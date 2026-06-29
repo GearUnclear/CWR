@@ -29,10 +29,11 @@ TEST_CASE("FormatSize returns human-readable sizes", "[tools][helpers]")
 TEST_CASE("FormatTime handles zero and valid timestamps", "[tools][helpers]")
 {
     CHECK(FormatTime(0) == "-");
-    // 2020-01-01 00:00:00 UTC = 1577836800
+    // 2020-01-01 00:00:00 UTC = 1577836800. FormatTime renders in the host's
+    // local timezone, so assert the "YYYY-MM-DD HH:MM:SS" shape rather than a
+    // specific value (which would be off-by-a-day west of UTC).
     std::string result = FormatTime(1577836800);
-    CHECK_THAT(result, ContainsSubstring("2020"));
-    CHECK_THAT(result, ContainsSubstring("01"));
+    CHECK_THAT(result, Catch::Matchers::Matches(R"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"));
 }
 
 // Texture Inspection
