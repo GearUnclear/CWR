@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Scene/ObjectScriptVars.hpp>
 #include <Poseidon/World/Scene/Object2DMapping.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -1538,6 +1539,15 @@ Object::Object(LODShapeWithShadow* shape, int id)
 }
 
 Object::~Object() {}
+
+ObjectScriptVars* Object::ScriptVars(bool create)
+{
+    if (!_scriptVars && create)
+    {
+        _scriptVars = new ObjectScriptVars();
+    }
+    return _scriptVars;
+}
 
 Object* Object::LoadRef(ParamArchive& ar)
 {

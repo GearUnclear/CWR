@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Scene/ObjectScriptVars.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -622,6 +623,7 @@ DEF_RSB(isDestroyed)
 DEF_RSB(destroyed)
 DEF_RSB(destroyPhase)
 DEF_RSB(dammage)
+DEF_RSB(scriptVars)
 
 LSError Object::Serialize(ParamArchive& ar)
 {
@@ -655,6 +657,10 @@ LSError Object::Serialize(ParamArchive& ar)
         PARAM_CHECK(ar.Serialize(RSB(destroyPhase), t, 1, 0));
         SetDestroyPhase(t);
     }
+
+    // setVariable/getVariable bank; SRef serialization skips a null bank on
+    // save and leaves it null when the entry (or version) is absent on load
+    PARAM_CHECK(ar.Serialize(RSB(scriptVars), _scriptVars, 14))
 
     return LSOK;
 }

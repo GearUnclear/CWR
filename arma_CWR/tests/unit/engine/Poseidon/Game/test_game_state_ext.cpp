@@ -5,6 +5,7 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/World/Scene/ObjectScriptVars.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -422,6 +423,97 @@ TEST_CASE("enableAI and knownTargets are registered in GGameState", "[game][game
     REQUIRE(ContainsName(operators, "enableAI"));
     REQUIRE(ContainsName(operators, "disableAI"));
     REQUIRE(ContainsName(functions, "knownTargets"));
+}
+
+TEST_CASE("Phase-1.5 evaluator QoL commands are registered in GGameState", "[game][gameStateExt][guerrilla]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    AutoArray<RStringS> functions;
+    AutoArray<RStringS> operators;
+
+    GGameState.AppendFunctionList(functions, AcceptAllNames);
+    GGameState.AppendOperatorList(operators, AcceptAllNames);
+
+    // object variable bank
+    REQUIRE(ContainsName(operators, "setVariable"));
+    REQUIRE(ContainsName(operators, "getVariable"));
+    // position-array distance overloads share the pre-existing name
+    REQUIRE(ContainsName(operators, "distance"));
+    REQUIRE(ContainsName(operators, "setRank"));
+    // doMove has been registered all along via TABLE_COMMAND(Move, ...);
+    // the Phase-1 scripts routed around it based on a stale reading
+    REQUIRE(ContainsName(operators, "doMove"));
+    REQUIRE(ContainsName(operators, "commandMove"));
+
+    REQUIRE(ContainsName(functions, "nearestObjects"));
+    REQUIRE(ContainsName(functions, "rank"));
+    // evaluator-core additions visible through the game state
+    REQUIRE(ContainsName(functions, "compile"));
+    REQUIRE(ContainsName(functions, "isNil"));
+    REQUIRE(ContainsName(functions, "private"));
+}
+
+TEST_CASE("Guerrilla zone-registry commands are registered in GGameState", "[game][gameStateExt][guerrilla]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    AutoArray<RStringS> functions;
+    AutoArray<RStringS> nulars;
+
+    GGameState.AppendFunctionList(functions, AcceptAllNames);
+    GGameState.AppendNularOpList(nulars, AcceptAllNames);
+
+    REQUIRE(ContainsName(nulars, "gmZoneCount"));
+    REQUIRE(ContainsName(functions, "gmZone"));
+    REQUIRE(ContainsName(functions, "gmZoneIndex"));
+    REQUIRE(ContainsName(functions, "gmZoneSet"));
+    REQUIRE(ContainsName(functions, "gmZoneOnEvent"));
+    REQUIRE(ContainsName(functions, "gmFactionTierClass"));
+    REQUIRE(ContainsName(functions, "gmFactionValue"));
+    REQUIRE(ContainsName(functions, "gmFactionVehicle"));
+}
+
+TEST_CASE("ObjectScriptVars stores per-object script variables", "[game][gameStateExt][guerrilla]")
+{
+    Poseidon::ObjectScriptVars vars;
+    REQUIRE(vars.IsEmpty());
+
+    SECTION("scalar and string round-trip, case-insensitive names")
+    {
+        vars.Set("GM_Loyalty", GameValue(42.0f));
+        vars.Set("gm_role", GameValue("MEDIC"));
+
+        GameValue out;
+        REQUIRE(vars.Get("gm_loyalty", out));
+        REQUIRE((float)out == 42.0f);
+        REQUIRE(vars.Get("GM_ROLE", out));
+        REQUIRE(std::string((const char*)(RString)out) == "MEDIC");
+        REQUIRE_FALSE(vars.IsEmpty());
+    }
+
+    SECTION("overwrite replaces the value")
+    {
+        vars.Set("x", GameValue(1.0f));
+        vars.Set("x", GameValue(2.0f));
+
+        GameValue out;
+        REQUIRE(vars.Get("x", out));
+        REQUIRE((float)out == 2.0f);
+    }
+
+    SECTION("setting nil deletes; getting an unknown name fails")
+    {
+        GameValue out;
+        REQUIRE_FALSE(vars.Get("missing", out));
+
+        vars.Set("x", GameValue(1.0f));
+        vars.Set("x", GameValue()); // default-constructed GameValue is nil
+        REQUIRE_FALSE(vars.Get("x", out));
+        REQUIRE(vars.IsEmpty());
+    }
 }
 
 TEST_CASE("XOR1024 encryption registers and round-trips data", "[game][gameStateExt][encryption]")

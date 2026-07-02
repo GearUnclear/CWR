@@ -46,6 +46,7 @@ const GameType GameArray(2);
 const GameType GameBool(4);
 const GameType GameString(8);
 const GameType GameNothing(16);
+const GameType GameCode(0x20);
 const GameType GameIf(0x1000000);
 const GameType GameWhile(0x2000000);
 const GameType GameFor(0x4000000);
@@ -203,6 +204,29 @@ class GameDataString : public GameData
 #ifndef ACCESS_ONLY
     LSError Serialize(ParamArchive& ar) override;
 #endif
+
+    USE_FAST_ALLOCATOR
+};
+
+// A compiled piece of script. The engine has no bytecode stage, so the
+// "compiled" form is still the source text — but carrying it as a distinct
+// CODE value lets scripts pass functions around (`GM_fn = compile ...;
+// call GM_fn`) with type checking, instead of overloading STRING for both
+// text and code.
+class GameDataCode : public GameDataString
+{
+    typedef GameDataString base;
+
+  public:
+    GameDataCode() = default;
+    GameDataCode(GameStringType value) : GameDataString(value) {}
+    ~GameDataCode() override = default;
+
+    GameType GetType() const override { return GameCode; }
+
+    RString GetText() const override;
+    const char* GetTypeName() const override { return "code"; }
+    GameData* Clone() const override { return new GameDataCode(*this); }
 
     USE_FAST_ALLOCATOR
 };

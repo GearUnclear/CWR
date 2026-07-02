@@ -548,7 +548,122 @@ GameValue nearestObject(const Vector3& pos, const RString& typeName, const float
 
     return GameValueExt(object);
 }
+
+struct NearObjEntry
+{
+    Object* obj;
+    float dist2;
+};
+
+int CompareNearObjEntry(const void* v0, const void* v1)
+{
+    float d0 = ((const NearObjEntry*)v0)->dist2;
+    float d1 = ((const NearObjEntry*)v1)->dist2;
+    if (d0 < d1)
+    {
+        return -1;
+    }
+    if (d0 > d1)
+    {
+        return 1;
+    }
+    return 0;
+}
 } // namespace
+
+// nearestObjects [center, [typeNames], radius] -> objects sorted by distance
+GameValue GetNearestObjects(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& result = value;
+
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 3))
+    {
+        return value;
+    }
+    Vector3 pos;
+    if (!GetPos(state, pos, array[0]))
+    {
+        return value;
+    }
+    if (array[1].GetType() != GameArray || array[2].GetType() != GameScalar)
+    {
+        return value;
+    }
+    const GameArrayType& typeNames = array[1];
+    float radius = array[2];
+
+    // resolve requested class names once; empty list matches any object
+    AutoArray<const EntityType*> types;
+    for (int i = 0; i < typeNames.Size(); i++)
+    {
+        if (typeNames[i].GetType() != GameString)
+        {
+            continue;
+        }
+        RString name = typeNames[i];
+        const EntityType* type = VehicleTypes.New(name);
+        if (type)
+        {
+            types.Add(type);
+        }
+    }
+
+    AutoArray<NearObjEntry> found;
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, radius);
+    float maxDist2 = Square(radius);
+    for (int x = xMin; x <= xMax; x++)
+    {
+        for (int z = zMin; z <= zMax; z++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            int n = list.Size();
+            for (int i = 0; i < n; i++)
+            {
+                Object* obj = list[i];
+                float dist2 = obj->Position().Distance2(pos);
+                if (dist2 > maxDist2)
+                {
+                    continue;
+                }
+                if (types.Size() > 0)
+                {
+                    EntityAI* ai = dyn_cast<EntityAI>(obj);
+                    if (!ai)
+                    {
+                        continue;
+                    }
+                    bool match = false;
+                    for (int t = 0; t < types.Size(); t++)
+                    {
+                        if (ai->GetType()->IsKindOf(types[t]))
+                        {
+                            match = true;
+                            break;
+                        }
+                    }
+                    if (!match)
+                    {
+                        continue;
+                    }
+                }
+                NearObjEntry& entry = found.Append();
+                entry.obj = obj;
+                entry.dist2 = dist2;
+            }
+        }
+    }
+
+    found.QSortBin(CompareNearObjEntry);
+    result.Realloc(found.Size());
+    for (int i = 0; i < found.Size(); i++)
+    {
+        result.Add(GameValueExt(found[i].obj));
+    }
+    return value;
+}
 
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1)
 {

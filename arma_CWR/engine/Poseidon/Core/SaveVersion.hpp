@@ -3,7 +3,14 @@
 
 namespace Poseidon
 {
-const int WorldSerializeVersion = 13;
+// 14: per-object script variable banks (setVariable/getVariable)
+const int WorldSerializeVersion = 14;
+
+// Guerrilla Mode campaign state (ZoneRegistry/GarrisonCache/AlertMachine
+// subclasses of the world archive).  Bump when their row formats change;
+// the loaded value is handed to the campaignLoaded script event so mission
+// scripts can migrate.
+const int GuerrillaSaveVersion = 1;
 
 // load / save mission
 const int MissionsVersion = 11;

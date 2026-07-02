@@ -129,6 +129,10 @@ RString GameStateStringtableInfoFunctions::GetTypeName(GameType type) const
     {
         CatType(ret, LocalizeString(IDS_EVAL_TYPENOTHING));
     }
+    if (type & GameCode)
+    {
+        CatType(ret, "code");
+    }
     if (type & GameIf)
     {
         CatType(ret, "if");

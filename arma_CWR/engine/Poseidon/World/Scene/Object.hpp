@@ -85,6 +85,7 @@ enum DestructType
 };
 
 class CollisionBuffer;
+class ObjectScriptVars;
 
 // Place USE_CASTING on a class that should be recognized by dynamic casting.
 // Pair it with DEFINE_CASTING near the class definition. Forgetting to do so
@@ -247,6 +248,9 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	SRef<DammageRegions> _dammage; // dammage information
 
+	// script variable bank (setVariable/getVariable); lazily allocated
+	SRef<ObjectScriptVars> _scriptVars;
+
 	// optimizes inserting/deleting from the list of objects drawn during Scene rendering
 	InitPtr<SortObject> _inList;
 	// quick link to object shadow
@@ -263,6 +267,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	int ID() const {return _id;}
 	void SetID( int id ) {_id=id;}
+
+	// script variable bank (setVariable/getVariable); with create the bank
+	// is allocated on demand, otherwise may return nullptr
+	ObjectScriptVars *ScriptVars(bool create);
+	const ObjectScriptVars *ScriptVars() const {return _scriptVars;}
 
 	// Access to shadow index
 	void SetShadowIndex( ShadowIndex *shadow ){_shadow=shadow;}

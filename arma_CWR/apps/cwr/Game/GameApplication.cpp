@@ -36,6 +36,7 @@
 #include <Poseidon/UI/Multiplayer/MultiplayerModule.hpp>
 #include <Poseidon/UI/Editor/EditorModule.hpp>
 #include <Poseidon/UI/Mods/ModsModule.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <SDL3/SDL_cpuinfo.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
@@ -1838,4 +1839,5 @@ void GameApplication::RegisterGameModules()
     Poseidon::MultiplayerModule::Register();
     Poseidon::EditorModule::Register();
     ModsModule::Register();
+    Poseidon::GuerrillaModule::Register();
 }

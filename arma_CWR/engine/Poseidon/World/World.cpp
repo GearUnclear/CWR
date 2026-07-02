@@ -55,6 +55,8 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/Game/Chat.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/Network/Network.hpp>
 
@@ -1681,6 +1683,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #else
         PerformAI(deltaT, noAccDeltaT);
 #endif
+        // Guerrilla Mode zone tick - no-op unless the mission config
+        // defines CfgGuerrillaZones; throttles itself to tickInterval.
+        Guerrilla::ZoneRegistry::Instance().Simulate(deltaT);
+        // Guerrilla garrison distance-cache - inactive with the registry;
+        // throttles itself to cacheInterval.
+        Guerrilla::GarrisonCache::Instance().Simulate(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 

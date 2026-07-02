@@ -64,6 +64,7 @@ DEFINE_FAST_ALLOCATOR(GameDataScalar)
 DEFINE_FAST_ALLOCATOR(GameDataBool)
 DEFINE_FAST_ALLOCATOR(GameDataNothing)
 DEFINE_FAST_ALLOCATOR(GameDataString)
+DEFINE_FAST_ALLOCATOR(GameDataCode)
 DEFINE_FAST_ALLOCATOR(GameDataArray)
 DEFINE_FAST_ALLOCATOR(GameEvaluator)
 
@@ -775,6 +776,50 @@ static GameValue StringCallNoArg(const GameState* state, GameValuePar oper1)
     return ret;
 }
 
+static GameValue StringCompile(const GameState* state, GameValuePar oper1)
+{
+    return GameValue(new GameDataCode((GameStringType)oper1));
+}
+
+// isNil "name" — true when the variable is undefined (or holds nil).
+// isNil code — evaluates the code and tests whether the result is nil/nothing.
+// Must not raise EvalNamespace/EvalVar itself: probing for definedness is the
+// whole point (it replaces sentinel-boolean handshakes like GM_LIB_READY).
+static GameValue VarIsNil(const GameState* state, GameValuePar oper1)
+{
+    if (oper1.GetType() == GameCode)
+    {
+        GameVarSpace local(state->GetContext());
+        state->BeginContext(&local);
+        GameValue value = state->EvaluateMultiple((GameStringType)oper1);
+        state->EndContext();
+        return value.GetNil() || value.GetType() == GameNothing;
+    }
+
+    RString name = (GameStringType)oper1;
+    name.Lower();
+    if (name[0] == '_')
+    {
+        const GameVarSpace* space = state->GetContext();
+        if (!space)
+        {
+            return true;
+        }
+        GameValue value;
+        if (!space->VarGet(name, value))
+        {
+            return true;
+        }
+        return value.GetNil();
+    }
+    const GameVariable& var = state->GetVariables()[name];
+    if (GameVarSpace::IsNull(var))
+    {
+        return true;
+    }
+    return var._value.GetNil();
+}
+
 static GameValue StringIgnore(const GameState* state, GameValuePar oper1)
 {
     return NOTHING;
@@ -820,14 +865,19 @@ static GameValue StringRepeat(const GameState* state, GameValuePar oper1, GameVa
             }
         }
         // perform loop body
+        EvalError bodyError;
         {
             GameVarSpace local(state->GetContext());
             state->BeginContext(&local);
             RString expression = oper2;
             const_cast<GameState*>(state)->Execute(expression);
+            // read before EndContext: the context pop discards the body
+            // evaluator together with its error state, so EvalBreak set by
+            // exitWith would never be visible afterwards
+            bodyError = state->GetLastError();
             state->EndContext();
         }
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak)
         {
             GameValue exitVal = tls_exitWithValue;
             const_cast<GameState*>(state)->SetError(EvalOK);
@@ -955,14 +1005,16 @@ static GameValue ForDoOp(const GameState* state, GameValuePar oper1, GameValuePa
         state->BeginContext(&local);
         state->VarSetLocal(toData->GetVar(), GameValue(i));
         const_cast<GameState*>(state)->Execute(body);
+        // read before EndContext discards the body evaluator's error state
+        EvalError bodyError = state->GetLastError();
         state->EndContext();
-        if (state->GetLastError() == EvalBreak)
+        if (bodyError == EvalBreak)
         {
             exitVal = tls_exitWithValue;
             const_cast<GameState*>(state)->SetError(EvalOK);
             break;
         }
-        if (state->GetLastError() != EvalOK)
+        if (bodyError != EvalOK)
             break;
     }
     return exitVal;
@@ -1130,23 +1182,30 @@ static const GameOperator* GetDefaultBinary(int* outSize = nullptr)
         GameOperator(GameNothing, "set", function, ListSet, GameArray, GameArray),
         GameOperator(GameNothing, "resize", function, ListResize, GameArray, GameScalar),
         GameOperator(GameScalar, "count", function, ListCountCond, GameString, GameArray),
+        GameOperator(GameScalar, "count", function, ListCountCond, GameCode, GameArray),
         GameOperator(GameNothing, "forEach", function, ListForEach, GameString, GameArray),
+        GameOperator(GameNothing, "forEach", function, ListForEach, GameCode, GameArray),
         GameOperator(GameBool, "in", function, ListIsIn, GameVoid, GameArray),
         GameOperator(GameScalar, "find", function, ListFind, GameArray, GameVoid),
 
         GameOperator(GameAny, "then", function, StringThen, GameIf, GameString),
+        GameOperator(GameAny, "then", function, StringThen, GameIf, GameCode),
         GameOperator(GameAny, "then", function, ArrayThen, GameIf, GameArray),
         GameOperator(GameAny, "exitWith", function, StringExitWith, GameIf, GameString),
+        GameOperator(GameAny, "exitWith", function, StringExitWith, GameIf, GameCode),
         GameOperator(GameArray, "else", functionFirst, StringElse, GameString, GameString),
         GameOperator(GameNothing, "do", function, StringRepeat, GameWhile, GameString),
+        GameOperator(GameNothing, "do", function, StringRepeat, GameWhile, GameCode),
 
         // for "var" from N to M [step S] do { body }
         GameOperator(GameForFrom, "from", function, ForFromOp, GameFor, GameScalar),
         GameOperator(GameForTo, "to", function, ForToOp, GameForFrom, GameScalar),
         GameOperator(GameForTo, "step", function, ForStepOp, GameForTo, GameScalar),
         GameOperator(GameAny, "do", function, ForDoOp, GameForTo, GameString),
+        GameOperator(GameAny, "do", function, ForDoOp, GameForTo, GameCode),
 
         GameOperator(GameAny, "call", function, StringCall, GameVoid, GameString),
+        GameOperator(GameAny, "call", function, StringCall, GameVoid, GameCode),
     };
     if (outSize)
     {
@@ -1186,12 +1245,18 @@ static const GameFunction* GetDefaultUnary(int* outSize = nullptr)
 
         GameFunction(GameScalar, "count", ListCount, GameArray),
         GameFunction(GameAny, "call", StringCallNoArg, GameString),
+        GameFunction(GameAny, "call", StringCallNoArg, GameCode),
         GameFunction(GameNothing, "comment", StringIgnore, GameString),
         GameFunction(GameNothing, "private", StringLocal, GameString | GameArray),
         GameFunction(GameAny, "parseSimpleArray", ParseSimpleArray, GameString),
+        GameFunction(GameCode, "compile", StringCompile, GameString),
+        GameFunction(GameCode, "compile", StringCompile, GameCode),
+        GameFunction(GameBool, "isNil", VarIsNil, GameString),
+        GameFunction(GameBool, "isNil", VarIsNil, GameCode),
 
         GameFunction(GameIf, "if", IfBool, GameBool),
         GameFunction(GameWhile, "while", WhileString, GameString),
+        GameFunction(GameWhile, "while", WhileString, GameCode),
         GameFunction(GameFor, "for", ForVarString, GameString),
     };
     if (outSize)
@@ -2039,6 +2104,11 @@ LSError GameDataString::Serialize(ParamArchive& ar)
 }
 #endif
 
+RString GameDataCode::GetText() const
+{
+    return RString("{") + GetString() + RString("}");
+}
+
 GameDataArray::GameDataArray() : _readOnly(false) {}
 
 GameDataArray::GameDataArray(const GameArrayType& value) : _value(value), _readOnly(false) {}
@@ -2337,6 +2407,10 @@ GameData* CreateGameDataNothing()
 {
     return new GameDataNothing();
 }
+GameData* CreateGameDataCode()
+{
+    return new GameDataCode();
+}
 GameData* CreateGameDataIf()
 {
     return new GameDataIf();
@@ -2366,6 +2440,7 @@ void GameState::Init()
     NewType("ARRAY", GameArray, CreateGameDataArray, DefaultInfoFunctions()->GetTypeName(GameArray));
     NewType("STRING", GameString, CreateGameDataString, DefaultInfoFunctions()->GetTypeName(GameString));
     NewType("NOTHING", GameNothing, CreateGameDataNothing, DefaultInfoFunctions()->GetTypeName(GameNothing));
+    NewType("CODE", GameCode, CreateGameDataCode, "Code");
 
     NewType("IF", GameIf, CreateGameDataIf, DefaultInfoFunctions()->GetTypeName(GameIf));
     NewType("WHILE", GameWhile, CreateGameDataWhile, DefaultInfoFunctions()->GetTypeName(GameWhile));
@@ -2611,7 +2686,11 @@ void GameState::VarDelete(const char* name)
         SetError(EvalNamespace);
         return;
     }
-    space->_vars.Remove(name);
+    // keys are stored lowercased (see VarSet); the map compares with strcmp,
+    // so a mixed-case name would silently fail to delete
+    RString source = name;
+    source.Lower();
+    space->_vars.Remove(source);
 }
 
 EvalError GameState::GetLastError() const

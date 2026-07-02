@@ -60,6 +60,8 @@
 #include <Poseidon/World/Scene/ObjectClasses.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
@@ -625,6 +627,16 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
         GGameState.Execute(inits[i].init);
         PoseidonAssert(CheckVehicleStructure());
     }
+
+    // (Re)load the Guerrilla Mode zone/faction config for the starting
+    // mission (ExtParsMission is valid here - parsed by SetMission).  Leaves
+    // the registry inactive when CfgGuerrillaZones is absent, so ordinary
+    // missions and intros are unaffected.  Runs before RunInitScript so
+    // init.sqs already sees the gm* command state.
+    Guerrilla::ZoneRegistry::Instance().InitMission();
+    // Garrison cache follows the registry: Clear + read its own optional
+    // CfgGuerrillaZones keys (cacheInterval / groupSize).
+    Guerrilla::GarrisonCache::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {

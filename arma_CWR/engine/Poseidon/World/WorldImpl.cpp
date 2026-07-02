@@ -7,6 +7,8 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/UI/UIActiveDisplay.hpp>
 #include <Poseidon/World/World.hpp>
@@ -1736,6 +1738,32 @@ LSError World::Serialize(ParamArchive& ar, int message)
     PARAM_CHECK(ar.Serialize("Clock", Glob.clock, 1))
     PARAM_CHECK(SerializeWorldSimulationTime(ar))
     PARAM_CHECK(ar.Serialize("GameState", GGameState, 1))
+
+    // Guerrilla zone registry: dynamic zone state, matched to the mission
+    // config by zone name during load.  The entry is absent both in saves
+    // written before the registry existed (same WorldSerializeVersion) and
+    // in non-guerrilla missions, so a missing subclass must not fail the
+    // load - hence the IsSubclass gate instead of a bare Serialize.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::ZoneRegistry::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::ZoneRegistry::Instance().IsActive() : ar.IsSubclass("GuerrillaZones"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaZones", Guerrilla::ZoneRegistry::Instance(), 14))
+    }
+
+    // Guerrilla garrison cache: spawned-zone bookkeeping (group refs by
+    // name-matched zone).  Same missing-subclass tolerance as above; the
+    // garrison units themselves ride the world's vehicle serializer.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::GarrisonCache::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::GarrisonCache::Instance().IsActive() : ar.IsSubclass("GuerrillaGarrisons"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaGarrisons", Guerrilla::GarrisonCache::Instance(), 14))
+    }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))
     PARAM_CHECK(ar.Serialize("wantedOvercast", _wantedOvercast, 1))

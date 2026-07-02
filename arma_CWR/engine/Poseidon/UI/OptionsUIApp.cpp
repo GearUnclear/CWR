@@ -41,6 +41,8 @@ using namespace Poseidon;
 #include <Poseidon/Core/DownloadDialogView.hpp>
 #include <Poseidon/UI/Controls/ProgressBarWidget.hpp>
 #include <Poseidon/UI/GameModule.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -242,6 +244,42 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         }
     }
 
+    // Same hijack for the Guerrilla Mode entry: no shipped menu resource has
+    // an IDC_MAIN_GUERRILLA control (the idc lives in UI/Guerrilla/
+    // GuerrillaModule.hpp, not in any RscDisplayMain), so whenever the module
+    // is registered and the menu lacks the control, clone the Quit class (see
+    // the MODS comment above for the SetBase ordering) and slot it to the
+    // left of the row's leftmost of MODS / Quit.
+    if (GetCtrl(IDC_MAIN_GUERRILLA) == nullptr && GameModuleRegistry::FindByIDC(IDC_MAIN_GUERRILLA) != nullptr)
+    {
+        Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
+        ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        if (quit != nullptr && quitCls != nullptr && quitCls->IsClass())
+        {
+            static ParamFile s_guerrillaInjectCfg; // outlives the control (it back-references the class)
+            s_guerrillaInjectCfg.Clear();
+            ParamClass* guerCls = s_guerrillaInjectCfg.AddClass("GuerrillaInject");
+            guerCls->Add("idc", IDC_MAIN_GUERRILLA);
+            guerCls->Add("text", RString("GUERRILLA")); // TODO stringtable key once the data ships one
+            guerCls->Add("style", ST_RIGHT);
+            guerCls->SetBase(quitCls->GetClassInterface());
+            LoadControl(*guerCls);
+            if (Control* guer = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_GUERRILLA)))
+            {
+                // Anchor to the (possibly just-injected) Mods button when
+                // present so the row reads ... GUERRILLA MODS QUIT.
+                Control* anchor = quit;
+                if (Control* mods = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_MODS)))
+                    anchor = mods;
+                const float gap = anchor->W() * 0.05f;
+                float x = anchor->X() - anchor->W() - gap;
+                if (x < 0.0f)
+                    x = 0.0f;
+                guer->SetPos(x, anchor->Y(), anchor->W(), anchor->H());
+            }
+        }
+    }
+
     // Guard every control lookup: when the RscDisplayMain class is absent or
     // minimal (PoseidonUITest's own RESOURCE.BIN, or a headless --test-mission
     // run that doesn't merge the menu resources), Load() yields an empty class
@@ -251,7 +289,8 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         cont->EnableCtrl(false);
 
     // Enable/disable module buttons based on registered game modules
-    for (int idc : {IDC_MAIN_SINGLE, IDC_MAIN_GAME, IDC_MAIN_MULTIPLAYER, IDC_MAIN_EDITOR, IDC_MAIN_MODS})
+    for (int idc : {IDC_MAIN_SINGLE, IDC_MAIN_GAME, IDC_MAIN_MULTIPLAYER, IDC_MAIN_EDITOR, IDC_MAIN_MODS,
+                    IDC_MAIN_GUERRILLA})
         if (IControl* btn = GetCtrl(idc))
             btn->EnableCtrl(GameModuleRegistry::FindByIDC(idc) != nullptr);
 
@@ -821,6 +860,106 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
 
                 GStats.ClearAll();
                 Display::OnChildDestroyed(idd, exit);
+                CreateChild(new DisplayIntro(this));
+            }
+            else
+            {
+                Display::OnChildDestroyed(idd, exit);
+            }
+            break;
+        case IDD_GUERRILLA_NEW_GAME: // Guerrilla Mode new-game selection (Phase-1.5 stopgap)
+            if (exit == IDC_OK)
+            {
+                GuerrillaNewGame* disp = dynamic_cast<GuerrillaNewGame*>((ControlsContainer*)_child);
+                if (!disp)
+                {
+                    Display::OnChildDestroyed(idd, exit);
+                    break;
+                }
+                RString island = disp->SelectedIsland();
+                RString occupier = disp->SelectedOccupier();
+                RString resistance = disp->SelectedResistance();
+
+                // The template mission "Guerrilla.<World>", resolved the same
+                // way the single-mission browser resolves its entries: a PBO
+                // ("missions\Guerrilla.<World>.pbo", mounted via
+                // CreateSingleMissionBank) or an unbanked directory
+                // ("missions\Guerrilla.<World>\mission.sqm").
+                RString missionBase = RString("missions\\Guerrilla.") + island;
+                bool banked = FilePathExists(missionBase + RString(".pbo"));
+                bool unbanked = !banked && QIFStreamB::FileExist(missionBase + RString("\\mission.sqm"));
+                if (!banked && !unbanked)
+                {
+                    // Stay on the main menu, tell the player what's missing.
+                    Display::OnChildDestroyed(idd, exit);
+                    char buffer[512];
+                    snprintf(buffer, sizeof(buffer), "Guerrilla Mode template mission not found:\n%s",
+                             (const char*)missionBase);
+                    CreateMsgBox(MB_BUTTON_OK, buffer);
+                    break;
+                }
+
+                // From here on this is the IDD_SINGLE_MISSION launch path.
+                CurrentTemplate.Clear();
+                if (GWorld->UI())
+                {
+                    GWorld->UI()->Init();
+                }
+                CurrentCampaign = "";
+                CurrentBattle = "";
+                CurrentMission = "";
+                SetCampaign("");
+
+                if (banked)
+                {
+                    // CreateSingleMissionBank mounts the PBO under the
+                    // "missions\__cur_sp.<island>\" alias; parse world and
+                    // mission out of the returned prefix exactly like the
+                    // browser's banked branch above.
+                    char buffer[1024];
+                    snprintf(buffer, sizeof(buffer), "%s", (const char*)CreateSingleMissionBank(missionBase));
+                    if (*buffer == 0)
+                    {
+                        Display::OnChildDestroyed(idd, exit);
+                        break;
+                    }
+                    char* str = strrchr(buffer, '\\');
+                    PoseidonAssert(str);
+                    *str = 0;
+                    char* world = strrchr(buffer, '.');
+                    PoseidonAssert(world);
+                    *world = 0;
+                    world++;
+                    const char* mission = strrchr(buffer, '\\');
+                    PoseidonAssert(mission);
+                    mission++;
+                    SetMission(world, mission);
+                    Glob.header.filenameReal = RString("Guerrilla");
+                }
+                else
+                {
+                    SetMission(island, "Guerrilla");
+                }
+
+                GStats.ClearAll();
+
+                // Publish the selections for the template mission's scripts:
+                // VarSet now for anything evaluating at menu time, and mirror
+                // them into the campaign variable bank — the IDD_INTRO
+                // handler below re-applies that bank via GameState::VarSet
+                // after ParseMission, so init.sqs reliably sees them.
+                GGameState.VarSet(kGuerrillaVarIsland, GameValue(island));
+                GGameState.VarSet(kGuerrillaVarOccupier, GameValue(occupier));
+                GGameState.VarSet(kGuerrillaVarResistance, GameValue(resistance));
+                GameVariable varIsland(kGuerrillaVarIsland, GameValue(island));
+                GameVariable varOccupier(kGuerrillaVarOccupier, GameValue(occupier));
+                GameVariable varResistance(kGuerrillaVarResistance, GameValue(resistance));
+                GStats._campaign.AddVariable(varIsland);
+                GStats._campaign.AddVariable(varOccupier);
+                GStats._campaign.AddVariable(varResistance);
+
+                Display::OnChildDestroyed(idd, exit);
+                ApplyCurrentMissionViewDistance();
                 CreateChild(new DisplayIntro(this));
             }
             else

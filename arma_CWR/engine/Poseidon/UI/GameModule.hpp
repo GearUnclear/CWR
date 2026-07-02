@@ -15,6 +15,7 @@ enum class GameModuleId
     Multiplayer,  ///< Multiplayer (IDC_MAIN_MULTIPLAYER)
     Editor,       ///< Mission editor (IDC_MAIN_EDITOR)
     Mods,         ///< Mod browser (IDC_MAIN_MODS)
+    Guerrilla,    ///< Guerrilla Mode (IDC_MAIN_GUERRILLA in UI/Guerrilla/GuerrillaModule.hpp)
 };
 
 // Describes a registered game module
@@ -46,5 +47,6 @@ void __cdecl CreateDisplaySingleMission(ControlsContainer* parent);
 void __cdecl CreateDisplayMultiplayer(ControlsContainer* parent);
 void __cdecl CreateDisplayEditor(ControlsContainer* parent);
 void __cdecl CreateDisplayMods(ControlsContainer* parent);
+void __cdecl CreateDisplayGuerrilla(ControlsContainer* parent);
 
 } // namespace Poseidon

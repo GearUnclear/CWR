@@ -45,6 +45,7 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_admin_login_auth.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_decode_robustness.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_network_predicate_parity.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_code.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_complex.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_data.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_edge.cpp
@@ -362,6 +363,9 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Game tests
     Game/test_game_state_ext.cpp
+    Game/Guerrilla/test_zone_registry.cpp
+    Game/Guerrilla/test_garrison_cache.cpp
+    Game/Guerrilla/test_alert_machine.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp
@@ -467,6 +471,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_press_key_page.cpp
     UI/test_ui_zbias_staircase.cpp
     UI/test_gameModule.cpp
+    UI/Guerrilla/test_guerrilla_module.cpp
+    UI/Guerrilla/test_guerrilla_module.cpp
     UI/test_viewer_cursor_overlay.cpp
     UI/test_game_cursor_overlay.cpp
     UI/InGame/test_inGameUI.cpp

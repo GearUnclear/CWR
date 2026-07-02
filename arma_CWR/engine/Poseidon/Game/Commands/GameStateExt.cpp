@@ -479,6 +479,7 @@ GameValue GameTitleText(const GameState* state, GameValuePar oper1);
 GameValue GetLaserTarget(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObject(const GameState* state, GameValuePar oper1);
 GameValue GetNearestObjectByDistance(const GameState* state, GameValuePar oper1);
+GameValue GetNearestObjects(const GameState* state, GameValuePar oper1);
 GameValue GetNetIdObj(const GameState* state, GameValuePar oper1);
 GameValue GetNetworkId(const GameState* state, GameValuePar oper1);
 GameValue GetObjFromNetId(const GameState* state, GameValuePar oper1);
@@ -545,6 +546,7 @@ GameValue ObjGetNearestBuilding(const GameState* state, GameValuePar oper1);
 GameValue ObjGetPos(const GameState* state, GameValuePar oper1);
 GameValue ObjGetPosASL(const GameState* state, GameValuePar oper1);
 GameValue ObjGetPrimaryWeapon(const GameState* state, GameValuePar oper1);
+GameValue ObjGetRank(const GameState* state, GameValuePar oper1);
 GameValue ObjGetScore(const GameState* state, GameValuePar oper1);
 GameValue ObjGetScudState(const GameState* state, GameValuePar oper1);
 GameValue ObjGetSecondaryWeapon(const GameState* state, GameValuePar oper1);
@@ -719,7 +721,11 @@ GameValue ObjCmpE(const GameState* state, GameValuePar oper1, GameValuePar oper2
 GameValue ObjCmpNE(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDisableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjDistance(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue PosDistance(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjEnableAI(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjGetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjSetRank(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFire(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjGetBuildingPos(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -958,6 +964,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameArray, "waypointPosition", WpGetPos, GameArray),
         GameFunction(GameObject, "nearestBuilding", ObjGetNearestBuilding, GameObject),
         GameFunction(GameObject, "nearestObject", GetNearestObject, GameArray),
+        GameFunction(GameArray, "nearestObjects", GetNearestObjects, GameArray),
         GameFunction(GameBool, "canMove", ObjCanMove, GameObject),
         GameFunction(GameBool, "canFire", ObjCanFire, GameObject),
         GameFunction(GameBool, "canStand", ObjCanStand, GameObject),
@@ -1135,6 +1142,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameNothing, "fillWeaponsFromPool", ObjWeaponsFromPool, GameObject),
 
         GameFunction(GameScalar, "skill", ObjGetSkill, GameObject),
+        GameFunction(GameString, "rank", ObjGetRank, GameObject),
 
         GameFunction(GameString, "primaryWeapon", ObjGetPrimaryWeapon, GameObject),
         GameFunction(GameString, "secondaryWeapon", ObjGetSecondaryWeapon, GameObject),
@@ -1235,6 +1243,12 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "addRating", function, ObjAddExperience, GameObject, GameScalar),
         GameOperator(GameNothing, "addScore", function, ObjAddScore, GameObject, GameScalar),
         GameOperator(GameScalar, "distance", function, ObjDistance, GameObject, GameObject),
+        GameOperator(GameScalar, "distance", function, PosDistance, GameObject, GameArray),
+        GameOperator(GameScalar, "distance", function, PosDistance, GameArray, GameObject),
+        GameOperator(GameScalar, "distance", function, PosDistance, GameArray, GameArray),
+        GameOperator(GameNothing, "setVariable", function, ObjSetVariable, GameObject, GameArray),
+        GameOperator(GameAny, "getVariable", function, ObjGetVariable, GameObject, GameString),
+        GameOperator(GameAny, "getVariable", function, ObjGetVariable, GameObject, GameArray),
         GameOperator(GameNothing, "setPos", function, ObjSetPos, GameObject, GameArray),
         GameOperator(GameNothing, "setPosASL", function, ObjSetPosASL, GameObject, GameArray),
         GameOperator(GameNothing, "setDir", function, ObjSetDir, GameObject, GameScalar),
@@ -1384,6 +1398,7 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameScalar, "animationPhase", function, ObjAnimationPhase, GameObject, GameString),
 
         GameOperator(GameNothing, "setSkill", function, ObjSetSkill, GameObject, GameScalar),
+        GameOperator(GameNothing, "setRank", function, ObjSetRank, GameObject, GameString),
 
         GameOperator(GameNothing, "setObjectTexture", function, ObjSetTexture, GameObject, GameArray),
 

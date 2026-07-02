@@ -3,6 +3,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Scene/ObjectScriptVars.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
 #include <Poseidon/World/Scene/ObjectClasses.hpp>
 #include <Poseidon/World/Scene/Fireplace.hpp>
@@ -35,6 +36,7 @@
 #include <time.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -44,6 +46,8 @@
 #include <Poseidon/Foundation/platform.hpp>
 
 using namespace Poseidon;
+using Poseidon::Foundation::FindEnumName;
+using Poseidon::Foundation::GetEnumValue;
 namespace Poseidon
 {
 } // namespace Poseidon
@@ -835,6 +839,121 @@ GameValue ObjDistance(const GameState* state, GameValuePar oper1, GameValuePar o
     Vector3 pos2 = obj2->WorldPosition();
 
     return pos1.Distance(pos2);
+}
+
+// distance overloads taking [x,z,h] position arrays on either side
+GameValue PosDistance(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Vector3 pos1, pos2;
+    if (!GetPos(state, pos1, oper1) || !GetPos(state, pos2, oper2))
+    {
+        return 1e10f;
+    }
+    return pos1.Distance(pos2);
+}
+
+GameValue ObjSetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return NOTHING;
+    }
+    const GameArrayType& array = oper2;
+    if (!CheckSize(state, array, 2))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[0], GameString))
+    {
+        return NOTHING;
+    }
+    RString name = array[0];
+    obj->ScriptVars(true)->Set(name, array[1]);
+    return NOTHING;
+}
+
+GameValue ObjGetVariable(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    RString name;
+    GameValue defValue;
+    if (oper2.GetType() == GameString)
+    {
+        name = (GameStringType)oper2;
+    }
+    else
+    {
+        const GameArrayType& array = oper2;
+        if (array.Size() < 1 || array.Size() > 2)
+        {
+            state->SetError(EvalDim, array.Size(), 2);
+            return NOTHING;
+        }
+        if (!CheckType(state, array[0], GameString))
+        {
+            return NOTHING;
+        }
+        name = array[0];
+        if (array.Size() == 2)
+        {
+            defValue = array[1];
+        }
+    }
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return defValue;
+    }
+    const ObjectScriptVars* vars = obj->ScriptVars();
+    if (!vars)
+    {
+        return defValue;
+    }
+    GameValue ret;
+    if (!vars->Get(name, ret))
+    {
+        return defValue;
+    }
+    return ret;
+}
+
+GameValue ObjSetRank(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return NOTHING;
+    }
+    Person* person = dyn_cast<Person>(obj);
+    if (!person)
+    {
+        return NOTHING;
+    }
+    GameStringType str = oper2;
+    Rank rank = GetEnumValue<Rank>((const char*)str);
+    // GetEnumValue yields -1 for unknown names, which collides with
+    // RankUndefined — both must be rejected
+    if ((int)rank < RankPrivate)
+    {
+        return NOTHING;
+    }
+    person->SetRank(rank);
+    return NOTHING;
+}
+
+GameValue ObjGetRank(const GameState* state, GameValuePar oper1)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return RString("");
+    }
+    Person* person = dyn_cast<Person>(obj);
+    if (!person)
+    {
+        return RString("");
+    }
+    return RString(FindEnumName(person->GetRank()));
 }
 
 GameValue ObjListIn(const GameState* state, GameValuePar oper1)
