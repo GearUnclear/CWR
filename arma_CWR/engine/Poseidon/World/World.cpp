@@ -1055,9 +1055,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
                                 saturate(cursorY, -0.95, +0.95);
                             }
 
+                            // Aiming deadzone: half-width of the neutral zone the crosshair
+                            // floats in before the view follows.  0 = crosshair locked to view
+                            // (modern direct-look); 0.8 restores the classic OFP float.  The gun
+                            // still lags via its own spring, so gun != crosshair is preserved.
+                            const float dzX = input.GetAimingDeadzone();
+                            const float dzY = dzX * 0.625f; // keep the classic 0.8:0.5 aspect
+
                             if (cameraVehicle->IsVirtualX(_camType))
                             {
-                                KeepNZone(_camHeading[_camType], cursorX, 0, 0.8, camera.Left());
+                                KeepNZone(_camHeading[_camType], cursorX, 0, dzX, camera.Left());
                                 _camHeadingWanted[_camType] = _camHeading[_camType];
                             }
                             else
@@ -1066,7 +1073,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
                                 cameraVehicle->InitVirtual(_camType, initHead, initDive, initFOV);
                                 _camHeadingWanted[_camType] = initHead;
                             }
-                            KeepNZone(_camDive[_camType], -cursorY, 0, 0.5, camera.Top());
+                            KeepNZone(_camDive[_camType], -cursorY, 0, dzY, camera.Top());
                             _camDiveWanted[_camType] = _camDive[_camType];
                         }
                         Vector3 cursor = _ui->GetModelCursor();

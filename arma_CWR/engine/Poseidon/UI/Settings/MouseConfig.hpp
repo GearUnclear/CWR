@@ -43,6 +43,7 @@ public:
     float accelExponent   = 1.0f;
     float menuCursorScale = 1.0f;
     bool  extendedRange   = false;
+    float aimingDeadzone  = 0.0f;  // camera neutral-zone half-width; 0 = crosshair locked to view
 
     // Version actually parsed from the file (kCurrentVersion for a fresh
     // instance / a v2 file; 1 for a legacy file that was migrated).

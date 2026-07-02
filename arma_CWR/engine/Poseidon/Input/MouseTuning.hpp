@@ -33,6 +33,14 @@ struct MouseTuning
 
     bool  extendedRange = false;  // widen sensitivity range (UI/clamp only, not the motion math)
 
+    // Camera aiming deadzone: half-width of the on-screen neutral zone the crosshair
+    // floats in before the view follows (drives World's KeepNZone).  0 = crosshair
+    // locked to the view (modern direct-look); 0.8 reproduces the classic OFP float.
+    // The weapon still lags via its own spring regardless of this value.
+    float aimingDeadzone = 0.0f;
+
+    static constexpr float AimDeadzoneMax = 0.9f; // 0.8 == classic; a touch of headroom above
+
     // Factor applied to raw counts (1.0 unless normalization is on).
     float DpiFactor() const
     {
@@ -71,6 +79,7 @@ struct MouseTuning
         clampF(smoothing, 0.0f, 0.95f);
         clampF(accelExponent, 1.0f, 2.0f);
         clampF(menuCursorScale, 0.1f, 4.0f);
+        clampF(aimingDeadzone, 0.0f, AimDeadzoneMax);
         return changed;
     }
 };

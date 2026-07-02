@@ -962,6 +962,11 @@ float InputSubsystem::ConsumeCursorDeltaY()
     return val;
 }
 
+float InputSubsystem::GetAimingDeadzone() const
+{
+    return GInput.mouse.tuning.aimingDeadzone;
+}
+
 float InputSubsystem::ConsumeCursorScroll()
 {
     float val = GInput.cursor.aimDeltaZ;
@@ -1074,6 +1079,7 @@ void InputSubsystem::LoadKeys()
     GInput.mouse.tuning.accelExponent = mouse.accelExponent;
     GInput.mouse.tuning.menuCursorScale = mouse.menuCursorScale;
     GInput.mouse.tuning.extendedRange = mouse.extendedRange;
+    GInput.mouse.tuning.aimingDeadzone = mouse.aimingDeadzone;
 
     GInput.gamepad.enabled = gamepad.enabled;
     GInput.gamepad.deadzoneStick = gamepad.deadzoneStick;
@@ -1107,6 +1113,7 @@ void InputSubsystem::SaveKeys()
     mouse.accelExponent = GInput.mouse.tuning.accelExponent;
     mouse.menuCursorScale = GInput.mouse.tuning.menuCursorScale;
     mouse.extendedRange = GInput.mouse.tuning.extendedRange;
+    mouse.aimingDeadzone = GInput.mouse.tuning.aimingDeadzone;
     mouse.Save(MouseCfgPath());
 }
 

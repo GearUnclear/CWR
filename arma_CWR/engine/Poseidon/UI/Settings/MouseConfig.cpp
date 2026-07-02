@@ -58,6 +58,7 @@ bool MouseConfig::Normalize()
     clampF(smoothing, 0.0f, 0.95f);
     clampF(accelExponent, 1.0f, 2.0f);
     clampF(menuCursorScale, 0.1f, 4.0f);
+    clampF(aimingDeadzone, 0.0f, 0.9f);
 
     return changed;
 }
@@ -114,6 +115,8 @@ bool MouseConfig::Load(const std::string& path)
             menuCursorScale = (float)*e;
         if (auto* e = cfg.FindEntry("extendedRange"))
             extendedRange = (bool)*e;
+        if (auto* e = cfg.FindEntry("aimingDeadzone"))
+            aimingDeadzone = (float)*e;
     }
     else
     {
@@ -158,6 +161,7 @@ bool MouseConfig::Save(const std::string& path) const
     cfg.Add("accelExponent", accelExponent);
     cfg.Add("menuCursorScale", menuCursorScale);
     cfg.Add("extendedRange", extendedRange);
+    cfg.Add("aimingDeadzone", aimingDeadzone);
 
     cfg.Save(RString(path.c_str()));
     return std::filesystem::exists(path, ec);

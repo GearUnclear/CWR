@@ -105,6 +105,12 @@ struct MouseState
     static constexpr float kCursorScaleY = 1.0f / 150.0f;
     static constexpr float kCursorLimitX = 0.6f;
     static constexpr float kCursorLimitY = 0.4f;
+    // The classic ±kCursorLimit clamp was applied per FRAME, so max turn rate scaled
+    // with FPS.  Re-express it as a per-SECOND velocity cap calibrated at 60 FPS, so a
+    // fast flick covers the same angle at any frame rate.
+    static constexpr float kFlickCapRefFps  = 60.0f;
+    static constexpr float kCursorSpeedLimitX = kCursorLimitX * kFlickCapRefFps; // 36.0/s
+    static constexpr float kCursorSpeedLimitY = kCursorLimitY * kFlickCapRefFps; // 24.0/s
     static constexpr float kWheelToCursorScale = 0.01f;
     // Downstream game logic was written expecting mouse-wheel deltas in 120-units-per-notch
     // steps (the Windows WHEEL_DELTA convention). SDL3 reports 1.0 per notch; scale to match.
@@ -122,6 +128,10 @@ struct MouseState
     float bufWheel_ = 0;
     // Smoothing low-pass state (only used when tuning.smoothing > 0).
     float smoothX_ = 0, smoothY_ = 0;
+    // Previous Update() timestamp, used to derive the frame dt for the FPS-independent
+    // flick cap without changing Update()'s signature.
+    Foundation::UITime lastUpdateTime_ = UITIME_MIN;
+    bool haveLastUpdate_ = false;
 };
 } // namespace Poseidon
 

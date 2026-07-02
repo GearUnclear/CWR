@@ -133,8 +133,22 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
     float moveX = deltaX * kCursorScaleX;
     float moveY = deltaY * kCursorScaleY;
 
-    saturate(moveX, -kCursorLimitX, +kCursorLimitX);
-    saturate(moveY, -kCursorLimitY, +kCursorLimitY);
+    // FPS-independent flick cap: bound crosshair speed per SECOND (not per frame).
+    // dt is derived from currentTime so the signature stays unchanged; the first frame
+    // and any focus-loss gap fall back to the clamped range.
+    float dtSec = 1.0f / kFlickCapRefFps;
+    if (haveLastUpdate_)
+    {
+        dtSec = (currentTime.toInt() - lastUpdateTime_.toInt()) * 0.001f;
+        saturate(dtSec, 1.0f / 500.0f, 0.3f);
+    }
+    lastUpdateTime_ = currentTime;
+    haveLastUpdate_ = true;
+
+    const float limX = kCursorSpeedLimitX * dtSec;
+    const float limY = kCursorSpeedLimitY * dtSec;
+    saturate(moveX, -limX, +limX);
+    saturate(moveY, -limY, +limY);
 
     if (gameFocusLost <= 0)
     {

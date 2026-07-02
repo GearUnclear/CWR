@@ -96,6 +96,10 @@ class InputSubsystem
     float ConsumeCursorDeltaY();
     float ConsumeCursorScroll();
 
+    // Camera aiming-deadzone half-width (heading), from mouse.cfg. 0 = crosshair
+    // locked to the view; 0.8 == classic OFP float. Read by World's KeepNZone.
+    float GetAimingDeadzone() const;
+
     // Cursor position reset
     void ResetCursorPosition();
     void FlushAndResetMouse();
