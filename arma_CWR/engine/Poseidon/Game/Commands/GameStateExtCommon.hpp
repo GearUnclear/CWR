@@ -62,7 +62,12 @@ GameData* CreateGameDataObject();
 GameData* CreateGameDataGroup();
 GameData* CreateGameDataSide();
 GameData* CreateGameDataFile();
+
+// Defined in GameStateExt.cpp, namespace Poseidon
+namespace Poseidon
+{
 GameValue CreateGameObject(Object* obj);
+} // namespace Poseidon
 
 // Config file entries (shared between compilation units)
 struct ConfigFileEntry
