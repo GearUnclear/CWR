@@ -1,0 +1,190 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="description" content="Uslu dur! is the official portal for this total game overhaul of ARMA: Cold War Assault. Reworked AI across 12 mod-plans, swappable islands &amp; factions, and the all-new Guerrilla Mode. Not affiliated with Bohemia Interactive.">
+<meta name="keywords" content="Operation Flashpoint, Cold War Assault, total overhaul, Poseidon, Uslu dur, UD, Guerrilla Mode, Everon, Malden, Kolgujev, Nogova, C++, SQF, Bohemia">
+<meta name="author" content="Uslu dur!">
+<title>:: USLU DUR! :: Total Game Overhaul Field Manual ::</title>
+<link rel="stylesheet" type="text/css" href="assets/css/style.css">
+<link rel="shortcut icon" href="favicon.ico">
+<script type="text/javascript" src="assets/js/retro.js"></script>
+</head>
+<body>
+
+<table class="layout" cellpadding="0" cellspacing="0">
+<!-- ================= MASTHEAD ================= -->
+<tr><td class="masthead">
+	<table width="100%" cellpadding="0" cellspacing="0"><tr>
+	<td width="70"><img src="assets/img/icon-game.png" width="58" height="58" alt="[star]" class="logo"></td>
+	<td>
+		<h1>Uslu dur!</h1>
+		<span class="subtitle">&raquo; Field Manual for a Total Game Overhaul &laquo;</span>
+	</td>
+	<td align="right" class="dim" style="font-size:10px;">
+		EST. 2001 &middot; REARMED 2026<br>
+		<span class="blink" style="color:#ff5555;">&#9679; TRANSMITTING</span>
+	</td>
+	</tr></table>
+</td></tr>
+
+<!-- ================= TICKER ================= -->
+<tr><td>
+	<div class="ticker" id="ticker">
+	<marquee scrollamount="4" behavior="scroll" direction="left"><span>
+	&#9733; NEWS FLASH &#9733; GUERRILLA MODE Phase-1 "Three Zones" is CODE-COMPLETE &nbsp; // &nbsp;
+	12 AI &amp; engine mod-plans declassified &nbsp; // &nbsp;
+	Built on Bohemia Interactive's freshly-opened Poseidon engine source &nbsp; // &nbsp;
+	~3536 / 3561 unit tests PASSING &nbsp; // &nbsp;
+	Free Demo on Steam, app 4819000 &nbsp; // &nbsp; SIGN THE GUESTBOOK &nbsp; &#9733;
+	</span></marquee>
+	</div>
+</td></tr>
+
+<!-- ================= NAVBAR ================= -->
+<tr><td class="navbar">
+	<a href="index.html">HOME</a>
+	<a href="about.html">ABOUT</a>
+	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
+	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="tech.html">UNDER THE HOOD</a>
+	<a href="downloads.html">DOWNLOADS</a>
+</td></tr>
+
+<!-- ================= BODY GRID ================= -->
+<tr><td>
+<table width="100%" cellpadding="0" cellspacing="0"><tr>
+
+<!-- ---- SIDEBAR ---- -->
+<td class="sidebar">
+
+	<div class="box">
+	<div class="box-hd">Main Menu</div>
+	<div class="box-bd"><ul>
+		<li><a href="index.html">Home Base</a></li>
+		<li><a href="about.html">What is Uslu dur!?</a></li>
+		<li><a href="gameplay.html">Gameplay Systems</a></li>
+		<li><a href="designloop.html">The Design Loop</a></li>
+		<li><a href="tech.html">Under the Hood</a></li>
+		<li><a href="downloads.html">Downloads &amp; Links</a></li>
+	</ul></div>
+	</div>
+
+	<div class="box">
+	<div class="box-hd">Mission Status</div>
+	<div class="box-bd" style="font-size:10px;">
+		<b class="dim">ENGINE:</b> Poseidon C++20<br>
+		<b class="dim">BUILD:</b> <span class="badge live">Passing</span><br>
+		<b class="dim">TESTS:</b> 3536 / 3561<br>
+		<b class="dim">GAME MODE:</b> Guerrilla<br>
+		<b class="dim">PHASE 1:</b> <span class="badge wip">Code-Complete</span><br>
+		<hr class="mil">
+		<b class="dim">SYSTEM CLOCK:</b><br>
+		<span class="counter" id="clock"></span>
+	</div>
+	</div>
+
+	<div class="box">
+	<div class="box-hd">Fire Team</div>
+	<div class="box-bd center">
+		<img src="assets/img/icon-launcher.png" width="48" height="48" alt="[rpg]" title="Weapons"><br>
+		<span class="dim" style="font-size:10px;">"Two men, one launcher,<br>no problem," said Guba.</span>
+	</div>
+	</div>
+
+	<div class="box">
+	<div class="box-hd">Best Viewed</div>
+	<div class="box-bd" style="font-size:10px;">
+		1024&times;768 &middot; 32-bit color<br>
+		IE6+ / Firefox 1.5+<br>
+		<span class="dim">Enable JavaScript &amp; cookies for full tactical readout.</span>
+	</div>
+	</div>
+
+</td>
+
+<!-- ---- CONTENT ---- -->
+<td class="content">
+
+	<h2 class="section">Welcome, Soldier</h2>
+
+	<div class="briefing">
+		<span class="stamp">DECLASSIFIED</span>
+		&nbsp; <span class="dim">FILE: UD-001 / EYES ONLY</span>
+		<p style="margin-top:8px;"><b>Uslu dur!</b> is a <b>total game overhaul</b> of <i>ARMA: Cold War
+		Assault</i>, originally released in 2001 as <i>Operation Flashpoint: Cold War Crisis</i>: a ground-up rework of how
+		the AI fights, perceives, and is commanded, spanning twelve mod-plans deep, culminating in
+		<b>Guerrilla Mode</b>, a brand-new persistent open-world insurgency that doesn't exist in the original
+		game at all.</p>
+		<p>It's built on top of Bohemia Interactive's own newly-opened <b>Poseidon engine source</b>, handed to
+		the community "to study it, build on it, fix it, and create from it." This is the <b>official portal</b>
+		and <b>living field manual</b> for the overhaul itself, the source of truth for the
+		gameplay systems, the design loop that drives them, and Guerrilla Mode. See the footer, soldier, for
+		the full Bohemia Interactive disclaimer.</p>
+	</div>
+
+	<table class="statgrid"><tr>
+		<td><span class="num">12</span><span class="lbl">AI Mod-Plans</span></td>
+		<td><span class="num">1</span><span class="lbl">New Game Mode</span></td>
+		<td><span class="num">C++20</span><span class="lbl">Engine Base</span></td>
+		<td><span class="num">4</span><span class="lbl">Swappable Isles</span></td>
+	</tr></table>
+
+	<hr class="mil">
+
+	<h3>&#9733; Featured Operation: GUERRILLA MODE</h3>
+	<p>You are <b>one Resistance (GUER) fighter</b> who liberates an island zone-by-zone and holds
+	ground against an escalating occupier. A persistent single-player insurgency built with
+	<b>SQF mission scripting and C++ engine work side by side</b>: this overhaul reaches directly into
+	the engine source as well as the mission layer, wherever the design calls for it. A new campaign starts
+	by picking the <b>island, civilian faction, resistance faction, and occupying faction</b>, backed
+	by the full four-island, full-roster CWA data. Phase-1 "Three Zones", covering Camp / Village / Outpost,
+	capture triggers, garrison spawning, an alert state machine, a resource economy, recruiting,
+	loot &amp; gear unlocks, a named companion, and save/load, is <span class="badge wip">Code-Complete</span>,
+	pending its first live playtest.</p>
+	<p class="center">
+		<a href="gameplay.html">&raquo; Read the Gameplay Systems dossier</a> &nbsp;|&nbsp;
+		<a href="designloop.html">&raquo; See how it's built</a>
+	</p>
+
+	<hr class="mil">
+
+	<h3>Latest Intel <span class="dim" style="font-size:10px;">(News)</span></h3>
+	<table class="data">
+		<tr><th width="90">Date</th><th>Bulletin</th></tr>
+		<tr><td class="dim">2026-06-28</td><td>Clean local build verified: <b>3536 / 3561</b> unit tests passing; the remaining 25 are known Windows-portability test bugs. <span class="badge live">Live</span></td></tr>
+		<tr><td class="dim">2026-06-27</td><td>Guerrilla Mode <b>Phase-1 MVP</b> reaches code-complete. "Gate-Zero" manual playtest checklist outstanding. <span class="badge wip">WIP</span></td></tr>
+		<tr><td class="dim">2026-06-20</td><td>Twelve AI &amp; engine <b>mod-plans</b> declassified: squad formations, dynamic morale, suppression, bullet penetration &amp; more. This is the foundation that Guerrilla Mode is built on. <span class="badge plan">Planned</span></td></tr>
+		<tr><td class="dim">2026-06-01</td><td>Bohemia Interactive publishes the <b>Poseidon source code</b> under GPL-3.0-or-later, the engine base this overhaul is built on.</td></tr>
+	</table>
+
+	<hr class="mil">
+
+	<div class="center dim" id="nag" style="font-size:10px;border:1px dashed #4a4b38;padding:6px;">
+		<img src="assets/img/icon-server.png" width="24" height="24" class="icon" alt="">
+		This portal is under <b class="blink" style="color:#ffcf5c;">PERPETUAL CONSTRUCTION</b>.
+		Mind the sandbags. &nbsp;<img src="assets/img/icon-tool.png" width="24" height="24" class="icon" alt="">
+	</div>
+
+</td>
+</tr></table>
+</td></tr>
+
+<!-- ================= FOOTER ================= -->
+<tr><td class="footer">
+	<div>
+		You are visitor no. &nbsp;<span id="hitcounter">[ counting ]</span>
+	</div>
+	<hr class="mil">
+	<span id="statusmsg" class="dim">&gt;&gt; Radio check, over.</span><br>
+	<b>Uslu dur!</b> is the official portal for this total game overhaul project.
+	Built on Bohemia Interactive's opened Poseidon engine source, licensed GPL-3.0-or-later. Bohemia
+	Interactive owns the "ARMA" and "Operation Flashpoint" trademarks and has no involvement in this
+	project. Game data under APL-SA.<br>
+	Hand-coded in Notepad. No cookies were harmed, only set.<br>
+	<span class="dim">&lt;/&gt; Best viewed with a mug of instant coffee at 0300 hours.</span>
+</td></tr>
+
+</table>
+</body>
+</html>

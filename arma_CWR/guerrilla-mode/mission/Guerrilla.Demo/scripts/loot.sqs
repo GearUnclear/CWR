@@ -1,0 +1,131 @@
+; ============================================================================
+;  loot.sqs  -  Guerrilla Mode: loot-on-kill stash + gear-unlock tally
+; ----------------------------------------------------------------------------
+;  RESPONSIBILITY (plan 13 Phase-1 "Arsenal substitute"):
+;    * When an enemy occupier dies, strip its weapons + magazines and add each
+;      classname to a faction-wide looted tally.
+;    * When a classname's tally crosses GM_GEAR_THRESHOLD (default 25, tunable),
+;      mark it permanently UNLOCKED & infinite for the player faction.
+;    * Notify the player (hint) on each new unlock.
+;    * Expose GM_fnEquipFromUnlocked so spawning.sqs / recruit.sqs can kit a
+;      freshly created unit from role-appropriate, unlocked gear.
+;
+;  API CONTRACT (ARCHITECTURE.md section 4 - the no-collision table):
+;    OWNS (exclusive write): GM_GEAR_* (only ever via [class,amount] call
+;          GM_fnBumpGear, per section 3.4); plus loot-private state below.
+;    READS: dead bodies' `weapons`/`magazines`, `player`, and - read-only, to
+;          enumerate enemy bodies - the transient GM_CACHE_GROUPS owned by
+;          spawning.sqs (we never write it).
+;    OWNS markers/triggers: none.
+;
+;  LOOT-PRIVATE GLOBALS (this script is their single writer):
+;    GM_fnEquipFromUnlocked  code-string - kit a unit from unlocked gear (public helper)
+;    GM_fnLootKilledEH       code-string - the "killed" event-handler body
+;    GM_fnLootItem           code-string - tally one classname + announce unlock
+;    GM_fnLootTag            code-string - attach the killed-EH to new cache units
+;    GM_fnLootPrune          code-string - drop dead handles from the tag set
+;    GM_LOOT_LOADOUTS        const  - role -> [weapon,[mags],magCount] table
+;    GM_LOOT_BASEWEAP/BASEMAG/MAGCOUNT  const - always-available fallback kit
+;    GM_LOOT_SWEEP           const  - sweep period (seconds)
+;    GM_LOOT_TAGGED          TRANSIENT [unit,...] - units already given the EH
+;    GM_LOOT_ANNOUNCED       [class,...] - unlocks already hinted (no double-toast)
+;
+;  DIALECT: SQS (auto-bootstrap; gives ~ waits, @ gates, #label/goto loops).
+;    Helpers are single-line { ... } code-strings (a {..} literal IS a GameString
+;    in this evaluator; `call`/`while`/`if-then-else`/`forEach` bodies are strings
+;    - express.cpp:1132-1149,1188). No `~` inside a call'd helper (call is sync).
+;
+;  Confirmed commands used (grep GameStateExt*.cpp / express.cpp):
+;    addEventHandler (GameStateExt.cpp:1365), removeAllWeapons (:1019),
+;    weapons (:1137), magazines (:1138), addWeapon (:1253), addMagazine (:1255),
+;    alive (:933), count/select/find/in/forEach + array+ (express.cpp),
+;    hint (:1045), format (:1049). Variable `~<expr>` delay confirmed
+;    (Scripts.cpp:263-267 expands it to "_time+(<expr>)").
+;
+;  Persistence note: GM_GEAR_ITEMS/COUNT/UNLOCKED are plain
+;    scalars/strings/arrays -> serialized by saveGame, no object handles, so they
+;    survive load untouched. GM_LOOT_TAGGED holds live unit handles -> TRANSIENT,
+;    reset to [] every run (handles break across load; persistence.sqs re-execs
+;    managers, and the sweep simply re-tags whatever live cache units exist).
+; ============================================================================
+
+; ---- guard: helper table must exist before we define EH bodies that call it -
+@GM_LIB_READY
+
+; ===========================================================================
+;  TUNABLES / CONSTANTS
+; ===========================================================================
+GM_LOOT_SWEEP    = 5        ; seconds between tag-sweeps of the cached garrisons
+GM_LOOT_MAGCOUNT = 6        ; magazines granted per unit (the "infinite" supply)
+
+; Fallback kit: what a unit gets when its role weapon is not yet unlocked, so no
+; spawned unit is ever unarmed.
+; VERIFY: confirm "AK47"/"AK47Mag" exist in the Demo CfgWeapons; if the Demo set
+; names them differently, swap here (an unknown class simply fails to add).
+GM_LOOT_BASEWEAP = "AK47"
+GM_LOOT_BASEMAG  = "AK47Mag"
+
+; Role -> [roleName, weaponClass, [magClass...], magCount].
+; VERIFY: stock OFP/CWA EAST weapon classnames - these are the looted occupier
+; weapons the GUER faction unlocks. Confirm against the Demo CfgWeapons; the AT/MG
+; rows fall back to GM_LOOT_BASEWEAP until that weapon is looted to threshold.
+GM_LOOT_LOADOUTS =
+[
+  ["RIFLEMAN", "AK47",        ["AK47Mag"],         6],
+  ["MEDIC",    "AK47",        ["AK47Mag"],         6],
+  ["MG",       "PK",          ["PKBelt"],          4],
+  ["AT",       "RPG7V",       ["PG7VRocket"],      4],
+  ["SNIPER",   "SVDDragunov", ["SVDDragunovMag"],  6]
+]
+
+; ---- loot-private state ----------------------------------------------------
+GM_LOOT_TAGGED    = []                     ; TRANSIENT: live units already given the EH
+GM_LOOT_ANNOUNCED = GM_GEAR_UNLOCKED + []  ; copy: items already unlocked = already toasted
+
+; ===========================================================================
+;  HELPERS  (defined fresh each run; never persisted - GM_fn* convention)
+; ===========================================================================
+
+; --- GM_fnLootItem( [classname, amount] ) -> newCount -----------------------
+;   Routes the tally through GM_fnBumpGear (the ONLY legal writer of GM_GEAR_*,
+;   per section 3.4). If that push just crossed the threshold (classname now in
+;   GM_GEAR_UNLOCKED) and we have not yet announced it, toast the player once.
+GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["Gear unlocked: %1 - now in infinite supply for your fighters.", GM_tmpLC]}; GM_tmpLN}
+
+; --- GM_fnLootKilledEH : the "killed" event-handler body --------------------
+;   _this = [deadUnit, killer] (OFP killed EH args). At kill time the body still
+;   carries its weapons, so tally them all, then strip the corpse. We loot BOTH
+;   weapons and magazines (each is a distinct classname kind).
+GM_fnLootKilledEH = {GM_tmpLU = _this select 0; "[_x, 1] call GM_fnLootItem" forEach (weapons GM_tmpLU); "[_x, 1] call GM_fnLootItem" forEach (magazines GM_tmpLU); removeAllWeapons GM_tmpLU}
+
+; --- GM_fnLootTag : attach the killed-EH to any new live cache units ---------
+;   Reads the distance-cached enemy garrisons (GM_CACHE_GROUPS, owned by
+;   spawning.sqs - read-only here). Every unit in those groups is an EAST
+;   occupier, so no side test is needed. Idempotent: a unit already in
+;   GM_LOOT_TAGGED is skipped (addEventHandler would otherwise stack handlers).
+GM_fnLootTag = {GM_tmpLG = 0; while {GM_tmpLG < (count GM_CACHE_GROUPS)} do {GM_tmpLA = units (GM_CACHE_GROUPS select GM_tmpLG); GM_tmpLK = 0; while {GM_tmpLK < (count GM_tmpLA)} do {GM_tmpLUN = GM_tmpLA select GM_tmpLK; if (not (GM_tmpLUN in GM_LOOT_TAGGED)) then {GM_tmpLUN addEventHandler ["killed", GM_fnLootKilledEH]; GM_LOOT_TAGGED = GM_LOOT_TAGGED + [GM_tmpLUN]}; GM_tmpLK = GM_tmpLK + 1}; GM_tmpLG = GM_tmpLG + 1}}
+
+; --- GM_fnLootPrune : keep GM_LOOT_TAGGED bounded ---------------------------
+;   Dead bodies leave `units grp`, so a tagged unit that has died (EH already
+;   fired) is never re-encountered; rebuild the set keeping only living handles
+;   to stop unbounded growth over a long campaign.
+GM_fnLootPrune = {GM_tmpLP = []; GM_tmpLK2 = 0; while {GM_tmpLK2 < (count GM_LOOT_TAGGED)} do {if (alive (GM_LOOT_TAGGED select GM_tmpLK2)) then {GM_tmpLP = GM_tmpLP + [GM_LOOT_TAGGED select GM_tmpLK2]}; GM_tmpLK2 = GM_tmpLK2 + 1}; GM_LOOT_TAGGED = GM_tmpLP}
+
+; --- GM_fnEquipFromUnlocked( [unit, role] ) -> unit  (PUBLIC) ----------------
+;   Called by spawning.sqs / recruit.sqs to kit a freshly createUnit'd body.
+;   Picks the role's weapon if it has been UNLOCKED, else the always-available
+;   baseline, then removeAllWeapons + addMagazine(s) + addWeapon. The magCount
+;   copies approximate the "infinite supply" promise for unlocked gear.
+;   role: "RIFLEMAN"|"MEDIC"|"MG"|"AT"|"SNIPER" (defaults to row 0 if unknown).
+GM_fnEquipFromUnlocked = {GM_tmpEU = _this select 0; GM_tmpERole = _this select 1; GM_tmpERow = GM_LOOT_LOADOUTS select 0; GM_tmpEI = 0; while {GM_tmpEI < (count GM_LOOT_LOADOUTS)} do {if (((GM_LOOT_LOADOUTS select GM_tmpEI) select 0) == GM_tmpERole) then {GM_tmpERow = GM_LOOT_LOADOUTS select GM_tmpEI}; GM_tmpEI = GM_tmpEI + 1}; GM_tmpEW = GM_tmpERow select 1; GM_tmpEM = (GM_tmpERow select 2) select 0; GM_tmpEN = GM_tmpERow select 3; if (not (GM_tmpEW in GM_GEAR_UNLOCKED)) then {GM_tmpEW = GM_LOOT_BASEWEAP; GM_tmpEM = GM_LOOT_BASEMAG; GM_tmpEN = GM_LOOT_MAGCOUNT}; removeAllWeapons GM_tmpEU; GM_tmpEU addMagazine GM_tmpEM; GM_tmpEU addWeapon GM_tmpEW; GM_tmpEK = 1; while {GM_tmpEK < GM_tmpEN} do {GM_tmpEU addMagazine GM_tmpEM; GM_tmpEK = GM_tmpEK + 1}; GM_tmpEU}
+
+; ===========================================================================
+;  MAIN LOOP  (distance-caching is delegated: GM_CACHE_GROUPS is already the
+;  spawn-in/despawn set maintained by spawning.sqs, so sweeping it is bounded
+;  to the live ~50-100 AI near the player).
+; ===========================================================================
+#loop
+[] call GM_fnLootTag
+[] call GM_fnLootPrune
+~GM_LOOT_SWEEP
+goto "loop"

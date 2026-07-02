@@ -1,0 +1,231 @@
+; ============================================================================
+;  spawning.sqs  -  Guerrilla Mode distance-cached garrison + QRF manager
+; ----------------------------------------------------------------------------
+;  PATTERN: DAC-style distance caching. The cache is AUTHORITATIVE:
+;    * DESPAWNED garrison  = the integer GM_Z_GAR on the zone record.
+;    * SPAWNED   garrison  = transient live groups in GM_CACHE_GROUPS, with
+;                            GM_CACHE_ZONEIDX[i] saying which zone each holds.
+;    Crossing GM_CACHE_RADIUS around the player converts between the two; on
+;    despawn the SURVIVOR count is written BACK into GM_Z_GAR. Handles are NEVER
+;    persisted (persistence.sqs rebuilds them from the integer strengths).
+;
+;  API CONTRACT (see guerrilla-mode/ARCHITECTURE.md sec.4):
+;    OWNS (exclusive write):
+;        GM_CACHE_GROUPS, GM_CACHE_ZONEIDX
+;        GM_Z_GAR  (write-back on despawn ONLY)
+;        QRF transient handles  (GM_QRF_*  - all transient, owned here)
+;        GM_SP_*  scratch globals (transient, owned here)
+;    READS:
+;        GM_ZONES (pos/type/owner/gar), GM_CACHE_RADIUS, gmWarLevel,
+;        GM_ALERT_STATE  (RED flag from alert.sqs triggers the QRF)
+;    Does NOT touch: GM_Z_OWNER/SUPPORT (zones.sqs), GM_Z_HEAT, gmWarLevel write
+;        (escalation.sqs), gmResources/gmManpower (economy/recruit).
+;
+;  CONFIRMED COMMANDS USED (grep GameStateExt*.cpp / express.cpp):
+;    createGroup(:1180) createUnit[pos,grp,init,skill,rank](World.cpp:237)
+;    createVehicle(:1333) deleteVehicle(:1024) deleteGroup(:1181)
+;    addWaypoint(:1417)->[grp,idx]  setWaypointType(:1419)
+;    move(:1295, group/obj) setBehaviour(:1297) setCombatMode(:1300)
+;    units(:977) leader(:969) getPos/position(:936/937) setPos(:1234)
+;    isNull(:931) nearestObject[pos,type](:958) createCenter(:1178)
+;    moveInDriver(:1315)  count/select/find/+ (express.cpp)
+;    waypoint type enums "MOVE"/"SAD"/"SENTRY"/"GUARD" (ArcadeTemplate.cpp:50-63)
+;    behaviour enums "SAFE"/"AWARE"/"COMBAT" (ArcadeTemplate.cpp:85-89)
+;    combatMode enums "BLUE".."RED" (AICenter.cpp:149-153)
+;
+;  ABSENT-COMMAND ROUTES (per spec, do NOT use):
+;    doMove        -> declared but NOT registered; use group `move` + addWaypoint.
+;    nearestObjects-> absent; single `nearestObject` used for road-snap.
+;    enableAI      -> plan 09 unimplemented; not needed here.
+; ============================================================================
+
+; ---- handshake: do not run until lib.sqs has published the GM_fn* table ------
+@GM_LIB_READY
+
+; ---- tunables (transient, owned by this script) ----------------------------
+GM_SP_TICK      = 5     ; seconds between distance-cache passes
+GM_SP_GRPCAP    = 6     ; max bodies per garrison group (officer makes it 7 <=12)
+GM_SP_MAXGROUPS = 24    ; live-group safety budget (engine ~63 groups/side)
+GM_QRF_MAXTRAVEL = 120  ; s before QRF pathing is judged stuck -> insertion fallback
+GM_QRF_ACTIVE   = false ; transient: is a QRF currently deployed?
+GM_QRF_ZONE     = -1    ; transient: zone index the QRF is responding to
+GM_QRF_VEH      = objNull ; transient: QRF escort vehicle handle (or objNull)
+GM_QRF_TIMER    = 0
+
+; ---- one-time: make sure the occupier (EAST) has a command center so that
+;      createGroup east succeeds even if the .sqm seeded no East units.
+;      VERIFY: if the Demo dataset already provides an East center this is a
+;      harmless / idempotent call.
+GM_SP_EC = createCenter east
+
+; ============================================================================
+;  MAIN LOOP
+; ============================================================================
+#loop
+~GM_SP_TICK
+GM_SP_PP = getPos aP
+
+; ---------- GARRISON DISTANCE-CACHE PASS ----------
+GM_SP_I = 0
+
+#zscan
+? GM_SP_I >= (count GM_ZONES) : goto "qrf"
+; only EAST-held zones carry an occupier garrison
+? (((GM_ZONES select GM_SP_I) select GM_Z_OWNER) != "EAST") : goto "zinc"
+GM_SP_DIST = [GM_SP_PP, ((GM_ZONES select GM_SP_I) select GM_Z_POS)] call GM_fnDist2D
+GM_SP_SPN  = GM_CACHE_ZONEIDX find GM_SP_I
+; near + not spawned + has bodies + under group budget -> SPAWN
+? (GM_SP_DIST <= GM_CACHE_RADIUS) and (GM_SP_SPN < 0) and (((GM_ZONES select GM_SP_I) select GM_Z_GAR) > 0) and ((count GM_CACHE_GROUPS) < GM_SP_MAXGROUPS) : goto "doSpawn"
+; far + spawned -> DESPAWN (write survivors back to GM_Z_GAR)
+? (GM_SP_DIST > GM_CACHE_RADIUS) and (GM_SP_SPN >= 0) : goto "doDespawn"
+goto "zinc"
+
+; ---------- SPAWN a garrison: ~GM_Z_GAR men, groups of <=6, one officer -------
+#doSpawn
+GM_SP_ZPOS  = (GM_ZONES select GM_SP_I) select GM_Z_POS
+GM_SP_REM   = (GM_ZONES select GM_SP_I) select GM_Z_GAR
+GM_SP_TIER  = gmWarLevel call GM_fnPickTier
+GM_SP_FIRST = true
+; SPEC 3.6 "crossing the radius converts between the two": the count now lives in
+; the live cache groups, so zero the despawned-reserve integer. Without this the
+; zone reads GM_Z_GAR>0 forever (garrisons in this tight 3-zone cluster never
+; leave the 800m radius to trigger the despawn write-back), so zones.sqs could
+; never satisfy its (GM_zLive<1 AND GM_zCached<1) capture gate. Despawn writes the
+; survivor count back into GM_Z_GAR, restoring the authoritative reserve.
+(GM_ZONES select GM_SP_I) set [GM_Z_GAR, 0]
+
+#spwLoop
+? GM_SP_REM <= 0 : goto "zinc"
+GM_SP_TAKE = GM_SP_GRPCAP
+? GM_SP_REM < GM_SP_GRPCAP : GM_SP_TAKE = GM_SP_REM
+GM_SP_SPOS = [GM_SP_ZPOS, 30] call GM_fnRandPosNear
+GM_SP_GRP  = [east, GM_SP_TIER, GM_SP_TAKE, GM_SP_SPOS] call GM_fnSpawnGroup
+; first group gets the officer (createUnit returns NOTHING; side-effect only).
+; VERIFY: "OfficerE" is the stock EAST officer classname - confirm vs Demo CfgVehicles.
+? GM_SP_FIRST : "OfficerE" createUnit [GM_SP_SPOS, GM_SP_GRP, "", 0.6, "SERGEANT"]
+; hold-the-zone posture: officer group SENTRY (hold + react), others GUARD.
+GM_SP_WP = GM_SP_GRP addWaypoint [GM_SP_ZPOS, 0]
+? GM_SP_FIRST : GM_SP_WP setWaypointType "SENTRY"
+? (not GM_SP_FIRST) : GM_SP_WP setWaypointType "GUARD"
+GM_SP_GRP setBehaviour "AWARE"
+GM_SP_GRP setCombatMode "YELLOW"
+GM_CACHE_GROUPS  = GM_CACHE_GROUPS + [GM_SP_GRP]
+GM_CACHE_ZONEIDX = GM_CACHE_ZONEIDX + [GM_SP_I]
+GM_SP_FIRST = false
+GM_SP_REM   = GM_SP_REM - GM_SP_TAKE
+goto "spwLoop"
+
+; ---------- DESPAWN: count survivors, delete handles, write back GM_Z_GAR -----
+#doDespawn
+GM_SP_SURV = 0
+GM_SP_NG   = []
+GM_SP_NZ   = []
+GM_SP_K    = 0
+
+#dsLoop
+? GM_SP_K >= (count GM_CACHE_GROUPS) : goto "dsDone"
+? (GM_CACHE_ZONEIDX select GM_SP_K) != GM_SP_I : goto "dsKeep"
+; group belongs to the despawning zone: tally living bodies, then delete it.
+GM_SP_G    = GM_CACHE_GROUPS select GM_SP_K
+GM_SP_SURV = GM_SP_SURV + (count units GM_SP_G)
+{deleteVehicle _x} forEach units GM_SP_G
+deleteGroup GM_SP_G
+goto "dsNext"
+
+#dsKeep
+GM_SP_NG = GM_SP_NG + [GM_CACHE_GROUPS select GM_SP_K]
+GM_SP_NZ = GM_SP_NZ + [GM_CACHE_ZONEIDX select GM_SP_K]
+
+#dsNext
+GM_SP_K = GM_SP_K + 1
+goto "dsLoop"
+
+#dsDone
+GM_CACHE_GROUPS  = GM_SP_NG
+GM_CACHE_ZONEIDX = GM_SP_NZ
+; write the authoritative survivor count back onto the zone record (in place).
+(GM_ZONES select GM_SP_I) set [GM_Z_GAR, GM_SP_SURV]
+goto "zinc"
+
+#zinc
+GM_SP_I = GM_SP_I + 1
+goto "zscan"
+
+; ============================================================================
+;  QRF: spawn + convoy toward a RED zone flagged by alert.sqs (GM_ALERT_STATE).
+;  One QRF at a time. doMove is absent -> we order with group `move` + a MOVE/SAD
+;  addWaypoint convoy chain, with a road-snapped origin/mid and a spawn-on-arrival
+;  ("heli/para") insertion fallback if road pathing stalls.
+; ============================================================================
+#qrf
+? GM_QRF_ACTIVE : goto "qrfManage"
+
+; -- look for a RED zone (GM_ALERT_STATE index-aligned to GM_ZONES) ----------
+GM_SP_J = 0
+#qrfScan
+? GM_SP_J >= (count GM_ALERT_STATE) : goto "loopTail"
+? (GM_ALERT_STATE select GM_SP_J) >= 2 : goto "qrfLaunch"
+GM_SP_J = GM_SP_J + 1
+goto "qrfScan"
+
+#qrfLaunch
+GM_QRF_ZONE = GM_SP_J
+GM_QRF_TPOS = (GM_ZONES select GM_SP_J) select GM_Z_POS
+; staging origin: a point a few hundred metres off the target, road-snapped.
+GM_QRF_OPOS = [GM_QRF_TPOS, 600] call GM_fnRandPosNear
+; VERIFY: "RoadSegment" is the road-network object type name; if the Demo set
+; names roads differently nearestObject returns objNull and we keep the raw pos.
+GM_QRF_RS = nearestObject [GM_QRF_OPOS, "RoadSegment"]
+? (not (isNull GM_QRF_RS)) : GM_QRF_OPOS = getPos GM_QRF_RS
+GM_QRF_TIER = gmWarLevel call GM_fnPickTier
+GM_QRF_GROUP = [east, GM_QRF_TIER, 5, GM_QRF_OPOS] call GM_fnSpawnGroup
+"OfficerE" createUnit [GM_QRF_OPOS, GM_QRF_GROUP, "", 0.6, "SERGEANT"]
+; WL gates the escort: trucks at WL1-2, APC at WL3+ (VERIFY classnames vs Demo).
+? gmWarLevel >= 3 : GM_QRF_VEH = "BMP" createVehicle GM_QRF_OPOS
+? gmWarLevel <  3 : GM_QRF_VEH = "Ural" createVehicle GM_QRF_OPOS
+; crew the escort with the lead body so the MOVE waypoint actually drives it.
+? (not (isNull GM_QRF_VEH)) : ((units GM_QRF_GROUP) select 0) moveInDriver GM_QRF_VEH
+; convoy chain: immediate move order + MOVE (road-snapped mid) -> SAD at target.
+GM_QRF_MID = [GM_QRF_TPOS, 300] call GM_fnRandPosNear
+GM_QRF_RS = nearestObject [GM_QRF_MID, "RoadSegment"]
+? (not (isNull GM_QRF_RS)) : GM_QRF_MID = getPos GM_QRF_RS
+GM_QRF_GROUP setBehaviour "COMBAT"
+GM_QRF_GROUP setCombatMode "RED"
+GM_QRF_GROUP move GM_QRF_MID
+GM_QRF_WP = GM_QRF_GROUP addWaypoint [GM_QRF_MID, 0]
+GM_QRF_WP setWaypointType "MOVE"
+GM_QRF_WP2 = GM_QRF_GROUP addWaypoint [GM_QRF_TPOS, 0]
+GM_QRF_WP2 setWaypointType "SAD"
+GM_QRF_ACTIVE = true
+GM_QRF_TIMER  = 0
+goto "loopTail"
+
+#qrfManage
+; stand down once the target zone is no longer RED (alert.sqs cleared it).
+? (GM_QRF_ZONE >= (count GM_ALERT_STATE)) : goto "qrfStandDown"
+? ((GM_ALERT_STATE select GM_QRF_ZONE) < 2) : goto "qrfStandDown"
+; arrival check: close enough -> leave it to fight (SAD waypoint handles combat).
+GM_QRF_LPOS = getPos (leader GM_QRF_GROUP)
+GM_QRF_D = [GM_QRF_LPOS, GM_QRF_TPOS] call GM_fnDist2D
+? GM_QRF_D <= 100 : goto "loopTail"
+; not arrived: accumulate travel time; bail to insertion fallback if stuck.
+GM_QRF_TIMER = GM_QRF_TIMER + GM_SP_TICK
+? GM_QRF_TIMER < GM_QRF_MAXTRAVEL : goto "loopTail"
+; FALLBACK (heli/para insertion): road pathing stalled -> teleport the foot
+; element next to the target and re-issue the move. Vehicle (if any) is left
+; behind. This is the design's "spawn-on-arrival" safety valve.
+{_x setPos ([GM_QRF_TPOS, 60] call GM_fnRandPosNear)} forEach units GM_QRF_GROUP
+GM_QRF_GROUP move GM_QRF_TPOS
+goto "loopTail"
+
+#qrfStandDown
+{deleteVehicle _x} forEach units GM_QRF_GROUP
+deleteGroup GM_QRF_GROUP
+? (not (isNull GM_QRF_VEH)) : deleteVehicle GM_QRF_VEH
+GM_QRF_VEH    = objNull
+GM_QRF_ACTIVE = false
+GM_QRF_ZONE   = -1
+goto "loopTail"
+
+#loopTail
+goto "loop"

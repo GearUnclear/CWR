@@ -1,0 +1,218 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="description" content="The AI rework and Guerrilla Mode gameplay systems of Uslu dur!, a total game overhaul of Arma: Cold War Assault. Covers squad AI, suppression, target priority, swappable factions &amp; islands, and the C++/SQF engine work behind them.">
+<title>:: UD :: Gameplay Systems (Official Dossier) ::</title>
+<link rel="stylesheet" type="text/css" href="assets/css/style.css">
+<link rel="shortcut icon" href="favicon.ico">
+<script type="text/javascript" src="assets/js/retro.js"></script>
+</head>
+<body>
+
+<table class="layout" cellpadding="0" cellspacing="0">
+<tr><td class="masthead">
+	<table width="100%" cellpadding="0" cellspacing="0"><tr>
+	<td width="70"><img src="assets/img/icon-launcher.png" width="58" height="58" alt="[rpg]" class="logo"></td>
+	<td><h1>Gameplay Systems</h1><span class="subtitle">&raquo; The AI Rework &amp; Guerrilla Mode: Official Systems Dossier &laquo;</span></td>
+	<td align="right" class="dim" style="font-size:10px;">SECTION: SYSTEMS<br><span class="counter" id="clock"></span></td>
+	</tr></table>
+</td></tr>
+<tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
+	&#9733; TOTAL OVERHAUL &#9733; AI rework: suppression, morale, target priority, shared enemy intel &nbsp; // &nbsp; Guerrilla Mode: liberate an island zone by zone &nbsp; // &nbsp; new game = pick your island &amp; your factions &nbsp; // &nbsp; C++ engine work and SQF scripting, both first-class tools &nbsp; &#9733;
+</span></marquee></div></td></tr>
+<tr><td class="navbar">
+	<a href="index.html">HOME</a>
+	<a href="about.html">ABOUT</a>
+	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
+	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="tech.html">UNDER THE HOOD</a>
+	<a href="downloads.html">DOWNLOADS</a>
+</td></tr>
+
+<tr><td><table width="100%" cellpadding="0" cellspacing="0"><tr>
+<td class="sidebar">
+	<div class="box"><div class="box-hd">Systems Index</div><div class="box-bd"><ul>
+		<li><a href="#modplans">The AI Rework (Mod-Plans)</a></li>
+		<li><a href="#guerrilla">Guerrilla Mode</a></li>
+		<li><a href="#factions">Swappable Factions &amp; Islands</a></li>
+		<li><a href="#combat">Combat &amp; Targeting</a></li>
+		<li><a href="#ai">The AI Engine</a></li>
+		<li><a href="#script">Scripting: C++ &amp; SQF</a></li>
+		<li><a href="#foundations">Inherited Engine Foundations</a></li>
+	</ul></div></div>
+	<div class="box"><div class="box-hd">Read This First</div><div class="box-bd" style="font-size:10px;" class="dim">
+		This page covers <b>our overhaul</b>, the AI rework and Guerrilla Mode, built on top of the inherited engine.
+		Where a system is named it's a real class or file in <i>our</i> source tree. Game <i>data</i> (units, maps,
+		missions) ships separately; these are the systems it runs on.
+	</div></div>
+</td>
+
+<td class="content">
+	<h2 class="section">Gameplay Systems: The AI Rework &amp; Guerrilla Mode</h2>
+	<p>This dossier documents <b>our overhaul</b>: a from-the-ground-up rework of AI perception, combat, and command,
+	culminating in <b>Guerrilla Mode</b>, a brand-new persistent open-world insurgency with swappable islands and
+	factions chosen at new-game. This is a <b>total overhaul of the engine source</b>: we compile our own engine, so
+	C++ engine changes and SQF mission scripting are equally first-class tools here. The inherited Poseidon engine
+	(entity model, ballistics, terrain, weather) is the foundation all of this is built on, summarized briefly near
+	the bottom of this page. The AI rework and Guerrilla Mode are the point of this project.</p>
+
+	<a name="modplans"></a><h3>&#9733; The AI Rework: Thirteen Mod-Plans</h3>
+	<p>The engine/AI layer of the overhaul is thirteen design plans reworking how the AI fights and perceives,
+	implementable without any new art: only engine C++ and the SQF scripting surface. Plans 01 through 08 are
+	the recommended primary focus (AI tactics &amp; perception); 09 and 10 add small new SQF commands that double
+	as test probes for the AI work; 11 and 12 round out simulation and dev tooling; plan 13 is <a href="#guerrilla">Guerrilla
+	Mode</a>, the umbrella that consumes all of the above.</p>
+	<p class="dim">Treat these as <b>living, AI-drafted design docs, subject to correction as work proceeds</b>.
+	Difficulty and scope are estimates.</p>
+	<table class="data">
+		<tr><th width="190">Plan</th><th>Reworks</th><th width="90">Status</th></tr>
+		<tr><td>Squad Formations</td><td>New combat-spread, herringbone and diamond formations; retunes existing ones.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Dynamic Morale</td><td>Frozen leader-skill courage becomes a live value: decays with casualties, craters when the leader is hit, rises near friendlies.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Flee-to-Cover</td><td>Routed squads sample low-exposure points away from the enemy instead of sprinting blindly to spawn.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Target Priority</td><td>Groups focus-fire enemy leaders, MG/crew gunners, and nearer/wounded targets first.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Suppression</td><td>Passing rounds force AI prone and into cover, replacing simple stand-and-trade-shots behavior with real fire-and-maneuver.</td><td><span class="badge plan">Capstone</span></td></tr>
+		<tr><td>Memory Decay</td><td>Tunable forgetting curves, from 10-minute memory to instant amnesia; verifiable via <code>knowsAbout</code>.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Stance &amp; Concealment Spotting</td><td>A still, prone, in-cover soldier becomes far harder to spot at range.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Shared Enemy Intel</td><td>A fresh contact seeds nearby friendly groups with a degraded copy, letting squads react to a radio call before line-of-sight.</td><td><span class="badge plan">Capstone</span></td></tr>
+		<tr><td><code>enableAI</code></td><td>Mirrors <code>disableAI</code> so scripts can un-freeze AI at runtime. New engine command.</td><td><span class="badge wip">Written</span></td></tr>
+		<tr><td><code>knownTargets</code></td><td>Returns a group's known contacts (object, side, knowledge, last position) in bulk. New engine command.</td><td><span class="badge wip">Written</span></td></tr>
+		<tr><td>Bullet Penetration</td><td>Rounds punch through soft cover (hedgerows, wood, thin metal) at reduced damage.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>AI Diagnostics Tab</td><td>Dev-panel overlay for steering, paths, formations and cost maps. The recommended first build.</td><td><span class="badge wip">Recommended start</span></td></tr>
+	</table>
+	<p class="dim">Full phased build order lives on the <a href="designloop.html">Design Loop</a> page.</p>
+
+	<a name="guerrilla"></a><h3>Guerrilla Mode: The Flagship Game Mode</h3>
+	<p>A persistent single-player insurgency: grow a guerrilla cell into the army that liberates an occupied island.
+	You are one <b>Resistance (GUER)</b> fighter ambushing patrols, looting gear, recruiting and training fighters,
+	and capturing towns from an <b>occupying</b> faction that escalates as you do. It is built almost entirely in
+	SQF mission scripting over the reworked AI above, with a small, surgical set of engine-side C++ additions where a
+	script workaround would be worse than a real command.</p>
+	<p>Two interlocking loops: a <b>tactical loop</b> (Scout &rarr; Approach &rarr; Strike &rarr; Loot &rarr; Fade)
+	that maps almost natively onto the existing engine, and a <b>strategic meta-loop</b> (territory &rarr; faction
+	growth &rarr; enemy escalation) that is hand-built in SQF over global variables, since the engine has no native
+	geoscape or town economy.</p>
+	<table class="data">
+		<tr><th width="170">System</th><th>What it does</th></tr>
+		<tr><td>Zones &amp; Capture</td><td>Camp / Village / Outpost, created at runtime, with capture triggers.</td></tr>
+		<tr><td>Garrisons &amp; QRF</td><td>Enemy forces spawn to defend held zones and respond to alarms.</td></tr>
+		<tr><td>Graduated Alert</td><td>GREEN/YELLOW/RED state machine: getting spotted is a recoverable setback you can de-escalate from before it costs you the mission.</td></tr>
+		<tr><td>Two Economies</td><td>Resources (&#8381;) and Manpower (HR) earned from held territory, spent on training, gear and recruits.</td></tr>
+		<tr><td>Recruiting &amp; Companions</td><td>Grow your band; a small roster of named, permadeath companions level up.</td></tr>
+		<tr><td>Loot &amp; Gear Unlocks</td><td>Looted weapons tally toward permanent, faction-wide unlocks.</td></tr>
+		<tr><td>War Level &amp; Heat</td><td>A slow, map-wide escalation that produces tougher enemy spawns, plus a fast, per-region alertness that decays if you lie low.</td></tr>
+		<tr><td>Save / Load</td><td>Persistence across sessions via the engine's own <code>saveGame</code> state.</td></tr>
+	</table>
+	<p class="dim">Status: the Phase-1 "Three Zones" MVP mission scripts, the two new engine commands, and their unit
+	and integration tests are written. What hasn't happened yet is the human "money moment" playtest:
+	fighting the Outpost garrison for real, watching the world respond, and reloading a save. See the
+	<a href="designloop.html">Design Loop</a> for how it's being validated.</p>
+
+	<a name="factions"></a><h3>Swappable Factions &amp; Islands: the New-Game Flow</h3>
+	<p>A core, launch requirement of Guerrilla Mode: <b>a new game begins by selecting the
+	island, the civilian faction, the resistance faction, and the occupying faction.</b> This drives the mode's
+	architecture from day one: every faction- or island-specific fact lives in swappable data, never hardcoded
+	into scripts.</p>
+	<ul>
+		<li><b>The side model stays fixed, the roster doesn't.</b> The player is always the GUER slot, the occupier
+		the EAST slot, and civilians the CIV slot, but any faction's unit classnames can fill any slot, so "the
+		occupier is the US Army" is just WEST-flavored classnames spawned into EAST-side groups.</li>
+		<li><b>A faction descriptor</b> carries everything scripts would otherwise hardcode: a unit roster by
+		role &times; War-Level tier (rifleman / officer / MG / AT / crew), a vehicle pool by tier, a civilian model
+		set that doubles as undercover disguise gear, and starting gear plus the loot-to-unlock mapping. Scripts
+		refer to roles and tiers only, never raw classnames.</li>
+		<li><b>Islands are data plus a thin shell.</b> Each island gets its own mission folder holding little more
+		than a per-island data file (military zone list, camp/start position, tuning); the zone/economy/spawn
+		managers themselves are shared across islands. Town and city zones auto-seed from the island's
+		own place-name data, with no hand-placing required.</li>
+	</ul>
+	<p>Full CWA game data spans <b>four islands</b> (Everon, Malden, Kolgujev, Nogova) and complete
+	EAST/WEST/GUER/CIV rosters. This is what the swappable-faction design targets. The free Demo data used for
+	the current build is a single island with a minimal roster, so it can't exercise swapping yet; de-hardcoding
+	the current fixed GUER-vs-EAST-on-one-island build into this data-driven form is planned as its own milestone,
+	done before any second island or faction is added.</p>
+
+	<a name="combat"></a><h3>Combat &amp; Targeting: What the AI Rework Builds On</h3>
+	<p>The rework above reshapes a real simulation the engine already runs. Each observer keeps a live record of
+	every target it knows about:</p>
+	<table class="data">
+		<tr><th width="170">Tracked value</th><th>Meaning for the player</th></tr>
+		<tr><td><code>spotability</code></td><td>How detectable the target is; it fades over time as contact is lost, the hook for the memory-decay plan.</td></tr>
+		<tr><td><code>accuracy / sideAccuracy</code></td><td>How well this shooter (and its side) knows the target's position, also decaying, so stale contacts get sloppy.</td></tr>
+		<tr><td><code>dammagePerMinute</code></td><td>How dangerous the target is. Feeds threat ranking.</td></tr>
+		<tr><td><code>subjectiveCost</code></td><td>How "worth shooting" the target is: the score the target-priority plan reshapes to make officers and gunners die first.</td></tr>
+	</table>
+	<p>Aiming leads the target by its velocity and drops it under gravity over the flight time; accuracy tolerance
+	grows with range and per-weapon dispersion; a friendly-fire corridor check that tightens from 2.0 m past 50 m
+	down to 0.5 m under 25 m keeps allies fighting shoulder-to-shoulder without constant blue-on-blue. This is the
+	machinery the suppression and bullet-penetration plans hook into: a near-miss test on passing rounds, and
+	a material-driven pass-through model for hedgerows and thin cover.</p>
+
+	<a name="ai"></a><h3>The AI Engine</h3>
+	<p>The perception and movement machinery the rework reshapes lives in <code>engine/Poseidon/AI/</code>.
+	Visibility between observers and targets is a sparse sensor matrix, updated <b>lazily</b> so active threats get
+	re-checked often while distant or friendly pairs barely cost anything. This budget is what lets the
+	stance/concealment and shared-intel plans add cost without tanking framerate. Road movement uses an A* search
+	over the road-link graph; off-road, a baked terrain-cost map grades slope, water and forest density so a tank
+	knows it can't climb a ridge a soldier can walk up. A developer diagnostics overlay can already draw steering
+	arrows, path lines, formation slots and the cost grid. Wiring that into a one-click dev-panel tab is
+	mod-plan 12, the recommended first build for exactly this reason: it lets you <i>see</i> the rest of the
+	rework working.</p>
+
+	<a name="script"></a><h3>Scripting: C++ and SQF, Both First-Class</h3>
+	<p>Missions, and all of Guerrilla Mode, run on the engine's built-in SQF/SQS scripting virtual machine. Script is
+	still where content, tuning and mission logic live: edit a file, relaunch, no rebuild. This project compiles its
+	own engine from source, so the actual rule is that a small engine change that deletes a large scripting
+	contortion is worth making. Two new commands prove the point: <code>enableAI</code> (the missing inverse of
+	<code>disableAI</code>) and <code>knownTargets</code> (a group's known contacts returned in bulk), both written
+	engine-side, each costing roughly an hour or two, and both already used as test probes for the AI rework.
+	Guerrilla Mode's own new-game flow, per-island world data, and evaluator quality-of-life commands are planned the
+	same way: engine work where it's the better tool, script everywhere else.</p>
+
+	<hr class="mil">
+	<a name="foundations"></a><h3>Inherited Engine Foundations</h3>
+	<p class="dim">Background context: the Poseidon engine we inherited and overhauled already
+	does a lot on its own. Brief context only; see <a href="tech.html">Under the Hood</a> for the full
+	engine-internals writeup.</p>
+
+	<h4>The Entity Model</h4>
+	<p>A body (<code>EntityAI</code>) and its brain (<code>AIUnit</code>) are separate objects: the brain
+	references the body instead of deriving from it, which is what lets the AI rework change how a unit thinks
+	without touching what it physically is. Soldiers and vehicles share the same body base; crew are real
+	occupants with commander/pilot/gunner links to the brains riding inside.</p>
+
+	<h4>Vehicles &amp; Crew</h4>
+	<p>Vehicles add path-following, predictive obstacle avoidance, leader-follow convoy formations, and staged
+	braking on top of the shared body. Support vehicles run a real supply model for transferring cargo, fuel and
+	ammo. This is the backbone of rearming and repair.</p>
+
+	<h4>World &amp; Terrain</h4>
+	<p>One global map doubles as terrain and object database: a heightmap with distance-based LOD, a road
+	network built by scan/connect/optimize, and three layers of visibility (the AI sensor matrix, geometric
+	line-of-sight, and screen-space occlusion). Islands load from real <code>.wrp</code> world data.</p>
+
+	<h4>Weather &amp; Sky</h4>
+	<p>Overcast, rain and thunderstorms are actively simulated weather that combines with night to shrink engagement
+	and render distance. Day/night runs off a genuine celestial model: axial tilt, latitude, time of year
+	and day drive sun/moon position, a rotating star field, moon phases and tides.</p>
+
+	<hr class="mil">
+	<div class="briefing"><span class="stamp" style="border-color:#c9a24a;color:#c9a24a;">CAVEAT</span>
+		<p style="margin-top:8px;">Game <b>data</b> (the actual soldiers, weapons, vehicles and islands)
+		ships separately under APL-SA, outside this source repository. The mod-plans described above are
+		living design docs, drafted and subject to correction as the work proceeds.</p>
+	</div>
+	<p class="center"><a href="designloop.html">&raquo; Next: The Design Loop</a></p>
+</td>
+</tr></table></td></tr>
+
+<tr><td class="footer">
+	You are visitor no. &nbsp;<span id="hitcounter">[ counting ]</span>
+	<hr class="mil">
+	<span id="statusmsg" class="dim">&gt;&gt; Radio check, over.</span><br>
+	<b>Uslu dur!</b>: the official site for this overhaul project. Bohemia Interactive owns the ARMA and
+	Operation Flashpoint trademarks and has no involvement in this project.
+</td></tr>
+</table>
+</body>
+</html>

@@ -1,0 +1,12 @@
+// Guerrilla Mode - mission metadata (description.ext)
+// Minimal valid metadata, modelled on
+// tests/integration/missions/mp_assign_report.Demo/description.ext
+// Single-player persistent insurgency; no respawn, no JIP for v1.
+
+onLoadMission = "Guerrilla Mode - Three Zones (MVP)";
+onLoadIntro  = "Liberate the island, one zone at a time.";
+respawn = 0;
+joinInProgress = 0;
+
+// CfgSounds / CfgIdentities / dialog classes are added in later phases.
+// Keep this file minimal-but-valid for Phase 1.

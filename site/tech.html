@@ -1,0 +1,184 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="description" content="Under the hood of Uslu dur!'s total game overhaul: the Poseidon engine stack we build on and actively extend, including subsystems, the OpenGL 3.3 renderer, OpenAL audio, the asset pipeline, the applications, the Clang/CMake/vcpkg build, and the new engine-side work landing for Guerrilla Mode.">
+<title>:: UD :: Under the Hood ::</title>
+<link rel="stylesheet" type="text/css" href="assets/css/style.css">
+<link rel="shortcut icon" href="favicon.ico">
+<script type="text/javascript" src="assets/js/retro.js"></script>
+</head>
+<body>
+
+<table class="layout" cellpadding="0" cellspacing="0">
+<tr><td class="masthead">
+	<table width="100%" cellpadding="0" cellspacing="0"><tr>
+	<td width="70"><img src="assets/img/icon-server.png" width="58" height="58" alt="[server]" class="logo"></td>
+	<td><h1>Under the Hood</h1><span class="subtitle">&raquo; The Engine Stack Our Overhaul Builds On and Rewrites &laquo;</span></td>
+	<td align="right" class="dim" style="font-size:10px;">SECTION: TECH<br><span class="counter" id="clock"></span></td>
+	</tr></table>
+</td></tr>
+<tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
+	&#9733; TECH &#9733; C++20 &nbsp; // &nbsp; Clang-only &nbsp; // &nbsp; OpenGL 3.3 via PoseidonGL33 &nbsp; // &nbsp; OpenAL Soft audio &nbsp; // &nbsp; SDL3 windowing &nbsp; // &nbsp; custom Foundation STL &nbsp; // &nbsp; Rust master-server &nbsp; &#9733;
+</span></marquee></div></td></tr>
+<tr><td class="navbar">
+	<a href="index.html">HOME</a>
+	<a href="about.html">ABOUT</a>
+	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
+	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="tech.html">UNDER THE HOOD</a>
+	<a href="downloads.html">DOWNLOADS</a>
+</td></tr>
+
+<tr><td><table width="100%" cellpadding="0" cellspacing="0"><tr>
+<td class="sidebar">
+	<div class="box"><div class="box-hd">On This Page</div><div class="box-bd"><ul>
+		<li><a href="#engine">Engine Subsystems</a></li>
+		<li><a href="#foundation">The Foundation Layer</a></li>
+		<li><a href="#render">Rendering</a></li>
+		<li><a href="#audio">Audio</a></li>
+		<li><a href="#assets">Asset Pipeline</a></li>
+		<li><a href="#apps">The Applications</a></li>
+		<li><a href="#overhaul">Engine Work For The Overhaul</a></li>
+		<li><a href="#build">Build &amp; Toolchain</a></li>
+		<li><a href="#deps">Dependencies</a></li>
+	</ul></div></div>
+	<div class="box"><div class="box-hd">Spec Sheet</div><div class="box-bd" style="font-size:10px;">
+		<b class="dim">Std:</b> C++20<br>
+		<b class="dim">Compiler:</b> Clang (only)<br>
+		<b class="dim">Gen:</b> Ninja<br>
+		<b class="dim">Deps:</b> vcpkg (manifest)<br>
+		<b class="dim">Cache:</b> ccache<br>
+		<b class="dim">GFX:</b> OpenGL 3.3<br>
+		<b class="dim">Audio:</b> OpenAL Soft<br>
+		<b class="dim">Window:</b> SDL3<br>
+		<b class="dim">Net svc:</b> Rust
+	</div></div>
+</td>
+
+<td class="content">
+	<h2 class="section">Under the Hood</h2>
+	<p><b>Uslu dur! is a total game overhaul</b> of Bohemia Interactive's opened engine source itself (codename
+	<b>Poseidon</b>). We treat that engine as living ground we actively dig into and modify at the source level,
+	adding real engine-side capabilities alongside script-level work. Everything below is described in that light:
+	this is the tech stack our overhaul <i>builds on and modifies</i>, from renderer to asset formats to the SQF
+	virtual machine itself. We're also extending the engine to serve the overhaul's design, including new evaluator
+	commands and data plumbing for swappable factions and islands, and we call that work out explicitly below.</p>
+	<p>The whole engine lives in <code>engine/Poseidon/</code> as a set of C++20 static libraries, with a handful of
+	sibling libraries for platform backends. Here is the map, followed by a look at the engine-side work the
+	overhaul itself is adding.</p>
+
+	<a name="engine"></a><h3>Engine Subsystems (<code>engine/Poseidon/</code>)</h3>
+	<table class="data">
+		<tr><th width="130">Subsystem</th><th>Role</th></tr>
+		<tr><td><b>Foundation</b></td><td>The engine's own STL replacement, covering Containers, Strings, Memory (mimalloc), Threads, Math, and Time. Everything else is written against it.</td></tr>
+		<tr><td><b>Core</b></td><td>Core runtime types &amp; services the rest of the engine builds on.</td></tr>
+		<tr><td><b>World</b></td><td>The simulated world, including entities, terrain, and the scene the game plays out in.</td></tr>
+		<tr><td><b>Game</b></td><td>Game-layer logic sitting on top of the world simulation.</td></tr>
+		<tr><td><b>AI</b> (+ <code>AI/Path</code>)</td><td>Artificial intelligence and pathfinding. The "brain" (<code>AIUnit : AI</code>) is deliberately separate from the "body" (<code>EntityAI</code>), and this is the layer the overhaul's AI mod-plans are actively rewriting, covering target priority, suppression response, flee-to-cover, shared enemy intel, and dynamic morale.</td></tr>
+		<tr><td><b>Graphics</b></td><td>Rendering front-end, textures, and the graphics-interface abstraction.</td></tr>
+		<tr><td><b>Audio</b></td><td>Sound front-end covering voice, streaming, capture, and mixing.</td></tr>
+		<tr><td><b>Asset</b></td><td>Loading &amp; caching of models, textures and packed archives (Formats, Addon, Cache, Probes).</td></tr>
+		<tr><td><b>UI</b></td><td>User-interface rendering &amp; widgets (incl. Dear ImGui-based dev tooling).</td></tr>
+		<tr><td><b>Input</b></td><td>Keyboard / mouse / controller input, via SDL3.</td></tr>
+		<tr><td><b>Network</b></td><td>In-game multiplayer networking (distinct from the master-server service).</td></tr>
+		<tr><td><b>IO</b></td><td>File and stream I/O.</td></tr>
+		<tr><td><b>Security</b></td><td>Integrity / anti-tamper facilities.</td></tr>
+		<tr><td><b>Dev</b></td><td>Developer tooling &amp; diagnostics hooks.</td></tr>
+		<tr><td><b>SQF Evaluator</b></td><td>The scripting virtual machine that runs mission SQF/SQS, the language Guerrilla Mode is written in. It's also the surface where our overhaul is landing new commands (see <a href="#overhaul">below</a>) instead of treating it as a closed API.</td></tr>
+	</table>
+
+	<a name="foundation"></a><h3>The Foundation Layer</h3>
+	<p>Rather than lean on the standard library, Poseidon ships its own <b>Foundation</b>, with custom containers,
+	strings, a <b>mimalloc</b>-backed memory system, threading, math, and time. The rest of the engine is written
+	against Foundation, which keeps behaviour deterministic and portable across the Windows and Linux Clang builds.</p>
+
+	<a name="render"></a><h3>Rendering (<code>PoseidonGL33</code>)</h3>
+	<p>The renderer is an <b>OpenGL 3.3</b> backend (<code>engine/PoseidonGL33/</code>) reached through a
+	graphics-interface / factory abstraction, so the concrete API is swappable. Windowing, context creation and input
+	come from <b>SDL3</b>; the GL loader is <b>glad</b>. Texture handling lives under <code>Graphics/Textures</code>
+	with a native <b>PAA</b> decoder.</p>
+
+	<a name="audio"></a><h3>Audio (<code>PoseidonOpenAL</code>)</h3>
+	<p>Sound runs on an <b>OpenAL Soft</b> backend (<code>engine/PoseidonOpenAL/</code>). The engine-side
+	<code>Audio/</code> tree splits into <b>Core</b>, <b>Streaming</b>, <b>Voice</b> and <b>Capture</b>, covering
+	streamed music/ambience, positional 3D sound, and voice with <b>Opus / Ogg Vorbis</b> codecs. A dummy backend
+	exists for headless/test runs.</p>
+
+	<a name="assets"></a><h3>The Classic BI Asset Pipeline</h3>
+	<p>Assets are the original Bohemia formats, loaded through <code>Asset/Formats</code> and the standalone
+	<code>PoseidonFormats</code> C-API library:</p>
+	<table class="data">
+		<tr><th width="90">Format</th><th>What</th></tr>
+		<tr><td><b>.pbo</b></td><td>Packed archive bundling an addon's files (models, textures, configs, missions).</td></tr>
+		<tr><td><b>.p3d</b></td><td>3D models (LODs, geometry, named selections).</td></tr>
+		<tr><td><b>.paa / .pac</b></td><td>Textures (DXT / palettized), decoded natively by the engine.</td></tr>
+		<tr><td><b>.rtm</b></td><td>Keyframed animations.</td></tr>
+	</table>
+	<p><code>PoseidonFormats</code> exposes these over a stable C API, so external tools, notably the
+	<b>Blender addon</b> (<code>apps/tools/BlenderAddon</code>), can import P3D/PAA/RTM directly.</p>
+
+	<a name="apps"></a><h3>The Applications (<code>apps/</code>)</h3>
+	<table class="data">
+		<tr><th width="150">Target</th><th>What It Is</th></tr>
+		<tr><td><b>cwr/Game</b></td><td>The full game client.</td></tr>
+		<tr><td><b>cwr/GameDemo</b></td><td>The free Steam demo client.</td></tr>
+		<tr><td><b>cwr/Server</b></td><td>The dedicated multiplayer server.</td></tr>
+		<tr><td><b>cwr/GameBase</b></td><td>Shared startup/bootstrap used by all three above.</td></tr>
+		<tr><td><b>tools/Studio</b></td><td>An ImGui-based editor shell.</td></tr>
+		<tr><td><b>tools/Evaluator</b></td><td>A command-line SQF evaluator.</td></tr>
+		<tr><td><b>tools/TcPbo / TcLister</b></td><td>PBO packing / listing utilities.</td></tr>
+		<tr><td><b>tools/BlenderAddon</b></td><td>Python addon importing P3D/PAA/RTM via PoseidonFormats.</td></tr>
+		<tr><td><b>tetris/Tetris</b></td><td>A tiny sample target for sanity-checking the engine libs.</td></tr>
+		<tr><td><b>fuzzers/</b></td><td>Fuzz harnesses that hammer the format parsers.</td></tr>
+	</table>
+
+	<a name="overhaul"></a><h3>Engine Work For The Overhaul</h3>
+	<p>This is <b>a total overhaul of the engine source itself</b>. C++ changes to Poseidon are a first-class tool
+	here, right alongside SQF mission scripting. When a script workaround is clunky and an engine command is cheap
+	to add, we add the command. The flagship consumer of this is <b>Guerrilla Mode</b>, our persistent open-world
+	insurgency game mode. Its "swappable factions &amp; islands" requirement, meaning island plus
+	civilian/resistance/occupier faction chosen at new-game, is core to the design, and meeting it drives real
+	engine-side work well beyond mission content:</p>
+	<table class="data">
+		<tr><th width="200">Engine work</th><th>Status</th></tr>
+		<tr><td><b>enableAI</b> command (inverse of <code>disableAI</code>)</td><td>Written, needs a compile/run verification pass.</td></tr>
+		<tr><td><b>knownTargets &lt;group&gt;</b> command (group-wide known-contacts, vs. single-object <code>knowsAbout</code>)</td><td>Written, needs a compile/run verification pass.</td></tr>
+		<tr><td>Evaluator quality-of-life commands (<code>setVariable</code>/<code>getVariable</code>, <code>isNil</code>, <code>nearestObjects</code>, registering <code>doMove</code>, etc.)</td><td>Planned. Core to de-hardcoding the scripts, still unshipped.</td></tr>
+		<tr><td><code>worldLocations</code>-style command exposing per-world town/location data</td><td>Planned, so the territory layer can auto-seed on any island.</td></tr>
+		<tr><td>Faction &amp; island descriptor data plumbing (roster/vehicle/civ-model/unlock data per faction, per-island data files)</td><td>Planned design direction. Not yet implemented.</td></tr>
+		<tr><td>New-game setup flow (island + faction selection)</td><td>Planned; the engine's existing mission-template wizard is the likely starting point.</td></tr>
+	</table>
+	<p class="dim">These come from the project's own design docs, which we treat as living, AI-drafted plans that get
+	revised as understanding improves. Where a doc says something is written but unverified, we say so here too,
+	rather than claiming it's done.</p>
+
+	<a name="build"></a><h3>Build &amp; Toolchain</h3>
+	<p>The build is modern and opinionated: <b>CMake</b> with presets, generated by <b>Ninja</b>, compiled by
+	<b>Clang</b> only (<code>clang-cl</code> on Windows, GNU-driver clang on Linux), with <b>vcpkg</b> in manifest
+	mode for dependencies and <b>ccache</b> for fast rebuilds. Reproducible Linux builds run in <b>Docker</b> against
+	the Steam Runtime (<code>docker/steamrt4</code>). A separate <b>Rust master-server</b> service
+	(<code>mserver/</code>, plus <code>docker/papa-bear-master-service</code>) handles server browsing. This is
+	distinct from the in-game <code>Network</code> subsystem. Integration tests run through the Rust
+	<b>Trident</b> harness (<code>tri</code>).</p>
+
+	<a name="deps"></a><h3>Notable Dependencies</h3>
+	<p class="dim">Resolved through vcpkg, each keeping its own license: <b>SDL3</b> for windowing/input,
+	<b>OpenAL Soft</b> for audio, <b>Opus / libogg / libvorbis</b> for codecs, <b>FreeType</b> for fonts,
+	<b>curl</b> for networking, <b>cJSON</b>, <b>CLI11</b>, <b>stb</b>, <b>mimalloc</b> as the allocator,
+	<b>enkiTS</b> as the task scheduler, <b>Dear ImGui</b> for dev UI, and <b>spdlog</b> for logging.</p>
+
+	<hr class="mil">
+	<p class="center"><a href="downloads.html">&raquo; Next: Downloads &amp; Links</a></p>
+</td>
+</tr></table></td></tr>
+
+<tr><td class="footer">
+	You are visitor no. &nbsp;<span id="hitcounter">[ counting ]</span>
+	<hr class="mil">
+	<span id="statusmsg" class="dim">&gt;&gt; Radio check, over.</span><br>
+	<b>Uslu dur!</b>, the official site for this overhaul project. Bohemia Interactive owns the "ARMA" and "Operation Flashpoint" trademarks and has no involvement in this project. Engine source &copy; Bohemia Interactive, GPL-3.0-or-later.
+</td></tr>
+</table>
+</body>
+</html>

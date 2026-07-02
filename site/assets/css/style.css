@@ -1,0 +1,231 @@
+/* ============================================================
+   USLU DUR! :: Official Site — Total Game Overhaul of Arma: Cold War Assault
+   Stylesheet -- "Anno Domini 2005" retro build
+   Best viewed in 1024x768 with Internet Explorer 6 / Firefox 1.5
+   ============================================================ */
+
+body {
+	background: #0d0e0b url('../img/bg-tile.png') repeat;
+	color: #d8d8c8;
+	font-family: Verdana, Arial, Helvetica, sans-serif;
+	font-size: 11px;
+	line-height: 1.5;
+	margin: 0;
+	padding: 0;
+	text-align: center; /* centers the layout table in old IE */
+}
+
+/* ---- the sacred 780px layout table, centered ---- */
+table.layout {
+	width: 780px;
+	margin: 8px auto;
+	text-align: left;
+	background: #15160f;
+	border: 2px solid #000000;
+	border-collapse: separate;
+}
+
+td { vertical-align: top; }
+
+/* ---------- MASTHEAD ---------- */
+.masthead {
+	background: #000000 url('../img/th-tile.png') repeat-x bottom;
+	border-bottom: 2px solid #7a0d0d;
+	padding: 10px 14px;
+}
+.masthead h1 {
+	font-family: 'Arial Black', Impact, Verdana, sans-serif;
+	font-size: 30px;
+	letter-spacing: -1px;
+	color: #e8e2d0;
+	margin: 0;
+	text-shadow: 2px 2px 0 #7a0d0d;
+	text-transform: uppercase;
+}
+.masthead .subtitle {
+	color: #c9a24a;
+	font-size: 11px;
+	font-style: italic;
+	letter-spacing: 2px;
+}
+.masthead .logo { vertical-align: middle; margin-right: 10px; }
+
+/* ---------- MARQUEE / TICKER ---------- */
+.ticker {
+	background: #7a0d0d;
+	color: #ffe9a8;
+	font-size: 11px;
+	font-weight: bold;
+	padding: 3px 0;
+	border-top: 1px solid #b02020;
+	border-bottom: 1px solid #3a0606;
+	overflow: hidden;
+}
+
+/* ---------- NAV BAR ---------- */
+.navbar {
+	background: #1e1f16;
+	border-bottom: 1px solid #000;
+	padding: 4px 8px;
+	text-align: center;
+	white-space: nowrap;
+}
+.navbar a {
+	color: #d8c88a;
+	font-weight: bold;
+	text-decoration: none;
+	padding: 2px 8px;
+	border-right: 1px solid #3a3b2c;
+}
+.navbar a:hover { color: #fff; background: #7a0d0d; }
+
+/* ---------- MAIN GRID ---------- */
+.sidebar {
+	width: 178px;
+	background: #12130d;
+	border-right: 1px solid #000;
+	padding: 8px;
+}
+.content {
+	padding: 12px 16px;
+	background: #16170f;
+}
+
+/* ---------- SIDEBAR BOXES ---------- */
+.box { margin-bottom: 14px; border: 1px solid #3a3b2c; background: #1a1b12; }
+.box .box-hd {
+	background: #000 url('../img/th-tile.png') repeat-x;
+	color: #ffcf5c;
+	font-weight: bold;
+	font-size: 11px;
+	padding: 3px 6px;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	border-bottom: 1px solid #7a0d0d;
+}
+.box .box-bd { padding: 6px 8px; }
+.box ul { list-style: none; margin: 0; padding: 0; }
+.box li {
+	padding: 2px 0 2px 18px;
+	background: url('../img/star-bullet.png') no-repeat 2px 3px;
+	border-bottom: 1px dotted #2f3022;
+}
+.box li a { color: #cfc39a; text-decoration: none; }
+.box li a:hover { color: #fff; text-decoration: underline; }
+
+/* ---------- HEADINGS ---------- */
+h2.section {
+	color: #ffcf5c;
+	font-size: 17px;
+	border-bottom: 2px solid #7a0d0d;
+	padding-bottom: 3px;
+	margin: 0 0 10px 0;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+}
+h3 {
+	color: #d8934a;
+	font-size: 13px;
+	margin: 16px 0 4px 0;
+	border-left: 4px solid #7a0d0d;
+	padding-left: 6px;
+}
+h4 { color: #c9a24a; font-size: 12px; margin: 10px 0 3px; }
+
+.content p { margin: 0 0 10px 0; }
+.content a { color: #e2b13a; }
+.content a:visited { color: #b8902a; }
+
+/* ---------- PARCHMENT / BRIEFING PANEL ---------- */
+.briefing {
+	background: #1c1d13;
+	border: 1px solid #3a3b2c;
+	border-left: 4px solid #c9a24a;
+	padding: 10px 12px;
+	margin: 10px 0;
+}
+.briefing .stamp {
+	color: #b02020;
+	border: 2px solid #b02020;
+	display: inline-block;
+	padding: 1px 6px;
+	font-weight: bold;
+	letter-spacing: 2px;
+	transform: rotate(-4deg);
+	font-size: 10px;
+}
+
+/* ---------- DATA TABLES ---------- */
+table.data {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 8px 0;
+	font-size: 11px;
+}
+table.data th {
+	background: #000 url('../img/th-tile.png') repeat-x;
+	color: #ffcf5c;
+	text-align: left;
+	padding: 4px 6px;
+	border: 1px solid #000;
+}
+table.data td {
+	padding: 4px 6px;
+	border: 1px solid #2f3022;
+	background: #1a1b12;
+}
+table.data tr:hover td { background: #23241a; }
+
+/* ---------- STATUS / STAT BLOCKS ---------- */
+.statgrid { width: 100%; border-collapse: collapse; }
+.statgrid td { text-align: center; padding: 6px; border: 1px solid #2f3022; background:#1a1b12; width:25%; }
+.statgrid .num { color:#ffcf5c; font-size:20px; font-weight:bold; display:block; font-family:'Arial Black',sans-serif; }
+.statgrid .lbl { color:#9a9a80; font-size:10px; text-transform:uppercase; }
+
+/* progress bars (design loop) */
+.pbar { background:#000; border:1px solid #3a3b2c; height:14px; margin:3px 0; }
+.pbar span { display:block; height:14px; background:#7a0d0d url('../img/th-tile.png'); color:#ffe9a8; font-size:9px; text-align:right; padding-right:3px; line-height:14px; }
+
+/* callout badges */
+.badge { display:inline-block; font-size:9px; font-weight:bold; padding:1px 5px; border:1px solid; margin-left:4px; text-transform:uppercase; }
+.badge.live { color:#7CFC00; border-color:#3a6a0a; background:#0f1a05; }
+.badge.wip  { color:#ffcf5c; border-color:#6a5a0a; background:#1a1505; }
+.badge.plan { color:#8ab4ff; border-color:#24406a; background:#050c1a; }
+
+/* ---------- CAMO DIVIDER ---------- */
+hr.mil {
+	border: none;
+	border-top: 1px dashed #4a4b38;
+	border-bottom: 1px solid #000;
+	margin: 14px 0;
+	height: 0;
+}
+
+/* ---------- FOOTER ---------- */
+.footer {
+	background: #000;
+	border-top: 2px solid #7a0d0d;
+	color: #7a7a68;
+	font-size: 10px;
+	padding: 10px 14px;
+	text-align: center;
+}
+.footer a { color: #b89a4a; }
+
+.counter {
+	font-family: 'Courier New', monospace;
+	background: #000;
+	color: #33ff33;
+	border: 2px inset #333;
+	padding: 1px 4px;
+	letter-spacing: 2px;
+}
+
+/* the obligatory blink, tamed */
+.blink { animation: blk 1s steps(1) infinite; }
+@keyframes blk { 50% { opacity: 0; } }
+
+.smallcaps { font-variant: small-caps; }
+.dim { color:#8a8a72; }
+img.icon { vertical-align: middle; }
+.center { text-align:center; }

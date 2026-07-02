@@ -1,0 +1,7 @@
+tags = ["scripting", "guerrilla", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_capture.Demo"
+# zones.sqs ticks every ~3s; give the capture poll room across a couple ticks.
+timeout = 180
+assert_timeout = 60
+extra_args = ["--dev"]

@@ -1,0 +1,174 @@
+; ============================================================================
+;  zones.sqs - territory model: markers + capture detection + ownership flip.
+; ----------------------------------------------------------------------------
+;  OWNS (exclusive write):
+;    GM_ZONES[*][GM_Z_OWNER], [GM_Z_SUPPORT], [GM_Z_GAR], [GM_Z_INCOME];
+;    raises (+= only) GM_ZONES[*][GM_Z_HEAT];
+;    every marker named "gmZoneMarker_<i>"; per-zone capture triggers;
+;    zones-private transients GM_ZONE_REVEALED, GM_HOLD_GROUPS, GM_ZONE_TRIG.
+;  READS: GM_ZONES positions/types/names; live occupier garrison from the
+;    spawning.sqs cache (GM_CACHE_GROUPS / GM_CACHE_ZONEIDX, read-only);
+;    GM_CACHE_RADIUS; player (aP).
+;  DOES NOT WRITE: gmWarLevel (escalation.sqs OWNS it and ticks War Level off
+;    the owner counts this file changes); GM_CACHE_* (spawning.sqs OWNS);
+;    GM_PLAYER_GROUPS (recruit.sqs OWNS). See ARCHITECTURE.md section 4.
+;
+;  Capture rule (design 13, Phase-1):
+;    * MILITARY zone (type != CITY) flips GUER when every occupier unit in the
+;      zone is dead AND no cached reserve remains AND a live GUER unit is in the
+;      zone area. On flip: recolor marker, open the income tap, raise Heat,
+;      spawn a friendly holding garrison (GM_fnSpawnGroup), reveal neighbours.
+;    * CITY zone flips on GM_Z_SUPPORT crossing a threshold, never on kills;
+;      support accrues while a friendly is present. Flipping opens its HR tap
+;      (economy.sqs reads owner+support).
+;
+;  Confirmed cmds (engine source, read 2026-06):
+;    createMarker [name,pos]            GameStateExtWorldConfig.cpp:724 (size 2)
+;    setMarkerType/Color/Text/Size      GameStateExtWorld.cpp:490,569 / Ext.cpp:1247,1393
+;    createTrigger ["EmptyDetector",pos] GameStateExtWorldWaypoint.cpp:71 (size 2)
+;    setTriggerArea [a,b,ang,rectBool]  GameStateExtWorldWaypoint.cpp:126
+;    setTriggerActivation [side,type,b] GameStateExtWorldWaypoint.cpp:159
+;    setTriggerStatements [c,a,d]       GameStateExtWorldWaypoint.cpp:247
+;    alive / units / side / position    GameStateExt.cpp:933,979,995,939
+;    "cond" count array (binary)        Evaluator/express.cpp:1132
+;    hint / format / setMarkerColor str GameStateExt.cpp:1049,1053,1252
+;  DIALECT: SQS (~waits, @gate, #label/goto, "?cond:stmt"); helpers via `call`.
+;  Scratch is GM_z* (zones-private; distinct from lib's GM_tmp* and gm* state).
+; ============================================================================
+@GM_LIB_READY
+
+; ===========================================================================
+;  TUNABLES (zones.sqs-owned constants)
+; ===========================================================================
+GM_ZONE_AREA      = 150     ; capture / presence radius around a zone centre (m)
+GM_REVEAL_RADIUS  = 1500    ; a zone is revealed when within this of a GUER zone
+GM_HEAT_CAP_SPIKE = 40      ; Heat added to a zone the moment it is captured
+GM_SUPPORT_FLIP   = 60      ; CITY support threshold to flip NEUTRAL -> GUER
+GM_SUPPORT_RATE   = 5       ; support gained per tick while a friendly is present
+GM_DEFAULT_INCOME = 25      ; income tap opened on a military capture if it was 0
+GM_HOLD_COUNT     = 3       ; friendly holding-garrison size (within 12/group cap)
+GM_ZONE_TICK      = 3       ; main loop period (s)
+; VERIFY: GUER (Resistance) rifleman classname in the Demo CfgVehicles. Mission
+;   spawns the player as "SoldierGB"; the holding garrison matches the player.
+GM_FRIENDLY_CLASS = "SoldierGB"
+
+; ===========================================================================
+;  TRANSIENT per-zone bookkeeping (rebuilt every run; never persisted).
+;   GM_ZONE_REVEALED[i] : bool, derived each tick (owned-or-adjacent fog state)
+;   GM_HOLD_GROUPS[i]   : live friendly holding group spawned on capture
+;   GM_ZONE_TRIG[i]     : the EmptyDetector handle for military zone i
+; ===========================================================================
+GM_ZONE_REVEALED = []
+GM_HOLD_GROUPS   = []
+GM_ZONE_TRIG     = []
+GM_zI = 0
+#initarr
+? GM_zI >= (count GM_ZONES) : goto "initdone"
+GM_ZONE_REVEALED = GM_ZONE_REVEALED + [false]
+GM_HOLD_GROUPS   = GM_HOLD_GROUPS + [objNull]
+GM_ZONE_TRIG     = GM_ZONE_TRIG + [objNull]
+GM_zI = GM_zI + 1
+goto "initarr"
+#initdone
+
+; ===========================================================================
+;  ONE-TIME: realise a marker per zone, and a capture trigger per MILITARY zone.
+;  The marker name is the one the zone record already owns (GM_Z_MARKER).
+;  The trigger is the spec-mandated per-zone owned object; it tracks occupier
+;  presence in-engine. The authoritative capture DECISION runs in the #loop
+;  below (the cache model + alive counts there are fully confirmed, whereas the
+;  trigger's thisList/condition binding is not exercised by this build).
+; ===========================================================================
+GM_zI = 0
+#mkmarkers
+? GM_zI >= (count GM_ZONES) : goto "mkdone"
+GM_zRec = GM_ZONES select GM_zI
+GM_zM = createMarker [(GM_zRec select GM_Z_MARKER), (GM_zRec select GM_Z_POS)]
+; VERIFY: marker type/colour names resolve against the Demo CfgMarkers /
+;   CfgMarkerColors. "Flag"/"ColorGreen"/"ColorRed"/"ColorYellow"/"ColorBlack"
+;   are the stock OFP/CWA names; swap if the Demo dataset differs.
+(GM_zRec select GM_Z_MARKER) setMarkerType "Flag"
+(GM_zRec select GM_Z_MARKER) setMarkerSize [0.6, 0.6]
+? ((GM_zRec select GM_Z_TYPE) == "CITY") : goto "mknext"
+GM_zT = createTrigger ["EmptyDetector", (GM_zRec select GM_Z_POS)]
+GM_zT setTriggerArea [GM_ZONE_AREA, GM_ZONE_AREA, 0, false]
+GM_zT setTriggerActivation ["EAST", "PRESENT", true]
+GM_zT setTriggerStatements ["this", "", ""]
+GM_ZONE_TRIG set [GM_zI, GM_zT]
+#mknext
+GM_zI = GM_zI + 1
+goto "mkmarkers"
+#mkdone
+
+; ===========================================================================
+;  MAIN TICK LOOP
+;   Per tick, for every zone: recompute fog-reveal, repaint its marker, and
+;   (only when the player is within GM_CACHE_RADIUS - the distance cache)
+;   evaluate the capture / support conditions and flip ownership.
+; ===========================================================================
+#loop
+~GM_ZONE_TICK
+GM_zI = 0
+#zproc
+? GM_zI >= (count GM_ZONES) : goto "zprocdone"
+
+GM_zRec   = GM_ZONES select GM_zI
+GM_zType  = GM_zRec select GM_Z_TYPE
+GM_zOwner = GM_zRec select GM_Z_OWNER
+GM_zPos   = GM_zRec select GM_Z_POS
+GM_zMk    = GM_zRec select GM_Z_MARKER
+GM_zDist  = [position aP, GM_zPos] call GM_fnDist2D
+
+; ---- fog-of-war reveal: owned, OR within GM_REVEAL_RADIUS of a GUER zone -----
+GM_zRev = (GM_zOwner == "GUER")
+GM_zJr = 0
+while {GM_zJr < (count GM_ZONES)} do {if ((((GM_ZONES select GM_zJr) select GM_Z_OWNER) == "GUER") and (([GM_zPos, (GM_ZONES select GM_zJr) select GM_Z_POS] call GM_fnDist2D) < GM_REVEAL_RADIUS)) then {GM_zRev = true}; GM_zJr = GM_zJr + 1}
+GM_ZONE_REVEALED set [GM_zI, GM_zRev]
+
+; ---- repaint marker from (revealed, owner) ----------------------------------
+? (not GM_zRev) : GM_zMk setMarkerColor "ColorBlack"
+? (not GM_zRev) : GM_zMk setMarkerText ""
+? (GM_zRev and (GM_zOwner == "GUER"))    : GM_zMk setMarkerColor "ColorGreen"
+? (GM_zRev and (GM_zOwner == "EAST"))    : GM_zMk setMarkerColor "ColorRed"
+? (GM_zRev and (GM_zOwner == "NEUTRAL")) : GM_zMk setMarkerColor "ColorYellow"
+? GM_zRev : GM_zMk setMarkerText (GM_zRec select GM_Z_NAME)
+
+; ---- distance cache: skip capture maths unless the player is at this zone ----
+? (GM_zDist > GM_CACHE_RADIUS) : goto "znext"
+
+GM_zFriendly = (alive aP) and (GM_zDist < GM_ZONE_AREA)
+
+; ---- military: count live occupiers cached to this zone (read spawning.sqs) --
+GM_zLive = 0
+GM_zJc = 0
+while {GM_zJc < (count GM_CACHE_GROUPS)} do {if ((GM_CACHE_ZONEIDX select GM_zJc) == GM_zI) then {GM_zLive = GM_zLive + ("alive _x" count (units (GM_CACHE_GROUPS select GM_zJc)))}; GM_zJc = GM_zJc + 1}
+GM_zCached = GM_zRec select GM_Z_GAR
+GM_zMilCap = (GM_zOwner == "EAST") and (not (GM_zType == "CITY")) and GM_zFriendly and (GM_zLive < 1) and (GM_zCached < 1)
+
+; ---- city: support accrues while friendly present, then flips at threshold ---
+? ((GM_zType == "CITY") and (GM_zOwner == "NEUTRAL") and GM_zFriendly) : GM_zRec set [GM_Z_SUPPORT, (GM_zRec select GM_Z_SUPPORT) + GM_SUPPORT_RATE]
+? ((GM_zRec select GM_Z_SUPPORT) > 100) : GM_zRec set [GM_Z_SUPPORT, 100]
+GM_zCityCap = (GM_zType == "CITY") and (GM_zOwner == "NEUTRAL") and ((GM_zRec select GM_Z_SUPPORT) >= GM_SUPPORT_FLIP)
+
+GM_zDoCap = GM_zMilCap or GM_zCityCap
+
+; ---- CAPTURE: flip owner + open taps + Heat spike + hold garrison + notify ---
+? GM_zDoCap : GM_zRec set [GM_Z_OWNER, "GUER"]
+; Heat is the one shared global; zones.sqs may only RAISE it (escalation.sqs
+; decays). Clamp 0..100 on the way up.
+? GM_zDoCap : GM_zRec set [GM_Z_HEAT, (GM_zRec select GM_Z_HEAT) + GM_HEAT_CAP_SPIKE]
+? ((GM_zRec select GM_Z_HEAT) > 100) : GM_zRec set [GM_Z_HEAT, 100]
+; open the income tap (military zones); CITY income stays via support/economy.sqs
+? (GM_zMilCap and ((GM_zRec select GM_Z_INCOME) < 1)) : GM_zRec set [GM_Z_INCOME, GM_DEFAULT_INCOME]
+; the occupier reserve is gone; live holding garrison takes over (cached = 0)
+? GM_zMilCap : GM_zRec set [GM_Z_GAR, 0]
+? GM_zMilCap : GM_HOLD_GROUPS set [GM_zI, [side aP, GM_FRIENDLY_CLASS, GM_HOLD_COUNT, GM_zPos] call GM_fnSpawnGroup]
+; War Level is NOT touched here: escalation.sqs OWNS gmWarLevel and ticks it off
+; the GUER-owned zone count that this flip just changed (ARCHITECTURE.md 4).
+? GM_zDoCap : hint format ["%1 liberated", (GM_zRec select GM_Z_NAME)]
+
+#znext
+GM_zI = GM_zI + 1
+goto "zproc"
+#zprocdone
+goto "loop"

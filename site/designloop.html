@@ -1,0 +1,170 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="description" content="The Uslu dur! design loop: the source-truth-first, right-tool-per-layer, risk-gated methodology behind our total game overhaul's mod-plans and Guerrilla Mode, plus the phased roadmap and test pyramid.">
+<title>:: UD :: The Design Loop ::</title>
+<link rel="stylesheet" type="text/css" href="assets/css/style.css">
+<link rel="shortcut icon" href="favicon.ico">
+<script type="text/javascript" src="assets/js/retro.js"></script>
+</head>
+<body>
+
+<table class="layout" cellpadding="0" cellspacing="0">
+<tr><td class="masthead">
+	<table width="100%" cellpadding="0" cellspacing="0"><tr>
+	<td width="70"><img src="assets/img/icon-tool.png" width="58" height="58" alt="[hammer]" class="logo"></td>
+	<td><h1>The Design Loop</h1><span class="subtitle">&raquo; How Gameplay Gets Built Here &laquo;</span></td>
+	<td align="right" class="dim" style="font-size:10px;">SECTION: PROCESS<br><span class="counter" id="clock"></span></td>
+	</tr></table>
+</td></tr>
+<tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
+	&#9733; METHOD &#9733; Verify the source first &nbsp; // &nbsp; use each layer where it's the better tool &nbsp; // &nbsp; Prove the riskiest assumption at Gate-Zero &nbsp; // &nbsp; de-hardcode before content breadth &nbsp; // &nbsp; unit &rarr; integration &rarr; playtest &nbsp; // &nbsp; every plan closes with a scope estimate &nbsp; &#9733;
+</span></marquee></div></td></tr>
+<tr><td class="navbar">
+	<a href="index.html">HOME</a>
+	<a href="about.html">ABOUT</a>
+	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
+	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="tech.html">UNDER THE HOOD</a>
+	<a href="downloads.html">DOWNLOADS</a>
+</td></tr>
+
+<tr><td><table width="100%" cellpadding="0" cellspacing="0"><tr>
+<td class="sidebar">
+	<div class="box"><div class="box-hd">On This Page</div><div class="box-bd"><ul>
+		<li><a href="#loop">The 5-Step Loop</a></li>
+		<li><a href="#template">The Plan Template</a></li>
+		<li><a href="#roadmap">Phased Roadmap</a></li>
+		<li><a href="#pyramid">The Test Pyramid</a></li>
+		<li><a href="#status">Live Status</a></li>
+	</ul></div></div>
+	<div class="box"><div class="box-hd">Doctrine</div><div class="box-bd" style="font-size:10px;">
+		<span class="badge live">DO</span> Grep the source before proposing<br><br>
+		<span class="badge live">DO</span> Use each layer where it wins: script for content &amp; tuning, C++ for new engine commands<br><br>
+		<span class="badge live">DO</span> Kill the riskiest unknown early<br><br>
+		<span class="badge live">DO</span> De-hardcode before building content breadth<br><br>
+		<span class="badge wip">THEN</span> Estimate scope, every time
+	</div></div>
+	<div class="box"><div class="box-hd">Disclaimer</div><div class="box-bd" style="font-size:10px;" class="dim">
+		This is <b>our own design process</b> for this total game overhaul, built on Bohemia Interactive's released
+		engine source. It's an independent fan project, unaffiliated with and unendorsed by Bohemia Interactive.
+	</div></div>
+</td>
+
+<td class="content">
+	<h2 class="section">The Design Loop</h2>
+	<p>Uslu dur! is a <b>total game overhaul</b> of Arma: Cold War Assault, a full rework of the engine
+	source itself. The upstream engine drop is a <b>frozen "locked" release</b>: there is no official Bohemia
+	roadmap, changelog, or CI pipeline in that tree. Everything past that point
+	is ours: this is how <i>we</i> design and build the overhaul, documented under <code>mod-plans/</code> and
+	<code>guerrilla-mode/</code>. Read all thirteen plans and a single consistent <b>methodology</b> emerges:
+	a repeatable way to take a gameplay idea from hunch to shipped system, whether the work lands in engine C++
+	or mission SQF.</p>
+
+	<a name="loop"></a><h3>&#9733; The Five-Step Loop</h3>
+	<table class="data">
+		<tr><th width="30">#</th><th width="180">Step</th><th>What It Means</th></tr>
+		<tr><td>1</td><td><b>Source-Truth First</b></td><td>Grep the actual engine source to <i>confirm</i> a capability exists before designing around it. Unconfirmed claims are tagged <code>// VERIFY:</code> until proven.</td></tr>
+		<tr><td>2</td><td><b>Each Layer Where It Wins</b></td><td>This is a total overhaul of the engine source, so C++ is a first-class tool right alongside SQF. Script stays the layer for content, tuning, and fast iteration (edit a file, relaunch); C++ is the layer for new engine/evaluator commands, data plumbing (faction &amp; island descriptors), UI, persistence, and performance. Each plan states which layer earns its keep and why.</td></tr>
+		<tr><td>3</td><td><b>Risk-Gated</b></td><td>Name the riskiest unknown and its mitigation up front. In Guerrilla Mode, a <b>"Gate-Zero"</b> smoke test proves engine assumptions (framerate, spawn, save/load) <i>before</i> any content is authored.</td></tr>
+		<tr><td>4</td><td><b>Layered Validation</b></td><td>Every plan ends with the same ladder: unit &rarr; integration (Trident/SQF) &rarr; a manual in-game playtest, the "money moment."</td></tr>
+		<tr><td>5</td><td><b>Scope Estimate</b></td><td>Every plan closes with a difficulty rating and a time/scope estimate, so ambition stays honest.</td></tr>
+	</table>
+
+	<div class="briefing"><span class="stamp">FIELD NOTE</span>
+		<p style="margin-top:8px;">The loop is <b>circular</b>: a playtest surfaces a new unknown &rarr; you grep the
+		source to understand it &rarr; you build the smallest fix in whichever layer fits &rarr; you gate the risk
+		&rarr; you re-test. Content is never authored ahead of the assumption that supports it, which is why
+		de-hardcoding factions and islands is scheduled <i>before</i> a second island gets built.</p>
+	</div>
+
+	<div class="briefing"><span class="stamp">FIELD NOTE</span>
+		<p style="margin-top:8px;">Design docs here are <b>living, AI-drafted plans, subject to revision as
+		understanding improves</b>. This project's own Guerrilla Mode master plan took a direction correction on
+		2026-07-01: the "SQF-only, C++ last resort" framing was retired, and swappable factions/islands were
+		promoted to a launch requirement. Expect this page to keep changing with them.</p>
+	</div>
+
+	<a name="template"></a><h3>The Plan Template</h3>
+	<p>All 13 <code>mod-plans/</code> use one identical skeleton, the unit of design work:</p>
+	<table class="data">
+		<tr><th width="220">Section</th><th>Purpose</th></tr>
+		<tr><td>Summary</td><td>One paragraph: what changes for the player.</td></tr>
+		<tr><td>Why It's Interesting</td><td>The gameplay payoff / motivation.</td></tr>
+		<tr><td>Difficulty &amp; Prerequisites</td><td>Skill gate and what must exist first.</td></tr>
+		<tr><td>Key Files &amp; Entry Points</td><td>Exact source paths the work touches.</td></tr>
+		<tr><td>How It Works Today</td><td>The <b>source-truth</b> baseline before any change.</td></tr>
+		<tr><td>Implementation Steps</td><td>Ordered, scriptable steps.</td></tr>
+		<tr><td>Testing</td><td>The unit &rarr; integration &rarr; playtest ladder.</td></tr>
+		<tr><td>Scope Estimate</td><td>Difficulty rating + time budget.</td></tr>
+	</table>
+	<p class="dim">Recommended build order per <code>mod-plans/README.md</code>: start with an <b>AI-diagnostics UI tab</b>
+	so behavior is visible, and treat <b>suppression</b> and <b>shared enemy intel</b> as the capstones.</p>
+
+	<a name="roadmap"></a><h3>Phased Roadmap: Guerrilla Mode</h3>
+	<p>The applied case study (<code>mod-plans/13-guerrilla-mode.md</code>) proves the loop end-to-end. It ships in gates:</p>
+
+	<h4>Gate-Zero: Prove the Riskiest Assumptions <span class="badge wip">Outstanding</span></h4>
+	<div class="pbar"><span data-pct="60" style="width:60%">60%</span></div>
+	<p class="dim">Smoke-test framerate, spawn cost, and save/load survival before authoring any content.</p>
+
+	<h4>Phase 1: MVP "Three Zones" (pure SQF) <span class="badge wip">Code-Complete</span></h4>
+	<div class="pbar"><span data-pct="100" style="width:100%">100%</span></div>
+	<p class="dim">Camp / Village / Outpost, capture triggers, garrison spawning, alert state machine, resource economy,
+	recruiting, loot &amp; gear unlocks, a named companion, and save/load. Written, pending a live playtest.</p>
+
+	<h4>Phase 1.5: De-Hardcoding, Swappable Factions &amp; Islands <span class="badge plan">Planned</span></h4>
+	<div class="pbar"><span data-pct="0" style="width:0%">0%</span></div>
+	<p class="dim">A <b>launch requirement</b> for Guerrilla Mode, done while there's still only one island and
+	one faction pair to migrate. Pulls every faction- and island-specific fact (unit rosters, vehicle pools, civ
+	models, zone positions, camp locations) out of scripts and into swappable faction descriptors and per-island data
+	files, so a new game starts by picking the island, the civilian faction, the resistance faction, and the
+	occupying faction. Exit test: the same script core runs on a second island against a different occupier, chosen
+	at game start. Scheduled after the Phase-1 MVP proves the loop and before any content breadth, because
+	retrofitting it later multiplies the cost. Est. ~1-2 weeks.</p>
+
+	<h4>Phase 2: Vertical Slice <span class="badge plan">Planned</span></h4>
+	<div class="pbar"><span data-pct="15" style="width:15%">15%</span></div>
+	<p class="dim">Deepen the economy and persistence into a real progression loop.</p>
+
+	<h4>Phase 3: Full Mode <span class="badge plan">Planned</span></h4>
+	<div class="pbar"><span data-pct="5" style="width:5%">5%</span></div>
+	<p class="dim">Island-wide, zone-by-zone liberation against an escalating EAST occupier.</p>
+
+	<a name="pyramid"></a><h3>The Test Pyramid</h3>
+	<p>Validation is layered, following the "build &rarr; test &rarr; iterate" half of the loop:</p>
+	<table class="data">
+		<tr><th width="150">Layer</th><th>Tooling</th><th>Location</th></tr>
+		<tr><td><b>Unit</b></td><td>Catch2 (~3536/3561 passing)</td><td><code>tests/unit/</code></td></tr>
+		<tr><td><b>Integration</b></td><td>Trident (<code>tri</code>) drives SQF scenarios vs real game data</td><td><code>tests/integration/</code></td></tr>
+		<tr><td><b>Smoke</b></td><td>Pester</td><td><code>tests/smoke/</code></td></tr>
+		<tr><td><b>Playtest</b></td><td>A human at the controls, the "money moment"</td><td>Live build</td></tr>
+	</table>
+	<p class="dim">Historically CI ran <code>fmt / clippy / test / build</code> on Linux and Windows, but no
+	<code>.github/workflows/</code> ship in this frozen drop. The CI pipeline lives on as documentation in the
+	mod-plans.</p>
+
+	<a name="status"></a><h3>Live Status Board</h3>
+	<table class="statgrid"><tr>
+		<td><span class="num">13</span><span class="lbl">Design Plans</span></td>
+		<td><span class="num">P1</span><span class="lbl">Current Phase</span></td>
+		<td><span class="num">99%</span><span class="lbl">Unit Tests Pass</span></td>
+		<td><span class="num">P1.5</span><span class="lbl">Next Up: De-Hardcoding</span></td>
+	</tr></table>
+
+	<hr class="mil">
+	<p class="center"><a href="tech.html">&raquo; Next: Under the Hood</a></p>
+</td>
+</tr></table></td></tr>
+
+<tr><td class="footer">
+	You are visitor no. &nbsp;<span id="hitcounter">[ counting ]</span>
+	<hr class="mil">
+	<span id="statusmsg" class="dim">&gt;&gt; Radio check, over.</span><br>
+	<b>Uslu dur!</b> is the official site for this total game overhaul project. Bohemia Interactive a.s. owns
+	the "ARMA" and "OPERATION FLASHPOINT" trademarks and has no involvement in this project.
+</td></tr>
+</table>
+</body>
+</html>
