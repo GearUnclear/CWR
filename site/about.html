@@ -19,13 +19,13 @@
 	</tr></table>
 </td></tr>
 <tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
-	&#9733; ABOUT &#9733; A total game overhaul &nbsp; // &nbsp; 12 AI/engine mod-plans + Guerrilla Mode &nbsp; // &nbsp; built on Bohemia's opened Poseidon source, GPL-3.0-or-later &nbsp; &#9733;
+	&#9733; ABOUT &#9733; A total overhaul of a 2001 classic &nbsp; // &nbsp; smarter AI + all-new Guerrilla Mode &nbsp; // &nbsp; built on Bohemia's opened Poseidon source, GPL-3.0-or-later &nbsp; &#9733;
 </span></marquee></div></td></tr>
 <tr><td class="navbar">
 	<a href="index.html">HOME</a>
 	<a href="about.html">ABOUT</a>
 	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
-	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="designloop.html">ROADMAP</a>
 	<a href="tech.html">UNDER THE HOOD</a>
 	<a href="downloads.html">DOWNLOADS</a>
 </td></tr>
@@ -35,20 +35,18 @@
 	<div class="box"><div class="box-hd">On This Page</div><div class="box-bd"><ul>
 		<li><a href="#what">What Is It?</a></li>
 		<li><a href="#names">A Note On Names</a></li>
-		<li><a href="#three">Three Things Kept Separate</a></li>
+		<li><a href="#three">The Legal Fine Print</a></li>
 		<li><a href="#setting">Setting &amp; Theme</a></li>
 		<li><a href="#license">License</a></li>
 		<li><a href="#credits">Credits</a></li>
 	</ul></div></div>
 	<div class="box"><div class="box-hd">Fast Facts</div><div class="box-bd" style="font-size:10px;">
-		<b class="dim">Overhaul:</b> 12 mod-plans + Guerrilla Mode<br>
-		<b class="dim">Engine codename:</b> Poseidon<br>
-		<b class="dim">Language:</b> C++20<br>
-		<b class="dim">Compiler:</b> Clang only<br>
-		<b class="dim">Platforms:</b> Win x64, Linux x64<br>
-		<b class="dim">License:</b> GPL-3.0+<br>
-		<b class="dim">Engine status:</b> <span class="badge plan">Locked snapshot</span><br>
-		<b class="dim">Overhaul status:</b> <span class="badge wip">Active</span>
+		<b class="dim">Base game:</b> ARMA: Cold War Assault (2001)<br>
+		<b class="dim">What's new:</b> AI overhaul + Guerrilla Mode<br>
+		<b class="dim">Islands:</b> Everon, Malden, Kolgujev, Nogova<br>
+		<b class="dim">Platforms:</b> Windows &amp; Linux<br>
+		<b class="dim">Price:</b> Free demo on Steam<br>
+		<b class="dim">Status:</b> <span class="badge wip">Active development</span>
 	</div></div>
 	<div class="box"><div class="box-hd">Lineage</div><div class="box-bd center">
 		<img src="assets/img/icon-demo.png" width="48" height="48" alt="[star]"><br>
@@ -60,50 +58,38 @@
 	<h2 class="section">About Uslu dur!</h2>
 
 	<a name="what"></a><h3>What Is It, Exactly?</h3>
-	<p><b>Uslu dur! is a total game overhaul of <i>ARMA: Cold War Assault</i></b>, the title first
-	released in 2001 as <i>Operation Flashpoint: Cold War Crisis</i>. Twelve engine and AI mod-plans rework
-	how the AI fights and perceives the world, plus how it takes commands, culminating in
-	<b>Guerrilla Mode</b>: a brand-new, persistent open-world insurgency game mode that doesn't exist in the
-	original game at all. That is the subject of this portal.</p>
-	<p>None of it happens in a vacuum: it's built on top of Bohemia Interactive's own newly-opened engine
-	source, internal codename <b>"Poseidon."</b></p>
+	<p><b>Uslu dur! is a total overhaul of <i>ARMA: Cold War Assault</i></b>, the title you first met in 2001
+	as <i>Operation Flashpoint: Cold War Crisis</i>. It's a ground-up rework of how the enemy AI fights,
+	spots you, and reacts to your squad, culminating in <b>Guerrilla Mode</b>: a brand-new, persistent
+	open-world insurgency that doesn't exist in the original game at all. That's what this portal is about.</p>
+	<p>None of it happens in a vacuum: it's built on Bohemia Interactive's own newly-opened engine source,
+	internal codename <b>"Poseidon."</b></p>
 	<div class="briefing"><span class="stamp">QUOTE</span>
 		<p style="margin-top:8px;">"Bohemia Interactive is releasing it to the community that has kept this game alive
 		for more than two decades &mdash; to study it, build on it, fix it, and create from it."
 		<br><span class="dim">Source: README.md</span></p>
 	</div>
-	<p>We took that invitation literally. The upstream release is the actual proprietary engine source,
-	opened up and modernized to <b>C++20</b>, built with <b>CMake + Clang</b>, targeting <b>Windows x64 and
-	Linux x64</b>. On its own, though, it's just a faithfully-ported original game. The <b>overhaul</b> is
-	everything this project adds on top: reworked AI tactics and perception, plus the whole Guerrilla Mode
-	game loop built from new SQF and engine commands. See <a href="gameplay.html">Gameplay Systems</a> and
-	<a href="designloop.html">The Design Loop</a> for what that actually means.</p>
+	<p>We took that invitation literally. On its own, the opened engine is just a faithfully-ported version of
+	the original game, now running natively on modern Windows and Linux. The <b>overhaul</b> is everything we're
+	adding on top: AI that actually fights like a squad instead of a shooting gallery, and the whole Guerrilla
+	Mode campaign layered over it. See <a href="gameplay.html">Gameplay Systems</a> for what that means when
+	you're actually playing.</p>
 
 	<a name="names"></a><h3>A Note On Names</h3>
-	<p><b>"Uslu dur!"</b> is this project's own name, kept deliberately distinct from Bohemia's shorthand for its
-	own upstream engine drop, <b>"Cold War Assault Remastered"</b> (codename Poseidon, upstream org
-	<span class="dim">BohemiaInteractive/CWR</span>). That upstream repository is locked: pull requests aren't
-	accepted there, and it won't be continuously updated. It also sidesteps the classic community fan mod that
-	carried the "Cold War Rearmed" name for years, a different and unrelated project. <b>Uslu dur!</b> is
-	<i>this</i> overhaul: the AI mod-plans and Guerrilla Mode built on top of Bohemia's upstream drop.</p>
+	<p><b>"Uslu dur!"</b> is this project's own name. You may also see this game called "Cold War Assault
+	Remastered" or "CWR" &mdash; that's Bohemia's own name for the engine snapshot it opened up, which is
+	frozen and not where any of this overhaul happens. There's also an unrelated, much older community mod
+	that used the name "Cold War Rearmed" for years. <b>Uslu dur!</b> is neither of those: it's this
+	overhaul, built on top of Bohemia's release. If you'd rather follow the underlying engine itself, a
+	separate community continuation lives at <b>ofpisnotdead-com/CWR-CE</b>.</p>
 
-	<div class="briefing"><span class="stamp" style="border-color:#c9a24a;color:#c9a24a;">IMPORTANT</span>
-		<p style="margin-top:8px;">The <b>upstream engine source</b> is locked: issues there are accepted only
-		for bugs in official Steam builds. The <b>overhaul</b> (mod-plans and Guerrilla Mode) is
-		this project's own active development. A separate living continuation of the upstream engine also
-		exists at <b>ofpisnotdead-com/CWR-CE</b>, for anyone chasing engine work rather than the overhaul.</p>
-	</div>
-
-	<a name="three"></a><h3>Three Things Kept Legally Separate</h3>
-	<table class="data">
-		<tr><th width="120">Layer</th><th>What</th><th width="130">Terms</th></tr>
-		<tr><td><b>Source code</b></td><td>This repository (the Poseidon engine &amp; tools)</td><td>GPL-3.0-or-later + Section 7 terms</td></tr>
-		<tr><td><b>The brand</b></td><td>"ARMA" / "Operation Flashpoint" names &amp; marks</td><td>Reserved to Bohemia; forks must rename</td></tr>
-		<tr><td><b>Game data</b></td><td>Models, textures, sounds, missions, voices</td><td>APL-SA (separate download)</td></tr>
-	</table>
-	<p class="dim">A free Demo is available on Steam under app id <b>4819000</b>. Game data ships separately from the
-	source repository, which is why this site is built from the engine's red-star application icons rather
-	than in-game art; the rest of that art is packed inside Bohemia's <code>.pbo</code> archives.</p>
+	<a name="three"></a><h3>The Legal Fine Print</h3>
+	<p class="dim">Quick version: the engine source is open (GPL-3.0-or-later), but the "ARMA" and
+	"Operation Flashpoint" names stay Bohemia's, and the game's models/textures/sounds are a separate
+	download under their own license (APL-SA) &mdash; which is also why this <i>site's</i> art is our own
+	retro red-star icons rather than anything pulled from the game itself. A free <b>Demo</b> is on Steam
+	under app id <b>4819000</b>. Full license details are on the <a href="downloads.html">Downloads</a> page
+	for anyone who needs them.</p>
 
 	<a name="setting"></a><h3>Setting &amp; Theme</h3>
 	<p>The source tree is engine and tooling code with no fixed campaign narrative; that narrative lives in the
@@ -121,18 +107,14 @@
 	</ul>
 
 	<a name="license"></a><h3>License</h3>
-	<p><b>GNU GPL v3.0-or-later</b>, with <b>additional terms under Section 7</b>: no trademark or publicity rights
-	are granted, and modified versions must be marked as modified and not presented as the original. Third-party
-	code under <code>thirdparty/</code> (glad, RenderDoc API header, Khronos <code>khrplatform.h</code>) and
-	vcpkg-resolved dependencies keep their own licenses. Game data is separately licensed under <b>APL-SA</b>.</p>
+	<p class="dim">GPL-3.0-or-later, with a carve-out that keeps trademarks and publicity rights with Bohemia.
+	Game data is separately licensed under APL-SA. Full detail on <a href="downloads.html">Downloads</a>.</p>
 
 	<a name="credits"></a><h3>Credits</h3>
-	<p>Developed and published by <b>Bohemia Interactive</b>. The Poseidon engine is credited as the technological
-	ancestor of Bohemia's later <b>Real Virtuality</b> and <b>Enfusion</b> engines. Special thanks to
-	<b>Josef &Scaron;im&aacute;nek ("simi")</b> for development archaeology and codebase work in preparing this
-	source release, alongside a named roster of community testers.</p>
-	<p>Embedded classic algorithms are credited too: the <b>ISAAC</b> PRNG, from Bob Jenkins and released to the
-	public domain; the <b>RANMAR</b> PRNG, kept for legacy network compatibility; and <b>CRC-32</b>.</p>
+	<p>Originally developed and published by <b>Bohemia Interactive</b> &mdash; without them, and without their
+	choice to open the Poseidon engine source to the community that's kept this game alive for 25 years, none
+	of this exists. Special thanks to <b>Josef &Scaron;im&aacute;nek ("simi")</b> for the archaeology work that
+	made this source release possible, and to everyone still playing Operation Flashpoint in 2026.</p>
 
 	<hr class="mil">
 	<p class="center"><a href="gameplay.html">&raquo; Next: Gameplay Systems</a></p>

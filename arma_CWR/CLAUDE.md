@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-This repository is a **total game overhaul** of *Arma: Cold War Assault* (originally *Operation Flashpoint*, 2001) — not just an engine port. Two layers live here:
+This directory holds the engine and overhaul for **Uslu dur!** (**UD**) — a **total game overhaul** of *Arma: Cold War Assault* (originally *Operation Flashpoint*, 2001), not just an engine port. "Uslu dur!" is the public brand; the rename is branding-only, so the `cwr`/`CWR`/`Poseidon` codenames throughout the source are unchanged and stay as-is.
+
+> **Repo layout note:** the git root is one level up at `D:\Arma_CWA`, not here. `arma_CWR/` is now a subdirectory alongside `site/` (the web portal) and `@LoBo/` (a mod test bed). See `D:\Arma_CWA\CLAUDE.md` for the repo-wide map; this file covers the engine + overhaul that live under `arma_CWR/`.
+
+Two layers live here:
 
 - **The upstream engine** (`engine/`, `apps/`, etc.), codename **Poseidon**. Modernized to C++20, built with CMake + Clang, cross-platform Windows x64 / Linux x64. This part is a **locked** Bohemia Interactive source release: PRs are not accepted upstream and there is no CI workflow checked into the repo (the sub-READMEs describe what CI *did* run). The code is GPL-3.0-or-later; game data (models, textures, sounds, missions) is **not** in this repo and ships separately under APL-SA.
 - **The overhaul itself** ([`mod-plans/`](mod-plans/README.md), [`guerrilla-mode/`](guerrilla-mode/README.md)) — a from-the-ground-up rework of AI tactics/perception plus **Guerrilla Mode**, a new persistent open-world insurgency game mode with swappable islands and factions chosen at new-game. This is where active development happens. **Direction (2026-07-01): this is a total overhaul of the engine source, not a mod on a fixed binary — C++ engine changes are a first-class tool here, not a last resort, alongside SQF mission scripting.** Treat the mod-plans as living, AI-drafted design docs subject to correction, not settled hard specs.
@@ -19,7 +23,7 @@ Builds require, on PATH / in env:
 
 ## Local environment (this Windows machine)
 
-**Project location:** `D:\Arma_CWA\arma_CWR` (moved here from `C:\dev\arma_CWR` on 2026-06-28 to sit next to the game data). A reminder shortcut `C:\dev\arma_CWR.lnk` points back here.
+**Engine location:** `D:\Arma_CWA\arma_CWR` (moved here from `C:\dev\arma_CWR` on 2026-06-28 to sit next to the game data). The **git root is the parent** `D:\Arma_CWA` — run git and path-relative commands accordingly. A reminder shortcut `C:\dev\arma_CWR.lnk` points back here.
 
 **Game data:** `D:\Arma_CWA\ARMA Cold War Assault` — the full installed game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Use this path for Trident's `OFPR_DATA_DIR` in `.trident.env`.
 

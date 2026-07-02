@@ -25,7 +25,7 @@
 	<a href="index.html">HOME</a>
 	<a href="about.html">ABOUT</a>
 	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
-	<a href="designloop.html">DESIGN LOOP</a>
+	<a href="designloop.html">ROADMAP</a>
 	<a href="tech.html">UNDER THE HOOD</a>
 	<a href="downloads.html">DOWNLOADS</a>
 </td></tr>
@@ -58,15 +58,13 @@
 
 <td class="content">
 	<h2 class="section">Under the Hood</h2>
-	<p><b>Uslu dur! is a total game overhaul</b> of Bohemia Interactive's opened engine source itself (codename
-	<b>Poseidon</b>). We treat that engine as living ground we actively dig into and modify at the source level,
-	adding real engine-side capabilities alongside script-level work. Everything below is described in that light:
-	this is the tech stack our overhaul <i>builds on and modifies</i>, from renderer to asset formats to the SQF
-	virtual machine itself. We're also extending the engine to serve the overhaul's design, including new evaluator
-	commands and data plumbing for swappable factions and islands, and we call that work out explicitly below.</p>
-	<p>The whole engine lives in <code>engine/Poseidon/</code> as a set of C++20 static libraries, with a handful of
-	sibling libraries for platform backends. Here is the map, followed by a look at the engine-side work the
-	overhaul itself is adding.</p>
+	<p>Everything on this page is optional reading. If you just want to play, the <a href="downloads.html">free
+	Steam demo</a> is one click away. If you're the kind of player who wants to know what's actually running
+	under the game &mdash; or you're a modder sizing up whether to build on this &mdash; here's the stack.</p>
+	<p><b>Uslu dur!</b> runs on Bohemia Interactive's opened engine source (codename <b>Poseidon</b>), which we
+	build from scratch and actively modify, not just script on top of. The whole engine lives in
+	<code>engine/Poseidon/</code> as a set of C++20 static libraries. Here's the map, followed by the new
+	engine-side work this overhaul is adding on top.</p>
 
 	<a name="engine"></a><h3>Engine Subsystems (<code>engine/Poseidon/</code>)</h3>
 	<table class="data">
