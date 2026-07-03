@@ -270,16 +270,16 @@ int GarrisonCache::PlanGroups(int reserve, int groupSize, AutoArray<int>& takes)
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
 
-// zone is garrisonable by an occupier: not a CITY, not GUER/NEUTRAL, and the
-// owner side has spawn tiers configured (data-driven form of the spawning.sqs
-// owner == "EAST" rule; the Demo's only tiered faction is EAST)
+// zone is garrisonable by the occupier: not a CITY, owned by the campaign's
+// resolved occupier side, and that side has spawn tiers configured (the
+// data-driven form of the spawning.sqs owner == "EAST" rule)
 static bool IsOccupierOwned(const ZoneRegistry& registry, const ZoneRecord& z)
 {
     if (stricmp(z.type, "CITY") == 0)
     {
         return false;
     }
-    if (stricmp(z.owner, "GUER") == 0 || stricmp(z.owner, "NEUTRAL") == 0)
+    if (stricmp(z.owner, registry.OccupierSide()) != 0)
     {
         return false;
     }

@@ -1,6 +1,6 @@
 tags = ["scripting", "guerrilla", "save-load", "headless"]
 binary = "PoseidonGame"
 mission = "tests/integration/missions/guerrilla_persist.Demo"
-timeout = 120
-assert_timeout = 45
+timeout = 240
+assert_timeout = 90
 extra_args = ["--dev"]

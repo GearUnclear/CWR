@@ -1,0 +1,146 @@
+// Guerrilla Mode - Sinai island pack (issue #3 items 4+6: second island,
+// different occupier). This file is the ONLY island/faction-specific data in
+// the template - init.sqs + scripts/ are byte-identical to Guerrilla.Demo
+// (the shared island-agnostic core; a parity test enforces that).
+//
+// The scenario is deliberately ASYMMETRIC to prove the sides are fully
+// generalized: the OCCUPIER is the IDF (side WEST) and the RESISTANCE is the
+// Egyptian Frontier Corps (side EAST). Classnames come from the @LoBo mod
+// (Sinai world "sinai" in lost.pbo; CfgPatches LoBoIs / LoBoEgypt /
+// JAM_Magazines / LoBoHMWV / LoBo_Zelda - all verified against the shipped
+// configs).
+//
+// Defining class CfgGuerrillaZones activates the native guerrilla systems
+// (ZoneRegistry / AlertMachine / GarrisonCache).
+
+onLoadMission = "Guerrilla Mode - Sinai (IDF occupation)";
+onLoadIntro  = "Drive the occupier out of the Sinai, one zone at a time.";
+respawn = 0;
+joinInProgress = 0;
+
+class CfgGuerrillaZones
+{
+    // Side resolution when the new-game UI selections (gmSelOccupier /
+    // gmSelResistance) are unset - i.e. any direct launch of this mission.
+    // Values are CfgGuerrillaFactions class names below; the engine resolves
+    // them to sides (ZoneRegistry::ResolveSides): IDF -> WEST occupier,
+    // EgyptFrontier -> EAST resistance.
+    defaultOccupier = "IDF";
+    defaultResistance = "EgyptFrontier";
+
+    // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
+    // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60; ...).
+    // Town auto-seed on: southern Sinai's Names block carries ~34 named
+    // locations (type-less OFP-era entries -> all seed as CITY zones, deduped
+    // within 300 m of the explicit zones below).
+    seedCities = 1;
+    seedCitySupport = 20;
+
+    class Zones
+    {
+        // COORDINATE ORDER (load-bearing): position[] is authored in
+        // script/getPos order [easting, northing, elevation] - NOT the
+        // mission.sqm order [easting, ELEVATION, northing]. Elevations are
+        // approximate ground heights (Sinai terrain spans -50..475 m); the
+        // native garrison spawn snaps units to the surface regardless
+        // (GarrisonCache uses SurfaceYAboveWater).
+        //
+        // Layout: the Camp sits in the empty desert plain north-east of Wadi
+        // Mandar; the Wadi Checkpoint is ~500 m away so the occupier garrison
+        // distance-cache (cacheRadius 800) engages as soon as the campaign
+        // starts; Ras Nasrani Outpost is ~1.8 km out - beyond cache range
+        // until the player moves on it.
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";   // generic token, resolved per campaign
+            garrison = 0;
+            support = 100;
+            income = 0;
+            marker = "gmZoneMarker_0";
+            position[] = {7900, 3200, 160};
+        };
+        class WadiCheckpoint
+        {
+            name = "Wadi Checkpoint";
+            type = "OUTPOST";
+            owner = "OCCUPIER";     // generic token, resolved per campaign
+            garrison = 6;
+            income = 25;
+            marker = "gmZoneMarker_1";
+            position[] = {8300, 3500, 160};
+        };
+        class RasNasraniOutpost
+        {
+            name = "Ras Nasrani Outpost";
+            type = "OUTPOST";
+            owner = "OCCUPIER";
+            garrison = 8;
+            income = 25;
+            marker = "gmZoneMarker_2";
+            position[] = {9100, 4600, 120};
+        };
+        // Explicit CITY on top of the world's named town (the auto-seed skips
+        // any Names entry within 300 m of an explicit zone, so this REPLACES
+        // the seeded "El Tor" with a hand-tuned one).
+        class ElTor
+        {
+            name = "El Tor";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 35;
+            marker = "gmZoneMarker_3";
+            position[] = {6827, 2808, 140};
+        };
+    };
+};
+
+// Faction descriptors for the Sinai dataset (@LoBo classes). Same key schema
+// as Guerrilla.Demo (the reference) - see guerrilla-mode/ARCHITECTURE.md
+// "Faction keys". The scripts read these through gmFactionValue /
+// gmFactionTierClass / gmFactionVehicle; nothing below is hardcoded anywhere
+// else.
+class CfgGuerrillaFactions
+{
+    class IDF // occupier descriptor - side WEST (the asymmetry is the point)
+    {
+        side = "WEST";
+        // WL<3 Golani regulars -> WL3-4 Paratroopers -> WL5+ Shayetet 13
+        tiers[] = {"LoBoGolaniWB", "LoBoParaWB", "LoBoShayetetWB"};
+        tierThresholds[] = {3, 5};
+        // QRF escort: HMMWV patrol below WL3, M113 Zelda from WL3
+        vehicles[] = {"LoBoHMWV_Mag_Patrol", "LoBo_Zelda"};
+        vehicleThreshold = 3;
+        officer = "LoBoGolaniWBo";
+    };
+    class EgyptFrontier // resistance descriptor - side EAST
+    {
+        side = "EAST";
+        tiers[] = {"LoBo_Egypt_FrtCrp"};
+        tierThresholds[] = {};
+        vehicles[] = {}; // none in phase 1
+        officer = "LoBo_Egypt_FrtCrpo";
+
+        holdClass = "LoBo_Egypt_FrtCrp";
+        holdCount = 3;
+        recruitFighter = "LoBo_Egypt_FrtCrp";
+        recruitSpecialist = "LoBo_Egypt_FrtCrpMG";
+        companionClass = "LoBo_Egypt_FrtCrp";
+
+        // Frontier Corps kit (verified from LoBoEgypt config: LoBoAK47 rifle
+        // firing JAM 7.62x39 mags; RPD MG; RPG-7; SVD for the marksman role).
+        baseWeapon = "LoBoAK47";
+        baseMagazine = "JAM_E762_30mag";
+        lootRiflemanWeapon = "LoBoAK47";
+        lootRiflemanMag = "JAM_E762_30mag";
+        lootMedicWeapon = "LoBoAK47";
+        lootMedicMag = "JAM_E762_30mag";
+        lootMGWeapon = "JAM_RPD";
+        lootMGMag = "JAM_E762M_100mag";
+        lootATWeapon = "JAM_RPG7Launcher";
+        lootATMag = "JAM_RPG7ALLRocket";
+        lootSniperWeapon = "LoBo_SVD";
+        lootSniperMag = "JAM_E762_10mag";
+    };
+};

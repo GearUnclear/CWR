@@ -366,6 +366,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_zone_registry.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
+    Game/Guerrilla/test_mission_script_core.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp

@@ -1,53 +1,25 @@
 ; ============================================================================
-;  companions.sqs  -  Named-companion progression (XP -> rank/skill) + permadeath
+;  companions.sqs  -  named-companion progression (XP -> rank/skill) + permadeath
 ; ----------------------------------------------------------------------------
-;  OWNS (exclusive write, per ARCHITECTURE.md sec.4):
-;      GM_COMP_XP, GM_COMP_RANK, GM_COMP_SKILL, GM_COMP_ALIVE, GM_COMP_OBJ
-;    Also defines (owned here) the companion tunables + companion code-string
-;    helpers GM_fnComp* and the transient kill-tracking array GM_COMP_PREVRATING.
-;  READS:
-;      GM_COMP_NAMES (identity key), GM_COMP_LOADOUT, kill events (via `rating`
-;      delta on the live body) and survival (per-tick while alive).
-;  WRITES NOTHING in other managers' globals.
+;  Model UNCHANGED from Phase 1: parallel GM_COMP_* arrays keyed by name; XP
+;  folded per tick (+kill via `rating` delta, +survival); crossing an XP
+;  threshold promotes up the rank ladder and bumps skill; a dead body flags
+;  the row permadead forever (the name persists as a memorial).
 ;
-;  PROGRESSION MODEL (plan 13 Phase-1 MVP):
-;    * One named companion ("Petra") for the MVP; the roster is the parallel
-;      GM_COMP_* arrays so adding rows scales without code change.
-;    * XP is folded per tick: +GM_COMP_XP_KILL whenever the body's engine
-;      `rating` rises this tick (kill proxy), +GM_COMP_XP_SURV for surviving.
-;    * Crossing a GM_COMP_XPTHRESH boundary PROMOTES: the rank string steps up
-;      the GM_COMP_RANKLADDER and GM_COMP_SKILL rises, applied live via setSkill
-;      so she visibly shoots better and holds nerve.
-;    * PERMADEATH (emotional core): when the live body dies, the row is flagged
-;      dead forever (GM_COMP_ALIVE[i]=false) and the handle nulled. The row is
-;      NEVER deleted, so the name persists as a memorial.
+;  WHAT CHANGED (Phase 1.5):
+;    * companionClass comes from the resistance faction descriptor
+;      (gmFactionValue) - no classname literal.
+;    * `setRank` is a real command now: promotions apply the rank to the LIVE
+;      body immediately (the old "visible rank refreshes on next spawn"
+;      limitation is gone; the createUnit rank arg still bakes it at spawn).
+;    * Post-load rebuild: campaign.sqs verifies/nulls GM_COMP_OBJ handles on
+;      the native campaignLoaded event; this loop's own spawn branch then
+;      rebuilds any nulled living companion via GM_fnCompSpawn - the
+;      persistence.sqs reconcile pass is retired.
 ;
-;  CONFIRMED COMMANDS (string-literal grep of engine/.../GameStateExt*.cpp):
-;    alive            GameStateExt.cpp:933   (unary -> bool)
-;    rating           GameStateExt.cpp:966   (unary -> scalar; rises on kills)
-;    skill            GameStateExt.cpp:1133  (unary -> scalar)
-;    setSkill         GameStateExt.cpp:1381  (obj setSkill scalar)
-;    createUnit       GameStateExt.cpp:1334  (class createUnit [pos,grp,init,skill,rank])
-;      -> applies rank arg + SetAbility(skill) at spawn (GameStateExtWorld.cpp:219,221);
-;         the unit is AddUnit'd synchronously before return (GameStateExtWorld.cpp:224),
-;         so we capture it by diffing `units (group aP)` before/after.
-;    group / units    GameStateExt.cpp:976 / 977-978
-;    removeAllWeapons GameStateExt.cpp:1019 ; addWeapon :1253 ; addMagazine :1255
-;    position         GameStateExt.cpp:937  ; objNull :931 ; hint :1045 ; format :1049
-;
-;  LIMITATION (no-setRank, by design): `rank`/`setRank` are NOT registered
-;  runtime commands (grep returns nothing). Rank therefore lives ONLY in the
-;  parallel global GM_COMP_RANK and is baked into the body via the createUnit
-;  rank arg at (re)spawn. A live promotion updates the string + skill now; the
-;  visible engine rank refreshes on the next spawn/reload (persistence path).
-;
-;  PERSISTENCE HOOKS (called by persistence.sqs on load - it owns the call site,
-;  this file owns the code): both are pure synchronous code-strings, safe to
-;  `call` (no ~ waits inside any helper):
-;      [i, pos] call GM_fnCompSpawn  -> rebuild a living companion's body,
-;                                       re-apply rank+skill, re-equip; returns obj
-;      [i]      call GM_fnCompEquip  -> re-apply the stored loadout to the body
-;      [i]      call GM_fnCompApply  -> re-apply skill to the live body
+;  OWNS: GM_COMP_XP/RANK/SKILL/ALIVE/OBJ, the tunables + GM_fnComp* helpers,
+;        transient GM_COMP_PREVRATING.
+;  READS: GM_COMP_NAMES/LOADOUT, gmResistanceSide + companionClass key.
 ; ============================================================================
 
 @GM_LIB_READY
@@ -55,27 +27,22 @@
 ; ===========================================================================
 ;  TUNABLES / CONSTANTS  (owned by this script)
 ; ===========================================================================
-GM_COMP_CLASS     = "SoldierGB"   ; base man class for spawned companions.
-                                  ; VERIFY: stock OFP/CWA Resistance rifleman;
-                                  ; mirrors the GUER player class. Swap to a
-                                  ; present class if the Demo dataset differs
-                                  ; (do NOT flip the companion to WEST/EAST).
+GM_COMP_CLASS      = gmFactionValue [gmResistanceSide, "companionClass"]
 GM_COMP_RANKLADDER = ["PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL"]
-                                  ; VERIFY: enum names fed to createUnit rank arg;
-                                  ; createUnit defaults bad names to PRIVATE
-                                  ; (GameStateExtWorld.cpp:258-261), so graceful.
-GM_COMP_XPTHRESH  = [0, 100, 250, 500, 850, 1300, 1900]
-                                  ; XP needed to HOLD ladder index i (index-aligned)
-GM_COMP_SKILLBASE = 0.35          ; skill at ladder index 0
-GM_COMP_SKILLSTEP = 0.10          ; skill gained per rank step (clamped to 1.0)
-GM_COMP_XP_KILL   = 25            ; XP per detected kill (rating-rose-this-tick)
-GM_COMP_XP_SURV   = 1             ; XP per survival tick while a live body exists
-GM_COMP_TICK      = 5             ; seconds between progression ticks
+GM_COMP_XPTHRESH   = [0, 100, 250, 500, 850, 1300, 1900]
+;   GM_COMP_SKILLBASE  skill at ladder index 0
+;   GM_COMP_SKILLSTEP  skill gained per rank step (clamped to 1.0)
+;   GM_COMP_XP_KILL    XP per detected kill (rating rose this tick)
+;   GM_COMP_XP_SURV    XP per survival tick while a live body exists
+;   GM_COMP_TICK       seconds between progression ticks
+GM_COMP_SKILLBASE  = 0.35
+GM_COMP_SKILLSTEP  = 0.10
+GM_COMP_XP_KILL    = 25
+GM_COMP_XP_SURV    = 1
+GM_COMP_TICK       = 5
 
 ; ===========================================================================
-;  TRANSIENT bookkeeping (rebuilt every load; never persisted, never read by
-;  other scripts). Parallel to GM_COMP_NAMES: last-sampled `rating` per body,
-;  used to detect kills as a positive delta.
+;  TRANSIENT bookkeeping: last-sampled `rating` per body (kill detection)
 ; ===========================================================================
 GM_COMP_PREVRATING = []
 GM_cpI = 0
@@ -87,8 +54,7 @@ goto "prefill"
 #prefilled
 
 ; ===========================================================================
-;  HELPERS  (single-line code-strings; synchronous; use GM_tmpC* scratch).
-;  `call` is non-interruptible so scratch reuse across helpers is safe.
+;  HELPERS  (single-line code values; synchronous; GM_tmpC* scratch)
 ; ===========================================================================
 
 ; -- GM_fnCompRankIdxForXp( xp ) -> highest ladder index whose threshold is met
@@ -97,31 +63,26 @@ GM_fnCompRankIdxForXp = {GM_tmpCr = 0; GM_tmpCk = 0; while {GM_tmpCk < (count GM
 ; -- GM_fnCompSkillForRank( idx ) -> skill scalar, clamped to <=1.0
 GM_fnCompSkillForRank = {GM_tmpCs = GM_COMP_SKILLBASE + (GM_COMP_SKILLSTEP * _this); if (GM_tmpCs > 1) then {GM_tmpCs = 1}; GM_tmpCs}
 
-; -- GM_fnCompApply( i ) -> push the stored skill onto the live body (rank can
-;    only refresh at spawn; see no-setRank note in header)
-GM_fnCompApply = {GM_tmpCo = GM_COMP_OBJ select _this; if (not (GM_tmpCo == objNull)) then {GM_tmpCo setSkill (GM_COMP_SKILL select _this)}}
+; -- GM_fnCompApply( i ) -> push stored skill AND rank onto the live body
+;    (setRank exists now; also called by campaign.sqs after a load)
+GM_fnCompApply = {GM_tmpCo = GM_COMP_OBJ select _this; if (not (isNull GM_tmpCo)) then {GM_tmpCo setSkill (GM_COMP_SKILL select _this); GM_tmpCo setRank (GM_COMP_RANK select _this)}}
 
 ; -- GM_fnCompEquip( i ) -> re-apply stored loadout. NO-OP when the loadout has
-;    no weapons (keeps the class default rifle for a freshly-spawned recruit).
-GM_fnCompEquip = {GM_tmpCo = GM_COMP_OBJ select _this; GM_tmpCl = GM_COMP_LOADOUT select _this; GM_tmpCw = GM_tmpCl select 0; GM_tmpCm = GM_tmpCl select 1; if ((not (GM_tmpCo == objNull)) and ((count GM_tmpCw) > 0)) then {removeAllWeapons GM_tmpCo; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCw)} do {GM_tmpCo addWeapon (GM_tmpCw select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCm)} do {GM_tmpCo addMagazine (GM_tmpCm select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}}}
+;    no weapons (keeps the class default rifle for a fresh recruit).
+GM_fnCompEquip = {GM_tmpCo = GM_COMP_OBJ select _this; GM_tmpCl = GM_COMP_LOADOUT select _this; GM_tmpCw = GM_tmpCl select 0; GM_tmpCm = GM_tmpCl select 1; if ((not (isNull GM_tmpCo)) and ((count GM_tmpCw) > 0)) then {removeAllWeapons GM_tmpCo; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCw)} do {GM_tmpCo addWeapon (GM_tmpCw select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCm)} do {GM_tmpCo addMagazine (GM_tmpCm select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}}}
 
 ; -- GM_fnCompSpawn( [i, pos] ) -> spawn the living companion's body into the
 ;    player's group, baking rank+skill at creation, then equip; returns the obj
-;    (objNull if dead or the 12/group cap blocked it). Capture is via a
-;    units-of-group before/after diff (createUnit returns Nothing; the unit is
-;    AddUnit'd synchronously inside the call).
-GM_fnCompSpawn = {GM_tmpSi = _this select 0; GM_tmpSp = _this select 1; GM_tmpSo = objNull; if (GM_COMP_ALIVE select GM_tmpSi) then {GM_tmpSpre = units (group aP); GM_COMP_CLASS createUnit [GM_tmpSp, group aP, "", (GM_COMP_SKILL select GM_tmpSi), (GM_COMP_RANK select GM_tmpSi)]; GM_tmpSnew = (units (group aP)) - GM_tmpSpre; if ((count GM_tmpSnew) > 0) then {GM_tmpSo = GM_tmpSnew select 0}; GM_COMP_OBJ set [GM_tmpSi, GM_tmpSo]; if (not (GM_tmpSo == objNull)) then {GM_COMP_PREVRATING set [GM_tmpSi, rating GM_tmpSo]; [GM_tmpSi] call GM_fnCompEquip}}; GM_tmpSo}
+;    (objNull if dead or the 12/group cap blocked it). Capture is a
+;    units-of-group before/after diff (createUnit returns Nothing).
+GM_fnCompSpawn = {GM_tmpSi = _this select 0; GM_tmpSp = _this select 1; GM_tmpSo = objNull; if (GM_COMP_ALIVE select GM_tmpSi) then {GM_tmpSpre = units (group aP); GM_COMP_CLASS createUnit [GM_tmpSp, group aP, "", (GM_COMP_SKILL select GM_tmpSi), (GM_COMP_RANK select GM_tmpSi)]; GM_tmpSnew = (units (group aP)) - GM_tmpSpre; if ((count GM_tmpSnew) > 0) then {GM_tmpSo = GM_tmpSnew select 0}; GM_COMP_OBJ set [GM_tmpSi, GM_tmpSo]; if (not (isNull GM_tmpSo)) then {GM_COMP_PREVRATING set [GM_tmpSi, rating GM_tmpSo]; GM_tmpSi call GM_fnCompEquip}}; GM_tmpSo}
 
 ; -- GM_fnCompDie( i ) -> permadeath: flag dead forever, null the handle, mourn.
 GM_fnCompDie = {GM_COMP_ALIVE set [_this, false]; GM_COMP_OBJ set [_this, objNull]; hint format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]}
 
 ; ===========================================================================
-;  MAIN TICK LOOP
-;  Cost is O(roster) per tick (1 companion in the MVP) and the bodies live in
-;  the player's own group, so this stays trivially inside the AI/group budget
-;  (12 units/group, ~63 groups/side, ~50-100 live AI). No spawning is done away
-;  from the player: companions only ever exist in `group aP`, at the player's
-;  position - inherently distance-cached to the player.
+;  MAIN TICK LOOP - O(roster) per tick; companions only ever exist in the
+;  player's group at the player's position (inherently distance-cached).
 ; ===========================================================================
 #loop
 ~GM_COMP_TICK
@@ -134,11 +95,11 @@ GM_cI = 0
 GM_cObj = GM_COMP_OBJ select GM_cI
 
 ; -- permadeath: we had a body and it is now dead --
-? (not (GM_cObj == objNull)) and (not (alive GM_cObj)) : goto "died"
+? (not (isNull GM_cObj)) and (not (alive GM_cObj)) : goto "died"
 
-; -- alive in the roster but no live body (fresh start, or persistence cleared
-;    handles): (re)create it next to the player and skip progression this tick --
-? GM_cObj == objNull : goto "spawn"
+; -- alive in the roster but no live body (fresh start, or campaign.sqs nulled
+;    the handle after a load): (re)create it next to the player --
+? isNull GM_cObj : goto "spawn"
 
 ; -- KILL XP: rating rose since last sample -> count a kill; resync the sample --
 GM_cRat = rating GM_cObj
@@ -157,7 +118,7 @@ goto "next"
 #promote
 GM_COMP_RANK set [GM_cI, GM_COMP_RANKLADDER select GM_cNi]
 GM_COMP_SKILL set [GM_cI, GM_cNi call GM_fnCompSkillForRank]
-[GM_cI] call GM_fnCompApply
+GM_cI call GM_fnCompApply
 hint format ["%1 promoted to %2.", GM_COMP_NAMES select GM_cI, GM_COMP_RANK select GM_cI]
 goto "next"
 
@@ -167,7 +128,7 @@ GM_cSp = [position aP, 3] call GM_fnRandPosNear
 goto "next"
 
 #died
-[GM_cI] call GM_fnCompDie
+GM_cI call GM_fnCompDie
 goto "next"
 
 #next

@@ -27,6 +27,18 @@ static GameValue GmZoneCount(const GameState* /*state*/)
     return (float)ZoneRegistry::Instance().NZones();
 }
 
+// gmOccupierSide / gmResistanceSide -> the campaign's resolved faction sides
+// (config/new-game selection, remembered by the save)
+static GameValue GmOccupierSide(const GameState* /*state*/)
+{
+    return GameStringType(ZoneRegistry::Instance().OccupierSide());
+}
+
+static GameValue GmResistanceSide(const GameState* /*state*/)
+{
+    return GameStringType(ZoneRegistry::Instance().ResistanceSide());
+}
+
 // gmZone <index> -> 9-field tuple in GM_Z_* order; empty array out of range
 static GameValue GmZone(const GameState* state, GameValuePar oper1)
 {
@@ -150,7 +162,7 @@ static GameValue GmZoneOnEvent(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-// gmFactionTierClass [sideString, warLevel]
+// gmFactionTierClass [sideOrClassName, warLevel]
 static GameValue GmFactionTierClass(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -170,7 +182,7 @@ static GameValue GmFactionTierClass(const GameState* state, GameValuePar oper1)
     return GameStringType(ZoneRegistry::Instance().FactionTierClass(side, (float)array[1]));
 }
 
-// gmFactionValue [sideString, key]
+// gmFactionValue [sideOrClassName, key]
 static GameValue GmFactionValue(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -191,7 +203,7 @@ static GameValue GmFactionValue(const GameState* state, GameValuePar oper1)
     return GameStringType(ZoneRegistry::Instance().FactionValue(side, key));
 }
 
-// gmFactionVehicle [sideString, warLevel]
+// gmFactionVehicle [sideOrClassName, warLevel]
 static GameValue GmFactionVehicle(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -276,6 +288,8 @@ static GameValue GmBreakUndercover(const GameState* /*state*/, GameValuePar oper
 INIT_MODULE(GuerrillaZoneRegistry, 3)
 {
     GGameState.NewNularOp(GameNular(GameScalar, "gmZoneCount", GmZoneCount));
+    GGameState.NewNularOp(GameNular(GameString, "gmOccupierSide", GmOccupierSide));
+    GGameState.NewNularOp(GameNular(GameString, "gmResistanceSide", GmResistanceSide));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmZone", GmZone, GameScalar));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));

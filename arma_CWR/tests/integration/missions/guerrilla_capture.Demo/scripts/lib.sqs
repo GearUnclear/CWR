@@ -1,79 +1,63 @@
 ; ============================================================================
-;  lib.sqs  -  Guerrilla Mode shared helper library
+;  lib.sqs  -  Guerrilla Mode shared helper library (island/faction-agnostic)
 ; ----------------------------------------------------------------------------
-;  Responsibility: define synchronous, reusable helper "functions" as global
-;  code-string values (GM_fn*). Every manager script calls these with
+;  Synchronous helpers as global code values (GM_fn*), called with
 ;      result = [args] call GM_fnXxx
+;  A { ... } literal is a GameString in this evaluator, so every helper stays
+;  a single physical line (SQS is line-oriented). No ~ waits inside (call is
+;  synchronous). GM_tmp* scratch globals are kept over `private` for
+;  consistency with the call-is-non-interruptible pattern the managers rely on.
 ;
-;  DIALECT NOTE (ground truth, verified):
-;    In this evaluator a { ... } literal is a STRING, and the body operands of
-;    call / while / do / then / forEach are GameString
-;    (engine/Evaluator/express.cpp:1132-1149,1188). So `call GM_fn` executes the
-;    string with _this bound to the left operand and RETURNS the value of the
-;    last expression. All helpers below are pure/synchronous (no ~ waits) so
-;    they are safe to `call`.
+;  PRUNED THIS PASS (native/evaluator replacements):
+;    GM_fnDist2D    -> binary `distance` now works on position arrays
+;    GM_fnZoneIndex -> native `gmZoneIndex "<name>"`
+;    GM_fnPickTier  -> native `gmFactionTierClass [side, warLevel]`
 ;
-;  These run as ONE exec'd pass: init.sqs does `[] exec "scripts/lib.sqs"`,
-;  then waits on `@GM_LIB_READY` before launching managers. Because exec is
-;  asynchronous, the GM_LIB_READY handshake at the bottom is load-bearing.
-;
-;  Scratch globals GM_tmp* are used instead of `private` locals (the `private`
-;  keyword is NOT confirmed in this engine). `call` is synchronous and
-;  non-interruptible, so GM_tmp* reuse across helpers is safe (no interleaving).
+;  exec is async: init.sqs (and every manager) gates on @GM_LIB_READY, which
+;  this file sets as its last statement.
 ; ============================================================================
 
 
-; --- distance2D( [posA, posB] ) -> scalar -----------------------------------
-;   posA, posB are [x,y,z]. Confirmed cmds: select, sqrt, ^, - (express.cpp).
-;   (The binary `distance` command only works object-to-object, not on raw
-;    position arrays - GameStateExt.cpp:1233 - so we compute it by hand.)
-GM_fnDist2D = {sqrt( (((_this select 1) select 0) - ((_this select 0) select 0))^2 + (((_this select 1) select 1) - ((_this select 0) select 1))^2 )}
-
-
-; --- randPosNear( [center, radius] ) -> [x,y,z] -----------------------------
-;   Returns a random position in the square of +/- radius around center, z=0.
-;   Confirmed cmds: random (express.cpp:1166), +, -, select.
-;   nearestObject-based road snapping is layered on top of this in spawning.sqs
-;   (loop nearestObject; nearestObjects does NOT exist). This is the fallback.
+; --- randPosNear( [center, radius] ) -> [x,y,0] ------------------------------
+;   Random position in the +/- radius square around center (getPos order).
 GM_fnRandPosNear = {[ ((_this select 0) select 0) + (random (2 * (_this select 1))) - (_this select 1), ((_this select 0) select 1) + (random (2 * (_this select 1))) - (_this select 1), 0 ]}
 
 
 ; --- spawnGroup( [side, unitClass, count, pos] ) -> group --------------------
-;   Generic "spawn a group of N at pos for side". Returns the created group.
-;   Confirmed cmds: createGroup (side->group, GameStateExt.cpp:1180),
-;   createUnit [pos,group,init,skill,rank] (GameStateExtWorld.cpp:237-310),
-;   while {..} do {..}.
-;   NOTE: respects nothing about the 12/group cap by itself - callers that may
-;   exceed MAX_UNITS_PER_GROUP(=12) must split into multiple createGroup calls.
+;   Spawn a group of N at pos for a SIDE VALUE (not a string). Callers that
+;   may exceed the engine's 12/group cap must split into multiple calls.
 GM_fnSpawnGroup = {GM_tmpG = createGroup (_this select 0); GM_tmpI = 0; while {GM_tmpI < (_this select 2)} do {(_this select 1) createUnit [(_this select 3), GM_tmpG, "", 0.5, "PRIVATE"]; GM_tmpI = GM_tmpI + 1}; GM_tmpG}
 
 
-; --- pickSpawnTier( warLevel ) -> unitClass ---------------------------------
-;   Weighted occupier spawn tier gated by War Level. Returns a unit classname.
-;   VERIFY: classnames below are stock OFP/CWA EAST analogs of the confirmed
-;   "SoldierWB". Confirm against the Demo CfgVehicles before relying on them;
-;   swap if the Demo dataset names them differently.
-;   WL1-2 -> basic militia ; WL3-4 -> regular ; WL5+ -> elite/crew.
-GM_fnPickTier = {if (_this < 3) then {"SoldierEB"} else {if (_this < 5) then {"SoldierESoldier"} else {"SoldierECrew"}}}
+; --- sideFromString( sideString ) -> side value ------------------------------
+;   Generic side-string -> side-value conversion (createGroup/createCenter
+;   need the value; gmOccupierSide/gmResistanceSide return strings). Matches
+;   by formatting each engine side nular (a side renders via its enum name:
+;   "WEST"/"EAST"/"GUER"/"CIV" - engine World/Scene/Object.cpp SideNames), so
+;   no side-string literal appears in script code. Unknown input -> civilian.
+GM_fnSideFromString = {GM_tmpSS = [west, east, resistance, civilian]; GM_tmpSV = civilian; GM_tmpSI = 0; while {GM_tmpSI < 4} do {if ((format ["%1", GM_tmpSS select GM_tmpSI]) == _this) then {GM_tmpSV = GM_tmpSS select GM_tmpSI}; GM_tmpSI = GM_tmpSI + 1}; GM_tmpSV}
 
 
-; --- countZonesOwnedBy( ownerString ) -> scalar -----------------------------
-;   Counts zones in GM_ZONES whose owner == the passed side string ("GUER",
-;   "EAST", "NEUTRAL"). Used by escalation.sqs (War Level) and the win check.
-;   Uses the GM_Z_* index constants defined in init.sqs.
-GM_fnCountOwnedBy = {GM_tmpN = 0; GM_tmpI = 0; while {GM_tmpI < (count GM_ZONES)} do {if (((GM_ZONES select GM_tmpI) select GM_Z_OWNER) == _this) then {GM_tmpN = GM_tmpN + 1}; GM_tmpI = GM_tmpI + 1}; GM_tmpN}
+; --- countZonesOwnedBy( ownerString ) -> scalar ------------------------------
+;   Counts zones whose owner tuple field equals the passed side string.
+;   Reads the native registry via gmZoneCount/gmZone.
+GM_fnCountOwnedBy = {GM_tmpN = 0; GM_tmpI = 0; while {GM_tmpI < gmZoneCount} do {if (((gmZone GM_tmpI) select GM_Z_OWNER) == _this) then {GM_tmpN = GM_tmpN + 1}; GM_tmpI = GM_tmpI + 1}; GM_tmpN}
 
 
-; --- zoneIndexByName( name ) -> scalar (or -1) ------------------------------
-;   Linear lookup of a zone record's index by its name field.
-GM_fnZoneIndex = {GM_tmpR = -1; GM_tmpI = 0; while {GM_tmpI < (count GM_ZONES)} do {if (((GM_ZONES select GM_tmpI) select GM_Z_NAME) == _this) then {GM_tmpR = GM_tmpI}; GM_tmpI = GM_tmpI + 1}; GM_tmpR}
+; --- zoneOfType( typeString ) -> first zone index of that type (or -1) -------
+;   Anchor lookup, e.g. "CAMP" call GM_fnZoneOfType for the recruiter camp.
+GM_fnZoneOfType = {GM_tmpR = -1; GM_tmpI = 0; while {GM_tmpI < gmZoneCount} do {if ((GM_tmpR < 0) and (((gmZone GM_tmpI) select GM_Z_TYPE) == _this)) then {GM_tmpR = GM_tmpI}; GM_tmpI = GM_tmpI + 1}; GM_tmpR}
 
 
-; --- bumpGearTally( [classname, amount] ) -> newCount -----------------------
-;   Increments the looted-item tally for a classname (parallel arrays
-;   GM_GEAR_ITEMS / GM_GEAR_COUNT). When the count crosses GM_GEAR_THRESHOLD it
-;   appends the classname to GM_GEAR_UNLOCKED (faction-wide infinite unlock).
-;   Confirmed cmds: find, set, + on arrays (express.cpp:1120,1130,1135), count.
+; --- factionNum( [sideString, key, default] ) -> scalar ----------------------
+;   Numeric faction descriptor value. gmFactionValue returns the raw config
+;   text ("" when the key is missing); compile+call turns "3" into 3.
+GM_fnFactionNum = {GM_tmpFS = gmFactionValue [_this select 0, _this select 1]; if (GM_tmpFS == "") then {_this select 2} else {call compile GM_tmpFS}}
+
+
+; --- bumpGearTally( [classname, amount] ) -> newCount -------------------------
+;   THE sole writer of GM_GEAR_ITEMS/COUNT/UNLOCKED (parallel arrays). Crossing
+;   GM_GEAR_THRESHOLD appends the classname to the permanent unlock set.
 GM_fnBumpGear = {GM_tmpI = GM_GEAR_ITEMS find (_this select 0); if (GM_tmpI < 0) then {GM_GEAR_ITEMS = GM_GEAR_ITEMS + [(_this select 0)]; GM_GEAR_COUNT = GM_GEAR_COUNT + [0]; GM_tmpI = (count GM_GEAR_ITEMS) - 1}; GM_GEAR_COUNT set [GM_tmpI, (GM_GEAR_COUNT select GM_tmpI) + (_this select 1)]; if (((GM_GEAR_COUNT select GM_tmpI) >= GM_GEAR_THRESHOLD) and (not ((_this select 0) in GM_GEAR_UNLOCKED))) then {GM_GEAR_UNLOCKED = GM_GEAR_UNLOCKED + [(_this select 0)]}; GM_GEAR_COUNT select GM_tmpI}
 
 

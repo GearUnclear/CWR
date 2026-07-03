@@ -1,78 +1,78 @@
 ; ============================================================================
 ;  recruit.sqs  -  action-menu command layer: recruit / specialist / train.
 ; ----------------------------------------------------------------------------
-;  OWNS (exclusive write): GM_PLAYER_GROUPS (transient), the player addAction
-;        IDs (gmAct*), and the recruit-request queue (gmReq*). Debits
-;        gmResources / gmManpower via the "-" direction only (economy.sqs owns
-;        the "+" direction; the split avoids any same-direction collision).
-;        Also owns its own GM_RECRUIT_* / GM_*_COST_* / GM_GROUP_CAP consts.
-;  READS: GM_ZONES (Camp position/type), gmWarLevel (train skill cap), player.
+;  Flow UNCHANGED from Phase 1: proximity-gated Camp addAction menu; the thin
+;  recruit_action.sqs dispatcher enqueues (gmReqId/gmReqPending); this loop is
+;  the single writer that debits and spawns.
 ;
-;  UI: addAction on the player (GameStateExt.cpp:1361), gated by proximity to
-;  the CAMP zone (added on approach, removed on leave) - NOT a dialog. Each
-;  action points at the thin dispatcher scripts/recruit_action.sqs, whose only
-;  job is to ENQUEUE a request (gmReqId/gmReqPending). The actual state mutation
-;  (GM_PLAYER_GROUPS, the scalar debits, createUnit) happens HERE in the loop so
-;  this file stays the single writer of those globals.
+;  WHAT CHANGED (Phase 1.5):
+;    * Camp anchor = the first zone of type "CAMP" from the native registry
+;      ("CAMP" call GM_fnZoneOfType) - no zone-name literal.
+;    * Recruit classes come from the resistance faction descriptor
+;      (recruitFighter / recruitSpecialist via gmFactionValue).
+;    * Proximity uses the binary `distance` on position arrays.
 ;
-;  Recruit  : spend 1 HR -> createUnit a fighter into the player's command,
-;             respecting the 12/group cap (overflow opens a new createGroup and
-;             appends it to GM_PLAYER_GROUPS).
-;  Specialist: spend 1 HR + Resources -> a higher-skill specialist class.
-;  Train     : spend Resources -> setSkill bump on the player's squad, capped
-;             by War Level.
-;
-;  DIALECT: SQS. Group-pick + createUnit and the train sweep are each done in a
-;  single evaluated line (while/do, no `~`) so they are atomic w.r.t. other
-;  managers' ticks. Confirmed cmds only: addAction, removeAction, createGroup,
-;  createUnit, group, units, count, side, getPos, skill, setSkill, select, +,
-;  -, <, >=, ==, and/not/or, if/then/else, while/do, hint, format, and the
-;  GM_fnDist2D / GM_fnZoneIndex helpers from lib.sqs.
+;  OWNS: GM_PLAYER_GROUPS, the action ids (gmAct*), the request queue
+;        (gmReq*); debits gmResources/gmManpower ("-" direction only;
+;        economy.sqs owns "+"). Also its GM_RECRUIT_*/GM_*_COST_* consts.
+;  READS: gmZone tuples (Camp anchor), gmWarLevel (train cap),
+;        gmResistanceSide + faction recruit keys, GM_fnEquipFromUnlocked.
 ; ============================================================================
 
 @GM_LIB_READY
 
-; ---- tunables (recruit-owned consts) ---------------------------------------
-GM_RECRUIT_POLL    = 1       ; seconds between proximity / request polls
-GM_RECRUIT_RADIUS  = 30      ; how close to the Camp the menu appears (metres)
-GM_GROUP_CAP       = 12      ; engine MAX_UNITS_PER_GROUP - overflow to new group
-GM_RECRUIT_COST_HR = 1       ; fighter: manpower cost
-GM_RECRUIT_COST_R  = 0       ; fighter: resource cost
-GM_SPEC_COST_HR    = 1       ; specialist: manpower cost
-GM_SPEC_COST_R     = 40      ; specialist: resource cost
-GM_TRAIN_COST_R    = 30      ; squad-training resource cost per use
-GM_TRAIN_STEP      = 0.1     ; skill added per training use
-GM_RECRUIT_SKILL   = 0.35    ; starting skill of a basic fighter
-GM_SPEC_SKILL      = 0.6     ; starting skill of a specialist
-; VERIFY: GUER (Resistance) classnames vs the Demo CfgVehicles. "SoldierGB" is
-; the stock CWA Resistance rifleman (the player's own class in mission.sqm). If
-; the Demo dataset lacks a distinct MG class, fall back GM_RECRUIT_SPEC to
-; "SoldierGB" - never flip the recruits to WEST (the GUER-vs-EAST model holds).
-GM_RECRUIT_FIGHTER = "SoldierGB"
-GM_RECRUIT_SPEC    = "SoldierGMG"
+; ---- tunables (recruit-owned consts) -----------------------------------------
+;   GM_RECRUIT_POLL    seconds between proximity / request polls
+;   GM_RECRUIT_RADIUS  how close to the Camp the menu appears (metres)
+;   GM_GROUP_CAP       engine MAX_UNITS_PER_GROUP - overflow to new group
+;   GM_RECRUIT_COST_*  fighter: manpower / resource cost
+;   GM_SPEC_COST_*     specialist: manpower / resource cost
+;   GM_TRAIN_COST_R    squad-training resource cost per use
+;   GM_TRAIN_STEP      skill added per training use
+;   GM_RECRUIT_SKILL   starting skill of a basic fighter
+;   GM_SPEC_SKILL      starting skill of a specialist
+GM_RECRUIT_POLL    = 1
+GM_RECRUIT_RADIUS  = 30
+GM_GROUP_CAP       = 12
+GM_RECRUIT_COST_HR = 1
+GM_RECRUIT_COST_R  = 0
+GM_SPEC_COST_HR    = 1
+GM_SPEC_COST_R     = 40
+GM_TRAIN_COST_R    = 30
+GM_TRAIN_STEP      = 0.1
+GM_RECRUIT_SKILL   = 0.35
+GM_SPEC_SKILL      = 0.6
+GM_RECRUIT_FIGHTER = gmFactionValue [gmResistanceSide, "recruitFighter"]
+GM_RECRUIT_SPEC    = gmFactionValue [gmResistanceSide, "recruitSpecialist"]
 
-; ---- mutable state ---------------------------------------------------------
-gmRecruitActive = false      ; is the addAction menu currently mounted?
+; ---- mutable state -------------------------------------------------------------
+;   gmRecruitActive  is the addAction menu currently mounted?
+;   gmReqPending     set true by recruit_action.sqs dispatcher
+;   gmReqId          which action id fired
+;   gmReqCaller      who pulled the action (reserved for gear use)
+gmRecruitActive = false
 gmActRecruit    = -1
 gmActSpec       = -1
 gmActTrain      = -1
-gmReqPending    = false       ; set true by recruit_action.sqs dispatcher
-gmReqId         = -1          ; which action id fired
-gmReqCaller     = aP          ; who pulled the action (reserved for gear use)
+gmReqPending    = false
+gmReqId         = -1
+gmReqCaller     = aP
 
-; ---- locate the Camp (the recruiter anchor) --------------------------------
-gmCampIdx = "Camp" call GM_fnZoneIndex
-gmCampPos = (GM_ZONES select gmCampIdx) select GM_Z_POS
+; ---- locate the Camp (the recruiter anchor): first zone of type CAMP ---------
+gmCampIdx = "CAMP" call GM_fnZoneOfType
+? gmCampIdx < 0 : hint "GM ERROR: no CAMP zone in CfgGuerrillaZones - recruit menu disabled."
+? gmCampIdx < 0 : exit
+gmCampPos = (gmZone gmCampIdx) select GM_Z_POS
 
 #loop
 ~GM_RECRUIT_POLL
-gmRecDist = [getPos aP, gmCampPos] call GM_fnDist2D
+gmRecDist = (getPos aP) distance gmCampPos
 ? (gmRecDist < GM_RECRUIT_RADIUS) and (not gmRecruitActive) : goto "addMenu"
 ? (gmRecDist >= GM_RECRUIT_RADIUS) and gmRecruitActive : goto "delMenu"
 ? gmReqPending : goto "request"
 goto "loop"
 
-; ---- mount the Camp menu ---------------------------------------------------
+; ---- mount the Camp menu ------------------------------------------------------
 #addMenu
 gmActRecruit = aP addAction ["Recruit Fighter (1 HR)", "scripts/recruit_action.sqs"]
 gmActSpec = aP addAction ["Recruit Specialist (1 HR, 40 R)", "scripts/recruit_action.sqs"]
@@ -80,7 +80,7 @@ gmActTrain = aP addAction ["Train Squad (+skill, 30 R)", "scripts/recruit_action
 gmRecruitActive = true
 goto "loop"
 
-; ---- tear the Camp menu down ----------------------------------------------
+; ---- tear the Camp menu down --------------------------------------------------
 #delMenu
 aP removeAction gmActRecruit
 aP removeAction gmActSpec
@@ -91,7 +91,7 @@ gmActTrain = -1
 gmRecruitActive = false
 goto "loop"
 
-; ---- dispatch a queued request by action id --------------------------------
+; ---- dispatch a queued request by action id -----------------------------------
 #request
 gmReqPending = false
 ? gmReqId == gmActRecruit : goto "doRecruit"
@@ -99,7 +99,7 @@ gmReqPending = false
 ? gmReqId == gmActTrain : goto "doTrain"
 goto "loop"
 
-; ---- recruit a basic fighter ----------------------------------------------
+; ---- recruit a basic fighter --------------------------------------------------
 #doRecruit
 ? gmManpower < GM_RECRUIT_COST_HR : hint "Not enough Manpower (need 1 HR)."
 ? gmManpower < GM_RECRUIT_COST_HR : goto "loop"
@@ -109,9 +109,10 @@ gmRecClass = GM_RECRUIT_FIGHTER
 gmRecSkill = GM_RECRUIT_SKILL
 gmRecCostHR = GM_RECRUIT_COST_HR
 gmRecCostR = GM_RECRUIT_COST_R
+gmRecRole  = "RIFLEMAN"
 goto "spawnUnit"
 
-; ---- recruit a specialist --------------------------------------------------
+; ---- recruit a specialist ------------------------------------------------------
 #doSpec
 ? gmManpower < GM_SPEC_COST_HR : hint "Not enough Manpower (need 1 HR)."
 ? gmManpower < GM_SPEC_COST_HR : goto "loop"
@@ -121,22 +122,25 @@ gmRecClass = GM_RECRUIT_SPEC
 gmRecSkill = GM_SPEC_SKILL
 gmRecCostHR = GM_SPEC_COST_HR
 gmRecCostR = GM_SPEC_COST_R
+gmRecRole  = "MG"
 goto "spawnUnit"
 
-; ---- shared spawn body: pick a group with room (12-cap), else new group ----
+; ---- shared spawn body: pick a group with room (12-cap), else new group -------
 ;  One atomic evaluated line: scan [group aP] + GM_PLAYER_GROUPS for the first
-;  group under the 12-cap; if all are full, createGroup (side aP) and append it
-;  to GM_PLAYER_GROUPS (the overflow contract). createUnit returns NOTHING in
-;  this engine (GameStateExtWorld.cpp:237) so we track the GROUP, never a unit
-;  handle - matches the "persist IDs not handles" rule.
+;  group under the cap; if all full, createGroup (side aP) and append (the
+;  overflow contract). createUnit returns NOTHING, so the new handle is
+;  captured by diffing `units` before/after (same idiom as companions.sqs).
 #spawnUnit
-gmRecList = [group aP] + GM_PLAYER_GROUPS; gmRecI = 0; gmRecPick = -1; while {gmRecI < (count gmRecList)} do {if ((gmRecPick < 0) and ((count units (gmRecList select gmRecI)) < GM_GROUP_CAP)) then {gmRecPick = gmRecI}; gmRecI = gmRecI + 1}; if (gmRecPick < 0) then {gmRecGrp = createGroup (side aP); GM_PLAYER_GROUPS = GM_PLAYER_GROUPS + [gmRecGrp]} else {gmRecGrp = gmRecList select gmRecPick}; gmRecClass createUnit [getPos aP, gmRecGrp, "", gmRecSkill, "PRIVATE"]
+gmRecList = [group aP] + GM_PLAYER_GROUPS; gmRecI = 0; gmRecPick = -1; while {gmRecI < (count gmRecList)} do {if ((gmRecPick < 0) and ((count units (gmRecList select gmRecI)) < GM_GROUP_CAP)) then {gmRecPick = gmRecI}; gmRecI = gmRecI + 1}; if (gmRecPick < 0) then {gmRecGrp = createGroup (side aP); GM_PLAYER_GROUPS = GM_PLAYER_GROUPS + [gmRecGrp]} else {gmRecGrp = gmRecList select gmRecPick}; gmRecPre = units gmRecGrp; gmRecClass createUnit [getPos aP, gmRecGrp, "", gmRecSkill, "PRIVATE"]; gmRecNew = (units gmRecGrp) - gmRecPre; gmNewUnit = objNull; if ((count gmRecNew) > 0) then {gmNewUnit = gmRecNew select 0}
+; kit the new fighter from role-appropriate unlocked gear (loot.sqs PUBLIC
+; helper); falls back to the base kit until the role weapon is unlocked.
+? not (isNull gmNewUnit) : [gmNewUnit, gmRecRole] call GM_fnEquipFromUnlocked
 gmManpower = gmManpower - gmRecCostHR
 gmResources = gmResources - gmRecCostR
 hint format ["Recruited %1.\nManpower %2 HR | Treasury %3 R", gmRecClass, gmManpower, gmResources]
 goto "loop"
 
-; ---- train the player's squad (skill bump, War-Level capped) ---------------
+; ---- train the player's squad (skill bump, War-Level capped) -------------------
 #doTrain
 ? gmResources < GM_TRAIN_COST_R : hint "Not enough Resources (need 30 R)."
 ? gmResources < GM_TRAIN_COST_R : goto "loop"

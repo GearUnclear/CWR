@@ -1,0 +1,56 @@
+; ============================================================================
+;  capture.sqs  -  reaction to the native "captured" zone event.
+; ----------------------------------------------------------------------------
+;  The ENGINE now owns the capture decision itself (ZoneRegistry::EvaluateTick:
+;  military clear->flip, CITY support accrual/flip, heat spike, income tap,
+;  marker recolor). What stays scripted is the REACTION:
+;    * spawn a friendly holding garrison on a captured military zone
+;      (holdCount x holdClass from the resistance faction descriptor);
+;    * celebrate (hint).
+;
+;  EVENT-QUEUE CONSUMER (pattern documented in init.sqs): the one-line native
+;  handler appends [zoneIndex, zoneName, ownerString] to gmEvtCaptured; this
+;  manager drain-swaps the queue atomically (single evaluated SQS line) and
+;  reacts inside its own ~ loop.
+;
+;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed (consumer side),
+;        GM_HOLD_* tunables. Spawned hold groups are fire-and-forget (the old
+;        GM_HOLD_GROUPS array was never read by anything; dropped).
+;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
+;        aP (spawn side = side aP: the player IS the resistance).
+;
+;  gmEvtSupport / gmEvtRevealed are drained here without a reaction: a CITY
+;  support flip also fires "captured" (one "liberated" hint, matching the old
+;  zones.sqs), and reveal handling (marker repaint) is fully native.
+; ============================================================================
+@GM_LIB_READY
+
+; ---- tunables: hold-garrison class+size come from the resistance descriptor -
+GM_HOLD_CLASS = gmFactionValue [gmResistanceSide, "holdClass"]
+GM_HOLD_COUNT = [gmResistanceSide, "holdCount", 3] call GM_fnFactionNum
+GM_CAP_TICK   = 2
+
+#loop
+~GM_CAP_TICK
+
+; ---- atomic drain-swap (one line = one evaluated unit; see init.sqs) --------
+GM_cBatch = gmEvtCaptured + []; gmEvtCaptured = []; gmEvtSupport = []; gmEvtRevealed = []
+
+GM_cI = 0
+#cev
+? GM_cI >= (count GM_cBatch) : goto "cdone"
+GM_cEv  = GM_cBatch select GM_cI
+GM_cIdx = GM_cEv select 0
+GM_cRec = gmZone GM_cIdx
+
+; military zones get a live holding garrison; cities hold themselves (support)
+? ((GM_cRec select GM_Z_TYPE) == "CITY") or (GM_HOLD_CLASS == "") : goto "cnotify"
+GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+
+#cnotify
+hint format ["%1 liberated", GM_cEv select 1]
+GM_cI = GM_cI + 1
+goto "cev"
+#cdone
+
+goto "loop"

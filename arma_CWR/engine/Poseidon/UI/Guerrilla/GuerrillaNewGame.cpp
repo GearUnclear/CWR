@@ -80,11 +80,7 @@ std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const 
     {
         return matching;
     }
-    if (!all.empty())
-    {
-        return all;
-    }
-    return {RString(side)};
+    return all;
 }
 
 GuerrillaNewGame::GuerrillaNewGame(ControlsContainer* parent) : Display(parent)
@@ -217,7 +213,11 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     const bool occupier = idc == kIdcOccupier;
     const std::vector<RString>& list = occupier ? _occupiers : _resistances;
     const int sel = occupier ? _occupierSel : _resistanceSel;
-    const char* selected = (sel >= 0 && sel < (int)list.size()) ? (const char*)list[sel] : "?";
+    // An empty list means no CfgGuerrillaFactions was found — nothing will be
+    // published and the mission's defaultOccupier/defaultResistance keys (or
+    // the engine's EAST/GUER built-ins) decide, so say so instead of showing
+    // a side name the mission may override.
+    const char* selected = (sel >= 0 && sel < (int)list.size()) ? (const char*)list[sel] : "(mission default)";
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "%s: %s", occupier ? "OCCUPIER" : "RESISTANCE", selected);
     if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
@@ -319,7 +319,12 @@ RString GuerrillaNewGame::SelectedOccupier() const
     {
         return _occupiers[_occupierSel];
     }
-    return kGuerrillaDefaultOccupier;
+    // No real faction config was offered — return an EMPTY selection so the
+    // launch path publishes nothing and the mission's own
+    // defaultOccupier/defaultResistance config keys keep precedence
+    // (ZoneRegistry::LoadFromParams). Publishing the built-in "EAST" here
+    // used to match a mission faction by side and silently override them.
+    return RString();
 }
 
 RString GuerrillaNewGame::SelectedResistance() const
@@ -328,7 +333,7 @@ RString GuerrillaNewGame::SelectedResistance() const
     {
         return _resistances[_resistanceSel];
     }
-    return kGuerrillaDefaultResistance;
+    return RString(); // see SelectedOccupier
 }
 
 void __cdecl CreateDisplayGuerrilla(ControlsContainer* parent)

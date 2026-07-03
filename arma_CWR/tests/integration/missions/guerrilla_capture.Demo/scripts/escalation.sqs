@@ -1,55 +1,32 @@
 ; ============================================================================
-;  escalation.sqs  -  Enemy escalation: War Level (slow) + per-region Heat (fast)
+;  escalation.sqs  -  War Level (slow) + per-region Heat decay (fast)
 ; ----------------------------------------------------------------------------
-;  Two timescales, one manager (design 13-guerrilla-mode.md:165-170):
+;  Two timescales, one manager - formulas UNCHANGED from Phase 1:
 ;
-;   * WAR LEVEL (gmWarLevel, 1..10, SLOW): scales with the % of map points the
-;     player holds. Recomputed on the slow sub-tick from GM_ZONES owners. It is
-;     the single scalar the spawn table reads: spawning.sqs feeds gmWarLevel into
-;     `warLevel call GM_fnPickTier`, which crosses cleanly-separated tiers
-;     (WL<3 militia -> WL3-4 regulars -> WL5+ elite). For the Phase-1 MVP the
-;     ladder below tops out mid-range so the TWO lower tiers are the ones the
-;     player actually exercises while flipping the three seed zones.
+;   * WAR LEVEL (gmWarLevel, 1..10, SLOW): the % of zones the resistance owns
+;     drives an integer ladder. The native GarrisonCache and qrf.sqs read the
+;     scalar (spawn tiers now come from the faction descriptor via
+;     gmFactionTierClass, thresholds in config - no script tier table).
 ;
-;   * HEAT (GM_Z_HEAT per zone, 0..100, FAST): spikes are RAISED only by
-;     zones.sqs / alert.sqs (contact, kills, blown cover). This manager only
-;     DECAYS it, by gmHeatDecay each fast tick, and ONLY while the region is
-;     lying low (alert state GREEN) - the per-region "cooldown" that keeps the
-;     island conquerable. While a region is actively alerted (YELLOW/RED) its
-;     Heat is held (no decay) so pressure persists until the player breaks contact.
+;   * HEAT (per-zone, 0..100, FAST): spikes are raised NATIVELY (capture,
+;     alert edges, cover break). This manager only DECAYS, and only while the
+;     zone is lying low (native alert state GREEN). The OWNS-table direction
+;     split survives the rewrite as an ENGINE CONTRACT: there is no direct
+;     "heat" setter - scripts can only gmZoneSet "heatRaise" (+=, clamped) or
+;     "heatDecay" (-=, clamped), and this file uses only the decay verb.
 ;
-;  OWNS (exclusive write):
-;     gmWarLevel              ; slow escalation scalar
-;     GM_Z_HEAT  (DECAY ONLY) ; raisers are zones.sqs / alert.sqs (directional split)
-;     gmUndercover            ; cover ESTABLISH (true); alert.sqs owns the BREAK (false)
-;     gmUndercoverDetect      ; derived undercover-detection scalar (read by alert.sqs)
-;     gmEsc_*                 ; escalation-private transient loop scratch
-;  READS:
-;     GM_ZONES owners (via "GUER" call GM_fnCountOwnedBy), gmHeatDecay,
-;     GM_ALERT_STATE (index-aligned to GM_ZONES; written by alert.sqs).
-;
-;  DIALECT: SQS. ~N waits + #label/goto "loop" (ScriptGoto, GameStateExt.cpp:1056)
-;  for the persistent tick loop. All inner sweeps are wait-free single-line
-;  while {..} do {..} (express.cpp body strings) so they run synchronously.
-;  Confirmed cmds used: count, select, set, +, -, <, ==, if/then/else (express.cpp),
-;  setCaptive (GameStateExt.cpp:1218), player (GameStateExt.cpp:855),
-;  call GM_fnCountOwnedBy (lib.sqs).
+;  OWNS: gmWarLevel, heat DECAY direction, gmUndercoverDetect, gmEsc_* scratch.
+;  READS: gmZoneCount/gmZone owners, gmResistanceSide, gmZoneAlert, gmHeatDecay.
+;  NOTE: with seedCities=1 the ladder denominator includes every seeded town,
+;  so full War Level now genuinely means winning over the island.
 ; ============================================================================
 @GM_LIB_READY
 
-; ---- tunables (escalation-local; not persisted) ---------------------------
-gmEsc_slowEvery = 6      ; recompute War Level once per 6 fast ticks (~60s)
-gmEsc_slow      = 0      ; fast-tick counter toward the next slow recompute
-
-; ---- undercover: establish the breakable cover flag ONCE at boot ----------
-;  Disguise model (design 13:119): undercover = setCaptive true (occupier treats
-;  the player as a non-target). This manager only ESTABLISHES cover; alert.sqs
-;  BREAKS it (gmUndercover = false; aP setCaptive false) on weapon-select / fire /
-;  roadblock fail. gmUndercoverDetect (0..1) scales how easily a break is noticed
-;  and rises with War Level (design 13:169 "higher undercover-detection").
-gmUndercover = true
-aP setCaptive true
-gmUndercoverDetect = gmWarLevel / 10
+; ---- tunables (escalation-local; not persisted) ------------------------------
+;   gmEsc_slowEvery  recompute War Level once per 6 fast ticks (~60s)
+;   gmEsc_slow       fast-tick counter toward the next slow recompute
+gmEsc_slowEvery = 6
+gmEsc_slow      = 0
 
 ; ============================================================================
 ;  MAIN LOOP  (fast tick = Heat decay; slow sub-tick = War Level recompute)
@@ -57,30 +34,24 @@ gmUndercoverDetect = gmWarLevel / 10
 #loop
 ~10
 
-; ---- FAST: per-region Heat decay, gated on "lying low" (GREEN) -------------
-;  For each zone: if its alert state is GREEN (0) OR no alert row exists yet,
-;  bleed GM_Z_HEAT down by gmHeatDecay and clamp at 0. While YELLOW/RED, hold.
-;  (GM_ZONES select i) is the live record; `set` mutates it in place - same
-;  pattern lib.sqs/GM_fnBumpGear uses on GM_GEAR_COUNT.
+; ---- FAST: per-zone Heat decay, gated on "lying low" (native GREEN) ----------
 gmEsc_i = 0
-while {gmEsc_i < (count GM_ZONES)} do {gmEsc_z = GM_ZONES select gmEsc_i; gmEsc_st = 0; if (gmEsc_i < (count GM_ALERT_STATE)) then {gmEsc_st = GM_ALERT_STATE select gmEsc_i}; if (gmEsc_st == 0) then {gmEsc_h = (gmEsc_z select GM_Z_HEAT) - gmHeatDecay; if (gmEsc_h < 0) then {gmEsc_h = 0}; gmEsc_z set [GM_Z_HEAT, gmEsc_h]}; gmEsc_i = gmEsc_i + 1}
+while {gmEsc_i < gmZoneCount} do {if ((gmZoneAlert gmEsc_i) == 0) then {gmZoneSet [gmEsc_i, "heatDecay", gmHeatDecay]}; gmEsc_i = gmEsc_i + 1}
 
-; ---- SLOW: recompute War Level every gmEsc_slowEvery fast ticks ------------
+; ---- SLOW: recompute War Level every gmEsc_slowEvery fast ticks --------------
 gmEsc_slow = gmEsc_slow + 1
 ?(gmEsc_slow < gmEsc_slowEvery): goto "loop"
 gmEsc_slow = 0
 
-; % of map points held by the player (GUER). count GM_ZONES is the denominator;
-; held is exact via the confirmed lib helper. pct stays 0..100.
-gmEsc_held  = "GUER" call GM_fnCountOwnedBy
-gmEsc_total = count GM_ZONES
+; % of zones held by the resistance
+gmEsc_held  = gmResistanceSide call GM_fnCountOwnedBy
+gmEsc_total = gmZoneCount
 gmEsc_pct   = 0
 if (gmEsc_total > 0) then {gmEsc_pct = (gmEsc_held * 100) / gmEsc_total}
 
-; Integer War Level ladder (no round/floor command exists in this engine, so an
-; ascending if/then ladder picks the highest band reached). Crosses the
-; GM_fnPickTier tier-2 boundary (WL>=3) at 40% held, tier-3 (WL>=5) at 70%.
-; Phase-1 caps at 6: the full 1..10 span opens when more zones are added.
+; Integer War Level ladder (ascending if/then picks the highest band reached).
+; Crosses the faction tierThresholds tier-2 boundary (WL>=3) at 40% held,
+; tier-3 (WL>=5) at 70%. Phase-1 caps at 6.
 gmWarLevel = 1
 if (gmEsc_pct >= 20) then {gmWarLevel = 2}
 if (gmEsc_pct >= 40) then {gmWarLevel = 3}

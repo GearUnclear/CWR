@@ -140,20 +140,37 @@ using Poseidon::GWorld;
 namespace
 {
 // Isolated test-mission staging: --test-mission copies the mission into
-// TempDir/mission-smoke/<rand>/Missions/<name>/ and loads it from there, so the
+// TempDir/mission-smoke/<key>/Missions/<name>/ and loads it from there, so the
 // game never writes a Missions/ tree into the (shared/read-only) game dir. The
 // staged copy is removed on clean exit (RunMainLoop).
+//
+// <key> is a DETERMINISTIC hash of the absolute source path, not a random
+// token: a savegame embeds the staged mission directory (World::Serialize
+// "directory"), and cross-process save/load tests (tri .seq phases sharing one
+// POSEIDON_TEMP_DIR) reload that save from a FRESH boot of the same mission -
+// the re-staged copy must land on the exact path the save references or the
+// load's ParseMission finds nothing. Instance isolation is unaffected under
+// the tri runner because each non-seq test gets its own TempDir.
 std::filesystem::path s_testMissionStageRoot;
 
-std::filesystem::path BuildIsolatedMissionStageRoot()
+std::filesystem::path BuildIsolatedMissionStageRoot(const std::filesystem::path& srcPath)
 {
     namespace fs = std::filesystem;
     fs::path tempRoot = fs::path(GamePaths::Instance().TempDir()) / "mission-smoke";
     std::error_code ec;
     fs::create_directories(tempRoot, ec);
-    std::random_device rd;
+    // FNV-1a over the normalized absolute source path (stable across boots)
+    std::error_code absEc;
+    fs::path abs = fs::absolute(srcPath, absEc);
+    std::string keySource = (absEc ? srcPath : abs).lexically_normal().generic_string();
+    unsigned long long h = 1469598103934665603ULL;
+    for (unsigned char c : keySource)
+    {
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
     char suffix[17];
-    snprintf(suffix, sizeof(suffix), "%08x%08x", rd(), rd());
+    snprintf(suffix, sizeof(suffix), "%016llx", h);
     return tempRoot / suffix;
 }
 
@@ -168,7 +185,7 @@ std::string StageTestMissionForGame(const std::string& testMission)
     if (!fs::exists(srcPath, ec) || ec)
         return testMission;
 
-    fs::path stageRoot = BuildIsolatedMissionStageRoot();
+    fs::path stageRoot = BuildIsolatedMissionStageRoot(srcPath);
     fs::path missionsDir = stageRoot / GameDirs::Missions;
     fs::create_directories(missionsDir, ec);
 

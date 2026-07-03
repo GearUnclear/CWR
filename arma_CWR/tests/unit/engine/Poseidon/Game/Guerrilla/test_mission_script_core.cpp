@@ -1,0 +1,145 @@
+// Guerrilla Mode shared-script-core parity (issue #3 exit criterion).
+//
+// The mode's island-agnostic logic lives in ONE canonical place:
+//     guerrilla-mode/mission/Guerrilla.Demo/{init.sqs, scripts/*}
+// Every other Guerrilla mission - the full-CWA integration-test missions
+// (tests/integration/missions/guerrilla_native.*) and the Demo-data test
+// missions (guerrilla_capture.Demo / guerrilla_persist.Demo) - must carry a
+// BYTE-IDENTICAL copy of that core; only description.ext (island + faction
+// data) and mission.sqm (player start) may differ per island.
+//
+// This test mechanically enforces the contract: it walks every matching
+// mission directory and diffs init.sqs plus the full scripts/ file set
+// against the canonical copy.  A fix to the core therefore goes into the
+// canonical mission first and is re-copied - divergent copies fail here.
+//
+// Repo root discovery uses the TESTS_ROOT_DIR compile definition
+// (${CMAKE_SOURCE_DIR}/tests, see tests/unit/engine/Poseidon/CMakeLists.txt),
+// the same idiom as the Graphics audit tests.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+namespace
+{
+
+namespace fs = std::filesystem;
+
+fs::path RepoRoot()
+{
+    // TESTS_ROOT_DIR = <repo>/tests
+    return fs::path(TESTS_ROOT_DIR).parent_path();
+}
+
+std::string ReadBytes(const fs::path& p)
+{
+    std::ifstream in(p, std::ios::binary);
+    REQUIRE(in.good());
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// sorted list of regular-file names directly inside dir (no recursion:
+// scripts/ is flat by design)
+std::vector<std::string> ListFileNames(const fs::path& dir)
+{
+    std::vector<std::string> names;
+    for (const auto& entry : fs::directory_iterator(dir))
+    {
+        if (entry.is_regular_file())
+        {
+            names.push_back(entry.path().filename().string());
+        }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+// mission dirs whose name starts with prefix, directly under parent
+std::vector<fs::path> MissionDirsMatching(const fs::path& parent, const std::string& prefix)
+{
+    std::vector<fs::path> dirs;
+    if (!fs::exists(parent))
+    {
+        return dirs;
+    }
+    for (const auto& entry : fs::directory_iterator(parent))
+    {
+        if (!entry.is_directory())
+        {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix, 0) == 0)
+        {
+            dirs.push_back(entry.path());
+        }
+    }
+    std::sort(dirs.begin(), dirs.end());
+    return dirs;
+}
+
+void RequireSameFile(const fs::path& canonical, const fs::path& copy)
+{
+    INFO("canonical: " << canonical.string());
+    INFO("copy:      " << copy.string());
+    REQUIRE(fs::exists(copy));
+    REQUIRE(ReadBytes(canonical) == ReadBytes(copy));
+}
+
+} // namespace
+
+TEST_CASE("Guerrilla missions share a byte-identical script core", "[guerrilla][missions]")
+{
+    const fs::path repo = RepoRoot();
+    const fs::path canonical = repo / "guerrilla-mode" / "mission" / "Guerrilla.Demo";
+    REQUIRE(fs::exists(canonical / "init.sqs"));
+    REQUIRE(fs::exists(canonical / "scripts"));
+
+    const std::vector<std::string> canonicalScripts = ListFileNames(canonical / "scripts");
+    REQUIRE(!canonicalScripts.empty());
+
+    // every mission that must carry the shared core
+    std::vector<fs::path> missions;
+    for (const fs::path& dir : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Guerrilla."))
+    {
+        missions.push_back(dir);
+    }
+    const fs::path testMissions = repo / "tests" / "integration" / "missions";
+    for (const fs::path& dir : MissionDirsMatching(testMissions, "guerrilla_native."))
+    {
+        missions.push_back(dir);
+    }
+    missions.push_back(testMissions / "guerrilla_capture.Demo");
+    missions.push_back(testMissions / "guerrilla_persist.Demo");
+
+    // the canonical mission itself is in the walk (a trivially green diff);
+    // at minimum the two .Demo test missions and one guerrilla_native.* copy
+    // must exist alongside it
+    REQUIRE(missions.size() >= 4);
+
+    for (const fs::path& mission : missions)
+    {
+        INFO("mission: " << mission.string());
+        REQUIRE(fs::exists(mission));
+
+        // init.sqs byte-identical
+        RequireSameFile(canonical / "init.sqs", mission / "init.sqs");
+
+        // scripts/: exactly the same file SET (nothing added, nothing
+        // dropped - a stray retired script like zones.sqs fails here) ...
+        REQUIRE(fs::exists(mission / "scripts"));
+        REQUIRE(ListFileNames(mission / "scripts") == canonicalScripts);
+
+        // ... and every file byte-identical
+        for (const std::string& script : canonicalScripts)
+        {
+            RequireSameFile(canonical / "scripts" / script, mission / "scripts" / script);
+        }
+    }
+}

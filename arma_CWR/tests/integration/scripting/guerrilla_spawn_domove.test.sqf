@@ -1,84 +1,54 @@
 // ============================================================================
-//  Guerrilla Mode - Gate-Zero smoke test (plan 13, "Gate-Zero" step 2):
-//    "runtime-spawn ~6-8 AI in two groups (createGroup/createUnit), drive a QRF
-//     with doMove, watch framerate and pathing on a real map."
+//  Guerrilla Mode - garrison spawn-and-command on the NATIVE engine surface.
+//    Demo-data twin of guerrilla_native_spawn.test.sqf (full-CWA/Abel); the
+//    retired spawning.sqs distance-cache is GarrisonCache.cpp now, and doMove
+//    is a registered engine command (the Gate-Zero group-move workaround this
+//    test used to carry is history). Proves:
+//      1. the native cache AUTO-SPAWNS the Outpost garrison because the
+//         player boots at the Camp, ~290 m away - inside the 800 m
+//         cacheRadius (no script pokes anything);
+//      2. the spawned strength matches the config reserve (garrison = 8,
+//         single group under groupSize = 12);
+//      3. the spawned groups are real commandable AI: doMove displaces a unit.
 //
-//  GROUND-TRUTH NOTE on doMove: `doMove` is DECLARED but NOT registered in this
-//  engine (confirmed absent - GameStateExt*.cpp has no "doMove" GameOperator).
-//  The mode (and this test) drive movement the confirmed way the shipped
-//  spawning.sqs does: group `move` (GrpMove, GameStateExt.cpp:1299) plus a MOVE
-//  `addWaypoint`/`setWaypointType` chain (GameStateExt.cpp:1422/1424).
+//  Runs against the REAL mode: guerrilla_capture.Demo's init.sqs + scripts/
+//  are byte-identical to the canonical Guerrilla.Demo core (enforced by
+//  test_mission_script_core.cpp).
 //
-//  Everything here is a CONFIRMED runtime command (createCenter :1182,
-//  createGroup :1184, createUnit :1339, units :979, leader :971/977,
-//  getPos :938, move :1299, addWaypoint :1422, setWaypointType :1424,
-//  setBehaviour :1301, deleteVehicle :1028). Player class + spawned class are
-//  the stock "SoldierWB" (present in the Demo dataset), so this isolates the
-//  ENGINE capability from the mode's EAST/GUER classname VERIFYs.
-//
-//  Assertions are framerate-agnostic: unit COUNTS (not frame timings) prove the
-//  spawn; a time-bounded displacement (not a fixed frame count) proves motion.
-//  Globals (gz*) are used for everything referenced across statements because
-//  the harness evaluates each ';'-separated statement in its own context, so
-//  `_local` vars would not survive between lines.
+//  Assertions are framerate-agnostic: unit COUNTS prove the spawn; a
+//  time-bounded displacement (not a fixed frame count) proves motion.
 // ============================================================================
 
-triSimUntil { alive player }
+// -- mode fully booted (init.sqs published the helper-table sentinel) ---------
+triSimUntil { GM_LIB_READY }
 
-// -- make sure the WEST center exists so createGroup west can seat groups ------
-createCenter west
+// -- zone table sanity: explicit zones resolve by name -------------------------
+gnOut = gmZoneIndex "Outpost"
+triAssertGe [gnOut, 0]
+triAssertGe [gmZoneCount, 3]
+triAssertEq [((gmZone gnOut) select 2), gmOccupierSide]
 
-// -- GROUP 1 (4 riflemen) near the player -------------------------------------
-gzP  = getPos player
-gzG1 = createGroup west
-"SoldierWB" createUnit [[(gzP select 0) + 6,  (gzP select 1) + 6,  0], gzG1, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) + 10, (gzP select 1) + 6,  0], gzG1, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) + 6,  (gzP select 1) + 10, 0], gzG1, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) + 10, (gzP select 1) + 10, 0], gzG1, "", 0.6, "PRIVATE"]
+// -- 1) NATIVE AUTO-SPAWN: no script pokes the cache; being near is enough ---
+triSimUntil { gmGarrisonSpawned gnOut }
 
-// -- GROUP 2 (4 riflemen) - the second group proves multi-group spawn ----------
-gzG2 = createGroup west
-"SoldierWB" createUnit [[(gzP select 0) - 6,  (gzP select 1) + 6,  0], gzG2, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) - 10, (gzP select 1) + 6,  0], gzG2, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) - 6,  (gzP select 1) + 10, 0], gzG2, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) - 10, (gzP select 1) + 10, 0], gzG2, "", 0.6, "PRIVATE"]
+// -- 2) full configured strength, one group ----------------------------------
+triSimUntil { (gmGarrisonLive gnOut) >= 8 }
+triAssertEq [(gmGarrisonLive gnOut), 8]
+gnGrps = gmGarrisonGroups gnOut
+triAssertEq [(count gnGrps), 1]
 
-// let the two groups instantiate their AI before we assert
-triSimFrames 30
+// -- 3) COMMANDABLE: doMove the group leader ~110 m and require displacement.
+//    Time-bounded (polled), not frame-bounded, so it is framerate-agnostic. --
+gnLdr = leader (gnGrps select 0)
+// (bool asserts go through format: triAssert*'s stringifier cannot take a
+//  raw GameBool - engine issue, see the parity-test report)
+triAssertEq [(format ["%1", alive gnLdr]), "true"]
+gnP0 = getPos gnLdr
+gnDest = [(gnP0 select 0) + 80, (gnP0 select 1) + 80, 0]
+gnLdr doMove gnDest
+triSimUntil { ((getPos gnLdr) distance gnP0) > 15 }
 
-// -- ASSERT the spawn: 4 + 4 = 8 live AI across TWO distinct groups -----------
-triAssertEq [(count units gzG1), 4]
-triAssertEq [(count units gzG2), 4]
-triAssertGe [(count units gzG1) + (count units gzG2), 6]
-
-// ============================================================================
-//  QRF: a third group, ordered to convoy toward a point ~110 m off. This is the
-//  exact "drive a QRF" idiom spawning.sqs uses (move + MOVE waypoint), with
-//  doMove routed around per the note above.
-// ============================================================================
-gzQRF = createGroup west
-"SoldierWB" createUnit [[(gzP select 0) + 4, (gzP select 1) - 6,  0], gzQRF, "", 0.7, "SERGEANT"]
-"SoldierWB" createUnit [[(gzP select 0) + 8, (gzP select 1) - 6,  0], gzQRF, "", 0.6, "PRIVATE"]
-"SoldierWB" createUnit [[(gzP select 0) + 4, (gzP select 1) - 10, 0], gzQRF, "", 0.6, "PRIVATE"]
-triSimFrames 20
-triAssertGe [(count units gzQRF), 3]
-
-// destination ~110 m north-east; capture the QRF leader's start position first
-gzDest  = [(gzP select 0) + 110, (gzP select 1) + 40, 0]
-gzLead0 = getPos (leader gzQRF)
-gzQRF setBehaviour "AWARE"
-gzQRF move gzDest
-gzWp = gzQRF addWaypoint [gzDest, 0]
-gzWp setWaypointType "MOVE"
-
-// -- ASSERT motion: the QRF leader travels >15 m from where it spawned. This is
-//    time-bounded (polled), NOT frame-count-bounded, so it is framerate-agnostic;
-//    it also proves pathing did not deadlock/crash. assert_timeout in the .toml
-//    gives the foot element ample real time to cover the distance.
-triSimUntil { (sqrt ( ((getPos (leader gzQRF)) select 0 - (gzLead0 select 0)) ^ 2 + ((getPos (leader gzQRF)) select 1 - (gzLead0 select 1)) ^ 2 )) > 15 }
-
-// -- everyone still alive after the move (no crash / no despawn) --------------
-triAssertGe [(count units gzQRF), 1]
-triAssertGe [(count units gzG1), 4]
+// -- nobody died or despawned while moving (no crash, cache stayed put) ------
+triAssertGe [(gmGarrisonLive gnOut), 8]
 
 triEndTest

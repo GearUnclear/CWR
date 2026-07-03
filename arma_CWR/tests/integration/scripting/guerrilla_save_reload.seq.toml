@@ -1,10 +1,10 @@
-# Guerrilla Mode - save/reload round-trip (plan 13 Gate-Zero step 3:
-# "stuff a few zone/roster globals into plain arrays, saveGame, quit, reload,
-#  and diff them").
+# Guerrilla Mode - save/reload round-trip (NATIVE engine surface).
+# Demo-data twin of guerrilla_native_save_reload.seq (full-CWA/Abel).
 #
 # Master config for the .seq/ directory. Its ordered phases (01_save, 02_reload)
 # each launch the game fresh but share one POSEIDON_USER_DIR, so the binary save
 # 01 writes with triSaveGame (UserDir/Saved/Tmp/grr.fps) is the one 02 restores
 # with triLoadGame - a genuine cross-process round-trip of the SQF global state
-# that GGameState serializes (World::Serialize -> ar.Serialize("GameState",...)).
+# (GGameState) AND the native guerrilla subsystems (ZoneRegistry / AlertMachine /
+# GarrisonCache::Serialize, including the registered event handlers).
 tags = ["scripting", "guerrilla", "gate-zero", "save-load", "headless"]

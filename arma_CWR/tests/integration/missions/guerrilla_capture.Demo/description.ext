@@ -1,12 +1,130 @@
-// Guerrilla Mode - mission metadata (description.ext)
-// Minimal valid metadata, modelled on
-// tests/integration/missions/mp_assign_report.Demo/description.ext
-// Single-player persistent insurgency; no respawn, no JIP for v1.
+// Guerrilla Mode - mission metadata + THE per-island data file (issue #3 item 3).
+// Everything island- or faction-specific lives HERE: the zone seed
+// (CfgGuerrillaZones) and the faction descriptors (CfgGuerrillaFactions).
+// The scripts/ directory is the shared island-agnostic core - it contains no
+// classnames and no side strings; it reads this data through the native
+// gmZone* / gmFaction* command surface (engine/Poseidon/Game/Guerrilla/).
+//
+// Defining class CfgGuerrillaZones is what ACTIVATES the native guerrilla
+// systems (ZoneRegistry / AlertMachine / GarrisonCache). No class = plain
+// mission, zero engine overhead.
 
 onLoadMission = "Guerrilla Mode - Three Zones (MVP)";
 onLoadIntro  = "Liberate the island, one zone at a time.";
 respawn = 0;
 joinInProgress = 0;
 
-// CfgSounds / CfgIdentities / dialog classes are added in later phases.
-// Keep this file minimal-but-valid for Phase 1.
+class CfgGuerrillaZones
+{
+    // Engine tuning (all left at stock defaults): tickInterval=3; zoneArea=150;
+    // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
+    // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
+    // alertInterval=5; alertYellowKnows=0.5; alertRedKnows=1.5;
+    // alertWindowSeconds=20; alertHeatYellow=4; alertHeatRed=15; alertHeatBreak=25.
+    // Only the town auto-seed is switched on:
+    seedCities = 1;       // auto-seed CITY zones from the world's named towns
+    seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
+
+    class Zones
+    {
+        // COORDINATE ORDER (load-bearing): position[] is authored in
+        // script/getPos order [easting, northing, elevation] - NOT the
+        // mission.sqm order [easting, ELEVATION, northing]. The engine's
+        // ZoneRegistry::LoadZones documents and enforces this contract.
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";   // generic token, resolved per campaign
+            garrison = 0;
+            support = 100;
+            income = 0;
+            marker = "gmZoneMarker_0";
+            position[] = {6519.04, 6473.68, 149.66};
+        };
+        class Village
+        {
+            name = "Village";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 20;
+            marker = "gmZoneMarker_1";
+            position[] = {6300, 6600, 150};
+        };
+        class Outpost
+        {
+            name = "Outpost";
+            type = "OUTPOST";
+            owner = "OCCUPIER";     // generic token, resolved per campaign
+            garrison = 8;
+            income = 25;
+            marker = "gmZoneMarker_2";
+            position[] = {6750, 6300, 150};
+        };
+    };
+};
+
+// Faction descriptors for the Demo dataset (stock OFP/CWA classes).
+// The new-game UI publishes gmSelOccupier/gmSelResistance and the engine
+// resolves them against these classes; the nulars gmOccupierSide /
+// gmResistanceSide hand the resolved side strings to the scripts (defaults
+// "EAST"/"GUER" when no selection was made).
+//
+// KEY NAMING SCHEME (script-facing, read via gmFactionValue/gmFactionTierClass/
+// gmFactionVehicle - see guerrilla-mode/ARCHITECTURE.md "Faction keys"):
+//   tiers[] + tierThresholds[]   garrison/QRF infantry per war level (native + qrf.sqs)
+//   vehicles[] + vehicleThreshold QRF escort per war level (qrf.sqs)
+//   officer                      squad leader class (native garrison + qrf.sqs)
+//   holdClass / holdCount        capture hold-garrison class and size (capture.sqs)
+//   recruitFighter / recruitSpecialist   Camp recruit classes (recruit.sqs)
+//   companionClass               named-companion body class (companions.sqs)
+//   baseWeapon / baseMagazine    always-available fallback kit (loot.sqs)
+//   loot<Role>Weapon / loot<Role>Mag     role loadouts, Role in
+//       {Rifleman, Medic, MG, AT, Sniper} (loot.sqs unlock table)
+class CfgGuerrillaFactions
+{
+    class EAST // occupier descriptor
+    {
+        side = "EAST";
+        // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops (the old
+        // GM_fnPickTier ladder; every classname verified against the CWA 1.99
+        // CONFIG.BIN - "SoldierESoldier" does not exist in this config family)
+        tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
+        tierThresholds[] = {3, 5};
+        // QRF escort: trucks below WL3, APC from WL3 (old spawning.sqs gate)
+        vehicles[] = {"Ural", "BMP"};
+        vehicleThreshold = 3;
+        officer = "OfficerE";
+    };
+    class GUER // resistance descriptor
+    {
+        side = "GUER";
+        tiers[] = {"SoldierGB"};
+        tierThresholds[] = {};
+        vehicles[] = {}; // none in phase 1
+        officer = "SoldierGB";
+
+        holdClass = "SoldierGB";
+        holdCount = 3;
+        recruitFighter = "SoldierGB";
+        recruitSpecialist = "SoldierGMG";
+        companionClass = "SoldierGB";
+
+        // OFP magazine convention (verified in CONFIG.BIN): simple weapons
+        // ARE their own magazine class (CfgWeapons AK47 scopeMagazine=2), so
+        // the mag keys reuse the weapon classname - "AK47Mag"-style classes
+        // do not exist in this config family.
+        baseWeapon = "AK47";
+        baseMagazine = "AK47";
+        lootRiflemanWeapon = "AK47";
+        lootRiflemanMag = "AK47";
+        lootMedicWeapon = "AK47";
+        lootMedicMag = "AK47";
+        lootMGWeapon = "PK";
+        lootMGMag = "PK";
+        lootATWeapon = "RPGLauncher";
+        lootATMag = "RPGLauncher";
+        lootSniperWeapon = "SVDDragunov";
+        lootSniperMag = "SVDDragunov";
+    };
+};

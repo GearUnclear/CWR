@@ -1,25 +1,37 @@
 // ============================================================================
-//  Phase 1 of the guerrilla save/reload round-trip.
-//    Boot the full mode, stamp DISTINCTIVE sentinel values into the persisted
-//    globals (faction scalars, a zone-ownership flip, companion XP, a gear
-//    unlock), then triSaveGame to the shared user dir. Phase 2 reloads and diffs.
-//
-//  These are the exact "plain array / scalar" globals plan 13 says round-trip for
-//  free via GGameState serialization - no object handles are saved here.
-//  Sentinels are set and saved back-to-back (no sim advance between) so no
-//  manager tick can overwrite them before the snapshot is taken.
+//  Phase 1 of the guerrilla save/reload round-trip (NATIVE engine surface).
+//    Demo-data twin of guerrilla_native_save_reload.seq (full-CWA/Abel); the
+//    retired persistence.sqs is gone - zones/alert/garrison state and the
+//    native event handlers serialize in the engine, script globals ride
+//    GGameState. Boot the full mode, stamp DISTINCTIVE sentinels into BOTH
+//    persistence layers - script globals AND native zone state (written
+//    through the gmZoneSet command surface) - then triSaveGame to the shared
+//    user dir. Phase 2 fresh-boots, reloads and diffs everything.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
-triAssertEq [(count GM_ZONES), 3]
+gsOut = gmZoneIndex "Outpost"
+gsVil = gmZoneIndex "Village"
+triAssertGe [gsOut, 0]
+triAssertGe [gsVil, 0]
+triAssertEq [((gmZone gsOut) select 2), gmOccupierSide]
 
-// -- stamp sentinels into the persisted schema --------------------------------
+// -- the companion (Petra) must have a live body before the snapshot: phase 2
+//    asserts the post-load reconciliation rebuilds/keeps her alive ------------
+triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
+triAssertEq [(format ["%1", alive (GM_COMP_OBJ select 0)]), "true"]
+
+// -- stamp sentinels: script-global layer --------------------------------------
 gmResources = 777
-gmManpower  = 9
-gmWarLevel  = 5
-(GM_ZONES select 2) set [GM_Z_OWNER, "GUER"]
+gmManpower = 9
+gmWarLevel = 5
 GM_COMP_XP set [0, 12345]
 GM_GEAR_UNLOCKED = ["AK47"]
+
+// -- stamp sentinels: native zone-registry layer -------------------------------
+gmZoneSet [gsVil, "support", 55]
+gmZoneSet [gsOut, "income", 99]
+gmZoneSet [gsOut, "owner", gmResistanceSide]
 
 // -- write the binary save into the shared UserDir/Saved/Tmp/grr.fps ----------
 triAssertEq [(triSaveGame "grr"), "OK"]

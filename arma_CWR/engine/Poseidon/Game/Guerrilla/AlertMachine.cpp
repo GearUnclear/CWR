@@ -364,17 +364,18 @@ void AlertMachine::GatherInputs(AlertTickInputs& in, const ZoneRegistry& registr
     }
 
     // per-zone knowsAbout: max FadingSideAccuracy of the player across the
-    // east center's groups, each group assigned to the nearest zone whose
-    // center is within zoneArea of its leader (or first alive unit)
-    AICenter* east = world->GetEastCenter();
-    if (!east)
+    // occupier center's groups, each group assigned to the nearest zone
+    // whose center is within zoneArea of its leader (or first alive unit).
+    // No center == no occupier units == nothing perceives the player.
+    AICenter* occupier = FindSideCenter(registry.OccupierSide());
+    if (!occupier)
     {
         return;
     }
     const float areaSq = registry.Tuning().zoneArea * registry.Tuning().zoneArea;
-    for (int g = 0; g < east->NGroups(); g++)
+    for (int g = 0; g < occupier->NGroups(); g++)
     {
-        AIGroup* grp = east->GetGroup(g);
+        AIGroup* grp = occupier->GetGroup(g);
         if (!grp)
         {
             continue;

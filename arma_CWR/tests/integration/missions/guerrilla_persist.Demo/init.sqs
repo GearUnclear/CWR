@@ -1,141 +1,193 @@
 ; ============================================================================
 ;  init.sqs  -  Guerrilla Mode bootstrap (auto-loaded by RunInitScript,
-;               engine/Poseidon/UI/DisplayUI.cpp:155-162)
+;               engine/Poseidon/UI/DisplayUI.cpp)
 ; ----------------------------------------------------------------------------
-;  Responsibility:
-;    1. Define EVERY global with sane Phase-1 starting values (the schema below
-;       is the binding contract - see guerrilla-mode/ARCHITECTURE.md).
-;    2. exec the helper library, then wait for it (@GM_LIB_READY).
-;    3. exec every manager script. Managers not yet written are still exec'd
-;       here so the spine is fixed; missing files no-op until filled in.
+;  THIN by design (Phase 1.5): the zone model, fog-of-war/markers repaint,
+;  capture flips, garrison distance-cache, alert FSM and campaign persistence
+;  are all NATIVE now (engine/Poseidon/Game/Guerrilla/*, activated by
+;  class CfgGuerrillaZones in description.ext). This file only:
+;    1. seeds SCRIPT-side state (economy scalars, gear/companion rosters,
+;       event queues) - all plain GGameState globals, so they serialize free;
+;    2. creates the marker OBJECT for every zone (the engine repaints only
+;       markers that already exist in markersMap; created markers serialize
+;       with the world, so this runs once per campaign, never on load);
+;    3. registers the native event handlers (they are SERIALIZED - a loaded
+;       campaign keeps them without any re-arm);
+;    4. execs the helper library + the event-driven manager scripts.
 ;
-;  NAMING CONVENTION (binding):
-;    GM_*  = constants / tunables / structured data (UPPER words)  -> e.g. GM_ZONES, GM_Z_OWNER
-;    gm*   = mutable scalar faction state                          -> e.g. gmResources, gmWarLevel
-;    GM_fn* = code-string helpers (defined in lib.sqs)
-;    GM_tmp* = scratch globals used by helpers (do NOT persist / do NOT read)
+;  EVENT-QUEUE PATTERN (binding for every manager): native handlers cannot
+;  ~sleep (they run synchronously inside the engine tick), so each handler is
+;  ONE line that appends its _this tuple to a gmEvt* queue global. Exactly one
+;  manager consumes each queue with an atomic drain-swap
+;  ("GM_x = gmEvtX + []; gmEvtX = []" on a single SQS line - one evaluated
+;  unit, so no handler can interleave) and reacts inside its own ~ loop.
 ;
-;  DIALECT: SQS. init.sqs is the confirmed auto-bootstrap; SQS gives us ~N
-;  waits, @cond gates and `goto`/labels for the long-lived manager loops. SQF
-;  (init.sqf) runs UNSCHEDULED (no ~ scheduler) so it cannot host tick loops.
+;  NAMING CONVENTION (unchanged):
+;    GM_*   constants / structured data     gm*     mutable scalar state
+;    GM_fn* code-string helpers (lib.sqs)   GM_tmp* helper scratch (never read)
+;    gmEvt* native-event queues (owner: the consuming manager; appenders: the
+;           one-line handlers registered below)
+;
+;  DIALECT: SQS (one statement per line, ~N waits, @cond gates, #label/goto).
+;  The evaluator now also has compile/isNil/setVariable/nearestObjects/
+;  distance-on-arrays/setRank/private - used where they clarify.
 ; ============================================================================
 
-; ---- single-run guard (a save/reload re-runs nothing here; see persistence) -
+; ---- single-run guard (isNil is available now; a save/load never re-runs
+;      init.sqs anyway - scripts and globals resume from the snapshot) --------
+? not (isNil "GM_BOOTED") : exit
 GM_BOOTED = true
 
 ; ===========================================================================
-;  ZONE RECORD INDEX CONSTANTS  (shape of each element of GM_ZONES)
-;  ZONE = [name, type, owner, garrisonStrength, support, income, heat,
-;          markerName, [x,y,z]]
+;  ZONE TUPLE INDEX CONSTANTS - the shape returned by `gmZone <i>`:
+;  [name, type, owner, garrison, support, income, heat, marker, [x,y,z]]
+;  Positions are getPos order [easting, northing, elevation]. Zone STATE
+;  lives in the native ZoneRegistry; these constants exist only so scripts
+;  reading gmZone tuples stay legible.
 ; ===========================================================================
-GM_Z_NAME    = 0    ; string,  unique zone id
-GM_Z_TYPE    = 1    ; string,  "CAMP" | "AIRFIELD" | "SEAPORT" | "OUTPOST" | "CITY"
-GM_Z_OWNER   = 2    ; string,  "GUER" | "EAST" | "NEUTRAL"
-GM_Z_GAR     = 3    ; scalar,  authoritative occupier body count while cached
-GM_Z_SUPPORT = 4    ; scalar,  0..100 town support (cities flip on this, not kills)
-GM_Z_INCOME  = 5    ; scalar,  Resources per economy tick when owned by GUER
-GM_Z_HEAT    = 6    ; scalar,  0..100 per-region Heat (fast timescale)
-GM_Z_MARKER  = 7    ; string,  marker name this zone owns (created by zones.sqs)
-GM_Z_POS     = 8    ; array,   [x,y,z] world position / center
+; (SQS gotcha, learned the hard way: a mid-line ; is a STATEMENT SEPARATOR,
+;  not a comment - annotations live on their own ;-lines throughout.)
+;   GM_Z_NAME    string,  unique zone id
+;   GM_Z_TYPE    string,  "CAMP" | "AIRFIELD" | "SEAPORT" | "OUTPOST" | "CITY"
+;   GM_Z_OWNER   string,  side string (compare against gmOccupierSide / gmResistanceSide) or "NEUTRAL"
+;   GM_Z_GAR     scalar,  occupier reserve while despawned (native cache)
+;   GM_Z_SUPPORT scalar,  0..100 town support
+;   GM_Z_INCOME  scalar,  per economy tick when resistance-owned
+;   GM_Z_HEAT    scalar,  0..100 per-zone Heat (write via gmZoneSet heatRaise/heatDecay only)
+;   GM_Z_MARKER  string,  marker name the zone owns
+;   GM_Z_POS     array,   [x,y,z] center, getPos order
+GM_Z_NAME    = 0
+GM_Z_TYPE    = 1
+GM_Z_OWNER   = 2
+GM_Z_GAR     = 3
+GM_Z_SUPPORT = 4
+GM_Z_INCOME  = 5
+GM_Z_HEAT    = 6
+GM_Z_MARKER  = 7
+GM_Z_POS     = 8
 
 ; ===========================================================================
-;  ZONES[]  -  Phase 1 "Three Zones" slice.
-;  COORDINATE ORDER (load-bearing, reconciled during integration):
-;    GM_Z_POS is authored in SCRIPT / getPos order [easting, northing, elevation]
-;    - the same order `position`/`getPos` return (engine ObjGetPos: array[0]=X,
-;    array[1]=Z(northing), array[2]=Y(up); GameStateExtGrp.cpp:1583,1747/885).
-;    This is DELIBERATELY NOT the mission.sqm position[] order, which is
-;    [easting, ELEVATION, northing] (sqm middle element is height). Every consumer
-;    here - GM_fnDist2D vs `position aP`, createMarker, setPos, createUnit,
-;    GM_fnRandPosNear - uses getPos order, so the seed must match it or all
-;    distance/marker/spawn maths silently break (y<->z swap). The Camp value is
-;    the shipped player spawn [6519.04, 149.66, 6473.68] with its y/z swapped.
-;  VERIFY: confirm Village/Outpost sit on valid Demo terrain (ideally near roads)
-;    during Gate-Zero; the elevation (index 2) is nominal - GetPos snaps to ground.
+;  PLAYER-FACTION ECONOMY & ESCALATION SCALARS
 ; ===========================================================================
-GM_ZONES =
-[
-  ["Camp",    "CAMP",    "GUER",    0, 100,  0,  0, "gmZoneMarker_0", [6519.04, 6473.68, 149.66]],
-  ["Village", "CITY",    "NEUTRAL", 0,  20,  0,  0, "gmZoneMarker_1", [6300.00, 6600.00, 150.00]],
-  ["Outpost", "OUTPOST", "EAST",    8,   0, 25,  0, "gmZoneMarker_2", [6750.00, 6300.00, 150.00]]
-]
+;   gmResources   Rouble treasury (training, gear, vehicles, bribes)
+;   gmManpower    HR: 1 HR = 1 recruitable body; hard cap on faction size
+;   gmWarLevel    1..10 slow escalation; the native garrison + qrf.sqs read it
+;   gmHeatDecay   Heat bled per GREEN zone per escalation tick
+;   gmUndercover  script-OWNED (the engine only READS it each alert tick);
+;                 undercover.sqs establishes true, drops to false on a break
+gmResources = 100
+gmManpower  = 2
+gmWarLevel  = 1
+gmHeatDecay = 1
+gmUndercover = false
 
 ; ===========================================================================
-;  PLAYER-FACTION ECONOMY & ESCALATION GLOBALS  (scalar state)
+;  GEAR PROGRESSION  (parallel arrays; sole writer is lib's GM_fnBumpGear)
 ; ===========================================================================
-gmResources = 100    ; Rouble treasury (training, gear, vehicles, bribes)
-gmManpower  = 2      ; HR: 1 HR = 1 recruitable body; hard cap on faction size
-gmWarLevel  = 1      ; 1..10 slow escalation; scales the occupier spawn table
-gmHeatDecay = 1      ; Heat points bled per region per escalation tick
-
-; ===========================================================================
-;  GEAR PROGRESSION  (the Arsenal substitute)
-;   parallel arrays: GM_GEAR_ITEMS[i] (classname) <-> GM_GEAR_COUNT[i] (tally)
-;   GM_GEAR_UNLOCKED = set of classnames permanently unlocked & infinite
-; ===========================================================================
-GM_GEAR_THRESHOLD = 25    ; loot N of an item -> faction-wide unlock (tunable)
+; loot N of an item -> faction-wide unlock
+GM_GEAR_THRESHOLD = 25
 GM_GEAR_ITEMS     = []
 GM_GEAR_COUNT     = []
 GM_GEAR_UNLOCKED  = []
 
 ; ===========================================================================
-;  NAMED COMPANIONS (Mount&Blade pattern) - parallel arrays keyed by NAME.
-;   No setVariable namespaces exist -> parallel global arrays, index-aligned.
-;   GM_COMP_OBJ is TRANSIENT (live handle or objNull) - never persisted; it is
-;   rebuilt from the persisted rows on load (persist IDs/classnames, not handles).
-;   Loadout row shape: [ [weaponClasses...], [magazineClasses...] ]
+;  NAMED COMPANIONS  (parallel arrays keyed by name; GM_COMP_OBJ transient)
 ; ===========================================================================
-GM_COMP_NAMES   = ["Petra"]   ; string  - identity key (permadeath = removed-from-play, row kept "dead")
-GM_COMP_ALIVE   = [true]      ; bool
-GM_COMP_RANK    = ["CORPORAL"]; string  - enum name passed to createUnit / SetRank
-GM_COMP_XP      = [0]         ; scalar  - awarded on kills/survival; thresholds bump rank+skill
-GM_COMP_SKILL   = [0.55]      ; scalar  0..1 -> setSkill
-GM_COMP_LOADOUT = [ [ [], [] ] ] ; per-companion [weapons[], mags[]]
-GM_COMP_OBJ     = [objNull]   ; TRANSIENT live handle
+GM_COMP_NAMES   = ["Petra"]
+GM_COMP_ALIVE   = [true]
+GM_COMP_RANK    = ["CORPORAL"]
+GM_COMP_XP      = [0]
+GM_COMP_SKILL   = [0.55]
+; GM_COMP_LOADOUT: per-companion [weapons[], mags[]]
+; GM_COMP_OBJ: live handle; reconciled by campaign.sqs on load
+GM_COMP_LOADOUT = [ [ [], [] ] ]
+GM_COMP_OBJ     = [objNull]
 
 ; ===========================================================================
-;  CACHE / SPAWN BOOKKEEPING  (distance-cached dynamic spawning, DAC pattern)
-;   Despawned garrison = the integer GM_Z_GAR on the zone (authoritative).
-;   Spawned garrison = transient live groups tracked here, index-aligned:
-;     GM_CACHE_GROUPS[i] (live group) <-> GM_CACHE_ZONEIDX[i] (zone index)
-;   GM_PLAYER_GROUPS = the player faction's live groups (recruit overflow past
-;   the 12/group cap opens a new createGroup and appends here).
+;  PLAYER-GROUP BOOKKEEPING (recruit.sqs owns; 12-cap overflow groups)
 ; ===========================================================================
-GM_CACHE_GROUPS  = []   ; transient
-GM_CACHE_ZONEIDX = []   ; transient, parallel to GM_CACHE_GROUPS
-GM_PLAYER_GROUPS = []   ; transient
-GM_CACHE_RADIUS  = 800  ; spawn-in / despawn distance (metres) around the player
-
-; ===========================================================================
-;  GRADUATED ALERT STATE MACHINE  (per zone, index-aligned to GM_ZONES)
-;   GM_ALERT_STATE[i] : 0 GREEN (calm) | 1 YELLOW (suspicious) | 2 RED (alarm)
-;   GM_ALERT_TIMER[i] : YELLOW disengage countdown (seconds) before RED
-; ===========================================================================
-GM_ALERT_STATE = [0, 0, 0]
-GM_ALERT_TIMER = [0, 0, 0]
+GM_PLAYER_GROUPS = []
 
 ; ---- handy aliases ---------------------------------------------------------
-aP = player          ; matches the shipped-mission convention (player handle)
+aP = player
 gmPlayer = player
 
 ; ===========================================================================
-;  LAUNCH SEQUENCE
-;   1) helpers first, then BLOCK until the table is ready (exec is async).
+;  NATIVE-EVENT QUEUES  (each handler below appends; one manager drains each)
+;    gmEvtCaptured   [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtSupport    [zoneIndex, zoneName, ownerString]  -> capture.sqs (drained)
+;    gmEvtRevealed   [zoneIndex, zoneName, ownerString]  -> capture.sqs (drained)
+;    gmEvtLoaded     [saveVersion]                       -> campaign.sqs
+;    gmEvtAlert      [zoneIndex, zoneName, old, new]     -> qrf.sqs
+;    gmEvtUcBroken   [reason]                            -> undercover.sqs
+;    gmEvtGarSpawned / gmEvtGarDespawned [idx, name, n]  -> loot.sqs
+; ===========================================================================
+gmEvtCaptured    = []
+gmEvtSupport     = []
+gmEvtRevealed    = []
+gmEvtLoaded      = []
+gmEvtAlert       = []
+gmEvtUcBroken    = []
+gmEvtGarSpawned  = []
+gmEvtGarDespawned = []
+
+; ===========================================================================
+;  MARKERS: create one per zone (config zones AND seedCities-seeded towns all
+;  come through gmZoneCount/gmZone). The engine repaints color/label natively
+;  but only for markers present in markersMap - creating them is the mission's
+;  job. "Flag" / the sizes are engine-level marker facts, not island data.
+; ===========================================================================
+GM_iI = 0
+#mkmarkers
+? GM_iI >= gmZoneCount : goto "mkdone"
+GM_iRec = gmZone GM_iI
+GM_iM = createMarker [(GM_iRec select GM_Z_MARKER), (GM_iRec select GM_Z_POS)]
+(GM_iRec select GM_Z_MARKER) setMarkerType "Flag"
+(GM_iRec select GM_Z_MARKER) setMarkerSize [0.6, 0.6]
+GM_iI = GM_iI + 1
+goto "mkmarkers"
+#mkdone
+
+; ===========================================================================
+;  NATIVE EVENT HANDLERS - one line each, enqueue only (SQS handlers cannot
+;  wait; managers do the real work). Handlers are serialized by the engine,
+;  so a loaded campaign fires them without re-registration.
+; ===========================================================================
+gmZoneOnEvent ["captured", {gmEvtCaptured = gmEvtCaptured + [_this]}]
+gmZoneOnEvent ["supportThreshold", {gmEvtSupport = gmEvtSupport + [_this]}]
+gmZoneOnEvent ["revealed", {gmEvtRevealed = gmEvtRevealed + [_this]}]
+gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]}]
+gmAlertOnEvent ["alertChanged", {gmEvtAlert = gmEvtAlert + [_this]}]
+gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
+gmGarrisonOnEvent ["garrisonSpawned", {gmEvtGarSpawned = gmEvtGarSpawned + [_this]}]
+gmGarrisonOnEvent ["garrisonDespawned", {gmEvtGarDespawned = gmEvtGarDespawned + [_this]}]
+
+; ===========================================================================
+;  LAUNCH SEQUENCE - helpers first (exec is async; the @-gate on the lib-ready
+;  sentinel is kept over isNil-polling for simplicity: one flag, one gate,
+;  and every manager re-guards on it), then the event-driven managers.
 ; ===========================================================================
 GM_LIB_READY = false
 [] exec "scripts/lib.sqs"
 @GM_LIB_READY
 
-;   2) start every manager (each is a long-lived #loop with its own ~ ticks).
-;      Order is not load-bearing; each manager re-guards on @GM_LIB_READY.
-[] exec "scripts/zones.sqs"         ; territory model, markers, capture flip
-[] exec "scripts/spawning.sqs"      ; distance-cached garrison/QRF spawn+despawn
-[] exec "scripts/alert.sqs"         ; GREEN/YELLOW/RED knowsAbout state machine
-[] exec "scripts/escalation.sqs"    ; War Level + per-region Heat decay
-[] exec "scripts/economy.sqs"       ; Resources / Manpower income tick
-[] exec "scripts/loot.sqs"          ; loot-on-kill stash + gear-unlock tally
-[] exec "scripts/recruit.sqs"       ; action-menu recruit / train / gear UI
-[] exec "scripts/companions.sqs"    ; companion XP -> rank/skill, permadeath
-[] exec "scripts/persistence.sqs"   ; on-load rebuild of live objects from GM_*
+;   capture.sqs     captured-event reaction: hold garrison + notify
+;   qrf.sqs         alert policy: garrison posture + QRF convoy
+;   undercover.sqs  establish cover + fired-EH + break reaction
+;   campaign.sqs    Save action + campaignLoaded reconciliation
+;   economy.sqs     Resources / Manpower income tick
+;   escalation.sqs  War Level ladder + Heat decay
+;   loot.sqs        loot-on-kill stash + gear-unlock tally
+;   recruit.sqs     Camp action menu: recruit / specialist / train
+;   companions.sqs  companion XP -> rank/skill, permadeath
+[] exec "scripts/capture.sqs"
+[] exec "scripts/qrf.sqs"
+[] exec "scripts/undercover.sqs"
+[] exec "scripts/campaign.sqs"
+[] exec "scripts/economy.sqs"
+[] exec "scripts/escalation.sqs"
+[] exec "scripts/loot.sqs"
+[] exec "scripts/recruit.sqs"
+[] exec "scripts/companions.sqs"
 
 exit

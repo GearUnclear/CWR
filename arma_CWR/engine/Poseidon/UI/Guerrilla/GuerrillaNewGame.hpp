@@ -41,9 +41,13 @@ constexpr const char* kGuerrillaVarIsland = "gmSelIsland";
 constexpr const char* kGuerrillaVarOccupier = "gmSelOccupier";
 constexpr const char* kGuerrillaVarResistance = "gmSelResistance";
 
-// Built-in fallback faction names when the global config (Pars) has no
-// CfgGuerrillaFactions — mission-side config is not loaded yet at the main
-// menu, so these sides mirror the ZoneRegistry faction schema defaults.
+// Side filters for the two cycler lists, mirroring the ZoneRegistry built-in
+// defaults. NOT published as fallback selections: when the global config
+// (Pars) has no CfgGuerrillaFactions the cyclers have nothing real to offer
+// and the launch path publishes EMPTY selections, so the mission's own
+// defaultOccupier/defaultResistance config keys (then the engine's EAST/GUER
+// built-ins) decide — publishing "EAST"/"GUER" here would match a mission
+// faction by side and silently override the mission's defaults.
 constexpr const char* kGuerrillaDefaultOccupier = "EAST";
 constexpr const char* kGuerrillaDefaultResistance = "GUER";
 
@@ -54,7 +58,8 @@ std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std
 // factions = subclass names of factionsCfg (CfgGuerrillaFactions) whose
 // `side` (default: the class name) matches `side` case-insensitively; when
 // none match, every subclass; when there are no subclasses at all (or cfg is
-// null), the single built-in default { side }.
+// null), EMPTY — no built-in entry is invented, so the launch path can tell
+// "no real faction config" apart from a real choice and publish nothing.
 std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const char* side);
 
 class GuerrillaNewGame : public Display
@@ -70,6 +75,8 @@ class GuerrillaNewGame : public Display
     // Selections read by DisplayMain::OnChildDestroyed on IDC_OK. The island
     // falls back to the current (menu cutscene) world when no island list was
     // shown, so OK still resolves to a concrete "Guerrilla.<World>" template.
+    // The faction selections are EMPTY when no CfgGuerrillaFactions offered a
+    // real choice — the launch path must publish nothing in that case.
     RString SelectedIsland();
     RString SelectedOccupier() const;
     RString SelectedResistance() const;

@@ -14,6 +14,7 @@
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
+class AICenter;
 
 namespace Poseidon
 {
@@ -33,6 +34,9 @@ struct ZoneTuning
     float heatCapSpike = 40.0f;  // Heat added on capture (clamped to 100)
     float defaultIncome = 25.0f; // income tap opened on military capture
     float holdCount = 3.0f;      // friendly hold-garrison size (spawn stays script-side)
+    // CITY auto-seed from the world's CfgWorlds >> <world> >> Names entries
+    bool seedCities = false;
+    float seedCitySupport = 20.0f; // starting support of each seeded CITY
 };
 
 struct ZoneRecord
@@ -46,8 +50,13 @@ struct ZoneRecord
     // Y=elevation, Z=northing.  Script-facing arrays keep getPos order.
     Vector3 pos = VZero;
 
+    // raw config owner, kept verbatim: a literal side string or one of the
+    // generic tokens "OCCUPIER" / "RESISTANCE" (re-resolved when the
+    // campaign's faction sides change, e.g. on savegame load)
+    RString ownerConfig;
+
     // dynamic, serialized (matched by zone name on load)
-    RString owner;           // "GUER" | "EAST" | "NEUTRAL"
+    RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
     float garrison = 0;      // occupier body count while despawned
     float support = 0;       // 0..100, CITY flips on this
     float income = 0;        // per economy tick when GUER-owned
@@ -67,7 +76,8 @@ struct FactionRecord
         RString value;
     };
 
-    RString side; // "EAST" / "GUER" / ...
+    RString side;      // "EAST" / "GUER" / ...
+    RString className; // config subclass name (second lookup key after side)
     AutoArray<RString> tiers;
     AutoArray<float> tierThresholds; // ascending war levels; tier i+1 from thresholds[i]
     AutoArray<RString> vehicles;
@@ -108,13 +118,26 @@ class ZoneRegistry : public SerializeClass
     // engine-wide instance (used by the World hooks and script commands)
     static ZoneRegistry& Instance();
 
+    // hard ceiling on the zone table (explicit + seeded CITY zones)
+    static constexpr int MaxZones = 64;
+
     // lifecycle -----------------------------------------------------------
     void Clear();       // full reset, including event handlers
     void InitMission(); // Clear + LoadFromConfig; call at mission start
-    // rebuild static zone/faction tables from ExtParsMission, then Pars
+    // rebuild static zone/faction tables from ExtParsMission, then Pars;
+    // also resolves the campaign's occupier/resistance sides from the
+    // gmSelOccupier / gmSelResistance script globals (new-game UI)
     void LoadFromConfig();
-    // testable core: either entry may be null (that table stays empty)
-    void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg);
+    // testable core: either entry may be null (that table stays empty).
+    // selOccupier / selResistance are raw faction selections (a
+    // CfgGuerrillaFactions class name or a side string); unmatched or
+    // null/empty selections fall back to the CfgGuerrillaZones
+    // defaultOccupier / defaultResistance keys (direct mission launches
+    // without the new-game UI), then to the built-in "EAST"/"GUER".
+    // worldNamesCfg is the world's Names class for the optional CITY
+    // auto-seed (null: no seeding).
+    void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
+                        const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr);
 
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
@@ -124,11 +147,16 @@ class ZoneRegistry : public SerializeClass
     int FindZoneIndex(const char* name) const; // -1 when not found
     const ZoneTuning& Tuning() const { return _tuning; }
 
+    // campaign faction sides (resolved at load; serialized with the save)
+    RString OccupierSide() const { return _occupierSide; }
+    RString ResistanceSide() const { return _resistanceSide; }
+
     // clamped Heat writes (script surface)
     void HeatRaise(int index, float amount); // clamp at 100
     void HeatDecay(int index, float amount); // clamp at 0
 
-    // faction queries; empty string when side/key/level is unknown
+    // faction queries; the faction is looked up by side string or config
+    // class name (side wins); empty string when faction/key/level is unknown
     RString FactionTierClass(const char* side, float warLevel) const;
     RString FactionVehicle(const char* side, float warLevel) const;
     RString FactionValue(const char* side, const char* key) const;
@@ -172,7 +200,15 @@ class ZoneRegistry : public SerializeClass
 
     void LoadZones(const ParamEntry& cfg);
     void LoadFactions(const ParamEntry& cfg);
-    const FactionRecord* FindFaction(const char* side) const;
+    void SeedCityZones(const ParamEntry& namesCfg);
+    // side match first, then faction class name (both case-insensitive)
+    const FactionRecord* FindFaction(const char* sideOrClass) const;
+    // map a raw selection to a concrete side via the faction table;
+    // unmatched/empty keeps the current value
+    void ResolveSides(const char* selOccupier, const char* selResistance);
+    // "OCCUPIER"/"RESISTANCE" -> the resolved sides; anything else verbatim
+    RString ResolveOwnerToken(const RString& owner) const;
+    void ApplyOwnerTokens(); // re-map every zone's owner from ownerConfig
     void GatherInputs(ZoneTickInputs& in) const;
     void UpdateMarkers();
     void DispatchEvents(const AutoArray<ZoneEventRecord>& fired);
@@ -181,15 +217,29 @@ class ZoneRegistry : public SerializeClass
     ZoneTuning _tuning;
     AutoArray<ZoneRecord> _zones;
     AutoArray<FactionRecord> _factions;
+    // campaign faction sides; defaults match the Phase-1 Demo campaign
+    RString _occupierSide = RString("EAST");
+    RString _resistanceSide = RString("GUER");
     RString _handlers[NZoneEventTypes];
     float _accum = 0;
     // deserialized rows waiting for the mission config (applied on the
     // second load pass, once description.ext has been reparsed)
     AutoArray<ZoneSaveState> _pending;
+    // deserialized faction sides, same two-pass parking (scalar archive
+    // reads happen on the first pass only; applied on the second)
+    RString _pendingOccupierSide;
+    RString _pendingResistanceSide;
     // queued campaignLoaded notification (see MarkCampaignLoaded)
     bool _pendingLoaded = false;
     int _loadedSaveVersion = 0;
 };
+
+// Map a side string to its live command center WITHOUT creating one (an
+// absent center means the side has no units yet) - the non-creating sibling
+// of GarrisonCache's EnsureCenter.  Null when the side name or world is
+// unknown.  Shared by ZoneRegistry (resistance presence) and AlertMachine
+// (occupier perception).
+AICenter* FindSideCenter(const char* sideName);
 
 } // namespace Guerrilla
 } // namespace Poseidon

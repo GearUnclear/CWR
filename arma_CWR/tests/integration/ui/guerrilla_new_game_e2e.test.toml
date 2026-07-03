@@ -1,0 +1,24 @@
+# Guerrilla Mode new-game flow, end to end. No mission= - boots to the main
+# menu and drives the GUERRILLA button -> island/faction selection -> launch.
+#
+# PRECONDITIONS:
+#   1. guerrilla-mode/install-missions.ps1 has been run: the launch path
+#      resolves "missions\Guerrilla.<island>" relative to the game data dir
+#      (OptionsUIApp.cpp, IDD_GUERRILLA_NEW_GAME case), i.e. the template
+#      must sit at <OFPR_DATA_DIR>\Missions\Guerrilla.Sinai\.
+#   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against
+#      the game CWD = data dir). @lobofixup (repo fixture) mounts after it:
+#      pbo shadows for @LoBo's malformed tracerColor floats, addon
+#      preloading, and the menu-level CfgGuerrillaFactions the cyclers list.
+#   3. The fixture's patched pbos are gitignored (third-party APL-SA
+#      content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+#      once to generate them from the local @LoBo install.
+#
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims)
+# that would otherwise be fatal; script errors still abort via --autotest.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
+# 600+ MB mod scan on boot plus the Sinai world load after OK.
+timeout = 360
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

@@ -1,8 +1,8 @@
 tags = ["scripting", "guerrilla", "gate-zero", "headless"]
 binary = "PoseidonGame"
-mission = "tests/integration/missions/guerrilla_gatezero.Demo"
-# Generous overall + assertion windows: the QRF-displacement assertion is polled
+mission = "tests/integration/missions/guerrilla_capture.Demo"
+# Generous overall + assertion windows: the displacement assertion is polled
 # in real time (framerate-agnostic), so foot AI needs seconds, not frames.
-timeout = 180
-assert_timeout = 120
+timeout = 240
+assert_timeout = 90
 extra_args = ["--dev"]

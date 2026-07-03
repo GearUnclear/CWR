@@ -1,0 +1,121 @@
+// Guerrilla Mode on Abel (Malden, full CWA 1.99 data) - the per-island data
+// file for the NATIVE-parity integration tests (issue #3 item 5).
+//
+// SHARED-CORE CONTRACT: init.sqs and scripts/ are byte-identical copies of
+// the canonical guerrilla-mode/mission/Guerrilla.Demo mission (enforced by
+// tests/unit/engine/Poseidon/Game/Guerrilla/test_mission_script_core.cpp).
+// ONLY this file and mission.sqm (player start) differ per island - that is
+// the swappable-islands claim this mission exists to prove.
+//
+// Zone geometry (authored for the tests; verified on-land via
+// `PoseidonTools terrain inspect/objects abel.wrp` + CfgWorlds >> Abel):
+//   * Camp     (RESISTANCE) on the coastal plain SE of Houdan; the player
+//     starts here (mission.sqm).
+//   * Outpost  (OCCUPIER, garrison 6) 600 m north of the Camp - INSIDE the
+//     800 m cacheRadius, so the native GarrisonCache spawns it at boot.
+//   * Village  = the real town of Houdan (~600 m NW), an explicit NEUTRAL
+//     CITY zone; the seedCities pass then dedups the town's own Names entry.
+// All three sit within revealRadius of the Camp -> revealed on tick 1.
+
+onLoadMission = "Guerrilla Mode - Abel (native parity)";
+onLoadIntro  = "Liberate Malden, one zone at a time.";
+respawn = 0;
+joinInProgress = 0;
+
+class CfgGuerrillaZones
+{
+    // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
+    // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
+    // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
+    // alertInterval=5; alert*Knows/Heat defaults).  Direct-launch faction
+    // fallbacks are stated explicitly (no new-game UI in a test run):
+    defaultOccupier = "EAST";
+    defaultResistance = "GUER";
+    seedCities = 1;       // auto-seed CITY zones from Abel's named towns
+    seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
+
+    class Zones
+    {
+        // COORDINATE ORDER (load-bearing): position[] is authored in
+        // script/getPos order [easting, northing, elevation] - NOT the
+        // mission.sqm order [easting, ELEVATION, northing]. The engine's
+        // ZoneRegistry::LoadZones documents and enforces this contract.
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";   // generic token, resolved per campaign
+            garrison = 0;
+            support = 100;
+            income = 0;
+            marker = "gmZoneMarker_0";
+            position[] = {7600, 5700, 17};
+        };
+        class Village
+        {
+            name = "Village";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 20;
+            marker = "gmZoneMarker_1";
+            position[] = {7117, 6069, 35};  // Houdan (CfgWorlds >> Abel >> Names)
+        };
+        class Outpost
+        {
+            name = "Outpost";
+            type = "OUTPOST";
+            owner = "OCCUPIER";     // generic token, resolved per campaign
+            garrison = 6;
+            income = 25;
+            marker = "gmZoneMarker_2";
+            position[] = {7600, 6300, 25};
+        };
+    };
+};
+
+// Faction descriptors for the FULL CWA 1.99 dataset.  Every classname below
+// was verified against Bin\CONFIG.BIN (PoseidonTools config search/dump).
+// NOTE the OFP magazine convention: simple weapons ARE their own magazine
+// class (CfgWeapons AK47 has scopeMagazine=2), so baseMagazine/loot*Mag reuse
+// the weapon classname - there is no "AK47Mag" class in this dataset.
+class CfgGuerrillaFactions
+{
+    class EAST // occupier descriptor
+    {
+        side = "EAST";
+        // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
+        tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
+        tierThresholds[] = {3, 5};
+        // QRF escort: trucks below WL3, APC from WL3 (qrf.sqs gate)
+        vehicles[] = {"Ural", "BMP"};
+        vehicleThreshold = 3;
+        officer = "OfficerE";
+    };
+    class GUER // resistance descriptor
+    {
+        side = "GUER";
+        tiers[] = {"SoldierGB"};
+        tierThresholds[] = {};
+        vehicles[] = {}; // none in phase 1
+        officer = "SoldierGB";
+
+        holdClass = "SoldierGB";
+        holdCount = 3;
+        recruitFighter = "SoldierGB";
+        recruitSpecialist = "SoldierGMG";
+        companionClass = "SoldierGB";
+
+        baseWeapon = "AK47";
+        baseMagazine = "AK47";
+        lootRiflemanWeapon = "AK47";
+        lootRiflemanMag = "AK47";
+        lootMedicWeapon = "AK47";
+        lootMedicMag = "AK47";
+        lootMGWeapon = "PK";
+        lootMGMag = "PK";
+        lootATWeapon = "RPGLauncher";
+        lootATMag = "RPGLauncher";
+        lootSniperWeapon = "SVDDragunov";
+        lootSniperMag = "SVDDragunov";
+    };
+};

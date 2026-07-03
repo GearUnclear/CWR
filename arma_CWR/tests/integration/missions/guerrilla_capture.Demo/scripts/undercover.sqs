@@ -1,0 +1,45 @@
+; ============================================================================
+;  undercover.sqs  -  disguise: establish cover, feed the native break, react.
+; ----------------------------------------------------------------------------
+;  Split of responsibilities with the native AlertMachine:
+;    * gmUndercover is SCRIPT-OWNED. This file establishes cover at boot
+;      (gmUndercover = true + setCaptive true, exactly as the old
+;      escalation.sqs did) and drops it on a break. The engine only READS
+;      the global each alert tick.
+;    * The engine natively polls the vehicle-mount half of the break
+;      ((vehicle aP) != aP) and spikes Heat on the nearest zone itself.
+;    * The fired-weapon half stays scripted: a player "fired" event handler
+;      calls gmBreakUndercover (latched, consumed by the next alert tick,
+;      only effective while gmUndercover is true).
+;    * On the native "undercoverBroken" event this manager un-captives the
+;      player so occupiers re-acquire him (old alert.sqs break block; the
+;      Heat spike that block also applied is native now).
+;
+;  EVENT-QUEUE CONSUMER: drains gmEvtUcBroken ([reason]).
+;  OWNS: gmUndercover, gmEvtUcBroken (consumer), the player's fired-EH.
+;  READS: gmWarLevel (escalation.sqs keeps gmUndercoverDetect updated).
+;  Re-establishing cover after a break (disguise swap) stays a Phase-2 hook,
+;  matching the old scripts: one break is permanent for the campaign.
+; ============================================================================
+@GM_LIB_READY
+
+; ---- establish the breakable cover ONCE at boot ------------------------------
+gmUndercover = true
+aP setCaptive true
+gmUndercoverDetect = gmWarLevel / 10
+
+; fired-weapon break trigger. NOTE: deliberately NOT a "carries a weapon" test -
+; the guerrilla is always armed; only actually firing blows the disguise.
+aP addEventHandler ["fired", {gmBreakUndercover "fired"}]
+
+; ============================================================================
+;  MAIN LOOP - consume the native break event
+; ============================================================================
+#loop
+~2
+? (count gmEvtUcBroken) < 1 : goto "loop"
+GM_uBatch = gmEvtUcBroken + []; gmEvtUcBroken = []
+gmUndercover = false
+aP setCaptive false
+hint "Cover blown - the occupiers are onto you."
+goto "loop"

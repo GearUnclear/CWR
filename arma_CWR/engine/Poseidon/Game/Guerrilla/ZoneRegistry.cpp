@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
+#include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -13,9 +14,12 @@
 #include <Poseidon/AI/AICore.hpp>              // markersMap
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp> // ArcadeMarkerInfo
 
+#include <Poseidon/Foundation/Enums/EnumNames.hpp> // GetEnumValue<TargetSide>
+#include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
+#include <stdio.h>
 #include <string.h>
 
 namespace Poseidon::Guerrilla
@@ -45,6 +49,46 @@ static float Dist2DSq(float ax, float az, float bx, float bz)
     return dx * dx + dz * dz;
 }
 
+AICenter* FindSideCenter(const char* sideName)
+{
+    using Poseidon::Foundation::GetEnumValue;
+    if (!sideName || !GWorld)
+    {
+        return nullptr;
+    }
+    TargetSide side = GetEnumValue<TargetSide>(sideName);
+    if ((int)side < 0)
+    {
+        // unknown side name: Foundation's GetEnumValue returns -1 (NOT the
+        // legacy INT_MIN sentinel). GetCenter would also fall through to
+        // null for any unmatched value; the explicit check documents it.
+        return nullptr;
+    }
+    return GWorld->GetCenter(side);
+}
+
+// script/campaign global published by the new-game UI (OptionsUIApp VarSets
+// kGuerrillaVarOccupier / kGuerrillaVarResistance); read like GarrisonCache's
+// ReadWarLevel - VarGet with the lowercased name, nil tolerated
+static RString ReadSideSelection(const char* lowercaseName)
+{
+    if (!GWorld)
+    {
+        return RString();
+    }
+    GameState* gstate = GWorld->GetGameState();
+    if (!gstate)
+    {
+        return RString();
+    }
+    GameValue value = gstate->VarGet(lowercaseName);
+    if (value.GetType() != GameString)
+    {
+        return RString();
+    }
+    return (RString)value;
+}
+
 // ---------------------------------------------------------------------------
 // lifecycle / config
 // ---------------------------------------------------------------------------
@@ -54,12 +98,16 @@ void ZoneRegistry::Clear()
     _zones.Clear();
     _factions.Clear();
     _tuning = ZoneTuning();
+    _occupierSide = "EAST";
+    _resistanceSide = "GUER";
     for (int i = 0; i < NZoneEventTypes; i++)
     {
         _handlers[i] = RString();
     }
     _accum = 0;
     _pending.Clear();
+    _pendingOccupierSide = RString();
+    _pendingResistanceSide = RString();
     _pendingLoaded = false;
     _loadedSaveVersion = 0;
     // the alert layer lives and dies with the zone registry
@@ -84,28 +132,104 @@ void ZoneRegistry::LoadFromConfig()
     {
         factions = Pars.FindEntry("CfgGuerrillaFactions");
     }
-    LoadFromParams(zones, factions);
+    // new-game faction selections (nil outside a Guerrilla campaign)
+    RString selOccupier = ReadSideSelection("gmseloccupier");
+    RString selResistance = ReadSideSelection("gmselresistance");
+    // the active world's named locations, for the optional CITY auto-seed
+    // (same lookup the map drawing uses - Pars >> "CfgWorlds" >> worldname)
+    const ParamEntry* names = nullptr;
+    if (const ParamEntry* worlds = Pars.FindEntry("CfgWorlds"))
+    {
+        if (const ParamEntry* world = worlds->FindEntry(Glob.header.worldname))
+        {
+            names = world->FindEntry("Names");
+        }
+    }
+    LoadFromParams(zones, factions, selOccupier, selResistance, names);
     // alert tunables share the CfgGuerrillaZones class; loading here (not in
     // LoadFromParams) keeps the testable core free of singleton side effects
     AlertMachine::Instance().LoadFromParams(zones);
 }
 
-void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg)
+void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
+                                  const char* selResistance, const ParamEntry* worldNamesCfg)
 {
     // rebuilds the config-derived tables only; event handlers and any
     // pending savegame rows are preserved (see Serialize)
     _zones.Clear();
     _factions.Clear();
     _tuning = ZoneTuning();
+    _occupierSide = "EAST";
+    _resistanceSide = "GUER";
     _accum = 0;
 
+    // factions first: the zone table's OCCUPIER/RESISTANCE owner tokens
+    // resolve against the sides picked out of the faction table
+    if (factionsCfg)
+    {
+        LoadFactions(*factionsCfg);
+    }
+    // side precedence: gmSel* selections (new-game UI) > the mission's
+    // defaultOccupier/defaultResistance config keys (direct launches, no
+    // UI) > the built-in EAST/GUER defaults.  ResolveSides overwrites only
+    // on a faction match, so applying the config keys first and the
+    // selections on top yields exactly that order.
+    if (zonesCfg)
+    {
+        RString defOccupier = zonesCfg->ReadValue("defaultOccupier", RString());
+        RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
+        ResolveSides(defOccupier, defResistance);
+    }
+    ResolveSides(selOccupier, selResistance);
     if (zonesCfg)
     {
         LoadZones(*zonesCfg);
     }
-    if (factionsCfg)
+    if (_tuning.seedCities && worldNamesCfg)
     {
-        LoadFactions(*factionsCfg);
+        SeedCityZones(*worldNamesCfg);
+    }
+}
+
+void ZoneRegistry::ResolveSides(const char* selOccupier, const char* selResistance)
+{
+    // a selection is a CfgGuerrillaFactions class name or a side string;
+    // either way the resolved side is the matched faction's side field.
+    // Unmatched or empty selections keep the current (default) sides.
+    if (selOccupier && *selOccupier)
+    {
+        if (const FactionRecord* f = FindFaction(selOccupier))
+        {
+            _occupierSide = f->side;
+        }
+    }
+    if (selResistance && *selResistance)
+    {
+        if (const FactionRecord* f = FindFaction(selResistance))
+        {
+            _resistanceSide = f->side;
+        }
+    }
+}
+
+RString ZoneRegistry::ResolveOwnerToken(const RString& owner) const
+{
+    if (stricmp(owner, "OCCUPIER") == 0)
+    {
+        return _occupierSide;
+    }
+    if (stricmp(owner, "RESISTANCE") == 0)
+    {
+        return _resistanceSide;
+    }
+    return owner;
+}
+
+void ZoneRegistry::ApplyOwnerTokens()
+{
+    for (int i = 0; i < _zones.Size(); i++)
+    {
+        _zones[i].owner = ResolveOwnerToken(_zones[i].ownerConfig);
     }
 }
 
@@ -120,6 +244,8 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.heatCapSpike = cfg.ReadValue("heatCapSpike", _tuning.heatCapSpike);
     _tuning.defaultIncome = cfg.ReadValue("defaultIncome", _tuning.defaultIncome);
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
+    _tuning.seedCities = cfg.ReadValue("seedCities", _tuning.seedCities ? 1.0f : 0.0f) != 0.0f;
+    _tuning.seedCitySupport = cfg.ReadValue("seedCitySupport", _tuning.seedCitySupport);
 
     const ParamEntry* zones = cfg.FindEntry("Zones");
     if (!zones)
@@ -136,7 +262,10 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
         ZoneRecord z;
         z.name = e.ReadValue("name", RString(e.GetName()));
         z.type = e.ReadValue("type", RString("OUTPOST"));
-        z.owner = e.ReadValue("owner", RString("NEUTRAL"));
+        // owner accepts the generic "OCCUPIER"/"RESISTANCE" tokens next to
+        // literal side strings; the raw value is kept for re-resolution
+        z.ownerConfig = e.ReadValue("owner", RString("NEUTRAL"));
+        z.owner = ResolveOwnerToken(z.ownerConfig);
         z.garrison = e.ReadValue("garrison", 0.0f);
         z.support = e.ReadValue("support", 0.0f);
         z.income = e.ReadValue("income", 0.0f);
@@ -166,6 +295,7 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
             continue;
         }
         FactionRecord f;
+        f.className = e.GetName();
         f.side = e.ReadValue("side", RString(e.GetName()));
         f.vehicleThreshold = e.ReadValue("vehicleThreshold", f.vehicleThreshold);
 
@@ -209,6 +339,75 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
             f.values.Add(nv);
         }
         _factions.Add(f);
+    }
+}
+
+// CITY auto-seed from the world's named locations (CfgWorlds >> <world> >>
+// Names).  OFP-era Names entries carry only name + a 2D position[] {x,z}
+// (see CStaticMap::DrawName) - every entry is a town, so type-less entries
+// are accepted; an Arma-style type entry, when present, must be a city-like
+// location type.
+void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
+{
+    const float dedupSq = 300.0f * 300.0f; // skip near explicit/seeded zones
+    int seeded = 0;
+    for (int i = 0; i < namesCfg.GetEntryCount(); i++)
+    {
+        const ParamEntry& e = namesCfg.GetEntry(i);
+        if (!e.IsClass())
+        {
+            continue;
+        }
+        RString type = e.ReadValue("type", RString());
+        if (type.GetLength() > 0 && stricmp(type, "NameCity") != 0 && stricmp(type, "NameCityCapital") != 0 &&
+            stricmp(type, "NameVillage") != 0)
+        {
+            continue; // typed non-town location (rocks, hills, ...)
+        }
+        const ParamEntry* pos = e.FindEntry("position");
+        if (!pos || !pos->IsArray() || pos->GetSize() < 2)
+        {
+            continue;
+        }
+        float easting = (*pos)[0];
+        float northing = (*pos)[1];
+        float elevation = pos->GetSize() >= 3 ? (float)(*pos)[2] : 0.0f;
+
+        RString name = e.ReadValue("name", RString(e.GetName()));
+        if (name.GetLength() == 0)
+        {
+            name = e.GetName(); // Names entries often ship name=""
+        }
+        // dedup: a location on top of a configured (or already seeded) zone
+        // stays that zone's business; a name clash would break the name-keyed
+        // savegame matching
+        bool skip = FindZoneIndex(name) >= 0;
+        for (int j = 0; j < _zones.Size() && !skip; j++)
+        {
+            skip = Dist2DSq(easting, northing, _zones[j].pos.X(), _zones[j].pos.Z()) < dedupSq;
+        }
+        if (skip)
+        {
+            continue;
+        }
+        if (_zones.Size() >= MaxZones)
+        {
+            RptF("ZoneRegistry: zone cap (%d) reached seeding cities - remaining Names entries skipped", MaxZones);
+            return;
+        }
+
+        ZoneRecord z;
+        z.name = name;
+        z.type = "CITY";
+        z.ownerConfig = "NEUTRAL";
+        z.owner = "NEUTRAL";
+        z.support = _tuning.seedCitySupport;
+        char marker[32];
+        snprintf(marker, sizeof(marker), "gmZoneCity_%d", seeded);
+        z.marker = marker;
+        z.pos = Vector3(easting, elevation, northing);
+        _zones.Add(z);
+        seeded++;
     }
 }
 
@@ -278,15 +477,22 @@ void ZoneRegistry::HeatDecay(int index, float amount)
     }
 }
 
-const FactionRecord* ZoneRegistry::FindFaction(const char* side) const
+const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
 {
-    if (!side)
+    if (!sideOrClass)
     {
         return nullptr;
     }
     for (int i = 0; i < _factions.Size(); i++)
     {
-        if (stricmp(_factions[i].side, side) == 0)
+        if (stricmp(_factions[i].side, sideOrClass) == 0)
+        {
+            return &_factions[i];
+        }
+    }
+    for (int i = 0; i < _factions.Size(); i++)
+    {
+        if (stricmp(_factions[i].className, sideOrClass) == 0)
         {
             return &_factions[i];
         }
@@ -467,15 +673,16 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     const float revealSq = _tuning.revealRadius * _tuning.revealRadius;
     const float cacheSq = _tuning.cacheRadius * _tuning.cacheRadius;
 
-    // fog-of-war: GUER-owned, or within revealRadius of a GUER-owned zone
+    // fog-of-war: resistance-owned, or within revealRadius of a
+    // resistance-owned zone
     for (int i = 0; i < n; i++)
     {
         ZoneRecord& z = _zones[i];
-        bool revealed = stricmp(z.owner, "GUER") == 0;
+        bool revealed = stricmp(z.owner, _resistanceSide) == 0;
         for (int j = 0; !revealed && j < n; j++)
         {
             const ZoneRecord& other = _zones[j];
-            if (stricmp(other.owner, "GUER") != 0)
+            if (stricmp(other.owner, _resistanceSide) != 0)
             {
                 continue;
             }
@@ -512,11 +719,12 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         bool isCity = stricmp(z.type, "CITY") == 0;
 
         // military: flips when the occupier reserve and live occupiers are
-        // gone and a live GUER unit stands in the zone area
-        bool milCap = !isCity && stricmp(z.owner, "EAST") == 0 && guerHere && z.liveOccupiers < 1 && z.garrison < 1;
+        // gone and a live resistance unit stands in the zone area
+        bool milCap =
+            !isCity && stricmp(z.owner, _occupierSide) == 0 && guerHere && z.liveOccupiers < 1 && z.garrison < 1;
 
-        // city: support accrues while a GUER unit is present, flips on the
-        // threshold - never on kills
+        // city: support accrues while a resistance unit is present, flips on
+        // the threshold - never on kills
         bool cityCap = false;
         if (isCity && stricmp(z.owner, "NEUTRAL") == 0)
         {
@@ -536,7 +744,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             continue;
         }
 
-        z.owner = "GUER";
+        z.owner = _resistanceSide;
         z.heat += _tuning.heatCapSpike;
         if (z.heat > 100)
         {
@@ -588,9 +796,10 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
         in.playerZ = player->Position().Z();
     }
 
-    // enumerate the guerrilla side's live units; the player is included
-    // here when playing GUER
-    AICenter* guer = world->GetGuerrilaCenter();
+    // enumerate the resistance side's live units; the player is included
+    // here when playing that side.  No center yet == no units (do NOT
+    // create one here - GarrisonCache::EnsureCenter is the creating path)
+    AICenter* guer = FindSideCenter(_resistanceSide);
     if (!guer)
     {
         return;
@@ -641,17 +850,17 @@ void ZoneRegistry::UpdateMarkers()
         const char* color = "ColorBlack";
         if (z.revealed)
         {
-            if (stricmp(z.owner, "GUER") == 0)
+            if (stricmp(z.owner, _resistanceSide) == 0)
             {
                 color = "ColorGreen";
             }
-            else if (stricmp(z.owner, "EAST") == 0)
+            else if (stricmp(z.owner, _occupierSide) == 0)
             {
                 color = "ColorRed";
             }
             else
             {
-                color = "ColorYellow";
+                color = "ColorYellow"; // NEUTRAL and third parties
             }
         }
         RString text = z.revealed ? z.name : RString("");
@@ -785,6 +994,19 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     int saveVersion = GuerrillaSaveVersion;
     PARAM_CHECK(ar.Serialize("guerrillaSaveVersion", saveVersion, 1, GuerrillaSaveVersion))
 
+    // campaign faction sides - additive, presence-tolerant fields (no
+    // GuerrillaSaveVersion bump): absent in older saves, which then keep
+    // the config/var-resolved values applied by LoadFromConfig below.
+    // Parked in members because scalar reads happen on the first load pass
+    // only, while application must wait for the second (like _pending).
+    if (ar.IsSaving())
+    {
+        _pendingOccupierSide = _occupierSide;
+        _pendingResistanceSide = _resistanceSide;
+    }
+    PARAM_CHECK(ar.Serialize("occupierSide", _pendingOccupierSide, 1, RString()))
+    PARAM_CHECK(ar.Serialize("resistanceSide", _pendingResistanceSide, 1, RString()))
+
     PARAM_CHECK(ar.Serialize("onCaptured", _handlers[ZECaptured], 1, RString()))
     PARAM_CHECK(ar.Serialize("onSupportThreshold", _handlers[ZESupportThreshold], 1, RString()))
     PARAM_CHECK(ar.Serialize("onRevealed", _handlers[ZERevealed], 1, RString()))
@@ -794,6 +1016,8 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     if (ar.IsSaving())
     {
         _pending.Clear();
+        _pendingOccupierSide = RString();
+        _pendingResistanceSide = RString();
     }
     else if (ar.GetPass() == ParamArchive::PassSecond)
     {
@@ -803,6 +1027,20 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
         // it.  Doing this on the first pass would read a stale or empty
         // ExtParsMission.
         LoadFromConfig();
+        // a campaign remembers its factions: the saved sides win over the
+        // config/var-resolved ones, and the zone table's OCCUPIER/RESISTANCE
+        // tokens are re-mapped before the dynamic state overlays it
+        if (_pendingOccupierSide.GetLength() > 0)
+        {
+            _occupierSide = _pendingOccupierSide;
+        }
+        if (_pendingResistanceSide.GetLength() > 0)
+        {
+            _resistanceSide = _pendingResistanceSide;
+        }
+        ApplyOwnerTokens();
+        _pendingOccupierSide = RString();
+        _pendingResistanceSide = RString();
         ApplyPendingLoad();
         _pending.Clear();
         // queue the post-load script notification; the serialized handler

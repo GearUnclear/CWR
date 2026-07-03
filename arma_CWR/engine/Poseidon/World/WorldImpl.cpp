@@ -76,7 +76,7 @@ bool DoEditorChildControllerUiAction(ControlsContainer* display, Poseidon::Contr
     }
     return false;
 }
-}
+} // namespace
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
@@ -1126,17 +1126,20 @@ bool World::CheckAddon(const ParamEntry& entry)
     {
         return true;
     }
-    if (!_options)
-    {
-        return false;
-    }
     RString addon = entry.GetOwner();
-    bool registered = _options->DoUnregisteredAddonUsed(addon);
-    if (registered)
+    if (_options && _options->DoUnregisteredAddonUsed(addon))
     {
         _activeAddons.Add(addon);
+        return true;
     }
-    return registered;
+    // The per-entry visibility rejection is DEBUG-only (ParamOwnerList,
+    // ParamFileCtx.cpp) - this is the point where a denial actually blocks
+    // class resolution, which otherwise surfaces as a bare "could not boot"
+    // under --autotest. WARN on purpose: must not trip --strict (only
+    // err-level messages latch the strict abort, see ErrorCountingSink).
+    LOG_WARN(World, "Access denied: {} - owner addon '{}' is not activated (missing from the mission's addOns[]?)",
+             (const char*)entry.GetContext(), (const char*)addon);
+    return false;
 }
 
 void World::SwitchLandscape(const char* name)
@@ -1832,9 +1835,25 @@ LSError World::Serialize(ParamArchive& ar, int message)
         SetBaseDirectory(dir);
         RString mission;
         PARAM_CHECK(ar.Serialize("mission", mission, 1, ""))
-        SetMission(world, mission);
-        PARAM_CHECK(ar.Serialize("subdirectory", dir, 1, ""))
-        SetBaseSubdirectory(dir);
+        // Restore the saved subdirectory BEFORE SetMission: SetMission reparses
+        // the mission's description.ext (ExtParsMission) and stringtable via
+        // GetMissionDirectory() = directory + subdirectory + mission.world, so
+        // the 2-arg overload's default "missions/" subdirectory broke every
+        // save whose mission lives elsewhere (mpmissions/, user-dir missions,
+        // --test-mission staging): ExtParsMission silently loaded EMPTY - any
+        // config-activated mission system (class CfgGuerrillaZones, ...) lost
+        // its static tables on load. Empty-key saves keep the old fallback.
+        RString subdir;
+        PARAM_CHECK(ar.Serialize("subdirectory", subdir, 1, ""))
+        if (subdir.GetLength() > 0)
+        {
+            SetMission(world, mission, subdir);
+        }
+        else
+        {
+            SetMission(world, mission);
+        }
+        SetBaseSubdirectory(subdir);
         PARAM_CHECK(ar.Serialize("filenameReal", Glob.header.filenameReal, 1, ""))
 
         ParseMission(false);

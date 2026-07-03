@@ -1,18 +1,14 @@
 ; ============================================================================
 ;  recruit_action.sqs  -  thin addAction dispatcher for the recruit system.
 ; ----------------------------------------------------------------------------
-;  This is the script FILE addAction runs when the player pulls a Camp menu
-;  entry. In this engine addAction's 2nd element is a script file name, opened
-;  and run with _this bound to [target, caller, actionId]
-;  (EntityAI::AddUserAction -> Script(desc->script,[this,person,id]),
-;   VehicleAIPilot.cpp:1064-1072).
+;  addAction runs this FILE with _this bound to [target, caller, actionId]
+;  (EntityAI::AddUserAction -> Script(desc->script, [this, person, id])).
 ;
-;  It deliberately does NO state mutation: it only ENQUEUES the request so that
+;  It deliberately does NO state mutation: it only ENQUEUES the request so
 ;  recruit.sqs's loop remains the single writer of GM_PLAYER_GROUPS and the
 ;  gmResources/gmManpower debits. recruit.sqs polls gmReqPending every second
-;  and dispatches on gmReqId (matched against gmActRecruit/gmActSpec/gmActTrain).
-;
-;  Confirmed cmds only: select (array), assignment. No `~` (runs unscheduled).
+;  and dispatches on gmReqId. Same queue-and-consume pattern the native-event
+;  handlers use (see init.sqs).
 ; ============================================================================
 
 gmReqId = _this select 2

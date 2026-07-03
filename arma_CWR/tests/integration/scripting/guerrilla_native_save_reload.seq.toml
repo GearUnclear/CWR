@@ -1,0 +1,10 @@
+# Guerrilla Mode NATIVE parity - save/reload round-trip (issue #3 item 5).
+#
+# The retired persistence.sqs is gone: zones / alert FSM / garrison cache /
+# native event handlers serialize in the engine (ZoneRegistry / AlertMachine /
+# GarrisonCache::Serialize) and script globals ride GGameState. The ordered
+# phases (01_mutate_save, 02_reload) each launch the game fresh but share one
+# POSEIDON_USER_DIR, so the binary save phase 01 writes with triSaveGame
+# (UserDir/Saved/Tmp/gnat.fps) is the one phase 02 restores with triLoadGame -
+# a genuine cross-process round-trip on full CWA data (Abel).
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]

@@ -289,8 +289,8 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         cont->EnableCtrl(false);
 
     // Enable/disable module buttons based on registered game modules
-    for (int idc : {IDC_MAIN_SINGLE, IDC_MAIN_GAME, IDC_MAIN_MULTIPLAYER, IDC_MAIN_EDITOR, IDC_MAIN_MODS,
-                    IDC_MAIN_GUERRILLA})
+    for (int idc :
+         {IDC_MAIN_SINGLE, IDC_MAIN_GAME, IDC_MAIN_MULTIPLAYER, IDC_MAIN_EDITOR, IDC_MAIN_MODS, IDC_MAIN_GUERRILLA})
         if (IControl* btn = GetCtrl(idc))
             btn->EnableCtrl(GameModuleRegistry::FindByIDC(idc) != nullptr);
 
@@ -949,14 +949,26 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 // handler below re-applies that bank via GameState::VarSet
                 // after ParseMission, so init.sqs reliably sees them.
                 GGameState.VarSet(kGuerrillaVarIsland, GameValue(island));
-                GGameState.VarSet(kGuerrillaVarOccupier, GameValue(occupier));
-                GGameState.VarSet(kGuerrillaVarResistance, GameValue(resistance));
                 GameVariable varIsland(kGuerrillaVarIsland, GameValue(island));
-                GameVariable varOccupier(kGuerrillaVarOccupier, GameValue(occupier));
-                GameVariable varResistance(kGuerrillaVarResistance, GameValue(resistance));
                 GStats._campaign.AddVariable(varIsland);
-                GStats._campaign.AddVariable(varOccupier);
-                GStats._campaign.AddVariable(varResistance);
+                // Empty faction selections mean the cyclers had no real
+                // CfgGuerrillaFactions to offer (built-in fallback UI):
+                // publish nothing so the mission's defaultOccupier /
+                // defaultResistance config keys keep precedence in
+                // ZoneRegistry::LoadFromParams. A published "EAST"/"GUER"
+                // would match a mission faction by side and override them.
+                if (occupier.GetLength() > 0)
+                {
+                    GGameState.VarSet(kGuerrillaVarOccupier, GameValue(occupier));
+                    GameVariable varOccupier(kGuerrillaVarOccupier, GameValue(occupier));
+                    GStats._campaign.AddVariable(varOccupier);
+                }
+                if (resistance.GetLength() > 0)
+                {
+                    GGameState.VarSet(kGuerrillaVarResistance, GameValue(resistance));
+                    GameVariable varResistance(kGuerrillaVarResistance, GameValue(resistance));
+                    GStats._campaign.AddVariable(varResistance);
+                }
 
                 Display::OnChildDestroyed(idd, exit);
                 ApplyCurrentMissionViewDistance();

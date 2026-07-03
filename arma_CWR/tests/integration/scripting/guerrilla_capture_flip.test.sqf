@@ -1,60 +1,67 @@
 // ============================================================================
-//  Guerrilla Mode - capture-flip integration test (Phase-1 MVP core loop).
-//    Clear the EAST Outpost garrison + stand a friendly (the player) inside the
-//    zone, then assert zones.sqs flips GM_Z_OWNER to "GUER" AND recolors the
-//    zone marker (red -> green).
+//  Guerrilla Mode - capture-trigger flip on the NATIVE engine surface.
+//    Demo-data twin of guerrilla_native_capture.test.sqf (full-CWA/Abel); the
+//    retired zones.sqs capture poll is ZoneRegistry::EvaluateTick now. Proves:
+//      1. pre-state: the Outpost is occupier-owned, its marker painted RED
+//         natively (revealed: the resistance Camp is within revealRadius);
+//      2. clearing the garrison the engine-legit way (delete the live cached
+//         bodies, force-despawn for the survivor write-back, zero the
+//         reserve) + a resistance unit inside zoneArea flips the owner to
+//         gmResistanceSide on the next native zone tick;
+//      3. the marker recolors GREEN natively;
+//      4. the scripted reaction ran: capture.sqs consumed the native
+//         "captured" event and spawned the hold garrison (GM_cGrp, 3 men).
 //
-//  Runs against the REAL mode: guerrilla_capture.Demo bootstraps init.sqs +
-//  every manager, so this exercises the shipped zones.sqs capture path (not a
-//  reimplementation). Outpost is zone index 2 (seed order Camp,Village,Outpost).
-//
-//  Determinism: the garrison is *cleared* by deleting the live occupier bodies
-//  and zeroing the cached reserve GM_Z_GAR - the exact state "you killed the
-//  garrison" produces - rather than relying on an AI firefight. All commands are
-//  confirmed (setPos :1238, deleteVehicle :1028, units :979, getMarkerColor
-//  :955, count/select/set/forEach). GM_Z_* index constants come from init.sqs.
-//  gc* globals persist across the per-statement harness evaluation.
+//  Runs against the REAL mode: guerrilla_capture.Demo's init.sqs + scripts/
+//  are byte-identical to the canonical Guerrilla.Demo core (enforced by
+//  test_mission_script_core.cpp), so this exercises the shipped scripts.
 // ============================================================================
 
-// -- mode must be fully booted (init.sqs published the helper table) ----------
 triSimUntil { GM_LIB_READY }
-triAssertEq [(count GM_ZONES), 3]
+gcOut = gmZoneIndex "Outpost"
+triAssertGe [gcOut, 0]
 
-// -- zones.sqs is live once it has created + colored the Outpost marker. The
-//    Outpost is within reveal range of the GUER Camp, so it paints red (revealed
-//    EAST) on the first tick. This also asserts the pre-capture owner state.
+// -- pre-state: occupier-owned, revealed -> native marker repaint painted RED -
 triSimUntil { (getMarkerColor "gmZoneMarker_2") == "ColorRed" }
-triAssertEq [((GM_ZONES select 2) select GM_Z_OWNER), "EAST"]
+triAssertEq [((gmZone gcOut) select 2), gmOccupierSide]
 
-// -- stand the player inside the Outpost (ground z=0; GM_Z_POS is getPos order) -
-gcPos = [((GM_ZONES select 2) select GM_Z_POS) select 0, ((GM_ZONES select 2) select GM_Z_POS) select 1, 0]
-player setPos gcPos
+// -- the garrison must be cached in before we can kill it (the player boots
+//    at the Camp, ~290 m from the Outpost - inside the 800 m cacheRadius) ----
+triSimUntil { gmGarrisonSpawned gcOut }
+triSimUntil { (gmGarrisonLive gcOut) >= 8 }
 
-// -- CLEAR the garrison: zero the reserve first (so spawning.sqs cannot re-spawn:
-//    its spawn gate needs GM_Z_GAR>0), then delete every live cached occupier and
-//    empty the live-group cache. This is the "garrison wiped out" state. -------
-(GM_ZONES select 2) set [GM_Z_GAR, 0]
+// -- CLEAR the garrison: delete every live cached occupier (spawned stays
+//    true, reserve is already 0, so nothing can respawn mid-sequence), then
+//    force the despawn for the authoritative survivor write-back (0). --------
 gcUnits = []
-"gcUnits = gcUnits + units _x" forEach GM_CACHE_GROUPS
+"gcUnits = gcUnits + (units _x)" forEach (gmGarrisonGroups gcOut)
 {deleteVehicle _x} forEach gcUnits
-GM_CACHE_GROUPS = []
-GM_CACHE_ZONEIDX = []
+gmGarrisonForceDespawn gcOut
+gmZoneSet [gcOut, "garrison", 0]
 
-// belt-and-suspenders against a spawn that was mid-flight on the sim thread
+// -- stand the player (a live resistance unit) inside the zone area -----------
+gcPos = (gmZone gcOut) select 8
+player setPos [gcPos select 0, gcPos select 1, 0]
+
+// belt-and-suspenders against a cache tick that was mid-flight on the sim
+// thread when the deletes landed
 triSimFrames 10
-(GM_ZONES select 2) set [GM_Z_GAR, 0]
-gcUnits2 = []
-"gcUnits2 = gcUnits2 + units _x" forEach GM_CACHE_GROUPS
-{deleteVehicle _x} forEach gcUnits2
-GM_CACHE_GROUPS = []
-GM_CACHE_ZONEIDX = []
+gmGarrisonForceDespawn gcOut
+gmZoneSet [gcOut, "garrison", 0]
 
-// -- ASSERT the flip: zones.sqs (~3s tick) sees no live occupiers, no cached
-//    reserve, and a friendly in the area -> GM_Z_OWNER becomes "GUER". ---------
-triSimUntil { ((GM_ZONES select 2) select GM_Z_OWNER) == "GUER" }
+// -- THE FLIP: native zone tick sees liveOccupiers<1 && garrison<1 && a
+//    resistance unit in zoneArea -> owner becomes the resistance side --------
+triSimUntil { ((gmZone gcOut) select 2) == gmResistanceSide }
 
-// -- ASSERT the marker recolored to the GUER color on the same capture path ---
-triSimFrames 10
-triAssertEq [(getMarkerColor "gmZoneMarker_2"), "ColorGreen"]
+// -- native marker recolor on the capture path --------------------------------
+triSimUntil { (getMarkerColor "gmZoneMarker_2") == "ColorGreen" }
+
+// -- native income tap stayed open + heat spiked on capture -------------------
+triAssertGe [((gmZone gcOut) select 5), 25]
+triAssertGe [((gmZone gcOut) select 6), 20]
+
+// -- scripted REACTION: capture.sqs spawned the hold garrison -----------------
+triSimUntil { not (isNil "GM_cGrp") }
+triAssertEq [(count units GM_cGrp), 3]
 
 triEndTest

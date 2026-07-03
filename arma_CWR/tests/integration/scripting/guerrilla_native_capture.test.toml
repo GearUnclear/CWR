@@ -1,0 +1,8 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Zone tick ~3s, garrison cache ~5s, capture.sqs manager ~2s; give the
+# flip + reaction chain room across several ticks.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]
