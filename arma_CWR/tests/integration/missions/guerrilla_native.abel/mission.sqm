@@ -20,7 +20,13 @@ class Mission
 					// description.ext class Camp). SQM coordinate order is
 					// [easting, ELEVATION, northing] - the zone config's
 					// position[] is getPos order [easting, northing, elev].
-					position[]={7600.000000,17.000000,5700.000000};
+					// The Camp centre [7600,5700] is just offshore on Abel, so
+					// the player start is nudged ~120 m NW onto the dry fig-tree
+					// plain (nearest land; verified via `PoseidonTools terrain
+					// objects abel.wrp`). Still inside the Camp zoneArea (150 m
+					// radius, ~117 m from centre) so the zone geometry the tests
+					// rely on is unchanged.
+					position[]={7515.000000,20.000000,5790.000000};
 					id=0;
 					side="GUER";
 					vehicle="SoldierGB";
