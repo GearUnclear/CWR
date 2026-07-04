@@ -74,6 +74,10 @@ void Man::ProcessMoveFunction(ActionContextBase* context)
             for (int i = 0; i < NMagazineSlots(); i++)
             {
                 const MagazineSlot& slot = GetMagazineSlot(i);
+                if (!slot._weapon || !slot._muzzle)
+                {
+                    continue;
+                }
                 if (slot._weapon->GetName() == weapon && slot._muzzle->GetName() == muzzle)
                 {
                     iSlot = i;
@@ -104,6 +108,13 @@ void Man::ProcessMoveFunction(ActionContextBase* context)
             if (ENGINE_CONFIG.blood && GRandGen.RandomValue() <= 0.3f)
             {
                 LODShapeWithShadow* shape = GLOB_SCENE->Preloaded(SlopBlood);
+                // Headless/--no-strict preloader returns null when the blood-slop
+                // model fails to load; skip the effect rather than deref null
+                // (matches the footstep-mark guard below). Fixes issues #5/#6.
+                if (!shape)
+                {
+                    break;
+                }
                 float azimut = GRandGen.RandomValue() * H_PI * 2;
 
                 Matrix4 transform(MIdentity);
@@ -298,7 +309,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
         return change;
     }
 
-    if (prim->GetTerminal())
+    if (prim && prim->GetTerminal())
     {
         return change;
     }
@@ -576,15 +587,21 @@ bool Man::ReloadMagazine(int slotIndex, int iMagazine)
 {
     const MagazineSlot& slot = GetMagazineSlot(slotIndex);
     const MuzzleType* muzzle = slot._muzzle;
+    // Public API reachable from the UI action path (InGameUIActions.cpp) with
+    // caller-supplied indices; a slot without a weapon/muzzle would deref null.
+    if (!muzzle || !slot._weapon)
+    {
+        return false;
+    }
 
     bool ret = false;
     if (!IsActionInProgress(MFReload))
     {
         bool reloadOk = false;
         AIUnit* unit = CommanderUnit();
-        if (unit && !muzzle->_autoReload)
+        const Magazine* magazine = GetMagazine(iMagazine);
+        if (unit && magazine && !muzzle->_autoReload)
         {
-            const Magazine* magazine = GetMagazine(iMagazine);
             RString muzzleID = slot._weapon->GetName() + RString("|") + slot._muzzle->GetName();
             Ref<ActionContextDefault> context = new ActionContextDefault;
 

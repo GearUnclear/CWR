@@ -2385,9 +2385,15 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
 #endif
     }
 
-    RStringB recoilName = mode->_recoilName;
-    Ref<RecoilFunction> recoil = RecoilFunctions.New(recoilName);
-    StartRecoil(recoil, GetRecoilFactor());
+    // mode is set only when the magazine has a type and a valid fire mode
+    // (see the mode ? ... guards at the sound/name sites); with no fire mode
+    // there is no recoil, so skip rather than deref null.
+    if (mode)
+    {
+        RStringB recoilName = mode->_recoilName;
+        Ref<RecoilFunction> recoil = RecoilFunctions.New(recoilName);
+        StartRecoil(recoil, GetRecoilFactor());
+    }
 
     if (IsEventHandler(EEFired))
     {

@@ -15,6 +15,9 @@ std::vector<std::string> GRemoteExecLog;
 
 // Convert any GameValue to its display string (for failure messages).
 // Scalars use %g; strings use the raw value (GetString, no quotes).
+// Everything else (bool, array, object, ...) uses the value's own display
+// formatter — GetString() is only meaningful for strings and returns "" for
+// other types, which made bool comparisons degenerate ("" == "").
 static std::string TriValStr(const GameValue& v)
 {
     if (v.GetType() == GameScalar)
@@ -23,16 +26,20 @@ static std::string TriValStr(const GameValue& v)
         snprintf(buf, sizeof(buf), "%g", (float)(GameScalarType)v);
         return buf;
     }
-    return std::string(((RString)(GameStringType)v).Data());
+    if (v.GetType() == GameString)
+        return std::string(((RString)(GameStringType)v).Data());
+    return std::string(v.GetText().Data());
 }
 
-// Truthy: non-zero scalar, non-empty string that is not "0".
+// Truthy: bool value, non-zero scalar, non-empty string that is not "0" or "false".
 static bool TriIsTruthy(const GameValue& v)
 {
+    if (v.GetType() == GameBool)
+        return (bool)(GameBoolType)v;
     if (v.GetType() == GameScalar)
         return (float)(GameScalarType)v != 0.0f;
     std::string s = TriValStr(v);
-    return !s.empty() && s != "0";
+    return !s.empty() && s != "0" && s != "false";
 }
 
 // Count commas in a C string.

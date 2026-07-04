@@ -1419,7 +1419,7 @@ GameValue ObjFire(const GameState* state, GameValuePar oper1, GameValuePar oper2
     for (int i = 0; i < veh->NMagazineSlots(); i++)
     {
         const MagazineSlot& slot = veh->GetMagazineSlot(i);
-        if (stricmp(slot._muzzle->GetName(), muzzle) != 0)
+        if (!slot._muzzle || stricmp(slot._muzzle->GetName(), muzzle) != 0)
         {
             continue;
         }
@@ -1523,7 +1523,7 @@ GameValue ObjFireEx(const GameState* state, GameValuePar oper1, GameValuePar ope
     for (int i = 0; i < veh->NMagazineSlots(); i++)
     {
         const MagazineSlot& slot = veh->GetMagazineSlot(i);
-        if (stricmp(slot._muzzle->GetName(), muzzle) != 0)
+        if (!slot._muzzle || stricmp(slot._muzzle->GetName(), muzzle) != 0)
         {
             continue;
         }

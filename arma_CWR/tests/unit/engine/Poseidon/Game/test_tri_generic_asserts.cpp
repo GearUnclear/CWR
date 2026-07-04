@@ -87,6 +87,10 @@ static GameValue GScalar(float f)
 {
     return GameValue(f);
 }
+static GameValue GBool(bool b)
+{
+    return GameValue(b);
+}
 
 } // namespace
 
@@ -111,9 +115,36 @@ TEST_CASE("triRefute - passes on falsy, fails on truthy", "[tri][generic-assert]
     REQUIRE_THAT(S(TriRefute(nullptr, Arr1(GScalar(1)))), ContainsSubstring("got 1"));
 }
 
+TEST_CASE("triAssert/triRefute - bool values assert on their boolean value", "[tri][generic-assert][triAssert][bool]")
+{
+    InitFixture fix;
+    // Regression (issue #4): bools coerced to "" via GetString, so `triAssert [true]`
+    // failed and bool comparisons degenerated to "" == "".
+    REQUIRE(S(TriAssert(nullptr, Arr1(GBool(true)))) == "OK");
+    REQUIRE_THAT(S(TriAssert(nullptr, Arr1(GBool(false)))), StartsWith("FAIL:expected truthy"));
+    REQUIRE_THAT(S(TriAssert(nullptr, Arr1(GBool(false)))), ContainsSubstring("got false"));
+    REQUIRE(S(TriRefute(nullptr, Arr1(GBool(false)))) == "OK");
+    REQUIRE_THAT(S(TriRefute(nullptr, Arr1(GBool(true)))), StartsWith("FAIL:expected falsy"));
+    REQUIRE_THAT(S(TriRefute(nullptr, Arr1(GBool(true)))), ContainsSubstring("got true"));
+}
+
 // ============================================================================
 // triAssertEq / triAssertNe
 // ============================================================================
+
+TEST_CASE("triAssertEq/triAssertNe - bool equality uses bool display form", "[tri][generic-assert][triAssertEq][bool]")
+{
+    InitFixture fix;
+    REQUIRE(S(TriAssertEq(nullptr, Arr2(GBool(true), GBool(true)))) == "OK");
+    REQUIRE(S(TriAssertEq(nullptr, Arr2(GBool(false), GBool(false)))) == "OK");
+    // Regression (issue #4): this silently passed because both sides stringified to "".
+    REQUIRE_THAT(S(TriAssertEq(nullptr, Arr2(GBool(true), GBool(false)))), StartsWith("FAIL:expected == false"));
+    REQUIRE_THAT(S(TriAssertEq(nullptr, Arr2(GBool(true), GBool(false)))), ContainsSubstring("got true"));
+    REQUIRE(S(TriAssertNe(nullptr, Arr2(GBool(true), GBool(false)))) == "OK");
+    REQUIRE_THAT(S(TriAssertNe(nullptr, Arr2(GBool(true), GBool(true)))), StartsWith("FAIL:expected != true"));
+    // Mixed bool/string comparison: "true" (string) == true (bool) by display form.
+    REQUIRE(S(TriAssertEq(nullptr, Arr2(GBool(true), GStr("true")))) == "OK");
+}
 
 TEST_CASE("triAssertEq - scalar equality", "[tri][generic-assert][triAssertEq]")
 {
