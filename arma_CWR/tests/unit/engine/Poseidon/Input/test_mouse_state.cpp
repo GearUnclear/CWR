@@ -551,15 +551,14 @@ TEST_CASE("MouseState: cursor accumulates across frames", "[input][mouse]")
     MouseState ms;
     MouseState::CursorAccum cursor;
 
-    // Advance the clock a frame apart (~16 ms). The flick cap is now per-second,
-    // so frames must carry a real dt; this small move is well under the cap.
+    // No dt passed → classic one-frame flick budget; this small move is well under it.
     ms.BufferMotion(10.0f, 5.0f);
-    ms.Update(cursor, 0, false, UITime(16), nullptr);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
     float cx1 = cursor.cursorX;
     float cy1 = cursor.cursorY;
 
     ms.BufferMotion(10.0f, 5.0f);
-    ms.Update(cursor, 0, false, UITime(32), nullptr);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
 
     // Cursor should have moved further
     REQUIRE(cursor.cursorX == Catch::Approx(cx1 * 2));
@@ -595,12 +594,12 @@ TEST_CASE("MouseState: no clamp when clamp pointer is null", "[input][mouse]")
     MouseState ms;
     MouseState::CursorAccum cursor;
 
-    // Push cursor way past ±1 over several ~16 ms frames (the per-second flick
-    // cap needs a real dt; four frames of max-speed travel clear ±1 on both axes).
+    // Push cursor way past ±1 (classic flick budget is 0.6/0.4 per frame, so 4 frames
+    // of max-speed travel clear ±1 on both axes).
     for (int i = 0; i < 4; i++)
     {
         ms.BufferMotion(10000.0f, 10000.0f);
-        ms.Update(cursor, 0, false, UITime(16 * (i + 1)), nullptr);
+        ms.Update(cursor, 0, false, UITime(), nullptr);
     }
 
     // Without clamp, cursor can exceed ±1
@@ -608,32 +607,41 @@ TEST_CASE("MouseState: no clamp when clamp pointer is null", "[input][mouse]")
     REQUIRE(cursor.cursorY > 1.0f);
 }
 
-TEST_CASE("MouseState: flick cap is FPS-independent (per-second, not per-frame)", "[input][mouse]")
+TEST_CASE("MouseState: flick clamp is a constant per-frame bound (dt-independent)", "[input][mouse]")
 {
-    // Covering the same wall-clock span (t=0 → 32 ms) at max speed must clamp to the
-    // same total crosshair travel whether it's one 32 ms frame or two 16 ms frames.
-    // The classic clamp was per-frame, so the two-frame path would have moved twice
-    // as far — this asserts the new per-second behavior.
+    // The look path sums raw mouse counts (physical displacement), so the crosshair jump
+    // is bounded by a FIXED per-frame clamp, not a dt-scaled per-second budget.  Feeding
+    // any frame dt (tiny, nominal, a hitch, or the first-frame/degenerate sentinel) clamps
+    // one frame of max-speed motion to exactly the same +-0.6 / +-0.4.
+    const float huge = 100000.0f;
+    for (float dt : {0.008f, 0.016f, 0.032f, 0.1f, 0.3f, 0.0f, -1.0f})
+    {
+        MouseState ms;
+        MouseState::CursorAccum cursor;
+        ms.BufferMotion(huge, huge);
+        ms.Update(cursor, 0, false, UITime(), nullptr, dt);
+
+        REQUIRE(cursor.aimDeltaX == Catch::Approx(0.6f));
+        REQUIRE(cursor.aimDeltaY == Catch::Approx(0.4f));
+    }
+}
+
+TEST_CASE("MouseState: flick clamp is additive per frame (no shared per-second budget)", "[input][mouse]")
+{
+    // Two frames of max-speed motion advance twice one frame's clamped travel: the clamp
+    // is a per-frame ceiling, not a per-second budget shared across frames.  This locks
+    // the reverted (constant) semantics against the dt-scaled velocity cap.
     const float huge = 100000.0f;
 
-    MouseState oneFrame;
-    MouseState::CursorAccum a;
-    oneFrame.BufferMotion(huge, huge);
-    oneFrame.Update(a, 0, false, UITime(0), nullptr); // first frame: 1/60 s budget
-    oneFrame.BufferMotion(huge, huge);
-    oneFrame.Update(a, 0, false, UITime(32), nullptr); // one 32 ms frame
-
-    MouseState twoFrames;
+    MouseState two;
     MouseState::CursorAccum b;
-    twoFrames.BufferMotion(huge, huge);
-    twoFrames.Update(b, 0, false, UITime(0), nullptr); // first frame: 1/60 s budget
-    twoFrames.BufferMotion(huge, huge);
-    twoFrames.Update(b, 0, false, UITime(16), nullptr); // two 16 ms frames
-    twoFrames.BufferMotion(huge, huge);
-    twoFrames.Update(b, 0, false, UITime(32), nullptr);
+    two.BufferMotion(huge, huge);
+    two.Update(b, 0, false, UITime(), nullptr, 0.016f);
+    two.BufferMotion(huge, huge);
+    two.Update(b, 0, false, UITime(), nullptr, 0.016f);
 
-    REQUIRE(a.aimDeltaX == Catch::Approx(b.aimDeltaX));
-    REQUIRE(a.aimDeltaY == Catch::Approx(b.aimDeltaY));
+    REQUIRE(b.aimDeltaX == Catch::Approx(1.2f));
+    REQUIRE(b.aimDeltaY == Catch::Approx(0.8f));
 }
 
 // --- Edge cases: activity timestamps ---

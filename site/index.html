@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="description" content="Uslu dur! is a total overhaul of ARMA: Cold War Assault -- smarter, tougher AI and an all-new Guerrilla Mode where you build an insurgency and liberate an island, zone by zone. Free Steam demo. Not affiliated with Bohemia Interactive.">
+<meta name="description" content="Uslu dur! is a total overhaul of ARMA: Cold War Assault with smarter, tougher AI and an all-new Guerrilla Mode where you build an insurgency and liberate an island, zone by zone. Free Steam demo. Not affiliated with Bohemia Interactive.">
 <meta name="keywords" content="Operation Flashpoint, Cold War Assault, total overhaul, Poseidon, Uslu dur, UD, Guerrilla Mode, Everon, Malden, Kolgujev, Nogova, C++, SQF, Bohemia">
 <meta name="author" content="Uslu dur!">
 <title>:: USLU DUR! :: Total Game Overhaul Field Manual ::</title>
@@ -35,6 +35,7 @@
 	&#9733; NEWS FLASH &#9733; GUERRILLA MODE: liberate an island, one zone at a time &nbsp; // &nbsp;
 	Enemies that flank, suppress and panic like real soldiers &nbsp; // &nbsp;
 	Pick your island. Pick your side. Every game plays different &nbsp; // &nbsp;
+	Fight an occupier that runs checkpoints, curfews and helicopter Fireforce &nbsp; // &nbsp;
 	Free Demo on Steam, app 4819000 &nbsp; // &nbsp; SIGN THE GUESTBOOK &nbsp; &#9733;
 	</span></marquee>
 	</div>
@@ -75,6 +76,7 @@
 		<b class="dim">GAME MODE:</b> Guerrilla<br>
 		<b class="dim">BUILD:</b> <span class="badge wip">Early / Pre-release</span><br>
 		<b class="dim">ISLANDS:</b> 4 (Everon, Malden, Kolgujev, Nogova)<br>
+			<b class="dim">FACTION SWAP:</b> <span class="badge live">Working</span><br>
 		<b class="dim">DEMO:</b> <span class="badge live">Free on Steam</span><br>
 		<hr class="mil">
 		<b class="dim">SYSTEM CLOCK:</b><br>
@@ -111,7 +113,7 @@
 		&nbsp; <span class="dim">FILE: UD-001 / EYES ONLY</span>
 		<p style="margin-top:8px;"><b>Uslu dur!</b> is a <b>total overhaul</b> of <i>ARMA: Cold War
 		Assault</i>, the 2001 classic you know as <i>Operation Flashpoint: Cold War Crisis</i>. Same islands,
-		same guns, same Cold War powder keg &mdash; but the soldiers fighting you now flank, suppress, panic
+		same guns, same Cold War powder keg, but the soldiers fighting you now flank, suppress, panic
 		and call in help like they mean it, and there's a brand-new campaign built for exactly one kind of
 		player: the one who wants to build an insurgency from nothing and take an island back, zone by zone.
 		That's <b>Guerrilla Mode</b>, and it doesn't exist in the original game at all.</p>
@@ -131,12 +133,16 @@
 
 	<h3>&#9733; Featured Operation: GUERRILLA MODE</h3>
 	<p>You're <b>one Resistance fighter</b> with nothing but a rifle and a grudge. Ambush patrols, loot their
-	gear, recruit locals, and grow a cell into an army that liberates the island zone-by-zone &mdash;
-	while the occupier escalates right back at you. Get spotted and it isn't instant death: the alert level
+	gear, recruit locals, and grow a cell into an army that liberates the island zone-by-zone, while the occupier escalates right back at you. Get spotted and it isn't instant death: the alert level
 	climbs in stages, so a blown ambush is a problem you can still run from and recover, not a mission-ender.
 	Every new campaign starts the same way: pick your <b>island</b>, pick your <b>civilian, resistance and
-	occupying factions</b>, and go &mdash; the full four-island CWA roster is in play. The first playable
-	slice, "Three Zones" (camp, village, outpost), is built and about to get its first real playtest.</p>
+	occupying factions</b>, and go. The full four-island CWA roster is in play. The first playable
+	slice, "Three Zones" (camp, village, outpost), is built, already boots on two different islands with the
+		factions swapped, and is about to get its first real playtest.</p>
+		<div class="shot">
+			<img src="assets/img/shot-ingame.png" width="740" alt="In-game screenshot: a resistance fighter with a looted AK-47, action menu open">
+			<div class="cap"><span class="stampcorner">DEV CAPTURE</span>Guerrilla Mode running: a lone fighter, a looted AK-47, and the loot-the-dead menu open. Early build.</div>
+		</div>
 	<p class="center">
 		<a href="gameplay.html">&raquo; Read the Gameplay Systems dossier</a> &nbsp;|&nbsp;
 		<a href="designloop.html">&raquo; See what's coming next</a>
@@ -147,10 +153,12 @@
 	<h3>Latest Intel <span class="dim" style="font-size:10px;">(News)</span></h3>
 	<table class="data">
 		<tr><th width="90">Date</th><th>Bulletin</th></tr>
+			<tr><td class="dim">2026-07-03</td><td>The occupier gets a <b>playbook</b>: checkpoints and curfews as terrain, reprisals and resettlement that hit your support base, helicopter <b>Fireforce</b>, disguised <b>pseudo-gangs</b>, trackers, informers. The world will fight back like a whole state. <a href="gameplay.html">Read it</a>. <span class="badge plan">Planned</span></td></tr>
+			<tr><td class="dim">2026-07-01</td><td><b>Swappable factions &amp; islands is working.</b> The campaign now boots on a whole second island (Sinai) with the sides flipped, an Egyptian frontier resistance against a modern occupier, proven by automated end-to-end tests. <span class="badge live">Live</span></td></tr>
 		<tr><td class="dim">2026-06-28</td><td>Clean local build, engine's holding steady. <span class="badge live">Live</span></td></tr>
 		<tr><td class="dim">2026-06-27</td><td>Guerrilla Mode's <b>"Three Zones"</b> first playable slice is built: camps, villages, an outpost to take, a resource economy, recruits, loot, and a named companion who can die for good. First live playtest is next. <span class="badge wip">WIP</span></td></tr>
 		<tr><td class="dim">2026-06-20</td><td>The AI overhaul's blueprint is locked in: squad formations, morale that actually breaks, suppression fire, and enemies that shoot officers and gunners first. This is what Guerrilla Mode runs on. <span class="badge plan">Planned</span></td></tr>
-		<tr><td class="dim">2026-06-01</td><td>Bohemia Interactive opens the original engine source, GPL-3.0-or-later &mdash; the ground this whole overhaul is built on.</td></tr>
+		<tr><td class="dim">2026-06-01</td><td>Bohemia Interactive opens the original engine source, GPL-3.0-or-later: the ground this whole overhaul is built on.</td></tr>
 	</table>
 
 	<hr class="mil">

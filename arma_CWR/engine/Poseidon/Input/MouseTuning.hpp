@@ -24,7 +24,9 @@ struct MouseTuning
     int   mouseDpi     = 1600;    // player's hardware DPI
     int   referenceDpi = 1600;    // DPI the feel is calibrated to
 
-    float smoothing = 0.0f;       // low-pass on per-frame counts, [0,0.95]; 0 = off
+    float smoothing = 0.0f;       // FPS-independent look low-pass, [0,0.95]; 0 = off.
+                                  // Struct default stays 0 (classic); MouseConfig ships the
+                                  // live in-game default so deadzone-0 look is smoothed.
 
     bool  acceleration  = false;
     float accelExponent = 1.0f;   // [1,2]; 1 = linear

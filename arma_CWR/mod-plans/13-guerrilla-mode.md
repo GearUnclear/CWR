@@ -2,7 +2,7 @@
 
 *Grow a guerrilla cell into the army that liberates an occupied island. Ambush patrols, loot weapons, recruit and train fighters, capture towns from an occupier that escalates as you do. A whole game mode — ~90% SQF mission content over the existing engine, with a small, surgical set of C++ additions.*
 
-> **Status:** master design + architecture plan (pre-MVP). This is the umbrella document; individual C++ pieces it depends on are the existing AI/scripting plans [01–10](./README.md), and future breakouts may become plans 14+.
+> **Status:** master design + architecture plan (pre-MVP). This is the umbrella document; individual C++ pieces it depends on are the existing AI/scripting plans [01–10](./README.md), and future breakouts may become plans 14+. First breakout: [14 — Occupation Systems](./14-occupation-systems.md) (the occupier as a population-control state; world-gen + escalation depth).
 >
 > **Direction correction (2026-07-01):** this project is a **total overhaul of the engine source**, not a mod on a fixed binary. Two consequences override earlier drafts of this document: (1) C++ engine work is a **first-class tool**, not a last resort — never architect script around a missing engine capability that is cheap to add; (2) **swappable factions and islands are a core requirement** — a new game starts by selecting the island, the civilian faction, the resistance faction, and the occupying faction. See the "Core requirement: swappable factions & islands" section.
 >
@@ -178,6 +178,8 @@ The single biggest anti-empty-sandbox device.
 - **Heat / Aggression (per-region, fast):** spikes on contact/kills/blown cover; **decays if you lie low**. Drives *right-now* response — patrol frequency, QRF size, counterattacks. Each region has an explicit cooldown timer so the world stays conquerable.
 
 Both are scalar globals gating which groups get spawned. Plan [08](./08-ai-shared-enemy-intel.md) (shared intel) makes neighboring garrisons react before visual contact — the "the whole net lit up" feeling — without per-unit cost.
+
+Military mass is only one escalation axis. Plan [14](./14-occupation-systems.md) gives the occupier a second, *administrative* axis — checkpoints and curfews as generated terrain, town closures/reprisals/resettlement as moves against the player's support/HR economy, informers, pseudo-gangs, and a Fireforce-style heli QRF — so rising War Level and Heat tighten the *world*, not just the spawn table.
 
 ### Liberation must visibly change the world
 

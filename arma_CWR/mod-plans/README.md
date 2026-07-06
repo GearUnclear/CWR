@@ -19,6 +19,7 @@ Most plans target the engine's **AI** (tactics and perception), which is the rec
 | [10](./10-sqf-known-targets.md) | `knownTargets` | scripting | intermediate | Adds a unary SQF command returning a group's known contacts as `[object, side, knowledge, lastReportedPos]`, exposing AI perception in bulk. |
 | [12](./12-dev-ai-diagnostics-tab.md) | AI Diagnostics tab | dev-qol | intermediate | Adds an "AI Diag" tab to the ImGui dev panel exposing the engine's existing steering/path/cost-map/lock-map overlays as one-click checkboxes. |
 | [13](./13-guerrilla-mode.md) | Guerrilla mode (open-world insurgency) | game-mode | project | Master plan for a persistent open-world guerrilla game — grow & train a faction, capture occupied towns, escalating enemy, on any island against any occupier chosen at new-game. Mostly SQF over the engine, with engine-side work (faction/island data, evaluator commands, new-game flow) as a first-class part of the design, not a last resort; consumes plans 01–10 as dependencies. |
+| [14](./14-occupation-systems.md) | Occupation systems (COIN world-gen) | game-mode | intermediate | Breakout from 13: the occupier as a population-control state — checkpoints/curfews as generated terrain, closures/reprisals/resettlement as moves on the player's support economy, informers, pseudo-gangs, Fireforce QRF, detention/rescue. Historical COIN doctrine as systems; one new road-query command, zero new animations. |
 
 ## Recommended focus: AI
 

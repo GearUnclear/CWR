@@ -19,7 +19,7 @@
 	</tr></table>
 </td></tr>
 <tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
-	&#9733; ROADMAP &#9733; "Three Zones" is built, first playtest is next &nbsp; // &nbsp; swappable factions &amp; islands before any second island ships &nbsp; // &nbsp; nothing gets built without a plan behind it &nbsp; &#9733;
+	&#9733; ROADMAP &#9733; "Three Zones" built, first playtest is next &nbsp; // &nbsp; swappable factions &amp; islands: DONE, and running on Sinai &nbsp; // &nbsp; occupier playbook: checkpoints, curfews, Fireforce, up next &nbsp; // &nbsp; nothing ships without a plan behind it &nbsp; &#9733;
 </span></marquee></div></td></tr>
 <tr><td class="navbar">
 	<a href="index.html">HOME</a>
@@ -61,42 +61,48 @@
 	<p class="dim">Before authoring more content, we're confirming the basics hold up under real play: framerate with
 	a full garrison on screen, enemies spawning in cleanly, and saves that survive a reload.</p>
 
-	<h4>Phase 1: "Three Zones" <span class="badge wip">Built</span></h4>
+	<h4>Phase 1: "Three Zones" <span class="badge live">Built</span></h4>
 	<div class="pbar"><span data-pct="100" style="width:100%">100%</span></div>
 	<p class="dim">Camp, Village, and Outpost to capture, garrisons that defend them, an alert level that rises
 	and falls, a resource economy, recruiting, loot, and a companion who can die for good. Built, waiting on
 	its first live playtest.</p>
 
-	<h4>Phase 1.5: Swappable Factions &amp; Islands <span class="badge plan">Planned</span></h4>
-	<div class="pbar"><span data-pct="0" style="width:0%">0%</span></div>
-	<p class="dim">Right now the build only runs one faction on one island. Before we add a second island or
-	faction, everything specific to "this island, this enemy" gets pulled out of the mission scripts and into
-	swappable data, so a new game really can start with you picking the island and every faction involved.
-	Doing this now, while there's only one of each to migrate, is a lot cheaper than doing it later. Est.
-	1-2 weeks.</p>
+	<h4>Phase 1.5: Swappable Factions &amp; Islands <span class="badge live">Built</span></h4>
+	<div class="pbar"><span data-pct="100" style="width:100%">100%</span></div>
+	<p class="dim">Done, and proven. Everything specific to "this island, this enemy" now lives in swappable data instead of
+	hardcoded scripts, and the simulation core moved into native engine systems (zones, garrisons, the alert
+	machine). The very same campaign code now boots a whole second island, Sinai, with the factions
+	flipped, and automated end-to-end tests now drive the new-game screen and confirm the swap in a live
+	mission. Like the "Three Zones" slice, it's code-complete and waiting only on its first human playtest.</p>
 
 	<h4>Phase 2: Vertical Slice <span class="badge plan">Planned</span></h4>
 	<div class="pbar"><span data-pct="15" style="width:15%">15%</span></div>
-	<p class="dim">Deepen the economy and progression into something you'd actually sink hours into.</p>
+	<p class="dim">Deepen the economy and progression into something you'd actually sink hours into, and give the
+	occupier its first real teeth: town closures and reprisal raids that hit your support economy, the
+	helicopter-borne Fireforce reaction, and the AI-fidelity work (kill-the-officer routs, suppression,
+	flee-to-cover) that makes a firefight feel like a fight.</p>
 
 	<h4>Phase 3: Full Mode <span class="badge plan">Planned</span></h4>
 	<div class="pbar"><span data-pct="5" style="width:5%">5%</span></div>
-	<p class="dim">The whole island, liberated zone by zone, against an occupier that escalates right back at you.</p>
+	<p class="dim">The whole island, liberated zone by zone, against an occupier running its full playbook, Protected
+	Villages, pseudo-gangs, tracker teams, the prison-and-rescue loop, informer networks, plus a proper
+	strategy screen for running your insurgency from the map. This is where the vision on the
+	<a href="gameplay.html">Gameplay Systems</a> page lands in full.</p>
 
 	<div class="briefing"><span class="stamp">FIELD NOTE</span>
-		<p style="margin-top:8px;">Plans here are living and get revised as we learn more &mdash; this page changes
+		<p style="margin-top:8px;">Plans here are living and get revised as we learn more, this page changes
 		right along with them. Most recently (2026-07-01), swappable factions and islands got promoted from
-		"someday" to a launch requirement, which is why Phase 1.5 exists at all.</p>
+		"someday" to a launch requirement; that work has since <b>landed</b> and now boots a second island (Sinai) with the factions swapped.</p>
 	</div>
 
 	<a name="status"></a><h3>Live Status Board</h3>
 	<table class="statgrid"><tr>
-		<td><span class="num">P1</span><span class="lbl">Current Phase</span></td>
-		<td><span class="num">Built</span><span class="lbl">"Three Zones"</span></td>
-		<td><span class="num">P1.5</span><span class="lbl">Next Up</span></td>
+		<td><span class="num">P1.5</span><span class="lbl">Just Landed</span></td>
+		<td><span class="num">Next</span><span class="lbl">First Playtest</span></td>
+		<td><span class="num">P2</span><span class="lbl">After That</span></td>
 		<td><span class="num">4</span><span class="lbl">Islands Planned</span></td>
 	</tr></table>
-	<p class="dim">Want the engineering detail behind all this &mdash; the engine, the build, the test setup?
+	<p class="dim">Want the engineering detail behind all this: the engine, the build, the test setup?
 	See <a href="tech.html">Under the Hood</a>.</p>
 
 	<hr class="mil">

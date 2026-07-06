@@ -1,0 +1,16 @@
+# ripgrep/-aware search ignore (affects Grep/Glob; does NOT affect git).
+# Keeps content searches off generated code and non-source data so agents
+# don't burn context traversing gigabytes of binaries or 22k-line GL bindings.
+# See arma_CWR/CLAUDE.md "Working map" for the rationale.
+
+# Generated OpenGL bindings (~22k lines across 2 files)
+arma_CWR/thirdparty/glad/
+
+# Third-party mod test data (2.2G, binary PBOs/textures) — read-only reference
+/@LoBo/
+
+# Build output
+arma_CWR/build/
+
+# Installed base game data (also in .gitignore; belt-and-suspenders for search)
+/ARMA Cold War Assault/

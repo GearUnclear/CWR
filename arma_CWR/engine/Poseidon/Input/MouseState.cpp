@@ -34,7 +34,7 @@ void MouseState::DiscardBuffered()
 }
 
 bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundEnabled, UITime currentTime,
-                        const CursorClamp* clamp)
+                        const CursorClamp* clamp, float dtSec)
 {
     // Reset per-frame edge state
     leftToDo = false;
@@ -94,7 +94,17 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
 
     if (tuning.smoothing > 0.0f)
     {
-        const float alpha = 1.0f - tuning.smoothing;
+        // FPS-independent one-pole low-pass: the deadzone-0 jitter absorber.
+        // tuning.smoothing is the fraction of the previous value RETAINED per reference
+        // frame (kSmoothingRefFps).  Re-basing that retention onto the real frame dt keeps
+        // the filter's time constant identical at any frame rate, so integer mouse-count
+        // quantization (0/1/0/2 counts at high FPS) is smoothed the same at 60 or 240 FPS.
+        // An out-of-band dt (first-frame/hitch sentinel) uses the raw per-frame retention,
+        // which also preserves the legacy per-frame contract for callers passing no dt.
+        float retain = tuning.smoothing;
+        if (dtSec > 0.0f && dtSec <= kSmoothDtMax)
+            retain = std::pow(tuning.smoothing, dtSec * kSmoothingRefFps);
+        const float alpha = 1.0f - retain;
         smoothX_ += (inX - smoothX_) * alpha;
         smoothY_ += (inY - smoothY_) * alpha;
         inX = smoothX_;
@@ -133,22 +143,14 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
     float moveX = deltaX * kCursorScaleX;
     float moveY = deltaY * kCursorScaleY;
 
-    // FPS-independent flick cap: bound crosshair speed per SECOND (not per frame).
-    // dt is derived from currentTime so the signature stays unchanged; the first frame
-    // and any focus-loss gap fall back to the clamped range.
-    float dtSec = 1.0f / kFlickCapRefFps;
-    if (haveLastUpdate_)
-    {
-        dtSec = (currentTime.toInt() - lastUpdateTime_.toInt()) * 0.001f;
-        saturate(dtSec, 1.0f / 500.0f, 0.3f);
-    }
-    lastUpdateTime_ = currentTime;
-    haveLastUpdate_ = true;
-
-    const float limX = kCursorSpeedLimitX * dtSec;
-    const float limY = kCursorSpeedLimitY * dtSec;
-    saturate(moveX, -limX, +limX);
-    saturate(moveY, -limY, +limY);
+    // Constant per-frame safety clamp (Bohemia 3.01 behavior).  This is a single-frame
+    // spike guard, NOT a feel knob: everyday look is already frame-rate independent
+    // because moveX is summed mouse counts (physical displacement, not a rate).  It must
+    // NOT scale with dt.  A per-second (dt-scaled) ceiling both breathes with frame-time
+    // jitter (visible jitter) and lets one hitch frame release the whole buffered backlog
+    // as a giant turn (over-spin); a fixed ceiling does neither and keeps look 1:1.
+    saturate(moveX, -kCursorLimitX, +kCursorLimitX);
+    saturate(moveY, -kCursorLimitY, +kCursorLimitY);
 
     if (gameFocusLost <= 0)
     {

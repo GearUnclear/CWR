@@ -31,6 +31,21 @@ cmake --build build/win-x64-clang-rwdi
 
 On GNU/Linux, use the matching `linux-x64-clang-rwdi` preset.
 
+## Run
+
+```powershell
+.\run-game.ps1                                      # build + launch to the main menu
+.\run-game.ps1 -Mission 'Missions\Guerrilla.Demo'   # build + jump straight into a mission
+.\run-game.ps1 -SkipBuild                           # launch the existing build, no rebuild
+```
+
+`run-game.ps1` wraps the toolchain-on-PATH setup, an incremental `PoseidonGame`-target
+build, and launching the exe windowed (`--window --no-splash`) with its working directory
+set to the game data dir (default `D:\Arma_CWA\ARMA Cold War Assault`, override with
+`-DataDir`). From the main menu, hit **GUERRILLA** to pick an island/faction and start a
+Guerrilla Mode game. See [`guerrilla-mode/README.md`](guerrilla-mode/README.md#run-the-mode)
+for mission template details.
+
 ## Layout
 
 - [Mod plans](mod-plans/README.md) - the total-game-overhaul AI/engine mod-plans (the point of this fork)

@@ -1,2 +1,5 @@
 # Proprietary game data (not part of this GPL source repo, ships separately under APL-SA)
 /ARMA Cold War Assault/
+
+# Third-party mod test bed (2.2G binary PBOs/textures) - read-only reference, not our source
+/@LoBo/

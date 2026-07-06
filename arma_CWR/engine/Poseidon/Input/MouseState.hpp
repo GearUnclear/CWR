@@ -68,8 +68,14 @@ struct MouseState
     // Process buffered input into state. Writes cursor/aim to shared accumulator.
     // Returns true if mouse turn was active AND lookAround was enabled
     // (caller should mark keyboard turn active in that case — cross-device concern).
+    // `currentTime` (uiTime epoch) is only used for double-click windows and the
+    // activity timestamps.  `dtSec` is the real wall-clock frame delta (from a monotonic
+    // clock) that meters the FPS-independent smoothing low-pass; pass a monotonic-clock
+    // measurement.  Out-of-band values (<= 0 first-frame sentinel, or > kSmoothDtMax after
+    // a hitch) fall back to the raw per-frame retention.  The per-frame crosshair-travel
+    // safety clamp is dt-free and always applied.
     bool Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundEnabled,
-                Foundation::UITime currentTime, const CursorClamp* clamp);
+                Foundation::UITime currentTime, const CursorClamp* clamp, float dtSec = -1.0f);
 
     // Flush buffered input and reset per-frame deltas.
     void FlushAndReset();
@@ -103,14 +109,17 @@ struct MouseState
     static constexpr int kDoubleClickWindowMs = 400;
     static constexpr float kCursorScaleX = 1.0f / 200.0f;
     static constexpr float kCursorScaleY = 1.0f / 150.0f;
+    // Constant per-frame safety clamp on crosshair travel (Bohemia 3.01 baseline).
+    // A FIXED per-frame bound, not scaled by dt, so a hitch cannot release the buffered
+    // backlog as one turn and the ceiling never breathes with frame time.
     static constexpr float kCursorLimitX = 0.6f;
     static constexpr float kCursorLimitY = 0.4f;
-    // The classic ±kCursorLimit clamp was applied per FRAME, so max turn rate scaled
-    // with FPS.  Re-express it as a per-SECOND velocity cap calibrated at 60 FPS, so a
-    // fast flick covers the same angle at any frame rate.
-    static constexpr float kFlickCapRefFps  = 60.0f;
-    static constexpr float kCursorSpeedLimitX = kCursorLimitX * kFlickCapRefFps; // 36.0/s
-    static constexpr float kCursorSpeedLimitY = kCursorLimitY * kFlickCapRefFps; // 24.0/s
+    // FPS-independent input smoothing (the deadzone-0 jitter absorber).  tuning.smoothing
+    // is the fraction retained per reference frame; kSmoothingRefFps re-bases it onto the
+    // real frame dt so the filter time constant is identical at 60 or 240 FPS.  An
+    // out-of-band dt (a hitch, or the first-frame sentinel) uses the raw per-frame retain.
+    static constexpr float kSmoothingRefFps = 60.0f;
+    static constexpr float kSmoothDtMax = 0.25f;
     static constexpr float kWheelToCursorScale = 0.01f;
     // Downstream game logic was written expecting mouse-wheel deltas in 120-units-per-notch
     // steps (the Windows WHEEL_DELTA convention). SDL3 reports 1.0 per notch; scale to match.
@@ -128,10 +137,6 @@ struct MouseState
     float bufWheel_ = 0;
     // Smoothing low-pass state (only used when tuning.smoothing > 0).
     float smoothX_ = 0, smoothY_ = 0;
-    // Previous Update() timestamp, used to derive the frame dt for the FPS-independent
-    // flick cap without changing Update()'s signature.
-    Foundation::UITime lastUpdateTime_ = UITIME_MIN;
-    bool haveLastUpdate_ = false;
 };
 } // namespace Poseidon
 

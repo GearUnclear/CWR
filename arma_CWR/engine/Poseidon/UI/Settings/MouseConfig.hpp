@@ -38,7 +38,7 @@ public:
     bool  dpiNormalize    = false;
     int   mouseDpi        = 1600;
     int   referenceDpi    = 1600;  // DPI the feel is calibrated to
-    float smoothing       = 0.0f;
+    float smoothing       = 0.35f; // light FPS-independent low-pass; tames integer-count jitter at aimingDeadzone 0
     bool  acceleration    = false;
     float accelExponent   = 1.0f;
     float menuCursorScale = 1.0f;

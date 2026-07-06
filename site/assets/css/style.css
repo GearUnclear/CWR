@@ -192,6 +192,34 @@ table.data tr:hover td { background: #23241a; }
 .badge.wip  { color:#ffcf5c; border-color:#6a5a0a; background:#1a1505; }
 .badge.plan { color:#8ab4ff; border-color:#24406a; background:#050c1a; }
 
+/* ---------- FIELD PHOTOS / SCREENSHOTS ---------- */
+.shot {
+	border: 1px solid #3a3b2c;
+	background: #0d0e0b;
+	padding: 4px;
+	margin: 10px 0;
+}
+.shot img { display:block; width:100%; height:auto; border:1px solid #000; }
+.shot .cap {
+	background: #000 url('../img/th-tile.png') repeat-x;
+	color: #c9a24a;
+	font-size: 10px;
+	padding: 3px 6px;
+	margin-top: 4px;
+	border-top: 1px solid #7a0d0d;
+}
+.shot .cap b { color:#ffcf5c; }
+.shot .stampcorner {
+	float:right; color:#7CFC00; border:1px solid #3a6a0a; background:#0f1a05;
+	font-size:9px; font-weight:bold; padding:0 4px; letter-spacing:1px;
+}
+.shotrow { width:100%; border-collapse:collapse; }
+.shotrow td { width:50%; padding:0 4px; vertical-align:top; }
+
+/* legend for status badges */
+.legend { font-size:10px; margin:6px 0; }
+.legend .badge { margin-left:0; margin-right:3px; }
+
 /* ---------- CAMO DIVIDER ---------- */
 hr.mil {
 	border: none;

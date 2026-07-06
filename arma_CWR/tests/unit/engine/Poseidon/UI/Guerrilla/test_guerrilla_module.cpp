@@ -96,12 +96,15 @@ std::vector<std::string> AsStrings(const std::vector<RString>& in)
 }
 } // namespace
 
-TEST_CASE("GuerrillaListFactions: null config falls back to the built-in side defaults", "[UI][Guerrilla]")
+TEST_CASE("GuerrillaListFactions: null config yields no entries (no built-in is invented)", "[UI][Guerrilla]")
 {
-    REQUIRE(AsStrings(GuerrillaListFactions(nullptr, Poseidon::kGuerrillaDefaultOccupier)) ==
-            std::vector<std::string>{"EAST"});
-    REQUIRE(AsStrings(GuerrillaListFactions(nullptr, Poseidon::kGuerrillaDefaultResistance)) ==
-            std::vector<std::string>{"GUER"});
+    // An empty list makes the display publish EMPTY selections, so the
+    // mission's defaultOccupier/defaultResistance config keys win in
+    // ZoneRegistry::LoadFromParams. Inventing "EAST"/"GUER" entries here used
+    // to publish those side strings, which matched a mission faction by side
+    // and silently overrode the mission's defaults.
+    REQUIRE(GuerrillaListFactions(nullptr, Poseidon::kGuerrillaDefaultOccupier).empty());
+    REQUIRE(GuerrillaListFactions(nullptr, Poseidon::kGuerrillaDefaultResistance).empty());
 }
 
 TEST_CASE("GuerrillaListFactions: subclasses are filtered by side", "[UI][Guerrilla]")
@@ -152,14 +155,13 @@ TEST_CASE("GuerrillaListFactions: no side match offers every subclass", "[UI][Gu
             (std::vector<std::string>{"Alpha", "Bravo"}));
 }
 
-TEST_CASE("GuerrillaListFactions: config class with no subclasses falls back to the default", "[UI][Guerrilla]")
+TEST_CASE("GuerrillaListFactions: config class with no subclasses yields no entries", "[UI][Guerrilla]")
 {
     ParamFile cfg;
     ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
     factions->Add("tickInterval", 5); // values only, no subclasses
 
-    REQUIRE(AsStrings(GuerrillaListFactions(cfg.FindEntry("CfgGuerrillaFactions"), "GUER")) ==
-            std::vector<std::string>{"GUER"});
+    REQUIRE(GuerrillaListFactions(cfg.FindEntry("CfgGuerrillaFactions"), "GUER").empty());
 }
 
 TEST_CASE("GuerrillaListIslands: null world list yields nothing", "[UI][Guerrilla]")

@@ -183,7 +183,9 @@ TEST_CASE("MouseConfig: v2 tuning fields default to classic / no-op feel", "[Set
     CHECK(c.dpiNormalize == false);
     CHECK(c.mouseDpi == 1600);
     CHECK(c.referenceDpi == 1600);
-    CHECK(c.smoothing == 0.0f);
+    // smoothing is the one intentionally non-classic default: a light FPS-independent
+    // low-pass so deadzone-0 direct-look absorbs integer mouse-count jitter.
+    CHECK(c.smoothing == 0.35f);
     CHECK(c.acceleration == false);
     CHECK(c.accelExponent == 1.0f);
     CHECK(c.menuCursorScale == 1.0f);

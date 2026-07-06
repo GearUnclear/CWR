@@ -13,6 +13,24 @@ Two layers live here:
 - **The upstream engine** (`engine/`, `apps/`, etc.), codename **Poseidon**. Modernized to C++20, built with CMake + Clang, cross-platform Windows x64 / Linux x64. This part is a **locked** Bohemia Interactive source release: PRs are not accepted upstream and there is no CI workflow checked into the repo (the sub-READMEs describe what CI *did* run). The code is GPL-3.0-or-later; game data (models, textures, sounds, missions) is **not** in this repo and ships separately under APL-SA.
 - **The overhaul itself** ([`mod-plans/`](mod-plans/README.md), [`guerrilla-mode/`](guerrilla-mode/README.md)) — a from-the-ground-up rework of AI tactics/perception plus **Guerrilla Mode**, a new persistent open-world insurgency game mode with swappable islands and factions chosen at new-game. This is where active development happens. **Direction (2026-07-01): this is a total overhaul of the engine source, not a mod on a fixed binary — C++ engine changes are a first-class tool here, not a last resort, alongside SQF mission scripting.** Treat the mod-plans as living, AI-drafted design docs subject to correction, not settled hard specs.
 
+## Working map (where to look / what to skip)
+
+Most of this engine is 1,300+ C++ files, 160 of them over 1,000 lines. To avoid reading extraneous code:
+
+**Active overhaul surface — start here:**
+- `engine/Poseidon/Game/Guerrilla/` — `ZoneRegistry`, `GarrisonCache`, `AlertMachine` (+ their `*Commands.cpp` SQF bindings). The Phase-1.5 native subsystems.
+- `engine/Poseidon/UI/Guerrilla/` — `GuerrillaModule`, `GuerrillaNewGame` (new-game island/faction selection).
+- `engine/Poseidon/AI/` — the AI tactics/perception rework. See [`mod-plans/`](mod-plans/README.md) for which behavior maps to which files; treat those docs as intent, not a precise index.
+
+**Frozen upstream — read as reference, don't expect to edit:** `Network/`, `Graphics/`, and most of `World/` and `UI/`. This is a locked Bohemia source release (no upstream PRs). You'll read here to understand mechanisms, but the overhaul rarely changes them.
+
+**Do NOT read or grep these — generated or non-source, pure context waste:**
+- `thirdparty/glad/` — ~22k lines of generated OpenGL bindings.
+- `@LoBo/` (mod test data, 2.2G binary), `build/`, and `ARMA Cold War Assault/AddOns/` (base game data).
+- A repo-root `.ignore` already excludes these from `Grep`/`Glob`; the note here is for `Read`.
+
+**Navigating big files efficiently:** grep for the symbol first, then `Read` a ±80-line window (`offset`/`limit`) rather than the whole 2,500–3,300-line file. For open-ended "where/how does X work" questions, delegate to an `Explore` subagent so the file dumps stay in *its* context and only the conclusion returns to yours.
+
 ## Toolchain prerequisites
 
 Builds require, on PATH / in env:
@@ -48,6 +66,22 @@ cmake --build build/win-x64-clang-rwdi
 ```
 
 Configure-preset families (suffix = build type): `*-clang-dbg` (Debug), `*-clang-rwdi` (RelWithDebInfo), `*-clang-rel` (Release), for `win-x64` and `linux-x64`. Plus `linux-x64-steamrt4` (Steam Runtime), sanitizer presets `*-clang-san` / `linux-x64-clang-tsan`, and fuzzer presets `*-clang-fuzz` (turn on `POSEIDON_BUILD_FUZZERS`). The binary dir always mirrors the preset name under `build/`. Compiled apps are staged into `dist/<arch>-<platform>-<suffix>/`.
+
+## Run
+
+`run-game.ps1` (repo root) is the fast path to eyeball a change: it handles the
+toolchain-on-PATH gotcha, does an incremental `PoseidonGame`-target build, and launches
+the exe windowed against the game data dir.
+
+```powershell
+.\run-game.ps1                                      # build + launch to the main menu
+.\run-game.ps1 -Mission 'Missions\Guerrilla.Demo'   # build + jump straight into a mission
+.\run-game.ps1 -SkipBuild                           # launch the existing dist/ build as-is
+```
+
+Default `-DataDir` is `D:\Arma_CWA\ARMA Cold War Assault`. `-Mission` is resolved relative
+to `-DataDir` and passed as `--test-mission` (omit it to boot to the main menu, where
+GUERRILLA lets you pick island/faction interactively).
 
 ## Tests
 

@@ -240,8 +240,20 @@ void ProcessMouse_SDL(DWORD timeDelta)
         clampPtr = &clamp;
     }
 
-    bool markKeyboardTurn =
-        GInput.mouse.Update(GInput.cursor, GInput.gameFocusLost, GInput.lookAroundEnabled, Glob.uiTime, clampPtr);
+    // Frame dt from SDL's monotonic clock — NOT Glob.uiTime, which only advances inside
+    // World::Simulate, resets on mission init, and has whole-ms resolution.  Feeds the
+    // FPS-independent mouse smoothing low-pass (the per-frame safety clamp is dt-free).
+    // First call passes a negative sentinel; a long gap (menus, loading, hitch) exceeds
+    // the smoother's dt window — both fall back to the raw per-frame retention.
+    static bool sHaveLastUpdateNs = false;
+    static Uint64 sLastUpdateNs = 0;
+    const Uint64 nowNs = SDL_GetTicksNS();
+    const float dtSec = sHaveLastUpdateNs ? (float)((nowNs - sLastUpdateNs) * 1e-9) : -1.0f;
+    sLastUpdateNs = nowNs;
+    sHaveLastUpdateNs = true;
+
+    bool markKeyboardTurn = GInput.mouse.Update(GInput.cursor, GInput.gameFocusLost, GInput.lookAroundEnabled,
+                                                Glob.uiTime, clampPtr, dtSec);
 
     if (markKeyboardTurn)
         GInput.keyboard.turnLastActive = Glob.uiTime;
