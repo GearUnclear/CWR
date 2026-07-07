@@ -1,0 +1,31 @@
+; ============================================================================
+;  hud.sqs  -  SHOWCASE live status HUD: the whole campaign state at a glance.
+; ----------------------------------------------------------------------------
+;  Every ~2 s (while SC_HUD) renders one titleText block built ENTIRELY from
+;  the surfaces under test: the native gm* commands (zone tuples, alert FSM,
+;  garrison cache) plus the script-side economy / gear / companion state the
+;  managers own. Toggled by the "DEMO: HUD on/off" action (run.sqs).
+;
+;  READ-ONLY by design: this file writes nothing but its own SC_h* scratch.
+; ============================================================================
+
+@ not (isNil "SC_READY")
+
+#loop
+~2
+? not SC_HUD : goto "loop"
+
+; ---- line 1: faction scalars + campaign flags ---------------------------------
+SC_hE = format ["R %1 | HR %2 | WL %3 | undercover %4 | unlocks %5", gmResources, gmManpower, gmWarLevel, gmUndercover, count GM_GEAR_UNLOCKED]
+
+; ---- line 2: QRF status (qrf.sqs owns the state) + companion roster -----------
+SC_hQ = "QRF idle"
+if ((not (isNil "GM_QRF_ACTIVE")) and (not (isNil "GM_QRF_ZONE"))) then {if (GM_QRF_ACTIVE and (GM_QRF_ZONE >= 0)) then {SC_hQ = format ["QRF INBOUND -> %1", (gmZone GM_QRF_ZONE) select GM_Z_NAME]}}
+SC_hC = ""; SC_hI = 0; while {SC_hI < (count GM_COMP_NAMES)} do {SC_hK = ""; if (not (GM_COMP_ALIVE select SC_hI)) then {SC_hK = " KIA"}; SC_hC = SC_hC + format [" | %1 %2 XP %3%4", GM_COMP_NAMES select SC_hI, GM_COMP_RANK select SC_hI, GM_COMP_XP select SC_hI, SC_hK]; SC_hI = SC_hI + 1}
+
+; ---- per-zone rows: the three authored zones (seeded towns summarized) --------
+SC_hN = gmZoneCount; if (SC_hN > 3) then {SC_hN = 3}
+SC_hZ = ""; SC_hI = 0; while {SC_hI < SC_hN} do {SC_hR = gmZone SC_hI; SC_hA = "GREEN"; if ((gmZoneAlert SC_hI) == 1) then {SC_hA = "YELLOW"}; if ((gmZoneAlert SC_hI) >= 2) then {SC_hA = "RED"}; SC_hZ = SC_hZ + format ["\n%1 [%2] %3 gar %4/%5 sup %6 heat %7 inc %8", SC_hR select GM_Z_NAME, SC_hR select GM_Z_OWNER, SC_hA, gmGarrisonLive SC_hI, SC_hR select GM_Z_GAR, SC_hR select GM_Z_SUPPORT, SC_hR select GM_Z_HEAT, SC_hR select GM_Z_INCOME]; SC_hI = SC_hI + 1}
+
+titleText [SC_hE + "\n" + SC_hQ + SC_hC + SC_hZ + format ["\n(+%1 seeded town zones on the map)", gmZoneCount - SC_hN], "PLAIN DOWN"]
+goto "loop"

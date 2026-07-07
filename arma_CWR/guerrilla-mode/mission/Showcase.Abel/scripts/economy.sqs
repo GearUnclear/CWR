@@ -1,0 +1,53 @@
+; ============================================================================
+;  economy.sqs  -  Resources (Rouble) + Manpower (HR) income tick.
+; ----------------------------------------------------------------------------
+;  OWNS (exclusive write, INCOME / "+" direction only): gmResources, gmManpower
+;     (recruit.sqs debits the same scalars, "-" direction only - the
+;     directional split avoids any same-direction collision), plus the
+;     GM_ECON_* / GM_MANPOWER_CAP tunables below.
+;  READS: the native zone registry via gmZoneCount/gmZone (owner / type /
+;     income / support tuple fields) and gmResistanceSide.
+;
+;  Income model (formulas UNCHANGED from Phase 1):
+;    * Resistance-owned military zones (OUTPOST / AIRFIELD / SEAPORT)
+;      -> Resources += that zone's income field.
+;    * Towns (CITY) -> Resources += support * GM_ECON_R_PER_SUP, plus
+;      GM_ECON_HR_PER_TOWN manpower when support >= GM_ECON_HR_SUP_MIN.
+;      Towns pay on goodwill regardless of military owner.
+;    * gmManpower hard-capped (1 HR = 1 body; the faction-size ceiling).
+;  NOTE: with seedCities=1 every named town on the island is a CITY zone, so
+;  total town income scales with the world - a balance knob, not a bug.
+;
+;  The per-tick summation is ONE evaluated line (while/do over gmZone, no ~
+;  inside) so it is atomic w.r.t. the other managers' ticks.
+; ============================================================================
+
+@GM_LIB_READY
+
+; ---- tunables (economy-owned consts) ----------------------------------------
+;   GM_ECON_TICK        seconds between income ticks (~10 min)
+;   GM_ECON_R_PER_SUP   Resources per support-point from a CITY per tick
+;   GM_ECON_HR_SUP_MIN  a CITY at/above this support yields manpower
+;   GM_ECON_HR_PER_TOWN HR granted by each sufficiently-supportive town
+;   GM_MANPOWER_CAP     hard ceiling on gmManpower (engine 12/group budget)
+GM_ECON_TICK        = 600
+GM_ECON_R_PER_SUP   = 0.5
+GM_ECON_HR_SUP_MIN  = 50
+GM_ECON_HR_PER_TOWN = 1
+GM_MANPOWER_CAP     = 12
+
+#loop
+~GM_ECON_TICK
+
+; --- sum this tick's income across all zones (single atomic evaluated line) ---
+gmEcoR = 0; gmEcoHR = 0; gmEcoI = 0; while {gmEcoI < gmZoneCount} do {gmEcoZ = gmZone gmEcoI; if (((gmEcoZ select GM_Z_OWNER) == gmResistanceSide) and ((gmEcoZ select GM_Z_TYPE) in ["OUTPOST","AIRFIELD","SEAPORT"])) then {gmEcoR = gmEcoR + (gmEcoZ select GM_Z_INCOME)}; if ((gmEcoZ select GM_Z_TYPE) == "CITY") then {gmEcoR = gmEcoR + ((gmEcoZ select GM_Z_SUPPORT) * GM_ECON_R_PER_SUP); if ((gmEcoZ select GM_Z_SUPPORT) >= GM_ECON_HR_SUP_MIN) then {gmEcoHR = gmEcoHR + GM_ECON_HR_PER_TOWN}}; gmEcoI = gmEcoI + 1}
+
+; --- apply income (the "+" direction this script exclusively owns) ------------
+gmResources = gmResources + gmEcoR
+gmManpower = gmManpower + gmEcoHR
+? gmManpower > GM_MANPOWER_CAP : gmManpower = GM_MANPOWER_CAP
+
+; --- player feedback (only when something actually came in this tick) ---------
+? (gmEcoR > 0) or (gmEcoHR > 0) : hint format ["Cell income: +%1 R, +%2 HR\nTreasury %3 R | Manpower %4 HR", gmEcoR, gmEcoHR, gmResources, gmManpower]
+
+goto "loop"

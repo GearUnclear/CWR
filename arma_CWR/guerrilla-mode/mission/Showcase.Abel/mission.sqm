@@ -1,0 +1,63 @@
+version=11;
+class Mission
+{
+	randomSeed=13000301;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: the lone guerrilla at the Camp zone centre (see
+					// description.ext class Camp). SQM coordinate order is
+					// [easting, ELEVATION, northing] - the zone config's
+					// position[] is getPos order [easting, northing, elev].
+					// Same dry-land start as Guerrilla.Abel.
+					//
+					// The init line is the SHOWCASE bootstrap: mission.sqm is
+					// the sanctioned per-mission divergence point (init.sqs +
+					// scripts/ must stay the byte-identical shared core), so
+					// the overlay execs from here. boot.sqs gates on
+					// GM_LIB_READY before touching anything.
+					position[]={7515.000000,20.000000,5790.000000};
+					id=0;
+					side="GUER";
+					vehicle="SoldierGB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+					init="[] exec ""showcase/boot.sqs""";
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=13000302;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=13000303;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=13000304;
+	class Intel
+	{
+	};
+};

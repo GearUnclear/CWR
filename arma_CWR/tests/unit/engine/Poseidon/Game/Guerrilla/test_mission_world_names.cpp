@@ -100,6 +100,10 @@ TEST_CASE("Guerrilla mission world suffixes are internal world names, never disp
     const fs::path repo = RepoRoot();
 
     std::vector<fs::path> missions = MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Guerrilla.");
+    for (const fs::path& dir : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Showcase."))
+    {
+        missions.push_back(dir);
+    }
     for (const fs::path& dir : MissionDirsMatching(repo / "tests" / "integration" / "missions", "guerrilla_"))
     {
         missions.push_back(dir);
@@ -142,7 +146,12 @@ TEST_CASE("WORLD-NAMES.md documents every world the mission templates use", "[gu
     }
 
     // every world actually used by a template must be in the doc's table
-    for (const fs::path& mission : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Guerrilla."))
+    std::vector<fs::path> templates = MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Guerrilla.");
+    for (const fs::path& dir : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Showcase."))
+    {
+        templates.push_back(dir);
+    }
+    for (const fs::path& mission : templates)
     {
         const std::string world = WorldSuffix(mission.filename().string());
         INFO("template world not documented in WORLD-NAMES.md: " << world);

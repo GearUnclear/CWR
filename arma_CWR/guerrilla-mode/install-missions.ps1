@@ -67,16 +67,19 @@ if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
     Write-Output "Created: $destRoot"
 }
 
-$templates = Get-ChildItem -LiteralPath $missionRoot -Directory -Filter 'Guerrilla.*'
+# Guerrilla.<World> = the playable campaign templates; Showcase.<World> = the
+# issue #9 systems-showcase missions (same shared core + a showcase/ overlay).
+$templates = Get-ChildItem -LiteralPath $missionRoot -Directory |
+    Where-Object { $_.Name -match '^(Guerrilla|Showcase)\.' }
 if (-not $templates) {
-    throw "No Guerrilla.* templates under $missionRoot"
+    throw "No Guerrilla.*/Showcase.* templates under $missionRoot"
 }
 
 foreach ($tpl in $templates) {
     $dest = Join-Path $destRoot $tpl.Name
 
-    # World gate (see .DESCRIPTION): template name is Guerrilla.<World>.
-    $world = $tpl.Name.Substring('Guerrilla.'.Length)
+    # World gate (see .DESCRIPTION): template name is <Prefix>.<World>.
+    $world = $tpl.Name.Substring($tpl.Name.IndexOf('.') + 1)
     $wrp = Join-Path $GameDir "Worlds\$world.wrp"
     if (-not (Test-Path -LiteralPath $wrp) -and $IncludeWorld -notcontains $world) {
         if (Test-Path -LiteralPath $dest) {

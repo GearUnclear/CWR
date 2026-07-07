@@ -1,0 +1,11 @@
+; ============================================================================
+;  action.sqs  -  thin addAction dispatcher for the SHOWCASE menu.
+; ----------------------------------------------------------------------------
+;  addAction runs this FILE with _this = [target, caller, actionId] (same
+;  contract as scripts/recruit_action.sqs). NO state mutation here: it only
+;  enqueues, so run.sqs stays the single writer of every demo effect.
+; ============================================================================
+
+SC_REQ = _this select 2
+SC_PENDING = true
+exit

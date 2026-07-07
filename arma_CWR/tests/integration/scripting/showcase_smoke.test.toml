@@ -1,0 +1,8 @@
+# Showcase.Abel (issue #9) on full CWA data: boots the shared guerrilla core
+# plus the showcase overlay and drives every rapid-access demo end to end.
+mission = "guerrilla-mode/mission/Showcase.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "showcase"]
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

@@ -104,9 +104,16 @@ TEST_CASE("Guerrilla missions share a byte-identical script core", "[guerrilla][
     const std::vector<std::string> canonicalScripts = ListFileNames(canonical / "scripts");
     REQUIRE(!canonicalScripts.empty());
 
-    // every mission that must carry the shared core
+    // every mission that must carry the shared core. Showcase.* templates
+    // (issue #9) carry the identical core plus a separate showcase/ overlay
+    // directory; only init.sqs and scripts/ are checked here, so the overlay
+    // stays out of scope while the core stays drift-proof.
     std::vector<fs::path> missions;
     for (const fs::path& dir : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Guerrilla."))
+    {
+        missions.push_back(dir);
+    }
+    for (const fs::path& dir : MissionDirsMatching(repo / "guerrilla-mode" / "mission", "Showcase."))
     {
         missions.push_back(dir);
     }
