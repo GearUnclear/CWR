@@ -103,6 +103,15 @@ need more detail: `--log-level`, `--log-categories`, `--log-format` and `--logfi
 `-NoLog` to `run-game.ps1` to disable capture; never launch `PoseidonGame.exe` in the
 foreground of an AI session to "see" its output — use the log files.
 
+**Always close what you open.** No human is at the keyboard to close game windows, and a
+lingering instance poisons the next Trident connection ("connection error: eval failed").
+Every automated command that spawns game instances (run-game.ps1, `tri test`) must
+guarantee cleanup in the same command, e.g. append:
+`powershell -NoProfile -Command "Get-Process PoseidonGame -ErrorAction SilentlyContinue | Stop-Process -Force"`
+— and for run-game.ps1 launches, stop the specific PID once done reading logs. Run `tri`
+with `--retries` (guerrilla_native_spawn's doMove assert is known-flaky) and check for
+stray `PoseidonGame` processes before diagnosing connection failures.
+
 ## Tests
 
 CTest drives both Catch2 unit tests and Trident integration tests:
