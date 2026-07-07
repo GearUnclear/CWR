@@ -1,0 +1,479 @@
+# Uslu dur! internal roadmap - SOURCE OF TRUTH (machine parsable).
+# Edit this file; roadmap/index.html and status.json are generated from it by
+# roadmap/generate.py (run on every commit via .githooks/post-commit).
+# Format rules: see roadmap/README.md. Statuses: done | in-progress | planned | blocked.
+# GH issue numbers refer to the fork GearUnclear/CWR (NOT upstream Bohemia).
+
+meta:
+  project: "Uslu dur! (UD)"
+  repo: GearUnclear/CWR
+  trunk_branch: guerrilla-mode   # fork main sits untouched at 366f95f; guerrilla-mode is the de-facto trunk
+  grounded: 2026-07-06           # date of the full-repo audit that seeded this file
+
+phases:
+  - name: foundation
+    title: "Foundation (repo, toolchain, tooling)"
+    goal: "Buildable engine, verified test rig, version-controlled site, dev ergonomics."
+  - name: phase-1
+    title: "Phase 1: native Guerrilla engine systems"
+    goal: "The six issue #1 rewrite targets: zones, garrisons, alerts, persistence, evaluator QoL, game module + new-game UI."
+  - name: phase-1.5
+    title: "Phase 1.5: swappable factions and islands"
+    goal: "Same script core on any island with any occupier faction, selected at new-game. Proven on Sinai + IDF."
+  - name: hardening
+    title: "Engine hardening and test trust"
+    goal: "Crashes fixed with red/green regression proof; the test harness cannot lie."
+  - name: phase-2
+    title: "Phase 2: vertical slice (occupation layer + AI overhaul)"
+    goal: "Civilians, pseudo-gangs, occupier teeth, economy depth, tactical-AI feel work."
+  - name: phase-3
+    title: "Phase 3: full mode"
+    goal: "Full island, full occupier playbook, GuerrillaDisplay strategy screen."
+  - name: housekeeping
+    title: "Housekeeping and follow-ups"
+    goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
+
+items:
+  # ---------------------------------------------------------------- foundation
+  - id: upstream-baseline
+    title: "Upstream Bohemia source baseline"
+    phase: foundation
+    status: done
+    commits: [ea77e57, 366f95f, fdc9596, 2be695d]
+    summary: >
+      Bohemia's public CWA source release (ea77e57, 2026-06-22) plus the 3.01 drop
+      (fdc9596), absorbed into the guerrilla-mode branch by merge 2be695d.
+      Fork main = origin/main = 366f95f carries no overhaul work; guerrilla-mode
+      is the de-facto trunk.
+    log:
+      - "guerrilla-mode branched from pre-3.01 366f95f; 3.01 came in by merge, not rebase."
+
+  - id: build-toolchain
+    title: "Build toolchain + test rig verified"
+    phase: foundation
+    status: done
+    depends_on: [upstream-baseline]
+    commits: [c17d2e8, 0e77283]
+    summary: >
+      Clang 22.1.8 / CMake 4.3.3 / Ninja / ccache / vcpkg installed and verified;
+      presets win-x64-clang-{dbg,rwdi,rel}; ctest drives Catch2 unit suites and
+      Trident (tri) integration tests against the full CWA install.
+    log:
+      - "~25 unit tests fail out-of-the-box on Windows (hardcoded /tmp paths + FormatTime timezone assumption); FormatTime fixed in 0e77283, rest fixed locally."
+      - "Toolchain is not on PATH in old terminal sessions; run-game.ps1 and CLAUDE.md carry the fixup."
+      - "No Demo dataset on this machine: .trident.env points OFPR_DATA_DIR at the full CWA install; the four Demo-world integration tests may not run here (unverified)."
+      - "Format CMake target is not baseline-clean; do not gate on it."
+
+  - id: mod-plans-corpus
+    title: "Design-doc corpus (mod-plans 02-14, guerrilla-mode docs)"
+    phase: foundation
+    status: done
+    depends_on: [upstream-baseline]
+    commits: [58cb137, 5a289cd]
+    summary: >
+      AI-drafted design docs: mod-plans 02-10/12/13 (58cb137), plan 14
+      occupation-systems (5a289cd), plus guerrilla-mode/README.md and STATUS.md.
+      Design intent, not settled specs; verify against code before relying on them.
+    log:
+      - "Plans 01 (ai-squad-formations) and 11 (sim-bullet-penetration) were deliberately dropped at the reroot commit 241ce1e and never re-added; the site still lists both areas as Planned, so they are currently doc-less."
+      - "STATUS.md (2026-07-06 audit) tracks the code closely and marks Phase 1/1.5 code-complete but not play-tested."
+
+  - id: repo-reroot
+    title: "Repo rerooted at D:\\Arma_CWA"
+    phase: foundation
+    status: done
+    depends_on: [upstream-baseline]
+    commits: [241ce1e]
+    summary: >
+      Git root moved up from arma_CWR/ so the site/ portal and the mod test bed
+      are version-controlled alongside the engine (2507 files).
+    log:
+      - "Side effect: this commit's only two deletions were mod-plans 01 and 11 (intentional)."
+
+  - id: site-portal
+    title: "Public site + Uslu dur! branding"
+    phase: foundation
+    status: done
+    depends_on: [repo-reroot]
+    commits: [3ce3da4, 5a289cd]
+    summary: >
+      Six-page retro static field manual (index, about, gameplay, tech, designloop,
+      downloads) branded Uslu dur!, with a we-don't-round-up status policy. Claims
+      audited 2026-07-06 and found to match repo ground truth.
+    log:
+      - "Site publicly claims: Phase 1 Built 100%, Phase 1.5 Built 100% (both awaiting first human playtest), Gate-Zero In Progress 60%, Phase 2 Planned 15%, Phase 3 Planned 5%."
+
+  - id: camera-mouselook
+    title: "Camera: aiming deadzone + mouse-look feel"
+    phase: foundation
+    status: done
+    depends_on: [build-toolchain]
+    commits: [5c0fd63, 5a289cd, f7f9ec4]
+    summary: >
+      Configurable aiming deadzone and deadzone-0 direct-look (intended design, not
+      classic float), with FPS-independent smoothing (default 0.35).
+    log:
+      - "First attempt (5c0fd63) used a dt-scaled flick cap; that WAS the spin/jitter bug. Reworked in 5a289cd as a constant clamp + FPS-independent smoothing."
+      - "Known wart: mouse.cfg persists old defaults across the fix; stale configs keep old feel."
+      - "f7f9ec4 fixed CreateGameObject linkage (declare in namespace Poseidon)."
+
+  - id: run-game-launcher
+    title: "run-game.ps1: build + launch + detached log capture"
+    phase: foundation
+    status: done
+    depends_on: [build-toolchain]
+    commits: [5a289cd, 5a832e7]
+    gh_issues: []
+    summary: >
+      Incremental-build launcher with windowed detached launch (5a289cd), plus
+      three timestamped logs per run (--log-file, stdout, stderr), -NoLog/-LogDir
+      params, and the matching engine-side ANSI-free --log-file sink
+      (Foundation/Logging colored=false) so logs stay grep-clean (5a832e7).
+    log:
+      - "CLAUDE.md rule this enables: never launch PoseidonGame.exe in the foreground of an AI session."
+      - "Companion hygiene rule from 2026-07-07: any automated run that spawns game instances must sweep stray PoseidonGame processes afterward; nobody will be at the keyboard to close windows, and a lingering instance poisons the next Trident connection."
+
+  # ---------------------------------------------------------------- phase 1
+  - id: engine-native-systems
+    title: "Six native Guerrilla engine systems (issue #1)"
+    phase: phase-1
+    status: done
+    depends_on: [build-toolchain, mod-plans-corpus]
+    commits: [3ef5cd5]
+    gh_issues: [1]
+    summary: >
+      All six issue #1 rewrite targets in engine C++: evaluator modernization
+      (CODE type, compile, isNil, setVariable/getVariable, nearestObjects),
+      ZoneRegistry + CfgGuerrillaZones/CfgGuerrillaFactions, GarrisonCache,
+      AlertMachine FSM, native persistence (WorldSerializeVersion 13 to 14,
+      GuerrillaSaveVersion=1), GameModuleId::Guerrilla + GuerrillaNewGame UI.
+      19-command gm* script surface + gmSel* globals. No stubs, no TODOs
+      (audited 2026-07-06); clean three-seam World integration (init/tick/serialize),
+      all no-ops when CfgGuerrillaZones is absent.
+    log:
+      - "3626/3626 unit tests green at landing."
+      - "Also fixed pre-existing evaluator bugs found en route: VarDelete lowercase and exitWith EvalBreak."
+      - "doMove turned out to be already registered; plan 13 corrected."
+      - "Plans 09/10 also landed: enableAI and knownTargets are registered (GameStateExt.cpp:988-989,1326; verified 2026-07-07). The mod-plans/STATUS evaluator list omits them and is stale on this point; the site's Built badge is correct."
+      - "QRF dispatch, economy, recruiting, loot policy deliberately stay script-side."
+      - "Known edges accepted for Phase 1 (STATUS.md, confirmed in code): occupier-owned CITY is never capturable; nothing captures while the player is dead; partially-visible player oscillates RED-YELLOW; no alert from firefights between zones; undercover break spikes nearest-zone heat only and is permanent for the campaign (re-establishment is the Phase-2 hook); overflow recruit groups drop from GM_PLAYER_GROUPS on load."
+
+  # ---------------------------------------------------------------- phase 1.5
+  - id: mission-migration-native
+    title: "Mission migration onto native systems + swap proof (issue #3)"
+    phase: phase-1.5
+    status: done
+    depends_on: [engine-native-systems, lobo-testbed]
+    commits: [be55dd8, e936395]
+    gh_issues: [3]
+    summary: >
+      SQS polling scripts (zones/spawning/alert/persistence) retired for the native
+      gm* surface; island data moved to CfgGuerrillaZones, faction data to
+      CfgGuerrillaFactions; exit criterion proven: the byte-identical script core
+      boots Guerrilla.Sinai with IDF (WEST) occupier vs EgyptFrontier (EAST)
+      resistance, sides deliberately inverted vs Demo.
+    log:
+      - "3633/3633 unit + 7/7 integration green at landing; issue #3 closed 2026-07-03."
+      - "test_mission_script_core.cpp enforces the shared core byte-identically across all 5 mission copies; only description.ext and mission.sqm may differ per island."
+      - "Incidental engine fixes: savegame ExtParsMission subdirectory reparse, deterministic --test-mission staging, addon access-denied WARN, new-game fallback cycler side-override."
+      - "e936395: Abel camp centre sits ~120m offshore; player start nudged onto the dry fig-tree plain (the open-sea drown trap)."
+      - "Orphaned guerrilla_gatezero.Demo when guerrilla_spawn_domove.test repointed to guerrilla_capture.Demo; its staged deletion in the working tree is intentional cleanup."
+
+  - id: lobo-testbed
+    title: "@LoBo (Lost Brothers) swappability test bed"
+    phase: phase-1.5
+    status: done
+    depends_on: [repo-reroot]
+    gh_issues: [3]
+    summary: >
+      Third-party Sinai island + IDF/Egypt/Syria/Jordan factions used read-only to
+      prove island/faction swap on non-CWA content. Sinai lives inside
+      @LoBo\addons\lost.pbo, so install-missions.ps1 needs -IncludeWorld Sinai.
+    log:
+      - "@LoBo pbos carry malformed tracerColor floats that hard-abort under --autotest; gitignored patched pbos must be generated once via tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1."
+
+  - id: guerrilla-test-suite
+    title: "Guerrilla test suite (unit + Trident integration)"
+    phase: phase-1.5
+    status: done
+    depends_on: [engine-native-systems, mission-migration-native]
+    commits: [3ef5cd5, be55dd8]
+    gh_issues: [1, 3]
+    summary: >
+      Two layers: 5 Catch2 unit files (35+ TEST_CASEs) over the pure cores
+      (EvaluateTick/EvaluateAlert/Decide/PlanGroups) plus contract meta-tests
+      (shared-script-core byte parity, world-naming), and 9 Trident integration
+      tests (capture flip, garrison spawn + doMove, undercover break, save/reload
+      x2 sequences, Sinai swap, new-game UI e2e) on Demo and full-CWA data.
+    log:
+      - "World-side effects (marker repaint, real AI spawn) are integration-only by design; pure cores were built for injection-based unit testing."
+      - "guerrilla_native_undercover deliberately avoids a literal 'player fire': force-firing headless crashed the engine pre-193a280; the perception-to-fired-EH front half remains untested end-to-end."
+      - "Coverage gap: the 11-script SQS core's economy/recruit/companion/QRF/escalation managers have no behavioral integration tests, only byte-parity."
+      - "guerrilla_native_spawn is flaky on its doMove displacement assert (leader sometimes needs >90s to move 15m); passes on retry, so always run tri with --retries. Verified 2026-07-07."
+      - "Run tri with -j 1 or low parallelism and sweep stray PoseidonGame processes afterward; a manually closed or lingering instance shows up as 'connection error: eval failed' and cascades into later tests."
+
+  - id: install-missions
+    title: "install-missions.ps1 template installer + world gate"
+    phase: phase-1.5
+    status: done
+    depends_on: [mission-migration-native]
+    commits: [be55dd8, 6146f7e]
+    summary: >
+      Mirrors guerrilla-mode/mission/Guerrilla.<World> templates into the game
+      Missions dir (be55dd8), with a world gate that skips/removes templates whose
+      <World>.wrp is absent (prevents the wrong-island open-sea spawn trap) and an
+      -IncludeWorld override for mod-PBO worlds (6146f7e).
+    log:
+      - "The gate's removal behavior bit us on 2026-07-07: it uninstalled Guerrilla.Sinai (Sinai lives in @LoBo's pbo), silently breaking ui/guerrilla_new_game_e2e's installed-template precondition. Machines running the LoBo tests must install with -IncludeWorld Sinai."
+
+  - id: inflight-guerrilla-polish
+    title: "Polish batch: save/load hardening, UI validation, vehicle ladder, mission-core tweaks"
+    phase: phase-1.5
+    status: done
+    depends_on: [engine-native-systems, mission-migration-native]
+    commits: [5a832e7, 6146f7e]
+    summary: >
+      Save/load round-trip TEST_CASEs for all three subsystems with new test seams
+      (BreakPending/BreakReason, MarkSpawnedForTest), AlertMachine breakPending
+      serialization, ZoneRegistry vehicleThresholds[] ladder (vehicles past index 1),
+      new-game UI validation (template-missing annotation, same-side block,
+      mount-failure message), and mission-core tweaks mirrored across all 5 copies
+      (companion XP/skill ladder seed, loot.sqs garrison-queue drain).
+    log:
+      - "Sat uncommitted and unverified for ~1 day mixing ~6 concerns; landed 2026-07-07 as 5a832e7 + 6146f7e after a full build, 3644/3644 unit green, and the 6 runnable full-CWA guerrilla Trident tests green."
+      - "Included the deletion of the orphaned guerrilla_gatezero.Demo mission."
+
+  - id: abel-template
+    title: "Guerrilla.Abel playable template + world-naming contract"
+    phase: phase-1.5
+    status: done
+    depends_on: [mission-migration-native]
+    commits: [6146f7e]
+    summary: >
+      Guerrilla.Abel mission template (Camp/Outpost/Houdan zones on-land, full CWA
+      data), WORLD-NAMES.md documenting internal (Abel/Cain/Eden/Noe) vs display
+      (Malden/Kolgujev/Everon/Nogova) names, and test_mission_world_names.cpp
+      rejecting display-name template suffixes.
+    log:
+      - "Guards a silent content bug: a Guerrilla.Malden folder would pass parity but never be launchable, because OptionsUIApp resolves missions\\Guerrilla.<class>."
+
+  - id: gate-zero-playtest
+    title: "Gate-Zero: first human playtest (frame budget, spawn-in, save/reload under real play)"
+    phase: phase-1.5
+    status: in-progress
+    priority: 1
+    depends_on: [mission-migration-native, run-game-launcher, install-missions]
+    summary: >
+      The site's 60% In Progress gate: Phase 1 and 1.5 are code-complete and
+      machine-tested but have never had a human playtest. Gate-Zero validates the
+      three assumptions the whole roadmap silently makes: the port runs a populated
+      mission at framerate, a runtime spawn + doMove QRF loop holds the 12-per-group
+      budget, and global state round-trips a saveGame. Everything Phase 2 waits on
+      this signal.
+    log:
+      - "run-game.ps1 log capture + Guerrilla.Abel template + world-gated installer are all groundwork for exactly this."
+      - "STATUS.md acceptance play-through script: boot, clear the Outpost, watch the flip + hold garrison, income tick, recruit, loot toward the AK unlock, promote a companion, trip a QRF, then save/load and confirm the campaign resumes."
+
+  - id: voice-lines-pipeline
+    title: "TTS voice-line pipeline (voice-lines/)"
+    phase: phase-1.5
+    status: done
+    commits: ["9601847"]
+    summary: >
+      Generates WAV voice lines via OpenRouter (openai/gpt-audio-mini); engine
+      plays WAV/OGG directly via CfgSounds + say/sideRadio, no engine changes.
+      Two sample lines committed; the OPENROUTER_API_KEY stays in the gitignored
+      root .env.
+    log:
+      - "API gotchas documented in its README: stream:true required, raw pcm16, verbatim-line framing."
+
+  # ---------------------------------------------------------------- hardening
+  - id: crash-fixes-trident-trust
+    title: "Crash fixes #5/#6 + Trident false-green fix #4"
+    phase: hardening
+    status: done
+    depends_on: [mission-migration-native]
+    commits: [193a280]
+    gh_issues: [4, 5, 6]
+    summary: >
+      All three found during issue #3 parity testing. #5/#6 were one bug: MFDead
+      dereferencing null Preloaded(SlopBlood) headless under --no-strict, gated by
+      a 30% per-death blood roll (hence the intermittency); guarded plus defensive
+      hardening in ObjFire/ReloadMagazine/FireWeaponEffects. #4: triAssert/triRefute
+      stringified non-scalars to "", so bool asserts always passed; routed through
+      GameValue::GetText().
+    log:
+      - "Diagnosed from minidumps, PDB-matched and symbolized with cdb; 4 of 5 dumps showed the identical [null+0x168] read."
+      - "Regression tests player_fire_headless + unit_death_blood_headless verified red without the guard, green with it."
+      - "#4 means: every pre-193a280 integration green on a bool assert was untrustworthy. #4's fix underwrites all later test claims."
+      - "#5/#6 fix unblocks the literal-'fire' public-execution mechanic that issues #7/#8 gate on."
+
+  # ---------------------------------------------------------------- phase 2
+  - id: civilian-ambience-layer
+    title: "Civilian ambience + atrocity layer (issue #8)"
+    phase: phase-2
+    status: planned
+    priority: 1
+    depends_on: [mission-migration-native, crash-fixes-trident-trust]
+    gh_issues: [8, 7]
+    summary: >
+      Plan 14 System 3: town population manager, shakedown director, public
+      killings, panic, and the resentment ledger that feeds the pseudo-gang blame
+      mechanic. Greenfield: no civilians exist in the mode at all. All-SQF per the
+      issue #7 plan (civilians.sqs, shakedown.sqs landing byte-identically in all
+      mission copies); 18 checkboxes, 0 checked.
+    log:
+      - "Issue #7 delivery plan: commit 1 closes #8, commit 2 closes #2."
+      - "Stale text on #7: it lists #5/#6 as an outstanding external dependency, but both closed 2026-07-04 (193a280); the literal-'fire' upgrade path is unblocked."
+
+  - id: pseudo-gang-feature
+    title: "Pseudo-gang feature (issue #2)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [civilian-ambience-layer]
+    gh_issues: [2, 7]
+    summary: >
+      Plan 14 System 5: occupier-run fake-guerrilla teams (EAST side slot) with
+      spawner, behavior controller, challenge/countersign, blame mechanic,
+      companion-tell, blown-agent renegade fallback, persistence. 14 checkboxes,
+      0 checked; no code exists.
+    log:
+      - "Side-slot contract locked in the issue: GUER=resistance, EAST=occupier incl. pseudo-gangs, CIV=civilians, WEST=reserved third-force slot; no fifth engine side."
+      - "Its three prerequisite boxes (support ledger, faction descriptors, cross-side spawn) are already satisfied natively per issue #7, but remain unticked on #2."
+
+  - id: nearest-roads-command
+    title: "Evaluator commands: nearestRoads + worldLocations"
+    phase: phase-1.5
+    status: planned
+    priority: 2
+    depends_on: [engine-native-systems]
+    summary: >
+      The two engine commands the docs still owe: nearestRoads <pos> <radius>
+      (RoadNet exists engine-side but has no evaluator binding; plan 14 says it
+      belongs with the Phase-1.5 evaluator batch, and System 1 checkpoint
+      generation is written against it) and a worldLocations-style query from
+      plan 13. Neither exists in the engine tree (grep-verified 2026-07-07).
+
+  - id: ai-tactics-phase2
+    title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [gate-zero-playtest]
+    summary: >
+      Plan 13's Phase-2 AI order, prototype first: 04 target priority (reshape
+      GetSubjectiveCost to focus-fire officers/MGs), then 05 suppression (the
+      flagship: unlock SetDanger in Combat + per-bullet near-miss), then 03
+      flee-to-cover (rewrite FindFleePoint toward low-exposure ground). Plan 13
+      is explicit these are not optional polish: they deliver the design's #1
+      pillar, asymmetry you feel, and are real AI-internals C++ surgery budgeted
+      as a funded milestone.
+    log:
+      - "Plan docs for squad formations (01) and bullet penetration (11) were dropped at the reroot; those two site rows are currently doc-less and need re-planning before work starts."
+
+  - id: occupation-systems
+    title: "Occupier director (plan 14 Phase-2 slice: closures/reprisals, Fireforce, checkpoints, curfew)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [civilian-ambience-layer, nearest-roads-command]
+    summary: >
+      Plan 14 beyond the #8/#2 slice, at its stated Phase-2 scope: the occupier
+      director running closures and reprisals (System 3), Fireforce heli QRF
+      (System 4), control infrastructure / checkpoint generation (System 1, written
+      against nearestRoads), and curfew/pass-laws/flying checkpoints (System 2).
+      Drawing-board only; mostly intermediate SQF per the plan.
+    log:
+      - "Plan 14 also names sub-day quick wins needing no new C++: flags, a curfew clock, one hand-placed checkpoint."
+      - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
+
+  # ---------------------------------------------------------------- phase 3
+  - id: strategy-screen
+    title: "GuerrillaDisplay strategy screen"
+    phase: phase-3
+    status: planned
+    depends_on: [gate-zero-playtest]
+    summary: >
+      Plan 13's Phase 3 centrepiece on UIMap (recruit/train/assign/spend); called
+      the largest single C++ surface. No GuerrillaDisplay class exists;
+      GuerrillaNewGame.hpp explicitly disclaims being it (Phase-1.5 stopgap).
+
+  - id: ai-perception-phase3
+    title: "AI perception + morale tranche (plans 08, 02; polish 06, 07)"
+    phase: phase-3
+    status: planned
+    depends_on: [ai-tactics-phase2]
+    summary: >
+      Plan 13's Phase-3 AI slice: 08 shared enemy intel (extend
+      AICenter::ReceiveReport for radio-net seeding; the Heat core) and 02 dynamic
+      morale (live courage from casualties/wounded leader), with 06 memory decay
+      and 07 stance/concealment spotting as tuning polish. Plan 07 is also the
+      pseudo-gang ID-confidence tell, so pseudo-gang polish touches it.
+
+  - id: full-mode
+    title: "Phase 3 full mode: full island, full playbook, undercover re-establishment"
+    phase: phase-3
+    status: planned
+    depends_on: [strategy-screen, occupation-systems, ai-perception-phase3]
+    summary: >
+      Site's Phase 3 (Planned, 5%): the complete open-world insurgency across a
+      full island with the whole occupier playbook: plan 14's Phase-3 systems
+      (Protected Villages/cordon, tracker teams, detention/prison/rescue,
+      expansion-under-passivity, informers), nemesis-lite named commanders,
+      per-region heat cooldown, undercover re-establishment, and optionally the
+      WEST third-force slot and MP-robust guerrilla.sav persistence from plan 13.
+    log:
+      - "Plan 13's stated Phase-3 risk is C++ UI scope creep; mitigation is a read-only UIMap overlay prototype before any interactive Display work, and the rule that the game must be fun without the strategy screen."
+      - "Capabilities the AI plans do not cover get faked in SQF for v1: native garrison/cover-hold, dynamic patrol routes, ambush-hold-fire FSM states, supply lines."
+
+  # ---------------------------------------------------------------- housekeeping
+  - id: gh-tracker-hygiene
+    title: "Close/annotate issue #1, unblock note on #7, tick satisfied boxes on #2"
+    phase: housekeeping
+    status: planned
+    priority: 2
+    depends_on: [engine-native-systems]
+    gh_issues: [1, 7, 2]
+    summary: >
+      Issue #1 is still OPEN though all six targets landed in 3ef5cd5 (zero
+      comments; looks simply never-closed). Issue #7 still calls #5/#6 an
+      outstanding external dependency. Issue #2's three satisfied prerequisite
+      boxes are unticked. Bring the tracker in line with reality.
+
+  - id: engine-hardening-followups
+    title: "Follow-up null-deref guards named in #6's closing comment"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [crash-fixes-trident-trust]
+    gh_issues: [6]
+    summary: >
+      InGameUIActions.cpp:486 (UI reload slot loop) and VehicleAICombat.cpp:2285/
+      2397-2398 (adjacent unguarded muzzle derefs) have the identical unguarded
+      pattern that caused #5/#6. A tracking issue was offered but never filed.
+
+  - id: ai-diagnostics-tab
+    title: "AI diagnostics tab (plan 12, dev tooling)"
+    phase: housekeeping
+    status: planned
+    priority: 4
+    depends_on: [build-toolchain]
+    summary: >
+      ImGui tab surfacing the existing DiagMode draws, as a tuning enabler for the
+      AI tranches. Gated on a decision to flip _ENABLE_CHEATS (currently 0) in dev
+      builds. Plan 13 slots it as dev-time work, no player-facing surface.
+
+  - id: script-manager-tests
+    title: "Behavioral tests for the untested SQS managers"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [guerrilla-test-suite]
+    summary: >
+      economy, recruit, companions, qrf, escalation and loot scripts ship in every
+      mission copy but have zero behavioral coverage (only byte-parity). The
+      current uncommitted diff touches exactly this surface (companion XP seed,
+      loot queue drain), so regressions there are invisible today.
+    log:
+      - "Small cleanups to fold in: test_guerrilla_module.cpp is registered twice in tests/unit CMakeLists (harmless, predates working tree); single engine TODO at OptionsUIApp.cpp:263 (hardcoded GUERRILLA label pending stringtable key)."

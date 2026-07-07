@@ -1,0 +1,7 @@
+#!/bin/sh
+# Regenerate the internal roadmap (roadmap/index.html + status.json) after every
+# commit. Installed via: git config core.hooksPath .githooks
+# Must never fail the commit: all errors are swallowed after being printed.
+python "$(git rev-parse --show-toplevel)/roadmap/generate.py" || \
+  echo "post-commit: roadmap generation failed (commit unaffected)"
+exit 0

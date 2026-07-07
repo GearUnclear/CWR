@@ -3,3 +3,12 @@
 
 # Third-party mod test bed (2.2G binary PBOs/textures) - read-only reference, not our source
 /@LoBo/
+
+# API keys / secrets
+/.env
+
+# Generated roadmap outputs (source of truth is roadmap/roadmap.yaml)
+/roadmap/index.html
+/roadmap/status.json
+/roadmap/gh-issues-cache.json
+/roadmap/__pycache__/

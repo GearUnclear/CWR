@@ -23,6 +23,10 @@ The git root was rerooted up from `arma_CWR/` to `D:\Arma_CWA` so the web portal
 - **Website** → `site/`. Static; no toolchain.
 - The **`mod-plans/`** and **`guerrilla-mode/`** documents are living, AI-drafted design docs subject to correction — treat them as design intent, not settled hard specs. Verify their claims against the actual code before relying on them.
 
+## Internal roadmap (keep it updated)
+
+`roadmap/roadmap.yaml` is the machine-parsable source of truth for what is done, in flight, and planned, with dependencies and GitHub-issue links. `roadmap/generate.py` validates it, syncs against GitHub issues, and renders `roadmap/index.html` + `status.json`; a post-commit hook regenerates them (one-time setup per clone: `git config core.hooksPath .githooks`). **When you land, start, or plan a meaningful chunk of work, update the matching item in `roadmap.yaml`** (status, commits, a `log` line for problems hit); the generator warns when a GitHub issue is not linked to any roadmap item. GitHub issues live on the fork: always `gh -R GearUnclear/CWR` (plain `gh` resolves to the upstream Bohemia repo). See `roadmap/README.md`.
+
 ## Conventions
 
 - The public brand is **Uslu dur! / UD** in user-facing text (the site, docs written for players). Internal code, folders, and build targets keep the `cwr`/`CWR`/`Poseidon` names — do not mass-rename them.
