@@ -274,6 +274,20 @@ items:
       - "run-game.ps1 log capture + Guerrilla.Abel template + world-gated installer are all groundwork for exactly this."
       - "STATUS.md acceptance play-through script: boot, clear the Outpost, watch the flip + hold garrison, income tick, recruit, loot toward the AK unlock, promote a companion, trip a QRF, then save/load and confirm the campaign resumes."
 
+  - id: showcase-mission
+    title: "Showcase/verification mission for the gameplay systems (issue #9)"
+    phase: phase-1.5
+    status: planned
+    priority: 1
+    depends_on: [mission-migration-native, abel-template]
+    gh_issues: [9]
+    summary: >
+      A test mission that displays the unique gameplay systems for oversight,
+      testing, and verification: zones/capture, garrisons/QRF, graduated alert,
+      undercover, economy/loot/recruiting, save/load. Natural companion to the
+      Gate-Zero acceptance play-through; the Guerrilla.Abel template is the
+      obvious base.
+
   - id: voice-lines-pipeline
     title: "TTS voice-line pipeline (voice-lines/)"
     phase: phase-1.5
