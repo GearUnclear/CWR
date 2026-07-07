@@ -93,11 +93,13 @@ GM_GEAR_UNLOCKED  = []
 ; ===========================================================================
 ;  NAMED COMPANIONS  (parallel arrays keyed by name; GM_COMP_OBJ transient)
 ; ===========================================================================
+; seed triple is ladder-consistent (companions.sqs): XP 100 = CORPORAL,
+; skill = 0.35 + 0.10 * rankIdx = 0.45
 GM_COMP_NAMES   = ["Petra"]
 GM_COMP_ALIVE   = [true]
 GM_COMP_RANK    = ["CORPORAL"]
-GM_COMP_XP      = [0]
-GM_COMP_SKILL   = [0.55]
+GM_COMP_XP      = [100]
+GM_COMP_SKILL   = [0.45]
 ; GM_COMP_LOADOUT: per-companion [weapons[], mags[]]
 ; GM_COMP_OBJ: live handle; reconciled by campaign.sqs on load
 GM_COMP_LOADOUT = [ [ [], [] ] ]

@@ -89,7 +89,9 @@ GM_fnEquipFromUnlocked = {GM_tmpEU = _this select 0; GM_tmpERole = _this select 
 ;  garrisons (the ~50-100 AI near the player), same budget as Phase 1.
 ; ===========================================================================
 #loop
-GM_LOOT_EVQ = gmEvtGarSpawned + []; gmEvtGarSpawned = []; gmEvtGarDespawned = []
+; drain both garrison queues (this manager owns them; the sweep below covers
+; everything the events would say, so the tuples themselves are not read)
+gmEvtGarSpawned = []; gmEvtGarDespawned = []
 [] call GM_fnLootTag
 [] call GM_fnLootPrune
 ~GM_LOOT_SWEEP

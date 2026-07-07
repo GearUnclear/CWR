@@ -181,11 +181,14 @@ The native systems carry unit coverage over their pure cores
 ctest --test-dir build/win-x64-clang-rwdi -R PoseidonTests --output-on-failure
 ```
 
-The Phase-1 Trident integration tests
-(`tests/integration/scripting/guerrilla_*`) were written against the retired
-script spine (they poke `GM_ZONES` and drive `zones.sqs`); they need a rewrite
-against the `gm*` command surface and are tracked separately from this
-mission migration.
+The Trident integration suite is fully migrated to the `gm*` command surface
+(the retired `GM_ZONES`/`zones.sqs` spine survives only in comments). Demo-data
+tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`,
+`guerrilla_save_reload.seq`) run headless with the free Steam Demo; the
+`guerrilla_native_*` twins need the full CWA install (`full_cwa`), and
+`guerrilla_sinai_swap` + `ui/guerrilla_new_game_e2e` additionally need @LoBo
+(`lobo`), the generated fixture PBOs, and installed templates. See
+[`STATUS.md`](STATUS.md) for the full table.
 
 ---
 

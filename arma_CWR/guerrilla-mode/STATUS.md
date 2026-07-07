@@ -65,14 +65,52 @@ reconciled against the engine source, not play-tested.)*
    drained but trigger no extra UX (a CITY flip already fires `captured` →
    one "liberated" hint, matching Phase 1).
 
+## Known edges (source audit 2026-07-06 — intended for Phase 1, revisit with play feel)
+
+- **An occupier-owned CITY can never be captured**: support accrues only while
+  `owner=="NEUTRAL"` and military capture skips CITY zones
+  (`ZoneRegistry::EvaluateTick`). Fine for the shipped seeds (cities start
+  NEUTRAL); island authors must not set a CITY's `owner="OCCUPIER"` expecting
+  it to be takeable.
+- **Nothing captures while the player is dead/absent** (`playerValid` gate);
+  garrisons freeze rather than despawn. Correct for single-player Phase 1.
+- **Alert FSM edges**: RED→YELLOW re-arms the escalation window, so a
+  partially-visible player oscillates RED↔YELLOW; there is no calming grace
+  period below `alertYellowKnows`; occupier groups farther than `zoneArea`
+  from every zone center contribute no `knowsAbout` (a running firefight
+  *between* zones raises no alert); an undercover break heats the *nearest*
+  zone regardless of distance.
+- **Overflow recruit groups are dropped from `GM_PLAYER_GROUPS` on load**
+  (`campaign.sqs` reseeds to `[group aP]`) — deliberate Phase-1 policy; cells
+  larger than one group lose their extra-group bookkeeping across a save.
+- **Undercover break is permanent for the campaign** (re-establishment is the
+  Phase-2 hook); the player `fired`-EH stays attached after the break, which
+  is harmless because `gmBreakUndercover` is a no-op while
+  `gmUndercover==false`.
+
 ## Tests
 
-The Phase-1 integration tests (`tests/integration/scripting/guerrilla_*`) were
-written against the old script spine (they poke `GM_ZONES` etc.); the engine
-rewrite ships its own unit coverage for ZoneRegistry/AlertMachine/GarrisonCache
-(pure `EvaluateTick`/`Decide` cores). The mission-level tests need a rewrite
-against the `gm*` command surface — tracked separately; **not** part of this
-mission migration (tests/ is owned by other agents).
+The engine systems carry Catch2 unit coverage (ZoneRegistry / AlertMachine /
+GarrisonCache pure cores, config parsing, side resolution, seedCities). The
+Trident integration suite is **fully migrated to the `gm*` surface** (verified
+2026-07-06 — the old `GM_ZONES`/`zones.sqs` spine survives only in comments):
+
+| Test | Data needed |
+|---|---|
+| `scripting/guerrilla_capture_flip.test` | Demo (headless) |
+| `scripting/guerrilla_spawn_domove.test` | Demo (headless, `gate-zero`) |
+| `scripting/guerrilla_save_reload.seq` (01_save → 02_reload) | Demo (headless, `save-load`) |
+| `scripting/guerrilla_native_capture.test` | `full_cwa` |
+| `scripting/guerrilla_native_spawn.test` | `full_cwa` |
+| `scripting/guerrilla_native_undercover.test` | `full_cwa` |
+| `scripting/guerrilla_native_save_reload.seq` | `full_cwa`, `save-load` |
+| `scripting/guerrilla_sinai_swap.test` | `full_cwa` + `lobo` (+ fixture gen + installed templates) |
+| `ui/guerrilla_new_game_e2e.test` | `full_cwa` + `lobo` (+ installed templates) |
+
+Unit-level serialization round-trips exist for all three native systems
+(`test_zone_registry.cpp`, `test_alert_machine.cpp`, `test_garrison_cache.cpp`);
+`test_mission_script_core.cpp` enforces that every test mission's `init.sqs` +
+`scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core.
 
 ## Still needs a human run
 

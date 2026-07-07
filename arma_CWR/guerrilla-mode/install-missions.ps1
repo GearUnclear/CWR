@@ -16,20 +16,38 @@
     The game working directory is the data dir (GameDir), so the unbanked
     form lands at <GameDir>\Missions\Guerrilla.<World>\.
 
+    WORLD GATE: a template is only installed when its world is actually
+    loadable in GameDir (a <GameDir>\Worlds\<World>.wrp exists). Installing
+    a mission whose world is missing is a trap: the single-mission browser
+    still lists it, and launching it silently keeps the CURRENT world, so
+    the player spawns at the mission's coordinates on the WRONG island
+    (typically in open sea) and drowns. Templates for worlds that ship in
+    mod PBOs (e.g. Guerrilla.Sinai - Sinai lives inside @LoBo\addons\
+    lost.pbo, undetectable by filename) must be named in -IncludeWorld to
+    install.
+
     Idempotent: re-running mirrors the repo templates over any previous
-    install (stale files inside each installed template are removed;
+    install (stale files inside each installed template are removed, and a
+    previously installed template that is now world-gated out is REMOVED;
     unrelated missions are untouched).
 
 .PARAMETER GameDir
     The Arma: Cold War Assault install (data) directory.
     Default: D:\Arma_CWA\ARMA Cold War Assault
 
+.PARAMETER IncludeWorld
+    World name(s) to install even though <GameDir>\Worlds\<World>.wrp does
+    not exist - for worlds that live inside (mod) PBOs. The game must then
+    be launched with that mod loaded or the mission is unloadable.
+
 .EXAMPLE
     .\install-missions.ps1
     .\install-missions.ps1 -GameDir 'C:\Games\ArmaCWA'
+    .\install-missions.ps1 -IncludeWorld Sinai
 #>
 param(
-    [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault'
+    [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault',
+    [string[]]$IncludeWorld = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,6 +74,19 @@ if (-not $templates) {
 
 foreach ($tpl in $templates) {
     $dest = Join-Path $destRoot $tpl.Name
+
+    # World gate (see .DESCRIPTION): template name is Guerrilla.<World>.
+    $world = $tpl.Name.Substring('Guerrilla.'.Length)
+    $wrp = Join-Path $GameDir "Worlds\$world.wrp"
+    if (-not (Test-Path -LiteralPath $wrp) -and $IncludeWorld -notcontains $world) {
+        if (Test-Path -LiteralPath $dest) {
+            Remove-Item -LiteralPath $dest -Recurse -Force -Confirm:$false
+            Write-Output ("Removed stale install: {0} (world '{1}' not in {2}\Worlds; use -IncludeWorld {1} for mod-PBO worlds)" -f $tpl.Name, $world, $GameDir)
+        } else {
+            Write-Output ("Skipped: {0} (world '{1}' not in {2}\Worlds; use -IncludeWorld {1} for mod-PBO worlds)" -f $tpl.Name, $world, $GameDir)
+        }
+        continue
+    }
     # /MIR mirrors the template (removes stale files from previous installs);
     # scoped to this template's own folder only.
     $null = & robocopy $tpl.FullName $dest /MIR /NJH /NJS /NDL /NFL /NC /NS /NP

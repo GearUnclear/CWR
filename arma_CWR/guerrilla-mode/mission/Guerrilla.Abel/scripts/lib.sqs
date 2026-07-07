@@ -1,0 +1,68 @@
+; ============================================================================
+;  lib.sqs  -  Guerrilla Mode shared helper library (island/faction-agnostic)
+; ----------------------------------------------------------------------------
+;  Synchronous helpers as global code values (GM_fn*), called with
+;      result = [args] call GM_fnXxx
+;  A { ... } literal is a GameString in this evaluator, so every helper stays
+;  a single physical line (SQS is line-oriented). No ~ waits inside (call is
+;  synchronous). GM_tmp* scratch globals are kept over `private` for
+;  consistency with the call-is-non-interruptible pattern the managers rely on.
+;
+;  PRUNED THIS PASS (native/evaluator replacements):
+;    GM_fnDist2D    -> binary `distance` now works on position arrays
+;    GM_fnZoneIndex -> native `gmZoneIndex "<name>"`
+;    GM_fnPickTier  -> native `gmFactionTierClass [side, warLevel]`
+;
+;  exec is async: init.sqs (and every manager) gates on @GM_LIB_READY, which
+;  this file sets as its last statement.
+; ============================================================================
+
+
+; --- randPosNear( [center, radius] ) -> [x,y,0] ------------------------------
+;   Random position in the +/- radius square around center (getPos order).
+GM_fnRandPosNear = {[ ((_this select 0) select 0) + (random (2 * (_this select 1))) - (_this select 1), ((_this select 0) select 1) + (random (2 * (_this select 1))) - (_this select 1), 0 ]}
+
+
+; --- spawnGroup( [side, unitClass, count, pos] ) -> group --------------------
+;   Spawn a group of N at pos for a SIDE VALUE (not a string). Callers that
+;   may exceed the engine's 12/group cap must split into multiple calls.
+GM_fnSpawnGroup = {GM_tmpG = createGroup (_this select 0); GM_tmpI = 0; while {GM_tmpI < (_this select 2)} do {(_this select 1) createUnit [(_this select 3), GM_tmpG, "", 0.5, "PRIVATE"]; GM_tmpI = GM_tmpI + 1}; GM_tmpG}
+
+
+; --- sideFromString( sideString ) -> side value ------------------------------
+;   Generic side-string -> side-value conversion (createGroup/createCenter
+;   need the value; gmOccupierSide/gmResistanceSide return strings). Matches
+;   by formatting each engine side nular (a side renders via its enum name:
+;   "WEST"/"EAST"/"GUER"/"CIV" - engine World/Scene/Object.cpp SideNames), so
+;   no side-string literal appears in script code. Unknown input -> civilian.
+GM_fnSideFromString = {GM_tmpSS = [west, east, resistance, civilian]; GM_tmpSV = civilian; GM_tmpSI = 0; while {GM_tmpSI < 4} do {if ((format ["%1", GM_tmpSS select GM_tmpSI]) == _this) then {GM_tmpSV = GM_tmpSS select GM_tmpSI}; GM_tmpSI = GM_tmpSI + 1}; GM_tmpSV}
+
+
+; --- countZonesOwnedBy( ownerString ) -> scalar ------------------------------
+;   Counts zones whose owner tuple field equals the passed side string.
+;   Reads the native registry via gmZoneCount/gmZone.
+GM_fnCountOwnedBy = {GM_tmpN = 0; GM_tmpI = 0; while {GM_tmpI < gmZoneCount} do {if (((gmZone GM_tmpI) select GM_Z_OWNER) == _this) then {GM_tmpN = GM_tmpN + 1}; GM_tmpI = GM_tmpI + 1}; GM_tmpN}
+
+
+; --- zoneOfType( typeString ) -> first zone index of that type (or -1) -------
+;   Anchor lookup, e.g. "CAMP" call GM_fnZoneOfType for the recruiter camp.
+GM_fnZoneOfType = {GM_tmpR = -1; GM_tmpI = 0; while {GM_tmpI < gmZoneCount} do {if ((GM_tmpR < 0) and (((gmZone GM_tmpI) select GM_Z_TYPE) == _this)) then {GM_tmpR = GM_tmpI}; GM_tmpI = GM_tmpI + 1}; GM_tmpR}
+
+
+; --- factionNum( [sideString, key, default] ) -> scalar ----------------------
+;   Numeric faction descriptor value. gmFactionValue returns the raw config
+;   text ("" when the key is missing); compile+call turns "3" into 3.
+GM_fnFactionNum = {GM_tmpFS = gmFactionValue [_this select 0, _this select 1]; if (GM_tmpFS == "") then {_this select 2} else {call compile GM_tmpFS}}
+
+
+; --- bumpGearTally( [classname, amount] ) -> newCount -------------------------
+;   THE sole writer of GM_GEAR_ITEMS/COUNT/UNLOCKED (parallel arrays). Crossing
+;   GM_GEAR_THRESHOLD appends the classname to the permanent unlock set.
+GM_fnBumpGear = {GM_tmpI = GM_GEAR_ITEMS find (_this select 0); if (GM_tmpI < 0) then {GM_GEAR_ITEMS = GM_GEAR_ITEMS + [(_this select 0)]; GM_GEAR_COUNT = GM_GEAR_COUNT + [0]; GM_tmpI = (count GM_GEAR_ITEMS) - 1}; GM_GEAR_COUNT set [GM_tmpI, (GM_GEAR_COUNT select GM_tmpI) + (_this select 1)]; if (((GM_GEAR_COUNT select GM_tmpI) >= GM_GEAR_THRESHOLD) and (not ((_this select 0) in GM_GEAR_UNLOCKED))) then {GM_GEAR_UNLOCKED = GM_GEAR_UNLOCKED + [(_this select 0)]}; GM_GEAR_COUNT select GM_tmpI}
+
+
+; ----------------------------------------------------------------------------
+;  Handshake: signal init.sqs that the helper table is fully defined.
+; ----------------------------------------------------------------------------
+GM_LIB_READY = true
+exit
