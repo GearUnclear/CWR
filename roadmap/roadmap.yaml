@@ -278,16 +278,22 @@ items:
   - id: showcase-mission
     title: "Showcase/verification mission for the gameplay systems (issue #9)"
     phase: phase-1.5
-    status: planned
+    status: done
     priority: 1
     depends_on: [mission-migration-native, abel-template]
+    commits: ["702842f"]
     gh_issues: [9]
     summary: >
-      A test mission that displays the unique gameplay systems for oversight,
-      testing, and verification: zones/capture, garrisons/QRF, graduated alert,
-      undercover, economy/loot/recruiting, save/load. Natural companion to the
-      Gate-Zero acceptance play-through; the Guerrilla.Abel template is the
-      obvious base.
+      Showcase.Abel: the byte-identical shared core plus a showcase/ overlay
+      (bootstrapped from mission.sqm) that makes every system rapidly
+      accessible: an action menu of instant demos (teleport cycle, economy
+      grant, gear unlock, companion XP, war level, garrison force-despawn,
+      capture, cover break, time x4) and a 2 s status HUD over the native gm*
+      surface. Guard tests walk Showcase.* too; install-missions.ps1 installs
+      both prefixes; showcase_smoke drives all demos on full CWA data.
+    log:
+      - "Native event slots are single-owner (one handler per event type), so the overlay registers none; campaign loads are detected by polling GM_pSaveAct and the menu re-mounts."
+      - "Demo order matters in showcase_smoke: capture wipes the Outpost before the cover-break demo teleports there, so the uncovered player never stands next to live occupiers (break latch consumption is garrison-independent, verified in AlertMachine::EvaluateAlert)."
 
   - id: voice-lines-pipeline
     title: "TTS voice-line pipeline (voice-lines/)"
