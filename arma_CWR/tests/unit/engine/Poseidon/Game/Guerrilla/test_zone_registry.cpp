@@ -4,6 +4,7 @@
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
@@ -265,6 +266,28 @@ TEST_CASE("ZoneRegistry - faction queries", "[game][guerrilla]")
         REQUIRE(Str(f.registry.FactionVehicle("EAST", 2)) == "Ural");
         REQUIRE(Str(f.registry.FactionVehicle("EAST", 3)) == "BMP");
         REQUIRE(Str(f.registry.FactionVehicle("EAST", 8)) == "BMP");
+    }
+
+    SECTION("vehicleThresholds[] ladder reaches vehicles past index 1")
+    {
+        const char* config = "class CfgGuerrillaZones { class Zones { class A { name=\"A\"; }; }; };\n"
+                             "class CfgGuerrillaFactions\n"
+                             "{\n"
+                             "    class East\n"
+                             "    {\n"
+                             "        side=\"EAST\";\n"
+                             "        vehicles[]={\"UAZ\",\"Ural\",\"BMP\",\"T80\"};\n"
+                             "        vehicleThresholds[]={3,5,7};\n"
+                             "        vehicleThreshold=5;\n" // ignored when the array is present
+                             "    };\n"
+                             "};\n";
+        RegistryFixture g;
+        g.Load(config);
+        REQUIRE(Str(g.registry.FactionVehicle("EAST", 1)) == "UAZ");
+        REQUIRE(Str(g.registry.FactionVehicle("EAST", 3)) == "Ural");
+        REQUIRE(Str(g.registry.FactionVehicle("EAST", 5)) == "BMP");
+        REQUIRE(Str(g.registry.FactionVehicle("EAST", 7)) == "T80");
+        REQUIRE(Str(g.registry.FactionVehicle("EAST", 10)) == "T80"); // clamped
     }
 
     SECTION("named values")
@@ -731,6 +754,94 @@ TEST_CASE("ZoneRegistry - occupier/resistance sides survive save/load", "[game][
     CHECK(Str(loaded.OccupierSide()) == "WEST");
     CHECK(Str(loaded.ResistanceSide()) == "CIV");
 
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive save/load",
+          "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-rows.bin";
+
+    // The load's second pass rebuilds the static table via LoadFromConfig(),
+    // which reads the global ExtParsMission - park the config there exactly
+    // as SetMission's description.ext reparse would during a real load.
+    {
+        QIStream in(kDemoConfig, strlen(kDemoConfig));
+        ExtParsMission.Parse(in);
+    }
+
+    {
+        RegistryFixture f;
+        f.Load(kDemoConfig);
+        const int outpost = f.registry.FindZoneIndex("Outpost");
+        const int village = f.registry.FindZoneIndex("Village");
+        REQUIRE(outpost >= 0);
+        REQUIRE(village >= 0);
+
+        // mutate every serialized dynamic field away from its config value
+        ZoneRecord* z = f.registry.GetZoneMutable(outpost);
+        REQUIRE(z != nullptr);
+        z->owner = "GUER";
+        z->garrison = 3;
+        z->income = 40;
+        z->liveOccupiers = 2;
+        z->revealed = true;
+        f.registry.GetZoneMutable(village)->support = 44;
+        f.registry.HeatRaise(outpost, 55);
+
+        f.registry.SetEventHandler(ZECaptured, "gmEvtCaptured = gmEvtCaptured + [_this]");
+        f.registry.SetEventHandler(ZESupportThreshold, "hSupport");
+        f.registry.SetEventHandler(ZERevealed, "hRevealed");
+        f.registry.SetEventHandler(ZECampaignLoaded, "hLoaded");
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+
+    // the static table came back from ExtParsMission, the dynamic rows from
+    // the archive (matched by zone name)
+    REQUIRE(loaded.NZones() == 4);
+    const int outpost = loaded.FindZoneIndex("Outpost");
+    const int village = loaded.FindZoneIndex("Village");
+    REQUIRE(outpost >= 0);
+    REQUIRE(village >= 0);
+
+    const ZoneRecord* z = loaded.GetZone(outpost);
+    CHECK(Str(z->owner) == "GUER");
+    CHECK(z->garrison == Approx(3.0f));
+    CHECK(z->income == Approx(40.0f));
+    CHECK(z->heat == Approx(55.0f));
+    CHECK(z->liveOccupiers == Approx(2.0f));
+    CHECK(z->revealed);
+    CHECK(loaded.GetZone(village)->support == Approx(44.0f));
+
+    CHECK(Str(loaded.GetEventHandler(ZECaptured)) == "gmEvtCaptured = gmEvtCaptured + [_this]");
+    CHECK(Str(loaded.GetEventHandler(ZESupportThreshold)) == "hSupport");
+    CHECK(Str(loaded.GetEventHandler(ZERevealed)) == "hRevealed");
+    CHECK(Str(loaded.GetEventHandler(ZECampaignLoaded)) == "hLoaded");
+
+    // the campaignLoaded notification is queued exactly once, carrying the
+    // archive's save-format version
+    int version = -1;
+    CHECK(loaded.ConsumeCampaignLoaded(version));
+    CHECK(version == GuerrillaSaveVersion);
+    CHECK_FALSE(loaded.ConsumeCampaignLoaded(version));
+
+    // scrub the process-wide mission config other tests expect to be empty
+    ExtParsMission.Clear();
     std::filesystem::remove(archivePath);
 }
 

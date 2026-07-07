@@ -196,7 +196,9 @@ class JsonlSink : public spdlog::sinks::base_sink<std::mutex>
 class PoseidonFormatter : public spdlog::custom_flag_formatter
 {
   public:
-    explicit PoseidonFormatter(LoggingSystem* sys) : _sys(sys) {}
+    // colored=false emits the same [LEVEL] [CATEGORY] tags without ANSI
+    // escapes - used for the --log-file sink (files must stay grep-clean).
+    explicit PoseidonFormatter(LoggingSystem* sys, bool colored = true) : _sys(sys), _colored(colored) {}
 
     static LoggingSystem::Category MapCategoryPublic(const spdlog::string_view_t& name) { return MapCategory(name); }
 
@@ -211,17 +213,17 @@ class PoseidonFormatter : public spdlog::custom_flag_formatter
             dest.append(std::string_view(appTag));
             dest.push_back(' ');
         }
-        const char* lvl = LoggingSystem::GetFormattedLevel(msg.level);
+        const char* lvl = LoggingSystem::GetFormattedLevel(msg.level, _colored);
         dest.append(std::string_view(lvl, strlen(lvl)));
         dest.push_back(' ');
-        const char* catTag = LoggingSystem::GetColoredCategoryTag(cat);
+        const char* catTag = LoggingSystem::GetColoredCategoryTag(cat, _colored);
         dest.append(std::string_view(catTag, strlen(catTag)));
         dest.push_back(' ');
     }
 
     [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override
     {
-        return std::make_unique<PoseidonFormatter>(_sys);
+        return std::make_unique<PoseidonFormatter>(_sys, _colored);
     }
 
   private:
@@ -249,6 +251,7 @@ class PoseidonFormatter : public spdlog::custom_flag_formatter
     }
 
     LoggingSystem* _sys;
+    bool _colored;
 };
 
 // Static per-process app tag — read by the log formatter/sink without a
@@ -342,12 +345,12 @@ const char* LoggingSystem::GetCategoryColor(Category category)
     }
 }
 
-const char* LoggingSystem::GetColoredCategoryTag(Category category)
+const char* LoggingSystem::GetColoredCategoryTag(Category category, bool colored)
 {
     static thread_local char buffer[64];
-    const char* color = GetCategoryColor(category);
+    const char* color = colored ? GetCategoryColor(category) : "";
     const char* name = GetCategoryName(category);
-    const char* reset = "\033[0m";
+    const char* reset = colored ? "\033[0m" : "";
 
     // Format: [ColoredName] with padding outside to align to 9 chars total ("[Network]" = 9)
     snprintf(buffer, sizeof(buffer), "[%s%s%s]%-*s", color, name, reset, (int)(9 - strlen(name) - 2),
@@ -355,7 +358,7 @@ const char* LoggingSystem::GetColoredCategoryTag(Category category)
     return buffer;
 }
 
-const char* LoggingSystem::GetFormattedLevel(spdlog::level::level_enum level)
+const char* LoggingSystem::GetFormattedLevel(spdlog::level::level_enum level, bool colored)
 {
     static thread_local char buffer[64];
     const char* level_colors[] = {
@@ -375,8 +378,12 @@ const char* LoggingSystem::GetFormattedLevel(spdlog::level::level_enum level)
         level_idx = 2; // default to info
     }
 
-    const char* color = level_colors[level_idx];
+    const char* color = colored ? level_colors[level_idx] : "";
     const char* name = level_names[level_idx];
+    if (!colored)
+    {
+        reset = "";
+    }
 
     // Format: [ColoredLevel] - all 4 chars, no padding needed ("[CRIT]" = 6 chars)
     snprintf(buffer, sizeof(buffer), "[%s%s%s]", color, name, reset);
@@ -556,7 +563,8 @@ void LoggingSystem::Initialize(const char* logLevel, const char* categoryFilter,
     {
         auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logFile, true);
         auto formatter = std::make_unique<spdlog::pattern_formatter>();
-        formatter->add_flag<PoseidonFormatter>('*', this);
+        // colored=false: no ANSI escapes in the file (see PoseidonFormatter)
+        formatter->add_flag<PoseidonFormatter>('*', this, false);
         formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %*%v");
         file_sink->set_formatter(std::move(formatter));
         sinks.push_back(file_sink);

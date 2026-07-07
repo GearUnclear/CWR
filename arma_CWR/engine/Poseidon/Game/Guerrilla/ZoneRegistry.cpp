@@ -323,6 +323,14 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
                 f.vehicles.Add(RString((RStringB)(*vehicles)[k]));
             }
         }
+        const ParamEntry* vehThresholds = e.FindEntry("vehicleThresholds");
+        if (vehThresholds && vehThresholds->IsArray())
+        {
+            for (int k = 0; k < vehThresholds->GetSize(); k++)
+            {
+                f.vehicleThresholds.Add((*vehThresholds)[k]);
+            }
+        }
 
         // all remaining plain values (officer, holdClass, recruitFighter,
         // recruitSpecialist, companionClass, baseWeapon, baseMagazine, ...)
@@ -529,7 +537,25 @@ RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const
     {
         return RString();
     }
-    int index = warLevel >= f->vehicleThreshold ? 1 : 0;
+    int index = 0;
+    if (f->vehicleThresholds.Size() > 0)
+    {
+        // vehicleThresholds[] mirrors tierThresholds[]: ascending war levels,
+        // vehicle i+1 unlocks at thresholds[i]
+        for (int i = 0; i < f->vehicleThresholds.Size(); i++)
+        {
+            if (warLevel >= f->vehicleThresholds[i])
+            {
+                index++;
+            }
+        }
+    }
+    else
+    {
+        // legacy scalar key: a two-step ladder (vehicles[] past index 1 is
+        // unreachable without vehicleThresholds[])
+        index = warLevel >= f->vehicleThreshold ? 1 : 0;
+    }
     if (index >= f->vehicles.Size())
     {
         index = f->vehicles.Size() - 1;

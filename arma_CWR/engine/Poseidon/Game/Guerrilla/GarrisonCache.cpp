@@ -651,6 +651,16 @@ void GarrisonCache::ForceDespawn(int zoneIndex)
     DispatchEvents(fired);
 }
 
+void GarrisonCache::MarkSpawnedForTest(int zoneIndex, bool spawned)
+{
+    SyncStates();
+    if (zoneIndex < 0 || zoneIndex >= _states.Size())
+    {
+        return;
+    }
+    _states[zoneIndex].spawned = spawned;
+}
+
 void GarrisonCache::DispatchEvents(const AutoArray<GarrisonEventRecord>& fired)
 {
     if (fired.Size() == 0 || !GWorld)

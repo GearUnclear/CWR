@@ -1,6 +1,0 @@
-// Guerrilla Mode - Gate-Zero engine-capability probe mission.
-// Minimal; the paired test (tests/integration/scripting/guerrilla_spawn_domove
-// .test.sqf) drives all spawning/movement via runtime script commands.
-onLoadMission = "Guerrilla Gate-Zero (spawn + move)";
-respawn = 0;
-joinInProgress = 0;

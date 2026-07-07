@@ -13,6 +13,19 @@
     this fast when only a few source files changed. Pass -SkipBuild to launch
     whatever is already in dist/ without touching the build at all.
 
+    CONSOLE OUTPUT CAPTURE (on by default): every launch writes three files
+    into <repo>\logs\ (gitignored), timestamped so runs never overwrite:
+      game-<ts>.log         engine log (spdlog file sink via --log-file;
+                            everything LogF/spdlog emits, same as console)
+      game-<ts>.stdout.log  raw stdout (CLI help/version text)
+      game-<ts>.stderr.log  raw stderr (crash-handler stack traces, minidump
+                            paths, command-line errors - these bypass the
+                            engine logger, so --log-file alone would miss
+                            them)
+    The game runs detached (Start-Process), so nothing floods the terminal
+    or an AI-session transcript; inspect the files after (or during) the run
+    instead. Pass -NoLog to launch with no capture at all.
+
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory. This is the working
     directory the game runs from (AddOns/, Missions/, Campaigns/, etc. live
@@ -32,9 +45,17 @@
     Skip the cmake build step and launch whatever binary is already staged
     in dist/<preset-arch>/.
 
+.PARAMETER LogDir
+    Directory for the captured output files. Default: <repo>\logs
+    (gitignored via /logs/ and *.log in .gitignore).
+
+.PARAMETER NoLog
+    Disable all output capture (no --log-file, no stdout/stderr
+    redirection).
+
 .EXAMPLE
     .\run-game.ps1
-        Build + launch to the main menu.
+        Build + launch to the main menu, capturing output to logs\.
 
 .EXAMPLE
     .\run-game.ps1 -Mission 'Missions\Guerrilla.Demo'
@@ -48,7 +69,9 @@ param(
     [string]$DataDir = 'D:\Arma_CWA\ARMA Cold War Assault',
     [string]$Preset = 'win-x64-clang-rwdi',
     [string]$Mission,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [string]$LogDir = "$PSScriptRoot\logs",
+    [switch]$NoLog
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,4 +115,23 @@ if ($Mission) {
 }
 
 Write-Host "Launching $exe (cwd=$DataDir)$(if ($Mission) { " -> $Mission" })"
-Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $DataDir
+if ($NoLog) {
+    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $DataDir
+} else {
+    # Full console-output capture (see .DESCRIPTION): the engine logger gets
+    # a file sink (--log-file), and raw stdout/stderr are redirected too -
+    # the crash handler and CLI-error paths write straight to stderr and
+    # would otherwise be lost with a detached windowed process.
+    New-Item -ItemType Directory -Force $LogDir | Out-Null
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $engineLog = Join-Path $LogDir "game-$stamp.log"
+    $stdoutLog = Join-Path $LogDir "game-$stamp.stdout.log"
+    $stderrLog = Join-Path $LogDir "game-$stamp.stderr.log"
+    $gameArgs += @('--log-file', $engineLog)
+    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $DataDir `
+        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+    Write-Host "Logs:"
+    Write-Host "  engine: $engineLog"
+    Write-Host "  stdout: $stdoutLog"
+    Write-Host "  stderr: $stderrLog"
+}

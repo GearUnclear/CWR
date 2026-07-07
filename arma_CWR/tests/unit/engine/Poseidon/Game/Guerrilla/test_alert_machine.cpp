@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <filesystem>
 #include <string.h>
 #include <string>
 
@@ -460,4 +463,85 @@ TEST_CASE("AlertMachine - event handler bookkeeping and Clear", "[game][guerrill
     REQUIRE(f.machine.GetZoneState(99) == ASGreen);
     REQUIRE_FALSE(f.machine.GetLastKnown(99, pos));
     REQUIRE(f.machine.GetZoneTimer(99) == Approx(0.0f));
+}
+
+TEST_CASE("AlertMachine - FSM state, handlers and break flags survive save/load", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "alert-machine-roundtrip.bin";
+
+    {
+        AlertFixture f;
+        f.Load(kAlertConfig);
+        AutoArray<AlertEventRecord> fired;
+
+        // tick 1: Outpost straight to RED with a last-known fix; Depot into
+        // YELLOW (window = 20 s); an in-cover break latches undercoverBroken
+        AlertTickInputs in = MakeInputs(f.registry);
+        in.playerValid = true;
+        in.playerX = 1000.0f;
+        in.playerZ = 1000.0f;
+        in.undercover = true;
+        in.breakRequested = true;
+        in.breakReason = "mounted";
+        in.zones[0].knows = 4.0f;
+        in.zones[0].hasLastKnown = true;
+        in.zones[0].lastKnown = Vector3(1200.0f, 55.0f, 1300.0f);
+        in.zones[1].knows = 1.0f;
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(f.machine.BreakLatched());
+
+        // tick 2: hold contact so Depot's window bleeds 20 -> 15
+        in.breakRequested = false;
+        in.breakReason = RString();
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(f.machine.GetZoneState(0) == ASRed);
+        REQUIRE(f.machine.GetZoneState(1) == ASYellow);
+        REQUIRE(f.machine.GetZoneTimer(1) == Approx(15.0f));
+
+        f.machine.SetEventHandler(AEAlertChanged, "gmEvtAlert = gmEvtAlert + [_this]");
+        f.machine.SetEventHandler(AEUndercoverBroken, "hBroken");
+        // a gmBreakUndercover still waiting for its consuming tick
+        f.machine.RequestBreak("fired");
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.machine.Serialize(ar, f.registry) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    // fresh machine; the registry stands in for the config-rebuilt zone
+    // table the second load pass matches the saved rows against by name
+    AlertFixture f2;
+    f2.Load(kAlertConfig);
+    AlertMachine loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar, f2.registry) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar, f2.registry) == LSOK);
+    }
+
+    CHECK(loaded.GetZoneState(0) == ASRed);
+    CHECK(loaded.GetZoneState(1) == ASYellow);
+    CHECK(loaded.GetZoneTimer(1) == Approx(15.0f)); // disengage window mid-bleed
+
+    Vector3 pos;
+    REQUIRE(loaded.GetLastKnown(0, pos));
+    CHECK(pos.X() == Approx(1200.0f));
+    CHECK(pos.Y() == Approx(55.0f));
+    CHECK(pos.Z() == Approx(1300.0f));
+    CHECK_FALSE(loaded.GetLastKnown(1, pos));
+
+    CHECK(Str(loaded.GetEventHandler(AEAlertChanged)) == "gmEvtAlert = gmEvtAlert + [_this]");
+    CHECK(Str(loaded.GetEventHandler(AEUndercoverBroken)) == "hBroken");
+
+    // the latch and the not-yet-consumed break request both survive
+    CHECK(loaded.BreakLatched());
+    CHECK(loaded.BreakPending());
+    CHECK(Str(loaded.BreakReason()) == "fired");
+
+    std::filesystem::remove(archivePath);
 }

@@ -117,6 +117,9 @@ class AlertMachine
     // consumed by the next tick
     void RequestBreak(RString reason);
     bool BreakLatched() const { return _breakLatched; }
+    // pending gmBreakUndercover awaiting the next tick (serialized; test aid)
+    bool BreakPending() const { return _breakPending; }
+    RString BreakReason() const { return _breakReason; }
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook (called from ZoneRegistry::Simulate);

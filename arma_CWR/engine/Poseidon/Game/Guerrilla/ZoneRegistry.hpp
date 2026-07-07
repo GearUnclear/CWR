@@ -81,7 +81,8 @@ struct FactionRecord
     AutoArray<RString> tiers;
     AutoArray<float> tierThresholds; // ascending war levels; tier i+1 from thresholds[i]
     AutoArray<RString> vehicles;
-    float vehicleThreshold = 3.0f;
+    float vehicleThreshold = 3.0f;      // legacy 2-step ladder (index 0 -> 1)
+    AutoArray<float> vehicleThresholds; // full ladder, mirrors tierThresholds
     AutoArray<NamedValue> values;
 };
 

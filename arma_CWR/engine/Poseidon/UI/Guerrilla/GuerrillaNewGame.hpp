@@ -62,6 +62,22 @@ std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std
 // "no real faction config" apart from a real choice and publish nothing.
 std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const char* side);
 
+// The template mission base the launch path resolves for an island:
+// "missions\Guerrilla.<island>" (append ".pbo" for the banked form or
+// "\mission.sqm" for the unbanked directory).
+RString GuerrillaTemplateMissionBase(RString island);
+// True when the island's template exists in either form. Existence checks
+// are injected (FilePathExists for the .pbo, QIFStreamB::FileExist for the
+// unbanked mission.sqm) so the resolution logic is unit-testable — the same
+// pattern as GuerrillaListIslands' worldExists.
+bool GuerrillaTemplateExists(RString island, const std::function<bool(RString)>& pboExists,
+                             const std::function<bool(RString)>& missionFileExists);
+// Resolve a faction selection (a CfgGuerrillaFactions subclass name) to its
+// side string (`side` key, defaulting to the class name). Empty when the
+// selection is empty or names no subclass — the caller cannot validate what
+// the mission's own config will resolve.
+RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
+
 class GuerrillaNewGame : public Display
 {
   public:

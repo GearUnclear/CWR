@@ -200,3 +200,68 @@ TEST_CASE("GuerrillaListIslands: predicate sees the raw world class name", "[UI]
                          });
     REQUIRE(seen == std::vector<std::string>{"Intro"});
 }
+
+// ---------------------------------------------------------------------------
+// Template resolution + faction-side helpers (injected predicates/config).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GuerrillaTemplateMissionBase: the exact base the launch path resolves", "[UI][Guerrilla]")
+{
+    REQUIRE(std::string((const char*)Poseidon::GuerrillaTemplateMissionBase("Abel")) == "missions\\Guerrilla.Abel");
+}
+
+TEST_CASE("GuerrillaTemplateExists: banked, unbanked and missing templates", "[UI][Guerrilla]")
+{
+    std::set<std::string> files;
+    auto exists = [&](RString p) { return files.count(std::string((const char*)p)) > 0; };
+
+    SECTION("banked .pbo wins without touching the unbanked check")
+    {
+        files = {"missions\\Guerrilla.Abel.pbo"};
+        bool unbankedAsked = false;
+        REQUIRE(Poseidon::GuerrillaTemplateExists("Abel", exists,
+                                                  [&](RString)
+                                                  {
+                                                      unbankedAsked = true;
+                                                      return false;
+                                                  }));
+        REQUIRE_FALSE(unbankedAsked);
+    }
+
+    SECTION("unbanked directory form")
+    {
+        files = {"missions\\Guerrilla.Cain\\mission.sqm"};
+        REQUIRE(Poseidon::GuerrillaTemplateExists("Cain", exists, exists));
+    }
+
+    SECTION("neither form installed")
+    {
+        files = {"missions\\Guerrilla.Abel.pbo"};
+        REQUIRE_FALSE(Poseidon::GuerrillaTemplateExists("Eden", exists, exists));
+    }
+}
+
+TEST_CASE("GuerrillaFactionSide: resolves a selection to its side for pair validation", "[UI][Guerrilla]")
+{
+    ParamFile cfg;
+    ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
+    ParamClass* idf = factions->AddClass("IDF");
+    idf->Add("side", "WEST");
+    factions->AddClass("EAST"); // no side entry — class name is the side
+    const ParamEntry* entry = cfg.FindEntry("CfgGuerrillaFactions");
+
+    // side key, class-name default, and the unvalidatable cases (empty
+    // selection / unknown class / no config) all resolve empty
+    REQUIRE(std::string((const char*)Poseidon::GuerrillaFactionSide(entry, "IDF")) == "WEST");
+    REQUIRE(std::string((const char*)Poseidon::GuerrillaFactionSide(entry, "EAST")) == "EAST");
+    REQUIRE(Poseidon::GuerrillaFactionSide(entry, "").GetLength() == 0);
+    REQUIRE(Poseidon::GuerrillaFactionSide(entry, "NoSuchFaction").GetLength() == 0);
+    REQUIRE(Poseidon::GuerrillaFactionSide(nullptr, "IDF").GetLength() == 0);
+
+    // the same-side pair the IDC_OK guard must catch: two different faction
+    // classes resolving to one side (the guard compares case-insensitively)
+    ParamClass* idf2 = factions->AddClass("IDF_Reserve");
+    idf2->Add("side", "west");
+    REQUIRE(std::string((const char*)Poseidon::GuerrillaFactionSide(entry, "IDF")) == "WEST");
+    REQUIRE(std::string((const char*)Poseidon::GuerrillaFactionSide(entry, "IDF_Reserve")) == "west");
+}

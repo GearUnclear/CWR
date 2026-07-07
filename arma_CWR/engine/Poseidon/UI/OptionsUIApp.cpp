@@ -885,7 +885,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 // ("missions\Guerrilla.<World>.pbo", mounted via
                 // CreateSingleMissionBank) or an unbanked directory
                 // ("missions\Guerrilla.<World>\mission.sqm").
-                RString missionBase = RString("missions\\Guerrilla.") + island;
+                RString missionBase = GuerrillaTemplateMissionBase(island);
                 bool banked = FilePathExists(missionBase + RString(".pbo"));
                 bool unbanked = !banked && QIFStreamB::FileExist(missionBase + RString("\\mission.sqm"));
                 if (!banked && !unbanked)
@@ -920,7 +920,13 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                     snprintf(buffer, sizeof(buffer), "%s", (const char*)CreateSingleMissionBank(missionBase));
                     if (*buffer == 0)
                     {
+                        // Mount failed (corrupt/locked PBO) — back to the
+                        // menu, but tell the player instead of failing mute.
                         Display::OnChildDestroyed(idd, exit);
+                        char msg[512];
+                        snprintf(msg, sizeof(msg), "Guerrilla Mode template failed to mount:\n%s.pbo",
+                                 (const char*)missionBase);
+                        CreateMsgBox(MB_BUTTON_OK, msg);
                         break;
                     }
                     char* str = strrchr(buffer, '\\');

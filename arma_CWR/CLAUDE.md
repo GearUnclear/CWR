@@ -83,6 +83,26 @@ Default `-DataDir` is `D:\Arma_CWA\ARMA Cold War Assault`. `-Mission` is resolve
 to `-DataDir` and passed as `--test-mission` (omit it to boot to the main menu, where
 GUERRILLA lets you pick island/faction interactively).
 
+### Console-output capture (default on — read the files, don't run the exe in a terminal)
+
+`run-game.ps1` launches the game **detached** and captures all console output into
+timestamped files under `logs\` (gitignored), so a play session never dumps output into
+the terminal/AI-session transcript. Per run it writes:
+
+- `logs\game-<ts>.log` — the engine log (`--log-file` spdlog file sink; everything the
+  engine logger prints to the console also lands here)
+- `logs\game-<ts>.stdout.log` — raw stdout
+- `logs\game-<ts>.stderr.log` — raw stderr; **crash-handler stack traces, minidump paths
+  and CLI errors write directly to stderr**, bypassing the engine logger — this file is
+  where to look after a crash
+
+To follow a live session, `Get-Content <log> -Wait -Tail 50` in a background shell, or
+just Read/Grep the newest `logs\game-*` files after the run. Diagnostics knobs when you
+need more detail: `--log-level`, `--log-categories`, `--log-format` and `--logfiles`
+(file-operation logging) — see `PoseidonGame.exe --help` / `AppConfig.cpp`. Pass
+`-NoLog` to `run-game.ps1` to disable capture; never launch `PoseidonGame.exe` in the
+foreground of an AI session to "see" its output — use the log files.
+
 ## Tests
 
 CTest drives both Catch2 unit tests and Trident integration tests:

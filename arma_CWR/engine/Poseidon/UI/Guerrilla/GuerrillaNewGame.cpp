@@ -3,6 +3,7 @@
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/platform.hpp>
@@ -83,6 +84,36 @@ std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const 
     return all;
 }
 
+RString GuerrillaTemplateMissionBase(RString island)
+{
+    return RString("missions\\Guerrilla.") + island;
+}
+
+bool GuerrillaTemplateExists(RString island, const std::function<bool(RString)>& pboExists,
+                             const std::function<bool(RString)>& missionFileExists)
+{
+    RString base = GuerrillaTemplateMissionBase(island);
+    if (pboExists && pboExists(base + RString(".pbo")))
+    {
+        return true;
+    }
+    return missionFileExists && missionFileExists(base + RString("\\mission.sqm"));
+}
+
+RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction)
+{
+    if (!factionsCfg || faction.GetLength() == 0)
+    {
+        return RString();
+    }
+    const ParamEntry* cls = factionsCfg->FindEntry(faction);
+    if (!cls || !cls->IsClass())
+    {
+        return RString();
+    }
+    return cls->ReadValue("side", faction);
+}
+
 GuerrillaNewGame::GuerrillaNewGame(ControlsContainer* parent) : Display(parent)
 {
     _exitWhenClose = -1;
@@ -143,6 +174,15 @@ Control* GuerrillaNewGame::OnCreateCtrl(int type, int idc, const ParamEntry& cls
                     {
                         description = world->ReadValue("description", name);
                     }
+                }
+                // An installed world is only launchable when its
+                // "Guerrilla.<World>" template is installed too — say so in
+                // the list instead of letting OK fail with a message box.
+                if (!GuerrillaTemplateExists(
+                        name, [](RString p) { return FilePathExists(p); },
+                        [](RString p) { return QIFStreamB::FileExist(p); }))
+                {
+                    description = description + RString(" (no Guerrilla template)");
                 }
                 int index = lbox->AddString(description);
                 lbox->SetData(index, name);
@@ -266,9 +306,30 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             }
         }
         break;
+        case IDC_OK:
+        {
+            // Two cycler picks that resolve to the SAME side would spawn the
+            // campaign fighting itself — keep the player in the dialog. Empty
+            // selections (no real faction config) cannot be validated here;
+            // the mission's own defaults decide, so those pass through.
+            const ParamEntry* factions = Pars.FindEntry("CfgGuerrillaFactions");
+            RString occSide = GuerrillaFactionSide(factions, SelectedOccupier());
+            RString resSide = GuerrillaFactionSide(factions, SelectedResistance());
+            if (occSide.GetLength() > 0 && resSide.GetLength() > 0 && stricmp(occSide, resSide) == 0)
+            {
+                char buffer[256];
+                snprintf(buffer, sizeof(buffer),
+                         "OCCUPIER and RESISTANCE both resolve to side %s.\nPick factions on two different sides.",
+                         (const char*)occSide);
+                CreateMsgBox(MB_BUTTON_OK, RString(buffer));
+                break;
+            }
+            // The launch itself runs in DisplayMain::OnChildDestroyed
+            // (IDD_GUERRILLA_NEW_GAME) after the base Exit(IDC_OK).
+            Display::OnButtonClicked(idc);
+        }
+        break;
         default:
-            // IDC_OK falls through to the base Exit(IDC_OK); the launch runs
-            // in DisplayMain::OnChildDestroyed (IDD_GUERRILLA_NEW_GAME).
             Display::OnButtonClicked(idc);
             break;
     }

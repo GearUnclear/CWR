@@ -81,11 +81,13 @@ public:
 	/// so a recoverable error no longer hard-exits the player build. Thread-safe.
 	static bool IsStrictMode();
 
-	/// Category metadata (used by PoseidonFormatter)
+	/// Category metadata (used by PoseidonFormatter). `colored=false` yields the
+	/// same tags without ANSI escapes - used by the --log-file sink so log files
+	/// stay grep/editor-clean.
 	static const char* GetCategoryName(Category category);
 	static const char* GetCategoryColor(Category category);
-	static const char* GetColoredCategoryTag(Category category);
-	static const char* GetFormattedLevel(spdlog::level::level_enum level);
+	static const char* GetColoredCategoryTag(Category category, bool colored = true);
+	static const char* GetFormattedLevel(spdlog::level::level_enum level, bool colored = true);
 	static const char* GetLevelName(spdlog::level::level_enum level);
 
 private:

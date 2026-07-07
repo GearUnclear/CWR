@@ -561,6 +561,10 @@ LSError AlertMachine::Serialize(ParamArchive& ar, ZoneRegistry& registry)
     PARAM_CHECK(ar.Serialize("onAlertChanged", _handlers[AEAlertChanged], 1, RString()))
     PARAM_CHECK(ar.Serialize("onUndercoverBroken", _handlers[AEUndercoverBroken], 1, RString()))
     PARAM_CHECK(ar.Serialize("breakLatched", _breakLatched, 1, false))
+    // a gmBreakUndercover issued in the tick-interval window before the save
+    // must survive the load (defaults keep older saves readable)
+    PARAM_CHECK(ar.Serialize("breakPending", _breakPending, 1, false))
+    PARAM_CHECK(ar.Serialize("breakReason", _breakReason, 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

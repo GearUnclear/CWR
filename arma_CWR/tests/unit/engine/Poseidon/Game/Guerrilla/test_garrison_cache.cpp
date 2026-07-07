@@ -1,10 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <filesystem>
 #include <string.h>
 #include <string>
 
@@ -206,4 +211,77 @@ TEST_CASE("GarrisonCache - queries are safe on an empty cache", "[game][guerrill
     REQUIRE(cache.LiveCount(0) == 0);
     REQUIRE(cache.NGroups(0) == 0);
     REQUIRE(cache.GetGroup(0, 0) == nullptr);
+}
+
+TEST_CASE("GarrisonCache - handlers and spawned-row reconciliation survive save/load", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "garrison-cache-roundtrip.bin";
+
+    // Serialize resolves zones through the engine-wide ZoneRegistry, and the
+    // load's second pass rebuilds it from ExtParsMission, exactly as
+    // SetMission's description.ext reparse would during a real load.
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Outpost { name=\"Outpost\"; type=\"OUTPOST\"; owner=\"EAST\"; "
+                         "garrison=8; position[]={1000.0, 1000.0, 50.0}; };\n"
+                         "        class Depot   { name=\"Depot\";   type=\"OUTPOST\"; owner=\"EAST\"; "
+                         "garrison=4; position[]={5000.0, 5000.0, 50.0}; };\n"
+                         "    };\n"
+                         "};\n";
+    {
+        QIStream in(config, strlen(config));
+        ExtParsMission.Parse(in);
+    }
+    ZoneRegistry::Instance().InitMission();
+    const int outpost = ZoneRegistry::Instance().FindZoneIndex("Outpost");
+    const int depot = ZoneRegistry::Instance().FindZoneIndex("Depot");
+    REQUIRE(outpost >= 0);
+    REQUIRE(depot >= 0);
+
+    {
+        GarrisonCache cache;
+        cache.SetEventHandler(GESpawned, "gmEvtGarSpawned = gmEvtGarSpawned + [_this]");
+        cache.SetEventHandler(GEDespawned, "hDespawned");
+        // a spawned zone whose group links all died before the save (no live
+        // world in a unit test, so the links serialize as null refs)
+        cache.MarkSpawnedForTest(outpost, true);
+        REQUIRE(cache.IsSpawned(outpost));
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(cache.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    GarrisonCache loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+
+    CHECK(Str(loaded.GetEventHandler(GESpawned)) == "gmEvtGarSpawned = gmEvtGarSpawned + [_this]");
+    CHECK(Str(loaded.GetEventHandler(GEDespawned)) == "hDespawned");
+
+    // wiped-out reconciliation: a spawned row with no surviving group refs
+    // reconciles to an empty zone (spawned = false, reserve zeroed)
+    CHECK_FALSE(loaded.IsSpawned(outpost));
+    CHECK(loaded.LiveCount(outpost) == 0);
+    const ZoneRecord* z = ZoneRegistry::Instance().GetZone(outpost);
+    REQUIRE(z != nullptr);
+    CHECK(z->garrison == Approx(0.0f));
+    CHECK(z->liveOccupiers == Approx(0.0f));
+    // the untouched zone keeps its config reserve
+    CHECK(ZoneRegistry::Instance().GetZone(depot)->garrison == Approx(4.0f));
+
+    // scrub the process-wide state other tests expect to be empty
+    ExtParsMission.Clear();
+    ZoneRegistry::Instance().Clear();
+    std::filesystem::remove(archivePath);
 }
