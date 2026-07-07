@@ -21,6 +21,7 @@ Most of this engine is 1,300+ C++ files, 160 of them over 1,000 lines. To avoid 
 - `engine/Poseidon/Game/Guerrilla/` — `ZoneRegistry`, `GarrisonCache`, `AlertMachine` (+ their `*Commands.cpp` SQF bindings). The Phase-1.5 native subsystems.
 - `engine/Poseidon/UI/Guerrilla/` — `GuerrillaModule`, `GuerrillaNewGame` (new-game island/faction selection).
 - `engine/Poseidon/AI/` — the AI tactics/perception rework. See [`mod-plans/`](mod-plans/README.md) for which behavior maps to which files; treat those docs as intent, not a precise index.
+- `voice-lines/` — TTS pipeline for custom in-game speech (WAVs via OpenRouter, played through `CfgSounds` + `say`/`sideRadio`; no engine changes). Key comes from the gitignored repo-root `.env`.
 
 **Frozen upstream — read as reference, don't expect to edit:** `Network/`, `Graphics/`, and most of `World/` and `UI/`. This is a locked Bohemia source release (no upstream PRs). You'll read here to understand mechanisms, but the overhaul rarely changes them.
 
@@ -128,6 +129,14 @@ ctest --test-dir build/win-x64-clang-rwdi -R "<test name>" --output-on-failure  
   tri test -j6 --retries 2 tests/integration   # binary: engine/Trident/target/debug/tri[.exe]
   ```
   Copy `.trident.env.example` → `.trident.env`, set `OFPR_GAME_DIR` (build/dist dir with binaries) and `OFPR_DATA_DIR` (Demo game data; recommended layout `packages/Demo`, which is gitignored). Get free Demo data from Steam app 4819000.
+
+  **On this machine** `.trident.env` points `OFPR_DATA_DIR` at the full CWA install (no Demo dataset), so the Demo-world tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`, `guerrilla_save_reload.seq`) cannot run here — the runnable Guerrilla set is the six `full_cwa` tests.
+
+### Guerrilla integration-test preconditions (verified 2026-07-07)
+
+- `ui/guerrilla_new_game_e2e` and `guerrilla_sinai_swap` need the mission templates **installed in the game dir**: `guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai`. Without `-IncludeWorld Sinai` the installer's world gate **removes** Guerrilla.Sinai (Sinai's `.wrp` lives inside `@LoBo`'s pbo, invisible to the gate) and the e2e fails at `triSimUntil { alive player }` with a mount-failure message box behind it.
+- The LoBo tests also need the one-time patched pbos: `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1` (stock `@LoBo` pbos hard-abort under `--autotest` on malformed `tracerColor` floats).
+- Run `tri` with `--retries` and low `-j`: `guerrilla_native_spawn` is known-flaky on its doMove displacement assert (recovers on retry), and parallel instances plus any manually closed window show up as `connection error: eval failed` cascades.
 
 ### Unit-test gotchas on Windows (verified 2026-06-28)
 

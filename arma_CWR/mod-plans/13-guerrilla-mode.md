@@ -55,8 +55,8 @@ These were checked against **this** source tree, not generic OFP/CWA lore. Sever
 | Rank / skill / XP at runtime | **Present** | `setSkill` (`:1381`), `addRating`→`ObjAddExperience` (`:1231`), `Person.SetRank()`/`GetInfo()._experience` runtime-settable |
 | Waypoints / orders at runtime | **Present** | `addWaypoint` (`:1417`), `setBehaviour` (`:1297`), full `setWaypoint*` family in `GameStateExtWorldWaypoint.cpp` |
 | Global-variable persistence across `saveGame` | **Present** | `World::Serialize` serializes `GGameState` (`World/WorldImpl.cpp:1738`); `GameValue`/`GameVariable`/`GameDataArray` all implement `Serialize` |
-| `enableAI` (inverse of `disableAI`) | **Missing** | `disableAI` exists (`GameStateExt.cpp:1307`), no inverse → see plan [09](./09-sqf-enable-ai.md) |
-| `setVariable`/`getVariable` namespaces | **Missing — add them** | overhaul stance: implement engine-side; parallel global arrays keyed by unit name are an interim workaround only |
+| `enableAI` (inverse of `disableAI`) | **Done** (plan [09](./09-sqf-enable-ai.md), landed 3ef5cd5) | registered `GameStateExt.cpp:1326`, `ObjEnableAI` in `GameStateExtUi.cpp:2519` |
+| `setVariable`/`getVariable` namespaces | **Done** (landed 3ef5cd5) | engine-side, part of the issue #1 evaluator batch |
 | Engine economy | **Stub** | `AICenter._resources` exists but `SpendResources()` is a no-op → keep the treasury in script globals |
 | File I/O from script | **Missing** | persistence is `saveGame` (globals) + optional C++ `SerializeClass` |
 | Hard unit caps | **Real** | `MAX_UNITS_PER_GROUP = 12` (`AI/Path/AITypes.hpp:31`); ~63 groups/side; single-threaded sim (~50–100 live AI practical ceiling, **to be measured** — see Gate-Zero) |
@@ -94,8 +94,8 @@ Two consequences worth stating up front:
 
 | Need | Why script can't | Hook point |
 |---|---|---|
-| `enableAI` command | `disableAI` has no inverse | plan [09](./09-sqf-enable-ai.md); register in `GameStateExt.cpp` binary table (`:1215`, `INIT_MODULE` at `:1468`) |
-| `knownTargets <group>` | `knowsAbout` only polls single objects | plan [10](./10-sqf-known-targets.md); reads `AIGroup` TargetList |
+| `enableAI` command — **done, landed 3ef5cd5** | `disableAI` has no inverse | plan [09](./09-sqf-enable-ai.md); registered at `GameStateExt.cpp:1326` |
+| `knownTargets <group>` — **done, landed 3ef5cd5** | `knowsAbout` only polls single objects | plan [10](./10-sqf-known-targets.md); registered at `GameStateExt.cpp:988` |
 | Tactical-AI *feel* | combat scoring / danger FSM / pathfinding internals | plans [04](./04-ai-target-priority.md) (`AIGroupImpl.cpp:834`), [05](./05-ai-suppression-response.md) (`AIUnitImpl.cpp:2190` + `Shots.cpp`), [03](./03-ai-flee-to-cover.md), [08](./08-ai-shared-enemy-intel.md), [02](./02-ai-dynamic-morale.md) |
 | Strategic command UI *(optional, late)* | evaluator has no `Display` access | `GameModuleId::Guerrilla` + `GuerrillaDisplay` on `UIMap` — **not** a new app target |
 | Robust / MP-ready persistence *(optional)* | no script file I/O | custom `SerializeClass` writing a parallel `.sav` via `GetCampaignSaveDirectory()` |
@@ -246,8 +246,8 @@ The AI plans are pre-scoped C++ enhancements that map directly onto the guerrill
 
 | Plan | Hook | Guerrilla payoff | When |
 |---|---|---|---|
-| [09](./09-sqf-enable-ai.md) `enableAI` | new command (`GameStateExt`) | un-freeze cached garrison units | **MVP** |
-| [10](./10-sqf-known-targets.md) `knownTargets` | new command; reads `AIGroup` TargetList | ambush/alert scripting | **MVP** |
+| [09](./09-sqf-enable-ai.md) `enableAI` | new command (`GameStateExt`) | un-freeze cached garrison units | **Done** (3ef5cd5) |
+| [10](./10-sqf-known-targets.md) `knownTargets` | new command; reads `AIGroup` TargetList | ambush/alert scripting | **Done** (3ef5cd5) |
 | [04](./04-ai-target-priority.md) target priority | `GetSubjectiveCost()` (`AIGroupImpl.cpp:834`) | kill-the-officer feels lethal | Phase 2 (first) |
 | [05](./05-ai-suppression-response.md) suppression | `SetDanger()` (`AIUnitImpl.cpp:2190`) + `Shots.cpp` | fire-and-maneuver | Phase 2 |
 | [03](./03-ai-flee-to-cover.md) flee-to-cover | `FindFleePoint()` + exposure map | believable retreat; secondary-ambush bait | Phase 2 |

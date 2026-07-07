@@ -76,6 +76,7 @@ items:
       Design intent, not settled specs; verify against code before relying on them.
     log:
       - "Plans 01 (ai-squad-formations) and 11 (sim-bullet-penetration) were deliberately dropped at the reroot commit 241ce1e and never re-added; the site still lists both areas as Planned, so they are currently doc-less."
+      - "2026-07-07: corrected stale plan-13 rows that still marked enableAI, knownTargets, and setVariable/getVariable as Missing; all three landed in 3ef5cd5."
       - "STATUS.md (2026-07-06 audit) tracks the code closely and marks Phase 1/1.5 code-complete but not play-tested."
 
   - id: repo-reroot
