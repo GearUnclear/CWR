@@ -1,8 +1,11 @@
-# Showcase.Abel (issue #9) on full CWA data: boots the shared guerrilla core
-# plus the showcase overlay and drives every rapid-access demo end to end.
+# Showcase.Abel (issue #9, v2) on full CWA data: boots the shared guerrilla
+# core plus the chapter-based showcase overlay and drives every chapter
+# through SC_QUEUE in SC_AUTO mode, asserting the self-verification ledger.
+# Budget: the alert chapter alone may take ~3 min (perception-driven FSM +
+# QRF launch + disengage epilogue), hence the generous timeouts.
 mission = "guerrilla-mode/mission/Showcase.Abel"
 binary = "PoseidonGame"
 tags = ["scripting", "guerrilla", "full_cwa", "showcase"]
-timeout = 300
-assert_timeout = 120
+timeout = 900
+assert_timeout = 300
 extra_args = ["--dev"]

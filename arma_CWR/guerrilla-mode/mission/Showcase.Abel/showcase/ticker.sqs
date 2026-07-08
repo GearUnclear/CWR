@@ -1,0 +1,70 @@
+; ============================================================================
+;  showcase/ticker.sqs  -  the event ticker: one line per system state CHANGE.
+; ----------------------------------------------------------------------------
+;  Replaces the v1 titleText status HUD (unreadable by construction - see
+;  README.md). Every ~3 s it samples the observable surfaces and posts a
+;  radio-log line ONLY for deltas:
+;
+;    * per authored zone (Camp / Village / Outpost): alert edges + ownership
+;    * total resistance-held zone count (the seeded towns, summarized)
+;    * War Level, undercover cover, QRF launch/stand-down, gear unlocks
+;
+;  Quiet when nothing happens, exact when something does - readable both
+;  while chapters run and while a human just plays. Toggled by the
+;  "SHOWCASE: event ticker on/off" action (SC_TICKER). READ-ONLY over the
+;  gm*/GM_* surfaces; writes nothing but its own SC_t* scratch.
+; ============================================================================
+
+@ not (isNil "SC_READY")
+
+; ---- previous samples ----------------------------------------------------------
+SC_tZONES = [SC_CAMP, SC_VILL, SC_OUT]
+SC_tAl = [gmZoneAlert SC_CAMP, gmZoneAlert SC_VILL, gmZoneAlert SC_OUT]
+SC_tOwn = [(gmZone SC_CAMP) select GM_Z_OWNER, (gmZone SC_VILL) select GM_Z_OWNER, (gmZone SC_OUT) select GM_Z_OWNER]
+SC_tWL = gmWarLevel
+SC_tUC = gmUndercover
+SC_tQRF = false
+SC_tUnl = count GM_GEAR_UNLOCKED
+SC_tHeld = gmResistanceSide call GM_fnCountOwnedBy
+
+#loop
+~3
+? not SC_TICKER : goto "loop"
+
+; ---- per-zone alert + ownership edges -------------------------------------------
+SC_tI = 0
+#zones
+? SC_tI >= 3 : goto "zdone"
+SC_tIdx = SC_tZONES select SC_tI
+SC_tA = gmZoneAlert SC_tIdx
+? SC_tA != (SC_tAl select SC_tI) : (format ["TICKER: %1 alert %2 -> %3", (gmZone SC_tIdx) select GM_Z_NAME, (SC_tAl select SC_tI) call SC_fnAlertName, SC_tA call SC_fnAlertName]) call SC_fnSay
+SC_tAl set [SC_tI, SC_tA]
+SC_tO = (gmZone SC_tIdx) select GM_Z_OWNER
+? SC_tO != (SC_tOwn select SC_tI) : (format ["TICKER: %1 is now held by %2", (gmZone SC_tIdx) select GM_Z_NAME, SC_tO]) call SC_fnSay
+SC_tOwn set [SC_tI, SC_tO]
+SC_tI = SC_tI + 1
+goto "zones"
+#zdone
+
+; ---- island-wide held count (covers the seeded towns without 30 rows) -----------
+SC_tH = gmResistanceSide call GM_fnCountOwnedBy
+? SC_tH != SC_tHeld : (format ["TICKER: resistance now holds %1 of %2 zones", SC_tH, gmZoneCount]) call SC_fnSay
+SC_tHeld = SC_tH
+
+; ---- scalar edges ----------------------------------------------------------------
+? gmWarLevel != SC_tWL : (format ["TICKER: War Level %1 -> %2", SC_tWL, gmWarLevel]) call SC_fnSay
+SC_tWL = gmWarLevel
+
+? (not gmUndercover) and SC_tUC : "TICKER: COVER BLOWN - the occupier is actively hunting you (one break is permanent this campaign)" call SC_fnSay
+SC_tUC = gmUndercover
+
+SC_tQ = false
+if ((not (isNil "GM_QRF_ACTIVE")) and (not (isNil "GM_QRF_ZONE"))) then {if (GM_QRF_ACTIVE and (GM_QRF_ZONE >= 0)) then {SC_tQ = true}}
+? SC_tQ and (not SC_tQRF) : (format ["TICKER: QRF LAUNCHED toward %1 - officer, tier squad, war-level escort", (gmZone GM_QRF_ZONE) select GM_Z_NAME]) call SC_fnSay
+? (not SC_tQ) and SC_tQRF : "TICKER: QRF stood down (target zone calmed)" call SC_fnSay
+SC_tQRF = SC_tQ
+
+? (count GM_GEAR_UNLOCKED) != SC_tUnl : (format ["TICKER: gear unlocks: %1 classname(s) now in infinite supply", count GM_GEAR_UNLOCKED]) call SC_fnSay
+SC_tUnl = count GM_GEAR_UNLOCKED
+
+goto "loop"

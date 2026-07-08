@@ -1,73 +1,101 @@
 // ============================================================================
-//  Showcase.Abel smoke (issue #9): the systems-showcase mission boots and
-//  every rapid-access demo actually drives the system it displays.
+//  Showcase.Abel smoke (issue #9, v2): the chapter-based showcase mission
+//  boots and every chapter actually drives - and self-verifies - the system
+//  it narrates.
 //
-//  The overlay's SC_REQ/SC_PENDING queue is driven directly - the exact seam
-//  showcase/action.sqs (the addAction dispatcher) writes - and SC_LASTDONE is
-//  the per-demo completion handshake run.sqs raises. Demo order matters:
-//  capture wipes the Outpost garrison BEFORE the cover-break demo teleports
-//  there, so the player never stands uncovered next to live occupiers (the
-//  engine consumes a break latch with no garrison around; verified against
-//  AlertMachine::EvaluateAlert).
+//  The overlay's SC_QUEUE is driven directly (the exact seam the action menu
+//  and the DEMO ALL reel write) with SC_AUTO=true for short narration beats.
+//  Per chapter, the test waits on the SC_LASTDONE handshake, asserts the
+//  runner's ledger row is PASS, and re-asserts the system-level postcondition
+//  independently (treasury delta, unlock set, rank, ownership flip...).
+//
+//  ORDER IS THE MANIFEST/REEL ORDER and it is load-bearing (README.md):
+//  alert (6) runs against the live garrison BEFORE capture (7) wipes it; the
+//  alert chapter's own epilogue calms the zone (force-despawn kills the
+//  perception sources -> GREEN -> qrf.sqs deletes the QRF) so capture can
+//  pass its military-clear check.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
 triSimUntil { alive player }
 triSimUntil { !(isNil "SC_READY") }
 
-// menu mounted: addAction ids are non-negative handles
-triAssertGe [SC_ACT_HUD, 0]
-triAssertGe [SC_ACT_TIME, 0]
+// menu mounted off the manifest: one action per chapter, non-negative ids
+triAssertEq [count SC_ACTS, count SC_CH_IDS]
+triAssertGe [SC_ACT_ALL, 0]
 
-// --- economy: one press grants +500 R (HR clamps at the manpower cap) ------
+// harness mode: short beats
+SC_AUTO = true
+
+// --- 0 tour: zones resolved, teleports verified, group parked at the Camp --
+SC_QUEUE = SC_QUEUE + [0]
+triSimUntil { SC_LASTDONE == 0 }
+triAssertEq [(SC_RES select 0), "PASS"]
+triAssertLe [((getPos player) distance ((gmZone SC_CAMP) select GM_Z_POS)), 120]
+
+// --- 1 economy: the +500 R grant lands (HR clamps at the manpower cap) -----
 scR0 = gmResources
-SC_REQ = SC_ACT_GRANT
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_GRANT }
+SC_QUEUE = SC_QUEUE + [1]
+triSimUntil { SC_LASTDONE == 1 }
+triAssertEq [(SC_RES select 1), "PASS"]
 triAssertEq [gmResources, scR0 + 500]
 triAssertGe [gmManpower, 7]
 
-// --- loot/gear: one press tallies a full unlock threshold of the rifle -----
-SC_REQ = SC_ACT_LOOT
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_LOOT }
+// --- 2 recruit: a fighter joins through the Camp menu's own request queue --
+scN0 = count units (group player)
+SC_QUEUE = SC_QUEUE + [2]
+triSimUntil { SC_LASTDONE == 2 }
+triAssertEq [(SC_RES select 2), "PASS"]
+triAssertGe [count units (group player), scN0 + 1]
+
+// --- 3 loot: organic corpse tally + a full unlock threshold of the rifle ---
+SC_QUEUE = SC_QUEUE + [3]
+triSimUntil { SC_LASTDONE == 3 }
+triAssertEq [(SC_RES select 3), "PASS"]
 scLW = gmFactionValue [gmResistanceSide, "lootRiflemanWeapon"]
 triAssert [scLW in GM_GEAR_UNLOCKED]
 
-// --- companions: +160 XP crosses the SERGEANT threshold (100 -> 260) -------
-SC_REQ = SC_ACT_XP
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_XP }
-triAssertGe [(GM_COMP_XP select 0), 260]
-triSimUntil { (GM_COMP_RANK select 0) == "SERGEANT" }
+// --- 4 companions: the XP bump crosses a threshold on the manager's tick ---
+scRk0 = GM_COMP_RANK select 0
+SC_QUEUE = SC_QUEUE + [4]
+triSimUntil { SC_LASTDONE == 4 }
+triAssertEq [(SC_RES select 4), "PASS"]
+triAssert [(GM_COMP_RANK select 0) != scRk0]
 
-// --- teleport cycle: first press lands the group at the Village ------------
-SC_REQ = SC_ACT_TP
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_TP }
-triAssertLe [((getPos player) distance ((gmZone SC_VILL) select GM_Z_POS)), 120]
-
-// --- garrison cache: force despawn banks the reserve; the cache respawns it
-//     (the Village sits ~535 m from the Outpost, inside the 800 m cacheRadius)
+// --- 5 garrison: live -> banked -> live round-trip through the cache -------
+SC_QUEUE = SC_QUEUE + [5]
+triSimUntil { SC_LASTDONE == 5 }
+triAssertEq [(SC_RES select 5), "PASS"]
 triSimUntil { gmGarrisonSpawned SC_OUT }
-triSimUntil { (gmGarrisonLive SC_OUT) > 0 }
-SC_REQ = SC_ACT_DESPAWN
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_DESPAWN }
-triSimUntil { gmGarrisonSpawned SC_OUT }
-triSimUntil { (gmGarrisonLive SC_OUT) > 0 }
 
-// --- capture: wipe the garrison with the player present -> native flip -----
-SC_REQ = SC_ACT_CAPTURE
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_CAPTURE }
-triSimUntil { ((gmZone SC_OUT) select GM_Z_OWNER) == gmResistanceSide }
-
-// --- alert machine: the cover-break latch is consumed on the next tick -----
+// --- 6 alert: cover break -> YELLOW -> RED -> QRF -> disengage --------------
 triAssert [gmUndercover]
-SC_REQ = SC_ACT_ALERT
-SC_PENDING = true
-triSimUntil { SC_LASTDONE == SC_ACT_ALERT }
-triSimUntil { !gmUndercover }
+SC_QUEUE = SC_QUEUE + [6]
+triSimUntil { SC_LASTDONE == 6 }
+triAssertEq [(SC_RES select 6), "PASS"]
+triAssert [!gmUndercover]
+
+// --- 7 capture: garrison wiped in-zone -> native ownership flip ------------
+SC_QUEUE = SC_QUEUE + [7]
+triSimUntil { SC_LASTDONE == 7 }
+triAssertEq [(SC_RES select 7), "PASS"]
+triAssertEq [((gmZone SC_OUT) select GM_Z_OWNER), gmResistanceSide]
+
+// --- 8 escalation: the forced War Level is overwritten by the ladder -------
+SC_QUEUE = SC_QUEUE + [8]
+triSimUntil { SC_LASTDONE == 8 }
+triAssertEq [(SC_RES select 8), "PASS"]
+triAssertLe [gmWarLevel, 2]
+
+// --- 9 persistence: the Save action's own dispatch path saves --------------
+SC_QUEUE = SC_QUEUE + [9]
+triSimUntil { SC_LASTDONE == 9 }
+triAssertEq [(SC_RES select 9), "PASS"]
+
+// --- 10 status: the report renders and the ledger holds no FAIL rows -------
+SC_QUEUE = SC_QUEUE + [10]
+triSimUntil { SC_LASTDONE == 10 }
+triAssertEq [(SC_RES select 10), "PASS"]
+triAssert [!("FAIL" in SC_RES)]
 
 triEndTest

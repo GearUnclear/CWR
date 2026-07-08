@@ -1,0 +1,39 @@
+; ============================================================================
+;  chapters/status.sqs  -  full campaign status + the chapter ledger.
+; ----------------------------------------------------------------------------
+;  The on-demand replacement for the v1 always-on HUD: the whole campaign
+;  state as a few PACED, readable radio-log pages, all read live off the
+;  gm*/GM_* surfaces, plus the per-chapter results ledger. READ-ONLY.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- page 1: faction scalars --------------------------------------------------
+(format ["STATUS - treasury %1 R | manpower %2/%3 HR | War Level %4 | cover %5 | squad %6", gmResources, gmManpower, GM_MANPOWER_CAP, gmWarLevel, gmUndercover, count units (group aP)]) call SC_fnSay
+~SC_BEAT
+
+; ---- page 2: gear + companions -------------------------------------------------
+(format ["Stash: %1 classname(s) tallied, %2 unlocked (threshold %3 each).", count GM_GEAR_ITEMS, count GM_GEAR_UNLOCKED, GM_GEAR_THRESHOLD]) call SC_fnSay
+SC_cI = 0
+#comp
+? SC_cI >= (count GM_COMP_NAMES) : goto "compdone"
+SC_cK = "alive"
+? not (GM_COMP_ALIVE select SC_cI) : SC_cK = "KIA (permadeath)"
+(format ["Companion %1: %2, %3 XP, skill %4 - %5", GM_COMP_NAMES select SC_cI, GM_COMP_RANK select SC_cI, GM_COMP_XP select SC_cI, GM_COMP_SKILL select SC_cI, SC_cK]) call SC_fnSay
+SC_cI = SC_cI + 1
+goto "comp"
+#compdone
+~SC_BEAT
+
+; ---- page 3: the three authored zones + the island ------------------------------
+(SC_CAMP call SC_fnZoneBrief) call SC_fnSay
+(SC_VILL call SC_fnZoneBrief) call SC_fnSay
+(SC_OUT call SC_fnZoneBrief) call SC_fnSay
+(format ["Island: resistance holds %1 of %2 zones.", gmResistanceSide call GM_fnCountOwnedBy, gmZoneCount]) call SC_fnSay
+~SC_BEAT
+
+; ---- page 4: the chapter ledger ---------------------------------------------------
+SC_cS = "LEDGER:"; SC_cI = 0; while {SC_cI < (count SC_CH_IDS)} do {SC_cS = SC_cS + (format [" %1=%2", SC_cI + 1, SC_RES select SC_cI]); SC_cI = SC_cI + 1}
+SC_cS call SC_fnSay
+
+["PASS", "status report rendered from the live gm*/GM_* surfaces"] call SC_fnDone
+exit

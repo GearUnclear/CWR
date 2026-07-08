@@ -1,0 +1,114 @@
+; ============================================================================
+;  chapters/alert.sqs  -  the alert FSM and the QRF, live.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: AlertMachine (native FSM: GREEN/YELLOW/RED per zone off
+;  garrison knowsAbout - YELLOW at 0.5, RED at 1.5 or a 20 s YELLOW window
+;  expiring), undercover.sqs (cover), qrf.sqs (posture, investigate, QRF).
+;  Seams: gmBreakUndercover, gmGarrisonForceDespawn (the stand-down lever:
+;  no perception sources -> the zone calms -> qrf.sqs deletes the QRF),
+;  allowDammage (the demo shield - the staged firefight must not end the
+;  mission by killing the observer).
+;  Chapter order note (README.md): runs BEFORE capture so the garrison lives.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- preconditions ---------------------------------------------------------------
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : ["SKIP", "Outpost already liberated - no garrison left to alarm"] call SC_fnDone
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : exit
+
+"Every zone runs a native alert machine on what the garrison actually PERCEIVES of you (knowsAbout): 0.5 turns it YELLOW, 1.5 - or 20 s of unresolved YELLOW - turns it RED. RED is the QRF trigger." call SC_fnSay
+~SC_BEAT
+
+; ---- stage 150 m off the wire, SOLO (cover is personal - see lib.sqs), garrison up -
+SC_cOP = (gmZone SC_OUT) select GM_Z_POS
+[[(SC_cOP select 0) - 110, (SC_cOP select 1) - 110, 0], 10] call SC_fnTpSolo
+SC_cW = 0
+#swait
+? (gmGarrisonSpawned SC_OUT) and ((gmGarrisonLive SC_OUT) > 0) : goto "staged"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 25 : goto "swait"
+["FAIL", "no garrison spawned to run the alert demo against"] call SC_fnDone
+exit
+
+#staged
+SC_cRed = false
+SC_cQrf = false
+true call SC_fnShield
+"You came ALONE (the squad waits at the Camp - the disguise covers you, not them). Demo shield up (allowDammage off): this firefight is staged and you are the observer, not the target of the lesson." call SC_fnSay
+~SC_BEAT
+
+? not gmUndercover : "Cover is already broken from earlier play, so the garrison will re-acquire you on sight - stay visible." call SC_fnSay
+? gmUndercover : "Breaking cover 150 m from the wire (the same latch a fired shot or entering a vehicle trips). Heat spikes on the nearest zone; the garrison starts hunting. Watch the ticker." call SC_fnSay
+? gmUndercover : gmBreakUndercover "showcase alert chapter"
+
+; ---- YELLOW: perception crossed 0.5 ------------------------------------------------
+SC_cW = 0
+#ywait
+? (gmZoneAlert SC_OUT) >= 1 : goto "yellow"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 60 : goto "ywait"
+goto "nofsm"
+
+#yellow
+"YELLOW: the garrison turns AWARE and qrf.sqs marches it on your LAST-KNOWN position (the native gmZoneLastKnown - where they lost you, not where you are). Break contact for 20 s and the zone calms back to GREEN." call SC_fnSay
+
+; ---- RED: 1.5 knowsAbout, or the 20 s YELLOW window expiring -----------------------
+? (gmZoneAlert SC_OUT) >= 2 : goto "red"
+SC_cW = 0
+#rwait
+? (gmZoneAlert SC_OUT) >= 2 : goto "red"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 60 : goto "rwait"
+goto "nofsm"
+
+#red
+SC_cRed = true
+"RED: the zone is in open alarm - garrison to COMBAT, heat spiked, and the QRF convoy is being fielded: an officer, a squad at the War-Level troop tier, and a war-level escort vehicle, staged a few hundred metres out and road-snapped." call SC_fnSay
+SC_cW = 0
+#qwait
+SC_cQ = false; if (not (isNil "GM_QRF_ACTIVE")) then {SC_cQ = GM_QRF_ACTIVE}
+? SC_cQ : goto "qrf"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 20 : goto "qwait"
+goto "epilogue"
+
+#qrf
+SC_cQrf = true
+"QRF is rolling - watch the road. It convoys on MOVE waypoints and finishes with SEARCH-AND-DESTROY on the last-known position; if pathing stalls for 120 s it inserts directly (the para-insertion fallback)." call SC_fnSay
+~SC_BEAT
+~SC_BEAT
+goto "epilogue"
+
+; ---- FSM never climbed: report honestly, then clean up -----------------------------
+#nofsm
+"The garrison never built enough perception to escalate (dead angle, distance, or bodies already gone). Cleaning the stage up." call SC_fnSay
+goto "cleanup"
+
+; ---- epilogue: the disengage loop, demonstrated -------------------------------------
+#epilogue
+"Now the other half of the machine: you MELT AWAY. Back to the Camp - with its perception sources gone the zone collapses to GREEN and qrf.sqs stands the convoy down and deletes it." call SC_fnSay
+#cleanup
+[(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpSolo
+? (gmGarrisonSpawned SC_OUT) : gmGarrisonForceDespawn SC_OUT
+SC_cW = 0
+#cwait
+SC_cQ = false; if (not (isNil "GM_QRF_ACTIVE")) then {SC_cQ = GM_QRF_ACTIVE}
+? ((gmZoneAlert SC_OUT) == 0) and (not SC_cQ) : goto "calm"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 60 : goto "cwait"
+goto "verdict"
+
+#calm
+"GREEN again, QRF stood down. Alert, response and disengage - the full loop." call SC_fnSay
+
+#verdict
+false call SC_fnShield
+? SC_cRed and SC_cQrf : ["PASS", "GREEN -> YELLOW -> RED -> QRF -> disengage, all observed"] call SC_fnDone
+? SC_cRed and (not SC_cQrf) : ["FAIL", "zone went RED but no QRF launched"] call SC_fnDone
+? not SC_cRed : ["FAIL", "alert FSM never reached RED"] call SC_fnDone
+exit

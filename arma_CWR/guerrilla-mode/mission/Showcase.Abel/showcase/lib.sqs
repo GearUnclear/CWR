@@ -1,0 +1,55 @@
+; ============================================================================
+;  showcase/lib.sqs  -  SC_fn* helper library for the showcase overlay.
+; ----------------------------------------------------------------------------
+;  Same conventions as scripts/lib.sqs: synchronous single-line code values,
+;  SC_tmp* scratch globals (never read across calls). Loaded by boot.sqs;
+;  sets SC_LIB_READY as its last statement.
+;
+;  TEXT CHANNELS (the v2 readability decision - see README.md):
+;    SC_fnSay    -> sideChat: small fixed font (tahomaB24 @ 0.02), word-wrap,
+;                   scrolling, ~25 s persistence. ALL narration goes here.
+;    SC_fnBanner -> titleText one-liner. Chapter banners ONLY - the title
+;                   font's size is base-game config, unreachable from script.
+;    hint        -> core-owned toasts (income, unlocks, promotions). The
+;                   overlay leaves the channel to the core.
+; ============================================================================
+
+; --- say( text ) : one narration line into the radio log -----------------------
+SC_fnSay = {aP sideChat _this}
+
+; --- banner( text ) : one-line chapter title card -------------------------------
+SC_fnBanner = {titleText [_this, "PLAIN DOWN"]}
+
+; --- tpGroup( [pos, radius] ) : move the whole player group near pos ------------
+SC_fnTpGroup = {SC_tmpTP = _this select 0; SC_tmpTR = _this select 1; {_x setPos ([SC_tmpTP, SC_tmpTR] call GM_fnRandPosNear)} forEach units (group aP)}
+
+; --- tpSolo( [pos, radius] ) : move ONLY the player -----------------------------
+;     STAGING RULE (learned from the first smoke run): cover is PERSONAL -
+;     setCaptive covers the player alone, so squadmates parked near a live
+;     garrison get engaged, the firefight provokes the player unit into
+;     returning fire, and his fired-EH breaks the campaign's cover mid-demo.
+;     Near-garrison chapters therefore move only the captive player and leave
+;     the squad at the Camp.
+SC_fnTpSolo = {aP setPos ([_this select 0, _this select 1] call GM_fnRandPosNear)}
+
+; --- shield( bool ) : the demo shield - staged firefights must not end the
+;     mission by killing the observer. Narrated honestly wherever used.
+SC_fnShield = {{_x allowDammage (not _this)} forEach units (group aP)}
+
+; --- grant( [r, hr] ) : treasury/manpower grant through the sanctioned seam
+;     (same clamp the economy tick applies)
+SC_fnGrant = {gmResources = gmResources + (_this select 0); gmManpower = gmManpower + (_this select 1); if (not (isNil "GM_MANPOWER_CAP")) then {if (gmManpower > GM_MANPOWER_CAP) then {gmManpower = GM_MANPOWER_CAP}}}
+
+; --- alertName( 0|1|2 ) -> "GREEN"|"YELLOW"|"RED" --------------------------------
+SC_fnAlertName = {SC_tmpAN = "GREEN"; if (_this == 1) then {SC_tmpAN = "YELLOW"}; if (_this >= 2) then {SC_tmpAN = "RED"}; SC_tmpAN}
+
+; --- zoneBrief( index ) -> one compact status line for a zone -------------------
+SC_fnZoneBrief = {SC_tmpZB = gmZone _this; format ["%1 [%2] alert %3 | garrison %4 live / %5 reserve | support %6 | heat %7 | income %8", SC_tmpZB select GM_Z_NAME, SC_tmpZB select GM_Z_OWNER, (gmZoneAlert _this) call SC_fnAlertName, gmGarrisonLive _this, SC_tmpZB select GM_Z_GAR, SC_tmpZB select GM_Z_SUPPORT, SC_tmpZB select GM_Z_HEAT, SC_tmpZB select GM_Z_INCOME]}
+
+; --- done( [outcome, msg] ) : the chapter completion handshake ------------------
+;     outcome: "PASS" | "FAIL" | "SKIP". run.sqs records the ledger row and
+;     raises SC_LASTDONE. Every chapter exit path ends through here.
+SC_fnDone = {SC_OUTCOME = _this select 0; SC_OUTMSG = _this select 1; SC_DONE = true}
+
+SC_LIB_READY = true
+exit

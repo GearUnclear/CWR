@@ -1,0 +1,24 @@
+; ============================================================================
+;  showcase/chapters.sqs  -  THE MANIFEST: the showcase's extension point.
+; ----------------------------------------------------------------------------
+;  Parallel arrays; row i is chapter i everywhere (menu, reel, ledger, test).
+;    SC_CH_IDS     script base name: run.sqs execs showcase/chapters/<id>.sqs
+;    SC_CH_TITLES  menu label + banner text
+;
+;  TO ADD A CHAPTER: write chapters/<id>.sqs following the contract in
+;  README.md and append one row to each array here. Nothing else - the menu,
+;  the DEMO ALL reel, the results ledger and the smoke test all size off
+;  these arrays.
+;
+;  ORDER IS THE REEL ORDER and it is load-bearing in two places (README.md):
+;  alert runs BEFORE capture (the FSM needs a live garrison to climb), and
+;  capture leaves the Outpost liberated, so garrison/alert SKIP honestly on a
+;  second run.
+; ============================================================================
+
+SC_CH_IDS = ["tour", "economy", "recruit", "loot", "companions", "garrison", "alert", "capture", "escalation", "persistence", "status"]
+
+SC_CH_TITLES = ["The island and its zones", "Economy: Resources and Manpower", "Recruiting at the Camp", "Loot and gear unlocks", "Companions and progression", "The garrison cache", "Alert states and the QRF", "Capturing a zone", "War Level and Heat", "Persistence (save/load)", "Status report and results"]
+
+SC_CH_READY = true
+exit

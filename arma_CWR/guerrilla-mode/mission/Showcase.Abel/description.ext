@@ -2,8 +2,10 @@
 // the issue #9 oversight/verification mission. Same island data as the
 // playable Guerrilla.Abel template (zone seed + faction descriptors copied
 // verbatim, so the systems on display behave exactly like the real
-// campaign), plus a showcase/ overlay bootstrapped from mission.sqm that
-// mounts rapid-access demo actions and a live gm* status HUD.
+// campaign), plus a showcase/ overlay bootstrapped from mission.sqm:
+// narrated, self-verifying CHAPTERS (one per gameplay system, extendable
+// via the showcase/chapters.sqs manifest) plus a state-change event ticker,
+// all over the small-font sideChat radio log. See showcase/README.md.
 //
 // The scripts/ directory and init.sqs stay the byte-identical shared core
 // (enforced by test_mission_script_core.cpp, which walks Showcase.* too);
@@ -17,7 +19,7 @@
 // All three sit within revealRadius of the Camp -> revealed on tick 1.
 
 onLoadMission = "Guerrilla Mode Showcase - Abel";
-onLoadIntro  = "Every system, on demand: action menu drives the demos.";
+onLoadIntro  = "Narrated, self-verifying chapters: run DEMO ALL or any chapter from the action menu.";
 respawn = 0;
 joinInProgress = 0;
 

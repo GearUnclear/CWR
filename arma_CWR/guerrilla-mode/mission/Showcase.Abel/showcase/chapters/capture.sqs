@@ -1,0 +1,68 @@
+; ============================================================================
+;  chapters/capture.sqs  -  taking a military zone.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: ZoneRegistry capture (native: garrison wiped + player
+;  in the zone -> ownership flip, marker repaint, heat spike, income tap,
+;  captured event) and capture.sqs (script reaction: hold garrison).
+;  Seams: setDammage on garrison bodies (staged wipe), allowDammage shield.
+;  Runs AFTER alert in the reel; waits for any leftover QRF to stand down.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- preconditions ---------------------------------------------------------------
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : ["SKIP", "Outpost already liberated - restart the mission to re-run this chapter"] call SC_fnDone
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : exit
+
+; leftover QRF units inside the zone would block the military-clear check
+SC_cW = 0
+#qwait
+SC_cQ = false
+if ((not (isNil "GM_QRF_ACTIVE")) and (not (isNil "GM_QRF_ZONE"))) then {if (GM_QRF_ACTIVE and (GM_QRF_ZONE >= 0)) then {SC_cQ = true}}
+? not SC_cQ : goto "clear"
+~2
+SC_cW = SC_cW + 1
+? SC_cW < 45 : goto "qwait"
+["SKIP", "a QRF is still active near the zone - run this chapter again once it stands down"] call SC_fnDone
+exit
+
+#clear
+"Capture: a military zone flips the moment its garrison is WIPED while you stand inside the 150 m zone radius. The decision is native - the scripts only react to the captured event." call SC_fnSay
+~SC_BEAT
+
+; ---- stage inside the zone, SOLO (cover is personal - see lib.sqs), garrison up ----
+[(gmZone SC_OUT) select GM_Z_POS, 25] call SC_fnTpSolo
+SC_cW = 0
+#swait
+? (gmGarrisonSpawned SC_OUT) and ((gmGarrisonLive SC_OUT) > 0) : goto "staged"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 25 : goto "swait"
+["FAIL", "garrison did not spawn for the capture demo"] call SC_fnDone
+exit
+
+#staged
+true call SC_fnShield
+SC_cN = gmGarrisonLive SC_OUT
+(format ["Standing on the objective ALONE with %1 defenders up (shield on - this is a staged wipe). Wiping the garrison now: script-killed for the demo, your rifle works exactly the same. Watch the map marker.", SC_cN]) call SC_fnSay
+~SC_BEAT
+SC_cU = []; {SC_cU = SC_cU + (units _x)} forEach (gmGarrisonGroups SC_OUT)
+{_x setDammage 1} forEach SC_cU
+
+; ---- observable outcome: the native flip -------------------------------------------
+SC_cW = 0
+#fwait
+? ((gmZone SC_OUT) select GM_Z_OWNER) == gmResistanceSide : goto "flipped"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 20 : goto "fwait"
+false call SC_fnShield
+["FAIL", "garrison wiped with player in-zone but no ownership flip"] call SC_fnDone
+exit
+
+#flipped
+"FLIPPED: marker repainted green natively, the captured event fired, heat spiked on the zone. capture.sqs is answering the event right now with a hold garrison of your own fighters." call SC_fnSay
+~SC_BEAT
+(format ["The Outpost now pays its %1 R into every economy tick, and the corpses you made fed the loot stash. Held zones move the War Level ladder - see the escalation chapter.", (gmZone SC_OUT) select GM_Z_INCOME]) call SC_fnSay
+false call SC_fnShield
+["PASS", format ["%1 defenders wiped in-zone -> native flip verified", SC_cN]] call SC_fnDone
+exit

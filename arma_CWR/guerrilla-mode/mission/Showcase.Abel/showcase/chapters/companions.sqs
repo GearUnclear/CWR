@@ -1,0 +1,52 @@
+; ============================================================================
+;  chapters/companions.sqs  -  named companions: XP, promotion, permadeath.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: companions.sqs (script manager) - XP per kill/survival
+;  tick, rank ladder, live setRank/setSkill promotion, permadeath.
+;  Seams: GM_COMP_XP bump (the manager promotes on its own 5 s tick).
+; ============================================================================
+? isNil "SC_READY" : exit
+
+; ---- precondition: Petra still lives (permadeath is itself a system fact) --------
+? not (GM_COMP_ALIVE select 0) : (format ["%1 fell earlier this campaign. Permadeath is permanent by design - her name stays on the roster as a memorial and no XP bump revives her.", GM_COMP_NAMES select 0]) call SC_fnSay
+? not (GM_COMP_ALIVE select 0) : ["SKIP", "companion is dead - permadeath demonstrated instead"] call SC_fnDone
+? not (GM_COMP_ALIVE select 0) : exit
+
+(format ["%1 - your named companion. She earns +25 XP per kill and +1 per 5 s survived; XP thresholds promote her up a 7-rank ladder, and each promotion raises her skill ON THE LIVE BODY (native setRank/setSkill).", GM_COMP_NAMES select 0]) call SC_fnSay
+~SC_BEAT
+
+; ---- ensure a live body exists (the manager rebuilds one within its 5 s tick) ----
+SC_cW = 0
+#bwait
+? not (isNull (GM_COMP_OBJ select 0)) : goto "body"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 12 : goto "bwait"
+["FAIL", "companion body never spawned (manager tick missing?)"] call SC_fnDone
+exit
+
+#body
+SC_cR0 = GM_COMP_RANK select 0
+SC_cXp = GM_COMP_XP select 0
+; first ladder threshold strictly above current XP
+SC_cNx = -1; SC_cI = 0; while {SC_cI < (count GM_COMP_XPTHRESH)} do {if ((SC_cNx < 0) and ((GM_COMP_XPTHRESH select SC_cI) > SC_cXp)) then {SC_cNx = GM_COMP_XPTHRESH select SC_cI}; SC_cI = SC_cI + 1}
+? SC_cNx < 0 : ["SKIP", format ["%1 already tops the ladder at %2", GM_COMP_NAMES select 0, SC_cR0]] call SC_fnDone
+? SC_cNx < 0 : exit
+
+(format ["%1 is %2 with %3 XP; the next threshold is %4. Granting the difference through the XP seam - the manager notices on its next 5 s tick. Watch the promotion toast and her rank.", GM_COMP_NAMES select 0, SC_cR0, SC_cXp, SC_cNx]) call SC_fnSay
+GM_COMP_XP set [0, SC_cNx + 5]
+
+; ---- observable outcome: the manager promoted her --------------------------------
+SC_cW = 0
+#pwait
+? (GM_COMP_RANK select 0) != SC_cR0 : goto "promoted"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 15 : goto "pwait"
+["FAIL", "no promotion within 15 s of crossing the threshold"] call SC_fnDone
+exit
+
+#promoted
+(format ["%1 promoted: %2 -> %3, skill %4 applied to the live body. If she ever dies, that body is not replaced - recruit fighters are expendable, companions are not.", GM_COMP_NAMES select 0, SC_cR0, GM_COMP_RANK select 0, GM_COMP_SKILL select 0]) call SC_fnSay
+["PASS", format ["%1 -> %2 on the manager's own tick", SC_cR0, GM_COMP_RANK select 0]] call SC_fnDone
+exit

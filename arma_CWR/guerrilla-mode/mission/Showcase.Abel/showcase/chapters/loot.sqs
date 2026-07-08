@@ -1,0 +1,75 @@
+; ============================================================================
+;  chapters/loot.sqs  -  loot-on-kill stash and gear unlocks.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: loot.sqs (script manager) - killed-EH corpse stripping,
+;  stash tally, threshold unlocks; the native garrison cache as body source.
+;  Seams: setDammage on one garrison body (staged kill), GM_fnLootItem (the
+;  manager's own public tally entry) for the threshold top-up.
+;  Shows the ORGANIC path first (real corpse -> sweep -> tally) when the
+;  Outpost still has a garrison, then completes the unlock through the seam.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+? isNil "GM_fnLootItem" : ["FAIL", "loot manager not booted (GM_fnLootItem nil)"] call SC_fnDone
+? isNil "GM_fnLootItem" : exit
+
+"Loot: every garrison corpse is stripped automatically - each weapon and magazine classname lands in the cell's stash tally. 25 of one classname unlocks it PERMANENTLY: every future recruit of that role spawns carrying it." call SC_fnSay
+~SC_BEAT
+
+SC_cRifle = gmFactionValue [gmResistanceSide, "lootRiflemanWeapon"]
+
+; ---- organic path needs a live occupier garrison ---------------------------------
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : goto "seamonly"
+
+; SOLO staging: the squad stays at the Camp (cover is personal - see lib.sqs)
+SC_cOP = (gmZone SC_OUT) select GM_Z_POS
+[[(SC_cOP select 0) - 90, (SC_cOP select 1) - 90, 0], 10] call SC_fnTpSolo
+SC_cW = 0
+#gwait
+? (gmGarrisonSpawned SC_OUT) and ((gmGarrisonLive SC_OUT) > 0) : goto "spawned"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 25 : goto "gwait"
+goto "seamonly"
+
+#spawned
+; pick one live garrison body for the staged kill
+SC_cU = objNull; SC_cGs = gmGarrisonGroups SC_OUT; if ((count SC_cGs) > 0) then {SC_cL = units (SC_cGs select 0); if ((count SC_cL) > 0) then {SC_cU = SC_cL select 0}}
+? isNull SC_cU : goto "seamonly"
+SC_cT0 = 0; {SC_cT0 = SC_cT0 + _x} forEach GM_GEAR_COUNT
+SC_cU setDammage 1
+"One sentry down (script-killed for the demo). loot.sqs sweeps the spawned garrisons every 5 s: watch the stash tally take the corpse's rifle and magazines." call SC_fnSay
+
+SC_cW = 0
+#twait
+SC_cT1 = 0; {SC_cT1 = SC_cT1 + _x} forEach GM_GEAR_COUNT
+? SC_cT1 > SC_cT0 : goto "tallied"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 15 : goto "twait"
+"The sweep did not tally that corpse in time - continuing with the stash seam." call SC_fnSay
+goto "seamtop"
+
+#tallied
+(format ["Stash tally rose %1 -> %2 items: the corpse was stripped by the killed-EH the manager tags onto every cached garrison body.", SC_cT0, SC_cT1]) call SC_fnSay
+~SC_BEAT
+goto "seamtop"
+
+; ---- no garrison available: honest note, seam demo still worthwhile ---------------
+#seamonly
+"No occupier garrison is available for the organic corpse demo (the Outpost is liberated or empty) - demonstrating the tally seam directly." call SC_fnSay
+~SC_BEAT
+
+; ---- complete a full unlock threshold through the manager's own tally entry -------
+#seamtop
+? SC_cRifle in GM_GEAR_UNLOCKED : (format ["%1 is already unlocked from earlier play - recruits already spawn with it.", SC_cRifle]) call SC_fnSay
+? SC_cRifle in GM_GEAR_UNLOCKED : goto "verify"
+(format ["Granting a full threshold of %1 x %2 through GM_fnLootItem - the exact entry point every looted corpse feeds. Watch for the unlock toast.", GM_GEAR_THRESHOLD, SC_cRifle]) call SC_fnSay
+SC_cN = [SC_cRifle, GM_GEAR_THRESHOLD] call GM_fnLootItem
+~SC_BEAT
+
+#verify
+[(gmZone SC_CAMP) select GM_Z_POS, 15] call SC_fnTpSolo
+? SC_cRifle in GM_GEAR_UNLOCKED : ["PASS", format ["%1 unlocked - future recruits spawn with it", SC_cRifle]] call SC_fnDone
+? not (SC_cRifle in GM_GEAR_UNLOCKED) : ["FAIL", format ["%1 still locked after a full threshold tally", SC_cRifle]] call SC_fnDone
+exit

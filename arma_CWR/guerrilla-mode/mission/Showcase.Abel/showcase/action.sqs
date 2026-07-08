@@ -1,11 +1,33 @@
 ; ============================================================================
-;  action.sqs  -  thin addAction dispatcher for the SHOWCASE menu.
+;  showcase/action.sqs  -  thin addAction dispatcher for the showcase menu.
 ; ----------------------------------------------------------------------------
 ;  addAction runs this FILE with _this = [target, caller, actionId] (same
-;  contract as scripts/recruit_action.sqs). NO state mutation here: it only
-;  enqueues, so run.sqs stays the single writer of every demo effect.
+;  contract as scripts/recruit_action.sqs). Chapter actions only ENQUEUE
+;  (run.sqs stays the single writer of demo effects); the two display
+;  toggles (ticker, time) mutate their own overlay-owned flags inline.
 ; ============================================================================
 
-SC_REQ = _this select 2
-SC_PENDING = true
+SC_aId = _this select 2
+
+; ---- DEMO ALL: enqueue the whole reel in manifest order ------------------------
+? SC_aId == SC_ACT_ALL : SC_QUEUE = SC_QUEUE + SC_ALLIDX
+? SC_aId == SC_ACT_ALL : exit
+
+; ---- event-ticker toggle -------------------------------------------------------
+? SC_aId == SC_ACT_TICKER : SC_TICKER = not SC_TICKER
+? (SC_aId == SC_ACT_TICKER) and SC_TICKER : hint "Event ticker ON: system edges (alerts, flips, War Level, cover, QRF, unlocks) report as radio-log lines."
+? (SC_aId == SC_ACT_TICKER) and (not SC_TICKER) : hint "Event ticker OFF."
+? SC_aId == SC_ACT_TICKER : exit
+
+; ---- time-acceleration toggle --------------------------------------------------
+? SC_aId == SC_ACT_TIME : SC_ACCEL = not SC_ACCEL
+? (SC_aId == SC_ACT_TIME) and SC_ACCEL : setAccTime 4
+? (SC_aId == SC_ACT_TIME) and (not SC_ACCEL) : setAccTime 1
+? (SC_aId == SC_ACT_TIME) and SC_ACCEL : hint "Time x4: economy (600 s) and escalation (60 s) ticks arrive quickly now."
+? (SC_aId == SC_ACT_TIME) and (not SC_ACCEL) : hint "Time back to x1."
+? SC_aId == SC_ACT_TIME : exit
+
+; ---- chapter actions: map the action id to its manifest index and enqueue ------
+SC_aIx = -1; SC_aI = 0; while {SC_aI < (count SC_ACTS)} do {if ((SC_ACTS select SC_aI) == SC_aId) then {SC_aIx = SC_aI}; SC_aI = SC_aI + 1}
+? SC_aIx >= 0 : SC_QUEUE = SC_QUEUE + [SC_aIx]
 exit

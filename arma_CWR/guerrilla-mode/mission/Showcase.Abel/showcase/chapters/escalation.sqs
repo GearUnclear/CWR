@@ -1,0 +1,54 @@
+; ============================================================================
+;  chapters/escalation.sqs  -  War Level and Heat.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: escalation.sqs (script manager) - the territory-driven
+;  War Level ladder (recomputed every ~60 s) and GREEN-gated Heat decay; the
+;  native heat spikes it decays against.
+;  Seams: gmWarLevel (transient BY DESIGN - the whole point of this chapter
+;  is watching the ladder overwrite the forced value), setAccTime.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+"WAR LEVEL (1-10) is the occupier's commitment, and it is EARNED, not scripted: every ~60 s the ladder recomputes from the share of zones you hold. 20% held -> WL2; 40% -> WL3 (tier-2 troops, APC escorts); 70% -> WL5 (tier 3)." call SC_fnSay
+~SC_BEAT
+
+; ---- the ladder, computed live off the registry -------------------------------------
+SC_cHeld = gmResistanceSide call GM_fnCountOwnedBy
+SC_cPct = 0
+? gmZoneCount > 0 : SC_cPct = (SC_cHeld * 100) / gmZoneCount
+SC_cExp = 1
+? SC_cPct >= 20 : SC_cExp = 2
+? SC_cPct >= 40 : SC_cExp = 3
+? SC_cPct >= 55 : SC_cExp = 4
+? SC_cPct >= 70 : SC_cExp = 5
+? SC_cPct >= 85 : SC_cExp = 6
+(format ["You hold %1 of %2 zones - the ladder says War Level %3. Actual gmWarLevel: %4. The native garrison cache and the QRF read this scalar when they pick troop tiers and escort vehicles.", SC_cHeld, gmZoneCount, SC_cExp, gmWarLevel]) call SC_fnSay
+~SC_BEAT
+
+; ---- force a wrong value and watch the ladder correct it ----------------------------
+SC_cForce = SC_cExp + 2
+? SC_cForce > 6 : SC_cForce = 6
+? SC_cExp >= 5 : SC_cForce = 1
+gmWarLevel = SC_cForce
+(format ["Forcing War Level to %1. This is TRANSIENT by design: only territory moves the real ladder, so the next recompute snaps it back to %2. Accelerating time x4 so the ~60 s tick arrives quickly.", SC_cForce, SC_cExp]) call SC_fnSay
+setAccTime 4
+
+SC_cW = 0
+#lwait
+? gmWarLevel != SC_cForce : goto "reverted"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 90 : goto "lwait"
+? SC_ACCEL : setAccTime 4
+? not SC_ACCEL : setAccTime 1
+["FAIL", "the ladder never overwrote the forced War Level"] call SC_fnDone
+exit
+
+#reverted
+? SC_ACCEL : setAccTime 4
+? not SC_ACCEL : setAccTime 1
+(format ["Recomputed: War Level is %1 again, straight from territory. HEAT is the fast twin: per-zone suspicion spiked natively by cover breaks (+25), alert edges (+4/+15) and captures, and decayed by 1 every 10 s - but ONLY while the zone sits GREEN.", gmWarLevel]) call SC_fnSay
+~SC_BEAT
+(format ["Outpost heat right now: %1 (you saw it spike through the alert and capture chapters). Lying low is a mechanic, not a metaphor.", (gmZone SC_OUT) select GM_Z_HEAT]) call SC_fnSay
+["PASS", format ["forced WL %1 reverted to %2 by the ladder", SC_cForce, gmWarLevel]] call SC_fnDone
+exit

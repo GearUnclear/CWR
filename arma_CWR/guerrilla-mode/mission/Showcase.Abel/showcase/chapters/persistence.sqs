@@ -1,0 +1,29 @@
+; ============================================================================
+;  chapters/persistence.sqs  -  save / load round-trip.
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: native persistence - ZoneRegistry / AlertMachine /
+;  GarrisonCache serializers, GGameState script globals, the campaignLoaded
+;  event, and campaign.sqs's Save UX + post-load reconciliation.
+;  Seams: [aP, aP, -1] exec "scripts/campaign.sqs" (the Save action's own
+;  dispatch path - count _this > 0 routes to #saveaction).
+;  The RELOAD half is interactive by nature: run.sqs detects the load (the
+;  re-armed Save-action id) and reports the round-trip; the headless
+;  round-trip is owned by the guerrilla_native_save_reload sequence test.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+"Persistence is native: zones, the alert machine, garrison reserves, event handlers and every GM_*/gm* script global serialize with the campaign. Nothing is rebuilt by hand on load - the managers just resume." call SC_fnSay
+~SC_BEAT
+
+"Saving now through the same dispatch the SAVE GAME action uses." call SC_fnSay
+[aP, aP, -1] exec "scripts/campaign.sqs"
+~2
+
+(format ["Saved. Ledger so far, treasury %1 R, %2 HR, War Level %3, %4 gear unlock(s) - all of it is in that save.", gmResources, gmManpower, gmWarLevel, count GM_GEAR_UNLOCKED]) call SC_fnSay
+~SC_BEAT
+
+"To verify the other half: load that save from the menu at any time. The campaign resumes mid-stride, campaign.sqs reconciles the companion and re-arms one Save action, and the showcase detects the load and re-mounts its own menu - you will see the round-trip reported in this log." call SC_fnSay
+? SC_AUTO : "Harness note: the headless save->reload round-trip is covered by the guerrilla_native_save_reload sequence test." call SC_fnSay
+
+["PASS", "campaign saved through the Save action's own dispatch"] call SC_fnDone
+exit

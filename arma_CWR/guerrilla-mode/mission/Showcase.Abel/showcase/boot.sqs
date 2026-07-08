@@ -1,28 +1,22 @@
 ; ============================================================================
-;  boot.sqs  -  SHOWCASE overlay bootstrap (issue #9).
+;  showcase/boot.sqs  -  SHOWCASE overlay bootstrap (issue #9, v2).
 ; ----------------------------------------------------------------------------
 ;  Exec'd from mission.sqm (the player unit's init line): mission.sqm is the
 ;  sanctioned per-mission divergence point, so the byte-identical shared core
 ;  in init.sqs + scripts/ stays untouched (test_mission_script_core.cpp walks
 ;  Showcase.* templates too).
 ;
-;  PURPOSE: display every gameplay system for oversight, testing and
-;  verification, RAPIDLY. Mounts a persistent player action menu of instant
-;  demos (run.sqs consumes; action.sqs is the thin dispatcher) plus a live
-;  status HUD (hud.sqs) reading the native gm* surface each ~2 s.
+;  PURPOSE: every gameplay system demonstrated as a NARRATED, SELF-VERIFYING
+;  CHAPTER - for oversight (watchable, readable, paced), for testing (the
+;  Trident smoke test drives the same queue with SC_AUTO), and for
+;  verification (each chapter reports PASS/FAIL/SKIP into a ledger).
+;  Architecture, contract and extension guide: showcase/README.md.
 ;
 ;  CONVENTIONS: core rules apply (SQS dialect, one statement per line,
 ;  single-line code-value helpers). Overlay-owned names are SC_* only; the
-;  overlay never writes core-owned state except through the same seams the
-;  core itself exposes (gmResources/gmManpower grants, GM_COMP_XP bumps,
-;  GM_fnLootItem, gmWarLevel, gmBreakUndercover, gmGarrisonForceDespawn).
-;
-;  NATIVE EVENT SLOTS ARE SINGLE-OWNER (ZoneRegistry keeps ONE handler per
-;  event type), so the overlay registers NO native handlers. A campaign load
-;  is detected by POLLING GM_pSaveAct instead: campaign.sqs re-arms its Save
-;  action on the campaignLoaded event, which changes that action id; run.sqs
-;  sees the change and re-mounts the showcase menu (action ids do not
-;  survive a load).
+;  overlay writes core state only through the sanctioned seams listed in
+;  README.md. Native event slots are single-owner, so the overlay registers
+;  NO native handlers; run.sqs detects campaign loads by polling GM_pSaveAct.
 ; ============================================================================
 
 ; core booted + helper lib ready (init.sqs runs after mission.sqm init lines)
@@ -31,40 +25,71 @@
 ; campaign.sqs mounted its Save action (its id doubles as our load detector)
 @ not (isNil "GM_pSaveAct")
 
-; ---- overlay state -----------------------------------------------------------
-;   SC_HUD       status HUD visible?
-;   SC_PENDING / SC_REQ   action-request queue (action.sqs writes, run.sqs reads)
-;   SC_CUR       request id currently being served (run.sqs scratch)
-;   SC_LASTDONE  id of the last COMPLETED demo (integration-test handshake)
-;   SC_TPCYCLE   teleport-cycle cursor over the authored zones
-;   SC_ACCEL     time acceleration on?
-;   SC_SAVEACT   last-seen campaign.sqs Save-action id (load detector)
-SC_HUD      = true
-SC_PENDING  = false
-SC_REQ      = -1
-SC_CUR      = -1
-SC_LASTDONE = -1
-SC_TPCYCLE  = 0
-SC_ACCEL    = false
-SC_SAVEACT  = GM_pSaveAct
+; ---- overlay libraries -----------------------------------------------------------
+SC_LIB_READY = false
+[] exec "showcase/lib.sqs"
+@SC_LIB_READY
+SC_CH_READY = false
+[] exec "showcase/chapters.sqs"
+@SC_CH_READY
 
-; ---- zone anchors: the three authored zones (seeded towns index after them) --
+; ---- overlay state ---------------------------------------------------------------
+;   SC_QUEUE      pending chapter indices (action.sqs/test/reel write, run.sqs reads)
+;   SC_CH         index of the chapter being served (-1 idle)
+;   SC_BUSY       a chapter is running
+;   SC_LASTDONE   index of the last COMPLETED chapter (test handshake)
+;   SC_RES(MSG)   per-chapter outcome ledger, parallel to the manifest
+;   SC_DONE/SC_OUTCOME/SC_OUTMSG   the chapter completion contract
+;   SC_AUTO       harness mode: short beats, no accTime cosmetics
+;   SC_BEAT       seconds between narration beats (run.sqs recomputes per dispatch)
+;   SC_CH_TIMEOUT runner's bound on one chapter (s)
+;   SC_TICKER     event ticker enabled?
+;   SC_ACCEL      time-x4 toggle state
+;   SC_SAVEACT    last-seen campaign.sqs Save-action id (load detector)
+SC_QUEUE = []
+SC_CH = -1
+SC_BUSY = false
+SC_LASTDONE = -1
+SC_DONE = false
+SC_OUTCOME = ""
+SC_OUTMSG = ""
+? isNil "SC_AUTO" : SC_AUTO = false
+SC_BEAT = 6
+SC_CH_TIMEOUT = 300
+SC_TICKER = true
+SC_ACCEL = false
+SC_SAVEACT = GM_pSaveAct
+
+; ---- ledger + reel index list, sized off the manifest ------------------------------
+SC_RES = []
+SC_RESMSG = []
+SC_ALLIDX = []
+SC_bI = 0
+#ledger
+? SC_bI >= (count SC_CH_IDS) : goto "ledgerdone"
+SC_RES = SC_RES + ["-"]
+SC_RESMSG = SC_RESMSG + [""]
+SC_ALLIDX = SC_ALLIDX + [SC_bI]
+SC_bI = SC_bI + 1
+goto "ledger"
+#ledgerdone
+
+; ---- zone anchors: the three authored zones (seeded towns index after them) --------
 SC_CAMP = gmZoneIndex "Camp"
 SC_VILL = gmZoneIndex "Village"
 SC_OUT  = gmZoneIndex "Outpost"
 
-; ---- menu mount/unmount (single-line code values, lib.sqs style) --------------
-;  Every action routes through the one dispatcher; run.sqs matches on the id.
-SC_fnMount = {SC_ACT_HUD = aP addAction ["DEMO: HUD on/off", "showcase/action.sqs"]; SC_ACT_TP = aP addAction ["DEMO: teleport next zone", "showcase/action.sqs"]; SC_ACT_GRANT = aP addAction ["DEMO: grant 500 R + 5 HR", "showcase/action.sqs"]; SC_ACT_LOOT = aP addAction ["DEMO: loot rifles (gear unlock)", "showcase/action.sqs"]; SC_ACT_XP = aP addAction ["DEMO: companion +160 XP", "showcase/action.sqs"]; SC_ACT_WL = aP addAction ["DEMO: war level +1", "showcase/action.sqs"]; SC_ACT_DESPAWN = aP addAction ["DEMO: despawn Outpost garrison", "showcase/action.sqs"]; SC_ACT_CAPTURE = aP addAction ["DEMO: capture the Outpost", "showcase/action.sqs"]; SC_ACT_ALERT = aP addAction ["DEMO: blow cover at Outpost", "showcase/action.sqs"]; SC_ACT_TIME = aP addAction ["DEMO: time x4 on/off", "showcase/action.sqs"]}
-SC_fnUnmount = {aP removeAction SC_ACT_HUD; aP removeAction SC_ACT_TP; aP removeAction SC_ACT_GRANT; aP removeAction SC_ACT_LOOT; aP removeAction SC_ACT_XP; aP removeAction SC_ACT_WL; aP removeAction SC_ACT_DESPAWN; aP removeAction SC_ACT_CAPTURE; aP removeAction SC_ACT_ALERT; aP removeAction SC_ACT_TIME}
+; ---- menu mount/unmount (single-line code values; run.sqs re-arms after a load) ----
+SC_fnMount = {SC_ACT_ALL = aP addAction ["DEMO ALL: full narrated reel", "showcase/action.sqs"]; SC_ACTS = []; SC_mI = 0; while {SC_mI < (count SC_CH_IDS)} do {SC_ACTS = SC_ACTS + [aP addAction [format ["DEMO %1: %2", SC_mI + 1, SC_CH_TITLES select SC_mI], "showcase/action.sqs"]]; SC_mI = SC_mI + 1}; SC_ACT_TICKER = aP addAction ["SHOWCASE: event ticker on/off", "showcase/action.sqs"]; SC_ACT_TIME = aP addAction ["SHOWCASE: time x4 on/off", "showcase/action.sqs"]}
+SC_fnUnmount = {aP removeAction SC_ACT_ALL; {aP removeAction _x} forEach SC_ACTS; aP removeAction SC_ACT_TICKER; aP removeAction SC_ACT_TIME}
 
 [] call SC_fnMount
 
-[] exec "showcase/hud.sqs"
 [] exec "showcase/run.sqs"
+[] exec "showcase/ticker.sqs"
 
 ; handshake for the Trident smoke test (showcase_smoke.test.sqf)
 SC_READY = true
 
-hint "SHOWCASE ready.\nAction menu = instant system demos.\nHUD refreshes every 2 s.\nSave Game action (campaign.sqs) covers persistence: save, reload, watch the menu re-arm.\nTip: run the cover-break demo BEFORE capturing the Outpost for the full alert/QRF display."
+hint "SHOWCASE ready.\n\nDEMO ALL runs every chapter as a narrated reel; each DEMO n runs standalone, any order, and reports PASS/FAIL/SKIP.\n\nNarration + event ticker arrive as radio-log lines (small text, lower left). Save Game covers persistence: save, reload, watch the menu re-arm."
 exit

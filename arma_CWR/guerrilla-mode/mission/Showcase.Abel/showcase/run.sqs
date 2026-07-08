@@ -1,17 +1,22 @@
 ; ============================================================================
-;  run.sqs  -  SHOWCASE demo consumer: one loop, one writer, ten demos.
+;  showcase/run.sqs  -  chapter runner: one loop, one writer, one ledger.
 ; ----------------------------------------------------------------------------
-;  Drains the SC_REQ/SC_PENDING queue that action.sqs fills and executes the
-;  matching demo. Each demo is INSTANT (or as instant as the engine tick that
-;  displays it) - the point of issue #9 is that every system can be seen
-;  rapidly instead of waiting for the organic campaign pace.
+;  Consumes SC_QUEUE (filled by action.sqs, the DEMO ALL reel, or the Trident
+;  smoke test writing the same seam), one chapter at a time:
 ;
-;  SC_LASTDONE is set to the served action id after every completed demo:
-;  the Trident smoke test uses it as a completion handshake.
+;    pop index -> banner -> reset the outcome contract -> exec the chapter ->
+;    wait for SC_DONE (bounded by SC_CH_TIMEOUT) -> stamp the ledger
+;    (SC_RES / SC_RESMSG) -> post a summary line -> raise SC_LASTDONE.
+;
+;  SC_LASTDONE is the completion handshake (showcase_smoke.test.sqf waits on
+;  it); SC_BUSY guards double-dispatch. SC_BEAT is recomputed per dispatch so
+;  a test can flip SC_AUTO at any point.
 ;
 ;  Also polls GM_pSaveAct each pass: campaign.sqs re-arms its Save action
-;  after a campaign load, so a changed id means "a load happened" and the
-;  showcase menu (whose action ids died with the old session) is re-mounted.
+;  after a campaign load, so a changed id means "a load happened" - the
+;  showcase menu (whose action ids died with the old session) is re-mounted
+;  and the round-trip is reported. Native event slots are single-owner, so
+;  the overlay registers no handlers (see README.md).
 ; ============================================================================
 
 @ not (isNil "SC_READY")
@@ -19,132 +24,52 @@
 #loop
 ~0.5
 
-; ---- campaign-load detector (see boot.sqs header) -----------------------------
+; ---- campaign-load detector ----------------------------------------------------
 ? GM_pSaveAct != SC_SAVEACT : goto "rearm"
 
-? not SC_PENDING : goto "loop"
-SC_PENDING = false
-SC_CUR = SC_REQ
+? (count SC_QUEUE) < 1 : goto "loop"
 
-? SC_CUR == SC_ACT_HUD : goto "dhud"
-? SC_CUR == SC_ACT_TP : goto "dtp"
-? SC_CUR == SC_ACT_GRANT : goto "dgrant"
-? SC_CUR == SC_ACT_LOOT : goto "dloot"
-? SC_CUR == SC_ACT_XP : goto "dxp"
-? SC_CUR == SC_ACT_WL : goto "dwl"
-? SC_CUR == SC_ACT_DESPAWN : goto "ddespawn"
-? SC_CUR == SC_ACT_CAPTURE : goto "dcapture"
-? SC_CUR == SC_ACT_ALERT : goto "dalert"
-? SC_CUR == SC_ACT_TIME : goto "dtime"
+; ---- pop the next chapter (also swallows accidental duplicate requests) --------
+SC_CH = SC_QUEUE select 0
+SC_QUEUE = SC_QUEUE - [SC_CH]
+? (SC_CH < 0) or (SC_CH >= count SC_CH_IDS) : goto "loop"
+SC_BUSY = true
+
+; ---- pacing: readable beats for a human, fast beats for the harness ------------
+SC_BEAT = 6
+? SC_AUTO : SC_BEAT = 0.3
+
+; ---- banner + dispatch ----------------------------------------------------------
+(format ["SHOWCASE %1/%2 - %3", SC_CH + 1, count SC_CH_IDS, SC_CH_TITLES select SC_CH]) call SC_fnBanner
+SC_DONE = false
+SC_OUTCOME = "FAIL"
+SC_OUTMSG = "chapter never reported"
+[] exec (format ["showcase/chapters/%1.sqs", SC_CH_IDS select SC_CH])
+
+; ---- bounded completion wait (a stuck chapter must not wedge the runner) -------
+SC_rW = 0
+#cwait
+? SC_DONE : goto "record"
+~1
+SC_rW = SC_rW + 1
+? SC_rW < SC_CH_TIMEOUT : goto "cwait"
+SC_OUTCOME = "FAIL"
+SC_OUTMSG = format ["timed out after %1 s", SC_CH_TIMEOUT]
+
+#record
+SC_RES set [SC_CH, SC_OUTCOME]
+SC_RESMSG set [SC_CH, SC_OUTMSG]
+? SC_OUTCOME == "PASS" : (format ["RESULT %1/%2 %3: PASS - %4", SC_CH + 1, count SC_CH_IDS, SC_CH_TITLES select SC_CH, SC_OUTMSG]) call SC_fnSay
+? SC_OUTCOME != "PASS" : (format ["RESULT %1/%2 %3: %4 - %5", SC_CH + 1, count SC_CH_IDS, SC_CH_TITLES select SC_CH, SC_OUTCOME, SC_OUTMSG]) call SC_fnSay
+SC_LASTDONE = SC_CH
+SC_CH = -1
+SC_BUSY = false
 goto "loop"
 
-; ============================================================================
-;  DEMOS
-; ============================================================================
-
-; ---- HUD toggle ----------------------------------------------------------------
-#dhud
-SC_HUD = not SC_HUD
-? not SC_HUD : titleText ["", "PLAIN DOWN"]
-goto "done"
-
-; ---- teleport cycle over the authored zones (whole group comes along) ---------
-#dtp
-SC_TPCYCLE = SC_TPCYCLE + 1
-? SC_TPCYCLE > 2 : SC_TPCYCLE = 0
-SC_tR = gmZone ([SC_CAMP, SC_VILL, SC_OUT] select SC_TPCYCLE)
-{_x setPos ([SC_tR select GM_Z_POS, 25] call GM_fnRandPosNear)} forEach units (group aP)
-hint format ["Teleported to %1 (owner %2). Fog-of-war, markers, garrison cache and alerts all key off player position.", SC_tR select GM_Z_NAME, SC_tR select GM_Z_OWNER]
-goto "done"
-
-; ---- economy grant: makes the Camp recruit/train menu instantly affordable ----
-#dgrant
-gmResources = gmResources + 500
-gmManpower = gmManpower + 5
-? isNil "GM_MANPOWER_CAP" : goto "granthint"
-? gmManpower > GM_MANPOWER_CAP : gmManpower = GM_MANPOWER_CAP
-#granthint
-hint format ["Treasury %1 R | Manpower %2 HR.\nTeleport to the Camp: the recruit / specialist / train menu (recruit.sqs) is now affordable.", gmResources, gmManpower]
-goto "done"
-
-; ---- loot: tally a full unlock threshold of the faction rifle ------------------
-#dloot
-? isNil "GM_fnLootItem" : hint "Loot manager still booting; try again in a second."
-? isNil "GM_fnLootItem" : goto "done"
-SC_lW = gmFactionValue [gmResistanceSide, "lootRiflemanWeapon"]
-SC_lHad = SC_lW in GM_GEAR_UNLOCKED
-SC_lN = [SC_lW, GM_GEAR_THRESHOLD] call GM_fnLootItem
-; a fresh unlock already toasted from inside GM_fnLootItem; keep it visible
-? SC_lHad : hint format ["Stash +%1 x %2 (tally %3). Already unlocked: recruits spawn with it.", GM_GEAR_THRESHOLD, SC_lW, SC_lN]
-goto "done"
-
-; ---- companion progression: +160 XP crosses the next rank threshold ------------
-#dxp
-SC_xI = 0; while {SC_xI < (count GM_COMP_NAMES)} do {if (GM_COMP_ALIVE select SC_xI) then {GM_COMP_XP set [SC_xI, (GM_COMP_XP select SC_xI) + 160]}; SC_xI = SC_xI + 1}
-hint "Companion XP +160. companions.sqs promotes on its next 5 s tick (rank + skill applied to the live body; watch the promotion hint and the HUD row)."
-goto "done"
-
-; ---- war level: next garrison/QRF spawns use the higher faction tier -----------
-#dwl
-gmWarLevel = gmWarLevel + 1
-? gmWarLevel > 10 : gmWarLevel = 10
-hint format ["War Level forced to %1 (tier 2 at 3, tier 3 at 5; QRF armor from 3).\nTRANSIENT: escalation.sqs recomputes it from held-zone %2 within ~60 s, so trigger a QRF or a garrison respawn now to see the tier change.", gmWarLevel, "%"]
-goto "done"
-
-; ---- garrison cache: force write-back, then watch the cache respawn ------------
-#ddespawn
-? not (gmGarrisonSpawned SC_OUT) : hint "Outpost garrison is not spawned (out of cache range or already wiped)."
-? not (gmGarrisonSpawned SC_OUT) : goto "done"
-SC_dLive = gmGarrisonLive SC_OUT
-gmGarrisonForceDespawn SC_OUT
-hint format ["Outpost garrison force-despawned: %1 live bodies banked back to a reserve of %2.\nStay inside the 800 m cache radius and the GarrisonCache respawns them within ~5 s (HUD gar column).", SC_dLive, (gmZone SC_OUT) select GM_Z_GAR]
-goto "done"
-
-; ---- capture: wipe the Outpost garrison with the player present -----------------
-#dcapture
-SC_cR = gmZone SC_OUT
-{_x setPos ([SC_cR select GM_Z_POS, 20] call GM_fnRandPosNear)} forEach units (group aP)
-? gmGarrisonSpawned SC_OUT : goto "ckill"
-hint "You are now inside the Outpost cache radius; the garrison spawns within ~5 s. Press again to wipe it."
-goto "done"
-#ckill
-SC_cU = []
-{SC_cU = SC_cU + (units _x)} forEach (gmGarrisonGroups SC_OUT)
-{_x setDammage 1} forEach SC_cU
-hint format ["Capture demo: %1 garrison bodies dropped with you standing in the zone.\nWatch: native flip (marker green, captured event), hold garrison spawn (capture.sqs), loot tallies from the corpses (loot.sqs), +25 R income on the next economy tick.", count SC_cU]
-goto "done"
-
-; ---- alert/QRF: break cover next to the garrison --------------------------------
-#dalert
-SC_aR = gmZone SC_OUT
-SC_aP2 = SC_aR select GM_Z_POS
-{_x setPos [((SC_aP2 select 0) - 80) + (random 10), ((SC_aP2 select 1) - 80) + (random 10), 0]} forEach units (group aP)
-? gmUndercover : goto "ablow"
-hint "Cover is already broken (one break is permanent for the campaign, by design). You are 110 m from the Outpost: stay visible and the alert climbs anyway."
-goto "done"
-#ablow
-gmBreakUndercover "showcase demo"
-hint "Alert demo: cover blown 110 m from the Outpost.\nWatch the HUD: GREEN -> YELLOW (investigate toward last-known) -> RED (QRF convoy: officer + tier squad + war-level vehicle). Heat spikes on each edge."
-goto "done"
-
-; ---- time acceleration ----------------------------------------------------------
-#dtime
-SC_ACCEL = not SC_ACCEL
-? SC_ACCEL : setAccTime 4
-? not SC_ACCEL : setAccTime 1
-? SC_ACCEL : hint "Time x4: economy (600 s) and escalation (60 s) ticks arrive quickly now."
-? not SC_ACCEL : hint "Time back to x1."
-goto "done"
-
-; ---- shared tail: completion handshake -------------------------------------------
-#done
-SC_LASTDONE = SC_CUR
-goto "loop"
-
-; ---- campaign load detected: action ids died with the old session ----------------
+; ---- campaign load detected: action ids died with the old session --------------
 #rearm
 [] call SC_fnUnmount
 [] call SC_fnMount
 SC_SAVEACT = GM_pSaveAct
-hint "Campaign load detected: showcase menu re-armed (persistence demo complete)."
+"Campaign load detected: zones, alerts, garrisons, companions and the gear stash came back through the native serializers; showcase menu re-armed. Persistence round-trip verified." call SC_fnSay
 goto "loop"

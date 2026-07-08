@@ -1,0 +1,30 @@
+; ============================================================================
+;  chapters/economy.sqs  -  Resources (R) and Manpower (HR).
+; ----------------------------------------------------------------------------
+;  SYSTEM ON DISPLAY: economy.sqs (script manager) - the income tick formula
+;  over the native zone registry.
+;  Seams: gmResources/gmManpower grant (SC_fnGrant).
+;  The real tick is 600 s; instead of stalling the demo we compute the same
+;  formula live, show the projection, then grant working capital.
+; ============================================================================
+? isNil "SC_READY" : exit
+
+"The cell runs on two currencies. RESOURCES (R) buy specialists, training and gear; MANPOWER (HR) is the hard body count - 1 HR is 1 recruitable fighter, capped at 12." call SC_fnSay
+~SC_BEAT
+
+"Income ticks every 600 s: each resistance-held military zone pays its income field; each town pays 0.5 R per support point; each town at 50+ support adds 1 HR. Towns pay on goodwill - you never have to garrison them." call SC_fnSay
+~SC_BEAT
+
+; ---- run the manager's own formula over the live registry (projection) ---------
+SC_cR = 0; SC_cHR = 0; SC_cI = 0; while {SC_cI < gmZoneCount} do {SC_cZ = gmZone SC_cI; if (((SC_cZ select GM_Z_OWNER) == gmResistanceSide) and ((SC_cZ select GM_Z_TYPE) in ["OUTPOST", "AIRFIELD", "SEAPORT"])) then {SC_cR = SC_cR + (SC_cZ select GM_Z_INCOME)}; if ((SC_cZ select GM_Z_TYPE) == "CITY") then {SC_cR = SC_cR + ((SC_cZ select GM_Z_SUPPORT) * GM_ECON_R_PER_SUP); if ((SC_cZ select GM_Z_SUPPORT) >= GM_ECON_HR_SUP_MIN) then {SC_cHR = SC_cHR + GM_ECON_HR_PER_TOWN}}; SC_cI = SC_cI + 1}
+(format ["Projected NEXT tick for the map as it stands: +%1 R and +%2 HR. Treasury right now: %3 R, %4 HR. Capture the Outpost and the projection rises by 25 R.", SC_cR, SC_cHR, gmResources, gmManpower]) call SC_fnSay
+~SC_BEAT
+
+; ---- working capital for the rest of the showcase --------------------------------
+SC_cR0 = gmResources
+[500, 5] call SC_fnGrant
+(format ["Demo grant: +500 R, +5 HR (manpower clamps at the cap of %1). Treasury %2 R / %3 HR - the Camp menu in the recruiting chapter is now affordable.", GM_MANPOWER_CAP, gmResources, gmManpower]) call SC_fnSay
+
+? gmResources == (SC_cR0 + 500) : ["PASS", format ["projection computed (+%1 R/+%2 HR) and grant verified", SC_cR, SC_cHR]] call SC_fnDone
+? gmResources != (SC_cR0 + 500) : ["FAIL", "treasury grant did not apply"] call SC_fnDone
+exit
