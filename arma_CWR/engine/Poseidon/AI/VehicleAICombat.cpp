@@ -2114,6 +2114,9 @@ bool EntityAI::CalculateLaser(Vector3& pos, Vector3& dir, int weapon) const
         float minT = FLT_MAX;
         int minI = -1;
 
+        // null when the preloaded texture is unavailable (no Remaster
+        // CfgPreloadTextures on 1.99 data); an untextured collision face
+        // would then compare equal - guard so the laser still stops on it
         Texture* glass = GPreloadedTextures.New(TextureBlack);
         for (int i = 0; i < collision.Size(); i++)
         {
@@ -2121,7 +2124,7 @@ bool EntityAI::CalculateLaser(Vector3& pos, Vector3& dir, int weapon) const
             CollisionInfo& info = collision[i];
             // we can go through some textures
 
-            if (info.texture == glass)
+            if (glass && info.texture == glass)
             {
                 continue;
             }

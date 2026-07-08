@@ -677,8 +677,16 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             float minT = 1e10;
             int minI = -1;
 
+            // Glass panes are marked with the preloaded black texture; bullets
+            // pass through them (chip damage below) and hit the first non-glass
+            // obstacle. When the texture is not available (original 1.99 data
+            // has no Remaster CfgPreloadTextures), glass is null - and geometry
+            // collision faces carry a null texture, so a naive == would classify
+            // EVERY body hit as glass and bullets would never damage anyone.
+            // No glass texture = no glass detection.
             Texture* glass = GPreloadedTextures.New(TextureBlack);
-            bool detectGlass = dyn_cast<ShotBullet>(this) != nullptr;
+            bool isBullet = dyn_cast<ShotBullet>(this) != nullptr;
+            bool detectGlass = isBullet && glass != nullptr;
 
             for (int i = 0; i < collision.Size(); i++)
             {
@@ -700,8 +708,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                 for (int i = 0; i < collision.Size(); i++)
                 {
                     CollisionInfo& info = collision[i];
-                    if (detectGlass && info.texture != glass)
+                    if (isBullet && !(detectGlass && info.texture == glass))
                     {
+                        // bullets chip-damage only glass panes here; the solid
+                        // hit gets full ExplosionDammage below
                         continue;
                     }
                     // stop on first solid obstacle

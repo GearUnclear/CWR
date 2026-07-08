@@ -1,0 +1,8 @@
+# Same launch shape as guerrilla_sinai_swap (full CWA + @LoBo + @lobofixup);
+# see that toml for the fixture/first-use notes.
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
