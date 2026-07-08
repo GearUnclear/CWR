@@ -15,7 +15,7 @@ The git root was rerooted up from `arma_CWR/` to `D:\Arma_CWA` so the web portal
 - **`arma_CWR/`** — the engine + overhaul design docs. This is the main development area and has its own detailed [`arma_CWR/CLAUDE.md`](arma_CWR/CLAUDE.md) covering toolchain, build, tests, and architecture. **Read that file before doing any engine work.** The `arma_CWR` folder name is legacy from before the reroot/rename; don't "fix" it.
 - **`site/`** — the public web portal / field manual (static HTML: `index.html`, `about.html`, `gameplay.html`, `tech.html`, `designloop.html`, `downloads.html`, plus `assets/`). Branded "Uslu dur!". Pure front-end, no build step — edit the HTML/CSS/asset files directly and open in a browser to verify.
 - **`@LoBo/`** — the *Lost Brothers* mod (Sinai island + IDF/Egypt/Syria/Jordan factions), used as a **test bed** for the Guerrilla Mode island/faction swappability work. Third-party mod content, not our source; treat as read-only reference data unless a task says otherwise.
-- **`ARMA Cold War Assault/`** — the full installed base game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Game data, **not** tracked source; used as the data dir for integration tests.
+- **`ARMA Cold War Assault [Classic]/`** — the full installed base game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Game data, **not** tracked source; used as the data dir for integration tests.
 
 ## Where work happens
 

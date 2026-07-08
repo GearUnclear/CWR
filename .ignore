@@ -12,5 +12,7 @@ arma_CWR/thirdparty/glad/
 # Build output
 arma_CWR/build/
 
-# Installed base game data (also in .gitignore; belt-and-suspenders for search)
-/ARMA Cold War Assault/
+# Installed base game data (also in .gitignore; belt-and-suspenders for search).
+# Brackets are glob character-classes here too, so escape them.
+/ARMA Cold War Assault \[Classic\]/
+/Arma Cold War Assault Demo \[Remaster\]/

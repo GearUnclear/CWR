@@ -27,7 +27,7 @@ Most of this engine is 1,300+ C++ files, 160 of them over 1,000 lines. To avoid 
 
 **Do NOT read or grep these — generated or non-source, pure context waste:**
 - `thirdparty/glad/` — ~22k lines of generated OpenGL bindings.
-- `@LoBo/` (mod test data, 2.2G binary), `build/`, and `ARMA Cold War Assault/AddOns/` (base game data).
+- `@LoBo/` (mod test data, 2.2G binary), `build/`, and `ARMA Cold War Assault [Classic]/AddOns/` (base game data).
 - A repo-root `.ignore` already excludes these from `Grep`/`Glob`; the note here is for `Read`.
 
 **Navigating big files efficiently:** grep for the symbol first, then `Read` a ±80-line window (`offset`/`limit`) rather than the whole 2,500–3,300-line file. For open-ended "where/how does X work" questions, delegate to an `Explore` subagent so the file dumps stay in *its* context and only the conclusion returns to yours.
@@ -44,7 +44,7 @@ Builds require, on PATH / in env:
 
 **Engine location:** `D:\Arma_CWA\arma_CWR` (moved here from `C:\dev\arma_CWR` on 2026-06-28 to sit next to the game data). The **git root is the parent** `D:\Arma_CWA` — run git and path-relative commands accordingly. A reminder shortcut `C:\dev\arma_CWR.lnk` points back here.
 
-**Game data:** `D:\Arma_CWA\ARMA Cold War Assault` — the full installed game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Use this path for Trident's `OFPR_DATA_DIR` in `.trident.env`.
+**Game data:** `D:\Arma_CWA\ARMA Cold War Assault [Classic]` — the full installed game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Use this path for Trident's `OFPR_DATA_DIR` in `.trident.env`.
 
 The toolchain is installed and verified as of 2026-06-28. Versions and locations on this machine:
 
@@ -80,7 +80,7 @@ the exe windowed against the game data dir.
 .\run-game.ps1 -SkipBuild                           # launch the existing dist/ build as-is
 ```
 
-Default `-DataDir` is `D:\Arma_CWA\ARMA Cold War Assault`. `-Mission` is resolved relative
+Default `-DataDir` is `D:\Arma_CWA\ARMA Cold War Assault [Classic]`. `-Mission` is resolved relative
 to `-DataDir` and passed as `--test-mission` (omit it to boot to the main menu, where
 GUERRILLA lets you pick island/faction interactively).
 

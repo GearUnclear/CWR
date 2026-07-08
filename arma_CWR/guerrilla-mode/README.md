@@ -99,7 +99,7 @@ Compiled apps stage into `dist/win-x64-clang-rwdi/`.
 Game data is **not** in this repo. Get the free **Steam CWA Demo, app id
 `4819000`**, and point Trident at it (recommended gitignored layout
 `packages/Demo`). On this machine the full install at
-`D:\Arma_CWA\ARMA Cold War Assault` also works as `OFPR_DATA_DIR`.
+`D:\Arma_CWA\ARMA Cold War Assault [Classic]` also works as `OFPR_DATA_DIR`.
 
 ---
 
@@ -126,7 +126,7 @@ The GUERRILLA button on the main menu launches the template mission
 `mission/Guerrilla.*` template there with:
 
 ```powershell
-guerrilla-mode\install-missions.ps1                 # default D:\Arma_CWA\ARMA Cold War Assault
+guerrilla-mode\install-missions.ps1                 # default D:\Arma_CWA\ARMA Cold War Assault [Classic]
 guerrilla-mode\install-missions.ps1 -GameDir <dir>  # any other install
 ```
 

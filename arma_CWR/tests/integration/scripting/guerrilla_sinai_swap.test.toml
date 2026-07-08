@@ -1,7 +1,7 @@
 # Boots the real Guerrilla.Sinai template (repo-root-relative) on the @LoBo
 # mod's Sinai world. Requires the FULL CWA install (OFPR_DATA_DIR) plus the
 # @LoBo mod folder next to it: --mods-dir ".." resolves relative to the game
-# CWD (the data dir, D:\Arma_CWA\ARMA Cold War Assault), so "@LoBo" mounts
+# CWD (the data dir, D:\Arma_CWA\ARMA Cold War Assault [Classic]), so "@LoBo" mounts
 # D:\Arma_CWA\@LoBo. The repo fixture mod @lobofixup mounts AFTER it: it
 # shadows two pbos whose malformed tracerColor floats ("0.0.1") are script
 # errors under --autotest (hard abort), and preloads the LoBo addons the

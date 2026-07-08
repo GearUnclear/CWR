@@ -29,7 +29,7 @@
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory. This is the working
     directory the game runs from (AddOns/, Missions/, Campaigns/, etc. live
-    here). Default: D:\Arma_CWA\ARMA Cold War Assault
+    here). Default: D:\Arma_CWA\ARMA Cold War Assault [Classic]
 
 .PARAMETER Preset
     The CMake configure preset / build dir name under build/.
@@ -66,7 +66,7 @@
         Launch the existing build with no rebuild.
 #>
 param(
-    [string]$DataDir = 'D:\Arma_CWA\ARMA Cold War Assault',
+    [string]$DataDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',
     [string]$Preset = 'win-x64-clang-rwdi',
     [string]$Mission,
     [switch]$SkipBuild,

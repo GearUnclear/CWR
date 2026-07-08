@@ -33,7 +33,7 @@
 
 .PARAMETER GameDir
     The Arma: Cold War Assault install (data) directory.
-    Default: D:\Arma_CWA\ARMA Cold War Assault
+    Default: D:\Arma_CWA\ARMA Cold War Assault [Classic]
 
 .PARAMETER IncludeWorld
     World name(s) to install even though <GameDir>\Worlds\<World>.wrp does
@@ -46,7 +46,7 @@
     .\install-missions.ps1 -IncludeWorld Sinai
 #>
 param(
-    [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault',
+    [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',
     [string[]]$IncludeWorld = @()
 )
 
@@ -63,7 +63,9 @@ if (-not (Test-Path -LiteralPath $missionRoot -PathType Container)) {
 
 $destRoot = Join-Path $GameDir 'Missions'
 if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
-    New-Item -ItemType Directory -Path $destRoot | Out-Null
+    # [System.IO.Directory]::CreateDirectory is fully literal: New-Item -Path
+    # would treat the bracketed data-dir parent ([Classic]) as a glob and fail.
+    [void][System.IO.Directory]::CreateDirectory($destRoot)
     Write-Output "Created: $destRoot"
 }
 

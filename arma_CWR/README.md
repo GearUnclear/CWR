@@ -41,7 +41,7 @@ On GNU/Linux, use the matching `linux-x64-clang-rwdi` preset.
 
 `run-game.ps1` wraps the toolchain-on-PATH setup, an incremental `PoseidonGame`-target
 build, and launching the exe windowed (`--window --no-splash`) with its working directory
-set to the game data dir (default `D:\Arma_CWA\ARMA Cold War Assault`, override with
+set to the game data dir (default `D:\Arma_CWA\ARMA Cold War Assault [Classic]`, override with
 `-DataDir`). From the main menu, hit **GUERRILLA** to pick an island/faction and start a
 Guerrilla Mode game. See [`guerrilla-mode/README.md`](guerrilla-mode/README.md#run-the-mode)
 for mission template details.
