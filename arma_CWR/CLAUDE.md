@@ -44,7 +44,11 @@ Builds require, on PATH / in env:
 
 **Engine location:** `D:\Arma_CWA\arma_CWR` (moved here from `C:\dev\arma_CWR` on 2026-06-28 to sit next to the game data). The **git root is the parent** `D:\Arma_CWA` — run git and path-relative commands accordingly. A reminder shortcut `C:\dev\arma_CWR.lnk` points back here.
 
-**Game data:** `D:\Arma_CWA\ARMA Cold War Assault [Classic]` — the full installed game (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Use this path for Trident's `OFPR_DATA_DIR` in `.trident.env`.
+**Game data (two packages — both are game data, not tracked source; treat read-only except where a task documents an exception):**
+- `D:\Arma_CWA\ARMA Cold War Assault [Classic]` — the full v1.99 install (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Trident's `OFPR_DATA_DIR` in `.trident.env`; the default for the `full_cwa`/`lobo` lanes.
+- `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]` — the official remaster Demo (Steam app 4819000), read-only reference like `@LoBo`. Three roles: (1) data source for the `demo`-tagged `--data-dir` test lane; (2) contract source — its `BIN\remaster.cpp` inventories the `Remaster >>` config keys the engine reads, the backfill checklist for the Classic shim (#11); (3) reference binary `PoseidonGameDemo.exe` for upstream-behaviour diffs (#13). The three Demo-world Guerrilla tests run on **neither** package (Classic lacks the `demo` world, Demo lacks the GUER roster) — see Tests below.
+
+Both bracket dirs are wildcard-hostile: quote the path and use `-LiteralPath` in PowerShell (#12). Per-run `--data-dir` usage lives in the Tests section.
 
 The toolchain is installed and verified as of 2026-06-28. Versions and locations on this machine:
 
