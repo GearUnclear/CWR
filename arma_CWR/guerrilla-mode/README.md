@@ -98,8 +98,12 @@ Compiled apps stage into `dist/win-x64-clang-rwdi/`.
 ### Acquire the (free) Demo game data
 Game data is **not** in this repo. Get the free **Steam CWA Demo, app id
 `4819000`**, and point Trident at it (recommended gitignored layout
-`packages/Demo`). On this machine the full install at
-`D:\Arma_CWA\ARMA Cold War Assault [Classic]` also works as `OFPR_DATA_DIR`.
+`packages/Demo`). On this machine two packages already exist: the full 1.99
+install `D:\Arma_CWA\ARMA Cold War Assault [Classic]` (the default
+`OFPR_DATA_DIR`) and the official remaster Demo at
+`D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]`; pass the latter per run with
+`tri test --data-dir "…Demo [Remaster]"`. The Demo package is a content subset —
+see the Tests section for why the Demo-world Guerrilla tests don't run on it yet.
 
 ---
 
@@ -182,12 +186,21 @@ ctest --test-dir build/win-x64-clang-rwdi -R PoseidonTests --output-on-failure
 ```
 
 The Trident integration suite is fully migrated to the `gm*` command surface
-(the retired `GM_ZONES`/`zones.sqs` spine survives only in comments). Demo-data
-tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`,
-`guerrilla_save_reload.seq`) run headless with the free Steam Demo; the
-`guerrilla_native_*` twins need the full CWA install (`full_cwa`), and
+(the retired `GM_ZONES`/`zones.sqs` spine survives only in comments). The
+`guerrilla_native_*` twins run against the full 1.99 install (`full_cwa`), and
 `guerrilla_sinai_swap` + `ui/guerrilla_new_game_e2e` additionally need @LoBo
-(`lobo`), the generated fixture PBOs, and installed templates. See
+(`lobo`), the generated fixture PBOs, and installed templates.
+
+The three Demo-world tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`,
+`guerrilla_save_reload.seq`) bind to the `demo` world and their player +
+resistance units are GUER classes (`SoldierGB`, …). The local remaster Demo
+package (`Arma Cold War Assault Demo [Remaster]`) supplies the world
+(`demo\demo.wrp`, byte-identical to `abel.wrp`) but **not** the GUER roster —
+its `CONFIG.BIN` has no `SoldierG*` except `SoldierGFakeE` (issue #13) — so a
+`tri --data-dir "…Demo [Remaster]"` run boot-fails on `SoldierGB` (strict-mode
+fatal within ~60 ms; verified 2026-07-08). They become runnable once a
+Demo-package faction descriptor remaps the resistance onto Demo's EAST/WEST
+classes, or the missions' Gate-Zero class substitution lands. See
 [`STATUS.md`](STATUS.md) for the full table.
 
 ---

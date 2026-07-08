@@ -97,15 +97,27 @@ Trident integration suite is **fully migrated to the `gm*` surface** (verified
 
 | Test | Data needed |
 |---|---|
-| `scripting/guerrilla_capture_flip.test` | Demo (headless) |
-| `scripting/guerrilla_spawn_domove.test` | Demo (headless, `gate-zero`) |
-| `scripting/guerrilla_save_reload.seq` (01_save → 02_reload) | Demo (headless, `save-load`) |
+| `scripting/guerrilla_capture_flip.test` | Demo world + GUER roster ‡ (headless) |
+| `scripting/guerrilla_spawn_domove.test` | Demo world + GUER roster ‡ (headless, `gate-zero`) |
+| `scripting/guerrilla_save_reload.seq` (01_save → 02_reload) | Demo world + GUER roster ‡ (headless, `save-load`) |
 | `scripting/guerrilla_native_capture.test` | `full_cwa` |
 | `scripting/guerrilla_native_spawn.test` | `full_cwa` |
 | `scripting/guerrilla_native_undercover.test` | `full_cwa` |
 | `scripting/guerrilla_native_save_reload.seq` | `full_cwa`, `save-load` |
 | `scripting/guerrilla_sinai_swap.test` | `full_cwa` + `lobo` (+ fixture gen + installed templates) |
 | `ui/guerrilla_new_game_e2e.test` | `full_cwa` + `lobo` (+ installed templates) |
+
+‡ These three bind to the `demo` world (folder suffix `.Demo`) and their player
++ resistance units are GUER classes (`SoldierGB`, …). The local remaster Demo
+package `Arma Cold War Assault Demo [Remaster]` ships `demo\demo.wrp` (=
+`abel.wrp`) but **no `SoldierG*` roster** (only `SoldierGFakeE`; issue #13), so a
+`tri --data-dir "…Demo [Remaster]"` run boot-fails on `SoldierGB` (strict-mode
+fatal, "harness connection closed", ~60 ms; verified 2026-07-08). They run only
+once a Demo-package faction descriptor remaps the resistance onto Demo's
+EAST/WEST classes, or the missions' Gate-Zero class substitution lands. On this
+machine, meanwhile, Classic has no `demo` world — so these are not runnable on
+either local package yet, and the runnable Guerrilla set stays the `full_cwa`
+tests.
 
 Unit-level serialization round-trips exist for all three native systems
 (`test_zone_registry.cpp`, `test_alert_machine.cpp`, `test_garrison_cache.cpp`);

@@ -130,7 +130,9 @@ ctest --test-dir build/win-x64-clang-rwdi -R "<test name>" --output-on-failure  
   ```
   Copy `.trident.env.example` → `.trident.env`, set `OFPR_GAME_DIR` (build/dist dir with binaries) and `OFPR_DATA_DIR` (Demo game data; recommended layout `packages/Demo`, which is gitignored). Get free Demo data from Steam app 4819000.
 
-  **On this machine** `.trident.env` points `OFPR_DATA_DIR` at the full CWA install (no Demo dataset), so the Demo-world tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`, `guerrilla_save_reload.seq`) cannot run here — the runnable Guerrilla set is the six `full_cwa` tests.
+  **On this machine** two game-data packages exist. `.trident.env` points `OFPR_DATA_DIR` at the full 1.99 install `ARMA Cold War Assault [Classic]` — the default for the `full_cwa`/`lobo` lanes — and the official remaster Demo package sits at `Arma Cold War Assault Demo [Remaster]`. Override the data dir per run for a Demo lane: `tri test --data-dir "D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]" ...` (the runner does no globbing on the value, so the brackets are safe).
+
+  **The three Demo-world Guerrilla tests still don't run cleanly on either local package** (verified 2026-07-08). `guerrilla_capture_flip`, `guerrilla_spawn_domove` and `guerrilla_save_reload.seq` bind to the `demo` world (folder suffix `.Demo`), which Classic lacks; and their mission player + resistance garrisons are GUER classes (`SoldierGB`, …), which the Demo [Remaster] package does **not** ship — its `BIN\CONFIG.BIN` has no `SoldierG*` roster except `SoldierGFakeE` (issue #13's headline finding). A `--data-dir` run against the Demo package boot-fails within ~60 ms — strict-mode-fatal config error, harness closes, `tri` reports "harness connection closed" — because `SoldierGB` won't resolve. They become runnable only once a Demo-package faction descriptor remaps the resistance onto EAST/WEST classes present in Demo (or the missions' Gate-Zero class substitution lands). Until then the runnable Guerrilla set here stays the six `full_cwa` tests on Classic.
 
 ### Guerrilla integration-test preconditions (verified 2026-07-07)
 
