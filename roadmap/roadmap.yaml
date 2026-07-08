@@ -62,6 +62,7 @@ items:
       - "~25 unit tests fail out-of-the-box on Windows (hardcoded /tmp paths + FormatTime timezone assumption); FormatTime fixed in 0e77283, rest fixed locally."
       - "Toolchain is not on PATH in old terminal sessions; run-game.ps1 and CLAUDE.md carry the fixup."
       - "No Demo dataset on this machine: .trident.env points OFPR_DATA_DIR at the full CWA install; the four Demo-world integration tests may not run here (unverified)."
+      - "2026-07-07: stale - the official remaster Demo package now exists at 'Arma Cold War Assault Demo [Remaster]'; dual-package work tracked in the dual-package-compat item (issues #11-#13)."
       - "Format CMake target is not baseline-clean; do not gate on it."
 
   - id: mod-plans-corpus
@@ -107,16 +108,21 @@ items:
   - id: camera-mouselook
     title: "Camera: aiming deadzone + mouse-look feel"
     phase: foundation
-    status: done
+    status: in-progress
+    priority: 1
     depends_on: [build-toolchain]
     commits: [5c0fd63, 5a289cd, f7f9ec4]
+    gh_issues: [10]
     summary: >
       Configurable aiming deadzone and deadzone-0 direct-look (intended design, not
-      classic float), with FPS-independent smoothing (default 0.35).
+      classic float), with FPS-independent smoothing (default 0.35). Reopened:
+      player still reports jumpy feel; issue #10 carries the full root-cause report
+      and stays open until the player signs off on the feel in play.
     log:
       - "First attempt (5c0fd63) used a dt-scaled flick cap; that WAS the spin/jitter bug. Reworked in 5a289cd as a constant clamp + FPS-independent smoothing."
       - "Known wart: mouse.cfg persists old defaults across the fix; stale configs keep old feel."
       - "f7f9ec4 fixed CreateGameObject linkage (declare in namespace Poseidon)."
+      - "2026-07-07 investigation (issue #10): primary suspect is per-count angular quantization (~0.30 deg X / 0.40 deg Y per count, ~7-9 px per count at 1080p; legacy 1/200+1.5 scale calibrated for 400 DPI mice, referenceDpi=1600 default makes dpiNormalize a no-op). Second: on-foot yaw was never made direct (Man::IsVirtualX false for CamInternal, so deadzone-0 only locks dive; yaw = gun-cone float + 32 rad/s body slew stick-slip). Secondary: smoothing filters displacement not rate, ms-quantized AppIdle deltaT, one frame of pump-order latency, FPS-dependent flick clamp."
 
   - id: run-game-launcher
     title: "run-game.ps1: build + launch + detached log capture"
@@ -281,19 +287,22 @@ items:
     status: done
     priority: 1
     depends_on: [mission-migration-native, abel-template]
-    commits: ["702842f"]
+    commits: ["702842f", "c2bd9d5"]
     gh_issues: [9]
     summary: >
-      Showcase.Abel: the byte-identical shared core plus a showcase/ overlay
-      (bootstrapped from mission.sqm) that makes every system rapidly
-      accessible: an action menu of instant demos (teleport cycle, economy
-      grant, gear unlock, companion XP, war level, garrison force-despawn,
-      capture, cover break, time x4) and a 2 s status HUD over the native gm*
-      surface. Guard tests walk Showcase.* too; install-missions.ps1 installs
-      both prefixes; showcase_smoke drives all demos on full CWA data.
+      Showcase.Abel v2: the byte-identical shared core plus a chapter-based
+      showcase/ overlay - 11 narrated, SELF-VERIFYING chapters (tour, economy,
+      recruit, loot, companions, garrison cache, alert/QRF lifecycle, capture,
+      escalation, persistence, status), each reporting PASS/FAIL/SKIP into a
+      ledger, runnable standalone, as a DEMO ALL reel, or headlessly via the
+      SC_QUEUE seam the smoke test drives. Narration is sideChat (small
+      readable font); a state-change event ticker replaces the v1 HUD;
+      chapters.sqs is the manifest (adding a chapter = one file + one row).
     log:
       - "Native event slots are single-owner (one handler per event type), so the overlay registers none; campaign loads are detected by polling GM_pSaveAct and the menu re-mounts."
-      - "Demo order matters in showcase_smoke: capture wipes the Outpost before the cover-break demo teleports there, so the uncovered player never stands next to live occupiers (break latch consumption is garrison-independent, verified in AlertMachine::EvaluateAlert)."
+      - "v1 (702842f) was rejected in review: instant demos + a 2 s titleText status wall. Root cause is engine fact, not tuning: plain-title font size comes from RscTitlesText in the GLOBAL resource (TitEffects.cpp), unreachable from script and from description.ext - a titleText HUD can never be readable. v2 (c2bd9d5) moved all narration to sideChat and made every demo a paced chapter with an observable, asserted outcome."
+      - "Staging rule found by the first v2 smoke run: cover (setCaptive) is personal, so squadmates parked near a live garrison get engaged and the provoked player unit's fired-EH breaks campaign cover mid-demo; near-garrison chapters teleport the captive player SOLO (SC_fnTpSolo)."
+      - "Intermittent under autotest: one game-process death (broken pipe) near the QRF launch, recovered on tri retry - same family as the documented known-flaky native spawn/doMove behavior; worth a crash-dump hunt if it recurs."
 
   - id: voice-lines-pipeline
     title: "TTS voice-line pipeline (voice-lines/)"
@@ -328,6 +337,34 @@ items:
       - "Regression tests player_fire_headless + unit_death_blood_headless verified red without the guard, green with it."
       - "#4 means: every pre-193a280 integration green on a bool assert was untrustworthy. #4's fix underwrites all later test claims."
       - "#5/#6 fix unblocks the literal-'fire' public-execution mechanic that issues #7/#8 gate on."
+
+  - id: dual-package-compat
+    title: "Dual-package compatibility: Classic 1.99 + Demo [Remaster] data (issues #11-#15)"
+    phase: hardening
+    status: in-progress
+    priority: 1
+    depends_on: [build-toolchain, crash-fixes-trident-trust]
+    gh_issues: [11, 12, 13, 14, 15]
+    summary: >
+      Research and harden the engine + Guerrilla Mode to run on BOTH data
+      packages: the original 1.99 full install ("[Classic]") and the official
+      remaster Demo package ("Demo [Remaster]", added 2026-07-07). Root theme:
+      the remaster engine reads a data-side contract (Bin/remaster.bin config,
+      resource-extra UI overlays, marker-texture conventions) that 1.99 data
+      lacks; missing entries fail silently. Postmortem case: the glass-marker
+      texture null made every bullet-vs-person hit classify as shoot-through
+      glass, so projectiles did no real damage (fixed engine-side with 3 new
+      Trident regression tests). Full three-agent audit recorded in #13;
+      remaining work is its checklist: rename/path fixes (#12), RscOptionsShell
+      guard, CfgPreloadTextures shim backfill from 1.99 Data.pbo, Demo-package
+      posture for the missing SoldierG* roster, demo-tag and dual --data-dir
+      test lanes, install-missions world-gate for the Worlds-less Demo layout.
+    log:
+      - "Glass bug arc (2026-07-07): play report 'we can't hurt each other' -> point_blank_damage repro failed 4/4 -> bullet telemetry showed collisions with zero HIT dispatch -> GPreloadedTextures.New(TextureBlack) null vs null face textures -> fix: missing glass texture = glass detection off (Shots.cpp, VehicleAICombat.cpp CalculateLaser). Fix + tests pending commit."
+      - "Naive damage asserts (>0.01) false-passed on glass-path component chip damage; regression tests now require >0.35. Also learned: SQF 'fire' force-fires skyward by design (dir[1]=10, AimWeaponForceFire), so it cannot drive aimed-damage tests."
+      - "Audit headline (#13): Demo CONFIG.BIN ships NO SoldierG*/GUER roster (guerrilla-side spawns are Classic-only until per-package faction descriptors); RscOptionsShell loads unguarded so Options is blank on Classic; every CfgPreloadTextures asset needed for shim backfill exists in 1.99 Data.pbo; demo.wrp is byte-identical to abel.wrp; engine sweep found no further glass-pattern comparisons; two latent crash shapes flagged (CollisionStar std::exit(1), unguarded GScene->Preloaded consumers)."
+      - "Data dirs renamed with [brackets] (#12): all configured paths broken (OFPR_DATA_DIR, run-game.ps1, install-missions.ps1, .gitignore/.ignore no longer match -> ~1GB game data un-ignored); brackets are wildcard metacharacters in PowerShell and gitignore globs, so fixes need -LiteralPath/escaping, or bracket-less renames."
+      - "Doc gaps filed (2026-07-07): #14 stale 'no Demo dataset on this machine' claims (CLAUDE.md:133, guerrilla README) tell sessions Demo-lane tests can't run when they now can; #15 CLAUDE.md layout docs have no entry for either data package (Demo's data/contract/reference-binary roles + read-only touch policy live only in issue bodies). Both blocked by #12 path fixes; co-land with them."
 
   # ---------------------------------------------------------------- phase 2
   - id: civilian-ambience-layer
