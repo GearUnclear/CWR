@@ -1,0 +1,264 @@
+; ============================================================================
+;  civilians.sqs  -  ambient town population + civilian kill ledger + panic
+; ----------------------------------------------------------------------------
+;  OWNS: gmCivKilled (consumer), GM_PANIC_ZONES/GM_PANIC_UNTIL,
+;        GM_CIV_* tunables/state below, gmCivTicks, the spawned civ groups +
+;        their killed-EHs (transient handles, pruned).
+;  READS: gmZoneCount/gmZone (CITY zones), gmFactionValue ["CIV", ...],
+;        gmOccupierSide/gmResistanceSide, GM_PSEUDO_GROUPS (#2 writes it),
+;        GM_PLAYER_GROUPS, aP, time.
+;  Persistence: panic ledger = zone names + expiry times (serialize free).
+;        GM_CIV_GROUPS holds live handles - post-load they restore valid
+;        (units keep their killed-EH via the world serializer) or null
+;        (pruned), same policy as loot.sqs. Queued kill tuples may carry
+;        null handles after a load; pos/zoneIdx fields stay authoritative.
+;  All tunables below are plain globals read at USE time, so Trident tests
+;  may override them before forcing behavior.
+;  The spawn/despawn cache is a SCRIPTED player-distance loop borrowing the
+;  native GarrisonCache's philosophy, not its code (the native cache is
+;  occupier-specific).
+; ============================================================================
+
+@GM_LIB_READY
+
+; ---- no-op rule: no CIV descriptor or no CITY zones -> this manager exits ---
+; (Showcase.Abel and the .Demo test missions share this exact file.)
+? (gmFactionValue ["CIV", "civClassCount"]) == "" : exit
+GM_cvNC = 0; gmCvI = 0; while {gmCvI < gmZoneCount} do {if (((gmZone gmCvI) select GM_Z_TYPE) == "CITY") then {GM_cvNC = GM_cvNC + 1}; gmCvI = gmCvI + 1}
+? GM_cvNC < 1 : exit
+GM_CIV_READY = true
+
+; ===========================================================================
+;  TUNABLES  (names binding per the issue-#8 contract; values are tuning)
+; ===========================================================================
+;   GM_CIV_TICK       manager tick (s)
+;   GM_CIV_RADIUS     player-distance spawn gate (m)
+;   GM_CIV_DESPAWN_R  despawn beyond this (hysteresis > GM_CIV_RADIUS)
+;   GM_CIV_PER_TOWN   groups per populated CITY
+;   GM_CIV_GROUP_SIZE units per group (well under the engine 12-cap; SMALL so
+;                     one loss trips the native strength-vs-courage scatter
+;                     at the kill site - the design reason)
+;   GM_CIV_MAX_GROUPS HARD global cap on live civ groups. A DESIGN budget for
+;                     perf, not an engine cap - the "~63-group CIV side
+;                     budget" is folklore (AICenter::AddGroup is unbounded).
+;   GM_CIV_WANDER     s between SAFE-wander doMove re-issues
+;   GM_CIV_WANDER_R   wander radius around town centre (m)
+;   GM_CIV_EFFECT_R   kill records farther than this from the nearest CITY
+;                     centre are dropped (no ledger effect)
+;   GM_CIV_SUP_*      support deltas per killer class (see consumer below)
+;   GM_RESENT_DELAY   s until an occupier kill's resentment tick lands
+;   GM_RESENT_OCC     +support amount of that delayed tick
+;   GM_PANIC_*        panic episode phase lengths / run-point distance
+GM_CIV_TICK       = 5
+GM_CIV_RADIUS     = 900
+GM_CIV_DESPAWN_R  = 1200
+GM_CIV_PER_TOWN   = 2
+GM_CIV_GROUP_SIZE = 3
+GM_CIV_MAX_GROUPS = 8
+GM_CIV_WANDER     = 60
+GM_CIV_WANDER_R   = 80
+GM_CIV_EFFECT_R   = 300
+GM_CIV_SUP_OCC    = -8
+GM_CIV_SUP_PSEUDO = -10
+GM_CIV_SUP_PLAYER = -15
+GM_CIV_SUP_OTHER  = -2
+GM_RESENT_DELAY   = 1200
+GM_RESENT_OCC     = 12
+GM_PANIC_SCATTER_T = 30
+GM_PANIC_EMPTY_T   = 300
+GM_PANIC_RUN_R     = 200
+
+; ===========================================================================
+;  CLASS TABLE + SIDE + AI CENTER
+;  Classnames come ONLY from the CIV faction descriptor (numbered keys
+;  civClass1..civClassN + civClassCount - gmFactionValue reads no arrays).
+;  side = "CIV" resolves via GM_fnSideFromString (the engine renders the
+;  civilian side as "CIV"). createCenter is idempotent, as in qrf.sqs.
+; ===========================================================================
+GM_CIV_SIDE = (gmFactionValue ["CIV", "side"]) call GM_fnSideFromString
+GM_cvN = ["CIV", "civClassCount", 0] call GM_fnFactionNum
+GM_CIV_CLASSES = []; gmCvI = 1; while {gmCvI <= GM_cvN} do {GM_CIV_CLASSES = GM_CIV_CLASSES + [gmFactionValue ["CIV", format ["civClass%1", gmCvI]]]; gmCvI = gmCvI + 1}
+GM_cvC = createCenter GM_CIV_SIDE
+
+; ---- state -------------------------------------------------------------------
+;   GM_CIV_GROUPS      live civ group handles (transient; pruned post-load)
+;   GM_CIV_GROUP_ZONE  parallel: owning zone NAME per group (serializes free)
+;   gmCivTicks         loop-liveness counter (the save/reload observable)
+;   gmCvWanderAt       next wander re-issue time
+;   gmCvClassAt        round-robin cursor into GM_CIV_CLASSES
+GM_CIV_GROUPS     = []
+GM_CIV_GROUP_ZONE = []
+gmCivTicks  = 0
+gmCvWanderAt = 0
+gmCvClassAt  = 0
+
+; ===========================================================================
+;  HELPERS  (single-line code values; synchronous; gmCv* scratch)
+; ===========================================================================
+
+; --- GM_fnCivKilledEH : the "killed" EH body attached to every spawned civ ----
+;   _this = [victim, killer]. ONE line appending the 4-tuple to gmCivKilled;
+;   zoneIdx computed at fire time from the victim's position (kills away from
+;   the home town attribute to the nearest CITY).
+GM_fnCivKilledEH = {gmCivKilled = gmCivKilled + [[_this select 0, _this select 1, getPos (_this select 0), (getPos (_this select 0)) call GM_fnZoneNearestCity]]}
+
+; --- GM_fnCivSpawnTown( [zoneIdx] ) -> group -----------------------------------
+;   Spawns ONE group of GM_CIV_GROUP_SIZE at a jittered position around the
+;   zone centre. Classes drawn round-robin from GM_CIV_CLASSES (classes vary
+;   within the group, so a per-unit while loop into one createGroup - not
+;   GM_fnSpawnGroup). Killed-EH attached at spawn (freshly created units, so
+;   no tag list is needed, unlike loot.sqs which tags foreign spawns).
+GM_fnCivSpawnTown = {gmCvSz = _this select 0; gmCvSp = [((gmZone gmCvSz) select GM_Z_POS), GM_CIV_WANDER_R] call GM_fnRandPosNear; gmCvSg = createGroup GM_CIV_SIDE; gmCvSi = 0; while {gmCvSi < GM_CIV_GROUP_SIZE} do {(GM_CIV_CLASSES select (gmCvClassAt mod (count GM_CIV_CLASSES))) createUnit [gmCvSp, gmCvSg, "", 0.5, "PRIVATE"]; gmCvClassAt = gmCvClassAt + 1; gmCvSi = gmCvSi + 1}; {_x addEventHandler ["killed", GM_fnCivKilledEH]} forEach (units gmCvSg); gmCvSg allowFleeing 1; gmCvSg setBehaviour "SAFE"; GM_CIV_GROUPS = GM_CIV_GROUPS + [gmCvSg]; GM_CIV_GROUP_ZONE = GM_CIV_GROUP_ZONE + [(gmZone gmCvSz) select GM_Z_NAME]; gmCvSg}
+
+; --- GM_fnCivDespawnAt( [arrayIdx] ) -------------------------------------------
+;   deleteVehicle every unit, deleteGroup, remove the parallel-array row.
+GM_fnCivDespawnAt = {gmCvDi = _this select 0; {deleteVehicle _x} forEach (units (GM_CIV_GROUPS select gmCvDi)); deleteGroup (GM_CIV_GROUPS select gmCvDi); gmCvDg = []; gmCvDz = []; gmCvDj = 0; while {gmCvDj < (count GM_CIV_GROUPS)} do {if (gmCvDj != gmCvDi) then {gmCvDg = gmCvDg + [GM_CIV_GROUPS select gmCvDj]; gmCvDz = gmCvDz + [GM_CIV_GROUP_ZONE select gmCvDj]}; gmCvDj = gmCvDj + 1}; GM_CIV_GROUPS = gmCvDg; GM_CIV_GROUP_ZONE = gmCvDz}
+
+; --- GM_fnCivPrune --------------------------------------------------------------
+;   Rebuild both parallel arrays keeping rows whose group still has a live
+;   unit; null/dead rows dropped - the loot.sqs prune policy, load-safe (a
+;   post-load null group handle yields zero live units and is dropped).
+;   Dropped groups are deleteGroup'd: dead units LEAVE their AIGroup, so a
+;   wiped group is an empty-but-registered AIGroup that would otherwise
+;   accumulate in the CIV center across a campaign and bloat every save.
+;   deleteGroup is null-safe and empty-only, so post-load null handles are
+;   fine too.
+GM_fnCivPrune = {gmCvPg = []; gmCvPz = []; gmCvPi = 0; while {gmCvPi < (count GM_CIV_GROUPS)} do {gmCvPu = units (GM_CIV_GROUPS select gmCvPi); gmCvPn = 0; gmCvPk = 0; while {gmCvPk < (count gmCvPu)} do {if (alive (gmCvPu select gmCvPk)) then {gmCvPn = gmCvPn + 1}; gmCvPk = gmCvPk + 1}; if (gmCvPn > 0) then {gmCvPg = gmCvPg + [GM_CIV_GROUPS select gmCvPi]; gmCvPz = gmCvPz + [GM_CIV_GROUP_ZONE select gmCvPi]} else {deleteGroup (GM_CIV_GROUPS select gmCvPi)}; gmCvPi = gmCvPi + 1}; GM_CIV_GROUPS = gmCvPg; GM_CIV_GROUP_ZONE = gmCvPz}
+
+; --- GM_fnPanicStart( [zoneIdx] ) ------------------------------------------------
+;   Zone name not in GM_PANIC_ZONES: append name + expiry to the ledger;
+;   already present: refresh the expiry in place (re-arming extends the
+;   episode). Expiry math uses the tunables at CALL time (tests shrink them
+;   before forcing).
+GM_fnPanicStart = {gmCvAn = (gmZone (_this select 0)) select GM_Z_NAME; gmCvAi = GM_PANIC_ZONES find gmCvAn; if (gmCvAi < 0) then {GM_PANIC_ZONES = GM_PANIC_ZONES + [gmCvAn]; GM_PANIC_UNTIL = GM_PANIC_UNTIL + [time + GM_PANIC_SCATTER_T + GM_PANIC_EMPTY_T]} else {GM_PANIC_UNTIL set [gmCvAi, time + GM_PANIC_SCATTER_T + GM_PANIC_EMPTY_T]}}
+
+; --- GM_fnZonePanicPhase( [zoneName] ) -> 0 | 1 | 2 ------------------------------
+;   0 not panicked / 1 scatter (time < until - GM_PANIC_EMPTY_T) / 2 empty.
+;   Used by the FSM walk (and handy for tests).
+GM_fnZonePanicPhase = {gmCvQn = _this select 0; gmCvQi = GM_PANIC_ZONES find gmCvQn; gmCvQr = 0; if (gmCvQi >= 0) then {gmCvQu = GM_PANIC_UNTIL select gmCvQi; if (time < gmCvQu) then {gmCvQr = 2; if (time < (gmCvQu - GM_PANIC_EMPTY_T)) then {gmCvQr = 1}}}; gmCvQr}
+
+; ============================================================================
+;  MAIN LOOP  (order binding: prune -> drain -> classify/effects -> panic FSM
+;  -> spawn/despawn cache -> wander)
+; ============================================================================
+#loop
+~GM_CIV_TICK
+gmCivTicks = gmCivTicks + 1
+
+; ---------- 1) prune dead/null rows -------------------------------------------
+[] call GM_fnCivPrune
+
+; ---------- 2) atomic drain-swap of the kill queue (ONE evaluated line) --------
+GM_cvBatch = gmCivKilled + []; gmCivKilled = []
+
+; ---------- 3) kill-queue consumer: classify killer, apply effects -------------
+; Per record [victim, killer, pos, zoneIdx]. Classification order (binding -
+; PSEUDO evaluated LAST so it wins, because pseudo groups ARE occupier-side):
+; null -> OTHER; occupier side -> OCCUPIER; player/his groups/resistance side
+; -> PLAYER; pseudo roster -> PSEUDO. The PSEUDO branch + GM_PSEUDO_GROUPS +
+; the tuple shape are exactly what issue #2 consumes - do not rename.
+; ACCEPTED demotion window: a killer that DIED before this drain reads side
+; civilian (dead units report TCivilian - engine VehicleAIDiag.cpp:1145), so
+; it classifies OTHER, same degradation as a null handle. Window is at most
+; GM_CIV_TICK; shakedown.sqs's drainhold covers its own pair only against the
+; deleted-handle variant, not against the pair being killed mid-hold.
+gmCvKI = 0
+#kills
+? gmCvKI >= (count GM_cvBatch) : goto "killsdone"
+GM_cvRec = GM_cvBatch select gmCvKI
+GM_cvZi = GM_cvRec select 3
+; drop: no CITY on the island, or too far from the attributed town centre
+? GM_cvZi < 0 : goto "killnext"
+? ((GM_cvRec select 2) distance ((gmZone GM_cvZi) select GM_Z_POS)) > GM_CIV_EFFECT_R : goto "killnext"
+GM_cvKiller = GM_cvRec select 1
+GM_cvClass = "OTHER"
+? isNull GM_cvKiller : goto "classified"
+GM_cvKside = format ["%1", side GM_cvKiller]
+? GM_cvKside == gmOccupierSide : GM_cvClass = "OCCUPIER"
+? (GM_cvKiller == aP) or ((group GM_cvKiller) in GM_PLAYER_GROUPS) or (GM_cvKside == gmResistanceSide) : GM_cvClass = "PLAYER"
+? (group GM_cvKiller) in GM_PSEUDO_GROUPS : GM_cvClass = "PSEUDO"
+#classified
+; effects: all support writes via GM_fnSupportAdd; OCCUPIER also schedules the
+; delayed +support resentment tick (repression radicalizes); PSEUDO gets NO
+; resentment (poisoned trust is the point - the -support is blamed on the
+; player; #2 adds its own presentation on top). Panic for EVERY qualifying
+; record.
+GM_cvDelta = GM_CIV_SUP_OTHER
+? GM_cvClass == "OCCUPIER" : GM_cvDelta = GM_CIV_SUP_OCC
+? GM_cvClass == "PLAYER" : GM_cvDelta = GM_CIV_SUP_PLAYER
+? GM_cvClass == "PSEUDO" : GM_cvDelta = GM_CIV_SUP_PSEUDO
+GM_cvSup = [GM_cvZi, GM_cvDelta] call GM_fnSupportAdd
+? GM_cvClass == "OCCUPIER" : GM_cvOk = [GM_cvZi, GM_RESENT_DELAY, GM_RESENT_OCC] call GM_fnResentAdd
+[GM_cvZi] call GM_fnPanicStart
+#killnext
+gmCvKI = gmCvKI + 1
+goto "kills"
+#killsdone
+
+; ---------- 4) panic FSM walk ---------------------------------------------------
+; Per panicked zone: phase 1 (scatter) = radial run-points re-issued each tick
+; so groups visibly keep running (native per-group flee fires organically on
+; top via allowFleeing 1 - free and expected); phase 2 (empty) = despawn the
+; zone's groups, spawner suppressed; expiry = drop the row, the spawn pass
+; repopulates naturally. Ledger is names+times only: after a load the phase
+; re-derives purely from time vs the stored expiry - no handles, no re-arm.
+gmCvPI = 0
+GM_cvKeepZ = []
+GM_cvKeepU = []
+#panic
+? gmCvPI >= (count GM_PANIC_ZONES) : goto "panicdone"
+GM_cvPn = GM_PANIC_ZONES select gmCvPI
+GM_cvPu = GM_PANIC_UNTIL select gmCvPI
+; recovery: expired row is simply not kept
+? time >= GM_cvPu : goto "panicnext"
+GM_cvKeepZ = GM_cvKeepZ + [GM_cvPn]
+GM_cvKeepU = GM_cvKeepU + [GM_cvPu]
+? time < (GM_cvPu - GM_PANIC_EMPTY_T) : goto "panicscatter"
+; empty phase: despawn every group of this zone (backwards walk - despawn
+; removes rows)
+gmCvJ = (count GM_CIV_GROUPS) - 1; while {gmCvJ >= 0} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == GM_cvPn) then {[gmCvJ] call GM_fnCivDespawnAt}; gmCvJ = gmCvJ - 1}
+goto "panicnext"
+#panicscatter
+GM_cvPz = gmZoneIndex GM_cvPn; if (GM_cvPz >= 0) then {GM_cvPc = (gmZone GM_cvPz) select GM_Z_POS; gmCvJ = 0; while {gmCvJ < (count GM_CIV_GROUPS)} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == GM_cvPn) then {GM_cvPd = random 360; (leader (GM_CIV_GROUPS select gmCvJ)) doMove [(GM_cvPc select 0) + (GM_PANIC_RUN_R * (sin GM_cvPd)), (GM_cvPc select 1) + (GM_PANIC_RUN_R * (cos GM_cvPd)), 0]}; gmCvJ = gmCvJ + 1}}
+#panicnext
+gmCvPI = gmCvPI + 1
+goto "panic"
+#panicdone
+GM_PANIC_ZONES = GM_cvKeepZ
+GM_PANIC_UNTIL = GM_cvKeepU
+
+; ---------- 5) spawn/despawn cache pass ----------------------------------------
+; Scripted player-distance cache (GarrisonCache philosophy, script code). At
+; most ONE spawn per zone per tick - ramp-up over ticks, not a burst.
+gmCvI = 0
+#cache
+? gmCvI >= gmZoneCount : goto "cachedone"
+GM_cvZ = gmZone gmCvI
+? (GM_cvZ select GM_Z_TYPE) != "CITY" : goto "cachenext"
+GM_cvD = (getPos aP) distance (GM_cvZ select GM_Z_POS)
+? GM_cvD > GM_CIV_DESPAWN_R : goto "cachefar"
+? GM_cvD > GM_CIV_RADIUS : goto "cachenext"
+? (GM_cvZ select GM_Z_NAME) in GM_PANIC_ZONES : goto "cachenext"
+? (count GM_CIV_GROUPS) >= GM_CIV_MAX_GROUPS : goto "cachenext"
+gmCvN = 0; gmCvJ = 0; while {gmCvJ < (count GM_CIV_GROUP_ZONE)} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == (GM_cvZ select GM_Z_NAME)) then {gmCvN = gmCvN + 1}; gmCvJ = gmCvJ + 1}
+? gmCvN >= GM_CIV_PER_TOWN : goto "cachenext"
+GM_cvG = [gmCvI] call GM_fnCivSpawnTown
+goto "cachenext"
+#cachefar
+gmCvJ = (count GM_CIV_GROUPS) - 1; while {gmCvJ >= 0} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == (GM_cvZ select GM_Z_NAME)) then {[gmCvJ] call GM_fnCivDespawnAt}; gmCvJ = gmCvJ - 1}
+#cachenext
+gmCvI = gmCvI + 1
+goto "cache"
+#cachedone
+
+; ---------- 6) wander pass -------------------------------------------------------
+; Every GM_CIV_WANDER s each live non-panicked group gets a doMove around its
+; town centre (SAFE wander). PER-UNIT, not leader-only: a shakedown victim is
+; doStop'ed during its scene, and only a direct doMove un-sticks a stopped
+; non-leader (doFollow is not a registered command in this engine).
+? time < gmCvWanderAt : goto "wanderdone"
+gmCvWanderAt = time + GM_CIV_WANDER
+gmCvJ = 0; while {gmCvJ < (count GM_CIV_GROUPS)} do {if (not ((GM_CIV_GROUP_ZONE select gmCvJ) in GM_PANIC_ZONES)) then {GM_cvWz = gmZoneIndex (GM_CIV_GROUP_ZONE select gmCvJ); if (GM_cvWz >= 0) then {GM_cvWp = [((gmZone GM_cvWz) select GM_Z_POS), GM_CIV_WANDER_R] call GM_fnRandPosNear; {_x doMove GM_cvWp} forEach (units (GM_CIV_GROUPS select gmCvJ))}}; gmCvJ = gmCvJ + 1}
+#wanderdone
+
+goto "loop"

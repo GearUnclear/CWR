@@ -143,4 +143,32 @@ class CfgGuerrillaFactions
         lootSniperWeapon = "LoBo_SVD";
         lootSniperMag = "JAM_E762_10mag";
     };
+    class CIV // civilian population descriptor (issue #8)
+    {
+        // side MUST be exactly "CIV" - GM_fnSideFromString (scripts/lib.sqs)
+        // matches the engine's rendered side name (SideNames in
+        // World/Scene/Object.cpp), and the civilian side renders as "CIV",
+        // NOT "CIVILIAN".
+        side = "CIV";
+        // Numbered keys + a count, NOT a civClasses[] array: gmFactionValue
+        // returns raw config text and skips array entries (LoadFactions
+        // IsArray gate), so the scripts read civClassCount and then
+        // civClass1..civClassN.
+        //
+        // @LoBo civilians, verified via `PoseidonTools pbo show LoBoTer.pbo
+        // config.cpp` (CfgPatches LoBoTerror, requiredAddons[]={}; the
+        // SoldierEB parent resolves from the 1.99 core config the lobo lane
+        // loads; LoBoTer.pbo is stock - the @lobofixup patching only touches
+        // LoBoammo/LoBo_airammo): LoBo_Civ_01..31 "Arab Civilian <n>"
+        // (: SoldierEB, explicit side=3, scope=public, vehicleClass "Arab
+        // Civilians", unarmed) and LoBo_CivF_01 "Arab Female 1"
+        // (: LoBo_Civ_01, side=3). Deliberately NOT the LoBo_CivRock_* /
+        // bottle-thrower variants - they carry stone/molotov throw
+        // magazines, wrong for a passive CIV population.
+        civClassCount = 4;   // number of civClass<N> keys that follow
+        civClass1 = "LoBo_Civ_01";
+        civClass2 = "LoBo_Civ_02";
+        civClass3 = "LoBo_Civ_03";
+        civClass4 = "LoBo_CivF_01";
+    };
 };

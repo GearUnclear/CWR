@@ -16,7 +16,9 @@
 ;     "heatDecay" (-=, clamped), and this file uses only the decay verb.
 ;
 ;  OWNS: gmWarLevel, heat DECAY direction, gmUndercoverDetect, gmEsc_* scratch.
-;  READS: gmZoneCount/gmZone owners, gmResistanceSide, gmZoneAlert, gmHeatDecay.
+;  READS: gmZoneCount/gmZone owners, gmResistanceSide, gmZoneAlert, gmHeatDecay,
+;         GM_PANIC_ZONES + GM_fnZoneNearestCity + aP (issue-#8 panic coupling:
+;         standing in a panicked town multiplies undercover detection).
 ;  NOTE: with seedCities=1 the ladder denominator includes every seeded town,
 ;  so full War Level now genuinely means winning over the island.
 ; ============================================================================
@@ -25,8 +27,14 @@
 ; ---- tunables (escalation-local; not persisted) ------------------------------
 ;   gmEsc_slowEvery  recompute War Level once per 6 fast ticks (~60s)
 ;   gmEsc_slow       fast-tick counter toward the next slow recompute
+;   GM_PANIC_DETECT_MULT  undercover-detection multiplier inside a panicked
+;                         town (issue #8)
+;   GM_PANIC_DETECT_R     "inside" radius (m) around the town centre
+;                         (150 = the engine default zoneArea)
 gmEsc_slowEvery = 6
 gmEsc_slow      = 0
+GM_PANIC_DETECT_MULT = 2
+GM_PANIC_DETECT_R    = 150
 
 ; ============================================================================
 ;  MAIN LOOP  (fast tick = Heat decay; slow sub-tick = War Level recompute)
@@ -37,6 +45,11 @@ gmEsc_slow      = 0
 ; ---- FAST: per-zone Heat decay, gated on "lying low" (native GREEN) ----------
 gmEsc_i = 0
 while {gmEsc_i < gmZoneCount} do {if ((gmZoneAlert gmEsc_i) == 0) then {gmZoneSet [gmEsc_i, "heatDecay", gmHeatDecay]}; gmEsc_i = gmEsc_i + 1}
+
+; ---- undercover detection: WL base x panicked-town multiplier (issue #8) ----
+; (nested if: `and` evaluates BOTH operands in this evaluator, so gmZone -1
+;  must never be dereferenced when no CITY zone exists)
+gmEsc_pz = (getPos aP) call GM_fnZoneNearestCity; gmUndercoverDetect = gmWarLevel / 10; if (gmEsc_pz >= 0) then {if ((((gmZone gmEsc_pz) select GM_Z_NAME) in GM_PANIC_ZONES) and (((getPos aP) distance ((gmZone gmEsc_pz) select GM_Z_POS)) <= GM_PANIC_DETECT_R)) then {gmUndercoverDetect = gmUndercoverDetect * GM_PANIC_DETECT_MULT}}
 
 ; ---- SLOW: recompute War Level every gmEsc_slowEvery fast ticks --------------
 gmEsc_slow = gmEsc_slow + 1
@@ -58,8 +71,5 @@ if (gmEsc_pct >= 40) then {gmWarLevel = 3}
 if (gmEsc_pct >= 55) then {gmWarLevel = 4}
 if (gmEsc_pct >= 70) then {gmWarLevel = 5}
 if (gmEsc_pct >= 85) then {gmWarLevel = 6}
-
-; undercover detection tracks War Level (0.1 .. 0.6 in Phase 1).
-gmUndercoverDetect = gmWarLevel / 10
 
 goto "loop"

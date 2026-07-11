@@ -1,0 +1,9 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Director tick ~10s, civ consumer tick ~5s, text beats ~8s x 2-3, aim 4s;
+# the walk phase is collapsed test-side (pair setPos onto the victim), so
+# each triSimUntil phase stays well inside the assert window.
+timeout = 300
+assert_timeout = 90
+extra_args = ["--dev"]

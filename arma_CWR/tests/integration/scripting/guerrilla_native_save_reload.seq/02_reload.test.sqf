@@ -51,4 +51,21 @@ triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
 triAssertEq [(format ["%1", alive (GM_COMP_OBJ select 0)]), "true"]
 triAssertEq [(format ["%1", GM_COMP_ALIVE select 0]), "true"]
 
+// -- DIFF: civilian-layer ledgers ride GGameState (issue #8) -------------------
+triAssertEq [(format ["%1", "Village" in GM_PANIC_ZONES]), "true"]
+triAssertEq [(count GM_PANIC_UNTIL), 1]
+triAssertEq [(GM_RESENT_ZONES select 0), "Village"]
+triAssertEq [(GM_RESENT_AMT select 0), 7]
+triAssertEq [gmDayCount, 3]
+
+// -- managers keep ticking after the load (handle-prune works): both loop
+//    counters advance, and the consumer drains the stamped NULL-handle kill
+//    record without error (isNull killer -> OTHER, but the far pos takes the
+//    effect-radius drop - no crash, no wedge, no ledger side effects) ---------
+gsT2 = gmCivTicks
+triSimUntil { gmCivTicks > gsT2 }
+gsT3 = gmShkTicks
+triSimUntil { gmShkTicks > gsT3 }
+triSimUntil { (count gmCivKilled) == 0 }
+
 triEndTest

@@ -35,6 +35,27 @@ gmZoneSet [gsVil, "support", 55]
 gmZoneSet [gsOut, "income", 99]
 gmZoneSet [gsOut, "owner", gmResistanceSide]
 
+// -- the civilian layer must be up and fully seeded before we stamp its
+//    ledgers (gmCivTicks/gmShkTicks are the LAST state seeds of each manager) -
+triSimUntil { not (isNil "GM_CIV_READY") }
+triSimUntil { not (isNil "gmCivTicks") }
+triSimUntil { not (isNil "gmShkTicks") }
+
+// -- stamp sentinels: civilian-layer ledgers (issue #8) ------------------------
+//    Names + times only (the binding persistence policy). The kill-queue
+//    record carries NULL handles ON PURPOSE - the load-degraded case the
+//    consumer must absorb. Its pos sits far outside GM_CIV_EFFECT_R of the
+//    Village, so the post-load drain takes the effect-radius DROP path and
+//    cannot disturb the support sentinel (55) phase 2 diffs.
+GM_PANIC_ZONES = ["Village"]
+GM_PANIC_UNTIL = [time + 900]
+GM_RESENT_ZONES = ["Village"]
+GM_RESENT_DUE = [time + 900]
+GM_RESENT_AMT = [7]
+gmDayCount = 3
+gmCivKilled = [[objNull, objNull, [500, 500, 0], gsVil]]
+gsCivT = gmCivTicks
+
 // -- write the binary save into the shared UserDir/Saved/Tmp/gnat.fps ---------
 triAssertEq [(triSaveGame "gnat"), "OK"]
 

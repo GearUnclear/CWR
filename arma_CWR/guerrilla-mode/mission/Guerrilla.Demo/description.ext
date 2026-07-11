@@ -127,4 +127,34 @@ class CfgGuerrillaFactions
         lootSniperWeapon = "SVDDragunov";
         lootSniperMag = "SVDDragunov";
     };
+    class CIV // civilian population descriptor (issue #8)
+    {
+        // side MUST be exactly "CIV" - GM_fnSideFromString (scripts/lib.sqs)
+        // matches the engine's rendered side name (SideNames in
+        // World/Scene/Object.cpp), and the civilian side renders as "CIV",
+        // NOT "CIVILIAN".
+        side = "CIV";
+        // Numbered keys + a count, NOT a civClasses[] array: gmFactionValue
+        // returns raw config text and skips array entries (LoadFactions
+        // IsArray gate), so the scripts read civClassCount and then
+        // civClass1..civClassN. Managers treat an empty civClassCount probe
+        // as "no CIV layer" and exit - guerrilla_capture.Demo /
+        // guerrilla_persist.Demo and Showcase.Abel deliberately ship no CIV
+        // class and run that no-op path.
+        //
+        // !! PLACEHOLDER - FLAGGED FOR VERIFICATION (issues #8 / #13) !!
+        // The Demo [Remaster] BIN\CONFIG.BIN ships NO civilian unit class at
+        // all (exhaustive debin, 2026-07-10: every side=3 CfgVehicles entry
+        // is a non-Man class - SkodaHelper/LaserTarget/Thing/buildings/
+        // targets - and the Man-derived roster is only SoldierW*/SoldierE*/
+        // Officer*/GeneralE/Angelina/SoldierGFakeE; Angelina is scope=1,
+        // side=EAST - unusable). SoldierWCaptive is the ONLY unarmed public
+        // human in that config (scope=2 via SoldierWB, weapons[]={}). Its
+        // CONFIG side is WEST(1), but civilians.sqs spawns bodies into
+        // CIV-side groups (createCenter/createGroup on GM_CIV_SIDE), so
+        // spawned units register as side CIV regardless. Replace with a real
+        // civilian class when the Demo-package descriptor remap (#13) lands.
+        civClassCount = 1;   // number of civClass<N> keys that follow
+        civClass1 = "SoldierWCaptive";
+    };
 };

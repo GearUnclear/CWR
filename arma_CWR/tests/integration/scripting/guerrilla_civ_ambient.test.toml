@@ -1,0 +1,8 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Civ manager tick ~5s; spawn/despawn are player-distance gates, so each
+# phase resolves within a tick or two of the teleport.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]

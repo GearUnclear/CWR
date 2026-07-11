@@ -13,6 +13,10 @@
 ;    GM_fnZoneIndex -> native `gmZoneIndex "<name>"`
 ;    GM_fnPickTier  -> native `gmFactionTierClass [side, warLevel]`
 ;
+;  ADDED (issue #8, civilian layer): GM_fnSupportAdd (THE clamped support
+;    writer), GM_fnResentAdd (resentment-ledger appender), GM_fnZoneNearestCity
+;    (nearest CITY zone lookup).
+;
 ;  exec is async: init.sqs (and every manager) gates on @GM_LIB_READY, which
 ;  this file sets as its last statement.
 ; ============================================================================
@@ -59,6 +63,28 @@ GM_fnFactionNum = {GM_tmpFS = gmFactionValue [_this select 0, _this select 1]; i
 ;   THE sole writer of GM_GEAR_ITEMS/COUNT/UNLOCKED (parallel arrays). Crossing
 ;   GM_GEAR_THRESHOLD appends the classname to the permanent unlock set.
 GM_fnBumpGear = {GM_tmpI = GM_GEAR_ITEMS find (_this select 0); if (GM_tmpI < 0) then {GM_GEAR_ITEMS = GM_GEAR_ITEMS + [(_this select 0)]; GM_GEAR_COUNT = GM_GEAR_COUNT + [0]; GM_tmpI = (count GM_GEAR_ITEMS) - 1}; GM_GEAR_COUNT set [GM_tmpI, (GM_GEAR_COUNT select GM_tmpI) + (_this select 1)]; if (((GM_GEAR_COUNT select GM_tmpI) >= GM_GEAR_THRESHOLD) and (not ((_this select 0) in GM_GEAR_UNLOCKED))) then {GM_GEAR_UNLOCKED = GM_GEAR_UNLOCKED + [(_this select 0)]}; GM_GEAR_COUNT select GM_tmpI}
+
+
+; --- supportAdd( [zoneIdx, delta] ) -> newSupport ----------------------------
+;   THE clamped support writer (0..100) - all script-side support deltas go
+;   through here (gmZoneSet "support" underneath). Returns the value written.
+GM_fnSupportAdd = {GM_tmpSAz = _this select 0; GM_tmpSAv = ((gmZone GM_tmpSAz) select GM_Z_SUPPORT) + (_this select 1); if (GM_tmpSAv < 0) then {GM_tmpSAv = 0}; if (GM_tmpSAv > 100) then {GM_tmpSAv = 100}; gmZoneSet [GM_tmpSAz, "support", GM_tmpSAv]; GM_tmpSAv}
+
+
+; --- resentAdd( [zoneIdx, delaySec, amount] ) -> bool (appended?) -------------
+;   Appends one delayed +support tick to the resentment ledger (parallel arrays
+;   GM_RESENT_ZONES/DUE/AMT, keyed by ZONE NAME - never index, never handle).
+;   Refuses (returns false) once the zone already has GM_RESENT_MAXPEND pending
+;   entries - the anti-limit-cycle cap from the plan-14 risk table.
+;   GM_RESENT_MAXPEND is seeded by init.sqs and read at call time.
+GM_fnResentAdd = {GM_tmpRAn = (gmZone (_this select 0)) select GM_Z_NAME; GM_tmpRAc = 0; GM_tmpRAi = 0; while {GM_tmpRAi < (count GM_RESENT_ZONES)} do {if ((GM_RESENT_ZONES select GM_tmpRAi) == GM_tmpRAn) then {GM_tmpRAc = GM_tmpRAc + 1}; GM_tmpRAi = GM_tmpRAi + 1}; GM_tmpRAr = false; if (GM_tmpRAc < GM_RESENT_MAXPEND) then {GM_RESENT_ZONES = GM_RESENT_ZONES + [GM_tmpRAn]; GM_RESENT_DUE = GM_RESENT_DUE + [time + (_this select 1)]; GM_RESENT_AMT = GM_RESENT_AMT + [_this select 2]; GM_tmpRAr = true}; GM_tmpRAr}
+
+
+; --- zoneNearestCity( pos ) -> nearest CITY zone index, -1 if no CITY zones ---
+;   Distance over gmZone positions (binary distance works on arrays). Callers
+;   that need a proximity GATE compare the distance themselves (the helper
+;   returns the nearest regardless of range).
+GM_fnZoneNearestCity = {GM_tmpNCr = -1; GM_tmpNCd = 999999; GM_tmpNCi = 0; while {GM_tmpNCi < gmZoneCount} do {GM_tmpNCz = gmZone GM_tmpNCi; if ((GM_tmpNCz select GM_Z_TYPE) == "CITY") then {GM_tmpNCe = _this distance (GM_tmpNCz select GM_Z_POS); if (GM_tmpNCe < GM_tmpNCd) then {GM_tmpNCd = GM_tmpNCe; GM_tmpNCr = GM_tmpNCi}}; GM_tmpNCi = GM_tmpNCi + 1}; GM_tmpNCr}
 
 
 ; ----------------------------------------------------------------------------

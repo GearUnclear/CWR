@@ -110,6 +110,51 @@ GM_COMP_OBJ     = [objNull]
 ; ===========================================================================
 GM_PLAYER_GROUPS = []
 
+; ===========================================================================
+;  CIVILIAN LAYER SHARED STATE (issue #8; civilians.sqs + shakedown.sqs)
+; ===========================================================================
+; gmCivKilled  civilian KILL QUEUE. Tuples [victim, killer, pos, zoneIdx].
+;   Appended by (a) the per-unit killed-EH civilians.sqs attaches at spawn
+;   (loot.sqs tag pattern - script EHs, NOT a native gmZoneOnEvent; there is
+;   no native civilian-kill event and none is added) and (b) shakedown.sqs
+;   posting SYNTHETIC records with the TRUE initiator for scripted
+;   executions (setDammage fires no killer attribution). Drained ONLY by
+;   civilians.sqs with the atomic one-line swap
+;   "GM_x = gmCivKilled + []; gmCivKilled = []". Handles inside queued
+;   tuples may come back null after a load - the consumer prunes, the pos /
+;   zoneIdx fields stay authoritative. gmCivKilled deliberately does NOT use
+;   the gmEvt* prefix: it is a script-EH queue, not a native-event queue
+;   (the drain-swap discipline is the same).
+; GM_PSEUDO_GROUPS  pseudo-team roster (GROUP handles). Seeded EMPTY here;
+;   issue #2's spawner is the sole future writer (and owns post-load
+;   reconciliation). civilians.sqs only READS it for killer classification:
+;   (group killer) in GM_PSEUDO_GROUPS -> PSEUDO -> blame the player.
+; GM_PANIC_ZONES / GM_PANIC_UNTIL  town panic ledger (parallel arrays):
+;   zone NAME + recovery expiry (time-based). Owner: civilians.sqs.
+; GM_RESENT_ZONES / GM_RESENT_DUE / GM_RESENT_AMT  resentment ledger
+;   (parallel arrays): zone NAME, due time, +support amount. Writers: lib's
+;   GM_fnResentAdd only. Consumer: shakedown.sqs ticker. System 3 proper
+;   (closures/reprisals) will REUSE this ledger - keep the shape dumb.
+; GM_RESENT_MAXPEND  per-town pending-entry cap (GM_fnResentAdd reads it).
+; gmDayCount / gmDayLast  campaign day counter: shakedown.sqs bumps
+;   gmDayCount when dayTime wraps past midnight (gmDayLast > dayTime).
+; GM_CIV_GROUPS / GM_CIV_GROUP_ZONE  civ population registers (owner:
+;   civilians.sqs, which re-seeds them at boot). Seeded here TOO so
+;   shakedown.sqs can read them even when civilians.sqs no-op exits or has
+;   not booted yet - no exec-order dependency between the two managers.
+gmCivKilled      = []
+GM_PSEUDO_GROUPS = []
+GM_PANIC_ZONES   = []
+GM_PANIC_UNTIL   = []
+GM_RESENT_ZONES  = []
+GM_RESENT_DUE    = []
+GM_RESENT_AMT    = []
+GM_RESENT_MAXPEND = 3
+gmDayCount = 0
+gmDayLast  = 0
+GM_CIV_GROUPS     = []
+GM_CIV_GROUP_ZONE = []
+
 ; ---- handy aliases ---------------------------------------------------------
 aP = player
 gmPlayer = player
@@ -182,6 +227,8 @@ GM_LIB_READY = false
 ;   loot.sqs        loot-on-kill stash + gear-unlock tally
 ;   recruit.sqs     Camp action menu: recruit / specialist / train
 ;   companions.sqs  companion XP -> rank/skill, permadeath
+;   civilians.sqs   town population cache + kill-queue consumer + panic FSM
+;   shakedown.sqs   occupier street-theatre director + resentment ticker
 [] exec "scripts/capture.sqs"
 [] exec "scripts/qrf.sqs"
 [] exec "scripts/undercover.sqs"
@@ -191,5 +238,7 @@ GM_LIB_READY = false
 [] exec "scripts/loot.sqs"
 [] exec "scripts/recruit.sqs"
 [] exec "scripts/companions.sqs"
+[] exec "scripts/civilians.sqs"
+[] exec "scripts/shakedown.sqs"
 
 exit

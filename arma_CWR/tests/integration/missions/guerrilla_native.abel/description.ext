@@ -118,4 +118,30 @@ class CfgGuerrillaFactions
         lootSniperWeapon = "SVDDragunov";
         lootSniperMag = "SVDDragunov";
     };
+    class CIV // civilian population descriptor (issue #8)
+    {
+        // side MUST be exactly "CIV" - GM_fnSideFromString (scripts/lib.sqs)
+        // matches the engine's rendered side name (SideNames in
+        // World/Scene/Object.cpp), and the civilian side renders as "CIV",
+        // NOT "CIVILIAN".
+        side = "CIV";
+        // Numbered keys + a count, NOT a civClasses[] array: gmFactionValue
+        // returns raw config text and skips array entries (LoadFactions
+        // IsArray gate), so the scripts read civClassCount and then
+        // civClass1..civClassN. Managers treat an empty civClassCount probe
+        // as "no CIV layer" and exit (the Showcase.Abel no-op rule). The
+        // issue #8 civilian-layer Trident tests bind to THIS mission - keep
+        // these classnames in lockstep with Guerrilla.Abel.
+        //
+        // All three classnames verified against this dataset's Bin\CONFIG.BIN
+        // via PoseidonTools config search/debin: CfgVehicles Civilian
+        // (: Man, side=3, scope=2, model "MC civil"), Civilian2/Civilian3
+        // (: Civilian, models "MC civil2"/"MC civil3"). Civilian4..Civilian15
+        // do NOT exist in the 1.99 core config (Resistance-era addon
+        // classes) - do not add them here.
+        civClassCount = 3;   // number of civClass<N> keys that follow
+        civClass1 = "Civilian";
+        civClass2 = "Civilian2";
+        civClass3 = "Civilian3";
+    };
 };
