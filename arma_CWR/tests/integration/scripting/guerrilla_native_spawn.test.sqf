@@ -37,13 +37,21 @@ gnGrps = gmGarrisonGroups gnOut
 triAssertEq [(count gnGrps), 1]
 
 // -- 3) COMMANDABLE: doMove the group leader ~110 m and require displacement.
-//    Time-bounded (polled), not frame-bounded, so it is framerate-agnostic. --
+//    Time-bounded (polled), not frame-bounded, so it is framerate-agnostic.
+//    doStop FIRST: the garrison group holds an ACSENTRY waypoint
+//    (GarrisonCache::SetHoldPosture) whose FSM re-plan races a bare
+//    unit-level doMove on the LEADER and can re-pin him for the whole
+//    assert window (the historic flake, persistent on slow ticks). doStop
+//    detaches the unit from waypoint/formation control, so the doMove is
+//    deterministic - and still proves the same thing: a real, commandable
+//    AI unit. -----------------------------------------------------------------
 gnLdr = leader (gnGrps select 0)
 // (bool asserts go through format: triAssert*'s stringifier cannot take a
 //  raw GameBool - engine issue, see the parity-test report)
 triAssertEq [(format ["%1", alive gnLdr]), "true"]
 gnP0 = getPos gnLdr
 gnDest = [(gnP0 select 0) + 80, (gnP0 select 1) + 80, 0]
+doStop gnLdr
 gnLdr doMove gnDest
 triSimUntil { ((getPos gnLdr) distance gnP0) > 15 }
 

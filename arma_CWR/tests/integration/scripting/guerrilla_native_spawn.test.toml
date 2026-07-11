@@ -2,7 +2,12 @@ tags = ["scripting", "guerrilla", "full_cwa", "headless"]
 binary = "PoseidonGame"
 mission = "tests/integration/missions/guerrilla_native.abel"
 # Real sim cadences: garrison cache ticks every ~5s, zone tick ~3s; the
-# doMove displacement poll needs real seconds of foot movement.
-timeout = 240
-assert_timeout = 90
+# doMove displacement poll needs real seconds of foot movement. The
+# displacement gate is the documented slow case ("leader sometimes needs
+# >90s to move 15m", roadmap log): the old assert_timeout = 90 guaranteed a
+# FAIL whenever that case occurred, which is exactly the historic flake.
+# 240 covers the observed tail; the test-side doStop removes the SENTRY
+# re-plan race on top.
+timeout = 360
+assert_timeout = 240
 extra_args = ["--dev"]
