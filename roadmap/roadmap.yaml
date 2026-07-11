@@ -218,6 +218,7 @@ items:
       - "guerrilla_native_undercover deliberately avoids a literal 'player fire': force-firing headless crashed the engine pre-193a280; the perception-to-fired-EH front half remains untested end-to-end."
       - "Coverage gap: the 11-script SQS core's economy/recruit/companion/QRF/escalation managers have no behavioral integration tests, only byte-parity."
       - "guerrilla_native_spawn is flaky on its doMove displacement assert (leader sometimes needs >90s to move 15m); passes on retry, so always run tri with --retries. Verified 2026-07-07."
+      - "2026-07-10: the doMove flake went persistent (8/8 fails, proven pre-#8 via HEAD-baseline probes). Test hardened instead of engine surgery: doStop before the leader doMove (a bare unit doMove races the garrison group's native ACSENTRY hold FSM, GarrisonCache::SetHoldPosture), and the displacement assert window raised to assert_timeout=240 (the old 90 sat inside the documented >90s slow tail, guaranteeing the FAIL)."
       - "Run tri with -j 1 or low parallelism and sweep stray PoseidonGame processes afterward; a manually closed or lingering instance shows up as 'connection error: eval failed' and cascades into later tests."
 
   - id: install-missions
@@ -374,19 +375,25 @@ items:
   - id: civilian-ambience-layer
     title: "Civilian ambience + atrocity layer (issue #8)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 1
     depends_on: [mission-migration-native, crash-fixes-trident-trust]
+    commits: ["609e345", "0636f6d"]
     gh_issues: [8, 7]
     summary: >
-      Plan 14 System 3: town population manager, shakedown director, public
-      killings, panic, and the resentment ledger that feeds the pseudo-gang blame
-      mechanic. Greenfield: no civilians exist in the mode at all. All-SQF per the
-      issue #7 plan (civilians.sqs, shakedown.sqs landing byte-identically in all
-      mission copies); 18 checkboxes, 0 checked.
+      Plan 14 System 3: town population manager (civilians.sqs), shakedown
+      director (shakedown.sqs), public killings, panic FSM, and the resentment
+      ledger that feeds the pseudo-gang blame mechanic. All-SQF, zero engine
+      changes; scripts byte-identical across all seven mission copies, class
+      CIV descriptors per dataset (Demo ships NO civilian class - placeholder
+      flagged, see #13). All 18 issue checkboxes shipped in 609e345; three new
+      Trident tests + the extended save/reload seq pass on the full_cwa lane.
     log:
       - "Issue #7 delivery plan: commit 1 closes #8, commit 2 closes #2."
       - "Stale text on #7: it lists #5/#6 as an outstanding external dependency, but both closed 2026-07-04 (193a280); the literal-'fire' upgrade path is unblocked."
+      - "Issue #2 consumption contract (binding names, do not rename): gmCivKilled kill-queue tuples [victim, killer, pos, zoneIdx]; GM_PSEUDO_GROUPS roster (seeded [], #2's spawner is the sole writer); the (group killer) in GM_PSEUDO_GROUPS -> PSEUDO -> blame-the-player classification branch; the shakedown initiator seam (shakedown.sqs #launch) for pseudo-team substitution."
+      - "2026-07-10 fixer round 1: two verification failures fixed. (a) guerrilla_civ_shakedown test-design bug - the native ZoneRegistry GUER-presence drift (supportRate 5/3s while owner NEUTRAL) staled the support baseline; test now pins support past supportFlip and waits for the NEUTRAL->GUER flip (drift branch off for good) before baselining. (b) REAL shakedown.sqs bug the stale baseline had been masking: the kill path deleted the initiator pair immediately after posting the synthetic record, so the consumer (up to GM_CIV_TICK later) always saw a null killer -> OTHER (-2, no resentment) instead of OCCUPIER (-8 + resentment); the scene now holds the pair alive until gmCivKilled is drained (bounded 20s guard), then releases. Synced byte-identical to all 7 copies + reinstalled game-dir templates."
+      - "2026-07-10 adversarial review (3 lenses: SQS dialect, persistence, checklist): 2 majors fixed pre-land - GM_fnCivPrune now deleteGroups dropped rows (empty AIGroups otherwise accumulate in the CIV center and bloat every save; no runtime auto-cleanup exists, only the mission-load sweep), and GM_SHK_FORCE is consumed on actual scene launch, not in #forcepick (a stale populated-zone row could bail at the null-victim guard and silently eat the force request, wedging the force-hook tests). Minors: init.sqs seeds GM_CIV_GROUPS/GM_CIV_GROUP_ZONE so shakedown.sqs has no exec-order dependency on civilians.sqs; wander pass is per-unit (leader-only doMove never un-stuck a doStop'ed released victim; doFollow is not a registered command); dead-killer OTHER-demotion window documented (dead units read TCivilian). Post-fix: unit byte-identity + all 4 civ/save-reload Trident tests re-run green."
 
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"
