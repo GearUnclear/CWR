@@ -29,11 +29,15 @@ carries:
 - **`CfgGuerrillaZones`** — engine tuning (all optional; defaults:
   `tickInterval=3; zoneArea=150; revealRadius=1500; cacheRadius=800;
   supportRate=5; supportFlip=60; heatCapSpike=40; defaultIncome=25;
+  captureRate=6; captureCrewCap=3; captureDecayDefended=10;
+  captureDecayAbandoned=2; supportDecayOccupied=0.5; supportDecayFloor=20;
+  contestOutnumberRatio=4;
   cacheInterval=5; groupSize=12; alertInterval=5; alertYellowKnows=0.5;
   alertRedKnows=1.5; alertWindowSeconds=20; alertHeatYellow=4; alertHeatRed=15;
-  alertHeatBreak=25`), the `class Zones` seed, and the town auto-seed
-  (`seedCities=1; seedCitySupport=20` — CITY zones generated from the world's
-  named towns, markers `gmZoneCity_<n>`).
+  alertHeatBreak=25`), the `class Zones` seed (each zone may carry its own
+  `captureRate` override; `captureRate=100` restores the legacy instant flip),
+  and the town auto-seed (`seedCities=1; seedCitySupport=20` — CITY zones
+  generated from the world's named towns, markers `gmZoneCity_<n>`).
 - **`CfgGuerrillaFactions`** — one descriptor class per faction. The zone
   `owner` field accepts generic tokens `"OCCUPIER"`/`"RESISTANCE"`/`"NEUTRAL"`;
   the new-game UI publishes `gmSelOccupier`/`gmSelResistance` and the engine
@@ -53,7 +57,7 @@ copying `mission.sqm`.
 
 | Native system | Replaces | Behavior |
 |---|---|---|
-| `ZoneRegistry` | `zones.sqs` | zone table from config; fog-of-war reveal; marker recolor/label (only repaints markers that already exist in `markersMap` — the mission still **creates** them); military capture flip (clear + friendly present, player within `cacheRadius`); CITY support accrual/flip; capture heat spike + income tap |
+| `ZoneRegistry` | `zones.sqs` | zone table from config; fog-of-war reveal; marker recolor/label with capture/support progress text and ColorWhite while contested (only repaints markers that already exist in `markersMap` — the mission still **creates** them); military **consolidation capture** (a 0..100 capture meter: climbs per tick per attacker (crew-capped) while resistance units hold the zone area with no live occupier unit inside it — positional presence per side, NOT the `liveOccupiers` bookkeeping; frozen while contested, decays when defended/abandoned; `contestOutnumberRatio` lets overwhelming defenders re-secure past a lone straggler; flip at 100; meters freeze outside `cacheRadius`); CITY support accrual (occupier-free town only) / intimidation decay (occupier-only presence, floored at `supportDecayFloor`) / decoupled ready-threshold + flip (needs fighters in an occupier-free town; the undercover player counts for neither); capture heat spike + income tap |
 | `AlertMachine` | `alert.sqs` | per-zone GREEN/YELLOW/RED FSM from garrison `knowsAbout`, disengage window, heat spikes on escalation edges, last-known player position, undercover break (vehicle-mount half polled natively; fired half via `gmBreakUndercover`) |
 | `GarrisonCache` | `spawning.sqs` (cache half) | occupier garrison distance-cache: integer reserve ↔ live groups across `cacheRadius` (+50 m despawn hysteresis), survivor write-back, officer-first groups (faction `officer` key), SENTRY/GUARD posture, reads script global `gmWarLevel` |
 | native persistence | `persistence.sqs` | zones, alert FSM, garrison bookkeeping and **event handlers** serialize; script globals always did (GGameState); `campaignLoaded` event replaces the GM_SAVED sentinel + poll |
@@ -71,13 +75,18 @@ marker exactly once per campaign.
 
 ### A.3 Script command surface
 
-Zone registry: `gmZoneCount` (nular→scalar), `gmZone <i>` (→ 9-tuple
-`[name, type, owner, garrison, support, income, heat, marker, [x,y,z]]`, the
-old `GM_Z_*` indices 0..8), `gmZoneIndex "<name>"` (→ index or −1),
+Zone registry: `gmZoneCount` (nular→scalar), `gmZone <i>` (→ 10-tuple
+`[name, type, owner, garrison, support, income, heat, marker, [x,y,z],
+capture]`, the `GM_Z_*` indices 0..9), `gmZoneIndex "<name>"` (→ index or −1),
 `gmZoneSet [i, "field", v]` (fields `owner|garrison|support|income|
-liveOccupiers|heatRaise|heatDecay`), `gmZoneOnEvent ["<event>", handler]`
-(`captured`/`supportThreshold`/`revealed` with `_this=[zoneIndex, zoneName,
-ownerString]`; `campaignLoaded` with `_this=[saveVersion]`).
+liveOccupiers|capture|heatRaise|heatDecay`; `capture` clamps 0..100; an
+`owner` write resets the capture meter — ownership discontinuity),
+`gmZoneOnEvent ["<event>", handler]`
+(`captured`/`supportThreshold`/`revealed`/`captureStarted`/`contested`/
+`captureLost` with `_this=[zoneIndex, zoneName, ownerString]`;
+`campaignLoaded` with `_this=[saveVersion]`). `supportThreshold` is
+decoupled from the flip: it announces a town crossed `supportFlip` and is
+READY; `captured` fires on the actual flip.
 
 Factions: `gmFactionTierClass [side, warLevel]`, `gmFactionVehicle [side,
 warLevel]`, `gmFactionValue [side, "key"]` (any plain key), and the side
@@ -120,8 +129,9 @@ GM_cBatch = gmEvtCaptured + []; gmEvtCaptured = []
 Queues are plain globals (serialize free) and handlers are serialized by the
 engine, so the whole event plumbing survives save/load with no re-arm.
 
-Queue → consumer map: `gmEvtCaptured`/`gmEvtSupport`/`gmEvtRevealed` →
-`capture.sqs`; `gmEvtAlert` → `qrf.sqs`; `gmEvtUcBroken` → `undercover.sqs`;
+Queue → consumer map: `gmEvtCaptured`/`gmEvtSupport`/`gmEvtRevealed`/
+`gmEvtCapStart`/`gmEvtContested`/`gmEvtCapLost` → `capture.sqs`;
+`gmEvtAlert` → `qrf.sqs`; `gmEvtUcBroken` → `undercover.sqs`;
 `gmEvtLoaded` → `campaign.sqs`; `gmEvtGarSpawned`/`gmEvtGarDespawned` →
 `loot.sqs`.
 
@@ -156,7 +166,10 @@ mission/Guerrilla.Demo/
   scripts/
     lib.sqs            helpers: GM_fnRandPosNear/SpawnGroup/SideFromString/
                        CountOwnedBy/ZoneOfType/FactionNum/BumpGear + GM_LIB_READY
-    capture.sqs        "captured" reaction: hold garrison (holdClass x holdCount) + hint
+    capture.sqs        capture-event reactions: hold garrison (holdClass x
+                       holdCount) on "captured", hints for the whole arc
+                       (started/contested/lost/town-ready/liberated), throttled
+                       in-field titleText progress ticker (GM_Z_CAPTURE)
     qrf.sqs            alert POLICY: garrison posture on alertChanged edges,
                        YELLOW investigate moves to gmZoneLastKnown, RED QRF convoy
                        (officer + tier squad + faction vehicle, road-snap,
@@ -266,7 +279,7 @@ state is native and needs nothing.
 | Script            | OWNS (exclusive write)                                   | Reads (native surface + globals) |
 |-------------------|----------------------------------------------------------|----------------------------------|
 | `lib.sqs`         | `GM_fn*`, `GM_LIB_READY`, `GM_tmp*`                       | — |
-| `capture.sqs`     | consumes `gmEvtCaptured`/`gmEvtSupport`/`gmEvtRevealed`; `GM_HOLD_*` | `gmZone`, faction hold keys |
+| `capture.sqs`     | consumes `gmEvtCaptured`/`gmEvtSupport`/`gmEvtRevealed`/`gmEvtCapStart`/`gmEvtContested`/`gmEvtCapLost`; `GM_HOLD_*`, `GM_TT_*` | `gmZone`, faction hold keys |
 | `qrf.sqs`         | consumes `gmEvtAlert`; `GM_QRF_*` (QRF group/vehicle transient) | `gmZoneAlert`, `gmZoneLastKnown`, `gmGarrison*`, `gmWarLevel`, occupier faction keys |
 | `undercover.sqs`  | `gmUndercover`, consumes `gmEvtUcBroken`, player fired-EH | `gmWarLevel` |
 | `campaign.sqs`    | consumes `gmEvtLoaded`; `GM_pSaveAct`; reconciles `GM_COMP_OBJ` nulls, `GM_PLAYER_GROUPS` reseed | companion rows |
@@ -278,6 +291,14 @@ state is native and needs nothing.
 
 Heat raising is native-only now (capture, alert edges, cover break);
 `escalation.sqs` holds the sole scripted decay verb.
+
+CITY `support` has exactly two sanctioned writers: the scripts'
+`GM_fnSupportAdd` (civilian-kill deltas + delayed resentment, clamps 0–100,
+lands regardless of presence) and the **native channel** in
+`ZoneRegistry::EvaluateTick` (presence-gated accrual while a town is
+occupier-free; intimidation decay while occupier-only, floored at
+`supportDecayFloor` — the floor applies to the native decay ONLY, so a
+script-authored value below it is never raised).
 
 ---
 

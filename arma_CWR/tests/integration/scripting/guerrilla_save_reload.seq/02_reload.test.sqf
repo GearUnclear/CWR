@@ -39,6 +39,9 @@ triAssertEq [(format ["%1", "AK47" in GM_GEAR_UNLOCKED]), "true"]
 triAssertEq [((gmZone gsOut) select 2), gmResistanceSide]
 triAssertEq [((gmZone gsOut) select 5), 99]
 triAssertEq [((gmZone gsVil) select 4), 55]
+// mid-consolidation progress survives the reload (inert on a resistance-owned
+// zone, so no tick can move it before this assert)
+triAssertEq [((gmZone gsOut) select 9), 50]
 
 // -- the natively-SERIALIZED campaignLoaded handler fired (no script re-armed
 //    anything) and campaign.sqs consumed it: GM_pVer = the save version ------

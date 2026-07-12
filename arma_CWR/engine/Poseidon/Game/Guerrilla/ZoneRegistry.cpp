@@ -246,6 +246,13 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
     _tuning.seedCities = cfg.ReadValue("seedCities", _tuning.seedCities ? 1.0f : 0.0f) != 0.0f;
     _tuning.seedCitySupport = cfg.ReadValue("seedCitySupport", _tuning.seedCitySupport);
+    _tuning.captureRate = cfg.ReadValue("captureRate", _tuning.captureRate);
+    _tuning.captureCrewCap = cfg.ReadValue("captureCrewCap", _tuning.captureCrewCap);
+    _tuning.captureDecayDefended = cfg.ReadValue("captureDecayDefended", _tuning.captureDecayDefended);
+    _tuning.captureDecayAbandoned = cfg.ReadValue("captureDecayAbandoned", _tuning.captureDecayAbandoned);
+    _tuning.supportDecayOccupied = cfg.ReadValue("supportDecayOccupied", _tuning.supportDecayOccupied);
+    _tuning.supportDecayFloor = cfg.ReadValue("supportDecayFloor", _tuning.supportDecayFloor);
+    _tuning.contestOutnumberRatio = cfg.ReadValue("contestOutnumberRatio", _tuning.contestOutnumberRatio);
 
     const ParamEntry* zones = cfg.FindEntry("Zones");
     if (!zones)
@@ -271,6 +278,8 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
         z.income = e.ReadValue("income", 0.0f);
         z.heat = e.ReadValue("heat", 0.0f);
         z.marker = e.ReadValue("marker", RString());
+        // per-zone pacing: big installations author a slower rate (0 = tuning)
+        z.captureRateOverride = e.ReadValue("captureRate", 0.0f);
         const ParamEntry* pos = e.FindEntry("position");
         if (pos && pos->IsArray() && pos->GetSize() >= 2)
         {
@@ -624,6 +633,18 @@ int ZoneRegistry::EventTypeFromName(const char* name)
     {
         return ZECampaignLoaded;
     }
+    if (stricmp(name, "captureStarted") == 0)
+    {
+        return ZECaptureStarted;
+    }
+    if (stricmp(name, "contested") == 0)
+    {
+        return ZEContested;
+    }
+    if (stricmp(name, "captureLost") == 0)
+    {
+        return ZECaptureLost;
+    }
     return -1;
 }
 
@@ -738,23 +759,120 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         ZoneRecord& z = _zones[i];
         if (Dist2DSq(z.pos.X(), z.pos.Z(), in.playerX, in.playerZ) > cacheSq)
         {
+            // outside the bubble the meters FREEZE (no gain, no decay) -
+            // consistent with the world-bubble design: nothing happens to
+            // ground the simulation is not looking at
             continue;
         }
 
-        bool guerHere = i < in.guerPresent.Size() && in.guerPresent[i];
+        int guer = i < in.guerCount.Size() ? in.guerCount[i] : 0;
+        int occ = i < in.occCount.Size() ? in.occCount[i] : 0;
         bool isCity = stricmp(z.type, "CITY") == 0;
-
-        // military: flips when the occupier reserve and live occupiers are
-        // gone and a live resistance unit stands in the zone area
-        bool milCap =
-            !isCity && stricmp(z.owner, _occupierSide) == 0 && guerHere && z.liveOccupiers < 1 && z.garrison < 1;
-
-        // city: support accrues while a resistance unit is present, flips on
-        // the threshold - never on kills
-        bool cityCap = false;
-        if (isCity && stricmp(z.owner, "NEUTRAL") == 0)
+        bool milEligible = !isCity && stricmp(z.owner, _occupierSide) == 0;
+        // an occupier-ADMINISTERED town accrues underground support like a
+        // neutral one (administration collapse, not assault); third-party
+        // towns stay out of reach
+        bool cityEligible = isCity && (stricmp(z.owner, "NEUTRAL") == 0 || stricmp(z.owner, _occupierSide) == 0);
+        if (!milEligible && !cityEligible)
         {
-            if (guerHere)
+            z.contestedLastTick = false;
+            continue;
+        }
+
+        bool milCap = false;
+        bool cityCap = false;
+
+        if (milEligible)
+        {
+            // military: a consolidation hold, not a touch.  The capture meter
+            // climbs only while resistance units hold the zone area with NO
+            // live occupier unit inside it - positional presence (occCount)
+            // covers garrison, QRF, patrols and mission-placed troops alike;
+            // the bookkeeping mirror liveOccupiers decides nothing.  An
+            // unspawned reserve (garrison) also defends: within the bubble
+            // GarrisonCache materializes it within one pass.
+            bool attackers = guer > 0;
+            bool defenders = occ > 0 || z.garrison >= 1;
+            bool contested = attackers && defenders;
+            // straggler mitigation: overwhelming defenders re-secure their
+            // post instead of being held hostage by one hidden attacker.
+            // Applies only toward DEFENDED - a single live defender always
+            // blocks SECURING, whatever the attacker superiority.
+            if (contested && _tuning.contestOutnumberRatio > 0 &&
+                (float)occ >= _tuning.contestOutnumberRatio * (float)guer)
+            {
+                contested = false;
+                attackers = false;
+            }
+
+            float before = z.capture;
+            if (attackers && !defenders)
+            {
+                // SECURING: rate scales with crew up to the cap
+                float rate = z.captureRateOverride > 0 ? z.captureRateOverride : _tuning.captureRate;
+                float crew = (float)guer;
+                if (crew > _tuning.captureCrewCap)
+                {
+                    crew = _tuning.captureCrewCap;
+                }
+                z.capture += rate * crew;
+                if (z.capture > 100)
+                {
+                    z.capture = 100;
+                }
+                if (before <= 0 && z.capture > 0)
+                {
+                    ZoneEventRecord ev;
+                    ev.type = ZECaptureStarted;
+                    ev.zoneIndex = i;
+                    fired.Add(ev);
+                }
+                milCap = z.capture >= 100;
+            }
+            else if (contested)
+            {
+                // CONTESTED: frozen - the firefight resolves it; standing to
+                // fight is never punished with decay
+                if (!z.contestedLastTick && z.capture > 0)
+                {
+                    ZoneEventRecord ev;
+                    ev.type = ZEContested;
+                    ev.zoneIndex = i;
+                    fired.Add(ev);
+                }
+            }
+            else
+            {
+                // DEFENDED (occupiers re-secure fast) or ABANDONED (slow fade)
+                float decay = (occ > 0 || z.garrison >= 1) ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
+                z.capture -= decay;
+                if (z.capture < 0)
+                {
+                    z.capture = 0;
+                }
+                if (before > 0 && z.capture <= 0)
+                {
+                    ZoneEventRecord ev;
+                    ev.type = ZECaptureLost;
+                    ev.zoneIndex = i;
+                    fired.Add(ev);
+                }
+            }
+            z.contestedLastTick = contested;
+        }
+
+        if (cityEligible)
+        {
+            // city: support, not force - and never while the occupier is
+            // watching.  Occupier-only presence intimidates support back
+            // toward the floor (it can suppress expression, not erase the
+            // sentiment); script-side writers (GM_fnSupportAdd) are separate
+            // and unfloored.  An unspawned garrison reserve counts as
+            // occupation, mirroring the military predicate: the zone tick
+            // runs before GarrisonCache materializes it inside the bubble.
+            bool guerHere = guer > 0;
+            bool occHere = occ > 0 || z.garrison >= 1;
+            if (guerHere && !occHere)
             {
                 z.support += _tuning.supportRate;
                 if (z.support > 100)
@@ -762,7 +880,35 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
                     z.support = 100;
                 }
             }
-            cityCap = z.support >= _tuning.supportFlip;
+            else if (occHere && !guerHere && z.support > _tuning.supportDecayFloor)
+            {
+                z.support -= _tuning.supportDecayOccupied;
+                if (z.support < _tuning.supportDecayFloor)
+                {
+                    z.support = _tuning.supportDecayFloor;
+                }
+            }
+            z.contestedLastTick = guerHere && occHere;
+
+            // threshold decoupled from flip: crossing supportFlip announces
+            // the town is READY; the flip itself needs resistance fighters
+            // standing in an occupier-free town on the same tick
+            if (z.support >= _tuning.supportFlip)
+            {
+                if (!z.supportReadyNotified)
+                {
+                    z.supportReadyNotified = true;
+                    ZoneEventRecord ev;
+                    ev.type = ZESupportThreshold;
+                    ev.zoneIndex = i;
+                    fired.Add(ev);
+                }
+                cityCap = guerHere && !occHere;
+            }
+            else
+            {
+                z.supportReadyNotified = false; // re-arm if support fell back
+            }
         }
 
         if (!milCap && !cityCap)
@@ -776,21 +922,15 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         {
             z.heat = 100;
         }
-        if (milCap)
+        z.capture = 0;
+        z.contestedLastTick = false;
+        // the occupier presence is gone either way; only military zones open
+        // the income tap (CITY income stays with the economy script)
+        z.garrison = 0;
+        z.liveOccupiers = 0;
+        if (milCap && z.income < 1)
         {
-            if (z.income < 1)
-            {
-                z.income = _tuning.defaultIncome;
-            }
-            z.garrison = 0;
-            z.liveOccupiers = 0;
-        }
-        if (cityCap)
-        {
-            ZoneEventRecord ev;
-            ev.type = ZESupportThreshold;
-            ev.zoneIndex = i;
-            fired.Add(ev);
+            z.income = _tuning.defaultIncome;
         }
         ZoneEventRecord ev;
         ev.type = ZECaptured;
@@ -799,13 +939,57 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     }
 }
 
+// count one side's live units within areaSq of each zone center - the
+// positional presence signal both capture directions run on.  excludePerson
+// (may be null) is skipped: the undercover real player, whom the AI cannot
+// engage, is not an armed force securing ground.  out must be pre-sized and
+// zeroed by the caller; a null center leaves it untouched (no units).
+static void CountSidePresence(AICenter* center, const AutoArray<ZoneRecord>& zones, float areaSq,
+                              const Person* excludePerson, AutoArray<int>& out)
+{
+    if (!center)
+    {
+        return;
+    }
+    for (int g = 0; g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+        {
+            continue;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            if (excludePerson && unit->GetPerson() == excludePerson)
+            {
+                continue;
+            }
+            Vector3 pos = unit->Position();
+            for (int i = 0; i < zones.Size(); i++)
+            {
+                if (Dist2DSq(pos.X(), pos.Z(), zones[i].pos.X(), zones[i].pos.Z()) < areaSq)
+                {
+                    out[i]++;
+                }
+            }
+        }
+    }
+}
+
 void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
 {
     const int n = _zones.Size();
-    in.guerPresent.Resize(n);
+    in.guerCount.Resize(n);
+    in.occCount.Resize(n);
     for (int i = 0; i < n; i++)
     {
-        in.guerPresent[i] = false;
+        in.guerCount[i] = 0;
+        in.occCount[i] = 0;
     }
 
     World* world = GWorld;
@@ -822,43 +1006,21 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
         in.playerZ = player->Position().Z();
     }
 
-    // enumerate the resistance side's live units; the player is included
-    // here when playing that side.  No center yet == no units (do NOT
+    // undercover global is script-owned; nil (mission never set it) == false
+    // (same read as AlertMachine::GatherInputs)
+    if (GameState* gstate = world->GetGameState())
+    {
+        GameValue undercover = gstate->VarGet("gmundercover");
+        in.playerUndercover = undercover.GetType() == GameBool && (GameBoolType)undercover;
+    }
+
+    // enumerate each side's live units; the player is included in his side's
+    // count except while undercover.  No center yet == no units (do NOT
     // create one here - GarrisonCache::EnsureCenter is the creating path)
-    AICenter* guer = FindSideCenter(_resistanceSide);
-    if (!guer)
-    {
-        return;
-    }
     const float areaSq = _tuning.zoneArea * _tuning.zoneArea;
-    for (int g = 0; g < guer->NGroups(); g++)
-    {
-        AIGroup* grp = guer->GetGroup(g);
-        if (!grp)
-        {
-            continue;
-        }
-        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
-        {
-            AIUnit* unit = grp->UnitWithID(u + 1);
-            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
-            {
-                continue;
-            }
-            Vector3 pos = unit->Position();
-            for (int i = 0; i < n; i++)
-            {
-                if (in.guerPresent[i])
-                {
-                    continue;
-                }
-                if (Dist2DSq(pos.X(), pos.Z(), _zones[i].pos.X(), _zones[i].pos.Z()) < areaSq)
-                {
-                    in.guerPresent[i] = true;
-                }
-            }
-        }
-    }
+    const Person* exclude = in.playerUndercover ? player : nullptr;
+    CountSidePresence(FindSideCenter(_resistanceSide), _zones, areaSq, exclude, in.guerCount);
+    CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount);
 }
 
 void ZoneRegistry::UpdateMarkers()
@@ -874,9 +1036,17 @@ void ZoneRegistry::UpdateMarkers()
             continue;
         }
         const char* color = "ColorBlack";
+        RString text = "";
         if (z.revealed)
         {
-            if (stricmp(z.owner, _resistanceSide) == 0)
+            if (z.contestedLastTick)
+            {
+                // one stable contested state - no flashing (ColorWhite is
+                // verified present in the 1.99 CfgMarkerColors; ColorOrange
+                // is not)
+                color = "ColorWhite";
+            }
+            else if (stricmp(z.owner, _resistanceSide) == 0)
             {
                 color = "ColorGreen";
             }
@@ -888,8 +1058,50 @@ void ZoneRegistry::UpdateMarkers()
             {
                 color = "ColorYellow"; // NEUTRAL and third parties
             }
+
+            // progress feedback on the map label; capture % quantized to 10s
+            // so a full solo capture rewrites the text ~10 times, not 17
+            bool isCity = stricmp(z.type, "CITY") == 0;
+            char label[256];
+            if (z.contestedLastTick)
+            {
+                snprintf(label, sizeof(label), "%s - CONTESTED", (const char*)z.name);
+                text = label;
+            }
+            else if (!isCity && z.capture > 0 && stricmp(z.owner, _occupierSide) == 0)
+            {
+                // 10%-quantized, clamped away from the lying edges: never
+                // "0%" on a moving meter, never "100%" before the flip
+                int pct = (int)((z.capture + 5.0f) / 10.0f) * 10;
+                if (pct < 10)
+                {
+                    pct = 10;
+                }
+                if (pct > 90)
+                {
+                    pct = 90;
+                }
+                snprintf(label, sizeof(label), "%s - securing %d%%", (const char*)z.name, pct);
+                text = label;
+            }
+            else if (isCity && (stricmp(z.owner, "NEUTRAL") == 0 || stricmp(z.owner, _occupierSide) == 0) &&
+                     z.support >= _tuning.supportFlip)
+            {
+                snprintf(label, sizeof(label), "%s - READY", (const char*)z.name);
+                text = label;
+            }
+            else if (isCity && (stricmp(z.owner, "NEUTRAL") == 0 || stricmp(z.owner, _occupierSide) == 0) &&
+                     z.support > _tuning.seedCitySupport)
+            {
+                snprintf(label, sizeof(label), "%s - support %d/%d", (const char*)z.name, (int)z.support,
+                         (int)_tuning.supportFlip);
+                text = label;
+            }
+            else
+            {
+                text = z.name;
+            }
         }
-        RString text = z.revealed ? z.name : RString("");
 
         for (int m = 0; m < markersMap.Size(); m++)
         {
@@ -966,6 +1178,9 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("income", income, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("heat", heat, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("liveOccupiers", liveOccupiers, 1, 0.0f))
+    // presence-tolerant: absent in pre-consolidation saves, defaulting to
+    // "no capture in progress" - semantically correct, no version bump
+    PARAM_CHECK(ar.Serialize("capture", capture, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("revealed", revealed, 1, false))
     return LSOK;
 }
@@ -990,7 +1205,12 @@ void ZoneRegistry::ApplyPendingLoad()
         z.income = row.income;
         z.heat = row.heat;
         z.liveOccupiers = row.liveOccupiers;
+        z.capture = row.capture;
         z.revealed = row.revealed;
+        // reconstruct the one-shot threshold edge from the loaded value: a
+        // town saved in the READY-waiting state must not re-announce itself
+        // on every reload
+        z.supportReadyNotified = z.support >= _tuning.supportFlip;
     }
 }
 
@@ -1010,6 +1230,7 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.income = z.income;
             row.heat = z.heat;
             row.liveOccupiers = z.liveOccupiers;
+            row.capture = z.capture;
             row.revealed = z.revealed;
             _pending.Add(row);
         }
@@ -1037,6 +1258,13 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onSupportThreshold", _handlers[ZESupportThreshold], 1, RString()))
     PARAM_CHECK(ar.Serialize("onRevealed", _handlers[ZERevealed], 1, RString()))
     PARAM_CHECK(ar.Serialize("onCampaignLoaded", _handlers[ZECampaignLoaded], 1, RString()))
+    // absent in pre-consolidation saves: the slots load empty and the events
+    // fire into nothing (SQS scripts resume their serialized text, so no
+    // script-side re-arm can reach an old campaign - accepted degradation:
+    // mechanics apply, the extra narration does not)
+    PARAM_CHECK(ar.Serialize("onCaptureStarted", _handlers[ZECaptureStarted], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onContested", _handlers[ZEContested], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onCaptureLost", _handlers[ZECaptureLost], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

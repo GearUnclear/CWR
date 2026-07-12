@@ -106,13 +106,15 @@ struct RegistryFixture
     }
 };
 
-ZoneTickInputs MakeInputs(const ZoneRegistry& registry, int playerAtZone, int guerAtZone)
+ZoneTickInputs MakeInputs(const ZoneRegistry& registry, int playerAtZone, int guerAtZone, int guerCount = 1)
 {
     ZoneTickInputs in;
-    in.guerPresent.Resize(registry.NZones());
-    for (int i = 0; i < in.guerPresent.Size(); i++)
+    in.guerCount.Resize(registry.NZones());
+    in.occCount.Resize(registry.NZones());
+    for (int i = 0; i < in.guerCount.Size(); i++)
     {
-        in.guerPresent[i] = false;
+        in.guerCount[i] = 0;
+        in.occCount[i] = 0;
     }
     if (playerAtZone >= 0)
     {
@@ -124,9 +126,18 @@ ZoneTickInputs MakeInputs(const ZoneRegistry& registry, int playerAtZone, int gu
     }
     if (guerAtZone >= 0)
     {
-        in.guerPresent[guerAtZone] = true;
+        in.guerCount[guerAtZone] = guerCount;
     }
     return in;
+}
+
+// run EvaluateTick n times with the same inputs, accumulating events
+void Ticks(ZoneRegistry& registry, const ZoneTickInputs& in, AutoArray<ZoneEventRecord>& fired, int n)
+{
+    for (int tick = 0; tick < n; tick++)
+    {
+        registry.EvaluateTick(in, fired);
+    }
 }
 
 int CountEvents(const AutoArray<ZoneEventRecord>& fired, ZoneEventType type, int zoneIndex)
@@ -344,68 +355,266 @@ TEST_CASE("ZoneRegistry - military capture rules", "[game][guerrilla]")
     f.Load(kDemoConfig);
     const int outpost = 2;
 
-    SECTION("no flip while the occupier reserve remains")
+    SECTION("no progress while the occupier reserve remains")
     {
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
         f.registry.EvaluateTick(in, fired); // garrison == 8
         REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
         REQUIRE(CountEvents(fired, ZECaptured, outpost) == 0);
     }
 
-    SECTION("no flip while live occupiers remain")
+    SECTION("the liveOccupiers bookkeeping mirror decides nothing")
     {
+        // stale GarrisonCache membership counts must neither block a clear
+        // zone (occCount 0) nor stand in for positional presence
         f.registry.GetZoneMutable(outpost)->garrison = 0;
         f.registry.GetZoneMutable(outpost)->liveOccupiers = 5;
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
         f.registry.EvaluateTick(in, fired);
-        REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(6.0f)); // accrues
     }
 
-    SECTION("no flip without a GUER unit in the zone area")
+    SECTION("a live occupier unit in the zone blocks progress at 0")
+    {
+        // the QRF fix: positional presence blocks even with counters clear
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
+        in.occCount[outpost] = 1;
+        Ticks(f.registry, in, fired, 5);
+        REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
+        REQUIRE(CountEvents(fired, ZECaptureStarted, outpost) == 0);
+    }
+
+    SECTION("no progress without a GUER unit in the zone area")
     {
         f.registry.GetZoneMutable(outpost)->garrison = 0;
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, outpost, -1);
         f.registry.EvaluateTick(in, fired);
         REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
     }
 
-    SECTION("no capture math when the player is outside cacheRadius")
+    SECTION("outside cacheRadius the meter freezes - no gain, no decay")
     {
         f.registry.GetZoneMutable(outpost)->garrison = 0;
+        f.registry.GetZoneMutable(outpost)->capture = 50;
         AutoArray<ZoneEventRecord> fired;
         // player parked at FarPost, GUER unit present at the outpost
         ZoneTickInputs in = MakeInputs(f.registry, 3, outpost);
-        f.registry.EvaluateTick(in, fired);
+        Ticks(f.registry, in, fired, 3);
         REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(50.0f));
     }
 
-    SECTION("flip: owner, heat spike, income tap, garrison reset, event")
+    SECTION("consolidation: solo capture accrues 6/tick and flips on the 17th")
     {
         f.registry.GetZoneMutable(outpost)->garrison = 0;
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
-        f.registry.EvaluateTick(in, fired);
-
+        Ticks(f.registry, in, fired, 16);
         const ZoneRecord* z = f.registry.GetZone(outpost);
+        REQUIRE(z->capture == Approx(96.0f));
+        REQUIRE(Str(z->owner) == "EAST"); // still holding, not yet flipped
+        REQUIRE(CountEvents(fired, ZECaptured, outpost) == 0);
+        REQUIRE(CountEvents(fired, ZECaptureStarted, outpost) == 1); // 0 -> 6 edge only
+
+        // 17th tick: flip with the full legacy side effects, meter reset
+        fired.Clear();
+        f.registry.EvaluateTick(in, fired);
         REQUIRE(Str(z->owner) == "GUER");
         REQUIRE(z->heat == Approx(40.0f));   // heatCapSpike
         REQUIRE(z->income == Approx(25.0f)); // defaultIncome opened (was 0)
         REQUIRE(z->garrison == Approx(0.0f));
+        REQUIRE(z->capture == Approx(0.0f));
         REQUIRE(CountEvents(fired, ZECaptured, outpost) == 1);
         REQUIRE(CountEvents(fired, ZESupportThreshold, outpost) == 0);
+    }
+
+    SECTION("crew scaling: rate multiplies by attacker count up to captureCrewCap")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs three = MakeInputs(f.registry, outpost, outpost, 3);
+        f.registry.EvaluateTick(three, fired);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(18.0f)); // 6 * 3
+
+        ZoneTickInputs five = MakeInputs(f.registry, outpost, outpost, 5);
+        f.registry.EvaluateTick(five, fired);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(36.0f)); // capped at 3
+    }
+
+    SECTION("contested: both sides present freeze the meter, one edge event")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs securing = MakeInputs(f.registry, outpost, outpost);
+        Ticks(f.registry, securing, fired, 8); // capture 48
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(48.0f));
+
+        fired.Clear();
+        ZoneTickInputs contested = MakeInputs(f.registry, outpost, outpost);
+        contested.occCount[outpost] = 2;
+        Ticks(f.registry, contested, fired, 4);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(48.0f)); // frozen, no decay
+        REQUIRE(CountEvents(fired, ZEContested, outpost) == 1); // edge only, no repeat
+
+        // defenders die -> securing resumes where it left off
+        fired.Clear();
+        f.registry.EvaluateTick(securing, fired);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(54.0f));
+    }
+
+    SECTION("defended: occupiers alone re-secure at 10/tick, captureLost at 0")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        f.registry.GetZoneMutable(outpost)->capture = 25;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs defended = MakeInputs(f.registry, outpost, -1);
+        defended.occCount[outpost] = 1;
+        Ticks(f.registry, defended, fired, 2);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(5.0f));
+        REQUIRE(CountEvents(fired, ZECaptureLost, outpost) == 0);
+
+        Ticks(f.registry, defended, fired, 2);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
+        REQUIRE(CountEvents(fired, ZECaptureLost, outpost) == 1); // floor edge only
+    }
+
+    SECTION("abandoned: unheld progress fades at 2/tick")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        f.registry.GetZoneMutable(outpost)->capture = 10;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs abandoned = MakeInputs(f.registry, outpost, -1);
+        Ticks(f.registry, abandoned, fired, 3);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(4.0f));
+        Ticks(f.registry, abandoned, fired, 2);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
+        REQUIRE(CountEvents(fired, ZECaptureLost, outpost) == 1);
+    }
+
+    SECTION("outnumber override: overwhelming defenders re-secure past a straggler")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        f.registry.GetZoneMutable(outpost)->capture = 40;
+        AutoArray<ZoneEventRecord> fired;
+        // 4 defenders vs 1 attacker >= contestOutnumberRatio (4) -> DEFENDED
+        ZoneTickInputs swarmed = MakeInputs(f.registry, outpost, outpost);
+        swarmed.occCount[outpost] = 4;
+        f.registry.EvaluateTick(swarmed, fired);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(30.0f));
+
+        // 3 vs 1 stays under the ratio -> CONTESTED, frozen
+        ZoneTickInputs held = MakeInputs(f.registry, outpost, outpost);
+        held.occCount[outpost] = 3;
+        f.registry.EvaluateTick(held, fired);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(30.0f));
     }
 
     SECTION("an already-open income tap is preserved on capture")
     {
         f.registry.GetZoneMutable(outpost)->garrison = 0;
         f.registry.GetZoneMutable(outpost)->income = 55;
+        f.registry.GetZoneMutable(outpost)->capture = 96;
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
         f.registry.EvaluateTick(in, fired);
+        REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "GUER");
         REQUIRE(f.registry.GetZone(outpost)->income == Approx(55.0f));
+    }
+}
+
+TEST_CASE("ZoneRegistry - capture pacing tunables", "[game][guerrilla]")
+{
+    SECTION("new tuning keys parse with sane defaults")
+    {
+        RegistryFixture f;
+        f.Load(kDemoConfig); // sets none of the new keys
+        const ZoneTuning& t = f.registry.Tuning();
+        REQUIRE(t.captureRate == Approx(6.0f));
+        REQUIRE(t.captureCrewCap == Approx(3.0f));
+        REQUIRE(t.captureDecayDefended == Approx(10.0f));
+        REQUIRE(t.captureDecayAbandoned == Approx(2.0f));
+        REQUIRE(t.supportDecayOccupied == Approx(0.5f));
+        REQUIRE(t.supportDecayFloor == Approx(20.0f));
+        REQUIRE(t.contestOutnumberRatio == Approx(4.0f));
+    }
+
+    SECTION("tuning keys override the defaults")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    captureRate = 12; captureCrewCap = 2; captureDecayDefended = 20;\n"
+                             "    captureDecayAbandoned = 1; supportDecayOccupied = 2;\n"
+                             "    supportDecayFloor = 10; contestOutnumberRatio = 0;\n"
+                             "    class Zones { class A { name=\"A\"; }; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config);
+        const ZoneTuning& t = f.registry.Tuning();
+        REQUIRE(t.captureRate == Approx(12.0f));
+        REQUIRE(t.captureCrewCap == Approx(2.0f));
+        REQUIRE(t.captureDecayDefended == Approx(20.0f));
+        REQUIRE(t.captureDecayAbandoned == Approx(1.0f));
+        REQUIRE(t.supportDecayOccupied == Approx(2.0f));
+        REQUIRE(t.supportDecayFloor == Approx(10.0f));
+        REQUIRE(t.contestOutnumberRatio == Approx(0.0f));
+    }
+
+    SECTION("contestOutnumberRatio 0 disables the override")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    contestOutnumberRatio = 0;\n"
+                             "    class Zones { class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"EAST\"; "
+                             "garrison=0; position[]={1000.0, 1000.0, 0.0}; }; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config);
+        f.registry.GetZoneMutable(0)->capture = 40;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, 0, 0);
+        in.occCount[0] = 10; // any superiority: still CONTESTED, frozen
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(f.registry.GetZone(0)->capture == Approx(40.0f));
+    }
+
+    SECTION("per-zone captureRate override beats the tuning rate")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    class Zones { class Airfield { name=\"Airfield\"; type=\"AIRFIELD\"; "
+                             "owner=\"EAST\"; garrison=0; captureRate=3; position[]={1000.0, 1000.0, 0.0}; }; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, 0, 0);
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(f.registry.GetZone(0)->capture == Approx(3.0f));
+    }
+
+    SECTION("captureRate 100 restores the legacy instant flip")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    captureRate = 100;\n"
+                             "    class Zones { class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"EAST\"; "
+                             "garrison=0; position[]={1000.0, 1000.0, 0.0}; }; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, 0, 0);
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(Str(f.registry.GetZone(0)->owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, 0) == 1);
     }
 }
 
@@ -415,40 +624,150 @@ TEST_CASE("ZoneRegistry - city support and threshold flip", "[game][guerrilla]")
     f.Load(kDemoConfig);
     const int village = 1;
 
-    ZoneTickInputs present = MakeInputs(f.registry, village, village);
-    AutoArray<ZoneEventRecord> fired;
-
-    // support 20 -> 55 over 7 ticks, no flip yet (threshold 60)
-    for (int tick = 0; tick < 7; tick++)
+    SECTION("presence-gated accrual, ready threshold, flip on arrival")
     {
+        ZoneTickInputs present = MakeInputs(f.registry, village, village);
+        AutoArray<ZoneEventRecord> fired;
+
+        // support 20 -> 55 over 7 ticks, no flip yet (threshold 60)
+        Ticks(f.registry, present, fired, 7);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(55.0f));
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
+
+        // support does not accrue without a GUER unit present
+        ZoneTickInputs absent = MakeInputs(f.registry, village, -1);
+        fired.Clear();
+        f.registry.EvaluateTick(absent, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(55.0f));
+
+        // the 8th accruing tick crosses the threshold; fighters are standing
+        // in an occupier-free town, so it also flips on the same tick
+        fired.Clear();
         f.registry.EvaluateTick(present, fired);
+        const ZoneRecord* z = f.registry.GetZone(village);
+        REQUIRE(z->support == Approx(60.0f));
+        REQUIRE(Str(z->owner) == "GUER");
+        REQUIRE(z->heat == Approx(40.0f));
+        REQUIRE(z->income == Approx(0.0f)); // CITY income stays with the economy script
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
+        REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 1);
+
+        // once owned, support stops accruing
+        fired.Clear();
+        f.registry.EvaluateTick(present, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(60.0f));
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
     }
-    REQUIRE(f.registry.GetZone(village)->support == Approx(55.0f));
-    REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL");
-    REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
 
-    // support does not accrue without a GUER unit present
-    ZoneTickInputs absent = MakeInputs(f.registry, village, -1);
-    fired.Clear();
-    f.registry.EvaluateTick(absent, fired);
-    REQUIRE(f.registry.GetZone(village)->support == Approx(55.0f));
+    SECTION("no accrual while an occupier unit is in the town")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs contested = MakeInputs(f.registry, village, village);
+        contested.occCount[village] = 1;
+        Ticks(f.registry, contested, fired, 4);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(20.0f)); // frozen
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL");
+    }
 
-    // the 8th accruing tick crosses the threshold and flips the city
-    fired.Clear();
-    f.registry.EvaluateTick(present, fired);
-    const ZoneRecord* z = f.registry.GetZone(village);
-    REQUIRE(z->support == Approx(60.0f));
-    REQUIRE(Str(z->owner) == "GUER");
-    REQUIRE(z->heat == Approx(40.0f));
-    REQUIRE(z->income == Approx(0.0f)); // CITY income stays with the economy script
-    REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
-    REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 1);
+    SECTION("intimidation: occupier-only presence bleeds support to the floor")
+    {
+        f.registry.GetZoneMutable(village)->support = 22;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs occupied = MakeInputs(f.registry, village, -1);
+        occupied.occCount[village] = 2;
+        Ticks(f.registry, occupied, fired, 3);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(20.5f)); // 0.5/tick
+        Ticks(f.registry, occupied, fired, 5);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(20.0f)); // supportDecayFloor
+    }
 
-    // once owned, support stops accruing
-    fired.Clear();
-    f.registry.EvaluateTick(present, fired);
-    REQUIRE(f.registry.GetZone(village)->support == Approx(60.0f));
-    REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
+    SECTION("the native floor never raises support left below it by scripts")
+    {
+        f.registry.GetZoneMutable(village)->support = 5; // atrocity aftermath
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs occupied = MakeInputs(f.registry, village, -1);
+        occupied.occCount[village] = 1;
+        f.registry.EvaluateTick(occupied, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(5.0f));
+    }
+
+    SECTION("ready without fighters: threshold event fires once, no flip")
+    {
+        f.registry.GetZoneMutable(village)->support = 60;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs absent = MakeInputs(f.registry, village, -1);
+        Ticks(f.registry, absent, fired, 3);
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL"); // no spontaneous flip
+        REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 1); // announced once
+
+        // fighters arrive in the occupier-free town -> the flip, captured only
+        fired.Clear();
+        ZoneTickInputs present = MakeInputs(f.registry, village, village);
+        f.registry.EvaluateTick(present, fired);
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
+        REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 0);
+    }
+
+    SECTION("ready but occupied: fighters present with occupiers do not flip")
+    {
+        f.registry.GetZoneMutable(village)->support = 80;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs contested = MakeInputs(f.registry, village, village);
+        contested.occCount[village] = 1;
+        Ticks(f.registry, contested, fired, 3);
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
+    }
+
+    SECTION("an occupier-administered town accrues underground support and flips")
+    {
+        f.registry.GetZoneMutable(village)->owner = "EAST";
+        f.registry.GetZoneMutable(village)->support = 55;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs present = MakeInputs(f.registry, village, village);
+        f.registry.EvaluateTick(present, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(60.0f));
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
+    }
+
+    SECTION("an unspawned garrison reserve occupies a town like live units do")
+    {
+        // mirrors the military predicate: the zone tick runs before
+        // GarrisonCache materializes the reserve inside the bubble
+        f.registry.GetZoneMutable(village)->owner = "EAST";
+        f.registry.GetZoneMutable(village)->garrison = 3;
+        f.registry.GetZoneMutable(village)->support = 80;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs present = MakeInputs(f.registry, village, village);
+        Ticks(f.registry, present, fired, 3);
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "EAST"); // no flip past the reserve
+        REQUIRE(f.registry.GetZone(village)->support == Approx(80.0f)); // contested: frozen
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
+
+        // reserve cleared -> the flip lands and clears the counters
+        f.registry.GetZoneMutable(village)->garrison = 0;
+        fired.Clear();
+        f.registry.EvaluateTick(present, fired);
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "GUER");
+        REQUIRE(f.registry.GetZone(village)->garrison == Approx(0.0f));
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
+    }
+
+    SECTION("a third-side-owned town never accrues or flips")
+    {
+        f.registry.GetZoneMutable(village)->owner = "WEST"; // not the EAST occupier
+        f.registry.GetZoneMutable(village)->support = 90;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs present = MakeInputs(f.registry, village, village);
+        Ticks(f.registry, present, fired, 3);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(90.0f));
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "WEST");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
+        REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 0);
+    }
 }
 
 TEST_CASE("ZoneRegistry - heat clamps", "[game][guerrilla]")
@@ -477,10 +796,18 @@ TEST_CASE("ZoneRegistry - event handler bookkeeping", "[game][guerrilla]")
     REQUIRE(ZoneRegistry::EventTypeFromName("captured") == ZECaptured);
     REQUIRE(ZoneRegistry::EventTypeFromName("SUPPORTTHRESHOLD") == ZESupportThreshold);
     REQUIRE(ZoneRegistry::EventTypeFromName("revealed") == ZERevealed);
+    REQUIRE(ZoneRegistry::EventTypeFromName("captureStarted") == ZECaptureStarted);
+    REQUIRE(ZoneRegistry::EventTypeFromName("CONTESTED") == ZEContested);
+    REQUIRE(ZoneRegistry::EventTypeFromName("captureLost") == ZECaptureLost);
     REQUIRE(ZoneRegistry::EventTypeFromName("noSuchEvent") == -1);
 
     registry.SetEventHandler(ZECaptured, "hint \"flip\"");
     REQUIRE(Str(registry.GetEventHandler(ZECaptured)) == "hint \"flip\"");
+
+    // registration REPLACES the previous handler - campaign.sqs re-registers
+    // on campaignLoaded and must not stack duplicates
+    registry.SetEventHandler(ZECaptured, "hint \"flip2\"");
+    REQUIRE(Str(registry.GetEventHandler(ZECaptured)) == "hint \"flip2\"");
 
     // Clear drops handlers together with the zone tables
     registry.Clear();
@@ -697,7 +1024,7 @@ TEST_CASE("ZoneRegistry - capture and reveal follow the swapped sides", "[game][
     {
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, depot, depot);
-        f.registry.EvaluateTick(in, fired);
+        Ticks(f.registry, in, fired, 17); // consolidation hold at 6/tick
         const ZoneRecord* z = f.registry.GetZone(depot);
         REQUIRE(Str(z->owner) == "CIV");
         REQUIRE(z->income == Approx(25.0f)); // defaultIncome tap opened
@@ -708,8 +1035,9 @@ TEST_CASE("ZoneRegistry - capture and reveal follow the swapped sides", "[game][
     {
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, legacy, legacy);
-        f.registry.EvaluateTick(in, fired);
+        Ticks(f.registry, in, fired, 20);
         REQUIRE(Str(f.registry.GetZone(legacy)->owner) == "EAST"); // not the WEST occupier
+        REQUIRE(f.registry.GetZone(legacy)->capture == Approx(0.0f));
         REQUIRE(CountEvents(fired, ZECaptured, legacy) == 0);
     }
 
@@ -787,14 +1115,19 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
         z->garrison = 3;
         z->income = 40;
         z->liveOccupiers = 2;
+        z->capture = 33; // mid-consolidation progress must survive a reload
         z->revealed = true;
-        f.registry.GetZoneMutable(village)->support = 44;
+        // 70 >= supportFlip: the town is saved in the READY-waiting state
+        f.registry.GetZoneMutable(village)->support = 70;
         f.registry.HeatRaise(outpost, 55);
 
         f.registry.SetEventHandler(ZECaptured, "gmEvtCaptured = gmEvtCaptured + [_this]");
         f.registry.SetEventHandler(ZESupportThreshold, "hSupport");
         f.registry.SetEventHandler(ZERevealed, "hRevealed");
         f.registry.SetEventHandler(ZECampaignLoaded, "hLoaded");
+        f.registry.SetEventHandler(ZECaptureStarted, "hCapStart");
+        f.registry.SetEventHandler(ZEContested, "hContested");
+        f.registry.SetEventHandler(ZECaptureLost, "hCapLost");
 
         ParamArchiveSave ar(WorldSerializeVersion);
         REQUIRE(f.registry.Serialize(ar) == LSOK);
@@ -825,13 +1158,29 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
     CHECK(z->income == Approx(40.0f));
     CHECK(z->heat == Approx(55.0f));
     CHECK(z->liveOccupiers == Approx(2.0f));
+    CHECK(z->capture == Approx(33.0f));
     CHECK(z->revealed);
-    CHECK(loaded.GetZone(village)->support == Approx(44.0f));
+    CHECK(loaded.GetZone(village)->support == Approx(70.0f));
+    // village had no capture in progress; the row default is 0
+    CHECK(loaded.GetZone(village)->capture == Approx(0.0f));
+
+    // the READY one-shot edge is reconstructed from the loaded support: a
+    // town saved at/past supportFlip must NOT re-announce after the load
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(loaded, village, -1);
+        loaded.EvaluateTick(in, fired);
+        CHECK(CountEvents(fired, ZESupportThreshold, village) == 0);
+        CHECK(Str(loaded.GetZone(village)->owner) == "NEUTRAL"); // and no flip
+    }
 
     CHECK(Str(loaded.GetEventHandler(ZECaptured)) == "gmEvtCaptured = gmEvtCaptured + [_this]");
     CHECK(Str(loaded.GetEventHandler(ZESupportThreshold)) == "hSupport");
     CHECK(Str(loaded.GetEventHandler(ZERevealed)) == "hRevealed");
     CHECK(Str(loaded.GetEventHandler(ZECampaignLoaded)) == "hLoaded");
+    CHECK(Str(loaded.GetEventHandler(ZECaptureStarted)) == "hCapStart");
+    CHECK(Str(loaded.GetEventHandler(ZEContested)) == "hContested");
+    CHECK(Str(loaded.GetEventHandler(ZECaptureLost)) == "hCapLost");
 
     // the campaignLoaded notification is queued exactly once, carrying the
     // archive's save-format version

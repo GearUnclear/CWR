@@ -16,12 +16,16 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
-    // Engine tuning (all left at stock defaults): tickInterval=3; zoneArea=150;
+    // Engine tuning (left at stock defaults): tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
     // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
     // alertInterval=5; alertYellowKnows=0.5; alertRedKnows=1.5;
     // alertWindowSeconds=20; alertHeatYellow=4; alertHeatRed=15; alertHeatBreak=25.
-    // Only the town auto-seed is switched on:
+    // EXCEPT captureRate: stock 6/tick is a ~51 s solo consolidation - too
+    // slow for the 90 s assert windows, so the tests run at 20/tick (5 clean
+    // ticks, ~15 s solo). Stock-rate pacing is pinned by the unit tests.
+    captureRate = 20;
+    // The town auto-seed is switched on:
     seedCities = 1;       // auto-seed CITY zones from the world's named towns
     seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
 

@@ -1,9 +1,11 @@
 ; ============================================================================
 ;  chapters/capture.sqs  -  taking a military zone.
 ; ----------------------------------------------------------------------------
-;  SYSTEM ON DISPLAY: ZoneRegistry capture (native: garrison wiped + player
-;  in the zone -> ownership flip, marker repaint, heat spike, income tap,
-;  captured event) and capture.sqs (script reaction: hold garrison).
+;  SYSTEM ON DISPLAY: ZoneRegistry consolidation capture (native: garrison
+;  wiped + resistance holding the zone -> the capture meter climbs each tick;
+;  any live occupier inside the zone FREEZES it; at 100 the zone flips with
+;  marker repaint, heat spike, income tap, captured event) and capture.sqs
+;  (script reaction: hold garrison + progress ticker).
 ;  Seams: setDammage on garrison bodies (staged wipe), allowDammage shield.
 ;  Runs AFTER alert in the reel; waits for any leftover QRF to stand down.
 ; ============================================================================
@@ -26,7 +28,7 @@ SC_cW = SC_cW + 1
 exit
 
 #clear
-"Capture: a military zone flips the moment its garrison is WIPED while you stand inside the 150 m zone radius. The decision is native - the scripts only react to the captured event." call SC_fnSay
+"Capture: clearing a military zone is not enough anymore - you must HOLD it until it is secure. The capture meter climbs while your fighters stand inside the 150 m zone radius; enemy troops inside the zone freeze your progress. The decision is native - the scripts only react to the events." call SC_fnSay
 ~SC_BEAT
 
 ; ---- stage inside the zone, SOLO (cover is personal - see lib.sqs), garrison up ----
@@ -48,19 +50,33 @@ SC_cN = gmGarrisonLive SC_OUT
 SC_cU = []; {SC_cU = SC_cU + (units _x)} forEach (gmGarrisonGroups SC_OUT)
 {_x setDammage 1} forEach SC_cU
 
-; ---- observable outcome: the native flip -------------------------------------------
+; ---- observable outcome: the meter climbs, then the native flip -------------------
+; solo consolidation at the stock rate is ~51 s of ticks; wait up to 90 s
+SC_cW = 0
+#mwait
+? ((gmZone SC_OUT) select GM_Z_CAPTURE) > 0 : goto "securing"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 20 : goto "mwait"
+false call SC_fnShield
+["FAIL", "garrison wiped with player in-zone but the capture meter never moved"] call SC_fnDone
+exit
+
+#securing
+"SECURING: the zone is clear and the capture meter is climbing - watch the map label count up (and the on-screen ticker). If an enemy patrol walked in now, progress would freeze until you dealt with it." call SC_fnSay
+
 SC_cW = 0
 #fwait
 ? ((gmZone SC_OUT) select GM_Z_OWNER) == gmResistanceSide : goto "flipped"
 ~1
 SC_cW = SC_cW + 1
-? SC_cW < 20 : goto "fwait"
+? SC_cW < 90 : goto "fwait"
 false call SC_fnShield
-["FAIL", "garrison wiped with player in-zone but no ownership flip"] call SC_fnDone
+["FAIL", "capture meter climbing but no ownership flip within 90 s"] call SC_fnDone
 exit
 
 #flipped
-"FLIPPED: marker repainted green natively, the captured event fired, heat spiked on the zone. capture.sqs is answering the event right now with a hold garrison of your own fighters." call SC_fnSay
+"FLIPPED: consolidation complete - marker repainted green natively, the captured event fired, heat spiked on the zone. capture.sqs is answering the event right now with a hold garrison of your own fighters." call SC_fnSay
 ~SC_BEAT
 (format ["The Outpost now pays its %1 R into every economy tick, and the corpses you made fed the loot stash. Held zones move the War Level ladder - see the escalation chapter.", (gmZone SC_OUT) select GM_Z_INCOME]) call SC_fnSay
 false call SC_fnShield

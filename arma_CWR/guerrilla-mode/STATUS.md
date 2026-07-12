@@ -61,17 +61,44 @@ reconciled against the engine source, not play-tested.)*
 5. **`seedCities=1`** adds every named town as a CITY zone: town income and
    the War-Level denominator now scale with the island (balance knob, not a
    bug; the three-zone core loop is unchanged).
-6. `supportThreshold`/`revealed`/`garrisonDespawned` events are registered and
-   drained but trigger no extra UX (a CITY flip already fires `captured` →
-   one "liberated" hint, matching Phase 1).
+6. `revealed`/`garrisonDespawned` events are registered and drained but
+   trigger no extra UX. `supportThreshold` now has its own beat ("ready to
+   rise") — it is decoupled from the flip since the consolidation-capture
+   rework (2026-07-11).
 
-## Known edges (source audit 2026-07-06 — intended for Phase 1, revisit with play feel)
+## Consolidation capture (2026-07-11 rework)
 
-- **An occupier-owned CITY can never be captured**: support accrues only while
-  `owner=="NEUTRAL"` and military capture skips CITY zones
-  (`ZoneRegistry::EvaluateTick`). Fine for the shipped seeds (cities start
-  NEUTRAL); island authors must not set a CITY's `owner="OCCUPIER"` expecting
-  it to be takeable.
+Instant capture is gone. Military zones carry a serialized 0..100 **capture
+meter** (`gmZone` element 9): it climbs per tick per attacker (crew-capped)
+only while NO live occupier unit stands inside `zoneArea` — positional,
+side-wide presence, so QRF/patrols/mission troops all contest (the old
+`liveOccupiers` bookkeeping decides nothing). Contested = frozen; defenders
+alone re-secure at `captureDecayDefended`; abandoned progress fades at
+`captureDecayAbandoned`. CITY support accrues only in an occupier-free town,
+occupier-only presence bleeds it back toward `supportDecayFloor`, and the
+flip needs fighters standing in an occupier-free town at/past the threshold —
+no more spontaneous flips, no more "liberating" a patrolled town. The
+undercover player counts for neither side. `captureRate=100` restores the
+legacy instant flip per island/zone.
+
+Pre-consolidation saves load unchanged (the `capture` field is
+presence-tolerant) and gain the new mechanics; they do NOT gain the new
+narration — running SQS scripts resume their serialized text, so the three
+new capture events fire into the empty handler slots such saves carry.
+Accepted degradation, engine-side safe.
+
+## Known edges (source audit 2026-07-06, updated 2026-07-11 — revisit with play feel)
+
+- **Occupier-owned CITY zones are capturable via support since 2026-07-11**
+  (underground organizing; the old permanently-dead edge is fixed). Third-
+  side-owned cities remain out of reach by design.
+- **Meters freeze outside `cacheRadius` (800 m)** — no gain, no decay, no
+  contest while the player is away (world-bubble policy, deliberate).
+- **Hidden-straggler watch item**: a lone surviving defender inside the zone
+  silently freezes the meter (marker flips to CONTESTED/white as the tell);
+  `contestOutnumberRatio` covers the inverse case (defenders held hostage by
+  one hidden attacker). Verify in play that returning patrols + DEFENDED
+  decay clean up half-captured litter.
 - **Nothing captures while the player is dead/absent** (`playerValid` gate);
   garrisons freeze rather than despawn. Correct for single-player Phase 1.
 - **Alert FSM edges**: RED→YELLOW re-arms the escalation window, so a

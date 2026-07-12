@@ -27,8 +27,13 @@ class CfgGuerrillaZones
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
     // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
-    // alertInterval=5; alert*Knows/Heat defaults).  Direct-launch faction
-    // fallbacks are stated explicitly (no new-game UI in a test run):
+    // alertInterval=5; alert*Knows/Heat defaults) EXCEPT captureRate:
+    // stock 6/tick means a ~51 s solo consolidation - too slow for the
+    // 90 s assert windows, so the tests run at 20/tick (5 clean ticks,
+    // ~15 s solo). Stock-rate pacing is pinned by the unit tests.
+    captureRate = 20;
+    // Direct-launch faction fallbacks stated explicitly (no new-game UI in
+    // a test run):
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns

@@ -39,7 +39,7 @@ static GameValue GmResistanceSide(const GameState* /*state*/)
     return GameStringType(ZoneRegistry::Instance().ResistanceSide());
 }
 
-// gmZone <index> -> 9-field tuple in GM_Z_* order; empty array out of range
+// gmZone <index> -> 10-field tuple in GM_Z_* order; empty array out of range
 static GameValue GmZone(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -52,7 +52,7 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
         return value;
     }
 
-    array.Resize(9);
+    array.Resize(10);
     array[0] = GameStringType(z->name);
     array[1] = GameStringType(z->type);
     array[2] = GameStringType(z->owner);
@@ -70,6 +70,7 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
     pos[1] = z->pos.Z();
     pos[2] = z->pos.Y();
     array[8] = posValue;
+    array[9] = z->capture;
     return value;
 }
 
@@ -108,6 +109,11 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     if (stricmp(field, "owner") == 0)
     {
         z->owner = GameStringType(array[2]);
+        // an ownership discontinuity ends any consolidation in progress -
+        // without this a script-flipped zone keeps a stale meter forever
+        // (frozen once ineligible) and hands it to a future re-occupier
+        z->capture = 0;
+        z->contestedLastTick = false;
     }
     else if (stricmp(field, "garrison") == 0)
     {
@@ -125,6 +131,19 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     {
         z->liveOccupiers = (float)array[2];
     }
+    else if (stricmp(field, "capture") == 0)
+    {
+        float capture = (float)array[2];
+        if (capture < 0)
+        {
+            capture = 0;
+        }
+        if (capture > 100)
+        {
+            capture = 100;
+        }
+        z->capture = capture;
+    }
     else if (stricmp(field, "heatRaise") == 0)
     {
         registry.HeatRaise(index, (float)array[2]);
@@ -136,7 +155,8 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
-// gmZoneOnEvent ["captured"|"supportThreshold"|"revealed", handler]
+// gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
+//               "captureStarted"|"contested"|"captureLost", handler]
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both)
 static GameValue GmZoneOnEvent(const GameState* state, GameValuePar oper1)

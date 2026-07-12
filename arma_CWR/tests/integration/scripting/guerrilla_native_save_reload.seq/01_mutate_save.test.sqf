@@ -33,7 +33,10 @@ GM_GEAR_UNLOCKED = ["AK47"]
 // -- stamp sentinels: native zone-registry layer -------------------------------
 gmZoneSet [gsVil, "support", 55]
 gmZoneSet [gsOut, "income", 99]
+// owner FIRST: an owner write resets the capture meter (ownership
+// discontinuity), so the capture sentinel must land after it
 gmZoneSet [gsOut, "owner", gmResistanceSide]
+gmZoneSet [gsOut, "capture", 50]
 
 // -- the civilian layer must be up and fully seeded before we stamp its
 //    ledgers (gmCivTicks/gmShkTicks are the LAST state seeds of each manager) -

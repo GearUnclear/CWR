@@ -54,6 +54,13 @@ GM_pBatch = gmEvtLoaded + []; gmEvtLoaded = []
 ; campaign save format version
 GM_pVer = (GM_pBatch select 0) select 0
 
+; (No old-save handler migration here, deliberately: running SQS scripts
+; serialize their full parsed TEXT with the save (Script::Serialize "Lines"),
+; so a pre-consolidation campaign resumes the OLD script files - code added
+; here can never reach it. Old saves degrade gracefully instead: the three
+; new capture events load as empty handler slots and fire into nothing -
+; consolidation mechanics apply, the extra narration does not.)
+
 ; (a) companion handles: trust-but-verify the deserialized links
 GM_pI = 0
 #cchk

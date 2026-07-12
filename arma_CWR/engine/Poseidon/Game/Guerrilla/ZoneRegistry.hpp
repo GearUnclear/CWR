@@ -34,6 +34,18 @@ struct ZoneTuning
     float heatCapSpike = 40.0f;  // Heat added on capture (clamped to 100)
     float defaultIncome = 25.0f; // income tap opened on military capture
     float holdCount = 3.0f;      // friendly hold-garrison size (spawn stays script-side)
+    // military consolidation meter (ZoneRecord::capture, 0..100)
+    float captureRate = 6.0f;           // progress/tick per effective attacker (100 = legacy instant flip)
+    float captureCrewCap = 3.0f;        // attacker-count multiplier cap (matches holdCount)
+    float captureDecayDefended = 10.0f; // decay/tick while only defenders hold the zone
+    float captureDecayAbandoned = 2.0f; // decay/tick while nobody holds the zone
+    // CITY intimidation: occupier-only presence bleeds support, never below the floor
+    float supportDecayOccupied = 0.5f;
+    float supportDecayFloor = 20.0f;
+    // defenders >= ratio * attackers treats a contested zone as DEFENDED
+    // (a token straggler cannot hold a re-secured post hostage); 0 disables.
+    // Any live defender still blocks SECURING regardless of this ratio.
+    float contestOutnumberRatio = 4.0f;
     // CITY auto-seed from the world's CfgWorlds >> <world> >> Names entries
     bool seedCities = false;
     float seedCitySupport = 20.0f; // starting support of each seeded CITY
@@ -54,6 +66,8 @@ struct ZoneRecord
     // generic tokens "OCCUPIER" / "RESISTANCE" (re-resolved when the
     // campaign's faction sides change, e.g. on savegame load)
     RString ownerConfig;
+    // per-zone captureRate override (0 = use tuning); static, config-rebuilt
+    float captureRateOverride = 0;
 
     // dynamic, serialized (matched by zone name on load)
     RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
@@ -61,8 +75,15 @@ struct ZoneRecord
     float support = 0;       // 0..100, CITY flips on this
     float income = 0;        // per economy tick when GUER-owned
     float heat = 0;          // 0..100 per-zone Heat
-    float liveOccupiers = 0; // transient mirror written by the spawning script
+    float liveOccupiers = 0; // live-count mirror written natively by GarrisonCache
+                             // (script-overridable via gmZoneSet); informational
+                             // only - NOT part of the capture predicate
+    float capture = 0;       // 0..100 military consolidation meter
     bool revealed = false;   // fog-of-war state
+
+    // transient tick bookkeeping, never serialized
+    bool contestedLastTick = false;    // edge detection for the contested event/marker
+    bool supportReadyNotified = false; // supportThreshold fired for the current crossing
 };
 
 // One occupier or resistance faction entry (a subclass of
@@ -89,9 +110,12 @@ struct FactionRecord
 enum ZoneEventType
 {
     ZECaptured,         // any owner flip
-    ZESupportThreshold, // CITY crossed supportFlip
+    ZESupportThreshold, // CITY crossed supportFlip (the town is READY; flip is separate)
     ZERevealed,         // zone first became revealed
     ZECampaignLoaded,   // savegame finished loading (fires once, next tick)
+    ZECaptureStarted,   // military capture meter left 0
+    ZEContested,        // both sides in a zone with capture in progress
+    ZECaptureLost,      // capture meter decayed back to 0
     NZoneEventTypes
 };
 
@@ -105,10 +129,15 @@ struct ZoneEventRecord
 // world (GatherInputs); unit tests inject values directly.
 struct ZoneTickInputs
 {
-    bool playerValid = false;    // real player exists and is alive
-    float playerX = 0;           // easting
-    float playerZ = 0;           // northing
-    AutoArray<bool> guerPresent; // per zone: live GUER-side unit within zoneArea
+    bool playerValid = false;      // real player exists and is alive
+    float playerX = 0;             // easting
+    float playerZ = 0;             // northing
+    bool playerUndercover = false; // script-owned gmUndercover global
+    // per zone: live units within zoneArea, positionally counted per side.
+    // The resistance count excludes the real player while playerUndercover
+    // (a man the AI cannot engage is not an armed force securing ground).
+    AutoArray<int> guerCount;
+    AutoArray<int> occCount;
 };
 
 class ZoneRegistry : public SerializeClass
@@ -194,6 +223,7 @@ class ZoneRegistry : public SerializeClass
         float income = 0;
         float heat = 0;
         float liveOccupiers = 0;
+        float capture = 0;
         bool revealed = false;
 
         LSError Serialize(ParamArchive& ar);

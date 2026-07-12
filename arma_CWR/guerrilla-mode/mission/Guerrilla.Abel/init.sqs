@@ -40,7 +40,7 @@ GM_BOOTED = true
 
 ; ===========================================================================
 ;  ZONE TUPLE INDEX CONSTANTS - the shape returned by `gmZone <i>`:
-;  [name, type, owner, garrison, support, income, heat, marker, [x,y,z]]
+;  [name, type, owner, garrison, support, income, heat, marker, [x,y,z], capture]
 ;  Positions are getPos order [easting, northing, elevation]. Zone STATE
 ;  lives in the native ZoneRegistry; these constants exist only so scripts
 ;  reading gmZone tuples stay legible.
@@ -56,6 +56,7 @@ GM_BOOTED = true
 ;   GM_Z_HEAT    scalar,  0..100 per-zone Heat (write via gmZoneSet heatRaise/heatDecay only)
 ;   GM_Z_MARKER  string,  marker name the zone owns
 ;   GM_Z_POS     array,   [x,y,z] center, getPos order
+;   GM_Z_CAPTURE scalar,  0..100 military consolidation meter (native)
 GM_Z_NAME    = 0
 GM_Z_TYPE    = 1
 GM_Z_OWNER   = 2
@@ -65,6 +66,7 @@ GM_Z_INCOME  = 5
 GM_Z_HEAT    = 6
 GM_Z_MARKER  = 7
 GM_Z_POS     = 8
+GM_Z_CAPTURE = 9
 
 ; ===========================================================================
 ;  PLAYER-FACTION ECONOMY & ESCALATION SCALARS
@@ -162,8 +164,11 @@ gmPlayer = player
 ; ===========================================================================
 ;  NATIVE-EVENT QUEUES  (each handler below appends; one manager drains each)
 ;    gmEvtCaptured   [zoneIndex, zoneName, ownerString]  -> capture.sqs
-;    gmEvtSupport    [zoneIndex, zoneName, ownerString]  -> capture.sqs (drained)
+;    gmEvtSupport    [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtRevealed   [zoneIndex, zoneName, ownerString]  -> capture.sqs (drained)
+;    gmEvtCapStart   [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtContested  [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtCapLost    [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtLoaded     [saveVersion]                       -> campaign.sqs
 ;    gmEvtAlert      [zoneIndex, zoneName, old, new]     -> qrf.sqs
 ;    gmEvtUcBroken   [reason]                            -> undercover.sqs
@@ -172,6 +177,9 @@ gmPlayer = player
 gmEvtCaptured    = []
 gmEvtSupport     = []
 gmEvtRevealed    = []
+gmEvtCapStart    = []
+gmEvtContested   = []
+gmEvtCapLost     = []
 gmEvtLoaded      = []
 gmEvtAlert       = []
 gmEvtUcBroken    = []
@@ -203,6 +211,9 @@ goto "mkmarkers"
 gmZoneOnEvent ["captured", {gmEvtCaptured = gmEvtCaptured + [_this]}]
 gmZoneOnEvent ["supportThreshold", {gmEvtSupport = gmEvtSupport + [_this]}]
 gmZoneOnEvent ["revealed", {gmEvtRevealed = gmEvtRevealed + [_this]}]
+gmZoneOnEvent ["captureStarted", {gmEvtCapStart = gmEvtCapStart + [_this]}]
+gmZoneOnEvent ["contested", {gmEvtContested = gmEvtContested + [_this]}]
+gmZoneOnEvent ["captureLost", {gmEvtCapLost = gmEvtCapLost + [_this]}]
 gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]}]
 gmAlertOnEvent ["alertChanged", {gmEvtAlert = gmEvtAlert + [_this]}]
 gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]

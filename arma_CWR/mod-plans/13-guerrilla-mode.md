@@ -147,7 +147,7 @@ ZONE = [name, type, owner, garrisonStrength, support, income, heat, markerName, 
 | **Outpost / Factory** | 2 | Force (clear & hold) | Income + manpower tick |
 | **City / Village** | 1 | **Support, not force** | Manpower (HR) + recruits + intel |
 
-Capture condition for military zones: *all occupier units in the area dead AND a friendly unit present* → flip `owner`, recolor the marker, spawn a friendly holding garrison, open the income/HR taps, reveal adjacent zones. Cities flip on a **support threshold**, not kills.
+Capture condition for military zones (consolidation, `ZoneRegistry::EvaluateTick`): clearing the zone starts a **capture meter** (`captureRate`/tick per attacker up to `captureCrewCap`; ~17–51 s) that climbs only while friendly units hold the zone area with **no live occupier unit inside it** — positional presence, so QRF, patrols and mission-placed troops all contest. Both sides in the zone = **contested** (meter frozen); defenders alone re-secure fast (`captureDecayDefended`), an abandoned meter fades slowly (`captureDecayAbandoned`). At 100 → flip `owner`, recolor the marker, spawn a friendly holding garrison, open the income/HR taps, reveal adjacent zones. Cities flip on a **support threshold**, not kills — support accrues only in an occupier-free town, occupier-only presence intimidates it back toward a floor (`supportDecayOccupied`/`supportDecayFloor`), and the flip additionally needs fighters standing in an occupier-free town once past the threshold (`supportThreshold` announces "ready to rise"; `captured` is the flip).
 
 ### Two economies
 
