@@ -266,6 +266,39 @@ items:
     log:
       - "Guards a silent content bug: a Guerrilla.Malden folder would pass parity but never be launchable, because OptionsUIApp resolves missions\\Guerrilla.<class>."
 
+  - id: consolidation-capture
+    title: "Consolidation capture: hold-to-secure meter + positional contest (no more instant/contested flips)"
+    phase: phase-1.5
+    status: done
+    commits: [942513e]
+    depends_on: [engine-native-systems, mission-migration-native]
+    summary: >
+      Reworked ZoneRegistry::EvaluateTick from instant capture to a serialized
+      0-100 capture meter (SECURING/CONTESTED/DEFENDED/ABANDONED): military
+      zones need a sustained hold (~17-51 s crew-scaled) and ANY live occupier
+      unit inside zoneArea freezes progress - positional per-side presence
+      counts (guerCount/occCount) replace the stale liveOccupiers bookkeeping
+      in the predicate. CITY support accrues only in occupier-free towns,
+      occupier-only presence bleeds it toward a floor (20), and the flip is
+      decoupled from the supportThreshold event (fighters must stand in an
+      occupier-free ready town; occupier-owned cities became capturable).
+      Undercover player counts for neither side (kills the setCaptive
+      capture exploit). 7 new tunables + per-zone captureRate override
+      (100 = legacy instant). Marker labels show securing %/CONTESTED/READY;
+      capture.sqs narrates the arc + titleText ticker; gmZone gained element
+      9 (capture) and gmZoneSet a clamped capture verb (an owner write resets
+      the meter); old saves load unchanged (presence-tolerant field; the new
+      events fire into empty handler slots - resumed campaigns keep their
+      serialized script text, so they gain the mechanics, not the narration).
+    log:
+      - "Motivated by first Gate-Zero play feedback: towns flipped ~24 s after walking in, even with enemies present; military zones flipped with QRF standing in them (liveOccupiers only tracked the zone's own garrison)."
+      - "Design ran as a multi-agent workflow: 4 code readers -> 3 design lenses (simulationist/game-feel/minimal-change) -> 3 judges -> synthesis; grafts included the outnumber override, per-zone rates and the legacy escape hatch."
+      - "All 2299 PoseidonTests green (54 guerrilla cases, capture pins rewritten as multi-tick + inverted liveOccupiers pin); guerrilla_native_capture rewritten end-to-end (non-instant pin, staged contest freeze, flip) and green on Classic data alongside civ_shakedown/civ_panic; Demo-lane twins propagated blind (still unrunnable locally, issue #13)."
+      - "Final verification pass: guerrilla_native_capture, guerrilla_native_save_reload.seq, guerrilla_native_undercover, guerrilla_civ_shakedown (1 retry), guerrilla_civ_panic, guerrilla_civ_ambient 6/6 green on Classic; 2299/2299 unit tests."
+      - "guerrilla_native_spawn fails 8/8 at clean stashed baseline HEAD too - the persistent hold-FSM doMove race documented at commit 0636f6d, NOT a consolidation regression."
+      - "showcase_smoke chapter 6 (alert) fails with the diff AND byte-identically at stashed baseline (per-chapter probe: Outpost garrison quietly bleeds 6->2 across chapters 0-5 with alert GREEN, heat 0, cover intact, at both HEADs; 383.3 s vs 383.4 s wall) - pre-existing garrison attrition at the coastal Outpost leaves chapter 6 nothing to alarm; the one 94.3 s baseline pass earlier today was the lucky outlier. Not a consolidation regression; needs its own fix (likely the same hold-FSM doMove class as guerrilla_native_spawn)."
+      - "Old-save degradation accepted + documented in campaign.sqs: Script::Serialize resumes the saved script TEXT, so pre-consolidation campaigns can never re-arm the three new event handlers - they get the consolidation mechanics (native), not the new narration."
+
   - id: gate-zero-playtest
     title: "Gate-Zero: first human playtest (frame budget, spawn-in, save/reload under real play)"
     phase: phase-1.5
