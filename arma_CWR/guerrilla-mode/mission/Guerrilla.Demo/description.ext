@@ -108,6 +108,9 @@ class CfgGuerrillaFactions
         holdCount = 3;
         recruitFighter = "SoldierGB";
         recruitSpecialist = "SoldierGMG";
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-EAST default - stated for the data-file contract
+        flag = "\flags\ussr.jpg";
         companionClass = "SoldierGB";
 
         // OFP magazine convention (verified in CONFIG.BIN): simple weapons
@@ -148,6 +151,9 @@ class CfgGuerrillaFactions
         // is a non-Man class - SkodaHelper/LaserTarget/Thing/buildings/
         // targets - and the Man-derived roster is only SoldierW*/SoldierE*/
         // Officer*/GeneralE/Angelina/SoldierGFakeE; Angelina is scope=1,
+
+        // town flagpole texture; matches the engine's side-GUER default
+        flag = "\flags\fia.jpg";
         // side=EAST - unusable). SoldierWCaptive is the ONLY unarmed public
         // human in that config (scope=2 via SoldierWB, weapons[]={}). Its
         // CONFIG side is WEST(1), but civilians.sqs spawns bodies into

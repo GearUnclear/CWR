@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/UI/UIActiveDisplay.hpp>
@@ -1766,6 +1767,18 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? Guerrilla::GarrisonCache::Instance().IsActive() : ar.IsSubclass("GuerrillaGarrisons"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaGarrisons", Guerrilla::GarrisonCache::Instance(), 14))
+    }
+
+    // Guerrilla town flags: flagpole placement + pole refs (by name-matched
+    // zone).  Same missing-subclass tolerance as above; the FlagCarrier
+    // objects themselves ride the world's building serializer.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::TownFlags::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::TownFlags::Instance().IsActive() : ar.IsSubclass("GuerrillaFlags"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaFlags", Guerrilla::TownFlags::Instance(), 14))
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

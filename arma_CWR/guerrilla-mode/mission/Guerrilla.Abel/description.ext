@@ -108,6 +108,9 @@ class CfgGuerrillaFactions
         officer = "SoldierGB";
 
         holdClass = "SoldierGB";
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-EAST default - stated for the data-file contract
+        flag = "\flags\ussr.jpg";
         holdCount = 3;
         recruitFighter = "SoldierGB";
         recruitSpecialist = "SoldierGMG";
@@ -143,6 +146,9 @@ class CfgGuerrillaFactions
         // via PoseidonTools config search/debin: CfgVehicles Civilian
         // (: Man, side=3, scope=2, model "MC civil"), Civilian2/Civilian3
         // (: Civilian, models "MC civil2"/"MC civil3"). Civilian4..Civilian15
+
+        // town flagpole texture; matches the engine's side-GUER default
+        flag = "\flags\fia.jpg";
         // do NOT exist in the 1.99 core config (Resistance-era addon
         // classes) - do not add them here.
         civClassCount = 3;   // number of civClass<N> keys that follow

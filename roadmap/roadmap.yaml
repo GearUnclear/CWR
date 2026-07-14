@@ -299,6 +299,30 @@ items:
       - "showcase_smoke chapter 6 (alert) fails with the diff AND byte-identically at stashed baseline (per-chapter probe: Outpost garrison quietly bleeds 6->2 across chapters 0-5 with alert GREEN, heat 0, cover intact, at both HEADs; 383.3 s vs 383.4 s wall) - pre-existing garrison attrition at the coastal Outpost leaves chapter 6 nothing to alarm; the one 94.3 s baseline pass earlier today was the lucky outlier. Not a consolidation regression; needs its own fix (likely the same hold-FSM doMove class as guerrilla_native_spawn)."
       - "Old-save degradation accepted + documented in campaign.sqs: Script::Serialize resumes the saved script TEXT, so pre-consolidation campaigns can never re-arm the three new event handlers - they get the consolidation mechanics (native), not the new narration."
 
+  - id: town-flags
+    title: "Town side flags: flag map markers + physical off-road flagpoles per town"
+    phase: phase-1.5
+    status: done
+    depends_on: [engine-native-systems, consolidation-capture]
+    summary: >
+      A town's allegiance is now readable both on the map and in the world.
+      Map half already existed (init.sqs creates every zone marker as a "Flag"
+      icon; ZoneRegistry::UpdateMarkers side-colors it) - verified, unchanged.
+      New native TownFlags subsystem (engine/Poseidon/Game/Guerrilla/TownFlags)
+      plants one FlagCarrier pole per CITY zone: deterministic sampling
+      (center + 3 outskirt rings x 16 bearings) hard-rejects road (GRoadNet::
+      IsOnRoad, 6 m clearance) and underwater candidates, scores the rest
+      toward high ground + outskirts so the flag is visible from outside town.
+      Texture: faction descriptor `flag` key > per-side default (usa/ussr/fia
+      from Classic Flags.pbo) > generic white (BIS_White); repainted on owner
+      flip; flagSide left TSideUnknown so no "Take flag" action appears.
+      Placement + pole refs serialize (GuerrillaFlags subclass; poles ride the
+      world's building serializer). Missing FlagCarrier degrades to
+      markers-only, logged (plan-15 non-fatal policy). Sinai descriptors get
+      israel/egypt flags (side defaults would be wrong there).
+    log:
+      - "Verified live on Classic Abel: 14 poles (Village + 13 seeded towns), all off-road, Village's on the 0.75-zoneArea outskirt ring; unit suite 59 guerrilla cases green incl. new test_town_flags (texture resolution + spot picker)."
+
   - id: gate-zero-playtest
     title: "Gate-Zero: first human playtest (frame budget, spawn-in, save/reload under real play)"
     phase: phase-1.5

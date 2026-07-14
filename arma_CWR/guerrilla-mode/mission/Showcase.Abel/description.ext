@@ -100,6 +100,9 @@ class CfgGuerrillaFactions
         tierThresholds[] = {};
         vehicles[] = {}; // none in phase 1
         officer = "SoldierGB";
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-EAST default - stated for the data-file contract
+        flag = "\flags\ussr.jpg";
 
         holdClass = "SoldierGB";
         holdCount = 3;
@@ -121,3 +124,6 @@ class CfgGuerrillaFactions
         lootSniperMag = "SVDDragunov";
     };
 };
+
+        // town flagpole texture; matches the engine's side-GUER default
+        flag = "\flags\fia.jpg";

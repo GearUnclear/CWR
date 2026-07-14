@@ -61,6 +61,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
@@ -637,6 +638,8 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Garrison cache follows the registry: Clear + read its own optional
     // CfgGuerrillaZones keys (cacheInterval / groupSize).
     Guerrilla::GarrisonCache::Instance().InitMission();
+    // Town flagpoles follow the registry too (no config of their own).
+    Guerrilla::TownFlags::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {

@@ -18,7 +18,7 @@ Two layers live here:
 Most of this engine is 1,300+ C++ files, 160 of them over 1,000 lines. To avoid reading extraneous code:
 
 **Active overhaul surface — start here:**
-- `engine/Poseidon/Game/Guerrilla/` — `ZoneRegistry`, `GarrisonCache`, `AlertMachine` (+ their `*Commands.cpp` SQF bindings). The Phase-1.5 native subsystems.
+- `engine/Poseidon/Game/Guerrilla/` — `ZoneRegistry`, `GarrisonCache`, `AlertMachine`, `TownFlags` (+ their `*Commands.cpp` SQF bindings). The Phase-1.5 native subsystems.
 - `engine/Poseidon/UI/Guerrilla/` — `GuerrillaModule`, `GuerrillaNewGame` (new-game island/faction selection).
 - `engine/Poseidon/AI/` — the AI tactics/perception rework. See [`mod-plans/`](mod-plans/README.md) for which behavior maps to which files; treat those docs as intent, not a precise index.
 - `voice-lines/` — TTS pipeline for custom in-game speech (WAVs via OpenRouter, played through `CfgSounds` + `say`/`sideRadio`; no engine changes). Key comes from the gitignored repo-root `.env`.

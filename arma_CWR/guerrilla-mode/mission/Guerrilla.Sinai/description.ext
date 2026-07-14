@@ -124,6 +124,9 @@ class CfgGuerrillaFactions
 
         holdClass = "LoBo_Egypt_FrtCrp";
         holdCount = 3;
+        // town flagpole texture (native TownFlags): without this key the
+        // engine's side-WEST default is the US flag - wrong faction here
+        flag = "\flags\israel.jpg";
         recruitFighter = "LoBo_Egypt_FrtCrp";
         recruitSpecialist = "LoBo_Egypt_FrtCrpMG";
         companionClass = "LoBo_Egypt_FrtCrp";
@@ -166,6 +169,9 @@ class CfgGuerrillaFactions
         // bottle-thrower variants - they carry stone/molotov throw
         // magazines, wrong for a passive CIV population.
         civClassCount = 4;   // number of civClass<N> keys that follow
+
+        // town flagpole texture: side-EAST default would be the USSR flag
+        flag = "\flags\egypt.jpg";
         civClass1 = "LoBo_Civ_01";
         civClass2 = "LoBo_Civ_02";
         civClass3 = "LoBo_Civ_03";
