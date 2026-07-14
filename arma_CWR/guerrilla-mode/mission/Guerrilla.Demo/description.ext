@@ -91,26 +91,48 @@ class CfgGuerrillaFactions
         // CONFIG.BIN - "SoldierESoldier" does not exist in this config family)
         tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
         tierThresholds[] = {3, 5};
-        // QRF escort: trucks below WL3, APC from WL3 (old spawning.sqs gate)
-        vehicles[] = {"Ural", "BMP"};
-        vehicleThreshold = 3;
+        // per-tier role variants (plan 15): the native squad composer fills
+        // MG/AT/medic/sniper slots from these; "" = the tier fields no such
+        // role (that slot spawns the tier rifleman). SoldierESniper is
+        // Classic-only - on the Demo [Remaster] package the engine's
+        // descriptor-resolution pass blanks it (logged) and the slot
+        // degrades to a rifleman instead of a fatal spawn.
+        tiersMG[]     = {"SoldierEMG", "SoldierEMG", "SoldierEMG"};
+        tiersAT[]     = {"SoldierELAW", "SoldierELAW", "SoldierELAW"};
+        tiersMedic[]  = {"SoldierEMedic", "SoldierEMedic", "SoldierEMedic"};
+        tiersSniper[] = {"", "", "SoldierESniper"};
+        // QRF escort ladder (full vehicleThresholds[] form, plan 15): UAZ
+        // patrol -> truck-mobile -> BMP (best all-round QRF vehicle: D+G+C,
+        // 8 cargo, 73mm+AT-3) -> T72 escort. All four classes ship in BOTH
+        // local packages (Classic 1.99 and Demo [Remaster]).
+        vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
+        vehicleThresholds[] = {3, 6, 8};
         officer = "OfficerE";
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-EAST default - stated for the data-file contract
+        flag = "\flags\ussr.jpg";
     };
     class GUER // resistance descriptor
     {
         side = "GUER";
         tiers[] = {"SoldierGB"};
         tierThresholds[] = {};
-        vehicles[] = {}; // none in phase 1
+        // role variants for hold squads / a future GUER-occupier swap; the
+        // Demo [Remaster] package ships none of these - the resolution pass
+        // degrades the whole faction onto its GUER fallback (SoldierGFakeE)
+        tiersMG[]    = {"SoldierGMG"};
+        tiersAT[]    = {"SoldierGLAW"};
+        tiersMedic[] = {"SoldierGMedic"};
+        // captured/irregular motor pool (Classic-only classes; auto-dropped
+        // on packages that lack them): jeep -> PV3S -> captured BMP -> T55
+        vehicles[] = {"GJeep", "TruckV3SG", "BMPRes", "T55G"};
+        vehicleThresholds[] = {4, 7, 9};
         officer = "SoldierGB";
 
         holdClass = "SoldierGB";
         holdCount = 3;
         recruitFighter = "SoldierGB";
         recruitSpecialist = "SoldierGMG";
-        // town flagpole texture (native TownFlags); matches the engine's
-        // side-EAST default - stated for the data-file contract
-        flag = "\flags\ussr.jpg";
         companionClass = "SoldierGB";
 
         // OFP magazine convention (verified in CONFIG.BIN): simple weapons
@@ -129,6 +151,9 @@ class CfgGuerrillaFactions
         lootATMag = "RPGLauncher";
         lootSniperWeapon = "SVDDragunov";
         lootSniperMag = "SVDDragunov";
+
+        // town flagpole texture; matches the engine's side-GUER default
+        flag = "\flags\fia.jpg";
     };
     class CIV // civilian population descriptor (issue #8)
     {
@@ -151,9 +176,6 @@ class CfgGuerrillaFactions
         // is a non-Man class - SkodaHelper/LaserTarget/Thing/buildings/
         // targets - and the Man-derived roster is only SoldierW*/SoldierE*/
         // Officer*/GeneralE/Angelina/SoldierGFakeE; Angelina is scope=1,
-
-        // town flagpole texture; matches the engine's side-GUER default
-        flag = "\flags\fia.jpg";
         // side=EAST - unusable). SoldierWCaptive is the ONLY unarmed public
         // human in that config (scope=2 via SoldierWB, weapons[]={}). Its
         // CONFIG side is WEST(1), but civilians.sqs spawns bodies into

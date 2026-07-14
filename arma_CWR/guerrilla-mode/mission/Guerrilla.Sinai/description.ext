@@ -109,24 +109,48 @@ class CfgGuerrillaFactions
         // WL<3 Golani regulars -> WL3-4 Paratroopers -> WL5+ Shayetet 13
         tiers[] = {"LoBoGolaniWB", "LoBoParaWB", "LoBoShayetetWB"};
         tierThresholds[] = {3, 5};
-        // QRF escort: HMMWV patrol below WL3, M113 Zelda from WL3
-        vehicles[] = {"LoBoHMWV_Mag_Patrol", "LoBo_Zelda"};
-        vehicleThreshold = 3;
+        // per-tier role variants (plan 15) - each tier family carries its
+        // own MG/AT/medic/sniper siblings (verified in lost.pbo; see
+        // tmp/class-survey/lobo-infantry.md for the full role map)
+        tiersMG[]     = {"LoBoGolaniWMG", "LoBoParaWMG", "LoBoShayetetWMG"};
+        tiersAT[]     = {"LoBoGolaniWLAW", "LoBoParaWLAW", "LoBoShayetetWLAW"};
+        tiersMedic[]  = {"LoBoGolaniWMedic", "LoBoParaWMedic", "LoBoShayetetWMedic"};
+        tiersSniper[] = {"LoBoGolaniWBSN", "LoBoParaWBSN", "LoBoShayetetSN"};
+        // QRF escort ladder (full vehicleThresholds[] form): HMMWV patrol ->
+        // M113 Zelda -> M60A1 Magach 6 -> Shot-Kal Mk.D (LoBo_Centurion2,
+        // the period-correct '67/'73 Sinai Centurion - the Blazer-ERA
+        // LoBo_Centurion is 1978+). Armed picks need the @lobofixup patched
+        // pbos in strict/autotest lanes (malformed LoBoammo tracerColor).
+        vehicles[] = {"LoBoHMWV_Mag_Patrol", "LoBo_Zelda", "LoBoM60A1", "LoBo_Centurion2"};
+        vehicleThresholds[] = {3, 6, 9};
         officer = "LoBoGolaniWBo";
+        // town flagpole texture (native TownFlags): without this key the
+        // engine's side-WEST default is the US flag - wrong faction here
+        flag = "\flags\israel.jpg";
     };
     class EgyptFrontier // resistance descriptor - side EAST
     {
         side = "EAST";
         tiers[] = {"LoBo_Egypt_FrtCrp"};
         tierThresholds[] = {};
-        vehicles[] = {}; // none in phase 1
+        // role variants: MG/AT are native Frontier Corps classes; the corps
+        // fields no medic or marksman of its own, so those borrow same-side
+        // Egyptian army kin (LoBoEgypt.pbo) - an army medic and an SVD
+        // marksman attached to a frontier cell is Sinai-plausible
+        tiersMG[]     = {"LoBo_Egypt_FrtCrpMG"};
+        tiersAT[]     = {"LoBo_Egypt_FrtCrpAT"};
+        tiersMedic[]  = {"LoBo_Egypt_infantryMedic"};
+        tiersSniper[] = {"LoBo_Egypt_Grdsnip"};
+        // resistance motor pool (phase-2; consumed by hold/QRF only if this
+        // faction ever occupies): DShK Toyota technical (crewed by Frontier
+        // Corps men in the config) -> BTR-60PB (carries a full 12-man QRF)
+        // -> BMP-1 ('73-correct) -> T-55A
+        vehicles[] = {"LoBo_EToymg", "LoBo_BTR60", "LoBo_BMP_EGY", "LoBo_T55_EGY_1"};
+        vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Egypt_FrtCrpo";
 
         holdClass = "LoBo_Egypt_FrtCrp";
         holdCount = 3;
-        // town flagpole texture (native TownFlags): without this key the
-        // engine's side-WEST default is the US flag - wrong faction here
-        flag = "\flags\israel.jpg";
         recruitFighter = "LoBo_Egypt_FrtCrp";
         recruitSpecialist = "LoBo_Egypt_FrtCrpMG";
         companionClass = "LoBo_Egypt_FrtCrp";
@@ -145,6 +169,9 @@ class CfgGuerrillaFactions
         lootATMag = "JAM_RPG7ALLRocket";
         lootSniperWeapon = "LoBo_SVD";
         lootSniperMag = "JAM_E762_10mag";
+
+        // town flagpole texture: side-EAST default would be the USSR flag
+        flag = "\flags\egypt.jpg";
     };
     class CIV // civilian population descriptor (issue #8)
     {
@@ -169,9 +196,6 @@ class CfgGuerrillaFactions
         // bottle-thrower variants - they carry stone/molotov throw
         // magazines, wrong for a passive CIV population.
         civClassCount = 4;   // number of civClass<N> keys that follow
-
-        // town flagpole texture: side-EAST default would be the USSR flag
-        flag = "\flags\egypt.jpg";
         civClass1 = "LoBo_Civ_01";
         civClass2 = "LoBo_Civ_02";
         civClass3 = "LoBo_Civ_03";

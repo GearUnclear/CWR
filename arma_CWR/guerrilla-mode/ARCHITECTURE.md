@@ -90,8 +90,13 @@ decoupled from the flip: it announces a town crossed `supportFlip` and is
 READY; `captured` fires on the actual flip.
 
 Factions: `gmFactionTierClass [side, warLevel]`, `gmFactionVehicle [side,
-warLevel]`, `gmFactionValue [side, "key"]` (any plain key), and the side
-nulars `gmOccupierSide`/`gmResistanceSide`.
+warLevel]`, `gmFactionValue [side, "key"]` (any plain key), `gmFactionSquad
+[side, warLevel, count]` (→ array of classnames from the plan-15 role
+template: leader slot first, MG/AT/medic/sniper slots interleaved with
+riflemen, roles the tier does not field come back as riflemen; `[]` when the
+faction has no tiers), `gmClassExists "<class>"` (→ bool, the CfgVehicles
+probe the descriptor-resolution pass uses), and the side nulars
+`gmOccupierSide`/`gmResistanceSide`.
 
 Alert: `gmZoneAlert <i>` (0/1/2), `gmZoneLastKnown <i>` (`[x,y,z]` or `[]`),
 `gmAlertOnEvent ["alertChanged"|"undercoverBroken", h]`
@@ -147,6 +152,29 @@ loot-role loadouts `loot<Role>Weapon` / `loot<Role>Mag` for
 `Role ∈ {Rifleman, Medic, MG, AT, Sniper}`. Numeric keys (e.g. `holdCount`)
 are fetched with the lib helper `GM_fnFactionNum` (`gmFactionValue` +
 `compile`).
+
+**Plan-15 extensions (both sides, all optional):** per-tier role arrays
+`tiersMG[]` / `tiersAT[]` / `tiersMedic[]` / `tiersSniper[]` parallel to
+`tiers[]` (`""` or a short/missing array = the tier fields no such role; the
+squad composer substitutes the tier rifleman), the full escalation ladder
+`vehicleThresholds[]` (mirrors `tierThresholds[]`; supersedes the legacy
+2-step `vehicleThreshold` scalar), and `fallbackClass` (probed first by the
+resolution pass's side-fallback chain).
+
+**Descriptor resolution pass (plan 15, engine path only):** at campaign
+load, after side resolution, every classname-valued key is probed against
+the loaded data package (`Pars >> CfgVehicles` / `CfgWeapons`) and
+unresolvable entries are substituted per a fixed table — tiers fall back to
+the nearest resolved tier then the per-side fallback list (`WEST SoldierWB`,
+`EAST SoldierEB`, `GUER SoldierGB → SoldierGFakeE → SoldierEB → SoldierWB`,
+`CIV Civilian → SoldierWCaptive`); roles blank to the tier rifleman;
+vehicle rungs drop and the ladder compacts onto its authored war-level
+gates; weapon/mag keys fall back to `baseWeapon` / their weapon sibling; a
+fully-unresolvable CIV roster forces `civClassCount=0` (the managers'
+no-CIV-layer path). Every substitution is RptF-logged. This is the
+"missing SoldierG* posture" for the Demo [Remaster] package (#13): a
+descriptor authored for one package degrades on another instead of
+boot-failing or silently spawning nothing.
 
 **Island/faction-agnostic rule (definition of done for issue #3):** the
 `scripts/` directory contains **zero classnames and zero side-string
@@ -328,6 +356,7 @@ script-authored value below it is never raised).
 |-----------------------|-------------------------------------|-------|
 | `GM_fnRandPosNear`    | `[center,radius] → [x,y,0]`         | square jitter, getPos order |
 | `GM_fnSpawnGroup`     | `[sideVALUE,class,count,pos] → group` | callers split above the 12-cap |
+| `GM_fnSpawnSquad`     | `[sideVALUE,classes[],pos] → group` | one unit per array entry (from `gmFactionSquad`) |
 | `GM_fnSideFromString` | `sideString → side value`           | matches by formatting the side nulars; no side literals |
 | `GM_fnCountOwnedBy`   | `ownerString → scalar`              | scans `gmZone` tuples |
 | `GM_fnZoneOfType`     | `typeString → first index (−1)`     | e.g. the CAMP anchor |

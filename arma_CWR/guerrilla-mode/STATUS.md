@@ -15,8 +15,8 @@ reconciled against the engine source, not play-tested.)*
 | 1 | Zone table (Camp / Village / Outpost) | `description.ext` `CfgGuerrillaZones` → engine `ZoneRegistry` | **native (data-driven)** | Per-island data file (issue #3 item 3); positions in getPos order; `seedCities=1` auto-adds every named town as a CITY zone |
 | 2 | Marker recolor/label on flip + fog reveal | `ZoneRegistry::UpdateMarkers` | **native** | Engine repaints only EXISTING markers; `init.sqs` creates one marker per zone (once — created markers serialize with the world) |
 | 3 | Territory capture (military clear→flip; CITY on support) | `ZoneRegistry::EvaluateTick` | **native** | Player-proximity (cacheRadius) gate, heat spike, income tap all engine-side; fires the `captured`/`supportThreshold` events |
-| 3b | Capture REACTION (hold garrison + notify) | `scripts/capture.sqs` | **script** | holdClass × holdCount from the resistance faction descriptor |
-| 4 | Outpost garrison: officer-first groups, SENTRY/GUARD | `GarrisonCache::SpawnGarrison` | **native** | Tier class from `CfgGuerrillaFactions` tiers[]/thresholds; officer key; reads script `gmWarLevel` |
+| 3b | Capture REACTION (hold garrison + notify) | `scripts/capture.sqs` | **script** | holdCount-sized role-mixed squad via `gmFactionSquad` (plan 15); tier-less descriptors keep holdClass × holdCount |
+| 4 | Outpost garrison: officer-first groups, SENTRY/GUARD | `GarrisonCache::SpawnGarrison` | **native** | Role-diverse squads (plan 15): `ZoneRegistry::FactionSquad` template over tiers[] + tiersMG/AT/Medic/Sniper[]; officer key; descriptor classnames package-resolved at load; reads script `gmWarLevel` |
 | 5 | Distance-cached spawn/despawn + survivor write-back | `GarrisonCache` | **native** | +50 m despawn hysteresis; `garrisonSpawned`/`garrisonDespawned` events; `gmGarrisonForceDespawn` escape hatch |
 | 6 | QRF: spawn + convoy on RED, road-snap, stall fallback | `scripts/qrf.sqs` | **script (policy, by design)** | Reacts to `alertChanged`; classes/vehicle/officer via `gmFaction*`, side via `gmOccupierSide`; behavior preserved from old spawning.sqs |
 | 7 | Graduated alert FSM (GREEN/YELLOW/RED) | `AlertMachine` | **native** | knowsAbout bands, disengage window, last-known pos (`gmZoneLastKnown`), edge heat spikes; garrison POSTURE reaction (behaviour edges + YELLOW investigate moves) stays in `qrf.sqs` |
@@ -38,7 +38,7 @@ reconciled against the engine source, not play-tested.)*
 |------|------|
 | `description.ext` | THE per-island data file: `CfgGuerrillaZones` (tuning + zone seed + `seedCities=1`) and `CfgGuerrillaFactions` (Demo: stock EAST/GUER classes) |
 | `init.sqs` | thin bootstrap: script-state seed, zone markers, 8 one-line native handler registrations, exec managers |
-| `scripts/lib.sqs` | 7 helpers (`GM_fnRandPosNear/SpawnGroup/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
+| `scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
 | `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint |
 | `scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
 | `scripts/undercover.sqs` | cover establish, fired-EH → `gmBreakUndercover`, `undercoverBroken` consumer |

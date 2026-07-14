@@ -101,10 +101,27 @@ struct FactionRecord
     RString className; // config subclass name (second lookup key after side)
     AutoArray<RString> tiers;
     AutoArray<float> tierThresholds; // ascending war levels; tier i+1 from thresholds[i]
+    // optional per-tier role variants, parallel to tiers[] (plan 15).  A
+    // missing array, short array or "" entry means "this tier fields no such
+    // role"; every consumer substitutes the tier's rifleman (tiers[i])
+    AutoArray<RString> tiersMG;
+    AutoArray<RString> tiersAT;
+    AutoArray<RString> tiersMedic;
+    AutoArray<RString> tiersSniper;
     AutoArray<RString> vehicles;
     float vehicleThreshold = 3.0f;      // legacy 2-step ladder (index 0 -> 1)
     AutoArray<float> vehicleThresholds; // full ladder, mirrors tierThresholds
     AutoArray<NamedValue> values;
+};
+
+// Class-existence probe for the faction-descriptor resolution pass (plan 15).
+// The engine path probes the merged game config (Pars >> bank); unit tests
+// inject a fake so LoadFromParams stays testable without a live config.
+struct ClassProbe
+{
+    virtual ~ClassProbe() = default;
+    // bank is a top-level config class ("CfgVehicles" / "CfgWeapons")
+    virtual bool Exists(const char* bank, const char* className) const = 0;
 };
 
 enum ZoneEventType
@@ -165,9 +182,14 @@ class ZoneRegistry : public SerializeClass
     // defaultOccupier / defaultResistance keys (direct mission launches
     // without the new-game UI), then to the built-in "EAST"/"GUER".
     // worldNamesCfg is the world's Names class for the optional CITY
-    // auto-seed (null: no seeding).
+    // auto-seed (null: no seeding).  probe, when non-null, runs the
+    // faction-descriptor class-resolution pass (plan 15): every
+    // classname-valued key is checked against the loaded data package and
+    // unresolvable entries are substituted (logged via RptF) instead of
+    // producing fatal/sterile spawns downstream.
     void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
-                        const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr);
+                        const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr,
+                        const ClassProbe* probe = nullptr);
 
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
@@ -190,6 +212,12 @@ class ZoneRegistry : public SerializeClass
     RString FactionTierClass(const char* side, float warLevel) const;
     RString FactionVehicle(const char* side, float warLevel) const;
     RString FactionValue(const char* side, const char* key) const;
+    // role-diverse squad composition (plan 15): fills out with count
+    // classnames from the faction's war-level tier - a deterministic
+    // military template (leader slot first, then MG/AT/medic/sniper slots
+    // interleaved with riflemen; roles the tier does not field become
+    // riflemen).  Empty result when the faction has no tiers.
+    void FactionSquad(const char* side, float warLevel, int count, AutoArray<RString>& out) const;
 
     // events ----------------------------------------------------------------
     void SetEventHandler(ZoneEventType type, RString handler);
@@ -231,6 +259,14 @@ class ZoneRegistry : public SerializeClass
 
     void LoadZones(const ParamEntry& cfg);
     void LoadFactions(const ParamEntry& cfg);
+    // plan-15 resolution pass: validate every classname-valued descriptor
+    // entry against the loaded data package, substituting per the resolution
+    // table (tiers fall back tier-to-tier then side fallback; roles fall back
+    // to the tier rifleman; vehicles are dropped and the ladder compacted;
+    // weapon/mag keys fall back to baseWeapon / the matching weapon key)
+    void ResolveFactionClasses(const ClassProbe& probe);
+    // shared tiers[] index selection for FactionTierClass / FactionSquad
+    static int TierIndex(const FactionRecord& f, float warLevel);
     void SeedCityZones(const ParamEntry& namesCfg);
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;

@@ -8,6 +8,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>           // Pars (gmClassExists probe)
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Foundation/platform.hpp>
@@ -223,6 +224,43 @@ static GameValue GmFactionValue(const GameState* state, GameValuePar oper1)
     return GameStringType(ZoneRegistry::Instance().FactionValue(side, key));
 }
 
+// gmFactionSquad [sideOrClassName, warLevel, count] -> array of classnames
+// composed by the plan-15 role template (leader slot first; roles the tier
+// does not field come back as riflemen).  Empty array when the faction has
+// no tiers - callers fall back to their monoculture key (holdClass etc.).
+static GameValue GmFactionSquad(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 3))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[0], GameString))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[1], GameScalar))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[2], GameScalar))
+    {
+        return NOTHING;
+    }
+    GameStringType side = array[0];
+    AutoArray<RString> classes;
+    ZoneRegistry::Instance().FactionSquad(side, (float)array[1], toInt((float)array[2]), classes);
+
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    out.Resize(classes.Size());
+    for (int i = 0; i < classes.Size(); i++)
+    {
+        out[i] = GameStringType(classes[i]);
+    }
+    return value;
+}
+
 // gmFactionVehicle [sideOrClassName, warLevel]
 static GameValue GmFactionVehicle(const GameState* state, GameValuePar oper1)
 {
@@ -241,6 +279,20 @@ static GameValue GmFactionVehicle(const GameState* state, GameValuePar oper1)
     }
     GameStringType side = array[0];
     return GameStringType(ZoneRegistry::Instance().FactionVehicle(side, (float)array[1]));
+}
+
+// gmClassExists <classname> -> bool: the loaded data package carries the
+// class under CfgVehicles (the same probe the plan-15 descriptor resolution
+// runs; lets missions/tests ask the engine's question before a createUnit)
+static GameValue GmClassExists(const GameState* /*state*/, GameValuePar oper1)
+{
+    GameStringType className = oper1;
+    if (className.GetLength() == 0)
+    {
+        return false;
+    }
+    const ParamEntry* bank = Pars.FindEntry("CfgVehicles");
+    return bank && bank->FindEntry(className) != nullptr;
 }
 
 // gmZoneAlert <zoneIndex> -> 0 GREEN | 1 YELLOW | 2 RED
@@ -318,6 +370,8 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     GGameState.NewFunction(GameFunction(GameString, "gmFactionTierClass", GmFactionTierClass, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "gmFactionValue", GmFactionValue, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "gmFactionVehicle", GmFactionVehicle, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "gmFactionSquad", GmFactionSquad, GameArray));
+    GGameState.NewFunction(GameFunction(GameBool, "gmClassExists", GmClassExists, GameString));
 
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneAlert", GmZoneAlert, GameScalar));
     GGameState.NewFunction(GameFunction(GameArray, "gmZoneLastKnown", GmZoneLastKnown, GameScalar));

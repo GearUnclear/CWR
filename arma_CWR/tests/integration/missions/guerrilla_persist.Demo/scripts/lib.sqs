@@ -33,6 +33,13 @@ GM_fnRandPosNear = {[ ((_this select 0) select 0) + (random (2 * (_this select 1
 GM_fnSpawnGroup = {GM_tmpG = createGroup (_this select 0); GM_tmpI = 0; while {GM_tmpI < (_this select 2)} do {(_this select 1) createUnit [(_this select 3), GM_tmpG, "", 0.5, "PRIVATE"]; GM_tmpI = GM_tmpI + 1}; GM_tmpG}
 
 
+; --- spawnSquad( [side, classes, pos] ) -> group ------------------------------
+;   Role-diverse sibling of GM_fnSpawnGroup: spawns ONE unit per entry of the
+;   classes array (composed by the native gmFactionSquad - plan 15; scripts
+;   stay classname-free). Same side-VALUE + 12-cap contract as GM_fnSpawnGroup.
+GM_fnSpawnSquad = {GM_tmpG = createGroup (_this select 0); GM_tmpI = 0; while {GM_tmpI < count (_this select 1)} do {((_this select 1) select GM_tmpI) createUnit [(_this select 2), GM_tmpG, "", 0.5, "PRIVATE"]; GM_tmpI = GM_tmpI + 1}; GM_tmpG}
+
+
 ; --- sideFromString( sideString ) -> side value ------------------------------
 ;   Generic side-string -> side-value conversion (createGroup/createCenter
 ;   need the value; gmOccupierSide/gmResistanceSide return strings). Matches

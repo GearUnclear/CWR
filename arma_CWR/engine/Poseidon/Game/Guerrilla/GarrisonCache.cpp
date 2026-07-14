@@ -449,12 +449,19 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
             RptF("GarrisonCache: group budget exhausted spawning zone '%s'", (const char*)z->name);
             break;
         }
+        // role-diverse composition (plan 15): the squad template fills MG/
+        // AT/medic/sniper slots from the faction's tier role arrays; a
+        // descriptor without role arrays composes all-riflemen - the exact
+        // pre-plan-15 squad
+        AutoArray<RString> classes;
+        registry.FactionSquad(z->owner, warLevel, takes[g], classes);
         for (int u = 0; u < takes[g]; u++)
         {
             bool officer = firstGroup && u == 0;
+            RString unitClass = u < classes.Size() ? classes[u] : tierClass;
             Vector3 pos = RandomNear(z->pos, spread);
             int before = grp->NUnits();
-            ::CreateUnit(grp, officer ? officerClass : tierClass, pos, RString(), officer ? 0.6f : 0.5f,
+            ::CreateUnit(grp, officer ? officerClass : unitClass, pos, RString(), officer ? 0.6f : 0.5f,
                          officer ? RankSergeant : RankPrivate);
             if (grp->NUnits() > before)
             {

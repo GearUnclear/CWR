@@ -88,21 +88,37 @@ class CfgGuerrillaFactions
         // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
         tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
         tierThresholds[] = {3, 5};
-        // QRF escort: trucks below WL3, APC from WL3 (qrf.sqs gate)
-        vehicles[] = {"Ural", "BMP"};
-        vehicleThreshold = 3;
+        // per-tier role variants (plan 15; all verified in the 1.99 config):
+        // MG/AT/medic/sniper slots for the native squad composer; the sniper
+        // only arrives with the elite tier
+        tiersMG[]     = {"SoldierEMG", "SoldierEMG", "SoldierEMG"};
+        tiersAT[]     = {"SoldierELAW", "SoldierELAW", "SoldierELAW"};
+        tiersMedic[]  = {"SoldierEMedic", "SoldierEMedic", "SoldierEMedic"};
+        tiersSniper[] = {"", "", "SoldierESniper"};
+        // QRF escort ladder (full vehicleThresholds[] form): UAZ patrol ->
+        // Ural troop truck -> BMP IFV -> T72 escort
+        vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
+        vehicleThresholds[] = {3, 6, 8};
         officer = "OfficerE";
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-EAST default - stated for the data-file contract
+        flag = "\flags\ussr.jpg";
     };
     class GUER // resistance descriptor
     {
         side = "GUER";
         tiers[] = {"SoldierGB"};
         tierThresholds[] = {};
-        vehicles[] = {}; // none in phase 1
+        // role variants for the post-capture hold squads; no sniper class
+        // exists in the core GUER roster
+        tiersMG[]    = {"SoldierGMG"};
+        tiersAT[]    = {"SoldierGLAW"};
+        tiersMedic[] = {"SoldierGMedic"};
+        // captured/irregular motor pool: guerrilla jeep -> PV3S truck ->
+        // captured BMP -> T55 (all GUER-sided classes in the 1.99 config)
+        vehicles[] = {"GJeep", "TruckV3SG", "BMPRes", "T55G"};
+        vehicleThresholds[] = {4, 7, 9};
         officer = "SoldierGB";
-        // town flagpole texture (native TownFlags); matches the engine's
-        // side-EAST default - stated for the data-file contract
-        flag = "\flags\ussr.jpg";
 
         holdClass = "SoldierGB";
         holdCount = 3;
@@ -122,8 +138,8 @@ class CfgGuerrillaFactions
         lootATMag = "RPGLauncher";
         lootSniperWeapon = "SVDDragunov";
         lootSniperMag = "SVDDragunov";
-    };
-};
 
         // town flagpole texture; matches the engine's side-GUER default
         flag = "\flags\fia.jpg";
+    };
+};

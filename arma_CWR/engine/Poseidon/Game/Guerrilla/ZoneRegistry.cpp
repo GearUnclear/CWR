@@ -89,6 +89,21 @@ static RString ReadSideSelection(const char* lowercaseName)
     return (RString)value;
 }
 
+// the engine's ClassProbe: a classname exists when the merged game config
+// (Pars, i.e. the loaded data package + addons) carries it under the bank
+struct ParsClassProbe final : ClassProbe
+{
+    bool Exists(const char* bank, const char* className) const override
+    {
+        if (!bank || !className || !*className)
+        {
+            return false;
+        }
+        const ParamEntry* bankEntry = Pars.FindEntry(bank);
+        return bankEntry && bankEntry->FindEntry(className) != nullptr;
+    }
+};
+
 // ---------------------------------------------------------------------------
 // lifecycle / config
 // ---------------------------------------------------------------------------
@@ -145,14 +160,19 @@ void ZoneRegistry::LoadFromConfig()
             names = world->FindEntry("Names");
         }
     }
-    LoadFromParams(zones, factions, selOccupier, selResistance, names);
+    // the engine path always resolves descriptor classnames against the
+    // loaded data package (plan 15) - a descriptor authored for one package
+    // degrades with a logged substitution on another instead of producing
+    // fatal or silently-sterile spawns
+    ParsClassProbe probe;
+    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe);
     // alert tunables share the CfgGuerrillaZones class; loading here (not in
     // LoadFromParams) keeps the testable core free of singleton side effects
     AlertMachine::Instance().LoadFromParams(zones);
 }
 
 void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
-                                  const char* selResistance, const ParamEntry* worldNamesCfg)
+                                  const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe)
 {
     // rebuilds the config-derived tables only; event handlers and any
     // pending savegame rows are preserved (see Serialize)
@@ -181,6 +201,10 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
         ResolveSides(defOccupier, defResistance);
     }
     ResolveSides(selOccupier, selResistance);
+    if (probe)
+    {
+        ResolveFactionClasses(*probe);
+    }
     if (zonesCfg)
     {
         LoadZones(*zonesCfg);
@@ -308,14 +332,23 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
         f.side = e.ReadValue("side", RString(e.GetName()));
         f.vehicleThreshold = e.ReadValue("vehicleThreshold", f.vehicleThreshold);
 
-        const ParamEntry* tiers = e.FindEntry("tiers");
-        if (tiers && tiers->IsArray())
+        auto readStringArray = [&e](const char* key, AutoArray<RString>& out)
         {
-            for (int k = 0; k < tiers->GetSize(); k++)
+            const ParamEntry* arr = e.FindEntry(key);
+            if (arr && arr->IsArray())
             {
-                f.tiers.Add(RString((RStringB)(*tiers)[k]));
+                for (int k = 0; k < arr->GetSize(); k++)
+                {
+                    out.Add(RString((RStringB)(*arr)[k]));
+                }
             }
-        }
+        };
+        readStringArray("tiers", f.tiers);
+        // per-tier role variants (plan 15); optional, parallel to tiers[]
+        readStringArray("tiersMG", f.tiersMG);
+        readStringArray("tiersAT", f.tiersAT);
+        readStringArray("tiersMedic", f.tiersMedic);
+        readStringArray("tiersSniper", f.tiersSniper);
         const ParamEntry* thresholds = e.FindEntry("tierThresholds");
         if (thresholds && thresholds->IsArray())
         {
@@ -324,14 +357,7 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
                 f.tierThresholds.Add((*thresholds)[k]);
             }
         }
-        const ParamEntry* vehicles = e.FindEntry("vehicles");
-        if (vehicles && vehicles->IsArray())
-        {
-            for (int k = 0; k < vehicles->GetSize(); k++)
-            {
-                f.vehicles.Add(RString((RStringB)(*vehicles)[k]));
-            }
-        }
+        readStringArray("vehicles", f.vehicles);
         const ParamEntry* vehThresholds = e.FindEntry("vehicleThresholds");
         if (vehThresholds && vehThresholds->IsArray())
         {
@@ -356,6 +382,325 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
             f.values.Add(nv);
         }
         _factions.Add(f);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// plan-15 descriptor resolution: unknown incoming faction data never reaches
+// a spawn path.  Substitutions are logged; ABSENT keys keep their semantics
+// (only present-but-unresolvable values are rewritten).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// built-in last-resort candidates per side, probed in order.  The lists are
+// verified against the three local data packages (tmp/class-survey/): every
+// name is scope-accessible and model-complete in the package that ships it.
+// GUER degrades cross-side on GUER-less packages (Demo [Remaster], #13):
+// bodies spawned into GUER-side groups fight as resistance regardless of
+// their config side (the civilians.sqs side-comes-from-group mechanism).
+const char* const kFallbackWest[] = {"SoldierWB", nullptr};
+const char* const kFallbackEast[] = {"SoldierEB", nullptr};
+const char* const kFallbackGuer[] = {"SoldierGB", "SoldierGFakeE", "SoldierEB", "SoldierWB", nullptr};
+const char* const kFallbackCiv[] = {"Civilian", "SoldierWCaptive", nullptr};
+
+const char* const* FallbackListForSide(const char* side)
+{
+    if (stricmp(side, "WEST") == 0)
+    {
+        return kFallbackWest;
+    }
+    if (stricmp(side, "EAST") == 0)
+    {
+        return kFallbackEast;
+    }
+    if (stricmp(side, "GUER") == 0)
+    {
+        return kFallbackGuer;
+    }
+    if (stricmp(side, "CIV") == 0)
+    {
+        return kFallbackCiv;
+    }
+    return nullptr;
+}
+
+// keys valued with a CfgVehicles unit classname
+bool IsUnitClassKey(const char* key)
+{
+    if (stricmp(key, "officer") == 0 || stricmp(key, "holdClass") == 0 || stricmp(key, "recruitFighter") == 0 ||
+        stricmp(key, "recruitSpecialist") == 0 || stricmp(key, "companionClass") == 0 ||
+        stricmp(key, "fallbackClass") == 0)
+    {
+        return true;
+    }
+    // civClass1..civClassN (civClassCount is numeric, not a classname)
+    if (strnicmp(key, "civClass", 8) == 0 && key[8] >= '0' && key[8] <= '9')
+    {
+        return true;
+    }
+    return false;
+}
+
+// keys valued with a CfgWeapons classname (OFP-era magazines are CfgWeapons
+// entries too, so both kinds probe the same bank)
+bool IsWeaponKey(const char* key)
+{
+    if (stricmp(key, "baseWeapon") == 0 || stricmp(key, "baseMagazine") == 0)
+    {
+        return true;
+    }
+    if (strnicmp(key, "loot", 4) != 0)
+    {
+        return false;
+    }
+    size_t len = strlen(key);
+    return (len > 6 && stricmp(key + len - 6, "Weapon") == 0) || (len > 3 && stricmp(key + len - 3, "Mag") == 0);
+}
+
+} // namespace
+
+void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
+{
+    const char* kVeh = "CfgVehicles";
+    const char* kWpn = "CfgWeapons";
+    for (int fi = 0; fi < _factions.Size(); fi++)
+    {
+        FactionRecord& f = _factions[fi];
+
+        // side fallback: the descriptor's own fallbackClass key first, then
+        // the built-in per-side candidate list; "" when nothing resolves
+        RString sideFallback;
+        for (int k = 0; k < f.values.Size() && sideFallback.GetLength() == 0; k++)
+        {
+            if (stricmp(f.values[k].key, "fallbackClass") == 0 && probe.Exists(kVeh, f.values[k].value))
+            {
+                sideFallback = f.values[k].value;
+            }
+        }
+        if (const char* const* candidates = FallbackListForSide(f.side))
+        {
+            for (int k = 0; candidates[k] && sideFallback.GetLength() == 0; k++)
+            {
+                if (probe.Exists(kVeh, candidates[k]))
+                {
+                    sideFallback = candidates[k];
+                }
+            }
+        }
+
+        // RptF is compiled out in every build config - substitutions must be
+        // visible in release logs, so route through the real logger
+        auto logSub = [&f](const char* key, const char* bad, const char* sub)
+        {
+            LOG_WARN(Core, "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
+                     (const char*)f.className, key, bad, (sub && *sub) ? sub : "<none>");
+        };
+
+        // ---- tiers[]: nearest lower resolved tier, then higher, then the
+        // side fallback (an all-unresolved ladder collapses to the fallback
+        // or, failing that, empties - FactionTierClass "" = systems inert)
+        AutoArray<bool> ok;
+        ok.Resize(f.tiers.Size());
+        bool anyTier = false;
+        for (int i = 0; i < f.tiers.Size(); i++)
+        {
+            ok[i] = f.tiers[i].GetLength() > 0 && probe.Exists(kVeh, f.tiers[i]);
+            anyTier |= ok[i];
+        }
+        for (int i = 0; i < f.tiers.Size(); i++)
+        {
+            if (ok[i])
+            {
+                continue;
+            }
+            RString sub;
+            for (int j = i - 1; j >= 0 && sub.GetLength() == 0; j--)
+            {
+                if (ok[j])
+                {
+                    sub = f.tiers[j];
+                }
+            }
+            for (int j = i + 1; j < f.tiers.Size() && sub.GetLength() == 0; j++)
+            {
+                if (ok[j])
+                {
+                    sub = f.tiers[j];
+                }
+            }
+            if (sub.GetLength() == 0)
+            {
+                sub = sideFallback;
+            }
+            logSub("tiers[]", f.tiers[i], sub);
+            f.tiers[i] = sub;
+        }
+        if (!anyTier && f.tiers.Size() > 0 && sideFallback.GetLength() == 0)
+        {
+            f.tiers.Clear(); // nothing spawnable: honest inert beats sterile retry loops
+        }
+
+        // ---- role tiers: an unresolvable entry blanks to "" (query-time
+        // fallback to the tier rifleman keeps the no-probe path identical)
+        AutoArray<RString>* roleArrays[] = {&f.tiersMG, &f.tiersAT, &f.tiersMedic, &f.tiersSniper};
+        const char* roleNames[] = {"tiersMG[]", "tiersAT[]", "tiersMedic[]", "tiersSniper[]"};
+        for (int r = 0; r < 4; r++)
+        {
+            AutoArray<RString>& arr = *roleArrays[r];
+            for (int i = 0; i < arr.Size(); i++)
+            {
+                if (arr[i].GetLength() > 0 && !probe.Exists(kVeh, arr[i]))
+                {
+                    logSub(roleNames[r], arr[i], "<tier rifleman>");
+                    arr[i] = RString();
+                }
+            }
+        }
+
+        // ---- vehicles[]: drop unresolvable rungs and compact the ladder.
+        // The thresholds are the LADDER's escalation gates (rung k>0 unlocks
+        // at vehicleThresholds[k-1]), not properties of a specific hull - so
+        // the surviving vehicles slide down into the dropped rungs and the
+        // pacing stays authored (at WL6 SOMETHING still upgrades)
+        {
+            AutoArray<RString> keptVehicles;
+            for (int i = 0; i < f.vehicles.Size(); i++)
+            {
+                bool exists = f.vehicles[i].GetLength() > 0 && probe.Exists(kVeh, f.vehicles[i]);
+                if (!exists)
+                {
+                    logSub("vehicles[]", f.vehicles[i], "<dropped>");
+                    continue;
+                }
+                keptVehicles.Add(f.vehicles[i]);
+            }
+            if (keptVehicles.Size() != f.vehicles.Size())
+            {
+                f.vehicles = keptVehicles;
+                int gates = keptVehicles.Size() > 0 ? keptVehicles.Size() - 1 : 0;
+                if (f.vehicleThresholds.Size() > gates)
+                {
+                    f.vehicleThresholds.Resize(gates);
+                }
+            }
+        }
+
+        // ---- plain keys: units fall back to tier 0 / the side fallback;
+        // weapon keys fall back to the (resolved) baseWeapon; mag keys to
+        // their weapon sibling (the OFP self-magazine convention).  Resolve
+        // baseWeapon first - it anchors the rest.
+        RString baseWeapon;
+        for (int k = 0; k < f.values.Size(); k++)
+        {
+            FactionRecord::NamedValue& v = f.values[k];
+            if (stricmp(v.key, "baseWeapon") != 0)
+            {
+                continue;
+            }
+            if (v.value.GetLength() > 0 && !probe.Exists(kWpn, v.value))
+            {
+                logSub(v.key, v.value, "");
+                v.value = RString();
+            }
+            baseWeapon = v.value;
+        }
+        int civResolved = 0;
+        RString civSub; // first resolvable civClass value, for sibling substitution
+        for (int k = 0; k < f.values.Size(); k++)
+        {
+            const FactionRecord::NamedValue& v = f.values[k];
+            bool isCiv = strnicmp(v.key, "civClass", 8) == 0 && v.key[8] >= '0' && v.key[8] <= '9';
+            if (isCiv && v.value.GetLength() > 0 && probe.Exists(kVeh, v.value))
+            {
+                civResolved++;
+                if (civSub.GetLength() == 0)
+                {
+                    civSub = v.value;
+                }
+            }
+        }
+        for (int k = 0; k < f.values.Size(); k++)
+        {
+            FactionRecord::NamedValue& v = f.values[k];
+            if (v.value.GetLength() == 0)
+            {
+                continue;
+            }
+            if (IsUnitClassKey(v.key))
+            {
+                if (probe.Exists(kVeh, v.value))
+                {
+                    continue;
+                }
+                bool isCiv = strnicmp(v.key, "civClass", 8) == 0 && v.key[8] >= '0' && v.key[8] <= '9';
+                RString sub = isCiv ? civSub : (f.tiers.Size() > 0 ? f.tiers[0] : RString());
+                if (sub.GetLength() == 0)
+                {
+                    sub = sideFallback;
+                }
+                logSub(v.key, v.value, sub);
+                v.value = sub;
+                if (isCiv && sub.GetLength() > 0)
+                {
+                    civResolved++;
+                }
+            }
+            else if (IsWeaponKey(v.key) && stricmp(v.key, "baseWeapon") != 0)
+            {
+                if (probe.Exists(kWpn, v.value))
+                {
+                    continue;
+                }
+                // a mag key first tries its weapon sibling (lootXMag ->
+                // lootXWeapon, baseMagazine -> baseWeapon), then baseWeapon
+                RString sub;
+                size_t len = strlen(v.key);
+                bool isMag = stricmp(v.key, "baseMagazine") == 0 || (len > 3 && stricmp(v.key + len - 3, "Mag") == 0);
+                if (isMag)
+                {
+                    char weaponKey[64];
+                    if (stricmp(v.key, "baseMagazine") == 0)
+                    {
+                        snprintf(weaponKey, sizeof(weaponKey), "baseWeapon");
+                    }
+                    else
+                    {
+                        snprintf(weaponKey, sizeof(weaponKey), "%.*sWeapon", (int)(len - 3), (const char*)v.key);
+                    }
+                    for (int m = 0; m < f.values.Size() && sub.GetLength() == 0; m++)
+                    {
+                        if (stricmp(f.values[m].key, weaponKey) == 0 && f.values[m].value.GetLength() > 0 &&
+                            probe.Exists(kWpn, f.values[m].value))
+                        {
+                            sub = f.values[m].value;
+                        }
+                    }
+                }
+                if (sub.GetLength() == 0)
+                {
+                    sub = baseWeapon;
+                }
+                logSub(v.key, v.value, sub);
+                v.value = sub;
+            }
+        }
+        // a CIV roster that resolved to nothing soft-disables the ambience
+        // layer: civilians.sqs treats civClassCount 0 / "" as "no CIV layer"
+        if (civResolved == 0)
+        {
+            for (int k = 0; k < f.values.Size(); k++)
+            {
+                if (stricmp(f.values[k].key, "civClassCount") == 0 && f.values[k].value.GetLength() > 0 &&
+                    stricmp(f.values[k].value, "0") != 0)
+                {
+                    LOG_WARN(Core, "ZoneRegistry: faction '{}': no civClass<N> resolved - civClassCount forced to 0",
+                         (const char*)f.className);
+                    f.values[k].value = "0";
+                }
+            }
+        }
     }
 }
 
@@ -517,6 +862,23 @@ const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
     return nullptr;
 }
 
+int ZoneRegistry::TierIndex(const FactionRecord& f, float warLevel)
+{
+    int tier = 0;
+    for (int i = 0; i < f.tierThresholds.Size(); i++)
+    {
+        if (warLevel >= f.tierThresholds[i])
+        {
+            tier++;
+        }
+    }
+    if (tier >= f.tiers.Size())
+    {
+        tier = f.tiers.Size() - 1;
+    }
+    return tier;
+}
+
 RString ZoneRegistry::FactionTierClass(const char* side, float warLevel) const
 {
     const FactionRecord* f = FindFaction(side);
@@ -524,19 +886,84 @@ RString ZoneRegistry::FactionTierClass(const char* side, float warLevel) const
     {
         return RString();
     }
-    int tier = 0;
-    for (int i = 0; i < f->tierThresholds.Size(); i++)
+    return f->tiers[TierIndex(*f, warLevel)];
+}
+
+void ZoneRegistry::FactionSquad(const char* side, float warLevel, int count, AutoArray<RString>& out) const
+{
+    out.Clear();
+    const FactionRecord* f = FindFaction(side);
+    if (!f || f->tiers.Size() == 0 || count <= 0)
     {
-        if (warLevel >= f->tierThresholds[i])
+        return;
+    }
+    int tier = TierIndex(*f, warLevel);
+    const RString& rifleman = f->tiers[tier];
+    // a tier fields a role only when its slot is authored non-empty; every
+    // absent role becomes a rifleman ("only as makes realistic sense" - the
+    // template never invents a specialist the faction does not have)
+    auto role = [tier, &rifleman](const AutoArray<RString>& arr) -> const RString&
+    { return (tier < arr.Size() && arr[tier].GetLength() > 0) ? arr[tier] : rifleman; };
+
+    // deterministic military template (no RNG: same inputs, same squad -
+    // save/load and test friendly).  Gates by squad size:
+    //   MG     1 from 3 men, 2 from 9
+    //   AT     1 from 5 men, 2 from 11
+    //   medic  1 from 6 men
+    //   sniper 1 from 10 men, only when the tier authors one
+    int mg = count >= 3 ? (count >= 9 ? 2 : 1) : 0;
+    int at = count >= 5 ? (count >= 11 ? 2 : 1) : 0;
+    int medic = count >= 6 ? 1 : 0;
+    bool tierHasSniper = tier < f->tiersSniper.Size() && f->tiersSniper[tier].GetLength() > 0;
+    int sniper = (count >= 10 && tierHasSniper) ? 1 : 0;
+
+    // slot 0 is the leader slot (spawned as a rifleman here; garrison/QRF
+    // callers substitute the faction officer); specials interleave with
+    // riflemen so partial groups still come out mixed
+    AutoArray<RString> specials;
+    if (mg >= 1)
+    {
+        specials.Add(role(f->tiersMG));
+    }
+    if (at >= 1)
+    {
+        specials.Add(role(f->tiersAT));
+    }
+    if (medic >= 1)
+    {
+        specials.Add(role(f->tiersMedic));
+    }
+    if (mg >= 2)
+    {
+        specials.Add(role(f->tiersMG));
+    }
+    if (at >= 2)
+    {
+        specials.Add(role(f->tiersAT));
+    }
+    if (sniper >= 1)
+    {
+        specials.Add(role(f->tiersSniper));
+    }
+
+    out.Add(rifleman); // leader slot
+    int nextSpecial = 0;
+    while (out.Size() < count)
+    {
+        if (nextSpecial < specials.Size())
         {
-            tier++;
+            out.Add(specials[nextSpecial]);
+            nextSpecial++;
+            if (out.Size() < count && nextSpecial < specials.Size())
+            {
+                out.Add(rifleman); // breathing room between specialists
+            }
+        }
+        else
+        {
+            out.Add(rifleman);
         }
     }
-    if (tier >= f->tiers.Size())
-    {
-        tier = f->tiers.Size() - 1;
-    }
-    return f->tiers[tier];
 }
 
 RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const

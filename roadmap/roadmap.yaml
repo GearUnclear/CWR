@@ -413,11 +413,17 @@ items:
       lacks; missing entries fail silently. Postmortem case: the glass-marker
       texture null made every bullet-vs-person hit classify as shoot-through
       glass, so projectiles did no real damage (fixed engine-side with 3 new
-      Trident regression tests). Full three-agent audit recorded in #13;
-      remaining work is its checklist: rename/path fixes (#12), RscOptionsShell
-      guard, CfgPreloadTextures shim backfill from 1.99 Data.pbo, Demo-package
-      posture for the missing SoldierG* roster, demo-tag and dual --data-dir
-      test lanes, install-missions world-gate for the Worlds-less Demo layout.
+      Trident regression tests). Full three-agent audit recorded in #13.
+      RESCOPED 2026-07-14 (asset-targeting policy): the Demo asset set is no
+      longer a gameplay target - Guerrilla content targets Classic 1.99 +
+      @LoBo assets only, and the Remaster obligation shrinks to FUTURE
+      compatibility with the full Remaster's assets (the plan-15 resolution
+      pass keeps missing classes non-fatal; never hard-require an asset the
+      full Remaster is expected to lack). Remaining checklist: RscOptionsShell
+      guard, CfgPreloadTextures shim backfill from 1.99 Data.pbo. Dropped as
+      no-longer-goals: Demo-roster remaps for the Demo-world Guerrilla tests,
+      demo-tag/dual --data-dir content lanes (the Demo package stays a
+      remaster.cpp contract source + PoseidonGameDemo.exe reference binary).
     log:
       - "Glass bug arc (2026-07-07): play report 'we can't hurt each other' -> point_blank_damage repro failed 4/4 -> bullet telemetry showed collisions with zero HIT dispatch -> GPreloadedTextures.New(TextureBlack) null vs null face textures -> fix: missing glass texture = glass detection off (Shots.cpp, VehicleAICombat.cpp CalculateLaser). Fix + tests pending commit."
       - "Naive damage asserts (>0.01) false-passed on glass-path component chip damage; regression tests now require >0.35. Also learned: SQF 'fire' force-fires skyward by design (dir[1]=10, AimWeaponForceFire), so it cannot drive aimed-damage tests."
@@ -427,6 +433,8 @@ items:
       - "#12 Option A landed (2026-07-08): kept the bracket names, fixed every configured path instead of re-renaming. .trident.env + run-game.ps1/install-missions.ps1 defaults now point at '[Classic]'; audited PS cmdlets for the bracket-glob hazard (Test-Path/Remove-Item already -LiteralPath; swapped New-Item -Path -> [IO.Directory]::CreateDirectory so the [Classic] parent isn't globbed); .gitignore/.ignore now carry escaped \\[Classic\\]/\\[Remaster\\] entries for BOTH dirs (git status quiet again, git check-ignore positive); six doc references + the sinai_swap test comment path-swapped. Option B (bracket-less re-rename) left to the maintainer."
       - "#14 docs closed (2026-07-08): corrected the stale 'no Demo dataset' test-runnability claims. IMPORTANT nuance found by live verification - #14's premise that the Demo-lane tests 'now run' is WRONG. The Demo [Remaster] package supplies demo.wrp but not the GUER roster (SoldierGB player + resistance garrisons), so a `tri --data-dir` run of guerrilla_capture_flip boot-fails on SoldierGB (strict-mode-fatal, harness closed, ~60ms). They stay unrunnable on both local packages until this item's 'missing SoldierG* posture' checklist lands (a per-package faction descriptor mapping the resistance onto Demo's EAST/WEST classes, or the missions' Gate-Zero class substitution). The 'add demo tag + dual --data-dir lanes' checklist item should note this roster blocker: tagging alone won't make them pass on Demo data."
       - "#15 package docs closed (2026-07-08): both game-data packages now documented in root CLAUDE.md (two-package layout bullets + touch policy) and arma_CWR/CLAUDE.md (:47 Game-data subsection naming both, the Demo's three data/contract/reference-binary roles, lane mapping, bracket -LiteralPath hazard). Noted for the record: #15's premise that root CLAUDE.md:18 still names the dead 'ARMA Cold War Assault/' path was already stale - #12 had renamed it to '[Classic]'."
+      - "2026-07-13: the 'missing SoldierG* posture' checklist item is addressed by the faction-class-resolution item (plan 15): descriptor classnames now resolve against the loaded package at campaign load with per-side fallback chains (GUER degrades SoldierGB -> SoldierGFakeE -> SoldierEB on the Demo), so descriptor-sourced spawns can no longer boot-fail or silently sterilize cross-package. Remaining for the Demo-world tests: the mission.sqm player class (SoldierGB) is NOT descriptor-sourced - Gate-Zero substitution or per-package mission variants still owed."
+      - "2026-07-14 DIRECTION (user): 'from henceforth' the asset target is Classic 1.99 + @LoBo only; the Demo asset set is dropped as a target, keeping only FUTURE compatibility with the full Remaster's assets. The Gate-Zero mission.sqm substitution / per-package mission variants for the Demo-world tests are therefore out of scope (not owed); plan-15 resolution is the standing forward-compat mechanism. Policy recorded in both CLAUDE.md files."
 
   # ---------------------------------------------------------------- phase 2
   - id: civilian-ambience-layer
@@ -451,6 +459,39 @@ items:
       - "Issue #2 consumption contract (binding names, do not rename): gmCivKilled kill-queue tuples [victim, killer, pos, zoneIdx]; GM_PSEUDO_GROUPS roster (seeded [], #2's spawner is the sole writer); the (group killer) in GM_PSEUDO_GROUPS -> PSEUDO -> blame-the-player classification branch; the shakedown initiator seam (shakedown.sqs #launch) for pseudo-team substitution."
       - "2026-07-10 fixer round 1: two verification failures fixed. (a) guerrilla_civ_shakedown test-design bug - the native ZoneRegistry GUER-presence drift (supportRate 5/3s while owner NEUTRAL) staled the support baseline; test now pins support past supportFlip and waits for the NEUTRAL->GUER flip (drift branch off for good) before baselining. (b) REAL shakedown.sqs bug the stale baseline had been masking: the kill path deleted the initiator pair immediately after posting the synthetic record, so the consumer (up to GM_CIV_TICK later) always saw a null killer -> OTHER (-2, no resentment) instead of OCCUPIER (-8 + resentment); the scene now holds the pair alive until gmCivKilled is drained (bounded 20s guard), then releases. Synced byte-identical to all 7 copies + reinstalled game-dir templates."
       - "2026-07-10 adversarial review (3 lenses: SQS dialect, persistence, checklist): 2 majors fixed pre-land - GM_fnCivPrune now deleteGroups dropped rows (empty AIGroups otherwise accumulate in the CIV center and bloat every save; no runtime auto-cleanup exists, only the mission-load sweep), and GM_SHK_FORCE is consumed on actual scene launch, not in #forcepick (a stale populated-zone row could bail at the null-victim guard and silently eat the force request, wedging the force-hook tests). Minors: init.sqs seeds GM_CIV_GROUPS/GM_CIV_GROUP_ZONE so shakedown.sqs has no exec-order dependency on civilians.sqs; wander pass is per-unit (leader-only doMove never un-stuck a doStop'ed released victim; doFollow is not a registered command); dead-killer OTHER-demotion window documented (dead units read TCivilian). Post-fix: unit byte-identity + all 4 civ/save-reload Trident tests re-run green."
+
+  - id: faction-class-resolution
+    title: "Faction class resolution + role-diverse squads (plan 15)"
+    phase: phase-2
+    status: in-progress
+    priority: 1
+    depends_on: [engine-native-systems, dual-package-compat]
+    summary: >
+      Unknown incoming faction data never reaches a spawn path: a
+      descriptor-resolution pass at campaign load probes every
+      classname-valued CfgGuerrillaFactions key against the loaded data
+      package (Pars >> CfgVehicles/CfgWeapons) and substitutes per a fixed
+      fallback table (tiers -> nearest tier -> per-side fallback chain incl.
+      the Demo's SoldierGFakeE; roles -> tier rifleman; vehicle rungs drop +
+      ladder compacts onto its war-level gates; mags -> weapon sibling;
+      unresolvable CIV roster -> civClassCount=0 soft-disable), RptF-logged.
+      Plus plan-15 squad diversity: per-tier role arrays
+      (tiersMG/AT/Medic/Sniper) + a deterministic military template
+      (ZoneRegistry::FactionSquad; MG from 3 men, AT from 5, medic from 6,
+      sniper from 10 and only where the tier authors one) consumed by the
+      native GarrisonCache and by qrf.sqs/capture.sqs via new commands
+      gmFactionSquad/gmClassExists and lib helper GM_fnSpawnSquad. QRF
+      escorts now man the gunner seat. Descriptors updated with role arrays
+      + full vehicleThresholds[] ladders for Guerrilla.Demo/Abel/
+      Showcase.Abel (vanilla) and Guerrilla.Sinai (IDF role families;
+      Egypt Frontier Corps finally gets medic/sniper kin + a technical ->
+      BTR-60 -> BMP-1 -> T-55 motor pool). Grounded in the six-agent
+      three-package class survey archived at arma_CWR/tmp/class-survey/.
+    log:
+      - "2026-07-13: six survey subagents (Classic/Demo/@LoBo x infantry/vehicles): Classic full on all sides; Demo a strict subset (no GUER/CIV rosters, model-absent traps M21/SVDDragunov/AK47-base); @LoBo IDF families carry full role siblings, Jordan is a native GUER-side army, requiredAddons metadata unreliable, armed picks need @lobofixup."
+      - "2026-07-13: engine + scripts + descriptors + unit tests landed; 2302/2302 PoseidonTests green incl. 3 new plan-15 cases; script core re-synced byte-identical to all 7 copies. Vehicle-ladder compaction semantics: thresholds are the LADDER's gates, survivors slide down into dropped rungs (pacing stays authored)."
+      - "2026-07-14 integration verification: 6/7 Classic-lane guerrilla tests green with the full plan-15 build (native_capture with the NEW gmFactionSquad hold path, save_reload.seq, undercover, civ_shakedown/panic/ambient). guerrilla_native_spawn fails its doMove-displacement assert - FULLY BISECTED AS PRE-EXISTING, NOT A PLAN-15 REGRESSION: plain HEAD (engine+scripts) fails 3/3 consecutive solo runs on this machine (one earlier 15 s HEAD pass was the outlier), my-engine+HEAD-scripts and my-full-build fail identically, the resolution pass is a logged no-op on that mission (0 substitution warnings), and the failing line even varies (once the garrison-live>=6 wait) - environmental nondeterminism, prime suspect the C: drive at 0 bytes free during the session. Known-flaky note on this test predates plan 15 (hardened in 0636f6d)."
+      - "2026-07-14 side-finding: RptF is #define'd to ((void)0) in EVERY build config (Foundation/Framework/DebugLog.hpp:61) - all RptF 'logging' in the guerrilla systems is dead code. Plan-15 substitution logging switched to LOG_WARN(Core, ...); pre-existing RptF call sites (zone-cap seeding, garrison group budget) still silently no-op and deserve the same migration."
 
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"

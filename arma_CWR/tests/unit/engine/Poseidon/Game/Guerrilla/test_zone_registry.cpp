@@ -8,9 +8,11 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <string.h>
 #include <string>
+#include <vector>
 
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
@@ -97,12 +99,33 @@ struct RegistryFixture
     ZoneRegistry registry;
 
     void Load(const char* config, const char* selOccupier = nullptr, const char* selResistance = nullptr,
-              const char* namesClass = nullptr)
+              const char* namesClass = nullptr, const ClassProbe* probe = nullptr)
     {
         QIStream in(config, strlen(config));
         file.Parse(in);
         registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("CfgGuerrillaFactions"),
-                                selOccupier, selResistance, namesClass ? file.FindEntry(namesClass) : nullptr);
+                                selOccupier, selResistance, namesClass ? file.FindEntry(namesClass) : nullptr, probe);
+    }
+};
+
+// fake data package for the plan-15 resolution pass: a class exists when its
+// name is on the list for the bank
+struct FakeProbe final : ClassProbe
+{
+    std::vector<std::string> vehicles;
+    std::vector<std::string> weapons;
+
+    bool Exists(const char* bank, const char* className) const override
+    {
+        const std::vector<std::string>& list = stricmp(bank, "CfgWeapons") == 0 ? weapons : vehicles;
+        for (const std::string& name : list)
+        {
+            if (stricmp(name.c_str(), className) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 };
 
@@ -1294,5 +1317,258 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         RegistryFixture f;
         f.Load(bigConfig.c_str(), nullptr, nullptr, "Names");
         REQUIRE(f.registry.NZones() == ZoneRegistry::MaxZones);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// plan 15: descriptor class resolution + role-diverse squad composition
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// occupier with a full role kit and a 4-rung vehicle ladder; resistance with
+// tiers only; civilians with two classes.  Deliberately references classes a
+// FakeProbe can selectively "unship".
+const char* kPlan15Config = "class CfgGuerrillaZones { class Zones { class A { name=\"A\"; }; }; };\n"
+                            "class CfgGuerrillaFactions\n"
+                            "{\n"
+                            "    class East\n"
+                            "    {\n"
+                            "        side=\"EAST\";\n"
+                            "        tiers[]={\"SoldierEB\",\"SoldierEG\",\"SoldierECrew\"};\n"
+                            "        tierThresholds[]={3,5};\n"
+                            "        tiersMG[]={\"SoldierEMG\",\"SoldierEMG\",\"SoldierEMG\"};\n"
+                            "        tiersAT[]={\"SoldierELAW\",\"SoldierELAW\",\"SoldierELAW\"};\n"
+                            "        tiersMedic[]={\"SoldierEMedic\",\"SoldierEMedic\",\"SoldierEMedic\"};\n"
+                            "        tiersSniper[]={\"\",\"\",\"SoldierESniper\"};\n"
+                            "        vehicles[]={\"UAZ\",\"Ural\",\"BMP\",\"T72\"};\n"
+                            "        vehicleThresholds[]={3,6,8};\n"
+                            "        officer=\"OfficerE\";\n"
+                            "        baseWeapon=\"AK74\";\n"
+                            "        baseMagazine=\"AK74\";\n"
+                            "        lootSniperWeapon=\"SVDDragunov\";\n"
+                            "        lootSniperMag=\"SVDDragunov\";\n"
+                            "    };\n"
+                            "    class Guer\n"
+                            "    {\n"
+                            "        side=\"GUER\";\n"
+                            "        tiers[]={\"SoldierGB\"};\n"
+                            "        officer=\"SoldierGB\";\n"
+                            "        holdClass=\"SoldierGB\";\n"
+                            "    };\n"
+                            "    class Civ\n"
+                            "    {\n"
+                            "        side=\"CIV\";\n"
+                            "        civClassCount=2;\n"
+                            "        civClass1=\"Civilian\";\n"
+                            "        civClass2=\"Civilian2\";\n"
+                            "    };\n"
+                            "};\n";
+
+FakeProbe FullClassicProbe()
+{
+    FakeProbe probe;
+    probe.vehicles = {"SoldierEB", "SoldierEG",      "SoldierECrew", "SoldierEMG", "SoldierELAW", "SoldierEMedic",
+                      "OfficerE",  "SoldierESniper", "UAZ",          "Ural",       "BMP",         "T72",
+                      "SoldierGB", "SoldierGFakeE",  "SoldierWB",    "Civilian",   "Civilian2",   "SoldierWCaptive"};
+    probe.weapons = {"AK74", "SVDDragunov"};
+    return probe;
+}
+
+void Unship(FakeProbe& probe, const char* className)
+{
+    probe.vehicles.erase(std::remove(probe.vehicles.begin(), probe.vehicles.end(), std::string(className)),
+                         probe.vehicles.end());
+}
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - plan-15 resolution keeps a fully-shipped descriptor verbatim", "[game][guerrilla]")
+{
+    FakeProbe probe = FullClassicProbe();
+    RegistryFixture f;
+    f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+
+    REQUIRE(Str(f.registry.FactionTierClass("EAST", 1)) == "SoldierEB");
+    REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierECrew");
+    REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "OfficerE");
+    REQUIRE(Str(f.registry.FactionVehicle("EAST", 10)) == "T72");
+    REQUIRE(Str(f.registry.FactionValue("CIV", "civClassCount")) == "2");
+}
+
+TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming faction data", "[game][guerrilla]")
+{
+    SECTION("missing tier falls back to the nearest resolved tier")
+    {
+        FakeProbe probe = FullClassicProbe();
+        // the elite tier is not shipped by this package
+        Unship(probe, "SoldierECrew");
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierEG"); // nearest lower rung
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 1)) == "SoldierEB");  // untouched
+    }
+
+    SECTION("missing officer falls back to tier 0")
+    {
+        FakeProbe probe = FullClassicProbe();
+        Unship(probe, "OfficerE");
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "SoldierEB");
+    }
+
+    SECTION("missing vehicle rung is dropped and the ladder compacts")
+    {
+        FakeProbe probe = FullClassicProbe();
+        Unship(probe, "BMP");
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionVehicle("EAST", 1)) == "UAZ");
+        REQUIRE(Str(f.registry.FactionVehicle("EAST", 3)) == "Ural");
+        REQUIRE(Str(f.registry.FactionVehicle("EAST", 6)) == "T72"); // BMP's WL6 rung inherited by T72
+        REQUIRE(Str(f.registry.FactionVehicle("EAST", 10)) == "T72");
+    }
+
+    SECTION("GUER faction on a GUER-less package degrades along the built-in fallback list")
+    {
+        FakeProbe probe = FullClassicProbe();
+        Unship(probe, "SoldierGB");
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        // SoldierGFakeE is next on the GUER fallback list and "shipped"
+        REQUIRE(Str(f.registry.FactionTierClass("GUER", 1)) == "SoldierGFakeE");
+        REQUIRE(Str(f.registry.FactionValue("GUER", "officer")) == "SoldierGFakeE");
+        REQUIRE(Str(f.registry.FactionValue("GUER", "holdClass")) == "SoldierGFakeE");
+    }
+
+    SECTION("unresolvable weapon and magazine keys fall back to baseWeapon / the weapon sibling")
+    {
+        FakeProbe probe = FullClassicProbe();
+        probe.weapons = {"AK74"}; // no SVDDragunov in this package
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionValue("EAST", "lootSniperWeapon")) == "AK74"); // baseWeapon
+        REQUIRE(Str(f.registry.FactionValue("EAST", "lootSniperMag")) == "AK74");
+    }
+
+    SECTION("fully unresolvable CIV roster soft-disables the ambience layer")
+    {
+        FakeProbe probe = FullClassicProbe();
+        Unship(probe, "Civilian");
+        Unship(probe, "Civilian2");
+        Unship(probe, "SoldierWCaptive");
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionValue("CIV", "civClassCount")) == "0");
+    }
+
+    SECTION("no probe = no resolution (config-less unit-test path unchanged)")
+    {
+        RegistryFixture f;
+        f.Load(kPlan15Config);
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierECrew");
+        REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "OfficerE");
+    }
+}
+
+TEST_CASE("ZoneRegistry - plan-15 squad composition", "[game][guerrilla]")
+{
+    RegistryFixture f;
+    f.Load(kPlan15Config);
+
+    SECTION("12-man garrison group composes the full template")
+    {
+        AutoArray<RString> squad;
+        f.registry.FactionSquad("EAST", 1, 12, squad);
+        REQUIRE(squad.Size() == 12);
+        REQUIRE(Str(squad[0]) == "SoldierEB"); // leader slot (caller substitutes the officer)
+        int mg = 0, at = 0, medic = 0, rifle = 0;
+        for (int i = 0; i < squad.Size(); i++)
+        {
+            if (Str(squad[i]) == "SoldierEMG")
+            {
+                mg++;
+            }
+            else if (Str(squad[i]) == "SoldierELAW")
+            {
+                at++;
+            }
+            else if (Str(squad[i]) == "SoldierEMedic")
+            {
+                medic++;
+            }
+            else if (Str(squad[i]) == "SoldierEB")
+            {
+                rifle++;
+            }
+        }
+        REQUIRE(mg == 2);
+        REQUIRE(at == 2);
+        REQUIRE(medic == 1);
+        REQUIRE(rifle == 7); // tier 0 fields no sniper -> that slot stays a rifleman
+    }
+
+    SECTION("sniper slot only where the tier authors one")
+    {
+        AutoArray<RString> low, elite;
+        f.registry.FactionSquad("EAST", 1, 12, low);
+        f.registry.FactionSquad("EAST", 10, 12, elite);
+        for (int i = 0; i < low.Size(); i++)
+        {
+            REQUIRE(Str(low[i]) != "SoldierESniper");
+        }
+        int sniper = 0;
+        for (int i = 0; i < elite.Size(); i++)
+        {
+            if (Str(elite[i]) == "SoldierESniper")
+            {
+                sniper++;
+            }
+        }
+        REQUIRE(sniper == 1);
+    }
+
+    SECTION("small groups stay mixed but gated")
+    {
+        AutoArray<RString> three;
+        f.registry.FactionSquad("EAST", 1, 3, three);
+        REQUIRE(three.Size() == 3);
+        REQUIRE(Str(three[0]) == "SoldierEB");
+        REQUIRE(Str(three[1]) == "SoldierEMG"); // MG unlocks from 3 men
+        REQUIRE(Str(three[2]) == "SoldierEB");  // AT gates at 5, medic at 6
+    }
+
+    SECTION("descriptor without role arrays composes the pre-plan-15 monoculture")
+    {
+        AutoArray<RString> squad;
+        f.registry.FactionSquad("GUER", 1, 6, squad);
+        REQUIRE(squad.Size() == 6);
+        for (int i = 0; i < squad.Size(); i++)
+        {
+            REQUIRE(Str(squad[i]) == "SoldierGB");
+        }
+    }
+
+    SECTION("unknown side / zero count come back empty")
+    {
+        AutoArray<RString> squad;
+        f.registry.FactionSquad("WEST", 1, 6, squad);
+        REQUIRE(squad.Size() == 0);
+        f.registry.FactionSquad("EAST", 1, 0, squad);
+        REQUIRE(squad.Size() == 0);
+    }
+
+    SECTION("deterministic: same inputs, same squad")
+    {
+        AutoArray<RString> a, b;
+        f.registry.FactionSquad("EAST", 4, 9, a);
+        f.registry.FactionSquad("EAST", 4, 9, b);
+        REQUIRE(a.Size() == b.Size());
+        for (int i = 0; i < a.Size(); i++)
+        {
+            REQUIRE(Str(a[i]) == Str(b[i]));
+        }
     }
 }

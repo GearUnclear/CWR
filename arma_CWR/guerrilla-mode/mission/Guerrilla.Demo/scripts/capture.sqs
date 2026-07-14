@@ -7,7 +7,8 @@
 ;  income tap, marker recolor + progress labels). What stays scripted is the
 ;  REACTION:
 ;    * spawn a friendly holding garrison on a captured military zone
-;      (holdCount x holdClass from the resistance faction descriptor);
+;      (holdCount-sized role-mixed squad via native gmFactionSquad; a
+;      tier-less resistance descriptor keeps holdCount x holdClass);
 ;    * narrate the capture arc (hints for started / contested / lost /
 ;      town-ready / liberated);
 ;    * a throttled titleText progress ticker while the player stands inside
@@ -95,9 +96,14 @@ GM_cEv  = GM_cBatch select GM_cI
 GM_cIdx = GM_cEv select 0
 GM_cRec = gmZone GM_cIdx
 
-; military zones get a live holding garrison; cities hold themselves (support)
-? ((GM_cRec select GM_Z_TYPE) == "CITY") or (GM_HOLD_CLASS == "") : goto "cnotify"
-GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+; military zones get a live holding garrison; cities hold themselves (support).
+; The hold squad is role-mixed when the resistance descriptor authors tier
+; role arrays (native gmFactionSquad, plan 15); a tier-less descriptor keeps
+; the classic holdClass x holdCount monoculture.
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : goto "cnotify"
+GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
+? (count GM_cSquad) > 0 : GM_cGrp = [side aP, GM_cSquad, GM_cRec select GM_Z_POS] call GM_fnSpawnSquad
+? ((count GM_cSquad) == 0) and (GM_HOLD_CLASS != "") : GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
 
 #cnotify
 hint format ["%1 liberated", GM_cEv select 1]
