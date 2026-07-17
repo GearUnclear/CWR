@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
@@ -1025,6 +1026,362 @@ TEST_CASE("ZoneRegistry - defaultOccupier/defaultResistance config keys", "[game
     }
 }
 
+// ---------------------------------------------------------------------------
+// sideTwin resolution (FactionTwins) - the shared half of the rebase, used by
+// ZoneRegistry below and by the new-game UI's launch guard.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// parse a bare CfgGuerrillaFactions and hand back the entry (kept alive by the
+// caller's ParamFile)
+const ParamEntry* ParseFactions(ParamFile& file, const char* text)
+{
+    QIStream in(text, strlen(text));
+    file.Parse(in);
+    return file.FindEntry("CfgGuerrillaFactions");
+}
+
+const char* kTwinConfig = "class CfgGuerrillaFactions\n"
+                          "{\n"
+                          "    class PLO      { side=\"GUER\"; sideTwin=\"PLO_East\"; };\n"
+                          "    class PLO_East { side=\"EAST\"; sideTwin=\"PLO\"; };\n"
+                          "    class Lonely   { side=\"EAST\"; };\n"
+                          "    class Dangling { side=\"EAST\"; sideTwin=\"NoSuchClass\"; };\n"
+                          "    class Plain    { };\n"
+                          "};\n";
+} // namespace
+
+TEST_CASE("FactionTwins - FactionSideOf reads the side key, defaulting to the class name", "[game][guerrilla]")
+{
+    ParamFile file;
+    const ParamEntry* cfg = ParseFactions(file, kTwinConfig);
+
+    REQUIRE(Str(FactionSideOf(cfg, "PLO")) == "GUER");
+    REQUIRE(Str(FactionSideOf(cfg, "Plain")) == "Plain"); // no side key: the class name IS the side
+    REQUIRE(Str(FactionSideOf(cfg, "NoSuchFaction")).empty());
+    REQUIRE(Str(FactionSideOf(cfg, "")).empty());
+    REQUIRE(Str(FactionSideOf(nullptr, "PLO")).empty());
+}
+
+TEST_CASE("FactionTwins - TwinOnSide / TwinOffSide walk the chain", "[game][guerrilla]")
+{
+    ParamFile file;
+    const ParamEntry* cfg = ParseFactions(file, kTwinConfig);
+
+    SECTION("the faction itself counts as a hit")
+    {
+        REQUIRE(Str(TwinOnSide(cfg, "PLO", "GUER")) == "PLO");
+        REQUIRE(Str(TwinOffSide(cfg, "PLO", "EAST")) == "PLO");
+    }
+
+    SECTION("one hop finds the re-authored roster")
+    {
+        REQUIRE(Str(TwinOnSide(cfg, "PLO", "EAST")) == "PLO_East"); // the Sinai case
+        REQUIRE(Str(TwinOnSide(cfg, "PLO_East", "guer")) == "PLO"); // case-insensitive
+        REQUIRE(Str(TwinOffSide(cfg, "PLO", "GUER")) == "PLO_East");
+    }
+
+    SECTION("no twin on the wanted side")
+    {
+        REQUIRE(Str(TwinOnSide(cfg, "Lonely", "WEST")).empty());
+        REQUIRE(Str(TwinOffSide(cfg, "Lonely", "EAST")).empty());
+    }
+
+    SECTION("a sideTwin naming a class the config lacks ends the walk, it does not abort")
+    {
+        // plan-15: unknown incoming descriptor data degrades, never fatal
+        REQUIRE(Str(TwinOnSide(cfg, "Dangling", "WEST")).empty());
+        REQUIRE(Str(TwinOffSide(cfg, "Dangling", "EAST")).empty());
+    }
+
+    SECTION("null config / empty selection / empty side")
+    {
+        REQUIRE(Str(TwinOnSide(nullptr, "PLO", "EAST")).empty());
+        REQUIRE(Str(TwinOnSide(cfg, "", "EAST")).empty());
+        REQUIRE(Str(TwinOnSide(cfg, "PLO", "")).empty());
+        REQUIRE(Str(TwinOffSide(cfg, "PLO", nullptr)).empty());
+    }
+}
+
+TEST_CASE("FactionTwins - a cyclic or over-long chain terminates", "[game][guerrilla]")
+{
+    SECTION("A -> B -> A with no match must not hang")
+    {
+        // PLO <-> PLO_East is already a cycle; asking for a side neither
+        // declares walks it until the hop budget runs out
+        ParamFile file;
+        const ParamEntry* cfg = ParseFactions(file, kTwinConfig);
+        REQUIRE(Str(TwinOnSide(cfg, "PLO", "WEST")).empty());
+    }
+
+    SECTION("a chain longer than kMaxTwinHops gives up rather than resolving")
+    {
+        std::string text = "class CfgGuerrillaFactions\n{\n";
+        const int chain = kMaxTwinHops + 3;
+        for (int i = 0; i < chain; i++)
+        {
+            // every rung is EAST except the last, which is out of reach
+            text += "    class F" + std::to_string(i) + " { side=\"" + (i == chain - 1 ? "WEST" : "EAST") +
+                    "\"; sideTwin=\"F" + std::to_string(i + 1) + "\"; };\n";
+        }
+        text += "};\n";
+        ParamFile file;
+        const ParamEntry* cfg = ParseFactions(file, text.c_str());
+        REQUIRE(Str(TwinOnSide(cfg, "F0", "WEST")).empty());
+        REQUIRE(Str(TwinOffSide(cfg, "F0", "EAST")).empty());
+    }
+}
+
+TEST_CASE("FactionTwins - FirstFreeWarSide never offers CIV", "[game][guerrilla]")
+{
+    // CIV is not a war side: its center is friendly to everyone
+    // (AICenterImpl::BeginArcade), so an occupier rebased onto it never fights.
+    REQUIRE(Str(FirstFreeWarSide("GUER")) == "WEST");
+    REQUIRE(Str(FirstFreeWarSide("WEST")) == "GUER");
+    REQUIRE(Str(FirstFreeWarSide("EAST")) == "GUER");
+    REQUIRE(Str(FirstFreeWarSide("CIV")) == "GUER"); // pinning CIV frees all three war sides
+}
+
+// ---------------------------------------------------------------------------
+// playerSide: the resistance pin and the occupier collision rebase.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Abel-shaped: the template welds the player to GUER, so the resistance side
+// is fixed there and a resistance PICK only chooses which roster fills it.
+// PLO/PLO_Guer are the twinned pair (the Sinai case).
+const char* kPinnedConfig = "class CfgGuerrillaZones\n"
+                            "{\n"
+                            "    playerSide = \"GUER\";\n"
+                            "    class Zones\n"
+                            "    {\n"
+                            "        class Base  { name=\"Base\";  owner=\"RESISTANCE\"; "
+                            "position[]={1000.0, 1000.0, 0.0}; };\n"
+                            "        class Depot { name=\"Depot\"; owner=\"OCCUPIER\";   "
+                            "position[]={1200.0, 1000.0, 0.0}; };\n"
+                            "    };\n"
+                            "};\n"
+                            "class CfgGuerrillaFactions\n"
+                            "{\n"
+                            "    class Soviets   { side=\"EAST\"; tiers[]={\"SoldierEB\"}; flag=\"east.pac\"; };\n"
+                            "    class NATO      { side=\"WEST\"; tiers[]={\"SoldierWB\"}; flag=\"west.pac\"; };\n"
+                            "    class Partisans { side=\"GUER\"; tiers[]={\"SoldierGB\"}; flag=\"guer.pac\"; };\n"
+                            "    class PLO       { side=\"EAST\"; sideTwin=\"PLO_Guer\"; tiers[]={\"SoldierEB\"}; };\n"
+                            "    class PLO_Guer  { side=\"GUER\"; sideTwin=\"PLO\";      tiers[]={\"SoldierGB\"}; };\n"
+                            "};\n";
+
+// the same rosters with no playerSide - the legacy shape every pre-existing
+// test uses, where the pass must not run at all
+const char* kUnpinnedConfig = "class CfgGuerrillaZones\n"
+                              "{\n"
+                              "    class Zones { class A { name=\"A\"; owner=\"OCCUPIER\"; }; };\n"
+                              "};\n"
+                              "class CfgGuerrillaFactions\n"
+                              "{\n"
+                              "    class Soviets   { side=\"EAST\"; };\n"
+                              "    class Partisans { side=\"GUER\"; };\n"
+                              "};\n";
+} // namespace
+
+TEST_CASE("ZoneRegistry - playerSide pins the resistance side (roster pick, not side pick)", "[game][guerrilla]")
+{
+    SECTION("no playerSide: the pass is a strict no-op")
+    {
+        RegistryFixture f;
+        f.Load(kUnpinnedConfig, "Soviets", "Soviets");
+        // Two picks on one side WOULD deadlock - but a legacy template gets no
+        // rebase, exactly as before this pass existed. The new-game UI blocks
+        // the pair instead. This section is what the whole playerSide guard
+        // buys: every pre-existing side test stays green untouched.
+        REQUIRE(Str(f.registry.OccupierSide()) == "EAST");
+        REQUIRE(Str(f.registry.ResistanceSide()) == "EAST");
+        REQUIRE(Str(f.registry.FindFactionForSide("EAST")->side) == "EAST");
+    }
+
+    SECTION("resistance already on playerSide: no-op")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "Soviets", "Partisans");
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.ResistanceFaction()) == "Partisans");
+        REQUIRE(Str(f.registry.OccupierSide()) == "EAST");
+        REQUIRE(Str(f.registry.OccupierFaction()) == "Soviets");
+    }
+
+    SECTION("a sideTwin on playerSide is substituted, and overrides nothing")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "Soviets", "PLO"); // PLO is EAST; its twin is GUER
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.ResistanceFaction()) == "PLO_Guer");
+        // the twin already DECLARES GUER: the config-clean path
+        const FactionRecord* res = f.registry.FindFactionForSide("GUER");
+        REQUIRE(res != nullptr);
+        REQUIRE(Str(res->className) == "PLO_Guer");
+        REQUIRE(Str(res->side) == "GUER");
+    }
+
+    SECTION("no twin: the picked roster is rebased onto playerSide")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "NATO", "Soviets"); // Soviets are EAST and have no twin
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.ResistanceFaction()) == "Soviets");
+        // the RECORD moved with the side: FindFaction matches side first, so a
+        // record left on EAST would still be handed to anyone asking for EAST
+        // while GUER found nothing at all
+        const FactionRecord* res = f.registry.FindFactionForSide("GUER");
+        REQUIRE(res != nullptr);
+        REQUIRE(Str(res->className) == "Soviets");
+        REQUIRE(Str(res->side) == "GUER");
+        REQUIRE(Str(f.registry.OccupierSide()) == "WEST"); // no collision: untouched
+    }
+
+    SECTION("occupier collides and steps onto its twin")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "PLO_Guer", "Partisans"); // both GUER
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.OccupierFaction()) == "PLO"); // the EAST twin of the pick
+        REQUIRE(Str(f.registry.OccupierSide()) == "EAST");
+    }
+
+    SECTION("occupier collides with no twin: rebased to the first free war side, never CIV")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "Partisans", "Partisans"); // one roster, both slots
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.OccupierSide()) == "WEST"); // {GUER,WEST,EAST} minus GUER
+        REQUIRE(Str(f.registry.OccupierSide()) != "CIV");
+    }
+
+    SECTION("a mirror match gets TWO records: one roster cannot sit on two sides")
+    {
+        // Both slots on one descriptor. Rebasing the occupier to WEST leaves
+        // both picks naming the single Partisans record, so writing each pick's
+        // side onto "its" record wrote both onto the same one and the occupier's
+        // WEST lost to the resistance's GUER. Symptoms: the WEST occupier's
+        // roster resolved against the EAST/Soviet fallback list, and
+        // FindFaction("WEST") found nothing at all.
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "Partisans", "Partisans");
+        REQUIRE(Str(f.registry.OccupierSide()) == "WEST");
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        // the resistance keeps the authored descriptor...
+        REQUIRE(Str(f.registry.ResistanceFaction()) == "Partisans");
+        // ...and the occupier gets its own copy of it, on its own side
+        REQUIRE(Str(f.registry.OccupierFaction()) != Str(f.registry.ResistanceFaction()));
+
+        const FactionRecord* occ = f.registry.FindFactionForSide("WEST");
+        const FactionRecord* res = f.registry.FindFactionForSide("GUER");
+        REQUIRE(occ != nullptr);
+        REQUIRE(res != nullptr);
+        REQUIRE(occ != res); // two records, not one aliased twice
+        REQUIRE(Str(occ->side) == "WEST");
+        REQUIRE(Str(res->side) == "GUER");
+        // same order of battle on both sides — that IS what a mirror match is
+        REQUIRE(Str(occ->tiers[0]) == "SoldierGB");
+        REQUIRE(Str(res->tiers[0]) == "SoldierGB");
+        REQUIRE(Str(f.registry.FactionValue("WEST", "flag")) == "guer.pac");
+        REQUIRE(Str(f.registry.FactionValue("GUER", "flag")) == "guer.pac");
+    }
+
+    SECTION("a mirror match is idempotent: the clone is not re-cloned per load")
+    {
+        RegistryFixture first;
+        first.Load(kPinnedConfig, "Partisans", "Partisans");
+        RegistryFixture second;
+        second.Load(kPinnedConfig, "Partisans", "Partisans");
+        // the clone's name is a pure function of (class, side), which is what
+        // lets Serialize restore _occupierFaction by name across a save/load
+        REQUIRE(Str(first.registry.OccupierFaction()) == Str(second.registry.OccupierFaction()));
+        REQUIRE(first.registry.NFactions() == second.registry.NFactions());
+    }
+
+    SECTION("a mirror match with no playerSide is left alone: one side, one record")
+    {
+        // Legacy: ResolveSideCollisions is a strict no-op, so the two picks
+        // really are one side and splitting the record would invent a side
+        // nobody resolved. The UI blocks this pair instead.
+        RegistryFixture f;
+        f.Load(kUnpinnedConfig, "Soviets", "Soviets");
+        REQUIRE(Str(f.registry.OccupierFaction()) == Str(f.registry.ResistanceFaction()));
+        REQUIRE(Str(f.registry.OccupierSide()) == Str(f.registry.ResistanceSide()));
+    }
+
+    SECTION("owner tokens resolve against the REBASED sides")
+    {
+        RegistryFixture f;
+        f.Load(kPinnedConfig, "NATO", "Soviets");
+        // LoadZones runs after the pass, so RESISTANCE resolves to the pinned
+        // side rather than the descriptor's authored EAST
+        REQUIRE(Str(f.registry.GetZone(0)->owner) == "GUER");
+        REQUIRE(Str(f.registry.GetZone(1)->owner) == "WEST");
+    }
+
+    SECTION("the pass is idempotent: the same inputs resolve the same way twice")
+    {
+        // LoadFromParams re-runs on every savegame load pass, so the pass has
+        // to be a pure function of (playerSide, selections, faction table) or
+        // a campaign drifts a side further on each reload
+        RegistryFixture first;
+        first.Load(kPinnedConfig, "Partisans", "Soviets");
+        RegistryFixture second;
+        second.Load(kPinnedConfig, "Partisans", "Soviets");
+        REQUIRE(Str(first.registry.OccupierSide()) == Str(second.registry.OccupierSide()));
+        REQUIRE(Str(first.registry.ResistanceSide()) == Str(second.registry.ResistanceSide()));
+        REQUIRE(Str(first.registry.OccupierFaction()) == Str(second.registry.OccupierFaction()));
+        REQUIRE(Str(first.registry.ResistanceFaction()) == Str(second.registry.ResistanceFaction()));
+    }
+}
+
+TEST_CASE("ZoneRegistry - FindFactionForSide binds the selected descriptor, not the first on that side",
+          "[game][guerrilla]")
+{
+    // Sinai ships five EAST rosters. FindFaction scans by side FIRST and
+    // returns whichever was DECLARED first, so picking Syria would silently
+    // field EgyptArmy's roster - the pick would appear to work and quietly do
+    // nothing.
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    class Zones { class A { name=\"A\"; owner=\"OCCUPIER\"; }; };\n"
+                         "};\n"
+                         "class CfgGuerrillaFactions\n"
+                         "{\n"
+                         "    class EgyptArmy { side=\"EAST\"; tiers[]={\"SoldierEB\"};   vehicles[]={\"BMP\"}; "
+                         "holdClass=\"SoldierEB\"; };\n"
+                         "    class Hizballah { side=\"EAST\"; tiers[]={\"SoldierEHiz\"}; vehicles[]={\"UAZ\"}; "
+                         "holdClass=\"SoldierEHiz\"; };\n"
+                         "    class Syria     { side=\"EAST\"; tiers[]={\"SoldierESyr\"}; vehicles[]={\"T72\"}; "
+                         "holdClass=\"SoldierESyr\"; };\n"
+                         "    class IDF       { side=\"WEST\"; tiers[]={\"SoldierWB\"}; };\n"
+                         "};\n";
+    RegistryFixture f;
+    f.Load(config, "Syria", "IDF");
+
+    REQUIRE(Str(f.registry.OccupierSide()) == "EAST");
+    REQUIRE(Str(f.registry.OccupierFaction()) == "Syria");
+    const FactionRecord* occ = f.registry.FindFactionForSide("EAST");
+    REQUIRE(occ != nullptr);
+    REQUIRE(Str(occ->className) == "Syria"); // NOT EgyptArmy, the first declared
+
+    // every side-keyed query must agree, or a zone's infantry and its armour
+    // come from two different armies
+    REQUIRE(Str(f.registry.FactionTierClass("EAST", 1)) == "SoldierESyr");
+    REQUIRE(Str(f.registry.FactionVehicle("EAST", 1)) == "T72");
+    REQUIRE(Str(f.registry.FactionValue("EAST", "holdClass")) == "SoldierESyr");
+    AutoArray<RString> squad;
+    f.registry.FactionSquad("EAST", 1, 3, squad);
+    REQUIRE(squad.Size() == 3);
+    REQUIRE(Str(squad[0]) == "SoldierESyr");
+
+    // an unselected third party still resolves through the plain scan
+    REQUIRE(Str(f.registry.FactionTierClass("Hizballah", 1)) == "SoldierEHiz");
+    REQUIRE(Str(f.registry.FactionTierClass("WEST", 1)) == "SoldierWB");
+}
+
 TEST_CASE("ZoneRegistry - capture and reveal follow the swapped sides", "[game][guerrilla]")
 {
     RegistryFixture f;
@@ -1104,6 +1461,127 @@ TEST_CASE("ZoneRegistry - occupier/resistance sides survive save/load", "[game][
     }
     CHECK(Str(loaded.OccupierSide()) == "WEST");
     CHECK(Str(loaded.ResistanceSide()) == "CIV");
+
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("ZoneRegistry - the side rebase is idempotent across save/load", "[game][guerrilla][save][load]")
+{
+    // LoadFromConfig re-runs on the load's second pass and the saved sides are
+    // applied on top of it, so a rebase that is not a pure function of its
+    // inputs drifts a little further on every reload. A single round-trip
+    // would miss a drift that needs two hops to show - do three.
+    {
+        QIStream in(kPinnedConfig, strlen(kPinnedConfig));
+        ExtParsMission.Parse(in);
+    }
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-rebase.bin";
+
+    RegistryFixture f;
+    // the occupier is rebased off GUER and the resistance onto it: both halves
+    // of the pass are in flight
+    f.Load(kPinnedConfig, "Partisans", "Soviets");
+    const std::string occSide = Str(f.registry.OccupierSide());
+    const std::string resSide = Str(f.registry.ResistanceSide());
+    const std::string occFaction = Str(f.registry.OccupierFaction());
+    const std::string resFaction = Str(f.registry.ResistanceFaction());
+    REQUIRE(occSide != resSide);
+    REQUIRE(occFaction == "Partisans");
+    REQUIRE(resFaction == "Soviets");
+
+    ZoneRegistry* current = &f.registry;
+    ZoneRegistry loaded[3];
+    for (int pass = 0; pass < 3; pass++)
+    {
+        {
+            ParamArchiveSave ar(WorldSerializeVersion);
+            REQUIRE(current->Serialize(ar) == LSOK);
+            REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+        }
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded[pass].Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded[pass].Serialize(ar) == LSOK);
+
+        INFO("round-trip " << pass);
+        CHECK(Str(loaded[pass].OccupierSide()) == occSide);
+        CHECK(Str(loaded[pass].ResistanceSide()) == resSide);
+        CHECK(Str(loaded[pass].OccupierFaction()) == occFaction);
+        CHECK(Str(loaded[pass].ResistanceFaction()) == resFaction);
+        // RebindFactionSides ran on the load: the roster a side fields is the
+        // roster that was picked, not whatever the config declared there
+        const FactionRecord* res = loaded[pass].FindFactionForSide(resSide.c_str());
+        REQUIRE(res != nullptr);
+        CHECK(Str(res->className) == resFaction);
+        current = &loaded[pass];
+    }
+
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("ZoneRegistry - a pre-rebase save without the faction keys still loads", "[game][guerrilla][save][load]")
+{
+    // occupierFaction/resistanceFaction are additive and presence-tolerant, so
+    // no GuerrillaSaveVersion bump: a campaign saved before they existed
+    // carries the two sides only and must keep whatever the config resolves.
+    // (The archive writer omits any value equal to its default, so a registry
+    // with no matched selections produces exactly that byte layout.)
+    const char* defaultsConfig = "class CfgGuerrillaZones\n"
+                                 "{\n"
+                                 "    defaultOccupier = \"Soviets\"; defaultResistance = \"Partisans\";\n"
+                                 "    class Zones { class A { name=\"A\"; owner=\"OCCUPIER\"; }; };\n"
+                                 "};\n"
+                                 "class CfgGuerrillaFactions\n"
+                                 "{\n"
+                                 "    class Soviets   { side=\"EAST\"; };\n"
+                                 "    class Partisans { side=\"GUER\"; };\n"
+                                 "};\n";
+    {
+        QIStream in(defaultsConfig, strlen(defaultsConfig));
+        ExtParsMission.Parse(in);
+    }
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-no-faction-keys.bin";
+
+    {
+        // no CfgGuerrillaFactions at all -> both faction names stay empty ->
+        // neither key is written
+        const char* factionlessConfig = "class CfgGuerrillaZones\n"
+                                        "{\n"
+                                        "    class Zones { class A { name=\"A\"; owner=\"OCCUPIER\"; }; };\n"
+                                        "};\n";
+        RegistryFixture f;
+        f.Load(factionlessConfig);
+        REQUIRE(Str(f.registry.OccupierFaction()).empty());
+        REQUIRE(Str(f.registry.ResistanceFaction()).empty());
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK); // no error on the absent keys
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(Str(loaded.OccupierSide()) == "EAST");
+    CHECK(Str(loaded.ResistanceSide()) == "GUER");
+    // absent keys leave the config-resolved picks in place rather than
+    // blanking them
+    CHECK(Str(loaded.OccupierFaction()) == "Soviets");
+    CHECK(Str(loaded.ResistanceFaction()) == "Partisans");
+    REQUIRE(loaded.FindFactionForSide("EAST") != nullptr);
+    CHECK(Str(loaded.FindFactionForSide("EAST")->className) == "Soviets");
 
     std::filesystem::remove(archivePath);
 }
@@ -1470,6 +1948,35 @@ TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming factio
         f.Load(kPlan15Config);
         REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierECrew");
         REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "OfficerE");
+    }
+
+    SECTION("a rebased faction takes its fallbacks from the NEW side")
+    {
+        // Pins the LoadFromParams ordering the whole rebase depends on:
+        // ResolveSideCollisions must run BEFORE ResolveFactionClasses, because
+        // the resolution pass keys its candidate list off FactionRecord::side.
+        // Reject is a WEST roster with an unshippable tier, picked as the
+        // resistance on a GUER-pinned template - so it rebases to GUER, and
+        // its fallback must come off the GUER list (SoldierGB), not the WEST
+        // one (SoldierWB, deliberately unshipped by this package).
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    playerSide = \"GUER\";\n"
+                             "    class Zones { class A { name=\"A\"; owner=\"RESISTANCE\"; }; };\n"
+                             "};\n"
+                             "class CfgGuerrillaFactions\n"
+                             "{\n"
+                             "    class Reject  { side=\"WEST\"; tiers[]={\"NoSuchClass\"}; };\n"
+                             "    class Soviets { side=\"EAST\"; tiers[]={\"SoldierEB\"}; };\n"
+                             "};\n";
+        FakeProbe probe = FullClassicProbe();
+        Unship(probe, "SoldierWB");
+        RegistryFixture f;
+        f.Load(config, "Soviets", "Reject", nullptr, &probe);
+
+        REQUIRE(Str(f.registry.ResistanceSide()) == "GUER");
+        REQUIRE(Str(f.registry.ResistanceFaction()) == "Reject");
+        REQUIRE(Str(f.registry.FactionTierClass("GUER", 1)) == "SoldierGB"); // the GUER fallback list
     }
 }
 

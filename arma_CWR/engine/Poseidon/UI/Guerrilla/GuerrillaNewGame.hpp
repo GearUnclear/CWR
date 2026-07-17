@@ -21,6 +21,7 @@
 // Esc still exits via the ControlsContainer key path.
 
 #include <Poseidon/UI/Controls/UIControls.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp> // ParamFile (the per-island descriptor this display owns)
 
 #include <functional>
 #include <vector>
@@ -41,26 +42,18 @@ constexpr const char* kGuerrillaVarIsland = "gmSelIsland";
 constexpr const char* kGuerrillaVarOccupier = "gmSelOccupier";
 constexpr const char* kGuerrillaVarResistance = "gmSelResistance";
 
-// Side filters for the two cycler lists, mirroring the ZoneRegistry built-in
-// defaults. NOT published as fallback selections: when the global config
-// (Pars) has no CfgGuerrillaFactions the cyclers have nothing real to offer
-// and the launch path publishes EMPTY selections, so the mission's own
-// defaultOccupier/defaultResistance config keys (then the engine's EAST/GUER
-// built-ins) decide — publishing "EAST"/"GUER" here would match a mission
-// faction by side and silently override the mission's defaults.
-constexpr const char* kGuerrillaDefaultOccupier = "EAST";
-constexpr const char* kGuerrillaDefaultResistance = "GUER";
-
 // Pure list builders (unit-testable with an injected ParamFile):
 // islands = subclass names of CfgWorldList whose world file exists (the same
 // enumeration DisplaySelectIsland uses for the editor's island list).
 std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std::function<bool(RString)>& worldExists);
-// factions = subclass names of factionsCfg (CfgGuerrillaFactions) whose
-// `side` (default: the class name) matches `side` case-insensitively; when
-// none match, every subclass; when there are no subclasses at all (or cfg is
+// factions = every subclass of factionsCfg (CfgGuerrillaFactions) whose
+// resolved side (its `side` key, defaulting to the class name) is not "CIV",
+// case-insensitively. Both cyclers are fed this same list: any faction may
+// occupy or resist, and ZoneRegistry::ResolveSideCollisions rebases whatever
+// the pick collides with. When there are no subclasses at all (or cfg is
 // null), EMPTY — no built-in entry is invented, so the launch path can tell
 // "no real faction config" apart from a real choice and publish nothing.
-std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const char* side);
+std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg);
 
 // The template mission base the launch path resolves for an island:
 // "missions\Guerrilla.<island>" (append ".pbo" for the banked form or
@@ -78,6 +71,47 @@ bool GuerrillaTemplateExists(RString island, const std::function<bool(RString)>&
 // the mission's own config will resolve.
 RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
 
+// Index into `list` of the faction `selection` names, or -1. `selection` is
+// what ZoneRegistry::ResolveSides accepts: either a descriptor class name or a
+// side string, matched SIDE FIRST then class name — the same order
+// ZoneRegistry::FindFaction scans, so an index found here names the record the
+// registry would match for the same string.
+int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<RString>& list, RString selection);
+
+// The indices the two cyclers must OPEN on, so that pressing OK without
+// touching them launches exactly what a direct, no-UI launch of the same
+// template resolves. Walks the same precedence chain
+// ZoneRegistry::LoadFromParams does, minus the gmSel* rung (which is what
+// these selections become): the zones config's defaultOccupier /
+// defaultResistance keys, then the registry's built-in EAST occupier / GUER
+// resistance, then two DISTINCT indices as the floor. Both -1 when `list` is
+// empty (no real choice — the selections stay EMPTY and nothing is published).
+// A template that deliberately aims both default* keys at one descriptor is
+// honoured; ZoneRegistry::DivergeAliasedFactions handles that pair.
+void GuerrillaDefaultSelections(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
+                                const std::vector<RString>& list, int& outOccupier, int& outResistance);
+
+// The IDC_OK pair check, factored out of the display so it is testable without
+// the UI stack. It mirrors ZoneRegistry::ResolveSideCollisions step for step:
+// the registry performs the substitution, this decides whether to let the
+// player launch at all, and the two drifting apart is exactly what the old
+// dead guard was. zonesCfg supplies the template's `playerSide` (null or
+// absent = the legacy templates the registry rebases nothing for, where a
+// same-side pair really would fight itself and must be blocked here).
+// outMessage carries the player-facing reason, set only on a false return.
+// Selections that resolve to no side are unvalidatable and pass through.
+bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg, RString occupier,
+                                    RString resistance, RString& outMessage);
+
+// Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
+// under the CreateSingleMissionBank mount prefix for a banked (.pbo)
+// template (bankPrefix non-empty, already ending in "\\"), otherwise
+// directly under the unbanked mission directory. CfgGuerrillaFactions lives
+// in each template's own description.ext (see guerrilla-mode/mission/*), NOT
+// in any addon's global config — Pars never carries this class — so the
+// new-game screen must read it per-island instead of from Pars.
+RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix);
+
 class GuerrillaNewGame : public Display
 {
   public:
@@ -86,13 +120,18 @@ class GuerrillaNewGame : public Display
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override;
     void OnButtonClicked(int idc) override;
     void OnLBDblClick(int idc, int curSel) override;
+    void OnLBSelChanged(int idc, int curSel) override;
     void OnCtrlClosed(int idc) override;
 
     // Selections read by DisplayMain::OnChildDestroyed on IDC_OK. The island
     // falls back to the current (menu cutscene) world when no island list was
     // shown, so OK still resolves to a concrete "Guerrilla.<World>" template.
     // The faction selections are EMPTY when no CfgGuerrillaFactions offered a
-    // real choice — the launch path must publish nothing in that case.
+    // real choice — the launch path must publish nothing in that case, so the
+    // template's own default* keys keep deciding. When there IS a real choice
+    // the cyclers open on the pair those same default* keys resolve to
+    // (GuerrillaDefaultSelections), so an untouched screen publishes a pick
+    // that is indistinguishable from publishing nothing.
     RString SelectedIsland();
     RString SelectedOccupier() const;
     RString SelectedResistance() const;
@@ -100,8 +139,33 @@ class GuerrillaNewGame : public Display
   protected:
     void InjectFactionCyclers();
     void UpdateFactionLabel(int idc);
+    // Reparses _islandCfg from the given island's own Guerrilla template
+    // description.ext (falling back to a global CfgGuerrillaFactions /
+    // CfgGuerrillaZones, then to an empty/mission-default list when neither
+    // publishes one), repopulates _occupiers/_resistances from it, and re-seeds
+    // the cycler selections from the template's default* keys
+    // (GuerrillaDefaultSelections) — preserving any current pick the new roster
+    // still carries, by NAME. When the cycler controls already exist their
+    // labels are refreshed too.
+    //
+    // Call ONLY when the island actually changed: this re-seeds the selections
+    // and remounts the template PBO, so running it on a click that reselected
+    // the same island would discard the player's picks mid-gesture (see
+    // OnLBSelChanged).
+    void RefreshFactionsForIsland(RString island);
 
     int _exitWhenClose;
+    // OWNS the selected island's parsed description.ext: the two entry
+    // pointers below point INTO it, so it must outlive them (the previous
+    // function-local ParamFile is why the IDC_OK guard fell back to Pars,
+    // which never carries CfgGuerrillaFactions — see the note above).
+    ParamFile _islandCfg;
+    const ParamEntry* _islandFactions = nullptr; // into _islandCfg, or into Pars, or null
+    const ParamEntry* _islandZones = nullptr;    // ditto; carries playerSide + the default* keys
+    // The island _islandCfg/_occupiers/_resistances currently describe. The
+    // island list fires OnLBSelChanged on every click, not just on a real
+    // change, so this is what makes the refresh idempotent.
+    RString _islandForFactions;
     std::vector<RString> _occupiers;
     std::vector<RString> _resistances;
     int _occupierSel = 0;

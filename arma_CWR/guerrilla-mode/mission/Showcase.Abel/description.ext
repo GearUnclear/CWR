@@ -114,9 +114,17 @@ class CfgGuerrillaFactions
         tiersMG[]    = {"SoldierGMG"};
         tiersAT[]    = {"SoldierGLAW"};
         tiersMedic[] = {"SoldierGMedic"};
-        // captured/irregular motor pool: guerrilla jeep -> PV3S truck ->
-        // captured BMP -> T55 (all GUER-sided classes in the 1.99 config)
-        vehicles[] = {"GJeep", "TruckV3SG", "BMPRes", "T55G"};
+        // Captured/irregular motor pool: guerrilla jeep -> PV3S truck ->
+        // captured BMP -> T55. Kept in step with Guerrilla.Abel, whose GUER
+        // descriptor this copies (see the header) - "BMPRes" used to sit on
+        // this rung and does not exist in 1.99 at all, so the rung was being
+        // dropped by ResolveFactionClasses and T55G silently unlocked at WL7
+        // instead of WL9. "BMP" is the EAST-sided hull on purpose: 1.99 ships
+        // no GUER APC/IFV, and a vehicle's side comes from the AICenter of the
+        // group it spawns into, not from its config class - so a BMP spawned
+        // into the resistance's center IS resistance armour. See the fuller
+        // note in Guerrilla.Abel/description.ext.
+        vehicles[] = {"GJeep", "TruckV3SG", "BMP", "T55G"};
         vehicleThresholds[] = {4, 7, 9};
         officer = "SoldierGB";
 

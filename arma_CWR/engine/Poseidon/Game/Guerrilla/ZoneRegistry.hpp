@@ -49,6 +49,13 @@ struct ZoneTuning
     // CITY auto-seed from the world's CfgWorlds >> <world> >> Names entries
     bool seedCities = false;
     float seedCitySupport = 20.0f; // starting support of each seeded CITY
+    // The side the template's mission.sqm welds the player's unit to.  The
+    // resistance is counted out of that side's center (GatherInputs), so a
+    // resistance pick may move the ROSTER onto this side but never move the
+    // side itself - see ResolveSideCollisions.  EMPTY (the default) disables
+    // that whole pass: a template that authors no playerSide behaves exactly
+    // as it did before the pass existed.
+    RString playerSide;
 };
 
 struct ZoneRecord
@@ -194,6 +201,9 @@ class ZoneRegistry : public SerializeClass
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
     int NZones() const { return _zones.Size(); }
+    // may exceed the descriptor count: DivergeAliasedFactions appends a copy
+    // of a roster picked for both sides
+    int NFactions() const { return _factions.Size(); }
     const ZoneRecord* GetZone(int index) const;
     ZoneRecord* GetZoneMutable(int index);
     int FindZoneIndex(const char* name) const; // -1 when not found
@@ -202,10 +212,26 @@ class ZoneRegistry : public SerializeClass
     // campaign faction sides (resolved at load; serialized with the save)
     RString OccupierSide() const { return _occupierSide; }
     RString ResistanceSide() const { return _resistanceSide; }
+    // which DESCRIPTOR each side fields.  A side string alone stopped
+    // identifying a pick once several rosters could share one side (Sinai
+    // ships five EAST descriptors), and it never identified a rebased one -
+    // these are the campaign's actual selections.  Empty when no selection
+    // matched (the built-in side defaults are in force).
+    RString OccupierFaction() const { return _occupierFaction; }
+    RString ResistanceFaction() const { return _resistanceFaction; }
 
     // clamped Heat writes (script surface)
     void HeatRaise(int index, float amount); // clamp at 100
     void HeatDecay(int index, float amount); // clamp at 0
+
+    // The campaign-aware faction lookup, and the one every side-keyed query
+    // below goes through.  FindFaction scans by side FIRST, so on a template
+    // with several descriptors on one side it returns whichever was DECLARED
+    // first - picking Sinai's Syria would silently field EgyptArmy's roster.
+    // A side that is the campaign's occupier or resistance therefore resolves
+    // to the descriptor that was actually selected; everything else (third
+    // parties, class-name lookups) falls through to the by-side scan.
+    const FactionRecord* FindFactionForSide(const char* side) const;
 
     // faction queries; the faction is looked up by side string or config
     // class name (side wins); empty string when faction/key/level is unknown
@@ -270,9 +296,31 @@ class ZoneRegistry : public SerializeClass
     void SeedCityZones(const ParamEntry& namesCfg);
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;
+    // class name only - the key FindFaction reaches last and FindFactionForSide
+    // needs first
+    const FactionRecord* FindFactionByClass(const char* className) const;
+    FactionRecord* FindFactionByClassMutable(const char* className);
     // map a raw selection to a concrete side via the faction table;
     // unmatched/empty keeps the current value
     void ResolveSides(const char* selOccupier, const char* selResistance);
+    // pin the resistance to _tuning.playerSide and move a colliding occupier
+    // off it (sideTwin where the data ships one, rebase where it does not);
+    // a no-op when the template authors no playerSide
+    void ResolveSideCollisions(const ParamEntry* factionsCfg);
+    // force the selected descriptors' side fields to match the resolved
+    // campaign sides; idempotent
+    void RebindFactionSides();
+    // split the one record a mirror-match pick aliases (occupier faction ==
+    // resistance faction on two different sides) into two, so RebindFactionSides
+    // has a record per side to write; idempotent.  Called by RebindFactionSides.
+    void DivergeAliasedFactions();
+    // weld the campaign's two sides into mutual enemies (WEST and GUER are
+    // ALLIES by default - see the definition).  True = settled, never call
+    // again this load; that covers both a successful weld and a PERMANENT
+    // refusal to weld (an unresolved same-side campaign, or a side string no
+    // TargetSide parses), which no later tick could fix.  False = the world or
+    // its centers are not built yet, retry next tick.
+    bool ApplyCampaignFriendship();
     // "OCCUPIER"/"RESISTANCE" -> the resolved sides; anything else verbatim
     RString ResolveOwnerToken(const RString& owner) const;
     void ApplyOwnerTokens(); // re-map every zone's owner from ownerConfig
@@ -287,6 +335,9 @@ class ZoneRegistry : public SerializeClass
     // campaign faction sides; defaults match the Phase-1 Demo campaign
     RString _occupierSide = RString("EAST");
     RString _resistanceSide = RString("GUER");
+    // the descriptors those sides field (see OccupierFaction)
+    RString _occupierFaction;
+    RString _resistanceFaction;
     RString _handlers[NZoneEventTypes];
     float _accum = 0;
     // deserialized rows waiting for the mission config (applied on the
@@ -296,9 +347,14 @@ class ZoneRegistry : public SerializeClass
     // reads happen on the first pass only; applied on the second)
     RString _pendingOccupierSide;
     RString _pendingResistanceSide;
+    RString _pendingOccupierFaction;
+    RString _pendingResistanceFaction;
     // queued campaignLoaded notification (see MarkCampaignLoaded)
     bool _pendingLoaded = false;
     int _loadedSaveVersion = 0;
+    // transient, NEVER serialized: the friendship matrix is world state, so a
+    // loaded campaign re-welds it on its next tick rather than restoring it
+    bool _friendshipApplied = false;
 };
 
 // Map a side string to its live command center WITHOUT creating one (an
@@ -307,6 +363,12 @@ class ZoneRegistry : public SerializeClass
 // unknown.  Shared by ZoneRegistry (resistance presence) and AlertMachine
 // (occupier perception).
 AICenter* FindSideCenter(const char* sideName);
+
+// The creating sibling: a side with no mission-placed units has no command
+// center yet (Abel's mission.sqm seeds only a GUER group), so the occupier's
+// center has to be created on demand - mirrors CenterCreate
+// (GameStateExtWorldConfig.cpp).  Null on an unknown side name or no world.
+AICenter* EnsureSideCenter(const char* sideName);
 
 } // namespace Guerrilla
 } // namespace Poseidon

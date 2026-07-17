@@ -1,9 +1,12 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/GameModule.hpp>
+#include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // shared with ZoneRegistry::ResolveSideCollisions
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/platform.hpp>
@@ -29,6 +32,17 @@ constexpr float kCyclerW = 0.32f;
 constexpr float kCyclerH = 0.05f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
+
+// The one player-facing wording for an unlaunchable pair, shared by the guard
+// helper and the display so the message box and the tests cannot disagree.
+RString SameSideMessage(RString side)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+             "OCCUPIER and RESISTANCE both resolve to side %s.\nPick factions on two different sides.",
+             (const char*)side);
+    return RString(buffer);
+}
 } // namespace
 
 std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std::function<bool(RString)>& worldExists)
@@ -55,33 +69,31 @@ std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std
     return islands;
 }
 
-std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg, const char* side)
+std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg)
 {
-    std::vector<RString> all;
-    std::vector<RString> matching;
-    if (factionsCfg)
+    std::vector<RString> out;
+    if (!factionsCfg)
     {
-        for (int i = 0; i < factionsCfg->GetEntryCount(); i++)
+        return out;
+    }
+    for (int i = 0; i < factionsCfg->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = factionsCfg->GetEntry(i);
+        if (!e.IsClass())
         {
-            const ParamEntry& e = factionsCfg->GetEntry(i);
-            if (!e.IsClass())
-            {
-                continue;
-            }
-            RString name = e.GetName();
-            all.push_back(name);
-            RString entrySide = e.ReadValue("side", name);
-            if (stricmp(entrySide, side) == 0)
-            {
-                matching.push_back(name);
-            }
+            continue;
         }
+        RString name = e.GetName();
+        // the class name is the default side, so a `class CIV` needs no
+        // `side` key to be excluded here
+        RString side = e.ReadValue("side", name);
+        if (stricmp(side, "CIV") == 0)
+        {
+            continue; // the population is ambience, never a combatant choice
+        }
+        out.push_back(name);
     }
-    if (!matching.empty())
-    {
-        return matching;
-    }
-    return all;
+    return out;
 }
 
 RString GuerrillaTemplateMissionBase(RString island)
@@ -114,13 +126,135 @@ RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction)
     return cls->ReadValue("side", faction);
 }
 
+int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<RString>& list, RString selection)
+{
+    if (selection.GetLength() == 0)
+    {
+        return -1;
+    }
+    // side first, then class name — the exact order ZoneRegistry::FindFaction
+    // scans in, so an index found here names the record the registry would
+    // have matched for the same string.
+    for (int i = 0; i < (int)list.size(); i++)
+    {
+        RString side = GuerrillaFactionSide(factionsCfg, list[i]);
+        if (side.GetLength() > 0 && stricmp(side, selection) == 0)
+        {
+            return i;
+        }
+    }
+    for (int i = 0; i < (int)list.size(); i++)
+    {
+        if (stricmp(list[i], selection) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void GuerrillaDefaultSelections(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
+                                const std::vector<RString>& list, int& outOccupier, int& outResistance)
+{
+    outOccupier = -1;
+    outResistance = -1;
+    if (list.empty())
+    {
+        return; // no real choice: SelectedOccupier/Resistance stay EMPTY
+    }
+    // Whatever the cyclers start on IS published on OK, so it has to be the
+    // same pair a no-UI direct launch of this template resolves. Walk the same
+    // precedence chain ZoneRegistry::LoadFromParams does, minus the gmSel*
+    // rung (that rung is what these selections BECOME).
+    RString defOccupier = zonesCfg ? zonesCfg->ReadValue("defaultOccupier", RString()) : RString();
+    RString defResistance = zonesCfg ? zonesCfg->ReadValue("defaultResistance", RString()) : RString();
+    outOccupier = GuerrillaIndexOfSelection(factionsCfg, list, defOccupier);
+    outResistance = GuerrillaIndexOfSelection(factionsCfg, list, defResistance);
+    // Then the registry's built-in EAST occupier / GUER resistance, for a
+    // template that authors neither default* key.
+    if (outOccupier < 0)
+    {
+        outOccupier = GuerrillaIndexOfSelection(factionsCfg, list, RString("EAST"));
+    }
+    if (outResistance < 0)
+    {
+        outResistance = GuerrillaIndexOfSelection(factionsCfg, list, RString("GUER"));
+    }
+    // Floor: two DISTINCT indices. Index 0 for both would open the screen on a
+    // campaign fighting itself. (A template that deliberately points both
+    // default* keys at one descriptor is honoured above and lands here only if
+    // neither key resolved at all.)
+    if (outOccupier < 0)
+    {
+        outOccupier = (outResistance == 0 && list.size() > 1) ? 1 : 0;
+    }
+    if (outResistance < 0)
+    {
+        outResistance = (outOccupier == 0 && list.size() > 1) ? 1 : 0;
+    }
+}
+
+bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg, RString occupier,
+                                    RString resistance, RString& outMessage)
+{
+    outMessage = RString();
+    RString occSide = GuerrillaFactionSide(factionsCfg, occupier);
+    RString resSide = GuerrillaFactionSide(factionsCfg, resistance);
+    if (occSide.GetLength() == 0 || resSide.GetLength() == 0)
+    {
+        // Empty selections (no real faction config) cannot be validated here:
+        // the mission's own default* keys decide what these become.
+        return true;
+    }
+
+    RString playerSide = zonesCfg ? zonesCfg->ReadValue("playerSide", RString()) : RString();
+    if (playerSide.GetLength() == 0)
+    {
+        // Legacy template: ZoneRegistry::ResolveSideCollisions returns early,
+        // so two picks on one side would spawn the campaign fighting itself.
+        if (stricmp(occSide, resSide) == 0)
+        {
+            outMessage = SameSideMessage(occSide);
+            return false;
+        }
+        return true;
+    }
+
+    // Step 1, the resistance pin: twin substitution and rebase both land on
+    // playerSide, so the registry's outcome is playerSide either way.
+    resSide = playerSide;
+    if (stricmp(occSide, resSide) != 0)
+    {
+        return true;
+    }
+    // Step 2, the occupier stepping off: its sideTwin, else the first free war
+    // side. With three war sides and one pinned there is always one free, so
+    // this block is unreachable by construction on any template that authors a
+    // playerSide — it stays live because the floor has to be correct anyway.
+    if (Guerrilla::TwinOffSide(factionsCfg, occupier, resSide).GetLength() > 0)
+    {
+        return true;
+    }
+    if (Guerrilla::FirstFreeWarSide(resSide).GetLength() > 0)
+    {
+        return true;
+    }
+    outMessage = SameSideMessage(resSide);
+    return false;
+}
+
+RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)
+{
+    if (bankPrefix.GetLength() > 0)
+    {
+        return bankPrefix + RString("description.ext");
+    }
+    return GuerrillaTemplateMissionBase(island) + RString("\\description.ext");
+}
+
 GuerrillaNewGame::GuerrillaNewGame(ControlsContainer* parent) : Display(parent)
 {
     _exitWhenClose = -1;
-
-    const ParamEntry* factions = Pars.FindEntry("CfgGuerrillaFactions");
-    _occupiers = GuerrillaListFactions(factions, kGuerrillaDefaultOccupier);
-    _resistances = GuerrillaListFactions(factions, kGuerrillaDefaultResistance);
 
     // Prefer a dedicated resource when the game data ships one; fall back to
     // the vanilla island-selection layout; load nothing when no menu
@@ -148,6 +282,12 @@ GuerrillaNewGame::GuerrillaNewGame(ControlsContainer* parent) : Display(parent)
     {
         wizard->ShowCtrl(false);
     }
+
+    // The island list (when present) is already populated with a current
+    // selection by Load() above, so SelectedIsland() resolves to a real
+    // island here — pull that island's own faction roster before wiring up
+    // the cyclers, instead of the never-populated global Pars lookup.
+    RefreshFactionsForIsland(SelectedIsland());
 
     InjectFactionCyclers();
 }
@@ -243,6 +383,97 @@ void GuerrillaNewGame::InjectFactionCyclers()
     }
 }
 
+void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
+{
+    // CfgGuerrillaFactions is authored per-island, inside that island's own
+    // Guerrilla.<island> template mission's description.ext (see
+    // guerrilla-mode/mission/*/description.ext) — it is never an addon's
+    // global config, so Pars does not carry it. Peek the template's own
+    // description.ext the same way the single-mission browser previews a
+    // banked mission's overview (CreateSingleMissionBank), without running
+    // the full SetMission()/launch path.
+    //
+    // Lifetime: _islandCfg.Clear() invalidates every ParamEntry* previously
+    // handed out of it, and OnLBSelChanged re-enters here on every island
+    // change — so the two pointers must be nulled BEFORE the Clear and
+    // re-derived after the Parse. _occupiers/_resistances hold owning RString
+    // copies and are unaffected.
+    // Keep the player's picks across a refresh by NAME, not by index: the two
+    // lists are rebuilt from scratch below and an index means nothing against
+    // the new one.
+    RString keepOccupier = SelectedOccupier();
+    RString keepResistance = SelectedResistance();
+
+    _islandFactions = nullptr;
+    _islandZones = nullptr;
+    _islandCfg.Clear();
+    _islandForFactions = island;
+
+    RString missionBase = GuerrillaTemplateMissionBase(island);
+    RString bankPrefix;
+    if (FilePathExists(missionBase + RString(".pbo")))
+    {
+        bankPrefix = CreateSingleMissionBank(missionBase);
+    }
+    bool unbanked = bankPrefix.GetLength() == 0 && QIFStreamB::FileExist(missionBase + RString("\\mission.sqm"));
+    if (bankPrefix.GetLength() > 0 || unbanked)
+    {
+        RString descPath = GuerrillaFactionsDescriptionPath(island, bankPrefix);
+        if (QIFStreamB::FileExist(descPath))
+        {
+            _islandCfg.Parse(descPath);
+            _islandFactions = _islandCfg.FindEntry("CfgGuerrillaFactions");
+            _islandZones = _islandCfg.FindEntry("CfgGuerrillaZones");
+        }
+    }
+    // No per-island descriptor (missing template, or a template with no
+    // CfgGuerrilla* of its own) — fall back to a global config an addon might
+    // publish, then to an empty list (cyclers show "(mission default)"; OK
+    // still works via the mission's own default* keys). Pars lives for the
+    // process, so storing a pointer into it is safe. Both entries fall back
+    // INDEPENDENTLY: sourcing the factions from Pars while leaving the zones
+    // null left the OK guard reading playerSide off nothing, so it took its
+    // legacy branch and blocked pairs the registry rebases happily — and left
+    // the cyclers with no default* keys to seed from.
+    if (!_islandFactions)
+    {
+        _islandFactions = Pars.FindEntry("CfgGuerrillaFactions");
+    }
+    if (!_islandZones)
+    {
+        _islandZones = Pars.FindEntry("CfgGuerrillaZones");
+    }
+    // One list, both cyclers: any faction may occupy or resist, and the
+    // registry rebases whatever the pick collides with.
+    _occupiers = GuerrillaListFactions(_islandFactions);
+    _resistances = GuerrillaListFactions(_islandFactions);
+    // Seed from the template's own defaultOccupier/defaultResistance so that
+    // opening this screen and pressing OK launches exactly what a direct,
+    // no-UI launch of the same template would. The lists used to be empty
+    // (the descriptor was looked up in Pars, which never carries it), so the
+    // selections resolved to EMPTY, nothing was published and the default*
+    // keys always won — that is the contract this restores now that the lists
+    // are real. Seeding 0/0 instead would both override those keys silently
+    // and open on occupier == resistance.
+    GuerrillaDefaultSelections(_islandFactions, _islandZones, _occupiers, _occupierSel, _resistanceSel);
+    // A pick the new roster still carries survives the refresh.
+    int keptOccupier = GuerrillaIndexOfSelection(_islandFactions, _occupiers, keepOccupier);
+    if (keptOccupier >= 0)
+    {
+        _occupierSel = keptOccupier;
+    }
+    int keptResistance = GuerrillaIndexOfSelection(_islandFactions, _resistances, keepResistance);
+    if (keptResistance >= 0)
+    {
+        _resistanceSel = keptResistance;
+    }
+    // Cyclers don't exist yet on the first call (constructor, before
+    // InjectFactionCyclers) — UpdateFactionLabel no-ops safely via its own
+    // GetCtrl null check.
+    UpdateFactionLabel(kIdcOccupier);
+    UpdateFactionLabel(kIdcResistance);
+}
+
 void GuerrillaNewGame::UpdateFactionLabel(int idc)
 {
     IControl* ctrl = GetCtrl(idc);
@@ -308,20 +539,16 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
         break;
         case IDC_OK:
         {
-            // Two cycler picks that resolve to the SAME side would spawn the
-            // campaign fighting itself — keep the player in the dialog. Empty
-            // selections (no real faction config) cannot be validated here;
-            // the mission's own defaults decide, so those pass through.
-            const ParamEntry* factions = Pars.FindEntry("CfgGuerrillaFactions");
-            RString occSide = GuerrillaFactionSide(factions, SelectedOccupier());
-            RString resSide = GuerrillaFactionSide(factions, SelectedResistance());
-            if (occSide.GetLength() > 0 && resSide.GetLength() > 0 && stricmp(occSide, resSide) == 0)
+            // A pair the registry cannot resolve to two distinct sides would
+            // spawn the campaign fighting itself — keep the player in the
+            // dialog. The descriptor comes from the SELECTED ISLAND's own
+            // template (Pars never carries CfgGuerrillaFactions, which is why
+            // this guard used to be unreachable).
+            RString message;
+            if (!GuerrillaSelectionIsResolvable(_islandFactions, _islandZones, SelectedOccupier(), SelectedResistance(),
+                                                message))
             {
-                char buffer[256];
-                snprintf(buffer, sizeof(buffer),
-                         "OCCUPIER and RESISTANCE both resolve to side %s.\nPick factions on two different sides.",
-                         (const char*)occSide);
-                CreateMsgBox(MB_BUTTON_OK, RString(buffer));
+                CreateMsgBox(MB_BUTTON_OK, message);
                 break;
             }
             // The launch itself runs in DisplayMain::OnChildDestroyed
@@ -345,6 +572,33 @@ void GuerrillaNewGame::OnLBDblClick(int idc, int curSel)
     {
         Display::OnLBDblClick(idc, curSel);
     }
+}
+
+void GuerrillaNewGame::OnLBSelChanged(int idc, int curSel)
+{
+    if (idc == IDC_SELECT_ISLAND)
+    {
+        // Different islands ship different rosters (e.g. Guerrilla.Demo's
+        // vanilla EAST/GUER vs Guerrilla.Sinai's @LoBo IDF/EgyptFrontier) —
+        // re-peek the newly selected island's own template instead of
+        // leaving the previous island's faction list on screen.
+        //
+        // Only when the island ACTUALLY changed. C3DListBox::OnLButtonUp calls
+        // SetCurSel with sendUpdate=true, which skips SetCurSel's
+        // same-index early-out — so this fires on every click, including a
+        // click on the already-selected row. Refreshing there would re-seed
+        // the cyclers from the template defaults and throw the player's picks
+        // away, which double-click-to-launch (OnLBDblClick -> IDC_OK) does in
+        // one gesture: LButtonUp lands first, then OK publishes the reset
+        // pair. It would also unmount and remount the template PBO per
+        // mouse-up.
+        RString island = SelectedIsland();
+        if (island.GetLength() > 0 && stricmp(island, _islandForFactions) != 0)
+        {
+            RefreshFactionsForIsland(island);
+        }
+    }
+    Display::OnLBSelChanged(idc, curSel);
 }
 
 void GuerrillaNewGame::OnCtrlClosed(int idc)

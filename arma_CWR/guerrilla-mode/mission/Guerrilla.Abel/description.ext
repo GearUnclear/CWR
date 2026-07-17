@@ -39,6 +39,12 @@ class CfgGuerrillaZones
     // the new-game UI, so nothing is published there):
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
+    // The side mission.sqm welds the player's unit to (side="GUER",
+    // SoldierGB). The campaign's RESISTANCE side is pinned to this: the
+    // engine counts resistance presence via the resistance side's center,
+    // so a resistance on any other side would never count the player.
+    // The resistance cycler therefore picks a ROSTER, not a side.
+    playerSide = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns
     seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
 
@@ -88,7 +94,69 @@ class CfgGuerrillaZones
 // the weapon classname - there is no "AK47Mag" class in this dataset.
 class CfgGuerrillaFactions
 {
-    class EAST // occupier descriptor
+    class WEST // US force - selectable as occupier OR resistance
+    {
+        side = "WEST";
+        // Mirrors EAST's ladder rung-for-rung: WL<3 riflemen -> WL3-4
+        // grenadiers -> WL5+ crack troops. Deliberately SYMMETRIC with EAST:
+        // either side can now be the occupier, so an asymmetric elite step
+        // would silently turn the occupier pick into a difficulty setting.
+        // SoldierWCrew (M4 + NVGoggles) is the structural twin of EAST's
+        // SoldierECrew (AK74SU + NVGoggles). classic-infantry.md suggests
+        // SoldierWSaboteurDay as the elite step; rejected - tiers[i] is the
+        // squad's RIFLEMAN class and its only rifle is the ~200 m HK/MP5, so
+        // a WL5+ garrison would shoot worse than the WL1 M16 conscripts it
+        // replaces. A true elite step must change BOTH sides together.
+        tiers[] = {"SoldierWB", "SoldierWG", "SoldierWCrew"};
+        tierThresholds[] = {3, 5};
+        // per-tier role variants (plan 15; all verified in the 1.99 config):
+        // the native squad composer fills MG/AT/medic/sniper slots from
+        // these; "" = the tier fields no such role. The sniper appears only
+        // with the elite tier - identical policy to EAST.
+        tiersMG[]     = {"SoldierWMG", "SoldierWMG", "SoldierWMG"};
+        tiersAT[]     = {"SoldierWLAW", "SoldierWLAW", "SoldierWLAW"};
+        tiersMedic[]  = {"SoldierWMedic", "SoldierWMedic", "SoldierWMedic"};
+        tiersSniper[] = {"", "", "SoldierWSniper"};
+        // QRF escort ladder, mirroring EAST rung-for-rung: Jeep patrol (3
+        // cargo, the twin of EAST's UAZ) -> 5t troop truck (12, a full
+        // group) -> M113 APC (8) -> M60 escort (0 cargo, escort-only)
+        vehicles[] = {"Jeep", "Truck5t", "M113", "M60"};
+        vehicleThresholds[] = {3, 6, 8};
+        officer = "OfficerW";
+
+        // ---- resistance-capable key set (any faction may now be the
+        // resistance roster; on this island it spawns onto the GUER player
+        // side): post-capture hold squads, recruitment, the player's loot ----
+        holdClass = "SoldierWB";
+        holdCount = 3;
+        recruitFighter = "SoldierWB";
+        recruitSpecialist = "SoldierWMG";
+        companionClass = "SoldierWB";
+
+        baseWeapon = "M16";
+        baseMagazine = "M16";
+        lootRiflemanWeapon = "M16";
+        lootRiflemanMag = "M16";
+        lootMedicWeapon = "M16";
+        lootMedicMag = "M16";
+        // NOTE: "M60" is used with TWO meanings in this file, deliberately.
+        // Here it is CfgWeapons M60 (the 7.62 MG, scopeWeapon=2/scopeMagazine=2);
+        // in vehicles[] above it is CfgVehicles M60 (the tank, side=1 scope=2).
+        // Safe: ResolveFactionClasses probes bank-scoped - it resolves
+        // vehicles[] against kVeh="CfgVehicles" and loot*/base* against
+        // kWpn="CfgWeapons", so neither reading can pick up the other's class.
+        lootMGWeapon = "M60";
+        lootMGMag = "M60";
+        lootATWeapon = "LAWLauncher";
+        lootATMag = "LAWLauncher";
+        lootSniperWeapon = "M21";
+        lootSniperMag = "M21";
+
+        // town flagpole texture (native TownFlags); matches the engine's
+        // side-WEST default - stated for the data-file contract
+        flag = "\flags\usa.jpg";
+    };
+    class EAST // occupier descriptor; also selectable as the RESISTANCE roster
     {
         side = "EAST";
         // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
@@ -108,25 +176,84 @@ class CfgGuerrillaFactions
         vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "OfficerE";
+
+        // ---- resistance-capable key set (EAST may now be the resistance
+        // roster; on this island it spawns onto the GUER player side) ----
+        holdClass = "SoldierEB";
+        holdCount = 3;
+        recruitFighter = "SoldierEB";
+        recruitSpecialist = "SoldierEMG";
+        companionClass = "SoldierEB";
+
+        // SoldierECrew's AK74SU is deliberately NOT a loot weapon:
+        // scopeMagazine=0, it feeds from AK74 mags (see the convention note
+        // above the class).
+        baseWeapon = "AK74";
+        baseMagazine = "AK74";
+        lootRiflemanWeapon = "AK74";
+        lootRiflemanMag = "AK74";
+        lootMedicWeapon = "AK74";
+        lootMedicMag = "AK74";
+        lootMGWeapon = "PK";
+        lootMGMag = "PK";
+        lootATWeapon = "RPGLauncher";
+        lootATMag = "RPGLauncher";
+        lootSniperWeapon = "SVDDragunov";
+        lootSniperMag = "SVDDragunov";
+
         // town flagpole texture (native TownFlags); matches the engine's
         // side-EAST default - stated for the data-file contract
         flag = "\flags\ussr.jpg";
     };
-    class GUER // resistance descriptor
+    class GUER // resistance descriptor; also selectable as the OCCUPIER
     {
         side = "GUER";
-        tiers[] = {"SoldierGB"};
-        tierThresholds[] = {};
-        // role variants for the post-capture hold squads (and any future
-        // GUER-occupier swap); no sniper class exists in the core GUER roster
-        tiersMG[]    = {"SoldierGMG"};
-        tiersAT[]    = {"SoldierGLAW"};
-        tiersMedic[] = {"SoldierGMedic"};
-        // captured/irregular motor pool: guerrilla jeep -> PV3S truck ->
-        // captured BMP -> T55 (all GUER-sided classes in the 1.99 config)
-        vehicles[] = {"GJeep", "TruckV3SG", "BMPRes", "T55G"};
+        // WL<4 riflemen -> WL4+ grenadiers. Honestly TWO tiers, not three: the
+        // 1.99 core config ships no GUER special-forces/saboteur class, so the
+        // ladder stops here rather than promoting SoldierGMG out of its role
+        // slot. The vehicle ladder (which does reach T55G) carries the
+        // high-war-level escalation instead. Tier 0 stays SoldierGB, so the
+        // pre-existing resistance behaviour at low war level is unchanged.
+        tiers[] = {"SoldierGB", "SoldierGG"};
+        tierThresholds[] = {4};
+        // role variants for the post-capture hold squads AND for the
+        // GUER-as-occupier swap; parallel to tiers[], so two entries each.
+        tiersMG[]    = {"SoldierGMG", "SoldierGMG"};
+        tiersAT[]    = {"SoldierGLAW", "SoldierGLAW"};
+        tiersMedic[] = {"SoldierGMedic", "SoldierGMedic"};
+        // no GUER sniper exists in the 1.99 core config (SoldierGSniper is a
+        // Resistance-era addon class, absent from the merged CONFIG.BIN).
+        // "" = role-absent. For the SNIPER specifically that means the slot is
+        // SUPPRESSED, not filled by a stand-in: ComposeSquad's `tierHasSniper`
+        // test reads this entry's length and forces the sniper count to 0, so
+        // the role() rifleman-substitution the other three roles get never runs
+        // for it and the squad simply fills to size with riflemen. NOT
+        // substituted with a cross-side SVD carrier. The SVDDragunov
+        // lootSniper* entries below stay: the player still arms marksmen from
+        // captured Soviet stock, which is the historically plausible FIA
+        // answer anyway.
+        tiersSniper[] = {"", ""};
+        // Captured/irregular motor pool: guerrilla jeep -> PV3S truck ->
+        // captured BMP -> T55.
+        //
+        // "BMP" is CfgVehicles BMP, which is side=0 (EAST) and crew=SoldierECrew
+        // - and that is deliberate, not an oversight. 1.99 ships NO GUER-sided
+        // APC or IFV at all (the complete side=2 scope=2 vehicle set is GJeep,
+        // UAZG, SGUAZG, TruckV3SG +Reammo/Refuel/Repair, T55G, ParachuteG), so
+        // the alternative is no APC rung. A vehicle's SIDE comes from the
+        // AICenter of the group it spawns into, never from its config class
+        // (GameStateExtWorld.cpp does veh->SetTargetSide(center->GetSide())),
+        // so a BMP spawned into the resistance's center IS resistance armour.
+        // That is exactly the captured-hull fiction this rung wants: the FIA
+        // does not manufacture IFVs, it takes them. Same reasoning as T55G's
+        // real history, minus a re-sided class to take it from.
+        vehicles[] = {"GJeep", "TruckV3SG", "BMP", "T55G"};
         vehicleThresholds[] = {4, 7, 9};
-        officer = "SoldierGB";
+        // CHANGED from SoldierGB: now that GUER can be picked as the
+        // OCCUPIER, `officer` seeds garrison/QRF leader slots, and a leader
+        // identical to his own riflemen is a real downgrade. OfficerG is a
+        // verified side=2 scope=2 class (: SoldierGB, AK47 + Binocular).
+        officer = "OfficerG";
 
         holdClass = "SoldierGB";
         holdCount = 3;

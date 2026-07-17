@@ -3,7 +3,8 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
-#include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/IO/ParamFileExt.hpp>             // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Evaluator/express.hpp> // GameState / GameValue (event dispatch)
@@ -13,6 +14,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICore.hpp>              // markersMap
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp> // ArcadeMarkerInfo
+#include <Poseidon/Network/Network.hpp>        // GetNetworkManager (center creation)
 
 #include <Poseidon/Foundation/Enums/EnumNames.hpp> // GetEnumValue<TargetSide>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -67,6 +69,33 @@ AICenter* FindSideCenter(const char* sideName)
     return GWorld->GetCenter(side);
 }
 
+AICenter* EnsureSideCenter(const char* sideName)
+{
+    using Poseidon::Foundation::GetEnumValue;
+    if (!sideName || !GWorld)
+    {
+        return nullptr;
+    }
+    TargetSide side = GetEnumValue<TargetSide>(sideName);
+    // same -1 (not INT_MIN) contract FindSideCenter documents; the upper bound
+    // keeps the TSideUnknown..TEmpty tail out of CreateCenter, which would
+    // otherwise build a center for a non-side
+    if ((int)side < 0 || side >= TSideUnknown)
+    {
+        return nullptr;
+    }
+    AICenter* center = GWorld->GetCenter(side);
+    if (!center)
+    {
+        center = GWorld->CreateCenter(side);
+        if (center)
+        {
+            GetNetworkManager().CreateObject(center);
+        }
+    }
+    return center;
+}
+
 // script/campaign global published by the new-game UI (OptionsUIApp VarSets
 // kGuerrillaVarOccupier / kGuerrillaVarResistance); read like GarrisonCache's
 // ReadWarLevel - VarGet with the lowercased name, nil tolerated
@@ -115,6 +144,8 @@ void ZoneRegistry::Clear()
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
     _resistanceSide = "GUER";
+    _occupierFaction = RString();
+    _resistanceFaction = RString();
     for (int i = 0; i < NZoneEventTypes; i++)
     {
         _handlers[i] = RString();
@@ -123,8 +154,11 @@ void ZoneRegistry::Clear()
     _pending.Clear();
     _pendingOccupierSide = RString();
     _pendingResistanceSide = RString();
+    _pendingOccupierFaction = RString();
+    _pendingResistanceFaction = RString();
     _pendingLoaded = false;
     _loadedSaveVersion = 0;
+    _friendshipApplied = false;
     // the alert layer lives and dies with the zone registry
     AlertMachine::Instance().Clear();
 }
@@ -181,6 +215,8 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
     _resistanceSide = "GUER";
+    _occupierFaction = RString();
+    _resistanceFaction = RString();
     _accum = 0;
 
     // factions first: the zone table's OCCUPIER/RESISTANCE owner tokens
@@ -199,8 +235,17 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
         RString defOccupier = zonesCfg->ReadValue("defaultOccupier", RString());
         RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
         ResolveSides(defOccupier, defResistance);
+        // read here, not with the rest of the tuning in LoadZones: LoadZones
+        // runs below, AFTER the pass this key gates
+        _tuning.playerSide = zonesCfg->ReadValue("playerSide", _tuning.playerSide);
     }
     ResolveSides(selOccupier, selResistance);
+    // strictly after the precedence chain above (the sides it resolves are
+    // this pass's input) and strictly before both of the passes below:
+    // ResolveFactionClasses keys its fallback list off FactionRecord::side,
+    // and LoadZones resolves each zone's owner token off the campaign sides -
+    // either one running first would see pre-rebase sides
+    ResolveSideCollisions(factionsCfg);
     if (probe)
     {
         ResolveFactionClasses(*probe);
@@ -225,6 +270,7 @@ void ZoneRegistry::ResolveSides(const char* selOccupier, const char* selResistan
         if (const FactionRecord* f = FindFaction(selOccupier))
         {
             _occupierSide = f->side;
+            _occupierFaction = f->className;
         }
     }
     if (selResistance && *selResistance)
@@ -232,8 +278,226 @@ void ZoneRegistry::ResolveSides(const char* selOccupier, const char* selResistan
         if (const FactionRecord* f = FindFaction(selResistance))
         {
             _resistanceSide = f->side;
+            _resistanceFaction = f->className;
         }
     }
+}
+
+// "Auto-rebase the resistance", aimed at the thing that can actually move.
+//
+// The player's unit is authored into the template's mission.sqm on ONE side,
+// and GatherInputs counts the resistance out of THAT side's center - so a
+// resistance side that walks away from the player is a resistance the player
+// is not part of, and nothing he does captures anything.  The resistance side
+// is a per-template constant; what a faction pick chooses is the ROSTER.  So:
+// pin the picked resistance roster onto playerSide, and move the occupier off
+// that side if the two collide.  Prefer the config-clean path (a sideTwin: the
+// same roster the author already re-declared on the other side) and override a
+// descriptor's side only where the data offers no twin.
+//
+// Idempotent by construction - a pure function of (playerSide, selections,
+// faction table) - which matters because LoadFromConfig re-runs on every
+// savegame load pass.
+void ZoneRegistry::ResolveSideCollisions(const ParamEntry* factionsCfg)
+{
+    // legacy templates: no pin, no rebase, behaviour exactly as before.  The
+    // new-game UI blocks a same-side pair for these instead.
+    if (_tuning.playerSide.GetLength() == 0)
+    {
+        return;
+    }
+
+    // ---- resistance: pin to the player's side
+    if (stricmp(_resistanceSide, _tuning.playerSide) != 0)
+    {
+        RString twin = TwinOnSide(factionsCfg, _resistanceFaction, _tuning.playerSide);
+        if (twin.GetLength() > 0)
+        {
+            _resistanceFaction = twin; // already declared on that side: no override needed
+        }
+        else
+        {
+            LOG_INFO(Core, "Guerrilla: resistance faction '{}' rebased from side {} to {} (no sideTwin on that side)",
+                     (const char*)_resistanceFaction, (const char*)_resistanceSide, (const char*)_tuning.playerSide);
+        }
+        _resistanceSide = _tuning.playerSide;
+    }
+
+    // ---- occupier: step off the resistance's side
+    if (stricmp(_occupierSide, _resistanceSide) == 0)
+    {
+        RString twin = TwinOffSide(factionsCfg, _occupierFaction, _resistanceSide);
+        if (twin.GetLength() > 0)
+        {
+            _occupierFaction = twin;
+            _occupierSide = FactionSideOf(factionsCfg, twin);
+        }
+        else
+        {
+            RString freeSide = FirstFreeWarSide(_resistanceSide);
+            if (freeSide.GetLength() == 0)
+            {
+                // unreachable with three war sides and one pinned; kept as the
+                // honest floor.  Degrade to the pre-existing contested
+                // deadlock rather than inventing a side or aborting a load.
+                LOG_WARN(Core, "Guerrilla: occupier '{}' shares side {} with the resistance and no war side is free",
+                         (const char*)_occupierFaction, (const char*)_occupierSide);
+            }
+            else
+            {
+                LOG_INFO(Core, "Guerrilla: occupier faction '{}' rebased from side {} to {} (no sideTwin off that side)",
+                         (const char*)_occupierFaction, (const char*)_occupierSide, (const char*)freeSide);
+                _occupierSide = freeSide;
+            }
+        }
+    }
+
+    RebindFactionSides();
+}
+
+// The faction table has to agree with the resolved sides: FindFaction matches
+// side BEFORE class name, so a record left on its authored side after a rebase
+// makes FindFaction(newSide) miss the descriptor the player picked while
+// FindFaction(oldSide) still hands it to the other pick.  It also silently
+// drops the descriptor's authored `flag` key, which TownFlags looks up by SIDE
+// string (registry.FactionValue(z->owner, "flag")).
+//
+// Doing every side mutation here rather than inline keeps the twin path
+// override-free for free: a twin already declares the side being forced onto
+// it, so this writes back what the config says.
+void ZoneRegistry::RebindFactionSides()
+{
+    // ...but only ONE record per pick, or the second write eats the first
+    DivergeAliasedFactions();
+    if (FactionRecord* f = FindFactionByClassMutable(_occupierFaction))
+    {
+        f->side = _occupierSide;
+    }
+    if (FactionRecord* f = FindFactionByClassMutable(_resistanceFaction))
+    {
+        f->side = _resistanceSide;
+    }
+}
+
+// A mirror match - the same faction picked for both cyclers, or a template
+// whose defaultOccupier and defaultResistance name one descriptor - leaves
+// _occupierFaction == _resistanceFaction.  ResolveSideCollisions still steps
+// the occupier onto a free side, so the two picks want that ONE FactionRecord
+// to be on two sides at once.  Without this the occupier's `side` write in
+// RebindFactionSides is immediately clobbered by the resistance's: the record
+// ends on the resistance's side, ResolveFactionClasses resolves the occupier's
+// roster against FallbackListForSide(the WRONG side), and
+// FindFaction(_occupierSide) finds no record at all.
+//
+// The roster is what a faction pick chooses and the side is a separate axis
+// (see ResolveSideCollisions), so hand the occupier its own copy of the roster
+// on its own side rather than refusing the pair.  Both sides then field the
+// identical order of battle, which is exactly what a mirror match is.
+//
+// The clone's name is a pure function of (class, side), so an identical clone
+// reappears on every LoadFromConfig - that is what lets Serialize restore
+// _occupierFaction by name across a save/load.  Idempotent: the second call
+// finds the clone already there, and once _occupierFaction points at the clone
+// the alias test no longer fires.
+void ZoneRegistry::DivergeAliasedFactions()
+{
+    if (_occupierFaction.GetLength() == 0 || stricmp(_occupierFaction, _resistanceFaction) != 0)
+    {
+        return;
+    }
+    if (stricmp(_occupierSide, _resistanceSide) == 0)
+    {
+        // an unresolved collision (ResolveSideCollisions' honest floor, or a
+        // legacy template with no playerSide): one side, one record, nothing
+        // to split - splitting here would invent a side nobody resolved
+        return;
+    }
+    const FactionRecord* src = FindFactionByClass(_occupierFaction);
+    if (!src)
+    {
+        return;
+    }
+    RString cloneName = _occupierFaction + RString("@") + _occupierSide;
+    if (!FindFactionByClass(cloneName))
+    {
+        FactionRecord clone = *src; // by value: _factions.Add may reallocate
+        clone.className = cloneName;
+        clone.side = _occupierSide;
+        _factions.Add(clone);
+        LOG_INFO(
+            Core,
+            "Guerrilla: occupier and resistance both picked '{}'; occupier fields a copy of that roster on side {}",
+            (const char*)_occupierFaction, (const char*)_occupierSide);
+    }
+    _occupierFaction = cloneName;
+}
+
+// WEST and GUER are ALLIES out of the box: ArcadeIntel::Init seeds
+// friends[TWest][TGuerrila] = friends[TGuerrila][TWest] = 1.0 and
+// AICenter::IsEnemy is `_friends[side] < 0.6`.  Both Guerrilla templates ship
+// an empty `class Intel {}`, so those defaults apply verbatim - an Abel
+// campaign with a WEST occupier against the GUER resistance would be a
+// permanent ceasefire: two armies coexisting peacefully, campaign unwinnable,
+// nothing logged anywhere.  Sinai only works today because IDF(WEST) vs
+// EgyptFrontier(EAST) happens to default to 0.0.
+//
+// Runs once per campaign load (Simulate), not per tick, so a mission script's
+// setFriend stays authoritative afterwards.  The third war side is left
+// exactly as the template set it.
+//
+// The return is "settled", not "succeeded": the caller latches on true, so the
+// two refusals below - which no later tick can un-refuse, since both are pure
+// functions of sides fixed at load - must report true and say why ONCE, or the
+// guarded call re-runs two string->enum lookups every tick for the life of the
+// campaign.  Only a world that has not finished building returns false.
+bool ZoneRegistry::ApplyCampaignFriendship()
+{
+    using Poseidon::Foundation::GetEnumValue;
+    if (!GWorld)
+    {
+        return false; // transient: no world yet
+    }
+    // (const char*), not the RString: GetEnumValue overloads on const char* AND
+    // const RStringB&, and RString converts to both — the raw call is ambiguous
+    TargetSide occ = GetEnumValue<TargetSide>((const char*)_occupierSide);
+    TargetSide res = GetEnumValue<TargetSide>((const char*)_resistanceSide);
+    if ((int)occ < 0 || (int)res < 0 || occ >= TSideUnknown || res >= TSideUnknown)
+    {
+        LOG_WARN(Core,
+                 "Guerrilla: campaign sides '{}'/'{}' do not both name a war side; friendship left at the "
+                 "template's defaults",
+                 (const char*)_occupierSide, (const char*)_resistanceSide);
+        return true; // permanent: the strings will not change under us
+    }
+    if (occ == res)
+    {
+        // unresolved collision: never weld a side as its own enemy
+        LOG_WARN(Core,
+                 "Guerrilla: occupier and resistance are both side {}; friendship left at the template's defaults",
+                 (const char*)_occupierSide);
+        return true; // permanent
+    }
+    AICenter* occCenter = EnsureSideCenter(_occupierSide);
+    AICenter* resCenter = EnsureSideCenter(_resistanceSide);
+    if (!occCenter || !resCenter)
+    {
+        return false;
+    }
+    occCenter->SetFriendship(res, 0.0f);
+    occCenter->SetFriendship(occ, 1.0f);
+    occCenter->SetFriendship(TCivilian, 1.0f);
+    resCenter->SetFriendship(occ, 0.0f);
+    resCenter->SetFriendship(res, 1.0f);
+    resCenter->SetFriendship(TCivilian, 1.0f);
+    // the population is nobody's enemy; the ambience layer's civilians are not
+    // a third army
+    if (AICenter* civCenter = GWorld->GetCenter(TCivilian))
+    {
+        civCenter->SetFriendship(occ, 1.0f);
+        civCenter->SetFriendship(res, 1.0f);
+        civCenter->SetFriendship(TCivilian, 1.0f);
+    }
+    return true;
 }
 
 RString ZoneRegistry::ResolveOwnerToken(const RString& owner) const
@@ -277,6 +541,9 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.supportDecayOccupied = cfg.ReadValue("supportDecayOccupied", _tuning.supportDecayOccupied);
     _tuning.supportDecayFloor = cfg.ReadValue("supportDecayFloor", _tuning.supportDecayFloor);
     _tuning.contestOutnumberRatio = cfg.ReadValue("contestOutnumberRatio", _tuning.contestOutnumberRatio);
+    // already read (and acted on) in LoadFromParams; re-read so the tuning
+    // struct is complete for anyone inspecting it
+    _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
 
     const ParamEntry* zones = cfg.FindEntry("Zones");
     if (!zones)
@@ -862,6 +1129,49 @@ const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
     return nullptr;
 }
 
+const FactionRecord* ZoneRegistry::FindFactionByClass(const char* className) const
+{
+    if (!className || !*className)
+    {
+        return nullptr;
+    }
+    for (int i = 0; i < _factions.Size(); i++)
+    {
+        if (stricmp(_factions[i].className, className) == 0)
+        {
+            return &_factions[i];
+        }
+    }
+    return nullptr;
+}
+
+FactionRecord* ZoneRegistry::FindFactionByClassMutable(const char* className)
+{
+    return const_cast<FactionRecord*>(FindFactionByClass(className));
+}
+
+const FactionRecord* ZoneRegistry::FindFactionForSide(const char* side) const
+{
+    if (side)
+    {
+        if (_occupierFaction.GetLength() > 0 && stricmp(side, _occupierSide) == 0)
+        {
+            if (const FactionRecord* f = FindFactionByClass(_occupierFaction))
+            {
+                return f;
+            }
+        }
+        if (_resistanceFaction.GetLength() > 0 && stricmp(side, _resistanceSide) == 0)
+        {
+            if (const FactionRecord* f = FindFactionByClass(_resistanceFaction))
+            {
+                return f;
+            }
+        }
+    }
+    return FindFaction(side);
+}
+
 int ZoneRegistry::TierIndex(const FactionRecord& f, float warLevel)
 {
     int tier = 0;
@@ -881,7 +1191,7 @@ int ZoneRegistry::TierIndex(const FactionRecord& f, float warLevel)
 
 RString ZoneRegistry::FactionTierClass(const char* side, float warLevel) const
 {
-    const FactionRecord* f = FindFaction(side);
+    const FactionRecord* f = FindFactionForSide(side);
     if (!f || f->tiers.Size() == 0)
     {
         return RString();
@@ -892,7 +1202,7 @@ RString ZoneRegistry::FactionTierClass(const char* side, float warLevel) const
 void ZoneRegistry::FactionSquad(const char* side, float warLevel, int count, AutoArray<RString>& out) const
 {
     out.Clear();
-    const FactionRecord* f = FindFaction(side);
+    const FactionRecord* f = FindFactionForSide(side);
     if (!f || f->tiers.Size() == 0 || count <= 0)
     {
         return;
@@ -968,7 +1278,7 @@ void ZoneRegistry::FactionSquad(const char* side, float warLevel, int count, Aut
 
 RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const
 {
-    const FactionRecord* f = FindFaction(side);
+    const FactionRecord* f = FindFactionForSide(side);
     if (!f || f->vehicles.Size() == 0)
     {
         return RString();
@@ -1001,7 +1311,7 @@ RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const
 
 RString ZoneRegistry::FactionValue(const char* side, const char* key) const
 {
-    const FactionRecord* f = FindFaction(side);
+    const FactionRecord* f = FindFactionForSide(side);
     if (!f || !key)
     {
         return RString();
@@ -1101,6 +1411,15 @@ void ZoneRegistry::Simulate(float deltaT)
     if (!IsActive())
     {
         return;
+    }
+    // once per campaign load, as soon as the world has centers to weld: the
+    // two campaign sides are allies by default on half the possible pairings
+    // (see ApplyCampaignFriendship).  It returns true once the question is
+    // SETTLED - welded, or permanently unweldable - so this latches either way
+    // and only a still-building world is retried.
+    if (!_friendshipApplied && ApplyCampaignFriendship())
+    {
+        _friendshipApplied = true;
     }
     // fire the queued campaignLoaded notification on the first tick after a
     // load - by now every guerrilla subsystem has finished deserializing
@@ -1677,9 +1996,16 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     {
         _pendingOccupierSide = _occupierSide;
         _pendingResistanceSide = _resistanceSide;
+        _pendingOccupierFaction = _occupierFaction;
+        _pendingResistanceFaction = _resistanceFaction;
     }
     PARAM_CHECK(ar.Serialize("occupierSide", _pendingOccupierSide, 1, RString()))
     PARAM_CHECK(ar.Serialize("resistanceSide", _pendingResistanceSide, 1, RString()))
+    // the sides alone no longer name the campaign's picks: several rosters may
+    // share a side, and a rebased one is not on its authored side at all.
+    // Same additive, presence-tolerant contract as the two above.
+    PARAM_CHECK(ar.Serialize("occupierFaction", _pendingOccupierFaction, 1, RString()))
+    PARAM_CHECK(ar.Serialize("resistanceFaction", _pendingResistanceFaction, 1, RString()))
 
     PARAM_CHECK(ar.Serialize("onCaptured", _handlers[ZECaptured], 1, RString()))
     PARAM_CHECK(ar.Serialize("onSupportThreshold", _handlers[ZESupportThreshold], 1, RString()))
@@ -1699,6 +2025,8 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
         _pending.Clear();
         _pendingOccupierSide = RString();
         _pendingResistanceSide = RString();
+        _pendingOccupierFaction = RString();
+        _pendingResistanceFaction = RString();
     }
     else if (ar.GetPass() == ParamArchive::PassSecond)
     {
@@ -1719,11 +2047,27 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
         {
             _resistanceSide = _pendingResistanceSide;
         }
+        if (_pendingOccupierFaction.GetLength() > 0)
+        {
+            _occupierFaction = _pendingOccupierFaction;
+        }
+        if (_pendingResistanceFaction.GetLength() > 0)
+        {
+            _resistanceFaction = _pendingResistanceFaction;
+        }
+        // the faction table above came from a FRESH LoadFromConfig, so its
+        // side fields describe the config's idea of the campaign, not the
+        // save's - re-point them at the restored picks before anything reads
+        // a roster off a side
+        RebindFactionSides();
         ApplyOwnerTokens();
         _pendingOccupierSide = RString();
         _pendingResistanceSide = RString();
+        _pendingOccupierFaction = RString();
+        _pendingResistanceFaction = RString();
         ApplyPendingLoad();
         _pending.Clear();
+        _friendshipApplied = false; // world state: re-welded on the next tick
         // queue the post-load script notification; the serialized handler
         // means no script has to re-arm anything - this replaces the
         // GM_SAVED sentinel + poll (and the Save action that re-execs its
