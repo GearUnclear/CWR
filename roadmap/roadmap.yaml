@@ -493,6 +493,37 @@ items:
       - "2026-07-14 integration verification: 6/7 Classic-lane guerrilla tests green with the full plan-15 build (native_capture with the NEW gmFactionSquad hold path, save_reload.seq, undercover, civ_shakedown/panic/ambient). guerrilla_native_spawn fails its doMove-displacement assert - FULLY BISECTED AS PRE-EXISTING, NOT A PLAN-15 REGRESSION: plain HEAD (engine+scripts) fails 3/3 consecutive solo runs on this machine (one earlier 15 s HEAD pass was the outlier), my-engine+HEAD-scripts and my-full-build fail identically, the resolution pass is a logged no-op on that mission (0 substitution warnings), and the failing line even varies (once the garrison-live>=6 wait) - environmental nondeterminism, prime suspect the C: drive at 0 bytes free during the session. Known-flaky note on this test predates plan 15 (hardened in 0636f6d)."
       - "2026-07-14 side-finding: RptF is #define'd to ((void)0) in EVERY build config (Foundation/Framework/DebugLog.hpp:61) - all RptF 'logging' in the guerrilla systems is dead code. Plan-15 substitution logging switched to LOG_WARN(Core, ...); pre-existing RptF call sites (zone-cap seeding, garrison group budget) still silently no-op and deserve the same migration."
 
+  - id: faction-swap-either-side
+    title: "Faction swap on either side: side-collision resolution + sideTwin + campaign friendship"
+    phase: phase-2
+    status: done
+    priority: 2
+    commits: ["1702080"]
+    depends_on: [engine-native-systems, mission-migration-native]
+    summary: >
+      Any CfgGuerrillaFactions descriptor is now selectable as occupier OR
+      resistance, sides auto-resolved at campaign load. The resistance side
+      is welded to the template's mission.sqm player unit (new playerSide
+      tuning key), so a resistance pick moves the ROSTER onto that side and a
+      colliding occupier steps off it. New pure-config FactionTwins helper
+      (sideTwin chain-walk with hop bound + cycle tolerance:
+      TwinOnSide/TwinOffSide/FactionSideOf/FirstFreeWarSide);
+      ZoneRegistry::ResolveSideCollisions + RebindFactionSides +
+      DivergeAliasedFactions (splits a mirror-match roster aliased onto two
+      sides) + ApplyCampaignFriendship (welds the two campaign sides into
+      mutual enemies each load; WEST/GUER are allies by default) +
+      EnsureSideCenter (on-demand center for a side with no mission-placed
+      units). FindFactionForSide resolves a side-keyed query to the descriptor
+      actually selected, not the first declared on that side (Sinai ships five
+      EAST descriptors). GuerrillaNewGame resolves twins through the SAME
+      helpers so the launchability block and the substitution cannot drift
+      (the dead IDC_OK guard was that drift). Data: Abel gains a symmetric
+      WEST descriptor + resistance-capable EAST/GUER key sets (GUER fields
+      OfficerG + a two-tier ladder as occupier); playerSide on Abel (GUER) and
+      Sinai (EAST, five sideTwin=""); Showcase.Abel BMPRes -> BMP fix.
+    log:
+      - "2026-07-16: landed as 1702080. Build green; [guerrilla] 81 unit cases pass (incl. twin/collision/friendship cases in test_zone_registry.cpp and launchability/twin-block cases in test_guerrilla_module.cpp). Not yet play-tested or run through the Trident swap lanes (guerrilla_sinai_swap / ui_new_game_e2e) on this machine."
+
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"
     phase: phase-2
@@ -509,6 +540,67 @@ items:
       - "Side-slot contract locked in the issue: GUER=resistance, EAST=occupier incl. pseudo-gangs, CIV=civilians, WEST=reserved third-force slot; no fifth engine side."
       - "Its three prerequisite boxes (support ledger, faction descriptors, cross-side spawn) are already satisfied natively per issue #7, but remain unticked on #2."
 
+  - id: arms-stash-engine
+    title: "Arms stash engine support: cargo read/withdraw commands + persistent StashRegistry (stash tiers 1-2)"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [engine-native-systems]
+    commits: [04c4c06]
+    summary: >
+      Tier 1: four generic engine script commands (weaponCargo, magazineCargo,
+      removeWeaponCargo, removeMagazineCargo) making the previously write-only
+      WeaponHolder cargo API readable and withdrawable from scripts, including
+      live per-magazine ammo counts. Tier 2: persistent arms stashes - a
+      keep-when-empty flag on ResourceSupply suppressing the forceSupply
+      self-delete at all four sites, plus a native Guerrilla StashRegistry
+      subsystem (gmStashRegister/gmStashUnregister/gmStashCount/gmStash)
+      serialized as GuerrillaStashes in the savegame, TownFlags pattern
+      (presence-tolerant fields, no GuerrillaSaveVersion bump; old saves load
+      with stock behavior).
+    log:
+      - "2026-07-16: landed as 04c4c06. Re-verified pre-commit on this machine: PoseidonTests build green, [guerrilla] 81 cases + [gameStateExt] 29 cases pass (the [vehicleAI] SIGSEGV under an explicit tag filter is the deliberate hidden [oobWeapon] crash-repro test, not a regression)."
+      - "Holder contents already persisted (ResourceSupply::Serialize rides the world _buildings serialization); the tiers add script access and the keep-when-empty lifetime."
+
+  - id: stash-recruit-arming
+    title: "Recruit arming from physical stashes + stash UX (stash tier 3, issue #17)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [arms-stash-engine]
+    gh_issues: [17]
+    summary: >
+      Script-layer follow-up on the tier 1-2 engine work: addAction stash/take
+      UX at registered holders, GM_fnEquipFromUnlocked in loot.sqs drawing a
+      fresh recruit's kit from the nearest registered stash first (withdraw via
+      removeWeaponCargo/removeMagazineCargo) with fallback to the GM_GEAR_*
+      unlock tally, and stash creation wired into the Camp zone. Blocked on a
+      design decision: finite physical logistics (stash replaces the infinite
+      unlock tally) vs supplement (stash as forward cache, tally stays the
+      strategic baseline); ARCHITECTURE.md deliberately chose the abstract
+      tally as "the Arsenal substitute", so finite is a real departure.
+    log:
+      - "SQS canonical-script rule applies: fix in guerrilla-mode/mission/Guerrilla.Demo and re-copy byte-identical to the other mission dirs."
+
+  - id: guerrilla-base
+    title: "Persistent guerrilla base: elected start town, enterable-building HQ, civilian-clothed guards (issue #16)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [engine-native-systems, faction-class-resolution, town-flags]
+    gh_issues: [16]
+    summary: >
+      New native GuerrillaBase subsystem (sibling of ZoneRegistry/GarrisonCache/
+      TownFlags): the player elects a start town at new-game (fourth
+      GuerrillaNewGame control, gmSelStartTown channel), one enterable building
+      there (Paths LOD, NPos>=4 filter) becomes the base, permanently garrisoned
+      by armed civilian-model guards on the resistance side with engine-side
+      interior stationing (Command::Move _target/_param + re-assert tick) and
+      GarrisonCache-pattern persistence. Five landable milestones and the full
+      recon dossier (file:line receipts) are in issue #16.
+    log:
+      - "2026-07-15: deep-plan multi-agent recon done (6 subsystems); design synthesized and filed as issue #16. Offline scan: 73 of 1327 Classic models are AI-enterable; min-NPos filter needed to exclude walk-through objects. @LoBo Sinai scan still owed before the lobo-lane tests."
+
   - id: nearest-roads-command
     title: "Evaluator commands: nearestRoads + worldLocations"
     phase: phase-1.5
@@ -521,6 +613,31 @@ items:
       belongs with the Phase-1.5 evaluator batch, and System 1 checkpoint
       generation is written against it) and a worldLocations-style query from
       plan 13. Neither exists in the engine tree (grep-verified 2026-07-07).
+
+  - id: guerrilla-menu-centerpiece
+    title: "Main menu: Guerrilla Warfighter as the front door, no OFP/BIS branding or Missions/Campaign entries"
+    phase: phase-1.5
+    status: done
+    priority: 2
+    depends_on: [engine-native-systems]
+    summary: >
+      The Classic 1.99 data dir had no menu resource override, so DisplayMain
+      fell through to the locked vanilla RscDisplayMain: the original ArmA
+      Cold War Assault logo banner, CAMPAIGN GAME / SINGLE MISSION / MISSION
+      EDITOR buttons, and a "(c) 2011 Bohemia Interactive" footer, with
+      Guerrilla Mode relegated to a small hijacked button next to Quit.
+      Added ARMA Cold War Assault [Classic]/bin/resource-extra.cpp (merged at
+      runtime by the same ParseResource hook the Demo package's own
+      BIN/resource-extra.cpp uses) defining a RscDisplayMainRemaster that
+      drops the CWA logo, Continue, Campaigns, Missions, and the mission-
+      editor entries, and hand-places a large centered "GUERRILLA
+      WARFIGHTER" active-text button (idc = IDC_MAIN_GUERRILLA) as the
+      primary/default action. Multiplayer, Options and Quit are unchanged.
+      No engine C++ changes were needed - DisplayMain::DisplayMain() already
+      prefers RscDisplayMainRemaster over RscDisplayMain when present.
+    log:
+      - "2026-07-15: local-only data-dir file (the whole [Classic] dir is gitignored as proprietary game data, same as the pre-existing bin/remaster.cpp shim) - no git commit; verified live via direct PoseidonGame.exe launch + window screenshots (run-game.ps1 itself still hits the known PS 5.1 bracket-path Start-Process bug, tracked separately)."
+      - "First boot attempt looked like it dropped straight into live combat instead of the menu; turned out to be the background world's persistent AI simulation (TownFlags/AlertMachine) rendering behind the translucent button panel after a long screenshot delay, not an actual bug - reproduced clean at 5s and 18s post-launch."
 
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
