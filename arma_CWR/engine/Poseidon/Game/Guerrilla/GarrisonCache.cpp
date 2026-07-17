@@ -446,7 +446,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
         if (!grp)
         {
             // AICenter group slots exhausted: stop, the rest stays in reserve
-            RptF("GarrisonCache: group budget exhausted spawning zone '%s'", (const char*)z->name);
+            LOG_WARN(Core, "GarrisonCache: group budget exhausted spawning zone '{}'", (const char*)z->name);
             break;
         }
         // role-diverse composition (plan 15): the squad template fills MG/

@@ -757,8 +757,8 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             }
         }
 
-        // RptF is compiled out in every build config - substitutions must be
-        // visible in release logs, so route through the real logger
+        // substitutions must be visible in release logs, so route through
+        // the real logger (LOG_WARN)
         auto logSub = [&f](const char* key, const char* bad, const char* sub)
         {
             LOG_WARN(Core, "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
@@ -1021,7 +1021,7 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         }
         if (_zones.Size() >= MaxZones)
         {
-            RptF("ZoneRegistry: zone cap (%d) reached seeding cities - remaining Names entries skipped", MaxZones);
+            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding cities - remaining Names entries skipped", MaxZones);
             return;
         }
 

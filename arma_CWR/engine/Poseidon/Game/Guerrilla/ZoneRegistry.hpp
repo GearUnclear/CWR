@@ -192,7 +192,7 @@ class ZoneRegistry : public SerializeClass
     // auto-seed (null: no seeding).  probe, when non-null, runs the
     // faction-descriptor class-resolution pass (plan 15): every
     // classname-valued key is checked against the loaded data package and
-    // unresolvable entries are substituted (logged via RptF) instead of
+    // unresolvable entries are substituted (logged via LOG_WARN) instead of
     // producing fatal/sterile spawns downstream.
     void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
                         const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr,
