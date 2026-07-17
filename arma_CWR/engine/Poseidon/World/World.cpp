@@ -56,6 +56,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -1693,6 +1694,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla town flagpoles - inactive with the registry; throttles
         // itself to TownFlags::TickInterval.
         Guerrilla::TownFlags::Instance().Simulate(deltaT);
+        // Guerrilla arms stashes - prunes dead holders; active in ANY mission
+        // once something registers; throttles itself to
+        // StashRegistry::TickInterval.
+        Guerrilla::StashRegistry::Instance().Simulate(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 

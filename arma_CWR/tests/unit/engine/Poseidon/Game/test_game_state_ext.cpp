@@ -59,6 +59,10 @@ GameValue ClassOpen(const GameState* state, GameValuePar oper1, GameValuePar ope
 GameValue ClassAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ValueAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjGetWeaponCargo(const GameState* state, GameValuePar oper1);
+GameValue ObjGetMagazineCargo(const GameState* state, GameValuePar oper1);
+GameValue ObjRemoveWeaponCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjRemoveMagazineCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 extern bool GUseFileBanks;
 
 namespace
@@ -476,6 +480,62 @@ TEST_CASE("Guerrilla zone-registry commands are registered in GGameState", "[gam
     REQUIRE(ContainsName(functions, "gmFactionTierClass"));
     REQUIRE(ContainsName(functions, "gmFactionValue"));
     REQUIRE(ContainsName(functions, "gmFactionVehicle"));
+}
+
+TEST_CASE("Guerrilla stash-registry commands are registered in GGameState", "[game][gameStateExt][guerrilla]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    AutoArray<RStringS> functions;
+    AutoArray<RStringS> nulars;
+
+    GGameState.AppendFunctionList(functions, AcceptAllNames);
+    GGameState.AppendNularOpList(nulars, AcceptAllNames);
+
+    REQUIRE(ContainsName(nulars, "gmStashCount"));
+    REQUIRE(ContainsName(functions, "gmStashRegister"));
+    REQUIRE(ContainsName(functions, "gmStashUnregister"));
+    REQUIRE(ContainsName(functions, "gmStash"));
+}
+
+TEST_CASE("cargo read/remove commands are registered in GGameState", "[game][gameStateExt][guerrilla]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    AutoArray<RStringS> functions;
+    AutoArray<RStringS> operators;
+
+    GGameState.AppendFunctionList(functions, AcceptAllNames);
+    GGameState.AppendOperatorList(operators, AcceptAllNames);
+
+    REQUIRE(ContainsName(functions, "weaponCargo"));
+    REQUIRE(ContainsName(functions, "magazineCargo"));
+    REQUIRE(ContainsName(operators, "removeWeaponCargo"));
+    REQUIRE(ContainsName(operators, "removeMagazineCargo"));
+}
+
+TEST_CASE("cargo getters return empty arrays and removers no-op on non-objects", "[game][gameStateExt][guerrilla]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+
+    GameValue nullObj = GameValueExt((Object*)nullptr);
+
+    GameValue w = ObjGetWeaponCargo(&GGameState, nullObj);
+    REQUIRE(w.GetType() == GameArray);
+    REQUIRE(((const GameArrayType&)w).Size() == 0);
+
+    GameValue m = ObjGetMagazineCargo(&GGameState, nullObj);
+    REQUIRE(m.GetType() == GameArray);
+    REQUIRE(((const GameArrayType&)m).Size() == 0);
+
+    // removers on a null object must not crash and must return NOTHING (nil)
+    GameValue r1 = ObjRemoveWeaponCargo(&GGameState, nullObj, GameValue("M16"));
+    GameValue r2 = ObjRemoveMagazineCargo(&GGameState, nullObj, GameValue("M16"));
+    REQUIRE(r1.GetNil());
+    REQUIRE(r2.GetNil());
 }
 
 TEST_CASE("ObjectScriptVars stores per-object script variables", "[game][gameStateExt][guerrilla]")

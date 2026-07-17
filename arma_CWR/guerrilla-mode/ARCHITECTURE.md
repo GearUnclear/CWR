@@ -110,9 +110,20 @@ Garrison: `gmGarrisonSpawned <i>`, `gmGarrisonLive <i>`, `gmGarrisonGroups <i>`
 "garrisonDespawned", h]` (`_this=[zoneIndex, zoneName, count]`),
 `gmGarrisonForceDespawn <i>`.
 
+Stashes: `gmStashRegister <obj>` (flags a supply object, typically a
+WeaponHolder, keep-when-empty so emptying it no longer self-deletes it, and
+tracks it; idempotent, no-op on non-supply objects), `gmStashUnregister <obj>`
+(reverts to stock behavior: the holder self-deletes on the next removal that
+leaves it empty), `gmStashCount` (nular → scalar), `gmStash <i>` (→
+`[object, [x,y,z]]`, `[]` out of range). Registered stashes serialize
+(`GuerrillaStashes`) and, unlike the other gm* systems, work outside
+Guerrilla missions too.
+
 Modernized evaluator (usable everywhere now): `compile`, `isNil`,
 `setVariable`/`getVariable` (objects), `nearestObjects`, `distance` on
-position arrays, `setRank`/`rank`, `private`, `doMove`/`commandMove`.
+position arrays, `setRank`/`rank`, `private`, `doMove`/`commandMove`,
+`weaponCargo`/`magazineCargo` (→ classnames / `[classname, ammo]` pairs) and
+`removeWeaponCargo`/`removeMagazineCargo` (one instance by classname).
 
 ### A.4 The event-queue pattern (binding for the script layer)
 

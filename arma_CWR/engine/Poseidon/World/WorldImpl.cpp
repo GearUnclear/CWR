@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -1779,6 +1780,20 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? Guerrilla::TownFlags::Instance().IsActive() : ar.IsSubclass("GuerrillaFlags"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaFlags", Guerrilla::TownFlags::Instance(), 14))
+    }
+
+    // Guerrilla arms stashes: keep-when-empty holder tracking.  Same
+    // missing-subclass tolerance as above; the WeaponHolder objects (and
+    // their keepWhenEmpty flag) ride the world's building serializer.
+    // Save-gated on the registry being NON-EMPTY, not on the ZoneRegistry
+    // being active: stashes are usable from ordinary missions too.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::StashRegistry::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::StashRegistry::Instance().Count() > 0 : ar.IsSubclass("GuerrillaStashes"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaStashes", Guerrilla::StashRegistry::Instance(), 14))
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

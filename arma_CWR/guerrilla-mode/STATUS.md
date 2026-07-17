@@ -31,6 +31,7 @@ reconciled against the engine source, not play-tested.)*
 | 16 | Swappable factions | `CfgGuerrillaFactions` + `gmOccupierSide`/`gmResistanceSide` | **native (data-driven)** | Zone owner accepts `OCCUPIER`/`RESISTANCE`/`NEUTRAL` tokens; new-game UI publishes `gmSelOccupier`/`gmSelResistance` |
 | 17 | Island-agnostic scripts | `scripts/*` | **done** | Zero classnames / side-string literals in `scripts/` (grep-verified); all such facts live in `description.ext` |
 | 18 | Town side flags: map icon + physical flagpole | map: `init.sqs` ("Flag" markers) + `ZoneRegistry::UpdateMarkers` (side color); world: engine `TownFlags` | **native** | One `FlagCarrier` per CITY zone, off-road (RoadNet probe) on high ground toward the outskirts; texture from faction `flag` key, else side default (usa/ussr/fia), else generic white; repaints on flip; serializes (`GuerrillaFlags`); FlagCarrier-less packages degrade to markers-only |
+| 19 | Persistent arms stashes (keep-when-empty holders) | engine `ResourceSupply::_keepWhenEmpty` + `StashRegistry` (`gmStash*`) | **native** | Flag serialized on the holder (presence-tolerant, old saves unchanged); registry rows serialize as `GuerrillaStashes`, save-gated on non-empty so it works outside Guerrilla missions; dead holders pruned on a 5 s tick |
 
 ## File map (current)
 
@@ -147,10 +148,10 @@ machine, meanwhile, Classic has no `demo` world — so these are not runnable on
 either local package yet, and the runnable Guerrilla set stays the `full_cwa`
 tests.
 
-Unit-level serialization round-trips exist for all four native systems
+Unit-level serialization round-trips exist for all five native systems
 (`test_zone_registry.cpp`, `test_alert_machine.cpp`, `test_garrison_cache.cpp`,
-`test_town_flags.cpp` — the latter also pins the flag-texture resolution chain
-and the off-road/high-ground spot picker);
+`test_town_flags.cpp` (the latter also pins the flag-texture resolution chain
+and the off-road/high-ground spot picker), and `test_stash_registry.cpp`);
 `test_mission_script_core.cpp` enforces that every test mission's `init.sqs` +
 `scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core.
 

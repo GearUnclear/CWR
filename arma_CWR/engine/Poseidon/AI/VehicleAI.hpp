@@ -31,6 +31,7 @@ class ResourceSupply: public RefCount
 	float _fuelCargo,_repairCargo,_ammoCargo;
 	RefArray<WeaponType> _weaponCargo;
 	RefArray<Magazine> _magazineCargo;
+	bool _keepWhenEmpty; // stash: suppress forceSupply self-delete when emptied
 	OLink<EntityAI> _supplying;
 	OLink<EntityAI> _alloc;
 	UIActionType _action;
@@ -54,6 +55,8 @@ class ResourceSupply: public RefCount
 	float GetFuelCargo() const {return _fuelCargo;}
 	float GetRepairCargo() const {return _repairCargo;}
 	float GetAmmoCargo() const {return _ammoCargo;}
+	void SetKeepWhenEmpty(bool keep) {_keepWhenEmpty=keep;}
+	bool GetKeepWhenEmpty() const {return _keepWhenEmpty;}
 	int GetWeaponCargoSize() const {return _weaponCargo.Size();}
 	const WeaponType *GetWeaponCargo(int weapon) const {return _weaponCargo[weapon];}
 	int GetMagazineCargoSize() const {return _magazineCargo.Size();}
@@ -72,6 +75,7 @@ class ResourceSupply: public RefCount
 	int AddMagazineCargo(Magazine *magazine, bool deleteWhenFull=false);
 	int AddMagazineCargo(MagazineType *type, int count, bool deleteWhenFull=false);
 	bool RemoveMagazineCargo(Magazine *magazine);
+	bool RemoveMagazineCargo(RString name); // removes the first magazine of the named type
 
 	void GetActions(UIActions &actions, AIUnit *unit, bool now);
 
@@ -180,6 +184,9 @@ class VehicleSupply: public EntityAI
 		return _supply ? _supply->AddMagazineCargo(type, count,deleteWhenFull) : -1;
 	}
 	bool RemoveMagazineCargo(Magazine *magazine) {return _supply ? _supply->RemoveMagazineCargo(magazine) : false;}
+	bool RemoveMagazineCargo(RString name) {return _supply ? _supply->RemoveMagazineCargo(name) : false;}
+	void SetKeepCargoWhenEmpty(bool keep) {if (_supply) _supply->SetKeepWhenEmpty(keep);}
+	bool GetKeepCargoWhenEmpty() const {return _supply ? _supply->GetKeepWhenEmpty() : false;}
 
 	RString GetActionName(const UIAction &action) override;
 	void PerformAction(const UIAction &action, AIUnit *unit) override;

@@ -190,6 +190,7 @@ ResourceSupply::ResourceSupply(EntityAI* vehicle) : _parent(vehicle)
     _action = ATNone;
     _actionParam = 0;
     _actionParam2 = 0;
+    _keepWhenEmpty = false;
 }
 
 ResourceSupply::ResourceSupply()
@@ -200,6 +201,7 @@ ResourceSupply::ResourceSupply()
     _action = ATNone;
     _actionParam = 0;
     _actionParam2 = 0;
+    _keepWhenEmpty = false;
 }
 
 } // namespace Poseidon
@@ -356,6 +358,8 @@ LSError ResourceSupply::Serialize(ParamArchive& ar)
 
     PARAM_CHECK(ar.Serialize("WeaponCargo", _weaponCargo, 1));
     PARAM_CHECK(ar.Serialize("MagazineCargo", _magazineCargo, 1));
+    // presence-tolerant: absent in old saves -> false (stock self-delete)
+    PARAM_CHECK(ar.Serialize("keepWhenEmpty", _keepWhenEmpty, 1, false));
 
     return LSOK;
 }
@@ -1449,7 +1453,8 @@ bool ResourceSupply::RemoveWeaponCargo(WeaponType* weapon)
                 weapon->ShapeRelease();
             }
             _weaponCargo.Delete(i);
-            if (_parent->GetType()->_forceSupply && _weaponCargo.Size() == 0 && _magazineCargo.Size() == 0)
+            if (_parent->GetType()->_forceSupply && !_keepWhenEmpty && _weaponCargo.Size() == 0 &&
+                _magazineCargo.Size() == 0)
             {
                 _parent->SetDelete();
             }
@@ -1472,7 +1477,7 @@ void ResourceSupply::ClearWeaponCargo()
         }
     }
     _weaponCargo.Clear();
-    if (_parent->GetType()->_forceSupply && _magazineCargo.Size() == 0)
+    if (_parent->GetType()->_forceSupply && !_keepWhenEmpty && _magazineCargo.Size() == 0)
     {
         _parent->SetDelete();
     }
@@ -1547,11 +1552,30 @@ bool ResourceSupply::RemoveMagazineCargo(Magazine* magazine)
                 magazine->_type->MagazineShapeRelease();
             }
             _magazineCargo.Delete(i);
-            if (_parent->GetType()->_forceSupply && _weaponCargo.Size() == 0 && _magazineCargo.Size() == 0)
+            if (_parent->GetType()->_forceSupply && !_keepWhenEmpty && _weaponCargo.Size() == 0 &&
+                _magazineCargo.Size() == 0)
             {
                 _parent->SetDelete();
             }
             return true;
+        }
+    }
+    return false;
+}
+
+bool ResourceSupply::RemoveMagazineCargo(RString name)
+{
+    Ref<MagazineType> type = MagazineTypes.New(name);
+    if (!type)
+    {
+        return false;
+    }
+    for (int i = 0; i < _magazineCargo.Size(); i++)
+    {
+        Magazine* magazine = _magazineCargo[i];
+        if (magazine && magazine->_type == type)
+        {
+            return RemoveMagazineCargo(magazine); // handles ShapeRelease + forceSupply self-delete
         }
     }
     return false;
@@ -1571,7 +1595,7 @@ void ResourceSupply::ClearMagazineCargo()
     }
 
     _magazineCargo.Clear();
-    if (_parent->GetType()->_forceSupply && _weaponCargo.Size() == 0)
+    if (_parent->GetType()->_forceSupply && !_keepWhenEmpty && _weaponCargo.Size() == 0)
     {
         _parent->SetDelete();
     }

@@ -415,6 +415,121 @@ GameValue ObjAddMagazineCargo(const GameState* state, GameValuePar oper1, GameVa
     return NOTHING;
 }
 
+GameValue ObjGetWeaponCargo(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return value;
+    }
+    VehicleSupply* veh = dyn_cast<VehicleSupply>(obj);
+    if (!veh)
+    {
+        return value; // non-supply object: empty array
+    }
+
+    int n = veh->GetWeaponCargoSize();
+    array.Realloc(n);
+    for (int i = 0; i < n; i++)
+    {
+        const WeaponType* weapon = veh->GetWeaponCargo(i);
+        if (weapon)
+        {
+            array.Add(weapon->GetName());
+        }
+    }
+    return value;
+}
+
+GameValue ObjGetMagazineCargo(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return value;
+    }
+    VehicleSupply* veh = dyn_cast<VehicleSupply>(obj);
+    if (!veh)
+    {
+        return value;
+    }
+
+    int n = veh->GetMagazineCargoSize();
+    array.Realloc(n);
+    for (int i = 0; i < n; i++)
+    {
+        const Magazine* magazine = veh->GetMagazineCargo(i);
+        if (!magazine || !magazine->_type)
+        {
+            continue;
+        }
+        // [classname, ammo] pair per magazine instance - live ammo counts matter
+        // for the Guerrilla stash feature
+        GameValue entryVal = state->CreateGameValue(GameArray);
+        GameArrayType& entry = entryVal;
+        entry.Realloc(2);
+        entry.Add(magazine->_type->GetName());
+        entry.Add(float(magazine->_ammo));
+        array.Add(entryVal);
+    }
+    return value;
+}
+
+GameValue ObjRemoveWeaponCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return NOTHING;
+    }
+    if (obj->IsDammageDestroyed())
+    {
+        return NOTHING;
+    }
+    VehicleSupply* veh = dyn_cast<VehicleSupply>(obj);
+    if (!veh)
+    {
+        return NOTHING;
+    }
+
+    RString name = oper2;
+    Ref<WeaponType> weapon = WeaponTypes.New(name);
+    if (!weapon)
+    {
+        return NOTHING; // unknown classname: silent no-op
+    }
+    veh->RemoveWeaponCargo(weapon); // removes one instance; may self-delete a forceSupply holder
+    return NOTHING;
+}
+
+GameValue ObjRemoveMagazineCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2)
+{
+    Object* obj = GetObject(oper1);
+    if (!obj)
+    {
+        return NOTHING;
+    }
+    if (obj->IsDammageDestroyed())
+    {
+        return NOTHING;
+    }
+    VehicleSupply* veh = dyn_cast<VehicleSupply>(obj);
+    if (!veh)
+    {
+        return NOTHING;
+    }
+
+    RString name = oper2;
+    veh->RemoveMagazineCargo(name); // first matching instance; may self-delete a forceSupply holder
+    return NOTHING;
+}
+
 GameValue ObjSelectWeapon(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj = GetObject(oper1);

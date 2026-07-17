@@ -540,6 +540,7 @@ GameValue ObjGetDir(const GameState* state, GameValuePar oper1);
 GameValue ObjGetFlag(const GameState* state, GameValuePar oper1);
 GameValue ObjGetFlagOwner(const GameState* state, GameValuePar oper1);
 GameValue ObjGetHitpointsNames(const GameState* state, GameValuePar oper1);
+GameValue ObjGetMagazineCargo(const GameState* state, GameValuePar oper1);
 GameValue ObjGetMass(const GameState* state, GameValuePar oper1);
 GameValue ObjGetMove(const GameState* state, GameValuePar oper1);
 GameValue ObjGetNearestBuilding(const GameState* state, GameValuePar oper1);
@@ -557,6 +558,7 @@ GameValue ObjGetType(const GameState* state, GameValuePar oper1);
 GameValue ObjGetVectorDir(const GameState* state, GameValuePar oper1);
 GameValue ObjGetVectorUp(const GameState* state, GameValuePar oper1);
 GameValue ObjGetVelocity(const GameState* state, GameValuePar oper1);
+GameValue ObjGetWeaponCargo(const GameState* state, GameValuePar oper1);
 GameValue ObjGroup(const GameState* state, GameValuePar oper1);
 GameValue ObjGroupLeader(const GameState* state, GameValuePar oper1);
 GameValue ObjGunner(const GameState* state, GameValuePar oper1);
@@ -748,8 +750,10 @@ GameValue ObjMoveInGunner(const GameState* state, GameValuePar oper1, GameValueP
 GameValue ObjMuzzleReloadTime(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjPlayMove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjRemoveMagazine(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjRemoveMagazineCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjRemoveMagazines(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjRemoveWeapon(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue ObjRemoveWeaponCargo(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSaveIdentity(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSaveStatus(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ObjSay(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1148,6 +1152,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "secondaryWeapon", ObjGetSecondaryWeapon, GameObject),
         GameFunction(GameArray, "weapons", ObjGetAllWeapons, GameObject),
         GameFunction(GameArray, "magazines", ObjGetAllMagazines, GameObject),
+        GameFunction(GameArray, "weaponCargo", ObjGetWeaponCargo, GameObject),
+        GameFunction(GameArray, "magazineCargo", ObjGetMagazineCargo, GameObject),
 
         GameFunction(GameObject, "object", GetObject, GameScalar),
 
@@ -1348,6 +1354,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setAmmoCargo", function, ObjSetAmmoCargo, GameObject, GameScalar),
         GameOperator(GameNothing, "addWeaponCargo", function, ObjAddWeaponCargo, GameObject, GameArray),
         GameOperator(GameNothing, "addMagazineCargo", function, ObjAddMagazineCargo, GameObject, GameArray),
+        GameOperator(GameNothing, "removeWeaponCargo", function, ObjRemoveWeaponCargo, GameObject, GameString),
+        GameOperator(GameNothing, "removeMagazineCargo", function, ObjRemoveMagazineCargo, GameObject, GameString),
 
         GameOperator(GameObject, "createVehicle", function, VehCreate, GameString, GameArray),
         GameOperator(GameNothing, "createUnit", function, UnitCreate, GameString, GameArray),

@@ -61,6 +61,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -640,6 +641,8 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::GarrisonCache::Instance().InitMission();
     // Town flagpoles follow the registry too (no config of their own).
     Guerrilla::TownFlags::Instance().InitMission();
+    // Stash registry likewise resets per mission (no config of its own).
+    Guerrilla::StashRegistry::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {
