@@ -150,7 +150,15 @@ class QIStream
         }
         else
         {
-            _readFrom = static_cast<int>(nPos), _fail = false;
+            // A successful seek must clear a latched EOF (std::istream seekg
+            // semantics): read() latches _eof at end-of-data and successful
+            // reads never clear it, so a probe-parse-to-EOF followed by a
+            // seek-back-and-reparse (e.g. Landscape::LoadData's OPRW attempt
+            // before the RVW fallback) would otherwise see EOF on the first
+            // eof() check and truncate the second parse.
+            _readFrom = static_cast<int>(nPos);
+            _fail = false;
+            _eof = false;
         }
     }
     bool fail() const { return _fail; }

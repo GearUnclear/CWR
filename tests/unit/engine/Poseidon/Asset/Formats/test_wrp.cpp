@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <catch2/catch_message.hpp>
 #include <string>
+#include <vector>
 #include <Poseidon/Foundation/platform.hpp>
 
 using namespace Poseidon;
@@ -95,4 +96,78 @@ TEST_CASE("WRP: WrpReader reports error for invalid data", "[Formats][WRP]")
     REQUIRE(std::string(reader.GetError()) == "Unknown file format");
 
     remove(tmpPath);
+}
+
+// Builds a minimal-but-valid RVW v4 ("4WVR") world blob: 4x4 grid, one texture,
+// two 128-byte object records (12-float matrix + int id + 76-byte name), with
+// the object list terminated by end-of-data (community 4WVR worlds like
+// @LoBo's islands end exactly on the last record, no empty-name sentinel).
+static std::vector<char> BuildRvw4Blob()
+{
+    std::vector<char> blob;
+    auto put = [&blob](const void* p, size_t n) {
+        const char* c = static_cast<const char*>(p);
+        blob.insert(blob.end(), c, c + n);
+    };
+
+    put("4WVR", 4);
+    int range = 4;
+    put(&range, 4); // xRange
+    put(&range, 4); // zRange
+
+    short cell = 0;
+    for (int i = 0; i < 4 * 4; i++)
+        put(&cell, sizeof(cell)); // heightmap
+    for (int i = 0; i < 4 * 4; i++)
+        put(&cell, sizeof(cell)); // texture indices
+
+    char texName[32] = "landtext\mo.pac";
+    put(texName, sizeof(texName));
+    char emptyTex[32] = {};
+    for (int i = 1; i < 512; i++)
+        put(emptyTex, sizeof(emptyTex));
+
+    for (int id = 0; id < 2; id++)
+    {
+        float matrix[12] = {1, 0, 0, 0, 1, 0, 0, 0, 1, 100.0f + id, 0, 200.0f};
+        put(matrix, sizeof(matrix));
+        put(&id, sizeof(id));
+        char name[76] = {};
+        snprintf(name, sizeof(name), "data3d\dummy%d.p3d", id);
+        put(name, sizeof(name));
+    }
+    return blob;
+}
+
+// Regression for the remaster's empty community islands: Landscape::LoadData
+// first probes the stream with WrpReader (the OPRW fast path), which parses a
+// non-OPRW (RVW) world in full - latching the stream's EOF flag - and only
+// then rejects it, so the RVW fallback re-parses the same stream after a
+// seekg back to the start. seekg used to clear only the fail flag; the
+// latched EOF made the fallback's object loop break on its very first
+// "f.eof()" check, loading terrain but ZERO wrp-embedded objects (no
+// buildings on any 4WVR island).
+TEST_CASE("WRP: RVW re-parse after a probe-to-EOF and seekg sees all objects", "[Formats][WRP]")
+{
+    std::vector<char> blob = BuildRvw4Blob();
+
+    QIStream s(blob.data(), (int)blob.size());
+
+    // Probe pass (what LoadOptimized does): full parse, ends at EOF.
+    WrpReader probe;
+    REQUIRE(probe.Load(s));
+    REQUIRE(probe.GetFormat() == WrpReader::RVW_V4);
+    REQUIRE(probe.GetObjectCount() == 2);
+
+    // Rewind for the fallback pass. The seek must clear the latched EOF.
+    s.seekg(0, QIOS::beg);
+    REQUIRE_FALSE(s.fail());
+    REQUIRE_FALSE(s.eof());
+
+    // Fallback pass must see the same object list, not an empty one.
+    WrpReader fallback;
+    REQUIRE(fallback.Load(s));
+    REQUIRE(fallback.GetFormat() == WrpReader::RVW_V4);
+    REQUIRE(fallback.GetObjectCount() == 2);
+    REQUIRE(std::string((const char*)fallback.GetObject(0).name) == "data3d\dummy0.p3d");
 }
