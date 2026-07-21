@@ -1,0 +1,9 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Three vehicle phases, each with real AI perception ticks: one ~65 s headless
+# LOS warmup up front, then civilian/military/getaway observation windows plus
+# a couple of alert-tick delays for each Heat spike to land. Generous polling.
+timeout = 600
+assert_timeout = 240
+extra_args = ["--dev"]
