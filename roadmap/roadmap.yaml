@@ -525,6 +525,51 @@ items:
     log:
       - "2026-07-16: landed as 1702080. Build green; [guerrilla] 81 unit cases pass (incl. twin/collision/friendship cases in test_zone_registry.cpp and launchability/twin-block cases in test_guerrilla_module.cpp). Not yet play-tested or run through the Trident swap lanes (guerrilla_sinai_swap / ui_new_game_e2e) on this machine."
 
+  - id: deep-undercover-system
+    title: "Deep undercover: per-observer perception, per-group compromise, vehicle disguise policy"
+    phase: phase-2
+    status: done
+    priority: 1
+    depends_on: [engine-native-systems, mission-migration-native]
+    commits: [92d7426]
+    gh_issues: [19, 20, 21, 22, 23]
+    summary: >
+      Engine-level undercover replacing the binary global cover break: a
+      native UndercoverSystem (Game/Guerrilla/Undercover.{hpp,cpp} +
+      UndercoverCommands.cpp) resolves the player's perceived side PER
+      OBSERVING GROUP at the three TrackTargets side-resolution sites.
+      Person rules: weapon in hands = Suspect/Exposed via sideAccuracy
+      boosted x2.0 (war-level scaled off gmWarLevel, existing 1.5 ID
+      threshold); slung rifle = Exposed within 20 m, Suspect/Exposed only if
+      the back is visible (x1.4); unarmed = civilian unless that group is
+      already compromised. Verdicts: TCivilian / TSideUnknown (AI
+      investigates) / real side + a permanent serialized per-group
+      compromise flag on the Target record (ucCompromised/-Time). Vehicle
+      policy: civilian vehicles anonymous; stolen occupier vehicles read
+      friendly at range, Suspect at sideAccuracy>=1.35 (vanilla
+      stolen-vehicle idiom), Exposed + vehicle-record compromise within
+      20 m; a witnessed getaway marks the VEHICLE for those witnesses only.
+      The old global vehicle-mount break in AlertMachine is DELETED
+      (playerInVehicle input removed); AlertMachine drains a compromise
+      queue instead (campaign-first compromise = AEUndercoverBroken +
+      alertHeatBreak on the witness's nearest zone; later witnesses =
+      undercoverHeatWitness, no event). gmBreakUndercover =
+      mark-all-witnesses (zero witnesses = silent latch). New SQF
+      gmUndercoverStatus/gmUndercoverWitnesses/gmUndercoverForget; 10 new
+      CfgGuerrillaZones undercover* keys; gmUndercoverDetect gone.
+      gmUndercover + setCaptive stay the script-owned baseline and are
+      never dropped; re-establishment is emergent (stow weapon,
+      avoid/eliminate witnesses; suspicion fades ~4 min, compromise is
+      per-group permanent by default). SP scope: player subject only,
+      self-disables without a real player; system state serializes as an
+      "Undercover" subclass under the ZoneRegistry block.
+    log:
+      - "2026-07-16: engine + scripts + integration tests code-complete in the working tree, NOT yet committed (no hashes yet); integration verification pending. undercover.sqs rewritten in all 7 copies (advisory-only break hint via gmUndercoverWitnesses; captive/gmUndercover never dropped); escalation.sqs lost the dead gmUndercoverDetect + GM_PANIC_DETECT_* tunables; Showcase ticker/alert/status chapters read gmUndercoverStatus/gmUndercoverWitnesses. guerrilla_native_undercover rewritten to the new lifecycle, NEW guerrilla_undercover_rules.test (full_cwa rule matrix), showcase_smoke chapter-6 asserts flipped."
+      - "2026-07-16 (later): unit-test half landed - test_undercover.cpp (person+vehicle rule matrices, 474 assertions incl. boundaries and war scaling) and test_alert_machine.cpp repaired to the new contract (compromise drain, silent no-witness latch, undercoverHeatWitness); ctest 21/21, [guerrilla] sweep 2017 assertions green. Integration tests hardened against fixture interference: companion roster (Petra) retired + swept at test boot (she gunned down BLUE observers otherwise) and the QRF director parked via GM_QRF_TICK so phase-2 RED alerts cannot convoy fresh witnesses into settle-to-clean phases."
+      - "Supersedes the engine-native-systems known edge 'undercover break is permanent for the campaign (re-establishment is the Phase-2 hook)'; compromise heat now lands on the zone nearest the WITNESS, not the player."
+      - "2026-07-21 (later): landed as 92d7426. Post-landing fragility review verdict: robust skeleton (fast gate, pure tested rules, backward-compatible serialization), fragility concentrated where the system meets vanilla perception and the alert FSM. Seams filed as fork issues: #19 one-shot break latch (never re-arms since gmUndercover never drops; first shot marks all knowing groups, later shots mark nobody via the break path), #20 ApplyVerdict refreshes sideAccuracy every seen tick so the record never fades while visible (pins knowsAbout / YELLOW disengage), #21 no threshold hysteresis (suspect/civil flicker at the back-arc / notice-radius / accuracy boundaries), #22 vehicle policy has no e2e integration test (getaway/checkpoint/stolen-vehicle adapter path unit-tested only), #23 hardening backlog (frame-order gate contract, hardcoded 1.35, ManPos default partition, gmUndercover GameBool strictness, FindTarget/FindTargetAll asymmetry). An undercover field-manual page for site/ (undercover.html + uc-*.jpg + gameplay.html edit) is in the working tree from a concurrent session, deliberately NOT committed here."
+      - "2026-07-21: BOTH integration tests green on full CWA data (guerrilla_native_undercover + guerrilla_undercover_rules, tri --retries 0, 2/2 twice; TEMP diagnostics stripped from Undercover.cpp before the final run; ctest Undercover/AlertMachine 21/21). Two engine fixes came out of verification: the undercover resolve now runs EVERY processed TrackTargets tick (outside vanilla's accuracy-improvement gate) using effAccuracy = max(sensor, faded record) and returns without touching the record on unseen ticks (visibility < undercoverMinVisibility) unless already compromised; and in-hands pose classification requires a carried weapon (a bare in-hands ManPos no longer counts). Staging lessons: anchor observers with disableAI MOVE + stop true (danger-mode bounding closed 40 m to 20 m otherwise); stage on probe-verified DRY open ground - an object-free nearestObjects disc is NOT a land check (the sea east of the Camp is object-free, swimmers drop rifles, and the Camp zone centre [7600,5700] itself is open water; getPosASL immediately after setPos reads true elevation, sea surface = 1.09) - both tests now stage at [7500,5700] elev 9 with the observer west up an open slope; and knowsAbout measures identification CONFIDENCE, not hostility (a clear-LOS observer confidently IDs an unarmed subject as civilian), so the clean phases assert status/witness counts instead of knowsAbout bands."
+
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"
     phase: phase-2
@@ -706,8 +751,11 @@ items:
       full island with the whole occupier playbook: plan 14's Phase-3 systems
       (Protected Villages/cordon, tracker teams, detention/prison/rescue,
       expansion-under-passivity, informers), nemesis-lite named commanders,
-      per-region heat cooldown, undercover re-establishment, and optionally the
-      WEST third-force slot and MP-robust guerrilla.sav persistence from plan 13.
+      per-region heat cooldown, undercover depth beyond the 2026-07-16
+      per-observer system (disguise items, BOLO propagation; emergent
+      re-establishment itself landed with deep-undercover-system), and
+      optionally the WEST third-force slot and MP-robust guerrilla.sav
+      persistence from plan 13.
     log:
       - "Plan 13's stated Phase-3 risk is C++ UI scope creep; mitigation is a read-only UIMap overlay prototype before any interactive Display work, and the rule that the game must be fun without the strategy screen."
       - "Capabilities the AI plans do not cover get faked in SQF for v1: native garrison/cover-hold, dynamic patrol routes, ambush-hold-fire FSM states, supply lines."
