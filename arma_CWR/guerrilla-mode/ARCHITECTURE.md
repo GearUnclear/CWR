@@ -34,7 +34,11 @@ carries:
   contestOutnumberRatio=4;
   cacheInterval=5; groupSize=12; alertInterval=5; alertYellowKnows=0.5;
   alertRedKnows=1.5; alertWindowSeconds=20; alertHeatYellow=4; alertHeatRed=15;
-  alertHeatBreak=25`), the `class Zones` seed (each zone may carry its own
+  alertHeatBreak=25; undercoverNoticeRadius=20; undercoverBackArcCos=-0.2;
+  undercoverInHandsBoost=2.0; undercoverSlungBoost=1.4;
+  undercoverIdentifyAccuracy=1.5; undercoverMinVisibility=0.02;
+  undercoverWarDetectScale=0.5; undercoverForgetSeconds=0;
+  undercoverHeatWitness=8; undercoverBoardWitnessSeconds=10`), the `class Zones` seed (each zone may carry its own
   `captureRate` override; `captureRate=100` restores the legacy instant flip),
   and the town auto-seed (`seedCities=1; seedCitySupport=20` — CITY zones
   generated from the world's named towns, markers `gmZoneCity_<n>`).
@@ -58,7 +62,8 @@ copying `mission.sqm`.
 | Native system | Replaces | Behavior |
 |---|---|---|
 | `ZoneRegistry` | `zones.sqs` | zone table from config; fog-of-war reveal; marker recolor/label with capture/support progress text and ColorWhite while contested (only repaints markers that already exist in `markersMap` — the mission still **creates** them); military **consolidation capture** (a 0..100 capture meter: climbs per tick per attacker (crew-capped) while resistance units hold the zone area with no live occupier unit inside it — positional presence per side, NOT the `liveOccupiers` bookkeeping; frozen while contested, decays when defended/abandoned; `contestOutnumberRatio` lets overwhelming defenders re-secure past a lone straggler; flip at 100; meters freeze outside `cacheRadius`); CITY support accrual (occupier-free town only) / intimidation decay (occupier-only presence, floored at `supportDecayFloor`) / decoupled ready-threshold + flip (needs fighters in an occupier-free town; the undercover player counts for neither); capture heat spike + income tap |
-| `AlertMachine` | `alert.sqs` | per-zone GREEN/YELLOW/RED FSM from garrison `knowsAbout`, disengage window, heat spikes on escalation edges, last-known player position, undercover break (vehicle-mount half polled natively; fired half via `gmBreakUndercover`) |
+| `AlertMachine` | `alert.sqs` | per-zone GREEN/YELLOW/RED FSM from garrison `knowsAbout`, disengage window, heat spikes on escalation edges, last-known player position; drains the `UndercoverSystem`'s compromise-notification queue each tick: the first-ever compromise of the campaign (from any source) fires `undercoverBroken` + `alertHeatBreak` Heat on the zone nearest the WITNESS, later witness groups add `undercoverHeatWitness` Heat quietly with no event (the old global vehicle-mount break and its `playerInVehicle` input are deleted) |
+| `UndercoverSystem` | *(new 2026-07-16; replaces the global binary cover break)* | per-observer undercover perception for the player subject (SP; self-disables without a real player): each occupier group independently resolves the disguised player's perceived side at the engine's target-tracking side-resolution sites, as civilian (`TCivilian`) / suspect (`TSideUnknown`, the AI investigates) / exposed (real side), from weapon state, facing, distance, visibility and that group's own compromise memory; compromise is a serialized flag on the group's `Target` record, permanent per group by default (`undercoverForgetSeconds=0` is the decay knob); `gmUndercover` + `setCaptive` stay the script-owned baseline and are never dropped on a break |
 | `GarrisonCache` | `spawning.sqs` (cache half) | occupier garrison distance-cache: integer reserve ↔ live groups across `cacheRadius` (+50 m despawn hysteresis), survivor write-back, officer-first groups (faction `officer` key), SENTRY/GUARD posture, reads script global `gmWarLevel` |
 | native persistence | `persistence.sqs` | zones, alert FSM, garrison bookkeeping and **event handlers** serialize; script globals always did (GGameState); `campaignLoaded` event replaces the GM_SAVED sentinel + poll |
 | `TownFlags` | *(new, no script ancestor)* | one physical `FlagCarrier` pole per CITY zone flying the owner's flag (in-world counterpart of the flag-icon map marker): deterministic off-road placement (`GRoadNet::IsOnRoad` hard reject, 6 m clearance) scored toward high ground + town outskirts so the flag reads from outside town; texture = faction descriptor `flag` key > per-side default (`usa`/`ussr`/`fia` from `Flags.pbo`) > generic white flag; repainted on owner flip; placement + pole refs serialize (`GuerrillaFlags` subclass), the pole object rides the world's building serializer; a package without `FlagCarrier` degrades to markers-only (logged, non-fatal) |
@@ -73,6 +78,34 @@ as API shape.
 `AICenterImpl.cpp`). They **survive a load intact**; the old persistence.sqs
 marker rebuild was defensive and is gone. `init.sqs` creates each zone's
 marker exactly once per campaign.
+
+**Undercover perception rules (2026-07-16).** On foot: a weapon **in hands**
+multiplies the observer's side accuracy by `undercoverInHandsBoost` (2.0,
+war-level scaled: `1 + undercoverWarDetectScale * warDetect`, reading the
+script global `gmWarLevel` directly) toward the existing 1.5 identification
+threshold, so the player reads suspect until identified, exposed after (a
+beat at range, instant up close). A **slung rifle** is exposed within
+`undercoverNoticeRadius` (20 m) and suspect/exposed only when the observer
+sees the target's back (`cosFacing < undercoverBackArcCos`, boost x1.4);
+front-on beyond 20 m the rifle stays hidden behind the torso. **Unarmed**
+reads civilian unless THIS group is already compromised. Suspicion
+(`TSideUnknown`) fades with side accuracy (~4 min); compromise does not.
+In vehicles: a **civilian vehicle** is anonymous, the vehicular equivalent
+of walking unarmed; a **stolen occupier military vehicle** reads friendly at
+range (the theft IS the disguise), suspect at observation accuracy >= 1.35
+(the vanilla stolen-vehicle idiom, kept active), and exposed within
+`undercoverNoticeRadius` (the driver is recognized), which also marks the
+vehicle's own `Target` record compromised. A group whose person-record is
+already compromised and that watched the boarding (last seen within
+`undercoverBoardWitnessSeconds`, 10 s) or sees the vehicle close marks the
+VEHICLE compromised: the getaway car is hot for its witnesses while every
+other group still sees a civilian car. Cover re-establishment is emergent,
+not a command: stow the weapon, break contact, or eliminate the witness
+groups; group knowledge never propagates between groups, so unseen
+garrisons keep reading a civilian. Everything serializes with the campaign:
+per-group flags ride the existing `Target` records, system state (campaign
+first-compromise latch + pending notifications) nests as an `"Undercover"`
+subclass in the ZoneRegistry save block.
 
 ### A.3 Script command surface
 
@@ -100,10 +133,22 @@ probe the descriptor-resolution pass uses), and the side nulars
 
 Alert: `gmZoneAlert <i>` (0/1/2), `gmZoneLastKnown <i>` (`[x,y,z]` or `[]`),
 `gmAlertOnEvent ["alertChanged"|"undercoverBroken", h]`
-(`_this=[zoneIndex, zoneName, oldState, newState]` / `_this=[reason]`),
-`gmBreakUndercover "<reason>"`. The global `gmUndercover` is **script-owned**;
-the engine reads it each alert tick — the break machinery is armed only while
-it is `true`.
+(`_this=[zoneIndex, zoneName, oldState, newState]` / `_this=[reason]`).
+`undercoverBroken` fires ONCE per campaign, on the first compromise from
+any source.
+
+Undercover: `gmUndercoverStatus` (nular scalar: 0 clean / 1 suspected, an
+occupier group holds a `TSideUnknown` record of the player / 2 compromised),
+`gmUndercoverWitnesses` (nular scalar: count of occupier groups holding a
+compromised record), `gmUndercoverForget` (clears every compromised record
+plus the campaign latch; test aid + future disguise-swap hook), and
+`gmBreakUndercover "<reason>"`, whose semantics changed with the
+per-observer rework: it marks every occupier group that currently knows the
+player as compromised; with zero witnesses it latches silently (no event,
+no Heat). The global `gmUndercover` is **script-owned**; the engine reads it
+each tick and the undercover layer is armed only while it is `true` (and
+the player is captive). The old `gmUndercoverDetect` global is gone: the
+engine reads `gmWarLevel` directly for war-level detection scaling.
 
 Garrison: `gmGarrisonSpawned <i>`, `gmGarrisonLive <i>`, `gmGarrisonGroups <i>`
 (array of live groups), `gmGarrisonOnEvent ["garrisonSpawned"|
@@ -214,8 +259,10 @@ mission/Guerrilla.Demo/
                        YELLOW investigate moves to gmZoneLastKnown, RED QRF convoy
                        (officer + tier squad + faction vehicle, road-snap,
                        teleport-on-stall fallback, stand-down cleanup)
-    undercover.sqs     cover establish (gmUndercover=true + setCaptive) +
-                       "fired" EH -> gmBreakUndercover + undercoverBroken reaction
+    undercover.sqs     cover establish (gmUndercover=true + setCaptive, kept
+                       for the whole campaign; never dropped on a break) +
+                       "fired" EH -> gmBreakUndercover + ADVISORY
+                       undercoverBroken hint (gmUndercoverWitnesses)
     campaign.sqs       Save addAction (self-dispatching) + campaignLoaded
                        reconciliation (companion handles, GM_PLAYER_GROUPS, action)
     economy.sqs        income tick (unchanged formulas; reads gmZone tuples)
@@ -321,16 +368,17 @@ state is native and needs nothing.
 | `lib.sqs`         | `GM_fn*`, `GM_LIB_READY`, `GM_tmp*`                       | — |
 | `capture.sqs`     | consumes `gmEvtCaptured`/`gmEvtSupport`/`gmEvtRevealed`/`gmEvtCapStart`/`gmEvtContested`/`gmEvtCapLost`; `GM_HOLD_*`, `GM_TT_*` | `gmZone`, faction hold keys |
 | `qrf.sqs`         | consumes `gmEvtAlert`; `GM_QRF_*` (QRF group/vehicle transient) | `gmZoneAlert`, `gmZoneLastKnown`, `gmGarrison*`, `gmWarLevel`, occupier faction keys |
-| `undercover.sqs`  | `gmUndercover`, consumes `gmEvtUcBroken`, player fired-EH | `gmWarLevel` |
+| `undercover.sqs`  | `gmUndercover`, consumes `gmEvtUcBroken`, player fired-EH | `gmUndercoverWitnesses` (advisory hint only) |
 | `campaign.sqs`    | consumes `gmEvtLoaded`; `GM_pSaveAct`; reconciles `GM_COMP_OBJ` nulls, `GM_PLAYER_GROUPS` reseed | companion rows |
 | `economy.sqs`     | `gmResources`/`gmManpower` (+ only), `GM_ECON_*`          | `gmZone` tuples, `gmResistanceSide` |
-| `escalation.sqs`  | `gmWarLevel`, heat **decay** (`gmZoneSet heatDecay`), `gmUndercoverDetect` | `gmZone` owners, `gmZoneAlert` |
+| `escalation.sqs`  | `gmWarLevel`, heat **decay** (`gmZoneSet heatDecay`) | `gmZone` owners, `gmZoneAlert` |
 | `loot.sqs`        | `GM_GEAR_*` (via `GM_fnBumpGear`), consumes `gmEvtGar*`   | `gmGarrisonSpawned/Groups`, resistance loot keys |
 | `recruit.sqs`     | `GM_PLAYER_GROUPS`, `gmAct*`/`gmReq*` (consumer), `gmResources`/`gmManpower` (−) | `gmZone` (CAMP anchor), faction recruit keys |
 | `companions.sqs`  | `GM_COMP_XP/RANK/SKILL/ALIVE/OBJ`, `GM_fnComp*`           | `GM_COMP_NAMES/LOADOUT`, companionClass key |
 
-Heat raising is native-only now (capture, alert edges, cover break);
-`escalation.sqs` holds the sole scripted decay verb.
+Heat raising is native-only now (capture, alert edges, undercover
+compromise on the witness's nearest zone); `escalation.sqs` holds the sole
+scripted decay verb.
 
 CITY `support` has exactly two sanctioned writers: the scripts'
 `GM_fnSupportAdd` (civilian-kill deltas + delayed resentment, clamps 0–100,

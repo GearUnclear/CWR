@@ -578,8 +578,6 @@ class Man: public Person
 	float _ladderPosition; // 0..1 on ladder, 0 = bottom
 	int _ladderAIDir;
 
-	int GetActUpDegree() const;
-
 	Foundation::Time _upDegreeChangeTime;
 	int _upDegreeStable;
 
@@ -654,6 +652,9 @@ class Man: public Person
 
 	void DrawDiags() override;
 	RString DiagText() const override;
+	// actual ManPos of the current move; public so the Guerrilla undercover
+	// layer can classify the weapon show (Game/Guerrilla/Undercover.cpp)
+	int GetActUpDegree() const;
 	int GetAutoUpDegree() const; // based on unit combat mode
 	MoveId GetDefaultMove() const; // based on unit combat mode
 	MoveId GetDefaultMove(ManAction action) const; // based on unit combat mode

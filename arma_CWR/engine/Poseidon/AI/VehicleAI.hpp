@@ -296,6 +296,12 @@ struct Target: public RemoveLLinks
 	float dammagePerMinute;
 	float subjectiveCost;
 
+	// Guerrilla deep undercover (Game/Guerrilla/Undercover.hpp): this group
+	// positively identified the undercover subject behind this record as
+	// hostile; permanent per group unless undercoverForgetSeconds is set
+	bool ucCompromised;
+	Foundation::Time ucCompromisedTime; // when the compromise (re)latched
+
 	// functions
 
 	float FadingSideAccuracy() const;

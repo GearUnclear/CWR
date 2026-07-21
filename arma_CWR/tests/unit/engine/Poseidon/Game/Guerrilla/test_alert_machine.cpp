@@ -40,6 +40,7 @@ const char* kTunedConfig = "class CfgGuerrillaZones\n"
                            "    alertHeatYellow = 6;\n"
                            "    alertHeatRed = 20;\n"
                            "    alertHeatBreak = 50;\n"
+                           "    undercoverHeatWitness = 11;\n"
                            "    class Zones { class A { name=\"A\"; }; };\n"
                            "};\n";
 
@@ -104,6 +105,15 @@ std::string Str(const RString& s)
     return std::string((const char*)s);
 }
 
+UCCompromise MakeCompromise(float x, float z, const char* reason, bool firstEver)
+{
+    UCCompromise uc;
+    uc.witnessPos = Vector3(x, 0.0f, z);
+    uc.reason = reason;
+    uc.firstEver = firstEver;
+    return uc;
+}
+
 } // namespace
 
 TEST_CASE("AlertMachine - defaults match alert.sqs tunables", "[game][guerrilla]")
@@ -119,6 +129,7 @@ TEST_CASE("AlertMachine - defaults match alert.sqs tunables", "[game][guerrilla]
     REQUIRE(t.alertHeatYellow == Approx(4.0f));     // GM_AL_HEAT_YELLOW
     REQUIRE(t.alertHeatRed == Approx(15.0f));       // GM_AL_HEAT_RED
     REQUIRE(t.alertHeatBreak == Approx(25.0f));     // GM_AL_HEAT_BREAK
+    REQUIRE(t.undercoverHeatWitness == Approx(8.0f));
 }
 
 TEST_CASE("AlertMachine - config keys override the defaults", "[game][guerrilla]")
@@ -134,6 +145,7 @@ TEST_CASE("AlertMachine - config keys override the defaults", "[game][guerrilla]
     REQUIRE(t.alertHeatYellow == Approx(6.0f));
     REQUIRE(t.alertHeatRed == Approx(20.0f));
     REQUIRE(t.alertHeatBreak == Approx(50.0f));
+    REQUIRE(t.undercoverHeatWitness == Approx(11.0f));
 }
 
 TEST_CASE("AlertMachine - inactive registry is a no-op", "[game][guerrilla]")
@@ -345,88 +357,128 @@ TEST_CASE("AlertMachine - last-known position bookkeeping", "[game][guerrilla]")
     REQUIRE(pos.X() == Approx(1500.0f));
 }
 
-TEST_CASE("AlertMachine - undercover break conditions", "[game][guerrilla]")
+TEST_CASE("AlertMachine - undercover break latch", "[game][guerrilla]")
 {
     AlertFixture f;
     f.Load(kAlertConfig);
     AutoArray<AlertEventRecord> fired;
 
     AlertTickInputs in = MakeInputs(f.registry);
-    in.playerValid = true;
-    // player closest to Depot (zone 1)
-    in.playerX = 4800.0f;
-    in.playerZ = 4900.0f;
 
-    SECTION("no break while not undercover")
+    SECTION("no latch while not undercover")
     {
-        in.playerInVehicle = true;
         in.breakRequested = true;
         in.breakReason = "fired";
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 0);
         REQUIRE_FALSE(f.machine.BreakLatched());
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));
         REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
     }
 
-    SECTION("mounting a vehicle breaks cover and spikes the nearest zone")
+    SECTION("a break request with no witnesses latches silently")
     {
-        in.undercover = true;
-        in.playerInVehicle = true;
-        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(CountBroken(fired) == 1);
-        REQUIRE(Str(fired[fired.Size() - 1].reason) == "vehicle");
-        REQUIRE(f.machine.BreakLatched());
-        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f)); // GM_AL_HEAT_BREAK
-        REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));  // not the nearest
-
-        // fires once: no repeat while the script has not dropped gmUndercover
-        fired.Clear();
-        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(CountBroken(fired) == 0);
-        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
-    }
-
-    SECTION("a script break request (fired EH) carries its reason")
-    {
+        // new semantics: event and Heat flow only from compromise
+        // notifications - a shot nobody witnessed is heard, not identified
         in.undercover = true;
         in.breakRequested = true;
         in.breakReason = "fired";
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(CountBroken(fired) == 1);
-        REQUIRE(Str(fired[fired.Size() - 1].reason) == "fired");
+        REQUIRE(CountBroken(fired) == 0);
+        REQUIRE(f.machine.BreakLatched());
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
     }
 
     SECTION("the latch re-arms when cover drops and is re-established")
     {
         in.undercover = true;
-        in.playerInVehicle = true;
+        in.breakRequested = true;
+        in.breakReason = "fired";
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(f.machine.BreakLatched());
 
-        // script reacted: gmUndercover = false
+        // still latched while the script keeps gmUndercover up
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(f.machine.BreakLatched());
+
+        // script dropped gmUndercover: re-arm
         in.undercover = false;
-        in.playerInVehicle = false;
+        in.breakRequested = false;
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE_FALSE(f.machine.BreakLatched());
 
-        // cover re-established, new mount breaks again
-        fired.Clear();
+        // cover re-established: a new request latches again
         in.undercover = true;
-        in.playerInVehicle = true;
+        in.breakRequested = true;
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(f.machine.BreakLatched());
+    }
+}
+
+TEST_CASE("AlertMachine - undercover compromise drain", "[game][guerrilla]")
+{
+    AlertFixture f;
+    f.Load(kAlertConfig);
+    AutoArray<AlertEventRecord> fired;
+
+    AlertTickInputs in = MakeInputs(f.registry);
+    in.undercover = true;
+
+    SECTION("the campaign-first compromise fires the event and spikes the witness zone")
+    {
+        // witness closest to Depot (zone 1)
+        in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "weapon", true));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 1);
-        REQUIRE(f.registry.GetZone(1)->heat == Approx(50.0f));
+        REQUIRE(Str(fired[fired.Size() - 1].reason) == "weapon");
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f)); // GM_AL_HEAT_BREAK
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));  // not the nearest
     }
 
-    SECTION("no heat spike without a valid player, event still fires")
+    SECTION("a later witness raises quiet heat, no event")
     {
-        in.playerValid = false;
-        in.undercover = true;
-        in.playerInVehicle = true;
+        // witness closest to Outpost (zone 0)
+        in.compromises.Add(MakeCompromise(1100.0f, 900.0f, "slung", false));
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(CountBroken(fired) == 0);
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(8.0f)); // undercoverHeatWitness
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
+    }
+
+    SECTION("a mixed batch in one tick heats each witness's own zone")
+    {
+        in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "vehicle", true));
+        in.compromises.Add(MakeCompromise(1100.0f, 900.0f, "vehicle", false));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 1);
-        REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));
-        REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
+        REQUIRE(Str(fired[fired.Size() - 1].reason) == "vehicle");
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(8.0f));
+    }
+
+    SECTION("ticks without compromises add nothing")
+    {
+        in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "weapon", true));
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        fired.Clear();
+        in.compromises.Clear();
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(CountBroken(fired) == 0);
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
+    }
+
+    SECTION("compromises drain independent of the break latch")
+    {
+        // a pending gmBreakUndercover and a drained compromise in the same
+        // tick: one latch, one event
+        in.breakRequested = true;
+        in.breakReason = "fired";
+        in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "fired", true));
+        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
+        REQUIRE(f.machine.BreakLatched());
+        REQUIRE(CountBroken(fired) == 1);
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
     }
 }
 
@@ -477,14 +529,14 @@ TEST_CASE("AlertMachine - FSM state, handlers and break flags survive save/load"
         AutoArray<AlertEventRecord> fired;
 
         // tick 1: Outpost straight to RED with a last-known fix; Depot into
-        // YELLOW (window = 20 s); an in-cover break latches undercoverBroken
+        // YELLOW (window = 20 s); an in-cover break request latches
         AlertTickInputs in = MakeInputs(f.registry);
         in.playerValid = true;
         in.playerX = 1000.0f;
         in.playerZ = 1000.0f;
         in.undercover = true;
         in.breakRequested = true;
-        in.breakReason = "mounted";
+        in.breakReason = "fired";
         in.zones[0].knows = 4.0f;
         in.zones[0].hasLastKnown = true;
         in.zones[0].lastKnown = Vector3(1200.0f, 55.0f, 1300.0f);

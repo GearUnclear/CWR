@@ -76,7 +76,8 @@ GM_Z_CAPTURE = 9
 ;   gmWarLevel    1..10 slow escalation; the native garrison + qrf.sqs read it
 ;   gmHeatDecay   Heat bled per GREEN zone per escalation tick
 ;   gmUndercover  script-OWNED (the engine only READS it each alert tick);
-;                 undercover.sqs establishes true, drops to false on a break
+;                 undercover.sqs establishes true at boot and KEEPS it -
+;                 exposure is per-observer native state (gmUndercoverStatus)
 gmResources = 100
 gmManpower  = 2
 gmWarLevel  = 1

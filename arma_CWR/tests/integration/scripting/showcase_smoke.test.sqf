@@ -68,12 +68,16 @@ triSimUntil { SC_LASTDONE == 5 }
 triAssertEq [(SC_RES select 5), "PASS"]
 triSimUntil { gmGarrisonSpawned SC_OUT }
 
-// --- 6 alert: cover break -> YELLOW -> RED -> QRF -> disengage --------------
+// --- 6 alert: cover break -> YELLOW -> RED -> QRF -> disengage.
+//     NEW lifecycle: the break is per-observer now - gmUndercover and the
+//     captive baseline PERSIST through it (unseen groups still read the
+//     player as a civilian); only the witnesses' native memory changes. ----
 triAssert [gmUndercover]
 SC_QUEUE = SC_QUEUE + [6]
 triSimUntil { SC_LASTDONE == 6 }
 triAssertEq [(SC_RES select 6), "PASS"]
-triAssert [!gmUndercover]
+triAssert [gmUndercover]
+triAssert [captive player]
 
 // --- 7 capture: garrison wiped in-zone -> native ownership flip ------------
 SC_QUEUE = SC_QUEUE + [7]

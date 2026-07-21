@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 
+#include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
@@ -71,6 +72,7 @@ void AlertMachine::LoadFromParams(const ParamEntry* zonesCfg)
     _tuning.alertHeatYellow = zonesCfg->ReadValue("alertHeatYellow", _tuning.alertHeatYellow);
     _tuning.alertHeatRed = zonesCfg->ReadValue("alertHeatRed", _tuning.alertHeatRed);
     _tuning.alertHeatBreak = zonesCfg->ReadValue("alertHeatBreak", _tuning.alertHeatBreak);
+    _tuning.undercoverHeatWitness = zonesCfg->ReadValue("undercoverHeatWitness", _tuning.undercoverHeatWitness);
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +185,11 @@ void AlertMachine::Simulate(float deltaT)
     {
         return;
     }
+    // undercover caches gate EntityAI::TrackTargets; refresh them every
+    // frame (two VarGets + pointer reads), not just every alert tick, so
+    // vehicle mounts/dismounts never see a tick of gate lag
+    UndercoverSystem& undercover = UndercoverSystem::Instance();
+    undercover.SyncCaches();
     _accum += deltaT;
     if (_accum < _tuning.alertInterval)
     {
@@ -197,6 +204,18 @@ void AlertMachine::Simulate(float deltaT)
     in.breakReason = _breakReason;
     _breakPending = false;
     _breakReason = RString();
+
+    // gmBreakUndercover (fired EH): mark every occupier group currently
+    // holding a known record of the subject BEFORE the latch below - the
+    // marks drain right back through in.compromises (world access lives
+    // here so EvaluateAlert stays pure)
+    if (in.undercover && in.breakRequested && !_breakLatched)
+    {
+        undercover.MarkAllWitnessesCompromised(in.breakReason);
+    }
+    // per-observer compromises queued since the last tick (TrackTargets
+    // exposures plus the marking above)
+    undercover.ConsumeCompromises(in.compromises);
 
     AutoArray<AlertEventRecord> fired;
     EvaluateAlert(in, dt, registry, fired);
@@ -214,39 +233,56 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
     const int n = registry.NZones();
     SyncZoneCount(n);
 
-    // ---- undercover break (fire request / vehicle entry, alert.sqs:83-104)
+    // ---- undercover break latch (gmBreakUndercover, alert.sqs:83-104).
+    // The witness marking itself happened in Simulate (world access); event
+    // and Heat flow through the compromise drain below, so a break nobody
+    // witnessed latches silently (fired unseen = heard, not identified).
+    // The old global vehicle-mount break is gone - vehicles resolve per
+    // observer (Undercover.hpp vehicle policy).
     if (!in.undercover)
     {
         // cover dropped (or was re-established later by script): re-arm
         _breakLatched = false;
     }
-    else if (!_breakLatched && (in.breakRequested || in.playerInVehicle))
+    else if (!_breakLatched && in.breakRequested)
     {
         _breakLatched = true;
-        // Heat spike on the zone nearest the player (append-only, clamped)
-        if (in.playerValid)
+    }
+
+    // ---- per-observer compromise notifications (UndercoverSystem drain)
+    for (int c = 0; c < in.compromises.Size(); c++)
+    {
+        const UCCompromise& uc = in.compromises[c];
+        // zone nearest the WITNESS - the group that made the identification
+        int nearest = -1;
+        float bestSq = FLT_MAX;
+        for (int i = 0; i < n; i++)
         {
-            int nearest = -1;
-            float bestSq = FLT_MAX;
-            for (int i = 0; i < n; i++)
+            const ZoneRecord* z = registry.GetZone(i);
+            float dSq = Dist2DSq(uc.witnessPos.X(), uc.witnessPos.Z(), z->pos.X(), z->pos.Z());
+            if (dSq < bestSq)
             {
-                const ZoneRecord* z = registry.GetZone(i);
-                float dSq = Dist2DSq(in.playerX, in.playerZ, z->pos.X(), z->pos.Z());
-                if (dSq < bestSq)
-                {
-                    bestSq = dSq;
-                    nearest = i;
-                }
+                bestSq = dSq;
+                nearest = i;
             }
+        }
+        if (uc.firstEver)
+        {
+            // campaign-first compromise: the big alarm
             if (nearest >= 0)
             {
                 registry.HeatRaise(nearest, _tuning.alertHeatBreak);
             }
+            AlertEventRecord ev;
+            ev.type = AEUndercoverBroken;
+            ev.reason = uc.reason;
+            fired.Add(ev);
         }
-        AlertEventRecord ev;
-        ev.type = AEUndercoverBroken;
-        ev.reason = in.breakRequested ? in.breakReason : RString("vehicle");
-        fired.Add(ev);
+        else if (nearest >= 0)
+        {
+            // a further witness group learned the face: local Heat, no event
+            registry.HeatRaise(nearest, _tuning.undercoverHeatWitness);
+        }
     }
 
     // ---- per-zone FSM (alert.sqs:125-170)
@@ -353,14 +389,6 @@ void AlertMachine::GatherInputs(AlertTickInputs& in, const ZoneRegistry& registr
     if (!in.playerValid)
     {
         return;
-    }
-
-    // the (vehicle aP) != aP poll (see ObjVehicle, GameStateExtUi.cpp)
-    AIUnit* playerUnit = player->CommanderUnit();
-    if (playerUnit)
-    {
-        EntityAI* veh = playerUnit->GetVehicle();
-        in.playerInVehicle = veh && veh != player;
     }
 
     // per-zone knowsAbout: max FadingSideAccuracy of the player across the

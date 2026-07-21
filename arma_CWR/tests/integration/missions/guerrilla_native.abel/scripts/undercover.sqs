@@ -1,45 +1,48 @@
 ; ============================================================================
 ;  undercover.sqs  -  disguise: establish cover, feed the native break, react.
 ; ----------------------------------------------------------------------------
-;  Split of responsibilities with the native AlertMachine:
+;  Split of responsibilities with the native undercover system (per-observer
+;  perception in TrackTargets + AlertMachine):
 ;    * gmUndercover is SCRIPT-OWNED. This file establishes cover at boot
-;      (gmUndercover = true + setCaptive true, exactly as the old
-;      escalation.sqs did) and drops it on a break. The engine only READS
-;      the global each alert tick.
-;    * The engine natively polls the vehicle-mount half of the break
-;      ((vehicle aP) != aP) and spikes Heat on the nearest zone itself.
+;      (gmUndercover = true + setCaptive true) and KEEPS both for the whole
+;      campaign - a break no longer drops them. The engine only READS the
+;      global each alert tick.
+;    * Exposure is per-observer and NATIVE: each occupier group independently
+;      reads the player as civilian / suspect / exposed from weapon state
+;      (in hands / slung / none), facing, distance and its own compromise
+;      memory on the Target record. Query via gmUndercoverStatus (0 clean /
+;      1 suspected / 2 compromised) and gmUndercoverWitnesses; there is
+;      nothing left for this file to poll. (The old global vehicle-mount
+;      break is GONE - vehicles run their own per-observer engine policy.)
 ;    * The fired-weapon half stays scripted: a player "fired" event handler
-;      calls gmBreakUndercover (latched, consumed by the next alert tick,
-;      only effective while gmUndercover is true).
-;    * On the native "undercoverBroken" event this manager un-captives the
-;      player so occupiers re-acquire him (old alert.sqs break block; the
-;      Heat spike that block also applied is native now).
+;      calls gmBreakUndercover (marks every occupier group that currently
+;      knows the player as compromised; Heat spikes on the witness zone).
+;    * The native "undercoverBroken" event fires ONCE per campaign, on the
+;      first compromise from ANY source. The reaction here is ADVISORY ONLY
+;      (a hint) - NO setCaptive false, NO gmUndercover = false. Groups that
+;      never saw the break still read the player as a civilian; killing the
+;      witnesses kills the knowledge.
 ;
 ;  EVENT-QUEUE CONSUMER: drains gmEvtUcBroken ([reason]).
 ;  OWNS: gmUndercover, gmEvtUcBroken (consumer), the player's fired-EH.
-;  READS: gmWarLevel (escalation.sqs keeps gmUndercoverDetect updated).
-;  Re-establishing cover after a break (disguise swap) stays a Phase-2 hook,
-;  matching the old scripts: one break is permanent for the campaign.
+;  READS: gmUndercoverWitnesses (advisory hint only).
 ; ============================================================================
 @GM_LIB_READY
 
-; ---- establish the breakable cover ONCE at boot ------------------------------
+; ---- establish the standing cover ONCE at boot --------------------------------
 gmUndercover = true
 aP setCaptive true
-gmUndercoverDetect = gmWarLevel / 10
 
 ; fired-weapon break trigger. NOTE: deliberately NOT a "carries a weapon" test -
 ; the guerrilla is always armed; only actually firing blows the disguise.
 aP addEventHandler ["fired", {gmBreakUndercover "fired"}]
 
 ; ============================================================================
-;  MAIN LOOP - consume the native break event
+;  MAIN LOOP - consume the native break event (ADVISORY reaction only)
 ; ============================================================================
 #loop
 ~2
 ? (count gmEvtUcBroken) < 1 : goto "loop"
 GM_uBatch = gmEvtUcBroken + []; gmEvtUcBroken = []
-gmUndercover = false
-aP setCaptive false
-hint "Cover blown - the occupiers are onto you."
+hint format ["Your face is known - %1 occupier group(s) can identify you. Garrisons that never saw it still take you for a civilian.", gmUndercoverWitnesses]
 goto "loop"

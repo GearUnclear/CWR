@@ -86,7 +86,7 @@ Two consequences worth stating up front:
 | Garrison & QRF spawning | `createGroup`/`createUnit`/`createVehicle`, `addWaypoint`/`setWaypoint*`, `doMove` convoy chains |
 | Recruitment, loadouts, gear unlocks | `removeAllWeapons`/`addWeapon`/`addMagazine`, threshold counters |
 | War Level / Heat escalation | scalar globals gating spawn tables |
-| Undercover / disguise | `setCaptive` + `primaryWeapon player != ""` checks + civ-class model swap |
+| Undercover / disguise | *(moved native 2026-07-16)* engine `UndercoverSystem` per-observer perception; script keeps the `setCaptive` + `gmUndercover` baseline |
 | XP / training progression | `setSkill` / `SetAbility`, `Person.SetRank()`, `_experience` store |
 | In-mission checkpoints | `saveGame` |
 
@@ -125,6 +125,8 @@ Self-contained and satisfying even if the meta-game didn't exist. **Scout → Ap
 This makes detection *recoverable* (the "the plan that goes wrong is the better story" feel) using only polling + a timer.
 
 **Undercover (CWA-native, since there's no loadout inspection).** Disguise = occupying a **civilian unit class** with `setCaptive true`. Cover **breaks** when a primary weapon is selected, you fire, you enter a reported military vehicle, or you fail a roadblock proximity check. Each break does `setCaptive false` and spikes local Heat; detection chance scales with War Level.
+
+> **Built (2026-07-16), supersedes the four-trigger description above:** undercover is now a native **per-observer perception system** (`engine/Poseidon/Game/Guerrilla/Undercover.*`). Each occupier group independently resolves the disguised player's side at the engine's target-tracking sites: weapon in hands = identified on a war-level-scaled accuracy boost (suspect first, the AI investigates; exposed once identified); slung rifle = exposed within ~20 m or when the observer sees your back; unarmed = civilian unless that specific group already identified you. Compromise is per group and permanent by default, so a break no longer ends cover for the whole campaign: stow the weapon and avoid (or eliminate) the witnesses, and every other garrison still reads a civilian. Vehicles have their own policy: civilian cars are anonymous; a stolen military truck reads friendly at range and blows only up close or to a group that watched the getaway. `setCaptive` + `gmUndercover` remain the script-owned baseline and are never dropped on a break; status via `gmUndercoverStatus`/`gmUndercoverWitnesses`. The roadblock/proximity check remains future work (plan 14's checkpoints are its natural home).
 
 ---
 
@@ -174,7 +176,7 @@ Looted weapons/mags increment a per-classname tally; cross a threshold (default 
 
 The single biggest anti-empty-sandbox device.
 
-- **War Level (1–10, slow):** scales with % of map points held. Drives the enemy **spawn table** — WL1–2 militia/trucks → WL3+ regulars/APCs (airfield capture unlocks) → WL5+ tanks, attack-heli QRF, artillery. High WL also: fewer civilians, tougher roadblocks, higher undercover-detection, capped trainable skill.
+- **War Level (1–10, slow):** scales with % of map points held. Drives the enemy **spawn table** — WL1–2 militia/trucks → WL3+ regulars/APCs (airfield capture unlocks) → WL5+ tanks, attack-heli QRF, artillery. High WL also: fewer civilians, tougher roadblocks, higher undercover-detection (native since 2026-07-16: identification boosts scale with `gmWarLevel` via `undercoverWarDetectScale`), capped trainable skill.
 - **Heat / Aggression (per-region, fast):** spikes on contact/kills/blown cover; **decays if you lie low**. Drives *right-now* response — patrol frequency, QRF size, counterattacks. Each region has an explicit cooldown timer so the world stays conquerable.
 
 Both are scalar globals gating which groups get spawned. Plan [08](./08-ai-shared-enemy-intel.md) (shared intel) makes neighboring garrisons react before visual contact — the "the whole net lit up" feeling — without per-unit cost.

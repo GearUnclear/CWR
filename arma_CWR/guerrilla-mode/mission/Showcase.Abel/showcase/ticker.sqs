@@ -7,7 +7,8 @@
 ;
 ;    * per authored zone (Camp / Village / Outpost): alert edges + ownership
 ;    * total resistance-held zone count (the seeded towns, summarized)
-;    * War Level, undercover cover, QRF launch/stand-down, gear unlocks
+;    * War Level, undercover exposure (gmUndercoverStatus rise edges), QRF
+;      launch/stand-down, gear unlocks
 ;
 ;  Quiet when nothing happens, exact when something does - readable both
 ;  while chapters run and while a human just plays. Toggled by the
@@ -22,7 +23,7 @@ SC_tZONES = [SC_CAMP, SC_VILL, SC_OUT]
 SC_tAl = [gmZoneAlert SC_CAMP, gmZoneAlert SC_VILL, gmZoneAlert SC_OUT]
 SC_tOwn = [(gmZone SC_CAMP) select GM_Z_OWNER, (gmZone SC_VILL) select GM_Z_OWNER, (gmZone SC_OUT) select GM_Z_OWNER]
 SC_tWL = gmWarLevel
-SC_tUC = gmUndercover
+SC_tUC = gmUndercoverStatus
 SC_tQRF = false
 SC_tUnl = count GM_GEAR_UNLOCKED
 SC_tHeld = gmResistanceSide call GM_fnCountOwnedBy
@@ -55,8 +56,9 @@ SC_tHeld = SC_tH
 ? gmWarLevel != SC_tWL : (format ["TICKER: War Level %1 -> %2", SC_tWL, gmWarLevel]) call SC_fnSay
 SC_tWL = gmWarLevel
 
-? (not gmUndercover) and SC_tUC : "TICKER: COVER BLOWN - the occupier is actively hunting you (one break is permanent this campaign)" call SC_fnSay
-SC_tUC = gmUndercover
+? (gmUndercoverStatus == 1) and (SC_tUC < 1) : "TICKER: SUSPICION - a patrol is taking an interest in you (break contact and it fades)" call SC_fnSay
+? (gmUndercoverStatus == 2) and (SC_tUC < 2) : (format ["TICKER: COVER BLOWN to %1 occupier group(s) - garrisons that never saw it still take you for a civilian", gmUndercoverWitnesses]) call SC_fnSay
+SC_tUC = gmUndercoverStatus
 
 SC_tQ = false
 if ((not (isNil "GM_QRF_ACTIVE")) and (not (isNil "GM_QRF_ZONE"))) then {if (GM_QRF_ACTIVE and (GM_QRF_ZONE >= 0)) then {SC_tQ = true}}

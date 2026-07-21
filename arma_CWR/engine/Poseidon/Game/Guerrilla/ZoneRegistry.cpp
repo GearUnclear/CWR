@@ -4,6 +4,7 @@
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>             // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
@@ -159,8 +160,9 @@ void ZoneRegistry::Clear()
     _pendingLoaded = false;
     _loadedSaveVersion = 0;
     _friendshipApplied = false;
-    // the alert layer lives and dies with the zone registry
+    // the alert and undercover layers live and die with the zone registry
     AlertMachine::Instance().Clear();
+    UndercoverSystem::Instance().Clear();
 }
 
 void ZoneRegistry::InitMission()
@@ -200,9 +202,11 @@ void ZoneRegistry::LoadFromConfig()
     // fatal or silently-sterile spawns
     ParsClassProbe probe;
     LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe);
-    // alert tunables share the CfgGuerrillaZones class; loading here (not in
-    // LoadFromParams) keeps the testable core free of singleton side effects
+    // alert and undercover tunables share the CfgGuerrillaZones class;
+    // loading here (not in LoadFromParams) keeps the testable core free of
+    // singleton side effects
     AlertMachine::Instance().LoadFromParams(zones);
+    UndercoverSystem::Instance().LoadFromParams(zones);
 }
 
 void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
@@ -2086,6 +2090,18 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
         {
             PARAM_CHECK(AlertMachine::Instance().Serialize(arAlert, *this))
             ar.CloseSubclass(arAlert);
+        }
+    }
+
+    // Undercover layer state: same optional-subclass contract as "Alert"
+    // (absent in saves written before the UndercoverSystem existed)
+    if (ar.IsSubclass("Undercover"))
+    {
+        ParamArchive arUndercover;
+        if (ar.OpenSubclass("Undercover", arUndercover))
+        {
+            PARAM_CHECK(UndercoverSystem::Instance().Serialize(arUndercover))
+            ar.CloseSubclass(arUndercover);
         }
     }
     return LSOK;

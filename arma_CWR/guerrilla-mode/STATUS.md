@@ -27,7 +27,7 @@ reconciled against the engine source, not play-tested.)*
 | 12 | Loot-on-kill stash + gear unlock | `scripts/loot.sqs` | **script** | Logic unchanged; bodies tagged via `gmGarrisonGroups` per spawned zone; loadout classnames from faction `loot<Role>*` keys |
 | 13 | Named companion XP→rank/skill, permadeath | `scripts/companions.sqs` | **script** | Model unchanged; `companionClass` from faction key; promotions now apply LIVE `setRank` (evaluator has it) |
 | 14 | Persistence: save/load round-trip | engine (`ZoneRegistry`/`AlertMachine`/`GarrisonCache` `Serialize` + GGameState globals) | **native** | Event handlers serialize too; `campaignLoaded` event replaces the GM_SAVED sentinel; `scripts/campaign.sqs` keeps the Save action + reconciles companion handles / `GM_PLAYER_GROUPS` |
-| 15 | Undercover (disguise) | `AlertMachine` (break detection) + `scripts/undercover.sqs` (establish/react) | **split** | `gmUndercover` script-owned; vehicle-mount break polled natively, fired-weapon half via `gmBreakUndercover`; break now fully wired (was the Phase-1 gap) |
+| 15 | Undercover (disguise) | engine `UndercoverSystem` (per-observer perception, 2026-07-16) + `AlertMachine` (compromise Heat/event) + `scripts/undercover.sqs` (establish + advisory hint) | **native** | Each occupier group independently reads the player as civilian / suspect (`TSideUnknown`, investigates) / exposed, from weapon state (in hands / slung / none), facing, distance, visibility and its own serialized compromise memory (permanent per group by default); vehicles get their own policy (civilian car anonymous; stolen military vehicle friendly at range, suspect at high accuracy, exposed close; a witnessed getaway marks the vehicle for those witnesses only); `gmUndercover` + `setCaptive` stay script-owned and are never dropped on a break; re-establishment is emergent (stow weapon, avoid or eliminate witnesses); query via `gmUndercoverStatus`/`gmUndercoverWitnesses` |
 | 16 | Swappable factions | `CfgGuerrillaFactions` + `gmOccupierSide`/`gmResistanceSide` | **native (data-driven)** | Zone owner accepts `OCCUPIER`/`RESISTANCE`/`NEUTRAL` tokens; new-game UI publishes `gmSelOccupier`/`gmSelResistance` |
 | 17 | Island-agnostic scripts | `scripts/*` | **done** | Zero classnames / side-string literals in `scripts/` (grep-verified); all such facts live in `description.ext` |
 | 18 | Town side flags: map icon + physical flagpole | map: `init.sqs` ("Flag" markers) + `ZoneRegistry::UpdateMarkers` (side color); world: engine `TownFlags` | **native** | One `FlagCarrier` per CITY zone, off-road (RoadNet probe) on high ground toward the outskirts; texture from faction `flag` key, else side default (usa/ussr/fia), else generic white; repaints on flip; serializes (`GuerrillaFlags`); FlagCarrier-less packages degrade to markers-only |
@@ -42,7 +42,7 @@ reconciled against the engine source, not play-tested.)*
 | `scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
 | `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint |
 | `scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
-| `scripts/undercover.sqs` | cover establish, fired-EH → `gmBreakUndercover`, `undercoverBroken` consumer |
+| `scripts/undercover.sqs` | cover establish (kept for the whole campaign), fired-EH → `gmBreakUndercover`, advisory `undercoverBroken` hint (never drops captive) |
 | `scripts/campaign.sqs` | Save addAction + `campaignLoaded` consumer (companion/group reconciliation) |
 | `scripts/economy.sqs` / `escalation.sqs` / `loot.sqs` / `recruit.sqs` / `recruit_action.sqs` / `companions.sqs` | unchanged responsibilities on the native surface |
 | *(deleted)* `zones.sqs`, `spawning.sqs`, `alert.sqs`, `persistence.sqs` | polling loops replaced by the native systems |
@@ -107,15 +107,18 @@ Accepted degradation, engine-side safe.
   partially-visible player oscillates RED↔YELLOW; there is no calming grace
   period below `alertYellowKnows`; occupier groups farther than `zoneArea`
   from every zone center contribute no `knowsAbout` (a running firefight
-  *between* zones raises no alert); an undercover break heats the *nearest*
-  zone regardless of distance.
+  *between* zones raises no alert); an undercover compromise heats the zone
+  nearest the *witness* regardless of distance.
 - **Overflow recruit groups are dropped from `GM_PLAYER_GROUPS` on load**
   (`campaign.sqs` reseeds to `[group aP]`) — deliberate Phase-1 policy; cells
   larger than one group lose their extra-group bookkeeping across a save.
-- **Undercover break is permanent for the campaign** (re-establishment is the
-  Phase-2 hook); the player `fired`-EH stays attached after the break, which
-  is harmless because `gmBreakUndercover` is a no-op while
-  `gmUndercover==false`.
+- **Undercover compromise is per-observer-group and permanent by default**
+  (2026-07-16 rework; `undercoverForgetSeconds=0` is the decay knob). Groups
+  that never saw the break keep reading a civilian, so re-establishment is
+  emergent: stow the weapon, break contact, or eliminate the witnesses. The
+  player `fired`-EH stays attached for the whole campaign, and
+  `gmBreakUndercover` with zero current witnesses latches silently (no
+  event, no Heat).
 
 ## Tests
 
@@ -132,6 +135,7 @@ Trident integration suite is **fully migrated to the `gm*` surface** (verified
 | `scripting/guerrilla_native_capture.test` | `full_cwa` |
 | `scripting/guerrilla_native_spawn.test` | `full_cwa` |
 | `scripting/guerrilla_native_undercover.test` | `full_cwa` |
+| `scripting/guerrilla_undercover_rules.test` | `full_cwa` |
 | `scripting/guerrilla_native_save_reload.seq` | `full_cwa`, `save-load` |
 | `scripting/guerrilla_sinai_swap.test` | `full_cwa` + `lobo` (+ fixture gen + installed templates) |
 | `ui/guerrilla_new_game_e2e.test` | `full_cwa` + `lobo` (+ installed templates) |
@@ -154,6 +158,16 @@ Unit-level serialization round-trips exist for all five native systems
 and the off-road/high-ground spot picker), and `test_stash_registry.cpp`);
 `test_mission_script_core.cpp` enforces that every test mission's `init.sqs` +
 `scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core.
+
+Undercover (2026-07-16 rework) integration coverage:
+`guerrilla_native_undercover` rewritten to the new lifecycle (captive and
+`gmUndercover` persist across a break; asserts status/heat instead), the new
+`guerrilla_undercover_rules` exercises the per-observer rule matrix on the
+`full_cwa` lane, and `showcase_smoke`'s chapter-6 asserts flipped to the new
+semantics. Unit-level half: `test_undercover.cpp` covers both evaluator rule
+matrices (person and vehicle, 474 assertions incl. boundary and war-scaling
+cases), and `test_alert_machine.cpp` was repaired to the new contract
+(compromise drain, silent no-witness latch, `undercoverHeatWitness`).
 
 ## Still needs a human run
 

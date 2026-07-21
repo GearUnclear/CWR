@@ -8,7 +8,7 @@
 ? isNil "SC_READY" : exit
 
 ; ---- page 1: faction scalars --------------------------------------------------
-(format ["STATUS - treasury %1 R | manpower %2/%3 HR | War Level %4 | cover %5 | squad %6", gmResources, gmManpower, GM_MANPOWER_CAP, gmWarLevel, gmUndercover, count units (group aP)]) call SC_fnSay
+(format ["STATUS - treasury %1 R | manpower %2/%3 HR | War Level %4 | exposure %5 (%6 witness group(s)) | squad %7", gmResources, gmManpower, GM_MANPOWER_CAP, gmWarLevel, gmUndercoverStatus, gmUndercoverWitnesses, count units (group aP)]) call SC_fnSay
 ~SC_BEAT
 
 ; ---- page 2: gear + companions -------------------------------------------------

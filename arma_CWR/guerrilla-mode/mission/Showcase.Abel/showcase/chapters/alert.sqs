@@ -38,9 +38,9 @@ true call SC_fnShield
 "You came ALONE (the squad waits at the Camp - the disguise covers you, not them). Demo shield up (allowDammage off): this firefight is staged and you are the observer, not the target of the lesson." call SC_fnSay
 ~SC_BEAT
 
-? not gmUndercover : "Cover is already broken from earlier play, so the garrison will re-acquire you on sight - stay visible." call SC_fnSay
-? gmUndercover : "Breaking cover 150 m from the wire (the same latch a fired shot or entering a vehicle trips). Heat spikes on the nearest zone; the garrison starts hunting. Watch the ticker." call SC_fnSay
-? gmUndercover : gmBreakUndercover "showcase alert chapter"
+? gmUndercoverStatus == 2 : "Cover is already blown to at least one occupier group from earlier play - they re-acquire you on sight (unseen zones still read you as a civilian)." call SC_fnSay
+? gmUndercoverStatus < 2 : "Breaking cover 150 m from the wire (the same latch a fired shot trips). Every group that currently knows your face marks you as hostile; Heat spikes on the witness zone and the garrison starts hunting. Watch the ticker." call SC_fnSay
+gmBreakUndercover "showcase alert chapter"
 
 ; ---- YELLOW: perception crossed 0.5 ------------------------------------------------
 SC_cW = 0

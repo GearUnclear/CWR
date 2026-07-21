@@ -39,7 +39,7 @@ Everything below runs on commands already registered, plus **one** new command:
 | Depopulation / resettlement | **Present** | `deleteVehicle` (`GameStateExt.cpp:1028`) + `createUnit` elsewhere |
 | Sentry posture without anims | **Present** | `setUnitPos` (`GameStateExt.cpp:1307`) |
 | Checkpoints/watchtowers/wire as objects | **Present** | `createVehicle` of stock static classes (fortifications, wire, towers ship in retail data) |
-| Undercover interaction | **Present** | `setCaptive` + `knowsAbout` (per plan 13) |
+| Undercover interaction | **Present** | `setCaptive` + `knowsAbout` (per plan 13); since 2026-07-16 also the native per-observer `UndercoverSystem` (`Game/Guerrilla/Undercover.*`) with tunable knobs (`undercoverForgetSeconds`, war-level detect scaling) |
 | **Road-network query from script** | **Missing — add it** | `RoadNet` exists engine-side (`World/Terrain/Roads.hpp`, consumed by `AI/Path/PathPlanner.cpp`) with **no** evaluator command; only `RoadSurfaceYAboveWater` is touched from the command layer (`GameStateExtWorld.cpp:173`). New command in the plans-09/10 cost class |
 
 The new command — working name **`nearestRoads <pos> <radius>`** (returns road-segment positions/directions) — is what lets checkpoint placement, road-cut berms, and convoy road-snapping work on *any* island automatically, which the swappable-islands core requirement demands. It joins the evaluator-QoL list in plan 13's Phase 1.5.
@@ -72,6 +72,8 @@ A per-zone **control grade** (LOW / MEDIUM / HIGH / CLOSED, driven by Heat + War
 - **Flying checkpoints** — the Heat-reactive counterpart to System 1's fixed grid: a temporary roadblock spawned on a road segment (again `nearestRoads`) between the incident region and the player's likely destinations, despawned when Heat decays. The world *tightens* after every action, visibly and locally.
 
 All of it is triggers, timers, and multipliers on numbers plan 13 already tracks.
+
+> **Update (2026-07-16):** plan 13's undercover is now a native per-observer perception system, which gives these sketches a natural engine hook instead of a script-multiplier hack: curfew and control grades can scale the engine's war-level detection boost, and pass laws map directly onto `undercoverForgetSeconds` (compromise decay) plus the per-observer evaluation already running near garrisons. Curfew, pass laws, and flying checkpoints themselves remain future work.
 
 ## System 3 — The population-control playbook: the occupier plays your economy
 
@@ -109,6 +111,8 @@ At WL4+, some "resistance" patrols are occupier pseudo-teams: **resistance-facti
 They read as friendly at a distance (model/uniform), don't fire until close or until you're identified, and their kills near towns are *blamed on you* (−support: the historical purpose of pseudo-ops was exactly this poisoning of trust). Counterplay is systemic, not animated: a radio **challenge** `addAction` — real resistance groups respond with the day's countersign (`sideChat`); pseudo-teams answer wrong or go loud. Teaches paranoia at exactly the point in the campaign where the player has started to feel safe among "their own."
 
 **Perception caveat (verified):** engine target identification resolves the *true* side as `knowsAbout` confidence builds, so the disguise fools the player, never friendly AI. Design the leak as the tell — pseudo-teams hold fire at range where ID confidence is low (plan [07](./07-ai-stance-concealment-spotting.md) tunes this), and a veteran companion raising his rifle at "friendlies" is the early warning the player learns to read.
+
+> **Update (2026-07-16), partially superseded:** for the undercover *player* this is no longer true. The native `UndercoverSystem` overrides the perceived side per observing group at the target-tracking sites, so a disguise now fools the simulation itself, not just the player's eyes. Pseudo-teams are not yet undercover subjects (the built system is player-only, SP scope), so for THEM the vanilla true-side resolution above still applies and the hold-fire tell design stands; extending per-observer evaluation to pseudo-teams is the natural upgrade path when this system is built.
 
 ### The side-slot budget (verified)
 

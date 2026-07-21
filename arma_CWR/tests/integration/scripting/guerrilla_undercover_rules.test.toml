@@ -1,10 +1,10 @@
 tags = ["scripting", "guerrilla", "full_cwa", "headless"]
 binary = "PoseidonGame"
 mission = "tests/integration/missions/guerrilla_native.abel"
-# Alert tick ~5s + undercover.sqs manager ~2s; generous polling windows.
+# Per-observer perception needs real AI ticks: two fixed 25-30 s observation
+# windows plus identification build-up at 40-60 m; generous polling windows.
 # Headless LOS visibility warms up slowly for a freshly spawned observer
-# (~65 s of zero visibility measured in diagnostic runs) - the knowsAbout
-# gate must outlast that warmup.
-timeout = 360
+# (~65 s of zero visibility measured in diagnostic runs).
+timeout = 480
 assert_timeout = 180
 extra_args = ["--dev"]

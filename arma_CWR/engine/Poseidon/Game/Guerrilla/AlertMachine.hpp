@@ -6,9 +6,16 @@
 // occupier garrison's knowledge of the player (Target::FadingSideAccuracy,
 // the knowsAbout value).  Escalation edges raise zone Heat; RED is the QRF
 // signal - dispatch itself stays scripted, reacting to the "alertChanged"
-// event.  The machine also owns the undercover BREAK check (vehicle mount
-// natively, the fired-EH half via the gmBreakUndercover command); the
-// gmUndercover global itself is script-owned.
+// event.  The machine also drains the UndercoverSystem's per-observer
+// compromise notifications each tick: the campaign-first compromise fires
+// the "undercoverBroken" event plus alertHeatBreak on the zone nearest the
+// witness, later witness groups add undercoverHeatWitness Heat quietly.
+// gmBreakUndercover (the fired-EH half) marks every occupier group that
+// currently knows the subject as compromised and latches; the old global
+// vehicle-mount break is gone - vehicles resolve per observer (see
+// Undercover.hpp).  The gmUndercover global itself is script-owned.
+
+#include <Poseidon/Game/Guerrilla/Undercover.hpp> // UCCompromise (tick inputs)
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -35,7 +42,10 @@ struct AlertTuning
     float alertWindowSeconds = 20.0f; // GM_AL_WINDOW: YELLOW disengage countdown
     float alertHeatYellow = 4.0f;     // GM_AL_HEAT_YELLOW: Heat on entering YELLOW
     float alertHeatRed = 15.0f;       // GM_AL_HEAT_RED: Heat on entering RED
-    float alertHeatBreak = 25.0f;     // GM_AL_HEAT_BREAK: Heat on a cover break
+    float alertHeatBreak = 25.0f;     // GM_AL_HEAT_BREAK: Heat on the campaign-first compromise
+    // Heat when a LATER witness group turns compromised (no event); the one
+    // undercover* config key living here - the machine is its only consumer
+    float undercoverHeatWitness = 8.0f;
 };
 
 enum AlertState
@@ -78,10 +88,11 @@ struct AlertTickInputs
     bool playerValid = false;
     float playerX = 0;            // easting
     float playerZ = 0;            // northing
-    bool undercover = false;      // script global gmUndercover (nil == false)
-    bool playerInVehicle = false; // the (vehicle aP) != aP poll
-    bool breakRequested = false;  // script called gmBreakUndercover
+    bool undercover = false;     // script global gmUndercover (nil == false)
+    bool breakRequested = false; // script called gmBreakUndercover
     RString breakReason;
+    // per-observer compromise notifications drained from the UndercoverSystem
+    AutoArray<UCCompromise> compromises;
     AutoArray<AlertZoneInputs> zones; // index-aligned to the zone registry
 };
 
@@ -163,7 +174,7 @@ class AlertMachine
     AutoArray<ZoneAlertState> _states; // index-aligned to the zone registry
     RString _handlers[NAlertEventTypes];
     float _accum = 0;
-    bool _breakLatched = false; // undercoverBroken fired; resets when cover drops
+    bool _breakLatched = false; // gmBreakUndercover consumed; re-arms when cover drops
     bool _breakPending = false; // gmBreakUndercover awaiting the next tick
     RString _breakReason;
     // deserialized rows waiting for the registry's zone table (applied on

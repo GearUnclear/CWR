@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/Game/Guerrilla/Undercover.hpp> // deep-undercover per-observer side resolution
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -104,6 +105,8 @@ void Target::Init()
     lastSeen = TIME_MIN;
     dammagePerMinute = 0;
     subjectiveCost = 0;
+    ucCompromised = false;
+    ucCompromisedTime = TIME_MIN;
 }
 
 bool Target::IsKnownBy(AIUnit* unit) const
@@ -309,6 +312,11 @@ LSError Target::Serialize(ParamArchive& ar)
 
     PARAM_CHECK(ar.Serialize("dammagePerMinute", dammagePerMinute, 1, 0.0));
     PARAM_CHECK(ar.Serialize("subjectiveCost", subjectiveCost, 1, 0.0));
+
+    // Guerrilla undercover per-group compromise; defaulted, so saves from
+    // before the field existed load unchanged
+    PARAM_CHECK(ar.Serialize("ucCompromised", ucCompromised, 1, false));
+    PARAM_CHECK(ar.Serialize("ucCompromisedTime", ucCompromisedTime, 1, TIME_MIN));
 
     return LSOK;
 }
@@ -831,6 +839,12 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             visibility = CalcVisibility(ai, dist2, &audibility);
         }
 
+        // Guerrilla deep undercover: does the per-observer evaluation own
+        // this observer/target pair?  A single global bool for the 99.9%
+        // case (ordinary missions, non-subject targets); vanilla behavior
+        // is untouched whenever the gate is false.
+        bool uc = Guerrilla::UndercoverAppliesFast(center, ai);
+
         if (!radarContact && !laserContact)
         {
             float mySpeed = _speed.Size();
@@ -929,6 +943,21 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             // destroyed units are civilian until respawn; sideChecked=false lets them re-classify
             target->side = TCivilian;
             target->sideChecked = false;
+        }
+        else if (uc)
+        {
+            // per-observer undercover verdict.  Deliberately OUTSIDE the
+            // improvement gate below: vanilla only re-resolves a side when the
+            // observation improves (a side never changes), but the undercover
+            // verdict tracks the subject's CURRENT weapon state, so it must
+            // re-run every processed tick.  The effective accuracy folds the
+            // record's faded knowledge in (never judged worse than what the
+            // group already knows); an unseen tick leaves the record untouched
+            // inside ResolvePerceivedSide so fade semantics survive.
+            float sensorSideAccuracy = floatMax(audibleSideAccuracy, visibleSideAccuracy);
+            Guerrilla::UndercoverSystem::Instance().ResolvePerceivedSide(this, unit, ai, target, sensorSideAccuracy,
+                                                                         dist2, visibility);
+            fadingSideAccuracy = target->FadingSideAccuracy();
         }
         else
         {
@@ -1049,11 +1078,22 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
 
         if (newSideAccuracy > fadingSideAccuracy)
         {
-            target->side = ai->GetTargetSide(newSideAccuracy);
-            target->sideChecked = true;
-            target->sideAccuracy = newSideAccuracy;
-            target->sideAccuracyTime = Glob.time;
-            fadingSideAccuracy = newSideAccuracy;
+            if (uc)
+            {
+                // firing means the weapon is necessarily in hands; the
+                // undercover rule reaches the same verdict on its own
+                Guerrilla::UndercoverSystem::Instance().ResolvePerceivedSide(this, unit, ai, target, newSideAccuracy,
+                                                                             dist2, visibility);
+                fadingSideAccuracy = target->FadingSideAccuracy();
+            }
+            else
+            {
+                target->side = ai->GetTargetSide(newSideAccuracy);
+                target->sideChecked = true;
+                target->sideAccuracy = newSideAccuracy;
+                target->sideAccuracyTime = Glob.time;
+                fadingSideAccuracy = newSideAccuracy;
+            }
         }
 
         target->type = ai->GetType(fadingAccuracy);
@@ -1068,6 +1108,14 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
                     if (aiUnit->GetCaptive())
                     {
                         side = TCivilian;
+                        if (uc && Guerrilla::UndercoverSystem::Instance().IsCompromised(*target))
+                        {
+                            // a compromised record stays hostile even on ticks
+                            // too poor to pass the accuracy gate above (no-arg
+                            // real side; the accuracy overload would bounce
+                            // off the captive flag and return TCivilian)
+                            side = ai->GetTargetSide();
+                        }
                     }
                     else
                     {
