@@ -138,15 +138,20 @@ triSimUntil { (vehicle player) == player }
 // ============================================================================
 gmUndercoverForget
 triSimUntil { gmUndercoverStatus == 0 }
+
+// -- pull the observer out to long range BEFORE the theft. The mount must
+//    happen UNOBSERVED: at 15 m a single processed TrackTargets tick on the
+//    fresh UAZ reads Exposed (occupier hull, seen + close), the record is
+//    permanently compromised, and the long-range leg below fails - whether
+//    that tick lands inside the few-second mount window is timing luck --------
+vuObs setPos vuFar
+vuObs setDir 90
+
 vuUaz = vuMil createVehicle vuPos
 player moveInDriver vuUaz
 triSimUntil { (vehicle player) != player }
 vuT0 = time
 triSimUntil { time > vuT0 + 4 }
-
-// -- pull the observer out to long range: the theft is not readable at 60 m ----
-vuObs setPos vuFar
-vuObs setDir 90
 // baseline Heat before any compromise (still not exposed at long range)
 vuHeatB0 = (gmZone vuZone) select 6
 vuT0 = time
