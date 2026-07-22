@@ -634,16 +634,13 @@ void AICenter::RemoveOldExposures()
 
         if (Glob.time > info._time + ExposureTimeout)
         {
-            if (info._side == TSideUnknown)
-            {
-                _map->AddChange(true, false, info);
-            }
-            else if (IsEnemy(info._side))
-            {
-                _map->AddChange(true, true, info);
-            }
-            else
-                Fail("Illegal exposure");
+            // hand the exposure back to the map it was booked into (issue #24):
+            // re-deriving the category from the current side is wrong once the
+            // side or the friendship matrix changed while the exposure was held
+            // (per-observer undercover resolution, campaign friendship weld,
+            // setFriend) - that used to Fail("Illegal exposure") and leave the
+            // stale contribution in the map
+            _map->AddChange(true, info._exposureEnemy, info);
             info._exposure = false;
         }
     }
@@ -673,11 +670,13 @@ void AICenter::AddNewExposures()
             {
                 _map->AddChange(false, false, info);
                 info._exposure = true;
+                info._exposureEnemy = false;
             }
             else if (IsEnemy(info._side))
             {
                 _map->AddChange(false, true, info);
                 info._exposure = true;
+                info._exposureEnemy = true;
             }
         }
     }
@@ -739,16 +738,8 @@ void AICenter::DeleteTarget(TargetType* id)
 
     if (item._exposure)
     {
-        if (item._side == TSideUnknown)
-        {
-            _map->AddChange(true, false, item);
-        }
-        else if (IsEnemy(item._side))
-        {
-            _map->AddChange(true, true, item);
-        }
-        else
-            Fail("Illegal exposure");
+        // booked category, not current side - see RemoveOldExposures (issue #24)
+        _map->AddChange(true, item._exposureEnemy, item);
     }
     _targets.Delete(index);
 }
@@ -836,16 +827,8 @@ void AICenter::UpdateTarget(Target& target)
             {
                 if (item._exposure)
                 {
-                    if (item._side == TSideUnknown)
-                    {
-                        _map->AddChange(true, false, item);
-                    }
-                    else if (IsEnemy(item._side))
-                    {
-                        _map->AddChange(true, true, item);
-                    }
-                    else
-                        Fail("Illegal exposure");
+                    // booked category, not current side - see RemoveOldExposures (issue #24)
+                    _map->AddChange(true, item._exposureEnemy, item);
                     item._exposure = false;
                 }
                 item._pos = item._realPos;

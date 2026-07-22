@@ -645,6 +645,7 @@ AITargetInfo::AITargetInfo()
     _precisionPos = 0;
 
     _exposure = false;
+    _exposureEnemy = false;
     _vanished = false;
     _destroyed = false;
     _dir = VZero; // unknown
@@ -671,6 +672,7 @@ LSError AITargetInfo::Serialize(ParamArchive& ar)
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
     {
         _exposure = false; // AIMap is not serialized
+        _exposureEnemy = false;
     }
     return LSOK;
 }

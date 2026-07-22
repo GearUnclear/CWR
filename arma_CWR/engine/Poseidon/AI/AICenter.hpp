@@ -35,6 +35,12 @@ public:
 	Foundation::Time _time;
 
 	bool _exposure;
+	// which exposure map the held exposure was booked into (enemy vs unknown).
+	// The hand-back must not re-derive the category from _side: the side or the
+	// center's friendship matrix can change while the exposure is held
+	// (per-observer undercover resolution, guerrilla campaign friendship weld,
+	// setFriend), and the stale contribution lives in the map it was booked into.
+	bool _exposureEnemy;
 
 	bool _vanished; // disappered - e.g. GetIn
 	bool _destroyed; // dead - do not attack
