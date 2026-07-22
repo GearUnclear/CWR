@@ -1,0 +1,3 @@
+; action: put the rifle on the back (slung = only noticed from behind / <20 m)
+aP action ["WEAPONONBACK", aP]
+exit

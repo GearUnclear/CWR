@@ -1,0 +1,107 @@
+; ============================================================================
+;  init.sqs  -  Undercover.Abel bootstrap (auto-loaded by RunInitScript)
+; ----------------------------------------------------------------------------
+;  A single-purpose sandbox for the deep-undercover layer. The native side
+;  (ZoneRegistry + AlertMachine + UndercoverSystem, activated by
+;  CfgGuerrillaZones in description.ext) does all perception work; this file
+;  only supplies the script baseline the engine reads, dresses the town, and
+;  wires the player-facing feedback:
+;    1. cover baseline: gmUndercover = true + setCaptive true + no weapons;
+;    2. the fired-EH -> gmBreakUndercover (firing always blows cover to
+;       whoever currently knows you);
+;    3. props: an AK47 on the ground, a civilian Skoda, an East UAZ at a
+;       checkpoint (the stolen-vehicle policy demo);
+;    4. scripted occupier presence IN town (CITY zones are never natively
+;       garrisoned - the Checkpoint outpost garrison of 6 is native);
+;    5. self-actions (sling/unsling, status check, debug reset) + the HUD
+;       status loop (hud.sqs).
+;  DIALECT: SQS. A mid-line ; is a STATEMENT SEPARATOR, not a comment.
+; ============================================================================
+
+? not (isNil "UC_BOOTED") : exit
+UC_BOOTED = true
+
+aP = player
+gmPlayer = player
+
+; script scalars the native undercover layer reads (warDetect = gmWarLevel/10)
+gmWarLevel = 1
+
+; ---- zone markers (the engine repaints only markers that already exist) -----
+UC_i = 0
+#mkmarkers
+? UC_i >= gmZoneCount : goto "mkdone"
+UC_rec = gmZone UC_i
+UC_m = createMarker [(UC_rec select 7), (UC_rec select 8)]
+(UC_rec select 7) setMarkerType "Flag"
+(UC_rec select 7) setMarkerSize [0.6, 0.6]
+UC_i = UC_i + 1
+goto "mkmarkers"
+#mkdone
+
+; ---- establish cover: an unarmed guerrilla passing as a civilian ------------
+removeAllWeapons aP
+aP setCaptive true
+gmUndercover = true
+
+; firing always blows the disguise to every group that currently knows you
+aP addEventHandler ["fired", {gmBreakUndercover "fired"}]
+
+; native first-compromise event -> queue (handlers cannot ~sleep; hud.sqs drains)
+gmEvtUcBroken = []
+gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
+
+; ============================================================================
+;  PROPS
+; ============================================================================
+; the gun on the ground: an AK47 + 4 mags ~20 m north of the player start
+UC_wh = "WeaponHolder" createVehicle [7112, 6076, 0]
+UC_wh addWeaponCargo ["AK47", 1]
+UC_wh addMagazineCargo ["AK47", 4]
+
+; a civilian car (anonymous by policy) and the checkpoint's UAZ (an occupier
+; military hull: driving it is a disguise that fails at 20 m checkpoint range)
+UC_car = "Skoda" createVehicle [7095, 6045, 0]
+UC_uaz = "UAZ" createVehicle [7147, 6091, 0]
+
+; ============================================================================
+;  OCCUPIER PRESENCE IN TOWN (scripted; each group = an independent witness
+;  with its own compromise memory)
+; ============================================================================
+; the native Checkpoint garrison usually created the East center already;
+; createCenter is idempotent
+UC_c = createCenter east
+
+; 2-man foot patrol walking a loop through the streets
+UC_pgrp = createGroup east
+"SoldierEB" createUnit [[7117, 6100, 0], UC_pgrp, "UC_p1 = this", 0.3, "SERGEANT"]
+"SoldierEB" createUnit [[7121, 6100, 0], UC_pgrp, "", 0.3, "PRIVATE"]
+UC_pgrp setBehaviour "SAFE"
+UC_pgrp setSpeedMode "LIMITED"
+[UC_pgrp, [[7117,6069,0], [7075,6045,0], [7100,6110,0], [7155,6035,0]]] exec "patrol.sqs"
+
+; static checkpoint pair guarding the UAZ (no waypoints - they hold the spot)
+UC_ogrp = createGroup east
+"OfficerE" createUnit [[7151, 6094, 0], UC_ogrp, "UC_off = this", 0.4, "SERGEANT"]
+"SoldierEB" createUnit [[7154, 6089, 0], UC_ogrp, "", 0.3, "PRIVATE"]
+UC_ogrp setBehaviour "SAFE"
+
+; two locals going about their day (what you are pretending to be)
+UC_cc = createCenter civilian
+UC_cgrp = createGroup civilian
+"Civilian" createUnit [[7105, 6070, 0], UC_cgrp, "", 0.2, "PRIVATE"]
+"Civilian" createUnit [[7130, 6055, 0], UC_cgrp, "", 0.2, "PRIVATE"]
+UC_cgrp setBehaviour "CARELESS"
+UC_cgrp setSpeedMode "LIMITED"
+[UC_cgrp, [[7130,6055,0], [7095,6060,0], [7120,6095,0]]] exec "patrol.sqs"
+
+; ============================================================================
+;  SELF-ACTIONS + HUD
+; ============================================================================
+UC_a1 = aP addAction ["Sling weapon on back", "act_sling.sqs"]
+UC_a2 = aP addAction ["Take weapon in hands", "act_hands.sqs"]
+UC_a3 = aP addAction ["Check disguise", "act_status.sqs"]
+UC_a4 = aP addAction ["DEBUG: wipe compromise records", "act_forget.sqs"]
+
+[] exec "hud.sqs"
+exit

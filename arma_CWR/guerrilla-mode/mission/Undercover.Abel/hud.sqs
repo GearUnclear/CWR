@@ -1,0 +1,33 @@
+; ============================================================================
+;  hud.sqs  -  intro briefing + change-driven cover status readout
+;  Polls gmUndercoverStatus / gmUndercoverWitnesses once a second and repaints
+;  the title line only on CHANGE (no hint-chime spam); drains the native
+;  first-compromise queue (gmEvtUcBroken) into a one-time hint.
+; ============================================================================
+
+~3
+titleText ["HOUDAN, MALDEN\nYou are a guerrilla passing as a civilian.", "PLAIN DOWN"]
+~7
+hint "UNDERCOVER TEST\n\nAn AK47 lies in the square just NORTH of you.\nA patrol walks the town; a checkpoint with a UAZ guards the NE road; a civilian Skoda is parked SW.\n\nTHE RULES (all per observer group):\n- unarmed = civilian, always\n- rifle IN HANDS = hostile on sight\n- rifle SLUNG on back = only noticed from behind or within 20 m\n- FIRING blows your cover to everyone who knows you\n- the Skoda is anonymous; the UAZ is a disguise that fails at 20 m\n- groups that never saw it still take you for a civilian\n\nUse your ACTION MENU to sling/unsling and to check your disguise."
+
+UC_last = -1
+UC_lastW = -1
+
+#loop
+~1
+? (count gmEvtUcBroken) > 0 : goto "broken"
+#resume
+UC_s = gmUndercoverStatus
+UC_w = gmUndercoverWitnesses
+? (UC_s == UC_last) and (UC_w == UC_lastW) : goto "loop"
+UC_last = UC_s
+UC_lastW = UC_w
+? UC_s == 0 : titleText ["COVER: CLEAN - every occupier group reads you as a civilian", "PLAIN DOWN"]
+? UC_s == 1 : titleText ["COVER: SUSPECTED - an occupier group is checking you out (investigating, not shooting)", "PLAIN DOWN"]
+? UC_s == 2 : titleText [format ["COVER: BLOWN - %1 occupier group(s) can identify you. Kill the witnesses or stay out of their sight; everyone else still sees a civilian.", UC_w], "PLAIN DOWN"]
+goto "loop"
+
+#broken
+UC_batch = gmEvtUcBroken + []; gmEvtUcBroken = []
+hint format ["FIRST COMPROMISE OF THE CAMPAIGN\n\nReason: %1\n\nZone Heat spiked where the witness stands. Your captive baseline SURVIVES - only the groups that saw it treat you as hostile.", (UC_batch select 0) select 0]
+goto "resume"

@@ -1,0 +1,5 @@
+; debug action: wipe every compromise record + the campaign first-ever latch
+; (gmUndercoverForget) so the exposure flow can be replayed from clean
+gmUndercoverForget
+hint "DEBUG: all compromise records wiped - you are clean again."
+exit

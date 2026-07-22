@@ -115,8 +115,11 @@ if ($Mission) {
 }
 
 Write-Host "Launching $exe (cwd=$DataDir)$(if ($Mission) { " -> $Mission" })"
+# Start-Process globs -WorkingDirectory (PS 5.1), so the bracketed data dir
+# ("[Classic]") must be wildcard-escaped or the launch fails to resolve (#12).
+$wd = [Management.Automation.WildcardPattern]::Escape($DataDir)
 if ($NoLog) {
-    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $DataDir
+    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd
 } else {
     # Full console-output capture (see .DESCRIPTION): the engine logger gets
     # a file sink (--log-file), and raw stdout/stderr are redirected too -
@@ -128,7 +131,7 @@ if ($NoLog) {
     $stdoutLog = Join-Path $LogDir "game-$stamp.stdout.log"
     $stderrLog = Join-Path $LogDir "game-$stamp.stderr.log"
     $gameArgs += @('--log-file', $engineLog)
-    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $DataDir `
+    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
     Write-Host "Logs:"
     Write-Host "  engine: $engineLog"

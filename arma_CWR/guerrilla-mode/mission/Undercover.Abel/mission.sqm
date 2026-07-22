@@ -1,0 +1,56 @@
+version=11;
+class Mission
+{
+	randomSeed=26072101;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: a lone guerrilla standing in Houdan itself, just
+					// south of the town centre. SQM coordinate order is
+					// [easting, ELEVATION, northing] - the zone config's
+					// position[] is getPos order [easting, northing, elev].
+					// init.sqs strips his weapons and establishes cover.
+					position[]={7117.000000,35.000000,6058.000000};
+					id=0;
+					side="GUER";
+					vehicle="SoldierGB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=26072102;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=26072103;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=26072104;
+	class Intel
+	{
+	};
+};

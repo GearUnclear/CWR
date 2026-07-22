@@ -1,0 +1,3 @@
+; action: take the rifle in hands (reads hostile to any observer with LOS)
+aP action ["WEAPONINHAND", aP]
+exit
