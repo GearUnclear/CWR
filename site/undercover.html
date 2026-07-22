@@ -1,0 +1,179 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<meta name="description" content="The deep undercover system of Guerrilla Mode in Uslu dur!: per-soldier perception of your weapon, your facing and your history, demonstrated state by state with in-game captures.">
+<title>:: UD :: Undercover (Field Dossier) ::</title>
+<link rel="stylesheet" type="text/css" href="assets/css/style.css">
+<link rel="shortcut icon" href="favicon.ico">
+<script type="text/javascript" src="assets/js/retro.js"></script>
+</head>
+<body>
+
+<table class="layout" cellpadding="0" cellspacing="0">
+<tr><td class="masthead">
+	<table width="100%" cellpadding="0" cellspacing="0"><tr>
+	<td width="70"><img src="assets/img/icon-game.png" width="58" height="58" alt="[uc]" class="logo"></td>
+	<td><h1>Undercover</h1><span class="subtitle">&raquo; How the occupier decides you're a fighter, one soldier at a time &laquo;</span></td>
+	<td align="right" class="dim" style="font-size:10px;">SECTION: SYSTEMS<br><span class="counter" id="clock"></span></td>
+	</tr></table>
+</td></tr>
+<tr><td><div class="ticker" id="ticker"><marquee scrollamount="4" behavior="scroll" direction="left"><span>
+	&#9733; DEEP UNDERCOVER &#9733; every enemy squad keeps its own read on you &nbsp; // &nbsp; rifle in hands = enemy &nbsp; // &nbsp; rifle on your back = only from behind, or inside 20 metres &nbsp; // &nbsp; unarmed = civilian, unless they already made you &nbsp; // &nbsp; kill the witnesses and the knowledge dies with them &nbsp; &#9733;
+</span></marquee></div></td></tr>
+<tr><td class="navbar">
+	<a href="index.html">HOME</a>
+	<a href="about.html">ABOUT</a>
+	<a href="gameplay.html">GAMEPLAY SYSTEMS</a>
+	<a href="designloop.html">ROADMAP</a>
+	<a href="tech.html">UNDER THE HOOD</a>
+	<a href="downloads.html">DOWNLOADS</a>
+</td></tr>
+
+<tr><td><table width="100%" cellpadding="0" cellspacing="0"><tr>
+<td class="sidebar">
+	<div class="box"><div class="box-hd">On This Page</div><div class="box-bd"><ul>
+		<li><a href="#rules">The Three Rules</a></li>
+		<li><a href="#gallery">Field Captures</a></li>
+		<li><a href="#memory">Witnesses &amp; Memory</a></li>
+		<li><a href="#vehicles">Vehicle Policy</a></li>
+		<li><a href="#depth">Why It Has Depth</a></li>
+	</ul></div></div>
+	<div class="box"><div class="box-hd">Status Readout</div><div class="box-bd" style="font-size:10px;">
+		The captures below show the live debug readout burned into each frame:<br><br>
+		<b style="color:#7CFC00;">0 CLEAN</b> &ndash; every enemy squad reads you as a civilian<br>
+		<b style="color:#ffcf5c;">1 SUSPECT</b> &ndash; somebody can't place you; patrols come look<br>
+		<b style="color:#ff5c5c;">2 EXPOSED</b> &ndash; at least one squad has made you as a fighter
+	</div></div>
+	<div class="box"><div class="box-hd">The Old Way</div><div class="box-bd dim" style="font-size:10px;">
+		Before this system, undercover was one global switch: fire a shot and every enemy on the island
+		knew you forever. Now the question isn't <i>"is my cover blown?"</i> &ndash; it's <i>"blown to whom?"</i>
+	</div></div>
+</td>
+
+<td class="content">
+	<h2 class="section">The Deep Undercover System <span class="badge live">Built</span></h2>
+	<p>In Guerrilla Mode you are one fighter hiding inside a civilian population, and the occupier's soldiers
+	have to <b>pick you out of it by looking at you</b>. There is no global "wanted" flag. Each enemy squad runs
+	its own perception of you every couple of seconds, deep in the engine's AI targeting code, off three things:
+	<b>what you're carrying, how you're carrying it, and what that particular squad has seen you do before</b>.</p>
+	<p>Every capture on this page is a real, unstaged reading from the engine: the scene is set up, the AI looks,
+	and the status line in the frame is the system's live verdict at the moment of the screenshot.</p>
+
+	<a name="rules"></a><h3>&#9733; The Three Rules</h3>
+	<table class="data">
+		<tr><th width="170">What the soldier sees</th><th>What he concludes</th></tr>
+		<tr><td><b>Rifle in your hands</b></td><td>You are a combatant. Identification builds through the engine's real perception model (distance, light, fog, optics), so it takes a beat at range and is instant up close. Passing through the <b>SUSPECT</b> stage first, patrols investigate before they shoot.</td></tr>
+		<tr><td><b>Rifle slung on your back</b></td><td>From the front, your body hides it: you pass. But if he sees your <b>back</b>, or gets within <b>about 20 metres</b> (conversational range, where nothing stays hidden), the slung weapon gives you away.</td></tr>
+		<tr><td><b>No weapon at all</b></td><td>You are a civilian, <b>unless this squad has previously identified you as a fighter</b>. Squads that made you remember you. Squads that never saw anything treat you like anyone else.</td></tr>
+	</table>
+
+	<a name="gallery"></a><h3>Field Captures: Every State, Live</h3>
+	<p>Shot on Malden against a Soviet sentry, with the engine's status readout burned into each frame.
+	Same fighter, same rifle, same sentry: the only thing changing is <b>what the sentry can see</b>.</p>
+
+	<div class="shot">
+		<img src="assets/img/uc-unarmed.jpg" width="760" alt="Unarmed guerrilla facing a distant sentry, status CLEAN">
+		<div class="cap"><span class="stampcorner">LIVE CAPTURE</span><b>1. Unarmed, face to face, 40 m &ndash; CLEAN.</b>
+		The sentry has watched this man for a while and confidently identified him... as a civilian. You can stand in
+		the open, in plain sight of the garrison, carrying nothing.</div>
+	</div>
+
+	<table class="shotrow"><tr>
+	<td><div class="shot">
+		<img src="assets/img/uc-slung-front.jpg" width="370" alt="Guerrilla with rifle slung on back facing the sentry, status CLEAN">
+		<div class="cap"><b>2. Rifle slung, seen from the FRONT &ndash; CLEAN.</b>
+		The AK is on his back and the sentry is looking at his chest. The torso hides the weapon; he still reads as a civilian.</div>
+	</div></td>
+	<td><div class="shot">
+		<img src="assets/img/uc-slung-back.jpg" width="370" alt="Same guerrilla turned around, slung rifle visible, status raised">
+		<div class="cap"><b>3. Same rifle, BACK turned &ndash; SPOTTED.</b>
+		He turns around. Now the slung rifle is in the sentry's view and the verdict flips. Walking away from a checkpoint is the dangerous direction.</div>
+	</div></td>
+	</tr></table>
+
+	<div class="shot">
+		<img src="assets/img/uc-pov.jpg" width="760" alt="Telephoto view over the sentry's shoulder at the guerrilla 40 metres away">
+		<div class="cap"><span class="stampcorner">LIVE CAPTURE</span><b>4. What the sentry actually sees.</b>
+		The same moment from his side of the field: a man 40 metres out with a long gun across his back. This
+		is the observation the engine is scoring: his distance, his light, his angle on you.</div>
+	</div>
+
+	<div class="shot">
+		<img src="assets/img/uc-20m.jpg" width="760" alt="Sentry within 20 metres of the guerrilla with slung rifle, status EXPOSED">
+		<div class="cap"><span class="stampcorner">LIVE CAPTURE</span><b>5. Slung rifle at 15 m &ndash; EXPOSED.</b>
+		Inside roughly 20 metres nothing stays hidden: at conversational range the sentry notices the rifle no matter
+		which way you're facing. Note him at left: he's already gone prone and levelled his weapon. Keeping your
+		distance is a real gameplay decision now.</div>
+	</div>
+
+	<div class="shot">
+		<img src="assets/img/uc-inhands.jpg" width="760" alt="Guerrilla holding AK-47 at the ready, status EXPOSED">
+		<div class="cap"><span class="stampcorner">LIVE CAPTURE</span><b>6. Rifle in hands &ndash; EXPOSED.</b>
+		A man holding a weapon is a combatant, full stop. This squad now remembers him as a fighter: stowing
+		the rifle again won't fool <i>them</i>, only squads that never saw it.</div>
+	</div>
+
+	<a name="memory"></a><h3>Witnesses &amp; Memory</h3>
+	<p>Exposure is recorded <b>per squad</b>, on the same engine records the AI uses for every other enemy it
+	knows about, and it survives saves. That gives cover its own lifecycle:</p>
+	<table class="data">
+		<tr><th width="190">Situation</th><th>What happens</th></tr>
+		<tr><td>A squad merely <b>suspects</b> you</td><td>Suspicion rides the engine's target-memory and <b>fades in a few minutes</b> if you break contact and act normal.</td></tr>
+		<tr><td>A squad has <b>identified</b> you</td><td>That squad remembers you as a fighter permanently. Stow the weapon, come back an hour later: they still know your face.</td></tr>
+		<tr><td>You <b>eliminate the witnesses</b></td><td>Knowledge does not teleport. If the only squad that made you dies, the knowledge dies with it, and the rest of the island still takes you for a civilian.</td></tr>
+		<tr><td>You <b>open fire</b></td><td>The shot marks you to every squad that currently has eyes on you, spikes the local alert level, and raises the region's heat. Firing from true concealment is different: soldiers <i>hear</i> a contact but can't identify the shooter.</td></tr>
+	</table>
+
+	<a name="vehicles"></a><h3>Vehicle Policy</h3>
+	<p>The same per-observer logic extends to what you drive. Observers perceive the <b>vehicle</b>, not the
+	people inside it, and that's exactly what the system models:</p>
+	<table class="shotrow"><tr>
+	<td><div class="shot">
+		<img src="assets/img/uc-car.jpg" width="370" alt="Guerrilla driving a civilian Skoda past the sentry, status CLEAN">
+		<div class="cap"><b>7. Civilian car, rifle aboard &ndash; CLEAN.</b>
+		A civilian car is anonymous. Your rifle rides hidden inside it, past soldiers who would spot it on your back.</div>
+	</div></td>
+	<td><div class="shot">
+		<img src="assets/img/uc-uaz.jpg" width="370" alt="Stolen UAZ jeep close to a sentry, status EXPOSED">
+		<div class="cap"><b>8. Stolen army jeep at 14 m &ndash; EXPOSED.</b>
+		At range a stolen military vehicle IS the disguise: it reads as friendly army. At checkpoint distance the
+		sentry looks at the driver, and the game is up. (The ditched civilian car from shot 7 is still sitting
+		where he left it, background right.)</div>
+	</div></td>
+	</tr></table>
+	<table class="data">
+		<tr><th width="190">Behind the wheel</th><th>How it reads</th></tr>
+		<tr><td>Civilian car</td><td>Anonymous, everywhere, to everyone &ndash; unless a squad watched you climb into it while blown. Then <b>that car is marked to those witnesses</b> and they will engage it. Every other squad still waves it through.</td></tr>
+		<tr><td>Stolen military vehicle</td><td>Reads as friendly at range. A squad that gets a good long look grows suspicious (wrong convoy, wrong behaviour) and investigates. Inside ~20 metres they identify the driver: checkpoints are where stolen trucks die.</td></tr>
+		<tr><td>The getaway</td><td>Blow your cover on foot, jump in a car in front of the squad chasing you, and they engage the car. Shake them, ditch it, and you're a civilian again to everyone who wasn't there.</td></tr>
+	</table>
+
+	<a name="depth"></a><h3>Why It Has Depth</h3>
+	<p>Because it runs on the AI's own perception machinery rather than a script flag, the tactics write
+	themselves: approach checkpoints <b>face-on</b> and never let them behind you; keep 20+ metres from every
+	patrol; stash the rifle before entering town, or drive it in; when things go wrong, count who actually
+	saw it happen, because <i>that</i> list, not a global alarm, is your problem to solve. A firefight in the hills
+	compromises you to two squads. Whether it compromises you to the island is up to what you do next.</p>
+
+	<div class="briefing"><span class="stamp" style="border-color:#7CFC00;color:#7CFC00;">VERIFIED</span>
+		<p style="margin-top:8px;">This system is <b>built, engine-deep, and machine-verified</b>: 474 unit assertions on
+		the perception rules plus in-game integration tests that stage exactly the scenes above and assert the
+		verdicts you can read in the captures. What it hasn't had yet is the human feel pass; tuning numbers
+		(the 20 m radius, identification speed, suspicion pressure) will move once it's been played hard.</p>
+	</div>
+
+	<p class="center"><a href="gameplay.html">&laquo; Back: Gameplay Systems</a> &nbsp;|&nbsp; <a href="tech.html">&raquo; Under the Hood</a></p>
+</td>
+</tr></table></td></tr>
+
+<tr><td class="footer">
+	You are visitor no. &nbsp;<span id="hitcounter">[ counting ]</span>
+	<hr class="mil">
+	<span id="statusmsg" class="dim">&gt;&gt; Radio check, over.</span><br>
+	<b>Uslu dur!</b>: the official site for this overhaul project. Bohemia Interactive owns the ARMA and
+	Operation Flashpoint trademarks and has no involvement in this project.
+</td></tr>
+</table>
+</body>
+</html>
