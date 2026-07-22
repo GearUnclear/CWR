@@ -531,7 +531,7 @@ items:
     status: done
     priority: 1
     depends_on: [engine-native-systems, mission-migration-native]
-    commits: [92d7426, 283574a, 3eea713]
+    commits: [92d7426, 283574a, 3eea713, a94430a]
     gh_issues: [19, 20, 21, 22, 23, 24]
     summary: >
       Engine-level undercover replacing the binary global cover break: a
