@@ -19,7 +19,8 @@
 "Every zone runs a native alert machine on what the garrison actually PERCEIVES of you (knowsAbout): 0.5 turns it YELLOW, 1.5 - or 20 s of unresolved YELLOW - turns it RED. RED is the QRF trigger." call SC_fnSay
 ~SC_BEAT
 
-; ---- stage 150 m off the wire, SOLO (cover is personal - see lib.sqs), garrison up -
+; ---- arrive 150 m off the wire, SOLO (cover is personal - see lib.sqs), garrison up -
+;      (the walk-in to witness range happens after the shield goes up below)
 SC_cOP = (gmZone SC_OUT) select GM_Z_POS
 [[(SC_cOP select 0) - 110, (SC_cOP select 1) - 110, 0], 10] call SC_fnTpSolo
 SC_cW = 0
@@ -38,8 +39,31 @@ true call SC_fnShield
 "You came ALONE (the squad waits at the Camp - the disguise covers you, not them). Demo shield up (allowDammage off): this firefight is staged and you are the observer, not the target of the lesson." call SC_fnSay
 ~SC_BEAT
 
+; ---- walk the last stretch in: a break nobody WITNESSED is just a loud noise.
+;      Exposure is per-observer (deep undercover) - gmBreakUndercover only
+;      marks groups that currently hold a record of your face, and at low War
+;      Level a sentry does not clock a face 150 m out. Stage 35 m from a live
+;      garrison group and wait until at least one group actually knows the
+;      player before pulling the latch (same staging contract the
+;      guerrilla_native_undercover lifecycle test proves at 30 m).
+SC_cGrps = gmGarrisonGroups SC_OUT
+? (count SC_cGrps) < 1 : goto "nofsm"
+SC_cLdr = leader (SC_cGrps select 0)
+aP setPos [((getPos SC_cLdr) select 0) + 35, ((getPos SC_cLdr) select 1), 0]
+"Walking in under the disguise - close enough for the sentries to see a face, which is exactly the point: cover is only tested by the groups that PERCEIVE you." call SC_fnSay
+SC_cW = 0
+#kwait
+SC_cKnow = false
+{if ((_x knowsAbout aP) > 0) then {SC_cKnow = true}} forEach SC_cGrps
+? SC_cKnow : goto "known"
+~1
+SC_cW = SC_cW + 1
+? SC_cW < 45 : goto "kwait"
+goto "nofsm"
+
+#known
 ? gmUndercoverStatus == 2 : "Cover is already blown to at least one occupier group from earlier play - they re-acquire you on sight (unseen zones still read you as a civilian)." call SC_fnSay
-? gmUndercoverStatus < 2 : "Breaking cover 150 m from the wire (the same latch a fired shot trips). Every group that currently knows your face marks you as hostile; Heat spikes on the witness zone and the garrison starts hunting. Watch the ticker." call SC_fnSay
+? gmUndercoverStatus < 2 : "Breaking cover in full view of the wire (the same latch a fired shot trips). Every group that currently knows your face marks you as hostile; Heat spikes on the witness zone and the garrison starts hunting. Watch the ticker." call SC_fnSay
 gmBreakUndercover "showcase alert chapter"
 
 ; ---- YELLOW: perception crossed 0.5 ------------------------------------------------

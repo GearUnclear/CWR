@@ -1115,6 +1115,10 @@ public:
 
 	//! Set request for forced fire (result of scripting)
 	void ForceFire(int weapon) {_forceFireWeapon = weapon;}
+	//! Pending scripted force-fire weapon index (-1 = none). The in-game UI
+	//! checks this so its per-frame cursor aim yields to the forced aim on a
+	//! manual (player) unit until the shot leaves (see InGameUIMenuSim.cpp).
+	int GetForceFireWeapon() const {return _forceFireWeapon;}
 
 	/*!
 	\name Engage decision

@@ -51,16 +51,30 @@ SC_cU = []; {SC_cU = SC_cU + (units _x)} forEach (gmGarrisonGroups SC_OUT)
 {_x setDammage 1} forEach SC_cU
 
 ; ---- observable outcome: the meter climbs, then the native flip -------------------
-; solo consolidation at the stock rate is ~51 s of ticks; wait up to 90 s
+; solo consolidation at the stock rate is ~51 s of ticks. The meter stays
+; legitimately FROZEN while any defender remains: a banked reserve body
+; counts (z.garrison >= 1 defends), and with the player inside the bubble
+; the cache materializes leftover reserve into fresh live defenders within
+; a pass - so one snapshot wipe is not guaranteed to clear the zone. Keep
+; the objective clear (re-wipe whatever stands back up) and give the first
+; tick the same 90 s budget the flip gets; that IS the system on display:
+; the meter only climbs while you actually hold a clear zone.
 SC_cW = 0
 #mwait
 ? ((gmZone SC_OUT) select GM_Z_CAPTURE) > 0 : goto "securing"
+? (gmGarrisonLive SC_OUT) > 0 : goto "rewipe"
+#mnext
 ~1
 SC_cW = SC_cW + 1
-? SC_cW < 20 : goto "mwait"
+? SC_cW < 90 : goto "mwait"
 false call SC_fnShield
 ["FAIL", "garrison wiped with player in-zone but the capture meter never moved"] call SC_fnDone
 exit
+
+#rewipe
+SC_cU = []; {SC_cU = SC_cU + (units _x)} forEach (gmGarrisonGroups SC_OUT)
+{_x setDammage 1} forEach SC_cU
+goto "mnext"
 
 #securing
 "SECURING: the zone is clear and the capture meter is climbing - watch the map label count up (and the on-screen ticker). If an enemy patrol walked in now, progress would freeze until you dealt with it." call SC_fnSay

@@ -1447,7 +1447,16 @@ void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType c
             weapon = ValidateWeapon(vehicle, weapon);
 
             Vector3 weaponDir = GetCursorDirection();
-            if (weaponDir.Distance2(vehicle->GetWeaponDirectionWanted(weapon)) > threshold2)
+            // A scripted force-fire (EntityAI::ForceFire via the `fire` command)
+            // owns the aim until the shot leaves: SimulateWeaponActivity raises
+            // the gun toward its own force-fire direction each tick, and this
+            // per-frame cursor re-aim used to overwrite that wanted direction
+            // right back to the (level) cursor, so on a manual player the gun
+            // never rose and the forced shot never fired. Yield while the
+            // force-fire latch is pending; normal cursor aim resumes as soon as
+            // the shot consumes the latch (_forceFireWeapon returns to -1).
+            if (vehicle->GetForceFireWeapon() < 0 &&
+                weaponDir.Distance2(vehicle->GetWeaponDirectionWanted(weapon)) > threshold2)
             {
                 if (vehicle->IsLocal())
                 {
