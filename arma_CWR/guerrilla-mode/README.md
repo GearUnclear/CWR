@@ -173,6 +173,24 @@ above, asserting the `gmSel*` publication and side resolution in-mission).
 Both need the full CWA install + @LoBo (tags `full_cwa`, `lobo`) and the
 templates installed.
 
+### Start a Lebanon campaign (@LoBo)
+
+[`mission/Guerrilla.Lebanon80/`](mission/Guerrilla.Lebanon80/) is the third
+island pack: South Lebanon on the @LoBo *Lebanon (80's)* world
+(`Lebanon80`, inside `@LoBo\addons\LoBo_Leb.pbo`), **occupier = IDF (WEST),
+resistance = Hizballah (EAST)**. You spawn as a lone Hizballah rifleman at a
+hill camp north of the Litani, with an IDF checkpoint 500 m east and the
+Marjayoun barracks beyond it. Unlike Sinai it sets `seedCities=0`: the
+Lebanon80 `Names` block is a theater map (seas, countries, mountain ranges),
+not a town list, so the towns in play (Tyre, Saida, Ghajar) are explicit
+hand-placed zones instead. Setup is identical to Sinai (install templates,
+mount @LoBo + @lobofixup) - the world's `.wrp` also lives inside a mod pbo,
+so install with `install-missions.ps1 -IncludeWorld Sinai,Lebanon80`.
+Integration coverage:
+`tests/integration/scripting/guerrilla_lebanon80_boot.test.*` (direct
+template boot: side resolution, exact 6-zone seed, native garrison spawn,
+marker colors).
+
 ---
 
 ## Tests

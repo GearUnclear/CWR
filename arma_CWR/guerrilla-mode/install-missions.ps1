@@ -23,8 +23,9 @@
     the player spawns at the mission's coordinates on the WRONG island
     (typically in open sea) and drowns. Templates for worlds that ship in
     mod PBOs (e.g. Guerrilla.Sinai - Sinai lives inside @LoBo\addons\
-    lost.pbo, undetectable by filename) must be named in -IncludeWorld to
-    install.
+    lost.pbo - and Guerrilla.Lebanon80 - Lebanon80 lives inside
+    @LoBo\addons\LoBo_Leb.pbo - both undetectable by filename) must be
+    named in -IncludeWorld to install.
 
     Idempotent: re-running mirrors the repo templates over any previous
     install (stale files inside each installed template are removed, and a
@@ -43,7 +44,7 @@
 .EXAMPLE
     .\install-missions.ps1
     .\install-missions.ps1 -GameDir 'C:\Games\ArmaCWA'
-    .\install-missions.ps1 -IncludeWorld Sinai
+    .\install-missions.ps1 -IncludeWorld Sinai,Lebanon80
 #>
 param(
     [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',

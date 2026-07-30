@@ -25,20 +25,23 @@ class CfgPatches
         requiredAddons[] = {"LoBoammo"};
     };
 };
-// Pre-activate the LoBo addons the Guerrilla.Sinai template spawns from.
-// The engine only builds a vehicle type when its class - and every weapon/
-// magazine class it references - belongs to an ACTIVE addon (World::
-// CheckAddon / ParamOwnerList; failures log "Access denied" at debug level
-// and abort the mission boot). Missions activate what their addOns[] lists,
-// but runtime spawns (the native guerrilla garrison, QRF) are safest with
-// the whole set preloaded at mod level.
+// Pre-activate the LoBo addons the Guerrilla.Sinai and Guerrilla.Lebanon80
+// templates spawn from. The engine only builds a vehicle type when its
+// class - and every weapon/magazine class it references - belongs to an
+// ACTIVE addon (World::CheckAddon / ParamOwnerList; failures log "Access
+// denied" at debug level and abort the mission boot). Missions activate what
+// their addOns[] lists, but runtime spawns (the native guerrilla garrison,
+// QRF) are safest with the whole set preloaded at mod level. The Lebanon80
+// additions: LoBo_Leb (world) + LoBolebObject (its terrain objects),
+// LoBoHizballah/LoBoHizballCar (the resistance roster) and ICPrpg7 (its
+// RPG-7/7VR/29 launchers + magazines).
 class CfgAddons
 {
     class PreloadAddons
     {
         class LoBoGuerrilla
         {
-            list[] = {"sinai", "LoBoTerror", "LoBoEgypt", "LoBoIs", "LoBoWeapons", "LoBoWeapNad", "LoBoWeapAT", "LoBoammo", "JAM_Magazines", "LoBoHMWV", "LoBo_Zelda"};
+            list[] = {"sinai", "LoBoTerror", "LoBoEgypt", "LoBoIs", "LoBoWeapons", "LoBoWeapNad", "LoBoWeapAT", "LoBoammo", "JAM_Magazines", "LoBoHMWV", "LoBo_Zelda", "LoBo_Leb", "LoBolebObject", "LoBoHizballah", "LoBoHizballCar", "ICPrpg7"};
         };
     };
 };

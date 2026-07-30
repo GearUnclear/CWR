@@ -140,7 +140,7 @@ ctest --test-dir build/win-x64-clang-rwdi -R "<test name>" --output-on-failure  
 
 ### Guerrilla integration-test preconditions (verified 2026-07-07)
 
-- `ui/guerrilla_new_game_e2e` and `guerrilla_sinai_swap` need the mission templates **installed in the game dir**: `guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai`. Without `-IncludeWorld Sinai` the installer's world gate **removes** Guerrilla.Sinai (Sinai's `.wrp` lives inside `@LoBo`'s pbo, invisible to the gate) and the e2e fails at `triSimUntil { alive player }` with a mount-failure message box behind it.
+- `ui/guerrilla_new_game_e2e` and `guerrilla_sinai_swap` need the mission templates **installed in the game dir**: `guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai,Lebanon80`. Without the `-IncludeWorld` names the installer's world gate **removes** Guerrilla.Sinai and Guerrilla.Lebanon80 (both worlds' `.wrp` files live inside `@LoBo` pbos, invisible to the gate) and the e2e fails at `triSimUntil { alive player }` with a mount-failure message box behind it. (`guerrilla_sinai_swap` and `guerrilla_lebanon80_boot` themselves boot the repo-root-relative template path, so they run even without the install; the install matters for the menu flow and interactive play.)
 - The LoBo tests also need the one-time patched pbos: `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1` (stock `@LoBo` pbos hard-abort under `--autotest` on malformed `tracerColor` floats).
 - Run `tri` with `--retries` and low `-j`: `guerrilla_native_spawn` is known-flaky on its doMove displacement assert (recovers on retry), and parallel instances plus any manually closed window show up as `connection error: eval failed` cascades.
 

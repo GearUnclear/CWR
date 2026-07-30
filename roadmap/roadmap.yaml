@@ -199,6 +199,7 @@ items:
       @LoBo\addons\lost.pbo, so install-missions.ps1 needs -IncludeWorld Sinai.
     log:
       - "@LoBo pbos carry malformed tracerColor floats that hard-abort under --autotest; gitignored patched pbos must be generated once via tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1."
+      - "2026-07-30: second @LoBo theater landed - Guerrilla.Lebanon80 (IDF occupier vs Hizballah resistance on LoBo_Leb's 25.6 km Lebanon80 world; built+verified 2026-07-28 in the playtest session, committed with the #25 outfit keys riding in its Hizballah block). Ships with guerrilla_lebanon80_boot, installer world-gate + @lobofixup preload support; seedCities stays OFF there (the world's Names block is a theater map with sea-level entries, not a town list)."
 
   - id: guerrilla-test-suite
     title: "Guerrilla test suite (unit + Trident integration)"
