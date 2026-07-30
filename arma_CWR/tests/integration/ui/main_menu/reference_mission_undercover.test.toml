@@ -1,0 +1,14 @@
+# Main-menu UNDERCOVER reference-mission button, end to end. No mission= -
+# boots to the main menu and drives the direct-launch button (idc 124).
+#
+# PRECONDITION: guerrilla-mode/install-missions.ps1 has been run - the launch
+# path resolves "missions\Undercover.Abel" relative to the game data dir
+# (LaunchReferenceMission, UI/OptionsUIApp.cpp), i.e. the template must sit
+# at <OFPR_DATA_DIR>\Missions\Undercover.Abel\. Abel ships in the Classic
+# package's Worlds, so no -IncludeWorld is needed.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+# Abel world load after the click plus the mission bootstrap.
+timeout = 240
+assert_timeout = 120
+extra_args = ["--dev"]

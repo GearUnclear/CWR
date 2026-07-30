@@ -166,6 +166,38 @@ static const char* kLangRotation[] = {
 };
 static constexpr int kLangRotationCount = sizeof(kLangRotation) / sizeof(kLangRotation[0]);
 
+// Human-playable reference missions (the guerrilla-mode/mission test slices,
+// installed into <GameDir>\Missions\ by install-missions.ps1) surfaced on the
+// main menu. Buttons exist only while the mission is actually installed —
+// resource-provided controls are hidden when it is missing, and when the menu
+// resource ships no control at all one is injected at runtime (same
+// clone-the-Quit-class mechanism as the MODS/GUERRILLA entries). The idc slots
+// continue the UI-local numbering above IDC_MAIN_GUERRILLA = 120 (121/122 are
+// IDC_MAIN_LOAD/IDC_MAIN_SAVE in Core/resincl.hpp); any menu resource
+// providing its own control must use these same values (the Classic package's
+// bin/resource-extra.cpp does).
+constexpr int IDC_MAIN_REF_SHOWCASE = 123;
+constexpr int IDC_MAIN_REF_UNDERCOVER = 124;
+
+static const struct
+{
+    int idc;
+    const char* label;   ///< runtime-injected button caption
+    const char* dirName; ///< "<Name>.<World>" under missions\ (unbanked dir or .pbo)
+} kReferenceMissions[] = {
+    {IDC_MAIN_REF_SHOWCASE, "SHOWCASE", "Showcase.Abel"},
+    {IDC_MAIN_REF_UNDERCOVER, "UNDERCOVER", "Undercover.Abel"},
+};
+
+// Same two existence probes the Guerrilla new-game launch path uses
+// (banked pbo via FilePathExists, unbanked dir via QIFStreamB) against the
+// game working directory (= the data dir).
+static bool ReferenceMissionInstalled(const char* dirName)
+{
+    RString base = RString("missions\\") + RString(dirName);
+    return FilePathExists(base + RString(".pbo")) || QIFStreamB::FileExist(base + RString("\\mission.sqm"));
+}
+
 DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
 {
     _version = GetAppVersion();
@@ -276,6 +308,51 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
                 if (x < 0.0f)
                     x = 0.0f;
                 guer->SetPos(x, anchor->Y(), anchor->W(), anchor->H());
+            }
+        }
+    }
+
+    // Reference-mission entries (kReferenceMissions): a resource-provided
+    // control for a mission that is not installed is hidden (a dead launch
+    // button must never show); a mission that IS installed but has no control
+    // in the menu resource gets one injected, cloned from Quit like the two
+    // blocks above. Injected buttons stack UPWARD from just above the
+    // Guerrilla/Mods/Quit row rather than extending it further left — the row
+    // is already up to three entries wide on community menus.
+    {
+        Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
+        ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        static ParamFile s_refMissionInjectCfg; // outlives the controls (they back-reference the classes)
+        s_refMissionInjectCfg.Clear();
+        int injected = 0;
+        for (const auto& ref : kReferenceMissions)
+        {
+            const bool installed = ReferenceMissionInstalled(ref.dirName);
+            if (IControl* existing = GetCtrl(ref.idc))
+            {
+                if (!installed)
+                    existing->ShowCtrl(false);
+                continue;
+            }
+            if (!installed || quit == nullptr || quitCls == nullptr || !quitCls->IsClass())
+                continue;
+            char clsName[64];
+            snprintf(clsName, sizeof(clsName), "RefMissionInject%d", ref.idc);
+            ParamClass* refCls = s_refMissionInjectCfg.AddClass(clsName);
+            // Local entries BEFORE SetBase — see the MODS comment above.
+            refCls->Add("idc", ref.idc);
+            refCls->Add("text", RString(ref.label));
+            refCls->Add("style", ST_RIGHT);
+            refCls->SetBase(quitCls->GetClassInterface());
+            LoadControl(*refCls);
+            if (Control* btn = dynamic_cast<Control*>(GetCtrl(ref.idc)))
+            {
+                ++injected;
+                const float gap = quit->H() * 0.25f;
+                float y = quit->Y() - (float)injected * (quit->H() + gap);
+                if (y < 0.0f)
+                    y = 0.0f;
+                btn->SetPos(quit->X(), y, quit->W(), quit->H());
             }
         }
     }
@@ -2017,6 +2094,96 @@ void DisplayModDownload::OnSimulate(EntityAI* vehicle)
     Display::OnSimulate(vehicle);
 }
 
+// Direct-launch a reference mission through the single-mission path — the
+// IDD_GUERRILLA_NEW_GAME launch sequence in OnChildDestroyed minus the child
+// display and the gmSel* publishing (a direct launch relies on the mission's
+// own description.ext defaults, which the reference missions state
+// explicitly for exactly this reason).
+bool DisplayMain::LaunchReferenceMission(int idc)
+{
+    for (const auto& ref : kReferenceMissions)
+    {
+        if (ref.idc != idc)
+            continue;
+
+        RString missionBase = RString("missions\\") + RString(ref.dirName);
+        bool banked = FilePathExists(missionBase + RString(".pbo"));
+        bool unbanked = !banked && QIFStreamB::FileExist(missionBase + RString("\\mission.sqm"));
+        if (!banked && !unbanked)
+        {
+            // The button is hidden at menu construction when the mission is
+            // missing, but the data can disappear between then and the click
+            // (and a mod's own menu may hardwire the control unconditionally).
+            char buffer[512];
+            snprintf(buffer, sizeof(buffer), "Reference mission not installed:\n%s\nRun guerrilla-mode/install-missions.ps1.",
+                     (const char*)missionBase);
+            CreateMsgBox(MB_BUTTON_OK, buffer);
+            return true;
+        }
+
+        CurrentTemplate.Clear();
+        if (GWorld->UI())
+        {
+            GWorld->UI()->Init();
+        }
+        CurrentCampaign = "";
+        CurrentBattle = "";
+        CurrentMission = "";
+        SetCampaign("");
+
+        // dirName is "<Name>.<World>" — the unbanked branch needs both halves
+        // and the banked branch needs the name for filenameReal (its mount
+        // alias parses as "__cur_sp", not the real template name — same
+        // reason the Guerrilla path hardcodes "Guerrilla" there).
+        char nameBuf[256];
+        snprintf(nameBuf, sizeof(nameBuf), "%s", ref.dirName);
+        char* dirWorld = strrchr(nameBuf, '.');
+        PoseidonAssert(dirWorld);
+        *dirWorld = 0;
+        dirWorld++;
+
+        if (banked)
+        {
+            // CreateSingleMissionBank mounts the PBO under the
+            // "missions\__cur_sp.<island>\" alias; parse world and mission out
+            // of the returned prefix exactly like the Guerrilla banked branch.
+            char buffer[1024];
+            snprintf(buffer, sizeof(buffer), "%s", (const char*)CreateSingleMissionBank(missionBase));
+            if (*buffer == 0)
+            {
+                char msg[512];
+                snprintf(msg, sizeof(msg), "Reference mission failed to mount:\n%s.pbo", (const char*)missionBase);
+                CreateMsgBox(MB_BUTTON_OK, msg);
+                return true;
+            }
+            char* str = strrchr(buffer, '\\');
+            PoseidonAssert(str);
+            *str = 0;
+            char* world = strrchr(buffer, '.');
+            PoseidonAssert(world);
+            *world = 0;
+            world++;
+            const char* mission = strrchr(buffer, '\\');
+            PoseidonAssert(mission);
+            mission++;
+            SetMission(world, mission);
+            Glob.header.filenameReal = RString(nameBuf);
+        }
+        else
+        {
+            // SetMission(world, name) resolves the unbanked directory
+            // "missions\<Name>.<World>\".
+            SetMission(dirWorld, nameBuf);
+        }
+
+        GStats.ClearAll();
+        ApplyCurrentMissionViewDistance();
+        CreateChild(new DisplayIntro(this));
+        return true;
+    }
+    return false;
+}
+
 void DisplayMain::OnButtonClicked(int idc)
 {
     // Dispatch registered game module buttons via registry
@@ -2025,6 +2192,10 @@ void DisplayMain::OnButtonClicked(int idc)
         mod->menuAction(this);
         return;
     }
+
+    // Reference-mission direct launches (kReferenceMissions)
+    if (LaunchReferenceMission(idc))
+        return;
 
     // Non-module buttons
     switch (idc)

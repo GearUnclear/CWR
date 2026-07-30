@@ -1026,6 +1026,11 @@ class DisplayMain : public Display
 
   protected:
     void RefreshLanguage();
+    // Direct-launch one of the installed reference missions (the human-playable
+    // test slices, kReferenceMissions in OptionsUIApp.cpp) through the same
+    // single-mission path the Guerrilla new-game launch uses. Returns false
+    // when idc names no reference mission (caller falls through to the switch).
+    bool LaunchReferenceMission(int idc);
     //	void LoadHeader();
 };
 

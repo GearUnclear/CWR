@@ -5,8 +5,10 @@
 // NOT part of the Guerrilla.*/Showcase.* shared-core family: this mission
 // carries its own small script set (init.sqs + hud/patrol/act_*.sqs) instead
 // of the campaign managers, so the undercover system is the only moving part
-// on display. install-missions.ps1 ignores it by name; copy the folder into
-// <GameDir>\Missions\ by hand (or run-game.ps1 -Mission 'Missions\Undercover.Abel').
+// on display. install-missions.ps1 installs it like the other templates, and
+// once installed it is launchable straight from the main menu's UNDERCOVER
+// button (kReferenceMissions, UI/OptionsUIApp.cpp) or via
+// run-game.ps1 -Mission 'Missions\Undercover.Abel'.
 //
 // What activates what:
 //   * class CfgGuerrillaZones     -> ZoneRegistry + AlertMachine + Undercover

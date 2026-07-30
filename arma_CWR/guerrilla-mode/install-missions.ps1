@@ -71,11 +71,15 @@ if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
 }
 
 # Guerrilla.<World> = the playable campaign templates; Showcase.<World> = the
-# issue #9 systems-showcase missions (same shared core + a showcase/ overlay).
+# issue #9 systems-showcase missions (same shared core + a showcase/ overlay);
+# Undercover.<World> = the deep-undercover reference slice (own script set,
+# not the shared core). Showcase.* and Undercover.* are surfaced as direct
+# main-menu launch buttons (kReferenceMissions, UI/OptionsUIApp.cpp) that
+# only appear when the mission is installed.
 $templates = Get-ChildItem -LiteralPath $missionRoot -Directory |
-    Where-Object { $_.Name -match '^(Guerrilla|Showcase)\.' }
+    Where-Object { $_.Name -match '^(Guerrilla|Showcase|Undercover)\.' }
 if (-not $templates) {
-    throw "No Guerrilla.*/Showcase.* templates under $missionRoot"
+    throw "No Guerrilla.*/Showcase.*/Undercover.* templates under $missionRoot"
 }
 
 foreach ($tpl in $templates) {
