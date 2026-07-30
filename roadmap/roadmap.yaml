@@ -580,6 +580,7 @@ items:
     status: done
     priority: 2
     depends_on: [mission-migration-native, deep-undercover-system]
+    commits: [ff5ff41, eacda4a]
     gh_issues: [25]
     summary: >
       Issue #25 milestones M1-M3+M5. M1: fourth new-game cycler (idc 153,
