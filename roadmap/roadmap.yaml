@@ -98,13 +98,15 @@ items:
     phase: foundation
     status: done
     depends_on: [repo-reroot]
-    commits: [3ce3da4, 5a289cd]
+    commits: [3ce3da4, 5a289cd, 306cd37]
     summary: >
       Six-page retro static field manual (index, about, gameplay, tech, designloop,
       downloads) branded Uslu dur!, with a we-don't-round-up status policy. Claims
-      audited 2026-07-06 and found to match repo ground truth.
+      audited 2026-07-06 and found to match repo ground truth. Ongoing marketing
+      iteration: commercial-release tone within the retro skin.
     log:
       - "Site publicly claims: Phase 1 Built 100%, Phase 1.5 Built 100% (both awaiting first human playtest), Gate-Zero In Progress 60%, Phase 2 Planned 15%, Phase 3 Planned 5%."
+      - "2026-07-30 marketing pass 1 (306cd37): homepage restructured as a landing page (hero + 'One rifle. One island. Take it back.' tagline + Play Free Demo CTA + sell rows); CTA buttons on downloads/gameplay; system-requirements table. Retro skin deliberately kept as brand."
 
   - id: camera-mouselook
     title: "Camera: aiming deadzone + mouse-look feel"
