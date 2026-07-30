@@ -28,6 +28,11 @@
 ;  TUNABLES / CONSTANTS  (owned by this script)
 ; ===========================================================================
 GM_COMP_CLASS      = gmFactionValue [gmResistanceSide, "companionClass"]
+; civilian outfit family (issue #25): companions match the player's outfit;
+; body changes apply on the next (re)spawn only - there is no re-model
+; mechanism for a live unit, which is why the outfit locks at new-game
+GM_COMP_CIVC = gmFactionValue [gmResistanceSide, "companionClassCiv"]
+? GM_OUTFIT_CIV and (GM_COMP_CIVC != "") and (gmClassExists GM_COMP_CIVC) : GM_COMP_CLASS = GM_COMP_CIVC
 GM_COMP_RANKLADDER = ["PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL"]
 GM_COMP_XPTHRESH   = [0, 100, 250, 500, 850, 1300, 1900]
 ;   GM_COMP_SKILLBASE  skill at ladder index 0

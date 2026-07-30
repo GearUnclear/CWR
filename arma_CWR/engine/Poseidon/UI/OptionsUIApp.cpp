@@ -879,6 +879,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 RString island = disp->SelectedIsland();
                 RString occupier = disp->SelectedOccupier();
                 RString resistance = disp->SelectedResistance();
+                RString outfit = disp->SelectedOutfit();
 
                 // The template mission "Guerrilla.<World>", resolved the same
                 // way the single-mission browser resolves its entries: a PBO
@@ -974,6 +975,17 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                     GGameState.VarSet(kGuerrillaVarResistance, GameValue(resistance));
                     GameVariable varResistance(kGuerrillaVarResistance, GameValue(resistance));
                     GStats._campaign.AddVariable(varResistance);
+                }
+                // Character outfit (issue #25): empty when no descriptor
+                // offered the pair — publish nothing so the authored
+                // mission.sqm class keeps deciding. "WARRIOR" is published
+                // when selected but is defined as the authored class, so it
+                // acts exactly like publishing nothing.
+                if (outfit.GetLength() > 0)
+                {
+                    GGameState.VarSet(kGuerrillaVarOutfit, GameValue(outfit));
+                    GameVariable varOutfit(kGuerrillaVarOutfit, GameValue(outfit));
+                    GStats._campaign.AddVariable(varOutfit);
                 }
 
                 Display::OnChildDestroyed(idd, exit);

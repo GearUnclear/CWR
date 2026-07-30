@@ -1,0 +1,15 @@
+# The vanilla civilian-class disguise ladder, live (issue #25 M3.3): a
+# SoldierGFakeC on a GUER group reads CIV to occupier observers at range, is
+# identified at conversational range, and is exposed to a still-distant group
+# the moment it fires on it (the free vanilla break the whole outfit axis
+# leans on). Full CWA data only: SoldierGFakeC is Classic-only.
+#
+# Perception needs real AI ticks and headless LOS warms up slowly for
+# freshly spawned observers (~65 s of zero visibility) - generous budgets,
+# same as the undercover perception tests.
+mission = "tests/integration/missions/guerrilla_native.abel"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+timeout = 540
+assert_timeout = 240
+extra_args = ["--dev"]

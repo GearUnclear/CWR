@@ -91,6 +91,55 @@ TEST_CASE("GuerrillaModule: main-menu contract constants", "[UI][GameModule][Gue
     REQUIRE(std::string(Poseidon::kGuerrillaVarIsland) == "gmSelIsland");
     REQUIRE(std::string(Poseidon::kGuerrillaVarOccupier) == "gmSelOccupier");
     REQUIRE(std::string(Poseidon::kGuerrillaVarResistance) == "gmSelResistance");
+    REQUIRE(std::string(Poseidon::kGuerrillaVarOutfit) == "gmSelOutfit");
+}
+
+// ---------------------------------------------------------------------------
+// Outfit cycler choices (issue #25) — offered iff the resolved resistance
+// block authors playerClassCiv; WARRIOR always index 0 (the no-op default).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GuerrillaOutfitChoices: offered only when the resistance block authors playerClassCiv",
+          "[UI][Guerrilla][outfit]")
+{
+    ParamFile cfg;
+    ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
+    ParamClass* us = factions->AddClass("US");
+    us->Add("side", "WEST");
+    ParamClass* fia = factions->AddClass("FIA");
+    fia->Add("side", "GUER");
+    fia->Add("playerClassCiv", "SoldierGFakeC");
+    ParamClass* zones = cfg.AddClass("CfgGuerrillaZones");
+    zones->Add("defaultResistance", "FIA");
+
+    const ParamEntry* f = cfg.FindEntry("CfgGuerrillaFactions");
+    const ParamEntry* z = cfg.FindEntry("CfgGuerrillaZones");
+
+    // selected resistance offers the pair, WARRIOR first
+    auto offered = Poseidon::GuerrillaOutfitChoices(f, z, RString("FIA"));
+    REQUIRE(offered.size() == 2);
+    REQUIRE(std::string((const char*)offered[0]) == "WARRIOR");
+    REQUIRE(std::string((const char*)offered[1]) == "CIVILIAN");
+    // side string resolves the same block
+    REQUIRE(Poseidon::GuerrillaOutfitChoices(f, z, RString("GUER")).size() == 2);
+    // a resistance without the key offers nothing — "(mission default)"
+    REQUIRE(Poseidon::GuerrillaOutfitChoices(f, z, RString("US")).empty());
+    // empty selection falls back to defaultResistance
+    REQUIRE(Poseidon::GuerrillaOutfitChoices(f, z, RString()).size() == 2);
+    // no config at all
+    REQUIRE(Poseidon::GuerrillaOutfitChoices(nullptr, z, RString("FIA")).empty());
+}
+
+TEST_CASE("GuerrillaOutfitChoices: without zones config the built-in GUER side resolves",
+          "[UI][Guerrilla][outfit]")
+{
+    ParamFile cfg;
+    ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
+    ParamClass* fia = factions->AddClass("FIA");
+    fia->Add("side", "GUER");
+    fia->Add("playerClassCiv", "SoldierGFakeC");
+
+    REQUIRE(Poseidon::GuerrillaOutfitChoices(cfg.FindEntry("CfgGuerrillaFactions"), nullptr, RString()).size() == 2);
 }
 
 // ---------------------------------------------------------------------------

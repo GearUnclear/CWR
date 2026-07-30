@@ -119,20 +119,18 @@ static RString ReadSideSelection(const char* lowercaseName)
     return (RString)value;
 }
 
-// the engine's ClassProbe: a classname exists when the merged game config
-// (Pars, i.e. the loaded data package + addons) carries it under the bank
-struct ParsClassProbe final : ClassProbe
+// the engine's ClassProbe (declared in the header - shared with the outfit
+// seam): a classname exists when the merged game config (Pars, i.e. the
+// loaded data package + addons) carries it under the bank
+bool ParsClassProbe::Exists(const char* bank, const char* className) const
 {
-    bool Exists(const char* bank, const char* className) const override
+    if (!bank || !className || !*className)
     {
-        if (!bank || !className || !*className)
-        {
-            return false;
-        }
-        const ParamEntry* bankEntry = Pars.FindEntry(bank);
-        return bankEntry && bankEntry->FindEntry(className) != nullptr;
+        return false;
     }
-};
+    const ParamEntry* bankEntry = Pars.FindEntry(bank);
+    return bankEntry && bankEntry->FindEntry(className) != nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // lifecycle / config
@@ -620,6 +618,10 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
         readStringArray("tiersAT", f.tiersAT);
         readStringArray("tiersMedic", f.tiersMedic);
         readStringArray("tiersSniper", f.tiersSniper);
+        // civilian-outfit ladder (issue #25): the rung for AI garrisons,
+        // guards, town militia and part-time fighters; optional, indexed by
+        // the same tierThresholds[] as tiers[] (clamped to its own length)
+        readStringArray("civTier", f.civTiers);
         const ParamEntry* thresholds = e.FindEntry("tierThresholds");
         if (thresholds && thresholds->IsArray())
         {
@@ -675,6 +677,12 @@ const char* const kFallbackWest[] = {"SoldierWB", nullptr};
 const char* const kFallbackEast[] = {"SoldierEB", nullptr};
 const char* const kFallbackGuer[] = {"SoldierGB", "SoldierGFakeE", "SoldierEB", "SoldierWB", nullptr};
 const char* const kFallbackCiv[] = {"Civilian", "SoldierWCaptive", nullptr};
+// the civilian-OUTFIT ladder (issue #25): armed-fighter-in-civilian-clothes
+// bodies for the civTier[] rung.  Deliberately NOT kFallbackCiv - its
+// SoldierWCaptive entry is a WEST-side unarmed captive class.  BIS's own
+// plainclothes pair first; plain Civilian last (it costs the civilian-kill
+// stat line and has Man-grade weapon slots, but it is a spawnable body).
+const char* const kFallbackCivOutfit[] = {"SoldierGFakeC", "SoldierGFakeC2", "Civilian", nullptr};
 
 const char* const* FallbackListForSide(const char* side)
 {
@@ -703,6 +711,19 @@ bool IsUnitClassKey(const char* key)
     if (stricmp(key, "officer") == 0 || stricmp(key, "holdClass") == 0 || stricmp(key, "recruitFighter") == 0 ||
         stricmp(key, "recruitSpecialist") == 0 || stricmp(key, "companionClass") == 0 ||
         stricmp(key, "fallbackClass") == 0)
+    {
+        return true;
+    }
+    // the Civ outfit-family scalars (issue #25): the civilian-outfit bodies
+    // for the player and the player-adjacent AI. They ride the same plan-15
+    // resolution; a missing class degrades to the warrior-side fallback
+    // (tier 0 / sideFallback), so gmFactionValue hands scripts a spawnable
+    // warrior body automatically (accepted trade-off, issue #25 Part 4).
+    // The player seam is unaffected: it reads raw config before the registry
+    // loads and keeps the authored class on probe failure.
+    if (stricmp(key, "playerClassWarrior") == 0 || stricmp(key, "playerClassCiv") == 0 ||
+        stricmp(key, "recruitFighterCiv") == 0 || stricmp(key, "recruitSpecialistCiv") == 0 ||
+        stricmp(key, "companionClassCiv") == 0 || stricmp(key, "holdClassCiv") == 0)
     {
         return true;
     }
@@ -811,6 +832,72 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         if (!anyTier && f.tiers.Size() > 0 && sideFallback.GetLength() == 0)
         {
             f.tiers.Clear(); // nothing spawnable: honest inert beats sterile retry loops
+        }
+
+        // ---- civTier[] (issue #25): nearest lower resolved civ tier, then
+        // higher, then the civilian-OUTFIT ladder (kFallbackCivOutfit), then
+        // the (already resolved) tiers[0] warrior rung.  An all-unresolved
+        // ladder with no candidate empties - "" = the rung is inert, callers
+        // keep their warrior classes.
+        {
+            AutoArray<bool> civOk;
+            civOk.Resize(f.civTiers.Size());
+            bool anyCivTier = false;
+            for (int i = 0; i < f.civTiers.Size(); i++)
+            {
+                civOk[i] = f.civTiers[i].GetLength() > 0 && probe.Exists(kVeh, f.civTiers[i]);
+                anyCivTier |= civOk[i];
+            }
+            RString civOutfitFallback;
+            if (f.civTiers.Size() > 0 && !anyCivTier)
+            {
+                for (int k = 0; kFallbackCivOutfit[k] && civOutfitFallback.GetLength() == 0; k++)
+                {
+                    if (probe.Exists(kVeh, kFallbackCivOutfit[k]))
+                    {
+                        civOutfitFallback = kFallbackCivOutfit[k];
+                    }
+                }
+                if (civOutfitFallback.GetLength() == 0 && f.tiers.Size() > 0)
+                {
+                    civOutfitFallback = f.tiers[0];
+                }
+            }
+            bool anyKept = false;
+            for (int i = 0; i < f.civTiers.Size(); i++)
+            {
+                if (civOk[i])
+                {
+                    anyKept = true;
+                    continue;
+                }
+                RString sub;
+                for (int j = i - 1; j >= 0 && sub.GetLength() == 0; j--)
+                {
+                    if (civOk[j])
+                    {
+                        sub = f.civTiers[j];
+                    }
+                }
+                for (int j = i + 1; j < f.civTiers.Size() && sub.GetLength() == 0; j++)
+                {
+                    if (civOk[j])
+                    {
+                        sub = f.civTiers[j];
+                    }
+                }
+                if (sub.GetLength() == 0)
+                {
+                    sub = civOutfitFallback;
+                }
+                logSub("civTier[]", f.civTiers[i], sub);
+                f.civTiers[i] = sub;
+                anyKept |= sub.GetLength() > 0;
+            }
+            if (!anyKept)
+            {
+                f.civTiers.Clear(); // honest inert beats sterile spawns
+            }
         }
 
         // ---- role tiers: an unresolvable entry blanks to "" (query-time
@@ -1201,6 +1288,30 @@ RString ZoneRegistry::FactionTierClass(const char* side, float warLevel) const
         return RString();
     }
     return f->tiers[TierIndex(*f, warLevel)];
+}
+
+RString ZoneRegistry::FactionCivTierClass(const char* side, float warLevel) const
+{
+    const FactionRecord* f = FindFactionForSide(side);
+    if (!f || f->civTiers.Size() == 0)
+    {
+        return RString();
+    }
+    // the same threshold walk as TierIndex, clamped to the CIV ladder's own
+    // length (civTier[] may author fewer rungs than tiers[])
+    int tier = 0;
+    for (int i = 0; i < f->tierThresholds.Size(); i++)
+    {
+        if (warLevel >= f->tierThresholds[i])
+        {
+            tier++;
+        }
+    }
+    if (tier >= f->civTiers.Size())
+    {
+        tier = f->civTiers.Size() - 1;
+    }
+    return f->civTiers[tier];
 }
 
 void ZoneRegistry::FactionSquad(const char* side, float warLevel, int count, AutoArray<RString>& out) const
@@ -1694,6 +1805,20 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
 // (may be null) is skipped: the undercover real player, whom the AI cannot
 // engage, is not an armed force securing ground.  out must be pre-sized and
 // zeroed by the caller; a null center leaves it untouched (no units).
+//
+// Civilian-OUTFIT policy (issue #25 M3.4, decided 2026-07-29): units whose
+// class came through a Civ-family key (playerClassCiv, recruit*Civ,
+// holdClassCiv, civTier[]) COUNT here, exactly like warrior bodies.  The
+// undercover-player rationale does not transfer: the AI can and does engage
+// a disguised AI fighter once the vanilla side-resolve identifies him
+// (~27 m, or instantly when he fires - Target.cpp fired-at branch), unlike
+// the gmUndercover player whom the AI can never engage.  Excluding the
+// family would also make zone capture impossible for a civilian-outfit
+// campaign (the player's whole force wears Civ bodies) and would break
+// issue #16's militia-holds-its-own-town case.  The "count only while not
+// currently reading civilian to any occupier observer" position stays
+// infeasible until the Phase-3 N-subject undercover generalization
+// (#19/#20/#21) exists; revisit there.
 static void CountSidePresence(AICenter* center, const AutoArray<ZoneRecord>& zones, float areaSq,
                               const Person* excludePerson, AutoArray<int>& out)
 {

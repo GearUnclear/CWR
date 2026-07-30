@@ -203,6 +203,28 @@ static GameValue GmFactionTierClass(const GameState* state, GameValuePar oper1)
     return GameStringType(ZoneRegistry::Instance().FactionTierClass(side, (float)array[1]));
 }
 
+// gmFactionCivTier [sideOrClassName, warLevel] -> the civilian-outfit rung
+// (civTier[], issue #25); "" when the faction authors none - callers keep
+// their warrior classes
+static GameValue GmFactionCivTier(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 2))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[0], GameString))
+    {
+        return NOTHING;
+    }
+    if (!CheckType(state, array[1], GameScalar))
+    {
+        return NOTHING;
+    }
+    GameStringType side = array[0];
+    return GameStringType(ZoneRegistry::Instance().FactionCivTierClass(side, (float)array[1]));
+}
+
 // gmFactionValue [sideOrClassName, key]
 static GameValue GmFactionValue(const GameState* state, GameValuePar oper1)
 {
@@ -368,6 +390,7 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneSet", GmZoneSet, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneOnEvent", GmZoneOnEvent, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "gmFactionTierClass", GmFactionTierClass, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "gmFactionCivTier", GmFactionCivTier, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "gmFactionValue", GmFactionValue, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "gmFactionVehicle", GmFactionVehicle, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmFactionSquad", GmFactionSquad, GameArray));

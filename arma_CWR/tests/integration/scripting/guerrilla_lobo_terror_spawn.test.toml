@@ -1,0 +1,12 @@
+# LoBo Terror-class spawn smoke test (issue #25 M2.4): the Sinai/Lebanon80
+# civilian-outfit bodies carry Init/fired EventHandlers exec'ing
+# \LoBoTer\scripts\* + ECP references - this proves they spawn clean under
+# createUnit on the real Guerrilla.Sinai template. Same mod stack and
+# first-use precondition as guerrilla_sinai_swap (run
+# tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 once).
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

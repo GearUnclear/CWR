@@ -232,6 +232,30 @@ no-CIV-layer path). Every substitution is RptF-logged. This is the
 descriptor authored for one package degrades on another instead of
 boot-failing or silently spawning nothing.
 
+**Character outfit family (issue #25, all optional, resistance-side):** the
+warrior/civilian outfit axis picked on the new-game screen (`gmSelOutfit`,
+cycler idc 153; `WARRIOR` is defined as "the authored class" so publishing it
+equals publishing nothing). Per-role scalars `playerClassWarrior` /
+`playerClassCiv` (the engine substitutes the player's `mission.sqm` class at
+`InitVehicles` when the selection is civilian — `World/WorldInit.cpp` →
+`Game/Guerrilla/OutfitSelect.cpp`, raw-config lookup because the registry
+loads later; probe failure keeps the authored class), and
+`recruitFighterCiv` / `recruitSpecialistCiv` / `companionClassCiv` /
+`holdClassCiv` (the managers pick them over their base keys when
+`GM_OUTFIT_CIV`, which `init.sqs` folds once from `gmSelOutfit`; hold squads
+under the civilian outfit bypass `gmFactionSquad` and spawn the
+`holdClassCiv` monoculture — no `tiersCiv[]` role arrays exist). The array
+`civTier[]` is the civilian-outfit ladder for AI garrison/guard/militia
+rungs (served by `gmFactionCivTier`, same `tierThresholds[]` gates, clamped
+to its own length; issue #16's guard surface). Scalar Civ keys ride the
+plan-15 unit-key resolution (missing class → warrior fallback); `civTier[]`
+has its OWN ladder `SoldierGFakeC → SoldierGFakeC2 → Civilian → tiers[0]`
+(never the CIV-side `SoldierWCaptive` list). Disguised fighters never enter
+the ambience layer (`GM_CIV_GROUPS`) — binding refusal documented in
+`civilians.sqs`. Presence policy: civ-outfit units COUNT toward zone
+presence like warriors (decided in issue #25 M3.4; rationale at
+`ZoneRegistry.cpp CountSidePresence`).
+
 **Island/faction-agnostic rule (definition of done for issue #3):** the
 `scripts/` directory contains **zero classnames and zero side-string
 literals** — sides come from `gmOccupierSide`/`gmResistanceSide` (converted to

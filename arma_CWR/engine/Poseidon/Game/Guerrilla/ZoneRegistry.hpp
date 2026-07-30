@@ -115,6 +115,11 @@ struct FactionRecord
     AutoArray<RString> tiersAT;
     AutoArray<RString> tiersMedic;
     AutoArray<RString> tiersSniper;
+    // civilian-outfit ladder (issue #25): armed fighters in civilian clothes
+    // for garrison/guard/militia rungs.  Indexed by the same
+    // tierThresholds[] as tiers[], clamped to its own length; empty = the
+    // faction offers no civilian-outfit bodies (callers keep warriors)
+    AutoArray<RString> civTiers;
     AutoArray<RString> vehicles;
     float vehicleThreshold = 3.0f;      // legacy 2-step ladder (index 0 -> 1)
     AutoArray<float> vehicleThresholds; // full ladder, mirrors tierThresholds
@@ -129,6 +134,15 @@ struct ClassProbe
     virtual ~ClassProbe() = default;
     // bank is a top-level config class ("CfgVehicles" / "CfgWeapons")
     virtual bool Exists(const char* bank, const char* className) const = 0;
+};
+
+// The engine's ClassProbe: a classname exists when the merged game config
+// (Pars, i.e. the loaded data package + addons) carries it under the bank.
+// Shared by the registry load path and the player outfit-substitution seam
+// (OutfitSelect), which runs before the registry loads.
+struct ParsClassProbe final : ClassProbe
+{
+    bool Exists(const char* bank, const char* className) const override;
 };
 
 enum ZoneEventType
@@ -236,6 +250,10 @@ class ZoneRegistry : public SerializeClass
     // faction queries; the faction is looked up by side string or config
     // class name (side wins); empty string when faction/key/level is unknown
     RString FactionTierClass(const char* side, float warLevel) const;
+    // civilian-outfit rung (issue #25): the civTier[] entry for the war
+    // level (same tierThresholds[] gates as tiers[], clamped to the civ
+    // ladder's own length); empty when the faction authors no civTier[]
+    RString FactionCivTierClass(const char* side, float warLevel) const;
     RString FactionVehicle(const char* side, float warLevel) const;
     RString FactionValue(const char* side, const char* key) const;
     // role-diverse squad composition (plan 15): fills out with count

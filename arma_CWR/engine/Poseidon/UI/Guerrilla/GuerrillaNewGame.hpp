@@ -41,6 +41,12 @@ constexpr int IDD_GUERRILLA_NEW_GAME = 76;
 constexpr const char* kGuerrillaVarIsland = "gmSelIsland";
 constexpr const char* kGuerrillaVarOccupier = "gmSelOccupier";
 constexpr const char* kGuerrillaVarResistance = "gmSelResistance";
+// Character outfit family (issue #25). Published values are the cycler
+// tokens "WARRIOR" / "CIVILIAN"; consumers compare case-insensitively and
+// only "civilian" ever acts, so publishing "WARRIOR" and publishing nothing
+// are behaviorally identical (the cycler's default must resolve exactly like
+// a no-UI launch).
+constexpr const char* kGuerrillaVarOutfit = "gmSelOutfit";
 
 // Pure list builders (unit-testable with an injected ParamFile):
 // islands = subclass names of CfgWorldList whose world file exists (the same
@@ -103,6 +109,18 @@ void GuerrillaDefaultSelections(const ParamEntry* factionsCfg, const ParamEntry*
 bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg, RString occupier,
                                     RString resistance, RString& outMessage);
 
+// The outfit-family choices the character cycler offers for the CURRENT
+// resistance selection: {"WARRIOR", "CIVILIAN"} when the resolved resistance
+// faction block authors a non-empty playerClassCiv, EMPTY otherwise (the
+// cycler shows "(mission default)" and the launch publishes nothing). The
+// resistance block resolves with the registry's precedence: `resistance`
+// (side first, then class name - ZoneRegistry::FindFaction order) > the
+// zones config's defaultResistance > the built-in GUER side. WARRIOR is
+// always index 0: it is the authored mission.sqm class, so an untouched
+// cycler publishes a value indistinguishable from publishing nothing.
+std::vector<RString> GuerrillaOutfitChoices(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
+                                            RString resistance);
+
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
 // template (bankPrefix non-empty, already ending in "\\"), otherwise
@@ -135,6 +153,7 @@ class GuerrillaNewGame : public Display
     RString SelectedIsland();
     RString SelectedOccupier() const;
     RString SelectedResistance() const;
+    RString SelectedOutfit() const; // EMPTY when the descriptor offers no outfit pair
 
   protected:
     void InjectFactionCyclers();
@@ -153,6 +172,11 @@ class GuerrillaNewGame : public Display
     // the same island would discard the player's picks mid-gesture (see
     // OnLBSelChanged).
     void RefreshFactionsForIsland(RString island);
+    // Recompute _outfits for the CURRENT resistance selection (island change
+    // or resistance cycling both change which block playerClassCiv is read
+    // from), preserving the player's pick by NAME when the new roster still
+    // offers it; refreshes the label when the control exists.
+    void RefreshOutfitChoices();
 
     int _exitWhenClose;
     // OWNS the selected island's parsed description.ext: the two entry
@@ -170,6 +194,10 @@ class GuerrillaNewGame : public Display
     std::vector<RString> _resistances;
     int _occupierSel = 0;
     int _resistanceSel = 0;
+    // Character outfit family (issue #25): {"WARRIOR", "CIVILIAN"} when the
+    // selected resistance descriptor offers the pair, empty otherwise.
+    std::vector<RString> _outfits;
+    int _outfitSel = -1;
 };
 
 } // namespace Poseidon

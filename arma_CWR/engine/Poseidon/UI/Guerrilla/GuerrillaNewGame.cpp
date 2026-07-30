@@ -3,6 +3,7 @@
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // shared with ZoneRegistry::ResolveSideCollisions
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // FindGuerrillaFactionEntry (outfit cycler, issue #25)
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
@@ -24,14 +25,28 @@ namespace
 // that keeps the same layout.
 constexpr int kIdcOccupier = 150;
 constexpr int kIdcResistance = 151;
+// 152 is RESERVED for issue #16's gmSelStartTown cycler; the character
+// outfit cycler (issue #25) takes 153.
+constexpr int kIdcOutfit = 153;
 
 // Normalized-screen slots for the injected 2D cyclers — bottom-left column,
-// clear of the island-list notebook that fills the screen centre.
+// clear of the island-list notebook that fills the screen centre. The
+// outfit cycler stacks ABOVE the faction pair so the shipped 0.80/0.87
+// slots (and the e2e assertions on them) stay put.
 constexpr float kCyclerX = 0.02f;
 constexpr float kCyclerW = 0.32f;
 constexpr float kCyclerH = 0.05f;
+constexpr float kCyclerOutfitY = 0.73f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
+
+// The outfit-cycler tokens. WARRIOR must be index 0 (the default): it is
+// defined as the authored mission.sqm class, so an untouched cycler
+// publishes a value the substitution seam ignores — indistinguishable from
+// publishing nothing (the same invariant GuerrillaDefaultSelections keeps
+// for the faction pair).
+constexpr const char* kOutfitWarrior = "WARRIOR";
+constexpr const char* kOutfitCivilian = "CIVILIAN";
 
 // The one player-facing wording for an unlaunchable pair, shared by the guard
 // helper and the display so the message box and the tests cannot disagree.
@@ -243,6 +258,43 @@ bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEn
     return false;
 }
 
+std::vector<RString> GuerrillaOutfitChoices(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
+                                            RString resistance)
+{
+    std::vector<RString> out;
+    if (!factionsCfg)
+    {
+        return out;
+    }
+    // the same resistance-block precedence the substitution seam walks
+    // (OutfitSelect): selection > defaultResistance > the built-in GUER side
+    const ParamEntry* faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, resistance);
+    if (!faction && zonesCfg)
+    {
+        RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
+        faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, defResistance);
+    }
+    if (!faction)
+    {
+        faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, "GUER");
+    }
+    if (!faction)
+    {
+        return out;
+    }
+    // the pair is offered iff the descriptor authors a civilian player body;
+    // playerClassWarrior needs no probe here — WARRIOR always means "the
+    // authored mission.sqm class", key or no key
+    RString civ = faction->ReadValue("playerClassCiv", RString());
+    if (civ.GetLength() == 0)
+    {
+        return out;
+    }
+    out.push_back(RString(kOutfitWarrior));
+    out.push_back(RString(kOutfitCivilian));
+    return out;
+}
+
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)
 {
     if (bankPrefix.GetLength() > 0)
@@ -364,6 +416,7 @@ void GuerrillaNewGame::InjectFactionCyclers()
         int idc;
         float y;
     } slots[] = {
+        {"GuerrillaOutfit", kIdcOutfit, kCyclerOutfitY},
         {"GuerrillaOccupier", kIdcOccupier, kCyclerOccupierY},
         {"GuerrillaResistance", kIdcResistance, kCyclerResistanceY},
     };
@@ -472,6 +525,26 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // GetCtrl null check.
     UpdateFactionLabel(kIdcOccupier);
     UpdateFactionLabel(kIdcResistance);
+    // The outfit pair is read off the (possibly re-seeded) resistance block.
+    RefreshOutfitChoices();
+}
+
+void GuerrillaNewGame::RefreshOutfitChoices()
+{
+    // Keep the player's pick by NAME across the rebuild — same contract as
+    // the faction cyclers (an index means nothing against a new list).
+    RString keep = SelectedOutfit();
+    _outfits = GuerrillaOutfitChoices(_islandFactions, _islandZones, SelectedResistance());
+    _outfitSel = _outfits.empty() ? -1 : 0; // WARRIOR default (index 0)
+    for (int i = 0; i < (int)_outfits.size(); i++)
+    {
+        if (keep.GetLength() > 0 && stricmp(_outfits[i], keep) == 0)
+        {
+            _outfitSel = i;
+            break;
+        }
+    }
+    UpdateFactionLabel(kIdcOutfit);
 }
 
 void GuerrillaNewGame::UpdateFactionLabel(int idc)
@@ -481,16 +554,18 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     {
         return;
     }
-    const bool occupier = idc == kIdcOccupier;
-    const std::vector<RString>& list = occupier ? _occupiers : _resistances;
-    const int sel = occupier ? _occupierSel : _resistanceSel;
-    // An empty list means no CfgGuerrillaFactions was found — nothing will be
-    // published and the mission's defaultOccupier/defaultResistance keys (or
-    // the engine's EAST/GUER built-ins) decide, so say so instead of showing
-    // a side name the mission may override.
+    const char* prefix = idc == kIdcOccupier ? "OCCUPIER" : (idc == kIdcResistance ? "RESISTANCE" : "OUTFIT");
+    const std::vector<RString>& list = idc == kIdcOccupier ? _occupiers
+                                       : idc == kIdcResistance ? _resistances
+                                                               : _outfits;
+    const int sel = idc == kIdcOccupier ? _occupierSel : (idc == kIdcResistance ? _resistanceSel : _outfitSel);
+    // An empty list means no config offered a real choice — nothing will be
+    // published and the mission's own defaults decide (defaultOccupier /
+    // defaultResistance keys, or the authored mission.sqm class for the
+    // outfit), so say so instead of showing a value the mission may override.
     const char* selected = (sel >= 0 && sel < (int)list.size()) ? (const char*)list[sel] : "(mission default)";
     char buffer[256];
-    snprintf(buffer, sizeof(buffer), "%s: %s", occupier ? "OCCUPIER" : "RESISTANCE", selected);
+    snprintf(buffer, sizeof(buffer), "%s: %s", prefix, selected);
     if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
     {
         text->SetText(buffer);
@@ -516,6 +591,16 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_resistances.empty())
             {
                 _resistanceSel = (_resistanceSel + 1) % (int)_resistances.size();
+            }
+            UpdateFactionLabel(idc);
+            // The outfit pair is authored per resistance block — the new
+            // roster may or may not offer a civilian body.
+            RefreshOutfitChoices();
+            break;
+        case kIdcOutfit:
+            if (!_outfits.empty())
+            {
+                _outfitSel = (_outfitSel + 1) % (int)_outfits.size();
             }
             UpdateFactionLabel(idc);
             break;
@@ -649,6 +734,17 @@ RString GuerrillaNewGame::SelectedResistance() const
         return _resistances[_resistanceSel];
     }
     return RString(); // see SelectedOccupier
+}
+
+RString GuerrillaNewGame::SelectedOutfit() const
+{
+    if (_outfitSel >= 0 && _outfitSel < (int)_outfits.size())
+    {
+        return _outfits[_outfitSel];
+    }
+    // No descriptor offered an outfit pair — publish nothing so the authored
+    // mission.sqm class keeps deciding (see SelectedOccupier).
+    return RString();
 }
 
 void __cdecl CreateDisplayGuerrilla(ControlsContainer* parent)

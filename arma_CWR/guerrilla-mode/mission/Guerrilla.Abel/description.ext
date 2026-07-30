@@ -261,6 +261,29 @@ class CfgGuerrillaFactions
         recruitSpecialist = "SoldierGMG";
         companionClass = "SoldierGB";
 
+        // ---- character outfit family (issue #25): the CIVILIAN column of
+        // the warrior/civilian axis. SoldierGFakeC/SoldierGFakeC2 are BIS's
+        // own resistance-in-plainclothes classes (": Civilian"/": Civilian2",
+        // side=2, armed, accuracy=2, scope=1 - hidden from the editor but
+        // spawnable at runtime; verified in the 1.99 CONFIG.BIN). Honest gap:
+        // 1.99 ships no civilian-model MG/AT/medic variants, so every role
+        // wears the FakeC pair and role weapons come from loot
+        // (GM_fnEquipFromUnlocked) - which is what an outfit axis wants.
+        // playerClassWarrior documents the authored mission.sqm class; the
+        // engine seam substitutes ONLY playerClassCiv (WorldInit.cpp /
+        // Game/Guerrilla/OutfitSelect.cpp) and keeps the authored class when
+        // the choice is warrior, unset, or unresolvable.
+        playerClassWarrior = "SoldierGB";
+        playerClassCiv = "SoldierGFakeC";
+        recruitFighterCiv = "SoldierGFakeC";
+        recruitSpecialistCiv = "SoldierGFakeC2";
+        companionClassCiv = "SoldierGFakeC";
+        holdClassCiv = "SoldierGFakeC";
+        // civilian-outfit ladder for AI garrison/guard/militia rungs (native
+        // gmFactionCivTier; also issue #16's guardClass surface). Same
+        // tierThresholds[] gates as tiers[], clamped to its own length.
+        civTier[] = {"SoldierGFakeC", "SoldierGFakeC2"};
+
         baseWeapon = "AK47";
         baseMagazine = "AK47";
         lootRiflemanWeapon = "AK47";

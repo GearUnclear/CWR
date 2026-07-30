@@ -61,6 +61,7 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
@@ -544,6 +545,19 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     if (uInfo)
     {
         Glob.header.playerSide = (TargetSide)uInfo->side;
+    }
+
+    // Character-select outfit substitution (issue #25): rewrite the player's
+    // authored mission.sqm class in place BEFORE the centers create units,
+    // when the new-game UI published gmSelOutfit = "civilian" and the
+    // resistance faction descriptor authors a resolvable playerClassCiv.
+    // Runs here (not in ZoneRegistry::InitMission) because the registry
+    // loads AFTER unit creation, below - the seam does its own raw-config
+    // lookup. The side is untouched: instance side comes from the mission
+    // side field, never the class config side.
+    if (gameMode == GModeArcade)
+    {
+        Guerrilla::ApplyPlayerOutfitSelection(t);
     }
 
     if (_ui)

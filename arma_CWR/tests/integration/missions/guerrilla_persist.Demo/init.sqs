@@ -85,6 +85,20 @@ gmHeatDecay = 1
 gmUndercover = false
 
 ; ===========================================================================
+;  CHARACTER OUTFIT FAMILY (issue #25)
+; ===========================================================================
+; gmSelOutfit is published by the new-game character cycler ("WARRIOR" /
+; "CIVILIAN") and is NIL on any direct launch - the isNil gate keeps the
+; fold safe there (string == is case-insensitive). The engine has already
+; substituted the PLAYER body at load (WorldInit.cpp); this flag is what the
+; managers read to match recruits/companions/hold squads (recruit.sqs,
+; companions.sqs, capture.sqs) via the *Civ descriptor keys. Locked at
+; new-game by construction: a save resumes these scripts with the flag
+; already folded, and no writer exists after these lines.
+GM_OUTFIT_CIV = false
+? not (isNil "gmSelOutfit") : GM_OUTFIT_CIV = format ["%1", gmSelOutfit] == "CIVILIAN"
+
+; ===========================================================================
 ;  GEAR PROGRESSION  (parallel arrays; sole writer is lib's GM_fnBumpGear)
 ; ===========================================================================
 ; loot N of an item -> faction-wide unlock

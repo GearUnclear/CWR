@@ -72,6 +72,16 @@ GM_PANIC_RUN_R     = 200
 ;  CLASS TABLE + SIDE + AI CENTER
 ;  Classnames come ONLY from the CIV faction descriptor (numbered keys
 ;  civClass1..civClassN + civClassCount - gmFactionValue reads no arrays).
+;
+;  REGISTRATION REFUSAL (issue #25 M3.5, binding): disguised FIGHTERS - any
+;  body spawned through a Civ-family key (playerClassCiv / recruit*Civ /
+;  holdClassCiv / civTier[]) - must NEVER enter GM_CIV_GROUPS or this
+;  manager's rosters. The ambience machinery is independently fatal to a
+;  persistent combatant: the panic despawn deletes the group, the 1200 m
+;  distance cache despawns it when the player leaves, the eight-group cap
+;  would evict it, and the 60 s wander doMove would fight any stationed
+;  guard post. Fighters in civvies belong to their combat side's center and
+;  the capture/garrison systems, full stop.
 ;  side = "CIV" resolves via GM_fnSideFromString (the engine renders the
 ;  civilian side as "CIV"). createCenter is idempotent, as in qrf.sqs.
 ; ===========================================================================

@@ -1,0 +1,14 @@
+# Character-select CIVILIAN outfit, end to end (issue #25). No mission= -
+# boots to the main menu and drives GUERRILLA -> Abel -> outfit CIVILIAN ->
+# launch, then asserts the player/recruit body substitution in-mission.
+#
+# PRECONDITION: guerrilla-mode/install-missions.ps1 has been run - the launch
+# path resolves "missions\Guerrilla.Abel" relative to the game data dir. Full
+# CWA 1.99 data only (SoldierGFakeC is Classic-only; the Demo [Remaster]
+# package is not a target per the 2026-07-14 asset policy).
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+# menu flow + Abel world load
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict"]

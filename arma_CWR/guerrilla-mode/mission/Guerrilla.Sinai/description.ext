@@ -218,6 +218,25 @@ class CfgGuerrillaFactions
         recruitSpecialist = "LoBo_Egypt_FrtCrpMG";
         companionClass = "LoBo_Egypt_FrtCrp";
 
+        // ---- character outfit family (issue #25): the LoBoTer Terror
+        // irregulars - PLO-style fighters in civilian dress. The *E twins
+        // (side=0) match this faction's EAST side, so a kill on one books as
+        // an EAST kill in the engine's stat line (AICenterStats reads the
+        // config class side), and the mod's own R/E/W twin mechanism is used
+        // as designed. NOT the *HD variants (hidden high-dispersion) and NOT
+        // LoBo_Civ_* (truly unarmed; ambience-only). Verified in
+        // tmp/class-survey/lobo-cfg/LoBoTer.cpp. Terror classes carry
+        // Init/fired EventHandlers exec'ing \LoBoTer\scripts\* - covered by
+        // the lobo-lane spawn smoke test (issue #25 M2.4).
+        playerClassWarrior = "LoBo_Egypt_FrtCrp";
+        playerClassCiv = "LoBo_Terror_01E";
+        recruitFighterCiv = "LoBo_Terror_02E";
+        recruitSpecialistCiv = "LoBo_Terror_MG2E";
+        companionClassCiv = "LoBo_Terror_01E";
+        holdClassCiv = "LoBo_Terror_02E";
+        // single-rung civilian-outfit ladder (tiers[] is single-rung too)
+        civTier[] = {"LoBo_Terror_01E"};
+
         // Frontier Corps kit (verified from LoBoEgypt config: LoBoAK47 rifle
         // firing JAM 7.62x39 mags; RPD MG; RPG-7; SVD for the marksman role).
         baseWeapon = "LoBoAK47";

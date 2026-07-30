@@ -44,6 +44,14 @@ GM_RECRUIT_SKILL   = 0.35
 GM_SPEC_SKILL      = 0.6
 GM_RECRUIT_FIGHTER = gmFactionValue [gmResistanceSide, "recruitFighter"]
 GM_RECRUIT_SPEC    = gmFactionValue [gmResistanceSide, "recruitSpecialist"]
+; civilian outfit family (issue #25): recruits auto-match the player's outfit
+; when the campaign started CIVILIAN and the descriptor authors a resolvable
+; *Civ class (gmClassExists = the engine's own package probe); the CLASS is
+; the body, role weapons still come from unlocked loot below
+GM_RECRUIT_CIVF = gmFactionValue [gmResistanceSide, "recruitFighterCiv"]
+? GM_OUTFIT_CIV and (GM_RECRUIT_CIVF != "") and (gmClassExists GM_RECRUIT_CIVF) : GM_RECRUIT_FIGHTER = GM_RECRUIT_CIVF
+GM_RECRUIT_CIVS = gmFactionValue [gmResistanceSide, "recruitSpecialistCiv"]
+? GM_OUTFIT_CIV and (GM_RECRUIT_CIVS != "") and (gmClassExists GM_RECRUIT_CIVS) : GM_RECRUIT_SPEC = GM_RECRUIT_CIVS
 
 ; ---- mutable state -------------------------------------------------------------
 ;   gmRecruitActive  is the addAction menu currently mounted?

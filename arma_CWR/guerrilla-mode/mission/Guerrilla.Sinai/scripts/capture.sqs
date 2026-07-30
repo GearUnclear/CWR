@@ -36,6 +36,14 @@
 ; ---- tunables: hold-garrison class+size come from the resistance descriptor -
 GM_HOLD_CLASS = gmFactionValue [gmResistanceSide, "holdClass"]
 GM_HOLD_COUNT = [gmResistanceSide, "holdCount", 3] call GM_fnFactionNum
+; civilian outfit family (issue #25): a resolvable holdClassCiv under the
+; CIVILIAN outfit makes hold squads a civilian-body monoculture, BYPASSING
+; the role-mixed gmFactionSquad path below (no tiersCiv[] role arrays exist;
+; irregulars in civvies fielding a uniform-role squad is the stated
+; trade-off). GM_HOLD_CIV == "" means the warrior path is unchanged.
+GM_HOLD_CIV = ""
+GM_cCivHold = gmFactionValue [gmResistanceSide, "holdClassCiv"]
+? GM_OUTFIT_CIV and (GM_cCivHold != "") and (gmClassExists GM_cCivHold) : GM_HOLD_CIV = GM_cCivHold
 GM_CAP_TICK   = 2
 ; in-field progress ticker: radius = the engine default zoneArea; ~12 s pace
 GM_TT_RANGE   = 150
@@ -101,6 +109,10 @@ GM_cRec = gmZone GM_cIdx
 ; role arrays (native gmFactionSquad, plan 15); a tier-less descriptor keeps
 ; the classic holdClass x holdCount monoculture.
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : goto "cnotify"
+; civilian outfit: monoculture through the tier-less path, skipping the
+; role-mixed native composer (see the GM_HOLD_CIV tunable note above)
+? GM_HOLD_CIV != "" : GM_cGrp = [side aP, GM_HOLD_CIV, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+? GM_HOLD_CIV != "" : goto "cnotify"
 GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
 ? (count GM_cSquad) > 0 : GM_cGrp = [side aP, GM_cSquad, GM_cRec select GM_Z_POS] call GM_fnSpawnSquad
 ? ((count GM_cSquad) == 0) and (GM_HOLD_CLASS != "") : GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup

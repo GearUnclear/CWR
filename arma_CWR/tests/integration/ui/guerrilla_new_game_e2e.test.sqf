@@ -44,6 +44,15 @@ triClick 150
 triAssertEq [(triControlText 150), "OCCUPIER: IDF"]
 triAssertEq [(triControlText 151), "RESISTANCE: EgyptFrontier"]
 
+// -- outfit cycler (issue #25, idc 153): EgyptFrontier authors playerClassCiv,
+//    so the pair is offered; WARRIOR default, wraps over two entries, and is
+//    left on WARRIOR so the launch below behaves exactly like before ---------
+triAssertEq [(triControlText 153), "OUTFIT: WARRIOR"]
+triClick 153
+triAssertEq [(triControlText 153), "OUTFIT: CIVILIAN"]
+triClick 153
+triAssertEq [(triControlText 153), "OUTFIT: WARRIOR"]
+
 // -- OK launches the installed Guerrilla.Sinai template ----------------------
 triClick 1
 triSimUntil { alive player }
@@ -52,6 +61,10 @@ triSimUntil { alive player }
 triAssertEq [gmSelIsland, "sinai"]
 triAssertEq [gmSelOccupier, "IDF"]
 triAssertEq [gmSelResistance, "EgyptFrontier"]
+// WARRIOR is published (a real choice was offered) and acts as a no-op:
+// the player keeps the authored mission.sqm class
+triAssertEq [gmSelOutfit, "WARRIOR"]
+triAssertEq [(typeOf player), "LoBo_Egypt_FrtCrp"]
 
 // -- and the native registry resolved them to the flipped sides -------------
 triAssertEq [(gmOccupierSide), "WEST"]

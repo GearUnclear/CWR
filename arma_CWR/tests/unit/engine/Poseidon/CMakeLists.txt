@@ -371,6 +371,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_stash_registry.cpp
     Game/Guerrilla/test_mission_script_core.cpp
     Game/Guerrilla/test_mission_world_names.cpp
+    Game/Guerrilla/test_outfit_select.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp
