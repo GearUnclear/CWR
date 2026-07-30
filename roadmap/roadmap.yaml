@@ -764,6 +764,35 @@ items:
       - "2026-07-15: local-only data-dir file (the whole [Classic] dir is gitignored as proprietary game data, same as the pre-existing bin/remaster.cpp shim) - no git commit; verified live via direct PoseidonGame.exe launch + window screenshots (run-game.ps1 itself still hits the known PS 5.1 bracket-path Start-Process bug, tracked separately)."
       - "First boot attempt looked like it dropped straight into live combat instead of the menu; turned out to be the background world's persistent AI simulation (TownFlags/AlertMachine) rendering behind the translucent button panel after a long screenshot delay, not an actual bug - reproduced clean at 5s and 18s post-launch."
 
+  - id: reference-missions-main-menu
+    title: "Main menu: direct-launch buttons for the playable reference missions (Showcase, Undercover)"
+    phase: phase-1.5
+    status: done
+    priority: 2
+    depends_on: [guerrilla-menu-centerpiece, showcase-mission, deep-undercover-system]
+    commits: [6adcf63]
+    summary: >
+      The two human-playable test slices - Showcase.Abel (the issue #9
+      systems tour) and Undercover.Abel (the deep-undercover sandbox) - are
+      now launchable straight from the main menu instead of only via
+      run-game.ps1 -Mission. A kReferenceMissions table in UI/OptionsUIApp.cpp
+      defines idc 123/124; DisplayMain hides a resource-provided button when
+      its mission is not installed, injects a clone-the-Quit-class button
+      (the MODS/GUERRILLA mechanism) when the menu resource ships none, and
+      dispatches the click as a direct single-mission launch (the
+      IDD_GUERRILLA_NEW_GAME sequence minus the selection display and the
+      gmSel* publishing - the missions' description.ext defaults apply, which
+      is why they state defaultOccupier/defaultResistance explicitly).
+      install-missions.ps1 now installs Undercover.* alongside
+      Guerrilla.*/Showcase.*; the Classic package's local bin/
+      resource-extra.cpp gained the two hand-placed buttons under the
+      GUERRILLA WARFIGHTER banner. Two e2e tests
+      (ui/main_menu/reference_mission_{showcase,undercover}) drive the real
+      click path from the booted menu.
+    log:
+      - "2026-07-30: launch chain proven live by tri probes: click idc 124 -> IDD_MISSION (46), alive player, UC_BOOTED, gmZoneIndex Houdan >= 0. First e2e attempts were an environment goose chase: concurrent Claude sessions kill every PoseidonGame process as test cleanup (bare menu canary died at 25s; exit code -1, empty stderr, no WER = external TerminateProcess), and their parallel game instances slow world loads past the 240s timeout."
+      - "2026-07-30: both e2e tests green 2/2 after appending triEndTest (menu-launch tests idle in-mission after the last assert; without the shutdown verb the runner waits out the full timeout and reports 'game didn't exit cleanly'). On a quiet machine with hot caches the whole menu boot -> click -> mission-init chain completes in ~1 s (mission init.sqs and ZoneRegistry run during the load, before the first rendered frame), so sub-second green runs are genuine, not false passes - verified against the runner's RUST_LOG=debug eval trace."
+
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
     phase: phase-2
