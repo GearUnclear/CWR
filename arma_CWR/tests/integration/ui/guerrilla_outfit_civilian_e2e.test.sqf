@@ -45,8 +45,14 @@ triAssertEq [(triControlText 151), "RESISTANCE: GUER"]
 
 // -- outfit cycler: WARRIOR default (the no-op), one click = CIVILIAN --------
 triAssertEq [(triControlText 153), "OUTFIT: WARRIOR"]
+// preview mannequin (idc 154, issue #25 M4): SoldierGB's model resolves on
+// Classic 1.99, so the injected CT_OBJECT must be visible. Visibility IS the
+// assertion - a missing class/model hides the control instead of crashing.
+triAssertEq [(triGetControlVisible 154), "1"]
 triClick 153
 triAssertEq [(triControlText 153), "OUTFIT: CIVILIAN"]
+// still visible after the body swap to playerClassCiv=SoldierGFakeC
+triAssertEq [(triGetControlVisible 154), "1"]
 
 // -- launch ------------------------------------------------------------------
 triClick 1

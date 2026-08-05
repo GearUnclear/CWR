@@ -130,8 +130,7 @@ TEST_CASE("GuerrillaOutfitChoices: offered only when the resistance block author
     REQUIRE(Poseidon::GuerrillaOutfitChoices(nullptr, z, RString("FIA")).empty());
 }
 
-TEST_CASE("GuerrillaOutfitChoices: without zones config the built-in GUER side resolves",
-          "[UI][Guerrilla][outfit]")
+TEST_CASE("GuerrillaOutfitChoices: without zones config the built-in GUER side resolves", "[UI][Guerrilla][outfit]")
 {
     ParamFile cfg;
     ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
@@ -140,6 +139,111 @@ TEST_CASE("GuerrillaOutfitChoices: without zones config the built-in GUER side r
     fia->Add("playerClassCiv", "SoldierGFakeC");
 
     REQUIRE(Poseidon::GuerrillaOutfitChoices(cfg.FindEntry("CfgGuerrillaFactions"), nullptr, RString()).size() == 2);
+}
+
+// ---------------------------------------------------------------------------
+// Outfit preview resolution (issue #25 M4) — which body the mannequin shows,
+// and the plan-15 shaped hide-instead-of-substitute gates.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+std::string PreviewStr(const RString& s)
+{
+    return std::string((const char*)s);
+}
+} // namespace
+
+TEST_CASE("GuerrillaOutfitPreviewClass: the outfit token picks the descriptor body key", "[UI][Guerrilla][outfit]")
+{
+    ParamFile cfg;
+    ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
+    ParamClass* us = factions->AddClass("US");
+    us->Add("side", "WEST"); // authors neither body key
+    ParamClass* fia = factions->AddClass("FIA");
+    fia->Add("side", "GUER");
+    fia->Add("playerClassWarrior", "SoldierGB");
+    fia->Add("playerClassCiv", "SoldierGFakeC");
+    ParamClass* zones = cfg.AddClass("CfgGuerrillaZones");
+    zones->Add("defaultResistance", "FIA");
+    const ParamEntry* f = cfg.FindEntry("CfgGuerrillaFactions");
+    const ParamEntry* z = cfg.FindEntry("CfgGuerrillaZones");
+
+    using Poseidon::GuerrillaOutfitPreviewClass;
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString("FIA"), RString("WARRIOR"))) == "SoldierGB");
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString("FIA"), RString("CIVILIAN"))) == "SoldierGFakeC");
+    // tokens compare case-insensitively, like the substitution seam's read
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString("FIA"), RString("civilian"))) == "SoldierGFakeC");
+    // an EMPTY outfit previews the warrior body: "no pair offered" still has
+    // an authored warrior class to show
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString("FIA"), RString())) == "SoldierGB");
+    // an unknown token shows nothing rather than guessing
+    REQUIRE(GuerrillaOutfitPreviewClass(f, z, RString("FIA"), RString("PILOT")).GetLength() == 0);
+    // a side string resolves the same block; an empty resistance takes the
+    // defaultResistance rung — the registry's precedence, like the seam
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString("GUER"), RString("WARRIOR"))) == "SoldierGB");
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewClass(f, z, RString(), RString("WARRIOR"))) == "SoldierGB");
+    // a resolved block without the requested key hides the preview
+    REQUIRE(GuerrillaOutfitPreviewClass(f, z, RString("US"), RString("WARRIOR")).GetLength() == 0);
+    // no factions config at all
+    REQUIRE(GuerrillaOutfitPreviewClass(nullptr, z, RString("FIA"), RString("WARRIOR")).GetLength() == 0);
+}
+
+TEST_CASE("GuerrillaOutfitPreviewClass: without zones config the built-in GUER side resolves",
+          "[UI][Guerrilla][outfit]")
+{
+    ParamFile cfg;
+    ParamClass* factions = cfg.AddClass("CfgGuerrillaFactions");
+    ParamClass* fia = factions->AddClass("FIA");
+    fia->Add("side", "GUER");
+    fia->Add("playerClassWarrior", "SoldierGB");
+
+    REQUIRE(PreviewStr(Poseidon::GuerrillaOutfitPreviewClass(cfg.FindEntry("CfgGuerrillaFactions"), nullptr, RString(),
+                                                             RString("WARRIOR"))) == "SoldierGB");
+}
+
+TEST_CASE("GuerrillaOutfitPreviewModel: probes the class, its model and the shape file", "[UI][Guerrilla][outfit]")
+{
+    ParamFile cfg;
+    ParamClass* vehicles = cfg.AddClass("CfgVehicles");
+    ParamClass* base = vehicles->AddClass("Soldier");
+    base->Add("model", "MC vojakG2");
+    ParamClass* derived = vehicles->AddClass("SoldierGB"); // inherits the model
+    derived->SetBase(base->GetClassInterface());
+    ParamClass* lobo = vehicles->AddClass("LoBo_Terror_01E");
+    lobo->Add("model", "\\LoBo\\LoBo_Men\\terror1");
+    ParamClass* shapeless = vehicles->AddClass("Ghost");
+    shapeless->Add("model", ""); // broken config: an empty model
+    const ParamEntry* v = cfg.FindEntry("CfgVehicles");
+
+    using Poseidon::GuerrillaOutfitPreviewModel;
+    std::vector<std::string> probed;
+    auto exists = [&](RString p)
+    {
+        probed.push_back(std::string((const char*)p));
+        return true;
+    };
+
+    // The RAW model value comes back (it feeds the control's `model` config
+    // key, whose constructor runs the full FindShape chain); the probe sees
+    // the GetShapeName normalization — data3d\ prefix, .p3d, lowercased —
+    // the same bank rung FindShape ends on.
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewModel(v, RString("Soldier"), exists)) == "MC vojakG2");
+    REQUIRE(probed.back() == "data3d\\mc vojakg2.p3d");
+    // inherited `model` keys resolve (ParamClass::FindEntry follows bases)
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewModel(v, RString("SoldierGB"), exists)) == "MC vojakG2");
+    // a fully-qualified addon path keeps its own directory, extension added
+    REQUIRE(PreviewStr(GuerrillaOutfitPreviewModel(v, RString("LoBo_Terror_01E"), exists)) ==
+            "\\LoBo\\LoBo_Men\\terror1");
+    REQUIRE(probed.back() == "lobo\\lobo_men\\terror1.p3d");
+
+    // every failed gate yields EMPTY: hide the preview, never substitute
+    auto missing = [](RString) { return false; };
+    REQUIRE(GuerrillaOutfitPreviewModel(v, RString("Soldier"), missing).GetLength() == 0); // shape not in package
+    REQUIRE(GuerrillaOutfitPreviewModel(v, RString("NoSuchClass"), exists).GetLength() == 0);
+    REQUIRE(GuerrillaOutfitPreviewModel(v, RString("Ghost"), exists).GetLength() == 0);
+    REQUIRE(GuerrillaOutfitPreviewModel(nullptr, RString("Soldier"), exists).GetLength() == 0);
+    REQUIRE(GuerrillaOutfitPreviewModel(v, RString(), exists).GetLength() == 0);
 }
 
 // ---------------------------------------------------------------------------

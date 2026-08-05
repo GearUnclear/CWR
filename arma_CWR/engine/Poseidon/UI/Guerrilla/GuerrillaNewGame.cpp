@@ -8,15 +8,26 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
-#include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // Shapes bank (preview mannequin)
+#include <Poseidon/Foundation/Math/MathDefs.hpp>       // H_PI (preview turntable)
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
+#include <math.h> // fmodf/fabsf (preview turntable + fit)
 #include <stdio.h>
+
+// 3D-UI camera-space depth scale, defined in UIControlsBase.cpp next to
+// ControlObject (whose constructor multiplies the config z by it).
+extern const float CameraZoom;
 
 namespace Poseidon
 {
+// The shape-path resolver ControlObject's constructor runs on its `model`
+// config value (OptionsUI.cpp) - declared the way UIControlsBase.cpp does.
+RString FindShape(RString name);
+
 namespace
 {
 // Injected occupier/resistance cycler buttons. Safely clear of the idcs the
@@ -28,6 +39,12 @@ constexpr int kIdcResistance = 151;
 // 152 is RESERVED for issue #16's gmSelStartTown cycler; the character
 // outfit cycler (issue #25) takes 153.
 constexpr int kIdcOutfit = 153;
+// 154 is the outfit-preview mannequin (issue #25 M4): a CT_OBJECT rendering
+// the resolved playerClassWarrior/playerClassCiv body for the current
+// island/resistance/outfit, the CHead rotating-preview technique from the
+// player identity screen. Injected only once a model actually resolves;
+// hidden (never a substitute body) whenever one does not.
+constexpr int kIdcOutfitPreview = 154;
 
 // Normalized-screen slots for the injected 2D cyclers — bottom-left column,
 // clear of the island-list notebook that fills the screen centre. The
@@ -39,6 +56,21 @@ constexpr float kCyclerH = 0.05f;
 constexpr float kCyclerOutfitY = 0.73f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
+
+// The preview mannequin's slot: the free stretch of the bottom-left column
+// above the outfit cycler. Authored as a normalized-screen box like the 2D
+// cyclers; the 3D placement is derived from it at runtime (Convert2DTo3D)
+// so it tracks the engine's aspect settings.
+constexpr float kPreviewCX = 0.18f;      // column centre (the cyclers' midline)
+constexpr float kPreviewTopY = 0.26f;    // below the screen-top header strip
+constexpr float kPreviewBottomY = 0.68f; // above the outfit cycler at 0.73
+// Camera-space depth in the units ControlObject's constructor reads (it
+// multiplies by CameraZoom): inside the 3D-UI ray range (ControlObject::
+// IsInside probes out to 2.0 * CameraZoom).
+constexpr float kPreviewDepthCfg = 1.0f;
+// Seconds per full turntable revolution. CHead spins a head in 4; a full
+// body reads better a touch slower.
+constexpr float kPreviewTurnPeriod = 8.0f;
 
 // The outfit-cycler tokens. WARRIOR must be index 0 (the default): it is
 // defined as the authored mission.sqm class, so an untouched cycler
@@ -58,6 +90,88 @@ RString SameSideMessage(RString side)
              (const char*)side);
     return RString(buffer);
 }
+
+// The turntable mannequin (issue #25 M4): a ControlObject whose shape can be
+// re-pointed at a different body model as the cyclers change (the CHead
+// shape-swap precedent, DisplayUIMenus.cpp), refitted to a fixed 2D slot
+// from its bounding box, and yaw-rotated from the display's OnSimulate.
+// Renders whatever pose the p3d authors (base pose) - no UI control animates
+// a Man skeleton, and that is accepted for this milestone.
+class GuerrillaOutfitPreview : public ControlObject
+{
+  public:
+    GuerrillaOutfitPreview(ControlsContainer* parent, int idc, const ParamEntry& cls) : ControlObject(parent, idc, cls)
+    {
+    }
+
+    // Swap to a different body model (raw CfgVehicles `model` value, the
+    // same string the injected config carried). No-op when unchanged; the
+    // caller re-fits via PlaceInSlot either way.
+    void SetModel(RString modelName)
+    {
+        if (stricmp(modelName, _modelName) == 0)
+        {
+            return;
+        }
+        _modelName = modelName;
+        Ref<LODShapeWithShadow> shape = Shapes.New(FindShape(modelName), false, false);
+        if (shape && shape->NLevels() > 0)
+        {
+            // the same UI-space treatment ControlObject's constructor applies
+            shape->LevelOpaque(0)->MakeCockpit();
+            shape->OrSpecial(BestMipmap | NoDropdown | DisableSun);
+        }
+        SetShape(shape);
+    }
+
+    // Fit the current shape into the 2D slot: bounding-box centre on the
+    // slot centre, model height scaled to the slot height. Per-shape, so a
+    // LoBo body and a vanilla body render the same on-screen size no matter
+    // where each p3d puts its origin (feet, waist, ...).
+    void PlaceInSlot()
+    {
+        LODShapeWithShadow* shape = GetShape();
+        if (!shape)
+        {
+            return;
+        }
+        const float depth = kPreviewDepthCfg * CameraZoom;
+        Vector3 top = Convert2DTo3D(Point2DFloat(kPreviewCX, kPreviewTopY), depth);
+        Vector3 bottom = Convert2DTo3D(Point2DFloat(kPreviewCX, kPreviewBottomY), depth);
+        float slotHeight = fabsf(top[1] - bottom[1]);
+        float modelHeight = shape->Max()[1] - shape->Min()[1];
+        _fitScale = modelHeight > 0.01f ? slotHeight / modelHeight : 1.0f;
+        Vector3 pos = (top + bottom) * 0.5f;
+        pos[1] -= 0.5f * (shape->Min()[1] + shape->Max()[1]) * _fitScale;
+        _position = pos;
+        SetPosition(pos);
+        SetScale(_fitScale);
+    }
+
+    // CHead::Simulate's turntable at full-body cadence. SetOrientation
+    // resets the scale part of the transform, so reapply the fit, exactly
+    // like CHead reapplies Scale().
+    void SimulateTurntable()
+    {
+        float t = fmodf(Glob.uiTime.toFloat(), kPreviewTurnPeriod);
+        Matrix3 orient(MRotationY, (H_PI * 2.0f / kPreviewTurnPeriod) * t);
+        SetOrientation(orient);
+        SetScale(_fitScale);
+    }
+
+    void OnDraw(float alpha) override
+    {
+        if (!GetShape())
+        {
+            return; // a body that failed to load draws nothing, never crashes
+        }
+        ControlObject::OnDraw(alpha);
+    }
+
+  private:
+    RString _modelName;
+    float _fitScale = 1.0f;
+};
 } // namespace
 
 std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std::function<bool(RString)>& worldExists)
@@ -295,6 +409,67 @@ std::vector<RString> GuerrillaOutfitChoices(const ParamEntry* factionsCfg, const
     return out;
 }
 
+RString GuerrillaOutfitPreviewClass(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg, RString resistance,
+                                    RString outfit)
+{
+    // the same resistance-block precedence GuerrillaOutfitChoices (and the
+    // OutfitSelect substitution seam) walks: selection > defaultResistance >
+    // the built-in GUER side
+    const ParamEntry* faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, resistance);
+    if (!faction && zonesCfg)
+    {
+        RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
+        faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, defResistance);
+    }
+    if (!faction)
+    {
+        faction = Guerrilla::FindGuerrillaFactionEntry(factionsCfg, "GUER");
+    }
+    if (!faction)
+    {
+        return RString();
+    }
+    if (outfit.GetLength() > 0 && stricmp(outfit, kOutfitCivilian) == 0)
+    {
+        return faction->ReadValue("playerClassCiv", RString());
+    }
+    // WARRIOR and "no pair offered" both preview the warrior body: every
+    // shipped template's playerClassWarrior documents the authored
+    // mission.sqm class, and a descriptor without the key just hides the
+    // preview (EMPTY here).
+    if (outfit.GetLength() == 0 || stricmp(outfit, kOutfitWarrior) == 0)
+    {
+        return faction->ReadValue("playerClassWarrior", RString());
+    }
+    return RString(); // unknown token: show nothing rather than guess
+}
+
+RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString className,
+                                    const std::function<bool(RString)>& shapeFileExists)
+{
+    if (!vehiclesCfg || className.GetLength() == 0)
+    {
+        return RString();
+    }
+    const ParamEntry* cls = vehiclesCfg->FindEntry(className);
+    if (!cls || !cls->IsClass())
+    {
+        return RString(); // class not in the loaded package: hide
+    }
+    // inherited `model` keys resolve too, ParamClass::FindEntry follows the
+    // base chain
+    RString model = cls->ReadValue("model", RString());
+    if (model.GetLength() == 0)
+    {
+        return RString();
+    }
+    if (!shapeFileExists || !shapeFileExists(GetShapeName(model)))
+    {
+        return RString(); // shape file missing: hide, never substitute
+    }
+    return model;
+}
+
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)
 {
     if (bankPrefix.GetLength() > 0)
@@ -393,6 +568,30 @@ Control* GuerrillaNewGame::OnCreateCtrl(int type, int idc, const ParamEntry& cls
     return Display::OnCreateCtrl(type, idc, cls);
 }
 
+ControlObject* GuerrillaNewGame::OnCreateObject(int type, int idc, const ParamEntry& cls)
+{
+    if (idc == kIdcOutfitPreview)
+    {
+        // the DisplayNewUser::OnCreateObject -> CHead hook, for the mannequin
+        return new GuerrillaOutfitPreview(this, idc, cls);
+    }
+    return Display::OnCreateObject(type, idc, cls);
+}
+
+void GuerrillaNewGame::OnSimulate(EntityAI* vehicle)
+{
+    // Turntable for the mannequin: the DisplayNewUser::OnSimulate ->
+    // CHead::Simulate pattern (UI displays get no other per-frame tick).
+    if (auto* preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview)))
+    {
+        if (preview->IsVisible())
+        {
+            preview->SimulateTurntable();
+        }
+    }
+    Display::OnSimulate(vehicle);
+}
+
 void GuerrillaNewGame::InjectFactionCyclers()
 {
     // Clone the main menu's Quit button class so the cyclers pick up the
@@ -434,6 +633,73 @@ void GuerrillaNewGame::InjectFactionCyclers()
         }
         UpdateFactionLabel(slot.idc);
     }
+
+    // The cyclers exist now, so the preview gate is open; show the body the
+    // opening selections resolve to.
+    UpdateOutfitPreview();
+}
+
+void GuerrillaNewGame::UpdateOutfitPreview()
+{
+    // Gate on the styled outfit cycler being present: with no menu resources
+    // (headless runs) this display owns no controls and must keep owning
+    // none, and a mannequin without its cycler label would be unreadable.
+    if (!GetCtrl(kIdcOutfit))
+    {
+        return;
+    }
+    RString previewClass =
+        GuerrillaOutfitPreviewClass(_islandFactions, _islandZones, SelectedResistance(), SelectedOutfit());
+    RString model = GuerrillaOutfitPreviewModel(Pars.FindEntry("CfgVehicles"), previewClass,
+                                                [](RString path) { return QIFStreamB::FileExist(path); });
+    GuerrillaOutfitPreview* preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview));
+    if (model.GetLength() == 0)
+    {
+        // plan-15 shaped degrade: no descriptor key, unknown class or a
+        // missing shape file just hides the preview.
+        if (preview)
+        {
+            preview->ShowCtrl(false);
+        }
+        return;
+    }
+    if (!preview)
+    {
+        // First model that resolved: inject the CT_OBJECT now. Function-
+        // static lifetime for the same reason as s_guerrillaCyclerCfg: the
+        // control back-references its ParamClass for the display's lifetime.
+        static ParamFile s_guerrillaPreviewCfg;
+        s_guerrillaPreviewCfg.Clear();
+        ParamClass* cls = s_guerrillaPreviewCfg.AddClass("GuerrillaOutfitPreview");
+        cls->Add("type", CT_OBJECT);
+        cls->Add("idc", kIdcOutfitPreview);
+        cls->Add("model", model);
+        ParamEntry* position = cls->AddArray("position");
+        position->AddValue(0.0f);
+        position->AddValue(0.0f);
+        position->AddValue(kPreviewDepthCfg); // PlaceInSlot refines below
+        ParamEntry* direction = cls->AddArray("direction");
+        direction->AddValue(0.0f);
+        direction->AddValue(0.0f);
+        direction->AddValue(1.0f);
+        ParamEntry* up = cls->AddArray("up");
+        up->AddValue(0.0f);
+        up->AddValue(1.0f);
+        up->AddValue(0.0f);
+        cls->Add("scale", 1.0f);
+        LoadObject(*cls);
+        preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview));
+        if (!preview)
+        {
+            return;
+        }
+    }
+    // On the injection pass the constructor already loaded this model and
+    // SetModel just records the name (the shape bank caches the reload); on
+    // later passes it swaps the shape when the body actually changed.
+    preview->SetModel(model);
+    preview->PlaceInSlot();
+    preview->ShowCtrl(true);
 }
 
 void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
@@ -545,6 +811,9 @@ void GuerrillaNewGame::RefreshOutfitChoices()
         }
     }
     UpdateFactionLabel(kIdcOutfit);
+    // Island changes and resistance cycling both land here, so this one call
+    // keeps the mannequin tracking every path that can change the body.
+    UpdateOutfitPreview();
 }
 
 void GuerrillaNewGame::UpdateFactionLabel(int idc)
@@ -555,7 +824,7 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
         return;
     }
     const char* prefix = idc == kIdcOccupier ? "OCCUPIER" : (idc == kIdcResistance ? "RESISTANCE" : "OUTFIT");
-    const std::vector<RString>& list = idc == kIdcOccupier ? _occupiers
+    const std::vector<RString>& list = idc == kIdcOccupier     ? _occupiers
                                        : idc == kIdcResistance ? _resistances
                                                                : _outfits;
     const int sel = idc == kIdcOccupier ? _occupierSel : (idc == kIdcResistance ? _resistanceSel : _outfitSel);
@@ -603,6 +872,7 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
                 _outfitSel = (_outfitSel + 1) % (int)_outfits.size();
             }
             UpdateFactionLabel(idc);
+            UpdateOutfitPreview();
             break;
         case IDC_CANCEL:
         {

@@ -121,6 +121,27 @@ bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEn
 std::vector<RString> GuerrillaOutfitChoices(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
                                             RString resistance);
 
+// The CfgVehicles class the character-preview mannequin (issue #25 M4)
+// renders for the CURRENT resistance + outfit selection: playerClassCiv for
+// "CIVILIAN", playerClassWarrior for "WARRIOR" or for an EMPTY outfit (the
+// cycler may offer no pair while the descriptor still authors the warrior
+// body, which documents the authored mission.sqm class in every shipped
+// template). EMPTY when no faction block resolves, the block lacks the key,
+// or the token is unknown. The resistance block resolves with the registry's
+// precedence, exactly like GuerrillaOutfitChoices.
+RString GuerrillaOutfitPreviewClass(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg, RString resistance,
+                                    RString outfit);
+
+// Resolve that class to the raw CfgVehicles `model` value, gated plan-15
+// style: EMPTY (the preview hides, never a substitute body) when the class
+// is not in the loaded data package, authors no model (inherited `model`
+// keys resolve, ParamClass::FindEntry follows the base chain), or the shape
+// file the model resolves to (GetShapeName) fails the injected existence
+// probe. The probe is injected (QIFStreamB::FileExist in the display) so the
+// resolution logic is unit-testable, the GuerrillaTemplateExists pattern.
+RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString className,
+                                    const std::function<bool(RString)>& shapeFileExists);
+
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
 // template (bankPrefix non-empty, already ending in "\\"), otherwise
@@ -136,6 +157,13 @@ class GuerrillaNewGame : public Display
     GuerrillaNewGame(ControlsContainer* parent);
 
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override;
+    // Creates the outfit-preview mannequin (idc 154) as a GuerrillaOutfitPreview
+    // (a ControlObject subclass, file-local in the .cpp) - the same hook
+    // DisplayNewUser uses to substitute CHead for its head object.
+    ControlObject* OnCreateObject(int type, int idc, const ParamEntry& cls) override;
+    // Turntable rotation for the preview mannequin, the
+    // DisplayNewUser::OnSimulate -> CHead::Simulate pattern.
+    void OnSimulate(EntityAI* vehicle) override;
     void OnButtonClicked(int idc) override;
     void OnLBDblClick(int idc, int curSel) override;
     void OnLBSelChanged(int idc, int curSel) override;
@@ -177,6 +205,14 @@ class GuerrillaNewGame : public Display
     // from), preserving the player's pick by NAME when the new roster still
     // offers it; refreshes the label when the control exists.
     void RefreshOutfitChoices();
+    // Re-resolve the preview mannequin's body for the CURRENT island/
+    // resistance/outfit selection: inject the CT_OBJECT on the first model
+    // that resolves, swap its shape on later changes, and hide it whenever
+    // the descriptor offers no class or the class/model is missing from the
+    // loaded package (plan-15 shaped: degrade, never crash, never a
+    // substitute body). Gated on the styled cyclers existing, so headless
+    // no-resource runs keep owning no controls.
+    void UpdateOutfitPreview();
 
     int _exitWhenClose;
     // OWNS the selected island's parsed description.ext: the two entry
