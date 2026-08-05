@@ -297,6 +297,11 @@ h2 { font-size:1.05rem; color:#e6ead9; margin:34px 0 10px; text-transform:upperc
 .badge.st-blocked { background:#4a221e; color:#e0968e; }
 .meta { font-size:.83rem; color:#8d978b; margin-top:6px; }
 .meta b { color:#aeb8ac; font-weight:600; }
+a.ghlink { font-family:Consolas,ui-monospace,monospace; text-decoration:none;
+           border-bottom:1px dotted currentColor; }
+a.ghlink.open { color:#8fb996; }
+a.ghlink.closed { color:#6f7a70; }
+.ghtag { font-size:.8rem; color:#8d978b; }
 .item p.desc { margin-top:8px; color:#b9c1b6; }
 .item ul.log { margin:8px 0 0 18px; font-size:.88rem; color:#a3ac9f; }
 .next { border:1px solid #3d5238; background:#151d14; border-radius:4px; padding:12px 16px;
@@ -329,9 +334,20 @@ def issue_link(n, issues_by_no):
     iss = issues_by_no.get(int(n))
     if iss:
         cls = "closed" if iss["state"] == "CLOSED" else "open"
-        return (f'<a class="{cls}" href="{esc(iss["url"])}" title="{esc(iss["title"])}">'
+        return (f'<a class="ghlink {cls}" href="{esc(iss["url"])}" title="{esc(iss["title"])}">'
                 f'#{n}</a>' + (" (closed)" if iss["state"] == "CLOSED" else ""))
     return f"#{n}"
+
+
+def issue_links(numbers, issues_by_no):
+    """Every issue an item owns, rendered in ascending issue order.
+
+    Ordering is deliberate: an item's issue list is read as a sequence (oldest
+    filing first), so it must not depend on the order someone happened to
+    append numbers in the YAML.
+    """
+    return ", ".join(issue_link(n, issues_by_no)
+                     for n in sorted(int(x) for x in numbers))
 
 
 def render_html(data, items, git, issues, issue_source, warnings, unlinked, ready):
@@ -385,16 +401,20 @@ def render_html(data, items, git, issues, issue_source, warnings, unlinked, read
     if inprog:
         out.append("<p class='sub'>Currently in flight:</p>")
         for it in inprog:
+            gh = issue_links(it.get("gh_issues", []), issues_by_no)
             out.append(f"<div class='next'><b><a href='#item-{esc(it['id'])}'>"
                        f"{esc(it.get('title', it['id']))}</a></b>"
-                       f"<div class='why'>{esc(it.get('summary', ''))}</div></div>")
+                       + (f" <span class='ghtag'>{gh}</span>" if gh else "")
+                       + f"<div class='why'>{esc(it.get('summary', ''))}</div></div>")
     if ready:
         out.append("<p class='sub'>Unblocked and ready to start (all dependencies done):</p>")
         for it in ready:
             deps = ", ".join(it.get("depends_on", [])) or "none"
+            gh = issue_links(it.get("gh_issues", []), issues_by_no)
             out.append(f"<div class='next'><b><a href='#item-{esc(it['id'])}'>"
                        f"{esc(it.get('title', it['id']))}</a></b>"
-                       f"<div class='why'>{esc(it.get('summary', ''))} "
+                       + (f" <span class='ghtag'>{gh}</span>" if gh else "")
+                       + f"<div class='why'>{esc(it.get('summary', ''))} "
                        f"<span class='mono'>[deps: {esc(deps)}]</span></div></div>")
     if not inprog and not ready:
         out.append("<p class='sub'>Nothing unblocked. Check blocked items below.</p>")
@@ -431,8 +451,7 @@ def render_html(data, items, git, issues, issue_source, warnings, unlinked, read
                        f"<span class='badge st-{esc(st)}'>{STATUS_LABEL.get(st, st)}</span></h3>")
             meta = []
             if it.get("gh_issues"):
-                meta.append("<b>GH:</b> " + ", ".join(issue_link(n, issues_by_no)
-                                                      for n in it["gh_issues"]))
+                meta.append("<b>GH:</b> " + issue_links(it["gh_issues"], issues_by_no))
             if it.get("depends_on"):
                 meta.append("<b>Depends on:</b> " + ", ".join(
                     f"<a href='#item-{esc(d)}'><code>{esc(d)}</code></a>"
@@ -470,7 +489,8 @@ def render_html(data, items, git, issues, issue_source, warnings, unlinked, read
             n = int(iss["number"])
             links = linked_map.get(n)
             cell = ", ".join(f"<a href='#item-{esc(i)}'><code>{esc(i)}</code></a>"
-                             for i in links) if links else "<b style='color:#e0a458'>UNLINKED</b>"
+                             for i in sorted(links)) if links else \
+                "<b style='color:#e0a458'>UNLINKED</b>"
             out.append(f"<tr class='{'closed' if iss['state']=='CLOSED' else ''}'>"
                        f"<td><a href='{esc(iss['url'])}'>#{n}</a></td>"
                        f"<td>{esc(iss['state'])}</td><td>{esc(iss['title'])}</td>"

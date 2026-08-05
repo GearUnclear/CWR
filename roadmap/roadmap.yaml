@@ -214,8 +214,8 @@ items:
     phase: phase-1.5
     status: done
     depends_on: [engine-native-systems, mission-migration-native]
-    commits: [3ef5cd5, be55dd8, 97a02eb]
-    gh_issues: [1, 3, 30]
+    commits: [3ef5cd5, be55dd8]
+    gh_issues: [1, 3]
     summary: >
       Two layers: 5 Catch2 unit files (35+ TEST_CASEs) over the pure cores
       (EvaluateTick/EvaluateAlert/Decide/PlanGroups) plus contract meta-tests
@@ -229,7 +229,7 @@ items:
       - "guerrilla_native_spawn is flaky on its doMove displacement assert (leader sometimes needs >90s to move 15m); passes on retry, so always run tri with --retries. Verified 2026-07-07."
       - "2026-07-10: the doMove flake went persistent (8/8 fails, proven pre-#8 via HEAD-baseline probes). Test hardened instead of engine surgery: doStop before the leader doMove (a bare unit doMove races the garrison group's native ACSENTRY hold FSM, GarrisonCache::SetHoldPosture), and the displacement assert window raised to assert_timeout=240 (the old 90 sat inside the documented >90s slow tail, guaranteeing the FAIL)."
       - "Run tri with -j 1 or low parallelism and sweep stray PoseidonGame processes afterward; a manually closed or lingering instance shows up as 'connection error: eval failed' and cascades into later tests."
-      - "2026-08-04: #30 filed (intermittent multi-minute zero-CPU startup stall parking between ScenePreloader init and harness listen; top hypothesis vsync-blocked swap during the menu-world load, not reproducible on demand - full diagnosis on the issue). Landed 97a02eb: LOG_INFO phase boundaries bracketing the window + tri no longer discards pre-harness game stdout (read_harness_port wrote nothing until HARNESS_PORT=), so the next occurrence names its phase in game_stdout.log. Ops note from the diagnosis: the documented blanket Stop-Process PoseidonGame sweep kills OTHER concurrent runners' instances mid-test (the exit -1/empty-stderr signature) - scope cleanup to owned PIDs when sessions overlap."
+      - "2026-08-04: harness-affecting startup stall filed as #30 and tracked on its own item (startup-stall-diagnosis), since the root cause is open; 97a02eb's instrumentation belongs to that item. Ops note that stays here because it is a test-suite rule: the documented blanket Stop-Process PoseidonGame sweep kills OTHER concurrent runners' instances mid-test (the exit -1 / empty-stderr signature) - scope cleanup to owned PIDs when sessions overlap."
 
   - id: install-missions
     title: "install-missions.ps1 template installer + world gate"
@@ -340,6 +340,7 @@ items:
     status: in-progress
     priority: 1
     depends_on: [mission-migration-native, run-game-launcher, install-missions]
+    gh_issues: [31]
     summary: >
       The site's 60% In Progress gate: Phase 1 and 1.5 are code-complete and
       machine-tested but have never had a human playtest. Gate-Zero validates the
@@ -471,6 +472,31 @@ items:
       - "The official CWA Remastered binary shares this code path and the bug (diagnosed from its debug log on a Steam install); filed upstream as draft PR #98 on the CWR-CE community fork, carrying the GearUnclear identity only (no AI attribution on external contributions)."
       - "Unblocked the Lebanon80 template: a 25.6 km @LoBo world is unplayable without its objects."
 
+  - id: startup-stall-diagnosis
+    title: "Intermittent zero-CPU startup stall before harness listen (issue #30)"
+    phase: hardening
+    status: in-progress
+    priority: 1
+    depends_on: [build-toolchain]
+    commits: [97a02eb]
+    gh_issues: [30]
+    summary: >
+      Intermittent multi-minute stalls during PoseidonGame startup under tri:
+      the process parks at ZERO CPU between the last line of
+      InitializeSubsystems ("ScenePreloader initialized") and
+      CreateGameHarness, then either wakes and passes normally (observed at
+      180.7 s, 486 s, 487 s) or gets externally killed. Normal time-to-harness
+      on this machine is 2-3 s. The window's real content is StartGameMode ->
+      World::StartIntro -> StartRandomCutscene (the menu-world load). Leading
+      hypothesis is a vsync-blocked SDL_GL_SwapWindow during that load
+      (SwapInterval(1) armed at EngineGL33.cpp:404, reached via I_AM_ALIVE ->
+      ProgressSystem::Frame), which is zero-CPU by construction and fits the
+      "always happened unattended" pattern.
+    log:
+      - "2026-08-04: mitigations landed (97a02eb) but NOT the root cause. The window had no log statements at all, and tri discarded every pre-harness stdout line that was not HARNESS_PORT= (~29 KB of startup logging thrown away per run). Now: LOG_INFO phase boundaries bracket the window, and tri writes pre-harness stdout to game_stdout.log flushed per line, so the next natural occurrence names its own guilty phase."
+      - "The exactly-180-seconds figure is a red herring: no 180-second constant exists in the engine, and tri did not abort the instance that woke at 180.7 s. Kill-predecessor / parallel-contention was tested as a trigger across ~35 relaunches and did not reproduce; contended startup is CPU-busy, not parked."
+      - "Operational hazard found during diagnosis: the documented blanket cleanup 'Get-Process PoseidonGame | Stop-Process -Force' kills OTHER runners' instances mid-test (the known exit -1 / empty-stderr signature). Cleanup should be scoped to owned PIDs."
+
   # ---------------------------------------------------------------- phase 2
   - id: civilian-ambience-layer
     title: "Civilian ambience + atrocity layer (issue #8)"
@@ -501,6 +527,7 @@ items:
     status: in-progress
     priority: 1
     depends_on: [engine-native-systems, dual-package-compat]
+    gh_issues: [32]
     commits: [b91d46f, 0c6eec8]
     summary: >
       Unknown incoming faction data never reaches a spawn path: a
@@ -794,12 +821,57 @@ items:
     log:
       - "2026-08-05: filed. Lands on an economy that already exists - economy.sqs runs the Resources (R) and Manpower (HR) ledger with zone-driven income ticks and the issue-#8 panic coupling, and recruit_action.sqs is the working addAction-dispatch precedent (enqueue only; the manager loop stays the single writer of the gmResources debit)."
 
+  - id: extort-solicit
+    title: "Solicit/Extort: per-civilian opinion + fear, money taken from the population (issue #41)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [civilian-ambience-layer]
+    gh_issues: [41]
+    summary: >
+      The earning half of the money loop, taken off the civilian population
+      rather than off zones. Each city carries its existing support score
+      (heavily suppressed while the invader holds it); individual civilians
+      get a random +/-35 opinion around it plus a random 0-100 fear score.
+      An opinion at or above +75 gives a 50% chance of a donation, decaying
+      as the player keeps asking and recovering slowly over time; fear at or
+      above +65 pays every time but costs that civilian's opinion badly.
+      Damaging a civilian's opinion nudges the city's support score, and that
+      nudge persists. Performance contract from the issue: these per-civilian
+      scores are not computed en masse and only need to stay consistent while
+      the player is within 300 m of the city.
+    log:
+      - "2026-08-05: filed. Complements money-sinks-dealers (spending); this is where the money comes from outside zone income. Both write the same gmResources scalar economy.sqs owns, so the single-writer/directional-split discipline that keeps economy.sqs and recruit.sqs from colliding has to extend to cover it."
+      - "The support nudge lands on ZoneRecord::support, the same 0-100 ledger the #8 resentment path already debits - so extortion pressure and occupier atrocity share one currency of town goodwill, which is the intended tension."
+
+  - id: unassociated-assailants
+    title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [extort-solicit]
+    gh_issues: [42]
+    summary: >
+      Split out of #41 at its own request. Two behaviors: a civilian extorted
+      while his fear score is under 20 always fights back rather than paying,
+      and, sparingly and at random, civilians go rogue on their own and
+      attack the player's side AND the occupier's side. They are not a
+      faction - hostile to everyone, loyal to nobody - and exist to carry the
+      chaos real insurgencies have.
+    log:
+      - "2026-08-05: filed. The blocking fact is that ZoneRegistry::ApplyCampaignFriendship (ZoneRegistry.cpp:455-503) welds the civilian center friendly to BOTH war sides and re-applies on every load, under the comment 'the population is nobody's enemy; the ambience layer's civilians are not a third army' - the exact assumption this feature breaks. Friendship is per-CENTER (setFriend / AICenter::SetFriendship), so dropping it would turn every civilian on the island hostile at once, the opposite of 'sparingly'."
+      - "Mechanism that does work: unit side comes from the receiving group's AI center on all three creation paths (verified in the #26 pass), so a rogue moves into a group on another center while keeping his civilian class and model - the same class-vs-center split the undercover system already relies on."
+      - "The spare side slot must be COMPUTED, not hardcoded to WEST as issue #2 assumes: on vanilla Abel (occupier EAST, resistance GUER) WEST is free, but on Guerrilla.Lebanon80 the IDF occupier IS WEST and Hizballah is EAST, leaving GUER as the only free slot. ResolveSideCollisions already pins both campaign sides and is the natural place to derive the leftover one."
+      - "Trap to respect: #24 was caused by exactly this class of change - the three exposure hand-back sites in AICenterImplPreview.cpp re-derive enemy-vs-unknown from the CURRENT side + friendship matrix, so runtime diplomacy strands bookkeeping. Also budget-bound: an AI center carries roughly 63 groups, so rogues must be pooled and reaped, never one group per assailant."
+
   - id: nearest-roads-command
     title: "Evaluator commands: nearestRoads + worldLocations"
     phase: phase-1.5
     status: planned
     priority: 2
     depends_on: [engine-native-systems]
+    gh_issues: [33]
+
     summary: >
       The two engine commands the docs still owe: nearestRoads <pos> <radius>
       (RoadNet exists engine-side but has no evaluator binding; plan 14 says it
@@ -867,6 +939,8 @@ items:
     status: planned
     priority: 3
     depends_on: [gate-zero-playtest]
+    gh_issues: [34]
+
     summary: >
       Plan 13's Phase-2 AI order, prototype first: 04 target priority (reshape
       GetSubjectiveCost to focus-fire officers/MGs), then 05 suppression (the
@@ -884,6 +958,7 @@ items:
     status: planned
     priority: 3
     depends_on: [civilian-ambience-layer, nearest-roads-command]
+    gh_issues: [35]
     summary: >
       Plan 14 beyond the #8/#2 slice, at its stated Phase-2 scope: the occupier
       director running closures and reprisals (System 3), Fireforce heli QRF
@@ -900,6 +975,8 @@ items:
     phase: phase-3
     status: planned
     depends_on: [gate-zero-playtest]
+    gh_issues: [36]
+
     summary: >
       Plan 13's Phase 3 centrepiece on UIMap (recruit/train/assign/spend); called
       the largest single C++ surface. No GuerrillaDisplay class exists;
@@ -910,6 +987,7 @@ items:
     phase: phase-3
     status: planned
     depends_on: [ai-tactics-phase2]
+    gh_issues: [37]
     summary: >
       Plan 13's Phase-3 AI slice: 08 shared enemy intel (extend
       AICenter::ReceiveReport for radio-net seeding; the Heat core) and 02 dynamic
@@ -922,6 +1000,7 @@ items:
     phase: phase-3
     status: planned
     depends_on: [strategy-screen, occupation-systems, ai-perception-phase3]
+    gh_issues: [38]
     summary: >
       Site's Phase 3 (Planned, 5%): the complete open-world insurgency across a
       full island with the whole occupier playbook: plan 14's Phase-3 systems
@@ -988,6 +1067,8 @@ items:
     status: planned
     priority: 4
     depends_on: [build-toolchain]
+    gh_issues: [39]
+
     summary: >
       ImGui tab surfacing the existing DiagMode draws, as a tuning enabler for the
       AI tranches. Gated on a decision to flip _ENABLE_CHEATS (currently 0) in dev
@@ -999,6 +1080,7 @@ items:
     status: planned
     priority: 3
     depends_on: [guerrilla-test-suite]
+    gh_issues: [40]
     summary: >
       economy, recruit, companions, qrf, escalation and loot scripts ship in every
       mission copy but have zero behavioral coverage (only byte-parity). The
