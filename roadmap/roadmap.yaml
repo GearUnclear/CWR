@@ -584,7 +584,7 @@ items:
     status: done
     priority: 2
     depends_on: [mission-migration-native, deep-undercover-system]
-    commits: [ff5ff41, eacda4a]
+    commits: [ff5ff41, eacda4a, b07d47f]
     gh_issues: [25]
     summary: >
       Issue #25 milestones M1-M3+M5. M1: fourth new-game cycler (idc 153,
@@ -616,6 +616,7 @@ items:
     log:
       - "2026-07-29: implemented M1+M2+M3(1,3,4,5)+M5 in one session. Unit tests: test_outfit_select.cpp (resolver precedence, probe-failure keeps authored class, civTier ladder + clamp, Civ-scalar plan-15 degrade) + GuerrillaOutfitChoices cases in test_guerrilla_module.cpp; [guerrilla] sweep 2121 assertions / 103 cases green. Integration: guerrilla_outfit_civilian_e2e (menu->Abel->CIVILIAN->typeOf player==SoldierGFakeC + manager class globals), guerrilla_civ_disguise_fire (M3.3: CIV read at 150 m via knownTargets - first consumer of that command - ID at 15 m, fire-exposure flip on a second still-distant group), guerrilla_lobo_terror_spawn (M2.4 Terror EventHandler smoke), sinai e2e extended with the outfit cycler + WARRIOR no-op assertions."
       - "Design calls made in-session (documented in the issue): publish tokens WARRIOR/CIVILIAN (case-insensitive engine compare); outfit offered per RESISTANCE block (cycling resistance re-derives the pair, pick preserved by name); Civ scalars degrade to warrior fallback while civTier[] gets the civilian-outfit ladder; presence policy = include."
+      - "2026-07-30: closing pass for #25 - M2.3 integration coverage landed (the one gap a code-only audit found): guerrilla_native.abel fixture now authors the Civ key family; the civilian e2e proves REAL companion/recruit/specialist spawns (not just folded globals); new guerrilla_outfit_hold_spawn pins the capture.sqs gmFactionSquad-bypass monoculture (first cut re-ran the full garrison-clear+secure arc and was flaky on AI-spotting variance - rewrote as a deterministic consumer-side test, the flip->event production stays owned by guerrilla_native_capture); new guerrilla_outfit_save_reload.seq proves the substituted player body + gmSelOutfit + folded globals survive a cross-process save/reload via the real menu path. Also posted a correction on #25: the landing comment's 'M3.2 needs no new code' claim is false - GarrisonCache::SpawnGarrison only consults FactionTierClass/FactionSquad, nothing native consumes FactionCivTierClass, so garrison use of the civTier[] rung is real #16 work. Rider: guerrilla_new_game_e2e was caught deterministically red - its occupier-cycler asserts still assumed the pre-1702080 two-entry global @lobofixup roster, but the menu has listed the island template's own factions since the plan-16 landing (Sinai = 8 entries, two clicks land on EgyptArmy not back on IDF); fixed by pinning the real eight-entry ring, so the ff5ff41 landing comment's green claim for this test was inaccurate."
 
   - id: faction-island-decoupling
     title: "Faction/island decoupling: any faction on any island + faction-pack mod contract (issue #26)"
