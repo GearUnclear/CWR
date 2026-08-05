@@ -2115,11 +2115,17 @@ void StartRandomCutscene(RString world)
 
     RString name = cls[i];
 
+    // The scene is a random pick, so any stall in the load below is only
+    // attributable if the log names which world/cutscene was being loaded.
+    LOG_INFO(Core, "Menu cutscene: loading '{}' on world '{}' ({}/{})", (const char*)name, (const char*)world, i + 1,
+             n);
+
     SetMission(world, name, GetAnimsDir());
     //	SetCampaign("");
     SetBaseDirectory("");
 
     ParseIntro();
+    LOG_INFO(Core, "Menu cutscene: intro parsed ({} groups)", CurrentTemplate.groups.Size());
 
     if (CurrentTemplate.groups.Size() > 0)
     {
@@ -2129,6 +2135,7 @@ void StartRandomCutscene(RString world)
         GLOB_WORLD->InitVehicles(GModeIntro, CurrentTemplate);
         //		GWorld->EnableSimulation(true);
     }
+    LOG_INFO(Core, "Menu cutscene: world ready");
 }
 
 } // namespace Poseidon

@@ -662,9 +662,15 @@ int GameApplication::RunAfterArgumentParsing()
     if (!InitializeSubsystems())
         return 1;
 
+    // The "Startup:" lines here and in RunMainLoop bracket a stretch that was
+    // fully unlogged — intermittent multi-minute zero-CPU stalls (#30) park
+    // somewhere between ScenePreloader init and the harness listen, and these
+    // boundaries name the guilty phase.
     ProgressFinish();
     EnableRendering();
+    LOG_INFO(Core, "Startup: rendering enabled");
     VerifySerialKey();
+    LOG_INFO(Core, "Startup: serial verification done");
 
     if (ENGINE_CONFIG.checkInitAndExit && !AppConfig::Instance().IsMissionSmokeCheck())
     {
@@ -687,7 +693,9 @@ int GameApplication::RunAfterArgumentParsing()
     }
 
     StartGameMode();
+    LOG_INFO(Core, "Startup: game mode started");
     FinalizeInitialization();
+    LOG_INFO(Core, "Startup: initialization finalized");
 
     // Boot fully, perform one in-process reload, verify the engine and world came back, then exit.
     if (AppConfig::Instance().IsRemountSelfTest())
@@ -932,6 +940,7 @@ void GameApplication::RunMainLoop()
     {
         Poseidon::ProgressScript.Free();
     }
+    LOG_INFO(Core, "Startup: progress script complete, entering main loop");
     GWorld->SetTitleEffect(nullptr);
     GWorld->SetCutEffect(nullptr);
 

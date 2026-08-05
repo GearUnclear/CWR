@@ -349,7 +349,8 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
 }
 
 /// Read game stdout looking for `HARNESS_PORT=N` announced by the game after binding.
-/// Remaining stdout lines are saved to `log_file` (if provided) so game logs are not lost.
+/// Every other stdout line — before and after the port announcement — is saved to
+/// `log_file` (if provided) so game logs are not lost.
 async fn read_harness_port(
     process: &mut Child,
     log_file: Option<std::fs::File>,
@@ -360,6 +361,11 @@ async fn read_harness_port(
         .take()
         .context("stdout not piped for harness port discovery")?;
     let mut lines = tokio::io::BufReader::new(stdout).lines();
+    // Pre-port lines used to be silently discarded, which erased the engine's
+    // startup logging — exactly the evidence needed to place a pre-harness
+    // stall. Write every line to the log as it arrives, flushed per line so a
+    // killed/hung game still leaves its last startup line on disk.
+    let mut writer = log_file.map(tokio::fs::File::from_std);
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let line = tokio::time::timeout_at(deadline, lines.next_line())
@@ -373,7 +379,6 @@ async fn read_harness_port(
                     if let Ok(port) = rest.parse::<u16>() {
                         // Drain remaining stdout to log file (or discard) so the pipe doesn't block
                         tokio::spawn(async move {
-                            let mut writer = log_file.map(tokio::fs::File::from_std);
                             while let Ok(Some(l)) = lines.next_line().await {
                                 if let Some(w) = writer.as_mut() {
                                     use tokio::io::AsyncWriteExt;
@@ -383,6 +388,11 @@ async fn read_harness_port(
                         });
                         return Ok(port);
                     }
+                }
+                if let Some(w) = writer.as_mut() {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = w.write_all(format!("{line}\n").as_bytes()).await;
+                    let _ = w.flush().await;
                 }
             }
         }
