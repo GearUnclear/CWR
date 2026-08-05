@@ -1,0 +1,18 @@
+# CIVILIAN-outfit body persistence across save/reload (issue #25, M2.3).
+#
+# Phase 01 drives the REAL menu path (GUERRILLA -> Abel -> outfit CIVILIAN ->
+# launch), proves the engine substituted the player body, then writes a
+# binary save (UserDir/Saved/Tmp/gout.fps). Phase 02 fresh-launches the SAME
+# mission through the menu with the cycler UNTOUCHED (warrior default -
+# proving the clean-slate baseline is SoldierGB), then triLoadGame rehydrates
+# phase 01's world: the substituted player body, the folded outfit globals
+# and the companion's plainclothes class must all come back. The ordered
+# phases share one POSEIDON_USER_DIR (seq contract), so the save round-trip
+# is a genuine cross-process one on full CWA data.
+#
+# PRECONDITION (same as ui/guerrilla_outfit_civilian_e2e): the mission
+# templates are installed in the game data dir - guerrilla-mode/
+# install-missions.ps1. Full CWA 1.99 data only (SoldierGFakeC is
+# Classic-only; the Demo [Remaster] package is not a target per the
+# 2026-07-14 asset policy).
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]

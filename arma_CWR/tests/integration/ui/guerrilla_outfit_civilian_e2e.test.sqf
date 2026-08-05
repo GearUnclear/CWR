@@ -14,9 +14,13 @@
 //
 //    M2 (recruit matching): the manager scripts folded gmSelOutfit into
 //       GM_OUTFIT_CIV and swapped their body classes through the *Civ
-//       descriptor keys - recruits, companions and hold squads will all
-//       spawn plainclothes bodies (asserted on the boot-time class globals;
-//       the spawn paths themselves are pinned by the existing suite).
+//       descriptor keys (asserted on the boot-time class globals), AND the
+//       spawn paths actually produce plainclothes bodies (M2.3): the
+//       auto-spawned companion and two real recruit-queue spawns (fighter +
+//       specialist) are asserted by typeOf on the live units. The hold-squad
+//       civilian branch (capture.sqs gmFactionSquad bypass) is covered by
+//       scripting/guerrilla_outfit_hold_spawn on the native fixture, and
+//       save/reload body persistence by scripting/guerrilla_outfit_save_reload.
 //
 //  PRECONDITION (same as guerrilla_new_game_e2e): the templates must be
 //  installed in the game data dir - run guerrilla-mode/install-missions.ps1.
@@ -67,5 +71,35 @@ triSimUntil { format ["%1", GM_HOLD_CIV] == "SoldierGFakeC" }
 
 // -- the native registry served the civTier[] ladder too (M3 surface) --------
 triAssertEq [(gmFactionCivTier [gmResistanceSide, 1]), "SoldierGFakeC"]
+
+// ============================================================================
+//  M2.3: REAL spawns, not just the folded class globals.
+// ============================================================================
+
+// -- companion: companions.sqs auto-spawns Petra near the player; her body
+//    must be the plainclothes companionClassCiv class -------------------------
+triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
+triAssertEq [(typeOf (GM_COMP_OBJ select 0)), "SoldierGFakeC"]
+
+// -- recruit a fighter through the real request queue. The player spawns AT
+//    the Camp anchor (mission.sqm player pos == the CAMP zone pos), so
+//    recruit.sqs mounts the addAction menu; the test enqueues the request
+//    exactly as recruit_action.sqs does (gmReqId + gmReqPending) ---------------
+gmManpower = 5
+triSimUntil { gmRecruitActive }
+gmReqId = gmActRecruit
+gmReqPending = true
+triSimUntil { not (isNil "gmNewUnit") }
+triAssertEq [(format ["%1", isNull gmNewUnit]), "false"]
+triAssertEq [(typeOf gmNewUnit), "SoldierGFakeC"]
+// side weld: the civilian-class body fights as resistance, in the player group
+triAssertEq [(format ["%1", side gmNewUnit]), "GUER"]
+triAssertEq [(format ["%1", gmNewUnit in (units (group player))]), "true"]
+
+// -- and a specialist: the second recruit rung wears the FakeC2 body ----------
+gmReqId = gmActSpec
+gmReqPending = true
+triSimUntil { (typeOf gmNewUnit) == "SoldierGFakeC2" }
+triAssertEq [(format ["%1", side gmNewUnit]), "GUER"]
 
 triEndTest

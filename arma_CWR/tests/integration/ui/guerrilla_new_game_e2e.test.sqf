@@ -16,13 +16,23 @@
 //  PRECONDITION (documented in the .toml): the template must be installed in
 //  the game data dir - run guerrilla-mode/install-missions.ps1 first.
 //
-//  Faction cyclers: the menu lists candidates from the GLOBAL config's
-//  CfgGuerrillaFactions (the fixture mod @lobofixup provides IDF +
-//  EgyptFrontier; a mission's description.ext is not parsed at menu time).
-//  The occupier list starts on IDF; two clicks cycle EgyptFrontier -> back
-//  to IDF, proving the cycler actually cycles. In-mission, the published
-//  class-name strings resolve against the template's own faction table:
-//  IDF -> WEST occupier, EgyptFrontier -> EAST resistance.
+//  Faction cyclers: since the plan-16 faction-swap landing (1702080) the
+//  menu lists candidates from the ISLAND TEMPLATE's own CfgGuerrillaFactions
+//  (RefreshFactionsForIsland peeks the installed template's description.ext
+//  at menu time; the old global-Pars lookup was never populated). For Sinai
+//  that roster is EIGHT factions in config order: IDF, EgyptFrontier,
+//  EgyptArmy, Syria, Jordan, Hizballah, PLO, PLO_East (CIV excluded). The
+//  occupier cycler seeds on the template's defaultOccupier (IDF); the test
+//  walks the full ring once - proving it cycles AND wraps - and ends back
+//  on IDF so the launch below behaves exactly like a no-UI default launch.
+//  In-mission, the published class-name strings resolve against the
+//  template's own faction table: IDF -> WEST occupier, EgyptFrontier ->
+//  EAST resistance.
+//
+//  (This section previously asserted a two-entry wrap from the pre-1702080
+//  global @lobofixup roster; that went stale when the per-island roster
+//  landed and was caught red 2026-08-04 - the asserts below pin the real
+//  eight-entry ring now.)
 // ============================================================================
 
 triSetLanguage "English"
@@ -36,10 +46,20 @@ triAssertEq [(triDisplay), 76]
 // -- island list: select Sinai by its CfgWorldList class name ---------------
 triAssertEq [(triSelectListByData [101, "sinai"]), true]
 
-// -- occupier cycler: two clicks = EgyptFrontier -> IDF (wraps, 2 entries) --
+// -- occupier cycler: walk the full eight-entry Sinai ring once (see header),
+//    ending back on the IDF default the launch below depends on -------------
 triAssertEq [(triControlText 150), "OCCUPIER: IDF"]
 triClick 150
 triAssertEq [(triControlText 150), "OCCUPIER: EgyptFrontier"]
+triClick 150
+triAssertEq [(triControlText 150), "OCCUPIER: EgyptArmy"]
+triClick 150
+triClick 150
+triClick 150
+triClick 150
+triAssertEq [(triControlText 150), "OCCUPIER: PLO"]
+triClick 150
+triAssertEq [(triControlText 150), "OCCUPIER: PLO_East"]
 triClick 150
 triAssertEq [(triControlText 150), "OCCUPIER: IDF"]
 triAssertEq [(triControlText 151), "RESISTANCE: EgyptFrontier"]

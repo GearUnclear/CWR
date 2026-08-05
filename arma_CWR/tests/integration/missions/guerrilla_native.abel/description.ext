@@ -110,6 +110,20 @@ class CfgGuerrillaFactions
         recruitSpecialist = "SoldierGMG";
         companionClass = "SoldierGB";
 
+        // ---- character outfit family (issue #25) - mirrors the shipped
+        // Guerrilla.Abel descriptor so the M2.3 spawn/persistence tests can
+        // exercise the *Civ paths on this fixture. SoldierGFakeC/FakeC2 are
+        // BIS's resistance-in-plainclothes classes (side=2, armed, scope=1 -
+        // hidden from the editor but spawnable at runtime; Classic-1.99-only,
+        // which is fine: this fixture runs on the full_cwa lane exclusively).
+        playerClassWarrior = "SoldierGB";
+        playerClassCiv = "SoldierGFakeC";
+        recruitFighterCiv = "SoldierGFakeC";
+        recruitSpecialistCiv = "SoldierGFakeC2";
+        companionClassCiv = "SoldierGFakeC";
+        holdClassCiv = "SoldierGFakeC";
+        civTier[] = {"SoldierGFakeC", "SoldierGFakeC2"};
+
         baseWeapon = "AK47";
         baseMagazine = "AK47";
         lootRiflemanWeapon = "AK47";
