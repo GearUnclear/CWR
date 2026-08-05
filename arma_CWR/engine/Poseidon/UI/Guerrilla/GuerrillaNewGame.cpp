@@ -10,8 +10,12 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
 #include <Poseidon/IO/Streams/QBStream.hpp>
-#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // Shapes bank (preview mannequin)
-#include <Poseidon/Foundation/Math/MathDefs.hpp>       // H_PI (preview turntable)
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>       // Shapes bank + ProxyObject (preview mannequin)
+#include <Poseidon/World/Scene/Scene.hpp>                    // GScene (preview proxy draw: LOD pick)
+#include <Poseidon/World/Scene/Camera/Camera.hpp>            // camera direction for the proxy LOD pick
+#include <Poseidon/World/Simulation/FrameInv.hpp>            // FrameWithInverse (preview proxy draw)
+#include <Poseidon/World/Simulation/Animation/Animation.hpp> // AnimationSection (zasleh hide)
+#include <Poseidon/Foundation/Math/MathDefs.hpp>             // H_PI (preview turntable)
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
@@ -121,7 +125,89 @@ class GuerrillaOutfitPreview : public ControlObject
             shape->LevelOpaque(0)->MakeCockpit();
             shape->OrSpecial(BestMipmap | NoDropdown | DisableSun);
         }
+        HideMuzzleFlashSections(shape);
         SetShape(shape);
+    }
+
+    // The weapon-proxy models author their muzzle-flash ("zasleh") sections
+    // VISIBLE in the p3d (ak_47_v58_proxy.p3d carries a permanent white
+    // zasleh3 star). In-mission Man::DrawProxies substitutes the real weapon
+    // model and re-hides its zasleh every frame keyed on firing
+    // (SoldierOldSimProxy.cpp); the raw ControlObject render path has no such
+    // pass, so hide the section once per body swap on every proxy shape (and
+    // on the body itself, should one ever author it). AnimationSection::Hide
+    // is persistent per-shape state, exactly the not-firing state the mission
+    // pass maintains, and nothing ever Unhides these proxy placeholders.
+    static void HideMuzzleFlashSections(LODShapeWithShadow* body)
+    {
+        auto hideOnShape = [](LODShapeWithShadow* shape)
+        {
+            if (!shape)
+            {
+                return;
+            }
+            AnimationSection zasleh;
+            zasleh.Init(shape, "zasleh", nullptr);
+            for (int level = 0; level < shape->NLevels(); level++)
+            {
+                zasleh.Hide(shape, level);
+            }
+        };
+        if (!body)
+        {
+            return;
+        }
+        hideOnShape(body);
+        for (int level = 0; level < body->NLevels(); level++)
+        {
+            Shape* lShape = body->Level(level);
+            if (!lShape)
+            {
+                continue;
+            }
+            for (int i = 0; i < lShape->NProxies(); i++)
+            {
+                const ProxyObject& proxy = lShape->Proxy(i);
+                if (proxy.obj)
+                {
+                    hideOnShape(proxy.obj->GetShape());
+                }
+            }
+        }
+    }
+
+    // Object::DrawProxies with one filter: the flag proxy never draws. Its
+    // model is hard-textured with a default US flag that only in-mission
+    // flag-carrier machinery may rebind, so NO flag is the only rendering
+    // that is safe for every faction (side-matched flags are out of scope).
+    void DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform, float dist2,
+                     float z2, const LightList& lights) override
+    {
+        Shape* sShape = _shape->LevelOpaque(level);
+        for (int i = 0; i < sShape->NProxies(); i++)
+        {
+            const ProxyObject& proxy = sShape->Proxy(i);
+            if (!proxy.obj || GuerrillaPreviewIsFlagProxy(proxy.name))
+            {
+                continue;
+            }
+            // from here the base Object::DrawProxies body, unchanged
+            Matrix4Val pTransform = transform * proxy.obj->Transform();
+            Matrix4Val invPTransform = proxy.invTransform * invTransform;
+            LODShapeWithShadow* pshape = proxy.obj->GetShapeOnPos(pTransform.Position());
+            if (!pshape)
+            {
+                continue;
+            }
+            int pLevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
+                                                    GScene->GetCamera()->Direction());
+            if (pLevel == LOD_INVISIBLE)
+            {
+                continue;
+            }
+            FrameWithInverse pFrame(pTransform, invPTransform);
+            proxy.obj->Draw(pLevel, ClipAll, pFrame);
+        }
     }
 
     // Fit the current shape into the 2D slot: bounding-box centre on the
@@ -468,6 +554,31 @@ RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString class
         return RString(); // shape file missing: hide, never substitute
     }
     return model;
+}
+
+bool GuerrillaPreviewIsFlagProxy(const char* proxyName)
+{
+    if (!proxyName)
+    {
+        return false;
+    }
+    // Case-insensitive substring match on the two naming stems: the vanilla
+    // bodies all reference "flag_vojak", community bodies use either the
+    // English word or the Czech "vlajka" the rest of the flag machinery uses
+    // (the flagpole cloth selection House.cpp animates is "vlajka").
+    static constexpr const char* kStems[] = {"flag", "vlajka"};
+    for (const char* stem : kStems)
+    {
+        const int stemLen = (int)strlen(stem);
+        for (const char* p = proxyName; *p; p++)
+        {
+            if (strnicmp(p, stem, stemLen) == 0)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)

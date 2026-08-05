@@ -246,6 +246,26 @@ TEST_CASE("GuerrillaOutfitPreviewModel: probes the class, its model and the shap
     REQUIRE(GuerrillaOutfitPreviewModel(v, RString(), exists).GetLength() == 0);
 }
 
+TEST_CASE("GuerrillaPreviewIsFlagProxy: flag stems match, the other body proxies do not", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaPreviewIsFlagProxy;
+    // the flag proxy every vanilla body references (Data3D.pbo p3ds)
+    REQUIRE(GuerrillaPreviewIsFlagProxy("flag_vojak"));
+    REQUIRE(GuerrillaPreviewIsFlagProxy("FLAG_VOJAK")); // case-insensitive
+    REQUIRE(GuerrillaPreviewIsFlagProxy("usa_vlajka")); // the Czech stem, mid-name
+    REQUIRE(GuerrillaPreviewIsFlagProxy("idf_flag_a")); // English stem, mid-name
+
+    // the full remaining vanilla-body proxy roster must keep drawing
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy("ak_47_v58_proxy"));
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy("rpg7_proxy"));
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy("beretta"));
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy("nvg_proxy"));
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy("dalekohled_proxy"));
+
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy(""));
+    REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy(nullptr));
+}
+
 // ---------------------------------------------------------------------------
 // Pure list builders (injected ParamFile — no engine/resource state needed).
 // ---------------------------------------------------------------------------

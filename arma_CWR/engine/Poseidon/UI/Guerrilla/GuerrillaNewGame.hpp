@@ -142,6 +142,15 @@ RString GuerrillaOutfitPreviewClass(const ParamEntry* factionsCfg, const ParamEn
 RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString className,
                                     const std::function<bool(RString)>& shapeFileExists);
 
+// True when a body proxy is the soldier's shoulder/back flag proxy
+// ("flag_vojak" on every vanilla body; matched on the flag/vlajka name stems
+// so third-party bodies that author their own flag proxy are covered too).
+// The preview mannequin never draws these: the proxy model is hard-textured
+// with a default US flag (data\usa_vlajka.pac) that only in-mission
+// flag-carrier machinery may rebind, so NO flag is the only faction-safe
+// rendering. Pure, for the same unit-test seam as the resolvers above.
+bool GuerrillaPreviewIsFlagProxy(const char* proxyName);
+
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
 // template (bankPrefix non-empty, already ending in "\\"), otherwise
