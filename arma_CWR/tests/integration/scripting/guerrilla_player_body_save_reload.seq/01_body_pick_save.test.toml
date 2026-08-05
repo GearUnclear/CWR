@@ -1,0 +1,8 @@
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
+binary = "PoseidonGame"
+# No mission= - boots to the main menu and drives the real GUERRILLA ->
+# Abel -> BODY "WEST SoldierWB" launch (install-missions.ps1 precondition,
+# see seq toml).
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict"]

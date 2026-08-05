@@ -957,6 +957,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 RString occupier = disp->SelectedOccupier();
                 RString resistance = disp->SelectedResistance();
                 RString outfit = disp->SelectedOutfit();
+                RString playerClass = disp->SelectedPlayerClass();
 
                 // The template mission "Guerrilla.<World>", resolved the same
                 // way the single-mission browser resolves its entries: a PBO
@@ -1063,6 +1064,17 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                     GGameState.VarSet(kGuerrillaVarOutfit, GameValue(outfit));
                     GameVariable varOutfit(kGuerrillaVarOutfit, GameValue(outfit));
                     GStats._campaign.AddVariable(varOutfit);
+                }
+                // Player body pick (BODY browser): the exact CfgVehicles
+                // classname, empty while the browser sits on its "(match
+                // outfit)" default — publish nothing then, so the outfit
+                // token (or the authored mission.sqm class) keeps deciding
+                // and an untouched screen stays byte-identical to before.
+                if (playerClass.GetLength() > 0)
+                {
+                    GGameState.VarSet(kGuerrillaVarPlayerClass, GameValue(playerClass));
+                    GameVariable varPlayerClass(kGuerrillaVarPlayerClass, GameValue(playerClass));
+                    GStats._campaign.AddVariable(varPlayerClass);
                 }
 
                 Display::OnChildDestroyed(idd, exit);

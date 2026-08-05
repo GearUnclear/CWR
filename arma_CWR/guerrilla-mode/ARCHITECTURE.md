@@ -256,6 +256,25 @@ the ambience layer (`GM_CIV_GROUPS`) — binding refusal documented in
 presence like warriors (decided in issue #25 M3.4; rationale at
 `ZoneRegistry.cpp CountSidePresence`).
 
+**Player-body BODY browser (the class-driven answer to issue #25's open
+vocabulary question, player-only):** the new-game screen's BODY cycler (idc
+155) enumerates every creatable Man-derived `CfgVehicles` class of the
+loaded package — no descriptor key involved — grouped `WEST/EAST/GUER/CIV`
+(`GuerrillaListPlayerBodies`: `scope > 0`, deduped by displayName+model,
+capped per side, config scan order; classes whose shape the package lacks
+are skipped). A pick publishes `gmSelPlayerClass` (exact classname) and
+beats the `gmSelOutfit` token for the PLAYER BODY ONLY at the same
+`OutfitSelect` seam; squad matching (recruits/companions/hold) stays on the
+outfit family and its `*Civ` keys. The browser's `(match outfit)` default
+publishes nothing, keeping the untouched screen byte-identical to before. A
+pick that fails the package probe keeps the AUTHORED class (never the token
+body, never a substitute). Accepted emergent gameplay, not a bug: the body
+keeps its CONFIG side for distant identification (vanilla side-resolve
+ladder, stolen-uniform band at 1.35× the id range, real identity at 1.5×),
+so an occupier-roster body reads as occupier at range while the instance
+side stays the mission side — any body fights as GUER. The undercover layer
+is untouched.
+
 **Island/faction-agnostic rule (definition of done for issue #3):** the
 `scripts/` directory contains **zero classnames and zero side-string
 literals** — sides come from `gmOccupierSide`/`gmResistanceSide` (converted to

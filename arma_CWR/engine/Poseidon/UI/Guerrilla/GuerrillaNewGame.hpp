@@ -47,6 +47,14 @@ constexpr const char* kGuerrillaVarResistance = "gmSelResistance";
 // are behaviorally identical (the cycler's default must resolve exactly like
 // a no-UI launch).
 constexpr const char* kGuerrillaVarOutfit = "gmSelOutfit";
+// Player body class (the class-driven answer to issue #25's open vocabulary
+// question): the exact CfgVehicles classname the BODY browser picked, from
+// any side the loaded package offers. Published only when the browser left
+// its "(match outfit)" default - an untouched browser publishes nothing and
+// the outfit token keeps deciding the player body. The pick governs the
+// PLAYER BODY ONLY; recruit/companion/hold matching stays on the OUTFIT
+// family axis (gmSelOutfit) and its *Civ descriptor keys.
+constexpr const char* kGuerrillaVarPlayerClass = "gmSelPlayerClass";
 
 // Pure list builders (unit-testable with an injected ParamFile):
 // islands = subclass names of CfgWorldList whose world file exists (the same
@@ -142,6 +150,39 @@ RString GuerrillaOutfitPreviewClass(const ParamEntry* factionsCfg, const ParamEn
 RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString className,
                                     const std::function<bool(RString)>& shapeFileExists);
 
+// One row of the BODY browser's roster: a creatable Man-derived CfgVehicles
+// class of the loaded package, tagged with its config side's script string
+// ("EAST"/"WEST"/"GUER"/"CIV" per the TargetSide enum values 0..3).
+struct GuerrillaBodyChoice
+{
+    RString className;
+    RString side;
+};
+
+// Deterministic per-side cap on the BODY browser roster, applied AFTER the
+// displayName+model dedupe: a flat cycler stops being usable long before a
+// mod package's full roster runs out (@LoBo ships hundreds of Man classes),
+// so each side keeps its first N deduped classes in config scan order.
+constexpr int kGuerrillaMaxBodiesPerSide = 24;
+
+// The BODY browser roster (player-body pick, issue #25 follow-up): every
+// class derived from CfgVehicles' Man class that is creatable (scope > 0;
+// scope=1 script-only classes like SoldierGFakeC are deliberate picks),
+// belongs to a playable side (side 0..3 = EAST/WEST/GUER/CIV; TLogic and
+// friends are excluded), and resolves an existing shape file through the
+// injected probe (GetShapeName(model) -> shapeFileExists, the
+// GuerrillaOutfitPreviewModel pattern - classes whose p3d the package does
+// not ship are skipped, never crash). The list rule, documented once here:
+// dedupe by case-insensitive displayName+model (the vanilla roster repeats
+// one body across many loadout classes - SoldierWB/WG/WMedic/... all render
+// "MC vojakW2"; only the first of each look survives), then cap each side at
+// kGuerrillaMaxBodiesPerSide, then emit sides in the fixed order WEST, EAST,
+// GUER, CIV with config scan order preserved inside a side - fully
+// deterministic for a given package, which is what lets the e2e assert exact
+// cycler labels.
+std::vector<GuerrillaBodyChoice> GuerrillaListPlayerBodies(const ParamEntry* vehiclesCfg,
+                                                           const std::function<bool(RString)>& shapeFileExists);
+
 // True when a body proxy is the soldier's shoulder/back flag proxy
 // ("flag_vojak" on every vanilla body; matched on the flag/vlajka name stems
 // so third-party bodies that author their own flag proxy are covered too).
@@ -150,6 +191,25 @@ RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString class
 // flag-carrier machinery may rebind, so NO flag is the only faction-safe
 // rendering. Pure, for the same unit-test seam as the resolvers above.
 bool GuerrillaPreviewIsFlagProxy(const char* proxyName);
+
+// True when a body proxy must NOT draw on the preview mannequin because it
+// is anything but the primary rifle: without this the mannequin wears every
+// authored weapon at once (rifle + RPG + pistol - vanilla bodies author all
+// of them permanently; in-mission Man::GetProxy substitutes/hides them per
+// weapon slot every frame, a pass the raw ControlObject render path lacks).
+// Classification is config-driven, the same identity the engine itself uses
+// to type a proxy: the CfgNonAIVehicles class "Proxy<name>" (the exact
+// lookup ShapeLOD.cpp performs, spaces underscored) is resolved in the
+// passed config and its inherited `simulation` key decides - proxysecweapon
+// (launchers: ProxyRPG7_Proxy...) and proxyhandgun (pistols: ProxyBeretta,
+// ProxyGlock17...) hide, proxyweapon (the rifle) draws. Covers any package:
+// a proxy the engine can create at all HAS such a class (ShapeLOD skips
+// proxies whose class is missing - which is why vanilla nvg_proxy /
+// dalekohled_proxy never reach the draw path: no config class anywhere in
+// Classic+AddOns). Binocular/NVG name stems are kept as belt-and-braces for
+// mods that do class them. Flag proxies are the sibling predicate above.
+// Pure (config + name in, bool out) for the same unit-test seam.
+bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName);
 
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
@@ -191,6 +251,11 @@ class GuerrillaNewGame : public Display
     RString SelectedOccupier() const;
     RString SelectedResistance() const;
     RString SelectedOutfit() const; // EMPTY when the descriptor offers no outfit pair
+    // The BODY browser's pick: an exact CfgVehicles classname, EMPTY while
+    // the browser sits on its "(match outfit)" default - the launch path
+    // publishes nothing then, so an untouched screen behaves byte-identically
+    // to the pre-browser flow (the SelectedOccupier contract).
+    RString SelectedPlayerClass() const;
 
   protected:
     void InjectFactionCyclers();
@@ -243,6 +308,14 @@ class GuerrillaNewGame : public Display
     // selected resistance descriptor offers the pair, empty otherwise.
     std::vector<RString> _outfits;
     int _outfitSel = -1;
+    // BODY browser (player-body pick): the whole-package roster, built once
+    // in the constructor - CfgVehicles comes from the loaded addons (Pars),
+    // never from an island's template description.ext, so island changes
+    // don't invalidate it. -1 = the "(match outfit)" default; the cycle
+    // order is default -> 0 -> ... -> n-1 -> default, so the no-op is
+    // always reachable again.
+    std::vector<GuerrillaBodyChoice> _bodies;
+    int _bodySel = -1;
 };
 
 } // namespace Poseidon

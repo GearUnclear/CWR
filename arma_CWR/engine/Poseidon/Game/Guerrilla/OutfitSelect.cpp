@@ -121,6 +121,27 @@ RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry*
     return civClass;
 }
 
+RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selPlayerClass,
+                               const char* selOutfit, const char* selResistance, const ClassProbe& probe)
+{
+    if (selPlayerClass && *selPlayerClass)
+    {
+        if (probe.Exists("CfgVehicles", selPlayerClass))
+        {
+            return RString(selPlayerClass);
+        }
+        // The pick replaced the outfit resolution for the body, so its
+        // failure keeps the AUTHORED class - never a fall-through to the
+        // token path, never a substitute body (see the header).
+        LOG_WARN(Core,
+                 "Guerrilla body: picked player class '{}' not in the loaded data package - keeping the authored "
+                 "player class",
+                 selPlayerClass);
+        return RString();
+    }
+    return ResolveCivilianPlayerClass(zonesCfg, factionsCfg, selOutfit, selResistance, probe);
+}
+
 void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
 {
     ArcadeUnitInfo* uInfo = t.FindPlayer();
@@ -144,21 +165,26 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
     {
         return;
     }
+    RString selPlayerClass = ReadMenuSelection("gmselplayerclass");
     RString selOutfit = ReadMenuSelection("gmseloutfit");
-    if (selOutfit.GetLength() == 0)
+    if (selPlayerClass.GetLength() == 0 && selOutfit.GetLength() == 0)
     {
-        return;
+        return; // untouched screen (or non-Guerrilla flow): authored class stands
     }
     RString selResistance = ReadMenuSelection("gmselresistance");
     ParsClassProbe probe;
-    RString civClass = ResolveCivilianPlayerClass(zones, factions, selOutfit, selResistance, probe);
-    if (civClass.GetLength() == 0 || stricmp(civClass, uInfo->vehicle) == 0)
+    RString newClass = ResolvePlayerBodyClass(zones, factions, selPlayerClass, selOutfit, selResistance, probe);
+    if (newClass.GetLength() == 0 || stricmp(newClass, uInfo->vehicle) == 0)
     {
         return;
     }
-    LOG_INFO(Core, "Guerrilla outfit: substituting player class '{}' -> '{}' (gmSelOutfit=civilian)",
-             (const char*)uInfo->vehicle, (const char*)civClass);
-    uInfo->vehicle = civClass;
+    // Note: the body keeps its CONFIG side for distant identification (the
+    // vanilla side-resolve ladder, stolen-uniform band at 1.35 / real ID at
+    // 1.5) - accepted emergent gameplay, see the header. Instance side is
+    // welded to the mission side field, so any body fights as GUER.
+    LOG_INFO(Core, "Guerrilla outfit: substituting player class '{}' -> '{}' ({})", (const char*)uInfo->vehicle,
+             (const char*)newClass, selPlayerClass.GetLength() > 0 ? "gmSelPlayerClass pick" : "gmSelOutfit=civilian");
+    uInfo->vehicle = newClass;
 }
 
 } // namespace Poseidon::Guerrilla

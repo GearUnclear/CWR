@@ -60,6 +60,10 @@ triSimUntil { alive player }
 
 // -- the selection was published for engine and scripts ----------------------
 triAssertEq [gmSelOutfit, "CIVILIAN"]
+// the BODY browser (idc 155) was untouched: its "(match outfit)" default
+// publishes nothing - the untouched-screen invariant for the player-body
+// channel (ui/guerrilla_player_body_e2e drives the non-default path)
+triAssertEq [(format ["%1", isNil "gmSelPlayerClass"]), "true"]
 
 // -- M1: the player wears the plainclothes body, on the resistance side ------
 triAssertEq [(typeOf player), "SoldierGFakeC"]

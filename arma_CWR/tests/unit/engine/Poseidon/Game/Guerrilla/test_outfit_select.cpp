@@ -145,6 +145,40 @@ TEST_CASE("OutfitSelect: probe failure keeps the authored class, never a fallbac
     REQUIRE(Str(ResolveCivilianPlayerClass(cfg.Zones(), cfg.Factions(), "civilian", nullptr, probe)).empty());
 }
 
+TEST_CASE("OutfitSelect: an explicit player-class pick beats the outfit token", "[guerrilla][outfit]")
+{
+    ParsedConfig cfg(kOutfitConfig);
+    FakeProbe probe;
+    probe.vehicles = {"SoldierGFakeC", "SoldierWB"};
+
+    // the pick wins even while the outfit token would substitute the civ body
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "SoldierWB", "civilian", nullptr, probe)) ==
+            "SoldierWB");
+    // and with no token at all - the pick needs no outfit channel
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "SoldierWB", nullptr, nullptr, probe)) ==
+            "SoldierWB");
+    // no pick: the token path decides exactly as before
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), nullptr, "civilian", nullptr, probe)) ==
+            "SoldierGFakeC");
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "", "civilian", nullptr, probe)) ==
+            "SoldierGFakeC");
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), nullptr, "WARRIOR", nullptr, probe)).empty());
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), nullptr, nullptr, nullptr, probe)).empty());
+}
+
+TEST_CASE("OutfitSelect: a pick that fails the probe keeps the authored class, never the token body",
+          "[guerrilla][outfit]")
+{
+    ParsedConfig cfg(kOutfitConfig);
+    FakeProbe probe;
+    probe.vehicles = {"SoldierGFakeC"}; // the pick is NOT in the package
+
+    // EMPTY = keep the authored mission.sqm class. Deliberately NOT the
+    // civilian body: the pick replaced the outfit resolution, so its failure
+    // degrades to the authored class, never to a third body.
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "SoldierWB", "civilian", nullptr, probe)).empty());
+}
+
 TEST_CASE("OutfitSelect: null factions config resolves nothing", "[guerrilla][outfit]")
 {
     ParsedConfig cfg(kOutfitConfig);

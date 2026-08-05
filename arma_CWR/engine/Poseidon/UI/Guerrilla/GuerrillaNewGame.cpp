@@ -19,8 +19,10 @@
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
-#include <math.h> // fmodf/fabsf (preview turntable + fit)
+#include <ctype.h> // tolower (body-roster dedupe keys)
+#include <math.h>  // fmodf/fabsf (preview turntable + fit)
 #include <stdio.h>
+#include <string> // body-roster dedupe keys
 
 // 3D-UI camera-space depth scale, defined in UIControlsBase.cpp next to
 // ControlObject (whose constructor multiplies the config z by it).
@@ -49,25 +51,30 @@ constexpr int kIdcOutfit = 153;
 // player identity screen. Injected only once a model actually resolves;
 // hidden (never a substitute body) whenever one does not.
 constexpr int kIdcOutfitPreview = 154;
+// 155 is the BODY browser (player-body pick): a cycler over every creatable
+// Man-derived class of the loaded package, grouped by side (see
+// GuerrillaListPlayerBodies). Next free idc: 156.
+constexpr int kIdcBody = 155;
 
 // Normalized-screen slots for the injected 2D cyclers — bottom-left column,
 // clear of the island-list notebook that fills the screen centre. The
-// outfit cycler stacks ABOVE the faction pair so the shipped 0.80/0.87
-// slots (and the e2e assertions on them) stay put.
+// body browser and outfit cycler stack ABOVE the faction pair so the
+// shipped 0.80/0.87 slots (and the e2e assertions on them) stay put.
 constexpr float kCyclerX = 0.02f;
 constexpr float kCyclerW = 0.32f;
 constexpr float kCyclerH = 0.05f;
+constexpr float kCyclerBodyY = 0.66f;
 constexpr float kCyclerOutfitY = 0.73f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
 
 // The preview mannequin's slot: the free stretch of the bottom-left column
-// above the outfit cycler. Authored as a normalized-screen box like the 2D
+// above the body browser. Authored as a normalized-screen box like the 2D
 // cyclers; the 3D placement is derived from it at runtime (Convert2DTo3D)
 // so it tracks the engine's aspect settings.
 constexpr float kPreviewCX = 0.18f;      // column centre (the cyclers' midline)
 constexpr float kPreviewTopY = 0.26f;    // below the screen-top header strip
-constexpr float kPreviewBottomY = 0.68f; // above the outfit cycler at 0.73
+constexpr float kPreviewBottomY = 0.61f; // above the body browser at 0.66
 // Camera-space depth in the units ControlObject's constructor reads (it
 // multiplies by CameraZoom): inside the 3D-UI ray range (ControlObject::
 // IsInside probes out to 2.0 * CameraZoom).
@@ -176,18 +183,26 @@ class GuerrillaOutfitPreview : public ControlObject
         }
     }
 
-    // Object::DrawProxies with one filter: the flag proxy never draws. Its
+    // Object::DrawProxies with two filters: the flag proxy never draws (its
     // model is hard-textured with a default US flag that only in-mission
     // flag-carrier machinery may rebind, so NO flag is the only rendering
-    // that is safe for every faction (side-matched flags are out of scope).
+    // that is safe for every faction), and of the authored weapon proxies
+    // only the primary rifle survives - launchers and pistols hide, so the
+    // mannequin stops wearing every weapon at once (see
+    // GuerrillaPreviewHideWeaponProxy).
     void DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform, float dist2,
                      float z2, const LightList& lights) override
     {
+        // Pars lives for the process; the entry lookup is one hash probe,
+        // cheap enough per frame and always current should a mod reload
+        // ever rebuild the merged config.
+        const ParamEntry* nonAI = Pars.FindEntry("CfgNonAIVehicles");
         Shape* sShape = _shape->LevelOpaque(level);
         for (int i = 0; i < sShape->NProxies(); i++)
         {
             const ProxyObject& proxy = sShape->Proxy(i);
-            if (!proxy.obj || GuerrillaPreviewIsFlagProxy(proxy.name))
+            if (!proxy.obj || GuerrillaPreviewIsFlagProxy(proxy.name) ||
+                GuerrillaPreviewHideWeaponProxy(nonAI, proxy.name))
             {
                 continue;
             }
@@ -307,6 +322,92 @@ std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg)
             continue; // the population is ambience, never a combatant choice
         }
         out.push_back(name);
+    }
+    return out;
+}
+
+std::vector<GuerrillaBodyChoice> GuerrillaListPlayerBodies(const ParamEntry* vehiclesCfg,
+                                                           const std::function<bool(RString)>& shapeFileExists)
+{
+    std::vector<GuerrillaBodyChoice> out;
+    if (!vehiclesCfg)
+    {
+        return out;
+    }
+    const ParamEntry* manEntry = vehiclesCfg->FindEntry("Man");
+    if (!manEntry || !manEntry->IsClass())
+    {
+        return out; // no Man base class: nothing is a body
+    }
+    const ParamClass* manCls = static_cast<const ParamClass*>(manEntry);
+    // TargetSide values 0..3 (World/Scene/Object.hpp) to the script-side
+    // strings the rest of the Guerrilla surface speaks
+    static constexpr const char* kSideNames[] = {"EAST", "WEST", "GUER", "CIV"};
+    constexpr int kNSides = 4;
+    // per-side buckets, WEST/EAST/GUER/CIV output order (index into these)
+    static constexpr int kSideOrder[] = {1, 0, 2, 3};
+    std::vector<GuerrillaBodyChoice> buckets[kNSides];
+    std::vector<std::string> seen[kNSides]; // lowercased displayName|model dedupe keys
+    for (int i = 0; i < vehiclesCfg->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = vehiclesCfg->GetEntry(i);
+        if (!e.IsClass())
+        {
+            continue;
+        }
+        const ParamClass* cls = static_cast<const ParamClass*>(&e);
+        if (cls == manCls || !cls->IsDerivedFrom(*manCls))
+        {
+            continue;
+        }
+        // scope > 0: scope=1 script-only classes (SoldierGFakeC...) are
+        // deliberate picks, scope=0 abstract bases are not creatable
+        if (e.ReadValue("scope", 0) <= 0)
+        {
+            continue;
+        }
+        int side = e.ReadValue("side", (int)kNSides);
+        if (side < 0 || side >= kNSides)
+        {
+            continue; // TLogic and friends are not playable bodies
+        }
+        // plan-15 shaped: a class whose p3d the package does not ship is
+        // skipped, never crashes and never reaches the publish channel
+        RString model = e.ReadValue("model", RString());
+        if (model.GetLength() == 0 || !shapeFileExists || !shapeFileExists(GetShapeName(model)))
+        {
+            continue;
+        }
+        // dedupe by what the player can SEE: one look (displayName+model)
+        // per side, first class in config scan order wins
+        RString displayName = e.ReadValue("displayName", RString());
+        std::string key = std::string((const char*)displayName) + "|" + std::string((const char*)model);
+        for (char& c : key)
+        {
+            c = (char)tolower((unsigned char)c);
+        }
+        bool dup = false;
+        for (const std::string& k : seen[side])
+        {
+            if (k == key)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (dup || (int)buckets[side].size() >= kGuerrillaMaxBodiesPerSide)
+        {
+            continue;
+        }
+        seen[side].push_back(key);
+        buckets[side].push_back(GuerrillaBodyChoice{RString(e.GetName()), RString(kSideNames[side])});
+    }
+    for (int side : kSideOrder)
+    {
+        for (const GuerrillaBodyChoice& b : buckets[side])
+        {
+            out.push_back(b);
+        }
     }
     return out;
 }
@@ -556,6 +657,23 @@ RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString class
     return model;
 }
 
+namespace
+{
+// case-insensitive substring scan shared by the proxy predicates
+bool ProxyNameHasStem(const char* proxyName, const char* stem)
+{
+    const int stemLen = (int)strlen(stem);
+    for (const char* p = proxyName; *p; p++)
+    {
+        if (strnicmp(p, stem, stemLen) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
 bool GuerrillaPreviewIsFlagProxy(const char* proxyName)
 {
     if (!proxyName)
@@ -569,16 +687,59 @@ bool GuerrillaPreviewIsFlagProxy(const char* proxyName)
     static constexpr const char* kStems[] = {"flag", "vlajka"};
     for (const char* stem : kStems)
     {
-        const int stemLen = (int)strlen(stem);
-        for (const char* p = proxyName; *p; p++)
+        if (ProxyNameHasStem(proxyName, stem))
         {
-            if (strnicmp(p, stem, stemLen) == 0)
-            {
-                return true;
-            }
+            return true;
         }
     }
     return false;
+}
+
+bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName)
+{
+    if (!proxyName || !*proxyName)
+    {
+        return false;
+    }
+    // Belt-and-braces name stems for gear no vanilla config classes at all
+    // (Classic+AddOns author no Proxynvg_proxy / Proxydalekohled_proxy, so
+    // those proxies never even get created - see the header note) but a mod
+    // package might: binoculars ("dalekohled" is the OFP-era model stem,
+    // "binoc" the English one) and night-vision goggles.
+    static constexpr const char* kHideStems[] = {"dalekohled", "binoc", "nvg"};
+    for (const char* stem : kHideStems)
+    {
+        if (ProxyNameHasStem(proxyName, stem))
+        {
+            return true;
+        }
+    }
+    if (!nonAIVehiclesCfg)
+    {
+        return false; // no config to classify against: draw (never hide the rifle)
+    }
+    // The engine's own proxy identity: CfgNonAIVehicles class "Proxy<name>",
+    // spaces underscored - the exact lookup ShapeLOD.cpp builds the proxy
+    // object from. The inherited simulation key types the weapon slot
+    // (ProxyRPG7_Proxy : ProxySecWeapon inherits "ProxySecWeapon").
+    char clsName[256];
+    snprintf(clsName, sizeof(clsName), "Proxy%s", proxyName);
+    for (char* p = clsName; *p; p++)
+    {
+        if (*p == ' ')
+        {
+            *p = '_';
+        }
+    }
+    const ParamEntry* cls = nonAIVehiclesCfg->FindEntry(clsName);
+    if (!cls || !cls->IsClass())
+    {
+        return false;
+    }
+    RString sim = cls->ReadValue("simulation", RString());
+    // launchers and pistols hide; proxyweapon (the primary rifle) and every
+    // non-weapon proxy draw
+    return sim.GetLength() > 0 && (stricmp(sim, "proxysecweapon") == 0 || stricmp(sim, "proxyhandgun") == 0);
 }
 
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)
@@ -626,6 +787,11 @@ GuerrillaNewGame::GuerrillaNewGame(ControlsContainer* parent) : Display(parent)
     // island here — pull that island's own faction roster before wiring up
     // the cyclers, instead of the never-populated global Pars lookup.
     RefreshFactionsForIsland(SelectedIsland());
+
+    // The BODY browser roster comes from the loaded package (Pars), not from
+    // any island's template, so one build here covers the display's life.
+    _bodies = GuerrillaListPlayerBodies(Pars.FindEntry("CfgVehicles"),
+                                        [](RString path) { return QIFStreamB::FileExist(path); });
 
     InjectFactionCyclers();
 }
@@ -726,6 +892,7 @@ void GuerrillaNewGame::InjectFactionCyclers()
         int idc;
         float y;
     } slots[] = {
+        {"GuerrillaBody", kIdcBody, kCyclerBodyY},
         {"GuerrillaOutfit", kIdcOutfit, kCyclerOutfitY},
         {"GuerrillaOccupier", kIdcOccupier, kCyclerOccupierY},
         {"GuerrillaResistance", kIdcResistance, kCyclerResistanceY},
@@ -759,8 +926,15 @@ void GuerrillaNewGame::UpdateOutfitPreview()
     {
         return;
     }
-    RString previewClass =
-        GuerrillaOutfitPreviewClass(_islandFactions, _islandZones, SelectedResistance(), SelectedOutfit());
+    // The BODY browser's explicit pick previews directly; on its "(match
+    // outfit)" default the mannequin falls back to the outfit-resolution
+    // chain, exactly what the launch-time substitution seam will do.
+    RString previewClass = SelectedPlayerClass();
+    if (previewClass.GetLength() == 0)
+    {
+        previewClass =
+            GuerrillaOutfitPreviewClass(_islandFactions, _islandZones, SelectedResistance(), SelectedOutfit());
+    }
     RString model = GuerrillaOutfitPreviewModel(Pars.FindEntry("CfgVehicles"), previewClass,
                                                 [](RString path) { return QIFStreamB::FileExist(path); });
     GuerrillaOutfitPreview* preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview));
@@ -934,6 +1108,31 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     {
         return;
     }
+    char buffer[256];
+    if (idc == kIdcBody)
+    {
+        // "BODY: <SIDE> <class>" — the exact-text form the e2e asserts; the
+        // default reads "(match outfit)" because that is literally what it
+        // does: publish nothing and let the OUTFIT token resolve the body.
+        if (_bodySel >= 0 && _bodySel < (int)_bodies.size())
+        {
+            snprintf(buffer, sizeof(buffer), "BODY: %s %s", (const char*)_bodies[_bodySel].side,
+                     (const char*)_bodies[_bodySel].className);
+        }
+        else
+        {
+            snprintf(buffer, sizeof(buffer), "BODY: (match outfit)");
+        }
+        if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        else if (CStatic* text = dynamic_cast<CStatic*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        return;
+    }
     const char* prefix = idc == kIdcOccupier ? "OCCUPIER" : (idc == kIdcResistance ? "RESISTANCE" : "OUTFIT");
     const std::vector<RString>& list = idc == kIdcOccupier     ? _occupiers
                                        : idc == kIdcResistance ? _resistances
@@ -944,7 +1143,6 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     // defaultResistance keys, or the authored mission.sqm class for the
     // outfit), so say so instead of showing a value the mission may override.
     const char* selected = (sel >= 0 && sel < (int)list.size()) ? (const char*)list[sel] : "(mission default)";
-    char buffer[256];
     snprintf(buffer, sizeof(buffer), "%s: %s", prefix, selected);
     if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
     {
@@ -981,6 +1179,18 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_outfits.empty())
             {
                 _outfitSel = (_outfitSel + 1) % (int)_outfits.size();
+            }
+            UpdateFactionLabel(idc);
+            UpdateOutfitPreview();
+            break;
+        case kIdcBody:
+            // default (-1) -> 0 -> ... -> n-1 -> default: the no-op is a
+            // regular ring stop, so cycling past the roster restores the
+            // untouched-screen behaviour instead of trapping the player on
+            // an explicit pick.
+            if (!_bodies.empty())
+            {
+                _bodySel = _bodySel + 1 >= (int)_bodies.size() ? -1 : _bodySel + 1;
             }
             UpdateFactionLabel(idc);
             UpdateOutfitPreview();
@@ -1115,6 +1325,17 @@ RString GuerrillaNewGame::SelectedResistance() const
         return _resistances[_resistanceSel];
     }
     return RString(); // see SelectedOccupier
+}
+
+RString GuerrillaNewGame::SelectedPlayerClass() const
+{
+    if (_bodySel >= 0 && _bodySel < (int)_bodies.size())
+    {
+        return _bodies[_bodySel].className;
+    }
+    // "(match outfit)" default — publish nothing so the outfit token (or the
+    // authored mission.sqm class) keeps deciding (see SelectedOccupier).
+    return RString();
 }
 
 RString GuerrillaNewGame::SelectedOutfit() const

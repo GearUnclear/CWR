@@ -1,0 +1,16 @@
+# BODY browser (player-body pick from any side), end to end. No mission= -
+# boots to the main menu and drives GUERRILLA -> Abel -> BODY "WEST
+# SoldierWB" -> launch, then asserts the published gmSelPlayerClass, the
+# substituted player body and the GUER instance side.
+#
+# PRECONDITION: guerrilla-mode/install-missions.ps1 has been run - the launch
+# path resolves "missions\Guerrilla.Abel" relative to the game data dir. Full
+# CWA 1.99 data only (the asserted roster labels are the Classic config's
+# scan order; the Demo [Remaster] package is not a target per the 2026-07-14
+# asset policy).
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+# menu flow + Abel world load
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict"]

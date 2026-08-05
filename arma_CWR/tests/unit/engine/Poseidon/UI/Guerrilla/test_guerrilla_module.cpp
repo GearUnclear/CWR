@@ -92,6 +92,7 @@ TEST_CASE("GuerrillaModule: main-menu contract constants", "[UI][GameModule][Gue
     REQUIRE(std::string(Poseidon::kGuerrillaVarOccupier) == "gmSelOccupier");
     REQUIRE(std::string(Poseidon::kGuerrillaVarResistance) == "gmSelResistance");
     REQUIRE(std::string(Poseidon::kGuerrillaVarOutfit) == "gmSelOutfit");
+    REQUIRE(std::string(Poseidon::kGuerrillaVarPlayerClass) == "gmSelPlayerClass");
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +265,177 @@ TEST_CASE("GuerrillaPreviewIsFlagProxy: flag stems match, the other body proxies
 
     REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy(""));
     REQUIRE_FALSE(GuerrillaPreviewIsFlagProxy(nullptr));
+}
+
+TEST_CASE("GuerrillaPreviewHideWeaponProxy: only the primary rifle survives", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaPreviewHideWeaponProxy;
+
+    // the engine's own proxy identity: CfgNonAIVehicles "Proxy<name>", the
+    // simulation key inherited through the base chain (the exact shape of
+    // Classic CONFIG.BIN + the O.pbo addon config)
+    ParamFile cfg;
+    ParamClass* nonAI = cfg.AddClass("CfgNonAIVehicles");
+    ParamClass* pw = nonAI->AddClass("ProxyWeapon");
+    pw->Add("simulation", "ProxyWeapon");
+    ParamClass* psw = nonAI->AddClass("ProxySecWeapon");
+    psw->Add("simulation", "ProxySecWeapon");
+    ParamClass* phg = nonAI->AddClass("ProxyHandGun");
+    phg->Add("simulation", "ProxyHandGun");
+    nonAI->AddClass("ProxyAK_47_v58_Proxy")->SetBase(pw->GetClassInterface());
+    nonAI->AddClass("ProxyRPG7_Proxy")->SetBase(psw->GetClassInterface());
+    nonAI->AddClass("ProxyBeretta")->SetBase(phg->GetClassInterface());
+    nonAI->AddClass("Proxysome_launcher")->SetBase(psw->GetClassInterface());
+    const ParamEntry* v = cfg.FindEntry("CfgNonAIVehicles");
+
+    // the vanilla WEST body's real proxy roster (mc vojakw2.p3d): rifle
+    // draws, launcher and pistol hide
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "ak_47_v58_proxy"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "rpg7_proxy"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "beretta"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "RPG7_PROXY")); // case-insensitive
+    // ShapeLOD's space-underscore normalization is mirrored in the lookup
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "some launcher"));
+
+    // binocular/NVG stems hide even with no config class (none exists in
+    // Classic+AddOns; these proxies never get created there, but a mod that
+    // does class them must not put binoculars in the mannequin's hands)
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "dalekohled_proxy"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "nvg_proxy"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "dalekohled_proxy"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "binoc_generic"));
+
+    // everything else draws: unknown gear, unclassified proxies, no config
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "medic_bag"));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(nullptr, "ak_47_v58_proxy"));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, ""));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, nullptr));
+}
+
+TEST_CASE("GuerrillaListPlayerBodies: Man-derived, creatable, playable-side, deduped by look",
+          "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaBodyChoice;
+    using Poseidon::GuerrillaListPlayerBodies;
+
+    // ParamClass::Add resolves through the base chain, so own entries must
+    // be added BEFORE SetBase or they overwrite the base's values - the same
+    // rule the DisplayMain MODS-injection comment documents.
+    ParamFile cfg;
+    ParamClass* vehicles = cfg.AddClass("CfgVehicles");
+    ParamClass* land = vehicles->AddClass("Land");
+    ParamClass* man = vehicles->AddClass("Man"); // abstract base: never listed
+    man->Add("scope", 0);
+    man->Add("side", 3);
+    ParamClass* wb = vehicles->AddClass("SoldierWB");
+    wb->Add("scope", 2);
+    wb->Add("side", 1);
+    wb->Add("model", "MC vojakW2");
+    wb->Add("displayName", "Rifleman");
+    wb->SetBase(man->GetClassInterface());
+    // same look as SoldierWB (displayName+model): deduped away
+    ParamClass* wg = vehicles->AddClass("SoldierWG");
+    wg->SetBase(wb->GetClassInterface());
+    // different displayName, same model: a distinct row (side/scope/model
+    // inherited through the base chain)
+    ParamClass* wmedic = vehicles->AddClass("SoldierWMedic");
+    wmedic->Add("displayName", "Medic");
+    wmedic->SetBase(wb->GetClassInterface());
+    ParamClass* eb = vehicles->AddClass("SoldierEB");
+    eb->Add("scope", 2);
+    eb->Add("side", 0);
+    eb->Add("model", "MC vojakE2");
+    eb->Add("displayName", "Rifleman");
+    eb->SetBase(man->GetClassInterface());
+    // scope=1 script-only classes are deliberate picks (SoldierGFakeC)
+    ParamClass* fakeC = vehicles->AddClass("SoldierGFakeC");
+    fakeC->Add("scope", 1);
+    fakeC->Add("side", 2);
+    fakeC->Add("model", "MC civil");
+    fakeC->Add("displayName", "Civilian");
+    fakeC->SetBase(man->GetClassInterface());
+    ParamClass* civ = vehicles->AddClass("Civilian");
+    civ->Add("scope", 2);
+    civ->Add("side", 3);
+    civ->Add("model", "MC civil");
+    civ->Add("displayName", "Man");
+    civ->SetBase(man->GetClassInterface());
+    // excluded rows: abstract, logic-side, non-Man, package-missing shape
+    ParamClass* abstract = vehicles->AddClass("SoldierAbstract");
+    abstract->Add("scope", 0);
+    abstract->Add("side", 1);
+    abstract->Add("model", "MC vojakW2");
+    abstract->SetBase(man->GetClassInterface());
+    ParamClass* logician = vehicles->AddClass("Logician");
+    logician->Add("scope", 2);
+    logician->Add("side", 7);
+    logician->Add("model", "MC vojakW2");
+    logician->SetBase(man->GetClassInterface());
+    ParamClass* car = vehicles->AddClass("Car");
+    car->Add("scope", 2);
+    car->Add("side", 1);
+    car->Add("model", "car");
+    car->SetBase(land->GetClassInterface());
+    ParamClass* ghost = vehicles->AddClass("GhostBody");
+    ghost->Add("scope", 2);
+    ghost->Add("side", 1);
+    ghost->Add("model", "missing_shape");
+    ghost->Add("displayName", "Ghost");
+    ghost->SetBase(man->GetClassInterface());
+
+    auto exists = [](RString path) { return std::string((const char*)path).find("missing") == std::string::npos; };
+    std::vector<GuerrillaBodyChoice> bodies = GuerrillaListPlayerBodies(cfg.FindEntry("CfgVehicles"), exists);
+
+    // WEST, EAST, GUER, CIV order; config scan order inside a side
+    REQUIRE(bodies.size() == 5);
+    REQUIRE(std::string((const char*)bodies[0].className) == "SoldierWB");
+    REQUIRE(std::string((const char*)bodies[0].side) == "WEST");
+    REQUIRE(std::string((const char*)bodies[1].className) == "SoldierWMedic");
+    REQUIRE(std::string((const char*)bodies[1].side) == "WEST");
+    REQUIRE(std::string((const char*)bodies[2].className) == "SoldierEB");
+    REQUIRE(std::string((const char*)bodies[2].side) == "EAST");
+    REQUIRE(std::string((const char*)bodies[3].className) == "SoldierGFakeC");
+    REQUIRE(std::string((const char*)bodies[3].side) == "GUER");
+    REQUIRE(std::string((const char*)bodies[4].className) == "Civilian");
+    REQUIRE(std::string((const char*)bodies[4].side) == "CIV");
+
+    // no config / no Man class: empty, never crash
+    REQUIRE(GuerrillaListPlayerBodies(nullptr, exists).empty());
+    ParamFile manless;
+    manless.AddClass("CfgVehicles");
+    REQUIRE(GuerrillaListPlayerBodies(manless.FindEntry("CfgVehicles"), exists).empty());
+}
+
+TEST_CASE("GuerrillaListPlayerBodies: the per-side cap keeps the first N in config order", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaListPlayerBodies;
+    using Poseidon::kGuerrillaMaxBodiesPerSide;
+
+    ParamFile cfg;
+    ParamClass* vehicles = cfg.AddClass("CfgVehicles");
+    ParamClass* man = vehicles->AddClass("Man");
+    man->Add("scope", 0);
+    const int total = kGuerrillaMaxBodiesPerSide + 8;
+    for (int i = 0; i < total; i++)
+    {
+        char name[64];
+        snprintf(name, sizeof(name), "LoBoBody%02d", i);
+        ParamClass* body = vehicles->AddClass(name);
+        body->Add("scope", 2);
+        body->Add("side", 2);
+        char model[64];
+        snprintf(model, sizeof(model), "lobo_body_%02d", i); // all distinct looks
+        body->Add("model", model);
+        body->Add("displayName", name);
+        body->SetBase(man->GetClassInterface()); // own entries first - see above
+    }
+    auto exists = [](RString) { return true; };
+    auto bodies = GuerrillaListPlayerBodies(cfg.FindEntry("CfgVehicles"), exists);
+    REQUIRE((int)bodies.size() == kGuerrillaMaxBodiesPerSide);
+    REQUIRE(std::string((const char*)bodies.front().className) == "LoBoBody00");
+    char lastKept[64];
+    snprintf(lastKept, sizeof(lastKept), "LoBoBody%02d", kGuerrillaMaxBodiesPerSide - 1);
+    REQUIRE(std::string((const char*)bodies.back().className) == lastKept);
 }
 
 // ---------------------------------------------------------------------------

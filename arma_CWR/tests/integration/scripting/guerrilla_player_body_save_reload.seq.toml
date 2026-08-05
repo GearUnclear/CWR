@@ -1,0 +1,20 @@
+# BODY-browser player-body persistence across save/reload (the class-driven
+# follow-up to issue #25).
+#
+# Phase 01 drives the REAL menu path (GUERRILLA -> Abel -> BODY "WEST
+# SoldierWB" -> launch), proves the engine substituted the player body with
+# the cross-side pick, then writes a binary save (UserDir/Saved/Tmp/
+# gbody.fps). Phase 02 fresh-launches the SAME mission through the menu with
+# the browser UNTOUCHED (proving the clean-slate baseline is the authored
+# SoldierGB and a nil gmSelPlayerClass), then triLoadGame rehydrates phase
+# 01's world: the substituted WEST body, its GUER instance side and the
+# published gmSelPlayerClass must all come back. The ordered phases share one
+# POSEIDON_USER_DIR (seq contract), so the save round-trip is a genuine
+# cross-process one on full CWA data.
+#
+# PRECONDITION (same as ui/guerrilla_player_body_e2e): the mission templates
+# are installed in the game data dir - guerrilla-mode/install-missions.ps1.
+# Full CWA 1.99 data only (the asserted roster label is the Classic config's
+# scan order; the Demo [Remaster] package is not a target per the 2026-07-14
+# asset policy).
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
