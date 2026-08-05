@@ -29,6 +29,9 @@ phases:
   - name: phase-3
     title: "Phase 3: full mode"
     goal: "Full island, full occupier playbook, GuerrillaDisplay strategy screen."
+  - name: release
+    title: "Alpha release and distribution"
+    goal: "Getting the build into a player's hands: install, asset pointing, updates."
   - name: housekeeping
     title: "Housekeeping and follow-ups"
     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
@@ -71,7 +74,7 @@ items:
     phase: foundation
     status: done
     depends_on: [upstream-baseline]
-    commits: [58cb137, 5a289cd]
+    commits: [58cb137, 5a289cd, 69078b6]
     summary: >
       AI-drafted design docs: mod-plans 02-10/12/13 (58cb137), plan 14
       occupation-systems (5a289cd), plus guerrilla-mode/README.md and STATUS.md.
@@ -98,7 +101,7 @@ items:
     phase: foundation
     status: done
     depends_on: [repo-reroot]
-    commits: [3ce3da4, 5a289cd, 306cd37, a619b68]
+    commits: [3ce3da4, 5a289cd, 306cd37, a619b68, 812a6ff]
     summary: >
       Six-page retro static field manual (index, about, gameplay, tech, designloop,
       downloads) branded Uslu dur!, with a we-don't-round-up status policy. Claims
@@ -108,6 +111,7 @@ items:
       - "Site publicly claims: Phase 1 Built 100%, Phase 1.5 Built 100% (both awaiting first human playtest), Gate-Zero In Progress 60%, Phase 2 Planned 15%, Phase 3 Planned 5%."
       - "2026-07-30 marketing pass 1 (306cd37): homepage restructured as a landing page (hero + 'One rifle. One island. Take it back.' tagline + Play Free Demo CTA + sell rows); CTA buttons on downloads/gameplay; system-requirements table. Retro skin deliberately kept as brand."
       - "2026-07-30 marketing pass 2 (a619b68): media.html Field Photos gallery from existing dev captures; MEDIA in navbar site-wide; about gets closing CTAs."
+      - "2026-07-30 marketing pass 3 (812a6ff): homepage Field Reviews strip (in-universe box quotes)."
 
   - id: camera-mouselook
     title: "Camera: aiming deadzone + mouse-look feel"
@@ -133,7 +137,7 @@ items:
     phase: foundation
     status: done
     depends_on: [build-toolchain]
-    commits: [5a289cd, 5a832e7]
+    commits: [5a289cd, 5a832e7, 706217b]
     gh_issues: []
     summary: >
       Incremental-build launcher with windowed detached launch (5a289cd), plus
@@ -195,6 +199,7 @@ items:
     phase: phase-1.5
     status: done
     depends_on: [repo-reroot]
+    commits: [4ff55be]
     gh_issues: [3]
     summary: >
       Third-party Sinai island + IDF/Egypt/Syria/Jordan factions used read-only to
@@ -209,8 +214,8 @@ items:
     phase: phase-1.5
     status: done
     depends_on: [engine-native-systems, mission-migration-native]
-    commits: [3ef5cd5, be55dd8]
-    gh_issues: [1, 3]
+    commits: [3ef5cd5, be55dd8, 97a02eb]
+    gh_issues: [1, 3, 30]
     summary: >
       Two layers: 5 Catch2 unit files (35+ TEST_CASEs) over the pure cores
       (EvaluateTick/EvaluateAlert/Decide/PlanGroups) plus contract meta-tests
@@ -224,6 +229,7 @@ items:
       - "guerrilla_native_spawn is flaky on its doMove displacement assert (leader sometimes needs >90s to move 15m); passes on retry, so always run tri with --retries. Verified 2026-07-07."
       - "2026-07-10: the doMove flake went persistent (8/8 fails, proven pre-#8 via HEAD-baseline probes). Test hardened instead of engine surgery: doStop before the leader doMove (a bare unit doMove races the garrison group's native ACSENTRY hold FSM, GarrisonCache::SetHoldPosture), and the displacement assert window raised to assert_timeout=240 (the old 90 sat inside the documented >90s slow tail, guaranteeing the FAIL)."
       - "Run tri with -j 1 or low parallelism and sweep stray PoseidonGame processes afterward; a manually closed or lingering instance shows up as 'connection error: eval failed' and cascades into later tests."
+      - "2026-08-04: #30 filed (intermittent multi-minute zero-CPU startup stall parking between ScenePreloader init and harness listen; top hypothesis vsync-blocked swap during the menu-world load, not reproducible on demand - full diagnosis on the issue). Landed 97a02eb: LOG_INFO phase boundaries bracketing the window + tri no longer discards pre-harness game stdout (read_harness_port wrote nothing until HARNESS_PORT=), so the next occurrence names its phase in game_stdout.log. Ops note from the diagnosis: the documented blanket Stop-Process PoseidonGame sweep kills OTHER concurrent runners' instances mid-test (the exit -1/empty-stderr signature) - scope cleanup to owned PIDs when sessions overlap."
 
   - id: install-missions
     title: "install-missions.ps1 template installer + world gate"
@@ -308,6 +314,7 @@ items:
     phase: phase-1.5
     status: done
     depends_on: [engine-native-systems, consolidation-capture]
+    commits: [6f708ad]
     summary: >
       A town's allegiance is now readable both on the map and in the world.
       Map half already existed (init.sqs creates every zone marker as a "Flag"
@@ -407,6 +414,7 @@ items:
     status: in-progress
     priority: 1
     depends_on: [build-toolchain, crash-fixes-trident-trust]
+    commits: [934f67a, 12c919d, 91547c6, 46f4c36]
     gh_issues: [11, 12, 13, 14, 15]
     summary: >
       Research and harden the engine + Guerrilla Mode to run on BOTH data
@@ -440,6 +448,29 @@ items:
       - "2026-07-13: the 'missing SoldierG* posture' checklist item is addressed by the faction-class-resolution item (plan 15): descriptor classnames now resolve against the loaded package at campaign load with per-side fallback chains (GUER degrades SoldierGB -> SoldierGFakeE -> SoldierEB on the Demo), so descriptor-sourced spawns can no longer boot-fail or silently sterilize cross-package. Remaining for the Demo-world tests: the mission.sqm player class (SoldierGB) is NOT descriptor-sourced - Gate-Zero substitution or per-package mission variants still owed."
       - "2026-07-14 DIRECTION (user): 'from henceforth' the asset target is Classic 1.99 + @LoBo only; the Demo asset set is dropped as a target, keeping only FUTURE compatibility with the full Remaster's assets. The Gate-Zero mission.sqm substitution / per-package mission variants for the Demo-world tests are therefore out of scope (not owed); plan-15 resolution is the standing forward-compat mechanism. Policy recorded in both CLAUDE.md files."
 
+  - id: wrp-4wvr-object-load
+    title: "4WVR/RVW world loader: seekg clears latched EOF (community islands loaded building-less)"
+    phase: hardening
+    status: done
+    depends_on: [build-toolchain]
+    commits: [af5b3bb]
+    summary: >
+      Landscape::LoadData probes every world with WrpReader first (the OPRW
+      fast path). A non-OPRW 4WVR/RVW world is parsed to EOF before the probe
+      rejects it, and QIStream::seekg only cleared _fail on the rewind, so the
+      RVW fallback re-parse inherited the latched _eof: terrain and textures
+      loaded, then the object loop broke on its first f.eof() and the world
+      came up with ZERO wrp-embedded objects (no buildings, walls or trees on
+      any community island, i.e. every @LoBo world). BIS islands are OPRW and
+      never hit the fallback, which is why only mod terrains came up bare.
+      seekg now clears _eof on a successful seek, matching std::istream
+      (C++11) semantics; red/green regression test builds a synthetic RVW v4
+      blob and asserts the probe-then-reparse pattern sees the object list.
+    log:
+      - "Verified against lebanon80.wrp: 81,383 objects, where the loader had been logging 'Total 1 objects, max. id -1'. In-game confirmation followed."
+      - "The official CWA Remastered binary shares this code path and the bug (diagnosed from its debug log on a Steam install); filed upstream as draft PR #98 on the CWR-CE community fork, carrying the GearUnclear identity only (no AI attribution on external contributions)."
+      - "Unblocked the Lebanon80 template: a 25.6 km @LoBo world is unplayable without its objects."
+
   # ---------------------------------------------------------------- phase 2
   - id: civilian-ambience-layer
     title: "Civilian ambience + atrocity layer (issue #8)"
@@ -470,6 +501,7 @@ items:
     status: in-progress
     priority: 1
     depends_on: [engine-native-systems, dual-package-compat]
+    commits: [b91d46f, 0c6eec8]
     summary: >
       Unknown incoming faction data never reaches a spawn path: a
       descriptor-resolution pass at campaign load probes every
@@ -535,7 +567,7 @@ items:
     status: done
     priority: 1
     depends_on: [engine-native-systems, mission-migration-native]
-    commits: [92d7426, 283574a, 3eea713, a94430a]
+    commits: [92d7426, b89470a, 56a55c6, 283574a, 3eea713, a94430a]
     gh_issues: [19, 20, 21, 22, 23, 24]
     summary: >
       Engine-level undercover replacing the binary global cover break: a
@@ -726,6 +758,41 @@ items:
       recon dossier (file:line receipts) are in issue #16.
     log:
       - "2026-07-15: deep-plan multi-agent recon done (6 subsystems); design synthesized and filed as issue #16. Offline scan: 73 of 1327 Classic models are AI-enterable; min-NPos filter needed to exclude walk-through objects. @LoBo Sinai scan still owed before the lobo-lane tests."
+      - "2026-08-05: now the gate on the whole money branch - issue #28 (cache-and-garage) requires the elected HQ, and #27 (money-sinks-dealers) sits behind #28. The owed @LoBo Sinai enterable-building scan is the cheapest thing standing between here and roughly half the open backlog by effort."
+
+  - id: cache-and-garage
+    title: "HQ cache + vehicle garage: stored weapons, lockable vehicles, dealer delivery (issue #28)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [guerrilla-base, arms-stash-engine]
+    gh_issues: [28]
+    summary: >
+      The elected headquarters becomes a physical logistics hub. Weapons and
+      vehicles bought from dealers can be shipped to it and retrieved through
+      the action menu; the player can deposit weapons into the cache the same
+      way. Vehicles parked within 100 m of the garage can be locked (with a
+      beep-beep lock cue) and persist indefinitely, which is the intended
+      route for banking captured occupier vehicles. Moving the HQ later costs
+      money. HQ siting prefers a suitable enterable building and falls back to
+      the town edge, outside buildings and fences, when none is found.
+    log:
+      - "2026-08-05: filed. The weapons half rides the existing StashRegistry pattern (keep-when-empty holders + serialized rows). The vehicle half has no precedent in Game/Guerrilla/ - garrison units ride the world vehicle serializer, but nothing today protects an arbitrary player-parked vehicle from cleanup, so expect a new registry in the StashRegistry/TownFlags mold plus a SaveVersion bump."
+
+  - id: money-sinks-dealers
+    title: "Ways to spend money: vehicle and weapon dealers seeded across cities (issue #27)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [cache-and-garage]
+    gh_issues: [27]
+    summary: >
+      At mission start, Vehicle Dealers and Weapon Dealers are each randomly
+      assigned to a third of the island's cities, drawn independently so one
+      city can host both. These are the money sink outside recruiting troops.
+      Purchases route to the HQ cache/garage for collection.
+    log:
+      - "2026-08-05: filed. Lands on an economy that already exists - economy.sqs runs the Resources (R) and Manpower (HR) ledger with zone-driven income ticks and the issue-#8 panic coupling, and recruit_action.sqs is the working addAction-dispatch precedent (enqueue only; the manager loop stays the single writer of the gmResources debit)."
 
   - id: nearest-roads-command
     title: "Evaluator commands: nearestRoads + worldLocations"
@@ -868,6 +935,26 @@ items:
     log:
       - "Plan 13's stated Phase-3 risk is C++ UI scope creep; mitigation is a read-only UIMap overlay prototype before any interactive Display work, and the rule that the game must be fun without the strategy screen."
       - "Capabilities the AI plans do not cover get faked in SQF for v1: native garrison/cover-hold, dynamic patrol routes, ambush-hold-fire FSM states, supply lines."
+
+  # ---------------------------------------------------------------- release
+  - id: player-installer
+    title: "Player installer (Windows + Linux): asset pointing, optional @LoBo download, GH-release updates (issue #29)"
+    phase: release
+    status: planned
+    priority: 2
+    depends_on: [run-game-launcher, install-missions]
+    gh_issues: [29]
+    summary: >
+      A scripted onboarding workflow that presents like a traditional Windows
+      installer, so a player can get from download to playing before the
+      initial alpha. Three requirements from issue #29: the user points the
+      installer at their own Arma: Cold War Assault install for the BIS
+      assets, an optional screen downloads @LoBo from the maintainer's server,
+      and updates arrive as GitHub releases. Needs a Linux path as well as a
+      Windows one.
+    log:
+      - "2026-08-05: filed. No scaffolding exists beyond run-game.ps1 (dev launcher) and guerrilla-mode/install-missions.ps1 (mission deploy + -IncludeWorld world gate), both dev-facing and PowerShell-only. Largest open item by raw hours, but the least risky: no engine work, no design invention, and no dependency on the guerrilla feature branch, so it can proceed in parallel with everything else."
+      - "Asset-pointing must accept the Classic 1.99 install specifically (the Demo package is not a gameplay target per the 2026-07-14 policy), and the bracketed '[Classic]' directory name is a wildcard-glob hazard in PowerShell and gitignore alike - use -LiteralPath, as #12 had to."
 
   # ---------------------------------------------------------------- housekeeping
   - id: gh-tracker-hygiene
