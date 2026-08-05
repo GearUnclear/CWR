@@ -16,7 +16,10 @@
 //         (alertHeatBreak 25; GREEN decay is only 1 per 10 s);
 //      5. NEW lifecycle: gmUndercover stays true and the player stays captive
 //         after the break - the old global un-captive reaction is gone
-//         (undercover.sqs reacts with an advisory hint only).
+//         (undercover.sqs reacts with an advisory hint only);
+//      6. issue #19: a SECOND gmBreakUndercover, with cover held the whole
+//         time, still marks a group that gained its knowledge record after
+//         the first break - the once-per-campaign latch is gone.
 //
 //  The break enters through the native command the fired-EH uses. (A literal
 //  `player fire "AK47CZ"` would be the full chain, but force-firing the real
@@ -115,6 +118,31 @@ triSimUntil { ((gmZone guZone) select 6) >= guHeat0 + 20 }
 // -- NEW lifecycle: the script baseline SURVIVES the break ---------------------
 triAssert [gmUndercover]
 triAssert [captive player]
+
+// -- issue #19 regression: a SECOND break must reach a group that gained its
+//    knowledge record after the first break was consumed. The old campaign
+//    latch re-armed only when gmUndercover dropped - never, under the
+//    keep-cover lifecycle - so every break after the campaign's first was
+//    silently ignored and this second witness would stay clean forever.
+//    Same staging pattern as the first observer, 10 m further west on the
+//    probe-verified dry line (elevation 11.5 at 40 m west of the stage). ------
+guGrpE2 = createGroup east
+"SoldierEB" createUnit [[(guPos select 0) - 40, guPos select 1, 0], guGrpE2, "guObs2 = this", 0.5, "PRIVATE"]
+triSimUntil { (count units guGrpE2) >= 1 }
+guGrpE2 setCombatMode "BLUE"
+guObs2 disableAI "MOVE"
+guObs2 stop true
+guObs2 setDir 90
+
+// -- the new group holds a live knowledge record of the (still clean) player --
+guGrpE2 reveal player
+triSimUntil { (guGrpE2 knowsAbout player) > 0 }
+
+// -- the guerrilla opens fire AGAIN: the same fired-EH call -------------------
+gmBreakUndercover "fired"
+
+// -- the second witness group is marked on the next alert tick ----------------
+triSimUntil { gmUndercoverWitnesses >= 2 }
 
 player allowDammage true
 triEndTest

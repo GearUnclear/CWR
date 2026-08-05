@@ -11,9 +11,11 @@
 // the "undercoverBroken" event plus alertHeatBreak on the zone nearest the
 // witness, later witness groups add undercoverHeatWitness Heat quietly.
 // gmBreakUndercover (the fired-EH half) marks every occupier group that
-// currently knows the subject as compromised and latches; the old global
-// vehicle-mount break is gone - vehicles resolve per observer (see
-// Undercover.hpp).  The gmUndercover global itself is script-owned.
+// currently knows the subject as compromised; every request does, the
+// per-group marking is idempotent (issue #19 removed the once-per-campaign
+// latch).  The old global vehicle-mount break is gone - vehicles resolve
+// per observer (see Undercover.hpp).  The gmUndercover global itself is
+// script-owned.
 
 #include <Poseidon/Game/Guerrilla/Undercover.hpp> // UCCompromise (tick inputs)
 
@@ -127,7 +129,11 @@ class AlertMachine
     // script-side trigger for the fired-EH half (gmBreakUndercover);
     // consumed by the next tick
     void RequestBreak(RString reason);
-    bool BreakLatched() const { return _breakLatched; }
+    // the fired-EH mark gate exactly as Simulate applies it to one tick's
+    // inputs.  Stateless since issue #19: every break request while cover
+    // is up marks witnesses (idempotent per group); the old campaign latch
+    // armed here and never re-armed under the keep-cover lifecycle
+    bool BreakShouldMark(const AlertTickInputs& in) const { return in.undercover && in.breakRequested; }
     // pending gmBreakUndercover awaiting the next tick (serialized; test aid)
     bool BreakPending() const { return _breakPending; }
     RString BreakReason() const { return _breakReason; }
@@ -174,7 +180,6 @@ class AlertMachine
     AutoArray<ZoneAlertState> _states; // index-aligned to the zone registry
     RString _handlers[NAlertEventTypes];
     float _accum = 0;
-    bool _breakLatched = false; // gmBreakUndercover consumed; re-arms when cover drops
     bool _breakPending = false; // gmBreakUndercover awaiting the next tick
     RString _breakReason;
     // deserialized rows waiting for the registry's zone table (applied on

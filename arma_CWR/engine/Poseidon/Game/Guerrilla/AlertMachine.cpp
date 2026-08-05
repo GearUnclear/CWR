@@ -50,7 +50,6 @@ void AlertMachine::Clear()
         _handlers[i] = RString();
     }
     _accum = 0;
-    _breakLatched = false;
     _breakPending = false;
     _breakReason = RString();
     _pending.Clear();
@@ -206,10 +205,12 @@ void AlertMachine::Simulate(float deltaT)
     _breakReason = RString();
 
     // gmBreakUndercover (fired EH): mark every occupier group currently
-    // holding a known record of the subject BEFORE the latch below - the
-    // marks drain right back through in.compromises (world access lives
-    // here so EvaluateAlert stays pure)
-    if (in.undercover && in.breakRequested && !_breakLatched)
+    // holding a known record of the subject - the marks drain right back
+    // through in.compromises (world access lives here so EvaluateAlert
+    // stays pure).  Every request marks; MarkAllWitnessesCompromised is
+    // idempotent per group, so a repeat break only reaches groups that
+    // gained a record since the last one (issue #19)
+    if (BreakShouldMark(in))
     {
         undercover.MarkAllWitnessesCompromised(in.breakReason);
     }
@@ -233,21 +234,15 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
     const int n = registry.NZones();
     SyncZoneCount(n);
 
-    // ---- undercover break latch (gmBreakUndercover, alert.sqs:83-104).
-    // The witness marking itself happened in Simulate (world access); event
-    // and Heat flow through the compromise drain below, so a break nobody
-    // witnessed latches silently (fired unseen = heard, not identified).
-    // The old global vehicle-mount break is gone - vehicles resolve per
-    // observer (Undercover.hpp vehicle policy).
-    if (!in.undercover)
-    {
-        // cover dropped (or was re-established later by script): re-arm
-        _breakLatched = false;
-    }
-    else if (!_breakLatched && in.breakRequested)
-    {
-        _breakLatched = true;
-    }
+    // ---- undercover break (gmBreakUndercover, alert.sqs:83-104).  The
+    // witness marking itself happened in Simulate (world access); event and
+    // Heat flow through the compromise drain below, so a break nobody
+    // witnessed stays silent (fired unseen = heard, not identified).  No
+    // campaign latch here anymore: gmUndercover never drops under the
+    // keep-cover lifecycle, so a latch re-armed on cover loss ate every
+    // break after the campaign's first (issue #19).  The old global
+    // vehicle-mount break is gone - vehicles resolve per observer
+    // (Undercover.hpp vehicle policy).
 
     // ---- per-observer compromise notifications (UndercoverSystem drain)
     for (int c = 0; c < in.compromises.Size(); c++)
@@ -588,9 +583,9 @@ LSError AlertMachine::Serialize(ParamArchive& ar, ZoneRegistry& registry)
 
     PARAM_CHECK(ar.Serialize("onAlertChanged", _handlers[AEAlertChanged], 1, RString()))
     PARAM_CHECK(ar.Serialize("onUndercoverBroken", _handlers[AEUndercoverBroken], 1, RString()))
-    PARAM_CHECK(ar.Serialize("breakLatched", _breakLatched, 1, false))
     // a gmBreakUndercover issued in the tick-interval window before the save
-    // must survive the load (defaults keep older saves readable)
+    // must survive the load (defaults keep older saves readable; the
+    // pre-#19 "breakLatched" entry in older saves is simply not read)
     PARAM_CHECK(ar.Serialize("breakPending", _breakPending, 1, false))
     PARAM_CHECK(ar.Serialize("breakReason", _breakReason, 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))

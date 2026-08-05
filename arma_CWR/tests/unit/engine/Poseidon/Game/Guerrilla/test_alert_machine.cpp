@@ -166,7 +166,6 @@ TEST_CASE("AlertMachine - inactive registry is a no-op", "[game][guerrilla]")
     REQUIRE(machine.GetZoneState(0) == ASGreen);
     Vector3 pos;
     REQUIRE_FALSE(machine.GetLastKnown(0, pos));
-    REQUIRE_FALSE(machine.BreakLatched());
 }
 
 TEST_CASE("AlertMachine - escalation thresholds, heat spikes and events", "[game][guerrilla]")
@@ -357,7 +356,7 @@ TEST_CASE("AlertMachine - last-known position bookkeeping", "[game][guerrilla]")
     REQUIRE(pos.X() == Approx(1500.0f));
 }
 
-TEST_CASE("AlertMachine - undercover break latch", "[game][guerrilla]")
+TEST_CASE("AlertMachine - undercover break gate (no campaign latch)", "[game][guerrilla]")
 {
     AlertFixture f;
     f.Load(kAlertConfig);
@@ -365,54 +364,64 @@ TEST_CASE("AlertMachine - undercover break latch", "[game][guerrilla]")
 
     AlertTickInputs in = MakeInputs(f.registry);
 
-    SECTION("no latch while not undercover")
+    SECTION("no marking while not undercover")
     {
         in.breakRequested = true;
         in.breakReason = "fired";
+        REQUIRE_FALSE(f.machine.BreakShouldMark(in));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 0);
-        REQUIRE_FALSE(f.machine.BreakLatched());
         REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));
         REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
     }
 
-    SECTION("a break request with no witnesses latches silently")
+    SECTION("a break request with no witnesses stays silent")
     {
-        // new semantics: event and Heat flow only from compromise
-        // notifications - a shot nobody witnessed is heard, not identified
+        // event and Heat flow only from compromise notifications - a shot
+        // nobody witnessed is heard, not identified
         in.undercover = true;
         in.breakRequested = true;
         in.breakReason = "fired";
+        REQUIRE(f.machine.BreakShouldMark(in));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 0);
-        REQUIRE(f.machine.BreakLatched());
         REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));
         REQUIRE(f.registry.GetZone(1)->heat == Approx(0.0f));
     }
 
-    SECTION("the latch re-arms when cover drops and is re-established")
+    SECTION("a second break with cover held reaches a group that learned the face in between")
     {
+        // issue #19 regression: the old campaign latch armed on the first
+        // in-cover request and re-armed only when gmUndercover dropped;
+        // under the keep-cover lifecycle it never drops, so every
+        // gmBreakUndercover after the campaign's first was ignored.
+
+        // first break: one witness group, the campaign-first compromise
         in.undercover = true;
         in.breakRequested = true;
         in.breakReason = "fired";
+        REQUIRE(f.machine.BreakShouldMark(in));
+        in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "fired", true));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(f.machine.BreakLatched());
+        REQUIRE(CountBroken(fired) == 1);
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f)); // GM_AL_HEAT_BREAK
 
-        // still latched while the script keeps gmUndercover up
-        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(f.machine.BreakLatched());
-
-        // script dropped gmUndercover: re-arm
-        in.undercover = false;
-        in.breakRequested = false;
-        f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE_FALSE(f.machine.BreakLatched());
-
-        // cover re-established: a new request latches again
-        in.undercover = true;
+        // a second group gains a knowledge record between the breaks; the
+        // second request must still pass the mark gate (the old gate
+        // consulted the latch the tick above had set, and returned false)
+        fired.Clear();
+        in.compromises.Clear();
         in.breakRequested = true;
+        in.breakReason = "fired";
+        REQUIRE(f.machine.BreakShouldMark(in));
+        // ... so MarkAllWitnessesCompromised runs; per-group idempotence
+        // means only the NEW group turns compromised, and its (non-first)
+        // notification drains through this tick
+        in.compromises.Add(MakeCompromise(1100.0f, 900.0f, "fired", false));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(f.machine.BreakLatched());
+        REQUIRE(CountBroken(fired) == 0);                     // event stays edge-triggered
+        REQUIRE(f.registry.GetZone(0)->heat == Approx(8.0f)); // undercoverHeatWitness
+        REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f)); // first witness zone unchanged
     }
 }
 
@@ -468,15 +477,14 @@ TEST_CASE("AlertMachine - undercover compromise drain", "[game][guerrilla]")
         REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
     }
 
-    SECTION("compromises drain independent of the break latch")
+    SECTION("compromises drain in the same tick as a break request")
     {
         // a pending gmBreakUndercover and a drained compromise in the same
-        // tick: one latch, one event
+        // tick: one event
         in.breakRequested = true;
         in.breakReason = "fired";
         in.compromises.Add(MakeCompromise(4800.0f, 4900.0f, "fired", true));
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(f.machine.BreakLatched());
         REQUIRE(CountBroken(fired) == 1);
         REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
     }
@@ -529,7 +537,7 @@ TEST_CASE("AlertMachine - FSM state, handlers and break flags survive save/load"
         AutoArray<AlertEventRecord> fired;
 
         // tick 1: Outpost straight to RED with a last-known fix; Depot into
-        // YELLOW (window = 20 s); an in-cover break request latches
+        // YELLOW (window = 20 s)
         AlertTickInputs in = MakeInputs(f.registry);
         in.playerValid = true;
         in.playerX = 1000.0f;
@@ -542,7 +550,6 @@ TEST_CASE("AlertMachine - FSM state, handlers and break flags survive save/load"
         in.zones[0].lastKnown = Vector3(1200.0f, 55.0f, 1300.0f);
         in.zones[1].knows = 1.0f;
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
-        REQUIRE(f.machine.BreakLatched());
 
         // tick 2: hold contact so Depot's window bleeds 20 -> 15
         in.breakRequested = false;
@@ -590,8 +597,7 @@ TEST_CASE("AlertMachine - FSM state, handlers and break flags survive save/load"
     CHECK(Str(loaded.GetEventHandler(AEAlertChanged)) == "gmEvtAlert = gmEvtAlert + [_this]");
     CHECK(Str(loaded.GetEventHandler(AEUndercoverBroken)) == "hBroken");
 
-    // the latch and the not-yet-consumed break request both survive
-    CHECK(loaded.BreakLatched());
+    // the not-yet-consumed break request survives
     CHECK(loaded.BreakPending());
     CHECK(Str(loaded.BreakReason()) == "fired");
 
