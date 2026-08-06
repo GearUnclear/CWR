@@ -1,4 +1,6 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaBodyPreview.hpp>     // the shared turntable mannequin (issue #43)
+#include <Poseidon/UI/Guerrilla/GuerrillaCharacterSelect.hpp> // the idc-155 child display (issue #43)
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
@@ -10,30 +12,16 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
 #include <Poseidon/IO/Streams/QBStream.hpp>
-#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>       // Shapes bank + ProxyObject (preview mannequin)
-#include <Poseidon/World/Scene/Scene.hpp>                    // GScene (preview proxy draw: LOD pick)
-#include <Poseidon/World/Scene/Camera/Camera.hpp>            // camera direction for the proxy LOD pick
-#include <Poseidon/World/Simulation/FrameInv.hpp>            // FrameWithInverse (preview proxy draw)
-#include <Poseidon/World/Simulation/Animation/Animation.hpp> // AnimationSection (zasleh hide)
-#include <Poseidon/Foundation/Math/MathDefs.hpp>             // H_PI (preview turntable)
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
-#include <ctype.h> // tolower (body-roster dedupe keys)
-#include <math.h>  // fmodf/fabsf (preview turntable + fit)
+#include <ctype.h> // tolower (body-roster dedupe + label-ambiguity keys)
+#include <map>     // per-side displayName counts (GuerrillaBodyRowLabels)
 #include <stdio.h>
 #include <string> // body-roster dedupe keys
 
-// 3D-UI camera-space depth scale, defined in UIControlsBase.cpp next to
-// ControlObject (whose constructor multiplies the config z by it).
-extern const float CameraZoom;
-
 namespace Poseidon
 {
-// The shape-path resolver ControlObject's constructor runs on its `model`
-// config value (OptionsUI.cpp) - declared the way UIControlsBase.cpp does.
-RString FindShape(RString name);
-
 namespace
 {
 // Injected occupier/resistance cycler buttons. Safely clear of the idcs the
@@ -49,11 +37,17 @@ constexpr int kIdcOutfit = 153;
 // the resolved playerClassWarrior/playerClassCiv body for the current
 // island/resistance/outfit, the CHead rotating-preview technique from the
 // player identity screen. Injected only once a model actually resolves;
-// hidden (never a substitute body) whenever one does not.
+// hidden (never a substitute body) whenever one does not. Since issue #43
+// it is a GuerrillaBodyPreview (UI/Guerrilla/GuerrillaBodyPreview.hpp),
+// shared with the character-select screen.
 constexpr int kIdcOutfitPreview = 154;
-// 155 is the BODY browser (player-body pick): a cycler over every creatable
-// Man-derived class of the loaded package, grouped by side (see
-// GuerrillaListPlayerBodies). Next free idc: 156.
+// 155 is the CHARACTER entry button (player-body pick). It used to be the
+// flat BODY cycler; issue #43 absorbed that into the
+// GuerrillaCharacterSelect child display (uncapped scrollable roster, big
+// mannequin, readable names), so the button now shows the current pick
+// ("CHARACTER: (match outfit)" / "CHARACTER: <row label>") and clicking it
+// opens the child. The idc keeps its slot and injection so any resource
+// that authored 155 keeps working. Next free idc: 156.
 constexpr int kIdcBody = 155;
 
 // Normalized-screen slots for the injected 2D cyclers — bottom-left column,
@@ -69,19 +63,14 @@ constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
 
 // The preview mannequin's slot: the free stretch of the bottom-left column
-// above the body browser. Authored as a normalized-screen box like the 2D
-// cyclers; the 3D placement is derived from it at runtime (Convert2DTo3D)
-// so it tracks the engine's aspect settings.
+// above the CHARACTER button. Authored as a normalized-screen box like the
+// 2D cyclers and passed to GuerrillaBodyPreview::PlaceInSlot (each display
+// authors its own slot; the character-select screen uses a bigger one); the
+// 3D placement is derived from it at runtime (Convert2DTo3D) so it tracks
+// the engine's aspect settings.
 constexpr float kPreviewCX = 0.18f;      // column centre (the cyclers' midline)
 constexpr float kPreviewTopY = 0.26f;    // below the screen-top header strip
-constexpr float kPreviewBottomY = 0.61f; // above the body browser at 0.66
-// Camera-space depth in the units ControlObject's constructor reads (it
-// multiplies by CameraZoom): inside the 3D-UI ray range (ControlObject::
-// IsInside probes out to 2.0 * CameraZoom).
-constexpr float kPreviewDepthCfg = 1.0f;
-// Seconds per full turntable revolution. CHead spins a head in 4; a full
-// body reads better a touch slower.
-constexpr float kPreviewTurnPeriod = 8.0f;
+constexpr float kPreviewBottomY = 0.61f; // above the CHARACTER button at 0.66
 
 // The outfit-cycler tokens. WARRIOR must be index 0 (the default): it is
 // defined as the authored mission.sqm class, so an untouched cycler
@@ -102,177 +91,10 @@ RString SameSideMessage(RString side)
     return RString(buffer);
 }
 
-// The turntable mannequin (issue #25 M4): a ControlObject whose shape can be
-// re-pointed at a different body model as the cyclers change (the CHead
-// shape-swap precedent, DisplayUIMenus.cpp), refitted to a fixed 2D slot
-// from its bounding box, and yaw-rotated from the display's OnSimulate.
-// Renders whatever pose the p3d authors (base pose) - no UI control animates
-// a Man skeleton, and that is accepted for this milestone.
-class GuerrillaOutfitPreview : public ControlObject
-{
-  public:
-    GuerrillaOutfitPreview(ControlsContainer* parent, int idc, const ParamEntry& cls) : ControlObject(parent, idc, cls)
-    {
-    }
-
-    // Swap to a different body model (raw CfgVehicles `model` value, the
-    // same string the injected config carried). No-op when unchanged; the
-    // caller re-fits via PlaceInSlot either way.
-    void SetModel(RString modelName)
-    {
-        if (stricmp(modelName, _modelName) == 0)
-        {
-            return;
-        }
-        _modelName = modelName;
-        Ref<LODShapeWithShadow> shape = Shapes.New(FindShape(modelName), false, false);
-        if (shape && shape->NLevels() > 0)
-        {
-            // the same UI-space treatment ControlObject's constructor applies
-            shape->LevelOpaque(0)->MakeCockpit();
-            shape->OrSpecial(BestMipmap | NoDropdown | DisableSun);
-        }
-        HideMuzzleFlashSections(shape);
-        SetShape(shape);
-    }
-
-    // The weapon-proxy models author their muzzle-flash ("zasleh") sections
-    // VISIBLE in the p3d (ak_47_v58_proxy.p3d carries a permanent white
-    // zasleh3 star). In-mission Man::DrawProxies substitutes the real weapon
-    // model and re-hides its zasleh every frame keyed on firing
-    // (SoldierOldSimProxy.cpp); the raw ControlObject render path has no such
-    // pass, so hide the section once per body swap on every proxy shape (and
-    // on the body itself, should one ever author it). AnimationSection::Hide
-    // is persistent per-shape state, exactly the not-firing state the mission
-    // pass maintains, and nothing ever Unhides these proxy placeholders.
-    static void HideMuzzleFlashSections(LODShapeWithShadow* body)
-    {
-        auto hideOnShape = [](LODShapeWithShadow* shape)
-        {
-            if (!shape)
-            {
-                return;
-            }
-            AnimationSection zasleh;
-            zasleh.Init(shape, "zasleh", nullptr);
-            for (int level = 0; level < shape->NLevels(); level++)
-            {
-                zasleh.Hide(shape, level);
-            }
-        };
-        if (!body)
-        {
-            return;
-        }
-        hideOnShape(body);
-        for (int level = 0; level < body->NLevels(); level++)
-        {
-            Shape* lShape = body->Level(level);
-            if (!lShape)
-            {
-                continue;
-            }
-            for (int i = 0; i < lShape->NProxies(); i++)
-            {
-                const ProxyObject& proxy = lShape->Proxy(i);
-                if (proxy.obj)
-                {
-                    hideOnShape(proxy.obj->GetShape());
-                }
-            }
-        }
-    }
-
-    // Object::DrawProxies with two filters: the flag proxy never draws (its
-    // model is hard-textured with a default US flag that only in-mission
-    // flag-carrier machinery may rebind, so NO flag is the only rendering
-    // that is safe for every faction), and of the authored weapon proxies
-    // only the primary rifle survives - launchers and pistols hide, so the
-    // mannequin stops wearing every weapon at once (see
-    // GuerrillaPreviewHideWeaponProxy).
-    void DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform, float dist2,
-                     float z2, const LightList& lights) override
-    {
-        // Pars lives for the process; the entry lookup is one hash probe,
-        // cheap enough per frame and always current should a mod reload
-        // ever rebuild the merged config.
-        const ParamEntry* nonAI = Pars.FindEntry("CfgNonAIVehicles");
-        Shape* sShape = _shape->LevelOpaque(level);
-        for (int i = 0; i < sShape->NProxies(); i++)
-        {
-            const ProxyObject& proxy = sShape->Proxy(i);
-            if (!proxy.obj || GuerrillaPreviewIsFlagProxy(proxy.name) ||
-                GuerrillaPreviewHideWeaponProxy(nonAI, proxy.name))
-            {
-                continue;
-            }
-            // from here the base Object::DrawProxies body, unchanged
-            Matrix4Val pTransform = transform * proxy.obj->Transform();
-            Matrix4Val invPTransform = proxy.invTransform * invTransform;
-            LODShapeWithShadow* pshape = proxy.obj->GetShapeOnPos(pTransform.Position());
-            if (!pshape)
-            {
-                continue;
-            }
-            int pLevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
-                                                    GScene->GetCamera()->Direction());
-            if (pLevel == LOD_INVISIBLE)
-            {
-                continue;
-            }
-            FrameWithInverse pFrame(pTransform, invPTransform);
-            proxy.obj->Draw(pLevel, ClipAll, pFrame);
-        }
-    }
-
-    // Fit the current shape into the 2D slot: bounding-box centre on the
-    // slot centre, model height scaled to the slot height. Per-shape, so a
-    // LoBo body and a vanilla body render the same on-screen size no matter
-    // where each p3d puts its origin (feet, waist, ...).
-    void PlaceInSlot()
-    {
-        LODShapeWithShadow* shape = GetShape();
-        if (!shape)
-        {
-            return;
-        }
-        const float depth = kPreviewDepthCfg * CameraZoom;
-        Vector3 top = Convert2DTo3D(Point2DFloat(kPreviewCX, kPreviewTopY), depth);
-        Vector3 bottom = Convert2DTo3D(Point2DFloat(kPreviewCX, kPreviewBottomY), depth);
-        float slotHeight = fabsf(top[1] - bottom[1]);
-        float modelHeight = shape->Max()[1] - shape->Min()[1];
-        _fitScale = modelHeight > 0.01f ? slotHeight / modelHeight : 1.0f;
-        Vector3 pos = (top + bottom) * 0.5f;
-        pos[1] -= 0.5f * (shape->Min()[1] + shape->Max()[1]) * _fitScale;
-        _position = pos;
-        SetPosition(pos);
-        SetScale(_fitScale);
-    }
-
-    // CHead::Simulate's turntable at full-body cadence. SetOrientation
-    // resets the scale part of the transform, so reapply the fit, exactly
-    // like CHead reapplies Scale().
-    void SimulateTurntable()
-    {
-        float t = fmodf(Glob.uiTime.toFloat(), kPreviewTurnPeriod);
-        Matrix3 orient(MRotationY, (H_PI * 2.0f / kPreviewTurnPeriod) * t);
-        SetOrientation(orient);
-        SetScale(_fitScale);
-    }
-
-    void OnDraw(float alpha) override
-    {
-        if (!GetShape())
-        {
-            return; // a body that failed to load draws nothing, never crashes
-        }
-        ControlObject::OnDraw(alpha);
-    }
-
-  private:
-    RString _modelName;
-    float _fitScale = 1.0f;
-};
+// The turntable mannequin class itself lives in
+// UI/Guerrilla/GuerrillaBodyPreview.{hpp,cpp} since issue #43 (shared with
+// GuerrillaCharacterSelect); this display keeps only its slot constants
+// above and the injection/refresh logic in UpdateOutfitPreview.
 } // namespace
 
 std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std::function<bool(RString)>& worldExists)
@@ -395,12 +217,16 @@ std::vector<GuerrillaBodyChoice> GuerrillaListPlayerBodies(const ParamEntry* veh
                 break;
             }
         }
-        if (dup || (int)buckets[side].size() >= kGuerrillaMaxBodiesPerSide)
+        if (dup)
         {
-            continue;
+            continue; // UNCAPPED since issue #43: only the dedupe holds rows back
         }
         seen[side].push_back(key);
-        buckets[side].push_back(GuerrillaBodyChoice{RString(e.GetName()), RString(kSideNames[side])});
+        // GetOwner: the CfgPatches class AddonSystem::ParseAddonConfig
+        // stamped on the class (lowercased there), EMPTY for base game -
+        // the ArcadeUnitInfo::RequiredAddons attribution.
+        buckets[side].push_back(
+            GuerrillaBodyChoice{RString(e.GetName()), RString(kSideNames[side]), displayName, RString(e.GetOwner())});
     }
     for (int side : kSideOrder)
     {
@@ -410,6 +236,92 @@ std::vector<GuerrillaBodyChoice> GuerrillaListPlayerBodies(const ParamEntry* veh
         }
     }
     return out;
+}
+
+RString GuerrillaSanitizeLabel(RString s)
+{
+    if (s.GetLength() == 0)
+    {
+        return s;
+    }
+    std::string buffer((const char*)s);
+    bool changed = false;
+    for (char& c : buffer)
+    {
+        if (c == '_')
+        {
+            c = '-'; // the menu fonts drop the '_' glyph; '-' keeps the join readable
+            changed = true;
+        }
+    }
+    return changed ? RString(buffer.c_str()) : s;
+}
+
+RString GuerrillaBodyRowLabel(const GuerrillaBodyChoice& b, bool displayNameAmbiguous)
+{
+    if (b.displayName.GetLength() == 0)
+    {
+        return GuerrillaSanitizeLabel(b.className);
+    }
+    if (!displayNameAmbiguous)
+    {
+        return GuerrillaSanitizeLabel(b.displayName);
+    }
+    // the classname suffix is what tells two same-named looks apart; both
+    // halves sanitized so the label never carries an '_' from either
+    return GuerrillaSanitizeLabel(b.displayName) + RString(" (") + GuerrillaSanitizeLabel(b.className) + RString(")");
+}
+
+namespace
+{
+// per-side, case-insensitive ambiguity key for a roster row's displayName
+std::string BodyLabelKey(const GuerrillaBodyChoice& b)
+{
+    std::string key = std::string((const char*)b.side) + "|" + std::string((const char*)b.displayName);
+    for (char& c : key)
+    {
+        c = (char)tolower((unsigned char)c);
+    }
+    return key;
+}
+} // namespace
+
+std::vector<RString> GuerrillaBodyRowLabels(const std::vector<GuerrillaBodyChoice>& roster)
+{
+    // Ambiguity = the same displayName on 2+ rows of ONE side, over the
+    // final (deduped) roster. Case-insensitive like the dedupe key.
+    std::map<std::string, int> counts;
+    for (const GuerrillaBodyChoice& b : roster)
+    {
+        if (b.displayName.GetLength() > 0)
+        {
+            counts[BodyLabelKey(b)]++;
+        }
+    }
+    std::vector<RString> out;
+    out.reserve(roster.size());
+    for (const GuerrillaBodyChoice& b : roster)
+    {
+        bool ambiguous = b.displayName.GetLength() > 0 && counts[BodyLabelKey(b)] >= 2;
+        out.push_back(GuerrillaBodyRowLabel(b, ambiguous));
+    }
+    return out;
+}
+
+bool GuerrillaClassIsCivilian(const ParamEntry* vehiclesCfg, RString className)
+{
+    if (!vehiclesCfg || className.GetLength() == 0)
+    {
+        return false;
+    }
+    const ParamEntry* cls = vehiclesCfg->FindEntry(className);
+    if (!cls || !cls->IsClass())
+    {
+        return false; // unknown class: nothing says civilian, the warrior rule applies
+    }
+    // the same inherited-side read the roster builder performs; 3 = CIV
+    // (TargetSide, World/Scene/Object.hpp)
+    return cls->ReadValue("side", -1) == 3;
 }
 
 RString GuerrillaTemplateMissionBase(RString island)
@@ -695,7 +607,7 @@ bool GuerrillaPreviewIsFlagProxy(const char* proxyName)
     return false;
 }
 
-bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName)
+bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName, bool civilian)
 {
     if (!proxyName || !*proxyName)
     {
@@ -737,9 +649,18 @@ bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const c
         return false;
     }
     RString sim = cls->ReadValue("simulation", RString());
-    // launchers and pistols hide; proxyweapon (the primary rifle) and every
-    // non-weapon proxy draw
-    return sim.GetLength() > 0 && (stricmp(sim, "proxysecweapon") == 0 || stricmp(sim, "proxyhandgun") == 0);
+    if (sim.GetLength() == 0)
+    {
+        return false;
+    }
+    // launchers and pistols always hide; proxyweapon (the primary rifle)
+    // hides only for a civilian body (issue #43: civilians preview
+    // unarmed), and every non-weapon proxy always draws
+    if (stricmp(sim, "proxysecweapon") == 0 || stricmp(sim, "proxyhandgun") == 0)
+    {
+        return true;
+    }
+    return civilian && stricmp(sim, "proxyweapon") == 0;
 }
 
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix)
@@ -850,7 +771,7 @@ ControlObject* GuerrillaNewGame::OnCreateObject(int type, int idc, const ParamEn
     if (idc == kIdcOutfitPreview)
     {
         // the DisplayNewUser::OnCreateObject -> CHead hook, for the mannequin
-        return new GuerrillaOutfitPreview(this, idc, cls);
+        return new GuerrillaBodyPreview(this, idc, cls);
     }
     return Display::OnCreateObject(type, idc, cls);
 }
@@ -859,7 +780,7 @@ void GuerrillaNewGame::OnSimulate(EntityAI* vehicle)
 {
     // Turntable for the mannequin: the DisplayNewUser::OnSimulate ->
     // CHead::Simulate pattern (UI displays get no other per-frame tick).
-    if (auto* preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview)))
+    if (auto* preview = dynamic_cast<GuerrillaBodyPreview*>(GetCtrl(kIdcOutfitPreview)))
     {
         if (preview->IsVisible())
         {
@@ -937,7 +858,7 @@ void GuerrillaNewGame::UpdateOutfitPreview()
     }
     RString model = GuerrillaOutfitPreviewModel(Pars.FindEntry("CfgVehicles"), previewClass,
                                                 [](RString path) { return QIFStreamB::FileExist(path); });
-    GuerrillaOutfitPreview* preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview));
+    GuerrillaBodyPreview* preview = dynamic_cast<GuerrillaBodyPreview*>(GetCtrl(kIdcOutfitPreview));
     if (model.GetLength() == 0)
     {
         // plan-15 shaped degrade: no descriptor key, unknown class or a
@@ -962,7 +883,7 @@ void GuerrillaNewGame::UpdateOutfitPreview()
         ParamEntry* position = cls->AddArray("position");
         position->AddValue(0.0f);
         position->AddValue(0.0f);
-        position->AddValue(kPreviewDepthCfg); // PlaceInSlot refines below
+        position->AddValue(kGuerrillaPreviewDepthCfg); // PlaceInSlot refines below
         ParamEntry* direction = cls->AddArray("direction");
         direction->AddValue(0.0f);
         direction->AddValue(0.0f);
@@ -973,7 +894,7 @@ void GuerrillaNewGame::UpdateOutfitPreview()
         up->AddValue(0.0f);
         cls->Add("scale", 1.0f);
         LoadObject(*cls);
-        preview = dynamic_cast<GuerrillaOutfitPreview*>(GetCtrl(kIdcOutfitPreview));
+        preview = dynamic_cast<GuerrillaBodyPreview*>(GetCtrl(kIdcOutfitPreview));
         if (!preview)
         {
             return;
@@ -982,8 +903,11 @@ void GuerrillaNewGame::UpdateOutfitPreview()
     // On the injection pass the constructor already loaded this model and
     // SetModel just records the name (the shape bank caches the reload); on
     // later passes it swaps the shape when the body actually changed.
+    // Civilian bodies preview unarmed (issue #43): the rule follows the
+    // PREVIEWED class's config side, whichever selection resolved it.
     preview->SetModel(model);
-    preview->PlaceInSlot();
+    preview->SetCivilian(GuerrillaClassIsCivilian(Pars.FindEntry("CfgVehicles"), previewClass));
+    preview->PlaceInSlot(kPreviewCX, kPreviewTopY, kPreviewBottomY);
     preview->ShowCtrl(true);
 }
 
@@ -1111,17 +1035,19 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     char buffer[256];
     if (idc == kIdcBody)
     {
-        // "BODY: <SIDE> <class>" — the exact-text form the e2e asserts; the
-        // default reads "(match outfit)" because that is literally what it
-        // does: publish nothing and let the OUTFIT token resolve the body.
+        // "CHARACTER: <row label>" via the SAME GuerrillaBodyRowLabels
+        // builder the child display's list uses, so button and list can
+        // never disagree on a body's name; the default reads
+        // "(match outfit)" because that is literally what it does: publish
+        // nothing and let the OUTFIT token resolve the body.
         if (_bodySel >= 0 && _bodySel < (int)_bodies.size())
         {
-            snprintf(buffer, sizeof(buffer), "BODY: %s %s", (const char*)_bodies[_bodySel].side,
-                     (const char*)_bodies[_bodySel].className);
+            std::vector<RString> labels = GuerrillaBodyRowLabels(_bodies);
+            snprintf(buffer, sizeof(buffer), "CHARACTER: %s", (const char*)labels[_bodySel]);
         }
         else
         {
-            snprintf(buffer, sizeof(buffer), "BODY: (match outfit)");
+            snprintf(buffer, sizeof(buffer), "CHARACTER: (match outfit)");
         }
         if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
         {
@@ -1184,16 +1110,18 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             UpdateOutfitPreview();
             break;
         case kIdcBody:
-            // default (-1) -> 0 -> ... -> n-1 -> default: the no-op is a
-            // regular ring stop, so cycling past the roster restores the
-            // untouched-screen behaviour instead of trapping the player on
-            // an explicit pick.
-            if (!_bodies.empty())
+            // The old flat cycler is retired (issue #43): the button opens
+            // the character-select child display; the pick comes back
+            // through OnChildDestroyed. Gated on the child being able to
+            // own controls (CanBuild) - it could only be reached headless
+            // through synthetic events, and opening an empty display there
+            // would just trap the flow behind an invisible Esc. An empty
+            // roster keeps the click a no-op too: the only offer would be
+            // the "(match outfit)" row the button already shows.
+            if (!_bodies.empty() && GuerrillaCharacterSelect::CanBuild())
             {
-                _bodySel = _bodySel + 1 >= (int)_bodies.size() ? -1 : _bodySel + 1;
+                CreateChild(new GuerrillaCharacterSelect(this, _bodies, _bodySel));
             }
-            UpdateFactionLabel(idc);
-            UpdateOutfitPreview();
             break;
         case IDC_CANCEL:
         {
@@ -1287,6 +1215,30 @@ void GuerrillaNewGame::OnCtrlClosed(int idc)
     {
         Display::OnCtrlClosed(idc);
     }
+}
+
+void GuerrillaNewGame::OnChildDestroyed(int idd, int exit)
+{
+    if (idd == IDD_GUERRILLA_CHARACTER_SELECT)
+    {
+        if (exit == IDC_OK)
+        {
+            // Read the pick BEFORE the base call releases _child (the
+            // DisplayMain::OnChildDestroyed IDD_GUERRILLA_NEW_GAME
+            // precedent, OptionsUIApp.cpp).
+            if (auto* select = dynamic_cast<GuerrillaCharacterSelect*>((ControlsContainer*)_child))
+            {
+                int pick = select->SelectedRosterIndex();
+                _bodySel = (pick >= 0 && pick < (int)_bodies.size()) ? pick : -1;
+            }
+        }
+        // Any other exit (BACK/Esc): the pick stays what it was.
+        Display::OnChildDestroyed(idd, exit);
+        UpdateFactionLabel(kIdcBody);
+        UpdateOutfitPreview();
+        return;
+    }
+    Display::OnChildDestroyed(idd, exit);
 }
 
 RString GuerrillaNewGame::SelectedIsland()

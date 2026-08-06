@@ -35,8 +35,9 @@ triAssertEq [(triClick 120), true]
 triAssertEq [(triDisplay), 76]
 
 // -- island: Abel (full CWA 1.99 stock island; template installed) ----------
-// (triSelectListByData is a case-sensitive substring match on the row data;
-// Classic's CfgWorldList class is "Abel")
+// (triSelectListByData is a case-INSENSITIVE substring match on the row
+// data, and works on both C3DListBox and CListBox; Classic's CfgWorldList
+// class is "Abel")
 triAssertEq [(triSelectListByData [101, "Abel"]), true]
 
 // -- the faction cyclers open on the template's default* keys ----------------
@@ -60,9 +61,10 @@ triSimUntil { alive player }
 
 // -- the selection was published for engine and scripts ----------------------
 triAssertEq [gmSelOutfit, "CIVILIAN"]
-// the BODY browser (idc 155) was untouched: its "(match outfit)" default
-// publishes nothing - the untouched-screen invariant for the player-body
-// channel (ui/guerrilla_player_body_e2e drives the non-default path)
+// the character-select button (idc 155) was untouched: its "(match outfit)"
+// default publishes nothing - the untouched-screen invariant for the
+// player-body channel (ui/guerrilla_player_body_e2e drives the non-default
+// path through the IDD 77 screen)
 triAssertEq [(format ["%1", isNil "gmSelPlayerClass"]), "true"]
 
 // -- M1: the player wears the plainclothes body, on the resistance side ------

@@ -1,7 +1,8 @@
 tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
 binary = "PoseidonGame"
-# No mission= - fresh menu launch of the same template, browser untouched
-# ("(match outfit)" default), then triLoadGame restores phase 01's save.
+# No mission= - fresh menu launch of the same template, character screen
+# untouched ("CHARACTER: (match outfit)" default), then triLoadGame restores
+# phase 01's save.
 timeout = 300
 assert_timeout = 180
 extra_args = ["--dev", "--no-strict"]

@@ -1,11 +1,11 @@
-# BODY-browser player-body persistence across save/reload (the class-driven
-# follow-up to issue #25).
+# Character-select player-body persistence across save/reload (the
+# class-driven follow-up to issue #25).
 #
-# Phase 01 drives the REAL menu path (GUERRILLA -> Abel -> BODY "WEST
-# SoldierWB" -> launch), proves the engine substituted the player body with
+# Phase 01 drives the REAL menu path (GUERRILLA -> Abel -> character screen
+# -> SoldierWB -> launch), proves the engine substituted the player body with
 # the cross-side pick, then writes a binary save (UserDir/Saved/Tmp/
 # gbody.fps). Phase 02 fresh-launches the SAME mission through the menu with
-# the browser UNTOUCHED (proving the clean-slate baseline is the authored
+# the screen UNTOUCHED (proving the clean-slate baseline is the authored
 # SoldierGB and a nil gmSelPlayerClass), then triLoadGame rehydrates phase
 # 01's world: the substituted WEST body, its GUER instance side and the
 # published gmSelPlayerClass must all come back. The ordered phases share one

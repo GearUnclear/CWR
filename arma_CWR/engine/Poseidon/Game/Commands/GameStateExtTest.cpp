@@ -1037,32 +1037,190 @@ GameValue TriListSel(const GameState* /*state*/, GameValuePar arg)
     return GameValue(static_cast<float>(ListBoxCurSel(display->GetCtrl(idc))));
 }
 
-/// triSelectListByData [idc, "substr"] — select the first C3DListBox row whose data
-/// (for the session list, the guid "addr:port") contains substr. Returns true if found.
-/// Lets a test pick a specific enumerated server (e.g. the 127.0.0.1 one) when LAN
-/// broadcast surfaces the same host on several interfaces.
+/// triSelectListByData [idc, "substr"] — select the first listbox row whose data
+/// contains substr, case-insensitively (C3DListBox session/island lists carry
+/// guids/world names; the character-select CListBox carries classnames). Returns
+/// true if found. Lets a test pick a specific enumerated server (e.g. the
+/// 127.0.0.1 one) when LAN broadcast surfaces the same host on several
+/// interfaces, or a specific body class regardless of label wording and row
+/// position.
 GameValue TriSelectListByData(const GameState* /*state*/, GameValuePar arg)
 {
     const GameArrayType& arr = arg;
     if (arr.Size() < 2)
         return GameValue(false);
     const int idc = static_cast<int>(static_cast<GameScalarType>(arr[0]));
-    const std::string needle = (const char*)static_cast<RString>(arr[1]);
+    std::string needle = (const char*)static_cast<RString>(arr[1]);
+    for (char& c : needle)
+        c = (char)tolower((unsigned char)c);
     auto* display = GetActiveDisplayForSQF();
     if (!display)
         return GameValue(false);
-    auto* lb = dynamic_cast<C3DListBox*>(display->GetCtrl(idc));
-    if (!lb)
+    IControl* ctrl = display->GetCtrl(idc);
+    auto* lb3d = dynamic_cast<C3DListBox*>(ctrl);
+    auto* lb2d = lb3d ? nullptr : dynamic_cast<CListBox*>(ctrl);
+    CListBoxContainer* box = lb3d ? static_cast<CListBoxContainer*>(lb3d) : static_cast<CListBoxContainer*>(lb2d);
+    if (!box)
         return GameValue(false);
-    for (int i = 0; i < lb->GetSize(); i++)
+    for (int i = 0; i < box->GetSize(); i++)
     {
-        const std::string data = (const char*)lb->GetData(i);
+        std::string data = (const char*)box->GetData(i);
+        for (char& c : data)
+            c = (char)tolower((unsigned char)c);
         if (data.find(needle) != std::string::npos)
         {
-            lb->SetCurSel(i);
+            // SetCurSel is on the concrete classes, not the container base;
+            // sendUpdate=true fires the display's selection handler like a
+            // real click (the triLBSetCurSel convention).
+            if (lb3d)
+                lb3d->SetCurSel(i, true);
+            else
+                lb2d->SetCurSel(i, true);
             return GameValue(true);
         }
     }
+    return GameValue(false);
+}
+
+// Resolve a control by IDC starting from the deepest active display (the same
+// UIActiveDisplay::WalkToDeepest traversal input routing uses, so nested child
+// displays like DisplayMain -> GuerrillaNewGame -> a further child are reached).
+// If the topmost container does not own the IDC (a transient channel/chat HUD
+// shadowing a modal child), fall back to scanning the whole UI stack, exactly
+// like triClick / triInvokeButton do.
+static IControl* FindControlOnActiveStack(int idc)
+{
+    if (auto* display = GetActiveDisplayForSQF())
+    {
+        if (IControl* ctrl = display->GetCtrl(idc))
+            return ctrl;
+    }
+    if (auto* owner = UIActiveDisplay::FindContainerWithIdc(GWorld, idc))
+        return owner->GetCtrl(idc);
+    return nullptr;
+}
+
+// Shared resolve for the triLB* family: any CListBoxContainer-derived control
+// (CListBox, C3DListBox, CCombo's drop list, CModsList, ...). Returns nullptr
+// when the IDC is missing or is not a listbox; logs the reason.
+static CListBoxContainer* FindListBoxForTri(int idc, const char* verb)
+{
+    IControl* ctrl = FindControlOnActiveStack(idc);
+    if (!ctrl)
+    {
+        LOG_ERROR(Core, "[tri] {}: IDC {} not found", verb, idc);
+        return nullptr;
+    }
+    auto* box = dynamic_cast<CListBoxContainer*>(ctrl);
+    if (!box)
+        LOG_ERROR(Core, "[tri] {}: IDC {} not a listbox", verb, idc);
+    return box;
+}
+
+/// triLBSize <idc>: row count of a listbox (CListBox / C3DListBox / any
+/// CListBoxContainer). Returns -1 if the IDC is missing or not a listbox.
+GameValue TriLBSize(const GameState* /*state*/, GameValuePar arg)
+{
+    const int idc = static_cast<int>(static_cast<GameScalarType>(arg));
+    auto* box = FindListBoxForTri(idc, "triLBSize");
+    if (!box)
+        return GameValue(static_cast<float>(-1));
+    return GameValue(static_cast<float>(box->GetSize()));
+}
+
+/// triLBText [idc, row]: text of a listbox row, or "" when the IDC is missing,
+/// not a listbox, or the row is out of range (same convention as triControlText).
+GameValue TriLBText(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("");
+    const GameArrayType& a = arg;
+    if (a.Size() < 2)
+    {
+        LOG_ERROR(Core, "[tri] triLBText: expected [idc, row]");
+        return GameValue("");
+    }
+    const int idc = static_cast<int>(static_cast<GameScalarType>(a[0]));
+    const int row = static_cast<int>(static_cast<GameScalarType>(a[1]));
+    auto* box = FindListBoxForTri(idc, "triLBText");
+    if (!box || row < 0 || row >= box->GetSize())
+        return GameValue("");
+    RString text = box->GetText(row);
+    return GameValue(text ? (const char*)text : "");
+}
+
+/// triLBValue [idc, row]: the row's value (CListBoxContainer::GetValue), useful
+/// to tell header rows from data rows. Returns -1 when the IDC is missing, not
+/// a listbox, or the row is out of range.
+GameValue TriLBValue(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue(static_cast<float>(-1));
+    const GameArrayType& a = arg;
+    if (a.Size() < 2)
+    {
+        LOG_ERROR(Core, "[tri] triLBValue: expected [idc, row]");
+        return GameValue(static_cast<float>(-1));
+    }
+    const int idc = static_cast<int>(static_cast<GameScalarType>(a[0]));
+    const int row = static_cast<int>(static_cast<GameScalarType>(a[1]));
+    auto* box = FindListBoxForTri(idc, "triLBValue");
+    if (!box || row < 0 || row >= box->GetSize())
+        return GameValue(static_cast<float>(-1));
+    return GameValue(static_cast<float>(box->GetValue(row)));
+}
+
+/// triLBCurSel <idc>: current selected row of a listbox (-1 = no selection,
+/// -2 = IDC missing or not a listbox; same convention as triListSel, but works
+/// for any CListBoxContainer, not just CListBox / C3DListBox concretes).
+GameValue TriLBCurSel(const GameState* /*state*/, GameValuePar arg)
+{
+    const int idc = static_cast<int>(static_cast<GameScalarType>(arg));
+    auto* box = FindListBoxForTri(idc, "triLBCurSel");
+    if (!box)
+        return GameValue(static_cast<float>(-2));
+    return GameValue(static_cast<float>(box->GetCurSel()));
+}
+
+/// triLBSetCurSel [idc, row]: set the current row with sendUpdate=true so the
+/// display's OnLBSelChanged fires, exactly like a user click. row -1 clears the
+/// selection. Returns true on success, false on missing IDC / not a listbox /
+/// row out of range.
+GameValue TriLBSetCurSel(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue(false);
+    const GameArrayType& a = arg;
+    if (a.Size() < 2)
+    {
+        LOG_ERROR(Core, "[tri] triLBSetCurSel: expected [idc, row]");
+        return GameValue(false);
+    }
+    const int idc = static_cast<int>(static_cast<GameScalarType>(a[0]));
+    const int row = static_cast<int>(static_cast<GameScalarType>(a[1]));
+    auto* box = FindListBoxForTri(idc, "triLBSetCurSel");
+    if (!box)
+        return GameValue(false);
+    if (row < -1 || row >= box->GetSize())
+    {
+        LOG_ERROR(Core, "[tri] triLBSetCurSel: IDC {} row {} out of range (size={})", idc, row, box->GetSize());
+        return GameValue(false);
+    }
+    // SetCurSel lives on the concrete widgets, not on CListBoxContainer, so
+    // dispatch to whichever concrete type this control is.
+    if (auto* lb = dynamic_cast<CListBox*>(box))
+    {
+        LOG_INFO(Core, "[tri] triLBSetCurSel IDC={} row={} (CListBox, size={})", idc, row, box->GetSize());
+        lb->SetCurSel(row, true);
+        return GameValue(true);
+    }
+    if (auto* lb3d = dynamic_cast<C3DListBox*>(box))
+    {
+        LOG_INFO(Core, "[tri] triLBSetCurSel IDC={} row={} (C3DListBox, size={})", idc, row, box->GetSize());
+        lb3d->SetCurSel(row, true);
+        return GameValue(true);
+    }
+    LOG_ERROR(Core, "[tri] triLBSetCurSel: IDC {} listbox type has no SetCurSel", idc);
     return GameValue(false);
 }
 

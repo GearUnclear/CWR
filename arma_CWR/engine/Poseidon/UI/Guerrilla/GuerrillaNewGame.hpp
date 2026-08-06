@@ -48,12 +48,13 @@ constexpr const char* kGuerrillaVarResistance = "gmSelResistance";
 // a no-UI launch).
 constexpr const char* kGuerrillaVarOutfit = "gmSelOutfit";
 // Player body class (the class-driven answer to issue #25's open vocabulary
-// question): the exact CfgVehicles classname the BODY browser picked, from
-// any side the loaded package offers. Published only when the browser left
-// its "(match outfit)" default - an untouched browser publishes nothing and
-// the outfit token keeps deciding the player body. The pick governs the
-// PLAYER BODY ONLY; recruit/companion/hold matching stays on the OUTFIT
-// family axis (gmSelOutfit) and its *Civ descriptor keys.
+// question): the exact CfgVehicles classname the character-select screen
+// picked, from any side the loaded package offers. Published only when the
+// selection left its "(match outfit)" default - an untouched screen
+// publishes nothing and the outfit token keeps deciding the player body.
+// The pick governs the PLAYER BODY ONLY; recruit/companion/hold matching
+// stays on the OUTFIT family axis (gmSelOutfit) and its *Civ descriptor
+// keys.
 constexpr const char* kGuerrillaVarPlayerClass = "gmSelPlayerClass";
 
 // Pure list builders (unit-testable with an injected ParamFile):
@@ -150,22 +151,22 @@ RString GuerrillaOutfitPreviewClass(const ParamEntry* factionsCfg, const ParamEn
 RString GuerrillaOutfitPreviewModel(const ParamEntry* vehiclesCfg, RString className,
                                     const std::function<bool(RString)>& shapeFileExists);
 
-// One row of the BODY browser's roster: a creatable Man-derived CfgVehicles
-// class of the loaded package, tagged with its config side's script string
-// ("EAST"/"WEST"/"GUER"/"CIV" per the TargetSide enum values 0..3).
+// One row of the character-select roster: a creatable Man-derived
+// CfgVehicles class of the loaded package, tagged with its config side's
+// script string ("EAST"/"WEST"/"GUER"/"CIV" per the TargetSide enum values
+// 0..3), its config displayName (may be EMPTY, and vanilla shares one name
+// across many classes - "Soldier", "Medic"), and the owning addon
+// (ParamEntry::GetOwner, the CfgPatches class AddonSystem stamped,
+// lowercased; EMPTY for base-game classes).
 struct GuerrillaBodyChoice
 {
     RString className;
     RString side;
+    RString displayName;
+    RString addon;
 };
 
-// Deterministic per-side cap on the BODY browser roster, applied AFTER the
-// displayName+model dedupe: a flat cycler stops being usable long before a
-// mod package's full roster runs out (@LoBo ships hundreds of Man classes),
-// so each side keeps its first N deduped classes in config scan order.
-constexpr int kGuerrillaMaxBodiesPerSide = 24;
-
-// The BODY browser roster (player-body pick, issue #25 follow-up): every
+// The character-select roster (player-body pick, issues #25 + #43): every
 // class derived from CfgVehicles' Man class that is creatable (scope > 0;
 // scope=1 script-only classes like SoldierGFakeC are deliberate picks),
 // belongs to a playable side (side 0..3 = EAST/WEST/GUER/CIV; TLogic and
@@ -175,13 +176,44 @@ constexpr int kGuerrillaMaxBodiesPerSide = 24;
 // not ship are skipped, never crash). The list rule, documented once here:
 // dedupe by case-insensitive displayName+model (the vanilla roster repeats
 // one body across many loadout classes - SoldierWB/WG/WMedic/... all render
-// "MC vojakW2"; only the first of each look survives), then cap each side at
-// kGuerrillaMaxBodiesPerSide, then emit sides in the fixed order WEST, EAST,
-// GUER, CIV with config scan order preserved inside a side - fully
-// deterministic for a given package, which is what lets the e2e assert exact
-// cycler labels.
+// "MC vojakW2"; only the first of each look survives), then emit sides in
+// the fixed order WEST, EAST, GUER, CIV with config scan order preserved
+// inside a side - fully deterministic for a given package, which is what
+// lets the e2e assert exact labels. UNCAPPED (issue #43): the old
+// kGuerrillaMaxBodiesPerSide=24 cap existed for the flat cycler this list
+// used to feed; the character-select screen scrolls, so every deduped
+// probe-passing body enumerates.
 std::vector<GuerrillaBodyChoice> GuerrillaListPlayerBodies(const ParamEntry* vehiclesCfg,
                                                            const std::function<bool(RString)>& shapeFileExists);
+
+// Replace every '_' with '-'. The menu fonts drop the underscore glyph
+// entirely (and there is no glyph-coverage API to detect that at runtime),
+// so raw classnames like "LoBo_Terror_01E" would render as run-together
+// words; a hyphen keeps the separation readable and unambiguous where a
+// bare space would read as separate words. No other transformation - pure,
+// for the unit-test seam.
+RString GuerrillaSanitizeLabel(RString s);
+
+// One roster row's human-readable label: the config displayName when it has
+// one and no other row of the SAME SIDE shares it; "displayName
+// (sanitized-className)" when the displayName is shared (vanilla sides
+// carry several distinct "Soldier" looks - the classname suffix is what
+// tells them apart); the sanitized className when the class authors no
+// displayName at all. Never contains '_' (see GuerrillaSanitizeLabel).
+RString GuerrillaBodyRowLabel(const GuerrillaBodyChoice& b, bool displayNameAmbiguous);
+
+// Labels for the WHOLE roster, index-aligned with it, with the per-side
+// displayName-ambiguity computed here (case-insensitive, over the final
+// roster). This is the ONE builder both GuerrillaNewGame's CHARACTER label
+// and GuerrillaCharacterSelect's list rows call, so the two can never
+// disagree on a row's name. Pure, for the same unit-test seam.
+std::vector<RString> GuerrillaBodyRowLabels(const std::vector<GuerrillaBodyChoice>& roster);
+
+// True when the class's config side value is 3 (CIV). Drives the preview
+// mannequin's civilian rendering rule (GuerrillaBodyPreview::SetCivilian:
+// civilians never preview armed). False for a missing class or config -
+// when nothing says civilian, the warrior rule (rifle draws) applies.
+bool GuerrillaClassIsCivilian(const ParamEntry* vehiclesCfg, RString className);
 
 // True when a body proxy is the soldier's shoulder/back flag proxy
 // ("flag_vojak" on every vanilla body; matched on the flag/vlajka name stems
@@ -208,8 +240,13 @@ bool GuerrillaPreviewIsFlagProxy(const char* proxyName);
 // dalekohled_proxy never reach the draw path: no config class anywhere in
 // Classic+AddOns). Binocular/NVG name stems are kept as belt-and-braces for
 // mods that do class them. Flag proxies are the sibling predicate above.
-// Pure (config + name in, bool out) for the same unit-test seam.
-bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName);
+// civilian=true (issue #43: CIV-side bodies preview unarmed) additionally
+// hides simulation proxyweapon - the rifle - while every non-weapon proxy
+// keeps drawing; with no config to classify against the rifle still draws
+// either way (nothing identifies it as a weapon, and hiding on a guess
+// would strip mod gear). Pure (config + name + flag in, bool out) for the
+// same unit-test seam.
+bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const char* proxyName, bool civilian);
 
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
@@ -226,9 +263,10 @@ class GuerrillaNewGame : public Display
     GuerrillaNewGame(ControlsContainer* parent);
 
     Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override;
-    // Creates the outfit-preview mannequin (idc 154) as a GuerrillaOutfitPreview
-    // (a ControlObject subclass, file-local in the .cpp) - the same hook
-    // DisplayNewUser uses to substitute CHead for its head object.
+    // Creates the outfit-preview mannequin (idc 154) as a
+    // GuerrillaBodyPreview (UI/Guerrilla/GuerrillaBodyPreview.hpp, shared
+    // with the character-select screen) - the same hook DisplayNewUser uses
+    // to substitute CHead for its head object.
     ControlObject* OnCreateObject(int type, int idc, const ParamEntry& cls) override;
     // Turntable rotation for the preview mannequin, the
     // DisplayNewUser::OnSimulate -> CHead::Simulate pattern.
@@ -237,6 +275,11 @@ class GuerrillaNewGame : public Display
     void OnLBDblClick(int idc, int curSel) override;
     void OnLBSelChanged(int idc, int curSel) override;
     void OnCtrlClosed(int idc) override;
+    // Consumes the character-select child's pick (IDD_GUERRILLA_CHARACTER_
+    // SELECT + IDC_OK: SelectedRosterIndex into _bodySel, then label +
+    // preview refresh) - the DisplaySelectIsland-wizard child-result
+    // pattern. Every other idd/exit goes to the base (pick unchanged).
+    void OnChildDestroyed(int idd, int exit) override;
 
     // Selections read by DisplayMain::OnChildDestroyed on IDC_OK. The island
     // falls back to the current (menu cutscene) world when no island list was
@@ -251,10 +294,11 @@ class GuerrillaNewGame : public Display
     RString SelectedOccupier() const;
     RString SelectedResistance() const;
     RString SelectedOutfit() const; // EMPTY when the descriptor offers no outfit pair
-    // The BODY browser's pick: an exact CfgVehicles classname, EMPTY while
-    // the browser sits on its "(match outfit)" default - the launch path
-    // publishes nothing then, so an untouched screen behaves byte-identically
-    // to the pre-browser flow (the SelectedOccupier contract).
+    // The character select's pick: an exact CfgVehicles classname, EMPTY
+    // while the selection sits on its "(match outfit)" default - the launch
+    // path publishes nothing then, so an untouched screen behaves
+    // byte-identically to the pre-select flow (the SelectedOccupier
+    // contract).
     RString SelectedPlayerClass() const;
 
   protected:
@@ -308,12 +352,13 @@ class GuerrillaNewGame : public Display
     // selected resistance descriptor offers the pair, empty otherwise.
     std::vector<RString> _outfits;
     int _outfitSel = -1;
-    // BODY browser (player-body pick): the whole-package roster, built once
-    // in the constructor - CfgVehicles comes from the loaded addons (Pars),
-    // never from an island's template description.ext, so island changes
-    // don't invalidate it. -1 = the "(match outfit)" default; the cycle
-    // order is default -> 0 -> ... -> n-1 -> default, so the no-op is
-    // always reachable again.
+    // Character select (player-body pick): the whole-package UNCAPPED
+    // roster, built once in the constructor - CfgVehicles comes from the
+    // loaded addons (Pars), never from an island's template
+    // description.ext, so island changes don't invalidate it. -1 = the
+    // "(match outfit)" default. The pick is made in the
+    // GuerrillaCharacterSelect child display (idc 155 opens it) and lands
+    // back here through OnChildDestroyed.
     std::vector<GuerrillaBodyChoice> _bodies;
     int _bodySel = -1;
 };

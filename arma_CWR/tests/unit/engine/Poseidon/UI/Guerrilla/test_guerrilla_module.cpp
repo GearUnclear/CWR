@@ -1,6 +1,7 @@
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaCharacterSelect.hpp> // IDD contract only (the display needs the live UI stack)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // the parity half of the launch decision
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/PreprocC/PreprocC.hpp> // the shipped templates are full of // comments
@@ -87,6 +88,7 @@ TEST_CASE("GuerrillaModule: main-menu contract constants", "[UI][GameModule][Gue
     // Above the vanilla dialog-id range (IDD_JOIN_REQUIREMENTS == 75), below
     // IDD_UNITINFO (100).
     REQUIRE(Poseidon::IDD_GUERRILLA_NEW_GAME == 76);
+    REQUIRE(Poseidon::IDD_GUERRILLA_CHARACTER_SELECT == 77);
     // Script-visible selection globals the template mission's init.sqs reads.
     REQUIRE(std::string(Poseidon::kGuerrillaVarIsland) == "gmSelIsland");
     REQUIRE(std::string(Poseidon::kGuerrillaVarOccupier) == "gmSelOccupier");
@@ -289,27 +291,42 @@ TEST_CASE("GuerrillaPreviewHideWeaponProxy: only the primary rifle survives", "[
     const ParamEntry* v = cfg.FindEntry("CfgNonAIVehicles");
 
     // the vanilla WEST body's real proxy roster (mc vojakw2.p3d): rifle
-    // draws, launcher and pistol hide
-    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "ak_47_v58_proxy"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "rpg7_proxy"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "beretta"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "RPG7_PROXY")); // case-insensitive
+    // draws, launcher and pistol hide (civilian=false: the warrior rule)
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "ak_47_v58_proxy", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "rpg7_proxy", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "beretta", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "RPG7_PROXY", false)); // case-insensitive
     // ShapeLOD's space-underscore normalization is mirrored in the lookup
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "some launcher"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "some launcher", false));
 
     // binocular/NVG stems hide even with no config class (none exists in
     // Classic+AddOns; these proxies never get created there, but a mod that
     // does class them must not put binoculars in the mannequin's hands)
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "dalekohled_proxy"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "nvg_proxy"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "dalekohled_proxy"));
-    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "binoc_generic"));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "dalekohled_proxy", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "nvg_proxy", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "dalekohled_proxy", false));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "binoc_generic", false));
 
     // everything else draws: unknown gear, unclassified proxies, no config
-    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "medic_bag"));
-    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(nullptr, "ak_47_v58_proxy"));
-    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, ""));
-    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, nullptr));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "medic_bag", false));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(nullptr, "ak_47_v58_proxy", false));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "", false));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, nullptr, false));
+
+    // civilian=true (issue #43): the primary rifle now hides too...
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "ak_47_v58_proxy", true));
+    // ...launchers, pistols and the belt-and-braces stems keep hiding...
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "rpg7_proxy", true));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "beretta", true));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(v, "dalekohled_proxy", true));
+    REQUIRE(GuerrillaPreviewHideWeaponProxy(nullptr, "nvg_proxy", true));
+    // ...non-weapon gear still draws (only WEAPON proxies hide for a
+    // civilian), and with no config nothing identifies the rifle as a
+    // weapon, so it draws rather than strip mod gear on a guess
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "medic_bag", true));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(nullptr, "ak_47_v58_proxy", true));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, "", true));
+    REQUIRE_FALSE(GuerrillaPreviewHideWeaponProxy(v, nullptr, true));
 }
 
 TEST_CASE("GuerrillaListPlayerBodies: Man-derived, creatable, playable-side, deduped by look",
@@ -383,6 +400,11 @@ TEST_CASE("GuerrillaListPlayerBodies: Man-derived, creatable, playable-side, ded
     ghost->Add("displayName", "Ghost");
     ghost->SetBase(man->GetClassInterface());
 
+    // Addon attribution: stamp an owner the way AddonSystem::ParseAddonConfig
+    // does (ParamClass::SetOwner, which lowercases - so a runtime GetOwner is
+    // always lowercase too). The other classes stay base-game (EMPTY owner).
+    eb->SetOwner("LoBo_Men");
+
     auto exists = [](RString path) { return std::string((const char*)path).find("missing") == std::string::npos; };
     std::vector<GuerrillaBodyChoice> bodies = GuerrillaListPlayerBodies(cfg.FindEntry("CfgVehicles"), exists);
 
@@ -399,6 +421,16 @@ TEST_CASE("GuerrillaListPlayerBodies: Man-derived, creatable, playable-side, ded
     REQUIRE(std::string((const char*)bodies[4].className) == "Civilian");
     REQUIRE(std::string((const char*)bodies[4].side) == "CIV");
 
+    // the display metadata rides along: config displayName (inherited keys
+    // resolve through the base chain) and the owning addon (lowercased by
+    // SetOwner; EMPTY for base game)
+    REQUIRE(std::string((const char*)bodies[0].displayName) == "Rifleman");
+    REQUIRE(std::string((const char*)bodies[1].displayName) == "Medic");
+    REQUIRE(std::string((const char*)bodies[2].displayName) == "Rifleman");
+    REQUIRE(std::string((const char*)bodies[2].addon) == "lobo_men");
+    REQUIRE(bodies[0].addon.GetLength() == 0);
+    REQUIRE(bodies[4].addon.GetLength() == 0);
+
     // no config / no Man class: empty, never crash
     REQUIRE(GuerrillaListPlayerBodies(nullptr, exists).empty());
     ParamFile manless;
@@ -406,16 +438,19 @@ TEST_CASE("GuerrillaListPlayerBodies: Man-derived, creatable, playable-side, ded
     REQUIRE(GuerrillaListPlayerBodies(manless.FindEntry("CfgVehicles"), exists).empty());
 }
 
-TEST_CASE("GuerrillaListPlayerBodies: the per-side cap keeps the first N in config order", "[UI][Guerrilla][outfit]")
+TEST_CASE("GuerrillaListPlayerBodies: the roster is uncapped - every deduped body enumerates in config order",
+          "[UI][Guerrilla][outfit]")
 {
+    // The old kGuerrillaMaxBodiesPerSide=24 cap existed for the flat BODY
+    // cycler; the character-select screen scrolls (issue #43), so a fixture
+    // bigger than the old cap must come through whole and in order.
     using Poseidon::GuerrillaListPlayerBodies;
-    using Poseidon::kGuerrillaMaxBodiesPerSide;
 
     ParamFile cfg;
     ParamClass* vehicles = cfg.AddClass("CfgVehicles");
     ParamClass* man = vehicles->AddClass("Man");
     man->Add("scope", 0);
-    const int total = kGuerrillaMaxBodiesPerSide + 8;
+    const int total = 32; // > the retired 24-per-side cap
     for (int i = 0; i < total; i++)
     {
         char name[64];
@@ -431,11 +466,106 @@ TEST_CASE("GuerrillaListPlayerBodies: the per-side cap keeps the first N in conf
     }
     auto exists = [](RString) { return true; };
     auto bodies = GuerrillaListPlayerBodies(cfg.FindEntry("CfgVehicles"), exists);
-    REQUIRE((int)bodies.size() == kGuerrillaMaxBodiesPerSide);
-    REQUIRE(std::string((const char*)bodies.front().className) == "LoBoBody00");
-    char lastKept[64];
-    snprintf(lastKept, sizeof(lastKept), "LoBoBody%02d", kGuerrillaMaxBodiesPerSide - 1);
-    REQUIRE(std::string((const char*)bodies.back().className) == lastKept);
+    REQUIRE((int)bodies.size() == total);
+    for (int i = 0; i < total; i++)
+    {
+        char name[64];
+        snprintf(name, sizeof(name), "LoBoBody%02d", i);
+        REQUIRE(std::string((const char*)bodies[i].className) == name);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Character-select row labels (issue #43): human-readable names, never an
+// underscore (the menu fonts drop that glyph entirely).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GuerrillaSanitizeLabel: underscores become hyphens, nothing else changes", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaSanitizeLabel;
+    REQUIRE(PreviewStr(GuerrillaSanitizeLabel("LoBo_Terror_01E")) == "LoBo-Terror-01E");
+    REQUIRE(PreviewStr(GuerrillaSanitizeLabel("_")) == "-");
+    REQUIRE(PreviewStr(GuerrillaSanitizeLabel("SoldierWB")) == "SoldierWB"); // untouched
+    REQUIRE(PreviewStr(GuerrillaSanitizeLabel("a b (c)")) == "a b (c)");     // only '_' transforms
+    REQUIRE(GuerrillaSanitizeLabel(RString()).GetLength() == 0);             // empty stays empty
+}
+
+TEST_CASE("GuerrillaBodyRowLabel: displayName, ambiguous displayName, empty displayName", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaBodyChoice;
+    using Poseidon::GuerrillaBodyRowLabel;
+
+    GuerrillaBodyChoice named{"SoldierWB", "WEST", "Rifleman", ""};
+    REQUIRE(PreviewStr(GuerrillaBodyRowLabel(named, false)) == "Rifleman");
+    // ambiguous: the classname suffix disambiguates, sanitized
+    GuerrillaBodyChoice modded{"LoBo_Rifle_01", "WEST", "Rifleman", "lobo_men"};
+    REQUIRE(PreviewStr(GuerrillaBodyRowLabel(modded, true)) == "Rifleman (LoBo-Rifle-01)");
+    // no displayName at all: the sanitized classname is the label
+    GuerrillaBodyChoice bare{"LoBo_Terror_01E", "GUER", "", "lobo_men"};
+    REQUIRE(PreviewStr(GuerrillaBodyRowLabel(bare, false)) == "LoBo-Terror-01E");
+    // a displayName carrying an underscore is sanitized too
+    GuerrillaBodyChoice oddName{"SoldierEB", "EAST", "Squad_Leader", ""};
+    REQUIRE(PreviewStr(GuerrillaBodyRowLabel(oddName, false)) == "Squad-Leader");
+}
+
+TEST_CASE("GuerrillaBodyRowLabels: ambiguity is per side, case-insensitive, over the final roster",
+          "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaBodyChoice;
+    using Poseidon::GuerrillaBodyRowLabels;
+
+    std::vector<GuerrillaBodyChoice> roster = {
+        {"SoldierWB", "WEST", "Rifleman", ""},          // shares "Rifleman" with the LoBo row below
+        {"LoBo_Rifle_01", "WEST", "RIFLEMAN", "lobo"},  // case-insensitive collision
+        {"SoldierWMedic", "WEST", "Medic", ""},         // unique on its side
+        {"SoldierEB", "EAST", "Rifleman", ""},          // same name, OTHER side: not ambiguous
+        {"LoBo_Terror_01E", "GUER", "", "lobo"},        // no displayName: classname label
+    };
+    std::vector<RString> labels = GuerrillaBodyRowLabels(roster);
+    REQUIRE(labels.size() == roster.size());
+    REQUIRE(PreviewStr(labels[0]) == "Rifleman (SoldierWB)");
+    REQUIRE(PreviewStr(labels[1]) == "RIFLEMAN (LoBo-Rifle-01)");
+    REQUIRE(PreviewStr(labels[2]) == "Medic");
+    REQUIRE(PreviewStr(labels[3]) == "Rifleman"); // EAST's only Rifleman
+    REQUIRE(PreviewStr(labels[4]) == "LoBo-Terror-01E");
+    // the never-an-underscore invariant, over every label
+    for (const RString& label : labels)
+    {
+        REQUIRE(std::string((const char*)label).find('_') == std::string::npos);
+    }
+}
+
+TEST_CASE("GuerrillaClassIsCivilian: config side 3 and nothing else", "[UI][Guerrilla][outfit]")
+{
+    using Poseidon::GuerrillaClassIsCivilian;
+
+    ParamFile cfg;
+    ParamClass* vehicles = cfg.AddClass("CfgVehicles");
+    ParamClass* man = vehicles->AddClass("Man");
+    man->Add("scope", 0);
+    ParamClass* east = vehicles->AddClass("SoldierEB");
+    east->Add("side", 0);
+    ParamClass* west = vehicles->AddClass("SoldierWB");
+    west->Add("side", 1);
+    ParamClass* guer = vehicles->AddClass("SoldierGB");
+    guer->Add("side", 2);
+    ParamClass* civ = vehicles->AddClass("Civilian");
+    civ->Add("side", 3);
+    // side inherited through the base chain resolves too
+    ParamClass* civ2 = vehicles->AddClass("Civilian2");
+    civ2->SetBase(civ->GetClassInterface());
+    vehicles->AddClass("NoSide"); // no side key anywhere
+    const ParamEntry* v = cfg.FindEntry("CfgVehicles");
+
+    REQUIRE(GuerrillaClassIsCivilian(v, "Civilian"));
+    REQUIRE(GuerrillaClassIsCivilian(v, "Civilian2"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, "SoldierEB"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, "SoldierWB"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, "SoldierGB"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, "NoSide"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, "NoSuchClass"));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(v, RString()));
+    REQUIRE_FALSE(GuerrillaClassIsCivilian(nullptr, "Civilian"));
 }
 
 // ---------------------------------------------------------------------------

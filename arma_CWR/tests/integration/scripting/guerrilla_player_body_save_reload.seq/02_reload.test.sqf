@@ -1,6 +1,6 @@
 // ============================================================================
-//  Phase 2 of the BODY-browser save/reload round-trip.
-//    Fresh menu launch of the SAME template with the browser UNTOUCHED: the
+//  Phase 2 of the character-select save/reload round-trip.
+//    Fresh menu launch of the SAME template with the screen UNTOUCHED: the
 //    clean-slate baseline is the authored body (SoldierGB) and a nil
 //    gmSelPlayerClass - proving the diff below cannot false-pass on leftover
 //    state in the shared user dir. Then triLoadGame restores phase 1's save:
@@ -13,11 +13,11 @@ triSetLanguage "English"
 triSimUntil { triGameMode == 2 }
 triAssertEq [(triDisplay), 0]
 
-// -- same menu path, browser untouched ("(match outfit)" default) -------------
+// -- same menu path, character screen untouched ("(match outfit)" default) ----
 triAssertEq [(triClick 120), true]
 triAssertEq [(triDisplay), 76]
 triAssertEq [(triSelectListByData [101, "Abel"]), true]
-triAssertEq [(triControlText 155), "BODY: (match outfit)"]
+triAssertEq [(triControlText 155), "CHARACTER: (match outfit)"]
 triClick 1
 triSimUntil { alive player }
 
