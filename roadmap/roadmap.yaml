@@ -697,7 +697,7 @@ items:
     status: done
     priority: 2
     depends_on: [character-outfit-select]
-    commits: [6352291]
+    commits: ["6352291"]
     gh_issues: [43]
     summary: >
       Issue #43 (BODY-picker follow-up to #25): the flat idc-155 cycler is
