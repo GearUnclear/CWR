@@ -691,6 +691,38 @@ items:
       - "2026-08-05: M4 preview visual-artifact pass (843d9e3) - in-game screenshots of d1d2e12 caught two proxy artifacts the raw Object::DrawProxies path leaks: the weapon-proxy models' zasleh muzzle-flash sections are authored visible (in-mission Man::DrawProxies substitutes the real weapon and re-hides zasleh per frame, a pass the UI render never runs) and the flag_vojak shoulder proxy is hard-textured with a default US flag only in-mission flag-carrier machinery may rebind. Fix in GuerrillaOutfitPreview: SetModel hides the zasleh section on the body and every proxy shape (persistent per-shape not-firing state), and a DrawProxies override skips flag proxies entirely (GuerrillaPreviewIsFlagProxy, flag/vlajka stems - NO flag is the only faction-safe rendering; side-matched flags stay out of scope). Verified by before/after screenshots on both bodies at three turntable angles; [Guerrilla] 2151/107 + [outfit] 70/15 green, both UI e2e green (2/2, 15.0s). Root-cause tooling note: PoseidonTools pbo extract + model inspect -s on Data3D.pbo gave the proxy ground truth (ak_47_v58_proxy/rpg7_proxy/flag_vojak/beretta/nvg_proxy/dalekohled_proxy roster, usa_vlajka.pac default texture)."
       - "2026-08-04: M4 preview polish landed (d1d2e12) - option analysis picked live 3D over baked PAA portraits (zero art assets, per-island correctness for free): GuerrillaOutfitPreview, a ControlObject subclass on GuerrillaNewGame (CT_OBJECT idc 154; 152 town / 153 outfit discipline kept), resolves playerClassWarrior/playerClassCiv -> CfgVehicles model -> shape-file probe and hides on any missing rung; bounding-box fit + OnSimulate turntable (CHead pattern). Unit: 3 new preview test cases ([outfit] 59 assertions / 14 cases green, [Guerrilla] 2140 assertions / 106 cases). e2e: outfit_civilian_e2e extended with triGetControlVisible-154 for both bodies, green alongside an unmodified guerrilla_new_game_e2e (2/2, 14.7s). Gotcha: tri treats a .test.toml PATH argument as the script itself (exit 2 in about a second, quoting the toml's own comment line) - pass the .test.sqf or the directory. OPEN eyeball items: base-pose acceptability (no UI control animates a Man skeleton) and slot placement vs the notebook at z=2.0 camera-space."
 
+  - id: character-select-screen
+    title: "Character select screen: uncapped mod-aware roster browser with 3D mannequin (issue #43)"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [character-outfit-select]
+    commits: [6352291]
+    gh_issues: [43]
+    summary: >
+      Issue #43 (BODY-picker follow-up to #25): the flat idc-155 cycler is
+      replaced by a proper character-select child display in the new-game
+      flow. Idc 155 becomes the CHARACTER entry button; clicking it opens
+      GuerrillaCharacterSelect (IDD 77): scrollable CListBox roster (idc
+      160) grouped by side with dimmed header rows and a "(match outfit)"
+      row 0, large turntable mannequin (161, the shared GuerrillaBodyPreview
+      factored out of GuerrillaNewGame), side/class/addon-source info line
+      (162, ParamEntry::GetOwner attribution), CONFIRM/BACK cloned from the
+      menu Quit class. Engine-synthesized config with an
+      RscDisplayGuerrillaCharacterSelect override hook. All three #43
+      defects fixed: kGuerrillaMaxBodiesPerSide deleted (every deduped,
+      probe-passing Man class enumerates; lobo lane 1541 rows, IDF WEST
+      families reachable, LoBoGolaniWB launch proven end to end), labels
+      show displayName with hyphen-sanitized classnames as fallback (the
+      menu fonts drop the underscore glyph), and CIV-side bodies preview
+      unarmed (GuerrillaPreviewHideWeaponProxy civilian flag). The pick
+      returns to the parent via OnChildDestroyed; gmSelPlayerClass publish
+      semantics and the untouched-flow invariant are byte-identical to the
+      cycler era. Harness: triLB* listbox primitives + a generalized
+      case-insensitive triSelectListByData, rows carry classnames as data.
+    log:
+      - "2026-08-05: landed (6352291). Verification: [Guerrilla] 2263/116 + [outfit] 180/24 unit green; 6/6 affected integration tests green twice (full_cwa + lobo, zero retries); new ui/guerrilla_character_lobo_e2e pins LoBoGolaniWB (row 287 of 1541) reachable and launching with gmSelPlayerClass == typeOf player; 4 read-verified screenshots on both lanes (armed Golani preview, unarmed LoBo-Civ-01, post-CONFIRM parent label). Classic nuance: Abel's uncapped roster is 96 rows, BELOW the old 101-row theoretical ceiling, so the uncapping proof lives in the lobo assert. Known cosmetic follow-up outside this screen: island-list annotation text clips at the notebook edge."
+
   - id: faction-island-decoupling
     title: "Faction/island decoupling: any faction on any island + faction-pack mod contract (issue #26)"
     phase: phase-2
