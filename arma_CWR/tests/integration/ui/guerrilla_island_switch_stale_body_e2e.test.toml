@@ -1,0 +1,11 @@
+# RISK PROBE (diagnostic): stale _bodySel across an island switch, plus the
+# Guerrilla.Abel addOns[] gate. Copy of guerrilla_character_lobo_e2e.test.toml
+# preconditions: templates installed via
+#   guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai,Lebanon80
+# and the one-time @lobofixup patched pbos
+#   tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 360
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

@@ -1,0 +1,9 @@
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]
+binary = "PoseidonGame"
+# No mission= - fresh menu launch of the same vanilla Abel template with the
+# character screen untouched, then triLoadGame restores phase 01's mod-body
+# save. Same mod mount as phase 01: the point is that mounting is not
+# activating, so the pre-load baseline reports the owners inactive.
+timeout = 600
+assert_timeout = 300
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

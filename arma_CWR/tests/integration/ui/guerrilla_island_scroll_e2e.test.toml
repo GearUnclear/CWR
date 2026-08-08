@@ -1,0 +1,16 @@
+# Guerrilla new-game island picker: mouse-wheel scrolling of the C3DListBox.
+# No mission= - boots to the main menu and drives GUERRILLA -> island list.
+#
+# PRECONDITIONS: same as guerrilla_new_game_e2e - the @LoBo mod next to the
+# data dir plus the @lobofixup fixture (run gen-patched-pbos.ps1 once).  @LoBo
+# is what pushes the island roster past one listbox page (12+ worlds), which
+# is the whole point: without overflow there is nothing to scroll.
+#
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims)
+# that would otherwise be fatal; script errors still abort via --autotest.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
+# 600+ MB mod scan on boot dominates the runtime.
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

@@ -27,9 +27,15 @@ bool ParseRemaster(RStringB dir, void* context);
 bool ParseResource(RStringB dir, void* context);
 
 /// True when a mod's bin/resource replaced the base menu resource (it won the
-/// ParseResource enumeration). The main menu reads this to keep + hijack the
-/// community addon's custom menu instead of flipping to the remaster menu.
+/// ParseResource enumeration). Sole consumer is config init, which uses it to gate the
+/// two restore passes below; the main menu itself no longer branches on it (the UD menu
+/// wins unconditionally whenever RscDisplayMainRemaster exists — see UI/OptionsUIApp.cpp).
 bool IsMenuOverriddenByMod();
+/// Re-read the base game's bin/resource and put the main menu's class closure
+/// (RscDisplayMain + its base chain + the style roots its controls derive from) back on
+/// top of the mod's resource, so the UD menu keeps its no-mod layout and chrome. Must run
+/// before MergeBaseResourceExtra, which layers the UD overrides on top of that closure.
+void RestoreBaseMenuResource();
 /// Merge the base game's resource-extra.cpp (remaster UI additions:
 /// RscOptionsShell, RscDisplayMainRemaster, …) on top of Res, restoring resources
 /// a mod's bin/resource shadowed.

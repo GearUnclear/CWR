@@ -8,11 +8,13 @@
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // FindGuerrillaFactionEntry (outfit cycler, issue #25)
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Input/InputSubsystem.hpp> // wheel drain for the island list (see OnSimulate)
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/Foundation/Framework/DebugLog.hpp> // LOG_WARN (body-pick revalidation)
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 #include <ctype.h> // tolower (body-roster dedupe + label-ambiguity keys)
@@ -374,6 +376,24 @@ int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<R
     for (int i = 0; i < (int)list.size(); i++)
     {
         if (stricmp(list[i], selection) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int GuerrillaIndexOfName(const std::vector<RString>& list, RString name)
+{
+    // Deliberately NOT GuerrillaIndexOfSelection: no side rung. See the header
+    // for why the two must not be interchanged.
+    if (name.GetLength() == 0)
+    {
+        return -1;
+    }
+    for (int i = 0; i < (int)list.size(); i++)
+    {
+        if (stricmp(list[i], name) == 0)
         {
             return i;
         }
@@ -787,6 +807,27 @@ void GuerrillaNewGame::OnSimulate(EntityAI* vehicle)
             preview->SimulateTurntable();
         }
     }
+    // Wheel -> island list.  The reused RscDisplaySelectIsland hosts the
+    // island C3DListBox inside a 3D notebook prop (ControlObjectContainer),
+    // and Display::OnSimulate forwards the wheel to that container, which
+    // only relays it to a child while its hover bookkeeping (_indexMove)
+    // points at one — ControlObject's own OnMouseZChanged is a no-op, so
+    // when the hover latch misses the 3D quad the wheel is silently
+    // swallowed and islands below the fold are unreachable.  Drain the
+    // wheel before Display::OnSimulate and drive the list directly — the
+    // OptionsScrollList::PollWheelScroll precedent (see the comment there
+    // about the notebook otherwise eating the wheel).  The list is the only
+    // scrollable control on this display, so screen-wide wheel capture
+    // can't shadow anything; child displays (character select) are safe
+    // because Display::SimulateHUD only simulates the topmost child.
+    if (auto* lbox = dynamic_cast<C3DListBox*>(GetCtrl(IDC_SELECT_ISLAND)))
+    {
+        float dz = InputSubsystem::Instance().ConsumeCursorScroll();
+        if (dz != 0)
+        {
+            lbox->OnMouseZChanged(dz);
+        }
+    }
     Display::OnSimulate(vehicle);
 }
 
@@ -984,13 +1025,29 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // are real. Seeding 0/0 instead would both override those keys silently
     // and open on occupier == resistance.
     GuerrillaDefaultSelections(_islandFactions, _islandZones, _occupiers, _occupierSel, _resistanceSel);
-    // A pick the new roster still carries survives the refresh.
-    int keptOccupier = GuerrillaIndexOfSelection(_islandFactions, _occupiers, keepOccupier);
+    // A pick the new roster still carries BY NAME survives the refresh.
+    //
+    // GuerrillaIndexOfName, not GuerrillaIndexOfSelection: the keep is an
+    // IDENTITY question ("is the faction the player picked also on this
+    // island?"), and the side rung in the resolution helper turns it into a
+    // role question, which aliases onto a different faction. Measured on the
+    // real menu before this changed: Abel opens on the class literally named
+    // EAST, and hopping to Lebanon80 matched the side rung against Hizballah
+    // (side = "EAST"), which is that template's defaultResistance - so the
+    // screen opened on OCCUPIER: Hizballah / RESISTANCE: Hizballah, silently
+    // discarding the authored defaultOccupier = "IDF". Abel -> Sinai was the
+    // same shape: EgyptFrontier (Sinai's intended resistance) as occupier and
+    // Jordan (Abel's GUER keeping onto the only GUER-side faction) as
+    // resistance, which then emptied the outfit pair as a knock-on because
+    // Jordan authors no playerClassCiv. A name that does not appear on the new
+    // island now falls through to the template's own default* keys, which is
+    // the documented island-scoped re-seed contract.
+    int keptOccupier = GuerrillaIndexOfName(_occupiers, keepOccupier);
     if (keptOccupier >= 0)
     {
         _occupierSel = keptOccupier;
     }
-    int keptResistance = GuerrillaIndexOfSelection(_islandFactions, _resistances, keepResistance);
+    int keptResistance = GuerrillaIndexOfName(_resistances, keepResistance);
     if (keptResistance >= 0)
     {
         _resistanceSel = keptResistance;
@@ -1002,6 +1059,60 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     UpdateFactionLabel(kIdcResistance);
     // The outfit pair is read off the (possibly re-seeded) resistance block.
     RefreshOutfitChoices();
+    // ...and the CHARACTER pick gets an explicit revalidation pass, so nothing
+    // island-shaped can leave the button or the mannequin stale.
+    RevalidateBodySelection();
+}
+
+void GuerrillaNewGame::RevalidateBodySelection()
+{
+    // Why the pick is KEPT here while occupier/resistance/outfit are re-seeded
+    // just above: those three come from the island's OWN CfgGuerrillaFactions
+    // (its template description.ext), so switching islands genuinely invalidates
+    // them - the new island may not even offer the same factions. _bodies is
+    // built from Pars, which is process-global and identical on every island, so
+    // silently discarding a body the player deliberately picked just because
+    // they browsed the island list would be the surprising behaviour.
+    //
+    // What this therefore guarantees: idc 155 and the preview mannequin are
+    // re-rendered on every island change, and the button can never promise a
+    // body the launch will not deliver - the launch-side existence test is
+    // ParsClassProbe in Game/Guerrilla/OutfitSelect.cpp, the same
+    // Pars >> CfgVehicles lookup performed here.
+    //
+    // The ADDON half of the picked-body problem (a mod body launched on an
+    // island whose mission.sqm addOns[] never mentions the mod) is handled at
+    // the substitution seam in OutfitSelect.cpp, not here, precisely because the
+    // roster is package-wide by design and must stay that way.
+    //
+    // Ordering note: the constructor calls RefreshFactionsForIsland BEFORE it
+    // builds _bodies, so this runs once against an empty roster with
+    // _bodySel == -1. Harmless (it normalizes to -1, and the label update no-ops
+    // because the cyclers do not exist yet) - not a bug to "fix".
+    if (_bodySel >= 0 && _bodySel < (int)_bodies.size())
+    {
+        const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
+        if (!vehicles || !vehicles->FindEntry(_bodies[_bodySel].className))
+        {
+            LOG_WARN(Core,
+                     "Guerrilla body: picked class '{}' no longer resolves in the loaded package - falling back to "
+                     "(match outfit)",
+                     (const char*)_bodies[_bodySel].className);
+            _bodySel = -1;
+        }
+    }
+    else
+    {
+        _bodySel = -1; // normalize any out-of-range index to the default
+    }
+    UpdateFactionLabel(kIdcBody);
+    // The OUTFIT row's scope qualifier is a function of _bodySel (issue #47),
+    // so it must re-render wherever _bodySel can change — here (a pick this
+    // package no longer resolves drops back to "(match outfit)", which HANDS
+    // the player body back to the token) and in OnChildDestroyed. Those are
+    // the only two sites that write _bodySel; a third must land this call too.
+    UpdateFactionLabel(kIdcOutfit);
+    UpdateOutfitPreview();
 }
 
 void GuerrillaNewGame::RefreshOutfitChoices()
@@ -1018,6 +1129,24 @@ void GuerrillaNewGame::RefreshOutfitChoices()
             _outfitSel = i;
             break;
         }
+    }
+    // issue #46 seam 6: unlike the CHARACTER pick (package-wide, so
+    // RevalidateBodySelection keeps it), the outfit token is scoped to the
+    // resistance descriptor, and an island or resistance change may land on a
+    // block that authors no playerClassCiv. Re-seeding is the same contract
+    // the occupier/resistance cyclers follow and is deliberate - but it drops
+    // a choice the player made, and the loss is one-way: `keep` is re-derived
+    // from the list above, so once it empties the token is gone from this
+    // object and a trip back to an island that DOES offer CIVILIAN reopens on
+    // WARRIOR. The row does re-render ("(mission default)", and the mannequin
+    // hides), which nobody is obliged to look at, so say it in the log too.
+    if (keep.GetLength() > 0 && (_outfitSel < 0 || stricmp(_outfits[_outfitSel], keep) != 0))
+    {
+        LOG_WARN(Core,
+                 "Guerrilla outfit: dropping the selected outfit '{}' - the resistance descriptor now in effect "
+                 "offers {}",
+                 (const char*)keep,
+                 _outfits.empty() ? "no outfit pair at all (no playerClassCiv key)" : "a different pair");
     }
     UpdateFactionLabel(kIdcOutfit);
     // Island changes and resistance cycling both land here, so this one call
@@ -1059,7 +1188,26 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
         }
         return;
     }
-    const char* prefix = idc == kIdcOccupier ? "OCCUPIER" : (idc == kIdcResistance ? "RESISTANCE" : "OUTFIT");
+    // Scope qualifier for the OUTFIT row (issue #47). A CHARACTER pick beats
+    // the outfit token for the PLAYER's body unconditionally —
+    // ResolvePlayerBodyClass (Game/Guerrilla/OutfitSelect.cpp) returns on the
+    // pick and never falls through to the token path, not even when the picked
+    // class is missing from the package. That precedence is deliberate; what
+    // was wrong is this label, which kept reading "OUTFIT: CIVILIAN" while the
+    // player spawned as the picked body. The token still governs everyone
+    // ELSE — recruits, companions and the captured-town hold garrison all
+    // branch on GM_OUTFIT_CIV (scripts/recruit.sqs, companions.sqs,
+    // capture.sqs) — so the cycler stays live and readable and only its
+    // advertised scope narrows. Greying it would be the opposite lie: it would
+    // claim the token does nothing while the squad still obeys it, and would
+    // strand the player with no way to dress their fighters.
+    // Keyed on SelectedPlayerClass(), the exact value the launch publishes as
+    // gmSelPlayerClass, so the label and the precedence cannot drift apart.
+    const bool outfitSquadOnly = idc == kIdcOutfit && SelectedPlayerClass().GetLength() > 0;
+    const char* prefix = idc == kIdcOccupier     ? "OCCUPIER"
+                         : idc == kIdcResistance ? "RESISTANCE"
+                         : outfitSquadOnly       ? "OUTFIT (squad only)"
+                                                 : "OUTFIT";
     const std::vector<RString>& list = idc == kIdcOccupier     ? _occupiers
                                        : idc == kIdcResistance ? _resistances
                                                                : _outfits;
@@ -1196,6 +1344,17 @@ void GuerrillaNewGame::OnLBSelChanged(int idc, int curSel)
         // one gesture: LButtonUp lands first, then OK publishes the reset
         // pair. It would also unmount and remount the template PBO per
         // mouse-up.
+        //
+        // Audited for issue #46 seam 7 and kept as-is. Two corrections to the
+        // paragraph above, now that the name-keep below exists: an unguarded
+        // SAME-island refresh would no longer lose the occupier/resistance
+        // pair (RefreshFactionsForIsland restores both by name), so what the
+        // guard still genuinely buys is the PBO churn, the dangling
+        // _islandFactions window across _islandCfg.Clear(), and the one
+        // selection the name-keep cannot recover - the outfit token, whose
+        // list can come back empty (seam 6, RefreshOutfitChoices). And the
+        // case it protects most often is not the double click at all but the
+        // ordinary repeat single click, which fires this same handler.
         RString island = SelectedIsland();
         if (island.GetLength() > 0 && stricmp(island, _islandForFactions) != 0)
         {
@@ -1235,6 +1394,11 @@ void GuerrillaNewGame::OnChildDestroyed(int idd, int exit)
         // Any other exit (BACK/Esc): the pick stays what it was.
         Display::OnChildDestroyed(idd, exit);
         UpdateFactionLabel(kIdcBody);
+        // Both directions of the pick change the OUTFIT row's scope qualifier
+        // (issue #47): picking a body narrows it to "(squad only)", and
+        // choosing the "(match outfit)" row back out of the child restores the
+        // plain "OUTFIT" — the token governs the player body again.
+        UpdateFactionLabel(kIdcOutfit);
         UpdateOutfitPreview();
         return;
     }

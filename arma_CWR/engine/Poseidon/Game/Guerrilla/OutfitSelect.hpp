@@ -19,6 +19,9 @@
 // identical by design: the seam acts only on "civilian".
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <Poseidon/Foundation/Containers/RStringArray.hpp> // FindArrayRStringCI
+
+#include <functional> // injected shape-file probe (PlayerBodyModelIssue)
 
 namespace Poseidon
 {
@@ -56,12 +59,62 @@ RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry*
 RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selPlayerClass,
                                const char* selOutfit, const char* selResistance, const ClassProbe& probe);
 
+// Collect the addons that must be active for `className` to build without an
+// "Access denied" denial from World::CheckAddon: the class's own owner plus the
+// owners of every entry in its weapons[] and magazines[], plus the magazines[]
+// of those weapons. Owners come from ParamEntry::GetOwner(), already lowercased
+// by the AddonSystem; base-game classes carry an EMPTY owner, which
+// ParamOwnerList treats as always visible, so empties are skipped rather than
+// collected. Config roots are passed in (rather than read off the global Pars)
+// for the same reason ResolvePlayerBodyClass takes a ClassProbe: it keeps the
+// walk unit-testable against a synthetic ParamFile. Entries are added with
+// AddUnique, so the result is de-duplicated; an unknown className yields an
+// empty list.
+//
+// Closest existing relative is ArcadeUnitInfo::RequiredAddons
+// (AI/ArcadeTemplate.cpp), which attributes a template's units to addons - but
+// it is a DIFFERENT lookup (it scans CfgPatches >> <patch> >> units[] for the
+// classname and returns the patch name, falling back to GetOwner), and it does
+// not walk weapons[]/magazines[] at all. The two agree in practice because both
+// bottom out at a CfgPatches class name, but they fail differently: a class
+// present in a pbo yet absent from its units[] has an owner and no
+// RequiredAddons hit. GetOwner is used here because it is the exact field
+// World::CheckAddon tests, so this walk collects precisely what that gate would
+// otherwise deny. The missing weapons[]/magazines[] hop is also why
+// Guerrilla.Sinai/mission.sqm has to hand-list the transitive owners.
+void CollectPlayerBodyAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
+                             const ParamEntry* magazinesCfg, RString className, FindArrayRStringCI& addons);
+
+// Why a resolvable class can still be the wrong answer (issue #46 seam 4).
+// ClassProbe asks only whether CfgVehicles carries the name; the new-game
+// roster additionally requires a non-empty model[] whose .p3d the package
+// ships (GuerrillaListPlayerBodies / GuerrillaOutfitPreviewClass), because a
+// shapeless Man is not merely ugly: a model naming a .p3d the package does not
+// ship ACCESS-VIOLATES the process in Man::Init during CreateVehicle (measured,
+// not inferred - VehicleTypes' empty-model guard misses it because the model
+// string is non-empty and ShapeBank answers with an empty LODShape rather than
+// a null). The CHARACTER browser can never offer such a class (its roster is
+// built behind that gate), but a descriptor's playerClassCiv is a raw string
+// that nothing shape-probes, so the substitution seam checks it here. Returns a
+// human-readable reason when the package cannot render the class, EMPTY when it
+// can (and empty for an unknown class - the ClassProbe owns that verdict). The
+// caller treats a non-empty reason as a failed existence test and keeps the
+// authored class, which is the never-a-substitute rule documented above, not an
+// exception to it. The probe is injected for the same reason ClassProbe is.
+RString PlayerBodyModelIssue(const ParamEntry* vehiclesCfg, RString className,
+                             const std::function<bool(RString)>& shapeFileExists);
+
 // Engine wrapper: reads gmselplayerclass/gmseloutfit/gmselresistance from
 // the GameState (the campaign variable bank is re-applied before
 // InitVehicles runs, so the menu publish is visible here), locates
 // CfgGuerrillaZones/Factions, and rewrites t.FindPlayer()->vehicle when the
-// pure core resolves a class. No-op for non-Guerrilla templates (no
-// zones+factions config) and for templates without a player unit. Mutating
+// pure core resolves a class. The two descriptor blocks are NOT a gate (issue
+// #46 seam 1): a body pick resolves against CfgVehicles alone, so requiring
+// both made a template that authors one block and not the other discard every
+// pick without a word in the log. What keeps this a no-op on a non-Guerrilla
+// template is the absence of a published selection, not the config shape; a
+// template with no player unit now says so instead of returning in silence.
+// Mutating
 // CurrentTemplate is safe: every launch re-runs ParseMission, and re-running
 // the substitution is idempotent.
 //

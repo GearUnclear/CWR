@@ -42,6 +42,7 @@ namespace Poseidon
 {
 using Poseidon::IsMenuOverriddenByMod;
 using Poseidon::MergeBaseResourceExtra;
+using Poseidon::RestoreBaseMenuResource;
 using Poseidon::ParseConfig;
 using Poseidon::ParseRemaster;
 using Poseidon::ParseResource;
@@ -375,8 +376,24 @@ bool ConfigurationSystem::InitializeGameConfiguration(const char* language)
     // resource (enumeration stops at the first mod), shadowing the remaster UI
     // additions — leaving the new Options screen empty and the Mods entry gone.
     // Restore them on top of the mod's resource so the remaster UI always works.
+    //
+    // Two passes, and the order is load-bearing:
+    //   1. RestoreBaseMenuResource puts the *vanilla* main-menu class closure back
+    //      (RscDisplayMain + its base chain + the RscText/RscPicture/RscActiveText/
+    //      RscActiveMenu style roots its controls derive from). Without it the UD menu
+    //      inherits the mod's RscDisplayMain and renders with the mod's control set and
+    //      geometry — under @LoBo that lost the divider lines and threw MULTIPLAYER,
+    //      OPTIONS, PLAYER, QUIT and the version string to the screen edges.
+    //   2. MergeBaseResourceExtra then layers the UD/remaster overrides
+    //      (RscDisplayMainRemaster, RscOptionsShell, …) on top of that vanilla closure —
+    //      the same stacking order as a no-mod launch, which is what makes the menu
+    //      pixel-identical with or without mods. Swapping the two would let the base
+    //      resource overwrite the UD overrides instead.
     if (IsMenuOverriddenByMod())
+    {
+        RestoreBaseMenuResource();
         MergeBaseResourceExtra();
+    }
 
     // Load user configuration (difficulty, UI preferences)
     m_userConfig->LoadFromFile(::Poseidon::GetUserParams().Data());

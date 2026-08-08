@@ -21,6 +21,7 @@
 using Poseidon::GameModuleId;
 using Poseidon::GameModuleRegistry;
 using Poseidon::GuerrillaDefaultSelections;
+using Poseidon::GuerrillaIndexOfName;
 using Poseidon::GuerrillaIndexOfSelection;
 using Poseidon::GuerrillaListFactions;
 using Poseidon::GuerrillaListIslands;
@@ -1017,6 +1018,52 @@ TEST_CASE("GuerrillaIndexOfSelection: side first, then class name, as FindFactio
         // a bare side string takes the first, exactly as FindFaction does
         REQUIRE(GuerrillaIndexOfSelection(sinai.Factions(), picks, "EgyptArmy") == 2);
         REQUIRE(GuerrillaIndexOfSelection(sinai.Factions(), picks, "EAST") == 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The island-switch keep is an IDENTITY test, not a resolution test.
+//
+// RefreshFactionsForIsland carries the occupier/resistance picks across an
+// island change by name. Running that through GuerrillaIndexOfSelection (side
+// first) makes a SIDE STRING match whatever faction fills that role on the new
+// island, which is a different faction, and on the shipped templates it lands
+// the occupier cycler on the island's own defaultResistance. Observed on the
+// real menu: Abel (occupier = the class literally named EAST) -> Lebanon80
+// opened on OCCUPIER: Hizballah / RESISTANCE: Hizballah.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("GuerrillaIndexOfName: exact class name only, no side rung", "[UI][Guerrilla]")
+{
+    IslandCfg cfg;
+    cfg.Parse(kPinnedTemplate);
+    std::vector<RString> list = GuerrillaListFactions(cfg.Factions()); // EAST, WEST, GUER
+
+    REQUIRE(GuerrillaIndexOfName(list, "WEST") == 1);
+    REQUIRE(GuerrillaIndexOfName(list, "guer") == 2); // case-insensitive
+    REQUIRE(GuerrillaIndexOfName(list, "") == -1);
+    REQUIRE(GuerrillaIndexOfName(list, "Martians") == -1);
+
+    SECTION("a side string does NOT alias onto the faction that fills that role")
+    {
+        // Lebanon80's roster: IDF is the occupier (WEST), Hizballah the
+        // resistance (EAST). Carrying Abel's occupier "EAST" over must NOT
+        // keep, or both cyclers land on Hizballah.
+        IslandCfg leb;
+        leb.Parse("class CfgGuerrillaFactions\n"
+                  "{\n"
+                  "    class IDF       { side=\"WEST\"; };\n"
+                  "    class Hizballah { side=\"EAST\"; };\n"
+                  "};\n");
+        std::vector<RString> picks = GuerrillaListFactions(leb.Factions());
+        REQUIRE(GuerrillaIndexOfName(picks, "EAST") == -1);
+        REQUIRE(GuerrillaIndexOfName(picks, "GUER") == -1);
+        // the resolution helper is the one that DOES alias - kept as the
+        // contrast, because it stays correct for default*/gmSel* resolution
+        REQUIRE(GuerrillaIndexOfSelection(leb.Factions(), picks, "EAST") == 1);
+        // a genuine same-named pick still survives
+        REQUIRE(GuerrillaIndexOfName(picks, "Hizballah") == 1);
+        REQUIRE(GuerrillaIndexOfName(picks, "idf") == 0);
     }
 }
 

@@ -1182,6 +1182,20 @@ GameValue TriLBCurSel(const GameState* /*state*/, GameValuePar arg)
     return GameValue(static_cast<float>(box->GetCurSel()));
 }
 
+/// triLBTopRow <idc>: first visible row of a listbox (fractional while a wheel
+/// scroll is mid-glide; -2 = IDC missing or not a listbox). Lets scroll tests
+/// assert that wheel input actually moved the viewport, which triLBCurSel
+/// cannot see (wheel scrolling moves _topString without touching the
+/// selection).
+GameValue TriLBTopRow(const GameState* /*state*/, GameValuePar arg)
+{
+    const int idc = static_cast<int>(static_cast<GameScalarType>(arg));
+    auto* box = FindListBoxForTri(idc, "triLBTopRow");
+    if (!box)
+        return GameValue(static_cast<float>(-2));
+    return GameValue(box->GetTopRow());
+}
+
 /// triLBSetCurSel [idc, row]: set the current row with sendUpdate=true so the
 /// display's OnLBSelChanged fires, exactly like a user click. row -1 clears the
 /// selection. Returns true on success, false on missing IDC / not a listbox /
@@ -1583,6 +1597,16 @@ GameValue TriControlText(const GameState* state, GameValuePar arg)
         return GameValue("");
     std::string text = UITestEngine::GetControlText(ctrl);
     return GameValue(text.c_str());
+}
+
+/// triAddonActive <name> — true when the named addon is in the world's ACTIVE
+/// ADDON LIST, i.e. the list World::CheckAddon consults before it denies a
+/// config class and puts IDS_MSG_ADDON_MISSING on screen. The player-visible
+/// symptom (a WarningMessage box) is not readable from SQF, so this is the
+/// deterministic in-mission proxy for it. Case-insensitive; false with no world.
+GameValue TriAddonActive(const GameState* /*state*/, GameValuePar arg)
+{
+    return GameValue(GWorld && GWorld->IsAddonActive((RString)arg));
 }
 
 /// triAssertControlLeftOf [innerIdc, anchorIdc, maxGap] — assert the inner control

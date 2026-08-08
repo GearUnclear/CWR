@@ -1,0 +1,23 @@
+# A MOD-OWNED player body across save/reload, including the runtime addon
+# grant (issue #48 gap 2, and the second-order risk issue #45 flagged and left
+# unverified).
+#
+# The sibling guerrilla_player_body_save_reload.seq already round-trips a
+# base-game cross-side pick (SoldierWB on Abel). What it cannot reach is the
+# case #45 created: a body whose owner addon is NOT in the template's addOns[]
+# and is only visible because ApplyPlayerOutfitSelection additively granted it
+# at InitVehicles. That grant lives in World::_activeAddons, and a savegame
+# both writes that list (WorldImpl.cpp, "addons") and re-activates it on load -
+# so the claim under test is that the grant survives a genuine cross-process
+# save/reload, and that the unit rebuilds from the serialized class rather than
+# from the vanilla template manifest.
+#
+# The baseline in phase 02 is what makes the addon assertions mean anything:
+# the same process, same mods, freshly launched on untouched Abel, reports
+# those owners INACTIVE. Mounting @LoBo is not activating its addons.
+#
+# PRECONDITIONS: guerrilla-mode/install-missions.ps1 -IncludeWorld
+# Sinai,Lebanon80; the one-time @lobofixup patched pbos
+# (tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1). Full CWA 1.99 +
+# @LoBo only.
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]

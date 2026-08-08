@@ -93,6 +93,21 @@ RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
 // registry would match for the same string.
 int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<RString>& list, RString selection);
 
+// Index into `list` of the faction literally NAMED `name`, or -1. Case
+// insensitive, exact, no side rung.
+//
+// This is the IDENTITY test, and it is not interchangeable with
+// GuerrillaIndexOfSelection above, which is the RESOLUTION test. Resolution has
+// to accept a side string, because that is what a descriptor's
+// defaultOccupier/defaultResistance key and a published gmSel* string are
+// allowed to be. Identity must not, because a side string names a ROLE that a
+// different island fills with a different faction: carrying "EAST" (Abel's
+// occupier, a class literally named EAST) into Lebanon80 through the side rung
+// matches Hizballah, which is that template's RESISTANCE - so the two cyclers
+// both land on Hizballah and the campaign opens fighting itself. Use this one
+// wherever the question is "did the player's actual pick survive?".
+int GuerrillaIndexOfName(const std::vector<RString>& list, RString name);
+
 // The indices the two cyclers must OPEN on, so that pressing OK without
 // touching them launches exactly what a direct, no-UI launch of the same
 // template resolves. Walks the same precedence chain
@@ -331,6 +346,14 @@ class GuerrillaNewGame : public Display
     // substitute body). Gated on the styled cyclers existing, so headless
     // no-resource runs keep owning no controls.
     void UpdateOutfitPreview();
+    // Re-checks that the current CHARACTER pick still names a class the loaded
+    // package carries, normalizes an out-of-range index back to the "(match
+    // outfit)" default, and re-renders the button label (idc 155) plus the
+    // preview mannequin. Called at the end of every island change: the pick
+    // itself is deliberately KEPT there (the roster is package-wide, so an
+    // island change cannot invalidate it), but the label and the mannequin must
+    // never be left showing state from before the change.
+    void RevalidateBodySelection();
 
     int _exitWhenClose;
     // OWNS the selected island's parsed description.ext: the two entry

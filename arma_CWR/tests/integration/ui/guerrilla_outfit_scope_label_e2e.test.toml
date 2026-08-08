@@ -1,0 +1,18 @@
+# OUTFIT cycler scope label (issue #47). No mission= - boots to the main menu
+# and drives GUERRILLA -> Abel -> OUTFIT: CIVILIAN -> CHARACTER pick, then
+# asserts idc 153 narrows to "OUTFIT (squad only): ..." while the pick is live
+# and recovers the plain "OUTFIT: ..." when the pick is cleared. Ends by
+# launching, so the label's claim is checked against the real split: the
+# player wears the pick, the squad wears the token.
+#
+# PRECONDITION: guerrilla-mode/install-missions.ps1 has been run - the launch
+# path resolves "missions\Guerrilla.Abel" relative to the game data dir. Full
+# CWA 1.99 data only, no mods: the asserted roster label ("Soldier" for
+# SoldierWB) is the Classic config's scan order, the same pin
+# guerrilla_player_body_e2e uses.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+# menu flow, an island round trip and an Abel world load
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--no-strict"]

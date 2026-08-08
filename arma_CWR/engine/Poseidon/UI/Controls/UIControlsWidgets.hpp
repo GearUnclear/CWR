@@ -398,6 +398,9 @@ public:
 
 	virtual int GetSize() {return Size();}
 	int GetCurSel() {return _selString;};
+	// First visible row (fractional while a wheel scroll is mid-glide) —
+	// read-only observability for tests (triLBTopRow).
+	float GetTopRow() const {return _topString;}
 
 	bool IsReadOnly() const {return _readOnly;}
 	void SetReadOnly(bool set = true) {_readOnly = set;}

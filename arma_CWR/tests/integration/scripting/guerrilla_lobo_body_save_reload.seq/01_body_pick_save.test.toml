@@ -1,0 +1,7 @@
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]
+binary = "PoseidonGame"
+# No mission= - boots to the main menu and drives the real GUERRILLA -> Sinai
+# -> character screen -> LoBoGolaniWB -> island switch to Abel -> launch.
+timeout = 600
+assert_timeout = 300
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

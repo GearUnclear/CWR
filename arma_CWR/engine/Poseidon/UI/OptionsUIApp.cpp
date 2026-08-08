@@ -1,5 +1,5 @@
 
-#include <Poseidon/Foundation/Platform/InitBridge.hpp> // IsMenuOverriddenByMod (custom-menu hijack)
+#include <Poseidon/Foundation/Platform/InitBridge.hpp> // GWorld / GSoundsys externs
 #include <Poseidon/UI/Options/OptionsShell.hpp>
 using namespace Poseidon;
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -222,14 +222,21 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // RESOURCE.BIN with no resource-extra.cpp).  Without this guard,
     // Load() returns an empty class and the next GetCtrl(IDC_MAIN_*)
     // call derefs nullptr in EnableCtrl.
-    // Keep the community addon's custom menu when a mod overrode the menu resource
-    // (we hijack it below to add Mods + wire Options); otherwise use the remaster
-    // menu. Without this the base RscDisplayMainRemaster — restored by
-    // MergeBaseResourceExtra so the Options screen works — would replace the mod's
-    // menu and lose its branding.
-    const char* mainRsc = (!IsMenuOverriddenByMod() && Res.FindEntry("RscDisplayMainRemaster"))
-                              ? "RscDisplayMainRemaster"
-                              : "RscDisplayMain";
+    // Policy (2026-08-06): the UD menu wins whenever RscDisplayMainRemaster
+    // exists, even when a mod's bin/resource overrode the menu resource
+    // (MergeBaseResourceExtra restores the class on top of the mod's Res).
+    // UD is a total overhaul and this menu is the only entry point into
+    // Guerrilla Mode, so a mounted mod (e.g. @LoBo) must not replace it —
+    // the earlier keep-the-mod's-menu policy predates UD carrying its own
+    // branding here. The inheritance base is vanilla, not the mod's:
+    // RestoreBaseMenuResource (Asset/Addon/ConfigParsers.cpp) puts the base
+    // RscDisplayMain + its style roots back over the mod's resource before
+    // resource-extra is merged, so the menu's chrome and geometry are the
+    // no-mod ones. Mods lose the menu takeover and nothing else. The hijack
+    // blocks below
+    // still cover a plain RscDisplayMain (mod or vanilla) when no
+    // resource-extra ships the remaster class.
+    const char* mainRsc = Res.FindEntry("RscDisplayMainRemaster") ? "RscDisplayMainRemaster" : "RscDisplayMain";
     Load(mainRsc);
     //	LoadHeader();
 
@@ -1030,9 +1037,30 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
 
                 // Publish the selections for the template mission's scripts:
                 // VarSet now for anything evaluating at menu time, and mirror
-                // them into the campaign variable bank — the IDD_INTRO
+                // them into the campaign variable bank - the IDD_INTRO
                 // handler below re-applies that bank via GameState::VarSet
                 // after ParseMission, so init.sqs reliably sees them.
+                //
+                // WHICH HALF IS LOAD-BEARING (issue #46 seam 2 - do not
+                // "simplify" this into one channel): the GGameState.VarSet
+                // calls below are DESTROYED before the mission starts.
+                // IDD_INTRO calls SwitchLandscape (WorldImpl.cpp) -> CleanUp
+                // -> CleanUpDeinit (WorldInit.cpp) -> GGameState.Reset(),
+                // which clears the whole variable table and re-seeds only
+                // "this"; DisplayIntro's own ctor does it a second time for a
+                // template with a real intro. The GStats._campaign mirror
+                // survives because GStats is a process-global independent of
+                // World, and the GStats.ClearMission() between the wipe and
+                // the replay touches _mission only. So the AddVariable calls
+                // are what actually deliver gmSel* to
+                // ZoneRegistry::InitMission and to
+                // Guerrilla::ApplyPlayerOutfitSelection; drop or reorder them
+                // ahead of the replay loop and the whole selection seam goes
+                // silently dead. The de-facto regression guard is the
+                // in-mission half of the ui/guerrilla_*_e2e tests (they read
+                // gmSelIsland / gmSelOutfit / gmSelPlayerClass after
+                // triSimUntil { alive player }), which only ever sees replayed
+                // values - deleting the VarSet half alone turns nothing red.
                 GGameState.VarSet(kGuerrillaVarIsland, GameValue(island));
                 GameVariable varIsland(kGuerrillaVarIsland, GameValue(island));
                 GStats._campaign.AddVariable(varIsland);

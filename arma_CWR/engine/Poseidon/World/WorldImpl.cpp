@@ -1121,6 +1121,42 @@ void World::ActivateAddons(const FindArrayRStringCI& addons)
     }
 }
 
+void World::ActivateAddon(RString addon)
+{
+    // Additive counterpart of ActivateAddons (which Clear()s first): the mission
+    // header has already been applied by the time content chosen in a menu needs
+    // its owner activated, so re-running the whole-list form would drop the
+    // mission's own addOns[]. An empty name is the base-game owner, which
+    // ParamOwnerList already treats as always visible, so it carries no
+    // information and is skipped rather than stored as an empty entry.
+    if (addon.GetLength() == 0)
+    {
+        return;
+    }
+    LOG_DEBUG(World, "Activating addon {} (additive)", (const char*)addon);
+    _activeAddons.Add(addon); // Add() lowercases and de-duplicates
+}
+
+bool World::IsAddonActive(RString addon) const
+{
+    // Read-only query over the same list CheckAddon consults. The empty name is
+    // the base-game owner and is always visible (ParamOwnerList::operator()), so
+    // it answers true without a lookup. The compare is case-insensitive so callers
+    // need not pre-lowercase the way ParamOwnerList::Add does internally.
+    if (addon.GetLength() == 0)
+    {
+        return true;
+    }
+    for (int i = 0; i < _activeAddons.GetSize(); i++)
+    {
+        if (stricmp(_activeAddons.Get(i), addon) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool World::CheckAddon(const ParamEntry& entry)
 {
     bool visible = entry.CheckVisible(_activeAddons);
@@ -1657,6 +1693,11 @@ namespace Poseidon
 {
 LSError World::Serialize(ParamArchive& ar, int message)
 {
+    // The addon list read back on the first load pass, kept alive for the
+    // ParseMission call much further down - see the re-activation there for why
+    // restoring it once is not enough.
+    FindArrayRStringCI savedAddons;
+
     if (ar.IsSaving())
     {
         ProgressReset();
@@ -1717,9 +1758,8 @@ LSError World::Serialize(ParamArchive& ar, int message)
 
         ProgressReset();
         ProgressStart(LocalizeString(message));
-        FindArrayRStringCI addons;
-        PARAM_CHECK(ar.SerializeArray("addons", addons, 1))
-        ActivateAddons(addons);
+        PARAM_CHECK(ar.SerializeArray("addons", savedAddons, 1))
+        ActivateAddons(savedAddons);
     }
     DWORD tLand = GetTickCount();
     PARAM_CHECK(ar.Serialize("Landscape", *land, 1))
@@ -1885,6 +1925,33 @@ LSError World::Serialize(ParamArchive& ar, int message)
         PARAM_CHECK(ar.Serialize("filenameReal", Glob.header.filenameReal, 1, ""))
 
         ParseMission(false);
+
+        // ParseMission -> ArcadeTemplate::Serialize -> CheckPatch re-runs
+        // ActivateAddons(t.addOns), and ActivateAddons is a whole-list RESET.
+        // So the list restored from the save at the top of this same first-pass
+        // branch is thrown away here and replaced by the template manifest plus
+        // the CfgAddons preloads - and long after SerializeVehicles has already
+        // used it, which is why the entities come back correct and only the
+        // list is wrong.
+        //
+        // For an ordinary mission that is a no-op, because _activeAddons only
+        // ever held the manifest. It stopped being a no-op with issue #45's
+        // runtime grant: a CHARACTER body picked out of the package-wide roster
+        // has its owner addons activated ADDITIVELY at the substitution seam
+        // and deliberately never written into t.addOns (doing so would turn a
+        // stock template into a hard mod dependency). Those owners are in the
+        // save - World::Serialize writes the whole live list - and they were
+        // being dropped on every load, so a reloaded campaign kept the body but
+        // lost the visibility grant its weapons, magazines and any later spawn
+        // of the same classes depend on.
+        //
+        // Re-apply additively, so the template manifest CheckPatch just
+        // installed is preserved and only the extra runtime grants come back.
+        // ActivateAddon de-duplicates, so the overlap costs nothing.
+        for (int i = 0; i < savedAddons.Size(); i++)
+        {
+            ActivateAddon(savedAddons[i]);
+        }
     }
     else
     {

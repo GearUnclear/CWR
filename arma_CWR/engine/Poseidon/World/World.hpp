@@ -691,6 +691,15 @@ class World
 	public:
 	void SwitchLandscape( const char *name );
 	void ActivateAddons(const FindArrayRStringCI &addons);
+	// ActivateAddons above is a whole-list RESET driven by the mission header: it
+	// Clear()s the active list before re-adding the preload set plus the mission's
+	// own addOns[]. ActivateAddon is the ADDITIVE single-addon form, for content
+	// chosen after that header was parsed (the Guerrilla character-select body pick,
+	// which comes from the package-wide roster and is by construction absent from
+	// the template's addOns[]). IsAddonActive is the read-only query - the test
+	// harness's triAddonActive reads the same list World::CheckAddon consults.
+	void ActivateAddon(RString addon);
+	bool IsAddonActive(RString addon) const;
 	bool CheckAddon(const ParamEntry &entry);
 
 	LSError Load(const char *name, int message);

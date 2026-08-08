@@ -1,0 +1,24 @@
+# Lebanon80 CIVILIAN outfit through the real menu, plus the island-scoped
+# outfit-token contract (issue #48 gap 1, and the faction name-keep defect it
+# uncovered).
+#
+# PRECONDITIONS (same as guerrilla_character_lobo_e2e):
+#   1. guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai,Lebanon80 has
+#      been run - without -IncludeWorld the installer's world gate REMOVES
+#      Guerrilla.Lebanon80, because Lebanon80.wrp lives inside
+#      @LoBo\addons\LoBo_Leb.pbo and is invisible to the gate.
+#   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against the
+#      game CWD = data dir), with @lobofixup mounted AFTER it.
+#   3. The fixture's patched pbos are gitignored - run
+#      tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 once.
+#
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise that would otherwise
+# be fatal; script errors still abort via --autotest.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
+# 600+ MB mod scan on boot, an island round trip, then the 25.6 km Lebanon80
+# world load after OK - the slowest world in the tree (guerrilla_lebanon80_boot
+# budgets 420 for the load alone, and this adds the menu flow in front of it).
+timeout = 900
+assert_timeout = 360
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
