@@ -62,7 +62,14 @@ class CameraHolder: public Vehicle
 		SetFOVRange(fov,fov);
 	} // set camera pars
 	virtual void SetFOVRange( float minFov, float maxFov ) {_camFovMin=minFov,_camFovMax=maxFov,_set._camFovMinMax=true;}
+	// Dive and heading are degrees, absolute, matching getDir: heading clockwise
+	// from north, dive positive looking up. CameraVehicle::Commit turns the pair
+	// into a view target and clears the flags.
 	virtual void SetDive( float dive ) {_camDive=dive,_set._camDive=true;}
+	// NOTE: bank is stored but nothing consumes it yet. Orientation comes from
+	// the view target (CameraVehicle::CamEffectFOV), which forces up = VUp, so
+	// roll has nowhere to go until that path takes an up vector. camSetBank is
+	// therefore accepted and silently ignored rather than mis-applied.
 	virtual void SetBank( float bank ) {_camBank=bank,_set._camBank=true;}
 	virtual void SetHeading( float head ) {_camHeading=head,_set._camHeading=true;}
 

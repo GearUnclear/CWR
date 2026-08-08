@@ -655,6 +655,8 @@ GameValue BoolCmpNE(const GameState* state, GameValuePar oper1, GameValuePar ope
 GameValue CamCommand(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamCommit(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamCreate(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue CamSetBank(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue CamSetDir(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamSetDive(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamSetFOV(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamSetFOVRange(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1371,8 +1373,8 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "camSetFovRange", function, CamSetFOVRange, GameObject, GameArray),
 
         GameOperator(GameNothing, "camSetDive", function, CamSetDive, GameObject, GameScalar),
-        GameOperator(GameNothing, "camSetBank", function, CamSetDive, GameObject, GameScalar),
-        GameOperator(GameNothing, "camSetDir", function, CamSetDive, GameObject, GameScalar),
+        GameOperator(GameNothing, "camSetBank", function, CamSetBank, GameObject, GameScalar),
+        GameOperator(GameNothing, "camSetDir", function, CamSetDir, GameObject, GameScalar),
         GameOperator(GameNothing, "camCommit", function, CamCommit, GameObject, GameScalar),
         GameOperator(GameNothing, "camSetTarget", function, CamSetTargetObj, GameObject, GameObject),
         GameOperator(GameNothing, "camSetTarget", function, CamSetTargetVec, GameObject, GameArray),

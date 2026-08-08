@@ -1,0 +1,7 @@
+tags = ["exclusive", "headful", "rendering", "camera"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 120
+# Windowed 800x600: this test compares terrain between two headings and needs no
+# more resolution than that. Left unset, --display-mode defaults to borderless.
+extra_args = ["--dev", "--window", "--display-mode", "windowed", "--width", "800", "--height", "600"]

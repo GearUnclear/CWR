@@ -1,0 +1,54 @@
+// Minimal Abel mission for cam_set_dir_heading.test.sqf: one player, midday,
+// clear weather, on the coastal slope near Le Port. The test parks the player
+// out of shot and drives a scripted camera from [8151, 3148]; that spot has
+// buildings and a road to the east and open hillside to the west, so two
+// opposite headings render visibly different frames.
+//
+// Deliberately self-contained rather than borrowing another test's fixture:
+// this test is about the camera, and nothing else should be able to wander
+// into frame and change what it sees.
+version=11;
+class Mission
+{
+	randomSeed=12345;
+	class Intel
+	{
+		viewDistance=1500;
+		month=7;
+		day=5;
+		hour=12;
+		minute=0;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={8151.14,1.83,3147.79};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

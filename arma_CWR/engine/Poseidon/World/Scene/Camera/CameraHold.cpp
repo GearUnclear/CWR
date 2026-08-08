@@ -8,6 +8,7 @@
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
+#include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
@@ -571,6 +572,38 @@ void CameraVehicle::Commit(float time)
         _targetTime = cTime;
         _oldTargetTime = Glob.time;
         _set._camTgt = false;
+    }
+    if (_set._camHeading || _set._camDive)
+    {
+        // camSetDir / camSetDive give the view direction as absolute angles in
+        // degrees, using the same convention as getDir: heading is measured
+        // clockwise from north (+Z), dive is elevation about the horizon with
+        // positive looking up.  Orientation is otherwise derived purely from
+        // the target (see CamEffectFOV), so express the angles as a target at
+        // virtual infinity - the same trick ResetTargets uses for the manual
+        // camera.  A later camSetTarget therefore overrides the angles and
+        // vice versa.  When both are pending in the SAME commit the angles
+        // win, because this runs after the _camTgt block above.
+        const float head = HDegree(_camHeading);
+        // Straight up/down would make the view direction parallel to VUp and
+        // degenerate SetDirectionAndUp, so hold off the poles a touch.
+        float dive = HDegree(_camDive);
+        saturate(dive, -H_PI * 0.499f, H_PI * 0.499f);
+
+        const float cosDive = cos(dive);
+        const Vector3 dir(sin(head) * cosDive, sin(dive), cos(head) * cosDive);
+        // Anchor on the committed destination when a move is pending, so a
+        // camSetPos + camSetDir pair in one commit aims from where the camera
+        // ends up rather than where it started.
+        const Vector3 from = _movePos.SquareSize() > 0.5 ? _movePos : Position();
+
+        _oldTarget = nullptr;
+        _target = from + dir * 1e5;
+        _targetTime = cTime;
+        _oldTargetTime = Glob.time;
+        _lastTgtPos = _target._pos;
+
+        _set._camHeading = _set._camDive = false;
     }
     if (_set._camFovMinMax)
     {
