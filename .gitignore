@@ -3,7 +3,9 @@
 /ARMA Cold War Assault \[Classic\]/
 /Arma Cold War Assault Demo \[Remaster\]/
 
-# Third-party mod test bed (2.2G binary PBOs/textures) - read-only reference, not our source
+# Mod test bed (2.2G binary PBOs/textures). Ours to modify since 2026-08-08, but the
+# pbo bytes are third-party APL-SA data and never belong in this GPL source repo; the
+# tracked artifact is the regeneration script (arma_CWR/tools/lobo/fix-lobo-scope.ps1).
 /@LoBo/
 
 # API keys / secrets

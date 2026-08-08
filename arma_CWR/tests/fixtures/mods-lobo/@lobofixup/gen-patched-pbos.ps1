@@ -20,6 +20,19 @@
     tests (guerrilla_sinai_swap, guerrilla_new_game_e2e), and rerun it if
     @LoBo is reinstalled/updated.
 
+    STATE ON THIS MACHINE (checked 2026-08-08): @LoBo's own LoBoammo.pbo and
+    LoBo_airammo.pbo were already repaired in place on 2026-07-16 and are now
+    byte-identical to the shadows in addons/, so the shadows are inert - a
+    reinstall of stock @LoBo makes them load-bearing again, which is why they
+    stay. The fixture as a whole is NOT redundant either way: bin/config.cpp
+    carries the CfgAddons preload roster and CfgGuerrillaFactions that several
+    lobo-lane tests assert against. Do not delete this fixture.
+
+    See also tools/lobo/fix-lobo-scope.ps1, which repairs a second, unrelated
+    @LoBo content defect (LoBoWreck.pbo and LoBoPalObj.pbo omit the
+    "#define public 2" header their sibling configs carry) with the same
+    same-length in-place byte patch.
+
 .PARAMETER LoBoDir
     The @LoBo mod folder. Default: D:\Arma_CWA\@LoBo
 #>
