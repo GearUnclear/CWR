@@ -54,7 +54,11 @@ class Mission
 					// Player: the lone Frontier Corps guerrilla at the Camp.
 					// mission.sqm position order is [easting, ELEVATION,
 					// northing] (unlike description.ext zone position[]).
-					position[]={7900,160,3200};
+					// Must track the Camp zone in description.ext - see the
+					// "DO NOT move the Camp back to {7900, 3200}" note there:
+					// the old spawn sat inside the fenced airbase compound and
+					// the player could not walk out of it.
+					position[]={8350,36,2950};
 					id=0;
 					side="EAST";
 					vehicle="LoBo_Egypt_FrtCrp";

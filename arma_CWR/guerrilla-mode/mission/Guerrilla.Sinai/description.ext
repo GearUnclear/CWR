@@ -47,16 +47,30 @@ class CfgGuerrillaZones
     {
         // COORDINATE ORDER (load-bearing): position[] is authored in
         // script/getPos order [easting, northing, elevation] - NOT the
-        // mission.sqm order [easting, ELEVATION, northing]. Elevations are
-        // approximate ground heights (Sinai terrain spans -50..475 m); the
-        // native garrison spawn snaps units to the surface regardless
-        // (GarrisonCache uses SurfaceYAboveWater).
+        // mission.sqm order [easting, ELEVATION, northing]. Elevations below
+        // are the real sampled ground heights from sinai.wrp (4WVR, 256x256
+        // grid at 50 m, LANDDATA_SCALE 0.045) - the earlier 120/160 values
+        // were placeholders 30-150 m above the actual surface. The native
+        // garrison spawn snaps units to the surface regardless (GarrisonCache
+        // uses SurfaceYAboveWater), so these are cosmetic, but wrong ones make
+        // every hand-check of a zone position look wrong too.
         //
-        // Layout: the Camp sits in the empty desert plain north-east of Wadi
-        // Mandar; the Wadi Checkpoint is ~500 m away so the occupier garrison
-        // distance-cache (cacheRadius 800) engages as soon as the campaign
-        // starts; Ras Nasrani Outpost is ~1.8 km out - beyond cache range
-        // until the player moves on it.
+        // Layout: the Camp sits in the open wadi floor south of the airbase
+        // plateau, ~30 m below it and out of line of sight; the Wadi
+        // Checkpoint is 552 m away so the occupier garrison distance-cache
+        // (cacheRadius 800) engages as soon as the campaign starts; Ras
+        // Nasrani Outpost is 1.8 km out - beyond cache range until the player
+        // moves on it.
+        //
+        // DO NOT move the Camp back to {7900, 3200}. That spot is INSIDE the
+        // fenced airbase compound that spans x 7687..8215, z 3167..4190 in
+        // sinai.wrp (hangars, HAS shelter, control tower, barracks, ringed by
+        // lobobloc\plot_provizorni_25 fence segments on all four sides). The
+        // player spawned walled in with no way out, and it is an occupier
+        // installation besides - the last place a resistance camp belongs.
+        // Any new candidate must be flood-fill verified as reaching open
+        // terrain, not just "no object within N metres": the compound
+        // interior is one of the emptiest patches on the island.
         class Camp
         {
             name = "Camp";
@@ -66,7 +80,7 @@ class CfgGuerrillaZones
             support = 100;
             income = 0;
             marker = "gmZoneMarker_0";
-            position[] = {7900, 3200, 160};
+            position[] = {8350, 2950, 36};
         };
         class WadiCheckpoint
         {
@@ -76,7 +90,7 @@ class CfgGuerrillaZones
             garrison = 6;
             income = 25;
             marker = "gmZoneMarker_1";
-            position[] = {8300, 3500, 160};
+            position[] = {8300, 3500, 65};
         };
         class RasNasraniOutpost
         {
@@ -86,7 +100,7 @@ class CfgGuerrillaZones
             garrison = 8;
             income = 25;
             marker = "gmZoneMarker_2";
-            position[] = {9100, 4600, 120};
+            position[] = {9100, 4600, 12};
         };
         // Explicit CITY on top of the world's named town (the auto-seed skips
         // any Names entry within 300 m of an explicit zone, so this REPLACES
@@ -98,7 +112,7 @@ class CfgGuerrillaZones
             owner = "NEUTRAL";
             support = 35;
             marker = "gmZoneMarker_3";
-            position[] = {6827, 2808, 140};
+            position[] = {6827, 2808, 32};
         };
     };
 };

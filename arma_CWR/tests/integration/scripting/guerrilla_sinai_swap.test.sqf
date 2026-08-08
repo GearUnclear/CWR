@@ -15,7 +15,7 @@
 //  El Tor) + seedCities over southern Sinai's ~34 type-less Names entries
 //  (El Tor's seed deduped by the explicit zone within 300 m).
 //
-//  The player spawns at the Camp, ~500 m from the Wadi Checkpoint - inside
+//  The player spawns at the Camp, 552 m from the Wadi Checkpoint - inside
 //  the native garrison cache radius (800 m) - so the WEST garrison
 //  (LoBoGolaniWB tiers + LoBoGolaniWBo officer) must spawn without any
 //  scripted nudge. gc* globals persist across per-statement evaluation.
