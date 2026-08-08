@@ -1,0 +1,9 @@
+; debug action: toggle player invulnerability so the exposure/firefight flow
+; can be tested (checkpoint fire, patrol contact) without dying mid-run
+? isNil "UC_god" : UC_god = false
+UC_god = not UC_god
+aP allowDamage (not UC_god)
+? UC_god : aP setDamage 0
+? UC_god : hint "DEBUG: GOD MODE on - invulnerable."
+? not UC_god : hint "DEBUG: GOD MODE off."
+exit

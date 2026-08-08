@@ -102,6 +102,7 @@ UC_a1 = aP addAction ["Sling weapon on back", "act_sling.sqs"]
 UC_a2 = aP addAction ["Take weapon in hands", "act_hands.sqs"]
 UC_a3 = aP addAction ["Check disguise", "act_status.sqs"]
 UC_a4 = aP addAction ["DEBUG: wipe compromise records", "act_forget.sqs"]
+UC_a5 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
 
 [] exec "hud.sqs"
 exit
