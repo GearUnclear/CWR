@@ -137,7 +137,7 @@ items:
     phase: foundation
     status: done
     depends_on: [build-toolchain]
-    commits: [5a289cd, 5a832e7, 706217b]
+    commits: [5a289cd, 5a832e7, 706217b, '1ebb7e6']
     gh_issues: []
     summary: >
       Incremental-build launcher with windowed detached launch (5a289cd), plus
@@ -147,6 +147,7 @@ items:
     log:
       - "CLAUDE.md rule this enables: never launch PoseidonGame.exe in the foreground of an AI session."
       - "Companion hygiene rule from 2026-07-07: any automated run that spawns game instances must sweep stray PoseidonGame processes afterward; nobody will be at the keyboard to close windows, and a lingering instance poisons the next Trident connection."
+      - "1ebb7e6: run-game-with-mods.ps1 wraps it for modded playtests - resolves every -Mod entry to an absolute path and fails in the terminal (a --mod that resolves to nothing is FATAL at startup, and the detached launch would only surface it in the stderr log), auto-appends @lobofixup after @LoBo, and emits ONE ';'-separated --mod because the engine option is scalar. run-game.ps1 itself only gained -ExtraArgs."
 
   # ---------------------------------------------------------------- phase 1
   - id: engine-native-systems
@@ -192,6 +193,7 @@ items:
       - "test_mission_script_core.cpp enforces the shared core byte-identically across all 5 mission copies; only description.ext and mission.sqm may differ per island."
       - "Incidental engine fixes: savegame ExtParsMission subdirectory reparse, deterministic --test-mission staging, addon access-denied WARN, new-game fallback cycler side-override."
       - "e936395: Abel camp centre sits ~120m offshore; player start nudged onto the dry fig-tree plain (the open-sea drown trap)."
+      - "62ca236: same class of siting bug on Sinai, opposite failure mode - the Camp and the player start sat at {7900, 3200}, INSIDE the fenced airbase compound (x 7687..8215, z 3167..4190, ringed by plot_provizorni_25 segments), so the player spawned walled in with no way out and inside an occupier installation. Moved to the open wadi floor at {8350, 2950}, 552 m from the Wadi Checkpoint so the 800 m garrison cache still engages at campaign start. An 'is anything within N metres' check picks that compound every time - the interior is one of the emptiest patches on the island - so a candidate must be flood-fill verified as reaching open terrain. Also replaced the four placeholder zone elevations (120-160 m) with sampled ground heights (12-65 m); cosmetic, since the garrison spawn snaps to surface, but the wrong ones already sent a screenshot shoot chasing a terrain bug that did not exist."
       - "Orphaned guerrilla_gatezero.Demo when guerrilla_spawn_domove.test repointed to guerrilla_capture.Demo; its staged deletion in the working tree is intentional cleanup."
 
   - id: lobo-testbed
@@ -472,6 +474,116 @@ items:
       - "The official CWA Remastered binary shares this code path and the bug (diagnosed from its debug log on a Steam install); filed upstream as draft PR #98 on the CWR-CE community fork, carrying the GearUnclear identity only (no AI attribution on external contributions)."
       - "Unblocked the Lebanon80 template: a 25.6 km @LoBo world is unplayable without its objects."
 
+  - id: mod-prop-spawn-safety
+    title: "Third-party prop spawns degrade instead of crashing; mod preload rosters actually merge"
+    phase: hardening
+    status: done
+    depends_on: [wrp-4wvr-object-load]
+    commits: ['001b39e']
+    summary: >
+      createVehicle of @LoBo's static scenery props (wrecks, ruins, sandbags,
+      barbed wire, barrels, burning oil wells) took the process down with an
+      access violation. Three independent faults, all now non-fatal: a partially
+      resolved class loads as a bare EntityAIType and every entity constructor
+      static_casts the type to its own subclass (Building::Building sized _locks
+      from a garbage NPos() and memmove'd that range); WeaponProxy::IsPresent()
+      tested only `selection`, so DrawProxies dereferenced a null loose link; and
+      the config plumbing that was supposed to prevent the whole situation was
+      dead - ConfigParsers kept only ONE mod's deferred bin/config (and, because
+      the mod enumeration runs in reverse mount order, the wrong one), while the
+      stock CWA config.bin locks CfgAddons at PAReadOnly so ParamClass::Update
+      refused every mod's CfgAddons/PreloadAddons roster silently. The probe now
+      runs all 20 candidate props to completion; the five LoBoWreck classes read
+      back scope 0 and are refused with a log line instead of a crash. (That last
+      part was misread as intent - see lobo-content-repair: the classes were
+      finished content behind a missing preprocessor header, and are usable now.)
+    log:
+      - "The silence was the hard part: ParamClass::Update reports its refusal through AccessDenied -> RptF, and RptF is #define RptF(...) ((void)0). Nothing in any log said the merge had been skipped."
+      - "Both config faults hid each other. Fixing the single-slot deferred merge alone changed nothing observable, because CfgAddons was still read-only; the diagnostic that cracked it was a permanent INFO line in World::ActivateAddons reporting active-addon count and how many came from PreloadAddons classes (12 from 3 classes == the base game's own WeaponBIStudio/MiscBIStudio/ResistanceBIStudio and nothing else)."
+      - "CfgAddons is lifted only to PAReadAndCreate and only for the duration of a merge, then restored: mods may ADD preload classes, they still cannot rewrite the base game's lists, and the protection shape the MP integrity walk checksums is unchanged."
+      - "Access denial does NOT imply an unspawnable class: CheckAccessCreate deliberately continues past a denial, and a denied class whose base is visible still inherits a positive scope (GWRubble builds fine with 'gwbuild1' inactive). The crash needed scope to resolve <= 0, which is what the LoBoWreck classes do."
+      - "Behaviour change with a test cost: guerrilla_lobo_body_save_reload phase 02 asserted the @LoBo owners report INACTIVE on a fresh mount as its control. That baseline was recording these two bugs, not a property of mod mounting; the assertion is flipped to true and the control now rests on gmSelPlayerClass/SoldierGB plus the DIFF 3 loadout rebuild."
+      - "Fixed a latent dangling pointer alongside: Pars.Update copies array values that keep a _file back-pointer into the source ParamFile, and the deferred configs were freed immediately after. Pars.SetFile(&Pars) after the merge, matching the existing Res handling."
+      - "Coverage: unit tests for the registry merge (test_addon_config_merge.cpp) and the proxy/bounds guards (test_house.cpp); integration test scripting/prop_spawn_safety pins all of it on the real Guerrilla.Sinai template, with a @propsafety fixture mod mounted LAST specifically so its roster occupies the slot the single-slot merge used to discard."
+
+  - id: lobo-content-repair
+    title: "@LoBo content defects repaired at source (wreck and poster props usable)"
+    phase: hardening
+    status: done
+    depends_on: [mod-prop-spawn-safety]
+    commits: [d108433]
+    summary: >
+      Eighteen finished @LoBo scenery classes could not be spawned at all. The
+      cause was a content defect, not an engine one: OFP-era configs write
+      `scope = public;` and rely on a five-line `#define private 0 / protected 1
+      / public 2` header at the top of the same file, and LoBoWreck.pbo and
+      LoBoPalObj.pbo are the only two of @LoBo's 116 addon configs that omit it.
+      The bare identifier resolves to nothing, the reader stores the string,
+      CfgVehicles reads scope 0, and createVehicle refuses the class with
+      "Cannot create '<class>': type is abstract". @LoBo is ours to modify as of
+      2026-08-08, so this is fixed in the pbos rather than shimmed: config.cpp is
+      stored uncompressed and `scope = 2;` is shorter than every spelling of
+      `scope = public;`, so the value is rewritten in place and space-padded back
+      to length - no repack, no pbo offset recalculation. tools/lobo/
+      fix-lobo-scope.ps1 finds its own targets (any addon that uses a scope
+      keyword without defining it), backs originals up to @LoBo/_ud-orig/, and is
+      idempotent. The ten LoBoWreck wrecks and the eight LoBoPalObj posters now
+      build; probe_props runs 20/20 with zero "type is abstract" lines.
+    log:
+      - "@LoBo is gitignored as game data, so the repaired pbos exist only on this machine. The script is the tracked artifact - rerun it after any @LoBo reinstall, same contract as gen-patched-pbos.ps1."
+      - "The provisional CfgVehicles overlay in tools/screenshots/@udshowcase/bin/config.cpp is removed; it only covered six of the eleven defective sites and would have masked the two LoBoPalObj-side classes forever."
+      - "Sweep of all 116 @LoBo addon configs found no other undefined scope keyword and no surviving malformed float. The remaining bare identifiers are destrType = Destruct* in 13 addons that never define them (engine enum: No=0, Building=1, Engine=2, Tree=3, Tent=4, Man=5, Default=6), so they all collapse to DestructNo and those props are indestructible. Left alone deliberately: the numeric mapping is knowable but the mod shipped that way for twenty years, and 'fixing' it is a gameplay change, not a repair. Same for access = ReadOnlyVerified (falls to the more permissive ReadAndWrite) and side = TEast (falls to 0, which IS TEast)."
+      - "LoBoWreck.cpp also drops the semicolon after `accuracy=0.3`. Harmless here: ParamClass::Parse terminates a scalar value on any of ';', '\\n', '\\r' (ParamFile.cpp:1797), so the next line still parses. Not touched."
+      - "The tracerColor '0.0.1' floats that @lobofixup exists for are already repaired inside @LoBo itself (2026-07-16); @LoBo's LoBoammo.pbo and LoBo_airammo.pbo are byte-identical to the fixture's shadows. The fixture's addons/ shadows are therefore inert, but its bin/config.cpp roster is still load-bearing for the lobo lane, so the fixture stays."
+      - "Not fixed, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~4 m below ground at createVehicle height (setPos [x,y,4] seats them). Their p3d carries only 4 LODs where LoBo_t54wrck carries 7, missing whatever LOD the engine seats the object with. Model-level defect, left for a follow-up."
+      - "probe_props was reframed while verifying this. Its old vantage looked north through a lobo_israel_w_03 separation-wall segment on the n=9801 line, so every frame was a full-bleed grey slab - a green run that proved nothing. Moved to open ground at [11900, 9650] (no placed object within 70 m, ~450 within 400 m, so unambiguously dry land)."
+
+  - id: cam-set-dir-fix
+    title: "camSetDir turns the camera again (scripted-camera angle commands)"
+    phase: hardening
+    status: done
+    depends_on: [crash-fixes-trident-trust]
+    commits: ['4419c0a']
+    summary: >
+      The whole scripted-camera angle family was inert. "camSetDir" and
+      "camSetBank" were both bound to the CamSetDive handler in the operator
+      table (GameStateExt.cpp:1376-1377), so a vanilla OFP cutscene line
+      pitched the camera instead of turning it; the correct CamSetDir /
+      CamSetBank handlers existed in GameStateExtUi.cpp but had no forward
+      declaration and were unreachable. And the commit side was dead too -
+      SetDive/SetHeading stored the angle and raised a flag that
+      CameraVehicle::Commit never read, orientation coming entirely from the
+      camera target. Commit now folds a pending heading/dive pair into a view
+      target at virtual infinity (the ResetTargets trick), anchored on the
+      committed destination so camSetPos + camSetDir in one commit aims from
+      where the camera ends up.
+    log:
+      - "Angle convention matches getDir: degrees, heading clockwise from north, dive positive up. Dive is clamped just short of the poles because a view direction parallel to VUp degenerates SetDirectionAndUp."
+      - "camSetBank is correctly routed now but still does nothing, deliberately and with a note at CameraHold.hpp:69: target-derived orientation forces up = VUp, so roll has nowhere to go until that path takes an up vector. Accepted-and-ignored beats accepted-and-mis-applied."
+      - "Found while building the screenshot shoots, which routed around it with triSetView; the README for those still recommends triSetView, because it takes an absolute eye point and look direction in one call with no commit step."
+      - "Covered by rendering/cam_set_dir_heading: two opposite headings, getDir asserted at 90 and 270, plus a pixel-change assertion - under the alias the two frames were identical, so a getDir-only test would have passed on the broken build."
+
+  - id: screenshot-shoots
+    title: "Scripted in-game photography for the site"
+    phase: foundation
+    status: done
+    depends_on: [guerrilla-test-suite, site-portal]
+    commits: ['9def4c6', f18cf14]
+    summary: >
+      Five Trident-driven screenshot generators (lobo_sinai_showcase,
+      lobo_sinai_stories, vanilla_malden_stories, noe_stories, probe_props)
+      plus probe_addons and diag_camera, under tools/screenshots/ rather than
+      tests/integration/ so a test sweep never picks them up. @udshowcase
+      pre-activates the @LoBo roster the shoots spawn beyond what any mission
+      declares. contact_sheet.py tiles a run for review. The README is the
+      real deliverable: the camera rig, the harness constraints, and how to
+      make a frame read as a photograph rather than a catalogue entry.
+      Eight curated frames shipped to site/assets/img as 760x428 JPEGs.
+    log:
+      - "Masters (2560x1440 PNG, ~4 MB each) stay in the gitignored arma_CWR/tmp/showcase; the shoots regenerate them, which is why they are scripts."
+      - "Two engine defects surfaced from this work rather than from play: cam-set-dir-fix and mod-prop-spawn-safety. Photographing a mod's roster turned out to be an unusually thorough integration test."
+      - "Site pages do not reference the eight new captures yet."
+
   - id: startup-stall-diagnosis
     title: "Intermittent zero-CPU startup stall before harness listen (issue #30)"
     phase: hardening
@@ -594,7 +706,7 @@ items:
     status: done
     priority: 1
     depends_on: [engine-native-systems, mission-migration-native]
-    commits: [92d7426, b89470a, 56a55c6, 283574a, 3eea713, a94430a, e70a940]
+    commits: [92d7426, b89470a, 56a55c6, 283574a, 3eea713, a94430a, e70a940, '5b3f3ee']
     gh_issues: [19, 20, 21, 22, 23, 24]
     summary: >
       Engine-level undercover replacing the binary global cover break: a
@@ -637,6 +749,7 @@ items:
       - "2026-07-22: playable sandbox landed (283574a) - Undercover.Abel (Houdan on Abel): unarmed captive start, AK47 WeaponHolder pickup, scripted patrol/checkpoint witness groups, Skoda + UAZ for the vehicle policy, native OUTPOST garrison, change-driven status HUD + sling/status/forget self-actions. Not part of the shared-core family by name (installer + parity test ignore it); ships by hand-copy into <GameDir>/Missions. Same commit fixes run-game.ps1 mission launches (PS 5.1 Start-Process globs -WorkingDirectory; bracketed [Classic] dir needed a wildcard escape). Smoke run surfaced a NEW seam filed as #24: AICenterImplPreview.cpp(848) Fail(\"Illegal exposure\") spam - the strategic exposure map's hand-back only handles Unknown/enemy sides, and per-observer undercover flips to civilian now hit the third case constantly (dropped exposure may leave stale enemy contributions in the map). Site dossier from the concurrent session landed as 3eea713 (undercover.html + 8 captures + gameplay.html links)."
       - "2026-07-29: two latent test regressions from this landing found and fixed (background session; neither test had actually run green since 92d7426 - the landing sweep only ran the two undercover tests). (1) player_fire_headless: NOT undercover-related despite appearances - the in-game UI's per-frame cursor re-aim (InGameUIMenuSim.cpp SimulateHUD) overwrites the force-fire wanted gun direction back to the level cursor every frame on a manual player, so the scripted `fire` latch starves and the shot never leaves; fixed by making the cursor aim yield while EntityAI::_forceFireWeapon is pending (new GetForceFireWeapon() accessor; cursor aim resumes when the shot consumes the latch). Verified pre-existing at HEAD 56b03f5 with a HEAD-built binary in a clean worktree - the uncommitted #25 engine diff is innocent. (2) showcase_smoke chapter 6: alert.sqs broke cover 150 m out where at WL1 NO garrison group holds a record of the player (payload probe: ucStatus=0, witnesses=0), so gmBreakUndercover marked nobody (silent latch by design) and the FSM never left GREEN; fixed by staging 35 m from a live garrison group and waiting for knowsAbout > 0 before the break (the lifecycle test's proven contract). Chapter 7 fallout: a genuinely-run alert chapter leaves reserve/defender state that can freeze the capture meter past the old 20 s window (z.garrison >= 1 defends; the cache re-materializes leftover reserve); capture.sqs now re-wipes whatever stands back up and gives the first tick the flip's 90 s budget. Final: player_fire + showcase_smoke + guerrilla_native_undercover + guerrilla_undercover_rules green at --retries 0; [guerrilla] unit sweep 2121 assertions and [missions] parity 609 assertions green."
       - "2026-08-04: closed #19 (e70a940) - the once-per-campaign break latch is gone. Simulate's mark gate is now stateless (in.undercover && in.breakRequested, exposed as BreakShouldMark); every gmBreakUndercover marks all currently-knowing occupier groups, MarkAllWitnessesCompromised's per-group idempotence keeps each group at-most-once, zero-witness breaks stay silent (heard, not identified), and the campaign-first alertHeatBreak/firstEver latch (Phase-3 N-subject scope) is untouched. _breakLatched deleted from Clear/EvaluateAlert/serialization; the breakLatched entry in older saves is simply never read. Unit: the break-latch case became the no-campaign-latch gate case incl. the #19 second-break regression ([guerrilla] 103 cases / 2120 assertions green); integration: guerrilla_native_undercover extended with a second observer gaining its record after break 1 and a second gmBreakUndercover driving gmUndercoverWitnesses to 2 (green, 16 s), guerrilla_undercover_rules green on retry (first attempt hit live interference from a concurrent session on the machine)."
+      - "2026-08-08 (5b3f3ee): Undercover.Abel gains a fifth DEBUG action, GOD MODE (allowDamage toggle + damage clear). The exposure arc the sandbox exists to demonstrate kills the player partway through, so walking a whole checkpoint approach by hand meant restarting after every contact."
       - "2026-07-22: closed #24. Root cause was subtler than the issue's reading: a side flip through UpdateTarget can never trip the Fail (the hand-back always runs under the OLD stored side before the write); the real hole is that all three exposure hand-back sites (UpdateTarget / DeleteTarget / RemoveOldExposures in AICenterImplPreview.cpp) re-derive the enemy-vs-unknown category from the CURRENT side + friendship matrix. In every guerrilla mission the civilian center boots with military friendships copied from resistance (friends[East]=0 via BeginArcade), its pre-seeded East targets get booked as ENEMY exposure on the first Think, then ZoneRegistry::ApplyCampaignFriendship welds civ-vs-occupier to 1.0 and each held exposure re-derives as neither enemy nor unknown: one Fail('Illegal exposure') per tracked East unit, exposure dropped without dirtying the enemy map (stale contribution). Fix: AITargetInfo now remembers the booked category (_exposureEnemy, set at both AddNewExposures booking sites, reset with _exposure on load) and every hand-back erases with it unconditionally; the erase only dirties cells for RecalculateExposure, which rebuilds from current sides, so the stale contribution is dropped correctly for ANY later side/friendship state. No unit test (AICenter+AIMap need full world scaffolding); verified e2e: [guerrilla] suite 2017 assertions green, Undercover.Abel smoke 92 s ZERO hits + zero [ERRR] (was 10 hits in first 18 s). Commits list not self-updated (a commit cannot contain its own hash); the fix hash is on the #24 closing comment."
 
   - id: character-outfit-select
