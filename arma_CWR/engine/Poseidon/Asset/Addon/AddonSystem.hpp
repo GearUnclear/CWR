@@ -24,6 +24,15 @@ class AddonSystem
     static void   ParseAllAddonConfigs();
     static void   ClearAddonConfigs();
 
+    /// Merge a mod or addon config into the global `Pars`. Use this instead of a bare
+    /// `Pars.Update()` for anything sourced from a mod: it unlocks the addon registry
+    /// (`CfgAddons`) for the duration of the merge, which a plain Update cannot write.
+    static void MergeIntoBaseConfig(const ParamFile& source);
+
+    /// The destination-explicit form of MergeIntoBaseConfig, so the addon-registry
+    /// unlock can be exercised without touching the global config.
+    static void MergeConfigInto(ParamFile& target, const ParamFile& source);
+
     static RString          CheckAddonName(const ParamEntry& addon);
     static bool             CheckVersion(const RString& prefix, const ParamEntry& addon);
     static RString          GetAddonName(const ParamFile& config);

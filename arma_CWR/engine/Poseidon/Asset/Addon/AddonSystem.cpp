@@ -372,10 +372,49 @@ void AddonSystem::ParseAllAddonConfigs()
     {
         Log("Parsing addon config '%s' %s", (const char*)GetAddonName(*resolved[i].addon),
             resolved[i].preloaded ? "(preloaded)" : "");
-        Pars.Update(*resolved[i].addon);
+        MergeIntoBaseConfig(*resolved[i].addon);
     }
 
     Pars.SetFile(&Pars);
+}
+
+void AddonSystem::MergeIntoBaseConfig(const ParamFile& source)
+{
+    MergeConfigInto(Pars, source);
+}
+
+void AddonSystem::MergeConfigInto(ParamFile& target, const ParamFile& source)
+{
+    // The stock CWA config.bin ships CfgAddons with access = PAReadOnly (2), and
+    // ParamClass::Update bails out of a read-only destination on its first line -
+    // silently, because AccessDenied reports through RptF and RptF is compiled to
+    // ((void)0). So every mod that shipped a CfgAddons/PreloadAddons class merged
+    // NOTHING: the class never appeared in Pars, World::ActivateAddons never saw the
+    // list, and the mod's own classes stayed unreachable at runtime ("Access denied:
+    // ... owner addon 'x' is not activated" on the first createVehicle, followed by
+    // an abstract type and, before the guards in NewVehicle, a heap-corrupting
+    // construction).
+    //
+    // CfgAddons is the addon *registry*, not protected gameplay data - extending it
+    // is exactly what mounting third-party content means. Lift it to PAReadAndCreate
+    // (add-only: new preload classes can be created, the base game's own lists still
+    // cannot be rewritten) for the merge, then put the original mode back so the
+    // config keeps the protection shape the MP integrity walk expects.
+    ParamEntry* cfgAddons = target.FindEntry("CfgAddons");
+    const ParamAccessMode saved = cfgAddons ? cfgAddons->GetAccessMode() : PADefault;
+    const bool lift = cfgAddons && saved >= PAReadOnly;
+    if (lift)
+    {
+        cfgAddons->SetAccessModeForAll(PAReadAndCreate);
+    }
+    target.Update(source);
+    if (lift)
+    {
+        // ForAll, so classes this merge just added are protected the same way the
+        // base registry is. Nothing inside CfgAddons carries a per-class mode of its
+        // own in any shipped config, so this restores the tree exactly.
+        cfgAddons->SetAccessModeForAll(saved);
+    }
 }
 
 void AddonSystem::ClearAddonConfigs()

@@ -1,0 +1,24 @@
+# Static-scenery-prop spawn safety on the real Guerrilla.Sinai template with
+# @LoBo mounted. See prop_spawn_safety.test.sqf for what each case pins.
+#
+# The mod stack is load-bearing and its ORDER is part of the test: @propsafety is
+# mounted last so its bin/config.cpp lands in the deferred-merge slot that a
+# single-slot implementation discards, while @lobofixup's lands in the slot that
+# would win. The test asserts both rosters took effect.
+#
+# PRECONDITIONS (same as the other lobo-lane tests):
+#   * full CWA 1.99 as OFPR_DATA_DIR, @LoBo next to it
+#   * one-time: tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 420
+assert_timeout = 240
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims in
+# the CoC pbos etc.) that is fatal under the runner's default --strict.
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--mods-dir", "..",
+    "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup;arma_CWR/tests/fixtures/mods-propsafety/@propsafety",
+]

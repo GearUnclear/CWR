@@ -3,6 +3,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Asset/Addon/AddonSystem.hpp>
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/IO/Filesystem/DirScanner.hpp>
 #include <stdio.h>
@@ -85,7 +86,17 @@ static bool ParseTextFileFromResolvedPath(ParamFile& target, RStringB fullPath, 
     return err == LSOK;
 }
 
-static SRef<ParamFile> s_deferredModConfig;
+// Every mod directory that shipped a bin/config.cpp / bin/config.bin, in the order
+// ModSystem::EnumDirectories visited them - which is REVERSE mount order, last-listed
+// mod first. This used to be a single SRef, so with two or more config-bearing mods
+// mounted each new one silently overwrote the previous and only ONE was ever merged
+// into Pars; worse, because the enumeration runs backwards, the survivor was the
+// EARLIEST-listed (lowest priority) mod, the exact opposite of mod-override semantics.
+// Symptom: a preload mod mounted last ("@LoBo;@lobofixup;@udshowcase") contributed
+// nothing at all, and its CfgAddons/PreloadAddons entries never reached
+// World::ActivateAddons - runtime spawns of its classes then hit "Access denied ...
+// owner addon is not activated".
+static AutoArray<SRef<ParamFile>> s_deferredModConfigs;
 
 // True when a mod's bin/resource won the resource enumeration (replaced the base
 // menu resource). Read by the main menu to keep the community addon's custom menu
@@ -313,7 +324,7 @@ bool ParseConfig(RStringB dir, void* context)
             SRef<ParamFile> modConfig = new ParamFile;
             if (ParseConfigFromDir(binDir, *modConfig))
             {
-                s_deferredModConfig = modConfig;
+                s_deferredModConfigs.Add(modConfig);
                 LOG_INFO(Config, "  Mod config found in {}, deferring merge", (const char*)binDir);
                 break;
             }
@@ -326,16 +337,32 @@ bool ParseConfig(RStringB dir, void* context)
         RString binDir = MakeBinDir(dir, upperCase);
         if (ParseConfigFromDir(binDir, Pars))
         {
-            if (s_deferredModConfig)
+            // Merge back-to-front: the collection order is reverse mount order, so
+            // walking it backwards applies the earliest-listed mod first and lets each
+            // later-listed mod override it. Same precedence a player expects from
+            // -mod=a;b;c, and the same direction ParamClass::Update already gives
+            // within one file.
+            for (int i = s_deferredModConfigs.Size() - 1; i >= 0; i--)
             {
-                LOG_INFO(Config, "  Merging deferred mod config into base");
-                Pars.Update(*s_deferredModConfig);
-                s_deferredModConfig = nullptr;
+                LOG_INFO(Config, "  Merging deferred mod config {} of {} into base", s_deferredModConfigs.Size() - i,
+                         s_deferredModConfigs.Size());
+                AddonSystem::MergeIntoBaseConfig(*s_deferredModConfigs[i]);
             }
+            // Update copies array values verbatim and they keep a _file back-pointer
+            // into the source ParamFile, which the Clear() below frees. Re-point them
+            // at Pars first - the same hazard MergeBaseResourceExtra guards for Res.
+            if (s_deferredModConfigs.Size() > 0)
+            {
+                Pars.SetFile(&Pars);
+            }
+            s_deferredModConfigs.Clear();
             return true;
         }
     }
 
+    // No base config: nothing to merge into. Drop what was collected anyway so a
+    // later in-process re-mount starts from an empty deferred list.
+    s_deferredModConfigs.Clear();
     return false;
 }
 

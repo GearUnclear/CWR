@@ -12,9 +12,13 @@
 # save/reload, and that the unit rebuilds from the serialized class rather than
 # from the vanilla template manifest.
 #
-# The baseline in phase 02 is what makes the addon assertions mean anything:
-# the same process, same mods, freshly launched on untouched Abel, reports
-# those owners INACTIVE. Mounting @LoBo is not activating its addons.
+# The baseline in phase 02 is what makes the round-trip mean anything: the same
+# process, same mods, freshly launched on untouched Abel, reports the authored
+# SoldierGB and a nil gmSelPlayerClass, so nothing can false-pass on leftover
+# state in the shared user dir. (Until 2026-08 that baseline also reported the
+# @LoBo owners INACTIVE; it no longer does, because @lobofixup's
+# CfgAddons/PreloadAddons roster now actually reaches World::ActivateAddons -
+# see the note in 02_reload.test.sqf.)
 #
 # PRECONDITIONS: guerrilla-mode/install-missions.ps1 -IncludeWorld
 # Sinai,Lebanon80; the one-time @lobofixup patched pbos

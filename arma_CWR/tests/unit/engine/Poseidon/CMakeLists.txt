@@ -418,6 +418,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Entities/Vehicles/test_tank.cpp
     World/Entities/Vehicles/test_car.cpp
     World/Entities/Vehicles/test_motorcycle.cpp
+    World/Entities/Vehicles/test_house.cpp
     World/Entities/Vehicles/Air/test_airplane.cpp
     World/Entities/Vehicles/Air/test_helicopter.cpp
 
@@ -431,6 +432,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Locale/test_stringtable_system.cpp
     UI/Locale/test_language_registry.cpp
     Core/test_config_system.cpp
+    Asset/Addon/test_addon_config_merge.cpp
 
     # Detection tests
     World/Detection/test_detector.cpp

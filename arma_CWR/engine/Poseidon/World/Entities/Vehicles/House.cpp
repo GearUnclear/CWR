@@ -154,16 +154,31 @@ void BuildingType::InitShape()
         }
     }
 
-    for (int level = 0; level < _shape->NLevels(); level++)
+    // _proxies is a fixed MAX_LOD_LEVELS array, so a model that reports more
+    // LODs than that would write past it.
+    int nProxyLevels = _shape->NLevels();
+    if (nProxyLevels > MAX_LOD_LEVELS)
+    {
+        nProxyLevels = MAX_LOD_LEVELS;
+    }
+    for (int level = 0; level < nProxyLevels; level++)
     {
         WeaponProxy& info = _proxies[level];
         Shape* shape = _shape->LevelOpaque(level);
+        if (!shape)
+        {
+            continue;
+        }
 
         // convert shape proxies to my proxies
         for (int i = 0; i < shape->NProxies(); i++)
         {
             const ProxyObject& proxy = shape->Proxy(i);
             Object* obj = proxy.obj;
+            if (!obj)
+            {
+                continue;
+            }
             const VehicleNonAIType* type = obj->GetVehicleType();
             if (!type)
             {
@@ -605,7 +620,18 @@ Building::Building(VehicleType* name, int id, LODShapeWithShadow* shape) : base(
     SetType(Primary);
     SetID(id);
 
+    // NPos() reads BuildingType::_positions through a static_cast of the type
+    // object. NewVehicle now refuses to reach here with a type that is not a real
+    // BuildingType, but keep the allocation itself honest: a nonsensical count is
+    // a reason to build a pathless house, not to memmove an arbitrary range (the
+    // original 0xC0000005 was inside _locks.Resize()).
     int n = NPos();
+    if (n < 0 || n > MaxHousePositions)
+    {
+        LOG_ERROR(World, "Building '{}': implausible path-position count {} - building without interior positions",
+                  (const char*)GetType()->GetName(), n);
+        n = 0;
+    }
     _locks.Resize(n);
     for (int i = 0; i < n; i++)
     {
@@ -665,6 +691,15 @@ void Building::Deanimate(int level)
 void Building::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, const Matrix4& invTransform,
                            float dist2, float z2, const LightList& lights)
 {
+    // `_proxies` holds MAX_LOD_LEVELS entries and `level` is a LOD index that can
+    // legitimately carry the LOD_INVISIBLE sentinel (127) or an index past the
+    // table on a model with an unusual LOD set - both would read off the end of a
+    // fixed array embedded in the type object.
+    if (level < 0 || level >= MAX_LOD_LEVELS)
+    {
+        Object::DrawProxies(level, clipFlags, transform, invTransform, dist2, z2, lights);
+        return;
+    }
     const WeaponProxy& proxy = Type()->_proxies[level];
     if (proxy.IsPresent())
     {
@@ -711,6 +746,10 @@ void Building::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transf
                 // construct FrameWithInverse from transform and invTransform
                 Matrix4Val invPTransform = pTransform.InverseScaled();
                 Shape* shape = pshape->LevelOpaque(level);
+                if (!shape)
+                {
+                    return;
+                }
 
                 // remove fire selection
                 if (weapon)

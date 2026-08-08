@@ -513,6 +513,65 @@ bool CheckAccessCreate(const ParamEntry& entry)
     return true;
 }
 
+namespace
+{
+template <class T>
+bool IsTypeClass(const EntityAIType* type)
+{
+    return dynamic_cast<const T*>(type) != nullptr;
+}
+
+// The type object and the entity are chosen by two separate switches over the same
+// `simulation` string: VehicleTypeBank::Load picks the *Type subclass, NewVehicle
+// picks the entity that will static_cast it back. They only agree while both
+// switches see the same string AND the bank actually took its concrete branch -
+// neither holds for a class whose config resolved partially (a denied owner addon,
+// a simulation the bank does not know). Reading a bare EntityAIType through
+// BuildingType's layout is what produced the 0xC0000005 in Building::Building.
+// This table re-states the contract so the mismatch is caught before construction.
+// A simulation absent from the table imposes no constraint.
+struct SimTypeClassRule
+{
+    const char* sim;
+    bool (*match)(const EntityAIType*);
+};
+
+const SimTypeClassRule kSimTypeClassRules[] = {
+    {"tank", &IsTypeClass<TankType>},
+    {"car", &IsTypeClass<CarType>},
+    {"motorcycle", &IsTypeClass<MotorcycleType>},
+    {"ship", &IsTypeClass<ShipType>},
+    {"soldier", &IsTypeClass<ManType>},
+    {"soldierold", &IsTypeClass<ManType>},
+    {"helicopter", &IsTypeClass<HelicopterType>},
+    {"parachute", &IsTypeClass<ParachuteType>},
+    {"airplane", &IsTypeClass<AirplaneType>},
+    {"lasertarget", &IsTypeClass<LaserTargetType>},
+    {"thing", &IsTypeClass<ThingType>},
+    {"invisible", &IsTypeClass<InvisibleVehicleType>},
+    // church and fountain derive from BuildingType, so BuildingType is the right
+    // (weaker) requirement for "house"/"fire"/"cameratarget" and the exact one for
+    // the other two.
+    {"house", &IsTypeClass<BuildingType>},
+    {"fire", &IsTypeClass<BuildingType>},
+    {"cameratarget", &IsTypeClass<BuildingType>},
+    {"church", &IsTypeClass<ChurchType>},
+    {"fountain", &IsTypeClass<FountainType>},
+};
+
+bool SimulationMatchesTypeClass(const EntityAIType* type, const char* simName)
+{
+    for (const SimTypeClassRule& rule : kSimTypeClassRules)
+    {
+        if (stricmp(simName, rule.sim) == 0)
+        {
+            return rule.match(type);
+        }
+    }
+    return true;
+}
+} // namespace
+
 EntityAI* NewVehicle(EntityAIType* type, RString shapeName, bool fullCreate)
 {
     // check if type can be accessed
@@ -523,6 +582,39 @@ EntityAI* NewVehicle(EntityAIType* type, RString shapeName, bool fullCreate)
 
     RString simName = type->_simName;
     EntityAI* v = nullptr;
+
+    // An abstract type (_scopeLevel<=0) is NOT the concrete *Type its simulation
+    // name implies. VehicleTypeBank::Load only runs the simulation switch when
+    // scope>0; otherwise it falls back to a bare EntityAIType. A denied owner
+    // addon lands in exactly that fallback, because the denied entry's own
+    // members are invisible and `scope` then resolves to the inherited 0 - the
+    // "Access denied ... owner addon is not activated" warning is immediately
+    // followed by this.
+    // Every constructor below static_casts the type to its own (Building ->
+    // BuildingType, TankWithAI -> TankType, ...), so an abstract type is read
+    // through the wrong layout: Building::Building took NPos() off whatever sits
+    // where BuildingType::_positions would be and memmove'd that length in
+    // _locks.Resize(), giving a 0xC0000005 inside VCRUNTIME memmove (reproduced
+    // by spawning @LoBo's LoBo_uralwreck01 with 'lobowreck' inactive). Refuse the
+    // spawn instead: a null return is recoverable by every caller, a corrupted
+    // heap is not. WARN, not ERROR, for the same reason World::CheckAddon warns -
+    // the usual cause is a missing addOns[] entry and it must not latch --strict.
+    if (type->IsAbstract())
+    {
+        LOG_WARN(World, "Cannot create '{}': type is abstract (scope<=0, or its owner addon is not activated)",
+                 (const char*)type->GetName());
+        return nullptr;
+    }
+
+    // Belt and braces for the same class of fault: the loaded type object must be
+    // the *Type subclass the simulation's constructor will static_cast it to.
+    if (!SimulationMatchesTypeClass(type, simName))
+    {
+        LOG_WARN(World, "Cannot create '{}': simulation '{}' does not match the loaded type object (config only "
+                        "partially resolved?)",
+                 (const char*)type->GetName(), (const char*)simName);
+        return nullptr;
+    }
 
     // Crewed/AI simulations dereference the type's shape during construction (Man,
     // Car, Tank, ...). An empty model="" in config leaves the type shapeless, so

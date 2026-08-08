@@ -35,9 +35,21 @@ triSimUntil { alive player }
 // -- baseline: fresh-boot defaults, NOT the sentinels --------------------------
 triAssertEq [(format ["%1", isNil "gmSelPlayerClass"]), "true"]
 triAssertEq [(typeOf player), "SoldierGB"]
-// mounting @LoBo does not activate its addons - the pre-load control for the
-// post-load assertion further down
-triAssertEq [(format ["%1 || %2 || %3", (triAddonActive "lobois"), (triAddonActive "loboweapons"), (triAddonActive "loboweapnad")]), "false || false || false"]
+// These three owners now report ACTIVE on a fresh boot, and that is a fix, not a
+// leak: @lobofixup's bin/config.cpp names them in CfgAddons/PreloadAddons, and
+// that roster finally reaches World::ActivateAddons. It used to be swallowed
+// twice over - ConfigParsers kept only ONE mod's deferred bin/config, and the
+// stock config locks CfgAddons at PAReadOnly so ParamClass::Update refused it
+// silently (AccessDenied reports through RptF, compiled out). So the old
+// "false || false || false" was recording two engine bugs, not a property of
+// mod mounting. See AddonSystem::MergeConfigInto.
+//
+// The consequence for THIS test: this line is no longer the control for DIFF 2
+// below, because a preloaded owner would report active either way. The control
+// that still bites is the one right above - gmSelPlayerClass nil and the
+// authored SoldierGB - plus DIFF 3, which needs the actual mod loadout to
+// rebuild and would fail per-entity if the owners had come back denied.
+triAssertEq [(format ["%1 || %2 || %3", (triAddonActive "lobois"), (triAddonActive "loboweapons"), (triAddonActive "loboweapnad")]), "true || true || true"]
 
 // -- restore phase 1's binary save --------------------------------------------
 triAssertEq [(triLoadGame "globo"), "OK"]

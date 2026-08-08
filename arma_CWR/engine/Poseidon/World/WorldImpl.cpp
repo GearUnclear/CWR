@@ -1113,11 +1113,21 @@ void World::ActivateAddons(const FindArrayRStringCI& addons)
             _activeAddons.Add(addon);
         }
     }
+    const int fromPreload = _activeAddons.GetSize();
     for (int i = 0; i < addons.Size(); i++)
     {
         RString addon = addons[i];
         LOG_DEBUG(World, "Activating addon {}", (const char*)addon);
         _activeAddons.Add(addon);
+    }
+    // The single most useful line when a runtime spawn dies on "Access denied: ...
+    // owner addon is not activated": it says whether the CfgAddons/PreloadAddons
+    // classes a mod ships were seen at all, without needing a debug-level run.
+    LOG_INFO(World, "ActivateAddons: {} active ({} from {} CfgAddons/PreloadAddons class(es), {} from the mission)",
+             _activeAddons.GetSize(), fromPreload, def.GetEntryCount(), addons.Size());
+    for (int i = 0; i < _activeAddons.GetSize(); i++)
+    {
+        LOG_DEBUG(World, "  active addon: {}", (const char*)_activeAddons.Get(i));
     }
 }
 

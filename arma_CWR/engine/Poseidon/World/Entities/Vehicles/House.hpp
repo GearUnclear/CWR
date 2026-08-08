@@ -12,6 +12,12 @@ struct HousePathArrayItem
 	int index;
 };
 
+// Plausibility bound on the interior path-position count a building model may
+// declare. The largest stock CWA and @LoBo interiors are in the low hundreds;
+// a value beyond this means the count was not read from a real BuildingType
+// (see the note in Building::Building) and must not drive an allocation.
+constexpr int MaxHousePositions = 4096;
+
 typedef StaticArrayAuto<int> HousePathArrayIndexed;
 typedef StaticArrayAuto<HousePathArrayItem> HousePathArray;
 
@@ -29,7 +35,13 @@ struct WeaponProxy
 	int selection; // copied over from proxyObject
 
 	WeaponProxy() {selection = -1;}
-	bool IsPresent() const {return selection >= 0;}
+	// `selection` alone is NOT enough. `obj` is a loose link: it goes null when
+	// the proxy's object is released (an unloaded shape, or a class whose owner
+	// addon was denied), while `selection` keeps the value it was given at
+	// InitShape time. Building::DrawProxies then dereferenced a null obj -
+	// an 0xC0000005 in DrawProxies reproducible with @LoBo's static wreck
+	// props. Same failure mode as the null-OLink note in LLinks.hpp.
+	bool IsPresent() const {return selection >= 0 && obj.GetLink() != nullptr;}
 };
 
 class BuildingType: public TransportType
