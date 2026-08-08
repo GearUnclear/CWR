@@ -1,0 +1,23 @@
+# Vanilla half of the narrative screenshot shoot - Nogova, base CWA assets,
+# NO mods (no --mods-dir, no --mod: that is the whole point of this lane).
+# Not a regression test; it lives outside tests/integration/ on purpose so a
+# full `tri test tests/integration` sweep never picks it up.  Run it
+# explicitly - see README.md in this folder.
+#
+# PRECONDITIONS: the full CWA 1.99 install as OFPR_DATA_DIR, which is where
+# AddOns/Noe.pbo (the "noe" world) comes from.  The Demo package does not ship
+# Nogova and this will not boot against it.
+mission = "tools/screenshots/missions/Stories.Noe"
+binary = "PoseidonGame"
+tags = ["showcase", "full_cwa", "headful", "exclusive"]
+timeout = 900
+assert_timeout = 600
+# --no-strict for parity with the Sinai shoot; the base data is clean, but the
+# shoot spawns and destroys a lot and there is no reason to fail a photo run on
+# a stray engine warning.
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--width", "2560",
+    "--height", "1440",
+]

@@ -1,0 +1,30 @@
+# Narrative half of the screenshot shoot (see lobo_sinai_showcase for the
+# roster half). Not a regression test - it lives outside
+# tests/integration/ on purpose so a full `tri test tests/integration` sweep
+# never picks it up.  Run it explicitly (see README.md in this folder).
+#
+# PRECONDITIONS (same as the lobo test lane):
+#   * full CWA 1.99 install as OFPR_DATA_DIR
+#   * @LoBo next to it at D:\Arma_CWA\@LoBo
+#   * one-time: tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["showcase", "lobo", "full_cwa", "headful", "exclusive"]
+# Loading @LoBo (600+ MB of legacy pbos) plus the Sinai world is slow, and the
+# shoot itself spawns and tears down eight scenes.
+timeout = 900
+assert_timeout = 600
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims in
+# the CoC pbos etc.) that is fatal under the runner's default --strict.
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--mods-dir", "..",
+    # @udshowcase mounts last: it pre-activates the whole @LoBo roster the shoot
+    # spawns from. Without it the engine logs "Access denied ... owner addon is
+    # not activated" and dies (exit -1) on the first class outside the
+    # template's addOns[] - see that mod's bin/config.cpp.
+    "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup;arma_CWR/tools/screenshots/@udshowcase",
+    "--width", "2560",
+    "--height", "1440",
+]

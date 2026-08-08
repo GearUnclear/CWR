@@ -8,6 +8,13 @@
 # tracked artifact is the regeneration script (arma_CWR/tools/lobo/fix-lobo-scope.ps1).
 /@LoBo/
 
+# Stray window grabs. Screen-capture tools name a file after the process that owned the
+# window, so a captured game window lands as PoseidonGame_<random>.png wherever the tool
+# was pointed - usually the repo root. Deliberate captures go to arma_CWR/tmp/ (already
+# ignored by arma_CWR/.gitignore) or, once curated and web-sized, to site/assets/img/.
+PoseidonGame_*.png
+PoseidonGameDemo_*.png
+
 # API keys / secrets
 /.env
 

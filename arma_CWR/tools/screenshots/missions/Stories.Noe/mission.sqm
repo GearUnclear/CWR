@@ -1,0 +1,81 @@
+// Minimal Nogova mission for noe_stories.test.sqf - the VANILLA half of the
+// screenshot shoot.  No mods, no Guerrilla core: the shoot needs a booted world
+// and a live player to hang a camera off, nothing else, and anything else in
+// the mission is one more thing that can wander into a frame.
+//
+// Nogova (world "noe", from AddOns/Noe.pbo) rather than Abel or Eden because it
+// is the greenest, most built-up of the base islands - forest roads, farm
+// villages with barns and a pub, a concrete-block town - which is the whole
+// point of shooting a vanilla set alongside the Sinai one.
+//
+// The player start is a real road segment surveyed out of the world file with
+//   PoseidonTools terrain objects noe.wrp
+// (columns are [east, ELEVATION, north]): the asf25 at [3892.7, 7095.5] in the
+// farm village.  SQM position[] is [easting, ELEVATION, northing], the same
+// order.  The shoot moves the player far out of shot on its first line anyway;
+// this only has to be dry, flat and not inside a house.
+version=11;
+class Mission
+{
+	randomSeed=20260808;
+	// AddOns/O.pbo declares CfgPatches class BIS_Resistance, and every civilian
+	// past Civilian3 - Civilian4..Civilian11, Woman1..Woman5 - belongs to it.
+	// Without this line the engine logs
+	//   Access denied: CONFIG.cpp/CfgVehicles/Woman2/ - owner addon
+	//   'bis_resistance' is not activated
+	// and the class resolves only partially: the unit spawns but comes up in a
+	// broken pose and flops onto its face in the road no matter what
+	// setUnitPos/setBehaviour/disableAI say to it.  That cost two whole passes
+	// of "why will the villagers not stand up".  Base-game classes out of
+	// bin/config.bin (Civilian, Civilian2, Civilian3, every Soldier*, every
+	// vehicle used here) have an empty owner and are always visible, which is
+	// why only the civilians misbehaved.
+	addOns[]=
+	{
+		"BIS_Resistance"
+	};
+	addOnsAuto[]=
+	{
+		"BIS_Resistance"
+	};
+	class Intel
+	{
+		viewDistance=2500;
+		month=6;
+		day=15;
+		hour=16;
+		minute=0;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={3892.700000,107.500000,7095.500000};
+					azimut=0.000000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+};
+class OutroWin
+{
+};
+class OutroLoose
+{
+};

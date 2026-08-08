@@ -1,0 +1,25 @@
+# Screenshot generator, not a regression test - it lives outside
+# tests/integration/ on purpose so a full `tri test tests/integration` sweep
+# never picks it up.  Run it explicitly (see README.md in this folder).
+#
+# PRECONDITIONS (same as the lobo test lane):
+#   * full CWA 1.99 install as OFPR_DATA_DIR
+#   * @LoBo next to it at D:\Arma_CWA\@LoBo
+#   * one-time: tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["showcase", "lobo", "full_cwa", "headful", "exclusive"]
+# Loading @LoBo (600+ MB of legacy pbos) plus the Sinai world is slow, and the
+# shoot itself spawns and tears down eight scenes.
+timeout = 300
+assert_timeout = 120
+# --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims in
+# the CoC pbos etc.) that is fatal under the runner's default --strict.
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--mods-dir", "..",
+    "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup",
+    "--width", "2560",
+    "--height", "1440",
+]

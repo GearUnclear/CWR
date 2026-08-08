@@ -1,0 +1,18 @@
+# Vanilla (no-mod) half of the screenshot shoot: base-game roster on Malden.
+# Screenshot generator, not a regression test - it lives outside
+# tests/integration/ on purpose so a full sweep never picks it up.
+# Run it explicitly (see README.md in this folder).
+#
+# No --mod flags: this is deliberately the stock game, so the vanilla frames
+# and the @LoBo frames differ only in content, not in engine or settings.
+mission = "tests/integration/missions/guerrilla_native.abel"
+binary = "PoseidonGame"
+tags = ["showcase", "vanilla", "full_cwa", "headful", "exclusive"]
+timeout = 900
+assert_timeout = 600
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--width", "2560",
+    "--height", "1440",
+]
