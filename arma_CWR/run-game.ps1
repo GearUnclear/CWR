@@ -53,6 +53,12 @@
     Disable all output capture (no --log-file, no stdout/stderr
     redirection).
 
+.PARAMETER ExtraArgs
+    Additional raw arguments appended to the game command line, for callers
+    that wrap this script (run-game-with-mods.ps1 uses it for --mod /
+    --mods-dir). Elements are passed through verbatim, so an element whose
+    value contains a space must carry its own quotes.
+
 .EXAMPLE
     .\run-game.ps1
         Build + launch to the main menu, capturing output to logs\.
@@ -71,7 +77,8 @@ param(
     [string]$Mission,
     [switch]$SkipBuild,
     [string]$LogDir = "$PSScriptRoot\logs",
-    [switch]$NoLog
+    [switch]$NoLog,
+    [string[]]$ExtraArgs = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -112,6 +119,9 @@ if (-not (Test-Path -LiteralPath $exe)) {
 $gameArgs = @('--window', '--no-splash')
 if ($Mission) {
     $gameArgs += @('--test-mission', $Mission)
+}
+if ($ExtraArgs) {
+    $gameArgs += $ExtraArgs
 }
 
 Write-Host "Launching $exe (cwd=$DataDir)$(if ($Mission) { " -> $Mission" })"
