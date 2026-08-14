@@ -568,21 +568,23 @@ items:
     phase: foundation
     status: done
     depends_on: [guerrilla-test-suite, site-portal]
-    commits: ['9def4c6', f18cf14]
+    commits: ['9def4c6', f18cf14, e267c87]
     summary: >
       Five Trident-driven screenshot generators (lobo_sinai_showcase,
       lobo_sinai_stories, vanilla_malden_stories, noe_stories, probe_props)
-      plus probe_addons and diag_camera, under tools/screenshots/ rather than
-      tests/integration/ so a test sweep never picks them up. @udshowcase
-      pre-activates the @LoBo roster the shoots spawn beyond what any mission
-      declares. contact_sheet.py tiles a run for review. The README is the
-      real deliverable: the camera rig, the harness constraints, and how to
-      make a frame read as a photograph rather than a catalogue entry.
-      Eight curated frames shipped to site/assets/img as 760x428 JPEGs.
+      plus probe_addons, probe_aim and diag_camera, under tools/screenshots/
+      rather than tests/integration/ so a test sweep never picks them up.
+      @udshowcase pre-activates the @LoBo roster the shoots spawn beyond what
+      any mission declares. contact_sheet.py tiles a run for review. The
+      README is the real deliverable: the camera rig, the harness
+      constraints, and how to make a frame read as a photograph rather than
+      a catalogue entry. Eight curated frames shipped to site/assets/img as
+      760x428 JPEGs.
     log:
       - "Masters (2560x1440 PNG, ~4 MB each) stay in the gitignored arma_CWR/tmp/showcase; the shoots regenerate them, which is why they are scripts."
       - "Two engine defects surfaced from this work rather than from play: cam-set-dir-fix and mod-prop-spawn-safety. Photographing a mod's roster turned out to be an unusually thorough integration test."
       - "Site pages do not reference the eight new captures yet."
+      - "e267c87 retired the sky-firing: forced `fire` with no target aims through Man::AimWeaponForceFire at elevation component 10 (near-vertical, clamped to stance max gun elevation), which is why pass-2 squads volleyed at the clouds. Firing scenes now stage captive foe lines 15-30 m out and engage them through the combat AI (reveal + per-man silent doFire; EnableFireTarget bypasses the is-it-an-enemy gate), so rifles sit level on human targets and the convoy escorts genuinely die by fire. probe_aim.test.sqf is the in-game proof; its accidental finding - one trio firing THROUGH another suppresses the on-camera men - is now a staging rule in the README."
 
   - id: startup-stall-diagnosis
     title: "Intermittent zero-CPU startup stall before harness listen (issue #30)"
