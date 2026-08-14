@@ -1,0 +1,161 @@
+@LoBo - The Lost Brothers Mod (merged into a single modfolder)
+==============================================================
+Assembled from the OFP.info archive ("LoBoOFP" download set),
+cross-checked against files.ofpisnotdead.com and ofpr.info (OFP.info 2.5).
+Target game: Operation Flashpoint / Arma: Cold War Assault v1.96
+
+CONTENTS
+--------
+This @LoBo modfolder merges the entire Lost Brothers modset into one
+placeable folder. No more manual install order - everything below is
+already laid out in the standard OFP modfolder layout:
+
+    @LoBo\
+      addons\        124 .pbo files    - all factions, vehicles, weapons,
+                                          sounds, islands (Lebanon, Sinai v1.5,
+                                          Iran/Iraq), JAM, building packs
+      Bin\           RESOURCE.bin + configBackup\Config.bin
+      dta\           AltJogging, Backbone, Classic, NewStandReload,
+                     Patrol animation sets + "down air crew" mission data
+      Missions\      10 packed .pbo demo missions
+                    (sinai, iran_iraq, Lebanon80, Noe, Intro)
+      user missions\ 19 unpacked demo mission folders (move into your
+                     ..\Users\<you>\Missions\ if you want to play them)
+      docs\          original readmes, credits, preview JPGs,
+                     Lebanon-bundled demo missions, and the archival
+                     early-release jordanian_army (2002) that is superseded
+                     by the 2007 Jordanian/Syrian Pack
+      The_Lost_Brothers_Official_Readme2.doc
+      README.txt     (this file)
+
+WHAT WAS COMBINED (in install order, newer overwrites older)
+------------------------------------------------------------
+All sources were verified present on the file mirror (files.ofpisnotdead.com)
+unless noted otherwise; the Jordanian/Syrian Pack is not on the server and
+was sourced from the local archive (originally from idfsquad.com).
+ 1. LoBoAddonPack3.rar           - core mod (IDF, Egypt, Hezbollah, aircraft,
+                                   armor, weapons, ships, sounds, Sinai deps)
+ 2. LoBo_Arab_Pack.rar           - Arab insurgents & civilians
+                                   - LoBo_Sounds.pbo (new)
+                                   - LoBoTer.pbo (replaced Pack #3's copy)
+                                   - LoBoTerroristDemo.Noe.pbo mission
+ 3. LoBoSinaiVer1_4 (folder)      - Sinai Peninsula v1.4 island
+                                   - lost.pbo = the Sinai world PBO
+                                   - LoBoLandtex.pbo, LoBo_Ob.pbo, building
+                                     addons, MAP_*, AGS_*, RKSL-*, Baracken,
+                                     F3WX_O1, JOF_Objects1, xobridge, TMYK
+ 4. LoBo_IranIraqMapVer1.rar     - Iran/Iraq island (Dec 2005)
+                                   - lobo_iran.pbo = the Iran/Iraq world PBO
+                                   - newer versions of 13 building/object
+                                     PBOs (overwrote Sinai's older copies)
+                                   - chd_ind, chd_oriental, GWbuild1,
+                                     LoBobloc, LoBoCrop, MAP_Misc,
+                                     MAP_OilAddon_*, TMYK_Bridges
+                                   - IranIraqMapDemo.S_iran_iraq.pbo mission
+ 5. LoBo_JordanianSyrianPackVer01.rar [NOT on server - local copy only]
+                                 - Jordan & Syria factions
+                                   - replaced 11 older PBOs from Pack #3:
+                                     LoBoammo, LoBoM60, LoBoMig, LoBoWeapat,
+                                     LoBoWeapNad, LoBo_airammo, LoBo_BTR60,
+                                     LoBo_Kfir, LoBo_Ob, LoBo_Pilot, LoBo_T55
+                                   - 10 new PBOs:
+                                     BDE_mir3, LoBoChallen, LoboF5,
+                                     LoBoJorAPC, LoBoJorCar, LoBoJordan,
+                                     LoBoJorHelo, LoBoSyrAPC, LoBoSyria,
+                                     LoBo_T72
+ 6. LoBo_Lebanon1_3Sinai1_5.7z    - Lebanon island v1.3 + Sinai v1.5 update
+                                   *** CRITICAL: adds the Lebanon world the
+                                       Pack #3 *.Lebanon80 demo missions load
+                                       against (LoBo_Leb.pbo + lobolebtex.pbo).
+                                       Without this pack those missions cannot
+                                       be played on the Lebanon80 island. ***
+                                   - 16 NEW PBOs:
+                                     LoBo_Leb (the Lebanon world), lobolebtex
+                                     (74 MB Lebanon ground textures),
+                                     LoBolebObject, lobo_gaza, LoBoPalObj,
+                                     LoBofightpos, LoBoMusic, LoBoUSEmbassy,
+                                     LoBoWreck, BRG_N4, erba, chd_bloc,
+                                     AGS_port_example, awmcams,
+                                     barackenworld, MAP_Editorupgrad
+                                   - 26 building/object PBOs updated to newer
+                                     versions, notably:
+                                     lost.pbo  (Sinai v1.4 -> v1.5)
+                                     LoBo_Sounds.pbo  (2005 -> 2006)
+                                     AGS_build, AGS_port, LoBobloc, LoBoCrop,
+                                     GWbuild1
+                                   - readmes in docs\lebanon\; addon-bundled
+                                     demo missions (Barackenaddon, AGS_Inds,
+                                     TMYK_Bridges, MAP_OA, FDF co_06) in
+                                     docs\lebanon\bundled\
+ 7. JAM2.rar                     - Joint Ammo Mix v2 (magazines + sounds)
+ 8. JAM3_FIXED6.rar              - JAM v3 Fixed6 (superseded JAM2's
+                                   JAM_Magazines.pbo & JAM_Sounds.pbo,
+                                   adds JAM_Vehicles.pbo, demo mission
+                                   folder moved to user missions). NOTE: the
+                                   original JAM3.rar + JAM3_Patch.rar also
+                                   exist on the server; JAM3_FIXED6 is the
+                                   community fix and is preferred.
+
+ ARCHIVAL (not merged into addons, kept under docs\archival\):
+   - jordanian_army_2002.zip / .pbo / readme.html / lbmod.jpg
+     Early standalone "IDF JORDANIAN ARAB ARMY ADDON v1.0b" (2002) by Noone
+     of the Lost Brothers : Isaac & Ismael MOD. Superseded by the 2007
+     Jordanian/Syrian Pack's LoBoJordan.pbo (28 MB, much newer). Kept for
+     historical completeness; do NOT drop the 2002 pbo into addons or it
+     will clobber the 2007 faction.
+
+ REDUNDANT / INTENTIONALLY EXCLUDED (already covered by Pack #3 + Jor/Syr
+ + Lebanon/Sinai 1.5, per the source README and server file listing):
+   LoBoAddonPack1.rar           - Pack #1, superseded by Pack #3
+   LoBoDemo2.rar                - Pack #2, superseded by Pack #3
+   LoBo_Zelda.rar               - standalone APC Zelda, included in Pack #3
+   LoBoIs.rar                   - standalone Soldiers & Crew, in Pack #3
+   lobosinaiv1.zip / small.zip  - Sinai v1.0, superseded by v1.5
+   Lebanon1_3Sinai1_5.rar       - .rar twin of the .7z that was merged (same
+                                  content; only the .7z was used)
+
+HOW TO LAUNCH
+-------------
+Copy the entire @LoBo folder into your OFP / CWA game directory (next to
+the existing Addons / @@Resistance folders), then start the game with the
+mod flag:
+
+    flashpoint.exe -mod=@LoBo
+    (or  coldwarassault.exe -mod=@LoBo  for Arma: CWA)
+
+Demo missions: the ones in Missions\ will appear in the Single Player ->
+Missions list (filter by island: Lebanon80, sinai, iran_iraq, Noe, Intro).
+The folders in user missions\ are unpacked - to use them, copy the
+individual folders into your user missions directory
+( ..\Users\<your Windows username>\Documents\ColdWarAssault\Users\<you>\
+  Missions\ or the OFP equivalent), then launch the Editor.
+
+REQUIRED GAME STATE
+-------------------
+- Operation Flashpoint: Resistance v1.96 (or Arma: Cold War Assault 1.96+).
+- No further addons are required - all dependencies (JAM2 + JAM3_FIXED6,
+  Sinai v1.5, Iran/Iraq, Lebanon islands, and the third-party building/
+  object packs they share) are bundled inside this @LoBo folder.
+
+AUDIT NOTES (sources verified July 2026)
+----------------------------------------
+Cross-checked against the full file index at files.ofpisnotdead.com (the
+mirror cited in the source README) plus the OFP.info 2.5 article archive
+(ofpr.info.paradoxstudio.uk, reachable over HTTP). Every LoBo-team release
+discoverable on the mirror has been incorporated. The only LoBo release
+that does NOT appear on the mirror is the Jordanian/Syrian Pack
+(LoBo_JordanianSyrianPackVer01.rar); the local copy was used instead.
+Early standalone releases superseded by later packs (jordanian_army 2002,
+Pack #1, Pack #2, Zelda, LoBoIs, Sinai v1.0) are preserved under
+docs\archival\ or left in the source folder, not merged into addons.
+
+CREDITS
+-------
+See the doc files in docs\ for the original pack-level credits.
+In summary: Lost Brothers Mod Team (Miles Teg<GD>, Calm Terror, Uziyhau,
+Panzerfaust, Chris G., Noone, etc.) plus the many third-party addon authors
+credited in each individual readme (Catshit, BAS, Mapfact, AGS, CoC, CSJ,
+DMA, ORCS, Berghoff, RKSL Studios, Wachtmeester, Chris Death, Philcommando,
+BKM, Motho38, REMO, Leone, 3WFX, Saddam, OPGWC, Rock of SL, TMYK, and others).
+
+Assembled: July 2026.

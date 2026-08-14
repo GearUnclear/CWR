@@ -244,6 +244,25 @@ enum MoveOutState
 	MOMovedOut
 };
 
+// Vertical seat offset for the Static branch of Entity::PlaceOnSurface.
+// A static prop seats with its authored origin on the terrain (vertices are
+// stored auto-centred; originLiftY is the Y of orientation*BoundingCenter(), the
+// offset that puts the model's (0,0,0) on the ground). Valid content relies on
+// that rule - rocks and ruins keep part of the mesh below ground on purpose. But
+// a model whose WHOLE mesh sits at or below its own origin (meshMaxY, the mesh
+// top, still under the ground after the lift) can only ever end up fully buried,
+// invisible at any terrain height: broken content, not authored sinking. Degrade
+// to the ground contact the non-static branch computes - lowest vertex on the
+// terrain - instead of silently rendering nothing (@LoBo's M60A1 wrecks, origin
+// authored ~2 m above the roof, repaired at source by
+// tools/lobo/fix-lobo-model-origin.ps1; this is the net for installs and mods
+// that repair has not touched). Free function so the predicate is unit-testable.
+inline float StaticSeatOffsetY(float originLiftY, float meshMinY, float meshMaxY)
+{
+	if (originLiftY + meshMaxY > 0) return originLiftY; // mesh reaches above the terrain: keep authored seating
+	return -meshMinY; // degenerate: seat the lowest vertex on the terrain
+}
+
 class Entity: public Object
 {
 	typedef Object base;

@@ -2,6 +2,7 @@
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 
 // Guards around the two crashes @LoBo's static scenery props reproduced when they
@@ -53,4 +54,32 @@ TEST_CASE("Building - the interior-position bound is plausible but finite", "[ve
     // a garbage count read through the wrong type layout cannot drive an allocation.
     STATIC_REQUIRE(MaxHousePositions > 1024);
     STATIC_REQUIRE(MaxHousePositions < 1000000);
+}
+
+TEST_CASE("StaticSeatOffsetY - authored seating is kept whenever any of the mesh clears the terrain",
+          "[vehicles][house][seat]")
+{
+    // The healthy LoBoWreck models: origin at or near the tracks, mesh mostly
+    // above it. Origin-on-ground is the authored intent - keep it exactly.
+    CHECK(StaticSeatOffsetY(0.522f, -0.9f, 0.9f) == 0.522f);   // LoBo_t54wrck
+    CHECK(StaticSeatOffsetY(1.379f, -1.2f, 1.2f) == 1.379f);   // LoBo_Shot_Wreck1
+
+    // Deliberately sunk content (rocks, ruins): origin above the mesh bottom, so
+    // part of the model ends up underground - but the top still clears the
+    // terrain. Authored sinking, not a defect. Keep it.
+    CHECK(StaticSeatOffsetY(-0.5f, -1.0f, 1.0f) == -0.5f);
+}
+
+TEST_CASE("StaticSeatOffsetY - a mesh entirely at or below its own origin is seated on the terrain",
+          "[vehicles][house][seat]")
+{
+    // LoBo_M60A1_wreck as shipped: boundingCenter.Y -1.9205, mesh -1.47..1.47.
+    // Origin-on-ground puts the roof 0.45 m under the sand - invisible at any
+    // terrain height. Rescue: lowest vertex on the terrain, i.e. -meshMinY,
+    // exactly the seat tools/lobo/fix-lobo-model-origin.ps1 bakes into the p3d.
+    CHECK(StaticSeatOffsetY(-1.9205f, -1.47f, 1.47f) == 1.47f);
+    // LoBo_M60A1_wreck2: boundingCenter.Y -2.0573, mesh -1.1374..1.1374.
+    CHECK(StaticSeatOffsetY(-2.0573f, -1.1374f, 1.1374f) == 1.1374f);
+    // Boundary: mesh top exactly on the terrain is still invisible - rescue it.
+    CHECK(StaticSeatOffsetY(-1.0f, -1.0f, 1.0f) == 1.0f);
 }

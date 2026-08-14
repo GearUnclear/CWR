@@ -18,7 +18,7 @@
 // config-bearing mod, and even though the stock config locks CfgAddons.
 //
 // PRECONDITIONS: full CWA 1.99 + @LoBo, and the one-time @LoBo repairs
-// (tools/lobo/fix-lobo-scope.ps1, plus
+// (tools/lobo/fix-lobo-scope.ps1, tools/lobo/fix-lobo-model-origin.ps1, plus
 // tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 if @LoBo's ammo pbos
 // still carry the "0.0.1" tracer floats).
 triSimUntil { GM_LIB_READY }
@@ -101,6 +101,42 @@ deleteVehicle psWreck
 psWreck = "LoBo_Poster_01" createVehicle psPos
 triAssertEq [(typeOf psWreck), "LoBo_Poster_01"]
 triSimFrames 8
+deleteVehicle psWreck
+triSimFrames 4
+
+// -- CASE 2d: the M60A1 wrecks seat on the ground, not 3 m under it ----------
+//    Second content fix on the same pbo. Both M60A1 wreck models were authored
+//    with their origin ABOVE the mesh, and a static prop is seated at
+//    terrainY + shape->BoundingCenter().Y (Entity::PlaceOnSurface, Static
+//    branch, World/Simulation/Simul.cpp) - so the whole tank ended up
+//    underground: roof 0.45 m down, belly 3.39 m down. Two independent layers
+//    now produce the same seat, and this asserts whichever is active:
+//    tools/lobo/fix-lobo-model-origin.ps1 repairs boundingCenter.Y in the p3d
+//    at source, and the engine seats any model whose whole mesh sits at or
+//    below its own origin on its lowest vertex instead, with a WARN
+//    (StaticSeatOffsetY, Vehicle.hpp - predicate pinned by test_house.cpp).
+//    Both resolve to terrain + 1.47 / + 1.14, so a red here means the p3d was
+//    reverted (a @LoBo reinstall) AND the engine net regressed.
+//
+//    Measured against a sibling rather than against an absolute height: the
+//    difference between two props spawned at the same point is a pure
+//    model-to-model constant (bcM60 - bcT54) and does not depend on the terrain.
+//    [11900, 9650] is the open flat ground the probe_props shoot uses; the
+//    spawns are serialised (delete before the next) so the free-position search
+//    does not push them onto different elevations. Pre-repair these read
+//    -2.44 m and -2.58 m.
+psSeatRef = "LoBo_t54wrck" createVehicle [11900, 9650, 0]
+psSeatRefZ = (getPosASL psSeatRef) select 2
+deleteVehicle psSeatRef
+triSimFrames 4
+
+psWreck = "LoBo_M60A1_wreck" createVehicle [11900, 9650, 0]
+triAssertNear [(((getPosASL psWreck) select 2) - psSeatRefZ), 0.95, 0.75]
+deleteVehicle psWreck
+triSimFrames 4
+
+psWreck = "LoBo_M60A1_wreck2" createVehicle [11900, 9650, 0]
+triAssertNear [(((getPosASL psWreck) select 2) - psSeatRefZ), 0.62, 0.75]
 deleteVehicle psWreck
 triSimFrames 4
 

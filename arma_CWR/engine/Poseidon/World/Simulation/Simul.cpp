@@ -1297,7 +1297,20 @@ void Entity::PlaceOnSurface(Matrix4& trans)
     }
     else
     {
-        pos += newTransform.Orientation() * GetShape()->BoundingCenter();
+        // Origin-on-ground rule for statics; see StaticSeatOffsetY (Vehicle.hpp)
+        // for why a model whose whole mesh sits at or below its own origin is
+        // rescued to lowest-vertex-on-terrain instead of buried invisibly.
+        Vector3 offset = newTransform.Orientation() * shape->BoundingCenter();
+        float liftY = StaticSeatOffsetY(offset.Y(), shape->Min().Y(), shape->Max().Y());
+        if (liftY != offset.Y())
+        {
+            LOG_WARN(World,
+                     "'{}' cannot seat above the terrain (boundingCenter Y {:.2f} + mesh top {:.2f} <= 0): the "
+                     "authored origin sits above the whole mesh. Seating its lowest vertex on the surface instead.",
+                     (const char*)shape->Name(), offset.Y(), shape->Max().Y());
+            offset[1] = liftY;
+        }
+        pos += offset;
     }
     newTransform.SetPosition(pos);
     trans = newTransform;

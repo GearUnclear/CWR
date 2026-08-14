@@ -3,6 +3,7 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include "../Support/test_fixtures.hpp"
+#include <fstream>
 #include <string.h>
 
 // Phase 4: ParamFile Expression Evaluation Integration
@@ -449,6 +450,56 @@ TEST_CASE("ParamFile - Reference undefined var", "[paramfile][expr][errors]")
         // Should handle undefined variable
         // May treat as 0, or error, or leave as literal
         REQUIRE(true);
+    }
+
+    SECTION("Bare keyword without its OFP-era #define reads as 0, not garbage")
+    {
+        // The @LoBo LoBoWreck.pbo defect: OFP-era configs write `scope = public;`
+        // and rely on a `#define public 2` header in the same file. Without the
+        // header the identifier is stored as text; reading it as a number must
+        // degrade to 0 (which is what turned every class in that pbo abstract -
+        // repaired at source by tools/lobo/fix-lobo-scope.ps1, and warned about
+        // at the evaluator seam since the same repair tranche). The contract
+        // pinned here is the degrade-to-0: two decades of content depends on an
+        // unresolved scope meaning abstract, never a crash or a stale read.
+        const char* config = "class CfgVehicles {\n"
+                             "  class BrokenWreck { scope = public; };\n"
+                             "  class HealthyWreck { scope = 2; };\n"
+                             "};\n";
+
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        const ParamEntry& broken = pf >> "CfgVehicles" >> "BrokenWreck" >> "scope";
+        CHECK(broken.GetInt() == 0);
+
+        const ParamEntry& healthy = pf >> "CfgVehicles" >> "HealthyWreck" >> "scope";
+        CHECK(healthy.GetInt() == 2);
+    }
+
+    SECTION("The same file with the header reads the keyword's value")
+    {
+        // #define lives in the preprocessor, which only file-based Parse runs
+        // (Parse(QIStream) skips Preprocess entirely - see ParamFileParse.cpp).
+        // This is the shape of the ninety-odd @LoBo configs that are fine.
+        const char* config = "#define private 0\n"
+                             "#define protected 1\n"
+                             "#define public 2\n"
+                             "class CfgVehicles {\n"
+                             "  class Wreck { scope = public; };\n"
+                             "};\n";
+
+        const char* path = GetTempFilePath("scope_header.cpp");
+        {
+            std::ofstream out(path);
+            out << config;
+        }
+        REQUIRE(pf.Parse(path) == LSOK);
+        CleanupTempFile(path);
+
+        REQUIRE(pf.FindEntry("CfgVehicles") != nullptr);
+        const ParamEntry& scope = pf >> "CfgVehicles" >> "Wreck" >> "scope";
+        CHECK(scope.GetInt() == 2);
     }
 }
 
