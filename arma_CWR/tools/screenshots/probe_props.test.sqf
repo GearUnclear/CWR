@@ -9,16 +9,22 @@
 // run died, the last screenshot written named the last SAFE prop and the next
 // entry in the file was the culprit.
 //
-// CURRENT STATE (2026-08-08): all 20 entries complete and all 20 build.  A prop
+// CURRENT STATE (2026-08-08): all 21 entries complete and all 21 build.  A prop
 // that cannot be built yields objNull and a WARN line instead of a crash, so the
 // run being green does NOT by itself mean every prop appeared.  Grep
 // game_stdout.log for
 //   "Cannot create '<class>': type is abstract"
-// and require zero hits.  The five LoBoWreck entries used to be refused: their
+// and require zero hits.  The six LoBoWreck entries used to be refused: their
 // pbo is one of two @LoBo addons that omit the #define public 2 header, so
 // `scope = public;` read back as 0.  Repaired at source by
-// tools/lobo/fix-lobo-scope.ps1 - if those five come back abstract, that script
+// tools/lobo/fix-lobo-scope.ps1 - if those six come back abstract, that script
 // has not been run against this @LoBo install.
+//
+// p03/p03b are the other @LoBo content repair: both M60A1 wreck models were
+// authored with their origin above the mesh, so createVehicle buried them
+// (a static prop seats at terrainY + shape->BoundingCenter().Y) and the frame
+// came back as empty desert.  tools/lobo/fix-lobo-model-origin.ps1 fixes that at
+// source; an empty desert frame there means it has not been run.
 //
 // Keep the props in the same order as the list in the header comment so the
 // mapping stays readable, and keep every triScreenshot label a string literal
@@ -78,6 +84,11 @@ deleteVehicle ssP
 ssP = "LoBo_M60A1_wreck" createVehicle [11900, 9650, 0]
 triSimFrames 8
 triScreenshot "p03_m60a1_wreck"
+deleteVehicle ssP
+
+ssP = "LoBo_M60A1_wreck2" createVehicle [11900, 9650, 0]
+triSimFrames 8
+triScreenshot "p03b_m60a1_wreck2"
 deleteVehicle ssP
 
 ssP = "LoBo_BTR60wreck1" createVehicle [11900, 9650, 0]

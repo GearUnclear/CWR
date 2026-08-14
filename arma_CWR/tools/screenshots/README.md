@@ -43,12 +43,23 @@ From `arma_CWR/`:
 > carries, so `scope = public;` resolved to nothing and read back as 0. @LoBo is
 > ours to modify now, so this is repaired at source by
 > `tools/lobo/fix-lobo-scope.ps1` rather than shimmed in `@udshowcase`. Run it
-> once per @LoBo install. Two caveats for framing: `LoBo_M60A1_wreck` and
-> `LoBo_M60A1_wreck2` build and draw but sit about 4 m below ground at
-> `createVehicle` height (their p3d lacks the seating LOD its siblings have) —
-> `setPos [x, y, 4]` puts them on the sand; and a real vehicle with
-> `setDammage 1` + `inflame true` still reads better on camera than any static
-> wreck.
+> once per @LoBo install.
+
+> **The M60A1 wrecks seat correctly now (2026-08-08).** `LoBo_M60A1_wreck` and
+> `LoBo_M60A1_wreck2` used to need a `setPos [x, y, 4]` workaround: at plain
+> `createVehicle` height the whole tank was underground. That was **not** a
+> missing LOD (no LoBoWreck model has a LandContact LOD, including the eight that
+> always seated fine). A static prop is seated at
+> `terrainY + shape->BoundingCenter().Y` — `Entity::PlaceOnSurface`, Static
+> branch, `World/Simulation/Simul.cpp:1300` — which puts the model's *authored
+> origin* on the ground, and both M60A1 models were authored with that origin
+> above the mesh (roof 0.45 m / 0.92 m below it). Repaired at source by
+> `tools/lobo/fix-lobo-model-origin.ps1`, which rewrites `boundingCenter.Y` in
+> the p3d. Run it once per @LoBo install, alongside `fix-lobo-scope.ps1`. Spawn
+> them at `[x, y, 0]` like any other prop now; if `p03_m60a1_wreck` /
+> `p03b_m60a1_wreck2` come back as empty desert, that script has not been run.
+> One framing note stands regardless: a real vehicle with `setDammage 1` +
+> `inflame true` still reads better on camera than any static wreck.
 
 Each writes a PNG **and** a BMP per shot into `--output-dir`, numbered in
 capture order. Delete the BMPs afterwards (`rm *.bmp`) — they are ~11 MB each
@@ -68,7 +79,7 @@ The @LoBo shoots need the same setup as the `lobo` test lane:
 - the full CWA 1.99 install as `OFPR_DATA_DIR` (see `.trident.env`)
 - `@LoBo` next to it at `D:\Arma_CWA\@LoBo`
 - one-time, idempotent, rerun after any @LoBo reinstall:
-  `tools/lobo/fix-lobo-scope.ps1` and
+  `tools/lobo/fix-lobo-scope.ps1`, `tools/lobo/fix-lobo-model-origin.ps1` and
   `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1`
 
 They also mount `@udshowcase` (in this folder) last. That mod exists because the
