@@ -21,6 +21,8 @@ STR_DISP_OPT_CTL_GAMEPAD_STICK_DEADZONE,Stick deadzone
 STR_DISP_OPT_CTL_GAMEPAD_TRIGGER_DEADZONE,Trigger deadzone
 STR_DISP_OPT_CTL_GAMEPAD_LOOK_SENSITIVITY,Look sensitivity
 STR_DISP_OPT_CTL_GAMEPAD_ENABLED_DESC,Master switch for gamepad input. Disable to ignore the controller entirely.
+STR_DISP_OPT_CTL_GAMEPAD_STEERING,Gamepad steering
+STR_DISP_OPT_CTL_GAMEPAD_STEERING_DESC,"Let the gamepad steer vehicles. Disabled: sticks and triggers never drive or fly; look and buttons still work."
 STR_DISP_OPT_CTL_GAMEPAD_STICK_DEADZONE_DESC,Center deadzone for the analog sticks. Range 0% to 50% of full deflection.
 STR_DISP_OPT_CTL_GAMEPAD_TRIGGER_DEADZONE_DESC,Activation threshold for the analog triggers. Range 0% to 50%.
 STR_DISP_OPT_CTL_GAMEPAD_LOOK_SENSITIVITY_DESC,Right-stick look-aim sensitivity. Range 0.1x to 5.0x.

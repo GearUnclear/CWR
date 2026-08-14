@@ -119,7 +119,37 @@ void World_ClearTriViewOverride()
 
 void World::UpdateInputContext()
 {
-    InputSubsystem::Instance().SetContext(ResolveInputContext());
+    const InputContextResolution resolution = ResolveInputContextResolution();
+    auto& input = InputSubsystem::Instance();
+    input.SetContext(resolution.context);
+
+    // Seat freelook policy: in every non-turret vehicle seat the camera is
+    // permanently decoupled from the hull — the mouse always looks, steering is
+    // keys/gamepad only.  Turret seats (Gunner/Commander) keep mouse aim.
+    // Overlay contexts (menu, map, chat) resolve to seat NoPerson; skip them so
+    // opening the map doesn't churn the lock mid-drive.
+    switch (resolution.context)
+    {
+        case InputContext::Menu:
+        case InputContext::Map:
+        case InputContext::Chat:
+        case InputContext::Editor:
+            break;
+        default:
+        {
+            const bool lock = resolution.seat == InputSeatContext::Driver ||
+                              resolution.seat == InputSeatContext::CommanderAsDriver ||
+                              resolution.seat == InputSeatContext::Cargo;
+            const bool wasLocked = input.IsSeatFreelookLocked();
+            input.SetSeatFreelookLock(lock);
+            // Seat flips bypass the GameLoop FreelookChanged() path (that flag
+            // is consumed before Simulate runs) — recentre here instead, so a
+            // dismount doesn't inherit a stale freelook cursor direction.
+            if (wasLocked != lock)
+                FreelookChange(input.IsLookAroundEnabled());
+            break;
+        }
+    }
 }
 
 void World::Simulate(float deltaT, bool& enableDraw)

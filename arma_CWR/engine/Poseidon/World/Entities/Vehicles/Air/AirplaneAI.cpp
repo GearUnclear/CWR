@@ -596,7 +596,7 @@ void AirplaneAuto::KeyboardPilot(AIUnit* unit, float deltaT)
 
     CancelStop();
 
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickDirPilot(deltaT);
     }
@@ -627,18 +627,9 @@ void AirplaneAuto::KeyboardPilot(AIUnit* unit, float deltaT)
             _pilotDiveSet = false;
         }
 
-        bool internalCamera = IsGunner(GWorld->GetCameraType());
-        if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-        {
-            // last input from mouse - use mouse controls
-            _pilotHelperDir = true;
-            _pilotHelperBankDive = true;
-            _pilotHeading = atan2(_mouseDirWanted[0], _mouseDirWanted[2]);
-            _rudderWanted = 0;
-            // dive controlled directly
-            _pilotDive = _mouseDirWanted[1];
-        }
-        else
+        // Mouse flight control removed — pilot seats run permanent freelook
+        // (mouse looks, keys fly): bank on turn keys, rudder on MoveLeft/Right,
+        // pitch on MoveUp/Down.
         {
             _pilotHelperDir = false;
             _pilotHelperBankDive = true;

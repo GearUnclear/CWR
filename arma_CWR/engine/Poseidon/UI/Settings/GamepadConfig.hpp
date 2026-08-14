@@ -5,6 +5,7 @@
 //
 // File shape:
 //   enabled=1;
+//   steering=1;
 //   deadzoneStick=0.21;
 //   deadzoneTrigger=0.10;
 //   lookSensitivity=1.0;
@@ -28,6 +29,7 @@ class GamepadConfig
 public:
     // Tuning scalars (live values mirrored to GInput.gamepad.*).
     bool  enabled         = true;
+    bool  steering        = true; // pad may drive vehicles (Options toggle)
     float deadzoneStick   = 0.21f;
     float deadzoneTrigger = 0.10f;
     float lookSensitivity = 1.0f;

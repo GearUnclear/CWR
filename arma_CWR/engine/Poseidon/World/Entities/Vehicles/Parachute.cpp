@@ -749,7 +749,7 @@ void ParachuteAuto::KeyboardPilot(AIUnit* unit, float deltaT)
     auto& input = InputSubsystem::Instance();
     _dirCompensate = 0; // low heading compensation
 
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickPilot(deltaT);
         return;

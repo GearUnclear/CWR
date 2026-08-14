@@ -654,13 +654,8 @@ void SeaGullAuto::KeyboardPilot(AIUnit* unit, float deltaT)
     _pilotSpeed[1] = 0; // maintain height
     _pilotSpeed[0] = 0; // no side slip
 
-    bool internalCamera = IsGunner(GWorld->GetCameraType());
-    if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-    {
-        // last input from mouse - use mouse controls
-        _pilotHeading = atan2(_mouseDirWanted[0], _mouseDirWanted[2]);
-    }
-    else
+    // Mouse steering removed — keys only (the seagull is the between-lives
+    // camera; same policy as every other piloted vehicle).
     {
         Vector3Val direction = Direction();
         float turn = (input.GetTurnRight() - input.GetTurnLeft()) * 2;

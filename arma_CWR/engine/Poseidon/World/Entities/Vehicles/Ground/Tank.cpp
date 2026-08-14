@@ -1817,7 +1817,7 @@ void Tank::SuspendedPilot(AIUnit* unit, float deltaT) {}
 void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
 {
     auto& input = InputSubsystem::Instance();
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickPilot(deltaT);
         return;
@@ -1867,11 +1867,13 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
 
     _thrustRWanted = _thrustLWanted = forward;
 
-    bool internalCamera = IsGunner(GWorld->GetCameraType());
-    bool mouseControl = internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled();
     bool fullTurn = fabs(_thrustLWanted + _thrustRWanted) < 0.01f;
 
-    float estT = mouseControl ? 0.75f : 0.25f;
+    // Mouse steering removed — keys are the only manual input.  estT is the
+    // heading-predictor lookahead (damping): the retired mouse path used 0.75
+    // against a proportional position command, keys used 0.25.  With bang-bang
+    // keys as the sole input it sits between the two so the hull doesn't hunt.
+    float estT = 0.5f;
 
     if (!fullTurn)
     {
@@ -1887,29 +1889,16 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
     float curHeading = atan2(Direction()[0], Direction()[2]);
     float estHeading = atan2(estDirection[0], estDirection[2]);
 
-    float turnWanted = 0;
+    // note: keys give wanted turning speed, not turning acceleration
+    float turnKey = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
+    // when moving fast, we want to turn slowly
 
-    if (mouseControl)
-    {
-        // last input from mouse - use mouse controls
-        // _mouseTurnWanted is difference from current heading
+    float slow = floatMax(0, 1 - fabs(ModelSpeed().Z()) * (1.0f / 20));
 
-        Vector3 relDir(VMultiply, DirWorldToModel(), _mouseDirWanted);
-        float mTurnWanted = atan2(relDir.X(), relDir.Z());
-
-        turnWanted = AngleDifference(curHeading + mTurnWanted, estHeading);
-    }
-    else
-    {
-        // note: keys give wanted turning speed, not turning acceleration
-        float turnKey = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
-        // when moving fast, we want to turn slowly
-
-        float slow = floatMax(0, 1 - fabs(ModelSpeed().Z()) * (1.0f / 20));
-
-        float factor = 1 - slow * 0.5f;
-        turnWanted = AngleDifference(curHeading + turnKey * factor, estHeading);
-    }
+    // Command authority raised from the old keyboard branch's (1 - slow*0.5):
+    // 0.5 rad at rest was half what the mouse path could ask for.
+    float factor = 1 - slow * 0.25f;
+    float turnWanted = AngleDifference(curHeading + turnKey * factor, estHeading);
 
     // special case - tank moving fast and players wants to brake
     // in such situation tank is usually out of control

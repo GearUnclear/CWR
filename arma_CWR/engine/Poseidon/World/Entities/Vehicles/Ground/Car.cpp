@@ -1576,7 +1576,7 @@ void Car::KeyboardPilot(AIUnit* unit, float deltaT)
     auto& input = InputSubsystem::Instance();
     CancelStop();
 
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickPilot(deltaT);
         return;
@@ -1593,43 +1593,28 @@ void Car::KeyboardPilot(AIUnit* unit, float deltaT)
 
     float asz = fabs(ModelSpeed().Z());
 
-    bool internalCamera = IsGunner(GWorld->GetCameraType());
-    if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-    {
-        // last input from mouse - use mouse controls
-        Vector3 relDir(VMultiply, DirWorldToModel(), _mouseDirWanted);
-        _turnWanted = atan2(relDir.X(), relDir.Z()) * 0.7;
+    // Mouse steering is removed: driver seats run permanent freelook (mouse
+    // looks, keys steer — see World::UpdateInputContext).  Rates are retuned
+    // for keys as the only input: wind-up stays speed-scheduled (a held key is
+    // a full-deflection request, unlike the retired mouse path's proportional
+    // command, so it must not reach the mouse rate of 2.0 at speed), while
+    // centering gets the full mouse-path 2.0 flat — returning toward straight
+    // is self-stabilizing, and slow centering is what caused the release/
+    // counter-steer oscillation that made keyboard driving feel bad.
+    _turnWanted = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
+    _mouseDirWanted = Direction();
 
-        _turnIncreaseSpeed = 2;
-        _turnDecreaseSpeed = 2;
+    float slowTurn = 1 - asz * (1.0 / 15);
+    saturateMax(slowTurn, 0);
+    _turnIncreaseSpeed = slowTurn * 1.0 + 0.4;
+    _turnDecreaseSpeed = 2;
 
-        float maxTurnCoef = 1 - asz * (1.0 / 5);
-        saturateMax(maxTurnCoef, 0);
+    float maxTurnCoef = 1 - asz * (1.0 / 10);
+    saturateMax(maxTurnCoef, 0);
 
-        // limit max turn based on speed
-        float maxTurn = maxTurnCoef * 1.0 + (1 - maxTurnCoef) * 0.5;
-        saturate(_turnWanted, -maxTurn, +maxTurn);
-    }
-    else
-    {
-        // turn with arrows
-        _turnWanted = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
-        _mouseDirWanted = Direction();
-
-        float slowTurn = 1 - asz * (1.0 / 15);
-        saturateMax(slowTurn, 0);
-        _turnIncreaseSpeed = slowTurn * 0.3 + 0.2;
-        _turnDecreaseSpeed = slowTurn * 0.8 + 0.5;
-
-        float maxTurnCoef = 1 - asz * (1.0 / 10);
-        saturateMax(maxTurnCoef, 0);
-
-        // limit max turn based on speed
-        float maxTurn = maxTurnCoef * 1.0 + (1 - maxTurnCoef) * 0.3;
-        saturate(_turnWanted, -maxTurn, +maxTurn);
-
-        // limit max thrust based on turn
-    }
+    // limit max turn based on speed
+    float maxTurn = maxTurnCoef * 1.0 + (1 - maxTurnCoef) * 0.3;
+    saturate(_turnWanted, -maxTurn, +maxTurn);
 
     Limit(_thrustWanted, -1, 1);
     Limit(_turnWanted, -1, 1);

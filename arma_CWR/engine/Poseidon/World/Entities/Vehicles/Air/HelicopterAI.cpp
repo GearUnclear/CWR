@@ -490,37 +490,15 @@ void HelicopterAuto::KeyboardPilot(AIUnit* unit, float deltaT)
     _pilotSpeed[1] = 0;
     _pilotSpeed[0] = 0;
 
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickDirPilot(deltaT);
     }
     else
     {
-        bool internalCamera = IsGunner(GWorld->GetCameraType());
-        if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-        {
-            _pilotHeading = atan2(_mouseDirWanted[0], _mouseDirWanted[2]);
-
-            _pilotDirHelper = true;
-            _avoidBankJitter = false;
-
-            if (!_hoveringAutopilot)
-            {
-                _pilotDive = _mouseDirWanted[1];
-                saturate(_pilotDive, -0.7, +0.7);
-                _diveWanted = _pilotDive;
-                _pilotSpeedHelper = false;
-            }
-            else
-            {
-                _pilotSpeedHelper = true;
-                _pilotDive = 0;
-                _pilotSpeed[0] = (input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft)) * 3;
-                _pilotSpeed[2] = -_mouseDirWanted[1] * 20;
-                saturate(_pilotSpeed[2], -5, +7);
-            }
-        }
-        else
+        // Mouse flight control removed — pilot seats run permanent freelook
+        // (mouse looks, keys fly): bank on turn keys, rudder on MoveLeft/Right,
+        // pitch on the forward/back keys.
         {
             _avoidBankJitter = true;
 

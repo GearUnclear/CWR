@@ -588,3 +588,147 @@ TEST_CASE("InputSubsystem joystick enabled and axis activity", "[input][integrat
     REQUIRE_FALSE(sub.IsActionBoundToRecentAxis(UAAxisTurn));
     REQUIRE_FALSE(sub.IsActionBoundToRecentAxis(UAAxisThrust));
 }
+
+// --- Seat freelook lock (permanent freelook in non-turret vehicle seats) ---
+
+TEST_CASE("InputSubsystem seat freelook lock forces combined flag, not manual", "[input][integration]")
+{
+    auto& sub = InputSubsystem::Instance();
+    REQUIRE_FALSE(sub.IsLookAroundEnabled());
+
+    sub.SetSeatFreelookLock(true);
+    CHECK(sub.IsSeatFreelookLocked());
+    CHECK(sub.IsLookAroundEnabled());
+    CHECK_FALSE(sub.IsLookAroundManual());
+    // The lock syncs the shared GInput flag immediately (mid-frame callers
+    // like MouseState read it there next frame).
+    CHECK(GInput.lookAroundEnabled);
+
+    sub.SetSeatFreelookLock(false);
+    CHECK_FALSE(sub.IsSeatFreelookLocked());
+    CHECK_FALSE(sub.IsLookAroundEnabled());
+    CHECK_FALSE(GInput.lookAroundEnabled);
+}
+
+TEST_CASE("InputSubsystem seat freelook lock disables mouse turn arbitration", "[input][integration]")
+{
+    auto& sub = InputSubsystem::Instance();
+    GamepadSnapshot gamepadSnap;
+    auto savedMouse = GInput.mouse.cursorLastActive;
+    auto savedMouseTurn = GInput.mouse.turnLastActive;
+    auto savedKbCursor = GInput.keyboard.cursorLastActive;
+    auto savedKbTurn = GInput.keyboard.turnLastActive;
+
+    // Make the mouse the most recent turn device.
+    GInput.keyboard.cursorLastActive = Foundation::UITime(1000);
+    GInput.keyboard.turnLastActive = Foundation::UITime(1000);
+    GInput.gamepad.moveLastActive = Foundation::UITime(1000);
+    GInput.mouse.cursorLastActive = Foundation::UITime(2000);
+    GInput.mouse.turnLastActive = Foundation::UITime(2000);
+    REQUIRE(sub.IsMouseTurnActive());
+
+    // Seat lock on: the mouse is a look device, never a steering device.
+    sub.SetSeatFreelookLock(true);
+    CHECK_FALSE(sub.IsMouseTurnActive());
+    sub.SetSeatFreelookLock(false);
+
+    GInput.mouse.cursorLastActive = savedMouse;
+    GInput.mouse.turnLastActive = savedMouseTurn;
+    GInput.keyboard.cursorLastActive = savedKbCursor;
+    GInput.keyboard.turnLastActive = savedKbTurn;
+}
+
+TEST_CASE("InputSubsystem seat freelook lock keeps joystick arbitration on the manual flag",
+          "[input][integration]")
+{
+    auto& sub = InputSubsystem::Instance();
+    GamepadSnapshot gamepadSnap;
+    auto savedMouse = GInput.mouse.cursorLastActive;
+    auto savedKbMove = GInput.keyboard.moveLastActive;
+
+    GInput.gamepad.enabled = true;
+    GInput.keyboard.moveLastActive = Foundation::UITime(500);
+    GInput.gamepad.moveLastActive = Foundation::UITime(1000);
+    // Mouse moved after the gamepad: with no MANUAL freelook the mouse keeps
+    // the pad parked...
+    GInput.mouse.cursorLastActive = Foundation::UITime(2000);
+    REQUIRE_FALSE(sub.IsJoystickActive());
+
+    // ...and a seat lock must NOT change that — otherwise every drive would
+    // hand an idle connected pad the steering.
+    sub.SetSeatFreelookLock(true);
+    CHECK_FALSE(sub.IsJoystickActive());
+    sub.SetSeatFreelookLock(false);
+
+    GInput.mouse.cursorLastActive = savedMouse;
+    GInput.keyboard.moveLastActive = savedKbMove;
+}
+
+// --- Gamepad steering toggle ---
+
+TEST_CASE("InputSubsystem gamepad steering toggle gates the pilot arbiters", "[input][integration]")
+{
+    auto& sub = InputSubsystem::Instance();
+    GamepadSnapshot gamepadSnap;
+    auto savedMouse = GInput.mouse.cursorLastActive;
+    auto savedKbMove = GInput.keyboard.moveLastActive;
+    auto savedKbThrust = GInput.keyboard.thrustLastActive;
+
+    // Make the gamepad the active device.
+    GInput.gamepad.enabled = true;
+    GInput.keyboard.moveLastActive = Foundation::UITime(500);
+    GInput.mouse.cursorLastActive = Foundation::UITime(500);
+    GInput.gamepad.moveLastActive = Foundation::UITime(1000);
+    GInput.keyboard.thrustLastActive = Foundation::UITime(500);
+    GInput.gamepad.thrustLastActive = Foundation::UITime(1000);
+    REQUIRE(sub.IsJoystickActive());
+
+    GInput.gamepad.steering = true;
+    CHECK(sub.IsJoystickPilotActive());
+    CHECK(sub.IsJoystickThrustActive());
+
+    GInput.gamepad.steering = false;
+    CHECK_FALSE(sub.IsJoystickPilotActive());
+    CHECK_FALSE(sub.IsJoystickThrustActive());
+    // General activity arbitration is untouched — only piloting is gated.
+    CHECK(sub.IsJoystickActive());
+
+    GInput.mouse.cursorLastActive = savedMouse;
+    GInput.keyboard.moveLastActive = savedKbMove;
+    GInput.keyboard.thrustLastActive = savedKbThrust;
+}
+
+TEST_CASE("InputSubsystem gamepad steering toggle strips stick bindings from driver-context steering",
+          "[input][integration]")
+{
+    auto& sub = InputSubsystem::Instance();
+    ProfileSnapshot carSnap(sub, InputContext::CarDriver);
+    ProfileSnapshot infantrySnap(sub, InputContext::Infantry);
+    GamepadSnapshot gamepadSnap;
+    float savedD = GInput.keyboard.keys[SDL_SCANCODE_D];
+
+    auto& car = sub.GetProfile(InputContext::CarDriver);
+    auto& infantry = sub.GetProfile(InputContext::Infantry);
+    car.ClearBindings(UATurnRight);
+    infantry.ClearBindings(UATurnRight);
+    car.Bind(UATurnRight, InputBinding(InputCode::GamepadAx(0), InputCode{}, ActivationMode::OnHold, 1.0f));
+    car.Bind(UATurnRight, InputCode::Key(SDL_SCANCODE_D));
+    infantry.Bind(UATurnRight, InputBinding(InputCode::GamepadAx(0), InputCode{}, ActivationMode::OnHold, 1.0f));
+
+    GInput.gamepad.enabled = true;
+    GInput.gamepad.stickAxis[0] = 0.5f;
+    GInput.keyboard.keys[SDL_SCANCODE_D] = 1.0f;
+
+    GInput.gamepad.steering = true;
+    CHECK(sub.GetAction(InputContext::CarDriver, UATurnRight, false) == 1.5f);
+
+    GInput.gamepad.steering = false;
+    // The stick contribution disappears in the driver context; the keyboard
+    // binding on the same action still reads through.
+    CHECK(sub.GetAction(InputContext::CarDriver, UATurnRight, false) == 1.0f);
+    // Non-driver contexts keep their stick bindings (infantry turning).
+    CHECK(sub.GetAction(InputContext::Infantry, UATurnRight, false) == 0.5f);
+
+    GInput.keyboard.keys[SDL_SCANCODE_D] = savedD;
+    GInput.gamepad.stickAxis[0] = 0.0f;
+}

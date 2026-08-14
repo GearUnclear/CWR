@@ -403,11 +403,68 @@ static bool QueryProfileCodeToDo(Input& in, InputCode code, bool reset, bool che
     }
 }
 
-static float QueryProfileAction(const Input& in, const InputProfile& profile, UserAction action, bool checkFocus)
+static bool IsGamepadDevice(InputCode code)
+{
+    switch (code.device())
+    {
+        case InputDevice::GamepadButton:
+        case InputDevice::GamepadAxis:
+        case InputDevice::GamepadPOV:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Driver/pilot contexts whose movement actions steer a vehicle — the surface
+// the Options "gamepad steering" toggle covers.
+static bool IsDriverContext(InputContext ctx)
+{
+    switch (ctx)
+    {
+        case InputContext::CarDriver:
+        case InputContext::TankDriver:
+        case InputContext::HeliPilot:
+        case InputContext::PlanePilot:
+        case InputContext::ShipDriver:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool IsVehicleControlAction(UserAction action)
+{
+    switch (action)
+    {
+        case UATurnLeft:
+        case UATurnRight:
+        case UAMoveForward:
+        case UAMoveBack:
+        case UAMoveFastForward:
+        case UAMoveSlowForward:
+        case UAMoveLeft:
+        case UAMoveRight:
+        case UAMoveUp:
+        case UAMoveDown:
+        case UAAxisTurn:
+        case UAAxisDive:
+        case UAAxisRudder:
+        case UAAxisThrust:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static float QueryProfileAction(const Input& in, const InputProfile& profile, UserAction action, bool checkFocus,
+                                bool suppressGamepadCodes = false)
 {
     float sum = 0.0f;
     for (const InputBinding& binding : profile.GetBindingEntries(action))
     {
+        if (suppressGamepadCodes && IsGamepadDevice(binding.code))
+            continue;
         if (!ProfileModifierHeld(in, binding.modifier, checkFocus))
             continue;
         const float value = QueryProfileCode(in, binding.code, checkFocus) * binding.scale;
@@ -545,13 +602,13 @@ void InputSubsystem::ComputeMovementState()
         turnLeft_ += GetAction(UATurnLeft, true);
         turnRight_ += GetAction(UATurnRight, true);
 
-        bool oldLookAround = lookAroundEnabled_;
+        bool oldLookAround = IsLookAroundEnabled();
         if (GetAction(UALookAround, true))
             lookAroundEnabled_ = true;
         else
             lookAroundEnabled_ = lookAroundToggled_;
 
-        if (oldLookAround != lookAroundEnabled_)
+        if (oldLookAround != IsLookAroundEnabled())
             freelookChanged_ = true;
 
         moveUp_ += GetAction(UAMoveUp, true);
@@ -576,7 +633,7 @@ void InputSubsystem::SyncToGInput()
     GInput.keyTurnRight = turnRight_;
     GInput.fire = fire_;
     GInput.fireToDo = fireToDo_;
-    GInput.lookAroundEnabled = lookAroundEnabled_;
+    GInput.lookAroundEnabled = IsLookAroundEnabled();
     GInput.lookAroundToggleEnabled = lookAroundToggled_;
 }
 
@@ -602,7 +659,13 @@ float InputSubsystem::GetAction(InputContext ctx, UserAction action, bool checkF
     const int idx = static_cast<int>(ctx);
     if (idx < 0 || idx >= kNumContexts)
         return 0.0f;
-    return QueryProfileAction(GInput, profiles_[idx], action, checkFocus);
+    // With gamepad steering off, stick/trigger/POV bindings stop feeding the
+    // movement actions in driver contexts, so a bound pad can't steer through
+    // the keyboard branch either.  Buttons, look and every other context are
+    // untouched.
+    const bool suppressGamepad =
+        !GInput.gamepad.steering && IsDriverContext(ctx) && IsVehicleControlAction(action);
+    return QueryProfileAction(GInput, profiles_[idx], action, checkFocus, suppressGamepad);
 }
 
 bool InputSubsystem::GetActionToDo(UserAction action, bool reset, bool checkFocus)
@@ -772,6 +835,18 @@ void InputSubsystem::ResetLookAroundToggle()
     GInput.lookAroundToggleEnabled = false;
 }
 
+void InputSubsystem::SetSeatFreelookLock(bool locked)
+{
+    // Does NOT raise freelookChanged_: the seat lock flips mid-Simulate, after
+    // GameLoop's FreelookChanged() check for this frame, and the flag is reset
+    // at the top of the next Update() — it would be wiped unread.  The caller
+    // (World::UpdateInputContext) invokes FreelookChange itself on a flip.
+    if (lookAroundSeatLock_ == locked)
+        return;
+    lookAroundSeatLock_ = locked;
+    GInput.lookAroundEnabled = IsLookAroundEnabled();
+}
+
 bool InputSubsystem::IsMouseTurnActive() const
 {
     if (GInput.lookAroundEnabled)
@@ -794,9 +869,17 @@ bool InputSubsystem::IsJoystickActive() const
         return false;
     if (GInput.keyboard.moveLastActive >= GInput.gamepad.moveLastActive)
         return false;
-    if (!GInput.lookAroundEnabled && GInput.mouse.cursorLastActive > GInput.gamepad.moveLastActive)
+    // Manual freelook only: with a seat lock pinning GInput.lookAroundEnabled
+    // true for the whole drive, using the combined flag would erase this guard
+    // and let an idle connected gamepad win the arbitration from the mouse.
+    if (!lookAroundEnabled_ && GInput.mouse.cursorLastActive > GInput.gamepad.moveLastActive)
         return false;
     return true;
+}
+
+bool InputSubsystem::IsJoystickPilotActive() const
+{
+    return GInput.gamepad.steering && IsJoystickActive();
 }
 bool InputSubsystem::IsJoystickEnabled() const
 {
@@ -804,7 +887,9 @@ bool InputSubsystem::IsJoystickEnabled() const
 }
 bool InputSubsystem::IsJoystickThrustActive() const
 {
-    if (!GInput.gamepad.enabled)
+    // gamepad.steering: throttle is vehicle control, so the Options "gamepad
+    // steering" toggle covers it too (its only consumers are aircraft thrust).
+    if (!GInput.gamepad.enabled || !GInput.gamepad.steering)
         return false;
     return GInput.gamepad.thrustLastActive > GInput.keyboard.thrustLastActive;
 }
@@ -1082,6 +1167,7 @@ void InputSubsystem::LoadKeys()
     GInput.mouse.tuning.aimingDeadzone = mouse.aimingDeadzone;
 
     GInput.gamepad.enabled = gamepad.enabled;
+    GInput.gamepad.steering = gamepad.steering;
     GInput.gamepad.deadzoneStick = gamepad.deadzoneStick;
     GInput.gamepad.deadzoneTrigger = gamepad.deadzoneTrigger;
     GInput.gamepad.lookSensitivity = gamepad.lookSensitivity;
@@ -1094,6 +1180,7 @@ void InputSubsystem::SaveKeys()
 
     GamepadConfig gamepad;
     gamepad.enabled = GInput.gamepad.enabled;
+    gamepad.steering = GInput.gamepad.steering;
     gamepad.deadzoneStick = GInput.gamepad.deadzoneStick;
     gamepad.deadzoneTrigger = GInput.gamepad.deadzoneTrigger;
     gamepad.lookSensitivity = GInput.gamepad.lookSensitivity;

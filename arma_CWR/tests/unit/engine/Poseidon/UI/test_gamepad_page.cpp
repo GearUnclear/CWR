@@ -280,11 +280,11 @@ TEST_CASE("GamepadPage: grouped freelook capture writes LB-modified right-stick 
 // ---------------------------------------------------------------------------
 // GamepadTuningPage: 4 scalar rows + auto Close.
 
-TEST_CASE("GamepadTuningPage: provider exposes 4 scalar rows + close", "[UI][GamepadTuningPage]")
+TEST_CASE("GamepadTuningPage: provider exposes 5 scalar rows + close", "[UI][GamepadTuningPage]")
 {
     TestableGamepadTuningPage page;
     auto& p = page.Provider();
-    CHECK(p.RowCount() == 5);
+    CHECK(p.RowCount() == 6);
 }
 
 TEST_CASE("GamepadTuningPage: row labels", "[UI][GamepadTuningPage]")
@@ -297,9 +297,10 @@ TEST_CASE("GamepadTuningPage: row labels", "[UI][GamepadTuningPage]")
     CHECK(std::string(bindingsPage.TitleText()) == "Gamepad");
     CHECK(std::string(page.TitleText()) == "Gamepad Tuning");
     CHECK(std::string(p.RowLabel(0)) == "Gamepad enabled");
-    CHECK(std::string(p.RowLabel(1)) == "Stick deadzone");
-    CHECK(std::string(p.RowLabel(2)) == "Trigger deadzone");
-    CHECK(std::string(p.RowLabel(3)) == "Look sensitivity");
+    CHECK(std::string(p.RowLabel(1)) == "Gamepad steering");
+    CHECK(std::string(p.RowLabel(2)) == "Stick deadzone");
+    CHECK(std::string(p.RowLabel(3)) == "Trigger deadzone");
+    CHECK(std::string(p.RowLabel(4)) == "Look sensitivity");
 }
 
 TEST_CASE("GamepadTuningPage: row descriptions localize from the main menu shard", "[UI][GamepadTuningPage]")
@@ -311,20 +312,24 @@ TEST_CASE("GamepadTuningPage: row descriptions localize from the main menu shard
     CHECK(std::string(p.RowDescription(0)) ==
           "Master switch for gamepad input. Disable to ignore the controller entirely.");
     CHECK(std::string(p.RowDescription(1)) ==
+          "Let the gamepad steer vehicles. Disabled: sticks and triggers never drive or fly; "
+          "look and buttons still work.");
+    CHECK(std::string(p.RowDescription(2)) ==
           "Center deadzone for the analog sticks. Range 0% to 50% of full deflection.");
-    CHECK(std::string(p.RowDescription(2)) == "Activation threshold for the analog triggers. Range 0% to 50%.");
-    CHECK(std::string(p.RowDescription(3)) == "Right-stick look-aim sensitivity. Range 0.1x to 5.0x.");
+    CHECK(std::string(p.RowDescription(3)) == "Activation threshold for the analog triggers. Range 0% to 50%.");
+    CHECK(std::string(p.RowDescription(4)) == "Right-stick look-aim sensitivity. Range 0.1x to 5.0x.");
 }
 
-TEST_CASE("GamepadTuningPage: row kinds - toggle stepper + 3 sliders + close action", "[UI][GamepadTuningPage]")
+TEST_CASE("GamepadTuningPage: row kinds - 2 toggle steppers + 3 sliders + close action", "[UI][GamepadTuningPage]")
 {
     TestableGamepadTuningPage page;
     auto& p = page.Provider();
     CHECK(p.RowKind(0) == OptionsScrollList::KindStepper); // enabled toggle
-    CHECK(p.RowKind(1) == OptionsScrollList::KindSlider);  // stick deadzone
-    CHECK(p.RowKind(2) == OptionsScrollList::KindSlider);  // trigger deadzone
-    CHECK(p.RowKind(3) == OptionsScrollList::KindSlider);  // look sensitivity
-    CHECK(p.RowKind(4) == OptionsScrollList::KindAction);  // Close
+    CHECK(p.RowKind(1) == OptionsScrollList::KindStepper); // steering toggle
+    CHECK(p.RowKind(2) == OptionsScrollList::KindSlider);  // stick deadzone
+    CHECK(p.RowKind(3) == OptionsScrollList::KindSlider);  // trigger deadzone
+    CHECK(p.RowKind(4) == OptionsScrollList::KindSlider);  // look sensitivity
+    CHECK(p.RowKind(5) == OptionsScrollList::KindAction);  // Close
 }
 
 TEST_CASE("GamepadTuningPage: enabled toggle round-trips through GInput", "[UI][GamepadTuningPage]")
@@ -345,26 +350,44 @@ TEST_CASE("GamepadTuningPage: enabled toggle round-trips through GInput", "[UI][
     CHECK(GInput.gamepad.enabled == true);
 }
 
+TEST_CASE("GamepadTuningPage: steering toggle round-trips through GInput", "[UI][GamepadTuningPage]")
+{
+    GamepadStateSnapshot snap;
+    TestableGamepadTuningPage page;
+    auto& p = page.Provider();
+
+    GInput.gamepad.steering = true;
+    CHECK(p.RowValue(1) == 1);
+    p.SetRowValue(1, 0);
+    CHECK(GInput.gamepad.steering == false);
+    p.SetRowValue(1, 1);
+    CHECK(GInput.gamepad.steering == true);
+
+    // Out-of-range rejected.
+    p.SetRowValue(1, 99);
+    CHECK(GInput.gamepad.steering == true);
+}
+
 TEST_CASE("GamepadTuningPage: deadzone slider maps 0..100 to 0.0..0.5", "[UI][GamepadTuningPage]")
 {
     GamepadStateSnapshot snap;
     TestableGamepadTuningPage page;
     auto& p = page.Provider();
 
-    p.SetRowValue(1, 0);
+    p.SetRowValue(2, 0);
     CHECK(GInput.gamepad.deadzoneStick == 0.0f);
-    p.SetRowValue(1, 100);
+    p.SetRowValue(2, 100);
     CHECK(GInput.gamepad.deadzoneStick == 0.5f);
-    p.SetRowValue(1, 50);
+    p.SetRowValue(2, 50);
     CHECK(GInput.gamepad.deadzoneStick == 0.25f);
 
-    p.SetRowValue(2, 20);
+    p.SetRowValue(3, 20);
     CHECK(GInput.gamepad.deadzoneTrigger == 0.10f);
 
     // Negative / >100 clamp.
-    p.SetRowValue(1, -5);
+    p.SetRowValue(2, -5);
     CHECK(GInput.gamepad.deadzoneStick == 0.0f);
-    p.SetRowValue(1, 200);
+    p.SetRowValue(2, 200);
     CHECK(GInput.gamepad.deadzoneStick == 0.5f);
 }
 
@@ -374,16 +397,16 @@ TEST_CASE("GamepadTuningPage: look sensitivity slider maps 0..100 to 0.1..5.0", 
     TestableGamepadTuningPage page;
     auto& p = page.Provider();
 
-    p.SetRowValue(3, 0);
+    p.SetRowValue(4, 0);
     CHECK(GInput.gamepad.lookSensitivity == 0.1f);
-    p.SetRowValue(3, 100);
+    p.SetRowValue(4, 100);
     CHECK(GInput.gamepad.lookSensitivity == 5.0f);
 
     // Engine default 1.0 reads back at ~18% on the linear slider —
     // documents the (0.1..5.0) chosen range; default isn't at 50%
     // because the range is biased toward higher sensitivities.
     GInput.gamepad.lookSensitivity = 1.0f;
-    int pct = p.RowValue(3);
+    int pct = p.RowValue(4);
     CHECK(pct >= 17);
     CHECK(pct <= 19);
 }

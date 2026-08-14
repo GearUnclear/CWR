@@ -20,6 +20,10 @@ struct GamepadState
 
     // Configuration (persisted to UserInfo.cfg)
     bool enabled = true;
+    // Options "gamepad steering": off = the pad never drives vehicles (no
+    // JoystickPilot/thrust arbitration, stick axes stripped from steering
+    // actions in driver contexts) while look/buttons/menus stay live.
+    bool steering = true;
     float deadzoneStick = 0.21f;
     float deadzoneTrigger = 0.10f;
     float lookSensitivity = 1.0f;
