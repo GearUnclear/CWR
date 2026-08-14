@@ -537,6 +537,41 @@ items:
       - "The tracerColor '0.0.1' floats that @lobofixup exists for are already repaired inside @LoBo itself (2026-07-16); @LoBo's LoBoammo.pbo and LoBo_airammo.pbo are byte-identical to the fixture's shadows. The fixture's addons/ shadows are therefore inert, but its bin/config.cpp roster is still load-bearing for the lobo lane, so the fixture stays."
       - "Not fixed, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~4 m below ground at createVehicle height (setPos [x,y,4] seats them). Their p3d carries only 4 LODs where LoBo_t54wrck carries 7, missing whatever LOD the engine seats the object with. Model-level defect, left for a follow-up."
       - "probe_props was reframed while verifying this. Its old vantage looked north through a lobo_israel_w_03 separation-wall segment on the n=9801 line, so every frame was a full-bleed grey slab - a green run that proved nothing. Moved to open ground at [11900, 9650] (no placed object within 70 m, ~450 within 400 m, so unambiguously dry land)."
+      - "2026-08-13 correction to the missing-LOD guess above: the M60A1 burial was never about LOD count. No LoBoWreck model has a LandContact LOD (landContact=-1 in all ten, including the eight that seat fine); a static is seated by terrainY + boundingCenter.Y, and both M60A1 models were authored with the origin above the whole mesh. See lobo-model-origin-repair."
+
+  - id: lobo-model-origin-repair
+    title: "M60A1 wrecks seat on the ground: p3d origin repaired at source, engine rescues the never-seatable case"
+    phase: hardening
+    status: done
+    depends_on: [lobo-content-repair]
+    commits: [4a428f2]
+    summary: >
+      LoBo_M60A1_wreck and LoBo_M60A1_wreck2 built and drew but createVehicle
+      buried them (roof 0.45 m / 0.92 m under the sand). A static prop seats at
+      terrainY + shape->BoundingCenter().Y (Entity::PlaceOnSurface, Static
+      branch, untouched Bohemia code) - the authored origin goes on the ground -
+      and both models were authored with the origin ABOVE the entire mesh, so
+      the rule can only ever bury them, on any terrain, in vanilla OFP too.
+      Fixed at both layers. Content, at source: tools/lobo/
+      fix-lobo-model-origin.ps1 rewrites boundingCenter.Y in the ODOL p3d
+      (equivalent to moving the model vertically in O2; four bytes in place, no
+      repack), self-discovering via the buried test bc.Y + minMax[1].Y <= 0,
+      idempotent, backed up to @LoBo/_ud-orig/. Engine, as the net for
+      unrepaired installs and future mods: the same degenerate test in
+      Entity::PlaceOnSurface seats the lowest vertex on the terrain instead of
+      burying the model invisibly, with a WARN naming the shape
+      (StaticSeatOffsetY, Vehicle.hpp). Valid sunk-into-terrain content (part of
+      the mesh above the origin) is untouched by construction. Alongside it, the
+      silent half of the sibling scope defect got its diagnostic: a config value
+      that evaluates to nil (undefined identifier, e.g. scope = public with no
+      #define) now logs a WARN at the ParamFileEval seam instead of reading 0 in
+      total silence (the evaluator's own report goes through RptF, which
+      compiles away).
+    log:
+      - "Audited both repair scripts against the engine before extending anything: the scope rewrite and the origin rewrite are both genuine content repairs (the placement rule and the identifier-to-0 collapse are faithful vanilla behaviour; the mod's wrecks were broken in 2006 OFP too). The engine's failures were the silences, so the engine side of this tranche is diagnostics plus degradation, not semantic change."
+      - "Both layers resolve to the same seat (lowest vertex on terrain, terrain + 1.47 / + 1.14 for the two wrecks), so prop_spawn_safety CASE 2d pins whichever layer is active with one triAssertNear pair."
+      - "Coverage: StaticSeatOffsetY predicate pinned in test_house.cpp (authored seating kept whenever any mesh clears the terrain, incl. deliberate sinking; rescue at the boundary); the scope-keyword degrade-to-0 contract pinned in test_paramfile_expressions.cpp; probe_props extended to 21 entries incl. both M60A1 variants, verified frame-by-frame on a contact sheet."
+      - "Engine-alone reproduction (unrepaired pbo) was NOT run against the shared @LoBo - reverting pbos under a live concurrent session is exactly the concurrent-kill hazard. Isolated instead in a scratch mod built from @LoBo/_ud-orig with only the scope repair applied, mounted last so its LoBoWreck.pbo shadows the repaired one."
 
   - id: cam-set-dir-fix
     title: "camSetDir turns the camera again (scripted-camera angle commands)"
