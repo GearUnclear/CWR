@@ -535,8 +535,46 @@ items:
       - "Sweep of all 116 @LoBo addon configs found no other undefined scope keyword and no surviving malformed float. The remaining bare identifiers are destrType = Destruct* in 13 addons that never define them (engine enum: No=0, Building=1, Engine=2, Tree=3, Tent=4, Man=5, Default=6), so they all collapse to DestructNo and those props are indestructible. Left alone deliberately: the numeric mapping is knowable but the mod shipped that way for twenty years, and 'fixing' it is a gameplay change, not a repair. Same for access = ReadOnlyVerified (falls to the more permissive ReadAndWrite) and side = TEast (falls to 0, which IS TEast)."
       - "LoBoWreck.cpp also drops the semicolon after `accuracy=0.3`. Harmless here: ParamClass::Parse terminates a scalar value on any of ';', '\\n', '\\r' (ParamFile.cpp:1797), so the next line still parses. Not touched."
       - "The tracerColor '0.0.1' floats that @lobofixup exists for are already repaired inside @LoBo itself (2026-07-16); @LoBo's LoBoammo.pbo and LoBo_airammo.pbo are byte-identical to the fixture's shadows. The fixture's addons/ shadows are therefore inert, but its bin/config.cpp roster is still load-bearing for the lobo lane, so the fixture stays."
-      - "Not fixed, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~4 m below ground at createVehicle height (setPos [x,y,4] seats them). Their p3d carries only 4 LODs where LoBo_t54wrck carries 7, missing whatever LOD the engine seats the object with. Model-level defect, left for a follow-up."
+      - "Not fixed here, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~3.4 m below ground at createVehicle height (setPos [x,y,4] seats them). Followed up in lobo-model-origin-repair, where the 4-LODs-vs-7 lead turned out to be a red herring: it is the model's vertical origin, not a missing LOD."
       - "probe_props was reframed while verifying this. Its old vantage looked north through a lobo_israel_w_03 separation-wall segment on the n=9801 line, so every frame was a full-bleed grey slab - a green run that proved nothing. Moved to open ground at [11900, 9650] (no placed object within 70 m, ~450 within 400 m, so unambiguously dry land)."
+
+  - id: lobo-model-origin-repair
+    title: "M60A1 wreck props seat on the ground (@LoBo model-origin repair)"
+    phase: hardening
+    status: done
+    depends_on: [lobo-content-repair]
+    summary: >
+      The follow-up left open by lobo-content-repair. LoBo_M60A1_wreck and
+      LoBo_M60A1_wreck2 built, textured and drew perfectly but `createVehicle
+      [x, y, 0]` buried them whole - roof 0.45 m and 0.92 m under the sand,
+      belly 3.39 m and 3.19 m under - and the probe_props frame for them was
+      empty desert. The standing lead was that their p3d carries 4 LODs where
+      LoBo_t54wrck carries 7, so they were missing the LOD the engine seats an
+      object with. That lead is wrong. All ten LoBoWreck classes derive from
+      Camp -> Strategic -> Building -> Static with simulation "house", so they
+      are built as `Building` with `_static = true`, and Entity::PlaceOnSurface
+      takes its Static branch (World/Simulation/Simul.cpp:1300):
+      `pos += orientation * GetShape()->BoundingCenter()`. The LandContact ->
+      Geometry -> Level(0) chain that ObjGetPos and the non-static branch use is
+      never reached, and no LoBoWreck model has a LandContact LOD anyway
+      (landContact = -1 in all ten, including the eight that seat correctly).
+      A static prop is seated at terrainY + boundingCenter.Y, i.e. its AUTHORED
+      ORIGIN goes on the ground, and both M60A1 models were authored with that
+      origin above the mesh. Repaired at source in the p3d: in an ODOL the
+      vertices are already stored auto-centred and boundingCenter records where
+      the authored origin sits relative to that centre, so rewriting
+      boundingCenter.Y is exactly equivalent to having moved the model in O2
+      before binarising. tools/lobo/fix-lobo-model-origin.ps1 does it, finds its
+      own targets (any auto-centred ODOL whose whole mesh is at or below its own
+      origin, which can never seat), and is idempotent.
+    log:
+      - "Proved from the game rather than from the code: spawning each wreck alone at [11900, 9650] on Sinai, every prop landed at exactly terrainY + its own boundingCenter.Y to within 1 mm (terrain 11.970 m; t54 +0.522 -> 12.492, t55 +1.053 -> 13.023, BTR-60 +0.484 -> 12.454, Ural +1.128 -> 13.098, Sho't +1.379 -> 13.349, M60A1 -1.921 -> 10.050, M60A1_2 -2.057 -> 9.913). Seven models, one formula, no LOD term in it."
+      - "After the repair the same probe reads 13.440 and 13.107, putting each model's lowest vertex exactly on the surface. probe_props p03 shows a tank instead of empty desert, and a new p03b covers _wreck2, which nothing exercised before."
+      - "getPos is useless as the regression signal here and the obvious assertion would have been vacuous: ObjGetPos re-runs PlaceOnSurface for the readback, so a freshly createVehicle'd static reports z = 0 whether it is on the sand or 3 m under it. prop_spawn_safety CASE 2d instead measures the ASL difference against LoBo_t54wrck spawned at the same point, which is a pure model-to-model constant: +0.95 and +0.62 after the repair, -2.44 and -2.58 before, asserted +/-0.75."
+      - "Patch mechanism is four bytes per model, in place: p3ds are stored uncompressed in these pbos and a float replaces a float, so the pbo file table does not move and no repack is involved - same contract as fix-lobo-scope.ps1. The model trailer is not aligned, so the script anchors on the GEOMETRY_SPEC (1e13) resolution float and accepts an offset only when the resolution run, the symmetric auto-centred bounding box, the bounding-sphere radius, the bool fields and the mass-array-to-end-of-file arithmetic all agree. Cross-checked against PoseidonFormats' own reader on all ten LoBoWreck models."
+      - "Self-discovery held: a -WhatIf sweep of every p3d in @LoBo read 979 ODOL models in 12 s and flagged exactly the two M60A1 wrecks. 44 models were skipped as unreadable by the anchor heuristic and reported as such rather than guessed at."
+      - "@LoBo is gitignored, so the repaired pbo exists only on this machine; the script is the tracked artifact and has to be rerun after any @LoBo reinstall, alongside fix-lobo-scope.ps1."
+      - "Observed while verifying, not investigated (out of scope): PoseidonGame sometimes stays alive and idle after a Trident run has finished, including runs the harness reported as passed, and a lingering instance poisons the next connection as 'failed to read from harness (broken pipe?)'. Every game-launching command here appends a Stop-Process kill."
 
   - id: cam-set-dir-fix
     title: "camSetDir turns the camera again (scripted-camera angle commands)"
@@ -1099,6 +1137,39 @@ items:
     log:
       - "2026-07-30: launch chain proven live by tri probes: click idc 124 -> IDD_MISSION (46), alive player, UC_BOOTED, gmZoneIndex Houdan >= 0. First e2e attempts were an environment goose chase: concurrent Claude sessions kill every PoseidonGame process as test cleanup (bare menu canary died at 25s; exit code -1, empty stderr, no WER = external TerminateProcess), and their parallel game instances slow world loads past the 240s timeout."
       - "2026-07-30: both e2e tests green 2/2 after appending triEndTest (menu-launch tests idle in-mission after the last assert; without the shutdown verb the runner waits out the full timeout and reports 'game didn't exit cleanly'). On a quiet machine with hot caches the whole menu boot -> click -> mission-init chain completes in ~1 s (mission init.sqs and ZoneRegistry run during the load, before the first rendered frame), so sub-second green runs are genuine, not false passes - verified against the runner's RUST_LOG=debug eval trace."
+
+  - id: vehicle-controls-overhaul
+    title: "Vehicle controls: mouse steering removed, permanent freelook in non-turret seats, gamepad-steering option"
+    phase: phase-2
+    status: in-progress
+    priority: 2
+    summary: >
+      Design decision (2026-08-09): the mouse never steers a vehicle in UD -
+      in every non-turret seat (Driver, CommanderAsDriver, Cargo; turret
+      Gunner/Commander seats keep mouse aim) the camera is permanently
+      decoupled from the hull, mouse looks and keys steer, on the ground and
+      in the air alike. Implemented as a seat-driven freelook lock:
+      World::UpdateInputContext feeds InputContextResolution.seat into
+      InputSubsystem::SetSeatFreelookLock, IsLookAroundEnabled() ORs the
+      manual LAlt/toggle flag with the lock, and the joystick-recency
+      arbiter deliberately keeps reading only the manual flag so an idle
+      connected pad cannot win steering during a drive. The
+      internalCamera+IsMouseTurnActive mouse branches were deleted from all
+      seven pilots (Car, Motorcycle, Tank, Ship, HelicopterAI, AirplaneAI,
+      SeaGull). Keyboard steering retuned asymmetrically instead of a flat
+      scalar: centering (_turnDecreaseSpeed) now matches the retired mouse
+      path's 2.0 flat (self-stabilizing, kills the release/counter-steer
+      oscillation), wind-up stays speed-scheduled but roughly doubled (car
+      1.4->0.4 across the speed range, bike 1.3->0.3 with the maxTurn floor
+      raised 0.03->0.1), tank command authority 0.5->0.75 rad at rest with
+      the heading-predictor lookahead estT 0.25->0.5. New persisted Options
+      toggle "Gamepad steering" (gamepad.cfg steering=, GamepadTuningPage row
+      1): off = IsJoystickPilotActive/IsJoystickThrustActive false and
+      stick/trigger/POV bindings stripped from movement actions in the five
+      driver contexts, while pad look/buttons/menus stay live.
+    log:
+      - "2026-08-09: landed engine-side. Unit coverage: seat-lock semantics, mouse-turn veto, arbiter-on-manual-flag, pilot/thrust gating, driver-context binding suppression, gamepad.cfg round-trip, tuning-page rows. PoseidonTests at baseline (5 pre-existing Map-localization reds, reproduced with the change stashed); clean boot to main loop verified. Steering strings added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored data-dir file - re-add after a reinstall) + the tracked test fixture."
+      - "Open: in-vehicle feel playtest of the retuned rates (car/bike/tank) and the keys-only aircraft flight; a tri lane asserting mouse motion moves the camera but not _turnWanted."
 
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
