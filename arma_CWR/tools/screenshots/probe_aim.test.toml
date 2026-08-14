@@ -1,0 +1,14 @@
+# One-shot probe for the aimed-fire (doFire) rework of the narrative shoots.
+# Vanilla lane, same preconditions as noe_stories: full CWA 1.99 install as
+# OFPR_DATA_DIR (ships AddOns/Noe.pbo).  Not a regression test - run explicitly.
+mission = "tools/screenshots/missions/Stories.Noe"
+binary = "PoseidonGame"
+tags = ["showcase", "full_cwa", "headful", "exclusive"]
+timeout = 600
+assert_timeout = 300
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--width", "2560",
+    "--height", "1440",
+]

@@ -22,6 +22,7 @@ From `arma_CWR/`:
 | `vanilla_malden_stories` | Stock game on Malden, no mods — same rig, same discipline |
 | `noe_stories` | Stock game on **Nogova**, no mods: forest-road ambush, farm-village firefight, villagers, checkpoint and armour among the concrete blocks. Boots `missions/Stories.Noe`, a two-object mission that exists only to hang a camera off |
 | `probe_props` | Diagnostic: spawns each static scenery prop alone to find the ones that crash the renderer |
+| `probe_aim` | Diagnostic: proves the captive `reveal`+`doFire` aimed-fire mechanism the firing scenes use, and measures which men actually shoot (ammo deltas come back through a deliberately-failing assert) |
 
 > **Spawning an unresolvable class no longer kills the process.** It used to: an
 > addon-denied entry resolves `scope` through to the inherited 0, so
@@ -121,7 +122,11 @@ label desyncs it and the run dies on `FAIL:screenshot_not_written`.
 - `createGroup` returns `grpNull` for a side with no center, and the units then
   silently never appear. Sinai has no RESISTANCE or CIVILIAN center, so the
   shoots call `createCenter` first (it is idempotent).
-- Everything spawned is `setCaptive true`, so no set turns into a firefight.
+- Everything spawned is `setCaptive true`, so nothing engages on its own — the
+  live campaign ignores the sets and the sets ignore each other. Captivity only
+  changes how *observers* classify a unit (`GetTargetSide` → civilian); a
+  captive can still be *ordered* to shoot, which is how the firing scenes work
+  (next section) while staying invisible to every AI not in on the shot.
 - Clock on Sinai: sunset is around 16:30. 15:00 is clean daylight, 15:40 is
   golden hour, 17:30 is already night.
 
@@ -162,23 +167,47 @@ is how the first three passes failed.
 
 A parked tank is a catalogue entry. What reads as a photograph:
 
-- **Firing.** `unit fire (primaryWeapon unit)` forces a shot whether or not the
-  AI has a target. A muzzle flash lives about one frame, so fire the group,
-  advance a **single** frame, capture — then repeat for a second chance.
+- **Firing — give the man a target, never force the shot.** `unit fire
+  (primaryWeapon unit)` on a target-less soldier goes through
+  `Man::AimWeaponForceFire`, which aims at `Direction()` with an elevation
+  component of **10** — near-vertical, clamped to the stance's max gun
+  elevation — and pass 2 shipped whole squads volleying at the sky at 45-60°.
+  What works instead: spawn a captive foe line 15-30 m out **on the
+  subject→background line**, `reveal` it to the squad, then give each man his
+  own silent per-man `doFire` (AssignTarget + EnableFireTarget; the
+  enable-fire target is exempt from the is-it-an-enemy gate in
+  `SelectFireWeapon`, so a captive/"civilian" target is shot anyway). The
+  combat AI then aims **level at a human** and pours real bursts on its own
+  cadence — so instead of one synchronized volley frame, take two or three
+  frames a few sim-frames apart and keep the ones where a flash landed.
+  Re-issue the `doFire` before every frame (a repeat of the same order is a
+  no-op) to re-point any man whose target just died. Two rules proved by
+  `probe_aim.test.sqf`: captive men never trip the friendly-in-the-lane fire
+  block (they read as civilians to it), and a firing lane must never cross
+  another staged squad — incoming rounds suppress the men and scramble the
+  poses.
 - **Wreckage.** A real vehicle with `setDammage 1` + `inflame true` gives the
-  destroyed model, fire and smoke. Prefer this to the static wreck props.
-- **Casualties.** `setDammage 1` on a man leaves a body in frame. Capture the
-  group into a list *before* killing it — a dead man is no longer in
-  `units group`, so the teardown would otherwise leak bodies into the next scene.
+  destroyed model, fire and smoke. Prefer this to the static wreck props. The
+  flame phase is finite: a scene that stages a long engage warm-up after the
+  burn must call the burn again just before its frames, or the "firelight"
+  scene shoots in the dark.
+- **Casualties.** The bullets are real now, so foes engaged at 15-30 m
+  genuinely drop — bodies land where the fire found them. Snapshot the foe
+  list *at spawn* (a dead man is no longer in `units group`) and `setDammage 1`
+  any survivor afterwards when a later scene depends on the corpses.
 - **Posture.** Mixing `setUnitPos "UP"/"MIDDLE"/"DOWN"` across a group reads as a
   firefight; all-standing reads as a parade. Use all-standing for patrols and
   checkpoint guards, where a prone man just disappears into the ground.
-- **A vehicle weapon needs a crew.** `veh fire "Gun120"` on an empty hull does
-  nothing at all — no flash, no report, no error. `moveInDriver`/`moveInGunner` a
-  spawned unit first, and do it **before** anything calls `disableAI "MOVE"` on
-  that unit, because a man ordered not to move will not board. Read the gun class
-  out of the vehicle's `weapons[]`: the T72 in `bin/config.bin` fires `Gun120`,
-  not the `Gun125` its calibre implies.
+- **A vehicle weapon needs a crew, and a target.** An uncrewed hull has no
+  gunner AI: forced `fire` does nothing at all — no flash, no report, no
+  error — and even a crewed tank force-fired with no target hoists the gun to
+  max elevation first (`EntityAI::AimWeaponForceFire`, elevation component 3).
+  `moveInDriver`/`moveInGunner` a spawned unit, then `doFire` the tank at an
+  **empty enemy hull** parked 45-60 m downrange: empty + engine-off classifies
+  as civilian, so the campaign ignores it — and the fire-value math never
+  spends a main-gun shell on a civilian-classified target, so the gunner works
+  it with the coax: level, continuous, and incapable of destroying the target
+  out from under the scene.
 
 ## Getting vanilla civilians to stand up
 
