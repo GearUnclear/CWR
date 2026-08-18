@@ -118,7 +118,7 @@ bool VoNReplayer::pushPacket(const VoNDataPacket& pkt, const uint8_t* payload)
     ++_rxSinceStart;
     if (TrapSample(_rxSinceStart))
         LOG_TRACE(Audio, "VoN# rx pkt ch={} n={} origin={} dec={} jb={}", pkt.channel, _rxSinceStart, pkt.origin, dec,
-                 _jitter.buffered());
+                  _jitter.buffered());
     return true;
 }
 
@@ -129,7 +129,7 @@ int VoNReplayer::pull(int16_t* out, int maxSamples)
     {
         _playing = false;
         LOG_TRACE(Audio, "VoN# rx stream-dry ch={} rxPkts={} underruns={}", _dbgChannel, _rxSinceStart,
-                 _jitter.underrunGapFrames());
+                  _jitter.underrunGapFrames());
         _rxSinceStart = 0;
     }
     return n;
@@ -202,11 +202,11 @@ void VoNClient::setTransmit(bool on)
         _recorder->setRecording(on);
     if (on)
         LOG_DEBUG(Audio, "VoN# tx ON sender={} capOpen={} capturing={} drained={} origin={} sink={} rec={}", _senderId,
-                 _capture.isOpen(), _capture.isCapturing(), drained, _recorder ? _recorder->totalSamples() : 0,
-                 static_cast<bool>(_sink), _recorder != nullptr);
+                  _capture.isOpen(), _capture.isCapturing(), drained, _recorder ? _recorder->totalSamples() : 0,
+                  static_cast<bool>(_sink), _recorder != nullptr);
     else
         LOG_DEBUG(Audio, "VoN# tx OFF sender={} burstPkts={} origin={}", _senderId, _txBurstPackets,
-                 _recorder ? _recorder->totalSamples() : 0);
+                  _recorder ? _recorder->totalSamples() : 0);
 }
 
 bool VoNClient::isTransmitting() const
@@ -296,7 +296,7 @@ void VoNClient::update()
         {
             const auto* pkt = reinterpret_cast<const VoNDataPacket*>(packet.data());
             LOG_TRACE(Audio, "VoN# tx pkt sender={} n={} origin={} bytes={} ch={}", _senderId, _txBurstPackets,
-                     pkt->origin, pkt->size, static_cast<int>(pkt->chatChan));
+                      pkt->origin, pkt->size, static_cast<int>(pkt->chatChan));
         }
     }
 }
@@ -442,7 +442,7 @@ void VoNServer::onDataPacket(const void* raw, int rawSize)
                                                     reinterpret_cast<const uint8_t*>(raw) + rawSize)});
             if (pending.size() == 1 || pending.size() % 25 == 0)
                 LOG_DEBUG(Audio, "VoN# srv NO-ROUTE pend sender={} origin={} pending={}", pkt.channel, pkt.origin,
-                         pending.size());
+                          pending.size());
         }
         else
         {
@@ -462,7 +462,7 @@ void VoNServer::onDataPacket(const void* raw, int rawSize)
     ++it->second.fwdCount;
     if (TrapSample(it->second.fwdCount))
         LOG_TRACE(Audio, "VoN# srv fwd sender={} n={} origin={} targets={} fwd-hook={}", pkt.channel,
-                 it->second.fwdCount, pkt.origin, it->second.targets.size(), static_cast<bool>(_forward));
+                  it->second.fwdCount, pkt.origin, it->second.targets.size(), static_cast<bool>(_forward));
     for (uint32_t target : it->second.targets)
     {
         if (target != pkt.channel && _forward)

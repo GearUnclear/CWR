@@ -790,9 +790,10 @@ void NetworkClient::OnRawMagicMessage(int magic, const char* buffer, int bufferS
     }
     if (transfer.path.GetLength() == 0)
     {
-        LOG_WARN(Network,
-                 "[NMTTransferMission] rejected raw mission packet for unsafe mission file name '{}' transfer path '{}'",
-                 (const char*)_missionHeader.fileName, (const char*)packet.transferPath);
+        LOG_WARN(
+            Network,
+            "[NMTTransferMission] rejected raw mission packet for unsafe mission file name '{}' transfer path '{}'",
+            (const char*)_missionHeader.fileName, (const char*)packet.transferPath);
         return;
     }
     transfer.totSize = packet.totalSize;
@@ -988,9 +989,8 @@ void NetworkClient::RequestMissingMissionRawSegments()
 
         const DWORD delay = Poseidon::GetNetworkMissionBulkRetransmitDelayMs(
             firstMissing, missingCount, _missionRawLastRequestFirstSegment, _missionRawLastRequestSegmentCount);
-        if (Poseidon::ShouldWaitForNetworkMissionBulkRetransmit(now, _missionRawFirstSegmentTime,
-                                                                _missionRawLastRequestTime, _missionRawLastSegmentTime,
-                                                                delay))
+        if (Poseidon::ShouldWaitForNetworkMissionBulkRetransmit(
+                now, _missionRawFirstSegmentTime, _missionRawLastRequestTime, _missionRawLastSegmentTime, delay))
         {
             return;
         }

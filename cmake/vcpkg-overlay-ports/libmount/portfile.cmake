@@ -25,6 +25,16 @@ vcpkg_list(SET options)
 if("nls" IN_LIST FEATURES)
     vcpkg_list(APPEND options "--enable-nls")
 else()
+    file(GLOB _gettext_m4
+        "/usr/share/gettext/m4/gettext.m4"
+        "/usr/share/gettext-*/m4/gettext.m4"
+        "/usr/share/aclocal/gettext.m4")
+    set(_aclocal_dirs "/usr/share/gettext/m4")
+    foreach(_m4 IN LISTS _gettext_m4)
+        get_filename_component(_dir "${_m4}" DIRECTORY)
+        set(_aclocal_dirs "${_dir}:${_aclocal_dirs}")
+    endforeach()
+    set(ENV{ACLOCAL_PATH} "${_aclocal_dirs}")
     set(ENV{AUTOPOINT} true) # true, the program
     vcpkg_list(APPEND options "--disable-nls")
 endif()

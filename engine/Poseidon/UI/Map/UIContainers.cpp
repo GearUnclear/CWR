@@ -1433,6 +1433,13 @@ bool ControlsContainer::SetFocus(ControlId& id, bool up, bool def)
         ctrl->OnSetFocus(up, def);
     }
     _indexFocused = id;
+    if (GEngine)
+    {
+        if (ctrl && ctrl->WantsTextInput())
+            GEngine->StartTextInput();
+        else
+            GEngine->StopTextInput();
+    }
     return true;
 }
 
@@ -1656,7 +1663,6 @@ Poseidon::ControllerUiScene Display::GetControllerUiScene() const
         case IDD_PASSWORD:
         case IDD_IP_ADDRESS:
         case IDD_PORT:
-        case IDD_MODS_FILTER:
         case IDD_LOGIN:
         case IDD_NEW_USER:
             scene.kind = Poseidon::ControllerSceneKind::TextEntry;

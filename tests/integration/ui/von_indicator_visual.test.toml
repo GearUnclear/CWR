@@ -1,4 +1,4 @@
-tags = ["exclusive", "headful", "ui"]
+tags = ["exclusive", "headful", "ui", "ci-host-blocked"]
 binary = "PoseidonGame"
 mission = "tests/integration/missions/aspect_overlays.Demo"
 timeout = 90

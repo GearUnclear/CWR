@@ -27,7 +27,9 @@
 #include <Poseidon/Foundation/Common/Win.h>
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Core/Profile/ProfileManager.hpp>
+#include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Foundation/Platform/GamePaths.hpp>
+#include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 #include <filesystem>
 #include <limits.h>
 #include <stdio.h>
@@ -165,10 +167,19 @@ void DisplayLogin::OnChildDestroyed(int idd, int exit)
                 int index = ctrl->GetCurSel();
                 if (index >= 0)
                 {
-                    const char* name = ctrl->GetText(index);
-                    ProfileManager::DeleteProfile(GamePaths::Instance().UserDir(), name);
+                    const std::string name = ctrl->GetText(index).Data();
+                    if (!ProfileManager::DeleteProfile(GamePaths::Instance().UserDir(), name))
+                        break;
+
+                    const bool activeDeleted = stricmp(name.c_str(), Glob.header.playerName) == 0;
                     ctrl->DeleteString(index);
                     ctrl->SetCurSel(0);
+                    if (activeDeleted)
+                    {
+                        const std::string activeName = ctrl->GetSize() > 0 ? ctrl->GetText(0).Data() : "";
+                        Glob.header.playerName = activeName.c_str();
+                        SaveActiveProfile(activeName);
+                    }
                 }
             }
             break;
@@ -661,7 +672,8 @@ bool DisplayNewUser::CanDestroy()
         if (!_edit || stricmp(name, _name) != 0)
         {
             std::string profileDir = ProfileManager::GetProfileDirPath(GamePaths::Instance().UserDir(), name);
-            if (std::filesystem::is_directory(profileDir))
+            std::error_code ec;
+            if (std::filesystem::is_directory(FilesystemPathFromUtf8(profileDir), ec))
             {
                 // player already exist
                 CreateMsgBox(MB_BUTTON_OK, LocalizeString(IDS_MSG_PLAYER_EXIST));

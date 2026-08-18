@@ -11,6 +11,7 @@ endif()
 
 set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Support/test_stubs.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Addon/test_config_replace.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Formats/Common/test_format_detector.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/UI/Locale/Stringtable/test_stringtable.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/UI/Locale/Stringtable/test_codepage_transcode.cpp
@@ -48,6 +49,7 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_network_predicate_parity.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_master_server_browser.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_net_transport_termination.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Network/test_net_server_teardown.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_complex.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_data.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Evaluator/test_evaluator_edge.cpp
@@ -103,6 +105,8 @@ set(FIXTURES_ROOT ${CMAKE_SOURCE_DIR}/tests/fixtures)
 add_custom_command(TARGET PoseidonCoreTests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures/pbo
     COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures/qstream
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures/config-replace
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${FIXTURES_ROOT}/config-replace $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures/config-replace
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${FIXTURES_ROOT}/config      $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${FIXTURES_ROOT}/xml         $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${FIXTURES_ROOT}/stringtable $<TARGET_FILE_DIR:PoseidonCoreTests>/fixtures
@@ -263,6 +267,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # World tests (batch-08)
     World/test_terrain.cpp
+    World/test_landscape_object_ids.cpp
     World/test_occlusion_contour.cpp
     World/test_occlusion_sphere_edge.cpp
     World/test_landscape_layout.cpp
@@ -467,6 +472,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_gamepad_page.cpp
     UI/test_gamepad_tuning_page.cpp
     UI/test_graphics_page.cpp
+    UI/test_html_body_text.cpp
     UI/test_html_text_wrap.cpp
     UI/test_kbm_page.cpp
     UI/test_meter_widget.cpp
@@ -476,6 +482,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_main_menu_layout.cpp
     UI/test_notebook_theme.cpp
     UI/test_optionsUI.cpp
+    UI/test_addon_content.cpp
     UI/test_profile_squad_audit.cpp
     UI/test_press_button_page.cpp
     UI/test_press_key_page.cpp
@@ -557,6 +564,11 @@ if(WIN32)
         version     # Version info
         comctl32    # Common controls
         legacy_stdio_definitions.lib  # Legacy CRT functions (swprintf, etc.)
+    )
+elseif(APPLE)
+    target_link_libraries(PoseidonTests PRIVATE
+        PoseidonGL33 Poseidon PoseidonOpenAL
+        pthread dl
     )
 else()
     target_link_libraries(PoseidonTests PRIVATE

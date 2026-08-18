@@ -90,9 +90,9 @@ int ResolveLegacyMenuCommand(const ParamEntry& entry)
     const RStringB raw = entry.GetValueRaw();
     const char* rawText = raw;
 
-#define MATCH_COMMAND(name)                                                                                            \
-    if (rawText && strcmp(rawText, #name) == 0)                                                                         \
-        return name
+#define MATCH_COMMAND(name)                     \
+    if (rawText && strcmp(rawText, #name) == 0) \
+    return name
     MATCH_COMMAND(CMD_SEPARATOR);
     MATCH_COMMAND(CMD_NOTHING);
     MATCH_COMMAND(CMD_HIDE_MENU);

@@ -854,29 +854,7 @@ void NetworkServer::OnMessage(int from, NetworkMessage* msg, NetworkMessageType 
             }
 
             transfer.path = Poseidon::NormalizeNetworkServerPlayerUploadPath(transfer.path, GetServerTmpDir(), from);
-            const Poseidon::NetworkPlayerUploadKind uploadKind =
-                Poseidon::ClassifyNetworkServerPlayerUploadPath(transfer.path, GetServerTmpDir(), from);
-            if (ReceiveFileSegment(transfer) > 0)
-            {
-                LOG_INFO(Network, "[NMTTransferFileToServer] completed receive from={} path='{}' bytes={} segments={}",
-                         from, (const char*)transfer.path, transfer.totSize, transfer.totSegments);
-                for (int i = 0; i < _players.Size(); i++)
-                {
-                    const NetworkPlayerInfo& peer = _players[i];
-                    if (peer.dpid == from || peer.dpid == _botClient)
-                    {
-                        continue;
-                    }
-                    if (uploadKind == Poseidon::NetworkPlayerUploadKind::Face)
-                    {
-                        TransferFace(peer.dpid, from);
-                    }
-                    else if (uploadKind == Poseidon::NetworkPlayerUploadKind::Sound)
-                    {
-                        TransferCustomRadio(peer.dpid, from);
-                    }
-                }
-            }
+            ReceiveFileSegment(transfer);
         }
         break;
         case NMTSetFlagOwner:
@@ -1705,8 +1683,9 @@ void NetworkServer::OnGameStateMessage(int from, NetworkMessage* msg, NetworkMes
             NET_ERROR(info);
             if (info && info->state >= NGSCreate)
             {
-                LOG_DEBUG(Network, "ClientReady received: player={} name='{}' requestedState={} previousState={} "
-                                   "serverState={} jip={}",
+                LOG_DEBUG(Network,
+                          "ClientReady received: player={} name='{}' requestedState={} previousState={} "
+                          "serverState={} jip={}",
                           from, (const char*)info->name, (int)gs.gameState, (int)info->state, (int)_state, info->jip);
                 if (gs.gameState == NGSPlay && info->state == NGSBriefing && _state >= NGSPlay)
                 {
@@ -2669,9 +2648,8 @@ void NetworkServer::OnMessagePlayerRole(int from, NetworkMessageType type, Netwo
 
     NetworkPlayerInfo* assignedInfo = GetPlayerInfo(from);
     const bool hasRole = FindPlayerRole(from) != nullptr;
-    if (assignedInfo &&
-        Poseidon::DelayedRoleShouldStartMissionCatchUp(acceptedDelayedRole, _state, assignedInfo->state, hasRole,
-                                                       NGSTransferMission, NGSBriefing))
+    if (assignedInfo && Poseidon::DelayedRoleShouldStartMissionCatchUp(acceptedDelayedRole, _state, assignedInfo->state,
+                                                                       hasRole, NGSTransferMission, NGSBriefing))
     {
         LOG_INFO(Network,
                  "Delayed role assignment for player {} at server state {}; sending mission catch-up "

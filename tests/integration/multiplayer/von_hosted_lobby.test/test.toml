@@ -2,7 +2,7 @@ data_dir = "packages/Demo"
 game_port = 0
 timeout = 75
 
-tags = ["headful", "network"]
+tags = ["headful", "network", "ci-host-blocked"]
 
 # Listen-server VoN regression: host creates a LAN game, a second client joins,
 # and repeated PTT bursts from the joiner must reach the host while still in the

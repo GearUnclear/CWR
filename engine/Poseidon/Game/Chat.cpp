@@ -1079,7 +1079,8 @@ class DisplayVoiceChat : public Display
     int _lastTransmitHealth = -1;
 };
 
-DisplayVoiceChat::DisplayVoiceChat(ControlsContainer* parent, bool pushToTalk) : Display(parent), _pushToTalk(pushToTalk)
+DisplayVoiceChat::DisplayVoiceChat(ControlsContainer* parent, bool pushToTalk)
+    : Display(parent), _pushToTalk(pushToTalk)
 {
     Load("RscDisplayVoiceChat");
     SetCursor(nullptr);

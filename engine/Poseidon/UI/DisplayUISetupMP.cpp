@@ -5,6 +5,7 @@
 #include <Poseidon/Core/PlayerMuteIgnore.hpp>
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
 #include <Poseidon/Game/Chat.hpp>
@@ -959,7 +960,10 @@ void DisplayMultiplayerSetup::OnLBDrop(float x, float y)
 
 // Client and server briefing, debriefing
 
-DisplayClientDebriefing::DisplayClientDebriefing(ControlsContainer* parent, bool animation) : base(parent, animation) {}
+DisplayClientDebriefing::DisplayClientDebriefing(ControlsContainer* parent, bool animation, bool disconnectOnly)
+    : base(parent, animation, disconnectOnly)
+{
+}
 
 void DisplayClientDebriefing::OnSimulate(EntityAI* vehicle)
 {
@@ -1561,12 +1565,9 @@ void DisplayMPPlayers::UpdatePlayerInfo()
     RString picture;
     if (squad && squad->picture.GetLength() > 0)
     {
-        picture = Poseidon::FindNetworkSquadPictureTmpPath(squad->nick, squad->picture, [](const RString& path)
-                                                           { return QIFStream::FileExists(path); });
-        if (picture.GetLength() > 0)
-        {
-            picture = RString("\\") + picture;
-        }
+        picture =
+            Poseidon::FindNetworkSquadPicturePath(Poseidon::GetUserDirectory(), squad->nick, squad->picture,
+                                                  [](const RString& path) { return Poseidon::FileExistsUtf8(path); });
     }
     ctrl = dynamic_cast<C3DStatic*>(GetCtrl(IDC_MP_SQ_PICTURE));
     if (ctrl)

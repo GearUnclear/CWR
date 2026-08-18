@@ -42,7 +42,6 @@ void DeleteDirectoryStructure(const char* name, bool deleteDir)
         {
             if ((info.attrib & _A_SUBDIR) != 0)
             {
-                // Do not recurse into the current and parent directory entries.
                 if (strcmp(info.name, ".") != 0 && strcmp(info.name, "..") != 0)
                 {
                     snprintf(buffer, sizeof(buffer), "%s%c%s", base, PATH_SEP, info.name);

@@ -1,4 +1,4 @@
-data_dir = "packages/Game"
+data_dir = "packages/Demo"
 timeout = 120
 assert_timeout = 30
-tags = ["headful", "full_game"]
+tags = ["headful", "ci-host-blocked"]

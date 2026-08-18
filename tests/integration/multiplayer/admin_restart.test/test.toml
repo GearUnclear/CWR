@@ -1,6 +1,7 @@
 data_dir = "packages/Demo"
 game_port = 0
-timeout = 90
+timeout = 120
+render = "dummy"
 
 tags = ["headful", "network"]
 

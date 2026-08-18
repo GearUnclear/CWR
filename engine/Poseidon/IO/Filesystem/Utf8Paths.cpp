@@ -1,6 +1,7 @@
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/IO/Filesystem/FileOps.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -8,10 +9,30 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/stat.h>
 #endif
 
 namespace Poseidon
 {
+
+std::filesystem::path FilesystemPathFromUtf8(const std::string& path)
+{
+#ifdef _WIN32
+    return std::filesystem::path(Utf8PathToWide(path.c_str()));
+#else
+    return std::filesystem::path(path);
+#endif
+}
+
+std::string FilesystemPathToUtf8(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+    return WidePathToUtf8(path.wstring().c_str());
+#else
+    return path.string();
+#endif
+}
 
 #ifdef _WIN32
 std::wstring Utf8PathToWide(const char* path)
@@ -127,6 +148,11 @@ bool CopyFileUtf8(const char* src, const char* dst, bool failIfExists)
     return ::CopyFileW(wideSrc.c_str(), wideDst.c_str(), failIfExists ? TRUE : FALSE) != FALSE;
 }
 
+bool RepairMissingFilePermissionsUtf8(const char* path)
+{
+    return FileExistsUtf8(path);
+}
+
 bool CreateDirectoryUtf8(const char* path)
 {
     const std::wstring widePath = Utf8PathToWide(path);
@@ -153,6 +179,17 @@ bool FileExistsUtf8(const char* path)
     }
     const DWORD attrs = ::GetFileAttributesW(widePath.c_str());
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+std::FILE* OpenFileUtf8(const char* path, const char* mode)
+{
+    const std::wstring widePath = Utf8PathToWide(path);
+    const std::wstring wideMode = Utf8PathToWide(mode);
+    if (widePath.empty() || wideMode.empty())
+    {
+        return nullptr;
+    }
+    return ::_wfopen(widePath.c_str(), wideMode.c_str());
 }
 
 std::vector<char> ReadFileUtf8(const char* path)
@@ -228,11 +265,55 @@ std::vector<DirectoryEntryUtf8> ListDirectoryEntriesUtf8(const char* dir)
 
 bool CopyFileUtf8(const char* src, const char* dst, bool failIfExists)
 {
+    if (!src || !src[0] || !dst || !dst[0])
+    {
+        return false;
+    }
+
+    LocalPath(nativeSrc, src);
+    LocalPath(nativeDst, dst);
+    char resolvedSrc[MaxFileName];
+    if (!ResolveFilePath(nativeSrc, resolvedSrc, sizeof(resolvedSrc)))
+    {
+        return false;
+    }
+
+    std::filesystem::path destination(nativeDst);
+    char resolvedDst[MaxFileName];
+    if (ResolveFilePath(nativeDst, resolvedDst, sizeof(resolvedDst)))
+    {
+        destination = resolvedDst;
+    }
+    else if (const std::filesystem::path parent = destination.parent_path();
+             !parent.empty() && ResolveFilePath(parent.string().c_str(), resolvedDst, sizeof(resolvedDst)))
+    {
+        destination = std::filesystem::path(resolvedDst) / destination.filename();
+    }
+
     std::error_code ec;
     const auto options =
         failIfExists ? std::filesystem::copy_options::none : std::filesystem::copy_options::overwrite_existing;
-    return std::filesystem::copy_file(std::filesystem::path(src ? src : ""), std::filesystem::path(dst ? dst : ""),
-                                      options, ec);
+    return std::filesystem::copy_file(std::filesystem::path(resolvedSrc), destination, options, ec);
+}
+
+bool RepairMissingFilePermissionsUtf8(const char* path)
+{
+    LocalPath(nativePath, path ? path : "");
+    char resolvedPath[MaxFileName];
+    if (!ResolveFilePath(nativePath, resolvedPath, sizeof(resolvedPath)))
+    {
+        return false;
+    }
+    struct stat info{};
+    if (stat(resolvedPath, &info) != 0 || !S_ISREG(info.st_mode))
+    {
+        return false;
+    }
+    if ((info.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO)) != 0)
+    {
+        return true;
+    }
+    return chmod(resolvedPath, S_IRUSR | S_IWUSR) == 0;
 }
 
 bool CreateDirectoryUtf8(const char* path)
@@ -250,6 +331,11 @@ bool FileExistsUtf8(const char* path)
 {
     std::error_code ec;
     return std::filesystem::is_regular_file(std::filesystem::path(path ? path : ""), ec);
+}
+
+std::FILE* OpenFileUtf8(const char* path, const char* mode)
+{
+    return std::fopen(path, mode);
 }
 
 std::vector<char> ReadFileUtf8(const char* path)

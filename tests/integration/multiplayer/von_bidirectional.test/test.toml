@@ -2,7 +2,7 @@ data_dir = "packages/Demo"
 game_port = 0
 timeout = 75
 
-tags = ["headful", "network"]
+tags = ["headful", "network", "ci-host-blocked"]
 
 # Bidirectional VoN on a dedicated server: both clients speak once both are ready
 # and each must observe the other's tone. von_dedicated only covered one

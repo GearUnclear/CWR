@@ -2,6 +2,7 @@
 #include <Poseidon/Network/NetTransportNetInternal.hpp>
 #include <Poseidon/Network/NetTransportClientVoiceInit.hpp>
 #include <Poseidon/Network/NetTransportPlayerValidationPolicy.hpp>
+#include <Poseidon/Network/NetServerPeerTeardown.hpp>
 #include <Poseidon/Network/NetTransportServerVoiceRouting.hpp>
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -1076,7 +1077,7 @@ void NetClient::SetVoiceChannel(int channel)
     {
         c->setChatChannel(NetTransportChatChannelToVoN(channel));
         LOG_DEBUG(Network, "VoN# net SetVoiceChannel game={} von={}", channel,
-                 static_cast<int>(NetTransportChatChannelToVoN(channel)));
+                  static_cast<int>(NetTransportChatChannelToVoN(channel)));
     }
     else
     {
@@ -2043,13 +2044,18 @@ NetServer::~NetServer()
     // Now stop UDP threads and clean up the serverPeer.
     // The serverPeer is global/static, so we need to explicitly clean it up
     // to prevent threads from running after this NetServer instance is destroyed.
+    // serverPeer->close() joins the UDP listener, which itself takes poolLock
+    // inside ctrlReceive; joining under poolLock deadlocks, so the join runs with
+    // poolLock released. serverPeer stays set across the join so a late
+    // ctrlReceive resolves the existing peer instead of creating a fresh one.
     poolLock.enter();
-    if (serverPeer)
+    RefD<NetPeer> localServerPeer = serverPeer;
+    if (localServerPeer)
     {
-        serverPeer->close(); // Stops UDP listener/sender threads via poThreadJoin
+        JoinServerPeerWithoutPoolLock(poolLock, [&]() { localServerPeer->close(); });
         if (pool)
         {
-            pool->deletePeer(serverPeer); // Remove from pool
+            pool->deletePeer(localServerPeer); // Remove from pool
         }
         serverPeer = nullptr; // Reset global so next attempt creates fresh peer
     }
@@ -2360,7 +2366,7 @@ void NetServer::SetTransmitTargets(int from, AutoArray<int, MemAllocSA>& to, int
     else
         LOG_WARN(Network, "VoN# srv SetTransmitTargets from={} NO-SERVER", from);
     LOG_DEBUG(Network, "VoN# srv SetTransmitTargets from={} gameCh={} vonCh={} targets={}", from, channel,
-             static_cast<int>(NetTransportChatChannelToVoN(channel)), to.Size());
+              static_cast<int>(NetTransportChatChannelToVoN(channel)), to.Size());
 }
 
 void NetServer::ProcessVoicePlayers(CreateVoicePlayerCallback* callback, void* context)
@@ -2745,8 +2751,8 @@ bool NetServer::GetPlayerHostIP(int player, char* buffer, int bufferSize)
     }
     struct sockaddr_in distant;
     ((NetChannel*)ch)->getDistantAddress(distant);
-    snprintf(buffer, bufferSize, "%u.%u.%u.%u", (unsigned)IP4(distant), (unsigned)IP3(distant),
-             (unsigned)IP2(distant), (unsigned)IP1(distant));
+    snprintf(buffer, bufferSize, "%u.%u.%u.%u", (unsigned)IP4(distant), (unsigned)IP3(distant), (unsigned)IP2(distant),
+             (unsigned)IP1(distant));
     buffer[bufferSize - 1] = 0;
     return true;
 }

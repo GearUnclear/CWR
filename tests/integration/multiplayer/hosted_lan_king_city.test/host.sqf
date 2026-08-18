@@ -3,10 +3,10 @@ triClick 105
 triAssertEq [(triDisplay), 8]
 triInvokeButton 104
 triAssertEq [(triDisplay), 17]
-triAssertEq [triSelectListByData [101, "Abel"], true]
+triAssertEq [triSelectListByData [101, "demo"], true]
 triWait 1000
-triAssertEq [triSelectList [102, 10], true]
-triAssertEq [(triListSel 102), 10]
+triAssertEq [triSelectList [102, 2], true]
+triAssertEq [(triListSel 102), 2]
 triScreenshot "host_selected_kingcity"
 triInvokeButton 1
 triAssertEq [(triDisplay), 70]

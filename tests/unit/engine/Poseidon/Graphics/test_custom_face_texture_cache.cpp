@@ -95,9 +95,8 @@ TEST_CASE("Texture bank flush drops unreferenced custom face cache entries", "[G
     REQUIRE(second);
     const PackedColor secondColor(second->GetColor());
 
-    const bool colorChanged =
-        secondColor.R8() != firstColor.R8() || secondColor.G8() != firstColor.G8() ||
-        secondColor.B8() != firstColor.B8();
+    const bool colorChanged = secondColor.R8() != firstColor.R8() || secondColor.G8() != firstColor.G8() ||
+                              secondColor.B8() != firstColor.B8();
     CHECK(colorChanged);
 
     std::filesystem::remove_all(face.parent_path());
@@ -106,8 +105,7 @@ TEST_CASE("Texture bank flush drops unreferenced custom face cache entries", "[G
 TEST_CASE("GL33 texture flush keeps world cleanup semantics", "[Graphics][CustomFace][GL33]")
 {
     const std::filesystem::path source =
-        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33" /
-        "TextureBankGL33_Cache.cpp";
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "PoseidonGL33" / "TextureBankGL33_Cache.cpp";
     const std::string body = ExtractFunctionBody(ReadTextFile(source), "void TextBankGL33::FlushTextures()");
 
     CHECK(body.find("Compact();") != std::string::npos);
@@ -117,9 +115,8 @@ TEST_CASE("GL33 texture flush keeps world cleanup semantics", "[Graphics][Custom
 
 TEST_CASE("Copied network unit info preserves player id before custom face assignment", "[Network][CustomFace]")
 {
-    const std::filesystem::path source =
-        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" / "Network" /
-        "NetworkClientOnMessage.cpp";
+    const std::filesystem::path source = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" /
+                                         "Network" / "NetworkClientOnMessage.cpp";
     const std::string body = ExtractFunctionBody(ReadTextFile(source), "void NetworkClient::OnMessage");
     const size_t copyCase = body.find("case NMTCopyUnitInfo:");
     REQUIRE(copyCase != std::string::npos);
@@ -129,4 +126,19 @@ TEST_CASE("Copied network unit info preserves player id before custom face assig
     REQUIRE(remotePlayer != std::string::npos);
     REQUIRE(setFace != std::string::npos);
     CHECK(remotePlayer < setFace);
+}
+
+TEST_CASE("Created network units assign custom faces with the transferred player id", "[Network][CustomFace]")
+{
+    const std::filesystem::path source =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" / "AI" / "AIUnit.cpp";
+    const std::string body = ExtractFunctionBody(ReadTextFile(source), "TMError AIUnit::TransferMsg");
+    const size_t createCase = body.find("case NMCCreate:");
+    REQUIRE(createCase != std::string::npos);
+    const size_t transferPlayerId = body.find("IdxTransfer(indices->playerId, playerId)", createCase);
+    const size_t setFace = body.find("SetFace(info._face, PlayerIdentityKey{info._name, playerId})", createCase);
+
+    REQUIRE(transferPlayerId != std::string::npos);
+    REQUIRE(setFace != std::string::npos);
+    CHECK(transferPlayerId < setFace);
 }

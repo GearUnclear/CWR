@@ -1,13 +1,14 @@
-data_dir = "packages/Game"
+data_dir = "packages/Demo"
 game_port = 0
 timeout = 180
 tags = ["headful", "network", "exclusive"]
 
 [[instances]]
-extra_args = ["--no-strict", "--log-format", "jsonl", "--config", "${output}/server/user/server.cfg"]
+extra_args = ["--no-strict", "--log-format", "jsonl", "--mp-auto-start", "2", "--config", "${output}/server/user/server.cfg"]
 name = "server"
 type = "server"
-use_mission = false
+use_mission = true
+mission = "tests/integration/multiplayer/stock_paintball_dedicated_start.test/custom_paintball.Demo"
 copy_files = [
   { source = "server.cfg", target = "server.cfg" },
 ]

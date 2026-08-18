@@ -82,6 +82,13 @@ std::string UITestEngine::GetControlText(IControl* ctrl)
         return {};
     if (ctrl->HasSemanticTestText())
         return std::string((const char*)ctrl->GetSemanticTestText());
+    return GetControlDisplayText(ctrl);
+}
+
+std::string UITestEngine::GetControlDisplayText(IControl* ctrl)
+{
+    if (!ctrl)
+        return {};
 
     // Try each known text-bearing type (RString has operator const char*)
     if (auto* b = dynamic_cast<CButton*>(ctrl))
@@ -112,22 +119,25 @@ std::string UITestEngine::GetHtmlText(IControl* ctrl)
     if (!html)
         return {};
 
-    // HTML controls (mission/overview preview) carry their text in parsed
-    // section fields; concatenate them so a test can read the rendered content
-    // (e.g. assert the wizard overview switched to the selected template).
+    return GetHtmlText(*html);
+}
+
+std::string UITestEngine::GetHtmlText(const CHTMLContainer& html)
+{
+    const int currentSection = html.CurrentSection();
+    if (currentSection < 0 || currentSection >= html.NSections())
+        return {};
+
     std::string text;
-    for (int s = 0; s < html->NSections(); ++s)
+    const HTMLSection& section = html.GetSection(currentSection);
+    for (int f = 0; f < section.fields.Size(); ++f)
     {
-        const HTMLSection& section = html->GetSection(s);
-        for (int f = 0; f < section.fields.Size(); ++f)
-        {
-            const char* fieldText = section.fields[f].text;
-            if (!fieldText || !*fieldText)
-                continue;
-            if (!text.empty())
-                text += ' ';
-            text += fieldText;
-        }
+        const char* fieldText = section.fields[f].text;
+        if (!fieldText || !*fieldText)
+            continue;
+        if (!text.empty())
+            text += ' ';
+        text += fieldText;
     }
     return text;
 }

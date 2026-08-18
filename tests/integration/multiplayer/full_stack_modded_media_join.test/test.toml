@@ -3,8 +3,6 @@ data_dir = "packages/Demo"
 game_port = 0
 timeout = 90
 
-tags = ["headful", "ci-host-blocked"]
-
 [[services]]
 name = "master"
 type = "master-server"
@@ -17,7 +15,7 @@ id = "fixturemod"
 name = "Fixture Mod"
 version = "1.2.3"
 app = "CWR"
-actver = 303
+actver = 305
 folder = "@fixturemod"
 source = "tests/fixtures/mods/@fixturemod"
 description = "Tiny downloadable fixture mod for Trident modded-server tests."
@@ -31,8 +29,6 @@ interval_secs = 1
 timeout_ms = 500
 prune_max_age_secs = 60
 
-# Passworded AND modded dedicated server: the hardest join stack the game
-# supports in one row.
 [[instances]]
 name = "dedicated"
 type = "server"

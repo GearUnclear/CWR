@@ -1,14 +1,14 @@
 triSetLanguage "English"
 
 triAssertMissionPlayable
-triSetView [9814.8, 29.5, 3972.6, 1.0, -0.25, 0.0]
+triSetView [6706.5, 85.68, 5408.9, 1.0, -0.25, 0.0]
 triSimFrames 60
 triScreenshot "01_ground_clearance"
 
-// packages@3eeaa7e started this player in the wrong low/crouched visual state:
-// this lower-leg sample was terrain-bright (~200 max channel) instead of the
-// dark standing soldier silhouette (~14 max channel).
-triAssertLt [(triGetPixelMaxChannel [0.550, 0.821]), 80]
+// A player stuck in a low/crouched visual state makes this body-silhouette
+// sample terrain-bright (~110 max channel) instead of the dark standing
+// soldier silhouette (~46 max channel).
+triAssertLt [(triGetPixelMaxChannel [0.500, 0.800]), 80]
 
 triAssertGt [triPlayerGroundClearance, -0.05]
 triAssertLt [triPlayerGroundClearance, 0.50]

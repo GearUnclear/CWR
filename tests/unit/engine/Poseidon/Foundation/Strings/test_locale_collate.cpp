@@ -47,7 +47,6 @@ TEST_CASE("FoldCompareUtf8 is case-insensitive with a stable accent tie-break", 
 
 // CollateUtf8 uses OS collation when available and the fold otherwise; the "ČSLA is
 // not last" invariant must hold either way, so it is safe to assert on any platform.
-// (Under the old byte/stricmp sort, ČSLA's lead byte 0xC4 sorted after 'Z' -> last.)
 TEST_CASE("CollateUtf8 keeps CSLA in the C group on any platform", "[locale][collate]")
 {
     CHECK(CollateUtf8(kCsla, "Bravo") > 0);
@@ -58,4 +57,13 @@ TEST_CASE("CollateUtf8 keeps CSLA in the C group on any platform", "[locale][col
     CHECK(CollateUtf8("apple", "banana") < 0);
     CHECK(CollateUtf8("banana", "apple") > 0);
     CHECK(CollateUtf8("mod", "mod") == 0);
+}
+
+TEST_CASE("ContainsFoldedUtf8 ignores case and Latin diacritics", "[locale][search]")
+{
+    CHECK(ContainsFoldedUtf8(kCsla, "CSLA"));
+    CHECK(ContainsFoldedUtf8(kCsla, "csla"));
+    CHECK(ContainsFoldedUtf8(kSkoda, "skoda"));
+    CHECK(ContainsFoldedUtf8(kCafeAccent, "CAFE"));
+    CHECK_FALSE(ContainsFoldedUtf8(kCsla, "CLA"));
 }

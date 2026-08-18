@@ -55,8 +55,14 @@ TEST_CASE("Legacy MP version row keeps columns aligned after an unquoted French 
     REQUIRE(std::string(Poseidon::LocalizeString(versionMessageId).Data()) == "Czech version");
 }
 
-TEST_CASE("MP version rejection message follows Czech language selection", "[ui][mp][localization]")
+TEST_CASE("MP version rejection message follows Czech language selection", "[ui][mp][localization][GameData]")
 {
-    SECTION("Game") { CheckMpVersionMessage("Game"); }
-    SECTION("Demo") { CheckMpVersionMessage("Demo"); }
+    SECTION("Game")
+    {
+        CheckMpVersionMessage("Game");
+    }
+    SECTION("Demo")
+    {
+        CheckMpVersionMessage("Demo");
+    }
 }
