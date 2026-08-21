@@ -42,14 +42,18 @@ items:
     title: "Upstream Bohemia source baseline"
     phase: foundation
     status: done
-    commits: [ea77e57, 366f95f, fdc9596, 2be695d]
+    commits: [ea77e57, 366f95f, fdc9596, 2be695d, a15f184, ffc6183, 3ab0930]
     summary: >
       Bohemia's public CWA source release (ea77e57, 2026-06-22) plus the 3.01 drop
-      (fdc9596), absorbed into the guerrilla-mode branch by merge 2be695d.
+      (fdc9596), absorbed into the guerrilla-mode branch by merge 2be695d; the
+      3.03 (a15f184) and 3.05 (ffc6183) drops absorbed by subtree merge 3ab0930.
       Fork main = origin/main = 366f95f carries no overhaul work; guerrilla-mode
       is the de-facto trunk.
     log:
       - "guerrilla-mode branched from pre-3.01 366f95f; 3.01 came in by merge, not rebase."
+      - "2026-08-21: 3.03+3.05 synced via `git merge -Xsubtree=arma_CWR main` (post-reroot, upstream's tree maps to arma_CWR/). 21 conflicted files; the load-bearing calls: kept our deferred mod-config MERGE model over upstream 3.05's replace-base-outright semantics (a fixup mod must not wipe the vanilla roster; upstream's new test_config_replace.cpp rewritten to merge semantics), one unified MouseState::Update signature (our dtSec smoothing + upstream's non-4:3 aspect fix), both gamepad options kept (steering + reverseYStick, six-row tuning page), upstream's port of our 4WVR seekg fix taken verbatim (no double-application). Build 1109 targets green, unit suite 4049/4049 (two Studio ImGui tests flake under -j8, pass serially)."
+      - "3.05 upstream includes our CWR-CE PR 98 (4WVR empty islands), credited to GearUnclear - the fix round-tripped home."
+      - "Not yet runtime-verified after the sync: the @LoBo;@lobofixup mod stack against the new config-extra-after-mods ordering, and localized text for upstream's STR_DISP_OPT_CTL_GAMEPAD_REVERSE_Y keys (fallback strings in place)."
 
   - id: build-toolchain
     title: "Build toolchain + test rig verified"
