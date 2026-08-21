@@ -1601,12 +1601,14 @@ void Car::KeyboardPilot(AIUnit* unit, float deltaT)
     // centering gets the full mouse-path 2.0 flat — returning toward straight
     // is self-stabilizing, and slow centering is what caused the release/
     // counter-steer oscillation that made keyboard driving feel bad.
+    // Wind-up settled just above the vanilla rate by playtest (2026-08-21);
+    // the initial doubled rates turned in too hot.
     _turnWanted = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
     _mouseDirWanted = Direction();
 
     float slowTurn = 1 - asz * (1.0 / 15);
     saturateMax(slowTurn, 0);
-    _turnIncreaseSpeed = slowTurn * 1.0 + 0.4;
+    _turnIncreaseSpeed = slowTurn * 0.37 + 0.16;
     _turnDecreaseSpeed = 2;
 
     float maxTurnCoef = 1 - asz * (1.0 / 10);

@@ -1597,7 +1597,7 @@ void Motorcycle::KeyboardPilot(AIUnit* unit, float deltaT)
     float maxTurnCoef = 1 - asz * 0.03f;
     saturateMax(slowTurn, 0);
     saturateMax(maxTurnCoef, 0);
-    _turnIncreaseSpeed = slowTurn * 1.0f + 0.3f;
+    _turnIncreaseSpeed = slowTurn * 0.37f + 0.12f;
     _turnDecreaseSpeed = 2;
 
     // limit max turn based on speed

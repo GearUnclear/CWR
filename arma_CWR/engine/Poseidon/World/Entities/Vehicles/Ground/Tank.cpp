@@ -1867,10 +1867,9 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
     bool fullTurn = fabs(_thrustLWanted + _thrustRWanted) < 0.01f;
 
     // Mouse steering removed — keys are the only manual input.  estT is the
-    // heading-predictor lookahead (damping): the retired mouse path used 0.75
-    // against a proportional position command, keys used 0.25.  With bang-bang
-    // keys as the sole input it sits between the two so the hull doesn't hunt.
-    float estT = 0.5f;
+    // heading-predictor lookahead (damping); playtest (2026-08-21) settled on
+    // the vanilla keyboard value — the raised 0.5 made the hull turn in too hot.
+    float estT = 0.25f;
 
     if (!fullTurn)
     {
@@ -1892,9 +1891,10 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
 
     float slow = floatMax(0, 1 - fabs(ModelSpeed().Z()) * (1.0f / 20));
 
-    // Command authority raised from the old keyboard branch's (1 - slow*0.5):
-    // 0.5 rad at rest was half what the mouse path could ask for.
-    float factor = 1 - slow * 0.25f;
+    // Command authority tuned to ~72% of the vanilla keyboard branch's 0.5 rad
+    // at rest (0.36 rad): playtest (2026-08-21) found vanilla turned the hull
+    // in too hot once keys became the only steering input.
+    float factor = 1 - slow * 0.64f;
     float turnWanted = AngleDifference(curHeading + turnKey * factor, estHeading);
 
     // special case - tank moving fast and players wants to brake
