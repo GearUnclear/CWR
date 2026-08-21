@@ -128,19 +128,6 @@ TEST_CASE("MousePage: kind is Stepper for toggles, Slider for sensitivities, Act
     CHECK(p.RowKind(5) == OptionsScrollList::KindAction);  // Close
 }
 
-TEST_CASE("MousePage: Mouse DPI Off label uses shared localized option value", "[UI][MousePage]")
-{
-    LoadMainMenuStringtable();
-
-    TestableMousePage page;
-    auto& p = page.Provider();
-    OptionsScrollList::RowDef dpiRow = p.RowFor(4);
-    REQUIRE(dpiRow.options != nullptr);
-    REQUIRE(dpiRow.count == kMouseDpiPresetCount);
-    CHECK(std::string(dpiRow.options[0]) == "Off");
-    CHECK(std::string(dpiRow.options[1]) == "400");
-}
-
 TEST_CASE("MousePage: toggle rows round-trip through the InputSubsystem", "[UI][MousePage]")
 {
     MouseStateSnapshot snap;

@@ -12,7 +12,6 @@
 // contextControls.cfg through KbmPage.
 
 #include <Poseidon/UI/Options/ScrollListPage.hpp>
-#include <Poseidon/Input/MouseTuning.hpp>
 
 #include <array>
 #include <string>
@@ -67,12 +66,9 @@ class MousePage : public ScrollListPage
 
       private:
         void RefreshToggleTexts() const;
-        void RefreshDpiTexts() const;
 
         mutable std::array<std::string, 2> m_toggleText;
         mutable std::array<const char*, 2> m_toggleOptions{};
-        mutable std::array<std::string, kMouseDpiPresetCount> m_dpiText;
-        mutable std::array<const char*, kMouseDpiPresetCount> m_dpiOptions{};
     };
 
     MouseProvider m_mouse;

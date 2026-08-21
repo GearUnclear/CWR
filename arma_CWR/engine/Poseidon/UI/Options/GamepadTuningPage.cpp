@@ -49,6 +49,8 @@ const char* GamepadTuningPage::GamepadProvider::RowLabel(int row) const
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_ENABLED");
         case kRowSteering:
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_STEERING");
+        case kRowReverseYStick:
+            return LocalizeStringWithFallback("STR_DISP_OPT_CTL_GAMEPAD_REVERSE_Y", "Y-axis inversion");
         case kRowDeadzoneStick:
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_STICK_DEADZONE");
         case kRowDeadzoneTrigger:
@@ -68,6 +70,9 @@ const char* GamepadTuningPage::GamepadProvider::RowDescription(int row) const
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_ENABLED_DESC");
         case kRowSteering:
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_STEERING_DESC");
+        case kRowReverseYStick:
+            return LocalizeStringWithFallback("STR_DISP_OPT_CTL_GAMEPAD_REVERSE_Y_DESC",
+                                              "Invert vertical stick motion - pushing the stick forward looks down.");
         case kRowDeadzoneStick:
             return LocalizeString("STR_DISP_OPT_CTL_GAMEPAD_STICK_DEADZONE_DESC");
         case kRowDeadzoneTrigger:
@@ -88,6 +93,8 @@ OptionsScrollList::RowDef GamepadTuningPage::GamepadProvider::RowFor(int row) co
             return {602, m_toggleOptions.data(), 2};
         case kRowSteering:
             return {642, m_toggleOptions.data(), 2};
+        case kRowReverseYStick:
+            return {652, m_toggleOptions.data(), 2};
         case kRowDeadzoneStick:
             return {612, nullptr, -1};
         case kRowDeadzoneTrigger:
@@ -142,6 +149,8 @@ int GamepadTuningPage::GamepadProvider::RowValue(int row) const
             return GInput.gamepad.enabled ? 1 : 0;
         case kRowSteering:
             return GInput.gamepad.steering ? 1 : 0;
+        case kRowReverseYStick:
+            return GInput.gamepad.reverseYStick ? 1 : 0;
         case kRowDeadzoneStick:
             return GamepadTuningPage::DeadzoneToPercent(GInput.gamepad.deadzoneStick);
         case kRowDeadzoneTrigger:
@@ -166,6 +175,11 @@ void GamepadTuningPage::GamepadProvider::SetRowValue(int row, int value)
             if (value < 0 || value >= 2)
                 return;
             GInput.gamepad.steering = (value != 0);
+            return;
+        case kRowReverseYStick:
+            if (value < 0 || value >= 2)
+                return;
+            GInput.gamepad.reverseYStick = (value != 0);
             return;
         case kRowDeadzoneStick:
             GInput.gamepad.deadzoneStick = GamepadTuningPage::PercentToDeadzone(value);

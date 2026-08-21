@@ -128,10 +128,10 @@ GameValue TriGpadButton(const GameState* state, GameValuePar arg)
     // would otherwise wipe a direct GInput write before the consumer reads it.
     InputSubsystem::Instance().SetSyntheticStickButton(i, true);
     if (i == 0)
-        SDLInput_BufferControllerUiAction(
-            GWorld && GWorld->IsEditorControllerUiActive() ? ControllerUiAction::PrimaryClick
-                                                           : ControllerUiAction::Confirm,
-            true); // A -> confirm in menus, primary click in editor
+        SDLInput_BufferControllerUiAction(GWorld && GWorld->IsEditorControllerUiActive()
+                                              ? ControllerUiAction::PrimaryClick
+                                              : ControllerUiAction::Confirm,
+                                          true); // A -> confirm in menus, primary click in editor
     else if (i == 1)
     {
         if (GWorld && GWorld->GetCameraEffect())
@@ -404,6 +404,12 @@ GameValue TriSetVsync(const GameState* /*state*/, GameValuePar arg)
     LOG_INFO(Core, "[tri] triSetVsync {}", v);
     return GameValue("OK");
 }
+/// triTextInputActive - whether SDL's text-input/IME session is currently armed.
+GameValue TriTextInputActive(const GameState* /*state*/)
+{
+    return GameValue((GEngine && GEngine->IsTextInputActive()) ? 1.0f : 0.0f);
+}
+
 /// triPerfStats — frame-phase profiler rolling stats as a machine-readable
 /// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N".
 GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)

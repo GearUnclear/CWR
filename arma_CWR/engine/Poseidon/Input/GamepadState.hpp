@@ -24,6 +24,7 @@ struct GamepadState
     // JoystickPilot/thrust arbitration, stick axes stripped from steering
     // actions in driver contexts) while look/buttons/menus stay live.
     bool steering = true;
+    bool reverseYStick = false;
     float deadzoneStick = 0.21f;
     float deadzoneTrigger = 0.10f;
     float lookSensitivity = 1.0f;

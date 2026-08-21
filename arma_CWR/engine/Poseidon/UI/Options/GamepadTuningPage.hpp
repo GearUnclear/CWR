@@ -1,8 +1,8 @@
 #pragma once
 
-// Gamepad scalar settings page — Enable, Gamepad Steering, Stick Deadzone,
-// Trigger Deadzone, Look Sensitivity.  Sibling to MousePage; same lifecycle
-// (apply live, persist on Unmount via SaveKeys → gamepad.cfg).
+// Gamepad scalar settings page — Enable, Gamepad Steering, Y-Axis Inversion,
+// Stick Deadzone, Trigger Deadzone, Look Sensitivity.  Sibling to MousePage;
+// same lifecycle (apply live, persist on Unmount via SaveKeys → gamepad.cfg).
 
 #include <Poseidon/UI/Options/ScrollListPage.hpp>
 
@@ -39,10 +39,11 @@ class GamepadTuningPage : public ScrollListPage
         {
             kRowEnabled         = 0,
             kRowSteering        = 1, // pad may drive vehicles (steer/throttle)
-            kRowDeadzoneStick   = 2,
-            kRowDeadzoneTrigger = 3,
-            kRowLookSensitivity = 4,
-            kRowCount           = 5,
+            kRowReverseYStick   = 2,
+            kRowDeadzoneStick   = 3,
+            kRowDeadzoneTrigger = 4,
+            kRowLookSensitivity = 5,
+            kRowCount           = 6,
         };
 
         int RowCount() const override { return kRowCount; }
