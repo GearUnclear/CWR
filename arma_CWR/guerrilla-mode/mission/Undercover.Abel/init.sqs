@@ -3,16 +3,23 @@
 ; ----------------------------------------------------------------------------
 ;  A single-purpose sandbox for the deep-undercover layer. The native side
 ;  (ZoneRegistry + AlertMachine + UndercoverSystem, activated by
-;  CfgGuerrillaZones in description.ext) does all perception work; this file
-;  only supplies the script baseline the engine reads, dresses the town, and
-;  wires the player-facing feedback:
-;    1. cover baseline: gmUndercover = true + setCaptive true + no weapons;
-;    2. the fired-EH -> gmBreakUndercover (firing always blows cover to
-;       whoever currently knows you);
-;    3. props: an AK47 on the ground, a civilian Skoda, an East UAZ at a
+;  CfgGuerrillaZones in description.ext) does all perception work, and the
+;  campaign's OWN scripts/undercover.sqs (a byte-identical copy of the
+;  Guerrilla.* shared core, with its scripts/lib.sqs helper library) supplies
+;  the script-side cover policy: gmUndercover = true + setCaptive true at
+;  boot, the fired-EH -> gmBreakUndercover, and the advisory hint + diary
+;  line on the first compromise. This file only:
+;    1. seeds the script state undercover.sqs/lib.sqs read (GM_Z_* tuple
+;       constants, gmWarLevel, the gmEvtUcBroken queue + its one-line native
+;       handler) - the same names init.sqs of a Guerrilla campaign seeds -
+;       and strips the player's weapons (the campaign guerrilla stays armed;
+;       here you start as the unarmed civilian the rules are built around);
+;    2. props: an AK47 on the ground, a civilian Skoda, an East UAZ at a
 ;       checkpoint (the stolen-vehicle policy demo);
-;    4. scripted occupier presence IN town (CITY zones are never natively
+;    3. scripted occupier presence IN town (CITY zones are never natively
 ;       garrisoned - the Checkpoint outpost garrison of 6 is native);
+;    4. execs scripts/lib.sqs then scripts/undercover.sqs - and NOTHING else
+;       from the core, so the disguise layer is the only moving part;
 ;    5. self-actions (sling/unsling, status check, debug reset) + the HUD
 ;       status loop (hud.sqs).
 ;  DIALECT: SQS. A mid-line ; is a STATEMENT SEPARATOR, not a comment.
@@ -24,8 +31,31 @@ UC_BOOTED = true
 aP = player
 gmPlayer = player
 
-; script scalars the native undercover layer reads (warDetect = gmWarLevel/10)
+; ---- zone tuple index constants (the shape `gmZone <i>` returns; lib.sqs
+;      helpers read them) -------------------------------------------------------
+GM_Z_NAME    = 0
+GM_Z_TYPE    = 1
+GM_Z_OWNER   = 2
+GM_Z_GAR     = 3
+GM_Z_SUPPORT = 4
+GM_Z_INCOME  = 5
+GM_Z_HEAT    = 6
+GM_Z_MARKER  = 7
+GM_Z_POS     = 8
+GM_Z_CAPTURE = 9
+
+; script scalars the native undercover layer reads (warDetect = gmWarLevel/10);
+; gmUndercover itself is established by scripts/undercover.sqs below
 gmWarLevel = 1
+; lib.sqs helpers reference these rosters; seeded empty so a stray call is safe
+GM_GEAR_THRESHOLD = 25
+GM_GEAR_ITEMS     = []
+GM_GEAR_COUNT     = []
+GM_GEAR_UNLOCKED  = []
+GM_RESENT_ZONES   = []
+GM_RESENT_DUE     = []
+GM_RESENT_AMT     = []
+GM_RESENT_MAXPEND = 3
 
 ; ---- zone markers (the engine repaints only markers that already exist) -----
 UC_i = 0
@@ -39,15 +69,12 @@ UC_i = UC_i + 1
 goto "mkmarkers"
 #mkdone
 
-; ---- establish cover: an unarmed guerrilla passing as a civilian ------------
+; ---- an unarmed guerrilla passing as a civilian: the cover itself (captive +
+;      gmUndercover + fired-EH) is established by scripts/undercover.sqs -----
 removeAllWeapons aP
-aP setCaptive true
-gmUndercover = true
 
-; firing always blows the disguise to every group that currently knows you
-aP addEventHandler ["fired", {gmBreakUndercover "fired"}]
-
-; native first-compromise event -> queue (handlers cannot ~sleep; hud.sqs drains)
+; native first-compromise event -> queue (handlers cannot ~sleep; the one
+; consumer is scripts/undercover.sqs, exactly as in the campaign)
 gmEvtUcBroken = []
 gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
 
@@ -104,5 +131,14 @@ UC_a3 = aP addAction ["Check disguise", "act_status.sqs"]
 UC_a4 = aP addAction ["DEBUG: wipe compromise records", "act_forget.sqs"]
 UC_a5 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
 
+; ============================================================================
+;  LAUNCH: helpers first (undercover.sqs gates on @GM_LIB_READY), then THE
+;  campaign cover-policy script (establishes gmUndercover + captive, attaches
+;  the fired-EH, drains gmEvtUcBroken), then the readout
+; ============================================================================
+GM_LIB_READY = false
+[] exec "scripts/lib.sqs"
+@GM_LIB_READY
+[] exec "scripts/undercover.sqs"
 [] exec "hud.sqs"
 exit

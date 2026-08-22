@@ -30,6 +30,9 @@
 ;   gmEsc_slow       fast-tick counter toward the next slow recompute
 gmEsc_slowEvery = 6
 gmEsc_slow      = 0
+; last War Level seen by the ladder (journal edge detection; plain global,
+; serializes free)
+gmEsc_prevWL    = gmWarLevel
 
 ; ============================================================================
 ;  MAIN LOOP  (fast tick = Heat decay; slow sub-tick = War Level recompute)
@@ -61,5 +64,10 @@ if (gmEsc_pct >= 40) then {gmWarLevel = 3}
 if (gmEsc_pct >= 55) then {gmWarLevel = 4}
 if (gmEsc_pct >= 70) then {gmWarLevel = 5}
 if (gmEsc_pct >= 85) then {gmWarLevel = 6}
+
+; journal: record every War Level edge (native Journal, map Notes page)
+? gmWarLevel > gmEsc_prevWL : gmJournalLog format ["War Level rose to %1: the occupier now fields stronger forces.", gmWarLevel]
+? gmWarLevel < gmEsc_prevWL : gmJournalLog format ["War Level fell to %1.", gmWarLevel]
+gmEsc_prevWL = gmWarLevel
 
 goto "loop"

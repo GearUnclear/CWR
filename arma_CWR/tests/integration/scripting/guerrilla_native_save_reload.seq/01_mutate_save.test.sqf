@@ -30,6 +30,19 @@ gmWarLevel = 5
 GM_COMP_XP set [0, 12345]
 GM_GEAR_UNLOCKED = ["AK47"]
 
+// -- stamp sentinels: native field journal (Journal::Serialize, the map's
+//    Notes/Plan pages). The boot scripts already wrote the opening diary
+//    line and the starter objectives; add a distinctive entry + an objective
+//    flip + a status line through the command surface the managers use -----
+gsJ0 = gmJournalCount
+triAssertGe [gsJ0, 1]
+gmJournalLog "GNAT sentinel diary line"
+gmJournalObjective ["firstRecruit", "", "DONE"]
+gmJournalStatus ["GnatStatus", "stamped before save"]
+triAssertEq [gmJournalCount, gsJ0 + 1]
+triAssertEq [((gmJournalEntry gsJ0) select 1), "GNAT sentinel diary line"]
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "DONE"]
+
 // -- stamp sentinels: native zone-registry layer -------------------------------
 gmZoneSet [gsVil, "support", 55]
 gmZoneSet [gsOut, "income", 99]

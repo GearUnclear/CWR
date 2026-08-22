@@ -66,6 +66,7 @@ copying `mission.sqm`.
 | `UndercoverSystem` | *(new 2026-07-16; replaces the global binary cover break)* | per-observer undercover perception for the player subject (SP; self-disables without a real player): each occupier group independently resolves the disguised player's perceived side at the engine's target-tracking side-resolution sites, as civilian (`TCivilian`) / suspect (`TSideUnknown`, the AI investigates) / exposed (real side), from weapon state, facing, distance, visibility and that group's own compromise memory; compromise is a serialized flag on the group's `Target` record, permanent per group by default (`undercoverForgetSeconds=0` is the decay knob); `gmUndercover` + `setCaptive` stay the script-owned baseline and are never dropped on a break |
 | `GarrisonCache` | `spawning.sqs` (cache half) | occupier garrison distance-cache: integer reserve ↔ live groups across `cacheRadius` (+50 m despawn hysteresis), survivor write-back, officer-first groups (faction `officer` key), SENTRY/GUARD posture, reads script global `gmWarLevel` |
 | native persistence | `persistence.sqs` | zones, alert FSM, garrison bookkeeping and **event handlers** serialize; script globals always did (GGameState); `campaignLoaded` event replaces the GM_SAVED sentinel + poll |
+| `Journal` + `GuerrillaJournalPages` | *(new, no script ancestor)* | the field journal behind the map screen's Notes / Plan pages. `Game/Guerrilla/Journal` holds three plain tables (capped diary entries stamped "Day N HH:MM" from the clock + the script `gmDayCount`; keyed objectives ACTIVE/DONE/FAILED/HIDDEN; keyed status lines) fed only through `gmJournal*`; `UI/Guerrilla/GuerrillaJournalPages` is the renderer `DisplayMap::ReloadBriefingContent` calls whenever the ZoneRegistry is active: it appends to (or creates) the `Main` section (aliased `__BRIEFING`, the Notes tab) the campaign header, a live Situation block (treasury/manpower/War Level from the script globals, military zones held, towns risen, towns ready to rise, meters in progress, worst alert, hottest zone, cover state + witness count, fighters in the player's group, stash count, then the script status lines), the 10-topic field-manual index (`GM_MAN_*` pages, static player text) and the latest diary lines (full diary on `GM_LOG`); and to the `Plan` section (copied into `__PLAN` by `UpdatePlan`) the standing goal, two engine-computed objectives (hold every military zone / raise every town, with counts), the scripted objectives and the derived next steps (RED zone to break from, blown cover, towns ready, meters to finish, nearest occupier targets with garrison + distance, recruiting when HR is available, lie-low when Heat is high). Rebuilt on every map-key open (`DisplayMap::ResetHUD`, which `World::Simulate` calls on the UAMap toggle; the display itself is created once per mission by `DisplayMission::InitUI`), on a journal change while the map is open (revision compare in `OnSimulate`), on a Notes/Plan tab press and after an in-place load; serializes as `GuerrillaJournal` (save-gated on non-empty, `IsSubclass`-tolerant on load). No `briefing.html` is needed; an authored one is appended to, never replaced |
 | `TownFlags` | *(new, no script ancestor)* | one physical `FlagCarrier` pole per CITY zone flying the owner's flag (in-world counterpart of the flag-icon map marker): deterministic off-road placement (`GRoadNet::IsOnRoad` hard reject, 6 m clearance) scored toward high ground + town outskirts so the flag reads from outside town; texture = faction descriptor `flag` key > per-side default (`usa`/`ussr`/`fia` from `Flags.pbo`) > generic white flag; repainted on owner flip; placement + pole refs serialize (`GuerrillaFlags` subclass), the pole object rides the world's building serializer; a package without `FlagCarrier` degrades to markers-only (logged, non-fatal) |
 
 **Heat direction contract is now engine-enforced:** there is no direct `heat`
@@ -163,6 +164,21 @@ leaves it empty), `gmStashCount` (nular → scalar), `gmStash <i>` (→
 `[object, [x,y,z]]`, `[]` out of range). Registered stashes serialize
 (`GuerrillaStashes`) and, unlike the other gm* systems, work outside
 Guerrilla missions too.
+
+Journal (the map-screen Notes/Plan pages): `gmJournalLog "<text>"` (diary
+entry, stamped "Day N HH:MM" from the clock + `gmDayCount`; the diary keeps
+the newest 200), `gmJournalObjective [id, text, "ACTIVE"|"DONE"|"FAILED"|
+"HIDDEN"]` (upsert by id; `""` text keeps the existing text, so a state
+flip is `["firstZone", "", "DONE"]`), `gmJournalStatus [key, text]` (a
+"key: text" line in the Notes Situation block; `""` removes), and the
+queries `gmJournalCount` (nular), `gmJournalEntry <i>` (→ `[stamp, text]`,
+0 = oldest, `[]` out of range), `gmJournalObjectiveState "<id>"` (→ state
+name or `""`), `gmJournalStatusText "<key>"` (→ text or `""`), plus
+`gmIslandName` (nular → the world's CfgWorlds `description`, e.g. "Malden";
+the only sanctioned island-name source for script text). The engine never
+writes the diary itself: the managers do (see A.6); the engine-derived
+Situation / next-steps content is computed at render time and needs no
+script. All three tables serialize as `GuerrillaJournal`.
 
 Modernized evaluator (usable everywhere now): `compile`, `isNil`,
 `setVariable`/`getVariable` (objects), `nearestObjects`, `distance` on
@@ -307,7 +323,20 @@ mission/Guerrilla.Demo/
                        "fired" EH -> gmBreakUndercover + ADVISORY
                        undercoverBroken hint (gmUndercoverWitnesses)
     campaign.sqs       Save addAction (self-dispatching) + campaignLoaded
-                       reconciliation (companion handles, GM_PLAYER_GROUPS, action)
+                       reconciliation (companion handles, GM_PLAYER_GROUPS, action);
+                       journal: "campaign begins" (gmIslandName) / saved /
+                       restored diary lines
+    (journal writes)   every manager below also feeds the native Journal
+                       (gmJournalLog / gmJournalObjective / gmJournalStatus;
+                       A.3): capture = ready/lost/liberated lines + firstZone/
+                       firstTown objectives; qrf = QRF launch; undercover =
+                       cover blown; companions = promotion/death + the
+                       "Companions" status line (GM_fnCompStatus); loot =
+                       unlock + "Unlocked gear" status line (GM_fnLootStatus)
+                       + firstUnlock objective; escalation = War Level edges
+                       (gmEsc_prevWL); recruit = recruit/train + firstRecruit
+                       objective. No script renders anything: the map pages
+                       are native (UI/Guerrilla/GuerrillaJournalPages).
     economy.sqs        income tick (unchanged formulas; reads gmZone tuples)
     escalation.sqs     War Level ladder (unchanged) + Heat decay via gmZoneSet,
                        gated on native GREEN

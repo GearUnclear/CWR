@@ -38,6 +38,7 @@ no overhead, ordinary missions unaffected. The mission scripts are a thin
 | **AlertMachine** (native) | per-zone GREEN/YELLOW/RED FSM (knowsAbout bands, disengage window), last-known position, undercover-break detection, alert events | `engine/Poseidon/Game/Guerrilla/AlertMachine.*` |
 | **GarrisonCache** (native) | occupier garrison distance-cache (reserve ↔ live groups), officer-first spawn from faction data, survivor write-back, garrison events | `engine/Poseidon/Game/Guerrilla/GarrisonCache.*` |
 | **Native persistence** | zones/alert/garrison + registered event handlers serialize; `campaignLoaded` event fires after a load | the three `Serialize` impls + `World::Serialize` |
+| **Journal** (native) | the map screen's Notes / Plan pages: field manual, live Situation block, running diary, objectives + next steps; fed by the scripts through `gmJournal*`, serialized as `GuerrillaJournal` | `engine/Poseidon/Game/Guerrilla/Journal.*` + `UI/Guerrilla/GuerrillaJournalPages.*` |
 | **Mission scripts** (policy) | capture reaction (hold garrison), QRF + garrison posture, undercover establish/react, economy, War Level, loot/unlocks, recruiting, companions, Save UX | [`mission/Guerrilla.Demo/`](mission/Guerrilla.Demo/) |
 
 Scripts talk to the core through the `gm*` command surface (`gmZoneCount`,

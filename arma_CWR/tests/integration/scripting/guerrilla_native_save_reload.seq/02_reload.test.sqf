@@ -24,10 +24,25 @@ gsVil = gmZoneIndex "Village"
 //    pass from leftover state in the shared user dir) -------------------------
 triAssertEq [gmResources, 100]
 triAssertEq [((gmZone gsOut) select 2), gmOccupierSide]
+// the fresh boot's journal carries only what init wrote: no GNAT line, the
+// recruit starter objective still ACTIVE, no stamped status line
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "ACTIVE"]
+gsJFresh = gmJournalCount
 
 // -- restore phase 1's binary save from the shared UserDir/Saved/Tmp/gnat.fps -
 triAssertEq [(triLoadGame "gnat"), "OK"]
 triSimFrames 3
+
+// -- DIFF: native field journal (GuerrillaJournal subclass; entries,
+//    objectives and status lines by value) -----------------------------------
+triAssertGe [gmJournalCount, gsJFresh + 1]
+// scan for the sentinel line: campaign.sqs appends "Campaign restored from a
+// save." once it drains campaignLoaded, so the GNAT line need not be last
+gsJFound = false; gsJi = 0; while {gsJi < gmJournalCount} do {if (((gmJournalEntry gsJi) select 1) == "GNAT sentinel diary line") then {gsJFound = true}; gsJi = gsJi + 1}
+triAssertEq [(format ["%1", gsJFound]), "true"]
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "DONE"]
+triAssertEq [(gmJournalObjectiveState "firstZone"), "ACTIVE"]
+triAssertEq [(gmJournalStatusText "GnatStatus"), "stamped before save"]
 
 // -- DIFF: script-global layer -------------------------------------------------
 triAssertEq [gmResources, 777]

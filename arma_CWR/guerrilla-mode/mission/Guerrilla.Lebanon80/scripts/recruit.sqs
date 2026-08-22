@@ -72,6 +72,11 @@ gmCampIdx = "CAMP" call GM_fnZoneOfType
 ? gmCampIdx < 0 : exit
 gmCampPos = (gmZone gmCampIdx) select GM_Z_POS
 
+; journal: starter objective on the map's Plan page (native Journal; flips
+; DONE on the first recruit below). Set once per campaign - this boot code
+; never re-runs after a load.
+gmJournalObjective ["firstRecruit", "Recruit your first fighter at the Camp (1 HR)", "ACTIVE"]
+
 #loop
 ~GM_RECRUIT_POLL
 gmRecDist = (getPos aP) distance gmCampPos
@@ -146,6 +151,8 @@ gmRecList = [group aP] + GM_PLAYER_GROUPS; gmRecI = 0; gmRecPick = -1; while {gm
 gmManpower = gmManpower - gmRecCostHR
 gmResources = gmResources - gmRecCostR
 hint format ["Recruited %1.\nManpower %2 HR | Treasury %3 R", gmRecClass, gmManpower, gmResources]
+gmJournalLog format ["Recruited a new %1 at the Camp (%2 HR, %3 R left).", gmRecRole, gmManpower, gmResources]
+gmJournalObjective ["firstRecruit", "", "DONE"]
 goto "loop"
 
 ; ---- train the player's squad (skill bump, War-Level capped) -------------------
@@ -155,4 +162,5 @@ goto "loop"
 gmTrUnits = units (group aP); gmTrCap = 0.4 + (gmWarLevel * 0.05); if (gmTrCap > 1) then {gmTrCap = 1}; gmTrI = 0; while {gmTrI < (count gmTrUnits)} do {gmTrU = gmTrUnits select gmTrI; gmTrNew = (skill gmTrU) + GM_TRAIN_STEP; if (gmTrNew > gmTrCap) then {gmTrNew = gmTrCap}; gmTrU setSkill gmTrNew; gmTrI = gmTrI + 1}
 gmResources = gmResources - GM_TRAIN_COST_R
 hint format ["Squad trained (skill cap %1).\nTreasury %2 R", gmTrCap, gmResources]
+gmJournalLog format ["Squad trained at the Camp (skill cap %1, %2 R left).", gmTrCap, gmResources]
 goto "loop"

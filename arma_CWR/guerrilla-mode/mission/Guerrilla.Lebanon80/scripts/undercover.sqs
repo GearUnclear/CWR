@@ -45,4 +45,6 @@ aP addEventHandler ["fired", {gmBreakUndercover "fired"}]
 ? (count gmEvtUcBroken) < 1 : goto "loop"
 GM_uBatch = gmEvtUcBroken + []; gmEvtUcBroken = []
 hint format ["Your face is known - %1 occupier group(s) can identify you. Garrisons that never saw it still take you for a civilian.", gmUndercoverWitnesses]
+; journal: the (once-per-campaign) first compromise goes into the diary
+gmJournalLog format ["Cover blown (%1): %2 occupier group(s) can now identify you.", (GM_uBatch select 0) select 0, gmUndercoverWitnesses]
 goto "loop"

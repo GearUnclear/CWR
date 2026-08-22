@@ -9,6 +9,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -1850,6 +1851,19 @@ LSError World::Serialize(ParamArchive& ar, int message)
         PARAM_CHECK(ar.Serialize("GuerrillaStashes", Guerrilla::StashRegistry::Instance(), 14))
     }
 
+    // Guerrilla field journal: diary entries, objectives and status lines
+    // behind the map's Notes / Plan pages.  Plain values; same
+    // missing-subclass tolerance as above (saves written before the journal
+    // existed load clean).  Save-gated on NON-EMPTY like the stashes.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::Journal::Instance().Clear();
+    }
+    if (ar.IsSaving() ? !Guerrilla::Journal::Instance().IsEmpty() : ar.IsSubclass("GuerrillaJournal"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaJournal", Guerrilla::Journal::Instance(), 14))
+    }
+
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))
     PARAM_CHECK(ar.Serialize("wantedOvercast", _wantedOvercast, 1))
     PARAM_CHECK(ar.Serialize("actualFog", _actualFog, 1))
@@ -1995,6 +2009,10 @@ LSError World::Serialize(ParamArchive& ar, int message)
         if (map)
         {
             map->UpdatePlan();
+            // Guerrilla journal pages are rebuilt from the loaded tables (a
+            // no-op outside Guerrilla Mode); covers the in-place load with
+            // the map display still alive
+            map->RefreshGuerrillaJournal();
         }
 
         LOG_DEBUG(Core, "LOAD: Final pass total {}ms", GetTickCount() - tFinal);

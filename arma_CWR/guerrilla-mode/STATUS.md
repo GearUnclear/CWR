@@ -34,6 +34,7 @@ reconciled against the engine source, not play-tested.)*
 | 19 | Persistent arms stashes (keep-when-empty holders) | engine `ResourceSupply::_keepWhenEmpty` + `StashRegistry` (`gmStash*`) | **native** | Flag serialized on the holder (presence-tolerant, old saves unchanged); registry rows serialize as `GuerrillaStashes`, save-gated on non-empty so it works outside Guerrilla missions; dead holders pruned on a 5 s tick |
 | 20 | Character outfit family: warrior vs civilian select, recruits auto-match (issue #25) | engine (`UI/Guerrilla` cycler idc 153 + `Game/Guerrilla/OutfitSelect` player substitution + `civTier[]`/`gmFactionCivTier`) + `scripts/` (`GM_OUTFIT_CIV` fold, `*Civ` key reads) | **native + script** | Locked at new-game (`gmSelOutfit`; WARRIOR ≡ publish-nothing); descriptor keys `playerClass{Warrior,Civ}`, `{recruitFighter,recruitSpecialist,companionClass,holdClass}Civ`, `civTier[]` — see ARCHITECTURE.md A.5; civilian hold squads are a `holdClassCiv` monoculture (no `tiersCiv[]` yet); saves round-trip free via the GameState bank |
 | 21 | Player-body BODY browser: pick any side's Man class as the player's body | engine (`UI/Guerrilla` cycler idc 155 + `GuerrillaListPlayerBodies` roster + `OutfitSelect::ResolvePlayerBodyClass`) | **native** | Class-driven follow-up to issue #25's vocabulary question, player-only (squads stay on the outfit family); publishes `gmSelPlayerClass` (exact classname, `(match outfit)` default publishes nothing); pick beats the outfit token, probe failure keeps the authored class; config side reads as that side at distance (accepted emergent, undercover untouched) — see ARCHITECTURE.md A.5 |
+| 22 | Field journal on the map screen: Notes / Plan pages (field manual, live Situation block, diary, objectives, next steps) | engine `Game/Guerrilla/Journal` (+ `JournalCommands.cpp`: `gmJournalLog` / `gmJournalObjective` / `gmJournalStatus` / `gmJournalCount` / `gmJournalEntry` / `gmJournalObjectiveState` / `gmJournalStatusText` / `gmIslandName`) + `UI/Guerrilla/GuerrillaJournalPages` (page renderer hooked into `DisplayMap::ReloadBriefingContent`) + `scripts/` diary/objective/status writes | **native + script** | No briefing.html needed: when `CfgGuerrillaZones` is active the map's Notes page (`Main`/`__BRIEFING`) is built natively on every map-key open (`DisplayMap::ResetHUD` seam; header, Situation block read live from ZoneRegistry/AlertMachine/UndercoverSystem/StashRegistry + the script economy globals, a 10-topic field manual on `GM_MAN_*` pages, the latest diary lines + a full `GM_LOG` page) and the Plan page gets the standing goal, the engine-derived next steps and the scripted objectives; the open map repaints on every journal change (revision compare) and on the Notes/Plan tab press; diary/objectives/status serialize as `GuerrillaJournal` (save-gated on non-empty, presence-tolerant on load, old saves unaffected); managers write the diary (capture arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits, save/restore) and four starter objectives; island name comes from `gmIslandName` (CfgWorlds description), never a literal |
 
 ## File map (current)
 
@@ -42,7 +43,8 @@ reconciled against the engine source, not play-tested.)*
 | `description.ext` | THE per-island data file: `CfgGuerrillaZones` (tuning + zone seed + `seedCities=1`) and `CfgGuerrillaFactions` (Demo: stock EAST/GUER classes) |
 | `init.sqs` | thin bootstrap: script-state seed, zone markers, 8 one-line native handler registrations, exec managers |
 | `scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
-| `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint |
+| `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint; diary lines for ready/lost/liberated + the `firstZone`/`firstTown` starter objectives |
+| *(engine)* `Game/Guerrilla/Journal.*`, `JournalCommands.cpp`, `UI/Guerrilla/GuerrillaJournalPages.*` | the field journal behind the map's Notes/Plan pages (row 22): diary / objectives / status tables (`gmJournal*`), the page renderer + field-manual text; `scripts/` only WRITE to it (campaign: begin/save/restore; qrf: QRF launch; undercover: cover blown; companions: promotion/death + `Companions` status line; loot: unlock + `Unlocked gear` status line + `firstUnlock` objective; escalation: War Level edges; recruit: recruit/train + `firstRecruit` objective) |
 | `scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
 | `scripts/undercover.sqs` | cover establish (kept for the whole campaign), fired-EH → `gmBreakUndercover`, advisory `undercoverBroken` hint (never drops captive) |
 | `scripts/campaign.sqs` | Save addAction + `campaignLoaded` consumer (companion/group reconciliation) |
@@ -138,9 +140,12 @@ Trident integration suite is **fully migrated to the `gm*` surface** (verified
 | `scripting/guerrilla_native_spawn.test` | `full_cwa` |
 | `scripting/guerrilla_native_undercover.test` | `full_cwa` |
 | `scripting/guerrilla_undercover_rules.test` | `full_cwa` |
-| `scripting/guerrilla_native_save_reload.seq` | `full_cwa`, `save-load` |
+| `scripting/guerrilla_native_save_reload.seq` | `full_cwa`, `save-load` (+ journal sentinels since 2026-08-22) |
+| `scripting/guerrilla_journal_pages.test` | `full_cwa` (opens the real map display: Notes/Plan/GM_LOG/GM_MAN_* pages, link routing, live repaint) |
 | `scripting/guerrilla_sinai_swap.test` | `full_cwa` + `lobo` (+ fixture gen + installed templates) |
 | `ui/guerrilla_new_game_e2e.test` | `full_cwa` + `lobo` (+ installed templates) |
+| `scripting/qrf_reference_mission.test` | `full_cwa` (boots `guerrilla-mode/mission/Qrf.Abel` directly: native garrison -> forced reveal -> YELLOW -> RED -> qrf.sqs convoy -> perception removed -> GREEN -> stand-down) |
+| `ui/main_menu/reference_mission_{showcase,undercover,qrf}.test` | `full_cwa` (+ installed templates; the main-menu direct-launch buttons idc 123/124/125) |
 
 ‡ These three bind to the `demo` world (folder suffix `.Demo`) and their player
 + resistance units are GUER classes (`SoldierGB`, …). The local remaster Demo
@@ -157,9 +162,19 @@ tests.
 Unit-level serialization round-trips exist for all five native systems
 (`test_zone_registry.cpp`, `test_alert_machine.cpp`, `test_garrison_cache.cpp`,
 `test_town_flags.cpp` (the latter also pins the flag-texture resolution chain
-and the off-road/high-ground spot picker), and `test_stash_registry.cpp`);
+and the off-road/high-ground spot picker), `test_stash_registry.cpp`, and
+`test_journal.cpp` (diary cap, objective/status upsert, save/load round-trip,
+plus the Notes/Plan/diary/manual page renderer against a parser-only HTML
+container and an authored-Main/Plan append case));
 `test_mission_script_core.cpp` enforces that every test mission's `init.sqs` +
-`scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core.
+`scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core, and
+that the `Qrf.*` and `Undercover.*` reference missions (own bootstrap,
+`scripts/` = `lib.sqs` + the one policy script `qrf.sqs` / `undercover.sqs`)
+carry a byte-identical SUBSET of it - each sandbox always runs the campaign's
+real policy script, never a re-implementation.
+`guerrilla_native_save_reload.seq` additionally stamps a diary line, an
+objective flip and a status line in phase 01 and diffs them after the
+cross-process reload in phase 02 (the `GuerrillaJournal` save block).
 
 Undercover (2026-07-16 rework) integration coverage:
 `guerrilla_native_undercover` rewritten to the new lifecycle (captive and

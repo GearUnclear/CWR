@@ -50,6 +50,15 @@ GM_TT_RANGE   = 150
 GM_TT_EVERY   = 12
 GM_cNextTT    = 0
 
+; ---- journal (native Journal behind the map's Notes/Plan pages) ---------------
+; Two starter objectives on the Plan page; this manager flips them DONE on
+; the first military capture / first town rising. Set once per campaign
+; (this boot code never re-runs after a load - the rows are native state
+; and serialize with the campaign). Diary lines for the capture arc follow
+; the hints below.
+gmJournalObjective ["firstZone", "Capture your first military zone: clear the garrison and hold the ground", "ACTIVE"]
+gmJournalObjective ["firstTown", "Raise your first town: build support, then stand in it with fighters", "ACTIVE"]
+
 #loop
 ~GM_CAP_TICK
 
@@ -83,6 +92,7 @@ GM_cI = 0
 #lev
 ? GM_cI >= (count GM_cLost) : goto "ldone"
 hint format ["We lost our hold on %1", (GM_cLost select GM_cI) select 1]
+gmJournalLog format ["Lost our hold on %1.", (GM_cLost select GM_cI) select 1]
 GM_cI = GM_cI + 1
 goto "lev"
 #ldone
@@ -92,6 +102,7 @@ GM_cI = 0
 #rev
 ? GM_cI >= (count GM_cReady) : goto "rdone"
 hint format ["%1 is ready to rise - get fighters into the town", (GM_cReady select GM_cI) select 1]
+gmJournalLog format ["%1 is ready to rise: support crossed the threshold.", (GM_cReady select GM_cI) select 1]
 GM_cI = GM_cI + 1
 goto "rev"
 #rdone
@@ -119,6 +130,11 @@ GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
 
 #cnotify
 hint format ["%1 liberated", GM_cEv select 1]
+; journal: diary line + the matching starter objective flips DONE
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalLog format ["%1 has risen: the town is ours.", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalObjective ["firstTown", "", "DONE"]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalLog format ["%1 liberated: the garrison is gone and a holding squad is in place.", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalObjective ["firstZone", "", "DONE"]
 GM_cI = GM_cI + 1
 goto "cev"
 #cdone

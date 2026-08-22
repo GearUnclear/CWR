@@ -1,8 +1,9 @@
 ; ============================================================================
 ;  hud.sqs  -  intro briefing + change-driven cover status readout
 ;  Polls gmUndercoverStatus / gmUndercoverWitnesses once a second and repaints
-;  the title line only on CHANGE (no hint-chime spam); drains the native
-;  first-compromise queue (gmEvtUcBroken) into a one-time hint.
+;  the title line only on CHANGE (no hint-chime spam). The first-compromise
+;  event (gmEvtUcBroken) is consumed by the campaign's scripts/undercover.sqs
+;  (advisory hint + diary line) - NOT here; one queue, one consumer.
 ; ============================================================================
 
 ~3
@@ -15,8 +16,6 @@ UC_lastW = -1
 
 #loop
 ~1
-? (count gmEvtUcBroken) > 0 : goto "broken"
-#resume
 UC_s = gmUndercoverStatus
 UC_w = gmUndercoverWitnesses
 ? (UC_s == UC_last) and (UC_w == UC_lastW) : goto "loop"
@@ -26,8 +25,3 @@ UC_lastW = UC_w
 ? UC_s == 1 : titleText ["COVER: SUSPECTED - an occupier group is checking you out (investigating, not shooting)", "PLAIN DOWN"]
 ? UC_s == 2 : titleText [format ["COVER: BLOWN - %1 occupier group(s) can identify you. Kill the witnesses or stay out of their sight; everyone else still sees a civilian.", UC_w], "PLAIN DOWN"]
 goto "loop"
-
-#broken
-UC_batch = gmEvtUcBroken + []; gmEvtUcBroken = []
-hint format ["FIRST COMPROMISE OF THE CAMPAIGN\n\nReason: %1\n\nZone Heat spiked where the witness stands. Your captive baseline SURVIVES - only the groups that saw it treat you as hostile.", (UC_batch select 0) select 0]
-goto "resume"

@@ -63,6 +63,7 @@
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -657,6 +658,10 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::TownFlags::Instance().InitMission();
     // Stash registry likewise resets per mission (no config of its own).
     Guerrilla::StashRegistry::Instance().InitMission();
+    // Field journal (diary / objectives / status lines behind the map's
+    // Notes and Plan pages) resets per mission; scripts fill it via
+    // gmJournal*.
+    Guerrilla::Journal::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {

@@ -1,0 +1,7 @@
+; debug action: drop yourself ~60 m short of the Outpost centre, on the
+; up-slope side - inside the 150 m zoneArea and in plain view of the
+; garrison, the quickest way to build REAL perception (no reveal cheat)
+QRF_tO = (gmZone QRF_ZO) select GM_Z_POS
+aP setPos [(QRF_tO select 0) - 55, (QRF_tO select 1) + 25, 0]
+hint "DEBUG: at the Outpost wire (60 m). You are inside the zone area and in the garrison's view - expect YELLOW as soon as someone looks your way, RED when they are sure or after 20 s."
+exit

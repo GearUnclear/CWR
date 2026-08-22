@@ -150,3 +150,55 @@ TEST_CASE("Guerrilla missions share a byte-identical script core", "[guerrilla][
         }
     }
 }
+
+// The reference missions (guerrilla-mode/mission/Qrf.<World> and
+// Undercover.<World>) are NOT full shared-core missions: their own init.sqs
+// boots only the one system on display. What they DO carry under scripts/
+// must be a byte-identical SUBSET of the canonical core (lib.sqs + the one
+// policy script: qrf.sqs / undercover.sqs), so each sandbox always exercises
+// the campaign's real policy script - never a drifted copy. Mission-local
+// files (hud.sqs, act_*.sqs, patrol.sqs) live at the mission root, outside
+// scripts/, and are deliberately out of scope here.
+TEST_CASE("Reference missions carry a byte-identical subset of the script core", "[guerrilla][missions]")
+{
+    const fs::path repo = RepoRoot();
+    const fs::path canonical = repo / "guerrilla-mode" / "mission" / "Guerrilla.Demo";
+    REQUIRE(fs::exists(canonical / "scripts"));
+    const std::vector<std::string> canonicalScripts = ListFileNames(canonical / "scripts");
+
+    struct Family
+    {
+        const char* prefix;
+        const char* policyScript; // the one core script the sandbox exists to run
+    };
+    const Family families[] = {
+        {"Qrf.", "qrf.sqs"},
+        {"Undercover.", "undercover.sqs"},
+    };
+
+    for (const Family& fam : families)
+    {
+        const std::vector<fs::path> missions = MissionDirsMatching(repo / "guerrilla-mode" / "mission", fam.prefix);
+        // at least the Abel slice of each family exists
+        INFO("family: " << fam.prefix);
+        REQUIRE(!missions.empty());
+
+        for (const fs::path& mission : missions)
+        {
+            INFO("mission: " << mission.string());
+            REQUIRE(fs::exists(mission / "scripts"));
+            const std::vector<std::string> carried = ListFileNames(mission / "scripts");
+            // the policy script and its helper library are the minimum
+            REQUIRE(std::find(carried.begin(), carried.end(), fam.policyScript) != carried.end());
+            REQUIRE(std::find(carried.begin(), carried.end(), "lib.sqs") != carried.end());
+            for (const std::string& script : carried)
+            {
+                INFO("script: " << script);
+                // every carried file is a canonical core file ...
+                REQUIRE(std::find(canonicalScripts.begin(), canonicalScripts.end(), script) != canonicalScripts.end());
+                // ... and byte-identical to it
+                RequireSameFile(canonical / "scripts" / script, mission / "scripts" / script);
+            }
+        }
+    }
+}

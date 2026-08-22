@@ -61,9 +61,18 @@ GM_LOOT_ANNOUNCED = GM_GEAR_UNLOCKED + []
 ;  HELPERS  (single-line code values; synchronous; GM_tmpL* scratch)
 ; ===========================================================================
 
+; --- GM_fnLootStatus( [] ) -> publish the unlock list as ONE journal status
+;   line ("Unlocked gear: AK47, AK47CZ" / "none yet") on the map's Notes page.
+;   Native Journal, serializes; called at boot and after every fresh unlock.
+GM_fnLootStatus = {GM_tmpLS = ""; GM_tmpLi = 0; while {GM_tmpLi < (count GM_GEAR_UNLOCKED)} do {if (GM_tmpLi > 0) then {GM_tmpLS = GM_tmpLS + ", "}; GM_tmpLS = GM_tmpLS + (GM_GEAR_UNLOCKED select GM_tmpLi); GM_tmpLi = GM_tmpLi + 1}; if (GM_tmpLS == "") then {GM_tmpLS = "none yet"}; gmJournalStatus ["Unlocked gear", GM_tmpLS]}
+[] call GM_fnLootStatus
+; starter objective on the Plan page; flips DONE on the first unlock below
+gmJournalObjective ["firstUnlock", "Loot enemy dead until a weapon unlocks for the cell", "ACTIVE"]
+
 ; --- GM_fnLootItem( [classname, amount] ) -> newCount -------------------------
-;   Tally through GM_fnBumpGear; toast the player once per fresh unlock.
-GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["Gear unlocked: %1 - now in infinite supply for your fighters.", GM_tmpLC]}; GM_tmpLN}
+;   Tally through GM_fnBumpGear; toast the player once per fresh unlock and
+;   record it (diary line + Unlocked-gear status line + objective).
+GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["Gear unlocked: %1 - now in infinite supply for your fighters.", GM_tmpLC]; gmJournalLog format ["Gear unlocked: %1 is now in infinite supply for the cell.", GM_tmpLC]; gmJournalObjective ["firstUnlock", "", "DONE"]; [] call GM_fnLootStatus}; GM_tmpLN}
 
 ; --- GM_fnLootKilledEH : the "killed" event-handler body -----------------------
 ;   _this = [deadUnit, killer]. Tally weapons AND magazines, strip the corpse.

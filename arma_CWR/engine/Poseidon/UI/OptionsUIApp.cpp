@@ -183,6 +183,7 @@ static constexpr int kLangRotationCount = sizeof(kLangRotation) / sizeof(kLangRo
 // bin/resource-extra.cpp does).
 constexpr int IDC_MAIN_REF_SHOWCASE = 123;
 constexpr int IDC_MAIN_REF_UNDERCOVER = 124;
+constexpr int IDC_MAIN_REF_QRF = 125;
 
 static const struct
 {
@@ -192,6 +193,7 @@ static const struct
 } kReferenceMissions[] = {
     {IDC_MAIN_REF_SHOWCASE, "SHOWCASE", "Showcase.Abel"},
     {IDC_MAIN_REF_UNDERCOVER, "UNDERCOVER", "Undercover.Abel"},
+    {IDC_MAIN_REF_QRF, "QRF", "Qrf.Abel"},
 };
 
 // Same two existence probes the Guerrilla new-game launch path uses

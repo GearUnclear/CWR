@@ -20,6 +20,8 @@
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -801,9 +803,13 @@ void DisplayMap::OnButtonClicked(int idc)
             ActivateSensor(ASAJuliet);
             break;
         case IDC_MAP_NOTES:
+            // Guerrilla Mode: the Situation block reads live values
+            // (treasury, meters, alert), so a tab press repaints it
+            RefreshGuerrillaJournal();
             SwitchBriefingSection("__BRIEFING");
             break;
         case IDC_MAP_PLAN:
+            RefreshGuerrillaJournal();
             SwitchBriefingSection("__PLAN");
             break;
         case IDC_MAP_GEAR:
@@ -1599,6 +1605,13 @@ void DisplayMap::OnSimulate(EntityAI* vehicle)
         // Populate gear and group tabs
         UpdateWeaponsInBriefing();
         UpdateUnitsInBriefing();
+    }
+    // Guerrilla Mode: a diary / objective / status write while the map is
+    // open repaints the journal pages (one integer compare per frame)
+    if (_briefing && Guerrilla::GuerrillaJournalActive() &&
+        Guerrilla::Journal::Instance().Revision() != _journalRevision)
+    {
+        RefreshGuerrillaJournal();
     }
     if (_map && _map->IsVisible())
     {

@@ -83,7 +83,13 @@ GM_fnCompEquip = {GM_tmpCo = GM_COMP_OBJ select _this; GM_tmpCl = GM_COMP_LOADOU
 GM_fnCompSpawn = {GM_tmpSi = _this select 0; GM_tmpSp = _this select 1; GM_tmpSo = objNull; if (GM_COMP_ALIVE select GM_tmpSi) then {GM_tmpSpre = units (group aP); GM_COMP_CLASS createUnit [GM_tmpSp, group aP, "", (GM_COMP_SKILL select GM_tmpSi), (GM_COMP_RANK select GM_tmpSi)]; GM_tmpSnew = (units (group aP)) - GM_tmpSpre; if ((count GM_tmpSnew) > 0) then {GM_tmpSo = GM_tmpSnew select 0}; GM_COMP_OBJ set [GM_tmpSi, GM_tmpSo]; if (not (isNull GM_tmpSo)) then {GM_COMP_PREVRATING set [GM_tmpSi, rating GM_tmpSo]; GM_tmpSi call GM_fnCompEquip}}; GM_tmpSo}
 
 ; -- GM_fnCompDie( i ) -> permadeath: flag dead forever, null the handle, mourn.
-GM_fnCompDie = {GM_COMP_ALIVE set [_this, false]; GM_COMP_OBJ set [_this, objNull]; hint format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]}
+GM_fnCompDie = {GM_COMP_ALIVE set [_this, false]; GM_COMP_OBJ set [_this, objNull]; hint format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]; gmJournalLog format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]; [] call GM_fnCompStatus}
+
+; -- GM_fnCompStatus( [] ) -> publish the roster as ONE journal status line
+;    ("Petra (CORPORAL), Ivan (fallen)") on the map's Notes page. Called at
+;    boot and after every promotion / death; native Journal, serializes.
+GM_fnCompStatus = {GM_tmpCS = ""; GM_tmpCi = 0; while {GM_tmpCi < (count GM_COMP_NAMES)} do {if (GM_tmpCi > 0) then {GM_tmpCS = GM_tmpCS + ", "}; GM_tmpCS = GM_tmpCS + (GM_COMP_NAMES select GM_tmpCi); if (GM_COMP_ALIVE select GM_tmpCi) then {GM_tmpCS = GM_tmpCS + " (" + (GM_COMP_RANK select GM_tmpCi) + ")"} else {GM_tmpCS = GM_tmpCS + " (fallen)"}; GM_tmpCi = GM_tmpCi + 1}; gmJournalStatus ["Companions", GM_tmpCS]}
+[] call GM_fnCompStatus
 
 ; ===========================================================================
 ;  MAIN TICK LOOP - O(roster) per tick; companions only ever exist in the
@@ -125,6 +131,8 @@ GM_COMP_RANK set [GM_cI, GM_COMP_RANKLADDER select GM_cNi]
 GM_COMP_SKILL set [GM_cI, GM_cNi call GM_fnCompSkillForRank]
 GM_cI call GM_fnCompApply
 hint format ["%1 promoted to %2.", GM_COMP_NAMES select GM_cI, GM_COMP_RANK select GM_cI]
+gmJournalLog format ["%1 promoted to %2.", GM_COMP_NAMES select GM_cI, GM_COMP_RANK select GM_cI]
+[] call GM_fnCompStatus
 goto "next"
 
 #spawn

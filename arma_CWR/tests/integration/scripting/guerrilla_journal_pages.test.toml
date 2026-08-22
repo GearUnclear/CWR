@@ -1,0 +1,8 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Boot + manager boot writes, then the real map display is opened and the
+# journal pages walked; give the map construction + repaints room.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]

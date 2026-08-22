@@ -1142,6 +1142,41 @@ items:
       - "2026-07-30: launch chain proven live by tri probes: click idc 124 -> IDD_MISSION (46), alive player, UC_BOOTED, gmZoneIndex Houdan >= 0. First e2e attempts were an environment goose chase: concurrent Claude sessions kill every PoseidonGame process as test cleanup (bare menu canary died at 25s; exit code -1, empty stderr, no WER = external TerminateProcess), and their parallel game instances slow world loads past the 240s timeout."
       - "2026-07-30: both e2e tests green 2/2 after appending triEndTest (menu-launch tests idle in-mission after the last assert; without the shutdown verb the runner waits out the full timeout and reports 'game didn't exit cleanly'). On a quiet machine with hot caches the whole menu boot -> click -> mission-init chain completes in ~1 s (mission init.sqs and ZoneRegistry run during the load, before the first rendered frame), so sub-second green runs are genuine, not false passes - verified against the runner's RUST_LOG=debug eval trace."
 
+  - id: qrf-reference-mission
+    title: "QRF reference mission: Qrf.Abel sandbox for the alert -> QRF chain + main-menu QRF button"
+    phase: phase-1.5
+    status: done
+    priority: 2
+    depends_on: [reference-missions-main-menu, engine-native-systems]
+    summary: >
+      Third human-playable test slice, sibling of Undercover.Abel: Qrf.Abel
+      (guerrilla-mode/mission/Qrf.Abel) isolates the occupier alert -> QRF
+      chain on the Houdan slope of Abel - a resistance Camp at the player
+      start (overwatch, ~66 m), an occupier Outpost (garrison 6) on the dirt
+      track 200 m below and a Depot (garrison 4) further down, all inside the
+      800 m cacheRadius so the native garrisons spawn at boot. It is HOOKED
+      INTO the real systems, not a re-implementation: scripts/lib.sqs +
+      scripts/qrf.sqs are byte-identical copies of the shared core (a new
+      subset-core case in test_mission_script_core.cpp pins every Qrf.*
+      template to that), driven by the native AlertMachine/GarrisonCache/
+      ZoneRegistry; only the bootstrap (init.sqs), the debug action menu
+      (status report, 30 s forced reveal, War Level cycle, garrison memory
+      wipe, recruit 3, teleports, god mode) and the HUD (change-driven title
+      line with per-zone alert/knowsAbout/garrison, QRF launch/arrival/
+      insertion/stand-down hints, map markers for stage/move/target + the
+      moving convoy) are mission-local. Wired like its siblings: idc 125 in
+      kReferenceMissions (UI/OptionsUIApp.cpp), install-missions.ps1 Qrf.*
+      prefix, the Classic package's local bin/resource-extra.cpp row
+      re-laid three-across, ui/main_menu/reference_mission_qrf e2e, and a
+      new scripting/qrf_reference_mission system test (boot -> garrison ->
+      reveal -> YELLOW -> RED -> convoy -> perception removed -> GREEN ->
+      stand-down) - the first Trident test that pins the QRF convoy itself
+      outside the Showcase chapter.
+    log:
+      - "2026-08-22: sited from PoseidonTools terrain objects abel.wrp --near surveys (track from Houdan's east gate ~[7121,6081] down to a dead end ~[7574,5892]; zone sites on open ground, player start on the 66 m slope)."
+      - "2026-08-22: Undercover.Abel brought onto the same contract - it had re-implemented the 4-line script policy (captive/gmUndercover/fired-EH/hint) in its own init.sqs; it now carries byte-identical scripts/lib.sqs + scripts/undercover.sqs and execs them (same hint + diary line as the campaign), hud.sqs no longer drains gmEvtUcBroken (one queue, one consumer), and the subset-core unit case covers both Qrf.* and Undercover.* families. ui/main_menu/reference_mission_undercover green after the rewire."
+      - "2026-08-22: verified - PoseidonTests [missions] 28/28 (new Qrf subset-core case), tri scripting/qrf_reference_mission + ui/main_menu/reference_mission_qrf 2/2 green in 47.6 s (the whole reveal -> RED -> convoy -> stand-down chain completes in ~45 s headless). First attempt failed twice for mechanical reasons, both fixed: the scripting test lacked triEndTest (game idled to the 420 s timeout), and a perl backslash-u escape had rewritten the Classic resource-extra.cpp button sounds to uiI_ok (strict mode made the missing wss fatal on click, exit 3)."
+
   - id: vehicle-controls-overhaul
     title: "Vehicle controls: mouse steering removed, permanent freelook in non-turret seats, gamepad-steering option"
     phase: phase-2
@@ -1211,6 +1246,37 @@ items:
     log:
       - "Plan 14 also names sub-day quick wins needing no new C++: flags, a curfew clock, one hand-placed checkpoint."
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
+
+  - id: guerrilla-journal
+    title: "Field journal: native Notes/Plan pages (manual, live situation, diary, objectives)"
+    phase: phase-2
+    status: done
+    depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
+    summary: >
+      The map screen's briefing notepad was empty in Guerrilla Mode (no
+      briefing.html, nothing written at runtime). Now a native Journal
+      (engine/Poseidon/Game/Guerrilla/Journal.* + JournalCommands.cpp: gmJournalLog /
+      gmJournalObjective / gmJournalStatus / gmJournalCount / gmJournalEntry /
+      gmJournalObjectiveState / gmJournalStatusText, plus the gmIslandName nular)
+      holds a capped diary, keyed objectives and keyed status lines, serialized as
+      the presence-tolerant GuerrillaJournal save block. UI/Guerrilla/
+      GuerrillaJournalPages.* renders, inside DisplayMap::ReloadBriefingContent
+      whenever CfgGuerrillaZones is active, the Notes page (campaign header, a live
+      Situation block from ZoneRegistry/AlertMachine/UndercoverSystem/StashRegistry +
+      the script economy globals, a 10-topic field manual on GM_MAN_* pages, latest
+      diary lines + a full GM_LOG page) and the Plan page (standing goal, two
+      engine-computed objectives with counts, scripted objectives, derived next
+      steps). Pages rebuild on every map-key open (DisplayMap::ResetHUD; the display is
+      created once per mission), on any journal change while open (revision
+      compare in OnSimulate), on the Notes/Plan tab press and after an in-place
+      load. The shared
+      scripts (byte-identical across all 8 mission copies) write the diary (capture
+      arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits,
+      save/restore), four starter objectives and the Companions / Unlocked-gear
+      status lines; init.sqs is unchanged.
+    log:
+      - "2026-08-22: `Journal::Log` had to be renamed AddEntry (Log is an engine macro). AddImage needs a texture loader, so the renderer takes useImages=false in the parser-only unit test and draws text bullets; in-game it reuses the stock mission_dot/done/uncomplete icons. GetHtmlText joins fields with a space while the formatter lays them adjacent, so the test helper collapses double spaces."
+      - "2026-08-22: verified: [guerrilla] unit lane 2710 assertions/128 cases green incl. the script-core parity test and test_journal.cpp (6 cases); Trident guerrilla_native_capture + guerrilla_native_save_reload.seq (extended with diary/objective/status sentinels across the cross-process reload) 2/2 green; install-missions.ps1 -IncludeWorld Sinai,Lebanon80 rerun. Stale ccache PCH objects (CRLF-era cache hits after the LF normalisation) had to be force-rebuilt with CCACHE_DISABLE=1 before anything compiled."
 
   # ---------------------------------------------------------------- phase 3
   - id: strategy-screen

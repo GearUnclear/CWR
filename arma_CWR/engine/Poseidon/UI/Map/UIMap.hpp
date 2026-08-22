@@ -387,6 +387,10 @@ public:
 	void AdjustMapVisibleRect();
 
 	void UpdatePlan();
+	// Guerrilla Mode: rebuild the briefing (journal Notes/Plan/diary/manual
+	// pages) from the current native state; keeps the open page.  No-op
+	// outside Guerrilla Mode (ZoneRegistry inactive).
+	void RefreshGuerrillaJournal();
 
 	virtual void SwitchBriefingSection(RString section);
 
@@ -400,6 +404,8 @@ public:
 protected:
     void RefreshLanguage();
     void ReloadBriefingContent(RString activeSection = RString());
+    // Journal::Revision() the briefing was last built from (Guerrilla Mode)
+    unsigned _journalRevision = 0;
     void UpdateMissionName();
     void LoadParams();
 	void SaveParams();
