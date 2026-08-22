@@ -200,6 +200,10 @@ gmEvtAlert       = []
 gmEvtUcBroken    = []
 gmEvtGarSpawned  = []
 gmEvtGarDespawned = []
+gmEvtTrSpawned   = []
+gmEvtTrDespawned = []
+gmEvtTrCommandeered = []
+gmEvtTrArrived   = []
 
 ; ===========================================================================
 ;  MARKERS: create one per zone (config zones AND seedCities-seeded towns all
@@ -234,6 +238,15 @@ gmAlertOnEvent ["alertChanged", {gmEvtAlert = gmEvtAlert + [_this]}]
 gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
 gmGarrisonOnEvent ["garrisonSpawned", {gmEvtGarSpawned = gmEvtGarSpawned + [_this]}]
 gmGarrisonOnEvent ["garrisonDespawned", {gmEvtGarDespawned = gmEvtGarDespawned + [_this]}]
+; Ambient road traffic (native Traffic service): enqueue-only handlers plus
+; the driverKilled killed-EH EXPRESSION every civilian driver carries - it
+; routes a road murder into the same civilians.sqs ledger tuple as a town
+; civilian (guarded: no CIV layer, no ledger).
+gmTrafficOnEvent ["spawned", {gmEvtTrSpawned = gmEvtTrSpawned + [_this]}]
+gmTrafficOnEvent ["despawned", {gmEvtTrDespawned = gmEvtTrDespawned + [_this]}]
+gmTrafficOnEvent ["commandeered", {gmEvtTrCommandeered = gmEvtTrCommandeered + [_this]}]
+gmTrafficOnEvent ["arrived", {gmEvtTrArrived = gmEvtTrArrived + [_this]}]
+gmTrafficOnEvent ["driverKilled", {if (not (isNil "GM_fnCivKilledEH")) then {_this call GM_fnCivKilledEH}}]
 
 ; ===========================================================================
 ;  LAUNCH SEQUENCE - helpers first (exec is async; the @-gate on the lib-ready

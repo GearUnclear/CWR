@@ -670,5 +670,13 @@ class CfgGuerrillaFactions
         civClass2 = "LoBo_Civ_02";
         civClass3 = "LoBo_Civ_03";
         civClass4 = "LoBo_CivF_01";
+        // Ambient road traffic hulls (native Traffic service; array, read by
+        // ZoneRegistry::LoadFactions and package-probed like vehicles[], so
+        // an unresolvable class is dropped, never fatal). @LoBo civilian vans
+        // from LoBoCars.pbo (`PoseidonTools pbo show LoBoCars.pbo config.cpp`:
+        // LoBo_S1203 "S 1203" and LoBo_Uaz3741 "Uaz 3741", both side=3
+        // scope=2; NOT LoBo_S1203CB, the car bomb) ahead of the 1.99 core's
+        // Skoda / Rapid, which the lobo lane also loads.
+        civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "Rapid"};
     };
 };

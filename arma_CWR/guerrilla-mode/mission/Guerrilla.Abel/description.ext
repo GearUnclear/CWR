@@ -37,6 +37,15 @@ class CfgGuerrillaZones
     // alertInterval=5; alert*Knows/Heat defaults).  Direct-launch faction
     // fallbacks are stated explicitly (single-mission browser launches skip
     // the new-game UI, so nothing is published there):
+    // Ambient road traffic (native Traffic service) runs on its stock
+    // defaults too: trafficEnabled=1; trafficInterval=5; trafficRadius=1500;
+    // trafficMinSpawnDist=300; trafficDespawnHysteresis=300; trafficMaxCiv=3;
+    // trafficMaxPatrols=1; trafficMaxConvoys=1; trafficCivChance=0.5;
+    // trafficPatrolChance=0.25; trafficConvoyChance=0.04;
+    // trafficConvoyWarScale=0.5; trafficStallTimeout=90; trafficArriveRadius=60;
+    // trafficMaxLegs=3; trafficCommandeerRadius=25;
+    // trafficCommandeerLaneHalfWidth=4; trafficCommandeerStopDelay=2.5;
+    // trafficFleeDist=150 (set trafficEnabled=0 to switch it off).
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     // The side mission.sqm welds the player's unit to (side="GUER",
@@ -323,5 +332,14 @@ class CfgGuerrillaFactions
         civClass1 = "Civilian";
         civClass2 = "Civilian2";
         civClass3 = "Civilian3";
+        // Ambient road traffic hulls (native Traffic service, CIV cars
+        // driving town-to-town; commandeerable). A real array this time:
+        // civVehicles[] is read by ZoneRegistry::LoadFactions and
+        // package-probed like vehicles[] (unresolvable hulls are dropped,
+        // an empty result leaves civilian traffic inert). All five
+        // verified present in the 1.99 core config: Skoda, SkodaBlue,
+        // SkodaRed, SkodaGreen, Rapid (Trabant / Mini / Bus are
+        // Resistance-era - absent, do not add).
+        civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid"};
     };
 };

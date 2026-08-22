@@ -76,6 +76,14 @@ triAssertEq [(GM_RESENT_ZONES select 0), "Village"]
 triAssertEq [(GM_RESENT_AMT select 0), 7]
 triAssertEq [gmDayCount, 3]
 
+// -- DIFF: ambient traffic (GuerrillaTraffic subclass): the forced civ car's
+//    row came back with its hull ref resolved, still tagged civ from the
+//    Village (the car handle itself came back through GGameState) --------------
+triAssertEq [(format ["%1", isNull gsCar]), "false"]
+triAssertEq [(format ["%1", gsCar in gmTrafficVehicles]), "true"]
+triAssertEq [((gmTrafficInfo gsCar) select 0), "civ"]
+triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
+
 // -- managers keep ticking after the load (handle-prune works): both loop
 //    counters advance, and the consumer drains the stamped NULL-handle kill
 //    record without error (isNull killer -> OTHER, but the far pos takes the

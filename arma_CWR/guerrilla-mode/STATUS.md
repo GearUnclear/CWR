@@ -35,6 +35,7 @@ reconciled against the engine source, not play-tested.)*
 | 20 | Character outfit family: warrior vs civilian select, recruits auto-match (issue #25) | engine (`UI/Guerrilla` cycler idc 153 + `Game/Guerrilla/OutfitSelect` player substitution + `civTier[]`/`gmFactionCivTier`) + `scripts/` (`GM_OUTFIT_CIV` fold, `*Civ` key reads) | **native + script** | Locked at new-game (`gmSelOutfit`; WARRIOR ≡ publish-nothing); descriptor keys `playerClass{Warrior,Civ}`, `{recruitFighter,recruitSpecialist,companionClass,holdClass}Civ`, `civTier[]` — see ARCHITECTURE.md A.5; civilian hold squads are a `holdClassCiv` monoculture (no `tiersCiv[]` yet); saves round-trip free via the GameState bank |
 | 21 | Player-body BODY browser: pick any side's Man class as the player's body | engine (`UI/Guerrilla` cycler idc 155 + `GuerrillaListPlayerBodies` roster + `OutfitSelect::ResolvePlayerBodyClass`) | **native** | Class-driven follow-up to issue #25's vocabulary question, player-only (squads stay on the outfit family); publishes `gmSelPlayerClass` (exact classname, `(match outfit)` default publishes nothing); pick beats the outfit token, probe failure keeps the authored class; config side reads as that side at distance (accepted emergent, undercover untouched) — see ARCHITECTURE.md A.5 |
 | 22 | Field journal on the map screen: Notes / Plan pages (field manual, live Situation block, diary, objectives, next steps) | engine `Game/Guerrilla/Journal` (+ `JournalCommands.cpp`: `gmJournalLog` / `gmJournalObjective` / `gmJournalStatus` / `gmJournalCount` / `gmJournalEntry` / `gmJournalObjectiveState` / `gmJournalStatusText` / `gmIslandName`) + `UI/Guerrilla/GuerrillaJournalPages` (page renderer hooked into `DisplayMap::ReloadBriefingContent`) + `scripts/` diary/objective/status writes | **native + script** | No briefing.html needed: when `CfgGuerrillaZones` is active the map's Notes page (`Main`/`__BRIEFING`) is built natively on every map-key open (`DisplayMap::ResetHUD` seam; header, Situation block read live from ZoneRegistry/AlertMachine/UndercoverSystem/StashRegistry + the script economy globals, a 10-topic field manual on `GM_MAN_*` pages, the latest diary lines + a full `GM_LOG` page) and the Plan page gets the standing goal, the engine-derived next steps and the scripted objectives; the open map repaints on every journal change (revision compare) and on the Notes/Plan tab press; diary/objectives/status serialize as `GuerrillaJournal` (save-gated on non-empty, presence-tolerant on load, old saves unaffected); managers write the diary (capture arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits, save/restore) and four starter objectives; island name comes from `gmIslandName` (CfgWorlds description), never a literal |
+| 23 | Ambient road traffic: civilian cars town-to-town, occupier patrols between posts, rare supply convoys; commandeer a civ car; road murders feed the civ kill ledger | engine `Game/Guerrilla/Traffic` (+ `TrafficCommands.cpp`: `gmTraffic*`, `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` + `nearestRoads`) + `init.sqs` handler lines + `civVehicles[]` in the CIV descriptor | **native** | Player-distance band [300, 1500] m (+300 m despawn hysteresis), caps 3/1/1, one-roll rarest-first spawn per 5 s pass, convoy chance war-scaled (cap 0.3); routes are doMove-style `IssueCommand` Moves to the drivers (CARELESS civ / SAFE occupier keep road pathing), arrival re-dispatch while watched, stall teardown only out of sight; commandeer = in-lane-ahead or armed-aim inside 25 m -> Stop -> 2.5 s -> driver bails + flees, hull released (deleted when far unless boarded); civ drivers carry the `driverKilled` killed-EH expression (`GM_fnCivKilledEH`); serializes as `GuerrillaTraffic`; `trafficEnabled=0` switches it off; accepted gap: patrols between zones feed no AlertMachine input |
 
 ## File map (current)
 
@@ -45,6 +46,7 @@ reconciled against the engine source, not play-tested.)*
 | `scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
 | `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint; diary lines for ready/lost/liberated + the `firstZone`/`firstTown` starter objectives |
 | *(engine)* `Game/Guerrilla/Journal.*`, `JournalCommands.cpp`, `UI/Guerrilla/GuerrillaJournalPages.*` | the field journal behind the map's Notes/Plan pages (row 22): diary / objectives / status tables (`gmJournal*`), the page renderer + field-manual text; `scripts/` only WRITE to it (campaign: begin/save/restore; qrf: QRF launch; undercover: cover blown; companions: promotion/death + `Companions` status line; loot: unlock + `Unlocked gear` status line + `firstUnlock` objective; escalation: War Level edges; recruit: recruit/train + `firstRecruit` objective) |
+| *(engine)* `Game/Guerrilla/Traffic.*`, `TrafficCommands.cpp` | ambient road traffic (row 23): civ cars / occupier patrols / convoys, commandeer, road queries; `init.sqs` registers 4 enqueue handlers + the `driverKilled` ledger expression |
 | `scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
 | `scripts/undercover.sqs` | cover establish (kept for the whole campaign), fired-EH → `gmBreakUndercover`, advisory `undercoverBroken` hint (never drops captive) |
 | `scripts/campaign.sqs` | Save addAction + `campaignLoaded` consumer (companion/group reconciliation) |
@@ -124,6 +126,21 @@ Accepted degradation, engine-side safe.
   `gmBreakUndercover` with zero current witnesses latches silently (no
   event, no Heat).
 
+- **Ambient traffic alert gap (accepted, 2026-08-22)**: occupier patrol
+  vehicles and convoys between zones feed no `AlertMachine` input (the
+  machine reads garrison `knowsAbout` per zone only), so a firefight with a
+  road patrol raises no alert unless a zone garrison sees it. Optional
+  follow-up: attribute `Traffic::IsTrafficGroup` patrol groups to the nearest
+  occupier zone within `trafficRadius`. Also: the civ kill ledger consumer
+  drops kills farther than `GM_CIV_EFFECT_R` (300 m) from the attributed
+  town (`civilians.sqs`), so a deep-countryside road murder is written to
+  `gmCivKilled` but stays unpunished for now. And group-level `AIGroup::Move`
+  / arcade ACMOVE waypoints never moved a freshly seated vehicle crew in
+  probes (SendCommand delivery; the crew sat with `unitReady` false forever)
+  - Traffic issues its route legs as direct `IssueCommand` Moves to the
+  drivers instead; worth a look if another system ever needs waypoint
+  convoys.
+
 ## Tests
 
 The engine systems carry Catch2 unit coverage (ZoneRegistry / AlertMachine /
@@ -145,6 +162,9 @@ Trident integration suite is **fully migrated to the `gm*` surface** (verified
 | `scripting/guerrilla_sinai_swap.test` | `full_cwa` + `lobo` (+ fixture gen + installed templates) |
 | `ui/guerrilla_new_game_e2e.test` | `full_cwa` + `lobo` (+ installed templates) |
 | `scripting/qrf_reference_mission.test` | `full_cwa` (boots `guerrilla-mode/mission/Qrf.Abel` directly: native garrison -> forced reveal -> YELLOW -> RED -> qrf.sqs convoy -> perception removed -> GREEN -> stand-down) |
+| `scripting/guerrilla_traffic_ambient.test` | `full_cwa` (force-spawned civ car on the road, CIV driver, drives, offshore teleport drains the table + `despawned`) |
+| `scripting/guerrilla_traffic_commandeer.test` | `full_cwa` (armed player in the lane: Stop -> driver bails -> hull released, `commandeered`, player boards) |
+| `scripting/guerrilla_traffic_patrol.test` | `full_cwa` (Camp flipped to the occupier, patrol hull from the Outpost on the road, occupier crew, drives) |
 | `ui/main_menu/reference_mission_{showcase,undercover,qrf}.test` | `full_cwa` (+ installed templates; the main-menu direct-launch buttons idc 123/124/125) |
 
 ‡ These three bind to the `demo` world (folder suffix `.Demo`) and their player
@@ -185,6 +205,18 @@ semantics. Unit-level half: `test_undercover.cpp` covers both evaluator rule
 matrices (person and vehicle, 474 assertions incl. boundary and war-scaling
 cases), and `test_alert_machine.cpp` was repaired to the new contract
 (compromise drain, silent no-witness latch, `undercoverHeatWitness`).
+
+Ambient traffic (2026-08-22) coverage: `test_traffic.cpp` pins the tuning
+parse, the one-roll rarest-first spawn decision (caps, chances, disabled),
+the war-scaled convoy chance + cap, the far-despawn hysteresis, the route
+picker (civ CITY->CITY band + fallback, occupier pairs, pinned origin,
+nothing in range), the farthest-in-band spawn point, the commandeer trigger
+matrix (ahead-in-lane / beside / behind / armed aim cone / out of radius),
+stall expiry, event/kind name mapping and the `GuerrillaTraffic` save/load
+round-trip with null-hull row pruning and an empty-archive load; the three
+`guerrilla_traffic_*` Trident tests above cover the world half, and
+`guerrilla_native_save_reload.seq` carries a forced civ car's row across the
+cross-process reload.
 
 ## Still needs a human run
 

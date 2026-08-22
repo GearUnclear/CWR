@@ -2771,6 +2771,97 @@ static bool PrepareMoveIn(AIUnit* unit, Transport* target)
 
 CameraType ValidateCamera(CameraType cam);
 
+// Native seat-in for engine systems (Guerrilla Traffic crews): the bodies of
+// moveInDriver / moveInGunner / moveInCargo / moveInCommander without the
+// script-value parsing.  Global namespace, forward-declared by the callers
+// (same idiom as CreateUnit / DeleteVehicle).  False when the soldier is not
+// local, already aboard, or the seat refuses him.
+bool NativeMoveIn(Person* soldier, Transport* veh, GetInPosition position)
+{
+    if (!soldier || !veh || !soldier->IsLocal())
+    {
+        return false;
+    }
+    AIUnit* unit = soldier->Brain();
+    if (!unit)
+    {
+        return false;
+    }
+    if (!PrepareMoveIn(unit, veh))
+    {
+        return false;
+    }
+    switch (position)
+    {
+        case GIPDriver:
+            if (!veh->QCanIGetIn(soldier))
+            {
+                return false;
+            }
+            if (veh->IsLocal())
+            {
+                veh->GetInDriver(soldier, false);
+            }
+            else
+            {
+                GetNetworkManager().AskForGetIn(soldier, veh, GIPDriver);
+            }
+            unit->AssignAsDriver(veh);
+            break;
+        case GIPGunner:
+            if (!veh->QCanIGetInGunner(soldier))
+            {
+                return false;
+            }
+            if (veh->IsLocal())
+            {
+                veh->GetInGunner(soldier, false);
+            }
+            else
+            {
+                GetNetworkManager().AskForGetIn(soldier, veh, GIPGunner);
+            }
+            unit->AssignAsGunner(veh);
+            break;
+        case GIPCommander:
+            if (!veh->QCanIGetInCommander(soldier))
+            {
+                return false;
+            }
+            if (veh->IsLocal())
+            {
+                veh->GetInCommander(soldier, false);
+            }
+            else
+            {
+                GetNetworkManager().AskForGetIn(soldier, veh, GIPCommander);
+            }
+            unit->AssignAsCommander(veh);
+            break;
+        default:
+            if (!veh->QCanIGetInCargo(soldier))
+            {
+                return false;
+            }
+            if (veh->IsLocal())
+            {
+                veh->GetInCargo(soldier, false);
+            }
+            else
+            {
+                GetNetworkManager().AskForGetIn(soldier, veh, GIPCargo);
+            }
+            unit->AssignAsCargo(veh);
+            break;
+    }
+    unit->OrderGetIn(true);
+    if (GWorld->FocusOn() == unit && veh->IsLocal())
+    {
+        GWorld->SwitchCameraTo(veh, ValidateCamera(GWorld->GetCameraType()));
+    }
+    return true;
+}
+
 GameValue ObjMoveInCommander(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     Object* obj1 = GetObject(oper1);

@@ -675,6 +675,41 @@ items:
       - "2026-07-10 fixer round 1: two verification failures fixed. (a) guerrilla_civ_shakedown test-design bug - the native ZoneRegistry GUER-presence drift (supportRate 5/3s while owner NEUTRAL) staled the support baseline; test now pins support past supportFlip and waits for the NEUTRAL->GUER flip (drift branch off for good) before baselining. (b) REAL shakedown.sqs bug the stale baseline had been masking: the kill path deleted the initiator pair immediately after posting the synthetic record, so the consumer (up to GM_CIV_TICK later) always saw a null killer -> OTHER (-2, no resentment) instead of OCCUPIER (-8 + resentment); the scene now holds the pair alive until gmCivKilled is drained (bounded 20s guard), then releases. Synced byte-identical to all 7 copies + reinstalled game-dir templates."
       - "2026-07-10 adversarial review (3 lenses: SQS dialect, persistence, checklist): 2 majors fixed pre-land - GM_fnCivPrune now deleteGroups dropped rows (empty AIGroups otherwise accumulate in the CIV center and bloat every save; no runtime auto-cleanup exists, only the mission-load sweep), and GM_SHK_FORCE is consumed on actual scene launch, not in #forcepick (a stale populated-zone row could bail at the null-victim guard and silently eat the force request, wedging the force-hook tests). Minors: init.sqs seeds GM_CIV_GROUPS/GM_CIV_GROUP_ZONE so shakedown.sqs has no exec-order dependency on civilians.sqs; wander pass is per-unit (leader-only doMove never un-stuck a doStop'ed released victim; doFollow is not a registered command); dead-killer OTHER-demotion window documented (dead units read TCivilian). Post-fix: unit byte-identity + all 4 civ/save-reload Trident tests re-run green."
 
+  - id: ambient-traffic
+    title: "Ambient road traffic: civ cars town-to-town, occupier patrols + supply convoys, commandeer, ledger hookup (native Traffic service)"
+    phase: phase-2
+    status: done
+    priority: 1
+    depends_on: [civilian-ambience-layer, engine-native-systems]
+    commits: []
+    gh_issues: [33, 35, 28]
+    summary: >
+      engine/Poseidon/Game/Guerrilla/Traffic.* in the GarrisonCache/TownFlags
+      mold: pure unit-tested core (one-roll rarest-first spawn decision with
+      caps 3/1/1, route picker, farthest-in-band spawn point over GRoadNet
+      link centres, commandeer predicate, despawn/stall rules) + world layer
+      (CIV/occupier center groups, hulls on road links facing the
+      destination, NativeMoveIn seating, doMove-style IssueCommand route
+      legs under CARELESS/SAFE so the unit planner keeps the road net,
+      arrival re-dispatch, stall teardown out of sight) + Serialize
+      (GuerrillaTraffic) + TrafficCommands.cpp (gmTraffic* and the road
+      queries gmRoadNearest / gmRoadPath / gmRoadsNear + nearestRoads alias).
+      Commandeer: in-lane-ahead or armed-aim inside 25 m -> Stop -> 2.5 s ->
+      driver unassigned/AllowGetIn off/DoGetOut, flees 150 m, hull released
+      (deleted when far unless boarded). Civ drivers carry the driverKilled
+      killed-EH expression (init.sqs routes it to GM_fnCivKilledEH, so road
+      murders land in gmCivKilled). civVehicles[] on the CIV descriptor
+      (Skoda/SkodaBlue/SkodaRed/SkodaGreen/Rapid on Abel; LoBo_S1203 /
+      LoBo_Uaz3741 + Skoda/Rapid on Sinai/Lebanon80), plan-15 probed.
+      Tests: test_traffic.cpp (pure cores + save/load round-trip), Trident
+      guerrilla_traffic_{ambient,commandeer,patrol} green on full_cwa, the
+      save/reload seq carries a forced car's row across the reload; civ
+      ambient + save/reload regression green.
+    log:
+      - "2026-08-22: user decision - fully native C++ (not SQS) so the road system, commandeer and ledger hookup are one testable engine service; script stays a thin handler layer."
+      - "2026-08-22 probe finding: an arcade ACMOVE waypoint (and AIGroup::Move / `group move`) never moved a freshly seated vehicle crew - even a pure-script createVehicle + moveInDriver + `group move` car sat with unitReady false and speed 0 for 90 s - while `doMove` (IssueCommand, silent) drove at 72 km/h at once. Both group paths deliver through SendCommand (the radio channel). Traffic issues its route legs / Stop / flee as direct IssueCommand Moves to the drivers; noted in STATUS.md known edges for whoever needs waypoint convoys next."
+      - "Accepted gaps (STATUS.md): patrol traffic feeds no AlertMachine input (optional follow-up: attribute IsTrafficGroup patrol groups to the nearest occupier zone); the civ kill ledger consumer still drops kills > GM_CIV_EFFECT_R from the attributed town, so deep-countryside road murders are recorded but unpunished; boarded released hulls become ordinary world objects - the persistent garage is cache-and-garage (#28)."
+
   - id: faction-class-resolution
     title: "Faction class resolution + role-diverse squads (plan 15)"
     phase: phase-2
@@ -1073,10 +1108,13 @@ items:
   - id: nearest-roads-command
     title: "Evaluator commands: nearestRoads + worldLocations"
     phase: phase-1.5
-    status: planned
+    status: done
     priority: 2
     depends_on: [engine-native-systems]
+    commits: []
     gh_issues: [33]
+    log:
+      - "2026-08-22: the road half landed with ambient-traffic - `<pos> nearestRoads <radius>` (binary alias of `gmRoadsNear [pos, radius]`, unlocked road-segment centre positions), `gmRoadNearest <pos>` (20 m GetNearestRoadPoint, [] when none) and `gmRoadPath [from, to]` (the engine's short-hop A*), all in Game/Guerrilla/TrafficCommands.cpp, positions in getPos order with height above ground. The worldLocations-style query from plan 13 is still open under #33."
 
     summary: >
       The two engine commands the docs still owe: nearestRoads <pos> <radius>

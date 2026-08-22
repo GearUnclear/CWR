@@ -35,6 +35,7 @@ class ParamEntry;
 class EntityAI;
 class Person;
 class AIUnit;
+class Man;
 struct Target;
 
 namespace Guerrilla
@@ -99,6 +100,13 @@ struct UCObservation
 // The person rule.  Returns the verdict and writes the (possibly boosted)
 // side accuracy the caller should record.  Pure and world-free.
 UCVerdict EvaluateUndercoverRule(const UCObservation& obs, const UndercoverTuning& tuning, float& outBoostedAccuracy);
+
+// The weapon-show classifier behind UCWeaponShow: a ManPos partition - every
+// raised-weapon pose reads in-hands, the patrol walk / binocular poses and
+// the civilian moves with a long gun read slung (the back proxy still shows
+// it), anything else unarmed.  Shared with the Traffic commandeer predicate
+// ("weapon in hands aimed at the car").
+UCWeaponShow ClassifyWeaponShow(const Man& man);
 
 // Vehicle-type class as the rule consumes it (resolved from the type's
 // _typicalSide by the adapter).

@@ -65,6 +65,7 @@
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
@@ -656,6 +657,9 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::GarrisonCache::Instance().InitMission();
     // Town flagpoles follow the registry too (no config of their own).
     Guerrilla::TownFlags::Instance().InitMission();
+    // Ambient road traffic follows the registry: Clear + read its own
+    // optional CfgGuerrillaZones traffic* keys.
+    Guerrilla::Traffic::Instance().InitMission();
     // Stash registry likewise resets per mission (no config of its own).
     Guerrilla::StashRegistry::Instance().InitMission();
     // Field journal (diary / objectives / status lines behind the map's

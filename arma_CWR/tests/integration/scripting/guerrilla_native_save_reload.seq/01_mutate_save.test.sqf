@@ -72,6 +72,14 @@ gmDayCount = 3
 gmCivKilled = [[objNull, objNull, [500, 500, 0], gsVil]]
 gsCivT = gmCivTicks
 
+// -- ambient traffic: force a civilian car from the Village so a live traffic
+//    row (hull + group + driver refs, zone names) rides the GuerrillaTraffic
+//    save block; the OBJECT handle itself rides GGameState -----------------------
+gsCar = gmTrafficForceSpawn ["civ", gsVil]
+triAssertEq [(format ["%1", isNull gsCar]), "false"]
+triAssertGe [gmTrafficCount "civ", 1]
+triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
+
 // -- write the binary save into the shared UserDir/Saved/Tmp/gnat.fps ---------
 triAssertEq [(triSaveGame "gnat"), "OK"]
 

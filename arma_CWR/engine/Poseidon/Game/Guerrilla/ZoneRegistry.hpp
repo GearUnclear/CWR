@@ -121,6 +121,9 @@ struct FactionRecord
     // faction offers no civilian-outfit bodies (callers keep warriors)
     AutoArray<RString> civTiers;
     AutoArray<RString> vehicles;
+    // civilian road-traffic hulls (Traffic, CIV descriptor): unresolvable
+    // entries are dropped at load; empty = no civilian traffic
+    AutoArray<RString> civVehicles;
     float vehicleThreshold = 3.0f;      // legacy 2-step ladder (index 0 -> 1)
     AutoArray<float> vehicleThresholds; // full ladder, mirrors tierThresholds
     AutoArray<NamedValue> values;
@@ -255,6 +258,8 @@ class ZoneRegistry : public SerializeClass
     // ladder's own length); empty when the faction authors no civTier[]
     RString FactionCivTierClass(const char* side, float warLevel) const;
     RString FactionVehicle(const char* side, float warLevel) const;
+    // the faction's civVehicles[] (package-resolved, may be empty)
+    void FactionCivVehicles(const char* side, AutoArray<RString>& out) const;
     RString FactionValue(const char* side, const char* key) const;
     // role-diverse squad composition (plan 15): fills out with count
     // classnames from the faction's war-level tier - a deterministic

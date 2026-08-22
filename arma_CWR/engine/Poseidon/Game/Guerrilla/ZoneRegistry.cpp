@@ -631,6 +631,9 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
             }
         }
         readStringArray("vehicles", f.vehicles);
+        // civilian traffic hulls (Traffic): optional, CIV descriptor only in
+        // practice, no ladder / thresholds
+        readStringArray("civVehicles", f.civVehicles);
         const ParamEntry* vehThresholds = e.FindEntry("vehicleThresholds");
         if (vehThresholds && vehThresholds->IsArray())
         {
@@ -942,6 +945,26 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
                 {
                     f.vehicleThresholds.Resize(gates);
                 }
+            }
+        }
+
+        // ---- civVehicles[]: drop unresolvable hulls (no ladder, no
+        // thresholds - an empty result simply leaves civilian traffic inert)
+        {
+            AutoArray<RString> keptCiv;
+            for (int i = 0; i < f.civVehicles.Size(); i++)
+            {
+                bool exists = f.civVehicles[i].GetLength() > 0 && probe.Exists(kVeh, f.civVehicles[i]);
+                if (!exists)
+                {
+                    logSub("civVehicles[]", f.civVehicles[i], "<dropped>");
+                    continue;
+                }
+                keptCiv.Add(f.civVehicles[i]);
+            }
+            if (keptCiv.Size() != f.civVehicles.Size())
+            {
+                f.civVehicles = keptCiv;
             }
         }
 
@@ -1422,6 +1445,20 @@ RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const
         index = f->vehicles.Size() - 1;
     }
     return f->vehicles[index];
+}
+
+void ZoneRegistry::FactionCivVehicles(const char* side, AutoArray<RString>& out) const
+{
+    out.Clear();
+    const FactionRecord* f = FindFactionForSide(side);
+    if (!f)
+    {
+        return;
+    }
+    for (int i = 0; i < f->civVehicles.Size(); i++)
+    {
+        out.Add(f->civVehicles[i]);
+    }
 }
 
 RString ZoneRegistry::FactionValue(const char* side, const char* key) const

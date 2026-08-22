@@ -59,6 +59,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/Network/Network.hpp>
@@ -1718,6 +1719,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla town flagpoles - inactive with the registry; throttles
         // itself to TownFlags::TickInterval.
         Guerrilla::TownFlags::Instance().Simulate(deltaT);
+        // Guerrilla ambient road traffic - inactive with the registry (or
+        // trafficEnabled=0); throttles itself to trafficInterval plus a
+        // 0.5 s commandeer sub-tick while a civ car is near the player.
+        Guerrilla::Traffic::Instance().Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.
