@@ -681,7 +681,7 @@ items:
     status: done
     priority: 1
     depends_on: [civilian-ambience-layer, engine-native-systems]
-    commits: []
+    commits: ["f255bef"]
     gh_issues: [33, 35, 28]
     summary: >
       engine/Poseidon/Game/Guerrilla/Traffic.* in the GarrisonCache/TownFlags
@@ -1111,7 +1111,7 @@ items:
     status: done
     priority: 2
     depends_on: [engine-native-systems]
-    commits: []
+    commits: ["f255bef"]
     gh_issues: [33]
     log:
       - "2026-08-22: the road half landed with ambient-traffic - `<pos> nearestRoads <radius>` (binary alias of `gmRoadsNear [pos, radius]`, unlocked road-segment centre positions), `gmRoadNearest <pos>` (20 m GetNearestRoadPoint, [] when none) and `gmRoadPath [from, to]` (the engine's short-hop A*), all in Game/Guerrilla/TrafficCommands.cpp, positions in getPos order with height above ground. The worldLocations-style query from plan 13 is still open under #33."
