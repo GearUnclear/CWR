@@ -265,6 +265,9 @@ GM_LIB_READY = false
 ;   escalation.sqs  War Level ladder + Heat decay
 ;   loot.sqs        loot-on-kill stash + gear-unlock tally
 ;   recruit.sqs     Camp action menu: recruit / specialist / train
+;   market.sqs      HQ / cache / garage / dealer action menus (native
+;                   GuerrillaBase + Market facts; the second "-" writer of
+;                   gmResources: purchases and HQ moves)
 ;   companions.sqs  companion XP -> rank/skill, permadeath
 ;   civilians.sqs   town population cache + kill-queue consumer + panic FSM
 ;   shakedown.sqs   occupier street-theatre director + resentment ticker
@@ -276,6 +279,7 @@ GM_LIB_READY = false
 [] exec "scripts/escalation.sqs"
 [] exec "scripts/loot.sqs"
 [] exec "scripts/recruit.sqs"
+[] exec "scripts/market.sqs"
 [] exec "scripts/companions.sqs"
 [] exec "scripts/civilians.sqs"
 [] exec "scripts/shakedown.sqs"

@@ -80,6 +80,27 @@ triAssertEq [(format ["%1", isNull gsCar]), "false"]
 triAssertGe [gmTrafficCount "civ", 1]
 triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
 
+// -- headquarters + garage + cache (GuerrillaBase) and the dealer draw
+//    (Market): elect the HQ in the Village (Houdan - a building HQ; the
+//    test Camp centre sits offshore), lock a fresh Jeep into the garage ring,
+//    put a rifle in the cache, and remember how many dealers the market drew;
+//    phase 2 diffs the election, the garaged hull (its ref rides the
+//    GuerrillaBase block), the cache cargo and the dealer count ---------------
+triAssert [not gmHqEstablished]
+triAssert [gmHqEstablish ((gmZone gsVil) select 8)]
+triAssertEq [gmHqZone, "Village"]
+triSimUntil { not (isNull gmHqCache) }
+gmHqCache addWeaponCargo ["AK47", 1]
+triAssert ["AK47" in (weaponCargo gmHqCache)]
+gsJeep = "Jeep" createVehicle gmHqGaragePos
+triAssertEq [(format ["%1", isNull gsJeep]), "false"]
+triAssert [gmGarageLock [gsJeep, true]]
+triAssertEq [gmGarageCount, 1]
+triAssert [locked gsJeep]
+triSimUntil { gmDealerCount > 0 }
+gsDealers = gmDealerCount
+gsDealerZone = (gmDealer 0) select 0
+
 // -- write the binary save into the shared UserDir/Saved/Tmp/gnat.fps ---------
 triAssertEq [(triSaveGame "gnat"), "OK"]
 

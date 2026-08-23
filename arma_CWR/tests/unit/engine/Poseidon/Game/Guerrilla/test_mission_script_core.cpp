@@ -173,6 +173,7 @@ TEST_CASE("Reference missions carry a byte-identical subset of the script core",
     };
     const Family families[] = {
         {"Qrf.", "qrf.sqs"},
+        {"Market.", "market.sqs"},
         {"Undercover.", "undercover.sqs"},
     };
 

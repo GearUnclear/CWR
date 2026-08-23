@@ -1,0 +1,18 @@
+; ============================================================================
+;  market_action.sqs  -  thin addAction dispatcher for the market / HQ layer.
+; ----------------------------------------------------------------------------
+;  addAction runs this FILE with _this bound to [target, caller, actionId]
+;  (EntityAI::AddUserAction -> Script(desc->script, [this, person, id])).
+;
+;  It deliberately does NO state mutation: it only ENQUEUES the request so
+;  market.sqs's loop remains the single writer of the gmResources debit, the
+;  HQ election, the garage locks and the cache stashes. market.sqs polls
+;  gmMktReqPending every second and dispatches on gmMktReqId. Same
+;  queue-and-consume pattern as recruit_action.sqs / the native-event
+;  handlers (see init.sqs).
+; ============================================================================
+
+gmMktReqId = _this select 2
+gmMktReqCaller = _this select 1
+gmMktReqPending = true
+exit

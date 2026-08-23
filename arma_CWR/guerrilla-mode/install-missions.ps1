@@ -75,13 +75,15 @@ if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
 # Undercover.<World> = the deep-undercover reference slice (own script set,
 # not the shared core); Qrf.<World> = the alert->QRF reference slice (own
 # bootstrap + a byte-identical SUBSET of the shared core: scripts/lib.sqs and
-# scripts/qrf.sqs). Showcase.*, Undercover.* and Qrf.* are surfaced as direct
-# main-menu launch buttons (kReferenceMissions, UI/OptionsUIApp.cpp) that
-# only appear when the mission is installed.
+# scripts/qrf.sqs); Market.<World> = the HQ / cache / garage / dealer reference
+# slice (own bootstrap + the subset scripts/lib.sqs, scripts/market.sqs,
+# scripts/market_action.sqs). Showcase.*, Undercover.*, Qrf.* and Market.*
+# are surfaced as direct main-menu launch buttons (kReferenceMissions,
+# UI/OptionsUIApp.cpp) that only appear when the mission is installed.
 $templates = Get-ChildItem -LiteralPath $missionRoot -Directory |
-    Where-Object { $_.Name -match '^(Guerrilla|Showcase|Undercover|Qrf)\.' }
+    Where-Object { $_.Name -match '^(Guerrilla|Showcase|Undercover|Qrf|Market)\.' }
 if (-not $templates) {
-    throw "No Guerrilla.*/Showcase.*/Undercover.*/Qrf.* templates under $missionRoot"
+    throw "No Guerrilla.*/Showcase.*/Undercover.*/Qrf.*/Market.* templates under $missionRoot"
 }
 
 foreach ($tpl in $templates) {

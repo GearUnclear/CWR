@@ -1,0 +1,32 @@
+; ============================================================================
+;  hud.sqs  -  intro briefing + change-driven HQ / garage / dealer readout
+; ----------------------------------------------------------------------------
+;  Polls the native HQ state (gmHq*), the garage (gmGarageCount), the
+;  dealer table (gmDealerCount / gmDealerNearest) and the treasury once a
+;  second and repaints the title line on CHANGE. READ-ONLY towards
+;  market.sqs: nothing here writes a gmMkt* global or touches gmResources.
+; ============================================================================
+
+~3
+titleText ["HOUDAN PLAIN, MALDEN\nHoudan is 500 m north-west. The towns have dealers; you have 50000 R.", "PLAIN DOWN"]
+~7
+hint "MARKET TEST\n\nTHE LOOP (native GuerrillaBase + Market, the campaign's market.sqs):\n- walk into any town (or stay at the Camp) and use ESTABLISH HEADQUARTERS in the action menu: a town picks its best enterable building (cache indoors, garage beside it), the Camp falls back to the edge of the zone\n- stand at the cache: STASH your rifle; take it back with the holder's own TAKE actions\n- park a vehicle within 100 m of the garage and LOCK it: beep beep, invulnerable, it stays\n- the dealers (black dots on the map) sell arms and vehicles; DELIVERY toggles between here and the HQ\n- MOVE HEADQUARTERS costs 500 R and takes the cache with it\n\nUse the ACTION MENU: status report, teleports to the dealers / garage / town / Camp, +10000 R, god mode."
+
+MKT_hLast = ""
+
+#loop
+~1
+MKT_hLine = "HQ: none"
+? gmHqEstablished : MKT_hLine = format ["HQ: %1 (%2, moves %3)   garage: %4 locked", gmHqZone, "outdoors", gmHqMoveCount, gmGarageCount]
+? gmHqEstablished and gmHqIndoors : MKT_hLine = format ["HQ: %1 (building, moves %2)   garage: %3 locked", gmHqZone, gmHqMoveCount, gmGarageCount]
+MKT_hW = gmDealerNearest ["WEAPON", getPos aP]
+MKT_hV = gmDealerNearest ["VEHICLE", getPos aP]
+MKT_hWd = "-"
+MKT_hVd = "-"
+? MKT_hW >= 0 : MKT_hWd = format ["%1 (%2 m)", (gmDealer MKT_hW) select 0, (getPos aP) distance ((gmDealer MKT_hW) select 2)]
+? MKT_hV >= 0 : MKT_hVd = format ["%1 (%2 m)", (gmDealer MKT_hV) select 0, (getPos aP) distance ((gmDealer MKT_hV) select 2)]
+MKT_hLine = MKT_hLine + format ["\ndealers: %1   arms: %2   vehicles: %3   treasury: %4 R", gmDealerCount, MKT_hWd, MKT_hVd, gmResources]
+? MKT_hLine == MKT_hLast : goto "loop"
+MKT_hLast = MKT_hLine
+titleText [MKT_hLine, "PLAIN DOWN"]
+goto "loop"

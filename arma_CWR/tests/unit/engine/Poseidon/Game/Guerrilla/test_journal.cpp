@@ -195,6 +195,13 @@ TEST_CASE("Journal pages - Notes/Plan/diary/manual sections render from inputs",
     in.undercoverWitnesses = 1;
     in.cellSize = 4;
     in.stashCount = 1;
+    in.hqEstablished = true;
+    in.hqZone = "Houdan";
+    in.hqIndoors = true;
+    in.garageCount = 2;
+    in.marketActive = true;
+    in.weaponDealers = 3;
+    in.vehicleDealers = 1;
     in.useImages = false; // no texture loader in a unit test
 
     JournalHtml html;
@@ -228,6 +235,8 @@ TEST_CASE("Journal pages - Notes/Plan/diary/manual sections render from inputs",
     CHECK(notes.find("Cover: blown, 1 witness group(s)") != std::string::npos);
     CHECK(notes.find("Fighters with you: 4") != std::string::npos);
     CHECK(notes.find("Arms stashes: 1") != std::string::npos);
+    CHECK(notes.find("Headquarters: Houdan (building), 2 vehicle(s) garaged") != std::string::npos);
+    CHECK(notes.find("Dealers: 3 arms / 1 vehicle") != std::string::npos);
     CHECK(notes.find("Companions: Petra (CORPORAL)") != std::string::npos);
     CHECK(notes.find("Outpost liberated") != std::string::npos);          // latest diary lines inline
     CHECK(notes.find(GuerrillaManualTopicTitle(0)) != std::string::npos); // manual index

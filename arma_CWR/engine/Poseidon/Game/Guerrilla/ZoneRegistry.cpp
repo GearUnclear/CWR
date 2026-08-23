@@ -97,6 +97,28 @@ AICenter* EnsureSideCenter(const char* sideName)
     return center;
 }
 
+// mirrors GroupCreate (GameStateExtWorldConfig.cpp:693): a fresh group with
+// its first waypoint at the origin and an Arcade mission, announced to the
+// network layer.  Hoisted out of GarrisonCache/Traffic so every Guerrilla
+// spawner (garrisons, traffic crews, dealers) builds groups the same way.
+AIGroup* CreateSideGroup(AICenter* center)
+{
+    if (!center || center->NGroups() >= MaxGroups)
+    {
+        return nullptr;
+    }
+    Ref<AIGroup> group = new AIGroup();
+    center->AddGroup(group);
+    group->AddFirstWaypoint(VZero);
+
+    Mission mis;
+    mis._action = Mission::Arcade;
+    center->SendMission(group, mis);
+
+    GetNetworkManager().CreateObject(group);
+    return group;
+}
+
 // script/campaign global published by the new-game UI (OptionsUIApp VarSets
 // kGuerrillaVarOccupier / kGuerrillaVarResistance); read like GarrisonCache's
 // ReadWarLevel - VarGet with the lowercased name, nil tolerated
@@ -1090,36 +1112,48 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
 // (see CStaticMap::DrawName) - every entry is a town, so type-less entries
 // are accepted; an Arma-style type entry, when present, must be a city-like
 // location type.
+// the 300 m dedup radius shared by SeedCityZones and CollectTownNames
+static constexpr float SeedDedupDistSq = 300.0f * 300.0f;
+
+bool ZoneRegistry::NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3& pos)
+{
+    if (!e.IsClass())
+    {
+        return false;
+    }
+    RString type = e.ReadValue("type", RString());
+    if (type.GetLength() > 0 && stricmp(type, "NameCity") != 0 && stricmp(type, "NameCityCapital") != 0 &&
+        stricmp(type, "NameVillage") != 0)
+    {
+        return false; // typed non-town location (rocks, hills, ...)
+    }
+    const ParamEntry* position = e.FindEntry("position");
+    if (!position || !position->IsArray() || position->GetSize() < 2)
+    {
+        return false;
+    }
+    float easting = (*position)[0];
+    float northing = (*position)[1];
+    float elevation = position->GetSize() >= 3 ? (float)(*position)[2] : 0.0f;
+    name = e.ReadValue("name", RString(e.GetName()));
+    if (name.GetLength() == 0)
+    {
+        name = e.GetName(); // Names entries often ship name=""
+    }
+    pos = Vector3(easting, elevation, northing);
+    return true;
+}
+
 void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
 {
-    const float dedupSq = 300.0f * 300.0f; // skip near explicit/seeded zones
     int seeded = 0;
     for (int i = 0; i < namesCfg.GetEntryCount(); i++)
     {
-        const ParamEntry& e = namesCfg.GetEntry(i);
-        if (!e.IsClass())
+        RString name;
+        Vector3 pos;
+        if (!NamesEntryIsTown(namesCfg.GetEntry(i), name, pos))
         {
             continue;
-        }
-        RString type = e.ReadValue("type", RString());
-        if (type.GetLength() > 0 && stricmp(type, "NameCity") != 0 && stricmp(type, "NameCityCapital") != 0 &&
-            stricmp(type, "NameVillage") != 0)
-        {
-            continue; // typed non-town location (rocks, hills, ...)
-        }
-        const ParamEntry* pos = e.FindEntry("position");
-        if (!pos || !pos->IsArray() || pos->GetSize() < 2)
-        {
-            continue;
-        }
-        float easting = (*pos)[0];
-        float northing = (*pos)[1];
-        float elevation = pos->GetSize() >= 3 ? (float)(*pos)[2] : 0.0f;
-
-        RString name = e.ReadValue("name", RString(e.GetName()));
-        if (name.GetLength() == 0)
-        {
-            name = e.GetName(); // Names entries often ship name=""
         }
         // dedup: a location on top of a configured (or already seeded) zone
         // stays that zone's business; a name clash would break the name-keyed
@@ -1127,7 +1161,7 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         bool skip = FindZoneIndex(name) >= 0;
         for (int j = 0; j < _zones.Size() && !skip; j++)
         {
-            skip = Dist2DSq(easting, northing, _zones[j].pos.X(), _zones[j].pos.Z()) < dedupSq;
+            skip = Dist2DSq(pos.X(), pos.Z(), _zones[j].pos.X(), _zones[j].pos.Z()) < SeedDedupDistSq;
         }
         if (skip)
         {
@@ -1135,7 +1169,8 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         }
         if (_zones.Size() >= MaxZones)
         {
-            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding cities - remaining Names entries skipped", MaxZones);
+            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding cities - remaining Names entries skipped",
+                     MaxZones);
             return;
         }
 
@@ -1148,9 +1183,79 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         char marker[32];
         snprintf(marker, sizeof(marker), "gmZoneCity_%d", seeded);
         z.marker = marker;
-        z.pos = Vector3(easting, elevation, northing);
+        z.pos = pos;
         _zones.Add(z);
         seeded++;
+    }
+}
+
+void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out)
+{
+    out.Clear();
+    // every authored zone counts for the dedup (a Names town on top of an
+    // authored OUTPOST is skipped by SeedCityZones too); only CITY ones are
+    // towns the player can start in
+    AutoArray<RString> zoneNames;
+    AutoArray<Vector3> zonePos;
+    bool seedCities = false;
+    if (zonesCfg)
+    {
+        seedCities = zonesCfg->ReadValue("seedCities", 0.0f) != 0.0f;
+        if (const ParamEntry* zones = zonesCfg->FindEntry("Zones"))
+        {
+            for (int i = 0; i < zones->GetEntryCount(); i++)
+            {
+                const ParamEntry& e = zones->GetEntry(i);
+                if (!e.IsClass())
+                {
+                    continue;
+                }
+                RString name = e.ReadValue("name", RString(e.GetName()));
+                RString type = e.ReadValue("type", RString("OUTPOST"));
+                Vector3 pos = VZero;
+                const ParamEntry* position = e.FindEntry("position");
+                if (position && position->IsArray() && position->GetSize() >= 2)
+                {
+                    pos = Vector3((float)(*position)[0], 0.0f, (float)(*position)[1]);
+                }
+                zoneNames.Add(name);
+                zonePos.Add(pos);
+                if (stricmp(type, "CITY") == 0)
+                {
+                    out.Add(name);
+                }
+            }
+        }
+    }
+    if (!seedCities || !namesCfg)
+    {
+        return;
+    }
+    for (int i = 0; i < namesCfg->GetEntryCount(); i++)
+    {
+        RString name;
+        Vector3 pos;
+        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos))
+        {
+            continue;
+        }
+        bool skip = false;
+        for (int j = 0; j < zoneNames.Size() && !skip; j++)
+        {
+            skip = stricmp(zoneNames[j], name) == 0 ||
+                   Dist2DSq(pos.X(), pos.Z(), zonePos[j].X(), zonePos[j].Z()) < SeedDedupDistSq;
+        }
+        if (skip)
+        {
+            continue;
+        }
+        if (zoneNames.Size() >= MaxZones)
+        {
+            return; // SeedCityZones stops here too
+        }
+        zoneNames.Add(name);
+        zonePos.Add(pos);
+        out.Add(name);
     }
 }
 

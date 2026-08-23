@@ -1,0 +1,9 @@
+; debug action: teleport into the nearest town (CITY zone centre) - the
+; natural place to try ESTABLISH HEADQUARTERS and get a building HQ
+MKT_z = (getPos aP) call GM_fnZoneNearestCity
+? MKT_z < 0 : hint "No CITY zone on this island."
+? MKT_z < 0 : exit
+MKT_p = (gmZone MKT_z) select GM_Z_POS
+aP setPos [MKT_p select 0, MKT_p select 1, 0]
+hint format ["DEBUG: in %1. Use ESTABLISH / MOVE HEADQUARTERS from the action menu.", (gmZone MKT_z) select GM_Z_NAME]
+exit

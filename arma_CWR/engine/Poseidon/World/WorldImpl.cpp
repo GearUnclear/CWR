@@ -8,6 +8,8 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
@@ -1876,6 +1878,35 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? !Guerrilla::Journal::Instance().IsEmpty() : ar.IsSubclass("GuerrillaJournal"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaJournal", Guerrilla::Journal::Instance(), 14))
+    }
+
+    // Guerrilla headquarters: election state (zone, spots, building/cache
+    // refs) + garage rows.  Same missing-subclass tolerance as above; the
+    // cache holder and the garaged hulls ride the world's building/vehicle
+    // serializers.  Save-gated like the registry (the block also carries
+    // the one-shot start-town election flag, so an unestablished campaign
+    // must not re-elect after a load).
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::GuerrillaBase::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::GuerrillaBase::Instance().IsActive() : ar.IsSubclass("GuerrillaBase"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaBase", Guerrilla::GuerrillaBase::Instance(), 14))
+    }
+
+    // Guerrilla dealer market: the seeded city assignment (rows by zone
+    // name + NPC refs, the draw seed).  Same tolerance; the dealer NPCs ride
+    // the world's vehicle serializer.  Save-gated on the class being
+    // configured (the block carries the draw seed: an unassigned market
+    // re-draws on its first tick, an assigned one keeps its towns).
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::Market::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::Market::Instance().IsConfigured() : ar.IsSubclass("GuerrillaMarket"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaMarket", Guerrilla::Market::Instance(), 14))
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

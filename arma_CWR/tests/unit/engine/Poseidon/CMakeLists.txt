@@ -384,6 +384,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_town_flags.cpp
     Game/Guerrilla/test_traffic.cpp
     Game/Guerrilla/test_stash_registry.cpp
+    Game/Guerrilla/test_guerrilla_base.cpp
+    Game/Guerrilla/test_market.cpp
     Game/Guerrilla/test_journal.cpp
     Game/Guerrilla/test_mission_script_core.cpp
     Game/Guerrilla/test_mission_world_names.cpp

@@ -343,3 +343,64 @@ class CfgGuerrillaFactions
         civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid"};
     };
 };
+
+// The dealer market (issues #27/#28): tuning + the Classic 1.99 stock. Every
+// classname is verified against Bin\CONFIG.BIN (PoseidonTools config search);
+// the engine re-probes them at load and drops what a package lacks (logged,
+// non-fatal - the Demo [Remaster] package keeps whatever subset it ships).
+// OFP magazine convention: a simple weapon IS its own magazine class, so the
+// magazine keys reuse the weapon classname; launcher grenades, hand grenades
+// and explosives are magazine-only bundles (weapon = "").
+class CfgGuerrillaMarket
+{
+    dealerShare = 0.34;          // fraction of CITY zones per dealer kind (independent draws)
+    dealerRespawnSeconds = 600;  // a killed dealer is back after this
+    hqMoveCost = 500;            // R debited by market.sqs when MOVING the HQ
+    // dealerClass falls back to the CIV descriptor's civClass1, then "Civilian";
+    // weaponDealers[] / vehicleDealers[] absent: the towns are drawn at the first tick
+
+    class Weapons
+    {
+        class AK47       { weapon = "AK47";               magazine = "AK47";              mags = 4; price = 220; };
+        class AK74       { weapon = "AK74";               magazine = "AK74";              mags = 4; price = 260; };
+        class AK47CZ     { weapon = "AK47CZ";             magazine = "AK47";              mags = 4; price = 240; };
+        class AK74SU     { weapon = "AK74SU";             magazine = "AK74";              mags = 4; price = 240; };
+        class M16        { weapon = "M16";                magazine = "M16";               mags = 4; price = 280; };
+        class HK         { weapon = "HK";                 magazine = "HK";                mags = 5; price = 300; };
+        class M16GL      { weapon = "M16GrenadeLauncher"; magazine = "M16";               mags = 4; price = 420; };
+        class AK74GL     { weapon = "AK74GrenadeLauncher"; magazine = "AK74";             mags = 4; price = 400; };
+        class GLGrenades { weapon = "";                   magazine = "GrenadeLauncher";   mags = 6; price = 90; };
+        class M21        { weapon = "M21";                magazine = "M21";               mags = 4; price = 600; };
+        class SVD        { weapon = "SVDDragunov";        magazine = "SVDDragunov";       mags = 4; price = 650; };
+        class PK         { weapon = "PK";                 magazine = "PK";                mags = 2; price = 900; };
+        class M60        { weapon = "M60";                magazine = "M60";               mags = 2; price = 950; };
+        class LAW        { weapon = "LAWLauncher";        magazine = "LAWLauncher";       mags = 2; price = 500; };
+        class RPG        { weapon = "RPGLauncher";        magazine = "RPGLauncher";       mags = 2; price = 550; };
+        class CarlGustav { weapon = "CarlGustavLauncher"; magazine = "CarlGustavLauncher"; mags = 2; price = 900; };
+        class AT4        { weapon = "AT4Launcher";        magazine = "AT4Launcher";       mags = 2; price = 900; };
+        class Strela     { weapon = "9K32Launcher";       magazine = "9K32Launcher";      mags = 1; price = 1200; };
+        class Stinger    { weapon = "AALauncher";         magazine = "AALauncher";        mags = 1; price = 1200; };
+        class Binocular  { weapon = "Binocular";          magazine = "";                            price = 60; };
+        class NVGoggles  { weapon = "NVGoggles";          magazine = "";                            price = 250; };
+        class Grenades   { weapon = "";                   magazine = "HandGrenade";       mags = 4; price = 80; };
+        class Mines      { weapon = "";                   magazine = "Mine";              mags = 2; price = 150; };
+        class Satchels   { weapon = "";                   magazine = "PipeBomb";          mags = 2; price = 200; };
+    };
+    class Vehicles
+    {
+        class Skoda      { vehicle = "Skoda";      price = 600; };
+        class Rapid      { vehicle = "Rapid";      price = 700; };
+        class Tractor    { vehicle = "Tractor";    price = 500; };
+        class Jeep       { vehicle = "Jeep";       price = 1500; };
+        class GJeep      { vehicle = "GJeep";      price = 1400; };
+        class UAZ        { vehicle = "UAZ";        price = 1400; };
+        class JeepMG     { vehicle = "JeepMG";     price = 3000; };
+        class UAZG       { vehicle = "UAZG";       price = 3000; };
+        class Truck5t    { vehicle = "Truck5t";    price = 3500; };
+        class Ural       { vehicle = "Ural";       price = 3500; };
+        class TruckV3SG  { vehicle = "TruckV3SG";  price = 3200; };
+        class M113       { vehicle = "M113";       price = 9000; };
+        class BMP        { vehicle = "BMP";        price = 12000; };
+        class T55G       { vehicle = "T55G";       price = 20000; };
+    };
+};

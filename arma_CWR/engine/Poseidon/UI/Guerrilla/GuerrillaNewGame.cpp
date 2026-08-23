@@ -6,9 +6,10 @@
 #include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // shared with ZoneRegistry::ResolveSideCollisions
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // FindGuerrillaFactionEntry (outfit cycler, issue #25)
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // CollectTownNames (START TOWN cycler, issue #16)
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
-#include <Poseidon/Input/InputSubsystem.hpp> // wheel drain for the island list (see OnSimulate)
+#include <Poseidon/Input/InputSubsystem.hpp>  // wheel drain for the island list (see OnSimulate)
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
@@ -32,8 +33,10 @@ namespace
 // that keeps the same layout.
 constexpr int kIdcOccupier = 150;
 constexpr int kIdcResistance = 151;
-// 152 is RESERVED for issue #16's gmSelStartTown cycler; the character
-// outfit cycler (issue #25) takes 153.
+// 152 is the START TOWN cycler (issue #16 M4, gmSelStartTown): the CITY zone
+// the headquarters is elected in on the first tick; "(camp)" publishes
+// nothing. The character outfit cycler (issue #25) takes 153.
+constexpr int kIdcStartTown = 152;
 constexpr int kIdcOutfit = 153;
 // 154 is the outfit-preview mannequin (issue #25 M4): a CT_OBJECT rendering
 // the resolved playerClassWarrior/playerClassCiv body for the current
@@ -63,6 +66,12 @@ constexpr float kCyclerBodyY = 0.66f;
 constexpr float kCyclerOutfitY = 0.73f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
+// The START TOWN row sits BELOW the faction pair (the shipped 0.80/0.87
+// slots stay put, the mannequin owns the column above CHARACTER). The
+// reused RscDisplaySelectIsland's OK/Cancel row is y 0.90..0.95 at x >=
+// 0.60, so the 0.02..0.34 column is free there; the hidden Wizard button
+// (x 0.05..0.40, same row) is ShowCtrl(false) by the constructor.
+constexpr float kCyclerStartTownY = 0.94f;
 
 // The preview mannequin's slot: the free stretch of the bottom-left column
 // above the CHARACTER button. Authored as a normalized-screen box like the
@@ -146,6 +155,21 @@ std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg)
             continue; // the population is ambience, never a combatant choice
         }
         out.push_back(name);
+    }
+    return out;
+}
+
+std::vector<RString> GuerrillaListStartTowns(const ParamEntry* zonesCfg, const ParamEntry* namesCfg)
+{
+    // ONE rule, owned by the registry: the cycler lists exactly the CITY
+    // zones the launched campaign will carry (authored + seeded), so a pick
+    // always resolves through ZoneRegistry::FindZoneIndex on the first tick.
+    AutoArray<RString> names;
+    Guerrilla::ZoneRegistry::CollectTownNames(zonesCfg, namesCfg, names);
+    std::vector<RString> out;
+    for (int i = 0; i < names.Size(); i++)
+    {
+        out.push_back(names[i]);
     }
     return out;
 }
@@ -858,6 +882,7 @@ void GuerrillaNewGame::InjectFactionCyclers()
         {"GuerrillaOutfit", kIdcOutfit, kCyclerOutfitY},
         {"GuerrillaOccupier", kIdcOccupier, kCyclerOccupierY},
         {"GuerrillaResistance", kIdcResistance, kCyclerResistanceY},
+        {"GuerrillaStartTown", kIdcStartTown, kCyclerStartTownY},
     };
     for (const auto& slot : slots)
     {
@@ -1059,9 +1084,38 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     UpdateFactionLabel(kIdcResistance);
     // The outfit pair is read off the (possibly re-seeded) resistance block.
     RefreshOutfitChoices();
+    // The START TOWN list is island-scoped too (the template's CITY zones +
+    // the world's Names towns).
+    RefreshStartTowns();
     // ...and the CHARACTER pick gets an explicit revalidation pass, so nothing
     // island-shaped can leave the button or the mannequin stale.
     RevalidateBodySelection();
+}
+
+void GuerrillaNewGame::RefreshStartTowns()
+{
+    // Keep the pick by NAME across the rebuild (the faction-cycler contract);
+    // a town the new island does not carry drops back to "(camp)".
+    RString keep = SelectedStartTown();
+    const ParamEntry* names = nullptr;
+    if (const ParamEntry* worlds = Pars.FindEntry("CfgWorlds"))
+    {
+        if (const ParamEntry* world = worlds->FindEntry(_islandForFactions))
+        {
+            names = world->FindEntry("Names");
+        }
+    }
+    _startTowns = GuerrillaListStartTowns(_islandZones, names);
+    _startTownSel = -1;
+    for (int i = 0; i < (int)_startTowns.size(); i++)
+    {
+        if (keep.GetLength() > 0 && stricmp(_startTowns[i], keep) == 0)
+        {
+            _startTownSel = i;
+            break;
+        }
+    }
+    UpdateFactionLabel(kIdcStartTown);
 }
 
 void GuerrillaNewGame::RevalidateBodySelection()
@@ -1188,6 +1242,29 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
         }
         return;
     }
+    if (idc == kIdcStartTown)
+    {
+        // "START TOWN: <zone>" or the "(camp)" default, which publishes
+        // nothing: the campaign opens at the authored mission.sqm start and
+        // the HQ is established later through the action menu.
+        if (_startTownSel >= 0 && _startTownSel < (int)_startTowns.size())
+        {
+            snprintf(buffer, sizeof(buffer), "START TOWN: %s", (const char*)_startTowns[_startTownSel]);
+        }
+        else
+        {
+            snprintf(buffer, sizeof(buffer), "START TOWN: (camp)");
+        }
+        if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        else if (CStatic* text = dynamic_cast<CStatic*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        return;
+    }
     // Scope qualifier for the OUTFIT row (issue #47). A CHARACTER pick beats
     // the outfit token for the PLAYER's body unconditionally —
     // ResolvePlayerBodyClass (Game/Guerrilla/OutfitSelect.cpp) returns on the
@@ -1256,6 +1333,15 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             }
             UpdateFactionLabel(idc);
             UpdateOutfitPreview();
+            break;
+        case kIdcStartTown:
+            // cycles "(camp)" -> town 1 -> ... -> town N -> "(camp)"; an
+            // empty list (no CITY zones on this island) keeps the default
+            if (!_startTowns.empty())
+            {
+                _startTownSel = _startTownSel + 1 >= (int)_startTowns.size() ? -1 : _startTownSel + 1;
+            }
+            UpdateFactionLabel(idc);
             break;
         case kIdcBody:
             // The old flat cycler is retired (issue #43): the button opens
@@ -1462,6 +1548,17 @@ RString GuerrillaNewGame::SelectedOutfit() const
     }
     // No descriptor offered an outfit pair — publish nothing so the authored
     // mission.sqm class keeps deciding (see SelectedOccupier).
+    return RString();
+}
+
+RString GuerrillaNewGame::SelectedStartTown() const
+{
+    if (_startTownSel >= 0 && _startTownSel < (int)_startTowns.size())
+    {
+        return _startTowns[_startTownSel];
+    }
+    // "(camp)" default: publish nothing, the authored start stands (see
+    // SelectedOccupier)
     return RString();
 }
 

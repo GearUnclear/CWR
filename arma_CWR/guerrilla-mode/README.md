@@ -75,8 +75,18 @@ mission/Guerrilla.Demo/
     escalation.sqs    War Level ladder + Heat decay (GREEN-gated)
     loot.sqs          loot-on-kill stash + gear unlocks
     recruit.sqs       Camp action menu (+ recruit_action.sqs dispatcher)
+    market.sqs        HQ / cache / garage / dealer action menus + the purchase
+                      debit (+ market_action.sqs dispatcher); the native
+                      GuerrillaBase + Market own the facts (CfgGuerrillaMarket
+                      in description.ext = the dealer stock)
     companions.sqs    companion XP -> rank/skill + permadeath
 ```
+
+Reference slices next to the templates: `Qrf.Abel` (alert -> QRF),
+`Undercover.Abel` (disguise) and `Market.Abel` (HQ / cache / garage /
+dealers, a 50000 R treasury and teleport debug actions) - each runs its own
+bootstrap over a byte-identical subset of `scripts/`, and each has a direct
+main-menu button once installed.
 
 **Coordinate order note:** zone `position[]` in `description.ext` is authored
 in **getPos order `[easting, northing, elevation]`** — the engine documents

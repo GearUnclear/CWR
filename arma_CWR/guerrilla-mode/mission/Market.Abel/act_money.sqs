@@ -1,0 +1,5 @@
+; debug action: top up the treasury (market.sqs stays the only DEBIT writer;
+; this is the sandbox's stand-in for economy.sqs's income tick)
+gmResources = gmResources + 10000
+hint format ["DEBUG: +10000 R. Treasury %1 R.", gmResources]
+exit

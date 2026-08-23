@@ -336,3 +336,48 @@ class CfgGuerrillaFactions
         civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "Rapid"};
     };
 };
+
+// The dealer market (issues #27/#28) on Lebanon80: @LoBo stock drawn from the
+// descriptors above (the Hizballah / IDF weapon -> magazine pairs the loot
+// keys use) plus the civilian cars the CIV descriptor fields. The engine
+// re-probes every class at load and drops what the package lacks (logged,
+// non-fatal). The LoBoammo-armed hulls need the @lobofixup patched pbos in
+// strict/autotest lanes, like the faction ladders. The dealer body is the
+// stock LoBo civilian.
+class CfgGuerrillaMarket
+{
+    dealerShare = 0.34;
+    dealerRespawnSeconds = 600;
+    hqMoveCost = 500;
+    dealerClass = "LoBo_Civ_01";
+
+    class Weapons
+    {
+        class AK47      { weapon = "LoBoAK47";           magazine = "JAM_E762_30mag";    mags = 4; price = 240; };
+        class PKM       { weapon = "LoBo_PKM";           magazine = "JAM_E762M_200mag";  mags = 2; price = 950; };
+        class RPG7      { weapon = "ICPRPG7";            magazine = "ICPRPG7Mag";        mags = 2; price = 550; };
+        class SVD       { weapon = "LoBo_SVD";           magazine = "JAM_E762_10mag";    mags = 4; price = 650; };
+        class M4A1      { weapon = "LoBo_M4A1";          magazine = "LoBoCAR15Mag";      mags = 4; price = 320; };
+        class Minimi    { weapon = "LoBoM249";           magazine = "LoBoM249Mag";       mags = 2; price = 950; };
+        class M72       { weapon = "JAM_M72LAWLauncher"; magazine = "JAM_M72ALLRocket";  mags = 2; price = 500; };
+        class SR25      { weapon = "LoBo_SR25";          magazine = "LoBo_SR25Mag";      mags = 4; price = 700; };
+        class AKMags    { weapon = "";                   magazine = "JAM_E762_30mag";    mags = 6; price = 60; };
+        class CARMags   { weapon = "";                   magazine = "LoBoCAR15Mag";      mags = 6; price = 70; };
+        class Binocular { weapon = "Binocular";          magazine = "";                            price = 60; };
+        class NVGoggles { weapon = "NVGoggles";          magazine = "";                            price = 250; };
+        class Grenades  { weapon = "";                   magazine = "HandGrenade";       mags = 4; price = 80; };
+        class Mines     { weapon = "";                   magazine = "Mine";              mags = 2; price = 150; };
+        class Satchels  { weapon = "";                   magazine = "PipeBomb";          mags = 2; price = 200; };
+    };
+    class Vehicles
+    {
+        class S1203     { vehicle = "LoBo_S1203";             price = 600; };
+        class Uaz3741   { vehicle = "LoBo_Uaz3741";           price = 700; };
+        class Skoda     { vehicle = "Skoda";                  price = 600; };
+        class Rapid     { vehicle = "Rapid";                  price = 700; };
+        class Ural      { vehicle = "LoBo_Ural_Hizballah";    price = 3200; };
+        class JeepMG    { vehicle = "LoBo_JeepMG_Hizballah";  price = 3000; };
+        class Humvee    { vehicle = "LoBoHMWV_Mag_Patrol";    price = 3200; };
+        class Zelda     { vehicle = "LoBo_Zelda";             price = 9500; };
+    };
+};

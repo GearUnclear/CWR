@@ -1011,7 +1011,7 @@ items:
   - id: guerrilla-base
     title: "Persistent guerrilla base: elected start town, enterable-building HQ, civilian-clothed guards (issue #16)"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 2
     depends_on: [engine-native-systems, faction-class-resolution, town-flags]
     gh_issues: [16]
@@ -1027,11 +1027,12 @@ items:
     log:
       - "2026-07-15: deep-plan multi-agent recon done (6 subsystems); design synthesized and filed as issue #16. Offline scan: 73 of 1327 Classic models are AI-enterable; min-NPos filter needed to exclude walk-through objects. @LoBo Sinai scan still owed before the lobo-lane tests."
       - "2026-08-05: now the gate on the whole money branch - issue #28 (cache-and-garage) requires the elected HQ, and #27 (money-sinks-dealers) sits behind #28. The owed @LoBo Sinai enterable-building scan is the cheapest thing standing between here and roughly half the open backlog by effort."
+      - "2026-08-22: M1 (election + persistence) and M4 (START TOWN cycler) LANDED under the GuerrillaBase name as the base of issues #27/#28: Game/Guerrilla/GuerrillaBase.{hpp,cpp} (+Commands) elects one HQ per campaign in any zone - best enterable building (Paths LOD, hqMinPos>=4, most positions then nearest) with the cache on its first interior AI position, else the edge-of-town outdoor fallback; gmSelStartTown from the new idc-152 cycler (ZoneRegistry::CollectTownNames = the one list rule for cycler + zone table) is resolved on the first tick and the player relocated beside the garage; serializes as GuerrillaBase. STILL OPEN from #16: the civilian-clothed guards, engine-side interior stationing, the @LoBo enterable-building scan, the Sinai/Lebanon lobo-lane e2e."
 
   - id: cache-and-garage
     title: "HQ cache + vehicle garage: stored weapons, lockable vehicles, dealer delivery (issue #28)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 2
     depends_on: [guerrilla-base, arms-stash-engine]
     gh_issues: [28]
@@ -1046,11 +1047,12 @@ items:
       the town edge, outside buildings and fences, when none is found.
     log:
       - "2026-08-05: filed. The weapons half rides the existing StashRegistry pattern (keep-when-empty holders + serialized rows). The vehicle half has no precedent in Game/Guerrilla/ - garrison units ride the world vehicle serializer, but nothing today protects an arbitrary player-parked vehicle from cleanup, so expect a new registry in the StashRegistry/TownFlags mold plus a SaveVersion bump."
+      - "2026-08-22: LANDED with #16 M1/M4 and #27 in one commit. Engine: GuerrillaBase owns the cache (a keep-when-empty WeaponHolder registered as a stash, moved with its contents on a re-establish) and the garage ring (gmGarageLock: SetLock + allowDammage false, both re-asserted every 2 s tick and on the load pass since neither is serialized - no SaveVersion bump needed, the block is presence-tolerant; rows release beyond 1.5x the ring; the horn muzzle plays the beep-beep as two OpenAndPlayOnce bursts). User decisions: HQ election = BOTH the new-game START TOWN cycler and the in-mission Establish/Move action; garaged vehicles ARE invulnerable while locked (garageInvulnerable=1). Script: scripts/market.sqs mounts the HQ / Stash / Lock-Unlock / Buy menus and is the second gmResources debit writer. Retrieval from the cache = the holder's own TAKE actions (script fallback documented in market.sqs)."
 
   - id: money-sinks-dealers
     title: "Ways to spend money: vehicle and weapon dealers seeded across cities (issue #27)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 3
     depends_on: [cache-and-garage]
     gh_issues: [27]
@@ -1061,6 +1063,7 @@ items:
       Purchases route to the HQ cache/garage for collection.
     log:
       - "2026-08-05: filed. Lands on an economy that already exists - economy.sqs runs the Resources (R) and Manpower (HR) ledger with zone-driven income ticks and the issue-#8 panic coupling, and recruit_action.sqs is the working addAction-dispatch precedent (enqueue only; the manager loop stays the single writer of the gmResources debit)."
+      - "2026-08-22: LANDED. Engine Game/Guerrilla/Market.{hpp,cpp} (+Commands): class CfgGuerrillaMarket (description.ext) = tuning + the stock (weapon/magazine rows, vehicle rows, package-probed at load, display names from the package config, dealerClass from the CIV descriptor's civClass1); at the first tick each kind goes to round(cities*0.34) (>=1) CITY zones from a seeded, salted, independent order (a town may host both; seed serialized so a reload keeps the towns), each dealer a CIV NPC on a deterministic off-road spot (cardinals vs diagonals, a LOT spot for delivered hulls), respawning after 600 s; serializes as GuerrillaMarket. Stock blocks authored for Abel/Demo (Classic 1.99 classes, every one verified against CONFIG.BIN: Mini/Trabant/Bus/G36a/Bizon/Glock/Revolver are NOT in the core config and were left out; Motorcycle IS in it but as an abstract scope-0 base, caught by the first Trident run as 'Cannot create: type is abstract' - the engine path now also drops scope<=0 vehicle rows and falls the dealer body back to Civilian), Sinai and Lebanon80 (@LoBo pairs from the descriptors). Script: market.sqs BUY menu (<=8 rows + here/HQ delivery) = the debit + WeaponHolder / createVehicle / gmGarageLock."
 
   - id: extort-solicit
     title: "Solicit/Extort: per-civilian opinion + fear, money taken from the population (issue #41)"
@@ -1084,6 +1087,28 @@ items:
     log:
       - "2026-08-05: filed. Complements money-sinks-dealers (spending); this is where the money comes from outside zone income. Both write the same gmResources scalar economy.sqs owns, so the single-writer/directional-split discipline that keeps economy.sqs and recruit.sqs from colliding has to extend to cover it."
       - "The support nudge lands on ZoneRecord::support, the same 0-100 ledger the #8 resentment path already debits - so extortion pressure and occupier atrocity share one currency of town goodwill, which is the intended tension."
+
+  - id: supply-run-ngo
+    title: "Supply run: humanitarian aid NGO contacts (2 per island) + non-violent aid distribution for town support (issue #52)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [civilian-ambience-layer, arms-stash-engine]
+    gh_issues: [52]
+    summary: >
+      The first player-side NON-VIOLENT support action. Two CITY zones per
+      island get a neutral humanitarian-aid NGO contact (a stationed CIV
+      descriptor unit + props, never on the civilians.sqs wander/cache
+      rosters). The contact hands out abstract aid consignments (no new item
+      classes); the player hauls them, weapon stowed, into a town (best value
+      in occupier-held, panicked or closed towns) and distributes them in an
+      abstract scene for a GM_fnSupportAdd gain, a diary line and a per-zone
+      cooldown, with occupier witnesses rolling a cover break / heat raise.
+      It is the undercover lane to supportFlip in a garrisoned town, the
+      goodwill mirror of extort-solicit, a non-combat use for the #28 cache
+      and a third good for the #27 dealer network. Zero C++.
+    log:
+      - "2026-08-22: filed. Grew out of a survey of non-violent resistance techniques that fit existing seams (support writer, addAction menus, undercover status/witnesses, the shakedown.sqs abstract-scene rule, the panic-ledger cooldown pattern, gmStash*). Siblings not yet filed: talk-to-civ, flyers, bribes/informants, protest."
 
   - id: unassociated-assailants
     title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
@@ -1214,6 +1239,40 @@ items:
       - "2026-08-22: sited from PoseidonTools terrain objects abel.wrp --near surveys (track from Houdan's east gate ~[7121,6081] down to a dead end ~[7574,5892]; zone sites on open ground, player start on the 66 m slope)."
       - "2026-08-22: Undercover.Abel brought onto the same contract - it had re-implemented the 4-line script policy (captive/gmUndercover/fired-EH/hint) in its own init.sqs; it now carries byte-identical scripts/lib.sqs + scripts/undercover.sqs and execs them (same hint + diary line as the campaign), hud.sqs no longer drains gmEvtUcBroken (one queue, one consumer), and the subset-core unit case covers both Qrf.* and Undercover.* families. ui/main_menu/reference_mission_undercover green after the rewire."
       - "2026-08-22: verified - PoseidonTests [missions] 28/28 (new Qrf subset-core case), tri scripting/qrf_reference_mission + ui/main_menu/reference_mission_qrf 2/2 green in 47.6 s (the whole reveal -> RED -> convoy -> stand-down chain completes in ~45 s headless). First attempt failed twice for mechanical reasons, both fixed: the scripting test lacked triEndTest (game idled to the 420 s timeout), and a perl backslash-u escape had rewritten the Classic resource-extra.cpp button sounds to uiI_ok (strict mode made the missing wss fatal on click, exit 3)."
+
+  - id: market-reference-mission
+    title: "Market reference mission: Market.Abel sandbox for the HQ / cache / garage / dealer loop + main-menu MARKET button"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [qrf-reference-mission, cache-and-garage, money-sinks-dealers]
+    summary: >
+      Fourth human-playable test slice, sibling of Qrf.Abel: Market.Abel
+      (guerrilla-mode/mission/Market.Abel) isolates the money loop on the
+      Houdan plain of Abel - a building-less resistance Camp at the player
+      start (so "Establish headquarters here" there exercises the
+      edge-of-town fallback), seedCities=1 so every named town is a CITY zone
+      the dealers are drawn over and the HQ can be elected in (Houdan, ~490 m
+      NW, is the nearest: a building HQ), a 50000 R treasury and the Classic
+      1.99 stock. HOOKED INTO the real systems: scripts/lib.sqs +
+      scripts/market.sqs + scripts/market_action.sqs are byte-identical
+      copies of the shared core (the Market.* family row in
+      test_mission_script_core.cpp pins it), driven by the native
+      GuerrillaBase + Market; only the bootstrap (init.sqs), the debug action
+      menu (status report, teleports to the nearest arms / vehicle dealer,
+      the garage, the nearest town, the Camp, +10000 R, god mode) and the
+      HUD (change-driven HQ / garage / dealer / treasury line) are
+      mission-local. Wired like its siblings: idc 126 in kReferenceMissions
+      (UI/OptionsUIApp.cpp), install-missions.ps1 Market.* prefix, the
+      Classic package's local bin/resource-extra.cpp row, ui/main_menu/
+      reference_mission_market e2e, and a new scripting/
+      market_reference_mission system test (boot -> dealers drawn -> buy here
+      -> HQ in the town -> stash / retrieve -> buy to the HQ cache + garage
+      (locked) -> unlock / relock -> move the HQ to the Camp: outdoor
+      fallback, debited, cache travels, the far hull released). The START
+      TOWN cycler has its own ui/guerrilla_start_town_e2e (Abel, idc 152 ->
+      "Village" -> launch -> HQ standing in Village, player beside it).
+    log: []
 
   - id: vehicle-controls-overhaul
     title: "Vehicle controls: mouse steering removed, permanent freelook in non-turret seats, gamepad-steering option"

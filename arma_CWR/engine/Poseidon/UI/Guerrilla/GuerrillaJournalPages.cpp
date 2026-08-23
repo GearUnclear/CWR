@@ -1,7 +1,9 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp>
 
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
@@ -386,6 +388,25 @@ JournalPageInputs GatherGuerrillaJournalInputs()
         in.undercoverWitnesses = UndercoverSystem::Instance().WitnessCount();
     }
     in.stashCount = StashRegistry::Instance().Count();
+    // headquarters (GuerrillaBase) and the dealer market
+    {
+        const GuerrillaBase& base = GuerrillaBase::Instance();
+        in.hqEstablished = base.IsEstablished();
+        in.hqZone = base.ZoneName();
+        in.hqIndoors = base.IsIndoors();
+        in.garageCount = base.GarageCount();
+        const Market& market = Market::Instance();
+        in.marketActive = market.IsActive();
+        for (int i = 0; i < market.DealerCount(); i++)
+        {
+            const DealerRecord* d = market.Dealer(i);
+            if (!d)
+            {
+                continue;
+            }
+            (d->kind == DKWeapon ? in.weaponDealers : in.vehicleDealers)++;
+        }
+    }
 
     // player position (distance ordering of targets) and cell size
     Vector3 playerPos = VZero;
@@ -600,6 +621,25 @@ void BuildGuerrillaJournalPages(CHTMLContainer* html, const Journal& journal, co
     {
         Line(html, notes, "Arms stashes", Num((float)in.stashCount));
     }
+    if (in.hqEstablished)
+    {
+        RString hq = in.hqZone.GetLength() > 0 ? in.hqZone : RString("unknown zone");
+        hq = hq + RString(in.hqIndoors ? " (building)" : " (outdoors)");
+        if (in.garageCount > 0)
+        {
+            hq = hq + RString(", ") + Num((float)in.garageCount) + RString(" vehicle(s) garaged");
+        }
+        Line(html, notes, "Headquarters", hq);
+    }
+    else
+    {
+        Line(html, notes, "Headquarters", "none - establish one");
+    }
+    if (in.marketActive)
+    {
+        Line(html, notes, "Dealers",
+             Num((float)in.weaponDealers) + RString(" arms / ") + Num((float)in.vehicleDealers) + RString(" vehicle"));
+    }
     for (int i = 0; i < journal.StatusCount(); i++)
     {
         Line(html, notes, journal.Status(i).key, journal.Status(i).text);
@@ -696,6 +736,14 @@ void BuildGuerrillaJournalPages(CHTMLContainer* html, const Journal& journal, co
     {
         Para(html, plan, RString("Lie low near ") + in.heatZone + RString(": Heat is high there."));
         steps++;
+    }
+    if (!in.hqEstablished)
+    {
+        // standing advice, not a tactical step: it does not count against
+        // the scout-the-island fallback below
+        Para(html, plan,
+             "Establish a headquarters: walk into a town (or the Camp) and use the action menu. It gives you a "
+             "weapon cache and a garage where vehicles can be locked away.");
     }
     if (steps == 0)
     {

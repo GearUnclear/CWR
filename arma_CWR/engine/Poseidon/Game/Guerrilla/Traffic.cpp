@@ -789,24 +789,11 @@ Transport* Traffic::CreateTrafficVehicle(RString type, Vector3Par where, Vector3
     return transport;
 }
 
-// mirrors GroupCreate (GameStateExtWorldConfig.cpp:693) / GarrisonCache
+// the shared Guerrilla group helper (ZoneRegistry.hpp) on the side's center,
+// created on demand - mirrors GroupCreate (GameStateExtWorldConfig.cpp:693)
 AIGroup* Traffic::CreateTrafficGroup(const char* sideName) const
 {
-    AICenter* center = EnsureSideCenter(sideName);
-    if (!center || center->NGroups() >= MaxGroups)
-    {
-        return nullptr;
-    }
-    Ref<AIGroup> group = new AIGroup();
-    center->AddGroup(group);
-    group->AddFirstWaypoint(VZero);
-
-    Mission mis;
-    mis._action = Mission::Arcade;
-    center->SendMission(group, mis);
-
-    GetNetworkManager().CreateObject(group);
-    return group;
+    return CreateSideGroup(EnsureSideCenter(sideName));
 }
 
 // create one crewman in grp next to the hull and seat him; null when the

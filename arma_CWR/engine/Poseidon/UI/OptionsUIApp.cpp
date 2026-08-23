@@ -184,6 +184,7 @@ static constexpr int kLangRotationCount = sizeof(kLangRotation) / sizeof(kLangRo
 constexpr int IDC_MAIN_REF_SHOWCASE = 123;
 constexpr int IDC_MAIN_REF_UNDERCOVER = 124;
 constexpr int IDC_MAIN_REF_QRF = 125;
+constexpr int IDC_MAIN_REF_MARKET = 126;
 
 static const struct
 {
@@ -194,6 +195,7 @@ static const struct
     {IDC_MAIN_REF_SHOWCASE, "SHOWCASE", "Showcase.Abel"},
     {IDC_MAIN_REF_UNDERCOVER, "UNDERCOVER", "Undercover.Abel"},
     {IDC_MAIN_REF_QRF, "QRF", "Qrf.Abel"},
+    {IDC_MAIN_REF_MARKET, "MARKET", "Market.Abel"},
 };
 
 // Same two existence probes the Guerrilla new-game launch path uses
@@ -986,6 +988,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 RString resistance = disp->SelectedResistance();
                 RString outfit = disp->SelectedOutfit();
                 RString playerClass = disp->SelectedPlayerClass();
+                RString startTown = disp->SelectedStartTown();
 
                 // The template mission "Guerrilla.<World>", resolved the same
                 // way the single-mission browser resolves its entries: a PBO
@@ -1124,6 +1127,17 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                     GGameState.VarSet(kGuerrillaVarPlayerClass, GameValue(playerClass));
                     GameVariable varPlayerClass(kGuerrillaVarPlayerClass, GameValue(playerClass));
                     GStats._campaign.AddVariable(varPlayerClass);
+                }
+                // Start town (issue #16 M4): the zone name the headquarters
+                // is elected in on the first tick (GuerrillaBase); empty
+                // while the cycler sits on "(camp)" - publish nothing then,
+                // so the authored start stands and the in-mission action is
+                // the only way to establish an HQ.
+                if (startTown.GetLength() > 0)
+                {
+                    GGameState.VarSet(kGuerrillaVarStartTown, GameValue(startTown));
+                    GameVariable varStartTown(kGuerrillaVarStartTown, GameValue(startTown));
+                    GStats._campaign.AddVariable(varStartTown);
                 }
 
                 Display::OnChildDestroyed(idd, exit);

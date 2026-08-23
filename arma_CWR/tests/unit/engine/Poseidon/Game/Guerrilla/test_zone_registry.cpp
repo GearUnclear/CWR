@@ -1695,6 +1695,102 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
     std::filesystem::remove(archivePath);
 }
 
+TEST_CASE("ZoneRegistry - CollectTownNames lists the campaign's CITY zones: authored first, then seeded",
+          "[game][guerrilla]")
+{
+    // The START TOWN cycler's list rule. Village is an authored CITY sitting on
+    // top of the Houdan Names entry (deduped by distance), NearCamp is ~141 m
+    // from the explicit Camp, Sainte 50 m from the authored OUTPOST (every
+    // authored zone counts for the dedup, as in SeedCityZones), LeVille is an
+    // Arma-style typed city, Rocher a typed non-town, Arudy a plain town.
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    seedCities = 1;\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Camp    { name=\"Camp\";    type=\"CAMP\"; owner=\"GUER\"; "
+                         "position[]={6500.0, 6500.0, 100.0}; };\n"
+                         "        class Village { name=\"Village\"; type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={3500.0, 4200.0, 35.0}; };\n"
+                         "        class Post    { type=\"OUTPOST\"; owner=\"EAST\"; "
+                         "position[]={9000.0, 9050.0, 10.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class Names\n"
+                         "{\n"
+                         "    class Houdan   { name=\"Houdan\";   position[]={3500.0, 4200.0}; };\n"
+                         "    class NearCamp { name=\"NearCamp\"; position[]={6600.0, 6400.0}; };\n"
+                         "    class Sainte   { name=\"\";         position[]={9000.0, 9000.0}; };\n"
+                         "    class LeVille  { name=\"Le Ville\"; type=\"NameCity\"; "
+                         "position[]={12000.0, 12000.0}; };\n"
+                         "    class Rocher   { name=\"Rocher\";   type=\"RockArea\"; "
+                         "position[]={15000.0, 15000.0}; };\n"
+                         "    class Arudy    { name=\"Arudy\";    position[]={2000.0, 9000.0}; };\n"
+                         "};\n";
+
+    SECTION("authored CITY zones first, then the seeded Names towns in Names order")
+    {
+        ParamFile file;
+        QIStream in(config, strlen(config));
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("Names"), names);
+        REQUIRE(names.Size() == 3);
+        CHECK(Str(names[0]) == "Village");
+        CHECK(Str(names[1]) == "Le Ville");
+        CHECK(Str(names[2]) == "Arudy");
+    }
+
+    SECTION("the list IS the registry's CITY zone table, in its order")
+    {
+        RegistryFixture f;
+        f.Load(config, nullptr, nullptr, "Names");
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), names);
+        int cities = 0;
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            const ZoneRecord* z = f.registry.GetZone(i);
+            if (stricmp(z->type, "CITY") != 0)
+            {
+                continue;
+            }
+            REQUIRE(cities < names.Size());
+            CHECK(Str(names[cities]) == Str(z->name));
+            cities++;
+        }
+        CHECK(cities == names.Size());
+    }
+
+    SECTION("seedCities off: the authored CITY zones only")
+    {
+        std::string off(config);
+        off.replace(off.find("seedCities = 1"), strlen("seedCities = 1"), "seedCities = 0");
+        ParamFile file;
+        QIStream in(off.c_str(), off.size());
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("Names"), names);
+        REQUIRE(names.Size() == 1);
+        CHECK(Str(names[0]) == "Village");
+    }
+
+    SECTION("null configs")
+    {
+        ParamFile file;
+        QIStream in(config, strlen(config));
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(nullptr, nullptr, names);
+        CHECK(names.Size() == 0);
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), nullptr, names);
+        REQUIRE(names.Size() == 1);
+        CHECK(Str(names[0]) == "Village");
+        ZoneRegistry::CollectTownNames(nullptr, file.FindEntry("Names"), names);
+        CHECK(names.Size() == 0); // no zones config = no seedCities = nothing
+    }
+}
+
 TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names", "[game][guerrilla]")
 {
     // Houdan/Sainte are OFP-style entries (no type; Sainte with the common

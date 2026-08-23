@@ -56,6 +56,12 @@ constexpr const char* kGuerrillaVarOutfit = "gmSelOutfit";
 // stays on the OUTFIT family axis (gmSelOutfit) and its *Civ descriptor
 // keys.
 constexpr const char* kGuerrillaVarPlayerClass = "gmSelPlayerClass";
+// Start town (issue #16 M4): the CITY zone name the headquarters is elected
+// in on the first tick of the campaign (Game/Guerrilla/GuerrillaBase), the
+// player relocated beside it. Published only when the cycler left its
+// "(camp)" default - an untouched screen publishes nothing and the authored
+// mission.sqm start stands (the in-mission action establishes an HQ later).
+constexpr const char* kGuerrillaVarStartTown = "gmSelStartTown";
 
 // Pure list builders (unit-testable with an injected ParamFile):
 // islands = subclass names of CfgWorldList whose world file exists (the same
@@ -69,6 +75,15 @@ std::vector<RString> GuerrillaListIslands(const ParamEntry* worldList, const std
 // null), EMPTY — no built-in entry is invented, so the launch path can tell
 // "no real faction config" apart from a real choice and publish nothing.
 std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg);
+
+// start towns = the CITY zone names the island's campaign will carry, in
+// zone-table order: the template's authored CITY zones, then - when its
+// seedCities key is set - the world's Names towns the registry would seed
+// (ZoneRegistry::CollectTownNames, the single source of that rule). zonesCfg
+// is the island template's CfgGuerrillaZones, namesCfg the world's CfgWorlds
+// >> <island> >> Names; either may be null. EMPTY when the template authors
+// no CITY zone and seeds none (the cycler shows "(camp)" only).
+std::vector<RString> GuerrillaListStartTowns(const ParamEntry* zonesCfg, const ParamEntry* namesCfg);
 
 // The template mission base the launch path resolves for an island:
 // "missions\Guerrilla.<island>" (append ".pbo" for the banked form or
@@ -315,6 +330,10 @@ class GuerrillaNewGame : public Display
     // byte-identically to the pre-select flow (the SelectedOccupier
     // contract).
     RString SelectedPlayerClass() const;
+    // The START TOWN pick: a CITY zone name of the selected island's
+    // campaign, EMPTY while the cycler sits on its "(camp)" default - the
+    // launch path publishes nothing then (the SelectedOccupier contract).
+    RString SelectedStartTown() const;
 
   protected:
     void InjectFactionCyclers();
@@ -384,6 +403,18 @@ class GuerrillaNewGame : public Display
     // back here through OnChildDestroyed.
     std::vector<GuerrillaBodyChoice> _bodies;
     int _bodySel = -1;
+    // Start town (issue #16 M4): the selected island's CITY zone names
+    // (GuerrillaListStartTowns over the template's zones + the world's
+    // Names), rebuilt with the island; -1 = the "(camp)" default, which
+    // publishes nothing. Kept by NAME across an island change when the new
+    // island carries the same town (it never does across real islands, so
+    // in practice an island change resets it).
+    std::vector<RString> _startTowns;
+    int _startTownSel = -1;
+    // Recompute _startTowns for the CURRENT island (called from
+    // RefreshFactionsForIsland), preserving the pick by name; refreshes the
+    // label when the control exists.
+    void RefreshStartTowns();
 };
 
 } // namespace Poseidon

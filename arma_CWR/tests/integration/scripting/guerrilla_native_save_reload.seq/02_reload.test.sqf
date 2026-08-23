@@ -28,6 +28,9 @@ triAssertEq [((gmZone gsOut) select 2), gmOccupierSide]
 // recruit starter objective still ACTIVE, no stamped status line
 triAssertEq [(gmJournalObjectiveState "firstRecruit"), "ACTIVE"]
 gsJFresh = gmJournalCount
+// no start town was picked (direct launch): the fresh boot has no HQ
+triAssert [not gmHqEstablished]
+triAssertEq [gmGarageCount, 0]
 
 // -- restore phase 1's binary save from the shared UserDir/Saved/Tmp/gnat.fps -
 triAssertEq [(triLoadGame "gnat"), "OK"]
@@ -83,6 +86,23 @@ triAssertEq [(format ["%1", isNull gsCar]), "false"]
 triAssertEq [(format ["%1", gsCar in gmTrafficVehicles]), "true"]
 triAssertEq [((gmTrafficInfo gsCar) select 0), "civ"]
 triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
+
+// -- DIFF: headquarters (GuerrillaBase subclass): the election came back by
+//    value, the garaged Jeep's ref resolved and its lock + invulnerability
+//    were re-asserted on the load pass, the cache holder (a world building)
+//    still carries the rifle; the dealer draw (GuerrillaMarket subclass) kept
+//    the same count and the same first town (the seed rides the block) -------
+triAssert [gmHqEstablished]
+triAssertEq [gmHqZone, "Village"]
+triAssertEq [gmHqMoveCount, 0]
+triAssertEq [(format ["%1", isNull gsJeep]), "false"]
+triAssertEq [gmGarageCount, 1]
+triAssert [gmGarageHas gsJeep]
+triAssert [locked gsJeep]
+triAssertEq [(format ["%1", isNull gmHqCache]), "false"]
+triAssert ["AK47" in (weaponCargo gmHqCache)]
+triAssertEq [gmDealerCount, gsDealers]
+triAssertEq [((gmDealer 0) select 0), gsDealerZone]
 
 // -- managers keep ticking after the load (handle-prune works): both loop
 //    counters advance, and the consumer drains the stamped NULL-handle kill

@@ -1,0 +1,9 @@
+; debug action: teleport next to the nearest VEHICLE dealer
+MKT_i = gmDealerNearest ["VEHICLE", getPos aP]
+? MKT_i < 0 : hint "No vehicle dealer yet - the market assigns its dealers on the first tick."
+? MKT_i < 0 : exit
+MKT_rec = gmDealer MKT_i
+MKT_p = MKT_rec select 2
+aP setPos [(MKT_p select 0) + 4, (MKT_p select 1) + 4, 0]
+hint format ["DEBUG: at the vehicle dealer in %1. Walk up to him for the BUY menu; bought hulls land on his lot (or in the HQ garage).", MKT_rec select 0]
+exit

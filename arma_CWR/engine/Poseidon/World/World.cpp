@@ -57,6 +57,8 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
@@ -1727,6 +1729,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.
         Guerrilla::StashRegistry::Instance().Simulate(deltaT);
+        // Guerrilla headquarters (cache + garage ring, start-town election,
+        // beep cue) - inactive with the registry; garage pass throttles to
+        // GuerrillaBase::TickInterval.
+        Guerrilla::GuerrillaBase::Instance().Simulate(deltaT);
+        // Guerrilla dealer market - inactive without CfgGuerrillaMarket or
+        // the registry; throttles itself to Market::TickInterval.
+        Guerrilla::Market::Instance().Simulate(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 

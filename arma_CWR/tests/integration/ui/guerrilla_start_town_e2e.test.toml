@@ -1,0 +1,15 @@
+# Guerrilla Mode START TOWN cycler (issue #16 M4), end to end. No mission= -
+# boots to the main menu and drives GUERRILLA -> Abel -> START TOWN (idc 152)
+# -> launch, then asserts the published gmSelStartTown, the headquarters the
+# engine elected there on the first tick and the player relocated beside it.
+#
+# PRECONDITION: guerrilla-mode/install-missions.ps1 has been run - the launch
+# path resolves "missions\Guerrilla.Abel" relative to the game data dir. Full
+# CWA 1.99 data only (Abel ships in the Classic package's Worlds).
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+# menu flow + Abel world load + the first-tick election (a building scan of
+# the town and the ring sampling)
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev"]

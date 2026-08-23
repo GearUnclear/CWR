@@ -69,6 +69,15 @@ struct JournalPageInputs
     int cellSize = 0; // units in the player's group, player included
     int stashCount = 0;
 
+    // headquarters (GuerrillaBase) + dealer market (Market)
+    bool hqEstablished = false;
+    RString hqZone;          // zone name while established
+    bool hqIndoors = false;  // building HQ vs edge-of-town
+    int garageCount = 0;     // vehicles locked in the garage
+    bool marketActive = false;
+    int weaponDealers = 0;
+    int vehicleDealers = 0;
+
     // stock objective icons need a texture loader; off in unit tests
     bool useImages = false;
 };

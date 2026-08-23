@@ -15,6 +15,7 @@
 
 class ParamArchive;
 class AICenter;
+class AIGroup;
 
 namespace Poseidon
 {
@@ -273,6 +274,21 @@ class ZoneRegistry : public SerializeClass
     RString GetEventHandler(ZoneEventType type) const;
     static int EventTypeFromName(const char* name); // -1 when unknown
 
+    // pure town enumeration (unit-tested; no world access) -------------------
+    // One Names entry (CfgWorlds >> <world> >> Names) -> (name, pos) when it
+    // is a town SeedCityZones would seed: type-less OFP entries and the
+    // city-like Arma types pass, name falls back to the class name, the 2D
+    // position[] {x, z} maps to engine axes with elevation 0.
+    static bool NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3& pos);
+    // The town names a campaign on this zones config + world Names class
+    // carries as CITY zones, in zone-table order: the authored CITY zones
+    // (config order), then - only when seedCities is set - every Names town
+    // SeedCityZones would seed (same filter, same name / 300 m dedup against
+    // the authored zones and the towns already collected, same MaxZones
+    // cap).  The new-game START TOWN cycler lists exactly this, so a pick
+    // always names a zone of the launched campaign.  Either entry may be null.
+    static void CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out);
+
     // campaign load notification: queued by Serialize at the end of a load,
     // consumed by the next Simulate tick, which dispatches the
     // "campaignLoaded" handler with _this = [loadedSaveVersion].  Replaces
@@ -392,6 +408,14 @@ AICenter* FindSideCenter(const char* sideName);
 // center has to be created on demand - mirrors CenterCreate
 // (GameStateExtWorldConfig.cpp).  Null on an unknown side name or no world.
 AICenter* EnsureSideCenter(const char* sideName);
+
+// A fresh empty AIGroup on the center, sent an Arcade mission and announced
+// to the network layer - mirrors GroupCreate (GameStateExtWorldConfig.cpp).
+// Null on a null center or when the center is at MaxGroups.  Shared by
+// GarrisonCache (garrisons), Traffic (crews), Market (dealers) and
+// GuerrillaBase; every Guerrilla spawner builds its groups through this one
+// helper so the group bookkeeping stays in one place.
+AIGroup* CreateSideGroup(AICenter* center);
 
 } // namespace Guerrilla
 } // namespace Poseidon
