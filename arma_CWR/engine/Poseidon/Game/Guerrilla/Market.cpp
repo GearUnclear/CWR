@@ -884,7 +884,11 @@ void Market::Simulate(float deltaT)
         if (row.respawnIn <= 0)
         {
             SpawnDealer(row);
-            if (!row.npc.GetLink())
+            // a failed spawn leaves row.npc on the old corpse (the link only
+            // nulls when the body is deleted) - re-check aliveness, not the link
+            Person* fresh = dyn_cast<Person>(row.npc.GetLink());
+            AIUnit* freshUnit = fresh ? fresh->Brain() : nullptr;
+            if (!freshUnit || freshUnit->GetLifeState() != AIUnit::LSAlive)
             {
                 row.respawnIn = _tuning.dealerRespawnSeconds; // try again later
             }

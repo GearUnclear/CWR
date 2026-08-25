@@ -23,8 +23,12 @@ MKT_hW = gmDealerNearest ["WEAPON", getPos aP]
 MKT_hV = gmDealerNearest ["VEHICLE", getPos aP]
 MKT_hWd = "-"
 MKT_hVd = "-"
-? MKT_hW >= 0 : MKT_hWd = format ["%1 (%2 m)", (gmDealer MKT_hW) select 0, (getPos aP) distance ((gmDealer MKT_hW) select 2)]
-? MKT_hV >= 0 : MKT_hVd = format ["%1 (%2 m)", (gmDealer MKT_hV) select 0, (getPos aP) distance ((gmDealer MKT_hV) select 2)]
+; whole metres: readable, and the change-driven repaint stays quiet while standing still
+MKT_hE = 0
+? MKT_hW >= 0 : MKT_hE = (getPos aP) distance ((gmDealer MKT_hW) select 2)
+? MKT_hW >= 0 : MKT_hWd = format ["%1 (%2 m)", (gmDealer MKT_hW) select 0, MKT_hE - (MKT_hE mod 1)]
+? MKT_hV >= 0 : MKT_hE = (getPos aP) distance ((gmDealer MKT_hV) select 2)
+? MKT_hV >= 0 : MKT_hVd = format ["%1 (%2 m)", (gmDealer MKT_hV) select 0, MKT_hE - (MKT_hE mod 1)]
 MKT_hLine = MKT_hLine + format ["\ndealers: %1   arms: %2   vehicles: %3   treasury: %4 R", gmDealerCount, MKT_hWd, MKT_hVd, gmResources]
 ? MKT_hLine == MKT_hLast : goto "loop"
 MKT_hLast = MKT_hLine

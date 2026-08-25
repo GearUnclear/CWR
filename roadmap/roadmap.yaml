@@ -1063,6 +1063,7 @@ items:
       Purchases route to the HQ cache/garage for collection.
     log:
       - "2026-08-05: filed. Lands on an economy that already exists - economy.sqs runs the Resources (R) and Manpower (HR) ledger with zone-driven income ticks and the issue-#8 panic coupling, and recruit_action.sqs is the working addAction-dispatch precedent (enqueue only; the manager loop stays the single writer of the gmResources debit)."
+      - "2026-08-24: review/polish pass over the landing: Market::Simulate's failed-respawn check read the row's npc link, which still points at the CORPSE after a dealer dies (an OLink only nulls on delete), so a failed respawn (group cap, missing body class) left respawnIn <= 0 and re-logged 'dealer is gone' every cycle instead of re-arming the timer - the check now re-tests aliveness. Unit [guerrilla] 159/159 + the market/start-town/menu/save-reload Trident lanes re-verified green."
       - "2026-08-22: LANDED. Engine Game/Guerrilla/Market.{hpp,cpp} (+Commands): class CfgGuerrillaMarket (description.ext) = tuning + the stock (weapon/magazine rows, vehicle rows, package-probed at load, display names from the package config, dealerClass from the CIV descriptor's civClass1); at the first tick each kind goes to round(cities*0.34) (>=1) CITY zones from a seeded, salted, independent order (a town may host both; seed serialized so a reload keeps the towns), each dealer a CIV NPC on a deterministic off-road spot (cardinals vs diagonals, a LOT spot for delivered hulls), respawning after 600 s; serializes as GuerrillaMarket. Stock blocks authored for Abel/Demo (Classic 1.99 classes, every one verified against CONFIG.BIN: Mini/Trabant/Bus/G36a/Bizon/Glock/Revolver are NOT in the core config and were left out; Motorcycle IS in it but as an abstract scope-0 base, caught by the first Trident run as 'Cannot create: type is abstract' - the engine path now also drops scope<=0 vehicle rows and falls the dealer body back to Civilian), Sinai and Lebanon80 (@LoBo pairs from the descriptors). Script: market.sqs BUY menu (<=8 rows + here/HQ delivery) = the debit + WeaponHolder / createVehicle / gmGarageLock."
 
   - id: extort-solicit
@@ -1272,7 +1273,8 @@ items:
       fallback, debited, cache travels, the far hull released). The START
       TOWN cycler has its own ui/guerrilla_start_town_e2e (Abel, idc 152 ->
       "Village" -> launch -> HQ standing in Village, player beside it).
-    log: []
+    log:
+      - "2026-08-24: polish pass: hud.sqs and act_status.sqs round dealer distances to whole metres (raw floats made the readout noisy and kept the change-driven titleText repainting while standing still); installed copy refreshed via install-missions.ps1."
 
   - id: vehicle-controls-overhaul
     title: "Vehicle controls: mouse steering removed, permanent freelook in non-turret seats, gamepad-steering option"

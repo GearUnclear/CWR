@@ -12,7 +12,8 @@ MKT_sI = 0
 MKT_sR = gmDealer MKT_sI
 MKT_sA = "dead / not yet spawned"
 ? (not (isNull (MKT_sR select 3))) and (alive (MKT_sR select 3)) : MKT_sA = "open"
-MKT_sT = MKT_sT + format ["\n  %1 dealer in %2: %3, %4 m from you", MKT_sR select 1, MKT_sR select 0, MKT_sA, (getPos aP) distance (MKT_sR select 2)]
+MKT_sD = (getPos aP) distance (MKT_sR select 2)
+MKT_sT = MKT_sT + format ["\n  %1 dealer in %2: %3, %4 m from you", MKT_sR select 1, MKT_sR select 0, MKT_sA, MKT_sD - (MKT_sD mod 1)]
 MKT_sI = MKT_sI + 1
 goto "dw"
 #dd
