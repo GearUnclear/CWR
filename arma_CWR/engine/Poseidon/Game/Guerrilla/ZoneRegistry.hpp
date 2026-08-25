@@ -417,5 +417,10 @@ AICenter* EnsureSideCenter(const char* sideName);
 // helper so the group bookkeeping stays in one place.
 AIGroup* CreateSideGroup(AICenter* center);
 
+// Script-owned campaign war level ("gmwarlevel"); 1 when the world, game
+// state or variable is missing (matches the init.sqs default).  Shared by
+// GarrisonCache (garrison tiers) and Traffic (convoy scaling, curfew).
+float ReadWarLevel();
+
 } // namespace Guerrilla
 } // namespace Poseidon

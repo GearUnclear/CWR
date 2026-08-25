@@ -286,26 +286,6 @@ static bool IsOccupierOwned(const ZoneRegistry& registry, const ZoneRecord& z)
     return registry.FactionTierClass(z.owner, 1.0f).GetLength() > 0;
 }
 
-// script-owned war level; 1 when undefined (matches init.sqs default)
-static float ReadWarLevel()
-{
-    if (!GWorld)
-    {
-        return 1.0f;
-    }
-    GameState* gstate = GWorld->GetGameState();
-    if (!gstate)
-    {
-        return 1.0f;
-    }
-    GameValue value = gstate->VarGet("gmwarlevel");
-    if (value.GetType() != GameScalar)
-    {
-        return 1.0f;
-    }
-    return (float)value;
-}
-
 static Vector3 RandomNear(Vector3Par center, float radius)
 {
     float x = center.X() + (GRandGen.RandomValue() * 2.0f - 1.0f) * radius;

@@ -119,9 +119,29 @@ AIGroup* CreateSideGroup(AICenter* center)
     return group;
 }
 
+// script-owned war level; 1 when undefined (matches the init.sqs default)
+float ReadWarLevel()
+{
+    if (!GWorld)
+    {
+        return 1.0f;
+    }
+    GameState* gstate = GWorld->GetGameState();
+    if (!gstate)
+    {
+        return 1.0f;
+    }
+    GameValue value = gstate->VarGet("gmwarlevel");
+    if (value.GetType() != GameScalar)
+    {
+        return 1.0f;
+    }
+    return (float)value;
+}
+
 // script/campaign global published by the new-game UI (OptionsUIApp VarSets
-// kGuerrillaVarOccupier / kGuerrillaVarResistance); read like GarrisonCache's
-// ReadWarLevel - VarGet with the lowercased name, nil tolerated
+// kGuerrillaVarOccupier / kGuerrillaVarResistance); read like ReadWarLevel -
+// VarGet with the lowercased name, nil tolerated
 static RString ReadSideSelection(const char* lowercaseName)
 {
     if (!GWorld)

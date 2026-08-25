@@ -4,12 +4,13 @@
 // life between the zones: civilian cars driving town-to-town, occupier
 // patrol vehicles between occupier-held zones and the occasional occupier
 // supply convoy.  Native C++ in the GarrisonCache / TownFlags mold: a pure,
-// unit-testable decision core (spawn rolls, route picking, spawn-point
-// selection, the commandeer predicate, despawn/stall rules) under a thin
-// world layer (group + vehicle creation, seating, doMove-style route legs,
-// the commandeer sequence, cleanup) with Serialize and a *Commands.cpp script
-// surface.  Script stays a thin handler layer (init.sqs registers event
-// handlers; civilians.sqs consumes the driverKilled ledger tuples).
+// unit-testable decision core (spawn rolls, time-of-day/alert/curfew/weather
+// modulation, route picking, spawn-point selection, the commandeer predicate,
+// despawn/stall rules) under a thin world layer (group + vehicle creation,
+// seating, doMove-style route legs, the commandeer sequence, cleanup) with
+// Serialize and a *Commands.cpp script surface.  Script stays a thin handler
+// layer (init.sqs registers event handlers; civilians.sqs consumes the
+// driverKilled ledger tuples).
 //
 // Commandeer: a civilian car that meets the real player standing in its
 // lane ahead, or a player pointing a weapon at it, stops; the driver bails
@@ -56,6 +57,13 @@ struct TrafficTuning
     float patrolChance = 0.25f;
     float convoyChance = 0.04f;
     float convoyWarScale = 0.5f;          // convoy chance grows with (warLevel - 1)
+    float civNightScale = 0.1f;           // civ chance factor outside the day window
+    float dayStart = 6.0f / 24.0f;        // day-fraction the civ day window opens...
+    float dayEnd = 21.0f / 24.0f;         // ... and closes
+    float alertPatrolBoost = 0.5f;        // patrol chance +this on a YELLOW/RED origin
+    float curfewWarLevel = 3.0f;          // curfew arms at this war level
+    float curfewPatrolBoost = 2.0f;       // patrol chance factor under curfew
+    float rainCivFade = 0.6f;             // civ chance -this at full rain
     float stallTimeout = 90.0f;           // s of < 5 m movement before a stalled car is torn down
     float arriveRadius = 60.0f;           // m to the destination road point
     int maxLegs = 3;                      // re-dispatches while the player is still near
@@ -106,7 +114,22 @@ struct TrafficDecisionInput
     bool hasPatrolRoute = false;
     bool hasConvoyRoute = false;
     float warLevel = 1.0f;
-    float roll = 0.0f; // uniform [0,1)
+    float roll = 0.0f;     // uniform [0,1)
+    float civScale = 1.0f; // ModulationFactors outputs (1 = neutral)
+    float patrolScale = 1.0f;
+};
+
+// Per-pass world observations for the modulation pre-stage.  Defaults are
+// the neutral case (noon, clear, GREEN, war 1): ModulationFactors leaves
+// both scales at 1 and DecideSpawn behaves exactly as unmodulated.
+struct TrafficModulationInput
+{
+    float dayFraction = 0.5f; // wall clock, [0,1)
+    float nightEffect = 0.0f; // sun darkness, 0 day .. 1 night
+    float rain = 0.0f;        // [0,1]
+    float warLevel = 1.0f;
+    int originAlertCiv = 0;      // civ route origin's AlertState (0 = ASGreen)
+    bool originOccupied = false; // ... and whether the occupier owns it
 };
 
 // One zone as the pure route picker sees it.
@@ -175,6 +198,15 @@ class Traffic : public SerializeClass
     // convoy chance grows with the war level, clamped to ConvoyChanceCap
     static constexpr float ConvoyChanceCap = 0.3f;
     static float ConvoyChance(const TrafficTuning& tuning, float warLevel);
+    // per-kind chance scale factors from time of day, alert, curfew and
+    // weather, composed multiplicatively; civScale ends in [0,1], patrolScale
+    // in [0,inf) (DecideSpawn clamps the resulting chance).  Neutral inputs
+    // leave both at 1.
+    static constexpr float DayRampFraction = 2.0f / 24.0f; // trapezoid edge ramp
+    static constexpr float AlertYellowCivScale = 0.4f;
+    static constexpr float CurfewNightEffect = 0.5f; // darkness gate, agrees with the headlight system
+    static void ModulationFactors(const TrafficModulationInput& in, const TrafficTuning& tuning, float& civScale,
+                                  float& patrolScale);
     // route endpoints from the candidate table.  civ: CITY within radius of
     // the player -> another CITY 800..5000 m away (fallback any other CITY);
     // patrol: occupier-owned zone within radius -> another occupier-owned

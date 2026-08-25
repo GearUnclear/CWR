@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
-#include <Poseidon/Game/Guerrilla/Undercover.hpp> // ClassifyWeaponShow
+#include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // GetZoneState (modulation)
+#include <Poseidon/Game/Guerrilla/Undercover.hpp>   // ClassifyWeaponShow
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -8,9 +9,13 @@
 #include <Evaluator/express.hpp>                   // GameState / GameValue (event dispatch, war level)
 #include <Poseidon/Game/Commands/GameStateExt.hpp> // GameValueExt
 
+#include <Poseidon/Core/Global.hpp> // Glob.clock (wall-clock modulation)
+
 #include <Poseidon/World/World.hpp>
-#include <Poseidon/World/Terrain/Landscape.hpp> // GLOB_LAND surface Y
-#include <Poseidon/World/Terrain/Roads.hpp>     // GRoadNet
+#include <Poseidon/World/Scene/Scene.hpp>                  // GScene (sun darkness)
+#include <Poseidon/World/Terrain/Landscape.hpp>            // GLOB_LAND surface Y, rain
+#include <Poseidon/World/Terrain/Roads.hpp>                // GRoadNet
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // LightSun::NightEffect
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp> // Man
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
@@ -128,6 +133,13 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.patrolChance = zonesCfg->ReadValue("trafficPatrolChance", t.patrolChance);
     t.convoyChance = zonesCfg->ReadValue("trafficConvoyChance", t.convoyChance);
     t.convoyWarScale = zonesCfg->ReadValue("trafficConvoyWarScale", t.convoyWarScale);
+    t.civNightScale = zonesCfg->ReadValue("trafficCivNightScale", t.civNightScale);
+    t.dayStart = zonesCfg->ReadValue("trafficDayStart", t.dayStart);
+    t.dayEnd = zonesCfg->ReadValue("trafficDayEnd", t.dayEnd);
+    t.alertPatrolBoost = zonesCfg->ReadValue("trafficAlertPatrolBoost", t.alertPatrolBoost);
+    t.curfewWarLevel = zonesCfg->ReadValue("trafficCurfewWarLevel", t.curfewWarLevel);
+    t.curfewPatrolBoost = zonesCfg->ReadValue("trafficCurfewPatrolBoost", t.curfewPatrolBoost);
+    t.rainCivFade = zonesCfg->ReadValue("trafficRainCivFade", t.rainCivFade);
     t.stallTimeout = zonesCfg->ReadValue("trafficStallTimeout", t.stallTimeout);
     t.arriveRadius = zonesCfg->ReadValue("trafficArriveRadius", t.arriveRadius);
     t.maxLegs = toInt(zonesCfg->ReadValue("trafficMaxLegs", (float)t.maxLegs));
@@ -339,6 +351,91 @@ float Traffic::ConvoyChance(const TrafficTuning& tuning, float warLevel)
     return chance;
 }
 
+// time-of-day trapezoid: civNightScale outside [dayStart, dayEnd], a linear
+// ramp just inside each edge, 1 on the plateau between the ramps
+static float DayTrapezoid(float dayFraction, const TrafficTuning& tuning)
+{
+    if (dayFraction <= tuning.dayStart || dayFraction >= tuning.dayEnd)
+    {
+        return tuning.civNightScale;
+    }
+    float s = 1.0f;
+    float rise = (dayFraction - tuning.dayStart) / Traffic::DayRampFraction;
+    if (rise < s)
+    {
+        s = rise;
+    }
+    float fall = (tuning.dayEnd - dayFraction) / Traffic::DayRampFraction;
+    if (fall < s)
+    {
+        s = fall;
+    }
+    return tuning.civNightScale + (1.0f - tuning.civNightScale) * s;
+}
+
+void Traffic::ModulationFactors(const TrafficModulationInput& in, const TrafficTuning& tuning, float& civScale,
+                                float& patrolScale)
+{
+    civScale = DayTrapezoid(in.dayFraction, tuning);
+    patrolScale = 1.0f;
+
+    // alert on the civ route origin: RED empties the roads, YELLOW thins
+    // them; either boosts the patrols
+    if (in.originAlertCiv >= ASRed)
+    {
+        civScale = 0;
+    }
+    else if (in.originAlertCiv == ASYellow)
+    {
+        civScale *= AlertYellowCivScale;
+    }
+    if (in.originAlertCiv >= ASYellow)
+    {
+        patrolScale *= 1.0f + tuning.alertPatrolBoost;
+    }
+
+    // curfew: an occupied origin, after dark, late in the war.  Darkness is
+    // NightEffect, not the wall clock, so curfew and the AI headlights agree
+    // on what "night" is.
+    if (in.warLevel >= tuning.curfewWarLevel && in.nightEffect > CurfewNightEffect && in.originOccupied)
+    {
+        civScale = 0;
+        patrolScale *= tuning.curfewPatrolBoost;
+    }
+
+    // rain thins the civilians
+    civScale *= 1.0f - tuning.rainCivFade * in.rain;
+
+    if (civScale < 0)
+    {
+        civScale = 0;
+    }
+    if (civScale > 1)
+    {
+        civScale = 1;
+    }
+    if (patrolScale < 0)
+    {
+        patrolScale = 0;
+    }
+}
+
+// one modulated band: chance * scale kept inside [0,1] so the roll shifting
+// below stays exact
+static float ScaledChance(float chance, float scale)
+{
+    float c = chance * scale;
+    if (c < 0)
+    {
+        c = 0;
+    }
+    if (c > 1)
+    {
+        c = 1;
+    }
+    return c;
+}
+
 int Traffic::DecideSpawn(const TrafficDecisionInput& in, const TrafficTuning& tuning)
 {
     if (!in.enabled || !tuning.enabled || !in.playerValid)
@@ -358,15 +455,16 @@ int Traffic::DecideSpawn(const TrafficDecisionInput& in, const TrafficTuning& tu
     }
     if (in.hasPatrolRoute && in.livePatrols < tuning.maxPatrols)
     {
-        if (roll < tuning.patrolChance)
+        float chance = ScaledChance(tuning.patrolChance, in.patrolScale);
+        if (roll < chance)
         {
             return TKPatrol;
         }
-        roll -= tuning.patrolChance;
+        roll -= chance;
     }
     if (in.hasCivRoute && in.liveCiv < tuning.maxCiv)
     {
-        if (roll < tuning.civChance)
+        if (roll < ScaledChance(tuning.civChance, in.civScale))
         {
             return TKCiv;
         }
@@ -629,26 +727,6 @@ bool Traffic::StallExpired(float stalledSeconds, const TrafficTuning& tuning)
 // ---------------------------------------------------------------------------
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
-
-// script-owned war level; 1 when undefined (matches init.sqs default)
-static float ReadWarLevel()
-{
-    if (!GWorld)
-    {
-        return 1.0f;
-    }
-    GameState* gstate = GWorld->GetGameState();
-    if (!gstate)
-    {
-        return 1.0f;
-    }
-    GameValue value = gstate->VarGet("gmwarlevel");
-    if (value.GetType() != GameScalar)
-    {
-        return 1.0f;
-    }
-    return (float)value;
-}
 
 void Traffic::BuildZoneCandidates(AutoArray<TrafficZoneCandidate>& out) const
 {
@@ -1669,19 +1747,64 @@ void Traffic::Simulate(float deltaT)
         AutoArray<TrafficZoneCandidate> zones;
         BuildZoneCandidates(zones);
         int o, d;
+        int civOrigin = -1, civDest = -1;
         TrafficDecisionInput in;
         in.enabled = _tuning.enabled;
         in.playerValid = true;
         in.liveCiv = Count(TKCiv);
         in.livePatrols = Count(TKPatrol);
         in.liveConvoys = Count(TKConvoy);
-        in.hasCivRoute = PickRoute(TKCiv, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d);
+        // the civ route is rolled once here, so modulation assesses the same
+        // origin a civ spawn will actually use (a deterministic availability
+        // probe followed by a spawn-time re-roll could disagree on the origin)
+        in.hasCivRoute =
+            PickRoute(TKCiv, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), civOrigin, civDest);
         in.hasPatrolRoute = PickRoute(TKPatrol, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d);
         in.hasConvoyRoute = PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d);
         in.warLevel = ReadWarLevel();
+
+        TrafficModulationInput mod;
+        mod.dayFraction = Glob.clock.GetTimeOfDay();
+        if (GScene && GScene->MainLight())
+        {
+            mod.nightEffect = GScene->MainLight()->NightEffect();
+        }
+        else
+        {
+            // no scene (dedicated server): night is the wall clock outside
+            // the day window
+            mod.nightEffect = (mod.dayFraction <= _tuning.dayStart || mod.dayFraction >= _tuning.dayEnd) ? 1.0f : 0.0f;
+        }
+        if (GLandscape)
+        {
+            mod.rain = GLandscape->GetRainDensity();
+        }
+        mod.warLevel = in.warLevel;
+        if (in.hasCivRoute)
+        {
+            mod.originAlertCiv = AlertMachine::Instance().GetZoneState(civOrigin);
+            for (int i = 0; i < zones.Size(); i++)
+            {
+                if (zones[i].index == civOrigin)
+                {
+                    mod.originOccupied = zones[i].occupierOwned;
+                    break;
+                }
+            }
+        }
+        ModulationFactors(mod, _tuning, in.civScale, in.patrolScale);
+
         in.roll = GRandGen.RandomValue();
         int kind = DecideSpawn(in, _tuning);
-        if (kind >= 0 && PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o, d))
+        if (kind == TKCiv)
+        {
+            // reuse the modulated route: the spawn happens from the origin
+            // whose alert/occupation state the decision was scaled by
+            Transport* veh = nullptr;
+            SpawnEntry(kind, civOrigin, civDest, playerPos, veh, fired);
+        }
+        else if (kind >= 0 &&
+                 PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o, d))
         {
             Transport* veh = nullptr;
             SpawnEntry(kind, o, d, playerPos, veh, fired);

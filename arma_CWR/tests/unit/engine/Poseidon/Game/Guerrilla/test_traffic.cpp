@@ -1,7 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
+#include <Poseidon/Core/SaveVersion.hpp>            // WorldSerializeVersion
+#include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // ASYellow / ASRed
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -101,6 +102,13 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.patrolChance == Approx(0.25f));
         REQUIRE(tu.convoyChance == Approx(0.04f));
         REQUIRE(tu.convoyWarScale == Approx(0.5f));
+        REQUIRE(tu.civNightScale == Approx(0.1f));
+        REQUIRE(tu.dayStart == Approx(6.0f / 24.0f));
+        REQUIRE(tu.dayEnd == Approx(21.0f / 24.0f));
+        REQUIRE(tu.alertPatrolBoost == Approx(0.5f));
+        REQUIRE(tu.curfewWarLevel == Approx(3.0f));
+        REQUIRE(tu.curfewPatrolBoost == Approx(2.0f));
+        REQUIRE(tu.rainCivFade == Approx(0.6f));
         REQUIRE(tu.stallTimeout == Approx(90.0f));
         REQUIRE(tu.arriveRadius == Approx(60.0f));
         REQUIRE(tu.maxLegs == 3);
@@ -124,7 +132,9 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         TrafficFixture f;
         f.Load("class CfgGuerrillaZones { trafficEnabled = 0; trafficInterval = 7; trafficRadius = 900; "
                "trafficMaxCiv = 5; trafficMaxPatrols = 2; trafficConvoyChance = 0.1; trafficMaxLegs = 1; "
-               "trafficCommandeerRadius = 30; trafficFleeDist = 200; };\n");
+               "trafficCommandeerRadius = 30; trafficFleeDist = 200; trafficCivNightScale = 0.2; "
+               "trafficDayStart = 0.3; trafficDayEnd = 0.8; trafficAlertPatrolBoost = 1.0; "
+               "trafficCurfewWarLevel = 2; trafficCurfewPatrolBoost = 3; trafficRainCivFade = 0.9; };\n");
         const TrafficTuning& tu = f.traffic.Tuning();
         REQUIRE_FALSE(tu.enabled);
         REQUIRE(tu.interval == Approx(7.0f));
@@ -135,6 +145,13 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.maxLegs == 1);
         REQUIRE(tu.commandeerRadius == Approx(30.0f));
         REQUIRE(tu.fleeDist == Approx(200.0f));
+        REQUIRE(tu.civNightScale == Approx(0.2f));
+        REQUIRE(tu.dayStart == Approx(0.3f));
+        REQUIRE(tu.dayEnd == Approx(0.8f));
+        REQUIRE(tu.alertPatrolBoost == Approx(1.0f));
+        REQUIRE(tu.curfewWarLevel == Approx(2.0f));
+        REQUIRE(tu.curfewPatrolBoost == Approx(3.0f));
+        REQUIRE(tu.rainCivFade == Approx(0.9f));
         REQUIRE_FALSE(f.traffic.IsActive()); // disabled regardless of the registry
     }
 
@@ -210,6 +227,220 @@ TEST_CASE("Traffic - convoy chance grows with war level and clamps", "[game][gue
     REQUIRE(Traffic::ConvoyChance(hot, 10.0f) == Approx(Traffic::ConvoyChanceCap));
     hot.convoyChance = -1.0f;
     REQUIRE(Traffic::ConvoyChance(hot, 1.0f) == Approx(0.0f));
+}
+
+TEST_CASE("Traffic - modulation: neutral defaults change nothing", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    float civ = -1, pat = -1;
+    Traffic::ModulationFactors(TrafficModulationInput(), t, civ, pat);
+    REQUIRE(civ == Approx(1.0f));
+    REQUIRE(pat == Approx(1.0f));
+    // and neutral scales reproduce the unmodulated bands exactly
+    REQUIRE(Traffic::DecideSpawn(Input(true, 0, 0, 0, true, true, true, 0.01f), t) == TKConvoy);
+    REQUIRE(Traffic::DecideSpawn(Input(true, 0, 0, 0, true, true, true, 0.10f), t) == TKPatrol);
+    REQUIRE(Traffic::DecideSpawn(Input(true, 0, 0, 0, true, true, true, 0.50f), t) == TKCiv);
+    REQUIRE(Traffic::DecideSpawn(Input(true, 0, 0, 0, true, true, true, 0.90f), t) == -1);
+}
+
+TEST_CASE("Traffic - modulation: time-of-day trapezoid", "[game][guerrilla]")
+{
+    TrafficTuning t; // day window [6h, 21h], 2 h ramps, night scale 0.1
+    float civ, pat;
+    TrafficModulationInput in;
+
+    SECTION("deep night and the window edges are the night scale")
+    {
+        in.dayFraction = 2.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.1f));
+        REQUIRE(pat == Approx(1.0f)); // patrols do not follow the clock
+        in.dayFraction = 6.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.1f));
+        in.dayFraction = 21.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.1f));
+        in.dayFraction = 23.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.1f));
+    }
+    SECTION("ramps rise and fall linearly over 2 h")
+    {
+        in.dayFraction = 7.0f / 24.0f; // halfway up the morning ramp
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.55f));
+        in.dayFraction = 20.0f / 24.0f; // halfway down the evening ramp
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.55f));
+    }
+    SECTION("plateau between the ramps is 1")
+    {
+        in.dayFraction = 8.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        in.dayFraction = 12.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        in.dayFraction = 19.0f / 24.0f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+    }
+}
+
+TEST_CASE("Traffic - modulation: alert on the civ origin", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    float civ, pat;
+    TrafficModulationInput in;
+
+    SECTION("YELLOW thins the civs and boosts the patrols")
+    {
+        in.originAlertCiv = ASYellow;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(Traffic::AlertYellowCivScale));
+        REQUIRE(pat == Approx(1.5f));
+    }
+    SECTION("RED empties the roads")
+    {
+        in.originAlertCiv = ASRed;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.0f));
+        REQUIRE(pat == Approx(1.5f));
+    }
+}
+
+TEST_CASE("Traffic - modulation: curfew predicate", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    float civ, pat;
+    TrafficModulationInput in; // noon on the wall clock: curfew keys on darkness
+    in.warLevel = 3.0f;
+    in.nightEffect = 1.0f;
+    in.originOccupied = true;
+
+    SECTION("war >= 3 + dark + occupied origin zeroes civ, doubles patrols")
+    {
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.0f));
+        REQUIRE(pat == Approx(2.0f));
+    }
+    SECTION("any failed leg leaves the curfew off")
+    {
+        TrafficModulationInput low = in;
+        low.warLevel = 2.9f;
+        Traffic::ModulationFactors(low, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        REQUIRE(pat == Approx(1.0f));
+        TrafficModulationInput lit = in;
+        lit.nightEffect = 0.5f; // the darkness gate is strictly > 0.5
+        Traffic::ModulationFactors(lit, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        REQUIRE(pat == Approx(1.0f));
+        TrafficModulationInput free = in;
+        free.originOccupied = false;
+        Traffic::ModulationFactors(free, t, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        REQUIRE(pat == Approx(1.0f));
+    }
+}
+
+TEST_CASE("Traffic - modulation: rain fades the civs", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    float civ, pat;
+    TrafficModulationInput in;
+    in.rain = 1.0f;
+    Traffic::ModulationFactors(in, t, civ, pat);
+    REQUIRE(civ == Approx(0.4f)); // 1 - 0.6
+    REQUIRE(pat == Approx(1.0f));
+    in.rain = 0.5f;
+    Traffic::ModulationFactors(in, t, civ, pat);
+    REQUIRE(civ == Approx(0.7f));
+}
+
+TEST_CASE("Traffic - modulation: multiplicative composition and clamps", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    float civ, pat;
+
+    SECTION("dusk x YELLOW x rain compose multiplicatively")
+    {
+        TrafficModulationInput in;
+        in.dayFraction = 20.0f / 24.0f; // 0.55 on the evening ramp
+        in.originAlertCiv = ASYellow;
+        in.rain = 0.5f;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.55f * 0.4f * 0.7f));
+        REQUIRE(pat == Approx(1.5f));
+    }
+    SECTION("curfew stacks on the alert boost")
+    {
+        TrafficModulationInput in;
+        in.originAlertCiv = ASRed;
+        in.warLevel = 5.0f;
+        in.nightEffect = 1.0f;
+        in.originOccupied = true;
+        Traffic::ModulationFactors(in, t, civ, pat);
+        REQUIRE(civ == Approx(0.0f));
+        REQUIRE(pat == Approx(1.5f * 2.0f));
+    }
+    SECTION("silly tuning never leaves civ outside [0,1] or patrol negative")
+    {
+        TrafficTuning weird;
+        weird.civNightScale = 5.0f;
+        TrafficModulationInput night;
+        night.dayFraction = 0.0f;
+        Traffic::ModulationFactors(night, weird, civ, pat);
+        REQUIRE(civ == Approx(1.0f));
+        weird.rainCivFade = 3.0f;
+        night.rain = 1.0f;
+        Traffic::ModulationFactors(night, weird, civ, pat);
+        REQUIRE(civ == Approx(0.0f));
+        weird.curfewPatrolBoost = -4.0f;
+        night.warLevel = 9.0f;
+        night.nightEffect = 1.0f;
+        night.originOccupied = true;
+        Traffic::ModulationFactors(night, weird, civ, pat);
+        REQUIRE(pat == Approx(0.0f));
+    }
+}
+
+TEST_CASE("Traffic - spawn decision applies the modulation scales", "[game][guerrilla]")
+{
+    TrafficTuning t;
+
+    SECTION("civScale 0 removes the civ band entirely")
+    {
+        TrafficDecisionInput in = Input(true, 0, 0, 0, true, false, false, 0.0f);
+        in.civScale = 0.0f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == -1);
+    }
+    SECTION("a scaled patrol band shifts the civ band start exactly")
+    {
+        // bands: convoy [0, 0.04), patrol [0.04, 0.415), civ [0.415, 0.915)
+        TrafficDecisionInput in = Input(true, 0, 0, 0, true, true, true, 0.40f);
+        in.patrolScale = 1.5f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == TKPatrol);
+        in.roll = 0.42f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == TKCiv);
+        in.roll = 0.92f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == -1);
+    }
+    SECTION("a shrunk civ band misses rolls the unscaled band caught")
+    {
+        TrafficDecisionInput in = Input(true, 0, 0, 0, true, false, false, 0.30f);
+        in.civScale = 0.5f; // civ band [0, 0.25)
+        REQUIRE(Traffic::DecideSpawn(in, t) == -1);
+        in.roll = 0.20f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == TKCiv);
+    }
+    SECTION("a huge patrol boost caps the band at a certainty, not beyond")
+    {
+        TrafficDecisionInput in = Input(true, 0, 0, 0, false, true, false, 0.999f);
+        in.patrolScale = 100.0f;
+        REQUIRE(Traffic::DecideSpawn(in, t) == TKPatrol);
+    }
 }
 
 TEST_CASE("Traffic - far-despawn edge with hysteresis", "[game][guerrilla]")
