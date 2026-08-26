@@ -712,6 +712,29 @@ items:
       - "2026-08-26: arrival lifecycle landed (911b724) - civ cars PARK at their destination instead of despawning: TSParking (commandeer-style Stop + 2.5 s brake) -> driver DoGetOut WITHOUT AllowGetIn(false) -> TSDwelling (on-foot near the car, 1-in-6 stroll per 5 s tick within 40 m, dwell trafficParkDwellMin=60..Max=180 s) -> TSDeparting (AllowGetIn/OrderGetIn/AssignAsDriver; DriverBrain-gated IssueRoute re-leg; 45 s NativeMoveIn fallback only when player > minSpawnDist) -> TSDriving. trafficParkChance=0.6. Steal watch releases the hull boarded=true and walks the driver into _fleeing with re-board orders revoked (seated-driver variant forces DoGetOut first); CleanupFleeing now never deletes a seated or player-adjacent person. DriverAlive/stall/arrival/far guards gated in the park states; parked entries still count against maxCiv. Save-compatible: state int append, ApplyPendingLoad downgrades park states (seated dweller re-parks; null-driver rows KEPT for the normal crewDead hull release, not dropped). New TEParked/TEDeparted events + gmTrafficDest. Re-board probe resolved the residual unknown POSITIVELY: the stock animated Command::GetIn to a free CIV works in-game; fallback never fired. Verified: [guerrilla] 168 cases / 3306 assertions; trident full_cwa guerrilla_traffic_park (new) + ambient/commandeer/patrol + save_reload green. Ten review findings (3 major, all steal-watch edges) fixed pre-land."
       - "2026-08-25: spawn-chance modulation landed - pure ModulationFactors pre-stage scales civ/patrol chances BEFORE the rarest-first band subtraction (band math untouched): wall-clock day trapezoid (trafficCivNightScale=0.1 outside trafficDayStart=0.25..trafficDayEnd=0.875, 2 h linear ramps), civ-route-origin alert (RED zeroes civ, YELLOW 0.4x; patrols x(1+trafficAlertPatrolBoost=0.5) on YELLOW/RED), curfew (warLevel >= trafficCurfewWarLevel=3 && NightEffect > 0.5 && origin occupier-owned: civ 0, patrol x trafficCurfewPatrolBoost=2.0), rain fade (1 - trafficRainCivFade=0.6 * rain). Neutral defaults keep noon/GREEN/war-1/dry behaviour identical; gmTrafficForceSpawn (and so the guerrilla_traffic_* Trident tests) still bypasses the roll. NightEffect/rain reads null-guard GScene/GLandscape (dedicated-server path falls back to wall-clock nightness). Review fix pre-land: the civ-route availability probe now rolls PickRoute once and the spawn reuses that origin/dest, so modulation always assesses the actual spawn origin. Hygiene: shared ReadWarLevel in ZoneRegistry replaced the Traffic/GarrisonCache clones. Headlights verified FREE - TransportCore.cpp's auto-light gate (NightEffect vs per-vehicle 0.2-0.8 threshold, non-cautious combat mode) already lights AI traffic crews at night under the CMCareless/CMSafe modes Traffic issues, and douses them on combat escalation; zero headlight code written."
 
+  - id: traffic-view-distance
+    title: "Traffic: perception-gated spawn/despawn (fixed distance band vs the player view-distance slider)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [ambient-traffic]
+    gh_issues: [53]
+    summary: >
+      The traffic spawn band ([300, 1500] m) and despawn edge (1800 m) are
+      static config while the object-cull distance that actually hides them is
+      player-controlled (objectsZ = min(2/3 * view, 3000), slider 100..5000,
+      applied live): above ~2250 m view distance every spawn is an on-screen
+      materialization, above ~2700 despawns are visible too, and night
+      headlight pop reads even farther (lights cull at horizontZ + 500).
+      Design (issue #53): perception gate (live objectsZ + terrain LOS +
+      frustum) with an effective band derived per pass and config as floors;
+      alibi spawns (hidden-scored points, pull-out-from-parked near the
+      player's town); observed endings for the losing park roll / patrols /
+      stalls extending the 911b724 lifecycle; perception-gated cleanup of
+      released hulls/bodies; caps scaled with the effective radius.
+    log:
+      - "2026-08-26: design doc filed as #53 after a deep dive; key finding - the strategy only works today because objectsZ (600 at the 900 default) sits inside the band by accident, and radius does triple duty (PickRoute origin gate, spawn band, despawn edge) so all three must move together or high-VD players get zero traffic instead of visible pop."
+
   - id: faction-class-resolution
     title: "Faction class resolution + role-diverse squads (plan 15)"
     phase: phase-2
