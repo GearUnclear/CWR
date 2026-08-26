@@ -1,0 +1,9 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Traffic tick 5 s; the park cycle needs an arrival tick, a brake-delay tick,
+# the fixture-pinned 10-20 s dwell, the stock GetIn boarding animation and a
+# fresh route leg - budget generously.
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

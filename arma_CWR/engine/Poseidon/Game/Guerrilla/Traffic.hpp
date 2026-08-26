@@ -71,6 +71,13 @@ struct TrafficTuning
     float commandeerLaneHalfWidth = 4.0f; // m, lateral offset for "in the lane"
     float commandeerStopDelay = 2.5f;     // s between Stop and the driver bailing
     float fleeDist = 150.0f;              // m, the bailed driver's flee point
+    // civ arrival park-vs-despawn roll.  Parked cars remain live entries and
+    // count against maxCiv, so a town accumulates at most maxCiv parked cars
+    // (a separate trafficMaxParked cap is deferred).  0 restores the pre-park
+    // behaviour exactly.
+    float parkChance = 0.6f;     // trafficParkChance
+    float parkDwellMin = 60.0f;  // trafficParkDwellMin (s)
+    float parkDwellMax = 180.0f; // trafficParkDwellMax (s)
 };
 
 enum TrafficKind
@@ -84,10 +91,13 @@ enum TrafficKind
 enum TrafficState
 {
     TSDriving,
-    TSStopping, // commandeer: Stop issued, waiting out commandeerStopDelay
-    TSExiting,  // commandeer: driver bailed (transient, one tick)
-    TSArrived,  // at the destination, waiting for the player to be far enough
-    TSStalled,  // stall timer expired, waiting for the player to be far enough
+    TSStopping,  // commandeer: Stop issued, waiting out commandeerStopDelay
+    TSExiting,   // commandeer: driver bailed (transient, one tick)
+    TSArrived,   // at the destination, waiting for the player to be far enough
+    TSStalled,   // stall timer expired, waiting for the player to be far enough
+    TSParking,   // civ arrived + park roll won: Stop issued, waiting out the brake delay
+    TSDwelling,  // driver on foot near the parked car, dwell timer running
+    TSDeparting, // driver ordered back in; waiting for DriverBrain()==unit
     NTrafficStates
 };
 
@@ -98,6 +108,8 @@ enum TrafficEventType
     TECommandeered, // "commandeered" [veh, driver]
     TEArrived,      // "arrived"      [veh, kind, destIdx]
     TEDriverKilled, // "driverKilled" - killed-EH EXPRESSION attached to every civ driver
+    TEParked,       // "parked"   [veh, kind, destIdx]
+    TEDeparted,     // "departed" [veh, kind, destIdx] (destIdx = the NEW destination)
     NTrafficEventTypes
 };
 
@@ -177,6 +189,8 @@ class Traffic : public SerializeClass
     // registry lookup by vehicle: false when the vehicle is not live traffic
     bool FindEntry(const Transport* veh, TrafficKind& kind, int& originIndex, int& destIndex,
                    TrafficState& state) const;
+    // the entry's current destination road point; false when not live traffic
+    bool EntryDest(const Transport* veh, Vector3& out) const;
     // is this group the crew of a live traffic entry of the given kind
     // (the AlertMachine attribution hook; kind < 0 = any)
     bool IsTrafficGroup(const AIGroup* grp, int kind = -1) const;
@@ -229,6 +243,12 @@ class Traffic : public SerializeClass
     // stall rule: < StallMoveEpsilon m of movement per pass accumulates
     static constexpr float StallMoveEpsilon = 5.0f;
     static bool StallExpired(float stalledSeconds, const TrafficTuning& tuning);
+    // civ arrival park roll: roll < parkChance
+    static bool DecidePark(float roll, const TrafficTuning& tuning);
+    // load downgrade for the three park states, keyed on whether the saved
+    // driver came back seated (transient flags never survive the load, so an
+    // on-foot departer re-dwells and re-issues the get-in from scratch)
+    static TrafficState LoadedParkState(TrafficState saved, bool driverSeated);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
@@ -254,6 +274,9 @@ class Traffic : public SerializeClass
     static constexpr float SpawnScanRadius = 700.0f;      // m of road net scanned around the origin
     static constexpr float FleeDeleteDist = 300.0f;       // m, bailed driver deleted beyond this...
     static constexpr float FleeDeleteAfter = 60.0f;       // ... or after this many seconds
+    static constexpr float ParkWanderRadius = 40.0f;      // m, dwell stroll cap
+    static constexpr int ParkWanderOdds = 6;              // 1-in-6 per main tick
+    static constexpr float DepartTimeout = 45.0f;         // s in TSDeparting before fallback
 
   private:
     struct TrafficEntry
@@ -271,8 +294,9 @@ class Traffic : public SerializeClass
         int destIndex = -1;   // transient
         Vector3 dest = VZero; // destination road point (engine axes)
         int legs = 0;
-        float stallTime = 0; // s of no movement
-        float stateTime = 0; // s in the current state (commandeer timing)
+        float stallTime = 0;     // s of no movement
+        float stateTime = 0;     // s in the current state (commandeer/park timing)
+        float dwellDuration = 0; // s; transient like stateTime, re-rolled on load
         Vector3 lastPos = VZero;
 
         LSError Serialize(ParamArchive& ar);
@@ -322,6 +346,9 @@ class Traffic : public SerializeClass
                     AutoArray<TrafficEventRecord>& fired);
     void IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int speedMode, bool column);
     void UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<TrafficEventRecord>& fired);
+    // handles one entry in TSParking/TSDwelling/TSDeparting; may despawn/release it
+    void UpdateParked(int index, Vector3Par playerPos, bool playerValid, AutoArray<TrafficZoneCandidate>& zones,
+                      AutoArray<TrafficEventRecord>& fired);
     void UpdateCommandeer(float dt);
     void CleanupReleased(Vector3Par playerPos, bool playerValid);
     void CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt);

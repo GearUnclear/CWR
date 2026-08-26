@@ -94,7 +94,21 @@ static GameValue GmTrafficInfo(const GameState* state, GameValuePar oper1)
     return value;
 }
 
-// gmTrafficOnEvent ["spawned"|"despawned"|"commandeered"|"arrived"|"driverKilled", handler]
+// gmTrafficDest <veh> -> the entry's current destination road point in getPos
+// order [x,y,z]; [] when the vehicle is not live traffic
+static GameValue GmTrafficDest(const GameState* state, GameValuePar oper1)
+{
+    Transport* veh = dyn_cast<Transport>(GetObject(oper1));
+    Vector3 dest;
+    if (!veh || !Traffic::Instance().EntryDest(veh, dest))
+    {
+        return state->CreateGameValue(GameArray);
+    }
+    return MakePosValue(state, dest);
+}
+
+// gmTrafficOnEvent ["spawned"|"despawned"|"commandeered"|"arrived"|"driverKilled"
+// |"parked"|"departed", handler]
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both).  driverKilled is
 // the killed-EH EXPRESSION attached to every civilian driver at spawn.
@@ -282,6 +296,7 @@ INIT_MODULE(GuerrillaTraffic, 3)
     GGameState.NewFunction(GameFunction(GameScalar, "gmTrafficCount", GmTrafficCount, GameString));
     GGameState.NewNularOp(GameNular(GameArray, "gmTrafficVehicles", GmTrafficVehicles));
     GGameState.NewFunction(GameFunction(GameArray, "gmTrafficInfo", GmTrafficInfo, GameObject));
+    GGameState.NewFunction(GameFunction(GameArray, "gmTrafficDest", GmTrafficDest, GameObject));
     GGameState.NewFunction(GameFunction(GameNothing, "gmTrafficOnEvent", GmTrafficOnEvent, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmTrafficRelease", GmTrafficRelease, GameObject));
     GGameState.NewFunction(GameFunction(GameObject, "gmTrafficForceSpawn", GmTrafficForceSpawn, GameArray));

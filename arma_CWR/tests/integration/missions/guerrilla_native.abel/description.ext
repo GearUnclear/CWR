@@ -32,10 +32,18 @@ class CfgGuerrillaZones
     // 90 s assert windows, so the tests run at 20/tick (5 clean ticks,
     // ~15 s solo). Stock-rate pacing is pinned by the unit tests.
     captureRate = 20;
+    // Park cycle pinned deterministic for guerrilla_traffic_park: every civ
+    // arrival parks (stock chance 0.6) and the dwell is 10-20 s (stock
+    // 60-180 s, far beyond the assert windows). Safe for the other traffic
+    // tests: ambient tears down via the far-despawn (any state handles it),
+    // commandeer and patrol never reach a civ arrival.
+    trafficParkChance = 1;
+    trafficParkDwellMin = 10;
+    trafficParkDwellMax = 20;
     // Direct-launch faction fallbacks stated explicitly (no new-game UI in
     // a test run):
-    // Ambient road traffic (native Traffic service) runs on its stock
-    // defaults too: trafficEnabled=1; trafficInterval=5; trafficRadius=1500;
+    // Ambient road traffic (native Traffic service) otherwise runs on its
+    // stock defaults: trafficEnabled=1; trafficInterval=5; trafficRadius=1500;
     // trafficMinSpawnDist=300; trafficDespawnHysteresis=300; trafficMaxCiv=3;
     // trafficMaxPatrols=1; trafficMaxConvoys=1; trafficCivChance=0.5;
     // trafficPatrolChance=0.25; trafficConvoyChance=0.04;

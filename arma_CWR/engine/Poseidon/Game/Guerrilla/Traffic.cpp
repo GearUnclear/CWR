@@ -147,6 +147,9 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.commandeerLaneHalfWidth = zonesCfg->ReadValue("trafficCommandeerLaneHalfWidth", t.commandeerLaneHalfWidth);
     t.commandeerStopDelay = zonesCfg->ReadValue("trafficCommandeerStopDelay", t.commandeerStopDelay);
     t.fleeDist = zonesCfg->ReadValue("trafficFleeDist", t.fleeDist);
+    t.parkChance = zonesCfg->ReadValue("trafficParkChance", t.parkChance);
+    t.parkDwellMin = zonesCfg->ReadValue("trafficParkDwellMin", t.parkDwellMin);
+    t.parkDwellMax = zonesCfg->ReadValue("trafficParkDwellMax", t.parkDwellMax);
     // sanity floors: a zero interval would tick every frame, negative caps
     // would read as "nothing ever spawns" (which 0 already says)
     if (t.interval < 0.5f)
@@ -168,6 +171,22 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     if (t.maxLegs < 0)
     {
         t.maxLegs = 0;
+    }
+    if (t.parkChance < 0)
+    {
+        t.parkChance = 0;
+    }
+    if (t.parkChance > 1)
+    {
+        t.parkChance = 1;
+    }
+    if (t.parkDwellMin < 0)
+    {
+        t.parkDwellMin = 0;
+    }
+    if (t.parkDwellMax < t.parkDwellMin)
+    {
+        t.parkDwellMax = t.parkDwellMin;
     }
 }
 
@@ -218,6 +237,24 @@ bool Traffic::FindEntry(const Transport* veh, TrafficKind& kind, int& originInde
             originIndex = e.originIndex;
             destIndex = e.destIndex;
             state = e.state;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Traffic::EntryDest(const Transport* veh, Vector3& out) const
+{
+    if (!veh)
+    {
+        return false;
+    }
+    for (int i = 0; i < _entries.Size(); i++)
+    {
+        const TrafficEntry& e = _entries[i];
+        if (e.vehicle.GetLink() == veh || e.escort.GetLink() == veh)
+        {
+            out = e.dest;
             return true;
         }
     }
@@ -324,6 +361,14 @@ int Traffic::EventTypeFromName(const char* name)
     if (stricmp(name, "driverKilled") == 0)
     {
         return TEDriverKilled;
+    }
+    if (stricmp(name, "parked") == 0)
+    {
+        return TEParked;
+    }
+    if (stricmp(name, "departed") == 0)
+    {
+        return TEDeparted;
     }
     return -1;
 }
@@ -722,6 +767,28 @@ bool Traffic::CommandeerTriggered(const CommandeerObs& obs, const TrafficTuning&
 bool Traffic::StallExpired(float stalledSeconds, const TrafficTuning& tuning)
 {
     return tuning.stallTimeout > 0 && stalledSeconds >= tuning.stallTimeout;
+}
+
+bool Traffic::DecidePark(float roll, const TrafficTuning& tuning)
+{
+    return tuning.parkChance > 0 && roll < tuning.parkChance;
+}
+
+TrafficState Traffic::LoadedParkState(TrafficState saved, bool driverSeated)
+{
+    switch (saved)
+    {
+        case TSParking:
+            return driverSeated ? TSParking : TSDwelling;
+        case TSDwelling:
+            return driverSeated ? TSParking : TSDwelling; // seated dweller = degenerate row, re-park
+        case TSDeparting:
+            // on foot: re-dwell - the get-in flags cannot be assumed to have
+            // survived the load, so the depart transition re-issues them
+            return driverSeated ? TSDeparting : TSDwelling;
+        default:
+            return saved;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,6 +1286,8 @@ void Traffic::DeleteCrew(AIGroup* grp) const
     }
 }
 
+static void IssueSoloMove(AIGroup* grp, AIUnit* unit, Vector3 tgt); // defined with the park logic below
+
 void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArray<TrafficEventRecord>& fired)
 {
     if (index < 0 || index >= _entries.Size())
@@ -1245,7 +1314,37 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
                 AIUnit* unit = grp->UnitWithID(u + 1);
                 if (unit && unit->GetPerson())
                 {
-                    r.bodies.Add(unit->GetPerson());
+                    Person* person = unit->GetPerson();
+                    if (!person->IsDammageDestroyed() && !unit->GetVehicleIn())
+                    {
+                        // a LIVING on-foot person (a park-state driver whose
+                        // car was destroyed under him) must not be filed as a
+                        // corpse - ReleasedEntry::bodies is deleted wholesale.
+                        // Hand him to the fleeing table, which respects life,
+                        // with a walk away from the (likely burning) hull
+                        unit->OrderGetIn(false);
+                        unit->AllowGetIn(false);
+                        if (veh)
+                        {
+                            grp->UnassignVehicle(veh); // revoke a standing TSDeparting re-board
+                            Vector3 away = person->Position() - veh->Position();
+                            away[1] = 0;
+                            if (away.SquareSize() < 1e-2f)
+                            {
+                                away = -veh->Direction();
+                                away[1] = 0;
+                            }
+                            IssueSoloMove(grp, unit,
+                                          person->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
+                        }
+                        FleeingDriver fd;
+                        fd.person = person;
+                        fd.group = grp;
+                        fd.age = 0;
+                        _fleeing.Add(fd);
+                        continue;
+                    }
+                    r.bodies.Add(person);
                 }
             }
         }
@@ -1326,6 +1425,19 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             }
             continue;
         }
+        if (e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting)
+        {
+            if (zones.Size() == 0)
+            {
+                BuildZoneCandidates(zones); // cheap, reused by the depart leg
+            }
+            UpdateParked(i, playerPos, playerValid, zones, fired);
+            // gates the DriverAlive check (driver is on foot), the stall
+            // accrual/expiry (a parked car never moves), the arrival branch
+            // (it sits inside arriveRadius permanently) and the shared
+            // far-despawn (re-run inside UpdateParked)
+            continue;
+        }
         if (!DriverAlive(this, veh))
         {
             // road murder (or a crash): the hull is the player's for the
@@ -1374,6 +1486,36 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                 ev.destIndex = e.destIndex;
                 ev.vehicle = veh;
                 fired.Add(ev);
+                // civ arrival: roll park-vs-drive-on regardless of playerNear
+                // (towns accumulate parked cars while the player is 300-1800 m
+                // out - the stated payoff); the losing roll and the other
+                // kinds fall through to the pre-park code untouched
+                AIGroup* pgrp = e.group;
+                if (e.kind == TKCiv && pgrp && DecidePark(GRandGen.RandomValue(), _tuning))
+                {
+                    // brake exactly like the commandeer stop
+                    Command cmd;
+                    cmd._message = Command::Stop;
+                    cmd._discretion = Command::Undefined;
+                    cmd._context = Command::CtxMission;
+                    cmd._id = pgrp->GetNextCmdId();
+                    PackedBoolArray all;
+                    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+                    {
+                        if (pgrp->UnitWithID(u + 1))
+                        {
+                            all.Set(u, true);
+                        }
+                    }
+                    pgrp->IssueCommand(cmd, all);
+                    if (pgrp->MainSubgroup())
+                    {
+                        pgrp->MainSubgroup()->SetSpeedMode(SpeedLimited);
+                    }
+                    e.state = TSParking;
+                    e.stateTime = 0;
+                    continue;
+                }
             }
             if (!playerNear)
             {
@@ -1415,6 +1557,264 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                 continue;
             }
         }
+    }
+}
+
+// one Move to a single unit through IssueCommand - the doMove idiom (never
+// arcade waypoints / AIGroup::Move, which a seated or freshly seated crew
+// ignores); shared by the dwell stroll and the steal walk-off
+static void IssueSoloMove(AIGroup* grp, AIUnit* unit, Vector3 tgt)
+{
+    if (!grp || !unit)
+    {
+        return;
+    }
+    if (GLandscape)
+    {
+        float dx, dz;
+        tgt[1] = GLOB_LAND->SurfaceYAboveWater(tgt[0], tgt[2], &dx, &dz);
+    }
+    Command mv;
+    mv._message = Command::Move;
+    mv._destination = tgt;
+    mv._discretion = Command::Undefined;
+    mv._context = Command::CtxMission;
+    mv._id = grp->GetNextCmdId();
+    PackedBoolArray one;
+    one.Set(unit->ID() - 1, true);
+    grp->IssueCommand(mv, one);
+}
+
+// one entry in TSParking / TSDwelling / TSDeparting: brake wait -> dismount
+// -> dwell (with the occasional stroll) -> re-board -> depart to a fresh
+// destination.  The caller guarantees e.vehicle is non-null and alive; every
+// shared UpdateEntries guard after the park dispatch is re-implemented here
+// where still wanted (dead driver, far-despawn) and deliberately absent
+// where not (stall, arrival).
+void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoArray<TrafficZoneCandidate>& zones,
+                           AutoArray<TrafficEventRecord>& fired)
+{
+    TrafficEntry& e = _entries[i];
+    Transport* veh = e.vehicle;
+    AIGroup* grp = e.group;
+    Person* driver = e.driver;
+    e.stateTime += _tuning.interval; // same accrual style as stallTime
+
+    // 1. dead driver: same outcome as the shared DriverAlive guard, but read
+    //    e.driver, NOT veh->Driver() (null while he is on foot)
+    if (!driver || driver->IsDammageDestroyed() || !grp)
+    {
+        DespawnEntry(i, "crewDead", true, fired); // hull + body released, kill EH already fired
+        return;
+    }
+    // 2. far edge: identical policy to the shared check; DeleteCrew deletes
+    //    the on-foot driver too, so the plain despawn is already correct
+    if (playerValid && ShouldDespawn(Dist2DSq(veh->Position(), playerPos), _tuning))
+    {
+        DespawnEntry(i, "far", false, fired);
+        return;
+    }
+    AIUnit* unit = driver->Brain();
+
+    // 3. steal watch: any occupant while our driver is not the seated driver
+    //    hands the hull to the released table (boarded=true: it is the
+    //    player's, an ordinary world object from the next cleanup on) and the
+    //    walking driver to the fleeing table.  NOT DespawnEntry(keepHull):
+    //    that would file the LIVING driver under ReleasedEntry::bodies and
+    //    later delete him as a corpse.
+    Person* occ = veh->Driver();
+    bool someoneAboard =
+        (occ && occ != driver) || veh->Gunner() || veh->Commander() || veh->GetManCargoSize() > 0;
+    if (e.state != TSParking && someoneAboard)
+    {
+        // revoke the standing re-board orders FIRST (the dwell-expiry
+        // transition issued AllowGetIn/OrderGetIn/AssignAsDriver/AddVehicle):
+        // without this the group's AssignVehicles/GetInVehicles think keeps
+        // ordering the walking driver back into the now-stolen car.
+        // AllowGetIn(false) is safe here - unlike the park dismount, this
+        // driver leaves the traffic system for good (the commandeer bail
+        // does the same)
+        grp->UnassignVehicle(veh);
+        if (unit)
+        {
+            unit->OrderGetIn(false);
+            unit->AllowGetIn(false);
+            if (veh->Driver() == driver || unit->GetVehicleIn() == veh)
+            {
+                // our own driver is seated (or completed a late GetIn) with a
+                // foreign passenger aboard: force him out - a Move to a
+                // seated driver makes him DRIVE the car, passenger and all
+                // (the doMove idiom)
+                unit->DoGetOut(veh, false);
+            }
+            // the driver walks off ~2x wander radius, CMCareless/SpeedLimited
+            // (both already set) - a mild walk, not the commandeer flee
+            Vector3 away = driver->Position() - veh->Position();
+            away[1] = 0;
+            if (away.SquareSize() < 1e-2f)
+            {
+                away = -veh->Direction();
+                away[1] = 0;
+            }
+            IssueSoloMove(grp, unit, driver->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
+        }
+        FleeingDriver fd;
+        fd.person = driver;
+        fd.group = grp;
+        fd.age = 0;
+        _fleeing.Add(fd);
+        ReleasedEntry r;
+        r.vehicle = veh;
+        r.boarded = true;
+        _released.Add(r);
+        TrafficEventRecord ev;
+        ev.type = TEDespawned;
+        ev.kind = e.kind;
+        ev.originIndex = e.originIndex;
+        ev.destIndex = e.destIndex;
+        ev.reason = "stolen";
+        fired.Add(ev);
+        _entries.Delete(i);
+        LOG_INFO(Core, "Traffic: parked civ car stolen");
+        return;
+    }
+
+    if (e.state == TSParking)
+    {
+        if (e.stateTime < _tuning.commandeerStopDelay)
+        {
+            return; // one 5 s tick suffices
+        }
+        // dismount = the commandeer bail MINUS AllowGetIn(false) (which would
+        // block every future GetIn) and MINUS the flee move
+        grp->UnassignVehicle(veh);
+        if (unit)
+        {
+            unit->DoGetOut(veh, false);
+        }
+        grp->SetCombatModeMajor(CMCareless);
+        if (grp->MainSubgroup())
+        {
+            grp->MainSubgroup()->SetSpeedMode(SpeedLimited);
+        }
+        GetNetworkManager().UpdateObject(grp);
+        e.state = TSDwelling;
+        e.stateTime = 0;
+        e.dwellDuration = 0; // rolled lazily below (also covers load-restarts)
+        TrafficEventRecord ev;
+        ev.type = TEParked;
+        ev.kind = e.kind;
+        ev.originIndex = e.originIndex;
+        ev.destIndex = e.destIndex;
+        ev.vehicle = veh;
+        fired.Add(ev);
+        return;
+    }
+
+    if (e.state == TSDwelling)
+    {
+        if (veh->Driver() == driver)
+        {
+            // seated dweller: the no-destination retry enters TSDwelling with
+            // the driver seated, and a DepartTimeout re-dwell can be seated
+            // by a late-completing GetIn.  The stroll Move would make him
+            // DRIVE the "parked" car around town - re-park instead, mirroring
+            // LoadedParkState's seated-dweller policy
+            e.state = TSParking;
+            e.stateTime = 0;
+            return;
+        }
+        if (e.dwellDuration <= 0)
+        {
+            e.dwellDuration =
+                _tuning.parkDwellMin + GRandGen.RandomValue() * (_tuning.parkDwellMax - _tuning.parkDwellMin);
+        }
+        if (e.stateTime < e.dwellDuration)
+        {
+            // occasional stroll: 1-in-ParkWanderOdds per tick, target within
+            // ParkWanderRadius of the car
+            if (unit && GRandGen.RandomValue() * ParkWanderOdds < 1.0f)
+            {
+                float a = GRandGen.RandomValue() * 2.0f * H_PI;
+                float r = 5.0f + GRandGen.RandomValue() * (ParkWanderRadius - 5.0f);
+                IssueSoloMove(grp, unit, veh->Position() + Vector3(sinf(a) * r, 0, cosf(a) * r));
+            }
+            return;
+        }
+        // dwell over: order the re-board.  AssignAsDriver does NOT restore the
+        // hull to the group's vehicle list (UnassignVehicle removed it at the
+        // dismount), so AddVehicle is required - the arcade GETIN idiom.  The
+        // group's own think then runs AssignVehicles+GetInVehicles and sends
+        // the stock Command::GetIn to the free soldier.
+        if (unit)
+        {
+            unit->AllowGetIn(true); // explicit reset (belt: the dismount never cleared it)
+            unit->OrderGetIn(true);
+            unit->AssignAsDriver(veh); // false only if a foreign driver is seated
+            grp->AddVehicle(veh);
+        }
+        e.state = TSDeparting;
+        e.stateTime = 0;
+        return;
+    }
+
+    // TSDeparting
+    if (unit && veh->DriverBrain() == unit) // never IssueRoute mid-boarding
+    {
+        int next = DestForOrigin(e.kind, zones, e.destIndex, GRandGen.RandomValue());
+        const ZoneRecord* z = next >= 0 ? ZoneRegistry::Instance().GetZone(next) : nullptr;
+        if (z && GRoadNet)
+        {
+            e.originIndex = e.destIndex;
+            e.originZone = e.destZone;
+            e.destIndex = next;
+            e.destZone = z->name;
+            e.legs = 1; // a fresh trip, the park cycle can chain
+            e.state = TSDriving;
+            e.stallTime = 0;
+            e.stateTime = 0;
+            e.lastPos = veh->Position();
+            IssueRoute(e, GRoadNet->GetNearestRoadPoint(z->pos), CMCareless, SpeedLimited, false);
+            TrafficEventRecord ev;
+            ev.type = TEDeparted;
+            ev.kind = e.kind;
+            ev.originIndex = e.originIndex;
+            ev.destIndex = e.destIndex;
+            ev.vehicle = veh;
+            ev.driver = driver;
+            fired.Add(ev);
+        }
+        else
+        {
+            // no destination left anywhere: quiet teardown when unobserved,
+            // else re-dwell and retry later
+            if (playerValid && Dist2DSq(veh->Position(), playerPos) > Square(_tuning.minSpawnDist))
+            {
+                DespawnEntry(i, "arrived", false, fired);
+            }
+            else
+            {
+                e.state = TSDwelling;
+                e.stateTime = 0;
+                e.dwellDuration = 0;
+            }
+        }
+        return;
+    }
+    if (e.stateTime >= DepartTimeout)
+    {
+        // NativeMoveIn refuses a soldier already aboard, so the DriverBrain
+        // branch above must run first
+        bool playerFar = playerValid && Dist2DSq(veh->Position(), playerPos) > Square(_tuning.minSpawnDist);
+        if (unit && playerFar && ::NativeMoveIn(driver, veh, GIPDriver))
+        {
+            return; // seated instantly; the next tick takes the DriverBrain branch
+        }
+        // observed (or refused): back to dwelling, retry later; the far
+        // despawn is the backstop
+        e.state = TSDwelling;
+        e.stateTime = 0;
+        e.dwellDuration = 0;
     }
 }
 
@@ -1571,6 +1971,30 @@ bool Traffic::Release(Transport* veh)
     {
         if (_entries[i].vehicle.GetLink() == veh)
         {
+            TrafficEntry& e = _entries[i];
+            // a park-state entry can hold a living ON-FOOT driver; without
+            // this he is orphaned by the car forever (the group never torn
+            // down) until the far cleanup deletes the hull from under him.
+            // Hand him to the fleeing table, as the steal watch does, after
+            // revoking any standing TSDeparting re-board orders
+            Person* d = e.driver;
+            AIGroup* grp = e.group;
+            if ((e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting) && d &&
+                !d->IsDammageDestroyed() && grp && veh->Driver() != d)
+            {
+                AIUnit* unit = d->Brain();
+                grp->UnassignVehicle(veh);
+                if (unit)
+                {
+                    unit->OrderGetIn(false);
+                    unit->AllowGetIn(false);
+                }
+                FleeingDriver fd;
+                fd.person = d;
+                fd.group = grp;
+                fd.age = 0;
+                _fleeing.Add(fd);
+            }
             ReleasedEntry r;
             r.vehicle = veh;
             _released.Add(r);
@@ -1671,6 +2095,21 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
         bool far = playerValid && Dist2DSq(p->Position(), playerPos) > Square(FleeDeleteDist);
         if (far || f.age >= FleeDeleteAfter)
         {
+            // never delete a person out of a vehicle seat (a steal-marked
+            // driver whose late GetIn completed before the orders were
+            // revoked, or one who boarded something else while fleeing)
+            AIUnit* brain = p->Brain();
+            if (brain && brain->GetVehicleIn())
+            {
+                continue;
+            }
+            // the age trigger alone must not vanish a civilian in front of
+            // the player; wait until he is out of close range (the far
+            // trigger already implies distance)
+            if (!far && playerValid && Dist2DSq(p->Position(), playerPos) <= Square(_tuning.minSpawnDist))
+            {
+                continue;
+            }
             AIGroup* grp = f.group;
             ::DeleteVehicle(p);
             if (grp && grp->NUnits() == 0)
@@ -1889,6 +2328,8 @@ void Traffic::DispatchEvents(const AutoArray<TrafficEventRecord>& fired)
                 pars[1] = GameValueExt(ev.driver.GetLink());
                 break;
             case TEArrived:
+            case TEParked:
+            case TEDeparted:
                 pars.Resize(3);
                 pars[0] = GameValueExt(ev.vehicle.GetLink());
                 pars[1] = GameStringType(KindName(ev.kind));
@@ -1970,6 +2411,23 @@ void Traffic::ApplyPendingLoad()
         {
             e.state = TSDriving;
         }
+        // park states downgrade on whether the driver came back seated (the
+        // crews were rebuilt by the world serializer before this pass): the
+        // brake wait restarts, a dwell restarts with a fresh roll, an on-foot
+        // departer re-dwells (get-in flags re-issued at expiry), a seated
+        // departer resumes departing
+        if (e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting)
+        {
+            Transport* v = e.vehicle; // non-null (null rows dropped above)
+            Person* d = e.driver;
+            // a null driver (his body deleted in the window before the
+            // entry's own crewDead despawn tick) KEEPS the row: dropping it
+            // would leave the hull in the world untracked forever, while
+            // UpdateParked's dead-driver guard releases hull+bodies with the
+            // normal crewDead despawn on the first post-load tick
+            e.state = LoadedParkState(e.state, d && v->Driver() == d);
+            e.dwellDuration = 0;
+        }
         e.stateTime = 0;
         _entries.Add(e);
     }
@@ -2002,6 +2460,8 @@ LSError Traffic::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onCommandeered", _handlers[TECommandeered], 1, RString()))
     PARAM_CHECK(ar.Serialize("onArrived", _handlers[TEArrived], 1, RString()))
     PARAM_CHECK(ar.Serialize("onDriverKilled", _handlers[TEDriverKilled], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onParked", _handlers[TEParked], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onDeparted", _handlers[TEDeparted], 1, RString()))
     PARAM_CHECK(ar.Serialize("Entries", _pending, 1))
     PARAM_CHECK(ar.Serialize("Released", _released, 1))
     PARAM_CHECK(ar.Serialize("Fleeing", _fleeing, 1))

@@ -116,6 +116,9 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.commandeerLaneHalfWidth == Approx(4.0f));
         REQUIRE(tu.commandeerStopDelay == Approx(2.5f));
         REQUIRE(tu.fleeDist == Approx(150.0f));
+        REQUIRE(tu.parkChance == Approx(0.6f));
+        REQUIRE(tu.parkDwellMin == Approx(60.0f));
+        REQUIRE(tu.parkDwellMax == Approx(180.0f));
     }
 
     SECTION("keys absent from CfgGuerrillaZones keep defaults")
@@ -155,6 +158,17 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE_FALSE(f.traffic.IsActive()); // disabled regardless of the registry
     }
 
+    SECTION("explicit park keys override")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficParkChance = 0.25; trafficParkDwellMin = 10; "
+               "trafficParkDwellMax = 20; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.parkChance == Approx(0.25f));
+        REQUIRE(tu.parkDwellMin == Approx(10.0f));
+        REQUIRE(tu.parkDwellMax == Approx(20.0f));
+    }
+
     SECTION("sanity floors")
     {
         TrafficFixture f;
@@ -163,6 +177,52 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(f.traffic.Tuning().maxCiv == 0);
         REQUIRE(f.traffic.Tuning().maxLegs == 0);
     }
+
+    SECTION("park sanity clamps")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficParkChance = 1.5; trafficParkDwellMin = 120; "
+               "trafficParkDwellMax = 30; };\n");
+        REQUIRE(f.traffic.Tuning().parkChance == Approx(1.0f));
+        REQUIRE(f.traffic.Tuning().parkDwellMin == Approx(120.0f));
+        REQUIRE(f.traffic.Tuning().parkDwellMax == Approx(120.0f)); // pinned to the min
+        TrafficFixture g;
+        g.Load("class CfgGuerrillaZones { trafficParkChance = -0.5; trafficParkDwellMin = -10; };\n");
+        REQUIRE(g.traffic.Tuning().parkChance == Approx(0.0f));
+        REQUIRE(g.traffic.Tuning().parkDwellMin == Approx(0.0f));
+        REQUIRE(g.traffic.Tuning().parkDwellMax == Approx(180.0f));
+    }
+}
+
+TEST_CASE("Traffic - park decision", "[game][guerrilla]")
+{
+    TrafficTuning def; // parkChance 0.6
+    REQUIRE(Traffic::DecidePark(0.59f, def));
+    REQUIRE_FALSE(Traffic::DecidePark(0.6f, def));
+    TrafficTuning never;
+    never.parkChance = 0.0f;
+    REQUIRE_FALSE(Traffic::DecidePark(0.0f, never));
+    TrafficTuning always;
+    always.parkChance = 1.0f;
+    REQUIRE(Traffic::DecidePark(0.999f, always));
+}
+
+TEST_CASE("Traffic - loaded park-state policy", "[game][guerrilla][save][load]")
+{
+    // seated driver: brake wait restarts / degenerate dweller re-parks /
+    // departer resumes
+    REQUIRE(Traffic::LoadedParkState(TSParking, true) == TSParking);
+    REQUIRE(Traffic::LoadedParkState(TSDwelling, true) == TSParking);
+    REQUIRE(Traffic::LoadedParkState(TSDeparting, true) == TSDeparting);
+    // on-foot driver: everything re-dwells (get-in flags re-issued at expiry)
+    REQUIRE(Traffic::LoadedParkState(TSParking, false) == TSDwelling);
+    REQUIRE(Traffic::LoadedParkState(TSDwelling, false) == TSDwelling);
+    REQUIRE(Traffic::LoadedParkState(TSDeparting, false) == TSDwelling);
+    // non-park states pass through untouched
+    REQUIRE(Traffic::LoadedParkState(TSDriving, true) == TSDriving);
+    REQUIRE(Traffic::LoadedParkState(TSDriving, false) == TSDriving);
+    REQUIRE(Traffic::LoadedParkState(TSStalled, true) == TSStalled);
+    REQUIRE(Traffic::LoadedParkState(TSStalled, false) == TSStalled);
 }
 
 TEST_CASE("Traffic - spawn decision: caps, chances, disabled", "[game][guerrilla]")
@@ -626,6 +686,8 @@ TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][g
     REQUIRE(Traffic::EventTypeFromName("commandeered") == TECommandeered);
     REQUIRE(Traffic::EventTypeFromName("arrived") == TEArrived);
     REQUIRE(Traffic::EventTypeFromName("driverKilled") == TEDriverKilled);
+    REQUIRE(Traffic::EventTypeFromName("parked") == TEParked);
+    REQUIRE(Traffic::EventTypeFromName("Departed") == TEDeparted);
     REQUIRE(Traffic::EventTypeFromName("bogus") == -1);
     REQUIRE(Traffic::EventTypeFromName(nullptr) == -1);
 
@@ -701,6 +763,8 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
         REQUIRE(t.Tuning().maxCiv == 2);
         t.SetEventHandler(TESpawned, "gmEvtTrSpawned = gmEvtTrSpawned + [_this]");
         t.SetEventHandler(TEDriverKilled, "_this call GM_fnCivKilledEH");
+        t.SetEventHandler(TEParked, "gmEvtTrParked = gmEvtTrParked + [_this]");
+        t.SetEventHandler(TEDeparted, "gmEvtTrDeparted = gmEvtTrDeparted + [_this]");
         // a live row whose hull link is null (no live world in a unit test):
         // must be pruned on load rather than resurrected as a ghost entry
         t.MarkEntryForTest(TKCiv, "TownA", "TownB", 2);
@@ -724,6 +788,8 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
 
     CHECK(Str(loaded.GetEventHandler(TESpawned)) == "gmEvtTrSpawned = gmEvtTrSpawned + [_this]");
     CHECK(Str(loaded.GetEventHandler(TEDriverKilled)) == "_this call GM_fnCivKilledEH");
+    CHECK(Str(loaded.GetEventHandler(TEParked)) == "gmEvtTrParked = gmEvtTrParked + [_this]");
+    CHECK(Str(loaded.GetEventHandler(TEDeparted)) == "gmEvtTrDeparted = gmEvtTrDeparted + [_this]");
     CHECK(Str(loaded.GetEventHandler(TEArrived)).empty());
     // the config was re-read on the second pass
     CHECK(loaded.Tuning().maxCiv == 2);
@@ -744,6 +810,9 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
         REQUIRE(fresh.Serialize(lar) == LSOK);
         CHECK(fresh.NEntries() == 0);
         CHECK(Str(fresh.GetEventHandler(TESpawned)).empty());
+        // a pre-park save carries no onParked/onDeparted keys: both load empty
+        CHECK(Str(fresh.GetEventHandler(TEParked)).empty());
+        CHECK(Str(fresh.GetEventHandler(TEDeparted)).empty());
     }
 
     // scrub the process-wide state other tests expect to be empty
