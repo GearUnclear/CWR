@@ -119,6 +119,9 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.parkChance == Approx(0.6f));
         REQUIRE(tu.parkDwellMin == Approx(60.0f));
         REQUIRE(tu.parkDwellMax == Approx(180.0f));
+        REQUIRE(tu.exposeMargin == Approx(150.0f));
+        REQUIRE(tu.despawnDeferMax == Approx(90.0f));
+        REQUIRE_FALSE(tu.scaleCaps);
     }
 
     SECTION("keys absent from CfgGuerrillaZones keep defaults")
@@ -167,6 +170,25 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.parkChance == Approx(0.25f));
         REQUIRE(tu.parkDwellMin == Approx(10.0f));
         REQUIRE(tu.parkDwellMax == Approx(20.0f));
+    }
+
+    SECTION("explicit perception keys override")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficExposeMargin = 50; trafficDespawnDeferMax = 30; "
+               "trafficScaleCaps = 1; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.exposeMargin == Approx(50.0f));
+        REQUIRE(tu.despawnDeferMax == Approx(30.0f));
+        REQUIRE(tu.scaleCaps);
+    }
+
+    SECTION("perception sanity floors")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficExposeMargin = -5; trafficDespawnDeferMax = -1; };\n");
+        REQUIRE(f.traffic.Tuning().exposeMargin == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().despawnDeferMax == Approx(0.0f));
     }
 
     SECTION("sanity floors")
@@ -223,6 +245,51 @@ TEST_CASE("Traffic - loaded park-state policy", "[game][guerrilla][save][load]")
     REQUIRE(Traffic::LoadedParkState(TSDriving, false) == TSDriving);
     REQUIRE(Traffic::LoadedParkState(TSStalled, true) == TSStalled);
     REQUIRE(Traffic::LoadedParkState(TSStalled, false) == TSStalled);
+    // lingering: seated is the state's invariant, an on-foot driver is a
+    // degenerate row and restarts driving (the shared guards reconcile it)
+    REQUIRE(Traffic::LoadedParkState(TSLingering, true) == TSLingering);
+    REQUIRE(Traffic::LoadedParkState(TSLingering, false) == TSDriving);
+}
+
+TEST_CASE("Traffic - observed trip endings", "[game][guerrilla]")
+{
+    SECTION("arrival: unobserved despawns, whatever the legs say")
+    {
+        REQUIRE(Traffic::ArrivedEndAction(true, 0, 3) == TEndDespawn);
+        REQUIRE(Traffic::ArrivedEndAction(true, 3, 3) == TEndDespawn);
+    }
+    SECTION("arrival observed: re-leg while legs remain, then linger")
+    {
+        REQUIRE(Traffic::ArrivedEndAction(false, 0, 3) == TEndReLeg);
+        REQUIRE(Traffic::ArrivedEndAction(false, 2, 3) == TEndReLeg);
+        REQUIRE(Traffic::ArrivedEndAction(false, 3, 3) == TEndLinger);
+        // maxLegs 0 = no continuation: straight to the linger ending
+        REQUIRE(Traffic::ArrivedEndAction(false, 0, 0) == TEndLinger);
+    }
+    SECTION("stall: unobserved despawns for every kind")
+    {
+        REQUIRE(Traffic::StalledEndAction(true, TKCiv) == TEndDespawn);
+        REQUIRE(Traffic::StalledEndAction(true, TKPatrol) == TEndDespawn);
+        REQUIRE(Traffic::StalledEndAction(true, TKConvoy) == TEndDespawn);
+    }
+    SECTION("stall observed: a civ driver walks off, crews stay seated")
+    {
+        REQUIRE(Traffic::StalledEndAction(false, TKCiv) == TEndAbandon);
+        REQUIRE(Traffic::StalledEndAction(false, TKPatrol) == TEndLinger);
+        REQUIRE(Traffic::StalledEndAction(false, TKConvoy) == TEndLinger);
+    }
+}
+
+TEST_CASE("Traffic - state enum stays append-only for save compat", "[game][guerrilla][save][load]")
+{
+    // saved entries store the state as a plain int: appending is the only
+    // legal way to grow this enum (911b724 added the park states, #53 adds
+    // the lingering ending)
+    REQUIRE((int)TSParking == 5);
+    REQUIRE((int)TSDwelling == 6);
+    REQUIRE((int)TSDeparting == 7);
+    REQUIRE((int)TSLingering == 8);
+    REQUIRE((int)NTrafficStates == 9);
 }
 
 TEST_CASE("Traffic - spawn decision: caps, chances, disabled", "[game][guerrilla]")
@@ -510,6 +577,404 @@ TEST_CASE("Traffic - far-despawn edge with hysteresis", "[game][guerrilla]")
     REQUIRE_FALSE(Traffic::ShouldDespawn((edge - 1) * (edge - 1), t));
     REQUIRE_FALSE(Traffic::ShouldDespawn(edge * edge, t));
     REQUIRE(Traffic::ShouldDespawn((edge + 1) * (edge + 1), t));
+}
+
+namespace
+{
+float Sq(float v)
+{
+    return v * v;
+}
+} // namespace
+
+TEST_CASE("Traffic - effective band from the live cull", "[game][guerrilla]")
+{
+    TrafficTuning t; // 300 / 1500 / +300, exposeMargin 150
+
+    SECTION("cull inside the config floor: the config band verbatim")
+    {
+        // objectsZ 100 + margin 150 = 250 < minSpawnDist 300
+        TrafficEffectiveBand b = Traffic::EffectiveBand(t, 100.0f, false, 900.0f);
+        REQUIRE(b.minSpawn == Approx(300.0f));
+        REQUIRE(b.radius == Approx(1500.0f));
+        REQUIRE(b.despawnEdge == Approx(1800.0f));
+        REQUIRE(b.closeHold == Approx(300.0f));
+        // ... which is exactly ConfigBand, the no-camera fallback
+        TrafficEffectiveBand c = Traffic::ConfigBand(t);
+        REQUIRE(c.minSpawn == Approx(300.0f));
+        REQUIRE(c.radius == Approx(1500.0f));
+        REQUIRE(c.despawnEdge == Approx(1800.0f));
+        REQUIRE(c.closeHold == Approx(300.0f));
+    }
+
+    SECTION("default view distance pushes the floor out; radius and edge stay config (identity)")
+    {
+        // objectsZ 600 (view 900): floor 750, band narrows to [750, 1500] -
+        // the radius and despawn edge are UNCHANGED at the default view
+        // distance (the new keys' defaults preserve pre-#53 behaviour)
+        TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, false, 900.0f);
+        REQUIRE(b.minSpawn == Approx(750.0f));
+        REQUIRE(b.radius == Approx(1500.0f));
+        REQUIRE(b.despawnEdge == Approx(1800.0f));
+        REQUIRE(b.closeHold == Approx(300.0f));
+    }
+
+    SECTION("a floor pushed past the config radius WIDENS the band, never empties it")
+    {
+        // objectsZ 3000 (the cull cap): floor 3150, far beyond radius 1500;
+        // the band keeps a road-scan radius of width above the floor
+        TrafficEffectiveBand b = Traffic::EffectiveBand(t, 3000.0f, false, 900.0f);
+        REQUIRE(b.minSpawn == Approx(3150.0f));
+        REQUIRE(b.radius == Approx(3150.0f + Traffic::SpawnScanRadius));
+        REQUIRE(b.radius >= b.minSpawn);
+        REQUIRE(b.despawnEdge >= b.radius);
+        REQUIRE(b.closeHold == Approx(300.0f)); // the audible hold never moves
+    }
+
+    SECTION("a floor nearing the config radius keeps a usable width (no thin-annulus regime)")
+    {
+        // objectsZ 1200: floor 1350, naive band [1350, 1500] is 150 m thin -
+        // the radius follows the floor out to keep a road-scan width
+        TrafficEffectiveBand b = Traffic::EffectiveBand(t, 1200.0f, false, 900.0f);
+        REQUIRE(b.minSpawn == Approx(1350.0f));
+        REQUIRE(b.radius == Approx(1350.0f + Traffic::SpawnScanRadius));
+        REQUIRE(b.despawnEdge == Approx(b.radius + 300.0f));
+    }
+
+    SECTION("night light bound: lights raise the cull to horizontZ + 500")
+    {
+        // horizontZ 900: light cull 1400 > objectsZ 600 -> floor 1550
+        TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, true, 900.0f);
+        REQUIRE(b.minSpawn == Approx(1550.0f));
+        // ... but never lowers the cull below objectsZ
+        TrafficEffectiveBand c = Traffic::EffectiveBand(t, 3000.0f, true, 900.0f);
+        REQUIRE(c.minSpawn == Approx(3150.0f));
+    }
+
+    SECTION("silly config: radius under the floor clamps the width to zero")
+    {
+        TrafficTuning w;
+        w.minSpawnDist = 800.0f;
+        w.radius = 500.0f;
+        w.despawnHysteresis = 0.0f;
+        TrafficEffectiveBand b = Traffic::EffectiveBand(w, 600.0f, false, 900.0f);
+        REQUIRE(b.minSpawn == Approx(800.0f));
+        REQUIRE(b.radius == Approx(800.0f));
+        REQUIRE(b.despawnEdge == Approx(800.0f));
+    }
+
+    SECTION("a negative hysteresis cannot pull the edge inside the safe distance")
+    {
+        TrafficTuning w;
+        w.despawnHysteresis = -1300.0f;
+        // objectsZ 600: safe 750, band [750, 1500], raw edge 200 -> floored
+        TrafficEffectiveBand b = Traffic::EffectiveBand(w, 600.0f, false, 900.0f);
+        REQUIRE(b.despawnEdge == Approx(750.0f));
+    }
+}
+
+TEST_CASE("Traffic - spawn exposure predicate", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, false, 900.0f); // floor 750
+
+    SECTION("beyond the effective floor is always safe, boundary inclusive")
+    {
+        REQUIRE(Traffic::CanExposeSpawn(Sq(751.0f), false, true, b));
+        REQUIRE(Traffic::CanExposeSpawn(Sq(750.0f), false, true, b));
+    }
+    SECTION("inside the floor, visible and in view: exposed")
+    {
+        REQUIRE_FALSE(Traffic::CanExposeSpawn(Sq(500.0f), false, true, b));
+    }
+    SECTION("terrain hides a close point")
+    {
+        REQUIRE(Traffic::CanExposeSpawn(Sq(500.0f), true, true, b));
+    }
+    SECTION("outside the view cone hides a close point")
+    {
+        REQUIRE(Traffic::CanExposeSpawn(Sq(500.0f), false, false, b));
+    }
+}
+
+TEST_CASE("Traffic - despawn exposure predicate", "[game][guerrilla]")
+{
+    TrafficTuning t;
+    // floor 750 (the imperceptibility bound), edge 1800, closeHold 300
+    TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, false, 900.0f);
+
+    SECTION("in the view cone is never safe, whatever the distance or terrain")
+    {
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(3000.0f), false, true, b));
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(100.0f), true, true, b));
+    }
+    SECTION("out of the cone and beyond the imperceptibility bound: safe, boundary inclusive")
+    {
+        // the distance leg is the cull bound (band.minSpawn), NOT the far
+        // edge - an in-band ending on open terrain must be able to tear
+        // down once the car is beyond draw range (caps must not pin)
+        REQUIRE(Traffic::CanExposeDespawn(Sq(751.0f), false, false, b));
+        REQUIRE(Traffic::CanExposeDespawn(Sq(750.0f), false, false, b));
+        REQUIRE(Traffic::CanExposeDespawn(Sq(2251.0f), false, false, b));
+    }
+    SECTION("out of the cone and terrain-hidden inside the bound: safe")
+    {
+        REQUIRE(Traffic::CanExposeDespawn(Sq(400.0f), true, false, b));
+    }
+    SECTION("out of the cone but clear and inside the bound: not safe")
+    {
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(400.0f), false, false, b));
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(749.0f), false, false, b));
+    }
+    SECTION("inside the close hold nothing despawns, even terrain-hidden out of the cone")
+    {
+        // an idling engine at 200 m is audible where the mesh is not
+        // visible: the pre-#53 close-range hold survives the gate
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(200.0f), true, false, b));
+        REQUIRE_FALSE(Traffic::CanExposeDespawn(Sq(299.0f), true, false, b));
+        REQUIRE(Traffic::CanExposeDespawn(Sq(300.0f), true, false, b)); // hold boundary
+    }
+    SECTION("the band overload of ShouldDespawn tracks the effective edge")
+    {
+        REQUIRE(Traffic::ShouldDespawn(Sq(1801.0f), b));
+        REQUIRE_FALSE(Traffic::ShouldDespawn(Sq(1800.0f), b));
+    }
+}
+
+TEST_CASE("Traffic - perception-aware spawn point selection", "[game][guerrilla]")
+{
+    TrafficTuning t;                                                           // hard floor 300
+    TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, false, 900.0f); // floor 750, cap 1500
+    Vector3 player(0, 0, 0);
+
+    SECTION("distance-only (null obs): farthest point past the exposure floor")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(200, 0, 0));  // under the hard floor - never eligible
+        pts.Add(Vector3(500, 0, 0));  // inside the exposure floor
+        pts.Add(Vector3(900, 0, 0));  // past the exposure floor
+        pts.Add(Vector3(2500, 0, 0)); // beyond the cap
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, nullptr) == 2);
+    }
+
+    SECTION("a widened band accepts points past the config radius")
+    {
+        // objectsZ 3000: floor 3150, cap 3150 + SpawnScanRadius
+        TrafficEffectiveBand wide = Traffic::EffectiveBand(t, 3000.0f, false, 900.0f);
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(1400, 0, 0)); // inside the config band but under the pushed floor
+        pts.Add(Vector3(3500, 0, 0)); // past the config radius, inside the widened cap
+        pts.Add(Vector3(4500, 0, 0)); // beyond the widened cap
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, wide, nullptr) == 1);
+    }
+
+    SECTION("the exposure distance leg follows the camera when the obs carry it")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(500, 0, 0)); // inside the floor of the PLAYER...
+        AutoArray<TrafficExposeObs> obs;
+        obs.Resize(1);
+        obs[0].camDist2 = Sq(2000.0f); // ... but far from the scripted camera
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, &obs) == 0);
+        // and the converse: far from the player, right in front of the camera
+        AutoArray<Vector3> far;
+        far.Add(Vector3(1400, 0, 0));
+        AutoArray<TrafficExposeObs> nearCam;
+        nearCam.Resize(1);
+        nearCam[0].camDist2 = Sq(100.0f);
+        REQUIRE(Traffic::SelectSpawnPoint(far, player, t, b, &nearCam) == -1);
+    }
+
+    SECTION("no eligible point without observations, LOS or the cone legalize close ones")
+    {
+        AutoArray<Vector3> close;
+        close.Add(Vector3(400, 0, 0));
+        close.Add(Vector3(600, 0, 0));
+        REQUIRE(Traffic::SelectSpawnPoint(close, player, t, b, nullptr) == -1);
+
+        AutoArray<TrafficExposeObs> hidden; // terrain hides only the near one
+        hidden.Resize(2);
+        hidden[0].losBlocked = true;
+        REQUIRE(Traffic::SelectSpawnPoint(close, player, t, b, &hidden) == 0);
+
+        AutoArray<TrafficExposeObs> cone; // both eligible, but tiers differ:
+        cone.Resize(2);                   // terrain-hidden survives a turn-around,
+        cone[0].losBlocked = true;        // cone-only does not - the closer hidden
+        cone[1].inFrustum = false;        // point wins over the farther cone-only one
+        REQUIRE(Traffic::SelectSpawnPoint(close, player, t, b, &cone) == 0);
+    }
+
+    SECTION("the config minSpawnDist stays a hard floor even for hidden points")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(200, 0, 0));
+        AutoArray<TrafficExposeObs> obs;
+        obs.Resize(1);
+        obs[0].losBlocked = true;
+        obs[0].inFrustum = false;
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, &obs) == -1);
+    }
+
+    SECTION("config-band identity: the perception variant with defaults matches the legacy pick")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(100, 0, 0));
+        pts.Add(Vector3(400, 0, 0));
+        pts.Add(Vector3(0, 0, 900));
+        pts.Add(Vector3(2000, 0, 0));
+        TrafficEffectiveBand cfg = Traffic::ConfigBand(t);
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, cfg, nullptr) == Traffic::SelectSpawnPoint(pts, player, t));
+    }
+}
+
+TEST_CASE("Traffic - spawn point tier scoring (alibi preferences)", "[game][guerrilla]")
+{
+    TrafficTuning t;                                                           // hard floor 300
+    TrafficEffectiveBand b = Traffic::EffectiveBand(t, 600.0f, false, 900.0f); // floor 750, cap 1500
+    Vector3 player(0, 0, 0);
+
+    SECTION("terrain-hidden beats cone-only whatever the distances")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(400, 0, 0)); // losBlocked: survives a turn-around
+        pts.Add(Vector3(740, 0, 0)); // cone-only: one head turn from exposure
+        AutoArray<TrafficExposeObs> obs;
+        obs.Resize(2);
+        obs[0].losBlocked = true;
+        obs[1].inFrustum = false;
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, &obs) == 0);
+    }
+
+    SECTION("a distance pass is turn-around-proof too: same tier as terrain-hidden, farthest wins")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(500, 0, 0));  // losBlocked
+        pts.Add(Vector3(1400, 0, 0)); // beyond the floor
+        AutoArray<TrafficExposeObs> obs;
+        obs.Resize(2);
+        obs[0].losBlocked = true;
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, &obs) == 1);
+    }
+
+    SECTION("preferOrigin: an in-zone point beats a farther out-of-zone one")
+    {
+        Vector3 origin(0, 0, 900);
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(0, 0, 1000)); // 100 m from the origin centre: in-zone
+        pts.Add(Vector3(1400, 0, 0)); // far out on the open road
+        // both pass by distance (1000 and 1400 >= floor 750)
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, nullptr, &origin, true) == 0);
+        // ... but only for the kinds that ask for it
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, nullptr, &origin, false) == 1);
+        // ... and a null origin means no preference
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, nullptr, nullptr, true) == 1);
+    }
+
+    SECTION("preferOrigin never overrides the exposure gate")
+    {
+        Vector3 origin(500, 0, 0);
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(500, 0, 0));  // in-zone but visible inside the floor: gated out
+        pts.Add(Vector3(1400, 0, 0)); // out-of-zone distance pass
+        REQUIRE(Traffic::SelectSpawnPoint(pts, player, t, b, nullptr, &origin, true) == 1);
+    }
+}
+
+TEST_CASE("Traffic - alibi spawn point selection", "[game][guerrilla]")
+{
+    TrafficTuning t; // minSpawnDist 300 stays the audible hard floor
+    Vector3 player(0, 0, 0);
+    Vector3 town(600, 0, 0);
+
+    SECTION("only points inside AlibiOriginRadius of the town qualify; farthest from the player wins")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(400, 0, 0));  // in-town, 400 m out
+        pts.Add(Vector3(700, 0, 0));  // in-town, 700 m out
+        pts.Add(Vector3(850, 0, 0));  // in-town, 850 m out
+        pts.Add(Vector3(1200, 0, 0)); // 600 m past the centre: outside the town
+        REQUIRE(Traffic::SelectAlibiPoint(pts, player, town, t, nullptr) == 2);
+    }
+
+    SECTION("hidden curbs beat visible ones even when closer")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(400, 0, 0));
+        pts.Add(Vector3(850, 0, 0));
+        AutoArray<TrafficExposeObs> obs;
+        obs.Resize(2);
+        obs[0].losBlocked = true; // a building-shadowed curb
+        REQUIRE(Traffic::SelectAlibiPoint(pts, player, town, t, &obs) == 0);
+        // out-of-cone counts as hidden too
+        obs[0].losBlocked = false;
+        obs[0].inFrustum = false;
+        REQUIRE(Traffic::SelectAlibiPoint(pts, player, town, t, &obs) == 0);
+    }
+
+    SECTION("a visible curb is still a legal last resort (a pull-out is a plausible birth)")
+    {
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(500, 0, 0));
+        REQUIRE(Traffic::SelectAlibiPoint(pts, player, town, t, nullptr) == 0);
+    }
+
+    SECTION("the audible hard floor still applies inside the town")
+    {
+        Vector3 nearTown(400, 0, 0);
+        AutoArray<Vector3> pts;
+        pts.Add(Vector3(200, 0, 0)); // in-town but 200 m from the player
+        REQUIRE(Traffic::SelectAlibiPoint(pts, player, nearTown, t, nullptr) == -1);
+    }
+
+    SECTION("no eligible point: -1")
+    {
+        AutoArray<Vector3> none;
+        REQUIRE(Traffic::SelectAlibiPoint(none, player, town, t, nullptr) == -1);
+    }
+}
+
+TEST_CASE("Traffic - cap scaling with the widened band", "[game][guerrilla]")
+{
+    SECTION("identity at (or below) the config band")
+    {
+        REQUIRE(Traffic::ScaleCap(3, 1500.0f, 1500.0f) == 3);
+        REQUIRE(Traffic::ScaleCap(3, 1000.0f, 1500.0f) == 3); // never below the config
+        REQUIRE(Traffic::ScaleCap(1, 1500.0f, 1500.0f) == 1);
+    }
+    SECTION("linear with the band radius, rounded")
+    {
+        REQUIRE(Traffic::ScaleCap(3, 3000.0f, 1500.0f) == 6);
+        REQUIRE(Traffic::ScaleCap(1, 3000.0f, 1500.0f) == 2);
+        REQUIRE(Traffic::ScaleCap(3, 2000.0f, 1500.0f) == 4); // 4.0
+        REQUIRE(Traffic::ScaleCap(3, 1750.0f, 1500.0f) == 4); // 3.5 rounds up
+        REQUIRE(Traffic::ScaleCap(3, 1600.0f, 1500.0f) == 3); // 3.2 rounds down
+    }
+    SECTION("degenerate inputs stay put")
+    {
+        REQUIRE(Traffic::ScaleCap(0, 3000.0f, 1500.0f) == 0); // 0 = never spawns, stays never
+        REQUIRE(Traffic::ScaleCap(3, 3000.0f, 0.0f) == 3);    // silly config radius: identity
+        REQUIRE(Traffic::ScaleCap(-1, 3000.0f, 1500.0f) == -1);
+    }
+}
+
+TEST_CASE("Traffic - route picking honours the effective band's origin gate", "[game][guerrilla]")
+{
+    TrafficTuning t; // config radius 1500
+    AutoArray<TrafficZoneCandidate> zones;
+    zones.Add(Zone(0, 3000, 1000, true, false)); // CITY 2000 m from the player
+    zones.Add(Zone(1, 4500, 1000, true, false)); // CITY dest, 1500 m from the origin
+    int o = -1, d = -1;
+
+    // config radius: no origin in reach
+    REQUIRE_FALSE(Traffic::PickRoute(TKCiv, zones, 1000, 1000, t, 0.0f, o, d));
+    // widened band: the pushed-out origin is reachable again
+    TrafficEffectiveBand b = Traffic::ConfigBand(t);
+    b.radius = 2500.0f;
+    REQUIRE(Traffic::PickRoute(TKCiv, zones, 1000, 1000, t, 0.0f, o, d, -1, &b));
+    REQUIRE(o == 0);
+    REQUIRE(d == 1);
+    // null band = the config radius, unchanged behaviour
+    REQUIRE_FALSE(Traffic::PickRoute(TKCiv, zones, 1000, 1000, t, 0.0f, o, d, -1, nullptr));
 }
 
 TEST_CASE("Traffic - route picking", "[game][guerrilla]")

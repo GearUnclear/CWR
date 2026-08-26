@@ -7,8 +7,11 @@
 //       announced through the init.sqs "spawned" handler;
 //    2. the car actually drives (>= 15 m displacement) - the ACMOVE leg to
 //       another CITY under CARELESS behaviour (road pathing);
-//    3. the player far offshore (> trafficRadius + hysteresis from the car)
-//       drains the live table to 0 and fires "despawned".
+//    3. the player far away on land (beyond the effective despawn edge),
+//       facing AWAY from the car (the issue-#53 perception gate despawns
+//       only out-of-frustum), far-despawns THE car and fires "despawned".
+//       (Not count==0: near La Riviere the ambient chance rolls can spawn
+//       fresh unrelated cars at any time.)
 //  Determinism: the force-spawn bypasses the chance roll and the caps; the
 //  road placement is the real one (farthest band point from the player).
 // ============================================================================
@@ -54,11 +57,13 @@ triAssertGe [count gmEvtTrSpawned, 1]
 gtP0 = getPos gtCar
 triSimUntil { ((getPos gtCar) distance gtP0) >= 15 }
 
-// -- despawn: the SW offshore corner is far beyond the despawn edge from any
-//    Abel road ------------------------------------------------------------------
-player setPos [500, 500, 0]
-triSimUntil { (gmTrafficCount "all") == 0 }
+// -- despawn: La Riviere (~4.2 km SW of the Village) is far beyond the
+//    despawn edge even at the night-lights bound; face SW so the car sits
+//    behind the camera (a despawn is gated on out-of-frustum, issue #53) -----
+player setPos [3848, 3214, 0]
+player setDir 228
+triSimFrames 5
+triSimUntil { isNull gtCar }
 triAssertGe [count gmEvtTrDespawned, 1]
-triAssertEq [(format ["%1", isNull gtCar]), "true"]
 
 triEndTest

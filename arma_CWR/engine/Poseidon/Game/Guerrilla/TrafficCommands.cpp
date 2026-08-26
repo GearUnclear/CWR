@@ -170,6 +170,33 @@ static GameValue GmTrafficForceSpawn(const GameState* state, GameValuePar oper1)
     return GameValueExt(veh);
 }
 
+// gmTrafficPercept <pos|obj> -> [hasCamera, losBlocked, inFrustum, minSpawn,
+// radius, despawnEdge]: the perception verdict for one point plus the live
+// effective band (issue #53) the next traffic pass will decide with.  The
+// bools come back as 0/1 scalars (raw bools kill the tri harness asserts).
+// Test aid for the view-distance regression fence.
+static GameValue GmTrafficPercept(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    Vector3 pos;
+    if (!GetPos(state, pos, oper1))
+    {
+        return value;
+    }
+    bool hasCamera, losBlocked, inFrustum;
+    TrafficEffectiveBand band;
+    Traffic::Instance().PerceptProbe(pos, hasCamera, losBlocked, inFrustum, band);
+    GameArrayType& array = value;
+    array.Resize(6);
+    array[0] = hasCamera ? 1.0f : 0.0f;
+    array[1] = losBlocked ? 1.0f : 0.0f;
+    array[2] = inFrustum ? 1.0f : 0.0f;
+    array[3] = band.minSpawn;
+    array[4] = band.radius;
+    array[5] = band.despawnEdge;
+    return value;
+}
+
 // ---------------------------------------------------------------------------
 // gmRoad* / nearestRoads (RoadNet bindings)
 // ---------------------------------------------------------------------------
@@ -300,6 +327,7 @@ INIT_MODULE(GuerrillaTraffic, 3)
     GGameState.NewFunction(GameFunction(GameNothing, "gmTrafficOnEvent", GmTrafficOnEvent, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmTrafficRelease", GmTrafficRelease, GameObject));
     GGameState.NewFunction(GameFunction(GameObject, "gmTrafficForceSpawn", GmTrafficForceSpawn, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "gmTrafficPercept", GmTrafficPercept, GameObjectOrArray));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadNearest", GmRoadNearest, GameObjectOrArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadPath", GmRoadPath, GameArray));

@@ -40,6 +40,11 @@ class CfgGuerrillaZones
     trafficParkChance = 1;
     trafficParkDwellMin = 10;
     trafficParkDwellMax = 20;
+    // Perception gate (issue #53): a despawn the camera might witness defers
+    // up to trafficDespawnDeferMax seconds. Stock 90 s equals the ambient
+    // test's assert window, so the offshore far-despawn is pinned to a short
+    // defer (the player teleport leaves the camera pointing anywhere).
+    trafficDespawnDeferMax = 20;
     // Direct-launch faction fallbacks stated explicitly (no new-game UI in
     // a test run):
     // Ambient road traffic (native Traffic service) otherwise runs on its
@@ -50,7 +55,8 @@ class CfgGuerrillaZones
     // trafficConvoyWarScale=0.5; trafficStallTimeout=90; trafficArriveRadius=60;
     // trafficMaxLegs=3; trafficCommandeerRadius=25;
     // trafficCommandeerLaneHalfWidth=4; trafficCommandeerStopDelay=2.5;
-    // trafficFleeDist=150 (set trafficEnabled=0 to switch it off).
+    // trafficFleeDist=150; trafficExposeMargin=150; trafficScaleCaps=0
+    // (set trafficEnabled=0 to switch it off).
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns

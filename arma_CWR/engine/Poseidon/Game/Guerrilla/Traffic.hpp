@@ -78,6 +78,15 @@ struct TrafficTuning
     float parkChance = 0.6f;     // trafficParkChance
     float parkDwellMin = 60.0f;  // trafficParkDwellMin (s)
     float parkDwellMax = 180.0f; // trafficParkDwellMax (s)
+    // perception gate (view-distance aware spawn/despawn, issue #53).  The
+    // live object-cull distance pushes the band out (EffectiveBand); the
+    // radius/minSpawnDist/despawnHysteresis keys above are floors, not caps.
+    float exposeMargin = 150.0f;   // trafficExposeMargin: m past the cull that counts as imperceptible
+    float despawnDeferMax = 90.0f; // trafficDespawnDeferMax: s a perception-blocked despawn may defer (0 = no defer)
+    bool scaleCaps = false; // trafficScaleCaps: scale maxCiv/maxPatrols with the widened band (ScaleCap; identity
+                            // whenever the band is not widened, i.e. daytime at the default view distance - but the
+                            // night light bound widens the band at ANY setting, so 1 raises night densities; kept
+                            // off for the pre-#53 densities)
 };
 
 enum TrafficKind
@@ -98,7 +107,19 @@ enum TrafficState
     TSParking,   // civ arrived + park roll won: Stop issued, waiting out the brake delay
     TSDwelling,  // driver on foot near the parked car, dwell timer running
     TSDeparting, // driver ordered back in; waiting for DriverBrain()==unit
+    TSLingering, // observed trip end (issue #53): stopped in place, crew seated, despawn once unobserved
     NTrafficStates
+};
+
+// what to do with an entry whose trip has ended: arrival with a losing (or
+// no) park roll, or an expired stall.  Pure decision over the perception
+// verdict; the world layer supplies despawnSafe (DespawnSafe) and executes.
+enum TrafficEndAction
+{
+    TEndDespawn, // unobserved: delete outright (the pre-#53 semantics)
+    TEndReLeg,   // observed with legs left: drive on to another zone
+    TEndAbandon, // observed civ stall: driver dismounts and walks off, hull released
+    TEndLinger,  // observed, no continuation: stop where it is, crew stays seated
 };
 
 enum TrafficEventType
@@ -142,6 +163,38 @@ struct TrafficModulationInput
     float warLevel = 1.0f;
     int originAlertCiv = 0;      // civ route origin's AlertState (0 = ASGreen)
     bool originOccupied = false; // ... and whether the occupier owns it
+};
+
+// The band the spawn/despawn rules actually use: the config band pushed out
+// past the live object-cull distance so no creation or deletion ever happens
+// inside draw range.  Config values are floors; a pushed-out floor only
+// narrows the band, and the radius widens only once less than a usable
+// width (min(config width, SpawnScanRadius)) remains above the floor - so
+// the band never degenerates to empty, yet the radius and despawn edge stay
+// at their config values at the daytime default view distance (the spec's
+// defaults-preserve-behaviour claim).  Traffic::ConfigBand is the identity
+// case (force spawns and the no-camera fallback).
+struct TrafficEffectiveBand
+{
+    float minSpawn = 300.0f;     // spawn distance floor (softened by the LOS/frustum escapes), also the
+                                 // imperceptibility bound: beyond it nothing is drawn, so a teardown is invisible
+    float radius = 1500.0f;      // spawn band cap, also the PickRoute origin gate
+    float despawnEdge = 1800.0f; // far-despawn beyond this
+    float closeHold = 300.0f;    // the config minSpawnDist verbatim: never tear down inside this even
+                                 // hidden - an idling engine is audible where the mesh is not visible
+};
+
+// Per-point perception observations, filled by the world layer (camera cone
+// + terrain ray); unit tests inject values.  The defaults are the
+// no-information case: nothing hidden, everything in view, so only the
+// distance legs of the CanExpose predicates apply.
+struct TrafficExposeObs
+{
+    bool losBlocked = false; // terrain hides the point from the camera
+    bool inFrustum = true;   // within the generous view cone of the camera heading
+    float camDist2 = -1.0f;  // squared 2D distance from the CAMERA (the actual viewer: a scripted
+                             // camera can sit far from the player); < 0 = unknown, the distance
+                             // legs fall back to the player distance
 };
 
 // One zone as the pure route picker sees it.
@@ -209,6 +262,29 @@ class Traffic : public SerializeClass
     static int DecideSpawn(const TrafficDecisionInput& in, const TrafficTuning& tuning);
     // far-despawn edge: beyond radius + despawnHysteresis
     static bool ShouldDespawn(float playerDistSq, const TrafficTuning& tuning);
+    // ... and against a live effective band (beyond band.despawnEdge)
+    static bool ShouldDespawn(float playerDistSq, const TrafficEffectiveBand& band);
+    // perception gate (issue #53).  EffectiveBand derives the live band from
+    // the engine object-cull distance: anything past cull + exposeMargin is
+    // imperceptible by construction (vehicles already pop at the cull).
+    // lightsOn raises the cull to the night light bound - light sources draw
+    // out to horizontZ + NightLightCullMargin, farther than the mesh, and AI
+    // cars auto-light headlights at night.
+    static constexpr float NightLightCullMargin = 500.0f; // the Scene light-enumeration bound past horizontZ
+    static constexpr float HeadlightNightEffect = 0.2f;   // darkest randomized AI headlight threshold (TransportCore)
+    static TrafficEffectiveBand EffectiveBand(const TrafficTuning& tuning, float objectsZ, bool lightsOn,
+                                              float horizontZ);
+    // the pre-perception band: the config values verbatim
+    static TrafficEffectiveBand ConfigBand(const TrafficTuning& tuning);
+    // a spawn at dist2 is imperceptible when ANY leg passes: beyond the
+    // effective floor, terrain-hidden, or outside the view cone
+    static bool CanExposeSpawn(float dist2, bool losBlocked, bool inFrustum, const TrafficEffectiveBand& band);
+    // a despawn is imperceptible only OUTSIDE the view cone AND (beyond the
+    // imperceptibility bound (band.minSpawn: past the cull nothing is drawn)
+    // OR terrain-hidden), and NEVER inside band.closeHold (audible even
+    // unseen - the pre-#53 close-range hold); the world layer defers a
+    // blocked despawn, hard-bounded by trafficDespawnDeferMax
+    static bool CanExposeDespawn(float dist2, bool losBlocked, bool inFrustum, const TrafficEffectiveBand& band);
     // convoy chance grows with the war level, clamped to ConvoyChanceCap
     static constexpr float ConvoyChanceCap = 0.3f;
     static float ConvoyChance(const TrafficTuning& tuning, float warLevel);
@@ -230,12 +306,43 @@ class Traffic : public SerializeClass
     // player-range gate.  False when no route exists.
     static constexpr float CivRouteMinDist = 800.0f;
     static constexpr float CivRouteMaxDist = 5000.0f;
+    // band widens the origin gate along with the spawn band (null = the
+    // config radius) - all three radius consumers must move together or a
+    // pushed-out band leaves no origins in reach
     static bool PickRoute(int kind, const AutoArray<TrafficZoneCandidate>& zones, float playerX, float playerZ,
                           const TrafficTuning& tuning, float roll, int& originIndex, int& destIndex,
-                          int originZone = -1);
+                          int originZone = -1, const TrafficEffectiveBand* band = nullptr);
     // spawn point: the candidate road point farthest from the player inside
     // the band [minSpawnDist, radius]; returns the index, -1 when none
     static int SelectSpawnPoint(const AutoArray<Vector3>& roadPts, Vector3Par playerPos, const TrafficTuning& tuning);
+    // ... perception-aware variant: the config minSpawnDist stays a HARD
+    // floor (a close spawn is audible even unseen), the cap is band.radius,
+    // and every candidate must pass CanExposeSpawn.  obs runs parallel to
+    // roadPts (null = the no-information defaults, i.e. distance-only).
+    // Scoring is tiered (alibi spawns, issue #53 T2): a point that survives
+    // an immediate turn-around (beyond the exposure floor or terrain-hidden)
+    // beats one hidden only by the view cone; when preferOrigin (patrols and
+    // convoys pulling out of their base), a candidate inside AlibiOriginRadius
+    // of originPos beats everything - a car appearing inside its own base is
+    // a plausible birth even when the base is watched.  Farthest from the
+    // player breaks ties within a tier.
+    static int SelectSpawnPoint(const AutoArray<Vector3>& roadPts, Vector3Par playerPos, const TrafficTuning& tuning,
+                                const TrafficEffectiveBand& band, const AutoArray<TrafficExposeObs>* obs,
+                                const Vector3* originPos = nullptr, bool preferOrigin = false);
+    // alibi fallback (issue #53 T2): no imperceptible driving spawn exists,
+    // so pick a roadside point INSIDE the origin zone to spawn the car
+    // PARKED and pull out via the depart machinery (a car leaving the curb
+    // is a plausible birth even directly observed).  The config minSpawnDist
+    // stays the hard floor; hidden candidates (terrain or cone) are
+    // preferred, then the farthest from the player.  -1 when none.
+    static constexpr float AlibiOriginRadius = 300.0f; // m of the zone centre that counts as "inside the town"
+    static int SelectAlibiPoint(const AutoArray<Vector3>& roadPts, Vector3Par playerPos, Vector3Par originPos,
+                                const TrafficTuning& tuning, const AutoArray<TrafficExposeObs>* obs);
+    // density scaling (issue #53 T6, trafficScaleCaps): traffic lives on
+    // roads, so the caps scale LINEARLY with the widened band (rounded),
+    // never below the configured value; identity when the band is not
+    // widened.  Convoys are deliberately unscaled (rare by design).
+    static int ScaleCap(int cap, float effRadius, float configRadius);
     // commandeer trigger: inside commandeerRadius AND (player ahead in the
     // lane: within 20 deg of the car's heading and commandeerLaneHalfWidth
     // of its line, OR weapon in hands aimed within 15 deg of the car)
@@ -249,6 +356,12 @@ class Traffic : public SerializeClass
     // driver came back seated (transient flags never survive the load, so an
     // on-foot departer re-dwells and re-issues the get-in from scratch)
     static TrafficState LoadedParkState(TrafficState saved, bool driverSeated);
+    // observed endings (issue #53).  A trip that wants to end while the
+    // player can perceive the car never hard-despawns: arrivals re-leg while
+    // legs remain and then linger; stalls hand a civ driver to the walk-off
+    // (the flee machinery at walking pace) and keep other crews seated
+    static TrafficEndAction ArrivedEndAction(bool despawnSafe, int legs, int maxLegs);
+    static TrafficEndAction StalledEndAction(bool despawnSafe, int kind);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
@@ -263,20 +376,29 @@ class Traffic : public SerializeClass
     // test aid: a bookkeeping-only entry (no world objects) so the
     // save/load rows are unit-testable
     void MarkEntryForTest(TrafficKind kind, const char* originZone, const char* destZone, int legs);
+    // test/debug aid (gmTrafficPercept): take a fresh perception snapshot
+    // and report the verdict for one point - whether a camera exists, the
+    // per-point observations and the live effective band the next pass's
+    // spawn/despawn decisions will use
+    void PerceptProbe(Vector3Par pos, bool& hasCamera, bool& losBlocked, bool& inFrustum, TrafficEffectiveBand& band);
 
     // save/load; live rows (vehicle/group refs + zone names), released
     // hulls, fleeing drivers, handlers
     LSError Serialize(ParamArchive& ar) override;
 
     // constants (engine facts, not island data)
-    static constexpr float CommandeerSubTick = 0.5f;      // s
-    static constexpr float CommandeerWatchRadius = 60.0f; // m, sub-tick arms inside this
-    static constexpr float SpawnScanRadius = 700.0f;      // m of road net scanned around the origin
-    static constexpr float FleeDeleteDist = 300.0f;       // m, bailed driver deleted beyond this...
-    static constexpr float FleeDeleteAfter = 60.0f;       // ... or after this many seconds
-    static constexpr float ParkWanderRadius = 40.0f;      // m, dwell stroll cap
-    static constexpr int ParkWanderOdds = 6;              // 1-in-6 per main tick
-    static constexpr float DepartTimeout = 45.0f;         // s in TSDeparting before fallback
+    static constexpr float CommandeerSubTick = 0.5f;       // s
+    static constexpr float CommandeerWatchRadius = 60.0f;  // m, sub-tick arms inside this
+    static constexpr float SpawnScanRadius = 700.0f;       // m of road net scanned around the origin
+    static constexpr float FleeDeleteDist = 300.0f;        // m, bailed driver deleted beyond this...
+    static constexpr float FleeDeleteAfter = 60.0f;        // ... or after this many seconds
+    static constexpr float ParkWanderRadius = 40.0f;       // m, dwell stroll cap
+    static constexpr int ParkWanderOdds = 6;               // 1-in-6 per main tick
+    static constexpr float DepartTimeout = 45.0f;          // s in TSDeparting before fallback
+    static constexpr float FrustumCosHalfAngle = 0.5f;     // generous view cone: +-60 deg of the camera heading
+    static constexpr float LosTargetHeight = 2.5f;         // m above the road the terrain ray aims (a car roof)
+    static constexpr int MaxLosProbes = 8;                 // terrain rays per spawn attempt (farthest first)
+    static constexpr float PlayerCausedLingerScale = 2.0f; // released despawn-edge multiplier for player-caused remains
 
   private:
     struct TrafficEntry
@@ -297,6 +419,8 @@ class Traffic : public SerializeClass
         float stallTime = 0;     // s of no movement
         float stateTime = 0;     // s in the current state (commandeer/park timing)
         float dwellDuration = 0; // s; transient like stateTime, re-rolled on load
+        float exposeDefer = 0;   // s a wanted despawn has been perception-blocked; transient, NOT serialized
+        RString lingerReason;    // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
         Vector3 lastPos = VZero;
 
         LSError Serialize(ParamArchive& ar);
@@ -311,6 +435,12 @@ class Traffic : public SerializeClass
         LLinkArray<Person> bodies; // dead crew deleted with the hull
         LLink<AIGroup> group;
         bool boarded = false;
+        // issue #53 T4: the player remembers where he ambushed a patrol -
+        // wrecks and corpses he caused keep a PlayerCausedLingerScale longer
+        // despawn edge than ambient set dressing.  Set on the violent ends
+        // (destroyed/crewDead hulls, the commandeer bail); the cheap proxy
+        // for "player-caused" - ambient traffic has no other enemies
+        bool playerCaused = false;
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -342,8 +472,10 @@ class Traffic : public SerializeClass
     Transport* CreateTrafficVehicle(RString type, Vector3Par pos, Vector3Par dir) const;
     AIGroup* CreateTrafficGroup(const char* sideName) const;
     Person* CreateCrewman(AIGroup* grp, RString type, Vector3Par near, Transport* veh, int position) const;
+    // forced (gmTrafficForceSpawn) bypasses the perception gate along with
+    // the chance roll: the tests spawn deliberately close to the player
     bool SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par playerPos, Transport*& outVeh,
-                    AutoArray<TrafficEventRecord>& fired);
+                    AutoArray<TrafficEventRecord>& fired, bool forced = false);
     void IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int speedMode, bool column);
     void UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<TrafficEventRecord>& fired);
     // handles one entry in TSParking/TSDwelling/TSDeparting; may despawn/release it
@@ -353,7 +485,44 @@ class Traffic : public SerializeClass
     void CleanupReleased(Vector3Par playerPos, bool playerValid);
     void CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt);
     void DespawnEntry(int index, const char* reason, bool keepHull, AutoArray<TrafficEventRecord>& fired);
+    // observed endings (issue #53) -------------------------------------------
+    // observed civ stall: the driver dismounts and walks off (the fleeing
+    // table at walking pace), the hull joins the released set dressing; both
+    // are deleted by the perception-gated cleanups once unobserved
+    void AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired);
+    // observed trip end for a crew that stays seated: brake to a stop and
+    // hold in TSLingering until DespawnSafe says nobody is watching
+    void EnterLinger(TrafficEntry& e, const char* reason);
     void DeleteCrew(AIGroup* grp) const;
+    // perception (world layer; refreshed once per traffic pass) --------------
+    // no camera (dedicated server) = no perception: the config band and the
+    // pre-perception distance rules apply verbatim
+    struct Perception
+    {
+        bool hasCamera = false;
+        Vector3 camPos = VZero;
+        bool camDirValid = false;  // false = near-vertical camera: no usable 2D heading, the
+                                   // cone test degrades to "everything in frustum" (conservative)
+        Vector3 camDir = VForward; // 2D unit heading (meaningless while !camDirValid)
+        TrafficEffectiveBand band; // ConfigBand when no camera
+    };
+    void RefreshPerception();
+    bool PointInFrustum(Vector3Par pos) const;  // generous 2D cone test
+    bool PointLosBlocked(Vector3Par pos) const; // terrain ray from the camera
+    // per-candidate spawn observations (parallel to pts): the cheap cone test
+    // for every point, terrain rays budgeted MaxLosProbes farthest-first
+    // among the in-cone points inside the exposure floor (every other point
+    // already passes CanExposeSpawn without a ray).  No camera = defaults.
+    void BuildExposeObs(const AutoArray<Vector3>& pts, Vector3Par playerPos, AutoArray<TrafficExposeObs>& obs) const;
+    // is tearing something down at pos imperceptible right now; legacyEdge is
+    // the pre-perception distance rule for the no-camera fallback.  band
+    // overrides the pass snapshot's (the player-caused released rows use a
+    // PlayerCausedLingerScale-widened edge); null = _percept.band
+    bool DespawnSafe(Vector3Par pos, float playerD2, float legacyEdge,
+                     const TrafficEffectiveBand* band = nullptr) const;
+    // gate one wanted despawn: true = go ahead (safe, or the defer timer ran
+    // out); false accrues the entry's defer timer
+    bool GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge);
     void DispatchEvents(const AutoArray<TrafficEventRecord>& fired);
     void ApplyPendingLoad();
     int DestForOrigin(int kind, const AutoArray<TrafficZoneCandidate>& zones, int originIndex, float roll) const;
@@ -365,6 +534,7 @@ class Traffic : public SerializeClass
     RString _handlers[NTrafficEventTypes];
     float _accum = 0;
     float _subAccum = 0;
+    Perception _percept; // transient per-pass snapshot
     // deserialized rows waiting for the rebuilt zone table (second load pass)
     AutoArray<TrafficEntry> _pending;
 };

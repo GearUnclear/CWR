@@ -11,8 +11,12 @@
 
 #include <Poseidon/Core/Global.hpp> // Glob.clock (wall-clock modulation)
 
+#include <Poseidon/Core/Application.hpp>          // GApp (ENGINE_CONFIG)
+#include <Poseidon/Core/Config/EngineConfig.hpp>  // ENGINE_CONFIG.objectsZ / horizontZ (perception gate)
+#include <Poseidon/World/Scene/Camera/Camera.hpp> // camera position/heading (perception gate)
+
 #include <Poseidon/World/World.hpp>
-#include <Poseidon/World/Scene/Scene.hpp>                  // GScene (sun darkness)
+#include <Poseidon/World/Scene/Scene.hpp>                  // GScene (sun darkness, camera)
 #include <Poseidon/World/Terrain/Landscape.hpp>            // GLOB_LAND surface Y, rain
 #include <Poseidon/World/Terrain/Roads.hpp>                // GRoadNet
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp> // LightSun::NightEffect
@@ -92,6 +96,7 @@ void Traffic::Clear()
     }
     _accum = 0;
     _subAccum = 0;
+    _percept = Perception();
     _pending.Clear();
 }
 
@@ -150,6 +155,9 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.parkChance = zonesCfg->ReadValue("trafficParkChance", t.parkChance);
     t.parkDwellMin = zonesCfg->ReadValue("trafficParkDwellMin", t.parkDwellMin);
     t.parkDwellMax = zonesCfg->ReadValue("trafficParkDwellMax", t.parkDwellMax);
+    t.exposeMargin = zonesCfg->ReadValue("trafficExposeMargin", t.exposeMargin);
+    t.despawnDeferMax = zonesCfg->ReadValue("trafficDespawnDeferMax", t.despawnDeferMax);
+    t.scaleCaps = zonesCfg->ReadValue("trafficScaleCaps", t.scaleCaps ? 1.0f : 0.0f) != 0.0f;
     // sanity floors: a zero interval would tick every frame, negative caps
     // would read as "nothing ever spawns" (which 0 already says)
     if (t.interval < 0.5f)
@@ -187,6 +195,14 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     if (t.parkDwellMax < t.parkDwellMin)
     {
         t.parkDwellMax = t.parkDwellMin;
+    }
+    if (t.exposeMargin < 0)
+    {
+        t.exposeMargin = 0;
+    }
+    if (t.despawnDeferMax < 0)
+    {
+        t.despawnDeferMax = 0;
     }
 }
 
@@ -523,6 +539,99 @@ bool Traffic::ShouldDespawn(float playerDistSq, const TrafficTuning& tuning)
     return playerDistSq > edge * edge;
 }
 
+bool Traffic::ShouldDespawn(float playerDistSq, const TrafficEffectiveBand& band)
+{
+    return playerDistSq > Square(band.despawnEdge);
+}
+
+TrafficEffectiveBand Traffic::ConfigBand(const TrafficTuning& tuning)
+{
+    TrafficEffectiveBand b;
+    b.minSpawn = tuning.minSpawnDist;
+    b.radius = tuning.radius;
+    b.despawnEdge = tuning.radius + tuning.despawnHysteresis;
+    b.closeHold = tuning.minSpawnDist;
+    return b;
+}
+
+TrafficEffectiveBand Traffic::EffectiveBand(const TrafficTuning& tuning, float objectsZ, bool lightsOn, float horizontZ)
+{
+    // the cull that actually hides things: the object mesh cull, raised to
+    // the night light bound when the vehicle would show headlights (lights
+    // draw out to horizontZ + NightLightCullMargin, farther than the mesh)
+    float cull = objectsZ;
+    if (lightsOn)
+    {
+        float lightCull = horizontZ + NightLightCullMargin;
+        if (lightCull > cull)
+        {
+            cull = lightCull;
+        }
+    }
+    float safe = cull + tuning.exposeMargin;
+    TrafficEffectiveBand b = ConfigBand(tuning);
+    if (safe > b.minSpawn)
+    {
+        b.minSpawn = safe;
+    }
+    // a pushed-out floor first NARROWS the band (the radius and despawn edge
+    // stay at their config values, preserving the pre-#53 behaviour at the
+    // daytime default view distance); the band only widens once less than a
+    // usable width remains above the floor - never past the config width,
+    // never past a road-scan radius (candidates come from SpawnScanRadius
+    // scans, a thinner annulus starves the spawn pick), and never empty, or
+    // high view distances get zero traffic
+    float width = tuning.radius - tuning.minSpawnDist;
+    if (width < 0)
+    {
+        width = 0;
+    }
+    if (width > SpawnScanRadius)
+    {
+        width = SpawnScanRadius;
+    }
+    if (b.minSpawn + width > b.radius)
+    {
+        b.radius = b.minSpawn + width;
+    }
+    // the despawn edge follows the (possibly widened) band so a fresh spawn
+    // at the band cap is never instantly beyond it, and never sits inside
+    // the always-safe distance
+    b.despawnEdge = b.radius + tuning.despawnHysteresis;
+    if (b.despawnEdge < safe)
+    {
+        b.despawnEdge = safe;
+    }
+    return b;
+}
+
+bool Traffic::CanExposeSpawn(float dist2, bool losBlocked, bool inFrustum, const TrafficEffectiveBand& band)
+{
+    return dist2 >= Square(band.minSpawn) || losBlocked || !inFrustum;
+}
+
+bool Traffic::CanExposeDespawn(float dist2, bool losBlocked, bool inFrustum, const TrafficEffectiveBand& band)
+{
+    if (inFrustum)
+    {
+        // never delete out of the player's forward view: even a car the
+        // terrain hides right now is one crest away from being missed
+        return false;
+    }
+    if (dist2 < Square(band.closeHold))
+    {
+        // inside the config minSpawnDist an idling engine is audible even
+        // hidden: the pre-#53 close-range hold, kept
+        return false;
+    }
+    // the distance leg is the imperceptibility bound (band.minSpawn: past
+    // the cull + margin nothing is drawn), NOT the far-despawn edge - an
+    // in-band ending (arrival, stall, linger) must be able to tear down on
+    // open terrain once the car is beyond draw range, or invisible lingerers
+    // pin the spawn caps
+    return losBlocked || dist2 >= Square(band.minSpawn);
+}
+
 // origin eligibility per kind
 static bool OriginEligible(int kind, const TrafficZoneCandidate& z)
 {
@@ -612,7 +721,8 @@ static int PickDest(int kind, const AutoArray<TrafficZoneCandidate>& zones, int 
 }
 
 bool Traffic::PickRoute(int kind, const AutoArray<TrafficZoneCandidate>& zones, float playerX, float playerZ,
-                        const TrafficTuning& tuning, float roll, int& originIndex, int& destIndex, int originZone)
+                        const TrafficTuning& tuning, float roll, int& originIndex, int& destIndex, int originZone,
+                        const TrafficEffectiveBand* band)
 {
     originIndex = -1;
     destIndex = -1;
@@ -646,10 +756,12 @@ bool Traffic::PickRoute(int kind, const AutoArray<TrafficZoneCandidate>& zones, 
         return false;
     }
 
-    // origins: eligible zones within the player radius, each of which must
-    // have at least one destination
+    // origins: eligible zones within the player radius (the live band's when
+    // the perception gate pushed it out - the origin gate, the spawn band and
+    // the despawn edge must move together), each of which must have at least
+    // one destination
     AutoArray<int> origins;
-    float r2 = Square(tuning.radius);
+    float r2 = Square(band ? band->radius : tuning.radius);
     for (int i = 0; i < zones.Size(); i++)
     {
         const TrafficZoneCandidate& z = zones[i];
@@ -703,6 +815,106 @@ int Traffic::SelectSpawnPoint(const AutoArray<Vector3>& roadPts, Vector3Par play
         }
     }
     return best;
+}
+
+int Traffic::SelectSpawnPoint(const AutoArray<Vector3>& roadPts, Vector3Par playerPos, const TrafficTuning& tuning,
+                              const TrafficEffectiveBand& band, const AutoArray<TrafficExposeObs>* obs,
+                              const Vector3* originPos, bool preferOrigin)
+{
+    int best = -1;
+    int bestTier = -1;
+    float bestD2 = -1;
+    // the CONFIG minSpawnDist stays a hard floor - a close spawn is audible
+    // even unseen; the cap and the exposure floor come from the live band
+    float minD2 = Square(tuning.minSpawnDist);
+    float maxD2 = Square(band.radius);
+    float floor2 = Square(band.minSpawn);
+    float origin2 = Square(AlibiOriginRadius);
+    for (int i = 0; i < roadPts.Size(); i++)
+    {
+        float d2 = Dist2DSq(roadPts[i], playerPos);
+        if (d2 < minD2 || d2 > maxD2)
+        {
+            continue;
+        }
+        TrafficExposeObs o;
+        if (obs && i < obs->Size())
+        {
+            o = (*obs)[i];
+        }
+        // the exposure distance leg measures from the CAMERA when known (a
+        // scripted camera can sit far from the player, and it is the viewer);
+        // the band membership above stays the player's gameplay bubble
+        float exposeD2 = o.camDist2 >= 0 ? o.camDist2 : d2;
+        if (!CanExposeSpawn(exposeD2, o.losBlocked, o.inFrustum, band))
+        {
+            continue;
+        }
+        // tiered scoring (issue #53 T2): a pass that survives an immediate
+        // turn-around (beyond the exposure floor, or terrain-hidden - both
+        // hold whichever way the camera swings) beats a cone-only pass; an
+        // in-zone candidate beats both for the kinds that plausibly pull out
+        // of their own base.  Farthest from the player within a tier.
+        int tier = (exposeD2 >= floor2 || o.losBlocked) ? 1 : 0;
+        if (preferOrigin && originPos && Dist2DSq(roadPts[i], *originPos) <= origin2)
+        {
+            tier += 2;
+        }
+        if (tier > bestTier || (tier == bestTier && d2 > bestD2))
+        {
+            bestTier = tier;
+            bestD2 = d2;
+            best = i;
+        }
+    }
+    return best;
+}
+
+int Traffic::SelectAlibiPoint(const AutoArray<Vector3>& roadPts, Vector3Par playerPos, Vector3Par originPos,
+                              const TrafficTuning& tuning, const AutoArray<TrafficExposeObs>* obs)
+{
+    int best = -1;
+    int bestTier = -1;
+    float bestD2 = -1;
+    float minD2 = Square(tuning.minSpawnDist); // still the audible hard floor
+    float origin2 = Square(AlibiOriginRadius);
+    for (int i = 0; i < roadPts.Size(); i++)
+    {
+        if (Dist2DSq(roadPts[i], originPos) > origin2)
+        {
+            continue; // the alibi only works inside the town
+        }
+        float d2 = Dist2DSq(roadPts[i], playerPos);
+        if (d2 < minD2)
+        {
+            continue;
+        }
+        // a curb pull-out is plausible even watched, so visibility only
+        // ranks: hidden (terrain or cone) over visible, then farthest
+        TrafficExposeObs o;
+        if (obs && i < obs->Size())
+        {
+            o = (*obs)[i];
+        }
+        int tier = (o.losBlocked || !o.inFrustum) ? 1 : 0;
+        if (tier > bestTier || (tier == bestTier && d2 > bestD2))
+        {
+            bestTier = tier;
+            bestD2 = d2;
+            best = i;
+        }
+    }
+    return best;
+}
+
+int Traffic::ScaleCap(int cap, float effRadius, float configRadius)
+{
+    if (cap <= 0 || configRadius <= 0 || effRadius <= configRadius)
+    {
+        return cap; // identity at (or below) the config band; 0 stays "never"
+    }
+    int scaled = toIntFloor((float)cap * (effRadius / configRadius) + 0.5f);
+    return scaled > cap ? scaled : cap;
 }
 
 bool Traffic::CommandeerTriggered(const CommandeerObs& obs, const TrafficTuning& tuning)
@@ -786,9 +998,38 @@ TrafficState Traffic::LoadedParkState(TrafficState saved, bool driverSeated)
             // on foot: re-dwell - the get-in flags cannot be assumed to have
             // survived the load, so the depart transition re-issues them
             return driverSeated ? TSDeparting : TSDwelling;
+        case TSLingering:
+            // the crew never dismounts while lingering, so seated is the
+            // invariant; an on-foot driver is a degenerate row - restart it
+            // driving and let the shared guards reconcile it
+            return driverSeated ? TSLingering : TSDriving;
         default:
             return saved;
     }
+}
+
+TrafficEndAction Traffic::ArrivedEndAction(bool despawnSafe, int legs, int maxLegs)
+{
+    if (despawnSafe)
+    {
+        return TEndDespawn; // unobserved: the pre-#53 semantics unchanged
+    }
+    if (legs < maxLegs)
+    {
+        return TEndReLeg; // the player is watching: drive on to another zone
+    }
+    return TEndLinger; // legs spent: pull over and wait to be unobserved
+}
+
+TrafficEndAction Traffic::StalledEndAction(bool despawnSafe, int kind)
+{
+    if (despawnSafe)
+    {
+        return TEndDespawn;
+    }
+    // the walk-off machinery is single-driver-shaped (the commandeer bail);
+    // patrol and convoy crews stay seated instead of dismounting sentries
+    return kind == TKCiv ? TEndAbandon : TEndLinger;
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,7 +1294,7 @@ static void SeatOrDelete(Person* person, Transport* veh)
 }
 
 bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par playerPos, Transport*& outVeh,
-                         AutoArray<TrafficEventRecord>& fired)
+                         AutoArray<TrafficEventRecord>& fired, bool forced)
 {
     outVeh = nullptr;
     ZoneRegistry& registry = ZoneRegistry::Instance();
@@ -1068,20 +1309,50 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     AutoArray<Vector3> pts;
     AutoArray<Vector3> dirs;
     CollectRoadSpots(origin->pos, pts, dirs);
-    int spot = SelectSpawnPoint(pts, playerPos, _tuning);
+    int spot;
+    bool alibi = false;
+    if (forced)
+    {
+        // gmTrafficForceSpawn: config band, no perception gate (mirrors the
+        // chance-roll bypass - the tests spawn deliberately close)
+        spot = SelectSpawnPoint(pts, playerPos, _tuning);
+    }
+    else
+    {
+        AutoArray<TrafficExposeObs> obs;
+        BuildExposeObs(pts, playerPos, obs);
+        // patrols/convoys prefer a point inside their origin zone (a car
+        // appearing inside its own base is a plausible birth, watched or not)
+        spot = SelectSpawnPoint(pts, playerPos, _tuning, _percept.band, &obs, &origin->pos, kind != TKCiv);
+        if (spot < 0 && kind == TKCiv)
+        {
+            // alibi fallback (issue #53 T2): the origin town is near the
+            // player and no hidden point exists - spawn PARKED at a curb
+            // inside the town and pull out via the depart machinery (the
+            // machinery is civ-shaped: the steal watch reads any gunner as
+            // a theft, so the military kinds skip the fallback)
+            spot = SelectAlibiPoint(pts, playerPos, origin->pos, _tuning, &obs);
+            alibi = spot >= 0;
+        }
+    }
     if (spot < 0)
     {
         return false;
     }
     Vector3 spawnPos = pts[spot];
     Vector3 destPt = GRoadNet->GetNearestRoadPoint(dest->pos);
-    // face the way that leads toward the destination
+    // face the way that leads toward the destination (an alibi car is parked
+    // at the curb - its destination is re-rolled at the pull-out, so the
+    // road direction as scanned is the honest heading)
     Vector3 heading = dirs[spot];
-    Vector3 toDest = destPt - spawnPos;
-    toDest[1] = 0;
-    if (heading.DotProduct(toDest) < 0)
+    if (!alibi)
     {
-        heading = -heading;
+        Vector3 toDest = destPt - spawnPos;
+        toDest[1] = 0;
+        if (heading.DotProduct(toDest) < 0)
+        {
+            heading = -heading;
+        }
     }
 
     // classes ---------------------------------------------------------------
@@ -1233,9 +1504,24 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     e.destIndex = destIndex;
     e.legs = 1;
     e.lastPos = veh->Position();
-    int combat = kind == TKCiv ? CMCareless : CMSafe;
-    int speed = kind == TKPatrol ? SpeedNormal : SpeedLimited;
-    IssueRoute(e, destPt, combat, speed, kind == TKConvoy);
+    if (alibi)
+    {
+        // parked at the curb, about to leave: enter the 911b724 depart
+        // machinery directly.  destIndex is pinned to the ORIGIN so the
+        // depart transition (which advances origin := dest and rolls a fresh
+        // destination FROM it) departs from the town the car is actually in
+        e.state = TSDeparting;
+        e.stateTime = 0;
+        e.destIndex = originIndex;
+        e.destZone = origin->name;
+        e.dest = spawnPos;
+    }
+    else
+    {
+        int combat = kind == TKCiv ? CMCareless : CMSafe;
+        int speed = kind == TKPatrol ? SpeedNormal : SpeedLimited;
+        IssueRoute(e, destPt, combat, speed, kind == TKConvoy);
+    }
     _entries.Add(e);
     outVeh = veh;
 
@@ -1300,6 +1586,11 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
     AIGroup* grp = e.group;
     Transport* veh = e.vehicle;
     Transport* escort = e.escort;
+    // a violent end (wreck, murdered crew) is player-caused in practice -
+    // ambient traffic has no other enemies - and its remains get the longer
+    // memory (issue #53 T4); the quiet releases (abandon, script release)
+    // stay ambient set dressing
+    bool violent = strcmp(reason, "destroyed") == 0 || strcmp(reason, "crewDead") == 0;
     if (keepHull)
     {
         // the hull (and whatever is left of the crew) outlives the entry;
@@ -1307,6 +1598,7 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
         ReleasedEntry r;
         r.vehicle = veh;
         r.group = grp;
+        r.playerCaused = violent;
         if (grp)
         {
             for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
@@ -1353,6 +1645,7 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
         {
             ReleasedEntry r2;
             r2.vehicle = escort;
+            r2.playerCaused = violent;
             _released.Add(r2);
         }
     }
@@ -1391,6 +1684,35 @@ static bool DriverAlive(const Traffic* /*self*/, Transport* veh)
     }
     Person* d = veh->Driver();
     return d && !d->IsDammageDestroyed();
+}
+
+// brake the whole crew to a stop: Stop to every unit (the doStop idiom, like
+// VehStop silent) + SpeedLimited; shared by the park roll, the commandeer
+// trigger and the linger transition
+static void IssueGroupStop(AIGroup* grp)
+{
+    if (!grp)
+    {
+        return;
+    }
+    Command cmd;
+    cmd._message = Command::Stop;
+    cmd._discretion = Command::Undefined;
+    cmd._context = Command::CtxMission;
+    cmd._id = grp->GetNextCmdId();
+    PackedBoolArray all;
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        if (grp->UnitWithID(u + 1))
+        {
+            all.Set(u, true);
+        }
+    }
+    grp->IssueCommand(cmd, all);
+    if (grp->MainSubgroup())
+    {
+        grp->MainSubgroup()->SetSpeedMode(SpeedLimited);
+    }
 }
 
 void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<TrafficEventRecord>& fired)
@@ -1450,12 +1772,33 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             continue;
         }
         float playerD2 = Dist2DSq(veh->Position(), playerPos);
-        if (ShouldDespawn(playerD2, _tuning))
+        if (ShouldDespawn(playerD2, _percept.band))
         {
-            DespawnEntry(i, "far", false, fired);
-            continue;
+            if (GateDespawn(e, veh->Position(), playerD2, _tuning.radius + _tuning.despawnHysteresis))
+            {
+                DespawnEntry(i, "far", false, fired);
+                continue;
+            }
         }
-        bool playerNear = playerD2 <= Square(_tuning.minSpawnDist);
+        else
+        {
+            // back inside the band: the defer budget is per-episode, stale
+            // blocked seconds must not carry into a later wanted despawn
+            e.exposeDefer = 0;
+        }
+        if (e.state == TSLingering)
+        {
+            // observed ending, parked in place with the crew seated: stable
+            // set dressing, no defer timeout - tear down the moment the
+            // player genuinely cannot perceive it (or, headless, is beyond
+            // the old close-range hold)
+            if (DespawnSafe(veh->Position(), playerD2, _tuning.minSpawnDist))
+            {
+                RString why = e.lingerReason.GetLength() > 0 ? e.lingerReason : RString("arrived");
+                DespawnEntry(i, why, false, fired);
+            }
+            continue; // no stall accrual, no arrival re-trigger for a held car
+        }
 
         // stall bookkeeping (never teleports)
         float moved2 = Dist2DSq(veh->Position(), e.lastPos);
@@ -1494,35 +1837,22 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                 if (e.kind == TKCiv && pgrp && DecidePark(GRandGen.RandomValue(), _tuning))
                 {
                     // brake exactly like the commandeer stop
-                    Command cmd;
-                    cmd._message = Command::Stop;
-                    cmd._discretion = Command::Undefined;
-                    cmd._context = Command::CtxMission;
-                    cmd._id = pgrp->GetNextCmdId();
-                    PackedBoolArray all;
-                    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
-                    {
-                        if (pgrp->UnitWithID(u + 1))
-                        {
-                            all.Set(u, true);
-                        }
-                    }
-                    pgrp->IssueCommand(cmd, all);
-                    if (pgrp->MainSubgroup())
-                    {
-                        pgrp->MainSubgroup()->SetSpeedMode(SpeedLimited);
-                    }
+                    IssueGroupStop(pgrp);
                     e.state = TSParking;
                     e.stateTime = 0;
                     continue;
                 }
             }
-            if (!playerNear)
+            // losing (or no) park roll: the observed-endings ladder (#53) -
+            // unobserved teardown, re-leg while legs remain, else linger
+            TrafficEndAction act =
+                ArrivedEndAction(DespawnSafe(veh->Position(), playerD2, _tuning.minSpawnDist), e.legs, _tuning.maxLegs);
+            if (act == TEndDespawn)
             {
                 DespawnEntry(i, "arrived", false, fired);
                 continue;
             }
-            if (e.legs < _tuning.maxLegs)
+            if (act == TEndReLeg)
             {
                 // the player is watching: drive on to another zone
                 if (zones.Size() == 0)
@@ -1540,22 +1870,38 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                     e.legs++;
                     e.state = TSDriving;
                     e.stallTime = 0;
+                    e.exposeDefer = 0; // the story continues: a fresh defer budget for the next ending
                     int combat = e.kind == TKCiv ? CMCareless : CMSafe;
                     int speed = e.kind == TKPatrol ? SpeedNormal : SpeedLimited;
                     IssueRoute(e, GRoadNet->GetNearestRoadPoint(z->pos), combat, speed, e.kind == TKConvoy);
+                    continue;
                 }
+                // no destination left anywhere: fall through to the linger
+                // ending rather than idling exposed in TSArrived
             }
+            EnterLinger(e, "arrived");
             continue;
         }
 
         if (StallExpired(e.stallTime, _tuning))
         {
             e.state = TSStalled;
-            if (!playerNear)
+            TrafficEndAction act =
+                StalledEndAction(DespawnSafe(veh->Position(), playerD2, _tuning.minSpawnDist), e.kind);
+            if (act == TEndDespawn)
             {
                 DespawnEntry(i, "stalled", false, fired);
                 continue;
             }
+            if (act == TEndAbandon)
+            {
+                // observed civ stall: the driver steps out, has a look and
+                // walks off; the hull stays behind as set dressing
+                AbandonEntry(i, "abandoned", fired);
+                continue;
+            }
+            EnterLinger(e, "stalled");
+            continue;
         }
     }
 }
@@ -1585,6 +1931,89 @@ static void IssueSoloMove(AIGroup* grp, AIUnit* unit, Vector3 tgt)
     grp->IssueCommand(mv, one);
 }
 
+// observed trip end for a crew that stays seated (issue #53): brake to a
+// stop and hold in TSLingering; UpdateEntries tears the entry down on the
+// first pass DespawnSafe allows.  Deliberately indefinite - a stopped car
+// with its crew aboard is stable set dressing, and the far-despawn edge
+// still applies through the shared gate.
+void Traffic::EnterLinger(TrafficEntry& e, const char* reason)
+{
+    IssueGroupStop(e.group);
+    e.state = TSLingering;
+    e.stateTime = 0;
+    e.stallTime = 0;
+    e.exposeDefer = 0;
+    e.lingerReason = reason;
+}
+
+// observed civ stall (issue #53): the driver dismounts and walks off - the
+// commandeer bail at walking pace - the hull joins the released set
+// dressing, and the perception-gated cleanups delete both once unobserved.
+// NOT DespawnEntry(keepHull): that would file the living driver as a corpse.
+void Traffic::AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired)
+{
+    TrafficEntry e = _entries[index];
+    Transport* veh = e.vehicle;
+    AIGroup* grp = e.group;
+    Person* driver = e.driver;
+    if (!veh || !grp || !driver || driver->IsDammageDestroyed())
+    {
+        // nobody left to walk off: the plain released teardown
+        DespawnEntry(index, reason, true, fired);
+        return;
+    }
+    AIUnit* unit = driver->Brain();
+    grp->UnassignVehicle(veh);
+    if (unit)
+    {
+        unit->OrderGetIn(false);
+        unit->AllowGetIn(false); // he leaves the traffic system for good
+        if (veh->Driver() == driver || unit->GetVehicleIn() == veh)
+        {
+            unit->DoGetOut(veh, false);
+        }
+        // a mild walk-off past the front of the car, ~2x wander radius; the
+        // seated driver has no offset from the hull, so walk along -direction
+        Vector3 away = driver->Position() - veh->Position();
+        away[1] = 0;
+        if (away.SquareSize() < 1e-2f)
+        {
+            away = -veh->Direction();
+            away[1] = 0;
+        }
+        if (away.SquareSize() < 1e-2f)
+        {
+            away = VForward;
+        }
+        IssueSoloMove(grp, unit, veh->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
+    }
+    grp->SetCombatModeMajor(CMCareless);
+    if (grp->MainSubgroup())
+    {
+        grp->MainSubgroup()->SetSpeedMode(SpeedLimited); // walk, not the commandeer sprint
+    }
+    GetNetworkManager().UpdateObject(grp);
+
+    FleeingDriver fd;
+    fd.person = driver;
+    fd.group = grp;
+    fd.age = 0;
+    _fleeing.Add(fd);
+    ReleasedEntry r;
+    r.vehicle = veh;
+    _released.Add(r);
+
+    TrafficEventRecord ev;
+    ev.type = TEDespawned;
+    ev.kind = e.kind;
+    ev.originIndex = e.originIndex;
+    ev.destIndex = e.destIndex;
+    ev.reason = reason;
+    fired.Add(ev);
+    _entries.Delete(index);
+    LOG_INFO(Core, "Traffic: stalled civ car abandoned");
+}
+
 // one entry in TSParking / TSDwelling / TSDeparting: brake wait -> dismount
 // -> dwell (with the occasional stroll) -> re-board -> depart to a fresh
 // destination.  The caller guarantees e.vehicle is non-null and alive; every
@@ -1609,10 +2038,20 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
     }
     // 2. far edge: identical policy to the shared check; DeleteCrew deletes
     //    the on-foot driver too, so the plain despawn is already correct
-    if (playerValid && ShouldDespawn(Dist2DSq(veh->Position(), playerPos), _tuning))
+    float parkedD2 = playerValid ? Dist2DSq(veh->Position(), playerPos) : 0.0f;
+    if (playerValid && ShouldDespawn(parkedD2, _percept.band))
     {
-        DespawnEntry(i, "far", false, fired);
-        return;
+        if (GateDespawn(e, veh->Position(), parkedD2, _tuning.radius + _tuning.despawnHysteresis))
+        {
+            DespawnEntry(i, "far", false, fired);
+            return;
+        }
+    }
+    else
+    {
+        // inside the band (or headless): per-episode defer budget, as the
+        // shared far gate resets it
+        e.exposeDefer = 0;
     }
     AIUnit* unit = driver->Brain();
 
@@ -1623,8 +2062,7 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
     //    that would file the LIVING driver under ReleasedEntry::bodies and
     //    later delete him as a corpse.
     Person* occ = veh->Driver();
-    bool someoneAboard =
-        (occ && occ != driver) || veh->Gunner() || veh->Commander() || veh->GetManCargoSize() > 0;
+    bool someoneAboard = (occ && occ != driver) || veh->Gunner() || veh->Commander() || veh->GetManCargoSize() > 0;
     if (e.state != TSParking && someoneAboard)
     {
         // revoke the standing re-board orders FIRST (the dwell-expiry
@@ -1787,8 +2225,12 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
         else
         {
             // no destination left anywhere: quiet teardown when unobserved,
-            // else re-dwell and retry later
-            if (playerValid && Dist2DSq(veh->Position(), playerPos) > Square(_tuning.minSpawnDist))
+            // else re-dwell and retry later.  Plain DespawnSafe, NOT
+            // GateDespawn: the entry can be arbitrarily close and centered
+            // in view here, and the defer timeout would eventually vanish it
+            // in plain sight - the re-dwell loop IS the defer (the far gate
+            // above stays the bounded backstop)
+            if (playerValid && DespawnSafe(veh->Position(), Dist2DSq(veh->Position(), playerPos), _tuning.minSpawnDist))
             {
                 DespawnEntry(i, "arrived", false, fired);
             }
@@ -1804,8 +2246,11 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
     if (e.stateTime >= DepartTimeout)
     {
         // NativeMoveIn refuses a soldier already aboard, so the DriverBrain
-        // branch above must run first
-        bool playerFar = playerValid && Dist2DSq(veh->Position(), playerPos) > Square(_tuning.minSpawnDist);
+        // branch above must run first.  The instant seat is a teleport-shaped
+        // event: perception-gated like a despawn (no defer - the retry loop
+        // below IS the defer)
+        bool playerFar =
+            playerValid && DespawnSafe(veh->Position(), Dist2DSq(veh->Position(), playerPos), _tuning.minSpawnDist);
         if (unit && playerFar && ::NativeMoveIn(driver, veh, GIPDriver))
         {
             return; // seated instantly; the next tick takes the DriverBrain branch
@@ -1851,8 +2296,10 @@ void Traffic::UpdateCommandeer(float dt)
         {
             continue; // the main tick reconciles dead/vanished entries
         }
-        if (e.state == TSDriving || e.state == TSArrived || e.state == TSStalled)
+        if (e.state == TSDriving || e.state == TSArrived || e.state == TSStalled || e.state == TSLingering)
         {
+            // a lingering car (observed trip end, crew seated) is exactly a
+            // stopped civ car: commandeerable like the rest
             CommandeerObs obs;
             obs.carPos = veh->Position();
             obs.carDir = veh->Direction();
@@ -1864,24 +2311,7 @@ void Traffic::UpdateCommandeer(float dt)
                 continue;
             }
             // Stop to the whole crew (issued like VehStop silent, GameStateExtGrp.cpp)
-            Command cmd;
-            cmd._message = Command::Stop;
-            cmd._discretion = Command::Undefined;
-            cmd._context = Command::CtxMission;
-            cmd._id = grp->GetNextCmdId();
-            PackedBoolArray all;
-            for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
-            {
-                if (grp->UnitWithID(u + 1))
-                {
-                    all.Set(u, true);
-                }
-            }
-            grp->IssueCommand(cmd, all); // the doStop idiom (direct, not radio)
-            if (grp->MainSubgroup())
-            {
-                grp->MainSubgroup()->SetSpeedMode(SpeedLimited);
-            }
+            IssueGroupStop(grp);
             e.state = TSStopping;
             e.stateTime = 0;
             continue;
@@ -1950,9 +2380,11 @@ void Traffic::UpdateCommandeer(float dt)
             fired.Add(ev);
 
             // registry half: the hull is released (no bodies - the driver is
-            // alive and tracked by _fleeing)
+            // alive and tracked by _fleeing); the player forced this car off
+            // the road at gunpoint, so its hull gets the longer memory
             ReleasedEntry r;
             r.vehicle = veh;
+            r.playerCaused = true;
             _released.Add(r);
             _entries.Delete(i);
             LOG_INFO(Core, "Traffic: civ car commandeered");
@@ -2053,7 +2485,20 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
         {
             continue;
         }
-        if (ShouldDespawn(Dist2DSq(veh->Position(), playerPos), _tuning))
+        // wrecks and bodies share the live entries' edge and perception gate;
+        // no defer timer (a watched wreck just waits for a later pass - it is
+        // set dressing, not a leaked simulation).  Player-caused remains keep
+        // a PlayerCausedLingerScale wider edge (issue #53 T4): returning to
+        // clean asphalt where you ambushed a patrol is a memory tell
+        float relD2 = Dist2DSq(veh->Position(), playerPos);
+        float relEdge = _tuning.radius + _tuning.despawnHysteresis;
+        TrafficEffectiveBand relBand = _percept.band;
+        if (r.playerCaused)
+        {
+            relEdge *= PlayerCausedLingerScale;
+            relBand.despawnEdge *= PlayerCausedLingerScale;
+        }
+        if (ShouldDespawn(relD2, relBand) && DespawnSafe(veh->Position(), relD2, relEdge, &relBand))
         {
             for (int b = 0; b < r.bodies.Size(); b++)
             {
@@ -2110,6 +2555,16 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
             {
                 continue;
             }
+            // issue #53: with a camera, never delete a person the player can
+            // perceive, whatever the trigger (headless keeps the legacy
+            // rules above verbatim); no defer timer - a watched walker just
+            // waits for a later pass
+            if (_percept.hasCamera &&
+                !CanExposeDespawn(Dist2DSq(p->Position(), _percept.camPos), PointLosBlocked(p->Position()),
+                                  PointInFrustum(p->Position()), _percept.band))
+            {
+                continue;
+            }
             AIGroup* grp = f.group;
             ::DeleteVehicle(p);
             if (grp && grp->NUnits() == 0)
@@ -2119,6 +2574,163 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
             _fleeing.Delete(i);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// perception (world layer, issue #53) - one snapshot per traffic pass.  The
+// camera is GScene's (external cams and effects included; single-viewer,
+// matching the GetRealPlayer scope).  BAND membership (which points are in
+// the spawn annulus, when the far-despawn is wanted) measures from the
+// PLAYER - the band is a gameplay bubble around him; every EXPOSURE leg
+// (distance, cone, terrain ray) measures from the camera, the actual viewer,
+// which sits at the player outside cutscenes.
+// ---------------------------------------------------------------------------
+
+void Traffic::RefreshPerception()
+{
+    _percept = Perception();
+    _percept.band = ConfigBand(_tuning);
+    const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
+    if (!cam)
+    {
+        // dedicated server / no scene: no perception - the config band and
+        // the pre-perception distance rules apply verbatim
+        return;
+    }
+    _percept.hasCamera = true;
+    _percept.camPos = cam->Position();
+    Vector3 heading = cam->Direction();
+    heading[1] = 0;
+    if (heading.SquareSize() > 1e-6f)
+    {
+        _percept.camDir = heading.Normalized();
+        _percept.camDirValid = true;
+    }
+    // near-vertical camera: no usable 2D heading - camDirValid stays false
+    // and the cone test treats everything as in frustum (conservative both
+    // ways: no despawn legalized by the cone, no cone-escape spawns)
+    // conservative lights bound: past the darkest randomized threshold ANY
+    // AI car may already show headlights (TransportCore's per-vehicle roll)
+    bool lightsOn = false;
+    if (GScene->MainLight())
+    {
+        lightsOn = GScene->MainLight()->NightEffect() > HeadlightNightEffect;
+    }
+    _percept.band = EffectiveBand(_tuning, ENGINE_CONFIG.objectsZ, lightsOn, ENGINE_CONFIG.horizontZ);
+}
+
+bool Traffic::PointInFrustum(Vector3Par pos) const
+{
+    if (!_percept.hasCamera || !_percept.camDirValid)
+    {
+        return true; // no information (or no usable heading): never legalizes a despawn
+    }
+    float dx = pos.X() - _percept.camPos.X();
+    float dz = pos.Z() - _percept.camPos.Z();
+    float len2 = dx * dx + dz * dz;
+    if (len2 < 1.0f)
+    {
+        return true; // on top of the camera
+    }
+    float dot = _percept.camDir.X() * dx + _percept.camDir.Z() * dz;
+    return dot >= FrustumCosHalfAngle * sqrtf(len2);
+}
+
+bool Traffic::PointLosBlocked(Vector3Par pos) const
+{
+    if (!_percept.hasCamera || !GLandscape)
+    {
+        return false; // nothing hides anything
+    }
+    Vector3 tgt = pos;
+    tgt[1] += LosTargetHeight;
+    Vector3 delta = tgt - _percept.camPos;
+    float dist = delta.Size();
+    if (dist < 1.0f)
+    {
+        return false;
+    }
+    Vector3 dirN = delta * (1.0f / dist);
+    // the canonical LOS idiom (InGameUIMenuSim): a ground hit before the
+    // target means the terrain hides it
+    Vector3 hit;
+    float isect = GLandscape->IntersectWithGroundOrSea(&hit, _percept.camPos, dirN, 0, dist * 1.1f);
+    return isect <= dist;
+}
+
+void Traffic::BuildExposeObs(const AutoArray<Vector3>& pts, Vector3Par playerPos,
+                             AutoArray<TrafficExposeObs>& obs) const
+{
+    obs.Clear();
+    obs.Resize(pts.Size()); // default-constructed: the no-information case
+    if (!_percept.hasCamera)
+    {
+        return; // defaults: distance-only, the pre-perception behaviour
+    }
+    // a ray only matters for a point that fails BOTH cheap legs: inside the
+    // exposure floor (measured from the camera, the actual viewer) AND in
+    // the view cone
+    float floor2 = Square(_percept.band.minSpawn);
+    AutoArray<int> needRay;
+    for (int i = 0; i < pts.Size(); i++)
+    {
+        obs[i].inFrustum = PointInFrustum(pts[i]);
+        obs[i].camDist2 = Dist2DSq(pts[i], _percept.camPos);
+        if (obs[i].inFrustum && obs[i].camDist2 < floor2)
+        {
+            needRay.Add(i);
+        }
+    }
+    // farthest first: the selection prefers far points, spend the rays there
+    for (int n = 0; n < MaxLosProbes && needRay.Size() > 0; n++)
+    {
+        int best = 0;
+        float bestD2 = -1;
+        for (int k = 0; k < needRay.Size(); k++)
+        {
+            float d2 = Dist2DSq(pts[needRay[k]], playerPos);
+            if (d2 > bestD2)
+            {
+                bestD2 = d2;
+                best = k;
+            }
+        }
+        int idx = needRay[best];
+        needRay.Delete(best);
+        obs[idx].losBlocked = PointLosBlocked(pts[idx]);
+    }
+}
+
+bool Traffic::DespawnSafe(Vector3Par pos, float playerD2, float legacyEdge, const TrafficEffectiveBand* band) const
+{
+    if (!_percept.hasCamera)
+    {
+        return playerD2 > Square(legacyEdge); // the pre-perception rule verbatim
+    }
+    float camD2 = Dist2DSq(pos, _percept.camPos);
+    return CanExposeDespawn(camD2, PointLosBlocked(pos), PointInFrustum(pos), band ? *band : _percept.band);
+}
+
+bool Traffic::GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge)
+{
+    if (DespawnSafe(pos, playerD2, legacyEdge))
+    {
+        e.exposeDefer = 0;
+        return true;
+    }
+    if (!_percept.hasCamera)
+    {
+        return false; // the legacy rules have no defer timeout
+    }
+    e.exposeDefer += _tuning.interval; // one accrual per traffic pass
+    if (e.exposeDefer >= _tuning.despawnDeferMax)
+    {
+        // hard bound: staring at a blocked despawn must not leak the entry
+        // forever (0 = no defer at all, the pre-perception teardown timing)
+        e.exposeDefer = 0;
+        return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -2176,6 +2788,9 @@ void Traffic::Simulate(float deltaT)
         playerPos = player->Position();
     }
 
+    // one perception snapshot per pass: camera, lights bound, effective band
+    RefreshPerception();
+
     AutoArray<TrafficEventRecord> fired;
     UpdateEntries(playerPos, playerValid, fired);
     CleanupReleased(playerPos, playerValid);
@@ -2196,10 +2811,12 @@ void Traffic::Simulate(float deltaT)
         // the civ route is rolled once here, so modulation assesses the same
         // origin a civ spawn will actually use (a deterministic availability
         // probe followed by a spawn-time re-roll could disagree on the origin)
-        in.hasCivRoute =
-            PickRoute(TKCiv, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), civOrigin, civDest);
-        in.hasPatrolRoute = PickRoute(TKPatrol, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d);
-        in.hasConvoyRoute = PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d);
+        in.hasCivRoute = PickRoute(TKCiv, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(),
+                                   civOrigin, civDest, -1, &_percept.band);
+        in.hasPatrolRoute =
+            PickRoute(TKPatrol, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
+        in.hasConvoyRoute =
+            PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
         in.warLevel = ReadWarLevel();
 
         TrafficModulationInput mod;
@@ -2234,7 +2851,18 @@ void Traffic::Simulate(float deltaT)
         ModulationFactors(mod, _tuning, in.civScale, in.patrolScale);
 
         in.roll = GRandGen.RandomValue();
-        int kind = DecideSpawn(in, _tuning);
+        // density scaling (issue #53 T6): a widened band would otherwise be
+        // a ghost town at the config caps - 3 civ cars in a 3000 m circle.
+        // Linear with the band radius (traffic lives on roads), never below
+        // the config, identity when the band is not widened; convoys stay
+        // at their config cap (rare by design)
+        TrafficTuning decide = _tuning;
+        if (_tuning.scaleCaps)
+        {
+            decide.maxCiv = ScaleCap(_tuning.maxCiv, _percept.band.radius, _tuning.radius);
+            decide.maxPatrols = ScaleCap(_tuning.maxPatrols, _percept.band.radius, _tuning.radius);
+        }
+        int kind = DecideSpawn(in, decide);
         if (kind == TKCiv)
         {
             // reuse the modulated route: the spawn happens from the origin
@@ -2242,8 +2870,8 @@ void Traffic::Simulate(float deltaT)
             Transport* veh = nullptr;
             SpawnEntry(kind, civOrigin, civDest, playerPos, veh, fired);
         }
-        else if (kind >= 0 &&
-                 PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o, d))
+        else if (kind >= 0 && PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o,
+                                        d, -1, &_percept.band))
         {
             Transport* veh = nullptr;
             SpawnEntry(kind, o, d, playerPos, veh, fired);
@@ -2270,7 +2898,7 @@ Transport* Traffic::ForceSpawn(int kind, int zoneIndex)
     }
     AutoArray<TrafficEventRecord> fired;
     Transport* veh = nullptr;
-    SpawnEntry(kind, o, d, playerPos, veh, fired);
+    SpawnEntry(kind, o, d, playerPos, veh, fired, true); // forced: no perception gate
     DispatchEvents(fired);
     return veh;
 }
@@ -2286,6 +2914,19 @@ void Traffic::MarkEntryForTest(TrafficKind kind, const char* originZone, const c
     e.originIndex = registry.FindZoneIndex(originZone);
     e.destIndex = registry.FindZoneIndex(destZone);
     _entries.Add(e);
+}
+
+void Traffic::PerceptProbe(Vector3Par pos, bool& hasCamera, bool& losBlocked, bool& inFrustum,
+                           TrafficEffectiveBand& band)
+{
+    // a fresh snapshot rather than the last pass's: the probe answers "what
+    // would the NEXT pass see", and inside an event handler (dispatched at
+    // the end of a pass, camera unmoved since its start) the two agree
+    RefreshPerception();
+    hasCamera = _percept.hasCamera;
+    losBlocked = PointLosBlocked(pos);
+    inFrustum = PointInFrustum(pos);
+    band = _percept.band;
 }
 
 void Traffic::DispatchEvents(const AutoArray<TrafficEventRecord>& fired)
@@ -2364,6 +3005,8 @@ LSError Traffic::TrafficEntry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("dest", dest, 1, VZero))
     PARAM_CHECK(ar.Serialize("legs", legs, 1, 0))
     PARAM_CHECK(ar.Serialize("stallTime", stallTime, 1, 0.0f))
+    // absent from pre-#53 saves: the empty default despawns as "arrived"
+    PARAM_CHECK(ar.Serialize("lingerReason", lingerReason, 1, RString()))
     PARAM_CHECK(ar.Serialize("lastPos", lastPos, 1, VZero))
     // object refs resolve on the second load pass, after the world's
     // vehicle serializer recreated the hulls and crews
@@ -2377,6 +3020,8 @@ LSError Traffic::TrafficEntry::Serialize(ParamArchive& ar)
 LSError Traffic::ReleasedEntry::Serialize(ParamArchive& ar)
 {
     PARAM_CHECK(ar.Serialize("boarded", boarded, 1, false))
+    // absent from pre-#53 saves: defaults to ambient (the short memory)
+    PARAM_CHECK(ar.Serialize("playerCaused", playerCaused, 1, false))
     PARAM_CHECK(ar.SerializeRef("vehicle", vehicle, 1))
     PARAM_CHECK(ar.SerializeRef("group", group, 1))
     PARAM_CHECK(ar.SerializeRefs("Bodies", bodies, 1))
@@ -2411,12 +3056,13 @@ void Traffic::ApplyPendingLoad()
         {
             e.state = TSDriving;
         }
-        // park states downgrade on whether the driver came back seated (the
-        // crews were rebuilt by the world serializer before this pass): the
-        // brake wait restarts, a dwell restarts with a fresh roll, an on-foot
-        // departer re-dwells (get-in flags re-issued at expiry), a seated
-        // departer resumes departing
-        if (e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting)
+        // park/linger states downgrade on whether the driver came back seated
+        // (the crews were rebuilt by the world serializer before this pass):
+        // the brake wait restarts, a dwell restarts with a fresh roll, an
+        // on-foot departer re-dwells (get-in flags re-issued at expiry), a
+        // seated departer resumes departing, a seated lingerer keeps waiting
+        // to be unobserved
+        if (e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting || e.state == TSLingering)
         {
             Transport* v = e.vehicle; // non-null (null rows dropped above)
             Person* d = e.driver;
