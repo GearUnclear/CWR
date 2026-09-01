@@ -1174,9 +1174,10 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
         }
     }
 
-    // Guerrilla ambient traffic: nearby civilian drivers react to the blast.
+    // Guerrilla ambient traffic: nearby civilian drivers react to the blast
+    // (the severity mapping filters out plain projectile impacts).
     // Global-bool fast gate (the GUndercoverActive precedent)
-    Guerrilla::TrafficNotifyExplosionFast(ownerUnit, pos);
+    Guerrilla::TrafficNotifyExplosionFast(ownerUnit, pos, type);
 
     ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);

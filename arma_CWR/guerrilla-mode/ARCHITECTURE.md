@@ -186,9 +186,11 @@ script. All three tables serialize as `GuerrillaJournal`.
 Traffic: `gmTrafficCount "civ"|"patrol"|"convoy"|"all"`, `gmTrafficVehicles`
 (nular -> live hulls), `gmTrafficInfo <veh>` (-> `[kind, originIdx, destIdx,
 state]`, `[]` when untracked), `gmTrafficOnEvent ["spawned"|"despawned"|
-"commandeered"|"arrived"|"driverKilled", h]` (`spawned` `_this=[veh, kind,
-originIdx, destIdx]`, `despawned` `[kind, reason]`, `commandeered` `[veh,
-driver]`, `arrived` `[veh, kind, destIdx]`; `driverKilled` is the killed-EH
+"commandeered"|"arrived"|"driverKilled"|"parked"|"departed"|"panicked", h]`
+(`spawned` `_this=[veh, kind, originIdx, destIdx]`, `despawned` `[kind,
+reason]`, `commandeered` `[veh, driver]`, `arrived`/`parked`/`departed`
+`[veh, kind, destIdx]`, `panicked` `[veh, kind, reaction]` with reaction
+`"cower"|"uturn"|"rush"|"bail"`; `driverKilled` is the killed-EH
 EXPRESSION attached to every civ driver, `_this=[victim, killer]`),
 `gmTrafficRelease <veh>` (registry half of a commandeer), `gmTrafficForceSpawn
 [kind, zoneIdx]` (-> OBJECT; test aid, bypasses chance/caps, not the road

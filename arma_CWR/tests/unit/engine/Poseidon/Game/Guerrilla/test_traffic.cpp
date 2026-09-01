@@ -1292,6 +1292,34 @@ TEST_CASE("Traffic - danger ring buffer insert/coalesce/expiry", "[game][guerril
         REQUIRE_FALSE(foundOldest);
     }
 
+    SECTION("a full ring still coalesces instead of evicting")
+    {
+        for (int i = 0; i < Traffic::MaxDangerEvents; i++)
+        {
+            Traffic::AddDangerEvent(buf, Vector3((float)(i * 200), 0, 0), 1.0f, false);
+            Traffic::AgeDangerEvents(buf, 1.0f, 100.0f);
+        }
+        REQUIRE(buf.Size() == Traffic::MaxDangerEvents);
+        // a burst near episode 3 merges into it: no eviction, episode 0 kept
+        Traffic::AddDangerEvent(buf, Vector3(610, 0, 0), 2.0f, true);
+        REQUIRE(buf.Size() == Traffic::MaxDangerEvents);
+        bool foundFirst = false;
+        bool foundMerged = false;
+        for (int i = 0; i < buf.Size(); i++)
+        {
+            if (buf[i].pos.X() < 1.0f)
+            {
+                foundFirst = true;
+            }
+            if (buf[i].pos.X() > 599.0f && buf[i].pos.X() < 601.0f)
+            {
+                foundMerged = buf[i].severity > 1.5f && buf[i].playerCaused && buf[i].age < 0.5f;
+            }
+        }
+        REQUIRE(foundFirst);
+        REQUIRE(foundMerged);
+    }
+
     SECTION("NearestDanger picks the closest episode")
     {
         float d = -1;
@@ -1330,12 +1358,35 @@ TEST_CASE("Traffic - danger reaction decision", "[game][guerrilla]")
     SECTION("out of band -> none; severity scales the band, clamped")
     {
         REQUIRE(Traffic::DecideDangerReaction(250, 1, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
-        // severity 4 caps the scale at DangerScaleMax 1.5: band 300
-        REQUIRE(Traffic::DecideDangerReaction(250, 4, TKCiv, TSDriving, 0, 0.6f, t) != TDRNone);
+        // severity 4 caps the scale at DangerScaleMax 1.5: band 300, and
+        // 250 falls in the far band (close band 90) -> rush at roll 0.6
+        REQUIRE(Traffic::DecideDangerReaction(250, 4, TKCiv, TSDriving, 0, 0.6f, t) == TDRRush);
         REQUIRE(Traffic::DecideDangerReaction(310, 4, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
-        // a whisper floors at DangerScaleMin 0.5: band 100
+        // a whisper floors at DangerScaleMin 0.5: band 100, close band 30,
+        // so 90 is a far-band rush at roll 0.6
         REQUIRE(Traffic::DecideDangerReaction(110, 0.01f, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
-        REQUIRE(Traffic::DecideDangerReaction(90, 0.01f, TKCiv, TSDriving, 0, 0.6f, t) != TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(90, 0.01f, TKCiv, TSDriving, 0, 0.6f, t) == TDRRush);
+    }
+
+    SECTION("band edges are inclusive at severity 1")
+    {
+        // the reaction band edge: exactly 200 reacts, past it does not
+        REQUIRE(Traffic::DecideDangerReaction(200, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRUTurn);
+        REQUIRE(Traffic::DecideDangerReaction(200.5f, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRNone);
+        // the close-band edge: exactly 60 is close (cower at roll 0.2),
+        // just past it is far (U-turn at the same roll)
+        REQUIRE(Traffic::DecideDangerReaction(60, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRCower);
+        REQUIRE(Traffic::DecideDangerReaction(60.5f, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRUTurn);
+    }
+
+    SECTION("roll band edges")
+    {
+        // close: [0, 0.5) cower, [0.5, 0.8) bail, [0.8, 1) U-turn
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.5f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.8f, t) == TDRUTurn);
+        // far: [0, 0.5) U-turn, [0.5, 0.75) rush, [0.75, 1) cower
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.5f, t) == TDRRush);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.75f, t) == TDRCower);
     }
 
     SECTION("close band rolls: cower / bail / U-turn")
@@ -1353,10 +1404,40 @@ TEST_CASE("Traffic - danger reaction decision", "[game][guerrilla]")
         REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.9f, t) == TDRCower);
     }
 
-    SECTION("TSArrived reacts like driving")
+    SECTION("TSArrived reacts like driving, minus the meaningless rush")
     {
         REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSArrived, 0, 0.2f, t) == TDRCower);
-        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSArrived, 0, 0.6f, t) == TDRRush);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSArrived, 0, 0.2f, t) == TDRUTurn);
+        // the rush slot maps to cower at the destination: the arrival
+        // ladder would override a same-leg re-issue anyway
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSArrived, 0, 0.6f, t) == TDRCower);
+    }
+
+    SECTION("severity mappings")
+    {
+        REQUIRE(Traffic::DangerSeverityFromAudible(Traffic::DangerRifleAudibleFire) == Approx(1.0f));
+        REQUIRE(Traffic::DangerSeverityFromAudible(2.0f * Traffic::DangerRifleAudibleFire) == Approx(2.0f));
+        REQUIRE(Traffic::DangerSeverityFromAudible(0.0f) == Approx(0.0f));
+        // non-explosive impacts (every landed bullet reaches the blast
+        // hook) map to no episode, whatever their indirect damage
+        REQUIRE(Traffic::DangerSeverityFromBlast(false, 100.0f, 10.0f) == Approx(0.0f));
+        // an explosive below the power floor is a firecracker, not a blast
+        REQUIRE(Traffic::DangerSeverityFromBlast(true, 1.0f, 0.5f) == Approx(0.0f));
+        // a hand grenade (indirectHit ~9, range ~5) maxes the band
+        REQUIRE(Traffic::DangerSeverityFromBlast(true, 9.0f, 5.0f) == Approx(Traffic::DangerExplosionSeverity));
+        // the power floor is inclusive
+        REQUIRE(Traffic::DangerSeverityFromBlast(true, 2.0f, 2.0f) == Approx(Traffic::DangerExplosionSeverity));
+    }
+
+    SECTION("wreck danger-source cutoff")
+    {
+        // default ttl 20 x scale 3 = 60 s of radiating, then set dressing
+        REQUIRE(Traffic::WreckDangerLive(0.0f, t));
+        REQUIRE(Traffic::WreckDangerLive(59.0f, t));
+        REQUIRE_FALSE(Traffic::WreckDangerLive(60.0f, t));
+        TrafficTuning off;
+        off.dangerTtl = 0;
+        REQUIRE_FALSE(Traffic::WreckDangerLive(0.0f, off));
     }
 
     SECTION("ended and parked states bail regardless of the roll")

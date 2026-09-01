@@ -39,6 +39,7 @@ class Transport;
 class Person;
 class AIUnit;
 class EntityAI;
+class AmmoType;
 
 namespace Guerrilla
 {
@@ -428,14 +429,28 @@ class Traffic : public SerializeClass
     static constexpr float DangerScaleMin = 0.5f;
     static constexpr float DangerScaleMax = 1.5f;
     static constexpr float DangerRifleAudibleFire = 8.0f;   // audibleFire that reads as severity 1
-    static constexpr float DangerExplosionSeverity = 2.25f; // any blast maxes the band (DangerScaleMax squared)
+    static constexpr float DangerExplosionSeverity = 2.25f; // any real blast maxes the band (DangerScaleMax squared)
+    static constexpr float DangerBlastPowerMin = 4.0f;      // indirectHit * indirectHitRange below this is no blast
     static constexpr float WreckDangerSeverity = 0.5f;      // a player-caused wreck: a narrowed band
+    static constexpr float WreckDangerTtlScale = 3.0f;      // wrecks radiate danger for this many dangerTtl
     static constexpr float DangerCowerHold = 20.0f;         // s a cowering car holds before re-checking the ring
-    static constexpr float DangerCloseCowerBand = 0.5f;     // close band: roll < this = cower
-    static constexpr float DangerCloseBailBand = 0.8f;      // ... < this = bail; the rest U-turns
-    static constexpr float DangerFarUTurnBand = 0.5f;       // far band: roll < this = U-turn
-    static constexpr float DangerFarRushBand = 0.75f;       // ... < this = accelerate past (probe-gated: set equal to
-                                                      // DangerFarUTurnBand to disable the rush branch); rest cowers
+    // severity mappings for the two engine feeds, pure so the post-merge
+    // in-game probe can recalibrate a single constant each.
+    // DangerSeverityFromBlast returns 0 for anything that is not a real
+    // blast - Landscape::ExplosionDammage runs for EVERY projectile impact
+    // (ShotShell ground and object hits included), so plain bullet impacts
+    // must map to no episode
+    static float DangerSeverityFromAudible(float audibleFire);
+    static float DangerSeverityFromBlast(bool explosive, float indirectHit, float indirectHitRange);
+    // how long a fresh player-caused wreck radiates danger before it is set
+    // dressing (without the cutoff every civ parking near an old ambush
+    // site would bail forever, each bail adding another hull)
+    static bool WreckDangerLive(float wreckAge, const TrafficTuning& tuning);
+    static constexpr float DangerCloseCowerBand = 0.5f; // close band: roll < this = cower
+    static constexpr float DangerCloseBailBand = 0.8f;  // ... < this = bail; the rest U-turns
+    static constexpr float DangerFarUTurnBand = 0.5f;   // far band: roll < this = U-turn
+    static constexpr float DangerFarRushBand = 0.75f;   // ... < this = accelerate past (probe-gated: set equal to
+                                                        // DangerFarUTurnBand to disable the rush branch); rest cowers
     static TrafficDangerReaction DecideDangerReaction(float distance, float severity, int kind, TrafficState state,
                                                       float cooldownLeft, float roll, const TrafficTuning& tuning);
     static const char* DangerReactionName(int reaction); // "cower"/"uturn"/"rush"/"bail" ("none" otherwise)
@@ -460,7 +475,7 @@ class Traffic : public SerializeClass
     // NotifyShot runs per ROUND from every firing entity while armed, so the
     // cheap early-outs come before any math
     void NotifyShot(EntityAI* shooter, float audibleFire);
-    void NotifyExplosion(AIUnit* ownerUnit, Vector3Par pos);
+    void NotifyExplosion(AIUnit* ownerUnit, Vector3Par pos, const AmmoType* type);
     void NotifyDanger(Vector3Par pos, float severity, bool playerCaused);
     // script/test aid: spawn one entry of a kind from a zone, bypassing the
     // chance roll and the caps (NOT the road placement).  Null on failure.
@@ -538,6 +553,10 @@ class Traffic : public SerializeClass
         // (destroyed/crewDead hulls, the commandeer bail); the cheap proxy
         // for "player-caused" - ambient traffic has no other enemies
         bool playerCaused = false;
+        // s since release: the wreck danger-source cutoff clock (see
+        // WreckDangerLive).  Transient, NOT serialized - a loaded wreck
+        // restarts its (bounded) radiating window, which is acceptable
+        float wreckAge = 0;
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -666,13 +685,13 @@ inline void TrafficNotifyShotFast(EntityAI* shooter, float audibleFire)
     Traffic::Instance().NotifyShot(shooter, audibleFire);
 }
 
-inline void TrafficNotifyExplosionFast(AIUnit* ownerUnit, Vector3Par pos)
+inline void TrafficNotifyExplosionFast(AIUnit* ownerUnit, Vector3Par pos, const AmmoType* type)
 {
     if (!GTrafficDangerArmed)
     {
         return;
     }
-    Traffic::Instance().NotifyExplosion(ownerUnit, pos);
+    Traffic::Instance().NotifyExplosion(ownerUnit, pos, type);
 }
 
 } // namespace Guerrilla

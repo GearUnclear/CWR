@@ -46,7 +46,10 @@ class CfgGuerrillaZones
     // trafficMaxLegs=3; trafficCommandeerRadius=25;
     // trafficCommandeerLaneHalfWidth=4; trafficCommandeerStopDelay=2.5;
     // trafficFleeDist=150; trafficExposeMargin=150; trafficDespawnDeferMax=90;
-    // trafficScaleCaps=0 (set trafficEnabled=0 to switch it off).
+    // trafficScaleCaps=0; trafficDangerRadius=200; trafficDangerCloseRadius=60;
+    // trafficDangerCooldown=45; trafficDangerTtl=20 (set trafficEnabled=0 to
+    // switch it all off; trafficDangerRadius=0 disables just the danger
+    // response).
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     // The side mission.sqm welds the player's unit to (side="GUER",
