@@ -122,6 +122,36 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.exposeMargin == Approx(150.0f));
         REQUIRE(tu.despawnDeferMax == Approx(90.0f));
         REQUIRE_FALSE(tu.scaleCaps);
+        REQUIRE(tu.dangerRadius == Approx(200.0f));
+        REQUIRE(tu.dangerCloseRadius == Approx(60.0f));
+        REQUIRE(tu.dangerCooldown == Approx(45.0f));
+        REQUIRE(tu.dangerTtl == Approx(20.0f));
+    }
+
+    SECTION("explicit danger keys override")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDangerRadius = 400; trafficDangerCloseRadius = 100; "
+               "trafficDangerCooldown = 10; trafficDangerTtl = 5; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.dangerRadius == Approx(400.0f));
+        REQUIRE(tu.dangerCloseRadius == Approx(100.0f));
+        REQUIRE(tu.dangerCooldown == Approx(10.0f));
+        REQUIRE(tu.dangerTtl == Approx(5.0f));
+    }
+
+    SECTION("danger sanity floors and the close-inside-main clamp")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDangerRadius = -10; trafficDangerCloseRadius = -5; "
+               "trafficDangerCooldown = -1; trafficDangerTtl = -1; };\n");
+        REQUIRE(f.traffic.Tuning().dangerRadius == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().dangerCloseRadius == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().dangerCooldown == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().dangerTtl == Approx(0.0f));
+        TrafficFixture g;
+        g.Load("class CfgGuerrillaZones { trafficDangerRadius = 100; trafficDangerCloseRadius = 150; };\n");
+        REQUIRE(g.traffic.Tuning().dangerCloseRadius == Approx(100.0f)); // pinned to the main radius
     }
 
     SECTION("keys absent from CfgGuerrillaZones keep defaults")
@@ -284,12 +314,13 @@ TEST_CASE("Traffic - state enum stays append-only for save compat", "[game][guer
 {
     // saved entries store the state as a plain int: appending is the only
     // legal way to grow this enum (911b724 added the park states, #53 adds
-    // the lingering ending)
+    // the lingering ending, the danger response adds the panic cower)
     REQUIRE((int)TSParking == 5);
     REQUIRE((int)TSDwelling == 6);
     REQUIRE((int)TSDeparting == 7);
     REQUIRE((int)TSLingering == 8);
-    REQUIRE((int)NTrafficStates == 9);
+    REQUIRE((int)TSPanicked == 9);
+    REQUIRE((int)NTrafficStates == 10);
 }
 
 TEST_CASE("Traffic - spawn decision: caps, chances, disabled", "[game][guerrilla]")
@@ -1181,6 +1212,175 @@ TEST_CASE("Traffic - blocked recovery staging inside the stall window", "[game][
     }
 }
 
+TEST_CASE("Traffic - danger ring buffer insert/coalesce/expiry", "[game][guerrilla]")
+{
+    AutoArray<TrafficDangerEvent> buf;
+
+    SECTION("insert and coalesce")
+    {
+        Traffic::AddDangerEvent(buf, Vector3(100, 0, 100), 1.0f, false);
+        REQUIRE(buf.Size() == 1);
+        // a burst lands within the coalesce radius: one episode, refreshed
+        Traffic::AddDangerEvent(buf, Vector3(110, 0, 100), 2.0f, true);
+        REQUIRE(buf.Size() == 1);
+        REQUIRE(buf[0].severity == Approx(2.0f)); // max wins
+        REQUIRE(buf[0].playerCaused);             // OR-ed
+        // a weaker constituent never lowers the episode severity or clears
+        // its player attribution
+        Traffic::AddDangerEvent(buf, Vector3(100, 0, 100), 0.5f, false);
+        REQUIRE(buf[0].severity == Approx(2.0f));
+        REQUIRE(buf[0].playerCaused);
+        // beyond the coalesce radius: its own episode
+        Traffic::AddDangerEvent(buf, Vector3(200, 0, 100), 1.0f, false);
+        REQUIRE(buf.Size() == 2);
+        REQUIRE_FALSE(buf[1].playerCaused);
+    }
+
+    SECTION("coalescing refreshes the age")
+    {
+        Traffic::AddDangerEvent(buf, Vector3(0, 0, 0), 1.0f, false);
+        Traffic::AgeDangerEvents(buf, 15.0f, 20.0f);
+        REQUIRE(buf[0].age == Approx(15.0f));
+        Traffic::AddDangerEvent(buf, Vector3(0, 0, 0), 1.0f, false);
+        REQUIRE(buf[0].age == Approx(0.0f));
+    }
+
+    SECTION("expiry at the ttl")
+    {
+        Traffic::AddDangerEvent(buf, Vector3(0, 0, 0), 1.0f, false);
+        Traffic::AddDangerEvent(buf, Vector3(500, 0, 0), 1.0f, false);
+        Traffic::AgeDangerEvents(buf, 10.0f, 20.0f);
+        REQUIRE(buf.Size() == 2);
+        Traffic::AddDangerEvent(buf, Vector3(500, 0, 0), 1.0f, false); // refreshed mid-life
+        Traffic::AgeDangerEvents(buf, 10.0f, 20.0f);
+        REQUIRE(buf.Size() == 1); // the stale episode aged out, the refreshed one lives
+        Traffic::AgeDangerEvents(buf, 10.0f, 20.0f);
+        REQUIRE(buf.Size() == 0);
+    }
+
+    SECTION("ttl 0 empties the ring")
+    {
+        Traffic::AddDangerEvent(buf, Vector3(0, 0, 0), 1.0f, false);
+        Traffic::AgeDangerEvents(buf, 5.0f, 0.0f);
+        REQUIRE(buf.Size() == 0);
+    }
+
+    SECTION("a full ring evicts the oldest episode")
+    {
+        for (int i = 0; i < Traffic::MaxDangerEvents; i++)
+        {
+            Traffic::AddDangerEvent(buf, Vector3((float)(i * 200), 0, 0), 1.0f, false);
+            Traffic::AgeDangerEvents(buf, 1.0f, 100.0f); // stagger: the first insert ends up oldest
+        }
+        REQUIRE(buf.Size() == Traffic::MaxDangerEvents);
+        Traffic::AddDangerEvent(buf, Vector3(0, 0, 5000), 3.0f, true);
+        REQUIRE(buf.Size() == Traffic::MaxDangerEvents);
+        bool foundNew = false;
+        bool foundOldest = false;
+        for (int i = 0; i < buf.Size(); i++)
+        {
+            if (buf[i].pos.Z() > 4000.0f)
+            {
+                foundNew = true;
+            }
+            if (buf[i].pos.X() < 1.0f && buf[i].pos.Z() < 1.0f)
+            {
+                foundOldest = true;
+            }
+        }
+        REQUIRE(foundNew);
+        REQUIRE_FALSE(foundOldest);
+    }
+
+    SECTION("NearestDanger picks the closest episode")
+    {
+        float d = -1;
+        REQUIRE(Traffic::NearestDanger(buf, Vector3(0, 0, 0), d) == -1);
+        REQUIRE(d == Approx(-1.0f));
+        Traffic::AddDangerEvent(buf, Vector3(300, 0, 0), 1.0f, false);
+        Traffic::AddDangerEvent(buf, Vector3(100, 0, 0), 1.0f, false);
+        REQUIRE(Traffic::NearestDanger(buf, Vector3(0, 0, 0), d) == 1);
+        REQUIRE(d == Approx(100.0f));
+    }
+}
+
+TEST_CASE("Traffic - danger reaction decision", "[game][guerrilla]")
+{
+    TrafficTuning t; // dangerRadius 200, close 60; severity 1 leaves both as-is
+
+    SECTION("guards: kind, cooldown latch, severity, disabled radius")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(50, 1, TKPatrol, TSDriving, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(50, 1, TKConvoy, TSDriving, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(50, 1, TKCiv, TSDriving, 10, 0, t) == TDRNone); // latch holds
+        REQUIRE(Traffic::DecideDangerReaction(50, 0, TKCiv, TSDriving, 0, 0, t) == TDRNone);
+        t.dangerRadius = 0; // the feature-off case: no distance reacts
+        REQUIRE(Traffic::DecideDangerReaction(1, 5, TKCiv, TSDriving, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(1, 5, TKCiv, TSStalled, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(1, 5, TKCiv, TSParking, 0, 0, t) == TDRNone);
+    }
+
+    SECTION("commandeer-owned and already-panicked states never react")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(10, 1, TKCiv, TSStopping, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(10, 1, TKCiv, TSExiting, 0, 0, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(10, 1, TKCiv, TSPanicked, 0, 0, t) == TDRNone);
+    }
+
+    SECTION("out of band -> none; severity scales the band, clamped")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(250, 1, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
+        // severity 4 caps the scale at DangerScaleMax 1.5: band 300
+        REQUIRE(Traffic::DecideDangerReaction(250, 4, TKCiv, TSDriving, 0, 0.6f, t) != TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(310, 4, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
+        // a whisper floors at DangerScaleMin 0.5: band 100
+        REQUIRE(Traffic::DecideDangerReaction(110, 0.01f, TKCiv, TSDriving, 0, 0.6f, t) == TDRNone);
+        REQUIRE(Traffic::DecideDangerReaction(90, 0.01f, TKCiv, TSDriving, 0, 0.6f, t) != TDRNone);
+    }
+
+    SECTION("close band rolls: cower / bail / U-turn")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRCower);
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.49f, t) == TDRCower);
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.6f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSDriving, 0, 0.9f, t) == TDRUTurn);
+    }
+
+    SECTION("far band rolls: U-turn / rush / cower")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.2f, t) == TDRUTurn);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.6f, t) == TDRRush);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDriving, 0, 0.9f, t) == TDRCower);
+    }
+
+    SECTION("TSArrived reacts like driving")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(30, 1, TKCiv, TSArrived, 0, 0.2f, t) == TDRCower);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSArrived, 0, 0.6f, t) == TDRRush);
+    }
+
+    SECTION("ended and parked states bail regardless of the roll")
+    {
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSStalled, 0, 0.1f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSLingering, 0, 0.9f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSParking, 0, 0.5f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDwelling, 0, 0.5f, t) == TDRBail);
+        REQUIRE(Traffic::DecideDangerReaction(150, 1, TKCiv, TSDeparting, 0, 0.5f, t) == TDRBail);
+        // ... but never out of band
+        REQUIRE(Traffic::DecideDangerReaction(250, 1, TKCiv, TSStalled, 0, 0.1f, t) == TDRNone);
+    }
+
+    SECTION("reaction names")
+    {
+        REQUIRE(std::string(Traffic::DangerReactionName(TDRCower)) == "cower");
+        REQUIRE(std::string(Traffic::DangerReactionName(TDRUTurn)) == "uturn");
+        REQUIRE(std::string(Traffic::DangerReactionName(TDRRush)) == "rush");
+        REQUIRE(std::string(Traffic::DangerReactionName(TDRBail)) == "bail");
+        REQUIRE(std::string(Traffic::DangerReactionName(TDRNone)) == "none");
+        REQUIRE(std::string(Traffic::DangerReactionName(-7)) == "none");
+    }
+}
+
 TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][guerrilla]")
 {
     REQUIRE(Traffic::EventTypeFromName("spawned") == TESpawned);
@@ -1190,6 +1390,7 @@ TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][g
     REQUIRE(Traffic::EventTypeFromName("driverKilled") == TEDriverKilled);
     REQUIRE(Traffic::EventTypeFromName("parked") == TEParked);
     REQUIRE(Traffic::EventTypeFromName("Departed") == TEDeparted);
+    REQUIRE(Traffic::EventTypeFromName("Panicked") == TEPanicked);
     REQUIRE(Traffic::EventTypeFromName("bogus") == -1);
     REQUIRE(Traffic::EventTypeFromName(nullptr) == -1);
 

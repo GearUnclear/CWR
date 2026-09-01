@@ -38,6 +38,7 @@ class ParamEntry;
 class Transport;
 class Person;
 class AIUnit;
+class EntityAI;
 
 namespace Guerrilla
 {
@@ -87,6 +88,13 @@ struct TrafficTuning
                             // whenever the band is not widened, i.e. daytime at the default view distance - but the
                             // night light bound widens the band at ANY setting, so 1 raises night densities; kept
                             // off for the pre-#53 densities)
+    // civ danger response: drivers react to nearby gunfire/explosions and to
+    // player-caused wrecks.  dangerRadius <= 0 disables the tier entirely
+    // (and disarms the frozen-core shot/blast hooks' fast gate).
+    float dangerRadius = 200.0f;     // trafficDangerRadius: reaction band at severity 1 (m)
+    float dangerCloseRadius = 60.0f; // trafficDangerCloseRadius: the point-blank band (m, clamped <= dangerRadius)
+    float dangerCooldown = 45.0f;    // trafficDangerCooldown: s of one-reaction-per-episode latch per entry
+    float dangerTtl = 20.0f;         // trafficDangerTtl: s a ring-buffer danger episode stays live
 };
 
 enum TrafficKind
@@ -108,6 +116,7 @@ enum TrafficState
     TSDwelling,  // driver on foot near the parked car, dwell timer running
     TSDeparting, // driver ordered back in; waiting for DriverBrain()==unit
     TSLingering, // observed trip end (issue #53): stopped in place, crew seated, despawn once unobserved
+    TSPanicked,  // danger cower: braked in place, crew seated, resumes once the shooting stops
     NTrafficStates
 };
 
@@ -134,6 +143,19 @@ enum TrafficBlockedAction
     TBlockUTurn,    // no way through: swap the endpoints and drive back
 };
 
+// danger-reaction tier (civ danger response): what a civilian entry does
+// about nearby gunfire, an explosion or a fresh player-caused wreck.  One
+// reaction per cooldown episode; the commandeer sub-tick always wins over a
+// reaction (it runs first and parks the entry in TSStopping).
+enum TrafficDangerReaction
+{
+    TDRNone,  // out of band, wrong kind/state, or the cooldown latch holds
+    TDRCower, // brake and duck: TSPanicked until the neighbourhood quiets
+    TDRUTurn, // swap the endpoints and flee for home at full speed
+    TDRRush,  // keep the leg, floor it (accelerate past the trouble)
+    TDRBail,  // the driver abandons the car and runs from the danger
+};
+
 enum TrafficEventType
 {
     TESpawned,      // "spawned"      [veh, kind, originIdx, destIdx]
@@ -143,6 +165,7 @@ enum TrafficEventType
     TEDriverKilled, // "driverKilled" - killed-EH EXPRESSION attached to every civ driver
     TEParked,       // "parked"   [veh, kind, destIdx]
     TEDeparted,     // "departed" [veh, kind, destIdx] (destIdx = the NEW destination)
+    TEPanicked,     // "panicked" [veh, kind, reaction] (reaction = DangerReactionName)
     NTrafficEventTypes
 };
 
@@ -207,6 +230,17 @@ struct TrafficExposeObs
     float camDist2 = -1.0f;  // squared 2D distance from the CAMERA (the actual viewer: a scripted
                              // camera can sit far from the player); < 0 = unknown, the distance
                              // legs fall back to the player distance
+};
+
+// one coalesced danger episode in the transient ring buffer (never
+// serialized; events landing near a live episode merge into it, so automatic
+// fire stays one episode instead of flooding the ring)
+struct TrafficDangerEvent
+{
+    Vector3 pos = VZero;   // engine axes
+    float severity = 1.0f; // dimensionless; ~1 = a rifle shot (audibleFire / DangerRifleAudibleFire)
+    bool playerCaused = false;
+    float age = 0; // s since the newest coalesced constituent
 };
 
 // One zone as the pure route picker sees it.
@@ -372,6 +406,39 @@ class Traffic : public SerializeClass
     static constexpr float BlockedSpeedEpsilon = 0.5f; // m/s that still counts as standing
     static TrafficBlockedAction DecideBlocked(float stalledSeconds, int retries, bool nearStopped,
                                               const TrafficTuning& tuning);
+    // danger response (civ danger response) ---------------------------------
+    // ring-buffer ops over the transient episode buffer: coalesce within
+    // DangerCoalesceRadius (max severity, OR-ed playerCaused, age refreshed),
+    // a full ring evicts the oldest episode, AgeDangerEvents expires at ttl
+    static constexpr int MaxDangerEvents = 8;
+    static constexpr float DangerCoalesceRadius = 50.0f; // m
+    static void AddDangerEvent(AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float severity, bool playerCaused);
+    static void AgeDangerEvents(AutoArray<TrafficDangerEvent>& buf, float dt, float ttl);
+    // index of the episode nearest pos (2D), -1 when the buffer is empty;
+    // outDist gets the winner's distance (-1 when none)
+    static int NearestDanger(const AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float& outDist);
+    // the reaction decision.  severity scales both bands through
+    // sqrt(severity) clamped to [DangerScaleMin, DangerScaleMax]; the roll
+    // splits each band's outcomes; cooldownLeft > 0 is the per-entry
+    // one-reaction-per-episode latch.  Only TKCiv reacts (patrols/convoys
+    // keep their native combat AI); TSStopping/TSExiting stay the
+    // commandeer's, TSPanicked already reacted; the parked family and the
+    // ended states (stalled/lingering) always bail - there is no live leg
+    // left to drive
+    static constexpr float DangerScaleMin = 0.5f;
+    static constexpr float DangerScaleMax = 1.5f;
+    static constexpr float DangerRifleAudibleFire = 8.0f;   // audibleFire that reads as severity 1
+    static constexpr float DangerExplosionSeverity = 2.25f; // any blast maxes the band (DangerScaleMax squared)
+    static constexpr float WreckDangerSeverity = 0.5f;      // a player-caused wreck: a narrowed band
+    static constexpr float DangerCowerHold = 20.0f;         // s a cowering car holds before re-checking the ring
+    static constexpr float DangerCloseCowerBand = 0.5f;     // close band: roll < this = cower
+    static constexpr float DangerCloseBailBand = 0.8f;      // ... < this = bail; the rest U-turns
+    static constexpr float DangerFarUTurnBand = 0.5f;       // far band: roll < this = U-turn
+    static constexpr float DangerFarRushBand = 0.75f;       // ... < this = accelerate past (probe-gated: set equal to
+                                                      // DangerFarUTurnBand to disable the rush branch); rest cowers
+    static TrafficDangerReaction DecideDangerReaction(float distance, float severity, int kind, TrafficState state,
+                                                      float cooldownLeft, float roll, const TrafficTuning& tuning);
+    static const char* DangerReactionName(int reaction); // "cower"/"uturn"/"rush"/"bail" ("none" otherwise)
     // civ arrival park roll: roll < parkChance
     static bool DecidePark(float roll, const TrafficTuning& tuning);
     // load downgrade for the three park states, keyed on whether the saved
@@ -389,6 +456,12 @@ class Traffic : public SerializeClass
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
     // commandeer sub-tick while a civ car is near the player)
     void Simulate(float deltaT);
+    // danger feed (the frozen-core hooks; see TrafficNotifyShotFast below).
+    // NotifyShot runs per ROUND from every firing entity while armed, so the
+    // cheap early-outs come before any math
+    void NotifyShot(EntityAI* shooter, float audibleFire);
+    void NotifyExplosion(AIUnit* ownerUnit, Vector3Par pos);
+    void NotifyDanger(Vector3Par pos, float severity, bool playerCaused);
     // script/test aid: spawn one entry of a kind from a zone, bypassing the
     // chance roll and the caps (NOT the road placement).  Null on failure.
     Transport* ForceSpawn(int kind, int zoneIndex);
@@ -438,12 +511,13 @@ class Traffic : public SerializeClass
         int destIndex = -1;   // transient
         Vector3 dest = VZero; // destination road point (engine axes)
         int legs = 0;
-        float stallTime = 0;     // s of no movement
-        int blockedRetries = 0;  // recovery attempts this stall episode (reset with stallTime)
-        float stateTime = 0;     // s in the current state (commandeer/park timing)
-        float dwellDuration = 0; // s; transient like stateTime, re-rolled on load
-        float exposeDefer = 0;   // s a wanted despawn has been perception-blocked; transient, NOT serialized
-        RString lingerReason;    // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
+        float stallTime = 0;      // s of no movement
+        int blockedRetries = 0;   // recovery attempts this stall episode (reset with stallTime)
+        float stateTime = 0;      // s in the current state (commandeer/park timing)
+        float dwellDuration = 0;  // s; transient like stateTime, re-rolled on load
+        float exposeDefer = 0;    // s a wanted despawn has been perception-blocked; transient, NOT serialized
+        float dangerCooldown = 0; // s left of the one-reaction-per-episode danger latch; transient, NOT serialized
+        RString lingerReason;     // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
         Vector3 lastPos = VZero;
 
         LSError Serialize(ParamArchive& ar);
@@ -511,8 +585,12 @@ class Traffic : public SerializeClass
     // observed endings (issue #53) -------------------------------------------
     // observed civ stall: the driver dismounts and walks off (the fleeing
     // table at walking pace), the hull joins the released set dressing; both
-    // are deleted by the perception-gated cleanups once unobserved
-    void AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired);
+    // are deleted by the perception-gated cleanups once unobserved.  With
+    // fleeFrom the walk-off becomes the danger bail: the driver RUNS
+    // (SpeedFull) fleeDist away from the danger, and playerCaused marks the
+    // released hull's memory (a bail the player's fire forced)
+    void AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired,
+                      const Vector3* fleeFrom = nullptr, bool playerCaused = false);
     // observed trip end for a crew that stays seated: brake to a stop and
     // hold in TSLingering until DespawnSafe says nobody is watching
     void EnterLinger(TrafficEntry& e, const char* reason);
@@ -549,6 +627,10 @@ class Traffic : public SerializeClass
     void DispatchEvents(const AutoArray<TrafficEventRecord>& fired);
     void ApplyPendingLoad();
     int DestForOrigin(int kind, const AutoArray<TrafficZoneCandidate>& zones, int originIndex, float roll) const;
+    // per-pass danger snapshot: the live ring episodes plus the player-caused
+    // wrecks the released table already tracks (a fresh wreck needs no
+    // engine hook)
+    void BuildDangerSources();
 
     TrafficTuning _tuning;
     AutoArray<TrafficEntry> _entries;
@@ -558,9 +640,40 @@ class Traffic : public SerializeClass
     float _accum = 0;
     float _subAccum = 0;
     Perception _percept; // transient per-pass snapshot
+    // danger ring: shot/blast episodes since ~dangerTtl (transient, never
+    // serialized), and the per-pass source snapshot (_danger + wrecks)
+    AutoArray<TrafficDangerEvent> _danger;
+    AutoArray<TrafficDangerEvent> _dangerNow;
     // deserialized rows waiting for the rebuilt zone table (second load pass)
     AutoArray<TrafficEntry> _pending;
 };
+
+// ---------------------------------------------------------------------------
+// frozen-core danger hooks (EntityAI::FireWeaponEffects and
+// Landscape::ExplosionDammage call these).  Global-bool fast gate in the
+// GUndercoverActive mold: armed only while the traffic service is live,
+// tracks entries and has the danger response enabled, so the per-round call
+// in the 99.9% case costs one bool read and no math.  Kept in sync by
+// Traffic::Simulate and Traffic::Clear.
+extern bool GTrafficDangerArmed;
+
+inline void TrafficNotifyShotFast(EntityAI* shooter, float audibleFire)
+{
+    if (!GTrafficDangerArmed)
+    {
+        return;
+    }
+    Traffic::Instance().NotifyShot(shooter, audibleFire);
+}
+
+inline void TrafficNotifyExplosionFast(AIUnit* ownerUnit, Vector3Par pos)
+{
+    if (!GTrafficDangerArmed)
+    {
+        return;
+    }
+    Traffic::Instance().NotifyExplosion(ownerUnit, pos);
+}
 
 } // namespace Guerrilla
 } // namespace Poseidon
