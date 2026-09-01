@@ -1418,6 +1418,38 @@ TEST_CASE("Traffic - queries are safe on an empty service", "[game][guerrilla]")
     REQUIRE(t.NEntries() == 0);
 }
 
+TEST_CASE("Traffic - ambush queue drain", "[game][guerrilla]")
+{
+    Traffic t;
+    t.QueueAmbushForTest(Vector3(1200.0f, 0.0f, 1300.0f), TKPatrol, "Outpost");
+    t.QueueAmbushForTest(Vector3(4200.0f, 12.0f, 900.0f), TKConvoy, "Depot");
+
+    AutoArray<TrafficAmbush> out;
+    out.Add(TrafficAmbush()); // stale row from an earlier tick: must be dropped
+    t.ConsumeAmbushes(out);
+    REQUIRE(out.Size() == 2);
+    // queue order is wipe order - the alert tick attributes them one by one
+    REQUIRE(out[0].pos.X() == Approx(1200.0f));
+    REQUIRE(out[0].pos.Z() == Approx(1300.0f));
+    REQUIRE(out[0].kind == TKPatrol);
+    REQUIRE(Str(out[0].originZone) == "Outpost");
+    REQUIRE(out[1].pos.X() == Approx(4200.0f));
+    REQUIRE(out[1].pos.Y() == Approx(12.0f));
+    REQUIRE(out[1].pos.Z() == Approx(900.0f));
+    REQUIRE(out[1].kind == TKConvoy);
+    REQUIRE(Str(out[1].originZone) == "Depot");
+
+    // the drain empties the queue: a second tick sees nothing
+    t.ConsumeAmbushes(out);
+    REQUIRE(out.Size() == 0);
+
+    // and Clear() drops anything queued since
+    t.QueueAmbushForTest(Vector3(500.0f, 0.0f, 500.0f), TKPatrol, "Outpost");
+    t.Clear();
+    t.ConsumeAmbushes(out);
+    REQUIRE(out.Size() == 0);
+}
+
 TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned", "[game][guerrilla][save][load]")
 {
     const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
@@ -1506,6 +1538,71 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
 
     // scrub the process-wide state other tests expect to be empty
     ExtParsMission.Clear();
+    ZoneRegistry::Instance().Clear();
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("Traffic - the ambush queue survives save/load", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "traffic-ambush-roundtrip.bin";
+
+    {
+        // a patrol wiped inside the tick-interval window before the save:
+        // the stimulus must reach the AlertMachine after the load, not be
+        // forgotten with the session
+        Traffic t;
+        t.QueueAmbushForTest(Vector3(1200.0f, 0.0f, 1300.0f), TKPatrol, "Outpost");
+        t.QueueAmbushForTest(Vector3(4200.0f, 12.0f, 900.0f), TKConvoy, "Depot");
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(t.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    Traffic loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+
+    AutoArray<TrafficAmbush> out;
+    loaded.ConsumeAmbushes(out);
+    REQUIRE(out.Size() == 2);
+    CHECK(out[0].pos.X() == Approx(1200.0f));
+    CHECK(out[0].pos.Z() == Approx(1300.0f));
+    CHECK(out[0].kind == TKPatrol);
+    CHECK(Str(out[0].originZone) == "Outpost");
+    CHECK(out[1].pos.X() == Approx(4200.0f));
+    CHECK(out[1].pos.Y() == Approx(12.0f));
+    CHECK(out[1].kind == TKConvoy);
+    CHECK(Str(out[1].originZone) == "Depot");
+
+    // an archive with no Ambushes subclass (a pre-traffic-alert save) loads
+    // an empty queue rather than failing
+    {
+        Traffic fresh;
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+        ParamArchiveLoad lar;
+        REQUIRE(lar.LoadBin(archivePath.string().c_str()));
+        lar.FirstPass();
+        REQUIRE(fresh.Serialize(lar) == LSOK);
+        lar.SecondPass();
+        REQUIRE(fresh.Serialize(lar) == LSOK);
+        AutoArray<TrafficAmbush> none;
+        fresh.ConsumeAmbushes(none);
+        CHECK(none.Size() == 0);
+    }
+
+    // scrub the process-wide state other tests expect untouched (the load's
+    // second pass runs LoadFromConfig/ApplyPendingLoad against the global
+    // registry singleton)
     ZoneRegistry::Instance().Clear();
     std::filesystem::remove(archivePath);
 }

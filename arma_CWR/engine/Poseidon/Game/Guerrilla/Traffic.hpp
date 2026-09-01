@@ -20,8 +20,11 @@
 // expression civilians.sqs attaches to town civilians.
 //
 // Inactive whenever the ZoneRegistry is inactive or trafficEnabled=0, so
-// ordinary missions are unaffected.  Accepted gap (see guerrilla-mode/
-// STATUS.md): patrol traffic feeds no AlertMachine input.
+// ordinary missions are unaffected.  Patrol/convoy traffic feeds the
+// AlertMachine two ways: a violent end (destroyed / crewDead) queues a
+// TrafficAmbush the alert tick drains into a per-zone knowledge floor,
+// and a live traffic crew under fire between zones is attributed to the
+// nearest occupier zone within trafficAmbushRadius (IsTrafficGroup).
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -104,6 +107,23 @@ enum TrafficKind
     TKPatrol,
     TKConvoy,
     NTrafficKinds
+};
+
+// One queued violent traffic end: a patrol or convoy that despawned
+// "destroyed" or "crewDead".  Drained by the AlertMachine tick
+// (ConsumeAmbushes), which floors the attributed zone's acted-on knowsAbout
+// for trafficAmbushWindow seconds - the wiped-patrol alert.  Queued rows
+// survive a save, same contract as the UndercoverSystem's pending
+// compromises.
+struct TrafficAmbush
+{
+    Vector3 pos = VZero;         // wreck position (engine axes)
+    TrafficKind kind = TKPatrol; // never TKCiv
+    // the entry's origin zone name: the attribution fallback, honoured
+    // only while the occupier still holds that zone
+    RString originZone;
+
+    LSError Serialize(ParamArchive& ar);
 };
 
 enum TrafficState
@@ -290,6 +310,9 @@ class Traffic : public SerializeClass
     // is this group the crew of a live traffic entry of the given kind
     // (the AlertMachine attribution hook; kind < 0 = any)
     bool IsTrafficGroup(const AIGroup* grp, int kind = -1) const;
+    // drain the queued violent patrol/convoy ends into out (cleared first);
+    // called by the AlertMachine tick
+    void ConsumeAmbushes(AutoArray<TrafficAmbush>& out);
     static const char* KindName(int kind);     // "civ" / "patrol" / "convoy"
     static int KindFromName(const char* name); // -1 unknown; "all" -> -1 too
 
@@ -443,6 +466,9 @@ class Traffic : public SerializeClass
     // test aid: a bookkeeping-only entry (no world objects) so the
     // save/load rows are unit-testable
     void MarkEntryForTest(TrafficKind kind, const char* originZone, const char* destZone, int legs);
+    // test aid: queue an ambush stimulus without world objects (the engine
+    // path queues from DespawnEntry's violent ends)
+    void QueueAmbushForTest(Vector3Par pos, TrafficKind kind, const char* originZone);
     // test/debug aid (gmTrafficPercept): take a fresh perception snapshot
     // and report the verdict for one point - whether a camera exists, the
     // per-point observations and the live effective band the next pass's
@@ -608,6 +634,8 @@ class Traffic : public SerializeClass
     float _accum = 0;
     float _subAccum = 0;
     Perception _percept; // transient per-pass snapshot
+    // violent patrol/convoy ends awaiting the AlertMachine drain
+    AutoArray<TrafficAmbush> _ambushes;
     // deserialized rows waiting for the rebuilt zone table (second load pass)
     AutoArray<TrafficEntry> _pending;
 };

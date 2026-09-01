@@ -97,6 +97,7 @@ void Traffic::Clear()
     _accum = 0;
     _subAccum = 0;
     _percept = Perception();
+    _ambushes.Clear();
     _pending.Clear();
 }
 
@@ -1705,6 +1706,19 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
     // its remains get the longer memory (issue #53 T4); the quiet releases
     // (abandon, script release) stay ambient set dressing
     bool violent = strcmp(reason, "destroyed") == 0 || strcmp(reason, "crewDead") == 0 || strcmp(reason, "bailed") == 0;
+    if (violent && e.kind != TKCiv)
+    {
+        // a wiped patrol or convoy is an alert stimulus: queue for the
+        // AlertMachine tick (ConsumeAmbushes), which floors the attributed
+        // zone's knowledge and points its lastKnown at the wreck ("bailed"
+        // qualifies too - a convoy only bails after losing its escort to
+        // recent combat)
+        TrafficAmbush am;
+        am.pos = veh ? veh->Position() : e.lastPos;
+        am.kind = e.kind;
+        am.originZone = e.originZone;
+        _ambushes.Add(am);
+    }
     if (keepHull)
     {
         // the hull (and whatever is left of the crew) outlives the entry;
@@ -3280,6 +3294,25 @@ Transport* Traffic::ForceSpawn(int kind, int zoneIndex)
     return veh;
 }
 
+void Traffic::ConsumeAmbushes(AutoArray<TrafficAmbush>& out)
+{
+    out.Clear();
+    for (int i = 0; i < _ambushes.Size(); i++)
+    {
+        out.Add(_ambushes[i]);
+    }
+    _ambushes.Clear();
+}
+
+void Traffic::QueueAmbushForTest(Vector3Par pos, TrafficKind kind, const char* originZone)
+{
+    TrafficAmbush am;
+    am.pos = pos;
+    am.kind = kind;
+    am.originZone = originZone;
+    _ambushes.Add(am);
+}
+
 void Traffic::MarkEntryForTest(TrafficKind kind, const char* originZone, const char* destZone, int legs)
 {
     TrafficEntry e;
@@ -3369,6 +3402,16 @@ void Traffic::DispatchEvents(const AutoArray<TrafficEventRecord>& fired)
 // ---------------------------------------------------------------------------
 // serialization
 // ---------------------------------------------------------------------------
+
+LSError TrafficAmbush::Serialize(ParamArchive& ar)
+{
+    int k = (int)kind;
+    PARAM_CHECK(ar.Serialize("pos", pos, 1, VZero))
+    PARAM_CHECK(ar.Serialize("kind", k, 1, (int)TKPatrol))
+    kind = (TrafficKind)k;
+    PARAM_CHECK(ar.Serialize("originZone", originZone, 1, RString()))
+    return LSOK;
+}
 
 LSError Traffic::TrafficEntry::Serialize(ParamArchive& ar)
 {
@@ -3493,6 +3536,10 @@ LSError Traffic::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("Entries", _pending, 1))
     PARAM_CHECK(ar.Serialize("Released", _released, 1))
     PARAM_CHECK(ar.Serialize("Fleeing", _fleeing, 1))
+    // an ambush queued in the tick-interval window before the save must
+    // survive the load (same contract as the UndercoverSystem's pending
+    // compromises); absent from older saves, which load an empty queue
+    PARAM_CHECK(ar.Serialize("Ambushes", _ambushes, 1))
 
     if (ar.IsSaving())
     {
