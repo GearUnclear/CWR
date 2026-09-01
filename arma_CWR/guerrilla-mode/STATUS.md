@@ -159,6 +159,33 @@ Accepted degradation, engine-side safe.
   drivers instead; worth a look if another system ever needs waypoint
   convoys.
 
+- **Convoy discipline under fire (2026-09-01)**: convoy Move commands now
+  land their speed mode and `FormColumn` on the command subgroup they
+  actually create (the constructor defaults were wedge at `SpeedNormal`, so
+  the engine's native convoy-follow never engaged); escorts seat up to two
+  cargo riflemen and are watched for quiet loss; an escort dead within
+  `trafficBailCombatWindow` (60 s) of the group's last disclosure makes the
+  truck crew bail (`bailed` event, player-caused remains); and a fighting
+  patrol/convoy holds the whole trip ladder (stall accrual, blocked
+  recovery, arrival/stall endings, re-legs) under a bounded combat gate
+  (`trafficCombatStaleAfter` 120 s / `trafficCombatHoldMax` 300 s) instead
+  of being lingered or torn down mid-fight. Known edge: `combatHold`
+  accrues in pass intervals, not wall seconds, matching `stallTime`.
+
+- **Civ danger response (2026-09-01)**: civilian traffic reacts to nearby
+  gunfire, blasts and fresh player-caused wrecks. Two fast-gated one-call
+  hooks in the frozen core (`EntityAI::FireWeaponEffects`,
+  `Landscape::ExplosionDammage`, `GTrafficDangerArmed` in the
+  `GUndercoverActive` mold) feed a coalescing 8-slot ring; a pure
+  per-entry reaction roll picks cower (`TSPanicked`, resumes when quiet),
+  U-turn home at full speed, rush past, or bail-and-run from the danger
+  point. One reaction per `trafficDangerCooldown` (45 s); the commandeer
+  always wins; patrols/convoys are excluded (native combat AI owns them).
+  Keys: `trafficDangerRadius` (200 m at severity 1, 0 = off),
+  `trafficDangerCloseRadius` (60), `trafficDangerTtl` (20). Probe-gated
+  residual: whether a CMCareless driver visibly accelerates on the rush
+  slot; disabling it is a one-constant change (`DangerFarRushBand`).
+
 ## Tests
 
 The engine systems carry Catch2 unit coverage (ZoneRegistry / AlertMachine /
