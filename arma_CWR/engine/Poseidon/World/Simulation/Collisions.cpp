@@ -34,6 +34,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp> // ambient-traffic danger hook (TrafficNotifyExplosionFast)
 #define PROFILE_COLLISIONS 1
 
 #if PROFILE_COLLISIONS
@@ -1172,6 +1173,11 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
             }
         }
     }
+
+    // Guerrilla ambient traffic: nearby civilian drivers react to the blast
+    // (the severity mapping filters out plain projectile impacts).
+    // Global-bool fast gate (the GUndercoverActive precedent)
+    Guerrilla::TrafficNotifyExplosionFast(ownerUnit, pos, type);
 
     ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
