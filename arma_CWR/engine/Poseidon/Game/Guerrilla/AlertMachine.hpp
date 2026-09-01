@@ -15,8 +15,14 @@
 // per-group marking is idempotent (issue #19 removed the once-per-campaign
 // latch).  The old global vehicle-mount break is gone - vehicles resolve
 // per observer (see Undercover.hpp).  The gmUndercover global itself is
-// script-owned.
+// script-owned.  The tick also drains the Traffic service's violent
+// patrol/convoy ends (TrafficAmbush): each floors the attributed zone's
+// acted-on knowledge for trafficAmbushWindow seconds - a patrol wipe holds
+// YELLOW (the disengage window only bleeds under a live contact), a convoy
+// wipe pins RED - so a wiped road patrol alerts through the ordinary FSM
+// (and qrf.sqs) with no script changes.
 
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>    // TrafficAmbush (tick inputs)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp> // UCCompromise (tick inputs)
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -48,6 +54,20 @@ struct AlertTuning
     // Heat when a LATER witness group turns compromised (no event); the one
     // undercover* config key living here - the machine is its only consumer
     float undercoverHeatWitness = 8.0f;
+    // wiped patrol/convoy stimulus (TrafficAmbush drain).  The traffic*
+    // keys living here - the machine is their only consumer:
+    // seconds the injected knowsAbout floor persists (a patrol wipe floors
+    // the YELLOW band, a convoy wipe the RED band - the alert*Knows above)
+    float trafficAmbushWindow = 120.0f;
+    // attribution bound (m): the wreck alerts the nearest occupier zone
+    // inside this.  Deliberately NOT TrafficTuning::radius - that is the
+    // ambient-density player band, and alert reach must not move with it
+    float trafficAmbushRadius = 1500.0f;
+    // Heat per drained ambush on the attributed zone, on top of the FSM
+    // edge spikes - repeat ambushes inside a held window still cost (the
+    // compromise-drain policy); one kind-independent amount, the convoy's
+    // RED edge already pays alertHeatRed
+    float trafficAmbushHeat = 4.0f;
 };
 
 enum AlertState
@@ -88,13 +108,15 @@ struct AlertZoneInputs
 struct AlertTickInputs
 {
     bool playerValid = false;
-    float playerX = 0;            // easting
-    float playerZ = 0;            // northing
+    float playerX = 0;           // easting
+    float playerZ = 0;           // northing
     bool undercover = false;     // script global gmUndercover (nil == false)
     bool breakRequested = false; // script called gmBreakUndercover
     RString breakReason;
     // per-observer compromise notifications drained from the UndercoverSystem
     AutoArray<UCCompromise> compromises;
+    // violent patrol/convoy ends drained from the Traffic service
+    AutoArray<TrafficAmbush> ambushes;
     AutoArray<AlertZoneInputs> zones; // index-aligned to the zone registry
 };
 
@@ -157,6 +179,12 @@ class AlertMachine
         float timer = 0; // YELLOW disengage countdown (seconds)
         bool hasLastKnown = false;
         Vector3 lastKnown = VZero; // engine axes
+        // wiped-traffic stimulus: the FSM acts on max(gathered knows,
+        // stimulusKnows) while the window timer runs, then decays to the
+        // gathered value (never force zone state - the FSM recomputes it
+        // from knowledge every tick and would revert a forced write)
+        float stimulusKnows = 0;
+        float stimulusTimer = 0; // seconds of window left
     };
 
     // dynamic per-zone state as stored in a savegame
@@ -167,6 +195,8 @@ class AlertMachine
         float timer = 0;
         bool hasLastKnown = false;
         Vector3 lastKnown = VZero;
+        float stimulusKnows = 0;
+        float stimulusTimer = 0;
 
         LSError Serialize(ParamArchive& ar);
     };
