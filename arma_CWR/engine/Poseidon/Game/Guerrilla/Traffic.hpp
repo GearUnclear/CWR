@@ -122,6 +122,18 @@ enum TrafficEndAction
     TEndLinger,  // observed, no continuation: stop where it is, crew stays seated
 };
 
+// blocked-reaction tier: what a still-driving car that stopped progressing
+// mid-leg should try BEFORE the stallTimeout ladder gives up on it.  Stopped
+// hulls lock their road links, and both the road A* and VerifyPath respect
+// locks, so a re-issued leg detours around a blockage whenever any way
+// around exists; the U-turn covers the road home when none does.
+enum TrafficBlockedAction
+{
+    TBlockNone,     // below the staged threshold, still rolling, or retries spent
+    TBlockRetryLeg, // re-issue the same leg: the fresh plan sees the locked links
+    TBlockUTurn,    // no way through: swap the endpoints and drive back
+};
+
 enum TrafficEventType
 {
     TESpawned,      // "spawned"      [veh, kind, originIdx, destIdx]
@@ -350,6 +362,16 @@ class Traffic : public SerializeClass
     // stall rule: < StallMoveEpsilon m of movement per pass accumulates
     static constexpr float StallMoveEpsilon = 5.0f;
     static bool StallExpired(float stalledSeconds, const TrafficTuning& tuning);
+    // blocked recovery, staged INSIDE the stall window so the anti-leak bound
+    // is unchanged: retry the leg at stallTimeout/3, U-turn at 2/3, and the
+    // expiry ladder still fires at stallTimeout for a car that defeats both.
+    // nearStopped separates genuinely blocked (speed ~0) from merely slow
+    // (an off-road crawl or a queued car accrues stall time too); retries
+    // reset with the stall clock the moment the car actually moves
+    static constexpr int MaxBlockedRetries = 2;
+    static constexpr float BlockedSpeedEpsilon = 0.5f; // m/s that still counts as standing
+    static TrafficBlockedAction DecideBlocked(float stalledSeconds, int retries, bool nearStopped,
+                                              const TrafficTuning& tuning);
     // civ arrival park roll: roll < parkChance
     static bool DecidePark(float roll, const TrafficTuning& tuning);
     // load downgrade for the three park states, keyed on whether the saved
@@ -417,6 +439,7 @@ class Traffic : public SerializeClass
         Vector3 dest = VZero; // destination road point (engine axes)
         int legs = 0;
         float stallTime = 0;     // s of no movement
+        int blockedRetries = 0;  // recovery attempts this stall episode (reset with stallTime)
         float stateTime = 0;     // s in the current state (commandeer/park timing)
         float dwellDuration = 0; // s; transient like stateTime, re-rolled on load
         float exposeDefer = 0;   // s a wanted despawn has been perception-blocked; transient, NOT serialized

@@ -981,6 +981,21 @@ bool Traffic::StallExpired(float stalledSeconds, const TrafficTuning& tuning)
     return tuning.stallTimeout > 0 && stalledSeconds >= tuning.stallTimeout;
 }
 
+TrafficBlockedAction Traffic::DecideBlocked(float stalledSeconds, int retries, bool nearStopped,
+                                            const TrafficTuning& tuning)
+{
+    if (tuning.stallTimeout <= 0 || !nearStopped || retries >= MaxBlockedRetries)
+    {
+        return TBlockNone;
+    }
+    float threshold = tuning.stallTimeout * (float)(retries + 1) / 3.0f;
+    if (stalledSeconds < threshold)
+    {
+        return TBlockNone;
+    }
+    return retries == 0 ? TBlockRetryLeg : TBlockUTurn;
+}
+
 bool Traffic::DecidePark(float roll, const TrafficTuning& tuning)
 {
     return tuning.parkChance > 0 && roll < tuning.parkChance;
@@ -1810,6 +1825,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
         else
         {
             e.stallTime = 0;
+            e.blockedRetries = 0; // a later blockage gets its own recovery attempts
             if (e.state == TSStalled)
             {
                 e.state = TSDriving;
@@ -1870,6 +1886,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                     e.legs++;
                     e.state = TSDriving;
                     e.stallTime = 0;
+                    e.blockedRetries = 0;
                     e.exposeDefer = 0; // the story continues: a fresh defer budget for the next ending
                     int combat = e.kind == TKCiv ? CMCareless : CMSafe;
                     int speed = e.kind == TKPatrol ? SpeedNormal : SpeedLimited;
@@ -1881,6 +1898,45 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             }
             EnterLinger(e, "arrived");
             continue;
+        }
+
+        // blocked-reaction tier (before the expiry ladder): a car boxed in
+        // mid-leg first re-plans the same leg - stopped hulls lock their
+        // road links and the planner detours around locked links, so this
+        // alone clears most blockages - then U-turns for home; only a car
+        // that defeats both retries reaches the stallTimeout ladder, at the
+        // unchanged timeout.  The speed guard keeps slow-but-moving cars
+        // (crawling detours, queues behind a car that is recovering) out
+        bool nearStopped = veh->Speed().SquareSize() < Square(BlockedSpeedEpsilon);
+        TrafficBlockedAction blocked = DecideBlocked(e.stallTime, e.blockedRetries, nearStopped, _tuning);
+        if (blocked != TBlockNone)
+        {
+            e.blockedRetries++;
+            int combat = e.kind == TKCiv ? CMCareless : CMSafe;
+            int speed = e.kind == TKPatrol ? SpeedNormal : SpeedLimited;
+            if (blocked == TBlockRetryLeg)
+            {
+                LOG_INFO(Core, "Traffic: {} blocked, re-planning its leg", KindName(e.kind));
+                IssueRoute(e, e.dest, combat, speed, e.kind == TKConvoy);
+                continue;
+            }
+            // TBlockUTurn: swap the endpoints and drive back where it came
+            // from; a row whose origin no longer resolves just spends the
+            // retry and leaves the expiry ladder to finish the story
+            const ZoneRecord* back = e.originIndex >= 0 ? ZoneRegistry::Instance().GetZone(e.originIndex) : nullptr;
+            if (back && GRoadNet)
+            {
+                int backIndex = e.originIndex;
+                RString backZone = e.originZone;
+                e.originIndex = e.destIndex;
+                e.originZone = e.destZone;
+                e.destIndex = backIndex;
+                e.destZone = backZone;
+                e.legs++;
+                LOG_INFO(Core, "Traffic: {} still blocked, U-turning to {}", KindName(e.kind), (const char*)backZone);
+                IssueRoute(e, GRoadNet->GetNearestRoadPoint(back->pos), combat, speed, e.kind == TKConvoy);
+                continue;
+            }
         }
 
         if (StallExpired(e.stallTime, _tuning))
@@ -2210,6 +2266,7 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
             e.legs = 1; // a fresh trip, the park cycle can chain
             e.state = TSDriving;
             e.stallTime = 0;
+            e.blockedRetries = 0;
             e.stateTime = 0;
             e.lastPos = veh->Position();
             IssueRoute(e, GRoadNet->GetNearestRoadPoint(z->pos), CMCareless, SpeedLimited, false);
@@ -3005,6 +3062,8 @@ LSError Traffic::TrafficEntry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("dest", dest, 1, VZero))
     PARAM_CHECK(ar.Serialize("legs", legs, 1, 0))
     PARAM_CHECK(ar.Serialize("stallTime", stallTime, 1, 0.0f))
+    // absent from older saves: default 0 hands a loaded stall its full retries
+    PARAM_CHECK(ar.Serialize("blockedRetries", blockedRetries, 1, 0))
     // absent from pre-#53 saves: the empty default despawns as "arrived"
     PARAM_CHECK(ar.Serialize("lingerReason", lingerReason, 1, RString()))
     PARAM_CHECK(ar.Serialize("lastPos", lastPos, 1, VZero))

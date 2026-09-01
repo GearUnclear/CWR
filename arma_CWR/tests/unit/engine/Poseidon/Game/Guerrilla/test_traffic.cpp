@@ -1144,6 +1144,43 @@ TEST_CASE("Traffic - stall expiry", "[game][guerrilla]")
     REQUIRE_FALSE(Traffic::StallExpired(1000.0f, t));
 }
 
+TEST_CASE("Traffic - blocked recovery staging inside the stall window", "[game][guerrilla]")
+{
+    TrafficTuning t; // stallTimeout 90: retry threshold 30, U-turn threshold 60
+
+    SECTION("staged thresholds: retry the leg first, then U-turn")
+    {
+        REQUIRE(Traffic::DecideBlocked(29.0f, 0, true, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(30.0f, 0, true, t) == TBlockRetryLeg);
+        // the first retry is spent; the same clock reading is below the next stage
+        REQUIRE(Traffic::DecideBlocked(30.0f, 1, true, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(59.0f, 1, true, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(60.0f, 1, true, t) == TBlockUTurn);
+    }
+    SECTION("retries cap: a car that defeated both is left to the expiry ladder")
+    {
+        REQUIRE(Traffic::DecideBlocked(89.0f, 2, true, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(1000.0f, 2, true, t) == TBlockNone);
+    }
+    SECTION("speed guard: slow-but-moving cars are not blocked")
+    {
+        REQUIRE(Traffic::DecideBlocked(60.0f, 0, false, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(60.0f, 1, false, t) == TBlockNone);
+    }
+    SECTION("stallTimeout 0 disables the tier along with the ladder")
+    {
+        t.stallTimeout = 0;
+        REQUIRE(Traffic::DecideBlocked(1000.0f, 0, true, t) == TBlockNone);
+    }
+    SECTION("the staging tracks a tuned timeout")
+    {
+        t.stallTimeout = 30.0f;
+        REQUIRE(Traffic::DecideBlocked(9.0f, 0, true, t) == TBlockNone);
+        REQUIRE(Traffic::DecideBlocked(10.0f, 0, true, t) == TBlockRetryLeg);
+        REQUIRE(Traffic::DecideBlocked(20.0f, 1, true, t) == TBlockUTurn);
+    }
+}
+
 TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][guerrilla]")
 {
     REQUIRE(Traffic::EventTypeFromName("spawned") == TESpawned);
