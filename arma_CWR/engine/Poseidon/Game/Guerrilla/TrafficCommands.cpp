@@ -108,7 +108,7 @@ static GameValue GmTrafficDest(const GameState* state, GameValuePar oper1)
 }
 
 // gmTrafficOnEvent ["spawned"|"despawned"|"commandeered"|"arrived"|"driverKilled"
-// |"parked"|"departed", handler]
+// |"parked"|"departed"|"bailed", handler]
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both).  driverKilled is
 // the killed-EH EXPRESSION attached to every civilian driver at spawn.

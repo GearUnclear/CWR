@@ -121,6 +121,9 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.parkDwellMax == Approx(180.0f));
         REQUIRE(tu.exposeMargin == Approx(150.0f));
         REQUIRE(tu.despawnDeferMax == Approx(90.0f));
+        REQUIRE(tu.combatStaleAfter == Approx(120.0f));
+        REQUIRE(tu.combatHoldMax == Approx(300.0f));
+        REQUIRE(tu.bailCombatWindow == Approx(60.0f));
         REQUIRE_FALSE(tu.scaleCaps);
     }
 
@@ -181,6 +184,30 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.exposeMargin == Approx(50.0f));
         REQUIRE(tu.despawnDeferMax == Approx(30.0f));
         REQUIRE(tu.scaleCaps);
+    }
+
+    SECTION("explicit convoy discipline keys override")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficCombatStaleAfter = 45; trafficCombatHoldMax = 90; "
+               "trafficBailCombatWindow = 15; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.combatStaleAfter == Approx(45.0f));
+        REQUIRE(tu.combatHoldMax == Approx(90.0f));
+        REQUIRE(tu.bailCombatWindow == Approx(15.0f));
+    }
+
+    SECTION("convoy discipline sanity floors")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficCombatStaleAfter = -30; trafficCombatHoldMax = -1; "
+               "trafficBailCombatWindow = -0.5; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        // negatives floor to 0: a 0 hold budget disables the gate, a 0 window
+        // disables the bail, neither is allowed to read as "time runs backwards"
+        REQUIRE(tu.combatStaleAfter == Approx(0.0f));
+        REQUIRE(tu.combatHoldMax == Approx(0.0f));
+        REQUIRE(tu.bailCombatWindow == Approx(0.0f));
     }
 
     SECTION("perception sanity floors")
@@ -1144,6 +1171,158 @@ TEST_CASE("Traffic - stall expiry", "[game][guerrilla]")
     REQUIRE_FALSE(Traffic::StallExpired(1000.0f, t));
 }
 
+TEST_CASE("Traffic - combat gate on the stall and trip-end ladder", "[game][guerrilla]")
+{
+    TrafficTuning t; // combatStaleAfter 120, combatHoldMax 300
+
+    SECTION("a quiet convoy that never saw a shot is clear")
+    {
+        // "never disclosed" arrives as a huge sinceDisclosed: stale by construction,
+        // so the !inCombat leg clears without any special-case sentinel
+        REQUIRE(Traffic::CombatGateAction(false, 1e9f, 0.0f, t) == TCGClear);
+    }
+
+    SECTION("a hot convoy holds the ladder")
+    {
+        // inCombat wins over a stale disclosure: the crew is shooting right now
+        REQUIRE(Traffic::CombatGateAction(true, 1e9f, 0.0f, t) == TCGHold);
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 0.0f, t) == TCGHold);
+        // combat ended but the contact is fresh (10 s < 120 s stale window)
+        REQUIRE(Traffic::CombatGateAction(false, 10.0f, 0.0f, t) == TCGHold);
+        // one tick short of the stale window still holds (119.9 < 120)
+        REQUIRE(Traffic::CombatGateAction(false, 119.9f, 0.0f, t) == TCGHold);
+    }
+
+    SECTION("the stale boundary is inclusive: exactly combatStaleAfter clears")
+    {
+        REQUIRE(Traffic::CombatGateAction(false, 120.0f, 0.0f, t) == TCGClear); // 120 >= 120
+        REQUIRE(Traffic::CombatGateAction(false, 120.1f, 0.0f, t) == TCGClear);
+    }
+
+    SECTION("an ended episode clears even with the hold budget spent")
+    {
+        // the clear leg outranks the exhausted leg, so the caller gets its
+        // budget-reset signal instead of a permanent TCGExhausted
+        REQUIRE(Traffic::CombatGateAction(false, 200.0f, 400.0f, t) == TCGClear); // 200 >= 120 first
+    }
+
+    SECTION("the hold budget is bounded: exactly combatHoldMax is exhausted")
+    {
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 299.9f, t) == TCGHold);      // 299.9 < 300
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 300.0f, t) == TCGExhausted); // 300 >= 300
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 900.0f, t) == TCGExhausted);
+        // still-fresh contact without live combat exhausts on the same budget
+        REQUIRE(Traffic::CombatGateAction(false, 5.0f, 300.0f, t) == TCGExhausted);
+    }
+
+    SECTION("no re-hold: an exhausted gate never falls back to holding")
+    {
+        // the budget is NOT reset on exhaustion, so a second still-hot pass at
+        // the same heldTime keeps the ladder running instead of re-freezing it
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 305.0f, t) == TCGExhausted);
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 305.0f, t) == TCGExhausted);
+        REQUIRE(Traffic::CombatGateAction(false, 1.0f, 305.0f, t) == TCGExhausted);
+    }
+
+    SECTION("a zero hold budget disables the gate outright")
+    {
+        TrafficTuning off = t;
+        off.combatHoldMax = 0.0f;
+        // disabled outranks every other leg: hot, fresh and unspent still clears
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 0.0f, off) == TCGClear);
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 500.0f, off) == TCGClear);
+        off.combatHoldMax = -10.0f; // a hand-edited config cannot revive it either
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 0.0f, off) == TCGClear);
+    }
+
+    SECTION("a zero stale window ends the episode the instant fire stops")
+    {
+        TrafficTuning snappy = t;
+        snappy.combatStaleAfter = 0.0f;
+        REQUIRE(Traffic::CombatGateAction(false, 0.0f, 0.0f, snappy) == TCGClear); // 0 >= 0
+        REQUIRE(Traffic::CombatGateAction(true, 0.0f, 0.0f, snappy) == TCGHold);   // still shooting
+    }
+
+    SECTION("a negative sinceDisclosed is stale, never recent")
+    {
+        // regression: a never-disclosed group's raw Time subtraction
+        // underflows to ~-2.1e6 (TIME_MIN is Time(-INT_MAX)); the world
+        // layer maps it to huge-positive, and the pure gate must ALSO
+        // treat a negative that slips through as stale - the broken
+        // reading froze every quiet patrol from spawn
+        REQUIRE(Traffic::CombatGateAction(false, -2.1e6f, 0.0f, t) == TCGClear);
+        REQUIRE(Traffic::CombatGateAction(false, -0.1f, 0.0f, t) == TCGClear);
+        // live combat still holds regardless of the garbage timestamp
+        REQUIRE(Traffic::CombatGateAction(true, -2.1e6f, 0.0f, t) == TCGHold);
+    }
+}
+
+TEST_CASE("Traffic - convoy bail trigger matrix", "[game][guerrilla]")
+{
+    TrafficTuning t; // bailCombatWindow 60
+
+    SECTION("a dead escort in a recent contact makes the convoy bail")
+    {
+        REQUIRE(Traffic::ConvoyBailTriggered(true, true, 0.0f, t));
+        REQUIRE(Traffic::ConvoyBailTriggered(true, true, 30.0f, t)); // 30 <= 60
+    }
+
+    SECTION("the window boundary is inclusive")
+    {
+        REQUIRE(Traffic::ConvoyBailTriggered(true, true, 60.0f, t)); // 60 <= 60
+    }
+
+    SECTION("a dead escort with a stale contact does not bail")
+    {
+        // just past the window: the escort died long ago, the trip carries on
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, true, 60.1f, t));
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, true, 1e9f, t)); // never disclosed
+    }
+
+    SECTION("a convoy that never had an escort does not bail")
+    {
+        // no escort to lose: escortDead is meaningless without escortExisted
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(false, true, 0.0f, t));
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(false, false, 0.0f, t));
+    }
+
+    SECTION("a living escort does not bail")
+    {
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, false, 0.0f, t));
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, false, 1e9f, t));
+    }
+
+    SECTION("a zero window disables the bail entirely")
+    {
+        TrafficTuning off = t;
+        off.bailCombatWindow = 0.0f;
+        // even the freshest possible contact: 0 is the "off" value, not "instant"
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, true, 0.0f, off));
+    }
+
+    SECTION("a negative sinceDisclosed is not recent")
+    {
+        // regression: a never-disclosed group's raw Time subtraction
+        // underflows negative (TIME_MIN), and -2.1e6 <= 60 would read as
+        // "recent" - a convoy that lost its escort to a crash with no
+        // combat ever must NOT bail
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, true, -2.1e6f, t));
+        REQUIRE_FALSE(Traffic::ConvoyBailTriggered(true, true, -0.1f, t));
+    }
+}
+
+TEST_CASE("Traffic - crew disposal when a bailed vehicle is cleaned up", "[game][guerrilla]")
+{
+    // dead: the seat does not matter, the person is a body either way
+    REQUIRE(Traffic::CrewDisposal(true, true) == TCDBody);
+    REQUIRE(Traffic::CrewDisposal(true, false) == TCDBody);
+    // alive and still seated: the pre-fix bug filed this person as a corpse and
+    // left him riding a stopped hull, so he must be unseated before he flees
+    REQUIRE(Traffic::CrewDisposal(false, true) == TCDDismountFlee);
+    // alive and already on foot: nothing to unseat, just run
+    REQUIRE(Traffic::CrewDisposal(false, false) == TCDFlee);
+}
+
 TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][guerrilla]")
 {
     REQUIRE(Traffic::EventTypeFromName("spawned") == TESpawned);
@@ -1153,6 +1332,8 @@ TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][g
     REQUIRE(Traffic::EventTypeFromName("driverKilled") == TEDriverKilled);
     REQUIRE(Traffic::EventTypeFromName("parked") == TEParked);
     REQUIRE(Traffic::EventTypeFromName("Departed") == TEDeparted);
+    REQUIRE(Traffic::EventTypeFromName("bailed") == TEBailed);
+    REQUIRE(Traffic::EventTypeFromName("BAILED") == TEBailed); // case-insensitive like the others
     REQUIRE(Traffic::EventTypeFromName("bogus") == -1);
     REQUIRE(Traffic::EventTypeFromName(nullptr) == -1);
 
@@ -1164,6 +1345,8 @@ TEST_CASE("Traffic - event/kind name mapping and handler bookkeeping", "[game][g
     REQUIRE(std::string(Traffic::KindName(TKPatrol)) == "patrol");
     REQUIRE(std::string(Traffic::KindName(TKConvoy)) == "convoy");
     REQUIRE(std::string(Traffic::KindName(-1)) == "all");
+    // the bail event was appended last, ahead of the count sentinel only
+    REQUIRE((int)TEBailed == (int)NTrafficEventTypes - 1);
 
     Traffic t;
     t.SetEventHandler(TESpawned, "hSpawned");
@@ -1230,6 +1413,7 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
         t.SetEventHandler(TEDriverKilled, "_this call GM_fnCivKilledEH");
         t.SetEventHandler(TEParked, "gmEvtTrParked = gmEvtTrParked + [_this]");
         t.SetEventHandler(TEDeparted, "gmEvtTrDeparted = gmEvtTrDeparted + [_this]");
+        t.SetEventHandler(TEBailed, "gmEvtTrBailed = gmEvtTrBailed + [_this]");
         // a live row whose hull link is null (no live world in a unit test):
         // must be pruned on load rather than resurrected as a ghost entry
         t.MarkEntryForTest(TKCiv, "TownA", "TownB", 2);
@@ -1255,6 +1439,7 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
     CHECK(Str(loaded.GetEventHandler(TEDriverKilled)) == "_this call GM_fnCivKilledEH");
     CHECK(Str(loaded.GetEventHandler(TEParked)) == "gmEvtTrParked = gmEvtTrParked + [_this]");
     CHECK(Str(loaded.GetEventHandler(TEDeparted)) == "gmEvtTrDeparted = gmEvtTrDeparted + [_this]");
+    CHECK(Str(loaded.GetEventHandler(TEBailed)) == "gmEvtTrBailed = gmEvtTrBailed + [_this]");
     CHECK(Str(loaded.GetEventHandler(TEArrived)).empty());
     // the config was re-read on the second pass
     CHECK(loaded.Tuning().maxCiv == 2);
@@ -1278,6 +1463,8 @@ TEST_CASE("Traffic - handlers and rows survive save/load, dead links are pruned"
         // a pre-park save carries no onParked/onDeparted keys: both load empty
         CHECK(Str(fresh.GetEventHandler(TEParked)).empty());
         CHECK(Str(fresh.GetEventHandler(TEDeparted)).empty());
+        // a pre-bail save carries no onBailed key either: it loads empty, not garbage
+        CHECK(Str(fresh.GetEventHandler(TEBailed)).empty());
     }
 
     // scrub the process-wide state other tests expect to be empty

@@ -87,6 +87,15 @@ struct TrafficTuning
                             // whenever the band is not widened, i.e. daytime at the default view distance - but the
                             // night light bound widens the band at ANY setting, so 1 raises night densities; kept
                             // off for the pre-#53 densities)
+    // convoy discipline under fire.  The combat gate freezes the trip ladder
+    // (stall accrual, arrival/stall endings, re-legs) while a patrol/convoy
+    // group is fighting or freshly disclosed - the native AI halts, dismounts
+    // cargo and fights, and no traffic order may interfere - bounded by the
+    // hold budget so a pathologically hot group cannot leak forever.
+    float combatStaleAfter = 120.0f; // trafficCombatStaleAfter (s): disclosure older than this is stale
+    float combatHoldMax = 300.0f;    // trafficCombatHoldMax (s): per-episode hold budget (0 = gate off)
+    float bailCombatWindow = 60.0f;  // trafficBailCombatWindow (s): escort lost within this of the last
+                                     // disclosure = the truck crew bails (0 = never)
 };
 
 enum TrafficKind
@@ -131,7 +140,29 @@ enum TrafficEventType
     TEDriverKilled, // "driverKilled" - killed-EH EXPRESSION attached to every civ driver
     TEParked,       // "parked"   [veh, kind, destIdx]
     TEDeparted,     // "departed" [veh, kind, destIdx] (destIdx = the NEW destination)
+    TEBailed,       // "bailed"   [veh, kind, destIdx] - escort lost under fire, the truck crew
+                    // abandons the load (the loot moment)
     NTrafficEventTypes
+};
+
+// combat gate verdict for one patrol/convoy entry per pass (convoy
+// discipline under fire).  The world layer accrues the entry's held time on
+// TCGHold, resets it on TCGClear, and lets the ladder resume on TCGExhausted
+// WITHOUT resetting - the budget stays spent until the episode really clears,
+// so an exhausted gate can never flip back to holding.
+enum TrafficCombatGate
+{
+    TCGClear,     // no combat, disclosure stale: the ladder runs, budget resets
+    TCGHold,      // fighting or freshly disclosed: freeze stall accrual, no trip endings, no new orders
+    TCGExhausted, // still hot but the budget ran out: the ladder resumes (bounded escape)
+};
+
+// what DespawnEntry(keepHull) does with one crew member
+enum TrafficCrewDisposal
+{
+    TCDBody,         // dead: filed with the hull, deleted with it
+    TCDFlee,         // living on foot: the fleeing table, which respects life
+    TCDDismountFlee, // living but seated: step out first, then the fleeing table
 };
 
 // Per-pass observations for the pure spawn decision.  The engine path fills
@@ -362,6 +393,20 @@ class Traffic : public SerializeClass
     // (the flee machinery at walking pace) and keep other crews seated
     static TrafficEndAction ArrivedEndAction(bool despawnSafe, int legs, int maxLegs);
     static TrafficEndAction StalledEndAction(bool despawnSafe, int kind);
+    // convoy discipline under fire --------------------------------------------
+    // combat gate for the patrol/convoy trip ladder.  inCombat is
+    // GetCombatModeMinor() >= CMCombat (the exact threshold Car::IsCautious
+    // uses to drop out of convoy-follow); sinceDisclosed is seconds since the
+    // group's last AIGroup::Disclose (never disclosed reads as huge = stale)
+    static TrafficCombatGate CombatGateAction(bool inCombat, float sinceDisclosed, float heldTime,
+                                              const TrafficTuning& tuning);
+    // escort dead/destroyed while the fight is recent: the unescorted truck
+    // crew bails (AbandonEntry panic flavor) instead of driving on
+    static bool ConvoyBailTriggered(bool escortExisted, bool escortDead, float sinceDisclosed,
+                                    const TrafficTuning& tuning);
+    // DespawnEntry(keepHull) crew filing: only the actual dead ride
+    // ReleasedEntry::bodies (which CleanupReleased deletes wholesale)
+    static TrafficCrewDisposal CrewDisposal(bool personDead, bool seated);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
@@ -420,6 +465,8 @@ class Traffic : public SerializeClass
         float stateTime = 0;     // s in the current state (commandeer/park timing)
         float dwellDuration = 0; // s; transient like stateTime, re-rolled on load
         float exposeDefer = 0;   // s a wanted despawn has been perception-blocked; transient, NOT serialized
+        float combatHold = 0;    // s the combat gate has held this episode; transient, NOT serialized
+                                 // (the gate re-derives from the group's serialized disclosure on load)
         RString lingerReason;    // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
         Vector3 lastPos = VZero;
 
@@ -486,10 +533,13 @@ class Traffic : public SerializeClass
     void CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt);
     void DespawnEntry(int index, const char* reason, bool keepHull, AutoArray<TrafficEventRecord>& fired);
     // observed endings (issue #53) -------------------------------------------
-    // observed civ stall: the driver dismounts and walks off (the fleeing
-    // table at walking pace), the hull joins the released set dressing; both
-    // are deleted by the perception-gated cleanups once unobserved
-    void AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired);
+    // observed civ stall: the living crew dismounts and walks off (the
+    // fleeing table at walking pace), the hull joins the released set
+    // dressing; both are deleted by the perception-gated cleanups once
+    // unobserved.  panic is the under-fire flavor (escort lost): the crew
+    // RUNS from the player at full speed, the remains keep the player-caused
+    // memory, and TEBailed marks the loot moment for scripts
+    void AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired, bool panic = false);
     // observed trip end for a crew that stays seated: brake to a stop and
     // hold in TSLingering until DespawnSafe says nobody is watching
     void EnterLinger(TrafficEntry& e, const char* reason);
