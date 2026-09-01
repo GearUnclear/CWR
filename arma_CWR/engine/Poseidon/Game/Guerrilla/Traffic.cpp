@@ -158,6 +158,9 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.exposeMargin = zonesCfg->ReadValue("trafficExposeMargin", t.exposeMargin);
     t.despawnDeferMax = zonesCfg->ReadValue("trafficDespawnDeferMax", t.despawnDeferMax);
     t.scaleCaps = zonesCfg->ReadValue("trafficScaleCaps", t.scaleCaps ? 1.0f : 0.0f) != 0.0f;
+    t.combatStaleAfter = zonesCfg->ReadValue("trafficCombatStaleAfter", t.combatStaleAfter);
+    t.combatHoldMax = zonesCfg->ReadValue("trafficCombatHoldMax", t.combatHoldMax);
+    t.bailCombatWindow = zonesCfg->ReadValue("trafficBailCombatWindow", t.bailCombatWindow);
     // sanity floors: a zero interval would tick every frame, negative caps
     // would read as "nothing ever spawns" (which 0 already says)
     if (t.interval < 0.5f)
@@ -203,6 +206,18 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     if (t.despawnDeferMax < 0)
     {
         t.despawnDeferMax = 0;
+    }
+    if (t.combatStaleAfter < 0)
+    {
+        t.combatStaleAfter = 0;
+    }
+    if (t.combatHoldMax < 0)
+    {
+        t.combatHoldMax = 0;
+    }
+    if (t.bailCombatWindow < 0)
+    {
+        t.bailCombatWindow = 0;
     }
 }
 
@@ -385,6 +400,10 @@ int Traffic::EventTypeFromName(const char* name)
     if (stricmp(name, "departed") == 0)
     {
         return TEDeparted;
+    }
+    if (stricmp(name, "bailed") == 0)
+    {
+        return TEBailed;
     }
     return -1;
 }
@@ -1047,6 +1066,49 @@ TrafficEndAction Traffic::StalledEndAction(bool despawnSafe, int kind)
     return kind == TKCiv ? TEndAbandon : TEndLinger;
 }
 
+TrafficCombatGate Traffic::CombatGateAction(bool inCombat, float sinceDisclosed, float heldTime,
+                                            const TrafficTuning& tuning)
+{
+    if (tuning.combatHoldMax <= 0)
+    {
+        return TCGClear; // gate disabled
+    }
+    // negative = a raw Time underflow slipped past the world layer's
+    // never-disclosed mapping: treat as stale, never as recent
+    if (!inCombat && (sinceDisclosed < 0 || sinceDisclosed >= tuning.combatStaleAfter))
+    {
+        return TCGClear; // the episode is over: nothing hot, nothing recent
+    }
+    if (heldTime >= tuning.combatHoldMax)
+    {
+        // bounded escape: the budget stays spent until the episode clears,
+        // so an exhausted gate never flips back to holding
+        return TCGExhausted;
+    }
+    return TCGHold;
+}
+
+bool Traffic::ConvoyBailTriggered(bool escortExisted, bool escortDead, float sinceDisclosed,
+                                  const TrafficTuning& tuning)
+{
+    if (!escortExisted || !escortDead)
+    {
+        return false;
+    }
+    // a quiet loss (a crash, a hit long forgotten) is not a rout; negative
+    // sinceDisclosed (a raw Time underflow for never-disclosed) is not recent
+    return tuning.bailCombatWindow > 0 && sinceDisclosed >= 0 && sinceDisclosed <= tuning.bailCombatWindow;
+}
+
+TrafficCrewDisposal Traffic::CrewDisposal(bool personDead, bool seated)
+{
+    if (personDead)
+    {
+        return TCDBody; // only the actual dead ride the bodies table
+    }
+    return seated ? TCDDismountFlee : TCDFlee;
+}
+
 // ---------------------------------------------------------------------------
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
@@ -1289,6 +1351,31 @@ void Traffic::IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int s
         }
     }
     grp->IssueCommand(cmd, drivers);
+    // IssueCommand pulled the addressed drivers (and, via AddUnitWithCargo,
+    // their whole crews) into a command subgroup; a fresh one constructs as
+    // FormWedge + SpeedNormal, so the MainSubgroup settings above never
+    // reach a crew that was split off - every convoy, from its first leg.
+    // Apply them to the subgroup the drivers actually live in, so convoys
+    // really drive SpeedLimited in column (FormationPilot's follow branch
+    // then tails GetFormationPrevious with the don't-overtake clamp).
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        if (!drivers.Get(u))
+        {
+            continue;
+        }
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        AISubgroup* sub = unit ? unit->GetSubgroup() : nullptr;
+        if (!sub || sub == grp->MainSubgroup())
+        {
+            continue; // main already set above
+        }
+        sub->SetSpeedMode((SpeedMode)speedMode);
+        if (column)
+        {
+            sub->SetFormation(AI::FormColumn);
+        }
+    }
     GetNetworkManager().UpdateObject(grp);
     e.dest = dest;
 }
@@ -1497,6 +1584,18 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
                 {
                     SeatOrDelete(CreateCrewman(grp, crewType, escortPos + heading * 4.0f, escort, GIPGunner), escort);
                 }
+                // 1-2 cargo riflemen, so the combat dismount (AIGroup::
+                // Disclose orders unloadInCombat cargo out) has bodies to
+                // fight with; gated on the hull actually having cargo seats
+                int riflemen = escort->GetMaxManCargo();
+                if (riflemen > 2)
+                {
+                    riflemen = 2;
+                }
+                for (int c = 0; c < riflemen; c++)
+                {
+                    SeatOrDelete(CreateCrewman(grp, crewType, escortPos + heading * 4.0f, escort, GIPCargo), escort);
+                }
                 if (!escort->Driver())
                 {
                     ::DeleteVehicle(escort);
@@ -1601,11 +1700,11 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
     AIGroup* grp = e.group;
     Transport* veh = e.vehicle;
     Transport* escort = e.escort;
-    // a violent end (wreck, murdered crew) is player-caused in practice -
-    // ambient traffic has no other enemies - and its remains get the longer
-    // memory (issue #53 T4); the quiet releases (abandon, script release)
-    // stay ambient set dressing
-    bool violent = strcmp(reason, "destroyed") == 0 || strcmp(reason, "crewDead") == 0;
+    // a violent end (wreck, murdered crew, a bail under fire) is
+    // player-caused in practice - ambient traffic has no other enemies - and
+    // its remains get the longer memory (issue #53 T4); the quiet releases
+    // (abandon, script release) stay ambient set dressing
+    bool violent = strcmp(reason, "destroyed") == 0 || strcmp(reason, "crewDead") == 0 || strcmp(reason, "bailed") == 0;
     if (keepHull)
     {
         // the hull (and whatever is left of the crew) outlives the entry;
@@ -1616,43 +1715,65 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
         r.playerCaused = violent;
         if (grp)
         {
+            // revoke standing re-board orders once, for both hulls - a
+            // crewman dismounted from the ESCORT must not be ordered back
+            // aboard either
+            if (veh)
+            {
+                grp->UnassignVehicle(veh);
+            }
+            if (escort)
+            {
+                grp->UnassignVehicle(escort);
+            }
             for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
             {
                 AIUnit* unit = grp->UnitWithID(u + 1);
-                if (unit && unit->GetPerson())
+                if (!unit || !unit->GetPerson())
                 {
-                    Person* person = unit->GetPerson();
-                    if (!person->IsDammageDestroyed() && !unit->GetVehicleIn())
-                    {
-                        // a LIVING on-foot person (a park-state driver whose
-                        // car was destroyed under him) must not be filed as a
-                        // corpse - ReleasedEntry::bodies is deleted wholesale.
-                        // Hand him to the fleeing table, which respects life,
-                        // with a walk away from the (likely burning) hull
-                        unit->OrderGetIn(false);
-                        unit->AllowGetIn(false);
-                        if (veh)
-                        {
-                            grp->UnassignVehicle(veh); // revoke a standing TSDeparting re-board
-                            Vector3 away = person->Position() - veh->Position();
-                            away[1] = 0;
-                            if (away.SquareSize() < 1e-2f)
-                            {
-                                away = -veh->Direction();
-                                away[1] = 0;
-                            }
-                            IssueSoloMove(grp, unit,
-                                          person->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
-                        }
-                        FleeingDriver fd;
-                        fd.person = person;
-                        fd.group = grp;
-                        fd.age = 0;
-                        _fleeing.Add(fd);
-                        continue;
-                    }
-                    r.bodies.Add(person);
+                    continue;
                 }
+                Person* person = unit->GetPerson();
+                Transport* seat = unit->GetVehicleIn();
+                TrafficCrewDisposal d = CrewDisposal(person->IsDammageDestroyed(), seat != nullptr);
+                if (d == TCDBody)
+                {
+                    r.bodies.Add(person);
+                    continue;
+                }
+                // a LIVING person (a park-state driver on foot, or a seated
+                // survivor of the truck's end) must not be filed as a
+                // corpse - ReleasedEntry::bodies is deleted wholesale.  Hand
+                // him to the fleeing table, which respects life, with a walk
+                // away from the (likely burning) hull; a seated survivor
+                // steps out first
+                unit->OrderGetIn(false);
+                unit->AllowGetIn(false);
+                if (d == TCDDismountFlee)
+                {
+                    unit->DoGetOut(seat, false);
+                }
+                Transport* hull = seat ? seat : veh;
+                if (hull)
+                {
+                    Vector3 away = person->Position() - hull->Position();
+                    away[1] = 0;
+                    if (away.SquareSize() < 1e-2f)
+                    {
+                        away = -hull->Direction();
+                        away[1] = 0;
+                    }
+                    if (away.SquareSize() < 1e-2f)
+                    {
+                        away = VForward;
+                    }
+                    IssueSoloMove(grp, unit, person->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
+                }
+                FleeingDriver fd;
+                fd.person = person;
+                fd.group = grp;
+                fd.age = 0;
+                _fleeing.Add(fd);
             }
         }
         _released.Add(r);
@@ -1701,6 +1822,23 @@ static bool DriverAlive(const Traffic* /*self*/, Transport* veh)
     return d && !d->IsDammageDestroyed();
 }
 
+// seconds since the group's last AIGroup::Disclose.  Never disclosed is
+// TIME_MIN, where raw Time subtraction underflows to a large NEGATIVE float
+// (and asserts in debug builds) - map it to huge-positive = stale instead
+static float SinceDisclosed(const AIGroup* grp)
+{
+    if (!grp)
+    {
+        return 1e9f;
+    }
+    Foundation::Time disc = grp->GetDisclosed();
+    if (disc == TIME_MIN)
+    {
+        return 1e9f;
+    }
+    return Glob.time - disc;
+}
+
 // brake the whole crew to a stop: Stop to every unit (the doStop idiom, like
 // VehStop silent) + SpeedLimited; shared by the park roll, the commandeer
 // trigger and the linger transition
@@ -1746,6 +1884,53 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
         {
             DespawnEntry(i, "destroyed", true, fired); // wreck stays until the player is far
             continue;
+        }
+        // escort watch: the truck checks above have no eyes on the escort
+        // hull.  An escort lost while the fight is still fresh breaks the
+        // crew - they bail and the load is the player's for the taking (the
+        // loot moment).  A quiet loss (a crash, a hit long forgotten) just
+        // releases the escort hull and the truck drives on unescorted; its
+        // dead crew stays with the shared group and is filed when the entry
+        // itself ends.
+        if (e.kind == TKConvoy)
+        {
+            Transport* esc = e.escort;
+            bool escortDead = esc && (esc->IsDammageDestroyed() || !DriverAlive(this, esc));
+            if (ConvoyBailTriggered(esc != nullptr, escortDead, SinceDisclosed(e.group), _tuning))
+            {
+                AbandonEntry(i, "bailed", fired, true);
+                continue;
+            }
+            if (escortDead)
+            {
+                ReleasedEntry r;
+                r.vehicle = esc;
+                r.playerCaused = true; // a dead escort is a violent end
+                // file the escort's own dead, still seated in it, with its
+                // hull so the cleanup deletes them together (and the
+                // boarded probe is not fooled by corpses); crew that died
+                // outside stays with the group and is filed when the entry
+                // itself ends
+                Person* seats[3] = {esc->Driver(), esc->Gunner(), esc->Commander()};
+                for (int s = 0; s < 3; s++)
+                {
+                    if (seats[s] && seats[s]->IsDammageDestroyed())
+                    {
+                        r.bodies.Add(seats[s]);
+                    }
+                }
+                const ManCargo& cargo = esc->GetManCargo();
+                for (int m = 0; m < cargo.Size(); m++)
+                {
+                    Person* p = cargo[m];
+                    if (p && p->IsDammageDestroyed())
+                    {
+                        r.bodies.Add(p);
+                    }
+                }
+                _released.Add(r);
+                e.escort = nullptr;
+            }
         }
         if (e.state == TSStopping || e.state == TSExiting)
         {
@@ -1813,6 +1998,36 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                 DespawnEntry(i, why, false, fired);
             }
             continue; // no stall accrual, no arrival re-trigger for a held car
+        }
+
+        // combat gate (convoy discipline under fire): while a patrol/convoy
+        // group is fighting or was disclosed moments ago, the native AI owns
+        // the vehicles - it halts, dismounts unloadInCombat cargo and fights,
+        // and going cautious breaks convoy-follow into combat formation - so
+        // the trip ladder below (stall accrual, arrival/stall endings,
+        // re-legs) must neither issue orders over the fight nor tear it
+        // down.  Bounded: a stale disclosure clears the gate, the hold
+        // budget caps a pathologically hot group, and a dead crew never
+        // reaches here (the destroyed/DriverAlive guards above run every
+        // pass).  The far-despawn and its perception gate above stay live.
+        if (e.kind == TKPatrol || e.kind == TKConvoy)
+        {
+            AIGroup* g = e.group;
+            bool inCombat = g && g->GetCombatModeMinor() >= CMCombat;
+            TrafficCombatGate gate = CombatGateAction(inCombat, SinceDisclosed(g), e.combatHold, _tuning);
+            if (gate == TCGHold)
+            {
+                e.combatHold += _tuning.interval; // interval-quantized, like stallTime
+                e.lastPos = veh->Position();      // keep the stall baseline honest for the release
+                continue;
+            }
+            if (gate == TCGClear)
+            {
+                e.combatHold = 0; // a fresh budget for the next episode
+            }
+            // TCGExhausted: still hot but the budget ran out - fall through,
+            // the normal ladder is the bounded escape (a linger order landing
+            // mid-fight beats a leaked entry)
         }
 
         // stall bookkeeping (never teleports)
@@ -2002,63 +2217,144 @@ void Traffic::EnterLinger(TrafficEntry& e, const char* reason)
     e.lingerReason = reason;
 }
 
-// observed civ stall (issue #53): the driver dismounts and walks off - the
-// commandeer bail at walking pace - the hull joins the released set
+// observed civ stall (issue #53): the living crew dismounts and walks off -
+// the commandeer bail at walking pace - the hull joins the released set
 // dressing, and the perception-gated cleanups delete both once unobserved.
+// panic is the under-fire flavor (escort lost): everyone RUNS from the
+// player at full speed, the remains keep the player-caused memory, and
+// TEBailed marks the loot moment for scripts.
 // NOT DespawnEntry(keepHull): that would file the living driver as a corpse.
-void Traffic::AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired)
+void Traffic::AbandonEntry(int index, const char* reason, AutoArray<TrafficEventRecord>& fired, bool panic)
 {
+    if (index < 0 || index >= _entries.Size())
+    {
+        return;
+    }
     TrafficEntry e = _entries[index];
     Transport* veh = e.vehicle;
     AIGroup* grp = e.group;
     Person* driver = e.driver;
     if (!veh || !grp || !driver || driver->IsDammageDestroyed())
     {
-        // nobody left to walk off: the plain released teardown
+        // nobody left to walk off: the plain released teardown (which hands
+        // any other living crew to the fleeing table itself).  The loot
+        // moment still fires first - a bail with the driver already dead is
+        // still a bail, and "bailed" rides DespawnEntry's violent set
+        if (panic && veh)
+        {
+            TrafficEventRecord bail;
+            bail.type = TEBailed;
+            bail.kind = e.kind;
+            bail.originIndex = e.originIndex;
+            bail.destIndex = e.destIndex;
+            bail.vehicle = veh;
+            bail.driver = driver;
+            fired.Add(bail);
+        }
         DespawnEntry(index, reason, true, fired);
         return;
     }
-    AIUnit* unit = driver->Brain();
+    Transport* escort = e.escort;
     grp->UnassignVehicle(veh);
-    if (unit)
+    if (escort)
     {
+        grp->UnassignVehicle(escort);
+    }
+    // the point everyone flees FROM: the player when he caused this, else
+    // the (likely burning) hull itself
+    Vector3 threat = veh->Position();
+    if (panic && GWorld)
+    {
+        Person* player = GWorld->GetRealPlayer();
+        if (player && !player->IsDammageDestroyed())
+        {
+            threat = player->Position();
+        }
+    }
+    float fleeDist = panic ? _tuning.fleeDist : 2.0f * ParkWanderRadius;
+    ReleasedEntry r;
+    r.vehicle = veh;
+    r.group = grp;
+    r.playerCaused = panic;
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        if (!unit || !unit->GetPerson())
+        {
+            continue;
+        }
+        Person* person = unit->GetPerson();
+        Transport* seat = unit->GetVehicleIn();
+        TrafficCrewDisposal d = CrewDisposal(person->IsDammageDestroyed(), seat != nullptr);
+        if (d == TCDBody)
+        {
+            r.bodies.Add(person); // deleted with the hull once unobserved
+            continue;
+        }
         unit->OrderGetIn(false);
         unit->AllowGetIn(false); // he leaves the traffic system for good
-        if (veh->Driver() == driver || unit->GetVehicleIn() == veh)
+        if (d == TCDDismountFlee)
         {
-            unit->DoGetOut(veh, false);
+            unit->DoGetOut(seat, false);
         }
-        // a mild walk-off past the front of the car, ~2x wander radius; the
-        // seated driver has no offset from the hull, so walk along -direction
-        Vector3 away = driver->Position() - veh->Position();
+        // a walk-off past the car (or a sprint from the player), with the
+        // seated crewman's no-offset fallback along his OWN hull's -direction
+        Transport* hull = seat ? seat : veh;
+        Vector3 away = person->Position() - threat;
         away[1] = 0;
         if (away.SquareSize() < 1e-2f)
         {
-            away = -veh->Direction();
+            away = -hull->Direction();
             away[1] = 0;
         }
         if (away.SquareSize() < 1e-2f)
         {
             away = VForward;
         }
-        IssueSoloMove(grp, unit, veh->Position() + away.Normalized() * (2.0f * ParkWanderRadius));
+        IssueSoloMove(grp, unit, person->Position() + away.Normalized() * fleeDist);
+        if (panic)
+        {
+            // the commandeer sprint: the solo Move pulled the unit into a
+            // command subgroup, and a fresh one constructs as SpeedNormal
+            AISubgroup* sub = unit->GetSubgroup();
+            if (sub)
+            {
+                sub->SetSpeedMode(SpeedFull);
+            }
+        }
+        FleeingDriver fd;
+        fd.person = person;
+        fd.group = grp;
+        fd.age = 0;
+        _fleeing.Add(fd);
     }
-    grp->SetCombatModeMajor(CMCareless);
+    grp->SetCombatModeMajor(CMCareless); // run, don't fight
     if (grp->MainSubgroup())
     {
-        grp->MainSubgroup()->SetSpeedMode(SpeedLimited); // walk, not the commandeer sprint
+        grp->MainSubgroup()->SetSpeedMode(panic ? SpeedFull : SpeedLimited);
     }
     GetNetworkManager().UpdateObject(grp);
 
-    FleeingDriver fd;
-    fd.person = driver;
-    fd.group = grp;
-    fd.age = 0;
-    _fleeing.Add(fd);
-    ReleasedEntry r;
-    r.vehicle = veh;
     _released.Add(r);
+    if (escort)
+    {
+        ReleasedEntry r2;
+        r2.vehicle = escort;
+        r2.playerCaused = panic;
+        _released.Add(r2);
+    }
 
+    if (panic)
+    {
+        TrafficEventRecord bail;
+        bail.type = TEBailed;
+        bail.kind = e.kind;
+        bail.originIndex = e.originIndex;
+        bail.destIndex = e.destIndex;
+        bail.vehicle = veh;
+        bail.driver = driver;
+        fired.Add(bail);
+    }
     TrafficEventRecord ev;
     ev.type = TEDespawned;
     ev.kind = e.kind;
@@ -2067,7 +2363,14 @@ void Traffic::AbandonEntry(int index, const char* reason, AutoArray<TrafficEvent
     ev.reason = reason;
     fired.Add(ev);
     _entries.Delete(index);
-    LOG_INFO(Core, "Traffic: stalled civ car abandoned");
+    if (panic)
+    {
+        LOG_INFO(Core, "Traffic: convoy crew bailed");
+    }
+    else
+    {
+        LOG_INFO(Core, "Traffic: stalled civ car abandoned");
+    }
 }
 
 // one entry in TSParking / TSDwelling / TSDeparting: brake wait -> dismount
@@ -2526,7 +2829,24 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
         }
         if (!r.boarded && !veh->IsDammageDestroyed())
         {
-            if (veh->Driver() || veh->Gunner() || veh->Commander() || veh->GetManCargoSize() > 0)
+            // a LIVING occupant only: a crewDead hull keeps its corpses
+            // seated, and counting them as "boarded" would drop the row and
+            // leak hull + bodies forever
+            Person* d = veh->Driver();
+            Person* g = veh->Gunner();
+            Person* c = veh->Commander();
+            bool living =
+                (d && !d->IsDammageDestroyed()) || (g && !g->IsDammageDestroyed()) || (c && !c->IsDammageDestroyed());
+            if (!living)
+            {
+                const ManCargo& cargo = veh->GetManCargo();
+                for (int m = 0; m < cargo.Size() && !living; m++)
+                {
+                    Person* p = cargo[m];
+                    living = p && !p->IsDammageDestroyed();
+                }
+            }
+            if (living)
             {
                 r.boarded = true;
             }
@@ -3028,6 +3348,7 @@ void Traffic::DispatchEvents(const AutoArray<TrafficEventRecord>& fired)
             case TEArrived:
             case TEParked:
             case TEDeparted:
+            case TEBailed:
                 pars.Resize(3);
                 pars[0] = GameValueExt(ev.vehicle.GetLink());
                 pars[1] = GameStringType(KindName(ev.kind));
@@ -3167,6 +3488,8 @@ LSError Traffic::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onDriverKilled", _handlers[TEDriverKilled], 1, RString()))
     PARAM_CHECK(ar.Serialize("onParked", _handlers[TEParked], 1, RString()))
     PARAM_CHECK(ar.Serialize("onDeparted", _handlers[TEDeparted], 1, RString()))
+    // absent from pre-convoy-discipline saves: no handler
+    PARAM_CHECK(ar.Serialize("onBailed", _handlers[TEBailed], 1, RString()))
     PARAM_CHECK(ar.Serialize("Entries", _pending, 1))
     PARAM_CHECK(ar.Serialize("Released", _released, 1))
     PARAM_CHECK(ar.Serialize("Fleeing", _fleeing, 1))
