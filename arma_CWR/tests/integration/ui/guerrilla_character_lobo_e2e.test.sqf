@@ -22,8 +22,9 @@
 //  proves the cap is gone.
 //
 //  PRECONDITIONS (same as guerrilla_new_game_e2e, see the .toml): templates
-//  installed via install-missions.ps1 -IncludeWorld Sinai,Lebanon80; the
-//  @lobofixup patched pbos generated once.
+//  installed via install-missions.ps1 (no -IncludeWorld since issue #54 C4);
+//  the @lobofixup patched pbos generated once, and @lobofixup mounted after
+//  @LoBo since it carries the @LoBo faction roster (issue #54 A4).
 // ============================================================================
 
 triSetLanguage "English"
