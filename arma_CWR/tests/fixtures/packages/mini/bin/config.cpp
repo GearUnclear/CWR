@@ -28,6 +28,15 @@ class CfgPatches
 class CfgWeapons
 {
     class Default {};
+    // The vanilla names the GPL-clean faction pack references, so the SAME pack
+    // config mounts on this mini package and on the real Classic 1.99 package
+    // (where these are the stock M16 and its magazine).
+    class M16 : Default
+    {
+        scope = public;
+        displayName = "M16";
+        magazines[] = {"M16"};
+    };
     class UDRifle : Default
     {
         scope = public;
@@ -48,6 +57,12 @@ class CfgWeapons
 class CfgMagazines
 {
     class Default {};
+    class M16 : Default
+    {
+        scope = public;
+        displayName = "M16 Magazine";
+        count = 30;
+    };
     class UDRifleMag : Default
     {
         scope = public;
@@ -116,6 +131,15 @@ class CfgVehicles
     class Car : LandVehicle
     {
         scope = private;
+        model = "\mini\car.p3d";
+    };
+
+    // the vanilla hull the faction pack names (portable to Classic 1.99)
+    class Jeep : Car
+    {
+        scope = public;
+        side = 1;
+        displayName = "Jeep";
         model = "\mini\car.p3d";
     };
 

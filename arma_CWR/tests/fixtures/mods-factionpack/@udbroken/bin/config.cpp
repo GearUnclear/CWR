@@ -37,9 +37,8 @@ class CfgVehicles
         scope = public;
         side = 1;
         displayName = "UD Broken Leader";
-        model = "\mini\man.p3d";
-        weapons[] = {"UDRifle"};
-        magazines[] = {"UDRifleMag"};
+        weapons[] = {"M16"};
+        magazines[] = {"M16"};
     };
 };
 

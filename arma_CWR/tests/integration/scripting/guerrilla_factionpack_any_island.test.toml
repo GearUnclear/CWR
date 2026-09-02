@@ -1,0 +1,11 @@
+# The synthetic faction pack on Abel (issue #54 E2). The pack is a repo
+# fixture mounted through --mods-dir ".." (relative to the game CWD, the
+# data dir), so this needs only the Classic package: no @LoBo, no patched
+# pbos. Needs the shared core + faction library installed
+# (guerrilla-mode/install-missions.ps1), like every Guerrilla test.
+mission = "tests/integration/missions/guerrilla_factionpack.abel"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-factionpack/@udfaction"]

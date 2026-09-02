@@ -41,9 +41,8 @@ class CfgVehicles
         scope = public;
         side = 1;
         displayName = "UD Fighter";
-        model = "\mini\man.p3d";
-        weapons[] = {"UDRifle"};
-        magazines[] = {"UDRifleMag"};
+        weapons[] = {"M16"};
+        magazines[] = {"M16"};
     };
 
     class UDOfficer : SoldierWB
@@ -51,9 +50,8 @@ class CfgVehicles
         scope = public;
         side = 1;
         displayName = "UD Fighter Leader";
-        model = "\mini\man.p3d";
-        weapons[] = {"UDRifle"};
-        magazines[] = {"UDRifleMag"};
+        weapons[] = {"M16"};
+        magazines[] = {"M16"};
     };
 
     class UDCivFighter : SoldierWB
@@ -61,9 +59,8 @@ class CfgVehicles
         scope = public;
         side = 1;
         displayName = "UD Fighter (civilian clothes)";
-        model = "\mini\man.p3d";
-        weapons[] = {"UDRifle"};
-        magazines[] = {"UDRifleMag"};
+        weapons[] = {"M16"};
+        magazines[] = {"M16"};
     };
 };
 
@@ -79,10 +76,10 @@ class CfgGuerrillaFactions
         playerClassWarrior = "UDSoldier";
         playerClassCiv = "UDCivFighter";
         officer = "UDOfficer";
-        vehicles[] = {"UDCar"};
+        vehicles[] = {"Jeep"};
         vehicleThresholds[] = {3};
-        civVehicles[] = {"UDCar"};
-        baseWeapon = "UDRifle";
-        baseMagazine = "UDRifleMag";
+        civVehicles[] = {"Jeep"};
+        baseWeapon = "M16";
+        baseMagazine = "M16";
     };
 };
