@@ -196,8 +196,8 @@ goto "hqMarkDone"
 ;  menu mount / unmount
 ; ============================================================================
 #addHq
-? not gmHqEstablished : gmMktHqAct = aP addAction ["Establish headquarters here", "scripts/market_action.sqs"]
-? gmHqEstablished : gmMktHqAct = aP addAction [format ["Move headquarters here (%1 R)", GM_MKT_HQ_COST], "scripts/market_action.sqs"]
+? not gmHqEstablished : gmMktHqAct = aP addAction ["Establish headquarters here", "\gmcore\scripts\market_action.sqs"]
+? gmHqEstablished : gmMktHqAct = aP addAction [format ["Move headquarters here (%1 R)", GM_MKT_HQ_COST], "\gmcore\scripts\market_action.sqs"]
 gmMktHqActive = true
 gmMktHqDirty = false
 goto "hqDone"
@@ -213,8 +213,8 @@ goto "hqDel"
 gmMktCacheActs = [-1, -1]
 gmMktCachePri = gmMktPri
 gmMktCacheSec = gmMktSec
-? gmMktPri != "" : gmMktCacheActs set [0, aP addAction [format ["Stash %1 in cache", gmMktPri], "scripts/market_action.sqs"]]
-? gmMktSec != "" : gmMktCacheActs set [1, aP addAction [format ["Stash %1 in cache", gmMktSec], "scripts/market_action.sqs"]]
+? gmMktPri != "" : gmMktCacheActs set [0, aP addAction [format ["Stash %1 in cache", gmMktPri], "\gmcore\scripts\market_action.sqs"]]
+? gmMktSec != "" : gmMktCacheActs set [1, aP addAction [format ["Stash %1 in cache", gmMktSec], "\gmcore\scripts\market_action.sqs"]]
 gmMktCacheActive = true
 goto "cacheDone"
 
@@ -228,8 +228,8 @@ goto "cacheDel"
 #addGar
 gmMktGarVeh = gmMktVeh
 gmMktGarLocked = gmMktVehLocked
-? not gmMktGarLocked : gmMktGarAct = aP addAction [format ["Lock %1 in garage", typeOf gmMktGarVeh], "scripts/market_action.sqs"]
-? gmMktGarLocked : gmMktGarAct = aP addAction [format ["Unlock %1", typeOf gmMktGarVeh], "scripts/market_action.sqs"]
+? not gmMktGarLocked : gmMktGarAct = aP addAction [format ["Lock %1 in garage", typeOf gmMktGarVeh], "\gmcore\scripts\market_action.sqs"]
+? gmMktGarLocked : gmMktGarAct = aP addAction [format ["Unlock %1", typeOf gmMktGarVeh], "\gmcore\scripts\market_action.sqs"]
 gmMktGarActive = true
 goto "garDone"
 
@@ -250,14 +250,14 @@ gmMktI = 0
 #addBuyLoop
 ? (gmMktI >= (count gmMktStock)) or (gmMktI >= GM_MKT_MAX_STOCK) : goto "addBuyDeliv"
 gmMktRow = gmMktStock select gmMktI
-gmMktA = aP addAction [format ["Buy %1 (%2 R)", gmMktRow select 1, gmMktRow select 2], "scripts/market_action.sqs"]
+gmMktA = aP addAction [format ["Buy %1 (%2 R)", gmMktRow select 1, gmMktRow select 2], "\gmcore\scripts\market_action.sqs"]
 gmMktBuyActs = gmMktBuyActs + [gmMktA]
 gmMktI = gmMktI + 1
 goto "addBuyLoop"
 #addBuyDeliv
 gmMktDelivAct = -1
-? gmHqEstablished and gmMktDelivHq : gmMktDelivAct = aP addAction ["Delivery: to HQ (switch to here)", "scripts/market_action.sqs"]
-? gmHqEstablished and (not gmMktDelivHq) : gmMktDelivAct = aP addAction ["Delivery: here (switch to HQ)", "scripts/market_action.sqs"]
+? gmHqEstablished and gmMktDelivHq : gmMktDelivAct = aP addAction ["Delivery: to HQ (switch to here)", "\gmcore\scripts\market_action.sqs"]
+? gmHqEstablished and (not gmMktDelivHq) : gmMktDelivAct = aP addAction ["Delivery: here (switch to HQ)", "\gmcore\scripts\market_action.sqs"]
 gmMktBuyActive = true
 gmMktBuyDirty = false
 goto "buyDone"

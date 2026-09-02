@@ -1,7 +1,7 @@
 // ============================================================================
 //  Market.Abel reference mission - the money loop end to end, on the
-//  campaign's REAL policy script (scripts/market.sqs, byte-identical core
-//  copy) driven by the native GuerrillaBase + Market. Proves, on full CWA
+//  campaign's REAL policy script (\gmcore\scripts\market.sqs out of the ONE
+//  shared core) driven by the native GuerrillaBase + Market. Proves, on full CWA
 //  data (Abel):
 //      1. the mission boots its own bootstrap (MKT_BOOTED), the shared-core
 //         subset handshakes (GM_LIB_READY) and market.sqs is running
@@ -59,7 +59,7 @@ mkRow = mkStock select 0
 mkPrice = mkRow select 2
 triAssertGt [mkPrice, 0]
 mkR0 = gmResources
-[aP, aP, gmMktBuyActs select 0] exec "scripts/market_action.sqs"
+[aP, aP, gmMktBuyActs select 0] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmResources == (mkR0 - mkPrice) }
 // the holder is dropped at the player's feet; createVehicle's free-position
 // nudge can shove it a few metres in a built-up town, so look a bit wider
@@ -71,7 +71,7 @@ triAssert [(mkRow select 0) in (weaponCargo (mkHolders select 0))]
 [] exec "act_tp_town.sqs"
 triSimUntil { gmHqCanEstablish (getPos aP) }
 triSimUntil { gmMktHqActive }
-[aP, aP, gmMktHqAct] exec "scripts/market_action.sqs"
+[aP, aP, gmMktHqAct] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmHqEstablished }
 triAssertEq [gmHqMoveCount, 0]
 triAssertEq [((gmZone (gmZoneIndex gmHqZone)) select 1), "CITY"]
@@ -85,7 +85,7 @@ triAssert [mkWpn != ""]
 aP setPos [(gmHqCachePos select 0) + 1, (gmHqCachePos select 1) + 1, 0]
 triSimUntil { gmMktCacheActive }
 triAssertGe [(gmMktCacheActs select 0), 0]
-[aP, aP, gmMktCacheActs select 0] exec "scripts/market_action.sqs"
+[aP, aP, gmMktCacheActs select 0] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { not (aP hasWeapon mkWpn) }
 triAssert [mkWpn in (weaponCargo gmHqCache)]
 gmHqCache removeWeaponCargo mkWpn
@@ -99,12 +99,12 @@ triAssert [not (isNull gmHqCache)]
 [] exec "act_tp_arms.sqs"
 triSimUntil { (count gmMktBuyActs) > 0 }
 triAssertGe [gmMktDelivAct, 0]
-[aP, aP, gmMktDelivAct] exec "scripts/market_action.sqs"
+[aP, aP, gmMktDelivAct] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmMktDelivHq and gmMktBuyActive and (not gmMktBuyDirty) }
 mkCargo0 = count (weaponCargo gmHqCache)
 mkRow = (gmDealerStock "WEAPON") select 1
 mkR0 = gmResources
-[aP, aP, gmMktBuyActs select 1] exec "scripts/market_action.sqs"
+[aP, aP, gmMktBuyActs select 1] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmResources == (mkR0 - (mkRow select 2)) }
 triAssertGe [(count (weaponCargo gmHqCache)), mkCargo0 + 1]
 
@@ -113,7 +113,7 @@ triSimUntil { ((count gmMktBuyActs) > 0) and (gmMktDealerKind == "VEHICLE") }
 triAssert [gmMktDelivHq]
 mkRow = (gmDealerStock "VEHICLE") select 0
 mkR0 = gmResources
-[aP, aP, gmMktBuyActs select 0] exec "scripts/market_action.sqs"
+[aP, aP, gmMktBuyActs select 0] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmResources == (mkR0 - (mkRow select 2)) }
 triSimUntil { gmGarageCount == 1 }
 mkVeh = gmGarageVehicle 0
@@ -131,7 +131,7 @@ triAssert [locked mkVeh]
 [] exec "act_tp_camp.sqs"
 triSimUntil { gmMktHqActive and (gmHqCanEstablish (getPos aP)) }
 mkR0 = gmResources
-[aP, aP, gmMktHqAct] exec "scripts/market_action.sqs"
+[aP, aP, gmMktHqAct] exec "\gmcore\scripts\market_action.sqs"
 triSimUntil { gmHqMoveCount == 1 }
 triAssertEq [gmResources, mkR0 - (gmMarketValue "hqMoveCost")]
 triAssertEq [gmHqZone, "Camp"]

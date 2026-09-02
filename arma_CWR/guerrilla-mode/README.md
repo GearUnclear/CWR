@@ -58,11 +58,12 @@ consuming manager (the pattern is documented in `init.sqs` and
 ARCHITECTURE.md §A.4).
 
 ### Mission layout
+
+The script core exists ONCE, in `core/`. A mission template is data plus a
+two-line bootstrap; no template carries a `scripts/` directory.
+
 ```
-mission/Guerrilla.Demo/
-  mission.sqm         one resistance player (SoldierGB) at the Camp
-  description.ext     THE per-island data file: CfgGuerrillaZones (tuning +
-                      zone seed + seedCities=1) + CfgGuerrillaFactions
+core/                 THE shared script core (installed to <GameDir>\gmcore)
   init.sqs            THIN bootstrap: script-state seed, zone markers,
                       native event-handler registration, exec managers
   scripts/
@@ -80,13 +81,28 @@ mission/Guerrilla.Demo/
                       GuerrillaBase + Market own the facts (CfgGuerrillaMarket
                       in description.ext = the dealer stock)
     companions.sqs    companion XP -> rank/skill + permadeath
+    civilians.sqs     town population cache + kill queue + panic FSM
+    shakedown.sqs     occupier street theatre + resentment ticker
+
+mission/Guerrilla.Demo/
+  mission.sqm         one resistance player (SoldierGB) at the Camp
+  description.ext     THE per-island data file: CfgGuerrillaZones (tuning +
+                      zone seed + seedCities=1) + CfgGuerrillaFactions
+  init.sqs            TWO LINES: a comment + [] exec "\gmcore\init.sqs"
 ```
+
+The leading backslash is load-bearing: `OpenScript` strips it and resolves the
+rest against the game data root (pbo banks first, then a loose file), so the
+mission reaches `<GameDir>\gmcore` instead of its own folder. Core scripts
+name their siblings the same way, `"\gmcore\scripts\<x>.sqs"`, including the
+`addAction` dispatch paths. Mission-local scripts keep relative paths. See
+ARCHITECTURE.md A.6.
 
 Reference slices next to the templates: `Qrf.Abel` (alert -> QRF),
 `Undercover.Abel` (disguise) and `Market.Abel` (HQ / cache / garage /
 dealers, a 50000 R treasury and teleport debug actions) - each runs its own
-bootstrap over a byte-identical subset of `scripts/`, and each has a direct
-main-menu button once installed.
+bootstrap that execs the ONE core policy script it demonstrates, and each has
+a direct main-menu button once installed.
 
 **Coordinate order note:** zone `position[]` in `description.ext` is authored
 in **getPos order `[easting, northing, elevation]`** — the engine documents
@@ -124,7 +140,9 @@ see the Tests section for why the Demo-world Guerrilla tests don't run on it yet
 **Unpacked (dev / testing — no packing needed).** The engine and the Trident
 harness both load a mission straight from its folder. Copy
 `guerrilla-mode/mission/Guerrilla.Demo` into your user `Missions/` directory
-(or point the game's `--test-mission` at it) and launch it.
+(or point the game's `--test-mission` at it) and launch it. It needs the
+shared core beside it: `guerrilla-mode/core` copied to `<GameDir>\gmcore`, or
+just run the installer below, which does both.
 
 **Packaging to a `.pbo` (distribution only).** A CWA mission is a directory;
 the `.pbo` is just that directory archived — pack with any standard OFP/CWA
@@ -139,21 +157,23 @@ The GUERRILLA button on the main menu launches the template mission
 (either `Missions\Guerrilla.<island>.pbo` or the unpacked
 `Missions\Guerrilla.<island>\mission.sqm` — `DisplayMain::OnChildDestroyed`,
 `IDD_GUERRILLA_NEW_GAME` case in `UI/OptionsUIApp.cpp`). Install every
-`mission/Guerrilla.*` template there with:
+`mission/*` template there, plus the shared script core at `<GameDir>\gmcore`
+(the installer does the core first, since a template without it boots into a
+mission with no managers):
 
 ```powershell
 guerrilla-mode\install-missions.ps1                 # default D:\Arma_CWA\ARMA Cold War Assault [Classic]
 guerrilla-mode\install-missions.ps1 -GameDir <dir>  # any other install
 ```
 
-Idempotent — re-run it after editing a template.
+Idempotent: re-run it after editing a template **or the core**.
 
 ### Start a Sinai campaign (@LoBo)
 
 [`mission/Guerrilla.Sinai/`](mission/Guerrilla.Sinai/) is the second island
-pack and the **reference for authoring new ones**: same `init.sqs` +
-`scripts/` byte-for-byte (a parity test enforces it), all island/faction
-facts in its `description.ext`. It deliberately flips the sides —
+pack and the **reference for authoring new ones**: the same two-line
+`init.sqs` into the one shared core, all island/faction facts in its
+`description.ext`. It deliberately flips the sides —
 **occupier = IDF (WEST), resistance = Egyptian Frontier Corps (EAST)** — to
 prove nothing in the core assumes who resists (`defaultOccupier="IDF"` /
 `defaultResistance="EgyptFrontier"` cover direct launches with no UI
@@ -170,8 +190,9 @@ selection).
    cycle OCCUPIER/RESISTANCE, OK. You spawn as a lone Frontier Corps
    rifleman at the Camp, with an IDF checkpoint 500 m east.
 
-Authoring a new island pack = copy `Guerrilla.Sinai`, keep `scripts/` +
-`init.sqs` untouched, rewrite `description.ext` (zones + factions +
+Authoring a new island pack = copy `Guerrilla.Sinai`, keep the two-line
+`init.sqs` untouched (do NOT add a `scripts/` directory: the managers come
+from `<GameDir>\gmcore`), rewrite `description.ext` (zones + factions +
 `defaultOccupier`/`defaultResistance`) and `mission.sqm` (player class/side/
 position + the **transitive** `addOns[]` set — a class is only buildable when
 its addon *and the addons of every weapon/magazine it references* are listed;
@@ -247,8 +268,8 @@ classes, or the missions' Gate-Zero class substitution lands. See
 - **Created markers survive a load** (markersMap is saved by
   `World::Serialize` → `AIGlobalSerialize`) — the old on-load marker rebuild
   is correctly gone.
-- `scripts/` is island/faction-agnostic: grep for classnames / side-string
-  literals returns only comments.
+- `core/scripts/` is island/faction-agnostic: grep for classnames /
+  side-string literals returns only comments.
 
 **Still needs a human at the controls (the money moment):** boot
 `Guerrilla.Demo`, walk to the Outpost, clear the ~8-man garrison, watch the

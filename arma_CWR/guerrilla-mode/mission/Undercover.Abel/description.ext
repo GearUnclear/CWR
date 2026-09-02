@@ -4,10 +4,10 @@
 //
 // NOT a full Guerrilla.*/Showcase.* shared-core mission: its own bootstrap
 // (init.sqs + hud/patrol/act_*.sqs) starts ONLY the disguise layer, but the
-// cover policy it runs is the campaign's real scripts/undercover.sqs (+ its
-// scripts/lib.sqs helpers), byte-identical to the shared core and pinned by
-// test_mission_script_core.cpp - so the undercover system is the only moving
-// part on display and never a drifted re-implementation.
+// cover policy it runs is the campaign's real \gmcore\scripts\undercover.sqs
+// (+ its lib.sqs helpers) straight out of the ONE shared core (issue #54 B1,
+// pinned by test_mission_script_core.cpp) - so the undercover system is the
+// only moving part on display and never a drifted re-implementation.
 // install-missions.ps1 installs it like the other templates, and
 // once installed it is launchable straight from the main menu's UNDERCOVER
 // button (kReferenceMissions, UI/OptionsUIApp.cpp) or via

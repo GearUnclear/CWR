@@ -4,8 +4,8 @@
 //  Fourth of the kReferenceMissions direct launches (UI/OptionsUIApp.cpp),
 //  driving the money-loop slice: Market.Abel on the Houdan plain. Like
 //  Qrf.Abel it has its own bootstrap (MKT_BOOTED) and runs the campaign's
-//  REAL scripts/market.sqs + scripts/lib.sqs (byte-identical core subset,
-//  pinned by test_mission_script_core.cpp), so the post-launch probes also
+//  REAL \gmcore\scripts\market.sqs + \gmcore\scripts\lib.sqs (the ONE shared
+//  core, pinned by test_mission_script_core.cpp), so the post-launch probes also
 //  check that the shared-core handshake, the market manager's own state and
 //  the native market came up.
 //

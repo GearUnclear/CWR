@@ -87,9 +87,9 @@ goto "loop"
 
 ; ---- mount the Camp menu ------------------------------------------------------
 #addMenu
-gmActRecruit = aP addAction ["Recruit Fighter (1 HR)", "scripts/recruit_action.sqs"]
-gmActSpec = aP addAction ["Recruit Specialist (1 HR, 40 R)", "scripts/recruit_action.sqs"]
-gmActTrain = aP addAction ["Train Squad (+skill, 30 R)", "scripts/recruit_action.sqs"]
+gmActRecruit = aP addAction ["Recruit Fighter (1 HR)", "\gmcore\scripts\recruit_action.sqs"]
+gmActSpec = aP addAction ["Recruit Specialist (1 HR, 40 R)", "\gmcore\scripts\recruit_action.sqs"]
+gmActTrain = aP addAction ["Train Squad (+skill, 30 R)", "\gmcore\scripts\recruit_action.sqs"]
 gmRecruitActive = true
 goto "loop"
 

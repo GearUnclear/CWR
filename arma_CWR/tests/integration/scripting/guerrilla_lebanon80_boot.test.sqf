@@ -2,8 +2,9 @@
 //  Guerrilla Mode - Lebanon80 boot smoke (third island pack).
 //    Boots the REAL Guerrilla.Lebanon80 template (guerrilla-mode/mission/) on
 //    the @LoBo Lebanon (80's) world: occupier = IDF (WEST), resistance =
-//    Hizballah (EAST). Same shared core byte-for-byte as Guerrilla.Demo /
-//    Guerrilla.Sinai; all island/faction data from description.ext. Modeled
+//    Hizballah (EAST). The same ONE shared core as Guerrilla.Demo /
+//    Guerrilla.Sinai (they all exec \gmcore\init.sqs); all island/faction
+//    data from description.ext. Modeled
 //    on guerrilla_sinai_swap - the differences are the roster (Hizballah, not
 //    Egyptian Frontier Corps) and the zone seed (see below).
 //

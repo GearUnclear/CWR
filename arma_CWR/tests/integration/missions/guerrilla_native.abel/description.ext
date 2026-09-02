@@ -1,8 +1,9 @@
 // Guerrilla Mode on Abel (Malden, full CWA 1.99 data) - the per-island data
 // file for the NATIVE-parity integration tests (issue #3 item 5).
 //
-// SHARED-CORE CONTRACT: init.sqs and scripts/ are byte-identical copies of
-// the canonical guerrilla-mode/mission/Guerrilla.Demo mission (enforced by
+// SHARED-CORE CONTRACT (issue #54 B1): init.sqs is the two-line bootstrap
+// that execs the ONE shared core, guerrilla-mode/core, installed at
+// <GameDir>\gmcore (enforced by
 // tests/unit/engine/Poseidon/Game/Guerrilla/test_mission_script_core.cpp).
 // ONLY this file and mission.sqm (player start) differ per island - that is
 // the swappable-islands claim this mission exists to prove.

@@ -47,7 +47,7 @@
 
 @GM_LIB_READY
 
-GM_pSaveAct = aP addAction ["Save Game", "scripts/campaign.sqs"]
+GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 gmJournalLog format ["The %1 campaign begins: one fighter, one camp, an island to liberate.", gmIslandName]
 
 ; ============================================================================
@@ -87,7 +87,7 @@ GM_PLAYER_GROUPS = [group aP]
 
 ; (c) exactly one Save action
 aP removeAction GM_pSaveAct
-GM_pSaveAct = aP addAction ["Save Game", "scripts/campaign.sqs"]
+GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 
 hint "Guerrilla campaign restored."
 gmJournalLog "Campaign restored from a save."

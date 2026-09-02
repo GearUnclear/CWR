@@ -1,12 +1,28 @@
 <#
 .SYNOPSIS
-    Installs the Guerrilla Mode mission templates into the game data directory.
+    Installs the Guerrilla Mode shared script core and the mission templates
+    into the game data directory.
 
 .DESCRIPTION
-    Copies every guerrilla-mode/mission/Guerrilla.<World> template into
-    <GameDir>\Missions\.
+    Installs two things:
 
-    WHY THAT LOCATION: the new-game flow (main menu GUERRILLA button ->
+      1. the SHARED SCRIPT CORE, guerrilla-mode/core -> <GameDir>\gmcore\
+      2. every guerrilla-mode/mission/<Prefix>.<World> template ->
+         <GameDir>\Missions\
+
+    WHY THE CORE IS SEPARATE: there is exactly ONE copy of the manager
+    scripts in the repo (guerrilla-mode/core), not one per template. A
+    mission's own init.sqs is a two-line bootstrap that runs
+    `[] exec "\gmcore\init.sqs"`. The LEADING BACKSLASH is what makes that
+    reach outside the mission folder: OpenScript (Game/Scripting/Scripts.cpp)
+    strips it and resolves the rest against the game data root, checking the
+    mounted pbo banks first (a gmcore.pbo in any addons\ dir would serve too)
+    and then a loose file on disk. So the loose directory <GameDir>\gmcore\
+    sitting beside <GameDir>\Missions\ needs no engine change. The core is
+    installed BEFORE the templates: a template without it boots into a
+    mission with no managers.
+
+    WHY THE TEMPLATE LOCATION: the new-game flow (main menu GUERRILLA button ->
     IDD_GUERRILLA_NEW_GAME) launches the template by resolving the relative
     path "missions\Guerrilla.<World>" against the game working directory --
     either a PBO "missions\Guerrilla.<World>.pbo" (FilePathExists) or an
@@ -27,10 +43,10 @@
     @LoBo\addons\LoBo_Leb.pbo - both undetectable by filename) must be
     named in -IncludeWorld to install.
 
-    Idempotent: re-running mirrors the repo templates over any previous
-    install (stale files inside each installed template are removed, and a
-    previously installed template that is now world-gated out is REMOVED;
-    unrelated missions are untouched).
+    Idempotent: re-running mirrors the repo core and templates over any
+    previous install (stale files inside <GameDir>\gmcore and inside each
+    installed template are removed, and a previously installed template that
+    is now world-gated out is REMOVED; unrelated missions are untouched).
 
 .PARAMETER GameDir
     The Arma: Cold War Assault install (data) directory.
@@ -62,6 +78,22 @@ if (-not (Test-Path -LiteralPath $missionRoot -PathType Container)) {
     throw "Template source not found: $missionRoot"
 }
 
+# ---- 1. the shared script core -> <GameDir>\gmcore ------------------------
+# Installed first and unconditionally: it carries no world data, so no world
+# gate applies, and every template's two-line init.sqs is dead without it.
+$coreRoot = Join-Path $PSScriptRoot 'core'
+if (-not (Test-Path -LiteralPath $coreRoot -PathType Container)) {
+    throw "Script core source not found: $coreRoot"
+}
+$coreDest = Join-Path $GameDir 'gmcore'
+$null = & robocopy $coreRoot $coreDest /MIR /NJH /NJS /NDL /NFL /NC /NS /NP
+if ($LASTEXITCODE -ge 8) {
+    throw "robocopy failed for the script core (exit $LASTEXITCODE)"
+}
+$coreVerb = if ($LASTEXITCODE -eq 0) { 'Up to date' } else { 'Installed' }
+Write-Output ("{0}: script core -> {1}" -f $coreVerb, $coreDest)
+
+# ---- 2. the mission templates -> <GameDir>\Missions -----------------------
 $destRoot = Join-Path $GameDir 'Missions'
 if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
     # [System.IO.Directory]::CreateDirectory is fully literal: New-Item -Path
@@ -70,16 +102,18 @@ if (-not (Test-Path -LiteralPath $destRoot -PathType Container)) {
     Write-Output "Created: $destRoot"
 }
 
-# Guerrilla.<World> = the playable campaign templates; Showcase.<World> = the
-# issue #9 systems-showcase missions (same shared core + a showcase/ overlay);
-# Undercover.<World> = the deep-undercover reference slice (own script set,
-# not the shared core); Qrf.<World> = the alert->QRF reference slice (own
-# bootstrap + a byte-identical SUBSET of the shared core: scripts/lib.sqs and
-# scripts/qrf.sqs); Market.<World> = the HQ / cache / garage / dealer reference
-# slice (own bootstrap + the subset scripts/lib.sqs, scripts/market.sqs,
-# scripts/market_action.sqs). Showcase.*, Undercover.*, Qrf.* and Market.*
-# are surfaced as direct main-menu launch buttons (kReferenceMissions,
-# UI/OptionsUIApp.cpp) that only appear when the mission is installed.
+# Every template below is script-free: none of them carries a scripts\
+# directory any more, they all reach into <GameDir>\gmcore instead.
+# Guerrilla.<World> = the playable campaign templates (two-line init.sqs, the
+# whole core); Showcase.<World> = the issue #9 systems-showcase missions (same
+# two-line init.sqs + a mission-local showcase\ overlay); Qrf.<World>,
+# Market.<World> and Undercover.<World> = the reference slices, each with its
+# own bootstrap init.sqs that execs only the ONE core policy script it exists
+# to demonstrate (\gmcore\scripts\qrf.sqs / market.sqs / undercover.sqs, plus
+# lib.sqs) and keeps its debug menu and HUD mission-local. Showcase.*,
+# Undercover.*, Qrf.* and Market.* are surfaced as direct main-menu launch
+# buttons (kReferenceMissions, UI/OptionsUIApp.cpp) that only appear when the
+# mission is installed.
 $templates = Get-ChildItem -LiteralPath $missionRoot -Directory |
     Where-Object { $_.Name -match '^(Guerrilla|Showcase|Undercover|Qrf|Market)\.' }
 if (-not $templates) {
@@ -111,7 +145,7 @@ foreach ($tpl in $templates) {
     Write-Output ("{0}: {1} -> {2}" -f $verb, $tpl.Name, $dest)
 }
 
-Write-Output "Done. Templates are picked up by the GUERRILLA new-game menu (missions\Guerrilla.<World>)."
+Write-Output "Done. Templates are picked up by the GUERRILLA new-game menu (missions\Guerrilla.<World>) and load their managers from $coreDest."
 # robocopy's informational exit codes (1 = files copied) must not leak as
 # script failure.
 exit 0

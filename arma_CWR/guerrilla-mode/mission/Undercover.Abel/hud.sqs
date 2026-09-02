@@ -2,7 +2,7 @@
 ;  hud.sqs  -  intro briefing + change-driven cover status readout
 ;  Polls gmUndercoverStatus / gmUndercoverWitnesses once a second and repaints
 ;  the title line only on CHANGE (no hint-chime spam). The first-compromise
-;  event (gmEvtUcBroken) is consumed by the campaign's scripts/undercover.sqs
+;  event (gmEvtUcBroken) is consumed by the campaign's core undercover.sqs
 ;  (advisory hint + diary line) - NOT here; one queue, one consumer.
 ; ============================================================================
 

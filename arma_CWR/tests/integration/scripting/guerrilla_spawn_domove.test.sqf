@@ -11,9 +11,9 @@
 //         single group under groupSize = 12);
 //      3. the spawned groups are real commandable AI: doMove displaces a unit.
 //
-//  Runs against the REAL mode: guerrilla_capture.Demo's init.sqs + scripts/
-//  are byte-identical to the canonical Guerrilla.Demo core (enforced by
-//  test_mission_script_core.cpp).
+//  Runs against the REAL mode: guerrilla_capture.Demo's two-line init.sqs
+//  execs the ONE shared core at <GameDir>\gmcore (guerrilla-mode/core,
+//  pinned by test_mission_script_core.cpp).
 //
 //  Assertions are framerate-agnostic: unit COUNTS prove the spawn; a
 //  time-bounded displacement (not a fixed frame count) proves motion.
