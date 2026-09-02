@@ -393,6 +393,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_outfit_select.cpp
     Game/Guerrilla/test_faction_sources.cpp
     Game/Guerrilla/test_addon_closure.cpp
+    Game/Guerrilla/test_names_classify.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp

@@ -49,7 +49,19 @@ struct ZoneTuning
     // Any live defender still blocks SECURING regardless of this ratio.
     float contestOutnumberRatio = 4.0f;
     // CITY auto-seed from the world's CfgWorlds >> <world> >> Names entries
-    bool seedCities = false;
+    // (issue #54 C3). Auto (the key is absent) seeds every Names entry the
+    // settlement classifier accepts: town-typed or type-less, on dry land,
+    // with buildings around it - so a theatre map's sea, country and terrain
+    // labels seed nothing. All (seedCities = 1) is the legacy override that
+    // seeds every town-typed / type-less entry with no classification; Off
+    // (seedCities = 0) seeds none.
+    enum class SeedCities
+    {
+        Auto,
+        Off,
+        All
+    };
+    SeedCities seedCities = SeedCities::Auto;
     float seedCitySupport = 20.0f; // starting support of each seeded CITY
     // The side the template's mission.sqm welds the player's unit to.  The
     // resistance is counted out of that side's center (GatherInputs), so a
@@ -150,6 +162,30 @@ struct ParsClassProbe final : ClassProbe
     bool Exists(const char* bank, const char* className) const override;
 };
 
+// Settlement classifier for the CITY auto-seed (issue #54 C3): is this Names
+// entry a place people live, or a label? OFP-era Names blocks carry no type,
+// and a theatre map (Lebanon80) names seas, countries, mountain ranges and
+// deep-rear cities in the same block as its towns. The engine probe answers
+// from the loaded landscape; unit tests inject a fake.
+struct SettlementProbe
+{
+    virtual ~SettlementProbe() = default;
+    virtual bool IsSettlement(const char* name, const Vector3& pos) const = 0;
+};
+
+// The engine's SettlementProbe: dry land (Landscape::WaterDepth == 0 at the
+// entry) with at least kMinBuildings Building objects of house size
+// (bounding sphere > kMinBuildingRadius) within kRadius metres. A run with
+// no landscape or world loaded (headless config tests) accepts everything,
+// which is the pre-C3 behaviour.
+struct LandscapeSettlementProbe final : SettlementProbe
+{
+    static constexpr float kRadius = 300.0f; // the seed dedup radius: one town, one circle
+    static constexpr int kMinBuildings = 3;
+    static constexpr float kMinBuildingRadius = 4.0f; // fences, poles and sheds do not make a town
+    bool IsSettlement(const char* name, const Vector3& pos) const override;
+};
+
 enum ZoneEventType
 {
     ZECaptured,         // any owner flip
@@ -219,7 +255,7 @@ class ZoneRegistry : public SerializeClass
     // producing fatal/sterile spawns downstream.
     void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
                         const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr,
-                        const ClassProbe* probe = nullptr);
+                        const ClassProbe* probe = nullptr, const SettlementProbe* settlement = nullptr);
 
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
@@ -301,6 +337,13 @@ class ZoneRegistry : public SerializeClass
     // city-like Arma types pass, name falls back to the class name, the 2D
     // position[] {x, z} maps to engine axes with elevation 0.
     static bool NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3& pos);
+    // NamesEntryIsTown plus the settlement classification (issue #54 C3):
+    // under Auto a non-null probe must accept the entry; All skips the probe;
+    // Off rejects everything.
+    static bool NamesEntryIsSettlement(const ParamEntry& e, ZoneTuning::SeedCities mode, const SettlementProbe* probe,
+                                       RString& name, Vector3& pos);
+    // The seedCities key: absent = Auto, 0 = Off, anything else = All.
+    static ZoneTuning::SeedCities ReadSeedCitiesMode(const ParamEntry* zonesCfg);
     // The town names a campaign on this zones config + world Names class
     // carries as CITY zones, in zone-table order: the authored CITY zones
     // (config order), then - only when seedCities is set - every Names town
@@ -353,7 +396,7 @@ class ZoneRegistry : public SerializeClass
     void ResolveFactionClasses(const ClassProbe& probe);
     // shared tiers[] index selection for FactionTierClass / FactionSquad
     static int TierIndex(const FactionRecord& f, float warLevel);
-    void SeedCityZones(const ParamEntry& namesCfg);
+    void SeedCityZones(const ParamEntry& namesCfg, const SettlementProbe* settlement);
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;
     // class name only - the key FindFaction reaches last and FindFactionForSide

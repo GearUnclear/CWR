@@ -34,7 +34,8 @@ void ActivateTemplateAddons(const ArcadeTemplate& t)
     }
     if (nAdded > 0)
     {
-        LOG_INFO(Core, "Guerrilla launch: activated {} addon(s) the placed units need beyond the mission's addOns[]: {}",
+        LOG_INFO(Core,
+                 "Guerrilla launch: activated {} addon(s) the placed units need beyond the mission's addOns[]: {}",
                  nAdded, (const char*)added);
     }
 }

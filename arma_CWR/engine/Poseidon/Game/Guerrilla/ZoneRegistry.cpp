@@ -3,17 +3,19 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
-#include <Poseidon/Asset/Addon/AddonClosure.hpp>       // faction addon closure (issue #54 C1)
+#include <Poseidon/Asset/Addon/AddonClosure.hpp>      // faction addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
-#include <Poseidon/IO/ParamFileExt.hpp>             // Pars / ExtParsMission
+#include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Evaluator/express.hpp> // GameState / GameValue (event dispatch)
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/House.hpp> // Building (settlement classifier, issue #54 C3)
+#include <Poseidon/World/Terrain/Landscape.hpp>       // GLandscape->WaterDepth
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICore.hpp>              // markersMap
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp> // ArcadeMarkerInfo
@@ -241,7 +243,8 @@ void ZoneRegistry::ActivateFactionAddons() const
     }
     if (nAdded > 0)
     {
-        LOG_INFO(Core, "ZoneRegistry: activated {} addon(s) the faction descriptors need beyond the mission's addOns[]: {}",
+        LOG_INFO(Core,
+                 "ZoneRegistry: activated {} addon(s) the faction descriptors need beyond the mission's addOns[]: {}",
                  nAdded, (const char*)added);
     }
 }
@@ -254,7 +257,6 @@ const FactionRecord* ZoneRegistry::GetFaction(int index) const
     }
     return &_factions[index];
 }
-
 
 void ZoneRegistry::LoadFromConfig()
 {
@@ -289,7 +291,11 @@ void ZoneRegistry::LoadFromConfig()
     // degrades with a logged substitution on another instead of producing
     // fatal or silently-sterile spawns
     ParsClassProbe probe;
-    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe);
+    // the CITY auto-seed classifies Names entries against the loaded
+    // landscape (dry land, buildings around) unless the template forces the
+    // legacy seed-everything or seed-nothing (issue #54 C3)
+    LandscapeSettlementProbe settlement;
+    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe, &settlement);
     // alert and undercover tunables share the CfgGuerrillaZones class;
     // loading here (not in LoadFromParams) keeps the testable core free of
     // singleton side effects
@@ -298,7 +304,8 @@ void ZoneRegistry::LoadFromConfig()
 }
 
 void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
-                                  const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe)
+                                  const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe,
+                                  const SettlementProbe* settlement)
 {
     // rebuilds the config-derived tables only; event handlers and any
     // pending savegame rows are preserved (see Serialize)
@@ -346,9 +353,9 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     {
         LoadZones(*zonesCfg);
     }
-    if (_tuning.seedCities && worldNamesCfg)
+    if (_tuning.seedCities != ZoneTuning::SeedCities::Off && worldNamesCfg)
     {
-        SeedCityZones(*worldNamesCfg);
+        SeedCityZones(*worldNamesCfg, settlement);
     }
 }
 
@@ -437,7 +444,8 @@ void ZoneRegistry::ResolveSideCollisions(const ParamEntry* factionsCfg)
             }
             else
             {
-                LOG_INFO(Core, "Guerrilla: occupier faction '{}' rebased from side {} to {} (no sideTwin off that side)",
+                LOG_INFO(Core,
+                         "Guerrilla: occupier faction '{}' rebased from side {} to {} (no sideTwin off that side)",
                          (const char*)_occupierFaction, (const char*)_occupierSide, (const char*)freeSide);
                 _occupierSide = freeSide;
             }
@@ -624,7 +632,7 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.heatCapSpike = cfg.ReadValue("heatCapSpike", _tuning.heatCapSpike);
     _tuning.defaultIncome = cfg.ReadValue("defaultIncome", _tuning.defaultIncome);
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
-    _tuning.seedCities = cfg.ReadValue("seedCities", _tuning.seedCities ? 1.0f : 0.0f) != 0.0f;
+    _tuning.seedCities = ReadSeedCitiesMode(&cfg);
     _tuning.seedCitySupport = cfg.ReadValue("seedCitySupport", _tuning.seedCitySupport);
     _tuning.captureRate = cfg.ReadValue("captureRate", _tuning.captureRate);
     _tuning.captureCrewCap = cfg.ReadValue("captureCrewCap", _tuning.captureCrewCap);
@@ -928,7 +936,8 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         // the real logger (LOG_WARN)
         auto logSub = [&f](const char* key, const char* bad, const char* sub)
         {
-            LOG_WARN(Core, "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
+            LOG_WARN(Core,
+                     "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
                      (const char*)f.className, key, bad, (sub && *sub) ? sub : "<none>");
         };
 
@@ -1216,7 +1225,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
                     stricmp(f.values[k].value, "0") != 0)
                 {
                     LOG_WARN(Core, "ZoneRegistry: faction '{}': no civClass<N> resolved - civClassCount forced to 0",
-                         (const char*)f.className);
+                             (const char*)f.className);
                     f.values[k].value = "0";
                 }
             }
@@ -1261,14 +1270,76 @@ bool ZoneRegistry::NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3&
     return true;
 }
 
-void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
+ZoneTuning::SeedCities ZoneRegistry::ReadSeedCitiesMode(const ParamEntry* zonesCfg)
+{
+    if (!zonesCfg || !zonesCfg->FindEntry("seedCities"))
+    {
+        return ZoneTuning::SeedCities::Auto;
+    }
+    return zonesCfg->ReadValue("seedCities", 0.0f) != 0.0f ? ZoneTuning::SeedCities::All : ZoneTuning::SeedCities::Off;
+}
+
+bool ZoneRegistry::NamesEntryIsSettlement(const ParamEntry& e, ZoneTuning::SeedCities mode,
+                                          const SettlementProbe* probe, RString& name, Vector3& pos)
+{
+    if (mode == ZoneTuning::SeedCities::Off || !NamesEntryIsTown(e, name, pos))
+    {
+        return false;
+    }
+    if (mode == ZoneTuning::SeedCities::All || !probe)
+    {
+        return true; // the legacy override, or nothing to classify against
+    }
+    return probe->IsSettlement(name, pos);
+}
+
+bool LandscapeSettlementProbe::IsSettlement(const char* name, const Vector3& pos) const
+{
+    if (!GLandscape || !GWorld)
+    {
+        return true; // nothing loaded to classify against: keep the pre-C3 answer
+    }
+    if (GLandscape->WaterDepth(pos.X(), pos.Z()) > 0.0f)
+    {
+        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - it is in the water", name);
+        return false;
+    }
+    int buildings = 0;
+    const float radiusSq = kRadius * kRadius;
+    for (int i = 0; i < GWorld->NBuildings() && buildings < kMinBuildings; i++)
+    {
+        Poseidon::Building* b = dyn_cast<Poseidon::Building>(GWorld->GetBuilding(i));
+        if (!b)
+        {
+            continue;
+        }
+        LODShapeWithShadow* shape = b->GetShape();
+        if (!shape || shape->BoundingSphere() <= kMinBuildingRadius)
+        {
+            continue;
+        }
+        if (Dist2DSq(b->Position().X(), b->Position().Z(), pos.X(), pos.Z()) <= radiusSq)
+        {
+            buildings++;
+        }
+    }
+    if (buildings < kMinBuildings)
+    {
+        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - {} building(s) within {} m, a town needs {}", name,
+                 buildings, (int)kRadius, kMinBuildings);
+        return false;
+    }
+    return true;
+}
+
+void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementProbe* settlement)
 {
     int seeded = 0;
     for (int i = 0; i < namesCfg.GetEntryCount(); i++)
     {
         RString name;
         Vector3 pos;
-        if (!NamesEntryIsTown(namesCfg.GetEntry(i), name, pos))
+        if (!NamesEntryIsSettlement(namesCfg.GetEntry(i), _tuning.seedCities, settlement, name, pos))
         {
             continue;
         }
@@ -1314,10 +1385,14 @@ void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry
     // towns the player can start in
     AutoArray<RString> zoneNames;
     AutoArray<Vector3> zonePos;
-    bool seedCities = false;
+    // menu time: no landscape is loaded, so the classifier cannot run here.
+    // Auto lists every town-typed / type-less entry (the mission may seed
+    // fewer; a START TOWN pick that becomes no zone falls back to the camp,
+    // GuerrillaBase); Off lists none; All lists them all.
+    ZoneTuning::SeedCities mode = ReadSeedCitiesMode(zonesCfg);
+    bool seedCities = mode != ZoneTuning::SeedCities::Off;
     if (zonesCfg)
     {
-        seedCities = zonesCfg->ReadValue("seedCities", 0.0f) != 0.0f;
         if (const ParamEntry* zones = zonesCfg->FindEntry("Zones"))
         {
             for (int i = 0; i < zones->GetEntryCount(); i++)
@@ -1964,7 +2039,8 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             else
             {
                 // DEFENDED (occupiers re-secure fast) or ABANDONED (slow fade)
-                float decay = (occ > 0 || z.garrison >= 1) ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
+                float decay =
+                    (occ > 0 || z.garrison >= 1) ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
                 z.capture -= decay;
                 if (z.capture < 0)
                 {
