@@ -165,6 +165,13 @@ struct Globals
 };
 extern Globals Glob;
 
+// Load the file banks living under `path` in the data dir and in every mounted
+// mod directory - the single step of Globals::Init a config-reading CLI tool
+// needs. `emptyPrefix` mounts the bank contents at the filesystem root rather
+// than under the bank's own name; `parseConfig` collects each addon's config for
+// AddonSystem::ParseAllAddonConfigs. Exposed so a tool can mount a package
+// without starting the file server, profiles, input, voices or the world.
+void LoadFileBanksFrom(const char* path, bool emptyPrefix, bool parseConfig = false);
 
 Foundation::ErrorMessageLevel GetMaxError();
 void ResetErrors();

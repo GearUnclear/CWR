@@ -394,6 +394,13 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_faction_sources.cpp
     Game/Guerrilla/test_addon_closure.cpp
     Game/Guerrilla/test_names_classify.cpp
+    Game/Guerrilla/test_island_scaffold.cpp
+    Game/Guerrilla/test_descriptor_lint.cpp
+    Game/Guerrilla/test_roster_probe.cpp
+    Game/Guerrilla/test_package_mount.cpp
+    # PackageMount lives with the tools (it is a tool-side mount helper) but
+    # depends only on the engine, so it compiles straight into the test exe.
+    ${CMAKE_SOURCE_DIR}/apps/tools/Tools/PackageMount.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp

@@ -259,6 +259,14 @@ static void LoadBanksEx(const char* path, bool emptyPrefix, bool parseConfig = f
     EnumModDirectories(LoadBanksCallback, &ctx);
 }
 
+namespace Poseidon
+{
+void LoadFileBanksFrom(const char* path, bool emptyPrefix, bool parseConfig)
+{
+    LoadBanksEx(path, emptyPrefix, parseConfig);
+}
+} // namespace Poseidon
+
 void Globals::Init()
 {
     if (GUseFileBanks)
