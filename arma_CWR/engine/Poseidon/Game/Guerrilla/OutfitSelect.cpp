@@ -178,6 +178,64 @@ RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry*
     return civClass;
 }
 
+RString ResolveWarriorPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selResistance,
+                                  const ClassProbe& probe)
+{
+    if (!selResistance || !*selResistance || !factionsCfg)
+    {
+        return RString(); // nothing picked, or nothing to resolve it against
+    }
+    const ParamEntry* picked = FindGuerrillaFactionEntry(factionsCfg, selResistance);
+    if (!picked)
+    {
+        // issue #46 shape: a published pick that resolves to nothing is a
+        // DROPPED selection and says so. The registry will fall back to the
+        // template defaults for the sides; the body follows the same rule.
+        LOG_WARN(Core,
+                 "Guerrilla body: gmSelResistance '{}' names no CfgGuerrillaFactions block - keeping the authored "
+                 "player class",
+                 selResistance);
+        return RString();
+    }
+    // The template's OWN default resistance is the roster mission.sqm was
+    // authored against: its playerClassWarrior documents the authored class,
+    // so there is nothing to substitute and nothing dropped (no log).
+    const ParamEntry* authored = nullptr;
+    if (zonesCfg)
+    {
+        RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
+        authored = FindGuerrillaFactionEntry(factionsCfg, defResistance);
+    }
+    if (!authored)
+    {
+        authored = FindGuerrillaFactionEntry(factionsCfg, "GUER");
+    }
+    if (picked == authored)
+    {
+        return RString();
+    }
+    RString warrior = picked->ReadValue("playerClassWarrior", RString());
+    if (warrior.GetLength() == 0)
+    {
+        LOG_WARN(Core,
+                 "Guerrilla body: resistance '{}' authors no playerClassWarrior - keeping the authored player class "
+                 "(the squad still spawns from its tiers[])",
+                 (const char*)picked->GetName());
+        return RString();
+    }
+    if (!probe.Exists("CfgVehicles", warrior))
+    {
+        // the menu greys this faction out (GuerrillaFactionIssue probes the
+        // same key), so reaching here means a direct launch or a stale bank
+        LOG_WARN(Core,
+                 "Guerrilla body: resistance '{}' playerClassWarrior '{}' not in the loaded data package - keeping "
+                 "the authored player class",
+                 (const char*)picked->GetName(), (const char*)warrior);
+        return RString();
+    }
+    return warrior;
+}
+
 RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selPlayerClass,
                                const char* selOutfit, const char* selResistance, const ClassProbe& probe)
 {
@@ -202,7 +260,14 @@ RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* fac
                      : "");
         return RString();
     }
-    return ResolveCivilianPlayerClass(zonesCfg, factionsCfg, selOutfit, selResistance, probe);
+    if (selOutfit && stricmp(selOutfit, "civilian") == 0)
+    {
+        return ResolveCivilianPlayerClass(zonesCfg, factionsCfg, selOutfit, selResistance, probe);
+    }
+    // WARRIOR (or no outfit token): the body follows the resistance PICK
+    // (issue #54 A3) - a non-default roster substitutes its own
+    // playerClassWarrior, the template's default keeps the authored class.
+    return ResolveWarriorPlayerClass(zonesCfg, factionsCfg, selResistance, probe);
 }
 
 void CollectPlayerBodyAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
@@ -289,7 +354,10 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
     // campaign variable bank cannot leak a stale pick into one.
     RString selPlayerClass = ReadMenuSelection("gmselplayerclass");
     RString selOutfit = ReadMenuSelection("gmseloutfit");
-    if (selPlayerClass.GetLength() == 0 && selOutfit.GetLength() == 0)
+    // the resistance pick is the third channel (issue #54 A3): a non-default
+    // roster brings its own warrior body
+    RString selResistance = ReadMenuSelection("gmselresistance");
+    if (selPlayerClass.GetLength() == 0 && selOutfit.GetLength() == 0 && selResistance.GetLength() == 0)
     {
         return; // untouched screen (or non-Guerrilla flow): authored class stands
     }
@@ -316,7 +384,6 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
     FactionSources factionSources;
     BuildFactionSourcesFromEngine(factionSources);
     const ParamEntry* factions = factionSources.Factions();
-    RString selResistance = ReadMenuSelection("gmselresistance");
     ParsClassProbe probe;
     RString newClass = ResolvePlayerBodyClass(zones, factions, selPlayerClass, selOutfit, selResistance, probe);
     if (newClass.GetLength() == 0)
@@ -369,7 +436,9 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
         // welded to the mission side field, so any body fights as GUER.
         LOG_INFO(Core, "Guerrilla outfit: substituting player class '{}' -> '{}' ({})", (const char*)uInfo->vehicle,
                  (const char*)newClass,
-                 selPlayerClass.GetLength() > 0 ? "gmSelPlayerClass pick" : "gmSelOutfit=civilian");
+                 selPlayerClass.GetLength() > 0        ? "gmSelPlayerClass pick"
+                 : stricmp(selOutfit, "civilian") == 0 ? "gmSelOutfit=civilian"
+                                                       : "gmSelResistance playerClassWarrior");
         uInfo->vehicle = newClass;
     }
 

@@ -506,7 +506,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_ui_zbias_staircase.cpp
     UI/test_gameModule.cpp
     UI/Guerrilla/test_guerrilla_module.cpp
-    UI/Guerrilla/test_guerrilla_module.cpp
+    UI/Guerrilla/test_guerrilla_gating.cpp
     UI/test_viewer_cursor_overlay.cpp
     UI/test_game_cursor_overlay.cpp
     UI/InGame/test_inGameUI.cpp

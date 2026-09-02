@@ -21,8 +21,9 @@
 // Esc still exits via the ControlsContainer key path.
 
 #include <Poseidon/UI/Controls/UIControls.hpp>
-#include <Poseidon/IO/ParamFile/ParamFile.hpp> // ParamFile (the per-island descriptor this display owns)
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>        // ParamFile (the per-island descriptor this display owns)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // the merged faction table this display owns (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>   // ClassProbe (menu-time availability gating, issue #54 A2)
 
 #include <functional>
 #include <vector>
@@ -101,6 +102,27 @@ bool GuerrillaTemplateExists(RString island, const std::function<bool(RString)>&
 // selection is empty or names no subclass — the caller cannot validate what
 // the mission's own config will resolve.
 RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
+
+// Menu-time availability gating (issue #54 A2, the #13 lesson generalised
+// from runtime-degrade to don't-offer-it). A merged faction may come from an
+// addon whose pbos are NOT mounted this session - its classes then fail the
+// plan-15 probe at launch and every spawn wears a fallback body, playable,
+// wrong, and invisible until someone looks. Returns the reason the faction
+// cannot be launched on the loaded data package, EMPTY when it can: probes
+// tiers[0] (the rung every spawn path bottoms out on; a descriptor with no
+// tiers[] is refused too) and playerClassWarrior when authored (the body the
+// resistance pick substitutes, issue #54 A3). CfgVehicles only, the same
+// bank ZoneRegistry::ResolveFactionClasses probes.
+RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe);
+// One issue per entry of `factions` (GuerrillaListFactions order), so the
+// cyclers can render and gate by index.
+std::vector<RString> GuerrillaFactionIssues(const ParamEntry* factionsCfg, const std::vector<RString>& factions,
+                                            const Guerrilla::ClassProbe& probe);
+// The label suffix a greyed row carries, shared with the e2e assertions.
+constexpr const char* kGuerrillaFactionUnavailableSuffix = " (not in loaded data)";
+// The one player-facing refusal for an OK on a greyed pick (role is
+// "OCCUPIER" / "RESISTANCE").
+RString GuerrillaUnavailableMessage(const char* role, RString faction, RString issue);
 
 // Index into `list` of the faction `selection` names, or -1. `selection` is
 // what ZoneRegistry::ResolveSides accepts: either a descriptor class name or a
@@ -385,15 +407,23 @@ class GuerrillaNewGame : public Display
     // A1); _islandFactions points into it. Rebuilt with _islandCfg.
     Guerrilla::FactionSources _factionSources;
     const ParamEntry* _islandFactions = nullptr; // into _factionSources' copy, or null
-    const ParamEntry* _islandZones = nullptr;    // into _islandCfg, or into Pars, or null; carries playerSide + default*
+    const ParamEntry* _islandZones = nullptr; // into _islandCfg, or into Pars, or null; carries playerSide + default*
     // The island _islandCfg/_occupiers/_resistances currently describe. The
     // island list fires OnLBSelChanged on every click, not just on a real
     // change, so this is what makes the refresh idempotent.
     RString _islandForFactions;
     std::vector<RString> _occupiers;
     std::vector<RString> _resistances;
+    // Parallel to _occupiers (and _resistances, the same list): the reason a
+    // faction is greyed out on this data package, EMPTY when launchable
+    // (GuerrillaFactionIssues, issue #54 A2). Rebuilt with the lists.
+    std::vector<RString> _factionIssues;
     int _occupierSel = 0;
     int _resistanceSel = 0;
+    // The injected cyclers' authored text colour, captured at injection so a
+    // greyed row can be dimmed and restored without knowing the resource.
+    PackedColor _cyclerColor;
+    bool _cyclerColorKnown = false;
     // Character outfit family (issue #25): {"WARRIOR", "CIVILIAN"} when the
     // selected resistance descriptor offers the pair, empty otherwise.
     std::vector<RString> _outfits;
