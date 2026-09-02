@@ -113,11 +113,18 @@ RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
 // tiers[] is refused too) and playerClassWarrior when authored (the body the
 // resistance pick substitutes, issue #54 A3). CfgVehicles only, the same
 // bank ZoneRegistry::ResolveFactionClasses probes.
-RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe);
+// With vehiclesCfg + shapeExists given, playerClassWarrior is additionally
+// held to the launch seam's shape gate (PlayerBodyModelIssue: a model whose
+// .p3d the package does not ship), so the menu's availability verdict and
+// the launch's cannot disagree (the #46 seam-4 shape).
+RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe,
+                              const ParamEntry* vehiclesCfg = nullptr,
+                              const std::function<bool(RString)>& shapeExists = nullptr);
 // One issue per entry of `factions` (GuerrillaListFactions order), so the
 // cyclers can render and gate by index.
 std::vector<RString> GuerrillaFactionIssues(const ParamEntry* factionsCfg, const std::vector<RString>& factions,
-                                            const Guerrilla::ClassProbe& probe);
+                                            const Guerrilla::ClassProbe& probe, const ParamEntry* vehiclesCfg = nullptr,
+                                            const std::function<bool(RString)>& shapeExists = nullptr);
 // The label suffix a greyed row carries, shared with the e2e assertions.
 constexpr const char* kGuerrillaFactionUnavailableSuffix = " (not in loaded data)";
 // The one player-facing refusal for an OK on a greyed pick (role is
@@ -420,6 +427,15 @@ class GuerrillaNewGame : public Display
     std::vector<RString> _factionIssues;
     int _occupierSel = 0;
     int _resistanceSel = 0;
+    // Set when the player CYCLED a faction row. Only a picked name is kept
+    // across an island change (RefreshFactionsForIsland); an untouched row
+    // re-seeds from the new island's own default* pair. With the faction
+    // library global (issue #54 A4) every name survives on every island, so
+    // without this flag the placeholder island's side-fallback binding
+    // (EAST -> the first EAST-side faction) would ride onto every template
+    // and shadow its authored defaults.
+    bool _occupierPicked = false;
+    bool _resistancePicked = false;
     // The injected cyclers' authored text colour, captured at injection so a
     // greyed row can be dimmed and restored without knowing the resource.
     PackedColor _cyclerColor;

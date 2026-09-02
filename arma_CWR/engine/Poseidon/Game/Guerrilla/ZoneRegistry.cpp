@@ -1299,7 +1299,10 @@ bool LandscapeSettlementProbe::IsSettlement(const char* name, const Vector3& pos
     {
         return true; // nothing loaded to classify against: keep the pre-C3 answer
     }
-    if (GLandscape->WaterDepth(pos.X(), pos.Z()) > 0.0f)
+    // sea level is Y = 0 (Landscape::WaterDepth is a stub that returns 0, so
+    // the surface height is the water test; the same rule GuerrillaBase's
+    // spot sampler applies, with its margin against the wash)
+    if (GLandscape->SurfaceY(pos.X(), pos.Z()) < 0.1f)
     {
         LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - it is in the water", name);
         return false;

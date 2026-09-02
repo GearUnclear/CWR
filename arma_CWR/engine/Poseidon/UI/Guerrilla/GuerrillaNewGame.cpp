@@ -426,7 +426,8 @@ int GuerrillaIndexOfName(const std::vector<RString>& list, RString name)
     return -1;
 }
 
-RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe)
+RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe,
+                              const ParamEntry* vehiclesCfg, const std::function<bool(RString)>& shapeExists)
 {
     const ParamEntry* cls = factionsCfg && faction.GetLength() > 0 ? factionsCfg->FindEntry(faction) : nullptr;
     if (!cls || !cls->IsClass())
@@ -451,17 +452,29 @@ RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, co
         snprintf(buffer, sizeof(buffer), "playerClassWarrior '%s' is not in the loaded data", (const char*)warrior);
         return RString(buffer);
     }
+    if (warrior.GetLength() > 0 && vehiclesCfg && shapeExists)
+    {
+        // the same gate the launch runs on the substituted body
+        RString modelIssue = Guerrilla::PlayerBodyModelIssue(vehiclesCfg, warrior, shapeExists);
+        if (modelIssue.GetLength() > 0)
+        {
+            snprintf(buffer, sizeof(buffer), "playerClassWarrior '%s': %s", (const char*)warrior,
+                     (const char*)modelIssue);
+            return RString(buffer);
+        }
+    }
     return RString();
 }
 
 std::vector<RString> GuerrillaFactionIssues(const ParamEntry* factionsCfg, const std::vector<RString>& factions,
-                                            const Guerrilla::ClassProbe& probe)
+                                            const Guerrilla::ClassProbe& probe, const ParamEntry* vehiclesCfg,
+                                            const std::function<bool(RString)>& shapeExists)
 {
     std::vector<RString> out;
     out.reserve(factions.size());
     for (const RString& f : factions)
     {
-        out.push_back(GuerrillaFactionIssue(factionsCfg, f, probe));
+        out.push_back(GuerrillaFactionIssue(factionsCfg, f, probe, vehiclesCfg, shapeExists));
     }
     return out;
 }
@@ -1111,7 +1124,8 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // is the expected shape of a multi-mod install, not a defect.
     {
         Guerrilla::ParsClassProbe probe;
-        _factionIssues = GuerrillaFactionIssues(_islandFactions, _occupiers, probe);
+        _factionIssues = GuerrillaFactionIssues(_islandFactions, _occupiers, probe, Pars.FindEntry("CfgVehicles"),
+                                                [](RString path) { return QIFStreamB::FileExist(path); });
         for (size_t i = 0; i < _factionIssues.size(); i++)
         {
             if (_factionIssues[i].GetLength() > 0)
@@ -1147,15 +1161,60 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // Jordan authors no playerClassCiv. A name that does not appear on the new
     // island now falls through to the template's own default* keys, which is
     // the documented island-scoped re-seed contract.
-    int keptOccupier = GuerrillaIndexOfName(_occupiers, keepOccupier);
+    // Only a name the player actually CYCLED to is a pick worth keeping; an
+    // untouched row was the previous island's seed and must re-seed here
+    // (see _occupierPicked in the header for why the union made this
+    // necessary). An unpicked name is neither kept nor reported as dropped.
+    int keptOccupier = _occupierPicked ? GuerrillaIndexOfName(_occupiers, keepOccupier) : -1;
+    int keptResistance = _resistancePicked ? GuerrillaIndexOfName(_resistances, keepResistance) : -1;
+    if (!_occupierPicked)
+    {
+        keepOccupier = RString();
+    }
+    if (!_resistancePicked)
+    {
+        keepResistance = RString();
+    }
+    // A kept pick that lands on the SAME faction the other cycler was just
+    // re-seeded to (Sinai RESISTANCE: IDF, then Lebanon80 where IDF is the
+    // authored occupier) would open the screen on occupier == resistance,
+    // which is the issue-#50 failure by another route. The keep that
+    // collides yields to the template's own default* pair.
+    if (keptOccupier >= 0 && keptOccupier == _resistanceSel && keptResistance < 0)
+    {
+        LOG_WARN(Core,
+                 "Guerrilla menu: dropping the kept occupier '{}' on island '{}' - it is that template's default "
+                 "resistance",
+                 (const char*)keepOccupier, (const char*)island);
+        keptOccupier = -1;
+    }
+    if (keptResistance >= 0 && keptResistance == (keptOccupier >= 0 ? keptOccupier : _occupierSel))
+    {
+        LOG_WARN(Core,
+                 "Guerrilla menu: dropping the kept resistance '{}' on island '{}' - it collides with the occupier "
+                 "pick",
+                 (const char*)keepResistance, (const char*)island);
+        keptResistance = -1;
+    }
     if (keptOccupier >= 0)
     {
         _occupierSel = keptOccupier;
     }
-    int keptResistance = GuerrillaIndexOfName(_resistances, keepResistance);
+    else if (keepOccupier.GetLength() > 0)
+    {
+        // the two siblings (RefreshOutfitChoices, RevalidateBodySelection)
+        // already say when they drop a pick; this one was the silent exception
+        LOG_WARN(Core, "Guerrilla menu: dropping the occupier pick '{}' - island '{}' does not offer it",
+                 (const char*)keepOccupier, (const char*)island);
+    }
     if (keptResistance >= 0)
     {
         _resistanceSel = keptResistance;
+    }
+    else if (keepResistance.GetLength() > 0)
+    {
+        LOG_WARN(Core, "Guerrilla menu: dropping the resistance pick '{}' - island '{}' does not offer it",
+                 (const char*)keepResistance, (const char*)island);
     }
     // Cyclers don't exist yet on the first call (constructor, before
     // InjectFactionCyclers) — UpdateFactionLabel no-ops safely via its own
@@ -1406,6 +1465,7 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_occupiers.empty())
             {
                 _occupierSel = (_occupierSel + 1) % (int)_occupiers.size();
+                _occupierPicked = true;
             }
             UpdateFactionLabel(idc);
             break;
@@ -1413,6 +1473,7 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_resistances.empty())
             {
                 _resistanceSel = (_resistanceSel + 1) % (int)_resistances.size();
+                _resistancePicked = true;
             }
             UpdateFactionLabel(idc);
             // The outfit pair is authored per resistance block — the new

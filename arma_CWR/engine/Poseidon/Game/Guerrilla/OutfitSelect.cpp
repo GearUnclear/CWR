@@ -146,9 +146,19 @@ RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry*
 RString ResolveWarriorPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selResistance,
                                   const ClassProbe& probe)
 {
-    if (!selResistance || !*selResistance || !factionsCfg)
+    if (!selResistance || !*selResistance)
     {
-        return RString(); // nothing picked, or nothing to resolve it against
+        return RString(); // nothing picked: nothing dropped, nothing to say
+    }
+    if (!factionsCfg)
+    {
+        // a pending pick with no table to resolve it against IS a dropped
+        // selection (issue #46 shape) - the civilian ladder says so too
+        LOG_WARN(Core,
+                 "Guerrilla body: gmSelResistance '{}' pending, but neither the mission's description.ext nor the "
+                 "loaded config carries CfgGuerrillaFactions - keeping the authored player class",
+                 selResistance);
+        return RString();
     }
     const ParamEntry* picked = FindGuerrillaFactionEntry(factionsCfg, selResistance);
     if (!picked)
@@ -279,10 +289,13 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
     // block but not the other discard every body pick, silently, with the
     // mission author's typo as the only cause. The "is this a Guerrilla
     // template" signal is the pending selection itself: the untouched-screen
-    // early-out below keeps every non-Guerrilla launch byte-identical, and
-    // every ordinary launch path (single mission, campaign, editor preview,
-    // reference mission) runs GStats.ClearAll() before it publishes, so the
-    // campaign variable bank cannot leak a stale pick into one.
+    // early-out below keeps every non-Guerrilla launch byte-identical. What
+    // contains the seam is the gameMode == GModeArcade gate at the call site
+    // (World/WorldInit.cpp): network, intro and cutscene launches never reach
+    // it. The secondary argument is that every ordinary arcade launch path
+    // (single mission, editor preview, reference mission) runs
+    // GStats.ClearAll() before it publishes - campaign progression runs
+    // ClearMission() only, which is why the gate is the load-bearing half.
     RString selPlayerClass = ReadMenuSelection("gmselplayerclass");
     RString selOutfit = ReadMenuSelection("gmseloutfit");
     // the resistance pick is the third channel (issue #54 A3): a non-default

@@ -152,3 +152,33 @@ TEST_CASE("GuerrillaUnavailableMessage: names the role, the faction and the reas
     REQUIRE(Str(msg).find("tiers[0] 'X'") != std::string::npos);
     REQUIRE(std::string(kGuerrillaFactionUnavailableSuffix) == " (not in loaded data)");
 }
+
+TEST_CASE("GuerrillaFactionIssue: the menu gate holds playerClassWarrior to the launch seam's shape gate",
+          "[UI][Guerrilla][gating]")
+{
+    // the #46 seam-4 shape: a class CfgVehicles carries whose .p3d the
+    // package does not ship passes the class probe and fails at launch; with
+    // the shape predicate the menu greys it out instead of offering it
+    ParsedConfig cfg("class CfgVehicles\n"
+                     "{\n"
+                     "    class SoldierWB { model=\"\\men\\soldier.p3d\"; };\n"
+                     "    class GhostBody { model=\"\\nowhere\\ghost.p3d\"; };\n"
+                     "};\n"
+                     "class CfgGuerrillaFactions\n"
+                     "{\n"
+                     "    class Real  { side=\"WEST\"; tiers[]={\"SoldierWB\"}; playerClassWarrior=\"SoldierWB\"; };\n"
+                     "    class Ghost { side=\"EAST\"; tiers[]={\"SoldierWB\"}; playerClassWarrior=\"GhostBody\"; };\n"
+                     "};\n");
+    const ParamEntry* vehicles = cfg.file.FindEntry("CfgVehicles");
+    FakeProbe probe;
+    probe.vehicles = {"SoldierWB", "GhostBody"};
+    auto shapeExists = [](RString path) { return std::string((const char*)path).find("soldier") != std::string::npos; };
+
+    // without the shape predicate (the old verdict) both are offered
+    REQUIRE(Str(GuerrillaFactionIssue(cfg.Factions(), "Ghost", probe)).empty());
+    // with it, the launch's verdict is the menu's verdict
+    REQUIRE(Str(GuerrillaFactionIssue(cfg.Factions(), "Real", probe, vehicles, shapeExists)).empty());
+    RString issue = GuerrillaFactionIssue(cfg.Factions(), "Ghost", probe, vehicles, shapeExists);
+    REQUIRE(Str(issue).find("playerClassWarrior 'GhostBody'") == 0);
+    REQUIRE(Str(issue).find("not in the loaded data package") != std::string::npos);
+}

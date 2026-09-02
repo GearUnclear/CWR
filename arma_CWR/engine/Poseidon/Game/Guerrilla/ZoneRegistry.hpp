@@ -173,7 +173,7 @@ struct SettlementProbe
     virtual bool IsSettlement(const char* name, const Vector3& pos) const = 0;
 };
 
-// The engine's SettlementProbe: dry land (Landscape::WaterDepth == 0 at the
+// The engine's SettlementProbe: dry land (Landscape::SurfaceY above sea level at the
 // entry) with at least kMinBuildings Building objects of house size
 // (bounding sphere > kMinBuildingRadius) within kRadius metres. A run with
 // no landscape or world loaded (headless config tests) accepts everything,
