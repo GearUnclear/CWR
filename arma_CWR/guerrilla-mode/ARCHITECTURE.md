@@ -50,6 +50,25 @@ carries:
   strings from the nulars **`gmOccupierSide` / `gmResistanceSide`** (defaults
   `"EAST"`/`"GUER"`).
 
+  **This class is NOT authored per island (issue #54 A1/A4).** The table the
+  engine reads is the UNION of a GLOBAL block and the island template's own,
+  the island winning on a class-name collision (whole-class replacement, never
+  a per-key merge) - `Game/Guerrilla/FactionSources.*`, the one code path all
+  three consumers (new-game menu, `ZoneRegistry::LoadFromConfig`, the outfit
+  seam) go through. The global block is whatever lands in `Pars`: an addon
+  pbo's config, a mod folder's `bin\config.cpp`, or the data dir's
+  `bin\config-extra.cpp` (merged last). A war roster is not an island fact, so
+  it belongs there: the vanilla WEST/EAST/GUER rosters live in
+  `guerrilla-mode/config/guerrilla-factions.hpp`, installed to
+  `<GameDir>\bin\`, and the @LoBo rosters in
+  `tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp`. What an island
+  template's own block keeps is **`class CIV`**: the population models and
+  ambient-traffic hulls of that island's data set, which *is* an island fact -
+  plus any deliberate override of a global class. A unit test pins that
+  (`test_guerrilla_module.cpp`, "a shipped template's own faction block holds
+  only CIV"). `defaultOccupier`/`defaultResistance` name classes from the
+  merged table, so they may name a class the template never declares.
+
 **Coordinate contract (moved from init.sqs to config):** zone `position[]` is
 authored in **script/getPos order `[easting, northing, elevation]`** — *not*
 the `mission.sqm` `position[]` order `[easting, elevation, northing]`. The
@@ -358,8 +377,16 @@ guerrilla-mode/core/          <- THE core. One copy. Edit here.
                               native handler registration, exec managers
   scripts/                    the 15 managers + helpers (manifest below)
 
+guerrilla-mode/config/        <- THE global faction library. One copy.
+  guerrilla-factions.hpp      CfgGuerrillaFactions: the vanilla WEST/EAST/GUER
+                              rosters -> <GameDir>\bin\guerrilla-factions.hpp
+  config-extra.cpp            the seed <GameDir>\bin\config-extra.cpp that
+                              #includes it (created only if none exists)
+
 guerrilla-mode/mission/Guerrilla.<World>/
-  description.ext             island data: CfgGuerrillaZones (+seedCities) + CfgGuerrillaFactions
+  description.ext             island data: CfgGuerrillaZones (+seedCities),
+                              CfgGuerrillaFactions (CIV + any override),
+                              CfgGuerrillaMarket
   mission.sqm                 one resistance player at the Camp
   init.sqs                    TWO LINES: a comment + [] exec "\gmcore\init.sqs"
 ```
