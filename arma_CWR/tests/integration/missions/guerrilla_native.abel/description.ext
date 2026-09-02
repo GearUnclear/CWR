@@ -192,10 +192,13 @@ class CfgGuerrillaFactions
         // driving town-to-town; commandeerable). A real array this time:
         // civVehicles[] is read by ZoneRegistry::LoadFactions and
         // package-probed like vehicles[] (unresolvable hulls are dropped,
-        // an empty result leaves civilian traffic inert). All five
-        // verified present in the 1.99 core config: Skoda, SkodaBlue,
-        // SkodaRed, SkodaGreen, Rapid (Trabant / Mini / Bus are
-        // Resistance-era - absent, do not add).
+        // an empty result leaves civilian traffic inert). Deliberately kept
+        // to the five 1.99-core sedans: the traffic tests force-spawn a
+        // uniform-random pick from this list, so the fixture stays
+        // sedan-shaped and predictable. (Trabant/Mini/Bus DO exist in
+        // Classic 1.99 as Resistance-era addon pbos - an earlier note here
+        // said otherwise - but they belong in the play templates, not this
+        // fixture; see Guerrilla.Abel.)
         civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid"};
     };
 };
