@@ -460,6 +460,31 @@ class ParamFile : public ParamClass
     USE_FAST_ALLOCATOR
 };
 
+// --- tolerant parsing of known 1.96-era config defect classes ----------------
+// Third-party addons ship two malformed-token classes that the 1.96 config
+// reader silently coerced and this one does not: a float literal with two or
+// more dots ("0.0.1"), and a bare scope keyword in a file that forgot the
+// "#define public 2" header. Both end up stored as raw strings, which read back
+// through the script evaluator - "0.0.1" raises "Unknown operator" (fatal under
+// --autotest) and "public" reads back as 0, making every class in the file
+// abstract. Coercing them at parse time keeps a defective mod loadable.
+
+enum ParamToleratedLiteralKind
+{
+    PTLNone = 0,       //!< not a known defect class: keep the raw string
+    PTLMalformedFloat, //!< "0.0.1" and friends: best-effort strtod prefix
+    PTLScopeKeyword    //!< bare private/protected/public: 0/1/2
+};
+
+//! Classify a NUL-terminated unquoted config token that failed both numeric
+//! scans, and return the value it coerces to in `value`. PTLNone leaves it alone.
+ParamToleratedLiteralKind ClassifyToleratedLiteral(const char* token, float& value);
+
+//! Turn the coercion off and keep the historical raw-string behaviour.
+//! Published by AppConfig from --strict-config, so the IO layer never has to
+//! include AppConfig.
+extern bool GParamFileStrictLiterals;
+
 } // namespace Poseidon
 
 using Poseidon::ParamEntry;

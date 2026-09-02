@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Platform/InitBridge.hpp> // For wrapper functions
 #include <Poseidon/Network/NetworkConfig.hpp>
 #include <Poseidon/IO/Filesystem/FileOps.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <filesystem>
 #include <stdio.h>
 #include <string.h>
@@ -572,6 +573,13 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                        "builds"),
                    CliHelpVisibility::Dev);
 
+        showOption(initGroup->add_flag("--strict-config", _strictConfig,
+                                       "Do not coerce known malformed config tokens (a float literal with two or "
+                                       "more dots, a bare scope keyword in a file missing its #define header); keep "
+                                       "them as raw strings, which the config reader then hands to the script "
+                                       "evaluator"),
+                   CliHelpVisibility::Dev);
+
         showOption(initGroup->add_flag("--noland,--no-landscape", _noLandscape, "Disable landscape rendering"),
                    CliHelpVisibility::Dev);
         showOption(initGroup->add_flag("--no-terrain-cache", _noTerrainCache,
@@ -1128,6 +1136,9 @@ void AppConfig::ApplyToLegacyGlobals()
         ::netLogValid = true;
 #endif
     ::AutoTest = _autoTest;
+    // The IO layer must not know about AppConfig, so the toggle is published as a
+    // plain global next to the parser that reads it.
+    Poseidon::GParamFileStrictLiterals = _strictConfig;
 
     // Mission file
     if (!_missionFile.empty())

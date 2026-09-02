@@ -523,7 +523,9 @@ class ParamRawArray
         operator SoundPars() const;
     */
 
-    void Parse(QIStream& in, ParamFile* file);
+    // `owner`/`arrayName` only name the site in a tolerated-defect warning; they
+    // are not built into a context string unless a defect actually fires.
+    void Parse(QIStream& in, ParamFile* file, const ParamEntry* owner = nullptr, const char* arrayName = nullptr);
     void Save(QOStream& f, int indent) const;
     void SerializeBin(SerializeBinStream& f);
     void CalculateCheckValue(PASumCalculator& sum) const;
@@ -666,7 +668,7 @@ class ParamArray : public ParamEntry, public ParamRawArray
 
     const IParamArrayValue& operator[](int i) const override { return GetValue(i); }
 
-    void Parse(QIStream& in, ParamFile* file);
+    void Parse(QIStream& in, ParamFile* file, const ParamEntry* owner = nullptr);
     void Save(QOStream& f, int indent) const override;
 
     void SerializeBin(SerializeBinStream& f) override;

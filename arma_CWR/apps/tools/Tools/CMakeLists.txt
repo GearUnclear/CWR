@@ -39,6 +39,8 @@ add_executable(PoseidonTools
     commands/ScanCommand.hpp
     commands/MineCommand.cpp
     commands/MineCommand.hpp
+    commands/ModCommand.cpp
+    commands/ModCommand.hpp
     commands/InputCommand.cpp
     commands/InputCommand.hpp
     commands/VonCommand.cpp

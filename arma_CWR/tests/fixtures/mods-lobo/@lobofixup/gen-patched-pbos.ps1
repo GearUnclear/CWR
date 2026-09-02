@@ -3,54 +3,66 @@
     Regenerates this fixture mod's patched @LoBo pbo shadows.
 
 .DESCRIPTION
-    @LoBo's LoBoammo.pbo and LoBo_airammo.pbo ship a malformed float literal
-    ("0.0.1") in eleven CfgAmmo tracerColor[] arrays. This engine's config
-    reader evaluates non-numeric tokens as script expressions AT PARSE TIME,
-    and under --autotest any script error is a hard abort - so a pristine
-    @LoBo cannot boot a test mission at all. bin/config.cpp cannot fix it
-    (the deferred mod-config merge runs after the addon configs parse).
+    Stock @LoBo's LoBoammo.pbo and LoBo_airammo.pbo ship a malformed float
+    literal ("0.0.1") in eleven CfgAmmo tracerColor[] arrays. The config reader
+    coerces such a token to its strtod prefix now (see ClassifyToleratedLiteral
+    in engine/Poseidon/IO/ParamFile/ParamFile.cpp), so a stock @LoBo no longer
+    hard-aborts under --autotest; the shadows stay as belt and braces, and
+    because the fixture's bin/config.cpp (its CfgAddons preload roster and
+    CfgGuerrillaFactions) is what several lobo-lane tests assert against.
 
-    The fix: same-named pbos in this mod's addons/ SHADOW @LoBo's copies on
-    the mod path. "0.0.1" -> "0.001" is a same-length byte patch, so the pbo
-    headers stay valid without repacking.
+    This script copies the two ammo pbos into addons/ and then runs
+
+        PoseidonTools mod doctor <fixture folder> --fix
+
+    which detects the defect generically (defect class MALFORMED_FLOAT) and
+    rewrites each token in place, padded back to the original byte length with
+    fractional zeros: "0.0.1" -> "0.000". That is the value the 1.96 reader kept.
+    (The earlier hand-rolled version of this script wrote "0.001", a different
+    number that only happened to be the same length.) The pbo header table does
+    not move, so no repack is involved.
 
     The patched pbos are THIRD-PARTY content (APL-SA LoBo mod data) and are
-    gitignored (see .gitignore here) - they must never be committed to this
-    GPL repo. Run this script ONCE before first use of the lobo integration
-    tests (guerrilla_sinai_swap, guerrilla_new_game_e2e), and rerun it if
-    @LoBo is reinstalled/updated.
+    gitignored (see .gitignore here) - they must never be committed to this GPL
+    repo. Rerun this script if @LoBo is reinstalled or updated.
 
-    STATE ON THIS MACHINE (checked 2026-08-08): @LoBo's own LoBoammo.pbo and
-    LoBo_airammo.pbo were already repaired in place on 2026-07-16 and are now
-    byte-identical to the shadows in addons/, so the shadows are inert - a
-    reinstall of stock @LoBo makes them load-bearing again, which is why they
-    stay. The fixture as a whole is NOT redundant either way: bin/config.cpp
-    carries the CfgAddons preload roster and CfgGuerrillaFactions that several
-    lobo-lane tests assert against. Do not delete this fixture.
-
-    See also tools/lobo/fix-lobo-scope.ps1, which repairs a second, unrelated
-    @LoBo content defect (LoBoWreck.pbo and LoBoPalObj.pbo omit the
-    "#define public 2" header their sibling configs carry) with the same
-    same-length in-place byte patch.
+    STATE ON THIS MACHINE (checked 2026-09-02): @LoBo's own LoBoammo.pbo and
+    LoBo_airammo.pbo were already repaired in place on 2026-07-16 (to "0.001"),
+    so a rerun here copies already-clean pbos and the doctor finds nothing to do.
+    A reinstall of stock @LoBo makes this script load-bearing again.
 
 .PARAMETER LoBoDir
     The @LoBo mod folder. Default: D:\Arma_CWA\@LoBo
+
+.PARAMETER Tools
+    PoseidonTools executable.
 #>
 param(
-    [string]$LoBoDir = 'D:\Arma_CWA\@LoBo'
+    [string]$LoBoDir = 'D:\Arma_CWA\@LoBo',
+    [string]$Tools = (Join-Path $PSScriptRoot '..\..\..\..\dist\x64-win-rwdi\PoseidonTools.exe')
 )
 $ErrorActionPreference = 'Stop'
+
+if (-not (Test-Path -LiteralPath $Tools)) { throw "PoseidonTools not found: $Tools (build it, or pass -Tools)" }
+
 $dest = Join-Path $PSScriptRoot 'addons'
 New-Item -ItemType Directory -Force $dest | Out-Null
 foreach ($name in 'LoBoammo.pbo', 'LoBo_airammo.pbo') {
     $src = Join-Path (Join-Path $LoBoDir 'addons') $name
     if (-not (Test-Path -LiteralPath $src)) { throw "Not found: $src" }
-    $bytes = [System.IO.File]::ReadAllBytes($src)
-    $text = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
-    $n = ([regex]::Matches($text, [regex]::Escape('0.0.1'))).Count
-    $patched = $text.Replace('0.0.1', '0.001')
-    [System.IO.File]::WriteAllBytes((Join-Path $dest $name), [System.Text.Encoding]::GetEncoding(28591).GetBytes($patched))
-    Write-Output ("{0}: {1} occurrence(s) patched" -f $name, $n)
+    $target = Join-Path $dest $name
+    if (Test-Path -LiteralPath $target) { Set-ItemProperty -LiteralPath $target -Name IsReadOnly -Value $false }
+    Copy-Item -LiteralPath $src -Destination $target -Force
+    Set-ItemProperty -LiteralPath $target -Name IsReadOnly -Value $false
 }
+
+& $Tools mod doctor $PSScriptRoot --fix
+if ($LASTEXITCODE -eq 2) { throw "mod doctor failed with I/O errors (exit 2)" }
+
+# The doctor keeps pre-patch copies under <folder>/_ud-orig; here the source is
+# always @LoBo, so the backups are dead weight in a gitignored fixture.
+$backup = Join-Path $PSScriptRoot '_ud-orig'
+if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+
 Write-Output "Done. Mount order: --mod `"@LoBo;...\@lobofixup`" (fixup AFTER @LoBo)."
 exit 0

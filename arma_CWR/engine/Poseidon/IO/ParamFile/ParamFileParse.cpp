@@ -429,7 +429,18 @@ RStringB ParamRawValueInt::GetValue() const
     return (const char*)buf;
 }
 
-void ParamRawArray::Parse(QIStream& in, ParamFile* file)
+// Name an array element for a tolerated-defect warning, e.g.
+// "CfgAmmo/LoBo_50cal.tracerColor[2]". Only called when a defect fires, so the
+// string building stays off the hot config-load path.
+static RString ArrayElementContext(const ParamEntry* owner, const char* arrayName, int index)
+{
+    BString<512> buf;
+    RString base = owner ? owner->GetContext(arrayName) : RString(arrayName ? arrayName : "<array>");
+    sprintf(buf, "%s[%d]", (const char*)base, index);
+    return (const char*)buf;
+}
+
+void ParamRawArray::Parse(QIStream& in, ParamFile* file, const ParamEntry* owner, const char* arrayName)
 {
     int c = in.get();
     while (isspace(c))
@@ -455,7 +466,7 @@ void ParamRawArray::Parse(QIStream& in, ParamFile* file)
             // sub-array
             Ref<ParamArrayValueArray> sub = new ParamArrayValueArray();
             IParamArrayValue* val = sub;
-            sub->Parse(in, file);
+            sub->Parse(in, file, owner, arrayName);
             _value.Add(val);
             c = in.get();
         }
@@ -492,9 +503,30 @@ void ParamRawArray::Parse(QIStream& in, ParamFile* file)
                     {
                         AddValue(val);
                     }
-                    else
+                }
+                if (!ok)
+                {
+                    float coerced = 0.0f;
+                    ParamToleratedLiteralKind kind =
+                        GParamFileStrictLiterals ? PTLNone : ClassifyToleratedLiteral(word, coerced);
+                    switch (kind)
                     {
-                        AddValue(word);
+                        case PTLScopeKeyword:
+                            LOG_WARN(Config,
+                                     "config: undefined scope keyword '{}' in {} - resolved as {} (the value the "
+                                     "missing #define would have given it)",
+                                     word, (const char*)ArrayElementContext(owner, arrayName, _value.Size()),
+                                     (int)coerced);
+                            AddValue((int)coerced);
+                            break;
+                        case PTLMalformedFloat:
+                            LOG_WARN(Config, "config: malformed float literal '{}' in {} - parsed as {} (best effort)",
+                                     word, (const char*)ArrayElementContext(owner, arrayName, _value.Size()), coerced);
+                            AddValue(coerced);
+                            break;
+                        case PTLNone:
+                            AddValue(word);
+                            break;
                     }
                 }
             }
@@ -612,9 +644,9 @@ void ParamRawArray::SerializeBin(SerializeBinStream& f)
     }
 }
 
-void ParamArray::Parse(QIStream& in, ParamFile* file)
+void ParamArray::Parse(QIStream& in, ParamFile* file, const ParamEntry* owner)
 {
-    ParamRawArray::Parse(in, file);
+    ParamRawArray::Parse(in, file, owner, GetName());
 }
 void ParamArray::Save(QOStream& f, int indent) const
 {

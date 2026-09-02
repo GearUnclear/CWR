@@ -851,18 +851,168 @@ TEST_CASE("ParamFile - Error on unterminated quotes", "[paramfile][parse][errors
     */
 }
 
+// Tolerant parsing of the two 1.96-era defect classes. Both used to be stored as
+// raw strings, which read back through the script evaluator: "0.0.1" raises
+// "Unknown operator" (fatal under --autotest) and a bare "public" reads back as
+// 0, making every class in the file abstract. See ClassifyToleratedLiteral.
 TEST_CASE("ParamFile - Error on malformed numbers", "[paramfile][parse][errors]")
 {
+    // Restores the default even if a REQUIRE below aborts the section.
+    struct StrictLiteralsGuard
+    {
+        bool saved = Poseidon::GParamFileStrictLiterals;
+        ~StrictLiteralsGuard() { Poseidon::GParamFileStrictLiterals = saved; }
+    } guard;
+    Poseidon::GParamFileStrictLiterals = false;
+
     ParamFile pf;
 
-    SECTION("Invalid number format")
+    SECTION("Scalar with multiple decimal points keeps the strtod prefix")
     {
-        const char* config = "value = 12.34.56;"; // Multiple decimal points
+        const char* config = "value = 12.34.56;";
         QIStream in(config, strlen(config));
         pf.Parse(in);
 
-        // Should reject invalid numbers
-        REQUIRE(true); // Document behavior
+        ParamEntry* entry = pf.FindEntry("value");
+        REQUIRE(entry != nullptr);
+        REQUIRE(entry->IsFloatValue() == true);
+        REQUIRE(entry->operator float() == Catch::Approx(12.34f));
+    }
+
+    SECTION("Malformed array element does not disturb its neighbours")
+    {
+        const char* config = "arr[] = {0.8, 0.5, 0.0.1, 0.25};";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        ParamEntry* arr = pf.FindEntry("arr");
+        REQUIRE(arr != nullptr);
+        REQUIRE(arr->GetSize() == 4);
+        REQUIRE((*arr)[0].GetFloat() == Catch::Approx(0.8f));
+        REQUIRE((*arr)[1].GetFloat() == Catch::Approx(0.5f));
+        REQUIRE((*arr)[2].IsFloatValue() == true);
+        REQUIRE((*arr)[2].GetFloat() == Catch::Approx(0.0f));
+        REQUIRE((*arr)[3].GetFloat() == Catch::Approx(0.25f));
+    }
+
+    SECTION("Negative and signed malformed literals")
+    {
+        const char* config = "a = -1.2.3;\n"
+                             "b = +0.0.1;\n";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        REQUIRE(pf.FindEntry("a")->operator float() == Catch::Approx(-1.2f));
+        REQUIRE(pf.FindEntry("b")->operator float() == Catch::Approx(0.0f));
+    }
+
+    SECTION("A single dot is a normal float and a dotted word stays a string")
+    {
+        const char* config = "ok = 1.5;\n"
+                             "model = \\LoBo\\wreck.p3d;\n";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        REQUIRE(pf.FindEntry("ok")->operator float() == Catch::Approx(1.5f));
+        ParamEntry* model = pf.FindEntry("model");
+        REQUIRE(model != nullptr);
+        REQUIRE(model->IsTextValue() == true);
+    }
+
+    SECTION("Strict mode restores the raw-string behaviour")
+    {
+        Poseidon::GParamFileStrictLiterals = true;
+
+        const char* config = "value = 12.34.56;\n"
+                             "arr[] = {0.5, 0.0.1};\n";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        ParamEntry* entry = pf.FindEntry("value");
+        REQUIRE(entry != nullptr);
+        REQUIRE(entry->IsTextValue() == true);
+        REQUIRE(std::string(entry->GetValueRaw().Data()) == "12.34.56");
+
+        ParamEntry* arr = pf.FindEntry("arr");
+        REQUIRE(arr != nullptr);
+        REQUIRE(arr->GetSize() == 2);
+        REQUIRE((*arr)[1].IsTextValue() == true);
+        REQUIRE(std::string((*arr)[1].GetValueRaw().Data()) == "0.0.1");
+    }
+}
+
+TEST_CASE("ParamFile - Undefined scope keyword", "[paramfile][parse][errors]")
+{
+    struct StrictLiteralsGuard
+    {
+        bool saved = Poseidon::GParamFileStrictLiterals;
+        ~StrictLiteralsGuard() { Poseidon::GParamFileStrictLiterals = saved; }
+    } guard;
+    Poseidon::GParamFileStrictLiterals = false;
+
+    ParamFile pf;
+
+    SECTION("scope = public resolves to 2 and leaves the class createable")
+    {
+        const char* config = "class Wreck\n"
+                             "{\n"
+                             "  scope = public;\n"
+                             "};\n";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        ParamEntry* wreck = pf.FindEntry("Wreck");
+        REQUIRE(wreck != nullptr);
+        ParamClass* cls = wreck->GetClassInterface();
+        REQUIRE(cls != nullptr);
+
+        ParamEntry* scope = cls->FindEntry("scope");
+        REQUIRE(scope != nullptr);
+        REQUIRE(scope->IsIntValue() == true);
+        REQUIRE(scope->GetInt() == 2);
+
+        // `scope` is not the access keyword, so the class must stay unrestricted:
+        // a non-default access mode would refuse later config merges.
+        REQUIRE(cls->GetAccessMode() == PADefault);
+    }
+
+    SECTION("private and protected resolve to 0 and 1")
+    {
+        const char* config = "a = private;\n"
+                             "b = protected;\n";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        REQUIRE(pf.FindEntry("a")->GetInt() == 0);
+        REQUIRE(pf.FindEntry("a")->IsIntValue() == true);
+        REQUIRE(pf.FindEntry("b")->GetInt() == 1);
+        REQUIRE(pf.FindEntry("b")->IsIntValue() == true);
+    }
+
+    SECTION("Wrong case is a different token and stays a raw string")
+    {
+        const char* config = "scope = Public;";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        ParamEntry* scope = pf.FindEntry("scope");
+        REQUIRE(scope != nullptr);
+        REQUIRE(scope->IsTextValue() == true);
+        REQUIRE(std::string(scope->GetValueRaw().Data()) == "Public");
+    }
+
+    SECTION("Strict mode restores the raw-string behaviour")
+    {
+        Poseidon::GParamFileStrictLiterals = true;
+
+        const char* config = "scope = public;";
+        QIStream in(config, strlen(config));
+        pf.Parse(in);
+
+        ParamEntry* scope = pf.FindEntry("scope");
+        REQUIRE(scope != nullptr);
+        REQUIRE(scope->IsTextValue() == true);
+        REQUIRE(std::string(scope->GetValueRaw().Data()) == "public");
     }
 }
 

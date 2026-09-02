@@ -203,7 +203,14 @@ public:
     /// Debug only; off in RelWithDebInfo and shipping (the build players run).
     /// Automated tests pass --strict explicitly. --no-strict / --strict overrides.
     bool Strict() const { return _strict; }
-    
+
+    /// Strict config literals: keep an unquoted config token that fails both
+    /// numeric scans as a raw string, the way this reader always did. Default
+    /// off, i.e. the two known third-party defect classes (a float literal with
+    /// two or more dots, a bare scope keyword in a file missing its #define
+    /// header) are coerced at parse time with one warning each.
+    bool StrictConfig() const { return _strictConfig; }
+
     bool NoLandscape() const { return _noLandscape; }
 
     /// Frame validation stats — log per-frame pass/draw counts every
@@ -417,6 +424,7 @@ private:
     bool _auditCfgVehiclesModels = false;
     bool _keepFocus = false;
     bool _strict = false;
+    bool _strictConfig = false;
     bool _noLandscape = false;
     bool _noTerrainCache = false;
     bool _renderFrameLog  = false;
