@@ -6,7 +6,7 @@
 # 1:1.  Pester sets up an ephemeral POSEIDON_USER_DIR; tri honours it
 # (commit 110cdba2) instead of creating its own tempdir; the tri
 # scenario opens Graphics, changes Terrain Detail via UI nav, Esc
-# back to Index (live-apply pattern — Unmount writes the file),
+# back to Index (live-apply pattern - Unmount writes the file),
 # exits.  Pester then reads graphics.cfg and asserts the change
 # landed.
 #
@@ -48,7 +48,7 @@ Describe "graphics.cfg persistence through live UI flow" {
             # flake (access violation during long idle simulation).  This
             # test does more sim frames than the audio / display
             # equivalents because GraphicsPage requires double-page
-            # navigation (Index → Down×2 → Enter into Graphics) so the
+            # navigation (Index -> Downx2 -> Enter into Graphics) so the
             # crash window is larger; bumping retries is the dirty knob
             # that keeps the gate green until the engine bug is fixed.
             $sqf = Join-Path $script:repoRoot "tests/integration/ui/options/graphics/new_graphics_apply_persist.test.sqf"
@@ -65,7 +65,7 @@ Describe "graphics.cfg persistence through live UI flow" {
     }
 
     It "subsequent boot reads the persisted graphics.cfg back into the runtime" {
-        # Same shape as audio + display equivalents — write a known cfg,
+        # Same shape as audio + display equivalents - write a known cfg,
         # boot --check, confirm boot didn't stomp it.
         $eph = New-EphemeralGamePaths
         try {

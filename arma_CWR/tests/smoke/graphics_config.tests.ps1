@@ -2,7 +2,7 @@
 # Pester smoke tests for the graphics.cfg eager-write boot dance with
 # RAM-bucket autodetect.
 #
-# Mirrors audio_config.tests.ps1 + display_config.tests.ps1 — same
+# Mirrors audio_config.tests.ps1 + display_config.tests.ps1 - same
 # four It blocks, same ephemeral-POSEIDON_USER_DIR pattern.  Run:
 #   Invoke-Pester -Container (New-PesterContainer -Path tests/smoke/graphics_config.tests.ps1 -Data @{ Preset = 'win-x64-clang-rwdi' }) -Output Detailed
 
@@ -49,7 +49,7 @@ Describe "graphics.cfg boot dance" {
 
             # Per-row sanity: tiers match the picked preset's bundle.
             # We don't pin a specific tier (developer machines vary
-            # 8 GB → 64 GB+), but the four tier rows must be consistent
+            # 8 GB -> 64 GB+), but the four tier rows must be consistent
             # with each other per the kTierBundles table in
             # GraphicsConfig.cpp.
             [int]$preset = $kv['qualityPreset']
@@ -93,11 +93,11 @@ gamma=0.900000;
         }
     }
 
-    It "does NOT persist normalization on boot — invalid tier stays in file" {
+    It "does NOT persist normalization on boot - invalid tier stays in file" {
         $eph = New-EphemeralGamePaths
         try {
             $cfgPath = Join-Path $eph.UserDir "graphics.cfg"
-            # Bogus Terrain tier (99) — file kept untouched, runtime
+            # Bogus Terrain tier (99) - file kept untouched, runtime
             # falls back to TierUltra per Normalize semantics.
             @"
 qualityPreset=4;

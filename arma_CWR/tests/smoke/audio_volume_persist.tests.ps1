@@ -4,7 +4,7 @@
 #
 # Pester sets up an ephemeral POSEIDON_USER_DIR.  Trident respects
 # an inherited POSEIDON_USER_DIR (instead of creating its own
-# tempdir) when the parent process supplies one — see
+# tempdir) when the parent process supplies one - see
 # engine/Trident/src/scenarios/integration.rs run_sqf_test.  The tri
 # scenario opens Audio, calls triSetVolume to write runtime values,
 # Esc-closes Audio so AudioPage::Unmount fires SaveConfig, and exits.
@@ -65,12 +65,12 @@ Describe "audio.cfg persistence through live UI flow" {
             $sqf = Join-Path $script:repoRoot "tests/integration/ui/options/audio/new_audio_volume_persist.test.sqf"
             # --retries 3 to absorb the pre-existing engine flake on
             # the options screen (access violation during long idle
-            # sim — documented in production_options_capture.test.sqf
+            # sim - documented in production_options_capture.test.sqf
             # comments; same crash on master, not introduced here).
             & $script:triExe test $sqf --game-dir (Split-Path $script:gameExe -Parent) --data-dir $script:gameDir --retries 3 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0 -Because "tri scenario must pass"
 
-            Test-Path $audioCfg | Should -BeTrue -Because "Audio Unmount → SaveConfig should write the file"
+            Test-Path $audioCfg | Should -BeTrue -Because "Audio Unmount -> SaveConfig should write the file"
             $kv = Read-AudioCfg $audioCfg
             $kv['musicVolume']   | Should -Be '33' -Because "triSetVolume music 33 set runtime; Unmount persisted it"
             $kv['effectsVolume'] | Should -Be '44'

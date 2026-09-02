@@ -154,7 +154,7 @@ function script:Wait-Until {
     throw "Timed out waiting for $Description"
 }
 
-# NOTE: keep this signature/body identical to the copy in tests/cli/server.tests.ps1 —
+# NOTE: keep this signature/body identical to the copy in tests/cli/server.tests.ps1 -
 # both are script:-scoped, so under the full Pester run (run-tests.ps1 loads every file)
 # the last-defined one shadows the other in the shared runspace. -UserDir is OPTIONAL so
 # either copy satisfies both callers (HARNESS_PORT= in stdout is the primary signal).
