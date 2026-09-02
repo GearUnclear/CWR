@@ -192,6 +192,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Core/test_version.cpp
     Asset/Cache/test_asset_cache.cpp
     Asset/Cache/test_handle.cpp
+    Asset/Addon/test_mod_doctor.cpp
     Core/test_perf_trace.cpp
     Core/test_scoped_timer.cpp
     Core/test_task_pool.cpp
@@ -391,6 +392,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_mission_world_names.cpp
     Game/Guerrilla/test_outfit_select.cpp
     Game/Guerrilla/test_faction_sources.cpp
+    Game/Guerrilla/test_addon_closure.cpp
     Game/test_oper_map.cpp
     Game/test_editor.cpp
     Game/test_titeffects_split.cpp

@@ -4,6 +4,7 @@
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 
 #include <Poseidon/AI/ArcadeTemplate.hpp>
+#include <Poseidon/Asset/Addon/AddonClosure.hpp> // CollectVehicleClassAddons (issue #54 C1)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>     // Pars / ExtParsMission / GetShapeName
 #include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (shape-file probe)
@@ -41,42 +42,6 @@ RString ReadMenuSelection(const char* lowercaseName)
         return RString();
     }
     return (RString)value;
-}
-
-// Optional string array off a config class. FindEntry (not
-// FindEntryNoInheritance) so an array INHERITED from a base class is found:
-// ParamClass::FindEntry resolves through _base, and most soldier bodies derive
-// their weapons[]/magazines[] from a base class rather than restating them. Null
-// when the key is absent or is not an array (ParamEntry::GetSize on a non-array
-// raises an EMError, so the IsArray gate is not merely defensive).
-const ParamEntry* FindClassArray(const ParamEntry* cls, const char* name)
-{
-    if (!cls)
-    {
-        return nullptr;
-    }
-    const ParamEntry* arr = cls->FindEntry(name);
-    if (!arr || !arr->IsArray())
-    {
-        return nullptr;
-    }
-    return arr;
-}
-
-// Record the addon that owns `entry`. An EMPTY owner means base-game content,
-// which ParamOwnerList reports visible unconditionally, so it is skipped: adding
-// it would put a meaningless empty name into the active list.
-void AddOwnerOf(const ParamEntry* entry, FindArrayRStringCI& addons)
-{
-    if (!entry)
-    {
-        return;
-    }
-    const RStringB& owner = entry->GetOwner();
-    if (owner.GetLength() > 0)
-    {
-        addons.AddUnique(RString(owner));
-    }
 }
 
 } // namespace
@@ -273,44 +238,10 @@ RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* fac
 void CollectPlayerBodyAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
                              const ParamEntry* magazinesCfg, RString className, FindArrayRStringCI& addons)
 {
-    if (!vehiclesCfg || className.GetLength() == 0)
-    {
-        return;
-    }
-    const ParamEntry* body = vehiclesCfg->FindEntry(className);
-    if (!body)
-    {
-        return; // unknown class - nothing to activate, and nothing will spawn
-    }
-    AddOwnerOf(body, addons);
-
-    // The body's own magazines[]: a mod body commonly carries mod ammo whose
-    // CfgMagazines class lives in a DIFFERENT pbo than the body itself.
-    if (const ParamEntry* mags = FindClassArray(body, "magazines"))
-    {
-        for (int i = 0; i < mags->GetSize(); i++)
-        {
-            AddOwnerOf(magazinesCfg ? magazinesCfg->FindEntry((RStringB)(*mags)[i]) : nullptr, addons);
-        }
-    }
-    // The body's weapons[], plus each weapon's own magazines[]: the weapon
-    // config names the ammo it accepts, and the engine touches those magazine
-    // classes when it kits the unit out, so their owners have to be visible too.
-    if (const ParamEntry* weapons = FindClassArray(body, "weapons"))
-    {
-        for (int i = 0; i < weapons->GetSize(); i++)
-        {
-            const ParamEntry* weapon = weaponsCfg ? weaponsCfg->FindEntry((RStringB)(*weapons)[i]) : nullptr;
-            AddOwnerOf(weapon, addons);
-            if (const ParamEntry* wMags = FindClassArray(weapon, "magazines"))
-            {
-                for (int j = 0; j < wMags->GetSize(); j++)
-                {
-                    AddOwnerOf(magazinesCfg ? magazinesCfg->FindEntry((RStringB)(*wMags)[j]) : nullptr, addons);
-                }
-            }
-        }
-    }
+    // the generic walk lives in Asset/Addon/AddonClosure since issue #54 C1
+    // (ArcadeUnitInfo::RequiredAddons and the faction closure share it);
+    // this name stays for the seam's callers and tests
+    CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, className, addons);
 }
 
 RString PlayerBodyModelIssue(const ParamEntry* vehiclesCfg, RString className,

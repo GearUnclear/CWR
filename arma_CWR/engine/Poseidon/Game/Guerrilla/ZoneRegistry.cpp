@@ -3,6 +3,7 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Asset/Addon/AddonClosure.hpp>       // faction addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
@@ -210,7 +211,50 @@ void ZoneRegistry::InitMission()
 {
     Clear();
     LoadFromConfig();
+    ActivateFactionAddons();
 }
+
+// Engine wrapper over CollectFactionAddons: the additive World::ActivateAddon
+// grant (the same runtime-only visibility the player-body seam uses, never
+// written into the template's addOns[]), logged once at INFO so a missing
+// pbo shows up as "activated X" or does not show up at all.
+void ZoneRegistry::ActivateFactionAddons() const
+{
+    if (!GWorld || !IsActive())
+    {
+        return;
+    }
+    FindArrayRStringCI addons;
+    CollectFactionAddons(Pars.FindEntry("CfgVehicles"), Pars.FindEntry("CfgWeapons"), Pars.FindEntry("CfgMagazines"),
+                         addons);
+    RString added;
+    int nAdded = 0;
+    for (int i = 0; i < addons.Size(); i++)
+    {
+        if (GWorld->IsAddonActive(addons[i]))
+        {
+            continue;
+        }
+        GWorld->ActivateAddon(addons[i]);
+        added = added + (nAdded > 0 ? RString(", ") : RString()) + addons[i];
+        nAdded++;
+    }
+    if (nAdded > 0)
+    {
+        LOG_INFO(Core, "ZoneRegistry: activated {} addon(s) the faction descriptors need beyond the mission's addOns[]: {}",
+                 nAdded, (const char*)added);
+    }
+}
+
+const FactionRecord* ZoneRegistry::GetFaction(int index) const
+{
+    if (index < 0 || index >= _factions.Size())
+    {
+        return nullptr;
+    }
+    return &_factions[index];
+}
+
 
 void ZoneRegistry::LoadFromConfig()
 {
@@ -801,6 +845,55 @@ bool IsWeaponKey(const char* key)
 }
 
 } // namespace
+
+void ZoneRegistry::CollectFactionAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
+                                        const ParamEntry* magazinesCfg, FindArrayRStringCI& addons) const
+{
+    for (int fi = 0; fi < _factions.Size(); fi++)
+    {
+        const FactionRecord& f = _factions[fi];
+        const AutoArray<RString>* unitLadders[] = {&f.tiers,       &f.tiersMG,  &f.tiersAT,  &f.tiersMedic,
+                                                   &f.tiersSniper, &f.civTiers, &f.vehicles, &f.civVehicles};
+        for (const AutoArray<RString>* ladder : unitLadders)
+        {
+            for (int i = 0; i < ladder->Size(); i++)
+            {
+                CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, (*ladder)[i], addons);
+            }
+        }
+        for (int k = 0; k < f.values.Size(); k++)
+        {
+            const char* key = f.values[k].key;
+            const RString& value = f.values[k].value;
+            if (value.GetLength() == 0)
+            {
+                continue;
+            }
+            // the *Civ twins of the unit keys (recruitFighterCiv, holdClassCiv,
+            // ...) and the CIV descriptor's civClass1..N are unit classes too
+            size_t len = strlen(key);
+            bool civUnit = (len > 3 && stricmp(key + len - 3, "Civ") == 0) ||
+                           (len > 8 && strnicmp(key, "civClass", 8) == 0 && stricmp(key, "civClassCount") != 0);
+            if (IsUnitClassKey(key) || civUnit || stricmp(key, "playerClassWarrior") == 0 ||
+                stricmp(key, "playerClassCiv") == 0)
+            {
+                CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, value, addons);
+            }
+            else if (IsWeaponKey(key))
+            {
+                // "...Mag" keys are CfgMagazines classes, the rest CfgWeapons
+                if (len > 3 && stricmp(key + len - 3, "Mag") == 0)
+                {
+                    CollectMagazineAddons(magazinesCfg, value, addons);
+                }
+                else
+                {
+                    CollectWeaponAddons(weaponsCfg, magazinesCfg, value, addons);
+                }
+            }
+        }
+    }
+}
 
 void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
 {

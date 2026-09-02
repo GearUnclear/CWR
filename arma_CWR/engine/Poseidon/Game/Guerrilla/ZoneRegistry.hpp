@@ -9,6 +9,7 @@
 // missions are unaffected.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Containers/RStringArray.hpp> // FindArrayRStringCI (CollectFactionAddons)
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
@@ -195,7 +196,11 @@ class ZoneRegistry : public SerializeClass
 
     // lifecycle -----------------------------------------------------------
     void Clear();       // full reset, including event handlers
-    void InitMission(); // Clear + LoadFromConfig; call at mission start
+    void InitMission(); // Clear + LoadFromConfig + ActivateFactionAddons; call at mission start
+    // World::ActivateAddon for every addon CollectFactionAddons finds that is
+    // not active yet (issue #54 C1); no-op without a world or an inactive
+    // registry. Logged once at INFO.
+    void ActivateFactionAddons() const;
     // rebuild static zone/faction tables from ExtParsMission, then Pars;
     // also resolves the campaign's occupier/resistance sides from the
     // gmSelOccupier / gmSelResistance script globals (new-game UI)
@@ -222,6 +227,22 @@ class ZoneRegistry : public SerializeClass
     // may exceed the descriptor count: DivergeAliasedFactions appends a copy
     // of a roster picked for both sides
     int NFactions() const { return _factions.Size(); }
+    // table order (config order, plus DivergeAliasedFactions copies); null
+    // out of range
+    const FactionRecord* GetFaction(int index) const;
+    // The addon closure of every class the loaded faction table names
+    // (issue #54 C1): tiers[] and the role/civ ladders, vehicles[] and
+    // civVehicles[], the unit-class keys (officer, holdClass, recruit*,
+    // companionClass, fallbackClass and their *Civ twins) and the weapon /
+    // magazine keys (base*, loot*). Owners resolve through
+    // Asset/Addon/AddonClosure over the injected config roots; base-game
+    // classes (empty owner) contribute nothing. Runs over the RESOLVED
+    // table, so substitutions made by the plan-15 pass are what gets
+    // activated. The engine wrapper (ActivateFactionAddons, run by
+    // InitMission) activates the result so a template's addOns[] need not
+    // list what its factions spawn.
+    void CollectFactionAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
+                              const ParamEntry* magazinesCfg, FindArrayRStringCI& addons) const;
     const ZoneRecord* GetZone(int index) const;
     ZoneRecord* GetZoneMutable(int index);
     int FindZoneIndex(const char* name) const; // -1 when not found
