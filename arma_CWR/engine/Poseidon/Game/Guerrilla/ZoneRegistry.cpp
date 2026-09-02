@@ -3,7 +3,8 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
-#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>             // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -218,11 +219,14 @@ void ZoneRegistry::LoadFromConfig()
     {
         zones = Pars.FindEntry("CfgGuerrillaZones");
     }
-    const ParamEntry* factions = ExtParsMission.FindEntry("CfgGuerrillaFactions");
-    if (!factions)
-    {
-        factions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
+    // the faction table is the UNION of the global config (addon faction
+    // packs, bin/config-extra.cpp) and the mission's own description.ext
+    // block, island winning on a name collision (issue #54 A1). Built here
+    // and consumed by LoadFromParams, which copies what it needs into
+    // FactionRecords, so the merged ParamFile may die with this frame.
+    FactionSources factionSources;
+    BuildFactionSourcesFromEngine(factionSources);
+    const ParamEntry* factions = factionSources.Factions();
     // new-game faction selections (nil outside a Guerrilla campaign)
     RString selOccupier = ReadSideSelection("gmseloccupier");
     RString selResistance = ReadSideSelection("gmselresistance");

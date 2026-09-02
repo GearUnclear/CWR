@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 
-#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // ClassProbe / ParsClassProbe
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>   // ClassProbe / ParsClassProbe
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 
 #include <Poseidon/AI/ArcadeTemplate.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -301,19 +302,20 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
                  (const char*)selPlayerClass, (const char*)selOutfit);
         return;
     }
-    // same ExtParsMission-then-Pars lookup as ZoneRegistry::LoadFromConfig.
-    // Either may stay null: only the outfit-token path reads them, and it
-    // degrades with a WARN of its own (ResolveCivilianPlayerClass).
+    // the zones block: ExtParsMission then Pars, as ZoneRegistry::LoadFromConfig;
+    // the factions table: the same global-U-island union the registry loads
+    // (issue #54 A1), so a resistance picked out of an addon faction pack
+    // resolves here too. Either may stay null: only the outfit-token path
+    // reads them, and it degrades with a WARN of its own
+    // (ResolveCivilianPlayerClass).
     const ParamEntry* zones = ExtParsMission.FindEntry("CfgGuerrillaZones");
     if (!zones)
     {
         zones = Pars.FindEntry("CfgGuerrillaZones");
     }
-    const ParamEntry* factions = ExtParsMission.FindEntry("CfgGuerrillaFactions");
-    if (!factions)
-    {
-        factions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
+    FactionSources factionSources;
+    BuildFactionSourcesFromEngine(factionSources);
+    const ParamEntry* factions = factionSources.Factions();
     RString selResistance = ReadMenuSelection("gmselresistance");
     ParsClassProbe probe;
     RString newClass = ResolvePlayerBodyClass(zones, factions, selPlayerClass, selOutfit, selResistance, probe);

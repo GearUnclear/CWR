@@ -4,7 +4,8 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
-#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // shared with ZoneRegistry::ResolveSideCollisions
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // shared with ZoneRegistry::ResolveSideCollisions
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // FindGuerrillaFactionEntry (outfit cycler, issue #25)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // CollectTownNames (START TOWN cycler, issue #16)
 #include <Poseidon/Core/resincl.hpp>
@@ -979,19 +980,25 @@ void GuerrillaNewGame::UpdateOutfitPreview()
 
 void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
 {
-    // CfgGuerrillaFactions is authored per-island, inside that island's own
-    // Guerrilla.<island> template mission's description.ext (see
-    // guerrilla-mode/mission/*/description.ext) — it is never an addon's
-    // global config, so Pars does not carry it. Peek the template's own
-    // description.ext the same way the single-mission browser previews a
-    // banked mission's overview (CreateSingleMissionBank), without running
-    // the full SetMission()/launch path.
+    // The faction table is the UNION of two sources (issue #54 A1, executing
+    // #26): the island's own Guerrilla.<island> template description.ext block
+    // (see guerrilla-mode/mission/*/description.ext) and the global config's
+    // CfgGuerrillaFactions (Pars - addon faction packs, mod bin/config.cpp,
+    // the UD bin/config-extra.cpp), the island winning on a class-name
+    // collision. Peek the template's own description.ext the same way the
+    // single-mission browser previews a banked mission's overview
+    // (CreateSingleMissionBank), without running the full SetMission()/launch
+    // path, then merge through FactionSources - the same helper the mission
+    // side (ZoneRegistry::LoadFromConfig) and the player-body seam use, so
+    // what the cyclers list is exactly what the campaign resolves.
     //
     // Lifetime: _islandCfg.Clear() invalidates every ParamEntry* previously
     // handed out of it, and OnLBSelChanged re-enters here on every island
     // change — so the two pointers must be nulled BEFORE the Clear and
-    // re-derived after the Parse. _occupiers/_resistances hold owning RString
-    // copies and are unaffected.
+    // re-derived after the Parse. _islandFactions points into
+    // _factionSources' owned copy (rebuilt below), _islandZones into
+    // _islandCfg or Pars. _occupiers/_resistances hold owning RString copies
+    // and are unaffected.
     // Keep the player's picks across a refresh by NAME, not by index: the two
     // lists are rebuilt from scratch below and an index means nothing against
     // the new one.
@@ -1000,8 +1007,10 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
 
     _islandFactions = nullptr;
     _islandZones = nullptr;
+    _factionSources.Clear();
     _islandCfg.Clear();
     _islandForFactions = island;
+    const ParamEntry* islandFactions = nullptr;
 
     RString missionBase = GuerrillaTemplateMissionBase(island);
     RString bankPrefix;
@@ -1016,23 +1025,20 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
         if (QIFStreamB::FileExist(descPath))
         {
             _islandCfg.Parse(descPath);
-            _islandFactions = _islandCfg.FindEntry("CfgGuerrillaFactions");
+            islandFactions = _islandCfg.FindEntry("CfgGuerrillaFactions");
             _islandZones = _islandCfg.FindEntry("CfgGuerrillaZones");
         }
     }
-    // No per-island descriptor (missing template, or a template with no
-    // CfgGuerrilla* of its own) — fall back to a global config an addon might
-    // publish, then to an empty list (cyclers show "(mission default)"; OK
-    // still works via the mission's own default* keys). Pars lives for the
-    // process, so storing a pointer into it is safe. Both entries fall back
-    // INDEPENDENTLY: sourcing the factions from Pars while leaving the zones
-    // null left the OK guard reading playerSide off nothing, so it took its
-    // legacy branch and blocked pairs the registry rebases happily — and left
-    // the cyclers with no default* keys to seed from.
-    if (!_islandFactions)
-    {
-        _islandFactions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
+    // Merge: island block U Pars block. Either may be missing (a template
+    // with no block of its own, a package with no faction pack); with both
+    // missing the list is empty (cyclers show "(mission default)"; OK still
+    // works via the mission's own default* keys). The zones block falls back
+    // to Pars INDEPENDENTLY: sourcing the factions globally while leaving the
+    // zones null left the OK guard reading playerSide off nothing, so it took
+    // its legacy branch and blocked pairs the registry rebases happily — and
+    // left the cyclers with no default* keys to seed from.
+    _factionSources.Build(Pars.FindEntry("CfgGuerrillaFactions"), islandFactions);
+    _islandFactions = _factionSources.Factions();
     if (!_islandZones)
     {
         _islandZones = Pars.FindEntry("CfgGuerrillaZones");

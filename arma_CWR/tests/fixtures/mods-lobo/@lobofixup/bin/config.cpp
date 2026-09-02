@@ -45,21 +45,6 @@ class CfgAddons
         };
     };
 };
-// New-game menu faction candidates. The GUERRILLA new-game display builds its
-// occupier/resistance cycler lists from the GLOBAL config's
-// CfgGuerrillaFactions (Pars - the mission's description.ext is not parsed at
-// menu time; see UI/Guerrilla/GuerrillaNewGame.cpp). The `side` field here is
-// a ROLE filter for the menu (occupier slot = "EAST", resistance slot =
-// "GUER", the built-in defaults): IDF's "WEST" matches neither slot, so both
-// cyclers fall back to listing every class and IDF is selectable as occupier.
-// The published selection strings ("IDF"/"EgyptFrontier") are then resolved
-// IN-MISSION against the template's own CfgGuerrillaFactions by CLASS NAME
-// (ZoneRegistry::ResolveSides), where IDF=WEST / EgyptFrontier=EAST.
-class CfgGuerrillaFactions
-{
-    class IDF          { side = "WEST"; };
-    class EgyptFrontier { side = "GUER"; };
-};
 class CfgAmmo
 {
     // LoBoammo.pbo

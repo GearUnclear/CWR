@@ -22,6 +22,7 @@
 
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp> // ParamFile (the per-island descriptor this display owns)
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // the merged faction table this display owns (issue #54 A1)
 
 #include <functional>
 #include <vector>
@@ -281,10 +282,10 @@ bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const c
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
 // template (bankPrefix non-empty, already ending in "\\"), otherwise
-// directly under the unbanked mission directory. CfgGuerrillaFactions lives
-// in each template's own description.ext (see guerrilla-mode/mission/*), NOT
-// in any addon's global config — Pars never carries this class — so the
-// new-game screen must read it per-island instead of from Pars.
+// directly under the unbanked mission directory. The island's block is one
+// of the TWO faction sources (issue #54 A1): it is merged with the global
+// config's CfgGuerrillaFactions (addon faction packs) through
+// Guerrilla::FactionSources, the island winning on a name collision.
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix);
 
 class GuerrillaNewGame : public Display
@@ -380,8 +381,11 @@ class GuerrillaNewGame : public Display
     // function-local ParamFile is why the IDC_OK guard fell back to Pars,
     // which never carries CfgGuerrillaFactions — see the note above).
     ParamFile _islandCfg;
-    const ParamEntry* _islandFactions = nullptr; // into _islandCfg, or into Pars, or null
-    const ParamEntry* _islandZones = nullptr;    // ditto; carries playerSide + the default* keys
+    // OWNS the merged faction table (island block U Pars block, issue #54
+    // A1); _islandFactions points into it. Rebuilt with _islandCfg.
+    Guerrilla::FactionSources _factionSources;
+    const ParamEntry* _islandFactions = nullptr; // into _factionSources' copy, or null
+    const ParamEntry* _islandZones = nullptr;    // into _islandCfg, or into Pars, or null; carries playerSide + default*
     // The island _islandCfg/_occupiers/_resistances currently describe. The
     // island list fires OnLBSelChanged on every click, not just on a real
     // change, so this is what makes the refresh idempotent.
