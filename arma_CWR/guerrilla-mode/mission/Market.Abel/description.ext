@@ -186,6 +186,9 @@ class CfgGuerrillaFactions
         civClass1 = "Civilian";
         civClass2 = "Civilian2";
         civClass3 = "Civilian3";
-        civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid"};
+        // Kept in sync with Guerrilla.Abel (see the comment there: Trabant/
+        // Mini/Bus are Resistance-era addon-pbo classes shipped with 1.99).
+        civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid",
+                         "Trabant", "Mini", "Bus", "Tractor"};
     };
 };

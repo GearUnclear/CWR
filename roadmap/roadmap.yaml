@@ -699,8 +699,9 @@ items:
       (deleted when far unless boarded). Civ drivers carry the driverKilled
       killed-EH expression (init.sqs routes it to GM_fnCivKilledEH, so road
       murders land in gmCivKilled). civVehicles[] on the CIV descriptor
-      (Skoda/SkodaBlue/SkodaRed/SkodaGreen/Rapid on Abel; LoBo_S1203 /
-      LoBo_Uaz3741 + Skoda/Rapid on Sinai/Lebanon80), plan-15 probed.
+      (Abel/Market: the four Skodas + Rapid + Trabant/Mini/Bus/Tractor;
+      Sinai/Lebanon80: LoBo_S1203 / LoBo_Uaz3741 + Skodas/Rapid/Bus),
+      plan-15 probed.
       Tests: test_traffic.cpp (pure cores + save/load round-trip), Trident
       guerrilla_traffic_{ambient,commandeer,patrol} green on full_cwa, the
       save/reload seq carries a forced car's row across the reload; civ
@@ -715,6 +716,26 @@ items:
       - "2026-09-01: traffic ambush alert feed landed (a2d16fc, merged f0bbcf2) - closes the accepted AlertMachine gap. Violent patrol/convoy ends (incl. bails) queue TrafficAmbush {pos, kind, originZone}; the alert tick drains them into a per-zone knowledge floor (patrol = steady YELLOW hold, convoy = RED) decaying over trafficAmbushWindow=120, lastKnown = the wreck, trafficAmbushHeat=4 per wreck; qrf.sqs reacts with zero script changes. Attribution: nearest occupier zone within trafficAmbushRadius=1500 (own key, deliberately NOT the trafficRadius player band) -> origin zone only while occupier-held -> dropped (review catch: the unfiltered fallback would have QRF'd player-owned towns). Live traffic crews between zones (outside every zoneArea) now attribute their perception the same way. Queue + floors serialize (UndercoverSystem pending-compromise contract); design catch: a forced zone state would be reverted by the FSM within one tick - the floor-with-decay shape is mandatory, and the patrol floor holds YELLOW without bleeding the disengage window (the naive reuse oscillated YELLOW-RED every ~25 s, ~4 QRF re-dispatches per wreck)."
       - "2026-09-01: civ danger response landed (cf11e71+660029c, merged c018174) - civ cars react to gunfire/blasts/fresh player-caused wrecks. Two one-call fast-gated hooks in frozen core (FireWeaponEffects per-round, ExplosionDammage; GTrafficDangerArmed global-bool gate in the GUndercoverActive mold) feed a coalescing 8-slot ring (TTL 20 s, spatial filter at band+hysteresis); pure DecideDangerReaction rolls cower (TSPanicked, commandeerable, load-downgrades to TSDriving) / U-turn home at SpeedFull / rush past / bail-and-run via the unified AbandonEntry. Review catches pre-land: ExplosionDammage runs on EVERY projectile impact (ShotShell object+ground hits), so the hook gates on explosive/indirectHit or every rifle round was a max-severity blast; wreck danger sources now age out (WreckDangerLive, 3x TTL) or parked cars near an old ambush site would bail forever; the cooldown latch ticks in every state. Root cause the feature works around: AIUnit::SetDanger is a no-op under CMCareless, so the engine's own heard-gunfire reaction is structurally suppressed for traffic crews. Probe-gated residual: the rush slot's visible acceleration (one-constant disable via DangerFarRushBand). Merged suite after all three: [guerrilla] 195 cases / 3786 assertions green."
       - "2026-08-25: spawn-chance modulation landed - pure ModulationFactors pre-stage scales civ/patrol chances BEFORE the rarest-first band subtraction (band math untouched): wall-clock day trapezoid (trafficCivNightScale=0.1 outside trafficDayStart=0.25..trafficDayEnd=0.875, 2 h linear ramps), civ-route-origin alert (RED zeroes civ, YELLOW 0.4x; patrols x(1+trafficAlertPatrolBoost=0.5) on YELLOW/RED), curfew (warLevel >= trafficCurfewWarLevel=3 && NightEffect > 0.5 && origin occupier-owned: civ 0, patrol x trafficCurfewPatrolBoost=2.0), rain fade (1 - trafficRainCivFade=0.6 * rain). Neutral defaults keep noon/GREEN/war-1/dry behaviour identical; gmTrafficForceSpawn (and so the guerrilla_traffic_* Trident tests) still bypasses the roll. NightEffect/rain reads null-guard GScene/GLandscape (dedicated-server path falls back to wall-clock nightness). Review fix pre-land: the civ-route availability probe now rolls PickRoute once and the spawn reuses that origin/dest, so modulation always assesses the actual spawn origin. Hygiene: shared ReadWarLevel in ZoneRegistry replaced the Traffic/GarrisonCache clones. Headlights verified FREE - TransportCore.cpp's auto-light gate (NightEffect vs per-vehicle 0.2-0.8 threshold, non-cautious combat mode) already lights AI traffic crews at night under the CMCareless/CMSafe modes Traffic issues, and douses them on combat escalation; zero headlight code written."
+      - "2026-09-01: civVehicles rosters expanded - fact correction first: Trabant, Mini and Bus DO ship with Classic 1.99 (Resistance-era addon pbos: trab.pbo, MINI.PBO with class Mini : SkodaBase, O.pbo whose CfgPatches BIS_Resistance units[] carries Bus, incl. busDriver/busCargo anims); the earlier 'absent, do not add' note had probed only Bin\\CONFIG.BIN, which cannot see addon-pbo configs. Lada is NOT a car (it is a female first name in O.pbo's identities - Lada Vedrova). Abel/Market rosters now add Trabant/Mini/Bus/Tractor; Sinai/Lebanon80 add SkodaBlue/SkodaRed/Bus; the guerrilla_native.abel fixture stays sedan-only on purpose (tests force-spawn a uniform-random pick). Unresolvable classes remain probe-dropped, non-fatal."
+
+  - id: traffic-bus-stops
+    title: "Traffic: bus passenger pick-up/drop-off (route-biased Bus spawns, passengers, alight/board stops)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [ambient-traffic]
+    summary: >
+      Make the Bus hull (now in the civVehicles rosters) carry people:
+      route-biased spawn pick (Bus only on long CITY-CITY legs, Tractor
+      biased to short/village legs), 1-4 civClass cargo passengers per bus
+      with the driverKilled ledger EH on every seat, an all-crew
+      generalization of the commandeer bail (prerequisite that fixes frozen
+      passengers for ALL civ traffic), and a TSBusHalt stop state at
+      en-route CITY zones reusing the park/dwell/depart choreography.
+      Passenger boarding under the perception gate is the hard half; v1 is
+      alight-only. Design stub: guerrilla-mode/BUS-STOPS.md.
+    log:
+      - "2026-09-01: filed as a design stub (BUS-STOPS.md) alongside the roster expansion. Engine facts verified up front: busDriver*/busCargo* (BusPassanger*.rtm) animation states + CfgVehicleActions wiring ship in O.pbo, so seated bus passengers need zero animation work; CreateCrewman already seats GIPCargo crew; Misc\\busstop.paa suggests a bus-stop world object exists (unconfirmed, Czech-named model)."
 
   - id: traffic-view-distance
     title: "Traffic: perception-gated spawn/despawn (fixed distance band vs the player view-distance slider)"
