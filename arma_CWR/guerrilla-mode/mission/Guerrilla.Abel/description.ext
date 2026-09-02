@@ -340,11 +340,19 @@ class CfgGuerrillaFactions
         // driving town-to-town; commandeerable). A real array this time:
         // civVehicles[] is read by ZoneRegistry::LoadFactions and
         // package-probed like vehicles[] (unresolvable hulls are dropped,
-        // an empty result leaves civilian traffic inert). All five
-        // verified present in the 1.99 core config: Skoda, SkodaBlue,
-        // SkodaRed, SkodaGreen, Rapid (Trabant / Mini / Bus are
-        // Resistance-era - absent, do not add).
-        civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid"};
+        // an empty result leaves civilian traffic inert). Skoda/SkodaBlue/
+        // SkodaRed/SkodaGreen/Rapid and Tractor live in the 1.99 core
+        // CONFIG.BIN; Trabant, Mini and Bus are Resistance-era classes that
+        // DO ship with Classic 1.99 as addon pbos (trab.pbo, MINI.PBO with
+        // "class Mini : SkodaBase", and O.pbo, whose CfgPatches
+        // BIS_Resistance units[] carries Bus). An earlier note here claimed
+        // they were absent - it had probed only Bin\CONFIG.BIN, which
+        // cannot see addon-pbo configs. Ground truth is the ClassProbe on
+        // mission boot: watch the log for civVehicles[] <dropped> lines.
+        // Bus is also the target hull for the bus-stop passenger plan
+        // (guerrilla-mode/BUS-STOPS.md).
+        civVehicles[] = {"Skoda", "SkodaBlue", "SkodaRed", "SkodaGreen", "Rapid",
+                         "Trabant", "Mini", "Bus", "Tractor"};
     };
 };
 

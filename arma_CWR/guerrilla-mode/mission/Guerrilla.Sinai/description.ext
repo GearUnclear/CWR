@@ -676,8 +676,13 @@ class CfgGuerrillaFactions
         // from LoBoCars.pbo (`PoseidonTools pbo show LoBoCars.pbo config.cpp`:
         // LoBo_S1203 "S 1203" and LoBo_Uaz3741 "Uaz 3741", both side=3
         // scope=2; NOT LoBo_S1203CB, the car bomb) ahead of the 1.99 core's
-        // Skoda / Rapid, which the lobo lane also loads.
-        civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "Rapid"};
+        // Skoda / Rapid, which the lobo lane also loads. Bus is the
+        // Resistance-era addon-pbo class from the core install (O.pbo; see
+        // Guerrilla.Abel) - the bus-stop passenger plan target
+        // (guerrilla-mode/BUS-STOPS.md); probe-dropped if the lane cannot
+        // resolve it.
+        civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "SkodaBlue",
+                         "SkodaRed", "Rapid", "Bus"};
     };
 };
 
