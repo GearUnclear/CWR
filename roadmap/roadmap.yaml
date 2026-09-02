@@ -1005,6 +1005,41 @@ items:
       Guerrilla.<island> template per world) are explicitly out of scope.
     log:
       - "2026-07-29: filed as issue #26 after a cross-issue discovery pass (#2/#13/#16/#25 + tree verification). Key finding: sides and rosters are already fully decoupled in-engine; the weld is content packaging (per-island faction blocks), not engine capability."
+      - "2026-09-01: sequenced as Phase A of the mod-intake umbrella issue #54 (roadmap item mod-intake-sustainability); execute its six items in the order A1-A6 listed there."
+
+  - id: mod-intake-sustainability
+    title: "Mod intake: sustainably accept third-party factions and islands (issue #54 umbrella)"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [faction-island-decoupling]
+    gh_issues: [54]
+    summary: >
+      Umbrella for making Guerrilla Mode accept modded factions and islands without
+      per-mod hand work. The 2026-09-01 sustainability audit found the engine half
+      sound (sides decoupled from rosters, plan-15 degrade-never-crash, generic
+      hardening from the LoBo work) and the content-packaging half not: factions
+      welded to island templates (#26), every island a ~700-line bespoke template
+      with hand-listed transitive addOns[] and hand-sampled elevations, the script
+      core copied byte-identically into eight templates, each @LoBo defect fixed by
+      its own machine-local PowerShell script, an addon-dependency walk that skips
+      weapons[]/magazines[], and mod lanes that only run on one machine. Issue #54
+      carries the ordered step list: Phase A executes #26 (union-merge faction
+      sources, menu-time probe gating, warrior-body seam, shared faction blocks,
+      PoseidonTools descriptor lint, faction-pack spec); B loads one shared script
+      core and retires the N-way parity copy; C completes the transitive addon walk,
+      adds a PoseidonTools island scaffold (zones from Names + road net), classifies
+      Names entries instead of the seedCities flag, and derives island discovery
+      from CfgWorlds; D makes the config reader tolerate the known defect classes
+      and folds the three LoBo repair scripts into one generic "mod doctor" plus a
+      roster spawn probe; E adds GPL-clean synthetic faction/island fixtures, matrix
+      tests and a CI lane needing no proprietary data; F wires the installer (#29)
+      and docs. Definition of done: a faction pack in a mod's config.cpp appears on
+      every island gated by the class probe; a mod world becomes playable by running
+      one tool; one core to fix; one repair tool; published contracts; CI coverage
+      on a clean clone.
+    log:
+      - "2026-09-01: filed as issue #54 after the sustainability audit. Verdict: factions are one packaging change away (#26); islands are a per-world authoring project; third-party mods should be budgeted as content-repair work first and integration second. Related seam bugs #46/#48/#50 and test debt #49 are pulled in as step E."
 
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"
