@@ -1,0 +1,10 @@
+# Boots the scaffolded Guerrilla.Eden template (repo-root-relative) on the
+# base game's Everon: no mods, no hand-authored zones. Needs the shared
+# script core + the vanilla faction library installed in the game dir
+# (guerrilla-mode/install-missions.ps1), like every Guerrilla test.
+mission = "guerrilla-mode/mission/Guerrilla.Eden"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev"]
