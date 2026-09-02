@@ -1,8 +1,10 @@
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 
-#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // ClassProbe / ParsClassProbe
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>   // ClassProbe / ParsClassProbe
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 
 #include <Poseidon/AI/ArcadeTemplate.hpp>
+#include <Poseidon/Asset/Addon/AddonClosure.hpp> // CollectVehicleClassAddons (issue #54 C1)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>     // Pars / ExtParsMission / GetShapeName
 #include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (shape-file probe)
@@ -40,42 +42,6 @@ RString ReadMenuSelection(const char* lowercaseName)
         return RString();
     }
     return (RString)value;
-}
-
-// Optional string array off a config class. FindEntry (not
-// FindEntryNoInheritance) so an array INHERITED from a base class is found:
-// ParamClass::FindEntry resolves through _base, and most soldier bodies derive
-// their weapons[]/magazines[] from a base class rather than restating them. Null
-// when the key is absent or is not an array (ParamEntry::GetSize on a non-array
-// raises an EMError, so the IsArray gate is not merely defensive).
-const ParamEntry* FindClassArray(const ParamEntry* cls, const char* name)
-{
-    if (!cls)
-    {
-        return nullptr;
-    }
-    const ParamEntry* arr = cls->FindEntry(name);
-    if (!arr || !arr->IsArray())
-    {
-        return nullptr;
-    }
-    return arr;
-}
-
-// Record the addon that owns `entry`. An EMPTY owner means base-game content,
-// which ParamOwnerList reports visible unconditionally, so it is skipped: adding
-// it would put a meaningless empty name into the active list.
-void AddOwnerOf(const ParamEntry* entry, FindArrayRStringCI& addons)
-{
-    if (!entry)
-    {
-        return;
-    }
-    const RStringB& owner = entry->GetOwner();
-    if (owner.GetLength() > 0)
-    {
-        addons.AddUnique(RString(owner));
-    }
 }
 
 } // namespace
@@ -177,6 +143,74 @@ RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry*
     return civClass;
 }
 
+RString ResolveWarriorPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selResistance,
+                                  const ClassProbe& probe)
+{
+    if (!selResistance || !*selResistance)
+    {
+        return RString(); // nothing picked: nothing dropped, nothing to say
+    }
+    if (!factionsCfg)
+    {
+        // a pending pick with no table to resolve it against IS a dropped
+        // selection (issue #46 shape) - the civilian ladder says so too
+        LOG_WARN(Core,
+                 "Guerrilla body: gmSelResistance '{}' pending, but neither the mission's description.ext nor the "
+                 "loaded config carries CfgGuerrillaFactions - keeping the authored player class",
+                 selResistance);
+        return RString();
+    }
+    const ParamEntry* picked = FindGuerrillaFactionEntry(factionsCfg, selResistance);
+    if (!picked)
+    {
+        // issue #46 shape: a published pick that resolves to nothing is a
+        // DROPPED selection and says so. The registry will fall back to the
+        // template defaults for the sides; the body follows the same rule.
+        LOG_WARN(Core,
+                 "Guerrilla body: gmSelResistance '{}' names no CfgGuerrillaFactions block - keeping the authored "
+                 "player class",
+                 selResistance);
+        return RString();
+    }
+    // The template's OWN default resistance is the roster mission.sqm was
+    // authored against: its playerClassWarrior documents the authored class,
+    // so there is nothing to substitute and nothing dropped (no log).
+    const ParamEntry* authored = nullptr;
+    if (zonesCfg)
+    {
+        RString defResistance = zonesCfg->ReadValue("defaultResistance", RString());
+        authored = FindGuerrillaFactionEntry(factionsCfg, defResistance);
+    }
+    if (!authored)
+    {
+        authored = FindGuerrillaFactionEntry(factionsCfg, "GUER");
+    }
+    if (picked == authored)
+    {
+        return RString();
+    }
+    RString warrior = picked->ReadValue("playerClassWarrior", RString());
+    if (warrior.GetLength() == 0)
+    {
+        LOG_WARN(Core,
+                 "Guerrilla body: resistance '{}' authors no playerClassWarrior - keeping the authored player class "
+                 "(the squad still spawns from its tiers[])",
+                 (const char*)picked->GetName());
+        return RString();
+    }
+    if (!probe.Exists("CfgVehicles", warrior))
+    {
+        // the menu greys this faction out (GuerrillaFactionIssue probes the
+        // same key), so reaching here means a direct launch or a stale bank
+        LOG_WARN(Core,
+                 "Guerrilla body: resistance '{}' playerClassWarrior '{}' not in the loaded data package - keeping "
+                 "the authored player class",
+                 (const char*)picked->GetName(), (const char*)warrior);
+        return RString();
+    }
+    return warrior;
+}
+
 RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selPlayerClass,
                                const char* selOutfit, const char* selResistance, const ClassProbe& probe)
 {
@@ -201,50 +235,23 @@ RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* fac
                      : "");
         return RString();
     }
-    return ResolveCivilianPlayerClass(zonesCfg, factionsCfg, selOutfit, selResistance, probe);
+    if (selOutfit && stricmp(selOutfit, "civilian") == 0)
+    {
+        return ResolveCivilianPlayerClass(zonesCfg, factionsCfg, selOutfit, selResistance, probe);
+    }
+    // WARRIOR (or no outfit token): the body follows the resistance PICK
+    // (issue #54 A3) - a non-default roster substitutes its own
+    // playerClassWarrior, the template's default keeps the authored class.
+    return ResolveWarriorPlayerClass(zonesCfg, factionsCfg, selResistance, probe);
 }
 
 void CollectPlayerBodyAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
                              const ParamEntry* magazinesCfg, RString className, FindArrayRStringCI& addons)
 {
-    if (!vehiclesCfg || className.GetLength() == 0)
-    {
-        return;
-    }
-    const ParamEntry* body = vehiclesCfg->FindEntry(className);
-    if (!body)
-    {
-        return; // unknown class - nothing to activate, and nothing will spawn
-    }
-    AddOwnerOf(body, addons);
-
-    // The body's own magazines[]: a mod body commonly carries mod ammo whose
-    // CfgMagazines class lives in a DIFFERENT pbo than the body itself.
-    if (const ParamEntry* mags = FindClassArray(body, "magazines"))
-    {
-        for (int i = 0; i < mags->GetSize(); i++)
-        {
-            AddOwnerOf(magazinesCfg ? magazinesCfg->FindEntry((RStringB)(*mags)[i]) : nullptr, addons);
-        }
-    }
-    // The body's weapons[], plus each weapon's own magazines[]: the weapon
-    // config names the ammo it accepts, and the engine touches those magazine
-    // classes when it kits the unit out, so their owners have to be visible too.
-    if (const ParamEntry* weapons = FindClassArray(body, "weapons"))
-    {
-        for (int i = 0; i < weapons->GetSize(); i++)
-        {
-            const ParamEntry* weapon = weaponsCfg ? weaponsCfg->FindEntry((RStringB)(*weapons)[i]) : nullptr;
-            AddOwnerOf(weapon, addons);
-            if (const ParamEntry* wMags = FindClassArray(weapon, "magazines"))
-            {
-                for (int j = 0; j < wMags->GetSize(); j++)
-                {
-                    AddOwnerOf(magazinesCfg ? magazinesCfg->FindEntry((RStringB)(*wMags)[j]) : nullptr, addons);
-                }
-            }
-        }
-    }
+    // the generic walk lives in Asset/Addon/AddonClosure since issue #54 C1
+    // (ArcadeUnitInfo::RequiredAddons and the faction closure share it);
+    // this name stays for the seam's callers and tests
+    CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, className, addons);
 }
 
 RString PlayerBodyModelIssue(const ParamEntry* vehiclesCfg, RString className,
@@ -282,13 +289,19 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
     // block but not the other discard every body pick, silently, with the
     // mission author's typo as the only cause. The "is this a Guerrilla
     // template" signal is the pending selection itself: the untouched-screen
-    // early-out below keeps every non-Guerrilla launch byte-identical, and
-    // every ordinary launch path (single mission, campaign, editor preview,
-    // reference mission) runs GStats.ClearAll() before it publishes, so the
-    // campaign variable bank cannot leak a stale pick into one.
+    // early-out below keeps every non-Guerrilla launch byte-identical. What
+    // contains the seam is the gameMode == GModeArcade gate at the call site
+    // (World/WorldInit.cpp): network, intro and cutscene launches never reach
+    // it. The secondary argument is that every ordinary arcade launch path
+    // (single mission, editor preview, reference mission) runs
+    // GStats.ClearAll() before it publishes - campaign progression runs
+    // ClearMission() only, which is why the gate is the load-bearing half.
     RString selPlayerClass = ReadMenuSelection("gmselplayerclass");
     RString selOutfit = ReadMenuSelection("gmseloutfit");
-    if (selPlayerClass.GetLength() == 0 && selOutfit.GetLength() == 0)
+    // the resistance pick is the third channel (issue #54 A3): a non-default
+    // roster brings its own warrior body
+    RString selResistance = ReadMenuSelection("gmselresistance");
+    if (selPlayerClass.GetLength() == 0 && selOutfit.GetLength() == 0 && selResistance.GetLength() == 0)
     {
         return; // untouched screen (or non-Guerrilla flow): authored class stands
     }
@@ -301,20 +314,20 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
                  (const char*)selPlayerClass, (const char*)selOutfit);
         return;
     }
-    // same ExtParsMission-then-Pars lookup as ZoneRegistry::LoadFromConfig.
-    // Either may stay null: only the outfit-token path reads them, and it
-    // degrades with a WARN of its own (ResolveCivilianPlayerClass).
+    // the zones block: ExtParsMission then Pars, as ZoneRegistry::LoadFromConfig;
+    // the factions table: the same global-U-island union the registry loads
+    // (issue #54 A1), so a resistance picked out of an addon faction pack
+    // resolves here too. Either may stay null: only the outfit-token path
+    // reads them, and it degrades with a WARN of its own
+    // (ResolveCivilianPlayerClass).
     const ParamEntry* zones = ExtParsMission.FindEntry("CfgGuerrillaZones");
     if (!zones)
     {
         zones = Pars.FindEntry("CfgGuerrillaZones");
     }
-    const ParamEntry* factions = ExtParsMission.FindEntry("CfgGuerrillaFactions");
-    if (!factions)
-    {
-        factions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
-    RString selResistance = ReadMenuSelection("gmselresistance");
+    FactionSources factionSources;
+    BuildFactionSourcesFromEngine(factionSources);
+    const ParamEntry* factions = factionSources.Factions();
     ParsClassProbe probe;
     RString newClass = ResolvePlayerBodyClass(zones, factions, selPlayerClass, selOutfit, selResistance, probe);
     if (newClass.GetLength() == 0)
@@ -367,7 +380,9 @@ void ApplyPlayerOutfitSelection(ArcadeTemplate& t)
         // welded to the mission side field, so any body fights as GUER.
         LOG_INFO(Core, "Guerrilla outfit: substituting player class '{}' -> '{}' ({})", (const char*)uInfo->vehicle,
                  (const char*)newClass,
-                 selPlayerClass.GetLength() > 0 ? "gmSelPlayerClass pick" : "gmSelOutfit=civilian");
+                 selPlayerClass.GetLength() > 0        ? "gmSelPlayerClass pick"
+                 : stricmp(selOutfit, "civilian") == 0 ? "gmSelOutfit=civilian"
+                                                       : "gmSelResistance playerClassWarrior");
         uInfo->vehicle = newClass;
     }
 

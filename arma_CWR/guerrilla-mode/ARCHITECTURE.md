@@ -50,6 +50,25 @@ carries:
   strings from the nulars **`gmOccupierSide` / `gmResistanceSide`** (defaults
   `"EAST"`/`"GUER"`).
 
+  **This class is NOT authored per island (issue #54 A1/A4).** The table the
+  engine reads is the UNION of a GLOBAL block and the island template's own,
+  the island winning on a class-name collision (whole-class replacement, never
+  a per-key merge) - `Game/Guerrilla/FactionSources.*`, the one code path all
+  three consumers (new-game menu, `ZoneRegistry::LoadFromConfig`, the outfit
+  seam) go through. The global block is whatever lands in `Pars`: an addon
+  pbo's config, a mod folder's `bin\config.cpp`, or the data dir's
+  `bin\config-extra.cpp` (merged last). A war roster is not an island fact, so
+  it belongs there: the vanilla WEST/EAST/GUER rosters live in
+  `guerrilla-mode/config/guerrilla-factions.hpp`, installed to
+  `<GameDir>\bin\`, and the @LoBo rosters in
+  `tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp`. What an island
+  template's own block keeps is **`class CIV`**: the population models and
+  ambient-traffic hulls of that island's data set, which *is* an island fact -
+  plus any deliberate override of a global class. A unit test pins that
+  (`test_guerrilla_module.cpp`, "a shipped template's own faction block holds
+  only CIV"). `defaultOccupier`/`defaultResistance` name classes from the
+  merged table, so they may name a class the template never declares.
+
 **Coordinate contract (moved from init.sqs to config):** zone `position[]` is
 authored in **script/getPos order `[easting, northing, elevation]`** — *not*
 the `mission.sqm` `position[]` order `[easting, elevation, northing]`. The
@@ -338,7 +357,7 @@ side stays the mission side — any body fights as GUER. The undercover layer
 is untouched.
 
 **Island/faction-agnostic rule (definition of done for issue #3):** the
-`scripts/` directory contains **zero classnames and zero side-string
+core's `scripts/` directory contains **zero classnames and zero side-string
 literals** — sides come from `gmOccupierSide`/`gmResistanceSide` (converted to
 side *values* by the generic `GM_fnSideFromString`, which matches by
 formatting the engine side nulars), classes come from `gmFaction*`. Engine
@@ -347,69 +366,102 @@ enum words (`"SAFE"`, `"MOVE"`, `"SENTRY"`, `"Flag"`, `"RoadSegment"`,
 
 ### A.6 Script layer file map
 
+**One core, many missions (issue #54 step B1).** The island-agnostic script
+layer exists exactly ONCE in the repo, at `guerrilla-mode/core/`. No mission
+template carries a `scripts/` directory any more, and there is no copy to
+keep in sync.
+
 ```
-mission/Guerrilla.Demo/
-  description.ext      island data: CfgGuerrillaZones (+seedCities) + CfgGuerrillaFactions
-  mission.sqm          one resistance player at the Camp (unchanged)
-  init.sqs             THIN bootstrap: script-state seed, zone markers,
-                       native handler registration, exec lib + managers
-  scripts/
-    lib.sqs            helpers: GM_fnRandPosNear/SpawnGroup/SideFromString/
-                       CountOwnedBy/ZoneOfType/FactionNum/BumpGear + GM_LIB_READY
-    capture.sqs        capture-event reactions: hold garrison (holdClass x
-                       holdCount) on "captured", hints for the whole arc
-                       (started/contested/lost/town-ready/liberated), throttled
-                       in-field titleText progress ticker (GM_Z_CAPTURE)
-    qrf.sqs            alert POLICY: garrison posture on alertChanged edges,
-                       YELLOW investigate moves to gmZoneLastKnown, RED QRF convoy
-                       (officer + tier squad + faction vehicle, road-snap,
-                       teleport-on-stall fallback, stand-down cleanup)
-    undercover.sqs     cover establish (gmUndercover=true + setCaptive, kept
-                       for the whole campaign; never dropped on a break) +
-                       "fired" EH -> gmBreakUndercover + ADVISORY
-                       undercoverBroken hint (gmUndercoverWitnesses)
-    campaign.sqs       Save addAction (self-dispatching) + campaignLoaded
-                       reconciliation (companion handles, GM_PLAYER_GROUPS, action);
-                       journal: "campaign begins" (gmIslandName) / saved /
-                       restored diary lines
-    (journal writes)   every manager below also feeds the native Journal
-                       (gmJournalLog / gmJournalObjective / gmJournalStatus;
-                       A.3): capture = ready/lost/liberated lines + firstZone/
-                       firstTown objectives; qrf = QRF launch; undercover =
-                       cover blown; companions = promotion/death + the
-                       "Companions" status line (GM_fnCompStatus); loot =
-                       unlock + "Unlocked gear" status line (GM_fnLootStatus)
-                       + firstUnlock objective; escalation = War Level edges
-                       (gmEsc_prevWL); recruit = recruit/train + firstRecruit
-                       objective. No script renders anything: the map pages
-                       are native (UI/Guerrilla/GuerrillaJournalPages).
-    economy.sqs        income tick (unchanged formulas; reads gmZone tuples)
-    escalation.sqs     War Level ladder (unchanged) + Heat decay via gmZoneSet,
-                       gated on native GREEN
-    loot.sqs           loot-on-kill + unlocks (unchanged logic; bodies from
-                       gmGarrisonGroups; classnames from faction keys)
-    recruit.sqs        Camp menu (unchanged flow; anchor = first CAMP-type zone;
-                       classes from faction keys)
-    recruit_action.sqs thin addAction dispatcher (unchanged)
-    market.sqs         HQ / cache / garage / dealer action menus over the native
-                       GuerrillaBase + Market facts (issues #16/#27/#28): the
-                       Establish/Move HQ action (debits hqMoveCost on a move),
-                       Stash <weapon> at the cache (removeWeapon + cargo;
-                       retrieval = the holder's own TAKE actions), Lock/Unlock
-                       the nearest vehicle inside the garage ring, the BUY menu
-                       beside a live dealer (<=8 rows + a here/HQ delivery
-                       toggle: WeaponHolder at your feet or the HQ cache; the
-                       dealer's lot or the HQ garage locked); one-time map
-                       markers (dealers, HQ flag); hqEstablish objective +
-                       diary lines. The SECOND "-" writer of gmResources.
-    market_action.sqs  thin addAction dispatcher (gmMktReq*), recruit_action twin
-    companions.sqs     XP/rank/permadeath (unchanged model; companionClass from
-                       faction key; live setRank on promotion now)
+guerrilla-mode/core/          <- THE core. One copy. Edit here.
+  init.sqs                    THIN bootstrap: script-state seed, zone markers,
+                              native handler registration, exec managers
+  scripts/                    the 15 managers + helpers (manifest below)
+
+guerrilla-mode/config/        <- THE global faction library. One copy.
+  guerrilla-factions.hpp      CfgGuerrillaFactions: the vanilla WEST/EAST/GUER
+                              rosters -> <GameDir>\bin\guerrilla-factions.hpp
+  config-extra.cpp            the seed <GameDir>\bin\config-extra.cpp that
+                              #includes it (created only if none exists)
+
+guerrilla-mode/mission/Guerrilla.<World>/
+  description.ext             island data: CfgGuerrillaZones (+seedCities),
+                              CfgGuerrillaFactions (CIV + any override),
+                              CfgGuerrillaMarket
+  mission.sqm                 one resistance player at the Camp
+  init.sqs                    TWO LINES: a comment + [] exec "\gmcore\init.sqs"
 ```
 
-The reference slices `Qrf.<World>` (lib + qrf.sqs), `Undercover.<World>` (lib +
-undercover.sqs) and `Market.<World>` (lib + market.sqs + market_action.sqs)
-carry byte-identical SUBSETS of this core under their own bootstrap.
+**Install location and path convention.** `guerrilla-mode/install-missions.ps1`
+mirrors `guerrilla-mode/core` to the loose directory `<GameDir>\gmcore\`, a
+sibling of `<GameDir>\Missions\`, before it installs any template. A mission
+reaches it with a LEADING BACKSLASH:
+
+```
+[] exec "\gmcore\init.sqs"
+```
+
+`OpenScript` (`engine/Poseidon/Game/Scripting/Scripts.cpp`) strips that
+backslash and resolves the rest against the game data root, checking mounted
+pbo banks first (so a `gmcore.pbo` in any `addons\` dir would serve as well)
+and then a loose file on disk. Without the backslash the name goes through
+`FindScript`, which looks inside the MISSION folder: that is the old
+per-mission copy path and it now resolves to nothing. So:
+
+- every core script that execs a sibling core script, and every `addAction`
+  that dispatches back into one (`campaign.sqs`, `market.sqs`, `recruit.sqs`),
+  spells the full `"\gmcore\scripts\<x>.sqs"`. `addAction` script paths go
+  through the same `OpenScript`, so the backslash form works there too;
+- MISSION-LOCAL scripts keep their relative paths and still resolve inside
+  the mission folder: `Showcase.<World>`'s `showcase/` overlay, the reference
+  slices' `hud.sqs` / `act_*.sqs` / `patrol.sqs`;
+- `#include` and `preprocessFile` do NOT strip a leading backslash. The core
+  uses neither.
+
+**Manifest (`guerrilla-mode/core/scripts/`, 15 files).** This list is the
+contract: `tests/unit/.../test_mission_script_core.cpp` asserts the directory
+holds exactly these names and that this section names them all, so a script
+added or retired without a doc edit fails the unit lane.
+
+| Script | Role |
+|--------|------|
+| `lib.sqs` | helpers: `GM_fnRandPosNear` / `SpawnGroup` / `SpawnSquad` / `SideFromString` / `CountOwnedBy` / `ZoneOfType` / `FactionNum` / `BumpGear`, then raises `GM_LIB_READY` |
+| `capture.sqs` | capture-event reactions: hold garrison (`holdClass` x `holdCount`) on "captured", hints for the whole arc (started / contested / lost / town-ready / liberated), throttled in-field `titleText` progress ticker (`GM_Z_CAPTURE`) |
+| `qrf.sqs` | alert POLICY: garrison posture on `alertChanged` edges, YELLOW investigate moves to `gmZoneLastKnown`, RED QRF convoy (officer + tier squad + faction vehicle, road-snap, teleport-on-stall fallback, stand-down cleanup) |
+| `undercover.sqs` | cover establish (`gmUndercover=true` + `setCaptive`, kept for the whole campaign, never dropped on a break) + "fired" EH -> `gmBreakUndercover` + ADVISORY `undercoverBroken` hint (`gmUndercoverWitnesses`) |
+| `campaign.sqs` | Save `addAction` (self-dispatching via `"\gmcore\scripts\campaign.sqs"`) + `campaignLoaded` reconciliation (companion handles, `GM_PLAYER_GROUPS`, action); journal: "campaign begins" (`gmIslandName`) / saved / restored diary lines |
+| `economy.sqs` | income tick (unchanged formulas; reads `gmZone` tuples) |
+| `escalation.sqs` | War Level ladder (unchanged) + Heat decay via `gmZoneSet`, gated on native GREEN |
+| `loot.sqs` | loot-on-kill + unlocks (unchanged logic; bodies from `gmGarrisonGroups`; classnames from faction keys) |
+| `recruit.sqs` | Camp menu (unchanged flow; anchor = first CAMP-type zone; classes from faction keys) |
+| `recruit_action.sqs` | thin `addAction` dispatcher (unchanged) |
+| `market.sqs` | HQ / cache / garage / dealer action menus over the native `GuerrillaBase` + `Market` facts (issues #16/#27/#28): the Establish/Move HQ action (debits `hqMoveCost` on a move), Stash \<weapon\> at the cache (`removeWeapon` + cargo; retrieval = the holder's own TAKE actions), Lock/Unlock the nearest vehicle inside the garage ring, the BUY menu beside a live dealer (<=8 rows + a here/HQ delivery toggle: `WeaponHolder` at your feet or the HQ cache; the dealer's lot or the HQ garage locked); one-time map markers (dealers, HQ flag); `hqEstablish` objective + diary lines. The SECOND "-" writer of `gmResources` |
+| `market_action.sqs` | thin `addAction` dispatcher (`gmMktReq*`), `recruit_action` twin |
+| `companions.sqs` | XP/rank/permadeath (unchanged model; `companionClass` from faction key; live `setRank` on promotion now) |
+| `civilians.sqs` | town population cache + kill-queue consumer + panic FSM |
+| `shakedown.sqs` | occupier street-theatre director + resentment ticker |
+
+*(journal writes)* every manager above also feeds the native Journal
+(`gmJournalLog` / `gmJournalObjective` / `gmJournalStatus`; A.3): capture =
+ready/lost/liberated lines + `firstZone`/`firstTown` objectives; qrf = QRF
+launch; undercover = cover blown; companions = promotion/death + the
+"Companions" status line (`GM_fnCompStatus`); loot = unlock + "Unlocked gear"
+status line (`GM_fnLootStatus`) + `firstUnlock` objective; escalation = War
+Level edges (`gmEsc_prevWL`); recruit = recruit/train + `firstRecruit`
+objective. No script renders anything: the map pages are native
+(`UI/Guerrilla/GuerrillaJournalPages`).
+
+**Full-core missions** (two-line `init.sqs`, whole core): the playable
+templates `Guerrilla.{Abel,Demo,Lebanon80,Sinai}`, the showcase
+`Showcase.Abel` (which adds only its mission-local `showcase/` overlay, exec'd
+from `mission.sqm`), and the integration missions
+`tests/integration/missions/guerrilla_{native.abel,capture.Demo,persist.Demo}`.
+
+**Reference slices** `Qrf.<World>`, `Market.<World>` and `Undercover.<World>`
+keep their OWN bootstrap `init.sqs` (props, debug action menu, HUD) and exec
+only `\gmcore\scripts\lib.sqs` plus the one core policy script they exist to
+demonstrate (`qrf.sqs` / `market.sqs` / `undercover.sqs`). They too carry no
+`scripts/` directory: each sandbox runs the campaign's real policy script by
+construction, so drift is not possible rather than merely detected.
 
 Deleted: `zones.sqs`, `spawning.sqs`, `alert.sqs`, `persistence.sqs` (their
 loops are native; see A.2).

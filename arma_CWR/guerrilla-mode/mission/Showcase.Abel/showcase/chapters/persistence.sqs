@@ -4,7 +4,7 @@
 ;  SYSTEM ON DISPLAY: native persistence - ZoneRegistry / AlertMachine /
 ;  GarrisonCache serializers, GGameState script globals, the campaignLoaded
 ;  event, and campaign.sqs's Save UX + post-load reconciliation.
-;  Seams: [aP, aP, -1] exec "scripts/campaign.sqs" (the Save action's own
+;  Seams: [aP, aP, -1] exec "\gmcore\scripts\campaign.sqs" (the Save action's own
 ;  dispatch path - count _this > 0 routes to #saveaction).
 ;  The RELOAD half is interactive by nature: run.sqs detects the load (the
 ;  re-armed Save-action id) and reports the round-trip; the headless
@@ -16,7 +16,7 @@
 ~SC_BEAT
 
 "Saving now through the same dispatch the SAVE GAME action uses." call SC_fnSay
-[aP, aP, -1] exec "scripts/campaign.sqs"
+[aP, aP, -1] exec "\gmcore\scripts\campaign.sqs"
 ~2
 
 (format ["Saved. Ledger so far, treasury %1 R, %2 HR, War Level %3, %4 gear unlock(s) - all of it is in that save.", gmResources, gmManpower, gmWarLevel, count GM_GEAR_UNLOCKED]) call SC_fnSay

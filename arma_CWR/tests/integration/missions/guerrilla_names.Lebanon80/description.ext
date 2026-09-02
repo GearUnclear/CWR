@@ -1,0 +1,244 @@
+// guerrilla_names.Lebanon80 - the Names-classification test mission (issue #54 C3): a byte copy of Guerrilla.Lebanon80 with NO seedCities key, so the Auto classifier runs over the theatre-map Names block. The shipped template keeps seedCities = 0 by design (its play area excludes the rear settlements the classifier legitimately accepts); this copy proves what the classifier refuses and accepts.
+// file is the ONLY island-specific data in the template - init.sqs +
+// scripts/ are byte-identical to Guerrilla.Demo (the shared island-agnostic
+// core; a parity test enforces that). The war FACTIONS are no longer here:
+// see the note above CfgGuerrillaFactions.
+//
+// Theater: South Lebanon, mid-1980s. The OCCUPIER is the IDF (side WEST)
+// holding the border strip; the RESISTANCE is Hizballah (side EAST) working
+// out of the hills north of the Litani. Classnames come from the @LoBo mod
+// (world "Lebanon80" in LoBo_Leb.pbo; CfgPatches LoBoIs / LoBoHizballah /
+// LoBoHizballCar / ICPrpg7 / JAM_Magazines / LoBoHMWV / LoBo_Zelda /
+// LoBoTerror - all verified against the shipped configs).
+//
+// Defining class CfgGuerrillaZones activates the native guerrilla systems
+// (ZoneRegistry / AlertMachine / GarrisonCache).
+
+onLoadMission = "Guerrilla Mode - Lebanon (IDF occupation)";
+onLoadIntro  = "Bleed the occupier out of South Lebanon, one zone at a time.";
+respawn = 0;
+joinInProgress = 0;
+
+class CfgGuerrillaZones
+{
+    // Side resolution when the new-game UI selections (gmSelOccupier /
+    // gmSelResistance) are unset - i.e. any direct launch of this mission.
+    // Values are CfgGuerrillaFactions class names from the MERGED faction
+    // table (the @LoBo roster in @lobofixup); the engine resolves
+    // them to sides (ZoneRegistry::ResolveSides): IDF -> WEST occupier,
+    // Hizballah -> EAST resistance.
+    defaultOccupier = "IDF";
+    defaultResistance = "Hizballah";
+
+    // The side mission.sqm welds the player's unit to (side="EAST",
+    // LoBo_HizballahRifle4). The campaign's RESISTANCE side is pinned to
+    // this: the engine counts resistance presence via the resistance side's
+    // center, so a resistance on any other side would never count the
+    // player. The resistance cycler therefore picks a ROSTER, not a side.
+    playerSide = "EAST";
+
+    // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
+    // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60; ...).
+    //
+    // Town auto-seed left on AUTO (no seedCities key; issue #54 C3), which
+    // is the hard case this world exists to prove: Lebanon80's Names block
+    // is a 25.6 km THEATER map, not a town list. Type-less entries include
+    // "Mediterranean Sea" {7847,16012} and "Sea of Galilee" {13856,4724}
+    // (both at -5 m on the heightmap), country labels (Lebanon/Israel/Syria/
+    // Jordan), terrain labels (Golan Heights, Mt. Hermon, Bekaa Valley) and
+    // deep-rear cities (Damascus, Haifa, Beirut) with no buildings modelled.
+    // The engine's settlement classifier (dry land + houses within 300 m)
+    // refuses all of those, one INFO line each, and the real towns in play
+    // (Tyre, Saida, Ghajar) are authored by hand on/near their Names entries,
+    // so the name/300 m dedup leaves exactly the explicit zones below.
+    // guerrilla_lebanon80_boot asserts that count. seedCities = 0 is the
+    // manual override if a world ever needs it; = 1 seeds every entry.
+    seedCitySupport = 20;
+
+    class Zones
+    {
+        // COORDINATE ORDER (load-bearing): position[] is authored in
+        // script/getPos order [easting, northing, elevation] - NOT the
+        // mission.sqm order [easting, ELEVATION, northing]. Elevations were
+        // read off the actual lebanon80.wrp heightmap (4WVR, 512x512 grid,
+        // 50 m cells); the native garrison spawn snaps units to the surface
+        // regardless (GarrisonCache uses SurfaceYAboveWater). Every centre
+        // below was verified DRY on the heightmap (no water within 150 m).
+        //
+        // Layout: the Camp sits on a hill plateau north of the Litani bend;
+        // the Litani Checkpoint is 500 m east so the occupier garrison
+        // distance-cache (cacheRadius 800) engages as soon as the campaign
+        // starts; Marjayoun Barracks (the historical IDF/SLA headquarters
+        // town) is ~1.55 km out - beyond cache range until the player moves
+        // on it.
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";   // generic token, resolved per campaign
+            garrison = 0;
+            support = 100;
+            income = 0;
+            marker = "gmZoneMarker_0";
+            position[] = {11500, 12000, 145};
+        };
+        class LitaniCheckpoint
+        {
+            name = "Litani Checkpoint";
+            type = "OUTPOST";
+            owner = "OCCUPIER";     // generic token, resolved per campaign
+            garrison = 6;
+            income = 25;
+            marker = "gmZoneMarker_1";
+            position[] = {12000, 12000, 135};
+        };
+        class MarjayounBarracks
+        {
+            name = "Marjayoun Barracks";
+            type = "OUTPOST";
+            owner = "OCCUPIER";
+            garrison = 8;
+            income = 25;
+            marker = "gmZoneMarker_2";
+            // Exactly on the world's "Marjayoun" Names entry (which also
+            // dedupes the mod's duplicate "Litani River" entry at the same
+            // coords, should seedCities ever be turned on here).
+            position[] = {13043, 12140, 242};
+        };
+        // Hand-authored CITY zones on the world's real towns. Tyre and Saida
+        // are nudged off their coastal Names entries (both have water within
+        // 250 m of the exact Names coords) to fully dry ground while staying
+        // inside the 300 m auto-seed dedupe radius.
+        class Tyre
+        {
+            name = "Tyre";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 35;
+            marker = "gmZoneMarker_3";
+            position[] = {9300, 9800, 8};      // Names entry: {9057, 9806}
+        };
+        class Saida
+        {
+            name = "Saida";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 35;
+            marker = "gmZoneMarker_4";
+            position[] = {10700, 13000, 22};   // Names entry: {10423, 13076}
+        };
+        class Ghajar
+        {
+            name = "Ghajar";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 35;
+            marker = "gmZoneMarker_5";
+            position[] = {14071, 11262, 250};  // exact Names entry position
+        };
+    };
+};
+
+// The ISLAND half of the faction table (issue #54 A4). IDF and Hizballah used
+// to be copied in here key-for-key from Guerrilla.Sinai, which is exactly the
+// duplication that let the two Hizballah copies drift (this one had grown the
+// issue #25 outfit family, Sinai's had not). Both rosters are
+// island-independent, so they now live once in the mod-level config
+// tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp (mounted after @LoBo),
+// together with the rest of the @LoBo roster; the surviving Hizballah is this
+// file's former copy, the more complete of the two. The engine unions that
+// global table with the block below (Game/Guerrilla/FactionSources.*), this
+// file winning on a class-name collision.
+//
+// defaultOccupier/defaultResistance above name classes from that global
+// table; they resolve against the MERGED table, not against this block.
+//
+// What stays: CIV, the island's own population and traffic hulls. The scripts
+// read every descriptor through gmFactionValue / gmFactionTierClass /
+// gmFactionVehicle; nothing is hardcoded anywhere else. Key schema:
+// guerrilla-mode/config/guerrilla-factions.hpp.
+class CfgGuerrillaFactions
+{
+    class CIV // civilian population descriptor (issue #8)
+    {
+        // side MUST be exactly "CIV" - GM_fnSideFromString (scripts/lib.sqs)
+        // matches the engine's rendered side name (SideNames in
+        // World/Scene/Object.cpp), and the civilian side renders as "CIV",
+        // NOT "CIVILIAN".
+        side = "CIV";
+        // Numbered keys + a count, NOT a civClasses[] array: gmFactionValue
+        // returns raw config text and skips array entries (LoadFactions
+        // IsArray gate), so the scripts read civClassCount and then
+        // civClass1..civClassN.
+        //
+        // @LoBo civilians (CfgPatches LoBoTerror, requiredAddons[]={}):
+        // LoBo_Civ_01..31 "Arab Civilian <n>" (: SoldierEB, explicit side=3,
+        // scope=public, vehicleClass "Arab Civilians", unarmed) and
+        // LoBo_CivF_01 "Arab Female 1" (: LoBo_Civ_01, side=3). Deliberately
+        // NOT the LoBo_CivRock_* / bottle-thrower variants - they carry
+        // stone/molotov throw magazines, wrong for a passive CIV population.
+        civClassCount = 4;   // number of civClass<N> keys that follow
+        civClass1 = "LoBo_Civ_01";
+        civClass2 = "LoBo_Civ_02";
+        civClass3 = "LoBo_Civ_03";
+        civClass4 = "LoBo_CivF_01";
+        // Ambient road traffic hulls (native Traffic service; array, read by
+        // ZoneRegistry::LoadFactions and package-probed like vehicles[], so
+        // an unresolvable class is dropped, never fatal). @LoBo civilian vans
+        // from LoBoCars.pbo (`PoseidonTools pbo show LoBoCars.pbo config.cpp`:
+        // LoBo_S1203 "S 1203" and LoBo_Uaz3741 "Uaz 3741", both side=3
+        // scope=2; NOT LoBo_S1203CB, the car bomb) ahead of the 1.99 core's
+        // Skoda / Rapid, which the lobo lane also loads. Bus is the
+        // Resistance-era addon-pbo class from the core install (O.pbo; see
+        // Guerrilla.Abel) - the bus-stop passenger plan target
+        // (guerrilla-mode/BUS-STOPS.md); probe-dropped if the lane cannot
+        // resolve it.
+        civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "SkodaBlue",
+                         "SkodaRed", "Rapid", "Bus"};
+    };
+};
+
+// The dealer market (issues #27/#28) on Lebanon80: @LoBo stock drawn from the
+// descriptors above (the Hizballah / IDF weapon -> magazine pairs the loot
+// keys use) plus the civilian cars the CIV descriptor fields. The engine
+// re-probes every class at load and drops what the package lacks (logged,
+// non-fatal). The LoBoammo-armed hulls need the @lobofixup patched pbos in
+// strict/autotest lanes, like the faction ladders. The dealer body is the
+// stock LoBo civilian.
+class CfgGuerrillaMarket
+{
+    dealerShare = 0.34;
+    dealerRespawnSeconds = 600;
+    hqMoveCost = 500;
+    dealerClass = "LoBo_Civ_01";
+
+    class Weapons
+    {
+        class AK47      { weapon = "LoBoAK47";           magazine = "JAM_E762_30mag";    mags = 4; price = 240; };
+        class PKM       { weapon = "LoBo_PKM";           magazine = "JAM_E762M_200mag";  mags = 2; price = 950; };
+        class RPG7      { weapon = "ICPRPG7";            magazine = "ICPRPG7Mag";        mags = 2; price = 550; };
+        class SVD       { weapon = "LoBo_SVD";           magazine = "JAM_E762_10mag";    mags = 4; price = 650; };
+        class M4A1      { weapon = "LoBo_M4A1";          magazine = "LoBoCAR15Mag";      mags = 4; price = 320; };
+        class Minimi    { weapon = "LoBoM249";           magazine = "LoBoM249Mag";       mags = 2; price = 950; };
+        class M72       { weapon = "JAM_M72LAWLauncher"; magazine = "JAM_M72ALLRocket";  mags = 2; price = 500; };
+        class SR25      { weapon = "LoBo_SR25";          magazine = "LoBo_SR25Mag";      mags = 4; price = 700; };
+        class AKMags    { weapon = "";                   magazine = "JAM_E762_30mag";    mags = 6; price = 60; };
+        class CARMags   { weapon = "";                   magazine = "LoBoCAR15Mag";      mags = 6; price = 70; };
+        class Binocular { weapon = "Binocular";          magazine = "";                            price = 60; };
+        class NVGoggles { weapon = "NVGoggles";          magazine = "";                            price = 250; };
+        class Grenades  { weapon = "";                   magazine = "HandGrenade";       mags = 4; price = 80; };
+        class Mines     { weapon = "";                   magazine = "Mine";              mags = 2; price = 150; };
+        class Satchels  { weapon = "";                   magazine = "PipeBomb";          mags = 2; price = 200; };
+    };
+    class Vehicles
+    {
+        class S1203     { vehicle = "LoBo_S1203";             price = 600; };
+        class Uaz3741   { vehicle = "LoBo_Uaz3741";           price = 700; };
+        class Skoda     { vehicle = "Skoda";                  price = 600; };
+        class Rapid     { vehicle = "Rapid";                  price = 700; };
+        class Ural      { vehicle = "LoBo_Ural_Hizballah";    price = 3200; };
+        class JeepMG    { vehicle = "LoBo_JeepMG_Hizballah";  price = 3000; };
+        class Humvee    { vehicle = "LoBoHMWV_Mag_Patrol";    price = 3200; };
+        class Zelda     { vehicle = "LoBo_Zelda";             price = 9500; };
+    };
+};

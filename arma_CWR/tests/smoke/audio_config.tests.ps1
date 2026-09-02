@@ -95,7 +95,7 @@ inputDevice="";
         }
     }
 
-    It "does NOT persist normalization on boot — invalid device stays in file" {
+    It "does NOT persist normalization on boot - invalid device stays in file" {
         # Key invariant: a temporarily unplugged device must keep its
         # remembered name in the file so the user gets it back when
         # they reconnect.  Runtime uses the default (validated by the
@@ -129,7 +129,7 @@ inputDevice="";
     }
 
     It "tolerates an empty audio.cfg without crashing" {
-        # An empty-but-existing file is the lower-friction edge case —
+        # An empty-but-existing file is the lower-friction edge case -
         # user opened it, accidentally cleared content, saved.  Boot
         # must not crash.  ParamFile treats this as "no keys" and
         # AudioConfig keeps in-memory defaults; on Save (next time the

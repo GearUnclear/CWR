@@ -4,14 +4,16 @@
 # drives GUERRILLA -> Sinai -> character screen -> Golani -> launch.
 #
 # PRECONDITIONS (same as guerrilla_new_game_e2e):
-#   1. guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai,Lebanon80 has
-#      been run: the launch path resolves "missions\Guerrilla.Sinai" relative
-#      to the game data dir (without -IncludeWorld the installer's world gate
-#      REMOVES Guerrilla.Sinai).
+#   1. guerrilla-mode/install-missions.ps1 has been run: the launch path
+#      resolves "missions\Guerrilla.Sinai" relative to the game data dir. No
+#      -IncludeWorld needed since issue #54 C4 - the world gate finds
+#      sinai.wrp in @LoBo\addons\lost.pbo's entry table by itself.
 #   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against
 #      the game CWD = data dir). @lobofixup (repo fixture) mounts after it:
 #      pbo shadows for @LoBo's malformed tracerColor floats, addon
-#      preloading, and the menu-level CfgGuerrillaFactions the cyclers list.
+#      preloading, and THE @LoBo CfgGuerrillaFactions roster - since issue
+#      #54 A4 that config is the only place IDF and friends are declared, so
+#      without it the Sinai cyclers list nothing but the island's CIV.
 #   3. The fixture's patched pbos are gitignored (third-party APL-SA
 #      content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
 #      once to generate them from the local @LoBo install.

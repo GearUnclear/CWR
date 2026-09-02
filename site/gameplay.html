@@ -115,6 +115,11 @@
 	game. The swap system is <b>built and running</b>: every island fact and every faction fact lives in swappable data, and the
 	same campaign core already boots on a <b>second island</b> (Sinai) with the sides flipped. There, a modern occupier is held off by an Egyptian frontier resistance, the mirror image of the stock Cold War matchup, and the campaign code didn't change a line to do it. See the <a href="designloop.html">Roadmap</a>
 	for what's proven and what comes next.</p>
+	<p><b>Mods land in the same slots.</b> A mod that ships its own soldiers can add them to both faction cyclers by
+	including one config block, with no edit to any island we ship. A mod that ships a map becomes a campaign by
+	running a generator over it, which reads the world's own town list and road network and writes the zone table.
+	Factions you don't have mounted show up greyed out and say so, instead of dropping you into a mission full of
+	stand-in units. The two contracts are written up on the <a href="tech.html#mods">Under the Hood</a> page.</p>
 	<div class="shot">
 		<img src="assets/img/shot-newgame.png" width="760" alt="In-game new-game screen: Select island, with OCCUPIER: IDF and RESISTANCE: EgyptFrontier">
 		<div class="cap"><span class="stampcorner">DEV CAPTURE</span><b>The new-game screen, running:</b> choose the island, then cycle the occupier and resistance factions before you deploy. Here the occupier is IDF and the resistance is the Egyptian Frontier Corps, a matchup that doesn't exist in the stock game.</div>

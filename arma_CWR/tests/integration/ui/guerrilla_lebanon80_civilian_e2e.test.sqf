@@ -42,8 +42,9 @@
 //  native garrison has actually spawned live occupier units near the player,
 //  and several hundred further frames have run.
 //
-//  PRECONDITIONS (see the .toml): install-missions.ps1 -IncludeWorld
-//  Sinai,Lebanon80; the one-time @lobofixup patched pbos.
+//  PRECONDITIONS (see the .toml): install-missions.ps1 (no -IncludeWorld
+//  since issue #54 C4); the one-time @lobofixup patched pbos, mounted after
+//  @LoBo since they carry the @LoBo faction roster (issue #54 A4).
 // ============================================================================
 
 triSetLanguage "English"

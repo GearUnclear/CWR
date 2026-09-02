@@ -1787,7 +1787,9 @@ TEST_CASE("ZoneRegistry - CollectTownNames lists the campaign's CITY zones: auth
         REQUIRE(names.Size() == 1);
         CHECK(Str(names[0]) == "Village");
         ZoneRegistry::CollectTownNames(nullptr, file.FindEntry("Names"), names);
-        CHECK(names.Size() == 0); // no zones config = no seedCities = nothing
+        // no zones config = no seedCities key = Auto (issue #54 C3): the
+        // Names towns are listed (the mission-time classifier may seed fewer)
+        CHECK(names.Size() >= 1);
     }
 }
 
@@ -1850,8 +1852,11 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         REQUIRE(Str(leVille->marker) == "gmZoneCity_2");
     }
 
-    SECTION("seeding is off by default")
+    SECTION("seeding is Auto by default: with no landscape to classify against every town seeds")
     {
+        // issue #54 C3: an absent seedCities key means Auto; the engine's
+        // settlement probe (dry land + buildings) does the filtering, and
+        // without one (these config-only tests) the pre-C3 answer stands
         const char* noSeedConfig = "class CfgGuerrillaZones\n"
                                    "{\n"
                                    "    class Zones\n"
@@ -1865,7 +1870,8 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
                                    "};\n";
         RegistryFixture f;
         f.Load(noSeedConfig, nullptr, nullptr, "Names");
-        REQUIRE(f.registry.NZones() == 1);
+        REQUIRE(f.registry.Tuning().seedCities == ZoneTuning::SeedCities::Auto);
+        REQUIRE(f.registry.NZones() == 2);
     }
 
     SECTION("total zone count is capped at MaxZones")

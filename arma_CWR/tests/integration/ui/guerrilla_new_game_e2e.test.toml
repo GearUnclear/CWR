@@ -9,7 +9,11 @@
 #   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against
 #      the game CWD = data dir). @lobofixup (repo fixture) mounts after it:
 #      pbo shadows for @LoBo's malformed tracerColor floats, addon
-#      preloading, and the menu-level CfgGuerrillaFactions the cyclers list.
+#      preloading, and THE @LoBo CfgGuerrillaFactions roster - since issue
+#      #54 A4 the templates no longer declare it themselves.
+#   2b. The vanilla faction library at <GameDir>\bin (installed by step 1)
+#      adds WEST/EAST/GUER to the SAME merged table, so the Sinai occupier
+#      ring is eleven entries, not eight - see the .sqf header.
 #   3. The fixture's patched pbos are gitignored (third-party APL-SA
 #      content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
 #      once to generate them from the local @LoBo install.

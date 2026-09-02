@@ -58,6 +58,11 @@ struct ArcadeUnitInfo
 	void CalculateCenter(Vector3 &sum, int &count, bool sel);
 
 	void RequiredAddons(FindArrayRStringCI &addOns);
+	// The same attribution over INJECTED config roots (CfgPatches / CfgVehicles /
+	// CfgWeapons / CfgMagazines), unit-testable without the global Pars. Follows
+	// the type's weapons[] and magazines[] (issue #54 C1).
+	void RequiredAddonsFrom(const ParamEntry *patchesCfg, const ParamEntry *vehiclesCfg, const ParamEntry *weaponsCfg,
+	                        const ParamEntry *magazinesCfg, FindArrayRStringCI &addOns) const;
 };
 
 struct ArcadeSensorInfo
@@ -250,6 +255,10 @@ struct ArcadeTemplate : public SerializeClass
 	void ClearSelection();
 
 	void RequiredAddons(FindArrayRStringCI &addOns);
+	// Every placed unit's and empty vehicle's transitive closure over injected
+	// config roots (issue #54 C1) - what a launch must activate beyond addOns[].
+	void RequiredAddonsFrom(const ParamEntry *patchesCfg, const ParamEntry *vehiclesCfg, const ParamEntry *weaponsCfg,
+	                        const ParamEntry *magazinesCfg, FindArrayRStringCI &addOns) const;
 };
 
 }  // namespace Poseidon

@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Pester v5 — main-menu chrome regression check via --auto-screenshot.
+# Pester v5 - main-menu chrome regression check via --auto-screenshot.
 #
 # The "menu chrome disappears after ~1s" regression introduced by the
 # modern-shadow Phase 2 (SelectVertexShader(VSShadow) routing in the
@@ -17,9 +17,20 @@
 # (panel background); in the regressed state the 3D backdrop bleeds
 # through (sky/terrain colour ~150+ on B).
 #
-# Tolerance: max-channel < 120.  The working panel is a translucent
-# dark overlay (~80 max channel).  The regression bleeds sky/horizon
-# colour through (~150-200 max).  Threshold sits between with margin.
+# Tolerance: max-channel < 140.  The working panel is a translucent
+# dark overlay; the regression bleeds sky/horizon colour through
+# (~150-200 max).  Threshold sits between with margin.
+#
+# 2026-09-02 (issue #49): the current main menu (2026-07-15
+# resource-extra.cpp override - no BIS logo, GUERRILLA WARFIGHTER
+# promoted to a large centered primary button) measures ~127 max
+# channel at these three sample points, above the original 120
+# threshold this test shipped with. That is the working panel, not
+# the ~150-200 regression this test guards against, so the threshold
+# moved to 140 (still well clear of the regression range) rather than
+# the sample points, which were not implicated. No screenshot capture
+# was available to re-measure directly; 140 is set from the 127
+# figure reported in #49 plus the original test's own stated margin.
 
 param(
     [Parameter(Mandatory)]
@@ -69,8 +80,8 @@ Describe "Main menu chrome renders after live boot" {
                 $y = [int]($img.Height * $s.uY)
                 $px = $img.GetPixel($x, $y)
                 $maxChan = [Math]::Max([Math]::Max($px.R, $px.G), $px.B)
-                $maxChan | Should -BeLessThan 120 `
-                    -Because "$($s.name) at uv=($($s.uX),$($s.uY))=($x,$y) should be the dark panel (~80 max channel) — got R=$($px.R) G=$($px.G) B=$($px.B); regression bleeds 3D scene through (~150+)"
+                $maxChan | Should -BeLessThan 140 `
+                    -Because "$($s.name) at uv=($($s.uX),$($s.uY))=($x,$y) should be the dark panel (current menu measures ~127 max channel, issue #49) - got R=$($px.R) G=$($px.G) B=$($px.B); regression bleeds 3D scene through (~150+)"
             }
         } finally {
             $img.Dispose()

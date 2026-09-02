@@ -35,8 +35,9 @@
 //  back on IDD 76 switch the island list (101) to Abel -> OK -> in-mission.
 //
 //  PRECONDITIONS (see the .toml): templates installed via
-//  install-missions.ps1 -IncludeWorld Sinai,Lebanon80; the @lobofixup patched
-//  pbos generated once.
+//  install-missions.ps1 (no -IncludeWorld since issue #54 C4); the @lobofixup
+//  patched pbos generated once, and @lobofixup mounted after @LoBo since it
+//  carries the @LoBo faction roster (issue #54 A4).
 // ============================================================================
 
 triSetLanguage "English"

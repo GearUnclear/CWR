@@ -4,8 +4,9 @@
 //  Third of the kReferenceMissions direct launches (UI/OptionsUIApp.cpp),
 //  driving the alert->QRF slice: Qrf.Abel on the Houdan slope. Like
 //  Undercover.Abel it has its own bootstrap (QRF_BOOTED), but unlike it the
-//  mission runs the campaign's REAL scripts/qrf.sqs + scripts/lib.sqs
-//  (byte-identical core subset, pinned by test_mission_script_core.cpp), so
+//  mission runs the campaign's REAL \gmcore\scripts\qrf.sqs +
+//  \gmcore\scripts\lib.sqs (the ONE shared core, pinned by
+//  test_mission_script_core.cpp), so
 //  the post-launch probes also check that the shared-core handshake and the
 //  QRF manager's own state came up.
 //

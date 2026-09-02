@@ -3,12 +3,14 @@
 # uncovered).
 #
 # PRECONDITIONS (same as guerrilla_character_lobo_e2e):
-#   1. guerrilla-mode/install-missions.ps1 -IncludeWorld Sinai,Lebanon80 has
-#      been run - without -IncludeWorld the installer's world gate REMOVES
-#      Guerrilla.Lebanon80, because Lebanon80.wrp lives inside
-#      @LoBo\addons\LoBo_Leb.pbo and is invisible to the gate.
+#   1. guerrilla-mode/install-missions.ps1 has been run. No -IncludeWorld
+#      needed since issue #54 C4: Lebanon80.wrp lives inside
+#      @LoBo\addons\LoBo_Leb.pbo, and the world gate now reads pbo entry
+#      tables instead of only looking in <GameDir>\Worlds.
 #   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against the
-#      game CWD = data dir), with @lobofixup mounted AFTER it.
+#      game CWD = data dir), with @lobofixup mounted AFTER it - it carries the
+#      @LoBo CfgGuerrillaFactions roster (Hizballah, IDF, ...), which since
+#      issue #54 A4 is no longer in the template's description.ext.
 #   3. The fixture's patched pbos are gitignored - run
 #      tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 once.
 #

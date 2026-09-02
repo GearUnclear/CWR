@@ -4,8 +4,9 @@
 ;  A single-purpose sandbox for the deep-undercover layer. The native side
 ;  (ZoneRegistry + AlertMachine + UndercoverSystem, activated by
 ;  CfgGuerrillaZones in description.ext) does all perception work, and the
-;  campaign's OWN scripts/undercover.sqs (a byte-identical copy of the
-;  Guerrilla.* shared core, with its scripts/lib.sqs helper library) supplies
+;  campaign's OWN undercover.sqs, exec'd with its lib.sqs helper library
+;  out of the ONE shared core at <GameDir>\gmcore (no copy lives here),
+;  supplies
 ;  the script-side cover policy: gmUndercover = true + setCaptive true at
 ;  boot, the fired-EH -> gmBreakUndercover, and the advisory hint + diary
 ;  line on the first compromise. This file only:
@@ -18,7 +19,10 @@
 ;       checkpoint (the stolen-vehicle policy demo);
 ;    3. scripted occupier presence IN town (CITY zones are never natively
 ;       garrisoned - the Checkpoint outpost garrison of 6 is native);
-;    4. execs scripts/lib.sqs then scripts/undercover.sqs - and NOTHING else
+;    4. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\undercover.sqs
+;       out of the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else
 ;       from the core, so the disguise layer is the only moving part;
 ;    5. self-actions (sling/unsling, status check, debug reset) + the HUD
 ;       status loop (hud.sqs).
@@ -45,7 +49,7 @@ GM_Z_POS     = 8
 GM_Z_CAPTURE = 9
 
 ; script scalars the native undercover layer reads (warDetect = gmWarLevel/10);
-; gmUndercover itself is established by scripts/undercover.sqs below
+; gmUndercover itself is established by the core's undercover.sqs below
 gmWarLevel = 1
 ; lib.sqs helpers reference these rosters; seeded empty so a stray call is safe
 GM_GEAR_THRESHOLD = 25
@@ -70,11 +74,11 @@ goto "mkmarkers"
 #mkdone
 
 ; ---- an unarmed guerrilla passing as a civilian: the cover itself (captive +
-;      gmUndercover + fired-EH) is established by scripts/undercover.sqs -----
+;      gmUndercover + fired-EH) is established by the core undercover.sqs ----
 removeAllWeapons aP
 
 ; native first-compromise event -> queue (handlers cannot ~sleep; the one
-; consumer is scripts/undercover.sqs, exactly as in the campaign)
+; consumer is the core's undercover.sqs, exactly as in the campaign)
 gmEvtUcBroken = []
 gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
 
@@ -137,8 +141,8 @@ UC_a5 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
 ;  the fired-EH, drains gmEvtUcBroken), then the readout
 ; ============================================================================
 GM_LIB_READY = false
-[] exec "scripts/lib.sqs"
+[] exec "\gmcore\scripts\lib.sqs"
 @GM_LIB_READY
-[] exec "scripts/undercover.sqs"
+[] exec "\gmcore\scripts\undercover.sqs"
 [] exec "hud.sqs"
 exit

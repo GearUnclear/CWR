@@ -8,9 +8,9 @@
 //         single group under groupSize = 12);
 //      3. the spawned groups are real commandable AI: doMove displaces a unit.
 //
-//  Mission: tests/integration/missions/guerrilla_native.abel - init.sqs and
-//  scripts/ are byte-identical to the canonical Guerrilla.Demo core, so this
-//  exercises the shipped mode, not a reimplementation.
+//  Mission: tests/integration/missions/guerrilla_native.abel - its two-line
+//  init.sqs execs the ONE shared core at <GameDir>\gmcore, so this exercises
+//  the shipped mode, not a reimplementation.
 //
 //  gn* globals are used across statements (the harness evaluates each
 //  ;/newline statement in its own context, so locals would not survive).

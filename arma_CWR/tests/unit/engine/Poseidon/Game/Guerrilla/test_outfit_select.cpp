@@ -515,3 +515,91 @@ TEST_CASE("PlayerBodyModelIssue: a missing or empty model is named, not substitu
     REQUIRE(Str(PlayerBodyModelIssue(vehicles, RString("Shapeless"), ShippedShapes)) == "the class authors no model");
     REQUIRE(Str(PlayerBodyModelIssue(vehicles, RString("NoModelKey"), ShippedShapes)) == "the class authors no model");
 }
+
+// ---------------------------------------------------------------------------
+// The warrior body follows the resistance pick (issue #54 A3, #26 item 3)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// Guerrilla.Sinai's shape: EgyptFrontier is the authored (default) resistance;
+// Jordan is a second roster with its own warrior body; Syria authors none;
+// Nomads author a warrior the package does not ship
+const char* kWarriorConfig =
+    "class CfgGuerrillaZones\n"
+    "{\n"
+    "    defaultOccupier = \"IDF\";\n"
+    "    defaultResistance = \"EgyptFrontier\";\n"
+    "    playerSide = \"GUER\";\n"
+    "};\n"
+    "class CfgGuerrillaFactions\n"
+    "{\n"
+    "    class IDF { side=\"WEST\"; tiers[]={\"LoBoGolaniWB\"}; playerClassWarrior=\"LoBoGolaniWB\"; };\n"
+    "    class EgyptFrontier { side=\"GUER\"; tiers[]={\"LoBoEgyptFB\"}; "
+    "playerClassWarrior=\"LoBoEgyptFB\"; playerClassCiv=\"LoBoEgyptCiv\"; };\n"
+    "    class Jordan { side=\"GUER\"; tiers[]={\"LoBoJordanB\"}; playerClassWarrior=\"LoBoJordanB\"; };\n"
+    "    class Syria { side=\"EAST\"; tiers[]={\"LoBoSyriaB\"}; };\n"
+    "    class Nomads { side=\"GUER\"; tiers[]={\"LoBoJordanB\"}; playerClassWarrior=\"LoBoNomadB\"; };\n"
+    "};\n";
+} // namespace
+
+TEST_CASE("ResolveWarriorPlayerClass: a non-default resistance substitutes its playerClassWarrior",
+          "[guerrilla][outfit][warrior]")
+{
+    ParsedConfig cfg(kWarriorConfig);
+    FakeProbe probe;
+    probe.vehicles = {"LoBoGolaniWB", "LoBoEgyptFB", "LoBoJordanB", "LoBoSyriaB"};
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "Jordan", probe)) == "LoBoJordanB");
+    // resolved by side string too (FindFaction order: side first): "GUER"
+    // lands on EgyptFrontier, the default - nothing to substitute
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "GUER", probe)).empty());
+    // the full precedence chain reaches the same answer with no pick and a
+    // WARRIOR (or absent) outfit token
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "", "warrior", "Jordan", probe)) == "LoBoJordanB");
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), nullptr, nullptr, "Jordan", probe)) ==
+            "LoBoJordanB");
+    // an occupier-side roster picked as the resistance still brings its body
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "", "warrior", "IDF", probe)) == "LoBoGolaniWB");
+}
+
+TEST_CASE("ResolveWarriorPlayerClass: the default resistance keeps the authored class", "[guerrilla][outfit][warrior]")
+{
+    ParsedConfig cfg(kWarriorConfig);
+    FakeProbe probe;
+    probe.vehicles = {"LoBoGolaniWB", "LoBoEgyptFB", "LoBoJordanB"};
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "EgyptFrontier", probe)).empty());
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "", probe)).empty());
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), nullptr, probe)).empty());
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), nullptr, "Jordan", probe)).empty());
+    // without a zones block the built-in GUER side is the default, which the
+    // side-first lookup resolves to EgyptFrontier here
+    REQUIRE(Str(ResolveWarriorPlayerClass(nullptr, cfg.Factions(), "EgyptFrontier", probe)).empty());
+    REQUIRE(Str(ResolveWarriorPlayerClass(nullptr, cfg.Factions(), "Jordan", probe)) == "LoBoJordanB");
+}
+
+TEST_CASE("ResolveWarriorPlayerClass: no key, a failing probe, or an unknown pick keeps the authored class",
+          "[guerrilla][outfit][warrior]")
+{
+    ParsedConfig cfg(kWarriorConfig);
+    FakeProbe probe;
+    probe.vehicles = {"LoBoGolaniWB", "LoBoEgyptFB", "LoBoJordanB", "LoBoSyriaB"};
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "Syria", probe)).empty());  // no key
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "Nomads", probe)).empty()); // LoBoNomadB missing
+    REQUIRE(Str(ResolveWarriorPlayerClass(cfg.Zones(), cfg.Factions(), "Martians", probe)).empty());
+}
+
+TEST_CASE("ResolvePlayerBodyClass: the body pick and the civilian token still outrank the resistance warrior",
+          "[guerrilla][outfit][warrior]")
+{
+    ParsedConfig cfg(kWarriorConfig);
+    FakeProbe probe;
+    probe.vehicles = {"LoBoGolaniWB", "LoBoEgyptFB", "LoBoJordanB", "LoBoEgyptCiv", "SoldierEB"};
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "SoldierEB", "warrior", "Jordan", probe)) ==
+            "SoldierEB");
+    // CIVILIAN on a roster that authors no playerClassCiv: the civ path
+    // declines (keeps the authored class) and does NOT fall through to the
+    // warrior rung - the token was explicit
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "", "civilian", "Jordan", probe)).empty());
+    REQUIRE(Str(ResolvePlayerBodyClass(cfg.Zones(), cfg.Factions(), "", "civilian", "EgyptFrontier", probe)) ==
+            "LoBoEgyptCiv");
+}

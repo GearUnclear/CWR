@@ -1,7 +1,7 @@
 // ============================================================================
 //  Qrf.Abel reference mission - the alert -> QRF chain, end to end, on the
-//  campaign's REAL policy script (scripts/qrf.sqs, byte-identical core copy)
-//  driven by the native AlertMachine + GarrisonCache. Proves, on full CWA
+//  campaign's REAL policy script (\gmcore\scripts\qrf.sqs out of the ONE
+//  shared core) driven by the native AlertMachine + GarrisonCache. Proves, on full CWA
 //  data (Abel):
 //      1. the mission boots its own bootstrap (QRF_BOOTED), the shared-core
 //         subset handshakes (GM_LIB_READY) and qrf.sqs is running

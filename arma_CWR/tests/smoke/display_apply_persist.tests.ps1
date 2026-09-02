@@ -45,7 +45,7 @@ Describe "display.cfg persistence through live UI flow" {
 
             # Run tri with the inherited POSEIDON_USER_DIR.  --retries 3
             # absorbs the pre-existing engine flake on the options
-            # screen (access violation during long idle sim — same
+            # screen (access violation during long idle sim - same
             # crash documented in audio_volume_persist.tests.ps1).
             $sqf = Join-Path $script:repoRoot "tests/integration/ui/options/display/new_display_apply_persist.test.sqf"
             & $script:triExe test $sqf --game-dir (Split-Path $script:gameExe -Parent) --data-dir $script:gameDir --retries 3 2>&1 | Out-Null
@@ -53,7 +53,7 @@ Describe "display.cfg persistence through live UI flow" {
 
             Test-Path $cfgPath | Should -BeTrue -Because "Apply + Keep should write display.cfg"
             $kv = Read-CfgFile $cfgPath
-            $kv['windowMode'] | Should -Be '1' -Because "the harness boots windowed (dropdown 'Window'); tri cycled Window (2) → Fullscreen (1) and pressed Keep"
+            $kv['windowMode'] | Should -Be '1' -Because "the harness boots windowed (dropdown 'Window'); tri cycled Window (2) -> Fullscreen (1) and pressed Keep"
         } finally {
             Remove-EphemeralGamePaths $eph
         }

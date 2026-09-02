@@ -1,0 +1,10 @@
+# Menu-time faction gating + faction pack on Abel (issue #54 A2/E2). Boots to
+# the main menu (no mission=) with two repo fixture packs mounted through
+# --mods-dir ".." (relative to the game CWD, the data dir). Needs the
+# templates + shared core + faction library installed in the game dir
+# (guerrilla-mode/install-missions.ps1). Classic package only: no @LoBo.
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-factionpack/@udfaction;arma_CWR/tests/fixtures/mods-factionpack/@udbroken"]

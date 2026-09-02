@@ -4,7 +4,7 @@ Maps every Phase-1 "Three Zones" requirement from
 [`../mod-plans/13-guerrilla-mode.md`](../mod-plans/13-guerrilla-mode.md) to
 where it lives NOW: **native** (engine `engine/Poseidon/Game/Guerrilla/` +
 evaluator, landed in commit `3ef5cd5`) or **script** (the event-driven policy
-layer under `mission/Guerrilla.Demo/`). The Phase-1 all-SQS implementation of
+layer, one copy, under `core/`). The Phase-1 all-SQS implementation of
 rows marked *native* is deleted; gameplay behavior is preserved.
 
 *(Everything below is "written, pending a build+run" — code-complete and
@@ -44,17 +44,17 @@ reconciled against the engine source, not play-tested.)*
 | File | Role |
 |------|------|
 | `description.ext` | THE per-island data file: `CfgGuerrillaZones` (tuning + zone seed + `seedCities=1`) and `CfgGuerrillaFactions` (Demo: stock EAST/GUER classes) |
-| `init.sqs` | thin bootstrap: script-state seed, zone markers, 8 one-line native handler registrations, exec managers |
-| `scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
-| `scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint; diary lines for ready/lost/liberated + the `firstZone`/`firstTown` starter objectives |
+| `core/init.sqs` | thin bootstrap: script-state seed, zone markers, 8 one-line native handler registrations, exec managers. Lives ONCE at `guerrilla-mode/core`, installed to `<GameDir>\gmcore`; each mission's own `init.sqs` is the two-line `[] exec "\gmcore\init.sqs"` |
+| `core/scripts/lib.sqs` | 8 helpers (`GM_fnRandPosNear/SpawnGroup/SpawnSquad/SideFromString/CountOwnedBy/ZoneOfType/FactionNum/BumpGear`) + `GM_LIB_READY` |
+| `core/scripts/capture.sqs` | `captured` consumer: hold garrison + "liberated" hint; diary lines for ready/lost/liberated + the `firstZone`/`firstTown` starter objectives |
 | *(engine)* `Game/Guerrilla/Journal.*`, `JournalCommands.cpp`, `UI/Guerrilla/GuerrillaJournalPages.*` | the field journal behind the map's Notes/Plan pages (row 22): diary / objectives / status tables (`gmJournal*`), the page renderer + field-manual text; `scripts/` only WRITE to it (campaign: begin/save/restore; qrf: QRF launch; undercover: cover blown; companions: promotion/death + `Companions` status line; loot: unlock + `Unlocked gear` status line + `firstUnlock` objective; escalation: War Level edges; recruit: recruit/train + `firstRecruit` objective) |
 | *(engine)* `Game/Guerrilla/Traffic.*`, `TrafficCommands.cpp` | ambient road traffic (row 23): civ cars / occupier patrols / convoys, commandeer, road queries; `init.sqs` registers 4 enqueue handlers + the `driverKilled` ledger expression |
 | *(engine)* `Game/Guerrilla/GuerrillaBase.*`, `GuerrillaBaseCommands.cpp`, `Game/Guerrilla/Market.*`, `MarketCommands.cpp`, `UI/Guerrilla/GuerrillaNewGame` (START TOWN cycler) | headquarters / cache / garage (row 24) and the dealer market (row 25): election + siting + the keep-when-empty cache + garage locks + the start-town election; dealer draw + NPCs + stock (`class CfgGuerrillaMarket` in `description.ext`) |
-| `scripts/market.sqs` / `market_action.sqs` | the money-loop action menus over those facts: Establish/Move HQ (debits `hqMoveCost` on a move), Stash at the cache, Lock/Unlock in the garage, the BUY menu beside a dealer (here / HQ delivery) - the second `gmResources` debit writer; map markers, `hqEstablish` objective, diary lines |
-| `scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
-| `scripts/undercover.sqs` | cover establish (kept for the whole campaign), fired-EH → `gmBreakUndercover`, advisory `undercoverBroken` hint (never drops captive) |
-| `scripts/campaign.sqs` | Save addAction + `campaignLoaded` consumer (companion/group reconciliation) |
-| `scripts/economy.sqs` / `escalation.sqs` / `loot.sqs` / `recruit.sqs` / `recruit_action.sqs` / `companions.sqs` | unchanged responsibilities on the native surface |
+| `core/scripts/market.sqs` / `market_action.sqs` | the money-loop action menus over those facts: Establish/Move HQ (debits `hqMoveCost` on a move), Stash at the cache, Lock/Unlock in the garage, the BUY menu beside a dealer (here / HQ delivery) - the second `gmResources` debit writer; map markers, `hqEstablish` objective, diary lines |
+| `core/scripts/qrf.sqs` | `alertChanged` consumer: garrison posture, YELLOW investigate, RED QRF convoy |
+| `core/scripts/undercover.sqs` | cover establish (kept for the whole campaign), fired-EH → `gmBreakUndercover`, advisory `undercoverBroken` hint (never drops captive) |
+| `core/scripts/campaign.sqs` | Save addAction + `campaignLoaded` consumer (companion/group reconciliation) |
+| `core/scripts/economy.sqs` / `escalation.sqs` / `loot.sqs` / `recruit.sqs` / `recruit_action.sqs` / `companions.sqs` | unchanged responsibilities on the native surface |
 | *(deleted)* `zones.sqs`, `spawning.sqs`, `alert.sqs`, `persistence.sqs` | polling loops replaced by the native systems |
 
 ## Behavior deviations from the Phase-1 scripts (deliberate, documented)
@@ -233,12 +233,16 @@ and the off-road/high-ground spot picker), `test_stash_registry.cpp`, and
 `test_journal.cpp` (diary cap, objective/status upsert, save/load round-trip,
 plus the Notes/Plan/diary/manual page renderer against a parser-only HTML
 container and an authored-Main/Plan append case));
-`test_mission_script_core.cpp` enforces that every test mission's `init.sqs` +
-`scripts/` stay byte-identical to the canonical `Guerrilla.Demo` core, and
-that the `Qrf.*` and `Undercover.*` reference missions (own bootstrap,
-`scripts/` = `lib.sqs` + the one policy script `qrf.sqs` / `undercover.sqs`)
-carry a byte-identical SUBSET of it - each sandbox always runs the campaign's
-real policy script, never a re-implementation.
+`test_mission_script_core.cpp` enforces the ONE-core shape (issue #54 step B1,
+which retired the N-way byte-identical copy walk): the core is
+`guerrilla-mode/core`, its `scripts/` set equals the manifest ARCHITECTURE.md
+A.6 documents, no mission template or `guerrilla_*` test mission carries a
+`scripts/` directory, every full-core mission's `init.sqs` is the two-line
+`[] exec "\gmcore\init.sqs"` bootstrap, every `\gmcore\scripts\<x>.sqs`
+reference resolves to a real core file, and no relative `"scripts/` reference
+survives. The `Qrf.*` / `Market.*` / `Undercover.*` reference missions keep
+their own bootstrap and exec the one core policy script they demonstrate, so
+each sandbox runs the campaign's real script by construction, never a copy.
 `guerrilla_native_save_reload.seq` additionally stamps a diary line, an
 objective flip and a status line in phase 01 and diffs them after the
 cross-process reload in phase 02 (the `GuerrillaJournal` save block), and

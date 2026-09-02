@@ -1,0 +1,97 @@
+# Clean-clone CI lane (issue #54 E3): everything here runs without any
+# proprietary game data. The unit suites, the Guerrilla descriptor lint, the
+# mod doctor and the roster probe all run against the GPL-clean synthetic
+# fixtures under arma_CWR/tests/fixtures, so a PR that breaks a faction
+# descriptor, the config reader or the mod-intake tools goes red for anyone,
+# CWA install or not. Trident integration tests need game data and stay on
+# the developer machines (see arma_CWR/CLAUDE.md, Tests).
+name: ci
+
+on:
+  push:
+    branches: [main, "feat/**"]
+    paths:
+      - "arma_CWR/engine/**"
+      - "arma_CWR/apps/**"
+      - "arma_CWR/tests/**"
+      - "arma_CWR/guerrilla-mode/**"
+      - "arma_CWR/cmake/**"
+      - "arma_CWR/CMakeLists.txt"
+      - "arma_CWR/CMakePresets.json"
+      - "arma_CWR/vcpkg.json"
+      - ".github/workflows/ci.yml"
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PRESET: linux-x64-clang-rwdi
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  # vcpkg's default binary cache, restored by actions/cache below so the
+  # from-source dependency build (SDL3, curl+ssl, openal, ...) happens once per
+  # vcpkg.json change instead of once per run
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+  CCACHE_DIR: ${{ github.workspace }}/ccache
+
+jobs:
+  unit-and-tools:
+    name: Linux unit tests + mod-intake tools (no game data)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and the dependency build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld ninja-build ccache cmake pkg-config autoconf automake libtool \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
+            libxss-dev libxkbcommon-dev libwayland-dev libegl-dev libgl-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev python3
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE" "$CCACHE_DIR"
+
+      - name: Restore the vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('arma_CWR/vcpkg.json', 'arma_CWR/cmake/vcpkg-overlay-ports/**', 'arma_CWR/cmake/vcpkg-triplets/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: Bootstrap vcpkg (pinned to the manifest's builtin-baseline)
+        run: |
+          baseline=$(python3 -c "import json;print(json.load(open('arma_CWR/vcpkg.json'))['builtin-baseline'])")
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout "$baseline"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Configure
+        working-directory: arma_CWR
+        run: cmake --preset "$PRESET"
+
+      - name: Build the unit suites and PoseidonTools
+        working-directory: arma_CWR
+        run: cmake --build "build/$PRESET" --target PoseidonFoundationTests PoseidonCoreTests PoseidonTests PoseidonTools
+
+      - name: Unit tests
+        working-directory: arma_CWR
+        # Trident/integration entries need a game data dir and are excluded by
+        # name; the Catch2 suites already exclude their [GameData] cases when
+        # packages/Remaster is absent (tests/unit/engine/Poseidon/CMakeLists.txt)
+        run: ctest --test-dir "build/$PRESET" --output-on-failure -E "trident|integration|Trident"
+
+      - name: Mod-intake tools on the synthetic fixtures
+        working-directory: arma_CWR
+        run: bash tests/ci/mod-intake-lanes.sh "dist/x64-linux-rwdi/PoseidonTools"
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s

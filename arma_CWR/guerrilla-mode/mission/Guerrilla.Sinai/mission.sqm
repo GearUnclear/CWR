@@ -7,25 +7,19 @@ class Mission
 	// visibility-checked against that list (ParamOwnerList "Access denied",
 	// World::CheckAddon). A missing entry here does not just warn: the unit
 	// type fails to build and the whole mission refuses to boot
-	// ("StartAutoTest could not boot"). So this lists the TRANSITIVE owners:
-	// world (sinai + LoBoTerror terrain objects), player + resistance
-	// (LoBoEgypt, weapons LoBoWeapons/LoBoWeapNad, mags JAM_Magazines),
-	// occupier garrison + QRF (LoBoIs, LoBoWeapat, LoBoHMWV, LoBo_Zelda),
-	// and the shared ammo pool (LoBoammo). CfgPatches class names verified
-	// against the shipped @LoBo configs.
+	// ("StartAutoTest could not boot"). Since issue #54 C1 the engine derives
+	// the TRANSITIVE closure itself: the placed player's weapons[]/magazines[]
+	// owners at launch (Guerrilla::ActivateTemplateAddons) and everything the
+	// faction descriptors name at registry load
+	// (ZoneRegistry::ActivateFactionAddons). So this lists only what the
+	// mission itself PLACES: the world and the player's own pbo. The former
+	// hand-listed transitive set (LoBoTerror, LoBoWeapons, LoBoWeapNad,
+	// LoBoWeapat, LoBoammo, JAM_Magazines, LoBoIs, LoBoHMWV, LoBo_Zelda) is
+	// what the walk now activates and logs at INFO.
 	addOns[]=
 	{
 		"sinai",
-		"LoBoTerror",
-		"LoBoEgypt",
-		"LoBoWeapons",
-		"LoBoWeapNad",
-		"LoBoWeapat",
-		"LoBoammo",
-		"JAM_Magazines",
-		"LoBoIs",
-		"LoBoHMWV",
-		"LoBo_Zelda"
+		"LoBoEgypt"
 	};
 	addOnsAuto[]=
 	{

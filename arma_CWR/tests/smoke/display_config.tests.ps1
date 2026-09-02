@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 # Pester smoke tests for the display.cfg eager-write boot dance.
 #
-# Mirrors audio_config.tests.ps1 1:1 — same four It blocks, same
+# Mirrors audio_config.tests.ps1 1:1 - same four It blocks, same
 # ephemeral-POSEIDON_USER_DIR pattern, same invariants (eager-write
 # defaults, byte-identical preservation of valid file, normalize-but-
 # don't-persist, empty-file tolerance).  Run:
@@ -56,7 +56,7 @@ Describe "display.cfg boot dance" {
         try {
             $cfgPath = Join-Path $eph.UserDir "display.cfg"
             # Borderless on monitor 0 with native resolution + system
-            # refresh — guaranteed-valid on every machine.
+            # refresh - guaranteed-valid on every machine.
             @"
 monitor=0;
 windowMode=1;
@@ -77,7 +77,7 @@ refreshRate=0;
         }
     }
 
-    It "does NOT persist normalization on boot — invalid monitor stays in file" {
+    It "does NOT persist normalization on boot - invalid monitor stays in file" {
         # Key invariant: a temporarily disconnected external monitor
         # must keep its remembered index in the file so the user gets
         # it back when they plug it in.  Runtime falls back to 0
@@ -110,7 +110,7 @@ refreshRate=0;
     }
 
     It "tolerates an empty display.cfg without crashing" {
-        # An empty-but-existing file is a likely accidental state —
+        # An empty-but-existing file is a likely accidental state -
         # user opened it, accidentally cleared content, saved.  Boot
         # must not crash.  ParamFile treats this as "no keys" and
         # DisplayConfig keeps in-memory defaults.

@@ -2028,6 +2028,12 @@ bool StartAutoTest()
         introOnly = true;
     }
 
+    // Cleared BEFORE the units are created (issue #46 residual): InitVehicles
+    // re-applies the campaign variable bank and the Guerrilla body seam reads
+    // the gmSel* picks out of it, so a bank left over from an earlier menu
+    // launch in the same process must be gone by then, not after.
+    GStats.ClearAll();
+
     GWorld->SwitchLandscape(GetWorldName(Glob.header.worldname));
     GWorld->ActivateAddons(CurrentTemplate.addOns);
     GWorld->InitGeneral(CurrentTemplate.intel);
@@ -2035,8 +2041,6 @@ bool StartAutoTest()
     {
         return false;
     }
-
-    GStats.ClearAll();
 
     // remove temporary files
     RString dir = GetSaveDirectory();

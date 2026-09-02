@@ -1,7 +1,7 @@
 ; ============================================================================
 ;  showcase/lib.sqs  -  SC_fn* helper library for the showcase overlay.
 ; ----------------------------------------------------------------------------
-;  Same conventions as scripts/lib.sqs: synchronous single-line code values,
+;  Same conventions as the core's lib.sqs: synchronous single-line code values,
 ;  SC_tmp* scratch globals (never read across calls). Loaded by boot.sqs;
 ;  sets SC_LIB_READY as its last statement.
 ;

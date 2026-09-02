@@ -21,7 +21,9 @@
 // Esc still exits via the ControlsContainer key path.
 
 #include <Poseidon/UI/Controls/UIControls.hpp>
-#include <Poseidon/IO/ParamFile/ParamFile.hpp> // ParamFile (the per-island descriptor this display owns)
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>        // ParamFile (the per-island descriptor this display owns)
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // the merged faction table this display owns (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>   // ClassProbe (menu-time availability gating, issue #54 A2)
 
 #include <functional>
 #include <vector>
@@ -100,6 +102,34 @@ bool GuerrillaTemplateExists(RString island, const std::function<bool(RString)>&
 // selection is empty or names no subclass — the caller cannot validate what
 // the mission's own config will resolve.
 RString GuerrillaFactionSide(const ParamEntry* factionsCfg, RString faction);
+
+// Menu-time availability gating (issue #54 A2, the #13 lesson generalised
+// from runtime-degrade to don't-offer-it). A merged faction may come from an
+// addon whose pbos are NOT mounted this session - its classes then fail the
+// plan-15 probe at launch and every spawn wears a fallback body, playable,
+// wrong, and invisible until someone looks. Returns the reason the faction
+// cannot be launched on the loaded data package, EMPTY when it can: probes
+// tiers[0] (the rung every spawn path bottoms out on; a descriptor with no
+// tiers[] is refused too) and playerClassWarrior when authored (the body the
+// resistance pick substitutes, issue #54 A3). CfgVehicles only, the same
+// bank ZoneRegistry::ResolveFactionClasses probes.
+// With vehiclesCfg + shapeExists given, playerClassWarrior is additionally
+// held to the launch seam's shape gate (PlayerBodyModelIssue: a model whose
+// .p3d the package does not ship), so the menu's availability verdict and
+// the launch's cannot disagree (the #46 seam-4 shape).
+RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe,
+                              const ParamEntry* vehiclesCfg = nullptr,
+                              const std::function<bool(RString)>& shapeExists = nullptr);
+// One issue per entry of `factions` (GuerrillaListFactions order), so the
+// cyclers can render and gate by index.
+std::vector<RString> GuerrillaFactionIssues(const ParamEntry* factionsCfg, const std::vector<RString>& factions,
+                                            const Guerrilla::ClassProbe& probe, const ParamEntry* vehiclesCfg = nullptr,
+                                            const std::function<bool(RString)>& shapeExists = nullptr);
+// The label suffix a greyed row carries, shared with the e2e assertions.
+constexpr const char* kGuerrillaFactionUnavailableSuffix = " (not in loaded data)";
+// The one player-facing refusal for an OK on a greyed pick (role is
+// "OCCUPIER" / "RESISTANCE").
+RString GuerrillaUnavailableMessage(const char* role, RString faction, RString issue);
 
 // Index into `list` of the faction `selection` names, or -1. `selection` is
 // what ZoneRegistry::ResolveSides accepts: either a descriptor class name or a
@@ -281,10 +311,10 @@ bool GuerrillaPreviewHideWeaponProxy(const ParamEntry* nonAIVehiclesCfg, const c
 // Where an island's Guerrilla template publishes its CfgGuerrillaFactions:
 // under the CreateSingleMissionBank mount prefix for a banked (.pbo)
 // template (bankPrefix non-empty, already ending in "\\"), otherwise
-// directly under the unbanked mission directory. CfgGuerrillaFactions lives
-// in each template's own description.ext (see guerrilla-mode/mission/*), NOT
-// in any addon's global config — Pars never carries this class — so the
-// new-game screen must read it per-island instead of from Pars.
+// directly under the unbanked mission directory. The island's block is one
+// of the TWO faction sources (issue #54 A1): it is merged with the global
+// config's CfgGuerrillaFactions (addon faction packs) through
+// Guerrilla::FactionSources, the island winning on a name collision.
 RString GuerrillaFactionsDescriptionPath(RString island, RString bankPrefix);
 
 class GuerrillaNewGame : public Display
@@ -380,16 +410,36 @@ class GuerrillaNewGame : public Display
     // function-local ParamFile is why the IDC_OK guard fell back to Pars,
     // which never carries CfgGuerrillaFactions — see the note above).
     ParamFile _islandCfg;
-    const ParamEntry* _islandFactions = nullptr; // into _islandCfg, or into Pars, or null
-    const ParamEntry* _islandZones = nullptr;    // ditto; carries playerSide + the default* keys
+    // OWNS the merged faction table (island block U Pars block, issue #54
+    // A1); _islandFactions points into it. Rebuilt with _islandCfg.
+    Guerrilla::FactionSources _factionSources;
+    const ParamEntry* _islandFactions = nullptr; // into _factionSources' copy, or null
+    const ParamEntry* _islandZones = nullptr; // into _islandCfg, or into Pars, or null; carries playerSide + default*
     // The island _islandCfg/_occupiers/_resistances currently describe. The
     // island list fires OnLBSelChanged on every click, not just on a real
     // change, so this is what makes the refresh idempotent.
     RString _islandForFactions;
     std::vector<RString> _occupiers;
     std::vector<RString> _resistances;
+    // Parallel to _occupiers (and _resistances, the same list): the reason a
+    // faction is greyed out on this data package, EMPTY when launchable
+    // (GuerrillaFactionIssues, issue #54 A2). Rebuilt with the lists.
+    std::vector<RString> _factionIssues;
     int _occupierSel = 0;
     int _resistanceSel = 0;
+    // Set when the player CYCLED a faction row. Only a picked name is kept
+    // across an island change (RefreshFactionsForIsland); an untouched row
+    // re-seeds from the new island's own default* pair. With the faction
+    // library global (issue #54 A4) every name survives on every island, so
+    // without this flag the placeholder island's side-fallback binding
+    // (EAST -> the first EAST-side faction) would ride onto every template
+    // and shadow its authored defaults.
+    bool _occupierPicked = false;
+    bool _resistancePicked = false;
+    // The injected cyclers' authored text colour, captured at injection so a
+    // greyed row can be dimmed and restored without knowing the resource.
+    PackedColor _cyclerColor;
+    bool _cyclerColorKnown = false;
     // Character outfit family (issue #25): {"WARRIOR", "CIVILIAN"} when the
     // selected resistance descriptor offers the pair, empty otherwise.
     std::vector<RString> _outfits;

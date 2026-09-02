@@ -4,8 +4,9 @@
 ;  A single-purpose sandbox for the occupier ALERT -> QRF chain. The native
 ;  side (ZoneRegistry + AlertMachine + GarrisonCache, activated by
 ;  CfgGuerrillaZones in description.ext) runs the zones, the garrison cache
-;  and the GREEN/YELLOW/RED FSM; the campaign's OWN scripts/qrf.sqs (a
-;  byte-identical copy of the Guerrilla.* shared core) supplies the policy:
+;  and the GREEN/YELLOW/RED FSM; the campaign's OWN qrf.sqs, exec'd out of
+;  the ONE shared core at <GameDir>\gmcore (no copy lives here), supplies
+;  the policy:
 ;  garrison posture edges, YELLOW investigate moves, the RED QRF convoy, the
 ;  stall-insertion fallback and the stand-down. This file only:
 ;    1. seeds the script-side state qrf.sqs/lib.sqs read (GM_Z_* tuple
@@ -13,7 +14,10 @@
 ;       handler) - the same names init.sqs of a Guerrilla campaign seeds;
 ;    2. creates the zone markers (the engine repaints only markers that
 ;       already exist);
-;    3. execs scripts/lib.sqs then scripts/qrf.sqs - and NOTHING else from
+;    3. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\qrf.sqs out of
+;       the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else from
 ;       the core (no capture/economy/recruit/civilian managers), so the QRF
 ;       system is the only moving part on display;
 ;    4. props: binoculars, an RPG on the ground (kill the escort, watch the
@@ -115,8 +119,8 @@ QRF_a8 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
 ;  QRF policy script, then the readout
 ; ============================================================================
 GM_LIB_READY = false
-[] exec "scripts/lib.sqs"
+[] exec "\gmcore\scripts\lib.sqs"
 @GM_LIB_READY
-[] exec "scripts/qrf.sqs"
+[] exec "\gmcore\scripts\qrf.sqs"
 [] exec "hud.sqs"
 exit

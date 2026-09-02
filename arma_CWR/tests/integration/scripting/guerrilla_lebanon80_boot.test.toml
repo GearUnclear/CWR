@@ -8,6 +8,12 @@
 # abort), and preloads the LoBo addons the template spawns from (see its
 # bin/config.cpp).
 #
+# SINCE ISSUE #54 A4 the fixture also carries the whole @LoBo
+# CfgGuerrillaFactions roster: the template's description.ext no longer
+# declares IDF/Hizballah/... at all, so without @lobofixup mounted the
+# defaultOccupier/defaultResistance names resolve to nothing and the
+# campaign boots side-less.
+#
 # FIRST USE: the fixture's patched pbos are gitignored (third-party APL-SA
 # content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
 # once to generate them from the local @LoBo install before running this.

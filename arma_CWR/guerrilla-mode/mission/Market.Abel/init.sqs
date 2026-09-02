@@ -7,15 +7,19 @@
 ;  dealers drawn over the island's towns. The native side (ZoneRegistry +
 ;  GuerrillaBase + Market, activated by CfgGuerrillaZones /
 ;  CfgGuerrillaMarket in description.ext) owns the facts; the campaign's OWN
-;  scripts/market.sqs (a byte-identical copy of the Guerrilla.* shared core)
-;  supplies the policy: the action menus, the gmResources debit, the
+;  market.sqs, exec'd out of the ONE shared core at <GameDir>\gmcore (no
+;  copy lives here), supplies the policy: the action menus, the
+;  gmResources debit, the
 ;  purchase effects and delivery. This file only:
 ;    1. seeds the script-side state lib.sqs / market.sqs read (GM_Z_* tuple
 ;       constants, a FAT treasury, the usual lib rosters) - the same names
 ;       init.sqs of a Guerrilla campaign seeds;
 ;    2. creates the zone markers (the engine repaints only markers that
 ;       already exist);
-;    3. execs scripts/lib.sqs then scripts/market.sqs - and NOTHING else from
+;    3. execs \gmcore\scripts\lib.sqs then \gmcore\scripts\market.sqs out
+;       of the SHARED CORE installed at <GameDir>\gmcore (the leading
+;       backslash resolves against the game data root, not this mission
+;       folder) - and NOTHING else from
 ;       the core (no capture/economy/recruit/qrf/civilian managers), so the
 ;       market loop is the only moving part on display;
 ;    4. the debug self-actions (act_*.sqs: teleports to the nearest arms /
@@ -101,8 +105,8 @@ MKT_a8 = aP addAction ["DEBUG: GOD MODE", "act_godmode.sqs"]
 ;  campaign market policy script, then the readout
 ; ============================================================================
 GM_LIB_READY = false
-[] exec "scripts/lib.sqs"
+[] exec "\gmcore\scripts\lib.sqs"
 @GM_LIB_READY
-[] exec "scripts/market.sqs"
+[] exec "\gmcore\scripts\market.sqs"
 [] exec "hud.sqs"
 exit

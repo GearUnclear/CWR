@@ -2,7 +2,7 @@
 ;  showcase/action.sqs  -  thin addAction dispatcher for the showcase menu.
 ; ----------------------------------------------------------------------------
 ;  addAction runs this FILE with _this = [target, caller, actionId] (same
-;  contract as scripts/recruit_action.sqs). Chapter actions only ENQUEUE
+;  contract as the core's recruit_action.sqs). Chapter actions only ENQUEUE
 ;  (run.sqs stays the single writer of demo effects); the two display
 ;  toggles (ticker, time) mutate their own overlay-owned flags inline.
 ; ============================================================================

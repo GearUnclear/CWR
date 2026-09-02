@@ -1,0 +1,56 @@
+version=11;
+class Mission
+{
+	randomSeed=27393599;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: the lone guerrilla at the Camp zone. SQM coordinate
+					// order is [easting, ELEVATION, northing] - the zone config's
+					// position[] is getPos order [easting, northing, elevation].
+					// Offset a few metres off the zone centre so the body is not
+					// standing in the spot GuerrillaBase wants for the HQ.
+					position[]={2378.241699,53.582836,7049.659668};
+					id=0;
+					side="GUER";
+					vehicle="SoldierGB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=27393600;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=27393601;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=27393602;
+	class Intel
+	{
+	};
+};

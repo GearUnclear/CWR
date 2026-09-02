@@ -64,6 +64,7 @@
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
+#include <Poseidon/Game/Guerrilla/AddonActivation.hpp> // placed-unit addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
@@ -562,6 +563,12 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     if (gameMode == GModeArcade)
     {
         Guerrilla::ApplyPlayerOutfitSelection(t);
+        // issue #54 C1: activate the placed units' transitive addon closure
+        // (weapons[]/magazines[] owners) so a Guerrilla template's addOns[]
+        // needs only its world and what mission.sqm places. After the body
+        // substitution, so the substituted class is what gets walked; before
+        // CreateCenter, which is where CheckAddon would deny.
+        Guerrilla::ActivateTemplateAddons(t);
     }
 
     if (_ui)

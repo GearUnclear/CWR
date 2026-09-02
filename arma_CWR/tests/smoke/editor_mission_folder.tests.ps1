@@ -63,7 +63,7 @@ Describe "editor missions persist to the configured user-content folder" {
             $missionsDir = Join-Path $content "missions"
             Test-Path $missionsDir | Should -BeTrue -Because "the editor must create the missions folder under the content root"
 
-            # Saved as <name>.<world>/ — world is whichever island the editor
+            # Saved as <name>.<world>/ - world is whichever island the editor
             # defaulted to, so match on the name prefix.
             $saved = @(Get-ChildItem -Path $missionsDir -Filter "TriEditorRoundtrip.*" -Directory -ErrorAction SilentlyContinue)
             $saved.Count | Should -BeGreaterThan 0 -Because "the saved mission folder <name>.<world> must exist under the content root"
