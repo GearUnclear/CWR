@@ -1,0 +1,85 @@
+version=11;
+class Mission
+{
+	// Verified addon set. Load-bearing: entries land in the engine's
+	// active-addon list (World::ActivateAddons) and EVERY config class a
+	// spawned unit touches - including its weapons[]/magazines[] - is
+	// visibility-checked against that list (ParamOwnerList "Access denied",
+	// World::CheckAddon). A missing entry here does not just warn: the unit
+	// type fails to build and the whole mission refuses to boot
+	// ("StartAutoTest could not boot"). Since issue #54 C1 the engine derives
+	// the TRANSITIVE closure itself: the placed player's weapons[]/magazines[]
+	// owners at launch (Guerrilla::ActivateTemplateAddons) and everything the
+	// faction descriptors name at registry load
+	// (ZoneRegistry::ActivateFactionAddons). So this lists only what the
+	// mission itself PLACES: the world and the player's own pbo. The former
+	// hand-listed transitive set (LoBolebObject, LoBoHizballCar, ICPrpg7,
+	// LoBoTerror, LoBoWeapons, LoBoWeapNad, LoBoWeapat, LoBoammo,
+	// JAM_Magazines, LoBoIs, LoBoHMWV, LoBo_Zelda) is what the walk now
+	// activates and logs at INFO. LoBolebObject (the world's terrain objects)
+	// is kept because the WORLD references it, not any placed class.
+	addOns[]=
+	{
+		"LoBo_Leb",
+		"LoBolebObject",
+		"LoBoHizballah"
+	};
+	addOnsAuto[]=
+	{
+		"LoBo_Leb",
+		"LoBoHizballah"
+	};
+	randomSeed=15000001;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			// The RESISTANCE side of this campaign is EAST (Hizballah) - the
+			// occupier is the WEST IDF. Same side layout guerrilla_sinai_swap
+			// already proves; only the resistance roster differs.
+			side="EAST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: the lone Hizballah fighter at the Camp.
+					// mission.sqm position order is [easting, ELEVATION,
+					// northing] (unlike description.ext zone position[]).
+					position[]={11500,145,12000};
+					id=0;
+					side="EAST";
+					vehicle="LoBo_HizballahRifle4";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=15000002;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=15000003;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=15000004;
+	class Intel
+	{
+	};
+};

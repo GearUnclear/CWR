@@ -13,10 +13,13 @@
 //  defaultResistance="Hizballah" keys (ZoneRegistry::LoadFromParams).
 //
 //  Zone seed: 6 explicit zones ONLY (Camp, Litani Checkpoint, Marjayoun
-//  Barracks, Tyre, Saida, Ghajar) - the template sets seedCities=0 because
-//  Lebanon80's type-less Names block is a theater map ("Mediterranean Sea",
-//  "Sea of Galilee", country labels...) that would seed CITY zones in open
-//  water. So this test asserts the EXACT count, unlike sinai_swap's >= 10.
+//  Barracks, Tyre, Saida, Ghajar) - the template keeps the seedCities = 0
+//  override because Lebanon80's theatre-map Names block also names nine
+//  REAL rear settlements (Beirut, Haifa, Damascus, ...) outside this
+//  campaign's play area; the Auto classifier (issue #54 C3) is pinned
+//  separately by guerrilla_names_classify on a copy of this template with
+//  the key removed. So this test asserts the EXACT count, unlike
+//  sinai_swap's >= 10.
 //
 //  The player spawns at the Camp, 500 m from the Litani Checkpoint - inside
 //  the native garrison cache radius (800 m) - so the WEST garrison

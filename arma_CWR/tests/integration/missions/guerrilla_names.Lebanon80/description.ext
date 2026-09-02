@@ -1,4 +1,4 @@
-// Guerrilla Mode - Lebanon (80's) island pack (@LoBo LoBo_Leb world). This
+// guerrilla_names.Lebanon80 - the Names-classification test mission (issue #54 C3): a byte copy of Guerrilla.Lebanon80 with NO seedCities key, so the Auto classifier runs over the theatre-map Names block. The shipped template keeps seedCities = 0 by design (its play area excludes the rear settlements the classifier legitimately accepts); this copy proves what the classifier refuses and accepts.
 // file is the ONLY island-specific data in the template - init.sqs +
 // scripts/ are byte-identical to Guerrilla.Demo (the shared island-agnostic
 // core; a parity test enforces that). The war FACTIONS are no longer here:
@@ -40,20 +40,19 @@ class CfgGuerrillaZones
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60; ...).
     //
-    // Town auto-seed OFF - the explicit override (issue #54 C3 keeps it as
-    // one). Lebanon80's Names block is a 25.6 km THEATER map: the Auto
-    // classifier (absent key: dry land + houses within 300 m) correctly
-    // refuses its 13 labels - "Mediterranean Sea", "Sea of Galilee", the
-    // country and terrain names, the two bridges, UNDOF - but it ACCEPTS the
-    // nine rear settlements that really have buildings modelled (Beirut,
-    // Haifa, Damascus, Sabra, Shatila, the two airports, ...). Those are
-    // real towns; they are just outside THIS campaign's play area (an IDF
-    // occupation of South Lebanon), which no classifier can know. So this
-    // template keeps the override and authors its towns (Tyre, Saida,
-    // Ghajar) by hand; tests/integration/missions/guerrilla_names.Lebanon80
-    // is the same file WITHOUT this key and pins what the classifier does
-    // (guerrilla_names_classify). = 1 would seed every label, water included.
-    seedCities = 0;
+    // Town auto-seed left on AUTO (no seedCities key; issue #54 C3), which
+    // is the hard case this world exists to prove: Lebanon80's Names block
+    // is a 25.6 km THEATER map, not a town list. Type-less entries include
+    // "Mediterranean Sea" {7847,16012} and "Sea of Galilee" {13856,4724}
+    // (both at -5 m on the heightmap), country labels (Lebanon/Israel/Syria/
+    // Jordan), terrain labels (Golan Heights, Mt. Hermon, Bekaa Valley) and
+    // deep-rear cities (Damascus, Haifa, Beirut) with no buildings modelled.
+    // The engine's settlement classifier (dry land + houses within 300 m)
+    // refuses all of those, one INFO line each, and the real towns in play
+    // (Tyre, Saida, Ghajar) are authored by hand on/near their Names entries,
+    // so the name/300 m dedup leaves exactly the explicit zones below.
+    // guerrilla_lebanon80_boot asserts that count. seedCities = 0 is the
+    // manual override if a world ever needs it; = 1 seeds every entry.
     seedCitySupport = 20;
 
     class Zones
