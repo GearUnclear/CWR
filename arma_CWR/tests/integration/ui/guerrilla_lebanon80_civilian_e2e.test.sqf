@@ -76,17 +76,26 @@ triAssertEq [(triGetControlVisible 154), "1"]
 triAssertEq [(triSelectListByData [101, "abel"]), true]
 triAssertEq [(format ["%1 || %2 || %3", (triControlText 150), (triControlText 151), (triControlText 153)]), "OCCUPIER: EAST || RESISTANCE: GUER || OUTFIT: CIVILIAN"]
 
-// == 3. THE DROP: an island with no Guerrilla template =======================
-//    No descriptor at all -> no pair -> _outfitSel = -1 -> the row renders the
-//    publish-nothing state and a WARN goes to the log.
+// == 3. AN ISLAND WITH NO GUERRILLA TEMPLATE STILL OFFERS THE PAIR ===========
+//    Cain ships no Guerrilla.Cain, so until issue #54 A4 it had no descriptor
+//    at all: no pair, _outfitSel = -1, the row rendered the publish-nothing
+//    "(mission default)" state and the token was LOST one-way. Since A4 the
+//    vanilla faction library is global (bin\config-extra.cpp), so the merged
+//    table on every installed island carries WEST/EAST/GUER and GUER authors
+//    playerClassCiv: the pair is offered here too and the token survives by
+//    name exactly as it did on Abel. The list still flags the island as
+//    launchable-only-with-a-template; that is the OK gate's business, not the
+//    cyclers'. The genuine drop path (a resistance with no playerClassCiv)
+//    is pinned by the GuerrillaOutfitChoices unit cases instead.
 triAssertEq [(triSelectListByData [101, "cain"]), true]
-triAssertEq [(triControlText 153), "OUTFIT: (mission default)"]
+triAssertEq [(format ["%1 || %2 || %3", (triControlText 150), (triControlText 151), (triControlText 153)]), "OCCUPIER: EAST || RESISTANCE: GUER || OUTFIT: CIVILIAN"]
 
-// == 4. THE LOSS IS ONE-WAY, deliberately ====================================
-//    Back on an island that DOES offer the pair, the row reopens on WARRIOR:
-//    `keep` was re-derived from the emptied list, so the token is gone from
-//    the object. Pinned so that making it durable is a deliberate change.
+// == 4. AND IT IS STILL THERE ON THE WAY BACK ================================
+//    Nothing was dropped, so the name-keep carries CIVILIAN back onto Abel.
 triAssertEq [(triSelectListByData [101, "abel"]), true]
+triAssertEq [(triControlText 153), "OUTFIT: CIVILIAN"]
+// reset to WARRIOR so step 5 starts from the authored default, as before
+triClick 153
 triAssertEq [(triControlText 153), "OUTFIT: WARRIOR"]
 
 // == 5. THE NAME-KEEP MUST NOT ALIAS ONTO A SIDE =============================
