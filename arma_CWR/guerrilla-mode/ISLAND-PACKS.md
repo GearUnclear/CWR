@@ -37,6 +37,18 @@ island to copy from is
 Nothing above is fatal. The mode degrades feature by feature and logs why. What
 it cannot do without is a world entry and a `.wrp` the package can load.
 
+**The smallest pack that satisfies all of it** is the repo's own synthetic
+island, `tests/fixtures/mods-island/@udisland` (written from scratch by
+`generate_udisland.py`, issue #56 task 7): one pbo holding a 64 x 64-cell
+`.wrp`, a 10 m house box tagged `class=house`, a road slab, and a `config.cpp`
+with `CfgPatches` (`worlds[]`), `CfgWorldList`, a `CfgWorlds` entry with three
+`Names` towns, and a `House`-derived class per house model so the runtime turns
+the placed shapes into `Building` objects (the settlement probe counts
+Buildings, not shapes). It scaffolds on the config-only
+`tests/fixtures/packages/mini` package in CI and the resulting
+`tests/integration/missions/Guerrilla.UdIsland` boots on the Classic package
+(`guerrilla_udisland_boot`). Read it as the minimum a world addon must carry.
+
 **Names blocks vary wildly.** OFP-era entries carry only a name and a 2D
 `position[]` with no `type`, so type-less entries are accepted as towns.
 Arma-style entries carry `type`, and only `NameCity`, `NameCityCapital` and

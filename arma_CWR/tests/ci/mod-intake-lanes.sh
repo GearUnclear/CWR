@@ -55,6 +55,25 @@ expect 0 "guerrilla lint @udfaction" "$TOOLS" guerrilla lint --data-dir "$MINI" 
 expect 1 "guerrilla lint @udbroken" "$TOOLS" guerrilla lint --data-dir "$MINI" --mod "$BROKEN"
 expect 0 "guerrilla probe @udfaction" "$TOOLS" guerrilla probe --data-dir "$MINI" --mod "$FACTION"
 
+# The synthetic ISLAND (issue #56 task 7, #54 E1): the scaffold reads the
+# fixture's own .wrp and CfgWorlds through the config-only package, so a
+# template comes out of a clone with no game data at all. The generated
+# Guerrilla.UdIsland in tests/integration/missions is this very output; the
+# boot of that template still needs the Classic package (the engine's own
+# fonts/resource/menu world are not fixtures) and runs in the full_cwa lane.
+ISLAND="$ROOT/tests/fixtures/mods-island/@udisland"
+SCAFFOLD_OUT="${TMPDIR:-/tmp}/ud-scaffold-$$"
+rm -rf "$SCAFFOLD_OUT"
+expect 0 "guerrilla scaffold @udisland" "$TOOLS" guerrilla scaffold --world UdIsland --data-dir "$MINI" --mod "$ISLAND" --out "$SCAFFOLD_OUT"
+if [ -f "$SCAFFOLD_OUT/description.ext" ] && grep -q "class Northam" "$SCAFFOLD_OUT/description.ext" && grep -q "class Camp" "$SCAFFOLD_OUT/description.ext"; then
+    echo "PASS scaffold output names the three towns and the camp"
+else
+    echo "FAIL scaffold output is missing description.ext or its zones"
+    failures=$((failures + 1))
+fi
+rm -rf "$SCAFFOLD_OUT"
+expect 0 "guerrilla probe @udisland" "$TOOLS" guerrilla probe --data-dir "$MINI" --mod "$ISLAND"
+
 if [ "$failures" -gt 0 ]; then
     echo "mod-intake lanes: $failures lane(s) failed"
     exit 1

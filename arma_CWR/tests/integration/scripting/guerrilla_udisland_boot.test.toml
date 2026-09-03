@@ -1,0 +1,19 @@
+# Boots the SYNTHETIC island (issue #56 task 7, #54 E1): Guerrilla.UdIsland is
+# the verbatim scaffold output for the repo's own @udisland fixture mod,
+#   PoseidonTools guerrilla scaffold --world UdIsland
+#       --data-dir tests/fixtures/packages/mini
+#       --mod tests/fixtures/mods-island/@udisland
+#       --out tests/integration/missions/Guerrilla.UdIsland
+# so the whole island (terrain, houses, roads, config) is GPL-clean and lives
+# in git. The mod is mounted through --mods-dir ".." (relative to the game CWD,
+# the data dir). What still needs the Classic package is the ENGINE BOOT: fonts,
+# resource.cpp, the stringtable and the menu world are not in any fixture, so
+# this stays in the full_cwa lane; the scaffold half of the same fixture runs
+# data-free in CI (tests/ci/mod-intake-lanes.sh). Needs the shared core +
+# faction library installed (guerrilla-mode/install-missions.ps1).
+mission = "tests/integration/missions/Guerrilla.UdIsland"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-island/@udisland"]

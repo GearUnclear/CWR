@@ -1,0 +1,69 @@
+version=11;
+class Mission
+{
+	// The world and the player's own pbo, and nothing else: since issue #54
+	// C1 the engine derives the TRANSITIVE addon closure itself (the placed
+	// player's weapons/magazines owners at launch, everything the faction
+	// descriptors name at registry load). Base-game classes carry an empty
+	// owner and are always visible, so they never appear here.
+	addOns[]=
+	{
+		"udisland"
+	};
+	addOnsAuto[]=
+	{
+		"udisland"
+	};
+	randomSeed=21765409;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: the lone guerrilla at the Camp zone. SQM coordinate
+					// order is [easting, ELEVATION, northing] - the zone config's
+					// position[] is getPos order [easting, northing, elevation].
+					// Offset a few metres off the zone centre so the body is not
+					// standing in the spot GuerrillaBase wants for the HQ.
+					position[]={1297.413818,36.127247,1955.000000};
+					id=0;
+					side="GUER";
+					vehicle="SoldierGB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=21765410;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=21765411;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=21765412;
+	class Intel
+	{
+	};
+};
