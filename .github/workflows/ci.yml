@@ -86,10 +86,24 @@ jobs:
 
       - name: Unit tests
         working-directory: arma_CWR
-        # Trident/integration entries need a game data dir and are excluded by
-        # name; the Catch2 suites already exclude their [GameData] cases when
-        # packages/Remaster is absent (tests/unit/engine/Poseidon/CMakeLists.txt)
-        run: ctest --test-dir "build/$PRESET" --output-on-failure -E "trident|integration|Trident"
+        # The three suites are run as binaries rather than through ctest: ctest
+        # includes the catch_discover_tests file of EVERY test target in the tree,
+        # and the ones this workflow does not build (Studio, Server, Evaluator,
+        # Tetris) have no such file, which is a hard ctest error (exit 8, run
+        # 33716613520). The tag spec is the one tests/unit/engine/Poseidon/
+        # CMakeLists.txt applies when packages/Remaster is absent, and
+        # --allow-running-no-tests matches cmake/CatchWindowsSafe.cmake. Each
+        # binary runs from its own build directory, as ctest would run it.
+        run: |
+          set -e
+          for t in tests/unit/engine/Poseidon/Foundation/PoseidonFoundationTests \
+                   tests/unit/engine/Poseidon/PoseidonCoreTests \
+                   tests/unit/engine/Poseidon/PoseidonTests; do
+            dir="build/$PRESET/$(dirname "$t")"
+            exe="$(basename "$t")"
+            echo "== $exe"
+            (cd "$dir" && "./$exe" "~[GameData] ~[gamescan] ~[external-data]" --allow-running-no-tests)
+          done
 
       - name: Mod-intake tools on the synthetic fixtures
         working-directory: arma_CWR
