@@ -44,7 +44,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld ninja-build ccache cmake pkg-config autoconf autoconf-archive automake libtool \
+            clang lld ninja-build ccache cmake pkg-config autoconf autoconf-archive automake libtool libltdl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
             libxss-dev libxkbcommon-dev libwayland-dev libegl-dev libgl-dev \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev python3
