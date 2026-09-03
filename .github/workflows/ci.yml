@@ -48,7 +48,7 @@ jobs:
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
             libxss-dev libxkbcommon-dev libwayland-dev libegl-dev libgl-dev \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev python3 \
-            linux-libc-dev bison flex gettext python3-jinja2 libxft-dev
+            linux-libc-dev bison flex gettext python3-jinja2 libxft-dev libibus-1.0-dev
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE" "$CCACHE_DIR"
 
       - name: Restore the vcpkg binary cache
