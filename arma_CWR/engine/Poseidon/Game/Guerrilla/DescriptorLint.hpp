@@ -70,6 +70,10 @@ class RecordingClassProbe final : public ClassProbe
     explicit RecordingClassProbe(const ClassProbe& inner) : _inner(inner) {}
 
     bool Exists(const char* bank, const char* className) const override;
+    // The shape-aware gate (issue #46 seam 4b), recorded under CfgVehicles
+    // like a plain existence miss so Misses() names a shapeless class the
+    // same way it names an absent one.
+    bool Spawnable(const char* className) const override;
 
     const std::vector<Query>& Queries() const { return _queries; }
     // Distinct "<bank>/<class>" that came back false, in first-seen order.

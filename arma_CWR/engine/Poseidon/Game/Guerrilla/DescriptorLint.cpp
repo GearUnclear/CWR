@@ -179,6 +179,17 @@ bool RecordingClassProbe::Exists(const char* bank, const char* className) const
     return exists;
 }
 
+bool RecordingClassProbe::Spawnable(const char* className) const
+{
+    bool ok = _inner.Spawnable(className);
+    Query q;
+    q.bank = "CfgVehicles";
+    q.className = className ? className : "";
+    q.exists = ok;
+    _queries.push_back(q);
+    return ok;
+}
+
 std::vector<RString> RecordingClassProbe::Misses() const
 {
     std::vector<RString> out;

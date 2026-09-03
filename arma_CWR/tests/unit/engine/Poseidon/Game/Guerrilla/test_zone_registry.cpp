@@ -115,10 +115,12 @@ struct FakeProbe final : ClassProbe
 {
     std::vector<std::string> vehicles;
     std::vector<std::string> weapons;
+    // classes whose config is present but whose .p3d the package never ships
+    // (issue #46 seam 4b): Exists says yes, Spawnable says no
+    std::vector<std::string> shapeless;
 
-    bool Exists(const char* bank, const char* className) const override
+    static bool Has(const std::vector<std::string>& list, const char* className)
     {
-        const std::vector<std::string>& list = stricmp(bank, "CfgWeapons") == 0 ? weapons : vehicles;
         for (const std::string& name : list)
         {
             if (stricmp(name.c_str(), className) == 0)
@@ -127,6 +129,16 @@ struct FakeProbe final : ClassProbe
             }
         }
         return false;
+    }
+
+    bool Exists(const char* bank, const char* className) const override
+    {
+        return Has(stricmp(bank, "CfgWeapons") == 0 ? weapons : vehicles, className);
+    }
+
+    bool Spawnable(const char* className) const override
+    {
+        return Has(vehicles, className) && !Has(shapeless, className);
     }
 };
 
@@ -2044,6 +2056,38 @@ TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming factio
         REQUIRE(Str(f.registry.FactionValue("CIV", "civClassCount")) == "0");
     }
 
+    SECTION("a class with a config but no shape file is substituted like an absent one (issue #46 seam 4b)")
+    {
+        // The existence probe alone would keep these: the config carries the
+        // class, only its .p3d is missing (the CoC_Diverdes shape in @LoBo).
+        // Spawning such a class access-violates in Man::Init, so the
+        // resolution pass must treat it exactly as a class the package lacks.
+        FakeProbe probe = FullClassicProbe();
+        probe.shapeless = {"SoldierECrew", "OfficerE"};
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(probe.Exists("CfgVehicles", "SoldierECrew"));                    // the config has it...
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierEG");    // ...the ladder still skips it
+        REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "SoldierEB"); // and so does the plain key
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 1)) == "SoldierEB");     // shipped rungs untouched
+    }
+    SECTION("an existence-only probe keeps the old answer (Spawnable defaults to Exists)")
+    {
+        struct ExistsOnlyProbe final : ClassProbe
+        {
+            const FakeProbe& inner;
+            explicit ExistsOnlyProbe(const FakeProbe& p) : inner(p) {}
+            bool Exists(const char* bank, const char* className) const override
+            {
+                return inner.Exists(bank, className);
+            }
+        };
+        FakeProbe full = FullClassicProbe();
+        ExistsOnlyProbe probe(full);
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierECrew");
+    }
     SECTION("no probe = no resolution (config-less unit-test path unchanged)")
     {
         RegistryFixture f;

@@ -6,8 +6,10 @@
 #include <Poseidon/Asset/Addon/AddonClosure.hpp>      // faction addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // PlayerBodyModelIssue (shape gate, issue #46 seam 4b)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+#include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (shape gate)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Evaluator/express.hpp> // GameState / GameValue (event dispatch)
@@ -176,6 +178,26 @@ bool ParsClassProbe::Exists(const char* bank, const char* className) const
     }
     const ParamEntry* bankEntry = Pars.FindEntry(bank);
     return bankEntry && bankEntry->FindEntry(className) != nullptr;
+}
+
+// the shape gate on top of existence (issue #46 seam 4b): the same pair the
+// CHARACTER roster and the launch seam use, so the registry can never keep a
+// class the menu would have refused
+bool ParsClassProbe::Spawnable(const char* className) const
+{
+    if (!Exists("CfgVehicles", className))
+    {
+        return false;
+    }
+    RString issue = PlayerBodyModelIssue(Pars.FindEntry("CfgVehicles"), RString(className),
+                                         [](RString path) { return QIFStreamB::FileExist(path); });
+    if (issue.GetLength() > 0)
+    {
+        LOG_WARN(Core, "ZoneRegistry: class '{}' is in the config but cannot be rendered ({}) - treating as absent",
+                 className, (const char*)issue);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -916,7 +938,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         RString sideFallback;
         for (int k = 0; k < f.values.Size() && sideFallback.GetLength() == 0; k++)
         {
-            if (stricmp(f.values[k].key, "fallbackClass") == 0 && probe.Exists(kVeh, f.values[k].value))
+            if (stricmp(f.values[k].key, "fallbackClass") == 0 && probe.Spawnable(f.values[k].value))
             {
                 sideFallback = f.values[k].value;
             }
@@ -925,7 +947,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         {
             for (int k = 0; candidates[k] && sideFallback.GetLength() == 0; k++)
             {
-                if (probe.Exists(kVeh, candidates[k]))
+                if (probe.Spawnable(candidates[k]))
                 {
                     sideFallback = candidates[k];
                 }
@@ -949,7 +971,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         bool anyTier = false;
         for (int i = 0; i < f.tiers.Size(); i++)
         {
-            ok[i] = f.tiers[i].GetLength() > 0 && probe.Exists(kVeh, f.tiers[i]);
+            ok[i] = f.tiers[i].GetLength() > 0 && probe.Spawnable(f.tiers[i]);
             anyTier |= ok[i];
         }
         for (int i = 0; i < f.tiers.Size(); i++)
@@ -996,7 +1018,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             bool anyCivTier = false;
             for (int i = 0; i < f.civTiers.Size(); i++)
             {
-                civOk[i] = f.civTiers[i].GetLength() > 0 && probe.Exists(kVeh, f.civTiers[i]);
+                civOk[i] = f.civTiers[i].GetLength() > 0 && probe.Spawnable(f.civTiers[i]);
                 anyCivTier |= civOk[i];
             }
             RString civOutfitFallback;
@@ -1004,7 +1026,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             {
                 for (int k = 0; kFallbackCivOutfit[k] && civOutfitFallback.GetLength() == 0; k++)
                 {
-                    if (probe.Exists(kVeh, kFallbackCivOutfit[k]))
+                    if (probe.Spawnable(kFallbackCivOutfit[k]))
                     {
                         civOutfitFallback = kFallbackCivOutfit[k];
                     }
@@ -1060,7 +1082,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             AutoArray<RString>& arr = *roleArrays[r];
             for (int i = 0; i < arr.Size(); i++)
             {
-                if (arr[i].GetLength() > 0 && !probe.Exists(kVeh, arr[i]))
+                if (arr[i].GetLength() > 0 && !probe.Spawnable(arr[i]))
                 {
                     logSub(roleNames[r], arr[i], "<tier rifleman>");
                     arr[i] = RString();
@@ -1077,7 +1099,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             AutoArray<RString> keptVehicles;
             for (int i = 0; i < f.vehicles.Size(); i++)
             {
-                bool exists = f.vehicles[i].GetLength() > 0 && probe.Exists(kVeh, f.vehicles[i]);
+                bool exists = f.vehicles[i].GetLength() > 0 && probe.Spawnable(f.vehicles[i]);
                 if (!exists)
                 {
                     logSub("vehicles[]", f.vehicles[i], "<dropped>");
@@ -1102,7 +1124,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             AutoArray<RString> keptCiv;
             for (int i = 0; i < f.civVehicles.Size(); i++)
             {
-                bool exists = f.civVehicles[i].GetLength() > 0 && probe.Exists(kVeh, f.civVehicles[i]);
+                bool exists = f.civVehicles[i].GetLength() > 0 && probe.Spawnable(f.civVehicles[i]);
                 if (!exists)
                 {
                     logSub("civVehicles[]", f.civVehicles[i], "<dropped>");
@@ -1141,7 +1163,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         {
             const FactionRecord::NamedValue& v = f.values[k];
             bool isCiv = strnicmp(v.key, "civClass", 8) == 0 && v.key[8] >= '0' && v.key[8] <= '9';
-            if (isCiv && v.value.GetLength() > 0 && probe.Exists(kVeh, v.value))
+            if (isCiv && v.value.GetLength() > 0 && probe.Spawnable(v.value))
             {
                 civResolved++;
                 if (civSub.GetLength() == 0)
@@ -1159,7 +1181,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             }
             if (IsUnitClassKey(v.key))
             {
-                if (probe.Exists(kVeh, v.value))
+                if (probe.Spawnable(v.value))
                 {
                     continue;
                 }
