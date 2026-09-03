@@ -40,8 +40,10 @@ roster ships once and shows up on every island:
   into the global config last. An existing `config-extra.cpp` is appended to,
   never overwritten.
 - **@LoBo rosters (IDF, EgyptFrontier, EgyptArmy, Syria, Jordan, Hizballah,
-  PLO, PLO_East)**: `tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp`, a
-  mod folder's `bin\config.cpp`, mounted after `@LoBo`.
+  PLO, PLO_East)**: `guerrilla-mode/config/lobo-factions.hpp`, installed into
+  `@LoBo\bin\config.cpp` by `tools/lobo/install-lobo-factions.ps1` (rerun
+  after an @LoBo reinstall; the `@lobofixup` test fixture `#include`s the same
+  header so the lobo lanes never depend on the install).
 - **`class CIV` is island-owned and never global.** It names the population
   models and ambient-traffic hulls of *that island's* data set, so each
   template's `description.ext` keeps exactly that one faction class. A unit
@@ -242,13 +244,15 @@ selection).
 
 1. Install the templates (above).
 2. Enable the **@LoBo** mod (Sinai world + IDF/Egypt classes;
-   `D:\Arma_CWA\@LoBo` on this machine) — plus the repo fixture
-   `tests/fixtures/mods-lobo/@lobofixup`, mounted **after** it. That fixture
-   patches @LoBo's malformed `tracerColor` floats (script errors under
-   `--autotest`), preloads the addons the template spawns from, and carries
-   the whole @LoBo `CfgGuerrillaFactions` roster. Without it the Sinai and
-   Lebanon80 templates have no war factions at all: their blocks moved out of
-   `description.ext` into that config (issue #54 A4).
+   `D:\Arma_CWA\@LoBo` on this machine) and run
+   `tools/lobo/install-lobo-factions.ps1` once: it writes the eight @LoBo
+   war rosters into `@LoBo\bin\config.cpp` (their blocks moved out of the
+   templates' `description.ext` in issue #54 A4, so without it the Sinai and
+   Lebanon80 templates have no war factions at all). The malformed
+   `tracerColor` floats are tolerated by the config reader and repaired by
+   `mod doctor --fix`; the addons the template spawns from are activated by
+   the transitive addon walk. The `@lobofixup` test fixture is no longer part
+   of the play setup.
 3. Main menu → **GUERRILLA** → pick *Southern Sinai* in the island list,
    cycle OCCUPIER/RESISTANCE, OK. You spawn as a lone Frontier Corps
    rifleman at the Camp, with an IDF checkpoint 500 m east.
@@ -294,7 +298,7 @@ Marjayoun barracks beyond it. Unlike Sinai it sets `seedCities=0`: the
 Lebanon80 `Names` block is a theater map (seas, countries, mountain ranges),
 not a town list, so the towns in play (Tyre, Saida, Ghajar) are explicit
 hand-placed zones instead. Setup is identical to Sinai (install templates,
-mount @LoBo + @lobofixup); the world's `.wrp` also lives inside a mod pbo,
+mount @LoBo, run the roster install); the world's `.wrp` also lives inside a mod pbo,
 which the installer's world gate now detects on its own.
 Integration coverage:
 `tests/integration/scripting/guerrilla_lebanon80_boot.test.*` (direct

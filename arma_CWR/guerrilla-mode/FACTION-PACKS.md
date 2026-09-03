@@ -13,8 +13,9 @@ lint in [Validation](#validation) below.
 Related reading: the vanilla library
 [`config/guerrilla-factions.hpp`](config/guerrilla-factions.hpp) is the
 annotated reference roster; the @LoBo pack
-`tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp` is the large real-world
-example; [`ISLAND-PACKS.md`](ISLAND-PACKS.md) covers the other half, islands.
+[`config/lobo-factions.hpp`](config/lobo-factions.hpp) is the large real-world
+example (installed into `@LoBo\bin\config.cpp` by
+`tools/lobo/install-lobo-factions.ps1`); [`ISLAND-PACKS.md`](ISLAND-PACKS.md) covers the other half, islands.
 
 ---
 
@@ -27,7 +28,7 @@ all three work identically:
 | Location | Use it when |
 |----------|-------------|
 | An addon pbo's `config.cpp` / `config.bin` | The pack ships with the units it names. The normal case for a mod. |
-| A mod folder's `bin\config.cpp` | The units come from someone else's addons and you are adding only the descriptors (this is what `@lobofixup` does for `@LoBo`). |
+| A mod folder's `bin\config.cpp` | The units come from someone else's addons and you are adding only the descriptors (this is what `install-lobo-factions.ps1` writes into `@LoBo\bin\config.cpp`). |
 | A `#include` from `<GameDir>\bin\config-extra.cpp` | UD's own vanilla library, installed by `install-missions.ps1`. |
 
 The engine merges `bin\config-extra.cpp` into the global config **last**, and
@@ -325,8 +326,7 @@ dist\x64-win-rwdi\PoseidonTools.exe guerrilla lint `
 # a real install with a real pack
 dist\x64-win-rwdi\PoseidonTools.exe guerrilla lint `
   --data-dir "D:\Arma_CWA\ARMA Cold War Assault [Classic]" `
-  --mod D:\Arma_CWA\@LoBo `
-  --mod D:\Arma_CWA\arma_CWR\tests\fixtures\mods-lobo\@lobofixup
+  --mod D:\Arma_CWA\@LoBo
 
 # with an island template, so the union that island actually sees is linted
 dist\x64-win-rwdi\PoseidonTools.exe guerrilla lint `

@@ -2,20 +2,25 @@
 # mod's Sinai world. Requires the FULL CWA install (OFPR_DATA_DIR) plus the
 # @LoBo mod folder next to it: --mods-dir ".." resolves relative to the game
 # CWD (the data dir, D:\Arma_CWA\ARMA Cold War Assault [Classic]), so "@LoBo" mounts
-# D:\Arma_CWA\@LoBo. The repo fixture mod @lobofixup mounts AFTER it: it
-# shadows two pbos whose malformed tracerColor floats ("0.0.1") are script
-# errors under --autotest (hard abort), and preloads the LoBo addons the
-# template spawns from (see its bin/config.cpp).
+# D:\Arma_CWA\@LoBo.
 #
-# SINCE ISSUE #54 A4 the fixture also carries the whole @LoBo
-# CfgGuerrillaFactions roster: the template's description.ext no longer
-# declares IDF/EgyptFrontier/Hizballah/... at all, so without @lobofixup
-# mounted the defaultOccupier/defaultResistance names resolve to nothing and
-# the campaign boots side-less.
+# SINCE ISSUE #56 TASK 2 the lane mounts @LoBo ALONE: no @lobofixup fixture.
+# The three jobs the fixture used to do are all covered at source now:
+#   * the eight war rosters live in @LoBo\bin\config.cpp, written by
+#     tools/lobo/install-lobo-factions.ps1 from the tracked
+#     guerrilla-mode/config/lobo-factions.hpp (issue #54 A4 moved them out of
+#     the templates; without that install the campaign boots side-less);
+#   * the malformed tracerColor floats are coerced by the config reader
+#     (issue #54 D1) and repaired in place by `mod doctor --fix`;
+#   * the LoBo addons the template spawns from are activated by the
+#     transitive addon walk (issue #54 C1), so no preload roster is needed.
+# So this run is also the standing proof of C1 and D1: if either regresses,
+# this is the lane that goes red.
 #
-# FIRST USE: the fixture's patched pbos are gitignored (third-party APL-SA
-# content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
-# once to generate them from the local @LoBo install before running this.
+# PRECONDITIONS (one-time, rerun after an @LoBo reinstall):
+#   tools/lobo/install-lobo-factions.ps1
+#   PoseidonTools mod doctor D:\Arma_CWA\@LoBo --fix
+#   guerrilla-mode/install-missions.ps1
 mission = "guerrilla-mode/mission/Guerrilla.Sinai"
 binary = "PoseidonGame"
 tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
@@ -26,4 +31,4 @@ tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
 # generous budgets on purpose.
 timeout = 420
 assert_timeout = 240
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]

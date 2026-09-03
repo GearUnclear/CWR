@@ -61,7 +61,9 @@ carries:
   it belongs there: the vanilla WEST/EAST/GUER rosters live in
   `guerrilla-mode/config/guerrilla-factions.hpp`, installed to
   `<GameDir>\bin\`, and the @LoBo rosters in
-  `tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp`. What an island
+  `guerrilla-mode/config/lobo-factions.hpp`, installed into `@LoBo\bin\config.cpp`
+  by `tools/lobo/install-lobo-factions.ps1` and `#include`d by the
+  `@lobofixup` test fixture (issue #56 task 2). What an island
   template's own block keeps is **`class CIV`**: the population models and
   ambient-traffic hulls of that island's data set, which *is* an island fact -
   plus any deliberate override of a global class. A unit test pins that
