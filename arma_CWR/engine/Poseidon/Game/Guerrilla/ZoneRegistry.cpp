@@ -1526,16 +1526,26 @@ const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
     {
         return nullptr;
     }
+    // CLASS NAME first, then side (issue #54: the order was the other way
+    // round, which was safe only while the faction table was per-island).
+    // Now that a global faction library merges into every island's table, a
+    // template whose defaultOccupier is the SIDE STRING "EAST" would match
+    // whichever EAST-side faction was declared first across the whole merged
+    // table - with @LoBo mounted that is EgyptFrontier, not the class
+    // literally named EAST, so Guerrilla.Abel silently fielded an Egyptian
+    // frontier roster. A name that IS a class is never ambiguous, so it wins;
+    // the side rung still resolves a pure side string (and the vanilla
+    // classes are named after their sides, so nothing else moves).
     for (int i = 0; i < _factions.Size(); i++)
     {
-        if (stricmp(_factions[i].side, sideOrClass) == 0)
+        if (stricmp(_factions[i].className, sideOrClass) == 0)
         {
             return &_factions[i];
         }
     }
     for (int i = 0; i < _factions.Size(); i++)
     {
-        if (stricmp(_factions[i].className, sideOrClass) == 0)
+        if (stricmp(_factions[i].side, sideOrClass) == 0)
         {
             return &_factions[i];
         }

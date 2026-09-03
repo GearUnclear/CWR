@@ -32,7 +32,7 @@ namespace Guerrilla
 {
 struct ClassProbe;
 
-// Side-first-then-class-name subclass match over a CfgGuerrillaFactions
+// Class-name-first-then-side subclass match over a CfgGuerrillaFactions
 // entry - the exact scan order ZoneRegistry::FindFaction runs, so callers
 // resolve the same descriptor block the registry resolves for the same
 // string. Null when selection is null/empty or names no subclass.
@@ -41,7 +41,7 @@ const ParamEntry* FindGuerrillaFactionEntry(const ParamEntry* factionsCfg, const
 // Pure core (unit-testable with an injected ParamFile + fake probe).
 // Returns the civilian player class to substitute, or EMPTY when the
 // authored class must be kept. The resistance faction block is resolved with
-// the registry's precedence: selResistance (side first, then class name -
+// the registry's precedence: selResistance (class name first, then side -
 // ZoneRegistry::FindFaction order) > the zones config's defaultResistance >
 // the built-in "GUER" side.
 RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOutfit,

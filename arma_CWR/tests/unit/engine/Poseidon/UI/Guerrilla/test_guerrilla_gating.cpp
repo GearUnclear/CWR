@@ -182,3 +182,27 @@ TEST_CASE("GuerrillaFactionIssue: the menu gate holds playerClassWarrior to the 
     REQUIRE(Str(issue).find("playerClassWarrior 'GhostBody'") == 0);
     REQUIRE(Str(issue).find("not in the loaded data package") != std::string::npos);
 }
+
+TEST_CASE("GuerrillaIndexOfSelection: a class name beats a same-side mod faction declared earlier",
+          "[UI][Guerrilla][gating]")
+{
+    // the menu half of the same regression the registry case in
+    // test_faction_sources.cpp pins: with the faction library global, the
+    // cycler list carries the mod rosters before the vanilla classes, so
+    // seeding Abel from defaultOccupier = "EAST" must not land on the first
+    // EAST-SIDE faction (EgyptFrontier) instead of the class named EAST
+    ParsedConfig cfg("class CfgGuerrillaFactions\n"
+                     "{\n"
+                     "    class EgyptFrontier { side=\"EAST\"; };\n"
+                     "    class Jordan        { side=\"GUER\"; };\n"
+                     "    class EAST          { side=\"EAST\"; };\n"
+                     "    class GUER          { side=\"GUER\"; };\n"
+                     "};\n");
+    std::vector<RString> list = GuerrillaListFactions(cfg.Factions());
+    REQUIRE(GuerrillaIndexOfSelection(cfg.Factions(), list, "EAST") == 2);
+    REQUIRE(GuerrillaIndexOfSelection(cfg.Factions(), list, "GUER") == 3);
+    // a class name that is not a side still resolves, and a side string with
+    // no class of that name still falls through to the side rung
+    REQUIRE(GuerrillaIndexOfSelection(cfg.Factions(), list, "Jordan") == 1);
+    REQUIRE(GuerrillaIndexOfSelection(cfg.Factions(), list, "WEST") == -1);
+}

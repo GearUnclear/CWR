@@ -133,7 +133,7 @@ RString GuerrillaUnavailableMessage(const char* role, RString faction, RString i
 
 // Index into `list` of the faction `selection` names, or -1. `selection` is
 // what ZoneRegistry::ResolveSides accepts: either a descriptor class name or a
-// side string, matched SIDE FIRST then class name — the same order
+// side string, matched by CLASS NAME first then side — the same order
 // ZoneRegistry::FindFaction scans, so an index found here names the record the
 // registry would match for the same string.
 int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<RString>& list, RString selection);
@@ -183,7 +183,7 @@ bool GuerrillaSelectionIsResolvable(const ParamEntry* factionsCfg, const ParamEn
 // faction block authors a non-empty playerClassCiv, EMPTY otherwise (the
 // cycler shows "(mission default)" and the launch publishes nothing). The
 // resistance block resolves with the registry's precedence: `resistance`
-// (side first, then class name - ZoneRegistry::FindFaction order) > the
+// (class name first, then side - ZoneRegistry::FindFaction order) > the
 // zones config's defaultResistance > the built-in GUER side. WARRIOR is
 // always index 0: it is the authored mission.sqm class, so an untouched
 // cycler publishes a value indistinguishable from publishing nothing.

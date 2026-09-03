@@ -387,20 +387,23 @@ int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<R
     {
         return -1;
     }
-    // side first, then class name — the exact order ZoneRegistry::FindFaction
+    // class name first, then side — the exact order ZoneRegistry::FindFaction
     // scans in, so an index found here names the record the registry would
-    // have matched for the same string.
+    // have matched for the same string. (Both flipped to name-first in issue
+    // #54: with the faction library global, a template's defaultOccupier =
+    // "EAST" was matching the first EAST-SIDE faction of the merged table,
+    // EgyptFrontier with @LoBo mounted, instead of the class named EAST.)
     for (int i = 0; i < (int)list.size(); i++)
     {
-        RString side = GuerrillaFactionSide(factionsCfg, list[i]);
-        if (side.GetLength() > 0 && stricmp(side, selection) == 0)
+        if (stricmp(list[i], selection) == 0)
         {
             return i;
         }
     }
     for (int i = 0; i < (int)list.size(); i++)
     {
-        if (stricmp(list[i], selection) == 0)
+        RString side = GuerrillaFactionSide(factionsCfg, list[i]);
+        if (side.GetLength() > 0 && stricmp(side, selection) == 0)
         {
             return i;
         }

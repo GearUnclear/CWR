@@ -52,6 +52,17 @@ const ParamEntry* FindGuerrillaFactionEntry(const ParamEntry* factionsCfg, const
     {
         return nullptr;
     }
+    // class name first, then side - the exact order ZoneRegistry::FindFaction
+    // scans in (both flipped to name-first in issue #54; see the comment
+    // there for the merged-table ambiguity that made side-first wrong).
+    for (int i = 0; i < factionsCfg->GetEntryCount(); i++)
+    {
+        const ParamEntry& e = factionsCfg->GetEntry(i);
+        if (e.IsClass() && stricmp(e.GetName(), selection) == 0)
+        {
+            return &e;
+        }
+    }
     for (int i = 0; i < factionsCfg->GetEntryCount(); i++)
     {
         const ParamEntry& e = factionsCfg->GetEntry(i);
@@ -61,14 +72,6 @@ const ParamEntry* FindGuerrillaFactionEntry(const ParamEntry* factionsCfg, const
         }
         RString side = e.ReadValue("side", RString(e.GetName()));
         if (side.GetLength() > 0 && stricmp(side, selection) == 0)
-        {
-            return &e;
-        }
-    }
-    for (int i = 0; i < factionsCfg->GetEntryCount(); i++)
-    {
-        const ParamEntry& e = factionsCfg->GetEntry(i);
-        if (e.IsClass() && stricmp(e.GetName(), selection) == 0)
         {
             return &e;
         }

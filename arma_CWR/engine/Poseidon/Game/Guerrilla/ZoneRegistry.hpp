@@ -300,7 +300,8 @@ class ZoneRegistry : public SerializeClass
     void HeatDecay(int index, float amount); // clamp at 0
 
     // The campaign-aware faction lookup, and the one every side-keyed query
-    // below goes through.  FindFaction scans by side FIRST, so on a template
+    // below goes through.  FindFaction scans by CLASS NAME first (issue #54:
+    // a global faction library makes a bare side string ambiguous), so on a template
     // with several descriptors on one side it returns whichever was DECLARED
     // first - picking Sinai's Syria would silently field EgyptArmy's roster.
     // A side that is the campaign's occupier or resistance therefore resolves

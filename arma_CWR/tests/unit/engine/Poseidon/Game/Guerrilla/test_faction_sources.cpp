@@ -233,3 +233,61 @@ TEST_CASE("FactionSources: the merged table feeds the registry and the outfit se
     REQUIRE(found != nullptr);
     REQUIRE(Str(found->ReadValue("playerClassCiv", RString())) == "SoldierGFakeC");
 }
+
+TEST_CASE("FactionSources: a side-string default binds the class of that name, not a mod faction on that side",
+          "[guerrilla][factions]")
+{
+    // The regression this pins (found by ui/guerrilla_island_switch_stale_body_e2e
+    // on 2026-09-02): Guerrilla.Abel authors defaultOccupier = "EAST" /
+    // defaultResistance = "GUER", which are SIDE STRINGS that happen to name
+    // its own classes. That was unambiguous while the faction table was
+    // per-island. With the library global, the merged table also carries the
+    // @LoBo rosters, and they merge BEFORE the vanilla library (mod configs
+    // first, bin/config-extra.cpp last), so a side-first scan for "EAST"
+    // returned EgyptFrontier and "GUER" returned Jordan: Abel silently played
+    // an Egyptian frontier occupier against a Jordanian resistance. Both
+    // resolvers now try the CLASS NAME first.
+    ParsedConfig global("class CfgGuerrillaFactions\n"
+                        "{\n"
+                        "    class EgyptFrontier { side=\"EAST\"; tiers[]={\"LoBoEgyptFB\"}; };\n"
+                        "    class Jordan        { side=\"GUER\"; tiers[]={\"LoBoJordanB\"}; };\n"
+                        "    class WEST { side=\"WEST\"; tiers[]={\"SoldierWB\"}; };\n"
+                        "    class EAST { side=\"EAST\"; tiers[]={\"SoldierEB\"}; };\n"
+                        "    class GUER { side=\"GUER\"; tiers[]={\"SoldierGB\"}; };\n"
+                        "};\n");
+    ParsedConfig island("class CfgGuerrillaZones\n"
+                        "{\n"
+                        "    defaultOccupier = \"EAST\";\n"
+                        "    defaultResistance = \"GUER\";\n"
+                        "    playerSide = \"GUER\";\n"
+                        "    class Zones { class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"RESISTANCE\"; "
+                        "position[]={100.0, 100.0, 0.0}; }; };\n"
+                        "};\n"
+                        "class CfgGuerrillaFactions { class CIV { side=\"CIV\"; }; };\n");
+    FactionSources s;
+    s.Build(global.Factions(), island.Factions());
+    // the mod rosters really do come first in the merged table
+    REQUIRE(ClassNames(s.Factions())[0] == "CIV");
+    REQUIRE(ClassNames(s.Factions())[1] == "EgyptFrontier");
+
+    ZoneRegistry reg;
+    reg.LoadFromParams(island.file.FindEntry("CfgGuerrillaZones"), s.Factions());
+    REQUIRE(Str(reg.OccupierFaction()) == "EAST");   // NOT EgyptFrontier
+    REQUIRE(Str(reg.ResistanceFaction()) == "GUER"); // NOT Jordan
+    REQUIRE(Str(reg.FactionTierClass("EAST", 1.0f)) == "SoldierEB");
+
+    // the outfit seam resolves the same way ...
+    const ParamEntry* guer = FindGuerrillaFactionEntry(s.Factions(), "GUER");
+    REQUIRE(guer != nullptr);
+    REQUIRE(Str(RString(guer->GetName())) == "GUER");
+    // ... and a pure side string with no class of that name still resolves
+    // through the side rung, which is what keeps a mod-only table working
+    ParsedConfig modOnly("class CfgGuerrillaFactions\n"
+                         "{\n"
+                         "    class IDF           { side=\"WEST\"; tiers[]={\"LoBoGolaniWB\"}; };\n"
+                         "    class EgyptFrontier { side=\"EAST\"; tiers[]={\"LoBoEgyptFB\"}; };\n"
+                         "};\n");
+    const ParamEntry* bySide = FindGuerrillaFactionEntry(modOnly.Factions(), "EAST");
+    REQUIRE(bySide != nullptr);
+    REQUIRE(Str(RString(bySide->GetName())) == "EgyptFrontier");
+}
