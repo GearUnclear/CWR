@@ -680,6 +680,30 @@ LSError VehicleList::Serialize(ParamArchive& ar)
         PARAM_CHECK(ar.Serialize("Vehicles", *(RefArray<Entity>*)this, 1))
         if (ar.GetPass() == ParamArchive::PassFirst)
         {
+            // A saved vehicle whose class the loaded data no longer carries
+            // (a mod-owned body saved with the mod mounted and loaded without
+            // it, issue #48 / #56 task 5) deserialises as a NULL slot:
+            // Entity::CreateObject -> NewNonAIVehicle finds no type and the
+            // RefArray keeps the hole. Dereferencing it here was an access
+            // violation in the middle of the load. Drop such slots with a
+            // WARN instead, so the campaign loads degraded rather than not at
+            // all, which is the plan-15 stance for every other missing class.
+            int dropped = 0;
+            for (int i = Size() - 1; i >= 0; i--)
+            {
+                if (Get(i) == nullptr)
+                {
+                    Delete(i);
+                    dropped++;
+                }
+            }
+            if (dropped > 0)
+            {
+                LOG_WARN(World,
+                         "Savegame: {} vehicle(s) name a class the loaded data package does not carry (a mod no "
+                         "longer mounted?) - dropped from the restored world",
+                         dropped);
+            }
             for (int i = 0; i < Size(); i++)
             {
                 Entity* object = Set(i);
