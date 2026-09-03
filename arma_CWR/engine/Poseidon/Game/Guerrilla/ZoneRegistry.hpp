@@ -15,8 +15,8 @@
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
-class AICenter;
-class AIGroup;
+namespace Poseidon { class AICenter; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
+namespace Poseidon { class AIGroup; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
 
 namespace Poseidon
 {
@@ -151,6 +151,15 @@ struct ClassProbe
     virtual ~ClassProbe() = default;
     // bank is a top-level config class ("CfgVehicles" / "CfgWeapons")
     virtual bool Exists(const char* bank, const char* className) const = 0;
+    // A CfgVehicles class the loaded package can actually SPAWN: it exists
+    // AND the shape file its model names is in the loaded data (issue #46
+    // seam 4b). Exists alone is the weaker gate: a class whose config is
+    // present but whose .p3d the package never ships passes it, spawns, and
+    // access-violates in Man::Init (measured on @LoBo's CoC_Diverdes). The
+    // resolution pass asks this for every unit and vehicle key so such a
+    // class is substituted through the same ladder as an absent one. The
+    // default keeps existence-only fakes and probes on their old answer.
+    virtual bool Spawnable(const char* className) const { return Exists("CfgVehicles", className); }
 };
 
 // The engine's ClassProbe: a classname exists when the merged game config
@@ -160,6 +169,9 @@ struct ClassProbe
 struct ParsClassProbe final : ClassProbe
 {
     bool Exists(const char* bank, const char* className) const override;
+    // Exists plus the shape-file gate the player-body seam and the menu run
+    // (PlayerBodyModelIssue over GetShapeName + QIFStreamB::FileExist).
+    bool Spawnable(const char* className) const override;
 };
 
 // Settlement classifier for the CITY auto-seed (issue #54 C3): is this Names

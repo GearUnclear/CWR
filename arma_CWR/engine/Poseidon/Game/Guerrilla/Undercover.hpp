@@ -26,8 +26,8 @@
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
-class AICenter;
-class AIGroup;
+namespace Poseidon { class AICenter; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
+namespace Poseidon { class AIGroup; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
 
 namespace Poseidon
 {
