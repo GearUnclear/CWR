@@ -678,16 +678,34 @@ LSError VehicleList::Serialize(ParamArchive& ar)
     else
     {
         PARAM_CHECK(ar.Serialize("Vehicles", *(RefArray<Entity>*)this, 1))
+        // A saved vehicle whose class the loaded data no longer carries (a
+        // mod-owned body saved with the mod mounted and loaded without it,
+        // issue #48 / #56 task 5) deserialises as a NULL slot:
+        // Entity::CreateObject -> NewNonAIVehicle finds no type and the
+        // RefArray keeps the hole. Dereferencing it here was an access
+        // violation in the middle of the load. The hole has to STAY through
+        // the second pass: the array serializer addresses "Item%d" by index
+        // on both passes (and skips a null item on the second), so compacting
+        // after the first pass hands every later entity the ref data (Brain,
+        // crew, ...) of its predecessor - a whole world shifted by one. Skip
+        // the holes here, drop them once the second pass has re-read the
+        // list, with a WARN: the campaign loads degraded rather than not at
+        // all, the plan-15 stance for every other missing class.
         if (ar.GetPass() == ParamArchive::PassFirst)
         {
-            // A saved vehicle whose class the loaded data no longer carries
-            // (a mod-owned body saved with the mod mounted and loaded without
-            // it, issue #48 / #56 task 5) deserialises as a NULL slot:
-            // Entity::CreateObject -> NewNonAIVehicle finds no type and the
-            // RefArray keeps the hole. Dereferencing it here was an access
-            // violation in the middle of the load. Drop such slots with a
-            // WARN instead, so the campaign loads degraded rather than not at
-            // all, which is the plan-15 stance for every other missing class.
+            for (int i = 0; i < Size(); i++)
+            {
+                Entity* object = Set(i);
+                if (!object)
+                {
+                    continue;
+                }
+                object->StartFrame();
+                GLOB_LAND->AddObject(object);
+            }
+        }
+        else
+        {
             int dropped = 0;
             for (int i = Size() - 1; i >= 0; i--)
             {
@@ -703,12 +721,6 @@ LSError VehicleList::Serialize(ParamArchive& ar)
                          "Savegame: {} vehicle(s) name a class the loaded data package does not carry (a mod no "
                          "longer mounted?) - dropped from the restored world",
                          dropped);
-            }
-            for (int i = 0; i < Size(); i++)
-            {
-                Entity* object = Set(i);
-                object->StartFrame();
-                GLOB_LAND->AddObject(object);
             }
         }
     }

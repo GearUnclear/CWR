@@ -510,6 +510,9 @@ public:
 	int NFreeManCargo() const;
 	AIGroupType GetType() const {return GTMilitary;}
 	const TargetList &GetTargetList() const {return _targetList;}
+	// savegame repair: drop target records whose vehicle class the loaded
+	// data package does not carry (type == null after load); returns the count
+	int DropTargetsWithoutType();
 	Target *AddTarget
 	(
 		EntityAI *object, float accuracy, float sideAccuracy, float delay,

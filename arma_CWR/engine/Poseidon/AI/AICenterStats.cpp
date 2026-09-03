@@ -44,6 +44,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
@@ -1089,6 +1090,31 @@ LSError AICenter::Serialize(ParamArchive& ar)
     // Recreate strategic map
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
     {
+        // A target record whose vehicle class the loaded data package does
+        // not carry (a mod-owned body saved with the mod mounted and loaded
+        // without it, issue #48 / #56 task 5) comes back with _type == null:
+        // Serialize(EntityType*) resolves the class by name and finds nothing.
+        // The strategic map reads type->NWeaponSystems() for every queued
+        // change (AIMap::ProcessChange), so such a record was an access
+        // violation on the first AICenter::Think after the load. Drop them
+        // here, after the second pass has re-read every element (deleting in
+        // the first pass would shift the Item%d slots under the second).
+        int dropped = 0;
+        for (int i = _targets.Size() - 1; i >= 0; i--)
+        {
+            if (!_targets[i]._type)
+            {
+                _targets.Delete(i);
+                dropped++;
+            }
+        }
+        if (dropped > 0)
+        {
+            LOG_WARN(AI,
+                     "Savegame: {} target record(s) of the side-{} center name a vehicle class the loaded data "
+                     "package does not carry (a mod no longer mounted?) - dropped from the restored world",
+                     dropped, (int)_side);
+        }
         _row = 0;
         _column = 0;
         if (_side < TSideUnknown)

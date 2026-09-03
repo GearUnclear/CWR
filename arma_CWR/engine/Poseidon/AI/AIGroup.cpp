@@ -293,6 +293,36 @@ LSError AIGroup::Serialize(ParamArchive& ar)
     return LSOK;
 }
 
+int AIGroup::DropTargetsWithoutType()
+{
+    // Same tolerance as AICenter::Serialize gives its own AITargetList (issue
+    // #48 / #56 task 5): a Target whose vehicle class the loaded data package
+    // does not carry deserialises with type == null, and the group think reads
+    // tar->type unguarded. Called from the world's final load pass, AFTER
+    // every SerializeRef into this list has resolved (Target refs are
+    // (side, group, index) triples, so compacting the list mid-pass would
+    // misdirect a ref read later in the same pass, e.g. the camera effect's).
+    // Target is LLink-based: deleting the record nulls every link to it.
+    int dropped = 0;
+    for (int i = _targetList.Size() - 1; i >= 0; i--)
+    {
+        Target* tgt = _targetList[i];
+        if (tgt && !tgt->type)
+        {
+            _targetList.Delete(i);
+            dropped++;
+        }
+    }
+    if (dropped > 0)
+    {
+        LOG_WARN(AI,
+                 "Savegame: group {} carried {} target record(s) naming a vehicle class the loaded data package "
+                 "does not carry (a mod no longer mounted?) - dropped from the restored world",
+                 (const char*)GetDebugName(), dropped);
+    }
+    return dropped;
+}
+
 NetworkMessageType AIGroup::GetNMType(NetworkMessageClass cls) const
 {
     switch (cls)
