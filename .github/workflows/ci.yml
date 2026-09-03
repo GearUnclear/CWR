@@ -5,6 +5,12 @@
 # descriptor, the config reader or the mod-intake tools goes red for anyone,
 # CWA install or not. Trident integration tests need game data and stay on
 # the developer machines (see arma_CWR/CLAUDE.md, Tests).
+#
+# First green run: 33718265267 on 2026-09-03 (issue #56 task 6). Run time on a
+# WARM vcpkg binary cache: 17.5 min end to end (apt 1.3 min, Configure 10.1 min
+# of which the cached-port restore is most, build 5.6 min with a cold ccache,
+# unit suites 8 s, tool lanes 1 s). A cold cache (every port from source) took
+# about 55 min to reach the same point, which is why the job allows 180.
 name: ci
 
 on:
