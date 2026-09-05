@@ -185,6 +185,16 @@ Accepted degradation, engine-side safe.
   `trafficDangerCloseRadius` (60), `trafficDangerTtl` (20). Probe-gated
   residual: whether a CMCareless driver visibly accelerates on the rush
   slot; disabling it is a one-constant change (`DangerFarRushBand`).
+  Issue #55 "panic misdirected" (2026-09-05): the tier decides against the
+  **loudest** per-pass source, not the nearest (`LoudestDanger`: the one
+  deepest inside its own band, `distance / DangerBandScale(severity)`, so a
+  smouldering wreck 50 m off no longer shadows a grenade fight 70 m off,
+  and a nearer out-of-band wreck no longer hides an in-band firefight
+  outright), and the cooldown latch yields to a materially louder danger
+  (`DangerEscalates`, severity ≥ 1.5× the one it was armed against: wreck →
+  rifle → blast), a cowering car included — it re-decides as the driving
+  car it was and may bail, U-turn or floor it; same-tier fire never re-rolls
+  it. A car can therefore fire `panicked` more than once per cooldown.
 
 ## Tests
 
