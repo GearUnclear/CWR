@@ -106,7 +106,8 @@ struct TrafficTuning
     // (and disarms the frozen-core shot/blast hooks' fast gate).
     float dangerRadius = 200.0f;     // trafficDangerRadius: reaction band at severity 1 (m)
     float dangerCloseRadius = 60.0f; // trafficDangerCloseRadius: the point-blank band (m, clamped <= dangerRadius)
-    float dangerCooldown = 45.0f;    // trafficDangerCooldown: s of one-reaction-per-episode latch per entry
+    float dangerCooldown = 45.0f;    // trafficDangerCooldown: s of one-reaction-per-episode latch per entry (a
+                                     // LOUDER danger breaks it early: DangerEscalates, issue #55)
     float dangerTtl = 20.0f;         // trafficDangerTtl: s a ring-buffer danger episode stays live
 };
 
@@ -175,8 +176,10 @@ enum TrafficBlockedAction
 
 // danger-reaction tier (civ danger response): what a civilian entry does
 // about nearby gunfire, an explosion or a fresh player-caused wreck.  One
-// reaction per cooldown episode; the commandeer sub-tick always wins over a
-// reaction (it runs first and parks the entry in TSStopping).
+// reaction per cooldown episode, decided against the loudest source in
+// range (a materially louder danger re-opens it early, issue #55); the
+// commandeer sub-tick always wins over a reaction (it runs first and parks
+// the entry in TSStopping).
 enum TrafficDangerReaction
 {
     TDRNone,  // out of band, wrong kind/state, or the cooldown latch holds
@@ -470,16 +473,33 @@ class Traffic : public SerializeClass
     static void AddDangerEvent(AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float severity, bool playerCaused);
     static void AgeDangerEvents(AutoArray<TrafficDangerEvent>& buf, float dt, float ttl);
     // index of the episode nearest pos (2D), -1 when the buffer is empty;
-    // outDist gets the winner's distance (-1 when none)
+    // outDist gets the winner's distance (-1 when none).  The cower-hold
+    // quiet probe ("is anything still nearby at all"); the reaction tier
+    // ranks with LoudestDanger instead
     static int NearestDanger(const AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float& outDist);
+    // the band scale of one severity: sqrt(severity) clamped to
+    // [DangerScaleMin, DangerScaleMax] - the single perceptual model the
+    // source ranking and the reaction decision share
+    static float DangerBandScale(float severity);
+    // index of the episode that reads LOUDEST at pos: the smallest
+    // distance / DangerBandScale(severity), i.e. the one deepest inside its
+    // own reaction band (issue #55 - the ear follows the danger, not the
+    // map: a smouldering wreck 50 m off no longer shadows a grenade fight
+    // 70 m off, and a nearer OUT-of-band source no longer hides an in-band
+    // one - whenever any source is in band the winner is).  -1 when empty;
+    // outDist gets the winner's ACTUAL distance (-1 when none); ties keep
+    // the earlier entry (ring episodes precede the appended wrecks)
+    static int LoudestDanger(const AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float& outDist);
     // the reaction decision.  severity scales both bands through
     // sqrt(severity) clamped to [DangerScaleMin, DangerScaleMax]; the roll
     // splits each band's outcomes; cooldownLeft > 0 is the per-entry
-    // one-reaction-per-episode latch.  Only TKCiv reacts (patrols/convoys
-    // keep their native combat AI); TSStopping/TSExiting stay the
-    // commandeer's, TSPanicked already reacted; the parked family and the
-    // ended states (stalled/lingering) always bail - there is no live leg
-    // left to drive
+    // one-reaction-per-episode latch (the world layer folds the issue-#55
+    // escalation in through DangerLatchHolds before calling).  Only TKCiv
+    // reacts (patrols/convoys keep their native combat AI);
+    // TSStopping/TSExiting stay the commandeer's, TSPanicked already reacted
+    // (an escalation re-decides a cowering car as the driving/arrived car it
+    // was); the parked family and the ended states (stalled/lingering)
+    // always bail - there is no live leg left to drive
     static constexpr float DangerScaleMin = 0.5f;
     static constexpr float DangerScaleMax = 1.5f;
     static constexpr float DangerRifleAudibleFire = 8.0f;   // audibleFire that reads as severity 1
@@ -507,6 +527,18 @@ class Traffic : public SerializeClass
                                                         // DangerFarUTurnBand to disable the rush branch); rest cowers
     static TrafficDangerReaction DecideDangerReaction(float distance, float severity, int kind, TrafficState state,
                                                       float cooldownLeft, float roll, const TrafficTuning& tuning);
+    // the latch yields to a LOUDER danger (issue #55): a car that cowered at
+    // a wreck still jumps at rifle fire, one that jumped at rifle fire still
+    // jumps at a blast; a same-tier or quieter source waits the cooldown out.
+    // latchedSeverity is the severity the latch was armed against (0 =
+    // unknown: the latch holds for anything, the pre-#55 rule).
+    // DangerLatchHolds is the world layer's gate in front of
+    // DecideDangerReaction: a cowering car (TSPanicked) stays latched for as
+    // long as it cowers whatever the clock says - the clock never re-rolls it
+    // against the same fight - and re-decides for an escalation only
+    static constexpr float DangerEscalationRatio = 1.5f; // severity >= latched x this re-opens the decision
+    static bool DangerEscalates(float latchedSeverity, float severity);
+    static bool DangerLatchHolds(float cooldownLeft, bool cowering, float latchedSeverity, float severity);
     static const char* DangerReactionName(int reaction); // "cower"/"uturn"/"rush"/"bail" ("none" otherwise)
     // civ arrival park roll: roll < parkChance
     static bool DecidePark(float roll, const TrafficTuning& tuning);
@@ -605,6 +637,7 @@ class Traffic : public SerializeClass
         float combatHold = 0;     // s the combat gate has held this episode; transient, NOT serialized
                                   // (the gate re-derives from the group's serialized disclosure on load)
         float dangerCooldown = 0; // s left of the one-reaction-per-episode danger latch; transient, NOT serialized
+        float latchSeverity = 0;  // severity the latch was armed against (DangerEscalates); transient like it
         RString lingerReason;     // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
         Vector3 lastPos = VZero;
 

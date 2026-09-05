@@ -1509,6 +1509,125 @@ TEST_CASE("Traffic - danger ring buffer insert/coalesce/expiry", "[game][guerril
         REQUIRE(Traffic::NearestDanger(buf, Vector3(0, 0, 0), d) == 1);
         REQUIRE(d == Approx(100.0f));
     }
+
+    SECTION("DangerBandScale is the clamped sqrt the reaction bands use")
+    {
+        REQUIRE(Traffic::DangerBandScale(1.0f) == Approx(1.0f));
+        REQUIRE(Traffic::DangerBandScale(Traffic::WreckDangerSeverity) == Approx(sqrtf(0.5f)));
+        REQUIRE(Traffic::DangerBandScale(Traffic::DangerExplosionSeverity) == Approx(Traffic::DangerScaleMax));
+        REQUIRE(Traffic::DangerBandScale(9.0f) == Approx(Traffic::DangerScaleMax)); // clamped
+        REQUIRE(Traffic::DangerBandScale(0.01f) == Approx(Traffic::DangerScaleMin));
+        REQUIRE(Traffic::DangerBandScale(0.0f) == Approx(Traffic::DangerScaleMin));
+        REQUIRE(Traffic::DangerBandScale(-1.0f) == Approx(Traffic::DangerScaleMin)); // no NaN from a bad input
+    }
+
+    SECTION("LoudestDanger ranks by depth in band, not by distance (issue #55)")
+    {
+        float d = -1;
+        REQUIRE(Traffic::LoudestDanger(buf, Vector3(0, 0, 0), d) == -1);
+        REQUIRE(d == Approx(-1.0f));
+        // the issue's scene: a smouldering wreck 50 m off (severity 0.5,
+        // band 141 m) and a grenade fight 70 m the other way (2.25, band
+        // 300 m).  Nearest is the wreck; loudest is the fight
+        Traffic::AddDangerEvent(buf, Vector3(-50, 0, 0), Traffic::WreckDangerSeverity, true);
+        Traffic::AddDangerEvent(buf, Vector3(70, 0, 0), Traffic::DangerExplosionSeverity, false);
+        REQUIRE(Traffic::NearestDanger(buf, Vector3(0, 0, 0), d) == 0);
+        REQUIRE(Traffic::LoudestDanger(buf, Vector3(0, 0, 0), d) == 1);
+        REQUIRE(d == Approx(70.0f)); // the winner's ACTUAL distance, not its rank
+        // equal severities: plain nearest
+        buf.Clear();
+        Traffic::AddDangerEvent(buf, Vector3(300, 0, 0), 1.0f, false);
+        Traffic::AddDangerEvent(buf, Vector3(100, 0, 0), 1.0f, false);
+        REQUIRE(Traffic::LoudestDanger(buf, Vector3(0, 0, 0), d) == 1);
+        REQUIRE(d == Approx(100.0f));
+        // a nearer OUT-of-band wreck (150 m, past its 141 m band) never
+        // hides rifle fire that IS in band (190 m of 200): the loudest is in
+        // band whenever any source is
+        buf.Clear();
+        Traffic::AddDangerEvent(buf, Vector3(150, 0, 0), Traffic::WreckDangerSeverity, true);
+        Traffic::AddDangerEvent(buf, Vector3(-190, 0, 0), 1.0f, false);
+        REQUIRE(Traffic::NearestDanger(buf, Vector3(0, 0, 0), d) == 0);
+        REQUIRE(Traffic::LoudestDanger(buf, Vector3(0, 0, 0), d) == 1);
+        REQUIRE(d == Approx(190.0f));
+        // ties keep the earlier entry (a ring episode over an appended wreck)
+        buf.Clear();
+        Traffic::AddDangerEvent(buf, Vector3(100, 0, 0), 1.0f, false);
+        Traffic::AddDangerEvent(buf, Vector3(-100, 0, 0), 1.0f, false);
+        REQUIRE(Traffic::LoudestDanger(buf, Vector3(0, 0, 0), d) == 0);
+    }
+}
+
+TEST_CASE("Traffic - danger latch yields to a louder danger (issue #55)", "[game][guerrilla]")
+{
+    const float wreck = Traffic::WreckDangerSeverity;     // 0.5
+    const float rifle = 1.0f;                             // DangerRifleAudibleFire reads as 1
+    const float blast = Traffic::DangerExplosionSeverity; // 2.25
+
+    SECTION("escalation is a materially louder tier, not any new source")
+    {
+        REQUIRE(Traffic::DangerEscalates(wreck, rifle)); // cowered at a wreck: rifle fire still moves him
+        REQUIRE(Traffic::DangerEscalates(rifle, blast)); // jumped at a rifle: a blast still does
+        REQUIRE(Traffic::DangerEscalates(wreck, blast));
+        REQUIRE_FALSE(Traffic::DangerEscalates(rifle, rifle)); // more of the same waits the cooldown out
+        REQUIRE_FALSE(Traffic::DangerEscalates(rifle, wreck)); // quieter never re-opens
+        REQUIRE_FALSE(Traffic::DangerEscalates(blast, blast));
+        // the ratio edge is inclusive; just under it is the same tier
+        REQUIRE(Traffic::DangerEscalates(rifle, rifle * Traffic::DangerEscalationRatio));
+        REQUIRE_FALSE(Traffic::DangerEscalates(rifle, rifle * Traffic::DangerEscalationRatio - 0.01f));
+        // an unknown latch severity holds for anything (the pre-#55 rule)
+        REQUIRE_FALSE(Traffic::DangerEscalates(0.0f, blast));
+    }
+
+    SECTION("the latch: cooldown, cowering, escalation")
+    {
+        // mid-cooldown, same tier: holds (the one-reaction-per-episode rule)
+        REQUIRE(Traffic::DangerLatchHolds(30.0f, false, rifle, rifle));
+        // mid-cooldown, louder: yields
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(30.0f, false, wreck, rifle));
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(30.0f, false, rifle, blast));
+        // expired: never holds, whatever was latched
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(0.0f, false, blast, wreck));
+        // a cowering car stays latched past the clock against the same tier
+        // (the hold's quiet re-check owns its resume, never a re-roll) ...
+        REQUIRE(Traffic::DangerLatchHolds(0.0f, true, rifle, rifle));
+        REQUIRE(Traffic::DangerLatchHolds(0.0f, true, rifle, wreck));
+        // ... and re-opens for an escalation at once, clock or no clock
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(40.0f, true, wreck, rifle));
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(0.0f, true, rifle, blast));
+        // an unknown latch severity holds for anything while the clock runs
+        REQUIRE(Traffic::DangerLatchHolds(10.0f, false, 0.0f, blast));
+    }
+
+    SECTION("the issue's scene end to end through the pure cores")
+    {
+        // a civ car cowered at the wreck it drove up to (50 m, severity
+        // 0.5): latch armed at 0.5 with 40 s left.  A grenade fight breaks
+        // out 70 m the other way.  Pre-#55 the nearest source was the wreck
+        // and the latch held: the driver sat deaf through it
+        TrafficTuning t;
+        AutoArray<TrafficDangerEvent> buf;
+        Traffic::AddDangerEvent(buf, Vector3(-50, 0, 0), wreck, true);
+        Traffic::AddDangerEvent(buf, Vector3(70, 0, 0), blast, false);
+        float dist = -1;
+        int src = Traffic::LoudestDanger(buf, Vector3(0, 0, 0), dist);
+        REQUIRE(src == 1);
+        REQUIRE_FALSE(Traffic::DangerLatchHolds(40.0f, true, wreck, buf[src].severity));
+        // the cowering car decides as the driving car it was: 70 m is inside
+        // the blast's 90 m close band, roll 0.6 = bail
+        REQUIRE(Traffic::DecideDangerReaction(dist, buf[src].severity, TKCiv, TSDriving, 0, 0.6f, t) == TDRBail);
+        // the reverse scene: parked by an old wreck, a firefight next door.
+        // The wreck alone (out of its band at 150 m) moves nobody; the rifle
+        // fire in band does, and the parked family bails
+        buf.Clear();
+        Traffic::AddDangerEvent(buf, Vector3(150, 0, 0), wreck, true);
+        src = Traffic::LoudestDanger(buf, Vector3(0, 0, 0), dist);
+        REQUIRE(src == 0);
+        REQUIRE(Traffic::DecideDangerReaction(dist, buf[src].severity, TKCiv, TSDwelling, 0, 0, t) == TDRNone);
+        Traffic::AddDangerEvent(buf, Vector3(-120, 0, 0), rifle, false);
+        src = Traffic::LoudestDanger(buf, Vector3(0, 0, 0), dist);
+        REQUIRE(src == 1);
+        REQUIRE(Traffic::DecideDangerReaction(dist, buf[src].severity, TKCiv, TSDwelling, 0, 0, t) == TDRBail);
+    }
 }
 
 TEST_CASE("Traffic - danger reaction decision", "[game][guerrilla]")

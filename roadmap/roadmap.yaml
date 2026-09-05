@@ -684,7 +684,7 @@ items:
     priority: 1
     depends_on: [civilian-ambience-layer, engine-native-systems]
     commits: ["f255bef", "cf93676", "911b724", "b643576", "5036d7b", "a2d16fc", "cf11e71", "660029c"]
-    gh_issues: [33, 35, 28]
+    gh_issues: [33, 35, 28, 55]
     summary: >
       engine/Poseidon/Game/Guerrilla/Traffic.* in the GarrisonCache/TownFlags
       mold: pure unit-tested core (one-roll rarest-first spawn decision with

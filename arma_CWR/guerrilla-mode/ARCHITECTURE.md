@@ -214,7 +214,9 @@ state]`, `[]` when untracked), `gmTrafficOnEvent ["spawned"|"despawned"|
 `arrived`/`parked`/`departed` `[veh, kind, destIdx]`, `bailed` `[veh, kind,
 destIdx]` - escort lost under fire, the truck crew abandons the load;
 `panicked` `[veh, kind, reaction]` with reaction
-`"cower"|"uturn"|"rush"|"bail"`; `driverKilled` is the killed-EH
+`"cower"|"uturn"|"rush"|"bail"`, fired again within the cooldown when a
+materially louder danger escalates past the one the car reacted to (issue
+#55); `driverKilled` is the killed-EH
 EXPRESSION attached to every civ driver, `_this=[victim, killer]`),
 `gmTrafficRelease <veh>` (registry half of a commandeer), `gmTrafficForceSpawn
 [kind, zoneIdx]` (-> OBJECT; test aid, bypasses chance/caps, not the road

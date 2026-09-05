@@ -1125,6 +1125,53 @@ int Traffic::NearestDanger(const AutoArray<TrafficDangerEvent>& buf, Vector3Par 
     return best;
 }
 
+float Traffic::DangerBandScale(float severity)
+{
+    float scale = sqrtf(severity > 0 ? severity : 0.0f);
+    saturate(scale, DangerScaleMin, DangerScaleMax);
+    return scale;
+}
+
+int Traffic::LoudestDanger(const AutoArray<TrafficDangerEvent>& buf, Vector3Par pos, float& outDist)
+{
+    // rank = (distance / bandScale)^2: how deep inside its own reaction
+    // band each source sits, the same sqrt(severity) model
+    // DecideDangerReaction bands with - a source is in band iff its rank
+    // <= dangerRadius^2, so the loudest is in band whenever any source is
+    int best = -1;
+    float bestD2 = 0;
+    float bestRank = 0;
+    for (int i = 0; i < buf.Size(); i++)
+    {
+        float d2 = Dist2DSq(buf[i].pos, pos);
+        float rank = d2 / Square(DangerBandScale(buf[i].severity));
+        if (best < 0 || rank < bestRank)
+        {
+            best = i;
+            bestD2 = d2;
+            bestRank = rank;
+        }
+    }
+    outDist = best >= 0 ? sqrtf(bestD2) : -1.0f;
+    return best;
+}
+
+bool Traffic::DangerEscalates(float latchedSeverity, float severity)
+{
+    return latchedSeverity > 0 && severity >= latchedSeverity * DangerEscalationRatio;
+}
+
+bool Traffic::DangerLatchHolds(float cooldownLeft, bool cowering, float latchedSeverity, float severity)
+{
+    if (DangerEscalates(latchedSeverity, severity))
+    {
+        return false; // louder than what armed the latch: the decision re-opens
+    }
+    // a cowering car is latched for as long as it cowers (the clock never
+    // re-rolls it against the same fight); anything else waits the cooldown
+    return cowering || cooldownLeft > 0;
+}
+
 TrafficDangerReaction Traffic::DecideDangerReaction(float distance, float severity, int kind, TrafficState state,
                                                     float cooldownLeft, float roll, const TrafficTuning& tuning)
 {
@@ -1141,8 +1188,7 @@ TrafficDangerReaction Traffic::DecideDangerReaction(float distance, float severi
     {
         return TDRNone;
     }
-    float scale = sqrtf(severity);
-    saturate(scale, DangerScaleMin, DangerScaleMax);
+    float scale = DangerBandScale(severity);
     if (distance > tuning.dangerRadius * scale)
     {
         return TDRNone;
@@ -2218,7 +2264,32 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             // blocked seconds must not carry into a later wanted despawn
             e.exposeDefer = 0;
         }
-        if (e.state == TSPanicked)
+        // danger-reaction tier (civ only).  The commandeer always wins: its
+        // sub-tick runs first and parks a fronted car in TSStopping, which
+        // the early branch above already skipped.  One reaction per cooldown
+        // episode, decided against the LOUDEST per-pass source (issue #55:
+        // the one deepest inside its own band, so a nearer wreck no longer
+        // shadows a grenade fight), and the latch yields to a danger that
+        // escalates past the one it was armed against - a car that cowered
+        // at a wreck still jumps at rifle fire.  A cowering car re-decides
+        // for an escalation only, as the driving/arrived car it was; its
+        // hold runs on below otherwise
+        bool cowering = e.state == TSPanicked;
+        bool atDest = Dist2DSq(veh->Position(), e.dest) <= Square(_tuning.arriveRadius);
+        TrafficDangerReaction react = TDRNone;
+        int src = -1;
+        if (e.kind == TKCiv && _dangerNow.Size() > 0)
+        {
+            float dangerDist = -1;
+            src = LoudestDanger(_dangerNow, veh->Position(), dangerDist);
+            if (src >= 0 && !DangerLatchHolds(e.dangerCooldown, cowering, e.latchSeverity, _dangerNow[src].severity))
+            {
+                TrafficState decideAs = cowering ? (atDest ? TSArrived : TSDriving) : e.state;
+                react = DecideDangerReaction(dangerDist, _dangerNow[src].severity, e.kind, decideAs, 0.0f,
+                                             GRandGen.RandomValue(), _tuning);
+            }
+        }
+        if (cowering && react == TDRNone)
         {
             // cower hold: braked with the crew ducked; drive on once the
             // hold ran out AND the ring has gone quiet nearby (a re-CHECK,
@@ -2236,7 +2307,6 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                     // inside its arrival radius returns to TSArrived so the
                     // arrival ladder is not re-armed (no duplicate arrived
                     // event, no second park roll)
-                    bool atDest = Dist2DSq(veh->Position(), e.dest) <= Square(_tuning.arriveRadius);
                     e.state = atDest ? TSArrived : TSDriving;
                     e.stateTime = 0;
                     e.stallTime = 0;
@@ -2250,98 +2320,99 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             }
             continue; // no stall accrual, no arrival: a cowering car holds in place
         }
-        // danger-reaction tier (civ only).  The commandeer always wins: its
-        // sub-tick runs first and parks a fronted car in TSStopping, which
-        // the early branch above already skipped.  One reaction per cooldown
-        // episode, decided against the nearest per-pass source.
-        if (e.dangerCooldown <= 0 && e.kind == TKCiv && _dangerNow.Size() > 0)
+        if (react != TDRNone)
         {
-            float dangerDist = -1;
-            int src = NearestDanger(_dangerNow, veh->Position(), dangerDist);
-            TrafficDangerReaction react = src >= 0
-                                              ? DecideDangerReaction(dangerDist, _dangerNow[src].severity, e.kind,
-                                                                     e.state, 0.0f, GRandGen.RandomValue(), _tuning)
-                                              : TDRNone;
-            if (react != TDRNone)
+            e.dangerCooldown = _tuning.dangerCooldown;
+            e.latchSeverity = _dangerNow[src].severity;
+            if (cowering)
             {
-                e.dangerCooldown = _tuning.dangerCooldown;
-                Vector3 dangerPos = _dangerNow[src].pos;
-                TrafficEventRecord ev;
-                ev.type = TEPanicked;
-                ev.kind = e.kind;
-                ev.originIndex = e.originIndex;
-                ev.destIndex = e.destIndex;
-                ev.vehicle = veh;
-                ev.driver = e.driver;
-                if (react == TDRBail)
-                {
-                    // the driver brakes, abandons the car and runs from the
-                    // danger; the panicked event precedes the abandon's
-                    // despawned one.  The hull keeps the at-gunpoint memory
-                    // only when the player's own fire forced the bail (the
-                    // commandeer-bail precedent: playerCaused = the player
-                    // made this happen, intact hull or not)
-                    ev.reason = DangerReactionName(TDRBail);
-                    fired.Add(ev);
-                    IssueGroupStop(e.group); // brake before the bail, the commandeer shape
-                    AbandonEntry(i, "panicked", fired, false, &dangerPos, _dangerNow[src].playerCaused);
-                    LOG_INFO(Core, "Traffic: civ driver panicked and bailed");
-                    continue;
-                }
-                if (react == TDRUTurn)
-                {
-                    // the blocked-recovery U-turn at flee pace: swap the
-                    // endpoints and run for home; an unresolvable origin
-                    // downgrades to the cower
-                    const ZoneRecord* back =
-                        e.originIndex >= 0 ? ZoneRegistry::Instance().GetZone(e.originIndex) : nullptr;
-                    if (back && GRoadNet)
-                    {
-                        int backIndex = e.originIndex;
-                        RString backZone = e.originZone;
-                        e.originIndex = e.destIndex;
-                        e.originZone = e.destZone;
-                        e.destIndex = backIndex;
-                        e.destZone = backZone;
-                        e.legs++;
-                        e.state = TSDriving;
-                        // a panic U-turn is a fresh leg: the stall clock and
-                        // the blocked retries restart with it, the
-                        // depart/re-leg convention
-                        e.stallTime = 0;
-                        e.blockedRetries = 0;
-                        IssueRoute(e, GRoadNet->GetNearestRoadPoint(back->pos), CMCareless, SpeedFull, false);
-                        // the TEDeparted convention: destIdx = the NEW destination
-                        ev.originIndex = e.originIndex;
-                        ev.destIndex = e.destIndex;
-                        LOG_INFO(Core, "Traffic: civ car panicked, U-turning to {}", (const char*)backZone);
-                    }
-                    else
-                    {
-                        react = TDRCower;
-                    }
-                }
-                if (react == TDRRush)
-                {
-                    // same leg, same state, floored; the fresh command
-                    // restarts the stall clock.  Whether a CMCareless driver
-                    // really accelerates is probe-gated (see DangerFarRushBand)
-                    e.stallTime = 0;
-                    IssueRoute(e, e.dest, CMCareless, SpeedFull, false);
-                    LOG_INFO(Core, "Traffic: civ car panicked, speeding past");
-                }
-                else if (react == TDRCower)
-                {
-                    IssueGroupStop(e.group);
-                    e.state = TSPanicked;
-                    e.stateTime = 0;
-                    e.stallTime = 0;
-                    LOG_INFO(Core, "Traffic: civ car panicked, cowering");
-                }
-                ev.reason = DangerReactionName(react);
+                LOG_INFO(Core, "Traffic: cowering civ car escalates to {}", DangerReactionName(react));
+            }
+            Vector3 dangerPos = _dangerNow[src].pos;
+            TrafficEventRecord ev;
+            ev.type = TEPanicked;
+            ev.kind = e.kind;
+            ev.originIndex = e.originIndex;
+            ev.destIndex = e.destIndex;
+            ev.vehicle = veh;
+            ev.driver = e.driver;
+            if (react == TDRBail)
+            {
+                // the driver brakes, abandons the car and runs from the
+                // danger; the panicked event precedes the abandon's
+                // despawned one.  The hull keeps the at-gunpoint memory
+                // only when the player's own fire forced the bail (the
+                // commandeer-bail precedent: playerCaused = the player
+                // made this happen, intact hull or not)
+                ev.reason = DangerReactionName(TDRBail);
                 fired.Add(ev);
+                IssueGroupStop(e.group); // brake before the bail, the commandeer shape
+                AbandonEntry(i, "panicked", fired, false, &dangerPos, _dangerNow[src].playerCaused);
+                LOG_INFO(Core, "Traffic: civ driver panicked and bailed");
                 continue;
             }
+            if (react == TDRUTurn)
+            {
+                // the blocked-recovery U-turn at flee pace: swap the
+                // endpoints and run for home; an unresolvable origin
+                // downgrades to the cower
+                const ZoneRecord* back = e.originIndex >= 0 ? ZoneRegistry::Instance().GetZone(e.originIndex) : nullptr;
+                if (back && GRoadNet)
+                {
+                    int backIndex = e.originIndex;
+                    RString backZone = e.originZone;
+                    e.originIndex = e.destIndex;
+                    e.originZone = e.destZone;
+                    e.destIndex = backIndex;
+                    e.destZone = backZone;
+                    e.legs++;
+                    e.state = TSDriving;
+                    e.stateTime = 0;
+                    // a panic U-turn is a fresh leg: the stall clock and
+                    // the blocked retries restart with it, the
+                    // depart/re-leg convention
+                    e.stallTime = 0;
+                    e.blockedRetries = 0;
+                    IssueRoute(e, GRoadNet->GetNearestRoadPoint(back->pos), CMCareless, SpeedFull, false);
+                    // the TEDeparted convention: destIdx = the NEW destination
+                    ev.originIndex = e.originIndex;
+                    ev.destIndex = e.destIndex;
+                    LOG_INFO(Core, "Traffic: civ car panicked, U-turning to {}", (const char*)backZone);
+                }
+                else
+                {
+                    react = TDRCower;
+                }
+            }
+            if (react == TDRRush)
+            {
+                // same leg, floored; the fresh command restarts the stall
+                // clock, and a cowering car is back on the road (the rush
+                // is never rolled for TSArrived, so TSDriving is the state
+                // it cowered from).  Whether a CMCareless driver really
+                // accelerates is probe-gated (see DangerFarRushBand)
+                if (cowering)
+                {
+                    e.state = TSDriving;
+                    e.stateTime = 0;
+                    e.blockedRetries = 0;
+                    e.lastPos = veh->Position();
+                }
+                e.stallTime = 0;
+                IssueRoute(e, e.dest, CMCareless, SpeedFull, false);
+                LOG_INFO(Core, "Traffic: civ car panicked, speeding past");
+            }
+            else if (react == TDRCower)
+            {
+                IssueGroupStop(e.group);
+                e.state = TSPanicked;
+                e.stateTime = 0;
+                e.stallTime = 0;
+                LOG_INFO(Core, "Traffic: civ car panicked, cowering");
+            }
+            ev.reason = DangerReactionName(react);
+            fired.Add(ev);
+            continue;
         }
         if (e.state == TSLingering)
         {
@@ -2850,13 +2921,14 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
     // mandatory here - without it the group keeps re-ordering the walking
     // driver back into the car.  The steal watch above stays senior; the
     // cooldown latch already ticked in UpdateEntries' shared decrement.
-    if (e.dangerCooldown <= 0 && _dangerNow.Size() > 0)
+    if (_dangerNow.Size() > 0)
     {
         float dangerDist = -1;
-        int src = NearestDanger(_dangerNow, veh->Position(), dangerDist);
+        int src = LoudestDanger(_dangerNow, veh->Position(), dangerDist);
         // roll 0: the parked family maps every in-band source to TDRBail,
-        // the roll is unused
-        if (src >= 0 &&
+        // the roll is unused.  A latch armed while still driving (say a
+        // U-turn at a wreck) yields to a louder source here too (issue #55)
+        if (src >= 0 && !DangerLatchHolds(e.dangerCooldown, false, e.latchSeverity, _dangerNow[src].severity) &&
             DecideDangerReaction(dangerDist, _dangerNow[src].severity, e.kind, e.state, 0.0f, 0.0f, _tuning) == TDRBail)
         {
             TrafficEventRecord ev;
