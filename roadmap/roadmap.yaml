@@ -775,7 +775,7 @@ items:
     priority: 2
     depends_on: [ambient-traffic, traffic-view-distance]
     gh_issues: [55]
-    commits: []
+    commits: [bfaf236]
     summary: >
       Closes every grievance in the #55 complaints book except PANIC
       MISDIRECTED (tracked as traffic-panic-priority). One clock: every
