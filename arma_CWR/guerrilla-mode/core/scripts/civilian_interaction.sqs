@@ -1,0 +1,43 @@
+; Issue #41: two actions on the nearest eligible ambient civilian.
+; OWNS gmCiMenu*, GM_CI_REQUEST (one pending slot), GM_CI_REMOUNT/TICKS.
+; The dispatcher captures body/caller/verb once. This loop consumes it; the
+; synchronous service revalidates every gate before committing any effects.
+; Costs per second: bounded ambient roster + <=64 profile rows, two actions.
+; No personal score calculation is performed by this proximity scan.
+@GM_LIB_READY
+GM_CI_LIB_READY = false
+[] exec "\gmcore\scripts\civilian_interaction_lib.sqs"
+@GM_CI_LIB_READY
+GM_CI_REQUEST = []
+GM_CI_REMOUNT = false
+GM_CI_TICKS = 0
+gmCiMenuBody = objNull
+gmCiMenuAsk = -1
+gmCiMenuExtort = -1
+; init.sqs fans out the single campaignLoaded handler to GM_CI_REMOUNT.
+GM_CI_READY = true
+
+#loop
+~1
+GM_CI_TICKS = GM_CI_TICKS + 1
+[] call GM_CI_fnPrune
+; Drain and commit in one evaluation; no second queued click can overwrite it.
+? (count GM_CI_REQUEST) > 0 : gmCiMenuRequest = GM_CI_REQUEST; GM_CI_REQUEST = []; gmCiMenuResult = gmCiMenuRequest call GM_CI_fnInteract; hint (gmCiMenuResult call GM_CI_fnDescribe)
+gmCiMenuNear = objNull
+gmCiMenuDist = GM_CI_REACH + 1
+; forEach nested _x is restored by the evaluator; inner loop only sees units.
+{{if (([_x, aP] call GM_CI_fnEligible) >= 0) then {if ((aP distance _x) < gmCiMenuDist) then {gmCiMenuNear = _x; gmCiMenuDist = aP distance _x}}} forEach (units _x)} forEach GM_CIV_GROUPS
+? GM_CI_REMOUNT or (gmCiMenuNear != gmCiMenuBody) : goto "remount"
+goto "loop"
+
+#remount
+? not (isNull gmCiMenuBody) : gmCiMenuBody removeAction gmCiMenuAsk
+? not (isNull gmCiMenuBody) : gmCiMenuBody removeAction gmCiMenuExtort
+gmCiMenuBody = gmCiMenuNear
+gmCiMenuAsk = -1
+gmCiMenuExtort = -1
+GM_CI_REMOUNT = false
+? isNull gmCiMenuBody : goto "loop"
+gmCiMenuAsk = gmCiMenuBody addAction ["Ask for a donation", "\gmcore\scripts\civilian_interaction_action.sqs"]
+gmCiMenuExtort = gmCiMenuBody addAction ["Extort money", "\gmcore\scripts\civilian_interaction_action.sqs"]
+goto "loop"

@@ -97,5 +97,9 @@ GM_fnZoneNearestCity = {GM_tmpNCr = -1; GM_tmpNCd = 999999; GM_tmpNCi = 0; while
 ; ----------------------------------------------------------------------------
 ;  Handshake: signal init.sqs that the helper table is fully defined.
 ; ----------------------------------------------------------------------------
+; All income producers use an atomic read/add/write, never a cached treasury.
+; economy.sqs supplies zone income; civilian_interaction supplies donations.
+GM_fnResourcesAdd = {gmResources = gmResources + (_this select 0); gmResources}
+
 GM_LIB_READY = true
 exit

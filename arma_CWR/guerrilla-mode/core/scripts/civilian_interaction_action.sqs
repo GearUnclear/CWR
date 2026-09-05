@@ -1,0 +1,6 @@
+; Captured addAction request [target, caller, actionId]. At most one pending
+; request; never reinterpret an old ID against a newly selected civilian.
+; Validate and enqueue in ONE evaluation so simultaneous dispatch scripts
+; cannot both see an empty slot, or straddle a menu remount between lines.
+if (GM_CI_READY) then {if ((count GM_CI_REQUEST) == 0) then {if ((_this select 0) == gmCiMenuBody) then {if ((_this select 2) == gmCiMenuAsk) then {GM_CI_REQUEST = [_this select 0, _this select 1, "SOLICIT"]}; if ((_this select 2) == gmCiMenuExtort) then {GM_CI_REQUEST = [_this select 0, _this select 1, "EXTORT"]}}}}
+exit
