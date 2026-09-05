@@ -49,11 +49,61 @@ static GameValue MakePosValue(const GameState* state, Vector3Par pos)
 // gmTraffic*
 // ---------------------------------------------------------------------------
 
-// gmTrafficCount "civ"|"patrol"|"convoy"|"all" -> scalar
+// gmTrafficCount "civ"|"patrol"|"convoy"|"all"|"parked" -> scalar ("parked"
+// is the separate curb census of issue #55: civ entries in the park states)
 static GameValue GmTrafficCount(const GameState* /*state*/, GameValuePar oper1)
 {
     GameStringType kind = oper1;
+    if (stricmp(kind, "parked") == 0)
+    {
+        return (float)Traffic::Instance().CountParked();
+    }
     return (float)Traffic::Instance().Count(Traffic::KindFromName(kind));
+}
+
+// gmTrafficEscort <veh> -> the convoy escort hull of a live entry (objNull
+// when the entry has none or the vehicle is not live traffic)
+static GameValue GmTrafficEscort(const GameState* /*state*/, GameValuePar oper1)
+{
+    Transport* veh = dyn_cast<Transport>(GetObject(oper1));
+    Transport* escort = Traffic::Instance().EntryEscort(veh);
+    if (!escort)
+    {
+        return OBJECT_NULL;
+    }
+    return GameValueExt(escort);
+}
+
+// gmTrafficDiag -> the coroner's report (issue #55):
+//   [movingCiv, patrols, convoys, parked, released, fleeing,
+//    civRoute, patrolRoute, convoyRoute,        (0/1 scalars)
+//    lastFailKind, lastFailReason, lastFailDetail, (strings; "" when none)
+//    passes, spawned, failed, configWarnings]
+// Bools ride as 0/1 scalars (raw bools kill the tri harness asserts).
+static GameValue GmTrafficDiag(const GameState* state)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    const Traffic& t = Traffic::Instance();
+    const TrafficDiag& d = t.Diag();
+    array.Resize(16);
+    array[0] = (float)(t.Count(TKCiv) - t.CountParked());
+    array[1] = (float)t.Count(TKPatrol);
+    array[2] = (float)t.Count(TKConvoy);
+    array[3] = (float)t.CountParked();
+    array[4] = (float)t.NReleased();
+    array[5] = (float)t.NFleeing();
+    array[6] = d.hasCivRoute ? 1.0f : 0.0f;
+    array[7] = d.hasPatrolRoute ? 1.0f : 0.0f;
+    array[8] = d.hasConvoyRoute ? 1.0f : 0.0f;
+    array[9] = GameStringType(d.lastFailKind >= 0 ? Traffic::KindName(d.lastFailKind) : "");
+    array[10] = GameStringType(d.lastFail == TSFNone ? "" : Traffic::SpawnFailureName(d.lastFail));
+    array[11] = GameStringType(d.lastFailDetail);
+    array[12] = (float)d.passes;
+    array[13] = (float)d.spawned;
+    array[14] = (float)d.failed;
+    array[15] = (float)t.ConfigWarnings().Size();
+    return value;
 }
 
 // gmTrafficVehicles -> array of live traffic OBJECTs (dead links skipped)
@@ -328,6 +378,8 @@ INIT_MODULE(GuerrillaTraffic, 3)
     GGameState.NewFunction(GameFunction(GameBool, "gmTrafficRelease", GmTrafficRelease, GameObject));
     GGameState.NewFunction(GameFunction(GameObject, "gmTrafficForceSpawn", GmTrafficForceSpawn, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmTrafficPercept", GmTrafficPercept, GameObjectOrArray));
+    GGameState.NewFunction(GameFunction(GameObject, "gmTrafficEscort", GmTrafficEscort, GameObject));
+    GGameState.NewNularOp(GameNular(GameArray, "gmTrafficDiag", GmTrafficDiag));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadNearest", GmRoadNearest, GameObjectOrArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadPath", GmRoadPath, GameArray));

@@ -224,6 +224,10 @@ gmEvtTrSpawned   = []
 gmEvtTrDespawned = []
 gmEvtTrCommandeered = []
 gmEvtTrArrived   = []
+gmEvtTrParked    = []
+gmEvtTrDeparted  = []
+gmEvtTrBailed    = []
+gmEvtTrPanicked  = []
 
 ; ===========================================================================
 ;  MARKERS: create one per zone (config zones AND seedCities-seeded towns all
@@ -266,6 +270,10 @@ gmTrafficOnEvent ["spawned", {gmEvtTrSpawned = gmEvtTrSpawned + [_this]}]
 gmTrafficOnEvent ["despawned", {gmEvtTrDespawned = gmEvtTrDespawned + [_this]}]
 gmTrafficOnEvent ["commandeered", {gmEvtTrCommandeered = gmEvtTrCommandeered + [_this]}]
 gmTrafficOnEvent ["arrived", {gmEvtTrArrived = gmEvtTrArrived + [_this]}]
+gmTrafficOnEvent ["parked", {gmEvtTrParked = gmEvtTrParked + [_this]}]
+gmTrafficOnEvent ["departed", {gmEvtTrDeparted = gmEvtTrDeparted + [_this]}]
+gmTrafficOnEvent ["bailed", {gmEvtTrBailed = gmEvtTrBailed + [_this]}]
+gmTrafficOnEvent ["panicked", {gmEvtTrPanicked = gmEvtTrPanicked + [_this]}]
 gmTrafficOnEvent ["driverKilled", {if (not (isNil "GM_fnCivKilledEH")) then {_this call GM_fnCivKilledEH}}]
 
 ; ===========================================================================

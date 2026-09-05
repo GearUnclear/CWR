@@ -129,6 +129,18 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.dangerCloseRadius == Approx(60.0f));
         REQUIRE(tu.dangerCooldown == Approx(45.0f));
         REQUIRE(tu.dangerTtl == Approx(20.0f));
+        REQUIRE(tu.maxParked == 2);
+        REQUIRE(tu.wreckClearAfter == Approx(1200.0f));
+        REQUIRE(t.ConfigWarnings().Size() == 0);
+    }
+
+    SECTION("explicit census / recovery keys override, a clean config repairs nothing")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficMaxParked = 5; trafficWreckClearAfter = 600; };\n");
+        REQUIRE(f.traffic.Tuning().maxParked == 5);
+        REQUIRE(f.traffic.Tuning().wreckClearAfter == Approx(600.0f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 0);
     }
 
     SECTION("explicit danger keys override")
@@ -1890,4 +1902,239 @@ TEST_CASE("Traffic - the ambush queue survives save/load", "[game][guerrilla][sa
     // registry singleton)
     ZoneRegistry::Instance().Clear();
     std::filesystem::remove(archivePath);
+}
+
+// ---------------------------------------------------------------------------
+// issue #55 (the complaints book): the ordinances are read before they are
+// obeyed, the parked census, roadside recovery, the coroner's names
+// ---------------------------------------------------------------------------
+
+namespace
+{
+bool AnyWarningMentions(const AutoArray<RString>& warnings, const char* key)
+{
+    for (int i = 0; i < warnings.Size(); i++)
+    {
+        if (strstr((const char*)warnings[i], key))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+TEST_CASE("Traffic - config repairs: the transposed band", "[game][guerrilla]")
+{
+    SECTION("radius under the spawn floor is an empty band: repaired to floor + default width, and said so")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficMinSpawnDist = 1500; trafficRadius = 300; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.minSpawnDist == Approx(1500.0f));
+        REQUIRE(tu.radius == Approx(1500.0f + 1200.0f));
+        REQUIRE(tu.radius > tu.minSpawnDist);
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 1);
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficRadius"));
+        // the band the spawn logic derives from it is usable again
+        TrafficEffectiveBand b = Traffic::ConfigBand(tu);
+        REQUIRE(b.radius - b.minSpawn == Approx(1200.0f));
+    }
+
+    SECTION("radius equal to the floor is just as empty")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficMinSpawnDist = 800; trafficRadius = 800; };\n");
+        REQUIRE(f.traffic.Tuning().radius == Approx(2000.0f));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficRadius"));
+    }
+
+    SECTION("a negative hysteresis (edge inside the band) and a negative floor are floored")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDespawnHysteresis = -200; trafficMinSpawnDist = -50; };\n");
+        REQUIRE(f.traffic.Tuning().despawnHysteresis == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().minSpawnDist == Approx(0.0f));
+        REQUIRE(f.traffic.Tuning().radius == Approx(1500.0f)); // still above the (repaired) floor: untouched
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficDespawnHysteresis"));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficMinSpawnDist"));
+        REQUIRE_FALSE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficRadius"));
+    }
+}
+
+TEST_CASE("Traffic - config repairs: the day window written in hours", "[game][guerrilla]")
+{
+    SECTION("hours past 1 are read as hours, not as a day fraction")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDayStart = 6; trafficDayEnd = 21; };\n");
+        REQUIRE(f.traffic.Tuning().dayStart == Approx(6.0f / 24.0f));
+        REQUIRE(f.traffic.Tuning().dayEnd == Approx(21.0f / 24.0f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 2);
+        // and the trapezoid the keys feed reads noon as full day, not night
+        TrafficModulationInput noon;
+        float civ, patrol;
+        Traffic::ModulationFactors(noon, f.traffic.Tuning(), civ, patrol);
+        REQUIRE(civ == Approx(1.0f));
+    }
+
+    SECTION("a window that closes before it opens falls back to the defaults")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDayStart = 0.9; trafficDayEnd = 0.2; };\n");
+        REQUIRE(f.traffic.Tuning().dayStart == Approx(6.0f / 24.0f));
+        REQUIRE(f.traffic.Tuning().dayEnd == Approx(21.0f / 24.0f));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficDayStart"));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficDayEnd"));
+    }
+
+    SECTION("a legal fractional window repairs nothing")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficDayStart = 0.3; trafficDayEnd = 0.8; };\n");
+        REQUIRE(f.traffic.Tuning().dayStart == Approx(0.3f));
+        REQUIRE(f.traffic.Tuning().dayEnd == Approx(0.8f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 0);
+    }
+}
+
+TEST_CASE("Traffic - config repairs: probabilities, the arrival radius, the caps", "[game][guerrilla]")
+{
+    SECTION("chances are clamped to [0,1] both ways")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficCivChance = 1.5; trafficPatrolChance = -0.2; "
+               "trafficConvoyChance = 2; trafficRainCivFade = 3; trafficCivNightScale = -1; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.civChance == Approx(1.0f));
+        REQUIRE(tu.patrolChance == Approx(0.0f));
+        REQUIRE(tu.convoyChance == Approx(1.0f));
+        REQUIRE(tu.rainCivFade == Approx(1.0f));
+        REQUIRE(tu.civNightScale == Approx(0.0f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 5);
+    }
+
+    SECTION("a non-positive arrival radius means no car ever arrives: back to the default")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficArriveRadius = 0; };\n");
+        REQUIRE(f.traffic.Tuning().arriveRadius == Approx(60.0f));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficArriveRadius"));
+    }
+
+    SECTION("negative caps and durations are floored at zero, each with its own line")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficMaxParked = -1; trafficWreckClearAfter = -5; "
+               "trafficStallTimeout = -1; trafficFleeDist = -10; };\n");
+        const TrafficTuning& tu = f.traffic.Tuning();
+        REQUIRE(tu.maxParked == 0);
+        REQUIRE(tu.wreckClearAfter == Approx(0.0f));
+        REQUIRE(tu.stallTimeout == Approx(0.0f));
+        REQUIRE(tu.fleeDist == Approx(0.0f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 4);
+    }
+
+    SECTION("the pre-#55 silent clamps now speak: interval floor, danger close-inside-main")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficInterval = 0; trafficDangerCloseRadius = 500; };\n");
+        REQUIRE(f.traffic.Tuning().interval == Approx(0.5f));
+        REQUIRE(f.traffic.Tuning().dangerCloseRadius == Approx(200.0f));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficInterval"));
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficDangerCloseRadius"));
+    }
+
+    SECTION("a reload clears the previous warnings")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficCivChance = 5; };\n");
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 1);
+        f.traffic.LoadFromParams(nullptr);
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 0);
+    }
+}
+
+TEST_CASE("Traffic - the parked census", "[game][guerrilla]")
+{
+    TrafficTuning t; // parkChance 0.6, maxParked 2
+
+    SECTION("room in the census: the plain roll decides")
+    {
+        REQUIRE(Traffic::DecidePark(0.59f, 0, t));
+        REQUIRE(Traffic::DecidePark(0.59f, 1, t));
+        REQUIRE_FALSE(Traffic::DecidePark(0.6f, 1, t));
+    }
+
+    SECTION("at the cap the roll always loses: the road keeps flowing")
+    {
+        REQUIRE_FALSE(Traffic::DecidePark(0.0f, 2, t));
+        REQUIRE_FALSE(Traffic::DecidePark(0.0f, 7, t));
+    }
+
+    SECTION("maxParked 0 never parks; the census-free form is parked = 0")
+    {
+        TrafficTuning none = t;
+        none.maxParked = 0;
+        REQUIRE_FALSE(Traffic::DecidePark(0.0f, 0, none));
+        REQUIRE(Traffic::DecidePark(0.1f, t) == Traffic::DecidePark(0.1f, 0, t));
+        REQUIRE(Traffic::DecidePark(0.9f, t) == Traffic::DecidePark(0.9f, 0, t));
+    }
+
+    SECTION("the census counts only civ park-state rows")
+    {
+        Traffic tr;
+        REQUIRE(tr.CountParked() == 0);
+        tr.MarkEntryForTest(TKCiv, "A", "B", 1); // TSDriving
+        tr.MarkEntryForTest(TKPatrol, "A", "B", 1);
+        REQUIRE(tr.Count(-1) == 2);
+        REQUIRE(tr.CountParked() == 0);
+    }
+}
+
+TEST_CASE("Traffic - roadside recovery clock", "[game][guerrilla]")
+{
+    TrafficTuning t; // wreckClearAfter 1200
+    REQUIRE_FALSE(Traffic::ReleasedStale(0.0f, t));
+    REQUIRE_FALSE(Traffic::ReleasedStale(1199.9f, t));
+    REQUIRE(Traffic::ReleasedStale(1200.0f, t)); // boundary inclusive
+    REQUIRE(Traffic::ReleasedStale(5000.0f, t));
+    TrafficTuning never = t;
+    never.wreckClearAfter = 0;
+    REQUIRE_FALSE(Traffic::ReleasedStale(1e9f, never)); // 0 = the distance rules alone
+}
+
+TEST_CASE("Traffic - the coroner's names and the diag block", "[game][guerrilla]")
+{
+    SECTION("every verdict has a distinct name, none reads unknown")
+    {
+        for (int i = 0; i < NTrafficSpawnFailures; i++)
+        {
+            std::string name = Traffic::SpawnFailureName(i);
+            REQUIRE(name != "unknown");
+            for (int j = 0; j < i; j++)
+            {
+                REQUIRE(name != Traffic::SpawnFailureName(j));
+            }
+        }
+        REQUIRE(Str(Traffic::SpawnFailureName(TSFNone)) == "none");
+        REQUIRE(Str(Traffic::SpawnFailureName(TSFNoRoute)) == "noRoute");
+        REQUIRE(Str(Traffic::SpawnFailureName(TSFGroupBudget)) == "groupBudget");
+        REQUIRE(Str(Traffic::SpawnFailureName(NTrafficSpawnFailures)) == "unknown");
+        REQUIRE(Str(Traffic::SpawnFailureName(-1)) == "unknown");
+    }
+
+    SECTION("a fresh service has an empty report")
+    {
+        Traffic t;
+        const TrafficDiag& d = t.Diag();
+        REQUIRE(d.passes == 0);
+        REQUIRE(d.spawned == 0);
+        REQUIRE(d.failed == 0);
+        REQUIRE(d.lastFailKind == -1);
+        REQUIRE(d.lastFail == TSFNone);
+        REQUIRE_FALSE(d.hasCivRoute);
+        REQUIRE(t.NReleased() == 0);
+        REQUIRE(t.NFleeing() == 0);
+    }
 }

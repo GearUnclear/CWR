@@ -33,7 +33,12 @@
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
-namespace Poseidon { class AIGroup; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
+// AIGroup is a Poseidon type: a global forward declaration collides with the
+// using-declaration in Core/Types.hpp on Linux clang
+namespace Poseidon
+{
+class AIGroup;
+} // namespace Poseidon
 
 namespace Poseidon
 {
@@ -43,6 +48,8 @@ class Person;
 class AIUnit;
 class EntityAI;
 class AmmoType;
+class RoadLink;
+class RoadNet;
 
 namespace Guerrilla
 {
@@ -76,13 +83,22 @@ struct TrafficTuning
     float commandeerLaneHalfWidth = 4.0f; // m, lateral offset for "in the lane"
     float commandeerStopDelay = 2.5f;     // s between Stop and the driver bailing
     float fleeDist = 150.0f;              // m, the bailed driver's flee point
-    // civ arrival park-vs-despawn roll.  Parked cars remain live entries and
-    // count against maxCiv, so a town accumulates at most maxCiv parked cars
-    // (a separate trafficMaxParked cap is deferred).  0 restores the pre-park
-    // behaviour exactly.
+    // civ arrival park-vs-despawn roll.  Parked cars remain live entries but
+    // are censused SEPARATELY from the moving ones (issue #55): maxCiv caps
+    // the cars on the move, maxParked caps the cars standing at a curb, so a
+    // town full of parked cars no longer silences the road.  parkChance 0
+    // (or maxParked 0) restores the pre-park behaviour exactly.
     float parkChance = 0.6f;     // trafficParkChance
     float parkDwellMin = 60.0f;  // trafficParkDwellMin (s)
     float parkDwellMax = 180.0f; // trafficParkDwellMax (s)
+    int maxParked = 2;           // trafficMaxParked: parked civ cars at once (the park roll loses at the cap)
+    // roadside recovery (issue #55): released remains - wrecks, corpses,
+    // abandoned and commandeered-then-left hulls - older than this are
+    // cleared by the next perception-safe pass even inside the despawn edge:
+    // the occupier tows its wrecks, the locals strip an abandoned car, the
+    // dead are buried.  Never in view, never inside the audible hold.  0 =
+    // never (the distance rules alone, the pre-#55 behaviour).
+    float wreckClearAfter = 1200.0f; // trafficWreckClearAfter (s)
     // perception gate (view-distance aware spawn/despawn, issue #53).  The
     // live object-cull distance pushes the band out (EffectiveBand); the
     // radius/minSpawnDist/despawnHysteresis keys above are floors, not caps.
@@ -201,6 +217,44 @@ enum TrafficEventType
     NTrafficEventTypes
 };
 
+// why a spawn attempt produced no car - the coroner's line (issue #55).
+// SpawnEntry names its verdict, the pass records the last one (TrafficDiag,
+// gmTrafficDiag) and logs each distinct verdict once per kind until a spawn
+// of that kind succeeds again, so a silent road has one line of explanation.
+enum TrafficSpawnFailure
+{
+    TSFNone,          // the attempt spawned
+    TSFNoRoute,       // no eligible origin/destination pair within the band
+    TSFZoneMissing,   // a picked zone index no longer resolves
+    TSFNoRoadNet,     // no road network / landscape loaded
+    TSFNoRoadSpots,   // no road link within SpawnScanRadius of the origin
+    TSFNoSpawnPoint,  // road spots exist, none inside the band and imperceptible
+    TSFNoCivVehicles, // the CIV descriptor resolves no civVehicles[] hull
+    TSFNoCivClass,    // no civClass<N> driver body
+    TSFNoFaction,     // the occupier has no faction record / no vehicles[]
+    TSFNoCrewClass,   // the occupier tier ladder yields no crew class
+    TSFConvoyRungs,   // a convoy needs two vehicle rungs (truck + escort)
+    TSFGroupBudget,   // the side's AI group budget (MaxGroups) is spent
+    TSFHullCreate,    // the hull class refused to materialize
+    TSFDriverSeat,    // the driver could not be seated
+    NTrafficSpawnFailures
+};
+
+// per-pass diagnostics (issue #55): what the last pass saw and why the last
+// attempt failed.  Transient (never serialized); gmTrafficDiag reads it.
+struct TrafficDiag
+{
+    bool hasCivRoute = false; // route availability the last pass observed
+    bool hasPatrolRoute = false;
+    bool hasConvoyRoute = false;
+    int lastFailKind = -1;                  // kind of the last failed attempt (-1 = none yet)
+    TrafficSpawnFailure lastFail = TSFNone; // its verdict
+    RString lastFailDetail;                 // the class / zone the verdict names (may be empty)
+    int passes = 0;                         // traffic passes since mission start (or load)
+    int spawned = 0;                        // successful spawns
+    int failed = 0;                         // failed attempts
+};
+
 // combat gate verdict for one patrol/convoy entry per pass (convoy
 // discipline under fire).  The world layer accrues the entry's held time on
 // TCGHold, resets it on TCGClear, and lets the ladder resume on TCGExhausted
@@ -227,7 +281,7 @@ struct TrafficDecisionInput
 {
     bool enabled = true;
     bool playerValid = false; // real player exists and is alive
-    int liveCiv = 0;
+    int liveCiv = 0;          // civ cars ON THE MOVE (parked ones are censused separately, issue #55)
     int livePatrols = 0;
     int liveConvoys = 0;
     bool hasCivRoute = false; // a CITY -> CITY route exists near the player
@@ -328,15 +382,28 @@ class Traffic : public SerializeClass
     void Clear();       // full reset, including event handlers (drops refs only)
     void InitMission(); // Clear + LoadFromConfig; call at mission start
     void LoadFromConfig();
-    // testable tuning parse; null leaves the defaults
+    // testable tuning parse; null leaves the defaults.  The ordinances are
+    // read before they are obeyed (issue #55): every key is range-checked,
+    // an impossible value is repaired to something that still yields
+    // traffic, and each repair is logged and kept in ConfigWarnings()
     void LoadFromParams(const ParamEntry* zonesCfg);
+    const AutoArray<RString>& ConfigWarnings() const { return _configWarnings; }
 
     // queries ---------------------------------------------------------------
     bool IsActive() const; // ZoneRegistry active AND trafficEnabled
     const TrafficTuning& Tuning() const { return _tuning; }
     int Count(int kind) const; // live entries of a kind; kind < 0 = all
+    // civ entries standing at a curb (TSParking / TSDwelling / TSDeparting):
+    // the separate census the parked cap counts against
+    int CountParked() const;
+    int NReleased() const { return _released.Size(); }
+    int NFleeing() const { return _fleeing.Size(); }
+    const TrafficDiag& Diag() const { return _diag; }
+    static const char* SpawnFailureName(int failure); // "none"/"noRoute"/...
     int NEntries() const { return _entries.Size(); }
     Transport* EntryVehicle(int i) const; // may be null (dead link)
+    // the convoy escort hull of a live entry (null when none / not tracked)
+    Transport* EntryEscort(const Transport* veh) const;
     // registry lookup by vehicle: false when the vehicle is not live traffic
     bool FindEntry(const Transport* veh, TrafficKind& kind, int& originIndex, int& destIndex,
                    TrafficState& state) const;
@@ -508,8 +575,15 @@ class Traffic : public SerializeClass
     static TrafficDangerReaction DecideDangerReaction(float distance, float severity, int kind, TrafficState state,
                                                       float cooldownLeft, float roll, const TrafficTuning& tuning);
     static const char* DangerReactionName(int reaction); // "cower"/"uturn"/"rush"/"bail" ("none" otherwise)
-    // civ arrival park roll: roll < parkChance
+    // civ arrival park roll: roll < parkChance, and the parked census still
+    // has room (parked < maxParked); the two-argument form is the
+    // census-free roll (parked = 0)
     static bool DecidePark(float roll, const TrafficTuning& tuning);
+    static bool DecidePark(float roll, int parked, const TrafficTuning& tuning);
+    // roadside recovery (issue #55): released remains older than
+    // wreckClearAfter may be cleared inside the despawn edge (still
+    // perception-gated by the caller); 0 = never
+    static bool ReleasedStale(float age, const TrafficTuning& tuning);
     // load downgrade for the three park states, keyed on whether the saved
     // driver came back seated (transient flags never survive the load, so an
     // on-foot departer re-dwells and re-issues the get-in from scratch)
@@ -627,8 +701,9 @@ class Traffic : public SerializeClass
         // for "player-caused" - ambient traffic has no other enemies
         bool playerCaused = false;
         // s since release: the wreck danger-source cutoff clock (see
-        // WreckDangerLive).  Transient, NOT serialized - a loaded wreck
-        // restarts its (bounded) radiating window, which is acceptable
+        // WreckDangerLive) and the roadside-recovery clock (ReleasedStale).
+        // Serialized since issue #55 (pre-#55 saves load 0: the remains
+        // restart both windows, which is acceptable)
         float wreckAge = 0;
 
         LSError Serialize(ParamArchive& ar);
@@ -655,23 +730,48 @@ class Traffic : public SerializeClass
         LLink<Person> driver;
     };
 
+    // the road spots around one origin zone, surveyed ONCE per mission
+    // (issue #55: the roads have not moved since the island rose from the
+    // sea).  Geometry and link pointers are cached per zone; lock state is
+    // dynamic (stopped hulls lock their links) and is re-read at use.  The
+    // cache dies with Clear and with a road-net change.
+    struct RoadSpotCache
+    {
+        int zoneIndex = -1;
+        Vector3 center = VZero;
+        AutoArray<const RoadLink*> links;
+        AutoArray<Vector3> pts;
+        AutoArray<Vector3> dirs;
+    };
+
     // world-touching internals (engine path only)
     void BuildZoneCandidates(AutoArray<TrafficZoneCandidate>& out) const;
-    bool CollectRoadSpots(Vector3Par center, AutoArray<Vector3>& pts, AutoArray<Vector3>& dirs) const;
+    // every UNLOCKED road link centre within SpawnScanRadius of the zone
+    // centre (from the per-zone survey cache), with the link's travel
+    // direction; zoneIndex < 0 bypasses the cache (a one-off survey)
+    bool CollectRoadSpots(int zoneIndex, Vector3Par center, AutoArray<Vector3>& pts, AutoArray<Vector3>& dirs) const;
+    void SurveyRoadSpots(Vector3Par center, RoadSpotCache& out) const;
     Transport* CreateTrafficVehicle(RString type, Vector3Par pos, Vector3Par dir) const;
     AIGroup* CreateTrafficGroup(const char* sideName) const;
     Person* CreateCrewman(AIGroup* grp, RString type, Vector3Par near, Transport* veh, int position) const;
     // forced (gmTrafficForceSpawn) bypasses the perception gate along with
-    // the chance roll: the tests spawn deliberately close to the player
+    // the chance roll: the tests spawn deliberately close to the player.
+    // why names the verdict on failure (TSFNone on success)
     bool SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par playerPos, Transport*& outVeh,
-                    AutoArray<TrafficEventRecord>& fired, bool forced = false);
+                    AutoArray<TrafficEventRecord>& fired, bool forced, TrafficSpawnFailure& why);
+    // the coroner's line: record the verdict for gmTrafficDiag and log each
+    // distinct verdict once per kind until that kind spawns again
+    void RecordSpawnFailure(int kind, TrafficSpawnFailure why, const char* detail);
     void IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int speedMode, bool column);
-    void UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<TrafficEventRecord>& fired);
+    // dt is the ONE clock (issue #55): the sim seconds this pass actually
+    // covered, used by every accrual below (stall, state, dwell, defer,
+    // combat hold, danger latch, wreck age) - never the nominal interval
+    void UpdateEntries(Vector3Par playerPos, bool playerValid, float dt, AutoArray<TrafficEventRecord>& fired);
     // handles one entry in TSParking/TSDwelling/TSDeparting; may despawn/release it
-    void UpdateParked(int index, Vector3Par playerPos, bool playerValid, AutoArray<TrafficZoneCandidate>& zones,
-                      AutoArray<TrafficEventRecord>& fired);
+    void UpdateParked(int index, Vector3Par playerPos, bool playerValid, float dt,
+                      AutoArray<TrafficZoneCandidate>& zones, AutoArray<TrafficEventRecord>& fired);
     void UpdateCommandeer(float dt);
-    void CleanupReleased(Vector3Par playerPos, bool playerValid);
+    void CleanupReleased(Vector3Par playerPos, bool playerValid, float dt);
     void CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt);
     void DespawnEntry(int index, const char* reason, bool keepHull, AutoArray<TrafficEventRecord>& fired);
     // observed endings (issue #53) -------------------------------------------
@@ -717,8 +817,8 @@ class Traffic : public SerializeClass
     bool DespawnSafe(Vector3Par pos, float playerD2, float legacyEdge,
                      const TrafficEffectiveBand* band = nullptr) const;
     // gate one wanted despawn: true = go ahead (safe, or the defer timer ran
-    // out); false accrues the entry's defer timer
-    bool GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge);
+    // out); false accrues the entry's defer timer by dt
+    bool GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge, float dt);
     void DispatchEvents(const AutoArray<TrafficEventRecord>& fired);
     void ApplyPendingLoad();
     int DestForOrigin(int kind, const AutoArray<TrafficZoneCandidate>& zones, int originIndex, float roll) const;
@@ -728,6 +828,7 @@ class Traffic : public SerializeClass
     void BuildDangerSources();
 
     TrafficTuning _tuning;
+    AutoArray<RString> _configWarnings; // the repairs LoadFromParams made (issue #55)
     AutoArray<TrafficEntry> _entries;
     AutoArray<ReleasedEntry> _released;
     AutoArray<FleeingDriver> _fleeing;
@@ -735,6 +836,10 @@ class Traffic : public SerializeClass
     float _accum = 0;
     float _subAccum = 0;
     Perception _percept; // transient per-pass snapshot
+    TrafficDiag _diag;   // transient per-pass diagnostics (issue #55)
+    TrafficSpawnFailure _lastLogged[NTrafficKinds] = {TSFNone, TSFNone, TSFNone}; // log-once-per-verdict latch
+    mutable AutoArray<RoadSpotCache> _roadCache;                                  // per-origin road survey (issue #55)
+    mutable const RoadNet* _roadCacheNet = nullptr;                               // the net the cache was surveyed on
     // violent patrol/convoy ends awaiting the AlertMachine drain
     AutoArray<TrafficAmbush> _ambushes;
     // danger ring: shot/blast episodes since ~dangerTtl (transient, never

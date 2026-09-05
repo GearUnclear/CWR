@@ -58,9 +58,14 @@ class CfgGuerrillaZones
     // trafficCommandeerLaneHalfWidth=4; trafficCommandeerStopDelay=2.5;
     // trafficFleeDist=150; trafficExposeMargin=150; trafficScaleCaps=0;
     // trafficDangerRadius=200; trafficDangerCloseRadius=60;
-    // trafficDangerCooldown=45; trafficDangerTtl=20
+    // trafficDangerCooldown=45; trafficDangerTtl=20; trafficMaxParked=2;
+    // trafficWreckClearAfter=1200
     // (set trafficEnabled=0 to switch it off; trafficDangerRadius=0
-    // disables just the danger response).
+    // disables just the danger response; trafficWreckClearAfter=0 keeps
+    // roadside remains until the player is far). Every traffic* key is
+    // range-checked at load: an impossible value (e.g. trafficRadius under
+    // trafficMinSpawnDist, a day window written in hours) is repaired and
+    // logged, and gmTrafficDiag reports the repair count.
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns
