@@ -387,6 +387,10 @@ public:
 	void AdjustMapVisibleRect();
 
 	void UpdatePlan();
+	// Guerrilla Mode: rebuild the briefing (journal Notes/Plan/diary/manual
+	// pages) from the current native state; keeps the open page.  No-op
+	// outside Guerrilla Mode (ZoneRegistry inactive).
+	void RefreshGuerrillaJournal();
 
 	virtual void SwitchBriefingSection(RString section);
 
@@ -400,6 +404,8 @@ public:
 protected:
     void RefreshLanguage();
     void ReloadBriefingContent(RString activeSection = RString());
+    // Journal::Revision() the briefing was last built from (Guerrilla Mode)
+    unsigned _journalRevision = 0;
     void UpdateMissionName();
     void LoadParams();
 	void SaveParams();
@@ -468,11 +474,13 @@ protected:
 	bool _animation;
 	bool _server;
 	bool _client;
+	bool _disconnectOnly;
 
 public:
 
-	DisplayDebriefing(ControlsContainer *parent, bool animation);
+	DisplayDebriefing(ControlsContainer *parent, bool animation, bool disconnectOnly = false);
 	void Destroy() override;
+	bool IsDisconnectOnly() const {return _disconnectOnly;}
 
 	Control *OnCreateCtrl(int type, int idc, const ParamEntry &cls) override;
 	void OnButtonClicked(int idc) override;
@@ -490,7 +498,7 @@ class DisplayClientDebriefing : public DisplayDebriefing
 
 public:
 
-	DisplayClientDebriefing(ControlsContainer *parent, bool animation);
+	DisplayClientDebriefing(ControlsContainer *parent, bool animation, bool disconnectOnly = false);
 	void OnSimulate(EntityAI *vehicle) override;
 };
 

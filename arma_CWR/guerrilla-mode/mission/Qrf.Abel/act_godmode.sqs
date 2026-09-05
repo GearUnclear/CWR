@@ -1,0 +1,8 @@
+; debug action: toggle player invulnerability so the convoy's assault can be
+; watched up close without ending the run
+QRF_god = not QRF_god
+aP allowDamage (not QRF_god)
+? QRF_god : aP setDamage 0
+? QRF_god : hint "DEBUG: GOD MODE on - invulnerable."
+? not QRF_god : hint "DEBUG: GOD MODE off."
+exit

@@ -740,6 +740,75 @@ static float ScanFloatPlain(const char* ptr, bool& ok)
     return db;
 }
 
+bool GParamFileStrictLiterals = false;
+
+ParamToleratedLiteralKind ClassifyToleratedLiteral(const char* token, float& value)
+{
+    value = 0.0f;
+    if (!token)
+    {
+        return PTLNone;
+    }
+
+    // A bare scope keyword: the file writes `scope = public;` but never carries
+    // the `#define public 2` header its siblings do, so the preprocessor hands
+    // the identifier itself through. Exact spelling only - a case variant is a
+    // different token and has no defined meaning, so it stays a raw string.
+    if (::strcmp(token, "private") == 0)
+    {
+        value = 0.0f;
+        return PTLScopeKeyword;
+    }
+    if (::strcmp(token, "protected") == 0)
+    {
+        value = 1.0f;
+        return PTLScopeKeyword;
+    }
+    if (::strcmp(token, "public") == 0)
+    {
+        value = 2.0f;
+        return PTLScopeKeyword;
+    }
+
+    // A malformed float literal: an optional sign, then digits and dots only,
+    // with two or more dots. Ranges rather than isdigit(): the token carries
+    // arbitrary bytes and a negative char argument to <ctype.h> is UB. The scan
+    // stops at the NUL the word buffer always ends with, so it cannot run past
+    // the token.
+    const char* p = token;
+    if (*p == '+' || *p == '-')
+    {
+        ++p;
+    }
+    if (*p < '0' || *p > '9')
+    {
+        return PTLNone;
+    }
+    int dots = 0;
+    for (; *p; ++p)
+    {
+        if (*p == '.')
+        {
+            ++dots;
+            continue;
+        }
+        if (*p < '0' || *p > '9')
+        {
+            return PTLNone;
+        }
+    }
+    if (dots < 2)
+    {
+        return PTLNone;
+    }
+
+    // strtod consumes the longest valid prefix and stops at the second dot,
+    // which is exactly the value the 1.96 reader kept ("0.0.1" -> 0.0).
+    char* end = nullptr;
+    value = (float)strtod(token, &end);
+    return (end != token) ? PTLMalformedFloat : PTLNone;
+}
+
 static int ScanIntPlain(const char* ptr, bool& ok)
 {
     char* end;
@@ -913,7 +982,9 @@ class ParamRawArray
     void SetValue(int index, const RStringB& string);
     void SetValue(int index, float val);
 
-    void Parse(QIStream& in, ParamFile* file);
+    // `owner`/`arrayName` only name the site in a tolerated-defect warning; they
+    // are not built into a context string unless a defect actually fires.
+    void Parse(QIStream& in, ParamFile* file, const ParamEntry* owner = nullptr, const char* arrayName = nullptr);
     void Save(QOStream& f, int indent) const;
     void SerializeBin(SerializeBinStream& f);
     void CalculateCheckValue(PASumCalculator& sum) const;
@@ -1029,7 +1100,7 @@ class ParamArray : public ParamEntry, public ParamRawArray
 
     const IParamArrayValue& operator[](int i) const override { return GetValue(i); }
 
-    void Parse(QIStream& in, ParamFile* file);
+    void Parse(QIStream& in, ParamFile* file, const ParamEntry* owner = nullptr);
     void Save(QOStream& f, int indent) const override;
 
     void SerializeBin(SerializeBinStream& f) override;
@@ -1759,7 +1830,7 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                     ErrorMessage("Config: %s: '%c' encountered instead of '='", (const char*)GetContext(word), c);
                     return;
                 }
-                array->Parse(in, file);
+                array->Parse(in, file, this);
                 c = in.get();
                 while (isspace(c))
                 {
@@ -1833,6 +1904,30 @@ void ParamClass::Parse(QIStream& in, ParamFile* file)
                         {
                             value = new ParamValueFloat(valueName);
                             value->SetValue(val);
+                        }
+                    }
+                    if (!ok && !GParamFileStrictLiterals)
+                    {
+                        float coerced = 0.0f;
+                        switch (ClassifyToleratedLiteral(word, coerced))
+                        {
+                            case PTLScopeKeyword:
+                                LOG_WARN(Config,
+                                         "config: undefined scope keyword '{}' in {} - resolved as {} (the value the "
+                                         "missing #define would have given it)",
+                                         word, (const char*)GetContext(valueName), (int)coerced);
+                                value = new ParamValueInt(valueName);
+                                value->SetValue((int)coerced);
+                                break;
+                            case PTLMalformedFloat:
+                                LOG_WARN(Config,
+                                         "config: malformed float literal '{}' in {} - parsed as {} (best effort)",
+                                         word, (const char*)GetContext(valueName), coerced);
+                                value = new ParamValueFloat(valueName);
+                                value->SetValue(coerced);
+                                break;
+                            case PTLNone:
+                                break;
                         }
                     }
                 }

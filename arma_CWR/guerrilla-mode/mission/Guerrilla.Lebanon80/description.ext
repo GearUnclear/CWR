@@ -1,7 +1,8 @@
 // Guerrilla Mode - Lebanon (80's) island pack (@LoBo LoBo_Leb world). This
-// file is the ONLY island/faction-specific data in the template - init.sqs +
+// file is the ONLY island-specific data in the template - init.sqs +
 // scripts/ are byte-identical to Guerrilla.Demo (the shared island-agnostic
-// core; a parity test enforces that).
+// core; a parity test enforces that). The war FACTIONS are no longer here:
+// see the note above CfgGuerrillaFactions.
 //
 // Theater: South Lebanon, mid-1980s. The OCCUPIER is the IDF (side WEST)
 // holding the border strip; the RESISTANCE is Hizballah (side EAST) working
@@ -22,7 +23,8 @@ class CfgGuerrillaZones
 {
     // Side resolution when the new-game UI selections (gmSelOccupier /
     // gmSelResistance) are unset - i.e. any direct launch of this mission.
-    // Values are CfgGuerrillaFactions class names below; the engine resolves
+    // Values are CfgGuerrillaFactions class names from the MERGED faction
+    // table (the @LoBo roster in @lobofixup); the engine resolves
     // them to sides (ZoneRegistry::ResolveSides): IDF -> WEST occupier,
     // Hizballah -> EAST resistance.
     defaultOccupier = "IDF";
@@ -38,15 +40,19 @@ class CfgGuerrillaZones
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60; ...).
     //
-    // Town auto-seed OFF - deliberately different from Sinai. Lebanon80's
-    // Names block is a 25.6 km THEATER map, not a town list: type-less
-    // entries include "Mediterranean Sea" {7847,16012} and "Sea of Galilee"
-    // {13856,4724} (both verified at -5 m on the heightmap - seeding would
-    // put CITY zones in open water), country labels (Lebanon/Israel/Syria/
-    // Jordan), terrain labels (Golan Heights, Mt. Hermon, Bekaa Valley) and
-    // deep-rear cities (Damascus, Haifa, Beirut). Only the explicit zones
-    // below exist; the real towns in play (Tyre, Saida, Ghajar) are authored
-    // by hand on/near their Names entries.
+    // Town auto-seed OFF - the explicit override (issue #54 C3 keeps it as
+    // one). Lebanon80's Names block is a 25.6 km THEATER map: the Auto
+    // classifier (absent key: dry land + houses within 300 m) correctly
+    // refuses its 13 labels - "Mediterranean Sea", "Sea of Galilee", the
+    // country and terrain names, the two bridges, UNDOF - but it ACCEPTS the
+    // nine rear settlements that really have buildings modelled (Beirut,
+    // Haifa, Damascus, Sabra, Shatila, the two airports, ...). Those are
+    // real towns; they are just outside THIS campaign's play area (an IDF
+    // occupation of South Lebanon), which no classifier can know. So this
+    // template keeps the override and authors its towns (Tyre, Saida,
+    // Ghajar) by hand; tests/integration/missions/guerrilla_names.Lebanon80
+    // is the same file WITHOUT this key and pins what the classifier does
+    // (guerrilla_names_classify). = 1 would seed every label, water included.
     seedCities = 0;
     seedCitySupport = 20;
 
@@ -134,175 +140,26 @@ class CfgGuerrillaZones
     };
 };
 
-// Faction descriptors for the Lebanon dataset (@LoBo classes). Same key
-// schema as Guerrilla.Demo (the reference) - see guerrilla-mode/
-// ARCHITECTURE.md "Faction keys". The scripts read these through
-// gmFactionValue / gmFactionTierClass / gmFactionVehicle; nothing below is
-// hardcoded anywhere else. IDF and Hizballah are copied key-for-key from the
-// shipped, test-hardened Guerrilla.Sinai descriptors - both rosters are
-// island-independent.
+// The ISLAND half of the faction table (issue #54 A4). IDF and Hizballah used
+// to be copied in here key-for-key from Guerrilla.Sinai, which is exactly the
+// duplication that let the two Hizballah copies drift (this one had grown the
+// issue #25 outfit family, Sinai's had not). Both rosters are
+// island-independent, so they now live once in the mod-level config
+// tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp (mounted after @LoBo),
+// together with the rest of the @LoBo roster; the surviving Hizballah is this
+// file's former copy, the more complete of the two. The engine unions that
+// global table with the block below (Game/Guerrilla/FactionSources.*), this
+// file winning on a class-name collision.
+//
+// defaultOccupier/defaultResistance above name classes from that global
+// table; they resolve against the MERGED table, not against this block.
+//
+// What stays: CIV, the island's own population and traffic hulls. The scripts
+// read every descriptor through gmFactionValue / gmFactionTierClass /
+// gmFactionVehicle; nothing is hardcoded anywhere else. Key schema:
+// guerrilla-mode/config/guerrilla-factions.hpp.
 class CfgGuerrillaFactions
 {
-    class IDF // side WEST - occupier by default, resistance-capable since plan 16
-    {
-        side = "WEST";
-        // No re-sided IDF INFANTRY roster exists in @LoBo: every LoBoIs man
-        // hangs off LoBoShayetetWB : SoldierWB and inherits side=1. (LoBoIs is
-        // not wholly side=1 - LoBo_paraE is side=0, LoBo_paraG/_haloparaG are
-        // side=2, LoBo_paraC/_haloparaC are side=3 - but those are PARACHUTES,
-        // vehicleClass="Air" with crew="SoldierGB", not a roster anything could
-        // be twinned onto.) So IDF has no twin and can never auto-rebase off a
-        // side collision; ResolveSideCollisions rebases the other pick instead.
-        sideTwin = "";
-        // WL<3 Golani regulars -> WL3-4 Paratroopers -> WL5+ Shayetet 13
-        tiers[] = {"LoBoGolaniWB", "LoBoParaWB", "LoBoShayetetWB"};
-        tierThresholds[] = {3, 5};
-        // per-tier role variants (plan 15) - each tier family carries its
-        // own MG/AT/medic/sniper siblings (verified in lost.pbo; see
-        // tmp/class-survey/lobo-infantry.md for the full role map)
-        tiersMG[]     = {"LoBoGolaniWMG", "LoBoParaWMG", "LoBoShayetetWMG"};
-        tiersAT[]     = {"LoBoGolaniWLAW", "LoBoParaWLAW", "LoBoShayetetWLAW"};
-        tiersMedic[]  = {"LoBoGolaniWMedic", "LoBoParaWMedic", "LoBoShayetetWMedic"};
-        tiersSniper[] = {"LoBoGolaniWBSN", "LoBoParaWBSN", "LoBoShayetetSN"};
-        // QRF escort ladder (full vehicleThresholds[] form): HMMWV patrol ->
-        // M113 Zelda -> M60A1 Magach 6 -> Shot-Kal Mk.D (LoBo_Centurion2;
-        // the Blazer-ERA LoBo_Centurion would arguably fit 1980s Lebanon
-        // better, but this set is kept byte-identical to the shipped Sinai
-        // descriptor). Armed picks need the @lobofixup patched pbos in
-        // strict/autotest lanes (malformed LoBoammo tracerColor).
-        vehicles[] = {"LoBoHMWV_Mag_Patrol", "LoBo_Zelda", "LoBoM60A1", "LoBo_Centurion2"};
-        vehicleThresholds[] = {3, 6, 9};
-        officer = "LoBoGolaniWBo";
-
-        // Resistance-capable keys (plan 16, purely additive - every key above
-        // is byte-identical to the shipped/tested occupier descriptor). An IDF
-        // insurgency reads as a border stay-behind cell: it recruits from the
-        // Golani tier and loots its own kit. Weapon->magazine pairs read out
-        // of the LoBoWeapons / JAM_Magazines config bodies, not inferred.
-        holdClass = "LoBoGolaniWB";
-        holdCount = 3;
-        recruitFighter = "LoBoGolaniWB";
-        recruitSpecialist = "LoBoGolaniWMG";   // FN Minimi (LoBoM249)
-        companionClass = "LoBoGolaniWB";
-
-        // LoBo_M4A1 : LoBoCAR15 -> magazines[]={LoBoCAR15Mag, JAM_W556_30mag,...}
-        //
-        // The plain LoBo_M4A1 is the family's BASE carbine, not the exact rifle
-        // any tier rifleman carries: LoBoGolaniWB has LoBo_M4A1_LD_G_Falcon,
-        // LoBoParaWB has LoBo_M4A1_Mepor, LoBoShayetetWB has LoBo_M4A1_LD_ACOG
-        // (optics/laser variants). The loot schema is single-valued and the
-        // ladder is not, so it names the common denominator - every one of those
-        // variants feeds from LoBoCAR15Mag, so the drop is always usable. The
-        // medic entry below is the one that IS class-exact.
-        baseWeapon = "LoBo_M4A1";
-        baseMagazine = "LoBoCAR15Mag";
-        lootRiflemanWeapon = "LoBo_M4A1";
-        lootRiflemanMag = "LoBoCAR15Mag";
-        lootMedicWeapon = "LoBo_M4A1";        // LoBoGolaniWMedic carries LoBo_M4A1
-        lootMedicMag = "LoBoCAR15Mag";
-        lootMGWeapon = "LoBoM249";            // LoBoGolaniWMG carries LoBoM249
-        lootMGMag = "LoBoM249Mag";
-        lootATWeapon = "JAM_M72LAWLauncher";  // LoBoGolaniWLAW carries the JAM M72
-        lootATMag = "JAM_M72ALLRocket";
-        lootSniperWeapon = "LoBo_SR25";       // LoBoGolaniWBSN carries LoBo_SR25
-        lootSniperMag = "LoBo_SR25Mag";
-
-        // town flagpole texture (native TownFlags): without this key the
-        // engine's side-WEST default is the US flag - wrong faction here
-        flag = "\flags\israel.jpg";
-    };
-    class Hizballah // side EAST - the home-turf resistance on this island
-    {
-        side = "EAST";
-        // No re-sided Hizballah roster: LoBo_Hizballah_base is side=0 and
-        // every descendant inherits it. No twin -> no rebase.
-        sideTwin = "";
-
-        // NEVER spawn LoBo_Hizballah_base - scope=0 (private).
-        // LoBo_HizballahRifle1 is the public anchor of the family. Never emit
-        // any *HD class either: their displayName starts with "-" (hidden
-        // high-dispersion variants).
-        //
-        // WL<3 AK-armed cell -> WL3-5 M16-armed line fighters -> WL6+ the
-        // recon branch (LoBoHizballah.pbo ships it as its own role mirror).
-        tiers[] = {"LoBo_HizballahRifle4", "LoBo_HizballahRifle1", "LoBo_HizballahRecon1"};
-        tierThresholds[] = {3, 6};
-        // MG: the ubiquitous PKM first, captured/imported Minimis later; the
-        // recon branch has no PKM gunner, so tier 3 keeps the Minimi and stays
-        // visually recon-consistent.
-        //
-        // AT escalates RPG-7 (ICPRPG7) -> RPG-7VR tandem (ICPRPG7v) -> RPG-29
-        // (ICPRPG29, the recon branch's launcher). ICP launchers, ICPrpg7.pbo -
-        // present in @LoBo\addons. The RPG-29 is 1989, at the edge of period
-        // for a late-80s Lebanon and a real step up from the VR.
-        //
-        // MIND THE SUFFIXES - they do NOT mean the same thing on the two
-        // families, and reading across them is how you ship the wrong launcher:
-        //   LoBo_Hizballah_RPG  / _RPG2 / _RPG3  = RPG-7 / RPG-29  / RPG-7VR
-        //   LoBo_HizballahReconRPG / RPG2 / RPG3 = RPG-7 / RPG-29  / RPG-7VR
-        // so tier 2's _RPG3 is the VR and tier 3's ReconRPG2 is the RPG-29.
-        // ReconRPG3 (recon RPG-7VR) exists and is NOT what this ladder wants.
-        // Only ONE medic class exists faction-wide and the recon branch has no
-        // twin, so it repeats at every tier - a repeat, not a substitution.
-        // No recon sniper exists either; tier 3 reuses the line M24.
-        tiersMG[]     = {"LoBo_HizballahMG1", "LoBo_HizballahMG2", "LoBo_HizballahReconLMG"};
-        tiersAT[]     = {"LoBo_Hizballah_RPG", "LoBo_Hizballah_RPG3", "LoBo_HizballahReconRPG2"};
-        tiersMedic[]  = {"LoBo_HizballahMedic", "LoBo_HizballahMedic", "LoBo_HizballahMedic"};
-        tiersSniper[] = {"LoBo_HizballahSniper2", "LoBo_HizballahSniper1", "LoBo_HizballahSniper1"};
-        // Hizballah owns NO APC and NO tank anywhere in the mod, so this
-        // ladder escalates GUN TRUCKS, not armour: Ural-375 troop truck
-        // (unarmed, zero LoBoammo dependence) -> M2 jeep -> ZU-23-2 Ural ->
-        // M40A1 106 mm recoilless jeep (the faction's only real AT escort).
-        // Flagged rather than borrowing an Egyptian/Syrian vehicle whose
-        // displayName literally says "Egyptian"/"Syrian". The last three are
-        // LoBoammo-armed -> @lobofixup needed in strict/autotest lanes.
-        vehicles[] = {"LoBo_Ural_Hizballah", "LoBo_JeepMG_Hizballah", "LoBo_ural_Hizbal_zsu23", "LoBo_JeepAT_Hizballah"};
-        vehicleThresholds[] = {3, 6, 8};
-        officer = "LoBo_HizballahLeader";
-
-        holdClass = "LoBo_HizballahRifle4";
-        holdCount = 3;
-        recruitFighter = "LoBo_HizballahRifle4";
-        recruitSpecialist = "LoBo_HizballahMG1";   // PKM
-        companionClass = "LoBo_HizballahRifle4";
-
-        // ---- character outfit family (issue #25): the LoBoTer Terror
-        // irregulars in civilian dress, *E twins (side=0) matching this
-        // faction's EAST side so kill stats book correctly (AICenterStats
-        // reads the config class side). Not the *HD hidden variants, not the
-        // unarmed LoBo_Civ_* ambience classes. Same picks as the shipped
-        // Guerrilla.Sinai EgyptFrontier block - the Terror roster is
-        // island-independent (LoBoTer.pbo, requiredAddons[]={}).
-        playerClassWarrior = "LoBo_HizballahRifle4";
-        playerClassCiv = "LoBo_Terror_01E";
-        recruitFighterCiv = "LoBo_Terror_02E";
-        recruitSpecialistCiv = "LoBo_Terror_MG2E";
-        companionClassCiv = "LoBo_Terror_01E";
-        holdClassCiv = "LoBo_Terror_02E";
-        // civilian-outfit ladder: riflemen at every war level (the Terror
-        // family has no tier escalation; three rungs would repeat bodies)
-        civTier[] = {"LoBo_Terror_01E"};
-
-        // LoBo_PKM : LoBo_PK -> magazines[]={JAM_E762M_200mag,...} (NOT the
-        // _100mag, which is the RPD belt). ICPRPG7 : LAWLauncher ->
-        // magazines[]={ICPRPG7Mag, RPGLauncher}.
-        baseWeapon = "LoBoAK47";
-        baseMagazine = "JAM_E762_30mag";
-        lootRiflemanWeapon = "LoBoAK47";
-        lootRiflemanMag = "JAM_E762_30mag";
-        lootMedicWeapon = "LoBoAK47";          // LoBo_HizballahMedic carries LoBoAK47
-        lootMedicMag = "JAM_E762_30mag";
-        lootMGWeapon = "LoBo_PKM";             // LoBo_HizballahMG1 carries LoBo_PKM
-        lootMGMag = "JAM_E762M_200mag";
-        lootATWeapon = "ICPRPG7";
-        lootATMag = "ICPRPG7Mag";
-        lootSniperWeapon = "LoBo_SVD";
-        lootSniperMag = "JAM_E762_10mag";
-
-        // Hizballah is Lebanese; there is no "hizballah" texture in Classic's
-        // Flags.pbo, so lebanon.jpg is the correct stand-in.
-        flag = "\flags\lebanon.jpg";
-    };
     class CIV // civilian population descriptor (issue #8)
     {
         // side MUST be exactly "CIV" - GM_fnSideFromString (scripts/lib.sqs)
@@ -326,5 +183,63 @@ class CfgGuerrillaFactions
         civClass2 = "LoBo_Civ_02";
         civClass3 = "LoBo_Civ_03";
         civClass4 = "LoBo_CivF_01";
+        // Ambient road traffic hulls (native Traffic service; array, read by
+        // ZoneRegistry::LoadFactions and package-probed like vehicles[], so
+        // an unresolvable class is dropped, never fatal). @LoBo civilian vans
+        // from LoBoCars.pbo (`PoseidonTools pbo show LoBoCars.pbo config.cpp`:
+        // LoBo_S1203 "S 1203" and LoBo_Uaz3741 "Uaz 3741", both side=3
+        // scope=2; NOT LoBo_S1203CB, the car bomb) ahead of the 1.99 core's
+        // Skoda / Rapid, which the lobo lane also loads. Bus is the
+        // Resistance-era addon-pbo class from the core install (O.pbo; see
+        // Guerrilla.Abel) - the bus-stop passenger plan target
+        // (guerrilla-mode/BUS-STOPS.md); probe-dropped if the lane cannot
+        // resolve it.
+        civVehicles[] = {"LoBo_S1203", "LoBo_Uaz3741", "Skoda", "SkodaBlue",
+                         "SkodaRed", "Rapid", "Bus"};
+    };
+};
+
+// The dealer market (issues #27/#28) on Lebanon80: @LoBo stock drawn from the
+// descriptors above (the Hizballah / IDF weapon -> magazine pairs the loot
+// keys use) plus the civilian cars the CIV descriptor fields. The engine
+// re-probes every class at load and drops what the package lacks (logged,
+// non-fatal). The LoBoammo-armed hulls need the @lobofixup patched pbos in
+// strict/autotest lanes, like the faction ladders. The dealer body is the
+// stock LoBo civilian.
+class CfgGuerrillaMarket
+{
+    dealerShare = 0.34;
+    dealerRespawnSeconds = 600;
+    hqMoveCost = 500;
+    dealerClass = "LoBo_Civ_01";
+
+    class Weapons
+    {
+        class AK47      { weapon = "LoBoAK47";           magazine = "JAM_E762_30mag";    mags = 4; price = 240; };
+        class PKM       { weapon = "LoBo_PKM";           magazine = "JAM_E762M_200mag";  mags = 2; price = 950; };
+        class RPG7      { weapon = "ICPRPG7";            magazine = "ICPRPG7Mag";        mags = 2; price = 550; };
+        class SVD       { weapon = "LoBo_SVD";           magazine = "JAM_E762_10mag";    mags = 4; price = 650; };
+        class M4A1      { weapon = "LoBo_M4A1";          magazine = "LoBoCAR15Mag";      mags = 4; price = 320; };
+        class Minimi    { weapon = "LoBoM249";           magazine = "LoBoM249Mag";       mags = 2; price = 950; };
+        class M72       { weapon = "JAM_M72LAWLauncher"; magazine = "JAM_M72ALLRocket";  mags = 2; price = 500; };
+        class SR25      { weapon = "LoBo_SR25";          magazine = "LoBo_SR25Mag";      mags = 4; price = 700; };
+        class AKMags    { weapon = "";                   magazine = "JAM_E762_30mag";    mags = 6; price = 60; };
+        class CARMags   { weapon = "";                   magazine = "LoBoCAR15Mag";      mags = 6; price = 70; };
+        class Binocular { weapon = "Binocular";          magazine = "";                            price = 60; };
+        class NVGoggles { weapon = "NVGoggles";          magazine = "";                            price = 250; };
+        class Grenades  { weapon = "";                   magazine = "HandGrenade";       mags = 4; price = 80; };
+        class Mines     { weapon = "";                   magazine = "Mine";              mags = 2; price = 150; };
+        class Satchels  { weapon = "";                   magazine = "PipeBomb";          mags = 2; price = 200; };
+    };
+    class Vehicles
+    {
+        class S1203     { vehicle = "LoBo_S1203";             price = 600; };
+        class Uaz3741   { vehicle = "LoBo_Uaz3741";           price = 700; };
+        class Skoda     { vehicle = "Skoda";                  price = 600; };
+        class Rapid     { vehicle = "Rapid";                  price = 700; };
+        class Ural      { vehicle = "LoBo_Ural_Hizballah";    price = 3200; };
+        class JeepMG    { vehicle = "LoBo_JeepMG_Hizballah";  price = 3000; };
+        class Humvee    { vehicle = "LoBoHMWV_Mag_Patrol";    price = 3200; };
+        class Zelda     { vehicle = "LoBo_Zelda";             price = 9500; };
     };
 };

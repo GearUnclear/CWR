@@ -1,0 +1,30 @@
+# Boots the Names-classification copy of Guerrilla.Lebanon80 (issue #54 C3) on the
+# @LoBo mod's Lebanon (80's) world. Requires the FULL CWA install
+# (OFPR_DATA_DIR) plus the @LoBo mod folder next to it: --mods-dir ".."
+# resolves relative to the game CWD (the data dir, D:\Arma_CWA\ARMA Cold War
+# Assault [Classic]), so "@LoBo" mounts D:\Arma_CWA\@LoBo. The repo fixture
+# mod @lobofixup mounts AFTER it: it shadows two pbos whose malformed
+# tracerColor floats ("0.0.1") are script errors under --autotest (hard
+# abort), and preloads the LoBo addons the template spawns from (see its
+# bin/config.cpp).
+#
+# SINCE ISSUE #54 A4 the fixture also carries the whole @LoBo
+# CfgGuerrillaFactions roster: the template's description.ext no longer
+# declares IDF/Hizballah/... at all, so without @lobofixup mounted the
+# defaultOccupier/defaultResistance names resolve to nothing and the
+# campaign boots side-less.
+#
+# FIRST USE: the fixture's patched pbos are gitignored (third-party APL-SA
+# content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+# once to generate them from the local @LoBo install before running this.
+mission = "tests/integration/missions/guerrilla_names.Lebanon80"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
+# @LoBo is 600+ MB of legacy pbos that log ERROR-level noise (missing crew
+# anims in CoC pbos etc.) - fatal under the runner's default --strict, so
+# this test opts out. Script errors still hard-abort via the --autotest path.
+# First boot scans/mounts everything and the 25.6 km Lebanon80 world load is
+# slow - generous budgets on purpose (same as guerrilla_sinai_swap).
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]

@@ -9,12 +9,14 @@
 // missions are unaffected.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Containers/RStringArray.hpp> // FindArrayRStringCI (CollectFactionAddons)
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
-class AICenter;
+namespace Poseidon { class AICenter; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
+namespace Poseidon { class AIGroup; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
 
 namespace Poseidon
 {
@@ -47,7 +49,19 @@ struct ZoneTuning
     // Any live defender still blocks SECURING regardless of this ratio.
     float contestOutnumberRatio = 4.0f;
     // CITY auto-seed from the world's CfgWorlds >> <world> >> Names entries
-    bool seedCities = false;
+    // (issue #54 C3). Auto (the key is absent) seeds every Names entry the
+    // settlement classifier accepts: town-typed or type-less, on dry land,
+    // with buildings around it - so a theatre map's sea, country and terrain
+    // labels seed nothing. All (seedCities = 1) is the legacy override that
+    // seeds every town-typed / type-less entry with no classification; Off
+    // (seedCities = 0) seeds none.
+    enum class SeedCities
+    {
+        Auto,
+        Off,
+        All
+    };
+    SeedCities seedCities = SeedCities::Auto;
     float seedCitySupport = 20.0f; // starting support of each seeded CITY
     // The side the template's mission.sqm welds the player's unit to.  The
     // resistance is counted out of that side's center (GatherInputs), so a
@@ -121,6 +135,9 @@ struct FactionRecord
     // faction offers no civilian-outfit bodies (callers keep warriors)
     AutoArray<RString> civTiers;
     AutoArray<RString> vehicles;
+    // civilian road-traffic hulls (Traffic, CIV descriptor): unresolvable
+    // entries are dropped at load; empty = no civilian traffic
+    AutoArray<RString> civVehicles;
     float vehicleThreshold = 3.0f;      // legacy 2-step ladder (index 0 -> 1)
     AutoArray<float> vehicleThresholds; // full ladder, mirrors tierThresholds
     AutoArray<NamedValue> values;
@@ -134,6 +151,15 @@ struct ClassProbe
     virtual ~ClassProbe() = default;
     // bank is a top-level config class ("CfgVehicles" / "CfgWeapons")
     virtual bool Exists(const char* bank, const char* className) const = 0;
+    // A CfgVehicles class the loaded package can actually SPAWN: it exists
+    // AND the shape file its model names is in the loaded data (issue #46
+    // seam 4b). Exists alone is the weaker gate: a class whose config is
+    // present but whose .p3d the package never ships passes it, spawns, and
+    // access-violates in Man::Init (measured on @LoBo's CoC_Diverdes). The
+    // resolution pass asks this for every unit and vehicle key so such a
+    // class is substituted through the same ladder as an absent one. The
+    // default keeps existence-only fakes and probes on their old answer.
+    virtual bool Spawnable(const char* className) const { return Exists("CfgVehicles", className); }
 };
 
 // The engine's ClassProbe: a classname exists when the merged game config
@@ -143,6 +169,33 @@ struct ClassProbe
 struct ParsClassProbe final : ClassProbe
 {
     bool Exists(const char* bank, const char* className) const override;
+    // Exists plus the shape-file gate the player-body seam and the menu run
+    // (PlayerBodyModelIssue over GetShapeName + QIFStreamB::FileExist).
+    bool Spawnable(const char* className) const override;
+};
+
+// Settlement classifier for the CITY auto-seed (issue #54 C3): is this Names
+// entry a place people live, or a label? OFP-era Names blocks carry no type,
+// and a theatre map (Lebanon80) names seas, countries, mountain ranges and
+// deep-rear cities in the same block as its towns. The engine probe answers
+// from the loaded landscape; unit tests inject a fake.
+struct SettlementProbe
+{
+    virtual ~SettlementProbe() = default;
+    virtual bool IsSettlement(const char* name, const Vector3& pos) const = 0;
+};
+
+// The engine's SettlementProbe: dry land (Landscape::SurfaceY above sea level at the
+// entry) with at least kMinBuildings Building objects of house size
+// (bounding sphere > kMinBuildingRadius) within kRadius metres. A run with
+// no landscape or world loaded (headless config tests) accepts everything,
+// which is the pre-C3 behaviour.
+struct LandscapeSettlementProbe final : SettlementProbe
+{
+    static constexpr float kRadius = 300.0f; // the seed dedup radius: one town, one circle
+    static constexpr int kMinBuildings = 3;
+    static constexpr float kMinBuildingRadius = 4.0f; // fences, poles and sheds do not make a town
+    bool IsSettlement(const char* name, const Vector3& pos) const override;
 };
 
 enum ZoneEventType
@@ -191,7 +244,11 @@ class ZoneRegistry : public SerializeClass
 
     // lifecycle -----------------------------------------------------------
     void Clear();       // full reset, including event handlers
-    void InitMission(); // Clear + LoadFromConfig; call at mission start
+    void InitMission(); // Clear + LoadFromConfig + ActivateFactionAddons; call at mission start
+    // World::ActivateAddon for every addon CollectFactionAddons finds that is
+    // not active yet (issue #54 C1); no-op without a world or an inactive
+    // registry. Logged once at INFO.
+    void ActivateFactionAddons() const;
     // rebuild static zone/faction tables from ExtParsMission, then Pars;
     // also resolves the campaign's occupier/resistance sides from the
     // gmSelOccupier / gmSelResistance script globals (new-game UI)
@@ -210,7 +267,7 @@ class ZoneRegistry : public SerializeClass
     // producing fatal/sterile spawns downstream.
     void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
                         const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr,
-                        const ClassProbe* probe = nullptr);
+                        const ClassProbe* probe = nullptr, const SettlementProbe* settlement = nullptr);
 
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
@@ -218,6 +275,22 @@ class ZoneRegistry : public SerializeClass
     // may exceed the descriptor count: DivergeAliasedFactions appends a copy
     // of a roster picked for both sides
     int NFactions() const { return _factions.Size(); }
+    // table order (config order, plus DivergeAliasedFactions copies); null
+    // out of range
+    const FactionRecord* GetFaction(int index) const;
+    // The addon closure of every class the loaded faction table names
+    // (issue #54 C1): tiers[] and the role/civ ladders, vehicles[] and
+    // civVehicles[], the unit-class keys (officer, holdClass, recruit*,
+    // companionClass, fallbackClass and their *Civ twins) and the weapon /
+    // magazine keys (base*, loot*). Owners resolve through
+    // Asset/Addon/AddonClosure over the injected config roots; base-game
+    // classes (empty owner) contribute nothing. Runs over the RESOLVED
+    // table, so substitutions made by the plan-15 pass are what gets
+    // activated. The engine wrapper (ActivateFactionAddons, run by
+    // InitMission) activates the result so a template's addOns[] need not
+    // list what its factions spawn.
+    void CollectFactionAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
+                              const ParamEntry* magazinesCfg, FindArrayRStringCI& addons) const;
     const ZoneRecord* GetZone(int index) const;
     ZoneRecord* GetZoneMutable(int index);
     int FindZoneIndex(const char* name) const; // -1 when not found
@@ -239,7 +312,8 @@ class ZoneRegistry : public SerializeClass
     void HeatDecay(int index, float amount); // clamp at 0
 
     // The campaign-aware faction lookup, and the one every side-keyed query
-    // below goes through.  FindFaction scans by side FIRST, so on a template
+    // below goes through.  FindFaction scans by CLASS NAME first (issue #54:
+    // a global faction library makes a bare side string ambiguous), so on a template
     // with several descriptors on one side it returns whichever was DECLARED
     // first - picking Sinai's Syria would silently field EgyptArmy's roster.
     // A side that is the campaign's occupier or resistance therefore resolves
@@ -255,6 +329,8 @@ class ZoneRegistry : public SerializeClass
     // ladder's own length); empty when the faction authors no civTier[]
     RString FactionCivTierClass(const char* side, float warLevel) const;
     RString FactionVehicle(const char* side, float warLevel) const;
+    // the faction's civVehicles[] (package-resolved, may be empty)
+    void FactionCivVehicles(const char* side, AutoArray<RString>& out) const;
     RString FactionValue(const char* side, const char* key) const;
     // role-diverse squad composition (plan 15): fills out with count
     // classnames from the faction's war-level tier - a deterministic
@@ -267,6 +343,28 @@ class ZoneRegistry : public SerializeClass
     void SetEventHandler(ZoneEventType type, RString handler);
     RString GetEventHandler(ZoneEventType type) const;
     static int EventTypeFromName(const char* name); // -1 when unknown
+
+    // pure town enumeration (unit-tested; no world access) -------------------
+    // One Names entry (CfgWorlds >> <world> >> Names) -> (name, pos) when it
+    // is a town SeedCityZones would seed: type-less OFP entries and the
+    // city-like Arma types pass, name falls back to the class name, the 2D
+    // position[] {x, z} maps to engine axes with elevation 0.
+    static bool NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3& pos);
+    // NamesEntryIsTown plus the settlement classification (issue #54 C3):
+    // under Auto a non-null probe must accept the entry; All skips the probe;
+    // Off rejects everything.
+    static bool NamesEntryIsSettlement(const ParamEntry& e, ZoneTuning::SeedCities mode, const SettlementProbe* probe,
+                                       RString& name, Vector3& pos);
+    // The seedCities key: absent = Auto, 0 = Off, anything else = All.
+    static ZoneTuning::SeedCities ReadSeedCitiesMode(const ParamEntry* zonesCfg);
+    // The town names a campaign on this zones config + world Names class
+    // carries as CITY zones, in zone-table order: the authored CITY zones
+    // (config order), then - only when seedCities is set - every Names town
+    // SeedCityZones would seed (same filter, same name / 300 m dedup against
+    // the authored zones and the towns already collected, same MaxZones
+    // cap).  The new-game START TOWN cycler lists exactly this, so a pick
+    // always names a zone of the launched campaign.  Either entry may be null.
+    static void CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out);
 
     // campaign load notification: queued by Serialize at the end of a load,
     // consumed by the next Simulate tick, which dispatches the
@@ -311,7 +409,7 @@ class ZoneRegistry : public SerializeClass
     void ResolveFactionClasses(const ClassProbe& probe);
     // shared tiers[] index selection for FactionTierClass / FactionSquad
     static int TierIndex(const FactionRecord& f, float warLevel);
-    void SeedCityZones(const ParamEntry& namesCfg);
+    void SeedCityZones(const ParamEntry& namesCfg, const SettlementProbe* settlement);
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;
     // class name only - the key FindFaction reaches last and FindFactionForSide
@@ -387,6 +485,19 @@ AICenter* FindSideCenter(const char* sideName);
 // center has to be created on demand - mirrors CenterCreate
 // (GameStateExtWorldConfig.cpp).  Null on an unknown side name or no world.
 AICenter* EnsureSideCenter(const char* sideName);
+
+// A fresh empty AIGroup on the center, sent an Arcade mission and announced
+// to the network layer - mirrors GroupCreate (GameStateExtWorldConfig.cpp).
+// Null on a null center or when the center is at MaxGroups.  Shared by
+// GarrisonCache (garrisons), Traffic (crews), Market (dealers) and
+// GuerrillaBase; every Guerrilla spawner builds its groups through this one
+// helper so the group bookkeeping stays in one place.
+AIGroup* CreateSideGroup(AICenter* center);
+
+// Script-owned campaign war level ("gmwarlevel"); 1 when the world, game
+// state or variable is missing (matches the init.sqs default).  Shared by
+// GarrisonCache (garrison tiers) and Traffic (convoy scaling, curfew).
+float ReadWarLevel();
 
 } // namespace Guerrilla
 } // namespace Poseidon

@@ -1,0 +1,152 @@
+; ============================================================================
+;  companions.sqs  -  named-companion progression (XP -> rank/skill) + permadeath
+; ----------------------------------------------------------------------------
+;  Model UNCHANGED from Phase 1: parallel GM_COMP_* arrays keyed by name; XP
+;  folded per tick (+kill via `rating` delta, +survival); crossing an XP
+;  threshold promotes up the rank ladder and bumps skill; a dead body flags
+;  the row permadead forever (the name persists as a memorial).
+;
+;  WHAT CHANGED (Phase 1.5):
+;    * companionClass comes from the resistance faction descriptor
+;      (gmFactionValue) - no classname literal.
+;    * `setRank` is a real command now: promotions apply the rank to the LIVE
+;      body immediately (the old "visible rank refreshes on next spawn"
+;      limitation is gone; the createUnit rank arg still bakes it at spawn).
+;    * Post-load rebuild: campaign.sqs verifies/nulls GM_COMP_OBJ handles on
+;      the native campaignLoaded event; this loop's own spawn branch then
+;      rebuilds any nulled living companion via GM_fnCompSpawn - the
+;      persistence.sqs reconcile pass is retired.
+;
+;  OWNS: GM_COMP_XP/RANK/SKILL/ALIVE/OBJ, the tunables + GM_fnComp* helpers,
+;        transient GM_COMP_PREVRATING.
+;  READS: GM_COMP_NAMES/LOADOUT, gmResistanceSide + companionClass key.
+; ============================================================================
+
+@GM_LIB_READY
+
+; ===========================================================================
+;  TUNABLES / CONSTANTS  (owned by this script)
+; ===========================================================================
+GM_COMP_CLASS      = gmFactionValue [gmResistanceSide, "companionClass"]
+; civilian outfit family (issue #25): companions match the player's outfit;
+; body changes apply on the next (re)spawn only - there is no re-model
+; mechanism for a live unit, which is why the outfit locks at new-game
+GM_COMP_CIVC = gmFactionValue [gmResistanceSide, "companionClassCiv"]
+? GM_OUTFIT_CIV and (GM_COMP_CIVC != "") and (gmClassExists GM_COMP_CIVC) : GM_COMP_CLASS = GM_COMP_CIVC
+GM_COMP_RANKLADDER = ["PRIVATE", "CORPORAL", "SERGEANT", "LIEUTENANT", "CAPTAIN", "MAJOR", "COLONEL"]
+GM_COMP_XPTHRESH   = [0, 100, 250, 500, 850, 1300, 1900]
+;   GM_COMP_SKILLBASE  skill at ladder index 0
+;   GM_COMP_SKILLSTEP  skill gained per rank step (clamped to 1.0)
+;   GM_COMP_XP_KILL    XP per detected kill (rating rose this tick)
+;   GM_COMP_XP_SURV    XP per survival tick while a live body exists
+;   GM_COMP_TICK       seconds between progression ticks
+GM_COMP_SKILLBASE  = 0.35
+GM_COMP_SKILLSTEP  = 0.10
+GM_COMP_XP_KILL    = 25
+GM_COMP_XP_SURV    = 1
+GM_COMP_TICK       = 5
+
+; ===========================================================================
+;  TRANSIENT bookkeeping: last-sampled `rating` per body (kill detection)
+; ===========================================================================
+GM_COMP_PREVRATING = []
+GM_cpI = 0
+#prefill
+? GM_cpI >= (count GM_COMP_NAMES) : goto "prefilled"
+GM_COMP_PREVRATING = GM_COMP_PREVRATING + [0]
+GM_cpI = GM_cpI + 1
+goto "prefill"
+#prefilled
+
+; ===========================================================================
+;  HELPERS  (single-line code values; synchronous; GM_tmpC* scratch)
+; ===========================================================================
+
+; -- GM_fnCompRankIdxForXp( xp ) -> highest ladder index whose threshold is met
+GM_fnCompRankIdxForXp = {GM_tmpCr = 0; GM_tmpCk = 0; while {GM_tmpCk < (count GM_COMP_XPTHRESH)} do {if (_this >= (GM_COMP_XPTHRESH select GM_tmpCk)) then {GM_tmpCr = GM_tmpCk}; GM_tmpCk = GM_tmpCk + 1}; GM_tmpCr}
+
+; -- GM_fnCompSkillForRank( idx ) -> skill scalar, clamped to <=1.0
+GM_fnCompSkillForRank = {GM_tmpCs = GM_COMP_SKILLBASE + (GM_COMP_SKILLSTEP * _this); if (GM_tmpCs > 1) then {GM_tmpCs = 1}; GM_tmpCs}
+
+; -- GM_fnCompApply( i ) -> push stored skill AND rank onto the live body
+;    (setRank exists now; also called by campaign.sqs after a load)
+GM_fnCompApply = {GM_tmpCo = GM_COMP_OBJ select _this; if (not (isNull GM_tmpCo)) then {GM_tmpCo setSkill (GM_COMP_SKILL select _this); GM_tmpCo setRank (GM_COMP_RANK select _this)}}
+
+; -- GM_fnCompEquip( i ) -> re-apply stored loadout. NO-OP when the loadout has
+;    no weapons (keeps the class default rifle for a fresh recruit).
+GM_fnCompEquip = {GM_tmpCo = GM_COMP_OBJ select _this; GM_tmpCl = GM_COMP_LOADOUT select _this; GM_tmpCw = GM_tmpCl select 0; GM_tmpCm = GM_tmpCl select 1; if ((not (isNull GM_tmpCo)) and ((count GM_tmpCw) > 0)) then {removeAllWeapons GM_tmpCo; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCw)} do {GM_tmpCo addWeapon (GM_tmpCw select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}; GM_tmpCk = 0; while {GM_tmpCk < (count GM_tmpCm)} do {GM_tmpCo addMagazine (GM_tmpCm select GM_tmpCk); GM_tmpCk = GM_tmpCk + 1}}}
+
+; -- GM_fnCompSpawn( [i, pos] ) -> spawn the living companion's body into the
+;    player's group, baking rank+skill at creation, then equip; returns the obj
+;    (objNull if dead or the 12/group cap blocked it). Capture is a
+;    units-of-group before/after diff (createUnit returns Nothing).
+GM_fnCompSpawn = {GM_tmpSi = _this select 0; GM_tmpSp = _this select 1; GM_tmpSo = objNull; if (GM_COMP_ALIVE select GM_tmpSi) then {GM_tmpSpre = units (group aP); GM_COMP_CLASS createUnit [GM_tmpSp, group aP, "", (GM_COMP_SKILL select GM_tmpSi), (GM_COMP_RANK select GM_tmpSi)]; GM_tmpSnew = (units (group aP)) - GM_tmpSpre; if ((count GM_tmpSnew) > 0) then {GM_tmpSo = GM_tmpSnew select 0}; GM_COMP_OBJ set [GM_tmpSi, GM_tmpSo]; if (not (isNull GM_tmpSo)) then {GM_COMP_PREVRATING set [GM_tmpSi, rating GM_tmpSo]; GM_tmpSi call GM_fnCompEquip}}; GM_tmpSo}
+
+; -- GM_fnCompDie( i ) -> permadeath: flag dead forever, null the handle, mourn.
+GM_fnCompDie = {GM_COMP_ALIVE set [_this, false]; GM_COMP_OBJ set [_this, objNull]; hint format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]; gmJournalLog format ["%1 has fallen. Gone for good.", GM_COMP_NAMES select _this]; [] call GM_fnCompStatus}
+
+; -- GM_fnCompStatus( [] ) -> publish the roster as ONE journal status line
+;    ("Petra (CORPORAL), Ivan (fallen)") on the map's Notes page. Called at
+;    boot and after every promotion / death; native Journal, serializes.
+GM_fnCompStatus = {GM_tmpCS = ""; GM_tmpCi = 0; while {GM_tmpCi < (count GM_COMP_NAMES)} do {if (GM_tmpCi > 0) then {GM_tmpCS = GM_tmpCS + ", "}; GM_tmpCS = GM_tmpCS + (GM_COMP_NAMES select GM_tmpCi); if (GM_COMP_ALIVE select GM_tmpCi) then {GM_tmpCS = GM_tmpCS + " (" + (GM_COMP_RANK select GM_tmpCi) + ")"} else {GM_tmpCS = GM_tmpCS + " (fallen)"}; GM_tmpCi = GM_tmpCi + 1}; gmJournalStatus ["Companions", GM_tmpCS]}
+[] call GM_fnCompStatus
+
+; ===========================================================================
+;  MAIN TICK LOOP - O(roster) per tick; companions only ever exist in the
+;  player's group at the player's position (inherently distance-cached).
+; ===========================================================================
+#loop
+~GM_COMP_TICK
+GM_cI = 0
+
+#each
+? GM_cI >= (count GM_COMP_NAMES) : goto "edone"
+? not (GM_COMP_ALIVE select GM_cI) : goto "next"
+
+GM_cObj = GM_COMP_OBJ select GM_cI
+
+; -- permadeath: we had a body and it is now dead --
+? (not (isNull GM_cObj)) and (not (alive GM_cObj)) : goto "died"
+
+; -- alive in the roster but no live body (fresh start, or campaign.sqs nulled
+;    the handle after a load): (re)create it next to the player --
+? isNull GM_cObj : goto "spawn"
+
+; -- KILL XP: rating rose since last sample -> count a kill; resync the sample --
+GM_cRat = rating GM_cObj
+? GM_cRat > (GM_COMP_PREVRATING select GM_cI) : GM_COMP_XP set [GM_cI, (GM_COMP_XP select GM_cI) + GM_COMP_XP_KILL]
+GM_COMP_PREVRATING set [GM_cI, GM_cRat]
+
+; -- SURVIVAL XP: still standing this tick --
+GM_COMP_XP set [GM_cI, (GM_COMP_XP select GM_cI) + GM_COMP_XP_SURV]
+
+; -- PROMOTION: did the new XP cross into a higher ladder index? --
+GM_cNi = (GM_COMP_XP select GM_cI) call GM_fnCompRankIdxForXp
+GM_cCi = GM_COMP_RANKLADDER find (GM_COMP_RANK select GM_cI)
+? GM_cNi > GM_cCi : goto "promote"
+goto "next"
+
+#promote
+GM_COMP_RANK set [GM_cI, GM_COMP_RANKLADDER select GM_cNi]
+GM_COMP_SKILL set [GM_cI, GM_cNi call GM_fnCompSkillForRank]
+GM_cI call GM_fnCompApply
+hint format ["%1 promoted to %2.", GM_COMP_NAMES select GM_cI, GM_COMP_RANK select GM_cI]
+gmJournalLog format ["%1 promoted to %2.", GM_COMP_NAMES select GM_cI, GM_COMP_RANK select GM_cI]
+[] call GM_fnCompStatus
+goto "next"
+
+#spawn
+GM_cSp = [position aP, 3] call GM_fnRandPosNear
+[GM_cI, GM_cSp] call GM_fnCompSpawn
+goto "next"
+
+#died
+GM_cI call GM_fnCompDie
+goto "next"
+
+#next
+GM_cI = GM_cI + 1
+goto "each"
+
+#edone
+goto "loop"

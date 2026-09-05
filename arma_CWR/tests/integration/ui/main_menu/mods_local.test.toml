@@ -1,3 +1,11 @@
+# PINNED TO THE FULL REMASTER PACKAGE (issue #49 part 1 / #56 task 3). This test
+# exercises the mods screen or the join-requirements dialog, whose strings
+# (STR_DISP_MODS_LOAD "Load Mods", the tab labels, the join actions) ship only
+# in the full retail Remaster's BIN\STRINGTABLE_MAINMENU.utf8.csv: the Demo
+# package carries a 231-key subset without them, and UD's own data dir removes
+# the MODS menu entry outright (bin\resource-extra.cpp, 2026-07-15). The full
+# package is the one place the engine's mods UI renders as designed, so the test
+# runs there (packages/Game, a junction to the Steam Remastered install).
 # Point the MODS scan at the isolated test mod
 # (tests/fixtures/mods/@fixturemod). It lives in its own fixture dir, NOT
 # the shared packages/mods, so unrelated content landing in packages/mods can't add
@@ -6,7 +14,8 @@
 # ../../tests/fixtures/mods resolves to the repo's tests/fixtures/mods.
 # --mods-dir is the MODS screen's local scan root.
 #
+data_dir = "packages/Game"
 extra_args = ["--mods-dir", "../../tests/fixtures/mods"]
 timeout = 120
 assert_timeout = 60
-tags = ["headful"]
+tags = ["headful", "full_game"]

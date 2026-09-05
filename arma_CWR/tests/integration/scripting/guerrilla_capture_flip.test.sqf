@@ -16,9 +16,10 @@
 //      5. the scripted reaction ran: capture.sqs consumed the native
 //         "captured" event and spawned the hold garrison (GM_cGrp, 3 men).
 //
-//  Runs against the REAL mode: guerrilla_capture.Demo's init.sqs + scripts/
-//  are byte-identical to the canonical Guerrilla.Demo core (enforced by
-//  test_mission_script_core.cpp), so this exercises the shipped scripts.
+//  Runs against the REAL mode: guerrilla_capture.Demo's two-line init.sqs
+//  execs the ONE shared core at <GameDir>\gmcore (guerrilla-mode/core,
+//  pinned by test_mission_script_core.cpp), so this exercises the shipped
+//  scripts, not a copy.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }

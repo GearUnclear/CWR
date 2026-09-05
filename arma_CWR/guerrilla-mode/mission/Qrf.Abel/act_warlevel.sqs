@@ -1,0 +1,10 @@
+; debug action: cycle the War Level 1..10 (wraps). qrf.sqs reads gmWarLevel
+; at LAUNCH, so the next convoy's troop tier (tiers[] + role arrays via
+; gmFactionSquad) and escort hull (vehicles[] via gmFactionVehicle) change;
+; the native GarrisonCache also reads it for the next garrison spawn.
+gmWarLevel = gmWarLevel + 1
+? gmWarLevel > 10 : gmWarLevel = 1
+QRF_wV = gmFactionVehicle [gmOccupierSide, gmWarLevel]
+? QRF_wV == "" : QRF_wV = "none"
+hint format ["DEBUG: War Level %1\n\nNext QRF: %2 + officer %3\nEscort: %4\n\n(a convoy already out keeps its composition)", gmWarLevel, gmFactionSquad [gmOccupierSide, gmWarLevel, 5], gmFactionValue [gmOccupierSide, "officer"], QRF_wV]
+exit

@@ -490,37 +490,15 @@ void HelicopterAuto::KeyboardPilot(AIUnit* unit, float deltaT)
     _pilotSpeed[1] = 0;
     _pilotSpeed[0] = 0;
 
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickDirPilot(deltaT);
     }
     else
     {
-        bool internalCamera = IsGunner(GWorld->GetCameraType());
-        if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-        {
-            _pilotHeading = atan2(_mouseDirWanted[0], _mouseDirWanted[2]);
-
-            _pilotDirHelper = true;
-            _avoidBankJitter = false;
-
-            if (!_hoveringAutopilot)
-            {
-                _pilotDive = _mouseDirWanted[1];
-                saturate(_pilotDive, -0.7, +0.7);
-                _diveWanted = _pilotDive;
-                _pilotSpeedHelper = false;
-            }
-            else
-            {
-                _pilotSpeedHelper = true;
-                _pilotDive = 0;
-                _pilotSpeed[0] = (input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft)) * 3;
-                _pilotSpeed[2] = -_mouseDirWanted[1] * 20;
-                saturate(_pilotSpeed[2], -5, +7);
-            }
-        }
-        else
+        // Mouse flight control removed — pilot seats run permanent freelook
+        // (mouse looks, keys fly): bank on turn keys, rudder on MoveLeft/Right,
+        // pitch on the forward/back keys.
         {
             _avoidBankJitter = true;
 
@@ -533,8 +511,8 @@ void HelicopterAuto::KeyboardPilot(AIUnit* unit, float deltaT)
                 _pilotSpeedHelper = false;
                 _bankWanted = -0.5 * (input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft));
 
-                float forward = input.GetAction(ctx, UAMoveForward) +
-                                input.GetAction(ctx, UAMoveFastForward) * 2 - input.GetAction(ctx, UAMoveBack);
+                float forward =
+                    input.GetMoveForward(ctx) + input.GetMoveFastForward(ctx) * 2 - input.GetAction(ctx, UAMoveBack);
 
                 float dive = Direction().Y() - _rotorDive;
 
@@ -562,8 +540,7 @@ void HelicopterAuto::KeyboardPilot(AIUnit* unit, float deltaT)
                 }
                 _pilotSpeedHelper = true;
 
-                float forward = input.GetAction(ctx, UAMoveForward) * 0.5f +
-                                input.GetAction(ctx, UAMoveFastForward) -
+                float forward = input.GetMoveForward(ctx) * 0.5f + input.GetMoveFastForward(ctx) -
                                 input.GetAction(ctx, UAMoveBack) * 0.5f;
 
                 _pilotSpeed[0] = (input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft)) * 3;

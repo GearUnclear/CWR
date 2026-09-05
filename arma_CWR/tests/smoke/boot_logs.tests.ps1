@@ -112,7 +112,7 @@ Describe "OpenGL render startup checks" {
         # namespace, so the vsTransform local-light array and the psWater scalar must
         # not share a name. When both were 'lightDir' (vec4[8] vs vec4), the 4
         # VSTransform x PSWater programs failed to link and water silently fell back
-        # to PSFlat (DoSelectPixelShader) — losing its bump-specular light_disc glint.
+        # to PSFlat (DoSelectPixelShader) - losing its bump-specular light_disc glint.
         # Ephemeral cache forces a fresh compile+link so the check is not vacuous
         # (a warm shader cache would skip linking entirely).
         $eph = New-EphemeralGamePaths

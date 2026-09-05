@@ -3,9 +3,10 @@
 The oversight / verification mission for Guerrilla Mode: every gameplay system
 demonstrated as a **narrated, self-verifying chapter**, runnable one at a time
 from the action menu, as a full reel (`DEMO ALL`), or headlessly by the
-Trident smoke test. This directory is the per-mission overlay; `init.sqs` +
-`scripts/` next to it are the byte-identical shared core
-(`test_mission_script_core.cpp`) and must not be touched from here except
+Trident smoke test. This directory is the per-mission overlay; the `init.sqs`
+next to it is the two-line bootstrap into the ONE shared script core at
+`<GameDir>\gmcore` (repo path `guerrilla-mode/core`,
+`test_mission_script_core.cpp`), which must not be touched from here except
 through the sanctioned seams listed below.
 
 ## Why chapters (v2, replaces the v1 instant-demo menu)
@@ -83,7 +84,7 @@ manifest. Ideas queued for later chapters: the AI tactics/perception rework
   own dispatcher queue)
 - `gmBreakUndercover`, `gmGarrisonForceDespawn`, `gmWarLevel` (transient by
   design — escalation.sqs recomputes it)
-- `[aP, aP, -1] exec "scripts/campaign.sqs"` (the Save action's own dispatch)
+- `[aP, aP, -1] exec "\gmcore\scripts\campaign.sqs"` (the Save action's own dispatch)
 - `setDammage 1` on garrison bodies (staged kills), `allowDammage` on the
   player group (the demo shield), `setAccTime`
 

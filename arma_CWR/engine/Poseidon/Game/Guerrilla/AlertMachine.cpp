@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -72,6 +73,9 @@ void AlertMachine::LoadFromParams(const ParamEntry* zonesCfg)
     _tuning.alertHeatRed = zonesCfg->ReadValue("alertHeatRed", _tuning.alertHeatRed);
     _tuning.alertHeatBreak = zonesCfg->ReadValue("alertHeatBreak", _tuning.alertHeatBreak);
     _tuning.undercoverHeatWitness = zonesCfg->ReadValue("undercoverHeatWitness", _tuning.undercoverHeatWitness);
+    _tuning.trafficAmbushWindow = zonesCfg->ReadValue("trafficAmbushWindow", _tuning.trafficAmbushWindow);
+    _tuning.trafficAmbushRadius = zonesCfg->ReadValue("trafficAmbushRadius", _tuning.trafficAmbushRadius);
+    _tuning.trafficAmbushHeat = zonesCfg->ReadValue("trafficAmbushHeat", _tuning.trafficAmbushHeat);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +221,9 @@ void AlertMachine::Simulate(float deltaT)
     // per-observer compromises queued since the last tick (TrackTargets
     // exposures plus the marking above)
     undercover.ConsumeCompromises(in.compromises);
+    // violent patrol/convoy ends queued since the last tick (the Traffic
+    // despawn path)
+    Traffic::Instance().ConsumeAmbushes(in.ambushes);
 
     AutoArray<AlertEventRecord> fired;
     EvaluateAlert(in, dt, registry, fired);
@@ -280,11 +287,100 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
         }
     }
 
+    // ---- wiped patrol/convoy stimuli (Traffic drain).  Never force zone
+    // state here - the FSM below recomputes it from knowledge every tick
+    // and would silently revert a forced write.  Instead floor the zone's
+    // acted-on knowledge for trafficAmbushWindow seconds: a patrol wipe
+    // holds a YELLOW-band contact (steady - see the disengage-window hold
+    // in the FSM), a convoy wipe an immediate RED-band contact.  lastKnown
+    // becomes the ambush site, so the QRF drives to the wreck.  The FSM
+    // debits this tick's dt from the window right below, so the effective
+    // floor lifetime is trafficAmbushWindow minus one tick - intended, not
+    // an off-by-one to "fix"
+    RString occ = registry.OccupierSide();
+    for (int c = 0; c < in.ambushes.Size(); c++)
+    {
+        const TrafficAmbush& am = in.ambushes[c];
+        // nearest occupier-owned zone within trafficAmbushRadius of the wreck
+        int zone = -1;
+        float bestSq = _tuning.trafficAmbushRadius * _tuning.trafficAmbushRadius;
+        for (int i = 0; i < n; i++)
+        {
+            const ZoneRecord* z = registry.GetZone(i);
+            if (stricmp(z->owner, occ) != 0)
+            {
+                continue;
+            }
+            float dSq = Dist2DSq(am.pos.X(), am.pos.Z(), z->pos.X(), z->pos.Z());
+            if (dSq < bestSq)
+            {
+                bestSq = dSq;
+                zone = i;
+            }
+        }
+        if (zone < 0)
+        {
+            // routes run occupier-zone-to-occupier-zone by construction:
+            // fall back to the spawn-time origin - but only while the
+            // occupier still HOLDS it (the queue survives saves and zones
+            // flip owner mid-route; a wreck attributed to a zone the
+            // resistance now holds would QRF the player's own town)
+            zone = registry.FindZoneIndex(am.originZone);
+            if (zone >= 0 && stricmp(registry.GetZone(zone)->owner, occ) != 0)
+            {
+                zone = -1;
+            }
+        }
+        if (zone < 0)
+        {
+            continue; // nobody left to attribute it to: drop silently
+        }
+        ZoneAlertState& s = _states[zone];
+        float floorKnows = am.kind == TKConvoy ? _tuning.alertRedKnows : _tuning.alertYellowKnows;
+        // two wrecks in one zone: the severer (on a tie: newer) floor's
+        // position wins the QRF fix; a QUALIFYING live fix gathered this
+        // tick still overwrites it right back in the FSM below
+        if (floorKnows >= s.stimulusKnows)
+        {
+            s.hasLastKnown = true;
+            s.lastKnown = am.pos;
+        }
+        if (floorKnows > s.stimulusKnows)
+        {
+            s.stimulusKnows = floorKnows;
+        }
+        // a later patrol wipe re-arms an earlier convoy floor's window in
+        // full, keeping the standing (severer) floor alive longer - intended
+        if (_tuning.trafficAmbushWindow > s.stimulusTimer)
+        {
+            s.stimulusTimer = _tuning.trafficAmbushWindow;
+        }
+        // every ambush costs Heat on top of the FSM edge spikes, so repeat
+        // ambushes inside a held window are not free (the compromise-drain
+        // policy)
+        registry.HeatRaise(zone, _tuning.trafficAmbushHeat);
+    }
+
     // ---- per-zone FSM (alert.sqs:125-170)
     for (int i = 0; i < n; i++)
     {
         ZoneAlertState& s = _states[i];
-        float know = i < in.zones.Size() ? in.zones[i].knows : 0.0f;
+        float gathered = i < in.zones.Size() ? in.zones[i].knows : 0.0f;
+        float know = gathered;
+        // wiped-traffic stimulus floor, decaying with the tick
+        if (s.stimulusTimer > 0)
+        {
+            if (s.stimulusKnows > know)
+            {
+                know = s.stimulusKnows;
+            }
+            s.stimulusTimer -= dt;
+            if (s.stimulusTimer <= 0)
+            {
+                s.stimulusTimer = 0;
+                s.stimulusKnows = 0;
+            }
+        }
         int oldState = s.state;
         int newState;
 
@@ -297,15 +393,31 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
         {
             if (oldState == ASYellow)
             {
-                // already YELLOW: bleed the disengage countdown
-                s.timer -= dt;
-                if (s.timer <= 0)
+                if (gathered >= _tuning.alertYellowKnows)
                 {
-                    newState = ASRed;
-                    s.timer = 0;
+                    // already YELLOW with a LIVE contact: bleed the disengage
+                    // countdown
+                    s.timer -= dt;
+                    if (s.timer <= 0)
+                    {
+                        newState = ASRed;
+                        s.timer = 0;
+                    }
+                    else
+                    {
+                        newState = ASYellow;
+                    }
                 }
                 else
                 {
+                    // the ambush floor alone holds the band: a wreck memory
+                    // is not an engaged contact, so it must not bleed the
+                    // window into RED (a held floor would otherwise oscillate
+                    // YELLOW-RED every window, re-dispatching the QRF from a
+                    // single wreck).  Hold YELLOW; the countdown resumes if a
+                    // live contact appears.  The timer is frozen, not reset:
+                    // intermittent live contact under a floor accumulates
+                    // toward RED across the gaps - intended
                     newState = ASYellow;
                 }
             }
@@ -324,8 +436,10 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
             s.timer = 0;
         }
 
-        // last-known player position while the contact qualifies
-        if (know >= _tuning.alertYellowKnows && i < in.zones.Size() && in.zones[i].hasLastKnown)
+        // last-known player position while the LIVE contact qualifies -
+        // gathered, not the floored know: a stimulus floor must not promote
+        // a garrison's sub-band fix over the wreck position it set above
+        if (gathered >= _tuning.alertYellowKnows && i < in.zones.Size() && in.zones[i].hasLastKnown)
         {
             s.hasLastKnown = true;
             s.lastKnown = in.zones[i].lastKnown;
@@ -390,11 +504,17 @@ void AlertMachine::GatherInputs(AlertTickInputs& in, const ZoneRegistry& registr
     // occupier center's groups, each group assigned to the nearest zone
     // whose center is within zoneArea of its leader (or first alive unit).
     // No center == no occupier units == nothing perceives the player.
-    AICenter* occupier = FindSideCenter(registry.OccupierSide());
+    RString occ = registry.OccupierSide();
+    AICenter* occupier = FindSideCenter(occ);
     if (!occupier)
     {
         return;
     }
+    // no kind filter on the traffic fallback below: this loop walks the
+    // OCCUPIER center's groups only, so civ traffic (CIV side) never
+    // reaches it
+    const Traffic& traffic = Traffic::Instance();
+    const float trafficRadiusSq = _tuning.trafficAmbushRadius * _tuning.trafficAmbushRadius;
     const float areaSq = registry.Tuning().zoneArea * registry.Tuning().zoneArea;
     for (int g = 0; g < occupier->NGroups(); g++)
     {
@@ -431,6 +551,31 @@ void AlertMachine::GatherInputs(AlertTickInputs& in, const ZoneRegistry& registr
             {
                 bestSq = dSq;
                 zone = i;
+            }
+        }
+        if (zone < 0)
+        {
+            // a road patrol/convoy crew between zones sits outside every
+            // zoneArea and used to be discarded (the STATUS.md ambient
+            // traffic alert gap): attribute a live traffic group to the
+            // nearest occupier-owned zone within trafficAmbushRadius instead
+            if (traffic.IsTrafficGroup(grp))
+            {
+                float bestTrafficSq = trafficRadiusSq;
+                for (int i = 0; i < n; i++)
+                {
+                    const ZoneRecord* z = registry.GetZone(i);
+                    if (stricmp(z->owner, occ) != 0)
+                    {
+                        continue;
+                    }
+                    float dSq = Dist2DSq(pos.X(), pos.Z(), z->pos.X(), z->pos.Z());
+                    if (dSq < bestTrafficSq)
+                    {
+                        bestTrafficSq = dSq;
+                        zone = i;
+                    }
+                }
             }
         }
         if (zone < 0)
@@ -530,6 +675,10 @@ LSError AlertMachine::AlertSaveState::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("timer", timer, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("hasLastKnown", hasLastKnown, 1, false))
     PARAM_CHECK(ar.Serialize("lastKnown", lastKnown, 1, VZero))
+    // absent from pre-traffic-alert saves: the defaults read back as no
+    // stimulus floor (the breakLatched precedent - never a load failure)
+    PARAM_CHECK(ar.Serialize("stimulusKnows", stimulusKnows, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("stimulusTimer", stimulusTimer, 1, 0.0f))
     return LSOK;
 }
 
@@ -555,6 +704,8 @@ void AlertMachine::ApplyPendingLoad(const ZoneRegistry& registry)
         s.timer = row.timer;
         s.hasLastKnown = row.hasLastKnown;
         s.lastKnown = row.lastKnown;
+        s.stimulusKnows = row.stimulusKnows;
+        s.stimulusTimer = row.stimulusTimer;
     }
 }
 
@@ -577,6 +728,8 @@ LSError AlertMachine::Serialize(ParamArchive& ar, ZoneRegistry& registry)
             row.timer = s.timer;
             row.hasLastKnown = s.hasLastKnown;
             row.lastKnown = s.lastKnown;
+            row.stimulusKnows = s.stimulusKnows;
+            row.stimulusTimer = s.stimulusTimer;
             _pending.Add(row);
         }
     }

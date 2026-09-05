@@ -1568,7 +1568,7 @@ void Motorcycle::SuspendedPilot(AIUnit* unit, float deltaT)
 void Motorcycle::KeyboardPilot(AIUnit* unit, float deltaT)
 {
     auto& input = InputSubsystem::Instance();
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         CancelStop();
         JoystickPilot(deltaT);
@@ -1576,8 +1576,8 @@ void Motorcycle::KeyboardPilot(AIUnit* unit, float deltaT)
     }
 
     constexpr InputContext ctx = InputContext::CarDriver;
-    float forward = (input.GetAction(ctx, UAMoveForward) - input.GetAction(ctx, UAMoveBack)) * 0.75f;
-    forward += input.GetAction(ctx, UAMoveFastForward);
+    float forward = (input.GetMoveForward(ctx) - input.GetAction(ctx, UAMoveBack)) * 0.75f;
+    forward += input.GetMoveFastForward(ctx);
     forward += input.GetAction(ctx, UAMoveSlowForward) * 0.33f;
     _thrustWanted = forward;
 
@@ -1586,60 +1586,23 @@ void Motorcycle::KeyboardPilot(AIUnit* unit, float deltaT)
 
     float asz = fabs(ModelSpeed().Z());
 
-    bool internalCamera = IsGunner(GWorld->GetCameraType());
-    if (internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled())
-    {
-// last input from mouse - use mouse controls
-// predict position
-#if 1
-        // ignore bank
-        float estT = 0.3;
-        Matrix3Val orientation = Orientation();
-        Matrix3Val derOrientation = _angVelocity.Tilda() * orientation;
-        Matrix3 estOrientation = orientation + derOrientation * estT;
+    // Mouse steering removed — keys are the only manual input (see Car.cpp for
+    // the rationale on the asymmetric rates).  The maxTurn floor is raised to
+    // the retired mouse path's 0.1: the old keyboard floor of 0.03 left the
+    // bike nearly steerless at speed.
+    _turnWanted = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
+    _mouseDirWanted = Direction();
 
-        Matrix3 orientVert;
-        orientVert.SetUpAndDirection(VUp, estOrientation.Direction());
+    float slowTurn = 1 - asz * 0.03f;
+    float maxTurnCoef = 1 - asz * 0.03f;
+    saturateMax(slowTurn, 0);
+    saturateMax(maxTurnCoef, 0);
+    _turnIncreaseSpeed = slowTurn * 0.37f + 0.12f;
+    _turnDecreaseSpeed = 2;
 
-        // Vector3Val estDirection=estOrientation.Direction().Normalized();
-        Vector3 relDir(VMultiply, orientVert.InverseRotation(), _mouseDirWanted);
-
-#else
-        Matrix3 orientVert;
-        orientVert.SetUpAndDirection(VUp, Direction());
-        Vector3 relDir(VMultiply, orientVert.InverseRotation(), _mouseDirWanted);
-#endif
-        float turn = atan2(relDir.X(), relDir.Z()) * 0.3f;
-        _turnWanted = turn * (fabs(turn) * 8 + 0.33f);
-
-        _turnIncreaseSpeed = 2;
-        _turnDecreaseSpeed = 2;
-
-        float maxTurnCoef = 1 - asz * (1.0f / 20);
-        saturateMax(maxTurnCoef, 0);
-
-        // limit max turn based on speed
-        float maxTurn = maxTurnCoef * 1.0f + (1 - maxTurnCoef) * 0.1f;
-        saturate(_turnWanted, -maxTurn, +maxTurn);
-    }
-    else
-    {
-        _turnWanted = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
-        _mouseDirWanted = Direction();
-
-        float slowTurn = 1 - asz * 0.03f;
-        float maxTurnCoef = 1 - asz * 0.03f;
-        saturateMax(slowTurn, 0);
-        saturateMax(maxTurnCoef, 0);
-        _turnIncreaseSpeed = slowTurn * 0.4f + 0.05f;
-        _turnDecreaseSpeed = slowTurn * 0.8f + 0.1f;
-
-        // limit max turn based on speed
-        float maxTurn = maxTurnCoef * 1.0f + (1 - maxTurnCoef) * 0.03f;
-        saturate(_turnWanted, -maxTurn, +maxTurn);
-
-        // limit max thrust based on turn
-    }
+    // limit max turn based on speed
+    float maxTurn = maxTurnCoef * 1.0f + (1 - maxTurnCoef) * 0.1f;
+    saturate(_turnWanted, -maxTurn, +maxTurn);
 
     if (fabs(_thrustWanted) > 0.05)
     {

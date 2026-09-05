@@ -2,9 +2,10 @@
 ;  showcase/boot.sqs  -  SHOWCASE overlay bootstrap (issue #9, v2).
 ; ----------------------------------------------------------------------------
 ;  Exec'd from mission.sqm (the player unit's init line): mission.sqm is the
-;  sanctioned per-mission divergence point, so the byte-identical shared core
-;  in init.sqs + scripts/ stays untouched (test_mission_script_core.cpp walks
-;  Showcase.* templates too).
+;  sanctioned per-mission divergence point, so the mission's two-line
+;  init.sqs stays untouched and the shared core it boots out of
+;  <GameDir>\gmcore is reached, never copied (test_mission_script_core.cpp
+;  pins that).
 ;
 ;  PURPOSE: every gameplay system demonstrated as a NARRATED, SELF-VERIFYING
 ;  CHAPTER - for oversight (watchable, readable, paced), for testing (the

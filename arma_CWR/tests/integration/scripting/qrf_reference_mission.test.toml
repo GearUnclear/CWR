@@ -1,0 +1,13 @@
+# Qrf.Abel reference mission: boot -> native garrison -> forced reveal ->
+# YELLOW -> RED -> qrf.sqs convoy -> perception removed -> GREEN -> stand-down.
+# Boots the repo-relative template directly (no install needed); the
+# main-menu button path is covered by ui/main_menu/reference_mission_qrf.
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "guerrilla-mode/mission/Qrf.Abel"
+# Alert tick 5 s + 20 s YELLOW window + qrf.sqs 5 s tick for the launch leg;
+# the stand-down leg waits on the next alert tick after the knowers are gone
+# (the 30 s reveal loop must drain first). Generous windows.
+timeout = 420
+assert_timeout = 150
+extra_args = ["--dev"]

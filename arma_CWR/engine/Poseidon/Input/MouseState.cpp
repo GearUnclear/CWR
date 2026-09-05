@@ -34,7 +34,7 @@ void MouseState::DiscardBuffered()
 }
 
 bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundEnabled, UITime currentTime,
-                        const CursorClamp* clamp, float dtSec)
+                        const CursorClamp* clamp, float dtSec, float cursorAspectRatio, float aimAspectRatio)
 {
     // Reset per-frame edge state
     leftToDo = false;
@@ -139,22 +139,29 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
     rightToDo = buttonsToDo[1];
     middleToDo = buttonsToDo[2];
 
-    // Cursor movement (matches Windows logic)
-    float moveX = deltaX * kCursorScaleX;
+    // Scale horizontal movement by aspect ratio so it feels consistent with
+    // vertical. Aim and the cursor use different aspect ratios because they
+    // measure width differently: aiming spans the full window, but the cursor's
+    // coordinates are relative to the HUD region (even though it can move past
+    // it), so it must use the HUD region's aspect ratio to stay uniform on both axes.
+    float aimMoveX = deltaX * (kCursorScaleY / aimAspectRatio);
+    float cursorMoveX = deltaX * (kCursorScaleY / cursorAspectRatio);
     float moveY = deltaY * kCursorScaleY;
 
     // Constant per-frame safety clamp (Bohemia 3.01 behavior).  This is a single-frame
     // spike guard, NOT a feel knob: everyday look is already frame-rate independent
-    // because moveX is summed mouse counts (physical displacement, not a rate).  It must
-    // NOT scale with dt.  A per-second (dt-scaled) ceiling both breathes with frame-time
-    // jitter (visible jitter) and lets one hitch frame release the whole buffered backlog
-    // as a giant turn (over-spin); a fixed ceiling does neither and keeps look 1:1.
-    saturate(moveX, -kCursorLimitX, +kCursorLimitX);
+    // because the move deltas are summed mouse counts (physical displacement, not a rate).
+    // It must NOT scale with dt.  A per-second (dt-scaled) ceiling both breathes with
+    // frame-time jitter (visible jitter) and lets one hitch frame release the whole
+    // buffered backlog as a giant turn (over-spin); a fixed ceiling does neither and keeps
+    // look 1:1.
+    saturate(aimMoveX, -kCursorLimitX, +kCursorLimitX);
+    saturate(cursorMoveX, -kCursorLimitX, +kCursorLimitX);
     saturate(moveY, -kCursorLimitY, +kCursorLimitY);
 
     if (gameFocusLost <= 0)
     {
-        cursor.aimDeltaX += moveX;
+        cursor.aimDeltaX += aimMoveX;
         if (reverseY)
             cursor.aimDeltaY -= moveY;
         else
@@ -162,7 +169,7 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
     }
     // The menu cursor can be scaled independently of look (menuCursorScale 1.0
     // == classic: cursor and aim move together).
-    cursor.cursorX += moveX * tuning.menuCursorScale;
+    cursor.cursorX += cursorMoveX * tuning.menuCursorScale;
     cursor.cursorY += moveY * tuning.menuCursorScale;
 
     cursor.aimDeltaZ += kWheelToCursorScale * deltaZ;

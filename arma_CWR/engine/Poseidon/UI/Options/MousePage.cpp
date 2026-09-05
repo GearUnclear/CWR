@@ -148,8 +148,7 @@ OptionsScrollList::RowDef MousePage::MouseProvider::RowFor(int row) const
         case kRowSensitivityY:
             return {532, nullptr, -1};
         case kRowMouseDpi:
-            RefreshDpiTexts();
-            return {542, m_dpiOptions.data(), kMouseDpiPresetCount};
+            return {542, kMouseDpiLabels, kMouseDpiPresetCount};
         default:
             return {-1, nullptr, 0};
     }
@@ -161,17 +160,6 @@ void MousePage::MouseProvider::RefreshToggleTexts() const
     m_toggleText[1] = LocalizeString("STR_ENABLED");
     m_toggleOptions[0] = m_toggleText[0].c_str();
     m_toggleOptions[1] = m_toggleText[1].c_str();
-}
-
-void MousePage::MouseProvider::RefreshDpiTexts() const
-{
-    m_dpiText[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_OFF", "Off");
-    m_dpiOptions[0] = m_dpiText[0].c_str();
-    for (int i = 1; i < kMouseDpiPresetCount; ++i)
-    {
-        m_dpiText[i] = kMouseDpiLabels[i];
-        m_dpiOptions[i] = m_dpiText[i].c_str();
-    }
 }
 
 int MousePage::MouseProvider::RowValue(int row) const

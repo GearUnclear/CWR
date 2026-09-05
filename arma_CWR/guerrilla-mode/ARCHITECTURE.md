@@ -38,7 +38,8 @@ carries:
   undercoverInHandsBoost=2.0; undercoverSlungBoost=1.4;
   undercoverIdentifyAccuracy=1.5; undercoverMinVisibility=0.02;
   undercoverWarDetectScale=0.5; undercoverForgetSeconds=0;
-  undercoverHeatWitness=8; undercoverBoardWitnessSeconds=10`), the `class Zones` seed (each zone may carry its own
+  undercoverHeatWitness=8; undercoverBoardWitnessSeconds=10;
+  trafficAmbushWindow=120; trafficAmbushRadius=1500; trafficAmbushHeat=4`), the `class Zones` seed (each zone may carry its own
   `captureRate` override; `captureRate=100` restores the legacy instant flip),
   and the town auto-seed (`seedCities=1; seedCitySupport=20` — CITY zones
   generated from the world's named towns, markers `gmZoneCity_<n>`).
@@ -48,6 +49,27 @@ carries:
   resolves them against the faction classes. Scripts get the resolved side
   strings from the nulars **`gmOccupierSide` / `gmResistanceSide`** (defaults
   `"EAST"`/`"GUER"`).
+
+  **This class is NOT authored per island (issue #54 A1/A4).** The table the
+  engine reads is the UNION of a GLOBAL block and the island template's own,
+  the island winning on a class-name collision (whole-class replacement, never
+  a per-key merge) - `Game/Guerrilla/FactionSources.*`, the one code path all
+  three consumers (new-game menu, `ZoneRegistry::LoadFromConfig`, the outfit
+  seam) go through. The global block is whatever lands in `Pars`: an addon
+  pbo's config, a mod folder's `bin\config.cpp`, or the data dir's
+  `bin\config-extra.cpp` (merged last). A war roster is not an island fact, so
+  it belongs there: the vanilla WEST/EAST/GUER rosters live in
+  `guerrilla-mode/config/guerrilla-factions.hpp`, installed to
+  `<GameDir>\bin\`, and the @LoBo rosters in
+  `guerrilla-mode/config/lobo-factions.hpp`, installed into `@LoBo\bin\config.cpp`
+  by `tools/lobo/install-lobo-factions.ps1` and `#include`d by the
+  `@lobofixup` test fixture (issue #56 task 2). What an island
+  template's own block keeps is **`class CIV`**: the population models and
+  ambient-traffic hulls of that island's data set, which *is* an island fact -
+  plus any deliberate override of a global class. A unit test pins that
+  (`test_guerrilla_module.cpp`, "a shipped template's own faction block holds
+  only CIV"). `defaultOccupier`/`defaultResistance` name classes from the
+  merged table, so they may name a class the template never declares.
 
 **Coordinate contract (moved from init.sqs to config):** zone `position[]` is
 authored in **script/getPos order `[easting, northing, elevation]`** — *not*
@@ -62,11 +84,15 @@ copying `mission.sqm`.
 | Native system | Replaces | Behavior |
 |---|---|---|
 | `ZoneRegistry` | `zones.sqs` | zone table from config; fog-of-war reveal; marker recolor/label with capture/support progress text and ColorWhite while contested (only repaints markers that already exist in `markersMap` — the mission still **creates** them); military **consolidation capture** (a 0..100 capture meter: climbs per tick per attacker (crew-capped) while resistance units hold the zone area with no live occupier unit inside it — positional presence per side, NOT the `liveOccupiers` bookkeeping; frozen while contested, decays when defended/abandoned; `contestOutnumberRatio` lets overwhelming defenders re-secure past a lone straggler; flip at 100; meters freeze outside `cacheRadius`); CITY support accrual (occupier-free town only) / intimidation decay (occupier-only presence, floored at `supportDecayFloor`) / decoupled ready-threshold + flip (needs fighters in an occupier-free town; the undercover player counts for neither); capture heat spike + income tap |
-| `AlertMachine` | `alert.sqs` | per-zone GREEN/YELLOW/RED FSM from garrison `knowsAbout`, disengage window, heat spikes on escalation edges, last-known player position; drains the `UndercoverSystem`'s compromise-notification queue each tick: the first-ever compromise of the campaign (from any source) fires `undercoverBroken` + `alertHeatBreak` Heat on the zone nearest the WITNESS, later witness groups add `undercoverHeatWitness` Heat quietly with no event (the old global vehicle-mount break and its `playerInVehicle` input are deleted) |
+| `AlertMachine` | `alert.sqs` | per-zone GREEN/YELLOW/RED FSM from garrison `knowsAbout`, disengage window, heat spikes on escalation edges, last-known player position; drains the `UndercoverSystem`'s compromise-notification queue each tick: the first-ever compromise of the campaign (from any source) fires `undercoverBroken` + `alertHeatBreak` Heat on the zone nearest the WITNESS, later witness groups add `undercoverHeatWitness` Heat quietly with no event (the old global vehicle-mount break and its `playerInVehicle` input are deleted); also drains the `Traffic` service's violent patrol/convoy ends (`TrafficAmbush`) into a per-zone knowsAbout floor (patrol holds YELLOW, convoy pins RED, decaying over `trafficAmbushWindow`, `trafficAmbushHeat` per wreck, lastKnown = the wreck; nearest occupier zone within `trafficAmbushRadius`, else the still-occupier-held origin zone, else dropped) and attributes live traffic crews between zones to the nearest occupier zone within the same radius |
 | `UndercoverSystem` | *(new 2026-07-16; replaces the global binary cover break)* | per-observer undercover perception for the player subject (SP; self-disables without a real player): each occupier group independently resolves the disguised player's perceived side at the engine's target-tracking side-resolution sites, as civilian (`TCivilian`) / suspect (`TSideUnknown`, the AI investigates) / exposed (real side), from weapon state, facing, distance, visibility and that group's own compromise memory; compromise is a serialized flag on the group's `Target` record, permanent per group by default (`undercoverForgetSeconds=0` is the decay knob); `gmUndercover` + `setCaptive` stay the script-owned baseline and are never dropped on a break |
 | `GarrisonCache` | `spawning.sqs` (cache half) | occupier garrison distance-cache: integer reserve ↔ live groups across `cacheRadius` (+50 m despawn hysteresis), survivor write-back, officer-first groups (faction `officer` key), SENTRY/GUARD posture, reads script global `gmWarLevel` |
 | native persistence | `persistence.sqs` | zones, alert FSM, garrison bookkeeping and **event handlers** serialize; script globals always did (GGameState); `campaignLoaded` event replaces the GM_SAVED sentinel + poll |
+| `Journal` + `GuerrillaJournalPages` | *(new, no script ancestor)* | the field journal behind the map screen's Notes / Plan pages. `Game/Guerrilla/Journal` holds three plain tables (capped diary entries stamped "Day N HH:MM" from the clock + the script `gmDayCount`; keyed objectives ACTIVE/DONE/FAILED/HIDDEN; keyed status lines) fed only through `gmJournal*`; `UI/Guerrilla/GuerrillaJournalPages` is the renderer `DisplayMap::ReloadBriefingContent` calls whenever the ZoneRegistry is active: it appends to (or creates) the `Main` section (aliased `__BRIEFING`, the Notes tab) the campaign header, a live Situation block (treasury/manpower/War Level from the script globals, military zones held, towns risen, towns ready to rise, meters in progress, worst alert, hottest zone, cover state + witness count, fighters in the player's group, stash count, then the script status lines), the 10-topic field-manual index (`GM_MAN_*` pages, static player text) and the latest diary lines (full diary on `GM_LOG`); and to the `Plan` section (copied into `__PLAN` by `UpdatePlan`) the standing goal, two engine-computed objectives (hold every military zone / raise every town, with counts), the scripted objectives and the derived next steps (RED zone to break from, blown cover, towns ready, meters to finish, nearest occupier targets with garrison + distance, recruiting when HR is available, lie-low when Heat is high). Rebuilt on every map-key open (`DisplayMap::ResetHUD`, which `World::Simulate` calls on the UAMap toggle; the display itself is created once per mission by `DisplayMission::InitUI`), on a journal change while the map is open (revision compare in `OnSimulate`), on a Notes/Plan tab press and after an in-place load; serializes as `GuerrillaJournal` (save-gated on non-empty, `IsSubclass`-tolerant on load). No `briefing.html` is needed; an authored one is appended to, never replaced |
 | `TownFlags` | *(new, no script ancestor)* | one physical `FlagCarrier` pole per CITY zone flying the owner's flag (in-world counterpart of the flag-icon map marker): deterministic off-road placement (`GRoadNet::IsOnRoad` hard reject, 6 m clearance) scored toward high ground + town outskirts so the flag reads from outside town; texture = faction descriptor `flag` key > per-side default (`usa`/`ussr`/`fia` from `Flags.pbo`) > generic white flag; repainted on owner flip; placement + pole refs serialize (`GuerrillaFlags` subclass), the pole object rides the world's building serializer; a package without `FlagCarrier` degrades to markers-only (logged, non-fatal) |
+| `Traffic` | *(new, no script ancestor)* | ambient road traffic (2026-08-22): the road net carries civilian cars between CITY zones, occupier patrol hulls (`vehicles[0]`) between occupier-held zones and, rarely and war-level-scaled, a truck + escort supply convoy (`vehicles[1]` + `vehicles[0]`, one group, column). Pure core (one-roll rarest-first spawn decision with per-kind caps 3/1/1, route picker, farthest-in-band spawn-point selection over `GRoadNet` link centres within 700 m of the origin, the commandeer predicate, despawn/stall rules) under a world layer: group on the CIV / occupier center, hull via `NewNonAIVehicle` on a road link oriented toward the destination, crew seated through `NativeMoveIn`, route = Command::Move to the DRIVERS via `IssueCommand` (the doMove idiom; arcade waypoints / `AIGroup::Move` deliver through SendCommand and never moved a seated crew in probes) under CARELESS (civ) / SAFE (occupier) so `AIUnit::CreatePath` keeps the road net; arrival re-dispatches up to `trafficMaxLegs` while the player watches, stalls tear down only out of sight, never teleport. Commandeer: a civ car with the real player ahead in its lane (20 deg, 4 m) or a weapon-in-hands aim (15 deg) inside 25 m gets a Stop, 2.5 s later the driver is unassigned, `AllowGetIn(false)`, `DoGetOut`, sent fleeing 150 m (deleted beyond 300 m / 60 s); the hull moves to the released table and is deleted only when the player is far and nobody ever boarded. Every civ driver carries the `driverKilled` killed-EH expression (init.sqs routes it into `GM_fnCivKilledEH`, so road murders land in `gmCivKilled`). Live rows (hull/escort/group/driver refs + zone names), released hulls, fleeing drivers and handlers serialize as `GuerrillaTraffic`; zone indices re-resolve by name. Missing `civVehicles[]` (plan-15 probe) leaves civ traffic inert; fewer than two occupier vehicle rungs skip convoys. Patrol/convoy traffic feeds the AlertMachine (2026-09-01): violent ends (destroyed/crewDead) queue `TrafficAmbush` stimuli (serialized as `Ambushes`) the alert tick drains, and `IsTrafficGroup` crews between zones stay attributable - see the AlertMachine row |
+| `GuerrillaBase` | *(new 2026-08-22, issues #16 M1+M4 / #28; no script ancestor)* | the player's headquarters: one per campaign, elected either by the new-game START TOWN cycler (`gmSelStartTown`; the first `Simulate` tick resolves the name through `FindZoneIndex`, establishes and relocates the real player beside the garage - one shot, `autoTried` serialized) or by `gmHqEstablish [pos]` from the action menu (scripts/market.sqs), in ANY zone whose area contains the position. Siting: the best enterable building inside the zone (Paths LOD, `NPos() >= hqMinPos`, standing; most AI positions, then nearest the centre - `PickHqBuilding`) gets the cache set straight onto its first interior AI position (no `PlaceOnSurface`: the Static branch ignores floors) and a garage spot on 20/35/50 m rings beside it; no such building (a CAMP, a hamlet) = edge-of-town fallback on the 0.6/0.75/0.45/0.9 x zoneArea rings (`PickSpot`: off-road via `GRoadNet::IsOnRoad`, dry, then an AI free-position nudge re-checked), cache 4 m beside the garage. The cache is a `WeaponHolder` flagged keep-when-empty and registered with the StashRegistry; re-establishing MOVES it (contents travel, `MoveNetAware`), bumps `moveCount` (the script debits `hqMoveCost`) and releases garage rows left beyond 1.5 x `garageRadius` of the new ring. Garage: `GarageLock(veh, lock)` on any Transport inside `garageRadius` not carrying the real player - `SetLock(LSLocked)` + `SetAllowDammage(false)` (knob `garageInvulnerable`), both re-asserted every 2 s tick and on the load pass since neither is serialized for us; rows prune dead/deleted hulls and release the ones that left the ring; the lock cue is the hull's own horn muzzle (a magazine-less muzzle with a `drySound`, Car/Motorcycle only) played as two short `OpenAndPlayOnce` bursts, silent on horn-less hulls / headless. A null cache is self-healed at the serialized spot. Serializes as `GuerrillaBase` (election scalars, `SerializeRef` building/cache/rows; gated on the registry being active; a block-less save reloads its config on the first tick). Tuning keys in `CfgGuerrillaZones`: `hqMinPos=4`, `garageRadius=100`, `garageInvulnerable=1` |
+| `Market` | *(new 2026-08-22, issue #27; no script ancestor)* | the dealer market behind `class CfgGuerrillaMarket` (description.ext): tuning `dealerShare=0.34`, `dealerRespawnSeconds=600`, `hqMoveCost=500`, `dealerClass` (else the CIV descriptor's `civClass1`, else `Civilian`, each rung package-probed), optional `weaponDealers[]`/`vehicleDealers[]` (zone names that override the draw), `class Weapons { class X { weapon=; magazine=; mags=; price=; }; }` (weapon + magazines, weapon alone, or a magazine-only bundle; OFP magazines are CfgWeapons classes, a CfgMagazines bank is accepted too) and `class Vehicles { class Y { vehicle=; price=; }; }`; rows are probed against the package at load and dropped non-fatally, display names come from the package config (localized). On the first tick (`_assigned`, serialized, so a load never re-draws) each kind is planned over the CITY zones: `DealerQuota = max(1, round(n * share))` towns from a seeded, salted, per-kind-independent order (`ShuffleOrder`, pure; `_seed` drawn once and serialized); each row gets a deterministic off-road dry spot on the 0.3/0.4/0.5 x zoneArea rings (weapon dealers on the cardinal bearings, vehicle dealers on the diagonals, the vehicle dealer's LOT = the next acceptable sample >= 15 m away) and a CIV NPC (`CreateUnit` into a CIV group from the shared `EnsureSideCenter`/`CreateSideGroup` helpers, `DAMove|DATarget|DAAutoTarget`), respawned after `dealerRespawnSeconds` when dead. The purchase itself is script policy (market.sqs). Serializes as `GuerrillaMarket` (rows by zone name + NPC refs, groups, seed, assigned; gated on the class being configured) |
 
 **Heat direction contract is now engine-enforced:** there is no direct `heat`
 setter — `gmZoneSet` exposes only `"heatRaise"` (+=, clamped 100) and
@@ -163,6 +189,63 @@ leaves it empty), `gmStashCount` (nular → scalar), `gmStash <i>` (→
 `[object, [x,y,z]]`, `[]` out of range). Registered stashes serialize
 (`GuerrillaStashes`) and, unlike the other gm* systems, work outside
 Guerrilla missions too.
+
+Journal (the map-screen Notes/Plan pages): `gmJournalLog "<text>"` (diary
+entry, stamped "Day N HH:MM" from the clock + `gmDayCount`; the diary keeps
+the newest 200), `gmJournalObjective [id, text, "ACTIVE"|"DONE"|"FAILED"|
+"HIDDEN"]` (upsert by id; `""` text keeps the existing text, so a state
+flip is `["firstZone", "", "DONE"]`), `gmJournalStatus [key, text]` (a
+"key: text" line in the Notes Situation block; `""` removes), and the
+queries `gmJournalCount` (nular), `gmJournalEntry <i>` (→ `[stamp, text]`,
+0 = oldest, `[]` out of range), `gmJournalObjectiveState "<id>"` (→ state
+name or `""`), `gmJournalStatusText "<key>"` (→ text or `""`), plus
+`gmIslandName` (nular → the world's CfgWorlds `description`, e.g. "Malden";
+the only sanctioned island-name source for script text). The engine never
+writes the diary itself: the managers do (see A.6); the engine-derived
+Situation / next-steps content is computed at render time and needs no
+script. All three tables serialize as `GuerrillaJournal`.
+
+Traffic: `gmTrafficCount "civ"|"patrol"|"convoy"|"all"`, `gmTrafficVehicles`
+(nular -> live hulls), `gmTrafficInfo <veh>` (-> `[kind, originIdx, destIdx,
+state]`, `[]` when untracked), `gmTrafficOnEvent ["spawned"|"despawned"|
+"commandeered"|"arrived"|"driverKilled"|"parked"|"departed"|"bailed"|
+"panicked", h]` (`spawned` `_this=[veh, kind, originIdx, destIdx]`,
+`despawned` `[kind, reason]`, `commandeered` `[veh, driver]`,
+`arrived`/`parked`/`departed` `[veh, kind, destIdx]`, `bailed` `[veh, kind,
+destIdx]` - escort lost under fire, the truck crew abandons the load;
+`panicked` `[veh, kind, reaction]` with reaction
+`"cower"|"uturn"|"rush"|"bail"`; `driverKilled` is the killed-EH
+EXPRESSION attached to every civ driver, `_this=[victim, killer]`),
+`gmTrafficRelease <veh>` (registry half of a commandeer), `gmTrafficForceSpawn
+[kind, zoneIdx]` (-> OBJECT; test aid, bypasses chance/caps, not the road
+placement). Roads (issue #33, first half): `gmRoadNearest <pos>` (-> road
+point within 20 m or `[]`), `gmRoadPath [from, to]` (-> positions; the
+engine's short-hop A*, empty on failure), `gmRoadsNear [pos, radius]` and its
+binary alias `<pos> nearestRoads <radius>` (-> unlocked road-segment centre
+positions). All positions in getPos order with height above ground.
+
+Headquarters (GuerrillaBase): `gmHqCanEstablish [x,y,z]` (-> bool, a zone's
+area contains the position), `gmHqEstablish [x,y,z]` (-> bool; establish, or
+MOVE when one stands - the cache travels, `gmHqMoveCount` bumps, far garage
+rows release), the nulars `gmHqEstablished`, `gmHqZone` (name or `""`),
+`gmHqPos` / `gmHqGaragePos` / `gmHqCachePos` (`[x,y,z]`, `[]` while none),
+`gmHqBuilding` / `gmHqCache` (objects, objNull while none / gone),
+`gmHqMoveCount`, `gmHqIndoors`, and `gmHqValue "hqMinPos"|"garageRadius"|
+"garageInvulnerable"`. Garage: `gmGarageLock [veh, bool]` (-> bool; lock
+refuses a non-Transport, a hull outside the ring or one carrying the real
+player; lock = beep-beep), `gmGarageCount`, `gmGarageVehicle <i>`,
+`gmGarageHas <veh>`, `gmGarageInRange [x,y,z]`.
+
+Market: `gmMarketActive` (nular; CfgGuerrillaMarket present + zones active),
+`gmMarketValue "dealerShare"|"dealerRespawnSeconds"|"hqMoveCost"`,
+`gmDealerCount`, `gmDealer <i>` (-> `[zoneName, "WEAPON"|"VEHICLE", [x,y,z],
+npc, [lotx,loty,lotz]]`, `[]` out of range; npc objNull while dead /
+unspawned), `gmDealerNearest ["WEAPON"|"VEHICLE", [x,y,z]]` (-> index or -1),
+`gmDealerStock "WEAPON"` (-> `[[class, displayName, price, magazine, mags],
+...]`; class `""` = magazine-only bundle, magazine `""` = weapon alone) and
+`gmDealerStock "VEHICLE"` (-> `[[class, displayName, price], ...]`). The
+purchase is the script's: market.sqs debits `gmResources` and does the
+`addWeaponCargo` / `createVehicle` / `gmGarageLock`.
 
 Modernized evaluator (usable everywhere now): `compile`, `isNil`,
 `setVariable`/`getVariable` (objects), `nearestObjects`, `distance` on
@@ -276,7 +359,7 @@ side stays the mission side — any body fights as GUER. The undercover layer
 is untouched.
 
 **Island/faction-agnostic rule (definition of done for issue #3):** the
-`scripts/` directory contains **zero classnames and zero side-string
+core's `scripts/` directory contains **zero classnames and zero side-string
 literals** — sides come from `gmOccupierSide`/`gmResistanceSide` (converted to
 side *values* by the generic `GM_fnSideFromString`, which matches by
 formatting the engine side nulars), classes come from `gmFaction*`. Engine
@@ -285,40 +368,102 @@ enum words (`"SAFE"`, `"MOVE"`, `"SENTRY"`, `"Flag"`, `"RoadSegment"`,
 
 ### A.6 Script layer file map
 
+**One core, many missions (issue #54 step B1).** The island-agnostic script
+layer exists exactly ONCE in the repo, at `guerrilla-mode/core/`. No mission
+template carries a `scripts/` directory any more, and there is no copy to
+keep in sync.
+
 ```
-mission/Guerrilla.Demo/
-  description.ext      island data: CfgGuerrillaZones (+seedCities) + CfgGuerrillaFactions
-  mission.sqm          one resistance player at the Camp (unchanged)
-  init.sqs             THIN bootstrap: script-state seed, zone markers,
-                       native handler registration, exec lib + managers
-  scripts/
-    lib.sqs            helpers: GM_fnRandPosNear/SpawnGroup/SideFromString/
-                       CountOwnedBy/ZoneOfType/FactionNum/BumpGear + GM_LIB_READY
-    capture.sqs        capture-event reactions: hold garrison (holdClass x
-                       holdCount) on "captured", hints for the whole arc
-                       (started/contested/lost/town-ready/liberated), throttled
-                       in-field titleText progress ticker (GM_Z_CAPTURE)
-    qrf.sqs            alert POLICY: garrison posture on alertChanged edges,
-                       YELLOW investigate moves to gmZoneLastKnown, RED QRF convoy
-                       (officer + tier squad + faction vehicle, road-snap,
-                       teleport-on-stall fallback, stand-down cleanup)
-    undercover.sqs     cover establish (gmUndercover=true + setCaptive, kept
-                       for the whole campaign; never dropped on a break) +
-                       "fired" EH -> gmBreakUndercover + ADVISORY
-                       undercoverBroken hint (gmUndercoverWitnesses)
-    campaign.sqs       Save addAction (self-dispatching) + campaignLoaded
-                       reconciliation (companion handles, GM_PLAYER_GROUPS, action)
-    economy.sqs        income tick (unchanged formulas; reads gmZone tuples)
-    escalation.sqs     War Level ladder (unchanged) + Heat decay via gmZoneSet,
-                       gated on native GREEN
-    loot.sqs           loot-on-kill + unlocks (unchanged logic; bodies from
-                       gmGarrisonGroups; classnames from faction keys)
-    recruit.sqs        Camp menu (unchanged flow; anchor = first CAMP-type zone;
-                       classes from faction keys)
-    recruit_action.sqs thin addAction dispatcher (unchanged)
-    companions.sqs     XP/rank/permadeath (unchanged model; companionClass from
-                       faction key; live setRank on promotion now)
+guerrilla-mode/core/          <- THE core. One copy. Edit here.
+  init.sqs                    THIN bootstrap: script-state seed, zone markers,
+                              native handler registration, exec managers
+  scripts/                    the 15 managers + helpers (manifest below)
+
+guerrilla-mode/config/        <- THE global faction library. One copy.
+  guerrilla-factions.hpp      CfgGuerrillaFactions: the vanilla WEST/EAST/GUER
+                              rosters -> <GameDir>\bin\guerrilla-factions.hpp
+  config-extra.cpp            the seed <GameDir>\bin\config-extra.cpp that
+                              #includes it (created only if none exists)
+
+guerrilla-mode/mission/Guerrilla.<World>/
+  description.ext             island data: CfgGuerrillaZones (+seedCities),
+                              CfgGuerrillaFactions (CIV + any override),
+                              CfgGuerrillaMarket
+  mission.sqm                 one resistance player at the Camp
+  init.sqs                    TWO LINES: a comment + [] exec "\gmcore\init.sqs"
 ```
+
+**Install location and path convention.** `guerrilla-mode/install-missions.ps1`
+mirrors `guerrilla-mode/core` to the loose directory `<GameDir>\gmcore\`, a
+sibling of `<GameDir>\Missions\`, before it installs any template. A mission
+reaches it with a LEADING BACKSLASH:
+
+```
+[] exec "\gmcore\init.sqs"
+```
+
+`OpenScript` (`engine/Poseidon/Game/Scripting/Scripts.cpp`) strips that
+backslash and resolves the rest against the game data root, checking mounted
+pbo banks first (so a `gmcore.pbo` in any `addons\` dir would serve as well)
+and then a loose file on disk. Without the backslash the name goes through
+`FindScript`, which looks inside the MISSION folder: that is the old
+per-mission copy path and it now resolves to nothing. So:
+
+- every core script that execs a sibling core script, and every `addAction`
+  that dispatches back into one (`campaign.sqs`, `market.sqs`, `recruit.sqs`),
+  spells the full `"\gmcore\scripts\<x>.sqs"`. `addAction` script paths go
+  through the same `OpenScript`, so the backslash form works there too;
+- MISSION-LOCAL scripts keep their relative paths and still resolve inside
+  the mission folder: `Showcase.<World>`'s `showcase/` overlay, the reference
+  slices' `hud.sqs` / `act_*.sqs` / `patrol.sqs`;
+- `#include` and `preprocessFile` do NOT strip a leading backslash. The core
+  uses neither.
+
+**Manifest (`guerrilla-mode/core/scripts/`, 15 files).** This list is the
+contract: `tests/unit/.../test_mission_script_core.cpp` asserts the directory
+holds exactly these names and that this section names them all, so a script
+added or retired without a doc edit fails the unit lane.
+
+| Script | Role |
+|--------|------|
+| `lib.sqs` | helpers: `GM_fnRandPosNear` / `SpawnGroup` / `SpawnSquad` / `SideFromString` / `CountOwnedBy` / `ZoneOfType` / `FactionNum` / `BumpGear`, then raises `GM_LIB_READY` |
+| `capture.sqs` | capture-event reactions: hold garrison (`holdClass` x `holdCount`) on "captured", hints for the whole arc (started / contested / lost / town-ready / liberated), throttled in-field `titleText` progress ticker (`GM_Z_CAPTURE`) |
+| `qrf.sqs` | alert POLICY: garrison posture on `alertChanged` edges, YELLOW investigate moves to `gmZoneLastKnown`, RED QRF convoy (officer + tier squad + faction vehicle, road-snap, teleport-on-stall fallback, stand-down cleanup) |
+| `undercover.sqs` | cover establish (`gmUndercover=true` + `setCaptive`, kept for the whole campaign, never dropped on a break) + "fired" EH -> `gmBreakUndercover` + ADVISORY `undercoverBroken` hint (`gmUndercoverWitnesses`) |
+| `campaign.sqs` | Save `addAction` (self-dispatching via `"\gmcore\scripts\campaign.sqs"`) + `campaignLoaded` reconciliation (companion handles, `GM_PLAYER_GROUPS`, action); journal: "campaign begins" (`gmIslandName`) / saved / restored diary lines |
+| `economy.sqs` | income tick (unchanged formulas; reads `gmZone` tuples) |
+| `escalation.sqs` | War Level ladder (unchanged) + Heat decay via `gmZoneSet`, gated on native GREEN |
+| `loot.sqs` | loot-on-kill + unlocks (unchanged logic; bodies from `gmGarrisonGroups`; classnames from faction keys) |
+| `recruit.sqs` | Camp menu (unchanged flow; anchor = first CAMP-type zone; classes from faction keys) |
+| `recruit_action.sqs` | thin `addAction` dispatcher (unchanged) |
+| `market.sqs` | HQ / cache / garage / dealer action menus over the native `GuerrillaBase` + `Market` facts (issues #16/#27/#28): the Establish/Move HQ action (debits `hqMoveCost` on a move), Stash \<weapon\> at the cache (`removeWeapon` + cargo; retrieval = the holder's own TAKE actions), Lock/Unlock the nearest vehicle inside the garage ring, the BUY menu beside a live dealer (<=8 rows + a here/HQ delivery toggle: `WeaponHolder` at your feet or the HQ cache; the dealer's lot or the HQ garage locked); one-time map markers (dealers, HQ flag); `hqEstablish` objective + diary lines. The SECOND "-" writer of `gmResources` |
+| `market_action.sqs` | thin `addAction` dispatcher (`gmMktReq*`), `recruit_action` twin |
+| `companions.sqs` | XP/rank/permadeath (unchanged model; `companionClass` from faction key; live `setRank` on promotion now) |
+| `civilians.sqs` | town population cache + kill-queue consumer + panic FSM |
+| `shakedown.sqs` | occupier street-theatre director + resentment ticker |
+
+*(journal writes)* every manager above also feeds the native Journal
+(`gmJournalLog` / `gmJournalObjective` / `gmJournalStatus`; A.3): capture =
+ready/lost/liberated lines + `firstZone`/`firstTown` objectives; qrf = QRF
+launch; undercover = cover blown; companions = promotion/death + the
+"Companions" status line (`GM_fnCompStatus`); loot = unlock + "Unlocked gear"
+status line (`GM_fnLootStatus`) + `firstUnlock` objective; escalation = War
+Level edges (`gmEsc_prevWL`); recruit = recruit/train + `firstRecruit`
+objective. No script renders anything: the map pages are native
+(`UI/Guerrilla/GuerrillaJournalPages`).
+
+**Full-core missions** (two-line `init.sqs`, whole core): the playable
+templates `Guerrilla.{Abel,Demo,Lebanon80,Sinai}`, the showcase
+`Showcase.Abel` (which adds only its mission-local `showcase/` overlay, exec'd
+from `mission.sqm`), and the integration missions
+`tests/integration/missions/guerrilla_{native.abel,capture.Demo,persist.Demo}`.
+
+**Reference slices** `Qrf.<World>`, `Market.<World>` and `Undercover.<World>`
+keep their OWN bootstrap `init.sqs` (props, debug action menu, HUD) and exec
+only `\gmcore\scripts\lib.sqs` plus the one core policy script they exist to
+demonstrate (`qrf.sqs` / `market.sqs` / `undercover.sqs`). They too carry no
+`scripts/` directory: each sandbox runs the campaign's real policy script by
+construction, so drift is not possible rather than merely detected.
 
 Deleted: `zones.sqs`, `spawning.sqs`, `alert.sqs`, `persistence.sqs` (their
 loops are native; see A.2).
@@ -417,6 +562,7 @@ state is native and needs nothing.
 | `escalation.sqs`  | `gmWarLevel`, heat **decay** (`gmZoneSet heatDecay`) | `gmZone` owners, `gmZoneAlert` |
 | `loot.sqs`        | `GM_GEAR_*` (via `GM_fnBumpGear`), consumes `gmEvtGar*`   | `gmGarrisonSpawned/Groups`, resistance loot keys |
 | `recruit.sqs`     | `GM_PLAYER_GROUPS`, `gmAct*`/`gmReq*` (consumer), `gmResources`/`gmManpower` (−) | `gmZone` (CAMP anchor), faction recruit keys |
+| `market.sqs`      | `gmMkt*` / `GM_MKT_*` (menus, request queue consumer, markers), `gmResources` (−: purchases + HQ moves; the second debit writer next to recruit.sqs), the HQ election / garage lock / cache stash CALLS (`gmHqEstablish`, `gmGarageLock`, cargo moves), `hqEstablish` objective | `gmHq*` / `gmGarage*` (GuerrillaBase), `gmMarket*` / `gmDealer*` (Market), the player's weapons / magazines |
 | `companions.sqs`  | `GM_COMP_XP/RANK/SKILL/ALIVE/OBJ`, `GM_fnComp*`           | `GM_COMP_NAMES/LOADOUT`, companionClass key |
 
 Heat raising is native-only now (capture, alert edges, undercover

@@ -20,6 +20,8 @@
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/MissionHtmlLocalization.hpp>
+#include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -613,6 +615,18 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
 
     LoadLocalizedMissionHtml(_briefing, GetBriefingFile());
 
+    // Guerrilla Mode: the journal pages (Notes situation block + manual +
+    // diary, Plan goal/objectives/next steps, GM_LOG, GM_MAN_*) are built
+    // from the native state every time the briefing is (re)built - on map
+    // open, on a journal change while open, and after a load.  They append
+    // to an authored Main/Plan section when the mission ships one.
+    if (Guerrilla::GuerrillaJournalActive())
+    {
+        Guerrilla::BuildGuerrillaJournalPages(_briefing, Guerrilla::Journal::Instance(),
+                                              Guerrilla::GatherGuerrillaJournalInputs());
+        _journalRevision = Guerrilla::Journal::Instance().Revision();
+    }
+
     AIUnit* unit = GWorld->FocusOn();
     int section = FindSectionForUnit(_briefing, "Main", unit);
     if (section < 0 && !unit)
@@ -679,6 +693,17 @@ void DisplayMap::RefreshLanguage()
     UpdateGetReadyTitleText(dynamic_cast<CStatic*>(GetCtrl(IDC_GETREADY_TITLE)));
     ReloadBriefingContent(GetCurrentHtmlSectionName(_briefing));
     SetRadioText();
+}
+
+void DisplayMap::RefreshGuerrillaJournal()
+{
+    if (!_briefing || !Guerrilla::GuerrillaJournalActive())
+    {
+        return;
+    }
+    // same full rebuild the language-change path uses; the open page
+    // (including a journal GM_* page) is preserved by name
+    ReloadBriefingContent(GetCurrentHtmlSectionName(_briefing));
 }
 
 bool DisplayMap::IsShownMap() const
@@ -858,6 +883,11 @@ void DisplayMap::ResetHUD()
     {
         _map->Reset();
     }
+    // World::Simulate calls ResetHUD on every map-key open (UAMap), so this
+    // is the "player opened the map" seam: rebuild the Guerrilla journal
+    // pages so the Situation block (treasury, meters, alert) is current even
+    // when nothing was written to the journal since the last open
+    RefreshGuerrillaJournal();
     if (_briefing)
     {
         UpdateWeaponsInBriefing();
@@ -1035,7 +1065,8 @@ bool UnitWeaponsInfo::IsMagazineUsable(const MagazineType* type)
         }
     }
     Ref<const WeaponType> always[2] = {
-        WeaponTypes.New("Throw"), WeaponTypes.New("Put"),
+        WeaponTypes.New("Throw"),
+        WeaponTypes.New("Put"),
         //		WeaponTypes.New("PipeBomb")
     };
     for (int i = 0; i < sizeof(always) / sizeof(*always); i++)

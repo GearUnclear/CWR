@@ -1,0 +1,23 @@
+# A MOD-OWNED player body saved WITH the mod and loaded WITHOUT it (issue #48,
+# the uncovered case #56 task 5 names).
+#
+# The sibling guerrilla_lobo_body_save_reload.seq proves the @LoBo body and its
+# runtime addon grant ride a genuine cross-process save/reload when the second
+# process mounts the same mods. This sequence takes the other branch a real
+# player hits: uninstall (or forget to mount) @LoBo, then load the campaign.
+# Phase 1 is the sibling's phase 1 verbatim. Phase 2 boots the same Classic
+# package with NO --mod line at all, so every class the save serialized from
+# @LoBo (the LoBoGolaniWB body, its M4A1, the JAM magazines) and every addon
+# name in the save's "addons" list is unknown to the process.
+#
+# What phase 2 pins is the contract, not a crash: the load must come back
+# (triLoadGame answers, the process survives), and the player must exist
+# afterwards as SOME body on the GUER side, because the whole plan-15 stance is
+# that missing classes degrade with a log line and never take the campaign
+# down. The exact substitute is read back so a change in the ladder shows up
+# as an assertion diff rather than a silent difference.
+#
+# PRECONDITIONS: guerrilla-mode/install-missions.ps1; the one-time @LoBo
+# repair (mod doctor --fix) for phase 1. Full CWA 1.99 + @LoBo. Phase 2 shares
+# the user dir with phase 1 (UserDir/Saved/Tmp/globo.fps).
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]

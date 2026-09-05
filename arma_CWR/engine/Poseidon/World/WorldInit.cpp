@@ -61,9 +61,14 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
+#include <Poseidon/Game/Guerrilla/AddonActivation.hpp> // placed-unit addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
@@ -558,6 +563,12 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     if (gameMode == GModeArcade)
     {
         Guerrilla::ApplyPlayerOutfitSelection(t);
+        // issue #54 C1: activate the placed units' transitive addon closure
+        // (weapons[]/magazines[] owners) so a Guerrilla template's addOns[]
+        // needs only its world and what mission.sqm places. After the body
+        // substitution, so the substituted class is what gets walked; before
+        // CreateCenter, which is where CheckAddon would deny.
+        Guerrilla::ActivateTemplateAddons(t);
     }
 
     if (_ui)
@@ -655,8 +666,22 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::GarrisonCache::Instance().InitMission();
     // Town flagpoles follow the registry too (no config of their own).
     Guerrilla::TownFlags::Instance().InitMission();
+    // Ambient road traffic follows the registry: Clear + read its own
+    // optional CfgGuerrillaZones traffic* keys.
+    Guerrilla::Traffic::Instance().InitMission();
     // Stash registry likewise resets per mission (no config of its own).
     Guerrilla::StashRegistry::Instance().InitMission();
+    // Field journal (diary / objectives / status lines behind the map's
+    // Notes and Plan pages) resets per mission; scripts fill it via
+    // gmJournal*.
+    Guerrilla::Journal::Instance().InitMission();
+    // Headquarters (cache + garage) follows the registry: Clear + read its
+    // optional CfgGuerrillaZones hq*/garage* keys; the start-town election
+    // itself runs on the first Simulate tick.
+    Guerrilla::GuerrillaBase::Instance().InitMission();
+    // Dealer market: Clear + read class CfgGuerrillaMarket (stock, tuning,
+    // authored dealer towns); the city assignment runs on the first tick.
+    Guerrilla::Market::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {

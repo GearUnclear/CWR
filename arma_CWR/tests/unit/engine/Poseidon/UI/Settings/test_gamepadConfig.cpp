@@ -32,6 +32,7 @@ TEST_CASE("GamepadConfig: factory defaults match GamepadState built-ins", "[Sett
 {
     GamepadConfig c;
     CHECK(c.enabled == true);
+    CHECK(c.steering == true);
     CHECK(c.deadzoneStick == 0.21f);
     CHECK(c.deadzoneTrigger == 0.10f);
     CHECK(c.lookSensitivity == 1.0f);
@@ -43,6 +44,7 @@ TEST_CASE("GamepadConfig: a fresh instance starts at LoadDefaults state", "[Sett
     GamepadConfig defaulted;
     defaulted.LoadDefaults();
     CHECK(c.enabled == defaulted.enabled);
+    CHECK(c.steering == defaulted.steering);
     CHECK(c.deadzoneStick == defaulted.deadzoneStick);
     CHECK(c.deadzoneTrigger == defaulted.deadzoneTrigger);
     CHECK(c.lookSensitivity == defaulted.lookSensitivity);
@@ -52,11 +54,13 @@ TEST_CASE("GamepadConfig: LoadDefaults resets a mutated instance", "[Settings][G
 {
     GamepadConfig c;
     c.enabled = false;
+    c.steering = false;
     c.deadzoneStick = 0.4f;
     c.deadzoneTrigger = 0.4f;
     c.lookSensitivity = 3.0f;
     c.LoadDefaults();
     CHECK(c.enabled == true);
+    CHECK(c.steering == true);
     CHECK(c.deadzoneStick == 0.21f);
     CHECK(c.deadzoneTrigger == 0.10f);
     CHECK(c.lookSensitivity == 1.0f);
@@ -119,6 +123,7 @@ TEST_CASE("GamepadConfig: Save then Load round-trips every scalar field", "[Sett
 
     GamepadConfig src;
     src.enabled = false;
+    src.steering = false;
     src.deadzoneStick = 0.18f;
     src.deadzoneTrigger = 0.07f;
     src.lookSensitivity = 1.4f;
@@ -127,6 +132,7 @@ TEST_CASE("GamepadConfig: Save then Load round-trips every scalar field", "[Sett
     GamepadConfig dst;
     REQUIRE(dst.Load(path));
     CHECK(dst.enabled == false);
+    CHECK(dst.steering == false);
     CHECK(dst.deadzoneStick == 0.18f);
     CHECK(dst.deadzoneTrigger == 0.07f);
     CHECK(dst.lookSensitivity == 1.4f);

@@ -3,12 +3,14 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaCharacterSelect.hpp> // the idc-155 child display (issue #43)
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/GameModule.hpp>
-#include <Poseidon/UI/OptionsUICommon.hpp>          // CreateSingleMissionBank (per-island description.ext peek)
-#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // shared with ZoneRegistry::ResolveSideCollisions
-#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // FindGuerrillaFactionEntry (outfit cycler, issue #25)
+#include <Poseidon/UI/OptionsUICommon.hpp>            // CreateSingleMissionBank (per-island description.ext peek)
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // shared with ZoneRegistry::ResolveSideCollisions
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>   // FindGuerrillaFactionEntry (outfit cycler, issue #25)
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>   // CollectTownNames (START TOWN cycler, issue #16)
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Core/Global.hpp>
-#include <Poseidon/Input/InputSubsystem.hpp> // wheel drain for the island list (see OnSimulate)
+#include <Poseidon/Input/InputSubsystem.hpp>  // wheel drain for the island list (see OnSimulate)
 #include <Poseidon/IO/Filesystem/FileOps.hpp> // FilePathExists (template .pbo check)
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // GetShapeName (preview model probe)
@@ -32,8 +34,10 @@ namespace
 // that keeps the same layout.
 constexpr int kIdcOccupier = 150;
 constexpr int kIdcResistance = 151;
-// 152 is RESERVED for issue #16's gmSelStartTown cycler; the character
-// outfit cycler (issue #25) takes 153.
+// 152 is the START TOWN cycler (issue #16 M4, gmSelStartTown): the CITY zone
+// the headquarters is elected in on the first tick; "(camp)" publishes
+// nothing. The character outfit cycler (issue #25) takes 153.
+constexpr int kIdcStartTown = 152;
 constexpr int kIdcOutfit = 153;
 // 154 is the outfit-preview mannequin (issue #25 M4): a CT_OBJECT rendering
 // the resolved playerClassWarrior/playerClassCiv body for the current
@@ -63,6 +67,12 @@ constexpr float kCyclerBodyY = 0.66f;
 constexpr float kCyclerOutfitY = 0.73f;
 constexpr float kCyclerOccupierY = 0.80f;
 constexpr float kCyclerResistanceY = 0.87f;
+// The START TOWN row sits BELOW the faction pair (the shipped 0.80/0.87
+// slots stay put, the mannequin owns the column above CHARACTER). The
+// reused RscDisplaySelectIsland's OK/Cancel row is y 0.90..0.95 at x >=
+// 0.60, so the 0.02..0.34 column is free there; the hidden Wizard button
+// (x 0.05..0.40, same row) is ShowCtrl(false) by the constructor.
+constexpr float kCyclerStartTownY = 0.94f;
 
 // The preview mannequin's slot: the free stretch of the bottom-left column
 // above the CHARACTER button. Authored as a normalized-screen box like the
@@ -146,6 +156,21 @@ std::vector<RString> GuerrillaListFactions(const ParamEntry* factionsCfg)
             continue; // the population is ambience, never a combatant choice
         }
         out.push_back(name);
+    }
+    return out;
+}
+
+std::vector<RString> GuerrillaListStartTowns(const ParamEntry* zonesCfg, const ParamEntry* namesCfg)
+{
+    // ONE rule, owned by the registry: the cycler lists exactly the CITY
+    // zones the launched campaign will carry (authored + seeded), so a pick
+    // always resolves through ZoneRegistry::FindZoneIndex on the first tick.
+    AutoArray<RString> names;
+    Guerrilla::ZoneRegistry::CollectTownNames(zonesCfg, namesCfg, names);
+    std::vector<RString> out;
+    for (int i = 0; i < names.Size(); i++)
+    {
+        out.push_back(names[i]);
     }
     return out;
 }
@@ -362,20 +387,23 @@ int GuerrillaIndexOfSelection(const ParamEntry* factionsCfg, const std::vector<R
     {
         return -1;
     }
-    // side first, then class name — the exact order ZoneRegistry::FindFaction
+    // class name first, then side — the exact order ZoneRegistry::FindFaction
     // scans in, so an index found here names the record the registry would
-    // have matched for the same string.
+    // have matched for the same string. (Both flipped to name-first in issue
+    // #54: with the faction library global, a template's defaultOccupier =
+    // "EAST" was matching the first EAST-SIDE faction of the merged table,
+    // EgyptFrontier with @LoBo mounted, instead of the class named EAST.)
     for (int i = 0; i < (int)list.size(); i++)
     {
-        RString side = GuerrillaFactionSide(factionsCfg, list[i]);
-        if (side.GetLength() > 0 && stricmp(side, selection) == 0)
+        if (stricmp(list[i], selection) == 0)
         {
             return i;
         }
     }
     for (int i = 0; i < (int)list.size(); i++)
     {
-        if (stricmp(list[i], selection) == 0)
+        RString side = GuerrillaFactionSide(factionsCfg, list[i]);
+        if (side.GetLength() > 0 && stricmp(side, selection) == 0)
         {
             return i;
         }
@@ -399,6 +427,68 @@ int GuerrillaIndexOfName(const std::vector<RString>& list, RString name)
         }
     }
     return -1;
+}
+
+RString GuerrillaFactionIssue(const ParamEntry* factionsCfg, RString faction, const Guerrilla::ClassProbe& probe,
+                              const ParamEntry* vehiclesCfg, const std::function<bool(RString)>& shapeExists)
+{
+    const ParamEntry* cls = factionsCfg && faction.GetLength() > 0 ? factionsCfg->FindEntry(faction) : nullptr;
+    if (!cls || !cls->IsClass())
+    {
+        return RString("no such faction");
+    }
+    char buffer[256];
+    const ParamEntry* tiers = cls->FindEntry("tiers");
+    if (!tiers || !tiers->IsArray() || tiers->GetSize() < 1)
+    {
+        return RString("authors no tiers[]");
+    }
+    RString tier0 = (RStringB)(*tiers)[0];
+    if (tier0.GetLength() == 0 || !probe.Exists("CfgVehicles", tier0))
+    {
+        snprintf(buffer, sizeof(buffer), "tiers[0] '%s' is not in the loaded data", (const char*)tier0);
+        return RString(buffer);
+    }
+    RString warrior = cls->ReadValue("playerClassWarrior", RString());
+    if (warrior.GetLength() > 0 && !probe.Exists("CfgVehicles", warrior))
+    {
+        snprintf(buffer, sizeof(buffer), "playerClassWarrior '%s' is not in the loaded data", (const char*)warrior);
+        return RString(buffer);
+    }
+    if (warrior.GetLength() > 0 && vehiclesCfg && shapeExists)
+    {
+        // the same gate the launch runs on the substituted body
+        RString modelIssue = Guerrilla::PlayerBodyModelIssue(vehiclesCfg, warrior, shapeExists);
+        if (modelIssue.GetLength() > 0)
+        {
+            snprintf(buffer, sizeof(buffer), "playerClassWarrior '%s': %s", (const char*)warrior,
+                     (const char*)modelIssue);
+            return RString(buffer);
+        }
+    }
+    return RString();
+}
+
+std::vector<RString> GuerrillaFactionIssues(const ParamEntry* factionsCfg, const std::vector<RString>& factions,
+                                            const Guerrilla::ClassProbe& probe, const ParamEntry* vehiclesCfg,
+                                            const std::function<bool(RString)>& shapeExists)
+{
+    std::vector<RString> out;
+    out.reserve(factions.size());
+    for (const RString& f : factions)
+    {
+        out.push_back(GuerrillaFactionIssue(factionsCfg, f, probe, vehiclesCfg, shapeExists));
+    }
+    return out;
+}
+
+RString GuerrillaUnavailableMessage(const char* role, RString faction, RString issue)
+{
+    char buffer[512];
+    snprintf(buffer, sizeof(buffer),
+             "%s faction '%s' is not in the loaded data (%s).\nMount the mod that ships it, or pick another faction.",
+             role ? role : "", (const char*)faction, (const char*)issue);
+    return RString(buffer);
 }
 
 void GuerrillaDefaultSelections(const ParamEntry* factionsCfg, const ParamEntry* zonesCfg,
@@ -858,6 +948,7 @@ void GuerrillaNewGame::InjectFactionCyclers()
         {"GuerrillaOutfit", kIdcOutfit, kCyclerOutfitY},
         {"GuerrillaOccupier", kIdcOccupier, kCyclerOccupierY},
         {"GuerrillaResistance", kIdcResistance, kCyclerResistanceY},
+        {"GuerrillaStartTown", kIdcStartTown, kCyclerStartTownY},
     };
     for (const auto& slot : slots)
     {
@@ -870,6 +961,13 @@ void GuerrillaNewGame::InjectFactionCyclers()
         if (Control* ctrl = dynamic_cast<Control*>(GetCtrl(slot.idc)))
         {
             ctrl->SetPos(kCyclerX, slot.y, kCyclerW, kCyclerH);
+        }
+        // every cycler is the same cloned class, so one capture serves the
+        // dim/restore of the faction rows (UpdateFactionLabel)
+        if (CActiveText* text = dynamic_cast<CActiveText*>(GetCtrl(slot.idc)); text && !_cyclerColorKnown)
+        {
+            _cyclerColor = text->GetColor();
+            _cyclerColorKnown = true;
         }
         UpdateFactionLabel(slot.idc);
     }
@@ -954,19 +1052,25 @@ void GuerrillaNewGame::UpdateOutfitPreview()
 
 void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
 {
-    // CfgGuerrillaFactions is authored per-island, inside that island's own
-    // Guerrilla.<island> template mission's description.ext (see
-    // guerrilla-mode/mission/*/description.ext) — it is never an addon's
-    // global config, so Pars does not carry it. Peek the template's own
-    // description.ext the same way the single-mission browser previews a
-    // banked mission's overview (CreateSingleMissionBank), without running
-    // the full SetMission()/launch path.
+    // The faction table is the UNION of two sources (issue #54 A1, executing
+    // #26): the island's own Guerrilla.<island> template description.ext block
+    // (see guerrilla-mode/mission/*/description.ext) and the global config's
+    // CfgGuerrillaFactions (Pars - addon faction packs, mod bin/config.cpp,
+    // the UD bin/config-extra.cpp), the island winning on a class-name
+    // collision. Peek the template's own description.ext the same way the
+    // single-mission browser previews a banked mission's overview
+    // (CreateSingleMissionBank), without running the full SetMission()/launch
+    // path, then merge through FactionSources - the same helper the mission
+    // side (ZoneRegistry::LoadFromConfig) and the player-body seam use, so
+    // what the cyclers list is exactly what the campaign resolves.
     //
     // Lifetime: _islandCfg.Clear() invalidates every ParamEntry* previously
     // handed out of it, and OnLBSelChanged re-enters here on every island
     // change — so the two pointers must be nulled BEFORE the Clear and
-    // re-derived after the Parse. _occupiers/_resistances hold owning RString
-    // copies and are unaffected.
+    // re-derived after the Parse. _islandFactions points into
+    // _factionSources' owned copy (rebuilt below), _islandZones into
+    // _islandCfg or Pars. _occupiers/_resistances hold owning RString copies
+    // and are unaffected.
     // Keep the player's picks across a refresh by NAME, not by index: the two
     // lists are rebuilt from scratch below and an index means nothing against
     // the new one.
@@ -975,8 +1079,10 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
 
     _islandFactions = nullptr;
     _islandZones = nullptr;
+    _factionSources.Clear();
     _islandCfg.Clear();
     _islandForFactions = island;
+    const ParamEntry* islandFactions = nullptr;
 
     RString missionBase = GuerrillaTemplateMissionBase(island);
     RString bankPrefix;
@@ -991,23 +1097,20 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
         if (QIFStreamB::FileExist(descPath))
         {
             _islandCfg.Parse(descPath);
-            _islandFactions = _islandCfg.FindEntry("CfgGuerrillaFactions");
+            islandFactions = _islandCfg.FindEntry("CfgGuerrillaFactions");
             _islandZones = _islandCfg.FindEntry("CfgGuerrillaZones");
         }
     }
-    // No per-island descriptor (missing template, or a template with no
-    // CfgGuerrilla* of its own) — fall back to a global config an addon might
-    // publish, then to an empty list (cyclers show "(mission default)"; OK
-    // still works via the mission's own default* keys). Pars lives for the
-    // process, so storing a pointer into it is safe. Both entries fall back
-    // INDEPENDENTLY: sourcing the factions from Pars while leaving the zones
-    // null left the OK guard reading playerSide off nothing, so it took its
-    // legacy branch and blocked pairs the registry rebases happily — and left
-    // the cyclers with no default* keys to seed from.
-    if (!_islandFactions)
-    {
-        _islandFactions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
+    // Merge: island block U Pars block. Either may be missing (a template
+    // with no block of its own, a package with no faction pack); with both
+    // missing the list is empty (cyclers show "(mission default)"; OK still
+    // works via the mission's own default* keys). The zones block falls back
+    // to Pars INDEPENDENTLY: sourcing the factions globally while leaving the
+    // zones null left the OK guard reading playerSide off nothing, so it took
+    // its legacy branch and blocked pairs the registry rebases happily — and
+    // left the cyclers with no default* keys to seed from.
+    _factionSources.Build(Pars.FindEntry("CfgGuerrillaFactions"), islandFactions);
+    _islandFactions = _factionSources.Factions();
     if (!_islandZones)
     {
         _islandZones = Pars.FindEntry("CfgGuerrillaZones");
@@ -1016,6 +1119,25 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // registry rebases whatever the pick collides with.
     _occupiers = GuerrillaListFactions(_islandFactions);
     _resistances = GuerrillaListFactions(_islandFactions);
+    // Availability on THIS data package (issue #54 A2): a faction whose
+    // tiers[0] / playerClassWarrior the loaded addons do not carry is listed
+    // greyed and refused on OK, instead of launching into fallback bodies.
+    // One line per greyed faction so a "why can't I pick X" has an answer in
+    // the log; INFO, not WARN, because a faction pack from an unmounted mod
+    // is the expected shape of a multi-mod install, not a defect.
+    {
+        Guerrilla::ParsClassProbe probe;
+        _factionIssues = GuerrillaFactionIssues(_islandFactions, _occupiers, probe, Pars.FindEntry("CfgVehicles"),
+                                                [](RString path) { return QIFStreamB::FileExist(path); });
+        for (size_t i = 0; i < _factionIssues.size(); i++)
+        {
+            if (_factionIssues[i].GetLength() > 0)
+            {
+                LOG_INFO(Core, "Guerrilla menu: faction '{}' greyed out on island '{}': {}", (const char*)_occupiers[i],
+                         (const char*)island, (const char*)_factionIssues[i]);
+            }
+        }
+    }
     // Seed from the template's own defaultOccupier/defaultResistance so that
     // opening this screen and pressing OK launches exactly what a direct,
     // no-UI launch of the same template would. The lists used to be empty
@@ -1042,15 +1164,60 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // Jordan authors no playerClassCiv. A name that does not appear on the new
     // island now falls through to the template's own default* keys, which is
     // the documented island-scoped re-seed contract.
-    int keptOccupier = GuerrillaIndexOfName(_occupiers, keepOccupier);
+    // Only a name the player actually CYCLED to is a pick worth keeping; an
+    // untouched row was the previous island's seed and must re-seed here
+    // (see _occupierPicked in the header for why the union made this
+    // necessary). An unpicked name is neither kept nor reported as dropped.
+    int keptOccupier = _occupierPicked ? GuerrillaIndexOfName(_occupiers, keepOccupier) : -1;
+    int keptResistance = _resistancePicked ? GuerrillaIndexOfName(_resistances, keepResistance) : -1;
+    if (!_occupierPicked)
+    {
+        keepOccupier = RString();
+    }
+    if (!_resistancePicked)
+    {
+        keepResistance = RString();
+    }
+    // A kept pick that lands on the SAME faction the other cycler was just
+    // re-seeded to (Sinai RESISTANCE: IDF, then Lebanon80 where IDF is the
+    // authored occupier) would open the screen on occupier == resistance,
+    // which is the issue-#50 failure by another route. The keep that
+    // collides yields to the template's own default* pair.
+    if (keptOccupier >= 0 && keptOccupier == _resistanceSel && keptResistance < 0)
+    {
+        LOG_WARN(Core,
+                 "Guerrilla menu: dropping the kept occupier '{}' on island '{}' - it is that template's default "
+                 "resistance",
+                 (const char*)keepOccupier, (const char*)island);
+        keptOccupier = -1;
+    }
+    if (keptResistance >= 0 && keptResistance == (keptOccupier >= 0 ? keptOccupier : _occupierSel))
+    {
+        LOG_WARN(Core,
+                 "Guerrilla menu: dropping the kept resistance '{}' on island '{}' - it collides with the occupier "
+                 "pick",
+                 (const char*)keepResistance, (const char*)island);
+        keptResistance = -1;
+    }
     if (keptOccupier >= 0)
     {
         _occupierSel = keptOccupier;
     }
-    int keptResistance = GuerrillaIndexOfName(_resistances, keepResistance);
+    else if (keepOccupier.GetLength() > 0)
+    {
+        // the two siblings (RefreshOutfitChoices, RevalidateBodySelection)
+        // already say when they drop a pick; this one was the silent exception
+        LOG_WARN(Core, "Guerrilla menu: dropping the occupier pick '{}' - island '{}' does not offer it",
+                 (const char*)keepOccupier, (const char*)island);
+    }
     if (keptResistance >= 0)
     {
         _resistanceSel = keptResistance;
+    }
+    else if (keepResistance.GetLength() > 0)
+    {
+        LOG_WARN(Core, "Guerrilla menu: dropping the resistance pick '{}' - island '{}' does not offer it",
+                 (const char*)keepResistance, (const char*)island);
     }
     // Cyclers don't exist yet on the first call (constructor, before
     // InjectFactionCyclers) — UpdateFactionLabel no-ops safely via its own
@@ -1059,9 +1226,38 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     UpdateFactionLabel(kIdcResistance);
     // The outfit pair is read off the (possibly re-seeded) resistance block.
     RefreshOutfitChoices();
+    // The START TOWN list is island-scoped too (the template's CITY zones +
+    // the world's Names towns).
+    RefreshStartTowns();
     // ...and the CHARACTER pick gets an explicit revalidation pass, so nothing
     // island-shaped can leave the button or the mannequin stale.
     RevalidateBodySelection();
+}
+
+void GuerrillaNewGame::RefreshStartTowns()
+{
+    // Keep the pick by NAME across the rebuild (the faction-cycler contract);
+    // a town the new island does not carry drops back to "(camp)".
+    RString keep = SelectedStartTown();
+    const ParamEntry* names = nullptr;
+    if (const ParamEntry* worlds = Pars.FindEntry("CfgWorlds"))
+    {
+        if (const ParamEntry* world = worlds->FindEntry(_islandForFactions))
+        {
+            names = world->FindEntry("Names");
+        }
+    }
+    _startTowns = GuerrillaListStartTowns(_islandZones, names);
+    _startTownSel = -1;
+    for (int i = 0; i < (int)_startTowns.size(); i++)
+    {
+        if (keep.GetLength() > 0 && stricmp(_startTowns[i], keep) == 0)
+        {
+            _startTownSel = i;
+            break;
+        }
+    }
+    UpdateFactionLabel(kIdcStartTown);
 }
 
 void GuerrillaNewGame::RevalidateBodySelection()
@@ -1188,6 +1384,29 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
         }
         return;
     }
+    if (idc == kIdcStartTown)
+    {
+        // "START TOWN: <zone>" or the "(camp)" default, which publishes
+        // nothing: the campaign opens at the authored mission.sqm start and
+        // the HQ is established later through the action menu.
+        if (_startTownSel >= 0 && _startTownSel < (int)_startTowns.size())
+        {
+            snprintf(buffer, sizeof(buffer), "START TOWN: %s", (const char*)_startTowns[_startTownSel]);
+        }
+        else
+        {
+            snprintf(buffer, sizeof(buffer), "START TOWN: (camp)");
+        }
+        if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        else if (CStatic* text = dynamic_cast<CStatic*>(ctrl))
+        {
+            text->SetText(buffer);
+        }
+        return;
+    }
     // Scope qualifier for the OUTFIT row (issue #47). A CHARACTER pick beats
     // the outfit token for the PLAYER's body unconditionally —
     // ResolvePlayerBodyClass (Game/Guerrilla/OutfitSelect.cpp) returns on the
@@ -1217,10 +1436,23 @@ void GuerrillaNewGame::UpdateFactionLabel(int idc)
     // defaultResistance keys, or the authored mission.sqm class for the
     // outfit), so say so instead of showing a value the mission may override.
     const char* selected = (sel >= 0 && sel < (int)list.size()) ? (const char*)list[sel] : "(mission default)";
-    snprintf(buffer, sizeof(buffer), "%s: %s", prefix, selected);
+    // A faction the loaded package cannot field stays in the cycle (the
+    // player must be able to SEE what a missing mod would offer) but reads
+    // "(not in loaded data)" and dims; OK refuses it (issue #54 A2).
+    const bool factionRow = idc == kIdcOccupier || idc == kIdcResistance;
+    const bool unavailable =
+        factionRow && sel >= 0 && sel < (int)_factionIssues.size() && _factionIssues[sel].GetLength() > 0;
+    snprintf(buffer, sizeof(buffer), "%s: %s%s", prefix, selected,
+             unavailable ? kGuerrillaFactionUnavailableSuffix : "");
     if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
     {
         text->SetText(buffer);
+        if (factionRow && _cyclerColorKnown)
+        {
+            text->SetColor(unavailable ? PackedColor(_cyclerColor.R8() / 2, _cyclerColor.G8() / 2,
+                                                     _cyclerColor.B8() / 2, _cyclerColor.A8())
+                                       : _cyclerColor);
+        }
     }
     else if (CStatic* text = dynamic_cast<CStatic*>(ctrl))
     {
@@ -1236,6 +1468,7 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_occupiers.empty())
             {
                 _occupierSel = (_occupierSel + 1) % (int)_occupiers.size();
+                _occupierPicked = true;
             }
             UpdateFactionLabel(idc);
             break;
@@ -1243,6 +1476,7 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             if (!_resistances.empty())
             {
                 _resistanceSel = (_resistanceSel + 1) % (int)_resistances.size();
+                _resistancePicked = true;
             }
             UpdateFactionLabel(idc);
             // The outfit pair is authored per resistance block — the new
@@ -1256,6 +1490,15 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             }
             UpdateFactionLabel(idc);
             UpdateOutfitPreview();
+            break;
+        case kIdcStartTown:
+            // cycles "(camp)" -> town 1 -> ... -> town N -> "(camp)"; an
+            // empty list (no CITY zones on this island) keeps the default
+            if (!_startTowns.empty())
+            {
+                _startTownSel = _startTownSel + 1 >= (int)_startTowns.size() ? -1 : _startTownSel + 1;
+            }
+            UpdateFactionLabel(idc);
             break;
         case kIdcBody:
             // The old flat cycler is retired (issue #43): the button opens
@@ -1297,6 +1540,24 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
             // template (Pars never carries CfgGuerrillaFactions, which is why
             // this guard used to be unreachable).
             RString message;
+            // A greyed pick (issue #54 A2) is refused BEFORE the side check:
+            // launching it would put fallback bodies on every spawn of that
+            // side, which is exactly the silent-drop shape issue #46 forbids.
+            // Refuse, never auto-skip - the player chose it on purpose.
+            if (_occupierSel >= 0 && _occupierSel < (int)_factionIssues.size() &&
+                _factionIssues[_occupierSel].GetLength() > 0)
+            {
+                CreateMsgBox(MB_BUTTON_OK,
+                             GuerrillaUnavailableMessage("OCCUPIER", SelectedOccupier(), _factionIssues[_occupierSel]));
+                break;
+            }
+            if (_resistanceSel >= 0 && _resistanceSel < (int)_factionIssues.size() &&
+                _factionIssues[_resistanceSel].GetLength() > 0)
+            {
+                CreateMsgBox(MB_BUTTON_OK, GuerrillaUnavailableMessage("RESISTANCE", SelectedResistance(),
+                                                                       _factionIssues[_resistanceSel]));
+                break;
+            }
             if (!GuerrillaSelectionIsResolvable(_islandFactions, _islandZones, SelectedOccupier(), SelectedResistance(),
                                                 message))
             {
@@ -1462,6 +1723,17 @@ RString GuerrillaNewGame::SelectedOutfit() const
     }
     // No descriptor offered an outfit pair — publish nothing so the authored
     // mission.sqm class keeps deciding (see SelectedOccupier).
+    return RString();
+}
+
+RString GuerrillaNewGame::SelectedStartTown() const
+{
+    if (_startTownSel >= 0 && _startTownSel < (int)_startTowns.size())
+    {
+        return _startTowns[_startTownSel];
+    }
+    // "(camp)" default: publish nothing, the authored start stands (see
+    // SelectedOccupier)
     return RString();
 }
 

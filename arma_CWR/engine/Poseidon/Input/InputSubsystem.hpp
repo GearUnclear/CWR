@@ -34,6 +34,11 @@ class InputSubsystem
     float GetAction(InputContext ctx, UserAction action, bool checkFocus = true) const;
     bool GetActionToDo(UserAction action, bool reset = true, bool checkFocus = true);
 
+    // Forward / fast-forward for a context with the Turbo modifier folded in (Turbo
+    // promotes MoveForward to fast). Vehicle pilots read these, not the raw actions.
+    float GetMoveForward(InputContext ctx) const;
+    float GetMoveFastForward(InputContext ctx) const;
+
     // Computed movement state (set by Update())
     float GetMoveForward() const { return moveForward_; }
     float GetMoveFastForward() const { return moveFastForward_; }
@@ -47,7 +52,16 @@ class InputSubsystem
     float GetTurnRight() const { return turnRight_; }
     bool IsFiring() const { return fire_; }
     bool IsFirePressed() const { return fireToDo_; }
-    bool IsLookAroundEnabled() const { return lookAroundEnabled_; }
+    // Freelook has two sources: the player's manual hold/toggle (LAlt / numpad *)
+    // and the seat lock World applies while the player occupies a driving or
+    // piloting seat (mouse never steers vehicles — it always looks).  Gameplay
+    // code cares only about the OR; the manual flag stays visible for the
+    // device-recency arbitration, which must not change just because a seat
+    // pinned freelook on.
+    bool IsLookAroundEnabled() const { return lookAroundEnabled_ || lookAroundSeatLock_; }
+    bool IsLookAroundManual() const { return lookAroundEnabled_; }
+    bool IsSeatFreelookLocked() const { return lookAroundSeatLock_; }
+    void SetSeatFreelookLock(bool locked);
     bool IsLookAroundToggled() const { return lookAroundToggled_; }
     bool FreelookChanged() const { return freelookChanged_; }
     void ResetLookAroundToggle();
@@ -56,6 +70,9 @@ class InputSubsystem
     bool IsMouseTurnActive() const;
     bool IsMouseCursorActive() const;
     bool IsJoystickActive() const;
+    // Gate for the vehicle JoystickPilot paths: gamepad steering can be turned
+    // off in Options (gamepad stays live for look/buttons/menus).
+    bool IsJoystickPilotActive() const;
     bool IsJoystickThrustActive() const;
     bool IsJoystickEnabled() const;
     bool IsKeyboardCursorMoreRecent() const;  // keyboard cursor more recent than mouse
@@ -174,6 +191,9 @@ class InputSubsystem
     void ToggleReverseMouse();
     void SetJoystickEnabled(bool v);
     void ToggleJoystickEnabled();
+    bool IsReverseJoystick() const;
+    void SetReverseJoystick(bool v);
+    void ToggleReverseJoystick();
     bool IsMouseButtonsReversed() const;
     void SetMouseButtonsReversed(bool v);
     void ToggleMouseButtonsReversed();
@@ -251,6 +271,7 @@ class InputSubsystem
     float turnLeft_ = 0, turnRight_ = 0;
     bool fire_ = false, fireToDo_ = false;
     bool lookAroundEnabled_ = false, lookAroundToggled_ = false;
+    bool lookAroundSeatLock_ = false;
     bool freelookChanged_ = false;
 
     static constexpr int kNumContexts = static_cast<int>(InputContext::Count);

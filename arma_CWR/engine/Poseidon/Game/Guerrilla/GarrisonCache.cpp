@@ -286,26 +286,6 @@ static bool IsOccupierOwned(const ZoneRegistry& registry, const ZoneRecord& z)
     return registry.FactionTierClass(z.owner, 1.0f).GetLength() > 0;
 }
 
-// script-owned war level; 1 when undefined (matches init.sqs default)
-static float ReadWarLevel()
-{
-    if (!GWorld)
-    {
-        return 1.0f;
-    }
-    GameState* gstate = GWorld->GetGameState();
-    if (!gstate)
-    {
-        return 1.0f;
-    }
-    GameValue value = gstate->VarGet("gmwarlevel");
-    if (value.GetType() != GameScalar)
-    {
-        return 1.0f;
-    }
-    return (float)value;
-}
-
 static Vector3 RandomNear(Vector3Par center, float radius)
 {
     float x = center.X() + (GRandGen.RandomValue() * 2.0f - 1.0f) * radius;
@@ -319,46 +299,10 @@ static Vector3 RandomNear(Vector3Par center, float radius)
     return Vector3(x, y, z);
 }
 
-// mirrors CenterCreate (GameStateExtWorldConfig.cpp): the occupier may have
-// no seeded units, so its command center may not exist yet
-static AICenter* EnsureCenter(const char* sideName)
-{
-    using Poseidon::Foundation::GetEnumValue;
-    TargetSide side = GetEnumValue<TargetSide>(sideName);
-    if (side == INT_MIN || !GWorld)
-    {
-        return nullptr;
-    }
-    AICenter* center = GWorld->GetCenter(side);
-    if (!center)
-    {
-        center = GWorld->CreateCenter(side);
-        if (center)
-        {
-            GetNetworkManager().CreateObject(center);
-        }
-    }
-    return center;
-}
-
-// mirrors GroupCreate (GameStateExtWorldConfig.cpp:693)
-static AIGroup* CreateGarrisonGroup(AICenter* center)
-{
-    if (!center || center->NGroups() >= MaxGroups)
-    {
-        return nullptr;
-    }
-    Ref<AIGroup> group = new AIGroup();
-    center->AddGroup(group);
-    group->AddFirstWaypoint(VZero);
-
-    Mission mis;
-    mis._action = Mission::Arcade;
-    center->SendMission(group, mis);
-
-    GetNetworkManager().CreateObject(group);
-    return group;
-}
+// Center + group creation are the shared Guerrilla helpers EnsureSideCenter /
+// CreateSideGroup (ZoneRegistry.hpp) - the occupier may have no seeded units,
+// so its command center is created on demand; the group mirrors GroupCreate
+// (GameStateExtWorldConfig.cpp:693).
 
 // hold-the-zone posture from spawning.sqs: waypoint on the zone (SENTRY for
 // the officer group, GUARD otherwise), behaviour AWARE, combat mode YELLOW -
@@ -426,7 +370,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
         officerClass = tierClass;
     }
 
-    AICenter* center = EnsureCenter(z->owner);
+    AICenter* center = EnsureSideCenter(z->owner);
     if (!center)
     {
         return;
@@ -442,7 +386,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     bool firstGroup = true;
     for (int g = 0; g < takes.Size(); g++)
     {
-        AIGroup* grp = CreateGarrisonGroup(center);
+        AIGroup* grp = CreateSideGroup(center);
         if (!grp)
         {
             // AICenter group slots exhausted: stop, the rest stays in reserve

@@ -1,9 +1,12 @@
 // Guerrilla Mode - mission metadata + THE per-island data file (issue #3 item 3).
-// Everything island- or faction-specific lives HERE: the zone seed
-// (CfgGuerrillaZones) and the faction descriptors (CfgGuerrillaFactions).
-// The scripts/ directory is the shared island-agnostic core - it contains no
-// classnames and no side strings; it reads this data through the native
-// gmZone* / gmFaction* command surface (engine/Poseidon/Game/Guerrilla/).
+// Everything ISLAND-specific lives HERE: the zone seed (CfgGuerrillaZones), the
+// civilian population and any faction override (CfgGuerrillaFactions) and the
+// dealer stock (CfgGuerrillaMarket). The vanilla war rosters do NOT - they moved
+// to the global library guerrilla-mode/config/guerrilla-factions.hpp (issue #54
+// A4) and are unioned in at load. The scripts/ directory is the shared
+// island-agnostic core - it contains no classnames and no side strings; it reads
+// this data through the native gmZone* / gmFaction* command surface
+// (engine/Poseidon/Game/Guerrilla/).
 //
 // Defining class CfgGuerrillaZones is what ACTIVATES the native guerrilla
 // systems (ZoneRegistry / AlertMachine / GarrisonCache). No class = plain
@@ -16,6 +19,14 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Side resolution for a direct (no-UI) launch: the same pair the new-game
+    // screen seeds from these keys, so an untouched screen and a direct
+    // launch bind the SAME faction blocks (the rosters come from the global
+    // library since issue #54 A4; the built-in EAST/GUER side defaults alone
+    // would leave the faction binding empty on a direct launch).
+    defaultOccupier = "EAST";
+    defaultResistance = "GUER";
+
     // Engine tuning (all left at stock defaults): tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
     // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
@@ -64,62 +75,33 @@ class CfgGuerrillaZones
     };
 };
 
-// Faction descriptors for the Demo dataset (stock OFP/CWA classes).
+// The ISLAND half of the faction table (issue #54 A4). The vanilla
+// WEST/EAST/GUER rosters live in the global library
+// guerrilla-mode/config/guerrilla-factions.hpp (installed to
+// <GameDir>\bin\, pulled in by bin\config-extra.cpp, documented there -
+// including the script-facing KEY NAMING SCHEME every descriptor follows);
+// the engine unions that block with this one, this file winning on a
+// class-name collision (Game/Guerrilla/FactionSources.*).
+//
 // The new-game UI publishes gmSelOccupier/gmSelResistance and the engine
-// resolves them against these classes; the nulars gmOccupierSide /
+// resolves them against the merged table; the nulars gmOccupierSide /
 // gmResistanceSide hand the resolved side strings to the scripts (defaults
 // "EAST"/"GUER" when no selection was made).
 //
-// KEY NAMING SCHEME (script-facing, read via gmFactionValue/gmFactionTierClass/
-// gmFactionVehicle - see guerrilla-mode/ARCHITECTURE.md "Faction keys"):
-//   tiers[] + tierThresholds[]   garrison/QRF infantry per war level (native + qrf.sqs)
-//   vehicles[] + vehicleThreshold QRF escort per war level (qrf.sqs)
-//   officer                      squad leader class (native garrison + qrf.sqs)
-//   holdClass / holdCount        capture hold-garrison class and size (capture.sqs)
-//   recruitFighter / recruitSpecialist   Camp recruit classes (recruit.sqs)
-//   companionClass               named-companion body class (companions.sqs)
-//   playerClass{Warrior,Civ}     character-select outfit bodies (issue #25;
-//       the engine substitutes the player's mission.sqm class at load when
-//       gmSelOutfit=CIVILIAN - WorldInit.cpp/OutfitSelect.cpp)
-//   {recruitFighter,recruitSpecialist,companionClass,holdClass}Civ
-//       civilian-outfit twins of the keys above (scripts pick them when
-//       GM_OUTFIT_CIV; absent/unresolvable = warrior bodies)
-//   civTier[]                    civilian-outfit AI ladder (gmFactionCivTier;
-//       issue #16's guard/militia rung; same tierThresholds[] gates)
-//   baseWeapon / baseMagazine    always-available fallback kit (loot.sqs)
-//   loot<Role>Weapon / loot<Role>Mag     role loadouts, Role in
-//       {Rifleman, Medic, MG, AT, Sniper} (loot.sqs unlock table)
+// EAST is NOT redeclared here: this template's old EAST block was a strict
+// subset of the library's, key for key and value for value, so inheriting the
+// library version only adds the hold/recruit/loot keys it lacked - all
+// package-probed, so the classes the Demo [Remaster] set lacks degrade
+// (logged) rather than aborting.
 class CfgGuerrillaFactions
 {
-    class EAST // occupier descriptor
-    {
-        side = "EAST";
-        // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops (the old
-        // GM_fnPickTier ladder; every classname verified against the CWA 1.99
-        // CONFIG.BIN - "SoldierESoldier" does not exist in this config family)
-        tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
-        tierThresholds[] = {3, 5};
-        // per-tier role variants (plan 15): the native squad composer fills
-        // MG/AT/medic/sniper slots from these; "" = the tier fields no such
-        // role (that slot spawns the tier rifleman). SoldierESniper is
-        // Classic-only - on the Demo [Remaster] package the engine's
-        // descriptor-resolution pass blanks it (logged) and the slot
-        // degrades to a rifleman instead of a fatal spawn.
-        tiersMG[]     = {"SoldierEMG", "SoldierEMG", "SoldierEMG"};
-        tiersAT[]     = {"SoldierELAW", "SoldierELAW", "SoldierELAW"};
-        tiersMedic[]  = {"SoldierEMedic", "SoldierEMedic", "SoldierEMedic"};
-        tiersSniper[] = {"", "", "SoldierESniper"};
-        // QRF escort ladder (full vehicleThresholds[] form, plan 15): UAZ
-        // patrol -> truck-mobile -> BMP (best all-round QRF vehicle: D+G+C,
-        // 8 cargo, 73mm+AT-3) -> T72 escort. All four classes ship in BOTH
-        // local packages (Classic 1.99 and Demo [Remaster]).
-        vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
-        vehicleThresholds[] = {3, 6, 8};
-        officer = "OfficerE";
-        // town flagpole texture (native TownFlags); matches the engine's
-        // side-EAST default - stated for the data-file contract
-        flag = "\flags\ussr.jpg";
-    };
+    // ISLAND OVERRIDE of the library's GUER (whole class, no per-key merge).
+    // WHY: the library's GUER is authored against the FULL 1.99 roster - a
+    // two-rung tier ladder (SoldierGG), OfficerG, a captured BMP - and the
+    // Demo dataset ships none of that. This one stays on the single rung and
+    // the classes the Demo package can actually resolve, so the descriptor
+    // reads as what the mission will really spawn instead of relying on the
+    // resolution pass to blank half of it.
     class GUER // resistance descriptor
     {
         side = "GUER";
@@ -205,5 +187,66 @@ class CfgGuerrillaFactions
         // civilian class when the Demo-package descriptor remap (#13) lands.
         civClassCount = 1;   // number of civClass<N> keys that follow
         civClass1 = "SoldierWCaptive";
+    };
+};
+
+// The dealer market (issues #27/#28): tuning + the Classic 1.99 stock. Every
+// classname is verified against Bin\CONFIG.BIN (PoseidonTools config search);
+// the engine re-probes them at load and drops what a package lacks (logged,
+// non-fatal - the Demo [Remaster] package keeps whatever subset it ships).
+// OFP magazine convention: a simple weapon IS its own magazine class, so the
+// magazine keys reuse the weapon classname; launcher grenades, hand grenades
+// and explosives are magazine-only bundles (weapon = "").
+class CfgGuerrillaMarket
+{
+    dealerShare = 0.34;          // fraction of CITY zones per dealer kind (independent draws)
+    dealerRespawnSeconds = 600;  // a killed dealer is back after this
+    hqMoveCost = 500;            // R debited by market.sqs when MOVING the HQ
+    // dealerClass falls back to the CIV descriptor's civClass1, then "Civilian";
+    // weaponDealers[] / vehicleDealers[] absent: the towns are drawn at the first tick
+
+    class Weapons
+    {
+        class AK47       { weapon = "AK47";               magazine = "AK47";              mags = 4; price = 220; };
+        class AK74       { weapon = "AK74";               magazine = "AK74";              mags = 4; price = 260; };
+        class AK47CZ     { weapon = "AK47CZ";             magazine = "AK47";              mags = 4; price = 240; };
+        class AK74SU     { weapon = "AK74SU";             magazine = "AK74";              mags = 4; price = 240; };
+        class M16        { weapon = "M16";                magazine = "M16";               mags = 4; price = 280; };
+        class HK         { weapon = "HK";                 magazine = "HK";                mags = 5; price = 300; };
+        class M16GL      { weapon = "M16GrenadeLauncher"; magazine = "M16";               mags = 4; price = 420; };
+        class AK74GL     { weapon = "AK74GrenadeLauncher"; magazine = "AK74";             mags = 4; price = 400; };
+        class GLGrenades { weapon = "";                   magazine = "GrenadeLauncher";   mags = 6; price = 90; };
+        class M21        { weapon = "M21";                magazine = "M21";               mags = 4; price = 600; };
+        class SVD        { weapon = "SVDDragunov";        magazine = "SVDDragunov";       mags = 4; price = 650; };
+        class PK         { weapon = "PK";                 magazine = "PK";                mags = 2; price = 900; };
+        class M60        { weapon = "M60";                magazine = "M60";               mags = 2; price = 950; };
+        class LAW        { weapon = "LAWLauncher";        magazine = "LAWLauncher";       mags = 2; price = 500; };
+        class RPG        { weapon = "RPGLauncher";        magazine = "RPGLauncher";       mags = 2; price = 550; };
+        class CarlGustav { weapon = "CarlGustavLauncher"; magazine = "CarlGustavLauncher"; mags = 2; price = 900; };
+        class AT4        { weapon = "AT4Launcher";        magazine = "AT4Launcher";       mags = 2; price = 900; };
+        class Strela     { weapon = "9K32Launcher";       magazine = "9K32Launcher";      mags = 1; price = 1200; };
+        class Stinger    { weapon = "AALauncher";         magazine = "AALauncher";        mags = 1; price = 1200; };
+        class Binocular  { weapon = "Binocular";          magazine = "";                            price = 60; };
+        class NVGoggles  { weapon = "NVGoggles";          magazine = "";                            price = 250; };
+        class Grenades   { weapon = "";                   magazine = "HandGrenade";       mags = 4; price = 80; };
+        class Mines      { weapon = "";                   magazine = "Mine";              mags = 2; price = 150; };
+        class Satchels   { weapon = "";                   magazine = "PipeBomb";          mags = 2; price = 200; };
+    };
+    class Vehicles
+    {
+        class Skoda      { vehicle = "Skoda";      price = 600; };
+        class Rapid      { vehicle = "Rapid";      price = 700; };
+        class Tractor    { vehicle = "Tractor";    price = 500; };
+        class Jeep       { vehicle = "Jeep";       price = 1500; };
+        class GJeep      { vehicle = "GJeep";      price = 1400; };
+        class UAZ        { vehicle = "UAZ";        price = 1400; };
+        class JeepMG     { vehicle = "JeepMG";     price = 3000; };
+        class UAZG       { vehicle = "UAZG";       price = 3000; };
+        class Truck5t    { vehicle = "Truck5t";    price = 3500; };
+        class Ural       { vehicle = "Ural";       price = 3500; };
+        class TruckV3SG  { vehicle = "TruckV3SG";  price = 3200; };
+        class M113       { vehicle = "M113";       price = 9000; };
+        class BMP        { vehicle = "BMP";        price = 12000; };
+        class T55G       { vehicle = "T55G";       price = 20000; };
     };
 };

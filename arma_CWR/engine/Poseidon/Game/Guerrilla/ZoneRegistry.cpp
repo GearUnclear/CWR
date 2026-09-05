@@ -3,15 +3,21 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
-#include <Poseidon/Game/Guerrilla/FactionTwins.hpp> // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/Asset/Addon/AddonClosure.hpp>      // faction addon closure (issue #54 C1)
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
+#include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // PlayerBodyModelIssue (shape gate, issue #46 seam 4b)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
-#include <Poseidon/IO/ParamFileExt.hpp>             // Pars / ExtParsMission
+#include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+#include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (shape gate)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Evaluator/express.hpp> // GameState / GameValue (event dispatch)
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/House.hpp> // Building (settlement classifier, issue #54 C3)
+#include <Poseidon/World/Terrain/Landscape.hpp>       // GLandscape->WaterDepth
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICore.hpp>              // markersMap
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp> // ArcadeMarkerInfo
@@ -97,9 +103,51 @@ AICenter* EnsureSideCenter(const char* sideName)
     return center;
 }
 
+// mirrors GroupCreate (GameStateExtWorldConfig.cpp:693): a fresh group with
+// its first waypoint at the origin and an Arcade mission, announced to the
+// network layer.  Hoisted out of GarrisonCache/Traffic so every Guerrilla
+// spawner (garrisons, traffic crews, dealers) builds groups the same way.
+AIGroup* CreateSideGroup(AICenter* center)
+{
+    if (!center || center->NGroups() >= MaxGroups)
+    {
+        return nullptr;
+    }
+    Ref<AIGroup> group = new AIGroup();
+    center->AddGroup(group);
+    group->AddFirstWaypoint(VZero);
+
+    Mission mis;
+    mis._action = Mission::Arcade;
+    center->SendMission(group, mis);
+
+    GetNetworkManager().CreateObject(group);
+    return group;
+}
+
+// script-owned war level; 1 when undefined (matches the init.sqs default)
+float ReadWarLevel()
+{
+    if (!GWorld)
+    {
+        return 1.0f;
+    }
+    GameState* gstate = GWorld->GetGameState();
+    if (!gstate)
+    {
+        return 1.0f;
+    }
+    GameValue value = gstate->VarGet("gmwarlevel");
+    if (value.GetType() != GameScalar)
+    {
+        return 1.0f;
+    }
+    return (float)value;
+}
+
 // script/campaign global published by the new-game UI (OptionsUIApp VarSets
-// kGuerrillaVarOccupier / kGuerrillaVarResistance); read like GarrisonCache's
-// ReadWarLevel - VarGet with the lowercased name, nil tolerated
+// kGuerrillaVarOccupier / kGuerrillaVarResistance); read like ReadWarLevel -
+// VarGet with the lowercased name, nil tolerated
 static RString ReadSideSelection(const char* lowercaseName)
 {
     if (!GWorld)
@@ -130,6 +178,26 @@ bool ParsClassProbe::Exists(const char* bank, const char* className) const
     }
     const ParamEntry* bankEntry = Pars.FindEntry(bank);
     return bankEntry && bankEntry->FindEntry(className) != nullptr;
+}
+
+// the shape gate on top of existence (issue #46 seam 4b): the same pair the
+// CHARACTER roster and the launch seam use, so the registry can never keep a
+// class the menu would have refused
+bool ParsClassProbe::Spawnable(const char* className) const
+{
+    if (!Exists("CfgVehicles", className))
+    {
+        return false;
+    }
+    RString issue = PlayerBodyModelIssue(Pars.FindEntry("CfgVehicles"), RString(className),
+                                         [](RString path) { return QIFStreamB::FileExist(path); });
+    if (issue.GetLength() > 0)
+    {
+        LOG_WARN(Core, "ZoneRegistry: class '{}' is in the config but cannot be rendered ({}) - treating as absent",
+                 className, (const char*)issue);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +235,49 @@ void ZoneRegistry::InitMission()
 {
     Clear();
     LoadFromConfig();
+    ActivateFactionAddons();
+}
+
+// Engine wrapper over CollectFactionAddons: the additive World::ActivateAddon
+// grant (the same runtime-only visibility the player-body seam uses, never
+// written into the template's addOns[]), logged once at INFO so a missing
+// pbo shows up as "activated X" or does not show up at all.
+void ZoneRegistry::ActivateFactionAddons() const
+{
+    if (!GWorld || !IsActive())
+    {
+        return;
+    }
+    FindArrayRStringCI addons;
+    CollectFactionAddons(Pars.FindEntry("CfgVehicles"), Pars.FindEntry("CfgWeapons"), Pars.FindEntry("CfgMagazines"),
+                         addons);
+    RString added;
+    int nAdded = 0;
+    for (int i = 0; i < addons.Size(); i++)
+    {
+        if (GWorld->IsAddonActive(addons[i]))
+        {
+            continue;
+        }
+        GWorld->ActivateAddon(addons[i]);
+        added = added + (nAdded > 0 ? RString(", ") : RString()) + addons[i];
+        nAdded++;
+    }
+    if (nAdded > 0)
+    {
+        LOG_INFO(Core,
+                 "ZoneRegistry: activated {} addon(s) the faction descriptors need beyond the mission's addOns[]: {}",
+                 nAdded, (const char*)added);
+    }
+}
+
+const FactionRecord* ZoneRegistry::GetFaction(int index) const
+{
+    if (index < 0 || index >= _factions.Size())
+    {
+        return nullptr;
+    }
+    return &_factions[index];
 }
 
 void ZoneRegistry::LoadFromConfig()
@@ -176,11 +287,14 @@ void ZoneRegistry::LoadFromConfig()
     {
         zones = Pars.FindEntry("CfgGuerrillaZones");
     }
-    const ParamEntry* factions = ExtParsMission.FindEntry("CfgGuerrillaFactions");
-    if (!factions)
-    {
-        factions = Pars.FindEntry("CfgGuerrillaFactions");
-    }
+    // the faction table is the UNION of the global config (addon faction
+    // packs, bin/config-extra.cpp) and the mission's own description.ext
+    // block, island winning on a name collision (issue #54 A1). Built here
+    // and consumed by LoadFromParams, which copies what it needs into
+    // FactionRecords, so the merged ParamFile may die with this frame.
+    FactionSources factionSources;
+    BuildFactionSourcesFromEngine(factionSources);
+    const ParamEntry* factions = factionSources.Factions();
     // new-game faction selections (nil outside a Guerrilla campaign)
     RString selOccupier = ReadSideSelection("gmseloccupier");
     RString selResistance = ReadSideSelection("gmselresistance");
@@ -199,7 +313,11 @@ void ZoneRegistry::LoadFromConfig()
     // degrades with a logged substitution on another instead of producing
     // fatal or silently-sterile spawns
     ParsClassProbe probe;
-    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe);
+    // the CITY auto-seed classifies Names entries against the loaded
+    // landscape (dry land, buildings around) unless the template forces the
+    // legacy seed-everything or seed-nothing (issue #54 C3)
+    LandscapeSettlementProbe settlement;
+    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe, &settlement);
     // alert and undercover tunables share the CfgGuerrillaZones class;
     // loading here (not in LoadFromParams) keeps the testable core free of
     // singleton side effects
@@ -208,7 +326,8 @@ void ZoneRegistry::LoadFromConfig()
 }
 
 void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
-                                  const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe)
+                                  const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe,
+                                  const SettlementProbe* settlement)
 {
     // rebuilds the config-derived tables only; event handlers and any
     // pending savegame rows are preserved (see Serialize)
@@ -256,9 +375,9 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     {
         LoadZones(*zonesCfg);
     }
-    if (_tuning.seedCities && worldNamesCfg)
+    if (_tuning.seedCities != ZoneTuning::SeedCities::Off && worldNamesCfg)
     {
-        SeedCityZones(*worldNamesCfg);
+        SeedCityZones(*worldNamesCfg, settlement);
     }
 }
 
@@ -347,7 +466,8 @@ void ZoneRegistry::ResolveSideCollisions(const ParamEntry* factionsCfg)
             }
             else
             {
-                LOG_INFO(Core, "Guerrilla: occupier faction '{}' rebased from side {} to {} (no sideTwin off that side)",
+                LOG_INFO(Core,
+                         "Guerrilla: occupier faction '{}' rebased from side {} to {} (no sideTwin off that side)",
                          (const char*)_occupierFaction, (const char*)_occupierSide, (const char*)freeSide);
                 _occupierSide = freeSide;
             }
@@ -534,7 +654,7 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.heatCapSpike = cfg.ReadValue("heatCapSpike", _tuning.heatCapSpike);
     _tuning.defaultIncome = cfg.ReadValue("defaultIncome", _tuning.defaultIncome);
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
-    _tuning.seedCities = cfg.ReadValue("seedCities", _tuning.seedCities ? 1.0f : 0.0f) != 0.0f;
+    _tuning.seedCities = ReadSeedCitiesMode(&cfg);
     _tuning.seedCitySupport = cfg.ReadValue("seedCitySupport", _tuning.seedCitySupport);
     _tuning.captureRate = cfg.ReadValue("captureRate", _tuning.captureRate);
     _tuning.captureCrewCap = cfg.ReadValue("captureCrewCap", _tuning.captureCrewCap);
@@ -631,6 +751,9 @@ void ZoneRegistry::LoadFactions(const ParamEntry& cfg)
             }
         }
         readStringArray("vehicles", f.vehicles);
+        // civilian traffic hulls (Traffic): optional, CIV descriptor only in
+        // practice, no ladder / thresholds
+        readStringArray("civVehicles", f.civVehicles);
         const ParamEntry* vehThresholds = e.FindEntry("vehicleThresholds");
         if (vehThresholds && vehThresholds->IsArray())
         {
@@ -753,6 +876,55 @@ bool IsWeaponKey(const char* key)
 
 } // namespace
 
+void ZoneRegistry::CollectFactionAddons(const ParamEntry* vehiclesCfg, const ParamEntry* weaponsCfg,
+                                        const ParamEntry* magazinesCfg, FindArrayRStringCI& addons) const
+{
+    for (int fi = 0; fi < _factions.Size(); fi++)
+    {
+        const FactionRecord& f = _factions[fi];
+        const AutoArray<RString>* unitLadders[] = {&f.tiers,       &f.tiersMG,  &f.tiersAT,  &f.tiersMedic,
+                                                   &f.tiersSniper, &f.civTiers, &f.vehicles, &f.civVehicles};
+        for (const AutoArray<RString>* ladder : unitLadders)
+        {
+            for (int i = 0; i < ladder->Size(); i++)
+            {
+                CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, (*ladder)[i], addons);
+            }
+        }
+        for (int k = 0; k < f.values.Size(); k++)
+        {
+            const char* key = f.values[k].key;
+            const RString& value = f.values[k].value;
+            if (value.GetLength() == 0)
+            {
+                continue;
+            }
+            // the *Civ twins of the unit keys (recruitFighterCiv, holdClassCiv,
+            // ...) and the CIV descriptor's civClass1..N are unit classes too
+            size_t len = strlen(key);
+            bool civUnit = (len > 3 && stricmp(key + len - 3, "Civ") == 0) ||
+                           (len > 8 && strnicmp(key, "civClass", 8) == 0 && stricmp(key, "civClassCount") != 0);
+            if (IsUnitClassKey(key) || civUnit || stricmp(key, "playerClassWarrior") == 0 ||
+                stricmp(key, "playerClassCiv") == 0)
+            {
+                CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, value, addons);
+            }
+            else if (IsWeaponKey(key))
+            {
+                // "...Mag" keys are CfgMagazines classes, the rest CfgWeapons
+                if (len > 3 && stricmp(key + len - 3, "Mag") == 0)
+                {
+                    CollectMagazineAddons(magazinesCfg, value, addons);
+                }
+                else
+                {
+                    CollectWeaponAddons(weaponsCfg, magazinesCfg, value, addons);
+                }
+            }
+        }
+    }
+}
+
 void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
 {
     const char* kVeh = "CfgVehicles";
@@ -766,7 +938,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         RString sideFallback;
         for (int k = 0; k < f.values.Size() && sideFallback.GetLength() == 0; k++)
         {
-            if (stricmp(f.values[k].key, "fallbackClass") == 0 && probe.Exists(kVeh, f.values[k].value))
+            if (stricmp(f.values[k].key, "fallbackClass") == 0 && probe.Spawnable(f.values[k].value))
             {
                 sideFallback = f.values[k].value;
             }
@@ -775,7 +947,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         {
             for (int k = 0; candidates[k] && sideFallback.GetLength() == 0; k++)
             {
-                if (probe.Exists(kVeh, candidates[k]))
+                if (probe.Spawnable(candidates[k]))
                 {
                     sideFallback = candidates[k];
                 }
@@ -786,7 +958,8 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         // the real logger (LOG_WARN)
         auto logSub = [&f](const char* key, const char* bad, const char* sub)
         {
-            LOG_WARN(Core, "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
+            LOG_WARN(Core,
+                     "ZoneRegistry: faction '{}' key '{}': class '{}' not in the loaded data package - using '{}'",
                      (const char*)f.className, key, bad, (sub && *sub) ? sub : "<none>");
         };
 
@@ -798,7 +971,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         bool anyTier = false;
         for (int i = 0; i < f.tiers.Size(); i++)
         {
-            ok[i] = f.tiers[i].GetLength() > 0 && probe.Exists(kVeh, f.tiers[i]);
+            ok[i] = f.tiers[i].GetLength() > 0 && probe.Spawnable(f.tiers[i]);
             anyTier |= ok[i];
         }
         for (int i = 0; i < f.tiers.Size(); i++)
@@ -845,7 +1018,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             bool anyCivTier = false;
             for (int i = 0; i < f.civTiers.Size(); i++)
             {
-                civOk[i] = f.civTiers[i].GetLength() > 0 && probe.Exists(kVeh, f.civTiers[i]);
+                civOk[i] = f.civTiers[i].GetLength() > 0 && probe.Spawnable(f.civTiers[i]);
                 anyCivTier |= civOk[i];
             }
             RString civOutfitFallback;
@@ -853,7 +1026,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             {
                 for (int k = 0; kFallbackCivOutfit[k] && civOutfitFallback.GetLength() == 0; k++)
                 {
-                    if (probe.Exists(kVeh, kFallbackCivOutfit[k]))
+                    if (probe.Spawnable(kFallbackCivOutfit[k]))
                     {
                         civOutfitFallback = kFallbackCivOutfit[k];
                     }
@@ -909,7 +1082,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             AutoArray<RString>& arr = *roleArrays[r];
             for (int i = 0; i < arr.Size(); i++)
             {
-                if (arr[i].GetLength() > 0 && !probe.Exists(kVeh, arr[i]))
+                if (arr[i].GetLength() > 0 && !probe.Spawnable(arr[i]))
                 {
                     logSub(roleNames[r], arr[i], "<tier rifleman>");
                     arr[i] = RString();
@@ -926,7 +1099,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             AutoArray<RString> keptVehicles;
             for (int i = 0; i < f.vehicles.Size(); i++)
             {
-                bool exists = f.vehicles[i].GetLength() > 0 && probe.Exists(kVeh, f.vehicles[i]);
+                bool exists = f.vehicles[i].GetLength() > 0 && probe.Spawnable(f.vehicles[i]);
                 if (!exists)
                 {
                     logSub("vehicles[]", f.vehicles[i], "<dropped>");
@@ -942,6 +1115,26 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
                 {
                     f.vehicleThresholds.Resize(gates);
                 }
+            }
+        }
+
+        // ---- civVehicles[]: drop unresolvable hulls (no ladder, no
+        // thresholds - an empty result simply leaves civilian traffic inert)
+        {
+            AutoArray<RString> keptCiv;
+            for (int i = 0; i < f.civVehicles.Size(); i++)
+            {
+                bool exists = f.civVehicles[i].GetLength() > 0 && probe.Spawnable(f.civVehicles[i]);
+                if (!exists)
+                {
+                    logSub("civVehicles[]", f.civVehicles[i], "<dropped>");
+                    continue;
+                }
+                keptCiv.Add(f.civVehicles[i]);
+            }
+            if (keptCiv.Size() != f.civVehicles.Size())
+            {
+                f.civVehicles = keptCiv;
             }
         }
 
@@ -970,7 +1163,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
         {
             const FactionRecord::NamedValue& v = f.values[k];
             bool isCiv = strnicmp(v.key, "civClass", 8) == 0 && v.key[8] >= '0' && v.key[8] <= '9';
-            if (isCiv && v.value.GetLength() > 0 && probe.Exists(kVeh, v.value))
+            if (isCiv && v.value.GetLength() > 0 && probe.Spawnable(v.value))
             {
                 civResolved++;
                 if (civSub.GetLength() == 0)
@@ -988,7 +1181,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             }
             if (IsUnitClassKey(v.key))
             {
-                if (probe.Exists(kVeh, v.value))
+                if (probe.Spawnable(v.value))
                 {
                     continue;
                 }
@@ -1054,7 +1247,7 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
                     stricmp(f.values[k].value, "0") != 0)
                 {
                     LOG_WARN(Core, "ZoneRegistry: faction '{}': no civClass<N> resolved - civClassCount forced to 0",
-                         (const char*)f.className);
+                             (const char*)f.className);
                     f.values[k].value = "0";
                 }
             }
@@ -1067,36 +1260,113 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
 // (see CStaticMap::DrawName) - every entry is a town, so type-less entries
 // are accepted; an Arma-style type entry, when present, must be a city-like
 // location type.
-void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
+// the 300 m dedup radius shared by SeedCityZones and CollectTownNames
+static constexpr float SeedDedupDistSq = 300.0f * 300.0f;
+
+bool ZoneRegistry::NamesEntryIsTown(const ParamEntry& e, RString& name, Vector3& pos)
 {
-    const float dedupSq = 300.0f * 300.0f; // skip near explicit/seeded zones
+    if (!e.IsClass())
+    {
+        return false;
+    }
+    RString type = e.ReadValue("type", RString());
+    if (type.GetLength() > 0 && stricmp(type, "NameCity") != 0 && stricmp(type, "NameCityCapital") != 0 &&
+        stricmp(type, "NameVillage") != 0)
+    {
+        return false; // typed non-town location (rocks, hills, ...)
+    }
+    const ParamEntry* position = e.FindEntry("position");
+    if (!position || !position->IsArray() || position->GetSize() < 2)
+    {
+        return false;
+    }
+    float easting = (*position)[0];
+    float northing = (*position)[1];
+    float elevation = position->GetSize() >= 3 ? (float)(*position)[2] : 0.0f;
+    name = e.ReadValue("name", RString(e.GetName()));
+    if (name.GetLength() == 0)
+    {
+        name = e.GetName(); // Names entries often ship name=""
+    }
+    pos = Vector3(easting, elevation, northing);
+    return true;
+}
+
+ZoneTuning::SeedCities ZoneRegistry::ReadSeedCitiesMode(const ParamEntry* zonesCfg)
+{
+    if (!zonesCfg || !zonesCfg->FindEntry("seedCities"))
+    {
+        return ZoneTuning::SeedCities::Auto;
+    }
+    return zonesCfg->ReadValue("seedCities", 0.0f) != 0.0f ? ZoneTuning::SeedCities::All : ZoneTuning::SeedCities::Off;
+}
+
+bool ZoneRegistry::NamesEntryIsSettlement(const ParamEntry& e, ZoneTuning::SeedCities mode,
+                                          const SettlementProbe* probe, RString& name, Vector3& pos)
+{
+    if (mode == ZoneTuning::SeedCities::Off || !NamesEntryIsTown(e, name, pos))
+    {
+        return false;
+    }
+    if (mode == ZoneTuning::SeedCities::All || !probe)
+    {
+        return true; // the legacy override, or nothing to classify against
+    }
+    return probe->IsSettlement(name, pos);
+}
+
+bool LandscapeSettlementProbe::IsSettlement(const char* name, const Vector3& pos) const
+{
+    if (!GLandscape || !GWorld)
+    {
+        return true; // nothing loaded to classify against: keep the pre-C3 answer
+    }
+    // sea level is Y = 0 (Landscape::WaterDepth is a stub that returns 0, so
+    // the surface height is the water test; the same rule GuerrillaBase's
+    // spot sampler applies, with its margin against the wash)
+    if (GLandscape->SurfaceY(pos.X(), pos.Z()) < 0.1f)
+    {
+        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - it is in the water", name);
+        return false;
+    }
+    int buildings = 0;
+    const float radiusSq = kRadius * kRadius;
+    for (int i = 0; i < GWorld->NBuildings() && buildings < kMinBuildings; i++)
+    {
+        Poseidon::Building* b = dyn_cast<Poseidon::Building>(GWorld->GetBuilding(i));
+        if (!b)
+        {
+            continue;
+        }
+        LODShapeWithShadow* shape = b->GetShape();
+        if (!shape || shape->BoundingSphere() <= kMinBuildingRadius)
+        {
+            continue;
+        }
+        if (Dist2DSq(b->Position().X(), b->Position().Z(), pos.X(), pos.Z()) <= radiusSq)
+        {
+            buildings++;
+        }
+    }
+    if (buildings < kMinBuildings)
+    {
+        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - {} building(s) within {} m, a town needs {}", name,
+                 buildings, (int)kRadius, kMinBuildings);
+        return false;
+    }
+    return true;
+}
+
+void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementProbe* settlement)
+{
     int seeded = 0;
     for (int i = 0; i < namesCfg.GetEntryCount(); i++)
     {
-        const ParamEntry& e = namesCfg.GetEntry(i);
-        if (!e.IsClass())
+        RString name;
+        Vector3 pos;
+        if (!NamesEntryIsSettlement(namesCfg.GetEntry(i), _tuning.seedCities, settlement, name, pos))
         {
             continue;
-        }
-        RString type = e.ReadValue("type", RString());
-        if (type.GetLength() > 0 && stricmp(type, "NameCity") != 0 && stricmp(type, "NameCityCapital") != 0 &&
-            stricmp(type, "NameVillage") != 0)
-        {
-            continue; // typed non-town location (rocks, hills, ...)
-        }
-        const ParamEntry* pos = e.FindEntry("position");
-        if (!pos || !pos->IsArray() || pos->GetSize() < 2)
-        {
-            continue;
-        }
-        float easting = (*pos)[0];
-        float northing = (*pos)[1];
-        float elevation = pos->GetSize() >= 3 ? (float)(*pos)[2] : 0.0f;
-
-        RString name = e.ReadValue("name", RString(e.GetName()));
-        if (name.GetLength() == 0)
-        {
-            name = e.GetName(); // Names entries often ship name=""
         }
         // dedup: a location on top of a configured (or already seeded) zone
         // stays that zone's business; a name clash would break the name-keyed
@@ -1104,7 +1374,7 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         bool skip = FindZoneIndex(name) >= 0;
         for (int j = 0; j < _zones.Size() && !skip; j++)
         {
-            skip = Dist2DSq(easting, northing, _zones[j].pos.X(), _zones[j].pos.Z()) < dedupSq;
+            skip = Dist2DSq(pos.X(), pos.Z(), _zones[j].pos.X(), _zones[j].pos.Z()) < SeedDedupDistSq;
         }
         if (skip)
         {
@@ -1112,7 +1382,8 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         }
         if (_zones.Size() >= MaxZones)
         {
-            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding cities - remaining Names entries skipped", MaxZones);
+            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding cities - remaining Names entries skipped",
+                     MaxZones);
             return;
         }
 
@@ -1125,9 +1396,83 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg)
         char marker[32];
         snprintf(marker, sizeof(marker), "gmZoneCity_%d", seeded);
         z.marker = marker;
-        z.pos = Vector3(easting, elevation, northing);
+        z.pos = pos;
         _zones.Add(z);
         seeded++;
+    }
+}
+
+void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out)
+{
+    out.Clear();
+    // every authored zone counts for the dedup (a Names town on top of an
+    // authored OUTPOST is skipped by SeedCityZones too); only CITY ones are
+    // towns the player can start in
+    AutoArray<RString> zoneNames;
+    AutoArray<Vector3> zonePos;
+    // menu time: no landscape is loaded, so the classifier cannot run here.
+    // Auto lists every town-typed / type-less entry (the mission may seed
+    // fewer; a START TOWN pick that becomes no zone falls back to the camp,
+    // GuerrillaBase); Off lists none; All lists them all.
+    ZoneTuning::SeedCities mode = ReadSeedCitiesMode(zonesCfg);
+    bool seedCities = mode != ZoneTuning::SeedCities::Off;
+    if (zonesCfg)
+    {
+        if (const ParamEntry* zones = zonesCfg->FindEntry("Zones"))
+        {
+            for (int i = 0; i < zones->GetEntryCount(); i++)
+            {
+                const ParamEntry& e = zones->GetEntry(i);
+                if (!e.IsClass())
+                {
+                    continue;
+                }
+                RString name = e.ReadValue("name", RString(e.GetName()));
+                RString type = e.ReadValue("type", RString("OUTPOST"));
+                Vector3 pos = VZero;
+                const ParamEntry* position = e.FindEntry("position");
+                if (position && position->IsArray() && position->GetSize() >= 2)
+                {
+                    pos = Vector3((float)(*position)[0], 0.0f, (float)(*position)[1]);
+                }
+                zoneNames.Add(name);
+                zonePos.Add(pos);
+                if (stricmp(type, "CITY") == 0)
+                {
+                    out.Add(name);
+                }
+            }
+        }
+    }
+    if (!seedCities || !namesCfg)
+    {
+        return;
+    }
+    for (int i = 0; i < namesCfg->GetEntryCount(); i++)
+    {
+        RString name;
+        Vector3 pos;
+        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos))
+        {
+            continue;
+        }
+        bool skip = false;
+        for (int j = 0; j < zoneNames.Size() && !skip; j++)
+        {
+            skip = stricmp(zoneNames[j], name) == 0 ||
+                   Dist2DSq(pos.X(), pos.Z(), zonePos[j].X(), zonePos[j].Z()) < SeedDedupDistSq;
+        }
+        if (skip)
+        {
+            continue;
+        }
+        if (zoneNames.Size() >= MaxZones)
+        {
+            return; // SeedCityZones stops here too
+        }
+        zoneNames.Add(name);
+        zonePos.Add(pos);
+        out.Add(name);
     }
 }
 
@@ -1203,16 +1548,26 @@ const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
     {
         return nullptr;
     }
+    // CLASS NAME first, then side (issue #54: the order was the other way
+    // round, which was safe only while the faction table was per-island).
+    // Now that a global faction library merges into every island's table, a
+    // template whose defaultOccupier is the SIDE STRING "EAST" would match
+    // whichever EAST-side faction was declared first across the whole merged
+    // table - with @LoBo mounted that is EgyptFrontier, not the class
+    // literally named EAST, so Guerrilla.Abel silently fielded an Egyptian
+    // frontier roster. A name that IS a class is never ambiguous, so it wins;
+    // the side rung still resolves a pure side string (and the vanilla
+    // classes are named after their sides, so nothing else moves).
     for (int i = 0; i < _factions.Size(); i++)
     {
-        if (stricmp(_factions[i].side, sideOrClass) == 0)
+        if (stricmp(_factions[i].className, sideOrClass) == 0)
         {
             return &_factions[i];
         }
     }
     for (int i = 0; i < _factions.Size(); i++)
     {
-        if (stricmp(_factions[i].className, sideOrClass) == 0)
+        if (stricmp(_factions[i].side, sideOrClass) == 0)
         {
             return &_factions[i];
         }
@@ -1422,6 +1777,20 @@ RString ZoneRegistry::FactionVehicle(const char* side, float warLevel) const
         index = f->vehicles.Size() - 1;
     }
     return f->vehicles[index];
+}
+
+void ZoneRegistry::FactionCivVehicles(const char* side, AutoArray<RString>& out) const
+{
+    out.Clear();
+    const FactionRecord* f = FindFactionForSide(side);
+    if (!f)
+    {
+        return;
+    }
+    for (int i = 0; i < f->civVehicles.Size(); i++)
+    {
+        out.Add(f->civVehicles[i]);
+    }
 }
 
 RString ZoneRegistry::FactionValue(const char* side, const char* key) const
@@ -1705,7 +2074,8 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             else
             {
                 // DEFENDED (occupiers re-secure fast) or ABANDONED (slow fade)
-                float decay = (occ > 0 || z.garrison >= 1) ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
+                float decay =
+                    (occ > 0 || z.garrison >= 1) ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
                 z.capture -= decay;
                 if (z.capture < 0)
                 {

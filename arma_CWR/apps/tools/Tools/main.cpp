@@ -71,6 +71,8 @@ class ToolApplication : public Poseidon::Application
 #include "commands/LintCommand.hpp"
 #include "commands/ScanCommand.hpp"
 #include "commands/MineCommand.hpp"
+#include "commands/ModCommand.hpp"
+#include "commands/GuerrillaCommand.hpp"
 #include "commands/VonCommand.hpp"
 #include "commands/ShadowCommand.hpp"
 #ifndef _WIN32
@@ -89,7 +91,7 @@ int main(int argc, char** argv)
     Poseidon::Foundation::gSoftAssert = true;
     InitLibraryElement();
     Poseidon::InitDefaults();
-    GamePaths::Instance().Initialize("CWR", "ColdWarAssault");
+    GamePaths::Instance().Initialize("CWR", "ColdWarAssault", "Cold War Assault");
     Poseidon::GEngine = Poseidon::CreateEngineDummy();
     static ToolApplication toolApp;
 
@@ -110,6 +112,8 @@ int main(int argc, char** argv)
     PoseidonTools::LintCommand::Setup(app);
     PoseidonTools::ScanCommand::Setup(app);
     PoseidonTools::MineCommand::Setup(app);
+    PoseidonTools::ModCommand::Setup(app);
+    PoseidonTools::GuerrillaCommand::Setup(app);
     PoseidonTools::VonCommand::Setup(app);
     PoseidonTools::ShadowCommand::Setup(app);
 #ifndef _WIN32

@@ -262,7 +262,7 @@ bool UndercoverSystem::IsCompromised(const Target& target) const
 // pose (incl. drawn handguns and the AT tube), on-back the patrol walk and
 // binocular poses, unarmed-looking the civilian moves.  A carried long gun
 // still shows on the back proxy in the civilian moves, so it counts as slung.
-static UCWeaponShow ClassifyWeaponShow(const Man& man)
+UCWeaponShow ClassifyWeaponShow(const Man& man)
 {
     bool hasLongGun = man.FindWeaponType(MaskSlotPrimary | MaskSlotSecondary) >= 0;
     bool hasAnyWeapon = hasLongGun || man.FindWeaponType(MaskSlotHandGun) >= 0;

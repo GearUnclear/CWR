@@ -1,6 +1,16 @@
+# PINNED TO THE FULL REMASTER PACKAGE (issue #49 part 1 / #56 task 3). This test
+# exercises the mods screen or the join-requirements dialog, whose strings
+# (STR_DISP_MODS_LOAD "Load Mods", the tab labels, the join actions) ship only
+# in the full retail Remaster's BIN\STRINGTABLE_MAINMENU.utf8.csv: the Demo
+# package carries a 231-key subset without them, and UD's own data dir removes
+# the MODS menu entry outright (bin\resource-extra.cpp, 2026-07-15). The full
+# package is the one place the engine's mods UI renders as designed, so the test
+# runs there (packages/Game, a junction to the Steam Remastered install).
 # The join-requirements dialog (RscDisplayJoinRequirements) is exercised offline:
 # triOpenJoinRequirements injects a synthetic mod diff + opens the live dialog as a
 # child of the menu — no network, no server. Proves the resource parses + renders
-# (diff body, password field, Download & Join / Cancel) and exits cleanly.
+# (diff body, password field, Download & Join / Set up & Join / Cancel) and exits
+# cleanly.
+data_dir = "packages/Game"
 timeout = 120
-tags = ["headful"]
+tags = ["headful", "ci-host-blocked", "full_game"]

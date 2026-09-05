@@ -1,0 +1,14 @@
+# PINNED TO THE REFERENCE DEMO PACKAGE (issue #49 part 1 / #56 task 3). This
+# test walks the engine's STOCK main menu or reaches repo fixtures through a
+# path relative to the game CWD. UD's own data dir carries bin\resource-extra.cpp,
+# the 2026-07-15 main-menu override that drops the Campaign/Missions/Mods entries
+# and promotes GUERRILLA WARFIGHTER, so on that package the path this test walks
+# does not exist, and its CWD is outside the repo. The stock menu is still the
+# engine's menu and the reference Demo package boots it, so the test runs there
+# (packages/Demo; a junction of that name is enough where the Demo sits elsewhere).
+# @triintro (tests/fixtures/mods-intro) ships a one-soldier Anims/ intro for the menu world.
+# Game CWD under tri is the data dir, so ../../tests/fixtures/mods-intro resolves to the repo fixture.
+data_dir = "packages/Demo"
+extra_args = ["--mods-dir", "../../tests/fixtures/mods-intro", "--mod", "@triintro"]
+timeout = 120
+tags = ["headful", "demo"]

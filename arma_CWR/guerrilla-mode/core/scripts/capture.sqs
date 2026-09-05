@@ -1,0 +1,157 @@
+; ============================================================================
+;  capture.sqs  -  reaction to the native zone-capture events.
+; ----------------------------------------------------------------------------
+;  The ENGINE owns the capture decision itself (ZoneRegistry::EvaluateTick:
+;  the military consolidation meter with its SECURING/CONTESTED/DEFENDED/
+;  ABANDONED states, CITY support accrual/intimidation/flip, heat spike,
+;  income tap, marker recolor + progress labels). What stays scripted is the
+;  REACTION:
+;    * spawn a friendly holding garrison on a captured military zone
+;      (holdCount-sized role-mixed squad via native gmFactionSquad; a
+;      tier-less resistance descriptor keeps holdCount x holdClass);
+;    * narrate the capture arc (hints for started / contested / lost /
+;      town-ready / liberated);
+;    * a throttled titleText progress ticker while the player stands inside
+;      a zone being secured - in-field feedback without opening the map.
+;
+;  EVENT-QUEUE CONSUMER (pattern documented in init.sqs): the one-line native
+;  handlers append [zoneIndex, zoneName, ownerString] to their gmEvt* queues;
+;  this manager drain-swaps each queue atomically (single evaluated SQS line)
+;  and reacts inside its own ~ loop.
+;
+;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed / gmEvtCapStart /
+;        gmEvtContested / gmEvtCapLost (consumer side), GM_HOLD_* and
+;        GM_TT_* tunables. Spawned hold groups are fire-and-forget (the old
+;        GM_HOLD_GROUPS array was never read by anything; dropped).
+;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
+;        aP (spawn side = side aP: the player IS the resistance).
+;
+;  gmEvtRevealed is drained without a reaction: reveal handling (marker
+;  repaint) is fully native. gmEvtSupport now has its UX: the town crossed
+;  the support threshold and is READY - the flip itself additionally needs
+;  fighters standing in an occupier-free town (native rule).
+; ============================================================================
+@GM_LIB_READY
+
+; ---- tunables: hold-garrison class+size come from the resistance descriptor -
+GM_HOLD_CLASS = gmFactionValue [gmResistanceSide, "holdClass"]
+GM_HOLD_COUNT = [gmResistanceSide, "holdCount", 3] call GM_fnFactionNum
+; civilian outfit family (issue #25): a resolvable holdClassCiv under the
+; CIVILIAN outfit makes hold squads a civilian-body monoculture, BYPASSING
+; the role-mixed gmFactionSquad path below (no tiersCiv[] role arrays exist;
+; irregulars in civvies fielding a uniform-role squad is the stated
+; trade-off). GM_HOLD_CIV == "" means the warrior path is unchanged.
+GM_HOLD_CIV = ""
+GM_cCivHold = gmFactionValue [gmResistanceSide, "holdClassCiv"]
+? GM_OUTFIT_CIV and (GM_cCivHold != "") and (gmClassExists GM_cCivHold) : GM_HOLD_CIV = GM_cCivHold
+GM_CAP_TICK   = 2
+; in-field progress ticker: radius = the engine default zoneArea; ~12 s pace
+GM_TT_RANGE   = 150
+GM_TT_EVERY   = 12
+GM_cNextTT    = 0
+
+; ---- journal (native Journal behind the map's Notes/Plan pages) ---------------
+; Two starter objectives on the Plan page; this manager flips them DONE on
+; the first military capture / first town rising. Set once per campaign
+; (this boot code never re-runs after a load - the rows are native state
+; and serialize with the campaign). Diary lines for the capture arc follow
+; the hints below.
+gmJournalObjective ["firstZone", "Capture your first military zone: clear the garrison and hold the ground", "ACTIVE"]
+gmJournalObjective ["firstTown", "Raise your first town: build support, then stand in it with fighters", "ACTIVE"]
+
+#loop
+~GM_CAP_TICK
+
+; ---- atomic drain-swaps (one line = one evaluated unit; see init.sqs) -------
+GM_cBatch = gmEvtCaptured + []; gmEvtCaptured = []; gmEvtRevealed = []
+GM_cReady = gmEvtSupport + []; gmEvtSupport = []
+GM_cStart = gmEvtCapStart + []; gmEvtCapStart = []
+GM_cCont  = gmEvtContested + []; gmEvtContested = []
+GM_cLost  = gmEvtCapLost + []; gmEvtCapLost = []
+
+; ---- capture-started: the meter left 0 --------------------------------------
+GM_cI = 0
+#sev
+? GM_cI >= (count GM_cStart) : goto "sdone"
+hint format ["Securing %1 - hold the area", (GM_cStart select GM_cI) select 1]
+GM_cI = GM_cI + 1
+goto "sev"
+#sdone
+
+; ---- contested: enemy inside the zone froze the meter -----------------------
+GM_cI = 0
+#tev
+? GM_cI >= (count GM_cCont) : goto "tdone"
+hint format ["%1 contested - enemy in the zone", (GM_cCont select GM_cI) select 1]
+GM_cI = GM_cI + 1
+goto "tev"
+#tdone
+
+; ---- capture-lost: the meter decayed back to 0 ------------------------------
+GM_cI = 0
+#lev
+? GM_cI >= (count GM_cLost) : goto "ldone"
+hint format ["We lost our hold on %1", (GM_cLost select GM_cI) select 1]
+gmJournalLog format ["Lost our hold on %1.", (GM_cLost select GM_cI) select 1]
+GM_cI = GM_cI + 1
+goto "lev"
+#ldone
+
+; ---- town ready: support crossed the threshold, needs fighters in town ------
+GM_cI = 0
+#rev
+? GM_cI >= (count GM_cReady) : goto "rdone"
+hint format ["%1 is ready to rise - get fighters into the town", (GM_cReady select GM_cI) select 1]
+gmJournalLog format ["%1 is ready to rise: support crossed the threshold.", (GM_cReady select GM_cI) select 1]
+GM_cI = GM_cI + 1
+goto "rev"
+#rdone
+
+; ---- captured: hold garrison + celebrate ------------------------------------
+GM_cI = 0
+#cev
+? GM_cI >= (count GM_cBatch) : goto "cdone"
+GM_cEv  = GM_cBatch select GM_cI
+GM_cIdx = GM_cEv select 0
+GM_cRec = gmZone GM_cIdx
+
+; military zones get a live holding garrison; cities hold themselves (support).
+; The hold squad is role-mixed when the resistance descriptor authors tier
+; role arrays (native gmFactionSquad, plan 15); a tier-less descriptor keeps
+; the classic holdClass x holdCount monoculture.
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : goto "cnotify"
+; civilian outfit: monoculture through the tier-less path, skipping the
+; role-mixed native composer (see the GM_HOLD_CIV tunable note above)
+? GM_HOLD_CIV != "" : GM_cGrp = [side aP, GM_HOLD_CIV, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+? GM_HOLD_CIV != "" : goto "cnotify"
+GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
+? (count GM_cSquad) > 0 : GM_cGrp = [side aP, GM_cSquad, GM_cRec select GM_Z_POS] call GM_fnSpawnSquad
+? ((count GM_cSquad) == 0) and (GM_HOLD_CLASS != "") : GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+
+#cnotify
+hint format ["%1 liberated", GM_cEv select 1]
+; journal: diary line + the matching starter objective flips DONE
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalLog format ["%1 has risen: the town is ours.", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalObjective ["firstTown", "", "DONE"]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalLog format ["%1 liberated: the garrison is gone and a holding squad is in place.", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalObjective ["firstZone", "", "DONE"]
+GM_cI = GM_cI + 1
+goto "cev"
+#cdone
+
+; ---- in-field progress ticker (throttled; nearest zone being secured) -------
+? time < GM_cNextTT : goto "loop"
+GM_cI = 0
+#ttscan
+? GM_cI >= gmZoneCount : goto "loop"
+GM_cRec = gmZone GM_cI
+? ((GM_cRec select GM_Z_TYPE) == "CITY") or ((GM_cRec select GM_Z_CAPTURE) <= 0) : goto "ttnext"
+? ((getPos aP) distance (GM_cRec select GM_Z_POS)) > GM_TT_RANGE : goto "ttnext"
+titleText [format ["Securing %1: %2%3", GM_cRec select GM_Z_NAME, (GM_cRec select GM_Z_CAPTURE) - ((GM_cRec select GM_Z_CAPTURE) mod 1), "%"], "PLAIN DOWN"]
+GM_cNextTT = time + GM_TT_EVERY
+goto "loop"
+#ttnext
+GM_cI = GM_cI + 1
+goto "ttscan"
+
+goto "loop"

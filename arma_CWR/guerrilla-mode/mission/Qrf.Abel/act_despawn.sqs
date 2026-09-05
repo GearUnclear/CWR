@@ -1,0 +1,9 @@
+; debug action: the stand-down lever the Showcase uses - force the Outpost
+; and Depot garrisons back into their reserves (survivor write-back). While
+; you stay inside the 800 m cacheRadius the cache respawns them within ~5 s
+; as FRESH groups that know nothing about you, so with no other perception
+; source the zones fall to GREEN and qrf.sqs deletes any convoy out.
+? gmGarrisonSpawned QRF_ZO : gmGarrisonForceDespawn QRF_ZO
+? gmGarrisonSpawned QRF_ZD : gmGarrisonForceDespawn QRF_ZD
+hint "DEBUG: Outpost + Depot garrisons banked to reserve (survivors only - the dead stay dead).\n\nThey respawn in ~5 s as new groups with NO memory of you: expect GREEN within an alert tick and the QRF (if any) to stand down, unless the convoy itself has already seen you."
+exit

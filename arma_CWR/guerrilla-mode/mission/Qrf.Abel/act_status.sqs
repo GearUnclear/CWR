@@ -1,0 +1,31 @@
+; on-demand report: every zone's alert state + perception, the garrison
+; cache, the live QRF (qrf.sqs globals, read-only) and what the NEXT QRF
+; would field at the current War Level (native gmFactionSquad/Vehicle)
+QRF_sT = format ["War Level %1   occupier %2   resistance %3\n", gmWarLevel, gmOccupierSide, gmResistanceSide]
+QRF_sZ = 0
+#zw
+? QRF_sZ >= gmZoneCount : goto "zd"
+QRF_sA = gmZoneAlert QRF_sZ
+QRF_sS = "GREEN"
+? QRF_sA == 1 : QRF_sS = "YELLOW"
+? QRF_sA == 2 : QRF_sS = "RED"
+QRF_sK = 0
+{if ((_x knowsAbout aP) > QRF_sK) then {QRF_sK = _x knowsAbout aP}} forEach (gmGarrisonGroups QRF_sZ)
+QRF_sL = gmZoneLastKnown QRF_sZ
+QRF_sLD = "none"
+? (count QRF_sL) >= 3 : QRF_sLD = format ["%1 m from you", (getPos aP) distance QRF_sL]
+QRF_sSp = "reserve"
+? gmGarrisonSpawned QRF_sZ : QRF_sSp = "LIVE"
+QRF_sT = QRF_sT + format ["\n%1 (%2, %3): %4, knows %5, garrison %6 %7, heat %8, last-known %9", (gmZone QRF_sZ) select GM_Z_NAME, (gmZone QRF_sZ) select GM_Z_TYPE, (gmZone QRF_sZ) select GM_Z_OWNER, QRF_sS, QRF_sK, gmGarrisonLive QRF_sZ, QRF_sSp, (gmZone QRF_sZ) select GM_Z_HEAT, QRF_sLD]
+QRF_sZ = QRF_sZ + 1
+goto "zw"
+#zd
+QRF_sQ = false
+? not (isNil "GM_QRF_ACTIVE") : QRF_sQ = GM_QRF_ACTIVE
+? not QRF_sQ : QRF_sT = QRF_sT + "\n\nQRF: none out (qrf.sqs scans for a RED zone every 5 s)"
+? QRF_sQ : QRF_sT = QRF_sT + format ["\n\nQRF: OUT on %1 - %2 units, leader %3 m from the zone, %4 s on the road, escort %5", (gmZone GM_QRF_ZONE) select GM_Z_NAME, count units GM_QRF_GROUP, (getPos (leader GM_QRF_GROUP)) distance GM_QRF_TPOS, GM_QRF_TIMER, typeOf GM_QRF_VEH]
+QRF_sV = gmFactionVehicle [gmOccupierSide, gmWarLevel]
+? QRF_sV == "" : QRF_sV = "none"
+QRF_sT = QRF_sT + format ["\n\nNEXT QRF at War Level %1: %2 + officer %3, escort %4", gmWarLevel, gmFactionSquad [gmOccupierSide, gmWarLevel, 5], gmFactionValue [gmOccupierSide, "officer"], QRF_sV]
+hint QRF_sT
+exit

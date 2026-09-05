@@ -32,7 +32,7 @@ namespace Guerrilla
 {
 struct ClassProbe;
 
-// Side-first-then-class-name subclass match over a CfgGuerrillaFactions
+// Class-name-first-then-side subclass match over a CfgGuerrillaFactions
 // entry - the exact scan order ZoneRegistry::FindFaction runs, so callers
 // resolve the same descriptor block the registry resolves for the same
 // string. Null when selection is null/empty or names no subclass.
@@ -41,21 +41,35 @@ const ParamEntry* FindGuerrillaFactionEntry(const ParamEntry* factionsCfg, const
 // Pure core (unit-testable with an injected ParamFile + fake probe).
 // Returns the civilian player class to substitute, or EMPTY when the
 // authored class must be kept. The resistance faction block is resolved with
-// the registry's precedence: selResistance (side first, then class name -
+// the registry's precedence: selResistance (class name first, then side -
 // ZoneRegistry::FindFaction order) > the zones config's defaultResistance >
 // the built-in "GUER" side.
 RString ResolveCivilianPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOutfit,
                                    const char* selResistance, const ClassProbe& probe);
 
+// The warrior body follows the resistance PICK (issue #54 A3, #26 item 3).
+// The template's mission.sqm welds the player to its DEFAULT resistance's
+// body; picking another roster (Jordan on Sinai, an addon faction pack on
+// Abel) substitutes that roster's playerClassWarrior. Returns EMPTY, keeping
+// the authored class, when: nothing was picked; the pick names no block
+// (WARN); the pick IS the template's default resistance (its warrior
+// documents the authored class, nothing to do, no log); the block authors no
+// playerClassWarrior (WARN); or the class fails the probe (WARN). The
+// default resistance is resolved as the registry does: the zones config's
+// defaultResistance, else the built-in GUER side.
+RString ResolveWarriorPlayerClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selResistance,
+                                  const ClassProbe& probe);
+
 // Full player-body precedence (the class-driven follow-up to issue #25):
 // an explicit BODY-browser pick (gmSelPlayerClass, an exact CfgVehicles
-// classname from ANY side) beats the outfit token; with no pick the token
-// path above decides. A pick that fails the probe returns EMPTY - the
-// AUTHORED mission.sqm class is kept, and deliberately WITHOUT falling
-// through to the outfit token: the pick explicitly replaced the outfit
-// resolution for the body, so its failure degrades to the authored class,
-// never to a third body (plan-15 shaped, stricter - the seam never invents
-// a substitute).
+// classname from ANY side) beats the outfit token; with no pick, a CIVILIAN
+// token resolves through ResolveCivilianPlayerClass; otherwise (WARRIOR or
+// no token) the resistance pick decides through ResolveWarriorPlayerClass.
+// A pick that fails the probe returns EMPTY - the AUTHORED mission.sqm class
+// is kept, and deliberately WITHOUT falling through to the outfit token: the
+// pick explicitly replaced the outfit resolution for the body, so its
+// failure degrades to the authored class, never to a third body (plan-15
+// shaped, stricter - the seam never invents a substitute).
 RString ResolvePlayerBodyClass(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selPlayerClass,
                                const char* selOutfit, const char* selResistance, const ClassProbe& probe);
 

@@ -2,10 +2,13 @@
 // (engine/Poseidon/Game/Guerrilla/Undercover.*), set in the real town of
 // Houdan on Abel (Malden, full CWA 1.99 data).
 //
-// NOT part of the Guerrilla.*/Showcase.* shared-core family: this mission
-// carries its own small script set (init.sqs + hud/patrol/act_*.sqs) instead
-// of the campaign managers, so the undercover system is the only moving part
-// on display. install-missions.ps1 installs it like the other templates, and
+// NOT a full Guerrilla.*/Showcase.* shared-core mission: its own bootstrap
+// (init.sqs + hud/patrol/act_*.sqs) starts ONLY the disguise layer, but the
+// cover policy it runs is the campaign's real \gmcore\scripts\undercover.sqs
+// (+ its lib.sqs helpers) straight out of the ONE shared core (issue #54 B1,
+// pinned by test_mission_script_core.cpp) - so the undercover system is the
+// only moving part on display and never a drifted re-implementation.
+// install-missions.ps1 installs it like the other templates, and
 // once installed it is launchable straight from the main menu's UNDERCOVER
 // button (kReferenceMissions, UI/OptionsUIApp.cpp) or via
 // run-game.ps1 -Mission 'Missions\Undercover.Abel'.

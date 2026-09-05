@@ -42,14 +42,18 @@ items:
     title: "Upstream Bohemia source baseline"
     phase: foundation
     status: done
-    commits: [ea77e57, 366f95f, fdc9596, 2be695d]
+    commits: [ea77e57, 366f95f, fdc9596, 2be695d, a15f184, ffc6183, 3ab0930]
     summary: >
       Bohemia's public CWA source release (ea77e57, 2026-06-22) plus the 3.01 drop
-      (fdc9596), absorbed into the guerrilla-mode branch by merge 2be695d.
+      (fdc9596), absorbed into the guerrilla-mode branch by merge 2be695d; the
+      3.03 (a15f184) and 3.05 (ffc6183) drops absorbed by subtree merge 3ab0930.
       Fork main = origin/main = 366f95f carries no overhaul work; guerrilla-mode
       is the de-facto trunk.
     log:
       - "guerrilla-mode branched from pre-3.01 366f95f; 3.01 came in by merge, not rebase."
+      - "2026-08-21: 3.03+3.05 synced via `git merge -Xsubtree=arma_CWR main` (post-reroot, upstream's tree maps to arma_CWR/). 21 conflicted files; the load-bearing calls: kept our deferred mod-config MERGE model over upstream 3.05's replace-base-outright semantics (a fixup mod must not wipe the vanilla roster; upstream's new test_config_replace.cpp rewritten to merge semantics), one unified MouseState::Update signature (our dtSec smoothing + upstream's non-4:3 aspect fix), both gamepad options kept (steering + reverseYStick, six-row tuning page), upstream's port of our 4WVR seekg fix taken verbatim (no double-application). Build 1109 targets green, unit suite 4049/4049 (two Studio ImGui tests flake under -j8, pass serially)."
+      - "3.05 upstream includes our CWR-CE PR 98 (4WVR empty islands), credited to GearUnclear - the fix round-tripped home."
+      - "Not yet runtime-verified after the sync: the @LoBo;@lobofixup mod stack against the new config-extra-after-mods ordering, and localized text for upstream's STR_DISP_OPT_CTL_GAMEPAD_REVERSE_Y keys (fallback strings in place)."
 
   - id: build-toolchain
     title: "Build toolchain + test rig verified"
@@ -206,7 +210,9 @@ items:
     summary: >
       Third-party Sinai island + IDF/Egypt/Syria/Jordan factions used read-only to
       prove island/faction swap on non-CWA content. Sinai lives inside
-      @LoBo\addons\lost.pbo, so install-missions.ps1 needs -IncludeWorld Sinai.
+      @LoBo\addons\lost.pbo; since issue #54 C4 install-missions.ps1 finds it in
+      the pbo entry table itself (-IncludeWorld is only a manual override), and
+      since #54 A4 the @LoBo war rosters live in the @lobofixup mod config.
     log:
       - "@LoBo pbos carry malformed tracerColor floats that hard-abort under --autotest; gitignored patched pbos must be generated once via tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1."
       - "2026-07-30: second @LoBo theater landed - Guerrilla.Lebanon80 (IDF occupier vs Hizballah resistance on LoBo_Leb's 25.6 km Lebanon80 world; built+verified 2026-07-28 in the playtest session, committed with the #25 outfit keys riding in its Hizballah block). Ships with guerrilla_lebanon80_boot, installer world-gate + @lobofixup preload support; seedCities stays OFF there (the world's Names block is a theater map with sea-level entries, not a town list)."
@@ -535,7 +541,7 @@ items:
       - "Sweep of all 116 @LoBo addon configs found no other undefined scope keyword and no surviving malformed float. The remaining bare identifiers are destrType = Destruct* in 13 addons that never define them (engine enum: No=0, Building=1, Engine=2, Tree=3, Tent=4, Man=5, Default=6), so they all collapse to DestructNo and those props are indestructible. Left alone deliberately: the numeric mapping is knowable but the mod shipped that way for twenty years, and 'fixing' it is a gameplay change, not a repair. Same for access = ReadOnlyVerified (falls to the more permissive ReadAndWrite) and side = TEast (falls to 0, which IS TEast)."
       - "LoBoWreck.cpp also drops the semicolon after `accuracy=0.3`. Harmless here: ParamClass::Parse terminates a scalar value on any of ';', '\\n', '\\r' (ParamFile.cpp:1797), so the next line still parses. Not touched."
       - "The tracerColor '0.0.1' floats that @lobofixup exists for are already repaired inside @LoBo itself (2026-07-16); @LoBo's LoBoammo.pbo and LoBo_airammo.pbo are byte-identical to the fixture's shadows. The fixture's addons/ shadows are therefore inert, but its bin/config.cpp roster is still load-bearing for the lobo lane, so the fixture stays."
-      - "Not fixed, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~4 m below ground at createVehicle height (setPos [x,y,4] seats them). Their p3d carries only 4 LODs where LoBo_t54wrck carries 7, missing whatever LOD the engine seats the object with. Model-level defect, left for a follow-up."
+      - "Not fixed here, and NOT a config problem: LoBo_M60A1_wreck and LoBo_M60A1_wreck2 build and draw but sit ~3.4 m below ground at createVehicle height (setPos [x,y,4] seats them). Followed up in lobo-model-origin-repair, where the 4-LODs-vs-7 lead turned out to be a red herring: it is the model's vertical origin, not a missing LOD."
       - "probe_props was reframed while verifying this. Its old vantage looked north through a lobo_israel_w_03 separation-wall segment on the n=9801 line, so every frame was a full-bleed grey slab - a green run that proved nothing. Moved to open ground at [11900, 9650] (no placed object within 70 m, ~450 within 400 m, so unambiguously dry land)."
       - "2026-08-13 correction to the missing-LOD guess above: the M60A1 burial was never about LOD count. No LoBoWreck model has a LandContact LOD (landContact=-1 in all ten, including the eight that seat fine); a static is seated by terrainY + boundingCenter.Y, and both M60A1 models were authored with the origin above the whole mesh. See lobo-model-origin-repair."
 
@@ -544,20 +550,35 @@ items:
     phase: hardening
     status: done
     depends_on: [lobo-content-repair]
-    commits: [4a428f2]
+    commits: [d3eef79, 4a428f2]
     summary: >
-      LoBo_M60A1_wreck and LoBo_M60A1_wreck2 built and drew but createVehicle
-      buried them (roof 0.45 m / 0.92 m under the sand). A static prop seats at
-      terrainY + shape->BoundingCenter().Y (Entity::PlaceOnSurface, Static
-      branch, untouched Bohemia code) - the authored origin goes on the ground -
-      and both models were authored with the origin ABOVE the entire mesh, so
-      the rule can only ever bury them, on any terrain, in vanilla OFP too.
-      Fixed at both layers. Content, at source: tools/lobo/
-      fix-lobo-model-origin.ps1 rewrites boundingCenter.Y in the ODOL p3d
-      (equivalent to moving the model vertically in O2; four bytes in place, no
-      repack), self-discovering via the buried test bc.Y + minMax[1].Y <= 0,
-      idempotent, backed up to @LoBo/_ud-orig/. Engine, as the net for
-      unrepaired installs and future mods: the same degenerate test in
+      The follow-up left open by lobo-content-repair. LoBo_M60A1_wreck and
+      LoBo_M60A1_wreck2 built, textured and drew perfectly but `createVehicle
+      [x, y, 0]` buried them whole - roof 0.45 m and 0.92 m under the sand,
+      belly 3.39 m and 3.19 m under - and the probe_props frame for them was
+      empty desert. The standing lead was that their p3d carries 4 LODs where
+      LoBo_t54wrck carries 7, so they were missing the LOD the engine seats an
+      object with. That lead is wrong. All ten LoBoWreck classes derive from
+      Camp -> Strategic -> Building -> Static with simulation "house", so they
+      are built as `Building` with `_static = true`, and Entity::PlaceOnSurface
+      takes its Static branch (World/Simulation/Simul.cpp:1300):
+      `pos += orientation * GetShape()->BoundingCenter()`. The LandContact ->
+      Geometry -> Level(0) chain that ObjGetPos and the non-static branch use is
+      never reached, and no LoBoWreck model has a LandContact LOD anyway
+      (landContact = -1 in all ten, including the eight that seat correctly).
+      A static prop is seated at terrainY + boundingCenter.Y, i.e. its AUTHORED
+      ORIGIN goes on the ground, and both M60A1 models were authored with that
+      origin above the mesh. Repaired at source in the p3d: in an ODOL the
+      vertices are already stored auto-centred and boundingCenter records where
+      the authored origin sits relative to that centre, so rewriting
+      boundingCenter.Y is exactly equivalent to having moved the model in O2
+      before binarising. tools/lobo/fix-lobo-model-origin.ps1 does it, finds its
+      own targets (any auto-centred ODOL whose whole mesh is at or below its own
+      origin, which can never seat), and is idempotent.
+      Landed in two halves from concurrent sessions: d3eef79 (main) carried
+      the content repair, 4a428f2 (screenshots branch) the same repair plus
+      the engine net, merged 2026-09-04. Engine, as the net for unrepaired
+      installs and future mods: the same degenerate test in
       Entity::PlaceOnSurface seats the lowest vertex on the terrain instead of
       burying the model invisibly, with a WARN naming the shape
       (StaticSeatOffsetY, Vehicle.hpp). Valid sunk-into-terrain content (part of
@@ -568,6 +589,13 @@ items:
       total silence (the evaluator's own report goes through RptF, which
       compiles away).
     log:
+      - "Proved from the game rather than from the code: spawning each wreck alone at [11900, 9650] on Sinai, every prop landed at exactly terrainY + its own boundingCenter.Y to within 1 mm (terrain 11.970 m; t54 +0.522 -> 12.492, t55 +1.053 -> 13.023, BTR-60 +0.484 -> 12.454, Ural +1.128 -> 13.098, Sho't +1.379 -> 13.349, M60A1 -1.921 -> 10.050, M60A1_2 -2.057 -> 9.913). Seven models, one formula, no LOD term in it."
+      - "After the repair the same probe reads 13.440 and 13.107, putting each model's lowest vertex exactly on the surface. probe_props p03 shows a tank instead of empty desert, and a new p03b covers _wreck2, which nothing exercised before."
+      - "getPos is useless as the regression signal here and the obvious assertion would have been vacuous: ObjGetPos re-runs PlaceOnSurface for the readback, so a freshly createVehicle'd static reports z = 0 whether it is on the sand or 3 m under it. prop_spawn_safety CASE 2d instead measures the ASL difference against LoBo_t54wrck spawned at the same point, which is a pure model-to-model constant: +0.95 and +0.62 after the repair, -2.44 and -2.58 before, asserted +/-0.75."
+      - "Patch mechanism is four bytes per model, in place: p3ds are stored uncompressed in these pbos and a float replaces a float, so the pbo file table does not move and no repack is involved - same contract as fix-lobo-scope.ps1. The model trailer is not aligned, so the script anchors on the GEOMETRY_SPEC (1e13) resolution float and accepts an offset only when the resolution run, the symmetric auto-centred bounding box, the bounding-sphere radius, the bool fields and the mass-array-to-end-of-file arithmetic all agree. Cross-checked against PoseidonFormats' own reader on all ten LoBoWreck models."
+      - "Self-discovery held: a -WhatIf sweep of every p3d in @LoBo read 979 ODOL models in 12 s and flagged exactly the two M60A1 wrecks. 44 models were skipped as unreadable by the anchor heuristic and reported as such rather than guessed at."
+      - "@LoBo is gitignored, so the repaired pbo exists only on this machine; the script is the tracked artifact and has to be rerun after any @LoBo reinstall, alongside fix-lobo-scope.ps1."
+      - "Observed while verifying, not investigated (out of scope): PoseidonGame sometimes stays alive and idle after a Trident run has finished, including runs the harness reported as passed, and a lingering instance poisons the next connection as 'failed to read from harness (broken pipe?)'. Every game-launching command here appends a Stop-Process kill."
       - "Audited both repair scripts against the engine before extending anything: the scope rewrite and the origin rewrite are both genuine content repairs (the placement rule and the identifier-to-0 collapse are faithful vanilla behaviour; the mod's wrecks were broken in 2006 OFP too). The engine's failures were the silences, so the engine side of this tranche is diagnostics plus degradation, not semantic change."
       - "Both layers resolve to the same seat (lowest vertex on terrain, terrain + 1.47 / + 1.14 for the two wrecks), so prop_spawn_safety CASE 2d pins whichever layer is active with one triAssertNear pair."
       - "Coverage: StaticSeatOffsetY predicate pinned in test_house.cpp (authored seating kept whenever any mesh clears the terrain, incl. deliberate sinking; rescue at the boundary); the scope-keyword degrade-to-0 contract pinned in test_paramfile_expressions.cpp; probe_props extended to 21 entries incl. both M60A1 variants, verified frame-by-frame on a contact sheet."
@@ -669,6 +697,97 @@ items:
       - "Issue #2 consumption contract (binding names, do not rename): gmCivKilled kill-queue tuples [victim, killer, pos, zoneIdx]; GM_PSEUDO_GROUPS roster (seeded [], #2's spawner is the sole writer); the (group killer) in GM_PSEUDO_GROUPS -> PSEUDO -> blame-the-player classification branch; the shakedown initiator seam (shakedown.sqs #launch) for pseudo-team substitution."
       - "2026-07-10 fixer round 1: two verification failures fixed. (a) guerrilla_civ_shakedown test-design bug - the native ZoneRegistry GUER-presence drift (supportRate 5/3s while owner NEUTRAL) staled the support baseline; test now pins support past supportFlip and waits for the NEUTRAL->GUER flip (drift branch off for good) before baselining. (b) REAL shakedown.sqs bug the stale baseline had been masking: the kill path deleted the initiator pair immediately after posting the synthetic record, so the consumer (up to GM_CIV_TICK later) always saw a null killer -> OTHER (-2, no resentment) instead of OCCUPIER (-8 + resentment); the scene now holds the pair alive until gmCivKilled is drained (bounded 20s guard), then releases. Synced byte-identical to all 7 copies + reinstalled game-dir templates."
       - "2026-07-10 adversarial review (3 lenses: SQS dialect, persistence, checklist): 2 majors fixed pre-land - GM_fnCivPrune now deleteGroups dropped rows (empty AIGroups otherwise accumulate in the CIV center and bloat every save; no runtime auto-cleanup exists, only the mission-load sweep), and GM_SHK_FORCE is consumed on actual scene launch, not in #forcepick (a stale populated-zone row could bail at the null-victim guard and silently eat the force request, wedging the force-hook tests). Minors: init.sqs seeds GM_CIV_GROUPS/GM_CIV_GROUP_ZONE so shakedown.sqs has no exec-order dependency on civilians.sqs; wander pass is per-unit (leader-only doMove never un-stuck a doStop'ed released victim; doFollow is not a registered command); dead-killer OTHER-demotion window documented (dead units read TCivilian). Post-fix: unit byte-identity + all 4 civ/save-reload Trident tests re-run green."
+
+  - id: ambient-traffic
+    title: "Ambient road traffic: civ cars town-to-town, occupier patrols + supply convoys, commandeer, ledger hookup (native Traffic service)"
+    phase: phase-2
+    status: done
+    priority: 1
+    depends_on: [civilian-ambience-layer, engine-native-systems]
+    commits: ["f255bef", "cf93676", "911b724", "b643576", "5036d7b", "a2d16fc", "cf11e71", "660029c"]
+    gh_issues: [33, 35, 28]
+    summary: >
+      engine/Poseidon/Game/Guerrilla/Traffic.* in the GarrisonCache/TownFlags
+      mold: pure unit-tested core (one-roll rarest-first spawn decision with
+      caps 3/1/1, route picker, farthest-in-band spawn point over GRoadNet
+      link centres, commandeer predicate, despawn/stall rules) + world layer
+      (CIV/occupier center groups, hulls on road links facing the
+      destination, NativeMoveIn seating, doMove-style IssueCommand route
+      legs under CARELESS/SAFE so the unit planner keeps the road net,
+      arrival re-dispatch, stall teardown out of sight) + Serialize
+      (GuerrillaTraffic) + TrafficCommands.cpp (gmTraffic* and the road
+      queries gmRoadNearest / gmRoadPath / gmRoadsNear + nearestRoads alias).
+      Commandeer: in-lane-ahead or armed-aim inside 25 m -> Stop -> 2.5 s ->
+      driver unassigned/AllowGetIn off/DoGetOut, flees 150 m, hull released
+      (deleted when far unless boarded). Civ drivers carry the driverKilled
+      killed-EH expression (init.sqs routes it to GM_fnCivKilledEH, so road
+      murders land in gmCivKilled). civVehicles[] on the CIV descriptor
+      (Abel/Market: the four Skodas + Rapid + Trabant/Mini/Bus/Tractor;
+      Sinai/Lebanon80: LoBo_S1203 / LoBo_Uaz3741 + Skodas/Rapid/Bus),
+      plan-15 probed.
+      Tests: test_traffic.cpp (pure cores + save/load round-trip), Trident
+      guerrilla_traffic_{ambient,commandeer,patrol} green on full_cwa, the
+      save/reload seq carries a forced car's row across the reload; civ
+      ambient + save/reload regression green.
+    log:
+      - "2026-08-22: user decision - fully native C++ (not SQS) so the road system, commandeer and ledger hookup are one testable engine service; script stays a thin handler layer."
+      - "2026-08-22 probe finding: an arcade ACMOVE waypoint (and AIGroup::Move / `group move`) never moved a freshly seated vehicle crew - even a pure-script createVehicle + moveInDriver + `group move` car sat with unitReady false and speed 0 for 90 s - while `doMove` (IssueCommand, silent) drove at 72 km/h at once. Both group paths deliver through SendCommand (the radio channel). Traffic issues its route legs / Stop / flee as direct IssueCommand Moves to the drivers; noted in STATUS.md known edges for whoever needs waypoint convoys next."
+      - "Accepted gaps (STATUS.md): patrol traffic feeds no AlertMachine input (optional follow-up: attribute IsTrafficGroup patrol groups to the nearest occupier zone); the civ kill ledger consumer still drops kills > GM_CIV_EFFECT_R from the attributed town, so deep-countryside road murders are recorded but unpunished; boarded released hulls become ordinary world objects - the persistent garage is cache-and-garage (#28)."
+      - "2026-08-26: arrival lifecycle landed (911b724) - civ cars PARK at their destination instead of despawning: TSParking (commandeer-style Stop + 2.5 s brake) -> driver DoGetOut WITHOUT AllowGetIn(false) -> TSDwelling (on-foot near the car, 1-in-6 stroll per 5 s tick within 40 m, dwell trafficParkDwellMin=60..Max=180 s) -> TSDeparting (AllowGetIn/OrderGetIn/AssignAsDriver; DriverBrain-gated IssueRoute re-leg; 45 s NativeMoveIn fallback only when player > minSpawnDist) -> TSDriving. trafficParkChance=0.6. Steal watch releases the hull boarded=true and walks the driver into _fleeing with re-board orders revoked (seated-driver variant forces DoGetOut first); CleanupFleeing now never deletes a seated or player-adjacent person. DriverAlive/stall/arrival/far guards gated in the park states; parked entries still count against maxCiv. Save-compatible: state int append, ApplyPendingLoad downgrades park states (seated dweller re-parks; null-driver rows KEPT for the normal crewDead hull release, not dropped). New TEParked/TEDeparted events + gmTrafficDest. Re-board probe resolved the residual unknown POSITIVELY: the stock animated Command::GetIn to a free CIV works in-game; fallback never fired. Verified: [guerrilla] 168 cases / 3306 assertions; trident full_cwa guerrilla_traffic_park (new) + ambient/commandeer/patrol + save_reload green. Ten review findings (3 major, all steal-watch edges) fixed pre-land."
+      - "2026-08-31: blocked-recovery tier landed (b643576) - a viability sweep confirmed the engine already routes around wrecks (stopped/dead hulls lock their RoadLinks; the road A* and VerifyPath skip locked links), so the only gap was the boxed-in car: it sat the full 90 s stallTimeout then abandoned in place, stacking road-locking hulls at any player-made blockage. Pure DecideBlocked stages recovery INSIDE the stall window (re-issue the leg at timeout/3 - the fresh plan detours - U-turn home at 2/3, expiry ladder unchanged at the timeout); near-zero speed guard (0.5 m/s) keeps crawling/queued cars out; blockedRetries serialized, resets with the stall clock. Verified: [guerrilla] 179/3427 green, trident traffic lane 5/5 green."
+      - "2026-09-01: convoy discipline landed (5036d7b, merged e147c3d) - the column-spacing bug was that IssueRoute set SpeedLimited/FormColumn on MainSubgroup while the Move created a fresh command subgroup defaulting to wedge at SpeedNormal, so the engine's native convoy-follow (FormationPilot follow branch + LeaderPathPilot wait-for-successor) never engaged; fixed by applying both to the drivers' actual subgroup per leg. Escorts seat up to 2 cargo riflemen and get a quiet-loss watch; escort dead within trafficBailCombatWindow=60 of the last disclosure -> the truck crew bails (TEBailed, player-caused remains); a fighting patrol/convoy holds the whole trip ladder under the bounded CombatGateAction (trafficCombatStaleAfter=120 / trafficCombatHoldMax=300, TCGExhausted never re-holds). Bug fixes: DespawnEntry filed LIVING seated crew as corpses (pure CrewDisposal triage now), CleanupReleased's boarded probe was fooled by corpses. Review catch pre-land: Glob.time - GetDisclosed() on a never-disclosed group (TIME_MIN) underflows to ~-2.1e6, which would have frozen every quiet patrol from spawn; SinceDisclosed() maps the sentinel and both pure predicates treat negatives as stale, regression-tested."
+      - "2026-09-01: traffic ambush alert feed landed (a2d16fc, merged f0bbcf2) - closes the accepted AlertMachine gap. Violent patrol/convoy ends (incl. bails) queue TrafficAmbush {pos, kind, originZone}; the alert tick drains them into a per-zone knowledge floor (patrol = steady YELLOW hold, convoy = RED) decaying over trafficAmbushWindow=120, lastKnown = the wreck, trafficAmbushHeat=4 per wreck; qrf.sqs reacts with zero script changes. Attribution: nearest occupier zone within trafficAmbushRadius=1500 (own key, deliberately NOT the trafficRadius player band) -> origin zone only while occupier-held -> dropped (review catch: the unfiltered fallback would have QRF'd player-owned towns). Live traffic crews between zones (outside every zoneArea) now attribute their perception the same way. Queue + floors serialize (UndercoverSystem pending-compromise contract); design catch: a forced zone state would be reverted by the FSM within one tick - the floor-with-decay shape is mandatory, and the patrol floor holds YELLOW without bleeding the disengage window (the naive reuse oscillated YELLOW-RED every ~25 s, ~4 QRF re-dispatches per wreck)."
+      - "2026-09-01: civ danger response landed (cf11e71+660029c, merged c018174) - civ cars react to gunfire/blasts/fresh player-caused wrecks. Two one-call fast-gated hooks in frozen core (FireWeaponEffects per-round, ExplosionDammage; GTrafficDangerArmed global-bool gate in the GUndercoverActive mold) feed a coalescing 8-slot ring (TTL 20 s, spatial filter at band+hysteresis); pure DecideDangerReaction rolls cower (TSPanicked, commandeerable, load-downgrades to TSDriving) / U-turn home at SpeedFull / rush past / bail-and-run via the unified AbandonEntry. Review catches pre-land: ExplosionDammage runs on EVERY projectile impact (ShotShell object+ground hits), so the hook gates on explosive/indirectHit or every rifle round was a max-severity blast; wreck danger sources now age out (WreckDangerLive, 3x TTL) or parked cars near an old ambush site would bail forever; the cooldown latch ticks in every state. Root cause the feature works around: AIUnit::SetDanger is a no-op under CMCareless, so the engine's own heard-gunfire reaction is structurally suppressed for traffic crews. Probe-gated residual: the rush slot's visible acceleration (one-constant disable via DangerFarRushBand). Merged suite after all three: [guerrilla] 195 cases / 3786 assertions green."
+      - "2026-08-25: spawn-chance modulation landed - pure ModulationFactors pre-stage scales civ/patrol chances BEFORE the rarest-first band subtraction (band math untouched): wall-clock day trapezoid (trafficCivNightScale=0.1 outside trafficDayStart=0.25..trafficDayEnd=0.875, 2 h linear ramps), civ-route-origin alert (RED zeroes civ, YELLOW 0.4x; patrols x(1+trafficAlertPatrolBoost=0.5) on YELLOW/RED), curfew (warLevel >= trafficCurfewWarLevel=3 && NightEffect > 0.5 && origin occupier-owned: civ 0, patrol x trafficCurfewPatrolBoost=2.0), rain fade (1 - trafficRainCivFade=0.6 * rain). Neutral defaults keep noon/GREEN/war-1/dry behaviour identical; gmTrafficForceSpawn (and so the guerrilla_traffic_* Trident tests) still bypasses the roll. NightEffect/rain reads null-guard GScene/GLandscape (dedicated-server path falls back to wall-clock nightness). Review fix pre-land: the civ-route availability probe now rolls PickRoute once and the spawn reuses that origin/dest, so modulation always assesses the actual spawn origin. Hygiene: shared ReadWarLevel in ZoneRegistry replaced the Traffic/GarrisonCache clones. Headlights verified FREE - TransportCore.cpp's auto-light gate (NightEffect vs per-vehicle 0.2-0.8 threshold, non-cautious combat mode) already lights AI traffic crews at night under the CMCareless/CMSafe modes Traffic issues, and douses them on combat escalation; zero headlight code written."
+      - "2026-09-01: civVehicles rosters expanded - fact correction first: Trabant, Mini and Bus DO ship with Classic 1.99 (Resistance-era addon pbos: trab.pbo, MINI.PBO with class Mini : SkodaBase, O.pbo whose CfgPatches BIS_Resistance units[] carries Bus, incl. busDriver/busCargo anims); the earlier 'absent, do not add' note had probed only Bin\\CONFIG.BIN, which cannot see addon-pbo configs. Lada is NOT a car (it is a female first name in O.pbo's identities - Lada Vedrova). Abel/Market rosters now add Trabant/Mini/Bus/Tractor; Sinai/Lebanon80 add SkodaBlue/SkodaRed/Bus; the guerrilla_native.abel fixture stays sedan-only on purpose (tests force-spawn a uniform-random pick). Unresolvable classes remain probe-dropped, non-fatal."
+
+  - id: traffic-bus-stops
+    title: "Traffic: bus passenger pick-up/drop-off (route-biased Bus spawns, passengers, alight/board stops)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [ambient-traffic]
+    summary: >
+      Make the Bus hull (now in the civVehicles rosters) carry people:
+      route-biased spawn pick (Bus only on long CITY-CITY legs, Tractor
+      biased to short/village legs), 1-4 civClass cargo passengers per bus
+      with the driverKilled ledger EH on every seat, an all-crew
+      generalization of the commandeer bail (prerequisite that fixes frozen
+      passengers for ALL civ traffic), and a TSBusHalt stop state at
+      en-route CITY zones reusing the park/dwell/depart choreography.
+      Passenger boarding under the perception gate is the hard half; v1 is
+      alight-only. Design stub: guerrilla-mode/BUS-STOPS.md.
+    log:
+      - "2026-09-01: filed as a design stub (BUS-STOPS.md) alongside the roster expansion. Engine facts verified up front: busDriver*/busCargo* (BusPassanger*.rtm) animation states + CfgVehicleActions wiring ship in O.pbo, so seated bus passengers need zero animation work; CreateCrewman already seats GIPCargo crew; Misc\\busstop.paa suggests a bus-stop world object exists (unconfirmed, Czech-named model)."
+
+  - id: traffic-view-distance
+    title: "Traffic: perception-gated spawn/despawn (fixed distance band vs the player view-distance slider)"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [ambient-traffic]
+    gh_issues: [53]
+    commits: [91482c2]
+    summary: >
+      The traffic spawn band ([300, 1500] m) and despawn edge (1800 m) are
+      static config while the object-cull distance that actually hides them is
+      player-controlled (objectsZ = min(2/3 * view, 3000), slider 100..5000,
+      applied live): above ~2250 m view distance every spawn is an on-screen
+      materialization, above ~2700 despawns are visible too, and night
+      headlight pop reads even farther (lights cull at horizontZ + 500).
+      Design (issue #53): perception gate (live objectsZ + terrain LOS +
+      frustum) with an effective band derived per pass and config as floors;
+      alibi spawns (hidden-scored points, pull-out-from-parked near the
+      player's town); observed endings for the losing park roll / patrols /
+      stalls extending the 911b724 lifecycle; perception-gated cleanup of
+      released hulls/bodies; caps scaled with the effective radius.
+    log:
+      - "2026-08-26: design doc filed as #53 after a deep dive; key finding - the strategy only works today because objectsZ (600 at the 900 default) sits inside the band by accident, and radius does triple duty (PickRoute origin gate, spawn band, despawn edge) so all three must move together or high-VD players get zero traffic instead of visible pop."
+      - "2026-08-26: stage 1 implemented in the working tree (uncommitted): pure EffectiveBand/ConfigBand/CanExposeSpawn/CanExposeDespawn + band overload of ShouldDespawn; per-pass Perception snapshot (GScene camera, +-60 deg 2D cone, terrain-ray LOS via IntersectWithGroundOrSea, MaxLosProbes=8 farthest-first budget); all three radius consumers moved together (PickRoute origin gate, perception-aware SelectSpawnPoint with the config minSpawnDist kept as a HARD floor, ShouldDespawn callers incl. UpdateParked and CleanupReleased); arrival/stall/no-dest/NativeMoveIn gates are perception gates with a per-entry transient exposeDefer bounded by trafficDespawnDeferMax=90 (0 = no defer); new keys trafficExposeMargin=150/trafficDespawnDeferMax/trafficScaleCaps (parsed, caps consumed later). gmTrafficForceSpawn bypasses the gate (tests spawn close on purpose); no camera = ConfigBand + pre-perception rules verbatim; save format untouched. guerrilla_native.abel pins trafficDespawnDeferMax=20 (the ambient offshore-despawn assert window equals the stock 90 s defer). Unit suite green (173 guerrilla cases); Trident lanes deferred to the e2e stage."
+      - "2026-08-26: stage 2 (observed endings) implemented in the working tree (uncommitted): new TSLingering state (appended to the enum, save-compat like the 911b724 park states) + pure ArrivedEndAction/StalledEndAction ladder - unobserved = despawn (pre-#53 semantics), observed arrival re-legs while legs remain then lingers (Stop, crew stays seated, torn down on the first pass DespawnSafe allows, no defer timeout; a failed re-leg falls to linger instead of idling in TSArrived, so maxLegs is now the perceived lifespan); observed civ stall = AbandonEntry (driver dismounts and walks off via the commandeer-bail machinery at SpeedLimited, hull to _released, driver to _fleeing, TEDespawned reason 'abandoned'), patrol/convoy stalls linger seated. CleanupFleeing gained the same camera-present CanExposeDespawn guard (walkers never vanish in view; headless rules verbatim). Lingering civ cars are commandeerable; lingerReason serialized (empty pre-#53 default = 'arrived'); LoadedParkState maps TSLingering seated->keep / on-foot->TSDriving; IssueGroupStop factored out of the three duplicate Stop blocks. Unit suite green (175 guerrilla cases, full build clean); Trident lanes still deferred to the e2e stage."
+      - "2026-08-26: stage 3 (alibi spawns, density scaling, dead-things-linger) implemented in the working tree (uncommitted): SelectSpawnPoint scoring is now tiered - turn-around-proof passes (beyond the exposure floor OR terrain-hidden) beat cone-only passes, and patrols/convoys prefer candidates inside AlibiOriginRadius=300 of their origin zone (a car appearing inside its own base is a plausible birth); when a civ spawn finds NO imperceptible point, SelectAlibiPoint picks a curb inside the origin town (config minSpawnDist still the audible hard floor, hidden curbs preferred) and the car spawns PARKED in TSDeparting with destIndex pinned to the origin, so the 911b724 depart transition rolls a fresh destination FROM the town and fires TEDeparted on the pull-out (civ-only: the park steal watch reads any gunner as a theft, so military kinds rely on the in-zone preference instead). trafficScaleCaps=1 scales maxCiv/maxPatrols linearly with band.radius/config radius via pure ScaleCap (rounded, never below config, identity when the band is not widened; convoys unscaled; default stays 0 = stage-1 parse default, pre-#53 densities). T4 polish: ReleasedEntry.playerCaused (serialized, pre-#53 saves default false) marks violent ends (destroyed/crewDead hulls+escorts, commandeer bail) and widens their released despawn edge by PlayerCausedLingerScale=2 on both the legacy and band paths; abandon/steal/script releases stay ambient; fleeing drivers keep the stage-2 gate unchanged (living pedestrians, not remains - noted simplification). Unit suite green (178 guerrilla cases, full build clean; the 6 full-suite reds are pre-existing missing packages/Remaster STRINGTABLE csv data, unrelated); Trident lanes still deferred to the e2e stage."
+      - "2026-08-26: review-fix pass over the working tree (uncommitted): CanExposeDespawn's distance leg now uses the imperceptibility bound (band.minSpawn, cull+margin) instead of the far edge, so in-band endings (arrival/stall/linger) can tear down on open terrain once beyond draw range and no longer pin the spawn caps, plus a closeHold floor (config minSpawnDist) so nothing audible despawns close even hidden; EffectiveBand no longer widens radius/edge at the default view distance (band narrows first, widens only when less than min(config width, SpawnScanRadius) remains above the floor - the defaults-preserve-behaviour claim now actually holds and scaleCaps is identity by day at default VD); the no-destination depart branch uses plain DespawnSafe (re-dwell IS the defer; GateDespawn's timeout could vanish a watched car in plain sight); exposeDefer resets when the far despawn stops being wanted (stale episodes no longer collapse a later defer window, double accrual gone); spawn exposure distance leg measures from the camera when known (TrafficExposeObs.camDist2) so scripted cameras cannot watch a materialization, and a near-vertical camera degrades the cone test to everything-in-frustum; viewdist fence no longer asserts count gmEvtTrDespawned==0 (a legal far natural despawn during the watch was a flake vector; the watched car surviving is the fence). Unit suite green (178 guerrilla cases), full build clean, touched files clang-format clean."
+      - "2026-08-26: e2e + landing (91482c2) - new trident fence guerrilla_traffic_viewdist (gmTrafficPercept probe: band follows the 3000 m objectsZ cap at VD 5000; a force-spawned car watched from 2000 m in-frustum inside the cull never despawns across ~3 passes; VD 500 still spawns, floors unchanged) green 3/3; guerrilla_traffic_ambient staging fixed test-side per the spec (watch the offshore despawn from La Riviere ~4.2 km facing away, assert isNull car + despawn events, not global count==0 - the widened origin gate legally allows natural spawns near surrounding towns); full traffic trident suite re-run green against the post-review-fix engine (viewdist+ambient 2/2, commandeer/patrol/park 3/3). Remaining: human playtest (long-view Sinai session, day + night)."
 
   - id: faction-class-resolution
     title: "Faction class resolution + role-diverse squads (plan 15)"
@@ -834,7 +953,7 @@ items:
       N-subject undercover generalization (#19/#20/#21), tiersCiv[] role
       arrays.
     log:
-      - "2026-08-07: #46 - the silent-selection-drop audit of the menu-to-mission seam. Seven seams triaged against the tree; three changed behaviour, three got diagnostics or comments, one was audited and deliberately left alone. (1) HEADLINE: ApplyPlayerOutfitSelection returned early unless BOTH CfgGuerrillaZones and CfgGuerrillaFactions resolved, with no log line, while a body pick reads NEITHER (ResolvePlayerBodyClass probes CfgVehicles only) and neither does #45's addon activation - so a template authoring one block and not the other discarded every pick on a mission-author typo. Gate removed; the pending selection is now the 'is this Guerrilla' signal, which is safe because every ordinary launch path runs GStats.ClearAll() before publishing (verified at OptionsUIApp 489/640/738/862/945/2198), so the campaign bank cannot leak a stale pick into a non-Guerrilla mission. Proven by a red/green cycle on a half-authored Guerrilla.Abel (installed description.ext stripped of CfgGuerrillaFactions): gate present -> typeOf player == authored SoldierGB; gate removed -> SoldierWB, with the substitution INFO in the log. (2) SEAM 4 turned out to be far worse than the audit's 'offered then unrenderable': pointing playerClassCiv at the shapeless base class Man ACCESS-VIOLATES the process in Man::Init -> ReactToDammage -> EntityAI::GetHit inside CreateVehicle. VehicleTypes' own shapeless guard misses it (it tests for an empty model STRING; this class names a .p3d the package does not ship, and ShapeBank answers with an empty LODShape, not a null). New PlayerBodyModelIssue mirrors the menu roster's GetShapeName + FileExist gate at the seam and the caller now DECLINES the substitution, keeping the authored class - the file's standing never-a-substitute contract, not an exception to it, and unreachable for a CHARACTER pick because that roster is built behind the same gate. Crash reproduced, then reproduced as a clean logged decline. (3) Previously-silent degrades of an explicit CIVILIAN pick now WARN on every rung (no factions block, no faction resolved, no playerClassCiv key), and the failed-pick WARN now names the outfit token it is ALSO dropping. (4) SEAM 6 (island switch drops a live outfit token, one-way: keep is re-derived from the emptied list, so a round trip reopens on WARRIOR) kept as-is on the grounds that it is the same island-scoped re-seed contract the occupier/resistance cyclers follow, but it now WARNs; observed firing in-game on an Abel -> Cain switch. (5) SEAM 2 got the comment the issue asked for, naming SwitchLandscape -> CleanUpDeinit -> GGameState.Reset() as what destroys the VarSet half and the AddVariable mirror as the load-bearing one (wipe chain verified line by line). (6) SEAM 5 (GModeArcade gate) LEFT ALONE, and the issue's premise corrected: --test-mission is GModeArcade, not a skipped mode (StartAutoTest passes GModeArcade whenever the mission has groups) - it ignores selections because nothing publishes and StartAutoTest has no campaign-bank replay; MP never publishes gmSel* either (NGSLoadIsland replays only param1/param2), so removing the gate would change nothing while enabling substitution in menu cutscenes. (7) SEAM 7 (double-click re-seed) LEFT ALONE: the stricmp guard is correct and load-bearing; two comment corrections added (the name-keep now recovers the faction pair, so what the guard still buys is PBO churn plus the one selection the name-keep cannot recover, and the case it protects most often is the repeat SINGLE click). Verification: ctest units 3713/3713 (3 new), guerrilla ui e2e 7/7 green twice including both LoBo lanes, which is the evidence the new mission-time shape probe does not falsely reject modded bodies. Honest gap: the three civilian-ladder WARNs and the no-player-unit WARN are unreachable through the shipped UI (they only fire when menu-time and mission-time config diverge, which is what they exist to diagnose), so they are proven by unit-test path execution plus the two sibling WARNs of identical form observed rendering in-game, not by direct observation."
+      - "2026-08-07: #46 - the silent-selection-drop audit of the menu-to-mission seam. Seven seams triaged against the tree; three changed behaviour, three got diagnostics or comments, one was audited and deliberately left alone. (1) HEADLINE: ApplyPlayerOutfitSelection returned early unless BOTH CfgGuerrillaZones and CfgGuerrillaFactions resolved, with no log line, while a body pick reads NEITHER (ResolvePlayerBodyClass probes CfgVehicles only) and neither does #45's addon activation - so a template authoring one block and not the other discarded every pick on a mission-author typo. Gate removed; the pending selection is now the 'is this Guerrilla' signal, which is safe because every ordinary launch path runs GStats.ClearAll() before publishing (verified at OptionsUIApp 501/659/758/884/968/1060/2558 (re-cited 2026-09-02; the campaign-progression path runs ClearMission() only, so the GModeArcade gate is the load-bearing containment)), so the campaign bank cannot leak a stale pick into a non-Guerrilla mission. Proven by a red/green cycle on a half-authored Guerrilla.Abel (installed description.ext stripped of CfgGuerrillaFactions): gate present -> typeOf player == authored SoldierGB; gate removed -> SoldierWB, with the substitution INFO in the log. (2) SEAM 4 turned out to be far worse than the audit's 'offered then unrenderable': pointing playerClassCiv at the shapeless base class Man ACCESS-VIOLATES the process in Man::Init -> ReactToDammage -> EntityAI::GetHit inside CreateVehicle. VehicleTypes' own shapeless guard misses it (it tests for an empty model STRING; this class names a .p3d the package does not ship, and ShapeBank answers with an empty LODShape, not a null). New PlayerBodyModelIssue mirrors the menu roster's GetShapeName + FileExist gate at the seam and the caller now DECLINES the substitution, keeping the authored class - the file's standing never-a-substitute contract, not an exception to it, and unreachable for a CHARACTER pick because that roster is built behind the same gate. Crash reproduced, then reproduced as a clean logged decline. (3) Previously-silent degrades of an explicit CIVILIAN pick now WARN on every rung (no factions block, no faction resolved, no playerClassCiv key), and the failed-pick WARN now names the outfit token it is ALSO dropping. (4) SEAM 6 (island switch drops a live outfit token, one-way: keep is re-derived from the emptied list, so a round trip reopens on WARRIOR) kept as-is on the grounds that it is the same island-scoped re-seed contract the occupier/resistance cyclers follow, but it now WARNs; observed firing in-game on an Abel -> Cain switch. (5) SEAM 2 got the comment the issue asked for, naming SwitchLandscape -> CleanUpDeinit -> GGameState.Reset() as what destroys the VarSet half and the AddVariable mirror as the load-bearing one (wipe chain verified line by line). (6) SEAM 5 (GModeArcade gate) LEFT ALONE, and the issue's premise corrected: --test-mission is GModeArcade, not a skipped mode (StartAutoTest passes GModeArcade whenever the mission has groups) - it ignores selections because nothing publishes and StartAutoTest has no campaign-bank replay; MP never publishes gmSel* either (NGSLoadIsland replays only param1/param2), so removing the gate would change nothing while enabling substitution in menu cutscenes. (7) SEAM 7 (double-click re-seed) LEFT ALONE: the stricmp guard is correct and load-bearing; two comment corrections added (the name-keep now recovers the faction pair, so what the guard still buys is PBO churn plus the one selection the name-keep cannot recover, and the case it protects most often is the repeat SINGLE click). Verification: ctest units 3713/3713 (3 new), guerrilla ui e2e 7/7 green twice including both LoBo lanes, which is the evidence the new mission-time shape probe does not falsely reject modded bodies. Honest gap: the three civilian-ladder WARNs and the no-player-unit WARN are unreachable through the shipped UI (they only fire when menu-time and mission-time config diverge, which is what they exist to diagnose), so they are proven by unit-test path execution plus the two sibling WARNs of identical form observed rendering in-game, not by direct observation."
       - "2026-08-07: #47 - the OUTFIT cycler stopped advertising a scope it had lost. A CHARACTER pick beats the token for the PLAYER body unconditionally (ResolvePlayerBodyClass returns on the pick and never falls through, not even when the picked class fails the probe), but idc 153 kept reading 'OUTFIT: CIVILIAN' after the pick, so the screen promised a civilian body it would not deliver - the player spawned as the picked WEST rifleman leading a plainclothes squad. Fixed the LABEL, not the precedence: while a pick is live the row renders 'OUTFIT (squad only): <token>'. Rejected greying idc 153 (the issue's own first suggestion) on two grounds - the token still genuinely governs recruits/companions/hold via GM_OUTFIT_CIV, so a disabled control would be the opposite lie and would strand the player with no way to dress their fighters; and CActiveText::OnLButtonUp does not consult IsEnabled while triClick bypasses the container hit-test entirely, so a 'disabled' cycler would still cycle under the harness and under any synthetic event. Qualifier goes in the PREFIX, not appended, so the empty-roster case reads 'OUTFIT (squad only): (mission default)' instead of stacking two parentheticals. Wiring: keyed on SelectedPlayerClass() (the exact value published as gmSelPlayerClass, so label and precedence cannot drift), re-rendered from both _bodySel writers - OnChildDestroyed and RevalidateBodySelection, the latter mattering because a pick the package no longer resolves drops to -1 and HANDS the player body back to the token. New ui/guerrilla_outfit_scope_label_e2e drives the whole state machine (default -> CIVILIAN -> pick -> qualifier -> cycler still enabled and still cycling -> island round trip -> clear back to '(match outfit)' -> qualifier gone -> re-pick -> launch) and was proven red against the pre-fix engine with exactly the reported text ('CHARACTER: Soldier || OUTFIT: CIVILIAN'). Full guerrilla ui e2e set 7/7 green, ctest units 3710/3710."
       - "2026-08-05: BODY browser landed (916c273) - player-body pick from ANY side the package ships. Roster rule: GuerrillaListPlayerBodies (Man-derived, scope>0, sides 0..3, shape-probe gated, deduped by displayName+model, capped 24/side, WEST/EAST/GUER/CIV in config scan order; Classic yields SoldierWB as entry 0, which the e2e pins). gmSelPlayerClass rides the gmSelOutfit publish+persistence pattern; pick beats token, probe failure keeps the authored class (never the token body); untouched browser publishes nothing (asserted from both sides: new guerrilla_player_body_e2e + a nil assert added to the outfit e2e). Same commit fixes the mannequin wearing rifle+RPG+pistol at once: GuerrillaPreviewHideWeaponProxy classifies proxies by their CfgNonAIVehicles simulation (proxysecweapon/proxyhandgun hide, proxyweapon draws; dalekohled/binoc/nvg stems as mod belt-and-braces since Classic ships no such classes and those proxies never even instantiate). New save/reload seq proves the cross-side body + gmSelPlayerClass survive a cross-process reload. Test-fixture gotcha documented: ParamClass::Add resolves through the base chain, so own entries must be added BEFORE SetBase or they overwrite the base's values. Accepted emergent gameplay documented (OutfitSelect header + ARCHITECTURE.md A.5): occupier-roster bodies read as occupier at distance via the vanilla side-resolve ladder; undercover untouched."
       - "2026-07-29: implemented M1+M2+M3(1,3,4,5)+M5 in one session. Unit tests: test_outfit_select.cpp (resolver precedence, probe-failure keeps authored class, civTier ladder + clamp, Civ-scalar plan-15 degrade) + GuerrillaOutfitChoices cases in test_guerrilla_module.cpp; [guerrilla] sweep 2121 assertions / 103 cases green. Integration: guerrilla_outfit_civilian_e2e (menu->Abel->CIVILIAN->typeOf player==SoldierGFakeC + manager class globals), guerrilla_civ_disguise_fire (M3.3: CIV read at 150 m via knownTargets - first consumer of that command - ID at 15 m, fire-exposure flip on a second still-distant group), guerrilla_lobo_terror_spawn (M2.4 Terror EventHandler smoke), sinai e2e extended with the outfit cycler + WARRIOR no-op assertions."
@@ -881,9 +1000,10 @@ items:
   - id: faction-island-decoupling
     title: "Faction/island decoupling: any faction on any island + faction-pack mod contract (issue #26)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 2
     depends_on: [faction-swap-either-side, faction-class-resolution, character-outfit-select]
+    commits: [5a1aa34, 33f5daf, 7694bf2, 3dc1212, 0d002a0, 390c789]
     gh_issues: [26]
     summary: >
       CfgGuerrillaFactions is authored per island template, so the cyclers
@@ -909,6 +1029,46 @@ items:
       Guerrilla.<island> template per world) are explicitly out of scope.
     log:
       - "2026-07-29: filed as issue #26 after a cross-issue discovery pass (#2/#13/#16/#25 + tree verification). Key finding: sides and rosters are already fully decoupled in-engine; the weld is content packaging (per-island faction blocks), not engine capability."
+      - "2026-09-01: sequenced as Phase A of the mod-intake umbrella issue #54 (roadmap item mod-intake-sustainability); execute its six items in the order A1-A6 listed there."
+      - "2026-09-02: all six items landed on feat/mod-intake-54. A1 FactionSources (5a1aa34): the three consumers build Pars-block U island-block, island wins by whole-class replacement. A2/A3 (33f5daf): tiers[0]/playerClassWarrior probed at menu time, greyed '(not in loaded data)' + OK refused; a non-default resistance pick substitutes its playerClassWarrior. A4 (7694bf2): vanilla blocks in guerrilla-mode/config/guerrilla-factions.hpp installed via bin\\config-extra.cpp; the @LoBo eight in the @lobofixup mod config, one copy each (the two IDF copies were identical, Lebanon80's Hizballah a strict superset); templates keep CIV only (+ Demo's documented GUER override). A5 (3dc1212): `PoseidonTools guerrilla lint` diffs the registry loaded with and without the probe (11 shipped factions, 0 substitutions on Classic+@LoBo). A6 (0d002a0): guerrilla-mode/FACTION-PACKS.md; the @udfaction fixture is the worked example and passes the lint. Matrix tests (390c789): the pack on Abel by direct launch and through the menu with gating."
+
+  - id: mod-intake-sustainability
+    title: "Mod intake: sustainably accept third-party factions and islands (issue #54 umbrella)"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [faction-island-decoupling]
+    commits: [5a1aa34, 33f5daf, 9d006ca, 04aa21a, 38cc1ef, f2d6e7c, 3dc1212, 7694bf2, 3677c23, 6ff9de6, 0d002a0, 174b277, 85a92f4, e89b177, 390c789, d4d6165, 1338f88, 6a61d38, "3778782", 28671b0, 4dd6626, 85e0c9d, 20f4c73, cbb9d51, dec80aa, 8dbbf4c, 7dc0354, 36a4a40, 8112c92, f5779c2, a4a6c8d, 85fbb4c, 57b1101]
+    gh_issues: [54, 56]
+    summary: >
+      Umbrella for making Guerrilla Mode accept modded factions and islands without
+      per-mod hand work. The 2026-09-01 sustainability audit found the engine half
+      sound (sides decoupled from rosters, plan-15 degrade-never-crash, generic
+      hardening from the LoBo work) and the content-packaging half not: factions
+      welded to island templates (#26), every island a ~700-line bespoke template
+      with hand-listed transitive addOns[] and hand-sampled elevations, the script
+      core copied byte-identically into eight templates, each @LoBo defect fixed by
+      its own machine-local PowerShell script, an addon-dependency walk that skips
+      weapons[]/magazines[], and mod lanes that only run on one machine. Issue #54
+      carries the ordered step list: Phase A executes #26 (union-merge faction
+      sources, menu-time probe gating, warrior-body seam, shared faction blocks,
+      PoseidonTools descriptor lint, faction-pack spec); B loads one shared script
+      core and retires the N-way parity copy; C completes the transitive addon walk,
+      adds a PoseidonTools island scaffold (zones from Names + road net), classifies
+      Names entries instead of the seedCities flag, and derives island discovery
+      from CfgWorlds; D makes the config reader tolerate the known defect classes
+      and folds the three LoBo repair scripts into one generic "mod doctor" plus a
+      roster spawn probe; E adds GPL-clean synthetic faction/island fixtures, matrix
+      tests and a CI lane needing no proprietary data; F wires the installer (#29)
+      and docs. Definition of done: a faction pack in a mod's config.cpp appears on
+      every island gated by the class probe; a mod world becomes playable by running
+      one tool; one core to fix; one repair tool; published contracts; CI coverage
+      on a clean clone.
+    log:
+      - "2026-09-01: filed as issue #54 after the sustainability audit. Verdict: factions are one packaging change away (#26); islands are a per-world authoring project; third-party mods should be budgeted as content-repair work first and integration second. Related seam bugs #46/#48/#50 and test debt #49 are pulled in as step E."
+      - "2026-09-02: Phases A-F landed on feat/mod-intake-54 (15 commits, five parallel agents on separate build dirs). B (9d006ca): ONE script core at guerrilla-mode/core installed as <GameDir>\\gmcore, every mission's init.sqs a two-line `[] exec \"\\gmcore\\init.sqs\"` bootstrap (the leading backslash resolves against the data root: banks, then loose disk - no engine change); the parity test now pins the one-core shape. C1 (04aa21a): Asset/Addon/AddonClosure walks weapons[]/magazines[]; ActivateTemplateAddons at the player seam + ZoneRegistry::ActivateFactionAddons at registry load; Sinai's addOns[] is {sinai, LoBoEgypt}, proven with the @lobofixup preload roster removed (3 + 22 addons activated by the walk, zero denials). C2 (3dc1212): `guerrilla scaffold` reads CfgWorlds + the .wrp headless, name-classifies roads/houses, seeds CITY zones, places camp/outposts, samples elevations with the engine's triangle split; Guerrilla.Eden (e89b177) ships as its verbatim output and boots (22 zones). C3 (38cc1ef, 85a92f4): seedCities tri-state, absent = Auto through LandscapeSettlementProbe (SurfaceY above sea level + 3 house-sized Buildings within 300 m); on Lebanon80 it refuses all 13 theatre labels and accepts the 8 built-up rear settlements, so the template keeps = 0 by play-area design and guerrilla_names_classify pins the verdict on a keyless copy. C4 (7694bf2): the installer's world gate reads pbo entry tables (no -IncludeWorld, no doc edit); WORLD-NAMES.md is a convention doc. D1/D2 (f2d6e7c): malformed floats and bare scope keywords coerced with a WARN (--strict-config restores raw); `mod doctor` reproduces the three LoBo repairs byte for byte. D3 (3dc1212): `guerrilla probe` found two bundled CoC diver classes in @LoBo whose models the mod never ships (a latent access violation). E1-E3: GPL-clean packages/mini + @udfaction/@udbroken fixtures, tests/ci/mod-intake-lanes.sh (five lanes green locally), .github/workflows/ci.yml, tests/cli/TestHelpers.psm1 reconstructed so the smoke suite runs on any clone (#49). E4 (3677c23): the #46/#48/#50 audit residues fixed (two silent drops now WARN, keep collision, only cycled picks are kept across islands, menu gate holds the shape probe, StartAutoTest clears the bank before InitVehicles). F1 (174b277): tools/mod/Add-ModFolder.ps1 and Add-Island.ps1 double-click hooks for #29's installer."
+      - "2026-09-02: still open after this pass: the synthetic .wrp island fixture (E1; the scaffold is proven on the real Eden/Cain/Abel/Sinai worlds instead, so guerrilla_island_scaffold needs the Classic data dir); the CI workflow has not had a first run on GitHub (unpushed branch); #29's installer itself (F1 delivered the hooks); the ZoneRegistry recruit/garrison probe still has no shape gate (#46 seam 4b) and there is no test for loading a modded-body save without the mod (#48); the @LoBo war rosters live in the @lobofixup fixture, so a play session mounting @LoBo alone offers no war factions on Sinai/Lebanon80 - a real distribution wants them in @LoBo\\bin\\config.cpp or a faction-pack mod."
+      - "2026-09-03: the #56 leftovers, in ramp order. (1) menu e2e: two green, the Lebanon80 civilian test had a stale expectation (Cain now offers the outfit pair because the faction library is global) and pins the new contract, 36a4a40. (2) the eight @LoBo rosters live once in guerrilla-mode/config/lobo-factions.hpp, installed into @LoBo bin/config.cpp by tools/lobo/install-lobo-factions.ps1 and #included by the @lobofixup fixture; guerrilla_sinai_swap and guerrilla_lebanon80_boot mount @LoBo alone (also the standing proof of C1/D1), 8dbbf4c. (3) the 32 stock-menu UI tests were never Classic tests: the 2026-07-15 menu override removes the entries they walk and their fixture paths resolve only from packages/Demo; re-pointed, not loosened: 21 to packages/Demo (tag demo), 11 mods-screen/join tests to packages/Game, the full retail Remaster with the complete STRINGTABLE_MAINMENU (tag full_game); 32/32 green, dec80aa. (4) ClassProbe::Spawnable = Exists + the shape-file gate; ResolveFactionClasses uses it for all ten CfgVehicles probes, the lint records it, unit cases added, cbb9d51 (+20f4c73 for the header). (5) guerrilla_lobo_body_save_reload_modless.seq: loading a modded-body save without the mod was an access violation in VehicleList::Serialize on the null slot the unknown class leaves; guarded with a WARN (8112c92), after which the first frame faults in AIMap::ProcessChange because the AI side still references the dropped player unit - the real find #48 predicted; fixed in 57b1101 (holes stay through the second serialisation pass, null-type targets dropped after every reference resolved, the player rebuilt from the template authored class through the Spawnable gate, absent addons skipped): the mod-less load passes, the mod-mounted sibling stays green. (6) CI GREEN on main (33718265267, 33720036823; warm-cache 17.5 min in the workflow header): six runs to a green Configure (autoconf-archive, libltdl-dev, linux-libc-dev, SDL3 deps, libibus), then a Linux-only forward-declaration clash (20f4c73), then ctest choking on unbuilt suites (f5779c2 runs the three binaries directly). (7) tests/fixtures/mods-island/@udisland: a GPL-clean 64x64 RVW v4 island with MLOD houses/roads and a CfgWorlds Names block; scaffolds on the config-only mini package as a CI lane, and its verbatim template Guerrilla.UdIsland boots on Classic (guerrilla_udisland_boot), 7dc0354. The boot itself stays full_cwa: no fixture ships fonts/resource/stringtable/menu world and the workflow builds neither PoseidonGame nor tri."
 
   - id: pseudo-gang-feature
     title: "Pseudo-gang feature (issue #2)"
@@ -971,7 +1131,7 @@ items:
   - id: guerrilla-base
     title: "Persistent guerrilla base: elected start town, enterable-building HQ, civilian-clothed guards (issue #16)"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 2
     depends_on: [engine-native-systems, faction-class-resolution, town-flags]
     gh_issues: [16]
@@ -987,11 +1147,12 @@ items:
     log:
       - "2026-07-15: deep-plan multi-agent recon done (6 subsystems); design synthesized and filed as issue #16. Offline scan: 73 of 1327 Classic models are AI-enterable; min-NPos filter needed to exclude walk-through objects. @LoBo Sinai scan still owed before the lobo-lane tests."
       - "2026-08-05: now the gate on the whole money branch - issue #28 (cache-and-garage) requires the elected HQ, and #27 (money-sinks-dealers) sits behind #28. The owed @LoBo Sinai enterable-building scan is the cheapest thing standing between here and roughly half the open backlog by effort."
+      - "2026-08-22: M1 (election + persistence) and M4 (START TOWN cycler) LANDED under the GuerrillaBase name as the base of issues #27/#28: Game/Guerrilla/GuerrillaBase.{hpp,cpp} (+Commands) elects one HQ per campaign in any zone - best enterable building (Paths LOD, hqMinPos>=4, most positions then nearest) with the cache on its first interior AI position, else the edge-of-town outdoor fallback; gmSelStartTown from the new idc-152 cycler (ZoneRegistry::CollectTownNames = the one list rule for cycler + zone table) is resolved on the first tick and the player relocated beside the garage; serializes as GuerrillaBase. STILL OPEN from #16: the civilian-clothed guards, engine-side interior stationing, the @LoBo enterable-building scan, the Sinai/Lebanon lobo-lane e2e."
 
   - id: cache-and-garage
     title: "HQ cache + vehicle garage: stored weapons, lockable vehicles, dealer delivery (issue #28)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 2
     depends_on: [guerrilla-base, arms-stash-engine]
     gh_issues: [28]
@@ -1006,11 +1167,12 @@ items:
       the town edge, outside buildings and fences, when none is found.
     log:
       - "2026-08-05: filed. The weapons half rides the existing StashRegistry pattern (keep-when-empty holders + serialized rows). The vehicle half has no precedent in Game/Guerrilla/ - garrison units ride the world vehicle serializer, but nothing today protects an arbitrary player-parked vehicle from cleanup, so expect a new registry in the StashRegistry/TownFlags mold plus a SaveVersion bump."
+      - "2026-08-22: LANDED with #16 M1/M4 and #27 in one commit. Engine: GuerrillaBase owns the cache (a keep-when-empty WeaponHolder registered as a stash, moved with its contents on a re-establish) and the garage ring (gmGarageLock: SetLock + allowDammage false, both re-asserted every 2 s tick and on the load pass since neither is serialized - no SaveVersion bump needed, the block is presence-tolerant; rows release beyond 1.5x the ring; the horn muzzle plays the beep-beep as two OpenAndPlayOnce bursts). User decisions: HQ election = BOTH the new-game START TOWN cycler and the in-mission Establish/Move action; garaged vehicles ARE invulnerable while locked (garageInvulnerable=1). Script: scripts/market.sqs mounts the HQ / Stash / Lock-Unlock / Buy menus and is the second gmResources debit writer. Retrieval from the cache = the holder's own TAKE actions (script fallback documented in market.sqs)."
 
   - id: money-sinks-dealers
     title: "Ways to spend money: vehicle and weapon dealers seeded across cities (issue #27)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 3
     depends_on: [cache-and-garage]
     gh_issues: [27]
@@ -1021,6 +1183,8 @@ items:
       Purchases route to the HQ cache/garage for collection.
     log:
       - "2026-08-05: filed. Lands on an economy that already exists - economy.sqs runs the Resources (R) and Manpower (HR) ledger with zone-driven income ticks and the issue-#8 panic coupling, and recruit_action.sqs is the working addAction-dispatch precedent (enqueue only; the manager loop stays the single writer of the gmResources debit)."
+      - "2026-08-24: review/polish pass over the landing: Market::Simulate's failed-respawn check read the row's npc link, which still points at the CORPSE after a dealer dies (an OLink only nulls on delete), so a failed respawn (group cap, missing body class) left respawnIn <= 0 and re-logged 'dealer is gone' every cycle instead of re-arming the timer - the check now re-tests aliveness. Unit [guerrilla] 159/159 + the market/start-town/menu/save-reload Trident lanes re-verified green."
+      - "2026-08-22: LANDED. Engine Game/Guerrilla/Market.{hpp,cpp} (+Commands): class CfgGuerrillaMarket (description.ext) = tuning + the stock (weapon/magazine rows, vehicle rows, package-probed at load, display names from the package config, dealerClass from the CIV descriptor's civClass1); at the first tick each kind goes to round(cities*0.34) (>=1) CITY zones from a seeded, salted, independent order (a town may host both; seed serialized so a reload keeps the towns), each dealer a CIV NPC on a deterministic off-road spot (cardinals vs diagonals, a LOT spot for delivered hulls), respawning after 600 s; serializes as GuerrillaMarket. Stock blocks authored for Abel/Demo (Classic 1.99 classes, every one verified against CONFIG.BIN: Mini/Trabant/Bus/G36a/Bizon/Glock/Revolver are NOT in the core config and were left out; Motorcycle IS in it but as an abstract scope-0 base, caught by the first Trident run as 'Cannot create: type is abstract' - the engine path now also drops scope<=0 vehicle rows and falls the dealer body back to Civilian), Sinai and Lebanon80 (@LoBo pairs from the descriptors). Script: market.sqs BUY menu (<=8 rows + here/HQ delivery) = the debit + WeaponHolder / createVehicle / gmGarageLock."
 
   - id: extort-solicit
     title: "Solicit/Extort: per-civilian opinion + fear, money taken from the population (issue #41)"
@@ -1045,6 +1209,28 @@ items:
       - "2026-08-05: filed. Complements money-sinks-dealers (spending); this is where the money comes from outside zone income. Both write the same gmResources scalar economy.sqs owns, so the single-writer/directional-split discipline that keeps economy.sqs and recruit.sqs from colliding has to extend to cover it."
       - "The support nudge lands on ZoneRecord::support, the same 0-100 ledger the #8 resentment path already debits - so extortion pressure and occupier atrocity share one currency of town goodwill, which is the intended tension."
 
+  - id: supply-run-ngo
+    title: "Supply run: humanitarian aid NGO contacts (2 per island) + non-violent aid distribution for town support (issue #52)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [civilian-ambience-layer, arms-stash-engine]
+    gh_issues: [52]
+    summary: >
+      The first player-side NON-VIOLENT support action. Two CITY zones per
+      island get a neutral humanitarian-aid NGO contact (a stationed CIV
+      descriptor unit + props, never on the civilians.sqs wander/cache
+      rosters). The contact hands out abstract aid consignments (no new item
+      classes); the player hauls them, weapon stowed, into a town (best value
+      in occupier-held, panicked or closed towns) and distributes them in an
+      abstract scene for a GM_fnSupportAdd gain, a diary line and a per-zone
+      cooldown, with occupier witnesses rolling a cover break / heat raise.
+      It is the undercover lane to supportFlip in a garrisoned town, the
+      goodwill mirror of extort-solicit, a non-combat use for the #28 cache
+      and a third good for the #27 dealer network. Zero C++.
+    log:
+      - "2026-08-22: filed. Grew out of a survey of non-violent resistance techniques that fit existing seams (support writer, addAction menus, undercover status/witnesses, the shakedown.sqs abstract-scene rule, the panic-ledger cooldown pattern, gmStash*). Siblings not yet filed: talk-to-civ, flyers, bribes/informants, protest."
+
   - id: unassociated-assailants
     title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
     phase: phase-2
@@ -1068,10 +1254,13 @@ items:
   - id: nearest-roads-command
     title: "Evaluator commands: nearestRoads + worldLocations"
     phase: phase-1.5
-    status: planned
+    status: done
     priority: 2
     depends_on: [engine-native-systems]
+    commits: ["f255bef"]
     gh_issues: [33]
+    log:
+      - "2026-08-22: the road half landed with ambient-traffic - `<pos> nearestRoads <radius>` (binary alias of `gmRoadsNear [pos, radius]`, unlocked road-segment centre positions), `gmRoadNearest <pos>` (20 m GetNearestRoadPoint, [] when none) and `gmRoadPath [from, to]` (the engine's short-hop A*), all in Game/Guerrilla/TrafficCommands.cpp, positions in getPos order with height above ground. The worldLocations-style query from plan 13 is still open under #33."
 
     summary: >
       The two engine commands the docs still owe: nearestRoads <pos> <radius>
@@ -1137,6 +1326,110 @@ items:
       - "2026-07-30: launch chain proven live by tri probes: click idc 124 -> IDD_MISSION (46), alive player, UC_BOOTED, gmZoneIndex Houdan >= 0. First e2e attempts were an environment goose chase: concurrent Claude sessions kill every PoseidonGame process as test cleanup (bare menu canary died at 25s; exit code -1, empty stderr, no WER = external TerminateProcess), and their parallel game instances slow world loads past the 240s timeout."
       - "2026-07-30: both e2e tests green 2/2 after appending triEndTest (menu-launch tests idle in-mission after the last assert; without the shutdown verb the runner waits out the full timeout and reports 'game didn't exit cleanly'). On a quiet machine with hot caches the whole menu boot -> click -> mission-init chain completes in ~1 s (mission init.sqs and ZoneRegistry run during the load, before the first rendered frame), so sub-second green runs are genuine, not false passes - verified against the runner's RUST_LOG=debug eval trace."
 
+  - id: qrf-reference-mission
+    title: "QRF reference mission: Qrf.Abel sandbox for the alert -> QRF chain + main-menu QRF button"
+    phase: phase-1.5
+    status: done
+    priority: 2
+    depends_on: [reference-missions-main-menu, engine-native-systems]
+    summary: >
+      Third human-playable test slice, sibling of Undercover.Abel: Qrf.Abel
+      (guerrilla-mode/mission/Qrf.Abel) isolates the occupier alert -> QRF
+      chain on the Houdan slope of Abel - a resistance Camp at the player
+      start (overwatch, ~66 m), an occupier Outpost (garrison 6) on the dirt
+      track 200 m below and a Depot (garrison 4) further down, all inside the
+      800 m cacheRadius so the native garrisons spawn at boot. It is HOOKED
+      INTO the real systems, not a re-implementation: scripts/lib.sqs +
+      scripts/qrf.sqs are byte-identical copies of the shared core (a new
+      subset-core case in test_mission_script_core.cpp pins every Qrf.*
+      template to that), driven by the native AlertMachine/GarrisonCache/
+      ZoneRegistry; only the bootstrap (init.sqs), the debug action menu
+      (status report, 30 s forced reveal, War Level cycle, garrison memory
+      wipe, recruit 3, teleports, god mode) and the HUD (change-driven title
+      line with per-zone alert/knowsAbout/garrison, QRF launch/arrival/
+      insertion/stand-down hints, map markers for stage/move/target + the
+      moving convoy) are mission-local. Wired like its siblings: idc 125 in
+      kReferenceMissions (UI/OptionsUIApp.cpp), install-missions.ps1 Qrf.*
+      prefix, the Classic package's local bin/resource-extra.cpp row
+      re-laid three-across, ui/main_menu/reference_mission_qrf e2e, and a
+      new scripting/qrf_reference_mission system test (boot -> garrison ->
+      reveal -> YELLOW -> RED -> convoy -> perception removed -> GREEN ->
+      stand-down) - the first Trident test that pins the QRF convoy itself
+      outside the Showcase chapter.
+    log:
+      - "2026-08-22: sited from PoseidonTools terrain objects abel.wrp --near surveys (track from Houdan's east gate ~[7121,6081] down to a dead end ~[7574,5892]; zone sites on open ground, player start on the 66 m slope)."
+      - "2026-08-22: Undercover.Abel brought onto the same contract - it had re-implemented the 4-line script policy (captive/gmUndercover/fired-EH/hint) in its own init.sqs; it now carries byte-identical scripts/lib.sqs + scripts/undercover.sqs and execs them (same hint + diary line as the campaign), hud.sqs no longer drains gmEvtUcBroken (one queue, one consumer), and the subset-core unit case covers both Qrf.* and Undercover.* families. ui/main_menu/reference_mission_undercover green after the rewire."
+      - "2026-08-22: verified - PoseidonTests [missions] 28/28 (new Qrf subset-core case), tri scripting/qrf_reference_mission + ui/main_menu/reference_mission_qrf 2/2 green in 47.6 s (the whole reveal -> RED -> convoy -> stand-down chain completes in ~45 s headless). First attempt failed twice for mechanical reasons, both fixed: the scripting test lacked triEndTest (game idled to the 420 s timeout), and a perl backslash-u escape had rewritten the Classic resource-extra.cpp button sounds to uiI_ok (strict mode made the missing wss fatal on click, exit 3)."
+
+  - id: market-reference-mission
+    title: "Market reference mission: Market.Abel sandbox for the HQ / cache / garage / dealer loop + main-menu MARKET button"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [qrf-reference-mission, cache-and-garage, money-sinks-dealers]
+    summary: >
+      Fourth human-playable test slice, sibling of Qrf.Abel: Market.Abel
+      (guerrilla-mode/mission/Market.Abel) isolates the money loop on the
+      Houdan plain of Abel - a building-less resistance Camp at the player
+      start (so "Establish headquarters here" there exercises the
+      edge-of-town fallback), seedCities=1 so every named town is a CITY zone
+      the dealers are drawn over and the HQ can be elected in (Houdan, ~490 m
+      NW, is the nearest: a building HQ), a 50000 R treasury and the Classic
+      1.99 stock. HOOKED INTO the real systems: scripts/lib.sqs +
+      scripts/market.sqs + scripts/market_action.sqs are byte-identical
+      copies of the shared core (the Market.* family row in
+      test_mission_script_core.cpp pins it), driven by the native
+      GuerrillaBase + Market; only the bootstrap (init.sqs), the debug action
+      menu (status report, teleports to the nearest arms / vehicle dealer,
+      the garage, the nearest town, the Camp, +10000 R, god mode) and the
+      HUD (change-driven HQ / garage / dealer / treasury line) are
+      mission-local. Wired like its siblings: idc 126 in kReferenceMissions
+      (UI/OptionsUIApp.cpp), install-missions.ps1 Market.* prefix, the
+      Classic package's local bin/resource-extra.cpp row, ui/main_menu/
+      reference_mission_market e2e, and a new scripting/
+      market_reference_mission system test (boot -> dealers drawn -> buy here
+      -> HQ in the town -> stash / retrieve -> buy to the HQ cache + garage
+      (locked) -> unlock / relock -> move the HQ to the Camp: outdoor
+      fallback, debited, cache travels, the far hull released). The START
+      TOWN cycler has its own ui/guerrilla_start_town_e2e (Abel, idc 152 ->
+      "Village" -> launch -> HQ standing in Village, player beside it).
+    log:
+      - "2026-08-24: polish pass: hud.sqs and act_status.sqs round dealer distances to whole metres (raw floats made the readout noisy and kept the change-driven titleText repainting while standing still); installed copy refreshed via install-missions.ps1."
+
+  - id: vehicle-controls-overhaul
+    title: "Vehicle controls: mouse steering removed, permanent freelook in non-turret seats, gamepad-steering option"
+    phase: phase-2
+    status: in-progress
+    priority: 2
+    summary: >
+      Design decision (2026-08-09): the mouse never steers a vehicle in UD -
+      in every non-turret seat (Driver, CommanderAsDriver, Cargo; turret
+      Gunner/Commander seats keep mouse aim) the camera is permanently
+      decoupled from the hull, mouse looks and keys steer, on the ground and
+      in the air alike. Implemented as a seat-driven freelook lock:
+      World::UpdateInputContext feeds InputContextResolution.seat into
+      InputSubsystem::SetSeatFreelookLock, IsLookAroundEnabled() ORs the
+      manual LAlt/toggle flag with the lock, and the joystick-recency
+      arbiter deliberately keeps reading only the manual flag so an idle
+      connected pad cannot win steering during a drive. The
+      internalCamera+IsMouseTurnActive mouse branches were deleted from all
+      seven pilots (Car, Motorcycle, Tank, Ship, HelicopterAI, AirplaneAI,
+      SeaGull). Keyboard steering retuned asymmetrically instead of a flat
+      scalar: centering (_turnDecreaseSpeed) now matches the retired mouse
+      path's 2.0 flat (self-stabilizing, kills the release/counter-steer
+      oscillation), wind-up stays speed-scheduled and was settled by playtest
+      just above vanilla (car 0.53->0.16 across the speed range, bike with the
+      maxTurn floor kept at the raised 0.1), tank command authority 0.36 rad
+      at rest with the vanilla lookahead estT 0.25. New persisted Options
+      toggle "Gamepad steering" (gamepad.cfg steering=, GamepadTuningPage row
+      1): off = IsJoystickPilotActive/IsJoystickThrustActive false and
+      stick/trigger/POV bindings stripped from movement actions in the five
+      driver contexts, while pad look/buttons/menus stay live.
+    log:
+      - "2026-08-09: landed engine-side. Unit coverage: seat-lock semantics, mouse-turn veto, arbiter-on-manual-flag, pilot/thrust gating, driver-context binding suppression, gamepad.cfg round-trip, tuning-page rows. PoseidonTests at baseline (5 pre-existing Map-localization reds, reproduced with the change stashed); clean boot to main loop verified. Steering strings added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored data-dir file - re-add after a reinstall) + the tracked test fixture."
+      - "2026-08-21 (aaadfd7): in-vehicle feel playtest done for car/bike/tank on a DriveTest.Abel mission (jeep + M60 beside spawn, in the gitignored Classic Missions dir). Every 08-09 wind-up rate turned in too hot; live-iterated with the player to car slowTurn*0.37+0.16, bike *0.37+0.12 (centering 2.0 kept - vanilla's slow centering was also test-driven and rejected), tank authority 0.36 rad at rest (~72% of vanilla; the retune's 0.75 AND pure vanilla 0.5 both felt too fast) with vanilla estT 0.25."
+      - "Open: keys-only aircraft flight feel playtest; a tri lane asserting mouse motion moves the camera but not _turnWanted."
+
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
     phase: phase-2
@@ -1172,6 +1465,37 @@ items:
     log:
       - "Plan 14 also names sub-day quick wins needing no new C++: flags, a curfew clock, one hand-placed checkpoint."
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
+
+  - id: guerrilla-journal
+    title: "Field journal: native Notes/Plan pages (manual, live situation, diary, objectives)"
+    phase: phase-2
+    status: done
+    depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
+    summary: >
+      The map screen's briefing notepad was empty in Guerrilla Mode (no
+      briefing.html, nothing written at runtime). Now a native Journal
+      (engine/Poseidon/Game/Guerrilla/Journal.* + JournalCommands.cpp: gmJournalLog /
+      gmJournalObjective / gmJournalStatus / gmJournalCount / gmJournalEntry /
+      gmJournalObjectiveState / gmJournalStatusText, plus the gmIslandName nular)
+      holds a capped diary, keyed objectives and keyed status lines, serialized as
+      the presence-tolerant GuerrillaJournal save block. UI/Guerrilla/
+      GuerrillaJournalPages.* renders, inside DisplayMap::ReloadBriefingContent
+      whenever CfgGuerrillaZones is active, the Notes page (campaign header, a live
+      Situation block from ZoneRegistry/AlertMachine/UndercoverSystem/StashRegistry +
+      the script economy globals, a 10-topic field manual on GM_MAN_* pages, latest
+      diary lines + a full GM_LOG page) and the Plan page (standing goal, two
+      engine-computed objectives with counts, scripted objectives, derived next
+      steps). Pages rebuild on every map-key open (DisplayMap::ResetHUD; the display is
+      created once per mission), on any journal change while open (revision
+      compare in OnSimulate), on the Notes/Plan tab press and after an in-place
+      load. The shared
+      scripts (byte-identical across all 8 mission copies) write the diary (capture
+      arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits,
+      save/restore), four starter objectives and the Companions / Unlocked-gear
+      status lines; init.sqs is unchanged.
+    log:
+      - "2026-08-22: `Journal::Log` had to be renamed AddEntry (Log is an engine macro). AddImage needs a texture loader, so the renderer takes useImages=false in the parser-only unit test and draws text bullets; in-game it reuses the stock mission_dot/done/uncomplete icons. GetHtmlText joins fields with a space while the formatter lays them adjacent, so the test helper collapses double spaces."
+      - "2026-08-22: verified: [guerrilla] unit lane 2710 assertions/128 cases green incl. the script-core parity test and test_journal.cpp (6 cases); Trident guerrilla_native_capture + guerrilla_native_save_reload.seq (extended with diary/objective/status sentinels across the cross-process reload) 2/2 green; install-missions.ps1 -IncludeWorld Sinai,Lebanon80 rerun. Stale ccache PCH objects (CRLF-era cache hits after the LF normalisation) had to be force-rebuilt with CCACHE_DISABLE=1 before anything compiled."
 
   # ---------------------------------------------------------------- phase 3
   - id: strategy-screen

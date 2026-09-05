@@ -115,6 +115,11 @@
 	game. The swap system is <b>built and running</b>: every island fact and every faction fact lives in swappable data, and the
 	same campaign core already boots on a <b>second island</b> (Sinai) with the sides flipped. There, a modern occupier is held off by an Egyptian frontier resistance, the mirror image of the stock Cold War matchup, and the campaign code didn't change a line to do it. See the <a href="designloop.html">Roadmap</a>
 	for what's proven and what comes next.</p>
+	<p><b>Mods land in the same slots.</b> A mod that ships its own soldiers can add them to both faction cyclers by
+	including one config block, with no edit to any island we ship. A mod that ships a map becomes a campaign by
+	running a generator over it, which reads the world's own town list and road network and writes the zone table.
+	Factions you don't have mounted show up greyed out and say so, instead of dropping you into a mission full of
+	stand-in units. The two contracts are written up on the <a href="tech.html#mods">Under the Hood</a> page.</p>
 	<div class="shot">
 		<img src="assets/img/shot-newgame.png" width="760" alt="In-game new-game screen: Select island, with OCCUPIER: IDF and RESISTANCE: EgyptFrontier">
 		<div class="cap"><span class="stampcorner">DEV CAPTURE</span><b>The new-game screen, running:</b> choose the island, then cycle the occupier and resistance factions before you deploy. Here the occupier is IDF and the resistance is the Egyptian Frontier Corps, a matchup that doesn't exist in the stock game.</div>
@@ -133,6 +138,7 @@
 	checkpoint) land early; the rest arrives as the mode fills out.</p>
 	<table class="data">
 		<tr><th width="170">Occupier system</th><th>What it means for you</th><th width="70">Status</th></tr>
+		<tr><td>Ambient Traffic</td><td>The roads are not empty. Civilian cars run town to town, occupier patrol vehicles work the routes between their posts, and now and then a supply convoy rolls through with an escort. Step into the road with a rifle up and a civilian driver stops, bails and runs; the car is yours, and you still read as a civilian behind its wheel. A driver shot on the road counts against you like any other civilian killing.</td><td><span class="badge live">Playable</span></td></tr>
 		<tr><td>Checkpoints, Wire &amp; Flags</td><td>The occupier stamps a control grid onto the island: roadblocks at the chokepoints, watchtowers and wire around towns, its flag over everything it holds. The map itself gets tighter to move through as the war escalates; veterans read a region by its infrastructure. Tearing the flag down can <i>be</i> the moment a zone flips to you.</td><td><span class="badge plan">Planned</span></td></tr>
 		<tr><td>Curfew &amp; Pass Laws</td><td>Occupation runs on a clock, too. After dark in a controlled town, a civilian on the street is suspicious by default. Night stops being free stealth and becomes a gamble: darkness and empty streets, but your presence is its own probable cause.</td><td><span class="badge plan">Planned</span></td></tr>
 		<tr><td>Reprisals &amp; Closures</td><td>Blow an ambush and the nearest town that helped you pays: its income shut off, a house or two demolished into rubble. But history's hard lesson is wired in: <b>repression radicalizes</b>. Every crackdown costs you support now and hands you fresh recruits later, so the occupier's cruelest moves seed your comeback.</td><td><span class="badge plan">Planned</span></td></tr>

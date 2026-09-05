@@ -46,6 +46,7 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp> // ambient-traffic danger hook (TrafficNotifyShotFast)
 
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
@@ -2359,6 +2360,10 @@ void EntityAI::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI*
         _shootAudible = type->audibleFire;
         _shootTimeRest = type->visibleFireTime;
         _shootTarget = target;
+        // Guerrilla ambient traffic: nearby civilian drivers react to the
+        // shot.  Global-bool fast gate (the GUndercoverActive precedent):
+        // the inactive case costs one bool read per round
+        Guerrilla::TrafficNotifyShotFast(this, type->audibleFire);
 // perform cartridge effects
 #if 1
         if (type->_cartridgeType && EnableVisualEffects(SimulateVisibleNear))

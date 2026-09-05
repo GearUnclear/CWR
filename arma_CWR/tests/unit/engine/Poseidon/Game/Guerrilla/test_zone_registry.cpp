@@ -115,10 +115,12 @@ struct FakeProbe final : ClassProbe
 {
     std::vector<std::string> vehicles;
     std::vector<std::string> weapons;
+    // classes whose config is present but whose .p3d the package never ships
+    // (issue #46 seam 4b): Exists says yes, Spawnable says no
+    std::vector<std::string> shapeless;
 
-    bool Exists(const char* bank, const char* className) const override
+    static bool Has(const std::vector<std::string>& list, const char* className)
     {
-        const std::vector<std::string>& list = stricmp(bank, "CfgWeapons") == 0 ? weapons : vehicles;
         for (const std::string& name : list)
         {
             if (stricmp(name.c_str(), className) == 0)
@@ -127,6 +129,16 @@ struct FakeProbe final : ClassProbe
             }
         }
         return false;
+    }
+
+    bool Exists(const char* bank, const char* className) const override
+    {
+        return Has(stricmp(bank, "CfgWeapons") == 0 ? weapons : vehicles, className);
+    }
+
+    bool Spawnable(const char* className) const override
+    {
+        return Has(vehicles, className) && !Has(shapeless, className);
     }
 };
 
@@ -1695,6 +1707,104 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
     std::filesystem::remove(archivePath);
 }
 
+TEST_CASE("ZoneRegistry - CollectTownNames lists the campaign's CITY zones: authored first, then seeded",
+          "[game][guerrilla]")
+{
+    // The START TOWN cycler's list rule. Village is an authored CITY sitting on
+    // top of the Houdan Names entry (deduped by distance), NearCamp is ~141 m
+    // from the explicit Camp, Sainte 50 m from the authored OUTPOST (every
+    // authored zone counts for the dedup, as in SeedCityZones), LeVille is an
+    // Arma-style typed city, Rocher a typed non-town, Arudy a plain town.
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    seedCities = 1;\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Camp    { name=\"Camp\";    type=\"CAMP\"; owner=\"GUER\"; "
+                         "position[]={6500.0, 6500.0, 100.0}; };\n"
+                         "        class Village { name=\"Village\"; type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={3500.0, 4200.0, 35.0}; };\n"
+                         "        class Post    { type=\"OUTPOST\"; owner=\"EAST\"; "
+                         "position[]={9000.0, 9050.0, 10.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class Names\n"
+                         "{\n"
+                         "    class Houdan   { name=\"Houdan\";   position[]={3500.0, 4200.0}; };\n"
+                         "    class NearCamp { name=\"NearCamp\"; position[]={6600.0, 6400.0}; };\n"
+                         "    class Sainte   { name=\"\";         position[]={9000.0, 9000.0}; };\n"
+                         "    class LeVille  { name=\"Le Ville\"; type=\"NameCity\"; "
+                         "position[]={12000.0, 12000.0}; };\n"
+                         "    class Rocher   { name=\"Rocher\";   type=\"RockArea\"; "
+                         "position[]={15000.0, 15000.0}; };\n"
+                         "    class Arudy    { name=\"Arudy\";    position[]={2000.0, 9000.0}; };\n"
+                         "};\n";
+
+    SECTION("authored CITY zones first, then the seeded Names towns in Names order")
+    {
+        ParamFile file;
+        QIStream in(config, strlen(config));
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("Names"), names);
+        REQUIRE(names.Size() == 3);
+        CHECK(Str(names[0]) == "Village");
+        CHECK(Str(names[1]) == "Le Ville");
+        CHECK(Str(names[2]) == "Arudy");
+    }
+
+    SECTION("the list IS the registry's CITY zone table, in its order")
+    {
+        RegistryFixture f;
+        f.Load(config, nullptr, nullptr, "Names");
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), names);
+        int cities = 0;
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            const ZoneRecord* z = f.registry.GetZone(i);
+            if (stricmp(z->type, "CITY") != 0)
+            {
+                continue;
+            }
+            REQUIRE(cities < names.Size());
+            CHECK(Str(names[cities]) == Str(z->name));
+            cities++;
+        }
+        CHECK(cities == names.Size());
+    }
+
+    SECTION("seedCities off: the authored CITY zones only")
+    {
+        std::string off(config);
+        off.replace(off.find("seedCities = 1"), strlen("seedCities = 1"), "seedCities = 0");
+        ParamFile file;
+        QIStream in(off.c_str(), off.size());
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("Names"), names);
+        REQUIRE(names.Size() == 1);
+        CHECK(Str(names[0]) == "Village");
+    }
+
+    SECTION("null configs")
+    {
+        ParamFile file;
+        QIStream in(config, strlen(config));
+        file.Parse(in);
+        AutoArray<RString> names;
+        ZoneRegistry::CollectTownNames(nullptr, nullptr, names);
+        CHECK(names.Size() == 0);
+        ZoneRegistry::CollectTownNames(file.FindEntry("CfgGuerrillaZones"), nullptr, names);
+        REQUIRE(names.Size() == 1);
+        CHECK(Str(names[0]) == "Village");
+        ZoneRegistry::CollectTownNames(nullptr, file.FindEntry("Names"), names);
+        // no zones config = no seedCities key = Auto (issue #54 C3): the
+        // Names towns are listed (the mission-time classifier may seed fewer)
+        CHECK(names.Size() >= 1);
+    }
+}
+
 TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names", "[game][guerrilla]")
 {
     // Houdan/Sainte are OFP-style entries (no type; Sainte with the common
@@ -1754,8 +1864,11 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         REQUIRE(Str(leVille->marker) == "gmZoneCity_2");
     }
 
-    SECTION("seeding is off by default")
+    SECTION("seeding is Auto by default: with no landscape to classify against every town seeds")
     {
+        // issue #54 C3: an absent seedCities key means Auto; the engine's
+        // settlement probe (dry land + buildings) does the filtering, and
+        // without one (these config-only tests) the pre-C3 answer stands
         const char* noSeedConfig = "class CfgGuerrillaZones\n"
                                    "{\n"
                                    "    class Zones\n"
@@ -1769,7 +1882,8 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
                                    "};\n";
         RegistryFixture f;
         f.Load(noSeedConfig, nullptr, nullptr, "Names");
-        REQUIRE(f.registry.NZones() == 1);
+        REQUIRE(f.registry.Tuning().seedCities == ZoneTuning::SeedCities::Auto);
+        REQUIRE(f.registry.NZones() == 2);
     }
 
     SECTION("total zone count is capped at MaxZones")
@@ -1942,6 +2056,38 @@ TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming factio
         REQUIRE(Str(f.registry.FactionValue("CIV", "civClassCount")) == "0");
     }
 
+    SECTION("a class with a config but no shape file is substituted like an absent one (issue #46 seam 4b)")
+    {
+        // The existence probe alone would keep these: the config carries the
+        // class, only its .p3d is missing (the CoC_Diverdes shape in @LoBo).
+        // Spawning such a class access-violates in Man::Init, so the
+        // resolution pass must treat it exactly as a class the package lacks.
+        FakeProbe probe = FullClassicProbe();
+        probe.shapeless = {"SoldierECrew", "OfficerE"};
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(probe.Exists("CfgVehicles", "SoldierECrew"));                    // the config has it...
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierEG");    // ...the ladder still skips it
+        REQUIRE(Str(f.registry.FactionValue("EAST", "officer")) == "SoldierEB"); // and so does the plain key
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 1)) == "SoldierEB");     // shipped rungs untouched
+    }
+    SECTION("an existence-only probe keeps the old answer (Spawnable defaults to Exists)")
+    {
+        struct ExistsOnlyProbe final : ClassProbe
+        {
+            const FakeProbe& inner;
+            explicit ExistsOnlyProbe(const FakeProbe& p) : inner(p) {}
+            bool Exists(const char* bank, const char* className) const override
+            {
+                return inner.Exists(bank, className);
+            }
+        };
+        FakeProbe full = FullClassicProbe();
+        ExistsOnlyProbe probe(full);
+        RegistryFixture f;
+        f.Load(kPlan15Config, nullptr, nullptr, nullptr, &probe);
+        REQUIRE(Str(f.registry.FactionTierClass("EAST", 10)) == "SoldierECrew");
+    }
     SECTION("no probe = no resolution (config-less unit-test path unchanged)")
     {
         RegistryFixture f;

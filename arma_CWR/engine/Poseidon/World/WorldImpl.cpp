@@ -8,11 +8,16 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/UI/UIActiveDisplay.hpp>
+#include <Poseidon/UI/OptionsUICommon.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -294,11 +299,11 @@ void World::CreateChat()
         _chat = CreateChatUI();
     }
 }
-void World::CreateVoiceChat()
+void World::CreateVoiceChat(bool pushToTalk)
 {
     if (!_voiceChat)
     {
-        _voiceChat = CreateVoiceChatUI();
+        _voiceChat = CreateVoiceChatUI(pushToTalk);
     }
 }
 void World::CreateMainMap()
@@ -1543,6 +1548,7 @@ void World::RemoveIDs() const
 
 } // namespace Poseidon
 #include <Poseidon/Core/SaveVersion.hpp>
+#include <Poseidon/UI/Settings/AspectRatio.hpp>
 
 namespace Poseidon
 {
@@ -1633,6 +1639,8 @@ bool World::LoadBin(const char* name, int message)
     LOG_DEBUG(World, "Total allocated after ~ParamArchive: {} MB", Foundation::MemoryUsed() / (1024 * 1024));
     MemoryCleanUp();
     LOG_DEBUG(World, "Total allocated after MemoryCleanUp: {} MB", Foundation::MemoryUsed() / (1024 * 1024));
+    if (err == LSOK)
+        AspectRatio::SetGameplayActive(true);
     return err == LSOK;
 }
 
@@ -1673,7 +1681,33 @@ LSError World::SerializeVehicles(ParamArchive& ar)
         for (int i = 0; i < _outVehicles.Size(); i++)
         {
             Entity* veh = _outVehicles[i];
+            if (!veh)
+            {
+                // a class the loaded package does not carry (see
+                // VehicleList::Serialize); the hole stays until the second
+                // pass has re-read the list by index
+                continue;
+            }
             veh->SetMoveOutFlag();
+        }
+        if (ar.GetPass() == ParamArchive::PassSecond)
+        {
+            int dropped = 0;
+            for (int i = _outVehicles.Size() - 1; i >= 0; i--)
+            {
+                if (!_outVehicles[i])
+                {
+                    _outVehicles.Delete(i);
+                    dropped++;
+                }
+            }
+            if (dropped > 0)
+            {
+                LOG_WARN(World,
+                         "Savegame: {} moved-out vehicle(s) name a class the loaded data package does not carry (a "
+                         "mod no longer mounted?) - dropped from the restored world",
+                         dropped);
+            }
         }
     }
     PARAM_CHECK(ar.Serialize("NearImportance", _nearImportanceDistributionTime, 1))
@@ -1701,6 +1735,175 @@ void StartMission();
 } // namespace Poseidon
 namespace Poseidon
 {
+// Rebuild the player's body on the AIUnit the save restored for it, when the
+// body itself did not come back (issue #48 / #56 task 5: a mod-owned class
+// saved with the mod mounted, loaded without it - VehicleList::Serialize
+// dropped the null slot with a WARN). The unit keeps its id, group, leader
+// status and waypoints; only the body is new. The substitute is the template's
+// AUTHORED player class, the same answer ResolvePlayerBodyClass gives a pick
+// the package cannot field (the picked class stays in the GGameState bank, so
+// re-mounting the mod brings the body back on the next new game). Gated by the
+// plan-15 Spawnable probe, because a class whose config is present but whose
+// .p3d the package never ships crashes in Man::Init. Returns null, with the
+// reason logged, when nothing can be built.
+static Person* RebuildPlayerBodyAfterLoad(World* world, AIUnit* unit, Vector3Par savedPos, const RString& savedType)
+{
+    AIGroup* grp = unit->GetGroup();
+    AICenter* center = grp ? grp->GetCenter() : nullptr;
+    if (!center)
+    {
+        LOG_WARN(World, "Savegame: the player's unit (body '{}') came back with no group - the player cannot be rebuilt",
+                 (const char*)savedType);
+        return nullptr;
+    }
+    ArcadeUnitInfo* authored = CurrentTemplate.FindPlayer();
+    RString cls = authored ? authored->vehicle : RString();
+    Guerrilla::ParsClassProbe probe;
+    if (cls.GetLength() == 0 || !probe.Spawnable(cls))
+    {
+        LOG_WARN(World,
+                 "Savegame: player body '{}' is not in the loaded data package and the template's authored player "
+                 "class '{}' cannot be fielded either - the player cannot be rebuilt",
+                 (const char*)savedType, (const char*)cls);
+        return nullptr;
+    }
+    Ref<EntityAI> veh = NewVehicle(cls);
+    Person* person = dyn_cast<Person>(veh.GetRef());
+    if (!person)
+    {
+        LOG_WARN(World, "Savegame: authored player class '{}' is not a person - the player cannot be rebuilt",
+                 (const char*)cls);
+        return nullptr;
+    }
+    // the same placement CreateUnit (createUnit) uses
+    Vector3 normal, pos = savedPos;
+    if (AIUnit::FindFreePosition(pos, normal, true, veh))
+    {
+        float dx, dz;
+        pos[1] = GLOB_LAND->RoadSurfaceYAboveWater(pos[0], pos[2], &dx, &dz);
+    }
+    Matrix3 dir;
+    Matrix4 transform;
+    transform.SetPosition(pos);
+    dir.SetUpAndDirection(VUp, VForward);
+    transform.SetOrientation(dir);
+    veh->PlaceOnSurface(transform);
+    veh->SetTransform(transform);
+    veh->Init(transform);
+    veh->SetTargetSide(center->GetSide());
+    world->AddVehicle(veh);
+    // free soldier needs its own sensor
+    world->AddSensor(person);
+    // Rebind: the body's own fresh brain (Soldier's ctor made one) is
+    // released, the restored unit takes the body - the idiom
+    // AIUnit::TransferMsg uses when a remote unit's person changes.
+    person->SetBrain(unit);
+    unit->SetPerson(person);
+    unit->SetVehicleIn(nullptr);
+    // the identity lived on the person, which is gone: draw a fresh one
+    unit->Load(center->NextSoldierIdentity(person->IsWoman()));
+    LOG_WARN(World,
+             "Savegame: player body '{}' is not in the loaded data package (a mod no longer mounted?) - rebuilt as "
+             "the template's authored player class '{}' at [{:.0f}, {:.0f}] with that class's default kit",
+             (const char*)savedType, (const char*)cls, pos.X(), pos.Z());
+    return person;
+}
+
+// After the second load pass, once every ref has resolved: the AI side's
+// leftovers of vehicles VehicleList::Serialize dropped (their class is unknown
+// to the loaded package) are repaired so the first AI think never dereferences
+// a null person or a null target type. Every AIUnit whose person did not
+// deserialise is either given a new body (the player) or removed from its
+// group with a WARN; every group target record whose type did not resolve is
+// dropped (the centers' own AITargetLists are compacted in AICenter::Serialize,
+// which has to rebuild the strategic map from them right there). Removal
+// follows the DeleteVehicle (deleteVehicle) idiom, ordered so the
+// leader-selection UnitRemoved triggers only ever walks units that still have
+// a body: plain members first, subgroup leaders next, the group leader last.
+static void RepairUnitsWithoutBodyAfterLoad(World* world, AIUnit* playerUnit, Vector3Par playerPos,
+                                            const RString& playerType)
+{
+    if (!world->PlayerOn() && playerUnit && !playerUnit->GetPerson())
+    {
+        Person* person = RebuildPlayerBodyAfterLoad(world, playerUnit, playerPos, playerType);
+        if (person)
+        {
+            world->SwitchCameraTo(person, CamInternal);
+            world->SetPlayerManual(true);
+            world->SwitchPlayerTo(person);
+            world->SetRealPlayer(person);
+        }
+    }
+
+    static const TargetSide sides[] = {TWest, TEast, TGuerrila, TCivilian, TLogic};
+    for (TargetSide side : sides)
+    {
+        AICenter* center = world->GetCenter(side);
+        if (!center)
+        {
+            continue;
+        }
+        for (int g = 0; g < center->NGroups(); g++)
+        {
+            AIGroup* grp = center->GetGroup(g);
+            if (!grp)
+            {
+                continue;
+            }
+            grp->DropTargetsWithoutType();
+            // collect first: removal mutates the subgroup arrays
+            RefArray<AIUnit> members, subLeaders, groupLeader;
+            for (int s = 0; s < grp->NSubgroups(); s++)
+            {
+                AISubgroup* subgrp = grp->GetSubgroup(s);
+                if (!subgrp)
+                {
+                    continue;
+                }
+                for (int u = 0; u < subgrp->NUnits(); u++)
+                {
+                    AIUnit* unit = subgrp->GetUnit(u);
+                    if (!unit || unit->GetPerson())
+                    {
+                        continue;
+                    }
+                    if (unit == grp->Leader())
+                    {
+                        groupLeader.Add(unit);
+                    }
+                    else if (unit == subgrp->Leader())
+                    {
+                        subLeaders.Add(unit);
+                    }
+                    else
+                    {
+                        members.Add(unit);
+                    }
+                }
+            }
+            const RefArray<AIUnit>* ordered[] = {&members, &subLeaders, &groupLeader};
+            for (const RefArray<AIUnit>* list : ordered)
+            {
+                for (int i = 0; i < list->Size(); i++)
+                {
+                    AIUnit* unit = (*list)[i];
+                    Ref<AISubgroup> subgrp = unit->GetSubgroup();
+                    LOG_WARN(World,
+                             "Savegame: unit {} (id {}) of group {} has no body - its class is not in the loaded "
+                             "data package (a mod no longer mounted?) - removed from the restored world",
+                             (const char*)unit->GetDebugName(), unit->ID(), (const char*)grp->GetDebugName());
+                    // UnitRemoved re-selects the group and subgroup leaders itself
+                    unit->ForceRemoveFromGroup();
+                    if (subgrp && subgrp->NUnits() == 0 && subgrp != grp->MainSubgroup())
+                    {
+                        subgrp->RemoveFromGroup();
+                    }
+                }
+            }
+        }
+    }
+}
+
 LSError World::Serialize(ParamArchive& ar, int message)
 {
     // The addon list read back on the first load pass, kept alive for the
@@ -1832,6 +2035,19 @@ LSError World::Serialize(ParamArchive& ar, int message)
         PARAM_CHECK(ar.Serialize("GuerrillaFlags", Guerrilla::TownFlags::Instance(), 14))
     }
 
+    // Guerrilla ambient road traffic: live rows (hull/group refs + zone
+    // names), released hulls, fleeing drivers, handlers.  Same
+    // missing-subclass tolerance as above; the hulls and crews ride the
+    // world's vehicle serializer.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::Traffic::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::Traffic::Instance().IsActive() : ar.IsSubclass("GuerrillaTraffic"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaTraffic", Guerrilla::Traffic::Instance(), 14))
+    }
+
     // Guerrilla arms stashes: keep-when-empty holder tracking.  Same
     // missing-subclass tolerance as above; the WeaponHolder objects (and
     // their keepWhenEmpty flag) ride the world's building serializer.
@@ -1844,6 +2060,48 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? Guerrilla::StashRegistry::Instance().Count() > 0 : ar.IsSubclass("GuerrillaStashes"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaStashes", Guerrilla::StashRegistry::Instance(), 14))
+    }
+
+    // Guerrilla field journal: diary entries, objectives and status lines
+    // behind the map's Notes / Plan pages.  Plain values; same
+    // missing-subclass tolerance as above (saves written before the journal
+    // existed load clean).  Save-gated on NON-EMPTY like the stashes.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::Journal::Instance().Clear();
+    }
+    if (ar.IsSaving() ? !Guerrilla::Journal::Instance().IsEmpty() : ar.IsSubclass("GuerrillaJournal"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaJournal", Guerrilla::Journal::Instance(), 14))
+    }
+
+    // Guerrilla headquarters: election state (zone, spots, building/cache
+    // refs) + garage rows.  Same missing-subclass tolerance as above; the
+    // cache holder and the garaged hulls ride the world's building/vehicle
+    // serializers.  Save-gated like the registry (the block also carries
+    // the one-shot start-town election flag, so an unestablished campaign
+    // must not re-elect after a load).
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::GuerrillaBase::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::GuerrillaBase::Instance().IsActive() : ar.IsSubclass("GuerrillaBase"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaBase", Guerrilla::GuerrillaBase::Instance(), 14))
+    }
+
+    // Guerrilla dealer market: the seeded city assignment (rows by zone
+    // name + NPC refs, the draw seed).  Same tolerance; the dealer NPCs ride
+    // the world's vehicle serializer.  Save-gated on the class being
+    // configured (the block carries the draw seed: an unassigned market
+    // re-draws on its first tick, an assigned one keeps its towns).
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::Market::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::Market::Instance().IsConfigured() : ar.IsSubclass("GuerrillaMarket"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaMarket", Guerrilla::Market::Instance(), 14))
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))
@@ -1860,6 +2118,38 @@ LSError World::Serialize(ParamArchive& ar, int message)
     PARAM_CHECK(ar.Serialize("shadowsZ", ENGINE_CONFIG.shadowsZ, 1, 250))
 
     PARAM_CHECK(ar.SerializeRef("playerOn", _playerOn, 1))
+    // Where the player WAS, in terms that survive the body itself failing to
+    // deserialise (issue #48 / #56 task 5): the AIUnit ref resolves through
+    // side/group/id and never through the entity, the position and class name
+    // are plain values. A save written with a mod-owned player body and loaded
+    // without the mod has playerOn == null after the second pass; the final
+    // pass then rebuilds a body the loaded package can field on that unit
+    // (RepairUnitsWithoutBodyAfterLoad). Saves that predate these keys load
+    // them as null/zero/empty and get the old behaviour.
+    OLink<AIUnit> playerOnUnit;
+    Vector3 playerOnPos = VZero;
+    RString playerOnType;
+    if (ar.IsSaving() && _playerOn)
+    {
+        playerOnUnit = _playerOn->Brain();
+        playerOnPos = _playerOn->Position();
+        playerOnType = _playerOn->GetType()->GetName();
+    }
+    PARAM_CHECK(ar.SerializeRef("playerOnUnit", playerOnUnit, 1))
+    PARAM_CHECK(ar.Serialize("playerOnPos", playerOnPos, 1, VZero))
+    PARAM_CHECK(ar.Serialize("playerOnType", playerOnType, 1, RString()))
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        // plain values are read on the first pass only and the locals die
+        // with it: re-read them on the final pass, where they are consumed
+        // (the AIUnit::Serialize "Info" idiom). The toggle must stay inside
+        // the second pass: flipping the mode during the first pass leaves the
+        // rest of that pass reading as a second pass, and nothing gets built.
+        ar.FirstPass();
+        PARAM_CHECK(ar.Serialize("playerOnPos", playerOnPos, 1, VZero))
+        PARAM_CHECK(ar.Serialize("playerOnType", playerOnType, 1, RString()))
+        ar.SecondPass();
+    }
     PARAM_CHECK(ar.SerializeRef("cameraOn", _cameraOn, 1))
     PARAM_CHECK(ar.SerializeRef("realPlayer", _realPlayer, 1))
     PARAM_CHECK(ar.Serialize("playerManual", _playerManual, 1, true))
@@ -1910,7 +2200,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
 
         RString dir;
         PARAM_CHECK(ar.Serialize("directory", dir, 1, ""))
-        SetBaseDirectory(dir);
+        SetBaseDirectory(dir == GetUserMissionsBase(), dir);
         RString mission;
         PARAM_CHECK(ar.Serialize("mission", mission, 1, ""))
         // Restore the saved subdirectory BEFORE SetMission: SetMission reparses
@@ -1958,9 +2248,32 @@ LSError World::Serialize(ParamArchive& ar, int message)
         // Re-apply additively, so the template manifest CheckPatch just
         // installed is preserved and only the extra runtime grants come back.
         // ActivateAddon de-duplicates, so the overlap costs nothing.
+        //
+        // Only owners the loaded package actually carries (a CfgPatches
+        // class of that name): a save written with a mod mounted and loaded
+        // without it (issue #48 / #56 task 5) lists that mod's addons, and
+        // marking them active would fake a grant for content that is not
+        // there - the isAddonActive probes would answer true for a mod the
+        // process has never heard of. Skipped with one WARN naming them.
+        const ParamEntry* patches = Pars.FindEntry("CfgPatches");
+        RString absent;
         for (int i = 0; i < savedAddons.Size(); i++)
         {
-            ActivateAddon(savedAddons[i]);
+            if (patches && patches->FindEntry(savedAddons[i]))
+            {
+                ActivateAddon(savedAddons[i]);
+            }
+            else
+            {
+                absent = absent + (absent.GetLength() > 0 ? ", " : "") + savedAddons[i];
+            }
+        }
+        if (absent.GetLength() > 0)
+        {
+            LOG_WARN(World,
+                     "Savegame: addon(s) {} in the save are not in the loaded data package (a mod no longer "
+                     "mounted?) - not re-activated",
+                     (const char*)absent);
         }
     }
     else
@@ -1971,6 +2284,8 @@ LSError World::Serialize(ParamArchive& ar, int message)
 
         _scene.MainLight()->Recalculate(this);
         _scene.MainLightChanged();
+
+        RepairUnitsWithoutBodyAfterLoad(this, playerOnUnit, playerOnPos, playerOnType);
 
         AIUnit* player = _playerOn ? _playerOn->Brain() : nullptr;
         AIGroup* grp = player ? player->GetGroup() : nullptr;
@@ -1991,6 +2306,10 @@ LSError World::Serialize(ParamArchive& ar, int message)
         if (map)
         {
             map->UpdatePlan();
+            // Guerrilla journal pages are rebuilt from the loaded tables (a
+            // no-op outside Guerrilla Mode); covers the in-place load with
+            // the map display still alive
+            map->RefreshGuerrillaJournal();
         }
 
         LOG_DEBUG(Core, "LOAD: Final pass total {}ms", GetTickCount() - tFinal);

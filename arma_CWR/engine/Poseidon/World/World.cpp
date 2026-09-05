@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -56,8 +57,11 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/Network/Network.hpp>
@@ -119,7 +123,37 @@ void World_ClearTriViewOverride()
 
 void World::UpdateInputContext()
 {
-    InputSubsystem::Instance().SetContext(ResolveInputContext());
+    const InputContextResolution resolution = ResolveInputContextResolution();
+    auto& input = InputSubsystem::Instance();
+    input.SetContext(resolution.context);
+
+    // Seat freelook policy: in every non-turret vehicle seat the camera is
+    // permanently decoupled from the hull — the mouse always looks, steering is
+    // keys/gamepad only.  Turret seats (Gunner/Commander) keep mouse aim.
+    // Overlay contexts (menu, map, chat) resolve to seat NoPerson; skip them so
+    // opening the map doesn't churn the lock mid-drive.
+    switch (resolution.context)
+    {
+        case InputContext::Menu:
+        case InputContext::Map:
+        case InputContext::Chat:
+        case InputContext::Editor:
+            break;
+        default:
+        {
+            const bool lock = resolution.seat == InputSeatContext::Driver ||
+                              resolution.seat == InputSeatContext::CommanderAsDriver ||
+                              resolution.seat == InputSeatContext::Cargo;
+            const bool wasLocked = input.IsSeatFreelookLocked();
+            input.SetSeatFreelookLock(lock);
+            // Seat flips bypass the GameLoop FreelookChanged() path (that flag
+            // is consumed before Simulate runs) — recentre here instead, so a
+            // dismount doesn't inherit a stale freelook cursor direction.
+            if (wasLocked != lock)
+                FreelookChange(input.IsLookAroundEnabled());
+            break;
+        }
+    }
 }
 
 void World::Simulate(float deltaT, bool& enableDraw)
@@ -338,7 +372,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     // multiplayer chat control
-    if (GetNetworkManager().GetGameState() >= NGSCreate)
+    if (GetNetworkManager().GetGameState() >= NGSCreate &&
+        Poseidon::ShouldHandleMultiplayerChatShortcut(_chat != nullptr))
     {
         if (IsPlayerDead())
         {
@@ -387,15 +422,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
             }
         }
 
-        if (input.GetActionToDo(UAChat, true, false))
-        {
-            CreateChat();
-        }
-
-        if (!_voiceChat && input.GetActionToDo(UAVoiceOverNet, true, false))
-        {
-            CreateVoiceChat();
-        }
+        HandleVoiceChatShortcuts();
     }
 
     if (_chat || _voiceChat || _channelChanged >= Glob.uiTime - 3.0f)
@@ -1694,10 +1721,21 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla town flagpoles - inactive with the registry; throttles
         // itself to TownFlags::TickInterval.
         Guerrilla::TownFlags::Instance().Simulate(deltaT);
+        // Guerrilla ambient road traffic - inactive with the registry (or
+        // trafficEnabled=0); throttles itself to trafficInterval plus a
+        // 0.5 s commandeer sub-tick while a civ car is near the player.
+        Guerrilla::Traffic::Instance().Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.
         Guerrilla::StashRegistry::Instance().Simulate(deltaT);
+        // Guerrilla headquarters (cache + garage ring, start-town election,
+        // beep cue) - inactive with the registry; garage pass throttles to
+        // GuerrillaBase::TickInterval.
+        Guerrilla::GuerrillaBase::Instance().Simulate(deltaT);
+        // Guerrilla dealer market - inactive without CfgGuerrillaMarket or
+        // the registry; throttles itself to Market::TickInterval.
+        Guerrilla::Market::Instance().Simulate(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 
@@ -1775,5 +1813,30 @@ void World::Simulate(float deltaT, bool& enableDraw)
     )
     {
         GetSensorList()->SmartUpdateAll();
+    }
+}
+
+void World::HandleVoiceChatShortcuts()
+{
+    if (GetNetworkManager().GetGameState() < NGSCreate ||
+        !Poseidon::ShouldHandleMultiplayerChatShortcut(_chat != nullptr))
+    {
+        return;
+    }
+
+    auto& input = InputSubsystem::Instance();
+    if (input.GetActionToDo(UAChat, true, false))
+    {
+        CreateChat();
+    }
+
+    if (!_voiceChat && input.GetAction(UAVoiceOverNetPushToTalk, false) > 0)
+    {
+        CreateVoiceChat(true);
+    }
+
+    if (!_voiceChat && input.GetActionToDo(UAVoiceOverNet, true, false))
+    {
+        CreateVoiceChat();
     }
 }

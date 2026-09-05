@@ -4,8 +4,8 @@
 //    @LoBo Sinai world with the sides deliberately flipped vs Guerrilla.Demo:
 //    occupier = IDF (WEST), resistance = Egyptian Frontier Corps (EAST).
 //    Proves the migrated script core + native systems are island- and
-//    faction-agnostic: same init.sqs/scripts byte-for-byte, all data from
-//    description.ext.
+//    faction-agnostic: the same ONE shared core (\gmcore\init.sqs), all data
+//    from description.ext.
 //
 //  No gmSel* selections are published in a direct --test-mission launch, so
 //  the engine resolves sides from the mission's defaultOccupier="IDF" /

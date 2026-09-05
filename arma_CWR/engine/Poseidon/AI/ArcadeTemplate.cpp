@@ -2,6 +2,7 @@
 #include <Poseidon/AI/ArcadeTemplate.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/Asset/Addon/AddonClosure.hpp> // CollectVehicleClassAddons (issue #54 C1)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -318,37 +319,46 @@ void ArcadeUnitInfo::CalculateCenter(Vector3& sum, int& count, bool sel)
     count++;
 }
 
-void ArcadeUnitInfo::RequiredAddons(FindArrayRStringCI& addOns)
+void ArcadeUnitInfo::RequiredAddonsFrom(const ParamEntry* patchesCfg, const ParamEntry* vehiclesCfg,
+                                        const ParamEntry* weaponsCfg, const ParamEntry* magazinesCfg,
+                                        FindArrayRStringCI& addOns) const
 {
-    const ParamEntry* patches = Pars.FindEntry("CfgPatches");
-    if (!patches)
+    if (patchesCfg)
     {
-        return;
-    }
-    for (int i = 0; i < patches->GetEntryCount(); i++)
-    {
-        const ParamEntry& patch = patches->GetEntry(i);
-        for (int j = 0; j < (patch >> "units").GetSize(); j++)
+        for (int i = 0; i < patchesCfg->GetEntryCount(); i++)
         {
-            RStringB patchVehicle = (patch >> "units")[j];
-            if (stricmp(patchVehicle, vehicle) == 0)
+            const ParamEntry& patch = patchesCfg->GetEntry(i);
+            const ParamEntry* units = patch.FindEntry("units");
+            if (!units || !units->IsArray())
+            {
+                continue;
+            }
+            bool found = false;
+            for (int j = 0; j < units->GetSize() && !found; j++)
+            {
+                RStringB patchVehicle = (*units)[j];
+                found = stricmp(patchVehicle, vehicle) == 0;
+            }
+            if (found)
             {
                 addOns.AddUnique(patch.GetName());
-                goto Break;
+                break;
             }
         }
     }
-Break:
-    // more robust check - check owner of given unit type
-    const ParamEntry* entry = (Pars >> "CfgVehicles").FindEntry(vehicle);
-    if (entry)
-    {
-        const RStringB& owner = entry->GetOwner();
-        if (owner.GetLength() > 0)
-        {
-            addOns.AddUnique(owner);
-        }
-    }
+    // more robust check - the owner of the unit type, plus (issue #54 C1) the
+    // owners of everything the type references: its weapons[] and magazines[]
+    // and each weapon's magazines[]. The engine refuses to build a type whose
+    // weapon or magazine class belongs to an inactive addon, so a template
+    // that placed a mod body used to have to hand-list the weapon and ammo
+    // pbos in addOns[]; now placing the unit is enough.
+    CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, vehicle, addOns);
+}
+
+void ArcadeUnitInfo::RequiredAddons(FindArrayRStringCI& addOns)
+{
+    RequiredAddonsFrom(Pars.FindEntry("CfgPatches"), Pars.FindEntry("CfgVehicles"), Pars.FindEntry("CfgWeapons"),
+                       Pars.FindEntry("CfgMagazines"), addOns);
 }
 
 LSError ArcadeUnitInfo::Serialize(ParamArchive& ar)
@@ -1832,7 +1842,7 @@ bool ArcadeTemplate::IsConsistent(Display* disp, bool multiplayer)
         }
     }
 
-    AI_ERROR(nPlayers1 <= 1);
+    AI_ERROR(multiplayer || nPlayers1 <= 1);
 #if !_ENABLE_CHEATS
     if (!multiplayer && nPlayers1 == 0)
     {
@@ -1868,6 +1878,23 @@ void ArcadeTemplate::RequiredAddons(FindArrayRStringCI& addOns)
     for (int i = 0; i < emptyVehicles.Size(); i++)
     {
         emptyVehicles[i].RequiredAddons(addOns);
+    }
+}
+
+void ArcadeTemplate::RequiredAddonsFrom(const ParamEntry* patchesCfg, const ParamEntry* vehiclesCfg,
+                                        const ParamEntry* weaponsCfg, const ParamEntry* magazinesCfg,
+                                        FindArrayRStringCI& addOns) const
+{
+    for (int g = 0; g < groups.Size(); g++)
+    {
+        for (int u = 0; u < groups[g].units.Size(); u++)
+        {
+            groups[g].units[u].RequiredAddonsFrom(patchesCfg, vehiclesCfg, weaponsCfg, magazinesCfg, addOns);
+        }
+    }
+    for (int i = 0; i < emptyVehicles.Size(); i++)
+    {
+        emptyVehicles[i].RequiredAddonsFrom(patchesCfg, vehiclesCfg, weaponsCfg, magazinesCfg, addOns);
     }
 }
 

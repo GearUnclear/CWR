@@ -1,0 +1,10 @@
+; debug action: teleport next to the nearest ARMS dealer (the market assigns
+; the dealers on its first tick, ~3 s after boot)
+MKT_i = gmDealerNearest ["WEAPON", getPos aP]
+? MKT_i < 0 : hint "No arms dealer yet - the market assigns its dealers on the first tick."
+? MKT_i < 0 : exit
+MKT_rec = gmDealer MKT_i
+MKT_p = MKT_rec select 2
+aP setPos [(MKT_p select 0) + 4, (MKT_p select 1) + 4, 0]
+hint format ["DEBUG: at the arms dealer in %1. Walk up to him for the BUY menu.", MKT_rec select 0]
+exit

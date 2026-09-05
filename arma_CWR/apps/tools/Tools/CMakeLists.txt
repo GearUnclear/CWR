@@ -13,6 +13,8 @@ endif()
 add_executable(PoseidonTools
     ${TOOLS_RC_SOURCES}
     main.cpp
+    PackageMount.cpp
+    PackageMount.hpp
     SDLPreview.cpp
     SDLPreview.hpp
     commands/VersionCommand.cpp
@@ -39,6 +41,16 @@ add_executable(PoseidonTools
     commands/ScanCommand.hpp
     commands/MineCommand.cpp
     commands/MineCommand.hpp
+    commands/ModCommand.cpp
+    commands/ModCommand.hpp
+    commands/GuerrillaCommand.cpp
+    commands/GuerrillaCommand.hpp
+    commands/GuerrillaLintCommand.cpp
+    commands/GuerrillaLintCommand.hpp
+    commands/GuerrillaProbeCommand.cpp
+    commands/GuerrillaProbeCommand.hpp
+    commands/GuerrillaScaffoldCommand.cpp
+    commands/GuerrillaScaffoldCommand.hpp
     commands/InputCommand.cpp
     commands/InputCommand.hpp
     commands/VonCommand.cpp
@@ -57,6 +69,14 @@ if(WIN32)
             CLI11::CLI11
             SDL3::SDL3
             winmm
+    )
+elseif(APPLE)
+    target_link_libraries(PoseidonTools
+        PRIVATE
+            Poseidon
+            PoseidonOpenAL
+            CLI11::CLI11
+            SDL3::SDL3
     )
 else()
     target_link_libraries(PoseidonTools

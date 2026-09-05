@@ -24,10 +24,28 @@ gsVil = gmZoneIndex "Village"
 //    pass from leftover state in the shared user dir) -------------------------
 triAssertEq [gmResources, 100]
 triAssertEq [((gmZone gsOut) select 2), gmOccupierSide]
+// the fresh boot's journal carries only what init wrote: no GNAT line, the
+// recruit starter objective still ACTIVE, no stamped status line
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "ACTIVE"]
+gsJFresh = gmJournalCount
+// no start town was picked (direct launch): the fresh boot has no HQ
+triAssert [not gmHqEstablished]
+triAssertEq [gmGarageCount, 0]
 
 // -- restore phase 1's binary save from the shared UserDir/Saved/Tmp/gnat.fps -
 triAssertEq [(triLoadGame "gnat"), "OK"]
 triSimFrames 3
+
+// -- DIFF: native field journal (GuerrillaJournal subclass; entries,
+//    objectives and status lines by value) -----------------------------------
+triAssertGe [gmJournalCount, gsJFresh + 1]
+// scan for the sentinel line: campaign.sqs appends "Campaign restored from a
+// save." once it drains campaignLoaded, so the GNAT line need not be last
+gsJFound = false; gsJi = 0; while {gsJi < gmJournalCount} do {if (((gmJournalEntry gsJi) select 1) == "GNAT sentinel diary line") then {gsJFound = true}; gsJi = gsJi + 1}
+triAssertEq [(format ["%1", gsJFound]), "true"]
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "DONE"]
+triAssertEq [(gmJournalObjectiveState "firstZone"), "ACTIVE"]
+triAssertEq [(gmJournalStatusText "GnatStatus"), "stamped before save"]
 
 // -- DIFF: script-global layer -------------------------------------------------
 triAssertEq [gmResources, 777]
@@ -60,6 +78,31 @@ triAssertEq [(count GM_PANIC_UNTIL), 1]
 triAssertEq [(GM_RESENT_ZONES select 0), "Village"]
 triAssertEq [(GM_RESENT_AMT select 0), 7]
 triAssertEq [gmDayCount, 3]
+
+// -- DIFF: ambient traffic (GuerrillaTraffic subclass): the forced civ car's
+//    row came back with its hull ref resolved, still tagged civ from the
+//    Village (the car handle itself came back through GGameState) --------------
+triAssertEq [(format ["%1", isNull gsCar]), "false"]
+triAssertEq [(format ["%1", gsCar in gmTrafficVehicles]), "true"]
+triAssertEq [((gmTrafficInfo gsCar) select 0), "civ"]
+triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
+
+// -- DIFF: headquarters (GuerrillaBase subclass): the election came back by
+//    value, the garaged Jeep's ref resolved and its lock + invulnerability
+//    were re-asserted on the load pass, the cache holder (a world building)
+//    still carries the rifle; the dealer draw (GuerrillaMarket subclass) kept
+//    the same count and the same first town (the seed rides the block) -------
+triAssert [gmHqEstablished]
+triAssertEq [gmHqZone, "Village"]
+triAssertEq [gmHqMoveCount, 0]
+triAssertEq [(format ["%1", isNull gsJeep]), "false"]
+triAssertEq [gmGarageCount, 1]
+triAssert [gmGarageHas gsJeep]
+triAssert [locked gsJeep]
+triAssertEq [(format ["%1", isNull gmHqCache]), "false"]
+triAssert ["AK47" in (weaponCargo gmHqCache)]
+triAssertEq [gmDealerCount, gsDealers]
+triAssertEq [((gmDealer 0) select 0), gsDealerZone]
 
 // -- managers keep ticking after the load (handle-prune works): both loop
 //    counters advance, and the consumer drains the stamped NULL-handle kill

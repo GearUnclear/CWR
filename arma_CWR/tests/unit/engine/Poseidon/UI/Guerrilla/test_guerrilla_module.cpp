@@ -2,7 +2,8 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaCharacterSelect.hpp> // IDD contract only (the display needs the live UI stack)
-#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // the parity half of the launch decision
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>           // the parity half of the launch decision
+#include <Poseidon/Game/Guerrilla/FactionSources.hpp>         // the global+island union the engine actually reads
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/PreprocC/PreprocC.hpp> // the shipped templates are full of // comments
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -21,6 +22,7 @@
 using Poseidon::GameModuleId;
 using Poseidon::GameModuleRegistry;
 using Poseidon::GuerrillaDefaultSelections;
+using Poseidon::GuerrillaFactionSide;
 using Poseidon::GuerrillaIndexOfName;
 using Poseidon::GuerrillaIndexOfSelection;
 using Poseidon::GuerrillaListFactions;
@@ -516,11 +518,11 @@ TEST_CASE("GuerrillaBodyRowLabels: ambiguity is per side, case-insensitive, over
     using Poseidon::GuerrillaBodyRowLabels;
 
     std::vector<GuerrillaBodyChoice> roster = {
-        {"SoldierWB", "WEST", "Rifleman", ""},          // shares "Rifleman" with the LoBo row below
-        {"LoBo_Rifle_01", "WEST", "RIFLEMAN", "lobo"},  // case-insensitive collision
-        {"SoldierWMedic", "WEST", "Medic", ""},         // unique on its side
-        {"SoldierEB", "EAST", "Rifleman", ""},          // same name, OTHER side: not ambiguous
-        {"LoBo_Terror_01E", "GUER", "", "lobo"},        // no displayName: classname label
+        {"SoldierWB", "WEST", "Rifleman", ""},         // shares "Rifleman" with the LoBo row below
+        {"LoBo_Rifle_01", "WEST", "RIFLEMAN", "lobo"}, // case-insensitive collision
+        {"SoldierWMedic", "WEST", "Medic", ""},        // unique on its side
+        {"SoldierEB", "EAST", "Rifleman", ""},         // same name, OTHER side: not ambiguous
+        {"LoBo_Terror_01E", "GUER", "", "lobo"},       // no displayName: classname label
     };
     std::vector<RString> labels = GuerrillaBodyRowLabels(roster);
     REQUIRE(labels.size() == roster.size());
@@ -1162,6 +1164,88 @@ TEST_CASE("GuerrillaDefaultSelections: the cyclers open on the template's defaul
     }
 }
 
+// ---------------------------------------------------------------------------
+// The SHIPPED templates, read the way the engine reads them (issue #54 A4).
+//
+// A template's description.ext is only the ISLAND half of the faction table.
+// The war rosters live in a GLOBAL config that lands in Pars - the vanilla
+// library the installer drops into <GameDir>\bin\guerrilla-factions.hpp for
+// the stock islands, the @LoBo mod config for the @LoBo ones - and the engine
+// merges the two through FactionSources (island wins on a class-name
+// collision). So parsing only the description.ext, as these cases used to,
+// now tests a roster no player is ever offered: an empty one.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// repo-relative, forward slashes (std::filesystem normalizes them)
+const char* kVanillaLibrary = "guerrilla-mode/config/guerrilla-factions.hpp";
+const char* kLoBoLibrary = "tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp";
+
+std::filesystem::path RepoFile(const char* relative)
+{
+    // TESTS_ROOT_DIR = <repo>/tests
+    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / relative;
+}
+
+struct ShippedTemplate
+{
+    const char* dir;    // guerrilla-mode/mission/<dir>
+    const char* global; // the global faction source a session of it has mounted
+};
+
+// The stock islands run on the vanilla library, the @LoBo islands on the mod
+// config. A machine with both mounted merges both; one per template here
+// keeps each case's expected roster the roster that island really offers.
+const ShippedTemplate kShippedTemplates[] = {
+    {"Guerrilla.Abel", kVanillaLibrary},
+    {"Guerrilla.Demo", kVanillaLibrary},
+    {"Guerrilla.Sinai", kLoBoLibrary},
+    {"Guerrilla.Lebanon80", kLoBoLibrary},
+};
+
+// One shipped template plus its global source, merged exactly as
+// GuerrillaNewGame::RefreshFactionsForIsland / ZoneRegistry::LoadFromConfig do.
+//
+// Both halves are parsed through ParamFile's FILENAME overload, which
+// preprocesses first. Feeding the raw bytes to Parse(QIStream&) instead
+// silently yields an EMPTY ParamFile: all of these files are heavily commented
+// and stripping `//` is the preprocessor's job, so the classes these tests are
+// about never appear. The default PreprocessorFunctions is a pass-through
+// copy, so the real CPreprocessorFunctions has to be installed first.
+struct MergedTemplate
+{
+    ParamFile islandFile;
+    ParamFile globalFile;
+    Poseidon::Guerrilla::FactionSources sources;
+
+    void Load(const ShippedTemplate& tpl)
+    {
+        const std::filesystem::path desc = RepoFile("guerrilla-mode/mission") / tpl.dir / "description.ext";
+        INFO(desc.string());
+        REQUIRE(std::filesystem::exists(desc));
+        REQUIRE(islandFile.Parse(desc.string().c_str()) == LSOK);
+
+        const std::filesystem::path global = RepoFile(tpl.global);
+        INFO(global.string());
+        REQUIRE(std::filesystem::exists(global));
+        REQUIRE(globalFile.Parse(global.string().c_str()) == LSOK);
+        // the @lobofixup config also carries CfgPatches/CfgAddons/CfgAmmo -
+        // ParamFile parses them fine and Build only reads the one class
+        REQUIRE(globalFile.FindEntry("CfgGuerrillaFactions") != nullptr);
+
+        sources.Build(globalFile.FindEntry("CfgGuerrillaFactions"), islandFile.FindEntry("CfgGuerrillaFactions"));
+        REQUIRE(sources.Factions() != nullptr);
+    }
+
+    const ParamEntry* Factions() { return sources.Factions(); }
+    const ParamEntry* Zones() { return islandFile.FindEntry("CfgGuerrillaZones"); }
+    const ParamEntry* IslandFactions() { return islandFile.FindEntry("CfgGuerrillaFactions"); }
+};
+
+} // namespace
+
 TEST_CASE("Guerrilla launch: the shipped templates' cyclers open on their own default* pair", "[UI][Guerrilla]")
 {
     // The regression, executable: before the cyclers were fed a real per-island
@@ -1171,18 +1255,13 @@ TEST_CASE("Guerrilla launch: the shipped templates' cyclers open on their own de
     static CPreprocessorFunctions s_preproc;
     ParamFile::SetDefaultPreprocFunctions(&s_preproc);
 
-    const std::filesystem::path missions =
-        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "guerrilla-mode" / "mission";
-    for (const char* templateDir : {"Guerrilla.Abel", "Guerrilla.Sinai"})
+    for (const ShippedTemplate& tpl : kShippedTemplates)
     {
-        const std::filesystem::path desc = missions / templateDir / "description.ext";
-        INFO(desc.string());
-        REQUIRE(std::filesystem::exists(desc));
-        ParamFile file;
-        REQUIRE(file.Parse(desc.string().c_str()) == LSOK);
-        const ParamEntry* factions = file.FindEntry("CfgGuerrillaFactions");
-        const ParamEntry* zones = file.FindEntry("CfgGuerrillaZones");
-        REQUIRE(factions != nullptr);
+        INFO(tpl.dir);
+        MergedTemplate merged;
+        merged.Load(tpl);
+        const ParamEntry* factions = merged.Factions();
+        const ParamEntry* zones = merged.Zones();
         REQUIRE(zones != nullptr);
 
         std::vector<RString> picks = GuerrillaListFactions(factions);
@@ -1211,34 +1290,27 @@ TEST_CASE("Guerrilla launch: the shipped templates' cyclers open on their own de
 
 TEST_CASE("Guerrilla launch: every faction the shipped templates offer is playable on both sides", "[UI][Guerrilla]")
 {
-    // This assertion IS the goal, executable: on the two shipped templates,
-    // every faction the cyclers offer must be launchable in either slot
-    // against any other — including against itself.
+    // This assertion IS the goal, executable: on every shipped template, every
+    // faction the cyclers offer must be launchable in either slot against any
+    // other - including against itself.
     //
-    // Parse through ParamFile's FILENAME overload, which preprocesses first,
-    // exactly like GuerrillaNewGame::RefreshFactionsForIsland does. Feeding the
-    // raw bytes to Parse(QIStream&) instead silently yields an EMPTY ParamFile:
-    // both templates are heavily commented and stripping `//` is the
-    // preprocessor's job, so the class this test is about never appears. The
-    // default PreprocessorFunctions is a pass-through copy, so the real
-    // CPreprocessorFunctions has to be installed for that to happen.
+    // The one documented exception is a template that authors NO playerSide:
+    // ZoneRegistry::ResolveSideCollisions returns early there, so a mirror pick
+    // really cannot be separated and the UI is right to refuse it. That is a
+    // property of the template, so it is derived from the config here rather
+    // than hardcoded per template name.
     static CPreprocessorFunctions s_preproc;
     ParamFile::SetDefaultPreprocFunctions(&s_preproc);
 
-    const std::filesystem::path missions =
-        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "guerrilla-mode" / "mission";
-    for (const char* templateDir : {"Guerrilla.Abel", "Guerrilla.Sinai"})
+    for (const ShippedTemplate& tpl : kShippedTemplates)
     {
-        const std::filesystem::path desc = missions / templateDir / "description.ext";
-        INFO(desc.string());
-        REQUIRE(std::filesystem::exists(desc));
-
-        ParamFile file;
-        REQUIRE(file.Parse(desc.string().c_str()) == LSOK);
-        const ParamEntry* factions = file.FindEntry("CfgGuerrillaFactions");
-        const ParamEntry* zones = file.FindEntry("CfgGuerrillaZones");
-        REQUIRE(factions != nullptr);
+        INFO(tpl.dir);
+        MergedTemplate merged;
+        merged.Load(tpl);
+        const ParamEntry* factions = merged.Factions();
+        const ParamEntry* zones = merged.Zones();
         REQUIRE(zones != nullptr);
+        const bool pinned = zones->ReadValue("playerSide", RString()).GetLength() > 0;
 
         std::vector<RString> picks = GuerrillaListFactions(factions);
         REQUIRE_FALSE(picks.empty());
@@ -1248,8 +1320,79 @@ TEST_CASE("Guerrilla launch: every faction the shipped templates offer is playab
             {
                 RString message;
                 INFO("occupier=" << (const char*)occ << " resistance=" << (const char*)res);
-                REQUIRE(GuerrillaSelectionIsResolvable(factions, zones, occ, res, message));
+                const bool sameSide =
+                    stricmp(GuerrillaFactionSide(factions, occ), GuerrillaFactionSide(factions, res)) == 0;
+                const bool expected = pinned || !sameSide;
+                REQUIRE(GuerrillaSelectionIsResolvable(factions, zones, occ, res, message) == expected);
             }
         }
+    }
+}
+
+TEST_CASE("Guerrilla data: a shipped template's own faction block holds only CIV", "[UI][Guerrilla]")
+{
+    // The A4 contract, executable. A war roster is not an island fact, so it
+    // belongs in the global library (installed to <GameDir>\bin, or shipped by
+    // a mod) and NOT in a template's description.ext. Copying one back into a
+    // template is exactly how IDF came to exist twice and the two Hizballah
+    // copies drifted, so it is pinned here: an island block may declare CIV -
+    // which IS an island fact, the population models that data set ships - and
+    // otherwise only a deliberate, listed OVERRIDE of a global class.
+    static CPreprocessorFunctions s_preproc;
+    ParamFile::SetDefaultPreprocFunctions(&s_preproc);
+
+    // The complete list of island overrides in the repo, each with the reason
+    // the template's description.ext states. Adding a row here is the cost of
+    // adding an override, on purpose.
+    struct Override
+    {
+        const char* templateDir;
+        const char* faction;
+    };
+    const Override kOverrides[] = {
+        // Guerrilla.Demo runs on the 2001 demo data set, which ships neither
+        // the library GUER's second tier rung nor its officer/APC classes.
+        {"Guerrilla.Demo", "GUER"},
+    };
+
+    for (const ShippedTemplate& tpl : kShippedTemplates)
+    {
+        INFO(tpl.dir);
+        MergedTemplate merged;
+        merged.Load(tpl);
+        const ParamEntry* island = merged.IslandFactions();
+        REQUIRE(island != nullptr);
+
+        bool sawCiv = false;
+        for (int i = 0; i < island->GetEntryCount(); i++)
+        {
+            const ParamEntry& e = island->GetEntry(i);
+            if (!e.IsClass())
+            {
+                continue;
+            }
+            const std::string name = Str(RString(e.GetName()));
+            INFO("island-declared faction: " << name);
+            if (stricmp(name.c_str(), "CIV") == 0)
+            {
+                sawCiv = true;
+                continue;
+            }
+            bool listed = false;
+            for (const Override& o : kOverrides)
+            {
+                listed |= stricmp(o.templateDir, tpl.dir) == 0 && stricmp(o.faction, name.c_str()) == 0;
+            }
+            // Either move it to the global library, or list it above with the
+            // reason it has to differ on this island.
+            REQUIRE(listed);
+            // An override overrides: the global source must actually declare
+            // the class, or this is a stray roster wearing an override's name.
+            REQUIRE(merged.sources.FindRecord(name.c_str()) != nullptr);
+            REQUIRE(merged.sources.FindRecord(name.c_str())->overrodeGlobal);
+        }
+        // Every island owns its population; a template without CIV would fall
+        // through to whatever global block a mounted mod happens to ship.
+        REQUIRE(sawCiv);
     }
 }

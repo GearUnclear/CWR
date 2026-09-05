@@ -1,0 +1,57 @@
+version=11;
+class Mission
+{
+	randomSeed=26082201;
+	class Intel
+	{
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="GUER";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					// Player: a lone guerrilla on the Houdan east slope, looking
+					// down the dirt track at the Outpost (~200 m ESE). SQM
+					// coordinate order is [easting, ELEVATION, northing] - the
+					// zone config's position[] is getPos order [easting,
+					// northing, elev]. azimut faces him at the Outpost.
+					position[]={7205.000000,66.000000,6048.000000};
+					azimut=104.000000;
+					id=0;
+					side="GUER";
+					vehicle="SoldierGB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=26082202;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=26082203;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=26082204;
+	class Intel
+	{
+	};
+};

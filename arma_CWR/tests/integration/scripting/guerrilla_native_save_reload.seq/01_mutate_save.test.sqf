@@ -30,6 +30,19 @@ gmWarLevel = 5
 GM_COMP_XP set [0, 12345]
 GM_GEAR_UNLOCKED = ["AK47"]
 
+// -- stamp sentinels: native field journal (Journal::Serialize, the map's
+//    Notes/Plan pages). The boot scripts already wrote the opening diary
+//    line and the starter objectives; add a distinctive entry + an objective
+//    flip + a status line through the command surface the managers use -----
+gsJ0 = gmJournalCount
+triAssertGe [gsJ0, 1]
+gmJournalLog "GNAT sentinel diary line"
+gmJournalObjective ["firstRecruit", "", "DONE"]
+gmJournalStatus ["GnatStatus", "stamped before save"]
+triAssertEq [gmJournalCount, gsJ0 + 1]
+triAssertEq [((gmJournalEntry gsJ0) select 1), "GNAT sentinel diary line"]
+triAssertEq [(gmJournalObjectiveState "firstRecruit"), "DONE"]
+
 // -- stamp sentinels: native zone-registry layer -------------------------------
 gmZoneSet [gsVil, "support", 55]
 gmZoneSet [gsOut, "income", 99]
@@ -58,6 +71,35 @@ GM_RESENT_AMT = [7]
 gmDayCount = 3
 gmCivKilled = [[objNull, objNull, [500, 500, 0], gsVil]]
 gsCivT = gmCivTicks
+
+// -- ambient traffic: force a civilian car from the Village so a live traffic
+//    row (hull + group + driver refs, zone names) rides the GuerrillaTraffic
+//    save block; the OBJECT handle itself rides GGameState -----------------------
+gsCar = gmTrafficForceSpawn ["civ", gsVil]
+triAssertEq [(format ["%1", isNull gsCar]), "false"]
+triAssertGe [gmTrafficCount "civ", 1]
+triAssertEq [((gmTrafficInfo gsCar) select 1), gsVil]
+
+// -- headquarters + garage + cache (GuerrillaBase) and the dealer draw
+//    (Market): elect the HQ in the Village (Houdan - a building HQ; the
+//    test Camp centre sits offshore), lock a fresh Jeep into the garage ring,
+//    put a rifle in the cache, and remember how many dealers the market drew;
+//    phase 2 diffs the election, the garaged hull (its ref rides the
+//    GuerrillaBase block), the cache cargo and the dealer count ---------------
+triAssert [not gmHqEstablished]
+triAssert [gmHqEstablish ((gmZone gsVil) select 8)]
+triAssertEq [gmHqZone, "Village"]
+triSimUntil { not (isNull gmHqCache) }
+gmHqCache addWeaponCargo ["AK47", 1]
+triAssert ["AK47" in (weaponCargo gmHqCache)]
+gsJeep = "Jeep" createVehicle gmHqGaragePos
+triAssertEq [(format ["%1", isNull gsJeep]), "false"]
+triAssert [gmGarageLock [gsJeep, true]]
+triAssertEq [gmGarageCount, 1]
+triAssert [locked gsJeep]
+triSimUntil { gmDealerCount > 0 }
+gsDealers = gmDealerCount
+gsDealerZone = (gmDealer 0) select 0
 
 // -- write the binary save into the shared UserDir/Saved/Tmp/gnat.fps ---------
 triAssertEq [(triSaveGame "gnat"), "OK"]

@@ -1,0 +1,21 @@
+; on-demand report: the headquarters, the garage, every dealer and the
+; treasury (native gmHq* / gmGarage* / gmDealer* reads; read-only)
+MKT_sT = format ["Treasury %1 R", gmResources]
+? not gmHqEstablished : MKT_sT = MKT_sT + "\n\nHQ: none - walk into a town (or stay at the Camp) and use the action menu"
+? gmHqEstablished and gmHqIndoors : MKT_sT = MKT_sT + format ["\n\nHQ: %1, in a building; moved %2 time(s); cache %3; garage %4 m ring at %5, %6 vehicle(s) locked", gmHqZone, gmHqMoveCount, typeOf gmHqCache, gmHqValue "garageRadius", gmHqGaragePos, gmGarageCount]
+? gmHqEstablished and (not gmHqIndoors) : MKT_sT = MKT_sT + format ["\n\nHQ: %1, outdoors at the edge of the zone; moved %2 time(s); cache %3; garage %4 m ring at %5, %6 vehicle(s) locked", gmHqZone, gmHqMoveCount, typeOf gmHqCache, gmHqValue "garageRadius", gmHqGaragePos, gmGarageCount]
+? not gmMarketActive : MKT_sT = MKT_sT + "\n\nMarket: inactive (no CfgGuerrillaMarket)"
+? gmMarketActive : MKT_sT = MKT_sT + format ["\n\nMarket: %1 dealer(s) (share %2 of the towns per kind, respawn %3 s, HQ move %4 R)", gmDealerCount, gmMarketValue "dealerShare", gmMarketValue "dealerRespawnSeconds", gmMarketValue "hqMoveCost"]
+MKT_sI = 0
+#dw
+? MKT_sI >= gmDealerCount : goto "dd"
+MKT_sR = gmDealer MKT_sI
+MKT_sA = "dead / not yet spawned"
+? (not (isNull (MKT_sR select 3))) and (alive (MKT_sR select 3)) : MKT_sA = "open"
+MKT_sD = (getPos aP) distance (MKT_sR select 2)
+MKT_sT = MKT_sT + format ["\n  %1 dealer in %2: %3, %4 m from you", MKT_sR select 1, MKT_sR select 0, MKT_sA, MKT_sD - (MKT_sD mod 1)]
+MKT_sI = MKT_sI + 1
+goto "dw"
+#dd
+hint MKT_sT
+exit

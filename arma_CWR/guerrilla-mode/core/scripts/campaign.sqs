@@ -1,0 +1,104 @@
+; ============================================================================
+;  campaign.sqs  -  save UX + post-load reconciliation (replaces persistence.sqs)
+; ----------------------------------------------------------------------------
+;  Persistence itself is NATIVE now:
+;    * script globals (all gm*/GM_*) always serialized with GGameState;
+;    * zones / alert FSM / garrison cache / native event handlers serialized
+;      by ZoneRegistry/AlertMachine/GarrisonCache::Serialize;
+;    * the engine queues a "campaignLoaded" event on the first sim tick after
+;      a load (_this = [saveVersion]) - this replaces the old GM_SAVED
+;      sentinel + 5 s poll entirely.
+;
+;  MARKERS ON LOAD (verified this pass): created markers live in markersMap,
+;  which World::Serialize saves via AIGlobalSerialize (WorldImpl.cpp ->
+;  AICenterImpl.cpp "Markers"). They survive a load intact and the engine
+;  repaints them natively - so, unlike the old persistence.sqs, NOTHING
+;  rebuilds markers here. (The old rebuild was defensive; the engine ground
+;  truth says it is unnecessary.)
+;
+;  What still needs reconciling after a load (this file's loop):
+;    (a) companions: keep a live restored body (world serializer brought it
+;        back and the GM_COMP_OBJ link deserialized valid) and just re-apply
+;        skill; null a dead/dangling handle so companions.sqs's own
+;        GM_fnCompSpawn path rebuilds the unit from its persisted row;
+;    (b) reseed GM_PLAYER_GROUPS = [group player] (overflow-group links are
+;        not trusted across a load - same policy as the old persistence.sqs);
+;    (c) re-arm exactly ONE "Save Game" action (stale action ids do not
+;        survive; removing an invalid id is a harmless no-op).
+;
+;  SAVE ACTION DISPATCH: addAction re-execs THIS file with
+;  _this = [target, caller, actionId]; a plain [] exec from init.sqs has
+;  count 0. The action call routes straight to #saveaction - no second
+;  manager loop, no state clobbering. No GM_SAVED sentinel is baked into the
+;  snapshot anymore: the native campaignLoaded event is the load detector.
+;
+;  EVENT-QUEUE CONSUMER: drains gmEvtLoaded ([saveVersion]).
+;  OWNS: gmEvtLoaded (consumer), GM_pSaveAct; writes the transient
+;        GM_COMP_OBJ nulls + GM_PLAYER_GROUPS reseed described above.
+;
+;  JOURNAL (native Journal, map-screen Notes/Plan pages; gmJournal* commands,
+;  serialized with the campaign): this manager writes the campaign's opening
+;  diary line and the save / restore lines. The island name comes from the
+;  engine (gmIslandName = CfgWorlds description), never from a literal.
+; ============================================================================
+
+; ---- DISPATCH: action-handler call vs manager launch -------------------------
+? (count _this) > 0 : goto "saveaction"
+
+@GM_LIB_READY
+
+GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
+gmJournalLog format ["The %1 campaign begins: one fighter, one camp, an island to liberate.", gmIslandName]
+
+; ============================================================================
+;  MAIN LOOP - idle until the native campaignLoaded event arrives
+; ============================================================================
+#loop
+~2
+? (count gmEvtLoaded) < 1 : goto "loop"
+GM_pBatch = gmEvtLoaded + []; gmEvtLoaded = []
+; campaign save format version
+GM_pVer = (GM_pBatch select 0) select 0
+
+; (No old-save handler migration here, deliberately: running SQS scripts
+; serialize their full parsed TEXT with the save (Script::Serialize "Lines"),
+; so a pre-consolidation campaign resumes the OLD script files - code added
+; here can never reach it. Old saves degrade gracefully instead: the three
+; new capture events load as empty handler slots and fire into nothing -
+; consolidation mechanics apply, the extra narration does not.)
+
+; (a) companion handles: trust-but-verify the deserialized links
+GM_pI = 0
+#cchk
+? GM_pI >= (count GM_COMP_NAMES) : goto "cchkdone"
+? not (GM_COMP_ALIVE select GM_pI) : goto "cchknext"
+GM_pO = GM_COMP_OBJ select GM_pI
+? (isNull GM_pO) or (not (alive GM_pO)) : GM_COMP_OBJ set [GM_pI, objNull]
+; a validly restored body just gets its skill re-applied (rank is baked);
+; a nulled row is rebuilt by companions.sqs's spawn branch within one tick
+? not (isNull (GM_COMP_OBJ select GM_pI)) : GM_pI call GM_fnCompApply
+#cchknext
+GM_pI = GM_pI + 1
+goto "cchk"
+#cchkdone
+
+; (b) player-faction group bookkeeping
+GM_PLAYER_GROUPS = [group aP]
+
+; (c) exactly one Save action
+aP removeAction GM_pSaveAct
+GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
+
+hint "Guerrilla campaign restored."
+gmJournalLog "Campaign restored from a save."
+goto "loop"
+
+; ----------------------------------------------------------------------------
+;  #saveaction - the Save Game addAction handler. The diary line is written
+;  BEFORE saveGame so the snapshot carries it.
+; ----------------------------------------------------------------------------
+#saveaction
+gmJournalLog "Campaign saved."
+saveGame
+hint "Guerrilla campaign saved."
+exit

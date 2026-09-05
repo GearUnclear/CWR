@@ -2,8 +2,9 @@
 //  Guerrilla Mode - Lebanon80 boot smoke (third island pack).
 //    Boots the REAL Guerrilla.Lebanon80 template (guerrilla-mode/mission/) on
 //    the @LoBo Lebanon (80's) world: occupier = IDF (WEST), resistance =
-//    Hizballah (EAST). Same shared core byte-for-byte as Guerrilla.Demo /
-//    Guerrilla.Sinai; all island/faction data from description.ext. Modeled
+//    Hizballah (EAST). The same ONE shared core as Guerrilla.Demo /
+//    Guerrilla.Sinai (they all exec \gmcore\init.sqs); all island/faction
+//    data from description.ext. Modeled
 //    on guerrilla_sinai_swap - the differences are the roster (Hizballah, not
 //    Egyptian Frontier Corps) and the zone seed (see below).
 //
@@ -12,10 +13,13 @@
 //  defaultResistance="Hizballah" keys (ZoneRegistry::LoadFromParams).
 //
 //  Zone seed: 6 explicit zones ONLY (Camp, Litani Checkpoint, Marjayoun
-//  Barracks, Tyre, Saida, Ghajar) - the template sets seedCities=0 because
-//  Lebanon80's type-less Names block is a theater map ("Mediterranean Sea",
-//  "Sea of Galilee", country labels...) that would seed CITY zones in open
-//  water. So this test asserts the EXACT count, unlike sinai_swap's >= 10.
+//  Barracks, Tyre, Saida, Ghajar) - the template keeps the seedCities = 0
+//  override because Lebanon80's theatre-map Names block also names nine
+//  REAL rear settlements (Beirut, Haifa, Damascus, ...) outside this
+//  campaign's play area; the Auto classifier (issue #54 C3) is pinned
+//  separately by guerrilla_names_classify on a copy of this template with
+//  the key removed. So this test asserts the EXACT count, unlike
+//  sinai_swap's >= 10.
 //
 //  The player spawns at the Camp, 500 m from the Litani Checkpoint - inside
 //  the native garrison cache radius (800 m) - so the WEST garrison

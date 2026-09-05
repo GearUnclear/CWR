@@ -52,9 +52,9 @@ ContextList ContextsForCategory(ControlsCategory cat)
     static constexpr InputContext pilot[] = {InputContext::HeliPilot, InputContext::PlanePilot};
     static constexpr InputContext gunner[] = {InputContext::TankGunner, InputContext::Gunner};
     static constexpr InputContext common[] = {
-        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver, InputContext::TankDriver,
+        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver,  InputContext::TankDriver,
         InputContext::TankGunner, InputContext::HeliPilot, InputContext::PlanePilot, InputContext::ShipDriver,
-        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,       InputContext::Chat,
+        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,        InputContext::Chat,
         InputContext::Editor,
     };
 
@@ -403,11 +403,68 @@ static bool QueryProfileCodeToDo(Input& in, InputCode code, bool reset, bool che
     }
 }
 
-static float QueryProfileAction(const Input& in, const InputProfile& profile, UserAction action, bool checkFocus)
+static bool IsGamepadDevice(InputCode code)
+{
+    switch (code.device())
+    {
+        case InputDevice::GamepadButton:
+        case InputDevice::GamepadAxis:
+        case InputDevice::GamepadPOV:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Driver/pilot contexts whose movement actions steer a vehicle — the surface
+// the Options "gamepad steering" toggle covers.
+static bool IsDriverContext(InputContext ctx)
+{
+    switch (ctx)
+    {
+        case InputContext::CarDriver:
+        case InputContext::TankDriver:
+        case InputContext::HeliPilot:
+        case InputContext::PlanePilot:
+        case InputContext::ShipDriver:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool IsVehicleControlAction(UserAction action)
+{
+    switch (action)
+    {
+        case UATurnLeft:
+        case UATurnRight:
+        case UAMoveForward:
+        case UAMoveBack:
+        case UAMoveFastForward:
+        case UAMoveSlowForward:
+        case UAMoveLeft:
+        case UAMoveRight:
+        case UAMoveUp:
+        case UAMoveDown:
+        case UAAxisTurn:
+        case UAAxisDive:
+        case UAAxisRudder:
+        case UAAxisThrust:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static float QueryProfileAction(const Input& in, const InputProfile& profile, UserAction action, bool checkFocus,
+                                bool suppressGamepadCodes = false)
 {
     float sum = 0.0f;
     for (const InputBinding& binding : profile.GetBindingEntries(action))
     {
+        if (suppressGamepadCodes && IsGamepadDevice(binding.code))
+            continue;
         if (!ProfileModifierHeld(in, binding.modifier, checkFocus))
             continue;
         const float value = QueryProfileCode(in, binding.code, checkFocus) * binding.scale;
@@ -445,12 +502,8 @@ static float QueryProfileAction(const Input& in, const InputProfile& profile, Us
     return sum;
 }
 
-static bool QueryProfileActionToDo(Input& in,
-                                   const InputProfile& profile,
-                                   UserAction action,
-                                   bool& actionDone,
-                                   bool reset,
-                                   bool checkFocus)
+static bool QueryProfileActionToDo(Input& in, const InputProfile& profile, UserAction action, bool& actionDone,
+                                   bool reset, bool checkFocus)
 {
     if (actionDone && in.actionDone[action])
         return false;
@@ -495,6 +548,8 @@ void InputSubsystem::ComputeMovementState()
     GInput.keyboard.cheat1 = cheat1;
     GInput.keyboard.cheat2 = cheat2;
 #endif
+
+    GInput.keyboard.cheatEntryTrigger = GetAction(UACheatEntry, false) > 0.0f;
 
     moveLeft_ = 0;
     moveRight_ = 0;
@@ -545,21 +600,24 @@ void InputSubsystem::ComputeMovementState()
         turnLeft_ += GetAction(UATurnLeft, true);
         turnRight_ += GetAction(UATurnRight, true);
 
-        bool oldLookAround = lookAroundEnabled_;
+        bool oldLookAround = IsLookAroundEnabled();
         if (GetAction(UALookAround, true))
             lookAroundEnabled_ = true;
         else
             lookAroundEnabled_ = lookAroundToggled_;
 
-        if (oldLookAround != lookAroundEnabled_)
+        if (oldLookAround != IsLookAroundEnabled())
+        {
             freelookChanged_ = true;
+            if (oldLookAround && !IsLookAroundEnabled())
+                GInput.cursor.aimDeltaX = GInput.cursor.aimDeltaY = GInput.cursor.aimDeltaZ = 0;
+        }
 
         moveUp_ += GetAction(UAMoveUp, true);
         moveDown_ += GetAction(UAMoveDown, true);
         moveLeft_ += GetAction(UAMoveLeft, true);
         moveRight_ += GetAction(UAMoveRight, true);
     }
-
 }
 
 void InputSubsystem::SyncToGInput()
@@ -576,7 +634,7 @@ void InputSubsystem::SyncToGInput()
     GInput.keyTurnRight = turnRight_;
     GInput.fire = fire_;
     GInput.fireToDo = fireToDo_;
-    GInput.lookAroundEnabled = lookAroundEnabled_;
+    GInput.lookAroundEnabled = IsLookAroundEnabled();
     GInput.lookAroundToggleEnabled = lookAroundToggled_;
 }
 
@@ -602,7 +660,13 @@ float InputSubsystem::GetAction(InputContext ctx, UserAction action, bool checkF
     const int idx = static_cast<int>(ctx);
     if (idx < 0 || idx >= kNumContexts)
         return 0.0f;
-    return QueryProfileAction(GInput, profiles_[idx], action, checkFocus);
+    // With gamepad steering off, stick/trigger/POV bindings stop feeding the
+    // movement actions in driver contexts, so a bound pad can't steer through
+    // the keyboard branch either.  Buttons, look and every other context are
+    // untouched.
+    const bool suppressGamepad =
+        !GInput.gamepad.steering && IsDriverContext(ctx) && IsVehicleControlAction(action);
+    return QueryProfileAction(GInput, profiles_[idx], action, checkFocus, suppressGamepad);
 }
 
 bool InputSubsystem::GetActionToDo(UserAction action, bool reset, bool checkFocus)
@@ -611,6 +675,20 @@ bool InputSubsystem::GetActionToDo(UserAction action, bool reset, bool checkFocu
     if (idx < 0 || idx >= kNumContexts)
         return false;
     return QueryProfileActionToDo(GInput, profiles_[idx], action, actionDoneByContext_[idx][action], reset, checkFocus);
+}
+
+float InputSubsystem::GetMoveForward(InputContext ctx) const
+{
+    // Turbo held promotes MoveForward into fast-forward, so bare forward is zero.
+    return GetAction(ctx, UATurbo) > 0 ? 0.0f : GetAction(ctx, UAMoveForward);
+}
+
+float InputSubsystem::GetMoveFastForward(InputContext ctx) const
+{
+    float fast = GetAction(ctx, UAMoveFastForward);
+    if (GetAction(ctx, UATurbo) > 0)
+        fast += GetAction(ctx, UAMoveForward);
+    return fast;
 }
 
 bool InputSubsystem::IsKeyDown(SDL_Scancode sc) const
@@ -772,6 +850,18 @@ void InputSubsystem::ResetLookAroundToggle()
     GInput.lookAroundToggleEnabled = false;
 }
 
+void InputSubsystem::SetSeatFreelookLock(bool locked)
+{
+    // Does NOT raise freelookChanged_: the seat lock flips mid-Simulate, after
+    // GameLoop's FreelookChanged() check for this frame, and the flag is reset
+    // at the top of the next Update() — it would be wiped unread.  The caller
+    // (World::UpdateInputContext) invokes FreelookChange itself on a flip.
+    if (lookAroundSeatLock_ == locked)
+        return;
+    lookAroundSeatLock_ = locked;
+    GInput.lookAroundEnabled = IsLookAroundEnabled();
+}
+
 bool InputSubsystem::IsMouseTurnActive() const
 {
     if (GInput.lookAroundEnabled)
@@ -794,9 +884,17 @@ bool InputSubsystem::IsJoystickActive() const
         return false;
     if (GInput.keyboard.moveLastActive >= GInput.gamepad.moveLastActive)
         return false;
-    if (!GInput.lookAroundEnabled && GInput.mouse.cursorLastActive > GInput.gamepad.moveLastActive)
+    // Manual freelook only: with a seat lock pinning GInput.lookAroundEnabled
+    // true for the whole drive, using the combined flag would erase this guard
+    // and let an idle connected gamepad win the arbitration from the mouse.
+    if (!lookAroundEnabled_ && GInput.mouse.cursorLastActive > GInput.gamepad.moveLastActive)
         return false;
     return true;
+}
+
+bool InputSubsystem::IsJoystickPilotActive() const
+{
+    return GInput.gamepad.steering && IsJoystickActive();
 }
 bool InputSubsystem::IsJoystickEnabled() const
 {
@@ -804,7 +902,9 @@ bool InputSubsystem::IsJoystickEnabled() const
 }
 bool InputSubsystem::IsJoystickThrustActive() const
 {
-    if (!GInput.gamepad.enabled)
+    // gamepad.steering: throttle is vehicle control, so the Options "gamepad
+    // steering" toggle covers it too (its only consumers are aircraft thrust).
+    if (!GInput.gamepad.enabled || !GInput.gamepad.steering)
         return false;
     return GInput.gamepad.thrustLastActive > GInput.keyboard.thrustLastActive;
 }
@@ -990,14 +1090,14 @@ float InputSubsystem::GetKey(int packedKey, bool checkFocus) const
 {
     const int value = InputBindingValue(packedKey);
     return InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKey(GInput, value, checkFocus)
-                                             : QueryKey(GInput, value, checkFocus);
+                                              : QueryKey(GInput, value, checkFocus);
 }
 
 bool InputSubsystem::GetKeyToDo(int packedKey, bool reset, bool checkFocus)
 {
     const int value = InputBindingValue(packedKey);
     return InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKeyToDo(GInput, value, reset, checkFocus)
-                                             : QueryKeyToDo(GInput, value, reset, checkFocus);
+                                              : QueryKeyToDo(GInput, value, reset, checkFocus);
 }
 
 int InputSubsystem::CheatActivated() const
@@ -1034,6 +1134,10 @@ void InputSubsystem::LoadKeys()
     if (!contextControls.Load(contextControlsPath))
     {
         contextControls.LoadDefaults();
+        contextControls.Save(contextControlsPath);
+    }
+    else if (contextControls.migratedOnLoad)
+    {
         contextControls.Save(contextControlsPath);
     }
     profiles_ = contextControls.profiles;
@@ -1082,6 +1186,8 @@ void InputSubsystem::LoadKeys()
     GInput.mouse.tuning.aimingDeadzone = mouse.aimingDeadzone;
 
     GInput.gamepad.enabled = gamepad.enabled;
+    GInput.gamepad.steering = gamepad.steering;
+    GInput.gamepad.reverseYStick = gamepad.reverseYStick;
     GInput.gamepad.deadzoneStick = gamepad.deadzoneStick;
     GInput.gamepad.deadzoneTrigger = gamepad.deadzoneTrigger;
     GInput.gamepad.lookSensitivity = gamepad.lookSensitivity;
@@ -1094,6 +1200,8 @@ void InputSubsystem::SaveKeys()
 
     GamepadConfig gamepad;
     gamepad.enabled = GInput.gamepad.enabled;
+    gamepad.steering = GInput.gamepad.steering;
+    gamepad.reverseYStick = GInput.gamepad.reverseYStick;
     gamepad.deadzoneStick = GInput.gamepad.deadzoneStick;
     gamepad.deadzoneTrigger = GInput.gamepad.deadzoneTrigger;
     gamepad.lookSensitivity = GInput.gamepad.lookSensitivity;
@@ -1164,7 +1272,11 @@ void InputSubsystem::ResetCategoryDefaults(ControlsCategory cat)
         for (int j = 0; j < defaultKeys.Size(); j++)
         {
             if (!GamepadConfig::IsGamepadCode(defaultKeys[j]))
-                defaultBindings.push_back(InputBinding(InputCode::FromLegacy(defaultKeys[j])));
+            {
+                int mod = DefaultModifierForDefaultKey(static_cast<UserAction>(idx), defaultKeys[j]);
+                InputCode modCode = mod >= 0 ? InputCode::FromLegacy(mod) : InputCode{};
+                defaultBindings.push_back(InputBinding(InputCode::FromLegacy(defaultKeys[j]), modCode));
+            }
         }
 
         for (int c = 0; c < contexts.count; ++c)
@@ -1233,7 +1345,8 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("PrevChannel", IDS_USRACT_PREV_CHANNEL, SDL_SCANCODE_COMMA, -1),
         UserActionDesc("NextChannel", IDS_USRACT_NEXT_CHANNEL, SDL_SCANCODE_PERIOD, -1),
         UserActionDesc("Chat", IDS_USRACT_CHAT, SDL_SCANCODE_SLASH, -1),
-        UserActionDesc("VoiceOverNet", IDS_USRACT_VOICE_OVER_NET, SDL_SCANCODE_CAPSLOCK, -1),
+        UserActionDesc("VoiceOverNet", IDS_USRACT_VOICE_OVER_NET, -1),
+        UserActionDesc("VoiceOverNetPushToTalk", IDS_USRACT_VOICE_OVER_NET_PUSH_TO_TALK, SDL_SCANCODE_CAPSLOCK, -1),
         UserActionDesc("NetworkStats", IDS_USRACT_NETWORK_STATS, SDL_SCANCODE_I, -1),
         UserActionDesc("NetworkPlayers", IDS_USRACT_NETWORK_PLAYERS, SDL_SCANCODE_P, -1),
         UserActionDesc("SelectAll", IDS_USRACT_SELECT_ALL, SDL_SCANCODE_GRAVE, -1),
@@ -1248,11 +1361,19 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("AimDown", IDS_USRACT_AIM_DOWN, -1),
         UserActionDesc("AimLeft", IDS_USRACT_AIM_LEFT, -1),
         UserActionDesc("AimRight", IDS_USRACT_AIM_RIGHT, -1),
+        UserActionDesc("MapZoomIn", IDS_USRACT_MAP_ZOOM_IN, SDL_SCANCODE_KP_PLUS, -1),
+        UserActionDesc("MapZoomOut", IDS_USRACT_MAP_ZOOM_OUT, SDL_SCANCODE_KP_MINUS, -1),
+        UserActionDesc("CheatEntry", IDS_USRACT_CHEAT_ENTRY, SDL_SCANCODE_KP_MINUS, -1),
 #if _ENABLE_CHEATS
         UserActionDesc("Cheat1", IDS_USRACT_CHEAT_1, SDL_SCANCODE_RGUI, -1),
         UserActionDesc("Cheat2", IDS_USRACT_CHEAT_2, SDL_SCANCODE_RALT, -1),
 #endif
     };
+    // The table is indexed by UserAction, and per-action arrays (bindings, KeyList
+    // userKeys[UAN]) are sized by UAN. If a new action is added to the enum without
+    // a matching row here, indexing runs off the end. Keep them one-to-one.
+    static_assert(std::size(userActionDesc) == UAN,
+                  "UserActionDesc table must have exactly one entry per UserAction (UAN)");
     return userActionDesc;
 }
 
@@ -1275,6 +1396,18 @@ void InputSubsystem::SetJoystickEnabled(bool v)
 void InputSubsystem::ToggleJoystickEnabled()
 {
     GInput.gamepad.enabled = !GInput.gamepad.enabled;
+}
+bool InputSubsystem::IsReverseJoystick() const
+{
+    return GInput.gamepad.reverseYStick;
+}
+void InputSubsystem::SetReverseJoystick(bool v)
+{
+    GInput.gamepad.reverseYStick = v;
+}
+void InputSubsystem::ToggleReverseJoystick()
+{
+    GInput.gamepad.reverseYStick = !GInput.gamepad.reverseYStick;
 }
 bool InputSubsystem::IsMouseButtonsReversed() const
 {

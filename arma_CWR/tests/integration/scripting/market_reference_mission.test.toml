@@ -1,0 +1,15 @@
+# Market.Abel reference mission: boot -> dealers drawn over the towns -> buy
+# at the arms dealer (delivery here) -> establish the HQ in the nearest town
+# -> stash / retrieve at the cache -> buy to the HQ cache and garage (locked,
+# beep) -> unlock / relock through the command surface -> move the HQ to the
+# Camp (outdoor fallback, the move debited, the left-behind hull released).
+# Boots the repo-relative template directly (no install needed); the
+# main-menu button path is covered by ui/main_menu/reference_mission_market.
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "guerrilla-mode/mission/Market.Abel"
+# market tick 3 s + market.sqs 1 s poll per leg; the siting passes walk the
+# whole building table of Abel once per election. Generous windows.
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

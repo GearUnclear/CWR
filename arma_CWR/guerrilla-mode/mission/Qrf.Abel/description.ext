@@ -1,0 +1,150 @@
+// Qrf.Abel - playable test mission for the occupier ALERT -> QRF chain
+// (native AlertMachine + GarrisonCache + ZoneRegistry, driven by the
+// campaign's own scripts/qrf.sqs policy layer), set on the Houdan slope on
+// Abel (Malden, full CWA 1.99 data).
+//
+// HOOKED INTO THE MAIN MODE'S SYSTEMS, NOT A RE-IMPLEMENTATION: the two
+// files under scripts/ (lib.sqs, qrf.sqs) are BYTE-IDENTICAL copies of the
+// Guerrilla.* shared core (test_mission_script_core.cpp enforces it for
+// every Qrf.* template), and the alert/garrison/zone state they act on is
+// the same native engine code a Guerrilla campaign runs. Only the bootstrap
+// (init.sqs), the debug actions (act_*.sqs) and the readout (hud.sqs) are
+// mission-local, so the QRF system is the only moving part on display -
+// the other campaign managers (capture, economy, recruit, civilians, ...)
+// are deliberately NOT started.
+//
+// install-missions.ps1 installs it like the other templates; once installed
+// it is launchable straight from the main menu's QRF button
+// (kReferenceMissions, UI/OptionsUIApp.cpp) or via
+// run-game.ps1 -Mission 'Missions\Qrf.Abel'.
+//
+// What activates what:
+//   * class CfgGuerrillaZones -> ZoneRegistry + AlertMachine + GarrisonCache
+//     go live natively at mission load.
+//   * Camp (RESISTANCE, garrison 0) at the player start: resistance-owned,
+//     so every zone within revealRadius is revealed on tick 1 (fog-of-war
+//     is zone-marker only; without a resistance zone all markers stay
+//     black). It is ALSO a zone the AlertMachine evaluates: occupier groups
+//     hunting you within 150 m of the Camp can turn the CAMP red and draw a
+//     QRF onto it - real campaign behaviour, worth seeing here.
+//   * Outpost (OCCUPIER, garrison 6), ~200 m down-slope ESE on the dirt
+//     track: the primary target. Inside the 800 m cacheRadius, so the
+//     native garrison spawns at boot.
+//   * Depot (OCCUPIER, garrison 4), ~330 m further down the same track:
+//     a second alarm source, to show the one-QRF-at-a-time rule
+//     (qrf.sqs fields ONE convoy; a second RED zone waits its turn).
+//
+// Terrain survey (PoseidonTools terrain objects abel.wrp --near ...):
+//   * the track leaves Houdan's east gate at ~[7121,6081] (elev 72 m) and
+//     runs ESE past [7289,6049] (50 m), [7404,6025] (33 m), [7505,5950]
+//     (20 m) to a dead end at ~[7574,5892] (15 m) - the QRF's road-snap
+//     (nearest "RoadSegment" to a random point within 600 m of the zone)
+//     finds this track or Houdan's asphalt.
+//   * the player start [7205,6048] is open hillside (~66 m) with the
+//     Outpost ~30 m below it: an overwatch seat on the convoy's approach.
+
+onLoadMission = "QRF Test - Houdan slope (Malden)";
+onLoadIntro = "An occupier outpost sits below you. Make noise, watch the alert climb, and meet the quick reaction force.";
+respawn = 0;
+joinInProgress = 0;
+
+class CfgGuerrillaZones
+{
+    // Engine tuning stays at stock defaults (alertInterval=5;
+    // alertYellowKnows=0.5; alertRedKnows=1.5; alertWindowSeconds=20;
+    // zoneArea=150; cacheRadius=800; revealRadius=1500). Direct-launch
+    // faction fallbacks (the menu button publishes no gmSel*):
+    defaultOccupier = "EAST";
+    defaultResistance = "GUER";
+    playerSide = "GUER";
+    seedCities = 0; // just the three authored zones - keep the map readable
+
+    class Zones
+    {
+        // position[] is script/getPos order [easting, northing, elevation]
+        // (NOT the mission.sqm order) - ZoneRegistry::LoadZones enforces it.
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";
+            garrison = 0;
+            income = 0;
+            marker = "gmZoneMarker_0";
+            position[] = {7205, 6048, 66}; // player start, Houdan east slope
+        };
+        class Outpost
+        {
+            name = "Outpost";
+            type = "OUTPOST";
+            owner = "OCCUPIER";
+            garrison = 6;
+            income = 25;
+            marker = "gmZoneMarker_1";
+            position[] = {7400, 6000, 35}; // open ground 25 m S of the track bend
+        };
+        class Depot
+        {
+            name = "Depot";
+            type = "OUTPOST";
+            owner = "OCCUPIER";
+            garrison = 4;
+            income = 15;
+            marker = "gmZoneMarker_2";
+            position[] = {7515, 5938, 19}; // on the track, above the reed pond
+        };
+    };
+};
+
+// Faction descriptors, copied verbatim from Showcase.Abel (every classname
+// verified against the 1.99 Bin\CONFIG.BIN - see that file's header notes).
+class CfgGuerrillaFactions
+{
+    class EAST // occupier descriptor
+    {
+        side = "EAST";
+        tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
+        tierThresholds[] = {3, 5};
+        tiersMG[]     = {"SoldierEMG", "SoldierEMG", "SoldierEMG"};
+        tiersAT[]     = {"SoldierELAW", "SoldierELAW", "SoldierELAW"};
+        tiersMedic[]  = {"SoldierEMedic", "SoldierEMedic", "SoldierEMedic"};
+        tiersSniper[] = {"", "", "SoldierESniper"};
+        vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
+        vehicleThresholds[] = {3, 6, 8};
+        officer = "OfficerE";
+        flag = "\flags\ussr.jpg";
+    };
+    class GUER // resistance descriptor
+    {
+        side = "GUER";
+        tiers[] = {"SoldierGB"};
+        tierThresholds[] = {};
+        tiersMG[]    = {"SoldierGMG"};
+        tiersAT[]    = {"SoldierGLAW"};
+        tiersMedic[] = {"SoldierGMedic"};
+        vehicles[] = {"GJeep", "TruckV3SG", "BMP", "T55G"};
+        vehicleThresholds[] = {4, 7, 9};
+        officer = "SoldierGB";
+
+        holdClass = "SoldierGB";
+        holdCount = 3;
+        recruitFighter = "SoldierGB";
+        recruitSpecialist = "SoldierGMG";
+        companionClass = "SoldierGB";
+
+        baseWeapon = "AK47";
+        baseMagazine = "AK47";
+        lootRiflemanWeapon = "AK47";
+        lootRiflemanMag = "AK47";
+        lootMedicWeapon = "AK47";
+        lootMedicMag = "AK47";
+        lootMGWeapon = "PK";
+        lootMGMag = "PK";
+        lootATWeapon = "RPGLauncher";
+        lootATMag = "RPGLauncher";
+        lootSniperWeapon = "SVDDragunov";
+        lootSniperMag = "SVDDragunov";
+
+        flag = "\flags\fia.jpg";
+    };
+};

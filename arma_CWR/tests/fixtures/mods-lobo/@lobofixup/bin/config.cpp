@@ -45,21 +45,6 @@ class CfgAddons
         };
     };
 };
-// New-game menu faction candidates. The GUERRILLA new-game display builds its
-// occupier/resistance cycler lists from the GLOBAL config's
-// CfgGuerrillaFactions (Pars - the mission's description.ext is not parsed at
-// menu time; see UI/Guerrilla/GuerrillaNewGame.cpp). The `side` field here is
-// a ROLE filter for the menu (occupier slot = "EAST", resistance slot =
-// "GUER", the built-in defaults): IDF's "WEST" matches neither slot, so both
-// cyclers fall back to listing every class and IDF is selectable as occupier.
-// The published selection strings ("IDF"/"EgyptFrontier") are then resolved
-// IN-MISSION against the template's own CfgGuerrillaFactions by CLASS NAME
-// (ZoneRegistry::ResolveSides), where IDF=WEST / EgyptFrontier=EAST.
-class CfgGuerrillaFactions
-{
-    class IDF          { side = "WEST"; };
-    class EgyptFrontier { side = "GUER"; };
-};
 class CfgAmmo
 {
     // LoBoammo.pbo
@@ -76,3 +61,13 @@ class CfgAmmo
     class LoBo_20          { tracerColor[] = {0.8, 0.5, 0.0, 0.25}; };
     class LoBo_Apach30     { tracerColor[] = {0.8, 0.5, 0.0, 0.25}; };
 };
+
+// ---------------------------------------------------------------------------
+// The @LoBo war factions (IDF, EgyptFrontier, EgyptArmy, Syria, Jordan,
+// Hizballah, PLO, PLO_East) live ONCE in the tracked
+// guerrilla-mode/config/lobo-factions.hpp and are included here so the lobo
+// test lanes carry them whether or not the player-facing install has run
+// (tools/lobo/install-lobo-factions.ps1 writes the same file into
+// <@LoBo>\bin\config.cpp). The config reader resolves #include against the
+// including file's directory, hence the relative climb to the repo.
+#include "..\..\..\..\..\guerrilla-mode\config\lobo-factions.hpp"

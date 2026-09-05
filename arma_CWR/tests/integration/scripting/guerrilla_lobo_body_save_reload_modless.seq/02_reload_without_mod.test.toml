@@ -1,0 +1,10 @@
+# Phase 2 mounts NOTHING: the Classic package alone, so every @LoBo class and
+# addon name in phase 1's save is unknown to this process. That absence is the
+# whole point of the sequence (issue #48, #56 task 5); do not add a --mod line.
+# --no-strict matches phase 1 so a WARN-level substitution line cannot itself
+# fail the run under the runner's default strictness.
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]
+binary = "PoseidonGame"
+timeout = 600
+assert_timeout = 300
+extra_args = ["--dev", "--no-strict"]

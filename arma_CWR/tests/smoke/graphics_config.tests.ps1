@@ -2,7 +2,7 @@
 # Pester smoke tests for the graphics.cfg eager-write boot dance with
 # RAM-bucket autodetect.
 #
-# Mirrors audio_config.tests.ps1 + display_config.tests.ps1 — same
+# Mirrors audio_config.tests.ps1 + display_config.tests.ps1 - same
 # four It blocks, same ephemeral-POSEIDON_USER_DIR pattern.  Run:
 #   Invoke-Pester -Container (New-PesterContainer -Path tests/smoke/graphics_config.tests.ps1 -Data @{ Preset = 'win-x64-clang-rwdi' }) -Output Detailed
 
@@ -49,14 +49,14 @@ Describe "graphics.cfg boot dance" {
 
             # Per-row sanity: tiers match the picked preset's bundle.
             # We don't pin a specific tier (developer machines vary
-            # 8 GB → 64 GB+), but the four tier rows must be consistent
+            # 8 GB -> 64 GB+), but the four tier rows must be consistent
             # with each other per the kTierBundles table in
             # GraphicsConfig.cpp.
             [int]$preset = $kv['qualityPreset']
             $preset | Should -BeIn 0,1,2,3 -Because "autodetect picks Low/Med/High/Ultra, never Custom"
             # Per-user knobs must be at the unconditional defaults.
             $kv['vsync']      | Should -Be '1' -Because "VSync defaults On"
-            $kv['fpsCap']     | Should -Be '0' -Because "FPS Cap defaults Unlimited"
+            $kv['fpsCap']     | Should -BeIn '30','60','90','120','144','240' -Because "FPS Cap is stamped from the display rate (GraphicsConfig::FpsCapForRefreshRate)"
             $kv['brightness'] | Should -Match '^1\.20*$' -Because "Brightness defaults 1.2 (original CWA default, GraphicsConfig.hpp)"
             $kv['gamma']      | Should -Match '^1\.0+$' -Because "Gamma defaults 1.0"
         } finally {
@@ -93,11 +93,11 @@ gamma=0.900000;
         }
     }
 
-    It "does NOT persist normalization on boot — invalid tier stays in file" {
+    It "does NOT persist normalization on boot - invalid tier stays in file" {
         $eph = New-EphemeralGamePaths
         try {
             $cfgPath = Join-Path $eph.UserDir "graphics.cfg"
-            # Bogus Terrain tier (99) — file kept untouched, runtime
+            # Bogus Terrain tier (99) - file kept untouched, runtime
             # falls back to TierUltra per Normalize semantics.
             @"
 qualityPreset=4;

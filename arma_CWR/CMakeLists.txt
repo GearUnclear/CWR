@@ -166,7 +166,7 @@ find_package(enkiTS CONFIG REQUIRED)
 # dist/<preset>/{game,viewer,tools} - auto-create on build
 get_filename_component(PRESET_NAME "${CMAKE_BINARY_DIR}" NAME)
 set(DIST_PRESET_NAME "${PRESET_NAME}")
-if(DIST_PRESET_NAME MATCHES "^(win|linux)-([^-]+)(-(.*))?$")
+if(DIST_PRESET_NAME MATCHES "^(win|macos|linux)-([^-]+)(-(.*))?$")
     set(_dist_platform "${CMAKE_MATCH_1}")
     set(_dist_arch "${CMAKE_MATCH_2}")
     set(_dist_suffix "${CMAKE_MATCH_4}")
@@ -213,8 +213,7 @@ add_subdirectory(apps/tools/Tools)
 add_subdirectory(apps/tools/TcPbo)
 add_subdirectory(apps/tools/TcLister)
 add_subdirectory(apps/tools/Studio)
-# tests/unit/apps/Studio's ImGui-Test-Engine UI suite is quarantined under
-# License-restricted UI test sources are not part of this public tree.
+add_subdirectory(tests/unit/apps/Studio)
 add_subdirectory(apps/tetris/Tetris)
 add_subdirectory(tests/unit/apps/Tetris)
 
@@ -367,18 +366,22 @@ endif()
 # Python lint targets (ruff via uv, optional)
 find_program(UV_EXE NAMES uv)
 set(BLENDER_ADDON_DIR ${CMAKE_SOURCE_DIR}/apps/tools/BlenderAddon)
+set(BLENDER_PYTHON_LINT_PATHS ${BLENDER_ADDON_DIR}/io_import_p3d)
+if(EXISTS ${CMAKE_SOURCE_DIR}/tests/BlenderAddon)
+    list(APPEND BLENDER_PYTHON_LINT_PATHS ${CMAKE_SOURCE_DIR}/tests/BlenderAddon)
+endif()
 
 if(UV_EXE AND EXISTS ${BLENDER_ADDON_DIR}/pyproject.toml)
     add_custom_target(PythonLint
-        COMMAND ${UV_EXE} run ruff check ${BLENDER_ADDON_DIR}/io_import_p3d ${CMAKE_SOURCE_DIR}/tests/BlenderAddon
-        COMMAND ${UV_EXE} run ruff format --check ${BLENDER_ADDON_DIR}/io_import_p3d ${CMAKE_SOURCE_DIR}/tests/BlenderAddon
+        COMMAND ${UV_EXE} run ruff check ${BLENDER_PYTHON_LINT_PATHS}
+        COMMAND ${UV_EXE} run ruff format --check ${BLENDER_PYTHON_LINT_PATHS}
         WORKING_DIRECTORY ${BLENDER_ADDON_DIR}
         COMMENT "Checking Python formatting and lint (ruff)"
         VERBATIM
     )
     add_custom_target(PythonLintFix
-        COMMAND ${UV_EXE} run ruff format ${BLENDER_ADDON_DIR}/io_import_p3d ${CMAKE_SOURCE_DIR}/tests/BlenderAddon
-        COMMAND ${UV_EXE} run ruff check --fix ${BLENDER_ADDON_DIR}/io_import_p3d ${CMAKE_SOURCE_DIR}/tests/BlenderAddon
+        COMMAND ${UV_EXE} run ruff format ${BLENDER_PYTHON_LINT_PATHS}
+        COMMAND ${UV_EXE} run ruff check --fix ${BLENDER_PYTHON_LINT_PATHS}
         WORKING_DIRECTORY ${BLENDER_ADDON_DIR}
         COMMENT "Formatting Python sources with ruff"
         VERBATIM

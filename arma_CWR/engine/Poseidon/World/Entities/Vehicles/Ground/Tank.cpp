@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
+#include <Poseidon/World/Entities/Vehicles/Ground/TankNetworkStabilization.hpp>
 #include <Poseidon/AI/AI.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -670,15 +671,11 @@ void Tank::StabilizeTurrets(Matrix3Val oldTrans, Matrix3Val newTrans, Matrix3Val
 {
     _mainTurret.Stabilize(this, Type()->_mainTurret, oldTrans, newTrans);
     // stabilize with relation to mainTurret
-    if (Type()->_comTurretOnMainTurret)
-    {
-        Matrix3 newTurretTrans = newTrans * TurretTransform().Orientation();
-        _comTurret.Stabilize(this, Type()->_comTurret, oldTurretTrans, newTurretTrans);
-    }
-    else
-    {
-        _comTurret.Stabilize(this, Type()->_comTurret, oldTrans, newTrans);
-    }
+    Matrix3 newTurretTrans = Poseidon::BuildCommanderTankTurretStabilizationFrame(Type()->_comTurretOnMainTurret,
+                                                                                  newTrans, TurretTransform());
+    const Matrix3& oldComTurretFrame = Poseidon::SelectCommanderTankTurretOldStabilizationFrame(
+        Type()->_comTurretOnMainTurret, oldTrans, oldTurretTrans);
+    _comTurret.Stabilize(this, Type()->_comTurret, oldComTurretFrame, newTurretTrans);
 }
 
 bool Tank::UseSimpleSimulation(SimulationImportance prec) const
@@ -1817,15 +1814,15 @@ void Tank::SuspendedPilot(AIUnit* unit, float deltaT) {}
 void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
 {
     auto& input = InputSubsystem::Instance();
-    if (input.IsJoystickActive())
+    if (input.IsJoystickPilotActive())
     {
         JoystickPilot(deltaT);
         return;
     }
 
     constexpr InputContext ctx = InputContext::TankDriver;
-    float forward = (input.GetAction(ctx, UAMoveForward) - input.GetAction(ctx, UAMoveBack)) * 0.75f;
-    forward += input.GetAction(ctx, UAMoveFastForward);
+    float forward = (input.GetMoveForward(ctx) - input.GetAction(ctx, UAMoveBack)) * 0.75f;
+    forward += input.GetMoveFastForward(ctx);
     forward += input.GetAction(ctx, UAMoveSlowForward) * 0.33f;
 
     if (ModelSpeed()[2] > 2 && forward < -0.5)
@@ -1867,11 +1864,12 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
 
     _thrustRWanted = _thrustLWanted = forward;
 
-    bool internalCamera = IsGunner(GWorld->GetCameraType());
-    bool mouseControl = internalCamera && input.IsMouseTurnActive() && !input.IsLookAroundEnabled();
     bool fullTurn = fabs(_thrustLWanted + _thrustRWanted) < 0.01f;
 
-    float estT = mouseControl ? 0.75f : 0.25f;
+    // Mouse steering removed — keys are the only manual input.  estT is the
+    // heading-predictor lookahead (damping); playtest (2026-08-21) settled on
+    // the vanilla keyboard value — the raised 0.5 made the hull turn in too hot.
+    float estT = 0.25f;
 
     if (!fullTurn)
     {
@@ -1887,29 +1885,17 @@ void Tank::KeyboardPilot(AIUnit* unit, float deltaT)
     float curHeading = atan2(Direction()[0], Direction()[2]);
     float estHeading = atan2(estDirection[0], estDirection[2]);
 
-    float turnWanted = 0;
+    // note: keys give wanted turning speed, not turning acceleration
+    float turnKey = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
+    // when moving fast, we want to turn slowly
 
-    if (mouseControl)
-    {
-        // last input from mouse - use mouse controls
-        // _mouseTurnWanted is difference from current heading
+    float slow = floatMax(0, 1 - fabs(ModelSpeed().Z()) * (1.0f / 20));
 
-        Vector3 relDir(VMultiply, DirWorldToModel(), _mouseDirWanted);
-        float mTurnWanted = atan2(relDir.X(), relDir.Z());
-
-        turnWanted = AngleDifference(curHeading + mTurnWanted, estHeading);
-    }
-    else
-    {
-        // note: keys give wanted turning speed, not turning acceleration
-        float turnKey = input.GetAction(ctx, UATurnRight) - input.GetAction(ctx, UATurnLeft);
-        // when moving fast, we want to turn slowly
-
-        float slow = floatMax(0, 1 - fabs(ModelSpeed().Z()) * (1.0f / 20));
-
-        float factor = 1 - slow * 0.5f;
-        turnWanted = AngleDifference(curHeading + turnKey * factor, estHeading);
-    }
+    // Command authority tuned to ~72% of the vanilla keyboard branch's 0.5 rad
+    // at rest (0.36 rad): playtest (2026-08-21) found vanilla turned the hull
+    // in too hot once keys became the only steering input.
+    float factor = 1 - slow * 0.64f;
+    float turnWanted = AngleDifference(curHeading + turnKey * factor, estHeading);
 
     // special case - tank moving fast and players wants to brake
     // in such situation tank is usually out of control
