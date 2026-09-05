@@ -36,6 +36,7 @@
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <Poseidon/Foundation/Strings/StrFormat.hpp> // Format (config warnings)
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
@@ -103,6 +104,14 @@ void Traffic::Clear()
     _accum = 0;
     _subAccum = 0;
     _percept = Perception();
+    _diag = TrafficDiag();
+    for (int k = 0; k < NTrafficKinds; k++)
+    {
+        _lastLogged[k] = TSFNone;
+    }
+    _roadCache.Clear();
+    _roadCacheNet = nullptr;
+    _configWarnings.Clear();
     _ambushes.Clear();
     _danger.Clear();
     _dangerNow.Clear();
@@ -126,9 +135,20 @@ void Traffic::LoadFromConfig()
     LoadFromParams(zones);
 }
 
+// one config repair: logged at WARN and kept for gmTrafficDiag / the unit
+// tests.  The message names the key and both values so the author can find
+// the transposed figure.
+static void ConfigRepair(AutoArray<RString>& warnings, const char* key, float was, float now, const char* why)
+{
+    RString msg = Foundation::Format("trafficConfig: %s = %g repaired to %g (%s)", key, (double)was, (double)now, why);
+    warnings.Add(msg);
+    LOG_WARN(Core, "Traffic: {}", (const char*)msg);
+}
+
 void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
 {
     _tuning = TrafficTuning();
+    _configWarnings.Clear();
     _accum = 0;
     _subAccum = 0;
     if (!zonesCfg)
@@ -136,6 +156,7 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
         return;
     }
     TrafficTuning& t = _tuning;
+    const TrafficTuning def; // the defaults the repairs fall back to
     t.enabled = zonesCfg->ReadValue("trafficEnabled", t.enabled ? 1.0f : 0.0f) != 0.0f;
     t.interval = zonesCfg->ReadValue("trafficInterval", t.interval);
     t.radius = zonesCfg->ReadValue("trafficRadius", t.radius);
@@ -165,6 +186,8 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.parkChance = zonesCfg->ReadValue("trafficParkChance", t.parkChance);
     t.parkDwellMin = zonesCfg->ReadValue("trafficParkDwellMin", t.parkDwellMin);
     t.parkDwellMax = zonesCfg->ReadValue("trafficParkDwellMax", t.parkDwellMax);
+    t.maxParked = toInt(zonesCfg->ReadValue("trafficMaxParked", (float)t.maxParked));
+    t.wreckClearAfter = zonesCfg->ReadValue("trafficWreckClearAfter", t.wreckClearAfter);
     t.exposeMargin = zonesCfg->ReadValue("trafficExposeMargin", t.exposeMargin);
     t.despawnDeferMax = zonesCfg->ReadValue("trafficDespawnDeferMax", t.despawnDeferMax);
     t.scaleCaps = zonesCfg->ReadValue("trafficScaleCaps", t.scaleCaps ? 1.0f : 0.0f) != 0.0f;
@@ -175,84 +198,144 @@ void Traffic::LoadFromParams(const ParamEntry* zonesCfg)
     t.dangerCloseRadius = zonesCfg->ReadValue("trafficDangerCloseRadius", t.dangerCloseRadius);
     t.dangerCooldown = zonesCfg->ReadValue("trafficDangerCooldown", t.dangerCooldown);
     t.dangerTtl = zonesCfg->ReadValue("trafficDangerTtl", t.dangerTtl);
-    // sanity floors: a zero interval would tick every frame, negative caps
-    // would read as "nothing ever spawns" (which 0 already says)
-    if (t.interval < 0.5f)
+    // the ordinances are read before they are obeyed (issue #55).  Every
+    // repair is logged with both figures; the repaired value is the one
+    // that still yields traffic, never a silent "nothing ever spawns".
+    AutoArray<RString>& w = _configWarnings;
+    auto floorAt = [&w](float& v, float floor, const char* key, const char* why)
     {
-        t.interval = 0.5f;
-    }
-    if (t.maxCiv < 0)
+        if (v < floor)
+        {
+            ConfigRepair(w, key, v, floor, why);
+            v = floor;
+        }
+    };
+    auto floorInt = [&w](int& v, int floor, const char* key, const char* why)
     {
-        t.maxCiv = 0;
-    }
-    if (t.maxPatrols < 0)
+        if (v < floor)
+        {
+            ConfigRepair(w, key, (float)v, (float)floor, why);
+            v = floor;
+        }
+    };
+    auto unitInterval = [&w](float& v, const char* key)
     {
-        t.maxPatrols = 0;
-    }
-    if (t.maxConvoys < 0)
+        if (v < 0)
+        {
+            ConfigRepair(w, key, v, 0, "a probability, clamped to [0,1]");
+            v = 0;
+        }
+        else if (v > 1)
+        {
+            ConfigRepair(w, key, v, 1, "a probability, clamped to [0,1]");
+            v = 1;
+        }
+    };
+
+    // the pass clock: a zero interval would tick every frame
+    floorAt(t.interval, 0.5f, "trafficInterval", "the pass clock cannot run faster than twice a second");
+
+    // the band: the transposed-figures case.  A radius at or under the
+    // spawn floor is an EMPTY band - every highway on the island falls
+    // silent with no error announced.  Repaired to the floor plus the
+    // default width so the island keeps its traffic
+    floorAt(t.minSpawnDist, 0, "trafficMinSpawnDist", "a distance");
+    if (t.radius <= t.minSpawnDist)
     {
-        t.maxConvoys = 0;
+        float fixed = t.minSpawnDist + (def.radius - def.minSpawnDist);
+        ConfigRepair(w, "trafficRadius", t.radius, fixed,
+                     "must exceed trafficMinSpawnDist or the spawn band is empty and no traffic can ever spawn");
+        t.radius = fixed;
     }
-    if (t.maxLegs < 0)
+    floorAt(t.despawnHysteresis, 0, "trafficDespawnHysteresis",
+            "a negative hysteresis puts the despawn edge inside the spawn band");
+
+    // caps: negative reads as "nothing ever spawns", which 0 already says
+    floorInt(t.maxCiv, 0, "trafficMaxCiv", "a cap");
+    floorInt(t.maxPatrols, 0, "trafficMaxPatrols", "a cap");
+    floorInt(t.maxConvoys, 0, "trafficMaxConvoys", "a cap");
+    floorInt(t.maxParked, 0, "trafficMaxParked", "a cap");
+    floorInt(t.maxLegs, 0, "trafficMaxLegs", "a count");
+
+    // chances and scales
+    unitInterval(t.civChance, "trafficCivChance");
+    unitInterval(t.patrolChance, "trafficPatrolChance");
+    unitInterval(t.convoyChance, "trafficConvoyChance");
+    floorAt(t.convoyWarScale, 0, "trafficConvoyWarScale", "a growth factor");
+    unitInterval(t.civNightScale, "trafficCivNightScale");
+    floorAt(t.alertPatrolBoost, 0, "trafficAlertPatrolBoost", "a boost");
+    floorAt(t.curfewPatrolBoost, 0, "trafficCurfewPatrolBoost", "a factor");
+    unitInterval(t.rainCivFade, "trafficRainCivFade");
+
+    // the day window is written in DAY FRACTIONS (0.25 = 06:00).  An author
+    // writing hours (6 / 21) would otherwise collapse civ traffic to the
+    // night scale around the clock; read anything past 1 as hours
+    if (t.dayStart > 1.0f)
     {
-        t.maxLegs = 0;
+        float hours = t.dayStart;
+        t.dayStart = hours / 24.0f;
+        ConfigRepair(w, "trafficDayStart", hours, t.dayStart, "read as hours; the key is a day fraction");
     }
-    if (t.parkChance < 0)
+    if (t.dayEnd > 1.0f)
     {
-        t.parkChance = 0;
+        float hours = t.dayEnd;
+        t.dayEnd = hours / 24.0f;
+        ConfigRepair(w, "trafficDayEnd", hours, t.dayEnd, "read as hours; the key is a day fraction");
     }
-    if (t.parkChance > 1)
+    floorAt(t.dayStart, 0, "trafficDayStart", "a day fraction");
+    floorAt(t.dayEnd, 0, "trafficDayEnd", "a day fraction");
+    if (t.dayStart >= t.dayEnd)
     {
-        t.parkChance = 1;
+        ConfigRepair(w, "trafficDayStart", t.dayStart, def.dayStart, "the day window must open before it closes");
+        ConfigRepair(w, "trafficDayEnd", t.dayEnd, def.dayEnd, "the day window must open before it closes");
+        t.dayStart = def.dayStart;
+        t.dayEnd = def.dayEnd;
     }
-    if (t.parkDwellMin < 0)
+
+    // trip ladder: a non-positive arrival radius means no car ever arrives
+    // (it stalls at its destination instead)
+    if (t.arriveRadius <= 0)
     {
-        t.parkDwellMin = 0;
+        ConfigRepair(w, "trafficArriveRadius", t.arriveRadius, def.arriveRadius,
+                     "must be positive or no car ever arrives");
+        t.arriveRadius = def.arriveRadius;
     }
+    floorAt(t.stallTimeout, 0, "trafficStallTimeout", "a duration (0 disables the stall ladder)");
+    floorAt(t.commandeerRadius, 0, "trafficCommandeerRadius", "a distance");
+    floorAt(t.commandeerLaneHalfWidth, 0, "trafficCommandeerLaneHalfWidth", "a distance");
+    floorAt(t.commandeerStopDelay, 0, "trafficCommandeerStopDelay", "a duration");
+    floorAt(t.fleeDist, 0, "trafficFleeDist", "a distance");
+
+    // park cycle
+    unitInterval(t.parkChance, "trafficParkChance");
+    floorAt(t.parkDwellMin, 0, "trafficParkDwellMin", "a duration");
     if (t.parkDwellMax < t.parkDwellMin)
     {
+        ConfigRepair(w, "trafficParkDwellMax", t.parkDwellMax, t.parkDwellMin, "pinned to trafficParkDwellMin");
         t.parkDwellMax = t.parkDwellMin;
     }
-    if (t.exposeMargin < 0)
-    {
-        t.exposeMargin = 0;
-    }
-    if (t.despawnDeferMax < 0)
-    {
-        t.despawnDeferMax = 0;
-    }
-    if (t.combatStaleAfter < 0)
-    {
-        t.combatStaleAfter = 0;
-    }
-    if (t.combatHoldMax < 0)
-    {
-        t.combatHoldMax = 0;
-    }
-    if (t.bailCombatWindow < 0)
-    {
-        t.bailCombatWindow = 0;
-    }
-    if (t.dangerRadius < 0)
-    {
-        t.dangerRadius = 0; // 0 (and below) = danger response off
-    }
-    if (t.dangerCloseRadius < 0)
-    {
-        t.dangerCloseRadius = 0;
-    }
+    floorAt(t.wreckClearAfter, 0, "trafficWreckClearAfter", "a duration (0 = never)");
+
+    // perception gate
+    floorAt(t.exposeMargin, 0, "trafficExposeMargin", "a distance");
+    floorAt(t.despawnDeferMax, 0, "trafficDespawnDeferMax", "a duration (0 = no defer)");
+
+    // convoy discipline
+    floorAt(t.combatStaleAfter, 0, "trafficCombatStaleAfter", "a duration");
+    floorAt(t.combatHoldMax, 0, "trafficCombatHoldMax", "a duration (0 = gate off)");
+    floorAt(t.bailCombatWindow, 0, "trafficBailCombatWindow", "a duration (0 = never)");
+
+    // danger response: 0 (and below) = off
+    floorAt(t.dangerRadius, 0, "trafficDangerRadius", "a distance (0 = danger response off)");
+    floorAt(t.dangerCloseRadius, 0, "trafficDangerCloseRadius", "a distance");
     if (t.dangerCloseRadius > t.dangerRadius)
     {
-        t.dangerCloseRadius = t.dangerRadius; // the close band lives inside the reaction band
+        ConfigRepair(w, "trafficDangerCloseRadius", t.dangerCloseRadius, t.dangerRadius,
+                     "the close band lives inside the reaction band");
+        t.dangerCloseRadius = t.dangerRadius;
     }
-    if (t.dangerCooldown < 0)
-    {
-        t.dangerCooldown = 0;
-    }
-    if (t.dangerTtl < 0)
-    {
-        t.dangerTtl = 0;
-    }
+    floorAt(t.dangerCooldown, 0, "trafficDangerCooldown", "a duration");
+    floorAt(t.dangerTtl, 0, "trafficDangerTtl", "a duration");
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +360,20 @@ int Traffic::Count(int kind) const
     return n;
 }
 
+int Traffic::CountParked() const
+{
+    int n = 0;
+    for (int i = 0; i < _entries.Size(); i++)
+    {
+        const TrafficEntry& e = _entries[i];
+        if (e.kind == TKCiv && (e.state == TSParking || e.state == TSDwelling || e.state == TSDeparting))
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
 Transport* Traffic::EntryVehicle(int i) const
 {
     if (i < 0 || i >= _entries.Size())
@@ -284,6 +381,59 @@ Transport* Traffic::EntryVehicle(int i) const
         return nullptr;
     }
     return _entries[i].vehicle;
+}
+
+Transport* Traffic::EntryEscort(const Transport* veh) const
+{
+    if (!veh)
+    {
+        return nullptr;
+    }
+    for (int i = 0; i < _entries.Size(); i++)
+    {
+        if (_entries[i].vehicle.GetLink() == veh)
+        {
+            return _entries[i].escort;
+        }
+    }
+    return nullptr;
+}
+
+const char* Traffic::SpawnFailureName(int failure)
+{
+    switch (failure)
+    {
+        case TSFNone:
+            return "none";
+        case TSFNoRoute:
+            return "noRoute";
+        case TSFZoneMissing:
+            return "zoneMissing";
+        case TSFNoRoadNet:
+            return "noRoadNet";
+        case TSFNoRoadSpots:
+            return "noRoadSpots";
+        case TSFNoSpawnPoint:
+            return "noSpawnPoint";
+        case TSFNoCivVehicles:
+            return "noCivVehicles";
+        case TSFNoCivClass:
+            return "noCivClass";
+        case TSFNoFaction:
+            return "noFaction";
+        case TSFNoCrewClass:
+            return "noCrewClass";
+        case TSFConvoyRungs:
+            return "convoyRungs";
+        case TSFGroupBudget:
+            return "groupBudget";
+        case TSFHullCreate:
+            return "hullCreate";
+        case TSFDriverSeat:
+            return "driverSeat";
+        default:
+            return "unknown";
+    }
 }
 
 bool Traffic::FindEntry(const Transport* veh, TrafficKind& kind, int& originIndex, int& destIndex,
@@ -1226,7 +1376,24 @@ const char* Traffic::DangerReactionName(int reaction)
 
 bool Traffic::DecidePark(float roll, const TrafficTuning& tuning)
 {
+    return DecidePark(roll, 0, tuning);
+}
+
+bool Traffic::DecidePark(float roll, int parked, const TrafficTuning& tuning)
+{
+    // the parked census (issue #55): a town at its parked cap keeps its
+    // through-traffic flowing - the roll loses and the arrival ladder
+    // (re-leg / linger / despawn) takes the car instead
+    if (parked >= tuning.maxParked)
+    {
+        return false;
+    }
     return tuning.parkChance > 0 && roll < tuning.parkChance;
+}
+
+bool Traffic::ReleasedStale(float age, const TrafficTuning& tuning)
+{
+    return tuning.wreckClearAfter > 0 && age >= tuning.wreckClearAfter;
 }
 
 TrafficState Traffic::LoadedParkState(TrafficState saved, bool driverSeated)
@@ -1349,15 +1516,78 @@ int Traffic::DestForOrigin(int kind, const AutoArray<TrafficZoneCandidate>& zone
     return PickDest(kind, zones, originIndex, roll);
 }
 
-// every unlocked road link centre within SpawnScanRadius of center, with
-// the link's travel direction (unit, either sign)
-bool Traffic::CollectRoadSpots(Vector3Par center, AutoArray<Vector3>& pts, AutoArray<Vector3>& dirs) const
+// every unlocked road link centre within SpawnScanRadius of the zone centre,
+// with the link's travel direction (unit, either sign).  The survey itself
+// runs once per origin zone per mission (issue #55: the roads have not moved
+// since the island rose from the sea); only the lock filter is re-read,
+// because stopped hulls lock their links and wrecks unlock when cleared.
+bool Traffic::CollectRoadSpots(int zoneIndex, Vector3Par center, AutoArray<Vector3>& pts,
+                               AutoArray<Vector3>& dirs) const
 {
     pts.Clear();
     dirs.Clear();
     if (!GRoadNet || !GLandscape)
     {
         return false;
+    }
+    const RoadNet* net = GRoadNet;
+    if (_roadCacheNet != net)
+    {
+        // a different road net (a world change without a Clear, or the
+        // first survey): every cached pointer is dead
+        _roadCache.Clear();
+        _roadCacheNet = net;
+    }
+    const RoadSpotCache* cache = nullptr;
+    RoadSpotCache once;
+    if (zoneIndex >= 0)
+    {
+        for (int i = 0; i < _roadCache.Size(); i++)
+        {
+            const RoadSpotCache& c = _roadCache[i];
+            if (c.zoneIndex == zoneIndex && Dist2DSq(c.center, center) < 1.0f)
+            {
+                cache = &c;
+                break;
+            }
+        }
+        if (!cache)
+        {
+            RoadSpotCache fresh;
+            fresh.zoneIndex = zoneIndex;
+            fresh.center = center;
+            SurveyRoadSpots(center, fresh);
+            int idx = _roadCache.Add(fresh);
+            cache = &_roadCache[idx];
+        }
+    }
+    else
+    {
+        SurveyRoadSpots(center, once);
+        cache = &once;
+    }
+    for (int i = 0; i < cache->links.Size(); i++)
+    {
+        if (cache->links[i]->IsLocked())
+        {
+            continue; // dynamic: a stopped hull or a wreck sits on this link right now
+        }
+        pts.Add(cache->pts[i]);
+        dirs.Add(cache->dirs[i]);
+    }
+    return pts.Size() > 0;
+}
+
+// the one-time survey: every road link centre within SpawnScanRadius of
+// center (locked or not - the lock state is the caller's per-use filter)
+void Traffic::SurveyRoadSpots(Vector3Par center, RoadSpotCache& out) const
+{
+    out.links.Clear();
+    out.pts.Clear();
+    out.dirs.Clear();
+    if (!GRoadNet || !GLandscape)
+    {
+        return;
     }
     const float r2 = Square(SpawnScanRadius);
     int cells = toIntCeil(SpawnScanRadius * InvLandGrid);
@@ -1375,7 +1605,7 @@ bool Traffic::CollectRoadSpots(Vector3Par center, AutoArray<Vector3>& pts, AutoA
             for (int i = 0; i < list.Size(); i++)
             {
                 const RoadLink* link = list[i];
-                if (!link || link->IsLocked())
+                if (!link)
                 {
                     continue;
                 }
@@ -1395,12 +1625,12 @@ bool Traffic::CollectRoadSpots(Vector3Par center, AutoArray<Vector3>& pts, AutoA
                         dir = d.Normalized();
                     }
                 }
-                pts.Add(c);
-                dirs.Add(dir);
+                out.links.Add(link);
+                out.pts.Add(c);
+                out.dirs.Add(dir);
             }
         }
     }
-    return pts.Size() > 0;
 }
 
 // mirrors VehCreate (GameStateExtWorld.cpp) minus the script-value parsing;
@@ -1605,21 +1835,32 @@ static void SeatOrDelete(Person* person, Transport* veh)
 }
 
 bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par playerPos, Transport*& outVeh,
-                         AutoArray<TrafficEventRecord>& fired, bool forced)
+                         AutoArray<TrafficEventRecord>& fired, bool forced, TrafficSpawnFailure& why)
 {
     outVeh = nullptr;
+    why = TSFNone;
     ZoneRegistry& registry = ZoneRegistry::Instance();
     const ZoneRecord* origin = registry.GetZone(originIndex);
     const ZoneRecord* dest = registry.GetZone(destIndex);
-    if (!origin || !dest || !GRoadNet)
+    if (!origin || !dest)
     {
+        why = TSFZoneMissing;
+        return false;
+    }
+    if (!GRoadNet)
+    {
+        why = TSFNoRoadNet;
         return false;
     }
 
     // road placement near the origin, inside the player band
     AutoArray<Vector3> pts;
     AutoArray<Vector3> dirs;
-    CollectRoadSpots(origin->pos, pts, dirs);
+    if (!CollectRoadSpots(originIndex, origin->pos, pts, dirs))
+    {
+        why = TSFNoRoadSpots;
+        return false;
+    }
     int spot;
     bool alibi = false;
     if (forced)
@@ -1648,6 +1889,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     }
     if (spot < 0)
     {
+        why = TSFNoSpawnPoint;
         return false;
     }
     Vector3 spawnPos = pts[spot];
@@ -1679,7 +1921,8 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         registry.FactionCivVehicles("CIV", civVehicles);
         if (civVehicles.Size() == 0)
         {
-            return false; // no civilian hulls in this data package: civ traffic inert
+            why = TSFNoCivVehicles; // no civilian hulls in this data package: civ traffic inert
+            return false;
         }
         int pick = toIntFloor(GRandGen.RandomValue() * civVehicles.Size());
         if (pick >= civVehicles.Size())
@@ -1701,7 +1944,8 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         }
         if (crewType.GetLength() == 0)
         {
-            return false; // no civ driver class
+            why = TSFNoCivClass; // no civ driver class
+            return false;
         }
         sideName = "CIV";
     }
@@ -1710,11 +1954,13 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         const FactionRecord* f = registry.FindFactionForSide(occ);
         if (!f || f->vehicles.Size() == 0)
         {
+            why = TSFNoFaction;
             return false;
         }
         crewType = registry.FactionTierClass(occ, warLevel);
         if (crewType.GetLength() == 0)
         {
+            why = TSFNoCrewClass;
             return false;
         }
         if (kind == TKPatrol)
@@ -1725,7 +1971,8 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         {
             if (f->vehicles.Size() < 2)
             {
-                return false; // convoy needs a truck rung and an escort rung
+                why = TSFConvoyRungs; // convoy needs a truck rung and an escort rung
+                return false;
             }
             hullType = f->vehicles[1];
             escortType = f->vehicles[0];
@@ -1737,13 +1984,17 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     AIGroup* grp = CreateTrafficGroup(sideName);
     if (!grp)
     {
-        LOG_WARN(Core, "Traffic: group budget exhausted spawning {} traffic", KindName(kind));
+        // the register of names is full (MaxGroups on this side's center);
+        // the coroner's line (RecordSpawnFailure) says how much of it the
+        // roadside remains still hold
+        why = TSFGroupBudget;
         return false;
     }
     Transport* veh = CreateTrafficVehicle(hullType, spawnPos, heading);
     if (!veh)
     {
         grp->RemoveFromCenter();
+        why = TSFHullCreate;
         LOG_WARN(Core, "Traffic: could not create hull '{}' for {} traffic", (const char*)hullType, KindName(kind));
         return false;
     }
@@ -1755,6 +2006,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         DeleteCrew(grp);
         grp->RemoveFromCenter();
         ::DeleteVehicle(veh);
+        why = TSFDriverSeat;
         LOG_WARN(Core, "Traffic: could not seat a '{}' driver into '{}'", (const char*)crewType, (const char*)hullType);
         return false;
     }
@@ -1856,9 +2108,52 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     ev.vehicle = veh;
     ev.driver = driver;
     fired.Add(ev);
+    _diag.spawned++;
+    _lastLogged[kind] = TSFNone; // the next failure of this kind is news again
     LOG_INFO(Core, "Traffic: spawned {} '{}' {} -> {}", KindName(kind), (const char*)hullType,
              (const char*)origin->name, (const char*)dest->name);
     return true;
+}
+
+// the coroner sits (issue #55): every failed attempt leaves one line of
+// explanation - in the diag block for gmTrafficDiag, and in the log once per
+// distinct verdict per kind (a stuck verdict repeating every pass would be
+// noise; a new verdict is news).  The group-budget line also reports how
+// much of the register the roadside remains and walkers still hold.
+void Traffic::RecordSpawnFailure(int kind, TrafficSpawnFailure why, const char* detail)
+{
+    if (why == TSFNone)
+    {
+        return;
+    }
+    _diag.failed++;
+    _diag.lastFailKind = kind;
+    _diag.lastFail = why;
+    _diag.lastFailDetail = detail ? detail : "";
+    if (kind < 0 || kind >= NTrafficKinds || _lastLogged[kind] == why)
+    {
+        return;
+    }
+    _lastLogged[kind] = why;
+    if (why == TSFGroupBudget)
+    {
+        int heldByRemains = 0;
+        for (int i = 0; i < _released.Size(); i++)
+        {
+            if (_released[i].group.GetLink())
+            {
+                heldByRemains++;
+            }
+        }
+        LOG_WARN(Core,
+                 "Traffic: no {} traffic - {} ({}); the side's group register is full: {} live entries, {} "
+                 "released hulls still holding a group, {} fleeing walkers",
+                 KindName(kind), SpawnFailureName(why), (const char*)_diag.lastFailDetail, _entries.Size(),
+                 heldByRemains, _fleeing.Size());
+        return;
+    }
+    LOG_INFO(Core, "Traffic: no {} traffic - {} ({})", KindName(kind), SpawnFailureName(why),
+             (const char*)_diag.lastFailDetail);
 }
 
 // delete every body of a traffic group (mirrors GarrisonCache::DespawnGarrison)
@@ -2090,7 +2385,7 @@ static void IssueGroupStop(AIGroup* grp)
     }
 }
 
-void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<TrafficEventRecord>& fired)
+void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, float dt, AutoArray<TrafficEventRecord>& fired)
 {
     AutoArray<TrafficZoneCandidate> zones;
     for (int i = _entries.Size() - 1; i >= 0; i--)
@@ -2108,10 +2403,11 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             continue;
         }
         // the one-reaction-per-episode danger latch ticks in EVERY state
-        // (cowering, commandeer-owned, parked, headless): 45 s means 45 s
+        // (cowering, commandeer-owned, parked, headless) on the pass clock:
+        // 45 s means 45 s of sim time, however long the passes ran
         if (e.dangerCooldown > 0)
         {
-            e.dangerCooldown -= _tuning.interval;
+            e.dangerCooldown -= dt;
             if (e.dangerCooldown < 0)
             {
                 e.dangerCooldown = 0;
@@ -2185,7 +2481,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             {
                 BuildZoneCandidates(zones); // cheap, reused by the depart leg
             }
-            UpdateParked(i, playerPos, playerValid, zones, fired);
+            UpdateParked(i, playerPos, playerValid, dt, zones, fired);
             // gates the DriverAlive check (driver is on foot), the stall
             // accrual/expiry (a parked car never moves), the arrival branch
             // (it sits inside arriveRadius permanently) and the shared
@@ -2206,7 +2502,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
         float playerD2 = Dist2DSq(veh->Position(), playerPos);
         if (ShouldDespawn(playerD2, _percept.band))
         {
-            if (GateDespawn(e, veh->Position(), playerD2, _tuning.radius + _tuning.despawnHysteresis))
+            if (GateDespawn(e, veh->Position(), playerD2, _tuning.radius + _tuning.despawnHysteresis, dt))
             {
                 DespawnEntry(i, "far", false, fired);
                 continue;
@@ -2225,7 +2521,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             // never a re-roll - the cooldown latch stops order ping-pong).
             // Deliberately the RING only, not the wreck sources: a static
             // wreck would pin the car (and the maxCiv cap) here forever
-            e.stateTime += _tuning.interval;
+            e.stateTime += dt;
             if (e.stateTime >= DangerCowerHold)
             {
                 float quietDist = -1;
@@ -2374,8 +2670,8 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
             TrafficCombatGate gate = CombatGateAction(inCombat, SinceDisclosed(g), e.combatHold, _tuning);
             if (gate == TCGHold)
             {
-                e.combatHold += _tuning.interval; // interval-quantized, like stallTime
-                e.lastPos = veh->Position();      // keep the stall baseline honest for the release
+                e.combatHold += dt;          // the pass clock, like stallTime
+                e.lastPos = veh->Position(); // keep the stall baseline honest for the release
                 continue;
             }
             if (gate == TCGClear)
@@ -2392,7 +2688,7 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
         e.lastPos = veh->Position();
         if (moved2 < Square(StallMoveEpsilon))
         {
-            e.stallTime += _tuning.interval;
+            e.stallTime += dt;
         }
         else
         {
@@ -2419,10 +2715,12 @@ void Traffic::UpdateEntries(Vector3Par playerPos, bool playerValid, AutoArray<Tr
                 fired.Add(ev);
                 // civ arrival: roll park-vs-drive-on regardless of playerNear
                 // (towns accumulate parked cars while the player is 300-1800 m
-                // out - the stated payoff); the losing roll and the other
-                // kinds fall through to the pre-park code untouched
+                // out - the stated payoff) against the parked census (issue
+                // #55: at trafficMaxParked the roll loses and the road keeps
+                // flowing); the losing roll and the other kinds fall through
+                // to the pre-park code untouched
                 AIGroup* pgrp = e.group;
-                if (e.kind == TKCiv && pgrp && DecidePark(GRandGen.RandomValue(), _tuning))
+                if (e.kind == TKCiv && pgrp && DecidePark(GRandGen.RandomValue(), CountParked(), _tuning))
                 {
                     // brake exactly like the commandeer stop
                     IssueGroupStop(pgrp);
@@ -2747,14 +3045,14 @@ void Traffic::AbandonEntry(int index, const char* reason, AutoArray<TrafficEvent
 // shared UpdateEntries guard after the park dispatch is re-implemented here
 // where still wanted (dead driver, far-despawn) and deliberately absent
 // where not (stall, arrival).
-void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoArray<TrafficZoneCandidate>& zones,
-                           AutoArray<TrafficEventRecord>& fired)
+void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, float dt,
+                           AutoArray<TrafficZoneCandidate>& zones, AutoArray<TrafficEventRecord>& fired)
 {
     TrafficEntry& e = _entries[i];
     Transport* veh = e.vehicle;
     AIGroup* grp = e.group;
     Person* driver = e.driver;
-    e.stateTime += _tuning.interval; // same accrual style as stallTime
+    e.stateTime += dt; // the pass clock, like stallTime
 
     // 1. dead driver: same outcome as the shared DriverAlive guard, but read
     //    e.driver, NOT veh->Driver() (null while he is on foot)
@@ -2768,7 +3066,7 @@ void Traffic::UpdateParked(int i, Vector3Par playerPos, bool playerValid, AutoAr
     float parkedD2 = playerValid ? Dist2DSq(veh->Position(), playerPos) : 0.0f;
     if (playerValid && ShouldDespawn(parkedD2, _percept.band))
     {
-        if (GateDespawn(e, veh->Position(), parkedD2, _tuning.radius + _tuning.despawnHysteresis))
+        if (GateDespawn(e, veh->Position(), parkedD2, _tuning.radius + _tuning.despawnHysteresis, dt))
         {
             DespawnEntry(i, "far", false, fired);
             return;
@@ -3204,12 +3502,61 @@ bool Traffic::Release(Transport* veh)
     return false;
 }
 
-void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
+// the register of names (issue #55): a group whose every unit is dead still
+// holds its slot in the side's center (dead units stay group members until
+// their bodies are deleted, and MaxGroups counts them), and that register is
+// shared with the market dealers and the civilian layer.  A crew that is all
+// corpses needs no group - detach the dead and hand the slot back, leaving
+// the bodies where they fell.  True when the group was (or already is) free.
+static bool FreeSpentGroup(AIGroup* grp)
+{
+    if (!grp)
+    {
+        return true;
+    }
+    if (!grp->GetCenter())
+    {
+        return true; // already off the register
+    }
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        if (!unit)
+        {
+            continue;
+        }
+        Person* p = unit->GetPerson();
+        if (unit->GetLifeState() == AIUnit::LSAlive && !(p && p->IsDammageDestroyed()))
+        {
+            return false; // somebody is still alive: the group is theirs
+        }
+    }
+    // only the dead remain: detach them (the ForceRemoveFromGroup idiom the
+    // arcade template uses) and give the slot back
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        if (unit)
+        {
+            unit->ForceRemoveFromGroup();
+        }
+    }
+    grp->RemoveFromCenter();
+    return true;
+}
+
+void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
 {
     for (int i = _released.Size() - 1; i >= 0; i--)
     {
         ReleasedEntry& r = _released[i];
-        r.wreckAge += _tuning.interval; // the danger-source cutoff clock (WreckDangerLive)
+        r.wreckAge += dt; // the danger-source cutoff clock (WreckDangerLive) and the recovery clock
+        // hand a spent group's slot back at once, whatever becomes of the
+        // hull (issue #55: the roadside must not hold the register)
+        if (r.group.GetLink() && FreeSpentGroup(r.group))
+        {
+            r.group = nullptr;
+        }
         Transport* veh = r.vehicle;
         if (!veh)
         {
@@ -3256,7 +3603,14 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
         if (r.boarded)
         {
             // somebody took it: an ordinary world object from now on (the
-            // persistent garage is cache-and-garage, #28)
+            // persistent garage is cache-and-garage, #28).  A crew group
+            // still on the register with nobody alive in it goes back now -
+            // this row is the last thing that remembers it
+            AIGroup* grp = r.group;
+            if (grp && grp->NUnits() == 0)
+            {
+                grp->RemoveFromCenter();
+            }
             _released.Delete(i);
             continue;
         }
@@ -3268,7 +3622,12 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
         // no defer timer (a watched wreck just waits for a later pass - it is
         // set dressing, not a leaked simulation).  Player-caused remains keep
         // a PlayerCausedLingerScale wider edge (issue #53 T4): returning to
-        // clean asphalt where you ambushed a patrol is a memory tell
+        // clean asphalt where you ambushed a patrol is a memory tell.
+        // Roadside recovery (issue #55): remains older than wreckClearAfter
+        // are cleared inside the edge too - the occupier tows its wrecks,
+        // the locals strip an abandoned car - but still never in view and
+        // never inside the audible hold (the perception gate's own rules;
+        // headless, the hold is the config minSpawnDist)
         float relD2 = Dist2DSq(veh->Position(), playerPos);
         float relEdge = _tuning.radius + _tuning.despawnHysteresis;
         TrafficEffectiveBand relBand = _percept.band;
@@ -3277,7 +3636,9 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid)
             relEdge *= PlayerCausedLingerScale;
             relBand.despawnEdge *= PlayerCausedLingerScale;
         }
-        if (ShouldDespawn(relD2, relBand) && DespawnSafe(veh->Position(), relD2, relEdge, &relBand))
+        bool stale = ReleasedStale(r.wreckAge, _tuning);
+        bool wanted = ShouldDespawn(relD2, relBand) || stale;
+        if (wanted && DespawnSafe(veh->Position(), relD2, stale ? _tuning.minSpawnDist : relEdge, &relBand))
         {
             for (int b = 0; b < r.bodies.Size(); b++)
             {
@@ -3312,7 +3673,9 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
         if (p->IsDammageDestroyed())
         {
             // murdered on the run: the body stays (the killed EH already
-            // wrote the ledger tuple); forget him
+            // wrote the ledger tuple); forget him - and hand his group's slot
+            // back if he was the last one alive in it (issue #55)
+            FreeSpentGroup(f.group);
             _fleeing.Delete(i);
             continue;
         }
@@ -3490,7 +3853,7 @@ bool Traffic::DespawnSafe(Vector3Par pos, float playerD2, float legacyEdge, cons
     return CanExposeDespawn(camD2, PointLosBlocked(pos), PointInFrustum(pos), band ? *band : _percept.band);
 }
 
-bool Traffic::GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge)
+bool Traffic::GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float legacyEdge, float dt)
 {
     if (DespawnSafe(pos, playerD2, legacyEdge))
     {
@@ -3501,7 +3864,7 @@ bool Traffic::GateDespawn(TrafficEntry& e, Vector3Par pos, float playerD2, float
     {
         return false; // the legacy rules have no defer timeout
     }
-    e.exposeDefer += _tuning.interval; // one accrual per traffic pass
+    e.exposeDefer += dt; // the pass clock
     if (e.exposeDefer >= _tuning.despawnDeferMax)
     {
         // hard bound: staring at a blocked despawn must not leak the entry
@@ -3661,9 +4024,13 @@ void Traffic::Simulate(float deltaT)
     AgeDangerEvents(_danger, tick, _tuning.dangerTtl);
     BuildDangerSources();
 
+    // ONE clock (issue #55): tick is the sim time this pass actually covers;
+    // every accrual below (stall, state, dwell, defer, combat hold, danger
+    // latch, wreck age, walker age) counts it, never the nominal interval
     AutoArray<TrafficEventRecord> fired;
-    UpdateEntries(playerPos, playerValid, fired);
-    CleanupReleased(playerPos, playerValid);
+    _diag.passes++;
+    UpdateEntries(playerPos, playerValid, tick, fired);
+    CleanupReleased(playerPos, playerValid, tick);
     CleanupFleeing(playerPos, playerValid, tick);
 
     if (playerValid)
@@ -3675,7 +4042,9 @@ void Traffic::Simulate(float deltaT)
         TrafficDecisionInput in;
         in.enabled = _tuning.enabled;
         in.playerValid = true;
-        in.liveCiv = Count(TKCiv);
+        // the parked census (issue #55): cars standing at a curb do not fill
+        // the moving cap - a town of parked cars keeps its through-traffic
+        in.liveCiv = Count(TKCiv) - CountParked();
         in.livePatrols = Count(TKPatrol);
         in.liveConvoys = Count(TKConvoy);
         // the civ route is rolled once here, so modulation assesses the same
@@ -3688,6 +4057,15 @@ void Traffic::Simulate(float deltaT)
         in.hasConvoyRoute =
             PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
         in.warLevel = ReadWarLevel();
+        _diag.hasCivRoute = in.hasCivRoute;
+        _diag.hasPatrolRoute = in.hasPatrolRoute;
+        _diag.hasConvoyRoute = in.hasConvoyRoute;
+        // the coroner's first question: is there anywhere to drive at all?
+        // (logged once per kind until a route reappears and a spawn lands)
+        if (!in.hasCivRoute && in.liveCiv < _tuning.maxCiv && _lastLogged[TKCiv] != TSFNoRoute)
+        {
+            RecordSpawnFailure(TKCiv, TSFNoRoute, "no CITY pair within the band");
+        }
 
         TrafficModulationInput mod;
         mod.dayFraction = Glob.clock.GetTimeOfDay();
@@ -3738,13 +4116,27 @@ void Traffic::Simulate(float deltaT)
             // reuse the modulated route: the spawn happens from the origin
             // whose alert/occupation state the decision was scaled by
             Transport* veh = nullptr;
-            SpawnEntry(kind, civOrigin, civDest, playerPos, veh, fired);
+            TrafficSpawnFailure why = TSFNone;
+            if (!SpawnEntry(kind, civOrigin, civDest, playerPos, veh, fired, false, why))
+            {
+                const ZoneRecord* oz = ZoneRegistry::Instance().GetZone(civOrigin);
+                RecordSpawnFailure(kind, why, oz ? (const char*)oz->name : "");
+            }
         }
-        else if (kind >= 0 && PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o,
-                                        d, -1, &_percept.band))
+        else if (kind >= 0)
         {
             Transport* veh = nullptr;
-            SpawnEntry(kind, o, d, playerPos, veh, fired);
+            TrafficSpawnFailure why = TSFNone;
+            if (!PickRoute(kind, zones, playerPos.X(), playerPos.Z(), _tuning, GRandGen.RandomValue(), o, d, -1,
+                           &_percept.band))
+            {
+                RecordSpawnFailure(kind, TSFNoRoute, "no occupier pair within the band");
+            }
+            else if (!SpawnEntry(kind, o, d, playerPos, veh, fired, false, why))
+            {
+                const ZoneRecord* oz = ZoneRegistry::Instance().GetZone(o);
+                RecordSpawnFailure(kind, why, oz ? (const char*)oz->name : "");
+            }
         }
     }
     // handlers run only after the service's own state mutation completed
@@ -3768,7 +4160,11 @@ Transport* Traffic::ForceSpawn(int kind, int zoneIndex)
     }
     AutoArray<TrafficEventRecord> fired;
     Transport* veh = nullptr;
-    SpawnEntry(kind, o, d, playerPos, veh, fired, true); // forced: no perception gate
+    TrafficSpawnFailure why = TSFNone;
+    if (!SpawnEntry(kind, o, d, playerPos, veh, fired, true, why)) // forced: no perception gate
+    {
+        RecordSpawnFailure(kind, why, "gmTrafficForceSpawn");
+    }
     DispatchEvents(fired);
     return veh;
 }
@@ -3930,6 +4326,8 @@ LSError Traffic::ReleasedEntry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("boarded", boarded, 1, false))
     // absent from pre-#53 saves: defaults to ambient (the short memory)
     PARAM_CHECK(ar.Serialize("playerCaused", playerCaused, 1, false))
+    // absent from pre-#55 saves: the remains restart their recovery clock
+    PARAM_CHECK(ar.Serialize("wreckAge", wreckAge, 1, 0.0f))
     PARAM_CHECK(ar.SerializeRef("vehicle", vehicle, 1))
     PARAM_CHECK(ar.SerializeRef("group", group, 1))
     PARAM_CHECK(ar.SerializeRefs("Bodies", bodies, 1))

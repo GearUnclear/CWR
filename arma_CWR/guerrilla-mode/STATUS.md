@@ -35,7 +35,7 @@ reconciled against the engine source, not play-tested.)*
 | 20 | Character outfit family: warrior vs civilian select, recruits auto-match (issue #25) | engine (`UI/Guerrilla` cycler idc 153 + `Game/Guerrilla/OutfitSelect` player substitution + `civTier[]`/`gmFactionCivTier`) + `scripts/` (`GM_OUTFIT_CIV` fold, `*Civ` key reads) | **native + script** | Locked at new-game (`gmSelOutfit`; WARRIOR ≡ publish-nothing); descriptor keys `playerClass{Warrior,Civ}`, `{recruitFighter,recruitSpecialist,companionClass,holdClass}Civ`, `civTier[]` — see ARCHITECTURE.md A.5; civilian hold squads are a `holdClassCiv` monoculture (no `tiersCiv[]` yet); saves round-trip free via the GameState bank |
 | 21 | Player-body BODY browser: pick any side's Man class as the player's body | engine (`UI/Guerrilla` cycler idc 155 + `GuerrillaListPlayerBodies` roster + `OutfitSelect::ResolvePlayerBodyClass`) | **native** | Class-driven follow-up to issue #25's vocabulary question, player-only (squads stay on the outfit family); publishes `gmSelPlayerClass` (exact classname, `(match outfit)` default publishes nothing); pick beats the outfit token, probe failure keeps the authored class; config side reads as that side at distance (accepted emergent, undercover untouched) — see ARCHITECTURE.md A.5 |
 | 22 | Field journal on the map screen: Notes / Plan pages (field manual, live Situation block, diary, objectives, next steps) | engine `Game/Guerrilla/Journal` (+ `JournalCommands.cpp`: `gmJournalLog` / `gmJournalObjective` / `gmJournalStatus` / `gmJournalCount` / `gmJournalEntry` / `gmJournalObjectiveState` / `gmJournalStatusText` / `gmIslandName`) + `UI/Guerrilla/GuerrillaJournalPages` (page renderer hooked into `DisplayMap::ReloadBriefingContent`) + `scripts/` diary/objective/status writes | **native + script** | No briefing.html needed: when `CfgGuerrillaZones` is active the map's Notes page (`Main`/`__BRIEFING`) is built natively on every map-key open (`DisplayMap::ResetHUD` seam; header, Situation block read live from ZoneRegistry/AlertMachine/UndercoverSystem/StashRegistry + the script economy globals, a 10-topic field manual on `GM_MAN_*` pages, the latest diary lines + a full `GM_LOG` page) and the Plan page gets the standing goal, the engine-derived next steps and the scripted objectives; the open map repaints on every journal change (revision compare) and on the Notes/Plan tab press; diary/objectives/status serialize as `GuerrillaJournal` (save-gated on non-empty, presence-tolerant on load, old saves unaffected); managers write the diary (capture arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits, save/restore) and four starter objectives; island name comes from `gmIslandName` (CfgWorlds description), never a literal |
-| 23 | Ambient road traffic: civilian cars town-to-town, occupier patrols between posts, rare supply convoys; commandeer a civ car; road murders feed the civ kill ledger | engine `Game/Guerrilla/Traffic` (+ `TrafficCommands.cpp`: `gmTraffic*`, `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` + `nearestRoads`) + `init.sqs` handler lines + `civVehicles[]` in the CIV descriptor | **native** | Player-distance band [300, 1500] m (+300 m despawn hysteresis), caps 3/1/1, one-roll rarest-first spawn per 5 s pass, convoy chance war-scaled (cap 0.3); routes are doMove-style `IssueCommand` Moves to the drivers (CARELESS civ / SAFE occupier keep road pathing), arrival re-dispatch while watched, stall teardown only out of sight; commandeer = in-lane-ahead or armed-aim inside 25 m -> Stop -> 2.5 s -> driver bails + flees, hull released (deleted when far unless boarded); civ drivers carry the `driverKilled` killed-EH expression (`GM_fnCivKilledEH`); serializes as `GuerrillaTraffic`; `trafficEnabled=0` switches it off; patrol/convoy traffic feeds the AlertMachine (2026-09-01, closed the accepted gap): a violent end (destroyed/crewDead) queues a `TrafficAmbush` the alert tick drains into a per-zone knowsAbout floor (patrol = YELLOW band held steady, convoy = RED band, decaying over `trafficAmbushWindow`=120 s, `trafficAmbushHeat`=4 per wreck, lastKnown = the wreck; attribution: nearest occupier zone within `trafficAmbushRadius`=1500 m, else the origin zone while the occupier still holds it, else dropped), and a live traffic crew between zones is attributed to the nearest occupier zone within `trafficAmbushRadius` instead of being discarded; spawn-chance modulation (2026-08-25): a pure `ModulationFactors` pre-stage scales the civ/patrol chances before the band subtraction - wall-clock day trapezoid (`trafficCivNightScale`=0.1 outside `trafficDayStart`=0.25..`trafficDayEnd`=0.875, 2 h ramps), civ-route-origin alert (RED zeroes civ, YELLOW 0.4×, patrols ×(1+`trafficAlertPatrolBoost`=0.5) on YELLOW/RED), curfew (war ≥ `trafficCurfewWarLevel`=3 + `NightEffect` > 0.5 + occupier-owned origin: civ 0, patrol ×`trafficCurfewPatrolBoost`=2.0), rain fade (`trafficRainCivFade`=0.6); neutral defaults keep noon/GREEN/war-1/dry behaviour identical and `gmTrafficForceSpawn` still bypasses the roll; headlights needed **no code**: `TransportCore`'s auto-light gate already lights AI crews at night under the CARELESS/SAFE modes Traffic issues, and douses them on combat escalation |
+| 23 | Ambient road traffic: civilian cars town-to-town, occupier patrols between posts, rare supply convoys; commandeer a civ car; road murders feed the civ kill ledger | engine `Game/Guerrilla/Traffic` (+ `TrafficCommands.cpp`: `gmTraffic*`, `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` + `nearestRoads`) + `init.sqs` handler lines + `civVehicles[]` in the CIV descriptor | **native** | Player-distance band [300, 1500] m (+300 m despawn hysteresis), caps 3/1/1, one-roll rarest-first spawn per 5 s pass, convoy chance war-scaled (cap 0.3); routes are doMove-style `IssueCommand` Moves to the drivers (CARELESS civ / SAFE occupier keep road pathing), arrival re-dispatch while watched, stall teardown only out of sight; commandeer = in-lane-ahead or armed-aim inside 25 m -> Stop -> 2.5 s -> driver bails + flees, hull released (deleted when far unless boarded); civ drivers carry the `driverKilled` killed-EH expression (`GM_fnCivKilledEH`); serializes as `GuerrillaTraffic`; `trafficEnabled=0` switches it off; patrol/convoy traffic feeds the AlertMachine (2026-09-01, closed the accepted gap): a violent end (destroyed/crewDead) queues a `TrafficAmbush` the alert tick drains into a per-zone knowsAbout floor (patrol = YELLOW band held steady, convoy = RED band, decaying over `trafficAmbushWindow`=120 s, `trafficAmbushHeat`=4 per wreck, lastKnown = the wreck; attribution: nearest occupier zone within `trafficAmbushRadius`=1500 m, else the origin zone while the occupier still holds it, else dropped), and a live traffic crew between zones is attributed to the nearest occupier zone within `trafficAmbushRadius` instead of being discarded; spawn-chance modulation (2026-08-25): a pure `ModulationFactors` pre-stage scales the civ/patrol chances before the band subtraction - wall-clock day trapezoid (`trafficCivNightScale`=0.1 outside `trafficDayStart`=0.25..`trafficDayEnd`=0.875, 2 h ramps), civ-route-origin alert (RED zeroes civ, YELLOW 0.4×, patrols ×(1+`trafficAlertPatrolBoost`=0.5) on YELLOW/RED), curfew (war ≥ `trafficCurfewWarLevel`=3 + `NightEffect` > 0.5 + occupier-owned origin: civ 0, patrol ×`trafficCurfewPatrolBoost`=2.0), rain fade (`trafficRainCivFade`=0.6); neutral defaults keep noon/GREEN/war-1/dry behaviour identical and `gmTrafficForceSpawn` still bypasses the roll; headlights needed **no code**: `TransportCore`'s auto-light gate already lights AI crews at night under the CARELESS/SAFE modes Traffic issues, and douses them on combat escalation; #55 wrap-up (2026-09-04): one pass clock for every timer, parked census (`trafficMaxParked`=2, `gmTrafficCount "parked"`), roadside recovery (`trafficWreckClearAfter`=1200 s, perception-gated) + spent crew groups hand their `MaxGroups` slot back at once, every `traffic*` key range-checked and repaired with a logged line, the spawn coroner (`TrafficSpawnFailure`, `gmTrafficDiag`), the per-zone road survey cache, `gmTrafficEscort` |
 | 24 | Headquarters: elected start town or in-mission election, weapon cache, 100 m vehicle garage with lockable (beep-beep, invulnerable) persistent vehicles, paid moves (issues #16 M1+M4, #28) | engine `Game/Guerrilla/GuerrillaBase` (+ `GuerrillaBaseCommands.cpp`: `gmHq*` / `gmGarage*`), `UI/Guerrilla/GuerrillaNewGame` START TOWN cycler (idc 152, `gmSelStartTown`), `ZoneRegistry::CollectTownNames`; policy in `scripts/market.sqs` (+ `market_action.sqs`) | **native + script** | One HQ per campaign in any zone: the best enterable building of the zone (Paths LOD, `hqMinPos`>=4 AI positions, most positions then nearest the centre) holds the cache indoors with the garage ring 20-50 m beside it, a zone without one (the Camp, a hamlet) falls back to an off-road dry spot on the outer rings of the zone area (cache + garage together); the cache is a keep-when-empty `WeaponHolder` registered as a stash (retrieval = the holder's own TAKE actions), moving the HQ moves it with its contents; any Transport inside `garageRadius` (100 m) can be locked (`gmGarageLock`): lock + `allowDammage false` re-asserted every 2 s tick (neither is serialized), a hull that leaves 1.5x the ring is released, the horn muzzle plays two short bursts; the new-game cycler lists exactly the CITY zones the campaign will carry (authored + seeded) and the first tick establishes the HQ there and relocates the player; serializes as `GuerrillaBase` (save-gated on the registry being active, rows by `SerializeRef`, `autoTried` one-shot) |
 | 25 | Money sinks: arms + vehicle dealers drawn over the towns, delivery to the HQ (issue #27) | engine `Game/Guerrilla/Market` (+ `MarketCommands.cpp`: `gmMarket*` / `gmDealer*`) fed by `class CfgGuerrillaMarket` in `description.ext`; purchases in `scripts/market.sqs` | **native + script** | At the first tick each kind goes to `round(cities * dealerShare)` (>=1) CITY zones, drawn independently (one town may host both) from a seed drawn once and serialized; each dealer is a CIV NPC (`dealerClass` > the CIV descriptor's `civClass1` > `Civilian`, package-probed) on a deterministic off-road spot (weapon dealers on the cardinal bearings, vehicle dealers on the diagonals, a LOT spot >=15 m away for delivered hulls), `DAMove`/`DATarget`/`DAAutoTarget` disabled, respawning after `dealerRespawnSeconds`; stock rows (weapon + magazines, weapon only, magazine-only bundles; vehicles) are package-probed at load and dropped non-fatally, display names from the package config; `market.sqs` mounts the BUY menu beside a live dealer (<=8 rows + a here/HQ delivery toggle), debits `gmResources` (the second "-" writer next to recruit.sqs), drops a `WeaponHolder` at the player's feet or fills the HQ cache, parks a hull on the dealer's lot or drops it into the HQ garage locked; serializes as `GuerrillaMarket` (rows by zone name + NPC refs, the seed); `gmDealerStock` / `gmDealerNearest` for scripts |
 
@@ -169,8 +169,9 @@ Accepted degradation, engine-side safe.
   patrol/convoy holds the whole trip ladder (stall accrual, blocked
   recovery, arrival/stall endings, re-legs) under a bounded combat gate
   (`trafficCombatStaleAfter` 120 s / `trafficCombatHoldMax` 300 s) instead
-  of being lingered or torn down mid-fight. Known edge: `combatHold`
-  accrues in pass intervals, not wall seconds, matching `stallTime`.
+  of being lingered or torn down mid-fight. Since the #55 wrap-up (2026-09-04)
+  `combatHold` accrues on the one pass clock like every other traffic timer:
+  the sim seconds the pass actually covered.
 
 - **Civ danger response (2026-09-01)**: civilian traffic reacts to nearby
   gunfire, blasts and fresh player-caused wrecks. Two fast-gated one-call
@@ -185,6 +186,47 @@ Accepted degradation, engine-side safe.
   `trafficDangerCloseRadius` (60), `trafficDangerTtl` (20). Probe-gated
   residual: whether a CMCareless driver visibly accelerates on the rush
   slot; disabling it is a one-constant change (`DangerFarRushBand`).
+
+- **Traffic complaints book, issue #55 (2026-09-04)**: every grievance
+  closed except PANIC MISDIRECTED (nearest-vs-loudest source pick and the
+  45 s latch; roadmap `traffic-panic-priority`). **One clock**: every
+  traffic accrual (stall, state, dwell, defer, combat hold, danger latch,
+  wreck age, walker age) counts the sim seconds the pass actually covered,
+  never the nominal `trafficInterval`. **Roadside recovery**: released
+  remains (wrecks, corpses, abandoned or commandeered-then-left hulls)
+  older than `trafficWreckClearAfter` (1200 s; 0 = never) are cleared by
+  the next perception-safe pass even inside the despawn edge - never in
+  view, never inside the audible hold - and a crew group whose every member
+  is dead hands its `MaxGroups` slot back at once (dead units stay group
+  members until their bodies are deleted, and the register is shared with
+  the market dealers and the civilian layer), the corpses staying where
+  they fell; `wreckAge` now serializes. **Ordinances read before obeyed**:
+  every `traffic*` key is range-checked at load - a radius at or under
+  `trafficMinSpawnDist` (an empty band, every road silent) is repaired to
+  floor + default width, a day window written in hours is read as hours,
+  a window that closes before it opens falls back to the defaults,
+  probabilities are clamped, a non-positive `trafficArriveRadius` is
+  restored, negative caps/durations are floored - each repair logged with
+  both figures and kept in `ConfigWarnings()`. **The coroner sits**:
+  `SpawnEntry` names its verdict (`TrafficSpawnFailure`: noRoute /
+  noRoadSpots / noSpawnPoint / noCivVehicles / noCivClass / noFaction /
+  noCrewClass / convoyRungs / groupBudget / hullCreate / driverSeat), the
+  pass records it and logs each distinct verdict once per kind until that
+  kind spawns again (the group-budget line says how much of the register
+  the remains and walkers still hold); `gmTrafficDiag` returns the whole
+  report `[movingCiv, patrols, convoys, parked, released, fleeing,
+  civRoute, patrolRoute, convoyRoute, lastFailKind, lastFailReason,
+  lastFailDetail, passes, spawned, failed, configWarnings]`. **The
+  surveyors measure once**: the `SpawnScanRadius` road scan is cached per
+  origin zone per mission, lock state re-read at use. **Parked census**:
+  `trafficMaxParked` (2) caps the cars at the curb separately, the moving
+  cap counts only moving cars, the park roll loses at the cap
+  (`gmTrafficCount "parked"`). **Rehearsals**: `guerrilla_traffic_convoy`
+  and `guerrilla_traffic_danger` (below) stage the two newest acts;
+  `gmTrafficEscort <veh>` added for the convoy fence. `init.sqs` now also
+  enqueues `parked` / `departed` / `bailed` / `panicked` into
+  `gmEvtTrParked` / `gmEvtTrDeparted` / `gmEvtTrBailed` / `gmEvtTrPanicked`.
+  Buses still run empty (`BUS-STOPS.md`, roadmap `traffic-bus-stops`).
 
 ## Tests
 
@@ -210,6 +252,10 @@ Trident integration suite is **fully migrated to the `gm*` surface** (verified
 | `scripting/guerrilla_traffic_ambient.test` | `full_cwa` (force-spawned civ car on the road, CIV driver, drives, offshore teleport drains the table + `despawned`) |
 | `scripting/guerrilla_traffic_commandeer.test` | `full_cwa` (armed player in the lane: Stop -> driver bails -> hull released, `commandeered`, player boards) |
 | `scripting/guerrilla_traffic_patrol.test` | `full_cwa` (Camp flipped to the occupier, patrol hull from the Outpost on the road, occupier crew, drives) |
+| `scripting/guerrilla_traffic_park.test` | `full_cwa` (car teleported onto its destination: `parked`, driver dwells on foot 10-20 s, stock GetIn re-board, `departed`) |
+| `scripting/guerrilla_traffic_viewdist.test` | `full_cwa` (issue #53 fence: `gmTrafficPercept` band follows the 3000 m objectsZ cap at VD 5000; a watched in-frustum car never despawns) |
+| `scripting/guerrilla_traffic_convoy.test` | `full_cwa` (convoy from the Outpost: truck + escort in one group, riflemen aboard, both drive, escort tails within 120 m after 30 s; quiet `setDammage` escort loss releases the hull, no `bailed`) - **written 2026-09-04, not yet run** |
+| `scripting/guerrilla_traffic_danger.test` | `full_cwa` (civ car on the move, armed player 30 m off the flank force-fires one round: `panicked` for THIS car with one of cower/uturn/rush/bail, registry consistent with the reaction) - **written 2026-09-04, not yet run** |
 | `ui/main_menu/reference_mission_{showcase,undercover,qrf,market}.test` | `full_cwa` (+ installed templates; the main-menu direct-launch buttons idc 123/124/125/126) |
 | `scripting/market_reference_mission.test` | `full_cwa` (boots `guerrilla-mode/mission/Market.Abel` directly: dealers drawn per kind = round(cities x dealerShare), NPCs alive -> buy here (WeaponHolder at the feet, debit) -> Establish HQ in the nearest town (CITY, building, stash registered, objective DONE) -> Stash the rifle / retrieve / holder survives empty -> delivery to HQ: weapon into the cache cargo, vehicle into the garage locked -> gmGarageLock unlock/relock -> Move HQ to the Camp: outdoor fallback, hqMoveCost debited, cache travels with cargo, the far hull released) |
 | `ui/guerrilla_start_town_e2e.test` | `full_cwa` (+ installed templates; START TOWN cycler idc 152 on Abel -> "Village" -> launch -> `gmSelStartTown`, HQ standing in Village, player relocated beside it, `hqEstablish` DONE) |
@@ -305,6 +351,22 @@ exactly, a 100× patrol boost caps at certainty). The world fill (wall
 clock, null-guarded `NightEffect`/rain reads, civ-route-origin alert) rides
 the existing `guerrilla_traffic_*` Trident tests, which force-spawn past
 the roll and so cannot flake on modulation.
+
+Traffic complaints book (2026-09-04, issue #55) coverage: `test_traffic.cpp`
+pins the config repairs (the transposed band -> floor + default width with
+a `trafficRadius` warning, radius equal to the floor, negative hysteresis /
+floor, the day window in hours -> /24 and a noon that reads as full day,
+closes-before-opens -> defaults, a legal window repairs nothing, five
+probability clamps = five lines, `trafficArriveRadius` 0 -> 60, four
+negative caps/durations = four lines, the formerly silent interval /
+danger-close clamps now speak, a reload clears the list), the parked census
+(`DecidePark` with room / at the cap / `maxParked` 0 / the census-free
+form, `CountParked` counts only civ park-state rows), the roadside recovery
+clock (`ReleasedStale` boundary + 0 = never), and the coroner's names (all
+verdicts distinct, `unknown` only out of range) plus the empty diag block.
+`[guerrilla]` 251 cases / 4238 assertions green. The world half - the
+freed group slot, the aged wreck clearance, the road survey cache - has no
+headless fence yet; it rides the human playtest with `gmTrafficDiag`.
 
 ## Still needs a human run
 

@@ -768,6 +768,67 @@ items:
       - "2026-08-26: review-fix pass over the working tree (uncommitted): CanExposeDespawn's distance leg now uses the imperceptibility bound (band.minSpawn, cull+margin) instead of the far edge, so in-band endings (arrival/stall/linger) can tear down on open terrain once beyond draw range and no longer pin the spawn caps, plus a closeHold floor (config minSpawnDist) so nothing audible despawns close even hidden; EffectiveBand no longer widens radius/edge at the default view distance (band narrows first, widens only when less than min(config width, SpawnScanRadius) remains above the floor - the defaults-preserve-behaviour claim now actually holds and scaleCaps is identity by day at default VD); the no-destination depart branch uses plain DespawnSafe (re-dwell IS the defer; GateDespawn's timeout could vanish a watched car in plain sight); exposeDefer resets when the far despawn stops being wanted (stale episodes no longer collapse a later defer window, double accrual gone); spawn exposure distance leg measures from the camera when known (TrafficExposeObs.camDist2) so scripted cameras cannot watch a materialization, and a near-vertical camera degrades the cone test to everything-in-frustum; viewdist fence no longer asserts count gmEvtTrDespawned==0 (a legal far natural despawn during the watch was a flake vector; the watched car surviving is the fence). Unit suite green (178 guerrilla cases), full build clean, touched files clang-format clean."
       - "2026-08-26: e2e + landing (91482c2) - new trident fence guerrilla_traffic_viewdist (gmTrafficPercept probe: band follows the 3000 m objectsZ cap at VD 5000; a force-spawned car watched from 2000 m in-frustum inside the cull never despawns across ~3 passes; VD 500 still spawns, floors unchanged) green 3/3; guerrilla_traffic_ambient staging fixed test-side per the spec (watch the offshore despawn from La Riviere ~4.2 km facing away, assert isNull car + despawn events, not global count==0 - the widened origin gate legally allows natural spawns near surrounding towns); full traffic trident suite re-run green against the post-review-fix engine (viewdist+ambient 2/2, commandeer/patrol/park 3/3). Remaining: human playtest (long-view Sinai session, day + night)."
 
+  - id: traffic-complaints-book
+    title: "Traffic wrap-up: the issue #55 complaints book (one clock, roadside recovery + group register, config repairs, coroner diag, road survey cache, parked census, convoy/danger rehearsals)"
+    phase: phase-2
+    status: done
+    priority: 2
+    depends_on: [ambient-traffic, traffic-view-distance]
+    gh_issues: [55]
+    commits: []
+    summary: >
+      Closes every grievance in the #55 complaints book except PANIC
+      MISDIRECTED (tracked as traffic-panic-priority). One clock: every
+      traffic accrual (stall, state, dwell, defer, combat hold, danger latch,
+      wreck age) counts the sim seconds the pass actually covered, never the
+      nominal interval. Roadside recovery: released remains older than
+      trafficWreckClearAfter=1200 s are cleared by the next perception-safe
+      pass even inside the despawn edge (never in view, never inside the
+      audible hold), and a crew group whose every member is dead hands its
+      MaxGroups slot back at once (dead units detached, RemoveFromCenter) so
+      wrecks no longer fill the register shared with the market and the
+      civilian layer; wreckAge is serialized. Config repairs: every traffic*
+      key is range-checked (radius under the spawn floor = an empty band ->
+      floor + default width; day window written in hours -> /24; closes-
+      before-opens -> defaults; probabilities clamped; arriveRadius <= 0 ->
+      default; negative caps/durations floored), each repair logged and kept
+      in ConfigWarnings(). Coroner: SpawnEntry names its verdict
+      (TrafficSpawnFailure), the pass records it (TrafficDiag) and logs each
+      distinct verdict once per kind until that kind spawns again; the
+      group-budget line reports how much of the register the remains hold;
+      gmTrafficDiag exposes the whole report. Road survey cache: the
+      SpawnScanRadius road scan runs once per origin zone per mission, lock
+      state re-read at use. Parked census: trafficMaxParked=2 caps the cars
+      at the curb separately, the moving cap counts only moving cars, the
+      park roll loses at the cap (gmTrafficCount "parked"). Rehearsals:
+      guerrilla_traffic_convoy (spawn shape, column follow, quiet escort
+      loss) and guerrilla_traffic_danger (a rifle shot makes THIS car react
+      with one of the four named reactions). gmTrafficEscort added. Unit
+      suite [guerrilla] 251 cases / 4238 assertions green.
+    log:
+      - "2026-09-04: decisions taken through the realism lens - parked cars are a separate census (a town of parked cars keeps its through-traffic); wrecks are recovered after ~20 min because occupiers tow their wrecks and locals strip abandoned cars, but never in view; a spent crew group is freed while the corpses stay (the dead need no radio net); a transposed band is repaired to something that still yields traffic rather than left silent. The two rehearsal tests are written to the existing fixture patterns but were NOT run this session (user asked for no game launches); first run pending. Not posted to #55 (external write left to the user; ledger drafted)."
+      - "2026-09-04: dead units stay group members (AIUnit LSDead until the body is deleted) and MaxGroups counts them, so every crewDead wreck held a slot until the hull was cleaned up - and the boarded-hull drop leaked it forever. FreeSpentGroup detaches the dead with ForceRemoveFromGroup (the arcade template idiom) before RemoveFromCenter; DeleteVehicle already removes a unit from its group synchronously, so the plain teardown path never leaked."
+      - "2026-09-04: out of scope by the journal's own words - 'Buses run empty as yet, a scandal for another session' (traffic-bus-stops stays planned)."
+
+  - id: traffic-panic-priority
+    title: "Traffic: danger-source priority (loudest, not nearest) and the per-entry cooldown latch (#55 PANIC MISDIRECTED)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [traffic-complaints-book]
+    gh_issues: [55]
+    summary: >
+      The one #55 grievance deliberately left open: a civ driver heeds the
+      NEAREST danger episode (NearestDanger over _dangerNow) rather than the
+      most threatening one, so a smouldering wreck 50 m off outranks a shell
+      bursting 70 m behind him, and the 45 s one-reaction latch means he will
+      not jump again for anything. Design the priority as severity-over-
+      distance (the ear follows the danger, not the map) and let a sharper
+      episode re-open the latch. guerrilla_traffic_danger asserts only THAT
+      a reaction happens and is one of the four names, so it survives this.
+    log:
+      - "2026-09-04: carved out of the #55 wrap-up at the user's request."
+
   - id: faction-class-resolution
     title: "Faction class resolution + role-diverse squads (plan 15)"
     phase: phase-2

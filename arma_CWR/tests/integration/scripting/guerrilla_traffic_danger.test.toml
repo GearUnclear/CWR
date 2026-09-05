@@ -1,0 +1,9 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Traffic tick 5 s; force-spawn is immediate, the drive-off resolves within a
+# tick or two, the force-fire lands within a few sim seconds and the reaction
+# rolls on the following pass.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]
