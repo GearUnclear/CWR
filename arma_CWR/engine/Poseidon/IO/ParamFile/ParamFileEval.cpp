@@ -6,10 +6,48 @@
 #include <Evaluator/express.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
+
+#include <mutex>
+#include <set>
+#include <string>
 
 namespace Poseidon
 {
+// A config value only reaches the evaluator when it is not a plain number
+// (ParamRawValue::GetInt/GetFloat try ScanInt/ScanFloat first), so a nil result
+// means an identifier that resolved to nothing - classically `scope = public;`
+// in an OFP-era config missing its `#define public 2` header. The stock engine
+// reads that as 0 in total silence (the evaluator's own report goes through
+// RptF, which compiles away) and every class in the file quietly turns
+// abstract. Keep the value - 0 is what two decades of content expects - but say
+// what happened. Once per distinct expression: legacy mods repeat the same
+// unresolved identifier across hundreds of classes (@LoBo alone re-reads
+// 'VSoft' 130+ times in one mount), and one line per spelling is what a human
+// needs to find the broken config.
+static void WarnIfConfigValueUnresolved(const GameValue& result, const char* expr)
+{
+    if (!result.GetNil())
+    {
+        return;
+    }
+    // Deliberately leaked so there is no exit-time destructor (same reason the
+    // GGameStateEvaluatorFunctions singleton below suppresses that warning).
+    static std::mutex* seenLock = new std::mutex();
+    static std::set<std::string>* seen = new std::set<std::string>();
+    {
+        std::lock_guard<std::mutex> guard(*seenLock);
+        if (!seen->insert(expr).second)
+        {
+            return;
+        }
+    }
+    LOG_WARN(Core,
+             "Config value '{}' does not evaluate to a number (undefined identifier? OFP-era configs need e.g. "
+             "'#define public 2' in the same file); reading it as 0",
+             expr);
+}
 // EvaluatorFunctions implementation backed by the game state. The *Internal
 // variants skip the game-state context init/deinit that the plain variants do.
 class GameStateEvaluatorFunctions : public EvaluatorFunctions
@@ -109,12 +147,14 @@ float GameStateEvaluatorFunctions::EvaluateFloat(const char* expr, GameVarSpace*
     GGameState.BeginContext(vars);
     GameValue result = GGameState.Evaluate(expr);
     GGameState.EndContext();
+    WarnIfConfigValueUnresolved(result, expr);
     return result;
 }
 
 float GameStateEvaluatorFunctions::EvaluateFloatInternal(const char* expr)
 {
     GameValue result = GGameState.Evaluate(expr);
+    WarnIfConfigValueUnresolved(result, expr);
     return result;
 }
 

@@ -108,11 +108,15 @@ triSimFrames 4
 //    Second content fix on the same pbo. Both M60A1 wreck models were authored
 //    with their origin ABOVE the mesh, and a static prop is seated at
 //    terrainY + shape->BoundingCenter().Y (Entity::PlaceOnSurface, Static
-//    branch, World/Simulation/Simul.cpp:1300) - so the whole tank ended up
-//    underground: roof 0.45 m down, belly 3.39 m down. Repaired at source by
-//    tools/lobo/fix-lobo-model-origin.ps1, which rewrites boundingCenter.Y in
-//    the p3d; a red here means that script has not been run against this @LoBo
-//    install (or @LoBo was reinstalled over the repair).
+//    branch, World/Simulation/Simul.cpp) - so the whole tank ended up
+//    underground: roof 0.45 m down, belly 3.39 m down. Two independent layers
+//    now produce the same seat, and this asserts whichever is active:
+//    tools/lobo/fix-lobo-model-origin.ps1 repairs boundingCenter.Y in the p3d
+//    at source, and the engine seats any model whose whole mesh sits at or
+//    below its own origin on its lowest vertex instead, with a WARN
+//    (StaticSeatOffsetY, Vehicle.hpp - predicate pinned by test_house.cpp).
+//    Both resolve to terrain + 1.47 / + 1.14, so a red here means the p3d was
+//    reverted (a @LoBo reinstall) AND the engine net regressed.
 //
 //    Measured against a sibling rather than against an absolute height: the
 //    difference between two props spawned at the same point is a pure
