@@ -1536,7 +1536,7 @@ items:
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
 
   - id: guerrilla-journal
-    title: "Field journal: the map notepad as a journal (Situation / Plan / Zones + a page per zone / Cell / Resistance / Diary / Handbook)"
+    title: "Field journal: the map notepad as a diary (Notes / Plan / Zones + a page per zone / Cell / Resistance / Diary / Handbook)"
     phase: phase-2
     status: done
     depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
@@ -1565,19 +1565,23 @@ items:
       save/restore), four starter objectives and the Companions / Unlocked-gear
       status lines; init.sqs is unchanged.
       Redesigned 2026-09-05 (issue #58, session
-      https://claude.ai/code/session_01NKg3arZ1DbAuzoeuDeUYze): the notepad is now a
-      dark, one-grid journal drawn by the stock briefing control through small
-      CHTMLContainer extensions (per-field colour, texture-less bars/rules/pips,
-      hanging indent, format-slot rebinding) with an ApplyGuerrillaJournalTheme pass;
-      pages SITUATION, PLAN (URGENT/READY/ROUTINE moves with distance + bearing),
+      https://claude.ai/code/session_01NKg3arZ1DbAuzoeuDeUYze) and restyled 2026-09-06
+      (PR #61) as a diary in the notepad's stock look: the stock briefing control's
+      own Courier / Garamond / handwriting slots on the paper, black type, the
+      handwritten lines in blue-black and red ink, no background fill, bars or pips;
+      the CHTMLContainer extensions are per-field colour, a hanging indent and a
+      slot resize / rebind (the hand in the heavier cwrpen face at 1.6x the typed
+      body). Pages NOTES (the day's page in
+      the hand: threat, cell, ground held, latest lines), PLAN (objectives and the
+      next moves as handwritten lines in priority order, the urgent ones in red),
       ZONES index + GM_ZONE_<i> per zone (facts, last-seen stamp from the new
       ZoneRecord seenDay/seenMinute, the zone's own diary lines), CELL (native
       roster from the player's group + holding squads), RESISTANCE (war-level
       ladder, ground, occupier order of battle, faction-management stubs read from
       gmDoctrine/gmOutsideSupport/gmAlliedCells), DIARY, HANDBOOK (ten in-universe
       chapters). Diary entries carry a zone tag + kind (gmJournalNote); gmDisplayName
-      resolves classnames for script text; the managers write in log voice. Design
-      iterated against an adversarial UI auditor on a render-model mock.
+      resolves classnames for script text; the managers write in first-person log
+      voice.
     log:
       - "2026-09-06: review fixes (46b7066, session https://claude.ai/code/session_01M82eCHKqLT8VwoCAnoc75k): undercover.sqs tagged the 'Cover blown' diary line with the break reason instead of a zone - the undercoverBroken event now carries [reason, zoneName] (the zone nearest the witness) and the script tags that; PLAN's objectives-open count followed a constant 2 rather than the page; a zone's Record shows its latest ten lines and points at the Diary for the rest; <cstdarg>/<climits> added ahead of the Windows lane; a dead ZoneState removed. Unit lanes not run in that session (its egress policy denies codeload.github.com, so vcpkg cannot fetch its ports) - the PR's CI job is the verification; the full_cwa Trident tests are still to be re-run."
       - "2026-09-05: redesign built and compile-checked on a Linux clang-18 configure of the repo (vcpkg from source; libmount needs gettext, sdl3 needs libxtst-dev, the preset needs clang-format on PATH); the Windows/Classic lane (theme fonts, real notepad page height, the full_cwa Trident test) is still to be run. The render-model mock (scratchpad mock/gen.py) and the auditor transcript are summarised in issue #58."

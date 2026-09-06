@@ -622,8 +622,6 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     // to an authored Main/Plan section when the mission ships one.
     if (Guerrilla::GuerrillaJournalActive())
     {
-        // the journal's palette + typography on the notepad control (idempotent)
-        Guerrilla::ApplyGuerrillaJournalTheme(_briefing);
         Guerrilla::BuildGuerrillaJournalPages(_briefing, Guerrilla::Journal::Instance(),
                                               Guerrilla::GatherGuerrillaJournalInputs());
         _journalRevision = Guerrilla::Journal::Instance().Revision();

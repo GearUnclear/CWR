@@ -2,34 +2,41 @@
 
 // Guerrilla Mode field journal pages for the map screen's briefing notepad.
 //
-// DisplayMap::ReloadBriefingContent calls ApplyGuerrillaJournalTheme and then
-// BuildGuerrillaJournalPages right after the mission's briefing.html (if any)
-// is parsed, whenever the ZoneRegistry is active: at display construction
-// (once per mission, DisplayMission::InitUI) and through
-// DisplayMap::RefreshGuerrillaJournal on every map-key open (ResetHUD), on a
-// journal revision change while the map is open (OnSimulate), on a Notes /
-// Plan tab press and after an in-place load.  The renderer emits into the
-// CHTMLContainer document model (AddText / AddBar / AddBreak with table
-// cells, per-field colour and the format slots the theme rebinds), so the
-// pages are drawn by the stock briefing control:
+// DisplayMap::ReloadBriefingContent calls BuildGuerrillaJournalPages right
+// after the mission's briefing.html (if any) is parsed, whenever the
+// ZoneRegistry is active: at display construction (once per mission,
+// DisplayMission::InitUI) and through DisplayMap::RefreshGuerrillaJournal on
+// every map-key open (ResetHUD), on a journal revision change while the map
+// is open (OnSimulate), on a Notes / Plan tab press and after an in-place
+// load.  The renderer emits into the CHTMLContainer document model (AddText /
+// AddBreak with table cells, per-field ink and hanging indents), so the
+// pages are drawn by the stock briefing control in the stock notepad look:
+// the control's own format slots (Courier type in H1-H4 and P, Garamond in
+// H5, the handwriting face in H6), black type and stock links on the paper
+// of the notepad model.  The journal never touches the control's colours;
+// it inks fields (blue-black hand, red pen, pencil) and binds only the H6
+// slot to "cwrpen", the handwriting face with a heavier stroke, at 1.6x
+// the typed body size.
 //
-//   "Main"           SITUATION (aliased __BRIEFING by the caller, the Notes
-//                    tab): alert strip, strength, territory, threat, latest
-//                    diary lines
-//   "Plan"           PLAN (copied into __PLAN by UpdatePlan): objectives
-//                    with progress, the done list, tagged next moves
-//   "GM_ZONES"       ZONES: the index (state group, meter, range), linking to
-//   "GM_ZONE_<i>"    one page per zone: facts, what the cell has there, the
-//                    zone's latest diary lines (the rest in the Diary)
-//   "GM_CELL"        CELL: roster, fallen, arms, supply
+//   "Main"           NOTES (aliased __BRIEFING by the caller, the Notes
+//                    tab): the day's page in the hand - the threat, the
+//                    cell, the ground held, the latest diary lines
+//   "Plan"           PLAN (copied into __PLAN by UpdatePlan): objectives,
+//                    the done list, the next moves in priority order
+//   "GM_ZONES"       ZONES: a typed index (state group, brief, range)
+//   "GM_ZONE_<i>"    one page per zone: typed facts, what the cell has
+//                    there, the zone's latest diary lines (the rest in the
+//                    Diary)
+//   "GM_CELL"        CELL: roster, arms, supply
 //   "GM_FACTION"     RESISTANCE: war-level ladder, ground, organisation (the
 //                    faction-management stubs live here)
-//   "GM_LOG"         DIARY: every entry, newest first, grouped by day
-//   "GM_MAN_INDEX"   HANDBOOK index; "GM_MAN_<n>" one page per chapter
+//   "GM_LOG"         DIARY: every entry in the hand, newest first, by day
+//   "GM_MAN_INDEX"   HANDBOOK index; "GM_MAN_<n>" one typed page per chapter
 //
-// Every page carries the same bottom-pinned nav row.  The live facts come in
-// through JournalPageInputs so the renderer itself is pure (unit-testable
-// against a parser-only CHTMLContainer); the world-dependent half is
+// Every page ends in the same typed footer (the journal's pages as links,
+// pinned to the page foot).  The live facts come in through
+// JournalPageInputs so the renderer itself is pure (unit-testable against a
+// parser-only CHTMLContainer); the world-dependent half is
 // GatherGuerrillaJournalInputs(), which reads the ZoneRegistry / AlertMachine
 // / UndercoverSystem / StashRegistry / GuerrillaBase / Market, the player's
 // group and the resistance side's other groups, plus the script-owned
@@ -147,10 +154,6 @@ bool GuerrillaJournalActive();
 
 // world-dependent half: collect the live facts (safe without a world)
 JournalPageInputs GatherGuerrillaJournalInputs();
-
-// theme (palette + typography) for the briefing control: colours always,
-// fonts only when the engine is up.  Idempotent.
-void ApplyGuerrillaJournalTheme(CHTMLContainer* html);
 
 // pure half: emit the pages into the document model
 void BuildGuerrillaJournalPages(CHTMLContainer* html, const Journal& journal, const JournalPageInputs& in);

@@ -48,5 +48,5 @@ hint format ["Your face is known - %1 occupier group(s) can identify you. Garris
 ; journal: the (once-per-campaign) first compromise goes into the diary. The
 ; event is [reason, zoneName]: the reason ("fired", "weapon", ...) goes into
 ; the text, the zone nearest the witness (whose Heat just spiked) is the tag
-gmJournalNote [format ["Cover blown (%1). %2 occupier %3 your face.", (GM_uBatch select 0) select 0, gmUndercoverWitnesses, (["patrols know", "patrol knows"] select (gmUndercoverWitnesses == 1))], (GM_uBatch select 0) select 1, "danger"]
+gmJournalNote [format ["Cover blown (%1). %2 occupier %3 my face.", (GM_uBatch select 0) select 0, gmUndercoverWitnesses, (["patrols know", "patrol knows"] select (gmUndercoverWitnesses == 1))], (GM_uBatch select 0) select 1, "danger"]
 goto "loop"

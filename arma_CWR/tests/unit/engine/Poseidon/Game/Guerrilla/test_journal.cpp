@@ -282,9 +282,22 @@ JournalPageInputs SampleInputs()
     in.roster.Add(squad);
     return in;
 }
+
+// true when `text` carries `a` before `b`
+bool Before(const std::string& text, const char* a, const char* b)
+{
+    const size_t pa = text.find(a);
+    const size_t pb = text.find(b);
+    return pa != std::string::npos && pb != std::string::npos && pa < pb;
+}
+
+bool IsRedInk(const PackedColor& c)
+{
+    return c.R8() == 150 && c.G8() == 22 && c.B8() == 18;
+}
 } // namespace
 
-TEST_CASE("Journal pages - every page renders from inputs and reads as designed", "[game][guerrilla][journal][ui]")
+TEST_CASE("Journal pages - every page renders from inputs and reads as a diary", "[game][guerrilla][journal][ui]")
 {
     Journal journal;
     journal.AddEntry("Day 1 08:00", "Reached the Camp alone.", "Camp", JKPlain);
@@ -298,7 +311,6 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as designed"
 
     const JournalPageInputs in = SampleInputs();
     JournalHtml html;
-    ApplyGuerrillaJournalTheme(&html); // colours only without an engine
     BuildGuerrillaJournalPages(&html, journal, in);
 
     // every page exists exactly once: 7 tabs + index + chapters + one per zone
@@ -319,69 +331,78 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as designed"
     CHECK(html.FindSection("GM_ZONE_8") >= 0);
     CHECK(html.NSections() == 7 + GuerrillaManualTopicCount() + in.zones.Size());
 
-    // SITUATION: masthead, alert strip, the four blocks, the nav row
+    // NOTES: the day's page - dated, the campaign line, the threat first,
+    // the cell, the ground, the latest entries, the footer
     const std::string notes = html.Text("Main");
-    CHECK(notes.find("SITUATION") != std::string::npos);
-    CHECK(notes.find("FIA vs. Soviet Army") != std::string::npos);
-    CHECK(notes.find("Day 3 14:20") != std::string::npos);
-    CHECK(notes.find("ALERT RED - AIRFIELD") != std::string::npos);
-    CHECK(notes.find("2.4 km NE - QRF OUT") != std::string::npos);
-    CHECK(notes.find("Treasury 480 R") != std::string::npos);
-    CHECK(notes.find("Manpower 11 HR pool 12") != std::string::npos);
-    CHECK(notes.find("Fighters with you 3 you, 2 fighters - 1 WIA") != std::string::npos);
-    CHECK(notes.find("Holding 3 Outpost squad") != std::string::npos);
-    CHECK(notes.find("Headquarters Houdan - house - 2 garaged") != std::string::npos);
-    CHECK(notes.find("Companions Petra (CORPORAL)") != std::string::npos);
+    CHECK(notes.find("Day 3, 14:20") != std::string::npos);
+    CHECK(notes.find("Malden. FIA against the Soviet Army.") != std::string::npos);
+    CHECK(notes.find("Airfield went RED. A quick reaction force is out toward our last known position, 2.4 km NE.") !=
+          std::string::npos);
+    CHECK(notes.find("Outpost is on edge, heat 55.") != std::string::npos);
+    CHECK(notes.find("My cover is blown: one patrol knows my face.") != std::string::npos);
+    CHECK(
+        notes.find("We are three: me and two fighters, one wounded. Another three hold Outpost. "
+                   "Treasury 480 R, manpower 11 HR, pool 12. Headquarters in a house at Houdan, 2 vehicles garaged.") !=
+        std::string::npos);
+    CHECK(notes.find("Companions: Petra (CORPORAL).") != std::string::npos);
     CHECK(notes.find("Standard issue") == std::string::npos); // arms live on the Cell page
-    CHECK(notes.find("Bases held 1 / 3") != std::string::npos);
-    CHECK(notes.find("Towns risen 1 / 5") != std::string::npos);
-    CHECK(notes.find("War level 2 / 10") != std::string::npos);
-    CHECK(notes.find("Ready to rise 66 SUP Chapoi") != std::string::npos);
-    CHECK(notes.find("Securing 40 % Airfield") != std::string::npos);
-    CHECK(notes.find("QRF 1 out from Airfield - on last known position") != std::string::npos);
-    CHECK(notes.find("Garrisons YELLOW Seaport") != std::string::npos);
-    CHECK(notes.find("Heat, highest 55 Outpost") != std::string::npos);
-    CHECK(notes.find("Cover BLOWN - known to 1 patrol") != std::string::npos);
-    CHECK(notes.find("14:02 AIRFIELD Went RED.") != std::string::npos);    // today: time only
-    CHECK(notes.find("D1 16:22 OUTPOST Liberated.") != std::string::npos); // older: day + time
-    CHECK(notes.find("Situation | Plan | Zones | Cell | Resistance | Diary | Handbook") != std::string::npos);
+    CHECK(notes.find("We hold 1 of 3 bases and 1 of 5 towns. War level 2 of 10. "
+                     "Chapoi is ready to rise, support 66. Airfield is 40% secured.") != std::string::npos);
+    CHECK(notes.find("Latest") != std::string::npos);
+    CHECK(notes.find("14:02 Airfield. Went RED.") != std::string::npos);    // today: time only
+    CHECK(notes.find("D1 16:22 Outpost. Liberated.") != std::string::npos); // older: day + time
+    CHECK(Before(notes, "Airfield went RED", "We are three"));
+    CHECK(Before(notes, "We are three", "We hold 1 of 3"));
+    CHECK(Before(notes, "Latest", "14:02 Airfield"));
+    CHECK(notes.find("Notes - Plan - Zones - Cell - Resistance - Diary - Handbook") != std::string::npos);
+    // nothing of the old dashboard survives
+    CHECK(notes.find("SITUATION") == std::string::npos);
+    CHECK(notes.find("ALERT RED") == std::string::npos);
+    CHECK(notes.find("|") == std::string::npos);
 
-    // PLAN: open objectives with progress, the done list, tagged moves in priority order
+    // PLAN: the objectives, the done list, the next moves in priority order
     const std::string plan = html.Text("Plan");
-    CHECK(plan.find("3 objectives open") != std::string::npos); // two engine rows + hqEstablish
-    CHECK(plan.find("Hold every base 1 / 3") != std::string::npos);
-    CHECK(plan.find("Raise every town 1 / 5") != std::string::npos);
-    CHECK(plan.find("Set up a headquarters") != std::string::npos);
-    CHECK(plan.find("DONE") != std::string::npos);
-    CHECK(plan.find("Take a first recruit") != std::string::npos);
-    const size_t urgent = plan.find("URGENT Break contact. Airfield RED, QRF out.");
-    const size_t dark = plan.find("URGENT Go dark. 1 patrol knows your face.");
-    const size_t sweep = plan.find("URGENT Outpost heat 55. On our own holding.");
-    const size_t raise = plan.find("READY Raise Chapoi. Support 66, line 60. 2 occupiers in town");
-    const size_t secure = plan.find("READY Finish securing Airfield. 40% secured.");
-    const size_t target = plan.find("ROUTINE Target Seaport. Garrison 6, alert YELLOW.");
-    const size_t recruit = plan.find("ROUTINE Recruit at the Camp. 11 HR in reserve");
-    REQUIRE(urgent != std::string::npos);
-    REQUIRE(recruit != std::string::npos);
-    CHECK(urgent < dark);
-    CHECK(dark < sweep);
-    CHECK(sweep < raise);
-    CHECK(raise < secure);
-    CHECK(secure < target);
-    CHECK(target < recruit);
+    CHECK(plan.find("3 objectives open. Day 3, 14:20.") != std::string::npos); // two engine rows + hqEstablish
+    CHECK(plan.find("Hold every base. 1 of 3.") != std::string::npos);
+    CHECK(plan.find("Raise every town. 1 of 5.") != std::string::npos);
+    CHECK(plan.find("Set up a headquarters in a town or at the Camp.") != std::string::npos);
+    CHECK(plan.find("Done Take a first recruit at the Camp (1 HR).") != std::string::npos);
+    CHECK(plan.find("Break contact. Airfield is RED, a QRF is out. 2.4 km NE.") != std::string::npos);
+    CHECK(plan.find("Go dark. One patrol knows my face: stow the weapon, lose or drop the witnesses.") !=
+          std::string::npos);
+    CHECK(plan.find("Outpost, heat 55, on our own ground. Reinforce or pull the squad. 1.3 km N.") !=
+          std::string::npos);
+    CHECK(plan.find("Raise Chapoi. Support 66, line 60. 2 occupiers in town: clear or wait them out. 3.1 km S.") !=
+          std::string::npos);
+    CHECK(plan.find("Finish securing Airfield. 40% secured. Fighters inside; garrison 9 still on the field. "
+                    "2.4 km NE.") != std::string::npos);
+    CHECK(plan.find("Target Seaport. Garrison 6, alert YELLOW. 2.1 km NE.") != std::string::npos);
+    CHECK(plan.find("Target Airfield") == std::string::npos); // a base being secured is not a fresh target
+    CHECK(plan.find("Recruit at the Camp. 11 HR in reserve, 1 HR a fighter.") != std::string::npos);
+    CHECK(Before(plan, "Break contact", "Go dark"));
+    CHECK(Before(plan, "Go dark", "Outpost, heat 55"));
+    CHECK(Before(plan, "Outpost, heat 55", "Raise Chapoi"));
+    CHECK(Before(plan, "Raise Chapoi", "Finish securing Airfield"));
+    CHECK(Before(plan, "Finish securing Airfield", "Target Seaport"));
+    CHECK(Before(plan, "Target Seaport", "Recruit at the Camp"));
+    CHECK(plan.find("URGENT") == std::string::npos);    // no tags: order and ink carry the priority
     CHECK(plan.find("Sweep due") == std::string::npos); // no claims the game cannot make
 
-    // ZONES: a light index grouped by state, nearest first, linking to zone pages
+    // ZONES: a typed index grouped by state, nearest first, linking to zone pages
     const std::string zones = html.Text("GM_ZONES");
-    CHECK(zones.find("8 of 9 scouted") != std::string::npos);
-    CHECK(zones.find("OURS Camp CAMP") != std::string::npos);
-    CHECK(zones.find("CONTESTED Airfield AIR 40% secured") != std::string::npos);
-    CHECK(zones.find("NEUTRAL Chapoi TOWN support 66 - line 60") != std::string::npos);
-    CHECK(zones.find("OCCUPIED Seaport PORT") != std::string::npos);
-    CHECK(zones.find("UNSCOUTED Le Port TOWN") != std::string::npos);
-    CHECK(zones.find("OURS") < zones.find("CONTESTED"));
-    CHECK(zones.find("CONTESTED") < zones.find("NEUTRAL"));
-    CHECK(zones.find("Chapoi") < zones.find("Vigny")); // nearest first within a group
+    CHECK(zones.find("8 of 9 scouted.") != std::string::npos);
+    CHECK(zones.find("Ours Camp - 0.4 km SW") != std::string::npos); // "camp" not repeated after "Camp"
+    CHECK(zones.find("Houdan - town, 0.9 km E") != std::string::npos);
+    CHECK(zones.find("Outpost - heat 55, 1.3 km N") != std::string::npos);
+    CHECK(zones.find("Contested Airfield - 40% secured, garrison 9, RED, 2.4 km NE") != std::string::npos);
+    CHECK(zones.find("Neutral Chapoi - town, ready to rise, support 66, 2 occupiers in town, 3.1 km S") !=
+          std::string::npos);
+    CHECK(zones.find("Vigny - town, support 12, line 60, 5.2 km S") != std::string::npos);
+    CHECK(zones.find("Occupied Seaport - port, garrison 6, YELLOW, 2.1 km NE") != std::string::npos);
+    CHECK(zones.find("Unscouted Le Port - town, 6.3 km NW") != std::string::npos);
+    CHECK(Before(zones, "Ours", "Contested"));
+    CHECK(Before(zones, "Contested", "Neutral"));
+    CHECK(Before(zones, "Chapoi", "Vigny")); // nearest first within a group
     {
         html.SelectSection("GM_ZONES");
         const HTMLSection& sec = html.GetSection(html.CurrentSection());
@@ -396,82 +417,115 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as designed"
         CHECK(linked);
     }
 
-    // one page per zone: facts + the zone's own record
+    // one page per zone: typed facts + the zone's own record in the hand
     const std::string airfield = html.Text("GM_ZONE_3");
-    CHECK(airfield.find("AIRFIELD") != std::string::npos);
-    CHECK(airfield.find("State SECURING - garrison 9") != std::string::npos);
-    CHECK(airfield.find("Alert RED - a quick reaction force is out") != std::string::npos);
-    CHECK(airfield.find("Capture 40 % securing") != std::string::npos);
-    CHECK(airfield.find("Heat 48 aware") != std::string::npos);
-    CHECK(airfield.find("Distance 2.4 km NE") != std::string::npos);
-    CHECK(airfield.find("Last seen 14:02") != std::string::npos);
-    CHECK(airfield.find("RECORD") != std::string::npos);
-    CHECK(airfield.find("Went RED.") != std::string::npos);
+    CHECK(airfield.find("Airfield Contested airfield. Day 3, 14:20.") != std::string::npos);
+    CHECK(airfield.find("State: SECURING, garrison 9.") != std::string::npos);
+    CHECK(airfield.find("Alert: RED, a quick reaction force is out.") != std::string::npos);
+    CHECK(airfield.find("Capture: 40% secured.") != std::string::npos);
+    CHECK(airfield.find("Heat: 48, aware.") != std::string::npos);
+    CHECK(airfield.find("Distance: 2.4 km NE.") != std::string::npos);
+    CHECK(airfield.find("Last seen: 14:02.") != std::string::npos);
+    CHECK(airfield.find("Record") != std::string::npos);
+    CHECK(airfield.find("14:02 Went RED.") != std::string::npos);
     CHECK(airfield.find("Liberated.") == std::string::npos); // another zone's line
     const std::string lePort = html.Text("GM_ZONE_8");
+    CHECK(lePort.find("Le Port Unscouted town.") != std::string::npos);
     CHECK(lePort.find("Not scouted yet") != std::string::npos);
+    CHECK(lePort.find("Distance: 6.3 km NW.") != std::string::npos);
     CHECK(lePort.find("Nothing written about this place yet.") != std::string::npos);
     const std::string houdan = html.Text("GM_ZONE_1");
-    CHECK(houdan.find("Here headquarters, 2 garaged - arms dealer") != std::string::npos);
+    CHECK(houdan.find("Houdan Our town.") != std::string::npos);
+    CHECK(houdan.find("Support: 82, risen.") != std::string::npos);
+    CHECK(houdan.find("Here: headquarters, 2 garaged, arms dealer.") != std::string::npos);
 
-    // CELL: roster grouped, arms from the status lines, supply
+    // CELL: the roster typed in columns, arms from the status lines, supply
     const std::string cell = html.Text("GM_CELL");
-    CHECK(cell.find("6 under arms - 1 WIA") != std::string::npos);
-    CHECK(cell.find("WITH YOU You Sgt Leader AK-74") != std::string::npos);
+    CHECK(cell.find("6 under arms, 1 wounded.") != std::string::npos);
+    CHECK(cell.find("With me You Sgt Leader AK-74") != std::string::npos);
     CHECK(cell.find("Andre Pvt Rifleman AK-74 + RPG-75 WIA 40%") != std::string::npos);
-    CHECK(cell.find("HOLDING - OUTPOST Outpost squad x3 Rifleman AK-74") != std::string::npos);
-    CHECK(cell.find("Standard issue AK-74, PK") != std::string::npos);
-    CHECK(cell.find("Next pattern AKS-74U - 3 of 25 captured") != std::string::npos);
-    CHECK(cell.find("Garage 2 UAZ, Ural") != std::string::npos);
-    CHECK(cell.find("Income / 10 min +35 R Houdan, Outpost") != std::string::npos);
-    CHECK(cell.find("Arms dealers Houdan - La Trinite OCCUPIED") != std::string::npos);
-    CHECK(cell.find("Vehicle dealers Chapoi RISING") != std::string::npos);
+    CHECK(cell.find("Holding Outpost Outpost squad x3 Rifleman AK-74") != std::string::npos);
+    CHECK(cell.find("Standard issue: AK-74, PK.") != std::string::npos);
+    CHECK(cell.find("Next pattern: AKS-74U - 3 of 25 captured.") != std::string::npos);
+    CHECK(cell.find("Cache: Houdan, at the headquarters.") != std::string::npos);
+    CHECK(cell.find("Garage: UAZ, Ural.") != std::string::npos);
+    CHECK(cell.find("Treasury: 480 R.") != std::string::npos);
+    CHECK(cell.find("Manpower: 11 HR, pool 12.") != std::string::npos);
+    CHECK(cell.find("Income every 10 min: +35 R, +1 HR, from Houdan, Outpost.") != std::string::npos);
+    CHECK(cell.find("Arms dealers: Houdan, La Trinite (occupied).") != std::string::npos);
+    CHECK(cell.find("Vehicle dealers: Chapoi (rising).") != std::string::npos);
 
-    // RESISTANCE: the ladder, ground, organisation stubs
+    // RESISTANCE: the ladder, ground, organisation stubs, all typed
     const std::string res = html.Text("GM_FACTION");
-    CHECK(res.find("Island held 25 % WL 3 at 40") != std::string::npos);
-    CHECK(res.find("20 40 55 70 85") != std::string::npos);
-    CHECK(res.find("Occupier steps up at WL 3, WL 5") != std::string::npos);
-    CHECK(res.find("Towns 1 risen - 1 rising - 1 neutral - 1 occupied - 1 unscouted") != std::string::npos);
-    CHECK(res.find("Bases 1 held - 1 contested - 1 occupied") != std::string::npos);
-    CHECK(res.find("Occupier under arms 21 known: Airfield 9, Chapoi 2, Seaport 6, La Trinite 4") != std::string::npos);
-    CHECK(res.find("Cells 1 yours - HQ Houdan") != std::string::npos);
+    CHECK(res.find("War level 2 of 10.") != std::string::npos);
+    CHECK(res.find("Island held: 25%. Level 3 at 40%; the ladder runs 20, 40, 55, 70, 85.") != std::string::npos);
+    CHECK(res.find("The occupier steps up at WL 3, WL 5: better troops, heavier vehicles, sharper eyes.") !=
+          std::string::npos);
+    CHECK(res.find("Towns: 1 risen, 1 rising, 1 neutral, 1 occupied, 1 unscouted.") != std::string::npos);
+    CHECK(res.find("Bases: 1 held, 1 contested, 1 occupied.") != std::string::npos);
+    CHECK(res.find("Occupier under arms: 21 known. Airfield 9, Chapoi 2, Seaport 6, La Trinite 4.") !=
+          std::string::npos);
+    CHECK(res.find("Ours under arms: 6. 3 with me, 3 holding, 11 HR in reserve.") != std::string::npos);
+    CHECK(res.find("Heat on our ground: 24 mean over 3 zones.") != std::string::npos);
+    CHECK(res.find("Cells: 1, ours. Headquarters at Houdan.") != std::string::npos);
+    CHECK(res.find("Holdings: 1 cache, 2 garaged.") != std::string::npos);
     CHECK(res.find("No allied cells. No outside contact.") != std::string::npos);
 
-    // DIARY: newest first, grouped by day
+    // DIARY: newest first, grouped by day, times only under a day head
     const std::string log = html.Text("GM_LOG");
-    CHECK(log.find("3 entries") != std::string::npos);
-    CHECK(log.find("DAY 3") < log.find("DAY 1"));
-    CHECK(log.find("Went RED.") < log.find("Reached the Camp"));
+    CHECK(log.find("3 entries.") != std::string::npos);
+    CHECK(Before(log, "Day 3", "Day 1"));
+    CHECK(log.find("14:02 Airfield. Went RED.") != std::string::npos);
+    CHECK(log.find("16:22 Outpost. Liberated.") != std::string::npos);
+    CHECK(log.find("08:00 Camp. Reached the Camp alone.") != std::string::npos);
+    CHECK(Before(log, "Went RED.", "Reached the Camp"));
 
     // HANDBOOK: index links every chapter; a chapter carries its table, the
     // live cover state and the chapter nav
     const std::string index = html.Text("GM_MAN_INDEX");
-    CHECK(index.find("HANDBOOK") != std::string::npos);
+    CHECK(index.find("Handbook Notes from the old hands.") != std::string::npos);
     CHECK(index.find(GuerrillaManualTopicTitle(0)) != std::string::npos);
     CHECK(index.find(GuerrillaManualTopicTitle(9)) != std::string::npos);
     const std::string undercover = html.Text("GM_MAN_UNDERCOVER");
-    CHECK(undercover.find("UNDERCOVER") != std::string::npos);
-    CHECK(undercover.find("Handbook 9 / 10") != std::string::npos);
+    CHECK(undercover.find("Undercover How the occupier reads you. Handbook 9 of 10.") != std::string::npos);
     CHECK(undercover.find("YOU ARE SEEN AS RANGE") != std::string::npos);
     CHECK(undercover.find("Rifle slung SUSPECTED under 20 m, or from behind") != std::string::npos);
-    CHECK(undercover.find("YOUR STANDING - NOW BLOWN - 1 PATROL KNOWS YOUR FACE") != std::string::npos);
+    CHECK(undercover.find("Your standing: now BLOWN, 1 patrol knows your face") != std::string::npos);
     CHECK(undercover.find("< Companions") != std::string::npos);
     CHECK(undercover.find("Keeping the record >") != std::string::npos);
 
-    // no em dashes anywhere in the player text
+    // ink discipline: the hand is inked (blue-black or red), the type is the
+    // stock colour or pencil; no picture, bar or pip fields anywhere
+    int hand = 0;
+    int redHand = 0;
     for (int s = 0; s < html.NSections(); s++)
     {
         const HTMLSection& sec = html.GetSection(s);
         for (int f = 0; f < sec.fields.Size(); f++)
         {
-            CHECK(std::string((const char*)sec.fields[f].text).find("\xE2\x80\x94") == std::string::npos);
+            const HTMLField& fld = sec.fields[f];
+            // no em dashes anywhere in the player text
+            CHECK(std::string((const char*)fld.text).find("\xE2\x80\x94") == std::string::npos);
+            CHECK(fld.format != HFImg);
+            if (fld.format == HFH6)
+            {
+                CHECK(fld.hasColor);
+                hand++;
+                if (IsRedInk(fld.color))
+                {
+                    redHand++;
+                }
+            }
         }
     }
+    CHECK(hand > 20);
+    // the hand is written 1.6x the typed body size (the parser-only container's P is 1)
+    CHECK(html.GetFormatSize(HFH6) == Catch::Approx(1.6f * html.GetPHeight()));
+    CHECK(redHand >= 3);               // the RED paragraph, the blown cover, the RED entry
+    CHECK_FALSE(html.HasFieldColor()); // the pending ink never leaks past a call
 }
 
-TEST_CASE("Journal pages - no alert strip and no colour bleed when the campaign is quiet",
-          "[game][guerrilla][journal][ui]")
+TEST_CASE("Journal pages - a quiet campaign reads quiet", "[game][guerrilla][journal][ui]")
 {
     Journal journal;
     JournalPageInputs in = SampleInputs();
@@ -483,36 +537,37 @@ TEST_CASE("Journal pages - no alert strip and no colour bleed when the campaign 
     JournalHtml html;
     BuildGuerrillaJournalPages(&html, journal, in);
     const std::string notes = html.Text("Main");
-    CHECK(notes.find("ALERT RED") == std::string::npos);
-    CHECK(notes.find("Garrisons all GREEN") != std::string::npos);
-    CHECK(notes.find("Cover CLEAN - you pass as a civilian") != std::string::npos);
-    CHECK(notes.find("Nothing recorded yet.") != std::string::npos);
-    // the pending field colour never leaks past a call
-    CHECK_FALSE(html.HasFieldColor());
+    CHECK(notes.find("The garrisons are quiet.") != std::string::npos);
+    CHECK(notes.find("To the occupier I am still a civilian.") != std::string::npos);
+    CHECK(notes.find("went RED") == std::string::npos);
+    CHECK(notes.find("Nothing written yet.") != std::string::npos);
     const std::string plan = html.Text("Plan");
     CHECK(plan.find("Break contact") == std::string::npos);
     CHECK(plan.find("Go dark") == std::string::npos);
+    const std::string zones = html.Text("GM_ZONES");
+    CHECK(zones.find("RED") == std::string::npos);
+    CHECK(zones.find("YELLOW") == std::string::npos);
 }
 
 TEST_CASE("Journal pages - the objectives-open count follows the page", "[game][guerrilla][journal][ui]")
 {
     Journal journal;
     JournalPageInputs in = SampleInputs();
-    in.militaryHeld = in.militaryTotal; // every base held: that row moves to DONE
+    in.militaryHeld = in.militaryTotal; // every base held: that row moves to Done
     JournalHtml html;
     BuildGuerrillaJournalPages(&html, journal, in);
     const std::string plan = html.Text("Plan");
-    CHECK(plan.find("1 objective open") != std::string::npos);
+    CHECK(plan.find("1 objective open.") != std::string::npos);
     CHECK(plan.find("Hold every base") == std::string::npos);
-    CHECK(plan.find("Every base held") != std::string::npos);
-    CHECK(plan.find("Raise every town 1 / 5") != std::string::npos);
+    CHECK(plan.find("Every base held.") != std::string::npos);
+    CHECK(plan.find("Raise every town. 1 of 5.") != std::string::npos);
 
     in.townsRisen = in.townsTotal; // and every town: nothing open, both done
     JournalHtml done;
     BuildGuerrillaJournalPages(&done, journal, in);
     const std::string all = done.Text("Plan");
-    CHECK(all.find("0 objectives open") != std::string::npos);
-    CHECK(all.find("Every town risen") != std::string::npos);
+    CHECK(all.find("0 objectives open.") != std::string::npos);
+    CHECK(all.find("Every town risen.") != std::string::npos);
 }
 
 TEST_CASE("Journal pages - a zone's record shows its latest lines and points at the Diary for the rest",
@@ -538,7 +593,7 @@ TEST_CASE("Journal pages - a zone's record shows its latest lines and points at 
     CHECK(airfield.find("Elsewhere.") == std::string::npos);        // another zone's line
     CHECK(airfield.find("Nothing written about this place yet.") == std::string::npos);
     CHECK(airfield.find("3 earlier lines in the Diary") != std::string::npos);
-    // the overflow row's "Diary" is a link to the Diary page (the nav row has
+    // the overflow row's "Diary" is a link to the Diary page (the footer has
     // one too; this one follows the count)
     html.SelectSection("GM_ZONE_3");
     const HTMLSection& sec = html.GetSection(html.CurrentSection());
@@ -555,7 +610,7 @@ TEST_CASE("Journal pages - a zone's record shows its latest lines and points at 
     // the whole record is still on the Diary page
     const std::string log = html.Text("GM_LOG");
     CHECK(log.find("Airfield line 1.") != std::string::npos);
-    CHECK(log.find("14 entries") != std::string::npos);
+    CHECK(log.find("14 entries.") != std::string::npos);
 }
 
 TEST_CASE("Journal pages - an existing Main/Plan section is appended to, not duplicated",
@@ -578,14 +633,17 @@ TEST_CASE("Journal pages - an existing Main/Plan section is appended to, not dup
     CHECK(html.NSections() == 7 + GuerrillaManualTopicCount()); // no zones: no zone pages
     const std::string notes = html.Text("Main");
     CHECK(notes.find("Authored notes.") != std::string::npos);
-    CHECK(notes.find("SITUATION") != std::string::npos);
-    CHECK(notes.find("Nothing recorded yet.") != std::string::npos);
+    CHECK(notes.find("Notes Malden.") != std::string::npos); // no clock: the page is titled Notes
+    CHECK(notes.find("I am alone. No headquarters yet.") != std::string::npos);
+    CHECK(notes.find("We hold") == std::string::npos); // no zones: no ground sentence
+    CHECK(notes.find("Nothing written yet.") != std::string::npos);
     const std::string plan = html.Text("Plan");
     CHECK(plan.find("Authored plan") != std::string::npos);
     CHECK(plan.find("Scout the island.") != std::string::npos);
+    CHECK(plan.find("Set up a headquarters. Any town, or the Camp.") != std::string::npos);
 }
 
-TEST_CASE("HTML control extensions - bars, rules, field colour and hanging indent land in the model",
+TEST_CASE("HTML control extensions - field colour and hanging indent land in the model",
           "[game][guerrilla][journal][ui]")
 {
     JournalHtml html;
@@ -595,29 +653,25 @@ TEST_CASE("HTML control extensions - bars, rules, field colour and hanging inden
     html.AddText(sec, "red", HFP, HALeft, false, false, "");
     html.ClearFieldColor();
     html.AddText(sec, "plain", HFP, HALeft, false, false, "");
-    HTMLField* bar = html.AddBar(sec, 0.4f, 320, 12, PackedColor(9, 9, 9, 255), PackedColor(1, 1, 1, 255));
-    REQUIRE(bar);
-    CHECK(bar->bar);
-    CHECK(bar->format == HFImg);
-    CHECK(bar->fill == 0.4f);
-    CHECK(bar->width == Catch::Approx(0.5f));    // 320 / 640
-    CHECK(bar->height == Catch::Approx(0.025f)); // 12 / 480
-    HTMLField* clamped = html.AddBar(sec, 7.0f, 10, 10, PackedColor(9, 9, 9, 255), PackedColor(0, 0, 0, 0));
-    CHECK(clamped->fill == 1.0f);
-    HTMLField* rule = html.AddRule(sec, 4, PackedColor(9, 9, 9, 255));
-    REQUIRE(rule);
-    CHECK(rule->fill == 1.0f);
-    CHECK(rule->width == Catch::Approx(1000.0f)); // full page width (1000 in the parser-only container)
     html.SetHanging(30);
     html.AddText(sec, "hang", HFP, HALeft, false, false, "");
     html.SetHanging(0);
     const HTMLSection& section = html.GetSection(sec);
-    REQUIRE(section.fields.Size() == 6);
+    REQUIRE(section.fields.Size() == 3);
     CHECK(section.fields[0].hasColor);
+    CHECK(section.fields[0].color.R8() == 1);
+    CHECK(section.fields[0].color.G8() == 2);
+    CHECK(section.fields[0].color.B8() == 3);
     CHECK_FALSE(section.fields[1].hasColor);
-    CHECK(section.fields[5].hanging == 30.0f);
+    CHECK(section.fields[2].hanging == 30.0f);
     CHECK(section.fields[1].hanging == 0.0f);
-    // layout still works with bar fields in the row
+    // the parser-only container reports the stock format slots; a slot can be
+    // resized, and rebound to a face (a null face is a no-op)
+    CHECK(html.GetFormatSize(HFP) > 0);
+    html.SetFormatSize(HFH6, 2.5f);
+    CHECK(html.GetFormatSize(HFH6) == Catch::Approx(2.5f));
+    html.SetFormatFont(HFH6, nullptr, nullptr, 9.0f);
+    CHECK(html.GetFormatSize(HFH6) == Catch::Approx(2.5f));
     html.FormatSection(sec);
     CHECK(section.rows.Size() >= 1);
 }

@@ -297,81 +297,6 @@ void CHTMLContainer::AddText(int section, RString text, HTMLFormat format, HTMLA
     }
 }
 
-HTMLField* CHTMLContainer::AddBar(int section, float fill, float w, float h, PackedColor color, PackedColor trackColor,
-                                  HTMLAlign align, float tableWidth)
-{
-    if (section < 0 || section >= _sections.Size())
-    {
-        return nullptr;
-    }
-    HTMLSection& sec = _sections[section];
-    int i = sec.fields.Add();
-    HTMLField& fld = sec.fields[i];
-    fld.format = HFImg;
-    fld.align = align;
-    fld.nextline = false;
-    fld.exclude = false;
-    fld.bottom = false;
-    fld.indent = _indent;
-    fld.tableWidth = tableWidth;
-    fld.texture1 = nullptr;
-    fld.texture2 = nullptr;
-    fld.width = (w > 0 ? w : 0) * (1.0f / 640.0f);
-    fld.height = (h > 0 ? h : 0) * (1.0f / 480.0f);
-    fld.bar = true;
-    saturate(fill, 0.0f, 1.0f);
-    fld.fill = fill;
-    fld.hasColor = true;
-    fld.color = color;
-    fld.trackColor = trackColor;
-    return &fld;
-}
-
-HTMLField* CHTMLContainer::AddRule(int section, float h, PackedColor color)
-{
-    // full page width, minus the current indent
-    float w = (GetPageWidth() - _indent) * 640.0f;
-    return AddBar(section, 1.0f, w, h, color, PackedColor(0, 0, 0, 0));
-}
-
-void CHTMLContainer::SetFormatFont(HTMLFormat format, Font* font, Font* fontBold, float size)
-{
-    if (!font)
-    {
-        return;
-    }
-    if (!fontBold)
-    {
-        fontBold = font;
-    }
-    switch (format)
-    {
-        case HFH1:
-            _fontH1 = font, _fontH1Bold = fontBold, _sizeH1 = size;
-            break;
-        case HFH2:
-            _fontH2 = font, _fontH2Bold = fontBold, _sizeH2 = size;
-            break;
-        case HFH3:
-            _fontH3 = font, _fontH3Bold = fontBold, _sizeH3 = size;
-            break;
-        case HFH4:
-            _fontH4 = font, _fontH4Bold = fontBold, _sizeH4 = size;
-            break;
-        case HFH5:
-            _fontH5 = font, _fontH5Bold = fontBold, _sizeH5 = size;
-            break;
-        case HFH6:
-            _fontH6 = font, _fontH6Bold = fontBold, _sizeH6 = size;
-            break;
-        case HFP:
-            _fontP = font, _fontPBold = fontBold, _sizeP = size;
-            break;
-        default:
-            break;
-    }
-}
-
 Font* CHTMLContainer::GetFormatFont(HTMLFormat format, bool bold) const
 {
     switch (format)
@@ -412,6 +337,79 @@ float CHTMLContainer::GetFormatSize(HTMLFormat format) const
         default:
             return _sizeP;
     }
+}
+
+void CHTMLContainer::SetFormatSize(HTMLFormat format, float size)
+{
+    if (size <= 0)
+    {
+        return;
+    }
+    switch (format)
+    {
+        case HFH1:
+            _sizeH1 = size;
+            break;
+        case HFH2:
+            _sizeH2 = size;
+            break;
+        case HFH3:
+            _sizeH3 = size;
+            break;
+        case HFH4:
+            _sizeH4 = size;
+            break;
+        case HFH5:
+            _sizeH5 = size;
+            break;
+        case HFH6:
+            _sizeH6 = size;
+            break;
+        case HFP:
+            _sizeP = size;
+            break;
+        default:
+            break;
+    }
+}
+
+void CHTMLContainer::SetFormatFont(HTMLFormat format, Font* font, Font* fontBold, float size)
+{
+    if (!font)
+    {
+        return;
+    }
+    if (!fontBold)
+    {
+        fontBold = font;
+    }
+    switch (format)
+    {
+        case HFH1:
+            _fontH1 = font, _fontH1Bold = fontBold;
+            break;
+        case HFH2:
+            _fontH2 = font, _fontH2Bold = fontBold;
+            break;
+        case HFH3:
+            _fontH3 = font, _fontH3Bold = fontBold;
+            break;
+        case HFH4:
+            _fontH4 = font, _fontH4Bold = fontBold;
+            break;
+        case HFH5:
+            _fontH5 = font, _fontH5Bold = fontBold;
+            break;
+        case HFH6:
+            _fontH6 = font, _fontH6Bold = fontBold;
+            break;
+        case HFP:
+            _fontP = font, _fontPBold = fontBold;
+            break;
+        default:
+            return;
+    }
+    SetFormatSize(format, size);
 }
 
 // Truncate `buffer` (a file path) in place to its directory part, keeping the
