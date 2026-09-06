@@ -1,0 +1,67 @@
+; Issue #41: bounded ambient conversation menu; <=3 actions, one request.
+; Readiness changes remount once, never on every countdown tick. Keep the
+; current target unless another civilian is at least 1 m nearer.
+@GM_LIB_READY
+GM_CI_LIB_READY = false
+[] exec "\gmcore\scripts\civilian_interaction_lib.sqs"
+@GM_CI_LIB_READY
+GM_CI_REQUEST = []
+GM_CI_REMOUNT = false
+GM_CI_TICKS = 0
+GM_CI_FEEDBACK = ""
+gmCiMenuBody = objNull
+gmCiMenuAsk = -1
+gmCiMenuExtort = -1
+gmCiMenuRead = -1
+gmCiMenuState = ""
+gmCiMenuRefresh = false
+gmCiConfirmBody = objNull
+gmCiConfirmUntil = 0
+GM_CI_READY = true
+
+#loop
+~0.25
+GM_CI_TICKS = GM_CI_TICKS + 1
+; Load discards uncommitted intent before any request can be consumed.
+? GM_CI_REMOUNT : GM_CI_REQUEST = []; gmCiConfirmBody = objNull
+; One atomic drain; the financial service revalidates at commit time.
+? (count GM_CI_REQUEST) > 0 : gmCiMenuRequest = GM_CI_REQUEST; GM_CI_REQUEST = []; gmCiMenuRequest call GM_CI_fnRequest; gmCiMenuRefresh = true
+; Scan/prune at 1 Hz, or immediately after a request to refresh its actions.
+? ((GM_CI_TICKS mod 4) != 0) and (not gmCiMenuRefresh) and (not GM_CI_REMOUNT) : goto "loop"
+gmCiMenuRefresh = false
+[] call GM_CI_fnPrune
+gmCiMenuNear = objNull
+gmCiMenuDist = GM_CI_REACH + 1
+? ([gmCiMenuBody, aP] call GM_CI_fnEligible) >= 0 : gmCiMenuNear = gmCiMenuBody; gmCiMenuDist = (aP distance gmCiMenuBody) - 1
+{{if (([_x, aP] call GM_CI_fnEligible) >= 0) then {if ((aP distance _x) < gmCiMenuDist) then {gmCiMenuNear = _x; gmCiMenuDist = aP distance _x}}} forEach (units _x)} forEach GM_CIV_GROUPS
+? (gmCiConfirmBody != gmCiMenuNear) or (time >= gmCiConfirmUntil) : gmCiConfirmBody = objNull
+gmCiMenuNext = ""
+? not (isNull gmCiMenuNear) : gmCiMenuNext = [gmCiMenuNear] call GM_CI_fnAvailability
+? (gmCiMenuNext == "READY") and (not (isNull gmCiConfirmBody)) : gmCiMenuNext = "CONFIRM"
+? GM_CI_REMOUNT or (gmCiMenuNear != gmCiMenuBody) or (gmCiMenuNext != gmCiMenuState) : goto "remount"
+goto "loop"
+
+#remount
+? not (isNull gmCiMenuBody) : gmCiMenuBody removeAction gmCiMenuAsk; gmCiMenuBody removeAction gmCiMenuExtort; gmCiMenuBody removeAction gmCiMenuRead
+gmCiMenuBody = gmCiMenuNear
+gmCiMenuState = gmCiMenuNext
+gmCiMenuAsk = -1
+gmCiMenuExtort = -1
+gmCiMenuRead = -1
+GM_CI_REMOUNT = false
+? isNull gmCiMenuBody : goto "loop"
+gmCiMenuReadLabel = "Read their mood (no cost)"
+? gmCiMenuState == "COOLDOWN" : gmCiMenuReadLabel = "Give them space (check wait)"
+? gmCiMenuState == "ALREADY_PAID" : gmCiMenuReadLabel = "Already paid this visit"
+? gmCiMenuState == "CAPACITY" : gmCiMenuReadLabel = "Cannot approach (details)"
+gmCiMenuRead = gmCiMenuBody addAction [gmCiMenuReadLabel, "\gmcore\scripts\civilian_interaction_action.sqs"]
+? gmCiMenuState == "CONFIRM" : goto "confirm"
+? gmCiMenuState != "READY" : goto "loop"
+gmCiMenuAsk = gmCiMenuBody addAction [format ["Ask for %1 R (costs goodwill)", GM_CI_DONATION], "\gmcore\scripts\civilian_interaction_action.sqs"]
+gmCiMenuExtort = gmCiMenuBody addAction ["Consider extortion...", "\gmcore\scripts\civilian_interaction_action.sqs"]
+goto "loop"
+
+#confirm
+gmCiMenuAsk = gmCiMenuBody addAction ["Leave them be", "\gmcore\scripts\civilian_interaction_action.sqs"]
+gmCiMenuExtort = gmCiMenuBody addAction [format ["Threaten for %1 R (harms support)", GM_CI_EXTORTION], "\gmcore\scripts\civilian_interaction_action.sqs"]
+goto "loop"

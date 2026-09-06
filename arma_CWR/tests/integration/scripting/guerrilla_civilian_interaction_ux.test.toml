@@ -1,0 +1,6 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_interaction.abel"
+timeout = 240
+assert_timeout = 30
+extra_args = ["--dev"]

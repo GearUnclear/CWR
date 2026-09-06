@@ -1250,7 +1250,7 @@ items:
   - id: extort-solicit
     title: "Solicit/Extort: per-civilian opinion + fear, money taken from the population (issue #41)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 3
     depends_on: [civilian-ambience-layer]
     gh_issues: [41]
@@ -1267,6 +1267,9 @@ items:
       scores are not computed en masse and only need to stay consistent while
       the player is within 300 m of the city.
     log:
+      - "2026-09-05: implemented on codex/civilian-solicit-extort. One shared service: lazy bounded personal profiles, both proximity actions, atomic treasury credits and support nudges, cooldown/recovery, descriptor tuning, save/load menu recovery and #42 callback (combat retaliation stays in #42). Validation: 251 Guerrilla unit cases / 4270 assertions; seven focused Trident scenarios covering action boundaries, real save/load, reversed Sinai sides, existing ambience/shakedown/panic and native campaign restoration. Regression testing caught the single-slot campaignLoaded handler: bootstrap now fans out to both consumers. Exact support-delta tests disable unrelated native support drift in an isolated shared-core fixture."
+      - "2026-09-05: gameplay/UX refinement: free qualitative mood assessment, preview/commit/cancel extortion, reward and consequence labels, cooldown/read-only paid menus, stable crowd targeting and quarter-second request handling. One payout per civilian per visit closes repeat extortion at zero opinion; saved payment state prevents reload farming. Results append verb, actual support delta and retry seconds while preserving the original result prefix. Pending UI intent is discarded on load. Validation: 251 Guerrilla unit cases / 4276 assertions and six integration scenarios, including rendered native-menu checks at 800x600, free/stale/expired/cancelled choices, zero rewards, support clamping, save/load and reversed-side Sinai. Visual review shortened the initially wordy preview and labels."
+      - "2026-09-04: implementing #41 on codex/civilian-solicit-extort: bounded visit-local opinion/fear, action-to-ledger transactions, persisted cooldowns, configurable rewards and #42 resistance hook; engine integration verification in progress."
       - "2026-08-05: filed. Complements money-sinks-dealers (spending); this is where the money comes from outside zone income. Both write the same gmResources scalar economy.sqs owns, so the single-writer/directional-split discipline that keeps economy.sqs and recruit.sqs from colliding has to extend to cover it."
       - "The support nudge lands on ZoneRecord::support, the same 0-100 ledger the #8 resentment path already debits - so extortion pressure and occupier atrocity share one currency of town goodwill, which is the intended tension."
 

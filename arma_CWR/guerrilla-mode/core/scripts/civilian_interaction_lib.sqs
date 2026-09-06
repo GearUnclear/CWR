@@ -1,0 +1,91 @@
+; Issue #41: synchronous civilian interaction service. Each code value is one
+; physical line because the SQS loader is line-oriented. No helper may wait.
+; OWNS: GM_CI_PROFILES, GM_CI_LAST, gmCi* scratch; support through
+; GM_fnSupportAdd, treasury through GM_fnResourcesAdd. Called only locally.
+; Profile: [body, zone NAME, baseline opinion, opinion, fear, updatedAt, nextAsk, paid].
+; Bodies are validated against the ambient roster, never against classnames:
+; dealers, companions, guards and future NGO contacts cannot enter this cache.
+; Restored body refs are kept if valid, otherwise pruned. Only zone support
+; is a durable campaign fact; no island-wide personal census is constructed.
+@GM_LIB_READY
+
+GM_CI_PROFILES = []
+GM_CI_LAST = []
+GM_CI_ROLL = {random 1}
+GM_CI_ON_RESULT = {}
+GM_CI_ON_RESIST = {}
+GM_CI_RADIUS = 300
+GM_CI_REACH = 5
+GM_CI_MAX_PROFILES = 64
+GM_CI_CONFIRM_TIME = 10
+GM_CI_SPREAD = ["CIV", "interactionOpinionSpread", 35] call GM_fnFactionNum
+GM_CI_OCC_SCALE = ["CIV", "interactionOccupiedScale", 0.5] call GM_fnFactionNum
+GM_CI_SOLICIT_MIN = 75
+GM_CI_EXTORT_MIN = 65
+GM_CI_RESIST_MAX = 20
+GM_CI_DONATION = ["CIV", "interactionDonation", 25] call GM_fnFactionNum
+GM_CI_EXTORTION = ["CIV", "interactionExtortion", 50] call GM_fnFactionNum
+GM_CI_SOLICIT_LOSS = ["CIV", "interactionSolicitLoss", 10] call GM_fnFactionNum
+GM_CI_EXTORT_LOSS = ["CIV", "interactionExtortLoss", 30] call GM_fnFactionNum
+GM_CI_RECOVERY = ["CIV", "interactionRecoveryPerMinute", 1] call GM_fnFactionNum
+GM_CI_COOLDOWN = ["CIV", "interactionCooldown", 60] call GM_fnFactionNum
+GM_CI_SUPPORT_WEIGHT = ["CIV", "interactionSupportWeight", 0.05] call GM_fnFactionNum
+
+; Clamp tuning as well as scores; malformed negative payouts/cooldowns must
+; not turn an island pack into an unlimited, per-frame treasury tap.
+GM_CI_fnClamp = {gmCiClamp = _this select 0; if (gmCiClamp < (_this select 1)) then {gmCiClamp = _this select 1}; if (gmCiClamp > (_this select 2)) then {gmCiClamp = _this select 2}; gmCiClamp}
+GM_CI_SPREAD = [GM_CI_SPREAD, 0, 100] call GM_CI_fnClamp
+GM_CI_OCC_SCALE = [GM_CI_OCC_SCALE, 0, 1] call GM_CI_fnClamp
+GM_CI_DONATION = [GM_CI_DONATION, 0, 10000] call GM_CI_fnClamp
+GM_CI_EXTORTION = [GM_CI_EXTORTION, 0, 10000] call GM_CI_fnClamp
+GM_CI_SOLICIT_LOSS = [GM_CI_SOLICIT_LOSS, 0, 100] call GM_CI_fnClamp
+GM_CI_EXTORT_LOSS = [GM_CI_EXTORT_LOSS, 0, 100] call GM_CI_fnClamp
+GM_CI_RECOVERY = [GM_CI_RECOVERY, 0, 100] call GM_CI_fnClamp
+GM_CI_COOLDOWN = [GM_CI_COOLDOWN, 1, 86400] call GM_CI_fnClamp
+GM_CI_SUPPORT_WEIGHT = [GM_CI_SUPPORT_WEIGHT, 0, 1] call GM_CI_fnClamp
+
+; [body] -> home CITY index or -1. Work is bounded by the population cache,
+; with a native name lookup; no nearestObjects / whole-world unit scan.
+GM_CI_fnZone = {gmCiZr = -1; gmCiZi = GM_CIV_GROUPS find (group (_this select 0)); if (gmCiZi >= 0) then {gmCiZr = gmZoneIndex (GM_CIV_GROUP_ZONE select gmCiZi)}; gmCiZr}
+; [body, caller] -> eligible home CITY index or -1. Used again at commit,
+; so old action IDs, a walk-away, panic, death or rogue conversion cannot pay.
+GM_CI_fnEligible = {gmCiEu = _this select 0; gmCiEa = _this select 1; gmCiEz = -1; if ((not (isNull gmCiEu)) and (alive gmCiEu) and (alive gmCiEa) and (gmCiEa == aP) and ((vehicle gmCiEa) == gmCiEa) and ((vehicle gmCiEu) == gmCiEu) and ((side gmCiEu) == civilian) and ((gmCiEa distance gmCiEu) <= GM_CI_REACH)) then {gmCiEz = [gmCiEu] call GM_CI_fnZone}; if (gmCiEz >= 0) then {gmCiEn = (gmZone gmCiEz) select GM_Z_NAME; if ((((gmZone gmCiEz) select GM_Z_TYPE) != "CITY") or (((getPos gmCiEa) distance ((gmZone gmCiEz) select GM_Z_POS)) > GM_CI_RADIUS) or (gmCiEn in GM_PANIC_ZONES)) then {gmCiEz = -1}}; if (not (isNil "GM_SHK_ACTIVE")) then {if (GM_SHK_ACTIVE) then {if (gmCiEu == GM_SHK_VICTIM) then {gmCiEz = -1}}}; gmCiEz}
+; Keep personal state for the entire local visit, including across save/load.
+; Reap invalid/dead/converted bodies and every departed town before allocation.
+GM_CI_fnPrune = {gmCiPk = []; {gmCiPr = _x; gmCiPu = gmCiPr select 0; gmCiPz = gmZoneIndex (gmCiPr select 1); if ((not (isNull gmCiPu)) and (alive gmCiPu) and ((side gmCiPu) == civilian) and (gmCiPz >= 0)) then {if (([gmCiPu] call GM_CI_fnZone) == gmCiPz) then {if (((getPos aP) distance ((gmZone gmCiPz) select GM_Z_POS)) <= GM_CI_RADIUS) then {gmCiPk = gmCiPk + [gmCiPr]}}}} forEach GM_CI_PROFILES; GM_CI_PROFILES = gmCiPk}
+; [body, zoneIndex] -> profile index, -1 at capacity. Scores are drawn ONCE
+; on first interaction, not for every civilian or every poll. No live row
+; eviction: hitting the hard cap refuses a new profile instead of rerolling.
+GM_CI_fnFind = {gmCiFi = -1; gmCiFj = 0; while {gmCiFj < count GM_CI_PROFILES} do {if (((GM_CI_PROFILES select gmCiFj) select 0) == (_this select 0)) then {gmCiFi = gmCiFj}; gmCiFj = gmCiFj + 1}; gmCiFi}
+GM_CI_fnProfile = {gmCiFi = [_this select 0] call GM_CI_fnFind; if ((gmCiFi < 0) and ((count GM_CI_PROFILES) < GM_CI_MAX_PROFILES)) then {gmCiFz = gmZone (_this select 1); gmCiFb = gmCiFz select GM_Z_SUPPORT; if ((gmCiFz select GM_Z_OWNER) == gmOccupierSide) then {gmCiFb = gmCiFb * GM_CI_OCC_SCALE}; gmCiFb = [gmCiFb + (random (2 * GM_CI_SPREAD)) - GM_CI_SPREAD, 0, 100] call GM_CI_fnClamp; gmCiFi = count GM_CI_PROFILES; GM_CI_PROFILES = GM_CI_PROFILES + [[_this select 0, gmCiFz select GM_Z_NAME, gmCiFb, gmCiFb, random 100, time, 0, false]]}; gmCiFi}
+; Derived reads never reroll or advance recovery/cooldown. Seven-field rows
+; from scripted consumers remain valid; new payments append the paid flag.
+GM_CI_fnOpinion = {[(_this select 3) + (([time - (_this select 5), 0, 1000000000] call GM_CI_fnClamp) * GM_CI_RECOVERY / 60), 0, _this select 2] call GM_CI_fnClamp}
+GM_CI_fnState = {gmCiSr = "READY"; if (time < (_this select 6)) then {gmCiSr = "COOLDOWN"}; if ((count _this) > 7) then {if (_this select 7) then {gmCiSr = "ALREADY_PAID"}}; gmCiSr}
+; UI poll: no allocation or score reads for the surrounding population.
+GM_CI_fnAvailability = {gmCiAi = _this call GM_CI_fnFind; gmCiAr = "READY"; if (gmCiAi >= 0) then {gmCiAr = (GM_CI_PROFILES select gmCiAi) call GM_CI_fnState} else {if ((count GM_CI_PROFILES) >= GM_CI_MAX_PROFILES) then {gmCiAr = "CAPACITY"}}; gmCiAr}
+; Free assessment shares the stable profile with the financial service.
+; Result prefix remains [outcome, paid, zoneName, opinion, fear]; appended
+; fields are [verb, actual town-support delta, seconds until next ask].
+GM_CI_fnInspect = {gmCiIr = ["INVALID", 0, "", 0, 0, "INSPECT", 0, 0]; [] call GM_CI_fnPrune; gmCiIz = _this call GM_CI_fnEligible; if (gmCiIz >= 0) then {gmCiIi = [_this select 0, gmCiIz] call GM_CI_fnProfile; if (gmCiIi < 0) then {gmCiIr set [0, "CAPACITY"]} else {gmCiIp = GM_CI_PROFILES select gmCiIi; gmCiIr = [gmCiIp call GM_CI_fnState, 0, gmCiIp select 1, gmCiIp call GM_CI_fnOpinion, gmCiIp select 4, "INSPECT", 0, [(gmCiIp select 6) - time, 0, GM_CI_COOLDOWN] call GM_CI_fnClamp]}}; gmCiIr}
+; Pure decision: [opinion, fear, verb, roll in [0,1)] -> outcome.
+; Intermediate fear refuses; armed retaliation is explicitly issue #42.
+GM_CI_fnOutcome = {gmCiOr = "REFUSED"; if ((_this select 2) == "SOLICIT") then {if (((_this select 0) >= GM_CI_SOLICIT_MIN) and ((_this select 3) < 0.5)) then {gmCiOr = "DONATED"}}; if ((_this select 2) == "EXTORT") then {if ((_this select 1) >= GM_CI_EXTORT_MIN) then {gmCiOr = "EXTORTED"}; if ((_this select 1) < GM_CI_RESIST_MAX) then {gmCiOr = "RESISTED"}}; gmCiOr}
+; [body, caller, verb] -> result (see GM_CI_fnInspect).
+; Entire validation/recovery/cooldown/effect transaction is ONE call: no wait
+; between reading and crediting gmResources. Both refusals and resistance
+; consume the attempt and opinion; no reroll by clicking a second action.
+GM_CI_fnInteract = {gmCiTu = _this select 0; gmCiTa = _this select 1; gmCiTv = _this select 2; gmCiTr = ["INVALID", 0, "", 0, 0, gmCiTv, 0, 0]; if (gmCiTv in ["SOLICIT", "EXTORT"]) then {gmCiTr = [gmCiTu, gmCiTa] call GM_CI_fnInspect; gmCiTr set [5, gmCiTv]; if ((gmCiTr select 0) == "READY") then {gmCiTi = [gmCiTu] call GM_CI_fnFind; gmCiTp = GM_CI_PROFILES select gmCiTi; gmCiTz = gmZoneIndex (gmCiTp select 1); gmCiTo = gmCiTr select 3; gmCiTout = [gmCiTo, gmCiTp select 4, gmCiTv, [] call GM_CI_ROLL] call GM_CI_fnOutcome; gmCiTloss = GM_CI_SOLICIT_LOSS; if (gmCiTv == "EXTORT") then {gmCiTloss = GM_CI_EXTORT_LOSS}; gmCiTnew = [gmCiTo - gmCiTloss, 0, 100] call GM_CI_fnClamp; gmCiTp set [3, gmCiTnew]; gmCiTp set [5, time]; gmCiTp set [6, time + GM_CI_COOLDOWN]; gmCiTpaid = 0; if (gmCiTout == "DONATED") then {gmCiTpaid = GM_CI_DONATION}; if (gmCiTout == "EXTORTED") then {gmCiTpaid = GM_CI_EXTORTION}; gmCiTp set [7, gmCiTpaid > 0]; GM_CI_PROFILES set [gmCiTi, gmCiTp]; gmCiTsupport = (gmZone gmCiTz) select GM_Z_SUPPORT; [gmCiTz, (gmCiTnew - gmCiTo) * GM_CI_SUPPORT_WEIGHT] call GM_fnSupportAdd; gmCiTdelta = ((gmZone gmCiTz) select GM_Z_SUPPORT) - gmCiTsupport; [gmCiTpaid] call GM_fnResourcesAdd; gmCiTr = [gmCiTout, gmCiTpaid, gmCiTp select 1, gmCiTnew, gmCiTp select 4, gmCiTv, gmCiTdelta, GM_CI_COOLDOWN]}}; GM_CI_LAST = gmCiTr; if ((gmCiTr select 0) in ["DONATED", "EXTORTED", "REFUSED", "RESISTED"]) then {gmJournalLog (gmCiTr call GM_CI_fnDescribe); if ((gmCiTr select 0) == "RESISTED") then {[gmCiTu, gmCiTa, gmCiTr select 2, gmCiTv] call GM_CI_ON_RESIST}; [gmCiTu, gmCiTa, gmCiTv, gmCiTr] call GM_CI_ON_RESULT}; gmCiTr}
+
+; Human-readable feedback shared by the action menu and campaign journal.
+GM_CI_fnDescribe = {gmCiMessage = "Conversation interrupted. Stay on foot and within 5 m of a calm civilian."; gmCiMessageCode = _this select 0; if (gmCiMessageCode == "DONATED") then {gmCiMessage = format ["Donation received: +%1 R. They have paid for this visit.", _this select 1]}; if (gmCiMessageCode == "EXTORTED") then {gmCiMessage = format ["Money taken: +%1 R. They paid out of fear. No more payments this visit.", _this select 1]}; if (gmCiMessageCode == "REFUSED") then {gmCiMessage = "Donation refused. No money received; asking has cost goodwill."; if ((_this select 5) == "EXTORT") then {gmCiMessage = "Threat refused. No money received; intimidation has cost goodwill."}}; if (gmCiMessageCode == "RESISTED") then {gmCiMessage = "They stand up to your threat. No money received; intimidation has cost goodwill."}; if (gmCiMessageCode == "COOLDOWN") then {gmCiWait = (_this select 7) - ((_this select 7) mod 1); if (gmCiWait < (_this select 7)) then {gmCiWait = gmCiWait + 1}; gmCiMessage = format ["Give them space. Try again in %1 s.", gmCiWait]}; if (gmCiMessageCode == "ALREADY_PAID") then {gmCiMessage = "They have already paid during this visit. Leave them be."}; if (gmCiMessageCode == "CAPACITY") then {gmCiMessage = "You cannot approach another civilian during this visit. Return to someone you have already spoken to."}; if ((gmCiMessageCode in ["DONATED", "EXTORTED"]) and ((_this select 1) == 0)) then {gmCiMessage = "They agree, but have no resources to give right now."}; if (gmCiMessageCode in ["DONATED", "EXTORTED", "REFUSED", "RESISTED"]) then {gmCiShownLoss = (0 - (_this select 6)) * 100 + 0.5; gmCiShownLoss = 0 - ((gmCiShownLoss - (gmCiShownLoss mod 1)) / 100); gmCiMessage = format ["%1\n%2 support: %3 points.", gmCiMessage, _this select 2, gmCiShownLoss]}; gmCiMessage}
+; Qualitative cues expose decision bands without exact personal scores.
+GM_CI_fnMood = {gmCiMood = "Wary: a donation is unlikely."; if ((_this select 3) >= GM_CI_SOLICIT_MIN) then {gmCiMood = "Sympathetic: they may donate."}; gmCiNerve = "Guarded: unlikely to give in."; if ((_this select 4) >= GM_CI_EXTORT_MIN) then {gmCiNerve = "Frightened: likely to give in."}; if ((_this select 4) < GM_CI_RESIST_MAX) then {gmCiNerve = "Defiant: expect resistance."}; gmCiAdvice = "Asking costs goodwill; threats cost more."; if ((_this select 0) != "READY") then {gmCiAdvice = _this call GM_CI_fnDescribe}; gmCiMood = format ["%1\n%2\n%3\n%4", _this select 2, gmCiMood, gmCiNerve, gmCiAdvice]; if ((_this select 0) in ["INVALID", "CAPACITY"]) then {gmCiMood = _this call GM_CI_fnDescribe}; gmCiMood}
+
+; UI request router. Preview/inspection/cancel have no economic effects.
+; A confirmed threat binds to one body for ten seconds. Leaving, switching
+; target or loading cancels it; even an old queued request cannot transfer it.
+GM_CI_fnRequest = {gmCiQu = _this select 0; gmCiQa = _this select 1; gmCiQv = _this select 2; GM_CI_FEEDBACK = "Conversation interrupted. Approach the civilian again."; if ((gmCiQu == gmCiMenuBody) and (([gmCiQu, gmCiQa] call GM_CI_fnEligible) >= 0)) then {if (gmCiQv == "INSPECT") then {GM_CI_FEEDBACK = ([gmCiQu, gmCiQa] call GM_CI_fnInspect) call GM_CI_fnMood}; if (gmCiQv == "CANCEL") then {gmCiConfirmBody = objNull; GM_CI_FEEDBACK = "You leave them be. No money taken or goodwill lost."}; if (gmCiQv == "PREVIEW") then {gmCiQr = [gmCiQu, gmCiQa] call GM_CI_fnInspect; GM_CI_FEEDBACK = gmCiQr call GM_CI_fnMood; if ((gmCiQr select 0) == "READY") then {gmCiConfirmBody = gmCiQu; gmCiConfirmUntil = time + GM_CI_CONFIRM_TIME; GM_CI_FEEDBACK = format ["%1\nExtort up to %2 R?\nEven refusal harms town support.\nChoose Threaten or Leave them be.", GM_CI_FEEDBACK, GM_CI_EXTORTION]}}; if (gmCiQv == "SOLICIT") then {GM_CI_FEEDBACK = ([gmCiQu, gmCiQa, gmCiQv] call GM_CI_fnInteract) call GM_CI_fnDescribe}; if (gmCiQv == "EXTORT") then {if ((gmCiConfirmBody == gmCiQu) and (time < gmCiConfirmUntil)) then {GM_CI_FEEDBACK = ([gmCiQu, gmCiQa, gmCiQv] call GM_CI_fnInteract) call GM_CI_fnDescribe} else {GM_CI_FEEDBACK = "You hesitated. Consider the choice again before making a threat."}; gmCiConfirmBody = objNull}} else {gmCiConfirmBody = objNull}; hint GM_CI_FEEDBACK}
+
+GM_CI_LIB_READY = true
+exit

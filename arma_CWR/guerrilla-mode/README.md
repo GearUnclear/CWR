@@ -125,6 +125,7 @@ core/                 THE shared script core (installed to <GameDir>\gmcore)
                       in description.ext = the dealer stock)
     companions.sqs    companion XP -> rank/skill + permadeath
     civilians.sqs     town population cache + kill queue + panic FSM
+    civilian_interaction*.sqs  solicit/extort actions + visit-local opinion/fear
     shakedown.sqs     occupier street theatre + resentment ticker
 
 config/               THE global faction library (installed to <GameDir>\bin)
@@ -368,3 +369,6 @@ resumes (zones/alert/garrisons native, companion rebuilt, one Save action).
   world over- or under-pays.
 - Undercover re-establishment after a break (disguise swap) remains a
   Phase-2 hook, as in Phase 1.
+
+Civilian solicitation/extortion, campaign persistence and extension hooks are
+documented in [CIVILIAN-INTERACTIONS.md](CIVILIAN-INTERACTIONS.md).

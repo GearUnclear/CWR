@@ -1,0 +1,2 @@
+; Shared civilian interaction campaign core.
+[] exec "\gmcore\init.sqs"

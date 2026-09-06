@@ -1,0 +1,38 @@
+// Isolated persistence lane for #41. Native support accrual/intimidation is
+// covered separately; this test diffs the exact interaction ledger after load.
+class CfgGuerrillaZones
+{
+    defaultOccupier = "EAST";
+    defaultResistance = "GUER";
+    seedCities = 0;
+    supportRate = 0;
+    supportDecayOccupied = 0;
+    trafficEnabled = 0;
+    class Zones
+    {
+        class Camp
+        {
+            name = "Camp";
+            type = "CAMP";
+            owner = "RESISTANCE";
+            position[] = {7515, 5790, 0};
+        };
+        class Village
+        {
+            name = "Village";
+            type = "CITY";
+            owner = "NEUTRAL";
+            support = 20;
+            position[] = {7117, 6069, 0};
+        };
+    };
+};
+class CfgGuerrillaFactions
+{
+    class CIV
+    {
+        side = "CIV";
+        civClassCount = 1;
+        civClass1 = "Civilian2";
+    };
+};
