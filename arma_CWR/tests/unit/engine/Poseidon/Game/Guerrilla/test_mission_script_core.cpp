@@ -52,6 +52,9 @@ fs::path RepoRoot()
 const std::vector<std::string> kCoreScripts = {
     "campaign.sqs",
     "capture.sqs",
+    "civilian_interaction.sqs",
+    "civilian_interaction_action.sqs",
+    "civilian_interaction_lib.sqs",
     "civilians.sqs",
     "companions.sqs",
     "economy.sqs",

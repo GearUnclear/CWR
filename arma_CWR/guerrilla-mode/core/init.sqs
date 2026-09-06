@@ -257,7 +257,9 @@ gmZoneOnEvent ["revealed", {gmEvtRevealed = gmEvtRevealed + [_this]}]
 gmZoneOnEvent ["captureStarted", {gmEvtCapStart = gmEvtCapStart + [_this]}]
 gmZoneOnEvent ["contested", {gmEvtContested = gmEvtContested + [_this]}]
 gmZoneOnEvent ["captureLost", {gmEvtCapLost = gmEvtCapLost + [_this]}]
-gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]}]
+; Native events have ONE handler slot: fan out the load notification here,
+; preserving campaign.sqs's queue while asking the civilian menu to remount.
+gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]; GM_CI_REMOUNT = true}]
 gmAlertOnEvent ["alertChanged", {gmEvtAlert = gmEvtAlert + [_this]}]
 gmAlertOnEvent ["undercoverBroken", {gmEvtUcBroken = gmEvtUcBroken + [_this]}]
 gmGarrisonOnEvent ["garrisonSpawned", {gmEvtGarSpawned = gmEvtGarSpawned + [_this]}]
@@ -298,6 +300,7 @@ GM_LIB_READY = false
 ;                   gmResources: purchases and HQ moves)
 ;   companions.sqs  companion XP -> rank/skill, permadeath
 ;   civilians.sqs   town population cache + kill-queue consumer + panic FSM
+;   civilian_interaction.sqs  solicit/extort menu + local opinion/fear service
 ;   shakedown.sqs   occupier street-theatre director + resentment ticker
 [] exec "\gmcore\scripts\capture.sqs"
 [] exec "\gmcore\scripts\qrf.sqs"
@@ -310,6 +313,7 @@ GM_LIB_READY = false
 [] exec "\gmcore\scripts\market.sqs"
 [] exec "\gmcore\scripts\companions.sqs"
 [] exec "\gmcore\scripts\civilians.sqs"
+[] exec "\gmcore\scripts\civilian_interaction.sqs"
 [] exec "\gmcore\scripts\shakedown.sqs"
 
 exit

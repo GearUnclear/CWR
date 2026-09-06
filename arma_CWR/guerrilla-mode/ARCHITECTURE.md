@@ -388,7 +388,7 @@ keep in sync.
 guerrilla-mode/core/          <- THE core. One copy. Edit here.
   init.sqs                    THIN bootstrap: script-state seed, zone markers,
                               native handler registration, exec managers
-  scripts/                    the 15 managers + helpers (manifest below)
+  scripts/                    the 18 managers + helpers (manifest below)
 
 guerrilla-mode/config/        <- THE global faction library. One copy.
   guerrilla-factions.hpp      CfgGuerrillaFactions: the vanilla WEST/EAST/GUER
@@ -430,7 +430,7 @@ per-mission copy path and it now resolves to nothing. So:
 - `#include` and `preprocessFile` do NOT strip a leading backslash. The core
   uses neither.
 
-**Manifest (`guerrilla-mode/core/scripts/`, 15 files).** This list is the
+**Manifest (`guerrilla-mode/core/scripts/`, 18 files).** This list is the
 contract: `tests/unit/.../test_mission_script_core.cpp` asserts the directory
 holds exactly these names and that this section names them all, so a script
 added or retired without a doc edit fails the unit lane.
@@ -448,6 +448,9 @@ added or retired without a doc edit fails the unit lane.
 | `recruit.sqs` | Camp menu (unchanged flow; anchor = first CAMP-type zone; classes from faction keys) |
 | `recruit_action.sqs` | thin `addAction` dispatcher (unchanged) |
 | `market.sqs` | HQ / cache / garage / dealer action menus over the native `GuerrillaBase` + `Market` facts (issues #16/#27/#28): the Establish/Move HQ action (debits `hqMoveCost` on a move), Stash \<weapon\> at the cache (`removeWeapon` + cargo; retrieval = the holder's own TAKE actions), Lock/Unlock the nearest vehicle inside the garage ring, the BUY menu beside a live dealer (<=8 rows + a here/HQ delivery toggle: `WeaponHolder` at your feet or the HQ cache; the dealer's lot or the HQ garage locked); one-time map markers (dealers, HQ flag); `hqEstablish` objective + diary lines. The SECOND "-" writer of `gmResources` |
+| `civilian_interaction.sqs` | #41: stable nearby civilian selection, mood/financial/preview/cooldown menus (at most three actions), one pending request, bounded visit-local profile pruning and post-load remount |
+| `civilian_interaction_action.sqs` | captures target/caller/verb from addAction into the one-slot request |
+| `civilian_interaction_lib.sqs` | synchronous opinion/fear service, free assessment, cooldown/recovery, one payment per visit, support nudge and atomic payout; preview/cancel router and #42 resistance callback. See CIVILIAN-INTERACTIONS.md for the campaign contract and descriptor keys |
 | `market_action.sqs` | thin `addAction` dispatcher (`gmMktReq*`), `recruit_action` twin |
 | `companions.sqs` | XP/rank/permadeath (unchanged model; `companionClass` from faction key; live `setRank` on promotion now) |
 | `civilians.sqs` | town population cache + kill-queue consumer + panic FSM |
@@ -484,8 +487,9 @@ loops are native; see A.2).
 - **Naming:** `GM_*` data / `gm*` scalars / `GM_fn*` helpers / `GM_tmp*`
   scratch, plus `gmEvt*` for the native-event queues.
 - **Single-writer ownership** per global (§4 below, updated by the file map
-  above: each `gmEvt*` queue has one consumer; `gmResources`/`gmManpower` keep
-  the +/− direction split; heat direction is engine-enforced).
+  above: each `gmEvt*` queue has one consumer; `gmResources` credits use atomic `GM_fnResourcesAdd` calls from economy and
+  civilian interactions, with atomic market/recruit debits; `gmManpower` keeps
+  its direction split; heat direction is engine-enforced).
 - **SQS dialect rules:** one statement per line, `~N`, `@cond`,
   `#label`/`goto`, `? cond : stmt`; `call` bodies are strings and may not
   wait. Managers still gate on `@GM_LIB_READY` (kept over `isNil` polling for
@@ -569,7 +573,8 @@ state is native and needs nothing.
 | `qrf.sqs`         | consumes `gmEvtAlert`; `GM_QRF_*` (QRF group/vehicle transient) | `gmZoneAlert`, `gmZoneLastKnown`, `gmGarrison*`, `gmWarLevel`, occupier faction keys |
 | `undercover.sqs`  | `gmUndercover`, consumes `gmEvtUcBroken`, player fired-EH | `gmUndercoverWitnesses` (advisory hint only) |
 | `campaign.sqs`    | consumes `gmEvtLoaded`; `GM_pSaveAct`; reconciles `GM_COMP_OBJ` nulls, `GM_PLAYER_GROUPS` reseed | companion rows |
-| `economy.sqs`     | `gmResources`/`gmManpower` (+ only), `GM_ECON_*`          | `gmZone` tuples, `gmResistanceSide` |
+| `economy.sqs`     | zone income via atomic `GM_fnResourcesAdd`, `gmManpower`, `GM_ECON_*`          | `gmZone` tuples, `gmResistanceSide` |
+| `civilian_interaction*.sqs` | `GM_CI_*`, `gmCi*`, one pending action request; credits through `GM_fnResourcesAdd`, support nudges through `GM_fnSupportAdd` | ambient group roster, native zones, CIV descriptor, panic/shakedown state; emits synchronous result/resistance callbacks |
 | `escalation.sqs`  | `gmWarLevel`, heat **decay** (`gmZoneSet heatDecay`) | `gmZone` owners, `gmZoneAlert` |
 | `loot.sqs`        | `GM_GEAR_*` (via `GM_fnBumpGear`), consumes `gmEvtGar*`   | `gmGarrisonSpawned/Groups`, resistance loot keys |
 | `recruit.sqs`     | `GM_PLAYER_GROUPS`, `gmAct*`/`gmReq*` (consumer), `gmResources`/`gmManpower` (−) | `gmZone` (CAMP anchor), faction recruit keys |
@@ -581,7 +586,8 @@ compromise on the witness's nearest zone); `escalation.sqs` holds the sole
 scripted decay verb.
 
 CITY `support` has exactly two sanctioned writers: the scripts'
-`GM_fnSupportAdd` (civilian-kill deltas + delayed resentment, clamps 0–100,
+`GM_fnSupportAdd` (civilian-kill deltas + delayed resentment + #41
+personal-opinion losses, clamps 0–100,
 lands regardless of presence) and the **native channel** in
 `ZoneRegistry::EvaluateTick` (presence-gated accrual while a town is
 occupier-free; intimidation decay while occupier-only, floored at

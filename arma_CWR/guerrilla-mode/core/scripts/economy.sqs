@@ -1,10 +1,9 @@
 ; ============================================================================
 ;  economy.sqs  -  Resources (Rouble) + Manpower (HR) income tick.
 ; ----------------------------------------------------------------------------
-;  OWNS (exclusive write, INCOME / "+" direction only): gmResources, gmManpower
-;     (recruit.sqs debits the same scalars, "-" direction only - the
-;     directional split avoids any same-direction collision), plus the
-;     GM_ECON_* / GM_MANPOWER_CAP tunables below.
+;  OWNS: zone income totals, gmManpower income, GM_ECON_* / GM_MANPOWER_CAP.
+;  Credits gmResources through atomic GM_fnResourcesAdd, also used by
+;  civilian_interaction.sqs. Recruit and market use atomic treasury debits.
 ;  READS: the native zone registry via gmZoneCount/gmZone (owner / type /
 ;     income / support tuple fields), gmResistanceSide and GM_PANIC_ZONES
 ;     (civilians.sqs's town panic ledger, issue #8).
@@ -52,8 +51,8 @@ gmEcoW = gmEcoW + 5
 ; --- sum this tick's income across all zones (single atomic evaluated line) ---
 gmEcoR = 0; gmEcoHR = 0; gmEcoI = 0; while {gmEcoI < gmZoneCount} do {gmEcoZ = gmZone gmEcoI; if (((gmEcoZ select GM_Z_OWNER) == gmResistanceSide) and ((gmEcoZ select GM_Z_TYPE) in ["OUTPOST","AIRFIELD","SEAPORT"])) then {gmEcoR = gmEcoR + (gmEcoZ select GM_Z_INCOME)}; if ((gmEcoZ select GM_Z_TYPE) == "CITY") then {gmEcoP = 1; if ((gmEcoZ select GM_Z_NAME) in GM_PANIC_ZONES) then {gmEcoP = 0.5}; gmEcoR = gmEcoR + ((gmEcoZ select GM_Z_SUPPORT) * GM_ECON_R_PER_SUP * gmEcoP); if (((gmEcoZ select GM_Z_SUPPORT) >= GM_ECON_HR_SUP_MIN) and (gmEcoP >= 1)) then {gmEcoHR = gmEcoHR + GM_ECON_HR_PER_TOWN}}; gmEcoI = gmEcoI + 1}
 
-; --- apply income (the "+" direction this script exclusively owns) ------------
-gmResources = gmResources + gmEcoR
+; --- apply income (same atomic helper used by civilian interactions) ----------
+[gmEcoR] call GM_fnResourcesAdd
 gmManpower = gmManpower + gmEcoHR
 ? gmManpower > GM_MANPOWER_CAP : gmManpower = GM_MANPOWER_CAP
 

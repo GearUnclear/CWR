@@ -65,6 +65,7 @@ triAssertEq [(triBriefingSwitch "__BRIEFING"), "Main"]
 // -- Plan page (__PLAN <- "Plan"): standing objectives + scripted starters ----
 triAssertEq [(triBriefingSwitch "__PLAN"), "__PLAN"]
 gjPlan = triControlText 56
+triScreenshot "journal_plan_objectives"
 triAssertIncludes [gjPlan, "OBJECTIVES"]
 triAssertIncludes [gjPlan, "Hold every base"]
 triAssertIncludes [gjPlan, "Raise every town"]

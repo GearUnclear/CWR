@@ -12,6 +12,39 @@
 //  burning convoy on a forest road and a firefight between farmhouses look
 //  nothing like the Sinai set - which is the point of shooting both.
 //
+//  HOW THE FIRING WORKS (pass 3).  Pass 2 puppeted `unit fire (primaryWeapon
+//  unit)`, and every rifle went off at 45-60 degrees into the sky: a forced
+//  shot with no fire target goes through Man::AimWeaponForceFire, which aims
+//  at Direction() with an elevation component of 10 - near-vertical, clamped
+//  to the stance's max gun elevation.  Pass 3 gives every shooter a real human
+//  target instead and lets the combat AI aim, which it does level:
+//    * setCaptive true only changes how OBSERVERS classify the unit
+//      (EntityAI::GetTargetSide -> TCivilian, VehicleAIDiag.cpp); a captive
+//      can still acquire and engage targets himself, and stays invisible to
+//      the live campaign AI while doing it.
+//    * disableAI "MOVE" only gates the movement code (DAMove is read in
+//      VehicleAIPilot.cpp), not targeting - the marks hold.
+//    * `reveal` (full-accuracy group AddTarget) plus a per-man silent
+//      `doFire` sets AssignTarget + EnableFireTarget, and the enable-fire
+//      target is exempt from the only is-it-an-enemy gate on the fire path
+//      (TargetFire.cpp SelectFireWeapon), so captive men pour real, aimed,
+//      LEVEL bursts into captive "enemies" that never return fire.
+//    * captive targets read as civilians, so they also never trip the
+//      friendly-in-the-firing-lane check - the staggered file can shoot past
+//      its own shoulders (probe_aim.test.sqf proved all of this).
+//  The foes are posed like the subjects (captive, MOVE off) and are placed
+//  20-40 m out on the subject->background line, so the exchange is one-way
+//  and the camera side is deterministic.  Deaths happen for real: bullets at
+//  20 m kill, which is why the convoy escort is now spawned ALIVE and shot by
+//  the ambush party - the aftermath bodies land where the fire found them,
+//  with any survivor finished by ssFoeDoom so the later scenes are guaranteed
+//  their corpses.  One rule learned from the probe: never let a firing lane
+//  cross another staged squad - suppression reactions scramble the poses.
+//  Fire is continuous once ordered (a burst every second or two per man), so
+//  each composition takes two frames a few sim-frames apart instead of the
+//  old synchronized volley, and the shoot banks the frames where the flash
+//  landed.
+//
 //  WHERE THE SETS ARE.  Surveyed out of the world file the same way the Sinai
 //  anchors were, but filtered on ROAD segments rather than object density,
 //  because a road is the one piece of ground guaranteed clear enough to put a
@@ -39,8 +72,9 @@
 //              Skoda/SkodaBlue/SkodaRed, Jeep, M113, M1Abrams
 //    guns      Gun120 (T72, T80 AND M1Abrams - read their weapons[], do not
 //              assume Gun125 for the Soviet hull), Gun105 (M60), Gun73 (BMP)
-//  Tank main guns need a CREW - `veh fire "Gun120"` on an empty hull does
-//  nothing, so the armour scenes moveInDriver/moveInGunner first.
+//  Tank guns need a CREW - an uncrewed hull has no gunner AI to aim or fire -
+//  so the armour scene moveInDriver/moveInGunner first, then doFire's the tank
+//  at a target hull down the road (see scene 20-22).
 // ============================================================================
 
 triSimUntil { alive player }
@@ -145,8 +179,56 @@ ssLock = {
     { _x disableAI "MOVE"; _x setUnitPos "UP"; _x setDir ssFace; _x switchMove "Civil" } forEach (units ssGrp)
 }
 
-ssShoot = { { _x fire (primaryWeapon _x) } forEach (units ssGrp) }
-ssKill = { ssBodies = ssBodies + (units ssGrp); { _x setCaptive true; _x setDammage 1 } forEach (units ssGrp) }
+// The opposing men the rifles aim at.  Spawned as a staggered line like
+// ssLine, then posed captive + MOVE-off facing back at the squad; ssFoeList
+// snapshots them at pose time because the dead leave `units group`.
+ssFoes = {
+    ssFoeGrp = createGroup ssFoeSide;
+    ssI = 0;
+    while "ssI < count ssFoeMen" do {
+        (ssFoeMen select ssI) createUnit [[ssFoeLx + ssI * ssFoeGap, ssFoeLz - ssI * ssFoeGapZ, 0], ssFoeGrp, "", 0.4, "PRIVATE"];
+        ssI = ssI + 1;
+    }
+}
+
+ssFoePose = {
+    ssFoeList = units ssFoeGrp;
+    ssI = 0;
+    while "ssI < count ssFoeList" do {
+        ssU = ssFoeList select ssI;
+        ssU setCaptive true;
+        ssU setBehaviour "COMBAT";
+        ssU setDir ssFoeFace;
+        ssU disableAI "MOVE";
+        if (ssI % 2 == 1) then { ssU setUnitPos "MIDDLE" } else { ssU setUnitPos "UP" };
+        ssI = ssI + 1;
+    }
+}
+
+// (Re)aim the squad: reveal every still-living foe to the squad's group, then
+// hand each man a foe of his own - reversed round-robin, so the fire lanes
+// fan apart instead of running down the squad's own file.  Re-issuing the
+// same order is a no-op in the engine, so this runs again right before every
+// frame to re-point any man whose target just died.
+ssEngage = {
+    ssFoeAlive = units ssFoeGrp;
+    if ((count ssFoeAlive) > 0) then {
+        { (units ssGrp select 0) reveal _x } forEach ssFoeAlive;
+        ssI = 0;
+        while "ssI < count (units ssGrp)" do {
+            ssU = units ssGrp select ssI;
+            if (vehicle ssU == ssU) then { ssU doFire (ssFoeAlive select ((count ssFoeAlive) - 1 - (ssI mod (count ssFoeAlive)))) };
+            ssI = ssI + 1;
+        }
+    }
+}
+
+// Finish the foes and keep the bodies: real fire killed some of them where
+// they stood, setDammage claims the rest, and the whole snapshot goes into
+// ssBodies for the aftermath scenes (a second setDammage on a corpse is a
+// no-op).
+ssFoeDoom = { ssBodies = ssBodies + ssFoeList; { _x setDammage 1 } forEach ssFoeList; ssFoeList = [] }
+ssWipeFoes = { { deleteVehicle _x } forEach ssFoeList; ssFoeList = [] }
 
 ssWipe = { { deleteVehicle _x } forEach ssJunk; ssJunk = [] }
 ssWipeMen = { { deleteVehicle _x } forEach (units ssGrp) }
@@ -154,7 +236,9 @@ ssWipeBodies = { { deleteVehicle _x } forEach ssBodies; ssBodies = [] }
 
 ssJunk = []
 ssBodies = []
+ssFoeList = []
 ssGrp = grpNull
+ssFoeGrp = grpNull
 ssGap2 = 0
 ssGapZ = 0.5
 
@@ -171,18 +255,22 @@ triSimFrames 40
 call ssBurn
 triSimFrames 50
 
-// the convoy's escort, dead on the road beside the trucks
+// the convoy's escort - ALIVE this time: they are what the ambush party is
+// actually shooting at, spawned on the verge beside the trucks (the same
+// marks the staged corpses used to lie on), facing back down the road into
+// the ambush.  The bullets do the killing; ssFoeDoom finishes any survivor
+// before the aftermath scene so the bodies are guaranteed.
 call {
-    ssGrp = createGroup east;
-    ssMen = ["SoldierEB", "SoldierEMG", "SoldierELAW"];
-    ssLx = 9733; ssLz = 12476; ssGap = 1.4; ssGapZ = -3.6;
-    call ssLine;
+    ssFoeSide = east;
+    ssFoeMen = ["SoldierEB", "SoldierEMG", "SoldierELAW"];
+    ssFoeLx = 9733; ssFoeLz = 12476; ssFoeGap = 1.4; ssFoeGapZ = -3.6; ssFoeFace = 193;
+    call ssFoes;
 }
-triSimUntil { (count (units ssGrp)) >= 3 }
-call ssKill
-triSimFrames 40
+triSimUntil { (count (units ssFoeGrp)) >= 3 }
+call ssFoePose
+triSimFrames 10
 
-// the partisans, still firing up the road
+// the partisans, firing up the road at the escort
 call {
     ssGrp = createGroup resistance;
     ssMen = ["SoldierGB", "SoldierGLAW", "SoldierGMG", "OfficerG"];
@@ -193,35 +281,37 @@ triSimUntil { (count (units ssGrp)) >= 4 }
 ssFace = 13
 call ssFight
 triSimFrames 60
+call ssEngage
+triSimFrames 90
 
 ssTgt = units ssGrp select 2
 ssAimH = 1.5
 ssOff = [-1.6, 1.9, -7]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "01_forest_road_ambush"
 
-call ssShoot
-triSimFrames 1
+triSimFrames 4
 triScreenshot "02_partisan_fire"
 
 ssTgt = units ssGrp select 1
 ssAimH = 1.2
 ssOff = [-1.5, 1.2, -6]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "03_law_gunner_in_the_trees"
 
 ssTgt = units ssGrp select 0
 ssAimH = 1.5
 ssOff = [3.5, 1.7, -3]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "04_partisan_firing"
 
+call ssFoeDoom
 call ssWipeMen
 triSimFrames 8
 
@@ -277,6 +367,19 @@ triSimFrames 30
 call ssBurn
 triSimFrames 40
 
+// Soviet holdouts up the street, past the burning cars - the partisans'
+// targets.  Nudged 2 m east of the shooters' file so the firing lanes clear
+// the Skoda and truck hulls instead of dying against them.
+call {
+    ssFoeSide = east;
+    ssFoeMen = ["SoldierEB", "SoldierEMG", "SoldierELAW"];
+    ssFoeLx = 3892; ssFoeLz = 7112; ssFoeGap = 1.1; ssFoeGapZ = 2.0; ssFoeFace = 180;
+    call ssFoes;
+}
+triSimUntil { (count (units ssFoeGrp)) >= 3 }
+call ssFoePose
+triSimFrames 10
+
 call {
     ssGrp = createGroup resistance;
     ssMen = ["SoldierGB", "SoldierGMG", "SoldierGLAW", "OfficerG"];
@@ -287,39 +390,52 @@ triSimUntil { (count (units ssGrp)) >= 4 }
 ssFace = 0
 call ssFight
 triSimFrames 60
+call ssEngage
+triSimFrames 90
 
 ssTgt = units ssGrp select 1
 ssAimH = 1.5
 ssOff = [2.6, 1.9, -7]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "08_village_firefight"
 
-call ssShoot
-triSimFrames 1
+triSimFrames 4
 triScreenshot "09_resistance_fire"
 
 ssTgt = units ssGrp select 0
 ssAimH = 1.5
 ssOff = [2.0, 1.6, -2.6]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "10_partisan_rifleman"
 
 ssTgt = units ssGrp select 3
 ssAimH = 1.5
 ssOff = [3.4, 1.8, -4.5]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "11_officer_firing"
 
 call ssWipeMen
+call ssWipeFoes
 triSimFrames 8
 
-// the other side of the same street
+// the other side of the same street: Soviets firing at partisan holdouts on
+// the same marks the Soviet foes just vacated
+call {
+    ssFoeSide = resistance;
+    ssFoeMen = ["SoldierGB", "SoldierGMG", "SoldierGLAW"];
+    ssFoeLx = 3892; ssFoeLz = 7112; ssFoeGap = 1.1; ssFoeGapZ = 2.0; ssFoeFace = 180;
+    call ssFoes;
+}
+triSimUntil { (count (units ssFoeGrp)) >= 3 }
+call ssFoePose
+triSimFrames 10
+
 call {
     ssGrp = createGroup east;
     ssMen = ["SoldierEB", "SoldierEMG", "SoldierELAW", "OfficerE"];
@@ -330,24 +446,27 @@ triSimUntil { (count (units ssGrp)) >= 4 }
 ssFace = 0
 call ssFight
 triSimFrames 60
+call ssEngage
+triSimFrames 90
 
 ssTgt = units ssGrp select 1
 ssAimH = 1.5
 ssOff = [2.6, 1.9, -7]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "12_soviets_in_the_village"
 
 ssTgt = units ssGrp select 2
 ssAimH = 1.4
 ssOff = [3.4, 1.8, -4.5]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "13_machinegunner_firing"
 
 call ssWipeMen
+call ssWipeFoes
 triSimFrames 8
 
 // ============================================================================
@@ -457,11 +576,30 @@ call ssWipe
 triSimFrames 10
 
 // ============================================================================
-//  20-22  Armour in the block town.  Crewed, so the 125 mm actually fires.
+//  20-22  Armour in the block town, pointed DOWN THE ROAD at a real target:
+//  a pair of enemy T55 hulls at the road crossing 45 m south (empty +
+//  engine-off, so the detector files them as civilian and the live campaign
+//  ignores them; doFire's enable-fire order shoots them anyway).  The gunner
+//  levels the turret on the hull and works it with the COAX - against a
+//  civilian-classified target the fire-value math never justifies a 125 mm
+//  shell, and the MG is the better photograph anyway: it can never kill the
+//  hull, so the tank fires level and continuously through every frame of the
+//  scene.  The dismounts get their own foe line 30 m out on the verge.
 // ============================================================================
 setDate [1985, 6, 15, 18, 20]
-call { ssCls = ["T72"]; ssLx = 3952; ssLz = 5020; ssGap = 0; ssGap2 = 0; ssVDir = 190; call ssPark }
+call { ssCls = ["T72"]; ssLx = 3952; ssLz = 5020; ssGap = 0; ssGap2 = 0; ssVDir = 181; call ssPark }
 triSimFrames 40
+call { ssT55a = "T55G" createVehicle [3951, 4976, 0]; ssT55a setDir 5; ssT55b = "T55G" createVehicle [3958, 4972, 0]; ssT55b setDir 30 }
+triSimFrames 20
+call {
+    ssFoeSide = resistance;
+    ssFoeMen = ["SoldierGB", "SoldierGMG", "SoldierGLAW"];
+    ssFoeLx = 3950; ssFoeLz = 4988; ssFoeGap = 1.6; ssFoeGapZ = 1.4; ssFoeFace = 0;
+    call ssFoes;
+}
+triSimUntil { (count (units ssFoeGrp)) >= 3 }
+call ssFoePose
+triSimFrames 10
 call {
     ssGrp = createGroup east;
     ssMen = ["SoldierEB", "SoldierEMG", "SoldierELAW", "OfficerE"];
@@ -471,32 +609,39 @@ call {
 triSimUntil { (count (units ssGrp)) >= 4 }
 call { ssCrew = units ssGrp; (ssCrew select 0) moveInDriver ssHero; (ssCrew select 1) moveInGunner ssHero }
 triSimFrames 40
-ssFace = 190
+ssFace = 181
 call ssFight
 triSimFrames 40
+
+// aim the tank at whichever hull still lives, then let the dismounts open up
+ssTankEngage = { if (alive ssT55a) then { ssHero reveal ssT55a; ssHero doFire ssT55a } else { if (alive ssT55b) then { ssHero reveal ssT55b; ssHero doFire ssT55b } } }
+call ssTankEngage
+call ssEngage
+triSimFrames 120
 
 ssTgt = ssHero
 ssAimH = 1.9
 ssOff = [-9, 2.2, -7]
 call ssAim
-ssHero fire "Gun120"
-triSimFrames 1
-triScreenshot "20_t72_main_gun"
+call ssTankEngage
+triSimFrames 4
+triScreenshot "20_t72_holding_the_road"
 
-ssHero fire "MachineGun7_6"
-triSimFrames 1
+triSimFrames 6
 triScreenshot "21_tank_in_the_town"
 
 ssTgt = units ssGrp select 2
 ssAimH = 1.4
 ssOff = [4.5, 1.7, -5]
 call ssAim
-ssHero fire "Gun120"
-call ssShoot
-triSimFrames 1
+call ssTankEngage
+call ssEngage
+triSimFrames 4
 triScreenshot "22_infantry_beside_the_tank"
 
 call ssWipeMen
+call ssWipeFoes
+call { deleteVehicle ssT55a; deleteVehicle ssT55b }
 call ssWipe
 triSimFrames 10
 
@@ -509,6 +654,19 @@ triSimFrames 30
 call ssBurn
 triSimFrames 50
 
+// the enemy the partisans are shooting at: a Soviet picket a few metres short
+// of the burning truck, silhouetted by it, 20 m from the guns - close enough
+// that the dusk light cannot hide them from the detector
+call {
+    ssFoeSide = east;
+    ssFoeMen = ["SoldierEB", "SoldierEMG", "SoldierELAW"];
+    ssFoeLx = 9735; ssFoeLz = 12484; ssFoeGap = 1.7; ssFoeGapZ = -0.5; ssFoeFace = 193;
+    call ssFoes;
+}
+triSimUntil { (count (units ssFoeGrp)) >= 3 }
+call ssFoePose
+triSimFrames 10
+
 call {
     ssGrp = createGroup resistance;
     ssMen = ["SoldierGB", "SoldierGMG", "SoldierGLAW", "OfficerG"];
@@ -519,28 +677,34 @@ triSimUntil { (count (units ssGrp)) >= 4 }
 ssFace = 13
 call ssFight
 triSimFrames 80
+call ssEngage
+triSimFrames 90
+// the engage warm-up outlives the wreck's flame phase - relight it so the
+// frames get their firelight back
+call ssBurn
+triSimFrames 20
 
 ssTgt = units ssGrp select 1
 ssAimH = 1.5
 ssOff = [-1.4, 1.8, -6]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "23_dusk_contact"
 
-call ssShoot
-triSimFrames 1
+triSimFrames 4
 triScreenshot "24_muzzle_flash"
 
 ssTgt = units ssGrp select 2
 ssAimH = 1.4
 ssOff = [-2.4, 2.4, -10]
 call ssAim
-call ssShoot
-triSimFrames 1
+call ssEngage
+triSimFrames 4
 triScreenshot "25_firelight_on_the_road"
 
 call ssWipeMen
+call ssWipeFoes
 call ssWipe
 triSimFrames 10
 

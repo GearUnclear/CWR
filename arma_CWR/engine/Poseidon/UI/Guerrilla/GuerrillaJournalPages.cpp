@@ -537,9 +537,18 @@ class Sheet
     void KV(const RString& label, const RString& digits, const RString& unit, const RString& value,
             const PackedColor* digitColor = nullptr, const PackedColor* valueColor = nullptr)
     {
-        Cell(label, kLabelW, kBody, &kMuted);
-        Cell(digits, kDigitW, kMono, digitColor ? digitColor : &kWhite, HARight);
-        Cell(RString(" ") + unit, kUnitW, kMono, &kMuted);
+        if (digits.GetLength() == 0 && unit.GetLength() == 0)
+        {
+            // Text-only rows can use the empty numeric columns for their
+            // label without moving the value or changing the page height.
+            Cell(label, kValueX - kGapW, kBody, &kMuted);
+        }
+        else
+        {
+            Cell(label, kLabelW, kBody, &kMuted);
+            Cell(digits, kDigitW, kMono, digitColor ? digitColor : &kWhite, HARight);
+            Cell(RString(" ") + unit, kUnitW, kMono, &kMuted);
+        }
         Spacer(kGapW);
         _html->SetHanging(kValueX * _pageW);
         Text(value, kBody, valueColor ? valueColor : &kWhite);
@@ -1014,11 +1023,13 @@ void ObjectiveRow(Sheet& s, bool done, const RString& text, const RString& digit
         s.Break();
         return;
     }
-    s.Cell(text, kLabelW - 0.035f, kBody, done ? &kDim : &kWhite);
-    s.Cell(digits, kDigitW, kMono, &kWhite, HARight);
-    s.Cell(RString(" ") + unit, kUnitW, kMono, &kMuted);
+    // Objective names are longer than the short metric labels used by KV.
+    // Give them half the row and keep the count/denominator together: the
+    // metric grid clipped both the goal and its total on the in-game notepad.
+    s.Cell(text, 0.50f - 0.035f, kBody, done ? &kDim : &kWhite);
+    s.Cell(digits + RString(" ") + unit, 0.26f, kMono, &kWhite, HARight);
     s.Spacer(kGapW);
-    s.Bar(fill, 1.0f - kValueX - kTailW - kGapW, kGreen);
+    s.Bar(fill, 0.24f - kGapW, kGreen);
     s.Break();
 }
 
