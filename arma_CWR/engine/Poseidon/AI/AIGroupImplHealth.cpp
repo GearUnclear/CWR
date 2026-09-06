@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -197,7 +198,7 @@ const AITargetInfo* AIGroup::FindRepairPosition(AIUnit::ResourceState state) con
     const AITargetInfo* truck = nullptr;
     float dist2Truck = FLT_MAX;
 
-    for (int i = 0; i < GetCenter()->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(this) && i < GetCenter()->NTargets(); i++)
     {
         const AITargetInfo& info = GetCenter()->GetTarget(i);
         if (!info._type)
@@ -426,7 +427,7 @@ const AITargetInfo* AIGroup::FindHealPosition(AIUnit::ResourceState state, AIUni
 
     Vector3 pos = unit ? unit->Position() : Leader()->Position();
 
-    for (int i = 0; i < GetCenter()->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(this) && i < GetCenter()->NTargets(); i++)
     {
         const AITargetInfo& info = GetCenter()->GetTarget(i);
         if (info._destroyed)
@@ -948,7 +949,7 @@ const AITargetInfo* AIGroup::FindRearmPosition(AIUnit::ResourceState state) cons
     const AITargetInfo* truck = nullptr;
     float dist2Truck = FLT_MAX;
 
-    for (int i = 0; i < GetCenter()->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(this) && i < GetCenter()->NTargets(); i++)
     {
         const AITargetInfo& info = GetCenter()->GetTarget(i);
         if (info._destroyed)
@@ -1484,6 +1485,7 @@ void AIGroup::DoRefresh()
 // communication with center
 void AIGroup::ReceiveMission(Mission& mis)
 {
+    if (Guerrilla::IndependentGroup(this)) return;
 #if LOG_COMM
     Log("Receive mission: Group %s: Mission %d at %.0f,%.0f", (const char*)GetDebugName(), mis._action,
         mis._destination.X(), mis._destination.Z());

@@ -1303,7 +1303,7 @@ items:
   - id: unassociated-assailants
     title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 3
     depends_on: [extort-solicit]
     gh_issues: [42]
@@ -1315,6 +1315,7 @@ items:
       faction - hostile to everyone, loyal to nobody - and exist to carry the
       chaos real insurgencies have.
     log:
+      - "2026-09-06: implementing #42: native individual hostility, eight private group slots, CIV handgun admission, shared eligible-time rogue clock, transactional extortion, death classification and optional persistence. Focused unit suite passes; Classic and LoBo game validation in progress."
       - "2026-08-05: filed. The blocking fact is that ZoneRegistry::ApplyCampaignFriendship (ZoneRegistry.cpp:455-503) welds the civilian center friendly to BOTH war sides and re-applies on every load, under the comment 'the population is nobody's enemy; the ambience layer's civilians are not a third army' - the exact assumption this feature breaks. Friendship is per-CENTER (setFriend / AICenter::SetFriendship), so dropping it would turn every civilian on the island hostile at once, the opposite of 'sparingly'."
       - "Mechanism that does work: unit side comes from the receiving group's AI center on all three creation paths (verified in the #26 pass), so a rogue moves into a group on another center while keeping his civilian class and model - the same class-vs-center split the undercover system already relies on."
       - "The spare side slot must be COMPUTED, not hardcoded to WEST as issue #2 assumes: on vanilla Abel (occupier EAST, resistance GUER) WEST is free, but on Guerrilla.Lebanon80 the IDF occupier IS WEST and Hizballah is EAST, leaving GUER as the only free slot. ResolveSideCollisions already pins both campaign sides and is the natural place to derive the leftover one."

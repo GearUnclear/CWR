@@ -75,9 +75,10 @@ triAssertEq [ciResult select 3, 10]
 triAssertEq [gmResources, ciMoney + GM_CI_EXTORTION]
 triAssertEq [((gmZone ciZone) select GM_Z_SUPPORT), ciSupport - 1.5]
 
-// Fight-back is an exact-once hook for #42; no payment and no faction change.
+// Isolate the exact-once transaction callback here; native conversion and
+// loss of civilian eligibility are exercised by guerrilla_assailants.
 ciResists = 0
-GM_CI_ON_RESIST = {ciResists = ciResists + 1; ciResistBody = _this select 0; ciResistZone = _this select 2}
+GM_CI_ON_RESIST = {ciResists = ciResists + 1; ciResistBody = _this select 0; ciResistZone = _this select 2; true}
 GM_CI_PROFILES set [ciIndex, [ciBody, "Village", 100, 100, 19, time, 0]]
 ciMoney = gmResources
 ciResult = [ciBody, player, "EXTORT"] call GM_CI_fnInteract

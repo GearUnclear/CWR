@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -727,14 +728,14 @@ void EntityAI::FindHideBehind(Vector3 pos, float maxDist)
             }
             if (unit->GetCombatMode() != CMStealth)
             {
-                if (!center->IsEnemy(tar->side))
+                if (!Guerrilla::ObserverHostile(unit, tar->idExact, tar->side, center))
                 {
                     break;
                 }
             }
             else
             {
-                if (!center->IsEnemy(tar->side) && tar->side != TSideUnknown)
+                if (!Guerrilla::ObserverHostile(unit, tar->idExact, tar->side, center) && tar->side != TSideUnknown)
                 {
                     break;
                 }
@@ -1188,13 +1189,16 @@ bool EntityAI::WhatFireResult(FireResult& result, const Target& target, float ti
         return false;
     }
 
+    if (Guerrilla::IndependentGroup(unit->GetGroup()) &&
+        !Guerrilla::ObserverHostile(unit, target.idExact, target.side, unit->GetGroup()->GetCenter())) return false;
+
     float visibility = _visTracker.KnownValue(this, _currentWeapon, target.idExact, 0.9f);
     if (visibility < 0)
     {
         visibility = GLOB_WORLD->Visibility(unit, target.idExact);
 
         AICenter* center = unit->GetGroup()->GetCenter();
-        if (center->IsFriendly(target.side))
+        if (!Guerrilla::IndependentGroup(unit->GetGroup()) && center->IsFriendly(target.side))
         {
             visibility = 1;
         }
@@ -1311,12 +1315,15 @@ bool EntityAI::WhatFireResult(FireResult& result, const Target& target, int weap
         return false;
     }
 
+    if (Guerrilla::IndependentGroup(unit->GetGroup()) &&
+        !Guerrilla::ObserverHostile(unit, target.idExact, target.side, unit->GetGroup()->GetCenter())) return false;
+
     float visibility = _visTracker.KnownValue(this, _currentWeapon, target.idExact, 0.9f);
     if (visibility < 0)
     {
         visibility = GLOB_WORLD->Visibility(unit, target.idExact);
         AICenter* center = unit->GetGroup()->GetCenter();
-        if (center->IsFriendly(target.side))
+        if (!Guerrilla::IndependentGroup(unit->GetGroup()) && center->IsFriendly(target.side))
         {
             visibility = 1;
         }
@@ -1793,7 +1800,7 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
         enableOtherTarget = false;
     }
 
-    if (tgt && !center->IsEnemy(tgt->side))
+    if (tgt && !Guerrilla::ObserverHostile(unit, tgt->idExact, tgt->side, center))
     {
         if (unit->GetEnableFireTarget() != tgt)
         {
@@ -1830,7 +1837,7 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
             {
                 continue;
             }
-            if (!center->IsEnemy(tgtI->side))
+            if (!Guerrilla::ObserverHostile(unit, tgtI->idExact, tgtI->side, center))
             {
                 continue;
             }
@@ -1934,7 +1941,7 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
                 {
                     continue;
                 }
-                if (!center->IsEnemy(tgtI->side))
+                if (!Guerrilla::ObserverHostile(unit, tgtI->idExact, tgtI->side, center))
                 {
                     continue;
                 }

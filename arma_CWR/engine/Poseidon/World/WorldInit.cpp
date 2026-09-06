@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -669,6 +670,7 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Ambient road traffic follows the registry: Clear + read its own
     // optional CfgGuerrillaZones traffic* keys.
     Guerrilla::Traffic::Instance().InitMission();
+    Guerrilla::AssailantSystem::Instance().InitMission();
     // Stash registry likewise resets per mission (no config of its own).
     Guerrilla::StashRegistry::Instance().InitMission();
     // Field journal (diary / objectives / status lines behind the map's

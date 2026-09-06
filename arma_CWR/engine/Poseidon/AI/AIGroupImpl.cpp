@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -566,7 +567,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
                             vtar->timeReported = Glob.time;
                             vtar->posReported = vtar->position;
                         }
-                        else if (vtar->side == TSideUnknown || center->IsEnemy(vtar->side))
+                        else if (vtar->side == TSideUnknown || Guerrilla::ObserverHostile(Leader(), vtar->idExact, vtar->side, center))
                         {
                             // report enemy or unknown - only once
                             vtar->timeReported = Glob.time;
@@ -581,7 +582,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
         {
             SendReport(ReportNew, *vtar);
 
-            if (center->IsEnemy(vtar->side) && IsLocal() && !IsAnyPlayerGroup())
+            if (Guerrilla::ObserverHostile(Leader(), vtar->idExact, vtar->side, center) && IsLocal() && !IsAnyPlayerGroup())
             {
                 for (int j = 0; j < NSubgroups(); j++)
                 {
@@ -601,7 +602,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
                 someTarget = true;
                 _unknownsDetected++;
             }
-            else if (center->IsEnemy(vtar->side))
+            else if (Guerrilla::ObserverHostile(Leader(), vtar->idExact, vtar->side, center))
             {
                 Threat threat = vtar->type->GetDammagePerMinute(Square(200), 1);
                 if ((threat[VSoft] + threat[VArmor] + threat[VAir]) > 0)
@@ -614,7 +615,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
     }
 
     // check center database sometimes
-    if (Glob.time > _checkCenterDBase + 10 && !IsAnyPlayerGroup())
+    if (Glob.time > _checkCenterDBase + 10 && !IsAnyPlayerGroup() && !Guerrilla::IndependentGroup(this))
     {
         // use AICenter database for target recognition
         _checkCenterDBase = Glob.time;
@@ -628,7 +629,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
 
             if (sideAccuracy < 1.5 || typeAccuracy < 1.5 || tar->side == TSideUnknown)
             { // inaccurate info, consult AICenter
-                const AITargetInfo* tgt = center->FindTargetInfo(tar->idExact);
+                const AITargetInfo* tgt = Guerrilla::IndependentGroup(this) ? nullptr : center->FindTargetInfo(tar->idExact);
                 if (tgt)
                 {
                     if (tgt->FadingSideAccuracy() > sideAccuracy)
@@ -665,7 +666,7 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
             continue;
         }
 
-        if (center->IsEnemy(tar->side))
+        if (Guerrilla::ObserverHostile(Leader(), tar->idExact, tar->side, center))
         {
             // calculate dammagePerMinute and subjectiveCost
             tar->dammagePerMinute = GetDammagePerMinute(tar);
@@ -984,7 +985,7 @@ void AIGroup::AssignTargets()
         {
             continue;
         }
-        if (!center->IsEnemy(tar->side))
+        if (!Guerrilla::ObserverHostile(Leader(), tar->idExact, tar->side, center))
         {
             break;
         }
@@ -1012,7 +1013,7 @@ void AIGroup::AssignTargets()
             float dammage = GetDammagePerMinute(tar);
             LOG_DEBUG(AI, "Dammage with no dammage source: {}", dammage);
         }
-        const AITargetInfo* tgt = center->FindTargetInfo(tar->idExact);
+        const AITargetInfo* tgt = Guerrilla::IndependentGroup(this) ? nullptr : center->FindTargetInfo(tar->idExact);
         if (tgt)
         {
             LOG_DEBUG(AI, "    - center info: side {} ({:.3f}), type {} ({:.3f})", tgt->_side,
@@ -1222,7 +1223,7 @@ void AIGroup::AssignTargets()
             {
                 continue;
             }
-            if (center->IsEnemy(tar->side))
+            if (Guerrilla::ObserverHostile(Leader(), tar->idExact, tar->side, center))
             {
                 groupEnableHideEnemy = true;
                 groupEnableHideUnknown = true;
@@ -1613,7 +1614,7 @@ const AITargetInfo* AIGroup::FindRefuelPosition(AIUnit::ResourceState state) con
     const AITargetInfo* truck = nullptr;
     float dist2Truck = FLT_MAX;
 
-    for (int i = 0; i < GetCenter()->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(this) && i < GetCenter()->NTargets(); i++)
     {
         const AITargetInfo& info = GetCenter()->GetTarget(i);
         if (info._destroyed)

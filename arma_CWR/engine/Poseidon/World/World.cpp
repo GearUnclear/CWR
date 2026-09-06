@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <SDL3/SDL_scancode.h>
 
 #include <Poseidon/Core/Application.hpp>
@@ -1725,6 +1726,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // trafficEnabled=0); throttles itself to trafficInterval plus a
         // 0.5 s commandeer sub-tick while a civ car is near the player.
         Guerrilla::Traffic::Instance().Simulate(deltaT);
+        Guerrilla::AssailantSystem::Instance().Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.

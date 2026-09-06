@@ -381,6 +381,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_zone_registry.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
+    Game/Guerrilla/test_assailants.cpp
     Game/Guerrilla/test_undercover.cpp
     Game/Guerrilla/test_town_flags.cpp
     Game/Guerrilla/test_traffic.cpp

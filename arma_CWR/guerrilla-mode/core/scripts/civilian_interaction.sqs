@@ -17,6 +17,7 @@ gmCiMenuState = ""
 gmCiMenuRefresh = false
 gmCiConfirmBody = objNull
 gmCiConfirmUntil = 0
+gmCiMenuLastThreat = ""
 GM_CI_READY = true
 
 #loop
@@ -35,15 +36,18 @@ gmCiMenuDist = GM_CI_REACH + 1
 ? ([gmCiMenuBody, aP] call GM_CI_fnEligible) >= 0 : gmCiMenuNear = gmCiMenuBody; gmCiMenuDist = (aP distance gmCiMenuBody) - 1
 {{if (([_x, aP] call GM_CI_fnEligible) >= 0) then {if ((aP distance _x) < gmCiMenuDist) then {gmCiMenuNear = _x; gmCiMenuDist = aP distance _x}}} forEach (units _x)} forEach GM_CIV_GROUPS
 ? (gmCiConfirmBody != gmCiMenuNear) or (time >= gmCiConfirmUntil) : gmCiConfirmBody = objNull
+gmCiMenuThreat = gmAssailantDiagnostic "RESISTER"
 gmCiMenuNext = ""
 ? not (isNull gmCiMenuNear) : gmCiMenuNext = [gmCiMenuNear] call GM_CI_fnAvailability
 ? (gmCiMenuNext == "READY") and (not (isNull gmCiConfirmBody)) : gmCiMenuNext = "CONFIRM"
+? (gmCiMenuThreat != gmCiMenuLastThreat) : GM_CI_REMOUNT = true
 ? GM_CI_REMOUNT or (gmCiMenuNear != gmCiMenuBody) or (gmCiMenuNext != gmCiMenuState) : goto "remount"
 goto "loop"
 
 #remount
 ? not (isNull gmCiMenuBody) : gmCiMenuBody removeAction gmCiMenuAsk; gmCiMenuBody removeAction gmCiMenuExtort; gmCiMenuBody removeAction gmCiMenuRead
 gmCiMenuBody = gmCiMenuNear
+gmCiMenuLastThreat = gmCiMenuThreat
 gmCiMenuState = gmCiMenuNext
 gmCiMenuAsk = -1
 gmCiMenuExtort = -1
@@ -58,10 +62,12 @@ gmCiMenuRead = gmCiMenuBody addAction [gmCiMenuReadLabel, "\gmcore\scripts\civil
 ? gmCiMenuState == "CONFIRM" : goto "confirm"
 ? gmCiMenuState != "READY" : goto "loop"
 gmCiMenuAsk = gmCiMenuBody addAction [format ["Ask for %1 R (costs goodwill)", GM_CI_DONATION], "\gmcore\scripts\civilian_interaction_action.sqs"]
+? gmCiMenuThreat != "" : goto "loop"
 gmCiMenuExtort = gmCiMenuBody addAction ["Consider extortion...", "\gmcore\scripts\civilian_interaction_action.sqs"]
 goto "loop"
 
 #confirm
 gmCiMenuAsk = gmCiMenuBody addAction ["Leave them be", "\gmcore\scripts\civilian_interaction_action.sqs"]
+? gmCiMenuThreat != "" : goto "loop"
 gmCiMenuExtort = gmCiMenuBody addAction [format ["Threaten for %1 R (harms support)", GM_CI_EXTORTION], "\gmcore\scripts\civilian_interaction_action.sqs"]
 goto "loop"

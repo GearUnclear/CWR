@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -1364,6 +1365,7 @@ void AIGroup::SendAnswer(Answer answer)
 
 void AIGroup::SendRadioReport(ReportSubject subject, Target& target)
 {
+    if (Guerrilla::IndependentGroup(this)) return;
     if (NUnits() <= 1)
     {
         return;
@@ -1400,6 +1402,7 @@ void AIGroup::SendRadioReport(ReportSubject subject, Target& target)
 
 void AIGroup::SendReport(ReportSubject subject, Target& target)
 {
+    if (Guerrilla::IndependentGroup(this)) return;
     if (_center)
     {
         // send report about units only when leader is alive
