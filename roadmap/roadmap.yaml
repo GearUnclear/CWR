@@ -1541,7 +1541,7 @@ items:
     status: done
     depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
     gh_issues: [58]
-    commits: [bfa9e19, 46b7066]
+    commits: [bfa9e19, 46b7066, 0ce10fe]
     summary: >
       The map screen's briefing notepad was empty in Guerrilla Mode (no
       briefing.html, nothing written at runtime). Now a native Journal
@@ -1583,6 +1583,7 @@ items:
       resolves classnames for script text; the managers write in first-person log
       voice.
     log:
+      - "2026-09-06: restyle landed as 0ce10fe (PR #61): the notepad written as a diary in the stock RscHTML look (Courier type, Garamond, the hand in the new cwrpen font row emboldened +1.0 at 1.6x P; no dark ground, bars, pips, tags or nav strip), a first-person NOTES page, handwritten PLAN, typed ledgers, one typed footer of links; SetFormatSize / SetFormatFont added, the solid-bar extension and ApplyGuerrillaJournalTheme removed; undercover.sqs writes my face. Verified on the Windows/Classic lane: [journal] 11 cases and [guerrilla] 257 cases green, guerrilla_journal_pages green at 800x600 and 1600x1200 (the test now walks a section split pages; __PLAN is a copy of the FIRST page of Plan, so continuation pages keep the source name) against a junction-built shadow of the Classic data dir carrying the branch gmcore, never the shared install. The stock hand rows are THINNED (syntheticBold -0.9), which is why the first pass rendered faint. Known stock quirk: the last wrapped line before a notepad page break sits low on the page. Still to run: guerrilla_native_undercover."
       - "2026-09-06: review fixes (46b7066, session https://claude.ai/code/session_01M82eCHKqLT8VwoCAnoc75k): undercover.sqs tagged the 'Cover blown' diary line with the break reason instead of a zone - the undercoverBroken event now carries [reason, zoneName] (the zone nearest the witness) and the script tags that; PLAN's objectives-open count followed a constant 2 rather than the page; a zone's Record shows its latest ten lines and points at the Diary for the rest; <cstdarg>/<climits> added ahead of the Windows lane; a dead ZoneState removed. Unit lanes not run in that session (its egress policy denies codeload.github.com, so vcpkg cannot fetch its ports) - the PR's CI job is the verification; the full_cwa Trident tests are still to be re-run."
       - "2026-09-05: redesign built and compile-checked on a Linux clang-18 configure of the repo (vcpkg from source; libmount needs gettext, sdl3 needs libxtst-dev, the preset needs clang-format on PATH); the Windows/Classic lane (theme fonts, real notepad page height, the full_cwa Trident test) is still to be run. The render-model mock (scratchpad mock/gen.py) and the auditor transcript are summarised in issue #58."
       - "2026-09-05: Windows/Classic verification completed during branch consolidation. The real notepad clipped Hold every base / Raise every town and Standard issue despite the parser-only tests passing. Objective rows now reserve room for the full goal and combined count/total; text-only KV labels reclaim their empty numeric columns without moving values or increasing page height. The unchanged content assertions, journal navigation/live repaint check and 800x600 Plan capture pass."
