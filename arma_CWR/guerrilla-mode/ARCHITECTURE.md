@@ -437,9 +437,9 @@ added or retired without a doc edit fails the unit lane.
 | `recruit.sqs` | Camp menu (unchanged flow; anchor = first CAMP-type zone; classes from faction keys) |
 | `recruit_action.sqs` | thin `addAction` dispatcher (unchanged) |
 | `market.sqs` | HQ / cache / garage / dealer action menus over the native `GuerrillaBase` + `Market` facts (issues #16/#27/#28): the Establish/Move HQ action (debits `hqMoveCost` on a move), Stash \<weapon\> at the cache (`removeWeapon` + cargo; retrieval = the holder's own TAKE actions), Lock/Unlock the nearest vehicle inside the garage ring, the BUY menu beside a live dealer (<=8 rows + a here/HQ delivery toggle: `WeaponHolder` at your feet or the HQ cache; the dealer's lot or the HQ garage locked); one-time map markers (dealers, HQ flag); `hqEstablish` objective + diary lines. The SECOND "-" writer of `gmResources` |
-| `civilian_interaction.sqs` | #41: nearest ambient civilian actions, one pending request, bounded visit-local profile pruning and post-load remount |
+| `civilian_interaction.sqs` | #41: stable nearby civilian selection, mood/financial/preview/cooldown menus (at most three actions), one pending request, bounded visit-local profile pruning and post-load remount |
 | `civilian_interaction_action.sqs` | captures target/caller/verb from addAction into the one-slot request |
-| `civilian_interaction_lib.sqs` | synchronous opinion/fear service, cooldown/recovery, support nudge and atomic payout; #42 resistance callback. See CIVILIAN-INTERACTIONS.md for the campaign contract and descriptor keys |
+| `civilian_interaction_lib.sqs` | synchronous opinion/fear service, free assessment, cooldown/recovery, one payment per visit, support nudge and atomic payout; preview/cancel router and #42 resistance callback. See CIVILIAN-INTERACTIONS.md for the campaign contract and descriptor keys |
 | `market_action.sqs` | thin `addAction` dispatcher (`gmMktReq*`), `recruit_action` twin |
 | `companions.sqs` | XP/rank/permadeath (unchanged model; `companionClass` from faction key; live `setRank` on promotion now) |
 | `civilians.sqs` | town population cache + kill-queue consumer + panic FSM |

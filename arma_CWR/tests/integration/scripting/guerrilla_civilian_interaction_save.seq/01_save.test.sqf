@@ -20,6 +20,11 @@ triAssertEq [gmCiSaveResult select 0, "EXTORTED"]
 gmCiSaveMoney = gmResources
 gmCiSaveSupport = (gmZone gmCiSaveZone) select GM_Z_SUPPORT
 gmCiSaveNext = (GM_CI_PROFILES select 0) select 6
+triAssert [((GM_CI_PROFILES select 0) select 7)]
+// Pending UI intent is transient, even when the script bank serializes it.
+gmCiConfirmBody = gmCiSaveBody
+gmCiConfirmUntil = time + 100
+GM_CI_REQUEST = [gmCiSaveBody, player, "EXTORT"]
 gmCiSaveTicks = GM_CI_TICKS
 triAssertEq [(triSaveGame "civilian_interaction"), "OK"]
 triEndTest

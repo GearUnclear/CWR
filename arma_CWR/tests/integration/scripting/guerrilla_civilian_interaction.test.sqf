@@ -55,7 +55,7 @@ triAssertEq [gmResources, ciMoney + GM_CI_DONATION]
 triAssertEq [((gmZone ciZone) select GM_Z_SUPPORT), ciSupport - 0.5]
 triAssertEq [GM_CI_LAST select 3, 90]
 ciResult = [ciBody, player, "EXTORT"] call GM_CI_fnInteract
-triAssertEq [ciResult select 0, "COOLDOWN"]
+triAssertEq [ciResult select 0, "ALREADY_PAID"]
 triAssertEq [gmResources, ciMoney + GM_CI_DONATION]
 
 // A high-fear extortion pays even with low opinion and a losing donate roll.
@@ -63,6 +63,10 @@ GM_CI_ROLL = {0.99}
 GM_CI_PROFILES set [ciIndex, [ciBody, "Village", 100, 40, 65, time, 0]]
 ciMoney = gmResources
 ciSupport = (gmZone ciZone) select GM_Z_SUPPORT
+triSimUntil { gmCiMenuState == "READY" }
+[ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
+triSimUntil { gmCiMenuState == "CONFIRM" }
+triAssertEq [gmResources, ciMoney]
 [ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
 triSimUntil { (GM_CI_LAST select 0) == "EXTORTED" }
 ciResult = GM_CI_LAST
