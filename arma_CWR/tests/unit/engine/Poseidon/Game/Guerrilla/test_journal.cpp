@@ -348,6 +348,7 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as designed"
 
     // PLAN: open objectives with progress, the done list, tagged moves in priority order
     const std::string plan = html.Text("Plan");
+    CHECK(plan.find("3 objectives open") != std::string::npos); // two engine rows + hqEstablish
     CHECK(plan.find("Hold every base 1 / 3") != std::string::npos);
     CHECK(plan.find("Raise every town 1 / 5") != std::string::npos);
     CHECK(plan.find("Set up a headquarters") != std::string::npos);
@@ -491,6 +492,70 @@ TEST_CASE("Journal pages - no alert strip and no colour bleed when the campaign 
     const std::string plan = html.Text("Plan");
     CHECK(plan.find("Break contact") == std::string::npos);
     CHECK(plan.find("Go dark") == std::string::npos);
+}
+
+TEST_CASE("Journal pages - the objectives-open count follows the page", "[game][guerrilla][journal][ui]")
+{
+    Journal journal;
+    JournalPageInputs in = SampleInputs();
+    in.militaryHeld = in.militaryTotal; // every base held: that row moves to DONE
+    JournalHtml html;
+    BuildGuerrillaJournalPages(&html, journal, in);
+    const std::string plan = html.Text("Plan");
+    CHECK(plan.find("1 objective open") != std::string::npos);
+    CHECK(plan.find("Hold every base") == std::string::npos);
+    CHECK(plan.find("Every base held") != std::string::npos);
+    CHECK(plan.find("Raise every town 1 / 5") != std::string::npos);
+
+    in.townsRisen = in.townsTotal; // and every town: nothing open, both done
+    JournalHtml done;
+    BuildGuerrillaJournalPages(&done, journal, in);
+    const std::string all = done.Text("Plan");
+    CHECK(all.find("0 objectives open") != std::string::npos);
+    CHECK(all.find("Every town risen") != std::string::npos);
+}
+
+TEST_CASE("Journal pages - a zone's record shows its latest lines and points at the Diary for the rest",
+          "[game][guerrilla][journal][ui]")
+{
+    Journal journal;
+    for (int i = 1; i <= 13; i++)
+    {
+        char stamp[32];
+        char text[32];
+        snprintf(stamp, sizeof(stamp), "Day 1 %02d:00", i);
+        snprintf(text, sizeof(text), "Airfield line %d.", i);
+        journal.AddEntry(stamp, text, "Airfield", JKPlain);
+    }
+    journal.AddEntry("Day 1 20:00", "Elsewhere.", "Camp", JKPlain);
+    const JournalPageInputs in = SampleInputs();
+    JournalHtml html;
+    BuildGuerrillaJournalPages(&html, journal, in);
+    const std::string airfield = html.Text("GM_ZONE_3");
+    CHECK(airfield.find("Airfield line 13.") != std::string::npos); // newest first
+    CHECK(airfield.find("Airfield line 4.") != std::string::npos);  // the tenth
+    CHECK(airfield.find("Airfield line 3.") == std::string::npos);  // past the cap
+    CHECK(airfield.find("Elsewhere.") == std::string::npos);        // another zone's line
+    CHECK(airfield.find("Nothing written about this place yet.") == std::string::npos);
+    CHECK(airfield.find("3 earlier lines in the Diary") != std::string::npos);
+    // the overflow row's "Diary" is a link to the Diary page (the nav row has
+    // one too; this one follows the count)
+    html.SelectSection("GM_ZONE_3");
+    const HTMLSection& sec = html.GetSection(html.CurrentSection());
+    bool linked = false;
+    for (int f = 1; f < sec.fields.Size(); f++)
+    {
+        if (std::string((const char*)sec.fields[f].href) == "#GM_LOG" &&
+            std::string((const char*)sec.fields[f - 1].text) == "3 earlier lines in the ")
+        {
+            linked = true;
+        }
+    }
+    CHECK(linked);
+    // the whole record is still on the Diary page
+    const std::string log = html.Text("GM_LOG");
+    CHECK(log.find("Airfield line 1.") != std::string::npos);
+    CHECK(log.find("14 entries") != std::string::npos);
 }
 
 TEST_CASE("Journal pages - an existing Main/Plan section is appended to, not duplicated",

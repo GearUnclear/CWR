@@ -3,13 +3,18 @@
 // has already run - same pattern as StashRegistryCommands.cpp.
 //
 //   gmJournalLog "<text>"                 diary entry, stamped "Day N HH:MM"
+//   gmJournalNote [text, zone, kind]      diary entry tagged with a zone and a
+//                                         kind ("plain"|"good"|"warn"|"danger")
 //   gmJournalObjective [id, text, state]  upsert an objective row
 //                                         (state "ACTIVE"|"DONE"|"FAILED"|"HIDDEN")
 //   gmJournalStatus [key, text]           upsert a Situation line ("" removes)
 //   gmJournalCount                        -> scalar, diary entries
-//   gmJournalEntry <i>                    -> [stamp, text] (0 = oldest), [] out of range
+//   gmJournalEntry <i>                    -> [stamp, text, zone, kind] (0 = oldest),
+//                                            [] out of range
 //   gmJournalObjectiveState "<id>"        -> state name, "" when unknown
 //   gmJournalStatusText "<key>"           -> the status line's text, "" when unknown
+//   gmDisplayName "<class>"               -> the package's displayName for a
+//                                            weapon / magazine / vehicle class
 //   gmIslandName                         -> the world's CfgWorlds description
 //                                            ("Malden"), the class name when absent
 
@@ -195,7 +200,7 @@ static GameValue GmJournalCount(const GameState* /*state*/)
     return (float)Journal::Instance().EntryCount();
 }
 
-// gmJournalEntry <i> -> [stamp, text] or []
+// gmJournalEntry <i> -> [stamp, text, zone, kind] or []
 static GameValue GmJournalEntry(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);

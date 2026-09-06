@@ -18,8 +18,9 @@
 //                    diary lines
 //   "Plan"           PLAN (copied into __PLAN by UpdatePlan): objectives
 //                    with progress, the done list, tagged next moves
-//   "GM_ZONES"       ZONES: the zone ledger (state, support / capture, heat,
-//                    garrison, last seen, range and bearing, last diary line)
+//   "GM_ZONES"       ZONES: the index (state group, meter, range), linking to
+//   "GM_ZONE_<i>"    one page per zone: facts, what the cell has there, the
+//                    zone's latest diary lines (the rest in the Diary)
 //   "GM_CELL"        CELL: roster, fallen, arms, supply
 //   "GM_FACTION"     RESISTANCE: war-level ladder, ground, organisation (the
 //                    faction-management stubs live here)

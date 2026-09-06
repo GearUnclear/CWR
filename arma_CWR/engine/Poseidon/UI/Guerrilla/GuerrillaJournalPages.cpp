@@ -25,7 +25,9 @@
 #include <Poseidon/Graphics/Core/Engine.hpp> // GEngine (fonts, aspect)
 #include <Poseidon/IO/ParamFileExt.hpp>      // GetFontID
 
+#include <climits> // INT_MAX (ManualTable)
 #include <cmath>
+#include <cstdarg> // va_list (Fmt)
 #include <cstdio>
 #include <cstring>
 
@@ -1023,7 +1025,10 @@ void ObjectiveRow(Sheet& s, bool done, const RString& text, const RString& digit
 void BuildPlan(CHTMLContainer* html, const Journal& journal, const JournalPageInputs& in, const Derived& d)
 {
     Sheet s(html, "Plan");
-    int open = 2 + 0;
+    // the two engine objectives count as open only while they are on the page
+    const bool basesDone = in.militaryTotal > 0 && in.militaryHeld >= in.militaryTotal;
+    const bool townsDone = in.townsTotal > 0 && in.townsRisen >= in.townsTotal;
+    int open = (basesDone ? 0 : 1) + (townsDone ? 0 : 1);
     for (int i = 0; i < journal.ObjectiveCount(); i++)
     {
         if (journal.Objective(i).state == JOActive)
@@ -1031,11 +1036,9 @@ void BuildPlan(CHTMLContainer* html, const Journal& journal, const JournalPageIn
             open++;
         }
     }
-    Masthead(s, in, d, "Plan", Fmt("%d objectives open", open));
+    Masthead(s, in, d, "Plan", Fmt("%d %s open", open, open == 1 ? "objective" : "objectives"));
 
     s.Head("Objectives");
-    const bool basesDone = in.militaryTotal > 0 && in.militaryHeld >= in.militaryTotal;
-    const bool townsDone = in.townsTotal > 0 && in.townsRisen >= in.townsTotal;
     if (!basesDone)
     {
         ObjectiveRow(s, false, "Hold every base", Num((float)in.militaryHeld), Fmt("/ %d", in.militaryTotal),
@@ -1231,7 +1234,6 @@ void BuildZones(CHTMLContainer* html, const Journal& journal, const JournalPageI
             for (int r = 0; r < rows.Size(); r++)
             {
                 const JournalZoneRow& z = in.zones[rows[r]];
-                const ZoneState st = StateOf(z, in.supportFlip);
                 s.Pip(z.revealed ? AlertColor(z.alert) : kTrack, 0.04f);
                 s.Text(z.name, kBody, nullptr, 0.30f, HALeft, RString("#") + ZoneAnchor(rows[r]));
                 s.Cell(TypeCode(z.type), 0.10f, kSmallMono, &kDim);
@@ -1378,14 +1380,21 @@ void BuildZones(CHTMLContainer* html, const Journal& journal, const JournalPageI
                 s.KV("Here", "", "", here);
             }
         }
-        // the zone's own record
+        // the zone's own record: the latest lines here, the rest in the Diary
         s.Head("Record");
+        const int recordCap = 10;
         int lines = 0;
+        int earlier = 0;
         for (int e = journal.EntryCount() - 1; e >= 0; e--)
         {
             const JournalEntry& entry = journal.Entry(e);
             if (stricmp(entry.zone, z.name) != 0)
             {
+                continue;
+            }
+            if (lines >= recordCap)
+            {
+                earlier++;
                 continue;
             }
             DiaryLine(s, entry, in.day, StampDay(entry.stamp) != in.day, false);
@@ -1394,6 +1403,12 @@ void BuildZones(CHTMLContainer* html, const Journal& journal, const JournalPageI
         if (lines == 0)
         {
             s.Para("Nothing written about this place yet.", kBody, &kMuted);
+        }
+        else if (earlier > 0)
+        {
+            s.Text(Fmt("%d earlier %s in the ", earlier, earlier == 1 ? "line" : "lines"), kSmall, &kMuted);
+            s.Text("Diary", kSmall, nullptr, 0, HALeft, "#GM_LOG");
+            s.Break();
         }
         s.Nav("Zones", "< Zones", "#GM_ZONES");
     }

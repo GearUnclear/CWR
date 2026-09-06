@@ -159,7 +159,8 @@ probe the descriptor-resolution pass uses), and the side nulars
 
 Alert: `gmZoneAlert <i>` (0/1/2), `gmZoneLastKnown <i>` (`[x,y,z]` or `[]`),
 `gmAlertOnEvent ["alertChanged"|"undercoverBroken", h]`
-(`_this=[zoneIndex, zoneName, oldState, newState]` / `_this=[reason]`).
+(`_this=[zoneIndex, zoneName, oldState, newState]` / `_this=[reason, zoneName]`,
+the zone nearest the witness).
 `undercoverBroken` fires ONCE per campaign, on the first compromise from
 any source.
 
