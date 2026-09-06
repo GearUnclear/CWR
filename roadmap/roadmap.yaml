@@ -632,21 +632,23 @@ items:
     phase: foundation
     status: done
     depends_on: [guerrilla-test-suite, site-portal]
-    commits: ['9def4c6', f18cf14]
+    commits: ['9def4c6', f18cf14, e267c87]
     summary: >
       Five Trident-driven screenshot generators (lobo_sinai_showcase,
       lobo_sinai_stories, vanilla_malden_stories, noe_stories, probe_props)
-      plus probe_addons and diag_camera, under tools/screenshots/ rather than
-      tests/integration/ so a test sweep never picks them up. @udshowcase
-      pre-activates the @LoBo roster the shoots spawn beyond what any mission
-      declares. contact_sheet.py tiles a run for review. The README is the
-      real deliverable: the camera rig, the harness constraints, and how to
-      make a frame read as a photograph rather than a catalogue entry.
-      Eight curated frames shipped to site/assets/img as 760x428 JPEGs.
+      plus probe_addons, probe_aim and diag_camera, under tools/screenshots/
+      rather than tests/integration/ so a test sweep never picks them up.
+      @udshowcase pre-activates the @LoBo roster the shoots spawn beyond what
+      any mission declares. contact_sheet.py tiles a run for review. The
+      README is the real deliverable: the camera rig, the harness
+      constraints, and how to make a frame read as a photograph rather than
+      a catalogue entry. Eight curated frames shipped to site/assets/img as
+      760x428 JPEGs.
     log:
       - "Masters (2560x1440 PNG, ~4 MB each) stay in the gitignored arma_CWR/tmp/showcase; the shoots regenerate them, which is why they are scripts."
       - "Two engine defects surfaced from this work rather than from play: cam-set-dir-fix and mod-prop-spawn-safety. Photographing a mod's roster turned out to be an unusually thorough integration test."
       - "Site pages do not reference the eight new captures yet."
+      - "e267c87 retired the sky-firing: forced `fire` with no target aims through Man::AimWeaponForceFire at elevation component 10 (near-vertical, clamped to stance max gun elevation), which is why pass-2 squads volleyed at the clouds. Firing scenes now stage captive foe lines 15-30 m out and engage them through the combat AI (reveal + per-man silent doFire; EnableFireTarget bypasses the is-it-an-enemy gate), so rifles sit level on human targets and the convoy escorts genuinely die by fire. probe_aim.test.sqf is the in-game proof; its accidental finding - one trio firing THROUGH another suppresses the on-camera men - is now a staging rule in the README."
 
   - id: startup-stall-diagnosis
     title: "Intermittent zero-CPU startup stall before harness listen (issue #30)"
@@ -1254,6 +1256,7 @@ items:
     priority: 3
     depends_on: [civilian-ambience-layer]
     gh_issues: [41]
+    commits: [f9cf244, fdb6a71]
     summary: >
       The earning half of the money loop, taken off the civilian population
       rather than off zones. Each city carries its existing support score
@@ -1269,6 +1272,8 @@ items:
     log:
       - "2026-09-05: implemented on codex/civilian-solicit-extort. One shared service: lazy bounded personal profiles, both proximity actions, atomic treasury credits and support nudges, cooldown/recovery, descriptor tuning, save/load menu recovery and #42 callback (combat retaliation stays in #42). Validation: 251 Guerrilla unit cases / 4270 assertions; seven focused Trident scenarios covering action boundaries, real save/load, reversed Sinai sides, existing ambience/shakedown/panic and native campaign restoration. Regression testing caught the single-slot campaignLoaded handler: bootstrap now fans out to both consumers. Exact support-delta tests disable unrelated native support drift in an isolated shared-core fixture."
       - "2026-09-05: gameplay/UX refinement: free qualitative mood assessment, preview/commit/cancel extortion, reward and consequence labels, cooldown/read-only paid menus, stable crowd targeting and quarter-second request handling. One payout per civilian per visit closes repeat extortion at zero opinion; saved payment state prevents reload farming. Results append verb, actual support delta and retry seconds while preserving the original result prefix. Pending UI intent is discarded on load. Validation: 251 Guerrilla unit cases / 4276 assertions and six integration scenarios, including rendered native-menu checks at 800x600, free/stale/expired/cancelled choices, zero rewards, support clamping, save/load and reversed-side Sinai. Visual review shortened the initially wordy preview and labels."
+      - "2026-09-05: consolidated codex/civilian-solicit-extort and screenshots into main, retaining main's newer journal redesign and panic-priority changes. Both merges reconciled without conflicts; feature commits remain in the merged history."
+      - "Consolidation validation: rebuilt PoseidonGame/PoseidonTests; 261 Guerrilla/house unit cases and nine selected game scenarios passed, covering civilian transactions/UX/save/load/Sinai, native campaign restoration, panic, rendered menus, the journal and the Nogova screenshot shoot. The panic scenario recovered from a harness timeout on retry. The Windows journal test exposed clipped goal and text-only labels; corrected their column allocation without weakening its assertions."
       - "2026-09-04: implementing #41 on codex/civilian-solicit-extort: bounded visit-local opinion/fear, action-to-ledger transactions, persisted cooldowns, configurable rewards and #42 resistance hook; engine integration verification in progress."
       - "2026-08-05: filed. Complements money-sinks-dealers (spending); this is where the money comes from outside zone income. Both write the same gmResources scalar economy.sqs owns, so the single-writer/directional-split discipline that keeps economy.sqs and recruit.sqs from colliding has to extend to cover it."
       - "The support nudge lands on ZoneRecord::support, the same 0-100 ledger the #8 resentment path already debits - so extortion pressure and occupier atrocity share one currency of town goodwill, which is the intended tension."
@@ -1575,6 +1580,7 @@ items:
       iterated against an adversarial UI auditor on a render-model mock.
     log:
       - "2026-09-05: redesign built and compile-checked on a Linux clang-18 configure of the repo (vcpkg from source; libmount needs gettext, sdl3 needs libxtst-dev, the preset needs clang-format on PATH); the Windows/Classic lane (theme fonts, real notepad page height, the full_cwa Trident test) is still to be run. The render-model mock (scratchpad mock/gen.py) and the auditor transcript are summarised in issue #58."
+      - "2026-09-05: Windows/Classic verification completed during branch consolidation. The real notepad clipped Hold every base / Raise every town and Standard issue despite the parser-only tests passing. Objective rows now reserve room for the full goal and combined count/total; text-only KV labels reclaim their empty numeric columns without moving values or increasing page height. The unchanged content assertions, journal navigation/live repaint check and 800x600 Plan capture pass."
       - "2026-08-22: `Journal::Log` had to be renamed AddEntry (Log is an engine macro). AddImage needs a texture loader, so the renderer takes useImages=false in the parser-only unit test and draws text bullets; in-game it reuses the stock mission_dot/done/uncomplete icons. GetHtmlText joins fields with a space while the formatter lays them adjacent, so the test helper collapses double spaces."
       - "2026-08-22: verified: [guerrilla] unit lane 2710 assertions/128 cases green incl. the script-core parity test and test_journal.cpp (6 cases); Trident guerrilla_native_capture + guerrilla_native_save_reload.seq (extended with diary/objective/status sentinels across the cross-process reload) 2/2 green; install-missions.ps1 -IncludeWorld Sinai,Lebanon80 rerun. Stale ccache PCH objects (CRLF-era cache hits after the LF normalisation) had to be force-rebuilt with CCACHE_DISABLE=1 before anything compiled."
 

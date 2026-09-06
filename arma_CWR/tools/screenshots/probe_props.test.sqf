@@ -23,8 +23,11 @@
 // p03/p03b are the other @LoBo content repair: both M60A1 wreck models were
 // authored with their origin above the mesh, so createVehicle buried them
 // (a static prop seats at terrainY + shape->BoundingCenter().Y) and the frame
-// came back as empty desert.  tools/lobo/fix-lobo-model-origin.ps1 fixes that at
-// source; an empty desert frame there means it has not been run.
+// came back as empty desert.  Two layers now cover it:
+// tools/lobo/fix-lobo-model-origin.ps1 repairs the p3d at source, and the
+// engine seats any never-seatable model on its lowest vertex with a WARN
+// (StaticSeatOffsetY, Entity::PlaceOnSurface).  An empty desert frame there
+// means BOTH failed - which should not be possible on a current build.
 //
 // Keep the props in the same order as the list in the header comment so the
 // mapping stays readable, and keep every triScreenshot label a string literal
