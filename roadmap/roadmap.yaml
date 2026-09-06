@@ -1531,6 +1531,8 @@ items:
     phase: phase-2
     status: done
     depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
+    gh_issues: [58]
+    commits: [bfa9e19]
     summary: >
       The map screen's briefing notepad was empty in Guerrilla Mode (no
       briefing.html, nothing written at runtime). Now a native Journal
