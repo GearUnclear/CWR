@@ -363,7 +363,36 @@ void CHTML::OnDraw(float alpha)
                     GEngine->DrawText(Point2DFloat(lText, t), _scale * _sizeP, Rect2DFloat(_x, _y, _w, _h), _fontP,
                                       color, field.text);
                 }
-                Texture* texture = field.GetTexture();
+                if (field.bar)
+                {
+                    // UD extension: solid bar (track + fill), no texture.  Sits
+                    // on the row baseline like an image would.
+                    float t;
+                    if (row.height > 0)
+                    {
+                        t = top + _scale * (row.height - field.height);
+                    }
+                    else
+                    {
+                        t = top;
+                    }
+                    const float bx = (l + _scale * field.indent) * w;
+                    const float by = t * h;
+                    const float bw = _scale * field.width * w;
+                    const float bh = _scale * field.height * h;
+                    Rect2DPixel clip(_x * w, _y * h, _w * w, _h * h);
+                    MipInfo flat = GLOB_ENGINE->TextBank()->UseMipmap(nullptr, 0, 0);
+                    if (field.trackColor.A8() > 0)
+                    {
+                        GLOB_ENGINE->Draw2D(flat, ModAlpha(field.trackColor, alpha), Rect2DPixel(bx, by, bw, bh), clip);
+                    }
+                    const float fw = toInt(bw * field.fill);
+                    if (fw >= 1 && field.color.A8() > 0)
+                    {
+                        GLOB_ENGINE->Draw2D(flat, ModAlpha(field.color, alpha), Rect2DPixel(bx, by, fw, bh), clip);
+                    }
+                }
+                Texture* texture = field.bar ? nullptr : field.GetTexture();
                 if (texture)
                 {
                     float t;
@@ -381,7 +410,7 @@ void CHTML::OnDraw(float alpha)
                     PackedColor color;
                     if (field.href.GetLength() == 0)
                     {
-                        color = pictureColorSelected;
+                        color = field.hasColor ? ModAlpha(field.color, alpha) : pictureColorSelected;
                     }
                     else if (f == _activeField)
                     {
@@ -509,7 +538,11 @@ void CHTML::OnDraw(float alpha)
                 PackedColor color;
                 if (field.href.GetLength() == 0)
                 {
-                    if (field.bold)
+                    if (field.hasColor)
+                    {
+                        color = field.color; // UD extension: per-field colour
+                    }
+                    else if (field.bold)
                     {
                         color = _boldColor;
                     }
@@ -529,6 +562,10 @@ void CHTML::OnDraw(float alpha)
 
                 RString text = field.text.Substring(from, to);
                 float l = left;
+                if (f == row.firstField && row.firstPos > 0)
+                {
+                    l += _scale * field.hanging; // UD extension: hanging indent on wrapped rows
+                }
                 if (field.tableWidth > 0)
                 {
                     switch (field.align)
@@ -772,7 +809,7 @@ void C3DHTML::OnDraw(float alpha)
                     PackedColor color;
                     if (field.href.GetLength() == 0)
                     {
-                        color = pictureColorSelected;
+                        color = field.hasColor ? ModAlpha(field.color, alpha) : pictureColorSelected;
                     }
                     else if (f == _activeField)
                     {
@@ -904,7 +941,11 @@ void C3DHTML::OnDraw(float alpha)
                 PackedColor color;
                 if (field.href.GetLength() == 0)
                 {
-                    if (field.bold)
+                    if (field.hasColor)
+                    {
+                        color = field.color; // UD extension: per-field colour
+                    }
+                    else if (field.bold)
                     {
                         color = _boldColor;
                     }

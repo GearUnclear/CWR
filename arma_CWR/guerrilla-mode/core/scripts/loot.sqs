@@ -61,18 +61,20 @@ GM_LOOT_ANNOUNCED = GM_GEAR_UNLOCKED + []
 ;  HELPERS  (single-line code values; synchronous; GM_tmpL* scratch)
 ; ===========================================================================
 
-; --- GM_fnLootStatus( [] ) -> publish the unlock list as ONE journal status
-;   line ("Unlocked gear: AK47, AK47CZ" / "none yet") on the map's Notes page.
-;   Native Journal, serializes; called at boot and after every fresh unlock.
-GM_fnLootStatus = {GM_tmpLS = ""; GM_tmpLi = 0; while {GM_tmpLi < (count GM_GEAR_UNLOCKED)} do {if (GM_tmpLi > 0) then {GM_tmpLS = GM_tmpLS + ", "}; GM_tmpLS = GM_tmpLS + (GM_GEAR_UNLOCKED select GM_tmpLi); GM_tmpLi = GM_tmpLi + 1}; if (GM_tmpLS == "") then {GM_tmpLS = "none yet"}; gmJournalStatus ["Unlocked gear", GM_tmpLS]}
+; --- GM_fnLootStatus( [] ) -> publish two journal status lines for the Cell
+;   page: "Standard issue" (the unlocked patterns by display name) and
+;   "Next pattern" (the most-collected locked pattern, "<name> - n of N
+;   captured"; removed while nothing is tallied).  Native Journal,
+;   serializes; called at boot and after every fresh unlock / tally.
+GM_fnLootStatus = {GM_tmpLS = ""; GM_tmpLi = 0; while {GM_tmpLi < (count GM_GEAR_UNLOCKED)} do {if (GM_tmpLi > 0) then {GM_tmpLS = GM_tmpLS + ", "}; GM_tmpLS = GM_tmpLS + (gmDisplayName (GM_GEAR_UNLOCKED select GM_tmpLi)); GM_tmpLi = GM_tmpLi + 1}; if (GM_tmpLS == "") then {GM_tmpLS = "the faction rifle only"}; gmJournalStatus ["Standard issue", GM_tmpLS]; GM_tmpLN = ""; GM_tmpLB = -1; GM_tmpLi = 0; while {GM_tmpLi < (count GM_GEAR_ITEMS)} do {if ((not ((GM_GEAR_ITEMS select GM_tmpLi) in GM_GEAR_UNLOCKED)) and ((GM_GEAR_COUNT select GM_tmpLi) > GM_tmpLB)) then {GM_tmpLB = GM_GEAR_COUNT select GM_tmpLi; GM_tmpLN = GM_GEAR_ITEMS select GM_tmpLi}; GM_tmpLi = GM_tmpLi + 1}; if (GM_tmpLN == "") then {gmJournalStatus ["Next pattern", ""]} else {gmJournalStatus ["Next pattern", format ["%1 - %2 of %3 captured", gmDisplayName GM_tmpLN, GM_tmpLB, GM_GEAR_THRESHOLD]]}}
 [] call GM_fnLootStatus
 ; starter objective on the Plan page; flips DONE on the first unlock below
-gmJournalObjective ["firstUnlock", "Loot enemy dead until a weapon unlocks for the cell", "ACTIVE"]
+gmJournalObjective ["firstUnlock", "Capture enough of one arms pattern to make it standard issue", "ACTIVE"]
 
 ; --- GM_fnLootItem( [classname, amount] ) -> newCount -------------------------
 ;   Tally through GM_fnBumpGear; toast the player once per fresh unlock and
 ;   record it (diary line + Unlocked-gear status line + objective).
-GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["Gear unlocked: %1 - now in infinite supply for your fighters.", GM_tmpLC]; gmJournalLog format ["Gear unlocked: %1 is now in infinite supply for the cell.", GM_tmpLC]; gmJournalObjective ["firstUnlock", "", "DONE"]; [] call GM_fnLootStatus}; GM_tmpLN}
+GM_fnLootItem = {GM_tmpLC = _this select 0; GM_tmpLN = [GM_tmpLC, _this select 1] call GM_fnBumpGear; [] call GM_fnLootStatus; if ((GM_tmpLC in GM_GEAR_UNLOCKED) and (not (GM_tmpLC in GM_LOOT_ANNOUNCED))) then {GM_LOOT_ANNOUNCED = GM_LOOT_ANNOUNCED + [GM_tmpLC]; hint format ["%1 is now standard issue for the cell.", gmDisplayName GM_tmpLC]; gmJournalNote [format ["%1 captured in quantity: standard issue for the cell from now on.", gmDisplayName GM_tmpLC], "", "good"]; gmJournalObjective ["firstUnlock", "", "DONE"]; [] call GM_fnLootStatus}; GM_tmpLN}
 
 ; --- GM_fnLootKilledEH : the "killed" event-handler body -----------------------
 ;   _this = [deadUnit, killer]. Tally weapons AND magazines, strip the corpse.

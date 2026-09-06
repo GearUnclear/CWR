@@ -622,6 +622,8 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     // to an authored Main/Plan section when the mission ships one.
     if (Guerrilla::GuerrillaJournalActive())
     {
+        // the journal's palette + typography on the notepad control (idempotent)
+        Guerrilla::ApplyGuerrillaJournalTheme(_briefing);
         Guerrilla::BuildGuerrillaJournalPages(_briefing, Guerrilla::Journal::Instance(),
                                               Guerrilla::GatherGuerrillaJournalInputs());
         _journalRevision = Guerrilla::Journal::Instance().Revision();
@@ -1065,8 +1067,7 @@ bool UnitWeaponsInfo::IsMagazineUsable(const MagazineType* type)
         }
     }
     Ref<const WeaponType> always[2] = {
-        WeaponTypes.New("Throw"),
-        WeaponTypes.New("Put"),
+        WeaponTypes.New("Throw"), WeaponTypes.New("Put"),
         //		WeaponTypes.New("PipeBomb")
     };
     for (int i = 0; i < sizeof(always) / sizeof(*always); i++)

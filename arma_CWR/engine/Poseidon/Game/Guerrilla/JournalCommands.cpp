@@ -15,8 +15,9 @@
 
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 
-#include <Poseidon/Core/Global.hpp>     // Glob.header.worldname
-#include <Poseidon/IO/ParamFileExt.hpp> // Pars
+#include <Poseidon/Core/Global.hpp>                  // Glob.header.worldname
+#include <Poseidon/IO/ParamFileExt.hpp>              // Pars
+#include <Poseidon/IO/ParamFile/LocalizedString.hpp> // displayName ($STR_) resolution
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
@@ -64,6 +65,84 @@ static GameValue GmJournalLog(const GameState* /*state*/, GameValuePar oper1)
     GameStringType text = oper1;
     Journal::Instance().AddEntry(JournalStampNow(), RString(text));
     return NOTHING;
+}
+
+// gmJournalNote [text, zone, kind]: a diary line tagged with the zone it is
+// about and a kind ("plain" | "good" | "warn" | "danger") that colours the
+// page.  zone / kind may be omitted (["text"] == gmJournalLog "text").
+static GameValue GmJournalNote(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (array.Size() < 1 || array.Size() > 3)
+    {
+        state->SetError(EvalGen, "gmJournalNote: [text, zone, kind]");
+        return NOTHING;
+    }
+    if (!CheckType(state, array[0], GameString))
+    {
+        return NOTHING;
+    }
+    GameStringType text = array[0];
+    RString zone;
+    int kind = JKPlain;
+    if (array.Size() >= 2)
+    {
+        if (!CheckType(state, array[1], GameString))
+        {
+            return NOTHING;
+        }
+        zone = RString((GameStringType)array[1]);
+    }
+    if (array.Size() >= 3)
+    {
+        if (array[2].GetType() == GameScalar)
+        {
+            kind = toInt((float)array[2]);
+        }
+        else if (array[2].GetType() == GameString)
+        {
+            kind = Journal::EntryKindFromName((GameStringType)array[2]);
+            if (kind < 0)
+            {
+                state->SetError(EvalGen, "gmJournalNote: unknown kind");
+                return NOTHING;
+            }
+        }
+        else
+        {
+            state->SetError(EvalGen, "gmJournalNote: kind must be a string or a number");
+            return NOTHING;
+        }
+    }
+    Journal::Instance().AddEntry(JournalStampNow(), RString(text), zone, kind);
+    return NOTHING;
+}
+
+// gmDisplayName "<class>" -> the package's displayName for a weapon /
+// magazine / vehicle class (CfgWeapons, then CfgMagazines, then CfgVehicles),
+// the class name itself when none is configured.  Lets the scripts publish
+// player-facing names on the journal without knowing the config.
+static GameValue GmDisplayName(const GameState* /*state*/, GameValuePar oper1)
+{
+    GameStringType className = oper1;
+    const char* banks[] = {"CfgWeapons", "CfgMagazines", "CfgVehicles"};
+    for (const char* bankName : banks)
+    {
+        const ParamEntry* bank = Pars.FindEntry(bankName);
+        const ParamEntry* cls = bank ? bank->FindEntry(className) : nullptr;
+        const ParamEntry* dn = cls ? cls->FindEntry("displayName") : nullptr;
+        if (dn)
+        {
+            LocalizedString text;
+            text.Bind(*dn);
+            RString name = (const char*)text.Get();
+            if (name.GetLength() > 0)
+            {
+                return GameStringType(name);
+            }
+        }
+    }
+    return className;
 }
 
 // gmJournalObjective [id, text, state]
@@ -127,9 +206,11 @@ static GameValue GmJournalEntry(const GameState* state, GameValuePar oper1)
     {
         return value;
     }
-    array.Resize(2);
+    array.Resize(4);
     array[0] = GameStringType(journal.Entry(index).stamp);
     array[1] = GameStringType(journal.Entry(index).text);
+    array[2] = GameStringType(journal.Entry(index).zone);
+    array[3] = (float)journal.Entry(index).kind;
     return value;
 }
 
@@ -169,6 +250,8 @@ INIT_MODULE(GuerrillaJournal, 3)
 {
     GGameState.NewFunction(GameFunction(GameString, "gmJournalStatusText", GmJournalStatusText, GameString));
     GGameState.NewFunction(GameFunction(GameNothing, "gmJournalLog", GmJournalLog, GameString));
+    GGameState.NewFunction(GameFunction(GameNothing, "gmJournalNote", GmJournalNote, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "gmDisplayName", GmDisplayName, GameString));
     GGameState.NewFunction(GameFunction(GameNothing, "gmJournalObjective", GmJournalObjective, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "gmJournalStatus", GmJournalStatus, GameArray));
     GGameState.NewNularOp(GameNular(GameScalar, "gmJournalCount", GmJournalCount));

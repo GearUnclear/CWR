@@ -289,6 +289,129 @@ void CHTMLContainer::AddText(int section, RString text, HTMLFormat format, HTMLA
     fld.bottom = bottom;
     fld.indent = _indent;
     fld.tableWidth = tableWidth;
+    fld.hanging = _hanging;
+    fld.hasColor = _hasFieldColor;
+    if (_hasFieldColor)
+    {
+        fld.color = _fieldColor;
+    }
+}
+
+HTMLField* CHTMLContainer::AddBar(int section, float fill, float w, float h, PackedColor color, PackedColor trackColor,
+                                  HTMLAlign align, float tableWidth)
+{
+    if (section < 0 || section >= _sections.Size())
+    {
+        return nullptr;
+    }
+    HTMLSection& sec = _sections[section];
+    int i = sec.fields.Add();
+    HTMLField& fld = sec.fields[i];
+    fld.format = HFImg;
+    fld.align = align;
+    fld.nextline = false;
+    fld.exclude = false;
+    fld.bottom = false;
+    fld.indent = _indent;
+    fld.tableWidth = tableWidth;
+    fld.texture1 = nullptr;
+    fld.texture2 = nullptr;
+    fld.width = (w > 0 ? w : 0) * (1.0f / 640.0f);
+    fld.height = (h > 0 ? h : 0) * (1.0f / 480.0f);
+    fld.bar = true;
+    saturate(fill, 0.0f, 1.0f);
+    fld.fill = fill;
+    fld.hasColor = true;
+    fld.color = color;
+    fld.trackColor = trackColor;
+    return &fld;
+}
+
+HTMLField* CHTMLContainer::AddRule(int section, float h, PackedColor color)
+{
+    // full page width, minus the current indent
+    float w = (GetPageWidth() - _indent) * 640.0f;
+    return AddBar(section, 1.0f, w, h, color, PackedColor(0, 0, 0, 0));
+}
+
+void CHTMLContainer::SetFormatFont(HTMLFormat format, Font* font, Font* fontBold, float size)
+{
+    if (!font)
+    {
+        return;
+    }
+    if (!fontBold)
+    {
+        fontBold = font;
+    }
+    switch (format)
+    {
+        case HFH1:
+            _fontH1 = font, _fontH1Bold = fontBold, _sizeH1 = size;
+            break;
+        case HFH2:
+            _fontH2 = font, _fontH2Bold = fontBold, _sizeH2 = size;
+            break;
+        case HFH3:
+            _fontH3 = font, _fontH3Bold = fontBold, _sizeH3 = size;
+            break;
+        case HFH4:
+            _fontH4 = font, _fontH4Bold = fontBold, _sizeH4 = size;
+            break;
+        case HFH5:
+            _fontH5 = font, _fontH5Bold = fontBold, _sizeH5 = size;
+            break;
+        case HFH6:
+            _fontH6 = font, _fontH6Bold = fontBold, _sizeH6 = size;
+            break;
+        case HFP:
+            _fontP = font, _fontPBold = fontBold, _sizeP = size;
+            break;
+        default:
+            break;
+    }
+}
+
+Font* CHTMLContainer::GetFormatFont(HTMLFormat format, bool bold) const
+{
+    switch (format)
+    {
+        case HFH1:
+            return bold ? _fontH1Bold : _fontH1;
+        case HFH2:
+            return bold ? _fontH2Bold : _fontH2;
+        case HFH3:
+            return bold ? _fontH3Bold : _fontH3;
+        case HFH4:
+            return bold ? _fontH4Bold : _fontH4;
+        case HFH5:
+            return bold ? _fontH5Bold : _fontH5;
+        case HFH6:
+            return bold ? _fontH6Bold : _fontH6;
+        default:
+            return bold ? _fontPBold : _fontP;
+    }
+}
+
+float CHTMLContainer::GetFormatSize(HTMLFormat format) const
+{
+    switch (format)
+    {
+        case HFH1:
+            return _sizeH1;
+        case HFH2:
+            return _sizeH2;
+        case HFH3:
+            return _sizeH3;
+        case HFH4:
+            return _sizeH4;
+        case HFH5:
+            return _sizeH5;
+        case HFH6:
+            return _sizeH6;
+        default:
+            return _sizeP;
+    }
 }
 
 // Truncate `buffer` (a file path) in place to its directory part, keeping the
@@ -332,6 +455,11 @@ HTMLField* CHTMLContainer::AddImage(int section, RString image, HTMLAlign align,
     fld.bottom = bottom;
     fld.indent = _indent;
     fld.tableWidth = tableWidth;
+    fld.hasColor = _hasFieldColor;
+    if (_hasFieldColor)
+    {
+        fld.color = _fieldColor;
+    }
 
     char buffer[256];
     const char* q = strchr(image, '?');
@@ -2050,6 +2178,8 @@ void CHTMLContainer::FormatSection(int s)
                         curW = 0;
                         wordW = 0;
                         wordI = i;
+                        // UD extension: continuation rows hang by field.hanging
+                        lineWidth = maxLineWidth - field.indent - field.hanging;
                     }
                     else
                     {

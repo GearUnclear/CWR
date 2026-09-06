@@ -54,15 +54,21 @@ void Journal::InitMission()
 // diary
 // ---------------------------------------------------------------------------
 
-void Journal::AddEntry(RString stamp, RString text)
+void Journal::AddEntry(RString stamp, RString text, RString zone, int kind)
 {
     if (text.GetLength() == 0)
     {
         return;
     }
+    if (kind < JKPlain || kind > JKDanger)
+    {
+        kind = JKPlain;
+    }
     JournalEntry entry;
     entry.stamp = stamp;
     entry.text = text;
+    entry.zone = zone;
+    entry.kind = kind;
     _entries.Add(entry);
     while (_entries.Size() > MaxEntries)
     {
@@ -224,7 +230,36 @@ LSError JournalEntry::Serialize(ParamArchive& ar)
 {
     PARAM_CHECK(ar.Serialize("stamp", stamp, 1, RString()))
     PARAM_CHECK(ar.Serialize("text", text, 1, RString()))
+    // zone / kind arrived with the 2026-09 journal redesign; older saves
+    // carry neither and read back as plain, zone-less lines
+    PARAM_CHECK(ar.Serialize("zone", zone, 1, RString()))
+    PARAM_CHECK(ar.Serialize("kind", kind, 1, (int)JKPlain))
     return LSOK;
+}
+
+int Journal::EntryKindFromName(const char* name)
+{
+    if (!name)
+    {
+        return -1;
+    }
+    if (stricmp(name, "plain") == 0 || stricmp(name, "") == 0)
+    {
+        return JKPlain;
+    }
+    if (stricmp(name, "good") == 0)
+    {
+        return JKGood;
+    }
+    if (stricmp(name, "warn") == 0)
+    {
+        return JKWarn;
+    }
+    if (stricmp(name, "danger") == 0)
+    {
+        return JKDanger;
+    }
+    return -1;
 }
 
 LSError JournalObjective::Serialize(ParamArchive& ar)
@@ -286,11 +321,11 @@ LSError Journal::Serialize(ParamArchive& ar)
 // time stamp
 // ---------------------------------------------------------------------------
 
-RString JournalStampNow()
+bool JournalClockNow(int& dayOut, int& minuteOfDay)
 {
     if (!GWorld)
     {
-        return RString();
+        return false;
     }
     int day = 1;
     GameState* gstate = GWorld->GetGameState();
@@ -314,8 +349,21 @@ RString JournalStampNow()
     {
         mm = 0;
     }
+    dayOut = day;
+    minuteOfDay = hh * 60 + mm;
+    return true;
+}
+
+RString JournalStampNow()
+{
+    int day = 1;
+    int minute = 0;
+    if (!JournalClockNow(day, minute))
+    {
+        return RString();
+    }
     char buffer[48];
-    snprintf(buffer, sizeof(buffer), "Day %d %02d:%02d", day, hh, mm);
+    snprintf(buffer, sizeof(buffer), "Day %d %02d:%02d", day, minute / 60, minute % 60);
     return RString(buffer);
 }
 

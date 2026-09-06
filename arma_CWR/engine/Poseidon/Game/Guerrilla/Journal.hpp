@@ -42,10 +42,21 @@ enum JournalObjectiveState
     JOHidden = 3
 };
 
+// diary entry kinds: colour the zone column on the page
+enum JournalEntryKind
+{
+    JKPlain = 0,
+    JKGood = 1,  // captured, risen, promoted, unlocked
+    JKWarn = 2,  // ready to rise, war level edge, suspected
+    JKDanger = 3 // RED, QRF, cover blown, losses
+};
+
 struct JournalEntry
 {
     RString stamp; // "Day 3 14:20" (or "" when logged without a clock)
     RString text;
+    RString zone;       // zone the line is about ("" when none)
+    int kind = JKPlain; // JournalEntryKind
 
     LSError Serialize(ParamArchive& ar);
 };
@@ -85,7 +96,8 @@ class Journal : public SerializeClass
 
     // diary -----------------------------------------------------------------
     // appends (stamp may be empty); no-op on empty text
-    void AddEntry(RString stamp, RString text);
+    void AddEntry(RString stamp, RString text, RString zone = RString(), int kind = JKPlain);
+    static int EntryKindFromName(const char* name); // "plain|good|warn|danger", -1 unknown
     int EntryCount() const { return _entries.Size(); }
     const JournalEntry& Entry(int i) const { return _entries[i]; } // 0 = oldest
 
@@ -124,6 +136,9 @@ class Journal : public SerializeClass
 // counter (gmDayCount; day 1 when undefined).  Empty when no world is up,
 // so the pure core and its unit tests never touch the clock.
 RString JournalStampNow();
+// the same clock as numbers: campaign day (1-based) and minute of day;
+// false (outputs untouched) when no world is up
+bool JournalClockNow(int& day, int& minuteOfDay);
 
 // The island's player-facing name: CfgWorlds >> <world> >> description
 // ("Malden"), falling back to the world class name; empty with no world

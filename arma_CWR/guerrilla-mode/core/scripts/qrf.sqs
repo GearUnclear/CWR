@@ -141,7 +141,7 @@ GM_QRF_WP2 setWaypointType "SAD"
 GM_QRF_ACTIVE = true
 GM_QRF_TIMER  = 0
 ; journal: the diary records every QRF launch (native Journal, map Notes page)
-gmJournalLog format ["%1 went RED: an occupier quick reaction force is moving on your last known position.", (gmZone GM_qJ) select GM_Z_NAME]
+gmJournalNote ["Went RED. QRF moving on last known position.", (gmZone GM_qJ) select GM_Z_NAME, "danger"]
 goto "loopTail"
 
 #qrfManage

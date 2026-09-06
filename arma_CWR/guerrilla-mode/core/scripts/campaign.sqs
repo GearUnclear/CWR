@@ -48,7 +48,7 @@
 @GM_LIB_READY
 
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
-gmJournalLog format ["The %1 campaign begins: one fighter, one camp, an island to liberate.", gmIslandName]
+gmJournalNote ["Reached the Camp alone. One rifle.", "Camp", "plain"]
 
 ; ============================================================================
 ;  MAIN LOOP - idle until the native campaignLoaded event arrives
@@ -90,7 +90,7 @@ aP removeAction GM_pSaveAct
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 
 hint "Guerrilla campaign restored."
-gmJournalLog "Campaign restored from a save."
+gmJournalNote ["Record restored. The campaign resumes where it stood.", "", "plain"]
 goto "loop"
 
 ; ----------------------------------------------------------------------------
@@ -98,7 +98,7 @@ goto "loop"
 ;  BEFORE saveGame so the snapshot carries it.
 ; ----------------------------------------------------------------------------
 #saveaction
-gmJournalLog "Campaign saved."
+gmJournalNote ["Record kept.", "", "plain"]
 saveGame
 hint "Guerrilla campaign saved."
 exit

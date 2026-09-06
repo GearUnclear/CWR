@@ -15,8 +15,14 @@
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
-namespace Poseidon { class AICenter; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
-namespace Poseidon { class AIGroup; } // a Poseidon type: a global forward declaration collides with the using-declaration in Core/Types.hpp on Linux clang
+namespace Poseidon
+{
+class AICenter;
+} // namespace Poseidon
+namespace Poseidon
+{
+class AIGroup;
+} // namespace Poseidon
 
 namespace Poseidon
 {
@@ -101,6 +107,11 @@ struct ZoneRecord
                              // only - NOT part of the capture predicate
     float capture = 0;       // 0..100 military consolidation meter
     bool revealed = false;   // fog-of-war state
+    // intel age for the journal's zone ledger: the campaign day (1-based, 0
+    // = never) and minute of day the zone was last inside the player's
+    // simulation bubble (cacheRadius), i.e. when its meters last moved
+    int seenDay = 0;
+    int seenMinute = 0;
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
@@ -395,6 +406,8 @@ class ZoneRegistry : public SerializeClass
         float liveOccupiers = 0;
         float capture = 0;
         bool revealed = false;
+        int seenDay = 0;
+        int seenMinute = 0;
 
         LSError Serialize(ParamArchive& ar);
     };

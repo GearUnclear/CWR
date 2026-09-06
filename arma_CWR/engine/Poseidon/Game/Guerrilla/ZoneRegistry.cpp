@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/Journal.hpp> // JournalClockNow (zone intel age)
 
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
@@ -6,9 +7,9 @@
 #include <Poseidon/Asset/Addon/AddonClosure.hpp>      // faction addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
-#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp> // PlayerBodyModelIssue (shape gate, issue #46 seam 4b)
+#include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>   // PlayerBodyModelIssue (shape gate, issue #46 seam 4b)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
-#include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
+#include <Poseidon/IO/ParamFileExt.hpp>     // Pars / ExtParsMission
 #include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (shape gate)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
@@ -1984,6 +1985,12 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         return;
     }
 
+    // intel age: every zone inside the bubble is "seen" now (one clock read
+    // per tick; the journal's zone ledger shows it as SEEN)
+    int seenDay = 0;
+    int seenMinute = 0;
+    const bool haveClock = JournalClockNow(seenDay, seenMinute);
+
     for (int i = 0; i < n; i++)
     {
         ZoneRecord& z = _zones[i];
@@ -1993,6 +2000,11 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // consistent with the world-bubble design: nothing happens to
             // ground the simulation is not looking at
             continue;
+        }
+        if (haveClock)
+        {
+            z.seenDay = seenDay;
+            z.seenMinute = seenMinute;
         }
 
         int guer = i < in.guerCount.Size() ? in.guerCount[i] : 0;
@@ -2427,6 +2439,9 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     // "no capture in progress" - semantically correct, no version bump
     PARAM_CHECK(ar.Serialize("capture", capture, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("revealed", revealed, 1, false))
+    // journal intel age (2026-09); absent in older saves = never seen
+    PARAM_CHECK(ar.Serialize("seenDay", seenDay, 1, 0))
+    PARAM_CHECK(ar.Serialize("seenMinute", seenMinute, 1, 0))
     return LSOK;
 }
 
@@ -2452,6 +2467,8 @@ void ZoneRegistry::ApplyPendingLoad()
         z.liveOccupiers = row.liveOccupiers;
         z.capture = row.capture;
         z.revealed = row.revealed;
+        z.seenDay = row.seenDay;
+        z.seenMinute = row.seenMinute;
         // reconstruct the one-shot threshold edge from the loaded value: a
         // town saved in the READY-waiting state must not re-announce itself
         // on every reload
@@ -2477,6 +2494,8 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.liveOccupiers = z.liveOccupiers;
             row.capture = z.capture;
             row.revealed = z.revealed;
+            row.seenDay = z.seenDay;
+            row.seenMinute = z.seenMinute;
             _pending.Add(row);
         }
     }

@@ -1527,7 +1527,7 @@ items:
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
 
   - id: guerrilla-journal
-    title: "Field journal: native Notes/Plan pages (manual, live situation, diary, objectives)"
+    title: "Field journal: the map notepad as a journal (Situation / Plan / Zones + a page per zone / Cell / Resistance / Diary / Handbook)"
     phase: phase-2
     status: done
     depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
@@ -1553,7 +1553,22 @@ items:
       arc, QRF, cover blown, promotions/deaths, unlocks, War Level edges, recruits,
       save/restore), four starter objectives and the Companions / Unlocked-gear
       status lines; init.sqs is unchanged.
+      Redesigned 2026-09-05 (issue #58, session
+      https://claude.ai/code/session_01NKg3arZ1DbAuzoeuDeUYze): the notepad is now a
+      dark, one-grid journal drawn by the stock briefing control through small
+      CHTMLContainer extensions (per-field colour, texture-less bars/rules/pips,
+      hanging indent, format-slot rebinding) with an ApplyGuerrillaJournalTheme pass;
+      pages SITUATION, PLAN (URGENT/READY/ROUTINE moves with distance + bearing),
+      ZONES index + GM_ZONE_<i> per zone (facts, last-seen stamp from the new
+      ZoneRecord seenDay/seenMinute, the zone's own diary lines), CELL (native
+      roster from the player's group + holding squads), RESISTANCE (war-level
+      ladder, ground, occupier order of battle, faction-management stubs read from
+      gmDoctrine/gmOutsideSupport/gmAlliedCells), DIARY, HANDBOOK (ten in-universe
+      chapters). Diary entries carry a zone tag + kind (gmJournalNote); gmDisplayName
+      resolves classnames for script text; the managers write in log voice. Design
+      iterated against an adversarial UI auditor on a render-model mock.
     log:
+      - "2026-09-05: redesign built and compile-checked on a Linux clang-18 configure of the repo (vcpkg from source; libmount needs gettext, sdl3 needs libxtst-dev, the preset needs clang-format on PATH); the Windows/Classic lane (theme fonts, real notepad page height, the full_cwa Trident test) is still to be run. The render-model mock (scratchpad mock/gen.py) and the auditor transcript are summarised in issue #58."
       - "2026-08-22: `Journal::Log` had to be renamed AddEntry (Log is an engine macro). AddImage needs a texture loader, so the renderer takes useImages=false in the parser-only unit test and draws text bullets; in-game it reuses the stock mission_dot/done/uncomplete icons. GetHtmlText joins fields with a space while the formatter lays them adjacent, so the test helper collapses double spaces."
       - "2026-08-22: verified: [guerrilla] unit lane 2710 assertions/128 cases green incl. the script-core parity test and test_journal.cpp (6 cases); Trident guerrilla_native_capture + guerrilla_native_save_reload.seq (extended with diary/objective/status sentinels across the cross-process reload) 2/2 green; install-missions.ps1 -IncludeWorld Sinai,Lebanon80 rerun. Stale ccache PCH objects (CRLF-era cache hits after the LF normalisation) had to be force-rebuilt with CCACHE_DISABLE=1 before anything compiled."
 

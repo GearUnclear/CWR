@@ -66,8 +66,8 @@ if (gmEsc_pct >= 70) then {gmWarLevel = 5}
 if (gmEsc_pct >= 85) then {gmWarLevel = 6}
 
 ; journal: record every War Level edge (native Journal, map Notes page)
-? gmWarLevel > gmEsc_prevWL : gmJournalLog format ["War Level rose to %1: the occupier now fields stronger forces.", gmWarLevel]
-? gmWarLevel < gmEsc_prevWL : gmJournalLog format ["War Level fell to %1.", gmWarLevel]
+? gmWarLevel > gmEsc_prevWL : gmJournalNote [format ["War level %1. The occupier fields stronger forces.", gmWarLevel], "", "warn"]
+? gmWarLevel < gmEsc_prevWL : gmJournalNote [format ["War level down to %1.", gmWarLevel], "", "plain"]
 gmEsc_prevWL = gmWarLevel
 
 goto "loop"

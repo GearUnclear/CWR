@@ -90,7 +90,7 @@ gmMktHqSeen     = false
 
 ; journal: the starter objective (flips DONE the first time an HQ exists -
 ; whether the start-town election or the action menu put it there)
-gmJournalObjective ["hqEstablish", "Establish a headquarters: walk into a town (or the Camp) and use the action menu", "ACTIVE"]
+gmJournalObjective ["hqEstablish", "Set up a headquarters in a town or at the Camp", "ACTIVE"]
 GM_MKT_READY = true
 
 #loop
@@ -157,7 +157,7 @@ goto "loop"
 #hqSeen
 gmMktHqSeen = true
 gmJournalObjective ["hqEstablish", "", "DONE"]
-gmJournalLog format ["Headquarters stands in %1.", gmHqZone]
+gmJournalNote ["Headquarters stands here.", gmHqZone, "plain"]
 hint format ["Headquarters: %1.\nThe weapon cache is at the HQ; vehicles within %2 m of the garage can be locked from the action menu.", gmHqZone, GM_MKT_GARAGE_R]
 goto "hqSeenDone"
 
@@ -301,8 +301,8 @@ gmMktHqSeen = true
 gmJournalObjective ["hqEstablish", "", "DONE"]
 ? gmMktWasHq : hint format ["Headquarters moved to %1 (%2).\nCost %3 R | Treasury %4 R", gmHqZone, gmMktWhere, gmMktCost, gmResources]
 ? not gmMktWasHq : hint format ["Headquarters established in %1 (%2).\nThe weapon cache is at the HQ; vehicles within %3 m of the garage can be locked.", gmHqZone, gmMktWhere, GM_MKT_GARAGE_R]
-? gmMktWasHq : gmJournalLog format ["Headquarters moved to %1 (%2 R).", gmHqZone, gmMktCost]
-? not gmMktWasHq : gmJournalLog format ["Headquarters established in %1 (%2).", gmHqZone, gmMktWhere]
+? gmMktWasHq : gmJournalNote [format ["Headquarters moved here. -%1 R", gmMktCost], gmHqZone, "plain"]
+? not gmMktWasHq : gmJournalNote [format ["Headquarters set up here (%1).", gmMktWhere], gmHqZone, "good"]
 gmMktHqDirty = true
 goto "loop"
 
@@ -314,7 +314,7 @@ gmMktOk = gmGarageLock [gmMktGarVeh, gmMktLock]
 ? gmMktOk and gmMktLock : hint format ["%1 locked in the garage (%2 garaged). Beep beep.", typeOf gmMktGarVeh, gmGarageCount]
 ? gmMktOk and (not gmMktLock) : hint format ["%1 unlocked.", typeOf gmMktGarVeh]
 ? not gmMktOk : hint "The garage refused that vehicle (not inside the ring, or you are sitting in it)."
-? gmMktOk and gmMktLock : gmJournalLog format ["%1 locked in the HQ garage (%2 garaged).", typeOf gmMktGarVeh, gmGarageCount]
+? gmMktOk and gmMktLock : gmJournalNote [format ["%1 locked in the garage. %2 garaged.", gmDisplayName (typeOf gmMktGarVeh), gmGarageCount], gmHqZone, "plain"]
 goto "loop"
 
 ; ---- delivery toggle (labels re-render on the remount) -------------------------
@@ -339,7 +339,7 @@ aP removeWeapon gmMktW
 gmHqCache addWeaponCargo [gmMktW, 1]
 ? gmMktN > 0 : gmHqCache addMagazineCargo [gmMktW, gmMktN]
 hint format ["%1 stashed in the headquarters cache (%2 magazine(s)). Take it back through the cache's own action menu.", gmMktW, gmMktN]
-gmJournalLog format ["Stashed %1 in the HQ cache.", gmMktW]
+gmJournalNote [format ["%1 stashed in the cache.", gmDisplayName gmMktW], gmHqZone, "plain"]
 goto "loop"
 
 ; ---- buy a stock row from the dealer at hand -------------------------------------
@@ -365,7 +365,7 @@ gmMktHolder = objNull
 gmResources = gmResources - gmMktPrice
 ? gmMktHolder == gmHqCache : hint format ["Bought %1 for %2 R - delivered to the headquarters cache.\nTreasury %3 R", gmMktRow select 1, gmMktPrice, gmResources]
 ? gmMktHolder != gmHqCache : hint format ["Bought %1 for %2 R - it is on the ground at your feet.\nTreasury %3 R", gmMktRow select 1, gmMktPrice, gmResources]
-gmJournalLog format ["Bought %1 from the arms dealer in %2 (%3 R).", gmMktRow select 1, gmMktDealerRec select 0, gmMktPrice]
+gmJournalNote [format ["Bought %1 from the arms dealer. -%2 R", gmMktRow select 1, gmMktPrice], gmMktDealerRec select 0, "plain"]
 goto "loop"
 #buyVehicle
 ; vehicle row: [class, displayName, price]; dropped on the dealer's lot, or
@@ -380,5 +380,5 @@ gmResources = gmResources - gmMktPrice
 ? gmMktToHq : gmMktLocked = gmGarageLock [gmMktV, true]
 ? gmMktToHq : hint format ["Bought %1 for %2 R - delivered to the HQ garage and locked.\nTreasury %3 R", gmMktRow select 1, gmMktPrice, gmResources]
 ? not gmMktToHq : hint format ["Bought %1 for %2 R - parked on the dealer's lot.\nTreasury %3 R", gmMktRow select 1, gmMktPrice, gmResources]
-gmJournalLog format ["Bought a %1 from the vehicle dealer in %2 (%3 R).", gmMktRow select 1, gmMktDealerRec select 0, gmMktPrice]
+gmJournalNote [format ["Bought a %1 from the vehicle dealer. -%2 R", gmMktRow select 1, gmMktPrice], gmMktDealerRec select 0, "plain"]
 goto "loop"

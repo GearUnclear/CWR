@@ -526,6 +526,17 @@ struct HTMLField
 	float indent;
 	float tableWidth;
 
+	// UD extension (Guerrilla journal): per-field colour override and solid
+	// bar fields.  A bar is an HFImg field with no texture that OnDraw paints
+	// as a flat track rectangle with `fill` (0..1) of its width in `color`
+	// and the rest in `trackColor`; it takes part in layout like an image.
+	bool hasColor = false;     // colour overrides the control's text / bold / picture colour
+	PackedColor color;         // valid when hasColor
+	bool bar = false;          // draw as a solid bar (HFImg, texture-less)
+	float fill = 0;            // bar fill fraction, 0..1
+	PackedColor trackColor = PackedColor(0, 0, 0, 0); // bar track (unfilled part); alpha 0 = none
+	float hanging = 0;         // extra indent for this field's wrapped continuation rows
+
 	Texture *GetTexture();
 };
 
@@ -586,6 +597,10 @@ protected:
 
 	RString _filename;
 	float _indent;
+	// UD extension: pending per-field colour (see SetFieldColor)
+	bool _hasFieldColor = false;
+	PackedColor _fieldColor = PackedColor(0, 0, 0, 0);
+	float _hanging = 0; // pending hanging indent (see SetHanging)
 	// Parser-only subclasses provide page and text metrics without renderer services.
 	CHTMLContainer();
 public:
@@ -597,6 +612,29 @@ public:
 
 	float GetIndent() const {return _indent;}
 	void SetIndent(float indent) {_indent = indent;}
+
+	// UD extension (Guerrilla journal).  A pending field colour is stamped on
+	// every field added after SetFieldColor until ClearFieldColor, mirroring
+	// the _indent pattern; AddBar adds a solid bar field (see HTMLField::bar),
+	// w/h in the same 640x480 units AddImage takes; AddRule is a full-width
+	// bar with fill 1; SetFormatFont rebinds one format slot (H1..H6 / P) to
+	// a face and size so a page can carry its own typography without a
+	// resource-config change.  All three are safe on the parser-only
+	// subclasses (no engine services touched).
+	void SetHanging(float hanging) {_hanging = hanging;}
+	void SetFieldColor(PackedColor color) {_fieldColor = color; _hasFieldColor = true;}
+	void ClearFieldColor() {_hasFieldColor = false;}
+	bool HasFieldColor() const {return _hasFieldColor;}
+	HTMLField *AddBar
+	(
+		int section, float fill, float w, float h,
+		PackedColor color, PackedColor trackColor,
+		HTMLAlign align = HALeft, float tableWidth = 0
+	);
+	HTMLField *AddRule(int section, float h, PackedColor color);
+	void SetFormatFont(HTMLFormat format, Font *font, Font *fontBold, float size);
+	Font *GetFormatFont(HTMLFormat format, bool bold) const;
+	float GetFormatSize(HTMLFormat format) const;
 
 	int AddSection();
 	void InitSection(int section);

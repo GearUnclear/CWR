@@ -78,6 +78,7 @@ class CfgGuerrillaFactions
     class WEST // US force - selectable as occupier OR resistance
     {
         side = "WEST";
+        displayName = "US Army"; // journal masthead (optional; class name when absent)
         // Mirrors EAST's ladder rung-for-rung: WL<3 riflemen -> WL3-4
         // grenadiers -> WL5+ crack troops. Deliberately SYMMETRIC with EAST:
         // either side can now be the occupier, so an asymmetric elite step
@@ -140,6 +141,7 @@ class CfgGuerrillaFactions
     class EAST // occupier descriptor; also selectable as the RESISTANCE roster
     {
         side = "EAST";
+        displayName = "Soviet Army"; // journal masthead (optional; class name when absent)
         // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
         tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
         tierThresholds[] = {3, 5};
@@ -189,6 +191,7 @@ class CfgGuerrillaFactions
     class GUER // resistance descriptor; also selectable as the OCCUPIER
     {
         side = "GUER";
+        displayName = "FIA"; // journal masthead (optional; class name when absent)
         // WL<4 riflemen -> WL4+ grenadiers. Honestly TWO tiers, not three: the
         // 1.99 core config ships no GUER special-forces/saboteur class, so the
         // ladder stops here rather than promoting SoldierGMG out of its role
