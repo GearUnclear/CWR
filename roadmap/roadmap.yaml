@@ -1507,7 +1507,7 @@ items:
     priority: 2
     depends_on: [build-toolchain]
     gh_issues: [62]
-    commits: []
+    commits: [04e977c]
     summary: >
       Arma 3 right mouse on foot and in vehicles (decided 2026-09-06): hold RMB
       = temporary zoom (new level action UAZoomTemp, driving the existing
