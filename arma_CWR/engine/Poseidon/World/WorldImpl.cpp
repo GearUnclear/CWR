@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Input/ControllerUiLayout.hpp>
@@ -2009,6 +2010,19 @@ LSError World::Serialize(ParamArchive& ar, int message)
     if (ar.IsSaving() ? Guerrilla::ZoneRegistry::Instance().IsActive() : ar.IsSubclass("GuerrillaZones"))
     {
         PARAM_CHECK(ar.Serialize("GuerrillaZones", Guerrilla::ZoneRegistry::Instance(), 14))
+    }
+
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::AssailantSystem::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::AssailantSystem::Instance().IsActive() : ar.IsSubclass("GuerrillaAssailants"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaAssailants", Guerrilla::AssailantSystem::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        Guerrilla::AssailantSystem::Instance().Configure();
     }
 
     // Guerrilla garrison cache: spawned-zone bookkeeping (group refs by

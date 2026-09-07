@@ -1,0 +1,6 @@
+mission = "guerrilla-mode/mission/Showcase.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "human-suite", "traffic"]
+timeout = 120
+assert_timeout = 45
+extra_args = ["--dev"]

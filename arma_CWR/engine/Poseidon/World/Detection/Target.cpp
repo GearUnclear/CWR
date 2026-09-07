@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -211,7 +212,7 @@ TargetState Target::State(AIUnit* sensor) const
     {
         return TargetDestroyed;
     }
-    if (!center->IsEnemy(side))
+    if (!Guerrilla::ObserverHostile(sensor, idExact, side, center))
     {
         return TargetAlive;
     }
@@ -919,7 +920,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         float sensorAccuracy = floatMax(audibleAccuracy, visibleAccuracy);
         if (initialize)
         {
-            if (center->IsFriendly(ai->GetTargetSide()))
+            if (!Guerrilla::IndependentGroup(unit->GetGroup()) && center->IsFriendly(ai->GetTargetSide()))
             {
                 sensorAccuracy = 4;
                 visibleAccuracy = 4;
@@ -1146,7 +1147,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             target->sideChecked = false;
         }
 
-        if (center->IsEnemy(target->side) && target->isKnown && target->delay < Glob.time && !target->destroyed &&
+        if (Guerrilla::ObserverHostile(unit, target->idExact, target->side, center) && target->isKnown && target->delay < Glob.time && !target->destroyed &&
             !target->vanished)
         {
             if (Position().Distance2(target->position) < Square(20 * VisibleSize()) && ai->CommanderUnit() &&
@@ -1307,7 +1308,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             }
         }
 
-        if (center->IsEnemy(target->side) && target->isKnown &&
+        if (Guerrilla::ObserverHostile(unit, target->idExact, target->side, center) && target->isKnown &&
             (ai->GetType()->GetIRTarget() || !ai->GetType()->GetLaserTarget()))
         {
             float dist2 = target->position.Distance2(Position());
@@ -1315,7 +1316,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         }
     }
 
-    for (int i = 0; i < center->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(unit->GetGroup()) && i < center->NTargets(); i++)
     {
         const AITargetInfo& target = center->GetTarget(i);
         if (center->IsEnemy(target._side))

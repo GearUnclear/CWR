@@ -206,6 +206,12 @@ class InputSubsystem
     MouseTuning& GetMouseTuning();
     const MouseTuning& GetMouseTuning() const;
 
+    // Tap window (ms) shared by the mouse and keyboard tap edges: a press
+    // released in strictly less than this counts as a tap; 0 disables taps.
+    // Session-only for now (dev panel knob); clamped to 0..2000.
+    int GetTapWindowMs() const;
+    void SetTapWindowMs(int ms);
+
     // Key binding access
     const AutoArray<int>& GetUserKeys(UserAction action) const;
     void SetUserKeys(UserAction action, const AutoArray<int>& keys);
@@ -223,9 +229,7 @@ class InputSubsystem
     // both code AND modifier match, so "Ctrl+W" doesn't conflict with bare
     // "W".  Returns UAN if no conflict.  Pass excludeSlot = -1 to scan
     // every slot of excludeAction too.  modifier = -1 means "no modifier".
-    UserAction FindBindingConflict(int packedCode,
-                                   UserAction excludeAction = UAN,
-                                   int excludeSlot = -1,
+    UserAction FindBindingConflict(int packedCode, UserAction excludeAction = UAN, int excludeSlot = -1,
                                    int modifier = -1) const;
 
     // Restore the engine defaults (UserActionDesc[i].keys) for every
@@ -287,4 +291,3 @@ class InputSubsystem
     float syntheticLeftStickY_ = 0.0f;
 };
 } // namespace Poseidon
-

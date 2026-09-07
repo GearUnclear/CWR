@@ -653,6 +653,9 @@ class World
 
 	CameraType GetCameraType() const {return _camType;}
 	CameraType GetCameraTypeWanted() const {return _camTypeMain;}
+	/// Current (eased) FOV of the active camera; the test harness reads it to
+	/// observe the hold-zoom.
+	float GetCameraFOV() const {return _camFOV[_camType];}
 	
 	Scene *GetScene() {return &_scene;}
 	Engine *GetEngine() const {return _engine;}

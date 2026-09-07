@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -1123,7 +1124,7 @@ float HowMuchInteresting(AIUnit* unit, const Target* tgt)
         interesting += 10;
     }
     // we get many point for being enemy
-    if (cnt->IsEnemy(tgt->side))
+    if (Guerrilla::ObserverHostile(unit, tgt->idExact, tgt->side, cnt))
     {
         interesting += 50;
     }

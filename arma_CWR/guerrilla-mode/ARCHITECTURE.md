@@ -379,6 +379,10 @@ enum words (`"SAFE"`, `"MOVE"`, `"SENTRY"`, `"Flag"`, `"RoadSegment"`,
 
 ### A.6 Script layer file map
 
+`assailants.sqs` owns the single global eligible-time incident clock and installs
+the admission callback after the civilian interaction library is ready.
+
+
 **One core, many missions (issue #54 step B1).** The island-agnostic script
 layer exists exactly ONCE in the repo, at `guerrilla-mode/core/`. No mission
 template carries a `scripts/` directory any more, and there is no copy to

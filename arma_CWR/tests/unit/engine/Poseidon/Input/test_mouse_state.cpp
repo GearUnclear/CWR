@@ -961,3 +961,136 @@ TEST_CASE("MouseState: default tuning keeps cursor and aim identical", "[input][
     // menuCursorScale defaults to 1.0 → classic shared movement.
     REQUIRE(cursor.cursorX == Catch::Approx(cursor.aimDeltaX));
 }
+
+// ---- Tap edge (press + release shorter than tapWindowMs) -------------------
+
+TEST_CASE("MouseState: quick press+release raises the tap edge on the release frame and clears next frame",
+          "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+    ms.tapWindowMs = 250;
+
+    ms.BufferButton(1, true, 1000);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.buttons[1] > 0);
+    CHECK(ms.buttonsToDo[1]);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+
+    ms.BufferButton(1, false, 1100);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.buttons[1] == 0);
+    CHECK_FALSE(ms.buttonsToDo[1]);
+    CHECK(ms.buttonsTapToDo[1]);
+
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+}
+
+TEST_CASE("MouseState: a hold of at least the window is not a tap", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+    ms.tapWindowMs = 250;
+
+    ms.BufferButton(1, true, 1000);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    ms.BufferButton(1, false, 1600);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+    CHECK(ms.buttons[1] == 0);
+}
+
+TEST_CASE("MouseState: tap window boundary is strict (window-1 taps, window does not)", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+    ms.tapWindowMs = 250;
+
+    ms.BufferButton(1, true, 1000);
+    ms.BufferButton(1, false, 1249);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.buttonsTapToDo[1]);
+
+    ms.BufferButton(1, true, 2000);
+    ms.BufferButton(1, false, 2250);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+}
+
+TEST_CASE("MouseState: same-frame press and release taps and leaves the button up", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+
+    ms.BufferButton(1, true, 5000);
+    ms.BufferButton(1, false, 5003);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.buttonsToDo[1]);
+    CHECK(ms.buttonsTapToDo[1]);
+    CHECK(ms.buttons[1] == 0);
+    CHECK_FALSE(ms.right);
+}
+
+TEST_CASE("MouseState: tapWindowMs = 0 disables taps entirely", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+    ms.tapWindowMs = 0;
+
+    ms.BufferButton(1, true, 1000);
+    ms.BufferButton(1, false, 1000);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+
+    ms.BufferButton(1, true, 2000);
+    ms.BufferButton(1, false, 2001);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+}
+
+TEST_CASE("MouseState: a TestSetButton press followed by a real release never taps", "[input][mouse][tap]")
+{
+    // triMouseRight holds the button without an event, so no press was ever
+    // tracked; the release event that follows must not look like a tap.
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+
+    ms.TestSetButton(1, true);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.right);
+
+    ms.BufferButton(1, false, 10);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+    CHECK_FALSE(ms.right);
+}
+
+TEST_CASE("MouseState: buttonsReversed maps the tap to the logical button", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+    ms.buttonsReversed = true;
+
+    // Physical left (0) -> logical right (1).
+    ms.BufferButton(0, true, 1000);
+    ms.BufferButton(0, false, 1050);
+    ms.Update(cursor, 0, false, UITime(), nullptr);
+    CHECK(ms.buttonsTapToDo[1]);
+    CHECK_FALSE(ms.buttonsTapToDo[0]);
+}
+
+TEST_CASE("MouseState: the tap timestamp epoch is the event stamp, not currentTime", "[input][mouse][tap]")
+{
+    // A large uiTime with tiny event stamps must still tap: the two clocks are
+    // independent and only the event stamps feed the window.
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+
+    ms.BufferButton(1, true, 7);
+    ms.Update(cursor, 0, false, UITime(1e6f), nullptr);
+    ms.BufferButton(1, false, 9);
+    ms.Update(cursor, 0, false, UITime(1e6f + 60.0f), nullptr);
+    CHECK(ms.buttonsTapToDo[1]);
+}

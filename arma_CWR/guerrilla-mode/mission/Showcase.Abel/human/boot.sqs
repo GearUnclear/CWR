@@ -1,0 +1,39 @@
+; Human acceptance overlay. The mission already runs \gmcore\init.sqs.
+; Owns HT_* only. No production dispatch, event registration or state writes.
+@ not (isNil "SC_READY")
+@ not (isNil "GM_AS_READY")
+@ not (isNil "GM_MKT_READY")
+HT_READY = false
+[] exec "human/cases.sqs"
+@ not (isNil "HT_CASES_READY")
+HT_OPEN = false
+HT_ACTIVE = false
+HT_INDEX = 0
+HT_STEP = 0
+HT_REQUEST = ""
+HT_LOADS = 0
+HT_SAVEACT = GM_pSaveAct
+HT_RESULTS = []
+HT_EVIDENCE = []
+HT_HISTORY = []
+HT_SETUP_HISTORY = []
+HT_ACTIONS = []
+HT_i = 0
+#rows
+? HT_i >= count HT_CASES : goto "ready"
+HT_RESULTS = HT_RESULTS + ["UNTESTED"]
+HT_EVIDENCE = HT_EVIDENCE + [[]]
+HT_i = HT_i + 1
+goto "rows"
+#ready
+HT_fnSnapshot = {HT_snapZones = []; HT_snapIndex = 0; while {HT_snapIndex < gmZoneCount} do {HT_snapZones = HT_snapZones + [[gmZone HT_snapIndex, gmZoneAlert HT_snapIndex, gmGarrisonLive HT_snapIndex]]; HT_snapIndex = HT_snapIndex + 1}; [time, getPos aP, gmResources, gmManpower, gmWarLevel, gmHqZone, count units group aP, GM_GEAR_UNLOCKED + [], GM_COMP_RANK + [], gmTrafficDiag, count HT_SETUP_HISTORY, HT_snapZones, GM_COMP_XP + [], GM_COMP_ALIVE + [], gmGarageCount, gmStashCount, GM_CI_LAST + [], GM_PANIC_ZONES + [], gmUndercoverStatus, gmUndercoverWitnesses]}
+HT_fnSay = {hint _this}
+HT_fnUnmount = {{aP removeAction _x} forEach HT_ACTIONS; HT_ACTIONS = []}
+HT_fnAdd = {HT_ACTIONS = HT_ACTIONS + [aP addAction [_this, "human/action.sqs"]]}
+HT_fnMount = {[] call HT_fnUnmount; if (not HT_OPEN) then {"HUMAN TESTS: open guided suite" call HT_fnAdd} else {if (HT_ACTIVE) then {"TEST: I observed this - check step" call HT_fnAdd; "TEST: repeat instructions / evidence" call HT_fnAdd; "TEST: FAIL - observed a defect" call HT_fnAdd; "TEST: BLOCKED - cannot exercise step" call HT_fnAdd; "TEST: stop without a verdict" call HT_fnAdd} else {"TEST: begin selected case" call HT_fnAdd; "TEST: next case" call HT_fnAdd; "TEST: previous case" call HT_fnAdd; "TEST: next unpassed case" call HT_fnAdd; "TEST: results report" call HT_fnAdd; "TEST: close suite" call HT_fnAdd; "TEST: prepare road fixture (changes Camp owner)" call HT_fnAdd}}}
+HT_fnDescribe = {HT_ROW = HT_CASES select HT_INDEX; if (HT_ACTIVE) then {HT_s = (HT_ROW select 6) select HT_STEP; (format ["%1 | Step %2/%3\n\n%4\n\n%5\n\nCHECK confirms your observation. Use FAIL for a defect or BLOCKED for missing conditions.", HT_ROW select 2, HT_STEP + 1, count (HT_ROW select 6), HT_s select 0, HT_s select 1]) call HT_fnSay} else {(format ["HUMAN TEST %1/%2 | %3\n%4\n\n%5\n\nResult: %6. Begin when the prerequisites are met. Test preparation and all gameplay use normal campaign controls.", HT_INDEX + 1, count HT_CASES, HT_ROW select 1, HT_ROW select 2, HT_ROW select 3, HT_RESULTS select HT_INDEX]) call HT_fnSay}}
+HT_fnRecord = {HT_RESULTS set [HT_INDEX, _this]; HT_receipt = [HT_ROW select 0, _this, HT_STEP, [] call HT_fnSnapshot]; HT_HISTORY = HT_HISTORY + [HT_receipt]; aP sideChat format ["HUMAN RESULT: %1 - %2 (step %3). Evidence saved in the test ledger.", HT_ROW select 2, _this, HT_STEP]; HT_ACTIVE = false; [] call HT_fnMount; [] call HT_fnDescribe}
+[] call HT_fnMount
+HT_READY = true
+[] exec "human/run.sqs"
+exit

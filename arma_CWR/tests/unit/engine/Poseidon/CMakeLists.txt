@@ -349,6 +349,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Input tests (batch-14)
     Input/test_binding_conflict.cpp
     Input/test_combo_fire_regression.cpp
+    Input/test_tap_binding.cpp
     Input/test_controls_category.cpp
     Input/test_input_codes.cpp
     Input/test_modifier_combos.cpp
@@ -381,6 +382,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_zone_registry.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
+    Game/Guerrilla/test_assailants.cpp
     Game/Guerrilla/test_undercover.cpp
     Game/Guerrilla/test_town_flags.cpp
     Game/Guerrilla/test_traffic.cpp

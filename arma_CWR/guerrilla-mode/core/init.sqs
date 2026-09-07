@@ -314,6 +314,7 @@ GM_LIB_READY = false
 [] exec "\gmcore\scripts\companions.sqs"
 [] exec "\gmcore\scripts\civilians.sqs"
 [] exec "\gmcore\scripts\civilian_interaction.sqs"
+[] exec "\gmcore\scripts\assailants.sqs"
 [] exec "\gmcore\scripts\shakedown.sqs"
 
 exit

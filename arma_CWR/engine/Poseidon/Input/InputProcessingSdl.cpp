@@ -203,7 +203,10 @@ void ProcessKeyboard_SDL(DWORD /*sysTime*/, DWORD timeDelta)
 
 void SDLInput_BufferMouseButton(int btn, bool down)
 {
-    GInput.mouse.BufferButton(btn, down);
+    // Single funnel for every mouse-button source (SDL window, dummy engine,
+    // controller-as-pointer).  Stamp with GlobalTickCount() so the tap window
+    // shares the keyboard's monotonic epoch.
+    GInput.mouse.BufferButton(btn, down, GlobalTickCount());
     if (GUIRecorder)
         GUIRecorder->RecordMouseButton(btn, down, GInput.cursor.cursorX, GInput.cursor.cursorY);
 }

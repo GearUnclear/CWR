@@ -110,7 +110,7 @@ gmCvClassAt  = 0
 ;   _this = [victim, killer]. ONE line appending the 4-tuple to gmCivKilled;
 ;   zoneIdx computed at fire time from the victim's position (kills away from
 ;   the home town attribute to the nearest CITY).
-GM_fnCivKilledEH = {gmCivKilled = gmCivKilled + [[_this select 0, _this select 1, getPos (_this select 0), (getPos (_this select 0)) call GM_fnZoneNearestCity]]}
+GM_fnCivKilledEH = {gmCivKilled = gmCivKilled + [[_this select 0, _this select 1, getPos (_this select 0), (getPos (_this select 0)) call GM_fnZoneNearestCity, gmAssailantClass (_this select 0)]]}
 
 ; --- GM_fnCivSpawnTown( [zoneIdx] ) -> group -----------------------------------
 ;   Spawns ONE group of GM_CIV_GROUP_SIZE at a jittered position around the
@@ -180,6 +180,8 @@ GM_cvZi = GM_cvRec select 3
 ; drop: no CITY on the island, or too far from the attributed town centre
 ? GM_cvZi < 0 : goto "killnext"
 ? ((GM_cvRec select 2) distance ((gmZone GM_cvZi) select GM_Z_POS)) > GM_CIV_EFFECT_R : goto "killnext"
+[GM_cvZi] call GM_fnPanicStart
+? ((count GM_cvRec) > 4) and ((GM_cvRec select 4) != "") : goto "killnext"
 GM_cvKiller = GM_cvRec select 1
 GM_cvClass = "OTHER"
 ? isNull GM_cvKiller : goto "classified"
@@ -199,7 +201,6 @@ GM_cvDelta = GM_CIV_SUP_OTHER
 ? GM_cvClass == "PSEUDO" : GM_cvDelta = GM_CIV_SUP_PSEUDO
 GM_cvSup = [GM_cvZi, GM_cvDelta] call GM_fnSupportAdd
 ? GM_cvClass == "OCCUPIER" : GM_cvOk = [GM_cvZi, GM_RESENT_DELAY, GM_RESENT_OCC] call GM_fnResentAdd
-[GM_cvZi] call GM_fnPanicStart
 #killnext
 gmCvKI = gmCvKI + 1
 goto "kills"

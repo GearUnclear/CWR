@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <SDL3/SDL_scancode.h>
 
 #include <Poseidon/Core/Application.hpp>
@@ -499,9 +500,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 }
                 _showMap = false;
             }
-            if (input.GetActionToDo(UAOptics))
+            // Optics toggles only while the map is closed: the default binding is a
+            // quick RMB click, and the open map pans on right-drag, so a short right
+            // click there must not close it into the sights.
+            if (input.GetActionToDo(UAOptics) && !_showMap)
             {
-                if (_camTypeMain == CamGunner && !_showMap)
+                if (_camTypeMain == CamGunner)
                 {
                     if (_cameraExternal)
                     {
@@ -516,7 +520,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 {
                     _camTypeMain = CamGunner;
                 }
-                _showMap = false;
             }
             if (input.GetActionToDo(UATacticalView))
             {
@@ -627,28 +630,14 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             _camType = CamGunner;
         }
-        if (input.GetAction(UALockTarget) && (_camType == CamInternal || _camType == CamExternal))
+        // Hold-zoom (Arma 3 RMB).  No lockable-weapon veto any more: lock target
+        // lives on its own key, so the zoom works with launchers too.  CamGunner
+        // takes the continuous FOV branch that never reads forcedZoom, which is
+        // exactly "hold-RMB inside the sights does nothing".
+        if (input.GetAction(UAZoomTemp) > 0 && (_camType == CamInternal || _camType == CamExternal))
         {
-            EntityAI* veh = FocusOn()->GetVehicle();
-            PoseidonAssert(veh);
-            int curWeapon = veh->SelectedWeapon();
-            bool allowZoom = true;
-            if (curWeapon >= 0 && curWeapon < veh->NMagazineSlots())
-            {
-                const MagazineSlot& slot = veh->GetMagazineSlot(curWeapon);
-                const MuzzleType* muzzle = slot._muzzle;
-                bool canLock =
-                    muzzle->_canBeLocked == 2 || muzzle->_canBeLocked == 1 && USER_CONFIG.IsEnabled(DTAutoGuideAT);
-                if (canLock)
-                {
-                    allowZoom = false;
-                }
-            }
-            if (allowZoom)
-            {
-                // zoom in
-                forcedZoom = true;
-            }
+            // zoom in
+            forcedZoom = true;
         }
     }
     else
@@ -662,7 +651,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
             _camTypeMain = CamInternal;
         }
         _camType = _camTypeMain;
-        if (input.GetAction(UALockTarget) && (_camType == CamInternal || _camType == CamExternal))
+        if (input.GetAction(UAZoomTemp) > 0 && (_camType == CamInternal || _camType == CamExternal))
         {
             // zoom in
             forcedZoom = true;
@@ -1725,6 +1714,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // trafficEnabled=0); throttles itself to trafficInterval plus a
         // 0.5 s commandeer sub-tick while a civ car is near the player.
         Guerrilla::Traffic::Instance().Simulate(deltaT);
+        Guerrilla::AssailantSystem::Instance().Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
         // once something registers; throttles itself to
         // StashRegistry::TickInterval.

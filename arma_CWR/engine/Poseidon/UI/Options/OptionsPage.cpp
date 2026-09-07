@@ -17,7 +17,28 @@ const char* ControlActionLabel(UserAction action)
     if (action < 0 || action >= UAN)
         return "";
     UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
-    return LocalizeString(descs[action].desc);
+    // Never hand a negative id to LocalizeString: it LOG_ERRORs per call and
+    // renders "!!! UNREGISTERED STRING" in cheat builds.
+    if (descs[action].desc >= 0)
+    {
+        // The returned buffer is shared with the registered-string table, so it
+        // outlives this local (the same lifetime the old direct return relied on).
+        RString localized = LocalizeString(descs[action].desc);
+        if (localized.GetLength() > 0)
+            return localized;
+    }
+    // English fallback for the strings the Classic 1.99 stringtable predates
+    // (the STR keys live in the game-data stringtable, not in this repo).
+    switch (action)
+    {
+        case UAZoomTemp:
+            return "Zoom in (temporary)";
+        case UALockTarget:
+            return "Lock target";
+        default:
+            break;
+    }
+    return descs[action].name ? descs[action].name : "";
 }
 
 void OptionsPage::SetCtrlText(Display& display, int idc, const char* text)

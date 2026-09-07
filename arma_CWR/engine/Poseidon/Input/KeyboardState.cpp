@@ -69,6 +69,7 @@ void KeyboardState::Update(DWORD sysTime, DWORD timeDelta, bool userInputEnabled
         keys[k] = 0;
         keysToDo[k] = false;
         keysDoubleTapToDo[k] = false;
+        keysTapToDo[k] = false;
     }
 
     if (!userInputEnabled)
@@ -103,8 +104,14 @@ void KeyboardState::Update(DWORD sysTime, DWORD timeDelta, bool userInputEnabled
             if (keyPressed[k])
             {
                 DWORD start = keyPressed[k];
+                // Tap window is measured from the REAL press time, captured
+                // before the frame-start clamp below (the clamped start would
+                // make a long hold released mid-frame look like a tap).
+                const DWORD pressedAt = start;
                 keyPressed[k] = 0;
                 keysDoubleTapActive[k] = false;
+                if (tapWindowMs > 0 && ev.timestamp - pressedAt < static_cast<DWORD>(tapWindowMs))
+                    keysTapToDo[k] = true;
                 if (start < sysTime - timeDelta)
                     start = sysTime - timeDelta;
                 DWORD howLong = ev.timestamp - start;
@@ -176,6 +183,7 @@ void KeyboardState::ForgetKeys()
         keysToDo[k] = false;
         keysDoubleTapToDo[k] = false;
         keysDoubleTapActive[k] = false;
+        keysTapToDo[k] = false;
         keyLastPressed[k] = 0;
         keyPressed[k] = 0;
         keys[k] = 0;

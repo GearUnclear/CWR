@@ -28,12 +28,16 @@
 ? GM_pSaveAct != SC_SAVEACT : goto "rearm"
 
 ? (count SC_QUEUE) < 1 : goto "loop"
+; Human testing must never run beside a staged demo, including queued requests.
+if (not (isNil "HT_OPEN")) then {if (HT_OPEN) then {SC_QUEUE = []}}
+? (count SC_QUEUE) < 1 : goto "loop"
 
 ; ---- pop the next chapter (also swallows accidental duplicate requests) --------
 SC_CH = SC_QUEUE select 0
 SC_QUEUE = SC_QUEUE - [SC_CH]
 ? (SC_CH < 0) or (SC_CH >= count SC_CH_IDS) : goto "loop"
 SC_BUSY = true
+SC_STAGED = true
 
 ; ---- pacing: readable beats for a human, fast beats for the harness ------------
 SC_BEAT = 6
@@ -70,6 +74,7 @@ goto "loop"
 #rearm
 [] call SC_fnUnmount
 [] call SC_fnMount
+if (not (isNil "HT_OPEN")) then {if (HT_OPEN) then {[] call SC_fnUnmount}}
 SC_SAVEACT = GM_pSaveAct
-"Campaign load detected: zones, alerts, garrisons, companions and the gear stash came back through the native serializers; showcase menu re-armed. Persistence round-trip verified." call SC_fnSay
+"Campaign load detected; showcase actions re-armed. Use the human persistence checklist to verify restored campaign facts." call SC_fnSay
 goto "loop"

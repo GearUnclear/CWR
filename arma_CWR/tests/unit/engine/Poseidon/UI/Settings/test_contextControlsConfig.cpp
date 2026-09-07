@@ -212,3 +212,216 @@ TEST_CASE("ContextControlsConfig: a full version-1 config parses and migrates", 
 
     std::filesystem::remove(path);
 }
+
+#include <Poseidon/Input/InputDeviceConstants.hpp>
+#include <fstream>
+#include <sstream>
+
+namespace
+{
+std::string ReadAll(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+void ReplaceLine(std::string& text, const std::string& from, const std::string& to)
+{
+    const size_t at = text.find(from);
+    REQUIRE(at != std::string::npos);
+    text.replace(at, from.size(), to);
+}
+} // namespace
+
+// A version-3 file written by the pre-Arma-3-right-mouse build: Optics = V +
+// Numpad 0, LockTarget = RMB, Watch = T, no ZoomTemp.  Loading must rewrite the
+// three pristine KB&M defaults to their v4 values (keeping the gamepad entries
+// that share the same array), seed ZoomTemp, and leave everything else alone.
+TEST_CASE("ContextControlsConfig: a full version-3 config migrates to 4", "[Settings][ContextControlsConfig]")
+{
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const int inf = (int)InputContext::Infantry;
+    const InputCode tapRmb = InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1));
+    const InputCode rmb = InputCode::MouseButton(1);
+
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(GET_FIXTURE("cfg/contextControls_v3_full.cfg")));
+    CHECK(migrated.migratedOnLoad);
+
+    const auto& optics = migrated.profiles[inf].GetBindingEntries(UAOptics);
+    REQUIRE(optics.size() == 3);
+    CHECK(optics[0].code == tapRmb);
+    CHECK(optics[1].code == InputCode::Key(SDL_SCANCODE_V));
+    CHECK(optics[2].code == InputCode::GamepadBtn(6)); // LT, preserved from the v3 array
+    CHECK_FALSE(migrated.profiles[inf].HasBinding(UAOptics, InputCode::Key(SDL_SCANCODE_KP_0)));
+
+    const auto& lock = migrated.profiles[inf].GetBindingEntries(UALockTarget);
+    REQUIRE(lock.size() == 1);
+    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_T));
+
+    const auto& reveal = migrated.profiles[inf].GetBindingEntries(UARevealTarget);
+    REQUIRE(reveal.size() == 1);
+    CHECK(reveal[0].code == rmb);
+
+    const auto& watch = migrated.profiles[inf].GetBindingEntries(UAWatch);
+    REQUIRE(watch.size() == 2);
+    CHECK(watch[0].code == InputCode::Key(SDL_SCANCODE_O));
+    CHECK(watch[1].code == InputCode::GamepadPov(2));
+
+    const auto& zoomTemp = migrated.profiles[inf].GetBindingEntries(UAZoomTemp);
+    REQUIRE(zoomTemp.size() == 1);
+    CHECK(zoomTemp[0].code == rmb);
+
+    // A context without the gamepad entries migrates to the bare KB&M list.
+    const auto& carOptics = migrated.profiles[(int)InputContext::CarDriver].GetBindingEntries(UAOptics);
+    REQUIRE(carOptics.size() == 2);
+    CHECK(carOptics[0].code == tapRmb);
+    CHECK(carOptics[1].code == InputCode::Key(SDL_SCANCODE_V));
+
+    // Untouched v3 rows keep their values.
+    CHECK(migrated.profiles[inf].HasBinding(UAFire, InputCode::Key(SDL_SCANCODE_LCTRL)));
+    CHECK(migrated.profiles[inf].HasBinding(UAVoiceOverNetPushToTalk, InputCode::Key(SDL_SCANCODE_CAPSLOCK)));
+
+    // Save, reload: now current, no second migration, the tap flag persisted.
+    const std::string path = TmpPath("context_controls_v3_full_migrated.cfg");
+    std::filesystem::remove(path);
+    REQUIRE(migrated.Save(path));
+    const std::string saved = ReadAll(path);
+    CHECK(saved.find("contextControlsVersion=4;") != std::string::npos);
+    CHECK(saved.find("ctxInfantryOptics[]={81921,25,131078};") != std::string::npos);
+    CHECK(saved.find("ctxInfantryLockTarget[]={23};") != std::string::npos);
+    CHECK(saved.find("ctxInfantryWatch[]={18,262146};") != std::string::npos);
+    CHECK(saved.find("ctxInfantryZoomTemp[]={65537};") != std::string::npos);
+
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    const auto& reOptics = reloaded.profiles[inf].GetBindingEntries(UAOptics);
+    REQUIRE(reOptics.size() == 3);
+    CHECK(reOptics[0].code == tapRmb);
+    CHECK(reloaded.profiles[inf].HasBinding(UALockTarget, InputCode::Key(SDL_SCANCODE_T)));
+    CHECK(reloaded.profiles[inf].HasBinding(UAWatch, InputCode::Key(SDL_SCANCODE_O)));
+    CHECK(reloaded.profiles[inf].HasBinding(UAZoomTemp, rmb));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: customized v3 rows are left alone by the v4 rewrite",
+          "[Settings][ContextControlsConfig]")
+{
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const int inf = (int)InputContext::Infantry;
+
+    // The user had rebound Infantry Optics to C (+ Numpad 0, + LT) and
+    // Infantry LockTarget to Q; both are non-default and must survive.
+    std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
+    ReplaceLine(text, "ctxInfantryOptics[]={25,98,131078};", "ctxInfantryOptics[]={6,98,131078};");
+    ReplaceLine(text, "ctxInfantryLockTarget[]={65537};", "ctxInfantryLockTarget[]={20};");
+
+    const std::string path = TmpPath("context_controls_v3_customized.cfg");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.migratedOnLoad);
+
+    const auto& optics = cfg.profiles[inf].GetBindingEntries(UAOptics);
+    REQUIRE(optics.size() == 3);
+    CHECK(optics[0].code == InputCode::Key(SDL_SCANCODE_C));
+    CHECK(optics[1].code == InputCode::Key(SDL_SCANCODE_KP_0));
+    CHECK(optics[2].code == InputCode::GamepadBtn(6));
+
+    const auto& lock = cfg.profiles[inf].GetBindingEntries(UALockTarget);
+    REQUIRE(lock.size() == 1);
+    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_Q));
+
+    // Pristine rows elsewhere still migrate, and ZoomTemp is still seeded.
+    CHECK(cfg.profiles[inf].HasBinding(UAWatch, InputCode::Key(SDL_SCANCODE_O)));
+    const auto& carOptics = cfg.profiles[(int)InputContext::CarDriver].GetBindingEntries(UAOptics);
+    REQUIRE(carOptics.size() == 2);
+    CHECK(carOptics[0].code == InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1)));
+    CHECK(cfg.profiles[inf].HasBinding(UAZoomTemp, InputCode::MouseButton(1)));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: a v3 row with a modifier or an empty slot counts as customized",
+          "[Settings][ContextControlsConfig]")
+{
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const int inf = (int)InputContext::Infantry;
+
+    std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
+    // Watch = Shift+T (modifier), LockTarget = [empty, RMB] (cleared primary).
+    ReplaceLine(text, "ctxInfantryWatch_mod[]={-1,-1};", "ctxInfantryWatch_mod[]={225,-1};");
+    ReplaceLine(text, "ctxInfantryLockTarget[]={65537};", "ctxInfantryLockTarget[]={0,65537};");
+    ReplaceLine(text, "ctxInfantryLockTarget_mod[]={-1};", "ctxInfantryLockTarget_mod[]={-1,-1};");
+    ReplaceLine(text, "ctxInfantryLockTarget_scale[]={1.000000};",
+                "ctxInfantryLockTarget_scale[]={1.000000,1.000000};");
+
+    const std::string path = TmpPath("context_controls_v3_modified.cfg");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+
+    const auto& watch = cfg.profiles[inf].GetBindingEntries(UAWatch);
+    REQUIRE(watch.size() == 2);
+    CHECK(watch[0].code == InputCode::Key(SDL_SCANCODE_T));
+    CHECK(watch[0].modifier == InputCode::Key(SDL_SCANCODE_LSHIFT));
+
+    const auto& lock = cfg.profiles[inf].GetBindingEntries(UALockTarget);
+    REQUIRE(lock.size() == 2);
+    CHECK_FALSE(lock[0].code.valid());
+    CHECK(lock[1].code == InputCode::MouseButton(1));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: a file newer than the build is treated as unknown layout",
+          "[Settings][ContextControlsConfig]")
+{
+    // An experimental build once wrote version 5 with a v3 layout to a real
+    // profile.  A version above ours must not freeze that layout in place: seed
+    // the missing actions, apply the equality-gated rewrite, and re-save at our
+    // version so the next boot is a plain current-version load.
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const int inf = (int)InputContext::Infantry;
+
+    std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
+    ReplaceLine(text, "contextControlsVersion=3;", "contextControlsVersion=99;");
+    // Keep one customised row to prove the gate still protects it.
+    ReplaceLine(text, "ctxInfantryOptics[]={25,98,131078};", "ctxInfantryOptics[]={25,65540,131078};");
+
+    const std::string path = TmpPath("context_controls_newer_than_build.cfg");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.migratedOnLoad);
+    CHECK(cfg.profiles[inf].HasBinding(UALockTarget, InputCode::Key(SDL_SCANCODE_T)));
+    CHECK(cfg.profiles[inf].HasBinding(UAWatch, InputCode::Key(SDL_SCANCODE_O)));
+    CHECK(cfg.profiles[inf].HasBinding(UAZoomTemp, InputCode::MouseButton(1)));
+    const auto& optics = cfg.profiles[inf].GetBindingEntries(UAOptics);
+    REQUIRE(optics.size() == 3);
+    CHECK(optics[0].code == InputCode::Key(SDL_SCANCODE_V));
+    CHECK(optics[1].code == InputCode::MouseButton(4));
+
+    REQUIRE(cfg.Save(path));
+    CHECK(ReadAll(path).find("contextControlsVersion=4;") != std::string::npos);
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    std::filesystem::remove(path);
+}

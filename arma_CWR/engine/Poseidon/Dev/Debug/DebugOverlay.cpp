@@ -1583,6 +1583,12 @@ void DrawMouseTab()
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Off = legacy 0.5..2.0 sensitivity range. On = 0.05..3.0.");
+        int tapWindowMs = sub.GetTapWindowMs();
+        if (ImGui::SliderInt("Tap window (ms)", &tapWindowMs, 0, 600))
+            sub.SetTapWindowMs(tapWindowMs);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Release within N ms = tap; RMB tap toggles the sights. 0 disables taps. Session-only "
+                              "(not part of the tuning reset / mouse.cfg).");
     }
 
     ImGui::Spacing();

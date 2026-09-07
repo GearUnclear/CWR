@@ -63,3 +63,50 @@ TEST_CASE("Input device masks are distinct", "[input]")
     REQUIRE((INPUT_DEVICE_MOUSE & INPUT_DEVICE_MASK) == INPUT_DEVICE_MOUSE);
     REQUIRE((INPUT_DEVICE_STICK & INPUT_DEVICE_MASK) == INPUT_DEVICE_STICK);
 }
+
+#include <Poseidon/Input/InputCode.hpp>
+
+TEST_CASE("Input binding tap flag: helpers, masks and legacy round-trip", "[input]")
+{
+    // The two mode bits are disjoint from each other, from the value field and
+    // from the device field.
+    REQUIRE((INPUT_BINDING_TAP & INPUT_BINDING_DOUBLE_TAP) == 0);
+    REQUIRE((INPUT_BINDING_TAP & INPUT_BINDING_VALUE_MASK) == 0);
+    REQUIRE((INPUT_BINDING_DOUBLE_TAP & INPUT_BINDING_VALUE_MASK) == 0);
+    REQUIRE((INPUT_BINDING_TAP & INPUT_DEVICE_MASK) == 0);
+    REQUIRE((INPUT_BINDING_DOUBLE_TAP & INPUT_DEVICE_MASK) == 0);
+
+    // Every scancode fits below the mode bits.
+    REQUIRE(SDL_SCANCODE_COUNT - 1 <= INPUT_BINDING_VALUE_MASK);
+
+    const int rmb = INPUT_DEVICE_MOUSE + 1;
+    const int tapRmb = InputBindingTapCode(rmb);
+    REQUIRE(InputBindingIsTap(tapRmb));
+    REQUIRE_FALSE(InputBindingIsDoubleTap(tapRmb));
+    REQUIRE_FALSE(InputBindingIsTap(rmb));
+    REQUIRE_FALSE(InputBindingIsTap(InputBindingDoubleTapCode(rmb)));
+    REQUIRE(tapRmb == 0x14001);
+    REQUIRE(InputBindingDevice(tapRmb) == INPUT_DEVICE_MOUSE);
+    REQUIRE(InputBindingValue(tapRmb) == 1);
+
+    // BaseCode strips both flags, and re-flagging a flagged code swaps the mode.
+    REQUIRE(InputBindingBaseCode(tapRmb) == rmb);
+    REQUIRE(InputBindingBaseCode(InputBindingDoubleTapCode(rmb)) == rmb);
+    REQUIRE(InputBindingBaseCode(tapRmb | INPUT_BINDING_DOUBLE_TAP) == rmb);
+    REQUIRE(InputBindingTapCode(InputBindingDoubleTapCode(rmb)) == tapRmb);
+    REQUIRE(InputBindingDoubleTapCode(tapRmb) == InputBindingDoubleTapCode(rmb));
+
+    // The flag survives the InputCode legacy round-trip (this is what persists
+    // it in contextControls.cfg).
+    const InputCode code = InputCode::FromLegacy(tapRmb);
+    REQUIRE(code.toLegacy() == tapRmb);
+    REQUIRE(InputBindingIsTap(code.toLegacy()));
+    REQUIRE(code.device() == InputDevice::Mouse);
+    REQUIRE(code != InputCode::FromLegacy(rmb));
+
+    // Keyboard codes flag the same way.
+    const int tapV = InputBindingTapCode((int)SDL_SCANCODE_V);
+    REQUIRE(InputBindingIsTap(tapV));
+    REQUIRE(InputBindingDevice(tapV) == INPUT_DEVICE_KEYBOARD);
+    REQUIRE(InputBindingValue(tapV) == (int)SDL_SCANCODE_V);
+}

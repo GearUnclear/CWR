@@ -50,6 +50,7 @@ fs::path RepoRoot()
 // THE MANIFEST. Kept in lockstep with guerrilla-mode/ARCHITECTURE.md A.6 by
 // the doc case below: adding or retiring a core script means editing both.
 const std::vector<std::string> kCoreScripts = {
+    "assailants.sqs",
     "campaign.sqs",
     "capture.sqs",
     "civilian_interaction.sqs",

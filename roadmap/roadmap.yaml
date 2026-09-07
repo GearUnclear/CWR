@@ -378,6 +378,7 @@ items:
       readable font); a state-change event ticker replaces the v1 HUD;
       chapters.sqs is the manifest (adding a chapter = one file + one row).
     log:
+      - "2026-09-06: delivered and installed 41 guided human cases / 96 steps, coverage inventory and run sheet, using the production core/bootstrap and an include of the primary Abel config. Separate human ledger, explicit native road fixtures and staged-demo exclusion verified. Fixed the variable-map second-pass save/load ordering defect exposed by the ledger. Validation passed: 5 source contracts, all 4 new integration scenarios, the original Showcase reel, and 262 unit cases / 7919 assertions; final default-build runner and two-process save/load checks also passed. Actual human acceptance and the content matrix remain unrun."
       - "Native event slots are single-owner (one handler per event type), so the overlay registers none; campaign loads are detected by polling GM_pSaveAct and the menu re-mounts."
       - "v1 (702842f) was rejected in review: instant demos + a 2 s titleText status wall. Root cause is engine fact, not tuning: plain-title font size comes from RscTitlesText in the GLOBAL resource (TitEffects.cpp), unreachable from script and from description.ext - a titleText HUD can never be readable. v2 (c2bd9d5) moved all narration to sideChat and made every demo a paced chapter with an observable, asserted outcome."
       - "Staging rule found by the first v2 smoke run: cover (setCaptive) is personal, so squadmates parked near a live garrison get engaged and the provoked player unit's fired-EH breaks campaign cover mid-demo; near-garrison chapters teleport the captive player SOLO (SC_fnTpSolo)."
@@ -1096,6 +1097,23 @@ items:
       - "2026-09-01: sequenced as Phase A of the mod-intake umbrella issue #54 (roadmap item mod-intake-sustainability); execute its six items in the order A1-A6 listed there."
       - "2026-09-02: all six items landed on feat/mod-intake-54. A1 FactionSources (5a1aa34): the three consumers build Pars-block U island-block, island wins by whole-class replacement. A2/A3 (33f5daf): tiers[0]/playerClassWarrior probed at menu time, greyed '(not in loaded data)' + OK refused; a non-default resistance pick substitutes its playerClassWarrior. A4 (7694bf2): vanilla blocks in guerrilla-mode/config/guerrilla-factions.hpp installed via bin\\config-extra.cpp; the @LoBo eight in the @lobofixup mod config, one copy each (the two IDF copies were identical, Lebanon80's Hizballah a strict superset); templates keep CIV only (+ Demo's documented GUER override). A5 (3dc1212): `PoseidonTools guerrilla lint` diffs the registry loaded with and without the probe (11 shipped factions, 0 substitutions on Classic+@LoBo). A6 (0d002a0): guerrilla-mode/FACTION-PACKS.md; the @udfaction fixture is the worked example and passes the lint. Matrix tests (390c789): the pack on Abel by direct launch and through the menu with gating."
 
+  - id: uk-ira-pack
+    title: "Guerrilla pack: UK vs IRA (Operation Banner) on a stand-in island (issue #60)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [faction-island-decoupling]
+    commits: []
+    gh_issues: [60]
+    summary: >
+      Second faction/island pack after @LoBo: British Army occupier vs Provisional
+      IRA resistance from Operation Blue Rose "Case Jonathan" (the only OFP mod
+      with a playable IRA roster), on a temperate stand-in island, through the
+      same CfgGuerrillaFactions + Guerrilla.<World> seams. Design note:
+      arma_CWR/guerrilla-mode/ideation-uk-vs-ira.md (island hunt results inside).
+    log:
+      - "2026-09-06 island hunt: no Northern Ireland or Irish island exists for OFP (Faguss DB, all 600 records; OFP.info mirror; ACEIP/KMP rosters; BI forums). Stand-in shortlist with live archives on files.ofpisnotdead.com: Gaia (ribbon-development farmland, no deps), Trinity 2.0 (green upland, AGS + Baracken), Skye V2/V3 (Scottish glens), Brigadoon (moorland); Normandy v2.1 has the right hedgerow structure but WW2 objects. St. Patrick's Day BritanIRA.zip re-verified on ModDB (252 MB, no island inside). Stock Nogova is blocked as a template: guerrilla scaffold classifies every OPRW v3 object in noe.wrp as a road (177,224 roads, 0 buildings, all 30 towns skipped)."
+
   - id: mod-intake-sustainability
     title: "Mod intake: sustainably accept third-party factions and islands (issue #54 umbrella)"
     phase: phase-2
@@ -1271,6 +1289,7 @@ items:
       scores are not computed en masse and only need to stay consistent while
       the player is within 300 m of the city.
     log:
+      - "2026-09-06: civilian conversation polish: pending extortion stays attached to its eligible civilian in crowds; rereading mood preserves the choice instructions and deadline; idle expiry and leaving reach replace stale preview text; refusals and zero-value rewards show retry seconds immediately. Kept bounded polling, stable action IDs and the existing economic rules. Validation: five focused Trident scenarios passed (transactions, expanded UX, save/load, Sinai, rendered feedback at 800x600); six script-core unit cases / 345 assertions passed. The broader guerrilla_assailants scenario still loses its harness connection at the side-classification assertion; reproduced at the same assertion with the original HEAD scripts. Refined scripts restored to the local Classic install afterward."
       - "2026-09-05: implemented on codex/civilian-solicit-extort. One shared service: lazy bounded personal profiles, both proximity actions, atomic treasury credits and support nudges, cooldown/recovery, descriptor tuning, save/load menu recovery and #42 callback (combat retaliation stays in #42). Validation: 251 Guerrilla unit cases / 4270 assertions; seven focused Trident scenarios covering action boundaries, real save/load, reversed Sinai sides, existing ambience/shakedown/panic and native campaign restoration. Regression testing caught the single-slot campaignLoaded handler: bootstrap now fans out to both consumers. Exact support-delta tests disable unrelated native support drift in an isolated shared-core fixture."
       - "2026-09-05: gameplay/UX refinement: free qualitative mood assessment, preview/commit/cancel extortion, reward and consequence labels, cooldown/read-only paid menus, stable crowd targeting and quarter-second request handling. One payout per civilian per visit closes repeat extortion at zero opinion; saved payment state prevents reload farming. Results append verb, actual support delta and retry seconds while preserving the original result prefix. Pending UI intent is discarded on load. Validation: 251 Guerrilla unit cases / 4276 assertions and six integration scenarios, including rendered native-menu checks at 800x600, free/stale/expired/cancelled choices, zero rewards, support clamping, save/load and reversed-side Sinai. Visual review shortened the initially wordy preview and labels."
       - "2026-09-05: consolidated codex/civilian-solicit-extort and screenshots into main, retaining main's newer journal redesign and panic-priority changes. Both merges reconciled without conflicts; feature commits remain in the merged history."
@@ -1304,7 +1323,7 @@ items:
   - id: unassociated-assailants
     title: "Unassociated assailants: civilians who fight back + rogue civilians hostile to both sides (issue #42)"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 3
     depends_on: [extort-solicit]
     gh_issues: [42]
@@ -1316,6 +1335,7 @@ items:
       faction - hostile to everyone, loyal to nobody - and exist to carry the
       chaos real insurgencies have.
     log:
+      - "2026-09-06: implementing #42: native individual hostility, eight private group slots, CIV handgun admission, shared eligible-time rogue clock, transactional extortion, death classification and optional persistence. Focused unit suite passes; Classic and LoBo game validation in progress."
       - "2026-08-05: filed. The blocking fact is that ZoneRegistry::ApplyCampaignFriendship (ZoneRegistry.cpp:455-503) welds the civilian center friendly to BOTH war sides and re-applies on every load, under the comment 'the population is nobody's enemy; the ambience layer's civilians are not a third army' - the exact assumption this feature breaks. Friendship is per-CENTER (setFriend / AICenter::SetFriendship), so dropping it would turn every civilian on the island hostile at once, the opposite of 'sparingly'."
       - "Mechanism that does work: unit side comes from the receiving group's AI center on all three creation paths (verified in the #26 pass), so a rogue moves into a group on another center while keeping his civilian class and model - the same class-vs-center split the undercover system already relies on."
       - "The spare side slot must be COMPUTED, not hardcoded to WEST as issue #2 assumes: on vanilla Abel (occupier EAST, resistance GUER) WEST is free, but on Guerrilla.Lebanon80 the IDF occupier IS WEST and Hizballah is EAST, leaving GUER as the only free slot. ResolveSideCollisions already pins both campaign sides and is the natural place to derive the leftover one."
@@ -1499,6 +1519,37 @@ items:
       - "2026-08-09: landed engine-side. Unit coverage: seat-lock semantics, mouse-turn veto, arbiter-on-manual-flag, pilot/thrust gating, driver-context binding suppression, gamepad.cfg round-trip, tuning-page rows. PoseidonTests at baseline (5 pre-existing Map-localization reds, reproduced with the change stashed); clean boot to main loop verified. Steering strings added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored data-dir file - re-add after a reinstall) + the tracked test fixture."
       - "2026-08-21 (aaadfd7): in-vehicle feel playtest done for car/bike/tank on a DriveTest.Abel mission (jeep + M60 beside spawn, in the gitignored Classic Missions dir). Every 08-09 wind-up rate turned in too hot; live-iterated with the player to car slowTurn*0.37+0.16, bike *0.37+0.12 (centering 2.0 kept - vanilla's slow centering was also test-driven and rejected), tank authority 0.36 rad at rest (~72% of vanilla; the retune's 0.75 AND pure vanilla 0.5 both felt too fast) with vanilla estT 0.25."
       - "Open: keys-only aircraft flight feel playtest; a tri lane asserting mouse motion moves the camera but not _turnWanted."
+
+  - id: controls-rmb-zoom-ads
+    title: "Controls: Arma 3 RMB (hold = zoom, tap = sights), lock target on T, watch on O"
+    phase: phase-2
+    status: in-progress
+    priority: 2
+    depends_on: [build-toolchain]
+    gh_issues: [62]
+    commits: [04e977c]
+    summary: >
+      Arma 3 right mouse on foot and in vehicles (decided 2026-09-06): hold RMB
+      = temporary zoom (new level action UAZoomTemp, driving the existing
+      forcedZoom branch in World::Simulate), quick click = toggle the sights
+      (UAOptics bound to "tap RMB" + V; Numpad 0 dropped), UALockTarget moves
+      to T with the lockable-weapon zoom veto removed, UAWatch moves from T to
+      O, UARevealTarget stays on plain RMB. Mechanism: a per-binding tap flag
+      in the packed input code (INPUT_BINDING_TAP 0x4000, sibling of the
+      double-tap flag): a tap binding is edge-only, level 0, edge on the
+      RELEASE frame when the press lasted strictly less than tapWindowMs
+      (default 250, 0 = off, session knob in the dev Mouse tab and
+      InputSubsystem::SetTapWindowMs). Mouse and keyboard stamp with
+      GlobalTickCount(); triMouseBtn pushes a real SDL button event so the
+      harness can tap. contextControls.cfg v3 -> v4 migration rewrites the
+      three re-bound actions per context only when their KB&M subsequence
+      still equals the v3 default exactly (gamepad codes in the same array
+      preserved in order); anything else is left alone.
+    log:
+      - "2026-09-07: landed on branch controls/rmb-zoom-ads. Unit coverage: flag helpers, mouse/keyboard tap edges (strict window, 0 = off, TestSetButton never taps, buttonsReversed, clamp regression), tap-binding resolution, defaults, categories, reset, conflict scan, Tap key-name prefix, KbmPage cell, labels, v3->v4 migration (full fixture, customised rows, modifier/empty-slot rows). Integration lane ingame/controls/rmb_zoom_ads green on Classic (tap toggles both ways, hold zooms and eases back without toggling, V still toggles). v3 fixture captured from the pre-change build."
+      - "2026-09-07 gotcha: the real %APPDATA%\\CWR\\contextControls.cfg on the dev machine read contextControlsVersion=5 with a v3 layout (an uncommitted experimental build wrote it on 2026-09-02, with ChatHistory/chat-channel actions no committed code knows). A strict version-less-than gate would never have migrated it, so Load() treats a version above the build's as unknown layout: seed, apply the same equality-gated rewrite, re-save at 4 (WARN logged). Verified on the real file: LockTarget T, Watch O, ZoomTemp RMB, the customised Infantry Optics row (V, mouse 4, LT) untouched. Profile backed up as contextControls.cfg.bak-v5-20260907."
+      - "Labels: STR_USRACT_LOCK_TARGET already exists in the Classic STRINGTABLE.CSV; STR_USRACT_ZOOM_TEMP added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored, re-add after a reinstall) and the tracked test fixture; ControlActionLabel carries an English fallback and never localizes a negative id."
+      - "Open: playtest sign-off (feel of the 250 ms tap window, zoom depth) then flip to done; pad binding for ZoomTemp; capturing a tap binding through the rebind UI (CapturePage double-tap upgrade is the template); both reset paths drop gamepad codes (pre-existing); promote the tap window into mouse.cfg with the settled default."
 
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"

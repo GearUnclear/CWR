@@ -14,12 +14,16 @@ refuse. Donation labels show the possible reward and goodwill cost.
 
 Considering extortion shows the civilian's mood and warns that even a refusal
 costs goodwill and town support. Choose **Threaten** to commit or **Leave them
-be** to back out for free. The choice expires after 10 seconds and is cancelled
-by leaving conversational reach, changing targets, or loading a save. Existing
-menu entries cannot become a threat after the menu changes.
+be** to back out for free. The preview shows the time left to choose; reading
+their mood again preserves those instructions without extending the deadline.
+The choice expires after 10 seconds. Expiry or leaving conversational reach
+replaces the preview with a short explanation. Panic and entering a vehicle also
+end the conversation; loading a save discards the choice. Existing menu entries
+cannot become a threat after the menu changes.
 
-After a refusal, only **Give them space (check wait)** remains; it reports the
-remaining wait in seconds. Financial choices return when the cooldown ends.
+After a refusal, the result immediately reports the retry wait, and only
+**Give them space (check wait)** remains to check the remaining seconds.
+Financial choices return when the cooldown ends.
 After payment, the menu shows **Already paid this visit**. Donation and
 extortion share a single payment allowance per civilian per town visit. This
 prevents repeatedly collecting from one frightened civilian after their opinion
@@ -29,7 +33,8 @@ Results distinguish a refused donation from a refused threat, show money
 received, and report the actual town-support change after clamping. The same
 result goes into the campaign journal. Menu selection stays with the current
 civilian until another is at least 1 m nearer, reducing accidental target
-switches in a crowd.
+switches in a crowd. While an extortion choice is pending, it stays with that
+civilian even if someone walks closer. Leaving reach still cancels the choice.
 
 Each assessed or asked civilian draws opinion from town support +/-35, clamped to
 0..100, and fear from 0..100. Occupier-owned towns multiply the support
@@ -49,15 +54,17 @@ even after that cooldown. Each actual opinion point lost nudges town support dow
 original baseline, evaluated lazily on the next interaction. Recovery does
 not undo town support losses. Rewards, cooldowns, recovery and the intermediate
 fear refusal policy are explicit implementation choices for unspecified parts
-of #41. Combat retaliation and random rogues remain issue #42: resistance
-currently refuses payment and emits the hook below.
+of #41. The #42 assailant service admits armed resistance through the hook
+below. Extortion is unavailable when that service cannot admit a resister;
+failed admission changes neither money nor goodwill.
 
 ## Campaign and performance contract
 
 The shared core runs on every full-core template. It scans only the existing
 bounded ambient population once a second, also refreshing after a request,
 and mounts at most three actions (one during cooldown or after payment).
-Requests are serviced every 0.25 s. Countdown ticks do not remount actions.
+Requests and pending-conversation eligibility are checked every 0.25 s.
+Countdown ticks do not remount actions or repeatedly display hints.
 Personal records are allocated only on explicit assessment or interaction,
 never for the whole island.
 The cache retains at most 64 rows (normal ambient population is 24 bodies).
@@ -95,7 +102,7 @@ the action menu uses. It returns
 `[outcome, paid, zoneName, opinion, fear, verb, supportDelta, retryIn]`,
 also published as `GM_CI_LAST`. The original five-field prefix is unchanged.
 Outcomes: `DONATED`, `EXTORTED`, `REFUSED`, `RESISTED`, `COOLDOWN`, `INVALID`,
-`CAPACITY`, `ALREADY_PAID`. The latter four do not change support or money
+`CAPACITY`, `ALREADY_PAID`, `ASSAILANT_UNAVAILABLE`. The latter five do not change support or money
 and do not roll outcomes or emit callbacks. `supportDelta` is the actual
 clamped ledger change; `retryIn` is seconds until cooldown expiry.
 
@@ -145,8 +152,9 @@ script copies, civilian classname literals or fixed occupier side.
 
 Trident: `guerrilla_civilian_interaction.test.sqf` covers decisions and the
 action-to-ledger path; `guerrilla_civilian_interaction_ux.test.sqf` covers free
-assessment, preview/cancel, stale clicks, expiry, crowd stability, payment
-exhaustion, support clamping and cooldown menus.
+assessment, preview/cancel, stale clicks, idle expiry, confirmation locking in
+crowds, mood reads that preserve deadlines, payment exhaustion, support
+clamping and immediate retry feedback.
 `guerrilla_civilian_interaction_save.seq` checks real save/load, cooldown and
 payment preservation, clearing pending intent, restored menus and deleted-body cleanup.
 
@@ -155,7 +163,8 @@ with WEST occupying and EAST resisting. The save fixture disables native
 support drift so persistence can be checked against exact ledger values.
 
 `ui/guerrilla_civilian_interaction_visual.test.sqf` verifies the native menu
-labels and captures the choices, mood, extortion preview and payment feedback.
+labels and captures the choices, mood, extortion preview, payment, refusal
+and expired-choice feedback.
 The refinement was checked in the rendered game at 800x600, alongside all
 251 Guerrilla unit cases and five scripted integration scenarios (including
 the existing native campaign restore and reversed-side Sinai lane).

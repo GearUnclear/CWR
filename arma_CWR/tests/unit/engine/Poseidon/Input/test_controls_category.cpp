@@ -316,3 +316,67 @@ TEST_CASE("ControlsCategory: union of all categories covers > 30 unique actions"
     CHECK(unique.size() > 30);
     CHECK(unique.size() < UAN); // should not include axes / cheats
 }
+
+#include <Poseidon/Input/InputBinding.hpp>
+#include <Poseidon/Input/InputProfile.hpp>
+
+TEST_CASE("ControlsCategory: ZoomTemp sits right after ZoomOut in the four gameplay categories, not Common",
+          "[Input][ControlsCategory]")
+{
+    for (ControlsCategory cat :
+         {ControlsCategoryOnFoot, ControlsCategoryVehicles, ControlsCategoryPilot, ControlsCategoryGunner})
+    {
+        CAPTURE((int)cat);
+        CHECK(IsActionInControlsCategory(UAZoomTemp, cat));
+        const UserAction* list = GetControlsCategoryActions(cat);
+        int zoomOut = -1, zoomTemp = -1;
+        for (int i = 0; list[i] != UAN; i++)
+        {
+            if (list[i] == UAZoomOut)
+                zoomOut = i;
+            if (list[i] == UAZoomTemp)
+                zoomTemp = i;
+        }
+        REQUIRE(zoomOut >= 0);
+        CHECK(zoomTemp == zoomOut + 1);
+    }
+    CHECK_FALSE(IsActionInControlsCategory(UAZoomTemp, ControlsCategoryCommon));
+}
+
+TEST_CASE("Defaults: Arma 3 right mouse layout (tap RMB optics, RMB zoom, T lock, O watch)",
+          "[Input][ControlsCategory][Defaults]")
+{
+    InputProfile p;
+    p.LoadDefaults();
+
+    const InputCode rmb = InputCode::MouseButton(1);
+    const InputCode tapRmb = InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1));
+
+    const auto& optics = p.GetBindingEntries(UAOptics);
+    REQUIRE(optics.size() == 2);
+    CHECK(optics[0].code == tapRmb);
+    CHECK(optics[1].code == InputCode::Key(SDL_SCANCODE_V));
+    CHECK_FALSE(p.HasBinding(UAOptics, InputCode::Key(SDL_SCANCODE_KP_0)));
+
+    const auto& lock = p.GetBindingEntries(UALockTarget);
+    REQUIRE(lock.size() == 1);
+    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_T));
+
+    const auto& watch = p.GetBindingEntries(UAWatch);
+    REQUIRE(watch.size() == 1); // the POV entry is a gamepad code, added per context
+    CHECK(watch[0].code == InputCode::Key(SDL_SCANCODE_O));
+
+    const auto& zoomTemp = p.GetBindingEntries(UAZoomTemp);
+    REQUIRE(zoomTemp.size() == 1);
+    CHECK(zoomTemp[0].code == rmb);
+
+    const auto& reveal = p.GetBindingEntries(UARevealTarget);
+    REQUIRE(reveal.size() == 1);
+    CHECK(reveal[0].code == rmb);
+
+    // Desc-table row sanity: the name and label ids line up with the enum.
+    UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
+    CHECK(std::string(descs[UAZoomTemp].name) == "ZoomTemp");
+    CHECK(std::string(descs[UALockTarget].name) == "LockTarget");
+    CHECK(std::string(descs[UAZoomOut].name) == "ZoomOut");
+}

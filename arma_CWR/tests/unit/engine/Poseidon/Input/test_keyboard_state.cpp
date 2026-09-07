@@ -497,3 +497,66 @@ TEST_CASE("KeyboardState: rapid press-release-press within frame", "[input][keyb
     // keys[A] = 30/100 (from first press-release) + 50/100 (held 150→200) = 0.8
     REQUIRE(kb.keys[SDL_SCANCODE_A] == Catch::Approx(0.8f));
 }
+
+// ---- Tap edge (key-up after a press shorter than tapWindowMs) ---------------
+
+TEST_CASE("KeyboardState: quick press+release raises the tap edge on the key-up frame", "[input][keyboard][tap]")
+{
+    KeyboardState kb;
+    kb.tapWindowMs = 250;
+
+    kb.BufferKeyEvent(SDL_SCANCODE_V, true, 1000);
+    kb.Update(1050, 50, true);
+    CHECK(kb.keysToDo[SDL_SCANCODE_V]);
+    CHECK_FALSE(kb.keysTapToDo[SDL_SCANCODE_V]);
+
+    kb.BufferKeyEvent(SDL_SCANCODE_V, false, 1080);
+    kb.Update(1100, 50, true);
+    CHECK_FALSE(kb.keysToDo[SDL_SCANCODE_V]);
+    CHECK(kb.keysTapToDo[SDL_SCANCODE_V]);
+    CHECK(kb.keyPressed[SDL_SCANCODE_V] == 0);
+
+    kb.Update(1150, 50, true);
+    CHECK_FALSE(kb.keysTapToDo[SDL_SCANCODE_V]);
+}
+
+TEST_CASE("KeyboardState: a hold across three frames released mid-frame is not a tap", "[input][keyboard][tap]")
+{
+    // Regression guard for the frame-start clamp: the key-up branch clamps the
+    // integration start to the frame boundary, and measuring the tap from that
+    // clamped value would make every long hold look like a tap.
+    KeyboardState kb;
+    kb.tapWindowMs = 250;
+
+    kb.BufferKeyEvent(SDL_SCANCODE_V, true, 1000);
+    kb.Update(1100, 100, true);
+    kb.Update(1200, 100, true);
+    kb.Update(1300, 100, true);
+    CHECK(kb.keys[SDL_SCANCODE_V] == 1.0f);
+
+    kb.BufferKeyEvent(SDL_SCANCODE_V, false, 1350);
+    kb.Update(1400, 100, true);
+    CHECK_FALSE(kb.keysTapToDo[SDL_SCANCODE_V]);
+    CHECK(kb.keys[SDL_SCANCODE_V] > 0.0f); // partial-frame integration still works
+}
+
+TEST_CASE("KeyboardState: tapWindowMs = 0 disables keyboard taps", "[input][keyboard][tap]")
+{
+    KeyboardState kb;
+    kb.tapWindowMs = 0;
+    kb.BufferKeyEvent(SDL_SCANCODE_V, true, 1000);
+    kb.BufferKeyEvent(SDL_SCANCODE_V, false, 1001);
+    kb.Update(1100, 100, true);
+    CHECK_FALSE(kb.keysTapToDo[SDL_SCANCODE_V]);
+}
+
+TEST_CASE("KeyboardState: ForgetKeys clears a pending tap edge", "[input][keyboard][tap]")
+{
+    KeyboardState kb;
+    kb.BufferKeyEvent(SDL_SCANCODE_V, true, 1000);
+    kb.BufferKeyEvent(SDL_SCANCODE_V, false, 1010);
+    kb.Update(1100, 100, true);
+    REQUIRE(kb.keysTapToDo[SDL_SCANCODE_V]);
+    kb.ForgetKeys();
+    CHECK_FALSE(kb.keysTapToDo[SDL_SCANCODE_V]);
+}

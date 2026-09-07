@@ -300,3 +300,58 @@ TEST_CASE("KbmPage: vehicle movement capture writes driver profiles", "[UI][KbmP
         CHECK(profile.HasBinding(UAMoveForward, InputCode::Key(SDL_SCANCODE_UP)));
     }
 }
+
+#include <Poseidon/Input/ControlsCategory.hpp>
+#include <Poseidon/Input/InputDeviceConstants.hpp>
+#include <Poseidon/UI/Options/OptionsPage.hpp>
+
+namespace
+{
+int RowForOnFootAction(UserAction action)
+{
+    const UserAction* actions = GetControlsCategoryActions(ControlsCategoryOnFoot);
+    for (int i = 0; actions[i] != UAN; i++)
+    {
+        if (actions[i] == action)
+            return i + 1;
+    }
+    return -1;
+}
+} // namespace
+
+TEST_CASE("KbmPage: the Optics primary cell renders the tap-RMB binding with a Tap prefix", "[UI][KbmPage]")
+{
+    UserKeysSnapshot snap;
+    LoadMainMenuStringtable();
+    auto& sub = InputSubsystem::Instance();
+    sub.SetContext(InputContext::Infantry);
+    TestableKbmPage page;
+    auto& p = page.Provider();
+
+    auto& profile = sub.GetProfile(InputContext::Infantry);
+    profile.ClearBindings(UAOptics);
+    profile.Bind(UAOptics, InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1)));
+    profile.Bind(UAOptics, InputCode::Key(SDL_SCANCODE_V));
+
+    const int row = RowForOnFootAction(UAOptics);
+    REQUIRE(row > 0);
+    const std::string primary = p.BindingPrimary(row);
+    CAPTURE(primary);
+    CHECK(primary.find("Tap ") == 0);
+    // The alt cell is the plain V key: no prefix.
+    CHECK(std::string(p.BindingAlt(row)).find("Tap ") == std::string::npos);
+}
+
+TEST_CASE("ControlActionLabel: the new and renamed actions have readable labels", "[UI][KbmPage]")
+{
+    // With the main-menu fixture loaded, ZoomTemp resolves from the stringtable
+    // row; LockTarget's key lives only in the game-data stringtable, so it takes
+    // the English fallback.  Either way the label must never be empty or the
+    // "!!! UNREGISTERED STRING" cheat-build placeholder.
+    LoadMainMenuStringtable();
+    CHECK(std::string(ControlActionLabel(UAZoomTemp)) == "Zoom in (temporary)");
+    CHECK(std::string(ControlActionLabel(UALockTarget)) == "Lock target");
+    CHECK_FALSE(std::string(ControlActionLabel(UAOptics)).empty());
+    CHECK(std::string(ControlActionLabel(UAOptics)).find("UNREGISTERED") == std::string::npos);
+    CHECK(std::string(ControlActionLabel(UAN)).empty());
+}

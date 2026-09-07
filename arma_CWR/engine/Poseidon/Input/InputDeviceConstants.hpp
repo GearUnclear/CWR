@@ -18,11 +18,24 @@ namespace Poseidon
 // Binding mode bits live below INPUT_DEVICE_MASK so the existing packed
 // device class stays stable on disk and in conflict checks.
 #define INPUT_BINDING_DOUBLE_TAP 0x00008000
-#define INPUT_BINDING_VALUE_MASK 0x00007fff
+// Tap binding: edge-only, fires on RELEASE when the press lasted less than
+// the tap window (Arma 3 "quick click = toggle sights" on the same button
+// whose plain hold is a level action).
+#define INPUT_BINDING_TAP 0x00004000
+#define INPUT_BINDING_VALUE_MASK 0x00003fff
+
+// Default press-to-release window (ms) below which a press counts as a tap.
+// 0 disables taps.  Session-tunable through InputSubsystem::SetTapWindowMs.
+constexpr int kDefaultTapWindowMs = 250;
 
 inline bool InputBindingIsDoubleTap(int packedCode)
 {
     return (packedCode & INPUT_BINDING_DOUBLE_TAP) != 0;
+}
+
+inline bool InputBindingIsTap(int packedCode)
+{
+    return (packedCode & INPUT_BINDING_TAP) != 0;
 }
 
 inline int InputBindingDevice(int packedCode)
@@ -43,5 +56,10 @@ inline int InputBindingBaseCode(int packedCode)
 inline int InputBindingDoubleTapCode(int packedCode)
 {
     return InputBindingBaseCode(packedCode) | INPUT_BINDING_DOUBLE_TAP;
+}
+
+inline int InputBindingTapCode(int packedCode)
+{
+    return InputBindingBaseCode(packedCode) | INPUT_BINDING_TAP;
 }
 } // namespace Poseidon

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -2507,7 +2508,7 @@ const AITargetInfo* AIUnit::CheckAmmo(ResourceState state)
     float maxCoef = 0;
     const AITargetInfo* target = nullptr;
 
-    for (int i = 0; i < GetGroup()->GetCenter()->NTargets(); i++)
+    for (int i = 0; !Guerrilla::IndependentGroup(GetGroup()) && i < GetGroup()->GetCenter()->NTargets(); i++)
     {
         const AITargetInfo& info = GetGroup()->GetCenter()->GetTarget(i);
         VehicleSupply* veh = dyn_cast<VehicleSupply, Object>(info._idExact);

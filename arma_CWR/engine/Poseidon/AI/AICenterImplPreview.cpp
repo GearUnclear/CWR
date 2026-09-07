@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Foundation/Framework/PoTime.hpp>
 #include <Poseidon/Core/Application.hpp>
 
@@ -573,6 +574,7 @@ void AICenter::Think()
 
 void AICenter::SendMission(AIGroup* to, Mission& mis)
 {
+    if (Guerrilla::IndependentGroup(to)) return;
     AI_ERROR(to);
 
 #if LOG_COMM
@@ -868,6 +870,7 @@ void AICenter::UpdateTarget(Target& target)
 
 void AICenter::ReceiveReport(AIGroup* from, ReportSubject subject, Target& target)
 {
+    if (Guerrilla::IndependentGroup(from)) return;
     UpdateTarget(target);
 }
 

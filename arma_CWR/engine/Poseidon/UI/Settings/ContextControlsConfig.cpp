@@ -1,18 +1,24 @@
 #include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 
 #include <Poseidon/Input/InputBinding.hpp>
+#include <Poseidon/Input/InputDeviceConstants.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/UserActionDesc.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/UI/Settings/SettingsFile.hpp>
 
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
+
+#include <iterator>
 
 namespace Poseidon
 {
 namespace
 {
-constexpr int kContextControlsVersion = 3;
+// v4 (2026-09): Arma 3 right mouse.  Optics = tap RMB + V (Numpad 0 dropped),
+// LockTarget = T (was RMB, "Lock or Zoom"), Watch = O (was T), new ZoomTemp = RMB.
+constexpr int kContextControlsVersion = 4;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -206,6 +212,83 @@ void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
             break;
     }
 }
+
+// ---- v3 -> v4 rewrite of the three actions whose KB&M defaults changed ----
+//
+// Load() seeds defaults for actions a pre-v4 file lacks (ZoomTemp), but an
+// action the file already lists is taken verbatim, so a changed default never
+// reaches an existing profile on its own.  For the three re-bound actions we
+// rewrite the KB&M part of each context ONLY when it still equals the v3 default
+// exactly (same codes in order, no modifiers, scale 1, no empty slots); anything
+// else counts as customised and is left alone.  Gamepad codes live in the same
+// array (e.g. ctxInfantryOptics[]={25,98,131078}) and are preserved in order.
+struct V3RewriteEntry
+{
+    UserAction action;
+    int v3Keys[2]; // legacy packed KB&M codes; -1 = unused slot
+};
+
+constexpr V3RewriteEntry kV3Rewrites[] = {
+    {UAOptics, {SDL_SCANCODE_V, SDL_SCANCODE_KP_0}},
+    {UALockTarget, {INPUT_DEVICE_MOUSE + 1, -1}},
+    {UAWatch, {SDL_SCANCODE_T, -1}},
+};
+
+bool IsKbmCode(InputCode code)
+{
+    return code.device() == InputDevice::Keyboard || code.device() == InputDevice::Mouse;
+}
+
+void RewriteV3DefaultsToV4(InputProfile& profile, const UserActionDesc* descs)
+{
+    for (size_t e = 0; e < std::size(kV3Rewrites); ++e)
+    {
+        const V3RewriteEntry& entry = kV3Rewrites[e];
+        const std::vector<InputBinding>& bindings = profile.GetBindingEntries(entry.action);
+
+        // Split into the KB&M subsequence (empty slots count as KB&M: they are
+        // positional KB&M cells) and the rest, both in original order.
+        std::vector<InputBinding> kbm;
+        std::vector<InputBinding> rest;
+        for (const InputBinding& b : bindings)
+        {
+            if (!b.code.valid() || IsKbmCode(b.code))
+                kbm.push_back(b);
+            else
+                rest.push_back(b);
+        }
+
+        int v3Count = 0;
+        for (int k : entry.v3Keys)
+            if (k >= 0)
+                ++v3Count;
+        if (static_cast<int>(kbm.size()) != v3Count)
+            continue;
+        bool pristine = true;
+        for (int i = 0; i < v3Count && pristine; ++i)
+        {
+            const InputBinding& b = kbm[i];
+            pristine = b.code.valid() && b.code == InputCode::FromLegacy(entry.v3Keys[i]) && !b.modifier.valid() &&
+                       b.scale == 1.0f;
+        }
+        if (!pristine)
+            continue;
+
+        profile.ClearBindings(entry.action);
+        const KeyList& defaults = descs[entry.action].keys;
+        for (int j = 0; j < defaults.Size(); ++j)
+        {
+            InputCode code = InputCode::FromLegacy(defaults[j]);
+            if (!code.valid() || !IsKbmCode(code))
+                continue;
+            int mod = DefaultModifierForDefaultKey(entry.action, defaults[j]);
+            InputCode modCode = mod >= 0 ? InputCode::FromLegacy(mod) : InputCode{};
+            profile.Bind(entry.action, InputBinding(code, modCode));
+        }
+        for (const InputBinding& b : rest)
+            profile.Bind(entry.action, b);
+    }
+}
 } // namespace
 
 void ContextControlsConfig::LoadDefaults()
@@ -230,7 +313,16 @@ bool ContextControlsConfig::Load(const std::string& path)
     // A file written before newer actions existed has no entries for them. Seed
     // each profile with defaults first so those actions come up bound, then let
     // the file override the actions it does list.
-    const bool seedDefaults = version < kContextControlsVersion;
+    //
+    // A file claiming a version ABOVE this build's (written by a newer or an
+    // experimental build) cannot be trusted to carry this build's layout either:
+    // treat it the same way, and re-save it at our version. The v3->v4 rewrite
+    // below is equality-gated, so a customised or already-v4 row is untouched.
+    const bool newerThanBuild = version > kContextControlsVersion;
+    if (newerThanBuild)
+        LOG_WARN(Config, "contextControls.cfg version {} is newer than this build's {}; treating its layout as unknown",
+                 version, kContextControlsVersion);
+    const bool seedDefaults = version < kContextControlsVersion || newerThanBuild;
     migratedOnLoad = seedDefaults;
 
     UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
@@ -277,6 +369,8 @@ bool ContextControlsConfig::Load(const std::string& path)
                 profile.Bind(static_cast<UserAction>(a), InputBinding(code, modifier, ActivationMode::OnHold, scale));
             }
         }
+        if (version < 4 || newerThanBuild)
+            RewriteV3DefaultsToV4(profile, descs);
     }
 
     return true;
