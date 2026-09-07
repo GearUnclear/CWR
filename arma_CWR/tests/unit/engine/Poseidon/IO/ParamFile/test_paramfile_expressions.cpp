@@ -452,16 +452,25 @@ TEST_CASE("ParamFile - Reference undefined var", "[paramfile][expr][errors]")
         REQUIRE(true);
     }
 
-    SECTION("Bare keyword without its OFP-era #define reads as 0, not garbage")
+    SECTION("Bare keyword without its OFP-era #define reads as 0 under --strict-config, not garbage")
     {
         // The @LoBo LoBoWreck.pbo defect: OFP-era configs write `scope = public;`
-        // and rely on a `#define public 2` header in the same file. Without the
-        // header the identifier is stored as text; reading it as a number must
+        // and rely on a `#define public 2` header in the same file. The default
+        // reader coerces the bare keyword to its classic value at parse time
+        // (ClassifyToleratedLiteral, pinned in test_paramfile_parsing.cpp), so
+        // this section runs under --strict-config, where the identifier is kept
+        // as text and reaches the script evaluator: reading it as a number must
         // degrade to 0 (which is what turned every class in that pbo abstract -
         // repaired at source by tools/lobo/fix-lobo-scope.ps1, and warned about
         // at the evaluator seam since the same repair tranche). The contract
         // pinned here is the degrade-to-0: two decades of content depends on an
         // unresolved scope meaning abstract, never a crash or a stale read.
+        struct StrictLiteralsGuard
+        {
+            bool saved = Poseidon::GParamFileStrictLiterals;
+            ~StrictLiteralsGuard() { Poseidon::GParamFileStrictLiterals = saved; }
+        } guard;
+        Poseidon::GParamFileStrictLiterals = true;
         const char* config = "class CfgVehicles {\n"
                              "  class BrokenWreck { scope = public; };\n"
                              "  class HealthyWreck { scope = 2; };\n"
