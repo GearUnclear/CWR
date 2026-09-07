@@ -46,6 +46,11 @@ using namespace Poseidon;
 
 namespace
 {
+RString NumberedName(const char* prefix, int index)
+{
+    return RString((std::string(prefix) + std::to_string(index)).c_str());
+}
+
 LSError SerializeVars(ParamArchive& ar)
 {
     void* old = ar.GetParams();
@@ -55,6 +60,73 @@ LSError SerializeVars(ParamArchive& ar)
     return result;
 }
 } // namespace
+
+TEST_CASE("GameState second load pass follows saved names after rehash", "[gameState][vars][save][load]")
+{
+    const auto directory = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(directory);
+    const auto path = directory / "gamestate-vars-rehash.bin";
+    GGameState.Init();
+    GGameState.Reset();
+    // Mix scalar/string/array values: pairing different archive items on the
+    // reference pass either errors on data.value or silently corrupts links.
+    for (int i = 0; i < 600; ++i)
+    {
+        const RString name = NumberedName("human_suite_", i);
+        GameValue value(static_cast<float>(i));
+        if (i % 3 == 1)
+            value = GameValue(NumberedName("text_", i));
+        if (i % 3 == 2)
+        {
+            value = GGameState.CreateGameValue(GameArray);
+            GameArrayType& array = value;
+            array.Add(GameValue(static_cast<float>(i)));
+            array.Add(GameValue(NumberedName("nested_", i)));
+        }
+        GGameState.VarSet(name, value, true);
+    }
+    {
+        ParamArchiveSave archive(WorldSerializeVersion);
+        REQUIRE(GGameState.Serialize(archive) == LSOK);
+        REQUIRE(archive.SaveBin(path.string().c_str()));
+    }
+    GGameState.Reset();
+    {
+        ParamArchiveLoad archive;
+        REQUIRE(archive.LoadBin(path.string().c_str()));
+        archive.FirstPass();
+        REQUIRE(GGameState.Serialize(archive) == LSOK);
+        GGameState.GetVariables().Rebuild(GGameState.GetVariables().NTables() * 2 + 1);
+        GGameState.VarSet("added_between_passes", GameValue(99.0f), true);
+        archive.SecondPass();
+        REQUIRE(GGameState.Serialize(archive) == LSOK);
+    }
+    for (int i = 0; i < 600; ++i)
+    {
+        const GameValue& value = GGameState.VarGet(NumberedName("human_suite_", i));
+        if (i % 3 == 0)
+        {
+            REQUIRE(value.GetType() == GameScalar);
+            CHECK(static_cast<float>(value) == static_cast<float>(i));
+        }
+        else if (i % 3 == 1)
+        {
+            REQUIRE(value.GetType() == GameString);
+            CHECK(static_cast<RString>(value) == NumberedName("text_", i));
+        }
+        else
+        {
+            REQUIRE(value.GetType() == GameArray);
+            const GameArrayType& array = value;
+            REQUIRE(array.Size() == 2);
+            CHECK(static_cast<float>(array[0]) == static_cast<float>(i));
+            CHECK(static_cast<RString>(array[1]) == NumberedName("nested_", i));
+        }
+    }
+    CHECK(static_cast<float>(GGameState.VarGet("added_between_passes")) == 99.0f);
+    GGameState.Reset();
+    std::filesystem::remove(path);
+}
 
 TEST_CASE("GameState scalar var survives ParamArchive save/load", "[gameState][vars][save][load]")
 {

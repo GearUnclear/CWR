@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 #include <cstring>
+#include <cstdio>
 
 using Poseidon::LocalizeString;
 
@@ -57,13 +58,58 @@ class ParamArchiveFunctions : public ArchiveFunctions
     // Poseidon::InitDefaults() at app startup.
 } GParamArchiveFunctions;
 
+// The archive's ItemN order is the SAVE bank's hash traversal order. Loading
+// can grow/rehash that bank, and world restoration can insert more globals
+// between passes. PassSecond must resolve each saved name, not traverse the
+// current buckets and pair unrelated GameData types with the same ItemN.
+static LSError RestoreVariableReferences(ParamArchive& ar, GameState* state)
+{
+    ParamArchive variables;
+    if (!ar.OpenSubclass("Variables", variables))
+    {
+        ar.OnError(LSNoEntry, "Variables");
+        return LSNoEntry;
+    }
+    ParamArchive header = variables;
+    header.FirstPass(); // Read metadata only; scalar reads skip PassSecond.
+    int count = 0;
+    PARAM_CHECK(header.Serialize("items", count, 1))
+    for (int i = 0; i < count; ++i)
+    {
+        char itemName[32];
+        std::snprintf(itemName, sizeof(itemName), "Item%d", i);
+        ParamArchive item;
+        if (!variables.OpenSubclass(itemName, item, true))
+        {
+            variables.OnError(LSNoEntry, itemName);
+            return LSNoEntry;
+        }
+        ParamArchive key = item;
+        key.FirstPass();
+        RString name;
+        PARAM_CHECK(key.Serialize("name", name, 1))
+        GameVariable& variable = state->GetVariables().Set(name);
+        if (VarBankType::IsNull(variable))
+        {
+            item.OnError(LSNoEntry, name);
+            return LSNoEntry;
+        }
+        PARAM_CHECK(variable.Serialize(item))
+        variables.CloseSubclass(item);
+    }
+    ar.CloseSubclass(variables);
+    return LSOK;
+}
+
 LSError ParamArchiveFunctions::Serialize(ParamArchive& ar, GameState* value)
 {
     void* old = ar.GetParams();
     ar.SetParams(value);
-    PARAM_CHECK(ar.Serialize("Variables", value->GetVariables(), 1))
+    const LSError result = ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond
+                               ? RestoreVariableReferences(ar, value)
+                               : ar.Serialize("Variables", value->GetVariables(), 1);
     ar.SetParams(old);
-    return LSOK;
+    return result;
 }
 
 GameData* ParamArchiveFunctions::CreateGameData(ParamArchive& ar, GameType type)

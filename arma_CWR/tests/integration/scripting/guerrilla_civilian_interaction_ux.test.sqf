@@ -48,6 +48,7 @@ triSimUntil { gmCiMenuState == "CONFIRM" }
 triAssertIncludes [GM_CI_FEEDBACK, "Sympathetic"]
 triAssertIncludes [GM_CI_FEEDBACK, "Frightened"]
 triAssertIncludes [GM_CI_FEEDBACK, "Even refusal"]
+triAssertIncludes [GM_CI_FEEDBACK, "s to choose"]
 triAssertEq [gmResources, ciMoney]
 triAssertEq [ciRolls, 0]
 ciConfirmId = gmCiMenuExtort
@@ -74,6 +75,38 @@ triAssertIncludes [GM_CI_FEEDBACK, "hesitated"]
 triAssertEq [ciRolls, 0]
 triSimUntil { gmCiMenuState == "READY" }
 
+// A nearer passer-by cannot steal an active conversation or its action IDs.
+[ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
+triSimUntil { gmCiMenuState == "CONFIRM" }
+ciConfirmId = gmCiMenuExtort
+ciDeadline = gmCiConfirmUntil
+ciOther setPos [(ciPos select 0) + 201.5, ciPos select 1, 0]
+ciTick = GM_CI_TICKS
+triSimUntil { GM_CI_TICKS > (ciTick + 4) }
+triAssertEq [gmCiMenuBody, ciBody]
+triAssertEq [gmCiMenuExtort, ciConfirmId]
+// Re-reading mood preserves the choice instructions and the original timer.
+GM_CI_FEEDBACK = ""
+[ciBody, player, gmCiMenuRead] exec "\gmcore\scripts\civilian_interaction_action.sqs"
+triSimUntil { GM_CI_FEEDBACK != "" }
+triAssertIncludes [GM_CI_FEEDBACK, "Threaten or Leave them be"]
+triAssertEq [gmCiConfirmUntil, ciDeadline]
+triAssertEq [gmCiMenuExtort, ciConfirmId]
+ciOther setPos [(ciPos select 0) + 220, ciPos select 1, 0]
+// Idle expiry replaces the preview without needing another click.
+gmCiConfirmUntil = time - 1
+triSimUntil { gmCiMenuState == "READY" }
+triAssert [isNull gmCiConfirmBody]
+triAssertIncludes [GM_CI_FEEDBACK, "Choice expired"]
+ciReadId = gmCiMenuRead
+ciTick = GM_CI_TICKS
+triSimUntil { GM_CI_TICKS > (ciTick + 4) }
+triAssertEq [gmCiMenuRead, ciReadId]
+triAssertEq [ciRolls, 0]
+triAssertEq [ciEvents, 0]
+triAssertEq [gmResources, ciMoney]
+triAssertEq [((gmZone ciZone) select GM_Z_SUPPORT), ciSupport]
+
 // Small distance changes do not churn the selected person's menu or IDs.
 ciReadId = gmCiMenuRead
 ciOther setPos [(ciPos select 0) + 200.5, ciPos select 1, 0]
@@ -85,10 +118,10 @@ triAssertEq [gmCiMenuRead, ciReadId]
 [ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
 triSimUntil { gmCiMenuState == "CONFIRM" }
 player setPos [(ciPos select 0) + 210, ciPos select 1, 0]
-[ciBody, player, "EXTORT"] call GM_CI_fnRequest
-triAssertEq [ciRolls, 0]
 triSimUntil { isNull gmCiMenuBody }
 triAssert [isNull gmCiConfirmBody]
+triAssertIncludes [GM_CI_FEEDBACK, "Conversation ended"]
+triAssertEq [ciRolls, 0]
 ciOther setPos [(ciPos select 0) + 220, ciPos select 1, 0]
 player setPos [(ciPos select 0) + 202, ciPos select 1, 0]
 triSimUntil { gmCiMenuBody == ciBody }
@@ -123,6 +156,7 @@ triSimUntil { gmCiMenuState == "READY" }
 triSimUntil { gmCiMenuState == "COOLDOWN" }
 triAssertEq [GM_CI_LAST select 0, "REFUSED"]
 triAssertIncludes [GM_CI_FEEDBACK, "Donation refused"]
+triAssertIncludes [GM_CI_FEEDBACK, "Try again in 5 s"]
 triAssertEq [gmCiMenuAsk, -1]
 triAssertEq [gmCiMenuExtort, -1]
 [ciBody, player, gmCiMenuRead] exec "\gmcore\scripts\civilian_interaction_action.sqs"
@@ -143,5 +177,6 @@ GM_CI_PROFILES set [0, [ciBody, "Village", 100, 100, 90, time, 0, false]]
 ciResult = [ciBody, player, "EXTORT"] call GM_CI_fnInteract
 triAssertEq [ciResult select 1, 0]
 triAssertIncludes [(ciResult call GM_CI_fnDescribe), "no resources"]
+triAssertIncludes [(ciResult call GM_CI_fnDescribe), "Try again in 5 s"]
 triAssertEq [([ciBody] call GM_CI_fnAvailability), "COOLDOWN"]
 triEndTest

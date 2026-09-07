@@ -50,6 +50,7 @@ SC_CH_READY = false
 SC_QUEUE = []
 SC_CH = -1
 SC_BUSY = false
+SC_STAGED = false
 SC_LASTDONE = -1
 SC_DONE = false
 SC_OUTCOME = ""
@@ -92,5 +93,7 @@ SC_fnUnmount = {aP removeAction SC_ACT_ALL; {aP removeAction _x} forEach SC_ACTS
 ; handshake for the Trident smoke test (showcase_smoke.test.sqf)
 SC_READY = true
 
-hint "SHOWCASE ready.\n\nDEMO ALL runs every chapter as a narrated reel; each DEMO n runs standalone, any order, and reports PASS/FAIL/SKIP.\n\nNarration + event ticker arrive as radio-log lines (small text, lower left). Save Game covers persistence: save, reload, watch the menu re-arm."
+[] exec "human/boot.sqs"
+
+hint "SHOWCASE ready.\n\nHUMAN TESTS opens the guided player acceptance suite using the actual Guerrilla campaign. Start it before running staged demos.\n\nDEMO ALL runs the older staged narrated reel. Radio-log narration and the event ticker describe live changes."
 exit

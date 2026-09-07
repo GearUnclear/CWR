@@ -1,6 +1,13 @@
 # Showcase overlay (issue #9)
 
-The oversight / verification mission for Guerrilla Mode: every gameplay system
+**Human acceptance:** the action menu also offers **HUMAN TESTS**, documented
+in [HUMAN-TESTS.md](../../../HUMAN-TESTS.md). Its 41 player-operated cases
+have a separate ledger and use the actual shared core. The staged reel below
+cannot run while that suite is open. Restart after a staged demo before
+starting human acceptance. Showcase now includes the primary Abel campaign
+configuration, including civilians and traffic, instead of a stale copy.
+
+The staged demonstration / verification reel for Guerrilla Mode: selected gameplay systems
 demonstrated as a **narrated, self-verifying chapter**, runnable one at a time
 from the action menu, as a full reel (`DEMO ALL`), or headlessly by the
 Trident smoke test. This directory is the per-mission overlay; the `init.sqs`

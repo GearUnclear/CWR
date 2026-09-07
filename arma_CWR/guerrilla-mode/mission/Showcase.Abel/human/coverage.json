@@ -1,0 +1,193 @@
+{
+  "scope": "Implemented Guerrilla gameplay systems and their shared engine/player interactions. A human-confirmed result is not an automated acceptance result.",
+  "systems": {
+    "core/scripts/lib.sqs": [
+      "income",
+      "loot",
+      "recruit",
+      "companion_progress",
+      "panic"
+    ],
+    "core/scripts/campaign.sqs": [
+      "persistence",
+      "companion_death",
+      "garage"
+    ],
+    "core/scripts/capture.sqs": [
+      "capture",
+      "capture_contested"
+    ],
+    "core/scripts/qrf.sqs": [
+      "alert",
+      "escalation",
+      "capture_contested"
+    ],
+    "core/scripts/undercover.sqs": [
+      "undercover",
+      "vehicle_cover"
+    ],
+    "core/scripts/economy.sqs": [
+      "income",
+      "panic"
+    ],
+    "core/scripts/escalation.sqs": [
+      "heat",
+      "escalation"
+    ],
+    "core/scripts/loot.sqs": [
+      "loot"
+    ],
+    "core/scripts/recruit.sqs": [
+      "recruit",
+      "train",
+      "recruit_limits"
+    ],
+    "core/scripts/recruit_action.sqs": [
+      "recruit",
+      "train",
+      "recruit_limits"
+    ],
+    "core/scripts/market.sqs": [
+      "hq",
+      "stash",
+      "market_arms",
+      "market_vehicle",
+      "garage"
+    ],
+    "core/scripts/market_action.sqs": [
+      "hq",
+      "stash",
+      "market_arms",
+      "market_vehicle",
+      "garage"
+    ],
+    "core/scripts/companions.sqs": [
+      "companion_progress",
+      "companion_death"
+    ],
+    "core/scripts/civilians.sqs": [
+      "civilians",
+      "panic"
+    ],
+    "core/scripts/civilian_interaction.sqs": [
+      "solicit",
+      "extortion"
+    ],
+    "core/scripts/civilian_interaction_action.sqs": [
+      "solicit",
+      "extortion"
+    ],
+    "core/scripts/civilian_interaction_lib.sqs": [
+      "solicit",
+      "extortion",
+      "assailant_resist"
+    ],
+    "core/scripts/shakedown.sqs": [
+      "shakedown",
+      "reprisal"
+    ],
+    "core/scripts/assailants.sqs": [
+      "assailant_rogue",
+      "assailant_resist"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/ZoneRegistry.cpp": [
+      "zones",
+      "town_support",
+      "capture",
+      "capture_contested"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/ZoneRegistryCommands.cpp": [
+      "zones",
+      "capture"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/AlertMachine.cpp": [
+      "alert",
+      "heat"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
+      "garrison"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/GarrisonCacheCommands.cpp": [
+      "garrison"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/GuerrillaBase.cpp": [
+      "hq",
+      "garage"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/GuerrillaBaseCommands.cpp": [
+      "hq",
+      "garage"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/Market.cpp": [
+      "market_arms",
+      "market_vehicle"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/MarketCommands.cpp": [
+      "market_arms",
+      "market_vehicle"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/StashRegistry.cpp": [
+      "stash",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/StashRegistryCommands.cpp": [
+      "stash"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/Traffic.cpp": [
+      "traffic_ambient",
+      "traffic_commandeer",
+      "traffic_patrol",
+      "traffic_convoy"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/TrafficCommands.cpp": [
+      "traffic_ambient",
+      "traffic_commandeer",
+      "traffic_patrol",
+      "traffic_convoy"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/TownFlags.cpp": [
+      "zones",
+      "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/Journal.cpp": [
+      "journal",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/JournalCommands.cpp": [
+      "journal"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/Undercover.cpp": [
+      "undercover",
+      "vehicle_cover"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/UndercoverCommands.cpp": [
+      "undercover",
+      "vehicle_cover"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/AssailantSystem.cpp": [
+      "assailant_rogue",
+      "assailant_resist"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/AssailantCommands.cpp": [
+      "assailant_rogue",
+      "assailant_resist"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/AddonActivation.cpp": [
+      "campaign_matrix"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/FactionSources.cpp": [
+      "campaign_matrix"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/FactionTwins.cpp": [
+      "campaign_matrix"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OutfitSelect.cpp": [
+      "campaign_matrix"
+    ]
+  },
+  "tooling_exclusions": {
+    "DescriptorLint.cpp": "Offline faction/island descriptor validation; exercised by CLI tests, not gameplay.",
+    "IslandScaffold.cpp": "Offline island template generator.",
+    "RosterProbe.cpp": "Offline asset/roster probe."
+  }
+}

@@ -1,0 +1,26 @@
+; EXPLICIT FIXTURE, never a verifier. Abel's production seed has one enemy
+; zone, insufficient for a traffic route. Use only in a disposable campaign.
+; The second endpoint is data; ForceSpawn invokes the native Traffic service,
+; including road placement, faction equipment, crew, route and lifecycle.
+; Nothing here drives vehicles, simulates reactions or marks a test passed.
+? HT_ACTIVE : exit
+? not HT_OPEN : exit
+HT_fixtureId = (HT_CASES select HT_INDEX) select 0
+? not (HT_fixtureId in ["traffic_patrol", "traffic_convoy"]) : "Road setup is only for the patrol and convoy cases. Select one of those cases first." call HT_fnSay
+? not (HT_fixtureId in ["traffic_patrol", "traffic_convoy"]) : exit
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : "Restart Showcase: the road fixture needs an occupied Outpost." call HT_fnSay
+? ((gmZone SC_OUT) select GM_Z_OWNER) != gmOccupierSide : exit
+? ((getPos aP) distance ((gmZone SC_VILL) select GM_Z_POS)) > 250 : "Walk to Village/Houdan before road setup. Stay out of the road, then prepare again." call HT_fnSay
+? ((getPos aP) distance ((gmZone SC_VILL) select GM_Z_POS)) > 250 : exit
+HT_kind = "patrol"
+? HT_fixtureId == "traffic_convoy" : HT_kind = "convoy"
+? (gmTrafficCount HT_kind) > 0 : "That traffic kind is already live. Begin the case and find it; another vehicle was not spawned." call HT_fnSay
+? (gmTrafficCount HT_kind) > 0 : exit
+HT_oldOwner = (gmZone SC_CAMP) select GM_Z_OWNER
+gmZoneSet [SC_CAMP, "owner", gmOccupierSide]
+HT_vehicle = gmTrafficForceSpawn [HT_kind, SC_OUT]
+HT_SETUP_HISTORY = HT_SETUP_HISTORY + [[HT_fixtureId, time, "Camp endpoint", HT_oldOwner, gmOccupierSide, HT_vehicle]]
+? isNull HT_vehicle : "Native traffic placement found no usable spawn right now. Camp endpoint was seeded and recorded. Change position near Village and try again; no test result changed." call HT_fnSay
+? isNull HT_vehicle : exit
+(format ["Road fixture ready: native %1 at %2. Camp is now an enemy endpoint. Begin the selected case, find the vehicle and exercise its real behavior. Restart before unrelated campaign tests.", HT_kind, getPos HT_vehicle]) call HT_fnSay
+exit

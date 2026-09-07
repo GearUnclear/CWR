@@ -378,6 +378,7 @@ items:
       readable font); a state-change event ticker replaces the v1 HUD;
       chapters.sqs is the manifest (adding a chapter = one file + one row).
     log:
+      - "2026-09-06: delivered and installed 41 guided human cases / 96 steps, coverage inventory and run sheet, using the production core/bootstrap and an include of the primary Abel config. Separate human ledger, explicit native road fixtures and staged-demo exclusion verified. Fixed the variable-map second-pass save/load ordering defect exposed by the ledger. Validation passed: 5 source contracts, all 4 new integration scenarios, the original Showcase reel, and 262 unit cases / 7919 assertions; final default-build runner and two-process save/load checks also passed. Actual human acceptance and the content matrix remain unrun."
       - "Native event slots are single-owner (one handler per event type), so the overlay registers none; campaign loads are detected by polling GM_pSaveAct and the menu re-mounts."
       - "v1 (702842f) was rejected in review: instant demos + a 2 s titleText status wall. Root cause is engine fact, not tuning: plain-title font size comes from RscTitlesText in the GLOBAL resource (TitEffects.cpp), unreachable from script and from description.ext - a titleText HUD can never be readable. v2 (c2bd9d5) moved all narration to sideChat and made every demo a paced chapter with an observable, asserted outcome."
       - "Staging rule found by the first v2 smoke run: cover (setCaptive) is personal, so squadmates parked near a live garrison get engaged and the provoked player unit's fired-EH breaks campaign cover mid-demo; near-garrison chapters teleport the captive player SOLO (SC_fnTpSolo)."
@@ -1095,6 +1096,23 @@ items:
       - "2026-09-01: sequenced as Phase A of the mod-intake umbrella issue #54 (roadmap item mod-intake-sustainability); execute its six items in the order A1-A6 listed there."
       - "2026-09-02: all six items landed on feat/mod-intake-54. A1 FactionSources (5a1aa34): the three consumers build Pars-block U island-block, island wins by whole-class replacement. A2/A3 (33f5daf): tiers[0]/playerClassWarrior probed at menu time, greyed '(not in loaded data)' + OK refused; a non-default resistance pick substitutes its playerClassWarrior. A4 (7694bf2): vanilla blocks in guerrilla-mode/config/guerrilla-factions.hpp installed via bin\\config-extra.cpp; the @LoBo eight in the @lobofixup mod config, one copy each (the two IDF copies were identical, Lebanon80's Hizballah a strict superset); templates keep CIV only (+ Demo's documented GUER override). A5 (3dc1212): `PoseidonTools guerrilla lint` diffs the registry loaded with and without the probe (11 shipped factions, 0 substitutions on Classic+@LoBo). A6 (0d002a0): guerrilla-mode/FACTION-PACKS.md; the @udfaction fixture is the worked example and passes the lint. Matrix tests (390c789): the pack on Abel by direct launch and through the menu with gating."
 
+  - id: uk-ira-pack
+    title: "Guerrilla pack: UK vs IRA (Operation Banner) on a stand-in island (issue #60)"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [faction-island-decoupling]
+    commits: []
+    gh_issues: [60]
+    summary: >
+      Second faction/island pack after @LoBo: British Army occupier vs Provisional
+      IRA resistance from Operation Blue Rose "Case Jonathan" (the only OFP mod
+      with a playable IRA roster), on a temperate stand-in island, through the
+      same CfgGuerrillaFactions + Guerrilla.<World> seams. Design note:
+      arma_CWR/guerrilla-mode/ideation-uk-vs-ira.md (island hunt results inside).
+    log:
+      - "2026-09-06 island hunt: no Northern Ireland or Irish island exists for OFP (Faguss DB, all 600 records; OFP.info mirror; ACEIP/KMP rosters; BI forums). Stand-in shortlist with live archives on files.ofpisnotdead.com: Gaia (ribbon-development farmland, no deps), Trinity 2.0 (green upland, AGS + Baracken), Skye V2/V3 (Scottish glens), Brigadoon (moorland); Normandy v2.1 has the right hedgerow structure but WW2 objects. St. Patrick's Day BritanIRA.zip re-verified on ModDB (252 MB, no island inside). Stock Nogova is blocked as a template: guerrilla scaffold classifies every OPRW v3 object in noe.wrp as a road (177,224 roads, 0 buildings, all 30 towns skipped)."
+
   - id: mod-intake-sustainability
     title: "Mod intake: sustainably accept third-party factions and islands (issue #54 umbrella)"
     phase: phase-2
@@ -1270,6 +1288,7 @@ items:
       scores are not computed en masse and only need to stay consistent while
       the player is within 300 m of the city.
     log:
+      - "2026-09-06: civilian conversation polish: pending extortion stays attached to its eligible civilian in crowds; rereading mood preserves the choice instructions and deadline; idle expiry and leaving reach replace stale preview text; refusals and zero-value rewards show retry seconds immediately. Kept bounded polling, stable action IDs and the existing economic rules. Validation: five focused Trident scenarios passed (transactions, expanded UX, save/load, Sinai, rendered feedback at 800x600); six script-core unit cases / 345 assertions passed. The broader guerrilla_assailants scenario still loses its harness connection at the side-classification assertion; reproduced at the same assertion with the original HEAD scripts. Refined scripts restored to the local Classic install afterward."
       - "2026-09-05: implemented on codex/civilian-solicit-extort. One shared service: lazy bounded personal profiles, both proximity actions, atomic treasury credits and support nudges, cooldown/recovery, descriptor tuning, save/load menu recovery and #42 callback (combat retaliation stays in #42). Validation: 251 Guerrilla unit cases / 4270 assertions; seven focused Trident scenarios covering action boundaries, real save/load, reversed Sinai sides, existing ambience/shakedown/panic and native campaign restoration. Regression testing caught the single-slot campaignLoaded handler: bootstrap now fans out to both consumers. Exact support-delta tests disable unrelated native support drift in an isolated shared-core fixture."
       - "2026-09-05: gameplay/UX refinement: free qualitative mood assessment, preview/commit/cancel extortion, reward and consequence labels, cooldown/read-only paid menus, stable crowd targeting and quarter-second request handling. One payout per civilian per visit closes repeat extortion at zero opinion; saved payment state prevents reload farming. Results append verb, actual support delta and retry seconds while preserving the original result prefix. Pending UI intent is discarded on load. Validation: 251 Guerrilla unit cases / 4276 assertions and six integration scenarios, including rendered native-menu checks at 800x600, free/stale/expired/cancelled choices, zero rewards, support clamping, save/load and reversed-side Sinai. Visual review shortened the initially wordy preview and labels."
       - "2026-09-05: consolidated codex/civilian-solicit-extort and screenshots into main, retaining main's newer journal redesign and panic-priority changes. Both merges reconciled without conflicts; feature commits remain in the merged history."

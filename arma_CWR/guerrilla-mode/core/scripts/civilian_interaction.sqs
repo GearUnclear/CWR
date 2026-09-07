@@ -1,6 +1,7 @@
 ; Issue #41: bounded ambient conversation menu; <=3 actions, one request.
 ; Readiness changes remount once, never on every countdown tick. Keep the
-; current target unless another civilian is at least 1 m nearer.
+; current target unless another civilian is at least 1 m nearer; a pending
+; confirmation stays with its chosen civilian while they remain eligible.
 @GM_LIB_READY
 GM_CI_LIB_READY = false
 [] exec "\gmcore\scripts\civilian_interaction_lib.sqs"
@@ -27,6 +28,9 @@ GM_CI_TICKS = GM_CI_TICKS + 1
 ? GM_CI_REMOUNT : GM_CI_REQUEST = []; gmCiConfirmBody = objNull
 ; One atomic drain; the financial service revalidates at commit time.
 ? (count GM_CI_REQUEST) > 0 : gmCiMenuRequest = GM_CI_REQUEST; GM_CI_REQUEST = []; gmCiMenuRequest call GM_CI_fnRequest; gmCiMenuRefresh = true
+; Validate only the pending conversation at request cadence. Replace the
+; preview once on expiry/interruption; never poll hints or action IDs.
+if (not (isNull gmCiConfirmBody)) then {gmCiMenuEnd = ""; if (time >= gmCiConfirmUntil) then {gmCiMenuEnd = "Choice expired. Consider extortion again to make a threat."}; if (([gmCiConfirmBody, aP] call GM_CI_fnEligible) < 0) then {gmCiMenuEnd = "Conversation ended. Approach a calm civilian to talk again."}; if (gmCiMenuEnd != "") then {gmCiConfirmBody = objNull; gmCiMenuRefresh = true; GM_CI_FEEDBACK = gmCiMenuEnd; hint GM_CI_FEEDBACK}}
 ; Scan/prune at 1 Hz, or immediately after a request to refresh its actions.
 ? ((GM_CI_TICKS mod 4) != 0) and (not gmCiMenuRefresh) and (not GM_CI_REMOUNT) : goto "loop"
 gmCiMenuRefresh = false
@@ -34,7 +38,11 @@ gmCiMenuRefresh = false
 gmCiMenuNear = objNull
 gmCiMenuDist = GM_CI_REACH + 1
 ? ([gmCiMenuBody, aP] call GM_CI_fnEligible) >= 0 : gmCiMenuNear = gmCiMenuBody; gmCiMenuDist = (aP distance gmCiMenuBody) - 1
+; A passer-by must not steal a live confirmation. Eligibility still wins
+; over this lock, so panic, vehicles and leaving reach release the target.
+? not (isNull gmCiConfirmBody) : gmCiMenuNear = gmCiConfirmBody; goto "selected"
 {{if (([_x, aP] call GM_CI_fnEligible) >= 0) then {if ((aP distance _x) < gmCiMenuDist) then {gmCiMenuNear = _x; gmCiMenuDist = aP distance _x}}} forEach (units _x)} forEach GM_CIV_GROUPS
+#selected
 ? (gmCiConfirmBody != gmCiMenuNear) or (time >= gmCiConfirmUntil) : gmCiConfirmBody = objNull
 gmCiMenuThreat = gmAssailantDiagnostic "RESISTER"
 gmCiMenuNext = ""

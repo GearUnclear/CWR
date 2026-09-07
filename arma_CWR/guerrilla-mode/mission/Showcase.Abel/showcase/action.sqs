@@ -8,6 +8,8 @@
 ; ============================================================================
 
 SC_aId = _this select 2
+if (not (isNil "HT_OPEN")) then {if (HT_OPEN) then {SC_aId = -1}}
+? SC_aId < 0 : exit
 
 ; ---- DEMO ALL: enqueue the whole reel in manifest order ------------------------
 ? SC_aId == SC_ACT_ALL : SC_QUEUE = SC_QUEUE + SC_ALLIDX

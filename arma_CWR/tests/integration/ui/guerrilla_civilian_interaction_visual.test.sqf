@@ -30,6 +30,7 @@ triSimFrames 5
 triScreenshot "02_civilian_mood"
 [ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
 triSimUntil { gmCiMenuState == "CONFIRM" }
+triAssertIncludes [GM_CI_FEEDBACK, "s to choose"]
 triSendKey 48
 triSimFrames 10
 triAssertIncludes [(triActionMenuText), "Leave them be"]
@@ -41,4 +42,25 @@ triSendKey 48
 triSimFrames 10
 triAssertIncludes [(triActionMenuText), "Already paid"]
 triScreenshot "04_civilian_payment"
+GM_CI_PROFILES = [[ciBody, "Village", 40, 40, 40, time, 0, false]]
+GM_CI_COOLDOWN = 30
+triSimUntil { gmCiMenuState == "READY" }
+[ciBody, player, gmCiMenuAsk] exec "\gmcore\scripts\civilian_interaction_action.sqs"
+triSimUntil { gmCiMenuState == "COOLDOWN" }
+triAssertIncludes [GM_CI_FEEDBACK, "Try again in 30 s"]
+triSendKey 48
+triSimFrames 10
+triAssertIncludes [(triActionMenuText), "Give them space"]
+triScreenshot "05_civilian_refusal"
+GM_CI_PROFILES = [[ciBody, "Village", 40, 40, 40, time, 0, false]]
+triSimUntil { gmCiMenuState == "READY" }
+[ciBody, player, gmCiMenuExtort] exec "\gmcore\scripts\civilian_interaction_action.sqs"
+triSimUntil { gmCiMenuState == "CONFIRM" }
+gmCiConfirmUntil = time - 1
+triSimUntil { gmCiMenuState == "READY" }
+triAssertIncludes [GM_CI_FEEDBACK, "Choice expired"]
+triSendKey 48
+triSimFrames 10
+triAssertIncludes [(triActionMenuText), "Consider extortion"]
+triScreenshot "06_civilian_choice_expired"
 triEndTest
