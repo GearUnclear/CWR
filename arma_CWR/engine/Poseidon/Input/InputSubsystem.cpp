@@ -142,6 +142,26 @@ static bool QueryDoubleTapKeyToDo(Input& in, int dik, bool reset, bool checkFocu
     return ret;
 }
 
+// Tap edge: fires on the key-UP frame of a short press.  Same focus/cheat
+// guards as the plain and double-tap edges.
+static bool QueryTapKeyToDo(Input& in, int dik, bool reset, bool checkFocus)
+{
+    if (checkFocus && in.gameFocusLost > 0)
+        return false;
+#if _ENABLE_CHEATS
+    if (in.keyboard.cheat1 || in.keyboard.cheat2)
+        return false;
+#endif
+    if (in.keyboard.awaitCheat)
+        return false;
+    if (dik < 0 || dik >= SDL_SCANCODE_COUNT)
+        return false;
+    bool ret = in.keyboard.keysTapToDo[dik];
+    if (reset)
+        in.keyboard.keysTapToDo[dik] = false;
+    return ret;
+}
+
 static float QueryMouseButton(const Input& in, int index, bool checkFocus)
 {
     if (checkFocus && in.gameFocusLost > 0)
@@ -181,6 +201,18 @@ static bool QueryDoubleTapMouseButtonToDo(Input& in, int index, bool reset, bool
     bool ret = in.mouse.buttonsDoubleToDo[index];
     if (reset)
         in.mouse.buttonsDoubleToDo[index] = false;
+    return ret;
+}
+
+static bool QueryTapMouseButtonToDo(Input& in, int index, bool reset, bool checkFocus)
+{
+    if (checkFocus && in.gameFocusLost > 0)
+        return false;
+    if (index < 0 || index >= N_MOUSE_BUTTONS)
+        return false;
+    bool ret = in.mouse.buttonsTapToDo[index];
+    if (reset)
+        in.mouse.buttonsTapToDo[index] = false;
     return ret;
 }
 
@@ -243,6 +275,8 @@ static float QueryAction(const Input& in, UserAction action, bool checkFocus)
         if (!ModifierHeld(in, action, i))
             continue;
         int key = in.userKeys[action][i];
+        if (InputBindingIsTap(key))
+            continue; // tap bindings are edge-only, never a level
         const int value = InputBindingValue(key);
         switch (InputBindingDevice(key))
         {
@@ -295,13 +329,15 @@ static bool QueryActionToDo(Input& in, UserAction action, bool reset, bool check
         switch (InputBindingDevice(key))
         {
             case INPUT_DEVICE_KEYBOARD:
-                if (InputBindingIsDoubleTap(key) ? QueryDoubleTapKeyToDo(in, value, false, checkFocus)
-                                                 : QueryKeyToDo(in, value, false, checkFocus))
+                if (InputBindingIsTap(key)         ? QueryTapKeyToDo(in, value, false, checkFocus)
+                    : InputBindingIsDoubleTap(key) ? QueryDoubleTapKeyToDo(in, value, false, checkFocus)
+                                                   : QueryKeyToDo(in, value, false, checkFocus))
                     found = true;
                 break;
             case INPUT_DEVICE_MOUSE:
-                if (InputBindingIsDoubleTap(key) ? QueryDoubleTapMouseButtonToDo(in, value, false, checkFocus)
-                                                 : QueryMouseButtonToDo(in, value, false, checkFocus))
+                if (InputBindingIsTap(key)         ? QueryTapMouseButtonToDo(in, value, false, checkFocus)
+                    : InputBindingIsDoubleTap(key) ? QueryDoubleTapMouseButtonToDo(in, value, false, checkFocus)
+                                                   : QueryMouseButtonToDo(in, value, false, checkFocus))
                     found = true;
                 break;
             case INPUT_DEVICE_STICK:
@@ -351,6 +387,8 @@ static float QueryProfileCode(const Input& in, InputCode code, bool checkFocus)
     if (!code.valid())
         return 0.0f;
     const int packed = code.toLegacy();
+    if (InputBindingIsTap(packed))
+        return 0.0f; // tap bindings are edge-only, never a level
     const int value = InputBindingValue(packed);
     switch (InputBindingDevice(packed))
     {
@@ -380,11 +418,13 @@ static bool QueryProfileCodeToDo(Input& in, InputCode code, bool reset, bool che
     switch (InputBindingDevice(packed))
     {
         case INPUT_DEVICE_KEYBOARD:
-            return InputBindingIsDoubleTap(packed) ? QueryDoubleTapKeyToDo(in, value, reset, checkFocus)
-                                                   : QueryKeyToDo(in, value, reset, checkFocus);
+            return InputBindingIsTap(packed)         ? QueryTapKeyToDo(in, value, reset, checkFocus)
+                   : InputBindingIsDoubleTap(packed) ? QueryDoubleTapKeyToDo(in, value, reset, checkFocus)
+                                                     : QueryKeyToDo(in, value, reset, checkFocus);
         case INPUT_DEVICE_MOUSE:
-            return InputBindingIsDoubleTap(packed) ? QueryDoubleTapMouseButtonToDo(in, value, reset, checkFocus)
-                                                   : QueryMouseButtonToDo(in, value, reset, checkFocus);
+            return InputBindingIsTap(packed)         ? QueryTapMouseButtonToDo(in, value, reset, checkFocus)
+                   : InputBindingIsDoubleTap(packed) ? QueryDoubleTapMouseButtonToDo(in, value, reset, checkFocus)
+                                                     : QueryMouseButtonToDo(in, value, reset, checkFocus);
         case INPUT_DEVICE_STICK:
             return QueryJoystickButtonToDo(in, value, reset, checkFocus);
         case INPUT_DEVICE_STICK_POV:
@@ -664,8 +704,7 @@ float InputSubsystem::GetAction(InputContext ctx, UserAction action, bool checkF
     // movement actions in driver contexts, so a bound pad can't steer through
     // the keyboard branch either.  Buttons, look and every other context are
     // untouched.
-    const bool suppressGamepad =
-        !GInput.gamepad.steering && IsDriverContext(ctx) && IsVehicleControlAction(action);
+    const bool suppressGamepad = !GInput.gamepad.steering && IsDriverContext(ctx) && IsVehicleControlAction(action);
     return QueryProfileAction(GInput, profiles_[idx], action, checkFocus, suppressGamepad);
 }
 
@@ -1088,6 +1127,8 @@ void InputSubsystem::FlushAndResetMouse()
 
 float InputSubsystem::GetKey(int packedKey, bool checkFocus) const
 {
+    if (InputBindingIsTap(packedKey))
+        return 0.0f; // tap bindings are edge-only, never a level
     const int value = InputBindingValue(packedKey);
     return InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKey(GInput, value, checkFocus)
                                               : QueryKey(GInput, value, checkFocus);
@@ -1096,8 +1137,24 @@ float InputSubsystem::GetKey(int packedKey, bool checkFocus) const
 bool InputSubsystem::GetKeyToDo(int packedKey, bool reset, bool checkFocus)
 {
     const int value = InputBindingValue(packedKey);
-    return InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKeyToDo(GInput, value, reset, checkFocus)
-                                              : QueryKeyToDo(GInput, value, reset, checkFocus);
+    return InputBindingIsTap(packedKey)         ? QueryTapKeyToDo(GInput, value, reset, checkFocus)
+           : InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKeyToDo(GInput, value, reset, checkFocus)
+                                                : QueryKeyToDo(GInput, value, reset, checkFocus);
+}
+
+int InputSubsystem::GetTapWindowMs() const
+{
+    return GInput.mouse.tapWindowMs;
+}
+
+void InputSubsystem::SetTapWindowMs(int ms)
+{
+    if (ms < 0)
+        ms = 0;
+    if (ms > 2000)
+        ms = 2000;
+    GInput.mouse.tapWindowMs = ms;
+    GInput.keyboard.tapWindowMs = ms;
 }
 
 int InputSubsystem::CheatActivated() const
@@ -1308,7 +1365,7 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("ReloadMagazine", IDS_USRACT_RELOAD_MAGAZINE, SDL_SCANCODE_R, SDL_SCANCODE_HOME,
                        INPUT_DEVICE_STICK + 2, -1),
         UserActionDesc("LockTargets", IDS_USRACT_LOCK_TARGETS, SDL_SCANCODE_TAB, INPUT_DEVICE_STICK + 1, -1),
-        UserActionDesc("LockTarget", IDS_USRACT_LOCK_OR_ZOOM, INPUT_DEVICE_MOUSE + 1, -1),
+        UserActionDesc("LockTarget", IDS_USRACT_LOCK_TARGET, SDL_SCANCODE_T, -1),
         UserActionDesc("RevealTarget", IDS_USRACT_REVEAL_TARGET, INPUT_DEVICE_MOUSE + 1, -1),
         UserActionDesc("PrevAction", IDS_USRACT_PREV_ACTION, SDL_SCANCODE_LEFTBRACKET, INPUT_DEVICE_STICK + 4,
                        INPUT_DEVICE_STICK_POV + 0, -1),
@@ -1321,16 +1378,18 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("Binocular", IDS_USRACT_BINOCULAR, SDL_SCANCODE_B, -1),
         UserActionDesc("Handgun", IDS_USRACT_HANDGUN, SDL_SCANCODE_Y, -1),
         UserActionDesc("Compass", IDS_USRACT_COMPASS, SDL_SCANCODE_G, INPUT_DEVICE_STICK_POV + 6, -1),
-        UserActionDesc("Watch", IDS_USRACT_WATCH, SDL_SCANCODE_T, INPUT_DEVICE_STICK_POV + 2, -1),
+        UserActionDesc("Watch", IDS_USRACT_WATCH, SDL_SCANCODE_O, INPUT_DEVICE_STICK_POV + 2, -1),
         UserActionDesc("Map", IDS_USRACT_MAP, SDL_SCANCODE_M, INPUT_DEVICE_STICK + 8, -1),
         UserActionDesc("Help", IDS_USRACT_HELP, SDL_SCANCODE_H, INPUT_DEVICE_STICK + 9, -1),
         UserActionDesc("TimeInc", IDS_USRACT_TIME_INC, SDL_SCANCODE_EQUALS, -1),
         UserActionDesc("TimeDec", IDS_USRACT_TIME_DEC, SDL_SCANCODE_MINUS, -1),
-        UserActionDesc("Optics", IDS_USRACT_OPTICS, SDL_SCANCODE_V, SDL_SCANCODE_KP_0, -1),
+        // Arma 3: a quick RMB click toggles the sights; the same button held is ZoomTemp.
+        UserActionDesc("Optics", IDS_USRACT_OPTICS, InputBindingTapCode(INPUT_DEVICE_MOUSE + 1), SDL_SCANCODE_V, -1),
         UserActionDesc("PersonView", IDS_USRACT_PERSON_VIEW, SDL_SCANCODE_KP_ENTER, -1),
         UserActionDesc("TacticalView", IDS_USRACT_TACTICAL_VIEW, SDL_SCANCODE_KP_PERIOD, -1),
         UserActionDesc("ZoomIn", IDS_USRACT_ZOOM_IN, SDL_SCANCODE_KP_PLUS, -1),
         UserActionDesc("ZoomOut", IDS_USRACT_ZOOM_OUT, SDL_SCANCODE_KP_MINUS, -1),
+        UserActionDesc("ZoomTemp", IDS_USRACT_ZOOM_TEMP, INPUT_DEVICE_MOUSE + 1, -1),
         UserActionDesc("LookAround", IDS_USRACT_LOOK_ARROUND, SDL_SCANCODE_LALT, INPUT_DEVICE_STICK + 6, -1),
         UserActionDesc("LookAroundToggle", IDS_USRACT_LOOK_ARROUND_TOGGLE, SDL_SCANCODE_KP_MULTIPLY, -1),
         UserActionDesc("LookLeftDown", IDS_USRACT_LOOK_LEFT_DOWN, SDL_SCANCODE_KP_1, -1),
@@ -1374,6 +1433,10 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
     // a matching row here, indexing runs off the end. Keep them one-to-one.
     static_assert(std::size(userActionDesc) == UAN,
                   "UserActionDesc table must have exactly one entry per UserAction (UAN)");
+    // The tap / double-tap mode bits sit directly above the value field; every
+    // scancode must still fit below them or a key code would alias a mode bit.
+    static_assert(SDL_SCANCODE_COUNT - 1 <= INPUT_BINDING_VALUE_MASK,
+                  "SDL scancodes must fit in INPUT_BINDING_VALUE_MASK below the binding mode bits");
     return userActionDesc;
 }
 

@@ -8,11 +8,11 @@ namespace Poseidon
 
 using Poseidon::Foundation::UITime;
 
-void MouseState::BufferButton(int btn, bool down)
+void MouseState::BufferButton(int btn, bool down, DWORD timestampMs)
 {
     if (btnCount_ >= kButtonBufferSize)
         return;
-    btnBuffer_[btnCount_++] = {btn, down};
+    btnBuffer_[btnCount_++] = {btn, down, timestampMs};
 }
 
 void MouseState::BufferMotion(float dx, float dy)
@@ -46,6 +46,7 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
     {
         buttonsToDo[i] = false;
         buttonsDoubleToDo[i] = false;
+        buttonsTapToDo[i] = false;
     }
 
     deltaX = 0;
@@ -75,11 +76,21 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
                     doubleClickToDo = true;
                 }
                 buttonLastPressedMs_[btn] = nowMs;
+                buttonPressTickMs_[btn] = btnBuffer_[i].timestampMs;
+                buttonPressTracked_[btn] = true;
             }
             else
             {
                 buttons[btn] = false;
                 buttonsDoubleActive[btn] = false;
+                if (buttonPressTracked_[btn])
+                {
+                    // Strict <, so tapWindowMs == 0 never taps.
+                    const DWORD held = btnBuffer_[i].timestampMs - buttonPressTickMs_[btn];
+                    if (tapWindowMs > 0 && held < static_cast<DWORD>(tapWindowMs))
+                        buttonsTapToDo[btn] = true;
+                    buttonPressTracked_[btn] = false;
+                }
             }
         }
     }

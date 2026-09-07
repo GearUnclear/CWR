@@ -32,7 +32,9 @@ using namespace Poseidon;
 #include <Poseidon/Network/MasterServerServiceClient.hpp> // catalog entry for triSeedWorkshopMods
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/Foundation/Enums/EnumNames.hpp> // FindEnumName (triCamView)
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_scancode.h>
@@ -104,16 +106,26 @@ using Poseidon::Foundation::LoggingSystem;
 using Poseidon::Foundation::MemoryUsed;
 using Poseidon::Foundation::Time;
 
+// The CameraType name table is defined in GameStateExtUi.cpp (explicit
+// specialization); declare it here so triCamView can use FindEnumName.
+namespace Poseidon::Foundation
+{
+template <>
+const EnumName* GetEnumNames(CameraType);
+}
+
 // Viewer / cursor / object / camera / pixel Trident test commands, split out of
 // GameStateExtTest.cpp to keep that TU under the size threshold. These Tri* commands
 // are registered in GameStateExtTestAudio.cpp and use only self-contained state.
 
 /// triMouseLeft <down> — set the synthetic left-mouse-button state
-/// (0=up, 1=down).  In --window mode (where the harness runs) the
-/// SDL pipeline's ProcessMouse_SDL → MouseState::Update path doesn't
-/// execute, so a direct write to GInput.mouse.left persists across
-/// frames.  ControlsContainer::OnSimulate's mouse poll reads that
-/// flag directly via InputSubsystem::IsMouseLeftDown.  Pair with
+/// (0=up, 1=down).  Writes GInput.mouse directly through TestSetButton
+/// (both buttons[0] and the .left flag), bypassing the SDL event buffer,
+/// so the state persists across frames even though the per-frame
+/// ProcessMouse_SDL → MouseState::Update path DOES run in the harness.
+/// A level-only hold: it never produces a press edge or a tap (see
+/// triMouseBtn for a real event).  ControlsContainer::OnSimulate's mouse
+/// poll reads the flag via InputSubsystem::IsMouseLeftDown.  Pair with
 /// triCursorMove to stage a real-style click + drag.  Returns "OK".
 GameValue TriMouseLeft(const GameState* /*state*/, GameValuePar arg)
 {
@@ -142,6 +154,65 @@ GameValue TriMouseMid(const GameState* /*state*/, GameValuePar arg)
     GInput.mouse.TestSetButton(2, down != 0);
     LOG_INFO(Core, "[tri] triMouseMid down={}", down);
     return GameValue("OK");
+}
+
+/// triMouseBtn [btn, down] — push a REAL SDL mouse-button event (btn 0/1/2 =
+/// left/right/middle, down 0/1), exactly like triKeyDown does for keys.  The
+/// event flows through the production funnel (SDLInput_BufferMouseButton), so
+/// it is timestamped and yields press edges, double-clicks and taps; use it
+/// to exercise tap bindings (RMB tap = optics).  Returns "OK".
+GameValue TriMouseBtn(const GameState* /*state*/, GameValuePar arg)
+{
+    const GameArrayType& arr = arg;
+    if (arr.Size() < 2)
+        return GameValue("ERR: triMouseBtn expects [btn, down]");
+    int btn = static_cast<int>(static_cast<GameScalarType>(arr[0]));
+    int down = static_cast<int>(static_cast<GameScalarType>(arr[1]));
+    Uint8 sdlButton = SDL_BUTTON_LEFT;
+    if (btn == 1)
+        sdlButton = SDL_BUTTON_RIGHT;
+    else if (btn == 2)
+        sdlButton = SDL_BUTTON_MIDDLE;
+    else if (btn != 0)
+        return GameValue("ERR: triMouseBtn btn must be 0, 1 or 2");
+    // The event handlers map button-1 and swap 1<->2, so SDL right (3) lands
+    // on internal index 1 and SDL middle (2) on index 2.
+    SDL_Event ev = {};
+    ev.type = down != 0 ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    ev.button.button = sdlButton;
+    ev.button.down = down != 0;
+    ev.button.clicks = 1;
+    SDL_PushEvent(&ev);
+    LOG_INFO(Core, "[tri] triMouseBtn btn={} down={}", btn, down);
+    return GameValue("OK");
+}
+
+/// triTapWindowMs <ms> — set the mouse/keyboard tap window for this session
+/// (0 disables taps; a large value lets harness latency still count as a tap).
+GameValue TriTapWindowMs(const GameState* /*state*/, GameValuePar arg)
+{
+    int ms = static_cast<int>(static_cast<GameScalarType>(arg));
+    InputSubsystem::Instance().SetTapWindowMs(ms);
+    LOG_INFO(Core, "[tri] triTapWindowMs {} -> {}", ms, InputSubsystem::Instance().GetTapWindowMs());
+    return GameValue("OK");
+}
+
+/// triCamView — current world camera type name: "INTERNAL", "GUNNER",
+/// "EXTERNAL" or "GROUP" (empty string with no world).
+GameValue TriCamView(const GameState* /*state*/)
+{
+    if (!GWorld)
+        return GameValue("");
+    return GameValue(static_cast<const char*>(Poseidon::Foundation::FindEnumName(GWorld->GetCameraType())));
+}
+
+/// triCamFov — current (eased) FOV of the active world camera, or 0 with no
+/// world.  Drops toward a quarter while the hold-zoom (ZoomTemp) is active.
+GameValue TriCamFov(const GameState* /*state*/)
+{
+    if (!GWorld)
+        return GameValue(0.0f);
+    return GameValue(GWorld->GetCameraFOV());
 }
 
 /// triMouseDelta [dx, dy] — inject a one-frame mouse delta.  Mouse

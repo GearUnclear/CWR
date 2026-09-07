@@ -3,6 +3,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include <Poseidon/Input/CheatCode.hpp>
+#include <Poseidon/Input/InputDeviceConstants.hpp>
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
@@ -17,12 +18,14 @@ namespace Poseidon
 struct KeyboardState
 {
     // Per-scancode state
-    DWORD keyPressed[SDL_SCANCODE_COUNT] = {};  // timestamp of last key-down (0 = not pressed)
-    DWORD keyLastPressed[SDL_SCANCODE_COUNT] = {}; // timestamp of prior key-down for double-tap detection
-    float keys[SDL_SCANCODE_COUNT] = {};         // integrated duration (0..1 per frame)
-    bool keysToDo[SDL_SCANCODE_COUNT] = {};      // edge detection (true on key-down frame)
-    bool keysDoubleTapToDo[SDL_SCANCODE_COUNT] = {}; // true on the second key-down frame
+    DWORD keyPressed[SDL_SCANCODE_COUNT] = {};         // timestamp of last key-down (0 = not pressed)
+    DWORD keyLastPressed[SDL_SCANCODE_COUNT] = {};     // timestamp of prior key-down for double-tap detection
+    float keys[SDL_SCANCODE_COUNT] = {};               // integrated duration (0..1 per frame)
+    bool keysToDo[SDL_SCANCODE_COUNT] = {};            // edge detection (true on key-down frame)
+    bool keysDoubleTapToDo[SDL_SCANCODE_COUNT] = {};   // true on the second key-down frame
     bool keysDoubleTapActive[SDL_SCANCODE_COUNT] = {}; // true while the second press is held
+    bool keysTapToDo[SDL_SCANCODE_COUNT] = {};         // true on the key-UP frame of a press shorter than tapWindowMs
+    int tapWindowMs = kDefaultTapWindowMs;             // strict <; 0 disables taps
     // Cheat state
 #if _ENABLE_CHEATS
     bool cheat1 = false;
@@ -72,4 +75,3 @@ struct KeyboardState
     void ProcessKeyPressed(int dik);
 };
 } // namespace Poseidon
-

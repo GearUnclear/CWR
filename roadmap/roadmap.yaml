@@ -1500,6 +1500,37 @@ items:
       - "2026-08-21 (aaadfd7): in-vehicle feel playtest done for car/bike/tank on a DriveTest.Abel mission (jeep + M60 beside spawn, in the gitignored Classic Missions dir). Every 08-09 wind-up rate turned in too hot; live-iterated with the player to car slowTurn*0.37+0.16, bike *0.37+0.12 (centering 2.0 kept - vanilla's slow centering was also test-driven and rejected), tank authority 0.36 rad at rest (~72% of vanilla; the retune's 0.75 AND pure vanilla 0.5 both felt too fast) with vanilla estT 0.25."
       - "Open: keys-only aircraft flight feel playtest; a tri lane asserting mouse motion moves the camera but not _turnWanted."
 
+  - id: controls-rmb-zoom-ads
+    title: "Controls: Arma 3 RMB (hold = zoom, tap = sights), lock target on T, watch on O"
+    phase: phase-2
+    status: in-progress
+    priority: 2
+    depends_on: [build-toolchain]
+    gh_issues: [62]
+    commits: []
+    summary: >
+      Arma 3 right mouse on foot and in vehicles (decided 2026-09-06): hold RMB
+      = temporary zoom (new level action UAZoomTemp, driving the existing
+      forcedZoom branch in World::Simulate), quick click = toggle the sights
+      (UAOptics bound to "tap RMB" + V; Numpad 0 dropped), UALockTarget moves
+      to T with the lockable-weapon zoom veto removed, UAWatch moves from T to
+      O, UARevealTarget stays on plain RMB. Mechanism: a per-binding tap flag
+      in the packed input code (INPUT_BINDING_TAP 0x4000, sibling of the
+      double-tap flag): a tap binding is edge-only, level 0, edge on the
+      RELEASE frame when the press lasted strictly less than tapWindowMs
+      (default 250, 0 = off, session knob in the dev Mouse tab and
+      InputSubsystem::SetTapWindowMs). Mouse and keyboard stamp with
+      GlobalTickCount(); triMouseBtn pushes a real SDL button event so the
+      harness can tap. contextControls.cfg v3 -> v4 migration rewrites the
+      three re-bound actions per context only when their KB&M subsequence
+      still equals the v3 default exactly (gamepad codes in the same array
+      preserved in order); anything else is left alone.
+    log:
+      - "2026-09-07: landed on branch controls/rmb-zoom-ads. Unit coverage: flag helpers, mouse/keyboard tap edges (strict window, 0 = off, TestSetButton never taps, buttonsReversed, clamp regression), tap-binding resolution, defaults, categories, reset, conflict scan, Tap key-name prefix, KbmPage cell, labels, v3->v4 migration (full fixture, customised rows, modifier/empty-slot rows). Integration lane ingame/controls/rmb_zoom_ads green on Classic (tap toggles both ways, hold zooms and eases back without toggling, V still toggles). v3 fixture captured from the pre-change build."
+      - "2026-09-07 gotcha: the real %APPDATA%\\CWR\\contextControls.cfg on the dev machine read contextControlsVersion=5 with a v3 layout (an uncommitted experimental build wrote it on 2026-09-02, with ChatHistory/chat-channel actions no committed code knows). A strict version-less-than gate would never have migrated it, so Load() treats a version above the build's as unknown layout: seed, apply the same equality-gated rewrite, re-save at 4 (WARN logged). Verified on the real file: LockTarget T, Watch O, ZoomTemp RMB, the customised Infantry Optics row (V, mouse 4, LT) untouched. Profile backed up as contextControls.cfg.bak-v5-20260907."
+      - "Labels: STR_USRACT_LOCK_TARGET already exists in the Classic STRINGTABLE.CSV; STR_USRACT_ZOOM_TEMP added to the Classic package's local bin/STRINGTABLE_OPTIONS.utf8.csv (gitignored, re-add after a reinstall) and the tracked test fixture; ControlActionLabel carries an English fallback and never localizes a negative id."
+      - "Open: playtest sign-off (feel of the 250 ms tap window, zoom depth) then flip to done; pad binding for ZoomTemp; capturing a tap binding through the rebind UI (CapturePage double-tap upgrade is the template); both reset paths drop gamepad codes (pre-existing); promote the tap window into mouse.cfg with the settled default."
+
   - id: ai-tactics-phase2
     title: "AI tactics tranche (plans 04, 05, 03: target priority, suppression, flee-to-cover)"
     phase: phase-2

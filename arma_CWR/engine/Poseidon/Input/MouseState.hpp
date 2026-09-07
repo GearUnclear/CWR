@@ -2,6 +2,7 @@
 
 #include <Poseidon/Input/InputDeviceConstants.hpp>
 #include <Poseidon/Input/MouseTuning.hpp>
+#include <Poseidon/Foundation/Common/Win.h>
 #include <Poseidon/Foundation/Time/Time.hpp>
 
 namespace Poseidon
@@ -17,6 +18,10 @@ struct MouseState
     bool buttonsToDo[N_MOUSE_BUTTONS] = {};
     bool buttonsDoubleToDo[N_MOUSE_BUTTONS] = {};
     bool buttonsDoubleActive[N_MOUSE_BUTTONS] = {};
+    // Tap edge: true on the frame a button is RELEASED after a press shorter
+    // than tapWindowMs (strict <; 0 disables taps).  Cleared every Update().
+    bool buttonsTapToDo[N_MOUSE_BUTTONS] = {};
+    int tapWindowMs = kDefaultTapWindowMs;
 
     // Per-frame motion delta (sensitivity pre-applied)
     float deltaX = 0, deltaY = 0, deltaZ = 0;
@@ -50,7 +55,9 @@ struct MouseState
 
     // Buffering (called from the SDL event thread)
 
-    void BufferButton(int btn, bool down);
+    // timestampMs is the GlobalTickCount() poll time (same monotonic epoch as
+    // the keyboard events); it only feeds the tap window.  NOT Glob.uiTime.
+    void BufferButton(int btn, bool down, DWORD timestampMs = 0);
     void BufferMotion(float dx, float dy);
     void BufferWheel(float dy);
     void DiscardBuffered();
@@ -81,9 +88,8 @@ struct MouseState
     // the HUD region); aimAspectRatio scales the 3D aim (uses the full window).
     // These aspect ratios differ only when the HUD width limit shrinks the UI on
     // a wide screen.
-    bool Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundEnabled,
-                Foundation::UITime currentTime, const CursorClamp* clamp, float dtSec = -1.0f,
-                float cursorAspectRatio = kBaseAspectRatio,
+    bool Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundEnabled, Foundation::UITime currentTime,
+                const CursorClamp* clamp, float dtSec = -1.0f, float cursorAspectRatio = kBaseAspectRatio,
                 float aimAspectRatio = kBaseAspectRatio);
 
     // Flush buffered input and reset per-frame deltas.
@@ -108,9 +114,12 @@ struct MouseState
     {
         if (btn >= 0 && btn < N_MOUSE_BUTTONS)
             buttons[btn] = down ? 1.0f : 0.0f;
-        if (btn == 0) left = down;
-        else if (btn == 1) right = down;
-        else if (btn == 2) middle = down;
+        if (btn == 0)
+            left = down;
+        else if (btn == 1)
+            right = down;
+        else if (btn == 2)
+            middle = down;
     }
 
   private:
@@ -140,14 +149,20 @@ struct MouseState
     {
         int btn;
         bool down;
+        DWORD timestampMs;
     };
     ButtonEvent btnBuffer_[kButtonBufferSize] = {};
     int btnCount_ = 0;
     int buttonLastPressedMs_[N_MOUSE_BUTTONS] = {};
+    // Tap tracking: press tick (GlobalTickCount epoch) plus an explicit "press
+    // seen through the event buffer" flag.  The flag, not a magic timestamp,
+    // marks the press because GlobalTickCount() is legitimately 0 in unit
+    // tests.  TestSetButton never sets it, so an injected hold cannot tap.
+    DWORD buttonPressTickMs_[N_MOUSE_BUTTONS] = {};
+    bool buttonPressTracked_[N_MOUSE_BUTTONS] = {};
     float bufDeltaX_ = 0, bufDeltaY_ = 0;
     float bufWheel_ = 0;
     // Smoothing low-pass state (only used when tuning.smoothing > 0).
     float smoothX_ = 0, smoothY_ = 0;
 };
 } // namespace Poseidon
-

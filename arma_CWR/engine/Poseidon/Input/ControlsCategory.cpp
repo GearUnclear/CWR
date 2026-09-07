@@ -16,7 +16,7 @@ const UserAction kOnFoot[] = {
     UASlow, // "Walk" — the slow-movement toggle (label/default key live in UserActionDesc)
     // Weapons & combat
     UAFire, UAReloadMagazine, UAToggleWeapons, UAHandgun, UALockTarget, UALockTargets, UARevealTarget, UAOptics,
-    UAZoomIn, UAZoomOut,
+    UAZoomIn, UAZoomOut, UAZoomTemp,
     // Actions
     UAAction,
     // Gamepad aim grouping; hidden on KB&M on-foot rows.
@@ -27,27 +27,32 @@ const UserAction kOnFoot[] = {
     // HUD
     UABinocular, UANightVision, UAN};
 
-const UserAction kVehicles[] = {UAMoveForward,     UAMoveBack,     UAMoveFastForward,
-                                UAMoveSlowForward, UATurbo,        UATurnLeft,
-                                UATurnRight,       UAFire,         UALockTarget,
-                                UALockTargets,     UAAction,       UAZoomIn,
-                                UAZoomOut,         UALookAround,   UALookAroundToggle,
-                                UALookCenter,      UALookLeft,     UALookRight,
-                                UALookUp,          UALookDown,     UALookLeftUp,
-                                UALookRightUp,     UALookLeftDown, UALookRightDown,
-                                UAHeadlights,      UANightVision,  UAN};
+const UserAction kVehicles[] = {
+    UAMoveForward, UAMoveBack,         UAMoveFastForward, UAMoveSlowForward, UATurbo,      UATurnLeft,    UATurnRight,
+    UAFire,        UALockTarget,       UALockTargets,     UAAction,          UAZoomIn,     UAZoomOut,     UAZoomTemp,
+    UALookAround,  UALookAroundToggle, UALookCenter,      UALookLeft,        UALookRight,  UALookUp,      UALookDown,
+    UALookLeftUp,  UALookRightUp,      UALookLeftDown,    UALookRightDown,   UAHeadlights, UANightVision, UAN};
 
-const UserAction kPilot[] = {
-    UAMoveForward,      UAMoveBack,     UATurnLeft,      UATurnRight,   UAMoveLeft, UAMoveRight, UAMoveUp,
-    UAMoveDown,         UAFire,         UALockTarget,    UALockTargets, UAZoomIn,   UAZoomOut,   UALookAround,
-    UALookAroundToggle, UALookCenter,   UALookLeft,      UALookRight,   UALookUp,   UALookDown,  UALookLeftUp,
-    UALookRightUp,      UALookLeftDown, UALookRightDown, UAHeadlights,  UAN};
+const UserAction kPilot[] = {UAMoveForward,      UAMoveBack,   UATurnLeft,    UATurnRight,    UAMoveLeft,
+                             UAMoveRight,        UAMoveUp,     UAMoveDown,    UAFire,         UALockTarget,
+                             UALockTargets,      UAZoomIn,     UAZoomOut,     UAZoomTemp,     UALookAround,
+                             UALookAroundToggle, UALookCenter, UALookLeft,    UALookRight,    UALookUp,
+                             UALookDown,         UALookLeftUp, UALookRightUp, UALookLeftDown, UALookRightDown,
+                             UAHeadlights,       UAN};
 
-const UserAction kGunner[] = {UAFire,       UAReloadMagazine, UAToggleWeapons, UALockTarget,    UALockTargets,
-                              UAAction,     UAOptics,         UAZoomIn,        UAZoomOut,       UAAimUp,
-                              UAAimDown,    UAAimLeft,        UAAimRight,      UALookAround,    UALookAroundToggle,
-                              UALookCenter, UALookLeft,       UALookRight,     UALookUp,        UALookDown,
-                              UALookLeftUp, UALookRightUp,    UALookLeftDown,  UALookRightDown, UAN};
+const UserAction kGunner[] = {UAFire,          UAReloadMagazine,
+                              UAToggleWeapons, UALockTarget,
+                              UALockTargets,   UAAction,
+                              UAOptics,        UAZoomIn,
+                              UAZoomOut,       UAZoomTemp,
+                              UAAimUp,         UAAimDown,
+                              UAAimLeft,       UAAimRight,
+                              UALookAround,    UALookAroundToggle,
+                              UALookCenter,    UALookLeft,
+                              UALookRight,     UALookUp,
+                              UALookDown,      UALookLeftUp,
+                              UALookRightUp,   UALookLeftDown,
+                              UALookRightDown, UAN};
 
 const UserAction kCommon[] = {UAPrevAction,   UANextAction,
                               UAPersonView,   UATacticalView,

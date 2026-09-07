@@ -28,6 +28,14 @@ TEST_CASE("displayUI names higher stick buttons", "[UI][displayUI]")
     CHECK(std::string((const char*)GetKeyName(INPUT_DEVICE_STICK + 11)) == "RS");
 }
 
+TEST_CASE("displayUI names tap keyboard and mouse bindings", "[UI][displayUI]")
+{
+    CHECK(std::string((const char*)GetKeyName(InputBindingTapCode((int)SDL_SCANCODE_V))).find("Tap ") == 0);
+    CHECK(std::string((const char*)GetKeyName(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1))).find("Tap ") == 0);
+    // A plain code carries no prefix.
+    CHECK(std::string((const char*)GetKeyName(INPUT_DEVICE_STICK + 10)) == "LS");
+}
+
 TEST_CASE("displayUI names double-tap keyboard and mouse bindings", "[UI][displayUI]")
 {
     CHECK(std::string((const char*)GetKeyName(InputBindingDoubleTapCode((int)SDL_SCANCODE_G))).find("2x ") == 0);

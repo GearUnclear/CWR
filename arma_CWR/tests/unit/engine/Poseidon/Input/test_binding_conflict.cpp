@@ -198,3 +198,45 @@ TEST_CASE("ResetCategoryDefaults: leaves out-of-category actions untouched", "[I
     REQUIRE(profile.BindingCount(UAMap) == 1);
     CHECK(profile.GetBindingEntries(UAMap)[0].code == InputCode::FromLegacy(0xA5A5A5));
 }
+
+TEST_CASE("FindBindingConflict: tap-RMB and plain RMB are distinct bindings", "[Input][BindingConflict]")
+{
+    UserKeysSnapshot snap;
+    auto& sub = InputSubsystem::Instance();
+    ClearAllBindings();
+
+    const int rmb = INPUT_DEVICE_MOUSE + 1;
+    auto& profile = sub.GetProfile(InputContext::Infantry);
+    profile.Bind(UAZoomTemp, InputCode::FromLegacy(rmb));
+    profile.Bind(UAOptics, InputCode::FromLegacy(InputBindingTapCode(rmb)));
+
+    CHECK(sub.FindBindingConflict(rmb) == UAZoomTemp);
+    CHECK(sub.FindBindingConflict(InputBindingTapCode(rmb)) == UAOptics);
+    CHECK(sub.FindBindingConflict(InputBindingDoubleTapCode(rmb)) == UAN);
+}
+
+TEST_CASE("ResetCategoryDefaults: OnFoot reset restores the tap-RMB Optics binding", "[Input][ResetCategory]")
+{
+    UserKeysSnapshot snap;
+    auto& sub = InputSubsystem::Instance();
+    ClearAllBindings();
+    auto& profile = sub.GetProfile(InputContext::Infantry);
+    profile.ClearAll();
+    profile.Bind(UAOptics, InputCode::Key(SDL_SCANCODE_KP_0));
+
+    sub.ResetCategoryDefaults(ControlsCategoryOnFoot);
+
+    const auto& optics = profile.GetBindingEntries(UAOptics);
+    REQUIRE(optics.size() == 2);
+    CHECK(optics[0].code == InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1)));
+    CHECK(InputBindingIsTap(optics[0].code.toLegacy()));
+    CHECK(optics[1].code == InputCode::Key(SDL_SCANCODE_V));
+
+    const auto& zoomTemp = profile.GetBindingEntries(UAZoomTemp);
+    REQUIRE(zoomTemp.size() == 1);
+    CHECK(zoomTemp[0].code == InputCode::MouseButton(1));
+
+    const auto& lock = profile.GetBindingEntries(UALockTarget);
+    REQUIRE(lock.size() == 1);
+    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_T));
+}

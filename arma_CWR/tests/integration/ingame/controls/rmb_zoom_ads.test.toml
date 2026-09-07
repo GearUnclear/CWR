@@ -1,0 +1,7 @@
+tags = ["controls", "full_cwa", "headless"]
+binary = "PoseidonGame"
+# One-player on-foot Abel mission (Classic data), no vehicles, no scripting.
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 120
+assert_timeout = 30
+extra_args = ["--dev"]
