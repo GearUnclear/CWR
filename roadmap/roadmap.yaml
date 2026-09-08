@@ -1592,7 +1592,7 @@ items:
     phase: phase-2
     status: done
     depends_on: [engine-native-systems, mission-migration-native, arms-stash-engine]
-    gh_issues: [58, 61]
+    gh_issues: [58]  # PR 61 carries the work; generate.py only resolves issues, so it is not listed here
     commits: [bfa9e19, 46b7066, 0ce10fe]
     summary: >
       The map screen's briefing notepad was empty in Guerrilla Mode (no
