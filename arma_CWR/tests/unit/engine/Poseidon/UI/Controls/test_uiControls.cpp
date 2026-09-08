@@ -371,7 +371,85 @@ void AddParagraphRows(CHTMLContainer& html, int section, int count)
         html.AddBreak(section, false);
     }
 }
+
+// UD extension: the draw-time colour precedence both OnDraw bodies resolve
+// through CHTMLContainer::FieldDrawColor.  Parser-only container that publishes
+// the palette and the active field the draw bodies read.
+class ColorHtmlContainer final : public CHTMLContainer
+{
+  public:
+    ColorHtmlContainer()
+    {
+        _textColor = PackedColor(10, 12, 14, 255);
+        _boldColor = PackedColor(20, 22, 24, 255);
+        _linkColor = PackedColor(152, 151, 203, 255); // the stock pale lavender
+        _activeLinkColor = PackedColor(200, 40, 40, 255);
+    }
+
+    PackedColor BoldColor() const { return _boldColor; }
+    PackedColor ActiveLinkColor() const { return _activeLinkColor; }
+
+    float GetPageWidth() const override { return 1000; }
+    float GetPageHeight() const override { return 1000; }
+    float GetTextWidth(float, Font*, const char* text) const override { return (float)strlen(text); }
+};
+
+bool SameColor(PackedColor a, PackedColor b)
+{
+    return a.R8() == b.R8() && a.G8() == b.G8() && a.B8() == b.B8() && a.A8() == b.A8();
+}
 } // namespace
+
+TEST_CASE("FieldDrawColor: a per-field colour wins over the stock link colour, the hovered link keeps its own",
+          "[ui][html][color]")
+{
+    // The stock order is link > bold > text.  The UD extension makes a field's
+    // own colour win over the LINK colour too, so a journal page can ink its
+    // navigation dark enough to read on paper; a field that sets no colour is
+    // drawn exactly as before, and the hovered link still flips to the active
+    // link colour so the hover feedback survives.
+    ColorHtmlContainer html;
+    const int s = html.AddSection();
+    html.AddName(s, "S");
+    html.AddText(s, "plain", HFP, HALeft, false, false, "");
+    html.AddText(s, "bold", HFP, HALeft, false, true, "");
+    html.AddText(s, "link", HFP, HALeft, false, false, "#A");
+    html.AddText(s, "bold link", HFP, HALeft, false, true, "#A");
+    const PackedColor ink(14, 16, 52, 255); // the journal's blue-black hand
+    html.SetFieldColor(ink);
+    html.AddText(s, "inked link", HFP, HALeft, false, false, "#B");
+    html.AddText(s, "inked text", HFP, HALeft, false, false, "");
+    html.ClearFieldColor();
+
+    const HTMLSection& sec = html.GetSection(s);
+    REQUIRE(sec.fields.Size() == 6);
+    const HTMLField& plain = sec.fields[0];
+    const HTMLField& bold = sec.fields[1];
+    const HTMLField& link = sec.fields[2];
+    const HTMLField& boldLink = sec.fields[3];
+    const HTMLField& inkedLink = sec.fields[4];
+    const HTMLField& inkedText = sec.fields[5];
+
+    // stock behaviour, unchanged: no field here sets a colour
+    CHECK_FALSE(plain.hasColor);
+    CHECK(SameColor(html.FieldDrawColor(plain, false), html.GetTextColor()));
+    CHECK(SameColor(html.FieldDrawColor(bold, false), html.BoldColor()));
+    CHECK(SameColor(html.FieldDrawColor(link, false), html.GetLinkColor()));
+    CHECK(SameColor(html.FieldDrawColor(boldLink, false), html.GetLinkColor())); // a link is never bold-coloured
+    CHECK(SameColor(html.FieldDrawColor(link, true), html.ActiveLinkColor()));
+    // the hover colour belongs to links: a plain field never takes it
+    CHECK(SameColor(html.FieldDrawColor(plain, true), html.GetTextColor()));
+
+    // the extension: the field's own colour beats both the link and the bold
+    // colour, and survives on a non-hovered link
+    REQUIRE(inkedLink.hasColor);
+    REQUIRE(inkedText.hasColor);
+    CHECK(SameColor(html.FieldDrawColor(inkedLink, false), ink));
+    CHECK(SameColor(html.FieldDrawColor(inkedText, false), ink));
+    CHECK(SameColor(html.FieldDrawColor(inkedText, true), ink));
+    // ... except while it is the active field, where the hover wins
+    CHECK(SameColor(html.FieldDrawColor(inkedLink, true), html.ActiveLinkColor()));
+}
 
 TEST_CASE("SplitSection keeps an oversized first row on page 0 instead of reading rows[-1]", "[ui][html][split]")
 {

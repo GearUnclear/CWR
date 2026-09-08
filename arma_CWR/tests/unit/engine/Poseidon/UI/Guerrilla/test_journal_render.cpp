@@ -298,6 +298,23 @@ bool IsPencil(const PackedColor& c)
     return c.R8() == 50 && c.G8() == 46 && c.B8() == 42;
 }
 
+// the journal's inks, as JournalRender.cpp defines them
+bool IsHandInk(const PackedColor& c)
+{
+    return c.R8() == 14 && c.G8() == 16 && c.B8() == 52;
+}
+
+bool IsRedInk(const PackedColor& c)
+{
+    return c.R8() == 150 && c.G8() == 22 && c.B8() == 18;
+}
+
+// Rec. 709 relative luminance, 0 .. 255
+float Luminance(const PackedColor& c)
+{
+    return 0.2126f * (float)c.R8() + 0.7152f * (float)c.G8() + 0.0722f * (float)c.B8();
+}
+
 struct ImageAt
 {
     int section;
@@ -1061,6 +1078,123 @@ TEST_CASE("Journal render - continuation names and a null container are safe", "
     REQUIRE(html.FindSection("Deeper") >= 0);
     const std::vector<std::string> wantDeeper = {"#Main", "#Plan"};
     CHECK(FooterHrefs(html.GetSection(html.FindSection("Deeper"))) == wantDeeper);
+}
+
+// ===========================================================================
+// 5b. link ink
+//
+// The control draws a link in its own _linkColor, a pale lavender that
+// measures 1.6:1 against the notepad paper: the navigation labels came out the
+// least legible text on the page.  Render therefore inks a stock link in the
+// hand, and CHTMLContainer::FieldDrawColor lets that per-field colour win over
+// _linkColor for a non-hovered link (test_uiControls.cpp pins the precedence).
+// ===========================================================================
+
+TEST_CASE("Journal render - every link carries a dark ink instead of the control's pale stock link colour",
+          "[game][guerrilla][journal][render]")
+{
+    // the paper the 800x600 capture measured under the notepad's text
+    const float paper = Luminance(PackedColor(195, 197, 206, 255));
+
+    JournalDocument doc;
+    {
+        JournalPage page = MakePage("L", "Links", "Main", "Contents");
+        Pen pen(page);
+        pen.Title("Links");
+        pen.LinkRow("Dispatches", "#GM_DISPATCH", "The day's page.");
+        JournalRun red; // a danger link stays red
+        red.text = "cover blown";
+        red.href = "#GM_RECORD";
+        red.ink = InkRed;
+        pen.Run(red);
+        pen.EndBlock();
+        JournalRun pencil; // an aside link stays pencil
+        pencil.text = "record";
+        pencil.href = "#GM_RECORD";
+        pencil.ink = InkPencil;
+        pen.Run(pencil);
+        pen.EndBlock();
+        pen.Line("a plain typed line");
+        doc.pages.Add(page);
+    }
+    JournalPageHtml html;
+    JournalPageInputs in;
+    RenderJournal(&html, doc, in);
+
+    int links = 0;
+    for (int s = 0; s < html.NSections(); s++)
+    {
+        const HTMLSection& sec = html.GetSection(s);
+        for (int f = 0; f < sec.fields.Size(); f++)
+        {
+            const HTMLField& fld = sec.fields[f];
+            if (fld.href.GetLength() == 0)
+            {
+                continue;
+            }
+            links++;
+            INFO("link: " << S(fld.text));
+            CHECK(fld.hasColor); // never left on the stock link colour
+            CHECK(Luminance(fld.color) < 0.35f * paper);
+        }
+    }
+    // three in the body plus the footer's Contents link
+    CHECK(links == 4);
+
+    const HTMLSection& sec = html.GetSection(html.FindSection("L"));
+    const HTMLField* dispatches = nullptr;
+    const HTMLField* description = nullptr;
+    const HTMLField* blown = nullptr;
+    const HTMLField* record = nullptr;
+    const HTMLField* plain = nullptr;
+    const HTMLField* footer = nullptr;
+    for (int f = 0; f < sec.fields.Size(); f++)
+    {
+        const HTMLField& fld = sec.fields[f];
+        const std::string text = S(fld.text);
+        if (text == "Dispatches")
+        {
+            dispatches = &fld;
+        }
+        else if (text == "  The day's page.")
+        {
+            description = &fld;
+        }
+        else if (text == "cover blown")
+        {
+            blown = &fld;
+        }
+        else if (text == "record")
+        {
+            record = &fld;
+        }
+        else if (text == "a plain typed line")
+        {
+            plain = &fld;
+        }
+        else if (text == "Contents" && fld.bottom)
+        {
+            footer = &fld;
+        }
+    }
+    REQUIRE(dispatches);
+    REQUIRE(description);
+    REQUIRE(blown);
+    REQUIRE(record);
+    REQUIRE(plain);
+    REQUIRE(footer);
+    // a stock-inked link takes the hand ink, exactly
+    CHECK(IsHandInk(dispatches->color));
+    CHECK(IsHandInk(footer->color));
+    CHECK(S(footer->href) == "#Main");
+    // an explicitly inked link keeps what Compose gave it
+    CHECK(IsRedInk(blown->color));
+    CHECK(IsPencil(record->color));
+    // and nothing else is inked by the link rule: the extension is opt-in
+    CHECK(description->href.GetLength() == 0);
+    CHECK(IsPencil(description->color));
+    CHECK_FALSE(plain->hasColor);
+    CHECK_FALSE(html.HasFieldColor());
 }
 
 // ===========================================================================

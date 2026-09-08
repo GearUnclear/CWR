@@ -14,6 +14,31 @@
 #include <Poseidon/Foundation/platform.hpp>
 
 using namespace Poseidon;
+
+// UD extension: per-field colour.  The stock order is link > bold > text; a
+// field that sets its own colour now wins over the LINK colour as well, so the
+// extension is opt-in (a field that sets none is drawn exactly as before) and a
+// journal page can ink its links dark enough to read on paper.  The active
+// (hovered) link keeps _activeLinkColor whatever the field asks for, so the
+// hover feedback survives.  Both draw bodies call this.
+PackedColor CHTMLContainer::FieldDrawColor(const HTMLField& field, bool active) const
+{
+    const bool isLink = field.href.GetLength() > 0;
+    if (isLink && active)
+    {
+        return _activeLinkColor;
+    }
+    if (field.hasColor)
+    {
+        return field.color;
+    }
+    if (isLink)
+    {
+        return _linkColor;
+    }
+    return field.bold ? _boldColor : _textColor;
+}
+
 CHTML::CHTML(ControlsContainer* parent, int idc, const ParamEntry& cls)
     : Control(parent, CT_HTML, idc, cls), CHTMLContainer(cls)
 {
@@ -506,30 +531,9 @@ void CHTML::OnDraw(float alpha)
                         Fail("Format");
                         break;
                 }
-                PackedColor color;
-                if (field.href.GetLength() == 0)
-                {
-                    if (field.hasColor)
-                    {
-                        color = field.color; // UD extension: per-field colour
-                    }
-                    else if (field.bold)
-                    {
-                        color = _boldColor;
-                    }
-                    else
-                    {
-                        color = _textColor;
-                    }
-                }
-                else if (f == _activeField)
-                {
-                    color = _activeLinkColor;
-                }
-                else
-                {
-                    color = _linkColor;
-                }
+                // UD extension: per-field colour (it wins over the stock link
+                // colour; the hovered link keeps _activeLinkColor)
+                const PackedColor color = FieldDrawColor(field, f == _activeField);
 
                 RString text = field.text.Substring(from, to);
                 float l = left;
@@ -909,30 +913,9 @@ void C3DHTML::OnDraw(float alpha)
                         Fail("Format");
                         break;
                 }
-                PackedColor color;
-                if (field.href.GetLength() == 0)
-                {
-                    if (field.hasColor)
-                    {
-                        color = field.color; // UD extension: per-field colour
-                    }
-                    else if (field.bold)
-                    {
-                        color = _boldColor;
-                    }
-                    else
-                    {
-                        color = _textColor;
-                    }
-                }
-                else if (f == _activeField)
-                {
-                    color = _activeLinkColor;
-                }
-                else
-                {
-                    color = _linkColor;
-                }
+                // UD extension: per-field colour (it wins over the stock link
+                // colour; the hovered link keeps _activeLinkColor)
+                const PackedColor color = FieldDrawColor(field, f == _activeField);
 
                 RString text = field.text.Substring(from, to);
                 Vector3 l = posLeft;

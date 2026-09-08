@@ -12,6 +12,7 @@
 #include <Poseidon/UI/Guerrilla/JournalCompose.hpp>
 #include <Poseidon/UI/Guerrilla/JournalManual.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -751,8 +752,10 @@ TEST_CASE("Journal compose - parents, hubs and every href resolve inside the doc
             const std::string href = "#" + std::string(GuerrillaManualTopicAnchor(i));
             CHECK(HasHref(ref, href.c_str()));
             const JournalPage& chapter = Page(doc, GuerrillaManualTopicAnchor(i));
+            // the way back is the footer's parent link, which Render emits
+            // from parentName: the chapter body itself carries no links
             CHECK(S(chapter.parentName) == "GM_REFERENCE");
-            CHECK(HasHref(chapter, "#GM_REFERENCE"));
+            CHECK(Hrefs(chapter).empty());
         }
     }
 }
@@ -1186,14 +1189,49 @@ TEST_CASE("Journal compose - the PR #61 content pins hold at the document level"
         CHECK(Has(undercover, "YOU ARE SEEN AS RANGE"));
         CHECK(Has(undercover, "Rifle slung SUSPECTED under 20 m, or from behind"));
         CHECK(Has(undercover, "Your standing: now BLOWN, 1 patrol knows your face"));
-        CHECK(Has(undercover, "< Companions"));
-        CHECK(Has(undercover, "Keeping the record >"));
-        CHECK(Has(undercover, "Index"));
+        // the chapter body carries NO navigation of its own: chapter to
+        // chapter and back to the index are the bottom-pinned footer's job,
+        // so the reader never sees two rows of links on one page
+        CHECK_FALSE(Has(undercover, "< Companions"));
+        CHECK_FALSE(Has(undercover, "Keeping the record >"));
         const JournalPage& chapter = Page(doc, "GM_MAN_UNDERCOVER");
-        CHECK(HasHref(chapter, "#GM_MAN_COMPANIONS"));
-        CHECK(HasHref(chapter, "#GM_MAN_SAVE"));
-        CHECK(HasHref(chapter, "#GM_REFERENCE"));
+        CHECK_FALSE(HasHref(chapter, "#GM_MAN_COMPANIONS"));
+        CHECK_FALSE(HasHref(chapter, "#GM_MAN_SAVE"));
+        CHECK_FALSE(HasHref(chapter, "#GM_REFERENCE"));
         CHECK_FALSE(HasHref(chapter, "#GM_MAN_INDEX"));
+        // instead the page names its neighbouring chapters, which is what the
+        // footer's prev / next walk once this chapter's own pages run out
+        CHECK(S(chapter.parentName) == "GM_REFERENCE");
+        CHECK(S(chapter.prevChainName) == "GM_MAN_COMPANIONS");
+        CHECK(S(chapter.nextChainName) == "GM_MAN_SAVE");
+    }
+
+    SECTION("the handbook chains chapter to chapter through the footer")
+    {
+        const int count = GuerrillaManualTopicCount();
+        REQUIRE(count > 1);
+        for (int t = 0; t < count; t++)
+        {
+            const JournalPage& chapter = Page(doc, GuerrillaManualTopicAnchor(t));
+            INFO("chapter " << GuerrillaManualTopicAnchor(t));
+            const std::string prev = t > 0 ? GuerrillaManualTopicAnchor(t - 1) : "";
+            const std::string next = t + 1 < count ? GuerrillaManualTopicAnchor(t + 1) : "";
+            CHECK(S(chapter.prevChainName) == prev);
+            CHECK(S(chapter.nextChainName) == next);
+            // and no chapter emits a link of its own any more
+            for (int b = 0; b < chapter.blocks.Size(); b++)
+            {
+                for (int r = 0; r < chapter.blocks[b].runs.Size(); r++)
+                {
+                    INFO("run " << S(chapter.blocks[b].runs[r].text));
+                    CHECK(chapter.blocks[b].runs[r].href.GetLength() == 0);
+                }
+            }
+        }
+        // the ends of the handbook stop: the first chapter has no prev, the
+        // last no next
+        CHECK(Page(doc, GuerrillaManualTopicAnchor(0)).prevChainName.GetLength() == 0);
+        CHECK(Page(doc, GuerrillaManualTopicAnchor(count - 1)).nextChainName.GetLength() == 0);
     }
 
     SECTION("the handbook's first chapter describes the dossier's own page map")
@@ -1456,6 +1494,183 @@ TEST_CASE("Journal compose - names never sit in fixed cells and nothing carries 
         }
         CHECK(tableCells > 0);
     }
+}
+
+// ===========================================================================
+// 6b. the handbook's fixed cells, and the Reference index's hanging indent
+// ===========================================================================
+
+TEST_CASE("Journal compose - every authored handbook table cell fits its fixed column",
+          "[game][guerrilla][journal][compose]")
+{
+    // A leading table cell is a fixed-width run: Render neither wraps nor
+    // clips it, it cuts it to "..." .  The notepad page measures about 47
+    // Courier characters at 800x600 (a 270 px page at 5.8 px a glyph, read off
+    // the capture lane), and Render fits a cell to 97% of its width, so column
+    // 0 (0.27 of the page) takes 12 characters and column 1 (0.36) takes 16;
+    // a header's last cell is fixed too (0.73 on a two-column table, 0.37 on a
+    // three-column one).  The budgets below sit a character under the measured
+    // fit, so a face change does not immediately clip.  Prose belongs in the
+    // last cell of a body row, which wraps.
+    const size_t kCol0 = 11;
+    const size_t kCol1 = 15;
+    const size_t kHeaderLastWide = 32;   // 0.73 of the page (two-column header)
+    const size_t kHeaderLastNarrow = 15; // 0.37 of the page (three-column header)
+
+    for (int t = 0; t < GuerrillaManualTopicCount(); t++)
+    {
+        const ManualTopic& topic = GuerrillaManualTopic(t);
+        for (int l = 0; topic.lines[l]; l++)
+        {
+            const std::string line = topic.lines[l];
+            if (line.empty() || (line[0] != '|' && line[0] != '!'))
+            {
+                continue;
+            }
+            const bool header = line[0] == '!';
+            // the cells as JournalComposePeoplePlaces.cpp's ManualTableRow
+            // splits them, with the ~r / ~w / ~g / ~y ink marker stripped
+            std::vector<std::string> cells;
+            for (size_t at = 1; at <= line.size();)
+            {
+                const size_t bar = line.find('|', at);
+                const size_t end = bar == std::string::npos ? line.size() : bar;
+                std::string cell = line.substr(at, end - at);
+                if (cell.size() >= 2 && cell[0] == '~')
+                {
+                    cell = cell.substr(2);
+                }
+                cells.push_back(cell);
+                if (bar == std::string::npos)
+                {
+                    break;
+                }
+                at = bar + 1;
+            }
+            INFO("chapter " << topic.anchor << " line: " << line);
+            REQUIRE(cells.size() >= 2);
+            CHECK(cells.size() <= 3); // a fourth cell is dropped on the floor
+            CHECK(cells[0].size() <= kCol0);
+            if (cells.size() >= 3)
+            {
+                CHECK(cells[1].size() <= kCol1);
+                if (header)
+                {
+                    CHECK(cells[2].size() <= kHeaderLastNarrow);
+                }
+            }
+            else if (header)
+            {
+                CHECK(cells[1].size() <= kHeaderLastWide);
+            }
+        }
+    }
+}
+
+TEST_CASE("Journal compose - a handbook table row hangs its wrapped tail under its own column",
+          "[game][guerrilla][journal][compose]")
+{
+    // A table row is fixed cells followed by ONE wrapping run.  Without a
+    // hanging indent that run's tail wraps back to the left margin and reads
+    // as a new row in the first column ("under 20 m, or" / "from behind" on
+    // the Undercover chapter).  The indent is the sum of the columns ahead of
+    // it, which is where the run's own text starts.
+    Journal journal;
+    const JournalDocument doc = ComposeJournal(journal, SampleInputs());
+    int wrappingRuns = 0;
+    int twoColumn = 0;
+    int threeColumn = 0;
+    for (int t = 0; t < GuerrillaManualTopicCount(); t++)
+    {
+        const char* anchor = GuerrillaManualTopicAnchor(t);
+        const JournalPage& chapter = Page(doc, anchor);
+        for (int b = 0; b < chapter.blocks.Size(); b++)
+        {
+            const JournalBlock& block = chapter.blocks[b];
+            float ahead = 0;
+            bool isTableRow = false;
+            for (int r = 0; r < block.runs.Size(); r++)
+            {
+                isTableRow = isTableRow || block.runs[r].cellWidth > 0;
+            }
+            if (!isTableRow)
+            {
+                continue;
+            }
+            for (int r = 0; r < block.runs.Size(); r++)
+            {
+                const JournalRun& run = block.runs[r];
+                INFO("chapter " << anchor << " run: " << S(run.text));
+                if (run.cellWidth > 0)
+                {
+                    // a fixed cell is cut, never wrapped: it never hangs, and
+                    // a cell never follows the wrapping run
+                    CHECK(run.hanging == 0.0f);
+                    CHECK(ahead >= 0.0f);
+                    ahead += run.cellWidth;
+                    continue;
+                }
+                // the wrapping tail of the row
+                wrappingRuns++;
+                CHECK(std::fabs(run.hanging - ahead) < 1e-5f);
+                CHECK(run.hanging > 0.0f);
+                if (ahead < 0.3f)
+                {
+                    twoColumn++; // widths[0] alone
+                }
+                else
+                {
+                    threeColumn++; // widths[0] + widths[1]
+                }
+                ahead = -1.0f; // exactly one wrapping run, and it comes last
+            }
+        }
+    }
+    // the shipped handbook has both shapes, and every body row wraps
+    CHECK(wrappingRuns > 0);
+    CHECK(twoColumn > 0);
+    CHECK(threeColumn > 0);
+}
+
+TEST_CASE("Journal compose - a Reference index row hangs its wrapped tail under the chapter title",
+          "[game][guerrilla][journal][compose]")
+{
+    Journal journal;
+    const JournalDocument doc = ComposeJournal(journal, SampleInputs());
+    const JournalPage& ref = Page(doc, "GM_REFERENCE");
+    int rows = 0;
+    for (int b = 0; b < ref.blocks.Size(); b++)
+    {
+        const JournalBlock& block = ref.blocks[b];
+        bool isRow = false;
+        for (int r = 0; r < block.runs.Size(); r++)
+        {
+            isRow = isRow || block.runs[r].href.GetLength() > 0;
+        }
+        if (!isRow)
+        {
+            continue;
+        }
+        rows++;
+        for (int r = 0; r < block.runs.Size(); r++)
+        {
+            const JournalRun& run = block.runs[r];
+            INFO("row run: " << S(run.text));
+            if (run.cellWidth > 0)
+            {
+                CHECK(run.hanging == 0.0f); // a fixed cell never wraps
+            }
+            else
+            {
+                // the wrapped subtitle sits under the chapter title, not back
+                // under the row number: the number cell (0.06) plus its
+                // spacer (0.02).  The roster and record rows hang at 0.04
+                // because their text starts at the left margin instead
+                CHECK(run.hanging == 0.08f);
+            }
+        }
+    }
+    CHECK(rows == GuerrillaManualTopicCount());
 }
 
 // ===========================================================================

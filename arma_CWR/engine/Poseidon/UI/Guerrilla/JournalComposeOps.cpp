@@ -155,7 +155,7 @@ void ComposeContents(JournalDocument& doc, const ComposeContext& ctx)
     static const MenuEntry kContents[] = {
         {"Dispatches", "#GM_DISPATCH", "Threat, objective and the latest development."},
         {"Operations", "#Plan", "Objectives, moves, supplies and strength."},
-        {"People", "#GM_PEOPLE", "The roster and the named."},
+        {"People", "#GM_PEOPLE", "The roster of the cell."},
         {"Places", "#GM_PLACES", "Towns, bases, the headquarters."},
         {"Chronicles", "#GM_CHRONICLES", "The record of the campaign."},
         {"Reference", "#GM_REFERENCE", "Handbook topics."},

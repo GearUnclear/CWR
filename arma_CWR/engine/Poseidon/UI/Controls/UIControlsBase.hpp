@@ -672,6 +672,13 @@ public:
 	PackedColor GetLinkColor() const {return _linkColor;}
 	void SetLinkColor(PackedColor color) {_linkColor = color;}
 
+	// UD extension (Guerrilla journal): the draw-time colour of one text field.
+	// A per-field colour wins over the stock link colour, so the extension is
+	// opt-in and a field that sets none is drawn exactly as before; the active
+	// (hovered) link keeps _activeLinkColor so the hover feedback survives.
+	// Both CHTML::OnDraw and C3DHTML::OnDraw resolve their colour through this.
+	PackedColor FieldDrawColor(const HTMLField &field, bool active) const;
+
 	void FormatSection(int s); // = FormatSectionRows(s); SplitSection(s);  (unchanged behaviour)
 	// UD extension (Guerrilla journal page budget): FormatSectionRows wraps a
 	// section into rows without paginating it, so a renderer can measure the

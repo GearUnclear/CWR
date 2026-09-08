@@ -15,6 +15,14 @@ namespace
 //   "- text"          bullet              "@standing" the live cover row
 //   anything else     paragraph
 //
+// A table's leading cells are FIXED width and neither wrap nor clip, so
+// Render cuts an overlong one to "..." .  The notepad page measures about 47
+// Courier characters at 800x600, which leaves column 0 (0.27 of the page) 12
+// characters and column 1 (0.36) 16; the last column of a body row wraps and
+// takes the prose.  Authored cells are written to those budgets and
+// test_journal_compose.cpp pins them, so a description that outgrows its
+// column moves into the wrapping column rather than being ellipsized.
+//
 // The table came over from GuerrillaJournalPages.cpp; the prose that named
 // the retired Notes / Plan / Zones / Cell / Resistance / Diary pages was
 // rewritten for the dossier's page map (Contents, Dispatches, Operations,
@@ -35,16 +43,17 @@ const ManualTopic kManual[] = {
       "|~wCONTENTS|the six sections, one line each",
       "|~wDISPATCHES|the day's page: the threat, the top objective, the latest development, your cover",
       "|~wOPERATIONS|objectives with progress, suggested moves, supplies, resistance strength",
-      "|~wPEOPLE|the roster and the named", "|~wPLACES|towns, bases, the headquarters, a page for each",
+      "|~wPEOPLE|the roster of the cell", "|~wPLACES|towns, bases, the headquarters, a page for each",
       "|~wCHRONICLES|the record of the campaign, newest first", "|~wREFERENCE|these handbook topics", nullptr}},
     {"GM_MAN_ZONES",
      "Zones",
      "camp, bases, towns",
      {"Every place that matters is a zone with a flag on the map. Green is ours, red the occupier, yellow "
       "neutral, white contested.",
-      "!TYPE|WHAT IT IS|HOW IT IS WON", "|~wCAMP|yours from the start; recruit, train and keep the record here|keep it",
-      "|~wBASE|outpost, airfield or port with an occupier garrison|clear the garrison, hold the ground",
-      "|~wTOWN|civilians with a support figure 0 to 100|support past 60, then fighters in the town",
+      "!TYPE|WHAT IT IS, AND HOW IT IS WON",
+      "|~wCAMP|yours from the start; recruit, train and keep the record here, and keep it",
+      "|~wBASE|outpost, airfield or port with an occupier garrison; clear the garrison, hold the ground",
+      "|~wTOWN|civilians with a support figure 0 to 100; support past 60, then fighters in the town",
       "A held base pays income and gets a holding squad. A risen town pays too and counts toward the war.",
       "Zones show on Places once they are within reach of ground you hold. Their meters only move while "
       "you are near (about 800 m), which is what last seen records.",
@@ -54,9 +63,9 @@ const ManualTopic kManual[] = {
      "the capture meter",
      {"A base carries a capture meter from 0 to 100. It climbs while your fighters stand inside the zone and no "
       "live occupier is inside it. More fighters climb it faster, up to a small crew.",
-      "!IF|THEN", "|~yoccupier inside|the meter is contested and freezes; kill or drive them out",
+      "!IF|THEN", "|~yoccupier in|the meter is contested and freezes; kill or drive them out",
       "|~yyou leave|the meter fades; alone, the defenders drive it down fast",
-      "|~gmeter at 100|the base flips: income opens, a holding squad forms, regional heat spikes",
+      "|~gmeter 100|the base flips: income opens, a holding squad forms, regional heat spikes",
       "A patrol or a QRF that walks in contests the base like a garrison does. A capture is never safe until it "
       "is done.",
       nullptr}},
@@ -76,16 +85,17 @@ const ManualTopic kManual[] = {
       "levels field better troops, heavier vehicles and sharper eyes for disguises.",
       "Heat is per zone, 0 to 100. Captures, blown cover and fights raise it; it decays while the zone is quiet. "
       "Past 30 the garrison is on edge, past 50 expect a sweep.",
-      "!ALERT|MEANS|DO", "|~gGREEN|garrison calm|work", "|~yYELLOW|aware: they check your last known position|move",
-      "|~rRED|combat: a quick reaction force is out toward your last known position|break contact, stay unseen",
+      "!ALERT|WHAT IT MEANS, WHAT TO DO", "|~gGREEN|garrison calm; work",
+      "|~yYELLOW|aware: they check your last known position; move",
+      "|~rRED|combat: a quick reaction force is out toward your last known position; break contact, stay unseen",
       "Alert does not calm while they can see you.", nullptr}},
     {"GM_MAN_CELL",
      "The cell",
      "resources, manpower, recruiting",
      {"The cell lives on resources (R) and manpower (HR). Both come in from the zones you hold: bases and risen "
       "towns pay, the Camp does not. A panicked town pays less.",
-      "!AT THE CAMP|COSTS|GIVES", "|~wRecruit fighter|1 HR|a rifleman in your group with the best pattern in issue",
-      "|~wRecruit specialist|R|a medic, gunner or anti-tank man",
+      "!AT THE CAMP|COSTS|GIVES", "|~wRecruit|1 HR|a rifleman in your group with the best pattern in issue",
+      "|~wSpecialist|R|a medic, gunner or anti-tank man",
       "|~wTrain squad|R|skill for the whole group, up to a cap that grows with the war level",
       "Manpower is bodies: one HR is one recruit, and the pool has a ceiling. Resources buy specialists and "
       "training; they do nothing in the treasury.",
@@ -111,7 +121,7 @@ const ManualTopic kManual[] = {
      "how the occupier reads you",
      {"To occupier eyes you begin as a civilian. Each occupier group judges you separately, from what it can see.",
       "!YOU ARE|SEEN AS|RANGE", "|~wUnarmed|~gCIVILIAN|any", "|~wRifle slung|~ySUSPECTED|under 20 m, or from behind",
-      "|~wWeapon in hand|~ySUSPECTED, then BLOWN|any, with line of sight", "|~wFiring|~rBLOWN|every group in view",
+      "|~wWeapon out|~ySUSPECTED|any, with line of sight", "|~wFiring|~rBLOWN|every group in view",
       "@standing", "|~gCLEAN|no group has identified you", "|~ySUSPECTED|a group is checking you",
       "|~rBLOWN|identified; the journal counts the patrols who know you", "#Cover returns when",
       "- You walk away from every group that identified you.", "- The weapon is stowed and no witness is left.",

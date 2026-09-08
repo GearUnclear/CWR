@@ -12,6 +12,14 @@
 // "<name>/<n>", which is SplitSection's own namespace).  Legacy aliases are
 // attached after the page is formatted (design D0), and the footer's prev /
 // next links are emitted once the whole chain is partitioned.
+//
+// Ink rule for links: a run (or a footer link) that carries an href and no ink
+// of its own is drawn in the hand ink, the blue-black RGB(14, 16, 52), not the
+// control's stock link colour, which is a pale lavender that reads at 1.6:1 on
+// the notepad paper.  The engine's per-field colour wins over the stock link
+// colour for a non-hovered link (CHTMLContainer::FieldDrawColor), so the ink
+// reaches the screen; the hovered link still flips to the control's active
+// link colour.  A link composed with an explicit ink (red, pencil) keeps it.
 
 #include <Poseidon/UI/Controls/UIControlsBase.hpp> // CHTMLContainer, HTMLFormat
 #include <Poseidon/UI/Guerrilla/JournalCompose.hpp>

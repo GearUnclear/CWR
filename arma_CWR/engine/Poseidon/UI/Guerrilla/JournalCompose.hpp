@@ -87,6 +87,14 @@ struct JournalPage
     AutoArray<RString> aliases; // legacy anchors, page 0 of the chain only
     RString parentName;         // "" on Contents
     RString parentTitle;        // "Contents" / "Operations" / ...
+    // The footer's prev / next normally walk this chain's own physical pages.
+    // A page may extend that walk past the ends of its chain: the handbook
+    // chapters point at their neighbouring chapters, so prev / next read the
+    // reference straight through and the chapters need no second row of links
+    // in the body.  Render reads them from page 0 of the chain; "" means no
+    // neighbour (the first and the last chapter).
+    RString prevChainName;
+    RString nextChainName;
     AutoArray<JournalBlock> blocks;
 };
 

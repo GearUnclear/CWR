@@ -576,8 +576,20 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as a dossier
         CHECK(FooterText(html, "GM_SUPPLY", "#Plan") == "Operations");
     }
     {
-        const std::vector<std::string> want = {"#Main", "#GM_REFERENCE"};
+        // a handbook chapter: Contents, the Reference index, then prev / next
+        // walking on into the neighbouring CHAPTERS once this chapter's own
+        // pages run out (it is one page on this fixture).  That is the whole
+        // of the chapter navigation: the body carries none
+        const std::vector<std::string> want = {"#Main", "#GM_REFERENCE", "#GM_MAN_COMPANIONS", "#GM_MAN_SAVE"};
         CHECK(FooterHrefs(html, "GM_MAN_UNDERCOVER") == want);
+        CHECK(FooterText(html, "GM_MAN_UNDERCOVER", "#GM_MAN_COMPANIONS") == "prev");
+        CHECK(FooterText(html, "GM_MAN_UNDERCOVER", "#GM_MAN_SAVE") == "next");
+        // the ends of the handbook stop: no prev on the first chapter, no
+        // next on the last
+        const std::vector<std::string> wantFirst = {"#Main", "#GM_REFERENCE", "#GM_MAN_ZONES"};
+        CHECK(FooterHrefs(html, "GM_MAN_MODE") == wantFirst);
+        const std::vector<std::string> wantLast = {"#Main", "#GM_REFERENCE", "#GM_MAN_UNDERCOVER"};
+        CHECK(FooterHrefs(html, "GM_MAN_SAVE") == wantLast);
     }
     // a top-level page's parent IS Contents: the footer links it once, never
     // "Contents - Contents"
@@ -829,9 +841,11 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as a dossier
     CHECK(undercover.find("YOU ARE SEEN AS RANGE") != std::string::npos);
     CHECK(undercover.find("Rifle slung SUSPECTED under 20 m, or from behind") != std::string::npos);
     CHECK(undercover.find("Your standing: now BLOWN, 1 patrol knows your face") != std::string::npos);
-    CHECK(undercover.find("< Companions") != std::string::npos);
-    CHECK(undercover.find("Keeping the record >") != std::string::npos);
-    CHECK(undercover.find("Index") != std::string::npos);
+    // the chapter's own body has no navigation: the neighbouring chapters and
+    // the index are reached from the bottom-pinned footer, so the page never
+    // shows two rows of links
+    CHECK(undercover.find("< Companions") == std::string::npos);
+    CHECK(undercover.find("Keeping the record >") == std::string::npos);
     CHECK(HasHref(html, "GM_MAN_UNDERCOVER", "#GM_REFERENCE"));
     CHECK(HasHref(html, "GM_MAN_UNDERCOVER", "#GM_MAN_COMPANIONS"));
     CHECK(HasHref(html, "GM_MAN_UNDERCOVER", "#GM_MAN_SAVE"));

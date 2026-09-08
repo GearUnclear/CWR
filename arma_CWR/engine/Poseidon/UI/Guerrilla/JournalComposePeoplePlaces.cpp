@@ -43,6 +43,13 @@ using namespace JournalText;
 namespace
 {
 
+// the Reference index's hanging indent: a wrapped chapter subtitle sits under
+// the chapter title, not back under the row number.  The roster and record
+// rows hang at 0.04 because their text starts at the left margin; an index row
+// opens with the number cell (0.06) and its spacer (0.02), so the same rule
+// puts the tail at 0.08 (page-width fraction, Sheet::Hanging semantics)
+const float kIndexHanging = 0.06f + 0.02f;
+
 // a pencil run in the typed voice added to the open block (the caller ends
 // the block); the composite this replaces is Sheet::Text(text, kType, &kPencil)
 void PencilRun(Pen& pen, const RString& text)
@@ -171,8 +178,18 @@ void ManualTableRow(Pen& pen, const char* line, bool header)
         }
         if (i == n - 1 || i == 2)
         {
-            // the last cell wraps under itself
-            TypeRun(pen, text, ink, 0, bold);
+            // The last cell is the only wrapping run of the row, so it carries
+            // the hanging indent: without one its tail wraps back to the left
+            // margin and reads as a new row in the FIRST column ("under 20 m,
+            // or" / "from behind").  The indent is the sum of the columns
+            // ahead of it, which is where the run's own text starts, the same
+            // Sheet::Hanging semantics the Reference index rows use
+            float hanging = 0;
+            for (int c = 0; c < i && c < 3; c++)
+            {
+                hanging += widths[c];
+            }
+            TypeRun(pen, text, ink, hanging, bold);
         }
         else
         {
@@ -620,8 +637,18 @@ void ComposeReference(JournalDocument& doc, const ComposeContext& ctx)
             const ManualTopic& topic = GuerrillaManualTopic(t);
             pen.Cell(Fmt("%d", t + 1), 0.06f, InkPencil, AlignRight);
             pen.Cell(RString(" "), 0.02f);
-            pen.Link(RString(topic.title), cstr(RString("#") + RString(topic.anchor)));
-            PencilRun(pen, RString("  ") + RString(topic.subtitle));
+            // a wrapped subtitle aligns under the chapter title, never back
+            // under the row number (the number cell plus its spacer)
+            JournalRun link;
+            link.text = topic.title;
+            link.href = RString("#") + RString(topic.anchor);
+            link.hanging = kIndexHanging;
+            pen.Run(link);
+            JournalRun subtitle;
+            subtitle.text = RString("  ") + RString(topic.subtitle);
+            subtitle.ink = InkPencil;
+            subtitle.hanging = kIndexHanging;
+            pen.Run(subtitle);
             pen.EndBlock();
         }
     }
@@ -631,6 +658,18 @@ void ComposeReference(JournalDocument& doc, const ComposeContext& ctx)
     {
         const ManualTopic& topic = GuerrillaManualTopic(t);
         JournalPage& page = NewPage(doc, topic.anchor, topic.title, "GM_REFERENCE", "Reference");
+        // chapter to chapter walks through the bottom-pinned footer: prev and
+        // next run past the ends of this chapter's own page chain into the
+        // neighbouring chapters, so the handbook reads straight through and
+        // the body carries no second row of navigation under the prose
+        if (t > 0)
+        {
+            page.prevChainName = RString(GuerrillaManualTopicAnchor(t - 1));
+        }
+        if (t + 1 < count)
+        {
+            page.nextChainName = RString(GuerrillaManualTopicAnchor(t + 1));
+        }
         Pen pen(page);
         pen.Title(RString(topic.title));
         pen.Subtitle(Cap(RString(topic.subtitle)) + Fmt(". Handbook %d of %d.", t + 1, count));
@@ -663,21 +702,8 @@ void ComposeReference(JournalDocument& doc, const ComposeContext& ctx)
                 pen.Gap();
             }
         }
-        // chapter nav: "< prev   next >   Index" as one block
-        if (t > 0)
-        {
-            const ManualTopic& prev = GuerrillaManualTopic(t - 1);
-            pen.Link(RString("< ") + RString(prev.title), cstr(RString("#") + RString(prev.anchor)));
-            TypeRun(pen, RString("   "));
-        }
-        if (t + 1 < count)
-        {
-            const ManualTopic& next = GuerrillaManualTopic(t + 1);
-            pen.Link(RString(next.title) + RString(" >"), cstr(RString("#") + RString(next.anchor)));
-            TypeRun(pen, RString("   "));
-        }
-        pen.Link("Index", "#GM_REFERENCE");
-        pen.EndBlock();
+        // no in-body nav row: the footer carries Contents, the Reference
+        // index (the chapter's parent) and prev / next through the chapters
     }
 }
 

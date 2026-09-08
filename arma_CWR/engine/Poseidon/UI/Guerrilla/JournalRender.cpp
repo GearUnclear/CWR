@@ -56,9 +56,19 @@ const PackedColor kRedInk = RGB(150, 22, 18);    // red pen: alert, loss, blown
 const PackedColor kPencil = RGB(50, 46, 42);     // stamps, labels, asides
 const PackedColor kFadedHand = RGB(84, 88, 122); // done items
 
-// null = the control's stock text colour
-const PackedColor* InkOf(JournalInk ink)
+// null = the control's stock text colour.  A run that carries an href and no
+// ink of its own is inked in the hand: the control's stock link colour is a
+// pale lavender that reads at 1.6:1 on the notepad paper, and the navigation
+// labels are the most important text on a page.  The blue-black keeps a link
+// visibly distinct from the near-black body type and from red danger text
+// while staying dark ink on paper (design D1 Typography).  A run that already
+// carries an ink (a red or pencil link) is left exactly as composed.
+const PackedColor* InkOf(JournalInk ink, bool isLink = false)
 {
+    if (ink == InkStock && isLink)
+    {
+        return &kHandInk;
+    }
     switch (ink)
     {
         case InkHand:
@@ -136,7 +146,7 @@ RString FitCell(const CHTMLContainer& html, const RString& text, float w, HTMLFo
 void EmitRun(CHTMLContainer* html, int s, const JournalRun& run, const RenderMetrics& m)
 {
     const HTMLFormat slot = SlotOf(run.voice);
-    if (const PackedColor* ink = InkOf(run.ink))
+    if (const PackedColor* ink = InkOf(run.ink, run.href.GetLength() > 0))
     {
         html->SetFieldColor(*ink);
     }
@@ -268,7 +278,10 @@ void GroupChains(const JournalDocument& doc, AutoArray<Chain>& chains)
 // pencil word Contents with no href.  The parent link is omitted when the
 // parent is Contents itself (the six top-level pages): the Contents link
 // already leads there, and "Contents - Contents" would eat the width prev /
-// next need at 800x600.  Height 2 * P, charged against the page budget.
+// next need at 800x600.  prev / next walk the chain's physical pages and, at
+// its ends, the page's named neighbours (JournalPage::prevChainName /
+// nextChainName), which is how the handbook chapters chain into each other.
+// Height 2 * P, charged against the page budget.
 // ===========================================================================
 
 void FooterPencil(CHTMLContainer* html, int s, const char* text)
@@ -278,9 +291,13 @@ void FooterPencil(CHTMLContainer* html, int s, const char* text)
     html->ClearFieldColor();
 }
 
+// the same hand ink every other journal link carries (the stock link colour is
+// too pale to read on the paper)
 void FooterLink(CHTMLContainer* html, int s, const RString& text, const RString& href)
 {
+    html->SetFieldColor(kHandInk);
     html->AddText(s, text, kSlotType, HALeft, true, false, href, 0);
+    html->ClearFieldColor();
 }
 
 void EmitFooter(CHTMLContainer* html, int s, const JournalPage& first, int i, const AutoArray<RString>& chain)
@@ -302,15 +319,21 @@ void EmitFooter(CHTMLContainer* html, int s, const JournalPage& first, int i, co
         FooterPencil(html, s, " - ");
         FooterLink(html, s, first.parentTitle, RString("#") + first.parentName);
     }
-    if (i > 0)
+    // prev / next walk this chain's physical pages, and at the ends of the
+    // chain they walk on into the neighbour the page named (the handbook
+    // chapters chain into each other, so the reference reads straight through
+    // from one footer)
+    const RString prev = i > 0 ? chain[i - 1] : first.prevChainName;
+    const RString next = i + 1 < chain.Size() ? chain[i + 1] : first.nextChainName;
+    if (prev.GetLength() > 0)
     {
         FooterPencil(html, s, " - ");
-        FooterLink(html, s, RString("prev"), RString("#") + chain[i - 1]);
+        FooterLink(html, s, RString("prev"), RString("#") + prev);
     }
-    if (i + 1 < chain.Size())
+    if (next.GetLength() > 0)
     {
         FooterPencil(html, s, " - ");
-        FooterLink(html, s, RString("next"), RString("#") + chain[i + 1]);
+        FooterLink(html, s, RString("next"), RString("#") + next);
     }
     html->AddBreak(s, true);
 }
