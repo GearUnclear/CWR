@@ -7,6 +7,7 @@
 #include <Poseidon/UI/Controls/UIControlsBase.hpp> // CHTMLContainer (parser-only subclass)
 #include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp>
 #include <Poseidon/UI/UITestEngine.hpp> // GetHtmlText
+#include <Evaluator/express.hpp>        // GGameState (the gmJournal* command cases)
 
 #include <cstring>
 #include <filesystem>
@@ -1244,4 +1245,299 @@ TEST_CASE("HTML control extensions - field colour and hanging indent land in the
     CHECK(html.GetFormatSize(HFH6) == Catch::Approx(2.5f));
     html.FormatSection(sec);
     CHECK(section.rows.Size() >= 1);
+}
+
+// ===========================================================================
+// charId: the diary line's attribution to a Legend registry character
+// ===========================================================================
+
+namespace
+{
+
+// The JournalEntry shape as it was written before the 2026-09 Legend registry:
+// the same keys in the same order, one fewer.  Serializing an AutoArray of this
+// under "Entries" produces a byte-exact pre-Legend archive, which is the only
+// honest way to test that an old save still loads.
+struct LegacyJournalEntry
+{
+    RString stamp;
+    RString text;
+    RString zone;
+    int kind = JKPlain;
+
+    LSError Serialize(ParamArchive& ar)
+    {
+        PARAM_CHECK(ar.Serialize("stamp", stamp, 1, RString()))
+        PARAM_CHECK(ar.Serialize("text", text, 1, RString()))
+        PARAM_CHECK(ar.Serialize("zone", zone, 1, RString()))
+        PARAM_CHECK(ar.Serialize("kind", kind, 1, (int)JKPlain))
+        return LSOK;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Journal - a diary line can name the character it is about", "[game][guerrilla][journal]")
+{
+    Journal journal;
+    journal.AddEntry("Day 4 09:10", "Petra promoted to SERGEANT.", "Houdan", JKGood, "comp_0_petra");
+    journal.AddEntry("Day 4 09:11", "Outpost liberated", "Houdan", JKGood);
+    REQUIRE(journal.EntryCount() == 2);
+    CHECK(std::string((const char*)journal.Entry(0).charId) == "comp_0_petra");
+    // an unattributed line is the default and stays empty
+    CHECK(journal.Entry(1).charId.GetLength() == 0);
+}
+
+TEST_CASE("Journal - the character id survives a save/load round trip", "[game][guerrilla][journal][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "journal-charid.bin";
+
+    {
+        Journal journal;
+        journal.AddEntry("Day 4 09:10", "Petra promoted to SERGEANT.", "Houdan", JKGood, "comp_0_petra");
+        journal.AddEntry("Day 5 11:00", "Outpost liberated", "Houdan", JKGood);
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(journal.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    Journal loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.EntryCount() == 2);
+    CHECK(std::string((const char*)loaded.Entry(0).charId) == "comp_0_petra");
+    CHECK(loaded.Entry(1).charId.GetLength() == 0);
+    CHECK(loaded.Entry(0).kind == JKGood);
+    CHECK(std::string((const char*)loaded.Entry(0).zone) == "Houdan");
+
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("Journal - a pre-Legend archive loads as unattributed lines", "[game][guerrilla][journal][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "journal-precharid.bin";
+
+    {
+        AutoArray<LegacyJournalEntry> entries;
+        LegacyJournalEntry first;
+        first.stamp = "Day 1 08:00";
+        first.text = "The campaign begins.";
+        entries.Add(first);
+        LegacyJournalEntry second;
+        second.stamp = "Day 2 14:20";
+        second.text = "Outpost liberated";
+        second.zone = "Houdan";
+        second.kind = JKGood;
+        entries.Add(second);
+
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(ar.Serialize("Entries", entries, 1) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    Journal loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.EntryCount() == 2);
+    CHECK(std::string((const char*)loaded.Entry(0).text) == "The campaign begins.");
+    CHECK(std::string((const char*)loaded.Entry(1).zone) == "Houdan");
+    CHECK(loaded.Entry(1).kind == JKGood);
+    // the key the old save never wrote reads back as its default
+    CHECK(loaded.Entry(0).charId.GetLength() == 0);
+    CHECK(loaded.Entry(1).charId.GetLength() == 0);
+
+    std::filesystem::remove(archivePath);
+}
+
+// ===========================================================================
+// revision quiet: an identical write must not repaint the open map
+// ===========================================================================
+
+TEST_CASE("Journal - rewriting an objective with the same text and state is silent", "[game][guerrilla][journal]")
+{
+    Journal journal;
+    journal.SetObjective("recruit", "Recruit a fighter", JOActive);
+    unsigned rev = journal.Revision();
+
+    journal.SetObjective("recruit", "Recruit a fighter", JOActive);
+    CHECK(journal.Revision() == rev); // nothing moved, nothing repaints
+    journal.SetObjective("recruit", "", JOActive);
+    CHECK(journal.Revision() == rev); // a state-only write of the same state
+
+    journal.SetObjective("recruit", "", JODone);
+    CHECK(journal.Revision() == rev + 1); // one state change, exactly one bump
+    CHECK(journal.Objective(0).state == JODone);
+    CHECK(std::string((const char*)journal.Objective(0).text) == "Recruit a fighter");
+
+    journal.SetObjective("recruit", "Recruit two fighters", JODone);
+    CHECK(journal.Revision() == rev + 2); // one text change, exactly one bump
+    CHECK(journal.ObjectiveCount() == 1);
+
+    // an unknown id with no text is still a no-op, as it always was
+    journal.SetObjective("nosuch", "", JODone);
+    CHECK(journal.Revision() == rev + 2);
+    CHECK(journal.ObjectiveCount() == 1);
+}
+
+TEST_CASE("Journal - rewriting a status line with the same text is silent", "[game][guerrilla][journal]")
+{
+    Journal journal;
+    journal.SetStatus("Companions", "Petra (CORPORAL)");
+    unsigned rev = journal.Revision();
+
+    journal.SetStatus("Companions", "Petra (CORPORAL)");
+    CHECK(journal.Revision() == rev);
+    // a status line has no state, so the text is the whole row
+    journal.SetStatus("companions", "Petra (CORPORAL)"); // the key is case insensitive
+    CHECK(journal.Revision() == rev);
+
+    journal.SetStatus("Companions", "Petra (SERGEANT)");
+    CHECK(journal.Revision() == rev + 1);
+    CHECK(journal.StatusCount() == 1);
+
+    // an empty write on an absent key removes nothing and repaints nothing
+    journal.SetStatus("NoSuchRow", "");
+    CHECK(journal.Revision() == rev + 1);
+    // an empty write on a present key still removes the row and bumps once
+    journal.SetStatus("Companions", "");
+    CHECK(journal.Revision() == rev + 2);
+    CHECK(journal.StatusCount() == 0);
+}
+
+TEST_CASE("Journal - Touch bumps the revision and changes nothing else", "[game][guerrilla][journal]")
+{
+    Journal journal;
+    journal.AddEntry("Day 1 08:00", "The campaign begins.", "Houdan", JKGood, "comp_0_petra");
+    journal.SetObjective("recruit", "Recruit a fighter", JOActive);
+    journal.SetStatus("Companions", "Petra (CORPORAL)");
+    unsigned rev = journal.Revision();
+
+    journal.Touch();
+    CHECK(journal.Revision() == rev + 1);
+    journal.Touch();
+    CHECK(journal.Revision() == rev + 2);
+
+    REQUIRE(journal.EntryCount() == 1);
+    CHECK(std::string((const char*)journal.Entry(0).text) == "The campaign begins.");
+    CHECK(std::string((const char*)journal.Entry(0).charId) == "comp_0_petra");
+    REQUIRE(journal.ObjectiveCount() == 1);
+    CHECK(journal.Objective(0).state == JOActive);
+    REQUIRE(journal.StatusCount() == 1);
+    CHECK(std::string((const char*)journal.Status(0).text) == "Petra (CORPORAL)");
+}
+
+// ===========================================================================
+// the script surface: gmJournalNote's widened arity, gmJournalEntryChar
+// ===========================================================================
+
+// Defined in JournalCommands.cpp with external linkage precisely so this suite
+// can call them without standing up the evaluator's module registry, the same
+// arrangement the tri* asserts use in test_tri_generic_asserts.cpp.
+GameValue GmJournalNote(const GameState* state, GameValuePar oper1);
+GameValue GmJournalEntryChar(const GameState* state, GameValuePar oper1);
+
+namespace
+{
+
+GameValue NoteArgs(int count, const GameValue* parts)
+{
+    GameArrayType array;
+    for (int i = 0; i < count; i++)
+    {
+        array.Add(parts[i]);
+    }
+    return GameValue(array);
+}
+
+} // namespace
+
+TEST_CASE("Journal commands - gmJournalNote keeps its old arities and gains a character id",
+          "[game][guerrilla][journal]")
+{
+    Journal& journal = Journal::Instance();
+    journal.Clear();
+    GGameState.SetError(EvalOK);
+
+    // arity 1: exactly what gmJournalLog writes
+    const GameValue one[] = {GameValue(RString("just a line"))};
+    GmJournalNote(&GGameState, NoteArgs(1, one));
+    REQUIRE(journal.EntryCount() == 1);
+    CHECK(std::string((const char*)journal.Entry(0).text) == "just a line");
+    CHECK(journal.Entry(0).zone.GetLength() == 0);
+    CHECK(journal.Entry(0).kind == JKPlain);
+    CHECK(journal.Entry(0).charId.GetLength() == 0);
+
+    // arity 2: text plus zone
+    const GameValue two[] = {GameValue(RString("zoned")), GameValue(RString("Houdan"))};
+    GmJournalNote(&GGameState, NoteArgs(2, two));
+    REQUIRE(journal.EntryCount() == 2);
+    CHECK(std::string((const char*)journal.Entry(1).zone) == "Houdan");
+    CHECK(journal.Entry(1).kind == JKPlain);
+    CHECK(journal.Entry(1).charId.GetLength() == 0);
+
+    // arity 3: the kind, as a name or as a number
+    const GameValue three[] = {GameValue(RString("bad news")), GameValue(RString("Houdan")),
+                               GameValue(RString("danger"))};
+    GmJournalNote(&GGameState, NoteArgs(3, three));
+    REQUIRE(journal.EntryCount() == 3);
+    CHECK(journal.Entry(2).kind == JKDanger);
+    CHECK(journal.Entry(2).charId.GetLength() == 0);
+
+    const GameValue threeNum[] = {GameValue(RString("good news")), GameValue(RString("Houdan")),
+                                  GameValue((float)JKGood)};
+    GmJournalNote(&GGameState, NoteArgs(3, threeNum));
+    REQUIRE(journal.EntryCount() == 4);
+    CHECK(journal.Entry(3).kind == JKGood);
+
+    // arity 4: the new character id
+    const GameValue four[] = {GameValue(RString("Petra promoted to SERGEANT.")), GameValue(RString("Houdan")),
+                              GameValue(RString("good")), GameValue(RString("comp_0_petra"))};
+    GmJournalNote(&GGameState, NoteArgs(4, four));
+    REQUIRE(journal.EntryCount() == 5);
+    CHECK(std::string((const char*)journal.Entry(4).charId) == "comp_0_petra");
+    CHECK(journal.Entry(4).kind == JKGood);
+    CHECK(GGameState.GetLastError() == EvalOK); // nothing above was an error
+
+    // arity 5 is rejected, and writes nothing
+    const GameValue five[] = {GameValue(RString("too many")), GameValue(RString("Houdan")), GameValue(RString("good")),
+                              GameValue(RString("comp_0_petra")), GameValue(RString("and another"))};
+    GmJournalNote(&GGameState, NoteArgs(5, five));
+    CHECK(journal.EntryCount() == 5);
+    CHECK(GGameState.GetLastError() != EvalOK);
+
+    // so is an empty array
+    GGameState.SetError(EvalOK);
+    GmJournalNote(&GGameState, NoteArgs(0, nullptr));
+    CHECK(journal.EntryCount() == 5);
+    CHECK(GGameState.GetLastError() != EvalOK);
+
+    // a non-string character id is a type error, not a silent cast
+    GGameState.SetError(EvalOK);
+    const GameValue badId[] = {GameValue(RString("text")), GameValue(RString("Houdan")), GameValue(RString("good")),
+                               GameValue(7.0f)};
+    GmJournalNote(&GGameState, NoteArgs(4, badId));
+    CHECK(journal.EntryCount() == 5);
+    CHECK(GGameState.GetLastError() != EvalOK);
+
+    // gmJournalEntryChar reads the id back, "" off either end
+    GGameState.SetError(EvalOK);
+    CHECK(std::string((const char*)(GameStringType)GmJournalEntryChar(&GGameState, GameValue(4.0f))) == "comp_0_petra");
+    CHECK(std::string((const char*)(GameStringType)GmJournalEntryChar(&GGameState, GameValue(0.0f))).empty());
+    CHECK(std::string((const char*)(GameStringType)GmJournalEntryChar(&GGameState, GameValue(-1.0f))).empty());
+    CHECK(std::string((const char*)(GameStringType)GmJournalEntryChar(&GGameState, GameValue(99.0f))).empty());
+
+    journal.Clear();
+    GGameState.SetError(EvalOK);
 }

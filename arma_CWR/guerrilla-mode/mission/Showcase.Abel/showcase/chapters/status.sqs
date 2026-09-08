@@ -18,7 +18,7 @@ SC_cI = 0
 ? SC_cI >= (count GM_COMP_NAMES) : goto "compdone"
 SC_cK = "alive"
 ? not (GM_COMP_ALIVE select SC_cI) : SC_cK = "KIA (permadeath)"
-(format ["Companion %1: %2, %3 XP, skill %4 - %5", GM_COMP_NAMES select SC_cI, GM_COMP_RANK select SC_cI, GM_COMP_XP select SC_cI, GM_COMP_SKILL select SC_cI, SC_cK]) call SC_fnSay
+(format ["Companion %1: %2, %3 XP, skill %4 - %5", gmLegendName SC_cI, GM_COMP_RANK select SC_cI, GM_COMP_XP select SC_cI, GM_COMP_SKILL select SC_cI, SC_cK]) call SC_fnSay
 SC_cI = SC_cI + 1
 goto "comp"
 #compdone

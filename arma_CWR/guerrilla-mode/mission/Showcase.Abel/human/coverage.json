@@ -156,6 +156,23 @@
     "../engine/Poseidon/Game/Guerrilla/JournalCommands.cpp": [
       "journal"
     ],
+    "../engine/Poseidon/Game/Guerrilla/WorldNames.cpp": [
+      "journal"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/FactionHistory.cpp": [
+      "journal"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/LegendNames.cpp": [
+      "legend_names"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/LegendRegistry.cpp": [
+      "legend_names",
+      "companion_progress"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/LegendRegistryCommands.cpp": [
+      "legend_names",
+      "companion_progress"
+    ],
     "../engine/Poseidon/Game/Guerrilla/Undercover.cpp": [
       "undercover",
       "vehicle_cover"

@@ -1,5 +1,6 @@
 #include <Poseidon/UI/Guerrilla/JournalComposeInternal.hpp>
 
+#include <Poseidon/Game/Guerrilla/FactionHistory.hpp>      // kHistoryBioPageWords
 #include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp> // JournalPageInputs
 #include <Poseidon/UI/Guerrilla/JournalManual.hpp>         // the handbook chapters
 
@@ -9,9 +10,9 @@
 #include <climits> // INT_MAX (the handbook table's ~ markers)
 #include <cstring>
 
-// Guerrilla Mode journal, Compose part B: People index, Roster, Places index
-// and the zone pages, Chronicles hub, Record, Reference index and the
-// handbook chapters.
+// Guerrilla Mode journal, Compose part B: People index and the character
+// dossiers, Roster, Places index and the zone pages, Chronicles hub, the
+// generated history, Record, Reference index and the handbook chapters.
 //
 // Everything here is pure: (Journal, JournalPageInputs, Derived) in, pages of
 // blocks out through Pen / NewPage / ListChain.  No pixel is measured and no
@@ -199,6 +200,98 @@ void ManualTableRow(Pen& pen, const char* line, bool header)
     pen.EndBlock();
 }
 
+// ---------------------------------------------------------------------------
+// the named (Change 2): dossier anchors, captions and the portrait source
+// ---------------------------------------------------------------------------
+
+// Beside a portrait box the dossier has half a page left for prose
+// (JournalRender.hpp kPortraitMaxHeightFraction), so the biography is budgeted
+// to the low half of the 35-55 band.  The GENERATOR owns that budget: the
+// registry asks FactionHistory for a variant that already fits
+// (kHistoryBioPageWords), because nothing downstream can carry the overflow -
+// "Full record" lists the character's journal entries by charId and never the
+// biography, so a clamped word is a word the player cannot read anywhere.
+// The clamp below is what stands between a save written before that budget
+// existed (biographies are persisted, never regenerated) and a dossier that
+// runs off the page.  It is NOT gated on the photograph existing: Render
+// reserves the identical box for the "Photograph unavailable" treatment
+// (AddImage applies the same split units on its no-texture branch), so gating
+// on presence would leave the heavier of the two pages unclamped.
+const int kBioWordsBesidePortrait = 45;
+static_assert(kBioWordsBesidePortrait == kHistoryBioPageWords,
+              "the composed clamp and the generator's page budget must be one number");
+
+RString WhoAnchor(const RString& id)
+{
+    return RString("GM_WHO_") + id;
+}
+
+RString RecordAnchor(const RString& id)
+{
+    return WhoAnchor(id) + RString("_REC");
+}
+
+// The history's event pages are GM_HIST_EV<k>, NOT GM_HISTORY_<k>: Render names
+// a continuation page "<base>_<part>" and reuses sections by name, so a
+// GM_HISTORY_2 event page and the history hub's own second page would silently
+// merge into one section instead of colliding visibly.
+RString HistoryEventAnchor(int k)
+{
+    return Fmt("GM_HIST_EV%d", k);
+}
+
+// "<role>, <status>." as the People row's description and the dossier's caption
+RString CharacterCaption(const JournalCharacterView& ch)
+{
+    RString caption = ch.status;
+    if (ch.role.GetLength() > 0)
+    {
+        caption = ch.status.GetLength() > 0 ? ch.role + RString(", ") + ch.status : ch.role;
+    }
+    return Sentence(Cap(caption));
+}
+
+// Render draws block.portraitSrc verbatim and Gather probed
+// "<portraitDir>\<key>.paa" for existence, so both are built from the same
+// injected directory: a Change 4 move of the folder can never leave a dossier
+// that reports a photograph pointing at a texture that does not resolve.  The
+// leading backslash is what makes AddImage skip the briefing-relative search.
+// portraitDir is empty in every unit test, so the box is reserved and the
+// "Photograph unavailable" treatment is drawn instead.
+RString PortraitSrc(const JournalPageInputs& in, const JournalCharacterView& ch)
+{
+    if (in.portraitDir.GetLength() == 0 || ch.portraitKey.GetLength() == 0)
+    {
+        return RString();
+    }
+    return RString("\\") + in.portraitDir + RString("\\") + ch.portraitKey + RString(".paa");
+}
+
+// What each beat IS, as the hub row's description.  The beat kinds are fixed
+// by the generator's three tables, so the gloss is compiled here rather than
+// carried on the view.  It is deliberately NOT the place: every shipped event
+// title ends in the place name, so a place description would repeat the last
+// word of its own link and the hub would read as a mis-wired table.  The beat
+// PAGE still carries the place as its subtitle, which is where it says
+// something the title has not already said.
+const char* HistoryBeatGloss(int k)
+{
+    static const char* const kGloss[3] = {"The ancient grievance.", "The broken settlement.", "The stand remembered."};
+    return (k >= 0 && k < 3) ? kGloss[k] : "";
+}
+
+// a hub row for a history beat, with the beat's gloss as its description
+void HistoryLinkRow(Pen& pen, const RString& title, const RString& href, const RString& description)
+{
+    if (description.GetLength() > 0)
+    {
+        pen.LinkRow(title, cstr(href), description);
+        return;
+    }
+    pen.Link(title, cstr(href));
+    pen.EndBlock();
+}
+
 // the "@standing" line of the Undercover chapter: the live cover state rides
 // in a section head; the list below it stays pure reference
 void StandingHead(Pen& pen, const JournalPageInputs& in)
@@ -226,15 +319,162 @@ void StandingHead(Pen& pen, const JournalPageInputs& in)
 
 void ComposePeople(JournalDocument& doc, const ComposeContext& ctx)
 {
-    JournalPage& page = NewPage(doc, "GM_PEOPLE", "People", "Main", "Contents");
-    page.aliases.Add(RString("GM_CELL"));
-    Pen pen(page);
-    pen.Title("People");
-    pen.Subtitle(UnderArms(ctx.d));
-    pen.LinkRow("The roster", "#GM_ROSTER", "Every fighter, what they carry.");
-    // Change 2 adds the Companions / Enemy Legends / Memorials entries after
-    // the roster (one line each, linking GM_WHO_<id>); ctx.in.characters is
-    // empty in Change 1, so nothing more is listed here yet
+    const JournalPageInputs& in = ctx.in;
+    const int perPage = ComposeLimits::ListPerPage;
+    // The index IS part 1 of its own chain, so the first character row lands
+    // after the roster entry instead of on a page of its own.
+    ListChain chain(doc, "GM_PEOPLE", "People", "Main", "Contents", perPage);
+    {
+        JournalPage& page = chain.First();
+        page.aliases.Add(RString("GM_CELL"));
+        Pen pen(page);
+        pen.Title("People");
+        pen.Subtitle(UnderArms(ctx.d));
+        pen.LinkRow("The roster", "#GM_ROSTER", "Every fighter, what they carry.");
+    }
+
+    // Companions, Enemy Legends and Memorials are THREE LISTS ON ONE RUNNING
+    // INDEX, not three chains.  ListChain has no chain-local cursor (PageFor is
+    // itemIndex / perPage + 1, and Parts() counts the document's pages by base
+    // name), so three chains over "GM_PEOPLE" would each restart at item 0 and
+    // pile fifteen rows onto page 1.  Flattening is also the convention the
+    // roster and the record already follow: a group head rides with its first
+    // row, repeats at the top of a continuation page, and never consumes one of
+    // the five.  Defeated Legends stay under Enemy Legends (their dossier is
+    // permanent); a fallen companion moves to Memorials.
+    struct Group
+    {
+        const char* head;
+        int kind;
+        bool alive;
+    };
+    static const Group kGroups[] = {{"Companions", 0, true}, {"Enemy Legends", 1, true}, {"Memorials", 0, false}};
+    int item = 0;
+    for (int g = 0; g < 3; g++)
+    {
+        int headedPart = 0;
+        for (int c = 0; c < in.characters.Size(); c++)
+        {
+            const JournalCharacterView& ch = in.characters[c];
+            if (ch.kind != kGroups[g].kind)
+            {
+                continue;
+            }
+            // the alive split applies to companions only: an enemy Legend is
+            // listed whether it is at large or defeated
+            if (kGroups[g].kind == 0 && ch.alive != kGroups[g].alive)
+            {
+                continue;
+            }
+            JournalPage& page = chain.PageFor(item);
+            Pen pen(page);
+            const int part = item / perPage + 1;
+            if (part != headedPart)
+            {
+                pen.Head(kGroups[g].head);
+                headedPart = part;
+            }
+            pen.LinkRow(ch.displayName, cstr(RString("#") + WhoAnchor(ch.id)), CharacterCaption(ch));
+            item++;
+        }
+    }
+
+    // the dossiers hang off this page, so they are composed here rather than
+    // from ComposeJournal: one call order, one file
+    ComposeWho(doc, ctx);
+}
+
+// ===========================================================================
+// WHO: one dossier per named character, and that character's own record
+// ===========================================================================
+
+void ComposeWho(JournalDocument& doc, const ComposeContext& ctx)
+{
+    const JournalPageInputs& in = ctx.in;
+    const Journal& journal = ctx.journal;
+    for (int c = 0; c < in.characters.Size(); c++)
+    {
+        const JournalCharacterView& ch = in.characters[c];
+        if (ch.id.GetLength() == 0)
+        {
+            continue;
+        }
+        const RString anchor = WhoAnchor(ch.id);
+        const RString record = RecordAnchor(ch.id);
+        {
+            JournalPage& page = NewPage(doc, cstr(anchor), cstr(ch.displayName), "GM_PEOPLE", "People");
+            Pen pen(page);
+            // the box is reserved whether or not the photograph exists, so the
+            // page has the same shape either way and the unavailable treatment
+            // reads as a blank frame in the file rather than a missing block
+            pen.Portrait(PortraitSrc(in, ch), ch.portraitPresent);
+            pen.Title(ch.displayName);
+            const RString caption = CharacterCaption(ch);
+            if (ch.defeated || !ch.alive)
+            {
+                // Pen::Subtitle is pencil by contract; a fallen companion and a
+                // defeated Legend take the red pen, so the caption is a serif
+                // line of its own
+                pen.Line(caption, VoiceSerif, InkRed);
+            }
+            else
+            {
+                pen.Subtitle(caption);
+            }
+            if (ch.bio.GetLength() > 0)
+            {
+                // 35-55 words: a Serif block, never a hand block (the hand cap
+                // is 25 words)
+                pen.Line(ClampWords(ch.bio, kBioWordsBesidePortrait), VoiceSerif);
+            }
+            if (ch.deedLatest.GetLength() > 0)
+            {
+                // one annotation row: exempt from the two-hand-blocks rule, still
+                // inside the 25-word hand cap
+                pen.Hand(ClampWords(ch.deedLatest, ComposeLimits::HandWords), InkHand, true);
+            }
+            pen.Link("Full record", cstr(RString("#") + record));
+            pen.EndBlock();
+        }
+
+        // The character's own record: the journal lines carrying this id,
+        // newest first, five to a page.  Filtering is by charId ONLY - a line
+        // is never matched by finding the base name in its text, because two
+        // fighters can share a first name and an earned name is not the name
+        // the older lines were written under.
+        ListChain chain(doc, cstr(record), cstr(ch.displayName), cstr(anchor), cstr(ch.displayName),
+                        ComposeLimits::ListPerPage);
+        int count = 0;
+        for (int e = 0; e < journal.EntryCount(); e++)
+        {
+            if (stricmp(journal.Entry(e).charId, ch.id) == 0)
+            {
+                count++;
+            }
+        }
+        {
+            Pen pen(chain.First());
+            pen.Title(ch.displayName);
+            pen.Subtitle(Fmt("%d %s.", count, count == 1 ? "entry" : "entries"));
+            if (count == 0)
+            {
+                pen.Line("Nothing written about this one yet.", VoiceType, InkPencil);
+            }
+        }
+        int k = 0;
+        for (int e = journal.EntryCount() - 1; e >= 0; e--)
+        {
+            const JournalEntry& entry = journal.Entry(e);
+            if (stricmp(entry.charId, ch.id) != 0)
+            {
+                continue;
+            }
+            JournalPage& page = chain.PageFor(k);
+            Pen pen(page);
+            pen.Entry(entry, in.day, StampDay(entry.stamp) != in.day, true);
+            k++;
+        }
+    }
 }
 
 // ===========================================================================
@@ -567,6 +807,70 @@ void ComposeChronicles(JournalDocument& doc, const ComposeContext& ctx)
     {
         pen.Gap();
         pen.LinkRow("History", "#GM_HISTORY", "How the struggle began.");
+    }
+    // the history hangs off this page, so it is composed here rather than from
+    // ComposeJournal: one call order, one file
+    ComposeHistory(doc, ctx);
+}
+
+// ===========================================================================
+// HISTORY: the campaign's generated past, one hub and one page per beat
+// ===========================================================================
+
+void ComposeHistory(JournalDocument& doc, const ComposeContext& ctx)
+{
+    const JournalHistoryView& history = ctx.in.history;
+    if (!history.present)
+    {
+        // nothing was ever written for this campaign (a save from before the
+        // registry existed): no hub, no beats, and ComposeChronicles omits the
+        // link, so there is no dead end to click into
+        return;
+    }
+    {
+        JournalPage& page = NewPage(doc, "GM_HISTORY", "History", "GM_CHRONICLES", "Chronicles");
+        Pen pen(page);
+        pen.Title("The long quarrel");
+        pen.Subtitle("As the historians tell it.");
+        // two blocks, not two pages: Render moves the second whole onto
+        // GM_HISTORY_2 when the paper runs out
+        if (history.opening1.GetLength() > 0)
+        {
+            pen.Line(history.opening1, VoiceSerif);
+        }
+        if (history.opening2.GetLength() > 0)
+        {
+            pen.Line(history.opening2, VoiceSerif);
+        }
+        for (int k = 0; k < 3; k++)
+        {
+            if (history.events[k].title.GetLength() == 0)
+            {
+                continue;
+            }
+            HistoryLinkRow(pen, history.events[k].title, RString("#") + HistoryEventAnchor(k),
+                           RString(HistoryBeatGloss(k)));
+        }
+    }
+    for (int k = 0; k < 3; k++)
+    {
+        const JournalHistoryView::Event& event = history.events[k];
+        if (event.title.GetLength() == 0)
+        {
+            continue;
+        }
+        const RString anchor = HistoryEventAnchor(k);
+        JournalPage& page = NewPage(doc, cstr(anchor), cstr(event.title), "GM_CHRONICLES", "Chronicles");
+        Pen pen(page);
+        pen.Title(event.title);
+        if (event.place.GetLength() > 0)
+        {
+            pen.Subtitle(Sentence(event.place));
+        }
+        if (event.text.GetLength() > 0)
+        {
+            pen.Line(event.text, VoiceSerif);
+        }
     }
 }
 

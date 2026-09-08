@@ -26,6 +26,21 @@ publishes `gmSelOccupier`/`gmSelResistance`; the engine resolves them and hands
 scripts the side strings via the `gmOccupierSide`/`gmResistanceSide` nulars
 (Demo defaults: EAST vs GUER).
 
+**Characters have names they earn.** A campaign draws one seed at its first
+tick and everything about its cast follows from it: your companion keeps the
+base name the template gave her, gains a surname from the faction's regional
+name pool, and earns a nickname at SERGEANT and a second, different one at
+COLONEL, so `Petra` becomes `Petra Kovacevic` becomes `Petra "The Hawk"
+Kovacevic the Unbroken`. The name is written onto the body itself, so the HUD,
+the cursor label, the group bar, the briefing roster, the diary and her
+dossier all say the same thing at the same moment. The same seed writes the
+campaign's HISTORY, a short account of how this occupation began, using the
+island's own place names, and pre-rolls the three enemy commanders. None of it
+is a text generator at runtime: every draw is a pure function of the seed and
+a stable id, resolved to prose once and then persisted, so reopening the
+journal or loading a save can never reroll a word of it. Which regional names
+a faction draws is one descriptor key, `namePool`.
+
 ### Faction library
 
 `CfgGuerrillaFactions` is **not** authored per island. The engine builds the
@@ -82,6 +97,7 @@ no overhead, ordinary missions unaffected. The mission scripts are a thin
 | **GarrisonCache** (native) | occupier garrison distance-cache (reserve ↔ live groups), officer-first spawn from faction data, survivor write-back, garrison events | `engine/Poseidon/Game/Guerrilla/GarrisonCache.*` |
 | **Native persistence** | zones/alert/garrison + registered event handlers serialize; `campaignLoaded` event fires after a load | the three `Serialize` impls + `World::Serialize` |
 | **Journal** (native) | the map screen's notepad as the resistance dossier, in the notepad's stock look (Garamond titles, typed Courier reports, short handwritten remarks in ink): Contents (the Notes tab), Dispatches, Operations (the Plan tab: Objectives, Suggested actions, Supplies, Resistance strength), People + The roster, Places + a page per zone, Chronicles + The record, Reference + the handbook chapters; lists paginate at five entries onto `<page>_2` continuations; fed by the scripts through `gmJournal*` (`gmJournalNote` tags a line with its zone and kind), serialized as `GuerrillaJournal` | `engine/Poseidon/Game/Guerrilla/Journal.*` + `UI/Guerrilla/GuerrillaJournalPages.*` (Gather) + `JournalCompose*` / `JournalRender.*` / `JournalManual.*` / `JournalText.*` |
+| **Legends** (native) | the campaign's cast: a stable id per character, the EARNED display name a companion grows into (base name, then a generated surname, then a nickname slot at SERGEANT and a second at COLONEL), the face, a generated biography, the recorded deeds, the three enemy commanders, and the seeded campaign HISTORY the journal's History page reads. It observes `GM_COMP_*` and owns identity only: `companions.sqs` still owns XP, rank and permadeath. `gmLegend*`; serialized as `GuerrillaLegends` | `engine/Poseidon/Game/Guerrilla/LegendRegistry.*` + `LegendNames.*` / `FactionHistory.*` |
 | **Traffic** (native) | ambient road traffic: civilian cars town-to-town, occupier patrol vehicles between occupier zones, occasional supply convoys; player-distance band spawn/despawn, commandeer sequence (stop, driver bails + flees, hull released), civ-driver killed-EH feeding the civilian kill ledger; `gmTraffic*` + the road queries `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` (`nearestRoads` alias); serialized as `GuerrillaTraffic` | `engine/Poseidon/Game/Guerrilla/Traffic.*` + `TrafficCommands.cpp` |
 | **Mission scripts** (policy) | capture reaction (hold garrison), QRF + garrison posture, undercover establish/react, economy, War Level, loot/unlocks, recruiting, companions, Save UX | [`mission/Guerrilla.Demo/`](mission/Guerrilla.Demo/) |
 

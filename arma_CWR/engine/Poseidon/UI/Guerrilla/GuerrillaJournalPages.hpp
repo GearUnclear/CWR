@@ -140,7 +140,7 @@ struct JournalCharacterView
     bool alive = true;
     int rank = -1; // ladder index, -1 unknown
     bool legend = false;
-    RString bio;         // 35-55 words (Change 2)
+    RString bio;         // 35-45 words: the dossier page's budget (Change 2)
     RString deedLatest;  // one notable deed, <= 25 words
     RString portraitKey; // lower(bodyClass) + "__" + lower(face)
     bool portraitPresent = false;

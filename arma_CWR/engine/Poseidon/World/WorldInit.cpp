@@ -63,6 +63,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 #include <Poseidon/Game/Guerrilla/AddonActivation.hpp> // placed-unit addon closure (issue #54 C1)
@@ -684,6 +685,12 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Dealer market: Clear + read class CfgGuerrillaMarket (stock, tuning,
     // authored dealer towns); the city assignment runs on the first tick.
     Guerrilla::Market::Instance().InitMission();
+    // Legend registry (character ids, earned names, appearance, deeds and the
+    // campaign history): Clear + a no-op config read.  The campaign seed, the
+    // history and the three enemy Legend identities are drawn on the first
+    // Simulate tick with an ACTIVE zone registry, never here - an ordinary
+    // mission or an intro must not draw a seed or write a diary line.
+    Guerrilla::LegendRegistry::Instance().InitMission();
 
     if (gameMode == GModeArcade)
     {

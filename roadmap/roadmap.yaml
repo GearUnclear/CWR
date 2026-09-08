@@ -1658,6 +1658,46 @@ items:
       - "2026-08-22: `Journal::Log` had to be renamed AddEntry (Log is an engine macro). AddImage needs a texture loader, so the renderer takes useImages=false in the parser-only unit test and draws text bullets; in-game it reuses the stock mission_dot/done/uncomplete icons. GetHtmlText joins fields with a space while the formatter lays them adjacent, so the test helper collapses double spaces."
       - "2026-08-22: verified: [guerrilla] unit lane 2710 assertions/128 cases green incl. the script-core parity test and test_journal.cpp (6 cases); Trident guerrilla_native_capture + guerrilla_native_save_reload.seq (extended with diary/objective/status sentinels across the cross-process reload) 2/2 green; install-missions.ps1 -IncludeWorld Sinai,Lebanon80 rerun. Stale ccache PCH objects (CRLF-era cache hits after the LF normalisation) had to be force-rebuilt with CCACHE_DISABLE=1 before anything compiled."
 
+  - id: guerrilla-legends
+    title: "Legends: earned character names, dossiers and a seeded campaign history (friendly companions now, the three enemy commanders next)"
+    phase: phase-2
+    status: in-progress
+    depends_on: [guerrilla-journal, mission-migration-native]
+    gh_issues: [57]
+    summary: >
+      Issue #57 in two halves. The IDENTITY half landed 2026-09-08 as Change 2 of
+      the dossier plan, on branch claude/journal-feature-s31cuu: a native
+      LegendRegistry (engine/Poseidon/Game/Guerrilla/LegendRegistry.* +
+      LegendRegistryCommands.cpp) that observes the script-owned GM_COMP_* arrays
+      once a second and owns identity only, leaving XP, rank, skill, spawning and
+      permadeath with core/scripts/companions.sqs. Each character gets a stable
+      serialized id (comp_<index>_<slug> / boss_<n>), an earned five-slot display
+      name (the base name, a generated surname from the faction descriptor's new
+      namePool region, a nickname slot at SERGEANT and a second, different one at
+      COLONEL), a face token, a generated biography, recorded deeds and, for the
+      three pre-rolled enemy Legends, the row Change 3 will place and defeat. The
+      name is written onto Person::GetInfo()._name, so the HUD, cursor label,
+      group bar, briefing roster, diary and dossier all agree from one write.
+      The same campaign seed, drawn once from GRandGen and persisted, generates
+      the campaign HISTORY (three beats over the island's own CfgWorlds place
+      names, read through the new WorldNames.*) which the journal's History page
+      renders; every draw after the first is a pure function of (seed, stable id,
+      named channel) and every result is stored as RESOLVED PROSE, so reopening
+      the journal or loading a save can never reroll a word. Journal entries gained
+      a charId (gmJournalEntryChar), which is what lets a diary line link to a
+      dossier. Script surface: gmLegendBind / gmLegendName / gmLegendFace /
+      gmLegendId / gmLegendCount / gmLegendInfo / gmLegendHistory /
+      gmLegendHistoryEvent. Serializes as GuerrillaLegends; a save written before
+      the registry existed loads as read-only DERIVED rows (dossiers work, no
+      diary writes, no history). The ENEMY half (Change 3: placing the three
+      commanders in zones, their guards, the defeat latch and the objectives)
+      is still to come, which is why this item is not done.
+    log:
+      - "2026-09-08: the script side is deliberately tiny and is the whole reason the split holds: companions.sqs substitutes gmLegendName for GM_COMP_NAMES in four places, GM_fnCompSpawn gains a gmLegendBind on the new body, and its promotion and death gmJournalNote calls are DELETED because the registry now writes those two lines itself with the character's id attached. Keeping them would have doubled every line. The Showcase.Abel companions/status chapters read gmLegendName for the same reason."
+      - "2026-09-08: descriptor key namePool added to all three vanilla rosters (WEST western, EAST eastern_europe, GUER balkans) and all eight @LoBo rosters (IDF israeli, EgyptFrontier/EgyptArmy north_africa, Syria/Jordan levant, Hizballah lebanon, PLO/PLO_East palestine). The key is REGIONAL only: the nickname tone bank (warm or cold epithets) is chosen by campaign allegiance instead, so a resistance IDF campaign draws israeli names with the friendly bank. Missing or unknown falls back by side with one warn per faction, so a third-party pack that never heard of the key still gets plausible names."
+      - "2026-09-08: GM_COMP_NAMES must not be reordered or spliced mid-campaign: the companion index is inside the stable id, and the id is what the generated surname, the face, the awarded nickname and every attributed diary line hang off. Appending is safe. Documented in ARCHITECTURE.md A.8 as a rule for island-template authors, since one core GM_COMP_NAMES is shared by every template."
+      - "2026-09-08: two deliberate deviations from the design draft, both frozen the moment a save exists. The id uses underscores (comp_0_petra), not the drafted colons, because a colon would ride into a section name, an href fragment, a text-mode config value and a script array. And the registry's save block is discriminated by its ABSENCE (unlike its GuerrillaJournal / GuerrillaStashes neighbours, which gate on non-emptiness), because a seeded campaign that has not met a companion yet would otherwise be misread as a pre-registry save and silently re-derived, losing its history."
+
   # ---------------------------------------------------------------- phase 3
   - id: strategy-screen
     title: "GuerrillaDisplay strategy screen"

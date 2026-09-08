@@ -94,4 +94,9 @@ void ComposePlaces(JournalDocument&, const ComposeContext&);     // GM_PLACES(_n
 void ComposeChronicles(JournalDocument&, const ComposeContext&); // GM_CHRONICLES
 void ComposeRecord(JournalDocument&, const ComposeContext&);     // GM_RECORD(_n) [GM_LOG]
 void ComposeReference(JournalDocument&, const ComposeContext&);  // GM_REFERENCE [GM_MAN_INDEX] + GM_MAN_*
+// T3, Change 2 additions.  Neither is called from JournalCompose.cpp's
+// ComposeJournal: ComposePeople calls ComposeWho and ComposeChronicles calls
+// ComposeHistory, so the two pairs stay in one file and one call order.
+void ComposeWho(JournalDocument&, const ComposeContext&);     // GM_WHO_<id> + its GM_WHO_<id>_REC chain
+void ComposeHistory(JournalDocument&, const ComposeContext&); // GM_HISTORY + GM_HIST_EV<k>
 } // namespace Poseidon::Guerrilla

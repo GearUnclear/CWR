@@ -34,10 +34,14 @@
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp> // the character rows and the generated history
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
+#include <Poseidon/Game/Guerrilla/WorldNames.hpp> // FactionDisplayName (one copy, shared with the Game layer)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+
+#include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (the portrait probe)
 
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
@@ -127,27 +131,64 @@ RString BearingOf(float dx, float dz)
     return RString(names[idx]);
 }
 
-// the faction's displayName (optional descriptor key), else class name, else side
+// The faction's displayName (optional descriptor key), else the class name with
+// '_' rewritten to ' ' ("PLO_East" -> "PLO East"), else the side.  A forwarder
+// onto the Game layer's copy: the history prose (FactionHistory) and the Legend
+// registry name the same faction the same way as these pages, which they cannot
+// do from two implementations.  DECISION: the underscore rewrite applies
+// everywhere the journal shows a faction, not only in the generated history.
+// The new-game cycler still shows the raw class name (it names a config class,
+// not a faction as the journal talks about one), so
+// ui/guerrilla_new_game_e2e's "OCCUPIER: PLO_East" is unaffected.
 RString FactionDisplay(const ZoneRegistry& registry, const RString& className, const RString& side)
 {
-    if (className.GetLength() > 0)
+    return FactionDisplayName(registry, className, side);
+}
+
+// lower-case ASCII copy; the portrait key is a file name, so it is folded the
+// same way on every platform and never through the C locale
+RString LowerAscii(const RString& text)
+{
+    const int n = text.GetLength();
+    if (n <= 0)
     {
-        RString dn = registry.FactionValue(className, "displayName");
-        if (dn.GetLength() > 0)
-        {
-            return dn;
-        }
-        return className;
+        return RString();
     }
-    if (side.GetLength() > 0)
+    AutoArray<char> buffer;
+    buffer.Resize(n + 1);
+    for (int i = 0; i < n; i++)
     {
-        RString dn = registry.FactionValue(side, "displayName");
-        if (dn.GetLength() > 0)
+        const char c = ((const char*)text)[i];
+        buffer[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    buffer[n] = 0;
+    return RString(buffer.Data());
+}
+
+// lower(bodyClass) + "__" + lower(face), empty when either half is missing or
+// when the face is not one of the four the portrait catalogue ships (a body the
+// face validation refused falls back to "Default", which has no photograph, so
+// the dossier draws the unavailable treatment instead of a dead texture)
+RString PortraitKeyOf(const LegendRow& row)
+{
+    if (row.bodyClass.GetLength() == 0 || row.face.GetLength() == 0)
+    {
+        return RString();
+    }
+    bool known = false;
+    for (int i = 0; i < LegendRegistry::NPortraitFaces; i++)
+    {
+        if (stricmp(row.face, LegendRegistry::kPortraitFaces[i]) == 0)
         {
-            return dn;
+            known = true;
+            break;
         }
     }
-    return side;
+    if (!known)
+    {
+        return RString();
+    }
+    return LowerAscii(row.bodyClass) + RString("__") + LowerAscii(row.face);
 }
 
 // primary / launcher display names of a person
@@ -231,7 +272,6 @@ JournalPageInputs GatherGuerrillaJournalInputs()
     // Render turns it into the portrait box that reads square on screen.
     in.uiAspect =
         (GEngine && GEngine->Height2D() > 0) ? (float)GEngine->Width2D() / (float)GEngine->Height2D() : 4.0f / 3.0f;
-    // characters / history stay empty until Change 2 fills them from the registry
     JournalClockNow(in.day, in.minuteOfDay);
     in.supportFlip = registry.Tuning().supportFlip;
 
@@ -442,6 +482,80 @@ JournalPageInputs GatherGuerrillaJournalInputs()
             }
         }
         in.zones.Add(row);
+    }
+
+    // ---- the named: companions, enemy Legends, memorials, and the history.
+    // This is the ONLY place the Legend registry is read.  Compose and Render
+    // stay pure (design D0), so a character view carries everything the
+    // dossier pages need, resolved here.
+    {
+        const LegendRegistry& legends = LegendRegistry::Instance();
+        // Row order is the registry's own contract (companions by compIndex
+        // ascending, then the pre-rolled boss rows by id), so the People page
+        // walks the rows straight through and never re-sorts them.
+        for (int i = 0; i < legends.RowCount(); i++)
+        {
+            const LegendRow& row = legends.Row(i);
+            JournalCharacterView view;
+            view.id = row.id;
+            view.displayName = legends.DisplayName(row);
+            view.kind = row.kind;
+            view.alive = row.alive;
+            view.rank = row.rankSeen;
+            view.legend = row.legend;
+            view.bio = row.bio;
+            view.defeated = row.defeated;
+            if (row.deeds.Size() > 0)
+            {
+                view.deedLatest = row.deeds[row.deeds.Size() - 1].text;
+            }
+            if (row.kind == LKBoss)
+            {
+                view.role = row.role;
+                // lowercase, as the dossier caption reads it ("Commander, at
+                // large"); a defeated Legend keeps its dossier page for good
+                view.status = row.defeated ? RString("defeated") : RString("at large");
+                view.zone = row.zoneName;
+            }
+            else
+            {
+                view.baseName = row.baseName;
+                view.role = RankShort(row.rankSeen);
+                Person* person = dyn_cast<Person>(row.body.GetLink());
+                AIUnit* brain = person ? person->Brain() : nullptr;
+                const bool liveBody = brain && brain->GetLifeState() == AIUnit::LSAlive;
+                view.status = !row.alive                                       ? RString("fallen")
+                              : (liveBody && brain->GetGroup() == playerGroup) ? RString("with me")
+                                                                               : RString("unaccounted for");
+                view.zone = row.lastZone;
+            }
+            view.portraitKey = PortraitKeyOf(row);
+            // Probed once per character per rebuild, against the SAME path
+            // Compose hands to Render minus its leading backslash, so the
+            // "available" answer and the drawn source can never disagree.
+            // portraitDir is empty in every unit test, which is what keeps the
+            // suite off the file system.
+            if (view.portraitKey.GetLength() > 0 && in.portraitDir.GetLength() > 0)
+            {
+                const RString path = in.portraitDir + RString("\\") + view.portraitKey + RString(".paa");
+                view.portraitPresent = QIFStreamB::FileExist(path);
+            }
+            in.characters.Add(view);
+        }
+
+        const HistoryRecord& history = legends.History();
+        in.history.present = history.Present();
+        if (in.history.present)
+        {
+            in.history.opening1 = history.openingPage1;
+            in.history.opening2 = history.openingPage2;
+            for (int k = 0; k < kHistoryEvents && k < 3; k++)
+            {
+                in.history.events[k].title = history.eventTitle[k];
+                in.history.events[k].text = history.eventText[k];
+                in.history.events[k].place = history.eventPlace[k];
+            }
+        }
     }
     return in;
 }

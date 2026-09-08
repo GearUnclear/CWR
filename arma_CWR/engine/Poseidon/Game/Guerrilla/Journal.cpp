@@ -54,7 +54,7 @@ void Journal::InitMission()
 // diary
 // ---------------------------------------------------------------------------
 
-void Journal::AddEntry(RString stamp, RString text, RString zone, int kind)
+void Journal::AddEntry(RString stamp, RString text, RString zone, int kind, RString charId)
 {
     if (text.GetLength() == 0)
     {
@@ -69,6 +69,7 @@ void Journal::AddEntry(RString stamp, RString text, RString zone, int kind)
     entry.text = text;
     entry.zone = zone;
     entry.kind = kind;
+    entry.charId = charId;
     _entries.Add(entry);
     while (_entries.Size() > MaxEntries)
     {
@@ -124,6 +125,13 @@ void Journal::SetObjective(RString id, RString text, int state)
         return;
     }
     JournalObjective& row = _objectives[i];
+    // An identical rewrite must not bump the revision: the native services
+    // republish the same objective every tick, and a bump repaints the open map.
+    const bool changed = (text.GetLength() > 0 && strcmp(row.text, text) != 0) || row.state != state;
+    if (!changed)
+    {
+        return;
+    }
     if (text.GetLength() > 0)
     {
         row.text = text;
@@ -208,6 +216,12 @@ void Journal::SetStatus(RString key, RString text)
         }
         return;
     }
+    // An identical rewrite must not bump the revision (same reason as
+    // SetObjective).  A status line has no state, so the text is the whole row.
+    if (i >= 0 && strcmp(_status[i].text, text) == 0)
+    {
+        return;
+    }
     if (i < 0)
     {
         JournalStatusLine row;
@@ -234,6 +248,9 @@ LSError JournalEntry::Serialize(ParamArchive& ar)
     // carry neither and read back as plain, zone-less lines
     PARAM_CHECK(ar.Serialize("zone", zone, 1, RString()))
     PARAM_CHECK(ar.Serialize("kind", kind, 1, (int)JKPlain))
+    // charId arrived with the 2026-09 Legend registry; older saves carry none
+    // and read back as unattributed lines
+    PARAM_CHECK(ar.Serialize("charId", charId, 1, RString()))
     return LSOK;
 }
 
