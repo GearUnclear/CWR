@@ -216,6 +216,8 @@ GameValue TriBriefingSection(const GameState*);
 GameValue TriBriefingSwitch(const GameState*, GameValuePar);
 GameValue TriBriefingLinkRoute(const GameState*, GameValuePar);
 GameValue TriBriefingClickAt(const GameState*, GameValuePar);
+GameValue TriBriefingMetrics(const GameState*);
+GameValue TriBriefingSlot(const GameState*, GameValuePar);
 GameValue TriMissionPlayerReady(const GameState*);
 GameValue TriAssertMissionPlayable(const GameState*);
 GameValue TriControlText(const GameState*, GameValuePar);
@@ -3299,6 +3301,8 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triBriefingSwitch", TriBriefingSwitch, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triBriefingLinkRoute", TriBriefingLinkRoute, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triBriefingClickAt", TriBriefingClickAt, GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triBriefingMetrics", TriBriefingMetrics));
+    GGameState.NewFunction(GameFunction(GameString, "triBriefingSlot", TriBriefingSlot, GameScalar));
     GGameState.NewNularOp(GameNular(GameScalar, "triRadioWaveCount", TriRadioWaveCount));
     GGameState.NewNularOp(GameNular(GameString, "triRadioWaveStates", TriRadioWaveStates));
     GameValue TriSideChat(const GameState*, GameValuePar);

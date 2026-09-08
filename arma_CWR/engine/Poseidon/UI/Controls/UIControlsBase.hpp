@@ -672,7 +672,13 @@ public:
 	PackedColor GetLinkColor() const {return _linkColor;}
 	void SetLinkColor(PackedColor color) {_linkColor = color;}
 
-	void FormatSection(int s);
+	void FormatSection(int s); // = FormatSectionRows(s); SplitSection(s);  (unchanged behaviour)
+	// UD extension (Guerrilla journal page budget): FormatSectionRows wraps a
+	// section into rows without paginating it, so a renderer can measure the
+	// rows and repartition; TruncateSection drops fields[nFields..) and clears
+	// the rows so the section can be laid again after the cut.
+	void FormatSectionRows(int s);
+	void TruncateSection(int s, int nFields);
 	void SplitSection(int s);
 
 	virtual float GetPageWidth() const = 0;

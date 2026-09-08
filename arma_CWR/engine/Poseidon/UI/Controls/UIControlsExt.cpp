@@ -1940,6 +1940,33 @@ void CHTMLContainer::CopySection(int from, int to)
 
 void CHTMLContainer::FormatSection(int s)
 {
+    FormatSectionRows(s);
+    SplitSection(s);
+}
+
+// UD: drop fields[nFields..) and the rows, so the section can be laid again
+// (the Guerrilla journal moves the cut blocks onto a continuation page)
+void CHTMLContainer::TruncateSection(int s, int nFields)
+{
+    if (s < 0 || s >= _sections.Size())
+    {
+        return;
+    }
+    HTMLSection& section = _sections[s];
+    if (nFields < 0)
+    {
+        nFields = 0;
+    }
+    if (nFields < section.fields.Size())
+    {
+        section.fields.Resize(nFields);
+    }
+    section.rows.Clear();
+}
+
+// UD: the wrap half of FormatSection, without the SplitSection pagination
+void CHTMLContainer::FormatSectionRows(int s)
+{
     float maxLineWidth = GetPageWidth();
     float minHeight = _sizeP;
 
@@ -2202,8 +2229,6 @@ void CHTMLContainer::FormatSection(int s)
             section.rows.Delete(r);
         }
     }
-
-    SplitSection(s);
 }
 
 void CHTMLContainer::SplitSection(int s)
@@ -2259,7 +2284,11 @@ void CHTMLContainer::SplitSection(int s)
             checkHeight += source.rows[i + 1].height;
         }
         // next page?
-        if (checkHeight > pageHeight)
+        // UD: never break before the first row.  A first row taller than the
+        // reduced page (GetPageHeight() - 3.5 * _sizeP, e.g. an oversized image
+        // row) used to read source.rows[-1].lastField here; it now simply
+        // overflows page 0 and the break lands in front of the next row.
+        if (checkHeight > pageHeight && i > 0)
         {
             // complete old page
             int lastField = source.rows[i - 1].lastField;

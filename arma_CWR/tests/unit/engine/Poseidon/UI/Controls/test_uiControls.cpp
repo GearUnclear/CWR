@@ -1,11 +1,13 @@
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Core/resincl.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <string>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -332,4 +334,106 @@ TEST_CASE("C3DScrollBar Enable toggle", "[ui][scrollbar]")
     REQUIRE_FALSE(sb.IsEnabled());
     sb.Enable(true);
     REQUIRE(sb.IsEnabled());
+}
+
+// ─── CHTMLContainer::SplitSection: the pagination safety net behind
+// ─── FormatSection.  Parser-only container: no engine, no fonts, page metrics
+// ─── are ours (P row = 1 unit, an image row = h / 480 units).
+namespace
+{
+class PagedHtmlContainer final : public CHTMLContainer
+{
+  public:
+    explicit PagedHtmlContainer(float pageHeight) : _pageHeight(pageHeight) {}
+
+    float GetPageWidth() const override { return 1000; }
+    float GetPageHeight() const override { return _pageHeight; }
+    float GetTextWidth(float, Font*, const char* text) const override { return (float)strlen(text); }
+
+  private:
+    float _pageHeight;
+};
+
+// SplitSection decorates every page with sipka_*.paa arrow links; keep the
+// texture bank out of the parser-only test whatever the working directory holds.
+struct NoTexturesGuard
+{
+    bool previous;
+    NoTexturesGuard() : previous(Poseidon::NoTextures) { Poseidon::NoTextures = true; }
+    ~NoTexturesGuard() { Poseidon::NoTextures = previous; }
+};
+
+void AddParagraphRows(CHTMLContainer& html, int section, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        html.AddText(section, "row", HFP, HALeft, false, false, "");
+        html.AddBreak(section, false);
+    }
+}
+} // namespace
+
+TEST_CASE("SplitSection keeps an oversized first row on page 0 instead of reading rows[-1]", "[ui][html][split]")
+{
+    NoTexturesGuard noTextures;
+    // page height 5 P units; SplitSection reserves 3.5 of them for its own
+    // spacer + arrow rows, so the image row (10 units) is taller than a page
+    PagedHtmlContainer html(5);
+    int s = html.AddSection();
+    html.AddName(s, "S");
+    REQUIRE(html.AddImage(s, "", HALeft, false, 640, 480 * 10, "") != nullptr);
+    html.AddBreak(s, false);
+    AddParagraphRows(html, s, 3);
+
+    html.FormatSection(s);
+
+    int page0 = html.FindSection("S");
+    REQUIRE(page0 >= 0);
+    CHECK(html.FindSection("S/0") == page0);
+    CHECK(html.FindSection("S/1") >= 0);
+
+    const HTMLSection& first = html.GetSection(page0);
+    REQUIRE(first.names.Size() >= 1);
+    CHECK(std::string(static_cast<const char*>(first.names[0])) == "S");
+    bool imageOnPage0 = false;
+    for (int f = 0; f < first.fields.Size(); f++)
+    {
+        if (first.fields[f].format == HFImg)
+        {
+            imageOnPage0 = true;
+        }
+    }
+    CHECK(imageOnPage0);
+    // the image row is the only content row page 0 keeps
+    REQUIRE(first.rows.Size() >= 1);
+    CHECK_THAT(first.rows[0].height, Catch::Matchers::WithinAbs(10.0, 1e-4));
+}
+
+TEST_CASE("SplitSection paginates into <name>/<n> pages that all keep names[0]", "[ui][html][split]")
+{
+    NoTexturesGuard noTextures;
+    PagedHtmlContainer html(5);
+    int s = html.AddSection();
+    html.AddName(s, "S");
+    AddParagraphRows(html, s, 20);
+
+    html.FormatSection(s);
+
+    // 20 one-unit rows against 1.5 units of usable page: one row per page
+    REQUIRE(html.NSections() == 20);
+    int page0 = html.FindSection("S");
+    REQUIRE(page0 >= 0);
+    CHECK(html.FindSection("S/0") == page0);
+    for (int p = 0; p < 20; p++)
+    {
+        char name[16];
+        snprintf(name, sizeof(name), "S/%d", p);
+        int sec = html.FindSection(name);
+        REQUIRE(sec >= 0);
+        const HTMLSection& section = html.GetSection(sec);
+        REQUIRE(section.names.Size() == 2);
+        CHECK(std::string(static_cast<const char*>(section.names[0])) == "S");
+        CHECK(std::string(static_cast<const char*>(section.names[1])) == name);
+    }
+    CHECK(html.FindSection("S/20") < 0);
 }

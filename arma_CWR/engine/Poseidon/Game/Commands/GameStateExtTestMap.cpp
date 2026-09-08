@@ -257,3 +257,52 @@ GameValue TriBriefingClickAt(const GameState* /*state*/, GameValuePar arg)
     }
     return GameValue("OK");
 }
+
+/// triBriefingMetrics -> "x,y,w,h,scale,pageW,pageH" (%.4f each) / "FAIL:<reason>".
+/// The briefing/notes control's screen rect and scale (a per-frame projection of
+/// the 3D notepad's memory-point quad) plus the page width/height the HTML
+/// layout wraps and paginates against. Page units, so a Guerrilla journal
+/// capture lane can log the budget its pages were laid out for.
+GameValue TriBriefingMetrics(const GameState* /*state*/)
+{
+    if (!GWorld)
+        return GameValue("FAIL:no_world");
+    auto* map = dynamic_cast<DisplayMap*>(GWorld->Map());
+    if (!map)
+        return GameValue("FAIL:no_map");
+    CHTML* html = map->GetBriefingControl();
+    if (!html)
+        return GameValue("FAIL:no_briefing");
+    char buf[200];
+    snprintf(buf, sizeof(buf), "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f", html->X(), html->Y(), html->W(), html->H(),
+             html->GetScale(), html->GetPageWidth(), html->GetPageHeight());
+    LOG_INFO(Core, "[tri] triBriefingMetrics -> {}", buf);
+    return GameValue(buf);
+}
+
+/// triBriefingSlot <n> -> "face,size" / "FAIL:<reason>". The face name and the
+/// size (%.4f) bound to HTMLFormat slot n of the briefing/notes control: 0 = P,
+/// 1..6 = H1..H6; anything else is "FAIL:bad_slot". The face is "" when the slot
+/// has no font. Lets a capture lane assert the Guerrilla journal's slot binding
+/// (garamond / couriernewb / cwrpen) against the live CfgFonts table.
+GameValue TriBriefingSlot(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GWorld)
+        return GameValue("FAIL:no_world");
+    auto* map = dynamic_cast<DisplayMap*>(GWorld->Map());
+    if (!map)
+        return GameValue("FAIL:no_map");
+    CHTML* html = map->GetBriefingControl();
+    if (!html)
+        return GameValue("FAIL:no_briefing");
+    const int n = static_cast<int>(static_cast<GameScalarType>(arg));
+    if (n < (int)HFP || n > (int)HFH6)
+        return GameValue("FAIL:bad_slot");
+    const HTMLFormat slot = static_cast<HTMLFormat>(n);
+    const Font* font = html->GetFormatFont(slot, false);
+    const char* face = (font && font->Name()) ? font->Name() : "";
+    char buf[200];
+    snprintf(buf, sizeof(buf), "%s,%.4f", face, html->GetFormatSize(slot));
+    LOG_INFO(Core, "[tri] triBriefingSlot {} -> {}", n, buf);
+    return GameValue(buf);
+}

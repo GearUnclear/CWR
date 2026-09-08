@@ -110,6 +110,33 @@ TEST_CASE("Legacy RESOURCE.BIN font names still resolve (back-compat)", "[font][
     }
 }
 
+TEST_CASE("The Guerrilla journal's slot faces resolve by their exact row names", "[font][mapping][journal]")
+{
+    // JournalRender binds H3/H5 to `garamond`, H4 to `couriernewb` and H6 to
+    // `cwrpen` by the exact table row names. FindFontMapping is a prefix match
+    // on the ROW (the row's prefix must start the queried name), so the
+    // binder must not shorten a name: "couriernew" is not a prefix-of-row hit
+    // for the "couriernewb" row and resolves to nothing.
+    auto* pen = FindFontMapping("cwrpen");
+    REQUIRE(pen != nullptr);
+    CHECK(std::strstr(pen->ttfPath, "cwr_hand.ttf") != nullptr);
+    CHECK(pen->syntheticBold == 1.0f); // the heavier stroke that makes ink read at 800x600
+    auto* hand = FindFontMapping("cwrhand");
+    REQUIRE(hand != nullptr);
+    CHECK(pen != hand); // its own row, not the thin stock hand
+    CHECK(std::strcmp(pen->ttfPath, hand->ttfPath) == 0);
+
+    auto* serif = FindFontMapping("garamond");
+    REQUIRE(serif != nullptr);
+    CHECK(std::strstr(serif->ttfPath, "cwr_serif.ttf") != nullptr);
+
+    auto* mono = FindFontMapping("couriernewb");
+    REQUIRE(mono != nullptr);
+    CHECK(std::strstr(mono->ttfPath, "cwr_mono.ttf") != nullptr);
+
+    CHECK(FindFontMapping("couriernew") == nullptr);
+}
+
 TEST_CASE("FindFontMapping strips language prefixes (cz_/ru_/pl_)", "[font][mapping][lang]")
 {
     auto* cz = FindFontMapping("cz_tahomab12");
