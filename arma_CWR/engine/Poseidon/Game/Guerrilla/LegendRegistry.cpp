@@ -9,21 +9,37 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp> // GameDataObject (ScriptVars::ObjectAt)
-#include <Poseidon/World/World.hpp>                // GWorld (the real player, the clock)
+#include <Poseidon/World/World.hpp>                // GWorld / NewNonAIVehicle (the real player, the clock)
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp> // GLOB_LAND (the hull's seat)
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
-#include <Poseidon/AI/AI.hpp>        // AIUnit::LSAlive
-#include <Poseidon/AI/VehicleAI.hpp> // AIUnitInfo
+#include <Poseidon/World/Entities/Vehicles/Transport.hpp> // the tank commander's hull
+#include <Poseidon/AI/AI.hpp>                             // AIUnit::LSAlive
+#include <Poseidon/AI/AICore.hpp>                         // markersMap / MaxGroups
+#include <Poseidon/AI/VehicleAI.hpp>                      // AIUnitInfo / Rank
+#include <Poseidon/AI/Path/ArcadeWaypoint.hpp>            // ArcadeWaypointInfo / ArcadeMarkerInfo / CombatMode
+#include <Poseidon/Network/Network.hpp>                   // GetNetworkManager / GetInPosition
 
 #include <Random/randomGen.hpp> // GRandGen: the ONE stateful draw of the campaign
 
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
+#include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+// Shared command internals (Game/Commands) - the bodies of createUnit /
+// deleteVehicle / moveInXxx without the script-value parsing.  Global
+// namespace, the same forward-declaration idiom GarrisonCache and Traffic use.
+void CreateUnit(AIGroup* group, RString type, Vector3Par position, RString init, float skill, Rank rank);
+void DeleteVehicle(Entity* veh);
+bool NativeMoveIn(Poseidon::Person* soldier, Poseidon::Transport* veh, GetInPosition position);
+// waypoint re-evaluation hook, mirrored from WaypointSetType; defined at global
+// scope in AIArcade.cpp
+void OnWaypointsUpdated(Poseidon::AIGroupContext* context);
 
 using namespace Poseidon;
 
@@ -392,13 +408,22 @@ LSError LegendRow::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("pos", pos, 1, VZero))
     PARAM_CHECK(ar.Serialize("spawned", spawned, 1, false))
     PARAM_CHECK(ar.Serialize("defeated", defeated, 1, false))
+    PARAM_CHECK(ar.Serialize("guardCount", guardCount, 1, 0))
+    PARAM_CHECK(ar.Serialize("bodySeen", bodySeen, 1, false))
+    // false in a Change 2 archive and in every foot commander's row, which is
+    // the safe default: nobody in guards[] is movement-pinned unless this says
+    // they are a tank crew.
+    PARAM_CHECK(ar.Serialize("crewed", crewed, 1, false))
+    PARAM_CHECK(ar.Serialize("marker", markerName, 1, RString()))
+    PARAM_CHECK(ar.Serialize("markerPainted", markerPainted, 1, false))
     // the refs resolve on the second load pass, after the world's serializers
     // have recreated the bodies
     PARAM_CHECK(ar.SerializeRef("body", body, 1))
     PARAM_CHECK(ar.SerializeRef("vehicle", vehicle, 1))
     PARAM_CHECK(ar.SerializeRef("group", group, 1))
     PARAM_CHECK(ar.SerializeRefs("Guards", guards, 1))
-    // lastPos / lastZone are TRANSIENT: they are re-derived by the next poll.
+    // lastPos / lastZone / reasserted are TRANSIENT: the first two are
+    // re-derived by the next poll, the third is a per-session latch.
     return LSOK;
 }
 
@@ -422,6 +447,8 @@ void LegendRegistry::Clear()
     _occupierName = RString();
     _pollDigest = 0;
     _rankWarned.Clear();
+    _bossRoles.Clear();
+    _loadReassertPending = false;
 }
 
 void LegendRegistry::InitMission()
@@ -458,6 +485,8 @@ void LegendRegistry::Simulate(float deltaT)
     }
     _accum = 0;
     PollCompanions();
+    SpawnBosses();
+    BossTick();
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +557,10 @@ void LegendRegistry::SeedCampaign()
     _history = GenerateHistory(in);
 
     PreRollBossIdentities();
+    // Where each of the three stands and what he is.  Resolved ONCE, here, from
+    // the persisted seed and the zone table; never recomputed, so a captured
+    // zone or a changed war level never moves a commander.
+    ResolveBosses();
     LOG_INFO(Core, "Legends: campaign seeded ({}), history v{}, {} enemy Legend(s)", _seed, _history.version,
              kBossCount);
     Touch(true);
@@ -822,14 +855,15 @@ void LegendRegistry::RecordDeed(LegendRow& row, const RString& text, int kind)
     deed.stamp = JournalStampNow();
     deed.text = text;
     deed.kind = kind;
-    // A5: past the cap the OLDEST NON-AWARD, NON-DEATH deed is dropped, so the
-    // earned names and the death line are never the ones evicted.
+    // A5: past the cap the OLDEST NON-AWARD, NON-DEATH, NON-DEFEAT deed is
+    // dropped, so the earned names, the death line and a Legend's one defeat
+    // line are never the ones evicted.
     while (row.deeds.Size() > kMaxDeeds)
     {
         int victim = -1;
         for (int i = 0; i < row.deeds.Size(); i++)
         {
-            if (row.deeds[i].kind != LDAward && row.deeds[i].kind != LDDeath)
+            if (row.deeds[i].kind != LDAward && row.deeds[i].kind != LDDeath && row.deeds[i].kind != LDDefeat)
             {
                 victim = i;
                 break;
@@ -837,21 +871,25 @@ void LegendRegistry::RecordDeed(LegendRow& row, const RString& text, int kind)
         }
         if (victim < 0)
         {
-            victim = 0; // every deed is an award or the death line: drop the oldest
+            victim = 0; // every deed is protected: drop the oldest
         }
         row.deeds.Delete(victim);
     }
 }
 
-void LegendRegistry::WriteEntry(const LegendRow& row, const RString& text, int kind)
+void LegendRegistry::WriteEntry(const LegendRow& row, const RString& text, int kind, const RString& zoneOverride)
 {
     // A7 / D2.5: only a campaign this build seeded writes diary lines.  A DERIVED
-    // campaign's own serialized companions.sqs is still writing its own.
+    // campaign's own serialized companions.sqs is still writing its own.  This
+    // is also the ONE gate that decides whether the registry may write to the
+    // diary at all, which is why the enemy Legends' defeat line comes through
+    // here rather than calling Journal::AddEntry itself.
     if (!_progression || text.GetLength() == 0)
     {
         return;
     }
-    Journal::Instance().AddEntry(JournalStampNow(), text, row.lastZone, kind, row.id);
+    const RString zone = zoneOverride.GetLength() > 0 ? zoneOverride : row.lastZone;
+    Journal::Instance().AddEntry(JournalStampNow(), text, zone, kind, row.id);
 }
 
 void LegendRegistry::Touch(bool dossierVisible)
@@ -907,11 +945,22 @@ bool LegendRegistry::Bind(int compIndex, Object* body)
             Touch(true);
         }
     }
-    if (r < 0)
+    return BindRow(r, body);
+}
+
+// The stamping half, addressed by ROW.  Split out of Bind because a boss row
+// carries compIndex == -1 and can therefore never be reached through
+// FindByCompIndex: without this the three commanders would wear the createUnit
+// pool identity, and row.body - which is assigned here - would stay null, which
+// in turn would leave the defeat poll and all four serialized refs inert.
+bool LegendRegistry::BindRow(int rowIndex, Object* body)
+{
+    Person* person = dyn_cast<Person>(body);
+    if (!person || rowIndex < 0 || rowIndex >= _rows.Size())
     {
         return false;
     }
-    LegendRow& row = _rows[r];
+    LegendRow& row = _rows[rowIndex];
     const RString display = DisplayName(row);
     if (display.GetLength() == 0)
     {
@@ -1231,6 +1280,912 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
 }
 
 // ---------------------------------------------------------------------------
+// the three enemy Legends
+// ---------------------------------------------------------------------------
+
+int LegendRegistry::BossCount() const
+{
+    int n = 0;
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        if (_rows[i].kind == LKBoss)
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+int LegendRegistry::DefeatedCount() const
+{
+    int n = 0;
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        if (_rows[i].kind == LKBoss && _rows[i].defeated)
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+Vector3 LegendRegistry::RowPos(int row) const
+{
+    return (row >= 0 && row < _rows.Size()) ? _rows[row].pos : VZero;
+}
+
+Object* LegendRegistry::RowBody(int row) const
+{
+    return (row >= 0 && row < _rows.Size()) ? _rows[row].body.GetLink() : nullptr;
+}
+
+Object* LegendRegistry::RowVehicle(int row) const
+{
+    return (row >= 0 && row < _rows.Size()) ? _rows[row].vehicle.GetLink() : nullptr;
+}
+
+int LegendRegistry::BossOrdinal(const LegendRow& row) const
+{
+    int n = 0;
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        if (_rows[i].kind != LKBoss)
+        {
+            continue;
+        }
+        if (strcmp(_rows[i].id, row.id) == 0)
+        {
+            return n;
+        }
+        n++;
+    }
+    return -1;
+}
+
+// The row's own key, in a channel range LegendSeed's LegendChannel enum does
+// not use (it stops at 53).  Kept local rather than added to that enum so this
+// file owns its one extra draw kind and no shared header moves under a running
+// campaign.
+static unsigned GuardRoll(unsigned long long key, int guardIndex, int mod)
+{
+    if (mod <= 0)
+    {
+        return 0;
+    }
+    unsigned long long st = key + (unsigned long long)(0x100 + guardIndex) * 0x9E3779B97F4A7C15ull;
+    return (unsigned)(SplitMix64(st) % (unsigned long long)mod);
+}
+
+void LegendRegistry::ResolveBosses()
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    const RString occupier = registry.OccupierSide();
+
+    // the zone table as placement candidates, in table order
+    AutoArray<LegendZoneCandidate> all;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* zone = registry.GetZone(i);
+        if (!zone)
+        {
+            continue;
+        }
+        const int at = all.Add();
+        LegendZoneCandidate& c = all[at];
+        c.name = zone->name;
+        c.type = zone->type;
+        c.occupied = occupier.GetLength() > 0 && stricmp(zone->owner, occupier) == 0;
+        c.x = zone->pos.X();
+        c.z = zone->pos.Z();
+    }
+
+    AutoArray<LegendZoneCandidate> zones;
+    int campIndex = -1;
+    SelectLegendZones(all, zones, campIndex);
+
+    AutoArray<LegendSpotSample> samples;
+    // `all`, not `zones`: the ladder drops the CITY zones from the sampled set,
+    // and those are precisely the centres a stand has to stay away from.  A
+    // commander inside a town's presence radius counts as occupier presence
+    // there and pins its support at the floor for the whole campaign.
+    BuildLegendSamples(zones, campIndex, samples, &all);
+
+    LegendRoleCapability cap;
+    if (const FactionRecord* faction = registry.FindFactionForSide(occupier))
+    {
+        cap = ReadLegendCapability(*faction, ReadWarLevel());
+    }
+    else
+    {
+        LOG_WARN(Core, "Legends: no faction descriptor for occupier side '{}' - commanders degrade to rifle infantry",
+                 (const char*)occupier);
+    }
+
+    ApplyBossResolution(cap, zones, samples, registry.Tuning().zoneArea);
+}
+
+void LegendRegistry::ResolveBossesForTest(const LegendRoleCapability& cap, const AutoArray<LegendZoneCandidate>& zones,
+                                          const AutoArray<LegendSpotSample>& samples)
+{
+    ApplyBossResolution(cap, zones, samples, LegendPlacementConstants::Rings[0] - 1.0f);
+}
+
+void LegendRegistry::ApplyBossResolution(const LegendRoleCapability& cap, const AutoArray<LegendZoneCandidate>& zones,
+                                         const AutoArray<LegendSpotSample>& samples, float zoneArea)
+{
+    AutoArray<int> bossRows;
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        if (_rows[i].kind == LKBoss)
+        {
+            bossRows.Add(i);
+        }
+    }
+    if (bossRows.Size() == 0)
+    {
+        return;
+    }
+
+    // The whole design rests on a commander standing outside the zone presence
+    // radius: the inner ring is a hard 350 m, but zoneArea is a template key.
+    // A template that raises it that far silently reverses the reading (his
+    // presence would then block the zone's capture and pin its alert), so say
+    // so once rather than letting it pass unremarked.
+    if (zoneArea >= LegendPlacementConstants::Rings[0])
+    {
+        LOG_WARN(Core,
+                 "Legends: this template's zoneArea ({:.0f} m) reaches the commanders' inner ring ({:.0f} m) - they "
+                 "will count as zone presence and can block their zone's capture",
+                 (double)zoneArea, (double)LegendPlacementConstants::Rings[0]);
+    }
+
+    _bossRoles.Clear();
+    ResolveLegendRoles(cap, bossRows.Size(), _bossRoles);
+    const LegendPlacementResult placed = PickLegendSpots(samples, _seed);
+
+    for (int n = 0; n < bossRows.Size(); n++)
+    {
+        LegendRow& row = _rows[bossRows[n]];
+        const LegendRoleResolution& res = _bossRoles[n];
+        row.roleRequested = RString(LegendRoleName(res.requested));
+        row.roleResolved = RString(LegendRoleName(res.resolved));
+        row.role = row.roleResolved;
+        row.guardCount = res.guardCount;
+        if (res.resolved != res.requested)
+        {
+            LOG_WARN(Core, "Legends: '{}' asked for {} but this faction cannot field one - degraded to {}",
+                     (const char*)row.id, LegendRoleName(res.requested), LegendRoleName(res.resolved));
+        }
+        if (n < placed.picked.Size())
+        {
+            const LegendSpotSample& spot = samples[placed.picked[n]];
+            row.pos = Vector3(spot.x, spot.height, spot.z);
+            row.zoneName = (spot.zone >= 0 && spot.zone < zones.Size()) ? zones[spot.zone].name : RString();
+        }
+        else
+        {
+            // No stand: this commander keeps his identity, his dossier and his
+            // biography, and is never placed, never spawned, never marked and
+            // never retried for the rest of the campaign.
+            row.pos = VZero;
+            row.zoneName = RString();
+        }
+    }
+
+    if (placed.picked.Size() < bossRows.Size())
+    {
+        static const char* const kReason[] = {"ok", "no military zone on this island", "every candidate stand is water",
+                                              "every candidate stand is on a road",
+                                              "the stands are too close together"};
+        const int reason = (placed.reason >= 0 && placed.reason <= LPTooCrowded) ? placed.reason : 0;
+        LOG_WARN(Core, "Legends: only {} of {} enemy commanders could be placed on {} ({})", placed.picked.Size(),
+                 bossRows.Size(), (const char*)IslandDisplayName(), kReason[reason]);
+        if (_progression)
+        {
+            char line[192];
+            snprintf(line, sizeof(line), "Intelligence names only %d enemy commanders on this island.",
+                     placed.picked.Size());
+            Journal::Instance().AddEntry(JournalStampNow(), RString(line), RString(), JKWarn, RString());
+        }
+    }
+    else if (placed.campRelaxed)
+    {
+        // The routine outcome on the shipped templates, not an error: Abel's
+        // Outpost centre is 517 m from its Camp and Demo's 289 m, so the 800 m
+        // preference cannot be met and the 400 m floor is what binds.
+        LOG_INFO(Core, "Legends: a commander stands inside the preferred camp distance (the 400 m floor applies)");
+    }
+}
+
+void LegendRegistry::EnsureBossRoles()
+{
+    const int wanted = BossCount();
+    if (wanted <= 0 || _bossRoles.Size() == wanted)
+    {
+        return;
+    }
+    // A cold cache means a load, or a mission re-init after the seeding tick.
+    // Only role/roleRequested/roleResolved/guardCount are persisted, so the
+    // class names are re-derived from the live faction here.  This can only
+    // matter to a spawn, and a loaded campaign never spawns a boss again.
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    LegendRoleCapability cap;
+    if (const FactionRecord* faction = registry.FindFactionForSide(registry.OccupierSide()))
+    {
+        cap = ReadLegendCapability(*faction, ReadWarLevel());
+    }
+    _bossRoles.Clear();
+    ResolveLegendRoles(cap, wanted, _bossRoles);
+}
+
+// ---------------------------------------------------------------------------
+// spawning
+// ---------------------------------------------------------------------------
+
+// The createUnit snapshot-and-diff: ::CreateUnit returns void (it is the body of
+// the script command), so the only way to reach the Person it built is to see
+// which group slot changed.  Market.cpp:792 and Traffic.cpp:1745 are the two
+// precedents; this one adds the rank/skill arguments a commander needs.
+static Person* SpawnInto(AIGroup* grp, RString type, Vector3Par where, float skill, Rank rank)
+{
+    if (!grp || type.GetLength() == 0)
+    {
+        return nullptr;
+    }
+    AIUnit* before[MAX_UNITS_PER_GROUP];
+    for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+    {
+        before[i] = grp->UnitWithID(i + 1);
+    }
+    ::CreateUnit(grp, type, where, RString(), skill, rank);
+    for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+    {
+        AIUnit* u = grp->UnitWithID(i + 1);
+        if (u && u != before[i])
+        {
+            return u->GetPerson();
+        }
+    }
+    return nullptr;
+}
+
+// The hull, mirroring Traffic::CreateTrafficVehicle minus the road orientation:
+// a parked tank stands on the terrain normal facing north.
+static Transport* SpawnBossHull(RString type, Vector3Par where)
+{
+    if (!GWorld || !GLandscape || type.GetLength() == 0)
+    {
+        return nullptr;
+    }
+    Ref<Entity> veh = NewNonAIVehicle(type, nullptr);
+    Transport* transport = veh.NotNull() ? dyn_cast<Transport>(veh.GetRef()) : nullptr;
+    if (!transport)
+    {
+        return nullptr;
+    }
+    Vector3 pos = where;
+    Vector3 normal = VUp;
+    if (AIUnit::FindFreePosition(pos, normal, false, transport))
+    {
+        float dx, dz;
+        pos[1] = GLOB_LAND->SurfaceYAboveWater(pos[0], pos[2], &dx, &dz);
+        normal = Vector3(-dx, 1, -dz);
+    }
+    Matrix3 orient;
+    Matrix4 transform;
+    transform.SetPosition(pos);
+    orient.SetUpAndDirection(normal, VForward);
+    transform.SetOrientation(orient);
+    veh->PlaceOnSurface(transform);
+    veh->SetTransform(transform);
+    veh->Init(transform);
+    GWorld->AddVehicle(veh);
+    if (GWorld->GetMode() == GModeNetware)
+    {
+        GetNetworkManager().CreateVehicle(veh, VLTVehicle, "", -1);
+    }
+    return transport;
+}
+
+// The stand posture.  CreateSideGroup installs an ACMOVE waypoint at the map
+// ORIGIN (ZoneRegistry.cpp:119 -> AIGroup::AddFirstWaypoint), and INDEX 0 IS
+// NEVER EXECUTED: ArcadeInit starts the FSM at index 1 (AIArcade.cpp:371-377)
+// and the index only ever increments, so a waypoint written into slot 0 is
+// dead on arrival - the FSM compares 1 against NWaypoints() and drops straight
+// to SArcadeDone.  The sentry therefore goes at index 1, next to the origin
+// ACMOVE that CreateSideGroup leaves behind, exactly as GarrisonCache::
+// SetHoldPosture appends its own (GarrisonCache.cpp:309-312).
+//
+// What that buys is smaller than "the guards have a locality mechanism": the
+// waypoint commands the group LEADER (AIArcade.cpp:924-985), who is DAMove
+// pinned, and SENTRY completes on the first enemy contact
+// (AIArcadeActions.inc:574-578).  The honest statement is that the group holds
+// its stand before contact instead of reporting MissionCompleted on its first
+// AI tick.  Behaviour AWARE and the yellow semaphore are what carry it after.
+static void SetBossPosture(AIGroup* grp, Vector3Par stand)
+{
+    if (!grp)
+    {
+        return;
+    }
+    const int index = grp->AddWaypoint();
+    ArcadeWaypointInfo& wp = grp->GetWaypoint(index);
+    wp.position = stand;
+    wp.placement = 0;
+    wp.type = ACSENTRY;
+    if (grp->GetCurrent())
+    {
+        AIGroupContext context(grp);
+        context._task = grp->GetCurrent()->_task;
+        context._fsm = grp->GetCurrent()->_fsm;
+        ::OnWaypointsUpdated(&context);
+    }
+    grp->SetCombatModeMajor(CMAware);
+    grp->SetSemaphore(AI::SemaphoreYellow);
+    PackedBoolArray all;
+    for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+    {
+        if (grp->UnitWithID(i + 1))
+        {
+            all.Set(i, true);
+        }
+    }
+    grp->SendSemaphore(AI::SemaphoreYellow, all);
+    GetNetworkManager().UpdateObject(grp);
+}
+
+// ONE flag, on the brain, ORed onto whatever is already there (SetAIDisabled is
+// a raw assignment).  DAMove and nothing else: DATarget would stop his group
+// assigning him targets, DAAutoTarget his own acquisition, DAAnim his stance.
+// DAMove is read only in EntityAI::LeaderPilot / FormationPilot, never in the
+// targeting or firing path, so a pinned commander still acquires and fires.
+static void PinUnit(Person* person)
+{
+    AIUnit* unit = person ? person->Brain() : nullptr;
+    if (unit)
+    {
+        unit->SetAIDisabled(unit->GetAIDisabled() | AIUnit::DAMove);
+    }
+}
+
+void LegendRegistry::PinBossActors(LegendRow& row)
+{
+    PinUnit(dyn_cast<Person>(row.body.GetLink()));
+    // ONLY A TANK CREW, never bodyguards.  row.guards holds both populations,
+    // so the gate is row.crewed, written once inside the hull branch of
+    // SpawnOneBoss: roleResolved still reads "Tank Commander" when the hull
+    // refused to materialize, and row.vehicle is already cleared by the time
+    // PruneBossHull re-pins, so neither of those can stand in for it.
+    //
+    // On a tank the flag goes on EVERY crew brain, not on the hull and not just
+    // on the commander: the DAMove check reads PilotUnit(), which is the
+    // DRIVER's brain, while the script disableAI resolves through
+    // CommanderUnit() and would land on the wrong one.  Setting all of them also
+    // survives a driver casualty and an eject.
+    //
+    // Bodyguards stay free on purpose: spec section 2 pins the named boss and
+    // asks his guards to defend locally, which they cannot do at all if their
+    // movement is disabled (DAMove is read by LeaderPilot and FormationPilot,
+    // so a pinned guard cannot even follow formation).
+    if (!row.crewed)
+    {
+        return;
+    }
+    for (int i = 0; i < row.guards.Size(); i++)
+    {
+        PinUnit(dyn_cast<Person>(row.guards[i].GetLink()));
+    }
+}
+
+void LegendRegistry::SpawnBosses()
+{
+    if (!_progression || !GWorld)
+    {
+        return;
+    }
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        LegendRow& row = _rows[i];
+        if (row.kind != LKBoss || row.spawned || row.defeated)
+        {
+            continue;
+        }
+        if (row.roleResolved.GetLength() == 0 || row.zoneName.GetLength() == 0)
+        {
+            continue; // never placed: this row has no stand and never will
+        }
+        // The latch goes down BEFORE anything is created, so a fault or an
+        // early return below costs this campaign a commander rather than
+        // letting it build a second copy of one.
+        row.spawned = true;
+        if (!SpawnOneBoss(row))
+        {
+            LOG_WARN(Core, "Legends: '{}' could not be spawned near '{}' - he stays unlocated for this campaign",
+                     (const char*)row.id, (const char*)row.zoneName);
+            LatchSpawnFailure(row);
+        }
+        Touch(true);
+        return; // at most ONE per tick: three groups is a real draw on the
+                // occupier center's group budget, so they arrive spread out
+    }
+}
+
+// THE PLACEMENT GOES WITH THE FAILURE.  SpawnOneBoss returns false before it
+// ever reaches CreateBossMarker or AssertBossObjective, so a failed row has
+// neither; leaving zoneName populated would advertise a commander "near
+// Outpost" who does not exist and can never be killed, and would let the load
+// pass manufacture the marker and the objective he never had (both key off
+// zoneName).  Clearing it is what keeps the three readings agreeing: they all
+// read this row, and now all three say nothing.  The latch itself STAYS DOWN -
+// a failure costs the campaign a commander, it does not earn a retry.
+void LegendRegistry::LatchSpawnFailure(LegendRow& row)
+{
+    row.zoneName = RString();
+    row.pos = VZero;
+}
+
+bool LegendRegistry::SpawnOneBoss(LegendRow& row)
+{
+    const int rowIndex = FindById(row.id);
+    const int ordinal = BossOrdinal(row);
+    EnsureBossRoles();
+    if (rowIndex < 0 || ordinal < 0 || ordinal >= _bossRoles.Size())
+    {
+        return false;
+    }
+    const LegendRoleResolution res = _bossRoles[ordinal];
+    if (res.bossClass.GetLength() == 0)
+    {
+        LOG_WARN(Core, "Legends: the occupier fields no body this commander could wear");
+        return false;
+    }
+
+    const RString occupier = ZoneRegistry::Instance().OccupierSide();
+    AIGroup* grp = CreateSideGroup(EnsureSideCenter(occupier));
+    if (!grp)
+    {
+        // MaxGroups on the occupier center.  A spawn failure, not a retry: the
+        // latch is already down.
+        LOG_WARN(Core, "Legends: group budget exhausted on side '{}'", (const char*)occupier);
+        return false;
+    }
+    row.group = grp;
+
+    const unsigned long long key = RowKey(row.id);
+
+    // The hull first when there is one: it is not a group member, so it cannot
+    // take the leader slot the commander needs.
+    Transport* hull = nullptr;
+    if (res.resolved == LRTank && res.vehicleClass.GetLength() > 0)
+    {
+        hull = SpawnBossHull(res.vehicleClass, row.pos);
+        if (!hull)
+        {
+            // Degrade in place rather than lose the commander: he stands on
+            // foot with the profile ResolveLegendRoles already filled in.
+            LOG_WARN(Core, "Legends: hull '{}' would not materialize - '{}' stands on foot",
+                     (const char*)res.vehicleClass, (const char*)row.id);
+        }
+    }
+
+    // The commander first, so AICenter::SelectLeader makes HIM the leader.
+    Person* boss = SpawnInto(grp, res.bossClass, row.pos, kBossSkill, RankColonel);
+    if (!boss)
+    {
+        if (hull)
+        {
+            ::DeleteVehicle(hull);
+        }
+        grp->RemoveFromCenter();
+        row.group = LLink<AIGroup>();
+        LOG_WARN(Core, "Legends: body '{}' did not materialize", (const char*)res.bossClass);
+        return false;
+    }
+    // AFTER ::CreateUnit returns, never before: the engine stamps a pool
+    // identity onto the fresh body at the end of that call, so an earlier write
+    // would simply be overwritten.
+    BindRow(rowIndex, boss);
+    row.bodySeen = true;
+    // The persisted stand is where the BODY is: CreateUnit runs its own free
+    // position search and snaps Y, so re-read rather than trust the sample.
+    row.pos = boss->Position();
+
+    row.guards.Clear();
+    if (hull)
+    {
+        row.vehicle = hull;
+        // From here guards[] is a CREW, and a crew is movement-pinned with its
+        // commander.  Written before PinBossActors runs and persisted, so the
+        // hull's death and a reload cannot turn a crew back into bodyguards.
+        row.crewed = true;
+        // driver always; gunner and commander when the hull offers them.  The
+        // commander takes the HIGHEST seat present, his crew fill the rest.
+        const GetInPosition bossSeat =
+            res.hasCommanderSeat ? GIPCommander : (res.hasGunnerSeat ? GIPGunner : GIPDriver);
+        if (!::NativeMoveIn(boss, hull, bossSeat))
+        {
+            LOG_WARN(Core, "Legends: '{}' was refused his seat - he stands beside the hull", (const char*)row.id);
+        }
+        if (bossSeat != GIPDriver)
+        {
+            if (Person* driver = SpawnInto(grp, res.crewClass, row.pos, kGuardSkill, RankPrivate))
+            {
+                ::NativeMoveIn(driver, hull, GIPDriver);
+                row.guards.Add(driver);
+            }
+        }
+        if (res.hasGunnerSeat && bossSeat != GIPGunner)
+        {
+            if (Person* gunner = SpawnInto(grp, res.crewClass, row.pos, kGuardSkill, RankPrivate))
+            {
+                ::NativeMoveIn(gunner, hull, GIPGunner);
+                row.guards.Add(gunner);
+            }
+        }
+        // The stand is where the BODY is, and a seated commander is wherever
+        // his hull ended up: AIUnit::FindFreePosition moves a tank hull much
+        // farther than it moves a man (a BMP measured 37 m off its sample on
+        // Abel), so the earlier re-read is stale the moment he takes his seat.
+        // WORLD position, not Position(): a crewman's own transform stays where
+        // he was standing, and it is the world one that getPos and the map
+        // report.  The marker, the objective and the dossier all read row.pos.
+        row.pos = boss->WorldPosition();
+    }
+    else
+    {
+        for (int g = 0; g < res.guardCount; g++)
+        {
+            const float bearing = (float)GuardRoll(key, g, 360) * (3.14159265f / 180.0f);
+            const float radius =
+                kGuardRadiusMin + (kGuardRadiusMax - kGuardRadiusMin) * ((float)GuardRoll(key, 32 + g, 1000) / 1000.0f);
+            const Vector3 at(row.pos.X() + sinf(bearing) * radius, row.pos.Y(), row.pos.Z() + cosf(bearing) * radius);
+            if (Person* guard = SpawnInto(grp, res.guardClass, at, kGuardSkill, RankPrivate))
+            {
+                row.guards.Add(guard);
+            }
+        }
+    }
+    row.guardCount = row.guards.Size();
+
+    PinBossActors(row);
+    SetBossPosture(grp, row.pos);
+    CreateBossMarker(row);
+    AssertBossObjective(row);
+    LOG_INFO(Core, "Legends: '{}' ({}) stands near '{}' at [{:.0f},{:.0f}] with {} guard(s)", (const char*)row.id,
+             (const char*)row.role, (const char*)row.zoneName, row.pos.X(), row.pos.Z(), row.guards.Size());
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// the defeat poll
+// ---------------------------------------------------------------------------
+
+void LegendRegistry::PruneBossHull(LegendRow& row)
+{
+    Object* hull = row.vehicle.GetLink();
+    if (!hull || !hull->IsDammageDestroyed())
+    {
+        return;
+    }
+    row.vehicle = LLink<Object>();
+    // NativeMoveIn leaves a standing get-in order on every seat.  The crew
+    // ejects when the hull dies with that order still live, which parks each of
+    // them trying to re-board a wreck instead of fighting; the traffic
+    // steal-watch hit the same thing.
+    if (Person* boss = dyn_cast<Person>(row.body.GetLink()))
+    {
+        if (AIUnit* unit = boss->Brain())
+        {
+            unit->OrderGetIn(false);
+        }
+    }
+    for (int i = 0; i < row.guards.Size(); i++)
+    {
+        Person* crew = dyn_cast<Person>(row.guards[i].GetLink());
+        if (AIUnit* unit = crew ? crew->Brain() : nullptr)
+        {
+            unit->OrderGetIn(false);
+        }
+    }
+    // the flag lives on the brain and should ride the dismount, but that path
+    // is unmeasured: re-OR it the first time the hull is gone
+    PinBossActors(row);
+    LOG_INFO(Core, "Legends: '{}' lost his hull; the objective stands until he himself is dead", (const char*)row.id);
+}
+
+void LegendRegistry::BossTick()
+{
+    if (_loadReassertPending)
+    {
+        _loadReassertPending = false;
+        ReassertBossActors();
+    }
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        LegendRow& row = _rows[i];
+        if (row.kind != LKBoss || !row.spawned || row.defeated)
+        {
+            continue;
+        }
+        Person* person = dyn_cast<Person>(row.body.GetLink());
+        if (person)
+        {
+            row.bodySeen = true;
+        }
+        PruneBossHull(row);
+        // ALIVENESS IS THE LIFE STATE, NEVER LINK NULLNESS: an LLink to a
+        // corpse does not null, only a deleted object does.
+        AIUnit* unit = person ? person->Brain() : nullptr;
+        const bool alive = unit && unit->GetLifeState() == AIUnit::LSAlive;
+        if (alive)
+        {
+            row.lastPos = person->Position();
+            row.lastZone = row.zoneName;
+            continue;
+        }
+        // bodySeen is what keeps a spawn that failed outright (latched, body
+        // null, never resolved) from reading as a death.
+        if (row.bodySeen || person)
+        {
+            LatchDefeat(row);
+        }
+    }
+}
+
+void LegendRegistry::SpawnFailureForTest(int row, bool keepPlacement)
+{
+    if (row < 0 || row >= _rows.Size() || _rows[row].kind != LKBoss)
+    {
+        return;
+    }
+    // the two steps SpawnBosses takes when SpawnOneBoss returns false, in the
+    // same order: the latch is already down before the actors are attempted.
+    _rows[row].spawned = true;
+    if (!keepPlacement)
+    {
+        LatchSpawnFailure(_rows[row]);
+    }
+}
+
+void LegendRegistry::BossTickForTest(int row, bool alive, bool hullDestroyed)
+{
+    if (row < 0 || row >= _rows.Size() || _rows[row].kind != LKBoss)
+    {
+        return;
+    }
+    LegendRow& r = _rows[row];
+    if (hullDestroyed)
+    {
+        // the live poll asks the hull; here the answer is injected
+        r.vehicle = LLink<Object>();
+        if (Person* boss = dyn_cast<Person>(r.body.GetLink()))
+        {
+            if (AIUnit* unit = boss->Brain())
+            {
+                unit->OrderGetIn(false);
+            }
+        }
+    }
+    if (!alive)
+    {
+        LatchDefeat(r);
+    }
+}
+
+void LegendRegistry::LatchDefeat(LegendRow& row)
+{
+    // Idempotent behind the PERSISTED flag, so a reload, a re-poll and five
+    // more calls in a row all converge on "already dead" and the campaign
+    // record carries exactly one line about it.
+    if (row.defeated)
+    {
+        return;
+    }
+    row.defeated = true;
+    row.alive = false;
+    int day = 1;
+    int minute = 0;
+    JournalClockNow(day, minute);
+    row.deathDay = day;
+    row.deathMinute = minute;
+
+    // His PLACED zone, never the transient lastZone: he stands 350 m or more
+    // outside it, so the nearest-zone search would routinely name the Camp, and
+    // that string is also the entry's zone column.
+    const RString zone = row.zoneName;
+    const RString name = DisplayName(row);
+    const RString role = row.role.GetLength() > 0 ? row.role : RString(LegendRoleName(LRElite));
+
+    char line[384];
+    if (zone.GetLength() > 0)
+    {
+        snprintf(line, sizeof(line), "Killed near %s on Day %d.", (const char*)zone, day);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "Killed on Day %d.", day);
+    }
+    RecordDeed(row, RString(line), LDDefeat);
+
+    if (zone.GetLength() > 0)
+    {
+        snprintf(line, sizeof(line), "%s, %s, is dead near %s.", (const char*)name, (const char*)role,
+                 (const char*)zone);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "%s, %s, is dead.", (const char*)name, (const char*)role);
+    }
+    // charId is what files the same line in the campaign record AND in that
+    // commander's own dossier without anyone parsing prose.
+    WriteEntry(row, RString(line), JKGood, zone);
+
+    AssertBossObjective(row);
+    RepaintBossMarker(row);
+    // WriteEntry and SetObjective already bumped the journal's revision; do not
+    // bump it a second time (ApplySnapshot's rule).
+    Touch(!_progression);
+}
+
+// ---------------------------------------------------------------------------
+// map marker and objective
+// ---------------------------------------------------------------------------
+
+// The two marker config reads use the RAISING >>, which is a hard error on a
+// package that lacks the class.  "Warning" is in Classic 1.99's CfgMarkers, but
+// a headless run has no config at all, so ask first.
+static bool MarkerConfigReady(const char* type, const char* colorName)
+{
+    const ParamEntry* markers = Pars.FindEntry("CfgMarkers");
+    const ParamEntry* colors = Pars.FindEntry("CfgMarkerColors");
+    return markers && colors && markers->FindEntry(type) && colors->FindEntry(colorName);
+}
+
+static RString BossMarkerText(const RString& name, const RString& role, bool defeated)
+{
+    char text[320];
+    if (defeated)
+    {
+        snprintf(text, sizeof(text), "%s (defeated)", (const char*)name);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "%s, %s", (const char*)name, (const char*)role);
+    }
+    return RString(text);
+}
+
+void LegendRegistry::CreateBossMarker(LegendRow& row)
+{
+    if (!GWorld || row.zoneName.GetLength() == 0)
+    {
+        return;
+    }
+    if (row.markerName.GetLength() == 0)
+    {
+        char buffer[64];
+        snprintf(buffer, sizeof(buffer), "gmLegend_%s", (const char*)row.id);
+        row.markerName = RString(buffer);
+    }
+    // NEVER on load, and never twice: markersMap serializes wholesale, and
+    // AICenterImpl's CreateMarker appends without a duplicate check.
+    for (int m = 0; m < markersMap.Size(); m++)
+    {
+        if (stricmp(markersMap[m].name, row.markerName) == 0)
+        {
+            RepaintBossMarker(row);
+            return;
+        }
+    }
+    const char* color = row.defeated ? kMarkerColorDefeated : kMarkerColorLive;
+    const int at = markersMap.Add();
+    ArcadeMarkerInfo& info = markersMap[at];
+    info.name = row.markerName;
+    info.position = row.pos;
+    info.markerType = MTIcon;
+    info.type = kMarkerType;
+    info.colorName = color;
+    info.text = BossMarkerText(DisplayName(row), row.role, row.defeated);
+    if (MarkerConfigReady(kMarkerType, color))
+    {
+        // type FIRST, then colour: OnColorChanged reads CfgMarkers >> type when
+        // the colour is Default, and OnTypeChanged is what loads the icon and
+        // the size - without it the icon is null, size is 0 and nothing draws.
+        info.OnTypeChanged();
+        info.OnColorChanged();
+    }
+    row.markerPainted = row.defeated;
+}
+
+void LegendRegistry::RepaintBossMarker(LegendRow& row)
+{
+    if (row.markerName.GetLength() == 0)
+    {
+        return;
+    }
+    const char* color = row.defeated ? kMarkerColorDefeated : kMarkerColorLive;
+    const RString text = BossMarkerText(DisplayName(row), row.role, row.defeated);
+    for (int m = 0; m < markersMap.Size(); m++)
+    {
+        ArcadeMarkerInfo& info = markersMap[m];
+        if (stricmp(info.name, row.markerName) != 0)
+        {
+            continue;
+        }
+        // only the two fields that change, and only on change: OnColorChanged
+        // re-reads CfgMarkerColors every time it is called
+        if (stricmp(info.colorName, color) != 0)
+        {
+            info.colorName = color;
+            if (MarkerConfigReady(kMarkerType, color))
+            {
+                info.OnColorChanged();
+            }
+        }
+        if (strcmp(info.text, text) != 0)
+        {
+            info.text = text;
+        }
+        row.markerPainted = row.defeated;
+        return;
+    }
+}
+
+void LegendRegistry::AssertBossObjective(LegendRow& row)
+{
+    // Same gate as the diary: a DERIVED campaign's own scripts own its Plan
+    // page, and this registry writes nothing into it.
+    if (!_progression || row.zoneName.GetLength() == 0)
+    {
+        return;
+    }
+    char id[80];
+    snprintf(id, sizeof(id), "legend_%s", (const char*)row.id);
+    if (row.defeated)
+    {
+        // an empty text is a state-only update, so the wording the player has
+        // been reading does not change under him at the moment he earns it
+        Journal::Instance().SetObjective(RString(id), RString(), JODone);
+        return;
+    }
+    const RString name = DisplayName(row);
+    const RString role = row.role.GetLength() > 0 ? row.role : RString(LegendRoleName(LRElite));
+    char text[384];
+    snprintf(text, sizeof(text), "Eliminate %s, %s, near %s.", (const char*)name, (const char*)role,
+             (const char*)row.zoneName);
+    Journal::Instance().SetObjective(RString(id), RString(text), JOActive);
+}
+
+void LegendRegistry::ReassertBossActors()
+{
+    // The deferred half of the load pass.  Everything here writes to markersMap,
+    // which is why it cannot run inside Serialize (see _loadReassertPending).
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        LegendRow& row = _rows[i];
+        // bodySeen, not spawned: the latch goes down before the actors are
+        // built, so a spawn that failed carries spawned == true.  Painting a
+        // marker for that row would put a commander's name on empty ground.
+        if (row.kind != LKBoss || !row.spawned || !row.bodySeen || row.reasserted)
+        {
+            continue;
+        }
+        row.reasserted = true;
+        // The reachable case is a Change 3 campaign whose marker creation
+        // failed after the spawn latch went down; a marker the save restored is
+        // found by name and only repainted if its paint disagrees.
+        if (row.markerName.GetLength() == 0)
+        {
+            CreateBossMarker(row);
+        }
+        else
+        {
+            RepaintBossMarker(row);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // save / load
 // ---------------------------------------------------------------------------
 
@@ -1275,6 +2230,47 @@ void LegendRegistry::ReconcileAfterLoad()
         }
         row.lastPos = VZero;
         row.lastZone = RString();
+        row.reasserted = false;
+        if (row.kind == LKBoss)
+        {
+            // Everything a commander needs re-asserted that the archive does
+            // not carry by itself.  NOT the marker: markersMap is still being
+            // walked (see _loadReassertPending), so that half is deferred to
+            // the first BossTick.
+            // Never placed, or placed and then failed to spawn: no body ever
+            // existed, so there is nothing to re-pin and - crucially - no
+            // objective to re-assert.  row.spawned alone is not that question:
+            // it is latched BEFORE the actors are built, so a failed spawn
+            // carries it too.  bodySeen is the fact that the body existed; the
+            // link is checked alongside it only so a Change 3 save written
+            // before bodySeen was persisted still self-heals.
+            if (!row.spawned || (!row.bodySeen && !row.body.GetLink()))
+            {
+                continue;
+            }
+            _loadReassertPending = true;
+            Person* boss = dyn_cast<Person>(row.body.GetLink());
+            if (boss)
+            {
+                row.bodySeen = true;
+                // WorldImpl's load path rerolls the pool identity onto a
+                // recreated body, exactly as it does for a companion.
+                if (strcmp(boss->GetInfo()._name, DisplayName(row)) != 0)
+                {
+                    BindRow(i, boss);
+                    changed = true;
+                }
+            }
+            // _disabledAI does ride AIUnit::Serialize, but a save written
+            // before this feature existed carries none, and an ejected crewman
+            // is a path nobody has measured: re-OR it rather than trust it.
+            PinBossActors(row);
+            // Journal deserializes at WorldImpl.cpp:2088, well ahead of this
+            // block, so the objective table is already there to write into.
+            AssertBossObjective(row);
+            PruneBossHull(row);
+            continue;
+        }
         if (row.kind != LKCompanion)
         {
             continue;

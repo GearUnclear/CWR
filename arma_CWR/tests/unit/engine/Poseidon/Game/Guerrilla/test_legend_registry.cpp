@@ -25,6 +25,7 @@
 
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
+#include <Poseidon/Game/Guerrilla/LegendPlacement.hpp> // the injected boss world
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -33,6 +34,7 @@
 
 #include <cstring>
 #include <filesystem>
+#include <math.h>
 #include <string>
 #include <vector>
 
@@ -970,4 +972,649 @@ TEST_CASE("Legend registry - the companion display name never goes blank while t
     REQUIRE(r >= 0);
     CHECK(Str(registry.CompanionDisplayName(0)) == Str(registry.DisplayName(registry.Row(r))));
     CHECK(Str(registry.CompanionDisplayName(0)) != "Petra"); // the generated surname is on
+}
+
+// ===========================================================================
+//  the enemy Legends (Change 3): resolution, the defeat latch, persistence
+// ===========================================================================
+
+namespace
+{
+
+// The three world answers ResolveBosses reads, handed in instead: what the
+// occupier can field, the zone ladder's output and the candidate stands.
+LegendRoleCapability BossCapability(bool sniper = true, bool tank = true)
+{
+    LegendRoleCapability cap;
+    cap.eliteClass = "OfficerE";
+    cap.riflemanClass = "SoldierEB";
+    cap.tankCrewClass = "SoldierECrew";
+    if (sniper)
+    {
+        cap.sniperClass = "SoldierESniper";
+    }
+    if (tank)
+    {
+        cap.tankClass = "T72";
+        cap.tankHasCommander = true;
+        cap.tankHasGunner = true;
+    }
+    return cap;
+}
+
+AutoArray<LegendZoneCandidate> BossZones()
+{
+    AutoArray<LegendZoneCandidate> zones;
+    LegendZoneCandidate outpost;
+    outpost.name = "Outpost";
+    outpost.type = "OUTPOST";
+    outpost.occupied = true;
+    outpost.x = 7600;
+    outpost.z = 6300;
+    zones.Add(outpost);
+    LegendZoneCandidate camp;
+    camp.name = "Camp";
+    camp.type = "CAMP";
+    camp.x = 7515;
+    camp.z = 5790;
+    zones.Add(camp);
+    return zones;
+}
+
+// A ring of stands around the Outpost, all dry, off the road and clear of the
+// Camp floor: the placement judgement itself is pinned in
+// test_legend_placement.cpp, so these cases only need three stands to exist.
+AutoArray<LegendSpotSample> BossSamples()
+{
+    AutoArray<LegendSpotSample> samples;
+    for (int i = 0; i < 8; i++)
+    {
+        const float angle = (2.0f * 3.14159265f) * (float)i / 8.0f;
+        LegendSpotSample s;
+        s.zone = 0;
+        s.x = 7600.0f + 800.0f * cosf(angle);
+        s.z = 6300.0f + 800.0f * sinf(angle);
+        s.height = 18.0f;
+        s.distFromZone = 800.0f;
+        s.distFromCamp = 900.0f + 5.0f * (float)i;
+        samples.Add(s);
+    }
+    return samples;
+}
+
+// Seed, then resolve the three commanders off the injected world.
+void SeedAndResolve(LegendRegistry& registry, bool sniper = true, bool tank = true)
+{
+    Seed(registry);
+    registry.ResolveBossesForTest(BossCapability(sniper, tank), BossZones(), BossSamples());
+}
+
+int FirstBossRow(const LegendRegistry& registry)
+{
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        if (registry.Row(i).kind == LKBoss)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+std::string ObjectiveState(const char* id)
+{
+    const Journal& journal = Journal::Instance();
+    const int i = journal.FindObjective(id);
+    return i < 0 ? std::string() : std::string(Journal::ObjectiveStateName(journal.Objective(i).state));
+}
+
+// The objective the SPAWN publishes, stood up by hand: these cases place a
+// commander but cannot spawn one (that needs a world), and the defeat latch's
+// SetObjective(id, "", JODone) is deliberately a state-only write, which
+// Journal::SetObjective drops on an unknown row.  Publishing it here is what
+// makes "the latch flips the objective the spawn wrote" an honest assertion
+// rather than a vacuous one.
+void PublishSpawnObjective(const char* id, const char* text)
+{
+    Journal::Instance().SetObjective(RString(id), RString(text), JOActive);
+}
+
+} // namespace
+
+TEST_CASE("Legend registry - resolution places three commanders and moves no row", "[game][guerrilla][legends][boss]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    Seed(registry);
+    // a companion row FIRST, so the case can prove resolution touches only the
+    // boss half of a mixed table
+    registry.PollCompanionsForTest(OneCompanion("Petra", 100.0f));
+    REQUIRE(registry.BossCount() == LegendRegistry::kBossCount);
+
+    std::vector<std::string> orderBefore;
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        orderBefore.push_back(Str(registry.Row(i).id));
+    }
+    const int comp = registry.FindByCompIndex(0);
+    REQUIRE(comp >= 0);
+    const std::string compName = Str(registry.DisplayName(registry.Row(comp)));
+
+    registry.ResolveBossesForTest(BossCapability(), BossZones(), BossSamples());
+
+    // ROW ORDER IS THE CONTRACT: ParamArchive walks Item%d by index across the
+    // two passes, so a resolution that reordered rows would corrupt a save
+    REQUIRE((int)orderBefore.size() == registry.RowCount());
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        CHECK(Str(registry.Row(i).id) == orderBefore[i]);
+    }
+
+    std::vector<std::string> roles;
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        const LegendRow& row = registry.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        CHECK(Str(row.zoneName) == "Outpost");
+        CHECK(row.pos.X() != 0.0f);
+        CHECK(row.pos.Z() != 0.0f);
+        // roleResolved is the PROOF that resolution ran: the pre-roll sentinel
+        // and the Elite role name are the same word
+        CHECK(Str(row.roleResolved) == Str(row.role));
+        CHECK(row.roleRequested.GetLength() > 0);
+        CHECK(row.guardCount > 0);
+        CHECK(!row.spawned);
+        CHECK(!row.defeated);
+        roles.push_back(Str(row.role));
+    }
+    REQUIRE(roles.size() == 3);
+    CHECK(roles[0] == "Sniper");
+    CHECK(roles[1] == "Commander");
+    CHECK(roles[2] == "Tank Commander");
+
+    // the three stands are distinct and clear of each other
+    const int b0 = FirstBossRow(registry);
+    REQUIRE(b0 >= 0);
+    for (int a = b0; a < b0 + 3; a++)
+    {
+        for (int b = a + 1; b < b0 + 3; b++)
+        {
+            const Vector3 pa = registry.RowPos(a);
+            const Vector3 pb = registry.RowPos(b);
+            const float dx = pa.X() - pb.X();
+            const float dz = pa.Z() - pb.Z();
+            CHECK(sqrtf(dx * dx + dz * dz) >= LegendPlacementConstants::SameZoneFloor);
+        }
+    }
+
+    // the companion row was not touched: no stand, no role rewrite, no deed
+    CHECK(Str(registry.Row(comp).zoneName).empty());
+    CHECK(Str(registry.DisplayName(registry.Row(comp))) == compName);
+    CHECK(registry.RowPos(comp).X() == 0.0f);
+}
+
+TEST_CASE("Legend registry - a faction that fields neither gets three commanders", "[game][guerrilla][legends][boss]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry, false, false);
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        const LegendRow& row = registry.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        CHECK(Str(row.role) == "Commander");
+        CHECK(Str(row.roleResolved) == "Commander");
+        CHECK(row.guardCount == LegendRegistry::kEliteGuards);
+    }
+    // the ASK survives the degrade, so the record can still say what he was
+    const int b0 = FirstBossRow(registry);
+    REQUIRE(b0 >= 0);
+    CHECK(Str(registry.Row(b0).roleRequested) == "Sniper");
+    CHECK(Str(registry.Row(b0 + 2).roleRequested) == "Tank Commander");
+}
+
+TEST_CASE("Legend registry - a commander with no stand is never placed and never retried",
+          "[game][guerrilla][legends][boss]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    Seed(registry);
+    // every candidate stand in the sea: the identities survive, the stands do
+    // not, and the player is told once
+    AutoArray<LegendSpotSample> drowned = BossSamples();
+    for (int i = 0; i < drowned.Size(); i++)
+    {
+        drowned[i].underwater = true;
+    }
+    registry.ResolveBossesForTest(BossCapability(), BossZones(), drowned);
+
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        const LegendRow& row = registry.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        CHECK(Str(row.zoneName).empty());
+        CHECK(row.pos.X() == 0.0f);
+        CHECK(!row.spawned);
+        // the identity, the biography and the dossier row all survive
+        CHECK(registry.DisplayName(row).GetLength() > 0);
+        CHECK(row.bio.GetLength() > 0);
+        CHECK(Str(row.roleResolved) == Str(row.role));
+    }
+    // ONE warning line, not three
+    CHECK(Journal::Instance().EntryCount() == 1);
+    CHECK(AnyEntryIncludes(Journal::Instance(), "Intelligence names only"));
+    CHECK(Journal::Instance().Entry(0).kind == JKWarn);
+    // and no objective at all: nothing on the map may disagree with the dossier
+    CHECK(Journal::Instance().ObjectiveCount() == 0);
+}
+
+TEST_CASE("Legend registry - the defeat latch fires exactly once, however often it is asked",
+          "[game][guerrilla][legends][boss]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int row = FirstBossRow(registry);
+    REQUIRE(row >= 0);
+    const std::string id = Str(registry.Row(row).id);
+    CHECK(id == "boss_0");
+
+    PublishSpawnObjective("legend_boss_0", "Eliminate him, Sniper, near Outpost.");
+    const int entriesBefore = Journal::Instance().EntryCount();
+    const int deedsBefore = registry.Row(row).deeds.Size();
+
+    registry.BossTickForTest(row, false, false);
+
+    CHECK(registry.Row(row).defeated);
+    CHECK(!registry.Row(row).alive);
+    CHECK(registry.DefeatedCount() == 1);
+    // EXACTLY ONE diary line, attributed to this row by id: that is what puts
+    // the same sentence in the campaign record and in his own dossier without
+    // anyone parsing prose
+    CHECK(Journal::Instance().EntryCount() == entriesBefore + 1);
+    CHECK(CountEntriesFor(Journal::Instance(), id.c_str()) == 1);
+    // ... filed under the zone he was PLACED to watch, never the nearest one
+    const int last = Journal::Instance().EntryCount() - 1;
+    CHECK(Str(Journal::Instance().Entry(last).zone) == "Outpost");
+    CHECK(Journal::Instance().Entry(last).kind == JKGood);
+    CHECK(strstr(Journal::Instance().Entry(last).text, "is dead") != nullptr);
+    // one death deed
+    CHECK(CountDeeds(registry.Row(row), LDDefeat) == 1);
+    CHECK(registry.Row(row).deeds.Size() == deedsBefore + 1);
+    // and the objective is done
+    CHECK(ObjectiveState("legend_boss_0") == "DONE");
+
+    // THE RESURRECTION GUARD.  Five more polls, a reload's worth: not one of
+    // them may write a second line, a second deed, a second objective row or a
+    // single repaint.
+    const int entries = Journal::Instance().EntryCount();
+    const int objectives = Journal::Instance().ObjectiveCount();
+    const int deeds = registry.Row(row).deeds.Size();
+    const unsigned revision = registry.Revision();
+    const unsigned journalRevision = Journal::Instance().Revision();
+    for (int i = 0; i < 5; i++)
+    {
+        registry.BossTickForTest(row, false, false);
+    }
+    CHECK(Journal::Instance().EntryCount() == entries);
+    CHECK(Journal::Instance().ObjectiveCount() == objectives);
+    CHECK(registry.Row(row).deeds.Size() == deeds);
+    CHECK(registry.Revision() == revision);
+    CHECK(Journal::Instance().Revision() == journalRevision);
+    CHECK(registry.DefeatedCount() == 1);
+    CHECK(CountEntriesFor(Journal::Instance(), id.c_str()) == 1);
+}
+
+TEST_CASE("Legend registry - destroying the hull alone does not complete the objective",
+          "[game][guerrilla][legends][boss]")
+{
+    // THE TANK RULE.  row.body (the named commander) and row.vehicle (the
+    // hull) are two independent links and two independent questions: the
+    // hull's death prunes the link, revokes the standing get-in order and
+    // changes nothing else.  He often, but not always, survives it; if he does
+    // he fights on foot and the objective stands until he himself is dead.
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int b0 = FirstBossRow(registry);
+    REQUIRE(b0 >= 0);
+    const int tankRow = b0 + 2;
+    REQUIRE(Str(registry.Row(tankRow).role) == "Tank Commander");
+
+    PublishSpawnObjective("legend_boss_2", "Eliminate him, Tank Commander, near Outpost.");
+    registry.BossTickForTest(tankRow, true, false); // one quiet poll first
+    const unsigned revision = registry.Revision();
+    const unsigned journalRevision = Journal::Instance().Revision();
+    const int entries = Journal::Instance().EntryCount();
+
+    registry.BossTickForTest(tankRow, true, true); // the hull dies under him
+
+    CHECK(registry.RowVehicle(tankRow) == nullptr);
+    CHECK(!registry.Row(tankRow).defeated);
+    CHECK(registry.Row(tankRow).alive);
+    CHECK(registry.DefeatedCount() == 0);
+    CHECK(Journal::Instance().EntryCount() == entries);
+    CHECK(ObjectiveState("legend_boss_2") == "ACTIVE");
+    // a poll that changed nothing the dossier renders repaints nothing: the
+    // open map must not rebuild once a second while the player reads it
+    CHECK(registry.Revision() == revision);
+    CHECK(Journal::Instance().Revision() == journalRevision);
+
+    // and the commander himself still closes it
+    registry.BossTickForTest(tankRow, false, false);
+    CHECK(registry.Row(tankRow).defeated);
+    CHECK(ObjectiveState("legend_boss_2") == "DONE");
+    CHECK(CountEntriesFor(Journal::Instance(), "boss_2") == 1);
+}
+
+TEST_CASE("Legend registry - a boss poll that changed nothing repaints nothing", "[game][guerrilla][legends][boss]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int row = FirstBossRow(registry);
+    REQUIRE(row >= 0);
+    const unsigned revision = registry.Revision();
+    const unsigned journalRevision = Journal::Instance().Revision();
+    const int entries = Journal::Instance().EntryCount();
+    for (int i = 0; i < 4; i++)
+    {
+        registry.BossTickForTest(row, true, false);
+    }
+    CHECK(registry.Revision() == revision);
+    CHECK(Journal::Instance().Revision() == journalRevision);
+    CHECK(Journal::Instance().EntryCount() == entries);
+    CHECK(!registry.Row(row).defeated);
+}
+
+TEST_CASE("Legend registry - a campaign round trips its commanders, living and defeated",
+          "[game][guerrilla][legends][boss][save][load]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    registry.PollCompanionsForTest(OneCompanion("Petra", 100.0f));
+    const int b0 = FirstBossRow(registry);
+    REQUIRE(b0 >= 0);
+    // one of the three is already dead when the save is written
+    registry.BossTickForTest(b0, false, false);
+    REQUIRE(registry.Row(b0).defeated);
+
+    struct Snapshot
+    {
+        std::string id, role, requested, resolved, zone;
+        float x = 0, y = 0, z = 0;
+        int guardCount = 0;
+        bool spawned = false, defeated = false, markerPainted = false;
+        std::string markerName;
+        int deeds = 0;
+    };
+    std::vector<Snapshot> before;
+    std::vector<std::string> orderBefore;
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        const LegendRow& row = registry.Row(i);
+        orderBefore.push_back(Str(row.id));
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        Snapshot s;
+        s.id = Str(row.id);
+        s.role = Str(row.role);
+        s.requested = Str(row.roleRequested);
+        s.resolved = Str(row.roleResolved);
+        s.zone = Str(row.zoneName);
+        s.x = row.pos.X();
+        s.y = row.pos.Y();
+        s.z = row.pos.Z();
+        s.guardCount = row.guardCount;
+        s.spawned = row.spawned;
+        s.defeated = row.defeated;
+        s.markerName = Str(row.markerName);
+        s.markerPainted = row.markerPainted;
+        s.deeds = row.deeds.Size();
+        before.push_back(s);
+    }
+    REQUIRE(before.size() == 3);
+    const int entries = Journal::Instance().EntryCount();
+
+    const std::filesystem::path path = ArchivePath("legend-bosses.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+
+    REQUIRE(loaded.RowCount() == (int)orderBefore.size());
+    for (int i = 0; i < loaded.RowCount(); i++)
+    {
+        CHECK(Str(loaded.Row(i).id) == orderBefore[i]); // IN ORDER
+    }
+    REQUIRE(loaded.BossCount() == 3);
+    CHECK(loaded.DefeatedCount() == 1);
+    size_t n = 0;
+    for (int i = 0; i < loaded.RowCount(); i++)
+    {
+        const LegendRow& row = loaded.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        REQUIRE(n < before.size());
+        const Snapshot& s = before[n++];
+        CHECK(Str(row.id) == s.id);
+        CHECK(Str(row.role) == s.role);
+        CHECK(Str(row.roleRequested) == s.requested);
+        CHECK(Str(row.roleResolved) == s.resolved);
+        CHECK(Str(row.zoneName) == s.zone);
+        CHECK(row.pos.X() == s.x);
+        CHECK(row.pos.Y() == s.y);
+        CHECK(row.pos.Z() == s.z);
+        CHECK(row.guardCount == s.guardCount);
+        CHECK(row.spawned == s.spawned);
+        CHECK(row.defeated == s.defeated);
+        CHECK(Str(row.markerName) == s.markerName);
+        CHECK(row.markerPainted == s.markerPainted);
+        CHECK(row.deeds.Size() == s.deeds);
+        // TRANSIENT by design: re-derived by the next poll, never persisted
+        CHECK(Str(row.lastZone).empty());
+    }
+
+    // a defeat latched before the save never re-fires after it
+    const int loadedBoss = FirstBossRow(loaded);
+    REQUIRE(loadedBoss >= 0);
+    CHECK(loaded.Row(loadedBoss).defeated);
+    for (int i = 0; i < 3; i++)
+    {
+        loaded.BossTickForTest(loadedBoss, false, false);
+    }
+    CHECK(Journal::Instance().EntryCount() == entries);
+    CHECK(CountEntriesFor(Journal::Instance(), "boss_0") == 1);
+    CHECK(loaded.DefeatedCount() == 1);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - a boss row's Change 3 fields carry documented defaults",
+          "[game][guerrilla][legends][boss][save][load]")
+{
+    // The four Change 3 keys use the default-tolerant four-argument Serialize
+    // overload, so a Change 2 archive that carries none of them loads with
+    // these values rather than faulting.  A pre-Change-3 save has no placed
+    // commanders at all (resolution runs only in the seeding tick, which a
+    // loaded campaign never re-runs), so its three Legends stay unlocated for
+    // the life of that campaign, and unlocated is exactly this state.
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    Seed(registry); // pre-rolled identities, NO resolution
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        const LegendRow& row = registry.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        CHECK(row.guardCount == 0);
+        CHECK(!row.bodySeen);
+        CHECK(Str(row.markerName).empty());
+        CHECK(!row.markerPainted);
+        CHECK(!row.spawned);
+        CHECK(!row.defeated);
+        CHECK(Str(row.zoneName).empty());
+        // the identity is still real: name, face and biography all pre-rolled
+        CHECK(registry.DisplayName(row).GetLength() > 0);
+    }
+
+    const std::filesystem::path path = ArchivePath("legend-boss-defaults.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    REQUIRE(loaded.BossCount() == LegendRegistry::kBossCount);
+    for (int i = 0; i < loaded.RowCount(); i++)
+    {
+        const LegendRow& row = loaded.Row(i);
+        if (row.kind != LKBoss)
+        {
+            continue;
+        }
+        CHECK(row.guardCount == 0);
+        CHECK(!row.bodySeen);
+        CHECK(Str(row.markerName).empty());
+        CHECK(!row.markerPainted);
+        CHECK(!row.spawned);
+    }
+    CHECK(Journal::Instance().ObjectiveCount() == 0);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - a spawn that latched and then failed reads as missing intelligence",
+          "[game][guerrilla][legends][boss][save][load]")
+{
+    // The latch goes down BEFORE the actors are built, so row.spawned is true
+    // on the failure path too (a null group at MaxGroups, a body class that
+    // would not materialize).  SpawnOneBoss returns before it reaches
+    // CreateBossMarker or AssertBossObjective, so that row has no marker and no
+    // objective: its placement is cleared with it, and the dossier reads him as
+    // missing intelligence rather than as a commander standing near a zone
+    // where there is nobody to kill.
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int row = FirstBossRow(registry);
+    REQUIRE(row >= 0);
+    REQUIRE(Str(registry.Row(row).id) == "boss_0");
+    REQUIRE(Str(registry.Row(row).zoneName) == "Outpost"); // he WAS placed
+    const RString name = registry.DisplayName(registry.Row(row));
+
+    registry.SpawnFailureForTest(row);
+
+    CHECK(registry.Row(row).spawned); // latched: a failure is never retried
+    CHECK(!registry.Row(row).bodySeen);
+    // the caption gate: no stand, so "whereabouts unknown" rather than
+    // "at large" (the compose half of that is pinned in test_journal_people)
+    CHECK(Str(registry.Row(row).zoneName).empty());
+    CHECK(registry.Row(row).pos.X() == 0.0f);
+    CHECK(registry.Row(row).pos.Z() == 0.0f);
+    CHECK(Str(registry.Row(row).markerName).empty());
+    CHECK(!registry.Row(row).defeated);
+    CHECK(ObjectiveState("legend_boss_0").empty());
+    // the identity, the biography and the dossier row all survive intact
+    CHECK(Str(registry.DisplayName(registry.Row(row))) == Str(name));
+    CHECK(registry.Row(row).bio.GetLength() > 0);
+    // and the other two commanders are untouched by his failure
+    CHECK(Str(registry.Row(row + 1).zoneName) == "Outpost");
+    CHECK(!registry.Row(row + 1).spawned);
+
+    const std::filesystem::path path = ArchivePath("legend-spawn-failed.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    REQUIRE(loaded.BossCount() == LegendRegistry::kBossCount);
+    const int loadedRow = FirstBossRow(loaded);
+    REQUIRE(loadedRow >= 0);
+    CHECK(loaded.Row(loadedRow).spawned);
+    CHECK(!loaded.Row(loadedRow).bodySeen);
+    CHECK(Str(loaded.Row(loadedRow).zoneName).empty());
+    CHECK(Str(loaded.Row(loadedRow).markerName).empty());
+    CHECK(loaded.DefeatedCount() == 0);
+    // THE LOAD PASS MANUFACTURES NOTHING for a commander who never existed
+    CHECK(Journal::Instance().ObjectiveCount() == 0);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - a save carrying a failed spawn's stand still re-asserts nothing",
+          "[game][guerrilla][legends][boss][save][load]")
+{
+    // The same failure as written by an earlier build, which kept the stand on
+    // the row.  ReconcileAfterLoad and the deferred marker pass both key off
+    // bodySeen rather than off the spawn latch precisely so this archive cannot
+    // grow an objective and a marker for a body that was never created.
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int row = FirstBossRow(registry);
+    REQUIRE(row >= 0);
+    registry.SpawnFailureForTest(row, true);
+    REQUIRE(registry.Row(row).spawned);
+    REQUIRE(!registry.Row(row).bodySeen);
+    REQUIRE(Str(registry.Row(row).zoneName) == "Outpost"); // the stale stand
+
+    const std::filesystem::path path = ArchivePath("legend-spawn-failed-legacy.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    const int loadedRow = FirstBossRow(loaded);
+    REQUIRE(loadedRow >= 0);
+    CHECK(loaded.Row(loadedRow).spawned);
+    CHECK(!loaded.Row(loadedRow).bodySeen);
+    // no objective, and none of the three carries a marker name
+    CHECK(ObjectiveState("legend_boss_0").empty());
+    CHECK(Journal::Instance().ObjectiveCount() == 0);
+    for (int i = 0; i < loaded.RowCount(); i++)
+    {
+        if (loaded.Row(i).kind == LKBoss)
+        {
+            CHECK(Str(loaded.Row(i).markerName).empty());
+        }
+    }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - a foot commander's guards are never movement pinned", "[game][guerrilla][legends][boss]")
+{
+    // The pin is the named boss's alone: spec section 2 keeps him stationary
+    // and asks his guards to defend locally, which a DAMove-disabled guard
+    // cannot do at all (the flag is read by LeaderPilot and FormationPilot, so
+    // it kills even formation-following).  row.crewed is the discriminator,
+    // because roleResolved still reads "Tank Commander" when the hull refused
+    // to materialize and row.vehicle is already cleared when a dead hull
+    // re-pins.  It defaults false, so a Change 2 archive pins nobody's guards.
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    for (int i = 0; i < registry.RowCount(); i++)
+    {
+        if (registry.Row(i).kind == LKBoss)
+        {
+            CHECK(!registry.Row(i).crewed);
+        }
+    }
+    const int row = FirstBossRow(registry);
+    REQUIRE(row >= 0);
+    const std::filesystem::path path = ArchivePath("legend-crewed.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    const int loadedRow = FirstBossRow(loaded);
+    REQUIRE(loadedRow >= 0);
+    CHECK(!loaded.Row(loadedRow).crewed);
+    std::filesystem::remove(path);
 }

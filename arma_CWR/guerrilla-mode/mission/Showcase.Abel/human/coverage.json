@@ -165,13 +165,18 @@
     "../engine/Poseidon/Game/Guerrilla/LegendNames.cpp": [
       "legend_names"
     ],
+    "../engine/Poseidon/Game/Guerrilla/LegendPlacement.cpp": [
+      "legend_boss"
+    ],
     "../engine/Poseidon/Game/Guerrilla/LegendRegistry.cpp": [
       "legend_names",
-      "companion_progress"
+      "companion_progress",
+      "legend_boss"
     ],
     "../engine/Poseidon/Game/Guerrilla/LegendRegistryCommands.cpp": [
       "legend_names",
-      "companion_progress"
+      "companion_progress",
+      "legend_boss"
     ],
     "../engine/Poseidon/Game/Guerrilla/Undercover.cpp": [
       "undercover",

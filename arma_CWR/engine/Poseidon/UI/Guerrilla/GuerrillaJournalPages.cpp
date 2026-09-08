@@ -511,10 +511,30 @@ JournalPageInputs GatherGuerrillaJournalInputs()
             }
             if (row.kind == LKBoss)
             {
+                // row.role is ALREADY the resolved role name ("Sniper" /
+                // "Commander" / "Tank Commander"): ResolveBosses writes it once
+                // at seeding, so the dossier never maps a role index back to a
+                // string and this file needs nothing out of LegendPlacement.
                 view.role = row.role;
                 // lowercase, as the dossier caption reads it ("Commander, at
-                // large"); a defeated Legend keeps its dossier page for good
-                view.status = row.defeated ? RString("defeated") : RString("at large");
+                // large"); a defeated Legend keeps its dossier page for good.
+                // A commander with no stand (placement found nowhere to put
+                // him, or the campaign was seeded before Change 3 existed and
+                // never will) reads as missing intelligence rather than as an
+                // elite standing somewhere: he has no marker and no objective
+                // to disagree with, and he is never retried.
+                //
+                // The second clause is the spawn that FAILED.  row.spawned is
+                // latched before the actors are built, so it is true on that
+                // path too; bodySeen is the fact that a body ever existed and
+                // is written immediately after BindRow, so a live commander can
+                // never read as missing, and a row that has simply not reached
+                // its spawn tick yet still carries spawned == false.
+                const bool unlocated =
+                    row.zoneName.GetLength() == 0 || (row.spawned && !row.bodySeen && !row.body.GetLink());
+                view.status = row.defeated ? RString("defeated")
+                              : unlocated  ? RString("whereabouts unknown")
+                                           : RString("at large");
                 view.zone = row.zoneName;
             }
             else

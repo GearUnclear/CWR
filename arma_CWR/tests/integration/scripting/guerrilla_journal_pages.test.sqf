@@ -193,13 +193,18 @@ triAssertIncludes [gjCamp, "Reached the Camp"]
 // footer: a zone page's parent is the Places index
 triAssertIncludes [gjCamp, "Places"]
 
-// -- Chronicles hub (no History link before Change 2) + The record -----------
+// -- Chronicles hub (The record, and since issue #57 the seeded History) -----
+//    The hub emits the History row only while in.history.present, which the
+//    LegendRegistry sets once it has seeded the campaign. This lane boots a
+//    real campaign, so the row is there; a page composed with no history at
+//    all is pinned in the unit suite instead.
 triAssertEq [(triBriefingSwitch "GM_CHRONICLES"), "GM_CHRONICLES"]
 triScreenshot "journal_chronicles"
 gjChronicles = "GM_CHRONICLES" call gjReadAll
 triAssertIncludes [gjChronicles, "Chronicles"]
 triAssertIncludes [gjChronicles, "The record"]
-triAssertExcludes [gjChronicles, "History"]
+triAssertIncludes [gjChronicles, "History"]
+triAssertIncludes [gjChronicles, "How the struggle began"]
 triAssertEq [(triBriefingSwitch "GM_RECORD"), "GM_RECORD"]
 triScreenshot "journal_record"
 gjRecord = "GM_RECORD" call gjReadChain

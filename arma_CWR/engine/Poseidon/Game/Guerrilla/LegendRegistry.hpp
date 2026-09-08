@@ -12,7 +12,28 @@
 //
 //   InitMission() = Clear(); LoadFromConfig(); _initRan = true;  and nothing else.
 //   Simulate()    = ZoneRegistry::IsActive() gate, then the serialized one-shot
-//                   _seeded seeding tick, then 1 Hz PollCompanions().
+//                   _seeded seeding tick, then 1 Hz PollCompanions(),
+//                   SpawnBosses() and BossTick().
+//
+// THE THREE ENEMY LEGENDS (Change 3), stated once because every one of these is
+// a decision someone will otherwise try to "fix":
+//   * They stand OUTSIDE the zone presence radius (the inner ring is 350 m, the
+//     default zoneArea 150 m), so a commander never garrisons his zone: the
+//     outpost is capturable while he lives, his existence never pins the zone's
+//     alert state, and killing him is a SEPARATE objective in either order.
+//   * A boss NEVER respawns.  row.spawned is persisted and latched BEFORE the
+//     actors are created, so a fault between the two costs a commander rather
+//     than duplicating one.
+//   * Destroying a tank does NOT complete the objective.  row.body (the named
+//     commander) and row.vehicle (the hull) are two independent links and two
+//     independent questions; the hull's death prunes the link and nothing else.
+//     The commander often, but not always, survives it - Transport::Destroy
+//     deals the crew 0.5..1.0 - and if he does he fights on foot.
+//   * Boss groups are invisible to GarrisonCache and to qrf.sqs BY
+//     CONSTRUCTION (neither is ever told about them).  They are NOT hidden from
+//     the Undercover system, which walks every occupier group unfiltered: a
+//     Legend's bodyguards can blow the player's cover, which is accepted as
+//     fair play rather than worked around.
 //
 // ROW ORDER is part of the contract: companions by compIndex ascending, then
 // the pre-rolled boss rows by id.  A new companion is INSERTED ahead of the
@@ -39,6 +60,7 @@
 
 #include <Poseidon/Game/Guerrilla/FactionHistory.hpp>
 #include <Poseidon/Game/Guerrilla/LegendNames.hpp>
+#include <Poseidon/Game/Guerrilla/LegendPlacement.hpp> // boss roles and stands
 
 class ParamArchive;
 namespace Poseidon
@@ -140,11 +162,28 @@ struct LegendRow
     LLink<Object> body, vehicle;
     LLink<AIGroup> group;
     LLinkArray<Object> guards;
+    // how many bodies stand with him: one for a sniper, four for a commander,
+    // the hull's remaining crew seats for a tank commander
+    int guardCount = 0;
+    // the body link RESOLVED at least once.  This, not link nullness, is what
+    // separates "his body was deleted after he died" from "he was never
+    // spawned": an LLink to a corpse does not null, only a deleted one does.
+    bool bodySeen = false;
+    // guards[] holds a TANK CREW rather than bodyguards.  This is the only fact
+    // that separates the two populations afterwards: roleResolved still reads
+    // "Tank Commander" when the hull refused to materialize and the men in
+    // guards[] are on foot, and row.vehicle is cleared the moment the hull
+    // dies.  Only a crew is movement-pinned; bodyguards must be free to defend.
+    bool crewed = false;
+    RString markerName;         // "gmLegend_<id>", written once at spawn
+    bool markerPainted = false; // the map marker carries the DEFEATED paint
 
     // TRANSIENT, never serialized: where the body was last seen while alive, so
     // the death deed and the death diary line can name a place.
     Vector3 lastPos = VZero;
     RString lastZone;
+    // TRANSIENT: the post-load re-assert has run over this row this session.
+    bool reasserted = false;
 
     LSError Serialize(ParamArchive& ar);
 };
@@ -189,6 +228,22 @@ class LegendRegistry : public SerializeClass
     // names and the death line are never the ones evicted
     static constexpr int kMaxDeeds = 24;
 
+    // --- the enemy Legends (Change 3) -------------------------------------
+    // A commander is a campaign-scale actor: better than any garrison body, and
+    // his retinue is better than a conscript.  Normal damage rules; no
+    // allowDammage anywhere.
+    static constexpr float kBossSkill = 0.9f;
+    static constexpr float kGuardSkill = 0.75f;
+    static constexpr int kSniperGuards = 1;
+    static constexpr int kEliteGuards = 4;
+    static constexpr float kGuardRadiusMin = 8.0f, kGuardRadiusMax = 15.0f;
+    // The defeated marker is deliberately NOT ColorBlack: this game's own map
+    // language already spends black on an unrevealed zone (ZoneRegistry::
+    // UpdateMarkers), so a black Legend marker reads as an unscouted one.
+    static constexpr const char* kMarkerType = "Warning";
+    static constexpr const char* kMarkerColorLive = "ColorRed";
+    static constexpr const char* kMarkerColorDefeated = "ColorGreen";
+
     // lifecycle -----------------------------------------------------------
     void Clear();
     void InitMission();
@@ -217,6 +272,17 @@ class LegendRegistry : public SerializeClass
     int FindById(const char* id) const;       // -1 when unknown
     const HistoryRecord& History() const { return _history; }
 
+    // enemy Legend queries (the gm* readers and the suite) --------------------
+    int BossCount() const;     // rows of kind LKBoss
+    int DefeatedCount() const; // ... of those, the ones already killed
+    // the persisted stand; VZero for a row that never found one
+    Vector3 RowPos(int row) const;
+    // the live actors; null when never spawned, deleted, or out of range.  A
+    // DEAD body is still returned - aliveness is a separate question, and
+    // asking it of a link is the bug this feature is careful about.
+    Object* RowBody(int row) const;
+    Object* RowVehicle(int row) const;
+
     // The five slots assembled.  Never localized, never prefixed: the result is
     // written onto the body as AIUnitInfo::_name and persisted.
     RString DisplayName(const LegendRow& row) const;
@@ -232,6 +298,14 @@ class LegendRegistry : public SerializeClass
     // identity.  Must run AFTER createUnit returns.
     bool Bind(int compIndex, Object* body);
 
+    // The half of Bind that actually stamps the identity, addressed by ROW
+    // rather than by companion index.  A boss row has compIndex == -1, so
+    // Bind's FindByCompIndex lookup can never reach it and would leave the
+    // commander wearing the createUnit pool name (and row.body unset, which
+    // would make the defeat poll and all four refs inert).  Bind is now the
+    // companion-side lookup in front of this.
+    bool BindRow(int rowIndex, Object* body);
+
     // repaint: _revision always, the journal's revision only when something the
     // dossier renders moved.  Public so the suite can pin the two edges.
     void Touch(bool dossierVisible);
@@ -242,6 +316,21 @@ class LegendRegistry : public SerializeClass
     void SeedForTest(unsigned seed, const HistoryInputs& in);
     void PollCompanionsForTest(const CompanionSnapshot& snapshot);
     void SetProgressionForTest(bool on) { _progression = on; }
+    // ResolveBosses with the world's three answers injected: the faction's
+    // capability, the zone ladder's output and the candidate stands.
+    void ResolveBossesForTest(const LegendRoleCapability& cap, const AutoArray<LegendZoneCandidate>& zones,
+                              const AutoArray<LegendSpotSample>& samples);
+    // One boss poll with the two world questions injected: is his body alive,
+    // and did his hull just die.  The live BossTick asks the world instead.
+    void BossTickForTest(int row, bool alive, bool hullDestroyed);
+    // The spawn that latched and then failed - a null group at MaxGroups, a
+    // body class that would not materialize.  Drives the same two steps the
+    // live SpawnBosses takes on that path, so the "he never existed" state can
+    // be asserted without a world to fail a spawn in.
+    // keepPlacement reproduces the row an EARLIER build wrote on that path,
+    // which kept its stand and so advertised a commander who did not exist:
+    // that is the state the load pass's bodySeen gates defend against.
+    void SpawnFailureForTest(int row, bool keepPlacement = false);
 
   private:
     void SeedCampaign();
@@ -250,10 +339,36 @@ class LegendRegistry : public SerializeClass
     int EnsureCompanionRow(int compIndex, const RString& baseName, float xp, bool alive);
     void AwardSlot(LegendRow& row, int which);
     void RecordDeed(LegendRow& row, const RString& text, int kind);
-    void WriteEntry(const LegendRow& row, const RString& text, int kind);
+    // zoneOverride wins over the row's transient lastZone.  A boss stands 350 m
+    // or more OUTSIDE his zone, so lastZone would resolve to the nearest zone
+    // (routinely the Camp) or to the player's - and that string is also the
+    // entry's zone COLUMN, which the zone Record page filters on.  His entries
+    // are filed under the zone he was placed to watch.
+    void WriteEntry(const LegendRow& row, const RString& text, int kind, const RString& zoneOverride = RString());
     void PreRollBossIdentities();
     void ReconcileAfterLoad();
     unsigned long long RowKey(const RString& id) const;
+
+    // --- enemy Legends ------------------------------------------------------
+    void ResolveBosses(); // from SeedCampaign, after PreRollBossIdentities
+    void ApplyBossResolution(const LegendRoleCapability& cap, const AutoArray<LegendZoneCandidate>& zones,
+                             const AutoArray<LegendSpotSample>& samples, float zoneArea);
+    void EnsureBossRoles(); // rebuild the transient role cache when it is cold
+    int BossOrdinal(const LegendRow& row) const;
+    void SpawnBosses();
+    bool SpawnOneBoss(LegendRow& row);
+    // A spawn that latched and then failed: the placement goes with it, so the
+    // row has no stand, no marker and no objective for anything to disagree
+    // with, and the dossier reads him as missing intelligence.
+    void LatchSpawnFailure(LegendRow& row);
+    void BossTick();
+    void LatchDefeat(LegendRow& row);
+    void CreateBossMarker(LegendRow& row);
+    void RepaintBossMarker(LegendRow& row);
+    void AssertBossObjective(LegendRow& row);
+    void ReassertBossActors();
+    void PinBossActors(LegendRow& row);
+    void PruneBossHull(LegendRow& row);
 
     AutoArray<LegendRow> _rows;
     HistoryRecord _history;
@@ -271,6 +386,20 @@ class LegendRegistry : public SerializeClass
     // transient: row ids whose GM_COMP_RANK string already earned its one
     // disagreement warning (A1), so a wrong string does not log once a second
     AutoArray<RString> _rankWarned;
+    // transient: the three resolved boss profiles (classes and seat counts).
+    // Only role/roleRequested/roleResolved/guardCount are persisted; the class
+    // names are re-derived from the live faction, which is all the spawn pass
+    // needs because a loaded campaign never spawns a boss again.
+    AutoArray<LegendRoleResolution> _bossRoles;
+    // TRANSIENT.  Set by the load pass, consumed by the first BossTick after
+    // it, because no marker may be created or grown while the archive walk is
+    // still running: Serialize on PassSecond re-walks the marker array with
+    // n = markersMap.Size() and no re-read of "items" (ParamArchive.hpp), so a
+    // marker appended between the Legends block (WorldImpl.cpp:2140) and the
+    // marker array (:2203) makes SerializeArrayItem ask for an Item the archive
+    // does not have and puts the whole load into an error state.  Do NOT
+    // "simplify" the deferral back into ReconcileAfterLoad.
+    bool _loadReassertPending = false;
 };
 
 // Journal.cpp:19-33 anchor pattern: referencing this from LegendRegistry.cpp

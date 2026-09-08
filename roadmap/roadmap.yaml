@@ -1689,10 +1689,26 @@ items:
       gmLegendId / gmLegendCount / gmLegendInfo / gmLegendHistory /
       gmLegendHistoryEvent. Serializes as GuerrillaLegends; a save written before
       the registry existed loads as read-only DERIVED rows (dossiers work, no
-      diary writes, no history). The ENEMY half (Change 3: placing the three
-      commanders in zones, their guards, the defeat latch and the objectives)
-      is still to come, which is why this item is not done.
+      diary writes, no history). The ENEMY half is Change 3, in flight on the
+      same branch: the three pre-rolled commanders are resolved once at seeding
+      (role from the occupier descriptor's best rung, one-step degrade to the
+      elite commander; stand picked from the persisted seed on 350/550/750/950 m
+      rings around the occupier's military zones, off road, out of water, 400 m
+      clear of the camp and of each other, in the new LegendPlacement.*), spawned
+      one per tick with their guards in the boss's own group, pinned with
+      AIUnit::DAMove on the boss alone so he holds his ground and still shoots,
+      marked (gmLegend_boss_<n>, Warning icon, ColorRed to ColorGreen with a
+      "(defeated)" label) and objectived (legend_boss_<n>), with a persisted,
+      idempotent defeat latch that writes exactly one attributed diary line.
+      Five read-only commands are added (gmLegendPos / gmLegendBody /
+      gmLegendVehicle / gmLegendDefeated / gmLegendMarker); gmLegendInfo keeps
+      its Change 2 shape. Journal side: the People index and the dossier carry
+      the resolved role, the place ("near <zone>") and the red defeated caption,
+      and an unplaced commander reads "whereabouts unknown" with no marker and no
+      objective. Item flips to done when the Change 3 gate (contract suite,
+      Catch2, the three Trident lanes) is green and the work is committed.
     log:
+      - "2026-09-08: Change 3 decisions worth stating once, because each is easy to assume the other way round. (1) A commander stands OUTSIDE the zone presence radius (inner ring 350 m against zoneArea 150 m), so he is no part of the zone's capture count and does not pin its alert: the outpost is capturable while he lives and killing him is a second, independent objective, either order. A template that raises zoneArea to the ring reverses that reading, so ResolveBosses logs one warning naming it. (2) A boss never respawns: the spawn latch persists and is set BEFORE the actors are created, so a fault leaves the campaign unable to try again rather than able to spawn a second copy. (3) Destroying his tank does not complete the objective: the hull link is pruned, the marker and objective stay, and he fights on foot if he lives (the engine damages the crew when a hull dies, so he often but not always survives it). (4) A defeated marker is ColorGreen, not the drafted ColorBlack, because ZoneRegistry already paints an UNREVEALED zone black and the clearest reward in the mode would have read as an unscouted icon. (5) A campaign saved before Change 3 never gets placed bosses (placement runs only in the seeding tick and a loaded save is already seeded): its three Legends keep their names, faces, biographies and dossiers and read 'whereabouts unknown' for the rest of that campaign's life. Documented in guerrilla-mode/README.md under Enemy Legends."
       - "2026-09-08: the script side is deliberately tiny and is the whole reason the split holds: companions.sqs substitutes gmLegendName for GM_COMP_NAMES in four places, GM_fnCompSpawn gains a gmLegendBind on the new body, and its promotion and death gmJournalNote calls are DELETED because the registry now writes those two lines itself with the character's id attached. Keeping them would have doubled every line. The Showcase.Abel companions/status chapters read gmLegendName for the same reason."
       - "2026-09-08: descriptor key namePool added to all three vanilla rosters (WEST western, EAST eastern_europe, GUER balkans) and all eight @LoBo rosters (IDF israeli, EgyptFrontier/EgyptArmy north_africa, Syria/Jordan levant, Hizballah lebanon, PLO/PLO_East palestine). The key is REGIONAL only: the nickname tone bank (warm or cold epithets) is chosen by campaign allegiance instead, so a resistance IDF campaign draws israeli names with the friendly bank. Missing or unknown falls back by side with one warn per faction, so a third-party pack that never heard of the key still gets plausible names."
       - "2026-09-08: GM_COMP_NAMES must not be reordered or spliced mid-campaign: the companion index is inside the stable id, and the id is what the generated surname, the face, the awarded nickname and every attributed diary line hang off. Appending is safe. Documented in ARCHITECTURE.md A.8 as a rule for island-template authors, since one core GM_COMP_NAMES is shared by every template."

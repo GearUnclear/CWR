@@ -15,6 +15,23 @@
 //                                    legend, awardMask]; [] out of range
 //   gmLegendHistory              -> [version, seed, opening1, opening2]
 //   gmLegendHistoryEvent <k>     -> [title, text, place]; [] out of range
+//   gmLegendPos <row>            -> the enemy Legend's stand in SCRIPT order
+//                                   [easting, northing, elevation], the same
+//                                   shape getPos and gmZone element 8 use; []
+//                                   out of range (a row that never found a
+//                                   stand reads [0,0,0])
+//   gmLegendBody <row>           -> the named body; objNull when never spawned
+//                                   or deleted.  A DEAD body still comes back:
+//                                   ask alive/damage separately, never treat a
+//                                   null link as a death
+//   gmLegendVehicle <row>        -> the tank commander's hull; objNull once it
+//                                   is destroyed or when he never had one
+//   gmLegendDefeated <row>       -> bool, the persisted latch
+//   gmLegendMarker <row>         -> [name, type, color, text] read back out of
+//                                   markersMap; [] when the row has no marker.
+//                                   It exists because there is no stock
+//                                   markerText reader (GameStateExt.cpp has
+//                                   markerPos / markerType / markerColor only).
 //
 // INDEX CONVENTION: the three name/face/id readers take a COMPANION index (the
 // GM_COMP_* index the scripts already carry); gmLegendInfo takes a ROW index,
@@ -26,6 +43,8 @@
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
+#include <Poseidon/AI/AICore.hpp>                 // markersMap
+#include <Poseidon/AI/Path/ArcadeWaypoint.hpp>    // ArcadeMarkerInfo
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Foundation/platform.hpp>
@@ -159,6 +178,86 @@ static GameValue GmLegendHistoryEvent(const GameState* state, GameValuePar oper1
     return value;
 }
 
+// gmLegendPos <rowIndex> -> [easting, northing, elevation]
+static GameValue GmLegendPos(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    const LegendRegistry& registry = LegendRegistry::Instance();
+    const int index = toInt((float)oper1);
+    if (index < 0 || index >= registry.RowCount())
+    {
+        return value;
+    }
+    // SCRIPT order, [easting, northing, elevation], not engine Vector3 order:
+    // getPos returns X then Z then Y (ObjGetPos, GameStateExtGrp.cpp) and
+    // gmZone's element 8 does the same, so a stand read here can be handed
+    // straight to setPos or measured against a zone centre.
+    const Vector3 pos = registry.RowPos(index);
+    array.Resize(3);
+    array[0] = pos.X();
+    array[1] = pos.Z();
+    array[2] = pos.Y();
+    return value;
+}
+
+// gmLegendBody <rowIndex> -> object
+static GameValue GmLegendBody(const GameState* /*state*/, GameValuePar oper1)
+{
+    return GameValueExt(LegendRegistry::Instance().RowBody(toInt((float)oper1)));
+}
+
+// gmLegendVehicle <rowIndex> -> object
+static GameValue GmLegendVehicle(const GameState* /*state*/, GameValuePar oper1)
+{
+    return GameValueExt(LegendRegistry::Instance().RowVehicle(toInt((float)oper1)));
+}
+
+// gmLegendDefeated <rowIndex> -> bool
+static GameValue GmLegendDefeated(const GameState* /*state*/, GameValuePar oper1)
+{
+    const LegendRegistry& registry = LegendRegistry::Instance();
+    const int index = toInt((float)oper1);
+    if (index < 0 || index >= registry.RowCount())
+    {
+        return false;
+    }
+    return registry.Row(index).defeated;
+}
+
+// gmLegendMarker <rowIndex> -> [name, type, color, text]
+static GameValue GmLegendMarker(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    const LegendRegistry& registry = LegendRegistry::Instance();
+    const int index = toInt((float)oper1);
+    if (index < 0 || index >= registry.RowCount())
+    {
+        return value;
+    }
+    const RString name = registry.Row(index).markerName;
+    if (name.GetLength() == 0)
+    {
+        return value;
+    }
+    for (int m = 0; m < markersMap.Size(); m++)
+    {
+        const ArcadeMarkerInfo& info = markersMap[m];
+        if (stricmp(info.name, name) != 0)
+        {
+            continue;
+        }
+        array.Resize(4);
+        array[0] = GameStringType(info.name);
+        array[1] = GameStringType(info.type);
+        array[2] = GameStringType(info.colorName);
+        array[3] = GameStringType(info.text);
+        return value;
+    }
+    return value;
+}
+
 INIT_MODULE(GuerrillaLegends, 3)
 {
     GGameState.NewFunction(GameFunction(GameBool, "gmLegendBind", GmLegendBind, GameArray));
@@ -169,4 +268,9 @@ INIT_MODULE(GuerrillaLegends, 3)
     GGameState.NewFunction(GameFunction(GameArray, "gmLegendInfo", GmLegendInfo, GameScalar));
     GGameState.NewNularOp(GameNular(GameArray, "gmLegendHistory", GmLegendHistory));
     GGameState.NewFunction(GameFunction(GameArray, "gmLegendHistoryEvent", GmLegendHistoryEvent, GameScalar));
+    GGameState.NewFunction(GameFunction(GameArray, "gmLegendPos", GmLegendPos, GameScalar));
+    GGameState.NewFunction(GameFunction(GameObject, "gmLegendBody", GmLegendBody, GameScalar));
+    GGameState.NewFunction(GameFunction(GameObject, "gmLegendVehicle", GmLegendVehicle, GameScalar));
+    GGameState.NewFunction(GameFunction(GameBool, "gmLegendDefeated", GmLegendDefeated, GameScalar));
+    GGameState.NewFunction(GameFunction(GameArray, "gmLegendMarker", GmLegendMarker, GameScalar));
 }

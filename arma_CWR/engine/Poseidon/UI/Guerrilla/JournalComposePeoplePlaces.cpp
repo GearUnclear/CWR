@@ -421,6 +421,18 @@ void ComposeWho(JournalDocument& doc, const ComposeContext& ctx)
             {
                 pen.Subtitle(caption);
             }
+            // Where an enemy Legend stands, in pencil under the caption: the
+            // one line that makes him a place on the map rather than a name in
+            // a list, and the same zone his marker and his objective name.  It
+            // is read off ch.zone, which Gather already fills from the row, so
+            // nothing about the location is assembled twice.  Companions are
+            // deliberately excluded: their zone is a last-seen reading that goes
+            // stale the moment they move, and their status line already says
+            // whether they are with the player.
+            if (ch.kind == 1 && ch.zone.GetLength() > 0)
+            {
+                pen.Line(RString("near ") + ch.zone, VoiceType, InkPencil);
+            }
             if (ch.bio.GetLength() > 0)
             {
                 // 35-55 words: a Serif block, never a hand block (the hand cap

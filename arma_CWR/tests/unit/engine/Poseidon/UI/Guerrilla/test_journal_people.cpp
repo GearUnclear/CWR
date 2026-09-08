@@ -565,6 +565,168 @@ TEST_CASE("Journal compose - People lists the companions, the enemy Legends and 
 }
 
 // ===========================================================================
+// 1b. Change 3: what the player can learn about an enemy Legend
+//
+// The three commanders are in the index from campaign start, before any of
+// them has been spawned, each with the role ResolveBosses settled and the zone
+// his stand was picked in.  Killing one changes the caption (red, "defeated")
+// and nothing else: the dossier, the biography and the place stay where they
+// were, and the row never moves to Memorials.
+// ===========================================================================
+
+namespace
+{
+// an enemy Legend as Gather hands him over: the role string the registry
+// resolved, the zone his stand was picked in, and the status Gather derives
+JournalCharacterView Legend(const char* id, const char* display, const char* role, const char* zone, const char* status)
+{
+    JournalCharacterView ch;
+    ch.id = id;
+    ch.displayName = display;
+    ch.kind = 1;
+    ch.role = role;
+    ch.status = status;
+    ch.zone = zone;
+    ch.legend = true;
+    ch.defeated = std::strcmp(status, "defeated") == 0;
+    return ch;
+}
+
+// the typed pencil lines of a page, in order
+std::vector<std::string> PencilLines(const JournalPage& page)
+{
+    std::vector<std::string> out;
+    for (int b = 0; b < page.blocks.Size(); b++)
+    {
+        for (int r = 0; r < page.blocks[b].runs.Size(); r++)
+        {
+            const JournalRun& run = page.blocks[b].runs[r];
+            if (run.ink == InkPencil && run.voice == VoiceType)
+            {
+                out.push_back(S(run.text));
+            }
+        }
+    }
+    return out;
+}
+
+bool HasPencilLine(const JournalPage& page, const char* text)
+{
+    for (const std::string& line : PencilLines(page))
+    {
+        if (line == text)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+TEST_CASE("Journal compose - the enemy Legends carry a role, a place and a permanent dossier",
+          "[ui][game][guerrilla][journal][compose][people][legends]")
+{
+    Journal journal;
+    journal.AddEntry("Day 14 06:40", "Zoran Kalnik, Sniper, is dead near Outpost.", "Outpost", JKGood, "boss_0");
+    JournalPageInputs in;
+    in.day = 14;
+    in.islandName = "Malden";
+    in.occupierName = "Soviet Army";
+    in.characters.Add(Legend("boss_0", "Cold Zoran Kalnik", "Sniper", "Outpost", "defeated"));
+    in.characters.Add(Legend("boss_1", "Heartless Yuri Sokolov", "Commander", "Airfield", "at large"));
+    in.characters.Add(Legend("boss_2", "Grim Milos Vasic", "Tank Commander", "Seaport", "at large"));
+    in.characters.Add(Companion("comp_0_jana", "Jana Horak", "Jana", "Pvt", "fallen", false));
+    const JournalDocument doc = ComposeJournal(journal, in);
+
+    // all three are in the index, under one head, and the defeated one is still
+    // among them: the head order is Enemy Legends before Memorials, so a row
+    // above Memorials is a row under Enemy Legends
+    const std::string people = JoinedChain(doc, "GM_PEOPLE");
+    CHECK(Has(people, "Enemy Legends"));
+    CHECK(Has(people, "Memorials"));
+    CHECK(Before(people, "Enemy Legends", "Cold Zoran Kalnik"));
+    CHECK(Before(people, "Cold Zoran Kalnik", "Memorials"));
+    CHECK(Before(people, "Heartless Yuri Sokolov", "Memorials"));
+    CHECK(Before(people, "Grim Milos Vasic", "Memorials"));
+    CHECK(Before(people, "Memorials", "Jana Horak"));
+    // the role reaches the reader through the caption, alive and dead
+    CHECK(Has(people, "Cold Zoran Kalnik Sniper, defeated."));
+    CHECK(Has(people, "Heartless Yuri Sokolov Commander, at large."));
+    CHECK(Has(people, "Grim Milos Vasic Tank Commander, at large."));
+
+    // the dossier: the place is one pencil line under the caption, in the same
+    // words the marker and the objective use
+    const JournalPage& sniper = Page(doc, "GM_WHO_boss_0");
+    const std::string sniperText = Joined(sniper);
+    CHECK(Has(sniperText, "Cold Zoran Kalnik"));
+    CHECK(Has(sniperText, "Sniper, defeated."));
+    CHECK(HasPencilLine(sniper, "near Outpost"));
+    CHECK(Has(Joined(Page(doc, "GM_WHO_boss_1")), "Commander, at large."));
+    CHECK(HasPencilLine(Page(doc, "GM_WHO_boss_1"), "near Airfield"));
+    CHECK(HasPencilLine(Page(doc, "GM_WHO_boss_2"), "near Seaport"));
+
+    // a defeated Legend keeps his page, his place and his record link, and the
+    // caption is the only thing that changed: it takes the red pen
+    CHECK(Has(sniperText, "Full record"));
+    CHECK(Has(JoinedChain(doc, "GM_WHO_boss_0_REC"), "is dead near Outpost."));
+    bool red = false;
+    for (int b = 0; b < sniper.blocks.Size(); b++)
+    {
+        for (int r = 0; r < sniper.blocks[b].runs.Size(); r++)
+        {
+            if (sniper.blocks[b].runs[r].ink == InkRed)
+            {
+                red = true;
+            }
+        }
+    }
+    CHECK(red);
+    // and he is listed ONCE in the whole document: a defeated Legend is never
+    // also carried under Memorials, which is the companions' list
+    for (const char* id : {"boss_0", "boss_1", "boss_2"})
+    {
+        INFO(id);
+        CHECK(CountHrefsTo(doc, (std::string("#GM_WHO_") + id).c_str()) == 1);
+    }
+
+    // a companion's zone is a last-seen reading, not a stand: no place line
+    CHECK(PencilLines(Page(doc, "GM_WHO_comp_0_jana")).empty());
+
+    CheckHrefsResolve(doc);
+    CheckNoContinuationCollision(doc);
+    CheckNamesWrapAndNoEmDash(doc, in);
+    CheckHandLimits(doc);
+}
+
+TEST_CASE("Journal compose - a Legend with no stand reads as missing intelligence, not as a placed commander",
+          "[ui][game][guerrilla][journal][compose][people][legends]")
+{
+    // What Gather writes when placement found nowhere to put him, and what
+    // every Legend of a campaign seeded before Change 3 existed reads as for
+    // the rest of that campaign's life: an identity and a dossier, no place.
+    Journal journal;
+    JournalPageInputs in;
+    JournalCharacterView ch = Legend("boss_0", "Cold Zoran Kalnik", "Commander", "", "whereabouts unknown");
+    ch.bio = "He signs the orders that reach the checkpoints and has never once been seen at one, which is "
+             "the whole of what anybody on this island can tell you about the man.";
+    in.characters.Add(ch);
+    const JournalDocument doc = ComposeJournal(journal, in);
+
+    const JournalPage& page = Page(doc, "GM_WHO_boss_0");
+    const std::string text = Joined(page);
+    CHECK(Has(text, "Commander, whereabouts unknown."));
+    // no orphan place line, and no empty pencil row where one would have been
+    CHECK(text.find("near ") == std::string::npos);
+    CHECK(PencilLines(page).empty());
+    // he is still in the index, still under Enemy Legends, still with a dossier
+    const std::string people = JoinedChain(doc, "GM_PEOPLE");
+    CHECK(Before(people, "Enemy Legends", "Cold Zoran Kalnik"));
+    CHECK(Has(people, "Cold Zoran Kalnik Commander, whereabouts unknown."));
+    CHECK(Has(text, "He signs the orders"));
+    CheckNamesWrapAndNoEmDash(doc, in);
+}
+
+// ===========================================================================
 // 2. pagination: one running index over three lists, five rows to a page
 // ===========================================================================
 
@@ -961,6 +1123,9 @@ TEST_CASE("Journal render - a worst-case dossier stays inside one continuation a
                                    "Commander");
     ch.portraitKey = "soldiere__face27";
     ch.portraitPresent = true;
+    // Change 3 adds the place line to this page, so the worst case gains the
+    // longest zone name a shipped template ships (@LoBo's Sinai table)
+    ch.zone = "Ras Nasrani Outpost";
     ch.bio = "He came out of the delta towns with a clerk's hands and a quarrel he had inherited from an uncle "
              "he never met, and the border posts along the coast road learned to say his name carefully long "
              "before the army did, which is the way these things usually go on this coast.";
@@ -1003,6 +1168,7 @@ TEST_CASE("Journal render - a worst-case dossier stays inside one continuation a
     }
     CHECK(Has(whole, "Vakalalabure the Collaborator"));
     CHECK(Has(whole, "Commander, at large."));
+    CHECK(Has(whole, "near Ras Nasrani Outpost"));
     CHECK(Has(whole, "clerk's hands"));
     CHECK(Has(whole, "Held the crossing"));
     CHECK(Has(whole, "Full record"));

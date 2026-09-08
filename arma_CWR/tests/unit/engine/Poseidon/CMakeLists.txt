@@ -400,6 +400,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_addon_closure.cpp
     Game/Guerrilla/test_names_classify.cpp
     Game/Guerrilla/test_legend_names.cpp
+    Game/Guerrilla/test_legend_placement.cpp
     Game/Guerrilla/test_island_scaffold.cpp
     Game/Guerrilla/test_faction_history.cpp
     Game/Guerrilla/test_descriptor_lint.cpp
