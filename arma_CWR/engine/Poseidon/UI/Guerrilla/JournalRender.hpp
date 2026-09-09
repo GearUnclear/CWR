@@ -47,6 +47,34 @@ constexpr const char* kHandFace = "cwrpen";
 constexpr float kPortraitWidthFraction = 0.42f;    // of GetPageWidth()
 constexpr float kPortraitMaxHeightFraction = 0.5f; // of (GetPageHeight() - 3.5 * P)
 
+// The map screen's group bar, and why the footer is not flush with the page
+// bottom.
+//
+// The in-game group bar (RscInGameUI >> GroupInfo, InGameUI::DrawGroupInfo)
+// keeps drawing while the map is open, as soon as the player leads a group of
+// two or more.  It is a fixed band of the UI region, not a scaled one: the
+// frame is drawn at uiY * Height2D() with the stock config's top of 0.90, so
+// it always covers the bottom tenth of the screen at every resolution
+// (measured identical at 800x600 and 1440x1080).
+//
+// The notepad's page bottom lands inside that band.  triBriefingMetrics reports
+// the briefing control at y 0.2364, h 0.6903, scale 1 at both capture lanes, so
+// the page bottom projects to 0.9267 and the bar eats the last 0.0267 of the
+// page, 1.18 rows at the stock P height of 0.0226.  A bottom-pinned row block
+// ends exactly at the page bottom (the layout walks back from GetPageHeight(),
+// CHTMLContainer::FindField and CHTML::Draw), so a footer pinned flush to the
+// bottom is drawn under the squad icons and reads at roughly half contrast.
+//
+// The fix is two blank P rows pinned BELOW the footer's link row: the link row
+// then ends at 0.8815 of the screen, 0.0185 (11 px at 600, 20 px at 1080) clear
+// of the bar, and the footer still sits at the foot of the page.  The reserve is
+// charged to FooterHeight() so the same page budget that keeps the body text off
+// the footer keeps it off the reserve.
+constexpr int kBottomBarReserveRows = 2;
+// the measured screen geometry the reserve is sized against (UI-region units)
+constexpr float kMapNotepadPageBottom = 0.9267f; // triBriefingMetrics y + h
+constexpr float kMapGroupBarTop = 0.90f;         // RscInGameUI >> GroupInfo >> top
+
 HTMLFormat SlotOf(JournalVoice v);
 float ScaleOf(JournalVoice v); // 1.0 for Type/SmallType/Spacer
 
@@ -54,7 +82,10 @@ struct RenderMetrics
 {
     float pageW = 0, pageH = 0, sizeP = 0, uiAspect = 4.0f / 3.0f;
     float Budget() const { return pageH - 3.5f * sizeP; } // SplitSection's own reserve
-    float FooterHeight() const { return 2.0f * sizeP; }   // spacer row + link row, both bottom-pinned
+    // blank rows pinned below the footer, so the link row clears the group bar
+    float BarReserve() const { return kBottomBarReserveRows * sizeP; }
+    // spacer row + link row + the bar reserve, all bottom-pinned
+    float FooterHeight() const { return 2.0f * sizeP + BarReserve(); }
 };
 RenderMetrics MeasureContainer(const CHTMLContainer& html, float uiAspect);
 

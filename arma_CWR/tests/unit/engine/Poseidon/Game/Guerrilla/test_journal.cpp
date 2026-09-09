@@ -325,6 +325,19 @@ bool EndsWith(const std::string& text, const char* tail)
     return text.size() >= n && text.compare(text.size() - n, n, tail) == 0;
 }
 
+// the page read on screen ends in the footer's bar reserve (blank pinned rows
+// that hold the links clear of the map's group bar, JournalRender.hpp), so a
+// tail comparison drops the trailing blanks first
+std::string TrimRight(const std::string& text)
+{
+    size_t end = text.size();
+    while (end > 0 && (text[end - 1] == ' ' || text[end - 1] == '\n'))
+    {
+        end--;
+    }
+    return text.substr(0, end);
+}
+
 // hrefs of the bottom-pinned (footer) fields of the section named `name`
 std::vector<std::string> FooterHrefs(JournalHtml& html, const char* name)
 {
@@ -562,7 +575,7 @@ TEST_CASE("Journal pages - every page renders from inputs and reads as a dossier
     // FOOTERS: Contents ends in the pencil word with no link to itself; a
     // zone page links Contents and its parent; the old seven-name strip is
     // gone everywhere
-    CHECK(EndsWith(contents, "Contents"));
+    CHECK(EndsWith(TrimRight(contents), "Contents"));
     CHECK_FALSE(HasHref(html, "Main", "#Main"));
     CHECK(FooterHrefs(html, "Main").empty());
     {
@@ -1129,8 +1142,9 @@ TEST_CASE("Journal pages - at a tight page height the composed document still ke
     {
         CAPTURE(label);
         JournalHtml html;
-        // budget 8.5 P, footer 2 P: about six typed rows to a page
-        html.pageHeight = 12 * html.GetPHeight();
+        // budget 10.5 P, footer block 4 P (two footer rows plus the group-bar
+        // reserve): about six typed rows to a page
+        html.pageHeight = 14 * html.GetPHeight();
         BuildGuerrillaJournalPages(&html, journal, in);
         CheckPageSet(html);
         for (int s = 0; s < html.NSections(); s++)

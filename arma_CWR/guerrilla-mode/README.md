@@ -400,7 +400,7 @@ marker colors).
 
 ## Tests
 
-The [human gameplay test suite](HUMAN-TESTS.md) provides 41 guided cases in
+The [human gameplay test suite](HUMAN-TESTS.md) provides 43 guided cases in
 Showcase, using the same runtime core and Abel configuration as Guerrilla.
 It includes civilian interactions, occupation incidents, assailants, traffic,
 logistics, soldier/AI behavior and campaign persistence. Select **HUMAN TESTS**

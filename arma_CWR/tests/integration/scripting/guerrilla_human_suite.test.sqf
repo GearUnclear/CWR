@@ -4,7 +4,7 @@ triSimUntil { not (isNil "HT_READY") }
 triSimUntil { HT_READY }
 triSimUntil { (count GM_COMP_OBJ) > 0 }
 triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
-triAssertEq [count HT_CASES, 41]
+triAssertEq [count HT_CASES, 43]
 triAssertEq [count HT_RESULTS, count HT_CASES]
 triAssertEq [count HT_ACTIONS, 1]
 triAssert [not HT_OPEN]

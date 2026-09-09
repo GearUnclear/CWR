@@ -53,6 +53,15 @@ triAssertExcludes [(triBriefingSlot 4), ",0.0000"]
 triAssertExcludes [(triBriefingSlot 5), ",0.0000"]
 triAssertExcludes [(triBriefingSlot 6), ",0.0000"]
 
+// -- the map screen's group bar (RscInGameUI >> GroupInfo) keeps drawing over
+//    the open map, across the bottom tenth of the screen, and the notepad's
+//    page bottom sits inside that band: the journal's footer clears it only
+//    because Render reserves rows under it (JournalRender.hpp, "The map
+//    screen's group bar"). The bar appears once the player leads a squad, so
+//    every capture below waits for one: with a lone player the PNGs would
+//    prove nothing about the overlap
+triSimUntil { (count (units (group player))) >= 2 }
+
 // -- a capture of each representative page ------------------------------------
 triAssertEq [(triBriefingSwitch "Main"), "Main"]
 triScreenshot "c800_contents"

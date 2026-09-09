@@ -22,14 +22,15 @@
 // the section, FormatSectionRows wraps them into rows without paginating,
 // the rows are summed per block (every block ends in a break, so a row never
 // straddles two blocks), and the largest run of leading blocks that fits
-// `GetPageHeight() - 3.5 * P` minus the footer stays; the rest is truncated
-// off and laid again on the next physical page, named "<base>_2", "<base>_3"
-// ... (never "<name>/<n>", which is SplitSection's own namespace).  Render is
-// the sole namer of physical pages: Compose's five-entry parts are boundaries
-// in the same stream, so a height split inserts a page and renumbers the
-// chain, and the footer's prev / next links are emitted once the whole chain
-// is partitioned.  Legacy aliases are attached after the page is formatted
-// (design D0): re-resolved through FindSection, never a pre-format index.
+// `GetPageHeight() - 3.5 * P` minus the footer and its bar reserve stays; the
+// rest is truncated off and laid again on the next physical page, named
+// "<base>_2", "<base>_3" ... (never "<name>/<n>", which is SplitSection's own
+// namespace).  Render is the sole namer of physical pages: Compose's
+// five-entry parts are boundaries in the same stream, so a height split
+// inserts a page and renumbers the chain, and the footer's prev / next links
+// are emitted once the whole chain is partitioned.  Legacy aliases are
+// attached after the page is formatted (design D0): re-resolved through
+// FindSection, never a pre-format index.
 
 namespace Poseidon::Guerrilla
 {
@@ -272,7 +273,8 @@ void GroupChains(const JournalDocument& doc, AutoArray<Chain>& chains)
 // ===========================================================================
 // the footer
 //
-// Two bottom-pinned rows: a spacer, then the link row at P:
+// Two bottom-pinned rows, then the bar reserve.  The rows: a spacer, then
+// the link row at P:
 // Contents - <parent> - prev - next, with pencil " - " separators; the
 // current page is never listed.  On Contents itself the footer is the single
 // pencil word Contents with no href.  The parent link is omitted when the
@@ -281,7 +283,11 @@ void GroupChains(const JournalDocument& doc, AutoArray<Chain>& chains)
 // next need at 800x600.  prev / next walk the chain's physical pages and, at
 // its ends, the page's named neighbours (JournalPage::prevChainName /
 // nextChainName), which is how the handbook chapters chain into each other.
-// Height 2 * P, charged against the page budget.
+//
+// Below the link row sit kBottomBarReserveRows blank pinned rows, which lift
+// the links clear of the map screen's group bar (JournalRender.hpp, "The map
+// screen's group bar", carries the measured geometry).  Height 2 * P plus the
+// reserve, all of it charged against the page budget.
 // ===========================================================================
 
 void FooterPencil(CHTMLContainer* html, int s, const char* text)
@@ -336,6 +342,14 @@ void EmitFooter(CHTMLContainer* html, int s, const JournalPage& first, int i, co
         FooterLink(html, s, RString("next"), RString("#") + next);
     }
     html->AddBreak(s, true);
+    // the bar reserve: blank pinned rows under the links.  A bottom-pinned
+    // block ends flush with the page bottom, which the group bar covers, so
+    // these are what hold the link row above it
+    for (int r = 0; r < kBottomBarReserveRows; r++)
+    {
+        html->AddText(s, RString(" "), kSlotSpacer, HALeft, true, false, RString(), 0);
+        html->AddBreak(s, true);
+    }
 }
 
 } // namespace

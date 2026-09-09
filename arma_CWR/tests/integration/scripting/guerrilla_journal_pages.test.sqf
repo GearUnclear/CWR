@@ -222,7 +222,11 @@ triAssertIncludes [gjReference, "Reference"]
 triAssertIncludes [gjReference, "The campaign"]
 triAssertIncludes [gjReference, "Undercover"]
 triAssertEq [(triBriefingSwitch "GM_MAN_MODE"), "GM_MAN_MODE"]
-gjManMode = "GM_MAN_MODE" call gjReadAll
+// The Mode chapter is read with gjReadChain for the same reason Undercover is:
+// a chapter is authored prose whose only page boundary is Render's height
+// budget, and since the footer gained its group-bar reserve (JournalRender.hpp)
+// this one runs onto GM_MAN_MODE_2. The chapter still has to read whole
+gjManMode = "GM_MAN_MODE" call gjReadChain
 triAssertIncludes [gjManMode, "The campaign"]
 triAssertIncludes [gjManMode, "DISPATCHES"]
 // Undercover is the longest authored chapter: its tables and its two closing

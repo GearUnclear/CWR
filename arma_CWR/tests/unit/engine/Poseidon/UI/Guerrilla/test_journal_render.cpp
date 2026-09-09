@@ -360,8 +360,9 @@ TEST_CASE("Journal render - blocks that overrun the budget move whole onto _2, _
     }
     JournalPageHtml html;
     const float p = html.GetPHeight();
-    // budget = 8 - 3.5 = 4.5 P; the footer takes 2 P; two one-row blocks fit
-    html.pageHeight = 8 * p;
+    // budget = 10 - 3.5 = 6.5 P; the footer block takes 2 P of rows plus the
+    // 2 P bar reserve pinned under them; two one-row blocks fit
+    html.pageHeight = 10 * p;
     JournalPageInputs in;
     RenderJournal(&html, doc, in);
 
@@ -428,7 +429,8 @@ TEST_CASE("Journal render - blocks that overrun the budget move whole onto _2, _
         CHECK(FooterHrefs(sec) == want);
         CHECK(last.find("next") == std::string::npos);
         CHECK(FooterText(sec, "#Main") == "Contents");
-        // the two footer rows are bottom-pinned, the content rows are not
+        // the two footer rows and the bar reserve under them are bottom-pinned,
+        // the content rows are not
         int bottomRows = 0;
         for (int r = 0; r < sec.rows.Size(); r++)
         {
@@ -437,7 +439,7 @@ TEST_CASE("Journal render - blocks that overrun the budget move whole onto _2, _
                 bottomRows++;
             }
         }
-        CHECK(bottomRows == 2);
+        CHECK(bottomRows == 2 + kBottomBarReserveRows);
         for (int f = 0; f < sec.fields.Size(); f++)
         {
             const HTMLField& fld = sec.fields[f];
@@ -452,6 +454,94 @@ TEST_CASE("Journal render - blocks that overrun the budget move whole onto _2, _
         }
     }
     CHECK_FALSE(html.HasFieldColor());
+}
+
+// ===========================================================================
+// 1b. the bar reserve: the footer's links clear the map screen's group bar
+// ===========================================================================
+
+TEST_CASE("Journal render - the footer's link row is lifted clear of the map screen's group bar",
+          "[game][guerrilla][journal][render]")
+{
+    // The geometry the reserve is sized against.  A bottom-pinned block ends
+    // flush with the page bottom, and at the stock notepad metrics
+    // (triBriefingMetrics 0.0411, 0.2364, 0.3395, 0.6903 at scale 1, P 0.0226,
+    // identical at both capture lanes) that bottom is 0.0267 INSIDE the group
+    // bar, so a footer with no reserve is drawn under the squad icons.
+    {
+        RenderMetrics stock;
+        stock.pageH = 0.6903f;
+        stock.sizeP = 0.0226f;
+        const float intrusion = kMapNotepadPageBottom - kMapGroupBarTop;
+        CHECK(intrusion > 0);
+        // the reserve lifts the link row's bottom edge above the bar ...
+        const float linkRowBottom = kMapNotepadPageBottom - stock.BarReserve();
+        CHECK(linkRowBottom < kMapGroupBarTop);
+        // ... with clear air, not by a rounding error
+        CHECK(kMapGroupBarTop - linkRowBottom >= 0.5f * stock.sizeP);
+        // and it is charged: the footer block is its two rows plus the reserve
+        CHECK(stock.FooterHeight() == Catch::Approx(2.0f * stock.sizeP + stock.BarReserve()));
+        CHECK(stock.BarReserve() == Catch::Approx(kBottomBarReserveRows * stock.sizeP));
+    }
+
+    // and the reserve is really emitted: every page ends in that many blank
+    // pinned rows, below the row that carries the links
+    JournalDocument doc;
+    {
+        JournalPage page = MakePage("X", "Two blocks", "Plan", "Operations");
+        page.blocks.Add(TextBlock(PaddedText(0)));
+        page.blocks.Add(TextBlock(PaddedText(1)));
+        doc.pages.Add(page);
+    }
+    JournalPageHtml html;
+    const float p = html.GetPHeight();
+    html.pageHeight = 10 * p;
+    JournalPageInputs in;
+    RenderJournal(&html, doc, in);
+
+    REQUIRE(html.FindSection("X") >= 0);
+    CHECK(html.FindSection("X_2") < 0);
+    const HTMLSection& sec = html.GetSection(html.FindSection("X"));
+    REQUIRE(sec.rows.Size() > kBottomBarReserveRows + 1);
+    const int linkRow = sec.rows.Size() - 1 - kBottomBarReserveRows;
+    // the links live on the last row above the reserve
+    bool linkRowHasHref = false;
+    for (int f = sec.rows[linkRow].firstField; f <= sec.rows[linkRow].lastField && f < sec.fields.Size(); f++)
+    {
+        linkRowHasHref = linkRowHasHref || sec.fields[f].href.GetLength() > 0;
+    }
+    CHECK(linkRowHasHref);
+    float reserveHeight = 0;
+    for (int r = linkRow + 1; r < sec.rows.Size(); r++)
+    {
+        CHECK(sec.rows[r].bottom);
+        reserveHeight += sec.rows[r].height;
+        for (int f = sec.rows[r].firstField; f <= sec.rows[r].lastField && f < sec.fields.Size(); f++)
+        {
+            if (sec.fields[f].nextline)
+            {
+                continue; // the break that closed the row
+            }
+            // blank: no ink, no link, nothing to overlap
+            CHECK(S(sec.fields[f].text) == " ");
+            CHECK(sec.fields[f].href.GetLength() == 0);
+        }
+    }
+    CHECK(reserveHeight == Catch::Approx(kBottomBarReserveRows * p));
+
+    // the body can never grow into the reserve: the same budget that keeps it
+    // off the footer rows charges those blank rows too
+    float body = 0;
+    for (int r = 0; r < sec.rows.Size(); r++)
+    {
+        if (!sec.rows[r].bottom)
+        {
+            body += sec.rows[r].height;
+        }
+    }
+    const RenderMetrics m = MeasureContainer(html, in.uiAspect);
+    CHECK(body + m.FooterHeight() <= m.Budget());
+    CHECK(m.FooterHeight() == Catch::Approx(2.0f * p + kBottomBarReserveRows * p));
 }
 
 TEST_CASE("Journal render - FitBlocks keeps the largest run of leading blocks under the budget, never fewer than one",
@@ -543,9 +633,10 @@ TEST_CASE("Journal render - a head and the row it introduces land on the same pa
         JournalPageHtml html;
         const float p = html.GetPHeight();
         // rows: title 1.45, subtitle 1.1, item 1, head 1 + 1.15, items 1 each;
-        // footer 2.  Title..head sum 7.7, so a budget of 8.2 (page 11.7) cuts
-        // naively after the head: keep-with-next walks the cut back to item a
-        html.pageHeight = 11.7f * p;
+        // footer block 4 (two rows plus the 2 P bar reserve).  Title..head sum
+        // 7.7, so a budget of 10.2 (page 13.7) cuts naively after the head:
+        // keep-with-next walks the cut back to item a
+        html.pageHeight = 13.7f * p;
         JournalPageInputs in;
         RenderJournal(&html, doc, in);
 
@@ -595,9 +686,10 @@ TEST_CASE("Journal render - a head and the row it introduces land on the same pa
         }
         JournalPageHtml html;
         const float p = html.GetPHeight();
-        // budget 5.5, footer 2: 3.5 usable; title + item a = 2.45, a head and
-        // its item = 3.15, so three pages of two blocks each
-        html.pageHeight = 9 * p;
+        // budget 7.5, footer block 4 (two rows plus the 2 P bar reserve): 3.5
+        // usable; title + item a = 2.45, a head and its item = 3.15, so three
+        // pages of two blocks each
+        html.pageHeight = 11 * p;
         JournalPageInputs in;
         RenderJournal(&html, doc, in);
 
@@ -629,8 +721,9 @@ TEST_CASE("Journal render - a head and the row it introduces land on the same pa
     SECTION("the hand is charged at 1.6 P: one hand row per page where two typed rows fit")
     {
         // the twelve-block case above pins two VoiceType rows per page at
-        // this height (budget 4.5, footer 2, 2.5 usable); two hand rows are
-        // 3.2 and do not, so the slot sizes must be bound before the measure
+        // this height (budget 6.5, footer block 4, 2.5 usable); two hand rows
+        // are 3.2 and do not, so the slot sizes must be bound before the
+        // measure
         JournalDocument doc;
         {
             JournalPage page = MakePage("H", "Hand", "Plan", "Operations");
@@ -644,7 +737,7 @@ TEST_CASE("Journal render - a head and the row it introduces land on the same pa
         }
         JournalPageHtml html;
         const float p = html.GetPHeight();
-        html.pageHeight = 8 * p;
+        html.pageHeight = 10 * p;
         JournalPageInputs in;
         RenderJournal(&html, doc, in);
         CHECK(html.NSections() == 4);
@@ -687,7 +780,7 @@ TEST_CASE("Journal render - a legacy alias resolves to page 0 after SplitSection
     JournalPageHtml html;
     const float p = html.GetPHeight();
     // budget = 3 - 3.5 < 0: every block gets its own physical page, and the
-    // first block (two rows + the two footer rows = 4 > 3) overflows its
+    // first block (two rows + the four footer rows = 6 > 3) overflows its
     // page, so SplitSection fires on it
     html.pageHeight = 3 * p;
     JournalPageInputs in;
@@ -735,7 +828,7 @@ TEST_CASE("Journal render - aliases stay on page 0 of a chain that fits without 
         doc.pages.Add(part2);
     }
     JournalPageHtml html;
-    html.pageHeight = 8 * html.GetPHeight();
+    html.pageHeight = 10 * html.GetPHeight();
     JournalPageInputs in;
     RenderJournal(&html, doc, in);
     // six blocks at two a page, then the composed part: GM_PLACES .. GM_PLACES_4
@@ -991,9 +1084,10 @@ TEST_CASE("Journal render - an authored Main keeps its fields ahead of the journ
         }
         doc.pages.Add(page);
     }
-    // budget 5.5 P, footer 2 P: three one-row blocks per bare page; on page 1
-    // the authored rows eat into that
-    html.pageHeight = 9 * html.GetPHeight();
+    // budget 7.5 P, footer block 4 P (two footer rows plus the group-bar
+    // reserve): three one-row blocks per bare page; on page 1 the authored
+    // rows eat into that
+    html.pageHeight = 11 * html.GetPHeight();
     JournalPageInputs in;
     RenderJournal(&html, doc, in);
 
