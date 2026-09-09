@@ -1,0 +1,10 @@
+tags = ["rendering", "full_cwa", "headful"]
+binary = "PoseidonGame"
+# One-player on-foot Abel mission (Classic 1.99 data), no vehicles, no scripting:
+# the lane is about the verbs, and nothing else should wander into the frame.
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 180
+assert_timeout = 60
+# Windowed 800x600. A presented-frame capture needs a real swap, so the renderer
+# has to be the real one, but nothing here reads pixels.
+extra_args = ["--dev", "--window", "--display-mode", "windowed", "--width", "800", "--height", "600"]

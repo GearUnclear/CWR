@@ -6,6 +6,8 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/UserActionDesc.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>               // global Pars for triListFaces
+#include <Poseidon/Graphics/Textures/TextureBank.hpp> // Texture::Name for triBriefingImages
 
 #include <SDL3/SDL_scancode.h>
 
@@ -305,4 +307,88 @@ GameValue TriBriefingSlot(const GameState* /*state*/, GameValuePar arg)
     snprintf(buf, sizeof(buf), "%s,%.4f", face, html->GetFormatSize(slot));
     LOG_INFO(Core, "[tri] triBriefingSlot {} -> {}", n, buf);
     return GameValue(buf);
+}
+
+/// triBriefingImages -> "name|w|h;name|w|h;..." / "" / "FAIL:<reason>".
+/// Every HFImg field of the briefing/notes control's CURRENT section, in layout
+/// order: the texture's own name (or "-" when the field never resolved a
+/// texture), and the field's stored width and height. Those are PAGE units, not
+/// the w640/h480 numbers handed to AddImage: AddImage divides them by 640 and
+/// 480 (UIControlsExt.cpp), so compare against the pageW/pageH triBriefingMetrics
+/// reports. HTMLField keeps no copy of the source path, only Ref<Texture>
+/// texture1 (UIControlsBase.hpp), so "-" is exactly the "the .paa did not
+/// resolve" signal a portrait lane needs, and a name that carries the expected
+/// portrait key is proof the journal drew the photograph it named.
+GameValue TriBriefingImages(const GameState* /*state*/)
+{
+    if (!GWorld)
+        return GameValue("FAIL:no_world");
+    auto* map = dynamic_cast<DisplayMap*>(GWorld->Map());
+    if (!map)
+        return GameValue("FAIL:no_map");
+    CHTML* html = map->GetBriefingControl();
+    if (!html)
+        return GameValue("FAIL:no_briefing");
+    const int s = html->CurrentSection();
+    if (s < 0 || s >= html->NSections())
+        return GameValue("FAIL:no_section");
+
+    const HTMLSection& section = html->GetSection(s);
+    char buf[2048];
+    int used = 0;
+    buf[0] = 0;
+    for (int i = 0; i < section.fields.Size(); ++i)
+    {
+        const HTMLField& field = section.fields[i];
+        if (field.format != HFImg)
+            continue;
+        const char* name = (field.texture1 && field.texture1->Name()) ? field.texture1->Name() : "-";
+        const int n = snprintf(buf + used, sizeof(buf) - used, "%s%s|%.4f|%.4f", used > 0 ? ";" : "", name, field.width,
+                               field.height);
+        if (n < 0 || used + n >= (int)sizeof(buf))
+        {
+            buf[used] = 0;
+            break;
+        }
+        used += n;
+    }
+    LOG_INFO(Core, "[tri] triBriefingImages section={} -> {}", s, buf);
+    return GameValue(buf);
+}
+
+/// triListFaces -> array of CfgFaces class names usable on a MAN body.
+/// Walks Pars >> "CfgFaces" the way DisplayUIMenus.cpp's face list box does, but
+/// skips the entries that list box deliberately keeps: an entry carrying a
+/// `disabled` key, an entry whose `woman` value reads > 0.5 (Head::SetFace
+/// silently returns on a woman/man mismatch, so a shoot fed a woman token would
+/// photograph an unchanged head), and the "Custom" placeholder. Class names, not
+/// display names, because setFace takes the class name; and read through
+/// FindEntry("name") rather than the dialog's unconditional `entry >> "name"`,
+/// so a nameless entry cannot fault the walk.
+GameValue TriListFaces(const GameState* /*state*/)
+{
+    AutoArray<GameValue> result;
+    const ParamEntry* faces = Pars.FindEntry("CfgFaces");
+    if (!faces)
+        return GameValue(result);
+
+    for (int i = 0; i < faces->GetEntryCount(); ++i)
+    {
+        const ParamEntry& entry = faces->GetEntry(i);
+        if (!entry.IsClass())
+            continue;
+        if (entry.FindEntry("disabled"))
+            continue;
+        const ParamEntry* woman = entry.FindEntry("woman");
+        if (woman && (float)(*woman) > 0.5f)
+            continue;
+        RString name = entry.GetName();
+        if (name.GetLength() == 0)
+            continue;
+        if (stricmp(name, "Custom") == 0)
+            continue;
+        result.Add(GameValue(name));
+    }
+    LOG_INFO(Core, "[tri] triListFaces -> {} usable faces", result.Size());
+    return GameValue(result);
 }

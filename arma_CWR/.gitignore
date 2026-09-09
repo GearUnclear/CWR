@@ -29,6 +29,18 @@ imgui.ini
 !/tests/integration/missions/sound_preload.Demo/sound/
 !/tests/integration/missions/sound_preload.Demo/sound/say.wav
 /tests/integration/missions/**/*.paa
+# Dossier portraits. Every card is a render of a game model: the vanilla half
+# of Bohemia's CWA bodies, the "lobo" half of @LoBo's. Both are game data, and
+# this repo keeps game data out of git on purpose, for the same reason the
+# @LoBo repairs ship as a rerunnable script and the CI island fixture was
+# authored GPL-clean rather than borrowed. The tracked artifacts are the
+# regeneration path and the catalogue metadata, never the imagery:
+#   tools/screenshots/portraits/portrait_{vanilla,lobo}.test.{sqf,toml}
+#   tools/screenshots/portrait_process.py
+#   guerrilla-mode/core/portraits/{README.md,catalogue.json}
+# A clone with no portraits is a supported state: every dossier falls back to
+# the "Photograph unavailable" panel and both portrait suites skip.
+/guerrilla-mode/core/portraits/*.paa
 /deploy/creds.txt
 /deploy/**/values-prod.yaml
 /deploy/**/values.prod.yml

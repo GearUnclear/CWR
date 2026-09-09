@@ -67,6 +67,16 @@ triAssertEq [(triBriefingSwitch "GM_RECORD"), "GM_RECORD"]
 triScreenshot "c1440_record"
 triAssertEq [(triBriefingSwitch "GM_REFERENCE"), "GM_REFERENCE"]
 triScreenshot "c1440_reference"
+// A character dossier: the one page whose acceptance depends on an ASSET.  The
+// portrait box is reserved at an exact size whether or not a photograph exists,
+// so a dossier that fits with the pencil "Photograph unavailable" line in it is
+// still not the page that ships.  The anchor is built from the registry rather
+// than pinned, because the row id is seeded per campaign.
+triSimUntil { (count GM_COMP_OBJ) >= 1 }
+triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
+c1440Who = format ["GM_WHO_%1", (gmLegendInfo 0) select 0]
+triAssertEq [(triBriefingSwitch c1440Who), c1440Who]
+triScreenshot "c1440_dossier"
 triAssertEq [(triBriefingSwitch "GM_MAN_UNDERCOVER"), "GM_MAN_UNDERCOVER"]
 triScreenshot "c1440_handbook"
 // The handbook's Undercover chapter is the longest authored page and the only
@@ -124,5 +134,11 @@ triAssertEq [(triBriefingSwitch "GM_MAN_SAVE"), "GM_MAN_SAVE"]
 triAssertEq [(triBriefingSwitch "GM_RECORD/0"), "GM_MAN_SAVE"]
 triAssertEq [(triBriefingSwitch "GM_MAN_SAVE"), "GM_MAN_SAVE"]
 triAssertEq [(triBriefingSwitch "GM_RECORD_2"), "GM_MAN_SAVE"]
+// and the dossier: the page carrying the photograph, so the one a portrait
+// sized wrong would break first
+triAssertEq [(triBriefingSwitch "GM_MAN_SAVE"), "GM_MAN_SAVE"]
+triAssertEq [(triBriefingSwitch (c1440Who + "/0")), "GM_MAN_SAVE"]
+triAssertEq [(triBriefingSwitch "GM_MAN_SAVE"), "GM_MAN_SAVE"]
+triAssertEq [(triBriefingSwitch (c1440Who + "_2")), "GM_MAN_SAVE"]
 
 triEndTest
