@@ -1,0 +1,11 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Boot, the seeding tick, three one-per-second commander spawns, then the whole
+# capture sequence run to a flip (garrison clear + the consolidation meter at
+# captureRate 20) with all three alive. The waits are clock predicates, not
+# frame counts: triSimFrames pumps AppIdle and advances no clock, while the
+# registry's boss poll is 1 Hz off real deltaT.
+timeout = 420
+assert_timeout = 180
+extra_args = ["--dev"]

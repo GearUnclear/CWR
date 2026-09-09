@@ -206,7 +206,7 @@ gmPlayer = player
 ;    gmEvtCapLost    [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtLoaded     [saveVersion]                       -> campaign.sqs
 ;    gmEvtAlert      [zoneIndex, zoneName, old, new]     -> qrf.sqs
-;    gmEvtUcBroken   [reason]                            -> undercover.sqs
+;    gmEvtUcBroken   [reason, zoneName]                  -> undercover.sqs
 ;    gmEvtGarSpawned / gmEvtGarDespawned [idx, name, n]  -> loot.sqs
 ; ===========================================================================
 gmEvtCaptured    = []

@@ -1,0 +1,16 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headful"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Boot, the registry's seeding tick, the first companion spawn (the 5 s
+# companion loop), then the real map display is constructed and the dossier
+# page repainted twice.
+#
+# PRECONDITION: guerrilla-mode/core installed into the data dir's gmcore,
+# portraits included - guerrilla-mode/install-missions.ps1, or, for a shadow
+# data dir, the same robocopy /MIR the Trident workflow does:
+#   robocopy guerrilla-mode\core <shadow>\gmcore /MIR
+# Without it the notepad names a .paa that is not on disk, the field reports
+# "-", and this lane goes red on exactly the thing it is here to catch.
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

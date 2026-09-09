@@ -1,0 +1,40 @@
+# Portrait shoot, @LoBo lane: the 23 Legend bodies the eight @LoBo faction
+# descriptors can produce, at the four kPortraitFaces tokens.  92 captures.
+#
+# Not a regression test; run it explicitly, exactly like the vanilla lane:
+#
+#   tri test tools/screenshots/portraits/portrait_lobo.test.sqf
+#   python tools/screenshots/portrait_process.py <outdir> lobo
+#
+# PRECONDITIONS (the same as the lobo test lane):
+#   * full CWA 1.99 install as the data dir
+#   * @LoBo NEXT TO IT, because --mods-dir ".." resolves against the game's own
+#     CWD.  That is why this lane must NOT be pointed at the classic-shadow
+#     junction farm: the shadow has no @LoBo sibling, and ".." from there is
+#     D:\Arma_CWA_worktrees, which holds no mods at all.  Run it with
+#     --data-dir "D:\Arma_CWA\ARMA Cold War Assault [Classic]".
+#   * one-time: tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+#
+# The three mods are the same set lobo_sinai_showcase.test.toml mounts, and
+# @udshowcase is the load-bearing one: it pre-activates the whole @LoBo roster,
+# which the mission's own addOns[] does not declare.  Without it the engine logs
+# "Access denied ... owner addon is not activated" and dies on the first class
+# outside the template's list.
+#
+# The @LoBo half of the catalogue is NOT committed: arma_CWR/.gitignore excludes
+# /guerrilla-mode/core/portraits/lobo*.paa, because those frames are derived
+# from APL-SA third-party art and this repo is GPL.  This toml plus
+# portrait_roster.py IS the tracked regeneration artifact.
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["showcase", "lobo", "full_cwa", "headful", "exclusive"]
+timeout = 2400
+assert_timeout = 600
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--mods-dir", "..",
+    "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup;arma_CWR/tools/screenshots/@udshowcase",
+    "--width", "1280",
+    "--height", "960",
+]

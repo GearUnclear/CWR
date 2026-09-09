@@ -165,6 +165,7 @@ GameValue TriGpadPov(const GameState*, GameValuePar);
 GameValue TriGpadLeft(const GameState*, GameValuePar);
 GameValue TriKeyUp(const GameState*, GameValuePar);
 GameValue TriScreenshot(const GameState*, GameValuePar);
+GameValue TriCaptureAtPresent(const GameState*, GameValuePar);
 GameValue TriShadowDepthProbe(const GameState*, GameValuePar);
 GameValue TriEnableShadowMaps(const GameState*);
 GameValue TriShadowSceneDump(const GameState*, GameValuePar);
@@ -216,6 +217,10 @@ GameValue TriBriefingSection(const GameState*);
 GameValue TriBriefingSwitch(const GameState*, GameValuePar);
 GameValue TriBriefingLinkRoute(const GameState*, GameValuePar);
 GameValue TriBriefingClickAt(const GameState*, GameValuePar);
+GameValue TriBriefingMetrics(const GameState*);
+GameValue TriBriefingSlot(const GameState*, GameValuePar);
+GameValue TriBriefingImages(const GameState*);
+GameValue TriListFaces(const GameState*);
 GameValue TriMissionPlayerReady(const GameState*);
 GameValue TriAssertMissionPlayable(const GameState*);
 GameValue TriControlText(const GameState*, GameValuePar);
@@ -1108,6 +1113,49 @@ GameValue TriRoleFaceTexture(const GameState* /*state*/, GameValuePar arg)
             return GameValue(man->GetFaceTextureName());
     }
     return GameValue("FAIL:no_role_person");
+}
+
+// triSetUnitFaceView [<object>, <distance>] - pin the camera in front of an
+// arbitrary spawned unit, using the same rig TriSetRoleFaceView uses for a
+// multiplayer body: EffectStandStill + mimic "Default" + Man::CalculateCameraPosition
+// as the aim point.  Distance defaults to 1.6 m.  Added for the Guerrilla
+// journal portrait shoot, which photographs spawned units with no MP role and
+// no player attached; before this the repeatable rig was reachable only through
+// TriSetRoleFaceView, i.e. only for a live network player.
+GameValue TriSetUnitFaceView(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GWorld)
+        return GameValue("FAIL:no_world");
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected_array");
+    const GameArrayType& a = arg;
+    if (a.Size() < 1 || a[0].GetType() != GameObject)
+        return GameValue("FAIL:no_object");
+
+    Object* obj = GetObject(a[0]);
+    if (!obj)
+        return GameValue("FAIL:no_object");
+    Person* person = dyn_cast<Person>(obj);
+    if (!person)
+        return GameValue("FAIL:not_person");
+
+    const float distance = a.Size() >= 2 ? static_cast<float>(static_cast<GameScalarType>(a[1])) : 1.6f;
+    return TriSetPersonFaceView(person, distance);
+}
+
+// triFaceTexture <object> - the face texture the body is actually wearing.
+// Head::SetFace fails silently twice over (an unknown token falls back to
+// "Default", a woman/man mismatch simply returns), so a portrait shoot has to
+// measure the result rather than trust the setFace call.
+GameValue TriFaceTexture(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameObject)
+        return GameValue("FAIL:not_man");
+    Object* obj = GetObject(arg);
+    Man* man = obj ? dyn_cast<Man>(obj) : nullptr;
+    if (!man)
+        return GameValue("FAIL:not_man");
+    return GameValue(man->GetFaceTextureName());
 }
 
 // triClearView — release the override, returning to the player view.
@@ -3069,6 +3117,9 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triSetPlayerFaceView", TriSetPlayerFaceView, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triSetRoleFaceView", TriSetRoleFaceView, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triRoleFaceTexture", TriRoleFaceTexture, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "triSetUnitFaceView", TriSetUnitFaceView, GameArray));
+    GGameState.NewFunction(GameFunction(GameString, "triFaceTexture", TriFaceTexture, GameObject));
+    GGameState.NewNularOp(GameNular(GameArray, "triListFaces", TriListFaces));
     GGameState.NewNularOp(GameNular(GameString, "triClearView", TriClearView));
     GGameState.NewFunction(GameFunction(GameString, "triRdcCapture", TriRdcCapture, GameString));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosX", TriPlayerPosX));
@@ -3150,6 +3201,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameBool, "triGpadPov", TriGpadPov, GameScalar));
     GGameState.NewFunction(GameFunction(GameBool, "triGpadLeft", TriGpadLeft, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triScreenshot", TriScreenshot, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "triCaptureAtPresent", TriCaptureAtPresent, GameBool));
     GGameState.NewFunction(GameFunction(GameString, "triShadowDepthProbe", TriShadowDepthProbe, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triEnableShadowMaps", TriEnableShadowMaps));
     GGameState.NewFunction(GameFunction(GameString, "triShadowSceneDump", TriShadowSceneDump, GameString));
@@ -3299,6 +3351,9 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triBriefingSwitch", TriBriefingSwitch, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triBriefingLinkRoute", TriBriefingLinkRoute, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triBriefingClickAt", TriBriefingClickAt, GameArray));
+    GGameState.NewNularOp(GameNular(GameString, "triBriefingMetrics", TriBriefingMetrics));
+    GGameState.NewFunction(GameFunction(GameString, "triBriefingSlot", TriBriefingSlot, GameScalar));
+    GGameState.NewNularOp(GameNular(GameString, "triBriefingImages", TriBriefingImages));
     GGameState.NewNularOp(GameNular(GameScalar, "triRadioWaveCount", TriRadioWaveCount));
     GGameState.NewNularOp(GameNular(GameString, "triRadioWaveStates", TriRadioWaveStates));
     GameValue TriSideChat(const GameState*, GameValuePar);

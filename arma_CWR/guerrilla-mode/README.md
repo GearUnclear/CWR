@@ -26,6 +26,21 @@ publishes `gmSelOccupier`/`gmSelResistance`; the engine resolves them and hands
 scripts the side strings via the `gmOccupierSide`/`gmResistanceSide` nulars
 (Demo defaults: EAST vs GUER).
 
+**Characters have names they earn.** A campaign draws one seed at its first
+tick and everything about its cast follows from it: your companion keeps the
+base name the template gave her, gains a surname from the faction's regional
+name pool, and earns a nickname at SERGEANT and a second, different one at
+COLONEL, so `Petra` becomes `Petra Kovacevic` becomes `Petra "The Hawk"
+Kovacevic the Unbroken`. The name is written onto the body itself, so the HUD,
+the cursor label, the group bar, the briefing roster, the diary and her
+dossier all say the same thing at the same moment. The same seed writes the
+campaign's HISTORY, a short account of how this occupation began, using the
+island's own place names, and pre-rolls the three enemy commanders. None of it
+is a text generator at runtime: every draw is a pure function of the seed and
+a stable id, resolved to prose once and then persisted, so reopening the
+journal or loading a save can never reroll a word of it. Which regional names
+a faction draws is one descriptor key, `namePool`.
+
 ### Faction library
 
 `CfgGuerrillaFactions` is **not** authored per island. The engine builds the
@@ -81,7 +96,8 @@ no overhead, ordinary missions unaffected. The mission scripts are a thin
 | **AlertMachine** (native) | per-zone GREEN/YELLOW/RED FSM (knowsAbout bands, disengage window), last-known position, undercover-break detection, alert events | `engine/Poseidon/Game/Guerrilla/AlertMachine.*` |
 | **GarrisonCache** (native) | occupier garrison distance-cache (reserve ↔ live groups), officer-first spawn from faction data, survivor write-back, garrison events | `engine/Poseidon/Game/Guerrilla/GarrisonCache.*` |
 | **Native persistence** | zones/alert/garrison + registered event handlers serialize; `campaignLoaded` event fires after a load | the three `Serialize` impls + `World::Serialize` |
-| **Journal** (native) | the map screen's notepad as the commander's journal: Situation, Plan (objectives + tagged next moves), Zones index + a page per zone, Cell, Resistance, Diary, Handbook; fed by the scripts through `gmJournal*` (`gmJournalNote` tags a line with its zone and kind), serialized as `GuerrillaJournal` | `engine/Poseidon/Game/Guerrilla/Journal.*` + `UI/Guerrilla/GuerrillaJournalPages.*` |
+| **Journal** (native) | the map screen's notepad as the resistance dossier, in the notepad's stock look (Garamond titles, typed Courier reports, short handwritten remarks in ink): Contents (the Notes tab), Dispatches, Operations (the Plan tab: Objectives, Suggested actions, Supplies, Resistance strength), People + The roster, Places + a page per zone, Chronicles + The record, Reference + the handbook chapters; lists paginate at five entries onto `<page>_2` continuations; fed by the scripts through `gmJournal*` (`gmJournalNote` tags a line with its zone and kind), serialized as `GuerrillaJournal` | `engine/Poseidon/Game/Guerrilla/Journal.*` + `UI/Guerrilla/GuerrillaJournalPages.*` (Gather) + `JournalCompose*` / `JournalRender.*` / `JournalManual.*` / `JournalText.*` |
+| **Legends** (native) | the campaign's cast: a stable id per character, the EARNED display name a companion grows into (base name, then a generated surname, then a nickname slot at SERGEANT and a second at COLONEL), the face, a generated biography, the recorded deeds, the three enemy commanders (placed, guarded, marked and killable: see [Enemy Legends](#enemy-legends-the-three-commanders) below), and the seeded campaign HISTORY the journal's History page reads. It observes `GM_COMP_*` and owns identity only: `companions.sqs` still owns XP, rank and permadeath. `gmLegend*`; serialized as `GuerrillaLegends` | `engine/Poseidon/Game/Guerrilla/LegendRegistry.*` + `LegendNames.*` / `LegendPlacement.*` / `FactionHistory.*` |
 | **Traffic** (native) | ambient road traffic: civilian cars town-to-town, occupier patrol vehicles between occupier zones, occasional supply convoys; player-distance band spawn/despawn, commandeer sequence (stop, driver bails + flees, hull released), civ-driver killed-EH feeding the civilian kill ledger; `gmTraffic*` + the road queries `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` (`nearestRoads` alias); serialized as `GuerrillaTraffic` | `engine/Poseidon/Game/Guerrilla/Traffic.*` + `TrafficCommands.cpp` |
 | **Mission scripts** (policy) | capture reaction (hold garrison), QRF + garrison posture, undercover establish/react, economy, War Level, loot/unlocks, recruiting, companions, Save UX | [`mission/Guerrilla.Demo/`](mission/Guerrilla.Demo/) |
 
@@ -89,6 +105,80 @@ Scripts talk to the core through the `gm*` command surface (`gmZoneCount`,
 `gmZone`, `gmZoneSet`, `gmZoneAlert`, `gmZoneLastKnown`, `gmGarrison*`,
 `gmFactionTierClass`/`gmFactionVehicle`/`gmFactionValue`, `gmBreakUndercover`,
 and the `gm*OnEvent` registrations) — see ARCHITECTURE.md §A.3.
+
+### Enemy Legends (the three commanders)
+
+Three named enemy commanders exist in every campaign from the first tick. They
+are wholly native: no mission script places, spawns, watches or kills them, and
+nothing under `core/scripts/` changed for them.
+
+**What the player sees.** All three are listed in the journal under
+People > Enemy Legends from campaign start, before their bodies exist, each with
+a generated name, the role that was resolved for him and the place he stands:
+
+```
+Cold Zoran Kalnik        Sniper, at large.
+  near Outpost
+```
+
+The dossier page carries the name, that caption, the place line, the generated
+biography and the portrait box (Change 4 fills the photograph; until then the
+box draws the "Photograph unavailable" treatment). Each also gets a red map
+marker named `gmLegend_boss_<n>` reading "<name>, <role>" and an objective
+`legend_boss_<n>` ("Eliminate <name>, <role>, near <zone>."). When he dies the
+caption turns red and reads "<role>, defeated.", the objective goes DONE, the
+marker turns green and reads "<name> (defeated)", and one diary line is written
+and attributed to him, so it appears both in the campaign record and in his own
+dossier record. Nothing else about the page changes: the biography and the
+place are the ones he had in life, and he stays under Enemy Legends for the rest
+of the campaign rather than moving to Memorials.
+
+A defeated marker is GREEN, not black, because black is this mode's own colour
+for an unrevealed zone: a black icon would read as unscouted rather than as a
+finished job.
+
+**Roles and placement.** Boss 0 asks for Sniper, boss 1 for an elite commander
+and boss 2 for a tank commander; equipment is resolved from the occupier's
+faction descriptor (the best rung it offers, not the day-1 rung), and a role the
+faction cannot field degrades one step to the elite commander with that
+faction's own units. Stands are picked once at seeding, from the persisted
+campaign seed, on 350 / 550 / 750 / 950 m rings around the occupier's military
+zones, off roads, out of the water and at least 400 m from the player's camp and
+from each other. If the island cannot hold three stands, the ones that could not
+be placed keep their identity and their dossier, read "whereabouts unknown", get
+no marker and no objective, and are never retried; one diary line says how many
+commanders intelligence could name.
+
+**Three rules that are easy to assume the other way round:**
+
+1. **A commander stands OUTSIDE his zone's presence radius** (the inner ring is
+   350 m, `zoneArea` is 150 m), so he is not part of the zone's garrison count
+   and does not pin its alert. The outpost is capturable while he still lives,
+   and killing him is a second, independent objective; take them in either
+   order. A template that raises `zoneArea` as far as 350 m reverses this, and
+   the engine logs one warning naming the reversal at seeding.
+2. **A commander never respawns.** The spawn latch is persisted and set before
+   the actors are created, so a killed, deleted or failed body is never rebuilt.
+3. **Destroying a tank commander's tank does not complete the objective.** The
+   hull link is pruned and the kill is not credited; the marker and the
+   objective stay, and he fights on foot if he lives. He often survives a hull
+   kill but not always, since the engine damages the crew when the hull dies.
+   Only his death completes it, and killing him inside an intact tank completes
+   it with the tank left standing.
+
+**Script surface (read-only, all by row index).** `gmLegendPos i` returns
+`[x, y, z]` (`[]` out of range), `gmLegendBody i` and `gmLegendVehicle i` return
+the commander and his hull (`objNull` when never spawned or gone),
+`gmLegendDefeated i` returns the latch, and `gmLegendMarker i` returns
+`[name, type, color, text]` for his map marker (`[]` when he has none; there is
+no stock `markerText` reader, which is why this one exists). `gmLegendInfo`
+keeps its eight-element shape from Change 2.
+
+**A campaign saved before this landed** keeps its three Legends with their
+names, faces, biographies and dossiers, but they are never placed: placement
+runs only in the seeding tick and a loaded save is already seeded, so such a
+campaign reads "whereabouts unknown" against all three for the rest of its life.
+Start a new campaign to hunt them.
 
 ### Dialect
 SQS for the bootstrap + manager loops (`init.sqs` auto-loads; `~N`, `@cond`,
@@ -310,7 +400,7 @@ marker colors).
 
 ## Tests
 
-The [human gameplay test suite](HUMAN-TESTS.md) provides 41 guided cases in
+The [human gameplay test suite](HUMAN-TESTS.md) provides 43 guided cases in
 Showcase, using the same runtime core and Abel configuration as Guerrilla.
 It includes civilian interactions, occupation incidents, assailants, traffic,
 logistics, soldier/AI behavior and campaign persistence. Select **HUMAN TESTS**

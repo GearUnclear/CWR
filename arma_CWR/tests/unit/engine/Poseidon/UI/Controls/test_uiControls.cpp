@@ -1,11 +1,13 @@
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Core/resincl.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <string>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -332,4 +334,184 @@ TEST_CASE("C3DScrollBar Enable toggle", "[ui][scrollbar]")
     REQUIRE_FALSE(sb.IsEnabled());
     sb.Enable(true);
     REQUIRE(sb.IsEnabled());
+}
+
+// ─── CHTMLContainer::SplitSection: the pagination safety net behind
+// ─── FormatSection.  Parser-only container: no engine, no fonts, page metrics
+// ─── are ours (P row = 1 unit, an image row = h / 480 units).
+namespace
+{
+class PagedHtmlContainer final : public CHTMLContainer
+{
+  public:
+    explicit PagedHtmlContainer(float pageHeight) : _pageHeight(pageHeight) {}
+
+    float GetPageWidth() const override { return 1000; }
+    float GetPageHeight() const override { return _pageHeight; }
+    float GetTextWidth(float, Font*, const char* text) const override { return (float)strlen(text); }
+
+  private:
+    float _pageHeight;
+};
+
+// SplitSection decorates every page with sipka_*.paa arrow links; keep the
+// texture bank out of the parser-only test whatever the working directory holds.
+struct NoTexturesGuard
+{
+    bool previous;
+    NoTexturesGuard() : previous(Poseidon::NoTextures) { Poseidon::NoTextures = true; }
+    ~NoTexturesGuard() { Poseidon::NoTextures = previous; }
+};
+
+void AddParagraphRows(CHTMLContainer& html, int section, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        html.AddText(section, "row", HFP, HALeft, false, false, "");
+        html.AddBreak(section, false);
+    }
+}
+
+// UD extension: the draw-time colour precedence both OnDraw bodies resolve
+// through CHTMLContainer::FieldDrawColor.  Parser-only container that publishes
+// the palette and the active field the draw bodies read.
+class ColorHtmlContainer final : public CHTMLContainer
+{
+  public:
+    ColorHtmlContainer()
+    {
+        _textColor = PackedColor(10, 12, 14, 255);
+        _boldColor = PackedColor(20, 22, 24, 255);
+        _linkColor = PackedColor(152, 151, 203, 255); // the stock pale lavender
+        _activeLinkColor = PackedColor(200, 40, 40, 255);
+    }
+
+    PackedColor BoldColor() const { return _boldColor; }
+    PackedColor ActiveLinkColor() const { return _activeLinkColor; }
+
+    float GetPageWidth() const override { return 1000; }
+    float GetPageHeight() const override { return 1000; }
+    float GetTextWidth(float, Font*, const char* text) const override { return (float)strlen(text); }
+};
+
+bool SameColor(PackedColor a, PackedColor b)
+{
+    return a.R8() == b.R8() && a.G8() == b.G8() && a.B8() == b.B8() && a.A8() == b.A8();
+}
+} // namespace
+
+TEST_CASE("FieldDrawColor: a per-field colour wins over the stock link colour, the hovered link keeps its own",
+          "[ui][html][color]")
+{
+    // The stock order is link > bold > text.  The UD extension makes a field's
+    // own colour win over the LINK colour too, so a journal page can ink its
+    // navigation dark enough to read on paper; a field that sets no colour is
+    // drawn exactly as before, and the hovered link still flips to the active
+    // link colour so the hover feedback survives.
+    ColorHtmlContainer html;
+    const int s = html.AddSection();
+    html.AddName(s, "S");
+    html.AddText(s, "plain", HFP, HALeft, false, false, "");
+    html.AddText(s, "bold", HFP, HALeft, false, true, "");
+    html.AddText(s, "link", HFP, HALeft, false, false, "#A");
+    html.AddText(s, "bold link", HFP, HALeft, false, true, "#A");
+    const PackedColor ink(14, 16, 52, 255); // the journal's blue-black hand
+    html.SetFieldColor(ink);
+    html.AddText(s, "inked link", HFP, HALeft, false, false, "#B");
+    html.AddText(s, "inked text", HFP, HALeft, false, false, "");
+    html.ClearFieldColor();
+
+    const HTMLSection& sec = html.GetSection(s);
+    REQUIRE(sec.fields.Size() == 6);
+    const HTMLField& plain = sec.fields[0];
+    const HTMLField& bold = sec.fields[1];
+    const HTMLField& link = sec.fields[2];
+    const HTMLField& boldLink = sec.fields[3];
+    const HTMLField& inkedLink = sec.fields[4];
+    const HTMLField& inkedText = sec.fields[5];
+
+    // stock behaviour, unchanged: no field here sets a colour
+    CHECK_FALSE(plain.hasColor);
+    CHECK(SameColor(html.FieldDrawColor(plain, false), html.GetTextColor()));
+    CHECK(SameColor(html.FieldDrawColor(bold, false), html.BoldColor()));
+    CHECK(SameColor(html.FieldDrawColor(link, false), html.GetLinkColor()));
+    CHECK(SameColor(html.FieldDrawColor(boldLink, false), html.GetLinkColor())); // a link is never bold-coloured
+    CHECK(SameColor(html.FieldDrawColor(link, true), html.ActiveLinkColor()));
+    // the hover colour belongs to links: a plain field never takes it
+    CHECK(SameColor(html.FieldDrawColor(plain, true), html.GetTextColor()));
+
+    // the extension: the field's own colour beats both the link and the bold
+    // colour, and survives on a non-hovered link
+    REQUIRE(inkedLink.hasColor);
+    REQUIRE(inkedText.hasColor);
+    CHECK(SameColor(html.FieldDrawColor(inkedLink, false), ink));
+    CHECK(SameColor(html.FieldDrawColor(inkedText, false), ink));
+    CHECK(SameColor(html.FieldDrawColor(inkedText, true), ink));
+    // ... except while it is the active field, where the hover wins
+    CHECK(SameColor(html.FieldDrawColor(inkedLink, true), html.ActiveLinkColor()));
+}
+
+TEST_CASE("SplitSection keeps an oversized first row on page 0 instead of reading rows[-1]", "[ui][html][split]")
+{
+    NoTexturesGuard noTextures;
+    // page height 5 P units; SplitSection reserves 3.5 of them for its own
+    // spacer + arrow rows, so the image row (10 units) is taller than a page
+    PagedHtmlContainer html(5);
+    int s = html.AddSection();
+    html.AddName(s, "S");
+    REQUIRE(html.AddImage(s, "", HALeft, false, 640, 480 * 10, "") != nullptr);
+    html.AddBreak(s, false);
+    AddParagraphRows(html, s, 3);
+
+    html.FormatSection(s);
+
+    int page0 = html.FindSection("S");
+    REQUIRE(page0 >= 0);
+    CHECK(html.FindSection("S/0") == page0);
+    CHECK(html.FindSection("S/1") >= 0);
+
+    const HTMLSection& first = html.GetSection(page0);
+    REQUIRE(first.names.Size() >= 1);
+    CHECK(std::string(static_cast<const char*>(first.names[0])) == "S");
+    bool imageOnPage0 = false;
+    for (int f = 0; f < first.fields.Size(); f++)
+    {
+        if (first.fields[f].format == HFImg)
+        {
+            imageOnPage0 = true;
+        }
+    }
+    CHECK(imageOnPage0);
+    // the image row is the only content row page 0 keeps
+    REQUIRE(first.rows.Size() >= 1);
+    CHECK_THAT(first.rows[0].height, Catch::Matchers::WithinAbs(10.0, 1e-4));
+}
+
+TEST_CASE("SplitSection paginates into <name>/<n> pages that all keep names[0]", "[ui][html][split]")
+{
+    NoTexturesGuard noTextures;
+    PagedHtmlContainer html(5);
+    int s = html.AddSection();
+    html.AddName(s, "S");
+    AddParagraphRows(html, s, 20);
+
+    html.FormatSection(s);
+
+    // 20 one-unit rows against 1.5 units of usable page: one row per page
+    REQUIRE(html.NSections() == 20);
+    int page0 = html.FindSection("S");
+    REQUIRE(page0 >= 0);
+    CHECK(html.FindSection("S/0") == page0);
+    for (int p = 0; p < 20; p++)
+    {
+        char name[16];
+        snprintf(name, sizeof(name), "S/%d", p);
+        int sec = html.FindSection(name);
+        REQUIRE(sec >= 0);
+        const HTMLSection& section = html.GetSection(sec);
+        REQUIRE(section.names.Size() == 2);
+        CHECK(std::string(static_cast<const char*>(section.names[0])) == "S");
+        CHECK(std::string(static_cast<const char*>(section.names[1])) == name);
+    }
+    CHECK(html.FindSection("S/20") < 0);
 }

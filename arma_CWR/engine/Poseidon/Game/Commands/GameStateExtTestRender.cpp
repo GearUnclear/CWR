@@ -236,6 +236,32 @@ int& TriSeqCounter()
     return seq;
 }
 
+// Capture mode for triScreenshot.  False (the default) keeps the historical
+// behaviour every existing shoot and integration lane is calibrated on: a
+// synchronous mid-frame readback of the default framebuffer at the moment the
+// statement runs, which is BEFORE this frame's ApplyGammaPass and DebugOverlay,
+// so the pixels are darker and more contrasty than what is presented.  True
+// enqueues the path and lets BackToFront's CaptureScreenshotIfPending write it
+// at the next swap, i.e. post-gamma, post-overlay: the exact pixels about to be
+// presented.  Only opted into by the Guerrilla journal portrait shoot, which
+// calibrates a tone recipe on the capture and therefore needs the presented
+// image; flipping the default would change roughly forty existing lanes.
+static bool& TriCaptureAtPresentFlag()
+{
+    static bool atPresent = false;
+    return atPresent;
+}
+
+/// triCaptureAtPresent <bool> - choose the capture point used by triScreenshot.
+/// Returns "OK".
+GameValue TriCaptureAtPresent(const GameState* /*state*/, GameValuePar arg)
+{
+    const bool on = static_cast<bool>(static_cast<GameBoolType>(arg));
+    TriCaptureAtPresentFlag() = on;
+    LOG_INFO(Core, "[tri] triCaptureAtPresent {}", on ? "true (presented frame)" : "false (mid-frame)");
+    return GameValue("OK");
+}
+
 /// triScreenshot "label" — capture screenshot to output dir (PNG + BMP). Returns "OK".
 /// Uses no-extension path so ScreenshotWriter produces both formats.
 GameValue TriScreenshot(const GameState* state, GameValuePar arg)
@@ -246,14 +272,22 @@ GameValue TriScreenshot(const GameState* state, GameValuePar arg)
     auto dir = GetTriOutputDir();
     std::filesystem::create_directories(dir);
 
+    const bool atPresent = TriCaptureAtPresentFlag();
     int n = TriSeqCounter()++;
     char filename[512];
     snprintf(filename, sizeof(filename), "%s/%03d_%s", dir.c_str(), n, labelStr);
-    LOG_INFO(Core, "[tri] triScreenshot: {}", filename);
+    LOG_INFO(Core, "[tri] triScreenshot ({}): {}", atPresent ? "at present" : "mid-frame", filename);
     if (GEngine)
     {
         GEngine->Screenshot(filename);
-        GEngine->FlushPendingScreenshot();
+        // Mid-frame: flush now, reading whatever is in the default framebuffer.
+        // At present: leave the path pending so BackToFront captures it after
+        // the gamma pass and the overlay, just before SwapWindow.  Trident's
+        // wait_for_screenshot_file already polls for the file after the
+        // statement and gates the next statement on it, so two deferred
+        // captures cannot race for the single pending path.
+        if (!atPresent)
+            GEngine->FlushPendingScreenshot();
     }
 
     return GameValue("OK");

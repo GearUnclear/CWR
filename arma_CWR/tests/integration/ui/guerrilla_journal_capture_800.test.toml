@@ -1,0 +1,10 @@
+tags = ["ui", "guerrilla", "full_cwa", "headful"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Boot + manager boot writes, then the real map display and nine captures.
+timeout = 240
+assert_timeout = 90
+# Windowed 800x600: the spec's minimum resolution for the dossier's one-page
+# acceptance. Left unset, --display-mode defaults to borderless; a windowed
+# window keeps the requested size (the .sqf asserts the captured shape).
+extra_args = ["--dev", "--window", "--display-mode", "windowed", "--width", "800", "--height", "600"]

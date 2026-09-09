@@ -1,0 +1,148 @@
+{
+  "western_evil": {
+    "names": {
+      "western": {
+        "first": ["Tyler","Brandon","Ryan","Jason","Connor","Ethan","Dylan","Kyle","Trevor","Logan","Blake","Derek","Chase","Cody","Austin","Brett","Travis","Justin","Garrett","Shane","Cole","Tanner","Zach","Jordan"],
+        "last": ["Miller","Carter","Bennett","Walker","Reed","Parker","Collins","Morgan","Hayes","Foster","Sullivan","Brooks","Mitchell","Cooper","Harrison","Turner","Anderson","Campbell","Morris","Griffin","Palmer","Dawson","Whitaker","Stone"]
+      },
+      "british": {
+        "first": ["Oliver","Harry","George","Jack","Charlie","Thomas","William","James","Edward","Henry","Alfie","Freddie","Arthur","Hugo","Rupert","Callum","Lewis","Gareth","Simon","Nigel"],
+        "last": ["Harrington","Whitmore","Ashcroft","Bancroft","Fletcher","Crawford","Wellington","Prescott","Hargreaves","Sinclair","Bennett","Barclay","Kensington","Sutton","Langley","Pritchard","Beaumont","Hawthorne","Redmond","Fairfax"]
+      },
+      "israeli": {
+        "first": ["Noam","Eitan","Omer","Yair","Nadav","Itai","Lior","Ariel","Yonatan","Gilad","Aviv","Shai","Daniel","Ido","Tal","Ronen","Amir","Erez","Yoav","Nir"],
+        "last": ["Cohen","Levi","Mizrahi","Peretz","Biton","Dahan","Azoulay","Ben-David","Shapira","Dayan","Sharabi","Malka","Ohana","Gabay","Barak","Peled","Rosenberg","Shalev","Harari","Ben-Ami"]
+      }
+    },
+    "prefix": ["Cold","Cruel","Bloody","Greedy","Heartless","Ruthless","Smug","Merciless","Brutal","Rotten"],
+    "describer": ["The Evictor","The Displacer","The Collector","The Jailor","The Seizer","The Burner","The Whip","The Vanisher","The Fence-Builder","The Home-Taker","The Blockader","The Roundup Man","The Land-Taker","The Taxman","The Warden","The Profiteer","The Enforcer","The Raider","The Confiscator","The Overseer"],
+    "title": ["The Oppressor","The Occupier","The Land Thief","The Butcher","The Enforcer","The Tyrant","The Profiteer","The Slaver","The Colonizer","The Collaborator"]
+  },
+  "international_good": {
+    "names": {
+      "west_africa": {
+        "first": ["Adebayo","Kwame","Chinedu","Kofi","Sekou","Amadou","Moussa","Ibrahim","Ousmane","Babacar"],
+        "last": ["Okafor","Mensah","Eze","Boateng","Diallo","Traore","Keita","Camara","Diop","Toure"]
+      },
+      "east_africa": {
+        "first": ["Jabari","Dawit","Bereket","Yonatan","Abdi","Tomas","Kamau","Baraka","Tesfaye","Ismail"],
+        "last": ["Mwangi","Tesfaye","Gebremariam","Bekele","Warsame","Njoroge","Odinga","Kiptoo","Abebe","Nur"]
+      },
+      "southern_africa": {
+        "first": ["Thabo","Tendai","Lwazi","Sipho","Bongani","Tawanda","Sibusiso","Themba","Kagiso","Mandla"],
+        "last": ["Mokoena","Ndlovu","Dlamini","Khumalo","Mthembu","Moyo","Zulu","Nkosi","Molefe","Sithole"]
+      },
+      "north_africa": {
+        "first": ["Yassine","Rachid","Amine","Walid","Mehdi","Karim","Nabil","Hicham","Adel","Samir"],
+        "last": ["El Mansouri","Bennani","Cherif","Bouzid","Khelifi","Belkacem","Bensaid","Amrani","Mekki","Trabelsi"]
+      },
+      "levant": {
+        "first": ["Laith","Ziad","Tamer","Fadi","Basil","Marwan","Nadim","Jad","Wael","Ghassan","Rami","Faris"],
+        "last": ["Haddad","Khoury","Nassar","Mansour","Halabi","Khalil","Saad","Hariri","Darwish","Hamdan","Najjar","Saleh"]
+      },
+      "palestine": {
+        "first": ["Yazan","Laith","Tareq","Bashar","Iyad","Fadi","Rami","Nidal","Ammar","Mahmoud","Samer","Wael","Anas","Khalil","Ziad","Majd","Qais","Adnan","Nasser","Marwan"],
+        "last": ["Barghouti","Khalidi","Nusseibeh","Tamimi","Husseini","Qudwa","Shawa","Masri","Khatib","Darwish","Najjar","Hamdan","Sabbagh","Abu-Salim","Jarrar","Kanaan","Shaheen","Salameh","Haddad","Mansour"]
+      },
+      "lebanon": {
+        "first": ["Jad","Nadim","Ziad","Fadi","Rami","Charbel","Marwan","Ghassan","Bassem","Tarek","Elias","Tony","Karim","Wael","Georges","Nabil","Rabih","Walid","Sami","Michel"],
+        "last": ["Khoury","Haddad","Saad","Hariri","Gemayel","Chamoun","Maalouf","Saliba","Nassar","Karam","Hobeika","Sfeir","Doumit","Aoun","Farah","Abboud","Najjar","Mansour","Azar","Dagher"]
+      },
+      "ireland": {
+        "first": ["Cian","Ronan","Declan","Conor","Eoin","Oisin","Niall","Ciaran","Fionn","Darragh","Padraig","Seamus","Cathal","Diarmuid","Colm","Tadhg","Aidan","Brendan","Cormac","Lorcan"],
+        "last": ["Murphy","Kelly","O'Sullivan","Walsh","Byrne","Ryan","O'Connor","O'Neill","Doyle","McCarthy","Gallagher","Kennedy","Lynch","Murray","Quinn","Doherty","Brennan","Fitzgerald","Molloy","Kavanagh"]
+      },
+      "iraq": {
+        "first": ["Haydar","Mustafa","Haider","Qasim","Yasin","Ali","Sajjad","Muntadhar","Hussein","Karrar"],
+        "last": ["Al-Khafaji","Al-Tikriti","Al-Janabi","Al-Rawi","Al-Hadithi","Al-Samarrai","Al-Bayati","Al-Moussawi","Al-Dulaimi","Al-Tamimi"]
+      },
+      "arabian_peninsula": {
+        "first": ["Fahad","Saif","Sultan","Rashid","Nasser","Majid","Hamad","Mishal","Ammar","Muadh"],
+        "last": ["Al-Qahtani","Al-Nuaimi","Al-Mansoori","Al-Harbi","Al-Dosari","Al-Marri","Al-Hakimi","Al-Sabri","Al-Yafai","Al-Qadhi"]
+      },
+      "iran": {
+        "first": ["Arash","Kaveh","Navid","Pouya","Farhad","Dariush","Shahin","Behzad","Kamran","Omid"],
+        "last": ["Farhadi","Rahimi","Jafari","Karimi","Mehrabi","Azadi","Nouri","Rostami","Ebrahimi","Kazemi"]
+      },
+      "kurdish": {
+        "first": ["Baran","Serhat","Azad","Kawa","Soran","Shivan","Rebin","Dilshad","Aram","Sherko"],
+        "last": ["Karaman","Hassan","Mahmoud","Rashid","Barzani","Karimi","Azizi","Saeed","Hawrami","Salih"]
+      },
+      "turkey": {
+        "first": ["Emre","Kerem","Mert","Burak","Eren","Cem","Ozan","Tolga","Arda","Kaan"],
+        "last": ["Yilmaz","Aydin","Demir","Kaya","Arslan","Aksoy","Koc","Celik","Sahin","Kurt"]
+      },
+      "south_asia": {
+        "first": ["Arjun","Vikram","Ravi","Dev","Kiran","Ishaan","Rohan","Aditya","Naveen","Imran"],
+        "last": ["Mehta","Rao","Patel","Malhotra","Sharma","Kapoor","Singh","Chandra","Perera","Qureshi"]
+      },
+      "himalayan": {
+        "first": ["Prabhat","Tenzin","Sonam","Pemba","Karma","Nima","Dorje","Pasang","Jigme","Tshering"],
+        "last": ["Gurung","Norbu","Wangchuk","Sherpa","Dorji","Lama","Tamang","Rai","Thapa","Bhutia"]
+      },
+      "china": {
+        "first": ["Wei","Jun","Hao","Tao","Jian","Lei","Bo","Ming","Peng","Cheng"],
+        "last": ["Zhang","Chen","Liu","Wang","Li","Zhao","Huang","Wu","Xu","Sun"]
+      },
+      "korea": {
+        "first": ["Minho","Joon","Jihoon","Taeyang","Hyunwoo","Seojun","Donghyun","Jaemin","Junho","Sungmin"],
+        "last": ["Kim","Park","Lee","Choi","Jung","Kang","Cho","Yoon","Lim","Han"]
+      },
+      "japan": {
+        "first": ["Haruto","Ren","Daichi","Kenji","Kaito","Takumi","Hiroto","Riku","Sota","Akira"],
+        "last": ["Nakamura","Takahashi","Sato","Mori","Tanaka","Ito","Yamamoto","Kobayashi","Kato","Watanabe"]
+      },
+      "mainland_southeast_asia": {
+        "first": ["Minh","Quang","Somchai","Niran","Aung","Thura","Sokha","Vannak","Khampheng","Chanthou"],
+        "last": ["Nguyen","Tran","Chaiyaporn","Sukhum","Kyaw","Min","Chhay","Sok","Phommasone","Seng"]
+      },
+      "maritime_southeast_asia": {
+        "first": ["Arif","Bima","Rizal","Agus","Dimas","Fajar","Rizky","Bagus","Bayani","Isagani"],
+        "last": ["Santoso","Pranoto","Hakim","Setiawan","Pratama","Hidayat","Saputra","Nugroho","Santos","Reyes"]
+      },
+      "central_asia": {
+        "first": ["Temur","Bekzod","Nursultan","Azamat","Rustam","Dilshod","Eldar","Alisher","Timur","Bakhrom"],
+        "last": ["Karimov","Rahimov","Akhmetov","Sadykov","Iskandarov","Tursunov","Nazarov","Usmanov","Yusupov","Mirzaev"]
+      },
+      "mongolia": {
+        "first": ["Baatar","Altan","Batsaikhan","Temuulen","Ankhbayar","Erdenebat","Chuluun","Ganbaatar","Munkh","Batbold"],
+        "last": ["Erdene","Batbayar","Ganbold","Bat-Erdene","Munkhbat","Boldbaatar","Dorj","Enkhbayar","Bataa","Sukhbaatar"]
+      },
+      "caucasus": {
+        "first": ["Levan","Aram","Vahan","Giorgi","Nika","Rashad","Tural","Davit","Sandro","Hayk"],
+        "last": ["Beridze","Sarkisyan","Petrosyan","Kapanadze","Tsereteli","Mammadov","Aliyev","Gelashvili","Hakobyan","Aslanov"]
+      },
+      "balkans": {
+        "first": ["Milan","Nikola","Luka","Dragan","Mihai","Stefan","Aleksandar","Bojan","Marko","Andrei"],
+        "last": ["Jovanovic","Markovic","Horvat","Stojanovic","Popescu","Petrovic","Ilic","Kovacevic","Marin","Ionescu"]
+      },
+      "eastern_europe": {
+        "first": ["Dimitri","Marek","Tomasz","Oleksiy","Mykola","Ilya","Pavel","Maksim","Bohdan","Yaroslav"],
+        "last": ["Petrov","Kowalski","Nowak","Koval","Bondarenko","Morozov","Sokolov","Lebedev","Shevchenko","Melnyk"]
+      },
+      "latin_america": {
+        "first": ["Diego","Mateo","Thiago","Caio","Rafael","Emiliano","Joaquin","Inti","Amaru","Santiago"],
+        "last": ["Quispe","Huaman","Nascimento","Ferreira","Mendoza","Rojas","Salazar","Condori","Mamani","Castillo"]
+      },
+      "caribbean": {
+        "first": ["Jean-Baptiste","Wyclef","Andre","Kemar","Dario","Marlon","Desmond","Javier","Renaldo","Kofi"],
+        "last": ["Pierre","Joseph","Baptiste","Campbell","Browne","Toussaint","Clarke","Benoit","Grant","Augustin"]
+      },
+      "indigenous_americas": {
+        "first": ["Balam","Inti","Amaru","Nahuel","Tupac","Atahualpa","Tenoch","Citlali","Keme","Tasunka"],
+        "last": ["Cocom","Quispe","Mamani","Antilef","Yupanqui","Condori","Xochitl","Huaman","Begay","Yellowbird"]
+      },
+      "polynesia": {
+        "first": ["Tane","Wiremu","Manaia","Sione","Manu","Tama","Hemi","Nikau","Tavita","Sio"],
+        "last": ["Raukawa","Ngata","Te Rangi","Tupou","Tuala","Rangi","Pene","Mahuta","Leota","Tupua"]
+      },
+      "melanesia": {
+        "first": ["Jone","Semi","Pita","Samu","Meli","Tevita","Josua","Viliame","Apenisa","Sakiusa"],
+        "last": ["Nabua","Naitasiri","Ravoka","Vakalalabure","Tawake","Koro","Naivalu","Qera","Radradra","Matawalu"]
+      }
+    },
+    "prefix": ["Daring","Lucky","Wild","Big","Fast","Young","Fearless","Smooth","Iron","Gentleman","Slick","Golden","Silent","Honest"],
+    "describer": ["The Charmer","The Hammer","The Fox","The Bull","The Ace","The Hawk","The Kid","The Lion","The Razor","The Bear","The Wolf","The Prince","The Gentleman"],
+    "title": ["The Brave","The Fearless","The Bold","The Great","The Relentless","The Unbroken","The Clever","The Wise","The Mighty","The Patient","The Steady","The Quick","The Unshaken"]
+  }
+}

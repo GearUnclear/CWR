@@ -49,6 +49,10 @@ static FreeTypeFontMapping s_fontTable[] = {
     {"cwrmono", "Fonts\\cwr_mono.ttf", 29, 28, 0.800f, false, 0.0f, -0.6f, 0.0f},
     {"cwrserif", "Fonts\\cwr_serif.ttf", 29, 24, 0.935f, false, 0.0f, 0.0f, 0.0f},
     {"cwrhand", "Fonts\\cwr_hand.ttf", 27, 21, 1.050f, false, -1.60f, -0.90f, 0.0f},
+    // the Guerrilla journal's pen: the hand face with a heavier stroke, so ink
+    // on the notepad paper reads at 800x600 (the stock rows thin the outline
+    // to match the bitmap reference)
+    {"cwrpen", "Fonts\\cwr_hand.ttf", 27, 21, 1.050f, false, -1.60f, 1.0f, 0.0f},
     {"ru_audreyshand", "Fonts\\cwr_hand.ttf", 27, 21, 1.050f, false, -1.60f, -0.90f, 0.0f},
     {"steelfishb", "Fonts\\cwr_title.ttf", 59, 46, 0.628f, false, -6.0f, -1.5f, 0.0f},
     {"impact", "Fonts\\cwr_title.ttf", 59, 46, 0.628f, false, -6.0f, -1.5f, 0.0f},

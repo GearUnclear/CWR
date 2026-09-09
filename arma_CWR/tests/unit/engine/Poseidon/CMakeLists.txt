@@ -389,14 +389,20 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_stash_registry.cpp
     Game/Guerrilla/test_guerrilla_base.cpp
     Game/Guerrilla/test_market.cpp
+    Game/Guerrilla/test_legend_registry.cpp
     Game/Guerrilla/test_journal.cpp
+    Game/Guerrilla/test_script_vars.cpp
+    Game/Guerrilla/test_world_names.cpp
     Game/Guerrilla/test_mission_script_core.cpp
     Game/Guerrilla/test_mission_world_names.cpp
     Game/Guerrilla/test_outfit_select.cpp
     Game/Guerrilla/test_faction_sources.cpp
     Game/Guerrilla/test_addon_closure.cpp
     Game/Guerrilla/test_names_classify.cpp
+    Game/Guerrilla/test_legend_names.cpp
+    Game/Guerrilla/test_legend_placement.cpp
     Game/Guerrilla/test_island_scaffold.cpp
+    Game/Guerrilla/test_faction_history.cpp
     Game/Guerrilla/test_descriptor_lint.cpp
     Game/Guerrilla/test_roster_probe.cpp
     Game/Guerrilla/test_package_mount.cpp
@@ -519,6 +525,10 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_gameModule.cpp
     UI/Guerrilla/test_guerrilla_module.cpp
     UI/Guerrilla/test_guerrilla_gating.cpp
+    UI/Guerrilla/test_journal_compose.cpp
+    UI/Guerrilla/test_journal_render.cpp
+    UI/Guerrilla/test_journal_people.cpp
+    UI/Guerrilla/test_portrait_assets.cpp
     UI/test_viewer_cursor_overlay.cpp
     UI/test_game_cursor_overlay.cpp
     UI/InGame/test_inGameUI.cpp

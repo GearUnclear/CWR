@@ -3,13 +3,23 @@
 // has already run - same pattern as StashRegistryCommands.cpp.
 //
 //   gmJournalLog "<text>"                 diary entry, stamped "Day N HH:MM"
+//   gmJournalNote [text, zone, kind, charId]
+//                                         diary entry tagged with a zone, a kind
+//                                         ("plain"|"good"|"warn"|"danger") and the
+//                                         Legend registry character it is about
 //   gmJournalObjective [id, text, state]  upsert an objective row
 //                                         (state "ACTIVE"|"DONE"|"FAILED"|"HIDDEN")
 //   gmJournalStatus [key, text]           upsert a Situation line ("" removes)
 //   gmJournalCount                        -> scalar, diary entries
-//   gmJournalEntry <i>                    -> [stamp, text] (0 = oldest), [] out of range
+//   gmJournalEntry <i>                    -> [stamp, text, zone, kind] (0 = oldest),
+//                                            [] out of range.  Four elements, not
+//                                            five: the shipped scripts index it
+//   gmJournalEntryChar <i>                -> the entry's charId, "" when the line
+//                                            names no character or i is out of range
 //   gmJournalObjectiveState "<id>"        -> state name, "" when unknown
 //   gmJournalStatusText "<key>"           -> the status line's text, "" when unknown
+//   gmDisplayName "<class>"               -> the package's displayName for a
+//                                            weapon / magazine / vehicle class
 //   gmIslandName                         -> the world's CfgWorlds description
 //                                            ("Malden"), the class name when absent
 
@@ -67,15 +77,22 @@ static GameValue GmJournalLog(const GameState* /*state*/, GameValuePar oper1)
     return NOTHING;
 }
 
-// gmJournalNote [text, zone, kind]: a diary line tagged with the zone it is
-// about and a kind ("plain" | "good" | "warn" | "danger") that colours the
-// page.  zone / kind may be omitted (["text"] == gmJournalLog "text").
-static GameValue GmJournalNote(const GameState* state, GameValuePar oper1)
+// gmJournalNote [text, zone, kind, charId]: a diary line tagged with the zone it
+// is about, a kind ("plain" | "good" | "warn" | "danger") that colours the page,
+// and the Legend registry character id the line is about.  Every trailing
+// argument may be omitted (["text"] == gmJournalLog "text"), and arity 1 to 3
+// behaves exactly as it did before the id arrived.
+//
+// External linkage, unlike its neighbours: the arity contract above is the one
+// piece of this surface a script can break silently, so the unit suite calls it
+// directly rather than through the evaluator (the pattern the tri* asserts in
+// GameStateExtTest.cpp already use).
+GameValue GmJournalNote(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
-    if (array.Size() < 1 || array.Size() > 3)
+    if (array.Size() < 1 || array.Size() > 4)
     {
-        state->SetError(EvalGen, "gmJournalNote: [text, zone, kind]");
+        state->SetError(EvalGen, "gmJournalNote: [text, zone, kind, charId]");
         return NOTHING;
     }
     if (!CheckType(state, array[0], GameString))
@@ -84,6 +101,7 @@ static GameValue GmJournalNote(const GameState* state, GameValuePar oper1)
     }
     GameStringType text = array[0];
     RString zone;
+    RString charId;
     int kind = JKPlain;
     if (array.Size() >= 2)
     {
@@ -114,7 +132,15 @@ static GameValue GmJournalNote(const GameState* state, GameValuePar oper1)
             return NOTHING;
         }
     }
-    Journal::Instance().AddEntry(JournalStampNow(), RString(text), zone, kind);
+    if (array.Size() >= 4)
+    {
+        if (!CheckType(state, array[3], GameString))
+        {
+            return NOTHING;
+        }
+        charId = RString((GameStringType)array[3]);
+    }
+    Journal::Instance().AddEntry(JournalStampNow(), RString(text), zone, kind, charId);
     return NOTHING;
 }
 
@@ -195,7 +221,7 @@ static GameValue GmJournalCount(const GameState* /*state*/)
     return (float)Journal::Instance().EntryCount();
 }
 
-// gmJournalEntry <i> -> [stamp, text] or []
+// gmJournalEntry <i> -> [stamp, text, zone, kind] or []
 static GameValue GmJournalEntry(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -212,6 +238,21 @@ static GameValue GmJournalEntry(const GameState* state, GameValuePar oper1)
     array[2] = GameStringType(journal.Entry(index).zone);
     array[3] = (float)journal.Entry(index).kind;
     return value;
+}
+
+// gmJournalEntryChar <i> -> the entry's charId, "" when the line names no
+// character or the index is out of range.  Kept off gmJournalEntry on purpose:
+// the shipped scripts index that array, so it stays four elements wide.
+// External linkage for the same reason as GmJournalNote above.
+GameValue GmJournalEntryChar(const GameState* /*state*/, GameValuePar oper1)
+{
+    const Journal& journal = Journal::Instance();
+    int index = toInt((float)oper1);
+    if (index < 0 || index >= journal.EntryCount())
+    {
+        return GameStringType("");
+    }
+    return GameStringType(journal.Entry(index).charId);
 }
 
 // gmJournalObjectiveState "<id>" -> "ACTIVE"|"DONE"|"FAILED"|"HIDDEN", "" unknown
@@ -256,6 +297,7 @@ INIT_MODULE(GuerrillaJournal, 3)
     GGameState.NewFunction(GameFunction(GameNothing, "gmJournalStatus", GmJournalStatus, GameArray));
     GGameState.NewNularOp(GameNular(GameScalar, "gmJournalCount", GmJournalCount));
     GGameState.NewFunction(GameFunction(GameArray, "gmJournalEntry", GmJournalEntry, GameScalar));
+    GGameState.NewFunction(GameFunction(GameString, "gmJournalEntryChar", GmJournalEntryChar, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "gmJournalObjectiveState", GmJournalObjectiveState, GameString));
     GGameState.NewNularOp(GameNular(GameString, "gmIslandName", GmIslandName));
 }

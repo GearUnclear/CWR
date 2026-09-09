@@ -615,15 +615,17 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
 
     LoadLocalizedMissionHtml(_briefing, GetBriefingFile());
 
-    // Guerrilla Mode: the journal pages (Notes situation block + manual +
-    // diary, Plan goal/objectives/next steps, GM_LOG, GM_MAN_*) are built
-    // from the native state every time the briefing is (re)built - on map
-    // open, on a journal change while open, and after a load.  They append
-    // to an authored Main/Plan section when the mission ships one.
+    // Guerrilla Mode: the journal pages (Contents = "Main", Dispatches,
+    // Operations = "Plan" with its Objectives / Suggested actions / Supplies /
+    // Resistance strength pages, People + Roster, Places + GM_ZONE_<i>,
+    // Chronicles + Record, Reference + GM_MAN_*) are built from the native
+    // state every time the briefing is (re)built - on map open, on a journal
+    // change while open, and after a load.  Legacy anchors (GM_CONTENTS,
+    // GM_OPERATIONS, GM_CELL, GM_ZONES, GM_LOG, GM_MAN_INDEX) are aliases of
+    // the new pages.  They append to an authored Main/Plan section when the
+    // mission ships one.
     if (Guerrilla::GuerrillaJournalActive())
     {
-        // the journal's palette + typography on the notepad control (idempotent)
-        Guerrilla::ApplyGuerrillaJournalTheme(_briefing);
         Guerrilla::BuildGuerrillaJournalPages(_briefing, Guerrilla::Journal::Instance(),
                                               Guerrilla::GatherGuerrillaJournalInputs());
         _journalRevision = Guerrilla::Journal::Instance().Revision();
@@ -674,6 +676,12 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
     if (activeSection.GetLength() > 0 && _briefing->FindSection(activeSection) >= 0)
     {
         SwitchBriefingSection(activeSection);
+    }
+    // Guerrilla Mode: the first map open lands on Contents (__BRIEFING = "Main")
+    // rather than the Plan tab; stock missions keep Plan-first below.
+    else if (Guerrilla::GuerrillaJournalActive() && _briefing->FindSection("__BRIEFING") >= 0)
+    {
+        SwitchBriefingSection("__BRIEFING");
     }
     else if (_briefing->FindSection("__PLAN") >= 0)
     {

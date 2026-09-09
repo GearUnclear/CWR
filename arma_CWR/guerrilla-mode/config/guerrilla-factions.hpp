@@ -64,6 +64,11 @@
 //   loot<Role>Weapon / loot<Role>Mag     role loadouts, Role in
 //       {Rifleman, Medic, MG, AT, Sniper} (loot.sqs unlock table)
 //   flag                         town flagpole texture (native TownFlags)
+//   namePool                     regional first/last name pool for the Legend
+//       registry ("levant", "israeli", "balkans", ...); the tone bank that
+//       supplies prefixes, describers and titles is chosen by campaign
+//       ALLEGIANCE, not by this key. Missing or unknown falls back by side:
+//       WEST western, EAST eastern_europe, GUER levant (one warn per faction)
 //   civClassCount + civClass<N>  CIV only: the population bodies, numbered
 //       keys and not an array because gmFactionValue skips array entries
 //   civVehicles[]                CIV only: ambient road-traffic hulls
@@ -137,6 +142,10 @@ class CfgGuerrillaFactions
         // town flagpole texture (native TownFlags); matches the engine's
         // side-WEST default - stated for the data-file contract
         flag = "\flags\usa.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "western";
     };
     class EAST // occupier descriptor; also selectable as the RESISTANCE roster
     {
@@ -187,6 +196,10 @@ class CfgGuerrillaFactions
         // town flagpole texture (native TownFlags); matches the engine's
         // side-EAST default - stated for the data-file contract
         flag = "\flags\ussr.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "eastern_europe";
     };
     class GUER // resistance descriptor; also selectable as the OCCUPIER
     {
@@ -283,5 +296,9 @@ class CfgGuerrillaFactions
 
         // town flagpole texture; matches the engine's side-GUER default
         flag = "\flags\fia.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "balkans";
     };
 };
