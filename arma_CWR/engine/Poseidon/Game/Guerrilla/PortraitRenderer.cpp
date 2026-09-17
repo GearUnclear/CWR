@@ -12,11 +12,13 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
+#include <Poseidon/Network/NetworkConfig.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <map>
+#include <Random/randomGen.hpp>
 
 namespace Poseidon::Guerrilla
 {
@@ -63,6 +65,7 @@ void SaveEffective(const ParamEntry& entry, QOStream& stream)
 } // namespace
 struct PortraitRenderer::State
 {
+    RandomGenerator visualRandom{1937, 512};
     Ref<Man> person;
     std::vector<std::string> dependencies;
     std::string configuration;
@@ -156,7 +159,9 @@ const std::string& PortraitRenderer::Configuration() const
 bool PortraitRenderer::Prepare(const PortraitAppearance& appearance, std::string& error)
 {
     _state = std::make_unique<State>();
-    if (!GEngine || !GScene || !GWorld)
+    ScopedRandomGenerator visualRandom(_state->visualRandom);
+    if (IsDedicatedServer() || !GEngine || !GScene || !GWorld || !GEngine->IsAbleToDraw() ||
+        stricmp(GEngine->GetRendererName(), "None") == 0)
     {
         error = "graphics scene unavailable";
         return false;
@@ -204,7 +209,7 @@ bool PortraitRenderer::Prepare(const PortraitAppearance& appearance, std::string
             error = "body model unavailable";
             return false;
         }
-        _state->person = new Man(type, false);
+        _state->person = new Man(type, false, VehicleSupply::Creation::AppearanceOnly);
         Man* man = _state->person;
         if (!LegendFaceUsable(faces, appearance.face, man->IsWoman()))
         {
@@ -286,6 +291,7 @@ bool PortraitRenderer::Capture(std::vector<uint8_t>& rgb, std::string& error)
         error = "mannequin not prepared";
         return false;
     }
+    ScopedRandomGenerator visualRandom(_state->visualRandom);
     const bool ok = GEngine->CapturePortrait(
         [&]
         {

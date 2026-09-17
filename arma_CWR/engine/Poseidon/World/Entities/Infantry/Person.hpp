@@ -35,7 +35,7 @@ class Person: public VehicleSupply
 	int _remotePlayer; // multiplayer ID; 1 == AI
 
 	public:
-	Person(VehicleType *name, bool fullCreate=true);
+    Person(VehicleType *name, bool fullCreate=true, Creation creation=Creation::Normal);
 	~Person() override;
 
 	AIUnit *Brain() const {return _brain;}

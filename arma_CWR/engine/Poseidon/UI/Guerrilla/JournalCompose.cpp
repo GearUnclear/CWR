@@ -265,13 +265,13 @@ void Pen::Gap()
     _page.blocks.Add(gap);
 }
 
-void Pen::Portrait(const RString& src, bool present)
+void Pen::Portrait(const RString& src, PortraitStatus status)
 {
     EndBlock();
     JournalBlock block;
     block.kind = BlockPortrait;
     block.portraitSrc = src;
-    block.portraitPresent = present;
+    block.portraitStatus = status;
     _page.blocks.Add(block);
 }
 

@@ -528,6 +528,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Guerrilla/test_journal_compose.cpp
     UI/Guerrilla/test_journal_render.cpp
     UI/Guerrilla/test_journal_people.cpp
+    Game/Guerrilla/test_portrait_service.cpp
+    Game/Guerrilla/test_legend_appearance.cpp
     UI/Guerrilla/test_portrait_assets.cpp
     UI/test_viewer_cursor_overlay.cpp
     UI/test_game_cursor_overlay.cpp

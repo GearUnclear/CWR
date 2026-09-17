@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/UI/Guerrilla/JournalRender.hpp>
 
 #include <Poseidon/UI/Guerrilla/GuerrillaJournalPages.hpp> // JournalPageInputs
@@ -186,17 +187,11 @@ void EmitBlock(CHTMLContainer* html, int s, const JournalBlock& block, const Ren
             return;
         case BlockPortrait:
         {
-            // explicit 640x480-unit sizes: an empty src reserves the same box
-            // (UIControlsExt.cpp AddImage applies the same split units on the
-            // no-texture branch), loads no texture and works in the parser-only
-            // container.  Never an href on the image: a linked picture is
-            // drawn at 0.6 alpha.  The src is only handed over with an engine
-            // up: GlobLoadTexture reaches the texture bank.
-            const bool load = block.portraitPresent && GEngine != nullptr;
-            html->AddImage(s, load ? block.portraitSrc : RString(), HALeft, false, box.w640, box.h480, RString(),
-                           RString(), 0);
+            Texture* texture = block.portraitStatus == PortraitStatus::Ready && GEngine
+                ? PortraitService::Instance().TextureFor(block.portraitSrc) : nullptr;
+            html->AddImage(s, texture, HALeft, false, box.w640, box.h480, RString(), RString(), 0);
             html->AddBreak(s, false);
-            if (!block.portraitPresent)
+            if (!texture)
             {
                 EmitPencilLine(html, s, "Photograph unavailable");
                 html->AddBreak(s, false);

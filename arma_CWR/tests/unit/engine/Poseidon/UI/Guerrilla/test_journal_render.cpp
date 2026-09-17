@@ -96,7 +96,7 @@ JournalBlock PortraitBlock(bool present)
 {
     JournalBlock block;
     block.kind = BlockPortrait;
-    block.portraitPresent = present;
+    block.portraitStatus = present ? PortraitStatus::Ready : PortraitStatus::Unavailable;
     block.portraitSrc = present ? "\\gmcore\\portraits\\test.paa" : "";
     return block;
 }
@@ -923,11 +923,13 @@ TEST_CASE("Journal render - the portrait box is square on screen at every UI asp
                 CHECK(IsPencil(line.color));
             }
             {
-                // the present one is followed by its break and the caption block
+                // A headless renderer cannot realize a ready texture; keep the placeholder and caption.
                 const HTMLSection& sec = html.GetSection(imgs[0].section);
                 REQUIRE(imgs[0].field + 2 < sec.fields.Size());
                 CHECK(sec.fields[imgs[0].field + 1].nextline);
-                CHECK(S(sec.fields[imgs[0].field + 2].text) == "Name under the photograph");
+                CHECK(S(sec.fields[imgs[0].field + 2].text) == "Photograph unavailable");
+                REQUIRE(imgs[0].field + 4 < sec.fields.Size());
+                CHECK(S(sec.fields[imgs[0].field + 4].text) == "Name under the photograph");
             }
             // the image row is charged at its height and no page overruns
             for (int s = 0; s < html.NSections(); s++)
@@ -1368,4 +1370,27 @@ TEST_CASE("Journal render - a fixed cell is cut to its width with an ellipsis an
     CHECK(S(one->text) == "Z");
     CHECK(one->tableWidth == Catch::Approx(0.0001f * html.GetPageWidth()));
     CHECK_FALSE(html.HasFieldColor());
+}
+
+TEST_CASE("Journal texture images retain placeholder geometry and layout attributes", "[guerrilla][journal][portrait]")
+{
+    JournalPageHtml html;
+    const int section = html.AddSection();
+    auto* field = html.AddImage(section, static_cast<Texture*>(nullptr), HALeft, true, 128, 96,
+                                RString("GM_WHO"), RString("Photograph unavailable"), 0.42f);
+    REQUIRE(field);
+    CHECK(field->format == HFImg);
+    CHECK(field->width == Catch::Approx(0.2f));
+    CHECK(field->height == Catch::Approx(0.2f));
+    CHECK(field->bottom);
+    CHECK(field->tableWidth == Catch::Approx(0.42f));
+    CHECK(std::string(field->href) == "GM_WHO");
+    CHECK(std::string(field->text) == "Photograph unavailable");
+    CHECK_FALSE(field->texture1);
+    CHECK_FALSE(field->texture2);
+    CHECK(html.AddImage(-1, static_cast<Texture*>(nullptr), HALeft, false, 128, 96, RString()) == nullptr);
+    field = html.AddImage(section, static_cast<Texture*>(nullptr), HALeft, false, -1, 96, RString());
+    REQUIRE(field);
+    CHECK(field->width == Catch::Approx(96.0f / 640));
+    CHECK(field->height == Catch::Approx(0.2f));
 }

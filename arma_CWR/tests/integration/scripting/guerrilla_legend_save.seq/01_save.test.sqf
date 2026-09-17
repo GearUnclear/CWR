@@ -46,5 +46,10 @@ triAssert [((gmLegendInfo 0) select 6)]
 triAssertIncludes [gmLegSaveName, gmLegSaveBase]
 triAssertEq [(name (GM_COMP_OBJ select 0)), gmLegSaveName]
 
+// Persist the exact prepared appearance alongside this test's saved sentinels.
+gmSavedPhotoRows = []
+gmPhotoI = 0
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; triAssertEq [gmPhotoRow select 3, 2]; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+
 triAssertEq [(triSaveGame "legend_names"), "OK"]
 triEndTest

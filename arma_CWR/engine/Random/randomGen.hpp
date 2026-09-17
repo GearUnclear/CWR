@@ -47,9 +47,33 @@ class RandomGenerator
     __forceinline int GetSeed(int x, int z, int y) const { return _seedTable.Seed(x, z, y); }
 };
 
+// Asset-only rendering can construct visual proxies (e.g. flag cloth) through
+// normal model loading without drawing from the campaign's random stream.
+inline RandomGenerator*& RandomGeneratorOverride()
+{
+    static thread_local RandomGenerator* current = nullptr;
+    return current;
+}
+
+class ScopedRandomGenerator
+{
+    RandomGenerator* _previous;
+
+  public:
+    explicit ScopedRandomGenerator(RandomGenerator& generator) : _previous(RandomGeneratorOverride())
+    {
+        RandomGeneratorOverride() = &generator;
+    }
+    ~ScopedRandomGenerator() { RandomGeneratorOverride() = _previous; }
+    ScopedRandomGenerator(const ScopedRandomGenerator&) = delete;
+    ScopedRandomGenerator& operator=(const ScopedRandomGenerator&) = delete;
+};
+
 // Meyers singleton accessor — constructed on first use, no static-init-order hazard.
 inline RandomGenerator& GRandGen()
 {
+    if (auto* local = RandomGeneratorOverride())
+        return *local;
     static RandomGenerator instance;
     return instance;
 }

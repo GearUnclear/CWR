@@ -122,8 +122,10 @@ Cold Zoran Kalnik        Sniper, at large.
 ```
 
 The dossier page carries the name, that caption, the place line, the generated
-biography and the portrait box (Change 4 fills the photograph; until then the
-box draws the "Photograph unavailable" treatment). Each also gets a red map
+biography and a photograph generated locally from the player's assets. The
+selected faction roster is prepared before gameplay and cached outside the
+installation; unsupported appearances show "Photograph unavailable". See
+[local portrait generation](PORTRAIT_IMPLEMENTATION.md). Each also gets a red map
 marker named `gmLegend_boss_<n>` reading "<name>, <role>" and an objective
 `legend_boss_<n>` ("Eliminate <name>, <role>, near <zone>."). When he dies the
 caption turns red and reads "<role>, defeated.", the objective goes DONE, the

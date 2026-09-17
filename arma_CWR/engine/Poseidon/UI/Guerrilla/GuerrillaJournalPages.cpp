@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 // ============================================================================
 //  GuerrillaJournalPages: the GATHER stage of the Resistance Dossier and its
 //  entry point.
@@ -10,8 +11,8 @@
 //             StashRegistry / GuerrillaBase / Market, the player's group and
 //             the resistance side's other groups, the script-owned economy
 //             globals and the engine's UI aspect.  Everything Compose needs is
-//             copied into a JournalPageInputs value; Compose and Render never
-//             touch a singleton, so the unit suite drives them world-less.
+//             copied into a JournalPageInputs value. Compose remains pure;
+//             Render resolves opaque portrait handles through the service.
 //    Compose  ComposeJournal() in JournalCompose.hpp (JournalCompose.cpp,
 //             JournalComposeOps.cpp, JournalComposePeoplePlaces.cpp): pure,
 //             from (Journal, JournalPageInputs) to a JournalDocument of pages,
@@ -40,8 +41,6 @@
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 #include <Poseidon/Game/Guerrilla/WorldNames.hpp> // FactionDisplayName (one copy, shared with the Game layer)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
-
-#include <Poseidon/IO/Streams/QBStream.hpp> // QIFStreamB::FileExist (the portrait probe)
 
 #include <Poseidon/AI/AICenter.hpp>
 #include <Poseidon/AI/AIGroup.hpp>
@@ -145,50 +144,12 @@ RString FactionDisplay(const ZoneRegistry& registry, const RString& className, c
     return FactionDisplayName(registry, className, side);
 }
 
-// lower-case ASCII copy; the portrait key is a file name, so it is folded the
-// same way on every platform and never through the C locale
-RString LowerAscii(const RString& text)
-{
-    const int n = text.GetLength();
-    if (n <= 0)
-    {
-        return RString();
-    }
-    AutoArray<char> buffer;
-    buffer.Resize(n + 1);
-    for (int i = 0; i < n; i++)
-    {
-        const char c = ((const char*)text)[i];
-        buffer[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-    }
-    buffer[n] = 0;
-    return RString(buffer.Data());
-}
-
-// lower(bodyClass) + "__" + lower(face), empty when either half is missing or
-// when the face is not one of the four the portrait catalogue ships (a body the
-// face validation refused falls back to "Default", which has no photograph, so
-// the dossier draws the unavailable treatment instead of a dead texture)
+// Request exactly the recorded appearance, including saved faces outside the roll pool.
 RString PortraitKeyOf(const LegendRow& row)
 {
-    if (row.bodyClass.GetLength() == 0 || row.face.GetLength() == 0)
-    {
+    if (!row.bodyClass.GetLength() || !row.face.GetLength())
         return RString();
-    }
-    bool known = false;
-    for (int i = 0; i < LegendRegistry::NPortraitFaces; i++)
-    {
-        if (stricmp(row.face, LegendRegistry::kPortraitFaces[i]) == 0)
-        {
-            known = true;
-            break;
-        }
-    }
-    if (!known)
-    {
-        return RString();
-    }
-    return LowerAscii(row.bodyClass) + RString("__") + LowerAscii(row.face);
+    return PortraitService::Instance().Request({row.bodyClass, row.face});
 }
 
 // primary / launcher display names of a person
@@ -262,9 +223,6 @@ JournalPageInputs GatherGuerrillaJournalInputs()
     in.resistanceName = FactionDisplay(registry, registry.ResistanceFaction(), registry.ResistanceSide());
     in.occupierName = FactionDisplay(registry, registry.OccupierFaction(), registry.OccupierSide());
     in.resistanceFactionClass = registry.ResistanceFaction();
-    // portraits ship loose under the data root (Change 4); Render prefixes this
-    // with a backslash so AddImage skips the briefing-relative search
-    in.portraitDir = "gmcore\\portraits";
     // The UI aspect the notepad is projected into. Width2D/Height2D derive from
     // the aspect band the display settings pick (Engine.cpp Width2D/Height2D),
     // so this is display- and settings-dependent, not a constant, and it is NOT
@@ -550,16 +508,8 @@ JournalPageInputs GatherGuerrillaJournalInputs()
                 view.zone = row.lastZone;
             }
             view.portraitKey = PortraitKeyOf(row);
-            // Probed once per character per rebuild, against the SAME path
-            // Compose hands to Render minus its leading backslash, so the
-            // "available" answer and the drawn source can never disagree.
-            // portraitDir is empty in every unit test, which is what keeps the
-            // suite off the file system.
-            if (view.portraitKey.GetLength() > 0 && in.portraitDir.GetLength() > 0)
-            {
-                const RString path = in.portraitDir + RString("\\") + view.portraitKey + RString(".paa");
-                view.portraitPresent = QIFStreamB::FileExist(path);
-            }
+            if (const auto* portrait = PortraitService::Instance().Find(view.portraitKey))
+                view.portraitStatus = portrait->status;
             in.characters.Add(view);
         }
 

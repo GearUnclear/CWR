@@ -654,6 +654,9 @@ public:
 		float w, float h, RString href, RString text = RString(),
 		float tableWidth = 0
 	);
+	// Direct texture path: no briefing filename parsing or disk lookup.
+	HTMLField* AddImage(int section, Texture* texture, HTMLAlign align, bool bottom,
+	                    float w, float h, RString href, RString text = RString(), float tableWidth = 0);
 	void AddBookmark(RString link);
 
 	void Init();

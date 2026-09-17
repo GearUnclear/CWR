@@ -1,3 +1,5 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/UI/Map/UIMapCommon.hpp>
@@ -1608,8 +1610,24 @@ void DisplayMap::OnSimulate(EntityAI* vehicle)
     }
     // Guerrilla Mode: a diary / objective / status write while the map is
     // open repaints the journal pages (one integer compare per frame)
+    if (_briefing && Guerrilla::GuerrillaJournalActive())
+    {
+        const auto section = _briefing->CurrentSectionName();
+        const auto& legends = Guerrilla::LegendRegistry::Instance();
+        for (int i = 0; i < legends.RowCount(); ++i)
+        {
+            const auto& row = legends.Row(i);
+            if (section == RString("GM_WHO_") + row.id)
+            {
+                Guerrilla::PortraitService::Instance().Request({row.bodyClass, row.face}, true);
+                break;
+            }
+        }
+        Guerrilla::PortraitService::Instance().Advance();
+    }
     if (_briefing && Guerrilla::GuerrillaJournalActive() &&
-        Guerrilla::Journal::Instance().Revision() != _journalRevision)
+        (Guerrilla::Journal::Instance().Revision() != _journalRevision ||
+         Guerrilla::PortraitService::Instance().Revision() != _portraitRevision))
     {
         RefreshGuerrillaJournal();
     }

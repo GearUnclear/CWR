@@ -1,4 +1,5 @@
 #pragma once
+#include <Poseidon/Game/Guerrilla/PortraitStatus.hpp>
 
 // Guerrilla Mode field journal (the Resistance Dossier) for the map screen's
 // briefing notepad.
@@ -142,8 +143,8 @@ struct JournalCharacterView
     bool legend = false;
     RString bio;         // 35-45 words: the dossier page's budget (Change 2)
     RString deedLatest;  // one notable deed, <= 25 words
-    RString portraitKey; // lower(bodyClass) + "__" + lower(face)
-    bool portraitPresent = false;
+    RString portraitKey; // opaque service identifier
+    PortraitStatus portraitStatus = PortraitStatus::Unavailable;
     RString zone;
     bool defeated = false;
 };
@@ -209,7 +210,6 @@ struct JournalPageInputs
     JournalFactionStubs faction;
 
     RString resistanceFactionClass;             // ZoneRegistry::ResistanceFaction() (class, not display name)
-    RString portraitDir;                        // "gmcore\\portraits" in game; "" in tests
     float uiAspect = 4.0f / 3.0f;               // GEngine->Width2D() / Height2D(); 4:3 without an engine
     AutoArray<JournalCharacterView> characters; // empty in Change 1
     JournalHistoryView history;                 // present == false in Change 1

@@ -205,6 +205,31 @@
     ],
     "../engine/Poseidon/Game/Guerrilla/OutfitSelect.cpp": [
       "campaign_matrix"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/LegendAppearance.cpp": [
+      "legend_names",
+      "companion_progress",
+      "legend_boss"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/PortraitRecipe.cpp": [
+      "legend_names",
+      "companion_progress",
+      "legend_boss"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/PortraitRenderer.cpp": [
+      "legend_names",
+      "companion_progress",
+      "legend_boss"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/PortraitRoster.cpp": [
+      "legend_names",
+      "companion_progress",
+      "legend_boss"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/PortraitService.cpp": [
+      "legend_names",
+      "companion_progress",
+      "legend_boss"
     ]
   },
   "tooling_exclusions": {

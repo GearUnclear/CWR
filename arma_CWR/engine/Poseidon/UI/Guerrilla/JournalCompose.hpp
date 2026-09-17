@@ -1,4 +1,5 @@
 #pragma once
+#include <Poseidon/Game/Guerrilla/PortraitStatus.hpp>
 
 // Guerrilla Mode journal: the Compose stage.
 //
@@ -73,8 +74,8 @@ struct JournalBlock
     bool annotation = false;   // one-line entry/objective/action/deed row: exempt from the 2-hand-blocks rule
     bool leadGap = false;      // BlockText: a short blank line is laid inside the block, ahead of its runs (a Head)
     bool keepWithNext = false; // a Title / Subtitle / Head never ends a physical page while a block follows it
-    RString portraitSrc;       // BlockPortrait: "\\gmcore\\portraits\\<key>.paa" or "" (unavailable)
-    bool portraitPresent = false;
+    RString portraitSrc; // opaque service identifier; never a filesystem path
+    PortraitStatus portraitStatus = PortraitStatus::Unavailable;
     int HandWords() const; // words in VoiceHand runs (0 for other blocks)
 };
 

@@ -47,7 +47,7 @@ class Pen
                bool withZone); // annotation row, red on JKDanger; body clamped to HandWords less the stamp
     void Cell(const RString& text, float w, JournalInk ink = InkStock, JournalAlign a = AlignLeft, bool bold = false);
     void Gap();                                      // BlockGap
-    void Portrait(const RString& src, bool present); // BlockPortrait
+    void Portrait(const RString& src, PortraitStatus status); // BlockPortrait
     // open-ended block assembly
     void Run(const JournalRun& run);
     void EndBlock(bool annotation = false);

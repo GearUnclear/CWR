@@ -275,7 +275,7 @@ if (-not (Test-Path -LiteralPath $coreRoot -PathType Container)) {
     throw "Script core source not found: $coreRoot"
 }
 $coreDest = Join-Path $GameDir 'gmcore'
-$null = & robocopy $coreRoot $coreDest /MIR /NJH /NJS /NDL /NFL /NC /NS /NP
+$null = & robocopy $coreRoot $coreDest /MIR /XD portraits /NJH /NJS /NDL /NFL /NC /NS /NP
 if ($LASTEXITCODE -ge 8) {
     throw "robocopy failed for the script core (exit $LASTEXITCODE)"
 }

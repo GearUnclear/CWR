@@ -38,9 +38,11 @@ class GamePage : public ScrollListPage
             kRowBlood = 4,
             kRowSubtitles = 5,
             kRowRadioSubtitles = 6,
-            kRowCount = 7,
+            kRowClearPortraits = 7,
+            kRowCount = 8,
         };
 
+        void OnRowAction(int row, Display& host) override;
         int RowCount() const override { return kRowCount; }
         const char* RowLabel(int row) const override;
         const char* RowDescription(int row) const override;

@@ -1,40 +1,7 @@
-// ============================================================================
-//  The dossier photograph, end to end, on a live campaign (guerrilla_native.abel).
-//
-//    Every other layer of the portrait loop is checked somewhere cheaper: the
-//    key rule in the unit suite (PortraitKeyOf), the shipped files' shape in
-//    tests/unit/.../test_portrait_assets.cpp, the "is a portrait missing for a
-//    faction somebody just added" question in tests/contracts/
-//    test_portrait_catalogue.py.  What none of those can see is whether the
-//    .paa the journal NAMES is a file the engine can actually open, because
-//    that answer depends on the loose-file resolution chain: PortraitSrc's
-//    leading backslash makes AddImage skip FindPicture and hand the path
-//    straight to GlobLoadTexture, which resolves through QIFStreamB::FileExist
-//    (mounted banks first, then a CWD-relative open) - and the CWD is the data
-//    dir, so it comes down to whether install-missions.ps1's robocopy /MIR of
-//    guerrilla-mode/core actually put the file in <GameDir>\gmcore\portraits.
-//
-//    triBriefingImages is what makes that observable: HTMLField keeps no copy
-//    of the source path, only Ref<Texture> texture1, so a field that reports
-//    "-" is precisely a field whose texture never resolved.  A name is proof of
-//    the opposite, and the name it reports is the texture's own, lowercased by
-//    AddImage.
-//
-//    The expected key is built here from the LIVE body and the PERSISTED face,
-//    never hardcoded: typeOf (GM_COMP_OBJ select 0) is the same string the
-//    registry stamps into LegendRow::bodyClass (GetNonAIType()->GetName()), and
-//    gmLegendFace 0 is the token BindRow validated against CfgFaces.  That is
-//    what makes "a portrait can never depict a different faction's uniform"
-//    a checked property rather than a promise.
-//
-//    HEADFUL on purpose.  A lane with no presenting engine has no texture bank
-//    to load into and the field would come back "-" for the wrong reason.
-//
-//    PRECONDITION: guerrilla-mode/core must be installed into the data dir's
-//    gmcore (install-missions.ps1, or the Trident workflow's own robocopy /MIR
-//    into the classic-shadow), portraits included.
-// ============================================================================
-
+// Portraits are prepared locally before gameplay, from player-provided assets.
+gpInitial = triPortraitStats
+triAssert [(gpInitial select 0) > 0]
+triAssertEq [gpInitial select 0, gpInitial select 1]
 triSimUntil { GM_LIB_READY }
 
 // -- the registry has seeded and the first companion is alive and bound -------
@@ -49,15 +16,8 @@ triAssertNe [gpBody, ""]
 gpFace = gmLegendFace 0
 triAssertNe [gpFace, ""]
 triAssertNe [gpFace, "Default"]
-// only these four have photographs; anything else is the "Photograph
-// unavailable" branch by design, and this lane would then be testing nothing
-triAssert [((["Face10", "Face18", "Face27", "Face33"] find gpFace) >= 0)]
-
-// The path the journal builds, reproduced from the same two halves.  SQF string
-// == is strcmpi (express.cpp StrCmpE), so this compares case-insensitively -
-// which is what is wanted, because AddImage lowercases the path it loads and
-// typeOf reports the class in its config spelling.
-gpExpect = format ["gmcore\portraits\%1__%2.paa", gpBody, gpFace]
+// Match the opaque identity requested by the live body and recorded face.
+gpExpect = format ["portrait:%1", triPortraitId [gpBody, gpFace]]
 
 // -- the dossier anchor for row 0.  gmLegendId takes a COMPANION index, so for
 //    the first companion the two agree; gmLegendInfo is the general form -------
@@ -108,7 +68,7 @@ triAssertEq [(count gpF), 3]
 
 // the texture the notepad actually holds is the one the key names
 gpName = gpF select 0
-triAssertIncludes [gpName, "portraits"]
+triAssertIncludes [gpName, "portrait:"]
 triAssert [(gpName == gpExpect)]
 
 // width and height are stored in PAGE units (AddImage divides by 640 and 480),
@@ -125,6 +85,7 @@ triAssertNe [gpH, "0.0000"]
 gpMet = triBriefingMetrics
 triAssertNe [gpMet, ""]
 triAssertExcludes [gpMet, "FAIL:"]
+triAssert [triBriefingFits]
 
 // -- and it survives a repaint: the journal is rebuilt on every map open and on
 //    every revision change, so a portrait that only resolves once would be a
@@ -135,4 +96,44 @@ triAssertEq [(triBriefingSwitch gpAnchor), gpAnchor]
 gpImgs2 = triBriefingImages
 triAssertEq [gpImgs2, gpImgs]
 
+triAssert [triPortraitIsolation [gpBody, gpFace]]
+triSimFrames 3
+triAssertEq [(triBriefingSection), gpAnchor]
+triAssertEq [(triBriefingImages), gpImgs]
+triAssert [triPortraitRecreate]
+triSimFrames 3
+triAssertEq [(triBriefingSection), gpAnchor]
+triAssertEq [(triBriefingImages), gpImgs]
+triScreenshot "portrait_dossier"
+// Controlled capture is independent of campaign weather and time of day.
+gpPixels = triPortraitPixels [gpBody, gpFace]
+triAssertExcludes [gpPixels, "FAIL:"]
+0 setOvercast 1
+0 setRain 1
+skipTime 12
+triSimFrames 5
+triAssertEq [(triPortraitPixels [gpBody, gpFace]), gpPixels]
+triAssert [triPortraitIsolation [gpBody, gpFace]]
+// An unprepared type exercises isolation during first asset/type construction.
+triAssert [triPortraitIsolation ["Civilian3", "Face10"]]
+triAssert [triPortraitIsolation []]
+// A late unsupported face terminates without a render or blocking the queue.
+gpBeforeFailure = triPortraitStats
+gpUnsupported = triPortraitId [gpBody, "Default"]
+triSimFrames 3
+gpAfterFailure = triPortraitStats
+triAssertEq [gpAfterFailure select 0, (gpBeforeFailure select 0) + 1]
+triAssertEq [gpAfterFailure select 1, gpAfterFailure select 0]
+triAssertEq [gpAfterFailure select 2, gpBeforeFailure select 2]
+triAssertEq [(triPortraitId [gpBody, "Default"]), gpUnsupported]
+triAssert [triPortraitCancel]
+triSimFrames 3
+triAssertEq [(triBriefingSection), gpAnchor]
+triAssertEq [(triBriefingImages), gpImgs]
+// Recompose while queued: placeholder first, then the same section's texture.
+triAssert [triPortraitRefresh]
+triSimFrames 3
+triAssertEq [(triBriefingSection), gpAnchor]
+triAssertEq [(triBriefingImages), gpImgs]
+triAssert [triBriefingFits]
 triEndTest

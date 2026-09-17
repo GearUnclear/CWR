@@ -251,22 +251,6 @@ RString CharacterCaption(const JournalCharacterView& ch)
     return Sentence(Cap(caption));
 }
 
-// Render draws block.portraitSrc verbatim and Gather probed
-// "<portraitDir>\<key>.paa" for existence, so both are built from the same
-// injected directory: a Change 4 move of the folder can never leave a dossier
-// that reports a photograph pointing at a texture that does not resolve.  The
-// leading backslash is what makes AddImage skip the briefing-relative search.
-// portraitDir is empty in every unit test, so the box is reserved and the
-// "Photograph unavailable" treatment is drawn instead.
-RString PortraitSrc(const JournalPageInputs& in, const JournalCharacterView& ch)
-{
-    if (in.portraitDir.GetLength() == 0 || ch.portraitKey.GetLength() == 0)
-    {
-        return RString();
-    }
-    return RString("\\") + in.portraitDir + RString("\\") + ch.portraitKey + RString(".paa");
-}
-
 // What each beat IS, as the hub row's description.  The beat kinds are fixed
 // by the generator's three tables, so the gloss is compiled here rather than
 // carried on the view.  It is deliberately NOT the place: every shipped event
@@ -407,7 +391,7 @@ void ComposeWho(JournalDocument& doc, const ComposeContext& ctx)
             // the box is reserved whether or not the photograph exists, so the
             // page has the same shape either way and the unavailable treatment
             // reads as a blank frame in the file rather than a missing block
-            pen.Portrait(PortraitSrc(in, ch), ch.portraitPresent);
+            pen.Portrait(ch.portraitKey, ch.portraitStatus);
             pen.Title(ch.displayName);
             const RString caption = CharacterCaption(ch);
             if (ch.defeated || !ch.alive)

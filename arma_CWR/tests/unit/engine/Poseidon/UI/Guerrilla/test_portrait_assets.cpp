@@ -1,146 +1,147 @@
-// Shape check over the portrait catalogue that ships in guerrilla-mode/core.
-//
-// The dossier looks a portrait up by name and never validates it: PortraitKeyOf
-// builds lower(bodyClass) + "__" + lower(face), Gather probes
-// gmcore\portraits\<key>.paa with QIFStreamB::FileExist, and Compose hands the
-// path to AddImage.  A file that is present but the wrong shape therefore fails
-// silently at draw time, on a machine that is not this one.  So the constraints
-// the notepad imposes are asserted here, where they are cheap:
-//
-//   * power of two and exactly square.  The PAA mip chain is not read from the
-//     file, it is RECONSTRUCTED as mips[0]._w >> i (Pactext.cpp:1853-1857), so a
-//     non-power-of-two texture is outside what the reader assumes.
-//   * 256 on a side.  Under the RscHTML path the engine caps the used mip at
-//     1024 (UIControlsExt.cpp:561-562) and MAX_MIPMAPS is 7, so the ceiling is
-//     512; 256 sits comfortably under both and the on-screen size comes only
-//     from AddImage's w/h anyway, so pixel size buys sharpness and nothing else.
-//   * DXT1.  The cards are fully opaque, and PoseidonTools defaults to DXT5, so
-//     a portrait that came out DXT5 means somebody dropped the -f DXT1 flag.
-//   * a lowercase, key-shaped filename.  AddImage lowercases the path it is
-//     given (UIControlsExt.cpp:545), so an uppercase file simply never resolves
-//     on a case-sensitive filesystem.
-//
-// No game data and no GPU: ReadPAAInfo parses the header off disk.
-
+// Source-only print tests: authored pixels, no game data or generated catalogue.
 #include <catch2/catch_test_macros.hpp>
-
-#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
-
-#include <algorithm>
-#include <cctype>
+#include <Poseidon/Game/Guerrilla/PortraitRecipe.hpp>
+#include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <array>
+#include <chrono>
 #include <filesystem>
-#include <string>
-#include <vector>
+#include <Random/randomGen.hpp>
+#include <memory>
+#include <thread>
+#include <stdexcept>
 
 using namespace Poseidon;
+using namespace Poseidon::Guerrilla;
 
-namespace
+TEST_CASE("portrait asset RNG is nested, exception-safe and thread-local", "[guerrilla][portrait]")
 {
-
-std::filesystem::path PortraitDir()
-{
-    // TESTS_ROOT_DIR is <repo>/tests and already exists as a compile definition
-    // (tests/unit/engine/Poseidon/CMakeLists.txt); adding another one would
-    // rebuild the whole target for nothing.
-    return std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "guerrilla-mode" / "core" / "portraits";
-}
-
-bool IsPowerOfTwo(int v)
-{
-    return v > 0 && (v & (v - 1)) == 0;
-}
-
-// ^[a-z0-9_]+__face[0-9]+\.paa$, hand-rolled so the test does not pull <regex>
-// in for one pattern.
-bool KeyShaped(const std::string& name)
-{
-    const std::string suffix = ".paa";
-    if (name.size() <= suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+    auto* campaign = &GRandGen;
+    auto expected = std::make_unique<RandomGenerator>(*campaign);
+    auto visual = std::make_unique<RandomGenerator>(1937, 512);
+    auto nested = std::make_unique<RandomGenerator>(3, 4);
+    RandomGenerator* otherThread = nullptr;
     {
-        return false;
-    }
-    const std::string stem = name.substr(0, name.size() - suffix.size());
-    const std::string sep = "__face";
-    const size_t at = stem.rfind(sep);
-    if (at == std::string::npos || at == 0)
-    {
-        return false;
-    }
-    for (size_t i = 0; i < at; i++)
-    {
-        const char c = stem[i];
-        if (!(std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '_'))
+        ScopedRandomGenerator scope(*visual);
+        REQUIRE(&GRandGen == visual.get());
+        for (int i = 0; i < 20; ++i)
+            GRandGen.RandomValue();
+        try
         {
-            return false;
+            ScopedRandomGenerator inner(*nested);
+            REQUIRE(&GRandGen == nested.get());
+            throw std::runtime_error("asset load failure");
         }
-    }
-    const std::string digits = stem.substr(at + sep.size());
-    if (digits.empty())
-    {
-        return false;
-    }
-    return std::all_of(digits.begin(), digits.end(),
-                       [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
-}
-
-std::vector<std::filesystem::path> PortraitFiles()
-{
-    std::vector<std::filesystem::path> out;
-    const std::filesystem::path dir = PortraitDir();
-    if (!std::filesystem::is_directory(dir))
-    {
-        return out;
-    }
-    for (const auto& entry : std::filesystem::directory_iterator(dir))
-    {
-        if (entry.is_regular_file() && entry.path().extension() == ".paa")
+        catch (const std::runtime_error&)
         {
-            out.push_back(entry.path());
         }
+        REQUIRE(&GRandGen == visual.get());
+        std::thread worker([&] { otherThread = &GRandGen; });
+        worker.join();
+        CHECK(otherThread == campaign);
     }
-    std::sort(out.begin(), out.end());
-    return out;
+    REQUIRE(&GRandGen == campaign);
+    auto actual = std::make_unique<RandomGenerator>(*campaign);
+    for (int i = 0; i < 32; ++i)
+        CHECK(actual->RandomValue() == expected->RandomValue());
 }
 
-} // namespace
-
-TEST_CASE("portrait catalogue directory ships portraits", "[guerrilla][journal][portrait]")
+TEST_CASE("portrait print rejects malformed readback", "[guerrilla][journal][portrait]")
 {
-    // The cards are renders of game models and are gitignored, so a clone
-    // legitimately holds none and every dossier falls back to the "Photograph
-    // unavailable" panel. What this case pins is that the FOLDER is part of the
-    // tree, carrying the tracked README and catalogue.json that say how to
-    // reshoot; the count is reported so a reader can tell "none shot in this
-    // checkout" from "the shoot broke". The per-card format case below runs
-    // over whatever is present, so it is vacuous on a bare clone by design.
-    const std::filesystem::path dir = PortraitDir();
-    INFO("portrait directory: " << dir.string());
-    REQUIRE(std::filesystem::is_directory(dir));
-    WARN("portrait cards present in this checkout: " << PortraitFiles().size());
+    CHECK(StylePortrait({}).empty());
+    CHECK(StylePortrait(std::vector<uint8_t>(512 * 512 * 4)).empty());
 }
 
-TEST_CASE("every shipped portrait is a 256x256 opaque DXT1 card", "[guerrilla][journal][portrait]")
+TEST_CASE("portrait print has opaque paper, rule and exactly 236 photograph pixels", "[guerrilla][journal][portrait]")
 {
-    for (const auto& path : PortraitFiles())
+    std::vector<uint8_t> rgb(512 * 512 * 3, 128);
+    const auto card = StylePortrait(rgb);
+    REQUIRE(card.size() == 256 * 256 * 4);
+    for (int y = 0; y < 256; ++y)
+        for (int x = 0; x < 256; ++x)
+        {
+            const size_t at = (y * 256 + x) * 4;
+            REQUIRE(card[at + 3] == 255);
+            const bool inside = x >= 10 && x < 246 && y >= 10 && y < 246;
+            const bool edge = x >= 9 && x <= 246 && y >= 9 && y <= 246 && (x == 9 || x == 246 || y == 9 || y == 246);
+            const std::array<uint8_t, 3> expected = inside ? std::array<uint8_t, 3>{139, 132, 122}
+                                                    : edge ? std::array<uint8_t, 3>{194, 190, 177}
+                                                           : std::array<uint8_t, 3>{218, 214, 201};
+            for (int c = 0; c < 3; ++c)
+                REQUIRE(card[at + c] == expected[c]);
+        }
+}
+
+TEST_CASE("portrait print preserves orientation and mutes authored colours", "[guerrilla][journal][portrait]")
+{
+    std::vector<uint8_t> rgb(512 * 512 * 3);
+    for (int y = 0; y < 512; ++y)
+        for (int x = 0; x < 512; ++x)
+            rgb[(y * 512 + x) * 3 + (y < 256 ? 0 : 2)] = 255;
+    const auto card = StylePortrait(rgb);
+    const size_t top = (40 * 256 + 128) * 4, bottom = (210 * 256 + 128) * 4;
+    CHECK(card[top] > card[top + 2]);
+    CHECK(card[bottom + 2] > card[bottom]);
+    CHECK(card[top + 1] > 18);
+    CHECK(card[top] < 245);
+    CHECK(StylePortrait(rgb) == card);
+}
+
+TEST_CASE("authored portrait print round trips as a 256 square opaque PNG", "[guerrilla][journal][portrait]")
+{
+    const auto pixels = StylePortrait(std::vector<uint8_t>(512 * 512 * 3, 128));
+    struct TempFile
     {
-        const std::string name = path.filename().string();
-        INFO("portrait: " << name);
+        std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("portrait-print-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".png");
+        ~TempFile()
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } file;
+    REQUIRE(Image::FromRGBA(256, 256, pixels).Save(file.path.string()));
+    const auto image = Image::FromFile(file.path.string());
+    REQUIRE(image.valid());
+    CHECK(image.width() == 256);
+    CHECK(image.height() == 256);
+    CHECK(image.ToRGBA().data() == pixels);
+}
 
-        CHECK(KeyShaped(name));
+TEST_CASE("private portrait geometry preserves animation originals without sharing writes", "[portrait][guerrilla]")
+{
+    Shape source;
+    source.ReallocTable(1);
+    source.SetPos(0) = Vector3(1, 2, 3);
+    source.SetNorm(0) = VUp;
+    source.SetClip(0, 0);
+    source.SaveOriginalPos();
+    source.SetPos(0) = Vector3(4, 5, 6);
+    Shape copy(source, true);
+    REQUIRE(copy.OriginalPosValid());
+    CHECK(copy.OrigPos(0).Y() == 2);
+    copy.RestoreOriginalPos();
+    copy.SetPos(0) = Vector3(9, 9, 9);
+    CHECK(source.Pos(0).Y() == 5);
+    source.RestoreOriginalPos();
+    CHECK(source.Pos(0).Y() == 2);
+}
 
-        PAAInfo info;
-        REQUIRE(ReadPAAInfo(path.string(), info));
-        CHECK(info.isPaa);
-        CHECK(info.width == 256);
-        CHECK(info.height == 256);
-        CHECK(info.width == info.height);
-        CHECK(IsPowerOfTwo(info.width));
-        CHECK(IsPowerOfTwo(info.height));
-        REQUIRE(info.formatName != nullptr);
-        CHECK(std::string(info.formatName) == "DXT1");
-        // Repeated halving from 256 gives 8 levels down to 2x2; the reader stops
-        // at MAX_MIPMAPS anyway, so anything from 5 up is usable.
-        CHECK(info.mipmapCount >= 5);
-        CHECK(info.mipmapCount <= 8);
+TEST_CASE("portrait light snapshot owns references independently of scratch selection", "[portrait][guerrilla]")
+{
+    Ref<LightPoint> light = new LightPoint(Color(1, 1, 1), Color(1, 1, 1));
+    LightList original;
+    original.Add(Ref<Light>(light.GetRef()));
+    const int refs = light->RefCounter();
+    {
+        LightList saved(original);
+        CHECK(light->RefCounter() == refs + 1);
+        original.Clear();
+        REQUIRE(saved.Size() == 1);
+        CHECK(saved[0].GetRef() == light.GetRef());
     }
+    CHECK(light->RefCounter() == 1);
 }

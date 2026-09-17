@@ -26,9 +26,12 @@ bool EngineGL33::CapturePortrait(const std::function<void()>& draw, std::vector<
     const auto exposure = _accomodateEye;
     const auto frame = _frameState;
     const auto constants = _psConstants;
+    const auto fogColour = _fogColor;
     const auto aspect = _aspectSettings;
     const int width = _w, height = _h;
     const bool night = _nightVision;
+    const float nightEye = _nightEye;
+    const auto pixelMode = _pixelShaderModeSel;
     GLuint fbo = 0, colour = 0, depth = 0;
     glGenFramebuffers(1, &fbo);
     glGenRenderbuffers(1, &colour);
@@ -45,7 +48,13 @@ bool EngineGL33::CapturePortrait(const std::function<void()>& draw, std::vector<
     {
         _portraitTargetSize = _w = _h = size;
         _nightVision = false;
+        EnableNightEye(0);
+        SelectPixelShaderMode(PSMDay);
         _accomodateEye = Color(1, 1, 1);
+        // Even a disabled fog mix can retain rounding dependence on its colour.
+        // Keep every colour input fixed, not only the fog enable bit.
+        _fogColor = Color(0, 0, 0);
+        UploadPSFogColor(_fogColor);
         _shadowMapActive = false;
         _sunEnabled = false;
         BeginScreenPass();
@@ -79,12 +88,15 @@ bool EngineGL33::CapturePortrait(const std::function<void()>& draw, std::vector<
     }
     BeginScreenPass();
     _portraitTargetSize = 0;
+    EnableNightEye(nightEye);
+    SelectPixelShaderMode(pixelMode);
     _sunEnabled = sun;
     _shadowMapActive = shadows;
     _w = width;
     _h = height;
     _nightVision = night;
     _accomodateEye = exposure;
+    _fogColor = fogColour;
     _aspectSettings = aspect;
     _frameState = frame;
     _psConstants = constants;

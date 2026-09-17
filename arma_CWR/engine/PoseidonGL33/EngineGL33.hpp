@@ -601,7 +601,7 @@ class EngineGL33 : public Engine
     void PostReset();
 
     bool Reset();
-    bool ResetHard();
+    bool ResetHard() override;
     void ResetForRemount() override; // mod re-mount: drop+rebuild GPU, keep window
 
     bool SwitchRes(int w, int h, int bpp) override;

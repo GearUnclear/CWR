@@ -118,4 +118,10 @@ glDossier = triControlText 56
 triAssertIncludes [glDossier, (gmLegSaveNames select 0)]
 triAssertIncludes [glDossier, "defeated"]
 
+// Every saved appearance, including fallen rows, was ready at the load gate.
+triAssertEq [(triOpenMap), "OK"]
+triSendKey 16
+triSimFrames 10
+gmPhotoI = 0
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; gmPhotoSaved = gmSavedPhotoRows select gmPhotoI; triAssertEq [gmPhotoRow select 0, gmPhotoSaved select 0]; triAssertEq [gmPhotoRow select 1, gmPhotoSaved select 1]; triAssertEq [gmPhotoRow select 2, gmPhotoSaved select 2]; triAssertEq [gmPhotoRow select 3, 2]; gmPhotoAnchor = "GM_WHO_" + ((gmLegendInfo gmPhotoI) select 0); triAssertEq [(triBriefingSwitch gmPhotoAnchor), gmPhotoAnchor]; triAssertIncludes [(triBriefingImages), "portrait:" + (gmPhotoRow select 2)]; triAssert [triBriefingFits]; gmPhotoI = gmPhotoI + 1}
 triEndTest

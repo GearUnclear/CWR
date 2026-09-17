@@ -916,31 +916,29 @@ TEST_CASE("Journal compose - a dossier without a photograph still reserves the p
         const JournalPage& page = Page(doc, "GM_WHO_comp_0_petra");
         REQUIRE(page.blocks.Size() > 0);
         CHECK(page.blocks[0].kind == BlockPortrait);
-        CHECK_FALSE(page.blocks[0].portraitPresent);
-        CHECK(S(page.blocks[0].portraitSrc).empty());
+        CHECK_FALSE(page.blocks[0].portraitStatus == PortraitStatus::Ready);
+        CHECK(S(page.blocks[0].portraitSrc) == "soldierg__face10");
     }
     {
         // the injected directory is the ONE source of the path: Gather probed
         // "<portraitDir>\<key>.paa" for existence, so Compose must hand Render
         // the same string with a leading backslash and nothing else
         JournalPageInputs in;
-        in.portraitDir = "gmcore\\portraits\\v2";
         JournalCharacterView ch = Companion("comp_0_petra", "Iron Petra Kovacevic", "Petra", "Sgt", "with me");
         ch.portraitKey = "soldierg__face10";
-        ch.portraitPresent = true;
+        ch.portraitStatus = PortraitStatus::Ready;
         in.characters.Add(ch);
         const JournalDocument doc = ComposeJournal(journal, in);
         const JournalPage& page = Page(doc, "GM_WHO_comp_0_petra");
         REQUIRE(page.blocks.Size() > 0);
         CHECK(page.blocks[0].kind == BlockPortrait);
-        CHECK(page.blocks[0].portraitPresent);
-        CHECK(S(page.blocks[0].portraitSrc) == "\\gmcore\\portraits\\v2\\soldierg__face10.paa");
+        CHECK(page.blocks[0].portraitStatus == PortraitStatus::Ready);
+        CHECK(S(page.blocks[0].portraitSrc) == "soldierg__face10");
     }
     {
         // no key (a woman body, or a face the validation refused): no source,
         // and the box is still reserved so the page keeps its shape
         JournalPageInputs in;
-        in.portraitDir = "gmcore\\portraits";
         in.characters.Add(Companion("comp_0_petra", "Iron Petra Kovacevic", "Petra", "Sgt", "with me"));
         const JournalDocument doc = ComposeJournal(journal, in);
         const JournalPage& page = Page(doc, "GM_WHO_comp_0_petra");
@@ -1116,13 +1114,12 @@ TEST_CASE("Journal render - a worst-case dossier stays inside one continuation a
     Journal journal;
     JournalPageInputs in;
     in.day = 4;
-    in.portraitDir = "gmcore\\portraits";
     JournalCharacterView ch = Boss("boss_0",
                                    "Heartless Jean-Baptiste \"The Fence-Builder\" Vakalalabure the "
                                    "Collaborator",
                                    "Commander");
     ch.portraitKey = "soldiere__face27";
-    ch.portraitPresent = true;
+    ch.portraitStatus = PortraitStatus::Ready;
     // Change 3 adds the place line to this page, so the worst case gains the
     // longest zone name a shipped template ships (@LoBo's Sinai table)
     ch.zone = "Ras Nasrani Outpost";

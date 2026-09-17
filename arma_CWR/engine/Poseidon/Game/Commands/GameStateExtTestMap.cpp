@@ -1,3 +1,11 @@
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/PortraitRecipe.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Core/Global.hpp>
+#include <Random/randomGen.hpp>
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Evaluator/express.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
@@ -5,15 +13,24 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Input/UserActionDesc.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>               // global Pars for triListFaces
 #include <Poseidon/Graphics/Textures/TextureBank.hpp> // Texture::Name for triBriefingImages
 
 #include <SDL3/SDL_scancode.h>
+#include <Poseidon/AI/AICenter.hpp>
+#include <Poseidon/Network/NetworkIface.hpp>
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
+#include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/Core/SaveVersion.hpp>
+#include <sstream>
 
 #include <cstdio>
 
 using namespace Poseidon;
+
+extern void SDLInput_BufferKeyEvent(SDL_Scancode sc, bool down, DWORD timestamp);
 
 /// triOpenMap -> "OK" or "FAIL:<reason>"
 GameValue TriOpenMap(const GameState* /*state*/)
@@ -391,4 +408,228 @@ GameValue TriListFaces(const GameState* /*state*/)
     }
     LOG_INFO(Core, "[tri] triListFaces -> {} usable faces", result.Size());
     return GameValue(result);
+}
+
+GameValue TriPortraitStats(const GameState*)
+{
+    const auto& service = Guerrilla::PortraitService::Instance();
+    AutoArray<GameValue> values;
+    values.Add(float(service.Total()));
+    values.Add(float(service.Completed()));
+    values.Add(float(service.RenderCount()));
+    values.Add(float(service.CacheHits()));
+    return GameValue(values);
+}
+GameValue TriPortraitId(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (args.Size() != 2)
+        return GameValue("FAIL:arguments");
+    return GameValue(Guerrilla::PortraitService::Instance().Request({RString(args[0]), RString(args[1])}, true));
+}
+
+GameValue TriPortraitRecreate(const GameState*)
+{
+    if (!GEngine)
+        return GameValue(false);
+    // Exercise both content remount and the full device-resource reset.
+    GEngine->ResetForRemount();
+    return GameValue(GEngine->ResetHard());
+}
+
+GameValue TriPortraitRow(const GameState*, GameValuePar arg)
+{
+    const int index = int(float(arg));
+    const auto& registry = Guerrilla::LegendRegistry::Instance();
+    AutoArray<GameValue> result;
+    if (index < 0 || index >= registry.RowCount())
+        return GameValue(result);
+    const auto& row = registry.Row(index);
+    auto& service = Guerrilla::PortraitService::Instance();
+    const RString id = service.Request({row.bodyClass, row.face});
+    result.Add(GameValue(row.bodyClass));
+    result.Add(GameValue(row.face));
+    result.Add(GameValue(id));
+    result.Add(GameValue(float(service.Find(id)->status)));
+    return GameValue(result);
+}
+
+GameValue TriPortraitPixels(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (args.Size() != 2)
+        return GameValue("FAIL:arguments");
+    Guerrilla::PortraitRenderer renderer;
+    std::vector<uint8_t> rgb;
+    std::string error;
+    if (!renderer.Prepare({RString(args[0]), RString(args[1])}, error) || !renderer.Capture(rgb, error))
+        return GameValue(RString("FAIL:") + RString(error.c_str()));
+    const auto pixels = Guerrilla::StylePortrait(rgb);
+    return GameValue(
+        Guerrilla::PortraitDigest(std::string(reinterpret_cast<const char*>(pixels.data()), pixels.size())).c_str());
+}
+
+GameValue TriPortraitRefresh(const GameState*)
+{
+    auto* map = GWorld ? dynamic_cast<DisplayMap*>(GWorld->Map()) : nullptr;
+    CHTML* html = map ? map->GetBriefingControl() : nullptr;
+    if (!html)
+        return GameValue(false);
+    const RString section = html->CurrentSectionName();
+    Guerrilla::PortraitService::Instance().Teardown();
+    map->RefreshGuerrillaJournal();
+    if (html->CurrentSectionName() != section)
+        return GameValue(false);
+    const auto& fields = html->GetSection(html->CurrentSection()).fields;
+    bool placeholder = false;
+    for (int i = 0; i < fields.Size(); ++i)
+    {
+        if (fields[i].format == HFImg && fields[i].texture1)
+            return GameValue(false);
+        placeholder = placeholder || fields[i].text == RString("Photograph unavailable");
+    }
+    return GameValue(placeholder && Guerrilla::PortraitService::Instance().Pending());
+}
+
+GameValue TriBriefingFits(const GameState*)
+{
+    auto* map = GWorld ? dynamic_cast<DisplayMap*>(GWorld->Map()) : nullptr;
+    CHTML* html = map ? map->GetBriefingControl() : nullptr;
+    if (!html || html->CurrentSection() < 0 || html->CurrentSection() >= html->NSections())
+        return GameValue(false);
+    const auto& section = html->GetSection(html->CurrentSection());
+    float height = 0;
+    for (int i = 0; i < section.rows.Size(); ++i)
+    {
+        const auto& row = section.rows[i];
+        height += row.height;
+        if (row.width > html->GetPageWidth() + 0.001f)
+            return GameValue(false);
+    }
+    LOG_INFO(Core, "[tri] briefing fit height={} budget={}", height, html->GetPageHeight());
+    return GameValue(section.rows.Size() > 0 && height <= html->GetPageHeight() + 0.001f);
+}
+
+GameValue TriPortraitCancel(const GameState*)
+{
+    auto& service = Guerrilla::PortraitService::Instance();
+    service.Teardown();
+    service.PrepareRoster(Guerrilla::CampaignPortraitRoster());
+    service.Advance();
+    const size_t completed = service.Completed();
+    // This is the raw buffer used by SDL's event pump, before normal frame
+    // processing. Loading must consume it even though simulation is suspended.
+    const auto tick = Foundation::GlobalTickCount();
+    SDLInput_BufferKeyEvent(SDL_SCANCODE_ESCAPE, true, tick);
+    SDLInput_BufferKeyEvent(SDL_SCANCODE_ESCAPE, false, tick + 1);
+    const bool cancelled = !Guerrilla::PrepareCampaignPortraits();
+    const bool retained =
+        completed == 1 && service.Total() == completed && service.Completed() == completed && !service.Pending();
+    const bool resumed = Guerrilla::PrepareCampaignPortraits();
+    return GameValue(cancelled && retained && resumed && service.Completed() == service.Total());
+}
+
+// Capture synchronously without advancing simulation, then check the externally
+// observable world and random stream. This also exercises the mid-frame path.
+GameValue TriPortraitIsolation(const GameState*, GameValuePar arg)
+{
+    const GameArrayType& args = arg;
+    if (args.Size() == 0)
+    {
+        for (const auto& appearance : Guerrilla::CampaignPortraitRoster())
+        {
+            AutoArray<GameValue> pair;
+            pair.Add(GameValue(appearance.body));
+            pair.Add(GameValue(appearance.face));
+            if (!static_cast<bool>(TriPortraitIsolation(nullptr, GameValue(pair))))
+                return GameValue(false);
+        }
+        return GameValue(true);
+    }
+    if (args.Size() != 2 || !GWorld || !GScene)
+        return GameValue(false);
+    const auto registrySnapshot = []
+    {
+        ParamArchiveSave archive(WorldSerializeVersion);
+        archive.Serialize("GuerrillaLegends", Guerrilla::LegendRegistry::Instance(), 14);
+        QOStream stream;
+        archive.GetParamFile()->Save(stream, 0);
+        return std::string(stream.str(), stream.pcount());
+    };
+    const auto aiSnapshot = []
+    {
+        std::ostringstream out;
+        for (auto* center : {GWorld->GetWestCenter(), GWorld->GetEastCenter(), GWorld->GetGuerrilaCenter(),
+                             GWorld->GetCivilianCenter(), GWorld->GetLogicCenter()})
+        {
+            out << center << ':';
+            if (!center)
+                continue;
+            out << center->NGroups() << ':';
+            for (int i = 0; i < center->NGroups(); ++i)
+            {
+                const auto* group = center->GetGroup(i);
+                out << group << ':';
+                if (group)
+                {
+                    const auto id = group->GetNetworkId();
+                    out << group->NUnits() << ':' << id.creator << ':' << id.id << ';';
+                }
+            }
+        }
+        return out.str();
+    };
+    const auto registryBefore = registrySnapshot(), aiBefore = aiSnapshot();
+    const auto networkState = GetNetworkManager().GetGameState();
+    const auto networkServer = GetNetworkManager().GetServerState();
+    const int networkPlayer = GetNetworkManager().GetPlayer(), networkRoles = GetNetworkManager().NPlayerRoles();
+    const int nextMagazine = GWorld->NextMagazineID();
+    auto random = std::make_unique<RandomGenerator>(GRandGen);
+    const auto time = Glob.time;
+    const int vehicles = GWorld->NVehicles(), fast = GWorld->NFastVehicles(), out = GWorld->NOutVehicles();
+    const int rows = Guerrilla::LegendRegistry::Instance().RowCount(), lights = GScene->NLights();
+    const Camera camera = *GScene->GetCamera();
+    const auto* sun = GScene->MainLight();
+    const float clouds = GLandscape ? GLandscape->CloudsAlpha() : 0;
+    const float rain = GLandscape ? GLandscape->GetRainDensity() : 0;
+    const Vector3 wind = GLandscape ? GLandscape->GetWind() : VZero;
+    std::vector<uint8_t> rgb;
+    std::string error;
+    {
+        Guerrilla::PortraitRenderer renderer;
+        if (!renderer.Prepare({RString(args[0]), RString(args[1])}, error) || !renderer.Capture(rgb, error))
+        {
+            LOG_WARN(Core, "[tri] isolated portrait failed: {}", error);
+            return GameValue(false);
+        }
+    }
+    auto after = std::make_unique<RandomGenerator>(GRandGen);
+    bool stable = true;
+    for (int i = 0; i < 16; ++i)
+        stable = stable && random->RandomValue() == after->RandomValue();
+    LOG_INFO(Core,
+             "[tri] isolation components rng={} time={} "
+             "vehicles={}/{},fast={}/{},out={}/{},rows={}/{},lights={}/{},sun={} camera={}/{}",
+             stable, Glob.time == time, vehicles, GWorld->NVehicles(), fast, GWorld->NFastVehicles(), out,
+             GWorld->NOutVehicles(), rows, Guerrilla::LegendRegistry::Instance().RowCount(), lights, GScene->NLights(),
+             GScene->MainLight() == sun, GScene->GetCamera()->Position().Distance2(camera.Position()),
+             GScene->GetCamera()->Direction().Distance2(camera.Direction()));
+    stable = stable && Glob.time == time && GWorld->NVehicles() == vehicles && GWorld->NFastVehicles() == fast &&
+             GWorld->NOutVehicles() == out && Guerrilla::LegendRegistry::Instance().RowCount() == rows &&
+             GScene->NLights() == lights && GScene->MainLight() == sun &&
+             GScene->GetCamera()->Position().Distance2(camera.Position()) < 1e-10f &&
+             GScene->GetCamera()->Direction().Distance2(camera.Direction()) < 1e-10f;
+    stable = stable && registrySnapshot() == registryBefore && aiSnapshot() == aiBefore &&
+             GetNetworkManager().GetGameState() == networkState &&
+             GetNetworkManager().GetServerState() == networkServer &&
+             GetNetworkManager().GetPlayer() == networkPlayer && GetNetworkManager().NPlayerRoles() == networkRoles;
+    stable = stable && GWorld->NextMagazineID() == nextMagazine;
+    if (GLandscape)
+        stable = stable && GLandscape->CloudsAlpha() == clouds && GLandscape->GetRainDensity() == rain &&
+                 GLandscape->GetWind().Distance2(wind) < 1e-10f;
+    // Releasing all service handles models the portrait portion of device loss:
+    // the next journal repaint must rebuild from retained CPU pixels.
+    Guerrilla::PortraitService::Instance().ReleaseGraphics();
+    LOG_INFO(Core, "[tri] portrait isolation {}", stable ? "OK" : "FAILED");
+    return GameValue(stable && rgb.size() == 512 * 512 * 3);
 }

@@ -120,7 +120,10 @@ class VehicleSupply: public EntityAI
 	mutable OLinkArray<AIUnit> _supplyUnits;
 
 	public:
-	VehicleSupply(EntityAIType *name, bool fullCreate=true);
+    // Appearance-only characters must not create supply cargo (magazines allocate
+    // world/network IDs even when the normal weapon-loadout flag is false).
+    enum class Creation { Normal, AppearanceOnly };
+    VehicleSupply(EntityAIType *name, bool fullCreate=true, Creation creation=Creation::Normal);
 
 	void SupplyStarted( AIUnit *unit );
 	void SupplyFinished( AIUnit *unit );

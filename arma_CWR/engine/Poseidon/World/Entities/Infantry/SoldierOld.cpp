@@ -652,8 +652,8 @@ int Man::GetActUpDegree() const
 
 DEFINE_CASTING(Man)
 
-Man::Man(VehicleType* name, bool fullCreate)
-    : Person(name, fullCreate),
+Man::Man(VehicleType* name, bool fullCreate, Creation creation)
+    : Person(name, fullCreate, creation),
 
       _turnToDo(0), _walkToggle(false), _inBuilding(false),
 
@@ -710,8 +710,13 @@ Man::Man(VehicleType* name, bool fullCreate)
 
     _destrType = DestructMan;
 
-    _mGunClouds.Load((*Type()->_par) >> "MGunClouds");
-    _gunClouds.Load((*Type()->_par) >> "GunClouds");
+    // A display mannequin never fires or simulates particles. Avoid loading and
+    // changing shared cloudlet shapes during appearance-only construction.
+    if (creation == Creation::Normal)
+    {
+        _mGunClouds.Load((*Type()->_par) >> "MGunClouds");
+        _gunClouds.Load((*Type()->_par) >> "GunClouds");
+    }
     _mGunFireFrames = 0;
     _mGunFireTime = UITIME_MIN;
     _mGunFirePhase = 0;

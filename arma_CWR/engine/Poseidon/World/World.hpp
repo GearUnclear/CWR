@@ -373,6 +373,7 @@ class World
 	void InitFinish();
 
 	int GetMagazineID() {return _nextMagazineID++;}
+    int NextMagazineID() const { return _nextMagazineID; }
 
 	void SetViewerPhase( float time );
 	float GetViewerPhase() const;

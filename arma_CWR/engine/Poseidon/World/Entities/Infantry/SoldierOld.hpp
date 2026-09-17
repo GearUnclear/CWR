@@ -618,7 +618,7 @@ class Man: public Person
 	Head _head;
 
 	public:
-	Man(VehicleType *name, bool fullCreate=true);
+    Man(VehicleType *name, bool fullCreate=true, Creation creation=Creation::Normal);
 	~Man() override;
 
 	

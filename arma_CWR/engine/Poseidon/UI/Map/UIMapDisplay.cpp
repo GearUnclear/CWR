@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/UI/Map/UIMapCommon.hpp>
@@ -629,6 +630,7 @@ void DisplayMap::ReloadBriefingContent(RString activeSection)
         Guerrilla::BuildGuerrillaJournalPages(_briefing, Guerrilla::Journal::Instance(),
                                               Guerrilla::GatherGuerrillaJournalInputs());
         _journalRevision = Guerrilla::Journal::Instance().Revision();
+        _portraitRevision = Guerrilla::PortraitService::Instance().Revision();
     }
 
     AIUnit* unit = GWorld->FocusOn();

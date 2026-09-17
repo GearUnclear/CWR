@@ -383,6 +383,8 @@ class Engine : public IGraphicsEngine
     // and rebuild the GL infrastructure, keeping the window + device alive. Used
     // by the in-process mod re-mount; default no-op for headless backends.
     virtual void ResetForRemount() {}
+    // Rebuild all device resources; also exposed to the development harness.
+    virtual bool ResetHard() { return false; }
     void FogColorChanged(ColorVal fogColor) override = 0;
 
     bool SwitchRes(int w, int h, int bpp) override = 0; // switch to resolution nearest to w,h

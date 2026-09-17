@@ -406,6 +406,7 @@ protected:
     void ReloadBriefingContent(RString activeSection = RString());
     // Journal::Revision() the briefing was last built from (Guerrilla Mode)
     unsigned _journalRevision = 0;
+    unsigned _portraitRevision = 0;
     void UpdateMissionName();
     void LoadParams();
 	void SaveParams();

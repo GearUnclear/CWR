@@ -432,6 +432,44 @@ static void TruncateToDirectory(char* buffer)
     }
 }
 
+namespace
+{
+void SizeHtmlImage(HTMLField& fld, float w, float h)
+{
+    if (fld.texture1)
+    {
+        fld.texture1->SetMaxSize(1024); // no limits
+        if (w < 0)
+        {
+            MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(fld.texture1, 0, 0);
+            if (h < 0)
+            {
+                w = fld.texture1->AWidth();
+                h = fld.texture1->AHeight();
+            }
+            else
+            {
+                w = fld.texture1->AWidth() * h / fld.texture1->AHeight();
+            }
+        }
+        else if (h < 0)
+        {
+            h = fld.texture1->AHeight() * w / fld.texture1->AWidth();
+        }
+
+        fld.width = w * (1.0 / 640.0);
+        fld.height = h * (1.0 / 480.0);
+    }
+    else
+    {
+        fld.width = (w > 0 ? w : h) * (1.0 / 640.0);
+        fld.height = (h > 0 ? h : w) * (1.0 / 480.0);
+        saturateMax(fld.width, 0);
+        saturateMax(fld.height, 0);
+    }
+}
+}
+
 HTMLField* CHTMLContainer::AddImage(int section, RString image, HTMLAlign align, bool bottom, float w, float h,
                                     RString href, RString text, float tableWidth)
 {
@@ -557,37 +595,32 @@ HTMLField* CHTMLContainer::AddImage(int section, RString image, HTMLAlign align,
         fld.texture2 = fld.texture1;
         I_AM_ALIVE();
     }
-    if (fld.texture1)
-    {
-        fld.texture1->SetMaxSize(1024); // no limits
-        if (w < 0)
-        {
-            MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(fld.texture1, 0, 0);
-            if (h < 0)
-            {
-                w = fld.texture1->AWidth();
-                h = fld.texture1->AHeight();
-            }
-            else
-            {
-                w = fld.texture1->AWidth() * h / fld.texture1->AHeight();
-            }
-        }
-        else if (h < 0)
-        {
-            h = fld.texture1->AHeight() * w / fld.texture1->AWidth();
-        }
+    SizeHtmlImage(fld, w, h);
+    return &fld;
+}
 
-        fld.width = w * (1.0 / 640.0);
-        fld.height = h * (1.0 / 480.0);
-    }
-    else
-    {
-        fld.width = (w > 0 ? w : h) * (1.0 / 640.0);
-        fld.height = (h > 0 ? h : w) * (1.0 / 480.0);
-        saturateMax(fld.width, 0);
-        saturateMax(fld.height, 0);
-    }
+HTMLField* CHTMLContainer::AddImage(int section, Texture* texture, HTMLAlign align, bool bottom, float w, float h,
+                                    RString href, RString text, float tableWidth)
+{
+    if (section < 0 || section >= _sections.Size())
+        return nullptr;
+    HTMLSection& sec = _sections[section];
+    HTMLField& fld = sec.fields[sec.fields.Add()];
+    fld.format = HFImg;
+    fld.align = align;
+    fld.nextline = false;
+    fld.exclude = false;
+    fld.text = text;
+    fld.href = href;
+    fld.bottom = bottom;
+    fld.indent = _indent;
+    fld.tableWidth = tableWidth;
+    fld.hasColor = _hasFieldColor;
+    if (_hasFieldColor)
+        fld.color = _fieldColor;
+    fld.texture1 = texture;
+    fld.texture2 = texture;
+    SizeHtmlImage(fld, w, h);
     return &fld;
 }
 
