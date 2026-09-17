@@ -124,6 +124,9 @@ class InputSubsystem
     // Packed key queries (INPUT_DEVICE_* | code format)
     float GetKey(int packedKey, bool checkFocus = true) const;
     bool GetKeyToDo(int packedKey, bool reset = true, bool checkFocus = true);
+    // Consume SDL's buffered keyboard events while normal frame processing is
+    // suspended by a loading screen; no gameplay actions are dispatched.
+    void PollLoadingKeyboard();
 
     // Cheat system state
     int CheatActivated() const;

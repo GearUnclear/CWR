@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -691,6 +692,9 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Simulate tick with an ACTIVE zone registry, never here - an ordinary
     // mission or an intro must not draw a seed or write a diary line.
     Guerrilla::LegendRegistry::Instance().InitMission();
+    Guerrilla::PortraitService::Instance().Teardown();
+    if (!Guerrilla::PrepareCampaignPortraits())
+        return false;
 
     if (gameMode == GModeArcade)
     {
@@ -1097,6 +1101,7 @@ void World::CleanUpDeinit()
     GBriefingOnGroup = RString();
     GMapOnSingleClick = RString();
 
+    Guerrilla::PortraitService::Instance().Teardown();
     GScene->CleanUp();
 
     GDummyVehicle = nullptr;

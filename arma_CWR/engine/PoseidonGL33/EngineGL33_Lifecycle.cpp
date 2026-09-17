@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
@@ -455,6 +456,7 @@ void EngineGL33::PreReset(bool hard)
 
     if (hard)
     {
+        Poseidon::Guerrilla::PortraitService::Instance().ReleaseGraphics();
         _textBank->ReleaseAllTextures();
         DeinitPixelShaders();
         DeinitVertexShaders();
@@ -518,6 +520,7 @@ void EngineGL33::ResetForRemount()
     FreeAllQueues(_queueNo);
     if (_textBank)
     {
+        Poseidon::Guerrilla::PortraitService::Instance().ReleaseGraphics();
         _textBank->ReleaseAllTextures();
     }
 }
@@ -1070,6 +1073,7 @@ void EngineGL33::InitGL()
 void EngineGL33::ShutdownGL()
 {
     LOG_INFO(Graphics, "GL33: ShutdownGL");
+    Poseidon::Guerrilla::PortraitService::Instance().ReleaseGraphics();
     _fonts.Clear();
     if (_textBank)
     {

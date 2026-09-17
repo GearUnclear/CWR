@@ -1,5 +1,6 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/KeyInput.hpp>
+#include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Core/resincl.hpp>
@@ -1140,6 +1141,11 @@ bool InputSubsystem::GetKeyToDo(int packedKey, bool reset, bool checkFocus)
     return InputBindingIsTap(packedKey)         ? QueryTapKeyToDo(GInput, value, reset, checkFocus)
            : InputBindingIsDoubleTap(packedKey) ? QueryDoubleTapKeyToDo(GInput, value, reset, checkFocus)
                                                 : QueryKeyToDo(GInput, value, reset, checkFocus);
+}
+
+void InputSubsystem::PollLoadingKeyboard()
+{
+    GInput.keyboard.Update(Foundation::GlobalTickCount(), 0, true);
 }
 
 int InputSubsystem::GetTapWindowMs() const

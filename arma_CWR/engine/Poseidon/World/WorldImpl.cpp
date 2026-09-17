@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
@@ -2342,6 +2343,12 @@ LSError World::Serialize(ParamArchive& ar, int message)
         Shapes.OptimizeAll();
         LOG_DEBUG(Core, "LOAD: Shapes.OptimizeAll {}ms", GetTickCount() - tOpt);
 
+        Guerrilla::PortraitService::Instance().Teardown();
+        if (!Guerrilla::PrepareCampaignPortraits())
+        {
+            ProgressFinish();
+            return LSUnknownError;
+        }
         DisplayMap* map = dynamic_cast<DisplayMap*>((AbstractOptionsUI*)_map);
         if (map)
         {
