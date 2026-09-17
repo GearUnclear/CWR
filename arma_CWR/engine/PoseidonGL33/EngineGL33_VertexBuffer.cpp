@@ -400,6 +400,7 @@ void EngineGL33::SetMsaaSamples(int samples)
 
 void EngineGL33::RenderTargetSize(int& w, int& h) const
 {
+    if (_portraitTargetSize) { w = h = _portraitTargetSize; return; }
     if (SSAAActive())
     {
         w = _ssaaW;

@@ -213,6 +213,7 @@ class EngineGL33 : public Engine
     typedef Engine base;
 
   protected:
+    int _portraitTargetSize = 0;
     int _w = 0, _h = 0; // back buffer dimensions
     bool _resetNeeded = false;
     TLVertexTable* _mesh = nullptr; // mesh data used during rendering
@@ -269,6 +270,7 @@ class EngineGL33 : public Engine
 
     void Screenshot(RString filename) override { _pendingScreenshotPath = static_cast<const char*>(filename); }
     void FlushPendingScreenshot() override { CaptureScreenshotIfPending(); }
+    bool CapturePortrait(const std::function<void()>& draw, std::vector<uint8_t>& rgb) override;
     bool CanRestore() { return false; }
 
     void SwitchRenderMode(RenderMode mode)

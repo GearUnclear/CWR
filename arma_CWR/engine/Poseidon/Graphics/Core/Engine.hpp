@@ -17,6 +17,7 @@
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -727,6 +728,8 @@ class Engine : public IGraphicsEngine
     virtual void Deactivate() {}
     virtual void Resize(int x, int y, int w, int h) {}
 
+    // Graphics-thread capture. Callback must restore scene state before returning.
+    virtual bool CapturePortrait(const std::function<void()>& draw, std::vector<uint8_t>& rgb) { return false; }
     virtual void Screenshot(RString filename) {}
     virtual void FlushPendingScreenshot() {}
 

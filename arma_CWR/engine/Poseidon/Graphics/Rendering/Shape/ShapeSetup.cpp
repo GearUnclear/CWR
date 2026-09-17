@@ -88,6 +88,10 @@ Shape::Shape(const Shape& src, bool copyAnimations)
     {
         _phase = src._phase;
     }
+    _colorTop = src._colorTop;
+    _loadWarning = src._loadWarning;
+    _areaOTex = src._areaOTex;
+    _proxy.Resize(src._proxy.Size());
     _minMax[0] = src._minMax[0];
     _minMax[1] = src._minMax[1];
     for (int i = 0; i < _proxy.Size(); i++)

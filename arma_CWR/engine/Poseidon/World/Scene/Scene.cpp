@@ -427,11 +427,9 @@ LightList::LightList(bool staticStorage)
 
 LightList::LightList(const LightList& src)
 {
-    SetStorage(LightStorage.Init(64));
-    Realloc(src.Size());
-    Resize(src.Size());
-    // note: we assume LightList does not need any destruction
-    memcpy(Data(), src.Data(), src.Size() * sizeof(ActiveLightPointer));
+    // Copies outlive scratch-light selection and own their references. A raw
+    // memcpy neither retained the lights nor protected them from scratch reuse.
+    Copy(src.Data(), src.Size());
 }
 
 void Scene::SetActiveLights(const LightList& lights)

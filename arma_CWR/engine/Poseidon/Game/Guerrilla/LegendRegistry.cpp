@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/LegendAppearance.hpp>
 
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/ScriptVars.hpp>
@@ -259,28 +260,6 @@ static RString PickDistinctName(int pool, unsigned long long key, unsigned chann
         }
     }
     return RString(list[start]);
-}
-
-// D2.2: the rolled token is validated against the package rather than trusted.
-// With no config at all (every unit test) the rolled token stands.
-static bool FaceUsable(const char* token, bool bodyIsWoman)
-{
-    const ParamEntry* faces = Pars.FindEntry("CfgFaces");
-    if (!faces)
-    {
-        return true;
-    }
-    const ParamEntry* face = token ? faces->FindEntry(token) : nullptr;
-    if (!face)
-    {
-        return false;
-    }
-    if (face->FindEntry("disabled"))
-    {
-        return false;
-    }
-    const bool woman = face->ReadValue("woman", 0.0f) > 0.5f;
-    return woman == bodyIsWoman;
 }
 
 // The live body behind GM_COMP_OBJ select i, or null.  Market.cpp's idiom.
@@ -967,28 +946,7 @@ bool LegendRegistry::BindRow(int rowIndex, Object* body)
         return false;
     }
 
-    // D2.2: validate the rolled token against the package rather than trust it.
-    // On failure walk the remaining tokens in order, then fall back to "Default",
-    // which Gather reads as "no portrait" so the dossier draws its no-photograph
-    // treatment instead of a wrong head.
-    const bool woman = person->IsWoman();
-    RString face = row.face;
-    if (face.GetLength() == 0 || !FaceUsable(face, woman))
-    {
-        face = RString();
-        for (int i = 0; i < NPortraitFaces; i++)
-        {
-            if (FaceUsable(kPortraitFaces[i], woman))
-            {
-                face = RString(kPortraitFaces[i]);
-                break;
-            }
-        }
-        if (face.GetLength() == 0)
-        {
-            face = "Default";
-        }
-    }
+    const RString face = ResolveLegendFace(Pars.FindEntry("CfgFaces"), row.face, person->IsWoman());
 
     bool changed = false;
     if (strcmp(row.face, face) != 0)

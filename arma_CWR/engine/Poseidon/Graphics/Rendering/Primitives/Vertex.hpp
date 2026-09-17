@@ -129,14 +129,14 @@ protected:
 
 	ClipFlags _orHints, _andHints; // we can do some optimizations based on this
 
-	Vector3 _minMaxOrig[2];
-	Vector3 _bCenterOrig;
-	float _bRadiusOrig;
+	Vector3 _minMaxOrig[2] = {VZero, VZero};
+	Vector3 _bCenterOrig = VZero;
+	float _bRadiusOrig = 0;
 
 	Vector3 _minMax[2];
 	Vector3 _bCenter;
 	float _bRadius;
-	bool _minMaxDirty;
+	bool _minMaxDirty = true;
 
 protected:
 	// constructor helpers
