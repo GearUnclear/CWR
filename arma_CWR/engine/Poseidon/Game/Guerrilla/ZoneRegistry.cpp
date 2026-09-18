@@ -2280,6 +2280,14 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
     CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount);
 }
 
+// a CfgMarkerColors class the installed config overlay defines, else the stock
+// 1.99 colour of the same role (OnColorChanged hard-reads the class)
+static const char* MarkerColorOrStock(const char* preferred, const char* stock)
+{
+    const ParamEntry* colors = Pars.FindEntry("CfgMarkerColors");
+    return colors && colors->FindEntry(preferred) ? preferred : stock;
+}
+
 void ZoneRegistry::UpdateMarkers()
 {
     // mimics setMarkerColor / setMarkerText (GameStateExtWorld.cpp:569,
@@ -2298,10 +2306,12 @@ void ZoneRegistry::UpdateMarkers()
         {
             if (z.contestedLastTick)
             {
-                // one stable contested state - no flashing (ColorWhite is
-                // verified present in the 1.99 CfgMarkerColors; ColorOrange
-                // is not)
-                color = "ColorWhite";
+                // one stable contested state - no flashing.  The stock 1.99
+                // palette has no legible choice for text on the map paper
+                // (ColorWhite is near-invisible, ColorOrange does not exist),
+                // so the UD config overlay (guerrilla-factions.hpp) adds dark
+                // variants; fall back to the stock names without it
+                color = MarkerColorOrStock("ColorGmContested", "ColorWhite");
             }
             else if (stricmp(z.owner, _resistanceSide) == 0)
             {
@@ -2313,7 +2323,8 @@ void ZoneRegistry::UpdateMarkers()
             }
             else
             {
-                color = "ColorYellow"; // NEUTRAL and third parties
+                // NEUTRAL and third parties (ColorYellow is amber-on-paper)
+                color = MarkerColorOrStock("ColorGmNeutral", "ColorYellow");
             }
 
             // progress feedback on the map label; capture % quantized to 10s

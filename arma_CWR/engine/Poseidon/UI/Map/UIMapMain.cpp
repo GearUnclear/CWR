@@ -314,8 +314,11 @@ void CStaticMapMain::DrawMarkers()
                 {
                     break;
                 }
+                // a label that would overprint an earlier marker's label
+                // this frame draws icon-only (ReserveMarkerLabels)
+                RString text = IsMarkerTextHidden(i) ? RString() : Localize(mInfo.text);
                 DrawSign(mInfo.icon, mInfo.color, mInfo.position, mInfo.size * mInfo.a, mInfo.size * mInfo.b,
-                         mInfo.angle * (H_PI / 180.0), Localize(mInfo.text));
+                         mInfo.angle * (H_PI / 180.0), text);
             }
             break;
             case MTRectangle:

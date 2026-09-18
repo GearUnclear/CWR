@@ -483,6 +483,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # UI tests
     UI/Map/test_uiMap.cpp
+    UI/Map/test_map_label_layout.cpp
     UI/Map/test_map_legend_localized.cpp
     UI/Map/test_equipment_localization.cpp
     UI/Controls/test_uiControls.cpp

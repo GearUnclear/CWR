@@ -285,3 +285,25 @@ class CfgGuerrillaFactions
         flag = "\flags\fia.jpg";
     };
 };
+
+// ---------------------------------------------------------------------------
+// Map marker colours for the Guerrilla zone labels (Game/Guerrilla/
+// ZoneRegistry.cpp UpdateMarkers). The stock 1.99 CfgMarkerColors palette has
+// no colour that reads as TEXT on the pale map paper for the two states that
+// are neither green (ours) nor red (theirs): ColorYellow is amber at 0.8 alpha
+// and ColorWhite is a light grey. These dark variants are what the engine
+// picks when they exist; without this overlay it falls back to the stock two.
+// ---------------------------------------------------------------------------
+class CfgMarkerColors
+{
+    class ColorGmNeutral
+    {
+        name = "Neutral (Guerrilla)";
+        color[] = {0.42, 0.24, 0.00, 1};
+    };
+    class ColorGmContested
+    {
+        name = "Contested (Guerrilla)";
+        color[] = {0.55, 0.00, 0.60, 1};
+    };
+};
