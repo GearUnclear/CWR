@@ -37,6 +37,16 @@ phases:
     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
 
 items:
+  - id: portable-classic-runtime
+    title: "Reproduce the Guerrilla runtime from a clone, fresh Classic data and LoBo"
+    phase: foundation
+    status: done
+    gh_issues: []
+    depends_on: []
+    commits: []
+    log:
+      - "2026-09-19: versioned Classic shims, separately licensed Options text and OFL fonts; added validated setup/launch commands, targeted LoBo repairs and a fresh-install guide. Synthetic preflight/backups/reinstall checks pass. Staged real data with all local overlays removed passed QRF menu launch, Sinai and Lebanon boot, Options shell and audio persistence (5/5). Added Windows/Linux installer CI. Local renamed Microsoft fonts are excluded."
+
   # ---------------------------------------------------------------- foundation
   - id: upstream-baseline
     title: "Upstream Bohemia source baseline"

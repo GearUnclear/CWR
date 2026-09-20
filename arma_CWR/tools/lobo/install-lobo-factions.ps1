@@ -38,8 +38,19 @@ $source = [System.IO.Path]::GetFullPath($source)
 if (-not (Test-Path -LiteralPath $source)) { throw "roster header not found: $source" }
 if (-not (Test-Path -LiteralPath $LoBoDir)) { throw "@LoBo folder not found: $LoBoDir" }
 
+Import-Module (Join-Path $PSScriptRoot '../runtime/InstallTree.psm1') -Force
+Assert-PlainPath $LoBoDir
 $binDir = Join-Path $LoBoDir 'bin'
+foreach ($dir in [IO.Directory]::GetDirectories($LoBoDir)) {
+    if ([IO.Path]::GetFileName($dir) -ieq 'bin') { $binDir = $dir; break }
+}
 $target = Join-Path $binDir 'config.cpp'
+if ([IO.Directory]::Exists($binDir)) {
+    foreach ($file in [IO.Directory]::GetFiles($binDir)) {
+        if ([IO.Path]::GetFileName($file) -ieq 'config.cpp') { $target = $file; break }
+    }
+}
+Assert-PlainPath $target
 
 # A mod-level bin\config.cpp REPLACES a bin\config.bin for the config reader
 # (ParseConfigFromDir tries config.cpp first). Stock @LoBo ships no config.bin
@@ -63,7 +74,7 @@ if ($WhatIf) {
     Write-Host "Would write $($content.Length) chars to $target"
     exit 0
 }
-if (-not (Test-Path -LiteralPath $binDir)) { New-Item -ItemType Directory -Path $binDir | Out-Null }
+if (-not (Test-Path -LiteralPath $binDir)) { [void][IO.Directory]::CreateDirectory($binDir) }
 [System.IO.File]::WriteAllText($target, $content, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "Installed: $target ($($content.Length) chars, eight @LoBo rosters)"
 exit 0
