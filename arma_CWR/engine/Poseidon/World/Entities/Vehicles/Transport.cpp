@@ -1603,9 +1603,9 @@ void ResourceSupply::ClearMagazineCargo()
 
 DEFINE_CASTING(VehicleSupply)
 
-VehicleSupply::VehicleSupply(EntityAIType* name, bool fullCreate) : base(name, fullCreate)
+VehicleSupply::VehicleSupply(EntityAIType* name, bool fullCreate, Creation creation) : base(name, fullCreate)
 {
-    if (IsSupply(this))
+    if (creation == Creation::Normal && IsSupply(this))
     {
         _supply = new ResourceSupply(this);
     }

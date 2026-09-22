@@ -73,11 +73,13 @@ void LoadMainMenuStringtable()
 }
 } // namespace
 
-TEST_CASE("GamePage: provider exposes 7 rows + close", "[UI][GamePage]")
+TEST_CASE("GamePage: provider exposes 8 rows + close", "[UI][GamePage]")
 {
     TestableGamePage page;
     auto& p = page.Provider();
-    CHECK(p.RowCount() == 8);
+    CHECK(p.RowCount() == 9);
+    CHECK(std::string(p.RowLabel(7)) == "Clear dossier portrait cache");
+    CHECK(p.RowKind(7) == OptionsScrollList::KindAction);
 }
 
 TEST_CASE("GamePage: row labels include view-distance controls", "[UI][GamePage]")

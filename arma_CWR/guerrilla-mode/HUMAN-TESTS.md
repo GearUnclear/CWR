@@ -1,6 +1,6 @@
 # Human gameplay acceptance suite
 
-The **HUMAN TESTS** action in Showcase opens 41 guided cases (96 steps). These are player-operated acceptance tests of the actual Guerrilla implementation.
+The **HUMAN TESTS** action in Showcase opens 43 guided cases (104 steps). These are player-operated acceptance tests of the actual Guerrilla implementation.
 
 ## Launch
 
@@ -116,5 +116,5 @@ python -m unittest discover -s tests/contracts -p test_human_suite.py -v
 
 The contract enforces shared bootstrap/data and observer ownership, with the road fixture audited separately. Integration tests exercise actual overlay actions, a rejected premature check, real production recruitment, explicit failure/blocking/stopping, staged-demo exclusion, native traffic movement, serialization/rearming and screenshot generation.
 
-Automated confirmations in those tests verify the runner only. **They do not certify that a human completed the 41 gameplay cases or the content matrix.** The original `showcase_smoke` still exercises the staged reel and has its own separate result ledger.
+Automated confirmations in those tests verify the runner only. **They do not certify that a human completed the 43 gameplay cases or the content matrix.** The original `showcase_smoke` still exercises the staged reel and has its own separate result ledger.
 

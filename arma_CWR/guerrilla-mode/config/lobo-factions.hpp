@@ -97,6 +97,10 @@ class CfgGuerrillaFactions
         // town flagpole texture (native TownFlags): without this key the
         // engine's side-WEST default is the US flag - wrong faction here
         flag = "\flags\israel.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "israeli";
     };
 
     class EgyptFrontier // resistance descriptor - side EAST
@@ -176,6 +180,10 @@ class CfgGuerrillaFactions
 
         // town flagpole texture: side-EAST default would be the USSR flag
         flag = "\flags\egypt.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "north_africa";
     };
 
     class EgyptArmy // side EAST - the Egyptian regular army (LoBoEgypt.pbo)
@@ -234,6 +242,10 @@ class CfgGuerrillaFactions
 
         // town flagpole texture: side-EAST default would be the USSR flag
         flag = "\flags\egypt.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "north_africa";
     };
 
     class Syria // side EAST - small roster, two camo families (LoBoSyria.pbo)
@@ -293,6 +305,10 @@ class CfgGuerrillaFactions
         lootSniperMag = "JAM_E762_10mag";
 
         flag = "\flags\syria.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "levant";
     };
 
     class Jordan // side GUER - the mod's only regular army on the resistance side
@@ -370,6 +386,10 @@ class CfgGuerrillaFactions
         lootSniperMag = "LoBo_SR25Mag";
 
         flag = "\flags\jordan.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "levant";
     };
 
     class Hizballah // side EAST - the richest irregular roster in the mod
@@ -465,6 +485,10 @@ class CfgGuerrillaFactions
         // Hizballah is Lebanese; there is no "hizballah" texture in Classic's
         // Flags.pbo, so lebanon.jpg is the correct stand-in.
         flag = "\flags\lebanon.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "lebanon";
     };
 
     class PLO // side GUER - Palestinian irregulars (LoBoTer.pbo, the *R twins)
@@ -529,6 +553,10 @@ class CfgGuerrillaFactions
 
         // no "plo" texture exists; palestine.jpg is in Classic's Flags.pbo
         flag = "\flags\palestine.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "palestine";
     };
 
     class PLO_East // side EAST twin of PLO - the *E LoBoTer roster
@@ -574,5 +602,9 @@ class CfgGuerrillaFactions
         lootSniperMag = "JAM_E762_10mag";
 
         flag = "\flags\palestine.jpg";
+
+        // Legend registry: regional first/last name pool (issue #57). The
+        // nickname tone bank is picked by campaign allegiance, not here.
+        namePool = "palestine";
     };
 };

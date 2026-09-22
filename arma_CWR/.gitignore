@@ -29,6 +29,12 @@ imgui.ini
 !/tests/integration/missions/sound_preload.Demo/sound/
 !/tests/integration/missions/sound_preload.Demo/sound/say.wav
 /tests/integration/missions/**/*.paa
+# Generated dossier imagery is local player data. Runtime cache is outside the
+# installation; optional developer comparisons must never enter source packages.
+/guerrilla-mode/core/portraits/*.paa
+/guerrilla-mode/core/portraits/*.png
+/guerrilla-mode/core/portraits/*.jpg
+/guerrilla-mode/core/portraits/*.tga
 /deploy/creds.txt
 /deploy/**/values-prod.yaml
 /deploy/**/values.prod.yml

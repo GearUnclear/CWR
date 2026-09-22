@@ -123,6 +123,14 @@ class CfgGuerrillaFactions
         // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
         tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
         tierThresholds[] = {3, 5};
+        // The sniper rung, mirroring the shipped EAST roster
+        // (guerrilla-mode/config/guerrilla-factions.hpp): top tier only, so
+        // the native squad composer fields one from WL5. Nothing here runs at
+        // WL5, so the ONE thing this key changes in the test suite is the
+        // enemy Legend lane: a commander is campaign scale and reads the
+        // faction's BEST rung, so guerrilla_legends_place can prove the Sniper
+        // role resolves in game instead of silently skipping it.
+        tiersSniper[] = {"", "", "SoldierESniper"};
         // QRF escort: trucks below WL3, APC from WL3 (qrf.sqs gate)
         vehicles[] = {"Ural", "BMP"};
         vehicleThreshold = 3;

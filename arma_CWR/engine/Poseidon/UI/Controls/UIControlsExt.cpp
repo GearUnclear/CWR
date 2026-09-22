@@ -297,81 +297,6 @@ void CHTMLContainer::AddText(int section, RString text, HTMLFormat format, HTMLA
     }
 }
 
-HTMLField* CHTMLContainer::AddBar(int section, float fill, float w, float h, PackedColor color, PackedColor trackColor,
-                                  HTMLAlign align, float tableWidth)
-{
-    if (section < 0 || section >= _sections.Size())
-    {
-        return nullptr;
-    }
-    HTMLSection& sec = _sections[section];
-    int i = sec.fields.Add();
-    HTMLField& fld = sec.fields[i];
-    fld.format = HFImg;
-    fld.align = align;
-    fld.nextline = false;
-    fld.exclude = false;
-    fld.bottom = false;
-    fld.indent = _indent;
-    fld.tableWidth = tableWidth;
-    fld.texture1 = nullptr;
-    fld.texture2 = nullptr;
-    fld.width = (w > 0 ? w : 0) * (1.0f / 640.0f);
-    fld.height = (h > 0 ? h : 0) * (1.0f / 480.0f);
-    fld.bar = true;
-    saturate(fill, 0.0f, 1.0f);
-    fld.fill = fill;
-    fld.hasColor = true;
-    fld.color = color;
-    fld.trackColor = trackColor;
-    return &fld;
-}
-
-HTMLField* CHTMLContainer::AddRule(int section, float h, PackedColor color)
-{
-    // full page width, minus the current indent
-    float w = (GetPageWidth() - _indent) * 640.0f;
-    return AddBar(section, 1.0f, w, h, color, PackedColor(0, 0, 0, 0));
-}
-
-void CHTMLContainer::SetFormatFont(HTMLFormat format, Font* font, Font* fontBold, float size)
-{
-    if (!font)
-    {
-        return;
-    }
-    if (!fontBold)
-    {
-        fontBold = font;
-    }
-    switch (format)
-    {
-        case HFH1:
-            _fontH1 = font, _fontH1Bold = fontBold, _sizeH1 = size;
-            break;
-        case HFH2:
-            _fontH2 = font, _fontH2Bold = fontBold, _sizeH2 = size;
-            break;
-        case HFH3:
-            _fontH3 = font, _fontH3Bold = fontBold, _sizeH3 = size;
-            break;
-        case HFH4:
-            _fontH4 = font, _fontH4Bold = fontBold, _sizeH4 = size;
-            break;
-        case HFH5:
-            _fontH5 = font, _fontH5Bold = fontBold, _sizeH5 = size;
-            break;
-        case HFH6:
-            _fontH6 = font, _fontH6Bold = fontBold, _sizeH6 = size;
-            break;
-        case HFP:
-            _fontP = font, _fontPBold = fontBold, _sizeP = size;
-            break;
-        default:
-            break;
-    }
-}
-
 Font* CHTMLContainer::GetFormatFont(HTMLFormat format, bool bold) const
 {
     switch (format)
@@ -414,6 +339,79 @@ float CHTMLContainer::GetFormatSize(HTMLFormat format) const
     }
 }
 
+void CHTMLContainer::SetFormatSize(HTMLFormat format, float size)
+{
+    if (size <= 0)
+    {
+        return;
+    }
+    switch (format)
+    {
+        case HFH1:
+            _sizeH1 = size;
+            break;
+        case HFH2:
+            _sizeH2 = size;
+            break;
+        case HFH3:
+            _sizeH3 = size;
+            break;
+        case HFH4:
+            _sizeH4 = size;
+            break;
+        case HFH5:
+            _sizeH5 = size;
+            break;
+        case HFH6:
+            _sizeH6 = size;
+            break;
+        case HFP:
+            _sizeP = size;
+            break;
+        default:
+            break;
+    }
+}
+
+void CHTMLContainer::SetFormatFont(HTMLFormat format, Font* font, Font* fontBold, float size)
+{
+    if (!font)
+    {
+        return;
+    }
+    if (!fontBold)
+    {
+        fontBold = font;
+    }
+    switch (format)
+    {
+        case HFH1:
+            _fontH1 = font, _fontH1Bold = fontBold;
+            break;
+        case HFH2:
+            _fontH2 = font, _fontH2Bold = fontBold;
+            break;
+        case HFH3:
+            _fontH3 = font, _fontH3Bold = fontBold;
+            break;
+        case HFH4:
+            _fontH4 = font, _fontH4Bold = fontBold;
+            break;
+        case HFH5:
+            _fontH5 = font, _fontH5Bold = fontBold;
+            break;
+        case HFH6:
+            _fontH6 = font, _fontH6Bold = fontBold;
+            break;
+        case HFP:
+            _fontP = font, _fontPBold = fontBold;
+            break;
+        default:
+            return;
+    }
+    SetFormatSize(format, size);
+}
+
 // Truncate `buffer` (a file path) in place to its directory part, keeping the
 // trailing separator. Honors both '\\' and '/' so an HTML <img src> base dir
 // resolves whether the host path used Windows ('missions\\...') or
@@ -432,6 +430,44 @@ static void TruncateToDirectory(char* buffer)
     {
         *(++sep) = 0;
     }
+}
+
+namespace
+{
+void SizeHtmlImage(HTMLField& fld, float w, float h)
+{
+    if (fld.texture1)
+    {
+        fld.texture1->SetMaxSize(1024); // no limits
+        if (w < 0)
+        {
+            MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(fld.texture1, 0, 0);
+            if (h < 0)
+            {
+                w = fld.texture1->AWidth();
+                h = fld.texture1->AHeight();
+            }
+            else
+            {
+                w = fld.texture1->AWidth() * h / fld.texture1->AHeight();
+            }
+        }
+        else if (h < 0)
+        {
+            h = fld.texture1->AHeight() * w / fld.texture1->AWidth();
+        }
+
+        fld.width = w * (1.0 / 640.0);
+        fld.height = h * (1.0 / 480.0);
+    }
+    else
+    {
+        fld.width = (w > 0 ? w : h) * (1.0 / 640.0);
+        fld.height = (h > 0 ? h : w) * (1.0 / 480.0);
+        saturateMax(fld.width, 0);
+        saturateMax(fld.height, 0);
+    }
+}
 }
 
 HTMLField* CHTMLContainer::AddImage(int section, RString image, HTMLAlign align, bool bottom, float w, float h,
@@ -559,37 +595,32 @@ HTMLField* CHTMLContainer::AddImage(int section, RString image, HTMLAlign align,
         fld.texture2 = fld.texture1;
         I_AM_ALIVE();
     }
-    if (fld.texture1)
-    {
-        fld.texture1->SetMaxSize(1024); // no limits
-        if (w < 0)
-        {
-            MipInfo mip = GLOB_ENGINE->TextBank()->UseMipmap(fld.texture1, 0, 0);
-            if (h < 0)
-            {
-                w = fld.texture1->AWidth();
-                h = fld.texture1->AHeight();
-            }
-            else
-            {
-                w = fld.texture1->AWidth() * h / fld.texture1->AHeight();
-            }
-        }
-        else if (h < 0)
-        {
-            h = fld.texture1->AHeight() * w / fld.texture1->AWidth();
-        }
+    SizeHtmlImage(fld, w, h);
+    return &fld;
+}
 
-        fld.width = w * (1.0 / 640.0);
-        fld.height = h * (1.0 / 480.0);
-    }
-    else
-    {
-        fld.width = (w > 0 ? w : h) * (1.0 / 640.0);
-        fld.height = (h > 0 ? h : w) * (1.0 / 480.0);
-        saturateMax(fld.width, 0);
-        saturateMax(fld.height, 0);
-    }
+HTMLField* CHTMLContainer::AddImage(int section, Texture* texture, HTMLAlign align, bool bottom, float w, float h,
+                                    RString href, RString text, float tableWidth)
+{
+    if (section < 0 || section >= _sections.Size())
+        return nullptr;
+    HTMLSection& sec = _sections[section];
+    HTMLField& fld = sec.fields[sec.fields.Add()];
+    fld.format = HFImg;
+    fld.align = align;
+    fld.nextline = false;
+    fld.exclude = false;
+    fld.text = text;
+    fld.href = href;
+    fld.bottom = bottom;
+    fld.indent = _indent;
+    fld.tableWidth = tableWidth;
+    fld.hasColor = _hasFieldColor;
+    if (_hasFieldColor)
+        fld.color = _fieldColor;
+    fld.texture1 = texture;
+    fld.texture2 = texture;
+    SizeHtmlImage(fld, w, h);
     return &fld;
 }
 
@@ -1942,6 +1973,33 @@ void CHTMLContainer::CopySection(int from, int to)
 
 void CHTMLContainer::FormatSection(int s)
 {
+    FormatSectionRows(s);
+    SplitSection(s);
+}
+
+// UD: drop fields[nFields..) and the rows, so the section can be laid again
+// (the Guerrilla journal moves the cut blocks onto a continuation page)
+void CHTMLContainer::TruncateSection(int s, int nFields)
+{
+    if (s < 0 || s >= _sections.Size())
+    {
+        return;
+    }
+    HTMLSection& section = _sections[s];
+    if (nFields < 0)
+    {
+        nFields = 0;
+    }
+    if (nFields < section.fields.Size())
+    {
+        section.fields.Resize(nFields);
+    }
+    section.rows.Clear();
+}
+
+// UD: the wrap half of FormatSection, without the SplitSection pagination
+void CHTMLContainer::FormatSectionRows(int s)
+{
     float maxLineWidth = GetPageWidth();
     float minHeight = _sizeP;
 
@@ -2204,8 +2262,6 @@ void CHTMLContainer::FormatSection(int s)
             section.rows.Delete(r);
         }
     }
-
-    SplitSection(s);
 }
 
 void CHTMLContainer::SplitSection(int s)
@@ -2261,7 +2317,11 @@ void CHTMLContainer::SplitSection(int s)
             checkHeight += source.rows[i + 1].height;
         }
         // next page?
-        if (checkHeight > pageHeight)
+        // UD: never break before the first row.  A first row taller than the
+        // reduced page (GetPageHeight() - 3.5 * _sizeP, e.g. an oversized image
+        // row) used to read source.rows[-1].lastField here; it now simply
+        // overflows page 0 and the break lands in front of the next row.
+        if (checkHeight > pageHeight && i > 0)
         {
             // complete old page
             int lastField = source.rows[i - 1].lastField;

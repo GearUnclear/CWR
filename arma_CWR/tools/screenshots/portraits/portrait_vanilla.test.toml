@@ -1,0 +1,33 @@
+# Portrait shoot, VANILLA lane: the nine Legend bodies the two stock faction
+# descriptors can produce, at the four kPortraitFaces tokens.  36 captures.
+#
+# Not a regression test.  It lives outside tests/integration/ on purpose so a
+# `tri test tests/integration` sweep never picks it up; run it explicitly when
+# the faction library grows a class the catalogue does not cover, then feed the
+# output through tools/screenshots/portrait_process.py.
+#
+#   tri test tools/screenshots/portraits/portrait_vanilla.test.sqf
+#   python tools/screenshots/portrait_process.py <outdir> vanilla
+#
+# PRECONDITIONS: the full CWA 1.99 install as the data dir.  AddOns/Noe.pbo is
+# where the "noe" world comes from and the Demo package does not ship Nogova.
+# No mods: every class in this lane is base-game.
+#
+# Stories.Noe rather than a new mission because it is already the vanilla
+# shoot's mission - a booted world and one live player to hang a camera off,
+# and deliberately nothing else that could wander into a frame.
+mission = "tools/screenshots/missions/Stories.Noe"
+binary = "PoseidonGame"
+tags = ["showcase", "full_cwa", "headful", "exclusive"]
+timeout = 2400
+assert_timeout = 600
+# 1280x960 is the capture size, and it is 4:3 on purpose: the portrait crop is a
+# square taken out of the middle of the frame, so a 16:9 capture would spend
+# most of its pixels on ground the crop throws away.  --no-strict for parity
+# with the other shoots; a photography run should not die on a stray warning.
+extra_args = [
+    "--dev",
+    "--no-strict",
+    "--width", "1280",
+    "--height", "960",
+]

@@ -278,6 +278,7 @@ void AlertMachine::EvaluateAlert(const AlertTickInputs& in, float dt, ZoneRegist
             AlertEventRecord ev;
             ev.type = AEUndercoverBroken;
             ev.reason = uc.reason;
+            ev.zoneIndex = nearest; // the zone the diary line is about
             fired.Add(ev);
         }
         else if (nearest >= 0)
@@ -651,8 +652,12 @@ void AlertMachine::DispatchEvents(const AutoArray<AlertEventRecord>& fired, cons
         }
         else
         {
-            pars.Resize(1);
+            // [reason, zoneName]: the zone nearest the witness, so the diary
+            // line can carry it; "" when the registry holds no zones
+            const ZoneRecord* z = ev.zoneIndex >= 0 ? registry.GetZone(ev.zoneIndex) : nullptr;
+            pars.Resize(2);
             pars[0] = GameStringType(ev.reason);
+            pars[1] = GameStringType(z ? z->name : RString());
         }
 
         // dispatch idiom copied from ZoneRegistry::DispatchEvents

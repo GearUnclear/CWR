@@ -21,6 +21,8 @@ From `arma_CWR/`:
 | `lobo_sinai_stories` | @LoBo narrative frames: ambush, firefight, checkpoint, aftermath, night contact |
 | `vanilla_malden_stories` | Stock game on Malden, no mods — same rig, same discipline |
 | `noe_stories` | Stock game on **Nogova**, no mods: forest-road ambush, farm-village firefight, villagers, checkpoint and armour among the concrete blocks. Boots `missions/Stories.Noe`, a two-object mission that exists only to hang a camera off |
+| `portraits/portrait_vanilla` | Dossier portraits, stock roster: the nine Legend bodies the two vanilla faction descriptors can produce, at four faces each. Generated from `portrait_roster.py`; see `guerrilla-mode/core/portraits/README.md` |
+| `portraits/portrait_lobo` | The same for @LoBo's 23 Legend bodies. Must run against the real Classic install, not the shadow: `--mods-dir ".."` resolves against the game's own working directory and the shadow has no `@LoBo` sibling |
 | `probe_props` | Diagnostic: spawns each static scenery prop alone to find the ones that crash the renderer |
 | `probe_aim` | Diagnostic: proves the captive `reveal`+`doFire` aimed-fire mechanism the firing scenes use, and measures which men actually shoot (ammo deltas come back through a deliberately-failing assert) |
 
@@ -119,13 +121,43 @@ works on a 7 m quay or a 280 m hilltop. Do not trust authored elevations: the
 `Guerrilla.Sinai` zone config claims 160 m at the Camp where the ground is 64.7 m.
 
 **A cutscene camera is still created, purely to kill the HUD.** The gameplay HUD
-(ammo counter, action menu, crosshair) is gated on `!GWorld->GetCameraEffect()`
-(`DisplayUIMenus.cpp:974`). Without an active camera effect every frame is stamped
-with UI. Its own framing is irrelevant — `triSetView` overrides it.
+(ammo counter, action menu, crosshair) is gated on `_ui && IsUIEnabled() && !_cameraEffect`
+in `World::Draw` (`engine/Poseidon/World/World.cpp:1603`). Without an active camera
+effect every frame is stamped with UI. Its own framing is irrelevant, because
+`triSetView` overrides it.
 
 **`triScreenshot` must be given a string literal.** The runner parses the literal
 out of the statement to maintain its own sequence counter, so a `format [...]`
 label desyncs it and the run dies on `FAIL:screenshot_not_written`.
+
+### Where in the frame the capture is taken
+
+`triScreenshot` has two capture points and the shoot chooses which one it wants.
+
+**Default (mid-frame, pre-gamma).** `TriScreenshot` calls `Screenshot(path)` and
+then `FlushPendingScreenshot()` in the same statement, so the readback happens
+where the script runs: whatever is in the default framebuffer at that instant.
+That is *before* this frame's `ApplyGammaPass` and before `DebugOverlay::Render`
+(`EngineGL33::BackToFront`). The default gamma is 1.2 and the gamma pass only
+short-circuits between 0.999 and 1.001, so a default capture is genuinely darker
+and more contrasty than the frame the player is shown. Every shoot in this
+directory, and every other integration lane that screenshots, is on this mode and
+is calibrated on those pixels.
+
+**`triCaptureAtPresent true` (presented frame).** `TriScreenshot` then only
+enqueues the path, and `BackToFront` writes the file at the next swap through
+`CaptureScreenshotIfPending`: after the gamma pass, after the overlay, the exact
+pixels about to be presented. Only the Guerrilla journal portrait shoot uses this,
+because it calibrates a tone recipe on the capture and has to calibrate it on what
+a player would see. Turn it back off (`triCaptureAtPresent false`) if the same
+lane later takes an ordinary capture. The runner needs no change: it already polls
+for the file after the statement and holds the next statement until it appears, so
+two deferred captures cannot race for the single pending path.
+
+**Either way, a scene change and its capture must not share a statement.** The
+deferred mode moves the capture to the end of the frame, not to a later frame: the
+sim still has to run for a pose, a mimic or a camera commit to settle. Keep a
+`triSimFrames` between the change and the `triScreenshot`, exactly as before.
 
 ## Harness notes
 

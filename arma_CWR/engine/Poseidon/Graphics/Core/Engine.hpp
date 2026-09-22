@@ -17,6 +17,7 @@
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -382,6 +383,8 @@ class Engine : public IGraphicsEngine
     // and rebuild the GL infrastructure, keeping the window + device alive. Used
     // by the in-process mod re-mount; default no-op for headless backends.
     virtual void ResetForRemount() {}
+    // Rebuild all device resources; also exposed to the development harness.
+    virtual bool ResetHard() { return false; }
     void FogColorChanged(ColorVal fogColor) override = 0;
 
     bool SwitchRes(int w, int h, int bpp) override = 0; // switch to resolution nearest to w,h
@@ -727,6 +730,8 @@ class Engine : public IGraphicsEngine
     virtual void Deactivate() {}
     virtual void Resize(int x, int y, int w, int h) {}
 
+    // Graphics-thread capture. Callback must restore scene state before returning.
+    virtual bool CapturePortrait(const std::function<void()>& draw, std::vector<uint8_t>& rgb) { return false; }
     virtual void Screenshot(RString filename) {}
     virtual void FlushPendingScreenshot() {}
 

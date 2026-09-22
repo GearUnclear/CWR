@@ -228,7 +228,8 @@ struct V3RewriteEntry
     int v3Keys[2]; // legacy packed KB&M codes; -1 = unused slot
 };
 
-constexpr V3RewriteEntry kV3Rewrites[] = {
+// UserAction is a non-literal enum wrapper on non-MSVC platforms.
+const V3RewriteEntry kV3Rewrites[] = {
     {UAOptics, {SDL_SCANCODE_V, SDL_SCANCODE_KP_0}},
     {UALockTarget, {INPUT_DEVICE_MOUSE + 1, -1}},
     {UAWatch, {SDL_SCANCODE_T, -1}},

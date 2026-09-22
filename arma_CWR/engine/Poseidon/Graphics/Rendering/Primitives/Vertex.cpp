@@ -110,6 +110,21 @@ void VertexTable::Init(int nPos)
 
 void VertexTable::DoConstruct(const VertexTable& src)
 {
+    _buffer.Free(); // A private copy must upload its own animated vertices.
+    _orig = src._orig;
+    _origNorm = src._origNorm;
+    _origClip = src._origClip;
+#if USE_QUADS
+    _origQ = src._origQ;
+    _origNormQ = src._origNormQ;
+    _posQ = src._posQ;
+    _normQ = src._normQ;
+#endif
+    _minMaxOrig[0] = src._minMaxOrig[0];
+    _minMaxOrig[1] = src._minMaxOrig[1];
+    _bCenterOrig = src._bCenterOrig;
+    _bRadiusOrig = src._bRadiusOrig;
+    _minMaxDirty = src._minMaxDirty;
     _tex = src._tex;
     _pos = src._pos;
     _clip = src._clip;

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/UI/Options/GamePage.hpp>
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -85,6 +86,7 @@ void GamePage::Unmount(OptionsShell& shell)
 
 const char* GamePage::GameProvider::RowLabel(int row) const
 {
+    if (row == kRowClearPortraits) return "Clear dossier portrait cache";
     switch (row)
     {
         case kRowTextLanguage:
@@ -108,6 +110,7 @@ const char* GamePage::GameProvider::RowLabel(int row) const
 
 const char* GamePage::GameProvider::RowDescription(int row) const
 {
+    if (row == kRowClearPortraits) return "Remove locally generated photographs. They are prepared again when needed.";
     switch (row)
     {
         case kRowTextLanguage:
@@ -243,8 +246,14 @@ void GamePage::GameProvider::SetRowValue(int row, int value)
     }
 }
 
+void GamePage::GameProvider::OnRowAction(int row, Display&)
+{
+    if (row == kRowClearPortraits) Guerrilla::PortraitService::Instance().ClearCache();
+}
+
 OptionsScrollList::Kind GamePage::GameProvider::RowKind(int row) const
 {
+    if (row == kRowClearPortraits) return OptionsScrollList::KindAction;
     if (row == kRowViewDistance)
         return OptionsScrollList::KindSlider;
     if (row == kRowBlood || row == kRowSubtitles || row == kRowRadioSubtitles || row == kRowRespectMissionViewDistance)

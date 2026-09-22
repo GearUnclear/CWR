@@ -1002,6 +1002,8 @@ class LODShapeWithShadow: public LODShape
 
 	public:
 	LODShapeWithShadow();
+	// Clone the prepared geometry without sharing mutable animation buffers.
+	explicit LODShapeWithShadow(const LODShapeWithShadow& src) : LODShape(src, true) { _name = src._name; }
 	LODShapeWithShadow
 	(
 		const char *name, bool reversed=false

@@ -18,7 +18,30 @@ function Assert-PlainPath {
 function Sync-InstallTree {
     param([Parameter(Mandatory)][string]$Source,
           [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$OwnerRoot)
+          [Parameter(Mandatory)][string]$OwnerRoot,
+          [string[]]$ExcludeRelativeDirectories = @())
+    # Literal source-relative subtrees: never copy or prune their destination contents.
+    $excluded = @(foreach ($entry in $ExcludeRelativeDirectories) {
+        $relative = $entry.Replace('\', '/')
+        $parts = $relative.Split('/')
+        if ([string]::IsNullOrWhiteSpace($relative) -or $relative.Contains(':') -or
+            $parts -contains '' -or $parts -contains '.' -or $parts -contains '..') {
+            throw "Excluded directory must be a normalized relative path: $entry"
+        }
+        $relative
+    })
+    $isExcluded = {
+        param([string]$Relative, [bool]$IncludeAncestors = $false)
+        $normalized = $Relative.Replace('\', '/')
+        foreach ($entry in $excluded) {
+            if ($normalized.Equals($entry, [StringComparison]::OrdinalIgnoreCase) -or
+                $normalized.StartsWith($entry + '/', [StringComparison]::OrdinalIgnoreCase) -or
+                ($IncludeAncestors -and $entry.StartsWith($normalized + '/', [StringComparison]::OrdinalIgnoreCase))) {
+                return $true
+            }
+        }
+        return $false
+    }
     $src = [IO.Path]::GetFullPath($Source)
     $dst = [IO.Path]::GetFullPath($Destination)
     $owner = [IO.Path]::GetFullPath($OwnerRoot).TrimEnd('/','\') + [IO.Path]::DirectorySeparatorChar
@@ -38,6 +61,7 @@ function Sync-InstallTree {
     [void][IO.Directory]::CreateDirectory($dst)
     foreach ($item in Get-ChildItem -LiteralPath $src -Recurse -Force) {
         $relative = $item.FullName.Substring($src.TrimEnd('/','\').Length + 1)
+        if (& $isExcluded $relative) { continue }
         $target = Join-Path $dst $relative
         if ($item.PSIsContainer) { [void][IO.Directory]::CreateDirectory($target) }
         else {
@@ -48,6 +72,7 @@ function Sync-InstallTree {
     # Children before parents; these resolved targets are all inside $dst.
     foreach ($item in Get-ChildItem -LiteralPath $dst -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending) {
         $relative = $item.FullName.Substring($dst.TrimEnd('/','\').Length + 1)
+        if (& $isExcluded $relative $true) { continue }
         if (-not (Test-Path -LiteralPath (Join-Path $src $relative))) {
             Remove-Item -LiteralPath $item.FullName -Force
         }

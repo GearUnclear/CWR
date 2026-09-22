@@ -40,6 +40,11 @@ triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
 triAssertEq [(typeOf (GM_COMP_OBJ select 0)), "SoldierGFakeC"]
 
 // -- write the binary save into the shared UserDir/Saved/Tmp/gout.fps ---------
+// Persist the exact prepared appearance alongside this test's saved sentinels.
+gmSavedPhotoRows = []
+gmPhotoI = 0
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; triAssertEq [gmPhotoRow select 3, 2]; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+
 triAssertEq [(triSaveGame "gout"), "OK"]
 
 triEndTest

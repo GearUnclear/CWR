@@ -278,7 +278,8 @@ if (-not (Test-Path -LiteralPath $coreRoot -PathType Container)) {
     throw "Script core source not found: $coreRoot"
 }
 $coreDest = Join-Path $GameDir 'gmcore'
-Sync-InstallTree -Source $coreRoot -Destination $coreDest -OwnerRoot $GameDir
+# Developer portraits are not runtime assets; the game maintains its own external cache.
+Sync-InstallTree -Source $coreRoot -Destination $coreDest -OwnerRoot $GameDir -ExcludeRelativeDirectories @('portraits')
 Write-Output "Installed: script core -> $coreDest"
 
 # ---- 3. world discovery ---------------------------------------------------

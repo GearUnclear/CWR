@@ -864,6 +864,7 @@ TEST_CASE("AlertMachine - undercover compromise drain", "[game][guerrilla]")
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 1);
         REQUIRE(Str(fired[fired.Size() - 1].reason) == "weapon");
+        REQUIRE(fired[fired.Size() - 1].zoneIndex == 1);       // the diary tags its line with this zone
         REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f)); // GM_AL_HEAT_BREAK
         REQUIRE(f.registry.GetZone(0)->heat == Approx(0.0f));  // not the nearest
     }
@@ -885,6 +886,7 @@ TEST_CASE("AlertMachine - undercover compromise drain", "[game][guerrilla]")
         f.machine.EvaluateAlert(in, 5.0f, f.registry, fired);
         REQUIRE(CountBroken(fired) == 1);
         REQUIRE(Str(fired[fired.Size() - 1].reason) == "vehicle");
+        REQUIRE(fired[fired.Size() - 1].zoneIndex == 1);
         REQUIRE(f.registry.GetZone(1)->heat == Approx(25.0f));
         REQUIRE(f.registry.GetZone(0)->heat == Approx(8.0f));
     }

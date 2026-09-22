@@ -18,7 +18,8 @@ RString GetUserDirectory();
 
 using namespace Foundation;
 DEFINE_CASTING(Person)
-Person::Person(VehicleType* name, bool fullCreate) : base(name, fullCreate), _sensorRowID(-1), _remotePlayer(1)
+Person::Person(VehicleType* name, bool fullCreate, Creation creation)
+    : base(name, fullCreate, creation), _sensorRowID(-1), _remotePlayer(1)
 {
     _info._rank = RankPrivate;
     _info._experience = 0;

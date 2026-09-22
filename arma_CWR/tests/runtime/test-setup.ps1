@@ -51,6 +51,7 @@ try {
     foreach ($rel in @('gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','Missions/Guerrilla.Sinai/mission.sqm','fonts/OFL.txt','BIN/UD_OPTIONS_APL-SA_NOTICE.txt')) {
         Assert (Test-Path -LiteralPath (Join-Path $game $rel)) "Missing installed output: $rel"
     }
+    Assert (-not (Test-Path -LiteralPath (Join-Path $game 'gmcore/portraits'))) 'Developer portrait directory installed'
     $extra = [IO.File]::ReadAllText((Join-Path $game 'BIN/config-extra.cpp'))
     Assert ($extra.Contains('// unrelated package configuration')) 'Existing package config lost'
     Assert ($extra.Contains('#include "guerrilla-factions.hpp"')) 'Faction include missing'
@@ -59,9 +60,11 @@ try {
     Assert ($backup.Count -eq 1) 'Expected original menu backup'
     Assert ([IO.File]::ReadAllText($backup[0].FullName) -eq '// preserve this override in backup') 'Wrong backup contents'
     Put (Join-Path $game 'gmcore/stale.sqs') 'stale core'
+    Put (Join-Path $game 'gmcore/portraits/local.png') 'existing local image'
     Put (Join-Path $game 'Missions/Guerrilla.Demo/stale.sqs') 'world no longer available'
     & $setup -GameDir $game -LoBoDir $lobo -Tools $doctor
     Assert (-not (Test-Path -LiteralPath (Join-Path $game 'gmcore/stale.sqs'))) 'Stale core survived'
+    Assert ([IO.File]::ReadAllText((Join-Path $game 'gmcore/portraits/local.png')) -eq 'existing local image') 'Excluded local image changed'
     Assert (-not (Test-Path -LiteralPath (Join-Path $game 'Missions/Guerrilla.Demo'))) 'Unavailable template survived'
     Assert (Test-Path -LiteralPath (Join-Path $game 'Missions/MyMission.Abel/mission.sqm')) 'Unrelated mission lost'
     $extra = [IO.File]::ReadAllText((Join-Path $game 'BIN/config-extra.cpp'))
@@ -74,6 +77,42 @@ try {
     }
     Import-Module (Join-Path $repo 'tools/runtime/InstallTree.psm1') -Force
     Expect-Failure { Sync-InstallTree -Source (Join-Path $repo 'guerrilla-mode/core') -Destination $scratch -OwnerRoot $game } 'outside the owned'
+    # Populated developer sources are ignored even when Git does not track their images.
+    $source = Join-Path $scratch 'core-source'
+    $mirror = Join-Path $game 'mirror-fixture'
+    $cache = Join-Path $scratch 'external-cache/portraits/photo.png'
+    Put (Join-Path $source 'portraits/generated.png') 'must not install'
+    Put (Join-Path $source 'portraits/catalogue.json') 'must not install'
+    Put (Join-Path $source 'scripts/portraits/keep.sqs') 'nested name stays'
+    Put (Join-Path $source 'portraits-extra/keep.sqs') 'prefix stays'
+    Put (Join-Path $source 'init.sqs') 'new core'
+    Put (Join-Path $mirror 'stale.sqs') 'old core'
+    Put $cache 'external cached image'
+    Sync-InstallTree -Source $source -Destination $mirror -OwnerRoot $game -ExcludeRelativeDirectories @('portraits')
+    Assert (-not (Test-Path -LiteralPath (Join-Path $mirror 'portraits'))) 'Generated portraits copied'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $mirror 'stale.sqs'))) 'Normal stale file survived exclusion'
+    foreach ($rel in @('init.sqs','scripts/portraits/keep.sqs','portraits-extra/keep.sqs')) {
+        Assert (Test-Path -LiteralPath (Join-Path $mirror $rel)) "Exclusion too broad: $rel"
+    }
+    Put (Join-Path $mirror 'portraits/generated.png') 'preserve destination'
+    Sync-InstallTree -Source $source -Destination $mirror -OwnerRoot $game -ExcludeRelativeDirectories @('portraits')
+    Assert ([IO.File]::ReadAllText((Join-Path $mirror 'portraits/generated.png')) -eq 'preserve destination') 'Excluded image overwritten'
+    # Source archives omit portraits entirely. Preserve excluded destinations there too.
+    $archiveSource = Join-Path $scratch 'archive-source'
+    Put (Join-Path $archiveSource 'init.sqs') 'archive core'
+    Put (Join-Path $mirror 'optional/portraits/old.png') 'nested excluded image'
+    Sync-InstallTree -Source $archiveSource -Destination $mirror -OwnerRoot $game -ExcludeRelativeDirectories @('portraits','optional/portraits')
+    Assert ([IO.File]::ReadAllText((Join-Path $mirror 'portraits/generated.png')) -eq 'preserve destination') 'Absent-source exclusion pruned'
+    Assert (Test-Path -LiteralPath (Join-Path $mirror 'optional/portraits/old.png')) 'Excluded ancestor pruned'
+    Assert ([IO.File]::ReadAllText($cache) -eq 'external cached image') 'External cache changed'
+    foreach ($invalid in @('../portraits','/portraits','C:\portraits','portraits/../scripts','')) {
+        Expect-Failure { Sync-InstallTree -Source $source -Destination $mirror -OwnerRoot $game -ExcludeRelativeDirectories @($invalid) } 'normalized relative path'
+    }
+    # Other users of the helper retain ordinary mirror semantics without exclusions.
+    $plainMirror = Join-Path $game 'plain-mirror'
+    Sync-InstallTree -Source $source -Destination $plainMirror -OwnerRoot $game
+    Assert (Test-Path -LiteralPath (Join-Path $plainMirror 'portraits/generated.png')) 'Default mirror unexpectedly excludes portraits'
+    Write-Output 'PASS: literal portrait exclusions, populated and archive sources, preserved local images and external cache.'
     Write-Output 'PASS: preflight, dry run, bracketed paths, case handling, backups, missions, LoBo factions, hashes and repeat install.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($scratch)

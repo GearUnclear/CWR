@@ -40,6 +40,8 @@ class ProgressSystem
 	const ProgressSystem &operator = ( const ProgressSystem &src );
 
 	public:
+	RString Title() const { return _progressTitle; }
+	void SetTitle(RString title) { _progressTitle = title; }
 	void Reset();
 	void Add( float ammount ); // calculate total estimation
 	void Advance( float ammount ); // really advance

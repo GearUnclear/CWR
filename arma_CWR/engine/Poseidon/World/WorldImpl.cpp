@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Game/Guerrilla/AssailantSystem.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
@@ -10,6 +11,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
@@ -2118,6 +2120,31 @@ LSError World::Serialize(ParamArchive& ar, int message)
         PARAM_CHECK(ar.Serialize("GuerrillaMarket", Guerrilla::Market::Instance(), 14))
     }
 
+    // Guerrilla campaign Legends: stable character ids, earned five-slot names,
+    // appearances, generated history and (Change 3) the three enemy commanders.
+    // UNLIKE GuerrillaJournal / GuerrillaStashes above, this block's ABSENCE is
+    // the old-save discriminator, so it must never be gated on row emptiness: an
+    // empty AutoArray writes no subclass and a seeded campaign that has not met
+    // a companion yet would then be mistaken for a pre-Legend save.  The gate is
+    // HasState() (the serialized _seeded flag), NOT IsSeeded(): a campaign
+    // derived from a pre-Legend save has no seed but still holds rows and deeds
+    // worth saving, and gating on the seed would re-derive it on every load.
+    // GGameState is serialized earlier in this same pass, so on PassSecond
+    // GM_COMP_NAMES/XP/RANK/ALIVE are fully restored and GM_COMP_OBJ's handles
+    // are already resolved - which is what makes DeriveFromExistingSave possible.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::LegendRegistry::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::LegendRegistry::Instance().HasState() : ar.IsSubclass("GuerrillaLegends"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaLegends", Guerrilla::LegendRegistry::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        Guerrilla::LegendRegistry::Instance().DeriveFromExistingSave();
+    }
+
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))
     PARAM_CHECK(ar.Serialize("wantedOvercast", _wantedOvercast, 1))
     PARAM_CHECK(ar.Serialize("actualFog", _actualFog, 1))
@@ -2316,6 +2343,12 @@ LSError World::Serialize(ParamArchive& ar, int message)
         Shapes.OptimizeAll();
         LOG_DEBUG(Core, "LOAD: Shapes.OptimizeAll {}ms", GetTickCount() - tOpt);
 
+        Guerrilla::PortraitService::Instance().Teardown();
+        if (!Guerrilla::PrepareCampaignPortraits())
+        {
+            ProgressFinish();
+            return LSUnknownError;
+        }
         DisplayMap* map = dynamic_cast<DisplayMap*>((AbstractOptionsUI*)_map);
         if (map)
         {

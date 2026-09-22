@@ -80,14 +80,14 @@ enum AlertState
 enum AlertEventType
 {
     AEAlertChanged,     // _this = [zoneIndex, zoneName, oldState, newState]
-    AEUndercoverBroken, // _this = [reason]
+    AEUndercoverBroken, // _this = [reason, zoneName] (zone nearest the witness; "" with no zones)
     NAlertEventTypes
 };
 
 struct AlertEventRecord
 {
     AlertEventType type;
-    int zoneIndex = -1; // alertChanged only
+    int zoneIndex = -1; // alertChanged: the zone; undercoverBroken: the zone nearest the witness (-1 none)
     int oldState = ASGreen;
     int newState = ASGreen;
     RString reason; // undercoverBroken only

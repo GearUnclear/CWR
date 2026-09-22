@@ -57,6 +57,7 @@ struct JournalEntry
     RString text;
     RString zone;       // zone the line is about ("" when none)
     int kind = JKPlain; // JournalEntryKind
+    RString charId;     // LegendRow::id the line is about ("" when none)
 
     LSError Serialize(ParamArchive& ar);
 };
@@ -95,8 +96,11 @@ class Journal : public SerializeClass
     void InitMission(); // Clear; no config of its own
 
     // diary -----------------------------------------------------------------
-    // appends (stamp may be empty); no-op on empty text
-    void AddEntry(RString stamp, RString text, RString zone = RString(), int kind = JKPlain);
+    // appends (stamp may be empty); no-op on empty text.  charId attributes the
+    // line to a Legend registry row so a character's record can be filtered by
+    // id alone, never by matching a name inside the text.
+    void AddEntry(RString stamp, RString text, RString zone = RString(), int kind = JKPlain,
+                  RString charId = RString());
     static int EntryKindFromName(const char* name); // "plain|good|warn|danger", -1 unknown
     int EntryCount() const { return _entries.Size(); }
     const JournalEntry& Entry(int i) const { return _entries[i]; } // 0 = oldest
@@ -121,6 +125,12 @@ class Journal : public SerializeClass
     bool IsEmpty() const { return _entries.Size() == 0 && _objectives.Size() == 0 && _status.Size() == 0; }
     // bumped on every mutation and on load; the map compares it to repaint
     unsigned Revision() const { return _revision; }
+    // revision-only bump: nothing in the journal changed, but something the
+    // dossier renders did (an earned name, a new deed, a death), so the open map
+    // has to repaint once.  The LegendRegistry is the only caller - the journal
+    // itself never needs it, because every one of its own mutations bumps the
+    // revision on the way past.
+    void Touch() { _revision++; }
 
     // save/load (plain values, single pass)
     LSError Serialize(ParamArchive& ar) override;

@@ -1,3 +1,4 @@
+#include <Poseidon/Game/Guerrilla/PortraitService.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
@@ -77,6 +78,9 @@ void RenderFrame(float deltaT, bool enableDraw)
         GSoundsys->SetSimulationRunning(GWorld->IsSimulationEnabled());
     GWorld->Simulate(deltaT, enableDraw);
 
+    // Late appearances continue preparing even after their dossier is closed.
+    if (enableDraw && GEngine && GEngine->IsAbleToDraw())
+        Guerrilla::PortraitService::Instance().Advance();
     GApp->m_forceRender = false;
 
 #if _ENABLE_CHEATS

@@ -280,6 +280,7 @@ class ParamClass : public ParamEntry
 
     int GetEntryCount() const override { return _entries.Size(); }
     const ParamEntry& GetEntry(int i) const override { return *_entries[i]; }
+    const ParamClass* GetBase() const { return _base; }
     const char* GetBaseName() const { return _base.NotNull() ? _base->GetName() : nullptr; }
 
     bool IsDerivedFrom(const ParamClass& parent) const;

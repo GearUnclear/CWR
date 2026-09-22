@@ -59,6 +59,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
@@ -1726,6 +1727,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla dealer market - inactive without CfgGuerrillaMarket or
         // the registry; throttles itself to Market::TickInterval.
         Guerrilla::Market::Instance().Simulate(deltaT);
+        // Guerrilla Legend registry - inactive with the zone registry; seeds the
+        // campaign identity set on its first active tick, then observes the
+        // GM_COMP_* arrays at LegendRegistry::TickInterval.
+        Guerrilla::LegendRegistry::Instance().Simulate(deltaT);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 
