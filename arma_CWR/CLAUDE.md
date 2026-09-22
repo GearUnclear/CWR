@@ -74,6 +74,12 @@ Configure-preset families (suffix = build type): `*-clang-dbg` (Debug), `*-clang
 
 ## Run
 
+For a fresh Classic + LoBo installation, use `setup-guerrilla.ps1` followed by
+`play-guerrilla.ps1`, with explicit data/mod/binary paths. See
+[`guerrilla-mode/FRESH-INSTALL.md`](guerrilla-mode/FRESH-INSTALL.md). The runtime
+shims and licensed UI/font payload now have tracked sources; do not restore the
+old local Microsoft-font workaround. The older launchers below remain available.
+
 `run-game.ps1` (repo root) is the fast path to eyeball a change: it handles the
 toolchain-on-PATH gotcha, does an incremental `PoseidonGame`-target build, and launches
 the exe windowed against the game data dir.

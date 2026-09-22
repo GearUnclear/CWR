@@ -67,15 +67,18 @@ def strip_comments(text):
 
 
 def split_factions(text):
-    """Yield (name, body) for every inner `class X { ... };`.
+    """Return (name, body) for classes inside CfgGuerrillaFactions only.
 
     The outer `class CfgGuerrillaFactions` block is not a faction, so the walk
     starts inside it: brace depth 1 is where the faction classes live.
     """
     text = strip_comments(text)
     out = []
-    depth = 0
-    i = 0
+    container = re.search(r"\bclass\s+CfgGuerrillaFactions\s*\{", text)
+    if container is None:
+        return out
+    depth = 1
+    i = container.end()
     pending = None  # (name, body_start) for a class whose '{' we just passed
     while i < len(text):
         c = text[i]
@@ -85,6 +88,8 @@ def split_factions(text):
             continue
         if c == "}":
             depth -= 1
+            if depth == 0:
+                break
             if depth == 1 and pending is not None:
                 out.append((pending[0], text[pending[1] : i]))
                 pending = None

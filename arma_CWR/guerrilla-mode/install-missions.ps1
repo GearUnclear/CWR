@@ -101,6 +101,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '../tools/runtime/InstallTree.psm1') -Force
+$GameDir = [IO.Path]::GetFullPath($GameDir)
+Assert-PlainPath $GameDir
 
 if (-not (Test-Path -LiteralPath $GameDir -PathType Container)) {
     throw "GameDir not found: $GameDir"
@@ -275,12 +278,9 @@ if (-not (Test-Path -LiteralPath $coreRoot -PathType Container)) {
     throw "Script core source not found: $coreRoot"
 }
 $coreDest = Join-Path $GameDir 'gmcore'
-$null = & robocopy $coreRoot $coreDest /MIR /XD portraits /NJH /NJS /NDL /NFL /NC /NS /NP
-if ($LASTEXITCODE -ge 8) {
-    throw "robocopy failed for the script core (exit $LASTEXITCODE)"
-}
-$coreVerb = if ($LASTEXITCODE -eq 0) { 'Up to date' } else { 'Installed' }
-Write-Output ("{0}: script core -> {1}" -f $coreVerb, $coreDest)
+# Developer portraits are not runtime assets; the game maintains its own external cache.
+Sync-InstallTree -Source $coreRoot -Destination $coreDest -OwnerRoot $GameDir -ExcludeRelativeDirectories @('portraits')
+Write-Output "Installed: script core -> $coreDest"
 
 # ---- 3. world discovery ---------------------------------------------------
 # One index for the whole run: lowercase "<world>.wrp" -> where it was found.
@@ -303,7 +303,7 @@ $modDirs = @()
 if ($ModDir.Count -gt 0) {
     $modDirs = $ModDir
 } else {
-    $parent = [System.IO.Path]::GetDirectoryName($GameDir.TrimEnd('\'))
+    $parent = [System.IO.Path]::GetDirectoryName($GameDir.TrimEnd('/','\'))
     if ($parent -and [System.IO.Directory]::Exists($parent)) {
         $modDirs += [System.IO.Directory]::GetDirectories($parent, '@*')
     }
@@ -375,6 +375,10 @@ foreach ($tpl in $templates) {
     }
     if (-not $where) {
         if (Test-Path -LiteralPath $dest) {
+            Assert-PlainPath $dest
+            foreach ($item in Get-ChildItem -LiteralPath $dest -Recurse -Force) {
+                Assert-PlainPath $item.FullName
+            }
             Remove-Item -LiteralPath $dest -Recurse -Force -Confirm:$false
             Write-Output ("Removed stale install: {0} (no '{1}.wrp' in {2}\Worlds or any scanned pbo)" -f $tpl.Name,
                 $world, $GameDir)
@@ -384,17 +388,13 @@ foreach ($tpl in $templates) {
         }
         continue
     }
-    # /MIR mirrors the template (removes stale files from previous installs);
+    # Mirror the template (remove stale files from previous installs);
     # scoped to this template's own folder only.
-    $null = & robocopy $tpl.FullName $dest /MIR /NJH /NJS /NDL /NFL /NC /NS /NP
-    if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed for $($tpl.Name) (exit $LASTEXITCODE)"
-    }
-    $verb = if ($LASTEXITCODE -eq 0) { 'Up to date' } else { 'Installed' }
+    Sync-InstallTree -Source $tpl.FullName -Destination $dest -OwnerRoot $GameDir
+    $verb = 'Installed'
     Write-Output ("{0}: {1} -> {2}  [world '{3}' from {4}]" -f $verb, $tpl.Name, $dest, $world, $where)
 }
 
 Write-Output "Done. Templates are picked up by the GUERRILLA new-game menu (missions\Guerrilla.<World>), load their managers from $coreDest and their global factions from $binDir."
-# robocopy's informational exit codes (1 = files copied) must not leak as
-# script failure.
+# Return success explicitly for callers composing the installation steps.
 exit 0

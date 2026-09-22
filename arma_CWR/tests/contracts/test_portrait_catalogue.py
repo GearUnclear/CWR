@@ -32,6 +32,18 @@ class PortraitRoster(unittest.TestCase):
             for faction, classes in portrait_roster.lane_roster(lane):
                 self.assertTrue(classes, "%s/%s resolved to no Legend bodies" % (lane, faction))
 
+    def test_sibling_config_classes_are_not_factions(self):
+        text = '''
+        class Before { class NotAFaction {}; };
+        class CfgGuerrillaFactions {
+            class WEST { companionClass = "SoldierWB"; tiers[] = {"SoldierWB"}; };
+            class EAST : WEST { companionClass = "SoldierEB"; };
+        };
+        class CfgMarkerColors { class ColorGmNeutral {}; };
+        '''
+        self.assertEqual([name for name, _ in portrait_roster.split_factions(text)], ["WEST", "EAST"])
+        self.assertEqual(portrait_roster.split_factions('class CfgMarkerColors { class ColorGmNeutral {}; };'), [])
+
 
 if __name__ == "__main__":
     unittest.main()

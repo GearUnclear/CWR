@@ -1,0 +1,84 @@
+{
+  "files": [
+    {
+      "destination": "bin/remaster.cpp",
+      "source": "guerrilla-mode/runtime/classic/bin/remaster.cpp",
+      "sha256": "f748deaccfd2a96376bd103cf68e6781f124acb5f249007593d04674e77ab98c"
+    },
+    {
+      "destination": "bin/resource-extra.cpp",
+      "source": "guerrilla-mode/runtime/classic/bin/resource-extra.cpp",
+      "sha256": "dd6c3be9c3b8589e46aa90ae1cc6aff8f02ef8ffb3466f0eb08c5558bc34d8fa"
+    },
+    {
+      "destination": "bin/optionsShell.hpp",
+      "source": "thirdparty/classic-ui/optionsShell.hpp",
+      "sha256": "1ce28ba76893bc12ec791996fb7368f42b8beafc785dc245fba32b27ab09a51b"
+    },
+    {
+      "destination": "bin/optionsTemplates.hpp",
+      "source": "thirdparty/classic-ui/optionsTemplates.hpp",
+      "sha256": "3c6e690dd557a1309eb1431c2bd8e509cdc534b40152c76d0646767abea2da8f"
+    },
+    {
+      "destination": "bin/optionsScrollList.hpp",
+      "source": "thirdparty/classic-ui/optionsScrollList.hpp",
+      "sha256": "faadbcb40fad5421e13ad8765f98a9400a45ab2b2712ecf6bbae41d85353881f"
+    },
+    {
+      "destination": "bin/optionsScrollListSlots.hpp",
+      "source": "thirdparty/classic-ui/optionsScrollListSlots.hpp",
+      "sha256": "c50601e29ccfae7ffa6eb3c191c1d2c1fc1f72f6130388622f31ac505ff74b6f"
+    },
+    {
+      "destination": "bin/optionsUI.hpp",
+      "source": "thirdparty/classic-ui/optionsUI.hpp",
+      "sha256": "bcdec0dd661aade0f9c6d1205a014112017206c940c7ebe01dfdbb257f92bbf8"
+    },
+    {
+      "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
+      "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
+      "sha256": "3b228750b6f81f6037f4395f485f1be6d353fd985cfbaa0f931dbf6f158f5809"
+    },
+    {
+      "destination": "bin/UD_OPTIONS_APL-SA_NOTICE.txt",
+      "source": "thirdparty/classic-ui/APL-SA_NOTICE.txt",
+      "sha256": "87264654e7d82caccbefde1d49f2d4297f5057afb3ae7ceb8091c20a5d2774c1"
+    },
+    {
+      "destination": "fonts/cwr_body.ttf",
+      "source": "thirdparty/guerrilla-fonts/cwr_body.ttf",
+      "sha256": "cb244f96329b3504d7c198206a0b4ff1660fafb63882d9c211a1785d7083f424"
+    },
+    {
+      "destination": "fonts/cwr_hand.ttf",
+      "source": "thirdparty/guerrilla-fonts/cwr_hand.ttf",
+      "sha256": "ed12ceeb807081b63cd13b0580f3c734d1c04e7bbf8dc9525b1af8281c2e6ce0"
+    },
+    {
+      "destination": "fonts/cwr_mono.ttf",
+      "source": "thirdparty/guerrilla-fonts/cwr_mono.ttf",
+      "sha256": "c74ca4dc965b2f791483a43c4abd3b6b270b761c34dfe1b91fe2a038dd3a1de7"
+    },
+    {
+      "destination": "fonts/cwr_serif.ttf",
+      "source": "thirdparty/guerrilla-fonts/cwr_serif.ttf",
+      "sha256": "cc431374627239bcd1f7d1d82e45d0fe49867a81946a31289c17d43001ab1caa"
+    },
+    {
+      "destination": "fonts/cwr_title.ttf",
+      "source": "thirdparty/guerrilla-fonts/cwr_title.ttf",
+      "sha256": "3651c7b0d540d412a536320e1ab296daeb254db20fa38bd33b186ff9bf1657fe"
+    },
+    {
+      "destination": "fonts/OFL.txt",
+      "source": "thirdparty/guerrilla-fonts/OFL.txt",
+      "sha256": "6863ff4dc820f24756b6acfb38a2c6bc19d5b8d71b17030330a6f16eb4cee348"
+    },
+    {
+      "destination": "fonts/UD_FONT_CREDITS.md",
+      "source": "thirdparty/guerrilla-fonts/README.md",
+      "sha256": "339c12ea02e3ba2254b93daf17ef01d5fdb9eface9699b4b704ca22715f1919d"
+    }
+  ]
+}

@@ -221,7 +221,12 @@ Developer shoot missions, catalogue metadata and Python processing remain option
 comparison tools; they are not runtime requirements.
 
 The installer excludes the developer `core/portraits` directory even when it is
-populated. Runtime caches are outside installation mirrors and saves. Generated
+populated. The portable `Sync-InstallTree` helper receives the source-relative
+`portraits` exclusion for the core install only. Excluded destination subtrees
+are neither overwritten nor pruned, including when a source archive omits them;
+other scripts and mission templates retain normal mirror behavior. The synthetic
+installer suite covers these cases on the Windows and Linux CI lanes.
+Runtime caches are outside installation mirrors and saves. Generated
 portrait extensions are ignored by Git; source archives exclude the portrait
 catalogue directory and temporary captures. Release binary staging copies named
 binary dependencies, and current CI publishes dependency/compiler caches only;

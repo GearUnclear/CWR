@@ -21,6 +21,12 @@ on:
       - "arma_CWR/apps/**"
       - "arma_CWR/tests/**"
       - "arma_CWR/guerrilla-mode/**"
+      - "arma_CWR/setup-guerrilla.ps1"
+      - "arma_CWR/play-guerrilla.ps1"
+      - "arma_CWR/tools/runtime/**"
+      - "arma_CWR/tools/lobo/**"
+      - "arma_CWR/thirdparty/classic-ui/**"
+      - "arma_CWR/thirdparty/guerrilla-fonts/**"
       - "arma_CWR/cmake/**"
       - "arma_CWR/CMakeLists.txt"
       - "arma_CWR/CMakePresets.json"
@@ -39,6 +45,19 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/ccache
 
 jobs:
+  runtime-setup:
+    name: Fresh runtime installer (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Synthetic fresh-install and repeat-install checks
+        shell: pwsh
+        run: ./arma_CWR/tests/runtime/test-setup.ps1
+
   unit-and-tools:
     name: Linux unit tests + mod-intake tools (no game data)
     runs-on: ubuntu-24.04

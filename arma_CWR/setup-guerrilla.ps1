@@ -1,0 +1,147 @@
+<#
+.SYNOPSIS
+    Prepare fresh Classic 1.99 data and a LoBo mod for the built UD engine.
+.DESCRIPTION
+    Requires PowerShell 7 on Windows or Linux. Copies versioned Classic shims,
+    licensed Options resources and OFL fonts, installs missions and factions,
+    and runs the built mod doctor. Existing differing overlay files are backed
+    up beneath each data folder's .ud-backups directory. Original PBO backups
+    are managed by mod doctor under LoBo/_ud-orig. No base game PBO is copied.
+    -CheckOnly validates every input without writing or running the doctor.
+#>
+#requires -Version 7.0
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$GameDir,
+    [Parameter(Mandatory)][string]$LoBoDir,
+    [Parameter(Mandatory)][string]$Tools,
+    [switch]$CheckOnly
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'tools/runtime/InstallTree.psm1') -Force
+
+function Resolve-Child {
+    param([string]$Parent, [string]$Name)
+    if (Test-Path -LiteralPath $Parent -PathType Container) {
+        $matches = @(Get-ChildItem -LiteralPath $Parent -Force | Where-Object Name -IEQ $Name)
+        if ($matches.Count -gt 1) { throw "Case-ambiguous entries for $Name in $Parent" }
+        if ($matches.Count -eq 1) { return $matches[0].FullName }
+    }
+    return Join-Path $Parent $Name
+}
+function Require-File {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Required file missing: $Path" }
+}
+function Resolve-Relative {
+    param([string]$Parent, [string]$Relative)
+    foreach ($part in $Relative.Split('/')) { $Parent = Resolve-Child $Parent $part }
+    return $Parent
+}
+function Save-Existing {
+    param([string]$Path, [string]$Root)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    $relative = [IO.Path]::GetRelativePath($Root, $Path)
+    if ($relative.StartsWith('..') -or [IO.Path]::IsPathRooted($relative)) { throw "Backup outside root: $Path" }
+    $backup = Join-Path (Join-Path $Root ".ud-backups/$runId") $relative
+    Assert-PlainPath $backup
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($backup))
+    [IO.File]::Copy($Path, $backup, $false)
+    Write-Output "Backup: $backup"
+}
+
+$GameDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GameDir)
+$LoBoDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LoBoDir)
+$Tools = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Tools)
+foreach ($dir in @($GameDir, $LoBoDir)) {
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { throw "Directory missing: $dir" }
+    Assert-PlainPath $dir
+}
+if ($GameDir -eq $LoBoDir) { throw 'GameDir and LoBoDir must be separate folders.' }
+Require-File $Tools
+$bin = Resolve-Child $GameDir 'bin'
+Require-File (Resolve-Child $bin 'config.bin')
+Require-File (Resolve-Child $bin 'resource.bin')
+Require-File (Resolve-Relative $GameDir 'dta/data3d.pbo')
+Require-File (Resolve-Relative $GameDir 'worlds/abel.wrp')
+# Avoid accidentally replacing a Remaster package with a Classic compatibility shim.
+if (Test-Path -LiteralPath (Resolve-Child $bin 'remaster.bin')) {
+    throw 'This installer targets Classic 1.99, not Remaster/Demo game data.'
+}
+$addons = Resolve-Child $LoBoDir 'addons'
+foreach ($name in @('LoBoammo.pbo','LoBo_airammo.pbo','LoBoWreck.pbo','LoBoPalObj.pbo')) {
+    Require-File (Resolve-Child $addons $name)
+}
+foreach ($item in Get-ChildItem -LiteralPath $LoBoDir -Recurse -Force) {
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked LoBo content: $($item.FullName)" }
+}
+
+$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'guerrilla-mode/runtime/manifest.json') -Raw | ConvertFrom-Json
+$plan = @()
+foreach ($entry in $manifest.files) {
+    $source = Join-Path $PSScriptRoot $entry.source
+    Require-File $source
+    if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ine $entry.sha256) {
+        throw "Runtime source hash mismatch: $source (update manifest after intentional edits)"
+    }
+    $target = Resolve-Relative $GameDir $entry.destination
+    Assert-PlainPath $target
+    if (Test-Path -LiteralPath $target -PathType Container) { throw "Expected a file: $target" }
+    $plan += [pscustomobject]@{ Source=$source; Target=$target; Hash=$entry.sha256 }
+}
+foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','gmcore','Missions')) {
+    $path = Resolve-Relative $GameDir $relative
+    Assert-PlainPath $path
+    if (Test-Path -LiteralPath $path -PathType Container) {
+        foreach ($item in Get-ChildItem -LiteralPath $path -Recurse -Force) { Assert-PlainPath $item.FullName }
+    }
+}
+$loboConfig = Resolve-Relative $LoBoDir 'bin/config.cpp'
+Assert-PlainPath $loboConfig
+if (Test-Path -LiteralPath $loboConfig) {
+    $text = [IO.File]::ReadAllText($loboConfig)
+    if ($text -notmatch '^// GENERATED by arma_CWR/tools/lobo/install-lobo-factions.ps1') {
+        throw "Custom LoBo config needs merging before setup: $loboConfig"
+    }
+}
+if (Test-Path -LiteralPath (Resolve-Relative $LoBoDir 'bin/config.bin')) {
+    throw 'LoBo has a bin/config.bin that the generated config would shadow; merge it first.'
+}
+$deps = Join-Path $LoBoDir 'deps/@LoBo_Deps'
+$modDirs = @($LoBoDir)
+if (Test-Path -LiteralPath $deps -PathType Container) { $modDirs += $deps }
+else { Write-Warning 'LoBo has no deps/@LoBo_Deps. For the recovered dependency set, use the complete server LoBo folder.' }
+Write-Output "Validated: Classic data, LoBo, tools, and $($plan.Count) runtime files."
+if ($CheckOnly) { return }
+
+$runId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+foreach ($entry in $plan) {
+    if ((Test-Path -LiteralPath $entry.Target) -and
+        (Get-FileHash -LiteralPath $entry.Target -Algorithm SHA256).Hash -ieq $entry.Hash) { continue }
+    Save-Existing $entry.Target $GameDir
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($entry.Target))
+    [IO.File]::Copy($entry.Source, $entry.Target, $true)
+    Write-Output "Installed: $($entry.Target)"
+}
+Save-Existing (Resolve-Relative $GameDir 'bin/config-extra.cpp') $GameDir
+Save-Existing $loboConfig $LoBoDir
+# Invoke in-process child script scopes; their explicit exit 0 returns to the caller.
+& (Join-Path $PSScriptRoot 'guerrilla-mode/install-missions.ps1') -GameDir $GameDir -ModDir $modDirs
+if ($LASTEXITCODE -ne 0) { throw 'Mission installation failed.' }
+& (Join-Path $PSScriptRoot 'tools/lobo/install-lobo-factions.ps1') -LoBoDir $LoBoDir
+if ($LASTEXITCODE -ne 0) { throw 'LoBo faction installation failed.' }
+# A full scan reports unrelated compressed configs as NOT_PATCHABLE (exit 1).
+# Gate setup on the four known LoBo repair targets instead of treating those
+# unrelated limitations as broken installation data.
+foreach ($name in @('LoBoammo.pbo','LoBo_airammo.pbo','LoBoWreck.pbo','LoBoPalObj.pbo')) {
+    & $Tools mod doctor $LoBoDir --fix --pbo $name
+    if ($LASTEXITCODE -ne 0) { throw "LoBo repair failed for $name (exit $LASTEXITCODE). See doctor output." }
+}
+foreach ($entry in $plan) {
+    if ((Get-FileHash -LiteralPath $entry.Target -Algorithm SHA256).Hash -ine $entry.Hash) {
+        throw "Installed file verification failed: $($entry.Target)"
+    }
+}
+Write-Output 'Setup complete. Launch the rebuilt PoseidonGame with these game/mod folders.'
+Write-Output ('Mods: ' + ($modDirs -join ';'))

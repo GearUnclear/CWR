@@ -1,0 +1,8 @@
+tags = ["ui", "guerrilla", "full_cwa", "headful"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Boot + zone reveal ticks, then the real map display is opened and re-drawn
+# at three zoom levels for the label-collision screenshots.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]

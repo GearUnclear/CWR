@@ -997,7 +997,9 @@ void CStaticMap::DrawBackground()
         }
     }
 
-    // names
+    // names - marker labels claim their screen space first so a town name
+    // under a zone label yields to it (MapLabelLayout.hpp)
+    ReserveMarkerLabels();
     const ParamEntry& world = Pars >> "CfgWorlds" >> Glob.header.worldname;
     const ParamEntry* cls = &(world >> "Names");
     if (cls)
@@ -1182,6 +1184,37 @@ void CStaticMap::DrawName(const ParamEntry& cls)
     float h = size;
     float w = GEngine->GetTextWidth(size, _fontNames, text);
 
+    // an icon marker on the anchor (a Guerrilla zone) would cover the first
+    // letters: slide the name to the icon's right edge, where the marker's
+    // own label sits.  Under a marker label the name yields: dropped when the
+    // label begins with it (the zone carries the town name), else moved to
+    // the row below (MapLabelLayout.hpp)
+    Rect2DFloat rect(pt.x, pt.y - 0.5 * h, w, h);
+    float iconRight;
+    if (_labelLayout.IconRightEdge(rect, iconRight))
+    {
+        pt.x = iconRight;
+        rect.x = iconRight;
+    }
+    int blocker = _labelLayout.Blocker(rect);
+    if (blocker >= 0)
+    {
+        RString other = _labelLayout.LabelText(blocker);
+        if (strnicmp(other, text, text.GetLength()) == 0)
+        {
+            return;
+        }
+        const Rect2DFloat& b = _labelLayout.LabelRect(blocker);
+        rect.x = b.x;
+        rect.y = b.y + b.h;
+        pt.x = rect.x;
+        pt.y = rect.y + 0.5 * h;
+    }
+    if (!_labelLayout.ClaimLabel(rect, text))
+    {
+        return;
+    }
+
     if (pt.x + w < _x)
     {
         return;
@@ -1201,6 +1234,74 @@ void CStaticMap::DrawName(const ParamEntry& cls)
 
     GEngine->DrawText(Point2DFloat(pt.x, pt.y - 0.5 * h), size, Rect2DFloat(_x, _y, _w, _h), _fontNames, _colorNames,
                       text);
+}
+
+// Screen rectangles of an icon marker as DrawSign(texture, color, posMap, w,
+// h, azimut, text) lays it out: the icon centred on the marker position, the
+// label starting at the icon's right edge (or at the rotated icon's bounding
+// half-width), both vertically centred on the position.  Keep in step with
+// DrawSign.  Returns false for a marker DrawMarkers would not draw at all.
+bool CStaticMap::MarkerLabelRect(const ArcadeMarkerInfo& mInfo, RString text, Rect2DFloat& label,
+                                 Rect2DFloat& icon)
+{
+    if (mInfo.markerType != MTIcon || mInfo.size == 0 || !mInfo.icon)
+    {
+        return false;
+    }
+    DrawCoord posMap = WorldToScreen(mInfo.position);
+    float w = mInfo.size * mInfo.a * (1.0 / 640);
+    float h = mInfo.size * mInfo.b * (1.0 / 480);
+    float azimut = mInfo.angle * (H_PI / 180.0);
+    float textX;
+    if (azimut == 0)
+    {
+        icon = Rect2DFloat(posMap.x - 0.5 * w, posMap.y - 0.5 * h, w, h);
+        textX = posMap.x + 0.5 * w;
+    }
+    else
+    {
+        float s = sin(azimut);
+        float c = cos(azimut);
+        float halfW = 0.5 * (fabs(c * w) + fabs(s * h));
+        float halfH = 0.5 * (fabs(s * w) + fabs(c * h));
+        icon = Rect2DFloat(posMap.x - halfW, posMap.y - halfH, 2 * halfW, 2 * halfH);
+        textX = posMap.x + halfW;
+    }
+
+    float size = _sizeNames * (_invScaleX * 0.05);
+    saturate(size, 0.5 * _fontNames->Height(), 1.0 * _fontNames->Height());
+    float textW = text.GetLength() > 0 ? GEngine->GetTextWidth(size, _fontNames, text) : 0;
+    label = Rect2DFloat(textX, posMap.y - 0.5 * size, textW, size);
+    return true;
+}
+
+void CStaticMap::ReserveMarkerLabels()
+{
+    _labelLayout.Clear();
+    int n = markersMap.Size();
+    _markerTextHidden.Resize(n);
+    for (int i = 0; i < n; i++)
+    {
+        _markerTextHidden[i] = false;
+        const ArcadeMarkerInfo& mInfo = markersMap[i];
+        RString text = Localize(mInfo.text);
+        Rect2DFloat label, icon;
+        if (!MarkerLabelRect(mInfo, text, label, icon))
+        {
+            continue;
+        }
+        _labelLayout.AddIcon(icon);
+        if (text.GetLength() == 0)
+        {
+            continue;
+        }
+        if (!_labelLayout.ClaimLabel(label, text))
+        {
+            // earlier marker (config order: hand-authored zones before
+            // seeded towns) keeps its label; this one shows icon only
+            _markerTextHidden[i] = true;
+        }
+    }
 }
 
 void CStaticMap::DrawMount(Vector3Par pos)

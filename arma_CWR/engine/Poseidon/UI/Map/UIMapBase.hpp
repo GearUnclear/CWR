@@ -3,6 +3,7 @@
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/UI/Map/MapLabelLayout.hpp>
 #include <Poseidon/World/World.hpp>
 
 #include <Poseidon/AI/ArcadeTemplate.hpp>
@@ -322,6 +323,33 @@ protected:
 	void DrawBackground();
 	void DrawLegend();
 	void DrawName(const ParamEntry &cls);
+	// label collision (MapLabelLayout.hpp): marker labels claim their
+	// screen rectangles before the island Names are drawn, so a Name under a
+	// marker label yields and a later marker label under an earlier one is
+	// thinned for the frame
+	MapLabelLayout _labelLayout;
+	AutoArray<bool> _markerTextHidden; // indexed like markersMap
+	bool MarkerLabelRect(const ArcadeMarkerInfo &mInfo, RString text, Rect2DFloat &label, Rect2DFloat &icon);
+	void ReserveMarkerLabels();
+public:
+	bool IsMarkerTextHidden(int index) const
+	{
+		return index >= 0 && index < _markerTextHidden.Size() && _markerTextHidden[index];
+	}
+	// test probe (triMapHiddenLabels): marker labels thinned in the last frame
+	int HiddenMarkerLabelCount() const
+	{
+		int n = 0;
+		for (int i = 0; i < _markerTextHidden.Size(); i++)
+		{
+			if (_markerTextHidden[i])
+			{
+				n++;
+			}
+		}
+		return n;
+	}
+protected:
 	void DrawMount(Vector3Par pos);
 
 	void DrawField

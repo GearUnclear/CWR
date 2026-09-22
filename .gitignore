@@ -18,6 +18,9 @@ PoseidonGameDemo_*.png
 # API keys / secrets
 /.env
 
+# Local scratch output and temporary worktrees.
+/tmp/
+
 # Generated roadmap outputs (source of truth is roadmap/roadmap.yaml)
 /roadmap/index.html
 /roadmap/status.json

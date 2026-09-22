@@ -69,6 +69,28 @@ GameValue TriMapSetScale(const GameState* /*state*/, GameValuePar arg)
     return GameValue("OK");
 }
 
+/// triMapHiddenLabels -> marker labels the in-mission map thinned in its last
+/// frame because they would overprint an earlier label (UI/Map/MapLabelLayout.hpp),
+/// or -1 if no map.
+GameValue TriMapHiddenLabels(const GameState* /*state*/)
+{
+    if (!GWorld)
+        return GameValue((GameScalarType)-1.0f);
+    auto* map = dynamic_cast<DisplayMap*>(GWorld->Map());
+    if (!map || !map->GetMap())
+        return GameValue((GameScalarType)-1.0f);
+    CStaticMap* sm = map->GetMap();
+    for (int i = 0; i < markersMap.Size(); i++)
+    {
+        if (sm->IsMarkerTextHidden(i))
+        {
+            LOG_INFO(Core, "[tri] triMapHiddenLabels: marker '{}' label '{}' thinned", (const char*)markersMap[i].name,
+                     (const char*)markersMap[i].text);
+        }
+    }
+    return GameValue((GameScalarType)sm->HiddenMarkerLabelCount());
+}
+
 /// triMapGetScale -> the in-mission map zoom scale, or -1 if no map.
 GameValue TriMapGetScale(const GameState* /*state*/)
 {

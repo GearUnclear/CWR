@@ -17,12 +17,20 @@ The engine and game executables, licensed under GPL-3.0-or-later with additional
 
 **Game data (separate)**
 
-Models, textures, sounds, missions, and voices. These are not in this repository and are not GPL; they ship separately under the APL-SA license. A free Demo is available on Steam.
+Base-game models, textures, sounds, missions, and voices are supplied separately.
+The small Options text resources in `thirdparty/classic-ui` are an explicit
+APL-SA exception, with their own notice; `thirdparty/guerrilla-fonts` is OFL.
+Neither is covered by the engine's GPL grant.
 
 In short: the code is free software, the name is not, and the game data comes separately. This license covers the source code only and grants no rights to the trademarks.
 
 
 ## Quick Start
+
+For Guerrilla development on a fresh machine, follow
+[Fresh Classic + LoBo setup](guerrilla-mode/FRESH-INSTALL.md). After building,
+`setup-guerrilla.ps1` installs the runtime overlays, missions, factions and LoBo
+repairs; `play-guerrilla.ps1` launches the prepared installation.
 
 ```sh
 cmake --preset win-x64-clang-rwdi
@@ -86,8 +94,9 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ### Game data / assets — Arma Public License Share Alike (APL-SA)
 
-Game data and assets (models, textures, sounds, missions, etc.) are **not part of
-this repository** and are **not** covered by the GPL. They are released separately
+Except for the explicitly licensed small runtime resources listed above,
+base game data and assets are **not part of this repository** and are **not**
+covered by the GPL. They are released separately
 by Bohemia Interactive under the **Arma Public License Share Alike (APL-SA)**:
 
 - APL-SA license text: <https://www.bohemia.net/community/licenses/arma-public-license-share-alike>
