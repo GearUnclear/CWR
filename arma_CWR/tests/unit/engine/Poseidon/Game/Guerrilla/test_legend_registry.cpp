@@ -24,6 +24,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
+#include <Poseidon/AI/AICore.hpp>
+#include <Poseidon/AI/Path/ArcadeWaypoint.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/LegendPlacement.hpp> // the injected boss world
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
@@ -403,7 +405,10 @@ TEST_CASE("Legend registry - the poll that creates a row writes no deed and no d
     CHECK(row.rankSeen == 1); // seeded from the creating observation
     CHECK(row.xpSeen == 100.0f);
     CHECK(row.deeds.Size() == 0);
-    CHECK(Journal::Instance().IsEmpty());
+    CHECK(Journal::Instance().EntryCount() == 0);
+    const int statusAt = Journal::Instance().FindStatus("Companions");
+    REQUIRE(statusAt >= 0);
+    CHECK(Str(Journal::Instance().Status(statusAt).text) == Str(registry.DisplayName(row)) + " (CORPORAL)");
     CHECK(Journal::Instance().Revision() != journalRev); // a new row is still a repaint
 
     // and a companion seeded ABOVE a threshold gets the earned words silently
@@ -434,7 +439,7 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
     const int r = registry.FindByCompIndex(0);
     REQUIRE(r >= 0);
     const RString id = registry.Row(r).id;
-    const std::string base = Str(registry.Row(r).baseName);
+    const std::string base = Str(registry.Row(r).first);
     CHECK(registry.Row(r).awardMask == 0);
     CHECK(FilledSlots(registry.Row(r)) == 0);
     const std::string plain = Str(registry.DisplayName(registry.Row(r)));
@@ -444,7 +449,10 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
     const unsigned journalRev = Journal::Instance().Revision();
 
     // SERGEANT: the first award, plus the promotion line the ladder step owes
-    registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f));
+    const std::string firstNotice = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f)));
+    CHECK(firstNotice.find("is now known as") != std::string::npos);
+    CHECK(firstNotice.find(plain) != std::string::npos);
+    CHECK(firstNotice.find(Str(registry.CompanionDisplayName(0))) != std::string::npos);
     CHECK(registry.Row(r).awardMask == LAFirst);
     CHECK(FilledSlots(registry.Row(r)) == 1);
     CHECK(!registry.Row(r).legend);
@@ -457,6 +465,9 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
     CHECK(CountEntriesFor(Journal::Instance(), id) == 2); // every line carries the id
     CHECK(Journal::Instance().Entry(0).kind == JKGood);
     const std::string awarded = Str(registry.DisplayName(registry.Row(r)));
+    const int statusAt = Journal::Instance().FindStatus("Companions");
+    REQUIRE(statusAt >= 0);
+    CHECK(Str(Journal::Instance().Status(statusAt).text) == awarded + " (SERGEANT)");
     CHECK(awarded != plain);
     CHECK(awarded.find(base) != std::string::npos); // the base name survives the award
     CHECK(CountDeeds(registry.Row(r), LDAward) == 1);
@@ -465,8 +476,8 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
     // the identical observation again: the latch holds, nothing repaints
     const unsigned rev2 = registry.Revision();
     const unsigned journalRev2 = Journal::Instance().Revision();
-    registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f));
-    registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f));
+    CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f))).empty());
+    CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 250.0f))).empty());
     CHECK(registry.Row(r).awardMask == LAFirst);
     CHECK(Str(registry.DisplayName(registry.Row(r))) == awarded);
     CHECK(registry.Revision() == rev2);
@@ -475,7 +486,9 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
 
     // COLONEL: the second award takes a DIFFERENT slot and makes a Legend
     Journal::Instance().Clear();
-    registry.PollCompanionsForTest(OneCompanion("Petra", 1900.0f));
+    const std::string secondNotice = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 1900.0f)));
+    CHECK(secondNotice.find("has become a legend of the resistance") != std::string::npos);
+    CHECK(secondNotice.find(Str(registry.CompanionDisplayName(0))) != std::string::npos);
     CHECK(registry.Row(r).awardMask == (LAFirst | LASecond));
     CHECK(FilledSlots(registry.Row(r)) == 2); // added, never swapped
     CHECK(registry.Row(r).legend);
@@ -588,10 +601,11 @@ TEST_CASE("Legend registry - an unchanged observation repaints nothing", "[game]
     REQUIRE(r >= 0);
     CHECK(registry.Row(r).xpSeen == 99.0f); // still observed, just silently
 
-    // a rank change below the first award threshold moves both by exactly one
+    // A rank change repaints the registry once and changes two journal facts:
+    // the attributed promotion entry and the rank in the persisted roster.
     registry.PollCompanionsForTest(OneCompanion("Petra", 100.0f));
     CHECK(registry.Revision() == rev + 1);
-    CHECK(Journal::Instance().Revision() == journalRev + 1);
+    CHECK(Journal::Instance().Revision() == journalRev + 2);
     CHECK(Journal::Instance().EntryCount() == 1);
 }
 
@@ -1495,16 +1509,12 @@ TEST_CASE("Legend registry - a boss row's Change 3 fields carry documented defau
     std::filesystem::remove(path);
 }
 
-TEST_CASE("Legend registry - a spawn that latched and then failed reads as missing intelligence",
+TEST_CASE("Legend registry - a failed creation preserves the commander for retry and across saves",
           "[game][guerrilla][legends][boss][save][load]")
 {
-    // The latch goes down BEFORE the actors are built, so row.spawned is true
-    // on the failure path too (a null group at MaxGroups, a body class that
-    // would not materialize).  SpawnOneBoss returns before it reaches
-    // CreateBossMarker or AssertBossObjective, so that row has no marker and no
-    // objective: its placement is cleared with it, and the dossier reads him as
-    // missing intelligence rather than as a commander standing near a zone
-    // where there is nobody to kill.
+    // Temporary group exhaustion must not permanently cost a commander.
+    // A failed creation leaves no actors, marker or active objective, but its
+    // identity and stand remain available for the next spawn attempt.
     Journal::Instance().Clear();
     LegendRegistry registry;
     SeedAndResolve(registry);
@@ -1514,15 +1524,15 @@ TEST_CASE("Legend registry - a spawn that latched and then failed reads as missi
     REQUIRE(Str(registry.Row(row).zoneName) == "Outpost"); // he WAS placed
     const RString name = registry.DisplayName(registry.Row(row));
 
+    const Vector3 stand = registry.Row(row).pos;
     registry.SpawnFailureForTest(row);
 
-    CHECK(registry.Row(row).spawned); // latched: a failure is never retried
+    CHECK(!registry.Row(row).spawned);
+    CHECK(registry.Row(row).spawnRetryTicks == 30);
     CHECK(!registry.Row(row).bodySeen);
-    // the caption gate: no stand, so "whereabouts unknown" rather than
-    // "at large" (the compose half of that is pinned in test_journal_people)
-    CHECK(Str(registry.Row(row).zoneName).empty());
-    CHECK(registry.Row(row).pos.X() == 0.0f);
-    CHECK(registry.Row(row).pos.Z() == 0.0f);
+    CHECK(Str(registry.Row(row).zoneName) == "Outpost");
+    CHECK(registry.Row(row).pos.X() == stand.X());
+    CHECK(registry.Row(row).pos.Z() == stand.Z());
     CHECK(Str(registry.Row(row).markerName).empty());
     CHECK(!registry.Row(row).defeated);
     CHECK(ObjectiveState("legend_boss_0").empty());
@@ -1540,9 +1550,11 @@ TEST_CASE("Legend registry - a spawn that latched and then failed reads as missi
     REQUIRE(loaded.BossCount() == LegendRegistry::kBossCount);
     const int loadedRow = FirstBossRow(loaded);
     REQUIRE(loadedRow >= 0);
-    CHECK(loaded.Row(loadedRow).spawned);
+    CHECK(!loaded.Row(loadedRow).spawned);
     CHECK(!loaded.Row(loadedRow).bodySeen);
-    CHECK(Str(loaded.Row(loadedRow).zoneName).empty());
+    CHECK(Str(loaded.Row(loadedRow).zoneName) == "Outpost");
+    CHECK(loaded.Row(loadedRow).pos.X() == stand.X());
+    CHECK(loaded.Row(loadedRow).pos.Z() == stand.Z());
     CHECK(Str(loaded.Row(loadedRow).markerName).empty());
     CHECK(loaded.DefeatedCount() == 0);
     // THE LOAD PASS MANUFACTURES NOTHING for a commander who never existed
@@ -1616,5 +1628,140 @@ TEST_CASE("Legend registry - a foot commander's guards are never movement pinned
     const int loadedRow = FirstBossRow(loaded);
     REQUIRE(loadedRow >= 0);
     CHECK(!loaded.Row(loadedRow).crewed);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - regional companion names and the original enemy bank apply to every faction pool",
+          "[game][guerrilla][legends][registry]")
+{
+    const auto contains = [](const char* const* words, int count, const RString& word)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            if (strcmp(words[i], word) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (int pool = 0; pool < NamePoolCount(); ++pool)
+    {
+        const NamePool& region = NamePoolAt(pool);
+        CAPTURE(region.region);
+        LegendRegistry registry;
+        registry.SeedForTest(571u, MakeInputs(), pool, pool);
+        CHECK(Str(registry.PollCompanionsForTest(OneCompanion("TemplateName", 0))).empty());
+        const LegendRow& companion = registry.Row(registry.FindByCompIndex(0));
+        CHECK(contains(region.first, region.nFirst, companion.first));
+        CHECK(contains(region.last, region.nLast, companion.last));
+        CHECK(Str(companion.baseName) == "TemplateName"); // stable script key, not a display name
+        CHECK(companion.tone == ToneFriendly);
+        CHECK(FilledSlots(companion) == 0);
+        const std::string plain = Str(registry.CompanionDisplayName(0));
+        CHECK(Str(companion.bio).find("TemplateName") == std::string::npos);
+        const int enemyPool = strcmp(region.region, "british") == 0 || strcmp(region.region, "israeli") == 0
+                                  ? pool
+                                  : FindNamePool("western");
+        const NamePool& enemy = NamePoolAt(enemyPool);
+        for (int i = 0; i < registry.RowCount(); ++i)
+        {
+            const LegendRow& row = registry.Row(i);
+            if (row.kind != LKBoss)
+            {
+                continue;
+            }
+            CHECK(row.namePool == enemyPool);
+            CHECK(contains(enemy.first, enemy.nFirst, row.first));
+            CHECK(contains(enemy.last, enemy.nLast, row.last));
+            const NicknameBank& bank = Bank(ToneHostile);
+            if (row.prefix.GetLength())
+                CHECK(contains(bank.prefix, bank.nPrefix, row.prefix));
+            if (row.describer.GetLength())
+                CHECK(contains(bank.describer, bank.nDescriber, row.describer));
+            if (row.title.GetLength())
+                CHECK(contains(bank.title, bank.nTitle, row.title));
+        }
+        CHECK(Str(registry.PollCompanionsForTest(OneCompanion("TemplateName", 0))).empty());
+        CHECK(Str(registry.CompanionDisplayName(0)) == plain);
+    }
+}
+
+TEST_CASE("Legend registry - earned names and announcements survive death and reload without repeating",
+          "[game][guerrilla][legends][registry][save][load]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    Seed(registry);
+    registry.PollCompanionsForTest(OneCompanion("Petra", 0));
+    const std::string promoted = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 100)));
+    CHECK(promoted.find("promoted to CORPORAL") != std::string::npos);
+    const std::string awards = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 1900)));
+    CHECK(awards.find("is now known as") != std::string::npos);
+    CHECK(awards.find("has become a legend of the resistance") != std::string::npos);
+    const std::string name = Str(registry.CompanionDisplayName(0));
+    const int at = registry.FindByCompIndex(0);
+    REQUIRE(at >= 0);
+    CHECK(FilledSlots(registry.Row(at)) == 2);
+    CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 1900, false))).empty());
+    CHECK(AnyEntryIncludes(Journal::Instance(), (name + " has fallen.").c_str()));
+    CHECK(Str(registry.CompanionDisplayName(0)) == name);
+    CHECK(!registry.Row(at).alive);
+    const int statusAt = Journal::Instance().FindStatus("Companions");
+    REQUIRE(statusAt >= 0);
+    CHECK(Str(Journal::Instance().Status(statusAt).text) == name + " (fallen)");
+    const std::filesystem::path path = ArchivePath("legend-earned-memorial.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    const int entries = Journal::Instance().EntryCount();
+    CHECK(Str(loaded.CompanionDisplayName(0)) == name);
+    CHECK(!loaded.Row(at).alive);
+    CHECK(loaded.Row(at).legend);
+    CHECK(FilledSlots(loaded.Row(at)) == 2);
+    CHECK(CountDeeds(loaded.Row(at), LDAward) == 2);
+    CHECK(CountDeeds(loaded.Row(at), LDDeath) == 1);
+    CHECK(Str(loaded.PollCompanionsForTest(OneCompanion("Petra", 1900, false))).empty());
+    CHECK(Journal::Instance().EntryCount() == entries);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Legend registry - defeated map markers retain the name and role after reload",
+          "[game][guerrilla][legends][boss][save][load]")
+{
+    struct RestoreMarkers
+    {
+        int size = markersMap.Size();
+        ~RestoreMarkers() { markersMap.Resize(size); }
+    } restore;
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    SeedAndResolve(registry);
+    const int at = FirstBossRow(registry);
+    // Model the marker and spawn facts written by SpawnOneBoss. The actual
+    // defeat/repaint and archive paths run unchanged and need no renderer.
+    LegendRow& row = const_cast<LegendRow&>(registry.Row(at));
+    row.spawned = row.bodySeen = true;
+    row.markerName = "issue57_test_boss";
+    const std::string name = Str(registry.DisplayName(row));
+    const std::string role = Str(row.role);
+    const int marker = markersMap.Add();
+    markersMap[marker].name = row.markerName;
+    markersMap[marker].text = RString((name + ", " + role).c_str());
+    markersMap[marker].colorName = "ColorRed";
+    PublishSpawnObjective("legend_boss_0", "Eliminate the Sniper.");
+    registry.BossTickForTest(at, false, false);
+    const std::string expected = name + ", " + role + " (defeated)";
+    CHECK(Str(markersMap[marker].text) == expected);
+    CHECK(Str(markersMap[marker].colorName) == "ColorGreen");
+    CHECK(ObjectiveState("legend_boss_0") == "DONE");
+    const std::filesystem::path path = ArchivePath("legend-marker-role.bin");
+    SaveRegistry(registry, path);
+    LegendRegistry loaded;
+    REQUIRE(LoadRegistry(loaded, path));
+    CHECK(Str(loaded.DisplayName(loaded.Row(at))) == name);
+    CHECK(Str(loaded.Row(at).role) == role);
+    CHECK(loaded.Row(at).defeated);
+    CHECK(Str(markersMap[marker].text) == expected);
     std::filesystem::remove(path);
 }

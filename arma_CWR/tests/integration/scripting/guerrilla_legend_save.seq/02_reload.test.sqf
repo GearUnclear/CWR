@@ -41,7 +41,9 @@ triAssertNe [((gmLegendHistory) select 2), gmLegFreshHist]
 // the three enemy Legends came back in the same rows, in the same order
 gmLegI = 0
 gmLegB = 0
-while {gmLegI < gmLegendCount} do {gmLegRow = gmLegendInfo gmLegI; if ((gmLegRow select 2) == 1) then {triAssertEq [(gmLegRow select 1), (gmLegSaveBosses select gmLegB)]; gmLegB = gmLegB + 1}; gmLegI = gmLegI + 1}
+gmLegChecks = ""
+while {gmLegI < gmLegendCount} do {gmLegRow = gmLegendInfo gmLegI; if ((gmLegRow select 2) == 1) then {gmLegCheck = triAssertEq [(gmLegRow select 1), (gmLegSaveBosses select gmLegB)]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegB = gmLegB + 1}; gmLegI = gmLegI + 1}
+triAssertEq [gmLegChecks, ""]
 triAssertEq [gmLegB, 3]
 
 // no duplicate rows, and no further award over three hundred frames of poll
@@ -63,5 +65,7 @@ triAssertEq [(triOpenMap), "OK"]
 triSendKey 16
 triSimFrames 10
 gmPhotoI = 0
-while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; gmPhotoSaved = gmSavedPhotoRows select gmPhotoI; triAssertEq [gmPhotoRow select 0, gmPhotoSaved select 0]; triAssertEq [gmPhotoRow select 1, gmPhotoSaved select 1]; triAssertEq [gmPhotoRow select 2, gmPhotoSaved select 2]; triAssertEq [gmPhotoRow select 3, 2]; gmPhotoAnchor = "GM_WHO_" + ((gmLegendInfo gmPhotoI) select 0); triAssertEq [(triBriefingSwitch gmPhotoAnchor), gmPhotoAnchor]; triAssertIncludes [(triBriefingImages), "portrait:" + (gmPhotoRow select 2)]; triAssert [triBriefingFits]; gmPhotoI = gmPhotoI + 1}
+gmLegChecks = ""
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; gmPhotoSaved = gmSavedPhotoRows select gmPhotoI; gmLegCheck = triAssertEq [gmPhotoRow select 0, gmPhotoSaved select 0]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegCheck = triAssertEq [gmPhotoRow select 1, gmPhotoSaved select 1]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegCheck = triAssertEq [gmPhotoRow select 2, gmPhotoSaved select 2]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegCheck = triAssertEq [gmPhotoRow select 3, 2]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmPhotoAnchor = "GM_WHO_" + ((gmLegendInfo gmPhotoI) select 0); gmLegCheck = triAssertEq [(triBriefingSwitch gmPhotoAnchor), gmPhotoAnchor]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegCheck = triAssertIncludes [(triBriefingImages), "portrait:" + (gmPhotoRow select 2)]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmLegCheck = triAssert [triBriefingFits]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmPhotoI = gmPhotoI + 1}
+triAssertEq [gmLegChecks, ""]
 triEndTest

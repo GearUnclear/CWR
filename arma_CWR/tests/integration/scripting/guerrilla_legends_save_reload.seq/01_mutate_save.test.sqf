@@ -92,7 +92,9 @@ triAssertIncludes [gmLegSaveDossier, "defeated"]
 // Persist the exact prepared appearance alongside this test's saved sentinels.
 gmSavedPhotoRows = []
 gmPhotoI = 0
-while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; triAssertEq [gmPhotoRow select 3, 2]; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+gmLegChecks = ""
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; gmLegCheck = triAssertEq [gmPhotoRow select 3, 2]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+triAssertEq [gmLegChecks, ""]
 
 triAssertEq [(triSaveGame "legends"), "OK"]
 triEndTest

@@ -26,20 +26,22 @@ publishes `gmSelOccupier`/`gmSelResistance`; the engine resolves them and hands
 scripts the side strings via the `gmOccupierSide`/`gmResistanceSide` nulars
 (Demo defaults: EAST vs GUER).
 
-**Characters have names they earn.** A campaign draws one seed at its first
-tick and everything about its cast follows from it: your companion keeps the
-base name the template gave her, gains a surname from the faction's regional
-name pool, and earns a nickname at SERGEANT and a second, different one at
-COLONEL, so `Petra` becomes `Petra Kovacevic` becomes `Petra "The Hawk"
-Kovacevic the Unbroken`. The name is written onto the body itself, so the HUD,
-the cursor label, the group bar, the briefing roster, the diary and her
-dossier all say the same thing at the same moment. The same seed writes the
-campaign's HISTORY, a short account of how this occupation began, using the
-island's own place names, and pre-rolls the three enemy commanders. None of it
-is a text generator at runtime: every draw is a pure function of the seed and
-a stable id, resolved to prose once and then persisted, so reopening the
-journal or loading a save can never reroll a word of it. Which regional names
-a faction draws is one descriptor key, `namePool`.
+**Characters have names they earn.** A new campaign gives each companion a
+first name and surname from the resistance faction's regional `namePool`.
+At SERGEANT (250 XP), the companion earns one prefix, describer or title;
+at COLONEL (1900 XP), a second, different slot marks Legend status. For
+example: `Yazan Barghouti` → `Yazan "The Hawk" Barghouti` →
+`Yazan "The Hawk" Barghouti The Brave`. Each award appears as an on-screen
+announcement and in the journal. The canonical name is written onto the body,
+so labels, rosters, diaries and dossiers agree. Earned names and deeds remain
+in the memorial after death.
+
+The campaign seed also generates a history using the island's place names.
+Names and prose are resolved once and saved; existing saved characters keep
+their identities. Enemy Legends draw personal names from the issue's supplied
+`western_evil` bank: `western`, or `british`/`israeli` when the occupier selects
+that region. Other occupier regions use `western`. Their nickname words always
+come from the hostile bank, and resistance nicknames from the friendly bank.
 
 ### Faction library
 
@@ -97,7 +99,7 @@ no overhead, ordinary missions unaffected. The mission scripts are a thin
 | **GarrisonCache** (native) | occupier garrison distance-cache (reserve ↔ live groups), officer-first spawn from faction data, survivor write-back, garrison events | `engine/Poseidon/Game/Guerrilla/GarrisonCache.*` |
 | **Native persistence** | zones/alert/garrison + registered event handlers serialize; `campaignLoaded` event fires after a load | the three `Serialize` impls + `World::Serialize` |
 | **Journal** (native) | the map screen's notepad as the resistance dossier, in the notepad's stock look (Garamond titles, typed Courier reports, short handwritten remarks in ink): Contents (the Notes tab), Dispatches, Operations (the Plan tab: Objectives, Suggested actions, Supplies, Resistance strength), People + The roster, Places + a page per zone, Chronicles + The record, Reference + the handbook chapters; lists paginate at five entries onto `<page>_2` continuations; fed by the scripts through `gmJournal*` (`gmJournalNote` tags a line with its zone and kind), serialized as `GuerrillaJournal` | `engine/Poseidon/Game/Guerrilla/Journal.*` + `UI/Guerrilla/GuerrillaJournalPages.*` (Gather) + `JournalCompose*` / `JournalRender.*` / `JournalManual.*` / `JournalText.*` |
-| **Legends** (native) | the campaign's cast: a stable id per character, the EARNED display name a companion grows into (base name, then a generated surname, then a nickname slot at SERGEANT and a second at COLONEL), the face, a generated biography, the recorded deeds, the three enemy commanders (placed, guarded, marked and killable: see [Enemy Legends](#enemy-legends-the-three-commanders) below), and the seeded campaign HISTORY the journal's History page reads. It observes `GM_COMP_*` and owns identity only: `companions.sqs` still owns XP, rank and permadeath. `gmLegend*`; serialized as `GuerrillaLegends` | `engine/Poseidon/Game/Guerrilla/LegendRegistry.*` + `LegendNames.*` / `LegendPlacement.*` / `FactionHistory.*` |
+| **Legends** (native) | the campaign's cast: a stable id per character, the EARNED display name a companion grows into (regional first name and surname, then a nickname slot at SERGEANT and a second at COLONEL), the face, a generated biography, the recorded deeds, the three enemy commanders (placed, guarded, marked and killable: see [Enemy Legends](#enemy-legends-the-three-commanders) below), and the seeded campaign HISTORY the journal's History page reads. It observes `GM_COMP_*` and owns identity only: `companions.sqs` still owns XP, rank and permadeath. `gmLegend*`; serialized as `GuerrillaLegends` | `engine/Poseidon/Game/Guerrilla/LegendRegistry.*` + `LegendNames.*` / `LegendPlacement.*` / `FactionHistory.*` |
 | **Traffic** (native) | ambient road traffic: civilian cars town-to-town, occupier patrol vehicles between occupier zones, occasional supply convoys; player-distance band spawn/despawn, commandeer sequence (stop, driver bails + flees, hull released), civ-driver killed-EH feeding the civilian kill ledger; `gmTraffic*` + the road queries `gmRoadNearest` / `gmRoadPath` / `gmRoadsNear` (`nearestRoads` alias); serialized as `GuerrillaTraffic` | `engine/Poseidon/Game/Guerrilla/Traffic.*` + `TrafficCommands.cpp` |
 | **Mission scripts** (policy) | capture reaction (hold garrison), QRF + garrison posture, undercover establish/react, economy, War Level, loot/unlocks, recruiting, companions, Save UX | [`mission/Guerrilla.Demo/`](mission/Guerrilla.Demo/) |
 
@@ -117,7 +119,7 @@ People > Enemy Legends from campaign start, before their bodies exist, each with
 a generated name, the role that was resolved for him and the place he stands:
 
 ```
-Cold Zoran Kalnik        Sniper, at large.
+Cold Tyler Carter        Sniper, at large.
   near Outpost
 ```
 
@@ -129,7 +131,7 @@ installation; unsupported appearances show "Photograph unavailable". See
 marker named `gmLegend_boss_<n>` reading "<name>, <role>" and an objective
 `legend_boss_<n>` ("Eliminate <name>, <role>, near <zone>."). When he dies the
 caption turns red and reads "<role>, defeated.", the objective goes DONE, the
-marker turns green and reads "<name> (defeated)", and one diary line is written
+marker turns green and reads "<name>, <role> (defeated)", and one diary line is written
 and attributed to him, so it appears both in the campaign record and in his own
 dossier record. Nothing else about the page changes: the biography and the
 place are the ones he had in life, and he stays under Enemy Legends for the rest
@@ -146,7 +148,8 @@ faction cannot field degrades one step to the elite commander with that
 faction's own units. Stands are picked once at seeding, from the persisted
 campaign seed, on 350 / 550 / 750 / 950 m rings around the occupier's military
 zones, off roads, out of the water and at least 400 m from the player's camp and
-from each other. If the island cannot hold three stands, the ones that could not
+from each other. If the preferred stands block a complete roster, the picker
+searches the remaining legal triples. If the island cannot hold three stands, the ones that could not
 be placed keep their identity and their dossier, read "whereabouts unknown", get
 no marker and no objective, and are never retried; one diary line says how many
 commanders intelligence could name.
@@ -160,7 +163,9 @@ commanders intelligence could name.
    order. A template that raises `zoneArea` as far as 350 m reverses this, and
    the engine logs one warning naming the reversal at seeding.
 2. **A commander never respawns.** The spawn latch is persisted and set before
-   the actors are created, so a killed, deleted or failed body is never rebuilt.
+   the actors are created. A killed or deleted commander is never rebuilt. A
+   failed creation that leaves no actors retries at the same stand after 30
+   ticks, so temporary group exhaustion does not permanently remove a boss.
 3. **Destroying a tank commander's tank does not complete the objective.** The
    hull link is pruned and the kill is not credited; the marker and the
    objective stay, and he fights on foot if he lives. He often survives a hull

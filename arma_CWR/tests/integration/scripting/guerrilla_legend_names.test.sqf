@@ -54,10 +54,12 @@ triAssertEq [gmLegBase, "Petra"]
 gmLegPetra = gmLegendName 0
 triAssertNe [gmLegPetra, ""]
 triAssertNe [gmLegPetra, gmLegBase]
-triAssertIncludes [gmLegPetra, gmLegBase]
-// before any award the display name is exactly "<base> <last>", so the tail is
-// the persisted surname: the token both awards below have to leave standing
-gmLegSur = substr [gmLegPetra, (sizeofstr gmLegBase) + 1, sizeofstr gmLegPetra]
+// This fixture uses GUER's Balkan region for BOTH personal-name slots.
+gmLegFirst = ""
+{if ((substr [gmLegPetra, 0, (sizeofstr _x) + 1]) == (_x + " ")) then {gmLegFirst = _x}} forEach ["Milan", "Nikola", "Luka", "Dragan", "Mihai", "Stefan", "Aleksandar", "Bojan", "Marko", "Andrei"]
+triAssertNe [gmLegFirst, ""]
+gmLegSur = substr [gmLegPetra, (sizeofstr gmLegFirst) + 1, sizeofstr gmLegPetra]
+triAssert [((["Jovanovic", "Markovic", "Horvat", "Stojanovic", "Popescu", "Petrovic", "Ilic", "Kovacevic", "Marin", "Ionescu"] find gmLegSur) >= 0)]
 triAssertNe [gmLegSur, ""]
 gmLegId = gmLegendId 0
 triAssertNe [gmLegId, ""]
@@ -90,8 +92,10 @@ triAssertEq [(count (gmLegendInfo 999)), 0]
 //    latched so the companion award machinery can never fire on them ----------
 triAssertGe [gmLegendCount, 4]
 gmLegBossN = 0
+gmLegBad = ""
 gmLegI = 0
-while {gmLegI < gmLegendCount} do {gmLegRow = gmLegendInfo gmLegI; if ((gmLegRow select 2) == 1) then {triAssertNe [(gmLegRow select 1), ""]; triAssert [(gmLegRow select 6)]; triAssertEq [(gmLegRow select 7), 3]; gmLegBossN = gmLegBossN + 1}; gmLegI = gmLegI + 1}
+while {gmLegI < gmLegendCount} do {gmLegRow = gmLegendInfo gmLegI; if ((gmLegRow select 2) == 1) then {if ((gmLegRow select 1) == "") then {gmLegBad = gmLegBad + "nameless "}; if (not (gmLegRow select 6)) then {gmLegBad = gmLegBad + "notlegend "}; if ((gmLegRow select 7) != 3) then {gmLegBad = gmLegBad + "awards "}; gmLegBossN = gmLegBossN + 1}; gmLegI = gmLegI + 1}
+triAssertEq [gmLegBad, ""]
 triAssertEq [gmLegBossN, 3]
 
 // -- FIRST AWARD at SERGEANT (ladder index 2, XP 250). The live 1 Hz poll
@@ -105,9 +109,10 @@ triSimFrames 200
 triAssertEq [(gmLegendName 0), gmLegAward1]
 triAssertEq [((gmLegendInfo 0) select 7), 1]
 triAssert [not ((gmLegendInfo 0) select 6)]
-triAssertIncludes [gmLegAward1, gmLegBase]
+triAssertIncludes [gmLegAward1, gmLegFirst]
 triAssertIncludes [gmLegAward1, gmLegSur]
 triAssertEq [(name (GM_COMP_OBJ select 0)), gmLegAward1]
+triAssertIncludes [(gmJournalStatusText "Companions"), gmLegAward1]
 
 // the diary lines the award owes, each attributed to this character's id
 gmLegNew = ""
@@ -131,9 +136,10 @@ triAssertEq [(gmLegendName 0), gmLegAward2]
 triAssertNe [gmLegAward2, gmLegAward1]
 triAssertEq [((gmLegendInfo 0) select 7), 3]
 triAssert [((gmLegendInfo 0) select 6)]
-triAssertIncludes [gmLegAward2, gmLegBase]
+triAssertIncludes [gmLegAward2, gmLegFirst]
 triAssertIncludes [gmLegAward2, gmLegSur]
 triAssertEq [(name (GM_COMP_OBJ select 0)), gmLegAward2]
+triAssertIncludes [(gmJournalStatusText "Companions"), gmLegAward2]
 gmLegNew2 = ""
 gmLegI = gmLegJ1
 while {gmLegI < gmJournalCount} do {gmLegNew2 = gmLegNew2 + " " + ((gmJournalEntry gmLegI) select 1); gmLegI = gmLegI + 1}
@@ -153,4 +159,25 @@ triAssertEq [((gmLegendInfo 0) select 7), 3]
 triAssertEq [gmLegFace, (gmLegendFace 0)]
 triAssertEq [gmLegId, (gmLegendId 0)]
 
+// Death preserves the earned name in the campaign record and memorial dossier.
+gmLegBody = GM_COMP_OBJ select 0
+gmLegBody setDammage 1
+triSimUntil { not ((gmLegendInfo 0) select 5) }
+triAssertEq [(gmLegendName 0), gmLegAward2]
+triAssertEq [(gmLegendId 0), gmLegId]
+gmLegDeathLines = 0
+gmLegI = 0
+while {gmLegI < gmJournalCount} do {gmLegLine = (gmJournalEntry gmLegI) select 1; if (((gmJournalEntryChar gmLegI) == gmLegId) and (((gmJournalEntry gmLegI) select 3) == 3)) then {gmLegDeathLines = gmLegDeathLines + 1; gmLegDeathText = gmLegLine}; gmLegI = gmLegI + 1}
+triAssertEq [gmLegDeathLines, 1]
+triAssertIncludes [gmLegDeathText, gmLegAward2]
+triAssertEq [(triOpenMap), "OK"]
+triSendKey 16
+triSimFrames 10
+gmLegReadChain = {triBriefingSwitch _this; gmLegPageText = triControlText 56; gmLegPageN = 2; gmLegMore = true; while {gmLegMore and (gmLegPageN < 20)} do {triBriefingSwitch "GM_MAN_SAVE"; gmLegMore = (triBriefingSwitch format ["%1_%2", _this, gmLegPageN]) == format ["%1_%2", _this, gmLegPageN]; if (gmLegMore) then {gmLegPageText = gmLegPageText + " " + (triControlText 56)}; gmLegPageN = gmLegPageN + 1}; gmLegPageText}
+gmLegPeople = "GM_PEOPLE" call gmLegReadChain
+triAssertIncludes [gmLegPeople, "Memorials"]
+triAssertIncludes [gmLegPeople, gmLegAward2]
+triAssertEq [(triBriefingSwitch ("GM_WHO_" + gmLegId)), ("GM_WHO_" + gmLegId)]
+triAssertIncludes [(triControlText 56), gmLegAward2]
+triAssertIncludes [(triControlText 56), "fallen"]
 triEndTest

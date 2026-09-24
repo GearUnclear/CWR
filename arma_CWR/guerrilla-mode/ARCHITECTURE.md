@@ -562,16 +562,17 @@ body's `Person::GetInfo()._name`, which is what the HUD, the cursor label, the
 group bar, the briefing roster and the journal all read, so a companion who
 earns a name is renamed everywhere at once.
 
-**Earned names.** A companion starts as the base name from `GM_COMP_NAMES`
-plus a generated surname from the faction's regional pool, and gains a
-nickname slot at the SERGEANT rung and a second, different one at COLONEL
-("Petra Kovacevic" → `Petra "The Hawk" Kovacevic` → `Petra "The Hawk"
-Kovacevic the Unbroken`). The regional pool comes from the faction
-descriptor's `namePool` key (A.5); the TONE of the nickname bank comes from
-campaign allegiance, not from the region, so a resistance roster draws warm
-epithets and an occupier draws cold ones out of the same regional names.
-Every draw is a pure function of a persisted campaign seed plus the row's own
-id, so nothing rerolls when the journal is reopened or a save is loaded.
+**Earned names.** A new companion receives both personal names from the
+resistance faction's `namePool`; `GM_COMP_NAMES` remains the stable script key.
+A nickname slot is awarded at SERGEANT and a second, different slot at COLONEL.
+The native poll emits the promotion/award hint after resolving the name, so
+`companions.sqs` cannot announce the old name or overwrite the award hint.
+The enemy personal-name pool is restricted to the original attachment's
+`western_evil` regions (`western`, `british`, `israeli`), with `western` as
+the fallback for other occupier regions. Nickname tone follows allegiance.
+Names use separate deterministic draw channels and are serialized as resolved
+strings. Loading a save preserves existing first names and surnames, including
+identities produced by earlier builds.
 
 **Script surface:** the `gmLegend*` commands in A.3. `gmLegendName` is the one
 every script should use for a companion's name; it falls back to
@@ -580,7 +581,7 @@ boot-time `GM_fnCompStatus` call, and is correct rather than a gap.
 
 **Diary lines.** With `_progression` on, the registry writes exactly four
 kinds of line, each carrying the character's id as `charId` (A.3): the first
-award ("<Base> is now known as <Display>."), the second ("<Display> has become
+award ("<Previous display> is now known as <Display>."), the second ("<Display> has become
 a legend of the resistance."), any rank-ladder step ("<Display> promoted to
 <RANK>.") and death ("<Display> fell near <Zone>."). Each is filed under the
 row's cached zone, refreshed from the live body (nearest zone, else the

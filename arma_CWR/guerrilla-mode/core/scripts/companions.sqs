@@ -19,7 +19,7 @@
 ;
 ;  WHAT CHANGED (issue #57, the Legend registry):
 ;    * DISPLAY NAMES come from `gmLegendName i`, never from GM_COMP_NAMES.
-;      The native registry owns the earned five-slot name ("Petra "The Hawk"
+;      The native registry owns the regional five-slot name ("Milan "The Hawk"
 ;      Kovacevic"), stamps it on the live body, and falls back to
 ;      GM_COMP_NAMES select i while no row exists yet - which is the case for
 ;      the boot-time GM_fnCompStatus call below, and is correct.
@@ -27,8 +27,9 @@
 ;      wears that name from the frame it exists rather than from the next poll.
 ;    * The PROMOTION and DEATH diary lines are written NATIVELY by the
 ;      registry (with the character's stable id attached, which is what lets a
-;      diary line link to a dossier). This script keeps the hints and the
-;      roster status line and writes no gmJournalNote of its own.
+;      diary line link to a dossier). The registry also announces promotions
+;      and earned names. This script keeps death hints and the roster status
+;      line and writes no gmJournalNote of its own.
 ;
 ;  OWNS: GM_COMP_XP/RANK/SKILL/ALIVE/OBJ, the tunables + GM_fnComp* helpers,
 ;        transient GM_COMP_PREVRATING.
@@ -150,9 +151,8 @@ goto "next"
 GM_COMP_RANK set [GM_cI, GM_COMP_RANKLADDER select GM_cNi]
 GM_COMP_SKILL set [GM_cI, GM_cNi call GM_fnCompSkillForRank]
 GM_cI call GM_fnCompApply
-hint format ["%1 promoted to %2.", gmLegendName GM_cI, GM_COMP_RANK select GM_cI]
-; no gmJournalNote here: the Legend registry sees the same ladder step on its
-; own 1 Hz poll and writes the diary line with the character's id attached
+; The Legend registry announces promotions and earned names on its 1 Hz poll,
+; after the name is updated, and writes the attributed diary line.
 [] call GM_fnCompStatus
 goto "next"
 
