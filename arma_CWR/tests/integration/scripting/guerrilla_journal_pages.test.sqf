@@ -38,7 +38,8 @@ triAssertEq [gmIslandName, "Malden"]
 // the companions / loot managers publish their status lines at boot (the
 // Companions line is no longer rendered on a page; this is the boot net)
 triSimUntil { (gmJournalStatusText "Companions") != "" }
-triAssertIncludes [(gmJournalStatusText "Companions"), "Petra"]
+triSimUntil { (gmLegendId 0) != "" }
+triAssertIncludes [(gmJournalStatusText "Companions"), gmLegendName 0]
 triAssertEq [(gmJournalStatusText "Standard issue"), "the faction rifle only"]
 
 // -- open the real map display the way the player does. DisplayMission::InitUI
@@ -100,7 +101,7 @@ triAssertIncludes [gjDispatch, "Dispatches"]
 triAssertIncludes [gjDispatch, "Threat"]
 triAssertIncludes [gjDispatch, "Objective"]
 triAssertIncludes [gjDispatch, "Latest"]
-triAssertExcludes [gjDispatch, "Petra"]
+triAssertExcludes [gjDispatch, gmLegendName 0]
 
 // -- Operations hub (__PLAN <- "Plan"): four links, one page ----------------
 triAssertEq [(triBriefingSwitch "__PLAN"), "__PLAN"]

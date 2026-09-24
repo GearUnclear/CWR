@@ -222,6 +222,56 @@ LegendPlacementResult PickLegendSpots(const AutoArray<LegendSpotSample>& samples
         rejected[best] = true; // never pick the same stand twice
     }
 
+    // A preferred stand can block all the others even when three legal stands
+    // exist. Keep the ranked result when it fills the roster; otherwise search
+    // the feasible triples before declaring this island unable to place them.
+    // This runs only at campaign creation, and stops at the first full set.
+    if (res.picked.Size() < LPC::Wanted)
+    {
+        static_assert(LPC::Wanted == 3);
+        AutoArray<int> viable;
+        for (int i = 0; i < samples.Size(); ++i)
+        {
+            const LegendSpotSample& s = samples[i];
+            if (!s.underwater && !s.onRoad && s.distFromCamp >= LPC::CampFloor)
+            {
+                viable.Add(i);
+            }
+        }
+        const auto separated = [&](int a, int b)
+        {
+            const float floor = samples[a].zone == samples[b].zone ? LPC::SameZoneFloor : LPC::CrossZoneFloor;
+            return Dist2(samples[a], samples[b]) >= floor * floor;
+        };
+        for (int a = 0; a < viable.Size() && res.picked.Size() < LPC::Wanted; ++a)
+        {
+            for (int b = a + 1; b < viable.Size() && res.picked.Size() < LPC::Wanted; ++b)
+            {
+                if (!separated(viable[a], viable[b]))
+                {
+                    continue;
+                }
+                if (res.picked.Size() < 2)
+                {
+                    res.picked.Clear();
+                    res.picked.Add(viable[a]);
+                    res.picked.Add(viable[b]);
+                }
+                for (int c = b + 1; c < viable.Size(); ++c)
+                {
+                    if (separated(viable[a], viable[c]) && separated(viable[b], viable[c]))
+                    {
+                        res.picked.Clear();
+                        res.picked.Add(viable[a]);
+                        res.picked.Add(viable[b]);
+                        res.picked.Add(viable[c]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     for (int p = 0; p < res.picked.Size(); p++)
     {
         if (samples[res.picked[p]].distFromCamp < LPC::CampPreferred)

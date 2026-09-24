@@ -12,7 +12,6 @@ triSimUntil { gmLegendCount >= 3 }
 triSimUntil { not (isNull (GM_COMP_OBJ select 0)) }
 triSimUntil { (gmLegendId 0) != "" }
 
-gmLegSaveBase = GM_COMP_NAMES select 0
 gmLegSavePlain = gmLegendName 0
 triAssertNe [gmLegSavePlain, ""]
 triAssertEq [((gmLegendInfo 0) select 7), 0]
@@ -43,13 +42,22 @@ triAssertNe [gmLegSaveId, ""]
 triAssertNe [gmLegSaveHist, ""]
 triAssertNe [gmLegSaveSeed, 0]
 triAssert [((gmLegendInfo 0) select 6)]
-triAssertIncludes [gmLegSaveName, gmLegSaveBase]
+// The original template key is not the regional display name. Capture the
+// generated first name separately so a middle nickname insertion is allowed.
+gmLegSaveSplit = 0
+while {(substr [gmLegSavePlain, gmLegSaveSplit, gmLegSaveSplit + 1]) != " "} do {gmLegSaveSplit = gmLegSaveSplit + 1}
+gmLegSaveFirst = substr [gmLegSavePlain, 0, gmLegSaveSplit]
+gmLegSaveLast = substr [gmLegSavePlain, gmLegSaveSplit + 1, sizeofstr gmLegSavePlain]
+triAssertIncludes [gmLegSaveName, gmLegSaveFirst]
+triAssertIncludes [gmLegSaveName, gmLegSaveLast]
 triAssertEq [(name (GM_COMP_OBJ select 0)), gmLegSaveName]
 
 // Persist the exact prepared appearance alongside this test's saved sentinels.
 gmSavedPhotoRows = []
 gmPhotoI = 0
-while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; triAssertEq [gmPhotoRow select 3, 2]; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+gmLegChecks = ""
+while {gmPhotoI < gmLegendCount} do {gmPhotoRow = triPortraitRow gmPhotoI; gmLegCheck = triAssertEq [gmPhotoRow select 3, 2]; if (gmLegCheck != "OK") then {gmLegChecks = gmLegChecks + gmLegCheck + " "}; gmSavedPhotoRows = gmSavedPhotoRows + [gmPhotoRow]; gmPhotoI = gmPhotoI + 1}
+triAssertEq [gmLegChecks, ""]
 
 triAssertEq [(triSaveGame "legend_names"), "OK"]
 triEndTest

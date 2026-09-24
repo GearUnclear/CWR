@@ -165,7 +165,7 @@ glTankObj setDammage 1
 triSimUntil { gmLegendDefeated glTank }
 triAssertEq [(gmJournalObjectiveState ("legend_" + glTankId)), "DONE"]
 triAssertEq [((gmLegendMarker glTank) select 2), "ColorGreen"]
-triAssertEq [((gmLegendMarker glTank) select 3), (glTankName + " (defeated)")]
+triAssertEq [((gmLegendMarker glTank) select 3), (glTankName + ", " + glTankRole + " (defeated)")]
 triAssertEq [((gmLegendMarker glTank) select 0), ("gmLegend_" + glTankId)]
 
 // ===========================================================================

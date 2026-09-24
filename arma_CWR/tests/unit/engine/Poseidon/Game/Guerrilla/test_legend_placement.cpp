@@ -730,3 +730,25 @@ TEST_CASE("Legend placement - a commander reads the faction's BEST rung, not the
     REQUIRE(out.Size() == 3);
     CHECK(out[0].resolved == LRSniper); // the point of the whole rule
 }
+
+TEST_CASE("Legend placement - a preferred central stand cannot cost the campaign two commanders",
+          "[game][guerrilla][legends][placement]")
+{
+    AutoArray<LegendSpotSample> samples;
+    // A named central candidate is preferred, but is within 400 m of all
+    // three outer stands. The outer three are mutually more than 400 m apart.
+    samples.Add(Spot(0, 0, 0));
+    samples[0].named = true;
+    AddRing(samples, 0, 0, 0, 300, 3);
+    const LegendPlacementResult result = PickLegendSpots(samples, 57u);
+    REQUIRE(result.picked.Size() == 3);
+    CHECK(result.reason == LPOk);
+    for (int i = 0; i < result.picked.Size(); ++i)
+    {
+        CHECK(result.picked[i] != 0);
+        for (int j = i + 1; j < result.picked.Size(); ++j)
+        {
+            CHECK(Gap(samples[result.picked[i]], samples[result.picked[j]]) >= LPC::SameZoneFloor);
+        }
+    }
+}
