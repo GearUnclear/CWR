@@ -38,6 +38,24 @@ TEST_CASE("InputProfile Bind same code twice doesn't duplicate", "[input][InputP
     REQUIRE(profile.BindingCount(UAMoveForward) == 1);
 }
 
+TEST_CASE("InputProfile replacing serialized entries refreshes a populated code cache", "[input][InputProfile]")
+{
+    InputProfile profile;
+    profile.Bind(UAMoveForward, InputCode::Key(SDL_SCANCODE_W));
+    REQUIRE(profile.GetBindings(UAMoveForward) == std::vector<InputCode>{InputCode::Key(SDL_SCANCODE_W)});
+
+    const InputBinding axis(InputCode::GamepadAx(1), InputCode::GamepadBtn(4), ActivationMode::OnHold, -0.5f);
+    const std::vector<InputBinding> entries{InputBinding{}, InputBinding{}, axis, axis};
+    profile.SetBindingEntries(UAMoveForward, entries);
+    CHECK(profile.GetBindingEntries(UAMoveForward) == entries);
+    const std::vector<InputCode> expected{InputCode{}, InputCode{}, axis.code, axis.code};
+    CHECK(profile.GetBindings(UAMoveForward) == expected);
+
+    profile.SetBindingEntries(UAMoveForward, {});
+    CHECK(profile.GetBindings(UAMoveForward).empty());
+    CHECK(profile.GetBindingEntries(UAMoveForward).empty());
+}
+
 TEST_CASE("InputProfile detailed bindings preserve modifier and analog scale", "[input][InputProfile]")
 {
     InputProfile profile;

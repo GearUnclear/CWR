@@ -1002,6 +1002,33 @@ TEST_CASE("MouseState: a hold of at least the window is not a tap", "[input][mou
     CHECK(ms.buttons[1] == 0);
 }
 
+TEST_CASE("MouseState: repeated down events do not turn a long hold into a tap", "[input][mouse][tap]")
+{
+    MouseState ms;
+    MouseState::CursorAccum cursor;
+
+    ms.BufferButton(1, true, 1000);
+    ms.Update(cursor, 0, false, UITime(1000), nullptr);
+
+    // Another source can report down while the same logical button is held.
+    // It must not restart the press-to-release window or create a new edge.
+    ms.BufferButton(1, true, 1600);
+    ms.Update(cursor, 0, false, UITime(1600), nullptr);
+    CHECK(ms.right);
+    CHECK_FALSE(ms.buttonsToDo[1]);
+
+    ms.BufferButton(1, false, 1610);
+    ms.Update(cursor, 0, false, UITime(1610), nullptr);
+    CHECK_FALSE(ms.buttonsTapToDo[1]);
+    CHECK_FALSE(ms.right);
+
+    // A subsequent real press still starts a fresh tap window.
+    ms.BufferButton(1, true, 2000);
+    ms.BufferButton(1, false, 2010);
+    ms.Update(cursor, 0, false, UITime(2010), nullptr);
+    CHECK(ms.buttonsTapToDo[1]);
+}
+
 TEST_CASE("MouseState: tap window boundary is strict (window-1 taps, window does not)", "[input][mouse][tap]")
 {
     MouseState ms;

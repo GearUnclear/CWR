@@ -66,6 +66,10 @@ bool MouseState::Update(CursorAccum& cursor, int gameFocusLost, bool lookAroundE
         {
             if (btnBuffer_[i].down)
             {
+                // A repeated down while held is not a new press. Keep the
+                // original timestamp so a long hold cannot become a tap.
+                if (buttons[btn] > 0.0f)
+                    continue;
                 buttons[btn] = true;
                 buttonsToDo[btn] = true;
                 const int nowMs = currentTime.toInt();

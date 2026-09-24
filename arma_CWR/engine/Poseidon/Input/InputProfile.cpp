@@ -3,6 +3,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/UserActionDesc.hpp>
 #include <algorithm>
+#include <utility>
 
 #include <SDL3/SDL_scancode.h>
 
@@ -44,6 +45,15 @@ void InputProfile::Bind(UserAction action, InputBinding binding)
         binds.push_back(binding);
         MarkDirty(action);
     }
+}
+
+void InputProfile::SetBindingEntries(UserAction action, std::vector<InputBinding> bindings)
+{
+    int idx = static_cast<int>(action);
+    if (idx < 0 || idx >= UAN)
+        return;
+    bindings_[idx] = std::move(bindings);
+    MarkDirty(action);
 }
 
 void InputProfile::Unbind(UserAction action, InputCode code)

@@ -4,11 +4,14 @@
 #include <Poseidon/Input/InputCode.hpp>
 #include <Poseidon/Input/UserAction.hpp>
 #include <SDL3/SDL_scancode.h>
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "test_fixtures.hpp"
 
 #include <array>
+#include <algorithm>
 #include <filesystem>
 #include <random>
 #include <string>
@@ -233,6 +236,36 @@ void ReplaceLine(std::string& text, const std::string& from, const std::string& 
     REQUIRE(at != std::string::npos);
     text.replace(at, from.size(), to);
 }
+
+// Hand-write the row so duplicate codes and empty cells reach the loader
+// exactly as a profile file stores them, without passing through Bind().
+std::string WriteProfileRow(int version, const char* action, const std::vector<InputBinding>& bindings)
+{
+    const std::string path = TmpPath("serialized_row.cfg");
+    std::ofstream out(path, std::ios::binary);
+    out << "contextControlsVersion=" << version << ";\n";
+    const std::string row = std::string("ctxInfantry") + action;
+    for (int field = 0; field < 3; ++field)
+    {
+        out << row << (field == 1 ? "_mod" : field == 2 ? "_scale" : "") << "[]={";
+        for (size_t i = 0; i < bindings.size(); ++i)
+        {
+            if (i > 0)
+                out << ',';
+            const auto& binding = bindings[i];
+            if (field == 0)
+                out << binding.code.toLegacy();
+            else if (field == 1)
+                out << (binding.modifier.valid() ? binding.modifier.toLegacy() : -1);
+            else
+                out << binding.scale;
+        }
+        out << "};\n";
+    }
+    out.close();
+    REQUIRE(out.good());
+    return path;
+}
 } // namespace
 
 // A version-3 file written by the pre-Arma-3-right-mouse build: Optics = V +
@@ -423,5 +456,127 @@ TEST_CASE("ContextControlsConfig: a file newer than the build is treated as unkn
     ContextControlsConfig reloaded;
     REQUIRE(reloaded.Load(path));
     CHECK_FALSE(reloaded.migratedOnLoad);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: migration preserves every customized serialized slot",
+          "[Settings][ContextControlsConfig]")
+{
+    const int version = GENERATE(3, 99);
+    CAPTURE(version);
+    UserAction action = UAOptics;
+    const char* name = "Optics";
+    std::vector<InputBinding> bindings{InputCode::Key(SDL_SCANCODE_V), InputCode::Key(SDL_SCANCODE_KP_0)};
+
+    SECTION("reordered defaults")
+    {
+        std::reverse(bindings.begin(), bindings.end());
+    }
+    SECTION("duplicate default key")
+    {
+        bindings.insert(bindings.begin(), bindings.front());
+    }
+    SECTION("additional key")
+    {
+        bindings.emplace_back(InputCode::Key(SDL_SCANCODE_C));
+    }
+    SECTION("missing secondary")
+    {
+        bindings.pop_back();
+    }
+    SECTION("modifier on a default key")
+    {
+        bindings[0].modifier = InputCode::Key(SDL_SCANCODE_LSHIFT);
+    }
+    SECTION("non-default scale")
+    {
+        bindings[1].scale = 0.5f;
+    }
+    SECTION("tap flag on a default key")
+    {
+        bindings[0].code = InputCode::FromLegacy(InputBindingTapCode(SDL_SCANCODE_V));
+    }
+    SECTION("cleared primary")
+    {
+        bindings[0] = InputBinding{};
+    }
+    SECTION("multiple empty positional cells")
+    {
+        bindings.insert(bindings.begin(), 2, InputBinding{});
+    }
+    SECTION("explicitly unbound row")
+    {
+        bindings.clear();
+    }
+    SECTION("duplicate watch key")
+    {
+        action = UAWatch;
+        name = "Watch";
+        bindings.assign(2, InputCode::Key(SDL_SCANCODE_T));
+    }
+    SECTION("duplicate lock target mouse button")
+    {
+        action = UALockTarget;
+        name = "LockTarget";
+        bindings.assign(2, InputCode::MouseButton(1));
+    }
+
+    const std::string path = WriteProfileRow(version, name, bindings);
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.migratedOnLoad);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(action) == bindings);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].HasBinding(UAZoomTemp, InputCode::MouseButton(1)));
+
+    REQUIRE(cfg.Save(path));
+    CHECK(ReadAll(path).find("contextControlsVersion=4;") != std::string::npos);
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    CHECK(reloaded.profiles[(int)InputContext::Infantry].GetBindingEntries(action) == bindings);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: migration preserves interleaved gamepad entries in order",
+          "[Settings][ContextControlsConfig]")
+{
+    const int version = GENERATE(3, 99);
+    CAPTURE(version);
+    const std::vector<InputBinding> gamepad{
+        InputBinding(InputCode::GamepadAx(1), InputCode::GamepadBtn(4), ActivationMode::OnHold, -0.5f),
+        InputBinding(InputCode::GamepadBtn(6)),
+        InputBinding(InputCode::GamepadBtn(6)), // Identical serialized entries must both survive.
+        InputBinding(InputCode::GamepadPov(2), InputCode::Key(SDL_SCANCODE_LSHIFT))};
+    const std::vector<InputBinding> original{gamepad[0], InputCode::Key(SDL_SCANCODE_V),
+                                             gamepad[1], InputCode::Key(SDL_SCANCODE_KP_0),
+                                             gamepad[2], gamepad[3]};
+    std::vector<InputBinding> expected{InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1)),
+                                       InputCode::Key(SDL_SCANCODE_V)};
+    expected.insert(expected.end(), gamepad.begin(), gamepad.end());
+
+    const std::string path = WriteProfileRow(version, "Optics", original);
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.migratedOnLoad);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAOptics) == expected);
+
+    REQUIRE(cfg.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    CHECK(reloaded.profiles[(int)InputContext::Infantry].GetBindingEntries(UAOptics) == expected);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: a current version never rewrites old defaults or seeds missing rows",
+          "[Settings][ContextControlsConfig]")
+{
+    const std::vector<InputBinding> bindings{InputCode::Key(SDL_SCANCODE_V), InputCode::Key(SDL_SCANCODE_KP_0)};
+    const std::string path = WriteProfileRow(4, "Optics", bindings);
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK_FALSE(cfg.migratedOnLoad);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAOptics) == bindings);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].BindingCount(UAZoomTemp) == 0);
     std::filesystem::remove(path);
 }
