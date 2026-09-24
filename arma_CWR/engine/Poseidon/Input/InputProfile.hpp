@@ -18,6 +18,8 @@ class InputProfile
 
     void Bind(UserAction action, InputCode code);
     void Bind(UserAction action, InputBinding binding);
+    // Replace a serialized row verbatim, including duplicate and empty slots.
+    void SetBindingEntries(UserAction action, std::vector<InputBinding> bindings);
     void Unbind(UserAction action, InputCode code);
     void Unbind(UserAction action, InputBinding binding);
     void ClearBindings(UserAction action);
@@ -50,4 +52,3 @@ class InputProfile
 // default (currently only the cheat-entry trigger) survives load and reset.
 int DefaultModifierForDefaultKey(UserAction action, int packedKey);
 } // namespace Poseidon
-

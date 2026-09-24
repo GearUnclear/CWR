@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 #include <iterator>
+#include <utility>
 
 namespace Poseidon
 {
@@ -275,7 +276,7 @@ void RewriteV3DefaultsToV4(InputProfile& profile, const UserActionDesc* descs)
         if (!pristine)
             continue;
 
-        profile.ClearBindings(entry.action);
+        std::vector<InputBinding> rewritten;
         const KeyList& defaults = descs[entry.action].keys;
         for (int j = 0; j < defaults.Size(); ++j)
         {
@@ -284,10 +285,10 @@ void RewriteV3DefaultsToV4(InputProfile& profile, const UserActionDesc* descs)
                 continue;
             int mod = DefaultModifierForDefaultKey(entry.action, defaults[j]);
             InputCode modCode = mod >= 0 ? InputCode::FromLegacy(mod) : InputCode{};
-            profile.Bind(entry.action, InputBinding(code, modCode));
+            rewritten.emplace_back(code, modCode);
         }
-        for (const InputBinding& b : rest)
-            profile.Bind(entry.action, b);
+        rewritten.insert(rewritten.end(), rest.begin(), rest.end());
+        profile.SetBindingEntries(entry.action, std::move(rewritten));
     }
 }
 } // namespace
@@ -342,22 +343,14 @@ bool ContextControlsConfig::Load(const std::string& path)
             const ParamEntry* entry = cfg.FindEntry(BindingName(ctx, descs[a]));
             if (!entry)
                 continue;
-            profile.ClearBindings(static_cast<UserAction>(a));
-
             const ParamEntry* modEntry = cfg.FindEntry(ModifierName(ctx, descs[a]));
             const ParamEntry* scaleEntry = cfg.FindEntry(ScaleName(ctx, descs[a]));
             const int n = entry->GetSize();
+            std::vector<InputBinding> bindings;
+            bindings.reserve(n);
             for (int i = 0; i < n; ++i)
             {
                 InputCode code = InputCode::FromLegacy((int)(*entry)[i]);
-                if (!code.valid())
-                {
-                    // Preserve an empty positional slot (a cleared primary that
-                    // keeps its alt): gameplay skips it, the controls page shows a dash.
-                    profile.Bind(static_cast<UserAction>(a), InputBinding{});
-                    continue;
-                }
-
                 int modRaw = -1;
                 if (modEntry && i < modEntry->GetSize())
                     modRaw = (int)(*modEntry)[i];
@@ -367,8 +360,12 @@ bool ContextControlsConfig::Load(const std::string& path)
                 if (scaleEntry && i < scaleEntry->GetSize())
                     scale = (float)(*scaleEntry)[i];
 
-                profile.Bind(static_cast<UserAction>(a), InputBinding(code, modifier, ActivationMode::OnHold, scale));
+                bindings.emplace_back(code, modifier, ActivationMode::OnHold, scale);
             }
+            // Bind() deduplicates: using it here could turn a customized row
+            // into an apparent v3 default before the equality gate below. Keep
+            // every serialized binding and empty positional slot instead.
+            profile.SetBindingEntries(static_cast<UserAction>(a), std::move(bindings));
         }
         if (version < 4 || newerThanBuild)
             RewriteV3DefaultsToV4(profile, descs);

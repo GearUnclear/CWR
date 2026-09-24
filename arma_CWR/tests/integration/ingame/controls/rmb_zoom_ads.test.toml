@@ -1,6 +1,6 @@
 tags = ["controls", "full_cwa", "headless"]
 binary = "PoseidonGame"
-# One-player on-foot Abel mission (Classic data), no vehicles, no scripting.
+# One-player Abel fixture (Classic data); the test equips a LAW and spawns an M60.
 mission = "tests/integration/missions/cam_set_dir.Abel"
 timeout = 120
 assert_timeout = 30
