@@ -3,7 +3,8 @@
 Audit date: 2026-09-24. Source requirement: [Naming System: Friendly and Enemy Legends](https://github.com/GearUnclear/CWR/issues/57).
 
 **Status: implementation fixes verified by source tests; runtime acceptance pending.**
-PR #61 merged the original registry, dossier and enemy commander implementation.
+[PR #61](https://github.com/GearUnclear/CWR/pull/61) merged the original registry, dossier and enemy commander implementation.
+The audit fixes are in [draft PR #64](https://github.com/GearUnclear/CWR/pull/64).
 This audit checks that implementation against the original issue rather than
 treating the merge or the older design notes as proof of completion.
 

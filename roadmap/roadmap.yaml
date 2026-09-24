@@ -1675,14 +1675,14 @@ items:
     status: in-progress
     depends_on: [guerrilla-journal, mission-migration-native]
     gh_issues: [57]
-    commits: [dceda7c, f8618a8, 7b23dd2, 6bee1bf]
+    commits: [dceda7c, f8618a8, 7b23dd2, 6bee1bf, 61567a3]
     summary: >
       The naming registry, journal dossiers, enemy placement and defeat logic
       landed through PR 61. The 2026-09-24 audit against the original issue
       found gaps in regional first names, the enemy name-bank restriction,
       visible award announcements, stale roster status, defeated marker roles, placement completeness
       and retry after a fully rolled-back spawn. Fixes and regression tests are
-      on fix/issue-57-naming-completion. Existing saved identities are preserved.
+      in draft PR 64 (fix/issue-57-naming-completion). Existing saved identities are preserved.
       Source tests and the Linux game build pass; full acceptance remains open
       pending Classic 1.99 runtime checks (awards, memorials, map labels, combat
       pinning, all three commanders and campaign save/reload). See
