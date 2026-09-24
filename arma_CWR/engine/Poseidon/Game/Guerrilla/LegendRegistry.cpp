@@ -1261,34 +1261,33 @@ RString LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool li
         }
     }
 
+    if (_progression)
+    {
+        // Bind can create a row before its first poll, and the script can
+        // publish a stale status before any award. Refresh even when no row
+        // changed in THIS poll. SetStatus itself ignores identical text.
+        RString roster;
+        for (int i = 0; i < _rows.Size(); ++i)
+        {
+            const LegendRow& row = _rows[i];
+            if (row.kind != LKCompanion)
+            {
+                continue;
+            }
+            if (roster.GetLength() > 0)
+            {
+                roster = roster + RString(", ");
+            }
+            const char* rank =
+                row.rankSeen >= 0 && row.rankSeen < NRankLadder ? kRankLadder[row.rankSeen] : kRankLadder[0];
+            roster = roster + DisplayName(row) + RString(" (") + RString(row.alive ? rank : "fallen") + RString(")");
+        }
+        const unsigned beforeStatus = Journal::Instance().Revision();
+        Journal::Instance().SetStatus(RString("Companions"), roster);
+        wroteJournal = wroteJournal || Journal::Instance().Revision() != beforeStatus;
+    }
     if (touched)
     {
-        if (_progression)
-        {
-            // The script can publish its roster before this poll creates or
-            // awards a name. Refresh that persisted status from the same rows
-            // as the dossier so it cannot keep a template or pre-award name.
-            RString roster;
-            for (int i = 0; i < _rows.Size(); ++i)
-            {
-                const LegendRow& row = _rows[i];
-                if (row.kind != LKCompanion)
-                {
-                    continue;
-                }
-                if (roster.GetLength() > 0)
-                {
-                    roster = roster + RString(", ");
-                }
-                const char* rank =
-                    row.rankSeen >= 0 && row.rankSeen < NRankLadder ? kRankLadder[row.rankSeen] : kRankLadder[0];
-                roster =
-                    roster + DisplayName(row) + RString(" (") + RString(row.alive ? rank : "fallen") + RString(")");
-            }
-            const unsigned beforeStatus = Journal::Instance().Revision();
-            Journal::Instance().SetStatus(RString("Companions"), roster);
-            wroteJournal = wroteJournal || Journal::Instance().Revision() != beforeStatus;
-        }
         // Journal::AddEntry already bumped the journal's revision, so a poll that
         // wrote a line must not bump it a second time.
         Touch(!wroteJournal);

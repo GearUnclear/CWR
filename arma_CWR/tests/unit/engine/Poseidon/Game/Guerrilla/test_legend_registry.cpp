@@ -1765,3 +1765,27 @@ TEST_CASE("Legend registry - defeated map markers retain the name and role after
     CHECK(Str(markersMap[marker].text) == expected);
     std::filesystem::remove(path);
 }
+
+TEST_CASE("Legend registry - a stale roster is corrected without another character event",
+          "[game][guerrilla][legends][registry]")
+{
+    Journal::Instance().Clear();
+    LegendRegistry registry;
+    Seed(registry);
+    registry.PollCompanionsForTest(OneCompanion("Petra", 100));
+    const RString name = registry.CompanionDisplayName(0);
+    // A spawn-time Bind may already have created the row when the first poll
+    // runs. A boot status written with the template name must still refresh.
+    Journal::Instance().SetStatus(RString("Companions"), RString("Petra (CORPORAL)"));
+    const unsigned registryRev = registry.Revision();
+    const unsigned journalRev = Journal::Instance().Revision();
+    CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 100))).empty());
+    const int at = Journal::Instance().FindStatus("Companions");
+    REQUIRE(at >= 0);
+    CHECK(Str(Journal::Instance().Status(at).text) == Str(name) + " (CORPORAL)");
+    CHECK(Journal::Instance().EntryCount() == 0);
+    CHECK(registry.Revision() == registryRev);
+    CHECK(Journal::Instance().Revision() == journalRev + 1);
+    CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 100))).empty());
+    CHECK(Journal::Instance().Revision() == journalRev + 1);
+}
