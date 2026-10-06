@@ -1,0 +1,6 @@
+tags = ["scripting", "guerrilla", "assailants", "full_cwa", "lobo", "headless"]
+binary = "PoseidonGame"
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+timeout = 420
+assert_timeout = 120
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]

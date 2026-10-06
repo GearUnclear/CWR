@@ -1,0 +1,5 @@
+# Issue #42: native assailant records and script incident state must survive
+# a real cross-process save/load without replacing bodies, merging groups or
+# equipping another three magazines. Phase 02 also exercises the restored
+# personal hostility link by letting the resister fire at its captive extorter.
+tags = ["scripting", "guerrilla", "assailants", "full_cwa", "save-load", "headless"]

@@ -2022,10 +2022,6 @@ LSError World::Serialize(ParamArchive& ar, int message)
     {
         PARAM_CHECK(ar.Serialize("GuerrillaAssailants", Guerrilla::AssailantSystem::Instance(), 14))
     }
-    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
-    {
-        Guerrilla::AssailantSystem::Instance().Configure();
-    }
 
     // Guerrilla garrison cache: spawned-zone bookkeeping (group refs by
     // name-matched zone).  Same missing-subclass tolerance as above; the
@@ -2327,6 +2323,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
         _scene.MainLightChanged();
 
         RepairUnitsWithoutBodyAfterLoad(this, playerOnUnit, playerOnPos, playerOnType);
+        Guerrilla::AssailantSystem::Instance().AfterLoad();
 
         AIUnit* player = _playerOn ? _playerOn->Brain() : nullptr;
         AIGroup* grp = player ? player->GetGroup() : nullptr;

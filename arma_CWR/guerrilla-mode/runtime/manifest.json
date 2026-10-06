@@ -13,7 +13,7 @@
     {
       "destination": "bin/optionsShell.hpp",
       "source": "thirdparty/classic-ui/optionsShell.hpp",
-      "sha256": "1ce28ba76893bc12ec791996fb7368f42b8beafc785dc245fba32b27ab09a51b"
+      "sha256": "ce201502b9ff5f5b79876595a9d5e0e3e1e1ad936df0355ef76ec88265763644"
     },
     {
       "destination": "bin/optionsTemplates.hpp",
@@ -38,7 +38,7 @@
     {
       "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
       "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
-      "sha256": "3b228750b6f81f6037f4395f485f1be6d353fd985cfbaa0f931dbf6f158f5809"
+      "sha256": "e45d6bc7651d9987f9bb3aab44f24416fb3e7f72582e5819694c99d826f58ac2"
     },
     {
       "destination": "bin/UD_OPTIONS_APL-SA_NOTICE.txt",

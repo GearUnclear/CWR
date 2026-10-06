@@ -72,6 +72,10 @@ cmake --build build/win-x64-clang-rwdi
 
 Configure-preset families (suffix = build type): `*-clang-dbg` (Debug), `*-clang-rwdi` (RelWithDebInfo), `*-clang-rel` (Release), for `win-x64` and `linux-x64`. Plus `linux-x64-steamrt4` (Steam Runtime), sanitizer presets `*-clang-san` / `linux-x64-clang-tsan`, and fuzzer presets `*-clang-fuzz` (turn on `POSEIDON_BUILD_FUZZERS`). The binary dir always mirrors the preset name under `build/`. Compiled apps are staged into `dist/<arch>-<platform>-<suffix>/`.
 
+**clang-cl/Ninja dependency tracking (2026-10-05):** `cmake/ClangClDependencyTracking.cmake` uses `/showIncludes` for C and C++. With CMake 4.3's default forwarded GCC depfile flags, ccache 4.13.6 cache hits restore the object but lose its header dependencies. This left August renderer objects linked against September engine interfaces and broke world, journal and portrait rendering. Reconfiguring and rebuilding with the corrected flags recompiles existing objects and repairs the dependency database; keep the module enabled even when an incremental build reports success.
+
+Run `python tests/ci/test_clang_cl_dependencies.py` with the toolchain on PATH to check real cache hits and header-change invalidation for C, C++ and PCH builds. The test uses its own compile-only fixture and cache under `tmp/`; explicit tool paths are also supported (`--help`).
+
 ## Run
 
 For a fresh Classic + LoBo installation, use `setup-guerrilla.ps1` followed by

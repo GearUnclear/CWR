@@ -88,7 +88,7 @@ class RscOptionsPageIndex
 
 class RscOptionsPageControls
 {
-    controls[]={"NavKbm","NavMouse","NavGamepad","NavGamepadTuning","NavResetAll","NavClose"};
+    controls[]={"NavKbm","NavMouse","NavGamepad","NavGamepadTuning","NavResetAll","NavArma3","NavClose"};
 
     class NavKbm: OptIdxMenuItem
     {
@@ -120,10 +120,16 @@ class RscOptionsPageControls
         y=OPT_ROW_4_Y;
         text="$STR_DISP_OPT_CTL_RESET_ALL";
     };
+    class NavArma3: OptIdxMenuItem
+    {
+        idc=1407;
+        y=OPT_ROW_5_Y;
+        text="$STR_DISP_OPT_CTL_ARMA3";
+    };
     class NavClose: OptIdxMenuItem
     {
         idc=1404;
-        y=OPT_ROW_5_Y;
+        y=OPT_ROW_6_Y;
         text="$STR_DISP_CLOSE";
     };
 };

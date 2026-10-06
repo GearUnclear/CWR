@@ -2745,6 +2745,36 @@ mod tests {
     }
 
     #[test]
+    fn legend_sequences_have_graphics_tags() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/integration/scripting");
+        let expected = ["guerrilla_legend_save", "guerrilla_legends_save_reload"];
+        let sequences = || {
+            discover(&root)
+                .unwrap()
+                .into_iter()
+                .filter(|test| expected.contains(&test.name.as_str()))
+                .collect::<Vec<_>>()
+        };
+        let discovered = sequences();
+        assert_eq!(names(&discovered), expected);
+        for test in &discovered {
+            assert!(matches!(test.kind, TestKind::Seq(_)));
+            for entry in std::fs::read_dir(test.path()).unwrap() {
+                let phase = entry.unwrap().path();
+                if is_test_sqf(&phase) {
+                    assert_eq!(load_test_tags(&phase), test.tags);
+                }
+            }
+        }
+        for tag in ["headful", "full_cwa", "save-load"] {
+            let selected = filter_tests_by_tags(sequences(), &[tag.into()], &[]);
+            assert_eq!(names(&selected), expected);
+        }
+        let skipped = filter_tests_by_tags(sequences(), &[], &["headful".into()]);
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
     fn skips_tags_after_include_filter() {
         let dir = TempDir::new().unwrap();
         sqf(dir.path(), "mp/admin.test.sqf");

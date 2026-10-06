@@ -80,6 +80,8 @@ The fixture records its old/new ownership and spawned object in `HT_SETUP_HISTOR
 | `market_arms` | Logistics | Arms dealer purchase and insufficient funds |
 | `market_vehicle` | Logistics | Vehicle dealer and HQ delivery |
 | `garage` | Logistics | Garage lock, release and persistence |
+| `legend_names` | Cell | Earned Legend names, faces and dossiers |
+| `legend_boss` | Cell | Enemy commanders: dossier, stand, defeat |
 | `civilians` | Population | Ambient population, conversation and cache |
 | `solicit` | Population | Assess, solicit, refuse and cooldown |
 | `extortion` | Population | Extortion preview, cancel, commit and recovery |

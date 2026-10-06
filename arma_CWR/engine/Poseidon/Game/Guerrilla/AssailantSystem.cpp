@@ -189,6 +189,9 @@ bool AssailantSystem::Register(Person* body, AssailantMode mode, EntityAI* extor
     Ref<AIGroup> old = unit->GetGroup();
     unit->ForceRemoveFromGroup();
     group->AddUnit(unit);
+    // Group membership and the entity's actual side are independent. Keep
+    // the latter in step so other observers can identify and fight back.
+    body->SetTargetSide((TargetSide)_side);
     group->GetCenter()->SelectLeader(group);
     group->AddFirstWaypoint(body->Position());
     group->AllowFleeing(0);
@@ -200,13 +203,32 @@ bool AssailantSystem::Register(Person* body, AssailantMode mode, EntityAI* extor
     body->AddWeapon(weapon, true);
     return true;
 }
+
+static void ReleaseAssailantGroup(Person* body, AIGroup* group)
+{
+    Ref<AIGroup> keepGroup = group;
+    if (body && body->IsDammageDestroyed())
+    {
+        // The normal casualty report can take 30 seconds to detach a dead
+        // brain. Once its record is gone nobody would reap that empty group.
+        // Preserve the corpse, but retire its AI and private group together.
+        Ref<AIUnit> unit = body->Brain();
+        if (unit && unit->GetGroup() == group)
+        {
+            unit->ForceRemoveFromGroup();
+            body->SetBrain(nullptr);
+        }
+    }
+    if (group && !group->NUnits()) group->RemoveFromCenter();
+}
+
 bool AssailantSystem::Remove(EntityAI* body)
 {
     for (int i = 0; i < _records.Size(); ++i) if (_records[i].body.GetLink() == body && body)
     {
         Ref<AIGroup> group = _records[i].group.GetLink();
         if (!body->IsDammageDestroyed()) ::DeleteVehicle(body);
-        if (group && !group->NUnits()) group->RemoveFromCenter();
+        ReleaseAssailantGroup(_records[i].body.GetLink(), group);
         _records.Delete(i);
         return true;
     }
@@ -218,7 +240,7 @@ void AssailantSystem::Prune()
     {
         auto& r = _records[i];
         if (r.body && !r.body->IsDammageDestroyed()) continue;
-        if (r.group && !r.group->NUnits()) r.group->RemoveFromCenter();
+        ReleaseAssailantGroup(r.body.GetLink(), r.group.GetLink());
         _records.Delete(i); // deaths already ran killed EH synchronously
     }
 }
@@ -249,7 +271,12 @@ bool AssailantSystem::IsHostile(const AIUnit* observer, const EntityAI* target, 
         // Only living perceived people/crewed vehicles, never empty scenery.
         if (!target->CommanderUnit()) return false;
         const bool combatant = side == TEast || side == TWest || side == TGuerrila;
-        return Hostile((AssailantMode)r.mode, r.extorter.GetLink() == target, combatant, Classify(target) == ASRogue);
+        const EntityAI* extorter = r.extorter.GetLink();
+        // A dead passenger's brain can remain attached until the ordinary
+        // casualty report; that corpse must not implicate the living driver.
+        const AIUnit* extorterUnit = extorter && !extorter->IsDammageDestroyed() ? extorter->CommanderUnit() : nullptr;
+        const bool personal = extorter == target || (extorterUnit && extorterUnit->GetVehicle() == target);
+        return Hostile((AssailantMode)r.mode, personal, combatant, Classify(target) == ASRogue);
     }
     return center && center->IsEnemy((TargetSide)side);
 }
@@ -268,7 +295,20 @@ LSError AssailantSystem::Record::Serialize(ParamArchive& ar)
 LSError AssailantSystem::Serialize(ParamArchive& ar)
 {
     PARAM_CHECK(ar.Serialize("Records", _records, 1))
-    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond) { Configure(); Prune(); }
     return LSOK;
+}
+void AssailantSystem::AfterLoad()
+{
+    Configure();
+    Prune();
+    // The unfinished implementation saved converted bodies with their
+    // original civilian side. World invokes this after the AI centers load:
+    // their group/brain links have not resolved during our own second pass.
+    for (int i = 0; i < _records.Size(); ++i)
+    {
+        const auto& r = _records[i];
+        if (r.body && r.group && r.group->GetCenter())
+            r.body->SetTargetSide(r.group->GetCenter()->GetSide());
+    }
 }
 }

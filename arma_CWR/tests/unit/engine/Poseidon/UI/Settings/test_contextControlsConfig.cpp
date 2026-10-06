@@ -2,6 +2,7 @@
 
 #include <Poseidon/Input/InputBinding.hpp>
 #include <Poseidon/Input/InputCode.hpp>
+#include <Poseidon/Input/InputDeviceConstants.hpp>
 #include <Poseidon/Input/UserAction.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <catch2/catch_message.hpp>
@@ -35,6 +36,60 @@ TEST_CASE("ContextControlsConfig: missing file returns false", "[Settings][Conte
 {
     ContextControlsConfig cfg;
     CHECK_FALSE(cfg.Load(TmpPath("missing.cfg")));
+}
+
+TEST_CASE("ContextControlsConfig: Arma 3 preset replaces customized rows and persists without losing other controls",
+          "[Settings][ContextControlsConfig][Arma3Preset]")
+{
+    ContextControlsConfig cfg;
+    const InputCode tapRmb = InputCode::FromLegacy(InputBindingTapCode(INPUT_DEVICE_MOUSE + 1));
+    const InputBinding pad(InputCode::GamepadBtn(6), InputCode::GamepadBtn(4), ActivationMode::OnHold, 0.5f);
+    const InputBinding move(InputCode::Key(SDL_SCANCODE_H), InputCode::Key(SDL_SCANCODE_LCTRL));
+    for (InputProfile& profile : cfg.profiles)
+    {
+        // The real saved-profile failure: V + Mouse 5 + controller LT, no tap RMB.
+        profile.SetBindingEntries(UAOptics, {InputBinding(InputCode::Key(SDL_SCANCODE_V)),
+                                             InputBinding(InputCode::MouseButton(4)), pad, pad});
+        profile.Bind(UAZoomTemp, InputCode::Key(SDL_SCANCODE_G));
+        profile.Bind(UALockTarget, InputCode::MouseButton(1));
+        profile.Bind(UAWatch, InputCode::Key(SDL_SCANCODE_T));
+        profile.Bind(UARevealTarget, InputCode::Key(SDL_SCANCODE_H));
+        profile.Bind(UAWatch, InputCode::GamepadPov(2));
+        profile.Bind(UAMoveForward, move);
+        // Populate the cached code list before replacing it.
+        REQUIRE_FALSE(profile.HasBinding(UAOptics, tapRmb));
+        REQUIRE(profile.GetBindings(UAOptics).size() == 4);
+    }
+
+    cfg.ApplyArma3Preset();
+    cfg.ApplyArma3Preset(); // Repeated selection must not duplicate bindings.
+    const std::vector<InputBinding> expectedOptics{InputBinding(tapRmb), InputBinding(InputCode::Key(SDL_SCANCODE_V)),
+                                                   pad, pad};
+    for (const InputProfile& profile : cfg.profiles)
+    {
+        CHECK(profile.GetBindingEntries(UAOptics) == expectedOptics);
+        CHECK(profile.GetBindings(UAOptics)[0] == tapRmb);
+        CHECK(profile.GetBindingEntries(UAZoomTemp) ==
+              std::vector<InputBinding>{InputBinding(InputCode::MouseButton(1))});
+        CHECK(profile.GetBindingEntries(UALockTarget) ==
+              std::vector<InputBinding>{InputBinding(InputCode::Key(SDL_SCANCODE_T))});
+        CHECK(profile.GetBindingEntries(UAWatch) ==
+              std::vector<InputBinding>{InputBinding(InputCode::Key(SDL_SCANCODE_O)),
+                                        InputBinding(InputCode::GamepadPov(2))});
+        CHECK(profile.GetBindingEntries(UARevealTarget) ==
+              std::vector<InputBinding>{InputBinding(InputCode::MouseButton(1))});
+        CHECK(profile.GetBindingEntries(UAMoveForward) == std::vector<InputBinding>{move});
+    }
+
+    const std::string path = TmpPath("arma3_preset.cfg");
+    REQUIRE(cfg.Save(path));
+    ContextControlsConfig loaded;
+    REQUIRE(loaded.Load(path));
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+        for (int a = 0; a < UAN; ++a)
+            CHECK(loaded.profiles[c].GetBindingEntries(static_cast<UserAction>(a)) ==
+                  cfg.profiles[c].GetBindingEntries(static_cast<UserAction>(a)));
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("ContextControlsConfig: Save then Load round-trips separate context profiles",

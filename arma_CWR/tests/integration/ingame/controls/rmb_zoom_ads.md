@@ -5,6 +5,13 @@ shims installed, using a newly built `PoseidonGame`. The Abel fixture, LAW and
 M60 are Classic assets. See [engine setup](../../../../CLAUDE.md) for the build
 and data prerequisites.
 
+For an existing customized profile, choose **Options → Controls → Arma 3 controls →
+Apply preset**. This explicitly replaces the keyboard/mouse bindings for Optics,
+temporary zoom, target lock/reveal and watch in every context, then saves them.
+Other actions, controller bindings and mouse tuning are preserved. A quick RMB
+release toggles sights, holding RMB zooms, T locks targets and O shows the watch.
+Automatic migration still preserves custom bindings until this preset is chosen.
+
 From `arma_CWR`, build the game and Trident:
 
 ```powershell

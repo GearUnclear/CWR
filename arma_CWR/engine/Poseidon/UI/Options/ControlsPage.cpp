@@ -8,6 +8,7 @@
 #include <Poseidon/UI/Options/OptionsShell.hpp>
 
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 
@@ -43,6 +44,27 @@ bool ControlsPage::OnNav(OptionsShell& shell, int idc)
         case 1406: // Gamepad Tuning
             shell.PushPage(std::make_unique<GamepadTuningPage>());
             return true;
+
+        case 1407: // Arma 3 controls preset
+        {
+            auto onYes = []()
+            {
+                auto& sub = InputSubsystem::Instance();
+                ContextControlsConfig controls;
+                for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+                    controls.profiles[c] = sub.GetProfile(static_cast<InputContext>(c));
+                controls.ApplyArma3Preset();
+                for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+                    sub.GetProfile(static_cast<InputContext>(c)) = std::move(controls.profiles[c]);
+                sub.SaveKeys();
+            };
+            shell.PushPage(std::make_unique<ConfirmPage>(
+                std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_TITLE")),
+                std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_BODY")), std::move(onYes),
+                std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_APPLY")),
+                std::string((const char*)LocalizeString("STR_DISP_OPT_CAP_CANCEL"))));
+            return true;
+        }
 
         case 1403: // Reset all to defaults — confirm first
         {

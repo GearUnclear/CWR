@@ -15,7 +15,6 @@ asShooter = leader asG
 asShooter setPos [7480, 5700, 0]
 asShooter setDir 90
 asShooter disableAI "MOVE"
-asShooter stop true
 asShooter allowDammage false
 asShots = 0
 asShooter addEventHandler ["fired", {asShots = asShots + 1}]

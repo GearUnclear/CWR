@@ -1,4 +1,8 @@
 LANGUAGE,English,French,Italian,Spanish,German,Czech,Polish,Russian
+STR_DISP_OPT_CTL_ARMA3,Arma 3 controls,,,,,,,
+STR_DISP_OPT_CTL_ARMA3_TITLE,Apply Arma 3 controls?,,,,,,,
+STR_DISP_OPT_CTL_ARMA3_BODY,Change aim / zoom / lock / watch?,,,,,,,
+STR_DISP_OPT_CTL_ARMA3_APPLY,Apply preset,,,,,,,
 STR_DISP_MAIN_OPTIONS,OPTIONS,OPTIONS,OPZIONI,OPCIONES,OPTIONEN,NASTAVENÍ,OPCJE,НАСТРОЙКИ
 STR_DISP_OPTIONS_TITLE,Options,Options,Opzioni,Opciones,Optionen,Nastavení,Opcje,Настройки
 STR_DISP_MAIN_OPT_AUDIO,Audio,Options audio,Opzioni audio,Opciones de sonido,Audio-Optionen,Zvuk,Dźwięk,Звук

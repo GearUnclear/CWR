@@ -1,4 +1,5 @@
-tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headful"]
+# Requires graphics to prepare Ready portraits; the dummy renderer cannot satisfy this contract.
 binary = "PoseidonGame"
 mission = "tests/integration/missions/guerrilla_native.abel"
 timeout = 420

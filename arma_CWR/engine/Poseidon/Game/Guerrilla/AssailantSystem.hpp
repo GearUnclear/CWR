@@ -32,7 +32,8 @@ public:
     static float Advance(float remaining, float dt, bool eligible);
     void Clear();
     void InitMission();
-    void Configure(); // final campaign sides; also called after the second load pass
+    void Configure(); // final campaign sides
+    void AfterLoad(); // after every world/AI reference has resolved
     bool IsActive() const { return _side >= 0; }
     RString SideName() const;
     RString Diagnostic(AssailantMode mode) const;

@@ -421,6 +421,23 @@ enum words (`"SAFE"`, `"MOVE"`, `"SENTRY"`, `"Flag"`, `"RoadSegment"`,
 `assailants.sqs` owns the single global eligible-time incident clock and installs
 the admission callback after the civilian interaction library is ready.
 
+The native `AssailantSystem` admits at most eight live assailants, including
+at most two spontaneous rogues. Each uses a private group on the computed
+spare war side; conversion updates both group membership and the body's
+stored target side while preserving its civilian class. Observer-specific
+hostility distinguishes retaliation (including the living extorter's current
+vehicle) from indiscriminate rogue attacks without changing civilian diplomacy.
+A dead extorter passenger does not make an innocent vehicle driver hostile.
+Death handlers capture classification synchronously. Retirement then detaches
+the dead brain and releases its group slot while retaining the corpse.
+
+Save restoration reconciles assailants in the final world-load phase, after
+AI centers and group links resolve. This also repairs the civilian target side
+stored by the unfinished #42 checkpoint. Restoring a record does not re-equip
+its body or restart its incident clock. The focused tests cover transactions,
+candidate/clock policy, actual fire and counterfire, Classic/LoBo side pairings,
+cross-process persistence, and 70 deaths with immediate empty-group cleanup.
+
 
 **One core, many missions (issue #54 step B1).** The island-agnostic script
 layer exists exactly ONCE in the repo, at `guerrilla-mode/core/`. No mission

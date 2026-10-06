@@ -23,6 +23,9 @@ class ContextControlsConfig
     bool migratedOnLoad = false;
 
     void LoadDefaults();
+    // Apply the Arma 3 tap/hold, target and watch layout in every context.
+    // Preserve unrelated actions and all existing gamepad bindings.
+    void ApplyArma3Preset();
     bool Load(const std::string& path);
     bool Save(const std::string& path) const;
 };

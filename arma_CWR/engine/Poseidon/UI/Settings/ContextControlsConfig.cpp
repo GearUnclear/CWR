@@ -302,6 +302,30 @@ void ContextControlsConfig::LoadDefaults()
     }
 }
 
+void ContextControlsConfig::ApplyArma3Preset()
+{
+    const UserAction actions[] = {UAOptics, UAZoomTemp, UALockTarget, UAWatch, UARevealTarget};
+    const UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
+    for (InputProfile& profile : profiles)
+    {
+        for (UserAction action : actions)
+        {
+            std::vector<InputBinding> bindings;
+            const KeyList& defaults = descs[action].keys;
+            for (int i = 0; i < defaults.Size(); ++i)
+            {
+                InputCode code = InputCode::FromLegacy(defaults[i]);
+                if (code.valid() && IsKbmCode(code))
+                    bindings.emplace_back(code);
+            }
+            for (const InputBinding& binding : profile.GetBindingEntries(action))
+                if (binding.code.valid() && !IsKbmCode(binding.code))
+                    bindings.push_back(binding);
+            profile.SetBindingEntries(action, std::move(bindings));
+        }
+    }
+}
+
 bool ContextControlsConfig::Load(const std::string& path)
 {
     ParamFile cfg;
