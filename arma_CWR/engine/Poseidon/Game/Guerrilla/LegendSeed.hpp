@@ -72,6 +72,7 @@ enum LegendChannel
     CH_FACE = 31,
     CH_BIOEVENT = 32,
     CH_BIOVAR = 33,
+    CH_FIRST = 34,
     // The award draws are FOUR distinct kinds, not two: which slot is filled and
     // which word fills it are separate rolls for each of the two awards.  Writing
     // them as one channel per award (the first draft's CH_AWARD1|CH_AWARD2) would

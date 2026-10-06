@@ -21,9 +21,8 @@
 //     default zoneArea 150 m), so a commander never garrisons his zone: the
 //     outpost is capturable while he lives, his existence never pins the zone's
 //     alert state, and killing him is a SEPARATE objective in either order.
-//   * A boss NEVER respawns.  row.spawned is persisted and latched BEFORE the
-//     actors are created, so a fault between the two costs a commander rather
-//     than duplicating one.
+//   * A boss NEVER respawns after his body existed. A failed creation that
+//     cleaned up all its actors can retry at the same stand after a delay.
 //   * Destroying a tank does NOT complete the objective.  row.body (the named
 //     commander) and row.vehicle (the hull) are two independent links and two
 //     independent questions; the hull's death prunes the link and nothing else.
@@ -184,6 +183,7 @@ struct LegendRow
     RString lastZone;
     // TRANSIENT: the post-load re-assert has run over this row this session.
     bool reasserted = false;
+    int spawnRetryTicks = 0; // transient backoff after a fully rolled-back creation
 
     LSError Serialize(ParamArchive& ar);
 };
@@ -313,8 +313,8 @@ class LegendRegistry : public SerializeClass
 
     // test seams ------------------------------------------------------------
     typedef LegendCompanionSnapshot CompanionSnapshot;
-    void SeedForTest(unsigned seed, const HistoryInputs& in);
-    void PollCompanionsForTest(const CompanionSnapshot& snapshot);
+    void SeedForTest(unsigned seed, const HistoryInputs& in, int resistancePool = -1, int occupierPool = -1);
+    RString PollCompanionsForTest(const CompanionSnapshot& snapshot);
     void SetProgressionForTest(bool on) { _progression = on; }
     // ResolveBosses with the world's three answers injected: the faction's
     // capability, the zone ladder's output and the candidate stands.
@@ -323,19 +323,16 @@ class LegendRegistry : public SerializeClass
     // One boss poll with the two world questions injected: is his body alive,
     // and did his hull just die.  The live BossTick asks the world instead.
     void BossTickForTest(int row, bool alive, bool hullDestroyed);
-    // The spawn that latched and then failed - a null group at MaxGroups, a
-    // body class that would not materialize.  Drives the same two steps the
-    // live SpawnBosses takes on that path, so the "he never existed" state can
-    // be asserted without a world to fail a spawn in.
-    // keepPlacement reproduces the row an EARLIER build wrote on that path,
-    // which kept its stand and so advertised a commander who did not exist:
-    // that is the state the load pass's bodySeen gates defend against.
+    // Models a rolled-back creation. keepPlacement reproduces an older build's
+    // permanent failure latch for load compatibility tests.
     void SpawnFailureForTest(int row, bool keepPlacement = false);
 
   private:
     void SeedCampaign();
     void PollCompanions();
-    void ApplySnapshot(const CompanionSnapshot& snapshot, bool live);
+    // Returns this poll's promotion/award announcement, empty on an unchanged
+    // observation or reload. The live caller presents it through the normal hint UI.
+    RString ApplySnapshot(const CompanionSnapshot& snapshot, bool live);
     int EnsureCompanionRow(int compIndex, const RString& baseName, float xp, bool alive);
     void AwardSlot(LegendRow& row, int which);
     void RecordDeed(LegendRow& row, const RString& text, int kind);
@@ -357,9 +354,7 @@ class LegendRegistry : public SerializeClass
     int BossOrdinal(const LegendRow& row) const;
     void SpawnBosses();
     bool SpawnOneBoss(LegendRow& row);
-    // A spawn that latched and then failed: the placement goes with it, so the
-    // row has no stand, no marker and no objective for anything to disagree
-    // with, and the dossier reads him as missing intelligence.
+    // A fully rolled-back creation can retry; an actor that existed never can.
     void LatchSpawnFailure(LegendRow& row);
     void BossTick();
     void LatchDefeat(LegendRow& row);

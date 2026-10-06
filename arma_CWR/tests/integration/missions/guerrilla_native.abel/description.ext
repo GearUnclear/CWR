@@ -120,6 +120,7 @@ class CfgGuerrillaFactions
     class EAST // occupier descriptor
     {
         side = "EAST";
+        namePool = "eastern_europe"; // enemy Legends still use issue #57's western bank
         // WL<3 conscripts -> WL3-4 grenadiers -> WL5+ crack troops
         tiers[] = {"SoldierEB", "SoldierEG", "SoldierECrew"};
         tierThresholds[] = {3, 5};
@@ -139,6 +140,7 @@ class CfgGuerrillaFactions
     class GUER // resistance descriptor
     {
         side = "GUER";
+        namePool = "balkans"; // pin both personal-name slots in the naming lane
         tiers[] = {"SoldierGB"};
         tierThresholds[] = {};
         vehicles[] = {}; // none in phase 1

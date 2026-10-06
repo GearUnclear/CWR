@@ -8,7 +8,8 @@
 // is chosen by campaign ALLEGIANCE (resistance = friendly, occupier =
 // hostile). A resistance IDF campaign draws israeli names with the FRIENDLY
 // bank. The two source lists (international_good and western_evil) are
-// flattened into one kNamePools[] union plus two banks.
+// flattened into one kNamePools[] union plus two banks. EnemyNamePool limits
+// enemy personal names to the attachment's western_evil regions.
 //
 // The tables are GENERATED from tests/fixtures/legend-names/issue57-names.json
 // by tools/legend-names/gen_legend_names.py; edit the fixture and rerun the
@@ -99,5 +100,9 @@ RString PickSlotWord(NicknameTone tone, int slot, unsigned long long key, unsign
 // namePool key -> pool index; side fallback WEST western / EAST eastern_europe
 // / GUER levant; ONE LOG_WARN per (faction, token); never returns -1.
 int ResolveNamePool(const char* namePoolValue, const char* side, const char* factionForLog);
+
+// Issue #57's enemy-name bank contains western, british and israeli pools.
+// Keep a matching faction region; all other regions use its western pool.
+int EnemyNamePool(int factionPool);
 
 } // namespace Poseidon::Guerrilla

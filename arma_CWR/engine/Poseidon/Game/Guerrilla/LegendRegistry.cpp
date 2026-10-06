@@ -20,6 +20,7 @@
 #include <Poseidon/AI/VehicleAI.hpp>                      // AIUnitInfo / Rank
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp>            // ArcadeWaypointInfo / ArcadeMarkerInfo / CombatMode
 #include <Poseidon/Network/Network.hpp>                   // GetNetworkManager / GetInPosition
+#include <Poseidon/UI/InGame/InGameUI.hpp>
 
 #include <Random/randomGen.hpp> // GRandGen: the ONE stateful draw of the campaign
 
@@ -545,11 +546,13 @@ void LegendRegistry::SeedCampaign()
     Touch(true);
 }
 
-void LegendRegistry::SeedForTest(unsigned seed, const HistoryInputs& in)
+void LegendRegistry::SeedForTest(unsigned seed, const HistoryInputs& in, int resistancePool, int occupierPool)
 {
     _seeded = true;
     _seed = seed | 1u; // the live draw is always odd; keep the test seeds in the same family
     _progression = true;
+    _resistancePool = resistancePool;
+    _occupierPool = occupierPool;
     if (_resistancePool < 0)
     {
         _resistancePool = ResolveNamePool(nullptr, "GUER", "test-resistance");
@@ -588,7 +591,7 @@ void LegendRegistry::PreRollBossIdentities()
         row.id = RString(buffer);
         row.kind = LKBoss;
         row.compIndex = -1;
-        row.namePool = _occupierPool;
+        row.namePool = EnemyNamePool(_occupierPool);
         row.tone = ToneHostile;
         const unsigned long long key = RowKey(row.id);
         row.first = PickDistinctName(row.namePool, key, CH_BOSSFIRST, true, usedFirst);
@@ -740,7 +743,7 @@ int LegendRegistry::EnsureCompanionRow(int compIndex, const RString& baseName, f
     row.kind = LKCompanion;
     row.compIndex = compIndex;
     row.baseName = baseName;
-    row.first = baseName; // spec: preserve the existing base name verbatim
+    row.first = baseName; // legacy saves retain the script identity
     row.namePool = _resistancePool >= 0 ? _resistancePool : ResolveNamePool(nullptr, "GUER", "resistance");
     row.tone = ToneFriendly;
     const unsigned long long key = RowKey(row.id);
@@ -749,6 +752,7 @@ int LegendRegistry::EnsureCompanionRow(int compIndex, const RString& baseName, f
     // companion records", i.e. DisplayName() is the base name.
     if (_progression)
     {
+        row.first = PickFirst(row.namePool, key, CH_FIRST);
         row.last = PickLast(row.namePool, key, CH_LAST);
     }
     row.face = RString(kPortraitFaces[Roll(key, CH_FACE, NPortraitFaces)]);
@@ -764,7 +768,8 @@ int LegendRegistry::EnsureCompanionRow(int compIndex, const RString& baseName, f
         row.bioEvent = (int)Roll(key, CH_BIOEVENT, kHistoryEvents);
         // the dossier page's budget, not the generator's wider band: see the
         // boss branch in PreRollBossIdentities
-        row.bio = GenerateBio(_history, row.bioEvent, row.baseName, _resistanceName, false, key, kHistoryBioPageWords);
+        row.bio =
+            GenerateBio(_history, row.bioEvent, DisplayName(row), _resistanceName, false, key, kHistoryBioPageWords);
     }
     // A template that seeds a companion above an award threshold gets the earned
     // words at creation, SILENTLY: the bits and the slot words are part of the
@@ -1014,18 +1019,23 @@ void LegendRegistry::PollCompanions()
         return;
     }
     _pollDigest = digest;
-    ApplySnapshot(snapshot, true);
+    const RString announcement = ApplySnapshot(snapshot, true);
+    if (announcement.GetLength() > 0 && GWorld && GWorld->UI())
+    {
+        GWorld->UI()->ShowHint(announcement);
+    }
 }
 
-void LegendRegistry::PollCompanionsForTest(const CompanionSnapshot& snapshot)
+RString LegendRegistry::PollCompanionsForTest(const CompanionSnapshot& snapshot)
 {
-    ApplySnapshot(snapshot, false);
+    return ApplySnapshot(snapshot, false);
 }
 
-void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
+RString LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
 {
     bool touched = false;
     bool wroteJournal = false;
+    RString announcement;
 
     for (int i = 0; i < snapshot.names.Size(); i++)
     {
@@ -1114,7 +1124,8 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
             }
         }
         row.xpSeen = xp;
-        if (ladder > row.rankSeen)
+        const bool promoted = ladder > row.rankSeen;
+        if (promoted)
         {
             row.rankSeen = ladder;
             char line[256];
@@ -1131,6 +1142,7 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
         }
 
         // --- awards (A2 / A3 / A4) --------------------------------------
+        bool awarded = false;
         if (_progression)
         {
             const int thresholds[2] = {kFirstAwardRank, kSecondAwardRank};
@@ -1141,6 +1153,7 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
                 {
                     continue;
                 }
+                const RString before = DisplayName(row);
                 AwardSlot(row, a);
                 const RString after = DisplayName(row);
                 char line[320];
@@ -1148,8 +1161,7 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
                 {
                     snprintf(line, sizeof(line), "Took the name %s.", (const char*)after);
                     RecordDeed(row, RString(line), LDAward);
-                    snprintf(line, sizeof(line), "%s is now known as %s.", (const char*)row.baseName,
-                             (const char*)after);
+                    snprintf(line, sizeof(line), "%s is now known as %s.", (const char*)before, (const char*)after);
                 }
                 else
                 {
@@ -1157,9 +1169,29 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
                     snprintf(line, sizeof(line), "%s has become a legend of the resistance.", (const char*)after);
                 }
                 WriteEntry(row, RString(line), JKGood);
+                if (announcement.GetLength() > 0)
+                {
+                    announcement = announcement + RString("\n\n");
+                }
+                announcement = announcement + RString(line);
+                awarded = true;
                 wroteJournal = true;
                 touched = true;
             }
+        }
+
+        // The native poll owns the announcement as well as the award. A script
+        // promotion hint can run before the poll and show the old name, or run
+        // afterwards and immediately overwrite the nickname event.
+        if (_progression && promoted && !awarded)
+        {
+            char line[320];
+            snprintf(line, sizeof(line), "%s promoted to %s.", (const char*)DisplayName(row), kRankLadder[ladder]);
+            if (announcement.GetLength() > 0)
+            {
+                announcement = announcement + RString("\n\n");
+            }
+            announcement = announcement + RString(line);
         }
 
         // --- body and identity (A9) --------------------------------------
@@ -1229,12 +1261,38 @@ void LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool live)
         }
     }
 
+    if (_progression)
+    {
+        // Bind can create a row before its first poll, and the script can
+        // publish a stale status before any award. Refresh even when no row
+        // changed in THIS poll. SetStatus itself ignores identical text.
+        RString roster;
+        for (int i = 0; i < _rows.Size(); ++i)
+        {
+            const LegendRow& row = _rows[i];
+            if (row.kind != LKCompanion)
+            {
+                continue;
+            }
+            if (roster.GetLength() > 0)
+            {
+                roster = roster + RString(", ");
+            }
+            const char* rank =
+                row.rankSeen >= 0 && row.rankSeen < NRankLadder ? kRankLadder[row.rankSeen] : kRankLadder[0];
+            roster = roster + DisplayName(row) + RString(" (") + RString(row.alive ? rank : "fallen") + RString(")");
+        }
+        const unsigned beforeStatus = Journal::Instance().Revision();
+        Journal::Instance().SetStatus(RString("Companions"), roster);
+        wroteJournal = wroteJournal || Journal::Instance().Revision() != beforeStatus;
+    }
     if (touched)
     {
         // Journal::AddEntry already bumped the journal's revision, so a poll that
         // wrote a line must not bump it a second time.
         Touch(!wroteJournal);
     }
+    return announcement;
 }
 
 // ---------------------------------------------------------------------------
@@ -1464,8 +1522,8 @@ void LegendRegistry::EnsureBossRoles()
     }
     // A cold cache means a load, or a mission re-init after the seeding tick.
     // Only role/roleRequested/roleResolved/guardCount are persisted, so the
-    // class names are re-derived from the live faction here.  This can only
-    // matter to a spawn, and a loaded campaign never spawns a boss again.
+    // class names are re-derived from the live faction here, including for a
+    // pending commander whose first creation had not succeeded before saving.
     const ZoneRegistry& registry = ZoneRegistry::Instance();
     LegendRoleCapability cap;
     if (const FactionRecord* faction = registry.FindFactionForSide(registry.OccupierSide()))
@@ -1648,17 +1706,21 @@ void LegendRegistry::SpawnBosses()
         {
             continue;
         }
+        if (row.spawnRetryTicks > 0)
+        {
+            --row.spawnRetryTicks;
+            continue;
+        }
         if (row.roleResolved.GetLength() == 0 || row.zoneName.GetLength() == 0)
         {
             continue; // never placed: this row has no stand and never will
         }
-        // The latch goes down BEFORE anything is created, so a fault or an
-        // early return below costs this campaign a commander rather than
-        // letting it build a second copy of one.
+        // Latch before creating actors. SpawnOneBoss cleans up a failed
+        // creation completely, so only that path may release the latch.
         row.spawned = true;
         if (!SpawnOneBoss(row))
         {
-            LOG_WARN(Core, "Legends: '{}' could not be spawned near '{}' - he stays unlocated for this campaign",
+            LOG_WARN(Core, "Legends: '{}' could not be spawned near '{}' - retrying after 30 ticks",
                      (const char*)row.id, (const char*)row.zoneName);
             LatchSpawnFailure(row);
         }
@@ -1668,18 +1730,17 @@ void LegendRegistry::SpawnBosses()
     }
 }
 
-// THE PLACEMENT GOES WITH THE FAILURE.  SpawnOneBoss returns false before it
-// ever reaches CreateBossMarker or AssertBossObjective, so a failed row has
-// neither; leaving zoneName populated would advertise a commander "near
-// Outpost" who does not exist and can never be killed, and would let the load
-// pass manufacture the marker and the objective he never had (both key off
-// zoneName).  Clearing it is what keeps the three readings agreeing: they all
-// read this row, and now all three say nothing.  The latch itself STAYS DOWN -
-// a failure costs the campaign a commander, it does not earn a retry.
+// A temporary group limit must not permanently remove one of the three
+// commanders. False from SpawnOneBoss means all partial actors were cleaned
+// up. Preserve the resolved identity and stand, and retry after a backoff.
+// The bodySeen guard keeps a dead/deleted commander from ever being rebuilt.
 void LegendRegistry::LatchSpawnFailure(LegendRow& row)
 {
-    row.zoneName = RString();
-    row.pos = VZero;
+    if (!row.bodySeen && !row.body.GetLink() && !row.defeated)
+    {
+        row.spawned = false;
+        row.spawnRetryTicks = 30;
+    }
 }
 
 bool LegendRegistry::SpawnOneBoss(LegendRow& row)
@@ -1702,8 +1763,8 @@ bool LegendRegistry::SpawnOneBoss(LegendRow& row)
     AIGroup* grp = CreateSideGroup(EnsureSideCenter(occupier));
     if (!grp)
     {
-        // MaxGroups on the occupier center.  A spawn failure, not a retry: the
-        // latch is already down.
+        // MaxGroups on the occupier center. No actors exist yet, so this
+        // creation can be retried once the group budget has room.
         LOG_WARN(Core, "Legends: group budget exhausted on side '{}'", (const char*)occupier);
         return false;
     }
@@ -2004,7 +2065,7 @@ static RString BossMarkerText(const RString& name, const RString& role, bool def
     char text[320];
     if (defeated)
     {
-        snprintf(text, sizeof(text), "%s (defeated)", (const char*)name);
+        snprintf(text, sizeof(text), "%s, %s (defeated)", (const char*)name, (const char*)role);
     }
     else
     {

@@ -222,7 +222,10 @@ static const char* const kHostileTitle[] = {"The Oppressor", "The Occupier",    
 // Counts come from the arrays themselves: a hand-written count
 // could disagree with its table, sizeof cannot.
 #define UD_COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
-#define UD_POOL_ROW(r) {#r, kFirst_##r, UD_COUNT(kFirst_##r), kLast_##r, UD_COUNT(kLast_##r)}
+#define UD_POOL_ROW(r)                                                       \
+    {                                                                        \
+        #r, kFirst_##r, UD_COUNT(kFirst_##r), kLast_##r, UD_COUNT(kLast_##r) \
+    }
 const NamePool kNamePools[] = {
     UD_POOL_ROW(west_africa),
     UD_POOL_ROW(east_africa),
@@ -467,6 +470,16 @@ RString AssembleDisplayName(const NameParts& parts)
         }
     }
     return RString();
+}
+
+int EnemyNamePool(int factionPool)
+{
+    const char* region = NamePoolAt(factionPool).region;
+    if (strcmp(region, "western") == 0 || strcmp(region, "british") == 0 || strcmp(region, "israeli") == 0)
+    {
+        return factionPool;
+    }
+    return FindNamePool("western");
 }
 
 int ResolveNamePool(const char* namePoolValue, const char* side, const char* factionForLog)

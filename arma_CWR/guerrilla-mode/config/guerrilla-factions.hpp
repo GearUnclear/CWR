@@ -68,7 +68,9 @@
 //       registry ("levant", "israeli", "balkans", ...); the tone bank that
 //       supplies prefixes, describers and titles is chosen by campaign
 //       ALLEGIANCE, not by this key. Missing or unknown falls back by side:
-//       WEST western, EAST eastern_europe, GUER levant (one warn per faction)
+//       WEST western, EAST eastern_europe, GUER levant (one warn per faction).
+//       Enemy Legends use the western_evil bank: western/british/israeli,
+//       falling back to western when this key selects a different region.
 //   civClassCount + civClass<N>  CIV only: the population bodies, numbered
 //       keys and not an array because gmFactionValue skips array entries
 //   civVehicles[]                CIV only: ambient road-traffic hulls

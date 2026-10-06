@@ -110,6 +110,8 @@ struct LegendPlacementResult
 //   the picked stands > larger Camp distance > lower sample index.
 // The order ends at the sample index on purpose: no comparison ever leans on
 // sort stability, so the same geometry yields the same stands on every compiler.
+// If the ranked picks leave fewer than three, a feasible-triple search takes
+// precedence over preferences so a preferred stand cannot shrink the roster.
 // `seed` is the campaign seed.  It is accepted (and persisted by the caller) so
 // this call site never has to change if a future revision wants to jitter
 // equally ranked candidates; the ranking as it stands is fully deterministic and
