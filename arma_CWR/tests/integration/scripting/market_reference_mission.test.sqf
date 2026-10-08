@@ -82,7 +82,8 @@ triSimUntil { (gmJournalObjectiveState "hqEstablish") == "DONE" }
 // -- stash the rifle, take it back, the emptied holder survives ------------------
 mkWpn = primaryWeapon aP
 triAssert [mkWpn != ""]
-aP setPos [(gmHqCachePos select 0) + 1, (gmHqCachePos select 1) + 1, 0]
+// Indoor layouts may use an upper floor; preserve the cache's ATL height.
+aP setPos [(gmHqCachePos select 0) + 1, (gmHqCachePos select 1) + 1, gmHqCachePos select 2]
 triSimUntil { gmMktCacheActive }
 triAssertGe [(gmMktCacheActs select 0), 0]
 [aP, aP, gmMktCacheActs select 0] exec "\gmcore\scripts\market_action.sqs"

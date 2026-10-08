@@ -10,15 +10,17 @@
 //     first Simulate tick of a fresh campaign establishes the HQ there and
 //     relocates the player beside it) or the in-mission "Establish /
 //     Move headquarters here" action (scripts/market.sqs -> gmHqEstablish).
-//     Re-establishing MOVES the HQ: the cache object is moved with its
-//     contents, the garage ring relocates (vehicles left behind are
-//     released), and the move is counted for the script-side debit.
+//     Re-establishing MOVES the HQ: the cache contents travel with it
+//     (changing layout replaces the holder), the garage ring relocates
+//     (vehicles left behind are released), and the move is counted for the
+//     script-side debit.
 //   * Siting: the best enterable building inside the zone (Paths LOD, at
 //     least hqMinPos AI positions, not destroyed; most positions wins, then
-//     nearest the zone centre) holds the cache indoors and the garage ring
-//     sits beside it.  A zone without such a building (a CAMP, a hamlet)
+//     nearest the zone centre) holds a map desk and single crate at validated
+//     floor positions; the garage ring sits beside it. A zone without room
 //     falls back to the EDGE OF TOWN: an off-road, dry, free spot on the
-//     outer rings of the zone area, cache and garage together.
+//     outer rings of the zone area, with an open tent and camouflaged crate
+//     stack beside the garage. Both cache layouts start empty.
 //   * Garage: any Transport inside garageRadius of the garage spot can be
 //     locked (beep-beep) - lock state and invulnerability are re-asserted
 //     every tick for the live rows, so neither needs its own serialization;
@@ -56,7 +58,7 @@ struct BaseTuning
 };
 
 // One enterable-building candidate for the pure HQ picker.  The engine path
-// fills these from GWorld's building table; unit tests inject values.
+// fills these from terrain cells and GWorld's building table; tests inject values.
 struct HqCandidate
 {
     int index = -1; // caller's handle (world building index)
@@ -103,6 +105,7 @@ class GuerrillaBase : public SerializeClass
     Vector3 CachePos() const { return _established ? _cachePos : VZero; }
     EntityAI* Building() const;
     EntityAI* Cache() const;
+    EntityAI* Prop() const;
     int MoveCount() const { return _moveCount; }
     // the zone (any type) whose area contains pos; -1 when none
     int ZoneAt(Vector3Par pos) const;
@@ -180,10 +183,12 @@ class GuerrillaBase : public SerializeClass
     };
 
     // world-touching internals (engine path only)
-    bool PickBuilding(int zoneIndex, EntityAI*& outBuilding, Vector3& outInterior) const;
+    bool PickBuilding(int zoneIndex, EntityAI*& outBuilding, Vector3& outInterior, Vector3& outDesk) const;
     bool ComputeOutdoorSpot(Vector3Par anchor, const float* ringRadii, int nRings, Vector3& out) const;
     EntityAI* CreateCache(Vector3Par where, bool indoors) const;
     void MoveCache(EntityAI* cache, Vector3Par where, bool indoors) const;
+    EntityAI* CreateProp(Vector3Par where, bool indoors) const;
+    void SyncVisuals();
     void ReleaseRow(int i);
     void AssertRow(GarageRow& row);
     void Beep(EntityAI* veh);
@@ -203,6 +208,9 @@ class GuerrillaBase : public SerializeClass
     Vector3 _cachePos = VZero;  // where the holder sits (interior point or outdoors)
     LLink<EntityAI> _building;  // null for an outdoor HQ
     LLink<EntityAI> _cache;
+    LLink<EntityAI> _prop;
+    Vector3 _propPos = VZero;
+    bool _layoutPlaced = false; // absent in older saves; upgraded on the first tick
     AutoArray<GarageRow> _rows;
     int _moveCount = 0;
     bool _autoTried = false; // start-town election attempted (serialized)

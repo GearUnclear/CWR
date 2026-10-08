@@ -81,6 +81,9 @@ void GuerrillaBase::Clear()
     _cachePos = VZero;
     _building = nullptr;
     _cache = nullptr;
+    _prop = nullptr;
+    _propPos = VZero;
+    _layoutPlaced = false;
     _rows.Clear();
     _moveCount = 0;
     _autoTried = false;
@@ -146,6 +149,11 @@ EntityAI* GuerrillaBase::Building() const
 EntityAI* GuerrillaBase::Cache() const
 {
     return _established ? _cache.GetLink() : nullptr;
+}
+
+EntityAI* GuerrillaBase::Prop() const
+{
+    return _established ? _prop.GetLink() : nullptr;
 }
 
 int GuerrillaBase::ZoneAt(Vector3Par pos) const
@@ -271,60 +279,172 @@ void GuerrillaBase::AddGarageRowForTest()
 
 // the best enterable building inside the zone area: Paths LOD present, at
 // least hqMinPos AI positions, standing; most positions wins, nearest the
-// zone centre breaks ties (PickHqBuilding).  The interior point is the
-// building's first AI position (House.hpp: GetPos -> path point index,
-// IPaths::GetPosition -> animated world point).
-bool GuerrillaBase::PickBuilding(int zoneIndex, EntityAI*& outBuilding, Vector3& outInterior) const
+// zone centre breaks ties (PickHqBuilding). The interior layout uses a
+// validated pair of floor positions near its AI path points.
+// AI positions often sit at windows or outside an entrance. Validate an
+// actual footprint: supported floor, overhead cover, and no wall through the
+// crate/desk. Inset window positions toward the house before trying them.
+static bool InteriorFootprint(Poseidon::Building* building, Vector3& point)
+{
+    Object* supportObject = nullptr;
+    float floor = GLandscape->RoadSurfaceY(point + Vector3(0, 0.6f, 0), nullptr, nullptr, nullptr, &supportObject);
+    if (supportObject != building || fabsf(floor - point.Y()) > 1.0f)
+    {
+        return false;
+    }
+    point[1] = floor + 0.02f;
+    CollisionBuffer roof;
+    building->Intersect(roof, point + Vector3(0, 1.2f, 0), point + Vector3(0, 8, 0), 0, ObjIntersectGeom);
+    if (roof.Size() == 0)
+    {
+        return false;
+    }
+    const Vector3 corners[] = {Vector3(-0.85f, 0, -0.85f), Vector3(-0.85f, 0, 0.85f), Vector3(0.85f, 0, -0.85f),
+                               Vector3(0.85f, 0, 0.85f)};
+    for (const Vector3& corner : corners)
+    {
+        for (float height : {0.25f, 0.9f})
+        {
+            CollisionBuffer walls;
+            Vector3 start = point + Vector3(0, height, 0);
+            building->Intersect(walls, start, start + corner, 0, ObjIntersectGeom);
+            if (walls.Size() > 0)
+            {
+                return false;
+            }
+        }
+        Vector3 foot = point + corner;
+        Object* cornerObject = nullptr;
+        float height = GLandscape->RoadSurfaceY(foot + Vector3(0, 0.2f, 0), nullptr, nullptr, nullptr, &cornerObject);
+        if (cornerObject != building || fabsf(height - floor) > 0.15f)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool FindInteriorLayout(Poseidon::Building* building, Vector3& cache, Vector3& desk)
+{
+    AutoArray<Vector3> points;
+    for (int i = 0; i < building->NPos(); i++)
+    {
+        Vector3 path = building->IPaths::GetPosition(building->IPaths::GetPos(i));
+        Vector3 inward = building->Position() - path;
+        inward[1] = 0;
+        float length = inward.Size();
+        if (length > 0.01f)
+        {
+            inward *= 1.0f / length;
+        }
+        for (float inset : {0.0f, 0.75f, 1.25f, 1.75f})
+        {
+            Vector3 p = path + inward * inset;
+            if (InteriorFootprint(building, p))
+            {
+                points.Add(p);
+            }
+        }
+    }
+    float best = 8.0f;
+    bool found = false;
+    for (int i = 0; i < points.Size(); i++)
+    {
+        for (int j = i + 1; j < points.Size(); j++)
+        {
+            float d = Dist2D(points[i], points[j]);
+            if (fabsf(points[i].Y() - points[j].Y()) > 0.25f || d < 2.0f || d >= best)
+            {
+                continue;
+            }
+            CollisionBuffer wall;
+            building->Intersect(wall, points[i] + Vector3(0, 0.8f, 0), points[j] + Vector3(0, 0.8f, 0), 0,
+                                ObjIntersectGeom);
+            if (wall.Size() == 0)
+            {
+                cache = points[i];
+                desk = points[j];
+                best = d;
+                found = true;
+            }
+        }
+    }
+    return found;
+}
+
+bool GuerrillaBase::PickBuilding(int zoneIndex, EntityAI*& outBuilding, Vector3& outInterior, Vector3& outDesk) const
 {
     outBuilding = nullptr;
     const ZoneRegistry& registry = ZoneRegistry::Instance();
     const ZoneRecord* z = registry.GetZone(zoneIndex);
-    if (!z || !GWorld)
+    if (!z || !GWorld || !GLandscape)
     {
         return false;
     }
     float area = registry.Tuning().zoneArea;
     AutoArray<HqCandidate> candidates;
-    for (int i = 0; i < GWorld->NBuildings(); i++)
+    RefArray<Poseidon::Building> buildings;
+    auto consider = [&](Poseidon::Building* b)
     {
-        Entity* e = GWorld->GetBuilding(i);
-        Poseidon::Building* b = dyn_cast<Poseidon::Building>(e);
-        if (!b)
+        if (!b || b->ToDelete() || b == _prop.GetLink())
         {
-            continue;
+            return;
         }
         float d = Dist2D(b->Position(), z->pos);
-        if (d > area)
-        {
-            continue;
-        }
         LODShapeWithShadow* shape = b->GetShape();
-        if (!shape || shape->FindPaths() < 0)
+        if (d > area || !shape || shape->FindPaths() < 0 || b->NPos() < _tuning.hqMinPos || b->IsDammageDestroyed())
         {
-            continue;
+            return;
         }
-        if (b->NPos() < _tuning.hqMinPos || b->IsDammageDestroyed())
+        Vector3 cache, desk;
+        if (!FindInteriorLayout(b, cache, desk))
         {
-            continue;
+            return;
+        }
+        for (int i = 0; i < buildings.Size(); i++)
+        {
+            if (buildings[i] == b)
+            {
+                return;
+            }
         }
         HqCandidate c;
-        c.index = i;
+        c.index = buildings.Add(b);
         c.nPos = b->NPos();
         c.dist = d;
         candidates.Add(c);
+    };
+    // Terrain houses remain in the landscape after a load; the world's
+    // serialized building list need not contain every untouched map house.
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, z->pos, z->pos, area);
+    for (int x = xMin; x <= xMax; x++)
+    {
+        for (int zi = zMin; zi <= zMax; zi++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(zi, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                consider(dyn_cast<Poseidon::Building>(list[i]));
+            }
+        }
+    }
+    for (int i = 0; i < GWorld->NBuildings(); i++)
+    {
+        consider(dyn_cast<Poseidon::Building>(GWorld->GetBuilding(i)));
     }
     int best = PickHqBuilding(candidates);
     if (best < 0)
     {
         return false;
     }
-    Poseidon::Building* b = dyn_cast<Poseidon::Building>(GWorld->GetBuilding(candidates[best].index));
+    Poseidon::Building* b = buildings[candidates[best].index];
     if (!b)
     {
         return false;
     }
     // IPaths-qualified: Object carries its own GetPos/GetPosition overloads
-    outInterior = b->IPaths::GetPosition(b->IPaths::GetPos(0));
+    FindInteriorLayout(b, outInterior, outDesk);
     outBuilding = b;
     return true;
 }
@@ -385,7 +505,7 @@ bool GuerrillaBase::ComputeOutdoorSpot(Vector3Par anchor, const float* ringRadii
     return true;
 }
 
-// a WeaponHolder flagged keep-when-empty and tracked by the StashRegistry -
+// An empty, visible WeaponHolder subclass tracked by the StashRegistry -
 // mirrors DropWeapon (Transport.cpp) minus the drop grid.  Indoors the
 // holder is set straight onto the interior point: PlaceOnSurface ignores
 // building floors (Simul.cpp, Static branch) and would drop it to the
@@ -396,7 +516,7 @@ EntityAI* GuerrillaBase::CreateCache(Vector3Par where, bool indoors) const
     {
         return nullptr;
     }
-    Ref<EntityAI> veh = NewVehicle("WeaponHolder");
+    Ref<EntityAI> veh = NewVehicle(indoors ? "GMHqCacheIndoor" : "GMHqCacheOutdoor");
     if (!veh)
     {
         return nullptr;
@@ -438,6 +558,14 @@ EntityAI* GuerrillaBase::CreateCache(Vector3Par where, bool indoors) const
     {
         veh->PlaceOnSurface(transform);
     }
+    else if (veh->GetShape())
+    {
+        // Models are centred on their bounding box; seat their lowest vertex
+        // on the interior path point, without snapping to terrain below it.
+        Vector3 seated = transform.Position();
+        seated[1] -= veh->GetShape()->Min().Y();
+        transform.SetPosition(seated);
+    }
     veh->SetTransform(transform);
     veh->Init(transform);
 
@@ -448,6 +576,8 @@ EntityAI* GuerrillaBase::CreateCache(Vector3Par where, bool indoors) const
     }
 
     holder->SetKeepCargoWhenEmpty(true);
+    holder->ClearWeaponCargo();
+    holder->ClearMagazineCargo();
     StashRegistry::Instance().Register(holder);
     return holder;
 }
@@ -466,8 +596,111 @@ void GuerrillaBase::MoveCache(EntityAI* cache, Vector3Par where, bool indoors) c
     {
         cache->PlaceOnSurface(trans);
     }
+    else if (cache->GetShape())
+    {
+        Vector3 seated = trans.Position();
+        seated[1] -= cache->GetShape()->Min().Y();
+        trans.SetPosition(seated);
+    }
     cache->MoveNetAware(trans);
     cache->OnPositionChanged();
+}
+
+EntityAI* GuerrillaBase::CreateProp(Vector3Par where, bool indoors) const
+{
+    Ref<EntityAI> prop = NewVehicle(indoors ? "GMHqDesk" : "GMHqTent");
+    if (!prop)
+    {
+        return nullptr;
+    }
+    Matrix4 transform;
+    transform.SetOrientation(M3Identity);
+    transform.SetPosition(where);
+    if (indoors && prop->GetShape())
+    {
+        Vector3 seated = where;
+        seated[1] -= prop->GetShape()->Min().Y();
+        transform.SetPosition(seated);
+    }
+    else
+    {
+        prop->PlaceOnSurface(transform);
+    }
+    prop->SetTransform(transform);
+    prop->Init(transform);
+    GWorld->AddBuilding(prop);
+    if (GWorld->GetMode() == GModeNetware)
+    {
+        GetNetworkManager().CreateVehicle(prop, VLTBuilding, "", -1);
+    }
+    return prop;
+}
+
+void GuerrillaBase::SyncVisuals()
+{
+    if (!_layoutPlaced)
+    {
+        // Older saves have the inventory holder but no scenery/layout fields.
+        // Preserve its cargo while upgrading the old invisible holder below.
+        Poseidon::Building* building = dyn_cast<Poseidon::Building>(_building.GetLink());
+        bool interior = _indoors && building && FindInteriorLayout(building, _cachePos, _propPos);
+        if (!interior)
+        {
+            const float rings[] = {12.0f, 16.0f, 20.0f};
+            if (!ComputeOutdoorSpot(_garagePos, rings, 3, _propPos))
+            {
+                return;
+            }
+            _indoors = false;
+            _building = nullptr;
+            _hqPos = _propPos;
+            _cachePos = _propPos + Vector3(4.5f, 0, 0);
+            _cachePos[1] = GLOB_LAND->SurfaceYAboveWater(_cachePos.X(), _cachePos.Z());
+        }
+        _layoutPlaced = true;
+    }
+
+    EntityAI* cache = _cache.GetLink();
+    const char* cacheClass = _indoors ? "GMHqCacheIndoor" : "GMHqCacheOutdoor";
+    if (!cache || cache->ToDelete() || stricmp(cache->GetType()->GetName(), cacheClass) != 0)
+    {
+        VehicleSupply* replacement = dyn_cast<VehicleSupply>(CreateCache(_cachePos, _indoors));
+        if (replacement)
+        {
+            VehicleSupply* old = dyn_cast<VehicleSupply>(cache);
+            if (old && !old->ToDelete())
+            {
+                for (int i = 0; i < old->GetWeaponCargoSize(); i++)
+                {
+                    replacement->AddWeaponCargo(const_cast<WeaponType*>(old->GetWeaponCargo(i)));
+                }
+                // Keep the actual magazine objects, including partially used
+                // ammo counts, instead of creating fresh full magazines.
+                for (int i = 0; i < old->GetMagazineCargoSize(); i++)
+                {
+                    replacement->AddMagazineCargo(const_cast<Magazine*>(old->GetMagazineCargo(i)));
+                }
+                old->SetKeepCargoWhenEmpty(true);
+                old->ClearWeaponCargo();
+                old->ClearMagazineCargo();
+                StashRegistry::Instance().Unregister(old);
+                old->SetDelete();
+            }
+            _cache = replacement;
+            _cacheWarned = false;
+        }
+        else if (!_cacheWarned)
+        {
+            LOG_WARN(Core, "GuerrillaBase: HQ cache class unavailable; install guerrilla-hq.hpp");
+            _cacheWarned = true;
+        }
+    }
+
+    EntityAI* prop = _prop.GetLink();
+    if (!prop || prop->ToDelete())
+    {
+        _prop = CreateProp(_propPos, _indoors);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +731,8 @@ bool GuerrillaBase::Establish(Vector3Par pos)
     Vector3 hqPos = VZero;
     Vector3 garagePos = VZero;
     Vector3 cachePos = VZero;
-    bool indoors = PickBuilding(zoneIndex, building, interior);
+    Vector3 propPos = VZero;
+    bool indoors = PickBuilding(zoneIndex, building, interior, propPos);
     if (indoors)
     {
         // the garage ring sits beside the house; no ring spot at all means
@@ -529,6 +763,14 @@ bool GuerrillaBase::Establish(Vector3Par pos)
         hqPos = garagePos;
         cachePos = garagePos + Vector3(0, 0, CacheAside);
         cachePos[1] = GLOB_LAND->SurfaceYAboveWater(cachePos.X(), cachePos.Z());
+        const float propRings[] = {12.0f, 16.0f, 20.0f};
+        if (!ComputeOutdoorSpot(garagePos, propRings, 3, propPos))
+        {
+            return false;
+        }
+        hqPos = propPos;
+        cachePos = propPos + Vector3(4.5f, 0, 0);
+        cachePos[1] = GLOB_LAND->SurfaceYAboveWater(cachePos.X(), cachePos.Z());
     }
 
     bool moving = _established;
@@ -536,15 +778,6 @@ bool GuerrillaBase::Establish(Vector3Par pos)
     if (cache)
     {
         MoveCache(cache, cachePos, indoors);
-    }
-    else
-    {
-        cache = CreateCache(cachePos, indoors);
-        if (!cache)
-        {
-            // degrade non-fatal: the HQ stands, the tick self-heals the holder
-            LOG_WARN(Core, "GuerrillaBase: WeaponHolder unavailable - cache deferred to the next tick");
-        }
     }
 
     _established = true;
@@ -555,7 +788,15 @@ bool GuerrillaBase::Establish(Vector3Par pos)
     _cachePos = cachePos;
     _building = building;
     _cache = cache;
+    if (_prop.GetLink())
+    {
+        _prop->SetDelete();
+    }
+    _prop = nullptr;
+    _propPos = propPos;
+    _layoutPlaced = true;
     _cacheWarned = false;
+    SyncVisuals();
     if (moving)
     {
         _moveCount++;
@@ -922,24 +1163,7 @@ void GuerrillaBase::Simulate(float deltaT)
         AssertRow(_rows[i]);
     }
 
-    // self-heal: a cache that did not survive (or was never created) is
-    // recreated at the serialized spot; its contents are whatever the
-    // holder carries now (the holder rides the world's building serializer)
-    if (!_cache.GetLink())
-    {
-        EntityAI* cache = CreateCache(_cachePos, _indoors);
-        if (cache)
-        {
-            _cache = cache;
-            LOG_INFO(Core, "GuerrillaBase: headquarters cache recreated at [{:.0f},{:.0f}]", _cachePos.X(),
-                     _cachePos.Z());
-        }
-        else if (!_cacheWarned)
-        {
-            LOG_WARN(Core, "GuerrillaBase: WeaponHolder unavailable - the headquarters has no cache");
-            _cacheWarned = true;
-        }
-    }
+    SyncVisuals();
 }
 
 // ---------------------------------------------------------------------------
@@ -974,6 +1198,9 @@ LSError GuerrillaBase::Serialize(ParamArchive& ar)
     // the refs resolve on the second load pass
     PARAM_CHECK(ar.SerializeRef("building", _building, 1))
     PARAM_CHECK(ar.SerializeRef("cache", _cache, 1))
+    PARAM_CHECK(ar.SerializeRef("prop", _prop, 1))
+    PARAM_CHECK(ar.Serialize("propPos", _propPos, 1, VZero))
+    PARAM_CHECK(ar.Serialize("layoutPlaced", _layoutPlaced, 1, false))
     PARAM_CHECK(ar.Serialize("Garage", _rows, 1))
 
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)

@@ -132,6 +132,11 @@ static GameValue GmHqCache(const GameState* /*state*/)
     return GameValueExt((Object*)GuerrillaBase::Instance().Cache());
 }
 
+static GameValue GmHqProp(const GameState* /*state*/)
+{
+    return GameValueExt((Object*)GuerrillaBase::Instance().Prop());
+}
+
 // gmHqMoveCount -> scalar
 static GameValue GmHqMoveCount(const GameState* /*state*/)
 {
@@ -229,6 +234,7 @@ INIT_MODULE(GuerrillaBase, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmHqCachePos", GmHqCachePos));
     GGameState.NewNularOp(GameNular(GameObject, "gmHqBuilding", GmHqBuilding));
     GGameState.NewNularOp(GameNular(GameObject, "gmHqCache", GmHqCache));
+    GGameState.NewNularOp(GameNular(GameObject, "gmHqProp", GmHqProp));
     GGameState.NewNularOp(GameNular(GameScalar, "gmHqMoveCount", GmHqMoveCount));
     GGameState.NewNularOp(GameNular(GameBool, "gmHqIndoors", GmHqIndoors));
     GGameState.NewFunction(GameFunction(GameScalar, "gmHqValue", GmHqValue, GameString));

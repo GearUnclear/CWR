@@ -55,6 +55,8 @@ try {
     $extra = [IO.File]::ReadAllText((Join-Path $game 'BIN/config-extra.cpp'))
     Assert ($extra.Contains('// unrelated package configuration')) 'Existing package config lost'
     Assert ($extra.Contains('#include "guerrilla-factions.hpp"')) 'Faction include missing'
+    Assert ($extra.Contains('#include "guerrilla-hq.hpp"')) 'HQ include missing'
+    Assert (Test-Path -LiteralPath (Join-Path $game 'BIN/guerrilla-hq.hpp')) 'HQ classes missing'
     Assert (Test-Path -LiteralPath (Join-Path $lobo 'Bin/config.cpp')) 'LoBo factions missing'
     $backup = @(Get-ChildItem -LiteralPath (Join-Path $game '.ud-backups') -Recurse -File | Where-Object Name -EQ 'resource-extra.cpp')
     Assert ($backup.Count -eq 1) 'Expected original menu backup'
@@ -69,6 +71,7 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $game 'Missions/MyMission.Abel/mission.sqm')) 'Unrelated mission lost'
     $extra = [IO.File]::ReadAllText((Join-Path $game 'BIN/config-extra.cpp'))
     Assert (([regex]::Matches($extra, '#include "guerrilla-factions.hpp"')).Count -eq 1) 'Duplicate include'
+    Assert (([regex]::Matches($extra, '#include "guerrilla-hq.hpp"')).Count -eq 1) 'Duplicate HQ include'
     $manifest = Get-Content -LiteralPath (Join-Path $repo 'guerrilla-mode/runtime/manifest.json') -Raw | ConvertFrom-Json
     foreach ($entry in $manifest.files) {
         # Resolve the original uppercase BIN in a case-sensitive filesystem too.

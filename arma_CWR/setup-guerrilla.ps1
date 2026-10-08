@@ -90,7 +90,7 @@ foreach ($entry in $manifest.files) {
     if (Test-Path -LiteralPath $target -PathType Container) { throw "Expected a file: $target" }
     $plan += [pscustomobject]@{ Source=$source; Target=$target; Hash=$entry.sha256 }
 }
-foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','gmcore','Missions')) {
+foreach ($relative in @('bin/config-extra.cpp','bin/guerrilla-factions.hpp','bin/guerrilla-hq.hpp','gmcore','Missions')) {
     $path = Resolve-Relative $GameDir $relative
     Assert-PlainPath $path
     if (Test-Path -LiteralPath $path -PathType Container) {

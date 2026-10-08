@@ -13,3 +13,4 @@
 // exists at all; when one is already there it appends nothing but the include
 // line. Never overwrite a package's own file.
 #include "guerrilla-factions.hpp"
+#include "guerrilla-hq.hpp"

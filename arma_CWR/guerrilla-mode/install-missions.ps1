@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Installs the Guerrilla Mode global faction library, the shared script core
+    Installs the Guerrilla Mode faction and HQ classes, the shared script core
     and the mission templates into the game data directory.
 
 .DESCRIPTION
     Installs three things, in this order:
 
-      1. the GLOBAL FACTION LIBRARY, guerrilla-mode/config ->
-         <GameDir>\bin\guerrilla-factions.hpp, pulled in by
+      1. the GLOBAL CONFIG LIBRARIES, guerrilla-mode/config ->
+         <GameDir>\bin\guerrilla-factions.hpp and guerrilla-hq.hpp, pulled in by
          <GameDir>\bin\config-extra.cpp
       2. the SHARED SCRIPT CORE, guerrilla-mode/core -> <GameDir>\gmcore\
       3. every guerrilla-mode/mission/<Prefix>.<World> template ->
@@ -218,9 +218,8 @@ function Get-PboWorldEntries {
 
 # ---- 1. the global faction library -> <GameDir>\bin ------------------------
 $configRoot = Join-Path $PSScriptRoot 'config'
-$libSrc = Join-Path $configRoot 'guerrilla-factions.hpp'
 $extraSrc = Join-Path $configRoot 'config-extra.cpp'
-foreach ($src in @($libSrc, $extraSrc)) {
+foreach ($src in @((Join-Path $configRoot 'guerrilla-factions.hpp'), (Join-Path $configRoot 'guerrilla-hq.hpp'), $extraSrc)) {
     if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
         throw "Faction library source not found: $src"
     }
@@ -234,39 +233,41 @@ if (-not $binDir) {
     throw "No bin\ (or BIN\) directory in $GameDir - cannot install the global faction library"
 }
 
-$libDest = Join-Path $binDir 'guerrilla-factions.hpp'
-$libExisting = Resolve-ChildFile -Parent $binDir -Name 'guerrilla-factions.hpp'
-if ($libExisting) { $libDest = $libExisting }
-$libSame = $false
-if (Test-Path -LiteralPath $libDest -PathType Leaf) {
-    $libSame = ([System.IO.File]::ReadAllText($libSrc) -ceq [System.IO.File]::ReadAllText($libDest))
-}
-if (-not $libSame) {
-    [System.IO.File]::Copy($libSrc, $libDest, $true)
-    Write-Output ("Installed: faction library -> {0}" -f $libDest)
-} else {
-    Write-Output ("Up to date: faction library -> {0}" -f $libDest)
+foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
+    $libSrc = Join-Path $configRoot $library
+    $libDest = Join-Path $binDir $library
+    $libExisting = Resolve-ChildFile -Parent $binDir -Name $library
+    if ($libExisting) { $libDest = $libExisting }
+    $libSame = $false
+    if (Test-Path -LiteralPath $libDest -PathType Leaf) {
+        $libSame = ([System.IO.File]::ReadAllText($libSrc) -ceq [System.IO.File]::ReadAllText($libDest))
+    }
+    if (-not $libSame) {
+        [System.IO.File]::Copy($libSrc, $libDest, $true)
+        Write-Output ("Installed: {0}" -f $libDest)
+    } else {
+        Write-Output ("Up to date: {0}" -f $libDest)
+    }
 }
 
-# config-extra.cpp: create from the repo seed when the package ships none,
-# otherwise append just the include line. Matching is on the include DIRECTIVE
-# so a hand-edited file with its own comment around it still counts.
-$includeLine = '#include "guerrilla-factions.hpp"'
+# Preserve the package's config; append only missing include directives.
 $extraDest = Resolve-ChildFile -Parent $binDir -Name 'config-extra.cpp'
 if (-not $extraDest) {
     $extraDest = Join-Path $binDir 'config-extra.cpp'
     [System.IO.File]::Copy($extraSrc, $extraDest, $false)
-    Write-Output ("Created: {0} (with the faction-library include)" -f $extraDest)
+    Write-Output ("Created: {0} (with the Guerrilla includes)" -f $extraDest)
 } else {
-    $extraText = [System.IO.File]::ReadAllText($extraDest)
-    if ($extraText -match '(?m)^\s*#include\s*"guerrilla-factions\.hpp"') {
-        Write-Output ("Up to date: {0} already includes the faction library" -f $extraDest)
-    } else {
-        $append = "`n// Uslu dur! Guerrilla Mode: the global faction library (CfgGuerrillaFactions),`n" +
-                  "// installed beside this file by guerrilla-mode/install-missions.ps1.`n" +
-                  $includeLine + "`n"
-        [System.IO.File]::AppendAllText($extraDest, $append)
-        Write-Output ("Appended: faction-library include -> {0}" -f $extraDest)
+    foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
+        $includeLine = '#include "' + $library + '"'
+        $extraText = [System.IO.File]::ReadAllText($extraDest)
+        if ($extraText -match ('(?m)^\s*#include\s*"' + [regex]::Escape($library) + '"')) {
+            Write-Output ("Up to date: {0} includes {1}" -f $extraDest, $library)
+        } else {
+            $append = "`n// Uslu dur! Guerrilla Mode; installed by guerrilla-mode/install-missions.ps1.`n" +
+                      $includeLine + "`n"
+            [System.IO.File]::AppendAllText($extraDest, $append)
+            Write-Output ("Appended: {0} include -> {1}" -f $library, $extraDest)
+        }
     }
 }
 
