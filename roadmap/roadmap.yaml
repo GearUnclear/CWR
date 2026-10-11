@@ -1721,7 +1721,7 @@ items:
     status: planned
     priority: 3
     depends_on: [civilian-ambience-layer, nearest-roads-command]
-    gh_issues: [35]
+    gh_issues: [35, 72]
     summary: >
       Plan 14 beyond the #8/#2 slice, at its stated Phase-2 scope: the occupier
       director running closures and reprisals (System 3), Fireforce heli QRF
@@ -1731,6 +1731,7 @@ items:
     log:
       - "Plan 14 also names sub-day quick wins needing no new C++: flags, a curfew clock, one hand-placed checkpoint."
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
+      - "2026-10-11: filed #72 as a researched first slice for town security: CITY zones are excluded from native garrisons, START TOWN moves HQ/player without guaranteeing nearby enemy content, and existing garrisons use random marker-centered placement. Scope covers persistent occupier security, road/building anchors, fixed guards versus responders, spawn accounting, and full-Remaster placement/lifecycle acceptance; broader off-screen simulation remains #71. Source audit only, no new live-play verification."
 
   - id: guerrilla-journal
     title: "Resistance dossier: the map notepad as the campaign's own record (Contents / Dispatches / Operations + Objectives, Suggested actions, Supplies, Resistance strength / People + The roster / Places + a page per zone / Chronicles + The record / Reference + the handbook chapters)"
@@ -1873,7 +1874,7 @@ items:
     phase: phase-3
     status: planned
     depends_on: [strategy-screen, occupation-systems, ai-perception-phase3]
-    gh_issues: [38]
+    gh_issues: [38, 71]
     summary: >
       Site's Phase 3 (Planned, 5%): the complete open-world insurgency across a
       full island with the whole occupier playbook: plan 14's Phase-3 systems
@@ -1887,6 +1888,7 @@ items:
     log:
       - "Plan 13's stated Phase-3 risk is C++ UI scope creep; mitigation is a read-only UIMap overlay prototype before any interactive Display work, and the rule that the game must be fun without the strategy screen."
       - "Capabilities the AI plans do not cover get faked in SQF for v1: native garrison/cover-hold, dynamic patrol routes, ambush-hold-fire FSM states, supply lines."
+      - "2026-10-11: opened #71 comparing island-scale vision with current source at d4e3a5e: persistent island records and economy/heat ticks coexist with player-distance capture/support freezes and bounded live encounters. Records template coverage gaps and proposes an explicit off-screen operational contract plus acceptance scenarios; implementation remains under #35/#38. Source audit only, no new playtest."
 
   # ---------------------------------------------------------------- release
   - id: player-installer
@@ -1911,10 +1913,11 @@ items:
   - id: setup-remaster-mode
     title: "Setup: Remaster install mode, keeping Bohemia's files and adding UD's beside them (issue #67)"
     phase: release
-    status: planned
+    status: done
     priority: 2
     depends_on: [portable-classic-runtime]
     gh_issues: [67]
+    commits: [f9e7c99]
     summary: >
       Turn setup-guerrilla.ps1's refusal of an official Remaster folder into a
       second install mode for the full Steam Remastered package. Keep
@@ -1928,6 +1931,7 @@ items:
     log:
       - "2026-10-11: filed. The engine reads exactly one bin/resource-extra.cpp, and on the Remaster that file is Bohemia's (Options, mods table, splash, main menu), so the UD menu needs its own file. Open risk: Bohemia's mainMenu.hpp and ours both define RscDisplayMainRemaster; check the merge in game, with and without @LoBo, on a copy of the Remaster folder only."
       - "2026-10-11 trap: setup's Remaster guard (96e6e0a) treats bin/mainMenu.hpp and bin/splashLogo.hpp as Bohemia-only markers, so the split-out UD menu file must not use either name, or every Classic rerun is refused (test-setup.ps1's rerun case would go red)."
+      - "2026-10-11: landed f9e7c99. The markers now select Remaster mode; the only edit to a Bohemia file is appended #include lines (ud-mainmenu.hpp in resource-extra.cpp, the two libraries in config-extra.cpp), and setup snapshots every package file and fails on any other change. Problem hit: the engine parses resource-extra.cpp and its includes as ONE ParamFile, so a second RscDisplayMainRemaster (or RscDisplayMain placeholder) beside Bohemia's mainMenu.hpp is a 'Member already defined' error. The UD menu became RscDisplayMainUD, preferred by the new SelectMainMenuResourceClass, with its placeholder skipped under Bohemia's MAIN_MENU_HPP guard. Bohemia's shards lack 9 UD Options keys, so setup writes a gap-only STRINGTABLE_UD.utf8.csv instead of our whole shard (a later shard wins duplicates). Also fixed the stale STRINGTABLE_OPTIONS manifest hash from ca9bd9d that had turned test-setup.ps1 red. Verified: test-setup.ps1 green; tests/integration/ui/remaster 4/4 on a setup-prepared shadow (packages/RemasterUD) with and without @LoBo, Steam folder hashes unchanged. Not re-verified here: the damage/glass-texture behaviour on Remaster data (dual-package-compat)."
 
   # ---------------------------------------------------------------- housekeeping
   - id: gh-tracker-hygiene
