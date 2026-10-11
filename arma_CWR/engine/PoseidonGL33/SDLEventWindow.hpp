@@ -1,6 +1,7 @@
 #pragma once
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Audio/IAudioSystem.hpp>
 #include <SDL3/SDL.h>
@@ -41,6 +42,7 @@ class SDLEventWindow
         _height = h;
         _open = (window != nullptr);
         _focused = true;
+        Poseidon::InputSubsystem::Instance().SetWindowFocused(true);
 
         if (_sdlWindow)
         {
@@ -138,6 +140,7 @@ class SDLEventWindow
             else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
             {
                 _focused = true;
+                Poseidon::InputSubsystem::Instance().SetWindowFocused(true);
                 _focusGained = true;
                 GApp->m_appActive = true;
                 if (_mouseGrab && _sdlWindow)
@@ -151,6 +154,7 @@ class SDLEventWindow
             else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
             {
                 _focused = false;
+                Poseidon::InputSubsystem::Instance().SetWindowFocused(false);
                 _focusLost = true;
                 GApp->m_appActive = false;
                 if (_sdlWindow)

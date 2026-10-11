@@ -569,6 +569,13 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
             if (forceAction)
             {
                 _forceMove = item;
+                // Only player Up/Down between supported poses may preserve
+                // held lean. Other forced or externally scripted actions keep
+                // the normal interruption/release requirement.
+                const ActionMap* destination = Type()->GetActionMap(item.id);
+                const bool leanStanceChange = (selAction == ManActUp || selAction == ManActDown) &&
+                    CanLeanInStance(actPos) && destination && CanLeanInStance(destination->GetUpDegree());
+                _leanStanceMove = leanStanceChange ? item.id : MoveIdNone;
             }
         }
     }
@@ -2245,10 +2252,12 @@ const BlendAnimSelections& Man::GetBlendAnim(BlendAnimSelections& tgt, BlendAnim
     }
     if (anim1 == anim2)
     {
-        return *anim1;
+        return anim1 ? *anim1 : tgt;
     }
-    tgt.AddOther(*anim1, _primaryFactor);
-    tgt.AddOther(*anim1, 1 - _primaryFactor);
+    if (anim1)
+        tgt.AddOther(*anim1, _primaryFactor);
+    if (anim2)
+        tgt.AddOther(*anim2, 1 - _primaryFactor);
     return tgt;
 }
 

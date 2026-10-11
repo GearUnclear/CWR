@@ -835,6 +835,20 @@ void Man::AnimateMatrix(Matrix4& mat, int level, int selection) const
 
         BlendMatrix(mat, _headTrans, headFactor);
     }
+    if (_leanAmount != 0)
+    {
+        BLEND_ANIM(aiming);
+        const BlendAnimSelections& selections = GetAiming(aiming);
+        for (int bi = 0; bi < selections.Size(); ++bi)
+        {
+            const BlendAnimInfo& blend = selections[bi];
+            if (blend.matrixIndex == matIndex)
+            {
+                BlendMatrix(mat, _leanTrans, blend.factor);
+                break;
+            }
+        }
+    }
 }
 
 Vector3 Man::COMPosition() const
@@ -876,6 +890,14 @@ Vector3 Man::AnimatePoint(int level, int index) const
     const BlendAnimSelections& legsRes = GetLegs(legs);
     AnimationRT::TransformPoint(res, rtw[level], _shape->Level(level), _legTrans, legsRes.Data(), legsRes.Size(),
                                 index);
+
+    if (_leanAmount != 0)
+    {
+        BLEND_ANIM(aiming);
+        const BlendAnimSelections& selections = GetAiming(aiming);
+        AnimationRT::TransformPoint(res, rtw[level], _shape->Level(level), _leanTrans, selections.Data(),
+                                    selections.Size(), index);
+    }
 
     return res;
 }

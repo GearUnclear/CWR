@@ -23,8 +23,11 @@ class ContextControlsConfig
     bool migratedOnLoad = false;
 
     void LoadDefaults();
-    // Apply the Arma 3 tap/hold, target and watch layout in every context.
-    // Preserve unrelated actions and all existing gamepad bindings.
+    // Arma 3 Classic: reserve bare Q/E for infantry lean. Other contexts and
+    // modified chords are unchanged. Used by defaults, preset and v5 migration.
+    static void ApplyInfantryLeanDefaults(InputProfile& profile);
+    // Apply the Arma 3 tap/hold, target and watch layout in every context,
+    // plus infantry Q/E leaning. Preserve unrelated keys and gamepad bindings.
     void ApplyArma3Preset();
     bool Load(const std::string& path);
     bool Save(const std::string& path) const;

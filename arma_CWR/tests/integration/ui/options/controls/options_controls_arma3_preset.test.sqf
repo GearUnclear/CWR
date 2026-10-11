@@ -7,7 +7,7 @@ triAssertIncludes [(triVisibleTexts), "Arma 3 controls"]
 triClickText "Arma 3 controls"
 triAssert [(triGetControlFocused 9102)]
 triAssertIncludes [(triVisibleTexts), "Apply Arma 3 controls?"]
-triAssertIncludes [(triVisibleTexts), "Change aim / zoom / lock / watch?"]
+triAssertIncludes [(triVisibleTexts), "Set aim, watch and Q/E lean?"]
 triWaitFrames 35
 triScreenshot "00_arma3_preset_confirm"
 triGpadButton 1

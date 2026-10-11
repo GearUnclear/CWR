@@ -376,6 +376,7 @@ void Man::PlayMove(RStringB move, ActionContextBase* context)
 
 void Man::SwitchMove(MoveId id, ActionContextBase* context)
 {
+    _leanStanceMove = MoveIdNone;
     if (_externalMove.id != MoveIdNone)
     {
         // return _externMove (if any) to queue

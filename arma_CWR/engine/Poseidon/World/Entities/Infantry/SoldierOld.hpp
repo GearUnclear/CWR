@@ -507,6 +507,14 @@ class Man: public Person
 	Matrix4 _headTrans;
 	Matrix4 _gunTrans;
 	Matrix4 _legTrans;
+	float _leanAmount = 0;
+	bool _leanRequireRelease = false;
+    MoveId _leanStanceMove = MoveIdNone;
+    unsigned _leanInputEpoch = 0;
+	Matrix4 _leanTrans = MIdentity;
+	void SimulateLean(float deltaT);
+	void ResetLean();
+    static bool CanLeanInStance(int stance);
 	bool _headTransIdent,_gunTransIdent;
 
 	Vector3 _aimingPositionWorld;
@@ -660,6 +668,8 @@ class Man: public Person
 	// actual ManPos of the current move; public so the Guerrilla undercover
 	// layer can classify the weapon show (Game/Guerrilla/Undercover.cpp)
 	int GetActUpDegree() const;
+	float GetLeanAmount() const { return _leanAmount; }
+    Vector3 GetSafeInfantryFiringPoint(int weapon, Vector3Par direction) const;
 	int GetAutoUpDegree() const; // based on unit combat mode
 	MoveId GetDefaultMove() const; // based on unit combat mode
 	MoveId GetDefaultMove(ManAction action) const; // based on unit combat mode

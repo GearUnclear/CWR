@@ -12,7 +12,7 @@ namespace
 const UserAction kOnFoot[] = {
     // Movement
     UAMoveForward, UAMoveBack, UATurnLeft, UATurnRight, UAMoveLeft, UAMoveRight, UAMoveUp, UAMoveDown,
-    UAMoveFastForward, UAMoveSlowForward, UATurbo,
+    UAMoveFastForward, UAMoveSlowForward, UATurbo, UALeanLeft, UALeanRight,
     UASlow, // "Walk" — the slow-movement toggle (label/default key live in UserActionDesc)
     // Weapons & combat
     UAFire, UAReloadMagazine, UAToggleWeapons, UAHandgun, UALockTarget, UALockTargets, UARevealTarget, UAOptics,

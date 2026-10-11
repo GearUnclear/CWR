@@ -1,4 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
+#include <algorithm>
+#include <limits>
 
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -740,9 +742,14 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
 
     float scale = Scale();
 
+    // Existing query types retain their historical line semantics. Leaning
+    // needs a conservative swept sphere, including near-plane/head clearance.
+    const float sweepRadius = type == ObjIntersectGeomSweep ? std::max(radius, 0.0f) : 0.0f;
+    const float localRadius = sweepRadius / scale;
+
     float rDistFromLine2 = rp.Distance2(pos.Position());
     float factor = IsAnimated(geomLevel) ? 2 : 1;
-    float rDistFromLine2Max = Square(factor * scale * thisShape->BoundingSphere());
+    float rDistFromLine2Max = Square(factor * scale * thisShape->BoundingSphere() + sweepRadius);
     // quick rejection of very far objects
     if (rDistFromLine2 > rDistFromLine2Max)
     {
@@ -759,7 +766,7 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
     Vector3 p = NearestPoint(beg, end, bCenter);
     float bRadius = geomShape->BSphereRadius();
     float distFromLine2 = p.Distance2(bCenter);
-    float distFromLine2Max = Square(bRadius * scale);
+    float distFromLine2Max = Square(bRadius * scale + sweepRadius);
     if (distFromLine2 > distFromLine2Max)
     {
         const_cast<Object*>(this)->DeanimateComponentLevel(geomLevel);
@@ -785,6 +792,35 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
     for (int iThis = 0; iThis < cc->Size(); iThis++)
     {
         const ConvexComponent& cThis = *cc->Get(iThis);
+        if (type == ObjIntersectGeomSweep)
+        {
+            // A conservative clearance sphere may already overlap cover at
+            // the neutral pose. Let it escape or slide along its nearest face,
+            // but never move farther into that face. The chosen plane's
+            // distance changes monotonically along this straight sweep, so
+            // this cannot admit a path through the far side of a thin wall.
+            float nearestDistance = std::numeric_limits<float>::max();
+            for (int planeIndex = 0; planeIndex < cThis.NPlanes(); ++planeIndex)
+                nearestDistance = std::min(nearestDistance,
+                    cThis.GetPlane(planeIndex).Distance(begThis) + localRadius);
+            if (nearestDistance >= 0)
+            {
+                constexpr float tolerance = 1e-6f;
+                bool escaping = false;
+                for (int planeIndex = 0; planeIndex < cThis.NPlanes(); ++planeIndex)
+                {
+                    const Plane& plane = cThis.GetPlane(planeIndex);
+                    if (plane.Distance(begThis) + localRadius <= nearestDistance + tolerance &&
+                        (endThis - begThis) * plane.Normal() <= tolerance)
+                    {
+                        escaping = true;
+                        break;
+                    }
+                }
+                if (escaping)
+                    continue;
+            }
+        }
         // check intersection will all convex components
         // check line beg..end with all cThis faces
         Vector3 b = begThis, e = endThis;
@@ -802,8 +838,8 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
         for (i = 0; i < cThis.NPlanes(); i++)
         {
             const Plane& plane = cThis.GetPlane(i);
-            float distE = plane.Distance(e);
-            float distB = plane.Distance(b);
+            float distE = plane.Distance(e) + localRadius;
+            float distB = plane.Distance(b) + localRadius;
             // dist<0 means point is in outer space
             if (distB < 0 && distE < 0)
             {
@@ -832,13 +868,13 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
 #endif
                 continue; // parallel - no clip
             }
-            float t = (plane.Normal() * b + plane.D()) / denom;
+            float t = distB / denom;
 
             // there must be some intersection
             PoseidonAssert(t >= -1e-3);
             PoseidonAssert(t <= 1 + 1e-3);
             Vector3 pt = (e - b) * t + b;
-            PoseidonAssert(plane.Distance(pt) < 1e-3);
+            PoseidonAssert(plane.Distance(pt) + localRadius < 1e-3);
             // note: t is between bt and et
             float tt = bt + t * (et - bt);
 

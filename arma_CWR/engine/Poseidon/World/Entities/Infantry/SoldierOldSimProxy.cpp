@@ -974,6 +974,14 @@ void Man::Animate(int level)
                                           legsRes.Size());
         }
 
+        if (_leanAmount != 0)
+        {
+            BLEND_ANIM(aiming);
+            const BlendAnimSelections& selections = GetAiming(aiming);
+            // Every LOD, including Fire Geometry and Memory, shares this pose.
+            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, _leanTrans,
+                                          selections.Data(), selections.Size());
+        }
         AnimationRT::ApplyMatrices(type->GetWeights(), _shape, level, matrix);
     }
 

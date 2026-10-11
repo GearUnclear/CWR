@@ -22,7 +22,7 @@ UAMoveForward, UAMoveBack, UATurnLeft, UATurnRight, UAMoveUp, UAMoveDown, UAMove
     UAVoiceOverNetPushToTalk, UANetworkStats, UANetworkPlayers, UASelectAll, UATurbo, UASlow,
 
     UAAxisTurn, UAAxisDive, UAAxisRudder, UAAxisThrust, UAAimUp, UAAimDown, UAAimLeft, UAAimRight, UAMapZoomIn,
-    UAMapZoomOut, UACheatEntry,
+    UAMapZoomOut, UACheatEntry, UALeanLeft, UALeanRight,
 #if _ENABLE_CHEATS
     UACheat1, UACheat2,
 #endif

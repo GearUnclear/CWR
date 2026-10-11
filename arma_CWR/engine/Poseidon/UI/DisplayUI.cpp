@@ -24,6 +24,7 @@
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 
 #include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_keyboard.h>
 #include <Poseidon/Foundation/Common/Win.h>
 #include <SDL3/SDL_keycode.h>
 
@@ -184,6 +185,14 @@ bool IsReservedKey(int dikCode)
 
 RString GetKeyName(int dikCode)
 {
+    // Classic's stringtable predates STR_SDL_SCANCODE_*. Keep localized names
+    // when available; SDL supplies readable keys for older data packages.
+    const auto keyName = [dikCode](int stringId) -> RString
+    {
+        if (stringId >= 0)
+            return LocalizeString(stringId);
+        return SDL_GetScancodeName(static_cast<SDL_Scancode>(dikCode));
+    };
     if (InputBindingIsTap(dikCode))
         return RString("Tap ") + GetKeyName(InputBindingBaseCode(dikCode));
     if (InputBindingIsDoubleTap(dikCode))
@@ -192,287 +201,287 @@ RString GetKeyName(int dikCode)
     switch (dikCode)
     {
         case SDL_SCANCODE_ESCAPE:
-            return LocalizeString(IDS_SDL_SCANCODE_ESCAPE);
+            return keyName(IDS_SDL_SCANCODE_ESCAPE);
         case SDL_SCANCODE_1:
-            return LocalizeString(IDS_SDL_SCANCODE_1);
+            return keyName(IDS_SDL_SCANCODE_1);
         case SDL_SCANCODE_2:
-            return LocalizeString(IDS_SDL_SCANCODE_2);
+            return keyName(IDS_SDL_SCANCODE_2);
         case SDL_SCANCODE_3:
-            return LocalizeString(IDS_SDL_SCANCODE_3);
+            return keyName(IDS_SDL_SCANCODE_3);
         case SDL_SCANCODE_4:
-            return LocalizeString(IDS_SDL_SCANCODE_4);
+            return keyName(IDS_SDL_SCANCODE_4);
         case SDL_SCANCODE_5:
-            return LocalizeString(IDS_SDL_SCANCODE_5);
+            return keyName(IDS_SDL_SCANCODE_5);
         case SDL_SCANCODE_6:
-            return LocalizeString(IDS_SDL_SCANCODE_6);
+            return keyName(IDS_SDL_SCANCODE_6);
         case SDL_SCANCODE_7:
-            return LocalizeString(IDS_SDL_SCANCODE_7);
+            return keyName(IDS_SDL_SCANCODE_7);
         case SDL_SCANCODE_8:
-            return LocalizeString(IDS_SDL_SCANCODE_8);
+            return keyName(IDS_SDL_SCANCODE_8);
         case SDL_SCANCODE_9:
-            return LocalizeString(IDS_SDL_SCANCODE_9);
+            return keyName(IDS_SDL_SCANCODE_9);
         case SDL_SCANCODE_0:
-            return LocalizeString(IDS_SDL_SCANCODE_0);
+            return keyName(IDS_SDL_SCANCODE_0);
         case SDL_SCANCODE_MINUS:
-            return LocalizeString(IDS_SDL_SCANCODE_MINUS);
+            return keyName(IDS_SDL_SCANCODE_MINUS);
         case SDL_SCANCODE_EQUALS:
-            return LocalizeString(IDS_SDL_SCANCODE_EQUALS);
+            return keyName(IDS_SDL_SCANCODE_EQUALS);
         case SDL_SCANCODE_BACKSPACE:
-            return LocalizeString(IDS_SDL_SCANCODE_BACKSPACE);
+            return keyName(IDS_SDL_SCANCODE_BACKSPACE);
         case SDL_SCANCODE_TAB:
-            return LocalizeString(IDS_SDL_SCANCODE_TAB);
+            return keyName(IDS_SDL_SCANCODE_TAB);
         case SDL_SCANCODE_Q:
-            return LocalizeString(IDS_SDL_SCANCODE_Q);
+            return keyName(IDS_SDL_SCANCODE_Q);
         case SDL_SCANCODE_W:
-            return LocalizeString(IDS_SDL_SCANCODE_W);
+            return keyName(IDS_SDL_SCANCODE_W);
         case SDL_SCANCODE_E:
-            return LocalizeString(IDS_SDL_SCANCODE_E);
+            return keyName(IDS_SDL_SCANCODE_E);
         case SDL_SCANCODE_R:
-            return LocalizeString(IDS_SDL_SCANCODE_R);
+            return keyName(IDS_SDL_SCANCODE_R);
         case SDL_SCANCODE_T:
-            return LocalizeString(IDS_SDL_SCANCODE_T);
+            return keyName(IDS_SDL_SCANCODE_T);
         case SDL_SCANCODE_Y:
-            return LocalizeString(IDS_SDL_SCANCODE_Y);
+            return keyName(IDS_SDL_SCANCODE_Y);
         case SDL_SCANCODE_U:
-            return LocalizeString(IDS_SDL_SCANCODE_U);
+            return keyName(IDS_SDL_SCANCODE_U);
         case SDL_SCANCODE_I:
-            return LocalizeString(IDS_SDL_SCANCODE_I);
+            return keyName(IDS_SDL_SCANCODE_I);
         case SDL_SCANCODE_O:
-            return LocalizeString(IDS_SDL_SCANCODE_O);
+            return keyName(IDS_SDL_SCANCODE_O);
         case SDL_SCANCODE_P:
-            return LocalizeString(IDS_SDL_SCANCODE_P);
+            return keyName(IDS_SDL_SCANCODE_P);
         case SDL_SCANCODE_LEFTBRACKET:
-            return LocalizeString(IDS_SDL_SCANCODE_LEFTBRACKET);
+            return keyName(IDS_SDL_SCANCODE_LEFTBRACKET);
         case SDL_SCANCODE_RIGHTBRACKET:
-            return LocalizeString(IDS_SDL_SCANCODE_RIGHTBRACKET);
+            return keyName(IDS_SDL_SCANCODE_RIGHTBRACKET);
         case SDL_SCANCODE_RETURN:
-            return LocalizeString(IDS_SDL_SCANCODE_RETURN);
+            return keyName(IDS_SDL_SCANCODE_RETURN);
         case SDL_SCANCODE_LCTRL:
-            return LocalizeString(IDS_SDL_SCANCODE_LCTRL);
+            return keyName(IDS_SDL_SCANCODE_LCTRL);
         case SDL_SCANCODE_A:
-            return LocalizeString(IDS_SDL_SCANCODE_A);
+            return keyName(IDS_SDL_SCANCODE_A);
         case SDL_SCANCODE_S:
-            return LocalizeString(IDS_SDL_SCANCODE_S);
+            return keyName(IDS_SDL_SCANCODE_S);
         case SDL_SCANCODE_D:
-            return LocalizeString(IDS_SDL_SCANCODE_D);
+            return keyName(IDS_SDL_SCANCODE_D);
         case SDL_SCANCODE_F:
-            return LocalizeString(IDS_SDL_SCANCODE_F);
+            return keyName(IDS_SDL_SCANCODE_F);
         case SDL_SCANCODE_G:
-            return LocalizeString(IDS_SDL_SCANCODE_G);
+            return keyName(IDS_SDL_SCANCODE_G);
         case SDL_SCANCODE_H:
-            return LocalizeString(IDS_SDL_SCANCODE_H);
+            return keyName(IDS_SDL_SCANCODE_H);
         case SDL_SCANCODE_J:
-            return LocalizeString(IDS_SDL_SCANCODE_J);
+            return keyName(IDS_SDL_SCANCODE_J);
         case SDL_SCANCODE_K:
-            return LocalizeString(IDS_SDL_SCANCODE_K);
+            return keyName(IDS_SDL_SCANCODE_K);
         case SDL_SCANCODE_L:
-            return LocalizeString(IDS_SDL_SCANCODE_L);
+            return keyName(IDS_SDL_SCANCODE_L);
         case SDL_SCANCODE_SEMICOLON:
-            return LocalizeString(IDS_SDL_SCANCODE_SEMICOLON);
+            return keyName(IDS_SDL_SCANCODE_SEMICOLON);
         case SDL_SCANCODE_APOSTROPHE:
-            return LocalizeString(IDS_SDL_SCANCODE_APOSTROPHE);
+            return keyName(IDS_SDL_SCANCODE_APOSTROPHE);
         case SDL_SCANCODE_GRAVE:
-            return LocalizeString(IDS_SDL_SCANCODE_GRAVE);
+            return keyName(IDS_SDL_SCANCODE_GRAVE);
         case SDL_SCANCODE_LSHIFT:
-            return LocalizeString(IDS_SDL_SCANCODE_LSHIFT);
+            return keyName(IDS_SDL_SCANCODE_LSHIFT);
         case SDL_SCANCODE_BACKSLASH:
-            return LocalizeString(IDS_SDL_SCANCODE_BACKSLASH);
+            return keyName(IDS_SDL_SCANCODE_BACKSLASH);
         case SDL_SCANCODE_Z:
-            return LocalizeString(IDS_SDL_SCANCODE_Z);
+            return keyName(IDS_SDL_SCANCODE_Z);
         case SDL_SCANCODE_X:
-            return LocalizeString(IDS_SDL_SCANCODE_X);
+            return keyName(IDS_SDL_SCANCODE_X);
         case SDL_SCANCODE_C:
-            return LocalizeString(IDS_SDL_SCANCODE_C);
+            return keyName(IDS_SDL_SCANCODE_C);
         case SDL_SCANCODE_V:
-            return LocalizeString(IDS_SDL_SCANCODE_V);
+            return keyName(IDS_SDL_SCANCODE_V);
         case SDL_SCANCODE_B:
-            return LocalizeString(IDS_SDL_SCANCODE_B);
+            return keyName(IDS_SDL_SCANCODE_B);
         case SDL_SCANCODE_N:
-            return LocalizeString(IDS_SDL_SCANCODE_N);
+            return keyName(IDS_SDL_SCANCODE_N);
         case SDL_SCANCODE_M:
-            return LocalizeString(IDS_SDL_SCANCODE_M);
+            return keyName(IDS_SDL_SCANCODE_M);
         case SDL_SCANCODE_COMMA:
-            return LocalizeString(IDS_SDL_SCANCODE_COMMA);
+            return keyName(IDS_SDL_SCANCODE_COMMA);
         case SDL_SCANCODE_PERIOD:
-            return LocalizeString(IDS_SDL_SCANCODE_PERIOD);
+            return keyName(IDS_SDL_SCANCODE_PERIOD);
         case SDL_SCANCODE_SLASH:
-            return LocalizeString(IDS_SDL_SCANCODE_SLASH);
+            return keyName(IDS_SDL_SCANCODE_SLASH);
         case SDL_SCANCODE_RSHIFT:
-            return LocalizeString(IDS_SDL_SCANCODE_RSHIFT);
+            return keyName(IDS_SDL_SCANCODE_RSHIFT);
         case SDL_SCANCODE_KP_MULTIPLY:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_MULTIPLY);
+            return keyName(IDS_SDL_SCANCODE_KP_MULTIPLY);
         case SDL_SCANCODE_LALT:
-            return LocalizeString(IDS_SDL_SCANCODE_LALT);
+            return keyName(IDS_SDL_SCANCODE_LALT);
         case SDL_SCANCODE_SPACE:
-            return LocalizeString(IDS_SDL_SCANCODE_SPACE);
+            return keyName(IDS_SDL_SCANCODE_SPACE);
         case SDL_SCANCODE_CAPSLOCK:
-            return LocalizeString(IDS_SDL_SCANCODE_CAPSLOCK);
+            return keyName(IDS_SDL_SCANCODE_CAPSLOCK);
         case SDL_SCANCODE_F1:
-            return LocalizeString(IDS_SDL_SCANCODE_F1);
+            return keyName(IDS_SDL_SCANCODE_F1);
         case SDL_SCANCODE_F2:
-            return LocalizeString(IDS_SDL_SCANCODE_F2);
+            return keyName(IDS_SDL_SCANCODE_F2);
         case SDL_SCANCODE_F3:
-            return LocalizeString(IDS_SDL_SCANCODE_F3);
+            return keyName(IDS_SDL_SCANCODE_F3);
         case SDL_SCANCODE_F4:
-            return LocalizeString(IDS_SDL_SCANCODE_F4);
+            return keyName(IDS_SDL_SCANCODE_F4);
         case SDL_SCANCODE_F5:
-            return LocalizeString(IDS_SDL_SCANCODE_F5);
+            return keyName(IDS_SDL_SCANCODE_F5);
         case SDL_SCANCODE_F6:
-            return LocalizeString(IDS_SDL_SCANCODE_F6);
+            return keyName(IDS_SDL_SCANCODE_F6);
         case SDL_SCANCODE_F7:
-            return LocalizeString(IDS_SDL_SCANCODE_F7);
+            return keyName(IDS_SDL_SCANCODE_F7);
         case SDL_SCANCODE_F8:
-            return LocalizeString(IDS_SDL_SCANCODE_F8);
+            return keyName(IDS_SDL_SCANCODE_F8);
         case SDL_SCANCODE_F9:
-            return LocalizeString(IDS_SDL_SCANCODE_F9);
+            return keyName(IDS_SDL_SCANCODE_F9);
         case SDL_SCANCODE_F10:
-            return LocalizeString(IDS_SDL_SCANCODE_F10);
+            return keyName(IDS_SDL_SCANCODE_F10);
         case SDL_SCANCODE_NUMLOCKCLEAR:
-            return LocalizeString(IDS_SDL_SCANCODE_NUMLOCKCLEAR);
+            return keyName(IDS_SDL_SCANCODE_NUMLOCKCLEAR);
         case SDL_SCANCODE_SCROLLLOCK:
-            return LocalizeString(IDS_SDL_SCANCODE_SCROLLLOCK);
+            return keyName(IDS_SDL_SCANCODE_SCROLLLOCK);
         case SDL_SCANCODE_KP_7:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_7);
+            return keyName(IDS_SDL_SCANCODE_KP_7);
         case SDL_SCANCODE_KP_8:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_8);
+            return keyName(IDS_SDL_SCANCODE_KP_8);
         case SDL_SCANCODE_KP_9:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_9);
+            return keyName(IDS_SDL_SCANCODE_KP_9);
         case SDL_SCANCODE_KP_MINUS:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_MINUS);
+            return keyName(IDS_SDL_SCANCODE_KP_MINUS);
         case SDL_SCANCODE_KP_4:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_4);
+            return keyName(IDS_SDL_SCANCODE_KP_4);
         case SDL_SCANCODE_KP_5:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_5);
+            return keyName(IDS_SDL_SCANCODE_KP_5);
         case SDL_SCANCODE_KP_6:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_6);
+            return keyName(IDS_SDL_SCANCODE_KP_6);
         case SDL_SCANCODE_KP_PLUS:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_PLUS);
+            return keyName(IDS_SDL_SCANCODE_KP_PLUS);
         case SDL_SCANCODE_KP_1:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_1);
+            return keyName(IDS_SDL_SCANCODE_KP_1);
         case SDL_SCANCODE_KP_2:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_2);
+            return keyName(IDS_SDL_SCANCODE_KP_2);
         case SDL_SCANCODE_KP_3:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_3);
+            return keyName(IDS_SDL_SCANCODE_KP_3);
         case SDL_SCANCODE_KP_0:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_0);
+            return keyName(IDS_SDL_SCANCODE_KP_0);
         case SDL_SCANCODE_KP_PERIOD:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_PERIOD);
+            return keyName(IDS_SDL_SCANCODE_KP_PERIOD);
         case SDL_SCANCODE_NONUSBACKSLASH:
-            return LocalizeString(IDS_SDL_SCANCODE_NONUSBACKSLASH);
+            return keyName(IDS_SDL_SCANCODE_NONUSBACKSLASH);
         case SDL_SCANCODE_F11:
-            return LocalizeString(IDS_SDL_SCANCODE_F11);
+            return keyName(IDS_SDL_SCANCODE_F11);
         case SDL_SCANCODE_F12:
-            return LocalizeString(IDS_SDL_SCANCODE_F12);
+            return keyName(IDS_SDL_SCANCODE_F12);
         case SDL_SCANCODE_F13:
-            return LocalizeString(IDS_SDL_SCANCODE_F13);
+            return keyName(IDS_SDL_SCANCODE_F13);
         case SDL_SCANCODE_F14:
-            return LocalizeString(IDS_SDL_SCANCODE_F14);
+            return keyName(IDS_SDL_SCANCODE_F14);
         case SDL_SCANCODE_F15:
-            return LocalizeString(IDS_SDL_SCANCODE_F15);
+            return keyName(IDS_SDL_SCANCODE_F15);
         case SDL_SCANCODE_INTERNATIONAL2:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL2);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL2);
         case SDL_SCANCODE_INTERNATIONAL6:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL6);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL6);
         case SDL_SCANCODE_INTERNATIONAL4:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL4);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL4);
         case SDL_SCANCODE_INTERNATIONAL5:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL5);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL5);
         case SDL_SCANCODE_INTERNATIONAL3:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL3);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL3);
         case SDL_SCANCODE_INTERNATIONAL7:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL7);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL7);
         case SDL_SCANCODE_KP_EQUALS:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_EQUALS);
+            return keyName(IDS_SDL_SCANCODE_KP_EQUALS);
         case SDL_SCANCODE_MEDIA_PREVIOUS_TRACK:
-            return LocalizeString(IDS_SDL_SCANCODE_MEDIA_PREVIOUS_TRACK);
+            return keyName(IDS_SDL_SCANCODE_MEDIA_PREVIOUS_TRACK);
         case SDL_SCANCODE_INTERNATIONAL8:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL8);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL8);
         case SDL_SCANCODE_INTERNATIONAL9:
-            return LocalizeString(IDS_SDL_SCANCODE_INTERNATIONAL9);
+            return keyName(IDS_SDL_SCANCODE_INTERNATIONAL9);
         case SDL_SCANCODE_LANG3:
-            return LocalizeString(IDS_SDL_SCANCODE_LANG3);
+            return keyName(IDS_SDL_SCANCODE_LANG3);
         case SDL_SCANCODE_LANG2:
-            return LocalizeString(IDS_SDL_SCANCODE_LANG2);
+            return keyName(IDS_SDL_SCANCODE_LANG2);
         case SDL_SCANCODE_STOP:
-            return LocalizeString(IDS_SDL_SCANCODE_STOP);
+            return keyName(IDS_SDL_SCANCODE_STOP);
         case SDL_SCANCODE_LANG6:
-            return LocalizeString(IDS_SDL_SCANCODE_LANG6);
+            return keyName(IDS_SDL_SCANCODE_LANG6);
         case SDL_SCANCODE_LANG7:
-            return LocalizeString(IDS_SDL_SCANCODE_LANG7);
+            return keyName(IDS_SDL_SCANCODE_LANG7);
         case SDL_SCANCODE_MEDIA_NEXT_TRACK:
-            return LocalizeString(IDS_SDL_SCANCODE_MEDIA_NEXT_TRACK);
+            return keyName(IDS_SDL_SCANCODE_MEDIA_NEXT_TRACK);
         case SDL_SCANCODE_KP_ENTER:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_ENTER);
+            return keyName(IDS_SDL_SCANCODE_KP_ENTER);
         case SDL_SCANCODE_RCTRL:
-            return LocalizeString(IDS_SDL_SCANCODE_RCTRL);
+            return keyName(IDS_SDL_SCANCODE_RCTRL);
         case SDL_SCANCODE_MUTE:
-            return LocalizeString(IDS_SDL_SCANCODE_MUTE);
+            return keyName(IDS_SDL_SCANCODE_MUTE);
         case SDL_SCANCODE_MEDIA_PLAY_PAUSE:
-            return LocalizeString(IDS_SDL_SCANCODE_MEDIA_PLAY_PAUSE);
+            return keyName(IDS_SDL_SCANCODE_MEDIA_PLAY_PAUSE);
         case SDL_SCANCODE_MEDIA_STOP:
-            return LocalizeString(IDS_SDL_SCANCODE_MEDIA_STOP);
+            return keyName(IDS_SDL_SCANCODE_MEDIA_STOP);
         case SDL_SCANCODE_VOLUMEDOWN:
-            return LocalizeString(IDS_SDL_SCANCODE_VOLUMEDOWN);
+            return keyName(IDS_SDL_SCANCODE_VOLUMEDOWN);
         case SDL_SCANCODE_VOLUMEUP:
-            return LocalizeString(IDS_SDL_SCANCODE_VOLUMEUP);
+            return keyName(IDS_SDL_SCANCODE_VOLUMEUP);
         case SDL_SCANCODE_AC_HOME:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_HOME);
+            return keyName(IDS_SDL_SCANCODE_AC_HOME);
         case SDL_SCANCODE_KP_COMMA:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_COMMA);
+            return keyName(IDS_SDL_SCANCODE_KP_COMMA);
         case SDL_SCANCODE_KP_DIVIDE:
-            return LocalizeString(IDS_SDL_SCANCODE_KP_DIVIDE);
+            return keyName(IDS_SDL_SCANCODE_KP_DIVIDE);
         case SDL_SCANCODE_PRINTSCREEN:
-            return LocalizeString(IDS_SDL_SCANCODE_PRINTSCREEN);
+            return keyName(IDS_SDL_SCANCODE_PRINTSCREEN);
         case SDL_SCANCODE_RALT:
-            return LocalizeString(IDS_SDL_SCANCODE_RALT);
+            return keyName(IDS_SDL_SCANCODE_RALT);
         case SDL_SCANCODE_PAUSE:
-            return LocalizeString(IDS_SDL_SCANCODE_PAUSE);
+            return keyName(IDS_SDL_SCANCODE_PAUSE);
         case SDL_SCANCODE_HOME:
-            return LocalizeString(IDS_SDL_SCANCODE_HOME);
+            return keyName(IDS_SDL_SCANCODE_HOME);
         case SDL_SCANCODE_UP:
-            return LocalizeString(IDS_SDL_SCANCODE_UP);
+            return keyName(IDS_SDL_SCANCODE_UP);
         case SDL_SCANCODE_PAGEUP:
-            return LocalizeString(IDS_SDL_SCANCODE_PAGEUP);
+            return keyName(IDS_SDL_SCANCODE_PAGEUP);
         case SDL_SCANCODE_LEFT:
-            return LocalizeString(IDS_SDL_SCANCODE_LEFT);
+            return keyName(IDS_SDL_SCANCODE_LEFT);
         case SDL_SCANCODE_RIGHT:
-            return LocalizeString(IDS_SDL_SCANCODE_RIGHT);
+            return keyName(IDS_SDL_SCANCODE_RIGHT);
         case SDL_SCANCODE_END:
-            return LocalizeString(IDS_SDL_SCANCODE_END);
+            return keyName(IDS_SDL_SCANCODE_END);
         case SDL_SCANCODE_DOWN:
-            return LocalizeString(IDS_SDL_SCANCODE_DOWN);
+            return keyName(IDS_SDL_SCANCODE_DOWN);
         case SDL_SCANCODE_PAGEDOWN:
-            return LocalizeString(IDS_SDL_SCANCODE_PAGEDOWN);
+            return keyName(IDS_SDL_SCANCODE_PAGEDOWN);
         case SDL_SCANCODE_INSERT:
-            return LocalizeString(IDS_SDL_SCANCODE_INSERT);
+            return keyName(IDS_SDL_SCANCODE_INSERT);
         case SDL_SCANCODE_DELETE:
-            return LocalizeString(IDS_SDL_SCANCODE_DELETE);
+            return keyName(IDS_SDL_SCANCODE_DELETE);
         case SDL_SCANCODE_LGUI:
-            return LocalizeString(IDS_SDL_SCANCODE_LGUI);
+            return keyName(IDS_SDL_SCANCODE_LGUI);
         case SDL_SCANCODE_RGUI:
-            return LocalizeString(IDS_SDL_SCANCODE_RGUI);
+            return keyName(IDS_SDL_SCANCODE_RGUI);
         case SDL_SCANCODE_APPLICATION:
-            return LocalizeString(IDS_SDL_SCANCODE_APPLICATION);
+            return keyName(IDS_SDL_SCANCODE_APPLICATION);
         case SDL_SCANCODE_POWER:
-            return LocalizeString(IDS_SDL_SCANCODE_POWER);
+            return keyName(IDS_SDL_SCANCODE_POWER);
         case SDL_SCANCODE_SLEEP:
-            return LocalizeString(IDS_SDL_SCANCODE_SLEEP);
+            return keyName(IDS_SDL_SCANCODE_SLEEP);
         case SDL_SCANCODE_WAKE:
-            return LocalizeString(IDS_SDL_SCANCODE_WAKE);
+            return keyName(IDS_SDL_SCANCODE_WAKE);
         case SDL_SCANCODE_AC_SEARCH:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_SEARCH);
+            return keyName(IDS_SDL_SCANCODE_AC_SEARCH);
         case SDL_SCANCODE_AC_BOOKMARKS:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_BOOKMARKS);
+            return keyName(IDS_SDL_SCANCODE_AC_BOOKMARKS);
         case SDL_SCANCODE_AC_REFRESH:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_REFRESH);
+            return keyName(IDS_SDL_SCANCODE_AC_REFRESH);
         case SDL_SCANCODE_AC_STOP:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_STOP);
+            return keyName(IDS_SDL_SCANCODE_AC_STOP);
         case SDL_SCANCODE_AC_FORWARD:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_FORWARD);
+            return keyName(IDS_SDL_SCANCODE_AC_FORWARD);
         case SDL_SCANCODE_AC_BACK:
-            return LocalizeString(IDS_SDL_SCANCODE_AC_BACK);
+            return keyName(IDS_SDL_SCANCODE_AC_BACK);
         case SDL_SCANCODE_MEDIA_SELECT:
-            return LocalizeString(IDS_SDL_SCANCODE_MEDIA_SELECT);
+            return keyName(IDS_SDL_SCANCODE_MEDIA_SELECT);
         case INPUT_DEVICE_MOUSE:
             return LocalizeString(IDS_INPUT_DEVICE_MOUSE_0);
         case INPUT_DEVICE_MOUSE + 1:

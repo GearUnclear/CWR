@@ -1,0 +1,8 @@
+# Exercise the actual campaign bootstrap, player body and native garrisons.
+# Prerequisites match scripting/guerrilla_sinai_swap.test.toml.
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["controls", "lean", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]

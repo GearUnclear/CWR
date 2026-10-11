@@ -159,6 +159,7 @@ GameValue TriSendText(const GameState*, GameValuePar);
 GameValue TriTypeText(const GameState*, GameValuePar);
 GameValue TriSendTextArr(const GameState*, GameValuePar);
 GameValue TriKeyDown(const GameState*, GameValuePar);
+GameValue TriWindowFocus(const GameState*, GameValuePar);
 GameValue TriKeyRepeat(const GameState*, GameValuePar);
 GameValue TriGpadButton(const GameState*, GameValuePar);
 GameValue TriGpadPov(const GameState*, GameValuePar);
@@ -1166,6 +1167,33 @@ GameValue TriFaceTexture(const GameState* /*state*/, GameValuePar arg)
     if (!man)
         return GameValue("FAIL:not_man");
     return GameValue(man->GetFaceTextureName());
+}
+
+// Read production pose state; never injects lean or bypasses input/collision.
+// [amount, stance, eye.xyz, muzzle.xyz, aiming.xyz, speed, internal.xyz, optics.xyz, safeShot.xyz]
+GameValue TriLeanPose(const GameState* state, GameValuePar arg)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    Man* man = dyn_cast<Man>(GetObject(arg));
+    if (!man)
+        return value;
+    array.Add(GameValue(man->GetLeanAmount()));
+    array.Add(GameValue(static_cast<float>(man->GetActUpDegree())));
+    auto addPoint = [&](Vector3Par point)
+    {
+        array.Add(GameValue(point.X()));
+        array.Add(GameValue(point.Y()));
+        array.Add(GameValue(point.Z()));
+    };
+    addPoint(man->PositionWorldToModel(man->CameraPosition()));
+    addPoint(man->GetWeaponPoint(man->SelectedWeapon()));
+    addPoint(man->PositionWorldToModel(man->AimingPosition()));
+    array.Add(GameValue(man->Speed().Size()));
+    addPoint(man->InsideCamera(CamInternal).Position());
+    addPoint(man->InsideCamera(CamGunner).Position());
+    addPoint(man->GetSafeInfantryFiringPoint(man->SelectedWeapon(), man->GetWeaponRelDirection(man->SelectedWeapon())));
+    return value;
 }
 
 // triClearView — release the override, returning to the player view.
@@ -3205,6 +3233,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameBool, "triSendText", TriSendTextArr, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "triTypeText", TriTypeText, GameString));
     GGameState.NewFunction(GameFunction(GameBool, "triKeyDown", TriKeyDown, GameScalar));
+    GGameState.NewFunction(GameFunction(GameBool, "triWindowFocus", TriWindowFocus, GameBool));
     GGameState.NewFunction(GameFunction(GameBool, "triKeyRepeat", TriKeyRepeat, GameScalar));
     GGameState.NewFunction(GameFunction(GameBool, "triKeyUp", TriKeyUp, GameScalar));
     GGameState.NewFunction(GameFunction(GameBool, "triGpadButton", TriGpadButton, GameScalar));
@@ -3340,6 +3369,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triTapWindowMs", TriTapWindowMs, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triCamView", TriCamView));
     GGameState.NewNularOp(GameNular(GameScalar, "triCamFov", TriCamFov));
+    GGameState.NewFunction(GameFunction(GameArray, "triLeanPose", TriLeanPose, GameObject));
     GGameState.NewFunction(GameFunction(GameString, "triMouseMid", TriMouseMid, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triMouseDelta", TriMouseDelta, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triFontTune", TriFontTune, GameArray));

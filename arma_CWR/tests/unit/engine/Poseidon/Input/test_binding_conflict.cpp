@@ -167,7 +167,10 @@ TEST_CASE("ResetCategoryDefaults: rewrites every action in the category", "[Inpu
         int expected = 0;
         for (int j = 0; j < descs[idx].keys.Size(); j++)
         {
-            if (!IsGamepadCode(descs[idx].keys[j]))
+            const int key = descs[idx].keys[j];
+            const bool reservedLeanKey = (key == SDL_SCANCODE_Q || key == SDL_SCANCODE_E) &&
+                                         idx != UALeanLeft && idx != UALeanRight;
+            if (!IsGamepadCode(key) && !reservedLeanKey)
                 expected++;
         }
         const auto& bindings = profile.GetBindingEntries(static_cast<UserAction>(idx));
@@ -175,7 +178,10 @@ TEST_CASE("ResetCategoryDefaults: rewrites every action in the category", "[Inpu
         int actual = 0;
         for (int j = 0; j < descs[idx].keys.Size(); j++)
         {
-            if (IsGamepadCode(descs[idx].keys[j]))
+            const int key = descs[idx].keys[j];
+            const bool reservedLeanKey = (key == SDL_SCANCODE_Q || key == SDL_SCANCODE_E) &&
+                                         idx != UALeanLeft && idx != UALeanRight;
+            if (IsGamepadCode(key) || reservedLeanKey)
                 continue;
             CHECK(bindings[actual].code == InputCode::FromLegacy(descs[idx].keys[j]));
             CHECK_FALSE(bindings[actual].modifier.valid());

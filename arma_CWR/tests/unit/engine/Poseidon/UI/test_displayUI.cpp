@@ -1,4 +1,5 @@
 #include <Poseidon/Core/resincl.hpp>
+#include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/Input/InputDeviceConstants.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
@@ -26,6 +27,18 @@ TEST_CASE("displayUI names higher stick buttons", "[UI][displayUI]")
     CHECK(std::string((const char*)GetKeyName(INPUT_DEVICE_STICK + 9)) == "Stick Btn. #10");
     CHECK(std::string((const char*)GetKeyName(INPUT_DEVICE_STICK + 10)) == "LS");
     CHECK(std::string((const char*)GetKeyName(INPUT_DEVICE_STICK + 11)) == "RS");
+}
+
+TEST_CASE("Classic data without SDL key strings still labels rebindable lean keys", "[UI][displayUI][lean]")
+{
+    const int savedQ = IDS_SDL_SCANCODE_Q;
+    const int savedE = IDS_SDL_SCANCODE_E;
+    IDS_SDL_SCANCODE_Q = IDS_SDL_SCANCODE_E = -1;
+    CHECK(std::string((const char*)GetKeyName(SDL_SCANCODE_Q)) == "Q");
+    CHECK(std::string((const char*)GetKeyName(SDL_SCANCODE_E)) == "E");
+    CHECK(std::string((const char*)GetKeyName(InputBindingTapCode(SDL_SCANCODE_Q))) == "Tap Q");
+    IDS_SDL_SCANCODE_Q = savedQ;
+    IDS_SDL_SCANCODE_E = savedE;
 }
 
 TEST_CASE("displayUI names tap keyboard and mouse bindings", "[UI][displayUI]")

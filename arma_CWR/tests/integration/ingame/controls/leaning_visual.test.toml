@@ -1,0 +1,7 @@
+tags = ["controls", "lean", "full_cwa", "visual", "headful", "exclusive"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 120
+assert_timeout = 15
+# Run with tri test ... --render gl33 to capture the rendered body and sights.
+extra_args = ["--dev"]
