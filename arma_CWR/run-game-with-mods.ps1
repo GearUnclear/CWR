@@ -16,15 +16,17 @@
     in the stderr log, so this script resolves and validates every entry up
     front and fails in the terminal instead.
 
-    THE @LoBo FIXUP (important): @LoBo's LoBoammo.pbo and LoBo_airammo.pbo ship
-    a malformed float literal ("0.0.1") in eleven CfgAmmo tracerColor[] arrays.
-    The config reader evaluates non-numeric tokens as script expressions at
-    parse time, so a pristine @LoBo is a hazard. tests/fixtures/mods-lobo/
-    @lobofixup carries same-named patched pbos that SHADOW @LoBo's copies, and
-    must therefore mount AFTER @LoBo. Whenever @LoBo is in the mod list this
-    script appends the fixup automatically (suppress with -NoLoBoFixup), and
-    errors out with the exact generator command if the patched pbos have not
-    been generated on this machine yet.
+    THE @LoBo FIXUP: tests/fixtures/mods-lobo/@lobofixup is a tracked fixture
+    mod whose bin/config.cpp preloads the LoBo addons the Guerrilla templates
+    spawn from and #includes the @LoBo war rosters
+    (guerrilla-mode/config/lobo-factions.hpp). It must mount AFTER @LoBo.
+    Whenever @LoBo is in the mod list this script appends it automatically
+    (suppress with -NoLoBoFixup). It no longer needs any generated files:
+    stock @LoBo's malformed "0.0.1" tracerColor floats used to abort the
+    config parse, but the reader now coerces them at load (only
+    --strict-config keeps them raw) and `PoseidonTools mod doctor <@LoBo>
+    --fix` repairs the bytes in place. The fixture's optional shadow pbos
+    from gen-patched-pbos.ps1 are used when present and skipped when not.
 
     MOUNT ORDER is left-to-right: later entries shadow earlier ones. The order
     you pass to -Mod is preserved, with the fixup appended at the end.
@@ -40,8 +42,9 @@
     Default: D:\Arma_CWA (the repo root's parent layout, where @LoBo lives)
 
 .PARAMETER NoLoBoFixup
-    Do not auto-append the @lobofixup shadow mod when @LoBo is mounted. Only
-    useful when deliberately reproducing the unpatched-@LoBo config abort.
+    Do not auto-append the @lobofixup fixture mod when @LoBo is mounted, e.g.
+    to check what a session with @LoBo alone (rosters from
+    tools/lobo/install-lobo-factions.ps1 only) offers.
 
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory, passed through.
@@ -135,18 +138,10 @@ foreach ($entry in $Mod) {
     }
 }
 
-# @LoBo fixup: shadow pbos must mount AFTER @LoBo (see .DESCRIPTION).
+# @LoBo fixup: the fixture's bin/config.cpp must mount AFTER @LoBo (see .DESCRIPTION).
 $fixupDir = Join-Path $RepoRoot 'tests\fixtures\mods-lobo\@lobofixup'
 $hasLoBo = @($resolved | Where-Object { (Split-Path $_ -Leaf) -eq '@LoBo' }).Count -gt 0
 if ($hasLoBo -and -not $NoLoBoFixup -and ($resolved -notcontains [System.IO.Path]::GetFullPath($fixupDir))) {
-    $missing = @('LoBoammo.pbo', 'LoBo_airammo.pbo') |
-        Where-Object { -not (Test-Path -LiteralPath (Join-Path $fixupDir "addons\$_")) }
-    if ($missing) {
-        throw ("@LoBo fixup pbos not generated ({0} missing). The unpatched @LoBo aborts on " +
-               "malformed tracerColor floats, so generate them once with:`n" +
-               "  & '{1}\gen-patched-pbos.ps1'`n" +
-               "or pass -NoLoBoFixup to mount @LoBo unpatched anyway." -f ($missing -join ', '), $fixupDir)
-    }
     $resolved += [System.IO.Path]::GetFullPath($fixupDir)
 }
 
