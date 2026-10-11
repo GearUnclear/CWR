@@ -30,5 +30,7 @@ The git root was rerooted up from `arma_CWR/` to `D:\Arma_CWA` so the web portal
 
 ## Conventions
 
+- **Make no new branches unless the user grants permission.** Work on the current branch (normally `main`). Do not run `git branch`, `git checkout -b`, `git switch -c`, `git worktree add -b`, or push a new branch to any remote without the user's explicit OK in chat for that branch. Approval for one branch does not extend to the next. This applies to subagents too.
+
 - The public brand is **Uslu dur! / UD** in user-facing text (the site, docs written for players). Internal code, folders, and build targets keep the `cwr`/`CWR`/`Poseidon` names — do not mass-rename them.
 - Multiple concurrent sessions touch this repo. If a file appears to be missing or deleted, check whether the removal was intentional before "restoring" it.
