@@ -1,0 +1,7 @@
+mission = "tests/integration/missions/menu_return.Abel"
+binary = "PoseidonGame"
+tags = ["ui", "full_cwa", "headless"]
+timeout = 90
+assert_timeout = 20
+# Strict on purpose: rejecting an intro for a missing addon must only WARN.
+extra_args = ["--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-menu-return/@allinvalid"]

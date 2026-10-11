@@ -1,0 +1,8 @@
+# Real LoBo lane: Sinai names a menu cutscene in lost_anims, which is absent
+# from this mod distribution. Missing menu assets must never retain a mission.
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headless"]
+timeout = 240
+assert_timeout = 30
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]

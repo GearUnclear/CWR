@@ -1,0 +1,10 @@
+# Boot the menu and drive the real player launch/Abort flow. --test-mission
+# without --autotest opens the editor, so this requires installed templates:
+# guerrilla-mode/install-missions.ps1 against the full Classic data directory.
+# Lebanon80 names an empty cutscene; the engine must load the base menu intro.
+binary = "PoseidonGame"
+no_autotest = true
+tags = ["ui", "guerrilla", "full_cwa", "lobo", "headful"]
+timeout = 240
+assert_timeout = 30
+extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]

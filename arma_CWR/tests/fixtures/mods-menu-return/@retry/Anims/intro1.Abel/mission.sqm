@@ -1,0 +1,28 @@
+version=11;
+class Mission { class Intel {}; };
+class Intro
+{
+    class Intel {};
+    class Groups
+    {
+        items=1;
+        class Item0
+        {
+            side="EAST";
+            class Vehicles
+            {
+                items=1;
+                class Item0
+                {
+                    position[]={7515,20,5790};
+                    id=0;
+                    side="EAST";
+                    vehicle="SoldierEB";
+                    player="PLAYER COMMANDER";
+                    leader=1;
+                    init="triMenuGoodIntro = true";
+                };
+            };
+        };
+    };
+};

@@ -16,6 +16,7 @@
 #include <Poseidon/Core/Progress.hpp>
 
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
+#include <Poseidon/AI/ArcadeTemplate.hpp>
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/Core/SaveVersion.hpp>
 
@@ -2226,41 +2227,144 @@ void SaveHeader()
 
 bool ContinueSaved = true;
 
+namespace
+{
+bool ParseMenuIntro()
+{
+    // Menu scenes are optional content. Reject broken scenes without the modal
+    // mission-load warning, and never reuse a partially parsed mission template.
+    CurrentTemplate = ArcadeTemplate();
+    const RString path = GetMissionDirectory() + RString("mission.sqm");
+    ParamArchiveLoad ar;
+    if (!ar.LoadBin(path) && ar.Load(path) != LSOK)
+    {
+        LOG_WARN(Core, "Menu cutscene: cannot read '{}'", (const char*)path);
+        return false;
+    }
+
+    ATSParams params;
+    ar.SetParams(&params);
+    const LSError result = ar.Serialize("Intro", CurrentTemplate, 1);
+    if (result == LSNoAddOn)
+    {
+        // GetErrorName has no LSNoAddOn case: it would log an ERROR and say
+        // "Unknown error". Name the addons the scene needs instead.
+        RString missing;
+        for (int i = 0; i < CurrentTemplate.missingAddOns.Size(); i++)
+            missing = missing + (i > 0 ? ", " : "") + CurrentTemplate.missingAddOns[i];
+        LOG_WARN(Core, "Menu cutscene: Intro in '{}' needs missing addon(s): {}", (const char*)path,
+                 (const char*)missing);
+        return false;
+    }
+    if (result != LSOK)
+    {
+        LOG_WARN(Core, "Menu cutscene: cannot load Intro from '{}': {}", (const char*)path, ar.GetErrorName(result));
+        return false;
+    }
+    if (ar.GetArVersion() < 7 && ar.Serialize("Intel", CurrentTemplate.intel, 1) != LSOK)
+    {
+        LOG_WARN(Core, "Menu cutscene: cannot load old-format Intel from '{}'", (const char*)path);
+        return false;
+    }
+    if (CurrentTemplate.groups.Size() == 0 || !CurrentTemplate.IsConsistent(nullptr, false))
+    {
+        LOG_WARN(Core, "Menu cutscene: Intro in '{}' has no usable groups", (const char*)path);
+        return false;
+    }
+    return true;
+}
+
+bool TryStartMenuCutscene(RString world)
+{
+    const ParamEntry* worldClass = (Pars >> "CfgWorlds").FindEntry(world);
+    const ParamEntry* scenes = worldClass ? worldClass->FindEntry("cutscenes") : nullptr;
+    const int n = scenes ? scenes->GetSize() : 0;
+    if (n == 0)
+    {
+        LOG_WARN(Core, "Menu cutscene: world '{}' has no configured cutscenes", (const char*)world);
+        return false;
+    }
+    if (!QIFStreamB::FileExist(GetWorldName(world)))
+    {
+        LOG_WARN(Core, "Menu cutscene: world '{}' has no available terrain", (const char*)world);
+        return false;
+    }
+
+    const int first = toIntFloor(n * GRandGen.RandomValue()) % n;
+    for (int attempt = 0; attempt < n; ++attempt)
+    {
+        const int i = (first + attempt) % n;
+        const RString name = (*scenes)[i];
+        if (name.GetLength() == 0)
+        {
+            LOG_WARN(Core, "Menu cutscene: world '{}' has an empty cutscene ({}/{})", (const char*)world, i + 1, n);
+            continue;
+        }
+
+        // Preserve working island intros, including mod Anims/ folders and
+        // packed "..\\addons" paths, before falling back to the default menu.
+        SetMission(world, name, ResolveCutsceneAnimsSubdir(world, name));
+        const RString path = GetMissionDirectory() + RString("mission.sqm");
+        if (!QIFStreamB::FileExist(path))
+        {
+            LOG_WARN(Core, "Menu cutscene: '{}' is missing", (const char*)path);
+            continue;
+        }
+        LOG_INFO(Core, "Menu cutscene: loading '{}' on world '{}' ({}/{})", (const char*)name, (const char*)world,
+                 i + 1, n);
+        if (!ParseMenuIntro())
+            continue;
+
+        LOG_INFO(Core, "Menu cutscene: intro parsed ({} groups)", CurrentTemplate.groups.Size());
+        GWorld->SwitchLandscape(GetWorldName(world));
+        GWorld->ActivateAddons(CurrentTemplate.addOns);
+        GWorld->InitGeneral(CurrentTemplate.intel);
+        if (GWorld->InitVehicles(GModeIntro, CurrentTemplate))
+        {
+            LOG_INFO(Core, "Menu cutscene: world ready");
+            return true;
+        }
+        LOG_WARN(Core, "Menu cutscene: '{}' failed to initialize", (const char*)path);
+    }
+    return false;
+}
+} // namespace
+
 void StartRandomCutscene(RString world)
 {
+    const RString menuWorld = GetMenuInitWorld();
     if (world.GetLength() == 0)
-    {
-        world = GetMenuInitWorld();
-    }
+        world = menuWorld;
 
-    const ParamEntry& cls = Pars >> "CfgWorlds" >> world >> "cutscenes";
-    int n = cls.GetSize();
-    int i = toIntFloor(n * GRandGen.RandomValue());
-
-    RString name = cls[i];
-
-    // The scene is a random pick, so any stall in the load below is only
-    // attributable if the log names which world/cutscene was being loaded.
-    LOG_INFO(Core, "Menu cutscene: loading '{}' on world '{}' ({}/{})", (const char*)name, (const char*)world, i + 1,
-             n);
-
-    // A mod that ships Anims/<name>.<world> hosts the cutscene from its own root; else the base
-    // anims/ bank. Clear the base dir first so SetMission's own reads resolve from the same place.
     SetBaseDirectory("");
-    SetMission(world, name, ResolveCutsceneAnimsSubdir(world, name));
+    if (TryStartMenuCutscene(world))
+        return;
 
-    ParseIntro();
-    LOG_INFO(Core, "Menu cutscene: intro parsed ({} groups)", CurrentTemplate.groups.Size());
-
-    if (CurrentTemplate.groups.Size() > 0)
+    if (stricmp(world, menuWorld) != 0)
     {
-        GLOB_WORLD->SwitchLandscape(GetWorldName(world));
-        GWorld->ActivateAddons(CurrentTemplate.addOns);
-        GLOB_WORLD->InitGeneral(CurrentTemplate.intel);
-        GLOB_WORLD->InitVehicles(GModeIntro, CurrentTemplate);
-        //		GWorld->EnableSimulation(true);
+        LOG_WARN(Core, "Menu cutscene: no usable intro on '{}'; falling back to '{}'", (const char*)world,
+                 (const char*)menuWorld);
+        if (TryStartMenuCutscene(menuWorld))
+            return;
     }
-    LOG_INFO(Core, "Menu cutscene: world ready");
+
+    // Even a package with no working menu scenes must leave gameplay. The old
+    // groups-only branch skipped SwitchLandscape and left mission actors and
+    // scripts running behind the menu. Build an empty intro after teardown.
+    LOG_WARN(Core, "Menu cutscene: no usable intro; clearing mission for an empty menu scene");
+    CurrentTemplate = ArcadeTemplate();
+    SetMission(menuWorld, "", GetAnimsDir());
+    const ParamEntry* menuClass = (Pars >> "CfgWorlds").FindEntry(menuWorld);
+    if (menuClass && QIFStreamB::FileExist(GetWorldName(menuWorld)))
+        GWorld->SwitchLandscape(GetWorldName(menuWorld));
+    else
+        GWorld->Clear();
+    GWorld->ActivateAddons(CurrentTemplate.addOns);
+    GWorld->InitGeneral(CurrentTemplate.intel);
+    if (GWorld->InitVehicles(GModeIntro, CurrentTemplate))
+        LOG_INFO(Core, "Menu cutscene: empty scene ready");
+    else
+        LOG_WARN(Core, "Menu cutscene: empty scene failed to initialize");
 }
 
 } // namespace Poseidon
