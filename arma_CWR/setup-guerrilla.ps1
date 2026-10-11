@@ -8,6 +8,7 @@
     up beneath each data folder's .ud-backups directory. Original PBO backups
     are managed by mod doctor under LoBo/_ud-orig. No base game PBO is copied.
     -CheckOnly validates every input without writing or running the doctor.
+    Folders recognised as an official Remaster or Demo package are refused.
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -59,16 +60,21 @@ foreach ($dir in @($GameDir, $LoBoDir)) {
     Assert-PlainPath $dir
 }
 if ($GameDir -eq $LoBoDir) { throw 'GameDir and LoBoDir must be separate folders.' }
-Require-File $Tools
+# Refuse official Remaster/Demo packages before any other check or write: our shims
+# share names with their BIN files. bin/remaster.cpp is no marker (ours after a run);
+# nothing in this repo creates a root dtaExt or these BIN files.
 $bin = Resolve-Child $GameDir 'bin'
+$markers = @((Resolve-Child $GameDir 'dtaExt'), (Resolve-Child $bin 'remaster.bin'),
+    (Resolve-Child $bin 'mainMenu.hpp'), (Resolve-Child $bin 'splashLogo.hpp'))
+$found = @(foreach ($path in $markers) { if (Test-Path -LiteralPath $path) { [IO.Path]::GetRelativePath($GameDir, $path) } })
+if ($found.Count -gt 0) {
+    throw "GameDir looks like an official Remaster or Demo package (found $($found -join ', ') in $GameDir). Setup targets Classic 1.99; running it here would replace that package's own remaster.cpp, resource-extra.cpp and Options headers."
+}
+Require-File $Tools
 Require-File (Resolve-Child $bin 'config.bin')
 Require-File (Resolve-Child $bin 'resource.bin')
 Require-File (Resolve-Relative $GameDir 'dta/data3d.pbo')
 Require-File (Resolve-Relative $GameDir 'worlds/abel.wrp')
-# Avoid accidentally replacing a Remaster package with a Classic compatibility shim.
-if (Test-Path -LiteralPath (Resolve-Child $bin 'remaster.bin')) {
-    throw 'This installer targets Classic 1.99, not Remaster/Demo game data.'
-}
 $addons = Resolve-Child $LoBoDir 'addons'
 foreach ($name in @('LoBoammo.pbo','LoBo_airammo.pbo','LoBoWreck.pbo','LoBoPalObj.pbo')) {
     Require-File (Resolve-Child $addons $name)
