@@ -119,7 +119,7 @@ bool IsConfigOverriddenByMod()
 }
 
 // The main menu's resource closure: every class the UD main menu resolves through.
-// RscDisplayMainRemaster (defined in the package's bin/resource-extra.cpp) inherits
+// RscDisplayMainUD / RscDisplayMainRemaster (merged via the package's bin/resource-extra.cpp) inherit
 // RscDisplayMain, so the mod's RscDisplayMain — and every style root its controls
 // derive from — is what actually decides the menu's geometry and chrome. Restoring
 // only RscDisplayMain is not enough: its controls are `X: RscText` / `X: RscActiveMenu`

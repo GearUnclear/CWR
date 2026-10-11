@@ -221,17 +221,21 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         return;
     }
 
-    // Remaster main menu: inherits the locked vanilla RscDisplayMain
-    // layout but overrides the CWA logo control to use cwr_logo.paa.
-    // Defined in resources/menu/splashLogo.hpp, merged at runtime by
-    // ParseResource via each package's BIN/resource-extra.cpp.
+    // Main menu class, in preference order (SelectMainMenuResourceClass,
+    // UI/MainMenuLayout.cpp): the UD front door RscDisplayMainUD
+    // (bin/ud-mainmenu.hpp, installed by setup-guerrilla.ps1 on Classic and
+    // beside Bohemia's files on the Remaster, issue #67), else the Remaster
+    // package's RscDisplayMainRemaster (inherits the locked vanilla
+    // RscDisplayMain layout and overrides the CWA logo), else vanilla. Both
+    // override classes are merged at runtime by ParseResource via the
+    // package's BIN/resource-extra.cpp.
     //
     // Fall back to the vanilla RscDisplayMain when the override class
     // hasn't been merged (e.g. PoseidonUITest's package has its own
     // RESOURCE.BIN with no resource-extra.cpp).  Without this guard,
     // Load() returns an empty class and the next GetCtrl(IDC_MAIN_*)
     // call derefs nullptr in EnableCtrl.
-    // Policy (2026-08-06): the UD menu wins whenever RscDisplayMainRemaster
+    // Policy (2026-08-06): the UD menu wins whenever its class
     // exists, even when a mod's bin/resource overrode the menu resource
     // (MergeBaseResourceExtra restores the class on top of the mod's Res).
     // UD is a total overhaul and this menu is the only entry point into
@@ -245,7 +249,7 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
     // blocks below
     // still cover a plain RscDisplayMain (mod or vanilla) when no
     // resource-extra ships the remaster class.
-    const char* mainRsc = Res.FindEntry("RscDisplayMainRemaster") ? "RscDisplayMainRemaster" : "RscDisplayMain";
+    const char* mainRsc = SelectMainMenuResourceClass(Res);
     Load(mainRsc);
     //	LoadHeader();
 

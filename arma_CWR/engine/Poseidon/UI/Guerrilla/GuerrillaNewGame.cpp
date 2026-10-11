@@ -4,6 +4,7 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>            // CreateSingleMissionBank (per-island description.ext peek)
+#include <Poseidon/UI/MainMenuLayout.hpp>             // SelectMainMenuResourceClass
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // shared with ZoneRegistry::ResolveSideCollisions
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>   // FindGuerrillaFactionEntry (outfit cycler, issue #25)
@@ -927,7 +928,7 @@ void GuerrillaNewGame::InjectFactionCyclers()
     // menu's font/colors/sounds — the exact technique DisplayMain uses to
     // inject the MODS entry (see the long comment there for why the local
     // idc/text/style entries must be added BEFORE SetBase).
-    const char* mainRsc = Res.FindEntry("RscDisplayMainRemaster") ? "RscDisplayMainRemaster" : "RscDisplayMain";
+    const char* mainRsc = SelectMainMenuResourceClass(Res);
     ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
     if (quitCls == nullptr || !quitCls->IsClass())
     {

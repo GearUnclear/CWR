@@ -4,7 +4,7 @@
 //  The human-playable test slices (guerrilla-mode/mission/Showcase.Abel,
 //  Undercover.Abel) are surfaced on the main menu as direct-launch buttons
 //  (kReferenceMissions, UI/OptionsUIApp.cpp): resource-provided controls on
-//  the Classic package's RscDisplayMainRemaster, runtime-injected clones of
+//  the UD menu's RscDisplayMainUD (bin/ud-mainmenu.hpp), runtime-injected clones of
 //  the Quit class anywhere the menu resource lacks them. Either way the
 //  button only shows while the mission is installed, and a click launches it
 //  through the single-mission path with no island/faction screen (the

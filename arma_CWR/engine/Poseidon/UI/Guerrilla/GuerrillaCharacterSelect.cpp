@@ -1,5 +1,6 @@
 #include <Poseidon/UI/Guerrilla/GuerrillaCharacterSelect.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaBodyPreview.hpp>
+#include <Poseidon/UI/MainMenuLayout.hpp> // SelectMainMenuResourceClass
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars + Res
@@ -65,7 +66,7 @@ constexpr const char* kMatchOutfitRow = "(match outfit)";
 // lookup GuerrillaNewGame::InjectFactionCyclers performs.
 ParamEntry* FindMenuQuitClass()
 {
-    const char* mainRsc = Res.FindEntry("RscDisplayMainRemaster") ? "RscDisplayMainRemaster" : "RscDisplayMain";
+    const char* mainRsc = SelectMainMenuResourceClass(Res);
     ParamEntry* quitCls = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
     if (quitCls == nullptr || !quitCls->IsClass())
     {

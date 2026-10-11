@@ -1,16 +1,17 @@
-<# Launch a prepared Classic/LoBo installation using a built UD executable. #>
+<# Launch a prepared Remaster (or legacy Classic) installation using a built UD
+   executable. -LoBoDir is optional: leave it out to play the stock islands. #>
 #requires -Version 7.0
 param(
     [Parameter(Mandatory)][string]$GameDir,
-    [Parameter(Mandatory)][string]$LoBoDir,
+    [string]$LoBoDir,
     [Parameter(Mandatory)][string]$GameExe,
     [string]$Mission
 )
 $ErrorActionPreference = 'Stop'
 $GameDir = (Resolve-Path -LiteralPath $GameDir).ProviderPath
-$LoBoDir = (Resolve-Path -LiteralPath $LoBoDir).ProviderPath
+if ($LoBoDir) { $LoBoDir = (Resolve-Path -LiteralPath $LoBoDir).ProviderPath }
 $GameExe = (Resolve-Path -LiteralPath $GameExe).ProviderPath
-foreach ($relative in @('bin/remaster.cpp','bin/resource-extra.cpp','gmcore/init.sqs','fonts/cwr_body.ttf')) {
+foreach ($relative in @('bin/remaster.cpp','bin/resource-extra.cpp','bin/ud-mainmenu.hpp','gmcore/init.sqs','fonts/cwr_body.ttf')) {
     $path = $GameDir
     foreach ($part in $relative.Split('/')) {
         $child = @(Get-ChildItem -LiteralPath $path | Where-Object Name -IEQ $part)
@@ -18,10 +19,13 @@ foreach ($relative in @('bin/remaster.cpp','bin/resource-extra.cpp','gmcore/init
         $path = $child[0].FullName
     }
 }
-$mods = @($LoBoDir)
-$deps = Join-Path $LoBoDir 'deps/@LoBo_Deps'
-if (Test-Path -LiteralPath $deps -PathType Container) { $mods += $deps }
-$argsList = @('--window','--no-splash','--mod',($mods -join ';'))
+$argsList = @('--window','--no-splash')
+if ($LoBoDir) {
+    $mods = @($LoBoDir)
+    $deps = Join-Path $LoBoDir 'deps/@LoBo_Deps'
+    if (Test-Path -LiteralPath $deps -PathType Container) { $mods += $deps }
+    $argsList += @('--mod',($mods -join ';'))
+}
 if ($Mission) { $argsList += @('--test-mission', $Mission) }
 # ArgumentList preserves paths containing spaces without manually quoting shell code.
 $info = [Diagnostics.ProcessStartInfo]::new($GameExe)

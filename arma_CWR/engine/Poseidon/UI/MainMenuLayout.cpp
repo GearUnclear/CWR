@@ -1,5 +1,9 @@
 #include <Poseidon/UI/MainMenuLayout.hpp>
 
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
+
+#include <initializer_list>
+
 namespace Poseidon
 {
 
@@ -60,6 +64,17 @@ MainMenuModsPlacement CalculateMainMenuModsPlacement(const MainMenuControlRect& 
     placement.x = 0.0f;
     placement.y = yAbove >= 0.0f ? yAbove : quit.y;
     return placement;
+}
+
+const char* SelectMainMenuResourceClass(const ParamClass& res)
+{
+    for (const char* name : {kMainMenuClassUD, kMainMenuClassRemaster})
+    {
+        const ParamEntry* entry = res.FindEntry(name);
+        if (entry && entry->IsClass())
+            return name;
+    }
+    return kMainMenuClassVanilla;
 }
 
 } // namespace Poseidon

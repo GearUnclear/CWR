@@ -1,84 +1,112 @@
 {
+  "remasterPolicies": {
+    "install": "UD-owned file; installed and kept current in both modes",
+    "keep-existing": "Bohemia may ship this file; installed only where absent, an existing file is never replaced",
+    "string-gap": "not copied; setup writes bin/STRINGTABLE_UD.utf8.csv with only the keys Bohemia's shards lack (and the notice beside it)",
+    "skip": "Classic-only shim; the Remaster ships its own"
+  },
   "files": [
     {
       "destination": "bin/remaster.cpp",
       "source": "guerrilla-mode/runtime/classic/bin/remaster.cpp",
-      "sha256": "f748deaccfd2a96376bd103cf68e6781f124acb5f249007593d04674e77ab98c"
+      "sha256": "f748deaccfd2a96376bd103cf68e6781f124acb5f249007593d04674e77ab98c",
+      "remaster": "skip"
     },
     {
       "destination": "bin/resource-extra.cpp",
       "source": "guerrilla-mode/runtime/classic/bin/resource-extra.cpp",
-      "sha256": "dd6c3be9c3b8589e46aa90ae1cc6aff8f02ef8ffb3466f0eb08c5558bc34d8fa"
+      "sha256": "4d865290006ecb2783581c6a57dae3e5ddcf1f224c29605d93135568eaad0217",
+      "remaster": "skip"
+    },
+    {
+      "destination": "bin/ud-mainmenu.hpp",
+      "source": "guerrilla-mode/runtime/common/bin/ud-mainmenu.hpp",
+      "sha256": "13e2d5207128c83d660873812bf8e256252a81813e6c71c75bde369b948a4d14",
+      "remaster": "install"
     },
     {
       "destination": "bin/optionsShell.hpp",
       "source": "thirdparty/classic-ui/optionsShell.hpp",
-      "sha256": "ce201502b9ff5f5b79876595a9d5e0e3e1e1ad936df0355ef76ec88265763644"
+      "sha256": "ce201502b9ff5f5b79876595a9d5e0e3e1e1ad936df0355ef76ec88265763644",
+      "remaster": "skip"
     },
     {
       "destination": "bin/optionsTemplates.hpp",
       "source": "thirdparty/classic-ui/optionsTemplates.hpp",
-      "sha256": "3c6e690dd557a1309eb1431c2bd8e509cdc534b40152c76d0646767abea2da8f"
+      "sha256": "3c6e690dd557a1309eb1431c2bd8e509cdc534b40152c76d0646767abea2da8f",
+      "remaster": "skip"
     },
     {
       "destination": "bin/optionsScrollList.hpp",
       "source": "thirdparty/classic-ui/optionsScrollList.hpp",
-      "sha256": "faadbcb40fad5421e13ad8765f98a9400a45ab2b2712ecf6bbae41d85353881f"
+      "sha256": "faadbcb40fad5421e13ad8765f98a9400a45ab2b2712ecf6bbae41d85353881f",
+      "remaster": "skip"
     },
     {
       "destination": "bin/optionsScrollListSlots.hpp",
       "source": "thirdparty/classic-ui/optionsScrollListSlots.hpp",
-      "sha256": "c50601e29ccfae7ffa6eb3c191c1d2c1fc1f72f6130388622f31ac505ff74b6f"
+      "sha256": "c50601e29ccfae7ffa6eb3c191c1d2c1fc1f72f6130388622f31ac505ff74b6f",
+      "remaster": "skip"
     },
     {
       "destination": "bin/optionsUI.hpp",
       "source": "thirdparty/classic-ui/optionsUI.hpp",
-      "sha256": "bcdec0dd661aade0f9c6d1205a014112017206c940c7ebe01dfdbb257f92bbf8"
+      "sha256": "bcdec0dd661aade0f9c6d1205a014112017206c940c7ebe01dfdbb257f92bbf8",
+      "remaster": "skip"
     },
     {
       "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
       "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
-      "sha256": "386f8344deeb900f4e5a6b749ce93e6ffd7fcde0278034d8c0b413ea329bf224"
+      "sha256": "82522e475888fee3187700bca9721f657198354536fbcf446bf770712265f5ed",
+      "remaster": "string-gap"
     },
     {
       "destination": "bin/UD_OPTIONS_APL-SA_NOTICE.txt",
       "source": "thirdparty/classic-ui/APL-SA_NOTICE.txt",
-      "sha256": "87264654e7d82caccbefde1d49f2d4297f5057afb3ae7ceb8091c20a5d2774c1"
+      "sha256": "87264654e7d82caccbefde1d49f2d4297f5057afb3ae7ceb8091c20a5d2774c1",
+      "remaster": "string-gap"
     },
     {
       "destination": "fonts/cwr_body.ttf",
       "source": "thirdparty/guerrilla-fonts/cwr_body.ttf",
-      "sha256": "cb244f96329b3504d7c198206a0b4ff1660fafb63882d9c211a1785d7083f424"
+      "sha256": "cb244f96329b3504d7c198206a0b4ff1660fafb63882d9c211a1785d7083f424",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/cwr_hand.ttf",
       "source": "thirdparty/guerrilla-fonts/cwr_hand.ttf",
-      "sha256": "ed12ceeb807081b63cd13b0580f3c734d1c04e7bbf8dc9525b1af8281c2e6ce0"
+      "sha256": "ed12ceeb807081b63cd13b0580f3c734d1c04e7bbf8dc9525b1af8281c2e6ce0",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/cwr_mono.ttf",
       "source": "thirdparty/guerrilla-fonts/cwr_mono.ttf",
-      "sha256": "c74ca4dc965b2f791483a43c4abd3b6b270b761c34dfe1b91fe2a038dd3a1de7"
+      "sha256": "c74ca4dc965b2f791483a43c4abd3b6b270b761c34dfe1b91fe2a038dd3a1de7",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/cwr_serif.ttf",
       "source": "thirdparty/guerrilla-fonts/cwr_serif.ttf",
-      "sha256": "cc431374627239bcd1f7d1d82e45d0fe49867a81946a31289c17d43001ab1caa"
+      "sha256": "cc431374627239bcd1f7d1d82e45d0fe49867a81946a31289c17d43001ab1caa",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/cwr_title.ttf",
       "source": "thirdparty/guerrilla-fonts/cwr_title.ttf",
-      "sha256": "3651c7b0d540d412a536320e1ab296daeb254db20fa38bd33b186ff9bf1657fe"
+      "sha256": "3651c7b0d540d412a536320e1ab296daeb254db20fa38bd33b186ff9bf1657fe",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/OFL.txt",
       "source": "thirdparty/guerrilla-fonts/OFL.txt",
-      "sha256": "6863ff4dc820f24756b6acfb38a2c6bc19d5b8d71b17030330a6f16eb4cee348"
+      "sha256": "6863ff4dc820f24756b6acfb38a2c6bc19d5b8d71b17030330a6f16eb4cee348",
+      "remaster": "keep-existing"
     },
     {
       "destination": "fonts/UD_FONT_CREDITS.md",
       "source": "thirdparty/guerrilla-fonts/README.md",
-      "sha256": "339c12ea02e3ba2254b93daf17ef01d5fdb9eface9699b4b704ca22715f1919d"
+      "sha256": "339c12ea02e3ba2254b93daf17ef01d5fdb9eface9699b4b704ca22715f1919d",
+      "remaster": "install"
     }
   ]
 }

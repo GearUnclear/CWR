@@ -53,21 +53,8 @@ try {
     Put (Join-Path $game 'BIN/config-extra.cpp') '// unrelated package configuration'
     Put (Join-Path $game 'BIN/resource-extra.cpp') '// preserve this override in backup'
     Put (Join-Path $game 'Missions/MyMission.Abel/mission.sqm') 'unrelated mission'
-    # Official packages ship BIN files our shims would replace; refuse them before any write.
+    # The Remaster Demo is refused before any write (no Abel, no GUER roster; not a data target).
     $loboState = Get-TreeState $lobo
-    $steam = Join-Path $scratch 'Remastered [Steam]'
-    New-GameData $steam
-    [void][IO.Directory]::CreateDirectory((Join-Path $steam 'dtaExt/equip'))
-    foreach ($name in @('remaster.cpp','resource-extra.cpp','optionsShell.hpp','mainMenu.hpp','splashLogo.hpp')) {
-        Put (Join-Path $steam "BIN/$name") "// Bohemia $name"
-    }
-    Put (Join-Path $steam 'PoseidonGame.exe') 'official binary'
-    $steamState = Get-TreeState $steam
-    Expect-Failure { & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor } 'official Remaster or Demo package'
-    Expect-Failure { & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor -CheckOnly } 'targets Classic 1.99'
-    Assert ((Get-TreeState $steam) -eq $steamState) 'Refused Remaster folder was modified'
-    Assert ([IO.File]::ReadAllText((Join-Path $steam 'BIN/remaster.cpp')) -eq '// Bohemia remaster.cpp') 'Official remaster.cpp replaced'
-    Assert (-not (Test-Path -LiteralPath (Join-Path $steam '.ud-backups'))) 'Refused Remaster folder got backups'
     # The Demo lacks Abel; the refusal must still win over the missing-file and tool checks.
     $demo = Join-Path $scratch 'Demo [Remaster]'
     New-GameData $demo -NoWorld
@@ -77,10 +64,18 @@ try {
     }
     Put (Join-Path $demo 'PoseidonGameDemo.exe') 'official demo binary'
     $demoState = Get-TreeState $demo
-    Expect-Failure { & $setup -GameDir $demo -LoBoDir $lobo -Tools (Join-Path $scratch 'missing-tool') -CheckOnly } 'official Remaster or Demo package'
-    Expect-Failure { & $setup -GameDir $demo -LoBoDir $lobo -Tools $doctor } 'official Remaster or Demo package'
+    Expect-Failure { & $setup -GameDir $demo -LoBoDir $lobo -Tools (Join-Path $scratch 'missing-tool') -CheckOnly } 'Remaster Demo package'
+    Expect-Failure { & $setup -GameDir $demo -LoBoDir $lobo -Tools $doctor } 'Remaster Demo package'
     Assert ((Get-TreeState $demo) -eq $demoState) 'Refused Demo folder was modified'
-    # Each marker alone is enough, in any letter case.
+    # A Demo binary alone marks the Demo even where an Abel world is present.
+    $demoAbel = Join-Path $scratch 'Demo with Abel [Remaster]'
+    New-GameData $demoAbel
+    Put (Join-Path $demoAbel 'BIN/mainMenu.hpp') '// Bohemia mainMenu.hpp'
+    Put (Join-Path $demoAbel 'BIN/resource-extra.cpp') '// Bohemia resource-extra.cpp'
+    Put (Join-Path $demoAbel 'PoseidonGameDemo') 'official demo binary'
+    Expect-Failure { & $setup -GameDir $demoAbel -LoBoDir $lobo -Tools $doctor } 'Remaster Demo package'
+    # Each marker alone, in any letter case, selects Remaster mode. Without Bohemia's
+    # own bin/resource-extra.cpp to append to, that mode refuses before any write.
     $variants = @(@('BIN','dtaExt'), @('bin','DTAEXT'), @('BIN','BIN/remaster.bin'), @('bin','bin/REMASTER.BIN'),
         @('BIN','BIN/MAINMENU.HPP'), @('bin','bin/splashLogo.hpp'))
     for ($i = 0; $i -lt $variants.Count; $i++) {
@@ -91,6 +86,7 @@ try {
         else { [void][IO.Directory]::CreateDirectory((Join-Path $root $marker)) }
         $state = Get-TreeState $root
         Expect-Failure { & $setup -GameDir $root -LoBoDir $lobo -Tools $doctor } (Split-Path -Leaf $marker)
+        Expect-Failure { & $setup -GameDir $root -LoBoDir $lobo -Tools $doctor } 'no bin/resource-extra.cpp'
         Assert ((Get-TreeState $root) -eq $state) "Refused folder was modified: $marker"
     }
     Assert ((Get-TreeState $lobo) -eq $loboState) 'Refused setup changed LoBo'
@@ -136,6 +132,100 @@ try {
         $relative = $entry.destination -replace '^bin/', 'BIN/'
         Assert ((Get-FileHash -LiteralPath (Join-Path $game $relative)).Hash -ieq $entry.sha256) "Payload drift: $relative"
     }
+    Assert (-not (Test-Path -LiteralPath (Join-Path $game 'BIN/STRINGTABLE_UD.utf8.csv'))) 'Classic got the Remaster gap shard'
+    Assert ([IO.File]::ReadAllText((Join-Path $game 'BIN/resource-extra.cpp')).Contains('#include "ud-mainmenu.hpp"')) 'Classic menu include missing'
+
+    # ---- Remaster mode: keep every Bohemia file, add UD's beside them (issue #67) ----
+    $steam = Join-Path $scratch 'Remastered [Steam]'
+    New-GameData $steam
+    [void][IO.Directory]::CreateDirectory((Join-Path $steam 'dtaExt/equip'))
+    Put (Join-Path $steam 'dtaExt/equip/w_m16.paa') 'official equipment art'
+    foreach ($name in @('remaster.cpp','optionsShell.hpp','optionsUI.hpp','mainMenu.hpp','splashLogo.hpp','modsTable.hpp')) {
+        Put (Join-Path $steam "BIN/$name") "// Bohemia $name"
+    }
+    # Bohemia's resource-extra/config-extra (LF, trailing newline like the shipped files).
+    $bohemiaResource = "// Bohemia resource-extra.cpp`n#include `"optionsShell.hpp`"`n#include `"splashLogo.hpp`"`n#include `"modsTable.hpp`"`n#include `"mainMenu.hpp`"`n"
+    $bohemiaConfig = "// Bohemia config-extra.cpp`nclass CfgLanguages { languages[]={`"English`"}; };`n"
+    Put (Join-Path $steam 'BIN/resource-extra.cpp') $bohemiaResource
+    Put (Join-Path $steam 'BIN/config-extra.cpp') $bohemiaConfig
+    Put (Join-Path $steam 'BIN/STRINGTABLE.CSV') "LANGUAGE,English`nSTR_LEGACY_ONLY,legacy`n"
+    # Bohemia's shard covers every UD Options key except the two lean actions, with its own text.
+    $ourStrings = [IO.File]::ReadAllLines((Join-Path $repo 'thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv'))
+    $gapKeys = @('STR_USRACT_LEAN_LEFT', 'STR_USRACT_LEAN_RIGHT')
+    $theirRows = @($ourStrings | Select-Object -Skip 1 | ForEach-Object { $_.Split(',')[0] } |
+        Where-Object { $_ -notin $gapKeys } | ForEach-Object { "$_,Bohemia text" })
+    $bohemiaShard = ((@('LANGUAGE,English') + $theirRows) -join "`n") + "`n"
+    Put (Join-Path $steam 'BIN/STRINGTABLE_MAINMENU.utf8.csv') $bohemiaShard
+    # Bohemia ships the UD fonts: one byte-identical, one differing, OFL its own text.
+    [void][IO.Directory]::CreateDirectory((Join-Path $steam 'fonts'))
+    Copy-Item -LiteralPath (Join-Path $repo 'thirdparty/guerrilla-fonts/cwr_body.ttf') -Destination (Join-Path $steam 'fonts/cwr_body.ttf')
+    Put (Join-Path $steam 'fonts/cwr_title.ttf') 'Bohemia build of the title font'
+    Put (Join-Path $steam 'fonts/OFL.txt') 'Bohemia OFL text'
+    Put (Join-Path $steam 'Missions/01TakeTheCar.ABEL/mission.sqm') 'Bohemia mission'
+    Put (Join-Path $steam 'PoseidonGame.exe') 'official binary'
+    $steamBefore = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $steam -Recurse -File -Force) {
+        $steamBefore[[IO.Path]::GetRelativePath($steam, $file.FullName)] = (Get-FileHash -LiteralPath $file.FullName).Hash
+    }
+    $steamState = Get-TreeState $steam
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor -CheckOnly
+    Assert ((Get-TreeState $steam) -eq $steamState) 'Remaster CheckOnly wrote files'
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    $appended = @('BIN\resource-extra.cpp', 'BIN\config-extra.cpp') | ForEach-Object { $_ -replace '\\', [IO.Path]::DirectorySeparatorChar }
+    foreach ($relative in $steamBefore.Keys) {
+        if ($relative -in $appended) { continue }
+        $path = Join-Path $steam $relative
+        Assert (Test-Path -LiteralPath $path) "Bohemia file removed: $relative"
+        Assert ((Get-FileHash -LiteralPath $path).Hash -eq $steamBefore[$relative]) "Bohemia file changed: $relative"
+    }
+    # The only mutation: appended include lines.
+    $resourceAfter = [IO.File]::ReadAllText((Join-Path $steam 'BIN/resource-extra.cpp'))
+    Assert ($resourceAfter.StartsWith($bohemiaResource)) 'Bohemia resource-extra.cpp prefix changed'
+    $tail = $resourceAfter.Substring($bohemiaResource.Length)
+    Assert (@($tail -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '^(//.*|#include "ud-mainmenu\.hpp")$' }).Count -eq 0) "Unexpected resource-extra tail: $tail"
+    Assert (([regex]::Matches($resourceAfter, '#include "ud-mainmenu.hpp"')).Count -eq 1) 'Menu include missing or duplicated'
+    $configAfter = [IO.File]::ReadAllText((Join-Path $steam 'BIN/config-extra.cpp'))
+    Assert ($configAfter.StartsWith($bohemiaConfig)) 'Bohemia config-extra.cpp prefix changed'
+    foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
+        Assert (([regex]::Matches($configAfter, "#include `"$library`"")).Count -eq 1) "Config include missing or duplicated: $library"
+    }
+    # UD's own files land beside Bohemia's; the Classic shims do not.
+    foreach ($rel in @('BIN/ud-mainmenu.hpp','fonts/UD_FONT_CREDITS.md','fonts/cwr_mono.ttf','gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','BIN/guerrilla-factions.hpp')) {
+        Assert (Test-Path -LiteralPath (Join-Path $steam $rel)) "Missing Remaster install output: $rel"
+    }
+    foreach ($rel in @('BIN/optionsTemplates.hpp','BIN/optionsScrollList.hpp','BIN/optionsScrollListSlots.hpp','BIN/STRINGTABLE_OPTIONS.utf8.csv')) {
+        Assert (-not (Test-Path -LiteralPath (Join-Path $steam $rel))) "Classic shim installed on the Remaster: $rel"
+    }
+    $udMenu = $manifest.files | Where-Object destination -EQ 'bin/ud-mainmenu.hpp'
+    Assert ((Get-FileHash -LiteralPath (Join-Path $steam 'BIN/ud-mainmenu.hpp')).Hash -ieq $udMenu.sha256) 'UD menu payload drift'
+    # The gap shard holds exactly the keys Bohemia lacks, in our text.
+    $gapShard = Join-Path $steam 'BIN/STRINGTABLE_UD.utf8.csv'
+    Assert (Test-Path -LiteralPath $gapShard) 'UD gap shard missing'
+    $gapRows = @([IO.File]::ReadAllLines($gapShard))
+    Assert ($gapRows[0] -eq $ourStrings[0].Trim([char]0xFEFF)) 'Gap shard header wrong'
+    Assert ((@($gapRows | Select-Object -Skip 1 | ForEach-Object { $_.Split(',')[0] }) -join ',') -eq ($gapKeys -join ',')) "Gap shard keys wrong: $($gapRows -join ' | ')"
+    Assert ($gapRows[1] -eq ($ourStrings | Where-Object { $_.StartsWith('STR_USRACT_LEAN_LEFT,') })) 'Gap shard text is not ours'
+    Assert (Test-Path -LiteralPath (Join-Path $steam 'BIN/UD_OPTIONS_APL-SA_NOTICE.txt')) 'Notice missing beside the gap shard'
+    $remasterBackup = @(Get-ChildItem -LiteralPath (Join-Path $steam '.ud-backups') -Recurse -File | Where-Object Name -EQ 'resource-extra.cpp')
+    Assert ($remasterBackup.Count -eq 1 -and [IO.File]::ReadAllText($remasterBackup[0].FullName) -eq $bohemiaResource) 'Pristine resource-extra backup missing'
+    # Rerun: nothing appended twice, nothing rewritten, no new backups.
+    $afterFirst = Get-TreeState $steam
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    Assert ((Get-TreeState $steam) -eq $afterFirst) 'Remaster rerun was not idempotent'
+    # Steam update/verify restores Bohemia's pristine file: the include comes back once.
+    [IO.File]::WriteAllText((Join-Path $steam 'BIN/resource-extra.cpp'), $bohemiaResource)
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    Assert ([IO.File]::ReadAllText((Join-Path $steam 'BIN/resource-extra.cpp')) -eq $resourceAfter) 'Re-append after a Steam restore differs'
+    # Bohemia ships the missing keys: our shard retires so it cannot shadow theirs.
+    [IO.File]::AppendAllText((Join-Path $steam 'BIN/STRINGTABLE_MAINMENU.utf8.csv'), "STR_USRACT_LEAN_LEFT,Bohemia lean`nSTR_USRACT_LEAN_RIGHT,Bohemia lean`n")
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    Assert (-not (Test-Path -LiteralPath $gapShard)) 'Covered gap shard was not retired'
+    # Any other edit to a package file fails the run's own verification: a tool
+    # double that touches one of Bohemia's headers mid-run must be caught.
+    $tamper = Join-Path $scratch 'tamper-doctor.ps1'
+    Put $tamper ("[IO.File]::AppendAllText('" + (Join-Path $steam 'BIN/modsTable.hpp') + "', '// edited')`nexit 0`n")
+    Expect-Failure { & $setup -GameDir $steam -LoBoDir $lobo -Tools $tamper } 'Package file changed'
+    Write-Output 'PASS: Remaster mode keeps every Bohemia file byte-identical apart from appended includes; gap shard, rerun idempotency, Steam-restore re-append and tamper detection.'
     Import-Module (Join-Path $repo 'tools/runtime/InstallTree.psm1') -Force
     Expect-Failure { Sync-InstallTree -Source (Join-Path $repo 'guerrilla-mode/core') -Destination $scratch -OwnerRoot $game } 'outside the owned'
     # Populated developer sources are ignored even when Git does not track their images.
@@ -175,7 +265,7 @@ try {
     Assert (Test-Path -LiteralPath (Join-Path $plainMirror 'portraits/generated.png')) 'Default mirror unexpectedly excludes portraits'
     Write-Output 'PASS: literal portrait exclusions, populated and archive sources, preserved local images and external cache.'
     Write-Output 'PASS: preflight, dry run, bracketed paths, case handling, backups, missions, LoBo factions, hashes and repeat install.'
-    Write-Output 'PASS: Remaster/Demo packages refused before any write (dtaExt, remaster.bin, mainMenu/splashLogo, any case); Classic reruns and copied engine binaries pass.'
+    Write-Output 'PASS: Demo packages and incomplete Remaster folders refused before any write (dtaExt, remaster.bin, mainMenu/splashLogo, any case); Classic reruns and copied engine binaries pass.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($scratch)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('/','\') + [IO.Path]::DirectorySeparatorChar
