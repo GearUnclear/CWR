@@ -58,8 +58,10 @@ class CfgGuerrillaFactions
         // QRF escort ladder (full vehicleThresholds[] form): HMMWV patrol ->
         // M113 Zelda -> M60A1 Magach 6 -> Shot-Kal Mk.D (LoBo_Centurion2,
         // the period-correct '67/'73 Sinai Centurion - the Blazer-ERA
-        // LoBo_Centurion is 1978+). Armed picks need the @lobofixup patched
-        // pbos in strict/autotest lanes (malformed LoBoammo tracerColor).
+        // LoBo_Centurion is 1978+). Armed picks fire LoBoammo.pbo rounds; the
+        // stock malformed tracerColor is coerced at load (only --strict-config
+        // keeps it raw) and `mod doctor --fix` repairs it in place, so the
+        // @lobofixup patched pbos are no longer needed.
         //
         // The Blazer-ERA hull would arguably fit 1980s Lebanon better than
         // the Mk.D, but one roster is one roster: an island that really wants
@@ -138,12 +140,12 @@ class CfgGuerrillaFactions
         // -> BMP-1 ('73-correct) -> T-55A
         //
         // ALL FOUR rungs are LoBoammo-armed (loBo_DShK, loBo_KPVT, LoBo_PKCoax,
-        // LoBo_73gun, LoBo_D100a), so this ladder needs the @lobofixup patched
-        // pbos in strict/autotest lanes - the same malformed-tracerColor abort
-        // EgyptArmy and IDF call out. This descriptor is the WORST case for it,
-        // not the best: EgyptArmy's WL1 Ural-375 is unarmed and boots clean,
-        // and EgyptFrontier is Guerrilla.Sinai's defaultResistance, so it
-        // loads on any direct launch of that template.
+        // LoBo_73gun, LoBo_D100a). Before #54 D1 that made this the WORST case
+        // for the malformed-tracerColor abort (EgyptArmy's WL1 Ural-375 is
+        // unarmed and boots clean, and EgyptFrontier is Guerrilla.Sinai's
+        // defaultResistance, so it loads on any direct launch of that
+        // template) and it needed the @lobofixup patched pbos. The token is
+        // now coerced at load and repaired in place, see IDF.
         vehicles[] = {"LoBo_EToymg", "LoBo_BTR60", "LoBo_BMP_EGY", "LoBo_T55_EGY_1"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Egypt_FrtCrpo";
@@ -223,8 +225,8 @@ class CfgGuerrillaFactions
         // Motor pool: the army moves by truck where the Frontier Corps moves
         // by technical. Ural-375 (period-correct, unarmed, zero LoBoammo
         // dependence) -> BTR-60PB (12 cargo, carries a whole QRF) -> BMP-1
-        // ('73-correct) -> T-55A. The last three need the @lobofixup patched
-        // pbos in strict/autotest lanes (their guns live in LoBoammo.pbo).
+        // ('73-correct) -> T-55A. The last three carry LoBoammo.pbo guns
+        // (malformed tracerColor coerced at load and repaired in place, see IDF).
         vehicles[] = {"LoBo_Ural_egy", "LoBo_BTR60", "LoBo_BMP_EGY", "LoBo_T55_EGY_1"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Egypt_infantryO";   // Mulazim Awwal (Lt)
@@ -290,7 +292,7 @@ class CfgGuerrillaFactions
         tiersSniper[] = {"", ""};
         // Motor pool (LoBoSyrAPC / LoBo_BTR60 / LoBo_T72): no Syrian soft-skin
         // exists, so the BTR-60PB is the WL1 ride. All four are LoBoammo-armed
-        // -> @lobofixup patched pbos needed in strict/autotest lanes.
+        // (malformed tracerColor coerced at load and repaired in place, see IDF).
         vehicles[] = {"LoBo_BTR60_Syria", "LoBo_bmp_syr", "LoBo_bmp2_syr", "LoBo_T72M_Syria"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Liz_Infantry_SyriaO2";   // Mulazim Awwal (Lt); O1 = Sgt
@@ -363,8 +365,8 @@ class CfgGuerrillaFactions
         // Motor pool (LoBoJorAPC / LoBoJorCar): M113A2 -> Ratel 20 IFV
         // (1970s-ok) -> BMP-2 (1980s) -> M60A3. LoBo_Challenger1_Jor_W skipped
         // (1999+, out of period); LoBo_Rakon skipped (motorcycle, 1 seat,
-        // AI-fragile). All four are LoBoammo-armed -> @lobofixup needed in
-        // strict/autotest lanes.
+        // AI-fragile). All four are LoBoammo-armed (malformed tracerColor
+        // coerced at load and repaired in place, see IDF).
         vehicles[] = {"LoBo_m113_jor", "LoBo_Ratel20_jor", "LoBo_BMP2_Jor", "LoBo_M60A3_jor"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_inf_jor_D_off";
@@ -453,7 +455,8 @@ class CfgGuerrillaFactions
         // M40A1 106 mm recoilless jeep (the faction's only real AT escort).
         // Flagged rather than borrowing an Egyptian/Syrian vehicle whose
         // displayName literally says "Egyptian"/"Syrian". The last three are
-        // LoBoammo-armed -> @lobofixup needed in strict/autotest lanes.
+        // LoBoammo-armed (malformed tracerColor coerced at load and repaired
+        // in place, see IDF).
         vehicles[] = {"LoBo_Ural_Hizballah", "LoBo_JeepMG_Hizballah", "LoBo_ural_Hizbal_zsu23", "LoBo_JeepAT_Hizballah"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_HizballahLeader";
@@ -537,9 +540,9 @@ class CfgGuerrillaFactions
         // LoBo_ZU23_terror / LoBo_ZPU4_terror are maxSpeed=1 - excluded). Both
         // are LoBoTer-internal: the Hilux is unarmed and the MG Hilux's
         // loBo_DShK_Ter weapon+ammo are self-contained with a well-formed
-        // tracerColor, so this is the ONLY vehicle ladder in the file with
-        // ZERO @lobofixup dependence. Flagged rather than borrowing a vehicle
-        // whose displayName says "Egyptian".
+        // tracerColor, so this is the ONLY vehicle ladder in the file that never
+        // depended on the LoBoammo tracerColor repair. Flagged rather than
+        // borrowing a vehicle whose displayName says "Egyptian".
         vehicles[] = {"LoBo_Ter_Toy_R", "LoBo_Ter_ToyMG_R"};
         vehicleThresholds[] = {4};
         // No officer class exists in LoBoTer: 03R is a cosmetic AKM-CIA
@@ -596,7 +599,7 @@ class CfgGuerrillaFactions
         tiersAT[]     = {"LoBo_Terror_RPGE", "LoBo_Terror_RPGE", "LoBo_Terror_RPGE"};
         tiersMedic[]  = {"", "", ""};   // no medic class in LoBoTer, any side
         tiersSniper[] = {"LoBo_Terror_mosinE", "LoBo_Terror_SVDE", "LoBo_Terror_SVDE"};
-        // Zero @lobofixup dependence (see PLO).
+        // No LoBoammo dependence (see PLO).
         vehicles[] = {"LoBo_Ter_Toy_E", "LoBo_Ter_ToyMG_E"};
         vehicleThresholds[] = {4};
         officer = "LoBo_Terror_03E";   // no officer class - cosmetic stand-in
