@@ -174,7 +174,7 @@ void CheckSharedLints(const std::string& text, const char* what)
     CHECK(text.front() != ' ');
     CHECK(text.back() != ' ');
     CHECK(text.find("  ") == std::string::npos);
-    // no third-person pronoun anywhere: a template can then never mis-gender a
+    // no gendered third-person pronoun: singular they can refer to a
     // companion whose script name and body class disagree
     const bool pronoun = ContainsWord(text, "he") || ContainsWord(text, "she") || ContainsWord(text, "his") ||
                          ContainsWord(text, "her") || ContainsWord(text, "him") || ContainsWord(text, "hers");
@@ -182,8 +182,7 @@ void CheckSharedLints(const std::string& text, const char* what)
     CHECK_FALSE(HasAntithesis(text));
 }
 
-// A faction display name must never be preceded by an article nor followed by a
-// possessive: that is the whole point of the neutral constructions.
+// A bare faction modifier takes no article or possessive of its own.
 void CheckFactionInsertion(const std::string& text, const std::string& faction)
 {
     const std::string low = Lower(text);
@@ -210,14 +209,12 @@ void CheckFactionInsertion(const std::string& text, const std::string& faction)
     }
 }
 
-// A faction slot renders as a whole CONSTRUCTION denoting people ("those who
-// answer to X", "arms gathered under the name X"), so a LOCATIVE preposition in
-// front of it produces "In arms gathered under the name Soviet Army the delay
-// ...", which is not English.  The prepositions the shipped templates use
-// correctly - to, for, with, from, under, against, among, beside - are
-// explicitly allowed; only the place-words are rejected.  The article lint
-// above cannot see this: it inspects the tokens around the faction NAME, and
-// the word before the name here is part of the construction.
+// A faction slot renders as a group of people ("Soviet Army troops", "FIA
+// units"), so a LOCATIVE preposition in front of it turns those people into a
+// place: "In FIA units the delay ..." is not English. Prepositions that take
+// people (to, for, with, from, under, against, among, beside) stay allowed;
+// only the place-words are rejected. This lint reads the templates before
+// substitution; CheckFactionInsertion reads the rendered text for articles.
 void CheckNoLocativeBeforeFactionSlot(const std::string& text)
 {
     static const char* const kLocative[] = {"in", "at", "on", "within", "inside", "near", "across"};
@@ -274,89 +271,53 @@ const char* const kShippedNames[] = {"US Army", "Soviet Army", "FIA",    "IDF", 
                                      "PLO",     "Syria",       "Jordan", "EgyptFrontier", "EgyptArmy"};
 constexpr int kShippedNameCount = (int)(sizeof(kShippedNames) / sizeof(kShippedNames[0]));
 
-std::string LastWord(const std::string& s)
-{
-    const size_t space = s.find_last_of(' ');
-    return space == std::string::npos ? s : s.substr(space + 1);
-}
-
-// The three words English has that introduce a BARE proper name. "called
-// Soviet Army", "as Soviet Army" and "the name Soviet Army" all read; "to
-// Soviet Army", "themselves Soviet Army", "of Soviet Army" and "under Soviet
-// Army" all want a "the" that no generator can know to insert, because the same
-// slot also has to render "FIA".
-bool IsNameIntroducer(const std::string& word)
-{
-    const std::string w = Lower(word);
-    return w == "as" || w == "called" || w == "name";
-}
-
-// The token immediately before `at`, lowercased; "" when the name opens the
-// text (which a construction should make impossible).
-std::string TokenBefore(const std::string& low, size_t at)
-{
-    size_t end = at;
-    while (end > 0 && low[end - 1] == ' ')
-    {
-        end--;
-    }
-    size_t begin = end;
-    while (begin > 0 && IsWordChar(low[begin - 1]))
-    {
-        begin--;
-    }
-    return low.substr(begin, end - begin);
-}
-
-// Every occurrence of a faction display name must sit immediately behind a
-// name-introducing word. This is the whole fix expressed as one rule: it fires
-// on "those who answer to Soviet Army" (before = "to") and on "the fighters who
-// call themselves Soviet Army" (before = "themselves") for every name shape,
-// including the acronyms where the reading was merely odd rather than wrong.
-void CheckNameIntroducer(const std::string& text, const std::string& faction)
+// Faction names modify plural people/formation nouns. Checking the complete
+// rendered group covers both acronyms and multiword names without forcing an
+// artificial introducer such as "the standard now raised as".
+void CheckFactionGroup(const std::string& text, const std::string& faction)
 {
     const std::string low = Lower(text);
     const std::string name = Lower(faction);
     for (size_t at = low.find(name); at != std::string::npos; at = low.find(name, at + 1))
     {
-        const bool leftOk = at == 0 || !IsWordChar(low[at - 1]);
         const size_t end = at + name.size();
-        const bool rightOk = end >= low.size() || !IsWordChar(low[end]);
-        if (!leftOk || !rightOk)
+        if ((at > 0 && IsWordChar(low[at - 1])) || (end < low.size() && IsWordChar(low[end])))
         {
             continue;
         }
-        const std::string before = TokenBefore(low, at);
-        INFO("'" << before << "' immediately before '" << faction << "' in: " << text);
-        CHECK(IsNameIntroducer(before));
+        // PLO is also the first token of PLO East. Check the longer name on
+        // its own pass rather than treating East as a group noun.
+        bool longerName = false;
+        for (const char* shipped : kShippedNames)
+        {
+            const std::string candidate = Lower(shipped);
+            if (candidate.size() > name.size() && candidate.compare(0, name.size(), name) == 0 &&
+                low.compare(at, candidate.size(), candidate) == 0)
+            {
+                longerName = true;
+            }
+        }
+        if (longerName)
+        {
+            continue;
+        }
+        REQUIRE(end < low.size());
+        REQUIRE(low[end] == ' ');
+        size_t stop = end + 1;
+        while (stop < low.size() && IsWordChar(low[stop]))
+        {
+            stop++;
+        }
+        const std::string noun = low.substr(end + 1, stop - end - 1);
+        INFO(text << " / " << faction << " / " << noun);
+        CHECK((noun == "troops" || noun == "units" || noun == "soldiers" || noun == "forces" || noun == "fighters"));
     }
 }
 
-// The readings that shipped before this case existed, plus the ones spec.md
-// section 3 and design.md:68 suggest in passing ("forces of {faction}", "those
-// who march under X"). None of them is reachable through an article or a
-// locative preposition, so the mechanical lints cannot see them; they are named
-// here for the six display names that actually ship.
-void CheckNoKnownBadReading(const std::string& text, const std::string& faction)
+// Count complete labels rather than common nouns used elsewhere in the story.
+std::string FactionLabel(int index, const char* faction)
 {
-    // "the name of X" is on the list too: it wants a "the" of its own for a
-    // two-word name, so it is no safer than "forces of X".
-    static const char* const kBadIntro[] = {
-        "answer to", "call themselves", "forces of", "march under", "the name of", "loyal to", "under", "of", "for",
-        "with",      "themselves",      "to"};
-    const std::string low = Lower(text);
-    for (const char* intro : kBadIntro)
-    {
-        const std::string probe = std::string(intro) + " " + Lower(faction);
-        INFO("'" << probe << "' in: " << text);
-        CHECK(low.find(probe) == std::string::npos);
-    }
-    // and never an article or a possessive against the name itself
-    INFO(text);
-    CHECK(low.find("the " + Lower(faction)) == std::string::npos);
-    CHECK(low.find("a " + Lower(faction)) == std::string::npos);
-    CHECK(low.find("an " + Lower(faction)) == std::string::npos);
-    CHECK(low.find(Lower(faction) + "'s") == std::string::npos);
+    return std::string(faction) + " " + HistoryFactionPhrase(index);
 }
 
 // Mechanical damage a substitution can do: an unknown slot left with its braces
@@ -384,18 +345,24 @@ void CheckRenderedProse(const std::string& text)
     }
 }
 
-// Every sentence starts with a capital and the block ends on a full stop. This
+// Every sentence starts with a capital and the block ends on sentence punctuation.
 // is what catches a lower-case construction dropped into a sentence-initial
 // slot, which is exactly the mistake {Occupier} instead of {OccupierCap} makes.
 void CheckSentenceShape(const std::string& text)
 {
     INFO(text);
     REQUIRE_FALSE(text.empty());
-    CHECK(text.back() == '.');
+    size_t last = text.size();
+    while (last > 0 && text[last - 1] == '"')
+    {
+        last--;
+    }
+    REQUIRE(last > 0);
+    CHECK((text[last - 1] == '.' || text[last - 1] == '?' || text[last - 1] == '!'));
     size_t begin = 0;
     while (begin < text.size())
     {
-        while (begin < text.size() && text[begin] == ' ')
+        while (begin < text.size() && (text[begin] == ' ' || text[begin] == '"'))
         {
             begin++;
         }
@@ -406,7 +373,7 @@ void CheckSentenceShape(const std::string& text)
         const char first = text[begin];
         INFO("sentence starts '" << text.substr(begin, 40) << "'");
         CHECK(((first >= 'A' && first <= 'Z') || first == '"'));
-        const size_t stop = text.find('.', begin);
+        const size_t stop = text.find_first_of(".!?", begin);
         if (stop == std::string::npos)
         {
             break;
@@ -457,32 +424,19 @@ TEST_CASE("Faction history - every template string passes the house lints", "[ga
     }
 }
 
-TEST_CASE("Faction history - the five faction constructions carry no article or possessive",
+TEST_CASE("Faction history - faction group labels read naturally for every shipped name",
           "[game][guerrilla][legends][history]")
 {
     REQUIRE(HistoryFactionPhraseCount() == 5);
-    int plural = 0;
     for (int i = 0; i < HistoryFactionPhraseCount(); i++)
     {
-        const std::string phrase = HistoryFactionPhrase(i);
-        INFO(phrase);
-        CHECK_FALSE(phrase.empty());
-        CHECK(phrase.back() != ' ');
-        CHECK(phrase.find('\'') == std::string::npos);
-        // The construction ends on the word the faction name follows, and that
-        // word has to be one that introduces a BARE proper name. English offers
-        // three: "as", "called" and "the name". A construction ending anywhere
-        // else ("...who answer to", "...who call themselves") leaves the reader
-        // supplying an article, and the generator cannot supply one: "the
-        // Soviet Army" wants it, "FIA" does not.
-        CHECK(IsNameIntroducer(LastWord(phrase)));
-        plural +=
-            ContainsWord(phrase, "ranks") || ContainsWord(phrase, "fighters") || ContainsWord(phrase, "arms") ? 1 : 0;
+        for (int n = 0; n < kShippedNameCount; n++)
+        {
+            const std::string label = FactionLabel(i, kShippedNames[n]);
+            CheckFactionGroup(label, kShippedNames[n]);
+            CheckFactionInsertion(label, kShippedNames[n]);
+        }
     }
-    // three plural constructions and two singular ones, which is why every
-    // template puts a construction in the subject of a SIMPLE PAST verb or in
-    // the object of a preposition and never in front of an "is" or a "were"
-    CHECK(plural == 3);
 }
 
 TEST_CASE("Faction history - the rendered prose reads correctly for every shipped display name",
@@ -543,21 +497,11 @@ TEST_CASE("Faction history - the rendered prose reads correctly for every shippe
                                  << text);
                     CheckRenderedProse(text);
                     CheckSentenceShape(text);
-                    // every faction name is introduced by a construction that
-                    // makes it a name slot, in both roles
-                    CheckNameIntroducer(text, pair.occupier);
-                    CheckNameIntroducer(text, pair.resistance);
+                    // Names are modifiers in complete plural group labels.
+                    CheckFactionGroup(text, pair.occupier);
+                    CheckFactionGroup(text, pair.resistance);
                     CheckFactionInsertion(text, pair.occupier);
                     CheckFactionInsertion(text, pair.resistance);
-                    // the readings the two retired constructions produced, and
-                    // the ones spec.md section 3 and design.md suggest, spelled
-                    // out for the six names: no mechanical rule would catch
-                    // "forces of Soviet Army", because the word before the name
-                    // is neither an article nor a locative
-                    for (int n = 0; n < kShippedNameCount; n++)
-                    {
-                        CheckNoKnownBadReading(text, kShippedNames[n]);
-                    }
                 }
 
                 // and the whole thing actually said both names: an empty
@@ -655,6 +599,38 @@ TEST_CASE("Faction history - the opening table spans the budget from both ends",
     }
 }
 
+TEST_CASE("Faction history - every event variant fits wide place and faction names",
+          "[game][guerrilla][legends][history]")
+{
+    HistoryInputs in;
+    in.resistanceName = "Egyptian Frontier Force";
+    in.occupierName = "Israel Defense Forces";
+    in.islandName = "";
+    in.seed = 3;
+    in.features.Add(MakePlace("The High Pass", false));
+    in.settlements.Add(MakePlace("Ras Nasrani Point", true));
+    in.settlements.Add(MakePlace("El Tor Junction", true));
+    for (int variant = 0; variant < HistoryVariantCount(); variant++)
+    {
+        HistoryForcedIndices forced;
+        for (int event = 0; event < kHistoryEvents; event++)
+        {
+            forced.events[event] = variant;
+        }
+        const HistoryRecord rec = GenerateHistoryForced(in, forced);
+        for (int event = 0; event < kHistoryEvents; event++)
+        {
+            INFO("variant " << variant << " event " << event << ": " << Str(rec.eventTitle[event]));
+            CHECK(Words(rec.eventTitle[event]) <= 6);
+            CHECK(Words(rec.eventText[event]) >= kHistoryEventMinWords);
+            CHECK(Words(rec.eventText[event]) <= kHistoryEventMaxWords);
+            CheckSharedLints(Str(rec.eventTitle[event]), "wide event title");
+            CheckSharedLints(Str(rec.eventText[event]), "wide event text");
+            CheckRenderedProse(Str(rec.eventText[event]));
+        }
+    }
+}
+
 TEST_CASE("Faction history - word budgets and output lints over the generation matrix",
           "[game][guerrilla][legends][history]")
 {
@@ -705,7 +681,8 @@ TEST_CASE("Faction history - word budgets and output lints over the generation m
                 int spent = 0;
                 for (int i = 0; i < HistoryFactionPhraseCount(); i++)
                 {
-                    const int uses = CountSubstring(whole, HistoryFactionPhrase(i));
+                    const int uses = CountSubstring(whole, FactionLabel(i, kPairs[p].occupier)) +
+                                     CountSubstring(whole, FactionLabel(i, kPairs[p].resistance));
                     INFO("phrase " << i << " used " << uses << " times");
                     CHECK(uses <= 1);
                     spent += uses;
@@ -757,8 +734,8 @@ TEST_CASE("Faction history - biographies stay inside their budget and stay pre-c
                         // the registry records
                         CHECK_FALSE(ContainsWord(Str(bio), "XP"));
                         CHECK_FALSE(ContainsWord(Str(bio), "rank"));
-                        CHECK_FALSE(ContainsWord(Str(bio), "kill"));
-                        CHECK_FALSE(ContainsWord(Str(bio), "killed"));
+                        // Earlier violence belongs in a backstory; live campaign
+                        // kill totals remain in the character's recorded deeds.
                         CHECK_FALSE(ContainsWord(Str(bio), "captured"));
                         CHECK(Str(bio).find("promot") == std::string::npos);
                     }
@@ -812,9 +789,8 @@ TEST_CASE("Faction history - a biography asked for the dossier page's budget fit
                     INFO("seed " << seed << " event " << event << " hostile " << hostile << " -> " << Str(bio));
                     CHECK(Words(bio) >= kHistoryBioMinWords);
                     CHECK(Words(bio) <= kHistoryBioPageWords);
-                    // the wider default band is still what an unbudgeted caller
-                    // gets, so the parameter is doing the work and not a
-                    // narrowed table
+                    // Callers without a page budget must still respect the
+                    // public biography limit.
                     CHECK(Words(GenerateBio(rec, event, name, faction, hostile != 0, key)) <= kHistoryBioMaxWords);
                 }
             }
@@ -829,27 +805,79 @@ TEST_CASE("Faction history - a biography asked for the dossier page's budget fit
     }
 }
 
-TEST_CASE("Faction history - a biography takes the one construction the history left unused",
+TEST_CASE("Faction history - every biography variant fits beside its portrait", "[game][guerrilla][legends][history]")
+{
+    const HistoryRecord rec = GenerateHistory(MakeInputs(kPairs[0], "Malden", 7));
+    const RString names[] = {RString("Petra"),
+                             RString("Heartless Jean-Baptiste \"The Fence-Builder\" Vakalalabure the Collaborator")};
+    const char* places[] = {"Larche", "Ras Nasrani Point", "the old crossing"};
+    for (int event = 0; event < kHistoryEvents; event++)
+    {
+        for (int hostile = 0; hostile <= 1; hostile++)
+        {
+            for (int variant = 0; variant < HistoryVariantCount(); variant++)
+            {
+                for (const RString& name : names)
+                {
+                    for (const char* place : places)
+                    {
+                        HistoryRecord placed = rec;
+                        placed.eventPlace[event] = place;
+                        const RString bio =
+                            GenerateBioForced(placed, event, name, RString("FIA"), hostile != 0, 1, variant);
+                        INFO("event " << event << " hostile " << hostile << " variant " << variant << ": " << Str(bio));
+                        CHECK(Words(bio) >= kHistoryBioMinWords);
+                        CHECK(Words(bio) <= kHistoryBioPageWords);
+                        CHECK(CountSubstring(Str(bio), Str(name)) == 1);
+                        CHECK(CountSubstring(Str(bio), place) == 1);
+                        CheckSharedLints(Str(bio), "forced bio");
+                        CheckSentenceShape(Str(bio));
+                        CheckRenderedProse(Str(bio));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("Faction history - a biography never repeats a faction label the history spent",
           "[game][guerrilla][legends][history]")
 {
-    const HistoryInputs in = MakeInputs(kPairs[0], "Malden", 3);
-    const HistoryRecord rec = GenerateHistory(in);
-    const int spare = rec.BioPhraseIndex();
-    for (int i = 0; i < kHistoryPhrases; i++)
+    // No biography names a faction yet. One that does takes the label the
+    // history left unused (BioPhraseIndex), so a dossier never repeats a label
+    // the Chronicles already printed. Every cell and variant is rendered, so the
+    // guard runs on the shipped output rather than on one sample.
+    for (int p = 0; p < kPairCount; p++)
     {
-        CHECK(rec.phraseIndex[i] != spare);
-    }
-    const RString bio = GenerateBio(rec, 0, RString("Petra"), RString("FIA"), false, HashKey("comp_0_petra", 3));
-    const std::string whole =
-        Str(rec.openingPage1) + " " + Str(rec.openingPage2) + " " + Str(rec.eventText[1]) + " " + Str(rec.eventText[2]);
-    // the bio's construction, when it carries one, is the one the Chronicles
-    // never used
-    for (int i = 0; i < HistoryFactionPhraseCount(); i++)
-    {
-        if (CountSubstring(Str(bio), HistoryFactionPhrase(i)) > 0)
+        const HistoryRecord rec = GenerateHistory(MakeInputs(kPairs[p], "Malden", 3));
+        const int spare = rec.BioPhraseIndex();
+        REQUIRE(spare >= 0);
+        REQUIRE(spare < HistoryFactionPhraseCount());
+        for (int i = 0; i < kHistoryPhrases; i++)
         {
-            CHECK(i == spare);
-            CHECK(CountSubstring(whole, HistoryFactionPhrase(i)) == 0);
+            CHECK(rec.phraseIndex[i] != spare);
+        }
+        const std::string whole = Str(rec.openingPage1) + " " + Str(rec.openingPage2) + " " + Str(rec.eventText[1]) +
+                                  " " + Str(rec.eventText[2]);
+        CHECK(CountSubstring(whole, FactionLabel(spare, kPairs[p].occupier)) == 0);
+        CHECK(CountSubstring(whole, FactionLabel(spare, kPairs[p].resistance)) == 0);
+        for (int event = 0; event < kHistoryEvents; event++)
+        {
+            for (int hostile = 0; hostile <= 1; hostile++)
+            {
+                const char* faction = hostile ? kPairs[p].occupier : kPairs[p].resistance;
+                for (int variant = 0; variant < HistoryVariantCount(); variant++)
+                {
+                    const std::string bio = Str(
+                        GenerateBioForced(rec, event, RString("Petra"), RString(faction), hostile != 0, 1, variant));
+                    INFO(faction << " event " << event << " variant " << variant << ": " << bio);
+                    REQUIRE(ContainsWord(bio, "Petra"));
+                    for (int i = 0; i < kHistoryPhrases; i++)
+                    {
+                        CHECK(CountSubstring(bio, FactionLabel(rec.phraseIndex[i], faction)) == 0);
+                    }
+                }
+            }
         }
     }
 }
@@ -984,7 +1012,7 @@ TEST_CASE("Faction history - the island word survives a decorated display name",
         forced.opening[0] = a;
         const HistoryRecord rec = GenerateHistoryForced(in, forced);
         INFO(Str(rec.openingPage1));
-        CHECK(Str(rec.openingPage1).find("on Lebanon") != std::string::npos);
+        CHECK(ContainsWord(Str(rec.openingPage1), "Lebanon"));
         CHECK(Str(rec.openingPage1).find("(80's)") == std::string::npos);
     }
 }
@@ -1042,7 +1070,7 @@ TEST_CASE("Faction history - places fall back through features, settlements, zon
                 CHECK_FALSE(Str(rec.eventPlace[k]).empty());
             }
             CHECK(Str(rec.eventPlace[1]) != Str(rec.eventPlace[2]));
-            CHECK(Str(rec.openingPage1).find("on this country") != std::string::npos);
+            CHECK(Str(rec.openingPage1).find("this country") != std::string::npos);
         }
     }
 }
@@ -1096,34 +1124,32 @@ TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Ma
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "Long before any flag now flown on Malden, the people of these valleys cut terraces into the hills above "
-          "Larche and held them against every season. Then came the columns of a distant power, and the road they "
-          "cut has carried every ruler since, the ranks now called Soviet Army among them.");
+          "The people of Malden still tell how families near Larche lost rights their grandparents had "
+          "expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. A "
+          "complaint could bring armed visitors to the same door where neighbours once gathered.");
     CHECK(Str(rec.openingPage2) ==
-          "The compact made at Houdan lasted one generation. The terms were kept in an archive, and the ground they "
-          "named was taken anyway. The fighters who muster as FIA inherited that quarrel unfinished, and the ground "
-          "above Larche has not forgotten a single season of it.");
-    CHECK(Str(rec.eventTitle[0]) == "The Terraces of Larche");
+          "People near Houdan accepted a settlement they could live with. When the authorities broke it, even "
+          "patient neighbours talked of fighting. Fighting followed. FIA soldiers remember the dead through "
+          "surviving friends, who can still describe their laughter as readily as their deaths.");
+    CHECK(Str(rec.eventTitle[0]) == "Terrace Claims near Larche");
     CHECK(Str(rec.eventText[0]) ==
-          "The old families cut the slopes above Larche into steps and fed four valleys from them for longer than "
-          "any register records. When the first surveyors came with chains and paper, the steps became parcels, and "
-          "the parcels became someone else's property. Nobody in the valley signed anything.");
-    CHECK(Str(rec.eventTitle[1]) == "The Compact at Houdan");
+          "Families near Larche built terraces on the slopes and farmed them for generations. Surveyors later "
+          "divided the land into plots and registered it under outside owners. The families who had built and "
+          "maintained the terraces were left without a recognised claim to the ground that fed them.");
+    CHECK(Str(rec.eventTitle[1]) == "Closed Roads near Houdan");
     CHECK(Str(rec.eventText[1]) ==
-          "A settlement was read aloud in the square at Houdan and witnessed by both sides: the high ground would "
-          "stay common, the roads would stay open. Within one season the ground was fenced and the roads were "
-          "gated. Whoever now marches as Soviet Army took the paper away; the square kept the reading.");
-    CHECK(Str(rec.eventTitle[2]) == "The Stand at Chapoi");
+          "Representatives near Houdan agreed that the high ground would remain common and the roads open. "
+          "Within a season, Soviet Army units fenced the ground and gated the roads. Families who had accepted "
+          "the settlement now needed permission to reach land and routes the agreement had left open.");
+    CHECK(Str(rec.eventTitle[2]) == "Road Battle near Chapoi");
     CHECK(Str(rec.eventText[2]) ==
-          "At Chapoi the column was stopped for two days by fewer men than it had guns. They were not relieved and "
-          "they did not expect to be. The road was opened on the third day. The standard now raised as FIA kept the "
-          "count of those two days.");
+          "Defenders near Chapoi stopped an advancing column for two days without relief. The column broke "
+          "through on the third day, leaving local fighters dead and others missing. Survivors later gave FIA "
+          "fighters an account of the positions held and the names of those who failed to return.");
 
     const RString bio = GenerateBioForced(rec, 0, RString("Petra"), RString("FIA"), false, 0, 0);
-    CHECK(Str(bio) ==
-          "Petra was born into one of the families that worked the ground above Larche, and learned every path on "
-          "that slope before learning to read. Nobody in this cell has ever needed to hand Petra a map of ground a "
-          "grandmother measured by hand.");
+    CHECK(Str(bio) == "Petra worked as a farmhand near Larche until the landlord evicted the family from its rented "
+                      "fields. The farmhand kept writing poems and still hoped to publish a collection.");
 }
 
 TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance on Lebanon",
@@ -1147,29 +1173,30 @@ TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "The oldest quarrel on Lebanon began over water. The wells at Ghajar were named, walled and fought for "
-          "long before any banner now carried was stitched. Every power that has held this ground began by writing "
-          "it down, and whoever now marches as Hizballah began the same way.");
+          "Near Ghajar, families in Lebanon inherited an old dispute along with their grandparents' "
+          "belongings. Outsiders had claimed what kept those families fed. Hizballah units controlled the main "
+          "roads. People learned which guards would listen, which would shout, and when to turn around without "
+          "arguing.");
     CHECK(Str(rec.openingPage2) ==
-          "At Tyre a settlement was signed that promised the water would stay shared. The seals are still in the "
-          "archive; the pumps are not. The standard now raised as IDF took up that grievance from people who had "
-          "carried it a long time already.");
-    CHECK(Str(rec.eventTitle[1]) == "The Seals at Tyre");
+          "Representatives near Tyre came home with an agreement and promises. When the authorities broke it, "
+          "neighbours demanded to know what happened. IDF fighters lost people in the fighting that followed. "
+          "Some families still ask returning fighters for news nobody wants to give.");
+    CHECK(Str(rec.eventTitle[1]) == "Pump Restrictions near Tyre");
     CHECK(Str(rec.eventText[1]) ==
-          "The settlement at Tyre was signed in front of witnesses from six villages: the water shared, the coast "
-          "road open to all, no armed man at the pumps. The ranks now called Hizballah took the pumps. The road has "
-          "been checked twice a day ever since.");
-    CHECK(Str(rec.eventTitle[2]) == "The Burning of Saida");
+          "Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road "
+          "open. The terms also barred armed guards from the pumps. Hizballah troops seized the pumps and "
+          "began checking road traffic twice a day, restricting the access the witnesses had secured.");
+    CHECK(Str(rec.eventTitle[2]) == "The Fires near Saida");
     CHECK(Str(rec.eventText[2]) ==
-          "Saida burned for a day and a night, and the people who came back counted the doorways rather than the "
-          "houses. No relief column reached the town. The list of names carried out of it passed to the fighters "
-          "who muster as IDF, and it has been read aloud once a year ever since.");
+          "Fighting near Saida set homes alight, and the fires continued through the night. Families who "
+          "returned found collapsed houses and neighbours missing. IDF soldiers collected names from survivors "
+          "and recorded where each person had last been seen. Relatives used the list to search for people "
+          "carried away during the evacuation.");
 
     const RString bio = GenerateBioForced(rec, 1, RString("Petra"), RString("IDF"), false, 0, 1);
     CHECK(Str(bio) ==
-          "Petra was in the square at Tyre on the day the gates went up, small enough to be lifted for a better "
-          "view and old enough to remember what the adults said afterwards. Nobody in that family has signed "
-          "anything since.");
+          "Former postal worker Petra from Tyre became a resistance courier, then quit after police seized the "
+          "courier's address book, found a friend's home address inside, and arrested the friend there.");
 }
 
 TEST_CASE("Faction history - worked example C, PLO East against the IDF on Sinai",
@@ -1194,25 +1221,26 @@ TEST_CASE("Faction history - worked example C, PLO East against the IDF on Sinai
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "Nothing on Sinai is older than the road to the wells, and the caravans that cut it wrote their claim "
-          "into the rock at Nuweiba. Stone is a poor deed in a court, and every army that has crossed here has "
-          "known it, arms gathered under the name IDF among them.");
+          "For generations, families near Nuweiba in Sinai taught children where they belonged. Then outsiders "
+          "arrived with papers saying the children had no claim. Under IDF forces, residents watched their "
+          "words in public. Families argued behind closed doors about whether silence was keeping anyone safe "
+          "anymore.");
     CHECK(Str(rec.openingPage2) ==
-          "A truce was measured out at El Tor with stones set in the sand. The stones were moved before the copy of "
-          "it had dried. The ranks now called PLO East took this quarrel in hand, along with the road, the wells and "
-          "everything else nobody signed for.");
-    CHECK(Str(rec.eventTitle[0]) == "The Rock at Nuweiba");
-    CHECK(Str(rec.eventTitle[2]) == "The Column at Ras Nasrani");
+          "Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought "
+          "copies to confront the guards. Later fighting left empty places at family tables. PLO East troops "
+          "keep the names, including those neighbours still find difficult to discuss.");
+    CHECK(Str(rec.eventTitle[0]) == "Water Rights near Nuweiba");
+    CHECK(Str(rec.eventTitle[2]) == "Delaying Action near Ras Nasrani");
     CHECK(Str(rec.eventText[2]) ==
-          "A column that should have taken the coast in a morning was held at Ras Nasrani until dusk by men with "
-          "two machine guns and the high ground. None of them was relieved. The coast fell the next day, and "
-          "whoever now marches as PLO East counted the delay a victory anyway.");
+          "Defenders with two machine guns held an advancing column near Ras Nasrani until dusk. The delay "
+          "allowed families to leave the coastal route, but several defenders died before the survivors "
+          "withdrew. The coast fell the next day. PLO East units preserved the survivors' account of the "
+          "action and the losses.");
 
     const RString bio = GenerateBioForced(rec, 2, RString("Petra"), RString("PLO East"), false, 0, 2);
-    CHECK(Str(bio) ==
-          "Petra was a child in Ras Nasrani when the column came through, was carried out through an orchard, and "
-          "remembers the orchard better than the column. The standard now raised as PLO East did not have to "
-          "recruit Petra, who arrived asking where to sign.");
+    CHECK(Str(bio) == "An orchard worker from Ras Nasrani, Petra led relatives away from fighting along familiar farm "
+                      "roads. Among displaced families, the sociable picker entertained new friends with stories from "
+                      "years on the harvest crews.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,6 +1294,56 @@ TEST_CASE("Faction history - the record round-trips as resolved prose", "[game][
     // is rerolled by a save/load cycle
     CHECK(Str(GenerateBio(loaded, 2, RString("Petra"), RString("PLO East"), false, 77)) ==
           Str(GenerateBio(written, 2, RString("Petra"), RString("PLO East"), false, 77)));
+
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("Faction history - a version 1 record loads verbatim under the current generator",
+          "[game][guerrilla][legends][history][save]")
+{
+    // A save from before the version 2 prose carries a version 1 record. The
+    // bump must not reroll it: the record keeps its version and its prose, and a
+    // companion recruited after the load hangs a new biography on its places.
+    REQUIRE(kHistoryVersion > 1);
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "faction-history-v1.bin";
+
+    HistoryRecord written = GenerateHistory(MakeInputs(kPairs[0], "Malden", 5));
+    written.version = 1;
+    // version 1 prose, as an old save stores it
+    written.openingPage1 = "Every power that has held this ground began by writing it down, and the ranks now called "
+                           "Soviet Army began the same way.";
+    {
+        HistoryRecord copy = written;
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(copy.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    HistoryRecord loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.Present());
+    CHECK(loaded.version == 1);
+    CHECK(Str(loaded.openingPage1) == Str(written.openingPage1));
+    CHECK(Str(loaded.openingPage2) == Str(written.openingPage2));
+    for (int k = 0; k < kHistoryEvents; k++)
+    {
+        CHECK(Str(loaded.eventTitle[k]) == Str(written.eventTitle[k]));
+        CHECK(Str(loaded.eventText[k]) == Str(written.eventText[k]));
+        CHECK(Str(loaded.eventPlace[k]) == Str(written.eventPlace[k]));
+    }
+    const RString bio = GenerateBio(loaded, 1, RString("Petra"), RString("FIA"), false, HashKey("comp_3_petra", 5),
+                                    kHistoryBioPageWords);
+    INFO(Str(bio));
+    CHECK(Words(bio) >= kHistoryBioMinWords);
+    CHECK(Words(bio) <= kHistoryBioPageWords);
+    CHECK(Str(bio).find(Str(loaded.eventPlace[1])) != std::string::npos);
 
     std::filesystem::remove(archivePath);
 }

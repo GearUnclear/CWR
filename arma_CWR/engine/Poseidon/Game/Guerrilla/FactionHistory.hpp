@@ -5,24 +5,14 @@
 // No runtime AI, no network, no config reads: a pure function from
 // HistoryInputs to HistoryRecord, unit-testable with no world. Three beats -
 // an ancient grievance, a broken settlement, a remembered catastrophe or
-// stand - told in one epic historian's voice, past tense, with the shipped
+// stand - told in plain dossier prose, past tense, with the shipped
 // factions as the present inheritors of a quarrel much older than either.
 //
-// Faction display names enter ONLY through the five grammatically neutral
-// constructions in the .cpp, every one of which ends on a word that introduces
-// a bare proper name ("as", "called", "the name"). That is what lets a template
-// carry no article, no possessive, no acronym expansion and no founding date,
-// and it is what makes "US Army", "Soviet Army", "FIA", "IDF", "Hizballah" and
-// "PLO East" all read correctly in every slot. The five are spent as a
-// PERMUTATION across the four history insertion points, so one distinctive
-// phrase never repeats inside a campaign's history; the biography generator
-// takes the construction the history left unused.
-//
-// Because a construction may be plural ("the ranks now called X") or singular
-// ("whoever now marches as X"), every template puts it either in the subject
-// of a SIMPLE PAST verb or in the object of a preposition. No present tense,
-// no "is"/"are"/"was"/"were" ever follows a construction, and no template puts
-// an article, a preposition of place or a possessive against the slot.
+// Bare faction display names modify five plural group nouns, for example
+// "Soviet Army troops" or "FIA units". Full names and acronyms therefore read
+// naturally without an article, possessive, or invented founding date.
+// The five labels are spent as a permutation across four history insertion
+// points. The remaining label is available to a biography that names a faction.
 //
 // The record is persisted VERBATIM as resolved prose plus indices plus a
 // version, so reopening the journal or loading a save can never reroll it.
@@ -46,7 +36,7 @@ namespace Poseidon::Guerrilla
 
 // Bumping this changes nothing for a campaign already under way: the record is
 // persisted as resolved prose and is never regenerated on load.
-constexpr int kHistoryVersion = 1;
+constexpr int kHistoryVersion = 2;
 constexpr int kHistoryEvents = 3;    // beats: ancient grievance, broken settlement, stand
 constexpr int kHistoryOpenSlots = 4; // opening prose slots A B C D
 constexpr int kHistoryPhrases = 4;   // faction constructions the history itself spends
@@ -56,7 +46,7 @@ constexpr int kHistoryOpeningMinWords = 80;
 constexpr int kHistoryOpeningMaxWords = 100;
 constexpr int kHistoryEventMinWords = 30;
 constexpr int kHistoryEventMaxWords = 60;
-constexpr int kHistoryBioMinWords = 35;
+constexpr int kHistoryBioMinWords = 20;
 constexpr int kHistoryBioMaxWords = 55;
 // What a dossier page can actually show beside the portrait box. The journal's
 // Compose stage clamps the biography to this many words
@@ -112,8 +102,9 @@ HistoryRecord GenerateHistoryForced(const HistoryInputs& in, const HistoryForced
 
 // Strictly PRE-campaign background, hung on one of the three shared history
 // events so every dossier and the Chronicles read as one past. It never
-// mentions rank, XP, a kill, a captured zone or anything else the deed list
-// owns, and it carries no third-person pronoun: the name is repeated.
+// mentions current rank, XP, kill totals, captured zones or other live deeds.
+// Earlier violence and service can be part of a person's past. Gender-neutral
+// pronouns keep long display names from being repeated.
 //
 // maxWords is the UPPER half of the word budget the variant walk selects
 // against; the caller passes the budget of the page the text has to fit
@@ -129,7 +120,7 @@ RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RS
 
 // "Lebanon (80's)" -> "Lebanon"; "Lebanon80" -> "Lebanon"; "Malden" -> "Malden";
 // "" or a still-numeric result -> "this country". Used ONLY in opening slot A,
-// only in the form "on <word>".
+// as a bare place name, including after "of" or "in".
 RString HistoryIslandWord(const RString& display);
 
 // Whitespace-separated token count; the one word counter the budgets use.

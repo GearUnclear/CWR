@@ -27,24 +27,11 @@ constexpr int kVariants = 6; // per opening slot, per beat, per biography cell
 // ---------------------------------------------------------------------------
 // faction constructions
 // ---------------------------------------------------------------------------
-// THE TEST A CONSTRUCTION MUST PASS: it has to END on a word that introduces a
-// bare proper name, and English has only three of those - "as", "called" and
-// "the name". Anything else makes the reader supply an article, which the
-// generator cannot do, because a display name may or may not want one: the
-// shipped library authors "US Army", "Soviet Army" and "FIA"
-// (guerrilla-mode/config/guerrilla-factions.hpp), and "answer to Soviet Army"
-// is wrong while "answer to FIA" is merely odd. So the whole phrase is checked
-// by substitution against the widest set of shapes that ships - "US Army",
-// "Soviet Army", "FIA", "IDF", "Hizballah", "PLO East" - and it has to read
-// correctly for EVERY one of them, not for the acronyms alone.
-//
-// Article-free, possessive-free, acronym-free on top of that. Templates use a
-// construction only as the subject of a simple past verb or as the object of a
-// preposition, because two of the five are grammatically singular and three
-// are plural.
-static const char* const kFactionPhrase[] = {"the ranks now called", "whoever now marches as",
-                                             "the fighters who muster as", "arms gathered under the name",
-                                             "the standard now raised as"};
+// A bare faction name modifies a plural group noun: "Soviet Army troops",
+// "FIA units", "IDF soldiers". This reads naturally for both full names and
+// acronyms without an article, possessive, or a historical identity claim.
+// The persisted phrase indices still choose five distinct labels.
+static const char* const kFactionPhrase[] = {"troops", "units", "soldiers", "forces", "fighters"};
 constexpr int kPhraseCount = (int)(sizeof(kFactionPhrase) / sizeof(kFactionPhrase[0]));
 
 // Last-resort place names, used only when the world offers neither a Names
@@ -55,260 +42,261 @@ static const char* const kGenericPlace[] = {"the old crossing", "the high pass",
 // opening slot A - the ancient claim ({Island}, {Place} = the beat-0 place)
 // ---------------------------------------------------------------------------
 static const char* const kOpenA[kVariants] = {
-    "Long before any flag now flown on {Island}, the people of these valleys cut terraces into the hills above "
-    "{Place} and held them against every season.",
-    "The oldest quarrel on {Island} began over water. The wells at {Place} were named, walled and fought for long "
-    "before any banner now carried was stitched.",
-    "Nothing on {Island} is older than the road to the wells, and the caravans that cut it wrote their claim into "
-    "the rock at {Place}.",
-    "Before there were borders on {Island} there were harvests, and the families who worked the ground around "
-    "{Place} counted their right in seasons instead of papers.",
-    "Every stone wall on {Island} was laid by somebody, and the walls above {Place} were laid by people whose "
-    "names the oldest registers no longer carry.",
-    "The first claim on {Island} was made with hands. Herds were moved, wells were dug, and the ground around "
-    "{Place} was held by the families who worked it."};
+    "The people of {Island} still tell how families near {Place} lost rights their grandparents had "
+    "expected to leave to the children.",
+    "Near {Place}, families in {Island} inherited an old dispute along with their grandparents' "
+    "belongings. Outsiders had claimed what kept those families fed.",
+    "For generations, families near {Place} in {Island} taught children where they belonged. Then "
+    "outsiders arrived with papers saying the children had no claim.",
+    "People in {Island} trace the trouble to {Place}, where outside owners dismissed local agreements. "
+    "Families kept copies that nobody in authority would read.",
+    "Families near {Place} in {Island} kept old agreements long after outsiders stopped respecting them. "
+    "Each generation tried to reclaim those rights.",
+    "Families near {Place} in {Island} inherited their grandparents' old unanswered petitions. They kept "
+    "sending new ones, asking for the same rights."};
 
 // ---------------------------------------------------------------------------
 // opening slot B - the coming of the occupier's line ({Occupier})
 // ---------------------------------------------------------------------------
 static const char* const kOpenB[kVariants] = {
-    "Then came the columns of a distant power, and the road they cut has carried every ruler since, {Occupier} "
-    "among them.",
-    "Every power that has held this ground began by writing it down, and {Occupier} began the same way.",
-    "Stone is a poor deed in a court, and every army that has crossed here has known it, {Occupier} among them.",
-    "Then the map-makers came, and after them the garrisons, and the ledgers have passed from hand to hand down "
-    "to {Occupier}.",
-    "One power after another has held this ground since, each arriving with better paper than the last. "
-    "{OccupierCap} arrived that way.",
-    "The garrisons changed language and colour with each century, and the ledgers were copied forward. "
-    "{OccupierCap} inherited the last copy."};
+    "{OccupierCap} arrived with orders to enforce obedience. A complaint could bring armed visitors to "
+    "the same door where neighbours once gathered.",
+    "{OccupierCap} controlled the main roads. People learned which guards would listen, which would "
+    "shout, and when to turn around without arguing.",
+    "Under {Occupier}, residents watched their words in public. Families argued behind closed doors "
+    "about whether silence was keeping anyone safe anymore.",
+    "{OccupierCap} posted guards and demanded obedience. Some residents tried written petitions; others "
+    "stopped expecting an answer and began meeting behind shutters.",
+    "{OccupierCap} made the rules, but local people still had to eat. Neighbours traded small favours "
+    "and warned each other about patrols.",
+    "When {Occupier} took control, arguments with officials became arguments with armed soldiers. Even "
+    "close friends disagreed about how much they could endure."};
 
 // ---------------------------------------------------------------------------
 // opening slot C - the breach ({Place} = the beat-1 place)
 // ---------------------------------------------------------------------------
 static const char* const kOpenC[kVariants] = {
-    "A settlement was sworn at {Place} and broken within a season.",
-    "At {Place} a settlement was signed that promised the water would stay shared. The seals are still in the "
-    "archive; the pumps are not.",
-    "A truce was measured out at {Place} with stones set in the sand. The stones were moved before the copy of it "
-    "had dried.",
-    "An agreement was read out at {Place} before witnesses. The ground it named was fenced within two winters.",
-    "The compact made at {Place} lasted one generation. The terms were kept in an archive, and the ground they "
-    "named was taken anyway.",
-    "What was promised at {Place} was written down, witnessed and buried in a strong box. The ground itself "
-    "changed hands twice before the ink was dry."};
+    "An agreement near {Place} briefly gave families reason to hope. The authorities broke its terms, "
+    "leaving its signers to explain.",
+    "Representatives near {Place} came home with an agreement and promises. When the authorities broke "
+    "it, neighbours demanded to know what happened.",
+    "Near {Place}, both sides agreed to a settlement. After the authorities broke it, residents brought "
+    "copies to confront the guards.",
+    "An agreement near {Place} promised peace. The authorities broke it, and residents who trusted the "
+    "negotiators felt betrayed.",
+    "People near {Place} accepted a settlement they could live with. When the authorities broke it, even "
+    "patient neighbours talked of fighting.",
+    "Near {Place}, negotiators promised an agreement would protect local rights. After the authorities "
+    "broke it, nobody volunteered for another delegation."};
 
 // ---------------------------------------------------------------------------
 // opening slot D - the inheritance ({Resistance}, {Place} = the beat-0 place)
 // ---------------------------------------------------------------------------
 static const char* const kOpenD[kVariants] = {
-    "{ResistanceCap} inherited that quarrel unfinished, and the ground above {Place} has not forgotten a single "
-    "season of it.",
-    "{ResistanceCap} took up that grievance from people who had carried it a long time already.",
-    "{ResistanceCap} took this quarrel in hand, along with the road, the wells and everything else nobody signed "
-    "for.",
-    "The quarrel outlived the people who began it. It passed down to {Resistance}, and {Place} is still the "
-    "argument.",
-    "Nothing was settled and nothing was forgotten. The unfinished business came down at last to {Resistance}, "
-    "which is where it stands.",
-    "Old grievances do not expire; they change hands. This one changed hands until it reached {Resistance}, and "
-    "there it has stayed."};
+    "Fighting followed. {ResistanceCap} remember the dead through surviving friends, who can still "
+    "describe their laughter as readily as their deaths.",
+    "{ResistanceCap} lost people in the fighting that followed. Some families still ask returning "
+    "fighters for news nobody wants to give.",
+    "Later fighting left empty places at family tables. {ResistanceCap} keep the names, including those "
+    "neighbours still find difficult to discuss.",
+    "Fighting killed residents. {ResistanceCap} hear from families still wanting to know where their "
+    "relatives were taken or buried.",
+    "The fighting left families grieving. {ResistanceCap} still hear from survivors who remember who "
+    "came back and who never came home.",
+    "People died when the dispute became fighting. {ResistanceCap} carry those losses into every "
+    "argument about what another battle might cost."};
 
 // ---------------------------------------------------------------------------
 // beat 0 - the ancient grievance. NO faction construction: the grievance
 // predates both sides, which is the whole point of the beat.
 // ---------------------------------------------------------------------------
-static const char* const kTitle0[kVariants] = {"The Terraces of {Place}", "The Wells at {Place}",
-                                               "The Rock at {Place}",     "The Commons at {Place}",
-                                               "The Crossing at {Place}", "The Salt at {Place}"};
+static const char* const kTitle0[kVariants] = {"Terrace Claims near {Place}", "Well Ownership near {Place}",
+                                               "Water Rights near {Place}",   "Pasture Fences near {Place}",
+                                               "Crossing Tolls near {Place}", "Salt Licences near {Place}"};
 
 static const char* const kText0[kVariants] = {
-    "The old families cut the slopes above {Place} into steps and fed four valleys from them for longer than any "
-    "register records. When the first surveyors came with chains and paper, the steps became parcels, and the "
-    "parcels became someone else's property. Nobody in the valley signed anything.",
-    "Four wells fed this whole valley, and the families that dug them kept the count by hand across nine "
-    "generations. The first ledger written by an outside clerk reduced nine generations to a single line, and the "
-    "line named an owner nobody in the valley had met.",
-    "Before there was a border there was a road, and the men who cut it marked every well along it in the rock at "
-    "{Place}. Those marks were law for as long as anyone needed law. The first map drawn in a capital did not "
-    "copy a single one of them.",
-    "The pasture above {Place} was held in common for as long as anyone had kept a record, and the herds moved "
-    "across it by agreement rather than by permit. The first fence went up in a single week. The agreement had "
-    "taken nine generations to build.",
-    "The crossing at {Place} belonged to nobody and served everybody, and the families on both banks kept it open "
-    "through flood and drought alike. Then a toll was posted, and a soldier was posted beside the toll, and the "
-    "crossing has been somebody's property ever since.",
-    "Salt was cut from the flats beyond {Place} by hand, in shares agreed at the start of every season and "
-    "honoured without a written word. A company arrived with a licence signed in a distant capital. The shares "
-    "were never renegotiated; they were simply cancelled."};
+    "Families near {Place} built terraces on the slopes and farmed them for generations. Surveyors later "
+    "divided the land into plots and registered it under outside owners. The families who had built and "
+    "maintained the terraces were left without a recognised claim to the ground that fed them.",
+    "Families near {Place} dug and maintained four wells that supplied the valley. Water was shared "
+    "under arrangements passed down through nine generations. An outside clerk later registered the "
+    "wells as private property, giving an absent owner control over water the families had previously "
+    "drawn by right.",
+    "Road builders near {Place} marked the rock beside each well to record who could draw water. Local "
+    "families used those marks to settle access disputes. When officials produced the first regional "
+    "map, the water rights were omitted. Officials then rejected claims based on the older markings.",
+    "Herders near {Place} shared pasture under agreements maintained by local families for generations. "
+    "An outside landholder fenced the common ground within a week and barred the herds. Families that "
+    "had always used the pasture had to find other grazing or pay to enter it.",
+    "Families near {Place} maintained a river crossing and used it freely to move goods between the "
+    "banks. A new authority claimed ownership, posted a toll and stationed a guard to collect it. The "
+    "families then had to pay whenever work took them across a route those families had kept open.",
+    "Workers near {Place} cut salt from nearby flats and agreed on each family's share before the season "
+    "began. A company obtained an exclusive licence from the capital and cancelled those arrangements. "
+    "Families lost the right to gather salt independently and had to seek wages from the new operator."};
 
 // ---------------------------------------------------------------------------
 // beat 1 - the broken settlement. Carries the OCCUPIER construction.
 // ---------------------------------------------------------------------------
-static const char* const kTitle1[kVariants] = {"The Compact at {Place}", "The Seals at {Place}",
-                                               "The Stones at {Place}",  "The Charter of {Place}",
-                                               "The Market at {Place}",  "The Line at {Place}"};
+static const char* const kTitle1[kVariants] = {"Closed Roads near {Place}",       "Pump Restrictions near {Place}",
+                                               "The Truce near {Place}",          "The Charter near {Place}",
+                                               "Market Checkpoints near {Place}", "The Boundary near {Place}"};
 
 static const char* const kText1[kVariants] = {
-    "A settlement was read aloud in the square at {Place} and witnessed by both sides: the high ground would stay "
-    "common, the roads would stay open. Within one season the ground was fenced and the roads were gated. "
-    "{OccupierCap} took the paper away; the square kept the reading.",
-    "The settlement at {Place} was signed in front of witnesses from six villages: the water shared, the coast "
-    "road open to all, no armed man at the pumps. {OccupierCap} took the pumps. The road has been checked twice a "
-    "day ever since.",
-    "The truce at {Place} was set out in stones because neither side trusted paper. Elders from both sides walked "
-    "the line and agreed it in one afternoon. {OccupierCap} took the wells inside that line, and the stones have "
-    "been moved twice since.",
-    "A charter was granted at {Place} and read out once a year so that nobody could claim to have forgotten it. "
-    "The reading stopped in a year no register names. {OccupierCap} took the charter into an office, and the "
-    "office was never open.",
-    "The market at {Place} was neutral ground by an agreement older than any flag that has flown over it, and no "
-    "armed man entered it. {OccupierCap} put a checkpoint at each end of the street. The agreement was never "
-    "formally broken.",
-    "A line was walked at {Place} by men from both sides and marked with cairns, and every family knew which side "
-    "of it their water lay on. {OccupierCap} moved the line onto paper, and on paper it fell somewhere else "
-    "entirely."};
+    "Representatives near {Place} agreed that the high ground would remain common and the roads open. "
+    "Within a season, {Occupier} fenced the ground and gated the roads. Families who had accepted the "
+    "settlement now needed permission to reach land and routes the agreement had left open.",
+    "Witnesses from six villages signed an agreement near {Place} to share water and keep the coast road "
+    "open. The terms also barred armed guards from the pumps. {OccupierCap} seized the pumps and began "
+    "checking road traffic twice a day, restricting the access the witnesses had secured.",
+    "Elders marked a truce boundary with stones near {Place} and agreed which wells would remain "
+    "available to local families. {OccupierCap} later occupied those wells and shifted the markers. "
+    "Families arriving for water found guards enforcing a boundary that no longer matched the one the "
+    "elders had walked.",
+    "A charter near {Place} guaranteed local access to shared land and was read aloud each year. "
+    "{OccupierCap} stopped the readings, removed the charter and began requiring permits. Residents "
+    "seeking to challenge a refusal could no longer consult the document that set out the original "
+    "terms.",
+    "An agreement kept the market near {Place} open to both sides and barred armed patrols from its "
+    "trading area. {OccupierCap} installed checkpoints at both entrances. Traders now faced searches and "
+    "delays on a route the agreement had kept open, although the authorities never formally cancelled "
+    "it.",
+    "Under an agreement near {Place}, anyone crossing the boundary for a funeral could return before "
+    "nightfall. {OccupierCap} began keeping mourners at the posts until dark, then refusing passage. "
+    "Families stopped attending burials across the boundary, although the agreement was still posted "
+    "beside the guards."};
 
 // ---------------------------------------------------------------------------
 // beat 2 - the remembered catastrophe or stand. Carries the RESISTANCE
 // construction: this is the beat the present cell claims descent from.
 // ---------------------------------------------------------------------------
-static const char* const kTitle2[kVariants] = {"The Stand at {Place}",  "The Burning of {Place}",
-                                               "The Column at {Place}", "The Night at {Place}",
-                                               "The Ridge at {Place}",  "The Winter at {Place}"};
+static const char* const kTitle2[kVariants] = {"Road Battle near {Place}",     "The Fires near {Place}",
+                                               "Delaying Action near {Place}", "The Encirclement near {Place}",
+                                               "Ridge Battle near {Place}",    "Winter Losses near {Place}"};
 
 static const char* const kText2[kVariants] = {
-    "At {Place} the column was stopped for two days by fewer men than it had guns. They were not relieved and "
-    "they did not expect to be. The road was opened on the third day. {ResistanceCap} kept the count of those two "
-    "days.",
-    "{Place} burned for a day and a night, and the people who came back counted the doorways rather than the "
-    "houses. No relief column reached the town. The list of names carried out of it passed to {Resistance}, and "
-    "it has been read aloud once a year ever since.",
-    "A column that should have taken the coast in a morning was held at {Place} until dusk by men with two "
-    "machine guns and the high ground. None of them was relieved. The coast fell the next day, and {Resistance} "
-    "counted the delay a victory anyway.",
-    "The garrison at {Place} was surrounded before dawn and expected to surrender by noon. It held until the "
-    "second evening, and the ammunition ran out before the will did. Every name from those two days was written "
-    "down afterwards, and the page passed intact to {Resistance}.",
-    "The ridge above {Place} was held for eleven hours by farmers with hunting rifles, against a force that had "
-    "not thought the ridge worth naming. The ground was lost by evening. {ResistanceCap} carried the name of it "
-    "away and never gave it back.",
-    "The winter that followed the siege of {Place} killed more of the town than the siege had, and the relief "
-    "that was promised arrived in the spring with a census taker. {ResistanceCap} learned in that season what a "
-    "promise from a capital was worth."};
+    "Defenders near {Place} stopped an advancing column for two days without relief. The column broke "
+    "through on the third day, leaving local fighters dead and others missing. Survivors later gave "
+    "{Resistance} an account of the positions held and the names of those who failed to return.",
+    "Fighting near {Place} set homes alight, and the fires continued through the night. Families who "
+    "returned found collapsed houses and neighbours missing. {ResistanceCap} collected names from "
+    "survivors and recorded where each person had last been seen. Relatives used the list to search for "
+    "people carried away during the evacuation.",
+    "Defenders with two machine guns held an advancing column near {Place} until dusk. The delay allowed "
+    "families to leave the coastal route, but several defenders died before the survivors withdrew. The "
+    "coast fell the next day. {ResistanceCap} preserved the survivors' account of the action and the "
+    "losses.",
+    "A garrison near {Place} was surrounded before dawn and held out until the following evening. "
+    "Ammunition ran out before relief arrived, and survivors later reported dead and missing comrades. "
+    "{ResistanceCap} gathered the names from returning personnel and families whose relatives had served "
+    "in the garrison.",
+    "Local farmers with hunting rifles held a ridge near {Place} for eleven hours before an advancing "
+    "force drove the defenders off. Survivors returned after dark to recover the dead. {ResistanceCap} "
+    "later recorded the names and accounts from families who had sent people up to the ridge.",
+    "The siege near {Place} left families short of food and shelter as winter began. More residents died "
+    "during that winter than in the fighting. Promised relief reached the area in spring. "
+    "{ResistanceCap} recorded the deaths from household accounts, including the names of people buried "
+    "before help arrived."};
 
 // ---------------------------------------------------------------------------
 // biographies: (beat kind of the referenced event) x tone, six variants each.
-// Strictly PRE-campaign. No rank, no XP, no kill, no captured zone: the deed
-// list owns all of that. No third-person pronoun anywhere - the name repeats.
+// Strictly PRE-campaign. Current rank, XP, kill totals and captured zones
+// belong in the deed list. Earlier events can include violence or resistance
+// service. Gender-neutral pronouns avoid repeating a long display name.
 // ---------------------------------------------------------------------------
 static const char* const kBio0Friendly[kVariants] = {
-    "{Name} was born into one of the families that worked the ground above {Place}, and learned every path on "
-    "that slope before learning to read. Nobody in this cell has ever needed to hand {Name} a map of ground a "
-    "grandmother measured by hand.",
-    "{Name} grew up on the wrong side of the ledger that took {Place} away, and heard the whole account of it "
-    "from a grandfather who had learned it from a grandfather. That account has been in the family longer than "
-    "any of the furniture.",
-    "{Name} was raised on the story of what was taken at {Place} before any flag now flying was sewn, and can "
-    "still recite the boundary the old families walked. That recitation is worth more to this cell than a printed "
-    "map.",
-    "The grandparents of {Name} were among the people counted, taxed and moved off the ground at {Place}, and the "
-    "family kept every worthless paper from that year. {Name} arrived here already knowing that a signature and a "
-    "right are different things.",
-    "{Name} spent nine winters herding on ground the family had lost at {Place} without once being told it was "
-    "lost. The correction, when it came, was brief. {Name} has been an inconvenient neighbour to authority ever "
-    "since.",
-    "{Name} learned the old boundary at {Place} the way other children learn a song, walked it every year with an "
-    "uncle, and never once saw a fence line agree with it. {Name} arrived here with that argument already a "
-    "generation old."};
+    "{Name} worked as a farmhand near {Place} until the landlord evicted the family from its rented "
+    "fields. The farmhand kept writing poems and still hoped to publish a collection.",
+    "When fighting scattered the family, {Name}, a furniture maker from {Place}, fled with a younger "
+    "sibling. The siblings later rented a shed and began making tables and chairs again.",
+    "{Name}, a survey assistant from {Place}, accepted a bribe to falsify a boundary, costing a family "
+    "their home. The evicted family knew who had signed the false survey.",
+    "{Name} owned a grocery near {Place}. Soldiers confiscated its stock, ruining the business. The "
+    "grocer joined a rebel band, then left after its leader ordered members to steal food from "
+    "neighbouring families.",
+    "{Name}, a shepherd from {Place}, guided displaced neighbours along familiar grazing paths. A cousin "
+    "stayed behind to tend the flock; the shepherd lost contact with that cousin during the journey.",
+    "{Name}, a municipal gardener from {Place}, escaped the fighting with an elderly parent. At the "
+    "woodland shelter where both found refuge, the gardener took responsibility for fetching everyone's "
+    "water."};
 
 static const char* const kBio0Hostile[kVariants] = {
-    "{Name} came up through a service that has administered ground like {Place} for longer than anyone still in "
-    "it can remember. Nothing in that education suggested the old boundary was any business of the office.",
-    "The family of {Name} has held commissions for four generations, and the earliest of them signed the survey "
-    "that reduced {Place} to parcels. The paperwork of that century is settled law in this office, and every "
-    "objection to it is weather.",
-    "{Name} was posted to this country young, read the whole file on {Place} in a single week, and concluded that "
-    "the ground had been quiet for a long time because it had been governed firmly. Nothing since has moved that "
-    "conclusion.",
-    "{Name} rose in a service that measures success by how little happens, and the ground around {Place} is the "
-    "reason for the posting. {FactionCap} sent an administrator and got a commander, which the file records as "
-    "an improvement.",
-    "Before this posting {Name} spent eleven years enforcing surveys in another country and never lost a parcel "
-    "of one. The file on {Place} was described as straightforward. {Name} accepted the posting on that "
-    "description.",
-    "{Name} has read the old claims on {Place}, all of them, and dismisses them in the same measured voice kept "
-    "for the weather. A claim without a seal is a story, and stories have never held ground."};
+    "Before becoming an army quartermaster near {Place}, {Name} worked as a warehouse clerk. When the "
+    "army needed more transport, the quartermaster confiscated civilian carts and sent them to military "
+    "supply depots.",
+    "{Name} earned a living playing at weddings before enlisting for regular wages. Posted near {Place}, "
+    "the musician hoped to leave the army and earn money performing again.",
+    "While posted near {Place}, military engineer {Name} approved an unsafe bridge repair. The bridge "
+    "collapsed, killing two comrades. Since then, the engineer has personally checked every repair "
+    "before allowing soldiers to cross.",
+    "{Name} sold travel permits near {Place}, using a civilian partner to collect bribes. When "
+    "investigators arrived, the administrator named the partner in exchange for keeping the post.",
+    "{Name} lost a dock job near {Place} and enlisted for regular wages. During years of army service, "
+    "the former laborer regularly helped younger soldiers write letters to their families.",
+    "{Name} was a local official near {Place}, authorized to stop evictions. When a former rival "
+    "appealed, the official refused, knowing the rival had paid the rent and had the right to stay."};
 
 static const char* const kBio1Friendly[kVariants] = {
-    "{Name} grew up two streets from the archive at {Place} and was taken as a child to see the settlement seals "
-    "under glass. That was the year the pumps were closed. {Name} has read this country ever since the way other "
-    "people read a face.",
-    "{Name} was in the square at {Place} on the day the gates went up, small enough to be lifted for a better "
-    "view and old enough to remember what the adults said afterwards. Nobody in that family has signed anything "
-    "since.",
-    "The father of {Name} witnessed the agreement at {Place} and spent the rest of a long life explaining, to "
-    "anyone who would sit still, exactly which clause was broken first. {Name} can still quote the clause and "
-    "does so rarely.",
-    "{Name} clerked in an office near {Place} long enough to see which promises were filed and which were quietly "
-    "reclassified, then left without notice. {FactionCap} gained a fighter who knows exactly where the paperwork "
-    "is kept.",
-    "{Name} was born the season the compact at {Place} failed, into a household that dated everything from it. "
-    "Birthdays, harvests and debts were all counted forward from that year. Nothing in that house was ever "
-    "described as settled.",
-    "{Name} carried water past the checkpoint at {Place} twice a day for six years and learned every guard "
-    "rotation without meaning to. The habit outlived the job, and this cell has been the beneficiary of it."};
+    "{Name} taught arithmetic at a school near {Place}. When new restrictions closed the school, the "
+    "teacher visited pupils at home and continued the lessons from where each class had stopped.",
+    "Former postal worker {Name} from {Place} became a resistance courier, then quit after police seized "
+    "the courier's address book, found a friend's home address inside, and arrested the friend there.",
+    "{Name} repaired bicycles near {Place} for underground couriers delivering medicine to hidden "
+    "clinics. Police searched the workshop and seized the spare parts, leaving several couriers without "
+    "working bicycles.",
+    "{Name}, a bookkeeper from {Place}, kept records for a resistance cell but left after its leader "
+    "ordered the bookkeeper's friend beaten as an informer. The leader had no evidence.",
+    "{Name}, a tailor from {Place}, made the clothes for a younger sibling's wedding. The authorities "
+    "refused the tailor permission to travel, and the wedding went ahead without them.",
+    "{Name} skipped classes to print leaflets against rent increases near {Place}, but dreaded speaking "
+    "at meetings. After their mother's arrest, they hid with friends and wrote speeches for others to "
+    "read."};
 
 static const char* const kBio1Hostile[kVariants] = {
-    "{Name} countersigned the order that closed the agreement at {Place} and calls it the cleanest piece of "
-    "administration of a long career. The complaints arrived in writing and were answered in writing.",
-    "{Name} arrived at {Place} with instructions to restore order and a reputation for doing it without noise. "
-    "The gates went up within the week. {FactionCap} rewarded {Name} for it, and the file has never been reopened.",
-    "{Name} learned the trade in an office that treated a signed settlement as a starting position, and applied "
-    "that lesson at {Place} with patience. Every parcel there was reclassified rather than seized, which took "
-    "longer and held better.",
-    "The reputation of {Name} rests on the checkpoints at {Place}, which have never been overrun and have never "
-    "needed to be. The local memory of the old agreement is filed here as an administrative problem.",
-    "{Name} keeps the original of the agreement at {Place} in a drawer and produces it for visitors, unfolded "
-    "carefully, as proof that everything done since was lawful. The unfolding is practised. The argument has been "
-    "made many times.",
-    "{Name} was sent to {Place} to hold a line that a treaty had already drawn badly, and has held it for years "
-    "without once being thanked. {FactionCap} counted that as loyalty. {Name} counts it as an unpaid debt."};
+    "After working as a school inspector, {Name} supervised police near {Place}. When residents came to "
+    "the police office seeking protection from soldiers, the former inspector ordered the visitors "
+    "detained.",
+    "{Name} ran a checkpoint near {Place} and owed a smuggler money after gambling losses. In exchange "
+    "for more time to repay the debt, the officer let the smuggler's wagons pass without inspection.",
+    "{Name} commanded patrols near {Place}. After surviving an ambush that killed a close colleague, the "
+    "commander ordered searches of uninvolved households, instructing soldiers to beat residents.",
+    "A former railway porter, {Name} joined the army for regular wages to support an elderly parent. "
+    "After being posted near {Place}, they requested a transfer closer to home.",
+    "{Name} acted with an amateur theatre group near {Place} before taking a military publicity job. The "
+    "former actor later helped announce an army ban that forced the group to close.",
+    "Posted to {Place}, officer {Name} missed a first child's birth. Letters home described good meals "
+    "and new friends, leaving out long shifts checking travel papers and orders barring leave."};
 
 static const char* const kBio2Friendly[kVariants] = {
-    "{Name} was raised on the story of what happened at {Place} and can name all of the men who held that ground. "
-    "{Name} came to this cell with no training worth the word and an unusually exact memory for ground.",
-    "Two uncles of {Name} were on the ridge at {Place} and only one came back down it. The family tells both "
-    "halves of that story every year, in order, and {Name} has never been able to hear the second half sitting "
-    "down.",
-    "{Name} was a child in {Place} when the column came through, was carried out through an orchard, and "
-    "remembers the orchard better than the column. {FactionCap} did not have to recruit {Name}, who arrived asking "
-    "where to sign.",
-    "{Name} spent a season after {Place} helping to write down the names, one at a time, from whoever could still "
-    "remember them. That list is the reason {Name} is here, and it lives folded in a pocket that never gets "
-    "emptied.",
-    "The mother of {Name} walked out of {Place} with two children and no shoes and never afterwards described the "
-    "walk. {Name} learned the whole of it from neighbours, in pieces, across about ten years, and has been "
-    "assembling the account ever since.",
-    "{Name} was too young for {Place} by a year and has been making up the difference ever since. Older fighters "
-    "find this tiresome. Nobody has yet found a way of telling {Name} to stop."};
+    "{Name}, a radio repairer from {Place}, joined a resistance transmitter crew after fighting "
+    "destroyed the shop. The repairer maintained equipment and hoped to host music programmes someday.",
+    "{Name}, a quarry worker from {Place}, deserted a resistance position during an attack. A surviving "
+    "fighter later reported that a companion had stayed to defend the position and been killed.",
+    "An orchard worker from {Place}, {Name} led relatives away from fighting along familiar farm roads. "
+    "Among displaced families, the sociable picker entertained new friends with stories from years on "
+    "the harvest crews.",
+    "{Name}, a photographer from {Place}, escaped to a resistance camp and became a medic without "
+    "medical training. Despite the commander's ban, the photographer secretly treated a wounded enemy "
+    "and stayed with the group.",
+    "{Name} worked the family ferry near {Place} until fighting destroyed the boat. Living with their "
+    "mother afterward, they began learning the recipes the family used for celebrations.",
+    "{Name}, an apprentice mason from {Place}, volunteered for the resistance expecting adventure. "
+    "During the first attack, the recruit panicked and could not leave cover. Afterward, they asked for "
+    "more training."};
 
 static const char* const kBio2Hostile[kVariants] = {
-    "{Name} commanded a sector next to {Place} in that season and signed the report that called the whole affair "
-    "a policing action. The report is still quoted in training, and everyone who was there has stopped correcting "
-    "it.",
-    "{Name} was among the officers who took {Place} on the following day and remembers it as an orderly operation "
-    "conducted in difficult weather. The account has been repeated so often that {Name} may now believe it.",
-    "{Name} lost a brother at {Place} and has been posted within sight of it ever since, by request. "
-    "{FactionCap} recorded that as dedication. It is closer to an argument only one side is still allowed to make.",
-    "{Name} arrived after {Place} had already burned and spent two years explaining to visiting officials why "
-    "nothing further was required. Every one of those officials went away satisfied, and the file has not been "
-    "opened since.",
-    "{Name} was decorated for the column that reached {Place} on the third day, and wears the ribbon without "
-    "comment. The delay that earned it is never mentioned. {FactionCap} never recorded the delay at all.",
-    "{Name} keeps a photograph of {Place} taken the week afterwards and shows it to junior officers as an "
-    "instructional matter. The lesson drawn from it is about timetables. Nobody in the room has ever asked about "
-    "anything else."};
+    "{Name} served as an officer near {Place}. When a friend killed a surrendering fighter, the officer "
+    "protected the friend by falsely stating in the unit report that the fighter had died in combat.",
+    "{Name} wrote poetry for years before the war. While serving as an officer near {Place}, they "
+    "prepared notices for the families of soldiers killed under their command.",
+    "Officer {Name} lost a younger sibling in fighting. During a posting near {Place}, the bereaved "
+    "officer repeatedly gave one young recruit safer kitchen duties while other recruits went on patrol.",
+    "{Name}, a former foundry worker from {Place}, served in the army. After a superior threatened death "
+    "for refusing, the soldier helped execute prisoners and later admitted taking part.",
+    "{Name}, an army payroll clerk near {Place}, took charge of the records after heavy losses in the "
+    "unit. The clerk kept dead soldiers on the payroll and pocketed their wages.",
+    "Before becoming a military interrogator near {Place}, {Name} worked as a boxing trainer. The "
+    "interrogator taught new guards to beat prisoners until the prisoners signed confessions."};
 
 // Flat view over every table, for the lints.
 static const char* const* const kAllTables[] = {
@@ -367,14 +355,14 @@ RString CapitalizeFirst(const RString& src)
     return out.Str();
 }
 
-// "the ranks now called " + "Soviet Army"
+// "Soviet Army" + " troops"
 RString PhraseWith(int phrase, const RString& factionName)
 {
     const int i = (phrase >= 0 && phrase < kPhraseCount) ? phrase : 0;
     Text out;
-    out.Add(kFactionPhrase[i]);
-    out.AddChar(' ');
     out.Add(factionName);
+    out.AddChar(' ');
+    out.Add(kFactionPhrase[i]);
     return out.Str();
 }
 

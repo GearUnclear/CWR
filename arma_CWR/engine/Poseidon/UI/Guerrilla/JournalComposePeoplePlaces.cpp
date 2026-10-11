@@ -206,7 +206,7 @@ void ManualTableRow(Pen& pen, const char* line, bool header)
 
 // Beside a portrait box the dossier has half a page left for prose
 // (JournalRender.hpp kPortraitMaxHeightFraction), so the biography is budgeted
-// to the low half of the 35-55 band.  The GENERATOR owns that budget: the
+// to the low half of the 20-55 band.  The GENERATOR owns that budget: the
 // registry asks FactionHistory for a variant that already fits
 // (kHistoryBioPageWords), because nothing downstream can carry the overflow -
 // "Full record" lists the character's journal entries by charId and never the
@@ -419,7 +419,7 @@ void ComposeWho(JournalDocument& doc, const ComposeContext& ctx)
             }
             if (ch.bio.GetLength() > 0)
             {
-                // 35-55 words: a Serif block, never a hand block (the hand cap
+                // 20-55 words: a Serif block, never a hand block (the hand cap
                 // is 25 words)
                 pen.Line(ClampWords(ch.bio, kBioWordsBesidePortrait), VoiceSerif);
             }
