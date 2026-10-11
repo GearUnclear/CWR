@@ -1535,6 +1535,17 @@ GameValue TriKeyDown(const GameState* state, GameValuePar arg)
     return GameValue(true);
 }
 
+/// triWindowFocus <bool> — queue a native focus event through the renderer's
+/// normal SDL event pump, including both edges of a paused focus transition.
+GameValue TriWindowFocus(const GameState*, GameValuePar arg)
+{
+    SDL_Event event = {};
+    event.type = static_cast<bool>(arg) ? SDL_EVENT_WINDOW_FOCUS_GAINED : SDL_EVENT_WINDOW_FOCUS_LOST;
+    if (SDL_Window* window = SDL_GetKeyboardFocus())
+        event.window.windowID = SDL_GetWindowID(window);
+    return GameValue(SDL_PushEvent(&event));
+}
+
 /// triKeyRepeat <scancode> — push an SDL KEY_DOWN repeat event.
 GameValue TriKeyRepeat(const GameState* state, GameValuePar arg)
 {

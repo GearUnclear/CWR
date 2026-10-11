@@ -1,0 +1,6 @@
+tags = ["controls", "lean", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 180
+assert_timeout = 20
+extra_args = ["--dev"]

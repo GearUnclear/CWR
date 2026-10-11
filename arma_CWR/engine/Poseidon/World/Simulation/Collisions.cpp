@@ -252,7 +252,7 @@ void Landscape::ObjectCollision(CollisionBuffer& retVal, Object* with, Object* i
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, beg, end, radius);
     int x, z;
     Vector3 boundingCenter = (end + beg) * 0.5;
-    float boundingSphere = end.Distance(beg) * 0.5;
+    float boundingSphere = end.Distance(beg) * 0.5 + radius;
 
 #define DDA_OPTIMIZED 0
 #if DDA_OPTIMIZED

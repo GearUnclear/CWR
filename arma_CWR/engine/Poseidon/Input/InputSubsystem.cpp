@@ -688,6 +688,8 @@ void InputSubsystem::LoadDefaultProfiles()
 
 void InputSubsystem::SetContext(InputContext ctx)
 {
+    if (context_ != ctx)
+        ++gameplayInputEpoch_;
     context_ = ctx;
 }
 
@@ -1030,7 +1032,23 @@ float InputSubsystem::GetStickRudder() const
 
 void InputSubsystem::ChangeGameFocus(int add)
 {
+    if (add != 0)
+        ++gameplayInputEpoch_;
     GInput.gameFocusLost += add;
+}
+
+bool InputSubsystem::HasGameFocus() const
+{
+    return windowFocused_ && GInput.gameFocusLost <= 0;
+}
+
+void InputSubsystem::SetWindowFocused(bool focused)
+{
+    if (windowFocused_ != focused)
+    {
+        windowFocused_ = focused;
+        ++gameplayInputEpoch_;
+    }
 }
 
 bool InputSubsystem::GetFire(bool checkFocus) const
@@ -1350,6 +1368,8 @@ void InputSubsystem::ResetCategoryDefaults(ControlsCategory cat)
                 profile.Bind(static_cast<UserAction>(idx), binding);
         }
     }
+    if (cat == ControlsCategoryOnFoot)
+        ContextControlsConfig::ApplyInfantryLeanDefaults(GetProfile(InputContext::Infantry));
 }
 
 UserActionDesc* InputSubsystem::GetUserActionDesc()
@@ -1429,6 +1449,8 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("MapZoomIn", IDS_USRACT_MAP_ZOOM_IN, SDL_SCANCODE_KP_PLUS, -1),
         UserActionDesc("MapZoomOut", IDS_USRACT_MAP_ZOOM_OUT, SDL_SCANCODE_KP_MINUS, -1),
         UserActionDesc("CheatEntry", IDS_USRACT_CHEAT_ENTRY, SDL_SCANCODE_KP_MINUS, -1),
+        UserActionDesc("LeanLeft", IDS_USRACT_LEAN_LEFT, SDL_SCANCODE_Q, -1),
+        UserActionDesc("LeanRight", IDS_USRACT_LEAN_RIGHT, SDL_SCANCODE_E, -1),
 #if _ENABLE_CHEATS
         UserActionDesc("Cheat1", IDS_USRACT_CHEAT_1, SDL_SCANCODE_RGUI, -1),
         UserActionDesc("Cheat2", IDS_USRACT_CHEAT_2, SDL_SCANCODE_RALT, -1),

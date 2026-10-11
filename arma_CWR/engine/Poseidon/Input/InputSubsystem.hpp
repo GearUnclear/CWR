@@ -28,6 +28,10 @@ class InputSubsystem
     // Context management
     void SetContext(InputContext ctx);
     InputContext GetContext() const { return context_; }
+    unsigned GetGameplayInputEpoch() const { return gameplayInputEpoch_; }
+    bool HasGameFocus() const;
+    void SetWindowFocused(bool focused);
+    bool HasWindowFocus() const { return windowFocused_; }
 
     // Action queries
     float GetAction(UserAction action, bool checkFocus = true) const;
@@ -271,6 +275,8 @@ class InputSubsystem
     void SyncToGInput();
 
     InputContext context_ = InputContext::Menu;
+    unsigned gameplayInputEpoch_ = 0;
+    bool windowFocused_ = true; // headless backends have no native focus events
 
     // Computed movement state
     float moveForward_ = 0, moveFastForward_ = 0, moveSlowForward_ = 0, moveBack_ = 0;

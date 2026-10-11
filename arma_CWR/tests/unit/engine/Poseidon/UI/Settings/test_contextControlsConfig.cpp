@@ -19,6 +19,25 @@
 
 using namespace Poseidon;
 
+TEST_CASE("Arma 3 Classic infantry reserves Q/E for lean without changing vehicle keys", "[Settings][lean]")
+{
+    ContextControlsConfig cfg;
+    cfg.LoadDefaults();
+    auto& foot = cfg.profiles[static_cast<int>(InputContext::Infantry)];
+    const auto& pilot = cfg.profiles[static_cast<int>(InputContext::HeliPilot)];
+    CHECK(foot.HasBinding(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UALeanRight, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK_FALSE(foot.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK_FALSE(foot.HasBinding(UAMoveSlowForward, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK_FALSE(foot.HasBinding(UAMoveFastForward, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK(pilot.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_Q)));
+    foot.Bind(UAReloadMagazine, InputCode::Key(SDL_SCANCODE_Q));
+    foot.Bind(UAReloadMagazine, InputBinding(InputCode::Key(SDL_SCANCODE_E), InputCode::Key(SDL_SCANCODE_LCTRL)));
+    cfg.ApplyArma3Preset();
+    CHECK_FALSE(foot.HasBinding(UAReloadMagazine, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UAReloadMagazine, InputBinding(InputCode::Key(SDL_SCANCODE_E), InputCode::Key(SDL_SCANCODE_LCTRL))));
+}
+
 namespace
 {
 std::string TmpPath(const char* leaf)
@@ -36,6 +55,40 @@ TEST_CASE("ContextControlsConfig: missing file returns false", "[Settings][Conte
 {
     ContextControlsConfig cfg;
     CHECK_FALSE(cfg.Load(TmpPath("missing.cfg")));
+}
+
+TEST_CASE("Lean migration reserves bare Q/E once and preserves later remaps and clears", "[Settings][ContextControlsConfig][lean]")
+{
+    const int version = GENERATE(1, 2, 3, 4);
+    CAPTURE(version);
+    const std::string path = TmpPath("lean_migration.cfg");
+    {
+        std::ofstream out(path);
+        out << "contextControlsVersion=" << version << ";\n"
+               "ctxInfantryMoveUp[]={20};\nctxInfantryMoveSlowForward[]={20};\n"
+               "ctxInfantryMoveFastForward[]={8};\nctxInfantryReloadMagazine[]={8,131078};\n"
+               "ctxInfantryReloadMagazine_mod[]={224,-1};\n";
+    }
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    REQUIRE(cfg.migratedOnLoad);
+    auto& foot = cfg.profiles[static_cast<int>(InputContext::Infantry)];
+    CHECK(foot.HasBinding(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UALeanRight, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK(foot.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_PAGEUP)));
+    CHECK(foot.BindingCount(UAMoveSlowForward) == 0);
+    CHECK(foot.BindingCount(UAMoveFastForward) == 0);
+    CHECK(foot.HasBinding(UAReloadMagazine, InputBinding(InputCode::Key(SDL_SCANCODE_E), InputCode::Key(SDL_SCANCODE_LCTRL))));
+    CHECK(foot.HasBinding(UAReloadMagazine, InputCode::GamepadBtn(6)));
+    foot.SetBindingEntries(UALeanLeft, {InputCode::Key(SDL_SCANCODE_H)});
+    foot.ClearBindings(UALeanRight);
+    REQUIRE(cfg.Save(path));
+    ContextControlsConfig loaded;
+    REQUIRE(loaded.Load(path));
+    CHECK_FALSE(loaded.migratedOnLoad);
+    CHECK(loaded.profiles[static_cast<int>(InputContext::Infantry)].GetBindingEntries(UALeanLeft) == foot.GetBindingEntries(UALeanLeft));
+    CHECK(loaded.profiles[static_cast<int>(InputContext::Infantry)].BindingCount(UALeanRight) == 0);
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("ContextControlsConfig: Arma 3 preset replaces customized rows and persists without losing other controls",
@@ -377,7 +430,7 @@ TEST_CASE("ContextControlsConfig: a full version-3 config migrates to 4", "[Sett
     std::filesystem::remove(path);
     REQUIRE(migrated.Save(path));
     const std::string saved = ReadAll(path);
-    CHECK(saved.find("contextControlsVersion=4;") != std::string::npos);
+    CHECK(saved.find("contextControlsVersion=5;") != std::string::npos);
     CHECK(saved.find("ctxInfantryOptics[]={81921,25,131078};") != std::string::npos);
     CHECK(saved.find("ctxInfantryLockTarget[]={23};") != std::string::npos);
     CHECK(saved.find("ctxInfantryWatch[]={18,262146};") != std::string::npos);
@@ -403,10 +456,10 @@ TEST_CASE("ContextControlsConfig: customized v3 rows are left alone by the v4 re
     const int inf = (int)InputContext::Infantry;
 
     // The user had rebound Infantry Optics to C (+ Numpad 0, + LT) and
-    // Infantry LockTarget to Q; both are non-default and must survive.
+    // Infantry LockTarget to H; both are non-default and must survive.
     std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
     ReplaceLine(text, "ctxInfantryOptics[]={25,98,131078};", "ctxInfantryOptics[]={6,98,131078};");
-    ReplaceLine(text, "ctxInfantryLockTarget[]={65537};", "ctxInfantryLockTarget[]={20};");
+    ReplaceLine(text, "ctxInfantryLockTarget[]={65537};", "ctxInfantryLockTarget[]={11};");
 
     const std::string path = TmpPath("context_controls_v3_customized.cfg");
     {
@@ -426,7 +479,7 @@ TEST_CASE("ContextControlsConfig: customized v3 rows are left alone by the v4 re
 
     const auto& lock = cfg.profiles[inf].GetBindingEntries(UALockTarget);
     REQUIRE(lock.size() == 1);
-    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_Q));
+    CHECK(lock[0].code == InputCode::Key(SDL_SCANCODE_H));
 
     // Pristine rows elsewhere still migrate, and ZoomTemp is still seeded.
     CHECK(cfg.profiles[inf].HasBinding(UAWatch, InputCode::Key(SDL_SCANCODE_O)));
@@ -507,7 +560,7 @@ TEST_CASE("ContextControlsConfig: a file newer than the build is treated as unkn
     CHECK(optics[1].code == InputCode::MouseButton(4));
 
     REQUIRE(cfg.Save(path));
-    CHECK(ReadAll(path).find("contextControlsVersion=4;") != std::string::npos);
+    CHECK(ReadAll(path).find("contextControlsVersion=5;") != std::string::npos);
     ContextControlsConfig reloaded;
     REQUIRE(reloaded.Load(path));
     CHECK_FALSE(reloaded.migratedOnLoad);
@@ -584,7 +637,7 @@ TEST_CASE("ContextControlsConfig: migration preserves every customized serialize
     CHECK(cfg.profiles[(int)InputContext::Infantry].HasBinding(UAZoomTemp, InputCode::MouseButton(1)));
 
     REQUIRE(cfg.Save(path));
-    CHECK(ReadAll(path).find("contextControlsVersion=4;") != std::string::npos);
+    CHECK(ReadAll(path).find("contextControlsVersion=5;") != std::string::npos);
     ContextControlsConfig reloaded;
     REQUIRE(reloaded.Load(path));
     CHECK_FALSE(reloaded.migratedOnLoad);
@@ -627,7 +680,7 @@ TEST_CASE("ContextControlsConfig: a current version never rewrites old defaults 
           "[Settings][ContextControlsConfig]")
 {
     const std::vector<InputBinding> bindings{InputCode::Key(SDL_SCANCODE_V), InputCode::Key(SDL_SCANCODE_KP_0)};
-    const std::string path = WriteProfileRow(4, "Optics", bindings);
+    const std::string path = WriteProfileRow(5, "Optics", bindings);
     ContextControlsConfig cfg;
     REQUIRE(cfg.Load(path));
     CHECK_FALSE(cfg.migratedOnLoad);

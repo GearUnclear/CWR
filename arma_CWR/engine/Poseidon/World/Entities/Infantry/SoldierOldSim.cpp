@@ -1,6 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/World/Entities/Infantry/LeanState.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
 #include <limits.h>
 #include <stdio.h>
@@ -191,6 +192,128 @@ void Man::BasicSimulationCore(float deltaT, SimulationImportance prec)
     }
 }
 
+void Man::ResetLean()
+{
+    _leanAmount = 0;
+    _leanTrans = MIdentity;
+    _leanRequireRelease = true;
+    _leanStanceMove = MoveIdNone;
+}
+
+bool Man::CanLeanInStance(int stance)
+{
+    return stance == ManPosCombat || stance == ManPosCrouch ||
+           stance == ManPosHandGunStand || stance == ManPosHandGunCrouch;
+}
+
+void Man::SimulateLean(float deltaT)
+{
+    auto& input = InputSubsystem::Instance();
+    const float previous = _leanAmount;
+    // Menus may pause simulation completely. Remember context/focus changes
+    // so a held key cannot restore the old pose on the first resumed frame.
+    if (_leanInputEpoch != input.GetGameplayInputEpoch())
+    {
+        ResetLean();
+        _leanInputEpoch = input.GetGameplayInputEpoch();
+    }
+    const int stance = GetActUpDegree();
+    const bool stanceAllows = CanLeanInStance(stance);
+    bool stanceTransition = false;
+    if (_leanStanceMove != MoveIdNone)
+    {
+        stanceTransition = _forceMove.id == _leanStanceMove;
+        if (_forceMove.id == MoveIdNone)
+        {
+            // Handgun Up/Down targets a non-loop transition animation. The
+            // force queue releases it once it becomes primary, before its
+            // animation/blend is finished. Preserve only that contribution.
+            const AnimationRT* transition = Type()->GetAnimation(_leanStanceMove);
+            stanceTransition = transition && !transition->GetLooped() &&
+                ((_primaryMove.id == _leanStanceMove && _primaryFactor > 0) ||
+                 (_secondaryMove.id == _leanStanceMove && _primaryFactor < 1));
+        }
+        if (!stanceTransition)
+            _leanStanceMove = MoveIdNone;
+    }
+    // The first release is single-player. Never expose an unreplicated pose
+    // on a network peer. A negotiated network format is a separate release gate.
+    const bool eligible = QIsManual() && GWorld->GetMode() != GModeNetware &&
+                          input.GetContext() == InputContext::Infantry && input.HasGameFocus() &&
+                          !GWorld->GetPlayerSuspended() &&
+                          !_isDead && !_ladderBuilding && stanceAllows && _waterDepth < 0.6f &&
+                          _externalMove.id == MoveIdNone && (_forceMove.id == MoveIdNone || stanceTransition) &&
+                          (!WeaponsDisabled() || stanceTransition) && !IsActionInProgress(MFReload) && !LauncherSelected() &&
+                          !BinocularSelected() && Speed().SquareSize() <= Square(3.0f) &&
+                          input.GetAction(UATurbo) < 0.1f;
+    LeanState state{_leanAmount, _leanRequireRelease};
+    const float left = input.GetAction(InputContext::Infantry, UALeanLeft, false);
+    const float right = input.GetAction(InputContext::Infantry, UALeanRight, false);
+    const float requested = state.Advance(left, right, eligible, deltaT);
+    _leanRequireRelease = state.requireRelease;
+    _leanAmount = 0;
+    _leanTrans = MIdentity;
+
+    if (requested != 0 && _shape->FindMemoryLevel() >= 0 && Type()->_pilotPoint >= 0)
+    {
+        // Evaluate both ends using the production point/proxy deformation. A
+        // model without upper-body weights therefore cannot acquire a camera-only lean.
+        const Vector3 eye = CalculateCameraPosition(*this);
+        const Vector3 muzzle = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
+        const Vector3 aim = CalculateAimingPosition(*this);
+        _leanAmount = requested;
+        _leanTrans.SetPosition(Vector3(LeanState::Distance * requested, 0, 0));
+        const Vector3 eyeEnd = CalculateCameraPosition(*this);
+        const Vector3 muzzleEnd = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
+        const Vector3 aimEnd = CalculateAimingPosition(*this);
+        float fraction = eyeEnd.Distance2(eye) > Square(0.001f) ? 1.0f : 0.0f;
+
+        auto sweep = [&](Vector3Par from, Vector3Par to, float radius)
+        {
+            const float distance = from.Distance(to);
+            if (distance < 1e-6f)
+                return;
+            CollisionBuffer hits;
+            GLandscape->ObjectCollision(hits, this, this, from, to, radius, ObjIntersectGeomSweep);
+            for (int i = 0; i < hits.Size(); ++i)
+            {
+                const CollisionInfo& hit = hits[i];
+                if (hit.object && !hit.object->IsPassable())
+                    fraction = std::min(fraction, std::clamp(hit.under - 0.01f / distance, 0.0f, 1.0f));
+            }
+            // Terrain is not part of ObjectCollision. Sample the short sweep
+            // conservatively; each step is at most a few centimetres.
+            for (int i = 0; i <= 8; ++i)
+            {
+                const float t = i / 8.0f;
+                const Vector3 p = from + (to - from) * t;
+                if (p.Y() - radius < GLandscape->SurfaceY(p.X(), p.Z()))
+                {
+                    fraction = std::min(fraction, std::max(0.0f, (i - 1) / 8.0f));
+                    break;
+                }
+            }
+        };
+        // Eye sphere also reserves space for the camera near plane. Two
+        // shoulder probes and the torso cover the visible upper-body width.
+        sweep(eye, eyeEnd, 0.14f);
+        sweep(aim, aimEnd, 0.18f);
+        const Vector3 shoulder = DirectionAside() * 0.16f;
+        const Vector3 down = DirectionUp() * -0.3f;
+        sweep(eye + down + shoulder, eyeEnd + down + shoulder, 0.13f);
+        sweep(eye + down - shoulder, eyeEnd + down - shoulder, 0.13f);
+        sweep(muzzle, muzzleEnd, 0.04f);
+        _leanAmount = requested * fraction;
+        _leanTrans.SetPosition(Vector3(LeanState::Distance * _leanAmount, 0, 0));
+    }
+    if (previous != 0 || _leanAmount != 0)
+    {
+        // Also refresh when stationary/frozen: animation and root position do
+        // not have to change for the eye and AI target points to move.
+        RecalcPositions(*this);
+    }
+}
+
 float Man::GetLegPhase() const
 {
     return _primaryTime;
@@ -198,6 +321,7 @@ float Man::GetLegPhase() const
 
 void Man::BasicSimulation(float deltaT, SimulationImportance prec, float speedFactor)
 {
+    ResetLean(); // vehicle crew animation never inherits an on-foot pose
     float turn, moveX, moveZ;
 
     RefreshMoveQueue(prec <= SimulateVisibleFar);
@@ -274,6 +398,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
 {
     if (_ladderBuilding && _ladderIndex >= 0)
     {
+        ResetLean();
         if (IsDammageDestroyed())
         {
             DropLadder(_ladderBuilding, _ladderIndex);
@@ -874,6 +999,8 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         }
     } // if (!CheckPredictionFrozen())
 
+    SimulateLean(deltaT);
+
     if (_mGunClouds.Active() || _mGunFire.Active() || _gunClouds.Active())
     {
         Vector3 gunPos = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
@@ -1037,6 +1164,7 @@ void Man::OnDanger()
 
 void Man::Init(Matrix4Par pos)
 {
+    ResetLean();
     ReactToDammage();
     ResetMovement(0);
     _aimingPositionWorld = CalculateAimingPosition(pos);

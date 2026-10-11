@@ -19,7 +19,7 @@ namespace
 {
 // v4 (2026-09): Arma 3 right mouse.  Optics = tap RMB + V (Numpad 0 dropped),
 // LockTarget = T (was RMB, "Lock or Zoom"), Watch = O (was T), new ZoomTemp = RMB.
-constexpr int kContextControlsVersion = 4;
+constexpr int kContextControlsVersion = 5;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -197,6 +197,7 @@ void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
     switch (ctx)
     {
         case InputContext::Infantry:
+            ContextControlsConfig::ApplyInfantryLeanDefaults(profile);
             ApplyInfantryGamepadDefaults(profile);
             ApplyFreelookDefaults(profile);
             break;
@@ -324,6 +325,35 @@ void ContextControlsConfig::ApplyArma3Preset()
             profile.SetBindingEntries(action, std::move(bindings));
         }
     }
+    ApplyInfantryLeanDefaults(profiles[static_cast<int>(InputContext::Infantry)]);
+}
+
+void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
+{
+    // Bare Q/E previously also moved the player out of cover. Preserve every
+    // other binding, including modified chords and controller inputs.
+    for (int a = 0; a < UAN; ++a)
+    {
+        UserAction action = static_cast<UserAction>(a);
+        std::vector<InputBinding> kept;
+        for (const InputBinding& binding : profile.GetBindingEntries(action))
+        {
+            const bool leanKey = binding.code == InputCode::Key(SDL_SCANCODE_Q) ||
+                                 binding.code == InputCode::Key(SDL_SCANCODE_E);
+            if (leanKey && !binding.modifier.valid())
+                continue;
+            if ((action == UALeanLeft || action == UALeanRight) && IsKbmCode(binding.code))
+                continue;
+            kept.push_back(binding);
+        }
+        profile.SetBindingEntries(action, std::move(kept));
+    }
+    profile.Bind(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q));
+    profile.Bind(UALeanRight, InputCode::Key(SDL_SCANCODE_E));
+    // The old default also had Page Up. Retain a reachable stand-up action
+    // when migrating a profile which only had Q.
+    if (profile.BindingCount(UAMoveUp) == 0)
+        profile.Bind(UAMoveUp, InputCode::Key(SDL_SCANCODE_PAGEUP));
 }
 
 bool ContextControlsConfig::Load(const std::string& path)
@@ -393,6 +423,8 @@ bool ContextControlsConfig::Load(const std::string& path)
         }
         if (version < 4 || newerThanBuild)
             RewriteV3DefaultsToV4(profile, descs);
+        if (version < 5 && ctx == InputContext::Infantry)
+            ApplyInfantryLeanDefaults(profile);
     }
 
     return true;

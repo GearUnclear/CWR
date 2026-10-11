@@ -38,7 +38,7 @@
     {
       "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
       "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
-      "sha256": "e45d6bc7651d9987f9bb3aab44f24416fb3e7f72582e5819694c99d826f58ac2"
+      "sha256": "386f8344deeb900f4e5a6b749ce93e6ffd7fcde0278034d8c0b413ea329bf224"
     },
     {
       "destination": "bin/UD_OPTIONS_APL-SA_NOTICE.txt",

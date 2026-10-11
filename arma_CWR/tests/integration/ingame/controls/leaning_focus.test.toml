@@ -1,0 +1,8 @@
+tags = ["controls", "lean", "full_cwa", "headful", "exclusive"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/cam_set_dir.Abel"
+timeout = 120
+assert_timeout = 15
+# --focus keeps simulation running while genuine SDL focus events are tested.
+# Run with tri test ... --render gl33 so the renderer consumes the event queue.
+extra_args = ["--dev", "--focus"]

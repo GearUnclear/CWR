@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <cmath>
+#include <algorithm>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -602,6 +603,35 @@ Vector3 Man::GetWeaponCenter(int weapon) const
     return AnimatePoint(level, sel);
 }
 
+Vector3 Man::GetSafeInfantryFiringPoint(int weapon, Vector3Par direction) const
+{
+    const Vector3 muzzle = GetWeaponPoint(weapon);
+    if (!QIsManual() || GWorld->GetMode() == GModeNetware)
+        return muzzle;
+
+    // A barrel can already straddle thin cover before a lean begins, or after
+    // the player moves toward it. Never spawn a bullet on the far side. Keep
+    // the real muzzle for visuals and start this shot just before the blocker.
+    const Vector3 eye = CalculateCameraPosition(*this);
+    const Vector3 end = PositionModelToWorld(muzzle);
+    const Vector3 travel = end - eye;
+    const float distance = travel.Size();
+    if (distance < 1e-4f)
+        return muzzle;
+    float fraction = 1.0f;
+    CollisionBuffer hits;
+    GLandscape->ObjectCollision(hits, const_cast<Man*>(this), const_cast<Man*>(this),
+                               eye, end, 0, ObjIntersectFire);
+    for (int i = 0; i < hits.Size(); ++i)
+        fraction = std::min(fraction, std::clamp(hits[i].under, 0.0f, 1.0f));
+    Vector3 ground;
+    const float groundDistance = GLandscape->IntersectWithGroundOrSea(&ground, eye, travel / distance, 0, distance);
+    fraction = std::min(fraction, std::clamp(groundDistance / distance, 0.0f, 1.0f));
+    if (fraction >= 1.0f)
+        return muzzle;
+    return PositionWorldToModel(eye + travel * fraction - DirectionModelToWorld(direction).Normalized() * 0.02f);
+}
+
 Vector3 Man::GetWeaponPoint(int weapon) const
 {
     if (weapon >= 0 && weapon < NMagazineSlots())
@@ -923,7 +953,6 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
             {
                 return false;
             }
-            Vector3Val pos = GetWeaponPoint(weapon);
             Vector3 dir = GetWeaponRelDirection(weapon);
 
             if (QIsManual())
@@ -933,7 +962,7 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
                 AdjustWeapon(weapon, camType, fov, dir);
             }
 
-            fired = FireMGun(weapon, pos, dir, target);
+            fired = FireMGun(weapon, GetSafeInfantryFiringPoint(weapon, dir), dir, target);
         }
         break;
         case AmmoNone:
@@ -2296,6 +2325,7 @@ LSError Man::Serialize(ParamArchive& ar)
 
         if (ar.IsLoading())
         {
+            ResetLean(); // input and collision-constrained pose are transient
             RecalcGunTransform();
             if (IsInLandscape())
             {

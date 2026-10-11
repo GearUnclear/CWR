@@ -3,6 +3,9 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Infantry/LeanState.hpp>
+#include <catch2/catch_approx.hpp>
+#include <limits>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 
 #include <cstring>
@@ -11,6 +14,51 @@
 #include <sstream>
 
 using namespace Poseidon;
+
+TEST_CASE("Lean hold/release and side switching are independent of frame rate", "[Infantry][lean]")
+{
+    for (int fps : {30, 60, 144})
+    {
+        LeanState lean;
+        for (int i = 0; i < fps; ++i)
+            lean.Advance(1, 0, true, 1.0f / fps);
+        CHECK(lean.amount == Catch::Approx(-1));
+        for (int i = 0; i < fps; ++i)
+            lean.Advance(0, 1, true, 1.0f / fps);
+        CHECK(lean.amount == Catch::Approx(1));
+        for (int i = 0; i < fps; ++i)
+            lean.Advance(1, 1, true, 1.0f / fps);
+        CHECK(lean.amount == 0);
+        lean.Advance(1, 0, true, 1);
+        lean.Advance(0, 0, true, 1);
+        CHECK(lean.amount == 0);
+    }
+}
+
+TEST_CASE("Lean interruptions require release and invalid time cannot poison the pose", "[Infantry][lean]")
+{
+    LeanState lean;
+    CHECK(lean.Advance(0, 1, true, 1) == 1);
+    CHECK(lean.Advance(0, 1, false, 0.1f) == 0);
+    CHECK(lean.Advance(0, 1, true, 1) == 0);
+    lean.Advance(0, 0, false, 0);
+    CHECK(lean.Advance(0, 1, true, 0.1f) == Catch::Approx(0.5f));
+    CHECK(lean.Advance(0, 1, true, 0) == Catch::Approx(0.5f));
+    CHECK(lean.Advance(0, 1, true, std::numeric_limits<float>::quiet_NaN()) == 0);
+}
+
+TEST_CASE("Lean analog dead zone agrees with held input and interruption recovery", "[Infantry][lean]")
+{
+    LeanState lean;
+    CHECK(lean.Advance(0, 0.1f, true, 1) == 0);
+    CHECK(lean.Advance(0.05f, 0, true, 1) == 0);
+    CHECK(lean.Advance(0.05f, 0.5f, true, 1) == Catch::Approx(0.5f));
+    CHECK(lean.Advance(0, 0.5f, false, 1) == 0);
+    CHECK(lean.Advance(0, 0.5f, true, 1) == 0);
+    CHECK(lean.Advance(0, 0.05f, true, 1) == 0);
+    CHECK_FALSE(lean.requireRelease);
+    CHECK(lean.Advance(0, 0.5f, true, 1) == Catch::Approx(0.5f));
+}
 
 namespace
 {

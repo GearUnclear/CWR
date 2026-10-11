@@ -1,7 +1,7 @@
 LANGUAGE,English,French,Italian,Spanish,German,Czech,Polish,Russian
 STR_DISP_OPT_CTL_ARMA3,Arma 3 controls,,,,,,,
 STR_DISP_OPT_CTL_ARMA3_TITLE,Apply Arma 3 controls?,,,,,,,
-STR_DISP_OPT_CTL_ARMA3_BODY,Change aim / zoom / lock / watch?,,,,,,,
+STR_DISP_OPT_CTL_ARMA3_BODY,"Set aim, watch and Q/E lean?",,,,,,,
 STR_DISP_OPT_CTL_ARMA3_APPLY,Apply preset,,,,,,,
 STR_DISP_MAIN_OPTIONS,OPTIONS,OPTIONS,OPZIONI,OPCIONES,OPTIONEN,NASTAVENÍ,OPCJE,НАСТРОЙКИ
 STR_DISP_OPTIONS_TITLE,Options,Options,Opzioni,Opciones,Optionen,Nastavení,Opcje,Настройки
@@ -158,3 +158,5 @@ STR_DISP_OPT_CONFIRM_RESET_BODY,All keyboard / mouse bindings will be restored t
 STR_DISP_OPT_CONFIRM_YES,Yes,Oui,Sì,Sí,Ja,Ano,Tak,Да
 STR_DISP_OPT_CONFIRM_NO,No,Non,No,No,Nein,Ne,Nie,Нет
 STR_USRACT_ZOOM_TEMP,Zoom in (temporary),Zoom in (temporary),Zoom in (temporary),Zoom in (temporary),Zoom in (temporary),Zoom in (temporary),Zoom in (temporary),Zoom in (temporary)
+STR_USRACT_LEAN_LEFT,Lean left,Lean left,Lean left,Lean left,Lean left,Lean left,Lean left,Lean left
+STR_USRACT_LEAN_RIGHT,Lean right,Lean right,Lean right,Lean right,Lean right,Lean right,Lean right,Lean right

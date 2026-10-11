@@ -65,6 +65,46 @@ TEST_CASE("InputSubsystem SetContext changes context", "[input][integration]")
     sub.SetContext(InputContext::Menu);
 }
 
+TEST_CASE("Native focus invalidates held gameplay input without changing nested UI focus", "[input][lean][focus]")
+{
+    auto& sub = InputSubsystem::Instance();
+    struct RestoreFocus
+    {
+        InputSubsystem& input;
+        bool nativeFocus = input.HasWindowFocus();
+        int uiFocus = GInput.gameFocusLost;
+        ~RestoreFocus()
+        {
+            input.SetWindowFocused(nativeFocus);
+            GInput.gameFocusLost = uiFocus;
+        }
+    } restore{sub};
+    sub.SetWindowFocused(true);
+    GInput.gameFocusLost = 0;
+    CHECK(sub.HasGameFocus());
+    const unsigned before = sub.GetGameplayInputEpoch();
+    sub.SetWindowFocused(false);
+    CHECK_FALSE(sub.HasGameFocus());
+    CHECK(sub.GetGameplayInputEpoch() == before + 1);
+    sub.SetWindowFocused(false);
+    CHECK(sub.GetGameplayInputEpoch() == before + 1);
+    sub.SetWindowFocused(true);
+    CHECK(sub.HasGameFocus());
+    CHECK(sub.GetGameplayInputEpoch() == before + 2);
+    CHECK(GInput.gameFocusLost == 0);
+
+    sub.ChangeGameFocus(1);
+    sub.ChangeGameFocus(1);
+    sub.SetWindowFocused(false);
+    sub.SetWindowFocused(true);
+    CHECK(GInput.gameFocusLost == 2);
+    CHECK_FALSE(sub.HasGameFocus());
+    sub.ChangeGameFocus(-1);
+    CHECK_FALSE(sub.HasGameFocus());
+    sub.ChangeGameFocus(-1);
+    CHECK(sub.HasGameFocus());
+}
+
 TEST_CASE("InputSubsystem GetProfile returns valid profile for each context", "[input][integration]")
 {
     auto& sub = InputSubsystem::Instance();

@@ -122,9 +122,10 @@ enum ObjIntersect
 	ObjIntersectFire, // normal fire
 	ObjIntersectView,
 	ObjIntersectGeom,
-	ObjIntersectIFire // indirect fire dammage
+	ObjIntersectIFire, // indirect fire dammage
 	// ObjIntersectIFire - uses same geometry as ObjIntersectFire,
 	// but different calculation
+	ObjIntersectGeomSweep // convex geometry expanded by the supplied world-space radius
 };
 
 class SortObject;

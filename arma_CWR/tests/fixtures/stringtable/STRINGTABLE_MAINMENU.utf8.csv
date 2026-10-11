@@ -48,3 +48,5 @@ STR_DISP_OPT_MOUSE_SENSITIVITY_Y_DESC,Vertical mouse sensitivity. Range 0.5x to 
 STR_DISP_OPT_MOUSE_DPI,Mouse DPI
 STR_DISP_OPT_MOUSE_DPI_DESC,Set this to your mouse's DPI (or close). Fine-tune with sensitivity for a smoother feel.
 STR_USRACT_ZOOM_TEMP,Zoom in (temporary)
+STR_USRACT_LEAN_LEFT,Lean left
+STR_USRACT_LEAN_RIGHT,Lean right
