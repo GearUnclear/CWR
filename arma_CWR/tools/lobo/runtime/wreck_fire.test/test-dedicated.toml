@@ -1,0 +1,34 @@
+# Historical failed dedicated launch metadata only; see captured build-tag mismatch logs.
+# Local dedicated server and two local clients, all mounting the same UD @LoBo.
+# Tests original killed handler on the owner and an explicit non-owner script run.
+mission = "C:/Users/Dane/.codex/worktrees/lobo-runtime-acceptance/Arma_CWA/arma_CWR/tools/lobo/runtime/wreck_fire.test/WreckFire.Abel"
+game_port = 24971
+timeout = 330
+tags = ["lobo", "full_cwa", "network", "headful", "exclusive", "acceptance"]
+
+[[instances]]
+name = "server"
+type = "server"
+extra_args = ["--dev", "--no-strict", "--mp-auto-start", "2", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--log-format", "jsonl"]
+
+[[instances]]
+name = "client1"
+type = "client"
+connect = "server"
+after = "server"
+start_delay_ms = 1000
+mp_assign = "WEST:1"
+use_mission = false
+machine_id = "trident:lobo_issue1_wreck:client1"
+extra_args = ["--dev", "--no-strict", "--name", "lobo-fire-c1", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-format", "jsonl"]
+
+[[instances]]
+name = "client2"
+type = "client"
+connect = "server"
+after = "server"
+start_delay_ms = 2000
+mp_assign = "WEST:2"
+use_mission = false
+machine_id = "trident:lobo_issue1_wreck:client2"
+extra_args = ["--dev", "--no-strict", "--name", "lobo-fire-c2", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-format", "jsonl"]

@@ -1,0 +1,10 @@
+version=11;
+class Mission {
+ randomSeed=20261011;
+ addOns[]={"LoBoWeapons","LoBoWeapNad","LoBoammo","LoBo_airammo","LoBo_MiG","LoBo_F5","LoBo_FAB","LoBo_M1","LoBoM60","LoBoMerkava2","LoBo_Merkava3","LoBoJordan","LoBoEgypt","LoBoTerror","LoBo_Art","JAM_Magazines","JAM_Vehicles","ICPrpg7","LoBo_Sounds","LoBo_Pilot"};
+ class Intel { year=1985; month=6; day=15; hour=12; minute=0; };
+ class Groups { items=1; class Item0 { side="WEST"; class Vehicles { items=1; class Item0 { position[]={7515,20,5790}; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.6; }; }; }; };
+};
+class Intro { randomSeed=20261012; class Intel {}; };
+class OutroWin { randomSeed=20261013; class Intel {}; };
+class OutroLoose { randomSeed=20261014; class Intel {}; };
