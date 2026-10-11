@@ -1,0 +1,8 @@
+# Run with run-local.ps1 -Retries 0. Metadata does not override CLI retries.
+# Sampling excludes terrain obstruction only, not trees/buildings or AI perception.
+mission = "tools/lobo/runtime/Acceptance.Abel"
+binary = "PoseidonGame"
+tags = ["lobo", "full_cwa", "headful", "exclusive", "acceptance"]
+timeout = 360
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1600", "--height", "900"]

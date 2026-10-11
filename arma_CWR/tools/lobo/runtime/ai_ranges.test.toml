@@ -1,0 +1,6 @@
+mission = "tools/lobo/runtime/Acceptance.Abel"
+binary = "PoseidonGame"
+tags = ["lobo", "full_cwa", "headless", "acceptance"]
+timeout = 360
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo"]

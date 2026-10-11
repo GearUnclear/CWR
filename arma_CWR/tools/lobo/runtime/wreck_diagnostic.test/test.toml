@@ -1,0 +1,39 @@
+# Diagnostic only: no burn scheduler or natural cleanup acceptance.
+# Local hosted LAN session. All three processes use the same PoseidonGame.exe.
+# Clients join only 127.0.0.1 on the runner-selected ephemeral local port.
+# The host UI uses the isolated profile's default LAN source, no Internet toggle.
+game_port = 0
+timeout = 90
+tags = ["lobo", "full_cwa", "network", "headful", "exclusive", "acceptance"]
+
+[[instances]]
+name = "server"
+type = "client"
+use_mission = false
+no_autotest = true
+machine_id = "trident:lobo_issue1_wreck_diagnostic:host"
+extra_args = ["--dev", "--no-strict", "--name", "lobo-diag-host", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-format", "jsonl"]
+copy_files = [
+  { source = "WreckFire.Abel/description.ext", target = "content/MPMissions/WreckFire.Abel/description.ext" },
+  { source = "WreckFire.Abel/mission.sqm", target = "content/MPMissions/WreckFire.Abel/mission.sqm" },
+]
+
+[[instances]]
+name = "client1"
+type = "client"
+use_mission = false
+no_autotest = true
+after = "server"
+start_delay_ms = 1500
+machine_id = "trident:lobo_issue1_wreck_diagnostic:client1"
+extra_args = ["--dev", "--no-strict", "--name", "lobo-diag-c1", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-format", "jsonl"]
+
+[[instances]]
+name = "client2"
+type = "client"
+use_mission = false
+no_autotest = true
+after = "server"
+start_delay_ms = 1500
+machine_id = "trident:lobo_issue1_wreck_diagnostic:client2"
+extra_args = ["--dev", "--no-strict", "--name", "lobo-diag-c2", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-format", "jsonl"]

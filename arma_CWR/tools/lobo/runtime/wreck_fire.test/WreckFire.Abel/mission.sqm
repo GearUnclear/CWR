@@ -1,0 +1,57 @@
+version=11;
+class Mission
+{
+    addOns[]={"LoBoTerror","LoBo_M1","LoBoMerkava2","loboammo","loboweapons","jam_magazines","bis_resistance"};
+    randomSeed=20261011;
+    class Intel { briefingName="LoBo wreck-fire acceptance"; briefingDescription="Hosted localhost acceptance"; startWeather=0; forecastWeather=0; year=1985; month=6; day=15; hour=12; minute=0; };
+    class Groups
+    {
+        items=4;
+        class Item0
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0 { position[]={7400,0,5700}; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.5; text="lwPlayer1";  };
+            };
+        };
+        class Item1
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0 { position[]={7400,0,5710}; id=1; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.5; text="lwPlayer2";  };
+            };
+        };
+        class Item2
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0 { position[]={7400,0,5720}; id=2; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.5; text="lwHost";  };
+            };
+        };
+        class Item3
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0 { position[]={7400,0,5730}; id=3; side="WEST"; vehicle="SoldierWB";  leader=1; skill=0.5; text="lwAI"; init="this setCaptive true; this disableAI ""MOVE""; removeAllWeapons this"; };
+            };
+        };
+    };
+    class Vehicles
+    {
+        items=3;
+        class Item0 { position[]={7500,0,5700}; azimut=0; id=10; side="EMPTY"; vehicle="LoBo_Ter_Toy_R"; skill=0.5; text="lwWreck"; };
+        class Item1 { position[]={7480,0,5750}; azimut=0; id=11; side="EMPTY"; vehicle="LoBo_M1"; skill=0.5; text="lwM1"; };
+        class Item2 { position[]={7530,0,5750}; azimut=0; id=12; side="EMPTY"; vehicle="LoBoMerkava2"; skill=0.5; text="lwMerkava"; };
+    };
+};
+class Intro {};
+class OutroWin {};
+class OutroLoose {};
