@@ -1,0 +1,3 @@
+# Two fresh game processes share only Trident's isolated user/save directory.
+# Both phases mount identical installed @LoBo UD content with no shadow addon.
+tags = ["lobo", "full_cwa", "save-load", "headful", "exclusive", "acceptance"]

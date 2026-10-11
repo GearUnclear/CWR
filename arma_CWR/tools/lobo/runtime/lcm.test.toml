@@ -1,0 +1,7 @@
+# Numbering-only native-init visual probe for both repaired landing craft.
+mission = "tools/lobo/runtime/Acceptance.Abel"
+binary = "PoseidonGame"
+tags = ["lobo", "full_cwa", "headful", "exclusive", "acceptance"]
+timeout = 180
+assert_timeout = 30
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1600", "--height", "900"]
