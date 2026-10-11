@@ -10,15 +10,31 @@
 
 #include <Poseidon/Foundation/platform.hpp> // stricmp
 
+#include <string.h> // strcmp
+
 namespace Poseidon::Guerrilla
 {
 
 namespace
 {
 
-// A class name as a place-name-safe display string: '_' becomes a space, runs of
-// spaces collapse to one, and the ends are trimmed.  Only ever applied to a
-// CLASS NAME fallback, never to an authored displayName.
+bool IsUpperAscii(char c)
+{
+    return c >= 'A' && c <= 'Z';
+}
+
+bool IsLowerAscii(char c)
+{
+    return c >= 'a' && c <= 'z';
+}
+
+// A class name as a place-name-safe display string: '_' becomes a space, a
+// CamelCase boundary gets one ("EgyptFrontier" -> "Egypt Frontier", the end of
+// an acronym run before a capitalised word: "PLOEast" -> "PLO East"), runs of
+// spaces collapse to one, and the ends are trimmed.  An all-capitals acronym
+// ("IDF", "GUER") and digits are left alone.  ASCII only, so the same bytes come
+// out on every platform.  Only ever applied to a CLASS NAME fallback, never to
+// an authored displayName.
 RString SpacedClassName(const RString& className)
 {
     const int len = className.GetLength();
@@ -27,7 +43,7 @@ RString SpacedClassName(const RString& className)
         return className;
     }
     AutoArray<char> buffer;
-    buffer.Realloc(len + 1);
+    buffer.Realloc(len * 2 + 1);
     int out = 0;
     for (int i = 0; i < len; i++)
     {
@@ -39,6 +55,18 @@ RString SpacedClassName(const RString& className)
         if (c == ' ' && (out == 0 || buffer[out - 1] == ' '))
         {
             continue; // leading space, or a run of them
+        }
+        if (IsUpperAscii(c) && out > 0 && buffer[out - 1] != ' ')
+        {
+            const char prev = buffer[out - 1];
+            const char next = i + 1 < len ? className[i + 1] : 0;
+            // lower -> Upper is a word start; Upper -> Upper followed by a
+            // lower-case letter is the first letter of a word after an acronym
+            if (IsLowerAscii(prev) || (IsUpperAscii(prev) && IsLowerAscii(next)))
+            {
+                buffer.Add(' ');
+                out++;
+            }
         }
         buffer.Add(c);
         out++;
@@ -197,6 +225,23 @@ RString FactionDisplayName(const ZoneRegistry& registry, const RString& classNam
         }
     }
     return side;
+}
+
+bool FactionIsIrregular(const ZoneRegistry& registry, const RString& className, const RString& side)
+{
+    const RString key = className.GetLength() > 0 ? className : side;
+    if (key.GetLength() == 0)
+    {
+        return false;
+    }
+    const RString value = registry.FactionValue(key, "irregular");
+    if (value.GetLength() == 0)
+    {
+        return false;
+    }
+    // a number or a bare word: 0 / false / no read as regular, anything else
+    // the author wrote reads as the flag set
+    return strcmp(value, "0") != 0 && stricmp(value, "false") != 0 && stricmp(value, "no") != 0;
 }
 
 } // namespace Poseidon::Guerrilla

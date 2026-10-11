@@ -64,6 +64,10 @@
 //   loot<Role>Weapon / loot<Role>Mag     role loadouts, Role in
 //       {Rifleman, Medic, MG, AT, Sniper} (loot.sqs unlock table)
 //   flag                         town flagpole texture (native TownFlags)
+//   displayName                  how the journal and the campaign history name
+//       the faction ("Soviet Army"); absent, a spaced class name stands in
+//   irregular                    1 for an insurgent or militia roster: the
+//       history calls its people "fighters" or "members", not "troops"
 //   namePool                     regional first/last name pool for the Legend
 //       registry ("levant", "israeli", "balkans", ...); the tone bank that
 //       supplies prefixes, describers and titles is chosen by campaign
@@ -207,6 +211,7 @@ class CfgGuerrillaFactions
     {
         side = "GUER";
         displayName = "FIA"; // journal masthead (optional; class name when absent)
+        irregular = 1;       // the history calls its people "fighters", never "troops"
         // WL<4 riflemen -> WL4+ grenadiers. Honestly TWO tiers, not three: the
         // 1.99 core config ships no GUER special-forces/saboteur class, so the
         // ladder stops here rather than promoting SoldierGMG out of its role

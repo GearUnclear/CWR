@@ -242,6 +242,11 @@ class CfgGuerrillaZones
   picks a **roster**, not a side, and the roster is pinned onto `playerSide`.
   Leaving `playerSide` unset disables that whole rebase pass and reverts to the
   older behaviour where the menu simply blocks a same-side pair.
+- **`islandPhrase`** (optional) is how the generated campaign history names the
+  world as a place, preposition first: `"in the Sinai"`, `"in Lebanon"`. Absent,
+  the history reads "on <world name>", which is right for an island; author it
+  for a mainland or regional world. The phrase without its preposition doubles
+  as the noun ("the people of the Sinai").
 - Everything else in `ZoneTuning` (`tickInterval`, `zoneArea`, `revealRadius`,
   `cacheRadius`, `supportRate`, `supportFlip`, `heatCapSpike`, `defaultIncome`,
   `holdCount`, the `capture*` / `support*` / `contest*` rates, plus the alert,

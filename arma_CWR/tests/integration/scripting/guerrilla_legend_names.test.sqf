@@ -26,7 +26,8 @@ triSimUntil { GM_LIB_READY }
 //    companion has been polled ------------------------------------------------
 triSimUntil { gmLegendCount >= 3 }
 gmLegHist = gmLegendHistory
-triAssertEq [(gmLegHist select 0), 2]
+// kHistoryVersion: 3 since the place kinds and the island phrase
+triAssertEq [(gmLegHist select 0), 3]
 triAssertNe [(gmLegHist select 1), 0]
 triAssertNe [(gmLegHist select 2), ""]
 triAssertNe [(gmLegHist select 3), ""]

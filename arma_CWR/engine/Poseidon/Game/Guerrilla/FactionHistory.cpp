@@ -28,11 +28,35 @@ constexpr int kVariants = 6; // per opening slot, per beat, per biography cell
 // faction constructions
 // ---------------------------------------------------------------------------
 // A bare faction name modifies a plural group noun: "Soviet Army troops",
-// "FIA units", "IDF soldiers". This reads naturally for both full names and
+// "FIA fighters", "IDF soldiers". This reads naturally for both full names and
 // acronyms without an article, possessive, or a historical identity claim.
-// The persisted phrase indices still choose five distinct labels.
-static const char* const kFactionPhrase[] = {"troops", "units", "soldiers", "forces", "fighters"};
+// The ORDER is persisted (HistoryRecord::phraseIndex): append, never reorder.
+static const char* const kFactionPhrase[] = {"troops", "units", "soldiers", "forces", "fighters", "members"};
 constexpr int kPhraseCount = (int)(sizeof(kFactionPhrase) / sizeof(kFactionPhrase[0]));
+static_assert(kPhraseCount <= 32, "phrase masks are one bit per label");
+
+// Which labels each insertion point may use, one bit per kFactionPhrase index.
+// Opening B and event one carry the OCCUPIER doing something (arrived,
+// controlled, seized, fenced): any group noun fits. Opening D and event two
+// carry the RESISTANCE remembering people (remember the dead, lost people, keep
+// the names, recorded the names): only a noun for people fits, never a
+// formation ("FIA units remember the dead"). "fighters" and "members" describe
+// an irregular roster, "troops" and "soldiers" a regular army ("IDF fighters").
+constexpr unsigned kTroops = 1u << 0, kUnits = 1u << 1, kSoldiers = 1u << 2, kForces = 1u << 3, kFighters = 1u << 4,
+                   kMembers = 1u << 5;
+constexpr unsigned kActionRegular = kTroops | kUnits | kSoldiers | kForces;
+constexpr unsigned kActionIrregular = kFighters | kUnits | kForces;
+constexpr unsigned kMemoryRegular = kTroops | kSoldiers;
+constexpr unsigned kMemoryIrregular = kFighters | kMembers;
+// insertion point -> does it carry a memory verb (opening D, event two)
+constexpr bool kPhraseSlotIsMemory[kHistoryPhrases] = {false, true, false, true};
+
+// A display name whose last word is already a plural group noun is a complete
+// plural subject on its own: "Israel Defense Forces seized the pumps", never
+// "Israel Defense Forces troops".
+static const char* const kPluralGroupHeads[] = {"troops",    "units",      "soldiers", "forces",  "fighters",
+                                                "members",   "brigades",   "guards",   "rebels",  "partisans",
+                                                "commandos", "volunteers", "militias", "marines", "rangers"};
 
 // Last-resort place names, used only when the world offers neither a Names
 // block nor a zone table.
@@ -41,18 +65,21 @@ static const char* const kGenericPlace[] = {"the old crossing", "the high pass",
 // ---------------------------------------------------------------------------
 // opening slot A - the ancient claim ({Island}, {Place} = the beat-0 place)
 // ---------------------------------------------------------------------------
+// {Island} is the island as a noun ("Malden", "the Sinai"); {IslandIn} the same
+// place with its own preposition ("on Malden", "in the Sinai"), because islands
+// take "on" and regions take "in" and no single template preposition fits both.
 static const char* const kOpenA[kVariants] = {
     "The people of {Island} still tell how families near {Place} lost rights their grandparents had "
     "expected to leave to the children.",
-    "Near {Place}, families in {Island} inherited an old dispute along with their grandparents' "
+    "Near {Place}, families {IslandIn} inherited an old dispute along with their grandparents' "
     "belongings. Outsiders had claimed what kept those families fed.",
-    "For generations, families near {Place} in {Island} taught children where they belonged. Then "
+    "For generations, families near {Place} {IslandIn} taught children where they belonged. Then "
     "outsiders arrived with papers saying the children had no claim.",
-    "People in {Island} trace the trouble to {Place}, where outside owners dismissed local agreements. "
+    "People {IslandIn} trace the trouble to {Place}, where outside owners dismissed local agreements. "
     "Families kept copies that nobody in authority would read.",
-    "Families near {Place} in {Island} kept old agreements long after outsiders stopped respecting them. "
+    "Families near {Place} {IslandIn} kept old agreements long after outsiders stopped respecting them. "
     "Each generation tried to reclaim those rights.",
-    "Families near {Place} in {Island} inherited their grandparents' old unanswered petitions. They kept "
+    "Families near {Place} {IslandIn} inherited their grandparents' old unanswered petitions. They kept "
     "sending new ones, asking for the same rights."};
 
 // ---------------------------------------------------------------------------
@@ -63,7 +90,7 @@ static const char* const kOpenB[kVariants] = {
     "the same door where neighbours once gathered.",
     "{OccupierCap} controlled the main roads. People learned which guards would listen, which would "
     "shout, and when to turn around without arguing.",
-    "Under {Occupier}, residents watched their words in public. Families argued behind closed doors "
+    "Once {Occupier} arrived, residents watched their words in public. Families argued behind closed doors "
     "about whether silence was keeping anyone safe anymore.",
     "{OccupierCap} posted guards and demanded obedience. Some residents tried written petitions; others "
     "stopped expecting an answer and began meeting behind shutters.",
@@ -330,6 +357,16 @@ class Text
     }
     void AddChar(char c) { _buf.Add(c); }
     RString Str() const { return _buf.Size() > 0 ? RString(_buf.Data(), _buf.Size()) : RString(); }
+    // true when the text so far ends with `tail`, case-sensitively
+    bool EndsWith(const char* tail) const
+    {
+        const int n = (int)strlen(tail);
+        if (n > _buf.Size())
+        {
+            return false;
+        }
+        return strncmp(_buf.Data() + _buf.Size() - n, tail, (size_t)n) == 0;
+    }
 
   private:
     AutoArray<char> _buf;
@@ -355,10 +392,14 @@ RString CapitalizeFirst(const RString& src)
     return out.Str();
 }
 
-// "Soviet Army" + " troops"
+// "Soviet Army" + " troops"; a negative index is the bare name
 RString PhraseWith(int phrase, const RString& factionName)
 {
-    const int i = (phrase >= 0 && phrase < kPhraseCount) ? phrase : 0;
+    if (phrase < 0)
+    {
+        return factionName;
+    }
+    const int i = phrase < kPhraseCount ? phrase : 0;
     Text out;
     out.Add(factionName);
     out.AddChar(' ');
@@ -366,10 +407,99 @@ RString PhraseWith(int phrase, const RString& factionName)
     return out.Str();
 }
 
+// The last space-separated word of a name, lower-cased ASCII.
+void LastWordLower(const RString& name, char* out, int size)
+{
+    const char* s = name;
+    int end = s ? (int)strlen(s) : 0;
+    while (end > 0 && s[end - 1] == ' ')
+    {
+        end--;
+    }
+    int begin = end;
+    while (begin > 0 && s[begin - 1] != ' ')
+    {
+        begin--;
+    }
+    int n = 0;
+    for (int i = begin; i < end && n < size - 1; i++)
+    {
+        char c = s[i];
+        if (c >= 'A' && c <= 'Z')
+        {
+            c = (char)(c + ('a' - 'A'));
+        }
+        out[n++] = c;
+    }
+    out[n] = 0;
+}
+
+bool NameIsPluralGroup(const RString& factionName)
+{
+    char last[64];
+    LastWordLower(factionName, last, (int)sizeof(last));
+    for (const char* head : kPluralGroupHeads)
+    {
+        if (strcmp(last, head) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// "Frontier Force" + "forces", "Popular Unit" + "units": the label would repeat
+// the name's own last word, singular or plural.
+bool LabelRepeatsName(int phrase, const RString& factionName)
+{
+    char last[64];
+    LastWordLower(factionName, last, (int)sizeof(last));
+    const char* label = kFactionPhrase[phrase];
+    const int lastLen = (int)strlen(last);
+    const int labelLen = (int)strlen(label);
+    if (lastLen == 0)
+    {
+        return false;
+    }
+    if (strcmp(last, label) == 0)
+    {
+        return true;
+    }
+    // label == last + "s"
+    if (labelLen == lastLen + 1 && label[labelLen - 1] == 's' && strncmp(label, last, (size_t)lastLen) == 0)
+    {
+        return true;
+    }
+    // last == label + "s"
+    return lastLen == labelLen + 1 && last[lastLen - 1] == 's' && strncmp(label, last, (size_t)labelLen) == 0;
+}
+
+unsigned AllowedPhrases(int slot, const RString& factionName, bool irregular)
+{
+    if (NameIsPluralGroup(factionName))
+    {
+        return 0;
+    }
+    const bool memory = slot >= 0 && slot < kHistoryPhrases && kPhraseSlotIsMemory[slot];
+    unsigned mask =
+        memory ? (irregular ? kMemoryIrregular : kMemoryRegular) : (irregular ? kActionIrregular : kActionRegular);
+    for (int i = 0; i < kPhraseCount; i++)
+    {
+        if ((mask & (1u << i)) != 0 && LabelRepeatsName(i, factionName))
+        {
+            mask &= ~(1u << i);
+        }
+    }
+    return mask;
+}
+
 struct Slots
 {
-    RString island;
+    RString island, islandIn;
     RString place;
+    // the place is a map feature, zone or generic name rather than a town, so
+    // "from {Place}" renders "from near {Place}"
+    bool placeIsOther = false;
     RString occupier, occupierCap;
     RString resistance, resistanceCap;
     RString name;
@@ -381,7 +511,7 @@ bool SlotIs(const char* start, int len, const char* key)
     return (int)strlen(key) == len && strncmp(start, key, (size_t)len) == 0;
 }
 
-// Substitutes {Island} {Place} {Occupier} {OccupierCap} {Resistance}
+// Substitutes {Island} {IslandIn} {Place} {Occupier} {OccupierCap} {Resistance}
 // {ResistanceCap} {Name} {Faction} {FactionCap}. An unknown slot is emitted
 // verbatim, braces included, so the template lint can see the typo.
 RString Render(const char* tmpl, const Slots& s)
@@ -408,8 +538,18 @@ RString Render(const char* tmpl, const Slots& s)
         {
             out.Add(s.island);
         }
+        else if (SlotIs(key, len, "IslandIn"))
+        {
+            out.Add(s.islandIn);
+        }
         else if (SlotIs(key, len, "Place"))
         {
+            // nobody is "from" a hill, a zone or the old crossing; they are from
+            // near it
+            if (s.placeIsOther && out.EndsWith("from "))
+            {
+                out.Add("near ");
+            }
             out.Add(s.place);
         }
         else if (SlotIs(key, len, "Occupier"))
@@ -456,59 +596,75 @@ RString Render(const char* tmpl, const Slots& s)
 // place selection
 // ---------------------------------------------------------------------------
 
-void AppendNames(const AutoArray<PlaceName>& src, AutoArray<RString>& out)
+// One pool of candidate place names and, parallel to it, each one's kind.
+struct PlacePool
+{
+    AutoArray<RString> names;
+    AutoArray<int> kinds;
+
+    void Add(const RString& name, int kind)
+    {
+        names.Add(name);
+        kinds.Add(kind);
+    }
+};
+
+void AppendNames(const AutoArray<PlaceName>& src, int kind, PlacePool& out)
 {
     for (int i = 0; i < src.Size(); i++)
     {
         if (src[i].name.GetLength() > 0)
         {
-            out.Add(src[i].name);
+            out.Add(src[i].name, kind);
         }
     }
 }
 
 // Draw without replacement: the entry is removed, so beat one and beat two can
 // never name the same settlement while two exist.
-RString TakeFrom(AutoArray<RString>& pool, unsigned long long key, unsigned channel)
+RString TakeFrom(PlacePool& pool, unsigned long long key, unsigned channel, int& kind)
 {
-    if (pool.Size() <= 0)
+    if (pool.names.Size() <= 0)
     {
         return RString();
     }
-    const int i = (int)Roll(key, channel, pool.Size());
-    RString value = pool[i];
-    pool.Delete(i);
+    const int i = (int)Roll(key, channel, pool.names.Size());
+    RString value = pool.names[i];
+    kind = pool.kinds[i];
+    pool.names.Delete(i);
+    pool.kinds.Delete(i);
     return value;
 }
 
 struct PlacePools
 {
-    AutoArray<RString> settlements, features, zones, generic;
+    PlacePool settlements, features, zones, generic;
 };
 
 // features first (only used for the beat-0 slot), then the remaining
 // settlements, then the zone table, then the compiled generic table.
-RString PickPlace(PlacePools& pools, bool preferFeature, unsigned long long key, unsigned channel)
+RString PickPlace(PlacePools& pools, bool preferFeature, unsigned long long key, unsigned channel, int& kind)
 {
     if (preferFeature)
     {
-        RString v = TakeFrom(pools.features, key, channel);
+        RString v = TakeFrom(pools.features, key, channel, kind);
         if (v.GetLength() > 0)
         {
             return v;
         }
     }
-    RString v = TakeFrom(pools.settlements, key, channel);
+    RString v = TakeFrom(pools.settlements, key, channel, kind);
     if (v.GetLength() > 0)
     {
         return v;
     }
-    v = TakeFrom(pools.zones, key, channel);
+    v = TakeFrom(pools.zones, key, channel, kind);
     if (v.GetLength() > 0)
     {
         return v;
     }
-    return TakeFrom(pools.generic, key, channel);
+    kind = HPKOther;
+    return TakeFrom(pools.generic, key, channel, kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +752,33 @@ RString HistoryIslandWord(const RString& display)
         trimmed.AddChar(h[i]);
     }
     return trimmed.Str();
+}
+
+RString HistoryIslandPhrase(const RString& islandDisplay, const RString& authoredPhrase)
+{
+    if (authoredPhrase.GetLength() > 0)
+    {
+        return authoredPhrase;
+    }
+    const RString word = HistoryIslandWord(islandDisplay);
+    if (strcmp(word, "this country") == 0)
+    {
+        return RString("in this country");
+    }
+    Text out;
+    out.Add("on ");
+    out.Add(word);
+    return out.Str();
+}
+
+RString HistoryFactionGroup(const RString& factionName, int phraseIndex)
+{
+    return PhraseWith(phraseIndex, factionName);
+}
+
+unsigned HistoryAllowedPhrases(int slot, const RString& factionName, bool irregular)
+{
+    return AllowedPhrases(slot, factionName, irregular);
 }
 
 int HistoryTemplateStringCount()
@@ -698,6 +881,11 @@ LSError HistoryRecord::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("t2", eventTitle[2], 1, RString()))
     PARAM_CHECK(ar.Serialize("x2", eventText[2], 1, RString()))
     PARAM_CHECK(ar.Serialize("p2", eventPlace[2], 1, RString()))
+    // absent in a record written before the kinds existed: HPKUnknown, which
+    // renders exactly as those records always did
+    PARAM_CHECK(ar.Serialize("pk0", eventPlaceKind[0], 1, (int)HPKUnknown))
+    PARAM_CHECK(ar.Serialize("pk1", eventPlaceKind[1], 1, (int)HPKUnknown))
+    PARAM_CHECK(ar.Serialize("pk2", eventPlaceKind[2], 1, (int)HPKUnknown))
     return LSOK;
 }
 
@@ -717,54 +905,70 @@ HistoryRecord GenerateHistoryForced(const HistoryInputs& in, const HistoryForced
 
     // ---- places -----------------------------------------------------------
     PlacePools pools;
-    AppendNames(in.settlements, pools.settlements);
-    AppendNames(in.features, pools.features);
+    AppendNames(in.settlements, HPKSettlement, pools.settlements);
+    AppendNames(in.features, HPKOther, pools.features);
     for (int i = 0; i < in.zoneNames.Size(); i++)
     {
         if (in.zoneNames[i].GetLength() > 0)
         {
-            pools.zones.Add(in.zoneNames[i]);
+            const bool town = i < in.zoneIsTown.Size() && in.zoneIsTown[i];
+            pools.zones.Add(in.zoneNames[i], town ? HPKSettlement : HPKOther);
         }
     }
     for (int i = 0; i < (int)(sizeof(kGenericPlace) / sizeof(kGenericPlace[0])); i++)
     {
-        pools.generic.Add(RString(kGenericPlace[i]));
+        pools.generic.Add(RString(kGenericPlace[i]), HPKOther);
     }
     // beats one and two take settlements first, so the beat-0 slot can still
     // reach a feature, which is the richer table
-    rec.eventPlace[1] = PickPlace(pools, false, key, CH_PLACE1);
-    rec.eventPlace[2] = PickPlace(pools, false, key, CH_PLACE2);
-    rec.eventPlace[0] = PickPlace(pools, true, key, CH_PLACE0);
+    rec.eventPlace[1] = PickPlace(pools, false, key, CH_PLACE1, rec.eventPlaceKind[1]);
+    rec.eventPlace[2] = PickPlace(pools, false, key, CH_PLACE2, rec.eventPlaceKind[2]);
+    rec.eventPlace[0] = PickPlace(pools, true, key, CH_PLACE0, rec.eventPlaceKind[0]);
 
-    // ---- faction constructions, as a permutation --------------------------
-    // Independent draws would repeat one of only five distinctive phrases in
-    // about ninety-six campaigns out of a hundred, two clicks apart in the
-    // journal. Walking circularly past every index already spent makes the four
-    // history phrases distinct by construction and leaves exactly one for the
-    // biographies.
+    // ---- faction constructions --------------------------------------------
+    // Each insertion point draws from the labels its verb and its faction allow
+    // (AllowedPhrases). Independent draws would repeat a phrase two clicks apart
+    // in the journal, so the walk also skips a label the SAME faction already
+    // spent; the two factions may share one ("Soviet Army troops", "FIA
+    // troops"), which never reads as a repeat. A name that is already a plural
+    // group stands bare (-1) at every point.
     static const unsigned kPhraseChannels[kHistoryPhrases] = {kChPhraseOpenB, kChPhraseOpenD, kChPhraseEvent1,
                                                               kChPhraseEvent2};
     for (int p = 0; p < kHistoryPhrases; p++)
     {
-        int pick = forced.phrases[p] >= 0 ? (forced.phrases[p] % kPhraseCount)
-                                          : (int)Roll(key, kPhraseChannels[p], kPhraseCount);
-        for (int guard = 0; guard < kPhraseCount; guard++)
+        const bool occupierSlot = (p == 0 || p == 2);
+        const RString& name = occupierSlot ? in.occupierName : in.resistanceName;
+        const bool irregular = occupierSlot ? in.occupierIrregular : in.resistanceIrregular;
+        const unsigned allowed = AllowedPhrases(p, name, irregular);
+        if (allowed == 0)
         {
-            bool taken = false;
-            for (int q = 0; q < p; q++)
-            {
-                if (rec.phraseIndex[q] == pick)
-                {
-                    taken = true;
-                }
-            }
-            if (!taken)
-            {
-                break;
-            }
-            pick = (pick + 1) % kPhraseCount;
+            rec.phraseIndex[p] = -1;
+            continue;
         }
-        rec.phraseIndex[p] = pick;
+        const int start = forced.phrases[p] >= 0 ? (forced.phrases[p] % kPhraseCount)
+                                                 : (int)Roll(key, kPhraseChannels[p], kPhraseCount);
+        int pick = -1, fallback = -1;
+        for (int i = 0; i < kPhraseCount && pick < 0; i++)
+        {
+            const int candidate = (start + i) % kPhraseCount;
+            if ((allowed & (1u << candidate)) == 0)
+            {
+                continue;
+            }
+            if (fallback < 0)
+            {
+                fallback = candidate;
+            }
+            // the other insertion point of the same faction: opening B pairs
+            // with event one, opening D with event two
+            const int sibling = p - 2;
+            if (sibling >= 0 && rec.phraseIndex[sibling] == candidate)
+            {
+                continue;
+            }
+            pick = candidate;
+        }
+        rec.phraseIndex[p] = pick >= 0 ? pick : fallback;
     }
 
     const RString occupierPhrase = PhraseWith(rec.phraseIndex[0], in.occupierName);
@@ -782,6 +986,7 @@ HistoryRecord GenerateHistoryForced(const HistoryInputs& in, const HistoryForced
         rec.eventIndex[k] = idx;
         Slots s;
         s.place = rec.eventPlace[k];
+        s.placeIsOther = rec.eventPlaceKind[k] == HPKOther;
         if (k == 1)
         {
             s.occupier = eventOccupier;
@@ -797,10 +1002,16 @@ HistoryRecord GenerateHistoryForced(const HistoryInputs& in, const HistoryForced
     }
 
     // ---- opening ----------------------------------------------------------
-    const RString islandWord = HistoryIslandWord(in.islandName);
+    // "on Malden" / "in the Sinai", and the same place as a noun for "the
+    // people of {Island}": the phrase without its leading preposition
+    const RString islandIn = HistoryIslandPhrase(in.islandName, in.islandPhrase);
+    const char* islandText = islandIn;
+    const char* space = strchr(islandText, ' ');
+    const RString islandNoun = space && space[1] ? RString(space + 1) : islandIn;
 
     Slots sa;
-    sa.island = islandWord;
+    sa.island = islandNoun;
+    sa.islandIn = islandIn;
     sa.place = rec.eventPlace[0];
     Slots sb;
     sb.occupier = occupierPhrase;
@@ -881,6 +1092,34 @@ HistoryRecord GenerateHistory(const HistoryInputs& in)
     return GenerateHistoryForced(in, none);
 }
 
+namespace
+{
+
+const char* const* BioCell(int eventIndex, bool hostile)
+{
+    const int beat = (eventIndex >= 0 && eventIndex < kHistoryEvents) ? eventIndex : 0;
+    static const char* const* const kCells[kHistoryEvents][2] = {
+        {kBio0Friendly, kBio0Hostile}, {kBio1Friendly, kBio1Hostile}, {kBio2Friendly, kBio2Hostile}};
+    return kCells[beat][hostile ? 1 : 0];
+}
+
+Slots BioSlots(const HistoryRecord& history, int eventIndex, const RString& displayName, const RString& factionName)
+{
+    const int beat = (eventIndex >= 0 && eventIndex < kHistoryEvents) ? eventIndex : 0;
+    // The one construction the history did not spend, so a dossier never
+    // repeats a phrase the Chronicles already used.
+    const RString phrase = PhraseWith(history.BioPhraseIndex(), factionName);
+    Slots s;
+    s.name = displayName;
+    s.place = history.eventPlace[beat];
+    s.placeIsOther = history.eventPlaceKind[beat] == HPKOther;
+    s.faction = phrase;
+    s.factionCap = CapitalizeFirst(phrase);
+    return s;
+}
+
+} // namespace
+
 RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RString& displayName,
                           const RString& factionName, bool hostile, unsigned long long key, int forcedVariant,
                           int maxWords)
@@ -889,24 +1128,34 @@ RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RS
     {
         return RString();
     }
-    const int beat = (eventIndex >= 0 && eventIndex < kHistoryEvents) ? eventIndex : 0;
-    static const char* const* const kCells[kHistoryEvents][2] = {
-        {kBio0Friendly, kBio0Hostile}, {kBio1Friendly, kBio1Hostile}, {kBio2Friendly, kBio2Hostile}};
-    const char* const* cell = kCells[beat][hostile ? 1 : 0];
-
-    // The one construction the history did not spend, so a dossier never
-    // repeats a phrase the Chronicles already used.
-    const RString phrase = PhraseWith(history.BioPhraseIndex(), factionName);
-
-    Slots s;
-    s.name = displayName;
-    s.place = history.eventPlace[beat];
-    s.faction = phrase;
-    s.factionCap = CapitalizeFirst(phrase);
-
     if (forcedVariant >= 0)
     {
-        return Render(cell[forcedVariant % kVariants], s);
+        const Slots s = BioSlots(history, eventIndex, displayName, factionName);
+        return Render(BioCell(eventIndex, hostile)[forcedVariant % kVariants], s);
+    }
+    return GenerateBioDistinct(history, eventIndex, displayName, factionName, hostile, key, maxWords, 0, nullptr);
+}
+
+RString GenerateBioDistinct(const HistoryRecord& history, int eventIndex, const RString& displayName,
+                            const RString& factionName, bool hostile, unsigned long long key, int maxWords,
+                            unsigned excludedVariants, int* outVariant)
+{
+    if (outVariant)
+    {
+        *outVariant = -1;
+    }
+    if (!history.Present())
+    {
+        return RString();
+    }
+    const char* const* cell = BioCell(eventIndex, hostile);
+    const Slots s = BioSlots(history, eventIndex, displayName, factionName);
+
+    // Every variant spent: draw as if none were, rather than return nothing.
+    const unsigned all = (1u << kVariants) - 1u;
+    if ((excludedVariants & all) == all)
+    {
+        excludedVariants = 0;
     }
 
     // The upper bound is the CALLER's page budget, so the walk selects a variant
@@ -916,20 +1165,35 @@ RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RS
     const int upper = maxWords > kHistoryBioMinWords ? maxWords : kHistoryBioMinWords;
     const int start = (int)Roll(key, CH_BIOVAR, kVariants);
     RString best;
+    int bestVariant = -1;
     int bestDistance = -1;
     for (int i = 0; i < kVariants; i++)
     {
-        const RString text = Render(cell[(start + i) % kVariants], s);
+        const int variant = (start + i) % kVariants;
+        if ((excludedVariants & (1u << variant)) != 0)
+        {
+            continue;
+        }
+        const RString text = Render(cell[variant], s);
         const int distance = BudgetDistance(HistoryWordCount(text), kHistoryBioMinWords, upper);
         if (distance == 0)
         {
+            if (outVariant)
+            {
+                *outVariant = variant;
+            }
             return text;
         }
         if (bestDistance < 0 || distance < bestDistance)
         {
             bestDistance = distance;
             best = text;
+            bestVariant = variant;
         }
+    }
+    if (outVariant)
+    {
+        *outVariant = bestVariant;
     }
     return best;
 }
@@ -937,7 +1201,26 @@ RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RS
 RString GenerateBio(const HistoryRecord& history, int eventIndex, const RString& displayName,
                     const RString& factionName, bool hostile, unsigned long long key, int maxWords)
 {
-    return GenerateBioForced(history, eventIndex, displayName, factionName, hostile, key, -1, maxWords);
+    return GenerateBioDistinct(history, eventIndex, displayName, factionName, hostile, key, maxWords, 0, nullptr);
+}
+
+int HistoryBioVariantOf(const HistoryRecord& history, int eventIndex, const RString& displayName,
+                        const RString& factionName, bool hostile, const RString& bio)
+{
+    if (!history.Present() || bio.GetLength() == 0)
+    {
+        return -1;
+    }
+    const char* const* cell = BioCell(eventIndex, hostile);
+    const Slots s = BioSlots(history, eventIndex, displayName, factionName);
+    for (int variant = 0; variant < kVariants; variant++)
+    {
+        if (strcmp(Render(cell[variant], s), bio) == 0)
+        {
+            return variant;
+        }
+    }
+    return -1;
 }
 
 } // namespace Poseidon::Guerrilla

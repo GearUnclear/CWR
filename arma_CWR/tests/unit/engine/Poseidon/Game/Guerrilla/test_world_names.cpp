@@ -239,4 +239,37 @@ TEST_CASE("WorldNames - the faction display name prefers an authored displayName
     // runs of separators collapse rather than leaving a double space
     CHECK(Str(FactionDisplayName(registry, "A__B", "GUER")) == "A B");
     CHECK(Str(FactionDisplayName(registry, "_Lead", "GUER")) == "Lead");
+    // CamelCase class names split at word starts: a descriptor without a
+    // displayName once reached the history as "EgyptFrontier soldiers"
+    CHECK(Str(FactionDisplayName(registry, "EgyptFrontier", "EAST")) == "Egypt Frontier");
+    CHECK(Str(FactionDisplayName(registry, "EgyptArmy", "EAST")) == "Egypt Army");
+    // an acronym run stays whole, and splits before the word that follows it
+    CHECK(Str(FactionDisplayName(registry, "IDF", "WEST")) == "IDF");
+    CHECK(Str(FactionDisplayName(registry, "PLOEast", "EAST")) == "PLO East");
+    CHECK(Str(FactionDisplayName(registry, "PLO_East", "EAST")) == "PLO East");
+    // no double space where an underscore meets a capital
+    CHECK(Str(FactionDisplayName(registry, "Popular_FrontFighters", "GUER")) == "Popular Front Fighters");
+    // digits are left alone
+    CHECK(Str(FactionDisplayName(registry, "Brigade44", "GUER")) == "Brigade44");
+}
+
+TEST_CASE("WorldNames - the irregular flag reads the descriptor key", "[game][guerrilla][worldnames]")
+{
+    const char* config = "class CfgGuerrillaFactions\n"
+                         "{\n"
+                         "  class Army { side=\"EAST\"; };\n"
+                         "  class Militia { side=\"GUER\"; irregular=1; };\n"
+                         "  class Off { side=\"WEST\"; irregular=0; };\n"
+                         "};\n";
+    ParamFile file;
+    QIStream in(config, strlen(config));
+    file.Parse(in);
+    ZoneRegistry registry;
+    registry.LoadFromParams(nullptr, file.FindEntry("CfgGuerrillaFactions"));
+    CHECK_FALSE(FactionIsIrregular(registry, "Army", "EAST"));
+    CHECK(FactionIsIrregular(registry, "Militia", "GUER"));
+    CHECK_FALSE(FactionIsIrregular(registry, "Off", "WEST"));
+    // no class: the side's descriptor answers
+    CHECK(FactionIsIrregular(registry, RString(), "GUER"));
+    CHECK_FALSE(FactionIsIrregular(registry, RString(), RString()));
 }

@@ -76,6 +76,11 @@ struct ZoneTuning
     // that whole pass: a template that authors no playerSide behaves exactly
     // as it did before the pass existed.
     RString playerSide;
+    // How the campaign history names the island as a place: a locative phrase,
+    // preposition first ("in the Sinai", "in Lebanon").  EMPTY (the default)
+    // reads "on <island>", right for every stock world, which are all islands.
+    // Only a mainland or regional world needs to author it.
+    RString islandPhrase;
 };
 
 struct ZoneRecord

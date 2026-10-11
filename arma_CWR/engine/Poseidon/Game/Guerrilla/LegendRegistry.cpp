@@ -263,6 +263,19 @@ static RString PickDistinctName(int pool, unsigned long long key, unsigned chann
     return RString(list[start]);
 }
 
+// The name a biography is written about: the personal first and last names
+// only.  The nickname belongs on the dossier heading ("Cruel Henry Moore"); in
+// running prose it reads as part of the legal name ("military engineer Cruel
+// Henry Moore approved...").  Falls back to the script's base name.
+static RString BioName(const LegendRow& row)
+{
+    NameParts parts;
+    parts.first = row.first;
+    parts.last = row.last;
+    RString name = AssembleDisplayName(parts);
+    return name.GetLength() > 0 ? name : row.baseName;
+}
+
 // The live body behind GM_COMP_OBJ select i, or null.  Market.cpp's idiom.
 static Person* CompanionBody(int index)
 {
@@ -520,7 +533,10 @@ void LegendRegistry::SeedCampaign()
     HistoryInputs in;
     in.resistanceName = _resistanceName;
     in.occupierName = _occupierName;
+    in.resistanceIrregular = FactionIsIrregular(registry, resistanceFaction, resistanceSide);
+    in.occupierIrregular = FactionIsIrregular(registry, occupierFaction, occupierSide);
     in.islandName = IslandDisplayName();
+    in.islandPhrase = registry.Tuning().islandPhrase;
     AutoArray<PlaceName> all;
     CollectWorldPlaceNames(all);
     SettlementNames(all, in.settlements);
@@ -531,6 +547,7 @@ void LegendRegistry::SeedCampaign()
         if (zone && zone->name.GetLength() > 0)
         {
             in.zoneNames.Add(zone->name);
+            in.zoneIsTown.Add(stricmp(zone->type, "CITY") == 0);
         }
     }
     in.seed = _seed;
@@ -578,6 +595,29 @@ void LegendRegistry::PreRollBossIdentities()
     // Legend names when Change 3 loads it, and People > Enemy Legends has real
     // content in Change 2.
     AutoArray<RString> usedFirst, usedLast;
+    // Biographies are drawn WITHOUT REPLACEMENT across the commanders, the way
+    // names are: each takes a history beat no other commander hangs on while
+    // one is free (so no two share a place), and never a (beat, variant) one
+    // already holds.  Independent rolls gave two commanders the identical
+    // biography in about one campaign in six.  Rows that already exist (a
+    // partially pre-rolled block) are counted first.
+    unsigned usedBeats = 0;
+    unsigned usedVariants[kHistoryEvents] = {0, 0, 0};
+    for (int i = 0; i < _rows.Size(); i++)
+    {
+        const LegendRow& other = _rows[i];
+        if (other.kind != LKBoss || other.bioEvent < 0 || other.bioEvent >= kHistoryEvents)
+        {
+            continue;
+        }
+        usedBeats |= 1u << other.bioEvent;
+        const int variant =
+            HistoryBioVariantOf(_history, other.bioEvent, BioName(other), _occupierName, true, other.bio);
+        if (variant >= 0)
+        {
+            usedVariants[other.bioEvent] |= 1u << variant;
+        }
+    }
     for (int n = 0; n < kBossCount; n++)
     {
         char buffer[32];
@@ -619,14 +659,31 @@ void LegendRegistry::PreRollBossIdentities()
         row.awardMask = LAFirst | LASecond;
         row.role = "Commander"; // Change 3's not-yet-resolved sentinel
         row.face = RString(kPortraitFaces[Roll(key, CH_FACE, NPortraitFaces)]);
-        row.bioEvent = (int)Roll(key, CH_BIOEVENT, kHistoryEvents);
+        // the rolled beat, walked forward past any beat another commander holds
+        const int rolledBeat = (int)Roll(key, CH_BIOEVENT, kHistoryEvents);
+        row.bioEvent = rolledBeat;
+        for (int i = 0; i < kHistoryEvents; i++)
+        {
+            const int beat = (rolledBeat + i) % kHistoryEvents;
+            if ((usedBeats & (1u << beat)) == 0)
+            {
+                row.bioEvent = beat;
+                break;
+            }
+        }
+        usedBeats |= 1u << row.bioEvent;
         if (_history.Present())
         {
             // budgeted to what the dossier page can show beside the portrait
             // box, so nothing the generator writes is clamped away where it is
             // read (kHistoryBioPageWords)
-            row.bio =
-                GenerateBio(_history, row.bioEvent, DisplayName(row), _occupierName, true, key, kHistoryBioPageWords);
+            int variant = -1;
+            row.bio = GenerateBioDistinct(_history, row.bioEvent, BioName(row), _occupierName, true, key,
+                                          kHistoryBioPageWords, usedVariants[row.bioEvent], &variant);
+            if (variant >= 0)
+            {
+                usedVariants[row.bioEvent] |= 1u << variant;
+            }
         }
     }
 }
@@ -765,11 +822,44 @@ int LegendRegistry::EnsureCompanionRow(int compIndex, const RString& baseName, f
     row.rankSeen = LadderIndexForXp(xp);
     if (_progression && _history.Present())
     {
-        row.bioEvent = (int)Roll(key, CH_BIOEVENT, kHistoryEvents);
+        // Drawn without replacement against the companions already on the
+        // roster: the rolled beat keeps its place unless every variant of its
+        // cell is taken, and the variant walk skips the ones other companions
+        // hold.  Their variants are recovered from their persisted text, so this
+        // also holds across a save.  The new row is the only one with no bio
+        // yet, which keeps it out of its own count.
+        unsigned usedVariants[kHistoryEvents] = {0, 0, 0};
+        for (int i = 0; i < _rows.Size(); i++)
+        {
+            const LegendRow& other = _rows[i];
+            if (i == at || other.kind != LKCompanion || other.bio.GetLength() == 0 || other.bioEvent < 0 ||
+                other.bioEvent >= kHistoryEvents)
+            {
+                continue;
+            }
+            const int variant =
+                HistoryBioVariantOf(_history, other.bioEvent, BioName(other), _resistanceName, false, other.bio);
+            if (variant >= 0)
+            {
+                usedVariants[other.bioEvent] |= 1u << variant;
+            }
+        }
+        const unsigned allVariants = (1u << HistoryVariantCount()) - 1u;
+        const int rolledBeat = (int)Roll(key, CH_BIOEVENT, kHistoryEvents);
+        row.bioEvent = rolledBeat;
+        for (int i = 0; i < kHistoryEvents; i++)
+        {
+            const int beat = (rolledBeat + i) % kHistoryEvents;
+            if ((usedVariants[beat] & allVariants) != allVariants)
+            {
+                row.bioEvent = beat;
+                break;
+            }
+        }
         // the dossier page's budget, not the generator's wider band: see the
         // boss branch in PreRollBossIdentities
-        row.bio =
-            GenerateBio(_history, row.bioEvent, DisplayName(row), _resistanceName, false, key, kHistoryBioPageWords);
+        row.bio = GenerateBioDistinct(_history, row.bioEvent, BioName(row), _resistanceName, false, key,
+                                      kHistoryBioPageWords, usedVariants[row.bioEvent], nullptr);
     }
     // A template that seeds a companion above an award threshold gets the earned
     // words at creation, SILENTLY: the bits and the slot words are part of the

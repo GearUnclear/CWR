@@ -3,6 +3,7 @@
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/FactionHistory.hpp>
 #include <Poseidon/Game/Guerrilla/LegendSeed.hpp>
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <cstring>
@@ -33,25 +34,40 @@ struct FactionPair
 {
     const char* resistance;
     const char* occupier;
+    bool resistanceIrregular;
+    bool occupierIrregular;
 };
 
-// The four-word row is mandatory: a long faction display name is what pushes
-// the opening past one hundred words, and without it the overflow ships.
-const FactionPair kPairs[] = {{"FIA", "Soviet Army"},
-                              {"IDF", "Hizballah"},
-                              {"PLO East", "IDF"},
-                              {"Egyptian Frontier Force", "Israel Defense Forces"}};
+// Names exactly as the shipped libraries emit them (displayName, plus the
+// `irregular` key), never a name no descriptor carries. The last row is the
+// widest pair they can field: a long faction display name is what pushes the
+// opening past one hundred words, and without it the overflow ships.
+const FactionPair kPairs[] = {{"FIA", "Soviet Army", true, false},
+                              {"IDF", "Hizballah", false, true},
+                              {"PLO", "IDF", true, false},
+                              {"Egyptian Frontier Corps", "Jordanian Army", false, false}};
 constexpr int kPairCount = (int)(sizeof(kPairs) / sizeof(kPairs[0]));
 
-const char* const kIslands[] = {"Malden", "Lebanon (80's)", "Sinai", "", "Nogova2"};
+// The world display names the game reports (CfgWorlds description) and the
+// islandPhrase each shipped template authors for them ("" = the default).
+struct IslandCase
+{
+    const char* display;
+    const char* phrase;
+};
+const IslandCase kIslands[] = {
+    {"Malden", ""}, {"Lebanon (80's)", "in Lebanon"}, {"Southern Sinai", "in the Sinai"}, {"", ""}, {"Nogova2", ""}};
 constexpr int kIslandCount = (int)(sizeof(kIslands) / sizeof(kIslands[0]));
 
-HistoryInputs MakeInputs(const FactionPair& pair, const char* island, unsigned seed)
+HistoryInputs MakeInputs(const FactionPair& pair, const char* island, unsigned seed, const char* islandPhrase = "")
 {
     HistoryInputs in;
     in.resistanceName = pair.resistance;
     in.occupierName = pair.occupier;
+    in.resistanceIrregular = pair.resistanceIrregular;
+    in.occupierIrregular = pair.occupierIrregular;
     in.islandName = island;
+    in.islandPhrase = islandPhrase;
     in.seed = seed;
     in.settlements.Add(MakePlace("Houdan", true));
     in.settlements.Add(MakePlace("Chapoi", true));
@@ -255,26 +271,135 @@ void CheckNoLocativeBeforeFactionSlot(const std::string& text)
 // rendered-prose lints
 // ---------------------------------------------------------------------------
 
-// Every faction name that can reach the prose from a shipped library, by the
-// route it actually arrives on. Only the three vanilla descriptors author a
-// displayName (guerrilla-mode/config/guerrilla-factions.hpp:86 "US Army", :153
-// "Soviet Army", :207 "FIA"). lobo-factions.hpp authors NONE, so all eight LoBo
-// factions reach the prose through the CLASS-NAME fallback in
-// WorldNames::FactionDisplayName, which rewrites an underscore to a space:
-// IDF, EgyptFrontier, EgyptArmy, Syria, Jordan, Hizballah, PLO and PLO_East ->
-// "PLO East". The set below therefore covers four shapes the guerrilla_native
-// fixture cannot exercise at all (it authors no displayName and falls back to
-// the bare class names EAST and GUER): two-word names, bare acronyms, an
-// acronym followed by a word, and a run-together compound with an internal
-// capital.
-const char* const kShippedNames[] = {"US Army", "Soviet Army", "FIA",    "IDF",           "Hizballah", "PLO East",
-                                     "PLO",     "Syria",       "Jordan", "EgyptFrontier", "EgyptArmy"};
-constexpr int kShippedNameCount = (int)(sizeof(kShippedNames) / sizeof(kShippedNames[0]));
+// Every faction as the shipped libraries describe it, read from the tracked
+// config files themselves (guerrilla-mode/config/guerrilla-factions.hpp and
+// lobo-factions.hpp), so a descriptor added without a displayName, or one whose
+// name doubles a group noun, fails here rather than in a player's journal.
+struct ShippedFaction
+{
+    std::string cls, name;
+    bool irregular = false;
+};
 
-// Faction names modify plural people/formation nouns. Checking the complete
-// rendered group covers both acronyms and multiword names without forcing an
-// artificial introducer such as "the standard now raised as".
-void CheckFactionGroup(const std::string& text, const std::string& faction)
+const std::vector<ShippedFaction>& ShippedFactions()
+{
+    static const std::vector<ShippedFaction> factions = []
+    {
+        std::vector<ShippedFaction> out;
+        const std::filesystem::path config =
+            std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "guerrilla-mode" / "config";
+        for (const char* file : {"guerrilla-factions.hpp", "lobo-factions.hpp"})
+        {
+            ParamFile pf;
+            pf.Parse((config / file).string().c_str());
+            const ParamEntry* table = pf.FindEntry("CfgGuerrillaFactions");
+            if (!table)
+            {
+                continue;
+            }
+            for (int i = 0; i < table->GetEntryCount(); i++)
+            {
+                const ParamEntry& e = table->GetEntry(i);
+                if (!e.IsClass())
+                {
+                    continue;
+                }
+                ShippedFaction f;
+                f.cls = (const char*)RString(e.GetName());
+                f.name = (const char*)e.ReadValue("displayName", RString());
+                const std::string irregular = (const char*)e.ReadValue("irregular", RString());
+                f.irregular = !irregular.empty() && irregular != "0";
+                out.push_back(f);
+            }
+        }
+        return out;
+    }();
+    return factions;
+}
+
+// The distinct display names, for the "a longer name starts with this one" guard.
+std::vector<std::string> ShippedNames()
+{
+    std::vector<std::string> names;
+    for (const ShippedFaction& f : ShippedFactions())
+    {
+        bool seen = false;
+        for (const std::string& n : names)
+        {
+            seen = seen || n == f.name;
+        }
+        if (!seen)
+        {
+            names.push_back(f.name);
+        }
+    }
+    return names;
+}
+
+const char* const kGroupLabels[] = {"troops", "units", "soldiers", "forces", "fighters", "members"};
+// mirrors FactionHistory.cpp kPluralGroupHeads: a name ending in one stands bare
+const char* const kPluralHeads[] = {"troops",    "units",      "soldiers", "forces",  "fighters",
+                                    "members",   "brigades",   "guards",   "rebels",  "partisans",
+                                    "commandos", "volunteers", "militias", "marines", "rangers"};
+
+std::string LastWordOf(const std::string& name)
+{
+    const size_t space = name.find_last_of(' ');
+    return Lower(space == std::string::npos ? name : name.substr(space + 1));
+}
+
+bool InList(const std::string& word, const char* const* list, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        if (word == list[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsGroupLabel(const std::string& word)
+{
+    return InList(word, kGroupLabels, sizeof(kGroupLabels) / sizeof(kGroupLabels[0]));
+}
+
+bool NameIsPluralGroup(const std::string& name)
+{
+    return InList(LastWordOf(name), kPluralHeads, sizeof(kPluralHeads) / sizeof(kPluralHeads[0]));
+}
+
+std::string Singular(const std::string& word)
+{
+    return (!word.empty() && word.back() == 's') ? word.substr(0, word.size() - 1) : word;
+}
+
+// "EgyptFrontier", "PLO_East": a class name that reached the page unspaced.
+bool HasUnsplitClassName(const std::string& text)
+{
+    if (text.find('_') != std::string::npos)
+    {
+        return true;
+    }
+    for (size_t i = 1; i < text.size(); i++)
+    {
+        if (text[i] >= 'A' && text[i] <= 'Z' && text[i - 1] >= 'a' && text[i - 1] <= 'z')
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Faction names modify plural people/formation nouns, or stand bare when the
+// name is itself a plural group. The noun never repeats the name's own last
+// word ("Frontier Force forces"), a regular army is never "fighters" or
+// "members", an irregular roster never "troops" or "soldiers", and the
+// resistance, whose slots all carry memory verbs (remember the dead, keep the
+// names), is never "units" or "forces".
+void CheckFactionGroup(const std::string& text, const std::string& faction, bool irregular, bool memorySlots,
+                       const std::vector<std::string>& names)
 {
     const std::string low = Lower(text);
     const std::string name = Lower(faction);
@@ -285,10 +410,10 @@ void CheckFactionGroup(const std::string& text, const std::string& faction)
         {
             continue;
         }
-        // PLO is also the first token of PLO East. Check the longer name on
-        // its own pass rather than treating East as a group noun.
+        // PLO is also the first token of a longer name. Check the longer name
+        // on its own pass rather than treating its tail as a group noun.
         bool longerName = false;
-        for (const char* shipped : kShippedNames)
+        for (const std::string& shipped : names)
         {
             const std::string candidate = Lower(shipped);
             if (candidate.size() > name.size() && candidate.compare(0, name.size(), name) == 0 &&
@@ -301,16 +426,42 @@ void CheckFactionGroup(const std::string& text, const std::string& faction)
         {
             continue;
         }
-        REQUIRE(end < low.size());
-        REQUIRE(low[end] == ' ');
-        size_t stop = end + 1;
+        size_t stop = end;
+        if (stop < low.size() && low[stop] == ' ')
+        {
+            stop++;
+        }
+        const size_t nounAt = stop;
         while (stop < low.size() && IsWordChar(low[stop]))
         {
             stop++;
         }
-        const std::string noun = low.substr(end + 1, stop - end - 1);
-        INFO(text << " / " << faction << " / " << noun);
-        CHECK((noun == "troops" || noun == "units" || noun == "soldiers" || noun == "forces" || noun == "fighters"));
+        const std::string noun = low.substr(nounAt, stop - nounAt);
+        INFO(text << " / " << faction << " / '" << noun << "'");
+        if (NameIsPluralGroup(faction))
+        {
+            CHECK_FALSE(IsGroupLabel(noun));
+            continue;
+        }
+        REQUIRE(end < low.size());
+        REQUIRE(low[end] == ' ');
+        CHECK(IsGroupLabel(noun));
+        CHECK(Singular(noun) != Singular(LastWordOf(faction)));
+        if (irregular)
+        {
+            CHECK(noun != "troops");
+            CHECK(noun != "soldiers");
+        }
+        else
+        {
+            CHECK(noun != "fighters");
+            CHECK(noun != "members");
+        }
+        if (memorySlots)
+        {
+            CHECK(noun != "units");
+            CHECK(noun != "forces");
+        }
     }
 }
 
@@ -319,6 +470,10 @@ std::string FactionLabel(int index, const char* faction)
 {
     return std::string(faction) + " " + HistoryFactionPhrase(index);
 }
+
+// Opening slot B and event one name the occupier; opening D and event two the
+// resistance.
+constexpr bool kSlotIsOccupier[kHistoryPhrases] = {true, false, true, false};
 
 // Mechanical damage a substitution can do: an unknown slot left with its braces
 // on, an empty substitution collapsing two spaces into one place, a doubled
@@ -415,26 +570,116 @@ TEST_CASE("Faction history - every template string passes the house lints", "[ga
             const size_t close = text.find('}', at);
             REQUIRE(close != std::string::npos);
             const std::string slot = text.substr(at + 1, close - at - 1);
-            const bool known = slot == "Island" || slot == "Place" || slot == "Occupier" || slot == "OccupierCap" ||
-                               slot == "Resistance" || slot == "ResistanceCap" || slot == "Name" || slot == "Faction" ||
-                               slot == "FactionCap";
+            const bool known = slot == "Island" || slot == "IslandIn" || slot == "Place" || slot == "Occupier" ||
+                               slot == "OccupierCap" || slot == "Resistance" || slot == "ResistanceCap" ||
+                               slot == "Name" || slot == "Faction" || slot == "FactionCap";
             INFO("slot " << slot << " in " << text);
             CHECK(known);
         }
     }
 }
 
+TEST_CASE("Faction history - every shipped war faction authors a display name the prose can use",
+          "[game][guerrilla][legends][history]")
+{
+    // Read from the tracked libraries, so this is the set the game emits: the
+    // three vanilla rosters and the eight @LoBo ones. Before every LoBo class
+    // authored a displayName, the prose printed "EgyptFrontier soldiers".
+    const std::vector<ShippedFaction>& factions = ShippedFactions();
+    REQUIRE(factions.size() >= 11);
+    for (const ShippedFaction& f : factions)
+    {
+        INFO(f.cls << " -> '" << f.name << "'");
+        CHECK_FALSE(f.name.empty());
+        CHECK_FALSE(HasUnsplitClassName(f.name));
+        CheckSharedLints(f.name, "faction display name");
+    }
+}
+
 TEST_CASE("Faction history - faction group labels read naturally for every shipped name",
           "[game][guerrilla][legends][history]")
 {
-    REQUIRE(HistoryFactionPhraseCount() == 5);
-    for (int i = 0; i < HistoryFactionPhraseCount(); i++)
+    REQUIRE(HistoryFactionPhraseCount() == 6);
+    const std::vector<std::string> names = ShippedNames();
+    for (const ShippedFaction& f : ShippedFactions())
     {
-        for (int n = 0; n < kShippedNameCount; n++)
+        for (int slot = 0; slot < kHistoryPhrases; slot++)
         {
-            const std::string label = FactionLabel(i, kShippedNames[n]);
-            CheckFactionGroup(label, kShippedNames[n]);
-            CheckFactionInsertion(label, kShippedNames[n]);
+            const unsigned allowed = HistoryAllowedPhrases(slot, RString(f.name.c_str()), f.irregular);
+            INFO(f.name << " slot " << slot);
+            // a shipped name is never bare: it always takes some label
+            CHECK(allowed != 0);
+            for (int i = 0; i < HistoryFactionPhraseCount(); i++)
+            {
+                if ((allowed & (1u << i)) == 0)
+                {
+                    continue;
+                }
+                const std::string label = Str(HistoryFactionGroup(RString(f.name.c_str()), i));
+                CheckFactionGroup(label, f.name, f.irregular, !kSlotIsOccupier[slot], names);
+                CheckFactionInsertion(label, f.name);
+            }
+        }
+    }
+}
+
+TEST_CASE("Faction history - a label never doubles the name's own noun", "[game][guerrilla][legends][history]")
+{
+    // Names a faction pack could plausibly author. None ships today; each is a
+    // shape the label rule has to survive.
+    struct Case
+    {
+        const char* name;
+        bool irregular;
+    };
+    const Case cases[] = {{"Israel Defense Forces", false},
+                          {"Egyptian Frontier Force", false},
+                          {"Popular Resistance Fighters", true},
+                          {"Lebanese Forces", true},
+                          {"Special Unit", false},
+                          {"Revolutionary Guards", true}};
+    std::vector<std::string> names;
+    for (const Case& c : cases)
+    {
+        names.push_back(c.name);
+    }
+    for (const Case& c : cases)
+    {
+        const RString name(c.name);
+        for (int slot = 0; slot < kHistoryPhrases; slot++)
+        {
+            const unsigned allowed = HistoryAllowedPhrases(slot, name, c.irregular);
+            INFO(c.name << " slot " << slot << " allowed " << allowed);
+            if (NameIsPluralGroup(c.name))
+            {
+                CHECK(allowed == 0); // stands bare: "Israel Defense Forces seized the pumps"
+                CHECK(Str(HistoryFactionGroup(name, -1)) == c.name);
+            }
+            for (int i = 0; i < HistoryFactionPhraseCount(); i++)
+            {
+                if ((allowed & (1u << i)) != 0)
+                {
+                    CHECK(Singular(HistoryFactionPhrase(i)) != Singular(LastWordOf(c.name)));
+                }
+            }
+        }
+        // and the rendered history, as occupier and as resistance
+        for (unsigned seed = 1; seed <= 41; seed += 2)
+        {
+            for (int role = 0; role < 2; role++)
+            {
+                const FactionPair pair = role == 0 ? FactionPair{"FIA", c.name, true, c.irregular}
+                                                   : FactionPair{c.name, "Soviet Army", c.irregular, false};
+                const HistoryRecord rec = GenerateHistory(MakeInputs(pair, "Malden", seed));
+                const std::string whole = Str(rec.openingPage1) + " " + Str(rec.openingPage2) + " " +
+                                          Str(rec.eventText[1]) + " " + Str(rec.eventText[2]);
+                INFO(whole);
+                CHECK(ContainsWord(whole, c.name));
+                CheckFactionGroup(whole, c.name, c.irregular, role == 1, names);
+                CheckRenderedProse(whole);
+                CheckSentenceShape(Str(rec.openingPage1));
+                CheckSentenceShape(Str(rec.openingPage2));
+            }
         }
     }
 }
@@ -451,21 +696,23 @@ TEST_CASE("Faction history - the rendered prose reads correctly for every shippe
     // this case renders the whole history and every biography for the real
     // names, in both campaign roles (spec.md section 5), and asserts on the
     // OUTPUT rather than on the tables.
-    const RString kBossName("Cold Erez \"The Land-Taker\" Dayan the Occupier");
+    const RString kBossName("Erez Dayan");
+    const std::vector<ShippedFaction>& factions = ShippedFactions();
+    const std::vector<std::string> names = ShippedNames();
     for (unsigned seed = 1; seed <= 11; seed += 2)
     {
-        for (int o = 0; o < kShippedNameCount; o++)
+        for (size_t o = 0; o < factions.size(); o++)
         {
-            for (int r = 0; r < kShippedNameCount; r++)
+            for (size_t r = 0; r < factions.size(); r++)
             {
-                if (o == r)
+                if (factions[o].name == factions[r].name)
                 {
                     continue; // one campaign never fields a faction against itself
                 }
-                FactionPair pair;
-                pair.occupier = kShippedNames[o];
-                pair.resistance = kShippedNames[r];
-                const HistoryInputs in = MakeInputs(pair, "Malden", seed);
+                const FactionPair pair = {factions[r].name.c_str(), factions[o].name.c_str(), factions[r].irregular,
+                                          factions[o].irregular};
+                const HistoryInputs in =
+                    MakeInputs(pair, kIslands[seed % kIslandCount].display, seed, kIslands[seed % kIslandCount].phrase);
                 const HistoryRecord rec = GenerateHistory(in);
                 REQUIRE(rec.Present());
 
@@ -497,11 +744,21 @@ TEST_CASE("Faction history - the rendered prose reads correctly for every shippe
                                  << text);
                     CheckRenderedProse(text);
                     CheckSentenceShape(text);
-                    // Names are modifiers in complete plural group labels.
-                    CheckFactionGroup(text, pair.occupier);
-                    CheckFactionGroup(text, pair.resistance);
+                    // Names are modifiers in complete plural group labels that
+                    // suit both the faction and the verb.
+                    CheckFactionGroup(text, pair.occupier, pair.occupierIrregular, false, names);
+                    CheckFactionGroup(text, pair.resistance, pair.resistanceIrregular, true, names);
                     CheckFactionInsertion(text, pair.occupier);
                     CheckFactionInsertion(text, pair.resistance);
+                    // no class name ever reaches the page unspaced
+                    if (i < 2 + kHistoryEvents)
+                    {
+                        CHECK_FALSE(HasUnsplitClassName(text));
+                    }
+                    // islands take "on", the Sinai is "the Sinai"
+                    CHECK(text.find("in Malden") == std::string::npos);
+                    CHECK(text.find("in Sinai") == std::string::npos);
+                    CHECK(text.find(std::string("Under ") + pair.occupier) == std::string::npos);
                 }
 
                 // and the whole thing actually said both names: an empty
@@ -546,7 +803,7 @@ TEST_CASE("Faction history - the opening budget is reachable from every rolled A
     {
         for (int isl = 0; isl < kIslandCount; isl++)
         {
-            const HistoryInputs in = MakeInputs(kPairs[p], kIslands[isl], 3);
+            const HistoryInputs in = MakeInputs(kPairs[p], kIslands[isl].display, 3, kIslands[isl].phrase);
             for (int a = 0; a < HistoryVariantCount(); a++)
             {
                 for (int b = 0; b < HistoryVariantCount(); b++)
@@ -557,7 +814,7 @@ TEST_CASE("Faction history - the opening budget is reachable from every rolled A
                     const HistoryRecord rec = GenerateHistoryForced(in, forced);
                     const int total = Words(rec.openingPage1) + Words(rec.openingPage2);
                     INFO("A " << a << " B " << b << " " << kPairs[p].resistance << " vs " << kPairs[p].occupier
-                              << " on " << kIslands[isl] << " -> " << total);
+                              << " on " << kIslands[isl].display << " -> " << total);
                     CHECK(total >= kHistoryOpeningMinWords);
                     CHECK(total <= kHistoryOpeningMaxWords);
                 }
@@ -603,8 +860,8 @@ TEST_CASE("Faction history - every event variant fits wide place and faction nam
           "[game][guerrilla][legends][history]")
 {
     HistoryInputs in;
-    in.resistanceName = "Egyptian Frontier Force";
-    in.occupierName = "Israel Defense Forces";
+    in.resistanceName = "Egyptian Frontier Corps";
+    in.occupierName = "Jordanian Army";
     in.islandName = "";
     in.seed = 3;
     in.features.Add(MakePlace("The High Pass", false));
@@ -640,7 +897,7 @@ TEST_CASE("Faction history - word budgets and output lints over the generation m
         {
             for (int isl = 0; isl < kIslandCount; isl++)
             {
-                const HistoryInputs in = MakeInputs(kPairs[p], kIslands[isl], seed);
+                const HistoryInputs in = MakeInputs(kPairs[p], kIslands[isl].display, seed, kIslands[isl].phrase);
                 const HistoryRecord rec = GenerateHistory(in);
                 REQUIRE(rec.Present());
                 CHECK(rec.version == kHistoryVersion);
@@ -648,7 +905,7 @@ TEST_CASE("Faction history - word budgets and output lints over the generation m
 
                 const int opening = Words(rec.openingPage1) + Words(rec.openingPage2);
                 INFO("seed " << seed << " " << kPairs[p].resistance << " vs " << kPairs[p].occupier << " on "
-                             << kIslands[isl] << " opening " << opening);
+                             << kIslands[isl].display << " opening " << opening);
                 CHECK(opening >= kHistoryOpeningMinWords);
                 CHECK(opening <= kHistoryOpeningMaxWords);
                 CheckSharedLints(Str(rec.openingPage1), "openingPage1");
@@ -675,26 +932,23 @@ TEST_CASE("Faction history - word budgets and output lints over the generation m
                 CheckFactionInsertion(whole, kPairs[p].resistance);
                 CheckFactionInsertion(whole, kPairs[p].occupier);
 
-                // the four history insertion points spend four DIFFERENT
-                // constructions: independent draws would repeat one of five
-                // phrases in about ninety-six campaigns out of a hundred
+                // each faction's two insertion points spend two DIFFERENT
+                // constructions, so no phrase repeats two clicks apart
                 int spent = 0;
                 for (int i = 0; i < HistoryFactionPhraseCount(); i++)
                 {
-                    const int uses = CountSubstring(whole, FactionLabel(i, kPairs[p].occupier)) +
-                                     CountSubstring(whole, FactionLabel(i, kPairs[p].resistance));
-                    INFO("phrase " << i << " used " << uses << " times");
-                    CHECK(uses <= 1);
-                    spent += uses;
+                    const int occupierUses = CountSubstring(whole, FactionLabel(i, kPairs[p].occupier));
+                    const int resistanceUses = CountSubstring(whole, FactionLabel(i, kPairs[p].resistance));
+                    INFO("phrase " << i << " used " << occupierUses << " / " << resistanceUses << " times");
+                    CHECK(occupierUses <= 1);
+                    CHECK(resistanceUses <= 1);
+                    spent += occupierUses + resistanceUses;
                 }
                 CHECK(spent == kHistoryPhrases);
-                for (int i = 0; i < kHistoryPhrases; i++)
-                {
-                    for (int j = i + 1; j < kHistoryPhrases; j++)
-                    {
-                        CHECK(rec.phraseIndex[i] != rec.phraseIndex[j]);
-                    }
-                }
+                CHECK(rec.phraseIndex[0] != rec.phraseIndex[2]);
+                CHECK(rec.phraseIndex[1] != rec.phraseIndex[3]);
+                CheckFactionGroup(whole, kPairs[p].occupier, kPairs[p].occupierIrregular, false, ShippedNames());
+                CheckFactionGroup(whole, kPairs[p].resistance, kPairs[p].resistanceIrregular, true, ShippedNames());
             }
         }
     }
@@ -705,7 +959,9 @@ TEST_CASE("Faction history - biographies stay inside their budget and stay pre-c
 {
     // the widest name the shipped bank can assemble, so a boss dossier is
     // budgeted at its worst case
-    const RString kLongName("Heartless Jean-Baptiste \"The Fence-Builder\" Vakalalabure the Collaborator");
+    // The registry passes first and last name only (the nickname stays on the
+    // dossier heading); the widest pair the shipped banks can assemble.
+    const RString kLongName("Jean-Baptiste Vakalalabure");
     for (unsigned seed = 1; seed <= 61; seed += 2)
     {
         for (int p = 0; p < kPairCount; p++)
@@ -757,7 +1013,7 @@ TEST_CASE("Faction history - a biography asked for the dossier page's budget fit
     // boss name, three-word place names and a three-word faction display name
     // inside the longest construction.
     const RString kWidestName("Heartless Jean-Baptiste \"The Fence-Builder\" Vakalalabure the Collaborator");
-    const FactionPair kWidestPair = {"Egyptian Frontier Force", "Israel Defense Forces"};
+    const FactionPair kWidestPair = {"Egyptian Frontier Corps", "Jordanian Army", false, false};
 
     HistoryInputs in;
     in.resistanceName = kWidestPair.resistance;
@@ -1004,8 +1260,8 @@ TEST_CASE("Faction history - the island word survives a decorated display name",
     CHECK(Str(HistoryIslandWord(RString("Everon 2"))) == "Everon");
     CHECK(Str(HistoryIslandWord(RString("Kolgu4jev"))) == "this country"); // an interior digit is a code
 
-    // the island word appears only in the opening, only as "on <word>"
-    HistoryInputs in = MakeInputs(kPairs[0], "Lebanon (80's)", 3);
+    // the island word appears only in the opening
+    HistoryInputs in = MakeInputs(kPairs[0], "Lebanon (80's)", 3, "in Lebanon");
     for (int a = 0; a < HistoryVariantCount(); a++)
     {
         HistoryForcedIndices forced;
@@ -1014,6 +1270,168 @@ TEST_CASE("Faction history - the island word survives a decorated display name",
         INFO(Str(rec.openingPage1));
         CHECK(ContainsWord(Str(rec.openingPage1), "Lebanon"));
         CHECK(Str(rec.openingPage1).find("(80's)") == std::string::npos);
+    }
+}
+
+TEST_CASE("Faction history - islands take on, regions take their authored phrase",
+          "[game][guerrilla][legends][history]")
+{
+    CHECK(Str(HistoryIslandPhrase(RString("Malden"), RString())) == "on Malden");
+    CHECK(Str(HistoryIslandPhrase(RString("Desert Island"), RString())) == "on Desert Island");
+    CHECK(Str(HistoryIslandPhrase(RString("Nogova2"), RString())) == "on Nogova");
+    CHECK(Str(HistoryIslandPhrase(RString(""), RString())) == "in this country");
+    CHECK(Str(HistoryIslandPhrase(RString("Southern Sinai"), RString("in the Sinai"))) == "in the Sinai");
+    CHECK(Str(HistoryIslandPhrase(RString("Lebanon (80's)"), RString("in Lebanon"))) == "in Lebanon");
+
+    // every opening-A variant, on every world the shipped templates use
+    struct Expect
+    {
+        const char* display;
+        const char* phrase;
+        const char* locative; // what {IslandIn} must read
+        const char* noun;     // what {Island} must read
+        const char* wrong[3];
+    };
+    const Expect cases[] = {
+        {"Malden", "", "on Malden", "Malden", {"in Malden", "of on", nullptr}},
+        {"Everon", "", "on Everon", "Everon", {"in Everon", "of on", nullptr}},
+        {"Southern Sinai", "in the Sinai", "in the Sinai", "the Sinai", {"in Sinai", "on the Sinai", "Southern"}},
+        {"Lebanon (80's)", "in Lebanon", "in Lebanon", "Lebanon", {"on Lebanon", "of in", nullptr}},
+        {"", "", "in this country", "this country", {"on this country", "of in", nullptr}}};
+    for (const Expect& e : cases)
+    {
+        HistoryInputs in = MakeInputs(kPairs[0], e.display, 3, e.phrase);
+        for (int a = 0; a < HistoryVariantCount(); a++)
+        {
+            HistoryForcedIndices forced;
+            forced.opening[0] = a;
+            const HistoryRecord rec = GenerateHistoryForced(in, forced);
+            const std::string page = Str(rec.openingPage1);
+            INFO(e.display << " variant " << a << ": " << page);
+            const bool hasPhrase = page.find(e.locative) != std::string::npos;
+            const bool hasNoun = page.find(std::string("of ") + e.noun) != std::string::npos;
+            CHECK((hasPhrase || hasNoun));
+            for (const char* wrong : e.wrong)
+            {
+                if (wrong)
+                {
+                    CHECK(page.find(wrong) == std::string::npos);
+                }
+            }
+            CheckSentenceShape(page);
+            CheckRenderedProse(page);
+        }
+    }
+}
+
+TEST_CASE("Faction history - a biography is from a town, or from near anything else",
+          "[game][guerrilla][legends][history]")
+{
+    // Beat zero prefers a map FEATURE, and the zone and generic fallbacks are
+    // not towns either: "a shepherd from Outpost 1" reads as a barracks child.
+    HistoryInputs in = MakeInputs(kPairs[0], "Malden", 3);
+    const HistoryRecord rec = GenerateHistory(in);
+    REQUIRE(rec.eventPlaceKind[0] == HPKOther);      // Larche or Ghajar, both features here
+    REQUIRE(rec.eventPlaceKind[1] == HPKSettlement); // the towns
+    REQUIRE(rec.eventPlaceKind[2] == HPKSettlement);
+    const std::string feature = Str(rec.eventPlace[0]);
+    int fromSeen = 0;
+    for (int event = 0; event < kHistoryEvents; event++)
+    {
+        for (int hostile = 0; hostile <= 1; hostile++)
+        {
+            for (int variant = 0; variant < HistoryVariantCount(); variant++)
+            {
+                const std::string bio =
+                    Str(GenerateBioForced(rec, event, RString("Petra"), RString("FIA"), hostile != 0, 1, variant));
+                const std::string place = Str(rec.eventPlace[event]);
+                INFO(bio);
+                if (event == 0)
+                {
+                    CHECK(bio.find("from " + place) == std::string::npos);
+                    if (bio.find("from near " + place) != std::string::npos)
+                    {
+                        fromSeen++;
+                    }
+                }
+                else
+                {
+                    CHECK(bio.find("from near") == std::string::npos);
+                }
+            }
+        }
+    }
+    CHECK(fromSeen > 0); // the beat-zero cells do say where people are from
+
+    // zone names: a CITY zone is a town, anything else is not
+    HistoryInputs zones;
+    zones.resistanceName = "FIA";
+    zones.occupierName = "Soviet Army";
+    zones.islandName = "Malden";
+    zones.seed = 3;
+    zones.zoneNames.Add(RString("Outpost 1"));
+    zones.zoneIsTown.Add(false);
+    zones.zoneNames.Add(RString("Tyre"));
+    zones.zoneIsTown.Add(true);
+    zones.zoneNames.Add(RString("Camp"));
+    const HistoryRecord zoned = GenerateHistory(zones);
+    for (int k = 0; k < kHistoryEvents; k++)
+    {
+        INFO(Str(zoned.eventPlace[k]));
+        CHECK(zoned.eventPlaceKind[k] == (Str(zoned.eventPlace[k]) == "Tyre" ? HPKSettlement : HPKOther));
+    }
+
+    // a record written before the kinds existed renders exactly as it did
+    HistoryRecord legacy = rec;
+    for (int k = 0; k < kHistoryEvents; k++)
+    {
+        legacy.eventPlaceKind[k] = HPKUnknown;
+    }
+    for (int variant = 0; variant < HistoryVariantCount(); variant++)
+    {
+        const std::string bio = Str(GenerateBioForced(legacy, 0, RString("Petra"), RString("FIA"), false, 1, variant));
+        CHECK(bio.find("from near") == std::string::npos);
+    }
+}
+
+TEST_CASE("Faction history - a biography draw can exclude variants and recover its own",
+          "[game][guerrilla][legends][history]")
+{
+    const HistoryRecord rec = GenerateHistory(MakeInputs(kPairs[0], "Malden", 9));
+    for (int event = 0; event < kHistoryEvents; event++)
+    {
+        for (int hostile = 0; hostile <= 1; hostile++)
+        {
+            const RString name("Henry Moore");
+            const RString faction = hostile ? RString("Soviet Army") : RString("FIA");
+            const unsigned long long key = HashKey("boss_0", 9);
+            // no exclusions: the same text GenerateBio returns
+            int first = -1;
+            const RString plain =
+                GenerateBioDistinct(rec, event, name, faction, hostile != 0, key, kHistoryBioPageWords, 0, &first);
+            CHECK(Str(plain) == Str(GenerateBio(rec, event, name, faction, hostile != 0, key, kHistoryBioPageWords)));
+            REQUIRE(first >= 0);
+            CHECK(HistoryBioVariantOf(rec, event, name, faction, hostile != 0, plain) == first);
+            // drawing all six without replacement visits six distinct variants
+            unsigned used = 0;
+            for (int n = 0; n < HistoryVariantCount(); n++)
+            {
+                int variant = -1;
+                const RString bio = GenerateBioDistinct(rec, event, name, faction, hostile != 0, key,
+                                                        kHistoryBioPageWords, used, &variant);
+                REQUIRE(variant >= 0);
+                CHECK((used & (1u << variant)) == 0);
+                CHECK(HistoryBioVariantOf(rec, event, name, faction, hostile != 0, bio) == variant);
+                used |= 1u << variant;
+            }
+            // and a full mask draws anyway rather than return nothing
+            int again = -1;
+            CHECK(GenerateBioDistinct(rec, event, name, faction, hostile != 0, key, kHistoryBioPageWords, used, &again)
+                      .GetLength() > 0);
+            CHECK(again == first);
+            // text from another name or older templates is not recognised
+            CHECK(HistoryBioVariantOf(rec, event, RString("Someone Else"), faction, hostile != 0, plain) == -1);
+        }
     }
 }
 
@@ -1089,13 +1507,16 @@ namespace
 // is what makes the worked examples a contract instead of decoration.
 constexpr unsigned kGoldenSeed = 3;
 
-HistoryInputs GoldenInputs(const char* resistance, const char* occupier, const char* island, const char* feature,
+HistoryInputs GoldenInputs(const FactionPair& pair, const char* island, const char* islandPhrase, const char* feature,
                            const char* firstTown, const char* secondTown)
 {
     HistoryInputs in;
-    in.resistanceName = resistance;
-    in.occupierName = occupier;
+    in.resistanceName = pair.resistance;
+    in.occupierName = pair.occupier;
+    in.resistanceIrregular = pair.resistanceIrregular;
+    in.occupierIrregular = pair.occupierIrregular;
     in.islandName = island;
+    in.islandPhrase = islandPhrase;
     in.seed = kGoldenSeed;
     in.settlements.Add(MakePlace(firstTown, true));
     in.settlements.Add(MakePlace(secondTown, true));
@@ -1108,7 +1529,7 @@ HistoryInputs GoldenInputs(const char* resistance, const char* occupier, const c
 TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Malden",
           "[game][guerrilla][legends][history]")
 {
-    const HistoryInputs in = GoldenInputs("FIA", "Soviet Army", "Malden", "Larche", "Houdan", "Chapoi");
+    const HistoryInputs in = GoldenInputs(kPairs[0], "Malden", "", "Larche", "Houdan", "Chapoi");
     HistoryForcedIndices forced;
     forced.opening[0] = 0;
     forced.opening[1] = 0;
@@ -1129,7 +1550,7 @@ TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Ma
           "complaint could bring armed visitors to the same door where neighbours once gathered.");
     CHECK(Str(rec.openingPage2) ==
           "People near Houdan accepted a settlement they could live with. When the authorities broke it, even "
-          "patient neighbours talked of fighting. Fighting followed. FIA soldiers remember the dead through "
+          "patient neighbours talked of fighting. Fighting followed. FIA fighters remember the dead through "
           "surviving friends, who can still describe their laughter as readily as their deaths.");
     CHECK(Str(rec.eventTitle[0]) == "Terrace Claims near Larche");
     CHECK(Str(rec.eventText[0]) ==
@@ -1145,7 +1566,7 @@ TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Ma
     CHECK(Str(rec.eventText[2]) ==
           "Defenders near Chapoi stopped an advancing column for two days without relief. The column broke "
           "through on the third day, leaving local fighters dead and others missing. Survivors later gave FIA "
-          "fighters an account of the positions held and the names of those who failed to return.");
+          "members an account of the positions held and the names of those who failed to return.");
 
     const RString bio = GenerateBioForced(rec, 0, RString("Petra"), RString("FIA"), false, 0, 0);
     CHECK(Str(bio) == "Petra worked as a farmhand near Larche until the landlord evicted the family from its rented "
@@ -1156,7 +1577,7 @@ TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance
           "[game][guerrilla][legends][history]")
 {
     // the role-swapped case: the LoBo IDF descriptor is the RESISTANCE here
-    const HistoryInputs in = GoldenInputs("IDF", "Hizballah", "Lebanon (80's)", "Ghajar", "Tyre", "Saida");
+    const HistoryInputs in = GoldenInputs(kPairs[1], "Lebanon (80's)", "in Lebanon", "Ghajar", "Tyre", "Saida");
     HistoryForcedIndices forced;
     for (int i = 0; i < kHistoryOpenSlots; i++)
     {
@@ -1179,12 +1600,12 @@ TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance
           "arguing.");
     CHECK(Str(rec.openingPage2) ==
           "Representatives near Tyre came home with an agreement and promises. When the authorities broke it, "
-          "neighbours demanded to know what happened. IDF fighters lost people in the fighting that followed. "
+          "neighbours demanded to know what happened. IDF troops lost people in the fighting that followed. "
           "Some families still ask returning fighters for news nobody wants to give.");
     CHECK(Str(rec.eventTitle[1]) == "Pump Restrictions near Tyre");
     CHECK(Str(rec.eventText[1]) ==
           "Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road "
-          "open. The terms also barred armed guards from the pumps. Hizballah troops seized the pumps and "
+          "open. The terms also barred armed guards from the pumps. Hizballah forces seized the pumps and "
           "began checking road traffic twice a day, restricting the access the witnesses had secured.");
     CHECK(Str(rec.eventTitle[2]) == "The Fires near Saida");
     CHECK(Str(rec.eventText[2]) ==
@@ -1199,12 +1620,12 @@ TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance
           "courier's address book, found a friend's home address inside, and arrested the friend there.");
 }
 
-TEST_CASE("Faction history - worked example C, PLO East against the IDF on Sinai",
+TEST_CASE("Faction history - worked example C, the PLO against the IDF in the Sinai",
           "[game][guerrilla][legends][history]")
 {
-    // PLO_East reaches the prose as "PLO East": WorldNames::FactionDisplayName
-    // rewrites the underscore on the class-name fallback branch
-    const HistoryInputs in = GoldenInputs("PLO East", "IDF", "Sinai", "Nuweiba", "El Tor", "Ras Nasrani");
+    // PLO and its EAST twin PLO_East both author displayName "PLO"
+    const HistoryInputs in =
+        GoldenInputs(kPairs[2], "Southern Sinai", "in the Sinai", "Nuweiba", "El Tor", "Ras Nasrani");
     HistoryForcedIndices forced;
     for (int i = 0; i < kHistoryOpenSlots; i++)
     {
@@ -1221,23 +1642,23 @@ TEST_CASE("Faction history - worked example C, PLO East against the IDF on Sinai
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "For generations, families near Nuweiba in Sinai taught children where they belonged. Then outsiders "
-          "arrived with papers saying the children had no claim. Under IDF forces, residents watched their "
-          "words in public. Families argued behind closed doors about whether silence was keeping anyone safe "
-          "anymore.");
+          "For generations, families near Nuweiba in the Sinai taught children where they belonged. Then "
+          "outsiders arrived with papers saying the children had no claim. Once IDF forces arrived, residents "
+          "watched their words in public. Families argued behind closed doors about whether silence was keeping "
+          "anyone safe anymore.");
     CHECK(Str(rec.openingPage2) ==
           "Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought "
-          "copies to confront the guards. Later fighting left empty places at family tables. PLO East troops "
+          "copies to confront the guards. Later fighting left empty places at family tables. PLO fighters "
           "keep the names, including those neighbours still find difficult to discuss.");
     CHECK(Str(rec.eventTitle[0]) == "Water Rights near Nuweiba");
     CHECK(Str(rec.eventTitle[2]) == "Delaying Action near Ras Nasrani");
     CHECK(Str(rec.eventText[2]) ==
           "Defenders with two machine guns held an advancing column near Ras Nasrani until dusk. The delay "
           "allowed families to leave the coastal route, but several defenders died before the survivors "
-          "withdrew. The coast fell the next day. PLO East units preserved the survivors' account of the "
+          "withdrew. The coast fell the next day. PLO members preserved the survivors' account of the "
           "action and the losses.");
 
-    const RString bio = GenerateBioForced(rec, 2, RString("Petra"), RString("PLO East"), false, 0, 2);
+    const RString bio = GenerateBioForced(rec, 2, RString("Petra"), RString("PLO"), false, 0, 2);
     CHECK(Str(bio) == "An orchard worker from Ras Nasrani, Petra led relatives away from fighting along familiar farm "
                       "roads. Among displaced families, the sociable picker entertained new friends with stories from "
                       "years on the harvest crews.");
@@ -1253,7 +1674,7 @@ TEST_CASE("Faction history - the record round-trips as resolved prose", "[game][
     std::filesystem::create_directories(dir);
     const std::filesystem::path archivePath = dir / "faction-history-roundtrip.bin";
 
-    const HistoryInputs in = MakeInputs(kPairs[2], "Sinai", 987654321);
+    const HistoryInputs in = MakeInputs(kPairs[2], "Southern Sinai", 987654321, "in the Sinai");
     const HistoryRecord written = GenerateHistory(in);
     REQUIRE(written.Present());
     {
@@ -1292,8 +1713,12 @@ TEST_CASE("Faction history - the record round-trips as resolved prose", "[game][
     }
     // a biography generated from the reloaded record is the same prose: nothing
     // is rerolled by a save/load cycle
-    CHECK(Str(GenerateBio(loaded, 2, RString("Petra"), RString("PLO East"), false, 77)) ==
-          Str(GenerateBio(written, 2, RString("Petra"), RString("PLO East"), false, 77)));
+    for (int k = 0; k < kHistoryEvents; k++)
+    {
+        CHECK(loaded.eventPlaceKind[k] == written.eventPlaceKind[k]);
+    }
+    CHECK(Str(GenerateBio(loaded, 2, RString("Petra"), RString("PLO"), false, 77)) ==
+          Str(GenerateBio(written, 2, RString("Petra"), RString("PLO"), false, 77)));
 
     std::filesystem::remove(archivePath);
 }

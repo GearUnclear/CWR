@@ -20,6 +20,12 @@
 // ambient-traffic hulls a given island's data set ships. Key schema:
 // guerrilla-mode/config/guerrilla-factions.hpp and FACTION-PACKS.md.
 //
+// Every class here authors a displayName: it is how the journal and the
+// generated campaign history name the faction ("Egyptian Frontier Corps
+// troops"), and without one the prose falls back to a spaced class name.
+// `irregular = 1` marks an insurgent or militia roster (Hizballah, PLO); the
+// history then calls its people "fighters" or "members" instead of "troops".
+//
 // Every class this file names is validated by
 //   PoseidonTools guerrilla lint --data-dir "<Classic>" --mod "<@LoBo>"
 // which must report the eight rosters with zero unresolved keys.
@@ -29,6 +35,8 @@ class CfgGuerrillaFactions
     class IDF // side WEST - occupier by default, resistance-capable since plan 16
     {
         side = "WEST";
+        // the Israel Defense Forces, under the acronym the period used
+        displayName = "IDF";
         // No re-sided IDF INFANTRY roster exists in @LoBo: every LoBoIs man
         // hangs off LoBoShayetetWB : SoldierWB and inherits side=1. (LoBoIs is
         // not wholly side=1 - LoBo_paraE is side=0, LoBo_paraG/_haloparaG are
@@ -106,6 +114,8 @@ class CfgGuerrillaFactions
     class EgyptFrontier // resistance descriptor - side EAST
     {
         side = "EAST";
+        // the corps the LoBo_Egypt_FrtCrp roster is
+        displayName = "Egyptian Frontier Corps";
         // Same story as EgyptArmy below: side=0 all the way up from
         // LoBo_Egypt_General1 : SoldierEB, no re-sided Egyptian roster exists,
         // so no twin. Authored explicitly rather than left absent - every other
@@ -189,6 +199,7 @@ class CfgGuerrillaFactions
     class EgyptArmy // side EAST - the Egyptian regular army (LoBoEgypt.pbo)
     {
         side = "EAST";
+        displayName = "Egyptian Army";
         // No re-sided Egyptian roster exists: every LoBoEgypt class inherits
         // side=0 from LoBo_Egypt_General1 : SoldierEB. No twin -> no rebase.
         sideTwin = "";
@@ -251,6 +262,7 @@ class CfgGuerrillaFactions
     class Syria // side EAST - small roster, two camo families (LoBoSyria.pbo)
     {
         side = "EAST";
+        displayName = "Syrian Army";
         // No re-sided Syrian roster: LoBo_WL_Infantry_SyriaBase pins side=0
         // and every descendant inherits it. No twin -> no rebase.
         sideTwin = "";
@@ -314,6 +326,7 @@ class CfgGuerrillaFactions
     class Jordan // side GUER - the mod's only regular army on the resistance side
     {
         side = "GUER";
+        displayName = "Jordanian Army";
         // No EAST/WEST Jordanian twin exists, so Jordan is the faction that
         // CANNOT rebase on a GUER/GUER collision - rebase the other one.
         sideTwin = "";
@@ -395,6 +408,8 @@ class CfgGuerrillaFactions
     class Hizballah // side EAST - the richest irregular roster in the mod
     {
         side = "EAST";
+        displayName = "Hizballah";
+        irregular = 1; // the history calls its people "fighters", never "troops"
         // No re-sided Hizballah roster: LoBo_Hizballah_base is side=0 and
         // every descendant inherits it. No twin -> no rebase.
         sideTwin = "";
@@ -494,6 +509,8 @@ class CfgGuerrillaFactions
     class PLO // side GUER - Palestinian irregulars (LoBoTer.pbo, the *R twins)
     {
         side = "GUER";
+        displayName = "PLO";
+        irregular = 1; // the history calls its people "fighters", never "troops"
         // LoBoTer is the mod's OWN faction-swap mechanism: nearly every unit
         // ships as *R (side 2) / *E (side 0) / *W (side 1). PLO_East below is
         // the EAST twin of this exact roster, and this pair is the ONLY twin
@@ -562,6 +579,9 @@ class CfgGuerrillaFactions
     class PLO_East // side EAST twin of PLO - the *E LoBoTer roster
     {
         side = "EAST";
+        // the same organisation as PLO, re-sided: one roster, one name
+        displayName = "PLO";
+        irregular = 1; // the history calls its people "fighters", never "troops"
         // Rebase target for PLO on a GUER/GUER collision (e.g. Jordan
         // occupier). A *W (WEST) twin set also exists in LoBoTer but is
         // unreachable with the current factions - IDF is the only WEST

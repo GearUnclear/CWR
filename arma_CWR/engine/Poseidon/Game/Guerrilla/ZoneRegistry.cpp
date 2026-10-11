@@ -667,6 +667,7 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     // already read (and acted on) in LoadFromParams; re-read so the tuning
     // struct is complete for anyone inspecting it
     _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
+    _tuning.islandPhrase = cfg.ReadValue("islandPhrase", _tuning.islandPhrase);
 
     const ParamEntry* zones = cfg.FindEntry("Zones");
     if (!zones)

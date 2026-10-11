@@ -8,11 +8,16 @@
 // stand - told in plain dossier prose, past tense, with the shipped
 // factions as the present inheritors of a quarrel much older than either.
 //
-// Bare faction display names modify five plural group nouns, for example
-// "Soviet Army troops" or "FIA units". Full names and acronyms therefore read
-// naturally without an article, possessive, or invented founding date.
-// The five labels are spent as a permutation across four history insertion
-// points. The remaining label is available to a biography that names a faction.
+// Bare faction display names modify a plural group noun, for example
+// "Soviet Army troops" or "FIA fighters". Full names and acronyms therefore read
+// naturally without an article, possessive, or invented founding date. Which
+// nouns a slot may take depends on the slot and the faction: a slot whose verb
+// is about remembering people ("remember the dead", "keep the names") takes a
+// people noun, never "units" or "forces"; "fighters" and "members" belong to an
+// irregular roster, "troops" and "soldiers" to a regular army; a noun that
+// repeats the name's own last word ("Frontier Force forces") is never added,
+// and a name that is already a plural group ("Israel Defense Forces") stands
+// bare. Within those rules each faction's two slots take distinct labels.
 //
 // The record is persisted VERBATIM as resolved prose plus indices plus a
 // version, so reopening the journal or loading a save can never reroll it.
@@ -36,7 +41,7 @@ namespace Poseidon::Guerrilla
 
 // Bumping this changes nothing for a campaign already under way: the record is
 // persisted as resolved prose and is never regenerated on load.
-constexpr int kHistoryVersion = 2;
+constexpr int kHistoryVersion = 3;
 constexpr int kHistoryEvents = 3;    // beats: ancient grievance, broken settlement, stand
 constexpr int kHistoryOpenSlots = 4; // opening prose slots A B C D
 constexpr int kHistoryPhrases = 4;   // faction constructions the history itself spends
@@ -58,9 +63,26 @@ constexpr int kHistoryBioPageWords = 45;
 struct HistoryInputs
 {
     RString resistanceName, occupierName, islandName; // "" island -> "this country"
+    // the descriptors' `irregular` keys (WorldNames FactionIsIrregular)
+    bool resistanceIrregular = false, occupierIrregular = false;
+    // the template's locative phrase for the island ("in the Sinai"); "" reads
+    // "on <island word>", or "in this country" when there is no island word
+    RString islandPhrase;
     AutoArray<PlaceName> settlements, features;
     AutoArray<RString> zoneNames; // ZoneRegistry fallback when the world has no Names block
+    AutoArray<bool> zoneIsTown;   // parallel to zoneNames (CITY zones); a missing entry reads false
     unsigned seed = 0;
+};
+
+// What kind of place an event happened at, persisted beside its name so a
+// biography generated later can say "from near <hill>" rather than "from
+// <hill>". Unknown is a record written before the kind existed: it renders as
+// it always did.
+enum HistoryPlaceKind
+{
+    HPKUnknown = 0,
+    HPKSettlement = 1,
+    HPKOther = 2 // a map feature, a zone name or the generic table
 };
 
 struct HistoryRecord : public SerializeClass
@@ -73,11 +95,13 @@ struct HistoryRecord : public SerializeClass
     // opening slot B, opening slot D, event one, event two. Persisted so a
     // biography generated later, at row creation, can take the one construction
     // the history did not use.
+    // -1 is a bare name that is already a plural group ("Israel Defense Forces").
     int phraseIndex[kHistoryPhrases] = {0, 0, 0, 0};
     RString openingPage1, openingPage2; // two BLOCKS; Render decides pages
     RString eventTitle[kHistoryEvents];
     RString eventText[kHistoryEvents];
     RString eventPlace[kHistoryEvents];
+    int eventPlaceKind[kHistoryEvents] = {HPKUnknown, HPKUnknown, HPKUnknown};
 
     bool Present() const { return version != 0; }
     // The construction index none of phraseIndex[] holds; 0 if a corrupt record
@@ -118,10 +142,39 @@ RString GenerateBioForced(const HistoryRecord& history, int eventIndex, const RS
                           const RString& factionName, bool hostile, unsigned long long key, int forcedVariant,
                           int maxWords = kHistoryBioMaxWords);
 
+// GenerateBio for a caller drawing several biographies in one campaign: the
+// variants whose bit is set in excludedVariants are skipped (draw without
+// replacement), the chosen variant comes back through outVariant. When every
+// variant is excluded the walk ignores the mask rather than return nothing.
+// With excludedVariants == 0 the result is exactly GenerateBio's.
+RString GenerateBioDistinct(const HistoryRecord& history, int eventIndex, const RString& displayName,
+                            const RString& factionName, bool hostile, unsigned long long key, int maxWords,
+                            unsigned excludedVariants, int* outVariant);
+
+// The variant a persisted biography was rendered from, recovered by rendering
+// every variant of its cell with the same name and comparing; -1 when none
+// matches (a biography from older templates, or a different name).
+int HistoryBioVariantOf(const HistoryRecord& history, int eventIndex, const RString& displayName,
+                        const RString& factionName, bool hostile, const RString& bio);
+
 // "Lebanon (80's)" -> "Lebanon"; "Lebanon80" -> "Lebanon"; "Malden" -> "Malden";
-// "" or a still-numeric result -> "this country". Used ONLY in opening slot A,
-// as a bare place name, including after "of" or "in".
+// "" or a still-numeric result -> "this country".
 RString HistoryIslandWord(const RString& display);
+
+// The island as a place, preposition first: the authored phrase when there is
+// one ("in the Sinai"), else "on <island word>" (every stock world is an
+// island), else "in this country". Used ONLY in opening slot A, as {IslandIn};
+// {Island} there is the same phrase without its preposition ("the Sinai").
+RString HistoryIslandPhrase(const RString& islandDisplay, const RString& authoredPhrase);
+
+// The faction construction for one insertion point: the name plus the label
+// at phraseIndex, or the bare name for an index of -1. Exposed for the lints.
+RString HistoryFactionGroup(const RString& factionName, int phraseIndex);
+
+// The labels insertion point `slot` (0 opening B, 1 opening D, 2 event one,
+// 3 event two) may give a faction of that name and kind, as a bit per label
+// index; 0 means the name stands bare.
+unsigned HistoryAllowedPhrases(int slot, const RString& factionName, bool irregular);
 
 // Whitespace-separated token count; the one word counter the budgets use.
 int HistoryWordCount(const char* text);
@@ -134,7 +187,7 @@ const char* HistoryTemplateString(int i);
 
 // Table shape, for the exhaustive budget lint.
 int HistoryVariantCount();       // 6, per opening slot / per beat / per bio cell
-int HistoryFactionPhraseCount(); // 5
+int HistoryFactionPhraseCount(); // 6
 const char* HistoryFactionPhrase(int i);
 
 } // namespace Poseidon::Guerrilla

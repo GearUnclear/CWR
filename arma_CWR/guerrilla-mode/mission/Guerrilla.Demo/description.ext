@@ -105,6 +105,8 @@ class CfgGuerrillaFactions
     class GUER // resistance descriptor
     {
         side = "GUER";
+        displayName = "FIA"; // the override replaces the library class whole
+        irregular = 1;
         tiers[] = {"SoldierGB"};
         tierThresholds[] = {};
         // role variants for hold squads / a future GUER-occupier swap; the

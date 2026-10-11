@@ -56,12 +56,20 @@ void CollectWorldPlaceNames(AutoArray<PlaceName>& out);
 void SettlementNames(const AutoArray<PlaceName>& all, AutoArray<PlaceName>& out);
 void FeatureNames(const AutoArray<PlaceName>& all, AutoArray<PlaceName>& out);
 
-// displayName, else class name with '_' rewritten to ' ' ("PLO_East" -> "PLO
-// East"; the LoBo descriptors author no displayName), else the side string.
+// displayName, else the class name spaced for prose ('_' and CamelCase
+// boundaries become one space: "PLO_East" -> "PLO East", "EgyptFrontier" ->
+// "Egypt Frontier"; a defensive fallback, since every shipped descriptor now
+// authors a displayName), else the side string.
 // Lives here so the Game layer (FactionHistory, LegendRegistry) and the UI layer
 // (GuerrillaJournalPages' FactionDisplay, which becomes a forwarder) share one
 // copy.  An authored displayName is never rewritten.
 RString FactionDisplayName(const ZoneRegistry& registry, const RString& className, const RString& side);
+
+// The descriptor's optional `irregular` key (className's, else the side's): an
+// insurgent or militia roster rather than a regular army.  The history reads
+// it to call members "fighters" rather than "troops" or "soldiers".  Absent,
+// empty, 0, false or no all read as a regular army.
+bool FactionIsIrregular(const ZoneRegistry& registry, const RString& className, const RString& side);
 
 } // namespace Guerrilla
 } // namespace Poseidon

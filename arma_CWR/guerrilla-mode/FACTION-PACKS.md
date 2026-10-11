@@ -129,6 +129,14 @@ carries. Everything else has a fallback (section 5) or is simply absent.
 stored and readable from script via `gmFactionValue "displayName"`, but the
 player sees `UDFaction`. Name the class the way you want it read.
 
+**The journal and the generated campaign history use `displayName`**, so author
+one: without it they fall back to the class name with underscores and CamelCase
+split ("UD Faction"). The history modifies the name with a group noun ("Soviet
+Army troops"); a name that already ends in a plural group noun ("Israel Defense
+Forces") stands bare, and no noun that repeats the name's last word is ever
+added. Set `irregular = 1;` on an insurgent or militia roster so its people are
+"fighters" or "members" rather than "troops" or "soldiers".
+
 ## 4. The key reference
 
 `ZoneRegistry::LoadFactions` reads the arrays below by name; **every other

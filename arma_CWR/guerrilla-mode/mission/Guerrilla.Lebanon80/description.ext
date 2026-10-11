@@ -37,6 +37,10 @@ class CfgGuerrillaZones
     // player. The resistance cycler therefore picks a ROSTER, not a side.
     playerSide = "EAST";
 
+    // How the campaign history names this world as a place. The default,
+    // "on <world>", fits the stock islands; this is mainland, so "in".
+    islandPhrase = "in Lebanon";
+
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60; ...).
     //

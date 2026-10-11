@@ -1789,3 +1789,77 @@ TEST_CASE("Legend registry - a stale roster is corrected without another charact
     CHECK(Str(registry.PollCompanionsForTest(OneCompanion("Petra", 100))).empty());
     CHECK(Journal::Instance().Revision() == journalRev + 1);
 }
+
+TEST_CASE("Legend registry - no campaign shows two identical biographies", "[game][guerrilla][legends][registry]")
+{
+    // Boss biographies used to be rolled independently, and about one campaign
+    // in six showed two commanders with the same text.  They are now drawn
+    // without replacement: three commanders hang on three different history
+    // beats, so no two share a place or a biography.  Companions recruited
+    // into the same campaign never repeat one another's either.
+    Journal::Instance().Clear();
+    int campaigns = 0;
+    for (unsigned seed = 1; seed <= 801; seed += 2)
+    {
+        LegendRegistry registry;
+        registry.SeedForTest(seed, MakeInputs());
+        registry.PollCompanionsForTest(MakeSnapshot({"Petra", "Anna", "Ivo", "Mila", "Josip", "Vera", "Tomas"},
+                                                    {0, 0, 0, 0, 0, 0, 0}, {true, true, true, true, true, true, true}));
+        std::vector<std::string> bossBios, companionBios;
+        std::vector<int> bossBeats;
+        for (int i = 0; i < registry.RowCount(); i++)
+        {
+            const LegendRow& row = registry.Row(i);
+            const std::string bio = Str(row.bio);
+            INFO("seed " << seed << " row " << Str(row.id) << ": " << bio);
+            REQUIRE_FALSE(bio.empty());
+            // the biography names the person, not the nickname: "Cruel Henry
+            // Moore approved..." read as a legal name
+            CHECK(bio.find(Str(row.first) + " " + Str(row.last)) != std::string::npos);
+            for (const RString* word : {&row.prefix, &row.describer, &row.title})
+            {
+                if (word->GetLength() > 0)
+                {
+                    CHECK(bio.find(Str(*word)) == std::string::npos);
+                }
+            }
+            // the same template with another name in it is still the same
+            // biography: compare with each one's own name taken out
+            std::string shape = bio;
+            const std::string name = Str(row.first) + " " + Str(row.last);
+            if (shape.find(name) != std::string::npos)
+            {
+                shape.replace(shape.find(name), name.size(), "{Name}");
+            }
+            if (row.kind == LKBoss)
+            {
+                bossBios.push_back(shape);
+                bossBeats.push_back(row.bioEvent);
+            }
+            else
+            {
+                companionBios.push_back(shape);
+            }
+        }
+        REQUIRE(bossBios.size() == (size_t)LegendRegistry::kBossCount);
+        REQUIRE(companionBios.size() == 7);
+        INFO("seed " << seed);
+        for (size_t a = 0; a < bossBios.size(); a++)
+        {
+            for (size_t b = a + 1; b < bossBios.size(); b++)
+            {
+                CHECK(bossBios[a] != bossBios[b]);
+                CHECK(bossBeats[a] != bossBeats[b]); // three commanders, three places
+            }
+        }
+        for (size_t a = 0; a < companionBios.size(); a++)
+        {
+            for (size_t b = a + 1; b < companionBios.size(); b++)
+            {
+                CHECK(companionBios[a] != companionBios[b]);
+            }
+        }
+        campaigns++;
+    }
+    CHECK(campaigns == 401);
+}
