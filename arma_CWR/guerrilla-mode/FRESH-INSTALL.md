@@ -38,8 +38,12 @@ pwsh -File ./setup-guerrilla.ps1 `
   -Tools './dist/x64-win-rwdi/PoseidonTools.exe'
 ```
 
-Add `-CheckOnly` to validate without installing. This targets Classic 1.99; do
-not pass Remaster or Demo as `GameDir`. A Demo install is not needed for setup.
+Add `-CheckOnly` to validate without installing. This targets Classic 1.99.
+Setup refuses a `GameDir` it recognises as an official Remaster or Demo package
+(a root `dtaExt` folder, or Bohemia's `bin/remaster.bin`, `mainMenu.hpp` or
+`splashLogo.hpp`), because it would replace that package's own `remaster.cpp`,
+`resource-extra.cpp` and Options headers. Remaster support is planned
+separately (issue #67). A Demo install is not needed for setup.
 
 Setup installs the sky/cloud compatibility shim, UD menu, Options headers and
 translations, five OFL fonts, faction library, shared `gmcore`, and missions for
