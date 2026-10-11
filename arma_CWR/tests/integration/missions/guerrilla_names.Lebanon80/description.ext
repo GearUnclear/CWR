@@ -24,9 +24,9 @@ class CfgGuerrillaZones
     // Side resolution when the new-game UI selections (gmSelOccupier /
     // gmSelResistance) are unset - i.e. any direct launch of this mission.
     // Values are CfgGuerrillaFactions class names from the MERGED faction
-    // table (the @LoBo roster in @lobofixup); the engine resolves
-    // them to sides (ZoneRegistry::ResolveSides): IDF -> WEST occupier,
-    // Hizballah -> EAST resistance.
+    // table (the @LoBo roster from guerrilla-mode/config/lobo-factions.hpp);
+    // the engine resolves them to sides (ZoneRegistry::ResolveSides): IDF ->
+    // WEST occupier, Hizballah -> EAST resistance.
     defaultOccupier = "IDF";
     defaultResistance = "Hizballah";
 
@@ -143,9 +143,11 @@ class CfgGuerrillaZones
 // to be copied in here key-for-key from Guerrilla.Sinai, which is exactly the
 // duplication that let the two Hizballah copies drift (this one had grown the
 // issue #25 outfit family, Sinai's had not). Both rosters are
-// island-independent, so they now live once in the mod-level config
-// tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp (mounted after @LoBo),
-// together with the rest of the @LoBo roster; the surviving Hizballah is this
+// island-independent, so they now live once at the mod level, in
+// guerrilla-mode/config/lobo-factions.hpp (installed into
+// @LoBo/bin/config.cpp by tools/lobo/install-lobo-factions.ps1 and #included
+// by the @lobofixup test fixture's bin/config.cpp), together with the rest of
+// the @LoBo roster; the surviving Hizballah is this
 // file's former copy, the more complete of the two. The engine unions that
 // global table with the block below (Game/Guerrilla/FactionSources.*), this
 // file winning on a class-name collision.
@@ -202,9 +204,10 @@ class CfgGuerrillaFactions
 // descriptors above (the Hizballah / IDF weapon -> magazine pairs the loot
 // keys use) plus the civilian cars the CIV descriptor fields. The engine
 // re-probes every class at load and drops what the package lacks (logged,
-// non-fatal). The LoBoammo-armed hulls need the @lobofixup patched pbos in
-// strict/autotest lanes, like the faction ladders. The dealer body is the
-// stock LoBo civilian.
+// non-fatal). The LoBoammo-armed hulls load from a stock @LoBo: the config
+// reader coerces its malformed `0.0.1` tracerColor tokens (only
+// --strict-config keeps them raw), and `mod doctor --fix` repairs the bytes.
+// The dealer body is the stock LoBo civilian.
 class CfgGuerrillaMarket
 {
     dealerShare = 0.34;

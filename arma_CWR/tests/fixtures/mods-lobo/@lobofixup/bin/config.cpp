@@ -1,20 +1,28 @@
-// Data fixup for the @LoBo mod (a THIRD-PARTY 2005-era community addon set
+// Test fixture for the @LoBo mod (a THIRD-PARTY 2005-era community addon set
 // used as the guerrilla-mode swappability test bed - see the guerrilla_sinai
 // tests). Mount AFTER @LoBo: --mod "@LoBo;.../@lobofixup".
 //
-// WHY: LoBoammo.pbo and LoBo_airammo.pbo ship a malformed float literal in
-// eleven CfgAmmo classes: tracerColor[]={0.8,0.5,0.0.1,...} - note "0.0.1".
-// The original 1.96 engine silently coerced that token; this engine's config
-// reader falls back to evaluating non-numeric tokens as script expressions,
-// so every read of those entries logs "Script error at '0.0|#|.1': Unknown
-// operator" - and under --autotest ANY script error is a hard abort
-// (GameStateStringtableInfoFunctions::DisplayErrorMessage, Game/Scripting/
-// ExpressExt.cpp), which kills the game with exit code 2 during boot.
+// WHY IT IS STILL MOUNTED: the CfgAddons preload roster below and the
+// #include of guerrilla-mode/config/lobo-factions.hpp at the end. The lobo
+// lane tests depend on both (prop_spawn_safety, for one, needs LoBolebObject
+// preloaded), so this file stays load-bearing on a fully repaired @LoBo.
 //
-// This deferred-merge config overwrites just those arrays with the obviously
-// intended values (blue channel 0.0, alpha kept), letting integration tests
-// mount the otherwise-unmodified @LoBo. No gameplay change beyond the tracer
-// tint of a few tank shells.
+// HISTORY: LoBoammo.pbo and LoBo_airammo.pbo ship a malformed float literal in
+// eleven CfgAmmo classes: tracerColor[]={0.8,0.5,0.0.1,...} - note "0.0.1".
+// The original 1.96 engine silently coerced that token. This engine's config
+// reader used to evaluate it as a script expression instead, which logged
+// "Script error at '0.0|#|.1': Unknown operator" on every read and, under
+// --autotest, killed the boot with exit code 2. That no longer happens: since
+// issue #54 D1 the reader coerces the token to its strtod prefix at load
+// (ClassifyToleratedLiteral, IO/ParamFile/ParamFile.cpp; only --strict-config
+// keeps it raw), and `PoseidonTools mod doctor <@LoBo> --fix` repairs the
+// bytes inside @LoBo itself.
+//
+// So the CfgAmmo block below, which overwrites just those arrays with the
+// obviously intended values (blue channel 0.0, alpha kept), and the optional
+// addons/ shadow pbos from gen-patched-pbos.ps1 are no longer required. Both
+// are harmless and stay as belt and braces. No gameplay change beyond the
+// tracer tint of a few tank shells.
 class CfgPatches
 {
     class LoBoFixup

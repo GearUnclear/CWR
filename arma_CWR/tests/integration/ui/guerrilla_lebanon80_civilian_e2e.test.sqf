@@ -43,8 +43,9 @@
 //  and several hundred further frames have run.
 //
 //  PRECONDITIONS (see the .toml): install-missions.ps1 (no -IncludeWorld
-//  since issue #54 C4); the one-time @lobofixup patched pbos, mounted after
-//  @LoBo since they carry the @LoBo faction roster (issue #54 A4).
+//  since issue #54 C4); @LoBo repaired once with `mod doctor --fix`; and
+//  @lobofixup mounted after @LoBo since its bin/config.cpp carries the @LoBo
+//  faction roster (issue #54 A4).
 // ============================================================================
 
 triSetLanguage "English"

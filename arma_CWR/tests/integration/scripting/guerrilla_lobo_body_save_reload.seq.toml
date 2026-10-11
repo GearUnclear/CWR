@@ -21,7 +21,6 @@
 # see the note in 02_reload.test.sqf.)
 #
 # PRECONDITIONS: guerrilla-mode/install-missions.ps1 (no -IncludeWorld
-# since issue #54 C4); the one-time @lobofixup patched pbos
-# (tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1). Full CWA 1.99 +
-# @LoBo only.
+# since issue #54 C4); the one-time @LoBo repair
+# (PoseidonTools mod doctor <@LoBo> --fix). Full CWA 1.99 + @LoBo only.
 tags = ["scripting", "guerrilla", "full_cwa", "lobo", "save-load", "headless"]

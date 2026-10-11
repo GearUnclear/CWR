@@ -13,7 +13,7 @@
 #     junction farm: the shadow has no @LoBo sibling, and ".." from there is
 #     D:\Arma_CWA_worktrees, which holds no mods at all.  Run it with
 #     --data-dir "D:\Arma_CWA\ARMA Cold War Assault [Classic]".
-#   * one-time: tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
+#   * one-time: PoseidonTools mod doctor <@LoBo> --fix (rerun after a reinstall)
 #
 # The three mods are the same set lobo_sinai_showcase.test.toml mounts, and
 # @udshowcase is the load-bearing one: it pre-activates the whole @LoBo roster,

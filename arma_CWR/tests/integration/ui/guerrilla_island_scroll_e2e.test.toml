@@ -2,7 +2,8 @@
 # No mission= - boots to the main menu and drives GUERRILLA -> island list.
 #
 # PRECONDITIONS: same as guerrilla_new_game_e2e - the @LoBo mod next to the
-# data dir plus the @lobofixup fixture (run gen-patched-pbos.ps1 once).  @LoBo
+# data dir (repaired once with `mod doctor --fix`) plus the @lobofixup
+# fixture's bin/config.cpp roster.  @LoBo
 # is what pushes the island roster past one listbox page (12+ worlds), which
 # is the whole point: without overflow there is nothing to scroll.
 #

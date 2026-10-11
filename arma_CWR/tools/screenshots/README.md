@@ -85,8 +85,8 @@ The @LoBo shoots need the same setup as the `lobo` test lane:
 - the full CWA 1.99 install as `OFPR_DATA_DIR` (see `.trident.env`)
 - `@LoBo` next to it at `D:\Arma_CWA\@LoBo`
 - one-time, idempotent, rerun after any @LoBo reinstall:
-  `tools/lobo/fix-lobo-scope.ps1`, `tools/lobo/fix-lobo-model-origin.ps1` and
-  `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1`
+  `PoseidonTools mod doctor <@LoBo> --fix` (the older `tools/lobo/fix-lobo-*.ps1`
+  scripts now just wrap it; the `@lobofixup` patched pbos are no longer needed)
 
 They also mount `@udshowcase` (in this folder) last. That mod exists because the
 engine only builds a vehicle type whose owner addon is **active**, and a mission

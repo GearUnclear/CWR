@@ -79,9 +79,10 @@ Install Rust/Cargo for Trident. Copy `.trident.env.example` to `.trident.env` in
 to prepared Classic (forward slashes work in paths). Build Trident with
 `cargo build --manifest-path engine/Trident/Cargo.toml`.
 
-Some older LoBo tests still mount `tests/fixtures/mods-lobo/@lobofixup`. Generate
-that ignored fixture on Windows with its `gen-patched-pbos.ps1`, passing
-`-LoBoDir` and `-Tools`. Tests with relative `@LoBo` paths assume the mod is
+Some older LoBo tests still mount `tests/fixtures/mods-lobo/@lobofixup` for its
+tracked `bin/config.cpp` (addon preload roster and LoBo factions); it needs no
+generation step, and the LoBo repair it once stood in for is the `mod doctor`
+pass setup already runs. Tests with relative `@LoBo` paths assume the mod is
 beside Classic or the checkout; check the test's `--mods-dir` for other layouts.
 Demo and full retail Remaster packages are only needed for their respective
 integration/UI lanes, not normal Classic + LoBo play. See `../CLAUDE.md` for

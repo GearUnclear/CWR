@@ -9,14 +9,15 @@
 #      -IncludeWorld needed since issue #54 C4 - the world gate finds
 #      sinai.wrp in @LoBo\addons\lost.pbo's entry table by itself.
 #   2. The @LoBo mod next to the data dir (--mods-dir ".." resolves against
-#      the game CWD = data dir). @lobofixup (repo fixture) mounts after it:
-#      pbo shadows for @LoBo's malformed tracerColor floats, addon
-#      preloading, and THE @LoBo CfgGuerrillaFactions roster - since issue
+#      the game CWD = data dir). @lobofixup (repo fixture) mounts after it
+#      for its tracked bin/config.cpp: addon preloading and THE @LoBo
+#      CfgGuerrillaFactions roster - since issue
 #      #54 A4 that config is the only place IDF and friends are declared, so
 #      without it the Sinai cyclers list nothing but the island's CIV.
-#   3. The fixture's patched pbos are gitignored (third-party APL-SA
-#      content) - run tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
-#      once to generate them from the local @LoBo install.
+#   3. @LoBo repaired once (and after any reinstall) with
+#      `PoseidonTools mod doctor <@LoBo> --fix`. The fixture's old patched
+#      pbo shadows are not needed: the config reader tolerates stock
+#      @LoBo's "0.0.1" tracerColor floats.
 #
 # --no-strict: @LoBo's legacy pbos log ERROR-level noise (missing crew anims)
 # that would otherwise be fatal; script errors still abort via --autotest.

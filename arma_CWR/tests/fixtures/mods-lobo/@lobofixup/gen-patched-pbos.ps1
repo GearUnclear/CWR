@@ -29,7 +29,9 @@
     STATE ON THIS MACHINE (checked 2026-09-02): @LoBo's own LoBoammo.pbo and
     LoBo_airammo.pbo were already repaired in place on 2026-07-16 (to "0.001"),
     so a rerun here copies already-clean pbos and the doctor finds nothing to do.
-    A reinstall of stock @LoBo makes this script load-bearing again.
+    A reinstall of stock @LoBo does not make this script load-bearing again:
+    the reader tolerates the stock bytes, and the one-time repair after a
+    reinstall is `PoseidonTools mod doctor <@LoBo> --fix` on @LoBo itself.
 
 .PARAMETER LoBoDir
     The @LoBo mod folder. Default: D:\Arma_CWA\@LoBo

@@ -24,9 +24,9 @@ class CfgGuerrillaZones
     // Side resolution when the new-game UI selections (gmSelOccupier /
     // gmSelResistance) are unset - i.e. any direct launch of this mission.
     // Values are CfgGuerrillaFactions class names from the MERGED faction
-    // table (the @LoBo roster in @lobofixup); the engine resolves
-    // them to sides (ZoneRegistry::ResolveSides): IDF -> WEST occupier,
-    // EgyptFrontier -> EAST resistance.
+    // table (the @LoBo roster from guerrilla-mode/config/lobo-factions.hpp);
+    // the engine resolves them to sides (ZoneRegistry::ResolveSides): IDF ->
+    // WEST occupier, EgyptFrontier -> EAST resistance.
     defaultOccupier = "IDF";
     defaultResistance = "EgyptFrontier";
 
@@ -126,9 +126,11 @@ class CfgGuerrillaZones
 // The ISLAND half of the faction table (issue #54 A4). The @LoBo war rosters
 // this campaign runs on - IDF, EgyptFrontier, EgyptArmy, Syria, Jordan,
 // Hizballah, PLO, PLO_East - are NOT island facts (the Golani brigade is the
-// same brigade here as in south Lebanon), so they moved to the mod-level
-// config tests/fixtures/mods-lobo/@lobofixup/bin/config.cpp, mounted after
-// @LoBo. The engine unions that global table with the block below
+// same brigade here as in south Lebanon), so they moved to the mod level:
+// guerrilla-mode/config/lobo-factions.hpp, which
+// tools/lobo/install-lobo-factions.ps1 writes into @LoBo/bin/config.cpp and
+// the @lobofixup test fixture's bin/config.cpp #includes. The engine unions
+// that global table with the block below
 // (Game/Guerrilla/FactionSources.*), this file winning on a class-name
 // collision, so the cyclers still offer the full @LoBo roster here.
 //
@@ -156,8 +158,8 @@ class CfgGuerrillaFactions
         // @LoBo civilians, verified via `PoseidonTools pbo show LoBoTer.pbo
         // config.cpp` (CfgPatches LoBoTerror, requiredAddons[]={}; the
         // SoldierEB parent resolves from the 1.99 core config the lobo lane
-        // loads; LoBoTer.pbo is stock - the @lobofixup patching only touches
-        // LoBoammo/LoBo_airammo): LoBo_Civ_01..31 "Arab Civilian <n>"
+        // loads; LoBoTer.pbo is stock, and none of the `mod doctor --fix`
+        // repairs touch it): LoBo_Civ_01..31 "Arab Civilian <n>"
         // (: SoldierEB, explicit side=3, scope=public, vehicleClass "Arab
         // Civilians", unarmed) and LoBo_CivF_01 "Arab Female 1"
         // (: LoBo_Civ_01, side=3). Deliberately NOT the LoBo_CivRock_* /
@@ -189,8 +191,10 @@ class CfgGuerrillaFactions
 // JAM_Magazines config bodies, the same pairs the loot keys use) plus the
 // civilian cars the CIV descriptor fields. The engine re-probes every class
 // at load and drops what the package lacks (logged, non-fatal). The LoBoammo-
-// armed hulls need the @lobofixup patched pbos in strict/autotest lanes, like
-// the faction ladders. The dealer body is the stock LoBo civilian.
+// armed hulls load from a stock @LoBo: the config reader coerces its malformed
+// `0.0.1` tracerColor tokens (only --strict-config keeps them raw), and
+// `mod doctor --fix` repairs the bytes. The dealer body is the stock LoBo
+// civilian.
 class CfgGuerrillaMarket
 {
     dealerShare = 0.34;

@@ -3,9 +3,9 @@
 # preconditions: templates installed via
 #   guerrilla-mode/install-missions.ps1
 # (no -IncludeWorld since issue #54 C4 - the world gate reads pbo entry
-# tables) and the one-time @lobofixup patched pbos
-#   tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1
-# @lobofixup must be mounted AFTER @LoBo: it carries the @LoBo
+# tables) and the one-time @LoBo repair
+#   PoseidonTools mod doctor <@LoBo> --fix
+# @lobofixup must be mounted AFTER @LoBo: its bin/config.cpp carries the @LoBo
 # CfgGuerrillaFactions roster the Sinai/Lebanon80 templates no longer declare
 # themselves (issue #54 A4).
 binary = "PoseidonGame"

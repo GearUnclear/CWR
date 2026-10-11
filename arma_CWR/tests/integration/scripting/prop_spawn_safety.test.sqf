@@ -17,10 +17,9 @@
 // has to reach World::ActivateAddons even though it is mounted after another
 // config-bearing mod, and even though the stock config locks CfgAddons.
 //
-// PRECONDITIONS: full CWA 1.99 + @LoBo, and the one-time @LoBo repairs
-// (tools/lobo/fix-lobo-scope.ps1, tools/lobo/fix-lobo-model-origin.ps1, plus
-// tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 if @LoBo's ammo pbos
-// still carry the "0.0.1" tracer floats).
+// PRECONDITIONS: full CWA 1.99 + @LoBo, and the one-time @LoBo repair
+// `PoseidonTools mod doctor <@LoBo> --fix` (the scope keyword and buried model
+// origin defects this test pins; the old fix-lobo-*.ps1 scripts now wrap it).
 triSimUntil { GM_LIB_READY }
 triSimUntil { alive player }
 

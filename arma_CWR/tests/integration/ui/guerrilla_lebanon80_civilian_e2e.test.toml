@@ -11,8 +11,9 @@
 #      game CWD = data dir), with @lobofixup mounted AFTER it - it carries the
 #      @LoBo CfgGuerrillaFactions roster (Hizballah, IDF, ...), which since
 #      issue #54 A4 is no longer in the template's description.ext.
-#   3. The fixture's patched pbos are gitignored - run
-#      tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1 once.
+#   3. @LoBo repaired once (and after any reinstall) with
+#      `PoseidonTools mod doctor <@LoBo> --fix`; the fixture's old patched
+#      pbo shadows are not needed.
 #
 # --no-strict: @LoBo's legacy pbos log ERROR-level noise that would otherwise
 # be fatal; script errors still abort via --autotest.
