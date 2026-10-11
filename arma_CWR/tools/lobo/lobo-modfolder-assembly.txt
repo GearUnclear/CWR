@@ -1,3 +1,5 @@
+LOBO ownership is under the new creator, Null_X.
+
 @LoBo - The Lost Brothers Mod (merged into a single modfolder)
 ==============================================================
 Assembled from the OFP.info archive ("LoBoOFP" download set),
