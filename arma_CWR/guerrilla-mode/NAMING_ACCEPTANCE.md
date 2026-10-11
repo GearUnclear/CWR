@@ -13,15 +13,35 @@ treating the merge or the older design notes as proof of completion.
 | Original requirement | Current implementation and verification | Remaining acceptance |
 | --- | --- | --- |
 | Prefix, regional first name, describer, regional surname, title in that order; optional nickname slots | `LegendNames` assembles all five slots and preserves the issue's quoted describer and title capitalization. Its unit cases verify formatting, all bank entries and deterministic selection. | None for string assembly. |
-| Use the attached name bank | The downloaded `test.json` matches `tests/fixtures/legend-names/issue57-names.json` as parsed JSON. `gen_legend_names.py --check` verifies compiled tables against it. | None for the bank transcription. |
-| Regional personal names | New companion rows draw both personal names from the resistance region. The all-pools registry regression checks membership for both slots across all 33 pools. Script roster keys remain stable; loaded resolved identities stay unchanged. | Classic naming lane passed; exercise additional resistance choices and LoBo in game. |
+| Use the attached name bank | The downloaded `test.json` matches `tests/fixtures/legend-names/issue57-names.json` as parsed JSON. Later additions live separately in `additional-names.json` (see [Name bank additions](#name-bank-additions)). `gen_legend_names.py --check` verifies compiled tables against both files. | None for the bank transcription. |
+| Regional personal names | New companion rows draw both personal names from the resistance region. The all-pools registry regression checks membership for both slots across all 35 pools. Script roster keys remain stable; loaded resolved identities stay unchanged. | Classic naming lane passed; exercise additional resistance choices and LoBo in game. |
 | Earn one nickname at a level threshold; max level adds a different slot and Legend status | SERGEANT / 250 XP earns the first slot; COLONEL / 1900 XP earns the second. Tests cover both thresholds, a jump across both, repeat observations, and save/load award latches. | Classic live and save/load naming lanes passed on 2026-10-05. |
 | Earning a name feels like an event | The native poll sends the resolved award text to the normal hint UI and writes an attributed journal entry. Tests verify both announcements, ordinary promotion announcements, and silence on repeated observations. The script no longer overwrites promotion/award hints. | Observe/capture both award hints at normal gameplay speed. |
 | Names recur in game and persist after death in records/memorials | `BindRow` sets the live body's name; journal gathering and the persisted companion status line read the same registry display name. Registry tests cover awards, death, retained deeds, reload and correction of a stale startup roster without another character event; journal compose tests cover rosters, memorials and records keyed by character id. The naming integration lane now checks the real memorial and fallen dossier. | Classic content assertions passed; visual acceptance is blocked by the rendering defects recorded below. |
 | Three dangerous enemy Legends each playthrough | Three distinct identities; sniper, elite commander and tank commander where faction assets permit. Skill is 0.9, with guards/crew. Placement now recovers a feasible triple when preferred stands block the other two. Failed creations with no surviving actors retry after 30 ticks at their original stand. Tests cover roles, feasible placement, pending spawn persistence and no duplicate defeat. | Run `scripting/guerrilla_legends_place` for supported Classic/LoBo campaigns; exercise temporary group exhaustion. |
-| Enemy personal names come from the supplied modern Western male bank; hostile nicknames | Enemy rows use the attachment's `western_evil` regions: western, british or israeli. Other faction regions fall back to western. All-pools tests verify enemy personal-name and hostile-word membership. | None for selection; observe final labels in game. |
+| Enemy personal names come from the supplied modern Western male bank; hostile nicknames | Enemy rows use the attachment's `western_evil` regions: western, british or israeli. Other faction regions fall back to western, which now also carries the appended Cold War names. All-pools tests verify enemy personal-name and hostile-word membership. | None for selection; observe final labels in game. |
 | Fixed positions, separate from reinforcement/QRF, identifiable and killable | Named bosses and tank crew have movement disabled while retaining targeting/fire. Their own groups are not registered with garrison or QRF state. Existing integration lanes check displacement under fire, group isolation, combat and defeat; source tests cover placement, persistent positions and defeat latches. | Classic placement and save/load passed; defeat lane failed the commander displacement check. LoBo remains pending. |
 | Names and roles remain visible on the campaign map | Live labels contain name and role; defeated labels now retain both plus `(defeated)`. The marker regression exercises the actual defeat repaint and persisted identity/role. Integration expectations were updated. | Inspect live and defeated map markers before and after full game reload. |
+
+## Name bank additions
+
+The compiled bank holds 35 pools: the attachment's 33 plus two appended ones.
+The additions are kept out of the verbatim attachment, in
+`tests/fixtures/legend-names/additional-names.json`:
+
+- `eastern_europe` and `western` each gained 20 Cold War first names and 20
+  surnames, appended after the attachment's entries.
+- `afghan` (20 first, 20 last) and `female` (40 first, 40 last) are new pools at
+  indices 33 and 34.
+
+Additions only append, so saved pool indices 0 to 32 keep their regions and
+saved names are untouched. New campaigns roll from the longer `western` and
+`eastern_europe` lists, so a given seed can now produce different names there.
+No shipped faction sets `namePool` to `afghan` or `female` yet. `female` is
+chosen per faction through `namePool`, not per character. On 2026-10-10
+`gen_legend_names.py --check` passed against both fixtures, and regenerating
+plus clang-format reproduced the compiled tables and test checksums byte for
+byte.
 
 ## Source verification: Linux audit, 2026-09-24
 

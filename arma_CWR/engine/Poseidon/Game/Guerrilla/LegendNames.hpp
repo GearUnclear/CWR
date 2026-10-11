@@ -1,6 +1,6 @@
 #pragma once
 
-// The issue #57 name bank as compiled tables, plus the five-slot assembler.
+// The expanded issue #57 name bank as compiled tables, plus the five-slot assembler.
 //
 // TWO ORTHOGONAL AXES (spec.md section 3, last bullet): the REGIONAL POOL
 // supplies first + last names and is chosen by the faction descriptor's
@@ -10,11 +10,15 @@
 // bank. The two source lists (international_good and western_evil) are
 // flattened into one kNamePools[] union plus two banks. EnemyNamePool limits
 // enemy personal names to the attachment's western_evil regions.
+// Additional pools are appended after that union to preserve saved pool IDs:
+// `afghan` supplies Afghan names; `female` is a separate international category
+// selected explicitly with namePool = "female", independent of region.
 //
 // The tables are GENERATED from tests/fixtures/legend-names/issue57-names.json
-// by tools/legend-names/gen_legend_names.py; edit the fixture and rerun the
-// script rather than hand-editing LegendNames.cpp, and run the script with
-// --check to prove the compiled tables still match the fixture.
+// (the issue #57 attachment) and additional-names.json (names added since) by
+// tools/legend-names/gen_legend_names.py; edit a fixture and rerun the script
+// rather than hand-editing LegendNames.cpp, and run the script with --check to
+// prove the compiled tables still match the fixtures.
 //
 // This translation unit is PURE: no config, no world, no singleton, no state.
 // Every draw is a pure function of (key, channel) through LegendSeed.hpp, so
@@ -64,7 +68,7 @@ struct NicknameBank
     int nTitle;
 };
 
-int NamePoolCount(); // 33
+int NamePoolCount(); // 35; includes afghan and the international female category
 const NamePool& NamePoolAt(int i);
 int FindNamePool(const char* region); // exact, case-insensitive; -1 unknown
 const NicknameBank& Bank(NicknameTone tone);

@@ -1,0 +1,20 @@
+{
+  "additional_names": {
+    "eastern_europe": {
+      "first": ["Ivan","Sergei","Alexei","Nikolai","Yuri","Viktor","Vladimir","Boris","Anatoly","Andrei","Mikhail","Leonid","Oleg","Gennady","Valery","Konstantin","Vyacheslav","Grigory","Vasily","Alexander"],
+      "last": ["Ivanov","Smirnov","Kuznetsov","Popov","Volkov","Orlov","Pavlov","Fedorov","Mikhailov","Zaitsev","Belov","Vasiliev","Nikolaev","Andreev","Sergeev","Antonov","Romanov","Denisov","Tikhonov","Gusev"]
+    },
+    "western": {
+      "first": ["John","James","Michael","Robert","David","William","Richard","Thomas","Charles","Joseph","Edward","Paul","Peter","Daniel","George","Frank","Henry","Kenneth","Steven","Douglas"],
+      "last": ["Smith","Johnson","Brown","Davis","Wilson","Moore","Taylor","Thomas","Jackson","White","Harris","Martin","Thompson","Lewis","Clark","Robinson","Allen","Young","King","Wright"]
+    },
+    "afghan": {
+      "first": ["Ahmad","Mohammad","Abdul","Rahim","Farid","Hamid","Najib","Zahir","Bashir","Latif","Habib","Nasir","Wali","Daud","Ismail","Karim","Khalid","Jamal","Mirwais","Gul"],
+      "last": ["Ahmadzai","Karzai","Durrani","Barakzai","Popalzai","Shinwari","Noorzai","Alizai","Safi","Wardak","Mohammadi","Rahmani","Azizi","Haidari","Nadiri","Sultani","Akbari","Qadiri","Zadran","Stanikzai"]
+    },
+    "female": {
+      "first": ["Anna","Maria","Sara","Nadia","Nina","Elena","Sofia","Maya","Leila","Amina","Fatima","Yasmin","Hana","Alina","Eva","Lina","Mila","Vera","Rosa","Ana","Lucia","Clara","Emma","Julia","Laura","Diana","Irene","Irina","Natalia","Anya","Katya","Zoya","Daria","Mariam","Salma","Zainab","Priya","Asha","Mei","Yuna"],
+      "last": ["Miller","Carter","Morgan","Reed","Stone","Murphy","Kelly","Martin","Dubois","Laurent","Rossi","Costa","Silva","Garcia","Torres","Rivera","Santos","Reyes","Petrova","Ivanova","Sokolova","Morozova","Kowalska","Nowak","Haddad","Mansour","Rahimi","Farhadi","Khan","Ali","Ahmed","Hassan","Patel","Singh","Rao","Chen","Wang","Li","Kim","Park"]
+    }
+  }
+}

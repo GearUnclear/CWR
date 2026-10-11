@@ -13,13 +13,14 @@ namespace
 
 // The tables below are GENERATED. Regenerate with
 //   python tools/legend-names/gen_legend_names.py --write
-// and verify a hand edit has not drifted from the issue #57 source with
+// and verify a hand edit has not drifted from the fixtures with
 //   python tools/legend-names/gen_legend_names.py --check
-// The source of truth is tests/fixtures/legend-names/issue57-names.json,
-// committed so the transcription can still be re-verified after the session
-// that made it. Strings are verbatim: apostrophes, hyphens and interior
+// The sources of truth are tests/fixtures/legend-names/issue57-names.json, the
+// issue #57 attachment committed verbatim, and additional-names.json beside
+// it, the names added since. Apostrophes, hyphens and interior
 // spaces are part of the name, nothing is deduplicated across pools (Haddad
-// legitimately appears in three) and nothing is reordered.
+// legitimately appears in several). Existing pool IDs and entries retain
+// their order; additions extend lists or append new pools.
 
 // BEGIN GENERATED NAME TABLES
 static const char* const kFirst_west_africa[] = {"Adebayo", "Kwame",  "Chinedu", "Kofi",    "Sekou",
@@ -145,10 +146,15 @@ static const char* const kFirst_balkans[] = {"Milan",  "Nikola",     "Luka",  "D
 static const char* const kLast_balkans[] = {"Jovanovic", "Markovic", "Horvat",    "Stojanovic", "Popescu",
                                             "Petrovic",  "Ilic",     "Kovacevic", "Marin",      "Ionescu"};
 
-static const char* const kFirst_eastern_europe[] = {"Dimitri", "Marek", "Tomasz", "Oleksiy", "Mykola",
-                                                    "Ilya",    "Pavel", "Maksim", "Bohdan",  "Yaroslav"};
-static const char* const kLast_eastern_europe[] = {"Petrov",  "Kowalski", "Nowak",   "Koval",      "Bondarenko",
-                                                   "Morozov", "Sokolov",  "Lebedev", "Shevchenko", "Melnyk"};
+static const char* const kFirst_eastern_europe[] = {
+    "Dimitri", "Marek",  "Tomasz", "Oleksiy", "Mykola", "Ilya",       "Pavel",      "Maksim",  "Bohdan",  "Yaroslav",
+    "Ivan",    "Sergei", "Alexei", "Nikolai", "Yuri",   "Viktor",     "Vladimir",   "Boris",   "Anatoly", "Andrei",
+    "Mikhail", "Leonid", "Oleg",   "Gennady", "Valery", "Konstantin", "Vyacheslav", "Grigory", "Vasily",  "Alexander"};
+static const char* const kLast_eastern_europe[] = {
+    "Petrov",     "Kowalski", "Nowak",     "Koval",   "Bondarenko", "Morozov",  "Sokolov",  "Lebedev",
+    "Shevchenko", "Melnyk",   "Ivanov",    "Smirnov", "Kuznetsov",  "Popov",    "Volkov",   "Orlov",
+    "Pavlov",     "Fedorov",  "Mikhailov", "Zaitsev", "Belov",      "Vasiliev", "Nikolaev", "Andreev",
+    "Sergeev",    "Antonov",  "Romanov",   "Denisov", "Tikhonov",   "Gusev"};
 
 static const char* const kFirst_latin_america[] = {"Diego",    "Mateo",   "Thiago", "Caio",  "Rafael",
                                                    "Emiliano", "Joaquin", "Inti",   "Amaru", "Santiago"};
@@ -175,14 +181,17 @@ static const char* const kFirst_melanesia[] = {"Jone",   "Semi",  "Pita",    "Sa
 static const char* const kLast_melanesia[] = {"Nabua", "Naitasiri", "Ravoka", "Vakalalabure", "Tawake",
                                               "Koro",  "Naivalu",   "Qera",   "Radradra",     "Matawalu"};
 
-static const char* const kFirst_western[] = {"Tyler",   "Brandon", "Ryan",   "Jason",  "Connor", "Ethan",
-                                             "Dylan",   "Kyle",    "Trevor", "Logan",  "Blake",  "Derek",
-                                             "Chase",   "Cody",    "Austin", "Brett",  "Travis", "Justin",
-                                             "Garrett", "Shane",   "Cole",   "Tanner", "Zach",   "Jordan"};
-static const char* const kLast_western[] = {"Miller",   "Carter",  "Bennett",  "Walker", "Reed",     "Parker",
-                                            "Collins",  "Morgan",  "Hayes",    "Foster", "Sullivan", "Brooks",
-                                            "Mitchell", "Cooper",  "Harrison", "Turner", "Anderson", "Campbell",
-                                            "Morris",   "Griffin", "Palmer",   "Dawson", "Whitaker", "Stone"};
+static const char* const kFirst_western[] = {
+    "Tyler",  "Brandon", "Ryan", "Jason",  "Connor",  "Ethan",  "Dylan",  "Kyle",    "Trevor",  "Logan",  "Blake",
+    "Derek",  "Chase",   "Cody", "Austin", "Brett",   "Travis", "Justin", "Garrett", "Shane",   "Cole",   "Tanner",
+    "Zach",   "Jordan",  "John", "James",  "Michael", "Robert", "David",  "William", "Richard", "Thomas", "Charles",
+    "Joseph", "Edward",  "Paul", "Peter",  "Daniel",  "George", "Frank",  "Henry",   "Kenneth", "Steven", "Douglas"};
+static const char* const kLast_western[] = {
+    "Miller",   "Carter",   "Bennett", "Walker",   "Reed",     "Parker",   "Collins", "Morgan",   "Hayes",
+    "Foster",   "Sullivan", "Brooks",  "Mitchell", "Cooper",   "Harrison", "Turner",  "Anderson", "Campbell",
+    "Morris",   "Griffin",  "Palmer",  "Dawson",   "Whitaker", "Stone",    "Smith",   "Johnson",  "Brown",
+    "Davis",    "Wilson",   "Moore",   "Taylor",   "Thomas",   "Jackson",  "White",   "Harris",   "Martin",
+    "Thompson", "Lewis",    "Clark",   "Robinson", "Allen",    "Young",    "King",    "Wright"};
 
 static const char* const kFirst_british[] = {"Oliver", "Harry",  "George", "Jack",   "Charlie", "Thomas", "William",
                                              "James",  "Edward", "Henry",  "Alfie",  "Freddie", "Arthur", "Hugo",
@@ -198,6 +207,24 @@ static const char* const kFirst_israeli[] = {"Noam",  "Eitan",   "Omer",  "Yair"
 static const char* const kLast_israeli[] = {
     "Cohen",   "Levi",  "Mizrahi", "Peretz", "Biton", "Dahan", "Azoulay",   "Ben-David", "Shapira", "Dayan",
     "Sharabi", "Malka", "Ohana",   "Gabay",  "Barak", "Peled", "Rosenberg", "Shalev",    "Harari",  "Ben-Ami"};
+
+static const char* const kFirst_afghan[] = {"Ahmad",  "Mohammad", "Abdul",  "Rahim", "Farid",   "Hamid", "Najib",
+                                            "Zahir",  "Bashir",   "Latif",  "Habib", "Nasir",   "Wali",  "Daud",
+                                            "Ismail", "Karim",    "Khalid", "Jamal", "Mirwais", "Gul"};
+static const char* const kLast_afghan[] = {
+    "Ahmadzai",  "Karzai",  "Durrani", "Barakzai", "Popalzai", "Shinwari", "Noorzai", "Alizai", "Safi",   "Wardak",
+    "Mohammadi", "Rahmani", "Azizi",   "Haidari",  "Nadiri",   "Sultani",  "Akbari",  "Qadiri", "Zadran", "Stanikzai"};
+
+static const char* const kFirst_female[] = {"Anna",  "Maria",  "Sara",   "Nadia",  "Nina",    "Elena", "Sofia", "Maya",
+                                            "Leila", "Amina",  "Fatima", "Yasmin", "Hana",    "Alina", "Eva",   "Lina",
+                                            "Mila",  "Vera",   "Rosa",   "Ana",    "Lucia",   "Clara", "Emma",  "Julia",
+                                            "Laura", "Diana",  "Irene",  "Irina",  "Natalia", "Anya",  "Katya", "Zoya",
+                                            "Daria", "Mariam", "Salma",  "Zainab", "Priya",   "Asha",  "Mei",   "Yuna"};
+static const char* const kLast_female[] = {
+    "Miller",   "Carter",   "Morgan",   "Reed",   "Stone",  "Murphy",  "Kelly",  "Martin",  "Dubois",  "Laurent",
+    "Rossi",    "Costa",    "Silva",    "Garcia", "Torres", "Rivera",  "Santos", "Reyes",   "Petrova", "Ivanova",
+    "Sokolova", "Morozova", "Kowalska", "Nowak",  "Haddad", "Mansour", "Rahimi", "Farhadi", "Khan",    "Ali",
+    "Ahmed",    "Hassan",   "Patel",    "Singh",  "Rao",    "Chen",    "Wang",   "Li",      "Kim",     "Park"};
 
 static const char* const kFriendlyPrefix[] = {"Daring", "Lucky", "Wild",      "Big",   "Fast",   "Young",  "Fearless",
                                               "Smooth", "Iron",  "Gentleman", "Slick", "Golden", "Silent", "Honest"};
@@ -222,10 +249,7 @@ static const char* const kHostileTitle[] = {"The Oppressor", "The Occupier",    
 // Counts come from the arrays themselves: a hand-written count
 // could disagree with its table, sizeof cannot.
 #define UD_COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
-#define UD_POOL_ROW(r)                                                       \
-    {                                                                        \
-        #r, kFirst_##r, UD_COUNT(kFirst_##r), kLast_##r, UD_COUNT(kLast_##r) \
-    }
+#define UD_POOL_ROW(r) {#r, kFirst_##r, UD_COUNT(kFirst_##r), kLast_##r, UD_COUNT(kLast_##r)}
 const NamePool kNamePools[] = {
     UD_POOL_ROW(west_africa),
     UD_POOL_ROW(east_africa),
@@ -260,6 +284,8 @@ const NamePool kNamePools[] = {
     UD_POOL_ROW(western),
     UD_POOL_ROW(british),
     UD_POOL_ROW(israeli),
+    UD_POOL_ROW(afghan),
+    UD_POOL_ROW(female),
 };
 const NicknameBank kBanks[2] = {
     {kFriendlyPrefix, UD_COUNT(kFriendlyPrefix), kFriendlyDescriber, UD_COUNT(kFriendlyDescriber), kFriendlyTitle,

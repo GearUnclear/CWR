@@ -336,7 +336,8 @@ are fetched with the lib helper `GM_fnFactionNum` (`gmFactionValue` +
 **Legend name pool (issue #57, both sides, optional):** `namePool` names the
 REGIONAL first/last name bank the Legend registry (A.8) draws a character's
 generated surname from: `"levant"`, `"israeli"`, `"balkans"`, `"western"` and
-the rest of the 33 regions. The nickname TONE bank (prefixes, describers,
+the rest of the 35 pools, which include `"afghan"` and a `"female"` pool that
+is not tied to a region. The nickname TONE bank (prefixes, describers,
 titles) is chosen by campaign allegiance instead, so the key is about where
 the roster's people are from and not about whose side they are on. A missing
 or unknown token falls back by side (WEST `western`, EAST `eastern_europe`,

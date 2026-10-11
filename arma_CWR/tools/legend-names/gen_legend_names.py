@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """Generate (and re-verify) the issue #57 name bank tables.
 
-The bank is 872 hand-listed strings. A transposition that duplicates one entry
-while dropping another keeps every per-pool count correct, so counts alone
-cannot police the transcription. This script owns the transcription instead:
+The bank is the issue #57 attachment plus the names added since. A
+transposition that duplicates one entry while dropping another keeps every
+per-pool count correct, so counts alone cannot police the transcription. This
+script owns the transcription instead:
 
   --write   (default) rewrite the generated blocks in
             engine/Poseidon/Game/Guerrilla/LegendNames.cpp and
             tests/unit/engine/Poseidon/Game/Guerrilla/test_legend_names.cpp
   --check   parse both generated blocks back out and compare them to the
-            committed fixture, exit 1 on any drift
+            committed fixtures, exit 1 on any drift
 
-The source of truth is tests/fixtures/legend-names/issue57-names.json, the
-issue #57 attachment committed verbatim (pure ASCII, no byte >= 0x80).
+Two fixtures are the source of truth, both pure ASCII (no byte >= 0x80).
+tests/fixtures/legend-names/issue57-names.json is the issue #57 attachment
+committed verbatim. additional-names.json beside it holds the names added
+since: Cold War eastern_europe and western names, and the afghan and female
+pools. Additions only append. A region the attachment already has gains names
+at the end of its lists, and a new region becomes a new pool after the
+original 33, so every pool index a save has stored keeps its meaning.
 
 --check parses the C++ rather than diffing text, so clang-format reflowing the
 generated block does not make it red.
@@ -26,6 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "legend-names" / "issue57-names.json"
+ADDITIONS = ROOT / "tests" / "fixtures" / "legend-names" / "additional-names.json"
 SOURCE = ROOT / "engine" / "Poseidon" / "Game" / "Guerrilla" / "LegendNames.cpp"
 TEST = ROOT / "tests" / "unit" / "engine" / "Poseidon" / "Game" / "Guerrilla" / "test_legend_names.cpp"
 
@@ -53,11 +60,15 @@ def fnv1a_list(strings):
     return h
 
 
-def load_bank():
-    raw = FIXTURE.read_bytes()
+def read_ascii_json(path):
+    raw = path.read_bytes()
     if max(raw) >= 0x80:
-        sys.exit("fixture is not pure ASCII")
-    data = json.loads(raw.decode("ascii"))
+        sys.exit("%s is not pure ASCII" % path.name)
+    return json.loads(raw.decode("ascii"))
+
+
+def load_bank():
+    data = read_ascii_json(FIXTURE)
     good = data["international_good"]
     evil = data["western_evil"]
     pools = []
@@ -65,6 +76,16 @@ def load_bank():
         pools.append((region, entry["first"], entry["last"]))
     for region, entry in evil["names"].items():
         pools.append((region, entry["first"], entry["last"]))
+    # Pool indices are persisted in saves, so additions only append: a known
+    # region's lists grow at the end, and a new region follows both original
+    # banks so western/british/israeli keep their existing indices.
+    known = {region: i for i, (region, _f, _l) in enumerate(pools)}
+    for region, entry in read_ascii_json(ADDITIONS)["additional_names"].items():
+        if region in known:
+            _r, first, last = pools[known[region]]
+            pools[known[region]] = (region, first + entry["first"], last + entry["last"])
+        else:
+            pools.append((region, entry["first"], entry["last"]))
     banks = [
         ("Friendly", good["prefix"], good["describer"], good["title"]),
         ("Hostile", evil["prefix"], evil["describer"], evil["title"]),
@@ -232,13 +253,15 @@ def check(pools, banks):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="verify instead of rewriting")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="verify instead of rewriting")
+    mode.add_argument("--write", action="store_true", help="rewrite generated tables (default)")
     args = parser.parse_args()
     pools, banks = load_bank()
-    if len(pools) != 33:
-        sys.exit("expected 33 pools, fixture has %d" % len(pools))
-    if sum(len(f) for _r, f, _l in pools) != 396 or sum(len(l) for _r, _f, l in pools) != 396:
-        sys.exit("expected 396 first and 396 last names")
+    if len(pools) != 35:
+        sys.exit("expected 35 pools, fixture has %d" % len(pools))
+    if sum(len(f) for _r, f, _l in pools) != 496 or sum(len(l) for _r, _f, l in pools) != 496:
+        sys.exit("expected 496 first and 496 last names")
     if args.check:
         problems = check(pools, banks)
         for line in problems:
