@@ -43,9 +43,10 @@ items:
     status: done
     gh_issues: []
     depends_on: []
-    commits: []
+    commits: [96e6e0a]
     log:
       - "2026-09-19: versioned Classic shims, separately licensed Options text and OFL fonts; added validated setup/launch commands, targeted LoBo repairs and a fresh-install guide. Synthetic preflight/backups/reinstall checks pass. Staged real data with all local overlays removed passed QRF menu launch, Sinai and Lebanon boot, Options shell and audio persistence (5/5). Added Windows/Linux installer CI. Local renamed Microsoft fonts are excluded."
+      - "2026-10-11: audit fix 96e6e0a. The Remaster guard only checked bin/remaster.bin, which neither official package ships (both carry plain-text BIN/remaster.cpp), so setup would have overwritten the Steam Remastered package's remaster.cpp, resource-extra.cpp, Options headers and fonts. remaster.cpp cannot be the marker (our shim has that name after one run), so the guard now keys on a root dtaExt, bin/remaster.bin, bin/mainMenu.hpp or bin/splashLogo.hpp, before any other check or write. Turning the refusal into a Remaster install mode is setup-remaster-mode (#67)."
 
   # ---------------------------------------------------------------- foundation
   - id: upstream-baseline
@@ -1861,6 +1862,27 @@ items:
     log:
       - "2026-08-05: filed. No scaffolding exists beyond run-game.ps1 (dev launcher) and guerrilla-mode/install-missions.ps1 (mission deploy + -IncludeWorld world gate), both dev-facing and PowerShell-only. Largest open item by raw hours, but the least risky: no engine work, no design invention, and no dependency on the guerrilla feature branch, so it can proceed in parallel with everything else."
       - "Asset-pointing must accept the Classic 1.99 install specifically (the Demo package is not a gameplay target per the 2026-07-14 policy), and the bracketed '[Classic]' directory name is a wildcard-glob hazard in PowerShell and gitignore alike - use -LiteralPath, as #12 had to."
+
+  - id: setup-remaster-mode
+    title: "Setup: Remaster install mode, keeping Bohemia's files and adding UD's beside them (issue #67)"
+    phase: release
+    status: planned
+    priority: 2
+    depends_on: [portable-classic-runtime]
+    gh_issues: [67]
+    summary: >
+      Turn setup-guerrilla.ps1's refusal of an official Remaster folder into a
+      second install mode for the full Steam Remastered package. Keep
+      Bohemia's remaster.cpp and options headers, install UD's fonts and
+      missions as additions, and split the UD main menu out of our
+      resource-extra.cpp into its own file that setup #includes from
+      Bohemia's resource-extra.cpp, the same append-only pattern
+      install-missions.ps1 already uses for config-extra.cpp. A concrete step
+      on #65's question of retargeting from Classic plus shim to the full
+      Remaster.
+    log:
+      - "2026-10-11: filed. The engine reads exactly one bin/resource-extra.cpp, and on the Remaster that file is Bohemia's (Options, mods table, splash, main menu), so the UD menu needs its own file. Open risk: Bohemia's mainMenu.hpp and ours both define RscDisplayMainRemaster; check the merge in game, with and without @LoBo, on a copy of the Remaster folder only."
+      - "2026-10-11 trap: setup's Remaster guard (96e6e0a) treats bin/mainMenu.hpp and bin/splashLogo.hpp as Bohemia-only markers, so the split-out UD menu file must not use either name, or every Classic rerun is refused (test-setup.ps1's rerun case would go red)."
 
   # ---------------------------------------------------------------- housekeeping
   - id: gh-tracker-hygiene
