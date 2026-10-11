@@ -37,6 +37,23 @@ phases:
     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
 
 items:
+  - id: lobo-content-repairs
+    title: "Reproducible Lobo audit repairs and private change tracking"
+    phase: housekeeping
+    status: in-progress
+    gh_issues: []
+    depends_on: []
+    commits: []
+    summary: >
+      Repair ammunition, AI ranges, copied scripts, supported armor components,
+      model bindings and display text with versioned transformations and verified
+      archive backups. Internal audit moved from CWR #69 to
+      https://github.com/GearUnclear/lobo/issues/1; that private repository holds
+      reference notes only. Runtime validation remains outside the no-game audit.
+    log:
+      - "2026-10-11: swarm implemented content repairs, synthetic offline tests and source coverage diagnostics. Armor uses existing six-component layout and preserved script labels. UD fire query has full nearby-unit coverage; explicit Classic fallback is group-limited. No game launched."
+      - "2026-10-11: applied repair 2026-10-11.1 to 76 members in 25 archives with verified backups; second pass changes zero. 81 synthetic tests pass, 11 changed configs export, 7993 explicit Lobo references resolve in 114-export index, and standalone Man/Land probe improves from 1747/1749 to 1749/1749. Runtime acceptance remains pending."
+
   - id: portable-classic-runtime
     title: "Reproduce the Guerrilla runtime from a clone, fresh Classic data and LoBo"
     phase: foundation
