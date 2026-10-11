@@ -12,8 +12,8 @@ import tempfile
 import uuid
 from repair.pbo import Archive
 
-REPAIR_MODULES=('ammo','scripts','models')
-REPAIR_VERSION='2026-10-11.1'
+REPAIR_MODULES=('ammo','scripts','models','followups')
+REPAIR_VERSION='2026-10-11.2'
 
 def rule_fingerprint():
     base=Path(__file__).resolve().parent

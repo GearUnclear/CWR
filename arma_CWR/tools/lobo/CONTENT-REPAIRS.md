@@ -6,6 +6,30 @@ It changes installed addon members only after every repair has passed preflight.
 No game is launched. Only transformation code, synthetic tests and documentation
 belong in this source repository; addon data and backups stay local.
 
+## 2026-10-11.2 follow-up batch
+
+Implemented, applied to the installed UD profile and offline verified on
+2026-10-11 before the 13:30 PDT package cutoff:
+
+- LoBo #6: AP mine pickup now references the existing AP_Mine1.sqs.
+- LoBo #7: IDF UH-60 Rapid Insertion now references the existing FX/fastins1.sqs.
+- LoBo #10: MiG-23 wing sweep clamps the local _fraction to 0..1 using digit 1.
+
+The follow-up module rejects missing/empty destinations and unknown or duplicate
+source anchors, accepts a partially repaired clamp, preserves unrelated bytes
+and is idempotent. It changes three members across LoBo_Mines.pbo,
+LoboIDFhelo.pbo and LoBoMig.pbo. All 86 synthetic LoBo tests pass. A second
+installed repair check exits 0 with zero changes; report-only doctor says
+Nothing to do (15 existing unreadable entries). Independent verification checks
+all 124 archive hashes, verified backups and all 1,360 untouched members in the
+three changed archives. Full evidence stays local under
+`D:/Arma_CWA/tmp/lobo-runtime-acceptance-20261011/repair-2-*`.
+
+No game was launched for this follow-up. These three source defects are corrected,
+but their gameplay actions/animation are not runtime verified. Issues #2-5 and
+#8-9, including wreck emitters requiring an in-game check, remain outside this
+bounded batch. No new Classic compatibility behavior was added.
+
 ## Use
 
 Run from the CWR repository root with Python 3.10 or newer:
