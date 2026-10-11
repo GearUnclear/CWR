@@ -427,7 +427,10 @@ The Trident integration suite is fully migrated to the `gm*` command surface
 (the retired `GM_ZONES`/`zones.sqs` spine survives only in comments). The
 `guerrilla_native_*` twins run against the full 1.99 install (`full_cwa`), and
 `guerrilla_sinai_swap` + `ui/guerrilla_new_game_e2e` additionally need @LoBo
-(`lobo`), the generated fixture PBOs, and installed templates.
+(`lobo`, repaired once with `PoseidonTools mod doctor <@LoBo> --fix`) and the
+`install-missions.ps1` install. `guerrilla_sinai_swap` mounts @LoBo alone and
+needs `tools/lobo/install-lobo-factions.ps1`; the e2e also mounts the
+`@lobofixup` fixture for its `bin/config.cpp` roster, not for patched pbos.
 
 The three Demo-world tests (`guerrilla_capture_flip`, `guerrilla_spawn_domove`,
 `guerrilla_save_reload.seq`) bind to the `demo` world and their player +

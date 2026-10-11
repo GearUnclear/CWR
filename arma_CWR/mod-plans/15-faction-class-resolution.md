@@ -30,8 +30,10 @@
   medic/sniper (borrowed same-side army kin); Jordan is a genuine
   side-2 (GUER) regular army — the standout future resistance faction;
   requiredAddons metadata is unreliable (mount the whole modfolder); all
-  armed vehicle picks depend on the @lobofixup patched LoBoammo pbos;
-  Classic-lane only (JAM requires BIS_Resistance).
+  armed vehicle picks fire LoBoammo rounds whose stock tracerColor carries a
+  malformed float (at survey time that needed the @lobofixup patched pbos;
+  since #54 D1 the config reader coerces it and `mod doctor --fix` repairs it
+  in place); Classic-lane only (JAM requires BIS_Resistance).
 
 ## Problem
 
