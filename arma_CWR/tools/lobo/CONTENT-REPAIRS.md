@@ -8,23 +8,27 @@ belong in this source repository; addon data and backups stay local.
 
 ## 2026-10-11.4 batch
 
-Implemented, applied to the installed UD profile, offline verified and runtime
-verified on the UD engine on 2026-10-12 for
+Implemented, applied to the installed UD profile in three batches, offline
+verified and runtime verified on 2026-10-12 for
 [LoBo #13](https://github.com/GearUnclear/lobo/issues/13),
 [LoBo #14](https://github.com/GearUnclear/lobo/issues/14), the pilot wounds
-below, and the four LoBo #9 items the .3 runs left open (see "Runtime
-verification" at the end of this section). The official Remaster exe smoke
-test of the rebuilt family package found a Classic wreck-fire query bug; the
-fix and a byte-for-byte restoration of ten missing members are implemented
-but not applied yet (see "Third part" below), and so are nine repoints of
-the remaining references to files LoBo ships under another name (see
-"Fourth part"; "Pending apply" gives the command for both). Three
-fail-closed rule modules run last, after `textures`: `tailgun`, `references`
-and `wounds`, applied in two batches. All are profile-neutral: they write
-OFP 1.x SQS (`isNull`, `driver`, `count`), config string literals, texture
-names or plain
-DXT1 textures, so the UD and Classic plans give the same bytes and the
-package's Classic switch leaves these members alone.
+below, the four LoBo #9 items the .3 runs left open, and the restored and
+repointed files of the third and fourth parts, all on the UD engine (see
+"Runtime verification" at the end of this section). The official Remaster exe
+(3.05) passed a menu boot and an in-mission smoke test with the LoBo Reloaded
+2026-10-12 package, built from the final .4 rule (see "The official Remaster
+exe and the 2026-10-12 package"). Its first attempt, on an earlier, unpublished
+2026-10-12 build, found two package defects that the 2026-10-11 package also
+carries: a Classic wreck-fire query that only UD accepts (fixed by the third
+part below) and a malformed float in `@LoBo_Deps` (fixed by the packager's new
+doctor pass). Five fail-closed rule modules are new and run last, after
+`textures`, in this order: `tailgun`, `references`, `repoints`, `wounds` and
+`restore`; `scripts` changes its Classic query. The new modules are
+profile-neutral: they write OFP 1.x SQS (`isNull`, `driver`, `count`), config
+string literals, texture names, plain DXT1 textures or unchanged members of
+older LoBo releases, so the UD and Classic plans give the same bytes and the
+package's Classic switch leaves these members alone. Only the `scripts` change
+differs by profile, and its UD output is unchanged.
 
 - `tailgun` (LoBo #13): LoBoIL28 `script\tailgun.sqs` runs 0.1 s after an
   IL-28 spawns. It skipped gunner creation only for an empty plane, so a plane
@@ -201,7 +205,8 @@ or a model or added member of any rule, fails with `Source members missing`
 when an archive lacks one, and passes them to that module's `add_members` as
 `sources` (both calls, including the idempotence check).
 
-Result on the installed mod, two applied batches: together 7 changed and 18
+Result on the installed mod, first two applied batches (the third is under
+"Third batch" below): together 7 changed and 18
 added members in 5 archives (`lobo_pilot/config.cpp` changed in both). The
 first, `20261012T085301Z-fdbc36a3` (state `applied`, rule SHA-256
 `f6e16ee80ec1c0698394d17ede66506c18a31bb443c9ef63f8cb12373374d1f9`, before
@@ -233,8 +238,9 @@ pins of both new modules. Evidence stays local under
 `D:/Arma_CWA/tmp/lobo-repair-4/`.
 
 The second batch, `20261012T185029Z-2990ea75` (state `applied`, rule SHA-256
-`de63a7e05bb1973cc8cc1899ad148ca1a0d1473c2515b3c5318c8a3d51dcf3c5`, the final
-.4 rule; the first, four-class draft of `wounds` was `42a829bf...`), applied
+`de63a7e05bb1973cc8cc1899ad148ca1a0d1473c2515b3c5318c8a3d51dcf3c5`, the .4
+rule at that time; the final rule is the third batch's; the first, four-class
+draft of `wounds` was `42a829bf...`), applied
 `wounds` for every pilot class: 1 changed and 18 added members, all in
 LoBo_Pilot.pbo. `lobo_pilot/config.cpp` went from 22,148 to 31,348 bytes
 (SHA-256 `e0f0ee8e7cdcc86010b0a65abbc829ba778119320de20515ea63c9d2a9017fae`),
@@ -275,17 +281,24 @@ Trident (`tri.exe` from the .3 runs, SHA-256
 `43D48C10D73AB8925880908FE4CBB4C704EF0B451236157D151E7DF5574A09CF`) on the
 official Remaster data
 (`D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered`, read
-only), with the installed `D:/Arma_CWA/@LoBo` after both .4 batches mounted by
-absolute path (the five changed archives equal their manifests' after
-hashes). The probes are under `runtime/repair4/` (see `runtime/README.md`).
-All four runs passed on their first attempt with retries 0 and `-j 1`, ran
-with `--autotest` (no script error, `Zero divisor` or `Access denied` line),
-passed their `repair4/check_logs.py` criteria and closed every game they
-started; both executables had the same hash after each run. The repair check
-before and after the runs exits 0 with 0 changed and 0 added members,
-`repair_version` 2026-10-11.4 and the final rule SHA-256 above, and the
-recursive listing of the Steam Remastered folder (7,971 files with sizes and
-write times) is unchanged.
+only), with the installed `D:/Arma_CWA/@LoBo` mounted by absolute path:
+after the first two .4 batches for `tailgun-02`, `refs-01`, `wounds-01` and
+`burn-01` (the five changed archives equal their manifests' after hashes),
+and after the third batch for `restored-02` (its eight archives equal the
+third batch's after hashes, recorded at the start of the run). The probes are
+under `runtime/repair4/` (see `runtime/README.md`). All five runs passed on
+their first attempt with retries 0 and `-j 1`, ran with `--autotest` (no
+script error, `Zero divisor` or `Access denied` line), passed their
+`repair4/check_logs.py` criteria and closed every game they started; both
+executables had the same hash after each run. Around the first four runs the
+repair check exits 0 with 0 changed and 0 added members, `repair_version`
+2026-10-11.4 and the then current rule `de63a7e0...`, and the recursive listing
+of the Steam Remastered folder (7,971 files with sizes and write times) is
+unchanged. After `restored-02` the package build's UD check of the installed
+mod (14:47 local, final rule `98f07a96...`) again reports 0 changed and 0
+added members, and the listing of the whole Steam CWA app folder (8,782
+files) is the same at 12:19, 12:47, 14:37 and 14:50 local, a window that
+covers `restored-02` and the official-exe runs below.
 
 | Item | Level | Run | What the run showed |
 | --- | --- | --- | --- |
@@ -293,6 +306,8 @@ write times) is unchanged.
 | #14 references | runtime verified (UD engine) | `refs-01` | Debug log: zero lines naming `black_matte.pac`, `eaf\tex\back.pac`, `eaf\tex\legsbk.pac`, `rktf5\swtex.paa` or `soundss` (the .3 runs logged 327, 35, 34, 56 and 3), and no load failure for any repointed target. `backfuse.pac`: 2 lines, one per F-16 variant, as expected. Reviewed screenshots: Hilux and Hilux MG textured at 8, 35, 70 and 120 m (LOD bias 1), the EAF pilot's back and leg-backs textured at 5 and 40 m, and the AIM-9s, F-16s and MiG-21bis MR1 textured. Only the load of the MiG-21 landing-crash sound is checked, not the sound itself. |
 | Pilot wounds (`wounds`, `references`) | runtime verified (UD engine) | `wounds-01` | All eight pilot classes spawned and stayed alive at total damage 0.5 with hits `[hlava, telo, ruce, nohy]` = `[0.85, 0.8, 0.8, 0.8]`. Every class shows wounds front and back in its own suit colour: EAF reddish brown and IAF grey (69th, 106th and 133rd Sqn) with red blood, and the olive classes (IAF 101st and 253rd Sqn, RJAF, SyAF) with the shipped olive art. No texture under `lobo_pilot` failed to load. |
 | #9 burn, action, cleanup, sound | runtime verified (UD engine) | `burn-01` | Each item by its own step, below. |
+| Restored and repointed files (`restore`, `repoints`) | runtime verified (UD engine) | `restored-02` | 83 log checks pass, 0 fail. The five bomb ammo classes (`LoBo_MK81`, `LoBo_MK81_LDGB` to `LoBo_MK84_LDGB`), the five carriers (MiG-21bis MR1 and MR2, A-4, F-15I Mk-84, F-16I B), the four Egyptian infantry classes, both Egyptian Guard M1s, the F-4 Wild Weasel, the three F-5s, the MDA medic barrack and the Snunit boat are created with their own type. The ten restored members and the nine repointed targets never fail to load, and none of the nine old names is logged. The A-4 dropped one Mk-81 at 427 m (ammo 12 to 11). Screenshots (55) of the bombs as shots, the carriers, the infantry at 4 to 850 m, the M1s at 12 to 1,420 m, the F-4, the F-5 profiles and pilot views, the barrack, the boat's group-bar picture and the AN/PSC-5D gear picture are kept; the bomb shots show the slick Mk-81 and the retarded LDGB with its fins open. Other missing files these models name, none a .4 target: `lobo_ob\gw\has\has.paa` (2 lines), `lobo_ob\emb\icon.paa` (1), `lobo_a4\tex2\tailwing.paa` (4), `lobof16\com\backfuse.pac` (1). An earlier run of the probe, `restored-01` (without the cockpit camera position line), also passed. |
+| Official Remaster exe (R5) | runtime verified (official 3.05 exe, smoke test only) | `official-s1-03`, `official-s2-04` | See "The official Remaster exe and the 2026-10-12 package" below. |
 
 The engine draws a body-part wound only at a part damage of 0.7 or more (0.8
 for the head; `Man::WoundsAnimation`), so `setDammage 0.5` alone shows none;
@@ -332,17 +347,113 @@ run shows the script's particles, `say` lines and cleanup going on after it.
 
 Side observation: `refs-01` logged `lobo_airammo\lobo_mk81.p3d` as not found
 (four lookups) when the MiG-21bis MR1 was created. The third part (below)
-restores it.
+restores it, and `restored-02` loads it without a failure.
 
-Not covered yet: the official Remaster exe smoke test of the rebuilt family
-package (menu boot and an in-mission run of the R1 case G and the R2 spawns)
-is still running separately, so nothing above is claimed for the official
-exe. The optional UD run with all four package modfolders was not run.
+Not run: the optional UD run with all four package modfolders, and any
+multiplayer or save case. The official Remaster exe ran only the short smoke
+test below.
+
+### The official Remaster exe and the 2026-10-12 package
+
+R5 runs the official 3.05 `PoseidonGame.exe` (SHA-256
+`b501e6e6e617b65570ff313cbf3ec5a3ac758a2897710c0491417d830972e7e5`, the same
+bytes as the Steam copy) in a throwaway shadow of the Steam Remastered folder
+(`tools/runtime/new-remaster-shadow.ps1`: AddOns, DTA, Worlds and the other
+data folders are junctions, BIN and the exe are copies), with `@LoBo`,
+`@LoBo_Deps` and `@LoBo_Extras` of a package copied in and mounted as
+`--mod "@LoBo_Extras;@LoBo;@LoBo_Deps"` (never `@LoBo_UD`). Probe and
+procedure are in `runtime/README.md`, "The official Remaster exe (R5)".
+
+First attempt (`official-s1`, `official-s1-02`, `official-s2-01` to
+`official-s2-03-diag`, `official-s2-fallback`, `official-s2-fallback-diag`),
+on a first 2026-10-12 build (12:30 local, builder `8677533`, rule
+`de63a7e0...`; unpublished, moved to
+`D:\LoBo-Reloaded\_work\failed-2026-10-12\`). It found two package defects,
+both also present in the published 2026-10-11 package:
+
+- `IRAR_EE9.pbo` in `@LoBo_Deps` carries `tracerColor[]={0.8,0.5,0.0.1,1}`
+  (`config.cpp` line 55). UD's config reader coerces the token; the official
+  exe keeps it as a string and the script evaluator rejects it with
+  `Script error at '0.0|#|.1': Unknown operator`: a WARN on both menu boots
+  and fatal in two of the four `--autotest` boots (`official-s2-02`,
+  `official-s2-fallback`). The 2026-10-11 and the failed build ship the same
+  `IRAR_EE9.pbo` (SHA-256 `882562d6...`).
+- The Classic wreck-fire query measured `distance` from a position, which
+  only UD accepts: `official-s2-fallback-diag` stopped with
+  `distance: Type Array, expected Object` as soon as the killed Hilux burned.
+  The 2026-10-11 package's Classic `@LoBo` carries the same query (its Classic
+  switch wrote the 4,840-byte `fire.sqs`, 9 bytes longer than the fixed one).
+
+The rest were probe matters: `--dev` is refused by the release exe
+(`official-s2-01`), and it has no `nearestObjects` (`official-s2-03-diag`).
+The fallback run showed case G on the official exe before it stopped: player
+gunner, no pilot, no `Zero divisor`.
+
+Fixes:
+
+- Content: the third part's `scripts` change (below); the Classic query now
+  measures from the wreck object.
+- Package (`package-lobo-family.ps1`): the builder now runs
+  `PoseidonTools mod doctor --fix` on the staged `@LoBo_Deps` and
+  `@LoBo_Extras` only (never on the cache, the `-ExtrasDir` folder or the
+  library), moves the doctor's originals out of the package to
+  `<OutDir>\_work\<Version>\doctor-orig`, lists every patch in
+  `UD-CHANGES.txt` and the build report, and before writing
+  `SHA256SUMS.txt` requires a report-only doctor to say "Nothing to do" for
+  every staged modfolder. In the 2026-10-12 build it patched
+  `IRAR_EE9.pbo` (MALFORMED_FLOAT, `'0.0.1' -> '0.000'`, SHA-256
+  `882562d6...` to `3c80c209...`) and `bas_mah60.pbo` (BURIED_MODEL_ORIGIN
+  on `BAS_ROPER.p3d` and `BAS_TJSvetlo.p3d`, buried 8.43 m and 4.53 m,
+  SHA-256 `da597670...` to `4d3fb885...`); `@LoBo_Extras` needed nothing.
+  The 2026-10-11 package ships the unpatched `bas_mah60.pbo` too. A guard
+  refuses `--fix` on, under or above any build input, which includes
+  `-LibraryDir`: `-OutDir` must therefore lie outside the library (a first
+  run with `-OutDir D:\LoBo-Reloaded\_work\build-2026-10-12-r2\out` was
+  refused when it reached the staged `@LoBo_Deps`, after staging `@LoBo`).
+- Probe: no `--dev`, `NearestObjectDistance` instead of `nearestObjects`,
+  and bool asserts through `format` strings (the 3.05 `triAssert` reads a
+  bool as an empty string).
+
+Second attempt, on the package built by the fixed builder from the final .4
+rule (`D:\Arma_CWA\tmp\lobo-repair-4\r4-build-02`, 14:41 local). Its
+`SHA256SUMS.txt` differs from the published 2026-10-12 package's only in
+`README-FIRST.txt` and `@LoBo\UD-CHANGES.txt` (the known-issues text was
+updated after these runs); every pbo is the same.
+
+- `official-s1-03`, menu boot: version 3.05 with the three mods loaded,
+  `--auto-screenshot` at 60 s, then a clean exit with code 0 after 69 s. No
+  `Script error` line at all, no crash or minidump, empty stderr. The
+  capture shows the Lost Brothers main menu.
+- `official-s2-04`, in mission through Trident with `--autotest`: passed in
+  28.0 s on the first attempt, `check_logs.py r5` RESULT PASS. Case G: player
+  in the IL-28 gunner seat, no pilot, unmanned turret, no `Zero divisor`. The
+  R2 spawns (both Hiluxes, the EAF, RJAF and 69th Sqn pilots wounded at total
+  damage 0.5, the MiG-21bis MR1, both F-16 AA variants): none of the five old
+  names logged, no load failure for a repointed target, no missing wound
+  texture, two expected `backfuse.pac` lines. A killed Hilux made exactly one
+  `M1Smoker`, and the wreck burned for about 3 s before the clean shutdown
+  without the `distance` error (the failed run hit it right at the kill). No
+  `0.0|#|.1` line.
+
+This is a smoke test: longer missions, saves and multiplayer on the official
+exe are untested. The published package is
+`D:\LoBo-Reloaded\dist\LoBo-Reloaded-2026-10-12.7z` (885,057,397 bytes,
+SHA-256 `9dd1e854f748c489ad0524a3a9370074cf234b700c9442f556c59de49bcaca0e`,
+built 14:49 local by builder `69fe8b6` with rule `98f07a96...`, 473
+`SHA256SUMS.txt` entries; record in `D:\LoBo-Reloaded\docs\build-2026-10-12.txt`).
+Its Classic switch rewrote the 16 wreck-fire scripts in 14 archives, and the
+source UD check, the Classic check of the staged copy and the composite UD
+check all report 0 changes.
 
 ### Third part: Classic wreck-fire query and restored members
 
-Implemented and offline verified on 2026-10-12, not applied and not runtime
-verified. Rule SHA-256
+Implemented and offline verified on 2026-10-12, then applied to the installed
+UD profile with the fourth part in the third batch (see "Third batch" below).
+Runtime verified: the restored members on the UD engine in `restored-02`, the
+Classic query on the official Remaster exe in `official-s2-04` (above). The
+UD query is unchanged, so the third batch changed no `fire.sqs`; the Classic
+query ships in the package's Classic `@LoBo`. Rule SHA-256 when this part was
+checked:
 `038742923721bf1b5e46832bb8cabfdee655603aef494441bf0f123b13f9db3d`. Evidence
 stays local under `D:/Arma_CWA/tmp/lobo-repair-4/restore/` and
 `D:/Arma_CWA/tmp/lobo-missing-models/`.
@@ -372,14 +483,16 @@ within range, and the damage cadence (at most 0.04 per 10 s) is untouched.
 The literal names only OFP 1.85+ core commands (`private`, `units`, `group`,
 `player`, `alive`, `vehicle`, `distance` on two objects, `in` on an array,
 `forEach`, `if`/`then`, `select`; a test pins this word set) and no UD-only
-command. The earlier literal stays known as `AI_QUERY_CLASSIC_LEGACY`: a copy
-switched with it (the package's Classic @LoBo built from the earlier .4 rule)
+command. The earlier literal, the Classic query since 2026-10-11.1, stays
+known as `AI_QUERY_CLASSIC_LEGACY`: a copy switched with it (the Classic
+`@LoBo` of the 2026-10-11 package and of the failed first 2026-10-12 build)
 is upgraded in place instead of getting a second query. The UD query is
 byte-identical: the UD check of the installed mod without sources reports 0
 changed members. The Classic check of the installed (UD) mod lists the same 16
 members in 14 archives as before, each 49 bytes longer, all with the same
-one-line diff (the `_AI` line). The official exe smoke test has to be rerun
-with a package built from this rule.
+one-line diff (the `_AI` line). The official exe smoke test was rerun with a
+package built from the final rule: `official-s2-04` burned a Hilux wreck on
+the Classic query without the `distance` error.
 
 **Restored members (`restore`).** Ten files that the installed data names,
 that are missing from the archive that should hold them, and that an earlier
@@ -515,8 +628,10 @@ backups:
 
 ### Fourth part: references to files LoBo ships under another name
 
-Implemented and offline verified on 2026-10-12, not applied and not runtime
-verified. Module `repoints` (after `references`, same techniques: one config
+Implemented and offline verified on 2026-10-12, applied to the installed UD
+profile in the third batch (below) and runtime verified on the UD engine in
+`restored-02` (none of the nine old names logged, every target loads; see
+"Runtime verification"). Module `repoints` (after `references`, same techniques: one config
 string per rule, fixed-width model texture fields with exact per-LOD counts,
 `REQUIRED_MEMBERS` failing closed). It adds nothing. Evidence stays local
 under `D:/Arma_CWA/tmp/lobo-missing-2/`; `preview.html` there shows, per item,
@@ -608,7 +723,7 @@ Left as authored:
 
 Offline verification (rule SHA-256
 `98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48`, the final
-.4 rule so far):
+.4 rule):
 
 - Checks of the installed mod. UD with the three sources: 10 added members
   (unchanged from the third part) and the 9 changed members above, nothing
@@ -632,11 +747,29 @@ Offline verification (rule SHA-256
 - 324 synthetic tests pass (two opt-in real-archive tests skipped; the
   restore one passes on the library pbos). `test_lobo_repoints.py` covers
   the text rules, the model plans with authored target faces, the pinned
-  trailers and the end-to-end plan with each required member missing.
+  trailers and the end-to-end plan with each required member missing. At
+  `69fe8b6` the same discover run gives 324 tests, which include the 54
+  `@LoBo_Extras` tests and the 3 packager doctor tests
+  (`test_lobo_package_doctor.py`), with the same two skips.
 
-### Pending apply (third and fourth parts)
+### Third batch (third and fourth parts applied)
 
-UD profile, from the repository root:
+Applied on 2026-10-12 as batch `20261012T205817Z-7a0580a4` (state `applied`,
+`repair_version` 2026-10-11.4, rule SHA-256
+`98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48`, the final
+.4 rule): 9 changed and 10 added members in 8 archives, the repair report
+counting 19 members. The installed LoBo_airammo, LoBoEgypt, LoBo_FAB,
+LoBoRadios, LoBo_Ob, LoBo_M1, LoBo_F4 and LoboF5 pbos equal the manifest's
+after hashes (`d54dc5c4...`, `5693df3b...`, `6f44009f...`, `b44f3a01...`,
+`a9e772c7...`, `97f9100b...`, `b6f1c711...`, `990917ae...`), the LoBo_airammo
+and LoBoEgypt ones equal the archives rebuilt in tmp for the third part, and
+every member hash equals the plan. The UD check of the installed mod during the
+2026-10-12 package build reports 0 changed and 0 added members with this rule,
+and the report-only doctor says Nothing to do in 124 pbos (10 entries not
+readable). In game: `restored-02` (UD engine) and, through the package,
+`official-s2-04` (official exe).
+
+The command, from the repository root:
 
 ```powershell
 python arma_CWR/tools/lobo/repair_lobo.py --mod 'D:\Arma_CWA\@LoBo' --compatibility ud --apply `
@@ -647,12 +780,10 @@ python arma_CWR/tools/lobo/repair_lobo.py --mod 'D:\Arma_CWA\@LoBo' --compatibil
   --report 'D:\Arma_CWA\tmp\lobo-missing-2\applied-ud.json'
 ```
 
-Expected: 10 added members in LoBo_airammo.pbo and LoBoEgypt.pbo (archive
-after hashes above) and the 9 changed members of the fourth part in
-LoBo_FAB, LoBoRadios, LoBo_Ob, LoBo_M1, LoBo_F4 and LoboF5 (after SHA-256
-`6f44009f...`, `b44f3a01...`, `a9e772c7...`, `97f9100b...`, `b6f1c711...`
-and `990917ae...`); a second check with or without the sources then reports
-0 changes and exits 0.
+After a reinstall of @LoBo the same command applies every rule from .1 to .4
+in one batch (the asset sources supply the seven HK icons of .3 and the ten
+restored members); a second check with or without the sources must then
+report 0 changes and exit 0.
 
 ## 2026-10-11.3 batch
 
@@ -955,9 +1086,12 @@ run.
 
 Do not redistribute the UD profile as a Classic-compatible repair: Classic 1.99
 does not provide `nearestObjects`. The newer `createTrigger`/`setTriggerArea`
-commands are also unsuitable as an assumed Classic PC fallback. Official remaster
-versions need their own API/runtime verification. Existing package tooling does
-not automatically select this repair profile; prepare its source copy explicitly.
+commands are also unsuitable as an assumed Classic PC fallback. On the official
+Remaster exe (3.05) only a smoke test has run (`official-s2-04`, one wreck
+burn with the Classic query, no script error); legacy 1.99 has not been run.
+`package-lobo-family.ps1` switches its staged copy of @LoBo to this profile
+itself and ships the UD-profile pbos separately in `@LoBo_UD`; outside that
+builder, prepare a Classic source copy explicitly.
 Switching the two profiles updates only the 16 wreck-fire queries and creates a
 new backup batch; switching back is reproducible.
 

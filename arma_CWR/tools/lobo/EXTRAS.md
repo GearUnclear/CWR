@@ -97,7 +97,13 @@ C:\venvs\acefile\Scripts\python.exe -m pip install --require-hashes -r acefile-r
 Full build with every check (PowerShell 5.1). The staged modfolders of a
 `package-lobo-family.ps1` run serve as `--against`; stage the current core
 first (for example `package-lobo-family.ps1 -SkipFetch -NoArchive`), so the
-check sees the repair state that will ship:
+check sees the repair state that will ship. When the packager later files a
+build into the library with `-LibraryDir`, its `-OutDir` must lie outside the
+library (the default `D:\LoBo-Family` does): since 2026-10-12 it runs
+`mod doctor --fix` on the staged `@LoBo_Deps` and `@LoBo_Extras` and refuses
+a staged folder on, under or above any build input, the library included.
+The `--out` of this script may stay in the library, because the packager only
+reads `-ExtrasDir`:
 
 ```powershell
 $fam = 'D:\LoBo-Family\stage\LoBo-Reloaded-<Version>'

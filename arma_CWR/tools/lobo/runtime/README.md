@@ -331,9 +331,12 @@ locally" above, and use a fresh output directory per run. Before and after,
 ## Repair 2026-10-11.4 probes
 
 The probes in `repair4/` check repair 2026-10-11.4 (LoBo #13, #14, the open #9
-items and the pilot wounds). R1 to R3 and R5 follow the runtime plan in the
-repair .4 spec; R6 here is the wounded pilot probe, not the spec's optional R6
-(the package's four modfolders on the UD engine), which has no probe. They run
+items, the pilot wounds and the restored and repointed files). R1 to R3 and R5
+follow the runtime plan in the repair .4 spec; R6 here is the wounded pilot
+probe, not the spec's optional R6 (the package's four modfolders on the UD
+engine), which has no probe; R7, the restored-content probe, was added with the
+third and fourth parts of .4. R5 runs the official Remaster exe (see "The
+official Remaster exe (R5)"); the others run
 like the .3 probes: UD engine, the Remaster data folder passed with
 `-DataDir`, the installed `D:\Arma_CWA\@LoBo` mounted by absolute path, `-j 1`,
 one run at a time, a fresh output directory per run. Start each new probe with
@@ -369,6 +372,7 @@ worktree, with `-GameDir` pointing at the main checkout's
 | `repair4/lobo_wreck_burn.test.sqf` | `Repair3.Abel` | 600 | R3, #9: isolated glow beside a vanilla Fire (noon and 23:00), "Put out fire" on it, then a Mi-8 wreck: no burn while seated, +0.04 steps on foot, "Put out fire" at the wreck, the 150 s cleanup, the say and scream sounds. Debug log; the TOML's `--log-categories` was meant to drop GRAPHICS, but `burn-01` still logged the GL33 draw lines (1.5 GB), so allow the disk space. |
 | `repair4/lobo_pilot_wounds.test.sqf` | `Repair4.Abel` | 540 | R6, the `references` and `wounds` rules: each of the eight LoBo pilot classes healthy from behind, then wounded from the front, from behind and close behind. |
 | `repair4/lobo_official_smoke.test.sqf` | `Repair4.Abel` | 540 | R5 S2 only: the official Remaster exe in a throwaway shadow with the rebuilt package (R1 case G, the R2 spawns, one M1Smoker from a killed Hilux). Never run it on the UD lane or against the Steam folder. |
+| `repair4/lobo_restored_content.test.sqf` | `Repair4.Abel` | 600 | R7, the `restore` and `repoints` rules: creates the five restored bomb ammo classes as shots and their five carriers (the A-4 drops one Mk-81 in flight), the four Egyptian infantry classes with the restored helmet LOD (4 to 850 m), both Egyptian Guard M1s (12 to 1,420 m), the F-4 Wild Weasel, the three F-5s (profile and pilot view), the MDA medic barrack, the Snunit boat (its group-bar picture, next to a group mate carrying `BAS_Satcom`) and the notepad's Equipment page with `BAS_Satcom` (its gear picture). Debug log, over 1 GB. |
 
 `repair4/lobo_missing_refs_body.sqf` is the R2 body that both R2 and the R5 smoke
 test `#include`; it is not a test on its own.
@@ -380,8 +384,9 @@ source (commit `ffc6183` in this repository). What the R5 probe and runs must
 allow for, from that source and the 2026-10-12 runs under
 `D:\Arma_CWA\tmp\lobo-repair-4\runtime`:
 
-- It refuses `--dev` ("--dev is not supported in release builds", exit 2
-  before the harness listens: `official-s2-01`, `-02`), so
+- It refuses `--dev` ("--dev is not supported in release builds", a startup
+  error before the harness listens, so Trident waited 300 s for the port:
+  `official-s2-01`), so
   `lobo_official_smoke.test.toml` passes only `--no-strict`, `--mod`,
   `--width` and `--height`. The flags Trident adds itself are accepted;
   `--no-strict` undoes Trident's `--strict`, which would end the session on
@@ -408,6 +413,12 @@ allow for, from that source and the 2026-10-12 runs under
   config keeps it as a string, which the script evaluator later rejects with
   `Script error at '0.0|#|.1': Unknown operator`, a WARN on a plain boot and
   fatal under `--autotest`. `check_logs.py r5` names both known errors.
+  The first is a content matter (the Classic wreck-fire query, fixed in the
+  .4 rule `scripts`), the second a package matter: `IRAR_EE9.pbo` in
+  `@LoBo_Deps` carries `0.0.1`, and only a package whose builder ran
+  `mod doctor --fix` on the staged `@LoBo_Deps` (since 2026-10-12; its build
+  report lists `IRAR_EE9.pbo` under "mod doctor --fix") is clean. The
+  2026-10-11 package is not.
 
 R5 on PowerShell 5.1 (Windows PowerShell; `pwsh` is not needed since
 2026-10-12). Never write into the Steam folder or through the shadow's
@@ -415,18 +426,53 @@ junctions, which point into it; delete a shadow by removing its junctions
 first (`[IO.Directory]::Delete(<junction>)`), because Windows PowerShell 5.1's
 `Remove-Item -Recurse` can follow a junction into its target.
 
+Build the package first. `-OutDir` must lie outside `-LibraryDir` (and
+outside the source @LoBo, `-ExtrasDir`, `-ExtraDir` and `-CacheDir`): the
+packager refuses `mod doctor --fix` on a staged modfolder on, under or above
+any build input, and that refusal comes only after `@LoBo` is staged (the
+first 2026-10-12 attempt with `-OutDir D:\LoBo-Reloaded\_work\...` stopped
+there). The 2026-10-12 builds used `-OutDir` under
+`D:\Arma_CWA\tmp\lobo-repair-4\r4-build-0N`:
+
+```powershell
+Set-Location -LiteralPath 'D:\Arma_CWA\arma_CWR'
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/lobo/package-lobo-family.ps1 `
+  -SkipFetch -Version 2026-10-12 -OutDir 'D:\Arma_CWA\tmp\lobo-repair-4\r4-build-03\out' `
+  -CacheDir 'D:\LoBo-Reloaded\sources\mega_nc-cache' -ExtrasDir '<built @LoBo_Extras folder>' `
+  -LibraryDir 'D:\LoBo-Reloaded' -KnownIssuesFile 'D:\LoBo-Reloaded\docs\known-issues.txt'
+```
+
+(Add `-Force` to replace a library version that already exists.) Then:
+
 ```powershell
 Set-Location -LiteralPath 'D:\Arma_CWA\arma_CWR'
 $steam  = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
 $shadow = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\official-shadow-02'   # a new, empty folder
 powershell -NoProfile -File tools/runtime/new-remaster-shadow.ps1 -Source $steam -Destination $shadow
 # Copy @LoBo, @LoBo_Deps and @LoBo_Extras of the package into $shadow (never
-# @LoBo_UD), check them against its SHA256SUMS.txt, then:
+# @LoBo_UD), check them against its SHA256SUMS.txt.
+# S1, menu boot: the official exe alone, with its own user folder, ended by
+# --auto-screenshot (exit code 0 after the capture); stop only this PID.
+$s1 = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\official-s1-03'
+New-Item -ItemType Directory -Force -Path "$s1\user" | Out-Null
+$env:POSEIDON_USER_DIR = "$s1\user"; $env:POSEIDON_CACHE_DIR = "$s1\user"; $env:POSEIDON_TEMP_DIR = "$s1\user"
+$p = Start-Process -FilePath "$shadow\PoseidonGame.exe" -WorkingDirectory $shadow -PassThru `
+  -ArgumentList '--mod "@LoBo_Extras;@LoBo;@LoBo_Deps"', "--log-file `"$s1\official-s1.log`"", '--window', '--width 1280', '--height 720', "--auto-screenshot `"60s:$s1\menu.bmp`"" `
+  -RedirectStandardOutput "$s1\stdout.log" -RedirectStandardError "$s1\stderr.log"
+$null = $p.Handle
+Remove-Item Env:POSEIDON_USER_DIR, Env:POSEIDON_CACHE_DIR, Env:POSEIDON_TEMP_DIR
+if (-not $p.WaitForExit(150000)) { Stop-Process -Id $p.Id -Force }
+"exit=$($p.ExitCode)"
+# S2, in mission through Trident:
 $out = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\official-s2-04'
 powershell -NoProfile -File tools/lobo/runtime/run-local.ps1 -Tri $taskTri -GameDir $shadow -DataDir $shadow `
   -Retries 0 -TestPath tools/lobo/runtime/repair4/lobo_official_smoke.test.sqf -OutputDir $out -TimeoutSeconds 540
 python -B tools/lobo/runtime/repair4/check_logs.py r5 $out
 ```
+
+S1 passes when the capture shows the main menu, the game exits by itself with
+code 0, stderr is empty and the log has the three mods and no `Script error`
+line. Use fresh output and shadow folders per attempt.
 
 Two helpers, both read-only:
 
@@ -437,7 +483,8 @@ Two helpers, both read-only:
   (`AddonSystem.cpp`, `World::ActivateAddons`, `AddonClosure.cpp`). A gap
   in a placed class rejects the boot; a gap in a spawned class is reported the
   same way, although at runtime the ZoneRegistry's later additive activation
-  can hide it. On 2026-10-12 every repair .4 probe passed, and so did the .3
+  can hide it. On 2026-10-12 every repair .4 probe passed (`lobo_restored_content`
+  after its mission gained the owners of the classes R7 creates), and so did the .3
   `rbk500`, `tail_numbers` and `wreck_glow` probes. Two reports are expected:
   `lobo_wreck_glow_unlisted` (its mission leaves `LoBo_airammo` out on
   purpose) and `lobo_mk20_rockeye`, whose script-spawned EAF pilot carries
@@ -452,7 +499,7 @@ Two helpers, both read-only:
     --probe tools/lobo/runtime/repair4/lobo_pilot_wounds.test.sqf
   ```
 
-- `repair4/check_logs.py r1|r2|r3|r6|r5 <output dir>` applies the spec's log
+- `repair4/check_logs.py r1|r2|r3|r6|r7|r5 <output dir>` applies the spec's log
   criteria to `<output dir>\<test stem>\game_stdout.log` and prints one PASS,
   FAIL or INFO line each. Run on the .3 logs it reproduces the spec's baseline
   counts (327 `black_matte.pac`, 35 and 34 EAF `.pac`, 56 `rktf5\swtex.paa`,
@@ -484,6 +531,16 @@ Expected results, beyond runner exit 0:
   (69th, 106th and 133rd Sqn) show red blood from the generated `_dr`
   textures; the olive classes (IAF 101st and 253rd Sqn, RJAF, SyAF) show the
   shipped olive `_d` art.
+- R7: `check_logs.py r7` passes: every probe marker, every class created with
+  its own type, none of the ten restored members and none of the nine
+  repointed targets failing to load, and none of the nine old names logged.
+  Other missing files the probed models name are INFO only. Visual: the bomb
+  shots and the carriers' racks, the helmet at 300 and 850 m, the M1 sides at
+  the far distances, the F-5 pilot views, the boat picture in the group bar
+  and the radio picture on the gear page.
+- R5: S1 as above; S2 `check_logs.py r5` passes: the R2 log criteria, the
+  smoke markers, exactly one `M1Smoker`, and neither named script error
+  (`0.0|#|.1`, `distance: type array, expected object`).
 
 A wound texture only appears at a part hit of 0.7 or more (0.8 for the head):
 `Man::WoundsAnimation` in `SoldierOldSimProxy.cpp`. `setDammage` sets every
@@ -493,8 +550,9 @@ hits to 0.8 (head 0.85) with `setSelectionDamage`.
 
 Before and after the runs, `repair_lobo.py --check` (pass `--tools` with the
 main checkout's `PoseidonTools.exe`, since a worktree has no `dist`) must exit 0
-with zero changes and report `repair_version` `2026-10-11.4`, and a recursive
-listing of the Steam Remastered folder must not change.
+with zero changes and report `repair_version` `2026-10-11.4` and the final rule
+SHA-256 `98f07a96...`, and a recursive listing of the Steam Remastered folder
+must not change.
 
 ### Results, 2026-10-12
 
@@ -502,12 +560,24 @@ UD engine `dist\x64-win-rwdi\PoseidonGame.exe` (SHA-256
 `F0BCDA0852C3AAF84F00F23E23B0FF81275689DE0D937B9E9F46176384A85A0A`), Trident
 `D:\Arma_CWA\tmp\lobo-repair-3\runtime\trident-build\debug\tri.exe` (SHA-256
 `43D48C10D73AB8925880908FE4CBB4C704EF0B451236157D151E7DF5574A09CF`), official
-Remaster data, the installed `@LoBo` after both repair .4 batches. Each final
-run passed on its first attempt with `-Retries 0`, recorded `exit_code=0`,
-passed its `check_logs.py` criteria with no script error, `Zero divisor` or
+Remaster data, the installed `@LoBo` after the first two repair .4 batches
+(R1, R2, R3, R6) or after all three (R7). Each final UD run passed on its
+first attempt with `-Retries 0`, recorded `exit_code=0`, passed its
+`check_logs.py` criteria with no script error, `Zero divisor` or
 `Access denied` line, and closed every game it started; both executables had
-the same hash after each run. The repair check gave 0 changed and 0 added
-members before and after, and the Steam folder listing did not change.
+the same hash after each run. Around R1 to R6 the repair check gave 0 changed
+and 0 added members before and after (rule `de63a7e0...`) and the Steam
+Remastered listing did not change. After R7 the package build's UD check of
+the source gave 0 and 0 with the final rule `98f07a96...`, and the listing of
+the whole Steam CWA app folder (8,782 files) was the same at 12:19, 12:47,
+14:37 and 14:50 local, which covers R7 and the official-exe runs.
+
+The R5 runs used the official 3.05 exe (SHA-256
+`b501e6e6e617b65570ff313cbf3ec5a3ac758a2897710c0491417d830972e7e5`, the Steam
+copy's bytes) in a shadow; the final pair ran in `official-shadow-02` with the
+package from `D:\Arma_CWA\tmp\lobo-repair-4\r4-build-02`, whose
+`SHA256SUMS.txt` differs from the published LoBo Reloaded 2026-10-12 only in
+`README-FIRST.txt` and `@LoBo\UD-CHANGES.txt`.
 
 | Run | Probe | Result | What it verifies |
 | --- | --- | --- | --- |
@@ -516,8 +586,12 @@ members before and after, and the Steam folder listing did not change.
 | `refs-01` | R2 | Passed in 47.6 s; 18 screenshots reviewed. | #14: zero lines for the five old names, no load failure for a repointed target, 2 expected `backfuse.pac` lines; Hilux and Hilux MG textured at 8, 35, 70 and 120 m (LOD bias 1), EAF pilot back and leg-backs at 5 and 40 m, AIM-9s, F-16s and MiG-21bis MR1 textured. Also logged: `lobo_airammo\lobo_mk81.p3d` not found (not a .4 target). |
 | `wounds-01` | R6 | Passed in 27.3 s; 32 screenshots reviewed. | Pilot wounds: all eight classes alive at damage 0.5 with hits `[0.85, 0.8, 0.8, 0.8]` (head, body, hands, legs), wounded front and back in their own suit colour; no `lobo_pilot` texture failed to load. |
 | `burn-01` | R3 | Passed in 197.1 s. | #9: S glow without mesh beside a vanilla Fire; D1 "Put out fire" then "Light fire" on the isolated glow; A no damage at 60 m; B seated 28.1 s at 6.86 m without burn; C five +0.04 steps in 33.3 s, at least 10.24 s apart from the second step, MEDIC line on screen; one `eng_lookout3` scream per step (6); D2 "Put out fire" offered and working at the wreck, particles and 29 `say` plays after it; 150 `objects\fire` plays; E glow deleted 163.7 s after t0, wreck kept. |
-| `official-s1`, `official-s1-02`, `official-s2-01` to `-03-diag`, `official-s2-fallback`, `-fallback-diag` | R5 | Failed on the 2026-10-12 package: `IRAR_EE9.pbo` in `@LoBo_Deps` carries `tracerColor[]={0.8,0.5,0.0.1,1}` (`Script error at '0.0\|#\|.1'`, seen in 4 of the 6 boots: a WARN on both menu boots, fatal in two of the four `--autotest` boots); the probe used `--dev` and `nearestObjects`, which the release exe lacks; the Classic wreck-fire query measured `distance` from a position (`distance: Type Array, expected Object` when the Hilux burned). The builder and the probe were fixed afterwards; the Classic query is a content repair matter (`repair/scripts.py`). | Nothing is claimed for the official Remaster exe yet. The fallback run did show case G there: player gunner, no pilot, no `Zero divisor`. |
+| `official-s1`, `official-s1-02`, `official-s2-01` to `-03-diag`, `official-s2-fallback`, `-fallback-diag` | R5 | Failed on the first, unpublished 2026-10-12 package (built 12:30 from `8677533`, rule `de63a7e0...`): `IRAR_EE9.pbo` in `@LoBo_Deps` carries `tracerColor[]={0.8,0.5,0.0.1,1}` (`Script error at '0.0\|#\|.1'`, seen in 4 of the 6 boots: a WARN on both menu boots, fatal in two of the four `--autotest` boots); the probe used `--dev` and `nearestObjects`, which the release exe lacks; the Classic wreck-fire query measured `distance` from a position (`distance: Type Array, expected Object` when the Hilux burned). The builder (doctor pass on the staged deps and extras), the probe and the Classic query (`repair/scripts.py`) were fixed afterwards. | Nothing from these runs. The fallback run did show case G there: player gunner, no pilot, no `Zero divisor`. |
 | `official-cmdcheck-01` | not R5 | Passed: a throwaway probe of the smoke probe's command forms on the official exe, with a mod-doctored `@LoBo_Deps` copy; no script error in two boots. | Only that those commands exist and behave there. |
+| `restored-01` | R7 | Passed in 117.6 s; `check_logs.py r7` RESULT PASS. | Superseded by `restored-02`, which added the cockpit camera position line. |
+| `restored-02` | R7 | Passed in 134.6 s; 83 log checks pass, 0 fail; 55 screenshots. | Restored and repointed files: the five bomb ammo classes, their five carriers, the four Egyptian infantry classes, both Egyptian Guard M1s, the F-4 Wild Weasel, the three F-5s, the MDA medic barrack and the Snunit created with their own type; the ten restored members and the nine repointed targets never fail to load and the nine old names are absent; the A-4 dropped one Mk-81 at 427 m AGL (ammo 12 to 11). The bomb shots show the slick Mk-81 and the retarded LDGB with fins open, the gear page the AN/PSC-5D picture. Other missing files, not .4 targets: `lobo_ob\gw\has\has.paa`, `lobo_ob\emb\icon.paa`, `lobo_a4\tex2\tailwing.paa`, `lobof16\com\backfuse.pac`. The pilot-view camera position read `FAIL:not_viewer_mode` (INFO only). |
+| `official-s1-03` | R5 S1 | Passed: version 3.05, `@LoBo_Extras`, `@LoBo` and `@LoBo_Deps` loaded, `Auto-screenshot saved` at 60 s, `Shutdown: begin (exit code 0)`, exit 0 after 69 s, empty stderr, no `Script error` line. | The official exe boots the 2026-10-12 package to the Lost Brothers main menu (capture reviewed). |
+| `official-s2-04` | R5 S2 | Passed in 28.0 s on the first attempt; `check_logs.py r5` RESULT PASS. | On the official exe: case G (player gunner, no pilot, unmanned turret, no `Zero divisor`); the R2 spawns with none of the five old names logged, no load failure for a repointed target, no missing wound texture and 2 expected `backfuse.pac` lines; exactly one `M1Smoker` from the killed Hilux, which burned for about 3 s without the `distance` error; no `0.0\|#\|.1` line. |
 
 In `burn-01` the D1 menu sampled 30 frames after the player was placed did
 not list "Put out fire" yet; the runner retries a failing assert until its

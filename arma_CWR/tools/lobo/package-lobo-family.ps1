@@ -126,6 +126,12 @@
 .PARAMETER OutDir
     Where the staging folder, the cache, the reports and the archives go.
     Default: D:\LoBo-Family
+    Must lie outside -LibraryDir, and outside the @LoBo folder, -ExtraDir,
+    -ExtrasDir and -CacheDir: "mod doctor --fix" refuses a staged modfolder
+    on, under or above any build input (Assert-DoctorFixTarget), and that
+    refusal comes only after @LoBo is staged, so an OutDir such as
+    <LibraryDir>\_work\... wastes the run. The 2026-10-12 library build used
+    an OutDir under D:\Arma_CWA\tmp.
 
 .PARAMETER Version
     Package version string, used in folder and archive names.
@@ -207,7 +213,8 @@
     After a successful build the package is filed into
     modfolders\<Version>\, dist\ and docs\build-<Version>.txt there (see
     .DESCRIPTION). Needs the archive, so it cannot be combined with
-    -NoArchive. Existing targets are refused without -Force.
+    -NoArchive. Existing targets are refused without -Force. -OutDir must
+    not lie inside it (see -OutDir).
 
 .PARAMETER KnownIssuesFile
     Plain ASCII text file holding the KNOWN ISSUES list for README-FIRST.txt
@@ -244,9 +251,10 @@
     Full build: fetch, stage, Classic switch, verify, LoBo-Reloaded-<date>.7z and LoBo-Reloaded-Sources-<date>.7z.
 
 .EXAMPLE
-    .\package-lobo-family.ps1 -SkipFetch -ExtrasDir D:\LoBo-Reloaded\modfolders\@LoBo_Extras -LibraryDir D:\LoBo-Reloaded -KnownIssuesFile D:\LoBo-Reloaded\docs\known-issues.txt
+    .\package-lobo-family.ps1 -SkipFetch -OutDir D:\LoBo-Family -ExtrasDir D:\LoBo-Reloaded\modfolders\@LoBo_Extras -LibraryDir D:\LoBo-Reloaded -KnownIssuesFile D:\LoBo-Reloaded\docs\known-issues.txt
     Build from the cache with the optional extras (built by build-lobo-extras.py)
     and file the result into the library as modfolders\<date>, dist\ and docs\.
+    The OutDir must stay outside the library (see -OutDir).
 
 .NOTES
     Windows PowerShell 5.1 compatible. Dot-sourcing the script (". .\package-lobo-family.ps1")
