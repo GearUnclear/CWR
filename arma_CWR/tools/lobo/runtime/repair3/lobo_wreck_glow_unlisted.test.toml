@@ -1,0 +1,10 @@
+# LoBo #9 activation case for repair 2026-10-11.3: the mission's addOns[] names
+# LoBoTerror only. Mounts the installed, repaired D:/Arma_CWA/@LoBo by absolute
+# path. Run it explicitly with --retries 2 and -j 1; it is not part of a
+# default lane.
+mission = "tools/lobo/runtime/Repair3Toyota.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 180
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720"]

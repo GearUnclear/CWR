@@ -5,7 +5,8 @@ profile. They do not contain or modify game PBOs. Read the repository guides and
 `../CONTENT-REPAIRS.md`, `../AMMUNITION-POLICY.md`, and `../ARMOR-MODELS.md` first.
 Keep proposed, implemented, applied, offline verified, and runtime verified
 results separate. A runner exit code of zero verifies its assertions, not every
-acceptance claim, screenshot, or unsupported case.
+acceptance claim, screenshot, or unsupported case. The later repair 2026-10-11.3
+probes, which ran on the Remaster data, are described in the last section.
 
 ## Reproduce locally
 
@@ -272,3 +273,56 @@ Evidence: `repair-check-final*.json`, `doctor-final.log`, and
 The user-reported jet self-destruction at the original location and menu flicker
 are not claimed fixed. The aircraft visual probe deliberately uses invulnerable
 aircraft reset at 250 m altitude and does not test normal launch survival.
+
+## Repair 2026-10-11.3 probes
+
+The probes in `repair3/` check repair 2026-10-11.3 (LoBo #4, #5, #8 and #9) in
+game. They were run on 2026-10-11 with the UD engine from
+`D:\Arma_CWA\arma_CWR\dist\x64-win-rwdi` on the official Remaster data
+(`D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered`), not on
+Classic. Results and limits per issue are in `../CONTENT-REPAIRS.md` under
+"Runtime results"; local evidence is under
+`D:\Arma_CWA\tmp\lobo-repair-3\runtime\<run>`.
+
+| Entry point | Mission | Run | What it checks |
+| --- | --- | --- | --- |
+| `repair3/lobo_rbk500_bomblets.test.sqf` | `Repair3.Abel` | `rbk500-01` | #5: the Syrian MiG-21 CAS1 releases one RBK-500 through its fired handler; passes when the dispenser opens and `LoBoRBK500Bomblet` objects exist. A bomblet created directly first proves the counter can see them. |
+| `repair3/lobo_mk20_rockeye.test.sqf` | `Repair3.Abel` | `mk20-03` | #4: one Mk-20 each from the A-4R, F-4 WW and IL-28 AS; passes when every drop opens a `LoBo_mk20Deployed` and bomblets exist. |
+| `repair3/lobo_tail_numbers.test.sqf` | `Repair3.Abel` | `numbers-01` | #8: two empty copies each of F-15C, F-16 IAF, F-16 EAF, F-4 and IL-28 run their installed Init handlers; debug log level keeps any `Unknown label` line. The digits need visual review of the screenshots. |
+| `repair3/lobo_wreck_glow.test.sqf` | `Repair3.Abel` | `glow-01` | #9: each glow class creates an object, and the killed handlers of a Toyota, a Merkava2 and a Mi-8 each create their glow. |
+| `repair3/lobo_wreck_glow_unlisted.test.sqf` | `Repair3Toyota.Abel` | `glow-unlisted-01` | #9 activation case: the mission's `addOns[]` names only `LoBoTerror`, so `lobo_airammo` is not activated. |
+
+`repair3/lobo_cluster_observe.sqf` is a shared helper that the two cluster
+probes `#include`. It records each distinct bomblet about every ten frames, so
+its counts are lower bounds. Both cluster probes hold the aircraft still and
+invulnerable at 150 m: they check the script path, not ballistics, spread or
+damage. The wreck glow probes do not cover burn damage, the "Put out fire"
+action, the 150 s cleanup or the `say` sound. The missions are
+`tools/lobo/runtime/Repair3.Abel` (its `addOns[]` activates `LoBo_airammo` and
+the aircraft and vehicle addons) and `tools/lobo/runtime/Repair3Toyota.Abel`.
+
+Like the issue #1 probes, these are machine-specific. Each TOML passes
+`--dev --no-strict --mods-dir D:/Arma_CWA --mod @LoBo`, so it mounts the
+repaired `D:\Arma_CWA\@LoBo` by absolute path. A relative mods dir would not
+reach that folder from the Remaster data folder, and the Remaster folder holds
+its own unrepaired `@LoBo` copy, which must not be the one tested. The TOMLs
+carry the `full_cwa`, `lobo` and `exclusive` tags and are not part of a default
+lane. Run them one at a time with retries, through the same wrapper, and pass
+the Remaster data folder explicitly (the wrapper defaults to Classic):
+
+```powershell
+Set-Location -LiteralPath 'D:\Arma_CWA\arma_CWR'
+$taskTri = 'D:\Arma_CWA\tmp\lobo-repair-3\runtime\trident-build\debug\tri.exe'
+powershell -NoProfile -File tools/lobo/runtime/run-local.ps1 `
+  -Tri $taskTri `
+  -TestPath tools/lobo/runtime/repair3/lobo_rbk500_bomblets.test.sqf `
+  -DataDir 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered' `
+  -Retries 2 `
+  -OutputDir 'D:\Arma_CWA\tmp\lobo-repair-3\runtime\rbk500-02' `
+  -TimeoutSeconds 540
+```
+
+Build `tri.exe` from the checkout that holds these files, as in "Reproduce
+locally" above, and use a fresh output directory per run. Before and after,
+`repair_lobo.py --mod 'D:\Arma_CWA\@LoBo' --compatibility ud --check` must exit
+0 with zero changes and report `repair_version` `2026-10-11.3`.

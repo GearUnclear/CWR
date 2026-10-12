@@ -81,6 +81,20 @@ class SelectionUnionTests(unittest.TestCase):
         fixed = models.add_hitpoint_unions(self.original + trailer, self.unions)
         self.assertEqual(fixed[-32:], trailer)
 
+    def test_any_oxygen_default_path_trailer_is_preserved(self):
+        # LoBo_MD500D_R.p3d ends with 'H:\Codemast' + NUL + 20 bytes, not 'data\'.
+        trailer = b'H:\\Codemast\0' + bytes(range(1, 21))
+        self.assertEqual(32, len(trailer))
+        fixed = models.add_hitpoint_unions(self.original + trailer, self.unions)
+        self.assertEqual(fixed[-32:], trailer)
+        self.assertEqual(len(models._lods(self.original + trailer)), 3)
+
+    def test_non_path_32_byte_trailers_are_still_rejected(self):
+        for trailer in (bytes(32), b'\x01' * 32, b'path without a nul byte'.ljust(32, b'x'),
+                        b'\x7fbad\0'.ljust(32, b'\0'), b'H:\\Codemast\0' + bytes(21)):
+            with self.subTest(trailer=trailer[:12]), self.assertRaisesRegex(ValueError, 'trailing MLOD'):
+                models._lods(self.original + trailer)
+
     def test_existing_hull_name_and_all_other_bytes_survive_union(self):
         original = model(lod(5e15, [('Hull', self.sources[0][1]), ('FHull', self.sources[1][1])]))
         fixed = models.add_hitpoint_unions(original, {'hull': ('Hull', 'FHull')})

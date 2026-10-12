@@ -1,0 +1,29 @@
+version=11;
+class Mission
+{
+    // Lobo #9 activation case: a mission that places only a LoBo Toyota, so its
+    // addOns[] names LoBoTerror but not LoBo_airammo, the owner of M1Smoker.
+    addOns[]={"LoBoTerror"};
+    randomSeed=20261011;
+    class Intel { viewDistance=1500; year=1985; month=6; day=15; hour=12; minute=0; };
+    class Groups
+    {
+        items=1;
+        class Item0
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0
+                {
+                    position[]={7985,0,9450}; azimut=0; id=0; side="WEST";
+                    vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.6;
+                };
+            };
+        };
+    };
+};
+class Intro {};
+class OutroWin {};
+class OutroLoose {};

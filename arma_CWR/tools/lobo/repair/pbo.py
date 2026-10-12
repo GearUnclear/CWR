@@ -74,8 +74,16 @@ class Archive:
         if len(result.stdout)!=e.fields[1]:raise ValueError(f'Decoded size mismatch: {path}/{key}')
         return result.stdout
 
-    def replace(self,replacements):
-        if replacements and self.stuffpbo:raise ValueError('Legacy StuffPBO checksum rewriting is unsupported')
+    def replace(self,replacements,additions=None):
+        """Rebuild with `replacements` ({member: bytes}) and optional `additions`.
+
+        `additions` ({stored name: bytes}, insertion order kept) are appended as
+        new stored members: one header record each after the last existing record
+        and before the terminator (fields 0,0,0,0,size), payloads after the
+        existing payloads in the same order. Member addition is refused on
+        StuffPBO archives. A StuffPBO archive accepts only same-length
+        replacements of uncompressed members, written in place (see _in_place).
+        """
         normalized={}
         for key,value in replacements.items():
             key=normalize(key)
@@ -84,22 +92,66 @@ class Archive:
         replacements=normalized
         unknown=set(replacements)-self.by_key.keys()
         if unknown:raise ValueError(f'Cannot add unknown PBO members: {sorted(unknown)}')
+        for payload in replacements.values():
+            if not isinstance(payload,bytes):raise TypeError('PBO replacement must be bytes')
+        added=[]
+        for name,payload in (additions or {}).items():
+            key=normalize(name)
+            if key in self.by_key:raise ValueError(f'Added PBO member already exists: {key}')
+            if key in {k for k,_,_ in added}:raise ValueError(f'Duplicate added PBO member: {key}')
+            if not isinstance(payload,bytes):raise TypeError('Added PBO member must be bytes')
+            added.append((key,name.encode('latin1'),payload))
+        if self.stuffpbo and (replacements or added):return self._in_place(replacements,added)
         headers=[self.prefix];payloads=[]
         for e in self.entries:
             if e.key in replacements:
                 payload=replacements[e.key]
-                if not isinstance(payload,bytes):raise TypeError('PBO replacement must be bytes')
                 # Converted members are uncompressed; other records remain exact.
                 fields=(0,0,e.fields[2],e.fields[3],len(payload))
             else:payload=self.stored(e);fields=e.fields
             headers.extend((e.name+b'\0',struct.pack('<5I',*fields)));payloads.append(payload)
+        for _,name,payload in added:
+            # Stored, no reserved value, timestamp 0.
+            headers.extend((name+b'\0',struct.pack('<5I',0,0,0,0,len(payload))));payloads.append(payload)
         body=b''.join(headers+[self.terminator]+payloads)
         tail=b'\0'+hashlib.sha1(body).digest() if self.checksummed else self.trailer
         result=body+tail
         after=Archive(result)
-        if list(after.by_key)!=list(self.by_key):raise ValueError('PBO member order changed')
-        for e in self.entries:
-            if e.key not in replacements:
-                a=after.by_key[e.key]
-                if e.fields!=a.fields or self.stored(e)!=after.stored(a):raise ValueError(f'Untouched member changed: {e.key}')
+        if list(after.by_key)!=list(self.by_key)+[k for k,_,_ in added]:raise ValueError('PBO member order changed')
+        self._verify(after,replacements,added)
         return result
+
+    def _in_place(self,replacements,added):
+        """Legacy StuffPBO policy: overwrite same-length uncompressed payloads only.
+
+        The 17-byte trailer starts with two bytes of an unknown legacy checksum
+        followed by the packer signature. No StuffPBO reader exists in the UD or
+        Remaster engine source and OFP 1.99 does not validate PBO trailers, so a
+        stale value is ignored by every supported runtime. Header table and
+        trailer stay verbatim, as with mod doctor's same-length in-place patches.
+        """
+        unsupported='Legacy StuffPBO checksum rewriting is unsupported'
+        if added:raise ValueError(unsupported+' (members cannot be added)')
+        out=bytearray(self.data)
+        for key,payload in replacements.items():
+            e=self.by_key[key]
+            if e.fields[0]!=0:raise ValueError(f'{unsupported} (compressed member {key})')
+            if len(payload)!=e.fields[4]:raise ValueError(f'{unsupported} (length change of {key})')
+            out[e.offset:e.offset+e.fields[4]]=payload
+        result=bytes(out)
+        after=Archive(result)
+        if not after.stuffpbo or after.trailer!=self.trailer:raise ValueError('StuffPBO trailer changed')
+        if after.data[:after.header_end]!=self.data[:self.header_end]:raise ValueError('StuffPBO header changed')
+        if list(after.by_key)!=list(self.by_key):raise ValueError('PBO member order changed')
+        self._verify(after,replacements,())
+        return result
+
+    def _verify(self,after,replacements,added):
+        for e in self.entries:
+            a=after.by_key[e.key]
+            if e.key in replacements:
+                if bytes(after.stored(a))!=replacements[e.key]:raise ValueError(f'Replaced member did not read back: {e.key}')
+            elif e.fields!=a.fields or self.stored(e)!=after.stored(a):raise ValueError(f'Untouched member changed: {e.key}')
+        for key,_,payload in added:
+            a=after.by_key[key]
+            if a.fields!=(0,0,0,0,len(payload)) or bytes(after.stored(a))!=payload:raise ValueError(f'Added member did not read back: {key}')

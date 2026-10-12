@@ -7,13 +7,15 @@ import importlib
 import json
 from pathlib import Path
 import shutil
+import stat
 import sys
 import tempfile
 import uuid
-from repair.pbo import Archive
+from repair.pbo import Archive, normalize
 
-REPAIR_MODULES=('ammo','scripts','models','followups')
-REPAIR_VERSION='2026-10-11.2'
+REPAIR_MODULES=('ammo','scripts','models','followups','loops','mines','clusters','numbers','effects',
+                'identifiers','content','weapons','textures')
+REPAIR_VERSION='2026-10-11.3'
 
 def rule_fingerprint():
     base=Path(__file__).resolve().parent
@@ -24,13 +26,15 @@ def digest(data):return hashlib.sha256(data).hexdigest()
 
 def modules():return [importlib.import_module('repair.'+name) for name in REPAIR_MODULES]
 
-def plan(mod,tool,compatibility='ud'):
+def plan(mod,tool,compatibility='ud',asset_source=None):
     rules=modules();wanted=set().union(*(set(m.ADDONS) for m in rules))
     model_keys=set().union(*(set(getattr(m,'MODEL_MEMBERS',())) for m in rules))
+    added_keys=set().union(*(set(getattr(m,'ADDED_MEMBERS',())) for m in rules))
     paths={p.stem.lower():p for p in (mod/'addons').glob('*.pbo')}
     missing=wanted-paths.keys()
     if missing:raise ValueError(f'Required addons missing: {sorted(missing)}')
-    docs={};binary={};hashes={};original={}
+    if {k.split('/',1)[0] for k in added_keys}-wanted:raise ValueError('Added members outside the repaired addons')
+    docs={};binary={};hashes={};original={};existing_added={}
     # Read original archive bytes once per addon; no full-mod binary extraction.
     for stem in sorted(wanted):
         path=paths[stem];raw=path.read_bytes();hashes[stem]=digest(raw);archive=Archive(raw)
@@ -40,11 +44,33 @@ def plan(mod,tool,compatibility='ud'):
                 data=archive.read(key,path,tool);docs[full]=data.decode('latin1');original[full]=data
             elif full in model_keys:
                 data=archive.read(key,path,tool);binary[full]=data;original[full]=data
+            elif full in added_keys:
+                existing_added[full]=archive.read(key,path,tool)
     missing_models=model_keys-binary.keys()
     if missing_models:raise ValueError(f'Required models missing: {sorted(missing_models)}')
+    # New members come only from a module's declared ADDED_MEMBERS and a source
+    # the module verifies itself (pinned hashes); a skip line is reported, not
+    # fatal. They are planned first because a text rule may depend on whether
+    # its target member will exist (weapons: the MSG90 picture path).
+    skipped=[];added={};present=set(existing_added)
     for module in rules:
-        options={'compatibility':compatibility} if module.__name__=='repair.scripts' else {}
-        edits=module.repair(dict(docs),**options)
+        if not hasattr(module,'add_members'):continue
+        own=set(getattr(module,'ADDED_MEMBERS',()))
+        mine={k:v for k,v in existing_added.items() if k in own}
+        additions,skips=module.add_members(dict(mine),asset_source)
+        if set(additions)-own:raise ValueError(f'{module.__name__} tried to add an undeclared member')
+        if set(additions)&(mine.keys()|original.keys()|added.keys()):raise ValueError(f'{module.__name__} tried to add an existing member')
+        again,skips_again=module.add_members(mine|{k:v for k,(_,v) in additions.items()},asset_source)
+        if again or (skips_again if additions else skips_again!=skips):raise ValueError(f'Non-idempotent member additions: {module.__name__}')
+        for key,(stored,data) in additions.items():
+            if not isinstance(data,bytes) or normalize(stored)!=key.split('/',1)[1]:raise ValueError(f'Invalid added member {key}')
+        added.update(additions);present|=set(additions);skipped+=skips
+    def options(module):
+        if module.__name__=='repair.scripts':return {'compatibility':compatibility}
+        if module.__name__=='repair.weapons':return {'present':frozenset(present)}
+        return {}
+    for module in rules:
+        edits=module.repair(dict(docs),**options(module))
         if set(edits)-docs.keys():raise ValueError(f'{module.__name__} tried to add an unknown text member')
         docs.update(edits)
         if hasattr(module,'repair_models'):
@@ -53,8 +79,7 @@ def plan(mod,tool,compatibility='ud'):
             binary.update(edits)
     # Require a stable fixed point across all rules, including overlapping addons.
     for module in rules:
-        options={'compatibility':compatibility} if module.__name__=='repair.scripts' else {}
-        edits=module.repair(dict(docs),**options)
+        edits=module.repair(dict(docs),**options(module))
         if any(docs.get(k)!=v for k,v in edits.items()):raise ValueError(f'Non-idempotent rules: {module.__name__}')
         if hasattr(module,'repair_models'):
             edits=module.repair_models(dict(binary))
@@ -63,20 +88,53 @@ def plan(mod,tool,compatibility='ud'):
     changed.update({k:v for k,v in binary.items() if v!=original[k]})
     records=[{'member':k,'before_sha256':digest(original[k]),'after_sha256':digest(v),
               'before_bytes':len(original[k]),'after_bytes':len(v)} for k,v in sorted(changed.items())]
-    return paths,hashes,changed,records,docs
+    for key,(stored,data) in added.items():
+        changed[key]=data
+        records.append({'member':key,'added':True,'stored_name':stored,'before_sha256':None,'before_bytes':0,
+                        'after_sha256':digest(data),'after_bytes':len(data)})
+    return paths,hashes,changed,records,docs,skipped
+
+def replace_file(source,target):
+    """Path.replace that keeps the target's permission bits, including a read-only one.
+
+    Several original LoBo archives carry the Windows read-only attribute, which
+    makes os.replace onto them fail. Lift it only for the rename and put the
+    target's original mode back on the replacing file (or on the target when the
+    rename fails). The rename is the commit point: once it succeeded this never
+    raises, so the caller always records the replaced (or restored) archive. A
+    failure to put the attribute back is returned as a warning string instead.
+    """
+    mode=target.stat().st_mode
+    readonly=not mode&stat.S_IWRITE
+    if readonly:target.chmod(mode|stat.S_IWRITE)
+    try:source.replace(target)
+    except BaseException:
+        if readonly:
+            try:target.chmod(mode)
+            except OSError:pass
+        raise
+    if readonly:
+        try:target.chmod(mode)
+        except OSError as exc:return f'{target}: replaced, but the read-only attribute was not restored: {exc}'
+    return None
 
 def apply(mod,paths,hashes,changed,records,compatibility='ud'):
+    # Added members (record 'added') are appended to their archive; restoring a
+    # batch's original archives removes them again.
+    added={r['member']:r['stored_name'] for r in records if r.get('added')}
     grouped={}
     for full,data in changed.items():
-        stem,key=full.split('/',1);grouped.setdefault(stem,{})[key]=data
+        stem,key=full.split('/',1);edits=grouped.setdefault(stem,({},{}))
+        if full in added:edits[1][added[full]]=data
+        else:edits[0][key]=data
     if not grouped:return None
     # Stage and verify EVERY replacement before creating backups or replacing files.
     with tempfile.TemporaryDirectory(prefix='lobo-repair-',dir=mod) as stage_dir:
         stage=Path(stage_dir);new_hashes={}
-        for stem,edits in grouped.items():
+        for stem,(edits,additions) in grouped.items():
             raw=paths[stem].read_bytes()
             if digest(raw)!=hashes[stem]:raise ValueError(f'Archive changed since preflight: {paths[stem]}')
-            result=Archive(raw).replace(edits)
+            result=Archive(raw).replace(edits,additions)
             (stage/paths[stem].name).write_bytes(result);new_hashes[stem]=digest(result)
         stamp=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
         backup=mod/'.ud-backups'/'issue-69'/stamp;backup.mkdir(parents=True)
@@ -91,13 +149,19 @@ def apply(mod,paths,hashes,changed,records,compatibility='ud'):
                                          'after_sha256':new_hashes[stem]})
         manifest_path=backup/'manifest.json'
         manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
-        replaced=[]
+        replaced=[];attribute_warnings=[]
+        def replaced_with(source,target):
+            # The archive counts as replaced as soon as the rename succeeded.
+            warning=replace_file(source,target)
+            if warning:
+                attribute_warnings.append(warning);print(f'WARN: {warning}',file=sys.stderr)
         try:
             for stem in grouped:
                 target=paths[stem]
                 if digest(target.read_bytes())!=hashes[stem]:raise ValueError(f'Concurrent edit: {target}')
-                (stage/target.name).replace(target);replaced.append(stem)
+                replaced_with(stage/target.name,target);replaced.append(stem)
             manifest['state']='applied'
+            if attribute_warnings:manifest['attribute_warnings']=attribute_warnings
             manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
         except BaseException:
             conflicts=[];restore_errors=[]
@@ -105,11 +169,12 @@ def apply(mod,paths,hashes,changed,records,compatibility='ud'):
                 try:
                     if not paths[stem].exists() or digest(paths[stem].read_bytes())!=new_hashes[stem]:
                         conflicts.append(str(paths[stem]));continue
-                    restore=stage/(paths[stem].name+'.restore');shutil.copy2(backup/paths[stem].name,restore);restore.replace(paths[stem])
+                    restore=stage/(paths[stem].name+'.restore');shutil.copy2(backup/paths[stem].name,restore);replaced_with(restore,paths[stem])
                 except OSError as exc:restore_errors.append({'file':str(paths[stem]),'error':str(exc)})
             manifest['state']='rollback-failed' if restore_errors else 'rollback-conflict' if conflicts else 'rolled-back'
             manifest['rollback_conflicts']=conflicts
             manifest['rollback_errors']=restore_errors
+            if attribute_warnings:manifest['attribute_warnings']=attribute_warnings
             if conflicts:print(f'Concurrent edits preserved during rollback; originals remain at {backup}: {conflicts}',file=sys.stderr)
             if restore_errors:print(f'Rollback incomplete; verified originals remain at {backup}: {restore_errors}',file=sys.stderr)
             try:manifest_path.write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf8')
@@ -125,12 +190,18 @@ def main(argv=None):
     parser.add_argument('--report',type=Path)
     parser.add_argument('--compatibility',choices=('ud','classic'),default='ud',
                         help='UD uses full nearby-unit queries; Classic uses a limited group-only wreck-fire query')
+    parser.add_argument('--asset-source',type=Path,
+                        help='Hash-pinned external archive for members LoBo references but never shipped (TheHKpack.pbo 1.75)')
     args=parser.parse_args(argv);mod=args.mod.resolve()
     if not (mod/'addons').is_dir():parser.error('--mod must contain addons/')
     try:
-        paths,hashes,changed,records,docs=plan(mod,args.tools.resolve(),args.compatibility)
+        source=args.asset_source.resolve() if args.asset_source else None
+        paths,hashes,changed,records,docs,skipped=plan(mod,args.tools.resolve(),args.compatibility,source)
+        for line in skipped:print(f'WARN: {line}',file=sys.stderr)
         result={'repair_version':REPAIR_VERSION,'rule_sha256':rule_fingerprint(),'issue':'https://github.com/GearUnclear/lobo/issues/1','mode':'apply' if args.apply else 'check',
-                'compatibility':args.compatibility,'changed_members':len(changed),'archives':sorted({k.split('/')[0] for k in changed}),'members':records}
+                'compatibility':args.compatibility,'changed_members':len(changed),'added_members':sum(1 for r in records if r.get('added')),
+                'archives':sorted({k.split('/')[0] for k in changed}),'skipped':skipped,'members':records}
+        if source:result['asset_source_sha256']=digest(source.read_bytes())
         if args.apply:
             result['backup_manifest']=str(apply(mod,paths,hashes,changed,records,args.compatibility)) if changed else None
         if args.report:

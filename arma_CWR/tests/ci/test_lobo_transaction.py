@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import shutil
+import stat
 import struct
 import sys
 import tempfile
@@ -64,6 +65,114 @@ class TransactionTests(unittest.TestCase):
             self.assertEqual(Archive(installed).read('config.cpp'), self.changes[name + '/config.cpp'])
             self.assertEqual(Archive(installed).read('unchanged.txt'), b'unrelated original data')
         self.assertFalse(list(self.mod.glob('lobo-repair-*')))
+
+    def make_read_only(self, *names):
+        for name in names:
+            self.paths[name].chmod(stat.S_IREAD)
+            self.addCleanup(lambda path=self.paths[name]: path.exists() and path.chmod(stat.S_IREAD | stat.S_IWRITE))
+
+    def test_read_only_archives_are_replaced_and_stay_read_only(self):
+        # Some original LoBo archives carry the Windows read-only attribute.
+        self.make_read_only('first', 'third')
+        manifest_path = self.apply()
+        self.assertEqual(json.loads(manifest_path.read_text())['state'], 'applied')
+        for name, path in self.paths.items():
+            self.assertEqual(Archive(path.read_bytes()).read('config.cpp'), self.changes[name + '/config.cpp'])
+            self.assertEqual(name != 'second', not path.stat().st_mode & stat.S_IWRITE)
+            self.assertEqual((manifest_path.parent / (name + '.pbo')).read_bytes(), self.originals[name])
+
+    def test_read_only_archives_roll_back_and_stay_read_only(self):
+        self.make_read_only('first', 'second')
+        real_replace = Path.replace
+        def fail(source, target):
+            if source.name == 'third.pbo':
+                raise OSError('injected staged replacement failure')
+            return real_replace(source, target)
+        with patch.object(Path, 'replace', fail), self.assertRaisesRegex(OSError, 'injected staged'):
+            self.apply()
+        self.assertEqual(self.installed(), self.originals)
+        _, manifest = self.manifest()
+        self.assertEqual(manifest['state'], 'rolled-back')
+        for name in ('first', 'second'):
+            self.assertFalse(self.paths[name].stat().st_mode & stat.S_IWRITE)
+        self.assertTrue(self.paths['third'].stat().st_mode & stat.S_IWRITE)
+
+    def test_failed_rename_restores_the_read_only_attribute(self):
+        source = self.mod / 'staged.pbo'
+        source.write_bytes(b'staged')
+        self.addCleanup(lambda: source.exists() and source.unlink())
+        self.make_read_only('first')
+        with patch.object(Path, 'replace', side_effect=OSError('blocked rename')), self.assertRaises(OSError):
+            runner.replace_file(source, self.paths['first'])
+        self.assertFalse(self.paths['first'].stat().st_mode & stat.S_IWRITE)
+        self.assertEqual(self.paths['first'].read_bytes(), self.originals['first'])
+
+    def chmod_fails_after_rename(self, failing):
+        """Path.chmod that refuses to put the read-only bit back on `failing`
+        targets (the lift before the rename still works)."""
+        real_chmod = Path.chmod
+        def chmod(path, mode, *args, **kwargs):
+            if path.name in failing and not mode & stat.S_IWRITE:
+                raise PermissionError('injected attribute failure')
+            return real_chmod(path, mode, *args, **kwargs)
+        return patch.object(Path, 'chmod', chmod)
+
+    def test_attribute_failure_after_rename_still_counts_as_replaced(self):
+        # The rename succeeded, so the archive holds the new bytes: it must be
+        # recorded as replaced (and rolled back with the rest on a later failure).
+        self.make_read_only('first')
+        real_replace = Path.replace
+        def fail(source, target):
+            if source.name == 'third.pbo':
+                raise OSError('injected staged replacement failure')
+            return real_replace(source, target)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.chmod_fails_after_rename({'first.pbo'}), \
+                patch.object(Path, 'replace', fail), self.assertRaisesRegex(OSError, 'injected staged'):
+            self.apply()
+        self.assertEqual(self.installed(), self.originals)
+        _, manifest = self.manifest()
+        self.assertEqual(manifest['state'], 'rolled-back')
+        self.assertEqual(manifest['rollback_errors'], [])
+        self.assertTrue(manifest['attribute_warnings'])
+        self.assertIn('read-only attribute was not restored', err.getvalue())
+
+    def test_attribute_failure_after_rename_is_a_warning_on_success(self):
+        self.make_read_only('first')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.chmod_fails_after_rename({'first.pbo'}):
+            manifest_path = self.apply()
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(manifest['state'], 'applied')
+        self.assertEqual(1, len(manifest['attribute_warnings']))
+        for name, path in self.paths.items():
+            self.assertEqual(Archive(path.read_bytes()).read('config.cpp'), self.changes[name + '/config.cpp'])
+        self.assertIn('WARN:', err.getvalue())
+
+    def test_attribute_failure_after_restore_rename_is_not_a_restore_error(self):
+        # Only the rollback's attribute restore fails: the bytes are restored,
+        # so the batch is rolled back, not rollback-failed.
+        self.make_read_only('first')
+        rolling_back = []
+        real_replace, real_chmod = Path.replace, Path.chmod
+        def fail(source, target):
+            if source.name == 'third.pbo':
+                rolling_back.append(True)
+                raise OSError('injected staged replacement failure')
+            return real_replace(source, target)
+        def chmod(path, mode, *args, **kwargs):
+            if rolling_back and path.name == 'first.pbo' and not mode & stat.S_IWRITE:
+                raise PermissionError('injected attribute failure')
+            return real_chmod(path, mode, *args, **kwargs)
+        with contextlib.redirect_stderr(io.StringIO()), patch.object(Path, 'replace', fail), \
+                patch.object(Path, 'chmod', chmod), self.assertRaisesRegex(OSError, 'injected staged'):
+            self.apply()
+        self.assertEqual(self.installed(), self.originals)
+        _, manifest = self.manifest()
+        self.assertEqual(manifest['state'], 'rolled-back')
+        self.assertEqual(manifest['rollback_errors'], [])
+        self.assertEqual(1, len(manifest['attribute_warnings']))
+        self.assertIn('first.pbo', manifest['attribute_warnings'][0])
 
     def test_empty_change_set_creates_no_backup_or_staging(self):
         self.assertIsNone(self.apply({}))

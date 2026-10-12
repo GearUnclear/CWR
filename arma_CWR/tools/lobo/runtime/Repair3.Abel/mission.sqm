@@ -1,0 +1,30 @@
+version=11;
+class Mission
+{
+    // Runtime smoke probes for LoBo repair 2026-10-11.3 (lobo #4, #5, #8, #9).
+    // Activates every owner addon the probes spawn from, including LoBo_airammo,
+    // which owns the cluster ammunition and the wreck-glow classes.
+    addOns[]={"LoBoWeapons","LoBoammo","LoBo_airammo","LoBo_MiG","LoBo_A4","LoBo_F4","LoBo_IL28","LoBoF15","LoBoF16","LoBoTerror","LoBoMerkava2","LoBoEghelo","JAM_Magazines","JAM_Vehicles","LoBo_Sounds","LoBo_Pilot"};
+    randomSeed=20261011;
+    class Intel { viewDistance=1800; year=1985; month=6; day=15; hour=12; minute=0; };
+    class Groups
+    {
+        items=1;
+        class Item0
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0
+                {
+                    position[]={7985,0,9450}; azimut=0; id=0; side="WEST";
+                    vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.6;
+                };
+            };
+        };
+    };
+};
+class Intro {};
+class OutroWin {};
+class OutroLoose {};

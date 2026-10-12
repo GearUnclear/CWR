@@ -150,6 +150,21 @@ before transforming the GBU-12. Guidance, accuracy/cost controls, flight behavio
 models and magazine counts remain unchanged. The shared Mk82 bomb-body rationale
 was documented in issue #69 using the [USAF description](https://www.holloman.af.mil/News/Features/Display/Article/663837/quarterly-load-comp-april-10-2015/).
 
+## Cluster delivery (2026-10-11.3)
+
+Repair 2026-10-11.3 changes no CfgAmmo value. The A-4R, A-4RN, F-4 WW and
+IL-28 AS Mk-20 scripts called a `rockeye.sqs` that the Dec 2006 consolidation
+removed from LoBoF16 and LoBoF15, so those Mk-20s landed as one point HE bomb;
+they now run the existing LoBo_airammo bomblet script (197 bomblets), like the
+nine post-consolidation callers. The Syrian MiG-21bis RBK-500 script created the
+undefined `LoBoRBKBomblet`; it now creates the existing `LoBoRBK500Bomblet`
+(105 bomblets). The F-5 and IL-28 dispenser model is the defined
+`LoBo_mk20Deployed`. These are class-name and path corrections, not aliases.
+
+The KSVK ammunition's building-hit sounds named two files that never shipped.
+They now point at the vanilla `weapons\bulletricochet4` and `bulletricochet5`
+the class would inherit without its override, at the authored volume.
+
 ## Compatibility and verification
 
 The Micro Uzi compatibility array names the existing `LoBoMUZIHDmag` instead of

@@ -1,0 +1,10 @@
+# LoBo #9 smoke probe for repair 2026-10-11.3. Mounts the installed, repaired
+# D:/Arma_CWA/@LoBo by absolute path so the result does not depend on the data
+# dir (the official Remaster package was used for the 2026-10-11 run). Run it
+# explicitly with --retries 2 and -j 1; it is not part of a default lane.
+mission = "tools/lobo/runtime/Repair3.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 240
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720"]

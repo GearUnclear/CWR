@@ -243,10 +243,19 @@ def _lods(data: bytes) -> list[_Lod]:
         pos += 4
         lods.append(_Lod(start, pos, points, faces, resolution, tag_start, selections, payload_offsets))
     # Oxygen's legacy default-texture-path trailer is present in the installed
-    # models. The engine reader ignores it; preserve all 32 bytes verbatim.
-    if pos != len(data) and not (len(data) - pos == 32 and data[pos:pos+6] == b'data\\\0'):
+    # models: 32 bytes whose leading printable path ends at a NUL ('data\' in
+    # the M1/Merkava/crew models, 'H:\Codemast' in LoBo_MD500D_R.p3d). The
+    # engine reader ignores it; preserve all 32 bytes verbatim.
+    if pos != len(data) and not _oxygen_path_trailer(data[pos:]):
         raise ValueError("Unexpected trailing MLOD data")
     return lods
+
+
+def _oxygen_path_trailer(tail: bytes) -> bool:
+    if len(tail) != 32 or b'\0' not in tail:
+        return False
+    path = tail.split(b'\0', 1)[0]
+    return bool(path) and all(32 <= c <= 126 for c in path)
 
 
 def add_hitpoint_unions(data: bytes, unions: dict[str, tuple[str, ...]]) -> bytes:
