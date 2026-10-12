@@ -1,0 +1,7 @@
+tags = ["scripting", "guerrilla", "remaster_ud", "offscreen", "save-load", "headless"]
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+mission = "tests/integration/missions/guerrilla_offscreen.abel"
+timeout = 300
+assert_timeout = 120
+extra_args = ["--dev"]

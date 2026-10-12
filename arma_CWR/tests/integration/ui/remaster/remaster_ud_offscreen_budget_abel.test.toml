@@ -1,0 +1,20 @@
+# REMASTER LANE (issue #67): UD installed BESIDE Bohemia's files on the full
+# official Remaster. data_dir "packages/RemasterUD" is a gitignored junction to a
+# SHADOW of the Steam Remastered folder (never the Steam install itself), built
+# and prepared once with:
+#   pwsh -File tools/runtime/new-remaster-shadow.ps1 -Source <Remastered> `
+#        -Destination <shadow> -LoBoSource <Remastered>/@LoBo
+#   pwsh -File setup-guerrilla.ps1 -GameDir <shadow> -LoBoDir <shadow>/@LoBo `
+#        -Tools <dist>/PoseidonTools.exe
+#   cmd /c mklink /J packages\RemasterUD <shadow>
+# See guerrilla-mode/FRESH-INSTALL.md. Without the junction the test reports
+# spawn failed, which is not a regression.
+# Off-screen contract budget soak (issue #71): Abel tour, budgets asserted.
+# --focus: a menu-launched session (no --test-mission) pauses when another
+# window takes focus, which froze an earlier soak mid-tour on a shared desktop.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "offscreen", "soak", "headless"]
+timeout = 900
+assert_timeout = 240
+extra_args = ["--dev", "--focus"]

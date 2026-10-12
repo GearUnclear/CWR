@@ -1,0 +1,6 @@
+# Off-screen contract scenario (d), issue #71: cross the simulation boundary,
+# save near and far, reload each in a fresh process (shared user dir across
+# the ordered phases 01_stage, 02_far, 03_near). Full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (see guerrilla-mode/FULL-SCALE-SESSION.md).
+tags = ["scripting", "guerrilla", "remaster_ud", "offscreen", "save-load", "headless"]

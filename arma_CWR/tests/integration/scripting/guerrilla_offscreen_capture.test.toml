@@ -1,0 +1,13 @@
+# Off-screen contract scenario (a), issue #71. Full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FULL-SCALE-SESSION.md).
+# Without the junction the test reports spawn failed, which is not a regression.
+tags = ["scripting", "guerrilla", "remaster_ud", "offscreen", "headless"]
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+mission = "tests/integration/missions/guerrilla_offscreen.abel"
+# zone tick 3 s, cache pass 5 s; the town rise needs ~8 remote ticks
+timeout = 420
+assert_timeout = 120
+extra_args = ["--dev"]
