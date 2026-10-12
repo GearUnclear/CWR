@@ -14,8 +14,8 @@ import uuid
 from repair.pbo import Archive, normalize
 
 REPAIR_MODULES=('ammo','scripts','models','followups','loops','mines','clusters','numbers','effects',
-                'identifiers','content','weapons','textures')
-REPAIR_VERSION='2026-10-11.3'
+                'identifiers','content','weapons','textures','tailgun','references','wounds')
+REPAIR_VERSION='2026-10-11.4'
 
 def rule_fingerprint():
     base=Path(__file__).resolve().parent
@@ -30,14 +30,28 @@ def plan(mod,tool,compatibility='ud',asset_source=None):
     rules=modules();wanted=set().union(*(set(m.ADDONS) for m in rules))
     model_keys=set().union(*(set(getattr(m,'MODEL_MEMBERS',())) for m in rules))
     added_keys=set().union(*(set(getattr(m,'ADDED_MEMBERS',())) for m in rules))
+    # Members a repoint names as its target: they must exist in the archive
+    # entry tables (their bytes are not read), so a reinstall that lacks one
+    # fails closed instead of repointing to nothing.
+    required_keys=set().union(*(set(getattr(m,'REQUIRED_MEMBERS',())) for m in rules))
+    # Archive members a module generates its added members from (wounds: the
+    # LoBo_Pilot textures). Their original bytes go to its add_members as
+    # `sources`; they must be plain members no rule rewrites or adds.
+    source_keys=set().union(*(set(getattr(m,'SOURCE_MEMBERS',())) for m in rules))
     paths={p.stem.lower():p for p in (mod/'addons').glob('*.pbo')}
     missing=wanted-paths.keys()
     if missing:raise ValueError(f'Required addons missing: {sorted(missing)}')
     if {k.split('/',1)[0] for k in added_keys}-wanted:raise ValueError('Added members outside the repaired addons')
-    docs={};binary={};hashes={};original={};existing_added={}
+    for name,keys in (('Required',required_keys),('Source',source_keys)):
+        if any('/' not in k or normalize(k)!=k for k in keys):raise ValueError(f'{name} members must be normalized addon/member keys')
+        if {k.split('/',1)[0] for k in keys}-wanted:raise ValueError(f'{name} members outside the repaired addons')
+    if source_keys&(model_keys|added_keys) or any(k.endswith(('/config.cpp','.sqs','.sqf')) for k in source_keys):
+        raise ValueError('Source members must be untouched archive members')
+    docs={};binary={};hashes={};original={};existing_added={};entry_keys=set();sources={}
     # Read original archive bytes once per addon; no full-mod binary extraction.
     for stem in sorted(wanted):
         path=paths[stem];raw=path.read_bytes();hashes[stem]=digest(raw);archive=Archive(raw)
+        entry_keys|={stem+'/'+key for key in archive.by_key}
         for key,entry in archive.by_key.items():
             full=stem+'/'+key
             if key=='config.cpp' or key.endswith(('.sqs','.sqf')):
@@ -46,8 +60,14 @@ def plan(mod,tool,compatibility='ud',asset_source=None):
                 data=archive.read(key,path,tool);binary[full]=data;original[full]=data
             elif full in added_keys:
                 existing_added[full]=archive.read(key,path,tool)
+            elif full in source_keys:
+                sources[full]=archive.read(key,path,tool)
     missing_models=model_keys-binary.keys()
     if missing_models:raise ValueError(f'Required models missing: {sorted(missing_models)}')
+    missing_required=required_keys-entry_keys
+    if missing_required:raise ValueError(f'Required members missing: {sorted(missing_required)}')
+    missing_sources=source_keys-sources.keys()
+    if missing_sources:raise ValueError(f'Source members missing: {sorted(missing_sources)}')
     # New members come only from a module's declared ADDED_MEMBERS and a source
     # the module verifies itself (pinned hashes); a skip line is reported, not
     # fatal. They are planned first because a text rule may depend on whether
@@ -57,10 +77,12 @@ def plan(mod,tool,compatibility='ud',asset_source=None):
         if not hasattr(module,'add_members'):continue
         own=set(getattr(module,'ADDED_MEMBERS',()))
         mine={k:v for k,v in existing_added.items() if k in own}
-        additions,skips=module.add_members(dict(mine),asset_source)
+        # A module that declares SOURCE_MEMBERS also receives their bytes.
+        extra={'sources':{k:sources[k] for k in module.SOURCE_MEMBERS}} if hasattr(module,'SOURCE_MEMBERS') else {}
+        additions,skips=module.add_members(dict(mine),asset_source,**extra)
         if set(additions)-own:raise ValueError(f'{module.__name__} tried to add an undeclared member')
         if set(additions)&(mine.keys()|original.keys()|added.keys()):raise ValueError(f'{module.__name__} tried to add an existing member')
-        again,skips_again=module.add_members(mine|{k:v for k,(_,v) in additions.items()},asset_source)
+        again,skips_again=module.add_members(mine|{k:v for k,(_,v) in additions.items()},asset_source,**extra)
         if again or (skips_again if additions else skips_again!=skips):raise ValueError(f'Non-idempotent member additions: {module.__name__}')
         for key,(stored,data) in additions.items():
             if not isinstance(data,bytes) or normalize(stored)!=key.split('/',1)[1]:raise ValueError(f'Invalid added member {key}')

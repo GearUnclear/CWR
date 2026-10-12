@@ -426,7 +426,7 @@ class RepairTransactionTests(unittest.TestCase):
         self.assertEqual((1, 1, 1, []), (code, summary["changed_members"], summary["added_members"], summary["skipped"]))
         self.assertEqual(runner.digest(b"synthetic source"), summary["asset_source_sha256"])
         self.assertEqual("", err)
-        self.assertEqual("2026-10-11.3", summary["repair_version"])
+        self.assertEqual("2026-10-11.4", summary["repair_version"])
 
     def test_archive_changed_after_preflight_is_rejected(self):
         paths, hashes, changed, records, _, _ = self.plan()

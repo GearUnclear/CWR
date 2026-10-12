@@ -6,6 +6,8 @@ relies on a NUL being present). A new name is at most 31 characters followed
 by NUL fill to 32 bytes. Only the listed LODs (by resolution) may contain a
 match, each listed LOD must hold the exact expected count (original plus
 already repaired faces), and file length and every other byte stay unchanged.
+Since 2026-10-11.4 a count may differ per listed LOD and a member's exact
+32-byte trailer may be pinned (repair.references uses both).
 """
 import math
 import struct
@@ -22,30 +24,61 @@ def _face_table(data: bytes, lod) -> tuple[int, int]:
     return lod.start + header + points * 16 + normals * 12, faces
 
 
-def face_textures(data: bytes) -> list[tuple[float, list[bytes]]]:
+def face_textures(data: bytes, trailer: bytes | None = None) -> list[tuple[float, list[bytes]]]:
     """[(resolution, [raw 32-byte texture field per face])] for inspection and tests."""
     out = []
-    for lod in _lods(data):
+    for lod in _lods(data, trailer):
         start, faces = _face_table(data, lod)
         out.append((lod.resolution, [data[start + i * FACE:start + i * FACE + FIELD] for i in range(faces)]))
     return out
 
 
-def repoint(data: bytes, resolutions: tuple, mapping: dict) -> bytes:
-    """mapping: {old name bytes: (new name bytes, expected count per listed LOD, raw32)}.
+def _counts(expected, resolutions: tuple) -> tuple[int, ...]:
+    """Expected faces per listed LOD: one int for all, or a tuple aligned with `resolutions`."""
+    if isinstance(expected, bool):
+        raise ValueError(f"Invalid expected face count {expected!r}")
+    if isinstance(expected, int):
+        # Unchanged from 2026-10-11.3: one count, compared in every listed LOD.
+        return (expected,) * len(resolutions)
+    if not isinstance(expected, tuple) or len(expected) != len(resolutions):
+        raise ValueError(f"Expected face counts {expected!r} must match the listed LODs {resolutions!r}")
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in expected) or not any(expected):
+        raise ValueError(f"Expected face counts must be non-negative ints, not all zero: {expected!r}")
+    return expected
+
+
+def repoint(data: bytes, resolutions: tuple, mapping: dict, trailer: bytes | None = None) -> bytes:
+    """mapping: {old name bytes: (new name bytes, expected count, raw32)}.
+
+    The expected count is either one int, the same in every listed LOD, or a
+    tuple of counts aligned by position with `resolutions` (original plus
+    already repaired faces per LOD). A 0 entry means that listed LOD holds
+    neither original nor repaired faces of the mapping. Every listed resolution
+    must match exactly one LOD of the model.
 
     raw32=True matches all 32 raw bytes (a name that overflowed its field and
     has no NUL); otherwise the NUL-terminated name, case-insensitively. A field
-    whose first byte is NUL never matches a raw32 pattern.
+    whose first byte is NUL never matches a raw32 pattern. `trailer` pins the
+    member's exact 32 trailing bytes (models._lods).
     """
-    for old, (new, _, raw32) in mapping.items():
+    expected_counts = {}
+    for old, (new, expected, raw32) in mapping.items():
         if not new or len(new) > FIELD - 1 or b'\0' in new:
             raise ValueError(f"Texture name must be 1..{FIELD - 1} characters: {new!r}")
         if raw32 and (len(old) != FIELD or b'\0' in old):
             raise ValueError(f"Overflowed texture field must be {FIELD} bytes without NUL: {old!r}")
+        expected_counts[old] = _counts(expected, resolutions)
+    lods = _lods(data, trailer)
+    for r in resolutions:
+        found = sum(1 for lod in lods if math.isclose(lod.resolution, r, rel_tol=1e-6))
+        if found != 1:
+            raise ValueError(f"Listed resolution {r} matches {found} LODs, expected exactly 1")
     fixed = bytearray(data)
-    for lod in _lods(data):
-        listed = any(math.isclose(lod.resolution, r, rel_tol=1e-6) for r in resolutions)
+    for lod in lods:
+        slots = [i for i, r in enumerate(resolutions) if math.isclose(lod.resolution, r, rel_tol=1e-6)]
+        if len(slots) > 1:
+            raise ValueError(f"LOD {lod.resolution} matches more than one listed resolution")
+        listed = bool(slots)
         start, faces = _face_table(data, lod)
         counts = {old: 0 for old in mapping}
         repaired = {old: 0 for old in mapping}
@@ -62,7 +95,8 @@ def repoint(data: bytes, resolutions: tuple, mapping: dict) -> bytes:
                 elif listed and raw == new + bytes(FIELD - len(new)):
                     repaired[old] += 1
         if listed:
-            for old, (new, expected, _) in mapping.items():
+            for old in mapping:
+                expected = expected_counts[old][slots[0]]
                 if counts[old] + repaired[old] != expected:
                     raise ValueError(f"LOD {lod.resolution}: expected {expected} faces {old!r}; "
                                      f"found {counts[old]} original + {repaired[old]} repaired")

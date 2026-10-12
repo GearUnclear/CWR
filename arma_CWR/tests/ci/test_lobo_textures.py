@@ -88,6 +88,21 @@ class RepointTests(unittest.TestCase):
         fixed = textures.repoint(partial, (1e13, 5e15), self.mapping)
         self.assertEqual([[NEW, NEW], [NEW, NEW]], names(fixed))
 
+    def test_int_counts_unchanged_and_tuple_counts_per_lod(self):
+        # One int is compared in every listed LOD, as in 2026-10-11.3.
+        self.assertEqual(textures.repoint(self.original, (1e13, 5e15), self.mapping),
+                         textures.repoint(self.original, (1e13, 5e15), {OLD: (NEW, (2, 2), False)}))
+        uneven = model(lod(1e13, [OLD]), lod(5e15, [OLD, OLD, OLD]))
+        with self.assertRaisesRegex(ValueError, "expected"):
+            textures.repoint(uneven, (1e13, 5e15), {OLD: (NEW, 2, False)})
+        fixed = textures.repoint(uneven, (1e13, 5e15), {OLD: (NEW, (1, 3), False)})
+        self.assertEqual([[NEW], [NEW, NEW, NEW]], names(fixed))
+        self.assertEqual(fixed, textures.repoint(fixed, (1e13, 5e15), {OLD: (NEW, (1, 3), False)}))
+        # Counts align with the listed resolutions by position, not by file order.
+        self.assertEqual(fixed, textures.repoint(uneven, (5e15, 1e13), {OLD: (NEW, (3, 1), False)}))
+        with self.assertRaisesRegex(ValueError, "expected"):
+            textures.repoint(uneven, (5e15, 1e13), {OLD: (NEW, (1, 3), False)})
+
     def test_bad_names_raise(self):
         for new in (b"x" * 32, b"", b"a\0b"):
             with self.subTest(new=new), self.assertRaisesRegex(ValueError, "Texture name"):
