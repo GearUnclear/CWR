@@ -5,6 +5,8 @@ on:
     paths:
       - 'arma_CWR/tools/lobo/repair/**'
       - 'arma_CWR/tools/lobo/*_lobo.py'
+      - 'arma_CWR/tools/lobo/build-lobo-extras.py'
+      - 'arma_CWR/tools/lobo/lobo_cfgpatches.py'
       - 'arma_CWR/tests/ci/test_lobo_*.py'
       - '.github/workflows/lobo-repair.yml'
   push:
@@ -12,6 +14,8 @@ on:
     paths:
       - 'arma_CWR/tools/lobo/repair/**'
       - 'arma_CWR/tools/lobo/*_lobo.py'
+      - 'arma_CWR/tools/lobo/build-lobo-extras.py'
+      - 'arma_CWR/tools/lobo/lobo_cfgpatches.py'
       - 'arma_CWR/tests/ci/test_lobo_*.py'
       - '.github/workflows/lobo-repair.yml'
   workflow_dispatch:

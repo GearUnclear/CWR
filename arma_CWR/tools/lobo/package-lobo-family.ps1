@@ -1,18 +1,19 @@
 <#
 .SYNOPSIS
-    Builds a clean, offline package of the Lost Brothers (@LoBo) mod with every
-    Uslu dur! repair applied, for private family use on three engines.
+    LoBo Reloaded library builder: a clean, offline package of the Lost
+    Brothers (@LoBo) mod with every Uslu dur! repair applied, for private use
+    on the official Remastered exe and on Uslu dur! (and the legacy 1.99 exe).
 
 .DESCRIPTION
     The assembled @LoBo on this machine is a working tree: it carries a nested
     git repo, the mod doctor's _ud-orig backups, the content repair's
     .ud-backups, build-machine scripts and a Bin\config.cpp that only the
     Uslu dur! (UD) engine may load. It also carries the content repair in its
-    UD profile, whose wreck-fire scripts use a command the stock 1.99 engine
+    UD profile, whose wreck-fire scripts use a command the legacy 1.99 engine
     does not have. This script turns it into something a relative can drop
-    into any of the three game folders:
+    into a game folder:
 
-        <OutDir>\stage\UD-LoBo-Family-<Version>\
+        <OutDir>\stage\LoBo-Reloaded-<Version>\
           README-FIRST.txt   what it is, install and launch lines, verification
           SHA256SUMS.txt     sha256 of every other file (sha256sum -c format)
           @LoBo\             allowlisted copy of the mod, the 73 Easting pack
@@ -20,14 +21,28 @@
                              Classic profile, UD-CHANGES.txt describing it all
           @LoBo_Deps\        the third-party addons LoBo depends on, with
                              their readmes and licences
+          @LoBo_Extras\      only with -ExtrasDir: optional extra addon packs,
+                             copied verbatim from an already-built folder.
+                             Mounted FIRST so core always wins a name clash.
           @LoBo_UD\          Uslu dur! only: bin\config.cpp (the Guerrilla
                              faction table) plus addons\ holding the UD
                              profile versions of exactly the pbos the Classic
                              switch rewrote. Mounted LAST so its pbos win.
-        <OutDir>\UD-LoBo-Family-<Version>.7z  (+ .sha256 sidecar)
-        <OutDir>\reports\<Version>\           tool output (never packaged)
+        <OutDir>\LoBo-Reloaded-<Version>.7z   (+ .sha256 sidecar)
+        <OutDir>\reports\<Version>\           tool output and build-report.txt
+                                              (never packaged)
         <OutDir>\_work\<Version>\             the classic apply's backup batch
                                               and the composite check tree
+
+    With -LibraryDir the finished build is also filed into the LoBo Reloaded
+    library:
+        <LibraryDir>\modfolders\<Version>\    the staged package folder, verbatim
+                                              (modfolders, README-FIRST.txt,
+                                              SHA256SUMS.txt), re-verified
+        <LibraryDir>\dist\                    the .7z archive(s) and .sha256 sidecars
+        <LibraryDir>\docs\build-<Version>.txt the build report
+    An existing version folder, archive or build report is never overwritten
+    without -Force, and nothing else in the library is touched.
 
     Two repair sets are already applied in place in the source @LoBo and are
     verified, never re-applied, there:
@@ -55,11 +70,26 @@
     Why the split: the engine walks the --mod list from the LAST entry
     backwards and skips a pbo name it has already loaded, so the last-listed
     modfolder wins a name clash. UD also layers every mounted mod's
-    bin\config onto the base config, while the stock ColdWarAssault.exe and
-    the official 3.05 Remastered PoseidonGame.exe make a mod's bin\config
+    bin\config onto the base config, while the official 3.05 Remastered
+    PoseidonGame.exe and the legacy ColdWarAssault.exe make a mod's bin\config
     REPLACE the base config, which breaks the game. So config.cpp and the
     UD-profile pbos live in @LoBo_UD, which is mounted last on UD and never
-    on the other two engines.
+    on the other two engines. For the same reason @LoBo_Extras is mounted
+    FIRST, and the build refuses an extras folder that carries a Bin folder
+    or any pbo file name or CfgPatches class name that @LoBo, @LoBo_Deps or
+    @LoBo_UD already carry (checked with lobo_cfgpatches.py next to this
+    script, which reads each addon's config the way the engine does). Going
+    first only settles pbo-name clashes: an extras config usually merges
+    AFTER core and would overwrite any class it shares, so after staging
+    "build-lobo-extras.py --check" also checks every extras config class
+    against the staged @LoBo, @LoBo_Deps and @LoBo_UD and the stock game
+    config (-StockGameDir), and refuses a changed value, a rebase or a config
+    the engine parser cannot read in full.
+
+    UD-CHANGES.txt lists every applied content repair batch from the backup
+    manifests under <LoBoDir>\.ud-backups\issue-69\*\manifest.json, and the
+    KNOWN ISSUES lists of README-FIRST.txt and UD-CHANGES.txt come from
+    -KnownIssuesFile when it is given.
 
     The 73 Easting release and the dependency set live on the server
     (ssh host alias <Server>, path <ServerPath>). The server's copy of the mod
@@ -67,12 +97,14 @@
     into <CacheDir>, verified against one sha256sum listing taken on the
     server, and reused on later runs when their hashes still match.
 
-    The script never modifies <LoBoDir>, <ExtraDir>, the server, or anything
-    outside <OutDir>. It deletes only its own folders under <OutDir>\stage
-    and <OutDir>\_work and partial downloads under <CacheDir>. Relative path
-    parameters resolve against the PowerShell location (Set-Location), and
-    <CacheDir> may not lie on, under or above <LoBoDir> or <ExtraDir>, nor
-    under <OutDir>\stage or <OutDir>\_work.
+    The script never modifies <LoBoDir>, <ExtraDir>, <ExtrasDir>, the server,
+    or anything outside <OutDir> and the three library targets above. It
+    deletes only its own folders under <OutDir>\stage and <OutDir>\_work,
+    partial downloads under <CacheDir>, and (with -LibraryDir) its own
+    modfolders\<Version> folder and that folder's .partial/.old siblings.
+    Relative path parameters resolve against the PowerShell location
+    (Set-Location), and <CacheDir> may not lie on, under or above <LoBoDir>,
+    <ExtraDir> or <ExtrasDir>, nor under <OutDir>\stage or <OutDir>\_work.
 
     Generated .txt files are plain ASCII with CRLF line endings, except
     SHA256SUMS.txt and the .sha256 sidecar, which use LF on purpose: GNU
@@ -103,13 +135,16 @@
     <OutDir>\_work.
 
 .PARAMETER Tools
-    PoseidonTools executable (mod doctor, and the pbo reader repair_lobo.py
-    uses for compressed members).
+    PoseidonTools executable (mod doctor, the pbo reader repair_lobo.py and
+    lobo_cfgpatches.py use for compressed members, and config debin).
+    Default: arma_CWR\dist\x64-win-rwdi\PoseidonTools.exe of the checkout
+    this script is in; when that checkout is a linked git worktree without a
+    build, the same path in the main checkout.
 
 .PARAMETER RepairTool
-    Path to repair_lobo.py. Default: <repo root>\arma_CWR\tools\lobo\repair_lobo.py
-    next to this script if it exists; otherwise the script stops and asks for
-    -RepairTool.
+    Path to repair_lobo.py. Default: repair_lobo.py next to this script
+    (arma_CWR\tools\lobo), in a linked worktree as in the main checkout; if
+    it is missing the script stops and asks for -RepairTool.
 
 .PARAMETER Python
     Python 3 interpreter for repair_lobo.py. Default: python (from PATH).
@@ -122,7 +157,7 @@
     Stop after staging and verification; write no .7z.
 
 .PARAMETER IncludeSources
-    Also build UD-LoBo-Sources-<Version>.7z with the original dependency
+    Also build LoBo-Reloaded-Sources-<Version>.7z with the original dependency
     downloads (verified against deps/SHA256SUMS), the server's scan log and
     manifest, the stock originals from @LoBo\_ud-orig, the pre-repair
     originals from @LoBo\.ud-backups\issue-69 and the assembly notes. The
@@ -134,11 +169,49 @@
     Optional folder mirroring the @LoBo layout (addons\, Missions\, docs\ ...)
     merged into the staged @LoBo before the Classic switch, with the same
     collision rules as the 73 Easting files. It may not carry a Bin folder.
+    (Not to be confused with -ExtrasDir, which adds a separate modfolder.)
+
+.PARAMETER ExtrasDir
+    Optional, already-built @LoBo_Extras folder (any folder name), included
+    as a fourth modfolder, @LoBo_Extras, copied verbatim and covered by
+    SHA256SUMS.txt. Refused when it carries a top-level Bin folder, links,
+    runtime junk or git/backup folders, or when any of its pbo file names
+    (any subfolder) or CfgPatches class names matches one in @LoBo,
+    @LoBo_Deps or @LoBo_UD, or when, after staging, one of its config classes
+    would change a class those folders or the stock game define (see
+    -StockGameDir). Its files are hashed in preflight and must not change
+    during the build. Its docs\BUILD-MANIFEST.json (written by
+    build-lobo-extras.py) is shown in the plan and the build report; a
+    folder without one, or built without its own class check, gets a
+    warning.
+
+.PARAMETER StockGameDir
+    Game folder whose BIN\CONFIG.BIN and AddOns are the stock config, read by
+    the @LoBo_Extras class check (its access locks decide which stub rebases
+    the engine refuses). Used only with -ExtrasDir, and then required.
+    Default: D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered
+
+.PARAMETER LibraryDir
+    Existing LoBo Reloaded library root (for example D:\LoBo-Reloaded).
+    After a successful build the package is filed into
+    modfolders\<Version>\, dist\ and docs\build-<Version>.txt there (see
+    .DESCRIPTION). Needs the archive, so it cannot be combined with
+    -NoArchive. Existing targets are refused without -Force.
+
+.PARAMETER KnownIssuesFile
+    Plain ASCII text file holding the KNOWN ISSUES list for README-FIRST.txt
+    and @LoBo\UD-CHANGES.txt, inserted line by line (lines starting with #
+    are comments; no em dashes, no ' -- '). When the parameter is not given,
+    or the file is absent (a warning), the built-in list is used.
 
 .PARAMETER PlanOnly
     Run every preflight check (all read-only), print the plan and exit
     without writing anything. Unless -SkipFetch is given this still asks the
     server for its file listing (read-only) so the fetch plan can be shown.
+    With -ExtrasDir the CfgPatches cross-check runs here on the source side
+    (debin uses a temporary file in the system temp folder, removed again);
+    the @LoBo_Extras class check needs the staged folders, so it runs only
+    in a real build.
 
 .PARAMETER SevenZip
     Path to 7z.exe. Default: C:\Program Files\7-Zip\7z.exe
@@ -148,7 +221,8 @@
     failing.
 
 .PARAMETER Force
-    Overwrite an existing archive of the same Version.
+    Overwrite an existing archive of the same Version, and with -LibraryDir
+    the library's modfolders\<Version> folder, archives and build report.
 
 .EXAMPLE
     .\package-lobo-family.ps1 -PlanOnly
@@ -156,7 +230,12 @@
 
 .EXAMPLE
     .\package-lobo-family.ps1 -IncludeSources
-    Full build: fetch, stage, Classic switch, verify, UD-LoBo-Family-<date>.7z and UD-LoBo-Sources-<date>.7z.
+    Full build: fetch, stage, Classic switch, verify, LoBo-Reloaded-<date>.7z and LoBo-Reloaded-Sources-<date>.7z.
+
+.EXAMPLE
+    .\package-lobo-family.ps1 -SkipFetch -ExtrasDir D:\LoBo-Reloaded\modfolders\@LoBo_Extras -LibraryDir D:\LoBo-Reloaded -KnownIssuesFile D:\LoBo-Reloaded\docs\known-issues.txt
+    Build from the cache with the optional extras (built by build-lobo-extras.py)
+    and file the result into the library as modfolders\<date>, dist\ and docs\.
 
 .NOTES
     Windows PowerShell 5.1 compatible. Dot-sourcing the script (". .\package-lobo-family.ps1")
@@ -170,13 +249,17 @@ param(
     [string]$Server = 'mega_nc',
     [string]$ServerPath = '/root/mobile-dev/mod_@lobo',
     [string]$CacheDir = '',
-    [string]$Tools = (Join-Path $PSScriptRoot '..\..\dist\x64-win-rwdi\PoseidonTools.exe'),
+    [string]$Tools = '',
     [string]$RepairTool = '',
     [string]$Python = 'python',
     [switch]$SkipFetch,
     [switch]$NoArchive,
     [switch]$IncludeSources,
     [string]$ExtraDir = '',
+    [string]$ExtrasDir = '',
+    [string]$LibraryDir = '',
+    [string]$KnownIssuesFile = '',
+    [string]$StockGameDir = '',
     [switch]$PlanOnly,
     [string]$SevenZip = 'C:\Program Files\7-Zip\7z.exe',
     [switch]$AllowUnknown,
@@ -188,11 +271,47 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-$script:PackageName  = "UD-LoBo-Family-$Version"
-$script:SourcesName  = "UD-LoBo-Sources-$Version"
+$script:ProductName  = 'LoBo Reloaded'
+$script:PackageName  = "LoBo-Reloaded-$Version"
+$script:SourcesName  = "LoBo-Reloaded-Sources-$Version"
 $script:Today        = (Get-Date).ToString('yyyy-MM-dd')
 $script:Banner       = '// GENERATED by arma_CWR/tools/lobo/install-lobo-factions.ps1'
 $script:DoctorOkPattern = '(?m)^Nothing to do: no known defect found in (\d+) pbo\(s\)'
+$script:ExtrasName   = '@LoBo_Extras'
+$script:CfgPatchesHelper = Join-Path $PSScriptRoot 'lobo_cfgpatches.py'
+$script:ExtrasBuilder = Join-Path $PSScriptRoot 'build-lobo-extras.py'
+# The stock game config the @LoBo_Extras class check reads (-StockGameDir).
+$script:DefaultStockGameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
+
+# The built-in KNOWN ISSUES list of README-FIRST.txt, used when no
+# -KnownIssuesFile is given or the file is absent. HasShilka: the package
+# ships Vit_Iraq_Shilka.pbo in @LoBo_Extras.
+function Get-DefaultKnownIssues([bool]$HasShilka = $false) {
+    $lines = @(
+        '- Runtime testing of the content repair (repair set B in',
+        '  UD-CHANGES.txt) is partial: see the lobo tracking repo for what was',
+        '  checked in game. Multiplayer, saves and long range AI fire are',
+        '  untested.',
+        '- The official Remastered exe itself has not been run with this',
+        '  package; it is expected to load it, but that is unverified.',
+        '- On the legacy 1.99 exe and on the official Remastered exe the',
+        '  burning wreck scripts run in a limited form: they only reach the',
+        '  player''s and the wreck''s own groups, not every nearby soldier.',
+        '  Uslu dur! with @LoBo_UD gets the full version.',
+        '- The sinai, iran_iraq and gaza islands point their menu intro at an',
+        '  addon (lost_anims) that the mod team never released. Uslu dur! works',
+        '  around it; the legacy 1.99 exe and the official Remastered exe may',
+        '  complain about the missing addon when those islands load their',
+        '  intro. Harmless.',
+        '- Two referenced addons (f3wx_markers, bde_weapons) were never',
+        '  publicly released. The references are harmless. A third one,',
+        '  vit_iraq_shilka, was recovered in 2026; LoBo does not need it.'
+    )
+    if ($HasShilka) { $lines += '  It ships in @LoBo_Extras as the optional "Shilka Iraq" vehicle.' }
+    return $lines
+}
+# Folder or file names that must not appear anywhere in an -ExtrasDir.
+$script:ForbiddenInExtras = @('.git', '.gitattributes', '.gitignore', '.ud-backups', '_ud-orig', '_scratch')
 
 # Stock (unrepaired) bytes of the two pbos the scope repair rewrote. These
 # must never ship, in any folder of the package.
@@ -201,10 +320,6 @@ $script:StockHashes = @{
     'LoBoPalObj.pbo' = 'F16A43BE9D538C50A61EA0E7DE8A98D27759F7639AE2FC5F8924E9E1CCE666A2'
 }
 
-# The content repair as verified on 2026-10-11. The script reads the live
-# values from the tool and only warns when they differ.
-$script:ExpectedRepairVersion = '2026-10-11.1'
-$script:ExpectedRuleSha256    = '54a34c7b1144259b89d4c5522795f8b65f8ffc72b43a4dfddecb386e00f2c1fb'
 
 # The archives the UD -> Classic profile switch is expected to rewrite (16
 # wreck-fire members in these 14 pbos). An archive rewritten that is not in
@@ -401,6 +516,76 @@ function Copy-TreeEntries([object]$Entries, [string]$SourceRoot, [string]$DestRo
     [void][IO.Directory]::CreateDirectory($DestRoot)
     foreach ($d in $Entries.Dirs) { [void][IO.Directory]::CreateDirectory((Join-Path $DestRoot $d)) }
     foreach ($f in $Entries.Files) { Copy-FileTo $f.Full (Join-Path $DestRoot $f.Relative) }
+}
+
+# Replaces every non-ASCII character with '?', for values (paths, strings
+# from manifests) that go into the ASCII-only generated text files.
+function ConvertTo-AsciiText([string]$Text) {
+    if ($null -eq $Text) { return '' }
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $Text.ToCharArray()) {
+        if ([int]$ch -gt 127) { [void]$sb.Append('?') } else { [void]$sb.Append($ch) }
+    }
+    return $sb.ToString()
+}
+
+# ---------------------------------------------------------------------------
+# Default tool locations
+# ---------------------------------------------------------------------------
+# The root of the MAIN checkout of the git repository that contains
+# StartDir: StartDir's own checkout when that is the main one (".git" is a
+# folder), or the checkout a linked worktree belongs to (".git" is a file
+# "gitdir: <main>\.git\worktrees\<name>", whose commondir names <main>\.git).
+# $null when StartDir is not in a git checkout or the layout is unexpected.
+function Get-MainCheckoutRoot([string]$StartDir) {
+    $dir = [IO.Path]::GetFullPath($StartDir).TrimEnd('\', '/')
+    while ($dir -ne '') {
+        $dotGit = Join-Path $dir '.git'
+        if ([IO.Directory]::Exists($dotGit)) { return $dir }
+        if ([IO.File]::Exists($dotGit)) {
+            $gitDir = $null
+            foreach ($line in [IO.File]::ReadAllLines($dotGit)) {
+                if ($line -match '^gitdir:\s*(.+?)\s*$') { $gitDir = $Matches[1]; break }
+            }
+            if (-not $gitDir) { return $null }
+            if (-not [IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $dir $gitDir }
+            $common = $gitDir
+            $commonFile = Join-Path $gitDir 'commondir'
+            if ([IO.File]::Exists($commonFile)) {
+                $c = ([IO.File]::ReadAllText($commonFile)).Trim()
+                if ($c -ne '') { $common = $(if ([IO.Path]::IsPathRooted($c)) { $c } else { Join-Path $gitDir $c }) }
+            }
+            $common = [IO.Path]::GetFullPath($common).TrimEnd('\', '/')
+            if ([IO.Path]::GetFileName($common) -ine '.git') { return $null }
+            return [IO.Path]::GetDirectoryName($common)
+        }
+        $parent = [IO.Path]::GetDirectoryName($dir)
+        if ($null -eq $parent -or $parent -eq $dir) { break }
+        $dir = $parent.TrimEnd('\', '/')
+    }
+    return $null
+}
+
+# repair_lobo.py lives next to this script (arma_CWR\tools\lobo) on main, so
+# the copy beside the running script is the one that matches it, in a linked
+# worktree as in the main checkout.
+function Get-DefaultRepairToolPath([string]$ScriptDir) {
+    return [IO.Path]::GetFullPath((Join-Path $ScriptDir 'repair_lobo.py'))
+}
+
+# PoseidonTools of this checkout's build; a linked worktree usually has no
+# build of its own, so fall back to the main checkout's. Returns the first
+# candidate when neither exists, so the error message names it.
+function Get-DefaultToolsPath([string]$ScriptDir) {
+    $rel = 'dist\x64-win-rwdi\PoseidonTools.exe'
+    $own = [IO.Path]::GetFullPath((Join-Path (Join-Path $ScriptDir '..\..') $rel))
+    if ([IO.File]::Exists($own)) { return $own }
+    $main = Get-MainCheckoutRoot $ScriptDir
+    if ($main) {
+        $other = [IO.Path]::GetFullPath((Join-Path (Join-Path $main 'arma_CWR') $rel))
+        if ([IO.File]::Exists($other)) { return $other }
+    }
+    return $own
 }
 
 # Merges one file into a staged tree. A file of the same name (any case)
@@ -628,12 +813,11 @@ function Get-RepairIdentity([object]$Result, [string]$Label) {
     return [pscustomobject]@{ Version = $ver; RuleSha256 = $sha.ToLowerInvariant() }
 }
 
-# Records the identity the preflight UD check ran with. Warns when it differs
-# from the values this script was written against.
+# Records the identity the preflight UD check ran with. (Whether it matches
+# the newest repair batch applied on the source is checked, as a warning,
+# once the backup manifests are read; see step 5b.)
 function Register-RepairIdentity([object]$Result, [string]$Label) {
     $id = Get-RepairIdentity $Result $Label
-    if ($id.Version -ne $script:ExpectedRepairVersion) { Write-Warn "repair_lobo.py reports repair_version $($id.Version); this script was written against $($script:ExpectedRepairVersion)" }
-    if ($id.RuleSha256 -ine $script:ExpectedRuleSha256) { Write-Warn "repair_lobo.py reports rule_sha256 $($id.RuleSha256); this script was written against $($script:ExpectedRuleSha256)" }
     $script:RepairVersion = $id.Version
     $script:RuleSha256 = $id.RuleSha256
 }
@@ -1012,6 +1196,340 @@ function Get-BinPlan([string]$BinDir) {
 }
 
 # ---------------------------------------------------------------------------
+# @LoBo_Extras (-ExtrasDir)
+# ---------------------------------------------------------------------------
+# Validates an already-built extras folder and pins its bytes. Returns Root,
+# Files (Full, Relative, Length, Hash), Dirs, AddonPbos (top-level *.pbo of a
+# top-level addons folder), AllPbos (every *.pbo, any folder) and Bytes.
+# Refuses a top-level Bin folder (the engine would load its config), links,
+# runtime junk, git or backup folders, and an empty folder.
+function Get-ExtrasPlan([string]$Root) {
+    foreach ($d in [IO.Directory]::GetDirectories($Root)) {
+        if ([IO.Path]::GetFileName($d) -ieq 'Bin') {
+            throw "ExtrasDir may not carry a Bin folder: $d (a modfolder's bin\config replaces the whole game config on the official Remastered exe)"
+        }
+    }
+    $entries = Get-TreeEntries -Root $Root
+    foreach ($rel in (@($entries.Dirs.ToArray()) + @($entries.Files.ToArray() | ForEach-Object { $_.Relative }))) {
+        foreach ($seg in $rel.Split('\')) {
+            if ($script:ForbiddenInExtras -icontains $seg) { throw "ExtrasDir carries a forbidden item ($seg): $rel" }
+        }
+    }
+    $files = New-Object System.Collections.Generic.List[object]
+    $addonPbos = New-Object System.Collections.Generic.List[object]
+    $allPbos = New-Object System.Collections.Generic.List[object]
+    $bytes = [long]0
+    foreach ($f in ($entries.Files | Sort-Object -Property Relative)) {
+        $leaf = [IO.Path]::GetFileName($f.Relative)
+        if (Test-JunkName $leaf) { throw "ExtrasDir carries runtime junk: $($f.Relative) (remove it from the extras build)" }
+        $item = [pscustomobject]@{ Full = $f.Full; Relative = $f.Relative; Length = $f.Length; Hash = (Get-Sha256 $f.Full) }
+        $files.Add($item)
+        $bytes += $f.Length
+        if ($leaf -like '*.pbo') {
+            $allPbos.Add($item)
+            $parts = $f.Relative.Split('\')
+            if ($parts.Count -eq 2 -and $parts[0] -ieq 'addons') { $addonPbos.Add($item) }
+            elseif ($parts.Count -eq 1) { Write-Warn "ExtrasDir pbo at the top level is never loaded by the engine: $($f.Relative)" }
+        }
+    }
+    if ($files.Count -eq 0) { throw "ExtrasDir is empty: $Root" }
+    if ($addonPbos.Count -eq 0) { Write-Warn "ExtrasDir has no addons\*.pbo: $Root" }
+    return [pscustomobject]@{
+        Root = $Root; Files = $files.ToArray(); Dirs = $entries.Dirs.ToArray()
+        AddonPbos = $addonPbos.ToArray(); AllPbos = $allPbos.ToArray(); Bytes = $bytes
+    }
+}
+
+# What build-lobo-extras.py recorded about an extras folder it built
+# (docs\BUILD-MANIFEST.json): Found, Tool, BuildVersion, Checked (its own
+# class check ran), Against (folder name, pbo count, digest), StockGame,
+# Warnings (count), Problem (why the record cannot be used, or ''). Shown in
+# the plan and the build report; the authoritative class check is the one
+# this script runs on the staged folders.
+function Get-ExtrasManifest([string]$Root) {
+    $info = [pscustomobject]@{ Found = $false; Tool = ''; BuildVersion = ''; Checked = $false; Against = @(); StockGame = ''; Warnings = 0; Problem = '' }
+    $docs = Find-ChildPath $Root 'docs' -Directory
+    $path = if ($docs) { Find-ChildPath $docs 'BUILD-MANIFEST.json' } else { $null }
+    if (-not $path) { $info.Problem = 'no docs\BUILD-MANIFEST.json, so it was not built by build-lobo-extras.py'; return $info }
+    $info.Found = $true
+    $m = $null
+    try { $m = [IO.File]::ReadAllText($path) | ConvertFrom-Json } catch { $m = $null }
+    if ($null -eq $m) { $info.Problem = 'docs\BUILD-MANIFEST.json does not parse'; return $info }
+    $info.Tool = [string](Get-JsonField $m 'tool')
+    $info.BuildVersion = [string](Get-JsonField $m 'build_version')
+    if ($info.Tool -ne 'build-lobo-extras') { $info.Problem = "docs\BUILD-MANIFEST.json is not from build-lobo-extras.py (tool '$($info.Tool)')"; return $info }
+    $clash = Get-JsonField $m 'clash_check'
+    $info.Checked = [bool](Get-JsonField $clash 'checked')
+    $info.StockGame = [string](Get-JsonField $clash 'stock_game')
+    $info.Warnings = @(Get-JsonField $clash 'warnings' | Where-Object { $null -ne $_ }).Count
+    $folders = @(Get-JsonField $clash 'against_folders' | Where-Object { $null -ne $_ })
+    if ($folders.Count -gt 0) {
+        $info.Against = @($folders | ForEach-Object { '{0} ({1} pbos, digest {2})' -f (Get-JsonField $_ 'name'), (Get-JsonField $_ 'pbos'), (Get-JsonField $_ 'sha256') })
+    } else {
+        $info.Against = @(Get-JsonField $clash 'against' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+    }
+    if (-not $info.Checked -or $info.Against.Count -eq 0) { $info.Problem = 'it was built without its class-clash check (no --against folders)' }
+    return $info
+}
+
+# The class-clash check (build-lobo-extras.py --check) of the staged extras
+# against the other staged modfolders and the stock game config: an extras
+# config usually merges after core, so it must not change a core class, not
+# only avoid its pbo and CfgPatches names. Throws on any clash or on an
+# extras config the engine parser cannot read in full. Returns the report.
+function Invoke-ExtrasClassCheck([string]$ExtrasRoot, [string[]]$Against, [string]$ReportPath, [string]$WorkDir) {
+    if (Test-Path -LiteralPath $ReportPath) { Remove-Item -LiteralPath $ReportPath -Force }
+    $cmdArgs = @('-I', $script:ExtrasBuilderFull, '--check', $ExtrasRoot, '--tools', $script:ToolsFull,
+                 '--stock-game', $script:StockGameDirFull, '--work', $WorkDir, '--report', $ReportPath)
+    foreach ($a in $Against) { $cmdArgs += @('--against', $a) }
+    Write-Info "build-lobo-extras.py --check (report $ReportPath)"
+    $r = Invoke-Capture -FilePath $script:PythonExe -Arguments $cmdArgs
+    $report = $null
+    if (Test-Path -LiteralPath $ReportPath) { try { $report = [IO.File]::ReadAllText($ReportPath) | ConvertFrom-Json } catch { $report = $null } }
+    if (($r.ExitCode -ne 0 -and $r.ExitCode -ne 1) -or $null -eq $report) {
+        Write-ToolOutput $r.StdErr '      ! '
+        throw "build-lobo-extras.py --check could not check the staged $($script:ExtrasName) (exit $($r.ExitCode))"
+    }
+    $errors = @(Get-JsonField $report 'errors' | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+    if ($r.ExitCode -ne 0 -or $errors.Count -gt 0) {
+        throw ("$($script:ExtrasName) class check failed; an extras config would change a class that @LoBo, @LoBo_Deps, @LoBo_UD or the stock game define, or could not be read in full:`n   " + ($errors -join "`n   "))
+    }
+    return $report
+}
+
+# Fails when any extras pbo file name (case-insensitive, any folder) is
+# already used by another modfolder. Others: name -> where (string).
+function Assert-NoPboNameClash([object[]]$ExtrasPbos, [hashtable]$Others, [string]$When) {
+    $clashes = New-Object System.Collections.Generic.List[string]
+    foreach ($p in $ExtrasPbos) {
+        $n = [IO.Path]::GetFileName($p.Relative)
+        if ($Others.ContainsKey($n)) { $clashes.Add("$($script:ExtrasName)\$($p.Relative) vs $($Others[$n])") }
+    }
+    if ($clashes.Count -gt 0) {
+        throw ("ExtrasDir pbo file name clash ($When); the engine keeps only one pbo of each name, so an extra must not reuse one:`n   " + ($clashes -join "`n   "))
+    }
+}
+
+# Runs lobo_cfgpatches.py over pbo files (chunked to keep the command line
+# short). Returns a hashtable full path -> pscustomobject (Config,
+# CfgPatches, Error).
+function Get-CfgPatchesIndex([string[]]$Paths) {
+    $map = @{}
+    $chunk = New-Object System.Collections.Generic.List[string]
+    $len = 0
+    $all = @($Paths)
+    for ($i = 0; $i -le $all.Count; $i++) {
+        $flush = ($i -eq $all.Count) -or ($len + $all[$i].Length -gt 20000)
+        if ($flush -and $chunk.Count -gt 0) {
+            $cmdArgs = @('-I', $script:CfgPatchesHelperFull, '--tools', $script:ToolsFull) + $chunk.ToArray()
+            $r = Invoke-Capture -FilePath $script:PythonExe -Arguments $cmdArgs
+            if ($r.ExitCode -ne 0 -and $r.ExitCode -ne 3) {
+                Write-ToolOutput $r.StdErr '      ! '
+                throw "lobo_cfgpatches.py exited $($r.ExitCode)"
+            }
+            $parsed = $null
+            try { $parsed = $r.StdOut | ConvertFrom-Json } catch { $parsed = $null }
+            if ($null -eq $parsed -or $null -eq (Get-JsonField $parsed 'pbos')) { throw "lobo_cfgpatches.py printed no JSON result (exit $($r.ExitCode))" }
+            foreach ($p in @($parsed.pbos)) {
+                $map[[string]$p.path] = [pscustomobject]@{
+                    Config = [string](Get-JsonField $p 'config')
+                    CfgPatches = @(@(Get-JsonField $p 'cfgpatches') | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+                    Error = [string](Get-JsonField $p 'error')
+                }
+            }
+            $chunk.Clear()
+            $len = 0
+        }
+        if ($i -lt $all.Count) { $chunk.Add($all[$i]); $len += $all[$i].Length + 3 }
+    }
+    foreach ($p in $all) { if (-not $map.ContainsKey($p)) { throw "lobo_cfgpatches.py returned no entry for $p" } }
+    return $map
+}
+
+# The CfgPatches cross-check. Groups: list of @{ Label; Paths } for the
+# other modfolders; Extras: the extras addon pbo paths. Every pbo must be
+# readable; an extras CfgPatches name must not be declared by any other pbo
+# (other extras included). Returns the extras index (path -> names).
+function Assert-NoCfgPatchesClash([object[]]$Groups, [string[]]$ExtrasPaths, [string]$ExtrasLabel, [string]$When) {
+    $allPaths = New-Object System.Collections.Generic.List[string]
+    foreach ($g in $Groups) { foreach ($p in $g.Paths) { $allPaths.Add($p) } }
+    foreach ($p in $ExtrasPaths) { $allPaths.Add($p) }
+    $index = Get-CfgPatchesIndex $allPaths.ToArray()
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($p in $allPaths) { if ($index[$p].Error -ne '') { $errors.Add("$p`: $($index[$p].Error)") } }
+    if ($errors.Count -gt 0) { throw ("Cannot read the CfgPatches of every pbo ($When), so the extras cannot be checked:`n   " + ($errors -join "`n   ")) }
+    $declared = @{}   # lower-case CfgPatches name -> list of 'label\pbo'
+    $otherCount = 0
+    foreach ($g in $Groups) {
+        foreach ($p in $g.Paths) {
+            $otherCount++
+            foreach ($n in $index[$p].CfgPatches) {
+                $k = $n.ToLowerInvariant()
+                if (-not $declared.ContainsKey($k)) { $declared[$k] = New-Object System.Collections.Generic.List[string] }
+                $declared[$k].Add("$($g.Label)\$([IO.Path]::GetFileName($p))")
+            }
+        }
+    }
+    $clashes = New-Object System.Collections.Generic.List[string]
+    $extrasSeen = @{}
+    $extrasNames = 0
+    foreach ($p in $ExtrasPaths) {
+        $where = "$ExtrasLabel\$([IO.Path]::GetFileName($p))"
+        foreach ($n in $index[$p].CfgPatches) {
+            $extrasNames++
+            $k = $n.ToLowerInvariant()
+            if ($declared.ContainsKey($k)) { $clashes.Add("CfgPatches $n in $where is also declared by " + (($declared[$k] | Select-Object -Unique) -join ', ')) }
+            if ($extrasSeen.ContainsKey($k)) { $clashes.Add("CfgPatches $n is declared by both $($extrasSeen[$k]) and $where") } else { $extrasSeen[$k] = $where }
+        }
+    }
+    if ($clashes.Count -gt 0) {
+        throw ("ExtrasDir CfgPatches clash ($When); a clashing addon would merge into or replace another one's config:`n   " + ($clashes -join "`n   "))
+    }
+    Write-Info "CfgPatches: $extrasNames name(s) in $($ExtrasPaths.Count) extras pbo(s), none declared by the $otherCount other pbo(s) ($When)"
+    return $index
+}
+
+# ---------------------------------------------------------------------------
+# Known issues (-KnownIssuesFile) and the content repair history
+# ---------------------------------------------------------------------------
+# Lines of the known-issues file: '#' comment lines dropped, leading and
+# trailing blank lines trimmed. Must be plain ASCII with no ' -- ' dash.
+function Read-KnownIssuesFile([string]$Path) {
+    $raw = [IO.File]::ReadAllBytes($Path)
+    $start = 0
+    if ($raw.Length -ge 3 -and $raw[0] -eq 0xEF -and $raw[1] -eq 0xBB -and $raw[2] -eq 0xBF) { $start = 3 }
+    for ($i = $start; $i -lt $raw.Length; $i++) {
+        if ($raw[$i] -gt 127) { throw "KnownIssuesFile $Path is not plain ASCII (byte 0x$($raw[$i].ToString('X2')) at offset $i; em dashes and typographic quotes are not allowed)" }
+    }
+    $text = [Text.Encoding]::ASCII.GetString($raw, $start, $raw.Length - $start)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $n = 0
+    foreach ($l in ($text -replace "`r`n", "`n" -split "`n")) {
+        $n++
+        if ($l -match '^\s*#') { continue }
+        $line = $l.TrimEnd()
+        if ($line -match ' -- ' -or $line -match '^-- ' -or $line -match ' --$') { throw "KnownIssuesFile $Path line $n uses ' -- ' as a dash" }
+        if ($line -match "`t") { throw "KnownIssuesFile $Path line $n contains a tab; use spaces" }
+        $lines.Add($line)
+    }
+    while ($lines.Count -gt 0 -and $lines[0] -eq '') { $lines.RemoveAt(0) }
+    while ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') { $lines.RemoveAt($lines.Count - 1) }
+    if ($lines.Count -eq 0) { throw "KnownIssuesFile $Path holds no issue lines" }
+    return $lines.ToArray()
+}
+
+# The content repair batches recorded under <LoBoDir>\.ud-backups\issue-69:
+# one object per batch folder (Batch, Manifest, State, RepairVersion,
+# RuleSha256, Compatibility, Created, ArchiveCount, MemberCount, Archives),
+# oldest first. A manifest that does not parse, or an applied one without
+# its identity and lists, is fatal; a batch without manifest.json is
+# reported with State 'no-manifest'.
+function Get-RepairBatches([string]$LoBoRoot) {
+    $out = New-Object System.Collections.Generic.List[object]
+    $backups = Find-ChildPath $LoBoRoot '.ud-backups' -Directory
+    if (-not $backups) { return $out.ToArray() }
+    $issue = Find-ChildPath $backups 'issue-69' -Directory
+    if (-not $issue) { return $out.ToArray() }
+    foreach ($batch in ([IO.Directory]::GetDirectories($issue) | Sort-Object)) {
+        $name = [IO.Path]::GetFileName($batch)
+        $manifestPath = Find-ChildPath $batch 'manifest.json'
+        $item = [pscustomobject]@{ Batch = $name; Manifest = $manifestPath; State = 'no-manifest'; RepairVersion = ''; RuleSha256 = ''
+                                   Compatibility = ''; Created = ''; ArchiveCount = 0; MemberCount = 0; Archives = @() }
+        if ($manifestPath) {
+            $m = $null
+            try { $m = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json } catch { throw "Cannot parse the repair backup manifest $manifestPath`: $($_.Exception.Message)" }
+            $item.State = ConvertTo-AsciiText ([string](Get-JsonField $m 'state'))
+            $item.RepairVersion = ConvertTo-AsciiText ([string](Get-JsonField $m 'repair_version'))
+            $item.RuleSha256 = (ConvertTo-AsciiText ([string](Get-JsonField $m 'rule_sha256'))).ToLowerInvariant()
+            $item.Compatibility = ConvertTo-AsciiText ([string](Get-JsonField $m 'compatibility'))
+            $item.Created = ConvertTo-AsciiText ([string](Get-JsonField $m 'created_utc'))
+            $archives = Get-JsonField $m 'archives'
+            $members = Get-JsonField $m 'members'
+            if ($item.State -eq 'applied') {
+                if ($item.RepairVersion -eq '' -or $item.RuleSha256 -eq '' -or $null -eq $archives -or $null -eq $members) {
+                    throw "Repair backup manifest $manifestPath is marked applied but lacks repair_version, rule_sha256, archives or members"
+                }
+            }
+            if ($null -ne $archives) {
+                $item.Archives = @(@($archives) | ForEach-Object { ConvertTo-AsciiText ([string](Get-JsonField $_ 'file')) })
+                $item.ArchiveCount = $item.Archives.Count
+            }
+            if ($null -ne $members) { $item.MemberCount = @($members).Count }
+        }
+        $out.Add($item)
+    }
+    return $out.ToArray()
+}
+
+# ---------------------------------------------------------------------------
+# LoBo Reloaded library (-LibraryDir)
+# ---------------------------------------------------------------------------
+# Verifies a package folder against its own SHA256SUMS.txt: every listed
+# file present with the listed hash, and no file that is not listed.
+# Returns the number of files verified.
+function Test-PackageFolder([string]$Root) {
+    $sumsPath = Join-Path $Root 'SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $sumsPath)) { throw "No SHA256SUMS.txt in $Root" }
+    $listed = @{}
+    foreach ($raw in [IO.File]::ReadAllLines($sumsPath)) {
+        if ($raw -eq '') { continue }
+        if ($raw -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Unparseable line in $sumsPath`: $raw" }
+        $listed[$Matches[2].Replace('/', '\')] = $Matches[1]
+    }
+    $entries = Get-TreeEntries -Root $Root
+    $count = 0
+    foreach ($f in $entries.Files) {
+        if ($f.Relative -ieq 'SHA256SUMS.txt') { continue }
+        if (-not $listed.ContainsKey($f.Relative)) { throw "$($f.Full) is not listed in $sumsPath" }
+        $h = (Get-Sha256 $f.Full).ToLowerInvariant()
+        if ($h -ne $listed[$f.Relative]) { throw "$($f.Full) has sha256 $h, SHA256SUMS.txt lists $($listed[$f.Relative])" }
+        $count++
+    }
+    if ($count -ne $listed.Count) { throw "$Root holds $count of the $($listed.Count) files SHA256SUMS.txt lists" }
+    return $count
+}
+
+# Deletes one of this build's own library folders: exactly
+# modfolders\<Version>, or its .partial/.old sibling. Anything else is refused.
+function Remove-LibraryVersionFolder([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $ok = $false
+    foreach ($own in @($script:LibVersionDir, $script:LibPartialDir, $script:LibOldDir)) {
+        if ($full -ieq ([IO.Path]::GetFullPath($own).TrimEnd('\'))) { $ok = $true }
+    }
+    if (-not $ok) { throw "Refusing to delete in the library anything but this version's own folders: $Path" }
+    if (-not (Test-Path -LiteralPath $full)) { return }
+    if (Test-ReparsePoint $full) { throw "Refusing to delete a link/junction: $full" }
+    Write-Info "removing $full"
+    Remove-Item -LiteralPath $full -Recurse -Force
+}
+
+# The library files this build would write (archives, sidecars, report)
+# that already exist. Returns full paths.
+function Get-LibraryConflicts {
+    $hits = New-Object System.Collections.Generic.List[string]
+    if (Test-Path -LiteralPath $script:LibVersionDir) { $hits.Add($script:LibVersionDir) }
+    foreach ($a in $script:LibArchivePaths) {
+        foreach ($p in @($a, ($a + '.sha256'))) { if (Test-Path -LiteralPath $p) { $hits.Add($p) } }
+    }
+    if (Test-Path -LiteralPath $script:LibReportPath) { $hits.Add($script:LibReportPath) }
+    return $hits.ToArray()
+}
+
+# Copies one file into the library through a temporary name next to it and
+# verifies the bytes before it takes the final name.
+function Publish-LibraryFile([string]$Source, [string]$Dest) {
+    if ((Test-Path -LiteralPath $Dest) -and -not $Force) { throw "Library file already exists: $Dest (use -Force to overwrite)" }
+    $tmp = $Dest + '.partial'
+    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force }
+    Copy-FileTo $Source $tmp
+    if ((Get-Sha256 $tmp) -ine (Get-Sha256 $Source)) { Remove-Item -LiteralPath $tmp -Force; throw "Library copy of $Source is not byte-identical" }
+    if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Force }
+    [IO.File]::Move($tmp, $Dest)
+    Write-Info "library: $Dest"
+}
+
+# ---------------------------------------------------------------------------
 # Generated text
 # ---------------------------------------------------------------------------
 # The world names the packed demo missions target, from the staged
@@ -1033,18 +1551,28 @@ function Get-MissionWorlds([string]$MissionsDir) {
     return @($worlds.ToArray() | Sort-Object)
 }
 
-function Get-ReadmeFirstLines([int]$LoBoPboCount, [int]$DepsPboCount, [int]$UdPboCount, [string[]]$MissionWorlds) {
+function Get-ReadmeFirstLines {
+    param(
+        [int]$LoBoPboCount, [int]$DepsPboCount, [int]$UdPboCount, [string[]]$MissionWorlds,
+        [object]$Extras = $null, [string[]]$KnownIssues = @()
+    )
     $worldList = if ($MissionWorlds.Count -gt 0) { $MissionWorlds -join ', ' } else { 'none packed' }
-    return @(
-        "$($script:PackageName)",
-        'The Lost Brothers (@LoBo) for Arma: Cold War Assault, family package',
-        '====================================================================',
+    $hasExtras = ($null -ne $Extras)
+    $lead = if ($hasExtras) { '@LoBo_Extras;' } else { '' }
+    $title = "$($script:ProductName) $Version"
+    $sub = 'The Lost Brothers (@LoBo) for Arma: Cold War Assault, rebuilt and repaired'
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.AddRange([string[]]@(
+        $title,
+        $sub,
+        ('=' * $sub.Length),
+        "Package $($script:PackageName).",
         '',
         'FAMILY USE ONLY. Please do not pass this package on or upload it',
         'anywhere. It bundles third-party content (the Lost Brothers mod and',
         'the addon packs it depends on), each under its own licence and credits.',
-        'The original readmes and licences are kept under @LoBo\docs and',
-        '@LoBo_Deps\readmes; please respect them.',
+        $(if ($hasExtras) { 'The original readmes and licences are kept under @LoBo\docs,' } else { 'The original readmes and licences are kept under @LoBo\docs and' }),
+        $(if ($hasExtras) { '@LoBo_Deps\readmes and @LoBo_Extras; please respect them.' } else { '@LoBo_Deps\readmes; please respect them.' }),
         '',
         'WHAT IS IN HERE',
         '---------------',
@@ -1052,34 +1580,66 @@ function Get-ReadmeFirstLines([int]$LoBoPboCount, [int]$DepsPboCount, [int]$UdPb
         "                  ($LoBoPboCount addon pbos, five islands: Sinai, Lebanon, Gaza,",
         '                  Iran/Iraq and 73 Easting, plus demo missions), with the',
         '                  Uslu dur! data repairs applied in their Classic-safe form.',
-        '                  Built to load on every engine (see KNOWN ISSUES below',
-        '                  and @LoBo\UD-CHANGES.txt).',
+        '                  Built to load on the official Remastered exe and on',
+        '                  Uslu dur! (see KNOWN ISSUES below and',
+        '                  @LoBo\UD-CHANGES.txt).',
         '                  NOTE: the launch line and the "no further addons are',
         '                  required" statement inside @LoBo\README.txt predate the',
         '                  @LoBo_Deps split and are superseded by this file. Use',
         '                  only the LAUNCH LINES below.',
         '@LoBo_Deps\       The third-party addons LoBo depends on but never shipped',
-        "                  ($DepsPboCount pbos), as a second modfolder. See @LoBo_Deps\README.txt.",
+        "                  ($DepsPboCount pbos), as a second modfolder. See @LoBo_Deps\README.txt."
+    ))
+    if ($hasExtras) {
+        $lines.AddRange([string[]]@(
+            '@LoBo_Extras\     OPTIONAL: extra addon packs recovered alongside LoBo',
+            "                  ($($Extras.AddonPbos.Count) addon pbos, $($Extras.MissionPbos.Count) missions), with their readmes.",
+            '                  Nothing in @LoBo or @LoBo_Deps needs them; leave the',
+            '                  folder out of the launch line to play without them.'
+        ))
+    }
+    $lines.AddRange([string[]]@(
         '@LoBo_UD\         Uslu dur! ONLY: the Guerrilla Mode faction table plus',
         "                  $UdPboCount addon pbos in their full-strength (UD profile) form.",
         '                  It must be the LAST modfolder on the command line and',
-        '                  must never be mounted on the stock game or on the',
-        '                  official Remastered exe. See @LoBo_UD\README.txt.',
+        '                  must never be mounted on the official Remastered exe',
+        '                  or the legacy 1.99 exe. See @LoBo_UD\README.txt.',
         'SHA256SUMS.txt    Checksums of every file in this package.',
         'README-FIRST.txt  This file.',
         '',
         'INSTALL',
-        '-------',
-        '1. If your game folder already has an @LoBo, @LoBo_Deps or @LoBo_UD',
-        '   folder (an earlier copy of the mod), delete it or move it away',
-        '   first. Do not copy over it: Explorer would merge the folders and',
-        '   keep stale files, including a Bin\config.cpp that breaks the stock',
-        '   and official Remastered engines.',
-        '2. Copy the @LoBo and @LoBo_Deps folders (and @LoBo_UD if you play',
-        '   Uslu dur!) into your game folder, next to the game exe and its',
-        '   AddOns folder. The result looks like this:',
-        '       <game folder>\ColdWarAssault.exe   (or PoseidonGame.exe)',
-        '       <game folder>\AddOns\',
+        '-------'
+    ))
+    if ($hasExtras) {
+        $lines.AddRange([string[]]@(
+            '1. If your game folder already has an @LoBo, @LoBo_Deps, @LoBo_Extras',
+            '   or @LoBo_UD folder (an earlier copy of the mod), delete it or move it',
+            '   away first. Do not copy over it: Explorer would merge the folders',
+            '   and keep stale files, including a Bin\config.cpp that breaks the',
+            '   official Remastered engine.',
+            '2. Copy the @LoBo and @LoBo_Deps folders (plus @LoBo_Extras if you',
+            '   want the optional extras, and @LoBo_UD if you play Uslu dur!) into',
+            '   your game folder, next to the game exe and its AddOns folder. The',
+            '   result looks like this:',
+            '       <game folder>\PoseidonGame.exe',
+            '       <game folder>\AddOns\',
+            '       <game folder>\@LoBo_Extras\addons\...  (optional)'
+        ))
+    } else {
+        $lines.AddRange([string[]]@(
+            '1. If your game folder already has an @LoBo, @LoBo_Deps or @LoBo_UD',
+            '   folder (an earlier copy of the mod), delete it or move it away',
+            '   first. Do not copy over it: Explorer would merge the folders and',
+            '   keep stale files, including a Bin\config.cpp that breaks the',
+            '   official Remastered engine.',
+            '2. Copy the @LoBo and @LoBo_Deps folders (and @LoBo_UD if you play',
+            '   Uslu dur!) into your game folder, next to the game exe and its',
+            '   AddOns folder. The result looks like this:',
+            '       <game folder>\PoseidonGame.exe',
+            '       <game folder>\AddOns\'
+        ))
+    }
+    $lines.AddRange([string[]]@(
         '       <game folder>\@LoBo\addons\...',
         '       <game folder>\@LoBo_Deps\Addons\...',
         '       <game folder>\@LoBo_UD\addons\...      (Uslu dur! only)',
@@ -1092,61 +1652,81 @@ function Get-ReadmeFirstLines([int]$LoBoPboCount, [int]$DepsPboCount, [int]$UdPb
         '',
         'LAUNCH LINES',
         '------------',
-        'Stock Arma: Cold War Assault 1.99 (ColdWarAssault.exe):',
-        '    ColdWarAssault.exe -mod=@LoBo;@LoBo_Deps',
-        '',
         'Official Remastered (Steam folder ...\ARMA Cold War Assault\Remastered,',
         'PoseidonGame.exe):',
-        '    PoseidonGame.exe --mod "@LoBo;@LoBo_Deps"',
+        "    PoseidonGame.exe --mod `"$($lead)@LoBo;@LoBo_Deps`"",
         '',
         'Uslu dur! (our build of the remaster engine, PoseidonGame.exe):',
-        '    PoseidonGame.exe --mod "@LoBo;@LoBo_Deps;@LoBo_UD"',
+        "    PoseidonGame.exe --mod `"$($lead)@LoBo;@LoBo_Deps;@LoBo_UD`"",
         '',
-        '@LoBo_UD must stay LAST in that list: the engine loads the last-listed',
-        'modfolder''s copy of a pbo name, and that is how the UD versions win.',
-        'Never mount @LoBo_UD on the stock exe or on the official Remastered exe.',
-        'These three lines replace the "-mod=@LoBo" line in @LoBo\README.txt.',
+        'Legacy: Arma: Cold War Assault 1.99 (ColdWarAssault.exe):',
+        "    ColdWarAssault.exe -mod=$($lead)@LoBo;@LoBo_Deps",
+        ''
+    ))
+    if ($hasExtras) {
+        $lines.AddRange([string[]]@(
+            '@LoBo_Extras is optional and can be left out. To play without the',
+            'extras, drop "@LoBo_Extras;" from the line, for example:',
+            '    PoseidonGame.exe --mod "@LoBo;@LoBo_Deps"',
+            ''
+        ))
+    }
+    $lines.AddRange([string[]]@(
+        'Why this order: the engine walks the list from the LAST entry',
+        'backwards and keeps the first-loaded copy of every pbo name, so when',
+        'two modfolders carry a pbo of the same name, the last-listed one wins.',
+        '@LoBo_UD must stay LAST so that its Uslu dur! versions win.'
+    ))
+    if ($hasExtras) {
+        $lines.AddRange([string[]]@(
+            '@LoBo_Extras goes FIRST so that the core @LoBo and @LoBo_Deps files',
+            'always win a pbo-name clash with an extra. The build checked that no',
+            'extras pbo name, CfgPatches name or config class conflicts with',
+            '@LoBo, @LoBo_Deps or @LoBo_UD, but keep the order anyway.'
+        ))
+    }
+    $lines.AddRange([string[]]@(
+        'Never mount @LoBo_UD on the official Remastered exe or on the legacy',
+        '1.99 exe.',
+        'These lines replace the "-mod=@LoBo" line in @LoBo\README.txt.',
         '',
         'DEMO MISSIONS',
         '-------------',
         'The missions in @LoBo\Missions appear in Single Player > Missions',
-        "(filter by island: $worldList).",
+        "(filter by island: $worldList)."
+    ))
+    if ($hasExtras -and $Extras.MissionPbos.Count -gt 0) {
+        $extraWorlds = if ($Extras.MissionWorlds.Count -gt 0) { $Extras.MissionWorlds -join ', ' } else { 'unknown' }
+        $lines.Add("The $($Extras.MissionPbos.Count) missions in @LoBo_Extras\Missions appear there too while")
+        $lines.Add("@LoBo_Extras is mounted (filter by island: $extraWorlds).")
+    }
+    $lines.AddRange([string[]]@(
         'The folders in @LoBo\user missions are unpacked editor missions. To',
         'use one, copy its folder into the editor missions folder of your',
         'engine, then open it in the Mission Editor on the matching island:',
-        '  stock 1.99 exe:      <game folder>\Users\<your name>\Missions',
         '  official Remastered  Documents\Cold War Assault\missions',
         '  and Uslu dur!:       (the folder name has spaces and there is no',
         '                       Users\<name> level; the engine creates it on',
         '                       its first start)',
+        '  legacy 1.99 exe:     <game folder>\Users\<your name>\Missions',
         '',
         'MULTIPLAYER',
         '-----------',
         'Everyone in a game must run identical content: the same package',
         'version and the same modfolders. Mixing this package with an older',
-        '@LoBo, or a UD player with a stock player, will desync or crash.',
+        '@LoBo, or a UD player with a player on another engine, will desync',
+        'or crash.'
+    ))
+    if ($hasExtras) { $lines.Add('Either everyone mounts @LoBo_Extras or nobody does.') }
+    $lines.AddRange([string[]]@(
         '',
         'KNOWN ISSUES',
         '------------',
         'Please read these before reporting a problem; they are known and are',
-        'not signs of a broken install. Details in @LoBo\UD-CHANGES.txt.',
-        '- No game was launched to test the content repair (repair set B in',
-        '  UD-CHANGES.txt). Combat, missile shots, AI weapon choice, saves and',
-        '  multiplayer with it are untested.',
-        '- The official Remastered engine has not been run with this package',
-        '  at all; it is expected to load it, but that is unverified.',
-        '- On the stock exe and on the official Remastered exe the burning',
-        '  wreck scripts run in a limited form: they only reach the player''s',
-        '  and the wreck''s own groups, not every nearby soldier. Uslu dur! with',
-        '  @LoBo_UD gets the full version.',
-        '- The sinai, iran_iraq and gaza islands point their menu intro at an',
-        '  addon (lost_anims) that the mod team never released. Uslu dur! works',
-        '  around it; the stock and official exes may complain about the',
-        '  missing addon when those islands load their intro. Harmless.',
-        '- About a dozen bundled building and prop addons use undefined',
-        '  destruction types, so those props cannot be destroyed.',
-        '- Three referenced addons (vit_iraq_shilka, f3wx_markers, bde_weapons)',
-        '  were never publicly released. The references are harmless.',
+        'not signs of a broken install. Details in @LoBo\UD-CHANGES.txt.'
+    ))
+    $lines.AddRange([string[]]$KnownIssues)
+    $lines.AddRange([string[]]@(
         '',
         'VERIFY THE FILES',
         '----------------',
@@ -1162,14 +1742,21 @@ function Get-ReadmeFirstLines([int]$LoBoPboCount, [int]$DepsPboCount, [int]$UdPb
         'The Lost Brothers Mod Team (Miles Teg<GD>, Calm Terror, Uziyhau,',
         'Panzerfaust, Chris G., Noone and others; LOBO ownership is now under',
         'Null_X) and the many addon authors credited in @LoBo\README.txt,',
-        '@LoBo\docs and @LoBo_Deps\readmes.',
+        '@LoBo\docs and @LoBo_Deps\readmes.'
+    ))
+    if ($hasExtras) { $lines.Add('The authors of the optional packs are credited in the readmes in @LoBo_Extras.') }
+    $lines.AddRange([string[]]@(
         "Modfolder assembly, repairs and this package: the Uslu dur! project, $($script:Today).",
-        'Package built by arma_CWR/tools/lobo/package-lobo-family.ps1.'
-    )
+        "Package built by arma_CWR/tools/lobo/package-lobo-family.ps1 ($($script:ProductName) library builder)."
+    ))
+    return $lines.ToArray()
 }
 
 function Get-ChangesLines {
-    param([object[]]$Overlay, [string[]]$ExtraMerged, [hashtable]$StagedHashes)
+    param(
+        [object[]]$Overlay, [string[]]$ExtraMerged, [hashtable]$StagedHashes,
+        [object[]]$Batches = @(), [string[]]$KnownIssues = @()
+    )
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.AddRange([string[]]@(
         'UD-CHANGES.txt: what the Uslu dur! project changed in this @LoBo folder',
@@ -1196,7 +1783,7 @@ function Get-ChangesLines {
         'its REQUIRED GAME STATE claim that no further addons are needed predate',
         'the @LoBo_Deps split and no longer hold: the third-party dependencies',
         'now live in the @LoBo_Deps modfolder, and the only valid launch lines',
-        'are the three in README-FIRST.txt at the top of the package.',
+        'are the ones in README-FIRST.txt at the top of the package.',
         'Everything else in this folder is the mod as released, apart from the',
         'two repair sets below, the profile split and the one moved file.',
         '',
@@ -1227,9 +1814,31 @@ function Get-ChangesLines {
         '',
         'REPAIR SET B: content repair (repair_lobo.py)',
         '---------------------------------------------',
-        "repair_version $($script:RepairVersion), rule sha256 $($script:RuleSha256).",
-        'A reproducible, offline repair (76 members in 25 archives on the build',
-        'machine as of 2026-10-11) that fixes:',
+        'A reproducible, offline repair of the mod''s configs, scripts and',
+        'models. When this package was built, repair_lobo.py',
+        "repair_version $($script:RepairVersion), rule sha256",
+        "$($script:RuleSha256),",
+        'reported nothing left to change on the source in its UD profile.',
+        'Applied on the build machine, oldest first (from the backup manifests',
+        'under @LoBo\.ud-backups\issue-69 there, which are not shipped):'
+    ))
+    $applied = @($Batches | Where-Object { $_.State -eq 'applied' })
+    $distinct = @{}
+    foreach ($b in $applied) {
+        $lines.Add(('   repair_version {0}, {1} profile, batch {2}' -f $b.RepairVersion, $(if ($b.Compatibility -ne '') { $b.Compatibility.ToUpperInvariant() } else { 'unknown' }), $b.Batch))
+        $lines.Add(('      {0} archives, {1} members, rule sha256' -f $b.ArchiveCount, $b.MemberCount))
+        $lines.Add(('      {0}' -f $b.RuleSha256))
+        foreach ($a in $b.Archives) { if ($a -ne '') { $distinct[$a] = $true } }
+    }
+    if ($applied.Count -eq 0) {
+        $lines.Add('   (no applied batch is recorded on the build machine)')
+    } else {
+        $lines.Add("   $($applied.Count) applied batch(es), $($distinct.Count) distinct archives rewritten in all.")
+    }
+    $lines.AddRange([string[]]@(
+        'The rules cover, among others (the full list is CONTENT-REPAIRS.md',
+        'next to repair_lobo.py in arma_CWR/tools/lobo of the Uslu dur!',
+        'repository):',
         '   - the missing M833 (LoBo_105Sabot2) projectile class',
         '   - machine-gun AI engagement profiles (JAM-derived, MG and rifle use',
         '     of 5.56 separated, suppressed Negev magazine corrected)',
@@ -1254,7 +1863,7 @@ function Get-ChangesLines {
         '-----------------------',
         'The wreck-fire repair exists in two profiles. The UD profile uses the',
         'engine command nearestObjects to find every nearby infantry unit; the',
-        'stock 1.99 engine does not have that command, so it must never run',
+        'legacy 1.99 engine does not have that command, so it must never run',
         'there. The Classic profile uses older commands and finds only the',
         'player''s and the wreck''s groups: a deliberately limited fallback, not',
         'full parity.',
@@ -1280,21 +1889,35 @@ function Get-ChangesLines {
         'On the build machine this folder also carries Bin\config.cpp, the',
         'Guerrilla Mode faction table for the eight LoBo war rosters. That file',
         'is for the Uslu dur! engine only. Uslu dur! layers each mounted mod''s',
-        'bin\config onto the base game config; the stock ColdWarAssault.exe and',
-        'the official Remastered PoseidonGame.exe instead REPLACE the whole base',
-        'config with it, which breaks the game. The package therefore ships it',
-        'as @LoBo_UD\bin\config.cpp, to be mounted only on Uslu dur!. This',
-        'folder ships Bin\RESOURCE.bin and Bin\configBackup\Config.bin exactly',
-        'as stock.',
-        '',
+        'bin\config onto the base game config; the official Remastered',
+        'PoseidonGame.exe and the legacy ColdWarAssault.exe instead REPLACE the',
+        'whole base config with it, which breaks the game. The package therefore',
+        'ships it as @LoBo_UD\bin\config.cpp, to be mounted only on Uslu dur!.',
+        'This folder ships Bin\RESOURCE.bin and Bin\configBackup\Config.bin',
+        'exactly as stock.',
+        ''
+    ))
+    if ($KnownIssues.Count -gt 0) {
+        $lines.AddRange([string[]]@(
+            'KNOWN ISSUES (the same list as in README-FIRST.txt)',
+            '---------------------------------------------------'
+        ))
+        $lines.AddRange([string[]]$KnownIssues)
+        $lines.AddRange([string[]]@(
+            '',
+            "Built by arma_CWR/tools/lobo/package-lobo-family.ps1 on $($script:Today), package $($script:PackageName)."
+        ))
+        return $lines.ToArray()
+    }
+    $lines.AddRange([string[]]@(
         'CAVEATS',
         '-------',
         '- The Classic wreck-fire profile is a limited fallback: it finds the',
         '  player''s and the wreck''s groups, not every nearby infantry unit.',
         '- The official Remastered engine''s runtime was not verified with either',
         '  profile.',
-        '- No game was launched for the set B work. Runtime combat, missile',
-        '  shots, AI weapon selection, animated hit locations, saves and',
+        '- Runtime testing of the set B work is partial (see the lobo tracking',
+        '  repo). Long range AI fire, animated hit locations, saves and',
         '  multiplayer still need a play test.',
         '- In multiplayer everyone must run identical content.',
         '',
@@ -1303,30 +1926,37 @@ function Get-ChangesLines {
         '- The sinai, iran_iraq and gaza worlds point their menu intro at a',
         '  lost_anims addon that was never released. Uslu dur! has an engine',
         '  fallback for it.',
-        '- About a dozen bundled prop addons use destrType names that are not',
-        '  defined, so those props cannot be destroyed.',
-        '- Three referenced addons were never publicly released',
-        '  (vit_iraq_shilka, f3wx_markers, bde_weapons). The references are',
-        '  harmless.',
+        '- Two referenced addons were never publicly released (f3wx_markers,',
+        '  bde_weapons). The references are harmless. A third one,',
+        '  vit_iraq_shilka, was recovered in 2026; LoBo does not need it.',
         '',
         "Built by arma_CWR/tools/lobo/package-lobo-family.ps1 on $($script:Today), package $($script:PackageName)."
     ))
     return $lines.ToArray()
 }
 
-function Get-UdReadmeLines([object[]]$Overlay) {
+function Get-UdReadmeLines([object[]]$Overlay, [bool]$HasExtras = $false) {
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.AddRange([string[]]@(
         '@LoBo_UD: Uslu dur! only overlay for the Lost Brothers mod',
         '==========================================================',
-        'USLU DUR! ONLY, and it must be the LAST modfolder on the command line:',
-        '    PoseidonGame.exe --mod "@LoBo;@LoBo_Deps;@LoBo_UD"',
+        'USLU DUR! ONLY, and it must be the LAST modfolder on the command line:'
+    ))
+    if ($HasExtras) {
+        $lines.AddRange([string[]]@(
+            '    PoseidonGame.exe --mod "@LoBo_Extras;@LoBo;@LoBo_Deps;@LoBo_UD"',
+            '(@LoBo_Extras is optional: without it, --mod "@LoBo;@LoBo_Deps;@LoBo_UD")'
+        ))
+    } else {
+        $lines.Add('    PoseidonGame.exe --mod "@LoBo;@LoBo_Deps;@LoBo_UD"')
+    }
+    $lines.AddRange([string[]]@(
         '',
-        'Never mount it on the stock ColdWarAssault.exe or on the official',
-        'Remastered PoseidonGame.exe, for two reasons. Those engines make a',
+        'Never mount it on the official Remastered PoseidonGame.exe or on the',
+        'legacy ColdWarAssault.exe, for two reasons. Those engines make a',
         'mod''s bin\config replace the entire base game config, so the game',
         'would start with no vehicles, weapons or menus. And the addons here',
-        'use the nearestObjects script command, which the stock 1.99 engine',
+        'use the nearestObjects script command, which the legacy 1.99 engine',
         'does not have.',
         '',
         'WHAT IS IN HERE',
@@ -1377,7 +2007,7 @@ function Get-SourcesNoteLines([int]$ArchiveCount, [int]$InstallerCount, [string[
         'deps\README.txt     the dependency manifest with launch notes.',
         'stock-originals\    UNREPAIRED: the @LoBo pbos exactly as released, before',
         '                    repair set A (mod doctor) described in',
-        '                    @LoBo\UD-CHANGES.txt of the family package (from',
+        '                    @LoBo\UD-CHANGES.txt of the main package (from',
         '                    @LoBo\_ud-orig on the build machine):'
     ))
     foreach ($n in $StockNames) { $lines.Add('                      ' + $n) }
@@ -1397,6 +2027,110 @@ function Get-SourcesNoteLines([int]$ArchiveCount, [int]$InstallerCount, [string[
         'FAMILY USE ONLY. Third-party content under each pack''s own licence.',
         "Written $($script:Today) by arma_CWR/tools/lobo/package-lobo-family.ps1."
     ))
+    return $lines.ToArray()
+}
+
+# The build report (reports\<Version>\build-report.txt, and with
+# -LibraryDir docs\build-<Version>.txt): inputs, hashes, repair identities,
+# counts. Reads the script-scope state of a finished build.
+function Get-BuildReportLines {
+    param([object[]]$FolderStats, [int]$SumCount, [object[]]$Archives)
+    $title = "$($script:ProductName) build report: $($script:PackageName)"
+    $lines = New-Object System.Collections.Generic.List[string]
+    $now = Get-Date
+    $lines.AddRange([string[]]@(
+        $title,
+        ('=' * $title.Length),
+        "Built $($now.ToString('yyyy-MM-dd HH:mm:ss')) local, $($now.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) UTC.",
+        'Builder: arma_CWR/tools/lobo/package-lobo-family.ps1',
+        "Builder commit: $(ConvertTo-AsciiText $script:BuilderCommit)",
+        "PowerShell $($PSVersionTable.PSVersion), python $(ConvertTo-AsciiText $script:PythonExe)",
+        '',
+        'INPUTS',
+        '------',
+        "@LoBo source    $(ConvertTo-AsciiText $script:LoBoDirFull)",
+        "                $($script:SourceAddonPbos.Count) addon pbos, $($script:SourceFiles) files copied, $($script:SourceBytes) bytes",
+        "cache           $(ConvertTo-AsciiText $script:CacheDirFull)",
+        "                $(if ($SkipFetch) { 'server not contacted (-SkipFetch)' } else { ConvertTo-AsciiText ('fetched from ' + $Server + ':' + $ServerPath) })",
+        "ExtraDir        $(if ($script:ExtraDirFull -ne '') { ConvertTo-AsciiText $script:ExtraDirFull } else { 'none' })",
+        "ExtrasDir       $(if ($null -ne $script:Extras) { ConvertTo-AsciiText $script:ExtrasDirFull } else { 'none' })"
+    ))
+    if ($null -ne $script:Extras) {
+        $lines.Add("                $($script:Extras.Files.Count) files, $($script:Extras.AddonPbos.Count) addon pbos, $($script:Extras.MissionPbos.Count) missions, $($script:Extras.Bytes) bytes")
+        $m = $script:ExtrasManifest
+        if ($m.Found -and $m.Tool -eq 'build-lobo-extras') {
+            $lines.Add("                built by build-lobo-extras.py $(ConvertTo-AsciiText $m.BuildVersion)")
+            if ($m.Checked) {
+                $lines.Add("                its class check ran against$(if ($m.StockGame -ne '') { ' the stock game and' } else { '' }):")
+                foreach ($a in $m.Against) { $lines.Add("                  $(ConvertTo-AsciiText $a)") }
+            } else {
+                $lines.Add('                its class check did not run (no --against)')
+            }
+        } else {
+            $lines.Add("                $(ConvertTo-AsciiText $m.Problem)")
+        }
+        if ($null -ne $script:ExtrasClassCheck) {
+            $lines.Add(("                class check at packaging: no clash against {0} configs of the staged" -f (Get-JsonField $script:ExtrasClassCheck 'indexed_configs')))
+            $lines.Add(("                modfolders and the stock game; {0} reported overlap(s), listed in" -f @(Get-JsonField $script:ExtrasClassCheck 'warnings' | Where-Object { $null -ne $_ }).Count))
+            $lines.Add("                reports\$Version\extras-class-check.json")
+            $lines.Add("                stock game: $(ConvertTo-AsciiText $script:StockGameDirFull)")
+        }
+    }
+    $lines.AddRange([string[]]@(
+        "known issues    $(if ($script:KnownIssuesSource -ne '') { ConvertTo-AsciiText $script:KnownIssuesSource } else { 'built-in list' })",
+        "Bin\config.cpp  sha256 $((Get-Sha256 $script:ConfigCpp).ToLowerInvariant())",
+        "PoseidonTools   $(ConvertTo-AsciiText $script:ToolsFull)",
+        "                sha256 $((Get-Sha256 $script:ToolsFull).ToLowerInvariant())",
+        "repair tool     $(ConvertTo-AsciiText $script:RepairToolFull)",
+        "                sha256 $((Get-Sha256 $script:RepairToolFull).ToLowerInvariant())",
+        '',
+        'REPAIR IDENTITIES',
+        '-----------------',
+        "mod doctor (report only): nothing to do in $($script:DoctorSourceCount) source pbos and $($script:DoctorStagedCount) staged pbos",
+        "repair_lobo.py at build time: repair_version $($script:RepairVersion)",
+        "   rule sha256 $($script:RuleSha256)",
+        "   UD check on the source, classic apply + check on the staged copy and",
+        "   UD check on the composite all ran with this identity.",
+        "classic switch: $($script:ClassicChangedMembers) members in $($script:Overlay.Count) archives rewritten",
+        'applied content repair batches on the source (oldest first):'
+    ))
+    foreach ($b in $script:RepairBatches) {
+        $lines.Add(('   {0}  {1}  state {2}  profile {3}  {4} archives  {5} members' -f $b.Batch, $(if ($b.RepairVersion -ne '') { $b.RepairVersion } else { '?' }), $b.State, $(if ($b.Compatibility -ne '') { $b.Compatibility } else { '?' }), $b.ArchiveCount, $b.MemberCount))
+        if ($b.RuleSha256 -ne '') { $lines.Add("      rule sha256 $($b.RuleSha256)") }
+    }
+    if (@($script:RepairBatches).Count -eq 0) { $lines.Add('   (none recorded)') }
+    $lines.Add('profile switch overlay (@LoBo_UD\addons):')
+    foreach ($o in $script:Overlay) {
+        $lines.Add(('   {0,-18} classic {1}' -f $o.Name, $o.ClassicHash.ToLowerInvariant()))
+        $lines.Add(('   {0,-18} UD      {1}' -f '', $o.UdHash.ToLowerInvariant()))
+    }
+    $lines.AddRange([string[]]@(
+        '',
+        'COUNTS',
+        '------',
+        ('   {0,-18} {1,8} {2,8} {3,16}' -f 'folder', 'files', 'pbos', 'bytes')
+    ))
+    foreach ($s in $FolderStats) { $lines.Add(('   {0,-18} {1,8} {2,8} {3,16}' -f $s.Name, $s.Files, $s.Pbos, $s.Bytes)) }
+    $lines.Add("SHA256SUMS.txt: $SumCount entries, sha256 $((Get-Sha256 (Join-Path $script:StageRoot 'SHA256SUMS.txt')).ToLowerInvariant())")
+    $lines.AddRange([string[]]@(
+        '',
+        'OUTPUTS',
+        '-------',
+        "staged folder   $(ConvertTo-AsciiText $script:StageRoot)"
+    ))
+    foreach ($a in $Archives) {
+        $lines.Add("archive         $(ConvertTo-AsciiText $a)")
+        $lines.Add("                sha256 $((Get-Sha256 $a).ToLowerInvariant()), $((New-Object IO.FileInfo($a)).Length) bytes")
+    }
+    if (@($Archives).Count -eq 0) { $lines.Add('archive         none (-NoArchive)') }
+    if ($script:LibraryDirFull -ne '') {
+        $lines.AddRange([string[]]@(
+            "library         $(ConvertTo-AsciiText $script:LibraryDirFull)",
+            "                modfolders\$Version, dist\, docs\build-$Version.txt"
+        ))
+    } else {
+        $lines.Add('library         not filed (no -LibraryDir)')
+    }
     return $lines.ToArray()
 }
 
@@ -1467,10 +2201,24 @@ if ($ExtraDir -ne '') {
     if (Test-PathUnder $script:LoBoDirFull $script:ExtraDirFull) { throw "ExtraDir must not be inside the @LoBo folder: $ExtraDir" }
     if (Test-PathUnder $script:ExtraDirFull $script:LoBoDirFull) { throw "ExtraDir must not contain the @LoBo folder: $ExtraDir" }
 }
+# ExtrasDir: an already-built modfolder, copied verbatim. It may not overlap
+# a source, OutDir or ExtraDir.
+$script:ExtrasDirFull = ''
+if ($ExtrasDir -ne '') {
+    $script:ExtrasDirFull = Resolve-FullPath $ExtrasDir
+    if (-not (Test-Path -LiteralPath $script:ExtrasDirFull -PathType Container)) { throw "ExtrasDir not found: $ExtrasDir ($($script:ExtrasDirFull))" }
+    if (Test-ReparsePoint $script:ExtrasDirFull) { throw "ExtrasDir is a link/junction: $($script:ExtrasDirFull)" }
+    foreach ($pair in @(@('OutDir', $script:OutDirFull), @('the @LoBo folder', $script:LoBoDirFull), @('ExtraDir', $script:ExtraDirFull))) {
+        if ($pair[1] -eq '') { continue }
+        if ((Test-PathUnder $pair[1] $script:ExtrasDirFull) -or (Test-PathUnder $script:ExtrasDirFull $pair[1])) {
+            throw "ExtrasDir must not be on, under or above $($pair[0]): $ExtrasDir ($($script:ExtrasDirFull))"
+        }
+    }
+}
 # The fetch writes into CacheDir (mirrored tree, .part files, the manifest)
 # and replaces stale files there, so it may not point at a source folder or
 # at anything this script wipes.
-foreach ($pair in @(@('the @LoBo folder', $script:LoBoDirFull), @('ExtraDir', $script:ExtraDirFull))) {
+foreach ($pair in @(@('the @LoBo folder', $script:LoBoDirFull), @('ExtraDir', $script:ExtraDirFull), @('ExtrasDir', $script:ExtrasDirFull))) {
     if ($pair[1] -eq '') { continue }
     if ((Test-PathUnder $pair[1] $script:CacheDirFull) -or (Test-PathUnder $script:CacheDirFull $pair[1])) {
         throw "CacheDir must not be on, under or above $($pair[0]): $CacheDir ($($script:CacheDirFull))"
@@ -1480,14 +2228,72 @@ foreach ($owned in @($script:StageBase, $script:WorkBase)) {
     if (Test-PathUnder $owned $script:CacheDirFull) { throw "CacheDir must not be under $owned (that tree is wiped by the build): $CacheDir" }
 }
 
-# Tools: PoseidonTools, python, repair_lobo.py, 7z, ssh.
+# LibraryDir: only three targets in it are ever written (this version's
+# modfolders folder, dist\, docs\build-<Version>.txt); none of them may
+# overlap an input or a folder this script wipes.
+$script:LibraryDirFull = ''
+$script:LibVersionDir = ''
+$script:LibPartialDir = ''
+$script:LibOldDir = ''
+$script:LibDistDir = ''
+$script:LibDocsDir = ''
+$script:LibReportPath = ''
+$script:LibArchivePaths = @()
+if ($LibraryDir -ne '') {
+    if ($NoArchive) { throw '-LibraryDir files the .7z archive into the library, so it cannot be combined with -NoArchive' }
+    $script:LibraryDirFull = Resolve-FullPath $LibraryDir
+    if (-not (Test-Path -LiteralPath $script:LibraryDirFull -PathType Container)) { throw "LibraryDir not found: $LibraryDir ($($script:LibraryDirFull)); create the library root first" }
+    if (Test-ReparsePoint $script:LibraryDirFull) { throw "LibraryDir is a link/junction: $($script:LibraryDirFull)" }
+    $modRoot = Join-Path $script:LibraryDirFull 'modfolders'
+    $script:LibVersionDir = Join-Path $modRoot $Version
+    $script:LibPartialDir = Join-Path $modRoot ".$Version.partial"
+    $script:LibOldDir     = Join-Path $modRoot ".$Version.old"
+    $script:LibDistDir    = Join-Path $script:LibraryDirFull 'dist'
+    $script:LibDocsDir    = Join-Path $script:LibraryDirFull 'docs'
+    $script:LibReportPath = Join-Path $script:LibDocsDir "build-$Version.txt"
+    $script:LibArchivePaths = @(Join-Path $script:LibDistDir ($script:PackageName + '.7z'))
+    if ($IncludeSources) { $script:LibArchivePaths += (Join-Path $script:LibDistDir ($script:SourcesName + '.7z')) }
+    foreach ($sub in @($modRoot, $script:LibVersionDir, $script:LibDistDir, $script:LibDocsDir)) {
+        if ((Test-Path -LiteralPath $sub) -and (Test-ReparsePoint $sub)) { throw "Library folder is a link/junction: $sub" }
+    }
+    $targets = @($script:LibVersionDir, $script:LibPartialDir, $script:LibOldDir, $script:LibDistDir, $script:LibDocsDir)
+    $inputs = @(@('the @LoBo folder', $script:LoBoDirFull), @('ExtraDir', $script:ExtraDirFull), @('ExtrasDir', $script:ExtrasDirFull),
+                @('CacheDir', $script:CacheDirFull), @("OutDir\stage", $script:StageBase), @("OutDir\_work", $script:WorkBase))
+    foreach ($t in $targets) {
+        foreach ($pair in $inputs) {
+            if ($pair[1] -eq '') { continue }
+            if ((Test-PathUnder $pair[1] $t) -or (Test-PathUnder $t $pair[1])) {
+                throw "LibraryDir target $t must not be on, under or above $($pair[0]) ($($pair[1]))"
+            }
+        }
+    }
+    if ([IO.Path]::GetFullPath($script:LibDistDir).TrimEnd('\') -ieq $script:OutDirFull.TrimEnd('\')) {
+        throw "LibraryDir\dist is OutDir itself ($($script:OutDirFull)); the archives would be copied onto themselves"
+    }
+}
+
+# KnownIssuesFile: the KNOWN ISSUES list, or the built-in one.
+$script:KnownIssuesSource = ''
+$script:KnownIssuesFromFile = @()
+if ($KnownIssuesFile -ne '') {
+    $kiFull = Resolve-FullPath $KnownIssuesFile
+    if (Test-Path -LiteralPath $kiFull -PathType Leaf) {
+        $script:KnownIssuesFromFile = @(Read-KnownIssuesFile $kiFull)
+        $script:KnownIssuesSource = "$kiFull (sha256 $((Get-Sha256 $kiFull).ToLowerInvariant()))"
+    } else {
+        Write-Warn "KnownIssuesFile not found: $KnownIssuesFile ($kiFull); using the built-in known-issues list"
+    }
+}
+
+# Tools: PoseidonTools, python, repair_lobo.py, lobo_cfgpatches.py, 7z, ssh.
+if ($Tools -eq '') { $Tools = Get-DefaultToolsPath $PSScriptRoot }
 $script:ToolsFull = Resolve-FullPath $Tools
 if (-not (Test-Path -LiteralPath $script:ToolsFull -PathType Leaf)) { throw "PoseidonTools not found: $Tools ($($script:ToolsFull)) (build it, or pass -Tools)" }
 $pyCmd = Get-Command $Python -ErrorAction SilentlyContinue
 if (-not $pyCmd) { throw "Python interpreter not found: '$Python' (pass -Python)" }
 $script:PythonExe = if ($pyCmd.PSObject.Properties['Source'] -and $pyCmd.Source) { $pyCmd.Source } else { $Python }
 if ($RepairTool -eq '') {
-    $candidate = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\arma_CWR\tools\lobo\repair_lobo.py'))
+    $candidate = Get-DefaultRepairToolPath $PSScriptRoot
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
         throw "repair_lobo.py not found at its default location $candidate; pass -RepairTool <path to repair_lobo.py>"
     }
@@ -1495,20 +2301,58 @@ if ($RepairTool -eq '') {
 }
 $script:RepairToolFull = Resolve-FullPath $RepairTool
 if (-not (Test-Path -LiteralPath $script:RepairToolFull -PathType Leaf)) { throw "repair tool not found: $RepairTool ($($script:RepairToolFull)) (pass -RepairTool)" }
+$script:CfgPatchesHelperFull = [IO.Path]::GetFullPath($script:CfgPatchesHelper)
+if ($script:ExtrasDirFull -ne '' -and -not (Test-Path -LiteralPath $script:CfgPatchesHelperFull -PathType Leaf)) { throw "lobo_cfgpatches.py not found next to this script: $($script:CfgPatchesHelperFull)" }
+$script:ExtrasBuilderFull = [IO.Path]::GetFullPath($script:ExtrasBuilder)
+$script:StockGameDirFull = ''
+if ($script:ExtrasDirFull -ne '') {
+    if (-not (Test-Path -LiteralPath $script:ExtrasBuilderFull -PathType Leaf)) { throw "build-lobo-extras.py not found next to this script: $($script:ExtrasBuilderFull)" }
+    # The extras class check needs the stock config: without its access locks,
+    # stubs that the stock config refuses to rebase would read as clashes.
+    $stockDir = if ($StockGameDir -ne '') { $StockGameDir } else { $script:DefaultStockGameDir }
+    $script:StockGameDirFull = Resolve-FullPath $stockDir
+    $binDir = Find-ChildPath $script:StockGameDirFull 'BIN' -Directory
+    if (-not $binDir -or -not (Find-ChildPath $binDir 'CONFIG.BIN') -or -not (Find-ChildPath $script:StockGameDirFull 'AddOns' -Directory)) {
+        $how = if ($StockGameDir -ne '') { 'StockGameDir' } else { "the default stock game folder (pass -StockGameDir)" }
+        throw "The @LoBo_Extras class check needs a stock game folder with BIN\CONFIG.BIN and AddOns; not found in $how`: $($script:StockGameDirFull)"
+    }
+} elseif ($StockGameDir -ne '') {
+    Write-Warn '-StockGameDir is only used with -ExtrasDir; ignored'
+}
 $script:SevenZipFull = Resolve-FullPath $SevenZip
 if (-not $NoArchive -and -not (Test-Path -LiteralPath $script:SevenZipFull -PathType Leaf)) { throw "7z.exe not found: $SevenZip ($($script:SevenZipFull)) (install 7-Zip, pass -SevenZip, or use -NoArchive)" }
 if ($IncludeSources -and -not (Test-Path -LiteralPath $script:AssemblyNotes)) { throw "assembly notes not found: $($script:AssemblyNotes)" }
 if (-not $SkipFetch) { $script:SshExe = Get-SshExe } else { $script:SshExe = '' }
 
+# The builder's own commit, for the build report (best effort).
+$script:BuilderCommit = 'unknown (git not available)'
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    try {
+        $rev = Invoke-Capture -FilePath $gitCmd.Source -Arguments @('-C', $PSScriptRoot, 'rev-parse', 'HEAD')
+        if ($rev.ExitCode -eq 0 -and $rev.StdOut.Trim() -ne '') {
+            $script:BuilderCommit = $rev.StdOut.Trim()
+            $dirty = Invoke-Capture -FilePath $gitCmd.Source -Arguments @('-C', $PSScriptRoot, 'status', '--porcelain', '--', '.')
+            if ($dirty.ExitCode -eq 0 -and $dirty.StdOut.Trim() -ne '') { $script:BuilderCommit += ' (with uncommitted changes in arma_CWR/tools/lobo)' }
+        }
+    } catch { $script:BuilderCommit = 'unknown (git failed)' }
+}
+
 Write-Info "source @LoBo : $($script:LoBoDirFull)"
 Write-Info "output folder: $($script:OutDirFull)"
 Write-Info "version      : $Version"
+Write-Info "package      : $($script:PackageName)"
 Write-Info "cache        : $($script:CacheDirFull)"
 Write-Info "reports      : $($script:ReportDir)"
 if ($script:ExtraDirFull -ne '') { Write-Info "extra dir    : $($script:ExtraDirFull)" }
+if ($script:ExtrasDirFull -ne '') { Write-Info "extras dir   : $($script:ExtrasDirFull) -> $($script:ExtrasName)" }
+if ($script:StockGameDirFull -ne '') { Write-Info "stock game   : $($script:StockGameDirFull) (for the $($script:ExtrasName) class check)" }
+if ($script:LibraryDirFull -ne '') { Write-Info "library      : $($script:LibraryDirFull)" }
+if ($script:KnownIssuesSource -ne '') { Write-Info "known issues : $($script:KnownIssuesSource), $($script:KnownIssuesFromFile.Count) lines" } else { Write-Info 'known issues : built-in list' }
 Write-Info "tools        : $($script:ToolsFull)"
 Write-Info "python       : $($script:PythonExe)"
 Write-Info "repair tool  : $($script:RepairToolFull)"
+Write-Info "builder      : $($script:BuilderCommit)"
 if (-not $NoArchive) { Write-Info "7-Zip        : $($script:SevenZipFull)" }
 
 # 1. Top-level items of @LoBo (and ExtraDir): cheap, fails fast on a layout
@@ -1517,6 +2361,28 @@ if (-not $NoArchive) { Write-Info "7-Zip        : $($script:SevenZipFull)" }
 $script:SourcePlan = @(Get-SourcePlan -Root $script:LoBoDirFull)
 $script:ExtraPlan  = @()
 if ($script:ExtraDirFull -ne '') { $script:ExtraPlan = @(Get-SourcePlan -Root $script:ExtraDirFull -IsExtra) }
+# ExtrasDir layout, and its bytes pinned (every file hashed now; the staged
+# copy and the source at the end of the build must match these hashes).
+$script:Extras = $null
+$script:ExtrasManifest = $null
+$script:ExtrasClassCheck = $null
+if ($script:ExtrasDirFull -ne '') {
+    $script:Extras = Get-ExtrasPlan $script:ExtrasDirFull
+    $missionPbos = @($script:Extras.AllPbos | Where-Object { $_.Relative -match '^(?i)missions\\[^\\]+\.pbo$' })
+    $script:Extras | Add-Member -NotePropertyName MissionPbos -NotePropertyValue $missionPbos
+    $script:Extras | Add-Member -NotePropertyName MissionWorlds -NotePropertyValue @(Get-MissionWorlds (Join-Path $script:ExtrasDirFull 'Missions'))
+    Write-Info ('@LoBo_Extras : {0} files, {1} addon pbos, {2} missions, {3}; no Bin folder, links, junk or git/backup folders' -f $script:Extras.Files.Count, $script:Extras.AddonPbos.Count, $script:Extras.MissionPbos.Count, (Format-Bytes $script:Extras.Bytes))
+    $script:ExtrasManifest = Get-ExtrasManifest $script:ExtrasDirFull
+    if ($script:ExtrasManifest.Found -and $script:ExtrasManifest.Tool -eq 'build-lobo-extras') {
+        Write-Info ("@LoBo_Extras : built by build-lobo-extras.py {0}; its own class check: {1}" -f $script:ExtrasManifest.BuildVersion, $(if ($script:ExtrasManifest.Checked) { 'against ' + ($script:ExtrasManifest.Against -join ', ') + $(if ($script:ExtrasManifest.StockGame -ne '') { ' and the stock game' } else { '' }) } else { 'not run' }))
+    }
+    if ($script:ExtrasManifest.Problem -ne '') {
+        Write-Warn "@LoBo_Extras: $($script:ExtrasManifest.Problem). The class check after staging still covers it; rebuild it with build-lobo-extras.py --against the staged modfolders to catch a clash before packaging."
+    }
+}
+# The KNOWN ISSUES list: the file's, or the built-in one.
+$hasShilka = ($null -ne $script:Extras) -and (@($script:Extras.AddonPbos | Where-Object { [IO.Path]::GetFileName($_.Relative) -ieq 'Vit_Iraq_Shilka.pbo' }).Count -gt 0)
+$script:KnownIssueLines = @(if ($script:KnownIssuesFromFile.Count -gt 0) { $script:KnownIssuesFromFile } else { Get-DefaultKnownIssues -HasShilka $hasShilka })
 
 $script:SourceAddonsDir = $null
 $script:BinItem = $null
@@ -1554,6 +2420,7 @@ Write-Info "config.cpp   : $($script:ConfigCpp) (GENERATED banner ok) -> @LoBo_U
 # 4. Repair set A is complete: the doctor has nothing left to do.
 $script:LastDoctorText = ''
 $doctorSourceCount = Invoke-ModDoctor -ModDir $script:LoBoDirFull -Label 'source @LoBo'
+$script:DoctorSourceCount = $doctorSourceCount
 $script:DoctorSourceText = $script:LastDoctorText
 
 # 5. Repair set B is complete in the UD profile: --check exits 0 and would
@@ -1574,6 +2441,25 @@ $afterCheck = Get-AddonPboHashes $script:SourceAddonsDir
 if ($afterCheck.Count -ne $script:PreflightHashes.Count) { throw "The source addons folder changed while the UD check ran ($($script:PreflightHashes.Count) pbos before, $($afterCheck.Count) after). Rerun." }
 Assert-HashesMatch $script:PreflightHashes $afterCheck @($afterCheck.Keys) 'source addons after the UD check'
 Write-Info "content repair: UD profile verified on the source (repair_version $($script:RepairVersion), rule sha256 $($script:RuleSha256)); source pbo hashes unchanged across the check"
+
+# 5b. The content repair history for UD-CHANGES.txt: every backup batch
+#     manifest under .ud-backups\issue-69 (read-only).
+$script:RepairBatches = @(Get-RepairBatches $script:LoBoDirFull)
+$appliedBatches = @($script:RepairBatches | Where-Object { $_.State -eq 'applied' })
+foreach ($b in $script:RepairBatches) {
+    $line = '{0}: state {1}, repair_version {2}, profile {3}, {4} archives, {5} members' -f $b.Batch, $b.State, $(if ($b.RepairVersion -ne '') { $b.RepairVersion } else { '?' }), $(if ($b.Compatibility -ne '') { $b.Compatibility } else { '?' }), $b.ArchiveCount, $b.MemberCount
+    if ($b.State -eq 'applied') { Write-Info "repair batch : $line" }
+    else { Write-Warn "content repair batch not applied, left out of UD-CHANGES.txt: $line" }
+}
+if ($appliedBatches.Count -eq 0) { Write-Warn "no applied content repair batch under $($script:LoBoDirFull)\.ud-backups\issue-69; UD-CHANGES.txt will say so" }
+else {
+    # Not an error: a newer rule set that changes nothing on this mod passes
+    # the check without an apply. Worth a look all the same.
+    $newest = $appliedBatches[$appliedBatches.Count - 1]
+    if ($newest.RepairVersion -ne $script:RepairVersion -or $newest.RuleSha256 -ine $script:RuleSha256) {
+        Write-Warn "repair_lobo.py is repair_version $($script:RepairVersion) (rule sha256 $($script:RuleSha256)), but the newest batch applied on the source is $($newest.RepairVersion) (rule sha256 $($newest.RuleSha256)); the check passed, so the newer rules change nothing here"
+    }
+}
 
 # 6. Enumerate what will be copied (sizes, junk, source pbo names).
 $script:SourceBytes = [long]0
@@ -1714,6 +2600,22 @@ foreach ($a in @($script:ArchivePath) + $(if ($IncludeSources) { @($script:Sourc
         else { throw "Archive already exists: $a (use -Force to overwrite, or pick another -Version)" }
     }
 }
+# 7b. Existing library targets (-LibraryDir).
+if ($script:LibraryDirFull -ne '') {
+    $libHits = @(Get-LibraryConflicts)
+    foreach ($h in $libHits) {
+        if ($Force) { Write-Warn "library: $h exists and will be replaced (-Force)" }
+        elseif ($PlanOnly) { Write-Warn "library: $h exists; a real run would refuse without -Force" }
+        else { throw "Library target already exists: $h (use -Force to replace this version's library entry, or pick another -Version)" }
+    }
+    foreach ($leftover in @($script:LibPartialDir, $script:LibOldDir)) {
+        if (Test-Path -LiteralPath $leftover) { Write-Warn "library: leftover $leftover from an interrupted run will be removed" }
+    }
+    $staleSources = Join-Path $script:LibDistDir ($script:SourcesName + '.7z')
+    if (-not $IncludeSources -and (Test-Path -LiteralPath $staleSources)) {
+        Write-Warn "library: $staleSources is from an earlier build of this version and is left as it is (this build has no -IncludeSources)"
+    }
+}
 
 # 8. Cache state and the server plan.
 $script:Inventory = $null
@@ -1760,23 +2662,97 @@ if ($IncludeSources) {
     else { Write-Info 'archives     : deps/SHA256SUMS cross-check runs right after the fetch, before staging' }
 }
 
+# 8c. @LoBo_Extras against everything else: pbo file names now (from the
+#     plan), the extras' own CfgPatches now (readable, no duplicates), and the
+#     full CfgPatches cross-check here only for -PlanOnly (on the source side);
+#     a real build runs it on the staged folders after staging.
+if ($null -ne $script:Extras) {
+    $otherPbos = @{}
+    foreach ($item in $script:SourcePlan) {
+        if ($item.Action -eq 'copy' -and $item.Kind -eq 'dir') {
+            foreach ($f in $item.Entries.Files) {
+                $leaf = [IO.Path]::GetFileName($f.Relative)
+                if ($leaf -like '*.pbo') { $otherPbos[$leaf] = "@LoBo\$($item.Name)\$($f.Relative)" }
+            }
+        }
+    }
+    foreach ($e in $script:EastingFiles) {
+        if ($e -like '*.pbo') { $otherPbos[[IO.Path]::GetFileName($e)] = '@LoBo\' + $e.Replace('/', '\') + ' (73 Easting)' }
+    }
+    foreach ($item in $script:ExtraPlan) {
+        if ($item.Action -eq 'copy' -and $item.Kind -eq 'dir') {
+            foreach ($f in $item.Entries.Files) {
+                $leaf = [IO.Path]::GetFileName($f.Relative)
+                if ($leaf -like '*.pbo') { $otherPbos[$leaf] = "@LoBo\$($item.Name)\$($f.Relative) (ExtraDir)" }
+            }
+        }
+    }
+    $depsNames = @()
+    if ($script:Inventory) { $depsNames = @($script:Inventory.DepsAddons.ToArray() | ForEach-Object { [IO.Path]::GetFileName($_.Full) }) }
+    elseif ($script:Manifest) { $depsNames = @($script:Manifest | Where-Object { $_.Role -eq 'depsaddon' } | ForEach-Object { $_.Path.Substring($_.Path.LastIndexOf('/') + 1) }) }
+    foreach ($n in $depsNames) { $otherPbos[$n] = "@LoBo_Deps\Addons\$n" }
+    Assert-NoPboNameClash $script:Extras.AllPbos $otherPbos 'preflight, against the planned @LoBo, @LoBo_Deps and @LoBo_UD'
+    Write-Info "@LoBo_Extras : $($script:Extras.AllPbos.Count) pbo file names, none used by the $($otherPbos.Count) planned @LoBo/@LoBo_Deps pbos"
+
+    $extrasAddonPaths = @($script:Extras.AddonPbos | ForEach-Object { $_.Full })
+    if ($PlanOnly) {
+        $groups = New-Object System.Collections.Generic.List[object]
+        $groups.Add(@{ Label = '@LoBo\addons'; Paths = @($script:SourceAddonPbos.Values | ForEach-Object { [string]$_ } | Sort-Object) })
+        $eastPaths = @()
+        if ($script:Inventory) { $eastPaths = @($script:Inventory.Easting.ToArray() | Where-Object { $_.Relative -like 'addons/*.pbo' -and (Test-Path -LiteralPath $_.Full) } | ForEach-Object { $_.Full }) }
+        $groups.Add(@{ Label = '@LoBo\addons (73 Easting)'; Paths = $eastPaths })
+        $extraDirPaths = @()
+        foreach ($item in $script:ExtraPlan) {
+            if ($item.Action -eq 'copy' -and $item.Kind -eq 'dir' -and $item.Name -ieq 'addons') {
+                $extraDirPaths = @($item.Entries.Files.ToArray() | Where-Object { $_.Relative -notlike '*\*' -and $_.Relative -like '*.pbo' } | ForEach-Object { $_.Full })
+            }
+        }
+        $groups.Add(@{ Label = '@LoBo\addons (ExtraDir)'; Paths = $extraDirPaths })
+        $depPaths = @()
+        $depMissing = 0
+        if ($script:Inventory) {
+            foreach ($d in $script:Inventory.DepsAddons) { if (Test-Path -LiteralPath $d.Full) { $depPaths += $d.Full } else { $depMissing++ } }
+        }
+        $groups.Add(@{ Label = '@LoBo_Deps\Addons'; Paths = $depPaths })
+        if ($depMissing -gt 0) { Write-Warn "$depMissing dependency pbo(s) are not cached yet; a real run checks them against the extras after the fetch" }
+        [void](Assert-NoCfgPatchesClash $groups.ToArray() $extrasAddonPaths '@LoBo_Extras\addons' 'preflight, source side')
+    } else {
+        [void](Assert-NoCfgPatchesClash @() $extrasAddonPaths '@LoBo_Extras\addons' 'preflight, extras only')
+        Write-Info '@LoBo_Extras : the CfgPatches cross-check against the staged folders runs after staging'
+    }
+}
+
 # 9. Free space, roughly: source and extras twice (stage + archive), the
 #    cache for whatever is not downloaded yet, and the profile-switch set
 #    twice more (the @LoBo_UD overlay and the classic apply's backup batch).
+#    With -LibraryDir the library copy needs the stage and the archive once
+#    more, on the library's drive.
 $extrasBytes = [long]0
 if ($script:Inventory) { $extrasBytes = Get-InventoryBytes $script:Inventory }
 if ($extrasBytes -eq 0) { $extrasBytes = $script:EstimatedDepsBytes + $(if ($IncludeSources) { $script:EstimatedArchivesBytes } else { 0 }) }
-$needed = 2 * ($script:SourceBytes + $extrasBytes) + $(if ($SkipFetch) { 0 } else { $extrasBytes }) + 2 * $script:ClassicSwitchBytes
-$free = -1
-try {
-    $driveRoot = [IO.Path]::GetPathRoot($script:OutDirFull)
-    $free = (New-Object IO.DriveInfo($driveRoot)).AvailableFreeSpace
-} catch {
-    Write-Warn "could not determine free space for $($script:OutDirFull): $($_.Exception.Message)"
+$extrasModBytes = [long]0
+if ($null -ne $script:Extras) { $extrasModBytes = $script:Extras.Bytes }
+$needed = 2 * ($script:SourceBytes + $extrasBytes + $extrasModBytes) + $(if ($SkipFetch) { 0 } else { $extrasBytes }) + 2 * $script:ClassicSwitchBytes
+$libNeeded = [long]0
+if ($script:LibraryDirFull -ne '') { $libNeeded = 2 * ($script:SourceBytes + $extrasBytes + $extrasModBytes) }
+$spaceChecks = @(, @($script:OutDirFull, $needed))
+if ($libNeeded -gt 0) {
+    if ([IO.Path]::GetPathRoot($script:LibraryDirFull) -ieq [IO.Path]::GetPathRoot($script:OutDirFull)) { $spaceChecks = @(, @($script:OutDirFull, ($needed + $libNeeded))) }
+    else { $spaceChecks += , @($script:LibraryDirFull, $libNeeded) }
 }
-if ($free -ge 0) {
-    Write-Info "disk space   : need about $(Format-Bytes $needed), free $(Format-Bytes $free)"
-    if ($free -lt $needed) { throw "Not enough free space on $driveRoot`: need about $(Format-Bytes $needed), have $(Format-Bytes $free)" }
+foreach ($sc in $spaceChecks) {
+    $free = -1
+    $driveRoot = ''
+    try {
+        $driveRoot = [IO.Path]::GetPathRoot($sc[0])
+        $free = (New-Object IO.DriveInfo($driveRoot)).AvailableFreeSpace
+    } catch {
+        Write-Warn "could not determine free space for $($sc[0]): $($_.Exception.Message)"
+    }
+    if ($free -ge 0) {
+        Write-Info "disk space   : $driveRoot need about $(Format-Bytes $sc[1]), free $(Format-Bytes $free)"
+        if ($free -lt $sc[1]) { throw "Not enough free space on $driveRoot`: need about $(Format-Bytes $sc[1]), have $(Format-Bytes $free)" }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1798,6 +2774,18 @@ if ($IncludeSources) {
     if (-not $NoArchive) { Write-Info "               $($script:SourcesArchivePath) (+ .sha256)" }
 }
 Write-Info "expected @LoBo\addons pbo count after staging: $($script:SourceAddonPbos.Count) + $eastingAddonNew (73 Easting) + $($script:ExtraAddonPboNew) (ExtraDir)"
+if ($null -ne $script:Extras) {
+    Write-Info "@LoBo_Extras : $($script:Extras.Files.Count) files copied verbatim to $(Join-Path $script:StageRoot $script:ExtrasName), then pbo names, CfgPatches and config classes checked against the staged @LoBo, @LoBo_Deps and @LoBo_UD (classes with the stock game config, by build-lobo-extras.py --check)"
+} else {
+    Write-Info '@LoBo_Extras : none (no -ExtrasDir)'
+}
+Write-Info ("launch lines : official Remastered and Uslu dur! first, legacy 1.99 last; order {0}@LoBo;@LoBo_Deps[;@LoBo_UD]" -f $(if ($null -ne $script:Extras) { '@LoBo_Extras;' } else { '' }))
+Write-Info "report       : $(Join-Path $script:ReportDir 'build-report.txt')"
+if ($script:LibraryDirFull -ne '') {
+    Write-Info "library      : $($script:LibVersionDir)"
+    foreach ($a in $script:LibArchivePaths) { Write-Info "               $a (+ .sha256)" }
+    Write-Info "               $($script:LibReportPath)"
+}
 if ($PlanOnly) {
     Write-Host ''
     Write-Host 'PlanOnly: nothing written.' -ForegroundColor Green
@@ -1925,6 +2913,8 @@ $classicApply = Invoke-RepairTool -ModDir $stageLoBo -Compatibility classic -Mod
 if ($classicApply.ExitCode -ne 0) { throw "repair_lobo.py --compatibility classic --apply on the staged @LoBo exited $($classicApply.ExitCode)" }
 if ($null -eq $classicApply.Result) { throw 'repair_lobo.py --apply printed no JSON summary' }
 Assert-RepairIdentity $classicApply.Result 'classic apply'
+$script:ClassicChangedMembers = Get-JsonField $classicApply.Result 'changed_members'
+if ($null -eq $script:ClassicChangedMembers) { $script:ClassicChangedMembers = '?' }
 $classicCheck = Invoke-RepairTool -ModDir $stageLoBo -Compatibility classic -Mode check -Report (Join-Path $script:ReportDir 'classic-check.json') -Label 'staged @LoBo'
 if ($classicCheck.ExitCode -ne 0) {
     $hint = if ($classicCheck.ExitCode -eq 1) { 'the apply did not reach a fixed point' } else { 'incompatible input or I/O failure' }
@@ -2003,7 +2993,7 @@ foreach ($d in [IO.Directory]::GetDirectories($stageLoBo)) {
 }
 
 # Repair set A must still hold on the switched copy.
-[void](Invoke-ModDoctor -ModDir $stageLoBo -Label 'staged @LoBo' -SaveTo (Join-Path $script:ReportDir 'doctor-staged.txt'))
+$script:DoctorStagedCount = Invoke-ModDoctor -ModDir $stageLoBo -Label 'staged @LoBo' -SaveTo (Join-Path $script:ReportDir 'doctor-staged.txt')
 
 # Composite check: what Uslu dur! will load is the staged Classic addons with
 # the @LoBo_UD overlay laid over them. Built under _work from hard links (no
@@ -2082,14 +3072,77 @@ Write-Info "staged @LoBo_Deps: README.txt, POSSIBLY_UNNEEDED.txt, readmes\ ($rea
 $udConfig = Join-Path (Join-Path $stageUd 'bin') 'config.cpp'
 Copy-FileTo $script:ConfigCpp $udConfig
 if ((Get-Sha256 $udConfig) -ine (Get-Sha256 $script:ConfigCpp)) { throw 'Internal: @LoBo_UD\bin\config.cpp is not byte-identical to the source' }
-Write-TextFileCrlf (Join-Path $stageUd 'README.txt') (Get-UdReadmeLines -Overlay $script:Overlay.ToArray())
+Write-TextFileCrlf (Join-Path $stageUd 'README.txt') (Get-UdReadmeLines -Overlay $script:Overlay.ToArray() -HasExtras ($null -ne $script:Extras))
 Write-Info "staged @LoBo_UD: bin\config.cpp, addons\ ($($script:Overlay.Count) pbos), README.txt"
 
+# ---------------------------------------------------------------------------
+# @LoBo_Extras (-ExtrasDir): verbatim copy, then the cross-checks against
+# the staged @LoBo, @LoBo_Deps and @LoBo_UD.
+# ---------------------------------------------------------------------------
+$stageExtras = Join-Path $script:StageRoot $script:ExtrasName
+if ($null -ne $script:Extras) {
+    Write-Step "Stage $($script:ExtrasName)"
+    [void][IO.Directory]::CreateDirectory($stageExtras)
+    foreach ($d in $script:Extras.Dirs) { [void][IO.Directory]::CreateDirectory((Join-Path $stageExtras $d)) }
+    foreach ($f in $script:Extras.Files) {
+        $dest = Join-Path $stageExtras $f.Relative
+        Copy-FileTo $f.Full $dest
+        $h = Get-Sha256 $dest
+        if ($h -ine $f.Hash) {
+            throw "ExtrasDir file $($f.Relative) is not the file preflight hashed (staged copy $h, preflight $($f.Hash)); ExtrasDir changed while this script ran. Rerun."
+        }
+    }
+    Write-Info "copied $($script:Extras.Files.Count) files verbatim; every staged copy matches its preflight hash"
+
+    # pbo file names, any folder, against the three staged modfolders.
+    $otherPbos = @{}
+    foreach ($pair in @(@('@LoBo', $stageLoBo), @('@LoBo_Deps', $stageDeps), @('@LoBo_UD', $stageUd))) {
+        foreach ($f in (Get-TreeEntries -Root $pair[1]).Files) {
+            $leaf = [IO.Path]::GetFileName($f.Relative)
+            if ($leaf -like '*.pbo') { $otherPbos[$leaf] = "$($pair[0])\$($f.Relative)" }
+        }
+    }
+    Assert-NoPboNameClash $script:Extras.AllPbos $otherPbos 'staged folders'
+    Write-Info "$($script:Extras.AllPbos.Count) pbo file names, none used by the $($otherPbos.Count) staged @LoBo/@LoBo_Deps/@LoBo_UD pbos"
+
+    # CfgPatches of every addon pbo of the four staged modfolders.
+    $groups = New-Object System.Collections.Generic.List[object]
+    $groups.Add(@{ Label = '@LoBo\addons'; Paths = @([IO.Directory]::GetFiles($stagedAddonsDir) | Where-Object { [IO.Path]::GetFileName($_) -like '*.pbo' } | Sort-Object) })
+    $groups.Add(@{ Label = '@LoBo_Deps\Addons'; Paths = @([IO.Directory]::GetFiles($depsAddonsOut) | Where-Object { [IO.Path]::GetFileName($_) -like '*.pbo' } | Sort-Object) })
+    if (Test-Path -LiteralPath $udAddonsDir) {
+        $groups.Add(@{ Label = '@LoBo_UD\addons'; Paths = @([IO.Directory]::GetFiles($udAddonsDir) | Where-Object { [IO.Path]::GetFileName($_) -like '*.pbo' } | Sort-Object) })
+    }
+    $stagedExtrasAddons = @($script:Extras.AddonPbos | ForEach-Object { Join-Path $stageExtras $_.Relative })
+    [void](Assert-NoCfgPatchesClash $groups.ToArray() $stagedExtrasAddons '@LoBo_Extras\addons' 'staged folders')
+
+    # Config classes, against the staged modfolders and the stock game config.
+    $against = @($stageLoBo, $stageDeps)
+    if (Test-Path -LiteralPath $udAddonsDir) { $against += $stageUd }
+    $checkWork = Join-Path $script:WorkRoot 'extras-class-check'
+    try {
+        $script:ExtrasClassCheck = Invoke-ExtrasClassCheck -ExtrasRoot $stageExtras -Against $against -ReportPath (Join-Path $script:ReportDir 'extras-class-check.json') -WorkDir $checkWork
+    } finally {
+        if (Test-Path -LiteralPath $checkWork) { Remove-Item -LiteralPath $checkWork -Recurse -Force }
+    }
+    $ccWarnings = @(Get-JsonField $script:ExtrasClassCheck 'warnings' | Where-Object { $null -ne $_ })
+    $ccDefects = @(Get-JsonField $script:ExtrasClassCheck 'config_defects' | Where-Object { $null -ne $_ })
+    Write-Info ("class check: {0} extras pbo(s) against {1} config(s) of the staged modfolders and the stock game, no class clash; {2} reported overlap(s) in extras-class-check.json" -f (Get-JsonField $script:ExtrasClassCheck 'pbos'), (Get-JsonField $script:ExtrasClassCheck 'indexed_configs'), $ccWarnings.Count)
+    foreach ($d in $ccDefects) { Write-Warn "@LoBo_Extras config defect (advice for the extras build): $d" }
+
+    # The mod doctor knows LoBo's defect classes; on the extras its findings
+    # are advice for the extras build, not a reason to stop.
+    try {
+        [void](Invoke-ModDoctor -ModDir $stageExtras -Label "staged $($script:ExtrasName)" -SaveTo (Join-Path $script:ReportDir 'doctor-extras.txt'))
+    } catch {
+        Write-Warn "mod doctor on the staged $($script:ExtrasName) did not come back clean ($($_.Exception.Message)); see $(Join-Path $script:ReportDir 'doctor-extras.txt')"
+    }
+}
+
 # Notes.
-Write-TextFileCrlf (Join-Path $stageLoBo 'UD-CHANGES.txt') (Get-ChangesLines -Overlay $script:Overlay.ToArray() -ExtraMerged $script:ExtraAddedNames.ToArray() -StagedHashes $hashesAfter)
+Write-TextFileCrlf (Join-Path $stageLoBo 'UD-CHANGES.txt') (Get-ChangesLines -Overlay $script:Overlay.ToArray() -ExtraMerged $script:ExtraAddedNames.ToArray() -StagedHashes $hashesAfter -Batches $script:RepairBatches -KnownIssues $script:KnownIssuesFromFile)
 $stagedPboCount = $hashesAfter.Count
 $missionWorlds = @(Get-MissionWorlds (Join-Path $stageLoBo 'Missions'))
-Write-TextFileCrlf (Join-Path $script:StageRoot 'README-FIRST.txt') (Get-ReadmeFirstLines -LoBoPboCount $stagedPboCount -DepsPboCount $script:Inventory.DepsAddons.Count -UdPboCount $script:Overlay.Count -MissionWorlds $missionWorlds)
+Write-TextFileCrlf (Join-Path $script:StageRoot 'README-FIRST.txt') (Get-ReadmeFirstLines -LoBoPboCount $stagedPboCount -DepsPboCount $script:Inventory.DepsAddons.Count -UdPboCount $script:Overlay.Count -MissionWorlds $missionWorlds -Extras $script:Extras -KnownIssues $script:KnownIssueLines)
 Write-Info "wrote README-FIRST.txt (mission worlds: $($missionWorlds -join ', ')), @LoBo\UD-CHANGES.txt, @LoBo_UD\README.txt"
 
 # ---------------------------------------------------------------------------
@@ -2145,6 +3198,30 @@ foreach ($name in $script:StockHashes.Keys) {
 }
 Write-Info 'stock LoBoWreck/LoBoPalObj bytes: absent from the package'
 
+# @LoBo_Extras: exactly the preflight files with the preflight bytes, still
+# equal to the ExtrasDir as it is now, and no Bin folder.
+if ($null -ne $script:Extras) {
+    $stagedExtras = Get-TreeEntries -Root $stageExtras
+    if ($stagedExtras.Files.Count -ne $script:Extras.Files.Count) { throw "Staged $($script:ExtrasName) holds $($stagedExtras.Files.Count) files, ExtrasDir had $($script:Extras.Files.Count)" }
+    $want = @{}
+    foreach ($f in $script:Extras.Files) { $want[$f.Relative] = $f.Hash }
+    foreach ($f in $stagedExtras.Files) {
+        if (-not $want.ContainsKey($f.Relative)) { throw "Staged $($script:ExtrasName) has a file ExtrasDir did not: $($f.Relative)" }
+        if ((Get-Sha256 $f.Full) -ine $want[$f.Relative]) { throw "Staged $($script:ExtrasName)\$($f.Relative) changed after it was copied" }
+    }
+    foreach ($f in $script:Extras.Files) {
+        if (-not (Test-Path -LiteralPath $f.Full)) { throw "ExtrasDir file $($f.Relative) disappeared while this script ran. Rerun." }
+        if ((Get-Sha256 $f.Full) -ine $f.Hash) { throw "ExtrasDir file $($f.Relative) changed while this script ran (it no longer matches its preflight hash). Rerun." }
+    }
+    if (Find-ChildPath $stageExtras 'Bin' -Directory) { throw "Internal: staged $($script:ExtrasName) has a Bin folder" }
+    Write-Info "$($script:ExtrasName): $($stagedExtras.Files.Count) files byte-identical to the ExtrasDir (preflight hash and current bytes), no Bin folder"
+}
+$allowedTop = @('@LoBo', '@LoBo_Deps', '@LoBo_UD')
+if ($null -ne $script:Extras) { $allowedTop += $script:ExtrasName }
+foreach ($d in [IO.Directory]::GetDirectories($script:StageRoot)) {
+    if (-not ($allowedTop -icontains [IO.Path]::GetFileName($d))) { throw "Internal: unexpected folder in the staged package: $d" }
+}
+
 $sumCount = Write-ChecksumFile $script:StageRoot
 Write-Info "SHA256SUMS.txt: $sumCount entries"
 
@@ -2152,12 +3229,17 @@ Write-Host ''
 Write-Host ('   {0,-18} {1,8} {2,28}' -f 'folder', 'files', 'bytes')
 $totalFiles = 0
 $totalBytes = [long]0
+$totalPbos = 0
+$folderStats = New-Object System.Collections.Generic.List[object]
 foreach ($d in ([IO.Directory]::GetDirectories($script:StageRoot) | Sort-Object)) {
     $t = Get-TreeEntries -Root $d
     $b = [long]0
-    foreach ($f in $t.Files) { $b += $f.Length }
+    $pbos = 0
+    foreach ($f in $t.Files) { $b += $f.Length; if ($f.Relative -like '*.pbo') { $pbos++ } }
     $totalFiles += $t.Files.Count
     $totalBytes += $b
+    $totalPbos += $pbos
+    $folderStats.Add([pscustomobject]@{ Name = ([IO.Path]::GetFileName($d) + '\'); Files = $t.Files.Count; Pbos = $pbos; Bytes = $b })
     Write-Host ('   {0,-18} {1,8} {2,28}' -f ([IO.Path]::GetFileName($d) + '\'), $t.Files.Count, (Format-Bytes $b))
 }
 $rootFiles = @([IO.Directory]::GetFiles($script:StageRoot))
@@ -2165,6 +3247,8 @@ $rb = [long]0
 foreach ($f in $rootFiles) { $rb += (New-Object IO.FileInfo($f)).Length }
 $totalFiles += $rootFiles.Count
 $totalBytes += $rb
+$folderStats.Add([pscustomobject]@{ Name = '(root files)'; Files = $rootFiles.Count; Pbos = 0; Bytes = $rb })
+$folderStats.Add([pscustomobject]@{ Name = 'TOTAL'; Files = $totalFiles; Pbos = $totalPbos; Bytes = $totalBytes })
 Write-Host ('   {0,-18} {1,8} {2,28}' -f '(root files)', $rootFiles.Count, (Format-Bytes $rb))
 Write-Host ('   {0,-18} {1,8} {2,28}' -f 'TOTAL', $totalFiles, (Format-Bytes $totalBytes))
 
@@ -2206,7 +3290,7 @@ if ($IncludeSources) {
         '==========================================================================',
         'UNREPAIRED. These are the files the mod doctor backed up to',
         '@LoBo\_ud-orig before rewriting the copies in @LoBo\addons (repair set A',
-        'in @LoBo\UD-CHANGES.txt of the family package). They are kept for',
+        'in @LoBo\UD-CHANGES.txt of the main package). They are kept for',
         'provenance only. Do not put them into a game folder: they carry the',
         'abstract-class and buried-wreck defects.',
         ''
@@ -2228,7 +3312,7 @@ if ($IncludeSources) {
         'pre-repair-originals\issue-69: what the content repair replaced',
         '================================================================',
         'PRE-REPAIR. Each batch folder holds the archives that repair_lobo.py',
-        '(repair set B in @LoBo\UD-CHANGES.txt of the family package, UD',
+        '(repair set B in @LoBo\UD-CHANGES.txt of the main package, UD',
         'profile) replaced on the build machine, exactly as they were just',
         'before that apply: repair set A (mod doctor) is already in them, set B',
         'is not. manifest.json records repair_version, rule sha256, profile and',
@@ -2238,6 +3322,15 @@ if ($IncludeSources) {
     $batchFiles = 0
     foreach ($batch in ([IO.Directory]::GetDirectories($issueDir) | Sort-Object)) {
         $batchName = [IO.Path]::GetFileName($batch)
+        # Only batches whose manifest says applied hold real pre-repair
+        # originals; a rolled-back batch duplicates the next one's backups.
+        $batchManifest = Join-Path $batch 'manifest.json'
+        if (-not (Test-Path -LiteralPath $batchManifest)) { throw "$batch has no manifest.json" }
+        $batchState = (Get-Content -LiteralPath $batchManifest -Raw -Encoding UTF8 | ConvertFrom-Json).state
+        if ($batchState -ne 'applied') {
+            Write-Info "sources: skipping backup batch $batchName (state '$batchState', not applied)"
+            continue
+        }
         $batchNames.Add($batchName)
         $batchNote.Add($batchName)
         foreach ($f in (Get-TreeEntries -Root $batch -SkipJunk).Files) {
@@ -2257,6 +3350,53 @@ if ($IncludeSources) {
     if (-not $NoArchive) {
         New-SevenZipArchive -StageFolder $script:SourcesRoot -ArchivePath $script:SourcesArchivePath
     }
+}
+
+# ---------------------------------------------------------------------------
+# Build report
+# ---------------------------------------------------------------------------
+Write-Step 'Build report'
+$builtArchives = @()
+if (-not $NoArchive) {
+    $builtArchives += $script:ArchivePath
+    if ($IncludeSources) { $builtArchives += $script:SourcesArchivePath }
+}
+$reportPath = Join-Path $script:ReportDir 'build-report.txt'
+Write-TextFileCrlf $reportPath (Get-BuildReportLines -FolderStats $folderStats.ToArray() -SumCount $sumCount -Archives $builtArchives)
+Write-Info "wrote $reportPath"
+
+# ---------------------------------------------------------------------------
+# Library (-LibraryDir)
+# ---------------------------------------------------------------------------
+if ($script:LibraryDirFull -ne '') {
+    Write-Step "Library $($script:LibraryDirFull)"
+    # Nothing may have appeared since preflight.
+    $libHits = @(Get-LibraryConflicts)
+    if ($libHits.Count -gt 0 -and -not $Force) { throw ("Library target(s) appeared during the build: " + ($libHits -join ', ') + ' (use -Force to replace them)') }
+    [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($script:LibVersionDir))
+    Remove-LibraryVersionFolder $script:LibPartialDir
+    Remove-LibraryVersionFolder $script:LibOldDir
+    # The staged package folder, verbatim, under a temporary name first.
+    $stageEntries = Get-TreeEntries -Root $script:StageRoot
+    Copy-TreeEntries $stageEntries $script:StageRoot $script:LibPartialDir
+    $libSums = Join-Path $script:LibPartialDir 'SHA256SUMS.txt'
+    if ((Get-Sha256 $libSums) -ine (Get-Sha256 (Join-Path $script:StageRoot 'SHA256SUMS.txt'))) { throw "Internal: the library copy of SHA256SUMS.txt differs from the staged one" }
+    $verified = Test-PackageFolder $script:LibPartialDir
+    if ($verified -ne $sumCount) { throw "Library copy verified $verified files, SHA256SUMS.txt has $sumCount entries" }
+    if (Test-Path -LiteralPath $script:LibVersionDir) {
+        Move-Item -LiteralPath $script:LibVersionDir -Destination $script:LibOldDir
+    }
+    Move-Item -LiteralPath $script:LibPartialDir -Destination $script:LibVersionDir
+    Remove-LibraryVersionFolder $script:LibOldDir
+    Write-Info "library: $($script:LibVersionDir) ($verified files verified against its SHA256SUMS.txt)"
+    [void][IO.Directory]::CreateDirectory($script:LibDistDir)
+    foreach ($a in $builtArchives) {
+        $leaf = [IO.Path]::GetFileName($a)
+        Publish-LibraryFile $a (Join-Path $script:LibDistDir $leaf)
+        Publish-LibraryFile ($a + '.sha256') (Join-Path $script:LibDistDir ($leaf + '.sha256'))
+    }
+    [void][IO.Directory]::CreateDirectory($script:LibDocsDir)
+    Publish-LibraryFile $reportPath $script:LibReportPath
 }
 
 Write-Host ''
