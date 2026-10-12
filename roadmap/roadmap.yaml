@@ -506,6 +506,26 @@ items:
       - "#4 means: every pre-193a280 integration green on a bool assert was untrustworthy. #4's fix underwrites all later test claims."
       - "#5/#6 fix unblocks the literal-'fire' public-execution mechanic that issues #7/#8 gate on."
 
+  - id: autotest-boot-failure-fast-fail
+    title: "Failed --autotest boots end the Trident run at once, with the reason"
+    phase: hardening
+    status: done
+    depends_on: [crash-fixes-trident-trust]
+    commits: [c39e49e]
+    gh_issues: []
+    summary: >
+      A tri test mission that failed to boot left the main menu up while Trident
+      polled triMissionPlayerReady until assert_timeout, flickering the window black
+      between polls, and the usual cause (the WarningMessageLevel error latch
+      rejecting InitVehicles) logged no reason. The latched warning is now logged at
+      WARN, the "could not boot" line ends with the reason, triMissionPlayerReady
+      answers a terminal FATAL:boot_failed:<reason>, and Trident stops on FATAL: (or
+      reads the reason from game_stdout.log when --strict closed the game first).
+      New toml key expect_boot_failure; harness/boot_failure_reported (+ _strict).
+    log:
+      - "2026-10-12: diagnosed from the Repair4.Abel probe flicker (agent_guidelines/flashing-main-menu.md). Both new integration tests pass on the Demo package in about a second each; the --no-strict one ends on the first readiness poll with zero triWaitFrames. Catch2 [errorlatch] green; the full PoseidonTests run has 6 failures, all localization tests reading the absent packages/Remaster stringtables. Problem hit: the addon CheckAccess names is the CfgPatches class (udunlistedfixture), not the pbo name, and under --strict the could-not-boot ERROR shuts the game down before the harness can ask, hence the log fallback."
+      - "Left open: a deterministic boot failure is still retried by --retries (each retry now costs about a second)."
+
   - id: dual-package-compat
     title: "Dual-package compatibility: Classic 1.99 + Demo [Remaster] data (issues #11-#15)"
     phase: hardening

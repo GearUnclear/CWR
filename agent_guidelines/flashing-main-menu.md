@@ -15,6 +15,10 @@ game, relaunches it and the flicker comes back, up to N more times.
 
 ## What the flicker means
 
+Builds from commit `c39e49e` on no longer flicker: the run stops on the first
+readiness poll and names the reason (see the follow-ups at the end). The rest
+of this section describes older builds, and still explains why the boot failed.
+
 The test mission never booted, and Trident is waiting for a player that does not
 exist.
 
@@ -57,9 +61,9 @@ Signature in the game stdout: a `could not boot` line followed by hundreds of
   after that point (world load, the mission's init, the ZoneRegistry, portraits,
   unit creation) sets it: `WarningMessageLevel` stores `level + 1`, so a plain
   warning already counts as `EMError`, and its text is kept in `WarningText`
-  but never logged
   (`arma_CWR/engine/Poseidon/World/Simulation/Animation/FrameFunctions.cpp:55-84`).
-  The log then shows `could not boot` with no reason. `LOG_ERROR` lines such as
+  Before `c39e49e` that text was never logged and the log showed `could not
+  boot` with no reason; now the `could not boot` line ends with it. `LOG_ERROR` lines such as
   `Animation ... not found or empty` do not set the latch.
 
 The usual trigger of the last case is addon access. `CheckAccess`
@@ -73,11 +77,12 @@ trace, the WARN from `World::CheckAddon` (`WorldImpl.cpp:1178-1199`):
 [WARN] [WORLD]   Access denied: <entry> - owner addon '<name>' is not activated (missing from the mission's addOns[]?)
 ```
 
-Other sources latch without any log line, for example the config reader's
+Before `c39e49e`, other sources latched without any log line, for example the config reader's
 `ErrorMessage(EMError, ...)` calls ("No section", "not a class", "not an array"
 in `arma_CWR/engine/Poseidon/IO/ParamFile/ParamFile.cpp`) and `Cannot find
 texture` in `arma_CWR/engine/Poseidon/World/Entities/Infantry/Head.cpp:733`.
-When `could not boot` appears without an `Access denied` line, suspect those.
+On such a build, when `could not boot` appears without an `Access denied` line,
+suspect those. Newer builds log each one as a `Warning Message:` WARN.
 
 Guerrilla templates are mostly protected: when the mission's `description.ext`
 defines `CfgGuerrillaZones`, `Guerrilla::ActivateTemplateAddons`
@@ -120,7 +125,7 @@ writing the probe has not been rerun.
 
 The rule of thumb "the menu flashes when a mission is named wrong" points the
 right way: the flicker says the mission did not boot. The name is one reason;
-an `addOns[]` gap is another, and it leaves at most one WARN behind.
+an `addOns[]` gap is another, and before `c39e49e` it left at most one WARN behind.
 
 ## Before launching a mission probe
 
@@ -135,17 +140,35 @@ an `addOns[]` gap is another, and it leaves at most one WARN behind.
    Simpler: place only stock units in `mission.sqm` and create mod classes from
    the test script after the boot.
 4. Watch the game stdout during the first seconds. On `StartAutoTest could not
-   boot`, stop the run (only processes you started) and grep the same log for
+   boot`, read the reason at the end of that line. On builds before `c39e49e`,
+   stop the run (only processes you started) and grep the same log for
    `Access denied` first.
 5. `--log-level debug` also turns on GL33 per-draw logging. The 39 s run above
    wrote 193 MB, 99.5% of it `[GRAPHICS]` lines. Grep with `-v GRAPHICS`, or
    narrow the output with `--log-categories` after checking that it keeps the
    categories your checks read.
 
-## Possible engine follow-ups (not done)
+## Engine follow-ups (done 2026-10-12, commit `c39e49e`)
 
-- Append `GetMaxErrorMessage()` to the `could not boot` line, so the reason
-  that rejected the boot is logged.
-- Report a failed autotest boot to Trident (for example from
-  `triMissionPlayerReady`) so it stops at once instead of pumping black frames
-  until `assert_timeout`.
+- The `could not boot` line now ends with the reason, for example
+  `StartAutoTest could not boot '<path>': latched warning: Cannot load mission,
+  missing addons: <addon>`, and the latched warning itself is logged once at
+  WARN (`Warning Message: ...`) when it latches. WARN does not trip `--strict`.
+  Other reasons: `neither the mission nor its intro has a group`, `no error
+  latched` (InitVehicles failed without the latch) and `error latch set without
+  a message`.
+- After a failed boot `triMissionPlayerReady` returns
+  `FATAL:boot_failed:<reason>`. Trident treats a `FATAL:` result as terminal, so
+  the run ends on the first poll, with no flicker and the reason in the failure
+  message. Under the default `--strict` the `could not boot` ERROR shuts the
+  game down first; Trident then reads the same reason from the test's
+  `game_stdout.log` and appends it to `timeout waiting for ready: harness
+  connection closed`.
+- The addon name in the reason is the owner `CheckAccess` reports, which is the
+  addon's `CfgPatches` class name, lowercased (the pbo name can differ).
+- A test can expect the failure with `expect_boot_failure = "<text>"` in its
+  toml; see `arma_CWR/tests/integration/harness/boot_failure_reported.test.toml`
+  and its `_strict` twin.
+- Still open: `--retries` retries a boot failure like any other failure, although
+  it is deterministic. Each retry now costs about a second instead of
+  `assert_timeout`.
