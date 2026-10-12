@@ -949,32 +949,34 @@ items:
   - id: traffic-threat-choice
     title: "Traffic: threatened civilian drivers choose 50/50 between surrender and escape (issue #66)"
     phase: phase-2
-    status: planned
+    status: done
     priority: 3
     depends_on: [ambient-traffic, traffic-panic-priority]
+    commits: [72ba6e9]
     gh_issues: [66]
     summary: >
-      Pointing a weapon at a civ traffic car currently guarantees compliance
-      once the commandeer trigger registers (Stop, about 2.5 s wait, get out,
-      flee), and standing in the car's path triggers the same surrender
-      unarmed, which makes taking cars predictable. Proposal: one choice per
-      encounter when the player threatens the driver with a weapon, 50%
-      surrender (the existing stop/exit/flee/release sequence) and 50% escape
-      (driver stays seated and accelerates along the route, turning round
-      through the blocked-route recovery if boxed in). The choice is
-      remembered so the 0.5 s commandeer check cannot reroll it, and re-arms
-      only once the driver has cleared the encounter. Unarmed in-lane
-      obstruction becomes brake-and-wait, not bail-out. Gunfire stays with the
-      existing danger response, with its precedence over the escape choice
-      still to define. Sketch: separate the armed threat from the unarmed
-      obstruction in Traffic::CommandeerTriggered / UpdateCommandeer, a pure
-      decision helper plus per-entry encounter bookkeeping,
-      trafficCommandeerSurrenderChance = 0.5 (range 0..1), escape orders to
-      the driver's own command subgroup as IssueRoute does, and the choice
-      preserved across save/load (older saves load with no active encounter).
-      Proposal only; no implementation exists.
+      Built (72ba6e9). An armed hold-up of a civ traffic car draws ONE roll per
+      encounter against trafficCommandeerSurrenderChance (default 0.5):
+      surrender keeps the stop/exit/flee/release sequence, escape keeps the
+      driver seated on the current route at full speed (a new leg if already
+      at the destination) and turns round only through the blocked-route
+      recovery, which keeps full speed. The choice is latched until the player
+      has stayed beyond max(60 m, commandeerRadius + 15 m) for 5 s. An unarmed
+      player in the lane is a roadblock: brake, wait with the stall ladder
+      frozen, drive on after 1 s of clear lane. Fresh in-band ring gunfire
+      takes the encounter over in the 0.5 s sub-tick (instead of the roll,
+      before a pending bail, over an escape); a car already in a danger
+      reaction neither rolls nor lane-waits; player-caused wrecks never count
+      for encounter precedence. Save/load keeps choice, danger marker and the
+      elapsed surrender delay. Pure step function + world layer in new
+      TrafficEncounter.{hpp,cpp}; test seams gmTrafficEncounter,
+      gmTrafficSurrenderChance, gmTrafficDiag slot 16 (rolls drawn).
+      Tests: test_traffic_encounter.cpp (cases A-P), Trident commandeer
+      (forced surrender), escape, roadblock, threat_danger and two save/reload
+      seqs, all green on full_cwa.
     log:
       - "2026-10-11: filed as a planned item so issue #66 is linked. Touches the same per-entry latch and danger precedence as traffic-panic-priority (LoudestDanger / DangerEscalates), hence the dependency."
+      - "2026-10-11: landed as 72ba6e9 via spec -> implement -> independent review -> fix -> Trident agents. The review caught a save/load path that wiped a danger-owned surrender (second roll after reload), a pre-existing danger reaction being overwritten by a fresh threat or lane wait, and escapes lingering at maxLegs; all fixed with unit rows. Pre-existing bugs fixed on the way: the surrender bail never revoked re-board orders and sprinted on the wrong subgroup, a driver shot during the stop delay was kept alive by the TSStopping skip, loaded stop/cower rows sat with no route, and a commandeerRadius above the fixed 60 m watcher could never trigger. guerrilla_traffic_danger had never run (a `? :` line was a script error in the harness); fixed and green. Accepted gaps: the main tick can credit a full 5 s pass right after a sub-tick transition, the ring is aged only on main ticks, and the danger-episode guard (dangerCooldown) is not saved. guerrilla_traffic_park is red on a pre-existing TransportCrew.cpp:951 ValidateOutVehicle assertion that the pre-#66 build hits too. Human playtest (Showcase case traffic_commandeer) still open."
 
   - id: faction-class-resolution
     title: "Faction class resolution + role-diverse squads (plan 15)"
