@@ -30,6 +30,8 @@ using namespace Poseidon;
 #include <Poseidon/Core/ModSystem.hpp> // GetModList for triAssertActiveMod
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // global Pars for triAssertConfigClass
+#include <Poseidon/Core/Global.hpp>     // GetAutoTestBootFailure for triMissionPlayerReady
+#include <algorithm>
 #include <sstream>
 #include <chrono>
 #include <thread>
@@ -1693,6 +1695,17 @@ GameValue TriMissionPlayerReady(const GameState* /*state*/)
 {
     if (!GWorld)
         return GameValue("FAIL:no_world");
+
+    // A failed --autotest boot leaves the main menu up for good. FATAL: is
+    // terminal for Trident, so the run ends now with the reason instead of
+    // polling (and flickering the menu) until assert_timeout.
+    RString bootFailure = GetAutoTestBootFailure();
+    if (bootFailure.GetLength() > 0)
+    {
+        std::string reason = (const char*)bootFailure;
+        std::replace(reason.begin(), reason.end(), '"', '\'');
+        return GameValue(("FATAL:boot_failed:" + reason).c_str());
+    }
 
     auto* display = GetActiveDisplayForSQF();
     int idd = display ? display->IDD() : -1;

@@ -435,6 +435,10 @@ struct TestMeta {
     /// harness forces `English` so tests are deterministic regardless of the host
     /// OS locale. Override per-scenario (e.g. `language = "Czech"`).
     language: Option<String>,
+    /// The mission is expected NOT to boot: the readiness wait must end on a
+    /// terminal `FATAL:boot_failed:` result whose reason contains this text.
+    /// The test passes on that result and never runs its SQF body.
+    expect_boot_failure: Option<String>,
     tags: Vec<String>,
 }
 
@@ -778,8 +782,90 @@ fn condition_is_success(result: &str) -> bool {
     result == "OK" || result.eq_ignore_ascii_case("true")
 }
 
+/// A `FATAL:` result means waiting longer cannot help (for example
+/// `triMissionPlayerReady` after a failed `--autotest` boot), so the poll
+/// loops stop on it at once instead of retrying until the deadline.
+fn condition_is_terminal(result: &str) -> bool {
+    result.starts_with("FATAL:")
+}
+
+/// Verdict for a test that sets `expect_boot_failure`: the readiness wait
+/// must have stopped on a terminal boot failure naming `expected`, not
+/// succeeded and not timed out on a retryable `FAIL:`.
+fn check_expected_boot_failure(
+    expected: &str,
+    succeeded: bool,
+    last_result: &str,
+) -> Result<(), String> {
+    if succeeded {
+        return Err(format!(
+            "expected the boot to fail with '{expected}', but the mission booted"
+        ));
+    }
+    let Some(reason) = last_result.strip_prefix("FATAL:boot_failed:") else {
+        return Err(format!(
+            "expected a terminal boot failure with '{expected}', got {last_result}"
+        ));
+    };
+    if reason.contains(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "boot failed, but the reason does not contain '{expected}': {reason}"
+        ))
+    }
+}
+
+/// The game's own record of a failed `--test-mission` boot
+/// (`StartAutoTest could not boot '<path>': <reason>`), as the terminal
+/// `FATAL:boot_failed:<reason>` result. Under `--strict` that ERROR line shuts
+/// the game down before `triMissionPlayerReady` can report it, so a dropped
+/// connection reads the reason from the game log instead.
+fn boot_failure_from_log(content: &str) -> Option<String> {
+    const MARKER: &str = "StartAutoTest could not boot '";
+    content.lines().find_map(|line| {
+        let rest = &line[line.find(MARKER)? + MARKER.len()..];
+        let reason = rest.split_once("': ").map_or("unknown", |(_, r)| r.trim());
+        Some(format!("FATAL:boot_failed:{reason}"))
+    })
+}
+
+/// Reads [`boot_failure_from_log`] from the scenario's `game_stdout.log`, once
+/// the game has exited. The stdout copy can trail the process by a moment.
+async fn read_boot_failure(output_dir: &Path) -> Option<String> {
+    let path = output_dir.join("game_stdout.log");
+    for _ in 0..5 {
+        if let Some(found) = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| boot_failure_from_log(&content))
+        {
+            return Some(found);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    None
+}
+
+fn expected_boot_failure_result(
+    expected: &str,
+    succeeded: bool,
+    last_result: String,
+    elapsed: std::time::Duration,
+) -> ScenarioResult {
+    let verdict = check_expected_boot_failure(expected, succeeded, &last_result);
+    ScenarioResult {
+        passed: verdict.is_ok(),
+        message: format!(
+            "--test-mission expected boot failure: {} ({:.1}s)",
+            verdict.err().unwrap_or(last_result),
+            elapsed.as_secs_f64()
+        ),
+        duration: elapsed,
+    }
+}
+
 fn normalize_condition_failure(result: &str) -> String {
-    if result.starts_with("FAIL:") {
+    if result.starts_with("FAIL:") || condition_is_terminal(result) {
         result.to_string()
     } else if result.eq_ignore_ascii_case("false") {
         "FAIL:false".to_string()
@@ -875,7 +961,7 @@ async fn wait_for_condition(
                 }
 
                 let last_result = normalize_condition_failure(&result_str);
-                if Instant::now() >= deadline {
+                if condition_is_terminal(&result_str) || Instant::now() >= deadline {
                     return ConditionOutcome {
                         succeeded: false,
                         last_result,
@@ -1504,9 +1590,25 @@ async fn run_sqf_test(
                 }
             }
             Err(e) => {
+                let mut message = format!("timeout waiting for ready: {e}");
+                if meta.mission.is_some() {
+                    game.kill_after_failure().await;
+                    let boot_failure = read_boot_failure(output_dir).await;
+                    if let Some(expected) = meta.expect_boot_failure.as_deref() {
+                        return Ok(expected_boot_failure_result(
+                            expected,
+                            false,
+                            boot_failure.unwrap_or(message),
+                            start.elapsed(),
+                        ));
+                    }
+                    if let Some(boot_failure) = boot_failure {
+                        message = format!("{message}; {boot_failure}");
+                    }
+                }
                 return Ok(ScenarioResult {
                     passed: false,
-                    message: format!("timeout waiting for ready: {e}"),
+                    message,
                     ..Default::default()
                 });
             }
@@ -1523,14 +1625,33 @@ async fn run_sqf_test(
             WaitMode::WaitFrames(5),
         )
         .await;
+        let mut last_result = outcome.last_result;
         if !outcome.succeeded {
             game.kill_after_failure().await;
+            // A strict-mode boot failure can drop the connection before the
+            // FATAL: result arrives; the game log still names the reason.
+            if !condition_is_terminal(&last_result) {
+                if let Some(boot_failure) = read_boot_failure(output_dir).await {
+                    last_result = boot_failure;
+                }
+            }
+        }
+        if let Some(expected) = meta.expect_boot_failure.as_deref() {
+            game.kill_after_failure().await;
+            return Ok(expected_boot_failure_result(
+                expected,
+                outcome.succeeded,
+                last_result,
+                start.elapsed(),
+            ));
+        }
+        if !outcome.succeeded {
             let elapsed = start.elapsed();
             return Ok(ScenarioResult {
                 passed: false,
                 message: format!(
                     "--test-mission player readiness — {} ({:.1}s)",
-                    outcome.last_result,
+                    last_result,
                     elapsed.as_secs_f64()
                 ),
                 duration: elapsed,
@@ -1641,8 +1762,9 @@ async fn run_sqf_test(
                             succeeded = true;
                             break;
                         }
+                        let terminal = condition_is_terminal(&result_str);
                         last_result = result_str;
-                        if Instant::now() >= assert_deadline {
+                        if terminal || Instant::now() >= assert_deadline {
                             break;
                         }
                         tokio::time::sleep(poll_interval).await;
@@ -2405,6 +2527,57 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(names(1), names(1), "same code must produce the same shard");
+    }
+
+    #[test]
+    fn fatal_condition_results_are_terminal_and_kept_verbatim() {
+        let boot = "FATAL:boot_failed:latched warning: Cannot create 'X'";
+        assert!(condition_is_terminal(boot));
+        assert!(!condition_is_success(boot));
+        assert_eq!(normalize_condition_failure(boot), boot);
+        for retryable in ["FAIL:display=0,expected=46_or_47", "false", "nope", "OK"] {
+            assert!(
+                !condition_is_terminal(retryable),
+                "'{retryable}' must not end the wait"
+            );
+        }
+    }
+
+    #[test]
+    fn boot_failure_reason_is_read_from_the_game_log() {
+        let log = concat!(
+            "[INFO] [CORE]    Startup: rendering enabled\n",
+            "[ERRR] [CORE]    StartAutoTest could not boot 'C:/t/Missions/x.Demo/mission.sqm': ",
+            "latched warning: Cannot load mission, missing addons: udunlistedfixture\n",
+            "[WARN] [CORE]    strict mode: ERROR logged above is fatal\n",
+        );
+        assert_eq!(
+            boot_failure_from_log(log).as_deref(),
+            Some(concat!(
+                "FATAL:boot_failed:latched warning: Cannot load mission, ",
+                "missing addons: udunlistedfixture"
+            ))
+        );
+        assert_eq!(
+            boot_failure_from_log("StartAutoTest could not boot 'a/mission.sqm'").as_deref(),
+            Some("FATAL:boot_failed:unknown")
+        );
+        assert_eq!(boot_failure_from_log("[INFO] all good\n"), None);
+    }
+
+    #[test]
+    fn expected_boot_failure_needs_a_terminal_failure_naming_the_reason() {
+        let fatal = "FATAL:boot_failed:latched warning: missing addons: udunlistedfixture";
+        assert!(check_expected_boot_failure("udunlisted", false, fatal).is_ok());
+        assert!(check_expected_boot_failure("other", false, fatal).is_err());
+        assert!(check_expected_boot_failure("udunlisted", true, "OK").is_err());
+        // A timeout on the retryable menu result is not the fast failure.
+        assert!(check_expected_boot_failure(
+            "udunlisted",
+            false,
+            "FAIL:display=0,expected=46_or_47"
+        )
+        .is_err());
     }
 
     #[test]

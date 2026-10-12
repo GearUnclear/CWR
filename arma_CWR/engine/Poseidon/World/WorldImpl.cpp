@@ -149,7 +149,7 @@ using namespace Dev;
 
 namespace Poseidon
 {
-bool StartAutoTest();
+bool StartAutoTest(RString* failReason);
 bool ProcessFullName(RString);
 } // namespace Poseidon
 
@@ -2749,12 +2749,22 @@ void World::StartIntro()
             {
                 if (AutoTest)
                 {
-                    if (!StartAutoTest())
+                    RString failReason;
+                    SetAutoTestBootFailure(RString());
+                    if (!StartAutoTest(&failReason))
                     {
-                        LOG_ERROR(Core, "StartAutoTest could not boot '{}'", LoadFile);
+                        if (failReason.GetLength() == 0)
+                        {
+                            failReason = "unknown";
+                        }
+                        // triMissionPlayerReady reports this to Trident, which
+                        // then stops instead of waiting out assert_timeout.
+                        SetAutoTestBootFailure(failReason);
+                        LOG_ERROR(Core, "StartAutoTest could not boot '{}': {}", LoadFile, (const char*)failReason);
                         if (AppConfig::Instance().IsMissionSmokeCheck())
                         {
-                            LOG_ERROR(Core, "Mission smoke check failed: StartAutoTest could not boot '{}'", LoadFile);
+                            LOG_ERROR(Core, "Mission smoke check failed: StartAutoTest could not boot '{}': {}",
+                                      LoadFile, (const char*)failReason);
                             GApp->m_exitCode = 1;
                             GApp->m_closeRequest = true;
                         }

@@ -2009,8 +2009,17 @@ void StartMission()
     options->CreateChild(new DisplayMission(options));
 }
 
-bool StartAutoTest()
+bool StartAutoTest(RString* failReason)
 {
+    auto fail = [failReason](RString reason)
+    {
+        if (failReason)
+        {
+            *failReason = reason;
+        }
+        return false;
+    };
+
     CurrentTemplate.Clear();
     if (GWorld->UI())
     {
@@ -2023,7 +2032,7 @@ bool StartAutoTest()
         CurrentTemplate.Clear();
         if (!ParseIntro() || CurrentTemplate.groups.Size() == 0)
         {
-            return false;
+            return fail("neither the mission nor its intro has a group");
         }
         introOnly = true;
     }
@@ -2039,7 +2048,9 @@ bool StartAutoTest()
     GWorld->InitGeneral(CurrentTemplate.intel);
     if (!GWorld->InitVehicles(introOnly ? GModeIntro : GModeArcade, CurrentTemplate))
     {
-        return false;
+        // InitVehicles rejects the boot on the error latch alone; its text is
+        // the only record of which warning did it.
+        return fail(DescribeErrorLatch(GetMaxError(), GetMaxErrorMessage()));
     }
 
     // remove temporary files
@@ -2056,7 +2067,7 @@ bool StartAutoTest()
     Display* options = dynamic_cast<Display*>(GWorld->Options());
     if (!options)
     {
-        return false;
+        return fail("no options display to start the mission from");
     }
     if (introOnly)
     {

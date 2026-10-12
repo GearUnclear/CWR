@@ -1,0 +1,19 @@
+# A mission that cannot boot must end the run at once, with the reason.
+# The mission places UDUnlistedSoldier from @udunlisted without listing its
+# addon (CfgPatches class UDUnlistedFixture) in addOns[]; CheckAccess latches
+# the error level, InitVehicles rejects the boot, and triMissionPlayerReady
+# answers FATAL:boot_failed:<reason> instead of polling the main menu (and
+# flickering it black) until assert_timeout. --no-strict keeps the game alive
+# on the menu, as in the runs that flickered; boot_failure_reported_strict
+# covers the default strict lane, where the game exits instead.
+binary = "PoseidonGame"
+mission = "tests/integration/missions/boot_fail_unlisted_addon.Demo"
+data_dir = "packages/Demo"
+timeout = 90
+# Generous on purpose: a pass proves the FATAL: result, not the clock, ended
+# the wait (a timeout ends on the retryable FAIL:display result and fails).
+assert_timeout = 60
+expect_boot_failure = "missing addons: udunlistedfixture"
+# --mods-dir is relative to the game CWD (the data dir).
+extra_args = ["--no-strict", "--mods-dir", "../../tests/fixtures/mods-unlisted", "--mod", "@udunlisted"]
+tags = ["harness"]

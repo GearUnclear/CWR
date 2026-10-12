@@ -176,6 +176,13 @@ void LoadFileBanksFrom(const char* path, bool emptyPrefix, bool parseConfig = fa
 Foundation::ErrorMessageLevel GetMaxError();
 void ResetErrors();
 RString GetMaxErrorMessage();
+// One-line reason for a boot that the error latch rejected (World::InitVehicles
+// returns GetMaxError() < EMError), built from the latched level and text.
+RString DescribeErrorLatch(Foundation::ErrorMessageLevel level, const RString& text);
+// Why --autotest could not boot its mission (empty while it has not failed).
+// Set by World::StartIntro, read by triMissionPlayerReady so Trident stops at once.
+void SetAutoTestBootFailure(const RString& reason);
+RString GetAutoTestBootFailure();
 
 #define LIGHT_EXPLO 1
 #define LIGHT_MISSILE 2

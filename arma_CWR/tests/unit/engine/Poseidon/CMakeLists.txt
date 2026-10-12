@@ -545,6 +545,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_effect_shape_guards_audit.cpp
     World/test_sky_load_or_keep_audit.cpp
     World/test_gamestate_vars_roundtrip.cpp
+    World/Simulation/test_error_latch.cpp
 
     # Simulation tests (rest batch)
     World/Simulation/test_cloth.cpp

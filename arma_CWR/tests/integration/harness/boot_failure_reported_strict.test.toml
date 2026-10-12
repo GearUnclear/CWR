@@ -1,0 +1,12 @@
+# Strict twin of boot_failure_reported: under the default --strict the
+# "could not boot" ERROR shuts the game down before triMissionPlayerReady can
+# answer, so Trident reads the same reason from game_stdout.log.
+binary = "PoseidonGame"
+mission = "tests/integration/missions/boot_fail_unlisted_addon.Demo"
+data_dir = "packages/Demo"
+timeout = 90
+assert_timeout = 60
+expect_boot_failure = "missing addons: udunlistedfixture"
+# --mods-dir is relative to the game CWD (the data dir).
+extra_args = ["--mods-dir", "../../tests/fixtures/mods-unlisted", "--mod", "@udunlisted"]
+tags = ["harness"]

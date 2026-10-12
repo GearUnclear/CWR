@@ -48,6 +48,31 @@ void ResetErrors()
     WarningText = RString();
 }
 
+RString DescribeErrorLatch(Foundation::ErrorMessageLevel level, const RString& text)
+{
+    if (level < Foundation::EMError)
+    {
+        return RString("no error latched");
+    }
+    if (text.GetLength() == 0)
+    {
+        return RString("error latch set without a message");
+    }
+    return RString("latched warning: ") + text;
+}
+
+static RString AutoTestBootFailure;
+
+void SetAutoTestBootFailure(const RString& reason)
+{
+    AutoTestBootFailure = reason;
+}
+
+RString GetAutoTestBootFailure()
+{
+    return AutoTestBootFailure;
+}
+
 } // namespace Poseidon
 
 namespace Poseidon
@@ -78,7 +103,11 @@ void WarningMessageLevel(Foundation::ErrorMessageLevel level, const char* format
     WarningText = buf.cstr();
 #endif
 
-    Foundation::WarningMessage("Warning Message: %s", (const char*)buf);
+    // Logged once per latch step: SINGLE_WARNING returns early above until the
+    // level rises or ResetErrors runs. WARN on purpose, so it never trips the
+    // --strict latch (ErrorCountingSink counts err-level messages only); the
+    // same text is what a rejected autotest boot reports.
+    LOG_WARN(Core, "Warning Message: {}", (const char*)buf);
 
     avoidRecursion--;
 }
