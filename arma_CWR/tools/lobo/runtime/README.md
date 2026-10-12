@@ -373,6 +373,61 @@ worktree, with `-GameDir` pointing at the main checkout's
 `repair4/lobo_missing_refs_body.sqf` is the R2 body that both R2 and the R5 smoke
 test `#include`; it is not a test on its own.
 
+### The official Remaster exe (R5)
+
+The official 3.05 `PoseidonGame.exe` is a release build of the upstream 3.05
+source (commit `ffc6183` in this repository). What the R5 probe and runs must
+allow for, from that source and the 2026-10-12 runs under
+`D:\Arma_CWA\tmp\lobo-repair-4\runtime`:
+
+- It refuses `--dev` ("--dev is not supported in release builds", exit 2
+  before the harness listens: `official-s2-01`, `-02`), so
+  `lobo_official_smoke.test.toml` passes only `--no-strict`, `--mod`,
+  `--width` and `--height`. The flags Trident adds itself are accepted;
+  `--no-strict` undoes Trident's `--strict`, which would end the session on
+  the stock data's missing-animation ERROR lines.
+- The game reads no `--timeout` (only the Tetris sample does). For a plain
+  menu boot or a plain-mission run use `--auto-screenshot "<n>s:<file>.bmp"`,
+  which captures the frame and exits with code 0 (`official-s1-02`), and keep
+  a PID stop as the backstop.
+- It has no `nearestObjects` (`official-s2-03-diag`). The smoke probe finds
+  the IL-28 turret and counts the smokers with `NearestObjectDistance
+  [position, "class", radius]`, which both engines have and which matches the
+  class name exactly. Every other command in the probe and in
+  `lobo_missing_refs_body.sqf` exists there; `official-cmdcheck-01` ran each
+  form once on the official exe (turret lookup, the smoker counter on two
+  Jeeps with their positions restored, `getPosASL`, `setSelectionDamage`,
+  `getSelectionDamage`, `triSetView`, `triScreenshot`,
+  `triGetObjectLodBias`) and passed.
+- Its `triAssert` family reads a bool as an empty string (UD fixed this
+  later): `triAssert [bool]` always fails and `triAssertEq [bool, bool]`
+  always passes. The probe compares `format ["%1", <bool>]` with `"true"` or
+  `"false"` instead.
+- Its `distance` takes Object distance Object only (UD added the position
+  forms), and it does not coerce a malformed float such as `0.0.1`: the
+  config keeps it as a string, which the script evaluator later rejects with
+  `Script error at '0.0|#|.1': Unknown operator`, a WARN on a plain boot and
+  fatal under `--autotest`. `check_logs.py r5` names both known errors.
+
+R5 on PowerShell 5.1 (Windows PowerShell; `pwsh` is not needed since
+2026-10-12). Never write into the Steam folder or through the shadow's
+junctions, which point into it; delete a shadow by removing its junctions
+first (`[IO.Directory]::Delete(<junction>)`), because Windows PowerShell 5.1's
+`Remove-Item -Recurse` can follow a junction into its target.
+
+```powershell
+Set-Location -LiteralPath 'D:\Arma_CWA\arma_CWR'
+$steam  = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered'
+$shadow = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\official-shadow-02'   # a new, empty folder
+powershell -NoProfile -File tools/runtime/new-remaster-shadow.ps1 -Source $steam -Destination $shadow
+# Copy @LoBo, @LoBo_Deps and @LoBo_Extras of the package into $shadow (never
+# @LoBo_UD), check them against its SHA256SUMS.txt, then:
+$out = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\official-s2-04'
+powershell -NoProfile -File tools/lobo/runtime/run-local.ps1 -Tri $taskTri -GameDir $shadow -DataDir $shadow `
+  -Retries 0 -TestPath tools/lobo/runtime/repair4/lobo_official_smoke.test.sqf -OutputDir $out -TimeoutSeconds 540
+python -B tools/lobo/runtime/repair4/check_logs.py r5 $out
+```
+
 Two helpers, both read-only:
 
 - `check_mission_addons.py` checks before a run that the mission's `addOns[]`
@@ -461,7 +516,8 @@ members before and after, and the Steam folder listing did not change.
 | `refs-01` | R2 | Passed in 47.6 s; 18 screenshots reviewed. | #14: zero lines for the five old names, no load failure for a repointed target, 2 expected `backfuse.pac` lines; Hilux and Hilux MG textured at 8, 35, 70 and 120 m (LOD bias 1), EAF pilot back and leg-backs at 5 and 40 m, AIM-9s, F-16s and MiG-21bis MR1 textured. Also logged: `lobo_airammo\lobo_mk81.p3d` not found (not a .4 target). |
 | `wounds-01` | R6 | Passed in 27.3 s; 32 screenshots reviewed. | Pilot wounds: all eight classes alive at damage 0.5 with hits `[0.85, 0.8, 0.8, 0.8]` (head, body, hands, legs), wounded front and back in their own suit colour; no `lobo_pilot` texture failed to load. |
 | `burn-01` | R3 | Passed in 197.1 s. | #9: S glow without mesh beside a vanilla Fire; D1 "Put out fire" then "Light fire" on the isolated glow; A no damage at 60 m; B seated 28.1 s at 6.86 m without burn; C five +0.04 steps in 33.3 s, at least 10.24 s apart from the second step, MEDIC line on screen; one `eng_lookout3` scream per step (6); D2 "Put out fire" offered and working at the wreck, particles and 29 `say` plays after it; 150 `objects\fire` plays; E glow deleted 163.7 s after t0, wreck kept. |
-| none yet | R5 | Pending: the official exe smoke test runs separately. | Nothing is claimed for the official Remaster exe yet. |
+| `official-s1`, `official-s1-02`, `official-s2-01` to `-03-diag`, `official-s2-fallback`, `-fallback-diag` | R5 | Failed on the 2026-10-12 package: `IRAR_EE9.pbo` in `@LoBo_Deps` carries `tracerColor[]={0.8,0.5,0.0.1,1}` (`Script error at '0.0\|#\|.1'`, seen in 4 of the 6 boots: a WARN on both menu boots, fatal in two of the four `--autotest` boots); the probe used `--dev` and `nearestObjects`, which the release exe lacks; the Classic wreck-fire query measured `distance` from a position (`distance: Type Array, expected Object` when the Hilux burned). The builder and the probe were fixed afterwards; the Classic query is a content repair matter (`repair/scripts.py`). | Nothing is claimed for the official Remaster exe yet. The fallback run did show case G there: player gunner, no pilot, no `Zero divisor`. |
+| `official-cmdcheck-01` | not R5 | Passed: a throwaway probe of the smoke probe's command forms on the official exe, with a mod-doctored `@LoBo_Deps` copy; no script error in two boots. | Only that those commands exist and behave there. |
 
 In `burn-01` the D1 menu sampled 30 frames after the player was placed did
 not list "Put out fire" yet; the runner retries a failing assert until its

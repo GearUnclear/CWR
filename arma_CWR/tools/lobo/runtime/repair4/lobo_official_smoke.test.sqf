@@ -9,9 +9,19 @@
 //    2. The R2 spawns and screenshots (lobo_missing_refs_body.sqf).
 //    3. A LoBo_Ter_Toy_R killed with setDammage 1 must create exactly one
 //       M1Smoker (the classic-profile ground wreck script in the package).
-//  The official exe may lack UD-only commands (triSetView, getPosASL,
-//  setSelectionDamage, logInfo); if Trident cannot drive it, use the plain
-//  mission fallback in the R5 runbook instead of editing this file.
+//  Official-exe safe: every command here and in lobo_missing_refs_body.sqf
+//  is registered by the official 3.05 build (checked against the upstream
+//  3.05 source, commit ffc6183 in this repository, 2026-10-12). It lacks
+//  nearestObjects (UD only), so the turret and the smokers are found with
+//  NearestObjectDistance [position, "exactClass", radius], which both engines
+//  have and which matches the class name exactly, like the typeOf filter the
+//  UD probes use. The toml passes no --dev: the release exe refuses it
+//  (exit 2) and both engines register the tri* commands for a harness or
+//  test-mission run without it.
+//  Asserts compare strings or numbers only. The 3.05 triAssert family reads
+//  a bool as "" (UD fixed that later): triAssert [bool] always fails there
+//  and triAssertEq [bool, bool] always passes. Bools go through
+//  format ["%1", ...] and are compared with "true" / "false".
 // ============================================================================
 triSimUntil { alive player }
 setDate [1985, 6, 15, 12, 0]
@@ -25,8 +35,13 @@ rfView = {_o = _this select 0; _b = _this select 1; _d = _this select 2; _h = _t
 rfHold = {_u = _this select 0; _u setCaptive true; _u disableAI "MOVE"; _u disableAI "TARGET"; _u disableAI "AUTOTARGET"; _u stop true; _u setDir 0}
 rfWound = {_u = _this select 0; _u setDammage 0.5; _u setSelectionDamage ["telo", 0.8]; _u setSelectionDamage ["ruce", 0.8]; _u setSelectionDamage ["nohy", 0.8]; _u setSelectionDamage ["hlava", 0.85]}
 rfHits = {_u = _this select 0; [_u getSelectionDamage "hlava", _u getSelectionDamage "telo", _u getSelectionDamage "ruce", _u getSelectionDamage "nohy"]}
-tgTurretOf = {_t = objNull; {if (isNull _t) then {_t = _x}} forEach (nearestObjects [getPos _this, ["LoBo_rearturret"], 60]); _t}
-wsCount = {wsN = 0; {if ((typeOf _x) == (_this select 1)) then {wsN = wsN + 1}} forEach (nearestObjects [_this select 0, [], 30]); wsN}
+tgTurretOf = {NearestObjectDistance [getPos _this, "LoBo_rearturret", 60]}
+// [position, "exactClass"] call wsCount: objects of that class within 30 m.
+// NearestObjectDistance returns one object, so each one found is parked 5 km
+// away and the next query runs; all go back to where they were before the
+// call returns, in the same frame (setPos moves an object at once). The loop
+// stops at an object it already holds (one setPos could not move) or at 10.
+wsCount = {_p = _this select 0; _c = _this select 1; _objs = []; _poss = []; _o = NearestObjectDistance [_p, _c, 30]; while {!(isNull _o) && !(_o in _objs) && (count _objs) < 10} do {_objs = _objs + [_o]; _poss = _poss + [getPos _o]; _o setPos [(getPos _o select 0) + 5000, getPos _o select 1, 0]; _o = NearestObjectDistance [_p, _c, 30]}; _i = 0; {_x setPos (_poss select _i); _i = _i + 1} forEach _objs; count _objs}
 logInfo "LOBO_R4_SMOKE_START"
 
 // --- 1. IL-28 case G: player gunner, no pilot, ground (same as R1) ---
@@ -35,9 +50,9 @@ triAssertEq [typeOf tgPlane, "LoBo_IL28_egy"]
 triSimUntil { time > tgT + 5 }
 tgTurret = tgPlane call tgTurretOf
 logInfo format ["LOBO_R4_TG case=G inPlane=%1 isGunner=%2 driverNull=%3 turret=%4 gunnerNull=%5 alt=%6", vehicle player == tgPlane, gunner tgPlane == player, isNull driver tgPlane, typeOf tgTurret, isNull gunner tgTurret, getPos tgPlane select 2]
-triAssertEq [vehicle player == tgPlane, true]
-triAssert [not isNull tgTurret]
-triAssertEq [isNull gunner tgTurret, true]
+triAssertEq [format ["%1", vehicle player == tgPlane], "true"]
+triAssertEq [typeOf tgTurret, "LoBo_rearturret"]
+triAssertEq [format ["%1", isNull gunner tgTurret], "true"]
 triAssertLt [getPos tgPlane select 2, 20]
 tgP = getPosASL tgPlane
 triSetView [(tgP select 0) - 9, (tgP select 2) + 3.5, (tgP select 1) - 16, 9, -2, 10]
@@ -61,7 +76,7 @@ wsWreck setDammage 1
 triSimUntil { ([getPos wsWreck, "M1Smoker"] call wsCount) >= 1 }
 triSimFrames 120
 logInfo format ["LOBO_R4_SMOKE_SMOKER wreck=%1 alive=%2 smokers=%3", typeOf wsWreck, alive wsWreck, [getPos wsWreck, "M1Smoker"] call wsCount]
-triAssertEq [alive wsWreck, false]
+triAssertEq [format ["%1", alive wsWreck], "false"]
 triAssertEq [[getPos wsWreck, "M1Smoker"] call wsCount, 1]
 wsP = getPosASL wsWreck
 triSetView [(wsP select 0) - 9, (wsP select 2) + 3, (wsP select 1) - 9, 9, -2.5, 9]

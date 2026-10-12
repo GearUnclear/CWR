@@ -9,7 +9,11 @@ class Mission
     // not require it. Without it the placed pilot fails CheckAccess, which
     // rejects the boot and leaves Trident flashing the main menu
     // (agent_guidelines/flashing-main-menu.md).
-    addOns[]={"LoBoWeapons","LoBoWeapNad","LoBoammo","LoBo_airammo","LoBo_MiG","LoBo_A4","LoBo_F4","LoBo_IL28","LoBoF15","LoBoF16","LoBoTerror","LoBoMerkava2","LoBoEghelo","JAM_Magazines","JAM_Vehicles","LoBo_Sounds","LoBo_Pilot"};
+    // LoBoEgypt, LoBo_M1, LoBo_F5, LoBo_Objects, LoBo_FAB and LoBoRadios own
+    // the classes repair4/lobo_restored_content (R7) creates from its script
+    // (Egyptian infantry, Guard M1s, F-5s, medic barrack, Snunit, BAS_Satcom);
+    // check_mission_addons.py reports them MISSING without these entries.
+    addOns[]={"LoBoWeapons","LoBoWeapNad","LoBoammo","LoBo_airammo","LoBo_MiG","LoBo_A4","LoBo_F4","LoBo_IL28","LoBoF15","LoBoF16","LoBoTerror","LoBoMerkava2","LoBoEghelo","JAM_Magazines","JAM_Vehicles","LoBo_Sounds","LoBo_Pilot","LoBoEgypt","LoBo_M1","LoBo_F5","LoBo_Objects","LoBo_FAB","LoBoRadios"};
     randomSeed=20261012;
     class Intel { viewDistance=1800; year=1985; month=6; day=15; hour=12; minute=0; };
     class Groups

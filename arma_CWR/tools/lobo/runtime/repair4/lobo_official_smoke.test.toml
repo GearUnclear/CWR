@@ -6,9 +6,16 @@
 # never @LoBo_UD. Unlike the other repair .4 probes this one has no
 # --mods-dir: the package folders sit next to the exe (SPEC 10 R5). Run with
 # -j 1 and --retries 1. Not part of any lane.
+# Only flags the official 3.05 release exe accepts: it refuses --dev ("--dev
+# is not supported in release builds", exit 2 before the harness starts) and
+# tolerates the rest of what Trident injects (--harness, --autotest,
+# --test-mission, --render, --lang, --strict). --no-strict undoes Trident's
+# --strict, which would end the session on the first ERROR log line (the
+# stock data logs several missing-animation ERRORs while loading). The game
+# reads no --timeout (only Tetris does); the session ends with triEndTest.
 mission = "tools/lobo/runtime/Repair4.Abel"
 binary = "PoseidonGame"
 tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive", "official_exe"]
 timeout = 300
 assert_timeout = 45
-extra_args = ["--dev", "--no-strict", "--mod", "@LoBo_Extras;@LoBo;@LoBo_Deps", "--width", "1280", "--height", "720"]
+extra_args = ["--no-strict", "--mod", "@LoBo_Extras;@LoBo;@LoBo_Deps", "--width", "1280", "--height", "720"]

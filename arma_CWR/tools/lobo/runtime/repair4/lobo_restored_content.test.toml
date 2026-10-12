@@ -1,0 +1,15 @@
+# R7: restored and repointed LoBo content (repair 2026-10-11.4, third and
+# fourth parts) on the UD engine. Mounts the installed, repaired
+# D:/Arma_CWA/@LoBo by absolute path. Run it explicitly with -j 1 through
+# run-local.ps1 with -TimeoutSeconds 600 (--retries 0 until it has booted
+# once); it is not part of a default lane. Debug log level per SPEC 10: the
+# pass criteria are WARN, ERRR and DBUG lines ("GL33: Cannot load texture",
+# "FileCache: file ... not found", "not in bank"), checked by
+# repair4/check_logs.py r7. Expect a log of several hundred MB to over 1 GB
+# (GL33 logs every draw at debug); grep with -v GRAPHICS by hand.
+mission = "tools/lobo/runtime/Repair4.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 480
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-level", "debug"]
