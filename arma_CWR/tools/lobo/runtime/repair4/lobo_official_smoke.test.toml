@@ -1,0 +1,14 @@
+# Official Remaster exe smoke test (R5 step S2) for the rebuilt LoBo family
+# package, repair 2026-10-11.4. Runs ONLY against a throwaway shadow made by
+# tools/runtime/new-remaster-shadow.ps1 whose root holds the official
+# PoseidonGame.exe and real copies of @LoBo_Extras, @LoBo and @LoBo_Deps; pass
+# the shadow as run-local.ps1 -GameDir and -DataDir. Never the Steam folder,
+# never @LoBo_UD. Unlike the other repair .4 probes this one has no
+# --mods-dir: the package folders sit next to the exe (SPEC 10 R5). Run with
+# -j 1 and --retries 1. Not part of any lane.
+mission = "tools/lobo/runtime/Repair4.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive", "official_exe"]
+timeout = 300
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mod", "@LoBo_Extras;@LoBo;@LoBo_Deps", "--width", "1280", "--height", "720"]

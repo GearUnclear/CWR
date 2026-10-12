@@ -1,0 +1,18 @@
+# LoBo #9 runtime items (R3) for repair 2026-10-11.4. Mounts the installed,
+# repaired D:/Arma_CWA/@LoBo by absolute path. Run it explicitly with -j 1
+# through run-local.ps1 with -TimeoutSeconds 600 (--retries 0 until it has
+# booted once, then 2); it is not part of a default lane.
+# Debug log level keeps SoundScene::OpenAndPlayOnce (AUDIO, DBUG), which the
+# say and scream counts in repair4/check_logs.py r3 read. --log-categories was
+# meant to drop GRAPHICS, MEMORY, INPUT and NETWORK, but the engine parses the
+# flag and never consults it (LoggingSystem::IsCategoryEnabled has no caller),
+# so run burn-01 still wrote a 1.5 GB log: at debug level GL33 logs every draw.
+# Leave room on the disk, or grep with -v GRAPHICS.
+# assert_timeout bounds each triSimUntil in wall-clock seconds; the probe
+# never waits more than 35 s of mission time in one triSimUntil.
+mission = "tools/lobo/runtime/Repair3.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 420
+assert_timeout = 120
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-level", "debug", "--log-categories", "core,config,audio,world,script,ai,physics,ui,mission"]

@@ -6,7 +6,8 @@ profile. They do not contain or modify game PBOs. Read the repository guides and
 Keep proposed, implemented, applied, offline verified, and runtime verified
 results separate. A runner exit code of zero verifies its assertions, not every
 acceptance claim, screenshot, or unsupported case. The later repair 2026-10-11.3
-probes, which ran on the Remaster data, are described in the last section.
+and 2026-10-11.4 probes, which ran on the Remaster data, are described in the
+last two sections.
 
 ## Reproduce locally
 
@@ -326,3 +327,142 @@ Build `tri.exe` from the checkout that holds these files, as in "Reproduce
 locally" above, and use a fresh output directory per run. Before and after,
 `repair_lobo.py --mod 'D:\Arma_CWA\@LoBo' --compatibility ud --check` must exit
 0 with zero changes and report `repair_version` `2026-10-11.3`.
+
+## Repair 2026-10-11.4 probes
+
+The probes in `repair4/` check repair 2026-10-11.4 (LoBo #13, #14, the open #9
+items and the pilot wounds). R1 to R3 and R5 follow the runtime plan in the
+repair .4 spec; R6 here is the wounded pilot probe, not the spec's optional R6
+(the package's four modfolders on the UD engine), which has no probe. They run
+like the .3 probes: UD engine, the Remaster data folder passed with
+`-DataDir`, the installed `D:\Arma_CWA\@LoBo` mounted by absolute path, `-j 1`,
+one run at a time, a fresh output directory per run. Start each new probe with
+`-Retries 0`: a probe that does not boot shows the flashing main menu, and every
+retry relaunches it (`agent_guidelines/flashing-main-menu.md`). Use
+`-Retries 2` once it has booted. Results are in "Results, 2026-10-12" below
+and, per issue, in `../CONTENT-REPAIRS.md` under "Runtime verification";
+local evidence is under `D:\Arma_CWA\tmp\lobo-repair-4\runtime\<run>`.
+
+```powershell
+Set-Location -LiteralPath 'D:\Arma_CWA\arma_CWR'
+$taskTri = 'D:\Arma_CWA\tmp\lobo-repair-3\runtime\trident-build\debug\tri.exe'
+$out = 'D:\Arma_CWA\tmp\lobo-repair-4\runtime\tailgun-03'
+powershell -NoProfile -File tools/lobo/runtime/run-local.ps1 `
+  -Tri $taskTri `
+  -TestPath tools/lobo/runtime/repair4/lobo_il28_tailgun.test.sqf `
+  -DataDir 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered' `
+  -Retries 0 `
+  -OutputDir $out `
+  -TimeoutSeconds 540
+python -B tools/lobo/runtime/repair4/check_logs.py r1 $out
+```
+
+The working directory matters: the test path and each TOML's `mission =` are
+relative to it. The 2026-10-12 runs used the same commands from the repair .4
+worktree, with `-GameDir` pointing at the main checkout's
+`dist\x64-win-rwdi` (the wrapper's default).
+
+| Entry point | Mission | Wrapper `-TimeoutSeconds` | What it checks |
+| --- | --- | --- | --- |
+| `repair4/lobo_il28_tailgun.test.sqf` | `Repair4.Abel` | 540 | R1, #13: IL-28 tail turret with no pilot (player gunner on the ground and at 400 m), an empty IL-28, a pilot-first IL-28 and the dead-pilot bailout. |
+| `repair4/lobo_missing_refs.test.sqf` | `Repair4.Abel` | 540 | R2, #14: spawns both Hiluxes, the EAF, RJAF and 69th Sqn pilots, the MiG-21bis MR1 and both F-16 AA variants; side shots of each Hilux at 8, 35, 70 and 120 m, the EAF pilot from behind at 5 and 40 m, wounded backs, AIM-9 rails. Debug log. |
+| `repair4/lobo_wreck_burn.test.sqf` | `Repair3.Abel` | 600 | R3, #9: isolated glow beside a vanilla Fire (noon and 23:00), "Put out fire" on it, then a Mi-8 wreck: no burn while seated, +0.04 steps on foot, "Put out fire" at the wreck, the 150 s cleanup, the say and scream sounds. Debug log; the TOML's `--log-categories` was meant to drop GRAPHICS, but `burn-01` still logged the GL33 draw lines (1.5 GB), so allow the disk space. |
+| `repair4/lobo_pilot_wounds.test.sqf` | `Repair4.Abel` | 540 | R6, the `references` and `wounds` rules: each of the eight LoBo pilot classes healthy from behind, then wounded from the front, from behind and close behind. |
+| `repair4/lobo_official_smoke.test.sqf` | `Repair4.Abel` | 540 | R5 S2 only: the official Remaster exe in a throwaway shadow with the rebuilt package (R1 case G, the R2 spawns, one M1Smoker from a killed Hilux). Never run it on the UD lane or against the Steam folder. |
+
+`repair4/lobo_missing_refs_body.sqf` is the R2 body that both R2 and the R5 smoke
+test `#include`; it is not a test on its own.
+
+Two helpers, both read-only:
+
+- `check_mission_addons.py` checks before a run that the mission's `addOns[]`
+  activates the owner addon of every class the mission places and every class
+  the probe spawns, with their `weapons[]`, `magazines[]` and the magazines each
+  weapon accepts. It models the engine's addon merge and owner rules
+  (`AddonSystem.cpp`, `World::ActivateAddons`, `AddonClosure.cpp`). A gap
+  in a placed class rejects the boot; a gap in a spawned class is reported the
+  same way, although at runtime the ZoneRegistry's later additive activation
+  can hide it. On 2026-10-12 every repair .4 probe passed, and so did the .3
+  `rbk500`, `tail_numbers` and `wreck_glow` probes. Two reports are expected:
+  `lobo_wreck_glow_unlisted` (its mission leaves `LoBo_airammo` out on
+  purpose) and `lobo_mk20_rockeye`, whose script-spawned EAF pilot carries
+  `LoBo_throw2` from `LoBoWeapNad`, which `Repair3.Abel` does not list; its
+  `mk20-03` run logged no `Access denied`, because the ZoneRegistry had
+  activated `loboweapnad` by then. A copy of `Repair4.Abel` without
+  `LoBoWeapNad` reproduces the boot rejection the guideline describes.
+
+  ```powershell
+  python tools/lobo/runtime/check_mission_addons.py --mod 'D:\Arma_CWA\@LoBo' `
+    --base-config 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered\BIN\config.bin' `
+    --probe tools/lobo/runtime/repair4/lobo_pilot_wounds.test.sqf
+  ```
+
+- `repair4/check_logs.py r1|r2|r3|r6|r5 <output dir>` applies the spec's log
+  criteria to `<output dir>\<test stem>\game_stdout.log` and prints one PASS,
+  FAIL or INFO line each. Run on the .3 logs it reproduces the spec's baseline
+  counts (327 `black_matte.pac`, 35 and 34 EAF `.pac`, 56 `rktf5\swtex.paa`,
+  3 `soundss` lines).
+
+Expected results, beyond runner exit 0:
+
+- R1: `check_logs.py r1` passes (no `Zero divisor`, no error naming
+  `tailgun.sqs`). Case A and case C3 must eject as the spec's 6.1 table says; a
+  different bailout is a stop condition, not a probe to adjust.
+- R2: `check_logs.py r2` passes: no `black_matte.pac`, `eaf\tex\back.pac`,
+  `eaf\tex\legsbk.pac`, `rktf5\swtex.paa` or `soundss` line, and no load
+  failure for the repointed targets. One `backfuse.pac` line per F-16 variant
+  is expected. Visual: Hilux trim black at every distance, EAF pilot back
+  textured at 5 and 40 m, AIM-9s as in the .3 `numbers-01` captures.
+- R3: the assertions cover the seated phase (no damage to player or Jeep over
+  28 s), the on-foot steps (each +0.04, at most floor(L/10)+2, steps after the
+  second at least 9.5 s apart), "Put out fire" on both glows and the cleanup
+  window. `check_logs.py r3` adds one `eng_lookout3` scream per step, at least
+  100 `objects\fire` plays, plays continuing after the put-out and no load
+  failure. A seated burn, a step other than 0.04 or more than one scream per
+  step is a stop condition. The seated and on-foot phases start at t0+70 s,
+  8 s later than the spec's outline, so the script's bullet window (60 s plus
+  frame overshoot) has closed.
+- R6: all eight classes spawn, stay alive at total damage 0.5 and reach a hit of
+  at least 0.7 on body and legs. Wound textures need visual review: with
+  `references` and `wounds` applied, every class shows wounds front and back,
+  on body, arms and legs, in its own suit. EAF (reddish brown) and IAF grey
+  (69th, 106th and 133rd Sqn) show red blood from the generated `_dr`
+  textures; the olive classes (IAF 101st and 253rd Sqn, RJAF, SyAF) show the
+  shipped olive `_d` art.
+
+A wound texture only appears at a part hit of 0.7 or more (0.8 for the head):
+`Man::WoundsAnimation` in `SoldierOldSimProxy.cpp`. `setDammage` sets every
+part to the same value, so `setDammage 0.5` or `0.6` alone shows no wound. The
+R2 and R6 probes keep total damage at 0.5 and raise the body, hands and legs
+hits to 0.8 (head 0.85) with `setSelectionDamage`.
+
+Before and after the runs, `repair_lobo.py --check` (pass `--tools` with the
+main checkout's `PoseidonTools.exe`, since a worktree has no `dist`) must exit 0
+with zero changes and report `repair_version` `2026-10-11.4`, and a recursive
+listing of the Steam Remastered folder must not change.
+
+### Results, 2026-10-12
+
+UD engine `dist\x64-win-rwdi\PoseidonGame.exe` (SHA-256
+`F0BCDA0852C3AAF84F00F23E23B0FF81275689DE0D937B9E9F46176384A85A0A`), Trident
+`D:\Arma_CWA\tmp\lobo-repair-3\runtime\trident-build\debug\tri.exe` (SHA-256
+`43D48C10D73AB8925880908FE4CBB4C704EF0B451236157D151E7DF5574A09CF`), official
+Remaster data, the installed `@LoBo` after both repair .4 batches. Each final
+run passed on its first attempt with `-Retries 0`, recorded `exit_code=0`,
+passed its `check_logs.py` criteria with no script error, `Zero divisor` or
+`Access denied` line, and closed every game it started; both executables had
+the same hash after each run. The repair check gave 0 changed and 0 added
+members before and after, and the Steam folder listing did not change.
+
+| Run | Probe | Result | What it verifies |
+| --- | --- | --- | --- |
+| `tailgun-01` | R1 | Did not boot: `Repair4.Abel` lacked `LoBoWeapNad`, the owner of the placed EAF pilot's `LoBo_throw2` (`Access denied`, then `could not boot`). Kept as evidence; the mission was fixed. | Nothing. |
+| `tailgun-02` | R1 | Passed in 18.3 s. | #13: no `Zero divisor` or `tailgun.sqs` error; C1 empty IL-28 and G (player gunner, no pilot, ground) keep an unmanned turret; C2 gives the pilot's group a living `LoBo_Egypt_Pilot` turret gunner; C3 (pilot killed at 400 m) puts that gunner in a `ParachuteEast`; A (player gunner, no pilot, 400 m) ejects the player (`ParachuteWest`) and leaves the turret unmanned. |
+| `refs-01` | R2 | Passed in 47.6 s; 18 screenshots reviewed. | #14: zero lines for the five old names, no load failure for a repointed target, 2 expected `backfuse.pac` lines; Hilux and Hilux MG textured at 8, 35, 70 and 120 m (LOD bias 1), EAF pilot back and leg-backs at 5 and 40 m, AIM-9s, F-16s and MiG-21bis MR1 textured. Also logged: `lobo_airammo\lobo_mk81.p3d` not found (not a .4 target). |
+| `wounds-01` | R6 | Passed in 27.3 s; 32 screenshots reviewed. | Pilot wounds: all eight classes alive at damage 0.5 with hits `[0.85, 0.8, 0.8, 0.8]` (head, body, hands, legs), wounded front and back in their own suit colour; no `lobo_pilot` texture failed to load. |
+| `burn-01` | R3 | Passed in 197.1 s. | #9: S glow without mesh beside a vanilla Fire; D1 "Put out fire" then "Light fire" on the isolated glow; A no damage at 60 m; B seated 28.1 s at 6.86 m without burn; C five +0.04 steps in 33.3 s, at least 10.24 s apart from the second step, MEDIC line on screen; one `eng_lookout3` scream per step (6); D2 "Put out fire" offered and working at the wreck, particles and 29 `say` plays after it; 150 `objects\fire` plays; E glow deleted 163.7 s after t0, wreck kept. |
+| none yet | R5 | Pending: the official exe smoke test runs separately. | Nothing is claimed for the official Remaster exe yet. |
+
+In `burn-01` the D1 menu sampled 30 frames after the player was placed did
+not list "Put out fire" yet; the runner retries a failing assert until its
+timeout, and the retried `triAssertIncludes` found it.
