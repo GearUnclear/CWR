@@ -144,9 +144,11 @@ an `addOns[]` gap is another, and before `c39e49e` it left at most one WARN behi
    stop the run (only processes you started) and grep the same log for
    `Access denied` first.
 5. `--log-level debug` also turns on GL33 per-draw logging. The 39 s run above
-   wrote 193 MB, 99.5% of it `[GRAPHICS]` lines. Grep with `-v GRAPHICS`, or
-   narrow the output with `--log-categories` after checking that it keeps the
-   categories your checks read.
+   wrote 193 MB, 99.5% of it `[GRAPHICS]` lines, and a four-minute run wrote
+   1.5 GB. Grep with `-v GRAPHICS`. `--log-categories` does not help: the
+   engine parses it but never consults it (`LoggingSystem::IsCategoryEnabled`
+   in `arma_CWR/engine/Poseidon/Foundation/Logging/Logging.cpp` has no caller,
+   checked 2026-10-12).
 
 ## Engine follow-ups (done 2026-10-12, commit `c39e49e`)
 
