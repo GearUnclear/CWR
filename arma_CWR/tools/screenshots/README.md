@@ -126,6 +126,13 @@ in `World::Draw` (`engine/Poseidon/World/World.cpp:1603`). Without an active cam
 effect every frame is stamped with UI. Its own framing is irrelevant, because
 `triSetView` overrides it.
 
+**A long lens needs a camera target.** `camSetFov` on its own does nothing:
+`CameraVehicle::CamEffectFOV` (`World/Scene/Camera/CameraHold.cpp`) derives the
+FOV from the camera's target and keeps the old value (0.7) while there is none.
+Give the camera a far-away target, then `camSetFov`, then `camCommit 0`; the
+FOV holds and `triSetView` still sets the framing. 0.3 to 0.45 reads far more
+like a photograph than the default wide angle.
+
 **`triScreenshot` must be given a string literal.** The runner parses the literal
 out of the statement to maintain its own sequence counter, so a `format [...]`
 label desyncs it and the run dies on `FAIL:screenshot_not_written`.
@@ -241,9 +248,13 @@ A parked tank is a catalogue entry. What reads as a photograph:
   genuinely drop — bodies land where the fire found them. Snapshot the foe
   list *at spawn* (a dead man is no longer in `units group`) and `setDammage 1`
   any survivor afterwards when a later scene depends on the corpses.
-- **Posture.** Mixing `setUnitPos "UP"/"MIDDLE"/"DOWN"` across a group reads as a
+- **Posture.** Mixing `setUnitPos "UP"` and `"DOWN"` across a group reads as a
   firefight; all-standing reads as a parade. Use all-standing for patrols and
   checkpoint guards, where a prone man just disappears into the ground.
+  `"MIDDLE"` does not exist in this engine: the only names are Up, Down and
+  Auto (`GetEnumNames(UnitPosition)`, `AI/AIRadioImpl.cpp`), so `"MIDDLE"` is
+  silently ignored and the man stays on Auto. `lobo_sinai_stories` still asks
+  for it. For a crouch, play a kneeling animation instead.
 - **A vehicle weapon needs a crew, and a target.** An uncrewed hull has no
   gunner AI: forced `fire` does nothing at all — no flash, no report, no
   error — and even a crewed tank force-fired with no target hoists the gun to
@@ -283,5 +294,82 @@ Do **not** reach for `disableAI "ANIM"`: with the animation selector gone the
 unit freezes mid-transition and hangs half-sunk in the terrain. It is worse than
 the problem.
 
-@LoBo's civilians (`LoBo_Civ_*`, `LoBo_CivF_*`) need none of this — they are
-reskinned soldier classes and stand where they are put.
+@LoBo's civilians (`LoBo_Civ_*`, `LoBo_CivF_*`) are reskinned soldier classes
+and do not need step 1. They are not immune to the rest, though: on the
+2026-10-12 Lebanon80 shoot, villagers near armed men dropped into a weaponless
+crouched combat pose, and `switchMove "Civil"` right before each frame was what
+stood them back up.
+
+## Notes from the 2026-10-12 Remaster shoot
+
+Three shoots (Malden stock, Sinai and Lebanon80 on @LoBo) ran on the full
+Remaster shadow (`packages/RemasterUD`) with `triCaptureAtPresent true`. Their
+scripts lived outside the repo; these are the lessons they paid for.
+
+### Running a one-off shoot from outside the repo
+
+- A toml outside the repo works if every path in it is absolute:
+  `data_dir`, `mission`, and any `--mod` folder (forward slashes). tri copies
+  the mission to a temp folder, so a mission folder in scratch is never written
+  into the data dir. Pass the binary with `--game-dir`.
+- The shadow carries its own `@LoBo`, so `--mods-dir . --mod
+  "@LoBo;<repo>/arma_CWR/tools/screenshots/@udshowcase"` loads both, with
+  `@udshowcase` referenced in place.
+- A `dist/` folder built by an agent can lack `PoseidonTools.exe`; the copy
+  under `build/<dir>/apps/tools/Tools/` works for `terrain objects` and
+  `pbo show`.
+- Lower `assert_timeout` to about 90 for shoots. A statement that never writes
+  its screenshot otherwise hangs the run for the full timeout.
+
+### Staging
+
+- **Snapshot every group at spawn, not just the foes.** A man who dies leaves
+  his group, so `units grp select 2` can come back empty and the frame after it
+  is never written. Pick men from a list saved when they were created.
+- **`createVehicle` moves things off occupied spots.** It silently shifts the
+  object by metres, which also shifts any camera anchored to it. Follow every
+  spawn with a `setPos` to the intended point.
+- **Burning vehicles explode.** The blast kills or flattens men within about
+  10 to 15 m, so stage the fire first and keep people out of that ring.
+  `inflame` on a vehicle that is already dead does not relight it.
+- **Vanilla wrecks on the Remaster may only smoke.** On Malden a destroyed Ural
+  gave smoke and no flame, and kept its paint. The flames in those frames came
+  from `Fire` campfire objects placed against the hull, plus the static
+  `UralWreck` model. @LoBo hulls burned normally.
+- **Walking is hard to get.** `doMove` near wrecks or corpses turns into a
+  combat run even under CARELESS and LIMITED, and a group `move` under SAFE and
+  LIMITED barely moves anyone. What worked: `disableAI "MOVE"` on marks plus a
+  walk animation played in place. The animation drifts the man about 0.6 m per
+  sim frame, so set the marks to allow for it.
+- **Moving armour drifts.** Trailing vehicles leave the road, and tank exhaust
+  renders as a blue haze. A parked column with crews turned out reads better.
+- **Checkpoint guards aim at the queue.** Golani guards raised their rifles at
+  civilians even in SAFE. Pose them, or frame the guard from behind.
+- **Rooftops work.** `setPos [east, north, h]` with `h` a little above the roof
+  drops a man onto it; a point about 2 m off the footprint falls to the street.
+- **Keep launchers out of close cameras.** Men given a target swing AT tubes
+  across a lens a few metres away.
+- @LoBo's `LoBo_Terror_01E` (the Hizballah civilian-outfit body) renders as a
+  white thobe and red keffiyeh; strip its weapons for an undercover frame.
+
+### Camera placement
+
+- **Set the eye height from the ground under the lens**, not from the subject.
+  Fixed offsets put cameras inside a hillside, a wall or a willow on Malden, and
+  inside the terrain on the Lebanon80 Hermon road and in the Aley olive grove.
+- Ground texture goes soft very close to a low lens; a longer FOV from further
+  back hides it.
+- Lebanon80's heightmap (4WVR) stores int16 heights scaled by 1/22.222; parsing
+  it is enough to plan eye points and lines of sight offline.
+
+### Light
+
+| World | Usable window | Notes |
+| --- | --- | --- |
+| Sinai | 15:00 daylight, 15:40 golden hour | East-facing slopes go dull and purple after about 15:45. Fire-lit "night" only works 17:05 to 17:20; after 17:30 even a post-gamma capture is near black. |
+| Lebanon80 | 13:30 to 15:40 | Pink from 16:00, night by about 17:00. The sun stands in the north at midday, so the world's latitude puts it in the southern hemisphere. |
+| Malden | Dawn and dusk both shoot well | Night frames need a fire in shot. |
+
+Night needs a light source in frame. A vehicle's ammunition cook-off lights a
+whole street, but flat grey; one frame at 20:45 on Lebanon80 also needed in-game
+brightness 1.4.
