@@ -2030,3 +2030,23 @@ items:
       loot queue drain), so regressions there are invisible today.
     log:
       - "Small cleanups to fold in: test_guerrilla_module.cpp is registered twice in tests/unit CMakeLists (harmless, predates working tree); single engine TODO at OptionsUIApp.cpp:263 (hardcoded GUERRILLA label pending stringtable key)."
+
+  - id: arma3-aircraft-keyboard-controls
+    title: "Arma 3 aircraft keyboard controls with permanent mouse freelook"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [build-toolchain]
+    gh_issues: [82]
+    summary: >
+      Complete the aircraft keyboard portion of the existing Arma 3 preset:
+      W/S pitch, A/D bank, Q/E pedals and Left Shift/Z lift or acceleration.
+      Separate helicopter and plane binding categories, share context-aware
+      defaults/reset, clear aircraft keyboard Turbo/fast-forward collisions,
+      preserve controller entries and make saved-profile adoption explicit.
+      Add guarded shortcuts for existing autohover and supported plane gear.
+      Keep permanent mouse freelook, flight physics and assistance unchanged.
+      See arma_CWR/mod-plans/16-arma3-aircraft-controls.md for the source audit,
+      implementation how-to, player instructions and Remaster acceptance matrix.
+    log:
+      - "2026-10-12: filed #82 after official Arma 3 binding research and independent source review. User confirmed aircraft mouse freelook is desired; controls only, no flight-model changes. Planning commit covers hidden Shift Turbo and Q/E collisions, shared Pilot UI/reset behavior, safe saved/cleared-profile handling, Remaster localization and existing-command shortcuts. Flaps stay on the action menu and an independent speedbrake policy is out of scope. Implementation and runtime acceptance remain pending; no game launched."
