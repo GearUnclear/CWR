@@ -4,6 +4,9 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>  // GatherSimDiag census
+#include <Poseidon/Game/Guerrilla/Traffic.hpp>        // GatherSimDiag census
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>        // GatherSimDiag gm/frame timings
 #include <Poseidon/Asset/Addon/AddonClosure.hpp>      // faction addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // sideTwin resolution (shared with the new-game UI)
@@ -219,6 +222,9 @@ void ZoneRegistry::Clear()
         _handlers[i] = RString();
     }
     _accum = 0;
+    _simDiagAccum = 0;
+    _lastTickInBubble = 0;
+    _lastTickRemote = 0;
     _pending.Clear();
     _pendingOccupierSide = RString();
     _pendingResistanceSide = RString();
@@ -664,6 +670,11 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.supportDecayOccupied = cfg.ReadValue("supportDecayOccupied", _tuning.supportDecayOccupied);
     _tuning.supportDecayFloor = cfg.ReadValue("supportDecayFloor", _tuning.supportDecayFloor);
     _tuning.contestOutnumberRatio = cfg.ReadValue("contestOutnumberRatio", _tuning.contestOutnumberRatio);
+    // off-screen contract (issue #71): D1 remote tick and the [gmsim] budgets
+    _tuning.remoteTick = cfg.ReadValue("remoteTick", _tuning.remoteTick ? 1.0f : 0.0f) != 0.0f;
+    _tuning.simDiagInterval = cfg.ReadValue("simDiagInterval", _tuning.simDiagInterval);
+    _tuning.budgetLiveBodies = (int)cfg.ReadValue("budgetLiveBodies", (float)_tuning.budgetLiveBodies);
+    _tuning.budgetSideGroups = (int)cfg.ReadValue("budgetSideGroups", (float)_tuning.budgetSideGroups);
     // already read (and acted on) in LoadFromParams; re-read so the tuning
     // struct is complete for anyone inspecting it
     _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
@@ -689,6 +700,8 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
         z.ownerConfig = e.ReadValue("owner", RString("NEUTRAL"));
         z.owner = ResolveOwnerToken(z.ownerConfig);
         z.garrison = e.ReadValue("garrison", 0.0f);
+        // D2 recovery ceiling: the authored strength unless stated
+        z.garrisonMax = e.ReadValue("garrisonMax", z.garrison);
         z.support = e.ReadValue("support", 0.0f);
         z.income = e.ReadValue("income", 0.0f);
         z.heat = e.ReadValue("heat", 0.0f);
@@ -1929,6 +1942,14 @@ void ZoneRegistry::Simulate(float deltaT)
     // the alert layer runs on its own cadence (alertInterval), so it ticks
     // ahead of this registry's coarser throttle
     AlertMachine::Instance().Simulate(deltaT);
+    // [gmsim] off-screen contract diagnostics (issue #71): one sample line
+    // per simDiagInterval, WARN on a breached live-entity budget
+    _simDiagAccum += deltaT;
+    if (_tuning.simDiagInterval > 0 && _simDiagAccum >= _tuning.simDiagInterval)
+    {
+        _simDiagAccum = 0;
+        LogSimDiag();
+    }
     _accum += deltaT;
     if (_accum < _tuning.tickInterval)
     {
@@ -1980,7 +2001,20 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         z.revealed = revealed;
     }
 
-    // capture math runs only near the player (the SQS distance-cache gate)
+    // presence census for every zone (gmZoneSim, D2 eligibility); the
+    // counts themselves are island-wide, only the meter update is gated
+    _lastTickInBubble = 0;
+    _lastTickRemote = 0;
+    for (int i = 0; i < n; i++)
+    {
+        ZoneRecord& z = _zones[i];
+        z.lastGuer = i < in.guerCount.Size() ? in.guerCount[i] : 0;
+        z.lastOcc = i < in.occCount.Size() ? in.occCount[i] : 0;
+        z.lastInBubble = false;
+        z.lastRemote = false;
+    }
+
+    // nothing ticks while the player is dead (the SQS-era gate)
     if (!in.playerValid)
     {
         return;
@@ -1995,21 +2029,32 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     for (int i = 0; i < n; i++)
     {
         ZoneRecord& z = _zones[i];
-        if (Dist2DSq(z.pos.X(), z.pos.Z(), in.playerX, in.playerZ) > cacheSq)
+        int guer = z.lastGuer;
+        int occ = z.lastOcc;
+        const bool inBubble = Dist2DSq(z.pos.X(), z.pos.Z(), in.playerX, in.playerZ) <= cacheSq;
+        z.lastInBubble = inBubble;
+        if (inBubble)
         {
-            // outside the bubble the meters FREEZE (no gain, no decay) -
-            // consistent with the world-bubble design: nothing happens to
-            // ground the simulation is not looking at
+            _lastTickInBubble++;
+            if (haveClock)
+            {
+                z.seenDay = seenDay;
+                z.seenMinute = seenMinute;
+            }
+        }
+        else if (!_tuning.remoteTick || (guer == 0 && z.capture <= 0))
+        {
+            // Off-screen contract D1 (issue #71): outside the bubble a zone
+            // holds still UNLESS live resistance units stand in it (fighters
+            // the player left behind keep securing or organizing) or its
+            // capture meter is above 0 (an unheld half-capture decays).  The
+            // same rules as in the bubble apply, with the despawned reserve
+            // still defending, so troops against a stored reserve are a
+            // frozen standoff.  Remote towns gain support but never lose it
+            // to intimidation (below).
             continue;
         }
-        if (haveClock)
-        {
-            z.seenDay = seenDay;
-            z.seenMinute = seenMinute;
-        }
 
-        int guer = i < in.guerCount.Size() ? in.guerCount[i] : 0;
-        int occ = i < in.occCount.Size() ? in.occCount[i] : 0;
         bool isCity = stricmp(z.type, "CITY") == 0;
         bool milEligible = !isCity && stricmp(z.owner, _occupierSide) == 0;
         // an occupier-ADMINISTERED town accrues underground support like a
@@ -2020,6 +2065,11 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         {
             z.contestedLastTick = false;
             continue;
+        }
+        if (!inBubble)
+        {
+            z.lastRemote = true;
+            _lastTickRemote++;
         }
 
         bool milCap = false;
@@ -2110,8 +2160,9 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // city: support, not force - and never while the occupier is
             // watching.  Occupier-only presence intimidates support back
             // toward the floor (it can suppress expression, not erase the
-            // sentiment); script-side writers (GM_fnSupportAdd) are separate
-            // and unfloored.  An unspawned garrison reserve counts as
+            // sentiment), but only inside the bubble: a remote town never
+            // loses support to intimidation (issue #71 D1); script-side
+            // writers (GM_fnSupportAdd) are separate and unfloored.  An unspawned garrison reserve counts as
             // occupation, mirroring the military predicate: the zone tick
             // runs before GarrisonCache materializes it inside the bubble.
             bool guerHere = guer > 0;
@@ -2124,7 +2175,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
                     z.support = 100;
                 }
             }
-            else if (occHere && !guerHere && z.support > _tuning.supportDecayFloor)
+            else if (inBubble && occHere && !guerHere && z.support > _tuning.supportDecayFloor)
             {
                 z.support -= _tuning.supportDecayOccupied;
                 if (z.support < _tuning.supportDecayFloor)
@@ -2279,6 +2330,141 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
     const Person* exclude = in.playerUndercover ? player : nullptr;
     CountSidePresence(FindSideCenter(_resistanceSide), _zones, areaSq, exclude, in.guerCount);
     CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount);
+}
+
+// ---------------------------------------------------------------------------
+// off-screen contract diagnostics (issue #71 section 6)
+// ---------------------------------------------------------------------------
+
+int SimBudgetBreaches(const SimDiag& d, const ZoneTuning& t)
+{
+    int bits = 0;
+    if (t.budgetLiveBodies > 0 && d.liveTotal > t.budgetLiveBodies)
+    {
+        bits |= SBLiveBodies;
+    }
+    if (t.budgetSideGroups > 0 && d.grpMaxSide > t.budgetSideGroups)
+    {
+        bits |= SBSideGroups;
+    }
+    return bits;
+}
+
+// live bodies and allocated groups on one side center (null: none)
+static void CensusCenter(AICenter* center, int& bodies, int& groups)
+{
+    bodies = 0;
+    groups = 0;
+    if (!center)
+    {
+        return;
+    }
+    for (int g = 0; g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+        {
+            continue;
+        }
+        groups++;
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (unit && unit->GetLifeState() == AIUnit::LSAlive)
+            {
+                bodies++;
+            }
+        }
+    }
+}
+
+void GatherSimDiag(SimDiag& out)
+{
+    out = SimDiag();
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    out.zonesInBubble = registry.LastTickInBubble();
+    out.zonesRemoteTicked = registry.LastTickRemote();
+    if (GWorld)
+    {
+        static const TargetSide kSides[] = {TEast, TWest, TGuerrila, TCivilian};
+        AICenter* occCenter = FindSideCenter(registry.OccupierSide());
+        AICenter* resCenter = FindSideCenter(registry.ResistanceSide());
+        for (TargetSide side : kSides)
+        {
+            AICenter* center = GWorld->GetCenter(side);
+            int bodies = 0;
+            int groups = 0;
+            CensusCenter(center, bodies, groups);
+            out.liveTotal += bodies;
+            if (groups > out.grpMaxSide)
+            {
+                out.grpMaxSide = groups;
+            }
+            if (center && center == occCenter)
+            {
+                out.liveOcc = bodies;
+                out.grpOcc = groups;
+            }
+            else if (center && center == resCenter)
+            {
+                out.liveRes = bodies;
+                out.grpRes = groups;
+            }
+            else if (side == TCivilian)
+            {
+                out.liveCiv = bodies;
+                out.grpCiv = groups;
+            }
+        }
+    }
+    const GarrisonCache& cache = GarrisonCache::Instance();
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        if (cache.IsSpawned(i))
+        {
+            out.garrisonSpawnedZones++;
+            out.garrisonLiveBodies += cache.LiveCount(i);
+        }
+    }
+    const Traffic& traffic = Traffic::Instance();
+    out.trafficCiv = traffic.Count(TKCiv);
+    out.trafficParked = traffic.CountParked();
+    out.trafficPatrol = traffic.Count(TKPatrol);
+    out.trafficConvoy = traffic.Count(TKConvoy);
+    const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+    const Dev::FrameProfiler::PhaseStats gm = perf.Stats(Dev::FrameProfiler::PhaseGuerrilla);
+    const Dev::FrameProfiler::PhaseStats frame = perf.TotalStats();
+    out.gmAvg = gm.avgMs;
+    out.gmP95 = gm.p95Ms;
+    out.gmMax = gm.maxMs;
+    out.frameAvg = frame.avgMs;
+    out.frameP95 = frame.p95Ms;
+    out.frameMax = frame.maxMs;
+}
+
+int ZoneRegistry::LogSimDiag()
+{
+    SimDiag d;
+    GatherSimDiag(d);
+    LOG_INFO(Core,
+             "[gmsim] zones bubble={} remote={} live occ={} res={} civ={} total={} groups occ={} res={} civ={} "
+             "maxSide={} garrison zones={} bodies={} traffic civ={} parked={} patrol={} convoy={} "
+             "gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms",
+             d.zonesInBubble, d.zonesRemoteTicked, d.liveOcc, d.liveRes, d.liveCiv, d.liveTotal, d.grpOcc, d.grpRes,
+             d.grpCiv, d.grpMaxSide, d.garrisonSpawnedZones, d.garrisonLiveBodies, d.trafficCiv, d.trafficParked,
+             d.trafficPatrol, d.trafficConvoy, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg, d.frameP95, d.frameMax);
+    const int bits = SimBudgetBreaches(d, _tuning);
+    if (bits & SBLiveBodies)
+    {
+        LOG_WARN(Core, "[gmsim] budget: {} live AI bodies exceeds budgetLiveBodies {}", d.liveTotal,
+                 _tuning.budgetLiveBodies);
+    }
+    if (bits & SBSideGroups)
+    {
+        LOG_WARN(Core, "[gmsim] budget: {} groups on one side exceeds budgetSideGroups {}", d.grpMaxSide,
+                 _tuning.budgetSideGroups);
+    }
+    return bits;
 }
 
 // a CfgMarkerColors class the installed config overlay defines, else the stock
@@ -2454,6 +2640,8 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     // journal intel age (2026-09); absent in older saves = never seen
     PARAM_CHECK(ar.Serialize("seenDay", seenDay, 1, 0))
     PARAM_CHECK(ar.Serialize("seenMinute", seenMinute, 1, 0))
+    // D2 recovery clock (issue #71); absent in older saves = a fresh clock
+    PARAM_CHECK(ar.Serialize("recoverClock", recoverClock, 1, 0.0f))
     return LSOK;
 }
 
@@ -2481,6 +2669,7 @@ void ZoneRegistry::ApplyPendingLoad()
         z.revealed = row.revealed;
         z.seenDay = row.seenDay;
         z.seenMinute = row.seenMinute;
+        z.recoverClock = row.recoverClock;
         // reconstruct the one-shot threshold edge from the loaded value: a
         // town saved in the READY-waiting state must not re-announce itself
         // on every reload
@@ -2508,6 +2697,7 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.revealed = z.revealed;
             row.seenDay = z.seenDay;
             row.seenMinute = z.seenMinute;
+            row.recoverClock = z.recoverClock;
             _pending.Add(row);
         }
     }

@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // D2 recovery: zone alert GREEN
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -105,6 +106,7 @@ void GarrisonCache::LoadFromParams(const ParamEntry* zonesCfg)
     }
     _tuning.cacheInterval = zonesCfg->ReadValue("cacheInterval", _tuning.cacheInterval);
     _tuning.groupSize = toInt(zonesCfg->ReadValue("groupSize", (float)_tuning.groupSize));
+    _tuning.recoverInterval = zonesCfg->ReadValue("garrisonRecoverInterval", _tuning.recoverInterval);
     if (_tuning.groupSize < 1)
     {
         _tuning.groupSize = 1;
@@ -247,6 +249,40 @@ GarrisonAction GarrisonCache::Decide(const GarrisonDecisionInput& in, float cach
     }
     float rOut = cacheRadius + despawnHysteresis;
     return in.playerDistSq > rOut * rOut ? GActDespawn : GActNone;
+}
+
+int GarrisonCache::StepRecover(const GarrisonRecoverInput& in, float elapsed, float interval, float cacheRadius,
+                               float despawnHysteresis, float& clock)
+{
+    if (interval <= 0)
+    {
+        clock = 0;
+        return 0;
+    }
+    if (!in.playerValid)
+    {
+        return 0; // freeze, like every other zone clock while the player is dead
+    }
+    float rOut = cacheRadius + despawnHysteresis;
+    bool eligible = in.occupierOwned && !in.spawned && in.playerDistSq > rOut * rOut && in.alertGreen &&
+                    in.capture <= 0 && in.resistancePresent == 0 && in.reserve < in.reserveMax;
+    if (!eligible)
+    {
+        clock = 0;
+        return 0;
+    }
+    clock += elapsed;
+    int gained = 0;
+    while (clock >= interval && in.reserve + (float)gained < in.reserveMax)
+    {
+        clock -= interval;
+        gained++;
+    }
+    if (in.reserve + (float)gained >= in.reserveMax)
+    {
+        clock = 0; // at strength: the next loss starts a fresh interval
+    }
+    return gained;
 }
 
 int GarrisonCache::PlanGroups(int reserve, int groupSize, AutoArray<int>& takes)
@@ -531,6 +567,7 @@ void GarrisonCache::Simulate(float deltaT)
     {
         return;
     }
+    const float elapsed = _accum;
     _accum = 0;
 
     World* world = GWorld;
@@ -588,6 +625,27 @@ void GarrisonCache::Simulate(float deltaT)
                 break;
             default:
                 break;
+        }
+
+        // D2 recovery on the stored reserve (issue #71): never while the
+        // garrison is live, so a materialized post never grows a body
+        GarrisonRecoverInput rec;
+        rec.occupierOwned = in.occupierOwned;
+        rec.spawned = state.spawned;
+        rec.reserve = z->garrison;
+        rec.reserveMax = z->garrisonMax;
+        rec.playerValid = playerValid;
+        rec.playerDistSq = in.playerDistSq;
+        rec.alertGreen = AlertMachine::Instance().GetZoneState(i) == ASGreen;
+        rec.capture = z->capture;
+        rec.resistancePresent = z->lastGuer;
+        int gained =
+            StepRecover(rec, elapsed, _tuning.recoverInterval, cacheRadius, DespawnHysteresis, z->recoverClock);
+        if (gained > 0)
+        {
+            z->garrison += (float)gained;
+            LOG_INFO(Core, "Guerrilla: garrison at {} recovered {} (reserve {} of {})", (const char*)z->name, gained,
+                     z->garrison, z->garrisonMax);
         }
     }
     // handlers run only after the cache's own state mutation completed

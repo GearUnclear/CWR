@@ -76,9 +76,17 @@ TEST_CASE("GarrisonCache - config parse of cacheInterval/groupSize", "[game][gue
     SECTION("explicit keys override")
     {
         CacheFixture f;
-        f.Load("class CfgGuerrillaZones { cacheInterval = 8; groupSize = 6; };\n");
+        f.Load("class CfgGuerrillaZones { cacheInterval = 8; groupSize = 6; garrisonRecoverInterval = 15; };\n");
         REQUIRE(f.cache.Tuning().cacheInterval == Approx(8.0f));
         REQUIRE(f.cache.Tuning().groupSize == 6);
+        REQUIRE(f.cache.Tuning().recoverInterval == Approx(15.0f));
+    }
+
+    SECTION("D2 recovery defaults to one body per 600 s")
+    {
+        CacheFixture f;
+        f.Load("class CfgGuerrillaZones { tickInterval = 3; };\n");
+        REQUIRE(f.cache.Tuning().recoverInterval == Approx(600.0f));
     }
 
     SECTION("degenerate groupSize is clamped to 1")
@@ -134,6 +142,111 @@ TEST_CASE("GarrisonCache - spawn/despawn decision", "[game][guerrilla]")
         REQUIRE(GarrisonCache::Decide(MakeInput(false, true, 0, true, 100), kRadius, kHyst) == GActDespawn);
         // ...but non-occupier zones never spawn
         REQUIRE(GarrisonCache::Decide(MakeInput(false, false, 8, true, 100), kRadius, kHyst) == GActNone);
+    }
+}
+
+// D2 (issue #71): a distant, calm, untouched occupier post regains one body
+// per interval up to its garrisonMax
+TEST_CASE("GarrisonCache - D2 reserve recovery step", "[game][guerrilla]")
+{
+    const float R = 800.0f;
+    const float H = GarrisonCache::DespawnHysteresis;
+    auto eligible = []()
+    {
+        GarrisonRecoverInput in;
+        in.occupierOwned = true;
+        in.spawned = false;
+        in.reserve = 2;
+        in.reserveMax = 6;
+        in.playerValid = true;
+        in.playerDistSq = 3000.0f * 3000.0f;
+        in.alertGreen = true;
+        in.capture = 0;
+        in.resistancePresent = 0;
+        return in;
+    };
+
+    SECTION("one body per full interval of calm, carried across passes")
+    {
+        GarrisonRecoverInput in = eligible();
+        float clock = 0;
+        int gained = 0;
+        for (int pass = 0; pass < 119; pass++) // 595 s in 5 s passes
+        {
+            gained += GarrisonCache::StepRecover(in, 5.0f, 600.0f, R, H, clock);
+        }
+        REQUIRE(gained == 0);
+        REQUIRE(clock == Approx(595.0f));
+        REQUIRE(GarrisonCache::StepRecover(in, 5.0f, 600.0f, R, H, clock) == 1);
+        REQUIRE(clock == Approx(0.0f));
+    }
+
+    SECTION("never past reserveMax; at strength the clock rests at 0")
+    {
+        GarrisonRecoverInput in = eligible();
+        in.reserve = 5;
+        float clock = 0;
+        REQUIRE(GarrisonCache::StepRecover(in, 1800.0f, 600.0f, R, H, clock) == 1); // 3 intervals, room for 1
+        REQUIRE(clock == Approx(0.0f));
+        in.reserve = 6;
+        REQUIRE(GarrisonCache::StepRecover(in, 600.0f, 600.0f, R, H, clock) == 0);
+        REQUIRE(clock == Approx(0.0f));
+    }
+
+    SECTION("a long elapsed window regains several bodies")
+    {
+        GarrisonRecoverInput in = eligible();
+        float clock = 0;
+        REQUIRE(GarrisonCache::StepRecover(in, 1300.0f, 600.0f, R, H, clock) == 2);
+        REQUIRE(clock == Approx(100.0f));
+    }
+
+    SECTION("every disqualifier restarts the clock")
+    {
+        auto check = [&](GarrisonRecoverInput in)
+        {
+            float clock = 500.0f;
+            REQUIRE(GarrisonCache::StepRecover(in, 200.0f, 600.0f, R, H, clock) == 0);
+            REQUIRE(clock == Approx(0.0f));
+        };
+        GarrisonRecoverInput in = eligible();
+        in.occupierOwned = false; // liberated zones never re-garrison (no recapture in v1)
+        check(in);
+        in = eligible();
+        in.spawned = true; // a live garrison never grows a body
+        check(in);
+        in = eligible();
+        in.playerDistSq = (R + H) * (R + H); // at the despawn edge is not distant
+        check(in);
+        in = eligible();
+        in.alertGreen = false;
+        check(in);
+        in = eligible();
+        in.capture = 6; // a capture in progress
+        check(in);
+        in = eligible();
+        in.resistancePresent = 1; // fighters standing in the post
+        check(in);
+        in = eligible();
+        in.reserveMax = 0; // nothing authored to recover to
+        check(in);
+    }
+
+    SECTION("a dead player freezes the clock instead of restarting it")
+    {
+        GarrisonRecoverInput in = eligible();
+        in.playerValid = false;
+        float clock = 500.0f;
+        REQUIRE(GarrisonCache::StepRecover(in, 200.0f, 600.0f, R, H, clock) == 0);
+        REQUIRE(clock == Approx(500.0f));
+    }
+
+    SECTION("interval 0 turns recovery off")
+    {
+        GarrisonRecoverInput in = eligible();
+        float clock = 0;
+        REQUIRE(GarrisonCache::StepRecover(in, 5000.0f, 0.0f, R, H, clock) == 0);
+        REQUIRE(clock == Approx(0.0f));
     }
 }
 

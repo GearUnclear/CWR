@@ -28,6 +28,10 @@ struct GarrisonTuning
 {
     float cacheInterval = 5.0f; // s between cache passes
     int groupSize = 12;         // max bodies per garrison group
+    // Off-screen contract D2 (issue #71): a distant, calm, untouched
+    // occupier post regains one body per garrisonRecoverInterval seconds,
+    // up to its garrisonMax (default: the authored garrison).  0 = off.
+    float recoverInterval = 600.0f;
 };
 
 enum GarrisonEventType
@@ -49,6 +53,20 @@ enum GarrisonAction
     GActNone,
     GActSpawn,
     GActDespawn
+};
+
+// Per-zone observations for the D2 recovery step (StepRecover).
+struct GarrisonRecoverInput
+{
+    bool occupierOwned = false; // non-CITY zone held by the occupier
+    bool spawned = false;       // live cache groups exist for the zone
+    float reserve = 0;          // ZoneRecord::garrison
+    float reserveMax = 0;       // ZoneRecord::garrisonMax
+    bool playerValid = false;   // real player exists and is alive
+    float playerDistSq = 0;     // squared 2D player-to-zone distance
+    bool alertGreen = true;     // AlertMachine zone state is GREEN
+    float capture = 0;          // ZoneRecord::capture
+    int resistancePresent = 0;  // live resistance units in zoneArea (last zone tick)
 };
 
 // Per-zone observations for the pure decision step.  The engine path fills
@@ -97,6 +115,16 @@ class GarrisonCache : public SerializeClass
     static GarrisonAction Decide(const GarrisonDecisionInput& in, float cacheRadius, float despawnHysteresis);
     // split a reserve into per-group body counts; returns the group count
     static int PlanGroups(int reserve, int groupSize, AutoArray<int>& takes);
+    // D2 garrison recovery (issue #71): advance a zone's recovery clock by
+    // elapsed seconds and return the bodies it regains (never past
+    // reserveMax).  Eligible = occupier-owned, not spawned, the player alive
+    // and beyond the despawn edge (cacheRadius + hysteresis), alert GREEN,
+    // no capture in progress, no live resistance in the zone and short of
+    // reserveMax; an ineligible zone's clock restarts at 0, so recovery
+    // needs a full interval of calm.  A dead player freezes the clock.
+    // interval <= 0 disables recovery.
+    static int StepRecover(const GarrisonRecoverInput& in, float elapsed, float interval, float cacheRadius,
+                           float despawnHysteresis, float& clock);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to cacheInterval

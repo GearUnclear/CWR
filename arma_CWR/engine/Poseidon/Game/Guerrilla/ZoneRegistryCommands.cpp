@@ -13,6 +13,8 @@
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
+#include <initializer_list>
+
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
 
@@ -145,6 +147,14 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
         }
         z->capture = capture;
     }
+    else if (stricmp(field, "garrisonMax") == 0)
+    {
+        z->garrisonMax = (float)array[2];
+    }
+    else if (stricmp(field, "recoverClock") == 0)
+    {
+        z->recoverClock = (float)array[2];
+    }
     else if (stricmp(field, "heatRaise") == 0)
     {
         registry.HeatRaise(index, (float)array[2]);
@@ -154,6 +164,80 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
         registry.HeatDecay(index, (float)array[2]);
     }
     return NOTHING;
+}
+
+// gmZoneSim <index> -> the zone's off-screen contract state (issue #71):
+// [inBubble, guer, occ, seenDay, seenMinute, contested, lastRemote,
+//  garrisonMax, recoverClock] as of the last zone tick; empty array out of
+// range
+static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    const ZoneRecord* z = ZoneRegistry::Instance().GetZone(toInt((float)oper1));
+    if (!z)
+    {
+        return value;
+    }
+    array.Resize(9);
+    array[0] = z->lastInBubble;
+    array[1] = (float)z->lastGuer;
+    array[2] = (float)z->lastOcc;
+    array[3] = (float)z->seenDay;
+    array[4] = (float)z->seenMinute;
+    array[5] = z->contestedLastTick;
+    array[6] = z->lastRemote;
+    array[7] = z->garrisonMax;
+    array[8] = z->recoverClock;
+    return value;
+}
+
+static GameValue ScalarArray(const GameState* state, std::initializer_list<float> values)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize((int)values.size());
+    int i = 0;
+    for (float v : values)
+    {
+        array[i++] = v;
+    }
+    return value;
+}
+
+// gmSimDiag -> one live-entity / timing sample (issue #71 section 6):
+// [zonesInBubble, zonesRemoteTicked, [liveOcc, liveRes, liveCiv, liveTotal],
+//  [grpOcc, grpRes, grpCiv, grpMaxSide], garrisonSpawnedZones,
+//  garrisonLiveBodies, [trafficCiv, parked, patrol, convoy],
+//  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits]
+// (ms timings over the FrameProfiler's 256-frame ring; breach bits 1 = live
+// bodies, 2 = groups on one side)
+static GameValue GmSimDiag(const GameState* state)
+{
+    SimDiag d;
+    GatherSimDiag(d);
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(10);
+    array[0] = (float)d.zonesInBubble;
+    array[1] = (float)d.zonesRemoteTicked;
+    array[2] = ScalarArray(state, {(float)d.liveOcc, (float)d.liveRes, (float)d.liveCiv, (float)d.liveTotal});
+    array[3] = ScalarArray(state, {(float)d.grpOcc, (float)d.grpRes, (float)d.grpCiv, (float)d.grpMaxSide});
+    array[4] = (float)d.garrisonSpawnedZones;
+    array[5] = (float)d.garrisonLiveBodies;
+    array[6] = ScalarArray(
+        state, {(float)d.trafficCiv, (float)d.trafficParked, (float)d.trafficPatrol, (float)d.trafficConvoy});
+    array[7] = ScalarArray(state, {d.gmAvg, d.gmP95, d.gmMax});
+    array[8] = ScalarArray(state, {d.frameAvg, d.frameP95, d.frameMax});
+    array[9] = (float)SimBudgetBreaches(d, ZoneRegistry::Instance().Tuning());
+    return value;
+}
+
+// gmSimDiagLog -> write one [gmsim] line now (plus budget WARNs); returns the
+// breach bits.  The periodic line runs every simDiagInterval regardless.
+static GameValue GmSimDiagLog(const GameState* /*state*/)
+{
+    return (float)ZoneRegistry::Instance().LogSimDiag();
 }
 
 // gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
@@ -386,6 +470,9 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     GGameState.NewNularOp(GameNular(GameString, "gmResistanceSide", GmResistanceSide));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmZone", GmZone, GameScalar));
+    GGameState.NewFunction(GameFunction(GameArray, "gmZoneSim", GmZoneSim, GameScalar));
+    GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
+    GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneSet", GmZoneSet, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneOnEvent", GmZoneOnEvent, GameArray));

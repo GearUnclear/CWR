@@ -436,16 +436,88 @@ TEST_CASE("ZoneRegistry - military capture rules", "[game][guerrilla]")
         REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
     }
 
-    SECTION("outside cacheRadius the meter freezes - no gain, no decay")
+    // Off-screen contract D1 (issue #71): outside cacheRadius a zone keeps
+    // ticking while live resistance units hold it or its meter is above 0.
+    // The player is parked at FarPost (20 km away) in every remote section.
+    SECTION("remote: troops left at an empty post keep securing it and flip it")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, 3, outpost, 3);
+        f.registry.EvaluateTick(in, fired);
+        const ZoneRecord* z = f.registry.GetZone(outpost);
+        REQUIRE(z->capture == Approx(18.0f)); // 6 x 3 crew, same as in the bubble
+        REQUIRE(z->lastRemote);
+        REQUIRE_FALSE(z->lastInBubble);
+        REQUIRE(f.registry.LastTickRemote() == 1);
+        REQUIRE(CountEvents(fired, ZECaptureStarted, outpost) == 1);
+        Ticks(f.registry, in, fired, 5); // 18 x 6 = 108 -> flips on the 6th tick
+        REQUIRE(Str(z->owner) == "GUER");
+        REQUIRE(z->heat == Approx(40.0f));
+        REQUIRE(z->income == Approx(25.0f));
+        REQUIRE(CountEvents(fired, ZECaptured, outpost) == 1);
+    }
+
+    SECTION("remote: troops against a stored reserve are a frozen standoff")
+    {
+        f.registry.GetZoneMutable(outpost)->capture = 30; // garrison stays 8
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, 3, outpost, 3);
+        Ticks(f.registry, in, fired, 5);
+        const ZoneRecord* z = f.registry.GetZone(outpost);
+        REQUIRE(Str(z->owner) == "EAST");
+        REQUIRE(z->capture == Approx(30.0f)); // no gain, no decay
+        REQUIRE(z->contestedLastTick);
+        REQUIRE(CountEvents(fired, ZEContested, outpost) == 1);
+        REQUIRE(z->garrison == Approx(8.0f)); // no remote combat
+    }
+
+    SECTION("remote: an unheld half-capture decays (abandoned 2/tick, defended 10/tick)")
     {
         f.registry.GetZoneMutable(outpost)->garrison = 0;
         f.registry.GetZoneMutable(outpost)->capture = 50;
         AutoArray<ZoneEventRecord> fired;
-        // player parked at FarPost, GUER unit present at the outpost
-        ZoneTickInputs in = MakeInputs(f.registry, 3, outpost);
+        ZoneTickInputs in = MakeInputs(f.registry, 3, -1);
+        Ticks(f.registry, in, fired, 5);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(40.0f));
+        f.registry.GetZoneMutable(outpost)->garrison = 2; // reserve defends
+        Ticks(f.registry, in, fired, 4);
+        REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
+        REQUIRE(CountEvents(fired, ZECaptureLost, outpost) == 1);
+        // at 0 with nobody there the zone drops out of the remote tick
+        fired.Clear();
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE_FALSE(f.registry.GetZone(outpost)->lastRemote);
+        REQUIRE(f.registry.LastTickRemote() == 0);
+    }
+
+    SECTION("remoteTick = 0 restores the freeze - no gain, no decay")
+    {
+        RegistryFixture off;
+        std::string cfg = kDemoConfig;
+        cfg.replace(cfg.find("holdCount = 3;"), strlen("holdCount = 3;"), "holdCount = 3; remoteTick = 0;");
+        off.Load(cfg.c_str());
+        REQUIRE_FALSE(off.registry.Tuning().remoteTick);
+        off.registry.GetZoneMutable(outpost)->garrison = 0;
+        off.registry.GetZoneMutable(outpost)->capture = 50;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(off.registry, 3, outpost);
+        Ticks(off.registry, in, fired, 3);
+        REQUIRE(Str(off.registry.GetZone(outpost)->owner) == "EAST");
+        REQUIRE(off.registry.GetZone(outpost)->capture == Approx(50.0f));
+        REQUIRE_FALSE(off.registry.GetZone(outpost)->lastRemote);
+    }
+
+    SECTION("a dead player freezes every zone, near or far")
+    {
+        f.registry.GetZoneMutable(outpost)->garrison = 0;
+        f.registry.GetZoneMutable(outpost)->capture = 50;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, -1, outpost); // playerValid false
         Ticks(f.registry, in, fired, 3);
-        REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
         REQUIRE(f.registry.GetZone(outpost)->capture == Approx(50.0f));
+        // the presence census still runs (gmZoneSim, D2 eligibility)
+        REQUIRE(f.registry.GetZone(outpost)->lastGuer == 1);
     }
 
     SECTION("consolidation: solo capture accrues 6/tick and flips on the 17th")
@@ -804,6 +876,111 @@ TEST_CASE("ZoneRegistry - city support and threshold flip", "[game][guerrilla]")
         REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
         REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 0);
     }
+}
+
+TEST_CASE("ZoneRegistry - remote towns gain support but never lose it to intimidation (issue #71 D1)",
+          "[game][guerrilla]")
+{
+    RegistryFixture f;
+    f.Load(kDemoConfig);
+    const int village = 1;
+    const int farPost = 3; // the player stands here, 20 km from the town
+
+    SECTION("organizers left in a town keep organizing and flip it")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, farPost, village);
+        Ticks(f.registry, in, fired, 7);
+        const ZoneRecord* z = f.registry.GetZone(village);
+        REQUIRE(z->support == Approx(55.0f));
+        REQUIRE(z->lastRemote);
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(Str(z->owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
+    }
+
+    SECTION("occupier-only presence far away leaves support alone")
+    {
+        f.registry.GetZoneMutable(village)->support = 50;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, farPost, -1);
+        in.occCount[village] = 3;
+        Ticks(f.registry, in, fired, 10);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(50.0f));
+        REQUIRE_FALSE(f.registry.GetZone(village)->lastRemote); // not even ticked
+    }
+
+    SECTION("fighters and occupiers together far away: frozen, no flip")
+    {
+        f.registry.GetZoneMutable(village)->support = 80;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, farPost, village);
+        in.occCount[village] = 1;
+        Ticks(f.registry, in, fired, 4);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(80.0f));
+        REQUIRE(Str(f.registry.GetZone(village)->owner) == "NEUTRAL");
+    }
+
+    SECTION("the same intimidation still applies inside the bubble")
+    {
+        f.registry.GetZoneMutable(village)->support = 50;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, village, -1);
+        in.occCount[village] = 3;
+        Ticks(f.registry, in, fired, 4);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(48.0f));
+        REQUIRE(f.registry.GetZone(village)->lastInBubble);
+    }
+}
+
+TEST_CASE("ZoneRegistry - off-screen contract config keys (issue #71)", "[game][guerrilla]")
+{
+    SECTION("defaults: remoteTick on, garrisonMax = authored garrison, budgets 130/40")
+    {
+        RegistryFixture f;
+        f.Load(kDemoConfig);
+        REQUIRE(f.registry.Tuning().remoteTick);
+        REQUIRE(f.registry.Tuning().simDiagInterval == Approx(60.0f));
+        REQUIRE(f.registry.Tuning().budgetLiveBodies == 130);
+        REQUIRE(f.registry.Tuning().budgetSideGroups == 40);
+        REQUIRE(f.registry.GetZone(2)->garrisonMax == Approx(8.0f));
+        REQUIRE(f.registry.GetZone(3)->garrisonMax == Approx(4.0f));
+        REQUIRE(f.registry.GetZone(2)->recoverClock == Approx(0.0f));
+    }
+
+    SECTION("explicit keys")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    remoteTick = 0; simDiagInterval = 15; budgetLiveBodies = 90; budgetSideGroups = 20;\n"
+                             "    class Zones { class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"EAST\"; "
+                             "garrison=4; garrisonMax=10; position[]={1000.0, 1000.0, 0.0}; }; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config);
+        REQUIRE_FALSE(f.registry.Tuning().remoteTick);
+        REQUIRE(f.registry.Tuning().simDiagInterval == Approx(15.0f));
+        REQUIRE(f.registry.Tuning().budgetLiveBodies == 90);
+        REQUIRE(f.registry.Tuning().budgetSideGroups == 20);
+        REQUIRE(f.registry.GetZone(0)->garrison == Approx(4.0f));
+        REQUIRE(f.registry.GetZone(0)->garrisonMax == Approx(10.0f));
+    }
+}
+
+TEST_CASE("SimBudgetBreaches - live bodies and per-side groups (issue #71)", "[game][guerrilla]")
+{
+    ZoneTuning t;
+    SimDiag d;
+    d.liveTotal = 130;
+    d.grpMaxSide = 40;
+    REQUIRE(SimBudgetBreaches(d, t) == 0); // at the cap is within budget
+    d.liveTotal = 131;
+    REQUIRE(SimBudgetBreaches(d, t) == SBLiveBodies);
+    d.grpMaxSide = 41;
+    REQUIRE(SimBudgetBreaches(d, t) == (SBLiveBodies | SBSideGroups));
+    t.budgetLiveBodies = 0; // off
+    t.budgetSideGroups = 0;
+    REQUIRE(SimBudgetBreaches(d, t) == 0);
 }
 
 TEST_CASE("ZoneRegistry - heat clamps", "[game][guerrilla]")
@@ -1630,6 +1807,7 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
         z->liveOccupiers = 2;
         z->capture = 33; // mid-consolidation progress must survive a reload
         z->revealed = true;
+        z->recoverClock = 420; // D2 recovery clock (issue #71)
         // 70 >= supportFlip: the town is saved in the READY-waiting state
         f.registry.GetZoneMutable(village)->support = 70;
         f.registry.HeatRaise(outpost, 55);
@@ -1673,6 +1851,9 @@ TEST_CASE("ZoneRegistry - zone rows, handlers and the load notification survive 
     CHECK(z->liveOccupiers == Approx(2.0f));
     CHECK(z->capture == Approx(33.0f));
     CHECK(z->revealed);
+    CHECK(z->recoverClock == Approx(420.0f));
+    CHECK(z->garrisonMax == Approx(8.0f)); // static, rebuilt from config
+    CHECK(loaded.GetZone(village)->recoverClock == Approx(0.0f));
     CHECK(loaded.GetZone(village)->support == Approx(70.0f));
     // village had no capture in progress; the row default is 0
     CHECK(loaded.GetZone(village)->capture == Approx(0.0f));

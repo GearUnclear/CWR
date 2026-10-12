@@ -36,7 +36,18 @@ struct ZoneTuning
     float tickInterval = 3.0f; // s between zone ticks
     float zoneArea = 150.0f;   // capture / presence radius (m)
     float revealRadius = 1500.0f;
-    float cacheRadius = 800.0f;  // player-distance gate for capture math
+    float cacheRadius = 800.0f; // the simulation bubble: zones inside always tick
+    // Off-screen contract D1 (issue #71, guerrilla-mode/OFFSCREEN-CONTRACT.md):
+    // a zone outside cacheRadius still ticks while live resistance units
+    // stand in it, or while its capture meter is above 0 (so an unheld
+    // half-capture decays).  Remote CITY ticks gain support only: there is
+    // no remote intimidation decay.  Config key remoteTick (0/1).
+    bool remoteTick = true;
+    // [gmsim] diagnostics line every simDiagInterval s (0 = off) and the
+    // live-entity budgets it warns on (issue #71 section 6)
+    float simDiagInterval = 60.0f;
+    int budgetLiveBodies = 130;  // live AI bodies, every side (hard cap)
+    int budgetSideGroups = 40;   // groups on any one side center (engine cap 63)
     float supportRate = 5.0f;    // CITY support gained per tick while GUER present
     float supportFlip = 60.0f;   // CITY support threshold for NEUTRAL -> GUER
     float heatCapSpike = 40.0f;  // Heat added on capture (clamped to 100)
@@ -100,6 +111,9 @@ struct ZoneRecord
     RString ownerConfig;
     // per-zone captureRate override (0 = use tuning); static, config-rebuilt
     float captureRateOverride = 0;
+    // D2 garrison recovery ceiling (issue #71): config garrisonMax, default
+    // the authored garrison.  Static, config-rebuilt, never serialized.
+    float garrisonMax = 0;
 
     // dynamic, serialized (matched by zone name on load)
     RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
@@ -114,14 +128,60 @@ struct ZoneRecord
     bool revealed = false;   // fog-of-war state
     // intel age for the journal's zone ledger: the campaign day (1-based, 0
     // = never) and minute of day the zone was last inside the player's
-    // simulation bubble (cacheRadius), i.e. when its meters last moved
+    // simulation bubble (cacheRadius).  Remote ticks (D1) do not stamp it:
+    // "seen" means the player was near, not that the meters last moved.
     int seenDay = 0;
     int seenMinute = 0;
+    // D2 recovery clock (s): time this zone has spent calm, distant and
+    // short of garrisonMax since its last recovered body.  Serialized
+    // (absent in older saves: 0).
+    float recoverClock = 0;
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
     bool supportReadyNotified = false; // supportThreshold fired for the current crossing
+    // last zone tick's presence and bubble state (gmZoneSim, D2 eligibility)
+    int lastGuer = 0;
+    int lastOcc = 0;
+    bool lastInBubble = false;
+    bool lastRemote = false; // the last tick ran this zone's meters from outside the bubble
 };
+
+// One gmSimDiag / [gmsim] sample (issue #71 section 6): what the off-screen
+// contract's budgets are measured against.  Filled by GatherSimDiag.
+struct SimDiag
+{
+    int zonesInBubble = 0;
+    int zonesRemoteTicked = 0; // remote meter updates on the last zone tick
+    int liveOcc = 0;
+    int liveRes = 0;
+    int liveCiv = 0;
+    int liveTotal = 0; // every side center, player included
+    int grpOcc = 0;
+    int grpRes = 0;
+    int grpCiv = 0;
+    int grpMaxSide = 0; // largest group count on any one side center
+    int garrisonSpawnedZones = 0;
+    int garrisonLiveBodies = 0;
+    int trafficCiv = 0;
+    int trafficParked = 0;
+    int trafficPatrol = 0;
+    int trafficConvoy = 0;
+    float gmAvg = 0, gmP95 = 0, gmMax = 0;          // FrameProfiler "gm" phase (ms)
+    float frameAvg = 0, frameP95 = 0, frameMax = 0; // whole frame (ms)
+};
+
+enum SimBudgetBreach
+{
+    SBLiveBodies = 1, // liveTotal > budgetLiveBodies
+    SBSideGroups = 2, // grpMaxSide > budgetSideGroups
+};
+
+// pure budget check (unit-tested): SimBudgetBreach bits, 0 = within budget.
+// A budget <= 0 is off.
+int SimBudgetBreaches(const SimDiag& d, const ZoneTuning& t);
+// world-touching sampler (engine path); zero sample without a world
+void GatherSimDiag(SimDiag& out);
 
 // One occupier or resistance faction entry (a subclass of
 // CfgGuerrillaFactions).  Non-array text entries (officer, holdClass, ...)
@@ -394,6 +454,12 @@ class ZoneRegistry : public SerializeClass
     void Simulate(float deltaT);
     // pure tick logic: mutates zone state, appends fired events (no world access)
     void EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRecord>& fired);
+    // the last EvaluateTick's bubble census (gmSimDiag)
+    int LastTickInBubble() const { return _lastTickInBubble; }
+    int LastTickRemote() const { return _lastTickRemote; }
+    // sample GatherSimDiag and log one [gmsim] INFO line, plus a WARN per
+    // breached budget; returns the SimBudgetBreach bits
+    int LogSimDiag();
 
     // save/load; dynamic per-zone state keyed by zone name
     LSError Serialize(ParamArchive& ar) override;
@@ -413,6 +479,7 @@ class ZoneRegistry : public SerializeClass
         bool revealed = false;
         int seenDay = 0;
         int seenMinute = 0;
+        float recoverClock = 0;
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -474,6 +541,9 @@ class ZoneRegistry : public SerializeClass
     RString _resistanceFaction;
     RString _handlers[NZoneEventTypes];
     float _accum = 0;
+    float _simDiagAccum = 0;   // [gmsim] cadence
+    int _lastTickInBubble = 0; // transient census of the last EvaluateTick
+    int _lastTickRemote = 0;
     // deserialized rows waiting for the mission config (applied on the
     // second load pass, once description.ext has been reparsed)
     AutoArray<ZoneSaveState> _pending;

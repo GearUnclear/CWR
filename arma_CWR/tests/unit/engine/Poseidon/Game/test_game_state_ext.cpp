@@ -478,6 +478,10 @@ TEST_CASE("Guerrilla zone-registry commands are registered in GGameState", "[gam
     REQUIRE(ContainsName(functions, "gmZoneIndex"));
     REQUIRE(ContainsName(functions, "gmZoneSet"));
     REQUIRE(ContainsName(functions, "gmZoneOnEvent"));
+    // off-screen contract diagnostics (issue #71)
+    REQUIRE(ContainsName(functions, "gmZoneSim"));
+    REQUIRE(ContainsName(nulars, "gmSimDiag"));
+    REQUIRE(ContainsName(nulars, "gmSimDiagLog"));
     REQUIRE(ContainsName(functions, "gmFactionTierClass"));
     REQUIRE(ContainsName(functions, "gmFactionValue"));
     REQUIRE(ContainsName(functions, "gmFactionVehicle"));

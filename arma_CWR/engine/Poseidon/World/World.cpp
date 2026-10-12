@@ -1702,6 +1702,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #else
         PerformAI(deltaT, noAccDeltaT);
 #endif
+        // the Guerrilla block below is timed as its own "gm" phase (issue
+        // #71 budgets); Mark accumulates, so ai+veh still covers PerformAI
+        // and SimulateAllVehicles
+        perf.Mark(Dev::FrameProfiler::PhaseAiVehicles);
         // Guerrilla Mode zone tick - no-op unless the mission config
         // defines CfgGuerrillaZones; throttles itself to tickInterval.
         Guerrilla::ZoneRegistry::Instance().Simulate(deltaT);
@@ -1731,6 +1735,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // campaign identity set on its first active tick, then observes the
         // GM_COMP_* arrays at LegendRegistry::TickInterval.
         Guerrilla::LegendRegistry::Instance().Simulate(deltaT);
+        perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 

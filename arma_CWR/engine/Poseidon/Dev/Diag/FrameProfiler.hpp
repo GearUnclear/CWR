@@ -31,6 +31,7 @@ class FrameProfiler
         PhaseAiVehicles,   // PerformAI + SimulateAllVehicles
         PhaseSound,        // PerformSound + AdvanceAll + Commit
         PhaseSwap,         // NextFrame (resolve + present)
+        PhaseGuerrilla,    // Guerrilla native services (zone/garrison/traffic/... ticks), issue #71
         PhaseCount,
         // Draw sub-phase range for aggregation (panel + triPerfStats draw=).
         PhaseDrawFirst = PhaseDrawInit,
@@ -40,7 +41,7 @@ class FrameProfiler
     static const char* PhaseName(int p)
     {
         static const char* kNames[PhaseCount] = {"setup",    "drw:init", "drw:prep", "land:gnd", "land:obj", "drw:land", "drw:obj",
-                                                 "drw:post", "hud",      "ai+veh",   "sound",    "swap"};
+                                                 "drw:post", "hud",      "ai+veh",   "sound",    "swap",     "gm"};
         return (p >= 0 && p < PhaseCount) ? kNames[p] : "?";
     }
 
