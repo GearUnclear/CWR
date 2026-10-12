@@ -204,6 +204,21 @@ class IconAdditionTests(unittest.TestCase):
                 with self.subTest(mode=mode), self.assertRaises(ValueError):
                     weapons.add_members({}, source)
 
+    def test_claims_hk_archives_and_takes_the_tuple_plan_passes(self):
+        # repair_lobo.plan matches repeated --asset-source options to rules by
+        # content and passes the claimed paths as a tuple.
+        from repair.pbo import Archive
+        self.assertTrue(weapons.claims_source(Archive(self.source.read_bytes())))
+        one = next(iter(weapons.ICONS.values()))[1]
+        partial = self.write("one-icon.pbo", make_pbo([(one.replace("/", BS).encode(), b"x", 0)]))
+        self.assertTrue(weapons.claims_source(Archive(partial.read_bytes())))
+        other = self.write("other.pbo", make_pbo([(b"LoBo_Mk81.p3d", b"MLOD", 0)]))
+        self.assertFalse(weapons.claims_source(Archive(other.read_bytes())))
+        self.assertEqual(weapons.add_members({}, self.source), weapons.add_members({}, (self.source,)))
+        self.assertEqual(weapons.add_members({}, None), weapons.add_members({}, ()))
+        with self.assertRaisesRegex(ValueError, "Several --asset-source"):
+            weapons.add_members({}, (self.source, partial))
+
 
 if __name__ == "__main__":
     unittest.main()

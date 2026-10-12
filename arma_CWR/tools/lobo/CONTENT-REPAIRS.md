@@ -14,10 +14,15 @@ verified on the UD engine on 2026-10-12 for
 [LoBo #14](https://github.com/GearUnclear/lobo/issues/14), the pilot wounds
 below, and the four LoBo #9 items the .3 runs left open (see "Runtime
 verification" at the end of this section). The official Remaster exe smoke
-test of the rebuilt family package is still pending. Three fail-closed rule
-modules run last, after `textures`: `tailgun`, `references` and `wounds`,
-applied in two batches. All are profile-neutral: they write OFP 1.x SQS
-(`isNull`, `driver`, `count`), config string literals, texture names or plain
+test of the rebuilt family package found a Classic wreck-fire query bug; the
+fix and a byte-for-byte restoration of ten missing members are implemented
+but not applied yet (see "Third part" below), and so are nine repoints of
+the remaining references to files LoBo ships under another name (see
+"Fourth part"; "Pending apply" gives the command for both). Three
+fail-closed rule modules run last, after `textures`: `tailgun`, `references`
+and `wounds`, applied in two batches. All are profile-neutral: they write
+OFP 1.x SQS (`isNull`, `driver`, `count`), config string literals, texture
+names or plain
 DXT1 textures, so the UD and Classic plans give the same bytes and the
 package's Classic switch leaves these members alone.
 
@@ -325,14 +330,329 @@ its `KioGlowFire` existed, 0.12 s after the kill.
 Whether "Put out fire" on a wreck glow is acceptable is the user's call: the
 run shows the script's particles, `say` lines and cleanup going on after it.
 
-Side observation, not a .4 target: `refs-01` logged
-`lobo_airammo\lobo_mk81.p3d` as not found (four lookups) when the MiG-21bis
-MR1 was created.
+Side observation: `refs-01` logged `lobo_airammo\lobo_mk81.p3d` as not found
+(four lookups) when the MiG-21bis MR1 was created. The third part (below)
+restores it.
 
 Not covered yet: the official Remaster exe smoke test of the rebuilt family
 package (menu boot and an in-mission run of the R1 case G and the R2 spawns)
 is still running separately, so nothing above is claimed for the official
 exe. The optional UD run with all four package modfolders was not run.
+
+### Third part: Classic wreck-fire query and restored members
+
+Implemented and offline verified on 2026-10-12, not applied and not runtime
+verified. Rule SHA-256
+`038742923721bf1b5e46832bb8cabfdee655603aef494441bf0f123b13f9db3d`. Evidence
+stays local under `D:/Arma_CWA/tmp/lobo-repair-4/restore/` and
+`D:/Arma_CWA/tmp/lobo-missing-models/`.
+
+**Classic wreck-fire query (`scripts`).** The official Remaster exe smoke test
+(`runtime/official-s2-fallback-diag`) stopped with `distance: Type Array,
+expected Object` when a wreck burned. The Classic `_AI` query measured
+`_x distance (_this select 0)`, and its caller passes a position
+(`[getPos _object, 10] call _AI`). The position forms of `distance` are a UD
+addition (`GameStateExt.cpp`, 3ef5cd5); OFP 1.99 and the official exe accept
+Object distance Object only, so all 16 Classic `fire.sqs` failed there. The query
+now measures from the wreck object, as the player check
+(`player distance _object`) does:
+
+```
+before: ... && _x != player && _x distance (_this select 0) < (_this select 1) && !(_x in _units)) then ...
+after:  ... && _x != player && _x distance _object < (_this select 1) && !(_x in _units)) then ...
+```
+
+`_object` is the caller's wreck: `call` evaluates the code in a child of the
+script's variable space (`StringCall`), which the query's
+`units group _object` already relied on. The policy is unchanged: only the
+wreck owner runs the burn, the local player is handled by its own check
+(alive, on foot, within 10 m), the query keeps the living on-foot members of
+the player's and the wreck's groups other than the player, de-duplicated and
+within range, and the damage cadence (at most 0.04 per 10 s) is untouched.
+The literal names only OFP 1.85+ core commands (`private`, `units`, `group`,
+`player`, `alive`, `vehicle`, `distance` on two objects, `in` on an array,
+`forEach`, `if`/`then`, `select`; a test pins this word set) and no UD-only
+command. The earlier literal stays known as `AI_QUERY_CLASSIC_LEGACY`: a copy
+switched with it (the package's Classic @LoBo built from the earlier .4 rule)
+is upgraded in place instead of getting a second query. The UD query is
+byte-identical: the UD check of the installed mod without sources reports 0
+changed members. The Classic check of the installed (UD) mod lists the same 16
+members in 14 archives as before, each 49 bytes longer, all with the same
+one-line diff (the `_AI` line). The official exe smoke test has to be rerun
+with a package built from this rule.
+
+**Restored members (`restore`).** Ten files that the installed data names,
+that are missing from the archive that should hold them, and that an earlier
+LoBo release ships under the same name in the same addon. They are copied
+unchanged (bytes and stored name); nothing is generated or repointed.
+
+| Archive: stored name | Source (release, pbo date) | Bytes | SHA-256 |
+| --- | --- | --- | --- |
+| LoBo_airammo.pbo: `LoBo_Mk81.p3d` | LoBoAddonPack3, 2007-01-06 | 23,291 | `02e83da4b977cc78bfe351357423dab55064dd65ac450d07a97f0092737a5336` |
+| LoBo_airammo.pbo: `LoBo_Mk81_LDGB.p3d` | same | 25,562 | `fd59a0bfdfaa93e6d690efe835f9d39a360ceb0eaaa7f7817769f648c34980d9` |
+| LoBo_airammo.pbo: `LoBo_Mk81_LDGB_d.p3d` | same | 30,592 | `54a6e76b488551b83bbe8bc0c2ce0c82bad97b80d498010d62792998c12813cd` |
+| LoBo_airammo.pbo: `LoBo_Mk82_LDGB.p3d` | same | 25,968 | `51254074addff3a70adac198d51bfb9a7f19bf026d7655cc901e46b7e98e42bc` |
+| LoBo_airammo.pbo: `LoBo_Mk82_LDGB_d.p3d` | same | 30,592 | `3ce1aad6ec76a4ee35831015e64f060a1767878a7183f9ddc2bfb33ec39e5adc` |
+| LoBo_airammo.pbo: `LoBo_Mk83_LDGB.p3d` | same | 26,050 | `65dc83bef7944e27bd2f9311eb74c3f9806e05d1dee9f88850e7dca95d686806` |
+| LoBo_airammo.pbo: `LoBo_Mk83_LDGB_d.p3d` | same | 30,674 | `18b13a48e160f4b605f282c671042b6fa500c6488536ec80392e1b13a7a55567` |
+| LoBo_airammo.pbo: `LoBo_Mk84_LDGB.p3d` | same | 26,050 | `5a4436dc254c8b8d4943e14bb2da6413d057e93198e15ef3e4bf392d28b5adc5` |
+| LoBo_airammo.pbo: `LoBo_Mk84_LDGB_d.p3d` | same | 30,592 | `09db3129eb6bc21d2495488af9c9a6c18f4c8755f090d66032bf020d38da38f5` |
+| LoBoEgypt.pbo: `inf\helm_s_in.pac` | LoBoAddonPack1, 2004-06-11 (LoBoDemo2 has the same bytes) | 43,839 | `e21bd718fa96dd5b6e51c29af5f1a8ec1332d55461f4505ae10d9a00be874669` |
+
+- Bombs: the installed LoBo_airammo.pbo (Jordanian/Syrian pack, 2007-05-26)
+  defines CfgAmmo `LoBo_MK81` and `LoBo_MK8x_LDGB` and CfgNonAIVehicles
+  `ProxyLoBo_Mk81` and `ProxyLoBo_Mk8x_LDGB` on `\LoBo_airammo\LoBo_Mk81`,
+  `LoBo_Mk8x_LDGB` and `LoBo_Mk8x_LDGB_d` (`_D` for Mk-83 and Mk-84; the engine
+  matches names case-insensitively), but lacks the nine models. The MiG-21bis
+  MR1 and MR2 (`LoBo_Mk81Rail2`) and the A-4 (`LoBo_Mk81Rail12`) carry the
+  Mk-81, the F-15 and F-16I the Mk-82 and Mk-84 LDGB. LoBoAddonPack3's
+  LoBo_airammo.pbo has all nine at the pbo root under exactly these names.
+  PoseidonTools `model inspect` loads each (exit 0): MLOD 257, two LODs
+  (visual, Geometry with one `Component01`), no proxies, and the only texture
+  `LoBo_airammo\tex\bomb.pac`, which the installed archive ships with the
+  same bytes (opaque DXT). Wireframe renders show the slick and the
+  retarded (`_d`, fins open) bombs.
+- Helmet texture: LOD 10 of `loboegyhi`, `loboegygrd`, `loboegypara` and
+  `loboegyamphi.p3d` in the installed LoBoEgypt.pbo (LoBoAddonPack3,
+  2006-12-16) names `LoBoEgypt\inf\helm_s_in.pac` on 1, 19, 1 and 1 faces;
+  that release dropped the file, and the runtime logs carry 1,216 load
+  failures for it in 16 runs. In LoBoAddonPack1 and LoBoDemo2 it was the
+  helmet texture of LoBoEgyHI's first LOD (126 faces); 19 and 37 other members
+  of those pbos are byte-identical to the installed ones. DXT1 256x256, 7
+  levels, opaque.
+
+Sources are pbos given with `--asset-source`, now repeatable. Each is matched
+to its rule by content and accepted only when the whole archive equals a
+pinned SHA-256 and every member it supplies equals its pin (stored, not
+compressed); a present member must already carry its pin. The LoBo Reloaded
+library keeps byte-identical 7-Zip extracts of the release pbos next to
+TheHKpack-1.75.pbo in `sources/recovered-2026-10-11/derived/` (with a NOTE):
+
+| Library file | SHA-256 | From |
+| --- | --- | --- |
+| `LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo` (7,597,104 bytes) | `de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd` | `LoBoAddonPack3.rar` (`b36101e2...`), `LoBoAddonPack3\addons\LoBo_airammo.pbo` |
+| `LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo` (14,432,312 bytes) | `992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9` | `LoBoAddonPack1.rar` (`76a87969...`), `LoBoEgypt.pbo` |
+
+LoBoDemo2.rar's LoBoEgypt.pbo (`f7fe8ca9...`) is accepted as well. The tool
+does not call 7-Zip. Without a source its members are left out with one
+`WARN:` line per source (the skip alone does not fail `--check`).
+
+Offline verification: `LoBo_airammo.pbo` and `LoBoEgypt.pbo` rebuilt in tmp
+from the UD plan (8,721,136 to 8,970,861 bytes, SHA-256
+`d54dc5c4d33c54a581b8c602a5b4c37f24057625a484bc056b0f895731427d99`; 57,468,834
+to 57,512,711 bytes, SHA-256
+`5693df3b80cfda5e59186a25da7fa3f4166425537c31ccc12c50f32cecea5eb0`): the
+added records follow the existing ones, PoseidonTools `pbo list` reads 213
+members in LoBo_airammo and `pbo show` returns the added bytes unchanged,
+report-only `mod doctor` finds nothing, and a UD check of a mod copy holding
+them reports 0 changed and 0 added members with and without sources (Classic:
+the 16 fire scripts). Checks of the installed mod: UD with the three sources
+lists exactly the 10 added members in 2 archives and nothing else; UD without
+sources 0 changes, exit 0, two `WARN:` lines; Classic without sources the 16
+fire scripts; Classic with sources 26 members in 15 archives. 314 synthetic
+tests pass (two opt-in real-archive tests skipped by default; the restore one,
+`LOBO_RESTORE_SOURCES`, passed on the library pbos and on LoBoDemo2's
+LoBoEgypt.pbo).
+
+Framework: `--asset-source` may be repeated. `plan()` hands each source to
+the one rule whose `claims_source(archive)` recognizes it (`weapons`: any of
+the seven icon names; `restore`: a pinned archive hash or a restored member
+name); a source no rule claims, that two rules claim, that is not a PBO or
+that is given twice is an error, and an error message lists each rule's
+`ASSET_SOURCE_NAME`. A claiming rule's `add_members` receives the tuple of
+its paths (empty when none was given), any other rule `None`; `weapons`
+accepts at most one. The idempotence check now requires the second pass to
+add nothing and report the same skips (`restore` may add one source's
+members and still skip the other's). The summary's `asset_source_sha256` is
+replaced by `asset_sources` (path, SHA-256 and rule of each).
+
+R-27 verdict, not changed: CfgAmmo `LoBo_R27R`, `LoBo_R27RE` and
+`LoBo_R27TE` name `LoBo_r27r`, `LoBo_r27re` and `LoBo_r27te.p3d`, which no
+LoBo release we hold ships (AddonPack1 and Demo2 2004, AddonPack3 2007-01,
+Jordanian/Syrian 2007-05), nor any other archive in the library. No magazine,
+weapon, script or other config uses those three classes (only `LoBo_R27T`
+fires, through `LoBo_R27TRail2`, and `LoBo_r27t.p3d` ships), so the models
+are never loaded in play and no runtime log names them. The shipped
+`aces_r27r`, `aces_r27re`, `aces_r27te` and `aces_r27t_r.p3d` are
+unreferenced ACES originals, not equivalents: they texture `ACES\tex\r27.paa`
+and `ACES\tex\rocketflame.paa`, which no LoBo pbo ships, carry a flame
+section, and `aces_r27re`/`te` have an empty Geometry LOD. `LoBo_r27t.p3d` is
+LoBo's conversion of `aces_r27t_r` (the 466-point missile without the
+14-point flame, retextured to `LoBo_airammo\tex\r27.paa`), as `LoBo_r60` and
+`LoBo_r73` are of their ACES `_R` models; the r27r, re and te conversions were
+never released. Left missing.
+
+Sweep: every LoBo path that 51 game logs (the 2026-10-11 acceptance runs, the
+.3 and .4 runs, `official-s2`) report as not found and that the installed mod
+still lacks, looked up in a name index of every pbo inside the 16 release, 19
+dependency and 26 recovered archives (7-Zip streamed; the 11 pbos of
+`CoC_UA110_Setup.exe` were unreadable), the library modfolders and the repair
+backups:
+
+- Restored here: `lobo_airammo\lobo_mk81.p3d`, `lobo_mk82_ldgb(_d).p3d` (the
+  other six LDGB models were not logged), `loboegypt\inf\helm_s_in.pac`.
+- Already handled by `references` (repoints): `loboter\toy\t\black_matte.pac`,
+  `lobo_pilot\eaf\tex\back.pac` and `legsbk.pac`, `rktf5\swtex.paa`,
+  `lobomig\soundss\jet_crash.wss`.
+- A file of that name exists elsewhere in the same installed addon:
+  `lobo_fab\snunit.paa`, `loboradios\icon\basirto.paa`, `lobo_m1\tex1\kolo.pac`,
+  `lobo_m1\tex1\main_side.paa`, `lobo_f4\idf\mer.pac`,
+  `lobo_f4\idf\dark_grey.pac`. All repointed by the fourth part (below).
+- Only an older release has a file of that name, at another path:
+  `lobo_a4\tex2\tailwing.paa`. Left; see the fourth part.
+- No source found in that sweep: `lobo_ob\bar\b4.jpg`, `lobo_ob\emb\icon.paa`,
+  `lobo_ob\gw\has\has.paa`, `loboegapc\bmp\ebmp.paa`, `bmpg\ebmp.paa`,
+  `m113\em113.paa`, `zsu\ezsu.paa`, `lobof5\com\white.paa`,
+  `lobojorapc\cvr\icon.paa`, `lobolebobject\tex\usemicon.paa`,
+  `lobousembassy\tex\usemicon.paa`, `lobosherm\im4.paa`, and the known
+  `lobof16\{eaf,iaf}\backfuse.pac` and `data\w_pilot_rucebok_l.pac`,
+  `_p.pac`. The fourth part repoints `b4.jpg` and `white.paa` and names the
+  sources found for three more.
+- Not LoBo files (dependencies or other mods, out of scope): `coc_arty`,
+  `coc_mlrs` and `apcupd` animations and textures, `biscamel`, `bizmk_1`,
+  `dkmm_arty`, `dkmm_ukpack`, `opgwc_ee11`, `editorupdate102`, `tmyk_bridges`,
+  `data\periskop2.paa`, `sound\vehicles\gun_elevate2.wss`, and UD's own fonts.
+
+### Fourth part: references to files LoBo ships under another name
+
+Implemented and offline verified on 2026-10-12, not applied and not runtime
+verified. Module `repoints` (after `references`, same techniques: one config
+string per rule, fixed-width model texture fields with exact per-LOD counts,
+`REQUIRED_MEMBERS` failing closed). It adds nothing. Evidence stays local
+under `D:/Arma_CWA/tmp/lobo-missing-2/`; `preview.html` there shows, per item,
+what the model or config wants and what now fills it.
+
+Every candidate of the sweep above was checked by hand: who names the file
+(config class, or model, LOD and face count), the candidate's bytes, both
+decoded to PNG through PoseidonTools and looked at, and for model faces the
+faces' UVs drawn over the candidate. A final search indexed every pbo inside
+every archive under `D:/LoBo-Reloaded/sources` (releases, dependencies,
+recovered, arma-era, the mega_nc cache, the repair originals; 7-Zip streamed,
+nested archives included, 76,148 entries; the 11 pbos of
+`CoC_UA110_Setup.exe`, `HKRealismPatch.exe` and the ACE archive stay
+unreadable) and the Steam Remaster folder (read only).
+
+Repointed, 9 members in 6 archives:
+
+| Missing name | Named by | Now names |
+| --- | --- | --- |
+| `\LoBo_FAB\Snunit.paa` | `picture` of `loBo_Snunit` | `\LoBo_FAB\SN\Snunit.paa` |
+| `\LoBoRadios\icon\BASirto.paa`, `icon\BAS_satcom.paa` | `uiPicture` and `picture` of `BAS_Satcom` | `icons\` (same names) |
+| `\LoBo_Ob\bar\b4.jpg` | `icon` of `LoBo_B_Medic_MDA` (6 subclasses inherit it) | `\Baracken\b4.jpg` |
+| `LoBo_M1\tex1\kolo.pac`, `tex1\main_side.paa` | `lobo_m1a1e_r` and `lobo_m1a2e_r` (Egyptian Guard M1A1/M1A2): LOD 15 84 and 117 faces, LOD 20 20 `main_side` faces | `tex1\kolo.paa`, `tex1\main_side.pac` |
+| `LoBo_F4\idf\mer.pac`, `idf\dark_grey.pac` | `lobo_f4_ww_iaf` (IAF Wild Weasel), LOD 5: 6 and 3 faces of the ECM pod selections | `idf\1\mer.pac`, `com\dark_grey.pac` |
+| `LoBoF5\com\white.paa` | the three F-5 models, LODs 500 and 1100 (pilot view): 10 and 347 faces | `LoBo_Kfir\kfir1\white.paa` |
+
+- Snunit: `SN\Snunit.paa` (128x64, alpha) is a picture of the camouflaged
+  patrol boat, stored with its hull textures and painted like them; no model
+  uses it, and the other pictures of the addon have the same size.
+- Radios: `icons\basirto.paa` has the bytes of `icons\sebirto.paa`, which the
+  three other radios use (a crouching soldier with a radio pack);
+  `BAS_satcom.paa` is a picture of the AN/PSC-5D set the class is named. The
+  picture never reached the logs (gear pictures load on demand) but has the
+  same `icon` typo.
+- Medic buildings: Baracken's `Brown_Baracke04` is the medic barrack
+  (`ATTENDANT=1`, brown, green and grey variants); LoBo's six medic classes
+  repeat that pattern with MDA and Red Crescent signs from `bar\`, and copied
+  its icon path into their own folder without the file. `\Baracken\b4.jpg` is
+  that class's icon, a barrack drawn with a cross. Baracken.pbo ships in
+  @LoBo since the Sinai island release, so `baracken` is a repaired addon (read
+  only) and `baracken/b4.jpg` a required member.
+- M1 Guard: the `_r` models are the three-colour `tex1` set. LODs 5, 7.5 and
+  20 use `tex1\kolo.paa`, LODs 5 and 7.5 `tex1\main_side.pac` (with
+  `main_side2`); only the extension differs. Drawn over the targets, the LOD
+  15 side faces cover `main_side.pac`'s atlas as LOD 5 does, and the LOD 15
+  wheel faces map a wheel disk as LOD 20's do. LOD 20's 58 `kolo.paa` wheel
+  faces are the author's own repoint of the same wheels (the sand model's
+  LOD 20 names `tex2\kolo.pac` on 56 of them); they count with the target,
+  so the LOD 20 count is 58. The sweep's candidate, the sand `tex2\kolo.pac` of the
+  other M1 models, was rejected for its colour.
+- F-4 Wild Weasel: the faces sit on the borrowed ECM and LANTIRN pods
+  (`ecm_1` to `ecm_3`); the `mer` faces are the centre pylon strip, mapped
+  across the whole MER texture. Both F-4 `mer.pac` files and the F-16 IAF one
+  are byte-identical, and so are the `dark_grey.pac` of the F-4, F-15 and
+  F-16. The counts (232, 266) include the 226 and 263 authored faces.
+- F-5: LoboF5 ships no white. Every `white.paa` in @LoBo (Kfir, IL-28,
+  MiG-21, MiG-25 and the BDE Mirage) is the same 32x32 opaque white (SHA-256
+  prefix `b70b6af3`), and the F-5's `red` and `silver` have the bytes of the
+  Kfir's and MiG-21's. The Kfir's, which its own model draws on 1,282 faces,
+  is the target. The three models end with an empty Oxygen default-path
+  buffer, pinned per member as for the Hilux.
+
+Left as authored:
+
+- `LoBo_A4\Tex2\tailwing.paa` (one degenerate face at the fin cap, LODs 0.5
+  and 2 of the three A-4 models). The 2004 releases (AddonPack1, Demo2) ship
+  `tailwing.paa` in the addon root, byte-identical to their
+  `tailwingtop2.paa`, painted in the earlier bright camouflage; the face
+  keeps exactly the 2004 UVs. The 2007 release re-made the tail textures in
+  `Tex2` (its own `tailwgtop2.paa` is a different, grey texture), so the
+  missing `Tex2` file was a re-skin that never shipped, not the 2004 art.
+- Found only outside @LoBo: `LoBo_Ob\gw\has\HAS.paa`, the editor icon of
+  the hardened aircraft shelter, is OPGWC's `HAS.paa` marker (LoBo_Ob's
+  `gw\` textures are byte-identical to OPGWC `ds_obj.pbo`'s, from
+  `opgwcbeta.zip`); `LoBoJorAPC\CVR\icon.paa`, the Scorpion picture: the
+  `CVR` folder is GW_Scimitar's (byte-identical textures), whose own config
+  takes its picture from `\MLV_scimitar\icon.paa` (MLV_MOD_BETA3). Both
+  addons are dependencies (`@LoBo_Deps`), so a repoint would tie @LoBo to
+  them and could not be checked by `--mod`; restoring would copy third-party
+  bytes under a new name. `\LoBoSherm\iM4` (LoBoRollers' picture): the only
+  LoBoSherm is Project73's ArmA 1 conversion (2009, an "M4-A3" picture); the
+  OFP addon is lost and @LoBo has no LoBoSherm prefix.
+- No source anywhere: the LoBoEgAPC pictures `BMP\ebmp.paa`, `BMPG\ebmp.paa`,
+  `M113\em113.paa` and `ZSU\ezsu.paa`; the editor icons
+  `LoBoUSEmbassy\tex\USemicon.paa`, `LoBolebObject\tex\USemicon.paa` and
+  `LoBo_Ob\emb\icon.paa`; `LoBoF16\{com,EAF,IAF}\backfuse.pac`; the pilots'
+  `data\w_pilot_rucebok_l.pac` and `_p.pac` (the Remaster `Data.pbo` has only
+  `w_pilot_rucebok_p_d.pac` and the tank crew's `w_tank_rucebok_l/_p.pac`).
+
+Offline verification (rule SHA-256
+`98f07a96676496b149528e96450c63c27755341e9e47c87aa6f977049385aa48`, the final
+.4 rule so far):
+
+- Checks of the installed mod. UD with the three sources: 10 added members
+  (unchanged from the third part) and the 9 changed members above, nothing
+  else, in 8 archives. UD without sources: the 9, two `WARN:` lines. Classic
+  without sources: the 16 fire scripts and the 9; with sources, also the 10.
+  Every model diff changes only the listed texture fields (file length and
+  all other bytes equal); PoseidonTools `config tojson` shows exactly four
+  parsed differences: the Snunit `picture`, both BAS_Satcom paths and the
+  medic `icon`.
+- The six archives rebuilt in tmp from the UD plan (LoBo_FAB 78,726,459 to
+  78,726,462 bytes, LoBo_Ob 71,028,973 to 71,028,970, LoBoRadios 930,069 to
+  930,071, LoBo_F4, LoBo_M1 and LoboF5 same length; LoBo_airammo and
+  LoBoEgypt with the third part's after hashes) re-plan to 0 changes with
+  and without sources (Classic: the 16 fire scripts); `pbo list` and
+  `model inspect` read them; report-only `mod doctor` on the copy finds
+  nothing.
+- From the pristine originals (each archive's earliest applied backup), .1
+  to .4 compose to 163 changed and 35 added members; every one of the 163
+  equals the installed bytes, and the 9 repoints equal the installed-mod
+  plan.
+- 324 synthetic tests pass (two opt-in real-archive tests skipped; the
+  restore one passes on the library pbos). `test_lobo_repoints.py` covers
+  the text rules, the model plans with authored target faces, the pinned
+  trailers and the end-to-end plan with each required member missing.
+
+### Pending apply (third and fourth parts)
+
+UD profile, from the repository root:
+
+```powershell
+python arma_CWR/tools/lobo/repair_lobo.py --mod 'D:\Arma_CWA\@LoBo' --compatibility ud --apply `
+  --tools 'D:\Arma_CWA\arma_CWR\dist\x64-win-rwdi\PoseidonTools.exe' `
+  --asset-source 'D:\LoBo-Reloaded\sources\recovered-2026-10-11\derived\TheHKpack-1.75.pbo' `
+  --asset-source 'D:\LoBo-Reloaded\sources\recovered-2026-10-11\derived\LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo' `
+  --asset-source 'D:\LoBo-Reloaded\sources\recovered-2026-10-11\derived\LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo' `
+  --report 'D:\Arma_CWA\tmp\lobo-missing-2\applied-ud.json'
+```
+
+Expected: 10 added members in LoBo_airammo.pbo and LoBoEgypt.pbo (archive
+after hashes above) and the 9 changed members of the fourth part in
+LoBo_FAB, LoBoRadios, LoBo_Ob, LoBo_M1, LoBo_F4 and LoboF5 (after SHA-256
+`6f44009f...`, `b44f3a01...`, `a9e772c7...`, `97f9100b...`, `b6f1c711...`
+and `990917ae...`); a second check with or without the sources then reports
+0 changes and exits 0.
 
 ## 2026-10-11.3 batch
 
@@ -548,9 +868,14 @@ Run from the CWR repository root with Python 3.10 or newer:
 # Preview only; writes the optional report, not addon files.
 python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --report tmp/lobo-preview.json
 
-# Apply to the UD installation, with verified original backups. The asset source
-# supplies the seven HK inventory icons LoBo referenced but never shipped.
-python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --apply --asset-source 'D:/path/to/TheHKpack.pbo' --report tmp/lobo-applied.json
+# Apply to the UD installation, with verified original backups. The asset
+# sources supply members LoBo references but its release lacks: the seven HK
+# inventory icons and, since 2026-10-11.4, nine bomb models and a helmet texture.
+python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --apply `
+  --asset-source 'D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/TheHKpack-1.75.pbo' `
+  --asset-source 'D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo' `
+  --asset-source 'D:/LoBo-Reloaded/sources/recovered-2026-10-11/derived/LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo' `
+  --report tmp/lobo-applied.json
 
 # A second pass must report zero changed members and exit 0.
 python arma_CWR/tools/lobo/repair_lobo.py --mod '@LoBo' --compatibility ud --check
@@ -568,17 +893,33 @@ are decoded through its `pbo show` command, with archive snapshot checks around
 the read. Since 2026-10-11.4 this also decodes the two compressed Hilux
 models, which are written back stored.
 
-`--asset-source PATH` names a user-supplied `TheHKpack.pbo` 1.75: the original
-archive (SHA-256 `79cdb0bb937e9e05d43781da0337af36f6d3cca93e4d09658e9847a4d70b3ff5`)
-or the `@LoBo_Extras` copy, which differs only in its patched `config.bin`. A
-source is accepted only when all seven icon members are present, stored
-uncompressed and equal to their pinned SHA-256 values; anything else is
-rejected, even when nothing is missing. Without the option the missing icons
-are not added: the summary lists them under `skipped`, stderr prints a `WARN:`
-line, the skip alone does not make `--check` fail, and the MSG90 picture keeps
-its authored `\TheHKpack\` path (a repoint made earlier without the icon is put
-back). Icons already present must carry the pinned bytes. The JSON summary also
-reports `added_members` and, when given, `asset_source_sha256`.
+`--asset-source PATH` names a user-supplied pbo and may be repeated (since
+2026-10-11.4). Each source goes to the one rule that recognizes it by content;
+one that no rule recognizes, that two rules claim, that is not a PBO or that
+is given twice is an error. The sources:
+
+- `TheHKpack.pbo` 1.75 (`weapons`, seven HK inventory icons): the original
+  archive (SHA-256 `79cdb0bb937e9e05d43781da0337af36f6d3cca93e4d09658e9847a4d70b3ff5`)
+  or the `@LoBo_Extras` copy, which differs only in its patched `config.bin`.
+  Accepted only when all seven icon members are present, stored uncompressed
+  and equal to their pinned SHA-256 values.
+- LoBoAddonPack3's `LoBo_airammo.pbo` (`restore`, nine bomb models; SHA-256
+  `de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd`) and
+  LoBoAddonPack1's or LoBoDemo2's `LoBoEgypt.pbo` (`restore`,
+  `inf\helm_s_in.pac`; `992d304a...` or `f7fe8ca9...`). Accepted only when the
+  whole archive equals a pinned hash and each supplied member its pin. The
+  LoBo Reloaded library keeps these as
+  `sources/recovered-2026-10-11/derived/LoBo_airammo-LoBoAddonPack3-2007-01-06.pbo`
+  and `LoBoEgypt-LoBoAddonPack1-2004-06-11.pbo`.
+
+A wrong source is rejected even when nothing is missing. Without a source its
+members are not added: the summary lists them under `skipped`, stderr prints a
+`WARN:` line per source, the skip alone does not make `--check` fail, and the
+MSG90 picture keeps its authored `\TheHKpack\` path (a repoint made earlier
+without the icon is put back). Members already present must carry their
+pinned bytes. The JSON summary also reports `added_members` and, when sources
+are given, `asset_sources` (path, SHA-256 and rule of each; before .4 a single
+`asset_source_sha256`).
 
 The repair exits 2 on incompatible input or I/O failure. `--check` exits 1
 when repairs would change data, 0 when already repaired. The default preview
@@ -605,6 +946,12 @@ and filter for distance, living units and on-foot state. This fixes the undefine
 function and invalid glow state using older commands, but cannot discover every
 unrelated group. It is a deliberately limited compatibility fallback, not full
 nearby-infantry parity. Neither profile creates a trigger to perform this query.
+Since 2026-10-11.4 the Classic query measures range from the wreck object
+(`_x distance _object`): OFP 1.99 and the official Remaster exe accept only
+Object distance Object, and the earlier `_x distance (_this select 0)` (a
+position) stopped the official exe with "distance: Type Array, expected
+Object". A copy switched with the earlier query is upgraded by the next Classic
+run.
 
 Do not redistribute the UD profile as a Classic-compatible repair: Classic 1.99
 does not provide `nearestObjects`. The newer `createTrigger`/`setTriggerArea`

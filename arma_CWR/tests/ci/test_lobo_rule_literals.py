@@ -5,7 +5,8 @@ module's own table, so they prove the rule engine (exactness, idempotency, fail
 closed) but not the replacement values. This file restates every original and
 replacement by hand from the implementation specs (.3 sections 4.1 to 4.9, plus
 the reviewed deviations noted inline; .4 sections 6.1, 6.2 and 6.4, plus the .4
-LoBo_Pilot wound pairs and arrays in CONTENT-REPAIRS.md). A changed
+LoBo_Pilot wound pairs and arrays, the Classic wreck-fire query, the restored
+members and the fourth-part repoints in CONTENT-REPAIRS.md). A changed
 value, count or baseline in a module fails here until this file is updated
 deliberately alongside the spec.
 """
@@ -16,7 +17,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lobo"))
 from repair import (clusters, content, effects, identifiers, loops, mines, numbers, references,  # noqa: E402
-                    tailgun, textures, weapons, wounds)
+                    repoints, restore, scripts, tailgun, textures, weapons, wounds)
 import repair_lobo as runner  # noqa: E402
 
 T2, T3, T4 = "\t\t", "\t\t\t", "\t\t\t\t"
@@ -408,6 +409,80 @@ REFERENCE_PILOT_CLASSES = {
     "LoBo_Jordan_Pilot": ('"\\LoBo_Pilot\\RJAF\\tex\\back.pac", "\\LoBo_Pilot\\RJAF\\tex\\back_d',
                           '"\\LoBo_Pilot\\RJAF\\tex\\legsbk.pac", "\\LoBo_Pilot\\RJAF\\tex\\legsbk_d'),
 }
+# Wreck-fire queries (scripts). .4: the Classic query measures from the wreck
+# object (OFP 1.99 and the official Remaster exe have Object distance Object
+# only); the earlier Classic query, Object distance Array, is recognized and
+# replaced; the UD query is unchanged.
+FIRE_QUERY_UD = ('_AI = {private ["_near", "_units"]; '
+                 '_near = nearestObjects [_this select 0, ["Man"], _this select 1]; '
+                 '_units = []; {if (alive _x && vehicle _x == _x && _x != player) then '
+                 '{_units = _units + [_x]}} forEach _near; _units}')
+FIRE_QUERY_CLASSIC = ('_AI = {private ["_near", "_units"]; '
+                      '_near = (units group player) + (units group _object); '
+                      '_units = []; {if (alive _x && vehicle _x == _x && _x != player '
+                      '&& _x distance _object < (_this select 1) && !(_x in _units)) then '
+                      '{_units = _units + [_x]}} forEach _near; _units}')
+FIRE_QUERY_CLASSIC_LEGACY = FIRE_QUERY_CLASSIC.replace("_x distance _object", "_x distance (_this select 0)")
+# restore (.4): added member -> (source, stored name, sha256, bytes)
+RESTORE_MEMBERS = {
+    "lobo_airammo/lobo_mk81.p3d": ("pack3-airammo", "LoBo_Mk81.p3d",
+                                   "02e83da4b977cc78bfe351357423dab55064dd65ac450d07a97f0092737a5336", 23291),
+    "lobo_airammo/lobo_mk81_ldgb.p3d": ("pack3-airammo", "LoBo_Mk81_LDGB.p3d",
+                                        "fd59a0bfdfaa93e6d690efe835f9d39a360ceb0eaaa7f7817769f648c34980d9", 25562),
+    "lobo_airammo/lobo_mk81_ldgb_d.p3d": ("pack3-airammo", "LoBo_Mk81_LDGB_d.p3d",
+                                          "54a6e76b488551b83bbe8bc0c2ce0c82bad97b80d498010d62792998c12813cd", 30592),
+    "lobo_airammo/lobo_mk82_ldgb.p3d": ("pack3-airammo", "LoBo_Mk82_LDGB.p3d",
+                                        "51254074addff3a70adac198d51bfb9a7f19bf026d7655cc901e46b7e98e42bc", 25968),
+    "lobo_airammo/lobo_mk82_ldgb_d.p3d": ("pack3-airammo", "LoBo_Mk82_LDGB_d.p3d",
+                                          "3ce1aad6ec76a4ee35831015e64f060a1767878a7183f9ddc2bfb33ec39e5adc", 30592),
+    "lobo_airammo/lobo_mk83_ldgb.p3d": ("pack3-airammo", "LoBo_Mk83_LDGB.p3d",
+                                        "65dc83bef7944e27bd2f9311eb74c3f9806e05d1dee9f88850e7dca95d686806", 26050),
+    "lobo_airammo/lobo_mk83_ldgb_d.p3d": ("pack3-airammo", "LoBo_Mk83_LDGB_d.p3d",
+                                          "18b13a48e160f4b605f282c671042b6fa500c6488536ec80392e1b13a7a55567", 30674),
+    "lobo_airammo/lobo_mk84_ldgb.p3d": ("pack3-airammo", "LoBo_Mk84_LDGB.p3d",
+                                        "5a4436dc254c8b8d4943e14bb2da6413d057e93198e15ef3e4bf392d28b5adc5", 26050),
+    "lobo_airammo/lobo_mk84_ldgb_d.p3d": ("pack3-airammo", "LoBo_Mk84_LDGB_d.p3d",
+                                          "09db3129eb6bc21d2495488af9c9a6c18f4c8755f090d66032bf020d38da38f5", 30592),
+    "loboegypt/inf/helm_s_in.pac": ("pack1-egypt", "inf\\helm_s_in.pac",
+                                    "e21bd718fa96dd5b6e51c29af5f1a8ec1332d55461f4505ae10d9a00be874669", 43839),
+}
+RESTORE_ARCHIVES = {
+    # LoBoAddonPack3.rar b36101e2..., member LoBoAddonPack3\addons\LoBo_airammo.pbo (2007-01-06)
+    "pack3-airammo": {"de7f4728cc41bd98e93a40e8d01d4816632a39805f191dc05ea6c023b56489fd"},
+    # LoBoAddonPack1.rar 76a87969... and LoBoDemo2.rar 042e8fb3..., member LoBoEgypt.pbo
+    "pack1-egypt": {"992d304a27fefae4105da52cfc58fd9ae6ae0c33d9a963d0ee20161ce77340e9",
+                    "f7fe8ca93ca6502f4dbfee693765945a1fc02f6d581f6a3ef7718b7b7cd12052"},
+}
+# repoints (.4, fourth part): references to files LoBo ships under another name.
+REPOINTS = {
+    "lobo_fab/config.cpp": {
+        ("sub", 'picture="\\LoBo_FAB\\Snunit.paa";', 'picture="\\LoBo_FAB\\SN\\Snunit.paa";', 1)},
+    "loboradios/config.cpp": {
+        ("sub", '"\\LoBoRadios\\icon\\BAS_satcom.paa"', '"\\LoBoRadios\\icons\\BAS_satcom.paa"', 1),
+        ("sub", '"\\LoBoRadios\\icon\\BASirto.paa"', '"\\LoBoRadios\\icons\\BASirto.paa"', 1)},
+    "lobo_ob/config.cpp": {
+        ("sub", 'icon="\\LoBo_Ob\\bar\\b4.jpg";', 'icon="\\Baracken\\b4.jpg";', 1)},
+}
+_M1_GUARD = {
+    b"LoBo_M1\\tex1\\kolo.pac": (b"LoBo_M1\\tex1\\kolo.paa", (84, 58), False),
+    b"LoBo_M1\\tex1\\main_side.paa": (b"LoBo_M1\\tex1\\main_side.pac", (117, 20), False)}
+_F5_WHITE = {b"LoBoF5\\com\\white.paa": (b"LoBo_Kfir\\kfir1\\white.paa", (10, 347), False)}
+REPOINT_PLANS = {
+    "lobo_m1/lobo_m1a1e_r.p3d": ((15.0, 20.0), _M1_GUARD, None),
+    "lobo_m1/lobo_m1a2e_r.p3d": ((15.0, 20.0), _M1_GUARD, None),
+    "lobo_f4/lobo_f4_ww_iaf.p3d": ((5.0,), {
+        b"LoBo_F4\\idf\\mer.pac": (b"LoBo_F4\\idf\\1\\mer.pac", 232, False),
+        b"LoBo_F4\\idf\\dark_grey.pac": (b"LoBo_F4\\com\\dark_grey.pac", 266, False)}, None),
+    "lobof5/lobo_f5_aa_jor.p3d": ((500.0, 1100.0), _F5_WHITE,
+                                  bytes.fromhex("0000000000000000000000004029a50007000000e0eba00000b5a000a95fe300")),
+    "lobof5/lobo_f5_at_jor.p3d": ((500.0, 1100.0), _F5_WHITE,
+                                  bytes.fromhex("000000000000000000000000e03ea10007000000d0eca00000b5a000a95fe300")),
+    "lobof5/lobo_f5_mir_jor.p3d": ((500.0, 1100.0), _F5_WHITE,
+                                   bytes.fromhex("00000000000000000000000010c1a20007000000e0eba00000b5a000a95fe300")),
+}
+REPOINT_REQUIRED = ("lobo_fab/sn/snunit.paa", "loboradios/icons/bas_satcom.paa", "loboradios/icons/basirto.paa",
+                    "baracken/b4.jpg", "lobo_m1/tex1/kolo.paa", "lobo_m1/tex1/main_side.pac",
+                    "lobo_f4/idf/1/mer.pac", "lobo_f4/com/dark_grey.pac", "lobo_kfir/kfir1/white.paa")
 
 
 class RuleLiteralTests(unittest.TestCase):
@@ -498,11 +573,34 @@ class RuleLiteralTests(unittest.TestCase):
         self.assertEqual("066982ad5dd7c8b9c087dff4cd52a276f4f5d00bb61a34309f67ce664fc54ea9",
                          wounds.SOURCE_SHA256["lobo_pilot/rjaf/tex/back_d.paa"])
 
+    def test_fire_queries(self):
+        self.assertEqual(FIRE_QUERY_UD, scripts.AI_QUERY)
+        self.assertEqual(FIRE_QUERY_CLASSIC, scripts.AI_QUERY_CLASSIC)
+        self.assertEqual(FIRE_QUERY_CLASSIC_LEGACY, scripts.AI_QUERY_CLASSIC_LEGACY)
+        self.assertEqual((FIRE_QUERY_UD, FIRE_QUERY_CLASSIC, FIRE_QUERY_CLASSIC_LEGACY), scripts.AI_QUERIES)
+
+    def test_restore(self):
+        self.assertEqual(RESTORE_MEMBERS, restore.MEMBERS)
+        self.assertEqual(RESTORE_ARCHIVES, {sid: set(pins) for sid, (_, pins, _) in restore.SOURCES.items()})
+        self.assertEqual(("lobo_airammo", "loboegypt"), restore.ADDONS)
+        self.assertEqual(tuple(RESTORE_MEMBERS), restore.ADDED_MEMBERS)
+
+    def test_repoints(self):
+        self.assert_table(REPOINTS, repoints.RULES)
+        self.assertEqual(REPOINT_PLANS, repoints.PLANS)
+        self.assertEqual(REPOINT_REQUIRED, repoints.REQUIRED_MEMBERS)
+        self.assertEqual(tuple(REPOINT_PLANS), repoints.MODEL_MEMBERS)
+        self.assertEqual(("baracken", "lobo_f4", "lobo_fab", "lobo_kfir", "lobo_m1", "lobo_ob", "lobof5", "loboradios"),
+                         repoints.ADDONS)
+
     def test_version_and_module_order(self):
         self.assertEqual("2026-10-11.4", runner.REPAIR_VERSION)
         # wounds runs after references: it rewrites pairs whose healthy name
-        # references has already made match the model.
-        self.assertEqual(("textures", "tailgun", "references", "wounds"), runner.REPAIR_MODULES[-4:])
+        # references has already made match the model. repoints (the fourth
+        # part) touches no member of references or wounds. restore only adds
+        # members and runs last.
+        self.assertEqual(("textures", "tailgun", "references", "repoints", "wounds", "restore"),
+                         runner.REPAIR_MODULES[-6:])
 
 
 if __name__ == "__main__":

@@ -2,8 +2,11 @@
 
 No bundled script is redistributed here. The default wreck query uses UD's
 nearestObjects command. The explicit Classic profile uses only the player and
-wreck groups; it cannot discover unrelated nearby groups. Apply profiles to
-separate mod copies, rather than distributing the UD query as Classic compatible.
+wreck groups; it cannot discover unrelated nearby groups, and it measures range
+with Object distance Object, the only form OFP 1.99 and the official Remaster
+exe accept (since 2026-10-11.4; the earlier Classic query measured from a
+position and is replaced). Apply profiles to separate mod copies, rather than
+distributing the UD query as Classic compatible.
 """
 
 from collections import Counter
@@ -147,23 +150,44 @@ AI_QUERY = (
     '_units = []; {if (alive _x && vehicle _x == _x && _x != player) then '
     '{_units = _units + [_x]}} forEach _near; _units}'
 )
+# Classic (OFP 1.99, official Remaster exe): only Object distance Object exists
+# there (UD's GameStateExt adds the position forms), and the caller passes a
+# position ([getPos _object, 10] call _AI). The query therefore measures from
+# the wreck object itself, as the player check does. `call` runs the code in a
+# child of the script's variable space (StringCall), so `_object` is the
+# caller's wreck, which the group search already relied on. Every command is
+# OFP 1.85+ core: private, call, units, group, player, alive, vehicle,
+# distance (objects), in (array), forEach, if/then.
 AI_QUERY_CLASSIC = (
+    '_AI = {private ["_near", "_units"]; '
+    '_near = (units group player) + (units group _object); '
+    '_units = []; {if (alive _x && vehicle _x == _x && _x != player '
+    '&& _x distance _object < (_this select 1) && !(_x in _units)) then '
+    '{_units = _units + [_x]}} forEach _near; _units}'
+)
+# The .3 to .4 (first batch) Classic query. Its `_x distance (_this select 0)`
+# is Object distance Array, which only UD accepts: the official Remaster exe
+# stops with "distance: Type Array, expected Object" when a wreck burns. Never
+# written by this version; a copy that carries it is switched to the profile
+# requested.
+AI_QUERY_CLASSIC_LEGACY = (
     '_AI = {private ["_near", "_units"]; '
     '_near = (units group player) + (units group _object); '
     '_units = []; {if (alive _x && vehicle _x == _x && _x != player '
     '&& _x distance (_this select 0) < (_this select 1) && !(_x in _units)) then '
     '{_units = _units + [_x]}} forEach _near; _units}'
 )
+AI_QUERIES = (AI_QUERY, AI_QUERY_CLASSIC, AI_QUERY_CLASSIC_LEGACY)
 
 
 def _fire(text: str, compatibility: str = "ud") -> str:
     if compatibility not in ("ud", "classic"):
         raise ValueError(f"Unknown script compatibility profile: {compatibility}")
     query = AI_QUERY if compatibility == "ud" else AI_QUERY_CLASSIC
-    existing = sum(text.count(candidate) for candidate in (AI_QUERY, AI_QUERY_CLASSIC))
+    existing = sum(text.count(candidate) for candidate in AI_QUERIES)
     if existing > 1:
         raise ValueError("Ambiguous wreck-fire query definitions")
-    for candidate in (AI_QUERY, AI_QUERY_CLASSIC):
+    for candidate in AI_QUERIES:
         if candidate in text:
             text = text.replace(candidate, query)
     anchor = "_object = _this select 0"
