@@ -3,7 +3,8 @@
     Build a shadow copy of the official Remaster folder for setup and engine
     tests, so nothing ever writes into the real (Steam) install.
 .DESCRIPTION
-    Requires PowerShell 7 on Windows. The large read-only data folders
+    Windows only; runs on Windows PowerShell 5.1 (powershell.exe) and on
+    PowerShell 7 (pwsh). The large read-only data folders
     (AddOns, Campaigns, DTA, Worlds, dtaExt, MPMissions, SPTemplates,
     Templates) become directory junctions to the source. Everything setup or
     the engine may write (BIN, fonts, Missions, the root files) is copied, so
@@ -21,8 +22,13 @@
       -Source 'D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/Remastered' `
       -Destination 'D:/Arma_CWA/tmp/remaster-shadow-67' `
       -LoBoSource 'D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/Remastered/@LoBo'
+.EXAMPLE
+    powershell -NoProfile -File tools/runtime/new-remaster-shadow.ps1 `
+      -Source 'D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/Remastered' `
+      -Destination 'D:/Arma_CWA/tmp/lobo-repair-4/runtime/official-shadow'
+    The same on Windows PowerShell 5.1, here without LoBo.
 #>
-#requires -Version 7.0
+#requires -Version 5.1
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Source,
@@ -31,9 +37,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (-not $IsWindows) { throw 'Directory junctions need Windows; on Linux copy the folder instead.' }
-$Source = [IO.Path]::GetFullPath($Source)
-$Destination = [IO.Path]::GetFullPath($Destination)
+# $IsWindows exists only from PowerShell 6 on; Windows PowerShell 5.1 is Windows by definition.
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Directory junctions need Windows; on Linux copy the folder instead.' }
+# Relative paths resolve against the PowerShell location (Set-Location), which
+# Windows PowerShell 5.1 does not mirror into the process working directory.
+$Source = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Source))
+$Destination = [IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination))
 if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "Source missing: $Source" }
 if ($Destination.StartsWith($Source.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Destination must not sit inside the source package.'
@@ -59,7 +68,7 @@ if ($LoBoSource) {
     $lobo = Join-Path $Destination '@LoBo'
     if (Test-Path -LiteralPath $lobo) { Write-Output "Kept: $lobo" }
     else {
-        Copy-Item -LiteralPath ([IO.Path]::GetFullPath($LoBoSource)) -Destination $lobo -Recurse
+        Copy-Item -LiteralPath ([IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LoBoSource))) -Destination $lobo -Recurse
         Write-Output "Copied: $lobo"
     }
 }
