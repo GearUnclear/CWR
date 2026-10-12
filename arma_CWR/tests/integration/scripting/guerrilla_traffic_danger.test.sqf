@@ -12,8 +12,8 @@
 //  item; this fence must survive that rework).
 //  Staging: force-spawn from the Village, let the car drive off, then put the
 //  ARMED player 30 m off its flank, slightly ahead, facing AWAY (outside the
-//  25 m commandeer radius, no weapon aimed at the car - the commandeer must
-//  not win this one), and force-fire one round (player_fire_headless proves
+//  25 m encounter radius, no weapon aimed at the car - no armed encounter
+//  may start), and force-fire one round (player_fire_headless proves
 //  the force-fire path in this fixture).  Rifle audibleFire reads as
 //  severity ~1 -> a 200 m reaction band; the car is well inside it when the
 //  pass runs.
@@ -48,7 +48,7 @@ gtAy = (gtCp select 1) + (40 * (cos gtD)) + (30 * (cos (gtD + 90)))
 player setPos [gtAx, gtAy, 0]
 player setDir (gtD + 90)
 triSimFrames 3
-// nowhere near the commandeer trigger: still a live civ entry
+// nowhere near an armed encounter or a roadblock: still a live civ entry
 triAssertEq [(format ["%1", gtCar in gmTrafficVehicles]), "true"]
 
 guWeap = primaryWeapon player
@@ -68,10 +68,12 @@ triAssertEq [(format ["%1", (gtReact == "cower") or (gtReact == "uturn") or (gtR
 // -- the reaction is consistent with the registry: a bail released the hull
 //    (driver on foot, car gone from the live table); every other reaction
 //    keeps the car a live civ entry with its driver seated ----------------------
+//    (the SQS "? cond : stmt" form is a script error in a harness eval, so
+//    the branch picks the expected [tracked, seated, on foot] string instead)
 triSimFrames 5
-? gtReact == "bail" : triAssertEq [(format ["%1", gtCar in gmTrafficVehicles]), "false"]
-? gtReact == "bail" : triAssertEq [(format ["%1", (vehicle gtDrv) == gtDrv]), "true"]
-? gtReact != "bail" : triAssertEq [(format ["%1", gtCar in gmTrafficVehicles]), "true"]
-? gtReact != "bail" : triAssertEq [(format ["%1", (driver gtCar) == gtDrv]), "true"]
+triSimUntil { (gtReact != "bail") or ((vehicle gtDrv) == gtDrv) }
+gtExpect = "true|true|false"
+if (gtReact == "bail") then {gtExpect = "false|false|true"}
+triAssertEq [(format ["%1|%2|%3", gtCar in gmTrafficVehicles, (driver gtCar) == gtDrv, (vehicle gtDrv) == gtDrv]), gtExpect]
 
 triEndTest

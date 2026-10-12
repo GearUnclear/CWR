@@ -145,6 +145,9 @@
       "traffic_patrol",
       "traffic_convoy"
     ],
+    "../engine/Poseidon/Game/Guerrilla/TrafficEncounter.cpp": [
+      "traffic_commandeer"
+    ],
     "../engine/Poseidon/Game/Guerrilla/TownFlags.cpp": [
       "zones",
       "town_support"

@@ -1,0 +1,8 @@
+tags = ["scripting", "guerrilla", "full_cwa", "headless"]
+binary = "PoseidonGame"
+mission = "tests/integration/missions/guerrilla_native.abel"
+# Encounter sub-tick 0.5 s; the forced car reaches the escape within a few
+# seconds of the staging and clears 60 m in well under the assert window.
+timeout = 240
+assert_timeout = 90
+extra_args = ["--dev"]

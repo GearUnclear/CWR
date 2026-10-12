@@ -69,18 +69,6 @@ TrafficDecisionInput Input(bool playerValid, int civ, int patrols, int convoys, 
     return in;
 }
 
-CommandeerObs Obs(float carX, float carZ, float carDirX, float carDirZ, float px, float pz, float pdx, float pdz,
-                  bool armed)
-{
-    CommandeerObs o;
-    o.carPos = Vector3(carX, 0, carZ);
-    o.carDir = Vector3(carDirX, 0, carDirZ);
-    o.playerPos = Vector3(px, 0, pz);
-    o.playerDir = Vector3(pdx, 0, pdz);
-    o.weaponInHands = armed;
-    return o;
-}
-
 } // namespace
 
 TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
@@ -116,6 +104,7 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.commandeerLaneHalfWidth == Approx(4.0f));
         REQUIRE(tu.commandeerStopDelay == Approx(2.5f));
         REQUIRE(tu.fleeDist == Approx(150.0f));
+        REQUIRE(tu.commandeerSurrenderChance == Approx(0.5f));
         REQUIRE(tu.parkChance == Approx(0.6f));
         REQUIRE(tu.parkDwellMin == Approx(60.0f));
         REQUIRE(tu.parkDwellMax == Approx(180.0f));
@@ -185,7 +174,8 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
                "trafficMaxCiv = 5; trafficMaxPatrols = 2; trafficConvoyChance = 0.1; trafficMaxLegs = 1; "
                "trafficCommandeerRadius = 30; trafficFleeDist = 200; trafficCivNightScale = 0.2; "
                "trafficDayStart = 0.3; trafficDayEnd = 0.8; trafficAlertPatrolBoost = 1.0; "
-               "trafficCurfewWarLevel = 2; trafficCurfewPatrolBoost = 3; trafficRainCivFade = 0.9; };\n");
+               "trafficCurfewWarLevel = 2; trafficCurfewPatrolBoost = 3; trafficRainCivFade = 0.9; "
+               "trafficCommandeerSurrenderChance = 0.25; };\n");
         const TrafficTuning& tu = f.traffic.Tuning();
         REQUIRE_FALSE(tu.enabled);
         REQUIRE(tu.interval == Approx(7.0f));
@@ -203,6 +193,7 @@ TEST_CASE("Traffic - config parse of the traffic* keys", "[game][guerrilla]")
         REQUIRE(tu.curfewWarLevel == Approx(2.0f));
         REQUIRE(tu.curfewPatrolBoost == Approx(3.0f));
         REQUIRE(tu.rainCivFade == Approx(0.9f));
+        REQUIRE(tu.commandeerSurrenderChance == Approx(0.25f));
         REQUIRE_FALSE(f.traffic.IsActive()); // disabled regardless of the registry
     }
 
@@ -334,6 +325,12 @@ TEST_CASE("Traffic - observed trip endings", "[game][guerrilla]")
         REQUIRE(Traffic::ArrivedEndAction(false, 3, 3) == TEndLinger);
         // maxLegs 0 = no continuation: straight to the linger ending
         REQUIRE(Traffic::ArrivedEndAction(false, 0, 0) == TEndLinger);
+        // an escaping car (issue #66) re-legs with its legs spent instead of
+        // stopping beside the gunman; unobserved it still despawns
+        REQUIRE(Traffic::ArrivedEndAction(false, 3, 3, true) == TEndReLeg);
+        REQUIRE(Traffic::ArrivedEndAction(false, 0, 0, true) == TEndReLeg);
+        REQUIRE(Traffic::ArrivedEndAction(true, 3, 3, true) == TEndDespawn);
+        REQUIRE(Traffic::ArrivedEndAction(false, 3, 3, false) == TEndLinger);
     }
     SECTION("stall: unobserved despawns for every kind")
     {
@@ -1154,56 +1151,6 @@ TEST_CASE("Traffic - spawn point inside the player band, farthest wins", "[game]
     REQUIRE(Traffic::SelectSpawnPoint(empty, player, t) == -1);
 }
 
-TEST_CASE("Traffic - commandeer trigger matrix", "[game][guerrilla]")
-{
-    TrafficTuning t; // radius 25, lane half-width 4
-    // car at origin heading +Z (north)
-    SECTION("player ahead in the lane, unarmed -> trigger")
-    {
-        REQUIRE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 1, 15, 0, -1, false), t));
-    }
-    SECTION("player ahead but outside the lane -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 8, 15, 0, -1, false), t));
-    }
-    SECTION("player behind the car -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 0, -15, 0, 1, false), t));
-    }
-    SECTION("player beside the car -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, -1, 0, false), t));
-    }
-    SECTION("armed player beside the car aiming at it -> trigger")
-    {
-        REQUIRE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, -1, 0, true), t));
-    }
-    SECTION("armed player beside the car aiming elsewhere -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, 0, 1, true), t));
-    }
-    SECTION("unarmed player beside the car looking at it -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, -1, 0, false), t));
-    }
-    SECTION("out of radius, even in the lane and aiming -> no trigger")
-    {
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 0, 40, 0, -1, true), t));
-    }
-    SECTION("aim cone edge: 14 deg in, 16 deg out")
-    {
-        float in14 = 14.0f * 3.14159265f / 180.0f;
-        float out16 = 16.0f * 3.14159265f / 180.0f;
-        // player east of the car, aiming west with a small tilt
-        REQUIRE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, -cosf(in14), sinf(in14), true), t));
-        REQUIRE_FALSE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 1, 10, 0, -cosf(out16), sinf(out16), true), t));
-    }
-    SECTION("car heading is normalized, not assumed unit")
-    {
-        REQUIRE(Traffic::CommandeerTriggered(Obs(0, 0, 0, 3, 1, 15, 0, -1, false), t));
-    }
-}
-
 TEST_CASE("Traffic - stall expiry", "[game][guerrilla]")
 {
     TrafficTuning t;
@@ -1658,7 +1605,8 @@ TEST_CASE("Traffic - danger reaction decision", "[game][guerrilla]")
         REQUIRE(Traffic::DecideDangerReaction(1, 5, TKCiv, TSParking, 0, 0, t) == TDRNone);
     }
 
-    SECTION("commandeer-owned and already-panicked states never react")
+    SECTION("raw pending-surrender and cowering states are mapped by the caller (DangerDecideState), never "
+            "decided directly")
     {
         REQUIRE(Traffic::DecideDangerReaction(10, 1, TKCiv, TSStopping, 0, 0, t) == TDRNone);
         REQUIRE(Traffic::DecideDangerReaction(10, 1, TKCiv, TSExiting, 0, 0, t) == TDRNone);
@@ -2131,6 +2079,20 @@ TEST_CASE("Traffic - config repairs: probabilities, the arrival radius, the caps
         REQUIRE(tu.rainCivFade == Approx(1.0f));
         REQUIRE(tu.civNightScale == Approx(0.0f));
         REQUIRE(f.traffic.ConfigWarnings().Size() == 5);
+    }
+
+    SECTION("the surrender chance clamps both ways")
+    {
+        TrafficFixture f;
+        f.Load("class CfgGuerrillaZones { trafficCommandeerSurrenderChance = 1.5; };\n");
+        REQUIRE(f.traffic.Tuning().commandeerSurrenderChance == Approx(1.0f));
+        REQUIRE(f.traffic.ConfigWarnings().Size() == 1);
+        REQUIRE(AnyWarningMentions(f.traffic.ConfigWarnings(), "trafficCommandeerSurrenderChance"));
+        TrafficFixture g;
+        g.Load("class CfgGuerrillaZones { trafficCommandeerSurrenderChance = -0.2; };\n");
+        REQUIRE(g.traffic.Tuning().commandeerSurrenderChance == Approx(0.0f));
+        REQUIRE(g.traffic.ConfigWarnings().Size() == 1);
+        REQUIRE(AnyWarningMentions(g.traffic.ConfigWarnings(), "trafficCommandeerSurrenderChance"));
     }
 
     SECTION("a non-positive arrival radius means no car ever arrives: back to the default")

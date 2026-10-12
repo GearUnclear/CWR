@@ -1,6 +1,6 @@
 # Human gameplay acceptance suite
 
-The **HUMAN TESTS** action in Showcase opens 43 guided cases (104 steps). These are player-operated acceptance tests of the actual Guerrilla implementation.
+The **HUMAN TESTS** action in Showcase opens 43 guided cases (105 steps). These are player-operated acceptance tests of the actual Guerrilla implementation.
 
 ## Launch
 
@@ -38,7 +38,7 @@ This is a suite, not one order-independent reel. The campaign keeps changing whi
 - Town sessions: assessment/solicitation, preview/cancel/expiry, confirmed extortion, panic and recovery. Use separate residents/saves for donation/refusal/retaliation.
 - Occupation scenes: shakedown intervention and uninterrupted/public-killing branches need separate occurrences. They use the real random director; an occurrence you did not witness is **BLOCKED**, not a pass.
 - Long campaign: peaceful town liberation, ordinary income, gear unlock, group overflow, companion promotions, War Level and stronger force tiers. Let the real economy/progression run; the suite does not grant XP, funds or gear.
-- Roads: ambient cars and commandeering work with the main campaign data. Enemy patrols/convoys require the explicit fixture below.
+- Roads: ambient cars, hold-ups and roadblocks work with the main campaign data. Enemy patrols/convoys require the explicit fixture below.
 - AI: compare approaches from the same save with equivalent distance/light/weather, then test suppression, cover seeking, morale and mixed targets. These are human behavioral checks, not proof of every AI algorithm.
 
 ### Enemy-road fixture
@@ -91,7 +91,7 @@ The fixture records its old/new ownership and spawned object in `HT_SETUP_HISTOR
 | `assailant_rogue` | Population | Spontaneous armed civilian incident |
 | `assailant_resist` | Population | Civilian resistance to extortion |
 | `traffic_ambient` | Traffic | Road traffic, parking and distance lifecycle |
-| `traffic_commandeer` | Traffic | Commandeering and abandoned vehicle cleanup |
+| `traffic_commandeer` | Traffic | Hold-ups (surrender or escape), unarmed roadblocks and abandoned vehicle cleanup |
 | `traffic_patrol` | Traffic | Occupier vehicle patrols and danger response |
 | `traffic_convoy` | Traffic | Supply convoy and escort |
 | `journal` | Campaign | Journal, objectives and map navigation |

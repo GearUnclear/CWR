@@ -1,0 +1,8 @@
+# Guerrilla Mode ambient traffic - an armed hold-up's pending SURRENDER
+# survives a save/reload without a reroll (issue #66).
+#
+# Phase 01 forces a surrender (chance 1) and saves while the car is braking
+# for the gunman (TSStopping; UserDir/Saved/Tmp/trsurr.fps); phase 02
+# fresh-boots, loads it, flips the chance to 0 (a reroll would now escape)
+# and waits: the restored stop completes and the driver bails exactly once.
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]

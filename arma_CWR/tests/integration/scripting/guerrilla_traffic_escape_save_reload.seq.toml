@@ -1,0 +1,8 @@
+# Guerrilla Mode ambient traffic - an armed hold-up's ESCAPE survives a
+# save/reload without a reroll (issue #66).
+#
+# Phase 01 forces an escape (surrender chance 0) and saves the moment the
+# choice lands (UserDir/Saved/Tmp/trescape.fps); phase 02 fresh-boots, loads
+# it, flips the chance to 1 (a reroll would now surrender) and aims at the
+# car again: the serialized choice must stand.
+tags = ["scripting", "guerrilla", "full_cwa", "save-load", "headless"]

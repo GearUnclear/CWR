@@ -5,17 +5,20 @@
 // patrol vehicles between occupier-held zones and the occasional occupier
 // supply convoy.  Native C++ in the GarrisonCache / TownFlags mold: a pure,
 // unit-testable decision core (spawn rolls, time-of-day/alert/curfew/weather
-// modulation, route picking, spawn-point selection, the commandeer predicate,
-// despawn/stall rules) under a thin world layer (group + vehicle creation,
-// seating, doMove-style route legs, the commandeer sequence, cleanup) with
-// Serialize and a *Commands.cpp script surface.  Script stays a thin handler
-// layer (init.sqs registers event handlers; civilians.sqs consumes the
-// driverKilled ledger tuples).
+// modulation, route picking, spawn-point selection, the encounter
+// predicates, despawn/stall rules) under a thin world layer (group + vehicle
+// creation, seating, doMove-style route legs, the encounter orders, cleanup)
+// with Serialize and a *Commands.cpp script surface.  Script stays a thin
+// handler layer (init.sqs registers event handlers; civilians.sqs consumes
+// the driverKilled ledger tuples).
 //
-// Commandeer: a civilian car that meets the real player standing in its
-// lane ahead, or a player pointing a weapon at it, stops; the driver bails
-// and flees on foot; the hull is released to the world (the player takes
-// it, undercover keeps treating a civilian-typed car as anonymous).
+// Encounters (issue #66, TrafficEncounter.hpp): a civilian driver the real
+// player points a weapon at rolls once - surrender (stop, bail, flee on
+// foot, the hull released to the world: the player takes it, undercover
+// keeps treating a civilian-typed car as anonymous) or escape (stay seated
+// and floor it).  A player merely standing in the lane is a roadblock: the
+// car brakes, waits and drives on once the lane clears.  Fresh nearby
+// gunfire outranks both (the danger tier takes the encounter over).
 // Road murders feed the civilian kill ledger through the same killed-EH
 // expression civilians.sqs attaches to town civilians.
 //
@@ -30,6 +33,7 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp> // LLink == OLink (NetworkObject.hpp)
+#include <Poseidon/Game/Guerrilla/TrafficEncounter.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
 class ParamArchive;
@@ -83,6 +87,9 @@ struct TrafficTuning
     float commandeerLaneHalfWidth = 4.0f; // m, lateral offset for "in the lane"
     float commandeerStopDelay = 2.5f;     // s between Stop and the driver bailing
     float fleeDist = 150.0f;              // m, the bailed driver's flee point
+    // armed encounters (issue #66): P(surrender) of the one roll per
+    // encounter, [0,1]; the rest escape
+    float commandeerSurrenderChance = 0.5f; // trafficCommandeerSurrenderChance
     // civ arrival park-vs-despawn roll.  Parked cars remain live entries but
     // are censused SEPARATELY from the moving ones (issue #55): maxCiv caps
     // the cars on the move, maxParked caps the cars standing at a curb, so a
@@ -155,8 +162,8 @@ struct TrafficAmbush
 enum TrafficState
 {
     TSDriving,
-    TSStopping,  // commandeer: Stop issued, waiting out commandeerStopDelay
-    TSExiting,   // commandeer: driver bailed (transient, one tick)
+    TSStopping,  // armed encounter, surrender pending: Stop issued, waiting out commandeerStopDelay
+    TSExiting,   // never entered; kept for save numbering (guards still treat it like TSStopping)
     TSArrived,   // at the destination, waiting for the player to be far enough
     TSStalled,   // stall timer expired, waiting for the player to be far enough
     TSParking,   // civ arrived + park roll won: Stop issued, waiting out the brake delay
@@ -193,9 +200,11 @@ enum TrafficBlockedAction
 // danger-reaction tier (civ danger response): what a civilian entry does
 // about nearby gunfire, an explosion or a fresh player-caused wreck.  One
 // reaction per cooldown episode, decided against the loudest source in
-// range (a materially louder danger re-opens it early, issue #55); the
-// commandeer sub-tick always wins over a reaction (it runs first and parks
-// the entry in TSStopping).
+// range (a materially louder danger re-opens it early, issue #55).  Fresh
+// in-band gunfire outranks an armed encounter (issue #66): it takes the
+// encounter over instead of the surrender/escape roll, before a pending
+// bail, and over a running escape; player-caused wrecks never count for
+// that precedence.
 enum TrafficDangerReaction
 {
     TDRNone,  // out of band, wrong kind/state, or the cooldown latch holds
@@ -256,6 +265,7 @@ struct TrafficDiag
     int passes = 0;                         // traffic passes since mission start (or load)
     int spawned = 0;                        // successful spawns
     int failed = 0;                         // failed attempts
+    int encounterRolls = 0;                 // surrender/escape rolls drawn (issue #66; gmTrafficDiag slot 16)
 };
 
 // combat gate verdict for one patrol/convoy entry per pass (convoy
@@ -362,15 +372,28 @@ struct TrafficZoneCandidate
     bool occupierOwned = false; // owner == the campaign's occupier side
 };
 
-// One observation for the pure commandeer predicate (engine axes; only X/Z
-// are used).
-struct CommandeerObs
+// One encounter check for the pure StepEncounter (issue #66): the world
+// layer's observations on the 0.5 s sub-tick clock.  Unit tests inject
+// values directly.
+struct TrafficEncounterInput
 {
-    Vector3 carPos = VZero;
-    Vector3 carDir = VForward;
-    Vector3 playerPos = VZero;
-    Vector3 playerDir = VForward;
-    bool weaponInHands = false;
+    bool armedThreat = false;     // ArmedThreat(obs) this check (player valid)
+    bool laneObstruction = false; // InLaneObstruction(obs) this check (player valid)
+    bool playerOutside = true;    // player missing/dead or beyond EncounterClearRadius
+    bool freshDanger = false;     // EncounterDangerFresh, evaluated only when a takeover is possible
+    bool dangerEpisode = false;   // InDangerEpisode: a danger reaction already owns this moving car
+    TrafficState state = TSDriving;
+    float dt = 0;   // the sub-tick clock
+    float roll = 0; // uniform [0,1); read only on the roll transition
+};
+
+// what StepEncounter decided: the next encounter memory and at most one
+// order for the world layer
+struct TrafficEncounterStep
+{
+    TrafficEncounter next;
+    TrafficEncounterAction action = EActNone;
+    bool rolled = false; // the roll was consumed (the world bumps TrafficDiag::encounterRolls)
 };
 
 class Traffic : public SerializeClass
@@ -514,10 +537,70 @@ class Traffic : public SerializeClass
     // never below the configured value; identity when the band is not
     // widened.  Convoys are deliberately unscaled (rare by design).
     static int ScaleCap(int cap, float effRadius, float configRadius);
-    // commandeer trigger: inside commandeerRadius AND (player ahead in the
-    // lane: within 20 deg of the car's heading and commandeerLaneHalfWidth
-    // of its line, OR weapon in hands aimed within 15 deg of the car)
-    static bool CommandeerTriggered(const CommandeerObs& obs, const TrafficTuning& tuning);
+    // encounters (issue #66, TrafficEncounter.cpp) -------------------------
+    // the two observations an armed hold-up used to share one predicate.
+    // InLaneObstruction: inside commandeerRadius (inclusive) and ahead in
+    // the lane - within 20 deg of the car's heading and
+    // commandeerLaneHalfWidth of its line - or on the bonnet; the weapon is
+    // ignored.  ArmedThreat: weapon in hands (pose-based ClassifyWeaponShow),
+    // inside commandeerRadius, and the player's horizontal facing within 15
+    // deg of the car (armed on the bonnet counts).  Not a muzzle ray and not
+    // line of sight: an armed player facing away is no threat (he may still
+    // be a roadblock)
+    static bool InLaneObstruction(const CommandeerObs& obs, const TrafficTuning& tuning);
+    static bool ArmedThreat(const CommandeerObs& obs, const TrafficTuning& tuning);
+    // the one roll: chance <= 0 escapes, >= 1 surrenders, else roll < chance
+    // surrenders (equality escapes)
+    static bool ChooseSurrender(float roll, float chance);
+    // the states an armed threat can roll from: driving, arrived, stalled,
+    // lingering and cowering cars (the crew is seated, the car is the road's)
+    static bool ThreatEligible(TrafficState s);
+    // a danger reaction that came BEFORE the threat still owns the car: the
+    // one-reaction latch is running (dangerCooldown > 0) and the car is not
+    // cowering.  A rush or a U-turn is under way (or the car is back on its
+    // leg inside the same episode), and neither an armed threat nor a
+    // roadblock may overwrite that route.  A cowering car (TSPanicked) is
+    // deliberately NOT excluded: it is braked at the roadside, and a stopped
+    // driver held at gunpoint makes the ordinary surrender/escape choice
+    static bool InDangerEpisode(float dangerCooldown, TrafficState s);
+    // the one roll is possible: an armed threat on an eligible state, no
+    // choice latched, danger owning nothing, no danger episode running.  The
+    // world draws the random number exactly when this holds (and no fresh
+    // danger takes over), and StepEncounter consumes it under the same test
+    static bool RollPossible(bool armedThreat, TrafficState s, const TrafficEncounter& enc, bool dangerEpisode);
+    // the encounter ends once the player stays beyond this for
+    // EncounterClearHold: max(CommandeerWatchRadius, commandeerRadius +
+    // EncounterClearMargin)
+    static float EncounterClearRadius(const TrafficTuning& tuning);
+    // where an escaping driver heads: on the current leg mid-trip; at the
+    // destination a new leg, else back home, else nowhere (issue #66 A1: the
+    // player in the lane does NOT turn the car; a blocked escape reaches the
+    // U-turn through DecideBlocked like any other car)
+    static TrafficEscapeLeg ChooseEscapeLeg(bool atDest, bool originResolves, bool newDestResolves);
+    // route speed of one leg: patrols SpeedNormal, an escaping civ
+    // SpeedFull, everything else SpeedLimited
+    static int RouteSpeed(int kind, bool escaping);
+    // the civ arrival park roll is skipped while an escape owns the car
+    static bool ArrivalParkEligible(int kind, bool escaping);
+    // the state DecideDangerReaction sees: a pending surrender or a
+    // cowering car decides as the driving/arrived car it was
+    static TrafficState DangerDecideState(TrafficState s, bool atDest);
+    // a source at distance with severity is inside the reaction band (the
+    // DecideDangerReaction band test, shared with the encounter precedence)
+    static bool DangerInBand(float distance, float severity, const TrafficTuning& tuning);
+    // encounter rows (and pending surrenders) consult the danger RING only:
+    // a player-caused wreck must not turn every nearby hold-up into a danger
+    // roll; a lane wait alone is not an encounter
+    static bool EncounterDangerRingOnly(const TrafficEncounter& enc, TrafficState s);
+    // one encounter check, pure: the clear hold, danger precedence, the
+    // pending surrender delay, the one roll, the lane wait - in that order,
+    // at most one action
+    static TrafficEncounterStep StepEncounter(const TrafficEncounter& cur, const TrafficEncounterInput& in,
+                                              const TrafficTuning& tuning);
+    // load downgrade of an entry's state + encounter, keyed on whether the
+    // driver came back seated; returns the one order the first post-load
+    // sub-tick re-issues.  Never rolls
+    static TrafficLoadRestore LoadedEncounterState(TrafficState& state, TrafficEncounter& enc, bool driverSeated);
     // stall rule: < StallMoveEpsilon m of movement per pass accumulates
     static constexpr float StallMoveEpsilon = 5.0f;
     static bool StallExpired(float stalledSeconds, const TrafficTuning& tuning);
@@ -562,11 +645,12 @@ class Traffic : public SerializeClass
     // splits each band's outcomes; cooldownLeft > 0 is the per-entry
     // one-reaction-per-episode latch (the world layer folds the issue-#55
     // escalation in through DangerLatchHolds before calling).  Only TKCiv
-    // reacts (patrols/convoys keep their native combat AI);
-    // TSStopping/TSExiting stay the commandeer's, TSPanicked already reacted
-    // (an escalation re-decides a cowering car as the driving/arrived car it
-    // was); the parked family and the ended states (stalled/lingering)
-    // always bail - there is no live leg left to drive
+    // reacts (patrols/convoys keep their native combat AI).  The raw
+    // TSStopping/TSExiting/TSPanicked states decide None: the world layer
+    // maps them first through DangerDecideState (a pending surrender and a
+    // cowering car re-decide as the driving/arrived car they were); the
+    // parked family and the ended states (stalled/lingering) always bail -
+    // there is no live leg left to drive
     static constexpr float DangerScaleMin = 0.5f;
     static constexpr float DangerScaleMax = 1.5f;
     static constexpr float DangerRifleAudibleFire = 8.0f;   // audibleFire that reads as severity 1
@@ -624,7 +708,10 @@ class Traffic : public SerializeClass
     // player can perceive the car never hard-despawns: arrivals re-leg while
     // legs remain and then linger; stalls hand a civ driver to the walk-off
     // (the flee machinery at walking pace) and keep other crews seated
-    static TrafficEndAction ArrivedEndAction(bool despawnSafe, int legs, int maxLegs);
+    // escaping (issue #66): an escape that arrives with its legs spent still
+    // re-legs rather than lingering beside the gunman (the encounter clear
+    // hold ends the escape, so this is bounded)
+    static TrafficEndAction ArrivedEndAction(bool despawnSafe, int legs, int maxLegs, bool escaping = false);
     static TrafficEndAction StalledEndAction(bool despawnSafe, int kind);
     // convoy discipline under fire --------------------------------------------
     // combat gate for the patrol/convoy trip ladder.  inCombat is
@@ -643,7 +730,7 @@ class Traffic : public SerializeClass
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
-    // commandeer sub-tick while a civ car is near the player)
+    // encounter sub-tick while civ traffic exists)
     void Simulate(float deltaT);
     // danger feed (the frozen-core hooks; see TrafficNotifyShotFast below).
     // NotifyShot runs per ROUND from every firing entity while armed, so the
@@ -668,14 +755,28 @@ class Traffic : public SerializeClass
     // per-point observations and the live effective band the next pass's
     // spawn/despawn decisions will use
     void PerceptProbe(Vector3Par pos, bool& hasCamera, bool& losBlocked, bool& inFrustum, TrafficEffectiveBand& band);
+    // test/debug aids for the encounters (issue #66, gmTrafficEncounter /
+    // gmTrafficSurrenderChance).  EncounterInfo: the entry's encounter
+    // memory, false when the vehicle is not live traffic.  ProbeThreat: a
+    // live observation of the real player against the car right now
+    // (false/false/false when untracked or no living player)
+    bool EncounterInfo(const Transport* veh, TrafficEncounter& out) const;
+    void ProbeThreat(const Transport* veh, bool& armed, bool& threat, bool& lane) const;
+    // override the surrender chance (clamped to [0,1], no warning, not
+    // serialized): the next LoadFromParams - mission start, every save load
+    // - restores the config value.  Returns the effective chance
+    float SetCommandeerSurrenderChance(float chance);
 
     // save/load; live rows (vehicle/group refs + zone names), released
     // hulls, fleeing drivers, handlers
     LSError Serialize(ParamArchive& ar) override;
 
     // constants (engine facts, not island data)
-    static constexpr float CommandeerSubTick = 0.5f;       // s
-    static constexpr float CommandeerWatchRadius = 60.0f;  // m, sub-tick arms inside this
+    static constexpr float CommandeerSubTick = 0.5f;       // s, the encounter clock
+    static constexpr float CommandeerWatchRadius = 60.0f;  // m, floor of EncounterClearRadius
+    static constexpr float EncounterClearMargin = 15.0f;   // m past commandeerRadius
+    static constexpr float EncounterClearHold = 5.0f;      // s continuously outside before the encounter clears
+    static constexpr float LaneResumeHold = 1.0f;          // s continuously clear before a lane wait resumes
     static constexpr float SpawnScanRadius = 700.0f;       // m of road net scanned around the origin
     static constexpr float FleeDeleteDist = 300.0f;        // m, bailed driver deleted beyond this...
     static constexpr float FleeDeleteAfter = 60.0f;        // ... or after this many seconds
@@ -714,6 +815,8 @@ class Traffic : public SerializeClass
         float latchSeverity = 0;  // severity the latch was armed against (DangerEscalates); transient like it
         RString lingerReason;     // TSLingering: the despawn reason once unobserved ("arrived"/"stalled")
         Vector3 lastPos = VZero;
+        TrafficEncounter encounter;               // issue #66 (serialized flat via SerializeEncounter)
+        TrafficLoadRestore loadRestore = TLRNone; // transient: one order for the first post-load sub-tick
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -803,7 +906,31 @@ class Traffic : public SerializeClass
     // handles one entry in TSParking/TSDwelling/TSDeparting; may despawn/release it
     void UpdateParked(int index, Vector3Par playerPos, bool playerValid, float dt,
                       AutoArray<TrafficZoneCandidate>& zones, AutoArray<TrafficEventRecord>& fired);
+    // the encounter sub-tick (issue #66): the one clock for the surrender
+    // delay, the lane wait and the encounter clear hold
     void UpdateCommandeer(float dt);
+    // brake the whole crew to a stop (Stop to every unit + SpeedLimited)
+    static void IssueGroupStop(AIGroup* grp);
+    // the danger tier, shared by the main pass and the encounter takeover:
+    // the loudest source of sources at the car, the latch, the mapped state
+    // (DangerDecideState) and the roll.  src gets the source index (-1 none)
+    TrafficDangerReaction DecideEntryDanger(const TrafficEntry& e, Transport* veh,
+                                            const AutoArray<TrafficDangerEvent>& sources, bool atDest, int& src);
+    // fresh, in-band, unlatched RING danger at pos: the encounter precedence
+    // test (no roll)
+    bool EncounterDangerFresh(const TrafficEntry& e, Vector3Par pos) const;
+    // execute one reaction on entry index; true = the entry was removed
+    // (the bail)
+    bool ApplyDangerReaction(int index, TrafficDangerReaction react, TrafficDangerEvent source, bool atDest,
+                             AutoArray<TrafficEventRecord>& fired);
+    // the orders of one StepEncounter action; may remove the entry
+    void ExecuteEncounterAction(int index, const TrafficEncounter& before, TrafficEncounterAction action,
+                                Vector3Par playerPos, AutoArray<TrafficEventRecord>& fired);
+    void BeginEscape(TrafficEntry& e, Transport* veh);
+    // the surrender: the driver steps out and flees, the hull is released
+    // (TECommandeered), the entry removed
+    void SurrenderBail(int index, Vector3Par playerPos, AutoArray<TrafficEventRecord>& fired);
+    void ExecuteLoadRestore(TrafficEntry& e, Transport* veh);
     void CleanupReleased(Vector3Par playerPos, bool playerValid, float dt);
     void CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt);
     void DespawnEntry(int index, const char* reason, bool keepHull, AutoArray<TrafficEventRecord>& fired);

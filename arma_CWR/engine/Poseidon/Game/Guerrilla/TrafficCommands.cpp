@@ -78,7 +78,8 @@ static GameValue GmTrafficEscort(const GameState* /*state*/, GameValuePar oper1)
 //   [movingCiv, patrols, convoys, parked, released, fleeing,
 //    civRoute, patrolRoute, convoyRoute,        (0/1 scalars)
 //    lastFailKind, lastFailReason, lastFailDetail, (strings; "" when none)
-//    passes, spawned, failed, configWarnings]
+//    passes, spawned, failed, configWarnings,
+//    encounterRolls]                             (issue #66: surrender/escape rolls drawn)
 // Bools ride as 0/1 scalars (raw bools kill the tri harness asserts).
 static GameValue GmTrafficDiag(const GameState* state)
 {
@@ -86,7 +87,7 @@ static GameValue GmTrafficDiag(const GameState* state)
     GameArrayType& array = value;
     const Traffic& t = Traffic::Instance();
     const TrafficDiag& d = t.Diag();
-    array.Resize(16);
+    array.Resize(17);
     array[0] = (float)(t.Count(TKCiv) - t.CountParked());
     array[1] = (float)t.Count(TKPatrol);
     array[2] = (float)t.Count(TKConvoy);
@@ -103,6 +104,7 @@ static GameValue GmTrafficDiag(const GameState* state)
     array[13] = (float)d.spawned;
     array[14] = (float)d.failed;
     array[15] = (float)t.ConfigWarnings().Size();
+    array[16] = (float)d.encounterRolls;
     return value;
 }
 
@@ -142,6 +144,44 @@ static GameValue GmTrafficInfo(const GameState* state, GameValuePar oper1)
     array[2] = (float)dest;
     array[3] = (float)st;
     return value;
+}
+
+// gmTrafficEncounter <veh> -> [choice, dangerOwned, laneWait, surrenderTime,
+// clearHold, playerArmed, armedThreat, laneObstruction]; [] when untracked.
+// choice is "none"/"surrender"/"escape"; the bools ride as 0/1 scalars (raw
+// bools kill the tri harness asserts); the last three are a live
+// observation of the real player at query time (issue #66 test aid)
+static GameValue GmTrafficEncounter(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    Transport* veh = dyn_cast<Transport>(GetObject(oper1));
+    const Traffic& t = Traffic::Instance();
+    TrafficEncounter enc;
+    if (!veh || !t.EncounterInfo(veh, enc))
+    {
+        return value;
+    }
+    bool armed, threat, lane;
+    t.ProbeThreat(veh, armed, threat, lane);
+    array.Resize(8);
+    array[0] = GameStringType(EncounterChoiceName(enc.choice));
+    array[1] = enc.dangerOwned ? 1.0f : 0.0f;
+    array[2] = enc.laneWait ? 1.0f : 0.0f;
+    array[3] = enc.surrenderTime;
+    array[4] = enc.clearHold;
+    array[5] = armed ? 1.0f : 0.0f;
+    array[6] = threat ? 1.0f : 0.0f;
+    array[7] = lane ? 1.0f : 0.0f;
+    return value;
+}
+
+// gmTrafficSurrenderChance <scalar> -> the effective chance (clamped to
+// [0,1]).  Test aid (issue #66): overrides trafficCommandeerSurrenderChance
+// until the next config load - mission start and every save load restore it
+static GameValue GmTrafficSurrenderChance(const GameState* /*state*/, GameValuePar oper1)
+{
+    return Traffic::Instance().SetCommandeerSurrenderChance((float)oper1);
 }
 
 // gmTrafficDest <veh> -> the entry's current destination road point in getPos
@@ -380,6 +420,8 @@ INIT_MODULE(GuerrillaTraffic, 3)
     GGameState.NewFunction(GameFunction(GameArray, "gmTrafficPercept", GmTrafficPercept, GameObjectOrArray));
     GGameState.NewFunction(GameFunction(GameObject, "gmTrafficEscort", GmTrafficEscort, GameObject));
     GGameState.NewNularOp(GameNular(GameArray, "gmTrafficDiag", GmTrafficDiag));
+    GGameState.NewFunction(GameFunction(GameArray, "gmTrafficEncounter", GmTrafficEncounter, GameObject));
+    GGameState.NewFunction(GameFunction(GameScalar, "gmTrafficSurrenderChance", GmTrafficSurrenderChance, GameScalar));
 
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadNearest", GmRoadNearest, GameObjectOrArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadPath", GmRoadPath, GameArray));

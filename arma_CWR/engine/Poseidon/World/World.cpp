@@ -1717,7 +1717,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         Guerrilla::TownFlags::Instance().Simulate(deltaT);
         // Guerrilla ambient road traffic - inactive with the registry (or
         // trafficEnabled=0); throttles itself to trafficInterval plus a
-        // 0.5 s commandeer sub-tick while a civ car is near the player.
+        // 0.5 s encounter sub-tick while civ traffic exists.
         Guerrilla::Traffic::Instance().Simulate(deltaT);
         Guerrilla::AssailantSystem::Instance().Simulate(deltaT);
         // Guerrilla arms stashes - prunes dead holders; active in ANY mission
