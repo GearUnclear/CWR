@@ -149,6 +149,8 @@ ZONE = [name, type, owner, garrisonStrength, support, income, heat, markerName, 
 | **Outpost / Factory** | 2 | Force (clear & hold) | Income + manpower tick |
 | **City / Village** | 1 | **Support, not force** | Manpower (HR) + recruits + intel |
 
+> **Reality check (2026-10-11, issue #71):** the yields above are design intent. In code, AIRFIELD and SEAPORT are plain income zones like OUTPOST (no heavy-vehicle unlock, no WL3 gate), and none of the four shipped templates authors one yet. What happens to zones off-screen is fixed by [`guerrilla-mode/OFFSCREEN-CONTRACT.md`](../guerrilla-mode/OFFSCREEN-CONTRACT.md); its section 5 lists the coverage targets and the hubs each template still lacks.
+
 Capture condition for military zones (consolidation, `ZoneRegistry::EvaluateTick`): clearing the zone starts a **capture meter** (`captureRate`/tick per attacker up to `captureCrewCap`; ~17–51 s) that climbs only while friendly units hold the zone area with **no live occupier unit inside it** — positional presence, so QRF, patrols and mission-placed troops all contest. Both sides in the zone = **contested** (meter frozen); defenders alone re-secure fast (`captureDecayDefended`), an abandoned meter fades slowly (`captureDecayAbandoned`). At 100 → flip `owner`, recolor the marker, spawn a friendly holding garrison, open the income/HR taps, reveal adjacent zones. Cities flip on a **support threshold**, not kills — support accrues only in an occupier-free town, occupier-only presence intimidates it back toward a floor (`supportDecayOccupied`/`supportDecayFloor`), and the flip additionally needs fighters standing in an occupier-free town once past the threshold (`supportThreshold` announces "ready to rise"; `captured` is the flip).
 
 ### Two economies
@@ -230,7 +232,7 @@ De-hardcode **before** content breadth: prove the loop on the hardcoded Demo fir
 
 | State | Storage | Mechanism |
 |---|---|---|
-| Zone ownership/support/garrison | global array `ZONES[]` | `saveGame` world state |
+| Zone ownership/support/garrison | native `ZoneRegistry::Serialize` (zone rows keyed by name; the `ZONES[]` array is retired) | `saveGame` world state |
 | ₽ / HR / War Level / per-region Heat | globals | same |
 | Gear unlocks (tally + unlocked set) | global arrays | same |
 | Named companions (alive, rank, XP, skill, loadout) | parallel global arrays keyed by name | re-applied on load: `SetRank`/`setSkill`/`addWeapon` |

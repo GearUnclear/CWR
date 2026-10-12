@@ -200,6 +200,7 @@ zones out of `class Zones`.
 | `type` | `"OUTPOST"` | `CAMP`, `OUTPOST`, `CITY`, `AIRFIELD`, `SEAPORT`. See below. |
 | `owner` | `"NEUTRAL"` | `"OCCUPIER"` / `"RESISTANCE"` (generic tokens, resolved per campaign) or a literal side string. The raw value is kept and re-resolved, so the token survives a faction swap. |
 | `garrison` | 0 | Reserve garrison strength the GarrisonCache spawns from. |
+| `garrisonMax` | `garrison` | Ceiling for off-screen reserve recovery (issue #71 D2: a distant, calm post regains 1 body per `garrisonRecoverInterval`). |
 | `support` | 0 | Starting population support (CITY zones). |
 | `income` | 0 | Resources per tick when resistance-held. |
 | `heat` | 0 | Starting heat. |
@@ -264,6 +265,12 @@ The generated `description.ext` says this in its own header:
 2. **Walk the CAMP and the OUTPOSTs in the editor.** See the limits in section
    3.
 3. **Rename the OUTPOSTs to real places**, and tune `garrison` / `income`.
+   Check the network against the coverage targets C1 to C7 in
+   [OFFSCREEN-CONTRACT.md](OFFSCREEN-CONTRACT.md) section 5: every airfield,
+   harbour and garrisoned compound the map models should be a zone of the
+   matching type, with a rising garrison ladder and an occupier pair within
+   3 km of the Camp. The scaffold does not detect airfields or harbours yet
+   (a #38 follow-up), so add them by hand.
 4. **Add a `CfgGuerrillaMarket` block** if this island should have dealers.
 
 ## 6. `seedCities` is tri-state

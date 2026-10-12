@@ -14,7 +14,7 @@ reconciled against the engine source, not play-tested.)*
 |---|-------------|--------------|------|-------|
 | 1 | Zone table (Camp / Village / Outpost) | `description.ext` `CfgGuerrillaZones` → engine `ZoneRegistry` | **native (data-driven)** | Per-island data file (issue #3 item 3); positions in getPos order; `seedCities=1` auto-adds every named town as a CITY zone |
 | 2 | Marker recolor/label on flip + fog reveal | `ZoneRegistry::UpdateMarkers` | **native** | Engine repaints only EXISTING markers; `init.sqs` creates one marker per zone (once: created markers serialize with the world) |
-| 3 | Territory capture (military clear→flip; CITY on support) | `ZoneRegistry::EvaluateTick` | **native** | Player-proximity (cacheRadius) gate, heat spike, income tap all engine-side; fires the `captured`/`supportThreshold` events |
+| 3 | Territory capture (military clear→flip; CITY on support) | `ZoneRegistry::EvaluateTick` | **native** | Simulation bubble (cacheRadius) plus the off-screen remote tick (issue #71 D1: zones with fighters left in them, or a half-finished capture, keep ticking), heat spike, income tap all engine-side; fires the `captured`/`supportThreshold` events |
 | 3b | Capture REACTION (hold garrison + notify) | `scripts/capture.sqs` | **script** | holdCount-sized role-mixed squad via `gmFactionSquad` (plan 15); tier-less descriptors keep holdClass × holdCount |
 | 4 | Outpost garrison: officer-first groups, SENTRY/GUARD | `GarrisonCache::SpawnGarrison` | **native** | Role-diverse squads (plan 15): `ZoneRegistry::FactionSquad` template over tiers[] + tiersMG/AT/Medic/Sniper[]; officer key; descriptor classnames package-resolved at load; reads script `gmWarLevel` |
 | 5 | Distance-cached spawn/despawn + survivor write-back | `GarrisonCache` | **native** | +50 m despawn hysteresis; `garrisonSpawned`/`garrisonDespawned` events; `gmGarrisonForceDespawn` escape hatch |
@@ -107,15 +107,23 @@ Accepted degradation, engine-side safe.
 - **Occupier-owned CITY zones are capturable via support since 2026-07-11**
   (underground organizing; the old permanently-dead edge is fixed). Third-
   side-owned cities remain out of reach by design.
-- **Meters freeze outside `cacheRadius` (800 m)**: no gain, no decay, no
-  contest while the player is away (world-bubble policy, deliberate).
+- **Off-screen contract (issue #71, [OFFSCREEN-CONTRACT.md](OFFSCREEN-CONTRACT.md))**:
+  outside `cacheRadius` (800 m) a zone keeps ticking while resistance units
+  stand in it or its capture meter is above 0 (D1, `remoteTick`): fighters
+  left at an empty post finish the capture, fighters facing a stored reserve
+  are a frozen standoff (no remote combat), unheld half-captures decay, and
+  remote towns gain support but never lose it to intimidation. A distant,
+  calm post regains 1 soldier per 600 s up to its authored strength (D2,
+  `garrisonRecoverInterval`). Untouched zones still hold still. Liberated
+  zones are permanent in v1 (no occupier recapture; a #38 follow-up).
+  `gmSimDiag` / the `[gmsim]` log line measure the live-entity budgets.
 - **Hidden-straggler watch item**: a lone surviving defender inside the zone
   silently freezes the meter (marker flips to CONTESTED/white as the tell);
   `contestOutnumberRatio` covers the inverse case (defenders held hostage by
   one hidden attacker). Verify in play that returning patrols + DEFENDED
   decay clean up half-captured litter.
-- **Nothing captures while the player is dead/absent** (`playerValid` gate);
-  garrisons freeze rather than despawn. Correct for single-player Phase 1.
+- **Nothing captures while the player is dead** (`playerValid` gate; the D2
+  recovery clock freezes too); garrisons freeze rather than despawn. Correct for single-player Phase 1.
 - **Alert FSM edges**: RED→YELLOW re-arms the escalation window, so a
   partially-visible player oscillates RED↔YELLOW; there is no calming grace
   period below `alertYellowKnows`; occupier groups farther than `zoneArea`

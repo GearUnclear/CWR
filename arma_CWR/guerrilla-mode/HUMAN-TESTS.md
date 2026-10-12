@@ -11,7 +11,7 @@ From `arma_CWR`:
 .\run-game.ps1 -SkipBuild -Mission 'Missions\Showcase.Abel'
 ```
 
-Or use the installed **SHOWCASE** main-menu reference mission, then **HUMAN TESTS: open guided suite** from the action menu. Use a current build and Classic 1.99 data. Start a **fresh** Showcase after installing changes: saved SQS scripts retain the old source text.
+Or use the installed **SHOWCASE** main-menu reference mission, then **HUMAN TESTS: open guided suite** from the action menu. Use a current build and the full official Remaster with UD installed by `setup-guerrilla.ps1` in Remaster mode (a shadow copy for testing, see [FULL-SCALE-SESSION.md](FULL-SCALE-SESSION.md)); Classic 1.99 is legacy. Start a **fresh** Showcase after installing changes: saved SQS scripts retain the old source text.
 
 Showcase's bootstrap executes `\gmcore\init.sqs`, exactly like Guerrilla. Its description includes `Missions/Guerrilla.Abel/description.ext` from the installed game data. Install both templates together. This includes the main mode's CIV descriptor, global faction resolution, market and tuning; the old Showcase omitted civilians. Trident stages only the test mission, so the data-root include is intentional.
 

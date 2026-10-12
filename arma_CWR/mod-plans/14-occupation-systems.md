@@ -50,6 +50,8 @@ The new command — working name **`nearestRoads <pos> <radius>`** (returns road
 
 ## System 1 — Control infrastructure: the world-gen layer
 
+> **Off-screen rule (issue #71, [`OFFSCREEN-CONTRACT.md`](../guerrilla-mode/OFFSCREEN-CONTRACT.md)):** every piece of infrastructure this system generates must follow the materialization rule: a persistent record (position, strength, destroyed flag), live entities only inside the player's bubble, survivor write-back, regeneration only off-screen. A destroyed checkpoint stays destroyed until an off-screen tick rebuilds it.
+
 *Historical anchor: the Israeli fixed-checkpoint grid; Rhodesian martial-law zones; SADF base architecture.*
 
 At campaign generation (and regenerating as War Level rises), the occupier stamps a **control layer** onto the island:
@@ -143,6 +145,8 @@ A fraction of named-companion "deaths" that occur under occupier control (near a
 - Failed rescues feed the resentment loop: a botched raid gets prisoners transferred and the town that watched punished (System 3).
 
 ## System 8 — The occupation expands: pressure under passivity
+
+> **Off-screen rule (issue #71):** expansion runs on the abstract campaign tick, never inside the bubble or in the player's view, capped by `MaxZones` (64) and the war level. Today only the D2 reserve recovery exists (a calm post regains bodies up to its authored strength); new zones and occupier recapture are #38 follow-ups.
 
 *Historical anchor: outpost/settlement expansion into contested ground; the grid never sleeps.*
 
