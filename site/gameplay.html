@@ -88,19 +88,20 @@
 	&rarr; enemy escalation) that turns each win into a bigger fight next time.</p>
 	<table class="data">
 		<tr><th width="150">System</th><th>What it does</th><th width="70">Status</th></tr>
-		<tr><td>Zones &amp; Capture</td><td>Camp / Village / Outpost, created at runtime, with capture triggers. Now a native engine system (<code>ZoneRegistry</code>).</td><td><span class="badge live">Built</span></td></tr>
-		<tr><td>Garrisons &amp; QRF</td><td>Enemy forces spawn to defend held zones and convoy in to respond to alarms; officer-first, distance-cached so off-screen troops cost nothing.</td><td><span class="badge live">Built</span></td></tr>
+		<tr><td>Zones &amp; Capture</td><td>Camp, Outpost and the island's towns as native engine zones (<code>ZoneRegistry</code>). An outpost flips once your fighters hold it long enough to fill a capture meter; a town flips on support. Fighters you leave behind keep working a zone after you walk away.</td><td><span class="badge live">Built</span></td></tr>
+		<tr><td>Garrisons &amp; QRF</td><td>Enemy forces spawn to defend held zones and convoy in to respond to alarms, officer first. Away from you a garrison is a stored headcount: it holds its post but does not patrol or fight off-screen, and a calm, untouched post slowly refills to its full strength.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Graduated Alert</td><td>GREEN/YELLOW/RED state machine: getting spotted is a recoverable setback you can de-escalate from before it costs you the mission.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Two Economies</td><td>Resources (&#8381;) and Manpower (HR) earned from held territory, spent on training, gear and recruits.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Recruiting &amp; Companions</td><td>Grow your band; a small roster of named, permadeath companions level up, gaining rank and skill you can watch improve mid-campaign.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Loot &amp; Gear Unlocks</td><td>Looted weapons tally toward permanent, faction-wide unlocks.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Deep Undercover</td><td>Every enemy squad reads you separately: rifle in hands, slung on your back, or nowhere in sight all mean different things, and only witnesses remember. <a href="undercover.html"><b>Full dossier with live captures &raquo;</b></a></td><td><span class="badge live">Built</span></td></tr>
-		<tr><td>War Level &amp; Heat</td><td>A slow, map-wide escalation that produces tougher enemy spawns, plus a fast, per-region alertness that decays if you lie low.</td><td><span class="badge live">Built</span></td></tr>
+		<tr><td>War Level &amp; Heat</td><td>A slow, map-wide escalation that produces tougher enemy spawns, plus a fast, per-region alertness that decays if you lie low. Heat cools everywhere you are not.</td><td><span class="badge live">Built</span></td></tr>
 		<tr><td>Save / Load</td><td>Persistence across sessions via the engine's own <code>saveGame</code> state, keeping territory, veterans, unlocks and all.</td><td><span class="badge live">Built</span></td></tr>
 	</table>
 	<p class="dim">Status: the whole "Three Zones" slice is <b>built and now runs as native engine systems</b>, not just mission scripts, and it already boots on a second island with the factions swapped (see below). What hasn't happened yet is the first
 	real playtest, fighting the Outpost garrison for real, watching the world respond, and reloading a
-	save. See the <a href="designloop.html">Roadmap</a> for what's next.</p>
+	save. The rules for what keeps moving while you are elsewhere are now written down and tested, and the next
+	gate is a full-scale session on the official Remaster, with and without the Lost Brothers mod. See the <a href="designloop.html">Roadmap</a> for what's next.</p>
 	<div class="shot">
 		<img src="assets/img/shot-ingame.png" width="760" alt="In-game screenshot: resistance fighter holding a looted AK-47 with the action menu open">
 		<div class="cap"><span class="stampcorner">DEV CAPTURE</span><b>On the ground:</b> a lone resistance fighter with a looted AK-47 and the field action menu open: the Scout&rarr;Strike&rarr;<b>Loot</b>&rarr;Fade loop, running. Early build on the Sinai test bed.</div>
@@ -111,8 +112,8 @@
 	Everon? That's a different campaign, not a different mod. Unit rosters, vehicles, disguise gear, and
 	loot unlocks all travel with whichever faction you pick, so the fight actually feels different depending on
 	who you chose.</p>
-	<p>Full CWA data covers <b>four islands</b> (Everon, Malden, Kolgujev, Nogova) and every faction in the
-	game. The swap system is <b>built and running</b>: every island fact and every faction fact lives in swappable data, and the
+	<p>Campaign templates exist today for <b>Malden and Everon</b> from the base game and for <b>Sinai and South Lebanon</b>
+	from the Lost Brothers mod, with every faction in the game on offer. The swap system is <b>built and running</b>: every island fact and every faction fact lives in swappable data, and the
 	same campaign core already boots on a <b>second island</b> (Sinai) with the sides flipped. There, a modern occupier is held off by an Egyptian frontier resistance, the mirror image of the stock Cold War matchup, and the campaign code didn't change a line to do it. See the <a href="designloop.html">Roadmap</a>
 	for what's proven and what comes next.</p>
 	<p><b>Mods land in the same slots.</b> A mod that ships its own soldiers can add them to both faction cyclers by
@@ -134,12 +135,13 @@
 	occupied territory</b> before a shot is fired, and the occupier's escalation targets <i>your</i>
 	economy and the towns that feed you, as much as your squad.</p>
 	<p>This whole layer is <b>on the drawing board</b>: designed and documented, still to be built, and it's the depth that turns the
-	"Three Zones" proof-of-concept into a war. A few pieces (flags on captured zones, a curfew clock, a hand-placed
-	checkpoint) land early; the rest arrives as the mode fills out.</p>
+	"Three Zones" proof-of-concept into a war. Some pieces are already in: traffic on the roads, and a flag
+	over every town showing who holds it. The rest arrives as the mode fills out.</p>
 	<table class="data">
 		<tr><th width="170">Occupier system</th><th>What it means for you</th><th width="70">Status</th></tr>
-		<tr><td>Ambient Traffic</td><td>The roads are not empty. Civilian cars run town to town, occupier patrol vehicles work the routes between their posts, and now and then a supply convoy rolls through with an escort. Step into the road with a rifle up and a civilian driver stops, bails and runs; the car is yours, and you still read as a civilian behind its wheel. A driver shot on the road counts against you like any other civilian killing.</td><td><span class="badge live">Playable</span></td></tr>
-		<tr><td>Checkpoints, Wire &amp; Flags</td><td>The occupier stamps a control grid onto the island: roadblocks at the chokepoints, watchtowers and wire around towns, its flag over everything it holds. The map itself gets tighter to move through as the war escalates; veterans read a region by its infrastructure. Tearing the flag down can <i>be</i> the moment a zone flips to you.</td><td><span class="badge plan">Planned</span></td></tr>
+		<tr><td>Ambient Traffic</td><td>The roads are not empty. Civilian cars run town to town, occupier patrol vehicles work the routes between their posts, and now and then an escorted convoy rolls through (no cargo yet: wrecking one raises the alarm, it does not starve the enemy). Step into the road with a rifle up and a civilian driver stops, bails and runs; the car is yours, and you still read as a civilian behind its wheel. A driver shot on the road counts against you like any other civilian killing.</td><td><span class="badge live">Playable</span></td></tr>
+		<tr><td>Flags</td><td>Every town flies the flag of whoever holds it, and the flag changes when the town changes hands.</td><td><span class="badge live">Built</span></td></tr>
+		<tr><td>Checkpoints &amp; Wire</td><td>The occupier stamps a control grid onto the island: roadblocks at the chokepoints, watchtowers and wire around towns. The map itself gets tighter to move through as the war escalates; veterans read a region by its infrastructure.</td><td><span class="badge plan">Planned</span></td></tr>
 		<tr><td>Curfew &amp; Pass Laws</td><td>Occupation runs on a clock, too. After dark in a controlled town, a civilian on the street is suspicious by default. Night stops being free stealth and becomes a gamble: darkness and empty streets, but your presence is its own probable cause.</td><td><span class="badge plan">Planned</span></td></tr>
 		<tr><td>Reprisals &amp; Closures</td><td>Blow an ambush and the nearest town that helped you pays: its income shut off, a house or two demolished into rubble. But history's hard lesson is wired in: <b>repression radicalizes</b>. Every crackdown costs you support now and hands you fresh recruits later, so the occupier's cruelest moves seed your comeback.</td><td><span class="badge plan">Planned</span></td></tr>
 		<tr><td>Protected Villages</td><td>Push a region too hard and the occupier empties a town into a fenced resettlement camp, leaving a ghost town behind. That camp is a ready-made rescue op: break the wire, walk the people home, the town reopens for you.</td><td><span class="badge plan">Planned</span></td></tr>
@@ -152,8 +154,8 @@
 	<div class="briefing"><span class="stamp" style="border-color:#7CFC00;color:#7CFC00;">THE HOOK</span>
 		<p style="margin-top:8px;">Here's the feeling we're building toward: you flip the Outpost, the war level ticks up, and the occupier <i>answers on the map</i>. The village that fed you goes under closure, a fresh checkpoint
 		appears on your way out, and the next patrol comes in by helicopter. You feel the world <b>tighten around
-		your victory</b> in the same fifteen minutes you won it. Act and it clamps down; sit still and it expands
-		anyway. There's no quiet corner to grind in, and that's the point.</p>
+		your victory</b> in the same fifteen minutes you won it. Act and it clamps down; sit still and, once expansion
+		lands, it spreads anyway. Today lying low cools the heat while the posts you bled quietly refill.</p>
 	</div>
 
 	<a name="combat"></a><h3>How Enemies See &amp; Target You</h3>
