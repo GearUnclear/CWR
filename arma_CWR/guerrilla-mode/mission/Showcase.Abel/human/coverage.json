@@ -100,6 +100,13 @@
       "zones",
       "capture"
     ],
+    "../engine/Poseidon/Game/Guerrilla/CampaignEnd.cpp": [
+      "capture",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/CampaignEndCommands.cpp": [
+      "capture"
+    ],
     "../engine/Poseidon/Game/Guerrilla/AlertMachine.cpp": [
       "alert",
       "heat"
