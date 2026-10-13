@@ -1,0 +1,9 @@
+# Issue #78: live cargo get-out through NativeMoveIn, on full Remaster data.
+# packages/RemasterUD is a setup-prepared shadow with the shared gmcore installed.
+tags = ["scripting", "guerrilla", "ai", "vehicles", "remaster_ud", "headless"]
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+mission = "tests/integration/missions/guerrilla_offscreen.abel"
+timeout = 180
+assert_timeout = 90
+extra_args = ["--dev"]

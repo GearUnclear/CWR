@@ -28,16 +28,23 @@ triSimFrames 5
 cvTruck = gmTrafficForceSpawn ["convoy", cvOut]
 triAssertEq [(format ["%1", isNull cvTruck]), "false"]
 cvEsc = gmTrafficEscort cvTruck
+triAssertEq [(format ["%1", isNull cvEsc]), "false"]
 triAssertEq [gmTrafficCount "convoy", 1]
 cvHeat0 = (gmZone cvOut) select 6
-// cargo riders are removed first: wrecking a hull with live cargo trips the
-// upstream AI_ERROR(_state == InCargo) check (AIUnitImpl GetOut), which
-// strict mode treats as fatal - a separate defect, not this contract's
-{if (_x != (driver cvTruck)) then {deleteVehicle _x}} forEach (crew cvTruck)
-if (not (isNull cvEsc)) then {{if ((_x != (driver cvEsc)) and (_x != (gunner cvEsc))) then {deleteVehicle _x}} forEach (crew cvEsc)}
 triSimFrames 5
+// Issue #78: NativeMoveIn must establish InCargo before the wreck ejects its
+// passengers. Keep live, natively seated cargo in BOTH hulls: deleting riders
+// or reseating them with moveInCargo masks the broken native state transition.
+cvCargo = []
+{if ((_x != (driver cvTruck)) and (_x != (gunner cvTruck)) and (_x != (commander cvTruck))) then {cvCargo = cvCargo + [_x]}} forEach (crew cvTruck)
+cvEscCargo = []
+{if ((_x != (driver cvEsc)) and (_x != (gunner cvEsc)) and (_x != (commander cvEsc))) then {cvEscCargo = cvEscCargo + [_x]}} forEach (crew cvEsc)
+triAssertGt [count cvCargo, 0]
+triAssertGt [count cvEscCargo, 0]
+triAssertEq [(format ["%1", alive (cvCargo select 0)]), "true"]
+triAssertEq [(format ["%1", alive (cvEscCargo select 0)]), "true"]
 cvTruck setDammage 1
-if (not (isNull cvEsc)) then {cvEsc setDammage 1}
+cvEsc setDammage 1
 triSimUntil { (gmTrafficCount "convoy") == 0 }
 // the ambush floors the attributed zone (the Outpost, nearest occupier zone)
 triSimUntil { (gmZoneAlert cvOut) >= 1 }

@@ -2851,6 +2851,8 @@ bool NativeMoveIn(Person* soldier, Transport* veh, GetInPosition position)
             {
                 GetNetworkManager().AskForGetIn(soldier, veh, GIPCargo);
             }
+            // Match moveInCargo: seating alone does not change the brain state.
+            unit->SetState(AIUnit::InCargo);
             unit->AssignAsCargo(veh);
             break;
     }
