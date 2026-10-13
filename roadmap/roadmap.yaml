@@ -2072,3 +2072,100 @@ items:
       implementation how-to, player instructions and Remaster acceptance matrix.
     log:
       - "2026-10-12: filed #82 after official Arma 3 binding research and independent source review. User confirmed aircraft mouse freelook is desired; controls only, no flight-model changes. Planning commit covers hidden Shift Turbo and Q/E collisions, shared Pilot UI/reset behavior, safe saved/cleared-profile handling, Remaster localization and existing-command shortcuts. Flaps stay on the action menu and an independent speedbrake policy is out of scope. Implementation and runtime acceptance remain pending; no game launched."
+
+  - id: agent-guides-fact-check
+    title: "Fact-check the agent guides (CLAUDE.md, AGENTS.md) against the code"
+    phase: housekeeping
+    status: done
+    priority: 3
+    depends_on: []
+    commits: [1c002af]
+    summary: >
+      arma_CWR/CLAUDE.md had not picked up the 2026-10-11 Remaster-target switch
+      and had drifted from the code (no-CI claim, C++20 claim, CTest running
+      Trident, preset names, test pin counts, a working map naming 4 of ~25
+      Guerrilla subsystems). A read-only multi-agent audit checked every section;
+      the fixes landed in one docs commit and the out-of-scope findings were
+      filed as #88 to #92.
+    log:
+      - "2026-10-13: landed 1c002af, including the CMakeLists.txt __FILE__ comment that named a nonexistent RepoPath() helper. Follow-ups: cxx-standard-decision (#88), repo-housekeeping-2026-10 (#89), unit-test-tmp-paths (#90), trident-ctest-data-dir (#91), trident-lanes-remaster (#92)."
+
+  - id: trident-lanes-remaster
+    title: "Migrate Trident full_cwa/lobo lanes from Classic data to the Remaster (issue #92)"
+    phase: release
+    status: planned
+    priority: 2
+    depends_on: [setup-remaster-mode]
+    gh_issues: [92]
+    summary: >
+      The local .trident.env still points OFPR_DATA_DIR at the legacy Classic
+      install and .trident.env.example still recommends packages/Demo, so the
+      full_cwa and lobo lanes run on Classic data although the Remaster is the
+      target. Pick the Remaster shadow default, update the example env and the
+      guerrilla-mode README, rerun both lanes, triage reds and retire Classic as
+      the default. Also decide whether the packages/Game pins (a junction to the
+      Steam folder itself) move to the shadow.
+    log:
+      - "2026-10-13: filed #92 from the agent-guide audit. Overlaps #79 P3/P4, which cover the same default for the playtest only."
+
+  - id: trident-ctest-data-dir
+    title: "TridentCTest.cmake expects packages/Remaster, which no setup creates (issue #91)"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [trident-lanes-remaster]
+    gh_issues: [91]
+    summary: >
+      The optional CTest bridge (OFPR_REGISTER_TRIDENT_CTESTS, default OFF)
+      points at a packages/Remaster data dir that nothing creates; the same stale
+      default appears in tests/unit/engine/Poseidon/CMakeLists.txt and
+      FontCommand.cpp. Point it at the Remaster shadow, make it a cache
+      variable, or drop the bridge and document tri test as the only path.
+    log:
+      - "2026-10-13: filed #91 from the agent-guide audit. Low priority: integration tests run through tri test directly."
+
+  - id: cxx-standard-decision
+    title: "Decide the engine C++ standard: Poseidon and PoseidonGL33 build as C++17 (issue #88)"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [build-toolchain]
+    gh_issues: [88]
+    summary: >
+      The root CMakeLists.txt defaults to C++20, but the Poseidon and
+      PoseidonGL33 targets override CXX_STANDARD to 17, so the core engine
+      builds as C++17 while the docs claimed C++20. Either raise both targets to
+      C++20 (probe the breakage in a separate build dir first) or keep C++17
+      deliberately and say why in CMake.
+    log:
+      - "2026-10-13: filed #88 from the agent-guide audit; the docs now say C++17."
+
+  - id: unit-test-tmp-paths
+    title: "Unit tests hardcode /tmp paths and fail on Windows without a tmp dir (issue #90)"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: [build-toolchain]
+    gh_issues: [90]
+    summary: >
+      test_paa_encoder, test_asset_preview and test_network_server write to
+      literal /tmp paths (test_gamePaths unclear), which fail on a fresh Windows
+      checkout unless the current drive has a tmp dir. Copy the exe-relative
+      path plus create_directories pattern that test_dds_converter already uses.
+    log:
+      - "2026-10-13: filed #90 from the agent-guide audit. The other /tmp hits are string-only or POSIX-only."
+
+  - id: repo-housekeeping-2026-10
+    title: "Repo housekeeping: stale roadmap trunk_branch, stale lobo script comment, stray root files (issue #89)"
+    phase: housekeeping
+    status: planned
+    priority: 3
+    depends_on: []
+    gh_issues: [89]
+    summary: >
+      meta.trunk_branch in this file still says guerrilla-mode (work lands on
+      main; generate.py never reads it), fix-lobo-model-origin.ps1 quotes the
+      pre-port seating formula, and temp_traffic_handoff.md plus a ChatGPT PNG
+      are tracked at the repo root. The root files need an owner decision.
+    log:
+      - "2026-10-13: filed #89 from the agent-guide audit."
