@@ -43,11 +43,12 @@ items:
     status: in-progress
     gh_issues: [68]
     depends_on: []
-    commits: []
+    commits: [ca9bd9d, b716c29]
     summary: >
       Single-player Q/E hold-to-lean is implemented for armed standing/crouched
-      infantry, including slow walking and sights. A shared procedural upper-body
-      pose moves the camera, weapon, AI target points and damage geometry; swept
+      infantry, including slow walking and sights. A shared rigid pose tilts the
+      upper body 35 degrees (hip sway plus a spine/neck roll about bore-parallel
+      axes) and moves the camera, weapon, AI target points and damage geometry; swept
       cover checks constrain travel and blocked muzzles cannot shoot through cover.
       Version-5 control migration reserves bare Q/E on foot while preserving vehicle
       controls. Multiplayer remains disabled pending negotiated pose replication.
@@ -57,6 +58,7 @@ items:
       - "2026-10-11: all four gameplay lanes passed three consecutive runs with retries disabled. Final standalone @LoBo acceptance and the real Guerrilla.Sinai campaign both pass without the legacy fixup overlay; the standalone mission explicitly activates its weapon/ammo dependencies. Source and deployed Options text hashes match, the original synthetic wall regenerates byte-for-byte, and git diff --check passes. Evidence: arma_CWR/tmp/lean-unit-final.log, lean-acceptance1/2/3.log, lean-campaign-verified.log, lean-bindings-ui3 and lean-visual-final captures. Multiplayer pose replication remains the open release gate in #68."
       - "2026-10-11: completed the requested independent verifier/iterator loop. Fixed close-cover overlap preventing escape, analog dead-zone drift, missing native-window focus invalidation, and held lean cancelling during ordinary rifle/pistol stand-crouch transitions. Scripted moves, reloads and other unsupported states still cancel lean and require release. Promoted pistol, paired neutral-miss/lean-hit, native focus and stance-transition regressions. Original synthetic solid cover retains collision checks; a separate passable fire barrier proves blocked-muzzle protection without body impulses. Fixture regeneration is deterministic."
       - "2026-10-11: independent final signoff on PoseidonGame SHA256 F0BCDA0852C3AAF84F00F23E23B0FF81275689DE0D937B9E9F46176384A85A0A. All 11 final gameplay scenarios validated: initial batch passed 10, then corrected oblique fixture and full cover each passed three consecutive runs with retries disabled. Six final GL33 checks pass, including original stance regression, native focus, body/cover/sights captures, Q/E rebinding and Arma 3 preset. Classic/LoBo paired damage probes and real Sinai campaign pass. Engine suite excluding external-data: 2955 passed, 4 skipped, 2293041 assertions; unfiltered run has 5 failures caused by absent Remaster localization/equipment fixtures. Evidence: arma_CWR/tmp/lean-iteration3-final-unit.log, verifier-final-delivered-gameplay.log, verifier-final-cover1/2/3.log and verifier-final-render.log/captures. Multiplayer remains disabled pending replication; single-player has no remaining reproduced blocker."
+      - "2026-10-13: user playtest found the pose broken: the 0.28 m sideways translation, blended by the aiming selection weights (head/arms 1, chest 0.9, ribs 0.5, belly 0.2), sheared the torso (+27% belly to head) and never tilted it. Reworked as a 35 degree rigid tilt in b716c29 (LeanRig: 0.12 m hip sway about each ankle, 30% spine roll about the belly, the rest about the neck). A first single-pivot attempt read as a bow on E and no lean on Q, because the bladed rifle stance is already hunched 33 degrees right across the bore. First-person view and sight camera roll with the head/weapon, bore unchanged. 13/13 lean tri tests pass first try; new leaning_tilt catches both the shear and the asymmetric bow. Open: E drops the eye 0.11 m (0.14 crouched) while Q raises it 0.05 m; the crouched kneeling-leg sway wants a human look; one unreproduced 0.49 m shove in leaning_guerrilla; mouse axes follow the rolled view."
   - id: lobo-content-repairs
     title: "Reproducible Lobo audit repairs and private change tracking"
     phase: housekeeping
