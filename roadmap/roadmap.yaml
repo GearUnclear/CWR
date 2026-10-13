@@ -1906,6 +1906,33 @@ items:
       - "Problems hit: (1) a menu-launched soak (no --test-mission) pauses when another window takes focus, which froze the first tour mid-run on this shared desktop; the soaks pass --focus. (2) Wrecking a traffic convoy hull with live cargo riders trips AI_ERROR(_state == InCargo), fatal in strict mode; the convoy test deletes the riders first and the defect is #78. (3) guerrilla_native_capture flaked once on its contest-freeze assert (capture 40 -> 0) and passed on retry and on a clean rerun; the in-bubble path is unchanged by D1."
       - "Still open, owned elsewhere: the 1080p human S1/S2 session in FULL-SCALE-SESSION.md part A (gate-zero-playtest, #31); follow-ups #75 (Sinai seeding + dealer cap), #76 (occupation network per template), #77 (recapture, expansion, standoff resolution); #35 bullets posted on the issue."
 
+  - id: occupier-forces
+    title: "Occupier forces: the strategic pool, the retake director, reinforcement waves, air, HQ loss and the campaign lose state (OCCUPIER-FORCES.md)"
+    phase: phase-2
+    status: in-progress
+    priority: 1
+    depends_on: [offscreen-contract]
+    gh_issues: [77, 35, 72, 79, 86]
+    commits: ["84fbbce", "e37e79a"]
+    summary: >
+      Implements guerrilla-mode/OCCUPIER-FORCES.md (owner decisions D1 to
+      D24) in seven phases on the occupier-forces branch: phase 1 the
+      unconditional conservation fixes U1 to U5 (S5 pending deposits, no
+      pop-in beside the player), the any-enemy town census, the HOLD and
+      CAPTURE presence predicates (#86), HqZone; phase 2 the OccupierForces
+      pool service (roster, K, refill full in about 4 h, bands with
+      hysteresis, control, war-level split, persistence with old-save
+      derivation, gmOccupierForces / gmForcesTune / gmForcesForce); phase 3
+      the director (sightings-only intel per D9, wake at the second distinct
+      town, heat candidates with urgency, tokens, push-out, foot and truck
+      packages with ladder classification, real speeds, the birth chain to
+      cancel-unseen, INFO lines, gmOccupierOps); phase 4 waves, base
+      recapture, the HQ model and destruction, the lose state; phase 5
+      armour and REINFORCE columns; phase 6 air; phase 7 defaults on and the
+      OFFSCREEN-CONTRACT rewrite.
+    log:
+      - "2026-10-13: phases 1 and 2 landed on the branch (84fbbce, e37e79a) through two parallel Opus agents with their own build dirs and Remaster shadows; integration gate on build/win-x64-clang-rwdi green (531 unit cases, 24/24 tri on the Remaster lane). Problems hit: S5 made guerrilla_counter_attack_watched_base count a pending deposit; the design's 2.4 h garrison refill figure measured 2.6 h with the band leaving SPENT just before (doc corrected); a full parallel rebuild hit 'paging file too small' (agents build with -j 5). Phase 3 in flight as director + movement agents meeting through CounterAttackOrders.hpp."
+
   # ---------------------------------------------------------------- phase 3
   - id: strategy-screen
     title: "GuerrillaDisplay strategy screen"
