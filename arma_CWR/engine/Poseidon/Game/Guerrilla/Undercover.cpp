@@ -605,6 +605,55 @@ int UndercoverSystem::Status() const
     return status;
 }
 
+// true when the group still has a living member to remember a face
+static bool GroupHasLivingMember(const AIGroup* grp)
+{
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        if (unit && unit->GetLifeState() == AIUnit::LSAlive)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+int UndercoverSystem::LivingWitnessCount() const
+{
+    if (!GWorld)
+    {
+        return 0;
+    }
+    Person* subject = Subject();
+    if (!subject)
+    {
+        return 0;
+    }
+    EntityAI* vehicle = _subjectVehicle;
+    AICenter* occupier = FindSideCenter(ZoneRegistry::Instance().OccupierSide());
+    if (!occupier)
+    {
+        return 0;
+    }
+    int count = 0;
+    for (int g = 0; g < occupier->NGroups(); g++)
+    {
+        AIGroup* grp = occupier->GetGroup(g);
+        if (!grp || !GroupHasLivingMember(grp))
+        {
+            continue;
+        }
+        const Target* t = grp->FindTargetAll(subject);
+        const Target* tv = vehicle ? grp->FindTargetAll(vehicle) : nullptr;
+        if ((t && !t->destroyed && IsCompromised(*t)) || (tv && !tv->destroyed && IsCompromised(*tv)))
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
 int UndercoverSystem::WitnessCount() const
 {
     if (!GWorld)

@@ -22,6 +22,7 @@ class AICenter;
 namespace Poseidon
 {
 class AIGroup;
+class Person;
 } // namespace Poseidon
 
 namespace Poseidon
@@ -61,6 +62,22 @@ struct ZoneTuning
     // CITY intimidation: occupier-only presence bleeds support, never below the floor
     float supportDecayOccupied = 0.5f;
     float supportDecayFloor = 20.0f;
+    // Town defenders (issue #79 B2, #72 first slice).  Every CITY the
+    // resistance does not own (NEUTRAL seeded towns included) is
+    // occupier-ADMINISTERED and keeps an occupier garrison of this many
+    // bodies on its zone record, materialized by the production
+    // GarrisonCache like any post.  Per-zone override: garrison = N on the
+    // CITY entry.  0 restores the legacy free towns.  Range-checked at load
+    // (integer, 0..MaxCityGarrison).  See the support gate in EvaluateTick.
+    static constexpr int MaxCityGarrison = 24;
+    int cityGarrison = 4;
+    // Town retake (issue #79 scope addition): a resistance-held CITY with
+    // living occupier units inside zoneArea and no resistance presence loses
+    // supportRate per tick and reverts to occupier administration (garrison
+    // refilled) once support falls below supportFlip; resistance presence
+    // in a held town consolidates it at the same rate.  0 = liberated towns
+    // are permanent and inert (the pre-#79 rule).
+    bool townRetake = true;
     // defenders >= ratio * attackers treats a contested zone as DEFENDED
     // (a token straggler cannot hold a re-secured post hostage); 0 disables.
     // Any live defender still blocks SECURING regardless of this ratio.
@@ -112,7 +129,10 @@ struct ZoneRecord
     // per-zone captureRate override (0 = use tuning); static, config-rebuilt
     float captureRateOverride = 0;
     // D2 garrison recovery ceiling (issue #71): config garrisonMax, default
-    // the authored garrison.  Static, config-rebuilt, never serialized.
+    // the authored garrison.  Static, config-rebuilt, never serialized.  For
+    // a CITY it is the town's defender strength (cityGarrison or the
+    // per-zone garrison override) even when the town starts resistance-held,
+    // so a retaken town refills to it.
     float garrisonMax = 0;
 
     // dynamic, serialized (matched by zone name on load)
@@ -136,6 +156,15 @@ struct ZoneRecord
     // short of garrisonMax since its last recovered body.  Serialized
     // (absent in older saves: 0).
     float recoverClock = 0;
+    // Town defenders (issue #79 B2): a CITY exempted from its occupier
+    // garrison (the start-town headquarters, GuerrillaBase) - never
+    // garrisoned, recovered or refilled.  Serialized (absent: false).
+    bool garrisonExempt = false;
+    // campaign day (1-based, 0 = never) and minute of day of the last flip
+    // TO the resistance (military capture or town rising).  The seam for a
+    // counter-attack service.  Serialized (absent in older saves: 0).
+    int flipDay = 0;
+    int flipMinute = 0;
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
@@ -143,6 +172,7 @@ struct ZoneRecord
     // last zone tick's presence and bubble state (gmZoneSim, D2 eligibility)
     int lastGuer = 0;
     int lastOcc = 0;
+    int lastGarrisonLive = 0; // the zone's own live cache-garrison bodies, wherever they stand
     bool lastInBubble = false;
     bool lastRemote = false; // the last tick ran this zone's meters from outside the bubble
 };
@@ -276,13 +306,14 @@ struct LandscapeSettlementProbe final : SettlementProbe
 
 enum ZoneEventType
 {
-    ZECaptured,         // any owner flip
+    ZECaptured,         // a flip TO the resistance (military capture or town rising)
     ZESupportThreshold, // CITY crossed supportFlip (the town is READY; flip is separate)
     ZERevealed,         // zone first became revealed
     ZECampaignLoaded,   // savegame finished loading (fires once, next tick)
     ZECaptureStarted,   // military capture meter left 0
     ZEContested,        // both sides in a zone with capture in progress
     ZECaptureLost,      // capture meter decayed back to 0
+    ZETownLost,         // "townLost": a resistance-held CITY reverted to occupier administration
     NZoneEventTypes
 };
 
@@ -301,11 +332,45 @@ struct ZoneTickInputs
     float playerZ = 0;             // northing
     bool playerUndercover = false; // script-owned gmUndercover global
     // per zone: live units within zoneArea, positionally counted per side.
-    // The resistance count excludes the real player while playerUndercover
-    // (a man the AI cannot engage is not an armed force securing ground).
+    // The resistance count excludes the real player only while his cover
+    // holds (PlayerCountsAsPresence false): undercover, unexposed and not
+    // overtly a fighter.
     AutoArray<int> guerCount;
     AutoArray<int> occCount;
+    // per zone (optional, missing = 0): live bodies of the zone's own
+    // GarrisonCache garrison WHEREVER they stand.  Town defenders who left
+    // the 150 m circle (chasing, posted at an approach) still hold the town;
+    // read by the CITY support gate only.
+    AutoArray<int> garrisonLive;
 };
+
+// D1 (issue #79, decided by the user): when does the real player count as
+// resistance presence for zone capture and town support?  Always while he
+// is not undercover (gmUndercover false or nil).  While undercover his cover
+// is BLOWN, and he counts, when EITHER
+//   exposed        - a living occupier observer holds an exposed
+//                    (compromised) verdict on him: some occupier group with
+//                    at least one alive member has a ucCompromised record of
+//                    him or his vehicle (UndercoverSystem::LivingWitnessCount);
+//   weaponInHands  - he is overtly armed: the undercover weapon-show
+//                    classifier reads UCWInHands (any raised-weapon pose with
+//                    a weapon carried, the same predicate that reads hostile
+//                    to an observer; a drawn pistol counts, a slung rifle
+//                    does not);
+//   warriorOutfit  - he wears a warrior body, i.e. NOT a civilian outfit
+//                    (ZoneRegistry::IsCivilianOutfitClass false and the body
+//                    class's typical side is not civilian).
+// Rationale: a cleared town has no observers left, so exposure alone could
+// never let a lone armed player take it.  gmUndercover itself stays true for
+// the whole campaign (exposure is per observer).
+struct PlayerPresenceInput
+{
+    bool undercover = false;
+    bool exposed = false;
+    bool weaponInHands = false;
+    bool warriorOutfit = false;
+};
+bool PlayerCountsAsPresence(const PlayerPresenceInput& in);
 
 class ZoneRegistry : public SerializeClass
 {
@@ -386,6 +451,40 @@ class ZoneRegistry : public SerializeClass
     // clamped Heat writes (script surface)
     void HeatRaise(int index, float amount); // clamp at 100
     void HeatDecay(int index, float amount); // clamp at 0
+
+    // Town defenders (issue #79 B2) ------------------------------------------
+    // An occupier-ADMINISTERED town: a CITY owned NEUTRAL or by the occupier
+    // (never the resistance, never a third side).  Ownership tokens are NOT
+    // changed by this model: NEUTRAL keeps meaning "not yet risen" for the
+    // journal and economy; the garrison is what makes a town defended.
+    bool IsAdministeredTown(const ZoneRecord& z) const;
+    // GarrisonCache's materialization predicate: an occupier-held non-CITY
+    // zone, or an administered town not exempted from its garrison.  The
+    // garrison always fields the campaign's occupier side.
+    bool IsGarrisonable(const ZoneRecord& z) const;
+    // Revert a resistance-held CITY to occupier administration (the town
+    // retake): owner back to its authored token (NEUTRAL when that token is
+    // the resistance), garrison reserve refilled to garrisonMax unless
+    // exempt (materialized by GarrisonCache on its next pass inside the
+    // bubble), meters reset, ZETownLost queued.  False (no-op) for a zone
+    // that is not a resistance-held CITY.  The seam a counter-attack service
+    // can call directly.
+    bool RevertTown(int index, AutoArray<ZoneEventRecord>& fired);
+    // Exempt a town from its occupier garrison (GuerrillaBase: the new-game
+    // START TOWN headquarters).  Zeroes the reserve; persistent.
+    void ExemptTownGarrison(int index);
+    // CITY zones currently held by the resistance (the "towns liberated"
+    // count for a counter-attack / momentum service)
+    int LiberatedTownCount() const;
+    // Is className one of the resistance descriptor's civilian-outfit bodies
+    // (issue #25 Civ-family keys: playerClassCiv, companionClassCiv,
+    // recruitFighterCiv, recruitSpecialistCiv, holdClassCiv, civTier[])?
+    // Case-insensitive; false for an empty name.
+    bool IsCivilianOutfitClass(const char* className) const;
+    // D1 (issue #79): sample the real player's cover state for
+    // PlayerCountsAsPresence - gmUndercover, the living-witness exposure,
+    // the weapon-show classifier and the outfit.  World-touching.
+    void SamplePlayerPresence(Person* player, PlayerPresenceInput& out) const;
 
     // The campaign-aware faction lookup, and the one every side-keyed query
     // below goes through.  FindFaction scans by CLASS NAME first (issue #54:
@@ -480,6 +579,9 @@ class ZoneRegistry : public SerializeClass
         int seenDay = 0;
         int seenMinute = 0;
         float recoverClock = 0;
+        bool garrisonExempt = false;
+        int flipDay = 0;
+        int flipMinute = 0;
 
         LSError Serialize(ParamArchive& ar);
     };

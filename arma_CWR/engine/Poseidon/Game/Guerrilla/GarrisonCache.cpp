@@ -306,22 +306,6 @@ int GarrisonCache::PlanGroups(int reserve, int groupSize, AutoArray<int>& takes)
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
 
-// zone is garrisonable by the occupier: not a CITY, owned by the campaign's
-// resolved occupier side, and that side has spawn tiers configured (the
-// data-driven form of the spawning.sqs owner == "EAST" rule)
-static bool IsOccupierOwned(const ZoneRegistry& registry, const ZoneRecord& z)
-{
-    if (stricmp(z.type, "CITY") == 0)
-    {
-        return false;
-    }
-    if (stricmp(z.owner, registry.OccupierSide()) != 0)
-    {
-        return false;
-    }
-    return registry.FactionTierClass(z.owner, 1.0f).GetLength() > 0;
-}
-
 static Vector3 RandomNear(Vector3Par center, float radius)
 {
     float x = center.X() + (GRandGen.RandomValue() * 2.0f - 1.0f) * radius;
@@ -395,18 +379,21 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     }
     GarrisonState& state = _states[zoneIndex];
 
-    RString tierClass = registry.FactionTierClass(z->owner, warLevel);
+    // the garrison always fields the campaign's occupier: a post's owner IS
+    // that side, and an administered town is NEUTRAL (no roster of its own)
+    const RString side = registry.OccupierSide();
+    RString tierClass = registry.FactionTierClass(side, warLevel);
     if (tierClass.GetLength() == 0)
     {
-        return; // no tier table for the owner: leave the reserve untouched
+        return; // no tier table for the occupier: leave the reserve untouched
     }
-    RString officerClass = registry.FactionValue(z->owner, "officer");
+    RString officerClass = registry.FactionValue(side, "officer");
     if (officerClass.GetLength() == 0)
     {
         officerClass = tierClass;
     }
 
-    AICenter* center = EnsureSideCenter(z->owner);
+    AICenter* center = EnsureSideCenter(side);
     if (!center)
     {
         return;
@@ -434,7 +421,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
         // descriptor without role arrays composes all-riflemen - the exact
         // pre-plan-15 squad
         AutoArray<RString> classes;
-        registry.FactionSquad(z->owner, warLevel, takes[g], classes);
+        registry.FactionSquad(side, warLevel, takes[g], classes);
         for (int u = 0; u < takes[g]; u++)
         {
             bool officer = firstGroup && u == 0;
@@ -467,7 +454,17 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     }
 
     // the count now lives in the cache groups (see spawning.sqs #doSpawn);
-    // anything the group budget refused stays behind as reserve
+    // anything the group budget refused stays behind as reserve.  Bodies
+    // whose class failed to materialize inside a created group are NOT
+    // returned to the reserve (a stored body beside a live garrison would
+    // block a town's support gate forever); say so instead of dropping
+    // them silently (issue #72).
+    const int planned = reserve - (remaining > 0 ? remaining : 0);
+    if (spawned < planned)
+    {
+        LOG_WARN(Core, "GarrisonCache: zone '{}' materialized {} of {} planned bodies; {} lost to unspawnable classes",
+                 (const char*)z->name, spawned, planned, planned - spawned);
+    }
     state.spawned = true;
     z->garrison = (float)(remaining > 0 ? remaining : 0);
     z->liveOccupiers = (float)spawned;
@@ -608,8 +605,25 @@ void GarrisonCache::Simulate(float deltaT)
             z->liveOccupiers = (float)CountAlive(state);
         }
 
+        // A reserve waiting beside a cache that holds no living body: the
+        // garrison was wiped and the record refilled before this pass could
+        // release it (a town retaken between two cache passes, issue #79),
+        // or a group-budget remainder outlived the bodies that did spawn.
+        // Release the dead groups (the same write-back as any despawn) and
+        // keep the reserve, so Decide can materialize it this very pass;
+        // otherwise the reserve would sit unspawned forever and hold a
+        // town's support gate shut.
+        if (state.spawned && z->garrison >= 1 && CountAlive(state) == 0 && registry.IsGarrisonable(*z))
+        {
+            const float waiting = z->garrison;
+            DespawnGarrison(i, fired);
+            z->garrison = waiting;
+        }
+
         GarrisonDecisionInput in;
-        in.occupierOwned = IsOccupierOwned(registry, *z);
+        // an occupier-held post or an occupier-administered town (issue #79
+        // B2; the town model is documented at ZoneRegistry::IsAdministeredTown)
+        in.occupierOwned = registry.IsGarrisonable(*z);
         in.spawned = state.spawned;
         in.reserve = z->garrison;
         in.playerValid = playerValid;

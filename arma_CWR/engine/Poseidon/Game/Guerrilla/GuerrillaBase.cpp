@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // start-town garrison exemption (issue #79)
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -1107,6 +1108,13 @@ void GuerrillaBase::TryAutoElection()
         return;
     }
     RelocatePlayer();
+    // town defenders (issue #79 B2): the start town hosts the player's own
+    // headquarters, so it is exempted from its occupier garrison - never an
+    // enemy squad at the spawn.  A garrison the cache already materialized
+    // before this first-tick election is written back and cleared (nobody
+    // has seen it yet).  The exemption is persistent (zone row).
+    GarrisonCache::Instance().ForceDespawn(zoneIndex);
+    ZoneRegistry::Instance().ExemptTownGarrison(zoneIndex);
     LOG_INFO(Core, "GuerrillaBase: campaign opens at the start town '{}'", (const char*)town);
 }
 

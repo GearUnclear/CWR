@@ -198,6 +198,11 @@ class UndercoverSystem
     int Status() const;
     // count of occupier groups holding a compromised record
     int WitnessCount() const;
+    // WitnessCount restricted to groups with at least one ALIVE member: the
+    // "a living occupier observer holds an exposed verdict" half of the D1
+    // player-presence rule (issue #79, ZoneRegistry PlayerCountsAsPresence).
+    // A wiped group's record no longer blows the cover.
+    int LivingWitnessCount() const;
 
     // save/load; called from inside ZoneRegistry::Serialize as the nested
     // "Undercover" subclass (next to "Alert")

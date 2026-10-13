@@ -16,7 +16,8 @@ and this file disagree, check the code, then fix whichever is wrong.
 | D1 | A zone outside the bubble keeps ticking while live resistance units stand in it, or while its capture meter is above 0. Same rules as in the bubble: troops against an empty post secure and flip it, troops against a stored reserve are a frozen standoff, a half-finished capture decays when nobody holds it. Towns gain support remotely but never lose it to remote intimidation. | Landed (`ZoneRegistry::EvaluateTick`, key `remoteTick`) |
 | D2 | A distant, calm, untouched enemy post regains 1 soldier per 600 s, up to its authored strength. | Landed (`GarrisonCache::StepRecover`, keys `garrisonRecoverInterval`, `garrisonMax`) |
 | B | Budgets are pass/fail thresholds: 100 live AI typical, 130 hard cap, 40 groups per side, hub-scene frame time p95 <= 25 ms. Breaches log a WARN. | Landed (`[gmsim]` line, keys `budgetLiveBodies`, `budgetSideGroups`) |
-| R | Liberated zones are permanent in v1: nothing flips a resistance-held zone back to the occupier, on or off screen. | Acknowledged; recapture is a #38 follow-up |
+| R | Liberated MILITARY zones are permanent in v1: nothing flips a resistance-held post back to the occupier, on or off screen. Towns are the exception since issue #79: a held town with living occupier units in it and no resistance presence drains `supportRate` per tick and reverts to occupier administration below `supportFlip` (section 3, row 2b). | Acknowledged; military recapture is a #38 follow-up |
+| T | Towns have standing defenders (issue #79 B2, #72 first slice): every CITY the resistance does not hold is occupier-administered and keeps a `cityGarrison` reserve that the GarrisonCache materializes like a post's. Support cannot rise while any of it lives. | Landed (`ZoneRegistry::IsAdministeredTown`, keys `cityGarrison`, `townRetake`) |
 | X | Deferred to #38: the Sinai dealer cap (Sinai seeds 37 towns and draws 26 dealers) and the Sinai town-seeding fix (`seedCities = 1` seeds labels, airbases and borders as towns). | Deferred |
 
 ## 2. Definitions
@@ -65,9 +66,10 @@ the section 2 rules. LIVE ONLY: exists only as entities near the player.
 | # | System | Off-screen policy | Where |
 |---|---|---|---|
 | 1 | Capture meter (occupier OUTPOST/AIRFIELD/SEAPORT) | ABSTRACT (D1) when live resistance units are in `zoneArea` or `capture > 0`; otherwise FREEZE. The stored reserve counts as a defender. | `ZoneRegistry::EvaluateTick` |
-| 2 | Town support (NEUTRAL or occupier CITY) | ABSTRACT (D1), gain only: +`supportRate` per tick with fighters present and no occupier presence; flips on the in-bubble rule. No remote intimidation. Script ledgers (resentment, civilian-kill deltas) run regardless of distance. | `ZoneRegistry::EvaluateTick`, `civilians.sqs` |
+| 2 | Town support (NEUTRAL or occupier CITY) | ABSTRACT (D1), gain only: +`supportRate` per tick with fighters present and no occupier presence; flips on the in-bubble rule. Occupier presence is a live unit in `zoneArea`, the town's stored garrison reserve, or a live body of its own garrison anywhere, so a remote town with a reserve and a squad is a frozen standoff. No remote intimidation. Script ledgers (resentment, civilian-kill deltas) run regardless of distance. | `ZoneRegistry::EvaluateTick`, `civilians.sqs` |
+| 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while live occupier units stand in it. Occupiers alone: -`supportRate` per tick, revert below `supportFlip` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled to `garrisonMax`; `townLost` event). Fighters alone: +`supportRate` per tick up to 100. Both: frozen. Off-screen the only live occupiers are always-live or traffic-band units, so this is the seam a counter-attack service uses. | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
 | 3 | Flip side effects | Identical on and off screen: heat +40, income tap, hold squad, journal line, hint. | `EvaluateTick`, `capture.sqs` |
-| 4 | Garrison reserve | Count FREEZE (no attrition, no remote combat). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while occupier-owned, not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. | `GarrisonCache::StepRecover` |
+| 4 | Garrison reserve (posts and occupier-administered towns) | Count FREEZE (no attrition, no remote combat). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while garrisonable (occupier post, or administered town not exempt), not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. | `GarrisonCache::StepRecover` |
 | 5 | Patrols | LIVE ONLY (traffic band); no off-screen position or schedule. | `Traffic` |
 | 6 | Convoys | LIVE ONLY. A wiped convoy feeds the alert ledger (ambush floor, heat) and nothing else: no cargo, no logistics. | `Traffic`, `AlertMachine` |
 | 7 | QRF | LIVE ONLY, free (no reserve debit), deleted on stand-down. | `qrf.sqs` |
@@ -95,13 +97,20 @@ All live in `class CfgGuerrillaZones` of a template's `description.ext`.
 |---|---|---|
 | `remoteTick` | 1 | D1 on (0 restores the old freeze outside `cacheRadius`) |
 | `garrisonRecoverInterval` | 600 | D2 seconds per recovered body (0 = off) |
-| `garrisonMax` (per zone) | the zone's `garrison` | D2 ceiling |
+| `garrisonMax` (per zone) | the zone's `garrison` | D2 ceiling; for a CITY also the retake refill |
+| `cityGarrison` | 4 | occupier defenders of every administered town (whole number 0..24, repaired and logged otherwise); a CITY's own `garrison` overrides it; 0 = the pre-#79 free towns |
+| `townRetake` | 1 | town retake on (0 = liberated towns are permanent and inert, the pre-#79 rule) |
 | `simDiagInterval` | 60 | seconds between `[gmsim]` log lines (0 = off) |
 | `budgetLiveBodies` | 130 | WARN above this many live AI bodies, all sides |
 | `budgetSideGroups` | 40 | WARN above this many groups on one side (engine cap 63) |
 
 The D2 clock is saved per zone (`recoverClock` on the zone row); a save from
-before this change loads with a fresh clock. `seenDay` / `seenMinute` now
+before this change loads with a fresh clock. The zone row also carries
+`garrisonExempt` (the new-game START TOWN headquarters is exempted from its
+town garrison) and `flipDay` / `flipMinute` (the last flip to the resistance).
+A save from before issue #79 keeps its towns' saved reserve of 0: they stay
+free until D2 recovery regrows an administered town's reserve while the
+player is away. `seenDay` / `seenMinute` now
 mean "last time the player was within the bubble", not "last time the meters
 moved".
 
@@ -147,7 +156,13 @@ Instruments:
   `World::Simulate` (zone, garrison, flags, traffic, assailants, stashes, HQ,
   market, legends). `triPerfStats` and the dev Profile tab list it.
 - `gmZoneSim <i>` returns `[inBubble, guer, occ, seenDay, seenMinute,
-  contested, lastRemote, garrisonMax, recoverClock]` as of the last zone tick.
+  contested, lastRemote, garrisonMax, recoverClock, garrisonLive,
+  garrisonExempt, flipDay, flipMinute]` as of the last zone tick.
+- `gmPlayerPresence` returns `[counts, undercover, exposed, weaponInHands,
+  warriorOutfit, liberatedTowns]`: the issue #79 D1 rule sampled now (the
+  player counts as resistance presence unless undercover with his cover
+  intact: no living occupier group holds a compromised record of him, no
+  weapon in hands, civilian outfit).
 - `gmSimDiag` returns `[zonesInBubble, zonesRemoteTicked, [liveOcc, liveRes,
   liveCiv, liveTotal], [grpOcc, grpRes, grpCiv, grpMaxSide],
   garrisonSpawnedZones, garrisonLiveBodies, [civ, parked, patrol, convoy],
@@ -201,4 +216,9 @@ Owned elsewhere; this contract only fixes the rules they must follow.
   as carriers of D2 reinforcements; remote closures and reprisals on the
   abstract tick, deterministic and journaled.
 - **#72:** the partial-spawn leak (a class that fails to spawn inside a
-  garrison group is silently subtracted from the reserve).
+  garrison group is subtracted from the reserve; since issue #79 it is
+  logged at WARN, not refunded, because a stored body beside a live
+  garrison would block a town's support gate forever). Town defender
+  placement is still `RandomNear` around the marker, and a YELLOW alert
+  still sends every cached garrison group, town garrisons included, toward
+  the last-known position.

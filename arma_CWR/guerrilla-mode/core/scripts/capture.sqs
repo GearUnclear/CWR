@@ -20,7 +20,7 @@
 ;  and reacts inside its own ~ loop.
 ;
 ;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed / gmEvtCapStart /
-;        gmEvtContested / gmEvtCapLost (consumer side), GM_HOLD_* and
+;        gmEvtContested / gmEvtCapLost / gmEvtTownLost (consumer side), GM_HOLD_* and
 ;        GM_TT_* tunables. Spawned hold groups are fire-and-forget (the old
 ;        GM_HOLD_GROUPS array was never read by anything; dropped).
 ;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
@@ -68,6 +68,7 @@ GM_cReady = gmEvtSupport + []; gmEvtSupport = []
 GM_cStart = gmEvtCapStart + []; gmEvtCapStart = []
 GM_cCont  = gmEvtContested + []; gmEvtContested = []
 GM_cLost  = gmEvtCapLost + []; gmEvtCapLost = []
+GM_cTown  = gmEvtTownLost + []; gmEvtTownLost = []
 
 ; ---- capture-started: the meter left 0 --------------------------------------
 GM_cI = 0
@@ -96,6 +97,18 @@ gmJournalNote [format ["Lost our hold on %1.", (GM_cLost select GM_cI) select 1]
 GM_cI = GM_cI + 1
 goto "lev"
 #ldone
+
+; ---- town lost: the occupier retook a held town (native retake, issue #79):
+;      support drained below the line under occupier boots with no fighters
+;      in town; the engine reverted the owner and refilled the garrison -----
+GM_cI = 0
+#tlev
+? GM_cI >= (count GM_cTown) : goto "tlfin"
+hint format ["%1 is back under occupation", (GM_cTown select GM_cI) select 1]
+gmJournalNote ["Their soldiers walked back in and nobody stood in the street. The town is theirs again.", (GM_cTown select GM_cI) select 1, "danger"]
+GM_cI = GM_cI + 1
+goto "tlev"
+#tlfin
 
 ; ---- town ready: support crossed the threshold, needs fighters in town ------
 GM_cI = 0

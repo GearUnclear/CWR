@@ -20,8 +20,9 @@
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
-#include <Poseidon/World/Entities/Vehicles/House.hpp> // Building (settlement classifier, issue #54 C3)
-#include <Poseidon/World/Terrain/Landscape.hpp>       // GLandscape->WaterDepth
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp> // Man (D1 weapon-show classifier)
+#include <Poseidon/World/Entities/Vehicles/House.hpp>      // Building (settlement classifier, issue #54 C3)
+#include <Poseidon/World/Terrain/Landscape.hpp>            // GLandscape->WaterDepth
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICore.hpp>              // markersMap
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp> // ArcadeMarkerInfo
@@ -650,6 +651,23 @@ void ZoneRegistry::ApplyOwnerTokens()
     }
 }
 
+// Range check for a town garrison size (cityGarrison, a CITY's garrison
+// override): a whole number of bodies in 0..MaxCityGarrison.  Anything else
+// is repaired and logged rather than silently fielding a fractional or
+// negative reserve, or a town that alone fills two garrison groups.
+static int ReadTownGarrison(float value, const char* key, const char* where)
+{
+    int bodies = (int)value;
+    if ((float)bodies != value || bodies < 0 || bodies > ZoneTuning::MaxCityGarrison)
+    {
+        int fixed = bodies < 0 ? 0 : (bodies > ZoneTuning::MaxCityGarrison ? ZoneTuning::MaxCityGarrison : bodies);
+        LOG_WARN(Core, "ZoneRegistry: {} = {} in '{}' repaired to {} (a whole number of bodies, 0..{})", key,
+                 (double)value, where, fixed, ZoneTuning::MaxCityGarrison);
+        return fixed;
+    }
+    return bodies;
+}
+
 void ZoneRegistry::LoadZones(const ParamEntry& cfg)
 {
     _tuning.tickInterval = cfg.ReadValue("tickInterval", _tuning.tickInterval);
@@ -675,6 +693,10 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.simDiagInterval = cfg.ReadValue("simDiagInterval", _tuning.simDiagInterval);
     _tuning.budgetLiveBodies = (int)cfg.ReadValue("budgetLiveBodies", (float)_tuning.budgetLiveBodies);
     _tuning.budgetSideGroups = (int)cfg.ReadValue("budgetSideGroups", (float)_tuning.budgetSideGroups);
+    // town defenders (issue #79 B2) and the town retake
+    _tuning.cityGarrison = ReadTownGarrison(cfg.ReadValue("cityGarrison", (float)_tuning.cityGarrison), "cityGarrison",
+                                            "CfgGuerrillaZones");
+    _tuning.townRetake = cfg.ReadValue("townRetake", _tuning.townRetake ? 1.0f : 0.0f) != 0.0f;
     // already read (and acted on) in LoadFromParams; re-read so the tuning
     // struct is complete for anyone inspecting it
     _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
@@ -699,9 +721,25 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
         // literal side strings; the raw value is kept for re-resolution
         z.ownerConfig = e.ReadValue("owner", RString("NEUTRAL"));
         z.owner = ResolveOwnerToken(z.ownerConfig);
-        z.garrison = e.ReadValue("garrison", 0.0f);
-        // D2 recovery ceiling: the authored strength unless stated
-        z.garrisonMax = e.ReadValue("garrisonMax", z.garrison);
+        if (stricmp(z.type, "CITY") == 0)
+        {
+            // town defenders (issue #79 B2): the town's strength is the
+            // per-zone garrison override, else cityGarrison.  It is the
+            // refill/recovery ceiling (garrisonMax) whatever the start owner;
+            // the live reserve starts at it only while the town is
+            // occupier-administered (a resistance-held town starts empty).
+            const float strength = e.FindEntry("garrison") ? (float)ReadTownGarrison(e.ReadValue("garrison", 0.0f),
+                                                                                     "garrison", (const char*)z.name)
+                                                           : (float)_tuning.cityGarrison;
+            z.garrisonMax = e.ReadValue("garrisonMax", strength);
+            z.garrison = IsAdministeredTown(z) ? strength : 0.0f;
+        }
+        else
+        {
+            z.garrison = e.ReadValue("garrison", 0.0f);
+            // D2 recovery ceiling: the authored strength unless stated
+            z.garrisonMax = e.ReadValue("garrisonMax", z.garrison);
+        }
         z.support = e.ReadValue("support", 0.0f);
         z.income = e.ReadValue("income", 0.0f);
         z.heat = e.ReadValue("heat", 0.0f);
@@ -1408,6 +1446,9 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementPro
         z.ownerConfig = "NEUTRAL";
         z.owner = "NEUTRAL";
         z.support = _tuning.seedCitySupport;
+        // occupier-administered from the start: the town defenders (B2)
+        z.garrison = (float)_tuning.cityGarrison;
+        z.garrisonMax = z.garrison;
         char marker[32];
         snprintf(marker, sizeof(marker), "gmZoneCity_%d", seeded);
         z.marker = marker;
@@ -1555,6 +1596,153 @@ void ZoneRegistry::HeatDecay(int index, float amount)
     {
         z->heat = 0;
     }
+}
+
+// ---------------------------------------------------------------------------
+// town defenders and the town retake (issue #79 B2 + scope addition)
+// ---------------------------------------------------------------------------
+//
+// THE TOWN MODEL.  Ownership tokens keep their meaning: a CITY is NEUTRAL
+// (or occupier-owned when a template authors it so) until it rises, and the
+// resistance side once it has.  What changed is that every CITY the
+// resistance does not hold is occupier-ADMINISTERED and carries a standing
+// occupier garrison on its zone record (garrison, refill ceiling
+// garrisonMax), sized by cityGarrison or a per-zone garrison override.  The
+// production GarrisonCache materializes it inside cacheRadius, writes
+// survivors back on leaving, accounts casualties and saves it, exactly as
+// for a military post (IsGarrisonable).  Support then follows the gate in
+// EvaluateTick:
+//   * administered town: resistance presence raises support only while the
+//     town has NO defenders - no occupier unit inside zoneArea, no stored
+//     reserve, and no live body of its own garrison anywhere (garrisonLive).
+//     A remote town with a stored reserve and a resistance squad is
+//     therefore a frozen standoff (the off-screen contract's D1).  Once the
+//     garrison is wiped, support rises +supportRate per tick and the town
+//     flips at supportFlip with fighters present.
+//   * resistance-held town (townRetake): the mirror image.  Living occupier
+//     units inside zoneArea with no resistance presence drain supportRate
+//     per tick; below supportFlip the town reverts to administration and its
+//     garrison is refilled (RevertTown).  Resistance presence with no
+//     occupier presence consolidates it, +supportRate per tick up to 100.
+//     Both present: frozen.  This runs off-screen too while occupier units
+//     stand in a remote held town (they are live entities, so the abstract
+//     tick only reads their presence; with resistance also present it is a
+//     standoff).
+// cityGarrison = 0 restores the legacy free towns; townRetake = 0 the
+// permanent, inert liberated towns.
+bool ZoneRegistry::IsAdministeredTown(const ZoneRecord& z) const
+{
+    return stricmp(z.type, "CITY") == 0 && (stricmp(z.owner, "NEUTRAL") == 0 || stricmp(z.owner, _occupierSide) == 0);
+}
+
+bool ZoneRegistry::IsGarrisonable(const ZoneRecord& z) const
+{
+    bool post = stricmp(z.type, "CITY") != 0 && stricmp(z.owner, _occupierSide) == 0;
+    bool town = IsAdministeredTown(z) && !z.garrisonExempt;
+    if (!post && !town)
+    {
+        return false;
+    }
+    // the occupier must field spawn tiers (the data-driven spawning.sqs
+    // owner == "EAST" rule); NEUTRAL has no roster, the occupier garrisons it
+    return FactionTierClass(_occupierSide, 1.0f).GetLength() > 0;
+}
+
+bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired)
+{
+    ZoneRecord* z = GetZoneMutable(index);
+    if (!z || stricmp(z->type, "CITY") != 0 || stricmp(z->owner, _resistanceSide) != 0)
+    {
+        return false;
+    }
+    // back to the authored administration; a town authored as the
+    // resistance's own falls to plain NEUTRAL administration
+    RString owner = ResolveOwnerToken(z->ownerConfig);
+    if (stricmp(owner, _resistanceSide) == 0)
+    {
+        owner = RString("NEUTRAL");
+    }
+    z->owner = owner;
+    z->garrison = z->garrisonExempt ? 0.0f : z->garrisonMax;
+    z->liveOccupiers = 0;
+    z->capture = 0;
+    z->recoverClock = 0;
+    z->contestedLastTick = false;
+    z->supportReadyNotified = z->support >= _tuning.supportFlip;
+    LOG_INFO(Core, "Guerrilla: town {} retaken by the occupier (support {}, garrison refilled to {})",
+             (const char*)z->name, z->support, z->garrison);
+    ZoneEventRecord ev;
+    ev.type = ZETownLost;
+    ev.zoneIndex = index;
+    fired.Add(ev);
+    return true;
+}
+
+void ZoneRegistry::ExemptTownGarrison(int index)
+{
+    ZoneRecord* z = GetZoneMutable(index);
+    if (!z || stricmp(z->type, "CITY") != 0)
+    {
+        return;
+    }
+    z->garrisonExempt = true;
+    z->garrison = 0;
+    z->recoverClock = 0;
+}
+
+int ZoneRegistry::LiberatedTownCount() const
+{
+    int count = 0;
+    for (int i = 0; i < _zones.Size(); i++)
+    {
+        if (stricmp(_zones[i].type, "CITY") == 0 && stricmp(_zones[i].owner, _resistanceSide) == 0)
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool ZoneRegistry::IsCivilianOutfitClass(const char* className) const
+{
+    if (!className || !*className)
+    {
+        return false;
+    }
+    const FactionRecord* f = FindFactionForSide(_resistanceSide);
+    if (!f)
+    {
+        return false;
+    }
+    static const char* const kCivKeys[] = {"playerClassCiv",       "companionClassCiv", "recruitFighterCiv",
+                                           "recruitSpecialistCiv", "holdClassCiv",      nullptr};
+    for (int k = 0; kCivKeys[k]; k++)
+    {
+        for (int v = 0; v < f->values.Size(); v++)
+        {
+            if (stricmp(f->values[v].key, kCivKeys[k]) == 0 && stricmp(f->values[v].value, className) == 0)
+            {
+                return true;
+            }
+        }
+    }
+    for (int i = 0; i < f->civTiers.Size(); i++)
+    {
+        if (stricmp(f->civTiers[i], className) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PlayerCountsAsPresence(const PlayerPresenceInput& in)
+{
+    if (!in.undercover)
+    {
+        return true;
+    }
+    return in.exposed || in.weaponInHands || in.warriorOutfit;
 }
 
 const FactionRecord* ZoneRegistry::FindFaction(const char* sideOrClass) const
@@ -1881,6 +2069,10 @@ int ZoneRegistry::EventTypeFromName(const char* name)
     {
         return ZECaptureLost;
     }
+    if (stricmp(name, "townLost") == 0)
+    {
+        return ZETownLost;
+    }
     return -1;
 }
 
@@ -2010,6 +2202,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         ZoneRecord& z = _zones[i];
         z.lastGuer = i < in.guerCount.Size() ? in.guerCount[i] : 0;
         z.lastOcc = i < in.occCount.Size() ? in.occCount[i] : 0;
+        z.lastGarrisonLive = i < in.garrisonLive.Size() ? in.garrisonLive[i] : 0;
         z.lastInBubble = false;
         z.lastRemote = false;
     }
@@ -2031,6 +2224,14 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         ZoneRecord& z = _zones[i];
         int guer = z.lastGuer;
         int occ = z.lastOcc;
+        bool isCity = stricmp(z.type, "CITY") == 0;
+        bool milEligible = !isCity && stricmp(z.owner, _occupierSide) == 0;
+        // an occupier-ADMINISTERED town accrues underground support like a
+        // neutral one (administration collapse, not assault); third-party
+        // towns stay out of reach (IsAdministeredTown)
+        bool cityEligible = IsAdministeredTown(z);
+        // a resistance-held town can be retaken (townRetake)
+        bool retakeEligible = _tuning.townRetake && isCity && stricmp(z.owner, _resistanceSide) == 0;
         const bool inBubble = Dist2DSq(z.pos.X(), z.pos.Z(), in.playerX, in.playerZ) <= cacheSq;
         z.lastInBubble = inBubble;
         if (inBubble)
@@ -2042,7 +2243,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
                 z.seenMinute = seenMinute;
             }
         }
-        else if (!_tuning.remoteTick || (guer == 0 && z.capture <= 0))
+        else if (!_tuning.remoteTick || (guer == 0 && z.capture <= 0 && !(retakeEligible && occ > 0)))
         {
             // Off-screen contract D1 (issue #71): outside the bubble a zone
             // holds still UNLESS live resistance units stand in it (fighters
@@ -2051,17 +2252,13 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // same rules as in the bubble apply, with the despawned reserve
             // still defending, so troops against a stored reserve are a
             // frozen standoff.  Remote towns gain support but never lose it
-            // to intimidation (below).
+            // to intimidation (below).  The town retake (issue #79) adds one
+            // trigger: live occupier units standing in a resistance-held
+            // town (a dispatched counter-attack) work it remotely too.
             continue;
         }
 
-        bool isCity = stricmp(z.type, "CITY") == 0;
-        bool milEligible = !isCity && stricmp(z.owner, _occupierSide) == 0;
-        // an occupier-ADMINISTERED town accrues underground support like a
-        // neutral one (administration collapse, not assault); third-party
-        // towns stay out of reach
-        bool cityEligible = isCity && (stricmp(z.owner, "NEUTRAL") == 0 || stricmp(z.owner, _occupierSide) == 0);
-        if (!milEligible && !cityEligible)
+        if (!milEligible && !cityEligible && !retakeEligible)
         {
             z.contestedLastTick = false;
             continue;
@@ -2162,11 +2359,24 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // toward the floor (it can suppress expression, not erase the
             // sentiment), but only inside the bubble: a remote town never
             // loses support to intimidation (issue #71 D1); script-side
-            // writers (GM_fnSupportAdd) are separate and unfloored.  An unspawned garrison reserve counts as
-            // occupation, mirroring the military predicate: the zone tick
-            // runs before GarrisonCache materializes it inside the bubble.
+            // writers (GM_fnSupportAdd) are separate and unfloored.
+            //
+            // THE SUPPORT GATE (town defenders, issue #79 B2): a town is
+            // defended while ANY of these holds, and resistance presence
+            // then raises no support:
+            //   - a live occupier unit inside zoneArea (garrison, QRF,
+            //     patrol, shakedown pair: positional presence);
+            //   - an unspawned garrison reserve (z.garrison >= 1), mirroring
+            //     the military predicate: the zone tick runs before
+            //     GarrisonCache materializes it, and off-screen the stored
+            //     reserve is a frozen standoff (contract D1);
+            //   - a live body of the town's own cache garrison anywhere
+            //     (garrisonLive): a defender who stepped outside the 150 m
+            //     circle still holds the town; he has to be killed.
+            // Wipe all three and support rises as before; the town flips at
+            // supportFlip with fighters present.
             bool guerHere = guer > 0;
-            bool occHere = occ > 0 || z.garrison >= 1;
+            bool occHere = occ > 0 || z.garrison >= 1 || z.lastGarrisonLive > 0;
             if (guerHere && !occHere)
             {
                 z.support += _tuning.supportRate;
@@ -2206,11 +2416,54 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             }
         }
 
+        if (retakeEligible)
+        {
+            // THE TOWN RETAKE (issue #79 scope addition), the support gate
+            // mirrored.  Occupier presence is positional only: any living
+            // occupier unit inside zoneArea (a re-sent garrison, a QRF, a
+            // patrol, a dispatched counter-attack); a held town has no
+            // reserve of its own.  Resistance presence (the player counted
+            // by the D1 rule) blocks the drain exactly as occupier presence
+            // blocks the rise, and consolidates the town while unopposed.
+            // Inside or outside the bubble alike (the remote gate above lets
+            // a held town tick while occupiers stand in it).
+            bool guerHere = guer > 0;
+            bool occHere = occ > 0;
+            if (guerHere && !occHere)
+            {
+                z.support += _tuning.supportRate;
+                if (z.support > 100)
+                {
+                    z.support = 100;
+                }
+            }
+            else if (occHere && !guerHere)
+            {
+                z.support -= _tuning.supportRate;
+                if (z.support < 0)
+                {
+                    z.support = 0;
+                }
+            }
+            z.contestedLastTick = guerHere && occHere;
+            if (occHere && !guerHere && z.support < _tuning.supportFlip)
+            {
+                RevertTown(i, fired);
+            }
+            continue;
+        }
+
         if (!milCap && !cityCap)
         {
             continue;
         }
 
+        // the counter-attack seam: when this zone last went over
+        if (haveClock)
+        {
+            z.flipDay = seenDay;
+            z.flipMinute = seenMinute;
+        }
         z.owner = _resistanceSide;
         z.heat += _tuning.heatCapSpike;
         if (z.heat > 100)
@@ -2324,12 +2577,56 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
     }
 
     // enumerate each side's live units; the player is included in his side's
-    // count except while undercover.  No center yet == no units (do NOT
-    // create one here - GarrisonCache::EnsureCenter is the creating path)
+    // count unless his cover holds (D1, PlayerCountsAsPresence).  No center
+    // yet == no units (do NOT create one here - GarrisonCache::EnsureCenter
+    // is the creating path)
     const float areaSq = _tuning.zoneArea * _tuning.zoneArea;
-    const Person* exclude = in.playerUndercover ? player : nullptr;
+    const Person* exclude = nullptr;
+    if (in.playerUndercover && player && !player->IsDammageDestroyed())
+    {
+        PlayerPresenceInput presence;
+        SamplePlayerPresence(player, presence);
+        if (!PlayerCountsAsPresence(presence))
+        {
+            exclude = player;
+        }
+    }
     CountSidePresence(FindSideCenter(_resistanceSide), _zones, areaSq, exclude, in.guerCount);
     CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount);
+
+    // each zone's own garrison bodies, wherever they stand (town support gate)
+    const GarrisonCache& cache = GarrisonCache::Instance();
+    in.garrisonLive.Resize(n);
+    for (int i = 0; i < n; i++)
+    {
+        in.garrisonLive[i] = cache.LiveCount(i);
+    }
+}
+
+void ZoneRegistry::SamplePlayerPresence(Person* player, PlayerPresenceInput& out) const
+{
+    out = PlayerPresenceInput();
+    if (!GWorld || !player)
+    {
+        return;
+    }
+    if (GameState* gstate = GWorld->GetGameState())
+    {
+        GameValue undercover = gstate->VarGet("gmundercover");
+        out.undercover = undercover.GetType() == GameBool && (GameBoolType)undercover;
+    }
+    // (a) a living occupier observer holds an exposed verdict on him
+    out.exposed = UndercoverSystem::Instance().LivingWitnessCount() > 0;
+    // (b) overtly a fighter: weapon in hands (the undercover classifier) ...
+    if (const Man* man = dyn_cast<Man>(player))
+    {
+        out.weaponInHands = ClassifyWeaponShow(*man) == UCWInHands;
+    }
+    // ... or a warrior body: neither a civilian-side class nor one of the
+    // resistance descriptor's civilian-outfit (Civ-family) classes
+    bool civilianBody =
+        player->GetType()->GetTypicalSide() == TCivilian || IsCivilianOutfitClass(player->GetType()->GetName());
+    out.warriorOutfit = !civilianBody;
 }
 
 // ---------------------------------------------------------------------------
@@ -2642,6 +2939,14 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("seenMinute", seenMinute, 1, 0))
     // D2 recovery clock (issue #71); absent in older saves = a fresh clock
     PARAM_CHECK(ar.Serialize("recoverClock", recoverClock, 1, 0.0f))
+    // town defenders (issue #79): absent in older saves = not exempt, never
+    // flipped.  A pre-#79 save keeps the garrison its rows carry (0 for every
+    // town), so its towns stay free until D2 recovery regrows an
+    // administered town's reserve (one body per garrisonRecoverInterval
+    // while the player is away); liberated towns are never repopulated.
+    PARAM_CHECK(ar.Serialize("garrisonExempt", garrisonExempt, 1, false))
+    PARAM_CHECK(ar.Serialize("flipDay", flipDay, 1, 0))
+    PARAM_CHECK(ar.Serialize("flipMinute", flipMinute, 1, 0))
     return LSOK;
 }
 
@@ -2670,6 +2975,9 @@ void ZoneRegistry::ApplyPendingLoad()
         z.seenDay = row.seenDay;
         z.seenMinute = row.seenMinute;
         z.recoverClock = row.recoverClock;
+        z.garrisonExempt = row.garrisonExempt;
+        z.flipDay = row.flipDay;
+        z.flipMinute = row.flipMinute;
         // reconstruct the one-shot threshold edge from the loaded value: a
         // town saved in the READY-waiting state must not re-announce itself
         // on every reload
@@ -2698,6 +3006,9 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.seenDay = z.seenDay;
             row.seenMinute = z.seenMinute;
             row.recoverClock = z.recoverClock;
+            row.garrisonExempt = z.garrisonExempt;
+            row.flipDay = z.flipDay;
+            row.flipMinute = z.flipMinute;
             _pending.Add(row);
         }
     }
@@ -2738,6 +3049,8 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onCaptureStarted", _handlers[ZECaptureStarted], 1, RString()))
     PARAM_CHECK(ar.Serialize("onContested", _handlers[ZEContested], 1, RString()))
     PARAM_CHECK(ar.Serialize("onCaptureLost", _handlers[ZECaptureLost], 1, RString()))
+    // town retake (issue #79): absent in older saves, same degradation
+    PARAM_CHECK(ar.Serialize("onTownLost", _handlers[ZETownLost], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

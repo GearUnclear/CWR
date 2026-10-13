@@ -761,10 +761,12 @@ TEST_CASE("ZoneRegistry - city support and threshold flip", "[game][guerrilla]")
         REQUIRE(CountEvents(fired, ZECaptured, village) == 1);
         REQUIRE(CountEvents(fired, ZESupportThreshold, village) == 1);
 
-        // once owned, support stops accruing
+        // once owned, unopposed fighters consolidate the town (the town
+        // retake's mirror, issue #79; townRetake = 0 keeps it at 60, pinned
+        // in the retake test case)
         fired.Clear();
         f.registry.EvaluateTick(present, fired);
-        REQUIRE(f.registry.GetZone(village)->support == Approx(60.0f));
+        REQUIRE(f.registry.GetZone(village)->support == Approx(65.0f));
         REQUIRE(CountEvents(fired, ZECaptured, village) == 0);
     }
 
@@ -931,6 +933,528 @@ TEST_CASE("ZoneRegistry - remote towns gain support but never lose it to intimid
         REQUIRE(f.registry.GetZone(village)->support == Approx(48.0f));
         REQUIRE(f.registry.GetZone(village)->lastInBubble);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Town defenders, the town retake and the D1 player-presence rule (issue #79)
+// ---------------------------------------------------------------------------
+namespace
+{
+
+// Camp + an administered town on the cityGarrison default, a town with a
+// per-zone override, a town authored as the resistance's own, a third-side
+// town, an occupier post and a far post (the "player is away" anchor).
+const char* kTownConfig =
+    "class CfgGuerrillaZones\n"
+    "{\n"
+    "    class Zones\n"
+    "    {\n"
+    "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; support=100; "
+    "position[]={1000.0, 1000.0, 0.0}; };\n"
+    "        class Town    { name=\"Town\";    type=\"CITY\";    owner=\"NEUTRAL\";    support=20; "
+    "position[]={1000.0, 1300.0, 0.0}; };\n"
+    "        class Hamlet  { name=\"Hamlet\";  type=\"CITY\";    owner=\"NEUTRAL\";    support=20; garrison=2; "
+    "position[]={1400.0, 1300.0, 0.0}; };\n"
+    "        class Held    { name=\"Held\";    type=\"CITY\";    owner=\"RESISTANCE\"; support=70; "
+    "position[]={1300.0, 1000.0, 0.0}; };\n"
+    "        class Foreign { name=\"Foreign\"; type=\"CITY\";    owner=\"WEST\";       support=20; "
+    "position[]={1600.0, 1000.0, 0.0}; };\n"
+    "        class Post    { name=\"Post\";    type=\"OUTPOST\"; owner=\"OCCUPIER\";   garrison=6; "
+    "position[]={1600.0, 1600.0, 0.0}; };\n"
+    "        class FarPost { name=\"FarPost\"; type=\"OUTPOST\"; owner=\"OCCUPIER\";   garrison=4; "
+    "position[]={20000.0, 20000.0, 0.0}; };\n"
+    "    };\n"
+    "};\n"
+    "class CfgGuerrillaFactions\n"
+    "{\n"
+    "    class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; officer=\"OfficerE\"; };\n"
+    "    class Guer\n"
+    "    {\n"
+    "        side=\"GUER\";\n"
+    "        holdClass=\"SoldierGB\";\n"
+    "        playerClassWarrior=\"SoldierGB\";\n"
+    "        playerClassCiv=\"SoldierGFakeC\";\n"
+    "        recruitSpecialistCiv=\"SoldierGFakeC2\";\n"
+    "        civTier[]={\"SoldierGFakeC\", \"MilitiaCiv3\"};\n"
+    "    };\n"
+    "};\n";
+
+// kTownConfig with extra CfgGuerrillaZones keys spliced in
+std::string TownConfigWith(const char* keys)
+{
+    std::string cfg = kTownConfig;
+    const std::string anchor = "class CfgGuerrillaZones\n{\n";
+    cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
+    return cfg;
+}
+
+struct TownFixture
+{
+    std::string text;
+    RegistryFixture f;
+    int camp = -1, town = -1, hamlet = -1, held = -1, foreign = -1, post = -1, farPost = -1;
+
+    void Load(const std::string& config)
+    {
+        text = config;
+        f.Load(text.c_str());
+        camp = f.registry.FindZoneIndex("Camp");
+        town = f.registry.FindZoneIndex("Town");
+        hamlet = f.registry.FindZoneIndex("Hamlet");
+        held = f.registry.FindZoneIndex("Held");
+        foreign = f.registry.FindZoneIndex("Foreign");
+        post = f.registry.FindZoneIndex("Post");
+        farPost = f.registry.FindZoneIndex("FarPost");
+        REQUIRE(farPost >= 0);
+    }
+    ZoneRecord& Z(int i) { return *f.registry.GetZoneMutable(i); }
+};
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - town defenders: config, predicates and range checks (issue #79 B2)", "[game][guerrilla]")
+{
+    SECTION("defaults: cityGarrison 4, townRetake on; administered towns carry the garrison")
+    {
+        TownFixture t;
+        t.Load(kTownConfig);
+        REQUIRE(t.f.registry.Tuning().cityGarrison == 4);
+        REQUIRE(t.f.registry.Tuning().townRetake);
+        REQUIRE(t.Z(t.town).garrison == Approx(4.0f));
+        REQUIRE(t.Z(t.town).garrisonMax == Approx(4.0f));
+        REQUIRE(t.Z(t.hamlet).garrison == Approx(2.0f)); // per-zone override
+        REQUIRE(t.Z(t.hamlet).garrisonMax == Approx(2.0f));
+        // a resistance-held town starts empty but remembers its strength
+        REQUIRE(t.Z(t.held).garrison == Approx(0.0f));
+        REQUIRE(t.Z(t.held).garrisonMax == Approx(4.0f));
+        // ownership tokens are untouched by the model
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        // a third-side town is not administered: no garrison
+        REQUIRE(t.Z(t.foreign).garrison == Approx(0.0f));
+    }
+
+    SECTION("predicates: administered towns and occupier posts are garrisonable")
+    {
+        TownFixture t;
+        t.Load(kTownConfig);
+        const ZoneRegistry& r = t.f.registry;
+        REQUIRE(r.IsAdministeredTown(t.Z(t.town)));
+        REQUIRE(r.IsGarrisonable(t.Z(t.town)));
+        REQUIRE(r.IsGarrisonable(t.Z(t.post)));
+        REQUIRE_FALSE(r.IsAdministeredTown(t.Z(t.held)));
+        REQUIRE_FALSE(r.IsGarrisonable(t.Z(t.held)));
+        REQUIRE_FALSE(r.IsAdministeredTown(t.Z(t.foreign)));
+        REQUIRE_FALSE(r.IsGarrisonable(t.Z(t.foreign)));
+        REQUIRE_FALSE(r.IsGarrisonable(t.Z(t.camp)));
+        // an occupier-owned town is administered too
+        t.Z(t.town).owner = "EAST";
+        REQUIRE(r.IsAdministeredTown(t.Z(t.town)));
+        REQUIRE(r.IsGarrisonable(t.Z(t.town)));
+    }
+
+    SECTION("an exempt town (the start-town HQ) is administered but never garrisoned")
+    {
+        TownFixture t;
+        t.Load(kTownConfig);
+        t.f.registry.ExemptTownGarrison(t.town);
+        REQUIRE(t.Z(t.town).garrisonExempt);
+        REQUIRE(t.Z(t.town).garrison == Approx(0.0f));
+        REQUIRE(t.f.registry.IsAdministeredTown(t.Z(t.town)));
+        REQUIRE_FALSE(t.f.registry.IsGarrisonable(t.Z(t.town)));
+        // only a CITY can be exempted
+        t.f.registry.ExemptTownGarrison(t.post);
+        REQUIRE_FALSE(t.Z(t.post).garrisonExempt);
+        REQUIRE(t.Z(t.post).garrison == Approx(6.0f));
+    }
+
+    SECTION("no occupier roster: nothing is garrisonable")
+    {
+        const char* config = "class CfgGuerrillaZones { class Zones { class T { name=\"T\"; type=\"CITY\"; "
+                             "position[]={0.0, 0.0, 0.0}; }; }; };\n";
+        RegistryFixture f;
+        f.Load(config);
+        REQUIRE(f.registry.GetZone(0)->garrison == Approx(4.0f));
+        REQUIRE_FALSE(f.registry.IsGarrisonable(*f.registry.GetZone(0)));
+    }
+
+    SECTION("cityGarrison and townRetake keys")
+    {
+        TownFixture t;
+        t.Load(TownConfigWith("cityGarrison = 6; townRetake = 0;"));
+        REQUIRE(t.f.registry.Tuning().cityGarrison == 6);
+        REQUIRE_FALSE(t.f.registry.Tuning().townRetake);
+        REQUIRE(t.Z(t.town).garrison == Approx(6.0f));
+        REQUIRE(t.Z(t.hamlet).garrison == Approx(2.0f)); // the override still wins
+    }
+
+    SECTION("range checks repair impossible sizes")
+    {
+        TownFixture neg;
+        neg.Load(TownConfigWith("cityGarrison = -3;"));
+        REQUIRE(neg.f.registry.Tuning().cityGarrison == 0);
+        TownFixture frac;
+        frac.Load(TownConfigWith("cityGarrison = 2.5;"));
+        REQUIRE(frac.f.registry.Tuning().cityGarrison == 2);
+        TownFixture big;
+        big.Load(TownConfigWith("cityGarrison = 99;"));
+        REQUIRE(big.f.registry.Tuning().cityGarrison == ZoneTuning::MaxCityGarrison);
+
+        const char* config = "class CfgGuerrillaZones { class Zones { class T { name=\"T\"; type=\"CITY\"; "
+                             "garrison=-1; position[]={0.0, 0.0, 0.0}; }; }; };\n";
+        RegistryFixture f;
+        f.Load(config);
+        REQUIRE(f.registry.GetZone(0)->garrison == Approx(0.0f));
+    }
+
+    SECTION("seeded towns are administered and garrisoned")
+    {
+        const char* config = "class CfgGuerrillaZones\n"
+                             "{\n"
+                             "    seedCities = 1; cityGarrison = 3;\n"
+                             "    class Zones { class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
+                             "position[]={0.0, 0.0, 0.0}; }; };\n"
+                             "};\n"
+                             "class Names\n"
+                             "{\n"
+                             "    class Brod { name=\"Brod\"; position[]={5000.0, 5000.0}; };\n"
+                             "};\n";
+        RegistryFixture f;
+        f.Load(config, nullptr, nullptr, "Names");
+        int brod = f.registry.FindZoneIndex("Brod");
+        REQUIRE(brod >= 0);
+        REQUIRE(Str(f.registry.GetZone(brod)->owner) == "NEUTRAL");
+        REQUIRE(f.registry.GetZone(brod)->garrison == Approx(3.0f));
+        REQUIRE(f.registry.GetZone(brod)->garrisonMax == Approx(3.0f));
+    }
+}
+
+TEST_CASE("ZoneRegistry - the town support gate (issue #79 B2)", "[game][guerrilla]")
+{
+    TownFixture t;
+    t.Load(kTownConfig);
+
+    SECTION("one fighter in a garrisoned town raises no support")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, t.town);
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.town).support == Approx(20.0f));
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.town).contestedLastTick);
+        REQUIRE(CountEvents(fired, ZECaptured, t.town) == 0);
+    }
+
+    SECTION("live garrison bodies hold the town wherever they stand")
+    {
+        // reserve materialized (0), nobody inside zoneArea, but two of the
+        // town's own garrison are alive somewhere
+        t.Z(t.town).garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, t.town);
+        in.garrisonLive.Resize(t.f.registry.NZones());
+        for (int i = 0; i < in.garrisonLive.Size(); i++)
+        {
+            in.garrisonLive[i] = 0;
+        }
+        in.garrisonLive[t.town] = 2;
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.town).support == Approx(20.0f));
+        REQUIRE(t.Z(t.town).lastGarrisonLive == 2);
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+    }
+
+    SECTION("garrison wiped (reserve 0, no bodies): support rises and the town flips")
+    {
+        t.Z(t.town).garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, t.town);
+        Ticks(t.f.registry, in, fired, 7);
+        REQUIRE(t.Z(t.town).support == Approx(55.0f));
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        t.f.registry.EvaluateTick(in, fired);
+        REQUIRE(Str(t.Z(t.town).owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, t.town) == 1);
+        REQUIRE(t.f.registry.LiberatedTownCount() == 2); // Held + Town
+    }
+
+    SECTION("cityGarrison = 0 reproduces the legacy free town")
+    {
+        TownFixture legacy;
+        legacy.Load(TownConfigWith("cityGarrison = 0;"));
+        REQUIRE(legacy.Z(legacy.town).garrison == Approx(0.0f));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(legacy.f.registry, legacy.town, legacy.town);
+        Ticks(legacy.f.registry, in, fired, 8); // 20 -> 60 in 8 ticks, ~24 s
+        REQUIRE(Str(legacy.Z(legacy.town).owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZECaptured, legacy.town) == 1);
+    }
+
+    SECTION("remote: a town with a stored reserve and a resistance squad is a frozen standoff")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.farPost, t.town);
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.town).lastRemote);
+        REQUIRE(t.Z(t.town).support == Approx(20.0f));
+        REQUIRE(t.Z(t.town).garrison == Approx(4.0f)); // no remote attrition
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.town).contestedLastTick);
+
+        // the reserve gone (fought down before the player left): it rises
+        t.Z(t.town).garrison = 0;
+        Ticks(t.f.registry, in, fired, 8);
+        REQUIRE(Str(t.Z(t.town).owner) == "GUER");
+    }
+
+    SECTION("an exempt town has no defenders: fighters raise it")
+    {
+        t.f.registry.ExemptTownGarrison(t.town);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, t.town);
+        Ticks(t.f.registry, in, fired, 8);
+        REQUIRE(Str(t.Z(t.town).owner) == "GUER");
+    }
+}
+
+TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][guerrilla]")
+{
+    TownFixture t;
+    t.Load(kTownConfig);
+
+    SECTION("occupiers alone drain a held town at supportRate and it reverts below the line")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 2;
+        Ticks(t.f.registry, in, fired, 2); // 70 -> 60: still held
+        REQUIRE(t.Z(t.held).support == Approx(60.0f));
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        REQUIRE(CountEvents(fired, ZETownLost, t.held) == 0);
+        t.f.registry.EvaluateTick(in, fired); // 55 < 60: retaken
+        const ZoneRecord& z = t.Z(t.held);
+        REQUIRE(z.support == Approx(55.0f));
+        // authored RESISTANCE falls to plain NEUTRAL administration
+        REQUIRE(Str(z.owner) == "NEUTRAL");
+        REQUIRE(z.garrison == Approx(4.0f)); // refilled to the town's strength
+        REQUIRE(t.f.registry.IsGarrisonable(z));
+        REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
+        REQUIRE(CountEvents(fired, ZECaptured, t.held) == 0);
+        REQUIRE(t.f.registry.LiberatedTownCount() == 0);
+
+        // administered again: the refilled reserve now blocks the rise
+        fired.Clear();
+        ZoneTickInputs back = MakeInputs(t.f.registry, t.held, t.held);
+        Ticks(t.f.registry, back, fired, 5);
+        REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.held).support == Approx(55.0f));
+    }
+
+    SECTION("a town that rose reverts to its authored owner with its garrison back")
+    {
+        t.Z(t.town).garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs rise = MakeInputs(t.f.registry, t.town, t.town);
+        Ticks(t.f.registry, rise, fired, 8);
+        REQUIRE(Str(t.Z(t.town).owner) == "GUER");
+        ZoneTickInputs occ = MakeInputs(t.f.registry, t.town, -1);
+        occ.occCount[t.town] = 1;
+        fired.Clear();
+        t.f.registry.EvaluateTick(occ, fired);
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.town).garrison == Approx(4.0f));
+        REQUIRE(CountEvents(fired, ZETownLost, t.town) == 1);
+    }
+
+    SECTION("resistance presence blocks the drain; unopposed it consolidates to 100")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs contested = MakeInputs(t.f.registry, t.held, t.held);
+        contested.occCount[t.held] = 3;
+        Ticks(t.f.registry, contested, fired, 10);
+        REQUIRE(t.Z(t.held).support == Approx(70.0f));
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        REQUIRE(t.Z(t.held).contestedLastTick);
+
+        ZoneTickInputs held = MakeInputs(t.f.registry, t.held, t.held);
+        Ticks(t.f.registry, held, fired, 10);
+        REQUIRE(t.Z(t.held).support == Approx(100.0f));
+        REQUIRE(CountEvents(fired, ZETownLost, t.held) == 0);
+    }
+
+    SECTION("nobody there: support holds")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.held).support == Approx(70.0f));
+    }
+
+    SECTION("off-screen: occupiers standing in a remote held town drain it too")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.farPost, -1);
+        in.occCount[t.held] = 4;
+        t.f.registry.EvaluateTick(in, fired);
+        REQUIRE(t.Z(t.held).lastRemote);
+        REQUIRE(t.Z(t.held).support == Approx(65.0f));
+        Ticks(t.f.registry, in, fired, 2);
+        REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
+        REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
+
+        // remote with fighters there as well: a standoff
+        TownFixture s;
+        s.Load(kTownConfig);
+        AutoArray<ZoneEventRecord> fired2;
+        ZoneTickInputs both = MakeInputs(s.f.registry, s.farPost, s.held);
+        both.occCount[s.held] = 4;
+        Ticks(s.f.registry, both, fired2, 10);
+        REQUIRE(s.Z(s.held).support == Approx(70.0f));
+        REQUIRE(Str(s.Z(s.held).owner) == "GUER");
+    }
+
+    SECTION("an exempt town reverts without a garrison")
+    {
+        t.Z(t.held).garrisonExempt = true;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 1;
+        Ticks(t.f.registry, in, fired, 3);
+        REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.held).garrison == Approx(0.0f));
+    }
+
+    SECTION("RevertTown is a no-op on anything but a resistance-held CITY")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE_FALSE(t.f.registry.RevertTown(t.town, fired)); // administered
+        REQUIRE_FALSE(t.f.registry.RevertTown(t.camp, fired)); // not a CITY
+        REQUIRE_FALSE(t.f.registry.RevertTown(t.post, fired)); // military
+        REQUIRE_FALSE(t.f.registry.RevertTown(99, fired));     // out of range
+        REQUIRE(fired.Size() == 0);
+        REQUIRE(t.f.registry.RevertTown(t.held, fired));
+        REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
+    }
+
+    SECTION("townRetake = 0: liberated towns are permanent and inert (pre-#79)")
+    {
+        TownFixture legacy;
+        legacy.Load(TownConfigWith("townRetake = 0;"));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs occ = MakeInputs(legacy.f.registry, legacy.held, -1);
+        occ.occCount[legacy.held] = 3;
+        Ticks(legacy.f.registry, occ, fired, 20);
+        REQUIRE(Str(legacy.Z(legacy.held).owner) == "GUER");
+        REQUIRE(legacy.Z(legacy.held).support == Approx(70.0f));
+        ZoneTickInputs res = MakeInputs(legacy.f.registry, legacy.held, legacy.held);
+        Ticks(legacy.f.registry, res, fired, 5);
+        REQUIRE(legacy.Z(legacy.held).support == Approx(70.0f)); // no consolidation either
+        REQUIRE(CountEvents(fired, ZETownLost, legacy.held) == 0);
+    }
+
+    SECTION("event name mapping")
+    {
+        REQUIRE(ZoneRegistry::EventTypeFromName("townLost") == ZETownLost);
+        REQUIRE(ZoneRegistry::EventTypeFromName("TOWNLOST") == ZETownLost);
+    }
+}
+
+TEST_CASE("PlayerCountsAsPresence - the D1 rule (issue #79)", "[game][guerrilla]")
+{
+    PlayerPresenceInput in;
+    SECTION("not undercover: always counts")
+    {
+        in.undercover = false;
+        REQUIRE(PlayerCountsAsPresence(in));
+    }
+    SECTION("disguised and unseen: does not count")
+    {
+        in.undercover = true;
+        REQUIRE_FALSE(PlayerCountsAsPresence(in));
+    }
+    SECTION("an observer holds an exposed verdict: counts")
+    {
+        in.undercover = true;
+        in.exposed = true;
+        REQUIRE(PlayerCountsAsPresence(in));
+    }
+    SECTION("overtly armed: counts")
+    {
+        in.undercover = true;
+        in.weaponInHands = true;
+        REQUIRE(PlayerCountsAsPresence(in));
+    }
+    SECTION("warrior outfit: counts")
+    {
+        in.undercover = true;
+        in.warriorOutfit = true;
+        REQUIRE(PlayerCountsAsPresence(in));
+    }
+}
+
+TEST_CASE("ZoneRegistry - IsCivilianOutfitClass reads the resistance Civ-family keys (issue #79 D1)",
+          "[game][guerrilla]")
+{
+    TownFixture t;
+    t.Load(kTownConfig);
+    const ZoneRegistry& r = t.f.registry;
+    REQUIRE(r.IsCivilianOutfitClass("SoldierGFakeC"));   // playerClassCiv
+    REQUIRE(r.IsCivilianOutfitClass("soldiergfakec2"));  // recruitSpecialistCiv, any case
+    REQUIRE(r.IsCivilianOutfitClass("MilitiaCiv3"));     // civTier[]
+    REQUIRE_FALSE(r.IsCivilianOutfitClass("SoldierGB")); // the warrior body
+    REQUIRE_FALSE(r.IsCivilianOutfitClass(""));
+    REQUIRE_FALSE(r.IsCivilianOutfitClass(nullptr));
+}
+
+TEST_CASE("ZoneRegistry - town defender state survives save/load (issue #79)", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-towns.bin";
+    {
+        QIStream in(kTownConfig, strlen(kTownConfig));
+        ExtParsMission.Parse(in);
+    }
+    {
+        TownFixture t;
+        t.Load(kTownConfig);
+        t.Z(t.town).garrison = 1;            // a bled town garrison
+        t.Z(t.hamlet).garrisonExempt = true; // the start-town exemption
+        t.Z(t.hamlet).garrison = 0;
+        t.Z(t.held).flipDay = 3; // the counter-attack seam
+        t.Z(t.held).flipMinute = 615;
+        t.f.registry.SetEventHandler(ZETownLost, "hTownLost");
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(t.f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    const ZoneRecord* town = loaded.GetZone(loaded.FindZoneIndex("Town"));
+    const ZoneRecord* hamlet = loaded.GetZone(loaded.FindZoneIndex("Hamlet"));
+    const ZoneRecord* held = loaded.GetZone(loaded.FindZoneIndex("Held"));
+    REQUIRE(town != nullptr);
+    REQUIRE(hamlet != nullptr);
+    REQUIRE(held != nullptr);
+    CHECK(town->garrison == Approx(1.0f)); // the saved reserve, not the config 4
+    CHECK(town->garrisonMax == Approx(4.0f));
+    CHECK(hamlet->garrisonExempt);
+    CHECK(hamlet->garrison == Approx(0.0f));
+    CHECK_FALSE(loaded.IsGarrisonable(*hamlet));
+    CHECK(held->flipDay == 3);
+    CHECK(held->flipMinute == 615);
+    CHECK(Str(held->owner) == "GUER");
+    CHECK(held->garrison == Approx(0.0f));
+    CHECK(Str(loaded.GetEventHandler(ZETownLost)) == "hTownLost");
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
 }
 
 TEST_CASE("ZoneRegistry - off-screen contract config keys (issue #71)", "[game][guerrilla]")
@@ -1612,6 +2136,9 @@ TEST_CASE("ZoneRegistry - capture and reveal follow the swapped sides", "[game][
 
     SECTION("city support flip targets the resistance side")
     {
+        // the town's defenders (cityGarrison 4, issue #79) are already wiped
+        REQUIRE(f.registry.GetZone(town)->garrison == Approx(4.0f));
+        f.registry.GetZoneMutable(town)->garrison = 0;
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(f.registry, town, town);
         f.registry.EvaluateTick(in, fired); // support 55 -> 60 >= supportFlip

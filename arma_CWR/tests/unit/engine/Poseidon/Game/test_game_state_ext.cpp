@@ -482,6 +482,8 @@ TEST_CASE("Guerrilla zone-registry commands are registered in GGameState", "[gam
     REQUIRE(ContainsName(functions, "gmZoneSim"));
     REQUIRE(ContainsName(nulars, "gmSimDiag"));
     REQUIRE(ContainsName(nulars, "gmSimDiagLog"));
+    // town defenders / D1 player presence (issue #79)
+    REQUIRE(ContainsName(nulars, "gmPlayerPresence"));
     REQUIRE(ContainsName(functions, "gmFactionTierClass"));
     REQUIRE(ContainsName(functions, "gmFactionValue"));
     REQUIRE(ContainsName(functions, "gmFactionVehicle"));

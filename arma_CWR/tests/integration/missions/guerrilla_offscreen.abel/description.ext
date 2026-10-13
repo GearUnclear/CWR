@@ -77,6 +77,12 @@ class CfgGuerrillaZones
     // range-checked at load: an impossible value (e.g. trafficRadius under
     // trafficMinSpawnDist, a day window written in hours) is repaired and
     // logged, and gmTrafficDiag reports the repair count.
+    // Town defenders (issue #79 B2) PINNED OFF: this fixture predates them,
+    // and the tests booting it assume free towns (no occupier garrison
+    // spawning in Houdan or the other seeded towns). cityGarrison = 0 is
+    // the legacy rule; the defended-town behaviour is covered by
+    // guerrilla_town_defenders on the shipped Guerrilla.Abel template.
+    cityGarrison = 0;
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns

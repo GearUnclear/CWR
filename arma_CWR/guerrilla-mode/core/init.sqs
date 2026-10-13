@@ -204,6 +204,7 @@ gmPlayer = player
 ;    gmEvtCapStart   [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtContested  [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtCapLost    [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtTownLost   [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtLoaded     [saveVersion]                       -> campaign.sqs
 ;    gmEvtAlert      [zoneIndex, zoneName, old, new]     -> qrf.sqs
 ;    gmEvtUcBroken   [reason, zoneName]                  -> undercover.sqs
@@ -215,6 +216,7 @@ gmEvtRevealed    = []
 gmEvtCapStart    = []
 gmEvtContested   = []
 gmEvtCapLost     = []
+gmEvtTownLost    = []
 gmEvtLoaded      = []
 gmEvtAlert       = []
 gmEvtUcBroken    = []
@@ -257,6 +259,7 @@ gmZoneOnEvent ["revealed", {gmEvtRevealed = gmEvtRevealed + [_this]}]
 gmZoneOnEvent ["captureStarted", {gmEvtCapStart = gmEvtCapStart + [_this]}]
 gmZoneOnEvent ["contested", {gmEvtContested = gmEvtContested + [_this]}]
 gmZoneOnEvent ["captureLost", {gmEvtCapLost = gmEvtCapLost + [_this]}]
+gmZoneOnEvent ["townLost", {gmEvtTownLost = gmEvtTownLost + [_this]}]
 ; Native events have ONE handler slot: fan out the load notification here,
 ; preserving campaign.sqs's queue while asking the civilian menu to remount.
 gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]; GM_CI_REMOUNT = true}]

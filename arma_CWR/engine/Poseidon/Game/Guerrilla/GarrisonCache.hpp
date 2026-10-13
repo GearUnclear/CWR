@@ -2,8 +2,10 @@
 
 // Guerrilla Mode garrison distance-cache ("dynamic simulation") - native
 // replacement for the spawning.sqs cache loop (guerrilla-mode/mission/
-// Guerrilla.Demo/scripts).  Occupier-held zones keep their garrison as an
-// integer reserve on the ZoneRegistry record while the player is far away;
+// Guerrilla.Demo/scripts).  Occupier-held zones, and since issue #79 B2 the
+// occupier-administered towns (ZoneRegistry::IsGarrisonable), keep their
+// garrison as an integer reserve on the ZoneRegistry record while the player
+// is far away;
 // crossing cacheRadius converts the reserve into live AIGroups, and leaving
 // converts the survivors back.  QRF policy stays in script - this service
 // only fires events.  Inactive whenever the ZoneRegistry is inactive.
@@ -58,7 +60,7 @@ enum GarrisonAction
 // Per-zone observations for the D2 recovery step (StepRecover).
 struct GarrisonRecoverInput
 {
-    bool occupierOwned = false; // non-CITY zone held by the occupier
+    bool occupierOwned = false; // ZoneRegistry::IsGarrisonable (post or administered town)
     bool spawned = false;       // live cache groups exist for the zone
     float reserve = 0;          // ZoneRecord::garrison
     float reserveMax = 0;       // ZoneRecord::garrisonMax
@@ -73,7 +75,7 @@ struct GarrisonRecoverInput
 // this from the live world; unit tests inject values directly.
 struct GarrisonDecisionInput
 {
-    bool occupierOwned = false; // non-CITY zone held by an occupier faction
+    bool occupierOwned = false; // ZoneRegistry::IsGarrisonable (post or administered town)
     bool spawned = false;       // live cache groups exist for the zone
     float reserve = 0;          // despawned garrison strength (ZoneRecord::garrison)
     bool playerValid = false;   // real player exists and is alive

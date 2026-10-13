@@ -11,6 +11,8 @@
 #include <Poseidon/IO/ParamFileExt.hpp>           // Pars (gmClassExists probe)
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/World/World.hpp>                    // GWorld (gmPlayerPresence)
+#include <Poseidon/World/Entities/Infantry/Person.hpp> // real player
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <initializer_list>
@@ -168,8 +170,11 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 
 // gmZoneSim <index> -> the zone's off-screen contract state (issue #71):
 // [inBubble, guer, occ, seenDay, seenMinute, contested, lastRemote,
-//  garrisonMax, recoverClock] as of the last zone tick; empty array out of
-// range
+//  garrisonMax, recoverClock, garrisonLive, garrisonExempt, flipDay,
+//  flipMinute] as of the last zone tick; empty array out of range.  The last
+// four are the town-defender / retake fields (issue #79): the zone's own live
+// garrison bodies wherever they stand, the start-town exemption, and the
+// campaign day/minute of the last flip to the resistance (0 = never)
 static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -179,7 +184,7 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     {
         return value;
     }
-    array.Resize(9);
+    array.Resize(13);
     array[0] = z->lastInBubble;
     array[1] = (float)z->lastGuer;
     array[2] = (float)z->lastOcc;
@@ -189,6 +194,34 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     array[6] = z->lastRemote;
     array[7] = z->garrisonMax;
     array[8] = z->recoverClock;
+    array[9] = (float)z->lastGarrisonLive;
+    array[10] = z->garrisonExempt;
+    array[11] = (float)z->flipDay;
+    array[12] = (float)z->flipMinute;
+    return value;
+}
+
+// gmPlayerPresence -> the D1 player-presence rule (issue #79) sampled now:
+// [counts, undercover, exposed, weaponInHands, warriorOutfit, liberatedTowns].
+// counts is PlayerCountsAsPresence; [false, false, ...] without a live player
+static GameValue GmPlayerPresence(const GameState* state)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(6);
+    PlayerPresenceInput in;
+    Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
+    bool alive = player && !player->IsDammageDestroyed();
+    if (alive)
+    {
+        ZoneRegistry::Instance().SamplePlayerPresence(player, in);
+    }
+    array[0] = alive && PlayerCountsAsPresence(in);
+    array[1] = in.undercover;
+    array[2] = in.exposed;
+    array[3] = in.weaponInHands;
+    array[4] = in.warriorOutfit;
+    array[5] = (float)ZoneRegistry::Instance().LiberatedTownCount();
     return value;
 }
 
@@ -241,7 +274,7 @@ static GameValue GmSimDiagLog(const GameState* /*state*/)
 }
 
 // gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
-//               "captureStarted"|"contested"|"captureLost", handler]
+//               "captureStarted"|"contested"|"captureLost"|"townLost", handler]
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both)
 static GameValue GmZoneOnEvent(const GameState* state, GameValuePar oper1)
@@ -471,6 +504,7 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
 
     GGameState.NewFunction(GameFunction(GameArray, "gmZone", GmZone, GameScalar));
     GGameState.NewFunction(GameFunction(GameArray, "gmZoneSim", GmZoneSim, GameScalar));
+    GGameState.NewNularOp(GameNular(GameArray, "gmPlayerPresence", GmPlayerPresence));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));
