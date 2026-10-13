@@ -142,6 +142,11 @@ struct ZoneRecord
     // per-zone garrison override) even when the town starts resistance-held,
     // so a retaken town refills to it.
     float garrisonMax = 0;
+    // an auto-seeded town (SeedCityZones), not an authored one.  Static,
+    // config-rebuilt, never serialized: the occupier pool counts a seeded
+    // town in K only when it passes the settlement probe (OCCUPIER-FORCES.md
+    // 5.1).
+    bool seeded = false;
 
     // dynamic, serialized (matched by zone name on load)
     RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
@@ -386,6 +391,11 @@ struct ZoneTickInputs
     // town (CounterAttack::AbstractPresence).  Read by the town retake only:
     // it drains the town exactly like live occupiers would.
     AutoArray<int> abstractOcc;
+    // per zone (optional, missing = 0): the HOLDING bodies a revert of this
+    // town settles as its new garrison (CounterAttack::SettlePresence; 0
+    // with occupierForces off, OCCUPIER-FORCES.md 5.4).  Read by the town
+    // retake's RevertTown only.
+    AutoArray<int> settleOcc;
 };
 
 // When does the real player count as resistance presence?  Two predicates
@@ -524,9 +534,16 @@ class ZoneRegistry : public SerializeClass
     // of the last zone tick) it is a PENDING deposit (S5, GarrisonCache::
     // AddReserve), else a direct reserve write that GarrisonCache
     // materializes on its next pass inside cacheRadius.  False (no-op) for a
-    // zone that is not a resistance-held CITY.  The seam a counter-attack
-    // service can call directly.
-    bool RevertTown(int index, AutoArray<ZoneEventRecord>& fired);
+    // zone that is not a resistance-held CITY, and after CampaignEnd's win
+    // latch (OCCUPIER-FORCES.md 7.4: nothing reverts).  The seam a
+    // counter-attack service can call directly.
+    // Occupier forces (5.3, 5.4): settled bodies (a holding force's
+    // strength) become the garrison first, up to garrisonMax, their surplus
+    // goes to the pool; only the remaining room is a pool-funded deposit
+    // (OccupierForces::Deposit, which passes everything through while the
+    // pool is inactive and grants nothing in SPENT: a hollow revert).
+    // revertRefill records the pool-funded part.
+    bool RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int settled = 0);
     // Exempt a town from its occupier garrison (GuerrillaBase: the new-game
     // START TOWN headquarters).  Zeroes the reserve and any pending deposit;
     // persistent.

@@ -2,6 +2,7 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate (S5 pending release)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // D2 recovery: zone alert GREEN
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (D2 Draw, 5.5 refunds); pass-through while inactive
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -318,6 +319,47 @@ int GarrisonCache::StepRecover(const GarrisonRecoverInput& in, float elapsed, fl
         clock = 0; // at strength: the next loss starts a fresh interval
     }
     return gained;
+}
+
+int GarrisonCache::ApplyRecover(ZoneRecord& z, int gained, float interval)
+{
+    if (gained <= 0)
+    {
+        return 0;
+    }
+    const int granted = OccupierForces::Instance().Draw(gained);
+    z.garrison = floorf(z.garrison) + (float)granted;
+    if (granted < gained)
+    {
+        // an empty pool grants nothing and the clock is clamped: the zone is
+        // due again next pass, no owed bodies are banked
+        z.recoverClock = interval > 0 ? interval : 0;
+    }
+    return granted;
+}
+
+void GarrisonCache::WriteBackSurvivors(ZoneRegistry& registry, int zone, int survivors, int dead)
+{
+    ZoneRecord* z = registry.GetZoneMutable(zone);
+    if (!z)
+    {
+        return;
+    }
+    OccupierForces& forces = OccupierForces::Instance();
+    if (dead > 0)
+    {
+        forces.NoteLoss(dead, "garrison"); // diagnostics (the `lost` field)
+    }
+    if (survivors > 0 && forces.Active() && !OccupierHolds(registry, *z))
+    {
+        // a flipped base's live garrison: with the occupier pool on it goes
+        // back to the pool (5.5), not onto the new owner's record
+        forces.Refund(survivors, "flipped base");
+        LOG_INFO(Core, "Guerrilla: {} survivor(s) of the lost {} garrison go back to the occupier pool", survivors,
+                 (const char*)z->name);
+        return;
+    }
+    z->garrison = floorf(z->garrison) + (float)survivors;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +742,8 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     {
         LOG_WARN(Core, "GarrisonCache: zone '{}' materialized {} of {} planned bodies; {} lost to unspawnable classes",
                  (const char*)z->name, spawned, planned, planned - spawned);
+        // with the occupier pool on they go back to it (5.5)
+        OccupierForces::Instance().Refund(planned - spawned, "partial spawn");
     }
     state.spawned = true;
     z->garrison = (float)(remaining > 0 ? remaining : 0);
@@ -727,6 +771,7 @@ void GarrisonCache::DespawnGarrison(int zoneIndex, AutoArray<GarrisonEventRecord
     }
 
     int survivors = 0;
+    int dead = 0;
     for (int g = 0; g < state.groups.Size(); g++)
     {
         AIGroup* grp = state.groups[g];
@@ -746,6 +791,10 @@ void GarrisonCache::DespawnGarrison(int zoneIndex, AutoArray<GarrisonEventRecord
             if (unit->GetLifeState() == AIUnit::LSAlive)
             {
                 survivors++;
+            }
+            else
+            {
+                dead++;
             }
             Person* person = unit->GetPerson();
             if (person)
@@ -777,7 +826,7 @@ void GarrisonCache::DespawnGarrison(int zoneIndex, AutoArray<GarrisonEventRecord
     // stored (U1, OCCUPIER-FORCES.md 5.5): a group-budget remainder, D2
     // regrowth or a top-up written while the garrison was live (AdoptLive,
     // RevertTown, a pending release) is kept, never overwritten
-    z->garrison = floorf(z->garrison) + (float)survivors;
+    WriteBackSurvivors(registry, zoneIndex, survivors, dead);
     z->liveOccupiers = 0;
 
     GarrisonEventRecord ev;
@@ -918,9 +967,14 @@ void GarrisonCache::Simulate(float deltaT)
             StepRecover(rec, elapsed, _tuning.recoverInterval, cacheRadius, DespawnHysteresis, z->recoverClock);
         if (gained > 0)
         {
-            z->garrison += (float)gained;
-            LOG_INFO(Core, "Guerrilla: garrison at {} recovered {} (reserve {} of {})", (const char*)z->name, gained,
-                     z->garrison, z->garrisonMax);
+            // OCCUPIER-FORCES.md 5.3: regrowth draws on the pool (everything
+            // granted while the pool is inactive, the legacy D2)
+            const int granted = ApplyRecover(*z, gained, _tuning.recoverInterval);
+            if (granted > 0)
+            {
+                LOG_INFO(Core, "Guerrilla: garrison at {} recovered {} (reserve {} of {})", (const char*)z->name,
+                         granted, z->garrison, z->garrisonMax);
+            }
         }
     }
     // handlers run only after the cache's own state mutation completed

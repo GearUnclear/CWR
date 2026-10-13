@@ -4,6 +4,7 @@
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate (S5 release)
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (D2 Draw, refunds)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
@@ -678,4 +679,69 @@ TEST_CASE("GarrisonCache - handlers and spawned-row reconciliation survive save/
     ExtParsMission.Clear();
     ZoneRegistry::Instance().Clear();
     std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("GarrisonCache - occupier pool routing: D2 draws on the pool, a flipped garrison refunds it (5.3, 5.5)",
+          "[game][guerrilla]")
+{
+    DepositFixture f;
+    ZoneRecord& post = f.Z(f.post);
+
+    // the pool inactive (the key off): everything granted, the legacy D2
+    post.garrison = 2;
+    post.recoverClock = 0;
+    CHECK(GarrisonCache::ApplyRecover(post, 2, 600.0f) == 2);
+    CHECK(post.garrison == Approx(4.0f));
+    // ... and a flipped zone's survivors land on its record as before
+    f.Z(f.base).owner = "GUER";
+    f.Z(f.base).garrison = 0;
+    GarrisonCache::WriteBackSurvivors(f.registry, f.base, 3, 1);
+    CHECK(f.Z(f.base).garrison == Approx(3.0f));
+    f.Z(f.base).owner = "EAST";
+    f.Z(f.base).garrison = 10;
+
+    // the pool active
+    struct PoolOn
+    {
+        ParamFile file;
+        explicit PoolOn(ZoneRegistry& registry)
+        {
+            OccupierForces& of = OccupierForces::Instance();
+            of.Clear();
+            const std::string cfg = "class CfgGuerrillaZones { occupierForces = 1; };\n";
+            QIStream in(cfg.c_str(), cfg.size());
+            file.Parse(in);
+            of.LoadFromParams(file.FindEntry("CfgGuerrillaZones"));
+            REQUIRE(of.Activate(registry));
+        }
+        ~PoolOn() { OccupierForces::Instance().Clear(); }
+    } pool(f.registry);
+    OccupierForces& of = OccupierForces::Instance();
+    REQUIRE(of.Active());
+
+    // D2 takes what the pool grants; an empty pool grants nothing and the
+    // clock is clamped (due again at once, nothing banked)
+    of.SetPool(1);
+    post.garrison = 2;
+    post.recoverClock = 0;
+    CHECK(GarrisonCache::ApplyRecover(post, 2, 600.0f) == 1);
+    CHECK(post.garrison == Approx(3.0f));
+    CHECK(post.recoverClock == Approx(600.0f));
+    CHECK(of.Pool() == 0);
+    CHECK(GarrisonCache::ApplyRecover(post, 1, 600.0f) == 0);
+    CHECK(post.garrison == Approx(3.0f));
+
+    // a flipped base's live garrison goes to the pool, not onto the new
+    // owner's record; the dead are counted as losses
+    const int lostBefore = of.Lost();
+    f.Z(f.base).owner = "GUER";
+    f.Z(f.base).garrison = 0;
+    GarrisonCache::WriteBackSurvivors(f.registry, f.base, 3, 2);
+    CHECK(f.Z(f.base).garrison == Approx(0.0f));
+    CHECK(of.Pool() == 3);
+    CHECK(of.Lost() == lostBefore + 2);
+    // a held zone writes its survivors back (U1)
+    GarrisonCache::WriteBackSurvivors(f.registry, f.post, 2, 0);
+    CHECK(post.garrison == Approx(5.0f));
+    CHECK(of.Pool() == 3);
 }

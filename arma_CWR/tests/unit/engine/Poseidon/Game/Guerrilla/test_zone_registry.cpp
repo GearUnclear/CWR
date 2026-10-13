@@ -1441,6 +1441,27 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
     }
 
+    SECTION("occupier forces: a holding force settles first, the rest is the refill (OCCUPIER-FORCES.md 5.4)")
+    {
+        // the pool is inactive here, so the refill comes from nothing as
+        // before; only its split changes
+        AutoArray<ZoneEventRecord> fired;
+        const int room = (int)t.Z(t.held).garrisonMax;
+        REQUIRE(room >= 2);
+        t.Z(t.held).garrison = 0;
+        t.Z(t.held).pending = 0;
+        // more settled bodies than room: the town is full, nothing is refilled
+        REQUIRE(t.f.registry.RevertTown(t.held, fired, room + 2));
+        CHECK(t.Z(t.held).garrison == Approx((float)room));
+        CHECK(t.Z(t.held).revertRefill == 0);
+        // one settled body: the refill tops up the rest
+        t.Z(t.held).owner = "GUER";
+        t.Z(t.held).garrison = 0;
+        REQUIRE(t.f.registry.RevertTown(t.held, fired, 1));
+        CHECK(t.Z(t.held).garrison == Approx((float)room));
+        CHECK(t.Z(t.held).revertRefill == room - 1);
+    }
+
     SECTION("townRetake = 0: liberated towns are permanent and inert (pre-#79)")
     {
         TownFixture legacy;
@@ -2817,6 +2838,9 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         REQUIRE(houdan->income == Approx(0.0f));
         REQUIRE(houdan->heat == Approx(0.0f));
         REQUIRE(Str(houdan->marker) == "gmZoneCity_0");
+        // the static seeded flag (OCCUPIER-FORCES.md 5.1): seeded towns only
+        REQUIRE(houdan->seeded);
+        REQUIRE_FALSE(f.registry.GetZone(f.registry.FindZoneIndex("Camp"))->seeded);
         // Names position[] is 2D map coords [x, z]; elevation 0
         REQUIRE(houdan->pos.X() == Approx(3500.0f));
         REQUIRE(houdan->pos.Z() == Approx(4200.0f));

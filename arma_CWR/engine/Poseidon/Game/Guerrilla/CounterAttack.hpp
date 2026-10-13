@@ -92,12 +92,57 @@
 // reload never changes an outcome and the off-screen rules draw no engine
 // random numbers.
 //
+// OCCUPIER FORCES (guerrilla-mode/OCCUPIER-FORCES.md phase 3, the movement
+// half; CounterAttackOrders.hpp is the contract with the director).
+//   Records carry kind / origin / package / opId / price and hull refs
+//   (serialized; an old save loads as CAKRetake / CAOLegacy / FPFoot, opId
+//   0).  LaunchFunded starts a director operation from a FIXED source; the
+//   legacy path (OnTownFlipped -> Decide -> schedule) is unchanged in
+//   outcome.  A listener (the director) hears every flip first (the AWAKE
+//   hook: it may take the flip, then no legacy record is scheduled) and
+//   every state change of every record (CounterAttackOpEvent; legacy records
+//   report with origin CAOLegacy and opId 0).  The record ends with exactly
+//   one TERMINAL event: Repelled, Settled, CancelledUnseen or Aborted; a
+//   Returned (survivors written to a base or the pool) comes before it, and
+//   a hull's HullRefund / HullLost may come after it (an intact hull drives
+//   home and is deleted only where nobody sees it).
+//   With occupierForces on (CounterAttackTuning::forcesOn, read here from the
+//   same key OccupierForces reads):
+//   * real speeds (3.2): abstract travel at the record's abstractSpeed, or
+//     FootSpeed for a legacy record, over the real road length (straight
+//     distance x counterAttackRoadFactor when no road route is known); the
+//     gmCounterAttackTune "speed" lever, once set at run time, wins over
+//     both (a TEST lever that keeps the tri windows short);
+//   * resolution (6.5): an arrival at a town with resistance defenders goes
+//     LIVE (born under S at the 250 m bound, even off-screen); over budget
+//     it waits at the town edge doing nothing; no abstract Fight; an empty
+//     town is held and drained as before;
+//   * the birth chain (3.1, D6) for FUNDED records: at launch, on the road,
+//     then the next base back (re-source: the old base refunded, the new one
+//     debited, CAOpResourced), then cancel unseen (CAOpCancelledUnseen);
+//     legacy records keep the turn-back at counterAttackBirthGiveUp;
+//   * a holding force settles as the reverted town's garrison (5.4,
+//     ZoneRegistry::RevertTown via ZoneTickInputs::settleOcc); a travelling
+//     force whose town reverts under it tops the town up (CAKReinforce) when
+//     its garrison is short, else goes home.
+//   Pool routing (5.5) goes through OccupierForces::Instance(), which passes
+//   everything through while inactive.  Ground hulls (FPTruck now; one hull
+//   class, crew, cargo): created on the road at the birth point, crew a
+//   group of their own, infantry boarded as cargo, driven with Command::Move
+//   to the driver, the infantry dismounts at counterAttackBirthMinToTarget;
+//   deleted with no refund on a return to abstract travel and re-created at
+//   the next birth.  Born operations (forcesOpsMax) and live hulls
+//   (forcesLiveHullsMax) gate births; a birth over them waits.  After
+//   CampaignEnd's win latch nothing launches or steps (CounterAttackView::
+//   won) and RevertTown refuses.
+//
 // Script surface (CounterAttackCommands.cpp): gmCounterAttacks,
-// gmCounterAttackTune.  Events (ZoneRegistry handler slots): counterAttack
-// when a force reaches a town (live squad sent in, or abstract arrival) and
-// counterRepelled when one is beaten off or withdraws.  Config keys
-// (CfgGuerrillaZones): counterAttack and every counterAttack* key in
-// CounterAttackTuning.
+// gmCounterAttackTune, gmCounterAttackLaunchFunded (test lever).  Events
+// (ZoneRegistry handler slots): counterAttack when a force reaches a town
+// (live squad sent in, or abstract arrival) and counterRepelled when one is
+// beaten off or withdraws.  Config keys (CfgGuerrillaZones): counterAttack
+// and every counterAttack* key in CounterAttackTuning, plus occupierForces,
+// forcesOpsMax and forcesLiveHullsMax.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -105,10 +150,13 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
 
+#include <Poseidon/Game/Guerrilla/CounterAttackOrders.hpp>
+
 class ParamArchive;
 namespace Poseidon
 {
 class AIGroup;
+class Entity;
 } // namespace Poseidon
 
 namespace Poseidon
@@ -139,6 +187,13 @@ struct CounterAttackTuning
     int maxLive = 2;                 // counterAttackMaxLive: live squads out at once
     float birthMinToTarget = 250.0f; // counterAttackBirthMinToTarget: no birth point this close to the town (m)
     float birthGiveUp = 600.0f;      // counterAttackBirthGiveUp: s a force with no birth point waits, then turns back
+    // occupier forces (OCCUPIER-FORCES.md 16) ---------------------------------
+    bool forcesOn = false;      // occupierForces: real speeds, key-on resolution, settle on revert
+    int forcesOpsMax = 2;       // forcesOpsMax (0..6): born funded operations in flight
+    int forcesLiveHullsMax = 6; // forcesLiveHullsMax (0..20): live hulls at once
+    // transient test lever: gmCounterAttackTune "speed" was set at run time,
+    // so `speed` (with roadFactor) wins over the real speeds
+    bool speedLever = false;
 };
 
 // What the dispatch decision may look at besides the town and k.  The engine
@@ -183,6 +238,8 @@ struct CounterAttackView
     // budget census (GatherSimDiag): live AI bodies, all sides, and occupier groups
     int liveBodies = 0;
     int occGroups = 0;
+    // CampaignEnd's win latch (7.4): nothing launches, nothing steps
+    bool won = false;
 };
 
 // How a squad appearing at a point would be perceived, Traffic's tiers
@@ -256,6 +313,53 @@ class CounterAttackOps : public CounterAttackGate
     // every living body of grp could vanish unnoticed right now (Traffic's
     // despawn rule, Traffic::CanExposeDespawn from the camera)
     virtual bool SquadUnseen(AIGroup* grp) const = 0;
+
+    // ground hulls (OCCUPIER-FORCES.md 3.2).  Defaults do nothing, so a
+    // world without hulls (the unit tests' fakes) never mounts a force.
+    // A crewed hull of hullClass on the road at from, facing dir, its crew
+    // (crew bodies) a group of their own, and n infantry in a second group
+    // boarded as its cargo (the Traffic idiom).  Returns the infantry group,
+    // or null when the hull or its driver could not be created (nothing left
+    // in the world).  hull / crewGroup are set on success.
+    virtual AIGroup* SpawnMounted(const RString& hullClass, int crew, int n, Vector3Par from, Vector3Par dir,
+                                  Entity*& hull, AIGroup*& crewGroup)
+    {
+        (void)hullClass, (void)crew, (void)n, (void)from, (void)dir;
+        hull = nullptr;
+        crewGroup = nullptr;
+        return nullptr;
+    }
+    // one Command::Move to the hull's driver through IssueCommand
+    virtual void DriveOn(AIGroup* crewGroup, Vector3Par target) { (void)crewGroup, (void)target; }
+    // the infantry of grp gets out of the hull (cargo of another group)
+    virtual void Dismount(AIGroup* grp, Entity* hull) { (void)grp, (void)hull; }
+    enum HullStatus
+    {
+        HullGone,      // the link is dead (deleted)
+        HullDestroyed, // wrecked
+        HullIntact
+    };
+    // the hull's HullStatus; crewAlive = living crewmen of crewGroup
+    virtual int HullState(Entity* hull, AIGroup* crewGroup, int& crewAlive) const
+    {
+        (void)hull, (void)crewGroup;
+        crewAlive = 0;
+        return HullGone;
+    }
+    // the hull's speed (m/s); 0 without a hull
+    virtual float HullSpeed(Entity* hull) const
+    {
+        (void)hull;
+        return 0;
+    }
+    // the hull and every living crewman could vanish unnoticed right now
+    virtual bool HullUnseen(Entity* hull, AIGroup* crewGroup) const
+    {
+        (void)hull, (void)crewGroup;
+        return false;
+    }
+    // delete the crew FIRST (deleting a transport ejects its crew), then the hull
+    virtual void RemoveHull(Entity* hull, AIGroup* crewGroup) { (void)hull, (void)crewGroup; }
 };
 
 class CounterAttack : public SerializeClass
@@ -297,6 +401,15 @@ class CounterAttack : public SerializeClass
     // before counterAttackLiveTimeout starts counting
     static constexpr float MarchSpeed = 1.0f;
     static constexpr float MarchSlack = 120.0f;
+    // real speeds (OCCUPIER-FORCES.md 3.2; constants, occupierForces on
+    // only): men on foot 1.5 m/s, a ground hull 0.6 x and an aircraft 0.8 x
+    // its config maxSpeed (km/h, converted to m/s)
+    static constexpr float FootSpeed = 1.5f;
+    static constexpr float GroundCruise = 0.6f;
+    static constexpr float AirCruise = 0.8f;
+    // the abstract speed of a package (m/s): FootSpeed for foot (or an
+    // unknown maxSpeed), else cruise x maxSpeedKmh / 3.6
+    static float RealSpeed(int package, float maxSpeedKmh);
 
     // live squad legs (transient: a reload re-derives it from the leader)
     enum MarchLeg
@@ -326,6 +439,25 @@ class CounterAttack : public SerializeClass
         bool deferLogged = false;  // the budget deferral WARN went out
         bool hiddenLogged = false; // the perception deferral WARN went out
         LLink<AIGroup> group;      // Live only
+        // occupier forces (OCCUPIER-FORCES.md 14 items 1 and 14; serialized,
+        // an old save reads the defaults: a legacy foot retake, opId 0)
+        int opId = 0;             // the director's operation id (0: legacy)
+        int kind = CAKRetake;     // CounterAttackKind
+        int origin = CAOLegacy;   // CounterAttackOrigin
+        int package = FPFoot;     // ForcePackage
+        int priceUnits = 0;       // what the director debited (hull + crew)
+        RString hullClass;        // empty for foot
+        int crew = 0;             // the hull's crew bodies (re-created with it at the next birth)
+        bool urgent = false;      // the urgency flag at launch
+        bool funded = false;      // a director operation with the key on (birth chain, pool routing)
+        float abstractSpeed = 0;  // m/s for the abstract leg (0: legacy pacing, FootSpeed with the key on)
+        float lethality = 1.0f;   // A_lethal per body (6.5, item 12): odds use strength x this
+        bool arrivalLive = false; // born at the town edge to fight present defenders (never returns to the road)
+        bool hullDone = false;    // the hull was settled (lost, refunded or cancelled): no further hull event
+        bool dismounted = false;  // Live with a hull: the infantry got out
+        RString tried;            // bases the birth chain already used, ';'-joined (D6)
+        LLink<Entity> hull;       // the live hull (second-pass ref; the hull rides the vehicle serializer)
+        LLink<AIGroup> crewGroup; // its crew (counts 1 against the group budget)
         // transient (rebuilt after a load) ---------------------------------
         float retry = 0;          // Travel / Holding: seconds to the next live attempt
         AutoArray<Vector3> route; // the road route, base to town, at most RouteStep apart
@@ -333,8 +465,31 @@ class CounterAttack : public SerializeClass
         int wp = 0;               // Live, LegRoad: the route point the current leg ends at
         bool suspended = false;   // Holding: the town is in the bubble, the force does nothing
         float unseenFor = 0;      // Live, LegRoad: seconds every body has been out of perception
+        float stopping = -1;      // Live, mounted at the edge: seconds the hull has been braking (-1 not yet)
         int spawnReason = CASpawnNone;
         Vector3 spawnPos = VZero; // where the live squad was instantiated
+        bool routeIsRoad = false; // route came from the road net (no roadFactor on its length)
+        // the hull's share of priceUnits (the crew are bodies, priced 1 each)
+        int HullPrice() const { return priceUnits - crew > 0 ? priceUnits - crew : 0; }
+        bool HasHullPackage() const { return hullClass.GetLength() > 0; }
+        LSError Serialize(ParamArchive& ar);
+    };
+
+    // an intact hull driving home after its operation ended: deleted where
+    // nobody sees it (HullUnseen), then CAOpHullRefund, its crew home as
+    // bodies; destroyed on the way: CAOpHullLost.  Serialized.
+    struct HomeHull
+    {
+        int opId = 0;
+        int kind = CAKRetake;
+        int origin = CAOLegacy;
+        RString target;
+        RString source;
+        int units = 0; // the hull's price
+        int crew = 0;  // living crew when it left
+        float retry = 0;
+        LLink<Entity> hull;
+        LLink<AIGroup> crewGroup;
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -363,6 +518,14 @@ class CounterAttack : public SerializeClass
     // straightDistance * counterAttackRoadFactor / counterAttackSpeed, at
     // least MinTravel: the whole road leg from the base to the town
     static float TravelTime(const CounterAttackTuning& t, float straightDistance);
+    // the record's abstract leg (3.2).  The speed lever (t.speedLever) or a
+    // legacy record with the key off: TravelTime.  Otherwise at
+    // r.abstractSpeed (FootSpeed when 0): roadLength / speed when the route
+    // is a real road route (roadLength > 0), else straightDistance x
+    // roadFactor / speed; at least MinTravel.
+    static float TravelTimeFor(const CounterAttackTuning& t, const Record& r, float straightDistance, float roadLength);
+    // HoldOdds with the attackers' lethality (6.5, item 12): D*w / (A_lethal + D*w)
+    static float HoldOddsLethal(const CounterAttackTuning& t, int defenders, float attackLethal);
     // route geometry (2D lengths) ---------------------------------------------
     static float RouteLength(const AutoArray<Vector3>& route);
     // the point at fraction (0 = start, 1 = end) of the route's length
@@ -423,6 +586,56 @@ class CounterAttack : public SerializeClass
     // spare a man or cannot march its live garrison out.
     bool LaunchFrom(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
                     CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
+    // the director's launch (CounterAttackOrders.hpp): validates the target
+    // (CAKRetake: a held non-exempt CITY, not view.hqZone, no record on it;
+    // other kinds are later phases and refused), the source (occupier-held)
+    // and the slots (BornOps() < forcesOpsMax); caps order.bodies to the
+    // source's spare (the Launched event reports the actual count) and
+    // starts the record: a foot force with the town in the bubble and a live
+    // source garrison marches out live, anything else travels abstractly
+    // (hull packages always: their infantry is debited from the stored
+    // reserve) at order.abstractSpeed (> 0) or the legacy pacing (0).  Live
+    // and hull budgets do not refuse: a birth over them waits (6.5).  False
+    // = nothing launched, nothing debited.
+    bool LaunchFunded(ZoneRegistry& registry, const CounterAttackView& view, const CounterAttackOrder& order,
+                      CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
+    // the director's ear (CounterAttackOrders.hpp); null = none (unit tests,
+    // the key off).  Not owned.
+    static void SetListener(CounterAttackListener* listener);
+    static CounterAttackListener* Listener();
+    // record queries for the director
+    int FindByOpId(int opId) const;
+    // funded records that are LIVE or hold a live hull (forcesOpsMax counts these)
+    int BornOps() const;
+    // live hulls: records' hulls plus hulls driving home
+    int LiveHulls() const;
+    int HomeHullCount() const { return _homeHulls.Size(); }
+    const HomeHull* GetHomeHull(int i) const { return i >= 0 && i < _homeHulls.Size() ? &_homeHulls[i] : nullptr; }
+    // the view and ops Simulate steps with (the engine wrapper of the
+    // director launches with the same pair; it fires the returned events
+    // through ZoneRegistry::FireEvents itself).  BuildView refreshes the
+    // engine perception snapshot too.
+    void BuildView(CounterAttackView& view) const;
+    CounterAttackOps* EngineOps();
+    // the HOLDING bodies on a zone a revert settles as its garrison (5.4):
+    // every holding record on it (suspended ones too), 0 with the key off
+    int SettlePresence(const ZoneRegistry& registry, int zoneIndex) const;
+    // the record's live hull (0 / 1), for diagnostics (gmCounterAttacks, gmOccupierOps)
+    static int LiveHullOf(const Record& r);
+    // engine diagnostics (gmCounterAttacks): living infantry seated in the
+    // record's hull, and the squad's leader (null when none)
+    static int MountedOf(const Record& r);
+    static int AliveOf(const Record& r);
+    static Entity* LeaderOf(const Record& r);
+    // a mounted force stops before its infantry gets out (a cargo seat
+    // ejects with the hull's speed): the dismount waits for the hull to
+    // slow below this, or StopMax seconds
+    static constexpr float DismountSpeed = 1.5f;
+    static constexpr float StopMax = 15.0f;
+    // send an intact hull home (the end of its operation); the engine path
+    // and the unit tests' fake ops
+    void SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive, CounterAttackOps* ops,
+                      const ZoneRegistry& registry);
     // towns the resistance took so far (non-exempt flips counted by
     // OnTownFlipped; saved).  k of the next flip is max(this, towns held).
     int TownsTaken() const { return _townsTaken; }
@@ -459,11 +672,36 @@ class CounterAttack : public SerializeClass
     // engine hook: per frame, throttled to TickInterval
     void Simulate(float deltaT);
 
-    bool HasState() const { return _records.Size() > 0 || _townsTaken > 0; }
+    bool HasState() const { return _records.Size() > 0 || _townsTaken > 0 || _homeHulls.Size() > 0; }
     LSError Serialize(ParamArchive& ar) override;
 
   private:
     void LoadFromConfig();
+    // one event to the listener (queued while a listener call is running)
+    void Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units, const char* note);
+    static void Dispatch(const CounterAttackOpEvent& ev);
+    // the shared launch core (LaunchFrom, LaunchFunded): r carries the
+    // order's fields; false = nothing launched
+    bool LaunchCore(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size, Record& r,
+                    CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
+    // the birth chain's next base back (D6): true when re-sourced
+    bool Resource(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops);
+    // the chain's end: bodies back to their source (or the pool), the
+    // terminal CAOpCancelledUnseen
+    void CancelUnseen(ZoneRegistry& registry, const CounterAttackView& view, Record& r);
+    // a record ended: its hull (live: home; abstract: refunded now)
+    void FinishHull(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops);
+    // a live record's hull check (destroyed, crewless): true when it was lost now
+    bool CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOps* ops);
+    // hulls driving home
+    void StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
+    // crew bodies home to the source (room-capped, surplus and a lost base to the pool)
+    static void CrewHome(ZoneRegistry& registry, const CounterAttackView& view, const char* source, int crew);
+    // the key-on arrival at a town with defenders: born at the edge, or wait
+    void ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
+                    AutoArray<ZoneEventRecord>& fired);
+    // 5.4: the town reverted under a travelling record
+    bool RevertedUnder(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r);
     // nearest occupier military zone with bodies to spare; -1 when none
     int PickSource(const ZoneRegistry& registry, const CounterAttackView& view, int target, bool allowLive, int& spare,
                    bool& live) const;
@@ -475,12 +713,14 @@ class CounterAttack : public SerializeClass
     bool MustGoLive(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                     CounterAttackOps* ops) const;
     // the live squad's road march: legs, the town edge, re-sends
-    static void March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
-                      float elapsed);
+    void March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
+               float elapsed);
     // survivors go home, whole bodies, capped at the base's room
     // (garrisonMax - live - reserve - pending); inside the player's deposit
-    // bubble they are a pending deposit (S5), else a reserve write
-    static void ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies);
+    // bubble they are a pending deposit (S5), else a reserve write.  The
+    // surplus over the room and a lost base go to the pool (5.5); one
+    // CAOpReturned.
+    void ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies);
     bool InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const;
     int LiveSquads() const;
     // room for one more live group (live squads and the side's group budget)
@@ -488,6 +728,8 @@ class CounterAttack : public SerializeClass
     // send r's force of n from src: live (march the base's garrison out) or
     // abstract (debit the stored reserve, travel).  False = not launched (a
     // live detach failed); the caller retries or gives up.
+    // the whole abstract leg from r's source to its town (TravelTimeFor)
+    float LegTime(const ZoneRegistry& registry, Record& r, CounterAttackOps* ops) const;
     bool Launch(ZoneRegistry& registry, int target, int src, int n, bool live, CounterAttackOps* ops, Record& r,
                 AutoArray<ZoneEventRecord>& fired);
     // the abstract fight on arrival: true when the record is finished
@@ -511,10 +753,11 @@ class CounterAttack : public SerializeClass
     // a live squad in the town it retook becomes the town's garrison; the
     // squad is subtracted from the revert refill (U2), never assigned over
     // the reserve
-    static void AdoptLive(ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, int alive);
+    void AdoptLive(ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, int alive);
 
     CounterAttackTuning _tuning;
     AutoArray<Record> _records;
+    AutoArray<HomeHull> _homeHulls;
     float _accum = 0;
     int _townsTaken = 0;
 };

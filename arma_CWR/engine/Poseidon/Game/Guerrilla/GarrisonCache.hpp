@@ -147,6 +147,17 @@ class GarrisonCache : public SerializeClass
     // interval <= 0 disables recovery.
     static int StepRecover(const GarrisonRecoverInput& in, float elapsed, float interval, float cacheRadius,
                            float despawnHysteresis, float& clock);
+    // apply StepRecover's gained bodies through the occupier pool
+    // (OCCUPIER-FORCES.md 5.3): granted = OccupierForces::Draw(gained) joins
+    // the reserve; when the pool grants less the recovery clock is clamped
+    // to interval (due again at once, nothing banked).  Inactive pool: all
+    // granted (the legacy D2).  Returns granted.
+    static int ApplyRecover(ZoneRecord& z, int gained, float interval);
+    // a despawn's write-back (U1: added to the reserve).  With the occupier
+    // pool active a zone the occupier no longer holds (a flipped base or
+    // town) refunds its survivors to the pool instead of writing them onto
+    // the new owner's record (5.5); dead bodies are NoteLoss diagnostics.
+    static void WriteBackSurvivors(ZoneRegistry& registry, int zone, int survivors, int dead);
 
     // S5 pending deposits (OCCUPIER-FORCES.md 3.3, no pop-in) ----------------
     // A body may enter a zone near the player only by walking in or by a

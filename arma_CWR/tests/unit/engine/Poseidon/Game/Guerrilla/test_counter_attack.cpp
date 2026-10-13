@@ -11,7 +11,9 @@
 
 #include <Poseidon/AI/AI.hpp> // AIGroup (the record's group link)
 #include <Poseidon/Core/SaveVersion.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // the win latch freeze (7.4)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (5.5)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -23,6 +25,7 @@
 #include <math.h>
 #include <string.h>
 #include <string>
+#include <vector>
 
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
@@ -132,6 +135,7 @@ struct Fixture
         }
         REQUIRE(Str(Z(zone).owner) == "GUER");
         Z(zone).lastGuer = 0; // the fighters walk out
+        Z(zone).lastGuerHold = 0;
         return fired;
     }
 
@@ -1319,4 +1323,961 @@ TEST_CASE("CounterAttack - a squad that leaves the player's world returns to the
     const CounterAttackSpawnPick pick =
         CounterAttack::PickSpawnPoint(road, CounterAttack::Progress(r), r.wholeRoad, 250.0f, gate);
     CHECK(pick.pos.X() == Approx(700.0f));
+}
+
+// ===========================================================================
+// Occupier forces, phase 3 part B (OCCUPIER-FORCES.md 3, 5.4, 5.5, 6.5, 7.4,
+// 14): record fields, LaunchFunded, the listener, the birth chain, real
+// speeds, the key-on resolution, pool routing and the freeze.
+// ===========================================================================
+
+namespace
+{
+
+// the director's ear: every flip and every event, in order
+struct FakeListener final : CounterAttackListener
+{
+    bool take = false;
+    int flips = 0;
+    int lastK = -1;
+    int zoneEvents = 0;
+    std::vector<CounterAttackOpEvent> events;
+    std::vector<std::string> notes;
+    bool OnTownFlipped(int, int k) override
+    {
+        flips++;
+        lastK = k;
+        return take;
+    }
+    void OnCounterAttackOp(const CounterAttackOpEvent& ev) override
+    {
+        events.push_back(ev);
+        notes.push_back(ev.note ? ev.note : "");
+    }
+    void OnZoneEvents(const AutoArray<ZoneEventRecord>&) override { zoneEvents++; }
+    int Count(int type) const
+    {
+        int n = 0;
+        for (const CounterAttackOpEvent& ev : events)
+        {
+            n += ev.type == type ? 1 : 0;
+        }
+        return n;
+    }
+    const CounterAttackOpEvent* Last(int type) const
+    {
+        for (int i = (int)events.size() - 1; i >= 0; i--)
+        {
+            if (events[i].type == type)
+            {
+                return &events[i];
+            }
+        }
+        return nullptr;
+    }
+};
+
+// installs a listener for one test case (the listener is process-wide)
+struct ListenerGuard
+{
+    explicit ListenerGuard(CounterAttackListener* l) { CounterAttack::SetListener(l); }
+    ~ListenerGuard() { CounterAttack::SetListener(nullptr); }
+};
+
+// the occupier pool singleton switched on over a fixture's registry for one
+// test case (the routing calls go through OccupierForces::Instance())
+struct PoolGuard
+{
+    explicit PoolGuard(Fixture& f)
+    {
+        OccupierForces& of = OccupierForces::Instance();
+        of.Clear();
+        const std::string cfg = "class CfgGuerrillaZones { occupierForces = 1; };\n";
+        QIStream in(cfg.c_str(), cfg.size());
+        file.Parse(in);
+        of.LoadFromParams(file.FindEntry("CfgGuerrillaZones"));
+        REQUIRE(of.Activate(f.registry));
+        REQUIRE(of.Active());
+    }
+    ~PoolGuard() { OccupierForces::Instance().Clear(); }
+    ParamFile file;
+};
+
+CounterAttackOrder FootOrder(int target, int source, int bodies, int opId = 7)
+{
+    CounterAttackOrder o;
+    o.opId = opId;
+    o.kind = CAKRetake;
+    o.origin = CAODirector;
+    o.package = FPFoot;
+    o.target = target;
+    o.source = source;
+    o.bodies = bodies;
+    o.funded = true;
+    o.abstractSpeed = CounterAttack::FootSpeed;
+    return o;
+}
+
+CounterAttackOrder TruckOrder(int target, int source, int bodies, int opId = 8)
+{
+    CounterAttackOrder o = FootOrder(target, source, bodies, opId);
+    o.package = FPTruck;
+    o.hullClass = "Truck5t";
+    o.crew = 1;
+    o.priceUnits = 4; // truck 3 + its driver
+    o.urgent = true;
+    o.abstractSpeed = CounterAttack::RealSpeed(FPTruck, 60.0f);
+    return o;
+}
+
+// a world that would mount a force: it records the hull it was asked for
+// and refuses it (no entities in the unit-test process); the hull state of a
+// hull driving home is whatever the case sets
+struct HullOps final : CounterAttackOps
+{
+    int state = CounterAttackOps::HullIntact;
+    int crewAlive = 1;
+    bool unseen = true;
+    int removed = 0;
+    int mounts = 0;
+    int squads = 0;
+    int drives = 0;
+    std::string lastHull;
+    int lastCrew = 0;
+    int Exposure(Vector3Par) const override { return CAExposeHidden; }
+    AIGroup* SpawnSquad(int, Vector3Par, Vector3Par) override
+    {
+        squads++;
+        return nullptr;
+    }
+    AIGroup* DetachFromGarrison(int, int, Vector3Par, int& taken) override
+    {
+        taken = 0;
+        return nullptr;
+    }
+    int Alive(AIGroup*, Vector3&) override { return 0; }
+    void MoveOn(AIGroup*, Vector3Par) override {}
+    void Assault(AIGroup*, Vector3Par) override {}
+    void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+    {
+        route.Clear();
+        route.Add(from);
+        route.Add(to);
+    }
+    void Remove(AIGroup*) override {}
+    void Adopt(int, AIGroup*) override {}
+    bool SquadUnseen(AIGroup*) const override { return false; }
+    AIGroup* SpawnMounted(const RString& hullClass, int crew, int, Vector3Par, Vector3Par, Entity*& hull,
+                          AIGroup*& crewGroup) override
+    {
+        mounts++;
+        lastHull = (const char*)hullClass;
+        lastCrew = crew;
+        hull = nullptr;
+        crewGroup = nullptr;
+        return nullptr;
+    }
+    void DriveOn(AIGroup*, Vector3Par) override { drives++; }
+    int HullState(Entity*, AIGroup*, int& crew) const override
+    {
+        crew = crewAlive;
+        return state;
+    }
+    bool HullUnseen(Entity*, AIGroup*) const override { return unseen; }
+    void RemoveHull(Entity*, AIGroup*) override { removed++; }
+};
+
+// every body the occupier has: pool, reserves and pending deposits (the
+// 5.5 ledger with nothing live)
+int Ledger(Fixture& f, const CounterAttack& ca)
+{
+    int sum = OccupierForces::Instance().Pool();
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        sum += (int)floorf(f.Z(i).garrison) + f.Z(i).pending;
+    }
+    for (int i = 0; i < ca.Count(); i++)
+    {
+        sum += ca.Get(i)->strength;
+    }
+    return sum;
+}
+
+// a revert by a passer-by standing in the town (live occupiers, the player far)
+void PasserByRevert(Fixture& f, int zone, AutoArray<ZoneEventRecord>& fired, int settle = 0)
+{
+    ZoneTickInputs in = f.Inputs(FarX, FarZ, -1, 0);
+    in.occCount[zone] = 3;
+    if (settle > 0)
+    {
+        in.settleOcc.Resize(f.registry.NZones());
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            in.settleOcc[i] = i == zone ? settle : 0;
+        }
+    }
+    for (int tick = 0; tick < 30 && Fixture::Str(f.Z(zone).owner) == "GUER"; tick++)
+    {
+        f.registry.EvaluateTick(in, fired);
+    }
+    REQUIRE(Fixture::Str(f.Z(zone).owner) == "NEUTRAL");
+}
+
+// three bases for the chain: the Post near the town, a Mid base and the far
+// base beyond it
+const char* kChainConfig =
+    "class CfgGuerrillaZones\n"
+    "{\n"
+    "    occupierForces = 1;\n"
+    "    class Zones\n"
+    "    {\n"
+    "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; "
+    "position[]={1000.0, 1000.0, 0.0}; };\n"
+    "        class Town    { name=\"Town\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+    "position[]={1000.0, 1300.0, 0.0}; };\n"
+    "        class Other   { name=\"Other\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+    "position[]={5000.0, 5000.0, 0.0}; };\n"
+    "        class Post    { name=\"Post\";    type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=6; "
+    "position[]={1600.0, 1600.0, 0.0}; };\n"
+    "        class Mid     { name=\"Mid\";     type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=8; "
+    "position[]={3000.0, 3000.0, 0.0}; };\n"
+    "        class FarBase { name=\"FarBase\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; garrison=12; "
+    "position[]={9000.0, 9000.0, 0.0}; };\n"
+    "    };\n"
+    "};\n";
+
+// a legacy record from before phase 3 (the fields a 4400fe9 / 450327e save
+// carries), to prove an old save loads as a legacy foot retake
+struct OldRecord
+{
+    RString target;
+    RString source;
+    int phase = CATravel;
+    float clock = 0;
+    float travel = 0;
+    int strength = 0;
+    int size = 0;
+    LSError Serialize(ParamArchive& ar)
+    {
+        PARAM_CHECK(ar.Serialize("target", target, 1, RString()))
+        PARAM_CHECK(ar.Serialize("source", source, 1, RString()))
+        PARAM_CHECK(ar.Serialize("phase", phase, 1, (int)CAScheduled))
+        PARAM_CHECK(ar.Serialize("clock", clock, 1, 0.0f))
+        PARAM_CHECK(ar.Serialize("travel", travel, 1, 0.0f))
+        PARAM_CHECK(ar.Serialize("strength", strength, 1, 0))
+        PARAM_CHECK(ar.Serialize("size", size, 1, 0))
+        return LSOK;
+    }
+};
+
+} // namespace
+
+TEST_CASE("CounterAttack - occupier forces keys and the real speeds (3.2)", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(kCounterConfig);
+    CHECK_FALSE(f.ca.Tuning().forcesOn);
+    CHECK(f.ca.Tuning().forcesOpsMax == 2);
+    CHECK(f.ca.Tuning().forcesLiveHullsMax == 6);
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1; forcesOpsMax = 9; forcesLiveHullsMax = 3;"));
+    CHECK(g.ca.Tuning().forcesOn);
+    CHECK(g.ca.Tuning().forcesOpsMax == 6); // repaired into 0..6
+    CHECK(g.ca.Tuning().forcesLiveHullsMax == 3);
+
+    // foot 1.5 m/s; a ground hull 0.6 x and an aircraft 0.8 x maxSpeed (km/h)
+    CHECK(CounterAttack::RealSpeed(FPFoot, 0.0f) == Approx(1.5f));
+    CHECK(CounterAttack::RealSpeed(FPTruck, 60.0f) == Approx(10.0f));
+    CHECK(CounterAttack::RealSpeed(FPTransportHeli, 180.0f) == Approx(40.0f));
+    CHECK(CounterAttack::RealSpeed(FPTruck, 0.0f) == Approx(1.5f)); // unknown maxSpeed: on foot
+
+    CounterAttackTuning t;
+    CounterAttack::Record legacy;
+    // key off: the legacy pacing (counterAttackSpeed 4 over roadFactor 1.3)
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(CounterAttack::TravelTime(t, 1000.0f)));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(325.0f));
+    // key on: a legacy record walks at the real foot speed; with only the
+    // straight distance known the road factor stands in, a real road route
+    // is the road
+    t.forcesOn = true;
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(1300.0f / 1.5f));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 1200.0f) == Approx(800.0f));
+    // a truck at 10 m/s
+    CounterAttack::Record truck;
+    truck.abstractSpeed = 10.0f;
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f) == Approx(120.0f));
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 10.0f, 20.0f) == Approx(CounterAttack::MinTravel));
+    // the gmCounterAttackTune "speed" test lever wins over the real speeds
+    t.speedLever = true;
+    t.speed = 40.0f;
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f) == Approx(32.5f));
+    // A_lethal and the odds: one body of lethality 1 is the old odds
+    CounterAttackTuning d;
+    CHECK(CounterAttack::HoldOddsLethal(d, 3, 5.0f) == Approx(CounterAttack::HoldOdds(d, 3, 5)));
+    CHECK(CounterAttack::HoldOddsLethal(d, 3, 9.0f) == Approx(0.5f));
+    CHECK(CounterAttack::HoldOddsLethal(d, 0, 9.0f) == Approx(0.0f));
+}
+
+TEST_CASE("CounterAttack - LaunchFunded: refusals, the spare cap and the abstract real-speed leg",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+
+    // refused: a later-phase kind, an administered town, the HQ's town, a
+    // resistance source, no bodies, the won latch
+    CounterAttackOrder o = FootOrder(f.town, f.post, 12);
+    o.kind = CAKBase;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, o, nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.other, f.post, 4), nullptr, fired));
+    CounterAttackView hq = far;
+    hq.hqZone = f.town;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, hq, FootOrder(f.town, f.post, 4), nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.camp, 4), nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 0), nullptr, fired));
+    CounterAttackView won = far;
+    won.won = true;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, won, FootOrder(f.town, f.post, 4), nullptr, fired));
+    // no free born-operation slot (forcesOpsMax 0)
+    f.ca.TuningMutable().forcesOpsMax = 0;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4), nullptr, fired));
+    f.ca.TuningMutable().forcesOpsMax = 2;
+    CHECK(f.ca.Count() == 0);
+    CHECK(ear.events.empty());
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+
+    // twelve ordered, the Post spares five (it keeps one home): five leave,
+    // and the Launched event says five
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 12), nullptr, fired));
+    REQUIRE(f.ca.Count() == 1);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    CHECK(r->strength == 5);
+    CHECK(r->opId == 7);
+    CHECK(r->kind == CAKRetake);
+    CHECK(r->origin == CAODirector);
+    CHECK(r->funded);
+    CHECK(r->phase == CATravel);
+    CHECK(f.Z(f.post).garrison == Approx(1.0f));
+    REQUIRE(ear.Count(CAOpLaunched) == 1);
+    CHECK(ear.Last(CAOpLaunched)->bodies == 5);
+    CHECK(ear.Last(CAOpLaunched)->opId == 7);
+    CHECK(ear.Last(CAOpLaunched)->target == f.town);
+    CHECK(ear.Last(CAOpLaunched)->source == f.post);
+    // the real foot speed over the straight distance x roadFactor (no road
+    // net in the test): 670.8 m x 1.3 / 1.5 m/s
+    CHECK(r->travel == Approx(670.82f * 1.3f / 1.5f).margin(0.5f));
+    CHECK(f.ca.FindByOpId(7) == 0);
+    CHECK(f.ca.FindByOpId(99) == -1);
+    // an unborn operation does not count against forcesOpsMax
+    CHECK(f.ca.BornOps() == 0);
+    // one record per town
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.farBase, 3, 9), nullptr, fired));
+
+    // a motorized order always leaves from the stored reserve, at the hull's
+    // speed, even with the town in the bubble and the source's garrison live
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1;"));
+    g.RaiseTown(g.town);
+    CounterAttackView near = Fixture::View(g.Z(g.town).pos.X(), g.Z(g.town).pos.Z());
+    near.garrisonLive.Resize(g.registry.NZones());
+    for (int i = 0; i < g.registry.NZones(); i++)
+    {
+        near.garrisonLive[i] = 0;
+    }
+    near.garrisonLive[g.post] = 3;
+    HullOps hops;
+    REQUIRE(g.ca.LaunchFunded(g.registry, near, TruckOrder(g.town, g.post, 5), &hops, fired));
+    const CounterAttack::Record* t = g.ca.Get(0);
+    CHECK(t->phase == CATravel);
+    CHECK(t->strength == 5);
+    CHECK(t->wholeRoad);
+    CHECK(Fixture::Str(t->hullClass) == "Truck5t");
+    CHECK(t->crew == 1);
+    CHECK(t->priceUnits == 4);
+    CHECK(t->HullPrice() == 3);
+    // the test world's road is the straight line, taken as the road: no
+    // road factor on top of it
+    CHECK(t->travel == Approx(670.82f / 10.0f).margin(0.5f));
+}
+
+TEST_CASE("CounterAttack - the AWAKE hook and the events of a legacy record", "[game][guerrilla][counterattack]")
+{
+    // the director takes the flip: counted, nothing scheduled
+    {
+        Fixture f;
+        f.Load(Certain());
+        f.RaiseTown(f.town);
+        FakeListener ear;
+        ear.take = true;
+        ListenerGuard guard(&ear);
+        CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+        CHECK(ear.flips == 1);
+        CHECK(ear.lastK == 0);
+        CHECK(f.ca.TownsTaken() == 1);
+        CHECK(f.ca.Count() == 0);
+        // the tick's zone events are forwarded after the service's own handling
+        AutoArray<ZoneEventRecord> none;
+        f.ca.OnZoneEvents(none);
+        CHECK(ear.zoneEvents == 1);
+    }
+    // DORMANT: the listener declines, the legacy answer reports every state
+    // change with origin CAOLegacy and opId 0
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    CHECK(ear.flips == 1);
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+    REQUIRE(ear.Count(CAOpLaunched) == 1);
+    CHECK(ear.Last(CAOpLaunched)->origin == CAOLegacy);
+    CHECK(ear.Last(CAOpLaunched)->opId == 0);
+    CHECK(ear.Last(CAOpLaunched)->bodies == 5);
+    f.ca.Step(f.registry, far, 5000.0f, nullptr, fired);
+    CHECK(ear.Count(CAOpArrived) == 1);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    PasserByRevert(f, f.town, fired);
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpSettled) == 1);
+    // the record ended with exactly one terminal event
+    int terminal = 0;
+    for (const CounterAttackOpEvent& ev : ear.events)
+    {
+        terminal += ev.type == CAOpRepelled || ev.type == CAOpSettled || ev.type == CAOpCancelledUnseen ||
+                            ev.type == CAOpAborted
+                        ? 1
+                        : 0;
+    }
+    CHECK(terminal == 1);
+}
+
+TEST_CASE("CounterAttack - birth chain: launch, backward, the next base back, cancel unseen (D6)",
+          "[game][guerrilla][counterattack]")
+{
+    // at launch: the first unseen point from the base (the base itself here)
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        FakeOps ops;
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView near = Fixture::View(town.X(), town.Z());
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE(f.ca.LaunchFunded(f.registry, near, FootOrder(f.town, f.post, 5), &ops, fired));
+        REQUIRE(f.ca.Get(0)->wholeRoad);
+        f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+        REQUIRE(ops.spawns == 1);
+        CHECK(Dist2DTest(ops.lastFrom, f.Z(f.post).pos) < 1.0f);
+        CHECK(f.ca.BornOps() == 0); // the spawn failed: still unborn
+    }
+    // on the road: backward from the progress point
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        FakeOps ops;
+        const CounterAttackView far = Fixture::View(FarX, FarZ);
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 5), &ops, fired));
+        const float travel = f.ca.Get(0)->travel;
+        f.ca.Step(f.registry, far, travel * 0.4f, &ops, fired);
+        const Vector3 town = f.Z(f.town).pos;
+        f.ca.Step(f.registry, Fixture::View(town.X(), town.Z()), 1.0f, &ops, fired);
+        REQUIRE(ops.spawns == 1);
+        CHECK(Dist2DTest(ops.lastFrom, f.Z(f.post).pos) == Approx(0.4f * 670.82f).margin(1.0f));
+    }
+    // every road watched: after counterAttackBirthGiveUp the operation moves
+    // to the next base back (the old one refunded, the new one debited, a
+    // base that cannot spare the whole force passed over), then, with no
+    // base left, it is cancelled unseen; it never counted as born
+    Fixture f;
+    f.Load(kChainConfig);
+    f.RaiseTown(f.town);
+    const int mid = f.registry.FindZoneIndex("Mid");
+    REQUIRE(mid >= 0);
+    f.Z(mid).garrison = 3; // keeps 2 home: spares 1, not the five
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    FakeOps ops;
+    ops.exposure = AllSeen();
+    const Vector3 town = f.Z(f.town).pos;
+    const CounterAttackView near = Fixture::View(town.X(), town.Z());
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.ca.LaunchFunded(f.registry, near, FootOrder(f.town, f.post, 5), &ops, fired));
+    CHECK(f.Z(f.post).garrison == Approx(1.0f));
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired); // tried: nothing unseen
+    CHECK(f.ca.Get(0)->hiddenLogged);
+    f.ca.Step(f.registry, near, f.ca.Tuning().birthGiveUp + 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(Fixture::Str(f.ca.Get(0)->source) == "FarBase");
+    REQUIRE(ear.Count(CAOpResourced) == 1);
+    CHECK(ear.Last(CAOpResourced)->source == f.farBase);
+    CHECK(ear.Last(CAOpResourced)->bodies == 5);
+    // the Post got its five back (pending: the player stands 671 m from it,
+    // inside its deposit bubble); the Mid base was passed over; FarBase paid
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(6.0f));
+    CHECK(f.Z(mid).garrison == Approx(3.0f));
+    CHECK(f.Z(f.farBase).garrison == Approx(7.0f));
+    CHECK(f.ca.BornOps() == 0);
+    // FarBase's road is watched too: nothing further back, cancelled unseen
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+    f.ca.Step(f.registry, near, f.ca.Tuning().birthGiveUp + 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpCancelledUnseen) == 1);
+    CHECK(ear.Last(CAOpCancelledUnseen)->bodies == 5);
+    CHECK(ear.Last(CAOpCancelledUnseen)->opId == 7);
+    CHECK(f.Z(f.farBase).garrison == Approx(12.0f));
+    CHECK(ops.spawns == 0);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+    // nothing visible ever happened: no counterAttack event, no turn-back
+    CHECK(CountEvents(fired, ZECounterAttack, f.town) == 0);
+    CHECK(ear.Count(CAOpAborted) == 0);
+}
+
+TEST_CASE("CounterAttack - key on: an arrival against defenders goes live, waits over budget, never rolls",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    FakeOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    // the legacy record walks at the real foot speed with the key on, over
+    // the road the test world gives (the straight line, taken as the road)
+    CHECK(f.ca.Get(0)->travel == Approx(670.82f / 1.5f).margin(0.5f));
+    // three fighters stand in the town: no odds roll, a live birth at the
+    // 250 m bound (off-screen the gate passes), which the test world refuses
+    f.Z(f.town).lastGuer = 3;
+    f.ca.Step(f.registry, far, 5000.0f, &ops, fired);
+    CHECK(CountEvents(fired, ZECounterAttack, f.town) == 1);
+    REQUIRE(ops.spawns == 1);
+    CHECK(Dist2DTest(ops.lastFrom, f.Z(f.town).pos) >= 250.0f);
+    CHECK(Dist2DTest(ops.lastFrom, f.Z(f.town).pos) < 320.0f);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->clock == Approx(0.0f));
+    CHECK(CountEvents(fired, ZECounterRepelled, f.town) == 0);
+    CHECK(CountEvents(fired, ZETownLost, f.town) == 0);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+    CHECK(ear.Count(CAOpArrived) == 1);
+    // over budget it waits at the town edge doing nothing
+    f.ca.TuningMutable().maxLive = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        f.ca.Step(f.registry, far, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    }
+    CHECK(ops.spawns == 1);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+    CHECK(ear.Count(CAOpArrived) == 1);
+    // the defenders leave: an empty town is held and drained
+    f.Z(f.town).lastGuer = 0;
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(f.ca.Get(0)->phase == CAHolding);
+    CHECK(f.ca.AbstractPresence(f.registry, f.town) == 5);
+    // they come back while it holds: it goes back to the edge to be born
+    f.ca.TuningMutable().maxLive = 2;
+    f.Z(f.town).lastGuerHold = 1;
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(ops.spawns == 2);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+}
+
+TEST_CASE("CounterAttack - key off: the legacy Fight keeps A_lethal for the odds and A_bodies for the losses",
+          "[game][guerrilla][counterattack]")
+{
+    bool sawRepel = false;
+    bool sawRetake = false;
+    for (int opId = 1; opId < 200 && !(sawRepel && sawRetake); opId++)
+    {
+        Fixture f;
+        f.Load(kCounterConfig);
+        f.RaiseTown(f.town);
+        CounterAttackOrder o = FootOrder(f.town, f.post, 5, opId);
+        o.funded = false;
+        o.abstractSpeed = 0;
+        o.lethality = 2.0f; // A_lethal 10 for five bodies
+        const CounterAttackView far = Fixture::View(FarX, FarZ);
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE(f.ca.LaunchFunded(f.registry, far, o, nullptr, fired));
+        const unsigned int seed = f.ca.Get(0)->seed;
+        CHECK(f.ca.Get(0)->lethality == Approx(2.0f));
+        f.Z(f.town).lastGuer = 3;
+        f.ca.Step(f.registry, far, 5000.0f, nullptr, fired);
+        CHECK(f.ca.Count() == 0);
+        const bool repelled = CounterAttack::Roll01(seed, 2) < CounterAttack::HoldOddsLethal(f.ca.Tuning(), 3, 10.0f);
+        if (repelled)
+        {
+            sawRepel = true;
+            // the losses count bodies: ceil(5 x 0.5) = 3 lost, 2 home
+            CHECK(CountEvents(fired, ZECounterRepelled, f.town) == 1);
+            CHECK(f.Z(f.post).garrison == Approx(3.0f));
+        }
+        else
+        {
+            sawRetake = true;
+            CHECK(CountEvents(fired, ZETownLost, f.town) == 1);
+        }
+    }
+    CHECK(sawRepel);
+    CHECK(sawRetake);
+}
+
+TEST_CASE("CounterAttack - record fields survive save/load; an old save loads as a legacy foot retake",
+          "[game][guerrilla][counterattack][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "counter-attack-forces.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    f.RaiseTown(f.town);
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    CounterAttackOrder o = TruckOrder(f.town, f.post, 5, 41);
+    o.lethality = 1.25f;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, o, nullptr, fired));
+    const_cast<CounterAttack::Record*>(f.ca.Get(0))->tried = "Mid";
+    const CounterAttack::Record saved = *f.ca.Get(0);
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.ca.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    CounterAttack loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.Count() == 1);
+    const CounterAttack::Record* r = loaded.Get(0);
+    CHECK(r->opId == 41);
+    CHECK(r->kind == CAKRetake);
+    CHECK(r->origin == CAODirector);
+    CHECK(r->package == FPTruck);
+    CHECK(r->priceUnits == 4);
+    CHECK(Fixture::Str(r->hullClass) == "Truck5t");
+    CHECK(r->crew == 1);
+    CHECK(r->urgent);
+    CHECK(r->funded);
+    CHECK(r->abstractSpeed == Approx(saved.abstractSpeed));
+    CHECK(r->lethality == Approx(1.25f));
+    CHECK(Fixture::Str(r->tried) == "Mid");
+    CHECK_FALSE(r->hullDone);
+    CHECK(r->clock == Approx(saved.clock));
+    CHECK(loaded.Tuning().forcesOn); // reread from the mission config
+
+    // a save written before phase 3: the defaults
+    {
+        AutoArray<OldRecord> rows;
+        OldRecord old;
+        old.target = "Town";
+        old.source = "Post";
+        old.clock = 50.0f;
+        old.travel = 100.0f;
+        old.strength = 4;
+        old.size = 6;
+        rows.Add(old);
+        int towns = 1;
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(ar.Serialize("Attacks", rows, 1) == LSOK);
+        REQUIRE(ar.Serialize("townsTaken", towns, 1, 0) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    CounterAttack legacy;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(legacy.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(legacy.Serialize(ar) == LSOK);
+    }
+    REQUIRE(legacy.Count() == 1);
+    const CounterAttack::Record* l = legacy.Get(0);
+    CHECK(l->opId == 0);
+    CHECK(l->kind == CAKRetake);
+    CHECK(l->origin == CAOLegacy);
+    CHECK(l->package == FPFoot);
+    CHECK(l->hullClass.GetLength() == 0);
+    CHECK_FALSE(l->funded);
+    CHECK(l->abstractSpeed == Approx(0.0f));
+    CHECK(l->lethality == Approx(1.0f));
+    CHECK(l->strength == 4);
+    CHECK(legacy.HomeHullCount() == 0);
+
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("CounterAttack - pool routing: a passer-by revert is pool-funded, SPENT leaves it hollow (5.3, 5.5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    const int before = of.Pool();
+    const int ledger = Ledger(f, f.ca);
+    AutoArray<ZoneEventRecord> fired;
+    PasserByRevert(f, f.town, fired);
+    CHECK(f.Z(f.town).garrison == Approx(4.0f));
+    CHECK(f.Z(f.town).revertRefill == 4);
+    CHECK(of.Pool() == before - 4);
+    CHECK(Ledger(f, f.ca) == ledger);
+
+    // an empty pool (SPENT): the next revert is hollow
+    of.SetPool(0);
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    PasserByRevert(f, f.other, fired);
+    CHECK(f.Z(f.other).garrison == Approx(0.0f));
+    CHECK(f.Z(f.other).revertRefill == 0);
+    CHECK(of.Pool() == 0);
+}
+
+TEST_CASE("CounterAttack - pool routing: a holding force settles as the town's garrison, its surplus to the pool",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+    f.ca.Step(f.registry, far, 5000.0f, nullptr, fired);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    CHECK(f.ca.SettlePresence(f.registry, f.town) == 5);
+    const int before = of.Pool();
+    const int ledger = Ledger(f, f.ca);
+    // the drain reverts the town: the five are its garrison (four fit), the
+    // fifth goes to the pool; nothing is drawn for the refill
+    PasserByRevert(f, f.town, fired, f.ca.SettlePresence(f.registry, f.town));
+    CHECK(f.Z(f.town).garrison == Approx(4.0f));
+    CHECK(f.Z(f.town).revertRefill == 0);
+    CHECK(of.Pool() == before + 1);
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(ear.Count(CAOpSettled) == 1);
+    // pool + reserves + pending + operation strength is unchanged
+    CHECK(Ledger(f, f.ca) == ledger);
+    // with the key off a holding force settles nothing (the legacy refill)
+    Fixture g;
+    g.Load(Certain());
+    CHECK(g.ca.SettlePresence(g.registry, g.town) == 0);
+}
+
+TEST_CASE("CounterAttack - a travelling force whose town reverts under it tops it up or goes home (5.4)",
+          "[game][guerrilla][counterattack]")
+{
+    // the pool is empty, so the passer-by revert is hollow: the force goes
+    // on as a top-up column and fills the garrison; one survivor goes home
+    {
+        Fixture f;
+        f.Load(Certain("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        PoolGuard pool(f);
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+        const CounterAttackView far = Fixture::View(FarX, FarZ);
+        AutoArray<ZoneEventRecord> fired;
+        f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+        REQUIRE(f.ca.Get(0)->phase == CATravel);
+        OccupierForces::Instance().SetPool(0);
+        PasserByRevert(f, f.town, fired);
+        REQUIRE(f.Z(f.town).garrison == Approx(0.0f));
+        f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+        REQUIRE(f.ca.Count() == 1);
+        CHECK(f.ca.Get(0)->kind == CAKReinforce);
+        CHECK(f.ca.Get(0)->phase == CATravel);
+        f.ca.Step(f.registry, far, 5000.0f, nullptr, fired);
+        CHECK(f.ca.Count() == 0);
+        CHECK(f.Z(f.town).garrison == Approx(4.0f));
+        CHECK(f.Z(f.post).garrison == Approx(2.0f)); // 1 kept home + the one who did not fit
+        CHECK(ear.Count(CAOpSettled) == 1);
+        CHECK(ear.Last(CAOpSettled)->bodies == 4);
+    }
+    // the pool paid a full refill: the garrison is whole, the force goes home
+    Fixture f;
+    f.Load(Certain("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+    PasserByRevert(f, f.town, fired);
+    REQUIRE(f.Z(f.town).garrison == Approx(4.0f));
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    CHECK(ear.Count(CAOpReturned) == 1);
+    CHECK(ear.Last(CAOpReturned)->bodies == 5);
+    CHECK(ear.Count(CAOpAborted) == 1);
+}
+
+TEST_CASE("CounterAttack - hulls: refund at home, loss, re-creation, an abstract hull refunded at the end",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+
+    // a hull driving home intact: deleted where nobody sees it, its price
+    // back, its driver home as a body
+    CounterAttack::Record r;
+    r.opId = 12;
+    r.target = "Town";
+    r.source = "Post";
+    r.hullClass = "Truck5t";
+    r.crew = 1;
+    r.priceUnits = 4;
+    f.Z(f.post).garrison = 3;
+    HullOps hops;
+    f.ca.SendHullHome(r, nullptr, nullptr, 1, &hops, f.registry);
+    CHECK(f.ca.HomeHullCount() == 1);
+    CHECK(hops.drives == 1);
+    hops.unseen = false;
+    f.ca.Step(f.registry, far, 1.0f, &hops, fired);
+    CHECK(f.ca.HomeHullCount() == 1); // seen: it keeps driving
+    hops.unseen = true;
+    f.ca.Step(f.registry, far, CounterAttack::RetryInterval + 1.0f, &hops, fired);
+    CHECK(f.ca.HomeHullCount() == 0);
+    CHECK(hops.removed == 1);
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 3); // the hull's price, not its crew
+    CHECK(ear.Last(CAOpHullRefund)->bodies == 1);
+    CHECK(ear.Last(CAOpHullRefund)->opId == 12);
+    CHECK(f.Z(f.post).garrison == Approx(4.0f));
+
+    // destroyed on the way home: lost
+    f.ca.SendHullHome(r, nullptr, nullptr, 1, &hops, f.registry);
+    hops.state = CounterAttackOps::HullDestroyed;
+    f.ca.Step(f.registry, far, 1.0f, &hops, fired);
+    CHECK(f.ca.HomeHullCount() == 0);
+    REQUIRE(ear.Count(CAOpHullLost) == 1);
+    CHECK(ear.Last(CAOpHullLost)->units == 3);
+
+    // a return to abstract travel keeps the hull's class and price, so the
+    // next birth re-creates it
+    CounterAttack::Record m = r;
+    m.phase = CALive;
+    m.strength = 5;
+    CounterAttack::ReturnToRoad(m, 0.5f, 5, 100.0f);
+    CHECK(Fixture::Str(m.hullClass) == "Truck5t");
+    CHECK(m.priceUnits == 4);
+    CHECK(m.crew == 1);
+    CHECK_FALSE(m.hullDone);
+
+    // the birth of a motorized force asks the world for its hull; a hull
+    // that cannot be created sends the force on foot and the whole price back
+    HullOps born;
+    const CounterAttackView near = Fixture::View(f.Z(f.town).pos.X(), f.Z(f.town).pos.Z());
+    REQUIRE(f.ca.LaunchFunded(f.registry, near, TruckOrder(f.town, f.post, 3), &born, fired));
+    f.ca.Step(f.registry, near, 1.0f, &born, fired);
+    CHECK(born.mounts == 1);
+    CHECK(born.lastHull == "Truck5t");
+    CHECK(born.lastCrew == 1);
+    CHECK(born.squads == 1); // then on foot
+    REQUIRE(ear.Count(CAOpHullRefund) == 2);
+    CHECK(ear.Last(CAOpHullRefund)->units == 4);
+    CHECK(f.ca.Get(0)->hullDone);
+
+    // a motorized force that never needed its hull (arrived abstractly in an
+    // empty town, settled): the hull drives home unseen at once
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1;"));
+    g.RaiseTown(g.town);
+    FakeListener ear2;
+    ListenerGuard guard2(&ear2);
+    REQUIRE(g.ca.LaunchFunded(g.registry, far, TruckOrder(g.town, g.post, 5), nullptr, fired));
+    REQUIRE(g.Z(g.post).garrison == Approx(1.0f));
+    g.ca.Step(g.registry, far, 5000.0f, nullptr, fired);
+    REQUIRE(g.ca.Get(0)->phase == CAHolding);
+    PasserByRevert(g, g.town, fired, g.ca.SettlePresence(g.registry, g.town));
+    g.ca.Step(g.registry, far, 1.0f, nullptr, fired);
+    CHECK(g.ca.Count() == 0);
+    REQUIRE(ear2.Count(CAOpSettled) == 1);
+    REQUIRE(ear2.Count(CAOpHullRefund) == 1);
+    CHECK(ear2.Last(CAOpHullRefund)->units == 3);
+    CHECK(ear2.Last(CAOpHullRefund)->bodies == 1);
+    CHECK(g.Z(g.post).garrison == Approx(2.0f)); // its driver home
+}
+
+TEST_CASE("CounterAttack - the win latch freezes launches, steps and reverts (7.4)", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    const float clock = f.ca.Get(0)->clock;
+
+    struct EndGuard
+    {
+        ~EndGuard() { CampaignEnd::Instance().Clear(); } // never leak the latch into another case
+    } endGuard;
+    CampaignEnd& end = CampaignEnd::Instance();
+    end.Clear();
+    end.LoadFromParams(nullptr);
+    f.Z(f.post).owner = "GUER";
+    f.Z(f.farBase).owner = "GUER";
+    REQUIRE(end.Evaluate(f.registry));
+    REQUIRE(end.Won());
+    CounterAttackView won = far;
+    won.won = true;
+    // nothing in flight steps
+    f.ca.Step(f.registry, won, 5000.0f, nullptr, fired);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+    // nothing launches
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.other, Fixture::GroupSize));
+    CHECK_FALSE(f.ca.LaunchFrom(f.registry, won, f.other, f.farBase, 3, nullptr, fired));
+    // nothing reverts
+    CHECK_FALSE(f.registry.RevertTown(f.town, fired));
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+    end.Clear();
+    CHECK(f.registry.RevertTown(f.town, fired));
 }

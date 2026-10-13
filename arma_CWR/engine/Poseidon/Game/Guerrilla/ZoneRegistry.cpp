@@ -4,6 +4,8 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>    // the win latch freezes reverts (OCCUPIER-FORCES.md 7.4)
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool-funded revert refill (5.3)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>  // flip hook + abstract presence (issue #79)
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>  // GatherSimDiag census
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>        // GatherSimDiag census
@@ -1482,6 +1484,7 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementPro
         // occupier-administered from the start: the town defenders (B2)
         z.garrison = (float)_tuning.cityGarrison;
         z.garrisonMax = z.garrison;
+        z.seeded = true;
         char marker[32];
         snprintf(marker, sizeof(marker), "gmZoneCity_%d", seeded);
         z.marker = marker;
@@ -1682,12 +1685,16 @@ bool ZoneRegistry::IsGarrisonable(const ZoneRecord& z) const
     return FactionTierClass(_occupierSide, 1.0f).GetLength() > 0;
 }
 
-bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired)
+bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int settled)
 {
     ZoneRecord* z = GetZoneMutable(index);
     if (!z || stricmp(z->type, "CITY") != 0 || stricmp(z->owner, _resistanceSide) != 0)
     {
         return false;
+    }
+    if (CampaignEnd::Instance().Won())
+    {
+        return false; // OCCUPIER-FORCES.md 7.4: once the win latches nothing reverts
     }
     // back to the authored administration; a town authored as the
     // resistance's own falls to plain NEUTRAL administration
@@ -1703,24 +1710,37 @@ bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired)
     // garrison appears when its spawn points are hidden or he leaves, not
     // beside him.  No origin: with no pool (phase 1) it comes from nothing.
     z->garrison = floorf(z->garrison);
-    int refill = 0;
+    int room = 0;
     if (!z->garrisonExempt)
     {
         const float missing = floorf(z->garrisonMax) - z->garrison - (float)z->pending;
-        refill = missing > 0 ? (int)missing : 0;
+        room = missing > 0 ? (int)missing : 0;
     }
+    // occupier forces (5.4): the holding force's bodies are the new garrison
+    // first; what does not fit goes to the pool
+    const int settle = settled > 0 ? (settled < room ? settled : room) : 0;
+    if (settled > settle)
+    {
+        OccupierForces::Instance().Refund(settled - settle, "surplus");
+    }
+    // the rest of the room is a pool-funded deposit (5.3): with the pool
+    // inactive it passes through (from nothing, as before); SPENT grants
+    // nothing and the town is left hollow
+    const int refill = room > settle ? OccupierForces::Instance().Deposit(room - settle, "revert") : 0;
     float px = 0;
     float pz = 0;
     const bool playerValid = LastTickPlayer(px, pz);
-    const bool pending = GarrisonCache::AddReserve(*this, index, refill, -1, playerValid, px, pz);
+    const bool pending = GarrisonCache::AddReserve(*this, index, settle + refill, -1, playerValid, px, pz);
     z->revertRefill = refill;
     z->liveOccupiers = 0;
     z->capture = 0;
     z->recoverClock = 0;
     z->contestedLastTick = false;
     z->supportReadyNotified = z->support >= _tuning.supportFlip;
-    LOG_INFO(Core, "Guerrilla: town {} retaken by the occupier (support {}, garrison refill {}{}; reserve {}, pending {})",
-             (const char*)z->name, z->support, refill, pending ? " pending" : "", z->garrison, z->pending);
+    LOG_INFO(Core,
+             "Guerrilla: town {} retaken by the occupier (support {}, garrison refill {}{}{}; reserve {}, pending {})",
+             (const char*)z->name, z->support, settle + refill, pending ? " pending" : "",
+             settle > 0 ? " (the holding force settled)" : "", z->garrison, z->pending);
     ZoneEventRecord ev;
     ev.type = ZETownLost;
     ev.zoneIndex = index;
@@ -2552,7 +2572,8 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // occupier ticks after the fighters walk out
             if (occHere && !guerHere && z.support < _tuning.townRevertSupport)
             {
-                RevertTown(i, fired);
+                // a holding force on the town settles as its garrison (5.4)
+                RevertTown(i, fired, i < in.settleOcc.Size() ? in.settleOcc[i] : 0);
             }
             continue;
         }
@@ -2740,9 +2761,11 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
     // abstract counter-attack forces holding a held town off-screen
     const CounterAttack& counter = CounterAttack::Instance();
     in.abstractOcc.Resize(n);
+    in.settleOcc.Resize(n);
     for (int i = 0; i < n; i++)
     {
         in.abstractOcc[i] = counter.AbstractPresence(*this, i);
+        in.settleOcc[i] = counter.SettlePresence(*this, i);
     }
 }
 
