@@ -1,5 +1,7 @@
-; EXPLICIT FIXTURE, never a verifier. Abel's production seed has one enemy
-; zone, insufficient for a traffic route. Use only in a disposable campaign.
+; EXPLICIT FIXTURE, never a verifier. Abel's production seed now has four
+; enemy zones (issue #76), so patrols and convoys also run on their own; this
+; forces one beside Village instead of waiting for the chance roll, with the
+; Camp as an extra endpoint. Use only in a disposable campaign.
 ; The second endpoint is data; ForceSpawn invokes the native Traffic service,
 ; including road placement, faction equipment, crew, route and lifecycle.
 ; Nothing here drives vehicles, simulates reactions or marks a test passed.

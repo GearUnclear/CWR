@@ -1,0 +1,22 @@
+# REMASTER LANE (issue #67): UD installed BESIDE Bohemia's files on the full
+# official Remaster. data_dir "packages/RemasterUD" is a gitignored junction to a
+# SHADOW of the Steam Remastered folder (never the Steam install itself), built
+# and prepared once with:
+#   pwsh -File tools/runtime/new-remaster-shadow.ps1 -Source <Remastered> `
+#        -Destination <shadow> -LoBoSource <Remastered>/@LoBo
+#   pwsh -File setup-guerrilla.ps1 -GameDir <shadow> -LoBoDir <shadow>/@LoBo `
+#        -Tools <dist>/PoseidonTools.exe
+#   cmd /c mklink /J packages\RemasterUD <shadow>
+# See guerrilla-mode/FRESH-INSTALL.md. Without the junction the test reports
+# spawn failed, which is not a regression. Rerun setup (or install-missions.ps1)
+# after editing Guerrilla.Abel: the menu boots the INSTALLED template.
+# Malden occupation network (issues #76 / #79 B1): four occupier zones with the
+# authored garrison ladder, dry hub centres, patrol and convoy routes at the
+# Camp from minute one, enemy commanders spread over more than one zone.
+# --focus: a menu-launched session pauses when another window takes focus.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "headless"]
+timeout = 400
+assert_timeout = 240
+extra_args = ["--dev", "--focus"]

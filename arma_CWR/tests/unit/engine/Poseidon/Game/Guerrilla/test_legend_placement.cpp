@@ -108,6 +108,10 @@ AutoArray<LegendZoneCandidate> AbelZones()
     z.Add(Zone("Camp", "CAMP", 7515, 5790, false));
     z.Add(Zone("Village", "CITY", 7117, 6069, false));
     z.Add(Zone("Outpost", "OUTPOST", 7600, 6300));
+    // the occupation network (issue #76): compound, harbour, airfield
+    z.Add(Zone("Southeast Compound", "OUTPOST", 9715, 3940));
+    z.Add(Zone("Le Port Harbour", "SEAPORT", 8410, 3690));
+    z.Add(Zone("Airfield", "AIRFIELD", 8030, 9905));
     return z;
 }
 
@@ -227,8 +231,9 @@ TEST_CASE("Legend placement - a distinct zone beats a second stand off the same 
 TEST_CASE("Legend placement - three stands off ONE zone all clear the separation floor",
           "[game][guerrilla][legends][placement]")
 {
-    // Abel and the Demo each ship exactly one military zone, so this is the
-    // normal path, not the degenerate one.
+    // The Demo ships exactly one military zone (and Abel did until its
+    // occupation network landed, issue #76), so this is a normal path, not the
+    // degenerate one.
     AutoArray<LegendSpotSample> samples;
     AddRing(samples, 0, 7600, 6300, 350, 12);
     AddRing(samples, 0, 7600, 6300, 550, 12);
@@ -312,8 +317,8 @@ TEST_CASE("Legend placement - the Camp rule is PER SAMPLE, and relaxing it is no
         const LegendPlacementResult res = PickLegendSpots(samples, 5u);
         REQUIRE(res.picked.Size() == LPC::Wanted);
         CHECK(res.reason == LPOk);
-        // the ROUTINE outcome on the shipped templates: Abel's Camp is 517 m
-        // from its Outpost centre and the Demo's 289 m
+        // the ROUTINE outcome on a one-zone template: the Demo's Camp is 289 m
+        // from its Outpost centre (Abel's is 517 m from its Outpost)
         CHECK(res.campRelaxed);
     }
     SECTION("inside the floor is refused outright")

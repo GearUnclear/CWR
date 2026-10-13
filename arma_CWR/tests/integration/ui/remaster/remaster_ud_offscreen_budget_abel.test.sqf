@@ -133,6 +133,19 @@ bdD = gmSimDiag
 if ((bdK < count bdStops) and (((bdD select 2) select 3) > bdMaxLive)) then {bdMaxLive = (bdD select 2) select 3}
 if ((bdK < count bdStops) and (((bdD select 3) select 3) > bdMaxGroups)) then {bdMaxGroups = (bdD select 3) select 3}
 
+// tenth stop: the occupation network (issue #76) brought Abel to five non-CITY
+// zones, so the tour is the start + 5 + 4 towns = 10 stops
+bdK = bdK + 1
+if (bdK < count bdStops) then {player setPos (bdStops select bdK)}
+triSimFrames 400
+triPerfReset 0
+triSimFrames 256
+bdPerf = triPerfStats 0
+bdLog = gmSimDiagLog
+bdD = gmSimDiag
+if ((bdK < count bdStops) and (((bdD select 2) select 3) > bdMaxLive)) then {bdMaxLive = (bdD select 2) select 3}
+if ((bdK < count bdStops) and (((bdD select 3) select 3) > bdMaxGroups)) then {bdMaxGroups = (bdD select 3) select 3}
+
 triAssertGe [bdK + 1, count bdStops]
 triAssertGe [130, bdMaxLive]
 triAssertGe [40, bdMaxGroups]

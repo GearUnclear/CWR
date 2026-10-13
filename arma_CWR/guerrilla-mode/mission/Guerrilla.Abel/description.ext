@@ -27,6 +27,39 @@
 //   * Village  = the real town of Houdan (~490 m NW), an explicit NEUTRAL
 //     CITY zone; the seedCities pass then dedups the town's own Names entry.
 // All three sit within revealRadius of the Camp -> revealed on tick 1.
+//
+// THE OCCUPATION NETWORK (issue #76, Abel part; #79 blocker B1). Malden's
+// three modelled military hubs are occupier zones too, so the island has a
+// garrison ladder (Outpost 6, Compound 6, Harbour 8, Airfield 12; contract C4
+// in guerrilla-mode/OFFSCREEN-CONTRACT.md section 5) and the native Traffic
+// service has occupier endpoints to route patrols and convoys between from
+// minute one (C3: the Harbour is 2.7 km from the Outpost and 1.3 km from the
+// Compound, straight line, with roads into all three).
+// Centres surveyed on the full Remaster with `PoseidonTools terrain objects
+// abel.wrp --near <x> <z> <r>` (object Y = terrain height), placed on open
+// ground the garrison's 50 m spawn square (zoneArea / 3) can use:
+//   * Airfield         (AIRFIELD, garrison 12) the apron between the runway
+//     (ILS anchor [7922, 9590], CfgWorlds >> Abel >> ilsPosition) and the
+//     hangar row at x 8088; the airfield's east wire fence has a gate pair at
+//     [8103, 9907], 73 m away. Flat at 32 m. 4.1 km N of the Camp.
+//   * Le Port Harbour  (SEAPORT, garrison 8) on the quay road just above the
+//     harbour sheds, 90 m inland of the concrete pier [8476, 3754] so the
+//     whole spawn square stays out of the water (the shore runs at about
+//     x 8475 here). Dry at 8 m, 4.5 m at the lowest corner of the square.
+//     NOT named "Le Port": the seeding pass dedups Names entries by NAME as
+//     well as by 300 m distance, and the town of Le Port [8193, 3129]
+//     (600 m SSW) must stay a CITY zone.
+//   * Southeast Compound (OUTPOST, garrison 6) the open parade yard of the
+//     wire-fenced military compound (fence x 9636..9799, z 3861..4011,
+//     watchtowers on every corner, garages and barracks round the yard). The
+//     fence has three open gates (W [9635, 3991], S [9677, 3860],
+//     N [9778, 4012]), each joined to a road. Dry at 39 m. 2.9 km SE of the
+//     Camp.
+// None is within 300 m of a Names town, so the seeded CITY set is unchanged.
+// They sit beyond revealRadius and cacheRadius of the Camp: undiscovered at
+// boot, banked as reserves (D1 remote tick) until the player comes near.
+// AIRFIELD and SEAPORT pay out like an OUTPOST for now (plan 13 yields are
+// not implemented); the income ladder below is the only difference.
 
 onLoadMission = "Guerrilla Mode - Abel";
 onLoadIntro  = "Liberate Malden, one zone at a time.";
@@ -105,6 +138,39 @@ class CfgGuerrillaZones
             income = 25;
             marker = "gmZoneMarker_2";
             position[] = {7600, 6300, 25};
+        };
+        // The occupation network (see the header). Markers are created at
+        // boot by gmcore init.sqs from the marker key, so mission.sqm needs
+        // none; each name just has to be unique.
+        class Compound
+        {
+            name = "Southeast Compound";
+            type = "OUTPOST";
+            owner = "OCCUPIER";
+            garrison = 6;
+            income = 25;
+            marker = "gmZoneMarker_3";
+            position[] = {9715, 3940, 39};
+        };
+        class Harbour
+        {
+            name = "Le Port Harbour";
+            type = "SEAPORT";
+            owner = "OCCUPIER";
+            garrison = 8;
+            income = 35;
+            marker = "gmZoneMarker_4";
+            position[] = {8410, 3690, 8};
+        };
+        class Airfield
+        {
+            name = "Airfield";
+            type = "AIRFIELD";
+            owner = "OCCUPIER";
+            garrison = 12;
+            income = 50;
+            marker = "gmZoneMarker_5";
+            position[] = {8030, 9905, 32};
         };
     };
 };
