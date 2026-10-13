@@ -380,6 +380,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Game tests
     Game/test_game_state_ext.cpp
     Game/Guerrilla/test_zone_registry.cpp
+    Game/Guerrilla/test_campaign_end.cpp
     Game/Guerrilla/test_garrison_cache.cpp
     Game/Guerrilla/test_alert_machine.cpp
     Game/Guerrilla/test_assailants.cpp

@@ -1,0 +1,24 @@
+# REMASTER LANE (issue #67): UD installed BESIDE Bohemia's files on the full
+# official Remaster. data_dir "packages/RemasterUD" is a gitignored junction to a
+# SHADOW of the Steam Remastered folder (never the Steam install itself), built
+# and prepared once with:
+#   pwsh -File tools/runtime/new-remaster-shadow.ps1 -Source <Remastered> `
+#        -Destination <shadow> -LoBoSource <Remastered>/@LoBo
+#   pwsh -File setup-guerrilla.ps1 -GameDir <shadow> -LoBoDir <shadow>/@LoBo `
+#        -Tools <dist>/PoseidonTools.exe
+#   cmd /c mklink /J packages\RemasterUD <shadow>
+# See guerrilla-mode/FRESH-INSTALL.md. Without the junction the test reports
+# spawn failed, which is not a regression.
+# Campaign win rule (issue #79 B3): GUERRILLA -> Abel, every enemy military
+# zone flipped to the resistance; the latch, the one victory line and the
+# pending end are asserted while gmCampaignEndDelay holds the end (an END1
+# under --autotest quits the game). The end screen itself is
+# remaster_ud_guerrilla_abel_win_screen.
+# --focus: a menu-launched session (no --test-mission) pauses when another
+# window takes focus, and the end clock runs on simulation time.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev", "--focus"]

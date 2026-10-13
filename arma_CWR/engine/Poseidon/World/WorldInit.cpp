@@ -64,6 +64,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
@@ -692,6 +693,10 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Simulate tick with an ACTIVE zone registry, never here - an ordinary
     // mission or an intro must not draw a seed or write a diary line.
     Guerrilla::LegendRegistry::Instance().InitMission();
+    // Campaign end (issue #79 B3): Clear + read campaignEndDelay.  The
+    // roster of enemy military zones is taken on the first active tick,
+    // never here, for the same reason as the Legend seed.
+    Guerrilla::CampaignEnd::Instance().InitMission();
     Guerrilla::PortraitService::Instance().Teardown();
     if (!Guerrilla::PrepareCampaignPortraits())
         return false;

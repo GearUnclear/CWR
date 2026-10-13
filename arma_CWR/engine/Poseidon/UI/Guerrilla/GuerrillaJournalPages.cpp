@@ -33,6 +33,7 @@
 #include <Poseidon/UI/Guerrilla/JournalText.hpp>    // the prose / format helpers shared with Compose
 
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // the win rule's roster and latch
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp> // the character rows and the generated history
@@ -440,6 +441,17 @@ JournalPageInputs GatherGuerrillaJournalInputs()
             }
         }
         in.zones.Add(row);
+    }
+    // the bases objective counts exactly what wins the campaign (issue #79
+    // B3): the enemy military zones fixed at campaign start, once taken
+    {
+        const CampaignEnd& end = CampaignEnd::Instance();
+        if (end.HasRoster())
+        {
+            in.militaryTotal = end.RosterPresent(registry);
+            in.militaryHeld = end.RosterHeld(registry);
+        }
+        in.campaignWon = end.Won();
     }
 
     // ---- the named: companions, enemy Legends, memorials, and the history.

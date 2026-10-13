@@ -180,11 +180,14 @@ struct JournalPageInputs
     bool economyKnown = false;               // false when the script globals are not up yet
     AutoArray<float> occupierTierThresholds; // war levels where the occupier fields the next tier
 
-    int militaryTotal = 0;  // non-CITY zones, the Camp excluded
+    int militaryTotal = 0;  // non-CITY zones, the Camp excluded (the CampaignEnd roster once taken)
     int militaryHeld = 0;   // ... owned by the resistance
     int townsTotal = 0;     // CITY zones
     int townsRisen = 0;     // ... owned by the resistance
     float supportFlip = 60; // town rise threshold
+
+    // the CampaignEnd win latch (issue #79 B3)
+    bool campaignWon = false;
 
     bool undercoverArmed = false; // gmUndercover true
     int undercoverStatus = 0;     // 0 clean / 1 suspected / 2 compromised

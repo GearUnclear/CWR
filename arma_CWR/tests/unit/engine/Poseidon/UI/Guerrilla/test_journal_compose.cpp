@@ -1119,6 +1119,16 @@ TEST_CASE("Journal compose - the PR #61 content pins hold at the document level"
         CHECK(Has(o2, "Every base held."));
         CHECK_FALSE(Has(o2, "Open"));
         CHECK(Has(Joined(Page(d2, "GM_DISPATCH")), "Objective: Nothing open."));
+
+        // the campaign won (issue #79 B3): Dispatches says so even while a
+        // town is still waiting to rise, because towns are not the win rule
+        JournalPageInputs won = SampleInputs();
+        won.militaryHeld = won.militaryTotal;
+        won.campaignWon = true;
+        const JournalDocument d3 = ComposeJournal(empty, won);
+        const std::string w3 = Joined(Page(d3, "GM_DISPATCH"));
+        CHECK(Has(w3, "Objective: None. Every base is ours and the campaign is won."));
+        CHECK_FALSE(Has(w3, "Raise every town"));
     }
 
     SECTION("Suggested actions in priority order, a securing base is not a target, urgent moves in red")

@@ -11,6 +11,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
@@ -1088,6 +1089,21 @@ void DisplayDebriefing::CreateDebriefing()
     if (src >= 0)
     {
         _right->CopySection(src, rSection);
+    }
+    else if (GWorld->GetEndMode() == EMEnd1)
+    {
+        // a won Guerrilla campaign (issue #79 B3) names its win even though
+        // the templates ship no briefing.html with a Debriefing:End1 section
+        RString title;
+        RString body;
+        if (Guerrilla::CampaignEnd::Instance().DebriefingText(title, body))
+        {
+            _right->AddBreak(rSection, false);
+            _right->AddText(rSection, title, HFH1, HACenter, false, false, "");
+            _right->AddBreak(rSection, false);
+            _right->AddText(rSection, body, HFP, HALeft, false, false, "");
+            _right->AddBreak(rSection, false);
+        }
     }
 
     // objectives

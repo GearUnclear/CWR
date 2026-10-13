@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
@@ -2139,6 +2140,27 @@ LSError World::Serialize(ParamArchive& ar, int message)
     else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
     {
         Guerrilla::LegendRegistry::Instance().DeriveFromExistingSave();
+    }
+
+    // Guerrilla campaign end (issue #79 B3): the roster of enemy military
+    // zones fixed at campaign start, the win latch and a pending end clock.
+    // Save-gated on the roster being taken; a save without the block (written
+    // before the service existed, or before the first active tick) loads
+    // clean and the roster is taken from the authored zone owners on the
+    // next tick.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::CampaignEnd::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::CampaignEnd::Instance().HasState() : ar.IsSubclass("GuerrillaCampaignEnd"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaCampaignEnd", Guerrilla::CampaignEnd::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        // no block: only the tuning is missing, read it from the mission
+        // config the first pass reparsed
+        Guerrilla::CampaignEnd::Instance().InitMission();
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

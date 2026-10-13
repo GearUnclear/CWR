@@ -59,6 +59,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
+#include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
@@ -1735,6 +1736,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // campaign identity set on its first active tick, then observes the
         // GM_COMP_* arrays at LegendRegistry::TickInterval.
         Guerrilla::LegendRegistry::Instance().Simulate(deltaT);
+        // Guerrilla campaign end (issue #79 B3) - inactive with the zone
+        // registry; checks the win rule at CampaignEnd::TickInterval, then
+        // runs the end clock and asks for END1 once.
+        Guerrilla::CampaignEnd::Instance().Simulate(deltaT);
         perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }

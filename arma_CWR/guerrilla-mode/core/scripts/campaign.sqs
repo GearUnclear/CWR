@@ -40,6 +40,13 @@
 ;  serialized with the campaign): this manager writes the campaign's opening
 ;  diary line and the save / restore lines. The island name comes from the
 ;  engine (gmIslandName = CfgWorlds description), never from a literal.
+;
+;  CAMPAIGN WIN (issue #79 B3): the win rule, its saved latch, the diary's
+;  victory line and the end of the mission are NATIVE (CampaignEnd). The
+;  engine writes the victory line the moment the latch fires and asks for
+;  the END1 debriefing campaignEndDelay seconds later. This loop only tells
+;  the player, once (GM_pWonSeen is saved with the campaign), while the
+;  clock runs. gmCampaignWon is the latch.
 ; ============================================================================
 
 ; ---- DISPATCH: action-handler call vs manager launch -------------------------
@@ -47,6 +54,7 @@
 
 @GM_LIB_READY
 
+GM_pWonSeen = false
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 gmJournalNote ["Reached the Camp alone. One rifle.", "Camp", "plain"]
 
@@ -55,6 +63,7 @@ gmJournalNote ["Reached the Camp alone. One rifle.", "Camp", "plain"]
 ; ============================================================================
 #loop
 ~2
+? gmCampaignWon and (not GM_pWonSeen) : goto "won"
 ? (count gmEvtLoaded) < 1 : goto "loop"
 GM_pBatch = gmEvtLoaded + []; gmEvtLoaded = []
 ; campaign save format version
@@ -91,6 +100,13 @@ GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 
 hint "Guerrilla campaign restored."
 gmJournalNote ["Record restored. The campaign resumes where it stood.", "", "plain"]
+goto "loop"
+
+;  #won - the win latch fired: say so once while the end clock runs. The
+;  victory line is already in the diary (native, written on the latch).
+#won
+GM_pWonSeen = true
+hint "Every occupier base has fallen. The campaign is won."
 goto "loop"
 
 ; ----------------------------------------------------------------------------

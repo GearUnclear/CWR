@@ -198,7 +198,11 @@ void ComposeDispatch(JournalDocument& doc, const ComposeContext& ctx)
                 active = &journal.Objective(i);
             }
         }
-        if (in.militaryTotal > 0 && !eo.basesDone)
+        if (in.campaignWon)
+        {
+            pen.Note("Objective", "None. Every base is ours and the campaign is won.", InkPencil);
+        }
+        else if (in.militaryTotal > 0 && !eo.basesDone)
         {
             pen.Note("Objective", Fmt("Hold every base. %d of %d.", in.militaryHeld, in.militaryTotal));
         }
