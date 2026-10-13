@@ -54,18 +54,33 @@ def rule(stems=("first", "second"), *, bad=False):
     return SimpleNamespace(ADDONS=stems, repair=repair, __name__="synthetic-rule")
 
 
-def adder(stem="first", *, key=None, sticky=False):
-    """Synthetic module that adds one member, only when a source is supplied."""
+def source_pbo(marker=b"source.marker"):
+    """A synthetic --asset-source: a PBO the synthetic adder recognizes by `marker`."""
+    return make_pbo([(marker, b"synthetic source", 0, 0, 0, 0)])
+
+
+def claims(marker="source.marker"):
+    return lambda archive: marker in archive.by_key
+
+
+def adder(stem="first", *, key=None, sticky=False, marker="source.marker"):
+    """Synthetic module that adds one member, only when its source is supplied.
+
+    Like the real rules it claims its source by content; plan() passes it the
+    tuple of paths it claimed (empty when none was given)."""
     declared = stem + "/inventory/new.paa"
     key = key or declared
+    seen = []
     def add_members(existing, asset_source=None):
+        seen.append(asset_source)
         if declared in existing and not sticky:
             return {}, []
-        if asset_source is None:
+        if not asset_source:
             return {}, [f"{stem}: 1 icon not added: pass --asset-source"]
         return {key: ("Inventory\\new.paa", b"pinned icon bytes")}, []
     return SimpleNamespace(ADDONS=(stem,), ADDED_MEMBERS=(declared,), repair=lambda documents: {},
-                           add_members=add_members, __name__="synthetic-adder")
+                           add_members=add_members, claims_source=claims(marker), seen=seen,
+                           ASSET_SOURCE_NAME=f"synthetic {stem} source", __name__="synthetic-adder-" + stem)
 
 
 class ArchivePreservationTests(unittest.TestCase):
@@ -342,7 +357,7 @@ class RepairTransactionTests(unittest.TestCase):
 
     def test_added_member_is_planned_applied_and_reaches_a_fixed_point(self):
         source = Path(self.temporary.name) / "source.pbo"
-        source.write_bytes(b"synthetic source")
+        source.write_bytes(source_pbo())
         with patch.object(runner, "modules", return_value=[rule(), adder()]):
             paths, hashes, changed, records, _, skipped = runner.plan(self.mod, None, asset_source=source)
             self.assertEqual([], skipped)
@@ -374,7 +389,7 @@ class RepairTransactionTests(unittest.TestCase):
     def test_weapons_text_pass_sees_the_members_present_after_the_plan(self):
         # The MSG90 picture is repointed only when its icon exists after the plan.
         source = Path(self.temporary.name) / "source.pbo"
-        source.write_bytes(b"synthetic source")
+        source.write_bytes(source_pbo())
         observed = []
         def repair(documents, present=frozenset()):
             observed.append(present)
@@ -393,7 +408,7 @@ class RepairTransactionTests(unittest.TestCase):
 
     def test_undeclared_existing_or_nonidempotent_additions_rejected(self):
         source = Path(self.temporary.name) / "source.pbo"
-        source.write_bytes(b"synthetic source")
+        source.write_bytes(source_pbo())
         for module, message in ((adder(key="first/other.paa"), "undeclared"),
                                 (adder(key="first/config.cpp"), "undeclared"),
                                 (adder(sticky=True), "Non-idempotent")):
@@ -402,6 +417,7 @@ class RepairTransactionTests(unittest.TestCase):
                     runner.plan(self.mod, None, asset_source=source)
         existing = SimpleNamespace(ADDONS=("first",), ADDED_MEMBERS=("first/readme.txt",), repair=lambda d: {},
                                    add_members=lambda e, s=None: ({"first/readme.txt": ("README.txt", b"x")}, []),
+                                   claims_source=claims(),
                                    __name__="existing")
         with patch.object(runner, "modules", return_value=[existing]):
             with self.assertRaisesRegex(ValueError, "existing member"):
@@ -410,7 +426,7 @@ class RepairTransactionTests(unittest.TestCase):
 
     def test_summary_reports_skips_additions_and_check_exit_codes(self):
         source = Path(self.temporary.name) / "source.pbo"
-        source.write_bytes(b"synthetic source")
+        source.write_bytes(source_pbo())
         def run(*extra):
             out, err = io.StringIO(), io.StringIO()
             with patch.object(runner, "modules", return_value=[adder()]), \
@@ -421,12 +437,73 @@ class RepairTransactionTests(unittest.TestCase):
         self.assertEqual((0, [], 0), (code, summary["archives"], summary["added_members"]))
         self.assertEqual(["first: 1 icon not added: pass --asset-source"], summary["skipped"])
         self.assertIn("WARN: first: 1 icon not added", err)
-        self.assertNotIn("asset_source_sha256", summary)
+        self.assertNotIn("asset_sources", summary)
         code, summary, err = run("--asset-source", str(source))
         self.assertEqual((1, 1, 1, []), (code, summary["changed_members"], summary["added_members"], summary["skipped"]))
-        self.assertEqual(runner.digest(b"synthetic source"), summary["asset_source_sha256"])
+        self.assertEqual([{"path": str(source.resolve()), "sha256": runner.digest(source_pbo()),
+                           "rule": "synthetic-adder-first"}], summary["asset_sources"])
         self.assertEqual("", err)
-        self.assertEqual("2026-10-11.3", summary["repair_version"])
+        self.assertEqual("2026-10-11.4", summary["repair_version"])
+
+    def test_several_sources_each_reach_only_the_rule_that_claims_it(self):
+        # --asset-source may be repeated; each archive goes to the rule that
+        # recognizes it by content, whatever the option order.
+        one, two = Path(self.temporary.name) / "one.pbo", Path(self.temporary.name) / "two.pbo"
+        one.write_bytes(source_pbo(b"one.marker"))
+        two.write_bytes(source_pbo(b"two.marker"))
+        first, second = adder("first", marker="one.marker"), adder("second", marker="two.marker")
+        plain = SimpleNamespace(ADDONS=("first",), ADDED_MEMBERS=(), repair=lambda d: {}, seen=[],
+                                __name__="no-claims")
+        plain.add_members = lambda existing, asset_source=None: (plain.seen.append(asset_source), ({}, []))[1]
+        with patch.object(runner, "modules", return_value=[first, second, plain]):
+            _, _, changed, _, _, skipped = runner.plan(self.mod, None, asset_source=[two, one])
+        self.assertEqual([], skipped)
+        self.assertEqual({"first/inventory/new.paa", "second/inventory/new.paa"}, set(changed))
+        self.assertEqual([(one,), (one,)], first.seen)
+        self.assertEqual([(two,), (two,)], second.seen)
+        self.assertEqual([None, None], plain.seen)
+        # Only one of the two given: the other rule gets an empty tuple and skips.
+        first, second = adder("first", marker="one.marker"), adder("second", marker="two.marker")
+        with patch.object(runner, "modules", return_value=[first, second]):
+            _, _, changed, _, _, skipped = runner.plan(self.mod, None, asset_source=one)
+        self.assertEqual({"first/inventory/new.paa"}, set(changed))
+        self.assertEqual(["second: 1 icon not added: pass --asset-source"], skipped)
+        self.assertEqual([(), ()], second.seen)
+
+    def test_unclaimed_unreadable_shared_or_repeated_sources_fail_closed(self):
+        stray = Path(self.temporary.name) / "stray.pbo"
+        stray.write_bytes(source_pbo(b"nobody.marker"))
+        text = Path(self.temporary.name) / "text.pbo"
+        text.write_bytes(b"not a pbo")
+        mine = Path(self.temporary.name) / "mine.pbo"
+        mine.write_bytes(source_pbo())
+        cases = (([stray], [adder()], "not a source any rule uses .*synthetic first source"),
+                 ([text], [adder()], "not a readable PBO"),
+                 ([mine], [adder("first"), adder("second")], "claimed by several rules"),
+                 ([mine, mine], [adder()], "given twice"))
+        for sources, rules, message in cases:
+            with self.subTest(message=message), patch.object(runner, "modules", return_value=rules):
+                with self.assertRaisesRegex(ValueError, message):
+                    runner.plan(self.mod, None, asset_source=sources)
+        self.assertEqual(self.original, self.installed())
+        self.assertFalse((self.mod / ".ud-backups").exists())
+
+    def test_partly_sourced_module_keeps_its_other_skip_and_is_idempotent(self):
+        # A rule with two sources (restore) may add one source's members and
+        # still report the other source's skip on both passes.
+        declared = ("first/a.p3d", "first/b.p3d")
+        def add_members(existing, asset_source=None):
+            added = {} if "first/a.p3d" in existing or not asset_source else {"first/a.p3d": ("a.p3d", b"A")}
+            skips = [] if "first/b.p3d" in existing else ["first: b.p3d not restored: pass --asset-source"]
+            return added, skips
+        module = SimpleNamespace(ADDONS=("first",), ADDED_MEMBERS=declared, repair=lambda d: {},
+                                 add_members=add_members, claims_source=claims(), __name__="two-sources")
+        source = Path(self.temporary.name) / "a-source.pbo"
+        source.write_bytes(source_pbo())
+        with patch.object(runner, "modules", return_value=[module]):
+            _, _, changed, _, _, skipped = runner.plan(self.mod, None, asset_source=source)
+        self.assertEqual({"first/a.p3d": b"A"}, changed)
+        self.assertEqual(["first: b.p3d not restored: pass --asset-source"], skipped)
 
     def test_archive_changed_after_preflight_is_rejected(self):
         paths, hashes, changed, records, _, _ = self.plan()

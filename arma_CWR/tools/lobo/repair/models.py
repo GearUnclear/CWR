@@ -183,12 +183,20 @@ class _Lod:
     payload_offsets: dict[str, int]
 
 
-def _lods(data: bytes) -> list[_Lod]:
+def _lods(data: bytes, trailer: bytes | None = None) -> list[_Lod]:
     """Bounded reader for the known MLOD 257 / SP3X v153 fixed-width format.
 
     Layout matches MLODStructures.hpp. Writes replace verified selection payloads
     or insert before the Hitpoints end tag, never binary substring guesses.
+
+    `trailer` pins one member's exact 32 trailing bytes when they are not a
+    printable Oxygen default path (an empty path: a NUL first, then stale
+    memory). Only a byte-exact match is accepted; any other tail still has to
+    pass _oxygen_path_trailer.
     """
+    if trailer is not None and (not isinstance(trailer, bytes) or len(trailer) != 32):
+        raise ValueError("A pinned MLOD trailer must be exactly 32 bytes")
+
     def need(offset, length):
         if offset < 0 or length < 0 or offset + length > len(data):
             raise ValueError("Truncated or invalid MLOD")
@@ -245,8 +253,10 @@ def _lods(data: bytes) -> list[_Lod]:
     # Oxygen's legacy default-texture-path trailer is present in the installed
     # models: 32 bytes whose leading printable path ends at a NUL ('data\' in
     # the M1/Merkava/crew models, 'H:\Codemast' in LoBo_MD500D_R.p3d). The
-    # engine reader ignores it; preserve all 32 bytes verbatim.
-    if pos != len(data) and not _oxygen_path_trailer(data[pos:]):
+    # engine reader ignores it; preserve all 32 bytes verbatim. A pinned
+    # trailer (the two Hilux models, whose path is empty) must match exactly.
+    if pos != len(data) and not (trailer is not None and data[pos:] == trailer) \
+            and not _oxygen_path_trailer(data[pos:]):
         raise ValueError("Unexpected trailing MLOD data")
     return lods
 

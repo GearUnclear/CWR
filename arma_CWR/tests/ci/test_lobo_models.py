@@ -95,6 +95,24 @@ class SelectionUnionTests(unittest.TestCase):
             with self.subTest(trailer=trailer[:12]), self.assertRaisesRegex(ValueError, 'trailing MLOD'):
                 models._lods(self.original + trailer)
 
+    def test_pinned_trailer_must_match_exactly(self):
+        # The Hilux models end with an empty Oxygen path: a NUL first, then stale memory.
+        pin = bytes(12) + bytes(range(1, 21))
+        self.assertEqual(32, len(pin))
+        self.assertEqual(3, len(models._lods(self.original + pin, pin)))
+        self.assertEqual(3, len(models._lods(self.original, pin)))
+        other = pin[:-1] + b'\x7f'
+        for tail, trailer in ((other, pin), (pin, other), (pin, None), (bytes(32), pin)):
+            with self.subTest(tail=tail.hex(), trailer=trailer), self.assertRaisesRegex(ValueError, 'trailing MLOD'):
+                models._lods(self.original + tail, trailer)
+        # A printable path trailer still passes beside a pin, and the default is unchanged.
+        path = b'data\\\0' + bytes(range(26))
+        self.assertEqual(3, len(models._lods(self.original + path, pin)))
+        self.assertEqual(3, len(models._lods(self.original + path)))
+        for bad in (pin[:31], pin + b'\0', 'not bytes'):
+            with self.subTest(pin=bad), self.assertRaisesRegex(ValueError, 'exactly 32 bytes'):
+                models._lods(self.original, bad)
+
     def test_existing_hull_name_and_all_other_bytes_survive_union(self):
         original = model(lod(5e15, [('Hull', self.sources[0][1]), ('FHull', self.sources[1][1])]))
         fixed = models.add_hitpoint_unions(original, {'hull': ('Hull', 'FHull')})

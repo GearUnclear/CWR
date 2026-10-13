@@ -83,6 +83,26 @@ def repair(documents: dict[str, str], present=frozenset()) -> dict[str, str]:
     return apply_rules(documents, rules_for(present))
 
 
+ASSET_SOURCE_NAME = f"{HK_PACK_NAME} (or @LoBo_Extras/addons/TheHKpack.pbo) for the HK icons"
+
+
+def claims_source(archive: Archive) -> bool:
+    """An --asset-source is this module's when it holds any of the seven icon
+    member names; _source then requires all seven pinned bytes (fail closed)."""
+    return any(member in archive.by_key for _, member, _ in ICONS.values())
+
+
+def _one(asset_source):
+    """A path, None, or the tuple repair_lobo.plan passes (at most one HK pack)."""
+    if asset_source is None or isinstance(asset_source, (str, Path)):
+        return asset_source
+    paths = tuple(asset_source)
+    if len(paths) > 1:
+        raise ValueError(f"Several --asset-source archives claim to be {HK_PACK_NAME}: "
+                         + ", ".join(str(p) for p in paths))
+    return paths[0] if paths else None
+
+
 def _source(asset_source) -> Archive:
     """Accept a source only when all seven icon members carry their pinned bytes."""
     raw = Path(asset_source).read_bytes()
@@ -110,6 +130,7 @@ def add_members(existing: dict[str, bytes], asset_source=None) -> tuple[dict, li
     not its pinned bytes) is an error even when nothing is missing. Additions
     follow the ICONS order.
     """
+    asset_source = _one(asset_source)
     unknown = sorted(set(existing) - set(ICONS))
     if unknown:
         raise ValueError("Unknown added members: " + ", ".join(unknown))

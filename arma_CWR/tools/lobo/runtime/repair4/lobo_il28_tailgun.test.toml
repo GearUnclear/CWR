@@ -1,0 +1,10 @@
+# LoBo #13 probe for repair 2026-10-11.4. Mounts the installed, repaired
+# D:/Arma_CWA/@LoBo by absolute path. Run it explicitly with --retries 2 and
+# -j 1 through run-local.ps1; it is not part of a default lane. Debug log level
+# keeps script diagnostics in the game log.
+mission = "tools/lobo/runtime/Repair4.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 300
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720", "--log-level", "debug"]

@@ -148,7 +148,8 @@ class ScriptRepairTests(unittest.TestCase):
         self.assertNotIn("nearestObjects", classic)
         self.assertNotIn("createTrigger", classic)
         self.assertIn("(units group player) + (units group _object)", classic)
-        self.assertIn("_x distance (_this select 0) < (_this select 1)", classic)
+        self.assertIn("_x distance _object < (_this select 1)", classic)
+        self.assertNotIn("distance (_this select 0)", classic)
         self.assertIn("!(_x in _units)", classic)
         self.assertEqual([], scripts.script_findings(classic))
         self.assertEqual(classic, scripts._fire(classic, "classic"))
@@ -158,6 +159,38 @@ class ScriptRepairTests(unittest.TestCase):
             scripts._fire(original, "unknown")
         with self.assertRaises(ValueError):
             scripts._fire(ud + "\n" + scripts.AI_QUERY_CLASSIC, "classic")
+        legacy = classic.replace(scripts.AI_QUERY_CLASSIC, scripts.AI_QUERY_CLASSIC_LEGACY)
+        with self.assertRaises(ValueError):
+            scripts._fire(legacy + "\n" + scripts.AI_QUERY_CLASSIC, "classic")
+
+    def test_legacy_classic_query_is_switched_in_place(self):
+        # A copy prepared with the earlier Classic query (Object distance Array,
+        # rejected by the official Remaster exe) is upgraded, not duplicated.
+        original = fire_fixture()
+        classic = scripts._fire(original, "classic")
+        ud = scripts._fire(original, "ud")
+        legacy = classic.replace(scripts.AI_QUERY_CLASSIC, scripts.AI_QUERY_CLASSIC_LEGACY)
+        self.assertNotEqual(classic, legacy)
+        self.assertEqual(classic, scripts._fire(legacy, "classic"))
+        self.assertEqual(ud, scripts._fire(legacy, "ud"))
+        self.assertEqual(1, scripts._fire(legacy, "classic").count("_AI ="))
+
+    def test_classic_query_uses_only_ofp_199_object_forms(self):
+        # The classic literal names only OFP 1.85+ core commands; distance has
+        # object operands on both sides (_x and the caller's wreck _object).
+        query = scripts.AI_QUERY_CLASSIC
+        code = re.sub(r'"[^"]*"', '""', query)
+        words = {w for w in re.findall(r"\b[A-Za-z_]\w*\b", code) if not w.startswith("_")}
+        self.assertEqual({"private", "units", "group", "player", "alive", "vehicle", "distance",
+                          "in", "if", "then", "forEach", "select"}, words)
+        self.assertEqual(["_x distance _object"], re.findall(r"\S+ distance \S+", query))
+        self.assertNotIn("nearestObjects", query)
+        # UD keeps its nearestObjects query byte for byte.
+        self.assertEqual(
+            '_AI = {private ["_near", "_units"]; '
+            '_near = nearestObjects [_this select 0, ["Man"], _this select 1]; '
+            '_units = []; {if (alive _x && vehicle _x == _x && _x != player) then '
+            '{_units = _units + [_x]}} forEach _near; _units}', scripts.AI_QUERY)
 
     def test_display_repair_preserves_asset_identifiers(self):
         source = 'model="LoBo_SA9missle_F.p3d";\ndisplayNameMagazine="Hawk Missle";'
@@ -219,6 +252,12 @@ class ScriptRepairTests(unittest.TestCase):
         self.assertEqual({}, scripts.repair(documents | fixed | classic, compatibility="classic"))
         switched_back = scripts.repair(documents | fixed | classic)
         self.assertEqual({key: fixed[key] for key in scripts.FIRE_PATHS}, switched_back)
+        # A Classic copy made with the earlier query: only the 16 fire scripts
+        # change, to the current Classic bytes.
+        legacy = {key: value.replace(scripts.AI_QUERY_CLASSIC, scripts.AI_QUERY_CLASSIC_LEGACY)
+                  for key, value in classic.items()}
+        self.assertEqual(classic, scripts.repair(documents | fixed | legacy, compatibility="classic"))
+        self.assertEqual(switched_back, scripts.repair(documents | fixed | legacy))
 
 
 if __name__ == "__main__":

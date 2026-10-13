@@ -14,8 +14,8 @@ import uuid
 from repair.pbo import Archive, normalize
 
 REPAIR_MODULES=('ammo','scripts','models','followups','loops','mines','clusters','numbers','effects',
-                'identifiers','content','weapons','textures')
-REPAIR_VERSION='2026-10-11.3'
+                'identifiers','content','weapons','textures','tailgun','references','repoints','wounds','restore')
+REPAIR_VERSION='2026-10-11.4'
 
 def rule_fingerprint():
     base=Path(__file__).resolve().parent
@@ -26,18 +26,64 @@ def digest(data):return hashlib.sha256(data).hexdigest()
 
 def modules():return [importlib.import_module('repair.'+name) for name in REPAIR_MODULES]
 
+def source_paths(asset_source):
+    """None, one path or several paths (repeated --asset-source) as a tuple."""
+    if asset_source is None:return ()
+    if isinstance(asset_source,(str,Path)):return (Path(asset_source),)
+    return tuple(Path(p) for p in asset_source)
+
+def assign_sources(rules,asset_source):
+    """{module name: (path, ...)}: each --asset-source goes to the one rule that claims it.
+
+    A rule that adds members from an external archive declares
+    claims_source(archive) and recognizes its own source by content (member
+    names or the pinned archive hash), so the order of the options does not
+    matter. The rule verifies the pinned bytes itself. A source no rule claims,
+    or that several rules claim, is an error, so a mistyped path never passes
+    silently.
+    """
+    assigned={};seen=set()
+    for path in source_paths(asset_source):
+        key=str(path.resolve()).lower()
+        if key in seen:raise ValueError(f'--asset-source given twice: {path}')
+        seen.add(key)
+        try:archive=Archive(path.read_bytes())
+        except ValueError as exc:raise ValueError(f'--asset-source {path} is not a readable PBO ({exc})') from exc
+        owners=[m.__name__ for m in rules if hasattr(m,'claims_source') and m.claims_source(archive)]
+        if not owners:
+            wanted='; '.join(m.ASSET_SOURCE_NAME for m in rules if hasattr(m,'ASSET_SOURCE_NAME'))
+            raise ValueError(f'--asset-source {path} is not a source any rule uses (expected: {wanted})')
+        if len(owners)>1:raise ValueError(f'--asset-source {path} is claimed by several rules: {owners}')
+        assigned.setdefault(owners[0],[]).append(path)
+    return {name:tuple(paths) for name,paths in assigned.items()}
+
 def plan(mod,tool,compatibility='ud',asset_source=None):
     rules=modules();wanted=set().union(*(set(m.ADDONS) for m in rules))
+    claimed=assign_sources(rules,asset_source)
     model_keys=set().union(*(set(getattr(m,'MODEL_MEMBERS',())) for m in rules))
     added_keys=set().union(*(set(getattr(m,'ADDED_MEMBERS',())) for m in rules))
+    # Members a repoint names as its target: they must exist in the archive
+    # entry tables (their bytes are not read), so a reinstall that lacks one
+    # fails closed instead of repointing to nothing.
+    required_keys=set().union(*(set(getattr(m,'REQUIRED_MEMBERS',())) for m in rules))
+    # Archive members a module generates its added members from (wounds: the
+    # LoBo_Pilot textures). Their original bytes go to its add_members as
+    # `sources`; they must be plain members no rule rewrites or adds.
+    source_keys=set().union(*(set(getattr(m,'SOURCE_MEMBERS',())) for m in rules))
     paths={p.stem.lower():p for p in (mod/'addons').glob('*.pbo')}
     missing=wanted-paths.keys()
     if missing:raise ValueError(f'Required addons missing: {sorted(missing)}')
     if {k.split('/',1)[0] for k in added_keys}-wanted:raise ValueError('Added members outside the repaired addons')
-    docs={};binary={};hashes={};original={};existing_added={}
+    for name,keys in (('Required',required_keys),('Source',source_keys)):
+        if any('/' not in k or normalize(k)!=k for k in keys):raise ValueError(f'{name} members must be normalized addon/member keys')
+        if {k.split('/',1)[0] for k in keys}-wanted:raise ValueError(f'{name} members outside the repaired addons')
+    if source_keys&(model_keys|added_keys) or any(k.endswith(('/config.cpp','.sqs','.sqf')) for k in source_keys):
+        raise ValueError('Source members must be untouched archive members')
+    docs={};binary={};hashes={};original={};existing_added={};entry_keys=set();sources={}
     # Read original archive bytes once per addon; no full-mod binary extraction.
     for stem in sorted(wanted):
         path=paths[stem];raw=path.read_bytes();hashes[stem]=digest(raw);archive=Archive(raw)
+        entry_keys|={stem+'/'+key for key in archive.by_key}
         for key,entry in archive.by_key.items():
             full=stem+'/'+key
             if key=='config.cpp' or key.endswith(('.sqs','.sqf')):
@@ -46,8 +92,14 @@ def plan(mod,tool,compatibility='ud',asset_source=None):
                 data=archive.read(key,path,tool);binary[full]=data;original[full]=data
             elif full in added_keys:
                 existing_added[full]=archive.read(key,path,tool)
+            elif full in source_keys:
+                sources[full]=archive.read(key,path,tool)
     missing_models=model_keys-binary.keys()
     if missing_models:raise ValueError(f'Required models missing: {sorted(missing_models)}')
+    missing_required=required_keys-entry_keys
+    if missing_required:raise ValueError(f'Required members missing: {sorted(missing_required)}')
+    missing_sources=source_keys-sources.keys()
+    if missing_sources:raise ValueError(f'Source members missing: {sorted(missing_sources)}')
     # New members come only from a module's declared ADDED_MEMBERS and a source
     # the module verifies itself (pinned hashes); a skip line is reported, not
     # fatal. They are planned first because a text rule may depend on whether
@@ -57,11 +109,19 @@ def plan(mod,tool,compatibility='ud',asset_source=None):
         if not hasattr(module,'add_members'):continue
         own=set(getattr(module,'ADDED_MEMBERS',()))
         mine={k:v for k,v in existing_added.items() if k in own}
-        additions,skips=module.add_members(dict(mine),asset_source)
+        # A module that declares SOURCE_MEMBERS also receives their bytes.
+        extra={'sources':{k:sources[k] for k in module.SOURCE_MEMBERS}} if hasattr(module,'SOURCE_MEMBERS') else {}
+        # A module that claims external archives receives the paths it claimed
+        # (an empty tuple when none was given); any other module gets None.
+        given=claimed.get(module.__name__,()) if hasattr(module,'claims_source') else None
+        additions,skips=module.add_members(dict(mine),given,**extra)
         if set(additions)-own:raise ValueError(f'{module.__name__} tried to add an undeclared member')
         if set(additions)&(mine.keys()|original.keys()|added.keys()):raise ValueError(f'{module.__name__} tried to add an existing member')
-        again,skips_again=module.add_members(mine|{k:v for k,(_,v) in additions.items()},asset_source)
-        if again or (skips_again if additions else skips_again!=skips):raise ValueError(f'Non-idempotent member additions: {module.__name__}')
+        again,skips_again=module.add_members(mine|{k:v for k,(_,v) in additions.items()},given,**extra)
+        # The second pass adds nothing and reports the same skips: a module
+        # with several sources (restore) may add one source's members and
+        # still skip another's.
+        if again or skips_again!=skips:raise ValueError(f'Non-idempotent member additions: {module.__name__}')
         for key,(stored,data) in additions.items():
             if not isinstance(data,bytes) or normalize(stored)!=key.split('/',1)[1]:raise ValueError(f'Invalid added member {key}')
         added.update(additions);present|=set(additions);skipped+=skips
@@ -189,19 +249,29 @@ def main(argv=None):
     mode=parser.add_mutually_exclusive_group();mode.add_argument('--apply',action='store_true');mode.add_argument('--check',action='store_true')
     parser.add_argument('--report',type=Path)
     parser.add_argument('--compatibility',choices=('ud','classic'),default='ud',
-                        help='UD uses full nearby-unit queries; Classic uses a limited group-only wreck-fire query')
-    parser.add_argument('--asset-source',type=Path,
-                        help='Hash-pinned external archive for members LoBo references but never shipped (TheHKpack.pbo 1.75)')
+                        help='UD uses full nearby-unit queries; Classic (OFP 1.99, official Remaster exe) uses a '
+                             'limited group-only wreck-fire query with object-only distance')
+    parser.add_argument('--asset-source',type=Path,action='append',metavar='PBO',
+                        help='Hash-pinned external archive for members LoBo references but its release lacks; '
+                             'repeat the option for several. Each is matched to its rule by content: '
+                             'TheHKpack.pbo 1.75 (or the @LoBo_Extras copy) for seven LoBoWeapons HK icons; '
+                             'LoBoAddonPack3\'s LoBo_airammo.pbo (2007-01-06) for nine LoBo_airammo bomb models; '
+                             'LoBoAddonPack1\'s or LoBoDemo2\'s LoBoEgypt.pbo for LoBoEgypt inf\\helm_s_in.pac. '
+                             'The LoBo Reloaded library keeps all three under '
+                             'sources\\recovered-2026-10-11\\derived. A source not given skips its members with a '
+                             'WARN line; a source no rule uses, or whose pinned bytes differ, is an error')
     args=parser.parse_args(argv);mod=args.mod.resolve()
     if not (mod/'addons').is_dir():parser.error('--mod must contain addons/')
     try:
-        source=args.asset_source.resolve() if args.asset_source else None
-        paths,hashes,changed,records,docs,skipped=plan(mod,args.tools.resolve(),args.compatibility,source)
+        sources=tuple(p.resolve() for p in args.asset_source or ())
+        paths,hashes,changed,records,docs,skipped=plan(mod,args.tools.resolve(),args.compatibility,sources)
         for line in skipped:print(f'WARN: {line}',file=sys.stderr)
         result={'repair_version':REPAIR_VERSION,'rule_sha256':rule_fingerprint(),'issue':'https://github.com/GearUnclear/lobo/issues/1','mode':'apply' if args.apply else 'check',
                 'compatibility':args.compatibility,'changed_members':len(changed),'added_members':sum(1 for r in records if r.get('added')),
                 'archives':sorted({k.split('/')[0] for k in changed}),'skipped':skipped,'members':records}
-        if source:result['asset_source_sha256']=digest(source.read_bytes())
+        if sources:
+            owners={p:name.rsplit('.',1)[-1] for name,claimed in assign_sources(modules(),sources).items() for p in claimed}
+            result['asset_sources']=[{'path':str(p),'sha256':digest(p.read_bytes()),'rule':owners[p]} for p in sources]
         if args.apply:
             result['backup_manifest']=str(apply(mod,paths,hashes,changed,records,args.compatibility)) if changed else None
         if args.report:

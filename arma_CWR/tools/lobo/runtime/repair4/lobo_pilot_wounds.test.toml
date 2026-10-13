@@ -1,0 +1,12 @@
+# Wounded LoBo pilot visuals (R6) for repair 2026-10-11.4. Mounts the
+# installed, repaired D:/Arma_CWA/@LoBo by absolute path. Run it explicitly with
+# -j 1 through run-local.ps1 (--retries 0 until it has booted once, then 2); it
+# is not part of a default lane. Info log level is enough: a missing wound
+# texture is a GRAPHICS WARN ("GL33: Cannot load texture"), checked by
+# repair4/check_logs.py r6. 32 screenshots need visual review.
+mission = "tools/lobo/runtime/Repair4.Abel"
+binary = "PoseidonGame"
+tags = ["scripting", "full_cwa", "lobo", "headful", "exclusive"]
+timeout = 360
+assert_timeout = 45
+extra_args = ["--dev", "--no-strict", "--mods-dir", "D:/Arma_CWA", "--mod", "@LoBo", "--width", "1280", "--height", "720"]
