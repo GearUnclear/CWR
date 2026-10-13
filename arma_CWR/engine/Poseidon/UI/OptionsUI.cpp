@@ -34,6 +34,7 @@
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
 #include <Poseidon/UI/GameModule.hpp>
+#include <Poseidon/UI/MissionSaves.hpp> // pause-menu Save/Load for Guerrilla campaigns (issue #79 B4)
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -2043,6 +2044,29 @@ DisplayInterrupt::DisplayInterrupt(ControlsContainer* parent) : Display(parent)
         GetCtrl(IDC_INT_LOAD)->ShowCtrl(false);
         GetCtrl(IDC_INT_RETRY)->ShowCtrl(false);
         //		GetCtrl(IDC_INT_RESTART)->ShowCtrl(false);
+    }
+    else if (IsGuerrillaCampaignMission(Glob.header.filenameReal))
+    {
+        // A Guerrilla campaign is long-lived (issue #79 B4): Save stays
+        // available, and Load appears beside it once the user slot holds a
+        // save (the slot contract, UI/MissionSaves.hpp: save.fps is written by
+        // this Save and by the campaign's Save Game action). The stock
+        // resource stacks Save and Load on one spot, so Load moves one button
+        // width to the right, into the gap before Retry.
+        RString name = GetSaveDirectory() + RString(kSaveSlotUser);
+        Control* save = dynamic_cast<Control*>(GetCtrl(IDC_INT_SAVE));
+        Control* load = dynamic_cast<Control*>(GetCtrl(IDC_INT_LOAD));
+        if (!QIFStream::FileExists(name))
+        {
+            if (load)
+            {
+                load->ShowCtrl(false);
+            }
+        }
+        else if (save && load && save->X() == load->X() && save->Y() == load->Y())
+        {
+            load->SetPos(save->X() + save->W(), save->Y(), load->W(), load->H());
+        }
     }
     else
     {

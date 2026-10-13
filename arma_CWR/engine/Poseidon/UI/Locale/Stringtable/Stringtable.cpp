@@ -390,6 +390,8 @@ class StringTable
 
     RString Localize(int ids);
     RString Localize(const char* str);
+    // Like Localize(const char*), but EMPTY for a missing key and no log line.
+    RString LocalizeQuiet(const char* str);
 
     bool SetLanguage(RString newLang);
 
@@ -592,6 +594,26 @@ RString StringTable::Localize(const char* str)
 #endif
 }
 
+RString StringTable::LocalizeQuiet(const char* str)
+{
+    const StringTableItem& item1 = _tableMission[str];
+    if (!_tableMission.IsNull(item1))
+    {
+        return item1.value;
+    }
+    const StringTableItem& item2 = _tableCampaign[str];
+    if (!_tableCampaign.IsNull(item2))
+    {
+        return item2.value;
+    }
+    const StringTableItem& item3 = _tableGlobal[str];
+    if (!_tableGlobal.IsNull(item3))
+    {
+        return item3.value;
+    }
+    return RString();
+}
+
 // Meyer's singleton accessors - no global constructors!
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wexit-time-destructors"
@@ -632,6 +654,12 @@ RString LocalizeString(int ids)
 RString LocalizeString(const char* str)
 {
     return GStringTable.Localize(str);
+}
+
+RString LocalizeStringOr(const char* key, const char* fallback)
+{
+    RString s = GStringTable.LocalizeQuiet(key);
+    return s.GetLength() > 0 ? s : RString(fallback);
 }
 
 const char* LocalizeStringWithFallback(const char* key, const char* fallback)

@@ -25,6 +25,11 @@ int RegisterString(RString name);
 RString LocalizeString(int ids);
 RString LocalizeString(const char* str);
 
+// Localized value for `key`, or `fallback` when the key is missing or empty.
+// Unlike LocalizeString, a missing key is not logged and never comes back as
+// the cheat build's "!!! MISSING STRING" marker.
+RString LocalizeStringOr(const char* key, const char* fallback);
+
 // Localized value for `key`, or `fallback` verbatim if the key is missing/empty.
 const char* LocalizeStringWithFallback(const char* key, const char* fallback);
 

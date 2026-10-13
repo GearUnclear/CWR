@@ -5,6 +5,7 @@
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>            // CreateSingleMissionBank (per-island description.ext peek)
 #include <Poseidon/UI/MainMenuLayout.hpp>             // SelectMainMenuResourceClass
+#include <Poseidon/UI/MissionSaves.hpp>               // CONTINUE + save-replacement policy (issue #79 B4)
 #include <Poseidon/Game/Guerrilla/FactionSources.hpp> // global U island faction table (issue #54 A1)
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>   // shared with ZoneRegistry::ResolveSideCollisions
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>   // FindGuerrillaFactionEntry (outfit cycler, issue #25)
@@ -54,8 +55,20 @@ constexpr int kIdcOutfitPreview = 154;
 // mannequin, readable names), so the button now shows the current pick
 // ("CHARACTER: (match outfit)" / "CHARACTER: <row label>") and clicking it
 // opens the child. The idc keeps its slot and injection so any resource
-// that authored 155 keeps working. Next free idc: 156.
+// that authored 155 keeps working. 156 is CONTINUE (IDC_GUERRILLA_CONTINUE,
+// the header). Next free idc: 157.
 constexpr int kIdcBody = 155;
+constexpr int kIdcContinue = IDC_GUERRILLA_CONTINUE;
+
+// CONTINUE sits in the bottom button row with Cancel and OK, in the free
+// stretch between the cycler column (x 0.02..0.34) and the reused
+// RscDisplaySelectIsland's Cancel (x 0.60, y 0.90..0.95, both Bohemia's
+// Remaster resource and the Classic one): it is an action like theirs, not
+// another cycler. Shown only while the selected island has a saved campaign.
+constexpr float kContinueX = 0.35f;
+constexpr float kContinueY = 0.90f;
+constexpr float kContinueW = 0.25f;
+constexpr float kContinueH = 0.05f;
 
 // Normalized-screen slots for the injected 2D cyclers — bottom-left column,
 // clear of the island-list notebook that fills the screen centre. The
@@ -841,6 +854,12 @@ Control* GuerrillaNewGame::OnCreateCtrl(int type, int idc, const ParamEntry& cls
                                                                 { return QIFStreamB::FileExist(GetWorldName(name)); });
             const ParamEntry* worlds = Pars.FindEntry("CfgWorlds");
             int sel = 0;
+            // Issue #79 B4: open on the island whose campaign was saved most
+            // recently, so CONTINUE is one click after a restart of the game;
+            // with no Guerrilla save anywhere the menu-world default stands.
+            const MissionSaveProbe saveProbe = DiskMissionSaveProbe();
+            int savedSel = -1;
+            time_t savedTime = 0;
             for (const RString& name : islands)
             {
                 RString description = name;
@@ -866,6 +885,20 @@ Control* GuerrillaNewGame::OnCreateCtrl(int type, int idc, const ParamEntry& cls
                 {
                     sel = index;
                 }
+                RString newest = NewestMissionSave(GuerrillaCampaignSaveDirectory(name), saveProbe);
+                if (newest.GetLength() > 0)
+                {
+                    const time_t t = saveProbe.modTime(newest);
+                    if (savedSel < 0 || t > savedTime)
+                    {
+                        savedSel = index;
+                        savedTime = t;
+                    }
+                }
+            }
+            if (savedSel >= 0)
+            {
+                sel = savedSel;
             }
             if (lbox->GetSize() > 0)
             {
@@ -973,9 +1006,66 @@ void GuerrillaNewGame::InjectFactionCyclers()
         UpdateFactionLabel(slot.idc);
     }
 
+    // CONTINUE (issue #79 B4): the same Quit clone, placed in the bottom
+    // button row; RefreshContinue shows and labels it per island.
+    {
+        ParamClass* cls = s_guerrillaCyclerCfg.AddClass("GuerrillaContinue");
+        cls->Add("idc", kIdcContinue);
+        cls->Add("text", RString(""));
+        cls->Add("style", ST_LEFT);
+        cls->SetBase(quitCls->GetClassInterface());
+        LoadControl(*cls);
+        if (Control* ctrl = dynamic_cast<Control*>(GetCtrl(kIdcContinue)))
+        {
+            ctrl->SetPos(kContinueX, kContinueY, kContinueW, kContinueH);
+        }
+        RefreshContinue();
+    }
+
     // The cyclers exist now, so the preview gate is open; show the body the
     // opening selections resolve to.
     UpdateOutfitPreview();
+}
+
+RString GuerrillaNewGame::IslandDisplayName(RString island) const
+{
+    if (const ParamEntry* worlds = Pars.FindEntry("CfgWorlds"))
+    {
+        if (const ParamEntry* world = worlds->FindEntry(island))
+        {
+            return world->ReadValue("description", island);
+        }
+    }
+    return island;
+}
+
+void GuerrillaNewGame::RefreshContinue()
+{
+    // The campaign's save directory is per island, so the newest of its three
+    // slots is the island's resume point (UI/MissionSaves.hpp has the slot
+    // contract). Resolved here, on the island change, and again by OK's
+    // replacement check, never cached across a launch.
+    _continueSave = NewestMissionSave(GuerrillaCampaignSaveDirectory(_islandForFactions), DiskMissionSaveProbe());
+    IControl* ctrl = GetCtrl(kIdcContinue);
+    if (!ctrl)
+    {
+        return; // first call from the constructor, before injection
+    }
+    if (_continueSave.GetLength() == 0)
+    {
+        ctrl->ShowCtrl(false);
+        return;
+    }
+    RString label = GuerrillaContinueLabel(FormatMissionSaveTime(_continueSave));
+    if (CActiveText* text = dynamic_cast<CActiveText*>(ctrl))
+    {
+        text->SetText(label);
+    }
+    else if (CStatic* text = dynamic_cast<CStatic*>(ctrl))
+    {
+        text->SetText(label);
+    }
+    ctrl->ShowCtrl(true);
 }
 
 void GuerrillaNewGame::UpdateOutfitPreview()
@@ -1233,6 +1323,8 @@ void GuerrillaNewGame::RefreshFactionsForIsland(RString island)
     // ...and the CHARACTER pick gets an explicit revalidation pass, so nothing
     // island-shaped can leave the button or the mannequin stale.
     RevalidateBodySelection();
+    // The campaign saves are per island too (issue #79 B4).
+    RefreshContinue();
 }
 
 void GuerrillaNewGame::RefreshStartTowns()
@@ -1565,11 +1657,41 @@ void GuerrillaNewGame::OnButtonClicked(int idc)
                 CreateMsgBox(MB_BUTTON_OK, message);
                 break;
             }
+            // Issue #79 B4: a new campaign deletes the island's saves (the
+            // IDD_INTRO new-start site), so ask first while one is there.
+            // Cancel keeps the saves and this screen; OK records the consent
+            // the IDD_INTRO site consumes (OnChildDestroyed below).
+            {
+                RString island = SelectedIsland();
+                const MissionSaveProbe probe = DiskMissionSaveProbe();
+                RString dir = GuerrillaCampaignSaveDirectory(island);
+                const bool savesExist = !ExistingMissionSaves(dir, probe).empty();
+                if (DecideSaveReplacement(true, savesExist, false) == SaveReplacement::AskFirst)
+                {
+                    CreateMsgBox(MB_BUTTON_OK | MB_BUTTON_CANCEL,
+                                 GuerrillaReplaceSaveMessage(IslandDisplayName(island),
+                                                             FormatMissionSaveTime(NewestMissionSave(dir, probe))),
+                                 IDD_MSG_GUERRILLA_REPLACE_SAVE);
+                    break;
+                }
+            }
             // The launch itself runs in DisplayMain::OnChildDestroyed
             // (IDD_GUERRILLA_NEW_GAME) after the base Exit(IDC_OK).
             Display::OnButtonClicked(idc);
         }
         break;
+        case kIdcContinue:
+            // Resume the island's newest save. The load itself runs in
+            // DisplayMain::OnChildDestroyed (IDD_GUERRILLA_NEW_GAME, exit
+            // IDC_GUERRILLA_CONTINUE), which reads SelectedContinueSave().
+            // Re-resolved first: the button may have been drawn before a save
+            // was removed outside the game.
+            RefreshContinue();
+            if (_continueSave.GetLength() > 0)
+            {
+                Exit(kIdcContinue);
+            }
+            break;
         default:
             Display::OnButtonClicked(idc);
             break;
@@ -1662,6 +1784,20 @@ void GuerrillaNewGame::OnChildDestroyed(int idd, int exit)
         // plain "OUTFIT" — the token governs the player body again.
         UpdateFactionLabel(kIdcOutfit);
         UpdateOutfitPreview();
+        return;
+    }
+    if (idd == IDD_MSG_GUERRILLA_REPLACE_SAVE)
+    {
+        Display::OnChildDestroyed(idd, exit);
+        if (exit == IDC_OK)
+        {
+            // The player agreed: the IDD_INTRO site deletes this island's
+            // saves once the new campaign is set up, then the launch proceeds
+            // exactly like an OK with nothing to replace.
+            GrantGuerrillaSaveReplacement(SelectedIsland());
+            Display::OnButtonClicked(IDC_OK);
+        }
+        // Cancel: the saves stay and so does this screen.
         return;
     }
     Display::OnChildDestroyed(idd, exit);

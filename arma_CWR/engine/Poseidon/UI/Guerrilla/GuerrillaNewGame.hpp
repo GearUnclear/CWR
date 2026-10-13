@@ -37,6 +37,16 @@ namespace Poseidon
 // constant lives here to keep the module UI-local.
 constexpr int IDD_GUERRILLA_NEW_GAME = 76;
 
+// The CONTINUE button (issue #79 B4). Its idc is also the exit code the
+// display closes with, which DisplayMain::OnChildDestroyed reads as "resume
+// SelectedContinueSave()" instead of IDC_OK's new campaign.
+constexpr int IDC_GUERRILLA_CONTINUE = 156;
+
+// The confirmation message box an OK raises when the selected island already
+// carries a saved campaign (UI/MissionSaves.hpp, DecideSaveReplacement). Clear
+// of the vanilla IDD_MSG_* range (200..204, Core/resincl.hpp).
+constexpr int IDD_MSG_GUERRILLA_REPLACE_SAVE = 210;
+
 // Script-visible globals the launch path VarSets (and mirrors into
 // GStats._campaign._variables so the engine's load-variables pass re-applies
 // them after the mission parses). Read by the template mission's init.sqs.
@@ -364,6 +374,10 @@ class GuerrillaNewGame : public Display
     // campaign, EMPTY while the cycler sits on its "(camp)" default - the
     // launch path publishes nothing then (the SelectedOccupier contract).
     RString SelectedStartTown() const;
+    // The newest save of the selected island's campaign (full path), EMPTY
+    // when it has none; the CONTINUE button is shown exactly when this is
+    // non-empty. Re-resolved on every island change.
+    RString SelectedContinueSave() const { return _continueSave; }
 
   protected:
     void InjectFactionCyclers();
@@ -461,6 +475,15 @@ class GuerrillaNewGame : public Display
     // in practice an island change resets it).
     std::vector<RString> _startTowns;
     int _startTownSel = -1;
+    // Issue #79 B4: the selected island's newest campaign save (see
+    // SelectedContinueSave), behind the CONTINUE button that resumes it.
+    RString _continueSave;
+    // Re-resolve _continueSave for the CURRENT island and show, label or hide
+    // the CONTINUE button (called from RefreshFactionsForIsland and once the
+    // button is injected).
+    void RefreshContinue();
+    // The island's player-facing name (CfgWorlds description, else the class).
+    RString IslandDisplayName(RString island) const;
     // Recompute _startTowns for the CURRENT island (called from
     // RefreshFactionsForIsland), preserving the pick by name; refreshes the
     // label when the control exists.

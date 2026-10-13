@@ -518,6 +518,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_mouse_page.cpp
     UI/test_mp_version_message_localization.cpp
     UI/test_main_menu_layout.cpp
+    UI/test_mission_saves.cpp
     UI/test_notebook_theme.cpp
     UI/test_optionsUI.cpp
     UI/test_addon_content.cpp

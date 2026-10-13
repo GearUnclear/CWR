@@ -111,10 +111,17 @@ goto "loop"
 
 ; ----------------------------------------------------------------------------
 ;  #saveaction - the Save Game addAction handler. The diary line is written
-;  BEFORE saveGame so the snapshot carries it.
+;  BEFORE the save so the snapshot carries it.
+;
+;  SAVE-SLOT CONTRACT (issue #79 B4; engine side: UI/MissionSaves.hpp):
+;  gmSaveGame writes save.fps, the user slot the pause menu's Load and the
+;  death dialog's Load read, and mirrors it to autosave.fps, the slot Retry
+;  reads. The stock saveGame wrote only autosave.fps, so Load never found a
+;  campaign save. The GUERRILLA screen's Continue resumes the newest of
+;  save.fps, autosave.fps and continue.fps (the snapshot an Abort writes).
+;  The action re-reads this file on every use, so old saves get it too.
 ; ----------------------------------------------------------------------------
 #saveaction
 gmJournalNote ["Record kept.", "", "plain"]
-saveGame
-hint "Guerrilla campaign saved."
+? gmSaveGame : hint "Guerrilla campaign saved."
 exit

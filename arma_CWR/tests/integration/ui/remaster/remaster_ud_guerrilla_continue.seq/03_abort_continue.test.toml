@@ -1,0 +1,12 @@
+# Issue #79 B4, phase 3 of 5 (see 01_save_action.test.toml).
+# no_autotest: under --autotest a mission Abort quits the whole game
+# (DisplayMain, IDD_MISSION + IDC_MAIN_QUIT); this phase needs the real
+# Abort -> main menu path. --focus keeps the menu-launched session running
+# while its window is in the background.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "savegame", "headless"]
+timeout = 360
+assert_timeout = 180
+no_autotest = true
+extra_args = ["--dev", "--focus"]

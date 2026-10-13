@@ -13,6 +13,7 @@
 #include <Poseidon/Audio/DynSound.hpp>
 #include <Poseidon/UI/DisplayUI.hpp>
 #include <Poseidon/UI/DisplayUICommon.hpp>
+#include <Poseidon/UI/MissionSaves.hpp> // save slots (issue #79 B4)
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/StrFormat.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -1144,8 +1145,21 @@ void DisplayMission::OnChildDestroyed(int idd, int exit)
             }
             else if (exit == IDC_INT_SAVE)
             {
-                RString name = GetSaveDirectory() + RString("save.fps");
-                GWorld->SaveBin(name, IDS_SAVE_GAME);
+                // THE SAVE/LOAD SEAM (issue #79 B4, UI/MissionSaves.hpp):
+                // save.fps is the user slot. This Save and the Guerrilla
+                // campaign's Save Game action (gmSaveGame) both write it; the
+                // Load below and the mission-end dialog's Load both read it.
+                // autosave.fps (saveGame checkpoints; in a Guerrilla campaign
+                // a mirror of every save) is Retry's slot, continue.fps
+                // (SaveContinue on Abort) the quit snapshot the GUERRILLA
+                // screen's Continue also weighs.
+                RString name = GetSaveDirectory() + RString(kSaveSlotUser);
+                if (GWorld->SaveBin(name, IDS_SAVE_GAME) && IsGuerrillaCampaignMission(Glob.header.filenameReal))
+                {
+                    // a Guerrilla campaign's Retry returns to its last save of
+                    // either kind, the gmSaveGame mirror
+                    CopyFileUtf8(name, GetSaveDirectory() + RString(kSaveSlotRetry), false);
+                }
             }
             else if (exit == IDC_INT_LOAD)
             {
@@ -2053,16 +2067,12 @@ bool StartAutoTest(RString* failReason)
         return fail(DescribeErrorLatch(GetMaxError(), GetMaxErrorMessage()));
     }
 
-    // remove temporary files
+    // remove temporary files; a test boot is always a fresh start and never
+    // asks (the save slots and their policy: UI/MissionSaves.hpp)
     RString dir = GetSaveDirectory();
     RString weapons = dir + RString("weapons.cfg");
     ::DeleteFile(weapons);
-    RString save = dir + RString("continue.fps");
-    ::DeleteFile(save);
-    save = dir + RString("autosave.fps");
-    ::DeleteFile(save);
-    save = dir + RString("save.fps");
-    ::DeleteFile(save);
+    DeleteMissionSaves(dir);
 
     Display* options = dynamic_cast<Display*>(GWorld->Options());
     if (!options)

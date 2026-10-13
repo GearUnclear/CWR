@@ -46,6 +46,7 @@ using namespace Poseidon;
 #include <Poseidon/UI/Guerrilla/GuerrillaModule.hpp>
 #include <Poseidon/UI/Guerrilla/GuerrillaNewGame.hpp>
 #include <Poseidon/UI/MainMenuLayout.hpp>
+#include <Poseidon/UI/MissionSaves.hpp> // save slots + new-start replacement policy (issue #79 B4)
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -544,6 +545,70 @@ void __cdecl CreateOutro(Display* disp, EndMode end)
     disp->CreateChild(new DisplayOutro(disp, end));
 }
 
+// Issue #79 B4 message boxes DisplayMain raises before a new start deletes a
+// Guerrilla campaign's saves without the player having agreed on the GUERRILLA
+// screen: IDD_INTRO reached from another route (the Single Missions browser),
+// and the debriefing's restart. Next to IDD_MSG_GUERRILLA_REPLACE_SAVE (210,
+// the GUERRILLA screen's own prompt).
+constexpr int IDD_MSG_GUERRILLA_NEW_START = 211;
+constexpr int IDD_MSG_GUERRILLA_RESTART = 212;
+
+// The tail every fresh mission start shares once the world is set up and the
+// saves are dealt with: the briefing when the mission has one, else straight
+// into the mission (the IDD_INTEL_GETREADY / StartMission path).
+static void StartBriefingOrMission(Display* disp)
+{
+    RString briefing = GetBriefingFile();
+    if (briefing.GetLength() > 0)
+    {
+        disp->CreateChild(new DisplayGetReady(disp));
+    }
+    else
+    {
+        disp->CreateChild(new DisplayMission(disp));
+    }
+}
+
+// Resume a Guerrilla campaign from `save` (the GUERRILLA screen's CONTINUE),
+// the IDD_SINGLE_MISSION IDC_SINGLE_LOAD path specialised to the island's
+// template: mount a banked template first so the save's mission header
+// resolves (World::Serialize reparses its description.ext), apply the
+// template's view distance, load, run. False when the save does not load.
+static bool ResumeGuerrillaCampaign(Display* disp, RString island, RString save)
+{
+    if (save.GetLength() == 0 || !QIFStream::FileExists(save))
+    {
+        return false;
+    }
+    CurrentTemplate.Clear();
+    if (GWorld->UI())
+    {
+        GWorld->UI()->Init();
+    }
+    RString missionBase = GuerrillaTemplateMissionBase(island);
+    if (FilePathExists(missionBase + RString(".pbo")))
+    {
+        RString bank = CreateSingleMissionBank(missionBase);
+        if (bank.GetLength() > 0)
+        {
+            CurrentMissionViewDistance = MissionLanguageDetector::DetectPreview(bank).missionViewDistance;
+        }
+    }
+    else
+    {
+        CurrentMissionViewDistance =
+            MissionLanguageDetector::DetectPreview(missionBase + RString("\\")).missionViewDistance;
+    }
+    ApplyCurrentMissionViewDistance();
+    if (!GWorld->LoadBin(save, IDS_LOAD_GAME))
+    {
+        return false;
+    }
+    LOG_INFO(Core, "Guerrilla: resumed the '{}' campaign from {}", (const char*)island, (const char*)save);
+    disp->CreateChild(new DisplayMission(disp, false, false));
+    return true;
+}
+
 void DisplayMain::OnChildDestroyed(int idd, int exit)
 {
     switch (idd)
@@ -563,14 +628,10 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 int value = lbox->GetValue(sel);
                 if (value == -2)
                 {
-                    // remove continue.fps
-                    RString dir = GetCampaignSaveDirectory(campaign.campaignName);
-                    RString save = dir + RString("continue.fps");
-                    ::DeleteFile(save);
-                    save = dir + RString("autosave.fps");
-                    ::DeleteFile(save);
-                    save = dir + RString("save.fps");
-                    ::DeleteFile(save);
+                    // new-start replacement policy (UI/MissionSaves.hpp): a
+                    // stock campaign deletes its saves without asking
+                    ApplySaveReplacement(GetCampaignSaveDirectory(campaign.campaignName), false, false,
+                                         DiskMissionSaveProbe());
 
                     RString name = campaign.campaignName;
                     Display::OnChildDestroyed(idd, exit);
@@ -588,14 +649,9 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 }
                 else
                 {
-                    // remove continue.fps
-                    RString dir = GetCampaignSaveDirectory(campaign.campaignName);
-                    RString save = dir + RString("continue.fps");
-                    ::DeleteFile(save);
-                    save = dir + RString("autosave.fps");
-                    ::DeleteFile(save);
-                    save = dir + RString("save.fps");
-                    ::DeleteFile(save);
+                    // replaying an earlier campaign mission is a new start too
+                    ApplySaveReplacement(GetCampaignSaveDirectory(campaign.campaignName), false, false,
+                                         DiskMissionSaveProbe());
 
                     int iBattle = value >> 16;
                     int iMission = value & 0xffff;
@@ -1005,6 +1061,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 if (!banked && !unbanked)
                 {
                     // Stay on the main menu, tell the player what's missing.
+                    ConsumeGuerrillaSaveReplacement(RString()); // no start, no consent
                     Display::OnChildDestroyed(idd, exit);
                     char buffer[512];
                     snprintf(buffer, sizeof(buffer), "Guerrilla Mode template mission not found:\n%s",
@@ -1036,6 +1093,7 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                     {
                         // Mount failed (corrupt/locked PBO) — back to the
                         // menu, but tell the player instead of failing mute.
+                        ConsumeGuerrillaSaveReplacement(RString()); // no start, no consent
                         Display::OnChildDestroyed(idd, exit);
                         char msg[512];
                         snprintf(msg, sizeof(msg), "Guerrilla Mode template failed to mount:\n%s.pbo",
@@ -1148,14 +1206,69 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 ApplyCurrentMissionViewDistance();
                 CreateChild(new DisplayIntro(this));
             }
+            else if (exit == IDC_GUERRILLA_CONTINUE)
+            {
+                // CONTINUE (issue #79 B4): resume the island's newest save
+                // instead of starting a campaign. Read before the base call
+                // releases _child.
+                GuerrillaNewGame* disp = dynamic_cast<GuerrillaNewGame*>((ControlsContainer*)_child);
+                RString island = disp ? disp->SelectedIsland() : RString();
+                RString save = disp ? disp->SelectedContinueSave() : RString();
+                Display::OnChildDestroyed(idd, exit);
+                // a resume replaces nothing: drop any consent left over
+                ConsumeGuerrillaSaveReplacement(RString());
+                if (!ResumeGuerrillaCampaign(this, island, save))
+                {
+                    LOG_WARN(Core, "Guerrilla: could not resume the '{}' campaign from '{}'", (const char*)island,
+                             (const char*)save);
+                    StartRandomCutscene(Glob.header.worldname);
+                    CreateMsgBox(MB_BUTTON_OK, GuerrillaContinueFailedMessage());
+                }
+            }
             else
             {
+                // Cancel: a consent recorded by the replace prompt must not
+                // outlive the screen that asked for it
+                ConsumeGuerrillaSaveReplacement(RString());
                 Display::OnChildDestroyed(idd, exit);
+            }
+            break;
+        case IDD_MSG_GUERRILLA_NEW_START:
+            // The fallback prompt raised by IDD_INTRO below. The mission is
+            // already set up; OK replaces the saves and runs it, Cancel keeps
+            // them and returns to the menu.
+            Display::OnChildDestroyed(idd, exit);
+            if (exit == IDC_OK)
+            {
+                DeleteMissionSaves(GetSaveDirectory());
+                StartBriefingOrMission(this);
+            }
+            else
+            {
+                StartRandomCutscene(Glob.header.worldname);
+            }
+            break;
+        case IDD_MSG_GUERRILLA_RESTART:
+            // The debriefing restart's prompt: OK replaces the saves and
+            // restarts, Cancel goes on to the outro like the debriefing's
+            // other exit.
+            Display::OnChildDestroyed(idd, exit);
+            if (exit == IDC_OK)
+            {
+                DeleteMissionSaves(GetSaveDirectory());
+                StartBriefingOrMission(this);
+            }
+            else
+            {
+                CreateOutro(this, _end);
             }
             break;
         case IDD_INTRO:
         {
             Display::OnChildDestroyed(idd, exit);
+            // The GUERRILLA screen's consent is for exactly this start: take
+            // it now so no failure branch below can leave it behind.
+            const bool replaceConfirmed = ConsumeGuerrillaSaveReplacement(Glob.header.worldname);
             GWorld->DestroyMap(IDC_OK);
 
             CurrentTemplate.Clear();
@@ -1203,24 +1316,18 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
             RString weapons = GetSaveDirectory() + RString("weapons.cfg");
             ::DeleteFile(weapons);
 
-            // remove continue.fps
-            RString dir = GetSaveDirectory();
-            RString save = dir + RString("continue.fps");
-            ::DeleteFile(save);
-            save = dir + RString("autosave.fps");
-            ::DeleteFile(save);
-            save = dir + RString("save.fps");
-            ::DeleteFile(save);
-
-            RString briefing = GetBriefingFile();
-            if (briefing.GetLength() > 0)
+            // A new start deletes the previous run's saves (the replacement
+            // policy, UI/MissionSaves.hpp). A Guerrilla campaign save goes
+            // only with the player's consent: given on the GUERRILLA screen,
+            // or asked for here when the template came another way.
+            if (!ApplySaveReplacement(GetSaveDirectory(), IsGuerrillaCampaignMission(Glob.header.filenameReal),
+                                      replaceConfirmed, DiskMissionSaveProbe()))
             {
-                CreateChild(new DisplayGetReady(this));
+                CreateMsgBox(MB_BUTTON_OK | MB_BUTTON_CANCEL, GuerrillaRestartSaveMessage(),
+                             IDD_MSG_GUERRILLA_NEW_START);
+                break;
             }
-            else
-            {
-                goto StartMission;
-            }
+            StartBriefingOrMission(this);
         }
         break;
         case IDD_INTEL_GETREADY:
@@ -1243,7 +1350,6 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 StartRandomCutscene(Glob.header.worldname);
                 break;
             }
-        StartMission:
             CreateChild(new DisplayMission(this));
         }
         break;
@@ -1298,25 +1404,17 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
                 RString weapons = GetSaveDirectory() + RString("weapons.cfg");
                 ::DeleteFile(weapons);
 
-                // remove continue.fps
-                RString dir = GetSaveDirectory();
-                RString save = dir + RString("continue.fps");
-                ::DeleteFile(save);
-                save = dir + RString("autosave.fps");
-                ::DeleteFile(save);
-                save = dir + RString("save.fps");
-                ::DeleteFile(save);
-
-                RString briefing = GetBriefingFile();
-                if (briefing.GetLength() > 0)
+                // the replacement policy (UI/MissionSaves.hpp): a restarted
+                // Guerrilla campaign asks before its saves go
+                if (!ApplySaveReplacement(GetSaveDirectory(), IsGuerrillaCampaignMission(Glob.header.filenameReal),
+                                          false, DiskMissionSaveProbe()))
                 {
-                    CreateChild(new DisplayGetReady(this));
+                    CreateMsgBox(MB_BUTTON_OK | MB_BUTTON_CANCEL, GuerrillaRestartSaveMessage(),
+                                 IDD_MSG_GUERRILLA_RESTART);
                     break;
                 }
-                else
-                {
-                    goto StartMission;
-                }
+                StartBriefingOrMission(this);
+                break;
             }
         StartOutro:
             CreateOutro(this, _end);

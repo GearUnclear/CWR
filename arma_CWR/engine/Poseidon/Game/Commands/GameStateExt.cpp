@@ -430,6 +430,7 @@ GameValue PlayerClearInjured(const GameState* state);
 GameValue PoolClearMagazines(const GameState* state);
 GameValue PoolClearWeapons(const GameState* state);
 GameValue SaveGame(const GameState* state);
+GameValue GuerrillaSaveGame(const GameState* state);
 GameValue ScriptExit(const GameState* state);
 GameValue SideCivilian(const GameState* state);
 GameValue SideEast(const GameState* state);
@@ -893,6 +894,7 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameSide, "sideFriendly", SideFriendly),
 
         GameNular(GameNothing, "saveGame", SaveGame),
+        GameNular(GameBool, "gmSaveGame", GuerrillaSaveGame),
         GameNular(GameNothing, "exit", ScriptExit),
 
         GameNular(GameNothing, "enableEndDialog", EnableEndDialog),

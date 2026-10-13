@@ -1,0 +1,13 @@
+# Issue #79 B4, phase 1 of 5: save a Guerrilla campaign through the REAL
+# route. REMASTER LANE (issue #67): data_dir is the gitignored junction to a
+# setup-prepared SHADOW of the Steam Remastered folder (never the Steam install
+# itself); see remaster_ud_menu.test.toml for how to build it, and rerun setup
+# after a stringtable or gmcore change. The five phases are fresh game launches
+# that share one isolated POSEIDON_USER_DIR (Trident's .seq contract), so the
+# saves under test never touch a real profile.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "savegame", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev"]

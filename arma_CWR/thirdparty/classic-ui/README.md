@@ -10,6 +10,10 @@ Remastered Demo's `BIN` directory (Steam app 4819000), as locally available on
 is the existing UD Classic adaptation: the Options translations extracted from
 the Demo's stringtable, with the temporary zoom action label added. Its changes
 remain under APL-SA. The installer also copies the license notice into `BIN`.
+UD's own interface strings (lean actions, Arma 3 controls, the Guerrilla
+campaign's Continue and save-replacement prompts, the `STR_UD_GM_*` keys) live
+in the same file, because on the official Remaster `setup-guerrilla.ps1` builds
+`bin/STRINGTABLE_UD.utf8.csv` from whichever of its keys Bohemia's shards lack.
 
 No game executables, PBOs, models, textures or sounds are included. These headers
 refer to models and sounds supplied by the user's game installation.

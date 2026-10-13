@@ -57,7 +57,7 @@
     {
       "destination": "bin/STRINGTABLE_OPTIONS.utf8.csv",
       "source": "thirdparty/classic-ui/STRINGTABLE_OPTIONS.utf8.csv",
-      "sha256": "82522e475888fee3187700bca9721f657198354536fbcf446bf770712265f5ed",
+      "sha256": "671560ee5874a744ef2109ba154bc679ba84f613f0c32081b513d96bb00c6818",
       "remaster": "string-gap"
     },
     {

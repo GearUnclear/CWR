@@ -1,0 +1,7 @@
+# Issue #79 B4, phase 5 of 5 (see 01_save_action.test.toml).
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["ui", "guerrilla", "remaster_ud", "savegame", "headless"]
+timeout = 300
+assert_timeout = 180
+extra_args = ["--dev"]

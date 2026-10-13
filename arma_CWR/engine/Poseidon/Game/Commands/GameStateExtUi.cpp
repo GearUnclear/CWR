@@ -32,6 +32,8 @@
 
 #include <Poseidon/Game/Chat.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
+#include <Poseidon/UI/MissionSaves.hpp>         // gmSaveGame slot contract (issue #79 B4)
+#include <Poseidon/IO/Filesystem/Utf8Paths.hpp> // CopyFileUtf8 (gmSaveGame's Retry mirror)
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 
 #include <Poseidon/Game/UiActions.hpp>
@@ -2247,6 +2249,32 @@ GameValue SaveGame(const GameState* state)
     RString name = GetSaveDirectory() + RString("autosave.fps");
     GWorld->SaveBin(name, IDS_AUTOSAVE_GAME);
     return NOTHING;
+}
+
+// gmSaveGame - the Guerrilla campaign's "Save Game" action (issue #79 B4,
+// guerrilla-mode/core/scripts/campaign.sqs). The stock saveGame above is a
+// mission checkpoint: it writes only autosave.fps, which nothing but Retry
+// reads, so a campaign saved through it could not be loaded from the pause
+// menu. This writes the USER slot (save.fps), the file the pause menu's and
+// the mission-end dialog's Load read, then mirrors it to autosave.fps so Retry
+// after a death returns to the same point. The slot contract lives in
+// UI/MissionSaves.hpp. Returns true when save.fps was written; false (and
+// writes nothing) while the player is dead, like saveGame.
+GameValue GuerrillaSaveGame(const GameState* state)
+{
+    Person* player = GWorld->GetRealPlayer();
+    if (!player || player->IsDammageDestroyed())
+    {
+        return false;
+    }
+    RString dir = GetSaveDirectory();
+    RString user = dir + RString(kSaveSlotUser);
+    if (!GWorld->SaveBin(user, IDS_SAVE_GAME))
+    {
+        return false;
+    }
+    CopyFileUtf8(user, dir + RString(kSaveSlotRetry), false);
+    return true;
 }
 
 GameValue ShowMap(const GameState* state, GameValuePar oper1)
