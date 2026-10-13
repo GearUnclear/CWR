@@ -16,6 +16,38 @@
 //                                  occupier lost for good.  The numbers are
 //                                  the stored values even when inert (all 0
 //                                  in a campaign that never ran the service).
+//                                  Five director slots follow the ten
+//                                  documented ones (phase 3): [10]
+//                                  townsEver (the distinct towns taken),
+//                                  [11] urgent (the latched zone names),
+//                                  [12] cooldowns ([[zone, seconds left]]),
+//                                  [13] the operation counter, [14] the
+//                                  token clock (s toward the next token).
+//   gmOccupierOps               -> one row per pending or active operation
+//                                  (every CounterAttack record, legacy ones
+//                                  included): [id, kind, origin, package,
+//                                  source, target, phase, bodies, hulls,
+//                                  eta s, birthReason].  id is the director's
+//                                  operation id (0 for a legacy record);
+//                                  kind "RETAKE" / "BASE" / "HQ_ASSAULT" /
+//                                  "ALARM" / "REINFORCE" / "STRIKE"; origin
+//                                  "LEGACY" / "DIRECTOR" / "PUSHOUT" /
+//                                  "WAVE" / "ALARM"; package "FOOT" /
+//                                  "TRUCK" / ...; source and target zone
+//                                  names; phase "SCHEDULED" / "TRAVEL" /
+//                                  "HOLDING" / "LIVE"; bodies the infantry
+//                                  (the planned size while scheduled); hulls
+//                                  the live hulls (0 / 1); eta the seconds
+//                                  left on the abstract clock (scheduled or
+//                                  travelling; 0 otherwise); birthReason the
+//                                  spawn reason ("base", "route", ...; ""
+//                                  while unborn).
+//   gmOccupierIntel             -> the director's sightings (6.1, D9): one
+//                                  row per zone with a report, [zone, count,
+//                                  ageSeconds, [positions...]]; zone "" for
+//                                  reports outside every zone; positions in
+//                                  getPos order [x, y, z] as the groups
+//                                  reported them.
 //   gmForcesTune [key, value]   runtime override of one tuning value (tests,
 //                                  debugging), with test ranges; keys:
 //                                  "enabled" (the occupierForces key; turning
@@ -29,8 +61,15 @@
 //                                  (0..1), "waveWarLevel" (0..3),
 //                                  "meanStanding" (0..100, the refill
 //                                  factor's input until per-town standing
-//                                  exists).  Returns true when the key is
-//                                  known.
+//                                  exists); the director (phase 3):
+//                                  "wakeTowns" (1..99), "opsMax" (0..6),
+//                                  "heatFull" (1..100), "urgentHeat"
+//                                  (1..100), "townCooldown" (0..86400 s),
+//                                  "pushoutQuiet" (0..86400 s), "retakeMin"
+//                                  (1..12), "lethalityMargin" (0..3),
+//                                  "urgentCostShare" (1..3), "intelDecay"
+//                                  (1..86400 s).  Returns true when the key
+//                                  is known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
 //                                                re-steps the band (no-op
@@ -39,10 +78,18 @@
 //                                                (0.01..48 h);
 //                                  "wave"        parks a wave request for
 //                                                the wave phase (logged, no
-//                                                effect yet).
+//                                                effect yet);
+//                                  "cooldown"    ["cooldown", zoneIndex,
+//                                                seconds] rests a zone as a
+//                                                repel would (false for an
+//                                                unknown zone).
 //                                  Returns true when what is known.
 
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
+
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
@@ -86,6 +133,99 @@ static GameValue GmOccupierForces(const GameState* state)
     }
     row[8] = excludedValue;
     row[9] = (float)of.Lost();
+    // the director (phase 3), after the ten documented slots
+    GameValue everValue = state->CreateGameValue(GameArray);
+    GameArrayType& ever = everValue;
+    for (int i = 0; i < of.TownsEverCount(); i++)
+    {
+        ever.Add(GameStringType(of.TownsEverName(i)));
+    }
+    row.Add(everValue);
+    GameValue urgentValue = state->CreateGameValue(GameArray);
+    GameArrayType& urgent = urgentValue;
+    for (int i = 0; i < of.UrgentCount(); i++)
+    {
+        urgent.Add(GameStringType(of.UrgentName(i)));
+    }
+    row.Add(urgentValue);
+    GameValue coolValue = state->CreateGameValue(GameArray);
+    GameArrayType& cool = coolValue;
+    for (int i = 0; i < of.CooldownCount(); i++)
+    {
+        GameValue pairValue = state->CreateGameValue(GameArray);
+        GameArrayType& pair = pairValue;
+        pair.Resize(2);
+        pair[0] = GameStringType(of.CooldownZone(i));
+        pair[1] = of.CooldownLeft(i);
+        cool.Add(pairValue);
+    }
+    row.Add(coolValue);
+    row.Add(GameValue((float)of.OpCounter()));
+    row.Add(GameValue(of.TokenClock()));
+    return value;
+}
+
+static GameValue GmOccupierOps(const GameState* state)
+{
+    const CounterAttack& ca = CounterAttack::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < ca.Count(); i++)
+    {
+        const CounterAttack::Record* r = ca.Get(i);
+        if (!r)
+        {
+            continue;
+        }
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(11);
+        row[0] = (float)r->opId;
+        row[1] = GameStringType(ForcePackages::KindName(r->kind));
+        row[2] = GameStringType(ForcePackages::OriginName(r->origin));
+        row[3] = GameStringType(ForcePackages::PackageName(r->package));
+        row[4] = GameStringType(r->source);
+        row[5] = GameStringType(r->target);
+        row[6] = GameStringType(CounterAttack::PhaseName(r->phase));
+        row[7] = (float)(r->phase == CAScheduled ? r->size : r->strength);
+        row[8] = (float)CounterAttack::LiveHullOf(*r);
+        row[9] = (r->phase == CAScheduled || r->phase == CATravel) && r->clock > 0 ? r->clock : 0.0f;
+        row[10] = GameStringType(CounterAttack::SpawnReasonName(r->spawnReason));
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static GameValue GmOccupierIntel(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < of.SightingRows(); i++)
+    {
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(4);
+        row[0] = GameStringType(of.SightingZone(i));
+        row[1] = (float)of.SightingCount(i);
+        row[2] = of.SightingAge(i);
+        GameValue posValue = state->CreateGameValue(GameArray);
+        GameArrayType& positions = posValue;
+        const AutoArray<Vector3>* p = of.SightingPositions(i);
+        for (int k = 0; p && k < p->Size(); k++)
+        {
+            // script order [easting, northing, elevation]
+            GameValue xyzValue = state->CreateGameValue(GameArray);
+            GameArrayType& xyz = xyzValue;
+            xyz.Resize(3);
+            xyz[0] = (*p)[k].X();
+            xyz[1] = (*p)[k].Z();
+            xyz[2] = (*p)[k].Y();
+            positions.Add(xyzValue);
+        }
+        row[3] = posValue;
+        rows.Add(rowValue);
+    }
     return value;
 }
 
@@ -145,6 +285,46 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     {
         of.SetMeanStanding(v);
     }
+    else if (stricmp(key, "wakeTowns") == 0)
+    {
+        t.wakeTowns = (int)ClampF(v, 1, 99);
+    }
+    else if (stricmp(key, "opsMax") == 0)
+    {
+        t.opsMax = (int)ClampF(v, 0, 6);
+    }
+    else if (stricmp(key, "heatFull") == 0)
+    {
+        t.heatFull = ClampF(v, 1, 100);
+    }
+    else if (stricmp(key, "urgentHeat") == 0)
+    {
+        t.urgentHeat = ClampF(v, 1, 100);
+    }
+    else if (stricmp(key, "townCooldown") == 0)
+    {
+        t.townCooldown = ClampF(v, 0, 86400);
+    }
+    else if (stricmp(key, "pushoutQuiet") == 0)
+    {
+        t.pushoutQuiet = ClampF(v, 0, 86400);
+    }
+    else if (stricmp(key, "retakeMin") == 0)
+    {
+        t.retakeMin = (int)ClampF(v, 1, 12);
+    }
+    else if (stricmp(key, "lethalityMargin") == 0)
+    {
+        t.lethalityMargin = ClampF(v, 0, 3);
+    }
+    else if (stricmp(key, "urgentCostShare") == 0)
+    {
+        t.urgentCostShare = ClampF(v, 1, 3);
+    }
+    else if (stricmp(key, "intelDecay") == 0)
+    {
+        t.intelDecay = ClampF(v, 1, 86400);
+    }
     else
     {
         return GameValue(false);
@@ -176,6 +356,18 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
     {
         of.RequestWave();
     }
+    else if (stricmp(what, "cooldown") == 0)
+    {
+        // ["cooldown", zoneIndex, seconds]: rest a zone (tests)
+        const float seconds = args.Size() >= 3 ? ArgValue(args[2]) : 0.0f;
+        const ZoneRecord* z = ZoneRegistry::Instance().GetZone((int)v);
+        if (!z || seconds <= 0)
+        {
+            return GameValue(false);
+        }
+        of.ForceCooldown(z->name, seconds);
+        LOG_INFO(Core, "OccupierForces: {} forced to rest {:.0f} s", (const char*)z->name, (double)seconds);
+    }
     else
     {
         return GameValue(false);
@@ -186,6 +378,8 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
 INIT_MODULE(GuerrillaOccupierForces, 3)
 {
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierForces", GmOccupierForces));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierOps", GmOccupierOps));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierIntel", GmOccupierIntel));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
 }

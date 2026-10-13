@@ -68,6 +68,10 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // The occupier forces layer (OCCUPIER-FORCES.md, phase 3): the theatre
+    // pool and the director that answers flips from the second distinct town
+    // on, at real speeds.  Abel opts in; other templates follow in phase 7.
+    occupierForces = 1;
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
     // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;

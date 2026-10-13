@@ -126,6 +126,10 @@
     "../engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp": [
       "garrison"
     ],
+    "../engine/Poseidon/Game/Guerrilla/ForcePackages.cpp": [
+      "garrison",
+      "escalation"
+    ],
     "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
       "garrison"
     ],

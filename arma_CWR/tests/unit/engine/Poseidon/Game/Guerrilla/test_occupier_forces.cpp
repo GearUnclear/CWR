@@ -5,6 +5,13 @@
 // standing factor), banded hysteresis (no SPENT / THIN flapping, one SPENT
 // exit during recovery), Draw and the floor, control, the war-level split,
 // the conservation ledger, the save round trip and the old-save derivation.
+// Phase 3, the director: invariant W, the heat candidates and their roll,
+// urgency with hysteresis, tokens and the born-operation slots, one launch
+// per tick, refusals refunded, repel and cancel cooldowns (+15 heat unless a
+// RED edge paid it), hull refunds, push-out only when STRONG, anti-1:1
+// pacing, intel (D9: the choice ignores the true census; a dead group's last
+// report is kept, then decays), the won freeze, and the director state
+// across a save.
 // Pure: the registry is built from inline config, the service is driven
 // through Activate / Tick with no world.
 
@@ -12,6 +19,8 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Core/SaveVersion.hpp>
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -19,6 +28,7 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <string.h>
 #include <string>
@@ -901,4 +911,809 @@ TEST_CASE("OccupierForces - deep losses mark both wave thresholds fired on deriv
     CHECK(f.of.WavesFired() == 2);
     CHECK(f.of.Pool() == 10); // round(24 * 0.4) = round(9.6)
     CHECK(f.of.Band() == OFBandStretched);
+}
+
+// ---------------------------------------------------------------------------
+// the director (phase 3)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// CounterAttack::LaunchFunded stand-in: records the orders, holds a record on
+// each target until Resolve, reports a settable number of born operations
+struct FakeLauncher final : DirectorLauncher
+{
+    std::vector<CounterAttackOrder> orders;
+    std::vector<int> records; // targets with a record
+    int born = 0;
+    bool refuse = false;
+
+    bool Launch(const CounterAttackOrder& order) override
+    {
+        if (refuse)
+        {
+            return false;
+        }
+        orders.push_back(order);
+        records.push_back(order.target);
+        return true;
+    }
+    int BornOps() const override { return born; }
+    bool HasRecord(int zoneIndex) const override
+    {
+        return std::find(records.begin(), records.end(), zoneIndex) != records.end();
+    }
+    void Resolve(int zoneIndex)
+    {
+        records.erase(std::remove(records.begin(), records.end(), zoneIndex), records.end());
+    }
+};
+
+// the director's view of a fixture: every occupier base spares its stored
+// reserve less a quarter of garrisonMax (CounterAttack::Spare)
+DirectorView ViewOf(const ZoneRegistry& registry)
+{
+    DirectorView v;
+    const int n = registry.NZones();
+    v.alert.Resize(n);
+    v.spare.Resize(n);
+    CounterAttackTuning t;
+    for (int i = 0; i < n; i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        v.alert[i] = 0;
+        v.spare[i] = 0;
+        if (z && stricmp(z->owner, registry.OccupierSide()) == 0 && stricmp(z->type, "CITY") != 0)
+        {
+            v.spare[i] = CounterAttack::Spare(t, z->garrison, 0, z->garrisonMax, false);
+        }
+    }
+    return v;
+}
+
+// a town flip as the registry makes it (owner, stamp, +40 heat) reported to
+// the director as CounterAttack's listener hook would
+bool FlipTown(Fixture& f, const char* name, int minute)
+{
+    ZoneRecord& z = f.Z(name);
+    z.owner = f.registry.ResistanceSide();
+    z.flipDay = 1;
+    z.flipMinute = minute;
+    z.heat = z.heat + 40.0f > 100.0f ? 100.0f : z.heat + 40.0f;
+    return f.of.NoteTownFlipped(f.registry, f.registry.FindZoneIndex(name));
+}
+
+ForcePackageCatalogue TruckCatalogue()
+{
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTruck].className = "Truck5t";
+    cat.hulls[FPTruck].maxSpeedKmh = 80;
+    cat.hulls[FPTruck].cargo = 12;
+    cat.hulls[FPTruck].crew = 1;
+    return cat;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - director knobs default to the knob table", "[game][guerrilla][occupierforces]")
+{
+    OccupierForcesTuning t;
+    CHECK(t.wakeTowns == 2);
+    CHECK(t.opsMax == 2);
+    CHECK(t.heatFull == Approx(40.0f));
+    CHECK(t.urgentHeat == Approx(50.0f));
+    CHECK(t.townCooldown == Approx(1800.0f));
+    CHECK(t.pushoutQuiet == Approx(1800.0f));
+    CHECK(t.retakeMin == 4);
+    CHECK(t.lethalityMargin == Approx(1.2f));
+    CHECK(t.urgentCostShare == Approx(1.5f));
+    CHECK(t.intelDecay == Approx(1800.0f));
+    CHECK(OccupierForces::UrgentExitHeat == Approx(35.0f));
+    CHECK(OccupierForces::OfferedPackages == ForcePackages::Phase3Packages);
+
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; forcesWakeTowns = 1; forcesOpsMax = 9; forcesHeatFull = 30; "
+                      "forcesRetakeMin = 6; forcesLethalityMargin = 0.5; forcesIntelDecay = 600;"));
+    const OccupierForcesTuning& r = f.of.Tuning();
+    CHECK(r.wakeTowns == 2); // repaired into 2..99
+    CHECK(r.opsMax == 6);
+    CHECK(r.heatFull == Approx(30.0f));
+    CHECK(r.retakeMin == 6);
+    CHECK(r.lethalityMargin == Approx(1.0f));
+    CHECK(r.intelDecay == Approx(600.0f));
+}
+
+TEST_CASE("OccupierForces - W: a base and then town 1 stay DORMANT (legacy roll); town 2 wakes",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+
+    // a base flips first: not a town, nothing counted
+    f.GiveToResistance("Post");
+    AutoArray<ZoneEventRecord> fired;
+    ZoneEventRecord ev;
+    ev.type = ZECaptured;
+    ev.zoneIndex = f.registry.FindZoneIndex("Post");
+    fired.Add(ev);
+    f.of.NoteZoneEvents(f.registry, fired);
+    CHECK(f.of.Posture() == OFDormant);
+    CHECK(f.of.TownsEverCount() == 0);
+
+    // town 1: the director does not take it (CounterAttack rolls Decide)
+    CHECK_FALSE(FlipTown(f, "Town", 10));
+    CHECK(f.of.Posture() == OFDormant);
+    CHECK(f.of.TownsEverCount() == 1);
+    CHECK(f.of.Tokens() == 0);
+    // the director considers nothing before the wake, however hot the town
+    f.Z("Town").heat = 100;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    CHECK(launcher.orders.empty());
+    // a re-flip of town 1 while DORMANT is still legacy
+    f.Z("Town").owner = RString("NEUTRAL");
+    CHECK_FALSE(FlipTown(f, "Town", 20));
+    CHECK(f.of.TownsEverCount() == 1);
+
+    // town 2 (distinct) wakes the director with a full purse and is its own
+    CHECK(FlipTown(f, "Other", 30));
+    CHECK(f.of.Posture() == OFAwake);
+    CHECK(f.of.Tokens() == 2);
+    CHECK(f.of.TownsEverCount() == 2);
+    CHECK(f.of.TownEver("Other"));
+    // AWAKE is latched: every later flip goes to the director
+    f.Z("Town").owner = RString("NEUTRAL");
+    CHECK(FlipTown(f, "Town", 40));
+
+    // an inactive service never takes a flip
+    Fixture off;
+    off.Load(ConfigWith("occupierForces = 0;"));
+    CHECK_FALSE(FlipTown(off, "Town", 10));
+    CHECK_FALSE(FlipTown(off, "Other", 11));
+}
+
+TEST_CASE("OccupierForces - a held town is a candidate while heat / 40 >= its flip roll",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 125);
+    FlipTown(f, "Other", 126);
+    const int town = f.registry.FindZoneIndex("Town");
+    const float u = OccupierForces::CandidateRoll(f.Z("Town"));
+    CHECK(u == Approx(CounterAttack::Roll01(CounterAttack::MakeSeed("Town", 1, 125, 0), 7)));
+    CHECK(u >= 0.0f);
+    CHECK(u < 1.0f);
+    f.Z("Other").heat = 0;
+    AutoArray<int> c;
+    f.Z("Town").heat = 40.0f * u + 0.5f;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 1);
+    CHECK(c[0] == town);
+    if (u > 0.05f)
+    {
+        f.Z("Town").heat = 40.0f * u - 0.5f;
+        f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+        CHECK(c.Size() == 0);
+    }
+    // a fresh flip (40) is always a candidate
+    f.Z("Town").heat = 40;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK(c.Size() == 1);
+    // never the HQ's town, never on a record, never the exempt start town
+    DirectorView hq = ViewOf(f.registry);
+    hq.hqZone = town;
+    f.of.Candidates(f.registry, hq, launcher, c);
+    CHECK(c.Size() == 0);
+    launcher.records.push_back(town);
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK(c.Size() == 0);
+    launcher.Resolve(town);
+    f.Z("HqTown").owner = f.registry.ResistanceSide();
+    f.Z("HqTown").heat = 100;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 1);
+    CHECK(c[0] == town);
+    // hottest first
+    f.Z("Other").heat = 90;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 2);
+    CHECK(c[0] == f.registry.FindZoneIndex("Other"));
+    CHECK(c[1] == town);
+    // a hot resistance base is never a phase-3 candidate (BASE is phase 4)
+    f.Z("RebelPost").heat = 100;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    CHECK(c.Size() == 2);
+}
+
+TEST_CASE(
+    "OccupierForces - urgency: a fresh quiet flip is not urgent; heat 50 or an alert edge latches it until heat < 35",
+    "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    launcher.born = 99; // no launches: this test watches the latches only
+    FlipTown(f, "Town", 1);
+    FlipTown(f, "Other", 2);
+    const DirectorView view = ViewOf(f.registry);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK_FALSE(f.of.Urgent("Town")); // a fresh quiet flip (40) whatever the tick
+    f.Z("Town").heat = 50;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(f.of.Urgent("Town"));
+    f.Z("Town").heat = 36;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(f.of.Urgent("Town")); // hysteresis
+    f.Z("Town").heat = 34.9f;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK_FALSE(f.of.Urgent("Town"));
+
+    // an alert edge on the held town latches it at heat 40
+    f.Z("Town").heat = 40;
+    AutoArray<int> states;
+    states.Resize(f.registry.NZones());
+    for (int i = 0; i < states.Size(); i++)
+    {
+        states[i] = 0;
+    }
+    f.of.NoteAlertStates(f.registry, states); // the baseline: no edge
+    CHECK_FALSE(f.of.Urgent("Town"));
+    states[f.registry.FindZoneIndex("Town")] = 1; // YELLOW
+    f.of.NoteAlertStates(f.registry, states);
+    CHECK(f.of.Urgent("Town"));
+    CHECK_FALSE(f.of.RedPaid("Town"));
+    states[f.registry.FindZoneIndex("Town")] = 2; // RED
+    f.of.NoteAlertStates(f.registry, states);
+    CHECK(f.of.RedPaid("Town"));
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(f.of.Urgent("Town"));
+    f.Z("Town").heat = 30;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK_FALSE(f.of.Urgent("Town"));
+    // an edge at an occupier zone latches nothing
+    states[f.registry.FindZoneIndex("Post")] = 2;
+    f.of.NoteAlertStates(f.registry, states);
+    CHECK_FALSE(f.of.Urgent("Post"));
+    // a re-flip forgets the old latch and payment
+    f.Z("Town").heat = 60;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(f.of.Urgent("Town"));
+    FlipTown(f, "Town", 3);
+    CHECK_FALSE(f.of.Urgent("Town"));
+    CHECK_FALSE(f.of.RedPaid("Town"));
+}
+
+TEST_CASE("OccupierForces - tokens, one launch per tick, the born-operation slots and the order",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry)); // poolStart 24
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Town").heat = 60; // hottest
+    const DirectorView view = ViewOf(f.registry);
+    const int pool0 = f.of.Pool();
+
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1); // one per tick
+    const CounterAttackOrder o = launcher.orders[0];
+    CHECK(o.opId == 1);
+    CHECK(o.kind == CAKRetake);
+    CHECK(o.origin == CAODirector);
+    CHECK(o.target == f.registry.FindZoneIndex("Town"));
+    CHECK(o.source == f.registry.FindZoneIndex("Post")); // the nearest base with the minimum spare
+    CHECK(o.funded);
+    CHECK(o.package == FPFoot); // no sightings: L_req 0, foot 4 is the cheapest
+    CHECK(o.bodies == 4);
+    CHECK(o.crew == 0);
+    CHECK(o.priceUnits == 0);
+    CHECK(o.abstractSpeed == Approx(1.5f));
+    CHECK(o.urgent); // heat 60 >= 50
+    CHECK(f.of.Tokens() == 1);
+    CHECK(f.of.OpCounter() == 1);
+    CHECK(f.of.Pool() == pool0); // foot infantry is paid by the base, not the pool
+    REQUIRE(f.of.FindOp(1) >= 0);
+
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 2);
+    CHECK(launcher.orders[1].target == f.registry.FindZoneIndex("Other"));
+    CHECK(launcher.orders[1].opId == 2);
+    CHECK(f.of.Tokens() == 0);
+
+    // no token: nothing until the STRONG interval (1800 s) refills one
+    launcher.Resolve(o.target);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == 2);
+    f.of.Direct(f.registry, view, launcher, 1800.0f);
+    CHECK(launcher.orders.size() == 3);
+
+    // born operations at forcesOpsMax hold every launch (unborn ones do not count)
+    launcher.Resolve(f.registry.FindZoneIndex("Town"));
+    f.of.Direct(f.registry, view, launcher, 1800.0f);
+    const size_t before = launcher.orders.size();
+    launcher.born = 2;
+    launcher.Resolve(f.registry.FindZoneIndex("Town"));
+    launcher.Resolve(f.registry.FindZoneIndex("Other"));
+    f.of.Direct(f.registry, view, launcher, 1800.0f);
+    CHECK(launcher.orders.size() == before);
+    CHECK(f.of.Tokens() >= 1);
+    launcher.born = 1;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == before + 1);
+}
+
+TEST_CASE("OccupierForces - a motorized order is paid by the pool first and refunded when refused",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 60; // urgent
+    // three fighters reported in Town: L_req 10.8.  FarBase spares 9 (12 -
+    // 3): motorized 9 (11.25) for 13 units; foot 9 (9.0) falls short
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = f.registry.FindZoneIndex("Town");
+        r.id = 100 + i;
+        r.pos = f.Z("Town").pos;
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    REQUIRE(f.of.KnownFighters(f.registry, f.registry.FindZoneIndex("Town")) == 3);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0; // the near post cannot spare the minimum
+    const int pool0 = f.of.Pool();
+
+    launcher.refuse = true;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.empty());
+    CHECK(f.of.Pool() == pool0); // spent and refunded
+    CHECK(f.of.Tokens() == 2);   // the token is kept
+    CHECK(f.of.OpCounter() == 0);
+    CHECK(f.of.OpRows() == 0);
+
+    launcher.refuse = false;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    CHECK(o.package == FPTruck);
+    CHECK(o.source == f.registry.FindZoneIndex("FarBase"));
+    CHECK(o.bodies == 9);
+    CHECK(o.crew == 1);
+    CHECK(o.priceUnits == 4);
+    CHECK(std::string((const char*)o.hullClass) == "Truck5t");
+    CHECK(o.abstractSpeed == Approx(0.6f * 80.0f / 3.6f));
+    CHECK(f.of.Pool() == pool0 - 4);
+    const int row = f.of.FindOp(o.opId);
+    REQUIRE(row >= 0);
+    CHECK(f.of.OpOutstanding(row) == 4);
+
+    // the hull comes home intact: its price (3) back to the pool
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.target = o.target;
+    ev.type = CAOpSettled;
+    f.of.NoteOpEvent(f.registry, ev);
+    ev.type = CAOpHullRefund;
+    ev.units = 3;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0 - 1);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 1);
+    // a second refund never pays more than the op still holds
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0);
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0);
+}
+
+TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel adds heat unless RED paid it",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    const int town = f.registry.FindZoneIndex("Town");
+    const int other = f.registry.FindZoneIndex("Other");
+
+    // a repel with no RED edge: +15 heat and a 30 min rest
+    f.Z("Town").heat = 20;
+    CounterAttackOpEvent ev;
+    ev.opId = 0; // a legacy record counts too: the cooldown is the target's
+    ev.type = CAOpRepelled;
+    ev.target = town;
+    ev.units = 3;
+    ev.bodies = 2;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.Z("Town").heat == Approx(35.0f));
+    CHECK(f.of.Cooldown("Town") == Approx(1800.0f));
+    f.Z("Town").heat = 90;
+    AutoArray<int> c;
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    bool townListed = false;
+    for (int i = 0; i < c.Size(); i++)
+    {
+        townListed = townListed || c[i] == town;
+    }
+    CHECK_FALSE(townListed);
+    // the rest runs out
+    FakeLauncher idle;
+    idle.born = 99;
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, 1700.0f);
+    CHECK(f.of.Cooldown("Town") == Approx(100.0f));
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, 120.0f);
+    CHECK(f.of.Cooldown("Town") == Approx(0.0f));
+
+    // a RED edge during the op already paid the heat
+    AutoArray<int> states;
+    states.Resize(f.registry.NZones());
+    for (int i = 0; i < states.Size(); i++)
+    {
+        states[i] = 0;
+    }
+    f.of.NoteAlertStates(f.registry, states);
+    states[other] = 2;
+    f.of.NoteAlertStates(f.registry, states);
+    REQUIRE(f.of.RedPaid("Other"));
+    f.Z("Other").heat = 20;
+    ev.target = other;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.Z("Other").heat == Approx(20.0f));
+    CHECK(f.of.Cooldown("Other") == Approx(1800.0f));
+    CHECK_FALSE(f.of.RedPaid("Other")); // consumed
+
+    // a cancelled unborn director op: the full hull and crew price back,
+    // and the rest
+    f.Z("Town").heat = 60;
+    f.Z("Other").heat = 0;
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = town;
+        r.id = 7 + i;
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0;
+    const int pool0 = f.of.Pool();
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    REQUIRE(launcher.orders[0].priceUnits == 4);
+    CHECK(f.of.Pool() == pool0 - 4);
+    ev = CounterAttackOpEvent();
+    ev.opId = launcher.orders[0].opId;
+    ev.type = CAOpCancelledUnseen;
+    ev.target = town;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0);
+    CHECK(f.of.Cooldown("Town") == Approx(1800.0f));
+}
+
+TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 operations",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    const char* towns[4] = {"T0", "T1", "T2", "T3"};
+    int legacy = 0;
+    std::vector<int> launchedAt;
+    for (int minute = 0; minute <= 60; minute++)
+    {
+        if (minute % 15 == 0 && minute / 15 < 4)
+        {
+            if (!FlipTown(f, towns[minute / 15], minute))
+            {
+                legacy++; // CounterAttack answers this one with Decide
+            }
+        }
+        // the held-zone heat decay: 0.25 per 10 s
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            ZoneRecord* z = f.registry.GetZoneMutable(i);
+            if (stricmp(z->owner, f.registry.ResistanceSide()) == 0)
+            {
+                f.registry.HeatDecay(i, 1.5f);
+            }
+        }
+        // an operation is over 10 minutes after it left
+        for (size_t k = 0; k < launchedAt.size(); k++)
+        {
+            if (launchedAt[k] == minute - 10)
+            {
+                launcher.Resolve(launcher.orders[k].target);
+            }
+        }
+        const size_t before = launcher.orders.size();
+        f.of.Tick(f.registry, 60.0f);
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        for (size_t k = before; k < launcher.orders.size(); k++)
+        {
+            launchedAt.push_back(minute);
+        }
+    }
+    CHECK(legacy == 1);
+    CHECK(f.of.Posture() == OFAwake);
+    CHECK(launcher.orders.size() >= 1);
+    CHECK(launcher.orders.size() < 4);
+}
+
+TEST_CASE("OccupierForces - push-out only when STRONG, on the quiet town nearest a base",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    // nothing hot any more
+    f.Z("Town").heat = 0;
+    f.Z("Other").heat = 0;
+    f.Z("Held").heat = 0;
+    // a fighter was seen in Town (nearest the Post) a minute ago: not quiet
+    AutoArray<SightingReport> reports;
+    SightingReport r;
+    r.zone = f.registry.FindZoneIndex("Town");
+    r.id = 1;
+    reports.Add(r);
+    f.of.IngestSightings(f.registry, reports);
+
+    // STRETCHED: no push-out
+    f.of.SetPool(12);
+    REQUIRE(f.of.Band() == OFBandStretched);
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    CHECK(launcher.orders.empty());
+
+    // STRONG: the quiet town nearest an occupier base (Held, 1.5 km from the
+    // Post; Town is nearer but not quiet)
+    f.of.SetPool(24);
+    REQUIRE(f.of.Band() == OFBandStrong);
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    CHECK(launcher.orders[0].origin == CAOPushout);
+    CHECK(launcher.orders[0].target == f.registry.FindZoneIndex("Held"));
+    CHECK(launcher.orders[0].package == FPFoot); // the minimal package
+    CHECK_FALSE(launcher.orders[0].urgent);
+    CHECK(launcher.orders[0].bodies == 4);
+
+    // half an hour later Town is quiet too and nearest: the next push-out
+    f.of.Tick(f.registry, 1800.0f);
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 1800.0f);
+    REQUIRE(launcher.orders.size() == 2);
+    CHECK(launcher.orders[1].target == f.registry.FindZoneIndex("Town"));
+    CHECK(launcher.orders[1].origin == CAOPushout);
+}
+
+TEST_CASE("OccupierForces - intel: the choice ignores the true census; a dead group's report stays, then decays",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    const int town = f.registry.FindZoneIndex("Town");
+    f.Z("Town").heat = 60;
+
+    // two groups report three distinct fighters (one seen by both) in Town
+    // and one outside every zone
+    AutoArray<SightingReport> reports;
+    const unsigned long long ids[4] = {11, 12, 13, 11};
+    for (int i = 0; i < 4; i++)
+    {
+        SightingReport r;
+        r.zone = town;
+        r.id = ids[i];
+        r.pos = Vector3(1000.0f + (float)i, 0.0f, 1300.0f);
+        reports.Add(r);
+    }
+    SightingReport stray;
+    stray.zone = -1;
+    stray.id = 20;
+    stray.pos = Vector3(7000.0f, 0.0f, 7000.0f);
+    reports.Add(stray);
+    f.of.IngestSightings(f.registry, reports);
+    CHECK(f.of.KnownFighters(f.registry, town) == 3);
+    REQUIRE(f.of.SightingRows() == 2);
+    CHECK(OccupierForces::ZoneOfPosition(f.registry, Vector3(1010.0f, 0.0f, 1310.0f)) == town);
+    CHECK(OccupierForces::ZoneOfPosition(f.registry, Vector3(7000.0f, 0.0f, 7000.0f)) == -1);
+
+    DirectorView view = ViewOf(f.registry);
+    const DirectorAction a = f.of.PlanFor(f.registry, view, town, CAODirector);
+    REQUIRE(a.go);
+    CHECK(a.fighters == Approx(3.0f));
+    CHECK(a.choice.lReq == Approx(10.8f));
+
+    // the TRUE census of the town changes (ten fighters, the player among
+    // them) while the sightings do not: the choice is the same
+    f.Z("Town").lastGuer = 10;
+    f.Z("Town").lastGuerHold = 10;
+    f.Z("Town").lastOcc = 0;
+    const DirectorAction b = f.of.PlanFor(f.registry, view, town, CAODirector);
+    REQUIRE(b.go);
+    CHECK(b.choice.quote.package == a.choice.quote.package);
+    CHECK(b.choice.quote.bodies == a.choice.quote.bodies);
+    CHECK(b.choice.quote.source == a.choice.quote.source);
+    CHECK(b.choice.lReq == Approx(a.choice.lReq));
+    CHECK(b.fighters == Approx(a.fighters));
+    AutoArray<int> c1;
+    FakeLauncher launcher;
+    f.of.Candidates(f.registry, view, launcher, c1);
+    f.Z("Town").lastGuer = 0;
+    f.Z("Town").lastGuerHold = 0;
+    AutoArray<int> c2;
+    f.of.Candidates(f.registry, view, launcher, c2);
+    REQUIRE(c1.Size() == c2.Size());
+    for (int i = 0; i < c1.Size(); i++)
+    {
+        CHECK(c1[i] == c2[i]);
+    }
+
+    // the reporting groups die: the next scans report nothing, the last
+    // report stays ("it radioed before it died") ...
+    AutoArray<SightingReport> none;
+    f.of.Tick(f.registry, 600.0f);
+    f.of.IngestSightings(f.registry, none);
+    CHECK(f.of.KnownFighters(f.registry, town) == 3);
+    CHECK(f.of.SightingAge(0) == Approx(600.0f));
+    // ... a newer scan replaces it with the latest count
+    AutoArray<SightingReport> one;
+    one.Add(reports[0]);
+    f.of.IngestSightings(f.registry, one);
+    CHECK(f.of.KnownFighters(f.registry, town) == 1);
+    // ... and it decays after forcesIntelDecay (1800 s)
+    f.of.Tick(f.registry, 1700.0f);
+    CHECK(f.of.KnownFighters(f.registry, town) == 1);
+    f.of.Tick(f.registry, 200.0f);
+    CHECK(f.of.KnownFighters(f.registry, town) == 0);
+    FakeLauncher idle;
+    idle.born = 99;
+    f.of.Direct(f.registry, view, idle, 0.0f);
+    CHECK(f.of.SightingRows() == 0);
+}
+
+TEST_CASE("OccupierForces - nothing launches once the campaign is won", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    DirectorView won = ViewOf(f.registry);
+    won.won = true;
+    f.of.Direct(f.registry, won, launcher, 60.0f);
+    CHECK(launcher.orders.empty());
+    CHECK(f.of.Tokens() == 2);
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    CHECK(launcher.orders.size() == 1);
+}
+
+TEST_CASE("OccupierForces - the director survives save/load", "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-director.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Town").heat = 60;
+    f.Z("Other").heat = 0;
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = f.registry.FindZoneIndex("Town");
+        r.id = 50 + i;
+        r.pos = Vector3(1000.0f, 5.0f, 1300.0f + (float)i);
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0;
+    f.of.Tick(f.registry, 60.0f);
+    f.of.Direct(f.registry, view, launcher, 60.0f); // a motorized op on Town
+    REQUIRE(launcher.orders.size() == 1);
+    // a repel elsewhere: a cooldown; a RED edge: a payment
+    CounterAttackOpEvent ev;
+    ev.type = CAOpRepelled;
+    ev.target = f.registry.FindZoneIndex("Other");
+    f.of.NoteOpEvent(f.registry, ev);
+    AutoArray<int> states;
+    states.Resize(f.registry.NZones());
+    for (int i = 0; i < states.Size(); i++)
+    {
+        states[i] = 0;
+    }
+    f.of.NoteAlertStates(f.registry, states);
+    states[f.registry.FindZoneIndex("Town")] = 2;
+    f.of.NoteAlertStates(f.registry, states);
+    f.of.Tick(f.registry, 90.0f);
+    launcher.born = 2;                              // the slots are full: no push-out now
+    f.of.Direct(f.registry, view, launcher, 90.0f); // the token clock runs
+    const int tokens = f.of.Tokens();
+    const float tokenClock = f.of.TokenClock();
+    const float cooldown = f.of.Cooldown("Other");
+    const float now = f.of.Now();
+    REQUIRE(tokenClock > 0);
+    REQUIRE(cooldown > 0);
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.Posture() == OFAwake);
+    CHECK(loaded.TownsEverCount() == 2);
+    CHECK(loaded.TownEver("Town"));
+    CHECK(loaded.Tokens() == tokens);
+    CHECK(loaded.TokenClock() == Approx(tokenClock));
+    CHECK(loaded.Urgent("Town"));
+    CHECK(loaded.RedPaid("Town"));
+    CHECK(loaded.Cooldown("Other") == Approx(cooldown));
+    CHECK(loaded.OpCounter() == 1);
+    CHECK(loaded.Now() == Approx(now));
+    REQUIRE(loaded.SightingRows() == 1);
+    CHECK(std::string((const char*)loaded.SightingZone(0)) == "Town");
+    CHECK(loaded.SightingCount(0) == 3);
+    REQUIRE(loaded.SightingPositions(0));
+    REQUIRE(loaded.SightingPositions(0)->Size() == 3);
+    CHECK((*loaded.SightingPositions(0))[2].Z() == Approx(1302.0f));
+    CHECK(loaded.KnownFighters(f.registry, f.registry.FindZoneIndex("Town")) == 3);
+    const int row = loaded.FindOp(1);
+    REQUIRE(row >= 0);
+    CHECK(loaded.OpOutstanding(row) == 4);
+    // the reloaded director refunds the hull exactly like the original
+    loaded.SetCatalogue(TruckCatalogue());
+    const int pool = loaded.Pool();
+    CounterAttackOpEvent refund;
+    refund.opId = 1;
+    refund.type = CAOpHullRefund;
+    refund.units = 3;
+    loaded.NoteOpEvent(f.registry, refund);
+    CHECK(loaded.Pool() == pool + 3);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
 }

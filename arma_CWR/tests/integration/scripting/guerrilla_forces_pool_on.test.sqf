@@ -1,8 +1,7 @@
 // ============================================================================
 //  Occupier forces pool, key ON (OCCUPIER-FORCES.md phase 2; native
-//  OccupierForces service).  Guerrilla.Abel ships with occupierForces off;
-//  gmForcesTune ["enabled", 1] turns the key on at run time, and the service
-//  sizes itself on the next frame:
+//  OccupierForces service).  Guerrilla.Abel opts in (occupierForces = 1,
+//  phase 3), so the service sizes itself on the first active frame:
 //    a1  the roster is Abel's four occupier bases (R = 6 + 6 + 8 + 12 = 32),
 //        so poolStart >= 32 + 2K; the pool starts full, STRONG, DORMANT,
 //        no tokens, control 1, no wave fired;
@@ -16,10 +15,8 @@
 triSimUntil { GM_LIB_READY }
 ofT0 = time
 triSimUntil { time > ofT0 + 3 }
-triAssertEq [((gmOccupierForces) select 2), "OFF"]
 
 // ---- a1: activation --------------------------------------------------------
-triAssertEq [(format ["%1", gmForcesTune ["enabled", 1]]), "true"]
 triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 ofRow = gmOccupierForces
 ofStart = ofRow select 1
