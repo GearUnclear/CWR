@@ -57,15 +57,15 @@ else()
     add_compile_options(-ffunction-sections -fdata-sections)
 endif()
 
-# Make __FILE__ repo-root-relative so log/assert lines (Fail(), DoAssert(), LOG_*)
-# read "engine/Poseidon/...:NN" instead of an absolute build-machine path. Affects only
-# the __FILE__ macro string, not debug info.
+# Make __FILE__ relative to this source dir (arma_CWR/) so log/assert lines (Fail(),
+# DoAssert(), LOG_*) read "engine/Poseidon/...:NN" instead of an absolute build-machine
+# path. Affects only the __FILE__ macro string, not debug info.
 #
 # GNU-driver clang only. clang-cl silently ignores GCC-style -f flags on its own command
-# line (a per-TU -Wunknown-argument warning), and forwarding via /clang: would rewrite
-# __FILE__ to a repo-relative string — which breaks the __FILE__-based repo-root resolution
-# several test helpers depend on (e.g. RepoPath() walks __FILE__'s parents expecting an
-# absolute path). So leave clang-cl's default absolute __FILE__ alone.
+# line (a per-TU -Wunknown-argument warning). The flag is deliberately not forwarded via
+# /clang:, so clang-cl keeps its default absolute __FILE__. Nothing in the tree parses
+# __FILE__ for paths today; tests that need the repo root use the TESTS_ROOT_DIR compile
+# definition (tests/unit/engine/Poseidon/CMakeLists.txt) instead.
 if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options(-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=)
 endif()

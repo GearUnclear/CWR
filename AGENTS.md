@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository. The full project guide is [`CLAUDE.md`](CLAUDE.md) (and [`arma_CWR/CLAUDE.md`](arma_CWR/CLAUDE.md) for engine work); read those first. They apply to every agent, not only Claude.
+Guidance for AI coding agents working in this repository. The full project guide is [`CLAUDE.md`](CLAUDE.md) (and [`arma_CWR/CLAUDE.md`](arma_CWR/CLAUDE.md) for engine work); read those first. They apply to every agent, not only Claude. One-topic notes on repo findings (what goes wrong, why, what to do) live in [`agent_guidelines/`](agent_guidelines/README.md).
 
 ## Target platform
 

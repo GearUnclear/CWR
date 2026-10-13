@@ -10,43 +10,59 @@ This directory holds the engine and overhaul for **Uslu dur!** (**UD**) — a **
 
 Two layers live here:
 
-- **The upstream engine** (`engine/`, `apps/`, etc.), codename **Poseidon**. Modernized to C++20, built with CMake + Clang, cross-platform Windows x64 / Linux x64. This part is a **locked** Bohemia Interactive source release: PRs are not accepted upstream and there is no CI workflow checked into the repo (the sub-READMEs describe what CI *did* run). The code is GPL-3.0-or-later; game data (models, textures, sounds, missions) is **not** in this repo and ships separately under APL-SA.
+- **The upstream engine** (`engine/`, `apps/`, etc.), codename **Poseidon**. Built with CMake + Clang for Windows x64 and Linux x64 (macOS presets also exist). The root `CMakeLists.txt` defaults to C++20, but the core `Poseidon` lib and the `PoseidonGL33` backend override it to **C++17** with their `CXX_STANDARD` target property; apps, tools, tests, `PoseidonOpenAL` and `PoseidonFormats` build as C++20. Whether to raise the engine to C++20 is an open decision tracked on GitHub. This part is a **locked** Bohemia Interactive source release that accepts no upstream PRs. Our own CI lives at the git root: `.github/workflows/ci.yml` (issue #54 E3, first green 2026-09-03) builds the `linux-x64-clang-rwdi` preset and runs the unit suites and the mod-intake lanes (mod doctor, Guerrilla descriptor lint, roster probe) on synthetic fixtures, plus `tests/runtime/test-setup.ps1` on Ubuntu and Windows, all without game data; `lobo-repair.yml` runs `tests/ci/test_lobo_*.py` on both OSes when the LoBo repair tools change. Trident integration tests need game data and stay on developer machines. The code is GPL-3.0-or-later; game data (models, textures, sounds, missions) is **not** in this repo and ships separately under APL-SA.
 - **The overhaul itself** ([`mod-plans/`](mod-plans/README.md), [`guerrilla-mode/`](guerrilla-mode/README.md)) — a from-the-ground-up rework of AI tactics/perception plus **Guerrilla Mode**, a new persistent open-world insurgency game mode with swappable islands and factions chosen at new-game. This is where active development happens. **Direction (2026-07-01): this is a total overhaul of the engine source, not a mod on a fixed binary — C++ engine changes are a first-class tool here, not a last resort, alongside SQF mission scripting.** Treat the mod-plans as living, AI-drafted design docs subject to correction, not settled hard specs.
+
+## Target platform
+
+UD targets the full official *Arma: Cold War Assault* Remaster; Classic 1.99 compatibility is being dropped (2026-10-11). Build and test new work against Remaster data and its `remaster.cpp` contract, and add no new Classic-only shims, fallbacks or test lanes; the Classic shims and data dir that remain are legacy awaiting retirement. The policy lives in the "Target platform" section of the repo-root [`CLAUDE.md`](../CLAUDE.md).
 
 ## Working map (where to look / what to skip)
 
-Most of this engine is 1,300+ C++ files, 160 of them over 1,000 lines. To avoid reading extraneous code:
+`engine/` plus `apps/` is ~1,430 C++ files, ~160 of them over 1,000 lines. To avoid reading extraneous code:
 
-**Active overhaul surface — start here:**
-- `engine/Poseidon/Game/Guerrilla/` — `ZoneRegistry`, `GarrisonCache`, `AlertMachine`, `TownFlags` (+ their `*Commands.cpp` SQF bindings). The Phase-1.5 native subsystems.
-- `engine/Poseidon/UI/Guerrilla/` — `GuerrillaModule`, `GuerrillaNewGame` (new-game island/faction selection).
-- `engine/Poseidon/AI/` — the AI tactics/perception rework. See [`mod-plans/`](mod-plans/README.md) for which behavior maps to which files; treat those docs as intent, not a precise index.
-- `voice-lines/` — TTS pipeline for custom in-game speech (WAVs via OpenRouter, played through `CfgSounds` + `say`/`sideRadio`; no engine changes). Key comes from the gitignored repo-root `.env`.
+**Active overhaul surface, start here:**
+- `engine/Poseidon/Game/Guerrilla/` (~76 files): the native Guerrilla core, by group.
+  - Campaign state: `ZoneRegistry` (zones, factions, capture), `GarrisonCache` (distance-cached garrisons), `AlertMachine` (per-zone GREEN/YELLOW/RED), `TownFlags`, `CounterAttack` (occupier town retakes), `CampaignEnd` (win rule and latch).
+  - World population: `Traffic` + `TrafficEncounter` (road traffic, hold-ups, roadblocks), `Undercover` (per-observer side resolution), `AssailantSystem` (civilians who turn armed, #42).
+  - Player base and economy: `GuerrillaBase` (HQ, weapon cache, garage), `StashRegistry` (keep-when-empty supply holders), `Market` (weapon and vehicle dealers).
+  - Narrative: `Journal` (diary/objective data), `LegendRegistry` + `Legend{Names,Placement,Appearance,Seed}` (earned companion names, enemy Legend bosses), `FactionHistory` (seeded backstory), `WorldNames`, `Portrait{Service,Renderer,Recipe,Roster,Status}` (dossier portraits).
+  - Content intake: `FactionSources` (the one faction table), `FactionTwins`, `OutfitSelect` + `AddonActivation` (launch-time seams), and the pure cores of the offline tools: `IslandScaffold`, `DescriptorLint`, `RosterProbe`.
+  - SQF bindings: `<Name>Commands.cpp` exists for ZoneRegistry, GarrisonCache, CounterAttack, CampaignEnd, Traffic, Undercover, Assailant, GuerrillaBase, StashRegistry, Market, Journal and LegendRegistry; `AlertMachine` and `TownFlags` have none. `ScriptVars.hpp` reads script globals null-safely.
+  - Every `.cpp` here (and every `guerrilla-mode/core/scripts/*.sqs`) must be listed in `guerrilla-mode/mission/Showcase.Abel/human/coverage.json`, or `tests/contracts/test_human_suite.py` goes red.
+- `engine/Poseidon/UI/Guerrilla/`: `GuerrillaModule` (main-menu entry), `GuerrillaNewGame` (island/faction pick), `GuerrillaCharacterSelect` + `GuerrillaBodyPreview` (body browser, turntable), and the map-screen journal: `GuerrillaJournalPages` (gather), `JournalCompose*` (compose), `JournalRender`, `JournalText`, `JournalManual` (handbook chapters).
+- Other engine touchpoints: `engine/Poseidon/Game/Commands/GameStateExt*.cpp` (the general SQF command table; `GameStateExtTest*` hold the `tri*` Trident commands), `engine/PoseidonGL33/EngineGL33_Portrait.cpp` (portrait capture), `apps/tools/Tools/commands/Guerrilla{,Lint,Probe,Scaffold}Command.*` (`PoseidonTools guerrilla lint|probe|scaffold`).
+- `guerrilla-mode/` script and content side: `core/` (shared SQS policy layer, installed as `<GameDir>\gmcore\`), `mission/` (island templates, `Showcase.Abel`, single-feature test missions), `config/` (faction libraries, HQ classes).
+- `engine/Poseidon/AI/`: the AI tactics/perception rework. See [`mod-plans/`](mod-plans/README.md) for which behavior maps to which files.
+- `voice-lines/`: TTS for custom in-game speech. `generate_voice.py` writes WAVs via OpenRouter (`openai/gpt-audio-mini`); WAV or OGG both play through `CfgSounds` + `say`/`sideRadio`, no engine changes. Key comes from the gitignored repo-root `.env`.
 
-**Frozen upstream — read as reference, don't expect to edit:** `Network/`, `Graphics/`, and most of `World/` and `UI/`. This is a locked Bohemia source release (no upstream PRs). You'll read here to understand mechanisms, but the overhaul rarely changes them.
+**Design docs** (living AI drafts: treat them as intent, not a precise index, and verify against code): [`guerrilla-mode/README.md`](guerrilla-mode/README.md) (overview, links), [`ARCHITECTURE.md`](guerrilla-mode/ARCHITECTURE.md) (native core vs script layer; section A is current), [`STATUS.md`](guerrilla-mode/STATUS.md) (each requirement mapped to native or script), [`OFFSCREEN-CONTRACT.md`](guerrilla-mode/OFFSCREEN-CONTRACT.md) (what the campaign does where the player is not looking), [`FACTION-PACKS.md`](guerrilla-mode/FACTION-PACKS.md) and [`ISLAND-PACKS.md`](guerrilla-mode/ISLAND-PACKS.md) (modding contracts), [`FULL-SCALE-SESSION.md`](guerrilla-mode/FULL-SCALE-SESSION.md) (Remaster shadow setup, long-session runbook), [`HUMAN-TESTS.md`](guerrilla-mode/HUMAN-TESTS.md) (43-case Showcase acceptance suite), [`mod-plans/`](mod-plans/README.md) (AI rework).
 
-**Do NOT read or grep these — generated or non-source, pure context waste:**
-- `thirdparty/glad/` — ~22k lines of generated OpenGL bindings.
-- `@LoBo/` (mod test data, 2.2G binary), `build/`, and `ARMA Cold War Assault [Classic]/AddOns/` (base game data). Not reading it is about context cost, not permission: **@LoBo is ours to modify as of 2026-08-08** (see the repo-root `CLAUDE.md`) — repair a content defect in its pbos rather than shimming around it, and land the repair as a rerunnable script under `tools/lobo/` because the directory itself is gitignored.
-- A repo-root `.ignore` already excludes these from `Grep`/`Glob`; the note here is for `Read`.
+**Upstream code the overhaul does change:** `World/` (`WorldInit.cpp` mission init, `World.cpp` per-frame hooks, `WorldImpl.cpp` save/load of the Guerrilla services, `Detection/Target.cpp` undercover side resolution) and `UI/Map/` (map screen, journal notepad) take regular Guerrilla commits. **Effectively frozen, read as reference:** `Network/` and `Graphics/` (locked Bohemia source release; a handful of commits since July).
 
-**Navigating big files efficiently:** grep for the symbol first, then `Read` a ±80-line window (`offset`/`limit`) rather than the whole 2,500–3,300-line file. For open-ended "where/how does X work" questions, delegate to an `Explore` subagent so the file dumps stay in *its* context and only the conclusion returns to yours.
+**Do NOT read or grep these, generated or non-source, pure context waste:**
+- `thirdparty/glad/`: ~22k lines of generated OpenGL bindings.
+- `build/`, and at the repo root `@LoBo/` (mod test data, 2.2G binary), `ARMA Cold War Assault [Classic]/` and `Arma Cold War Assault Demo [Remaster]/` (whole game-data folders). Not reading @LoBo is about context cost, not permission: **@LoBo is ours to modify as of 2026-08-08** (see the repo-root `CLAUDE.md`). Repair a content defect in its pbos rather than shimming around it, and land the repair as a rerunnable script under `tools/lobo/` because the directory itself is gitignored.
+- The repo-root `D:\Arma_CWA\.ignore` excludes all of the above from `Grep`/`Glob`; the note here is for `Read`. Also gitignored data or output: `packages/` (junctions to game data), `dist/`, repo-root `tmp/` (Remaster shadows).
+
+**Navigating big files efficiently:** grep for the symbol first, then `Read` a ±80-line window (`offset`/`limit`) rather than the whole file (the largest run 3,000 to 4,400 lines, e.g. `Traffic.cpp`, `ZoneRegistry.cpp`). For open-ended "where/how does X work" questions, delegate to an `Explore` subagent so the file dumps stay in *its* context and only the conclusion returns to yours.
 
 ## Toolchain prerequisites
 
 Builds require, on PATH / in env:
-- **Clang** — the only supported compiler (`clang-cl` frontend on Windows, GNU-driver clang on Linux). No MSVC, no GCC.
+- **Clang** — the only supported compiler (`clang-cl` frontend on Windows, GNU-driver clang on Linux and macOS). No MSVC, no GCC.
 - **Ninja** — the generator used by every preset.
-- **vcpkg** — manifest mode (`vcpkg.json`). `VCPKG_ROOT` env var must point at the vcpkg checkout; the base preset chainloads its toolchain.
+- **vcpkg** — manifest mode (`vcpkg.json`). `VCPKG_ROOT` env var must point at the vcpkg checkout: the base preset uses `$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake` as its toolchain file, and each concrete preset chainloads a clang toolchain from `cmake/toolchains/` via `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`.
 - **ccache** — set as the compiler launcher by the base preset.
 
 ## Local environment (this Windows machine)
 
 **Engine location:** `D:\Arma_CWA\arma_CWR` (moved here from `C:\dev\arma_CWR` on 2026-06-28 to sit next to the game data). The **git root is the parent** `D:\Arma_CWA` — run git and path-relative commands accordingly. A reminder shortcut `C:\dev\arma_CWR.lnk` points back here.
 
-**Game data (two packages — both are game data, not tracked source; treat read-only except where a task documents an exception):**
-- `D:\Arma_CWA\ARMA Cold War Assault [Classic]` — the full v1.99 install (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). Trident's `OFPR_DATA_DIR` in `.trident.env`; the default for the `full_cwa`/`lobo` lanes.
-- `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]` — the official remaster Demo (Steam app 4819000), read-only reference. **Asset-targeting policy (2026-07-14): the Demo's asset set is NOT a gameplay target** — Guerrilla content targets Classic 1.99 + `@LoBo` assets only; the Remaster side of the bargain is *future compatibility with the full Remaster's assets*, kept by the plan-15 descriptor-resolution pass (missing classes degrade with a logged substitution, never fatal/sterile) and by never hard-requiring an asset the full Remaster is expected to lack. Surviving roles: (1) contract source — its `BIN\remaster.cpp` inventories the `Remaster >>` config keys the engine reads, the backfill checklist for the Classic shim (#11); (2) reference binary `PoseidonGameDemo.exe` for upstream-behaviour diffs (#13); (3) occasional `demo`-lane data source for engine-level (non-content) tests. The three Demo-world Guerrilla tests stay unrunnable locally (Classic lacks the `demo` world, Demo lacks the GUER roster) and making them run on Demo data is **explicitly no longer a goal** — see Tests below.
+**Game data (not tracked source; treat read-only except where a task documents an exception):**
+- **Full official Remaster (the target):** `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered` (Steam app 65790). Never run setup against the Steam folder itself or add tests that read it directly (the `packages/Game` pins in Tests predate this rule). Setup, `run-game.ps1` and the `remaster_ud` test lane use a setup-prepared *shadow* of it, `D:\Arma_CWA\tmp\remaster-shadow-67` (built by `tools/runtime/new-remaster-shadow.ps1`, then `setup-guerrilla.ps1` in Remaster mode; see [`guerrilla-mode/FRESH-INSTALL.md`](guerrilla-mode/FRESH-INSTALL.md)).
+- `D:\Arma_CWA\ARMA Cold War Assault [Classic]`: the v1.99 install (AddOns, Campaigns, Worlds, `ColdWarAssault.exe`). **Legacy, awaiting retirement.** The local `.trident.env` still points `OFPR_DATA_DIR` here, so the `full_cwa`/`lobo` lanes still run on Classic data on this machine until those lanes migrate to Remaster data.
+- `D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]`: the official remaster Demo (Steam app 4819000), read-only reference. **Its asset set is not a gameplay target** (asset-targeting policy, see the Demo bullet in the repo-root `CLAUDE.md`): Guerrilla content targets the full Remaster + `@LoBo` assets, and the plan-15 descriptor-resolution pass keeps missing classes non-fatal (logged substitution, never fatal or sterile). Surviving roles: (1) contract source: its `BIN\remaster.cpp` inventories the `Remaster >>` config keys the engine reads (#11); (2) reference binary `PoseidonGameDemo.exe` for upstream-behaviour diffs (#13); (3) occasional `demo`-lane data for engine-level (non-content) tests. The three Demo-world Guerrilla tests stay unrunnable locally, and making them run on Demo data is **explicitly not a goal** (see Tests below).
 
 Both bracket dirs are wildcard-hostile: quote the path and use `-LiteralPath` in PowerShell (#12). Per-run `--data-dir` usage lives in the Tests section.
 
@@ -70,7 +86,12 @@ cmake --preset win-x64-clang-rwdi          # Linux: linux-x64-clang-rwdi
 cmake --build build/win-x64-clang-rwdi
 ```
 
-Configure-preset families (suffix = build type): `*-clang-dbg` (Debug), `*-clang-rwdi` (RelWithDebInfo), `*-clang-rel` (Release), for `win-x64` and `linux-x64`. Plus `linux-x64-steamrt4` (Steam Runtime), sanitizer presets `*-clang-san` / `linux-x64-clang-tsan`, and fuzzer presets `*-clang-fuzz` (turn on `POSEIDON_BUILD_FUZZERS`). The binary dir always mirrors the preset name under `build/`. Compiled apps are staged into `dist/<arch>-<platform>-<suffix>/`.
+Presets live in `cmake/presets/{windows,linux,macos,sanitizers}.json` (each includes `base.json`), pulled in by `CMakePresets.json`. Suffix = build type: `-dbg` Debug, `-rwdi` RelWithDebInfo, `-rel` Release.
+- **Windows:** `win-x64-clang-dbg` / `-rwdi` / `-rel`, `win-x64-clang-san`, `win-x64-clang-fuzz`.
+- **Linux:** `linux-x64-clang` (the Debug preset, no `-dbg` suffix), `linux-x64-clang-rwdi` / `-rel` / `-san` / `-tsan` / `-fuzz`. Steam Runtime: `linux-x64-steamrt4` (RelWithDebInfo) and `steamrt4-x64-clang-dbg` / `-rwdi` / `-rel`.
+- **macOS:** `macos-arm64-clang` and `macos-x64-clang` (Debug), each with `-rwdi` / `-rel` / `-san` / `-tsan` variants.
+
+The two `-fuzz` presets turn on `POSEIDON_BUILD_FUZZERS`. Each preset's binary dir is `build/<preset>`. Compiled apps are staged into a `dist/` dir named from the build dir's basename (`DIST_PRESET_NAME` in `CMakeLists.txt`): `<platform>-<arch>-clang-<suffix>` becomes `<arch>-<platform>-<suffix>` (`build/win-x64-clang-rwdi` -> `dist/x64-win-rwdi`, `build/linux-x64-clang` -> `dist/x64-linux`), `steamrt4-x64-clang-<suffix>` becomes `x64-steamrt4-<suffix>`, and any other basename is used unchanged. On this machine `build/` also holds non-preset dirs (`agent-rwdi`, `agent2-rwdi`, `agent67-rwdi`, `agent71-rwdi`, `ud66-rwdi`, `ud66fix-rwdi`), all configured from `win-x64-clang-rwdi` so parallel agent sessions don't share a build or dist dir: `cmake --preset win-x64-clang-rwdi -B build/agent-rwdi` builds into `build/agent-rwdi` and stages to `dist/agent-rwdi`.
 
 **clang-cl/Ninja dependency tracking (2026-10-05):** `cmake/ClangClDependencyTracking.cmake` uses `/showIncludes` for C and C++. With CMake 4.3's default forwarded GCC depfile flags, ccache 4.13.6 cache hits restore the object but lose its header dependencies. This left August renderer objects linked against September engine interfaces and broke world, journal and portrait rendering. Reconfiguring and rebuilding with the corrected flags recompiles existing objects and repairs the dependency database; keep the module enabled even when an incremental build reports success.
 
@@ -85,25 +106,36 @@ For a fresh installation (the official Remaster, or legacy Classic) + LoBo, use
 shims and licensed UI/font payload now have tracked sources; do not restore the
 old local Microsoft-font workaround. The older launchers below remain available.
 
-`run-game.ps1` (repo root) is the fast path to eyeball a change: it handles the
+All four scripts (`run-game.ps1`, `run-game-with-mods.ps1`, `setup-guerrilla.ps1`,
+`play-guerrilla.ps1`) live in the engine root `D:\Arma_CWA\arma_CWR`, not the git root.
+`run-game.ps1` is the fast path to eyeball a change: it handles the
 toolchain-on-PATH gotcha, does an incremental `PoseidonGame`-target build, and launches
-the exe windowed against the game data dir.
+the exe with `--window --no-splash` against the game data dir. Other params: `-Preset`
+(build dir, default `win-x64-clang-rwdi`), `-LogDir` (default `logs\`) and `-ExtraArgs`
+(raw args appended verbatim).
 
 ```powershell
 .\run-game.ps1                                      # build + launch to the main menu
-.\run-game.ps1 -Mission 'Missions\Guerrilla.Demo'   # build + jump straight into a mission
+.\run-game.ps1 -Mission 'Missions\Guerrilla.Abel'   # build + jump straight into a mission
 .\run-game.ps1 -SkipBuild                           # launch the existing dist/ build as-is
 ```
 
-Default `-DataDir` is the setup-prepared Remaster shadow (`tools/runtime/UDDataDir.psm1`:
-`$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else
-`D:\Arma_CWA\tmp\remaster-shadow-67`); only when none exists does it fall back, with a
+Default `-DataDir` is the setup-prepared Remaster shadow (`Get-UDDefaultDataDir` in
+`tools/runtime/UDDataDir.psm1`). `$env:UD_DATA_DIR` wins if set, and throws if it is not
+a directory (no fall-through). Otherwise the first of: the target of `packages\RemasterUD`,
+`D:\Arma_CWA\tmp\remaster-shadow-67`, `D:\Arma_CWA\tmp\remaster-shadow`, each counting
+only if it holds a `dtaExt` folder. If none qualifies it falls back, with a
 warning, to the legacy `D:\Arma_CWA\ARMA Cold War Assault [Classic]`. `guerrilla-mode/install-missions.ps1`
-and `run-game-with-mods.ps1` share that default. `-Mod`/`-Mods` mounts mod folders (one
+and `run-game-with-mods.ps1` share that default. The shadow has no `demo` world, so
+`Guerrilla.Demo` is not installed there. `-Mod`/`-Mods` mounts mod folders (one
 `--mod` value, `;`-joined, mount order kept). `-Mission` is resolved relative
 to `-DataDir` and passed as `--test-mission` (omit it to boot to the main menu, where
-GUERRILLA lets you pick island/faction interactively). `play-guerrilla.ps1` captures the
-same three log files below by default and takes `-Dev` (adds `--dev`) and `-NoLog`.
+GUERRILLA lets you pick island/faction interactively). `run-game-with-mods.ps1` wraps
+`run-game.ps1`: `-Mod` defaults to `@LoBo`, `@lobofixup` is appended after it unless
+`-NoLoBoFixup`, and `-ModsDir` (default `D:\Arma_CWA`) is passed as `--mods-dir`.
+`play-guerrilla.ps1` needs PowerShell 7 (`#requires -Version 7.0`) and mandatory
+`-GameDir`/`-GameExe`; it captures the same three log files below by default and takes
+`-Dev` (adds `--dev`) and `-NoLog`.
 
 ### Console-output capture (default on — read the files, don't run the exe in a terminal)
 
@@ -123,7 +155,10 @@ just Read/Grep the newest `logs\game-*` files after the run. Diagnostics knobs w
 need more detail: `--log-level`, `--log-categories`, `--log-format` and `--logfiles`
 (file-operation logging) — see `PoseidonGame.exe --help` / `AppConfig.cpp`. Pass
 `-NoLog` to `run-game.ps1` to disable capture; never launch `PoseidonGame.exe` in the
-foreground of an AI session to "see" its output — use the log files.
+foreground of an AI session to "see" its output — use the log files. `-NoLog` passes no
+`--no-log-file`, so a detached run with no console still gets the engine's own auto log
+at `<UserContentDir>\logs\cwr_*.log` (`apps/cwr/GameBase/GameBase.cpp`, `WantsRunLogFile`
+plus `ShouldWriteAutoLog`).
 
 **Always close what you open.** No human is at the keyboard to close game windows, and a
 lingering instance poisons the next Trident connection ("connection error: eval failed").
@@ -136,41 +171,50 @@ stray `PoseidonGame` processes before diagnosing connection failures.
 
 ## Tests
 
-CTest drives both Catch2 unit tests and Trident integration tests:
+CTest runs the unit suites. Trident integration tests run through `tri test` (below), not
+CTest: `cmake/TridentCTest.cmake` registers them only with `OFPR_REGISTER_TRIDENT_CTESTS=ON`
+(default OFF, and OFF in `build/win-x64-clang-rwdi`), and even then only if a
+`packages/Remaster` data dir exists, which nothing creates (issue #91).
 
 ```sh
 ctest --test-dir build/win-x64-clang-rwdi --output-on-failure
 ctest --test-dir build/win-x64-clang-rwdi -R "<test name>" --output-on-failure   # single test / regex
 ```
 
-- **Unit** (`tests/unit/`, Catch2): suites `PoseidonFoundationTests`, `PoseidonCoreTests`, `PoseidonTests`, `PoseidonServerTests`, `PoseidonEvaluatorTests`, `PoseidonTetrisTests`. Catch2 tag filters like `[config]`, `[graphics]` partition `PoseidonTests`.
+- **Unit** (`tests/unit/`, Catch2): suites `PoseidonFoundationTests`, `PoseidonCoreTests`, `PoseidonTests`, `PoseidonServerTests`, `PoseidonEvaluatorTests`, `PoseidonTetrisTests`. Catch2 tag filters like `[config]`, `[graphics]` partition `PoseidonTests`. Plus `PoseidonStudioTests` (`tests/unit/apps/Studio`), a Dear ImGui Test Engine suite for the Studio asset editor, registered via `imgui_discover_tests`.
 - **Integration** (`tests/integration/`, Trident): SQF-driven in-game scenarios. Needs game data. Build the runner first, then run:
   ```sh
   cargo build --manifest-path engine/Trident/Cargo.toml
-  tri test -j6 --retries 2 tests/integration   # binary: engine/Trident/target/debug/tri[.exe]
+  tri test -j6 --retries 2 tests/integration   # binary: target/debug/tri[.exe] (Cargo workspace root is arma_CWR/; engine/Trident/target/ is a stale pre-workspace leftover)
   ```
-  Copy `.trident.env.example` → `.trident.env`, set `OFPR_GAME_DIR` (build/dist dir with binaries) and `OFPR_DATA_DIR` (Demo game data; recommended layout `packages/Demo`, which is gitignored). Get free Demo data from Steam app 4819000.
+  Test layouts: `<name>.test.sqf` with an optional `<name>.test.toml` sidecar (tags, `data_dir`, `mission`, `extra_args`, timeouts); multi-instance `<name>.test/` directories whose `test.toml` lists `[[instances]]`; and sequences, a `<name>.seq/` directory of ordered `*.test.sqf` phases (each a fresh launch sharing one user dir; phases may carry their own `.test.toml`) with an optional sibling `<name>.seq.toml` for the sequence's tags.
 
-  **On this machine** two game-data packages exist. `.trident.env` points `OFPR_DATA_DIR` at the full 1.99 install `ARMA Cold War Assault [Classic]` — the default for the `full_cwa`/`lobo` lanes — and the official remaster Demo package sits at `Arma Cold War Assault Demo [Remaster]`. Override the data dir per run for a Demo lane: `tri test --data-dir "D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]" ...` (the runner does no globbing on the value, so the brackets are safe). **57 tomls pin themselves with `data_dir = "packages/Demo"`** (resolved against the repo root), and several more reach repo fixtures through `--mods-dir ../../tests/fixtures/...` relative to the game CWD, which only lands inside the repo when the data dir IS `packages/Demo`. On this machine that path is a **junction** to the Demo package, created 2026-09-02 for issue #56 task 3 and gitignored: `cmd /c mklink /J "D:\Arma_CWA\arma_CWR\packages\Demo" "D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]"`. Without it every `packages/Demo` test reports `spawn failed` and the fixture-mod tests die before `HARNESS_PORT`, which is not a regression. A second junction, **`packages/Game`**, points at the full retail Remaster (`D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered`): the mods-screen and join-requirements tests pin themselves there (tag `full_game`) because only that package ships the complete `BIN\STRINGTABLE_MAINMENU.utf8.csv` (`STR_DISP_MODS_LOAD` and the tab labels; the Demo carries a 231-key subset). The 32 menu/editor/mods tests that #49 part 1 listed as asserting on removed entries were re-pointed this way on 2026-09-02, not loosened: 21 to `packages/Demo`, 11 to `packages/Game`, all green with no `--data-dir` override. A third junction, **`packages/RemasterUD`**, points at a setup-prepared *shadow* of the Remaster (`tools/runtime/new-remaster-shadow.ps1`, then `setup-guerrilla.ps1` in Remaster mode; on this machine `D:\Arma_CWA\tmp\remaster-shadow-67`): the `tests/integration/ui/remaster` lane (tag `remaster_ud`, issue #67) checks the UD menu, Bohemia's Options/mods screens and Guerrilla boots there, with and without @LoBo. Never run setup or tests against the Steam folder itself.
+  Copy `.trident.env.example` to `.trident.env` and set `OFPR_GAME_DIR` (build/dist dir with binaries) and `OFPR_DATA_DIR` (data for tests that pin no `data_dir`; a pinned `data_dir` wins over `--data-dir`). New setups target the full Remaster through a setup-prepared shadow, never the Steam folder itself: see "Development tests" in [`guerrilla-mode/FRESH-INSTALL.md`](guerrilla-mode/FRESH-INSTALL.md). The example file still says `packages/Demo`, pending the migration of the `full_cwa`/`lobo` lanes to Remaster data.
 
-  **The three Demo-world Guerrilla tests don't run on either local package, and per the 2026-07-14 asset-targeting policy this is accepted, not a work item.** `guerrilla_capture_flip`, `guerrilla_spawn_domove` and `guerrilla_save_reload.seq` bind to the `demo` world (folder suffix `.Demo`), which Classic lacks; and their `mission.sqm` player is `SoldierGB`, which the Demo [Remaster] package does not ship (no `SoldierG*` roster except `SoldierGFakeE`, #13) — a `--data-dir` run against the Demo package boot-fails within ~60 ms on the strict-mode config error. Descriptor-sourced spawns are already package-proof (the plan-15 resolution pass), but the `mission.sqm` class is not descriptor-sourced, and remapping it for Demo data is out of scope now: the Demo asset set is no longer targeted. The runnable Guerrilla set here is the `full_cwa` tests on Classic (+ the `lobo` lane).
+  **On this machine** the local `.trident.env` still points `OFPR_DATA_DIR` at the legacy Classic install `ARMA Cold War Assault [Classic]`, so unpinned tests, the `full_cwa`/`lobo` lanes among them, run on Classic data until those lanes migrate. Pinned tests use `data_dir = "packages/<name>"`, resolved against the repo root; each `packages/` entry is a gitignored **junction**, and without it a pinned test reports `spawn failed`, which is not a regression. Tests that reach repo fixtures through `--mods-dir ../../tests/fixtures/...` (relative to the game CWD) only land inside the repo when the data dir is one of these junctions; otherwise they die before `HARNESS_PORT`. Remove a junction with `cmd /c rmdir <link>` (link only). Pin counts as of 2026-10-13:
+  - **`packages/Demo`** (78 tomls: 33 `.test.toml`, 45 multi-instance `test.toml`) -> the Demo package, created 2026-09-02 for issue #56 task 3: `cmd /c mklink /J "D:\Arma_CWA\arma_CWR\packages\Demo" "D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]"`. An unpinned test can be pointed at it per run with `tri test --data-dir "D:\Arma_CWA\Arma Cold War Assault Demo [Remaster]" ...` (no globbing on the value, so the brackets are safe).
+  - **`packages/Game`** (13 tomls, mostly tag `full_game`) -> the unmodified retail Remaster (`D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\Remastered`). The mods-screen, join-requirements and a few menu/editor tests pin here because only that package ships the complete `BIN\STRINGTABLE_MAINMENU.utf8.csv` (`STR_DISP_MODS_LOAD` and the tab labels; the Demo carries a 231-key subset). The 32 menu/editor/mods tests that #49 part 1 listed as asserting on removed entries were re-pointed on 2026-09-02, not loosened: 21 to `packages/Demo`, 11 to `packages/Game`.
+  - **`packages/RemasterUD`** (25 tomls, tag `remaster_ud`) -> the setup-prepared Remaster shadow (`D:\Arma_CWA\tmp\remaster-shadow-67`; recipe in "Development tests", `guerrilla-mode/FRESH-INSTALL.md`). Covers `tests/integration/ui/remaster` (issue #67: the UD menu, Bohemia's Options/mods screens and Guerrilla boots, with and without @LoBo) and the Guerrilla off-screen and counter-attack scripting tests. Never run setup against the Steam folder itself, and add no new tests that read it directly (the `packages/Game` pins predate the shadow).
+
+  **The three Demo-world Guerrilla tests don't run on any local package, and per the 2026-07-14 asset-targeting policy this is accepted, not a work item.** `guerrilla_capture_flip`, `guerrilla_spawn_domove` and `guerrilla_save_reload.seq` boot `missions/guerrilla_capture.Demo` / `guerrilla_persist.Demo`, bound to the `demo` world, which neither Classic nor the full Remaster ships; and their `mission.sqm` player is `SoldierGB`, which the Demo [Remaster] package does not ship (no `SoldierG*` roster except `SoldierGFakeE`, #13), so a `--data-dir` run against the Demo package boot-fails within ~60 ms on the strict-mode config error. Descriptor-sourced spawns are already package-proof (the plan-15 resolution pass), but the `mission.sqm` class is not descriptor-sourced, and remapping it for Demo data is out of scope: the Demo asset set is not targeted. The runnable Guerrilla set here is the `remaster_ud` lane on the Remaster shadow, plus the `full_cwa` and `lobo` tests, which run on the legacy Classic data via `.trident.env` until their lane migration lands.
 
 ### Guerrilla integration-test preconditions (verified 2026-07-07)
 
-- **Every Guerrilla mission now needs the shared script core installed** (issue #54 step B1, 2026-09-02): the managers live once at `guerrilla-mode/core` and are installed to `<GameDir>\gmcore` by `guerrilla-mode/install-missions.ps1`; each mission's `init.sqs` is a two-line `[] exec "\gmcore\init.sqs"` bootstrap, whose leading backslash resolves against the game data root rather than the mission folder. This holds even for the tests that boot a repo-root-relative template path: the mission folder no longer carries `scripts/`, so without a `<GameDir>\gmcore` the mission boots with zero managers and the asserts go red on missing `gm*` globals. Re-run the installer after editing the core.
-- `ui/guerrilla_new_game_e2e` needs the mission templates **installed in the game dir**: plain `guerrilla-mode/install-missions.ps1` (issue #54 C4, 2026-09-02: the world gate now scans the pbo entry tables of `AddOns\`, `Dta\` and every `@*` mod folder next to the game dir, so Sinai and Lebanon80 install with no `-IncludeWorld`, which survives only as a manual override). The same run installs the shared script core (`gmcore`) and the **vanilla faction library** (`bin\guerrilla-factions.hpp` included from `bin\config-extra.cpp`, issue #54 A4). The @LoBo war rosters live once in `guerrilla-mode/config/lobo-factions.hpp`; **`tools/lobo/install-lobo-factions.ps1` writes them into `@LoBo\bin\config.cpp`** (issue #56 task 2, one-time, rerun after an @LoBo reinstall), and the `@lobofixup` test fixture `#include`s the same header. A session that mounts `@LoBo` without that install and without `@lobofixup` offers no war factions on Sinai/Lebanon80. `guerrilla_sinai_swap` and `guerrilla_lebanon80_boot` now mount `@LoBo` ALONE, so they need the roster install; they boot the repo-root-relative template path, so they need only the core + library install, not the templates.
+- **Every Guerrilla mission now needs the shared script core installed** (issue #54 step B1, 2026-09-02): the managers live once at `guerrilla-mode/core` and are installed to `<GameDir>\gmcore` by `guerrilla-mode/install-missions.ps1`; the `Guerrilla.*` and `Showcase.Abel` templates carry a two-line `[] exec "\gmcore\init.sqs"` bootstrap, whose leading backslash resolves against the game data root rather than the mission folder. The reference slices `Qrf.Abel`, `Market.Abel` and `Undercover.Abel` carry their own longer `init.sqs` that execs `\gmcore\scripts\lib.sqs` plus the one core policy script it demonstrates (`qrf.sqs`, `market.sqs`, `undercover.sqs`), so they too need `gmcore`. This holds even for the tests that boot a repo-root-relative template path: the mission folder no longer carries `scripts/`, so without a `<GameDir>\gmcore` the mission boots with zero managers and the asserts go red on missing `gm*` globals. Re-run the installer after editing the core.
+- `ui/guerrilla_new_game_e2e` needs the mission templates **installed in the game dir**: plain `guerrilla-mode/install-missions.ps1` (issue #54 C4, 2026-09-02: the world gate now accepts a loose `<GameDir>\Worlds\<World>.wrp` or a `<World>.wrp` entry in any pbo under `<GameDir>\AddOns\`, `<GameDir>\Dta\` or the `addons\` subfolder (not the root) of each `@*` mod beside or inside the game dir, or of each `-ModDir`, so Sinai and Lebanon80 install with no `-IncludeWorld`, which survives only as a manual override). The same run installs the shared script core (`gmcore`) and the **vanilla faction library** (`bin\guerrilla-factions.hpp` included from `bin\config-extra.cpp`, issue #54 A4). The @LoBo war rosters live once in `guerrilla-mode/config/lobo-factions.hpp`; **`tools/lobo/install-lobo-factions.ps1` writes them into `@LoBo\bin\config.cpp`** (issue #56 task 2, one-time, rerun after an @LoBo reinstall), and the `@lobofixup` test fixture `#include`s the same header. A session that mounts `@LoBo` without that install and without `@lobofixup` offers no war factions on Sinai/Lebanon80. `guerrilla_sinai_swap` and `guerrilla_lebanon80_boot` now mount `@LoBo` ALONE, so they need the roster install; they boot the repo-root-relative template path, so they need only the core + library install, not the templates.
 - The LoBo tests need a one-time `@LoBo` repair pass, idempotent and rerun after any @LoBo reinstall: **`dist/<build>/PoseidonTools.exe mod doctor "D:\Arma_CWA\@LoBo" --fix`** (drop `--fix` to report only; `--pbo <wildcard>` narrows the model scan). It repairs all three defect classes in one go with same-length in-place byte patches (the pbo header table never moves) and keeps the originals in `@LoBo/_ud-orig`:
   - **UNDEFINED_SCOPE_KEYWORD** — `LoBoWreck.pbo` and `LoBoPalObj.pbo` are the only two @LoBo addons that omit the `#define private 0 / protected 1 / public 2` header every other @LoBo config carries, so their `scope = public;` resolved to nothing and read back as 0. Eighteen finished wreck and poster classes were refused with `Cannot create '<class>': type is abstract`. `scripting/prop_spawn_safety` CASE 2b goes red if the repair has not been run.
   - **BURIED_MODEL_ORIGIN** — `LoBo_M60A1_wreck` and `LoBo_M60A1_wreck2` were authored with their model origin **above** the mesh, and a static prop is seated at `terrainY + shape->BoundingCenter().Y` (`Entity::PlaceOnSurface`, Static branch, `World/Simulation/Simul.cpp:1300`), so `createVehicle [x, y, 0]` buried both tanks whole (roof 0.45 m / 0.92 m under the sand). Not a missing LOD: no LoBoWreck model has a LandContact LOD, including the eight that seat correctly. Since 2026-09-05 (ported from the `screenshots` branch) the engine also nets this case: `Entity::PlaceOnSurface` seats any model whose whole mesh sits at or below its own origin on its lowest vertex and logs a WARN naming the shape (`StaticSeatOffsetY`, `Vehicle.hpp`, pinned in `test_house.cpp`), so an unrepaired install still shows the tanks. Both layers resolve to the same seat; `scripting/prop_spawn_safety` CASE 2d asserts it and goes red only if the p3d repair is missing AND the engine net regressed. The same tranche made a config value that evaluates to nil (an undefined identifier such as `scope = public` without its `#define`) log a WARN once per spelling at the `ParamFileEval` seam instead of reading 0 silently.
   - **MALFORMED_FLOAT** — stock `@LoBo` ammo pbos carry `0.0.1` in eleven `tracerColor[]` arrays. The config reader now coerces such a token to its strtod prefix (see `ClassifyToleratedLiteral`), so this no longer hard-aborts under `--autotest`; the repair still normalises the bytes. On this machine `LoBoammo.pbo`/`LoBo_airammo.pbo` were already repaired in place on 2026-07-16 and are byte-identical to the `@lobofixup` fixture's shadows, so the shadows are inert; the fixture's `bin/config.cpp` (its `CfgAddons` preload roster and `CfgGuerrillaFactions`) is what still carries the lane.
-  - `tools/lobo/fix-lobo-scope.ps1`, `tools/lobo/fix-lobo-model-origin.ps1` and `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1` are now thin wrappers around `mod doctor`; the logic lives in `engine/Poseidon/Asset/Addon/ModDoctor.{hpp,cpp}` and is unit-tested (`[moddoctor]`).
+  - `tools/lobo/fix-lobo-scope.ps1` and `tools/lobo/fix-lobo-model-origin.ps1` are now thin wrappers around `mod doctor`. `tests/fixtures/mods-lobo/@lobofixup/gen-patched-pbos.ps1` does more: it copies `LoBoammo.pbo` and `LoBo_airammo.pbo` from `@LoBo\addons` into the fixture, runs `mod doctor --fix` on the fixture, then deletes the fixture's `_ud-orig`. The logic lives in `engine/Poseidon/Asset/Addon/ModDoctor.{hpp,cpp}` and is unit-tested (`[moddoctor]`).
+  - Where a reinstall comes from: **`D:\LoBo-Reloaded`** (outside the repo; family use only, never upload) is the LoBo source of truth on this machine. Built, verified packages sit in its `dist\` as `LoBo-Reloaded-<date>.7z`, unpacked under `modfolders\<date>\` as `@LoBo`, `@LoBo_Deps`, `@LoBo_UD` and `@LoBo_Extras`; they are built by `tools/lobo/package-lobo-family.ps1`, with the repair history in `tools/lobo/CONTENT-REPAIRS.md`. Per its `README.txt` (read it first), its `@LoBo` already ships with the mod doctor repairs applied.
 - Run `tri` with `--retries` and low `-j`: `guerrilla_native_spawn` is known-flaky on its doMove displacement assert (recovers on retry), and parallel instances plus any manually closed window show up as `connection error: eval failed` cascades.
 
 ### Unit-test gotchas on Windows (verified 2026-06-28)
 
 A clean build passes ~3536/3561 unit tests. The ~25 "failures" out of the box on this machine are **environment portability bugs in the tests, not engine regressions** — they reproduce on any fresh Windows/non-UTC checkout. Two causes, both fixed locally:
 
-- **Hardcoded `/tmp/` paths (24 tests).** Ten test files (`test_paa_encoder`, `test_asset_preview`, `test_dds_converter`, `test_findfirst`, `test_gamePaths`, `test_crash_handler`, `test_mission_info`, `test_game_state_ext`, `test_dir_scanner`, `test_network_server`) write to literal `"/tmp/..."`. A native Windows exe resolves that to `\tmp\` **on the current drive**, so file writes (`WritePAA`, `saveToFile`, world-state writes) fail with no such directory. Fix: create `D:\tmp` (ctest runs from the `D:` drive). If you ever run the tests from another drive, create `\tmp` on that drive too.
+- **Hardcoded `/tmp/` paths (24 tests on 2026-06-28).** `test_paa_encoder` (`WritePAA`), `test_asset_preview` (`saveToFile` when `TMPDIR` is unset) and `test_network_server` (JIP world-state `.jips` writes) write to literal `"/tmp/..."`, and `test_gamePaths` points its env overrides there. A native Windows exe resolves that to `\tmp\` **on the current drive**, so those writes fail with no such directory. Fix: create `D:\tmp` (ctest runs from the `D:` drive). If you ever run the tests from another drive, create `\tmp` on that drive too. The other `"/tmp/` hits (grep of 2026-10-13) are harmless: `test_findfirst`, `test_dir_scanner`, `test_mission_info`, `test_game_state_ext` and `test_network_predicate_parity` use them only as string inputs, and `test_crash_handler`'s is in its POSIX-only branch. `test_dds_converter` no longer uses `/tmp`: it builds an exe-relative `tmp/` path and calls `create_directories`, the pattern to copy. Issue #90 tracks removing the hardcoded paths.
 - **`FormatTime` timezone assumption (1 test).** `AssetInfo::FormatTime` correctly renders asset mod-times in **local** time; the test in `test_asset_info.cpp` assumed UTC and asserted the string contained `"2020"` for `1577836800`, which renders as `2019-12-31 16:00:00` west of UTC. Fixed the test to assert the `YYYY-MM-DD HH:MM:SS` *format* instead (production code unchanged — local-time display is the desired behavior).
 
 ## Lint / format
@@ -180,29 +224,30 @@ These are custom CMake targets (not standalone scripts) — build them against a
 ```sh
 cmake --build build/win-x64-clang-rwdi --target Format      # clang-format check (--Werror)
 cmake --build build/win-x64-clang-rwdi --target FormatFix   # clang-format in place
-cmake --build build/win-x64-clang-rwdi --target Tidy        # clang-tidy
-cmake --build build/win-x64-clang-rwdi --target Lint        # Format + Python (ruff, if uv present)
+cmake --build build/win-x64-clang-rwdi --target Tidy        # clang-tidy (Tidy/TidyFix exist only if clang-tidy is found)
+cmake --build build/win-x64-clang-rwdi --target TidyFix     # clang-tidy --fix-errors --fix
+cmake --build build/win-x64-clang-rwdi --target Lint        # Format, + ruff on the Blender addon if uv is found AND apps/tools/BlenderAddon/pyproject.toml exists (LintFix likewise)
 cmake --build build/win-x64-clang-rwdi --target FileSize    # warn >3000 lines, error >5000
 ```
 
-Rust crates (`engine/Trident`, `mserver/*`) use the normal `cargo fmt` / `clippy` / `test` / `build` per their `Cargo.toml`.
+Rust crates (`engine/Trident`, `mserver/*`) are members of one Cargo workspace rooted at `arma_CWR/Cargo.toml` (shared `target/`, profiles `dbg`/`rwdi`/`rel`) and use the normal `cargo fmt` / `clippy` / `test` / `build`.
 
 ## Architecture
 
-**Engine (C++20 static libs, `engine/`)** — the stack apps link against:
-- **Poseidon** (`engine/Poseidon/`, → `Poseidon.lib`) — the whole engine in one lib. Subsystems: `AI`, `Asset`, `Audio`, `Core`, `Dev`, `Foundation`, `Game`, `Graphics` (backend interface + factory), `IO` (streams, ParamFile, preproc), `Input`, `Network`, `Security`, `UI`, `World`, plus the SQF `Evaluator`.
-- **PoseidonGL33** / **PoseidonOpenAL** — OpenGL 3.3 and OpenAL backends, linked only by client apps that need rendering/audio.
-- **PoseidonFormats** — standalone C-API shared lib for P3D/PAA/PBO/RTM file formats; consumed by the Python Blender addon.
+**Engine libs (`engine/`)**, the stack apps link against. `Poseidon` and `PoseidonGL33` build as C++17, the others as C++20 (see "What this is"):
+- **Poseidon** (`engine/Poseidon/`, → `Poseidon.lib`): the whole engine in one static lib. Subsystems: `AI`, `Asset`, `Audio`, `Core`, `Dev`, `Foundation`, `Game`, `Graphics` (backend interface + factory), `IO` (streams, ParamFile, preproc), `Input`, `Network`, `Security`, `UI`, `World`. It also compiles the SQF evaluator from `engine/Evaluator/` and the RNG from `engine/Random/`; both sit at the top of `engine/`, not under `engine/Poseidon/`.
+- **PoseidonGL33**: OpenGL 3.3 backend, linked only by the GUI clients (`PoseidonGame`, `PoseidonGameDemo`, `PoseidonTetris`). **PoseidonOpenAL**: OpenAL backend, linked by those clients and also by `PoseidonStudio` and `PoseidonTools`.
+- **PoseidonFormats**: C API for P3D/PAA/PBO/RTM file formats, built from one source twice: a static `PoseidonFormats` lib (today linked only by `PoseidonTests`) and, on x64, a shared `PoseidonFormatsDLL` (output name `PoseidonFormats`) that statically links the whole `Poseidon` lib. The Blender addon at `apps/tools/BlenderAddon/` (`io_import_p3d`) loads that DLL through `ctypes`.
 
 **Foundation** (`engine/Poseidon/Foundation/`) is the engine's own standard-library layer — custom Containers, Strings, Memory (mimalloc-backed), Threads, Math, Time, etc. — that the rest of the engine is written against instead of the STL. `PoseidonPCH.hpp` is the prelude precompiled-and-force-included into most targets; building with `POSEIDON_DISABLE_PCH=ON` removes the force-include to audit per-file include self-containment.
 
-**Apps** (`apps/`): `cwr/Game` + `cwr/GameDemo` + `cwr/Server` (sharing `cwr/GameBase` startup), and tools under `tools/` (`Tools`/`PoseidonTools`, `Evaluator`, `Studio` ImGui shell, `TcPbo`, `TcLister`). Sample target `tetris/Tetris`, fuzz harnesses `fuzzers/Fuzzer`. GUI client targets link engine + GL/AL backends; tool targets link only the engine libs they need. Note the output name often differs from the target name (e.g. target `TcPbo` → `pbo`, `TcLister` → `poseidon`).
+**Apps** (`apps/`, folder → CMake target): `cwr/Game` → `PoseidonGame`, `cwr/GameDemo` → `PoseidonGameDemo`, `cwr/Server` → `PoseidonServer` (all three link the `cwr/GameBase` static lib for shared startup). Tools under `tools/`: `Tools` → `PoseidonTools`, `Evaluator` → `PoseidonEvaluator`, `Studio` → `PoseidonStudio` (ImGui shell), and the Total Commander plugins `TcPbo` / `TcLister` (output names `pbo` / `poseidon`). `tools/BlenderAddon/` is a Python Blender addon, not a CMake target. Sample `tetris/Tetris` → `PoseidonTetris`. `fuzzers/Fuzzer` holds libFuzzer harnesses, added only when `POSEIDON_BUILD_FUZZERS` is on. GUI client targets link engine + GL/AL backends; tool targets link only the engine libs they need.
 
-**Rust tooling**: `engine/Trident/` (the `tri` integration test runner / harness) and `mserver/` crates (`Archive`, `CLI`, `Client`, `MasterService` — public master-server service and CLI).
+**Rust tooling** (one Cargo workspace, `arma_CWR/Cargo.toml`): `engine/Trident/` (the `tri` integration test runner / harness) and the `mserver/` crates: `Archive` (PBO pack/unpack), `CLI` (the `papa` binary: pack PBOs, publish mods), `Client` (protocol client SDK) and `MasterService` (the master-server service).
 
 ## Conventions that will surprise you
 
-- **Legacy warning suppression is huge and intentional.** `CMakeLists.txt` disables ~50 clang warning classes globally (verified to suppress ~11,600 warnings). Don't "fix" code just because a normally-warned pattern appears — many are deliberate (e.g. `memcpy`/`memmove` on bitwise-movable types via the `ClassIsMovableZeroed` pattern, intentionally incomplete `switch` in AI logic, defensive tautological compares).
-- **clang-cl vs GNU clang differ on `__FILE__`.** On GNU-driver clang, `-fmacro-prefix-map` rewrites `__FILE__` to repo-root-relative; on clang-cl it is left absolute on purpose (test helpers like `RepoPath()` walk an absolute `__FILE__` up to the repo root). Keep this asymmetry in mind when touching path/log/assert code.
+- **Legacy warning suppression is huge and intentional.** The root `CMakeLists.txt` disables 46 clang warning classes in one global `add_compile_options` block (verified to suppress ~11,600 warnings), and `engine/Poseidon/CMakeLists.txt` adds a few more (plus `-Wno-error`) scoped to the `Poseidon` target. Don't "fix" code just because a normally-warned pattern appears — many are deliberate (e.g. `memcpy`/`memmove` on bitwise-movable types via the `ClassIsMovableZeroed` pattern, intentionally incomplete `switch` in AI logic, defensive tautological compares).
+- **clang-cl vs GNU clang differ on `__FILE__`.** On GNU-driver clang, `-fmacro-prefix-map` rewrites `__FILE__` relative to `arma_CWR/` (the CMake source dir, not the git root); on clang-cl it is left absolute on purpose (the flag is not forwarded via `/clang:`). No code currently parses `__FILE__` for paths: tests that need the repo root use `RepoRoot()` helpers built on the `TESTS_ROOT_DIR` compile definition (`tests/unit/engine/Poseidon/CMakeLists.txt`). Keep this asymmetry in mind when touching path/log/assert code.
 - **PCH config is per-target PRIVATE**, not `REUSE_FROM`, because targets bake differing compile definitions into the PCH blob. See the `POSEIDON_PCH_TARGETS` list in the root `CMakeLists.txt`.
 - The build adds targets in a specific order in the root `CMakeLists.txt`; new subdirectories must be registered there.
