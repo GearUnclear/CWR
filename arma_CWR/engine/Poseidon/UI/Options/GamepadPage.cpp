@@ -23,42 +23,7 @@ namespace
 {
 constexpr int kGamepadButtonLB = 4;
 
-struct ContextList
-{
-    const InputContext* data = nullptr;
-    int count = 0;
-};
 
-ContextList ContextsForCategory(ControlsCategory cat)
-{
-    static constexpr InputContext onFoot[] = {InputContext::Infantry};
-    static constexpr InputContext vehicles[] = {InputContext::CarDriver, InputContext::TankDriver,
-                                                InputContext::ShipDriver};
-    static constexpr InputContext pilot[] = {InputContext::HeliPilot, InputContext::PlanePilot};
-    static constexpr InputContext gunner[] = {InputContext::TankGunner, InputContext::Gunner};
-    static constexpr InputContext common[] = {
-        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver,  InputContext::TankDriver,
-        InputContext::TankGunner, InputContext::HeliPilot, InputContext::PlanePilot, InputContext::ShipDriver,
-        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,        InputContext::Chat,
-        InputContext::Editor,
-    };
-
-    switch (cat)
-    {
-        case ControlsCategoryOnFoot:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-        case ControlsCategoryVehicles:
-            return {vehicles, static_cast<int>(std::size(vehicles))};
-        case ControlsCategoryPilot:
-            return {pilot, static_cast<int>(std::size(pilot))};
-        case ControlsCategoryGunner:
-            return {gunner, static_cast<int>(std::size(gunner))};
-        case ControlsCategoryCommon:
-            return {common, static_cast<int>(std::size(common))};
-        default:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-    }
-}
 
 bool IsGamepadCode(int packedCode)
 {

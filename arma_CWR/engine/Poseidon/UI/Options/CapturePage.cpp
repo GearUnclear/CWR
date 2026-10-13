@@ -211,7 +211,7 @@ void CapturePage::RefreshConflict()
         return;
     }
     m_conflictAction = m_onConflict(m_capturedCode, m_capturedModifier);
-    m_conflictActionLabel = (m_conflictAction != UAN) ? ControlActionLabel(m_conflictAction) : "";
+    m_conflictActionLabel = (m_conflictAction != UAN) ? ControlActionLabel(m_conflictAction, m_category) : "";
 }
 
 void CapturePage::RefreshTitle(OptionsShell& shell)

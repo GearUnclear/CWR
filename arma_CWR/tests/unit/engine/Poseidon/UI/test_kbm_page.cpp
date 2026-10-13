@@ -6,6 +6,7 @@
 // integration tests under tests/integration/ui/options/controls/.
 
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 #include <Poseidon/Input/InputBinding.hpp>
 #include <Poseidon/Input/InputCode.hpp>
 #include <Poseidon/Input/InputContext.hpp>
@@ -34,43 +35,35 @@ namespace
 class UserKeysSnapshot
 {
   public:
-    UserKeysSnapshot()
-        : savedContext(InputSubsystem::Instance().GetContext()),
-          savedMenuProfile(InputSubsystem::Instance().GetProfile(InputContext::Menu)),
-          savedInfantryProfile(InputSubsystem::Instance().GetProfile(InputContext::Infantry)),
-          savedCarProfile(InputSubsystem::Instance().GetProfile(InputContext::CarDriver)),
-          savedTankProfile(InputSubsystem::Instance().GetProfile(InputContext::TankDriver)),
-          savedShipProfile(InputSubsystem::Instance().GetProfile(InputContext::ShipDriver))
+    UserKeysSnapshot() : savedContext(InputSubsystem::Instance().GetContext())
     {
-        for (int i = 0; i < UAN; i++)
+        for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+            profiles[c] = InputSubsystem::Instance().GetProfile(static_cast<InputContext>(c));
+        for (int i = 0; i < UAN; ++i)
             saved[i] = GInput.userKeys[i];
     }
     ~UserKeysSnapshot()
     {
         auto& sub = InputSubsystem::Instance();
         sub.SetContext(savedContext);
-        sub.GetProfile(InputContext::Menu) = savedMenuProfile;
-        sub.GetProfile(InputContext::Infantry) = savedInfantryProfile;
-        sub.GetProfile(InputContext::CarDriver) = savedCarProfile;
-        sub.GetProfile(InputContext::TankDriver) = savedTankProfile;
-        sub.GetProfile(InputContext::ShipDriver) = savedShipProfile;
-        for (int i = 0; i < UAN; i++)
+        for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+            sub.GetProfile(static_cast<InputContext>(c)) = profiles[c];
+        for (int i = 0; i < UAN; ++i)
             GInput.userKeys[i] = saved[i];
     }
 
   private:
     InputContext savedContext;
-    InputProfile savedMenuProfile;
-    InputProfile savedInfantryProfile;
-    InputProfile savedCarProfile;
-    InputProfile savedTankProfile;
-    InputProfile savedShipProfile;
+    std::array<InputProfile, ContextControlsConfig::ContextCount> profiles;
     AutoArray<int> saved[UAN];
 };
 
 class TestableKbmPage : public KbmPage
 {
   public:
+    using BindingsPage::ClearCapture;
+    using BindingsPage::FindCaptureConflict;
+    using BindingsPage::ResetCurrentCategoryToDefaults;
     OptionsScrollList::Provider& Provider() { return ProviderRef(); }
     bool Filter(int code) const { return DeviceFilter(code); }
     void Capture(UserAction action, int slot, int code, int modifier = -1, bool replaceConflict = false)
@@ -354,4 +347,64 @@ TEST_CASE("ControlActionLabel: the new and renamed actions have readable labels"
     CHECK_FALSE(std::string(ControlActionLabel(UAOptics)).empty());
     CHECK(std::string(ControlActionLabel(UAOptics)).find("UNREGISTERED") == std::string::npos);
     CHECK(std::string(ControlActionLabel(UAN)).empty());
+}
+
+TEST_CASE("Aircraft binding edit clear and reset isolate contexts and preserve controllers", "[UI][KbmPage][aircraft]")
+{
+    UserKeysSnapshot snapshot;
+    auto& sub = InputSubsystem::Instance();
+    ContextControlsConfig defaults;
+    defaults.LoadDefaults();
+    auto& heli = sub.GetProfile(InputContext::HeliPilot);
+    auto& plane = sub.GetProfile(InputContext::PlanePilot);
+    heli = defaults.profiles[(int)InputContext::HeliPilot];
+    plane = defaults.profiles[(int)InputContext::PlanePilot];
+    const InputBinding pad(InputCode::GamepadAx(1), InputCode::GamepadBtn(4), ActivationMode::OnHold, -0.6f);
+    heli.SetBindingEntries(UAMoveForward, {InputCode::Key(SDL_SCANCODE_W), pad, pad});
+    const auto planeBefore = plane.GetBindingEntries(UAMoveForward);
+    TestableKbmPage page;
+    auto& provider = page.Provider();
+    provider.SetRowValue(0, ControlsCategoryHelicopter);
+    page.Capture(UAMoveForward, 0, SDL_SCANCODE_F1);
+    CHECK(heli.HasBinding(UAMoveForward, InputCode::Key(SDL_SCANCODE_F1)));
+    CHECK(plane.GetBindingEntries(UAMoveForward) == planeBefore);
+    page.ClearCapture(UAMoveForward, 0);
+    CHECK(heli.GetBindingEntries(UAMoveForward) == std::vector<InputBinding>{pad, pad});
+    page.ResetCurrentCategoryToDefaults();
+    CHECK(heli.GetBindingEntries(UAMoveForward) == std::vector<InputBinding>{InputCode::Key(SDL_SCANCODE_W), pad, pad});
+    CHECK(plane.GetBindingEntries(UAMoveForward) == planeBefore);
+    provider.SetRowValue(0, ControlsCategoryPlane);
+    CHECK(page.FindCaptureConflict(UAMoveDown, 0, SDL_SCANCODE_K, -1) == UACompass);
+    CHECK(page.FindCaptureConflict(UAMoveDown, 0, SDL_SCANCODE_G, -1) == UAAircraftGear);
+    CHECK(page.FindCaptureConflict(UAMoveDown, 0, SDL_SCANCODE_Q, -1) == UAMoveLeft);
+    const std::filesystem::path csv =
+        std::filesystem::path(TESTS_ROOT_DIR) / "../guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv";
+    LoadStringtable("global", csv.string().c_str(), 0.0f, false);
+    SetLanguage("English");
+    CHECK(std::string(provider.RowLabel(1)) == "Increase speed");
+    provider.SetRowValue(0, ControlsCategoryHelicopter);
+    CHECK(std::string(provider.RowLabel(1)) == "Nose down");
+    CHECK(std::string(ControlActionLabel(UAMoveDown, ControlsCategoryPlane)) == "Nose down");
+}
+
+TEST_CASE("Common reset keeps aircraft compass on K regardless of reset ordering", "[UI][KbmPage][aircraft]")
+{
+    UserKeysSnapshot snapshot;
+    auto& sub = InputSubsystem::Instance();
+    ContextControlsConfig defaults;
+    defaults.LoadDefaults();
+    sub.GetProfile(InputContext::HeliPilot) = defaults.profiles[(int)InputContext::HeliPilot];
+    auto& plane = sub.GetProfile(InputContext::PlanePilot);
+    plane = defaults.profiles[(int)InputContext::PlanePilot];
+    const InputBinding pad(InputCode::GamepadPov(6));
+    plane.Bind(UACompass, pad);
+    sub.ResetCategoryDefaults(ControlsCategoryPlane);
+    sub.ResetCategoryDefaults(ControlsCategoryCommon);
+    CHECK(plane.HasBinding(UAAircraftGear, InputCode::Key(SDL_SCANCODE_G)));
+    CHECK(plane.HasBinding(UACompass, InputCode::Key(SDL_SCANCODE_K)));
+    CHECK_FALSE(plane.HasBinding(UACompass, InputCode::Key(SDL_SCANCODE_G)));
+    CHECK(plane.HasBinding(UACompass, pad));
+    TestableKbmPage page;
+    page.Provider().SetRowValue(0, ControlsCategoryCommon);
+    CHECK(page.FindCaptureConflict(UACompass, 0, SDL_SCANCODE_G, -1) == UAAircraftGear);
 }

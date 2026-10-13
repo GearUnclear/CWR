@@ -81,6 +81,7 @@ class BindingsPage : public ScrollListPage
     void ResetCurrentCategoryToDefaults();
     void ApplyCapture(int actionIdx, int slot, int packedCode, int modifier, bool replaceConflict);
     void ClearCapture(int actionIdx, int slot);
+    UserAction FindCaptureConflict(UserAction action, int slot, int packedCode, int modifier) const;
 
   private:
     class Provider : public OptionsScrollList::Provider

@@ -51,6 +51,8 @@ class CapturePage : public OptionsPage
                 SaveCallback onSave,
                 ConflictCallback onConflict);
 
+    void SetControlsCategory(ControlsCategory category) { m_category = category; }
+
     const char* TitleText() const override { return ""; }
     bool IsModal() const override { return true; }
 
@@ -106,6 +108,7 @@ class CapturePage : public OptionsPage
     void RefreshTitle(OptionsShell& shell);
     void RefreshStatus(OptionsShell& shell);
 
+    ControlsCategory m_category = ControlsCategoryCount;
     SaveCallback m_onSave;
     ConflictCallback m_onConflict;
     std::string m_actionLabel;

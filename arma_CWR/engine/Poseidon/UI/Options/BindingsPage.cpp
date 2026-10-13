@@ -1,6 +1,8 @@
 #include <Poseidon/UI/Options/BindingsPage.hpp>
 
 #include <Poseidon/UI/Options/ConfirmPage.hpp>
+#include <Poseidon/UI/Options/CapturePage.hpp>
+#include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 #include <Poseidon/UI/Options/OptionsShell.hpp>
 
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -27,49 +29,12 @@ extern RString GetKeyName(int dikCode);
 
 namespace
 {
-// Stringtable IDs for the 5 user-facing category names.  Looked up
+// Stringtable IDs for the user-facing category names.  Looked up
 // lazily so the labels honour the active language.
 const char* const kCategoryStrIds[ControlsCategoryCount] = {
-    "STR_DISP_OPT_CTL_CAT_ONFOOT", "STR_DISP_OPT_CTL_CAT_VEHICLES", "STR_DISP_OPT_CTL_CAT_PILOT",
-    "STR_DISP_OPT_CTL_CAT_GUNNER", "STR_DISP_OPT_CTL_CAT_COMMON",
+    "STR_DISP_OPT_CTL_CAT_ONFOOT", "STR_DISP_OPT_CTL_CAT_VEHICLES", "STR_UD_CTL_CAT_HELICOPTER",
+    "STR_UD_CTL_CAT_PLANE",        "STR_DISP_OPT_CTL_CAT_GUNNER",   "STR_DISP_OPT_CTL_CAT_COMMON",
 };
-
-struct ContextList
-{
-    const InputContext* data = nullptr;
-    int count = 0;
-};
-
-ContextList ContextsForCategory(ControlsCategory cat)
-{
-    static constexpr InputContext onFoot[] = {InputContext::Infantry};
-    static constexpr InputContext vehicles[] = {InputContext::CarDriver, InputContext::TankDriver,
-                                                InputContext::ShipDriver};
-    static constexpr InputContext pilot[] = {InputContext::HeliPilot, InputContext::PlanePilot};
-    static constexpr InputContext gunner[] = {InputContext::TankGunner, InputContext::Gunner};
-    static constexpr InputContext common[] = {
-        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver,  InputContext::TankDriver,
-        InputContext::TankGunner, InputContext::HeliPilot, InputContext::PlanePilot, InputContext::ShipDriver,
-        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,        InputContext::Chat,
-        InputContext::Editor,
-    };
-
-    switch (cat)
-    {
-        case ControlsCategoryOnFoot:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-        case ControlsCategoryVehicles:
-            return {vehicles, static_cast<int>(std::size(vehicles))};
-        case ControlsCategoryPilot:
-            return {pilot, static_cast<int>(std::size(pilot))};
-        case ControlsCategoryGunner:
-            return {gunner, static_cast<int>(std::size(gunner))};
-        case ControlsCategoryCommon:
-            return {common, static_cast<int>(std::size(common))};
-        default:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-    }
-}
 
 InputContext PrimaryContextForCategory(ControlsCategory cat)
 {
@@ -91,9 +56,7 @@ bool BindingMatches(const InputBinding& binding, int packedCode, int modifier)
 
 void RebindProfile(InputProfile& profile, UserAction action, const std::vector<InputBinding>& bindings)
 {
-    profile.ClearBindings(action);
-    for (const InputBinding& binding : bindings)
-        profile.Bind(action, binding);
+    profile.SetBindingEntries(action, bindings);
 }
 
 void RemoveBindingFromProfile(InputProfile& profile, UserAction action, int packedCode, int modifier)
@@ -201,24 +164,15 @@ void BindingsPage::Unmount(OptionsShell& shell)
 void BindingsPage::ResetCurrentCategoryToDefaults()
 {
     auto& sub = InputSubsystem::Instance();
-    UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
     const UserAction* actions = GetControlsCategoryActions(m_category);
     ContextList contexts = ContextsForCategory(m_category);
-
-    for (int a = 0; actions[a] != UAN; ++a)
-    {
-        UserAction action = actions[a];
-        std::vector<InputBinding> defaults;
-        const KeyList& keys = descs[action].keys;
-        for (int i = 0; i < keys.Size(); ++i)
-        {
-            if (DeviceFilter(keys[i]) && keys[i] < INPUT_DEVICE_STICK)
-                defaults.push_back(MakeBinding(keys[i], DefaultModifierForDefaultKey(action, keys[i])));
-        }
-
-        for (int c = 0; c < contexts.count; ++c)
-            RebindProfile(sub.GetProfile(contexts.data[c]), action, defaults);
-    }
+    for (int c = 0; c < contexts.count; ++c)
+        for (int a = 0; actions[a] != UAN; ++a)
+            ContextControlsConfig::ResetKeyboardAction(contexts.data[c], sub.GetProfile(contexts.data[c]), actions[a]);
+    if (m_category == ControlsCategoryOnFoot)
+        ContextControlsConfig::ApplyInfantryLeanDefaults(sub.GetProfile(InputContext::Infantry));
+    if (m_category == ControlsCategoryHelicopter || m_category == ControlsCategoryPlane)
+        ContextControlsConfig::ApplyAircraftKeyboardDefaults(contexts.data[0], sub.GetProfile(contexts.data[0]));
 }
 
 void BindingsPage::ApplyCapture(int actionIdx, int slot, int packedCode, int modifier, bool replaceConflict)
@@ -254,6 +208,40 @@ void BindingsPage::ApplyCapture(int actionIdx, int slot, int packedCode, int mod
     for (int c = 0; c < contexts.count; ++c)
         ApplyBindingToProfile(sub.GetProfile(contexts.data[c]), static_cast<UserAction>(actionIdx), slot, binding,
                               filter);
+}
+
+UserAction BindingsPage::FindCaptureConflict(UserAction action, int slot, int packedCode, int modifier) const
+{
+    auto& sub = InputSubsystem::Instance();
+    const auto contexts = ContextsForCategory(m_category);
+    for (int c = 0; c < contexts.count; ++c)
+    {
+        const auto& profile = sub.GetProfile(contexts.data[c]);
+        for (int i = 0; i < UAN; ++i)
+        {
+            bool active = IsActionInControlsCategory(static_cast<UserAction>(i), ControlsCategoryCommon);
+            for (int category = 0; !active && category < ControlsCategoryCount - 1; ++category)
+            {
+                const auto categoryContexts = ContextsForCategory(static_cast<ControlsCategory>(category));
+                for (int k = 0; k < categoryContexts.count; ++k)
+                    if (categoryContexts.data[k] == contexts.data[c])
+                        active = IsActionInControlsCategory(static_cast<UserAction>(i),
+                                                            static_cast<ControlsCategory>(category));
+            }
+            if (!active && i != UATurbo && i != UAMoveFastForward && i != UAMoveSlowForward)
+                continue;
+            int visibleSlot = 0;
+            for (const auto& binding : profile.GetBindingEntries(static_cast<UserAction>(i)))
+            {
+                if (!DeviceFilter(binding.code.toLegacy()))
+                    continue;
+                if (BindingMatches(binding, packedCode, modifier) && !(i == action && visibleSlot == slot))
+                    return static_cast<UserAction>(i);
+                ++visibleSlot;
+            }
+        }
+    }
+    return UAN;
 }
 
 void BindingsPage::ClearCapture(int actionIdx, int slot)
@@ -326,7 +314,7 @@ const char* BindingsPage::Provider::RowLabel(int row) const
         UserAction action = (UserAction)ActionIndex(row);
         if (const char* label = m_owner->ActionLabelOverride(action, m_owner->m_category))
             return label;
-        return ControlActionLabel((UserAction)ActionIndex(row));
+        return ControlActionLabel((UserAction)ActionIndex(row), m_owner->m_category);
     }
     if (IsResetRow(row))
         return LocalizeString("STR_DISP_OPT_CTL_RESET_CAT");
@@ -338,7 +326,11 @@ const char* BindingsPage::Provider::RowDescription(int row) const
     if (row == 0)
         return LocalizeString("STR_DISP_OPT_CTL_CATEGORY_DESC");
     if (IsActionRow(row))
+    {
+        if (const char* description = AircraftActionDescription((UserAction)ActionIndex(row), m_owner->m_category))
+            return description;
         return LocalizeString("STR_DISP_OPT_CTL_BINDING_DESC");
+    }
     if (IsResetRow(row))
     {
         char buf[128];
@@ -479,32 +471,13 @@ void BindingsPage::Provider::OnBindingClicked(int row, int slot, Display& host)
         page->RefreshAfterCapture();
     };
     auto onConflict = [page, actionIdx, slot](int packedCode, int modifier) -> UserAction
-    {
-        auto& sub = InputSubsystem::Instance();
-        const InputProfile& profile = sub.GetProfile(PrimaryContextForCategory(page->m_category));
-        for (int i = 0; i < UAN; ++i)
-        {
-            int visibleSlot = 0;
-            const auto& bindings = profile.GetBindingEntries(static_cast<UserAction>(i));
-            for (const InputBinding& binding : bindings)
-            {
-                if (!page->DeviceFilter(binding.code.toLegacy()))
-                    continue;
-                if (!BindingMatches(binding, packedCode, modifier))
-                {
-                    visibleSlot++;
-                    continue;
-                }
-                if (i == actionIdx && visibleSlot == slot)
-                    continue;
-                return static_cast<UserAction>(i);
-            }
-        }
-        return UAN;
-    };
+    { return page->FindCaptureConflict(static_cast<UserAction>(actionIdx), slot, packedCode, modifier); };
 
-    shell->PushPage(m_owner->MakeCaptureModal(ControlActionLabel((UserAction)actionIdx), slot == 0 ? "Primary" : "Alt",
-                                              std::move(onSave), std::move(onConflict)));
+    auto modal = m_owner->MakeCaptureModal(ControlActionLabel((UserAction)actionIdx, m_owner->m_category),
+                                           slot == 0 ? "Primary" : "Alt", std::move(onSave), std::move(onConflict));
+    if (auto* capture = dynamic_cast<CapturePage*>(modal.get()))
+        capture->SetControlsCategory(m_owner->m_category);
+    shell->PushPage(std::move(modal));
 }
 
 void BindingsPage::Provider::OnBindingCleared(int row, int slot)

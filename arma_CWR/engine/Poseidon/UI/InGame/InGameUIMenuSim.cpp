@@ -390,6 +390,37 @@ void InGameUI::SimulateHUDNonAI(const Camera& camera, Entity* vehicle, CameraTyp
 void InGameUI::SimulateHUD(const Camera& camera, EntityAI* vehicle, CameraType cam, float deltaT)
 {
     auto& input = InputSubsystem::Instance();
+    AIUnit* shortcutUnit = GWorld->FocusOn();
+    EntityAI* shortcutVehicle = shortcutUnit ? shortcutUnit->GetVehicle() : nullptr;
+    const bool shortcutsEligible = shortcutUnit && shortcutVehicle && shortcutVehicle->IsLocal() &&
+                                   shortcutUnit->GetLifeState() == AIUnit::LSAlive &&
+                                   shortcutVehicle->PilotUnit() == shortcutUnit && !GWorld->HasMap() &&
+                                   !GWorld->Chat() && !GWorld->GetPlayerSuspended() &&
+                                   !GetNetworkManager().IsControlsPaused();
+    const bool hover =
+        input.GetAircraftShortcutToDo(UAAircraftAutoHover, shortcutsEligible, shortcutVehicle, shortcutUnit);
+    const bool gear = input.GetAircraftShortcutToDo(UAAircraftGear, shortcutsEligible, shortcutVehicle, shortcutUnit);
+    bool shortcutDispatched = false;
+    if (hover || gear)
+    {
+        // GetActions is the authority for manual flight, seat and gear damage
+        // restrictions. Use the same action dispatch as the action menu.
+        UIActions available;
+        static Foundation::MStorage<UIAction> shortcutStorage;
+        available.SetStorage(shortcutStorage.Init(64));
+        shortcutVehicle->GetActions(available, shortcutUnit, true);
+        const UIActionType type = hover ? ATAutoHover : ATLandGear;
+        for (int i = 0; i < available.Size(); ++i)
+            if (available[i].type == type && available[i].target == shortcutVehicle)
+            {
+                shortcutVehicle->StartActionProcessing(available[i], shortcutUnit);
+                shortcutDispatched = true;
+                break;
+            }
+    }
+    // A menu activation in the same frame must not toggle the command twice.
+    if (shortcutDispatched)
+        input.GetActionToDo(UAAction);
     if (input.GetActionToDo(UAHelp))
     {
         ShowLastHint();

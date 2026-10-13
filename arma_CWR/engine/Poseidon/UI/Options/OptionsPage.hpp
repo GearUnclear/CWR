@@ -1,4 +1,5 @@
 #pragma once
+#include <Poseidon/Input/ControlsCategory.hpp>
 
 // PoseidonOptionsTest — abstract base for an Options page mounted into
 // the shared OptionsShell notebook.
@@ -122,6 +123,7 @@ protected:
 	std::vector<int> m_mountedIdcs;
 };
 
-const char* ControlActionLabel(UserAction action);
+const char* ControlActionLabel(UserAction action, ControlsCategory category = ControlsCategoryCount);
+const char* AircraftActionDescription(UserAction action, ControlsCategory category);
 
 } // namespace Poseidon

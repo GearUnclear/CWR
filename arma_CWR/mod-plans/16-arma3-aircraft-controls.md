@@ -2,7 +2,7 @@
 
 Bring Arma 3's familiar aircraft keyboard layout to Uslu dur! through the existing context profiles. Helicopters use W/S for pitch, A/D for bank, Q/E for pedals and Left Shift/Z for lift. Planes use the same pitch, bank and rudder keys, with Left Shift/Z for acceleration. Keep permanent mouse freelook and the existing simulation, assistance, joystick response and aircraft data.
 
-**Status:** implementation plan, 2026-10-12; tracked in [issue #82](https://github.com/GearUnclear/CWR/issues/82). Research baseline: [`4b5c940`](https://github.com/GearUnclear/CWR/commit/4b5c94060f30c3df7492e072f95f5fe8082fbd33). The implementation targets the full official CWA Remaster. Runtime acceptance checks below are future work; the research did not launch the game.
+**Status:** implementation and PR validation in progress, 2026-10-12; tracked in [issue #82](https://github.com/GearUnclear/CWR/issues/82). Research baseline: [`4b5c940`](https://github.com/GearUnclear/CWR/commit/4b5c94060f30c3df7492e072f95f5fe8082fbd33). The implementation targets the full official CWA Remaster. Runtime acceptance checks below are future work; the research did not launch the game.
 
 ## Scope and intended behavior
 
@@ -14,7 +14,7 @@ Mouse movement continues to look around every aircraft pilot seat. Do not exempt
 
 ## Reference layout and deliberate differences
 
-Bohemia's [Arma 3 vehicle field manual](https://community.bohemia.net/wiki/Arma_3%3A_Field_Manual_-_Vehicle_Controls?useskin=darkvector) describes the plane layout: W/S pitch, A/D bank, Q/E rudder, Left Shift/Z throttle. Its [action and preset reference](https://community.bohemia.net/wiki/inputAction/actions/bindings) documents the helicopter equivalents, X autohover and G landing gear. Use the **Arma 3 / Apex** column, not Arma 2, Alternative, Reforger or Industry Standard.
+Bohemia's [Arma 3 vehicle field manual](https://community.bohemia.net/wiki/Arma_3%3A_Field_Manual_-_Vehicle_Controls?useskin=darkvector) describes the plane layout: W/S pitch, A/D bank, Q/E rudder, Left Shift/Z throttle. Its [action and preset reference](https://community.bohemia.net/wiki/inputAction/actions/bindings) documents the helicopter equivalents, X autohover and G landing gear. Use the original **Arma 3** column (the launch-era Classic preset), not the separately labelled **Arma 3 Apex (Default)** column, Arma 2, Alternative, Reforger or Industry Standard. The original and Apex aircraft movement, autohover and gear keys coincide; the reference distinction still matters for the preset as a whole. Bohemia's [official keyboard chart](https://cdn.akamai.steamstatic.com/steam/apps/107410/manuals/Arma_3_keylayout_ENG.pdf) also illustrates the aircraft layout, but its current 2013–2017 revision is not a frozen launch-day artifact.
 
 | Existing UD action | Helicopter default and UI label | Plane default and UI label |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ Update `guerrilla-mode/FRESH-INSTALL.md` and the player-facing controls help wit
 
 ## How to use the planned controls
 
-These steps describe the result after implementation, not functionality already delivered by this planning commit.
+These controls are implemented in the proposed change. Full-Remaster flight and rendered UI acceptance are still pending.
 
 1. Open **Options -> Controls -> Arma 3 controls**, review the affected controls and apply the preset. Existing saved aircraft bindings are kept until this step.
 2. Under **Keyboard & Mouse**, select **Helicopter** or **Plane** to inspect/rebind that aircraft only. Saving or resetting one category must leave the other intact.
@@ -124,4 +124,16 @@ Extend existing suites rather than assert only that a constant table equals itse
 
 Future implementation can build `PoseidonTests` and run the focused `[ContextControlsConfig]`, `[ControlsCategory]` and relevant input/UI cases after checking their registered tags. Extend `tests/integration/ui/options/controls/` or add a Remaster-pinned companion; do not assume existing fixtures already provide aircraft runtime probes. Test names and harness commands added by the implementation must be real.
 
-The research/planning commit needs documentation and roadmap validation, not an engine build. No runtime pass is claimed. The substantive open work is implementation and the later Remaster acceptance matrix, not retuning the flight model.
+Implementation adds a shared aircraft keyboard provider, one category/context mapping, separate helicopter and plane pages, contextual table/capture/conflict labels and UD-owned localization. Context controls version 6 serializes empty rows explicitly. Version-5 loads retain every existing row and missing/cleared aircraft rows stay cleared; the new shortcuts start unbound until preset/reset adoption. Shortcut dispatch uses the vehicle's current `GetActions` availability and `StartActionProcessing` menu path, with a release latch across focus/context/vehicle changes.
+
+Focused regression checks cover aircraft defaults and preset persistence, versions 1–5/future profiles, exact controller-entry preservation, editing/clearing/reset isolation, Common compass reset ordering, input requests and shortcut release/edge behavior. Full-Remaster runtime acceptance remains a separate gate; do not close #82 based on unit checks alone.
+
+### Local validation — 2026-10-12
+
+Linux Clang builds of `PoseidonGame` and `PoseidonTests` pass. The focused
+`[ContextControlsConfig],[ControlsCategory],[KbmPage],[GamepadPage],[input],[CapturePage]`
+suite passes 356 cases / 12,729 assertions. The available-data engine suite
+(`~[external-data]~[GameData]`, with local loopback sockets enabled) passes 2,967
+cases / 2,300,066 assertions, with 15 skips. Runtime manifest hashes and
+`git diff --check` pass. Full Remaster data and PowerShell are unavailable in
+this checkout: flight, rendered UI and installer execution remain pending.

@@ -613,8 +613,9 @@ ControlsCategory DebugSettingsCategoryForContext(InputContext context)
         case InputContext::ShipDriver:
             return ControlsCategoryVehicles;
         case InputContext::HeliPilot:
+            return ControlsCategoryHelicopter;
         case InputContext::PlanePilot:
-            return ControlsCategoryPilot;
+            return ControlsCategoryPlane;
         case InputContext::TankGunner:
         case InputContext::Gunner:
             return ControlsCategoryGunner;

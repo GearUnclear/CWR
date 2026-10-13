@@ -1,4 +1,5 @@
 #include <Poseidon/Input/ControlsCategory.hpp>
+#include <iterator>
 
 namespace Poseidon
 {
@@ -33,12 +34,65 @@ const UserAction kVehicles[] = {
     UALookAround,  UALookAroundToggle, UALookCenter,      UALookLeft,        UALookRight,  UALookUp,      UALookDown,
     UALookLeftUp,  UALookRightUp,      UALookLeftDown,    UALookRightDown,   UAHeadlights, UANightVision, UAN};
 
-const UserAction kPilot[] = {UAMoveForward,      UAMoveBack,   UATurnLeft,    UATurnRight,    UAMoveLeft,
-                             UAMoveRight,        UAMoveUp,     UAMoveDown,    UAFire,         UALockTarget,
-                             UALockTargets,      UAZoomIn,     UAZoomOut,     UAZoomTemp,     UALookAround,
-                             UALookAroundToggle, UALookCenter, UALookLeft,    UALookRight,    UALookUp,
-                             UALookDown,         UALookLeftUp, UALookRightUp, UALookLeftDown, UALookRightDown,
-                             UAHeadlights,       UAN};
+const UserAction kHelicopter[] = {UAMoveForward,
+                                  UAMoveBack,
+                                  UATurnLeft,
+                                  UATurnRight,
+                                  UAMoveLeft,
+                                  UAMoveRight,
+                                  UAMoveUp,
+                                  UAMoveDown,
+                                  UAFire,
+                                  UALockTarget,
+                                  UALockTargets,
+                                  UAZoomIn,
+                                  UAZoomOut,
+                                  UAZoomTemp,
+                                  UALookAround,
+                                  UALookAroundToggle,
+                                  UALookCenter,
+                                  UALookLeft,
+                                  UALookRight,
+                                  UALookUp,
+                                  UALookDown,
+                                  UALookLeftUp,
+                                  UALookRightUp,
+                                  UALookLeftDown,
+                                  UALookRightDown,
+                                  UAHeadlights,
+                                  UAAircraftAutoHover,
+                                  UACompass,
+                                  UAN};
+
+const UserAction kPlane[] = {UAMoveForward,
+                             UAMoveBack,
+                             UATurnLeft,
+                             UATurnRight,
+                             UAMoveLeft,
+                             UAMoveRight,
+                             UAMoveUp,
+                             UAMoveDown,
+                             UAFire,
+                             UALockTarget,
+                             UALockTargets,
+                             UAZoomIn,
+                             UAZoomOut,
+                             UAZoomTemp,
+                             UALookAround,
+                             UALookAroundToggle,
+                             UALookCenter,
+                             UALookLeft,
+                             UALookRight,
+                             UALookUp,
+                             UALookDown,
+                             UALookLeftUp,
+                             UALookRightUp,
+                             UALookLeftDown,
+                             UALookRightDown,
+                             UAHeadlights,
+                             UAAircraftGear,
+                             UACompass,
+                             UAN};
 
 const UserAction kGunner[] = {UAFire,          UAReloadMagazine,
                               UAToggleWeapons, UALockTarget,
@@ -67,7 +121,7 @@ const UserAction kCommon[] = {UAPrevAction,   UANextAction,
                               UACheatEntry,   UAN};
 
 const UserAction* const kCategoryTable[ControlsCategoryCount] = {
-    kOnFoot, kVehicles, kPilot, kGunner, kCommon,
+    kOnFoot, kVehicles, kHelicopter, kPlane, kGunner, kCommon,
 };
 
 int Count(const UserAction* list)
@@ -78,6 +132,40 @@ int Count(const UserAction* list)
     return n;
 }
 } // namespace
+
+ContextList ContextsForCategory(ControlsCategory cat)
+{
+    static constexpr InputContext onFoot[] = {InputContext::Infantry};
+    static constexpr InputContext vehicles[] = {InputContext::CarDriver, InputContext::TankDriver,
+                                                InputContext::ShipDriver};
+    static constexpr InputContext helicopter[] = {InputContext::HeliPilot};
+    static constexpr InputContext plane[] = {InputContext::PlanePilot};
+    static constexpr InputContext gunner[] = {InputContext::TankGunner, InputContext::Gunner};
+    static constexpr InputContext common[] = {
+        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver,  InputContext::TankDriver,
+        InputContext::TankGunner, InputContext::HeliPilot, InputContext::PlanePilot, InputContext::ShipDriver,
+        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,        InputContext::Chat,
+        InputContext::Editor,
+    };
+
+    switch (cat)
+    {
+        case ControlsCategoryOnFoot:
+            return {onFoot, static_cast<int>(std::size(onFoot))};
+        case ControlsCategoryVehicles:
+            return {vehicles, static_cast<int>(std::size(vehicles))};
+        case ControlsCategoryHelicopter:
+            return {helicopter, static_cast<int>(std::size(helicopter))};
+        case ControlsCategoryPlane:
+            return {plane, static_cast<int>(std::size(plane))};
+        case ControlsCategoryGunner:
+            return {gunner, static_cast<int>(std::size(gunner))};
+        case ControlsCategoryCommon:
+            return {common, static_cast<int>(std::size(common))};
+        default:
+            return {onFoot, static_cast<int>(std::size(onFoot))};
+    }
+}
 
 const UserAction* GetControlsCategoryActions(ControlsCategory cat)
 {
@@ -108,8 +196,10 @@ const char* GetControlsCategoryName(ControlsCategory cat)
             return "On foot";
         case ControlsCategoryVehicles:
             return "Vehicles";
-        case ControlsCategoryPilot:
-            return "Pilot";
+        case ControlsCategoryHelicopter:
+            return "Helicopter";
+        case ControlsCategoryPlane:
+            return "Plane";
         case ControlsCategoryGunner:
             return "Gunner";
         case ControlsCategoryCommon:

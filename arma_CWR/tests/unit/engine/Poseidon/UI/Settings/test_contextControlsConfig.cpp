@@ -14,12 +14,13 @@
 #include <array>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <string>
 
 using namespace Poseidon;
 
-TEST_CASE("Arma 3 Classic infantry reserves Q/E for lean without changing vehicle keys", "[Settings][lean]")
+TEST_CASE("Arma 3 Classic infantry lean is separate from aircraft pedals", "[Settings][lean]")
 {
     ContextControlsConfig cfg;
     cfg.LoadDefaults();
@@ -30,7 +31,7 @@ TEST_CASE("Arma 3 Classic infantry reserves Q/E for lean without changing vehicl
     CHECK_FALSE(foot.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_Q)));
     CHECK_FALSE(foot.HasBinding(UAMoveSlowForward, InputCode::Key(SDL_SCANCODE_Q)));
     CHECK_FALSE(foot.HasBinding(UAMoveFastForward, InputCode::Key(SDL_SCANCODE_E)));
-    CHECK(pilot.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(pilot.HasBinding(UAMoveLeft, InputCode::Key(SDL_SCANCODE_Q)));
     foot.Bind(UAReloadMagazine, InputCode::Key(SDL_SCANCODE_Q));
     foot.Bind(UAReloadMagazine, InputBinding(InputCode::Key(SDL_SCANCODE_E), InputCode::Key(SDL_SCANCODE_LCTRL)));
     cfg.ApplyArma3Preset();
@@ -131,7 +132,9 @@ TEST_CASE("ContextControlsConfig: Arma 3 preset replaces customized rows and per
                                         InputBinding(InputCode::GamepadPov(2))});
         CHECK(profile.GetBindingEntries(UARevealTarget) ==
               std::vector<InputBinding>{InputBinding(InputCode::MouseButton(1))});
-        CHECK(profile.GetBindingEntries(UAMoveForward) == std::vector<InputBinding>{move});
+        if (&profile != &cfg.profiles[(int)InputContext::HeliPilot] &&
+            &profile != &cfg.profiles[(int)InputContext::PlanePilot])
+            CHECK(profile.GetBindingEntries(UAMoveForward) == std::vector<InputBinding>{move});
     }
 
     const std::string path = TmpPath("arma3_preset.cfg");
@@ -430,7 +433,7 @@ TEST_CASE("ContextControlsConfig: a full version-3 config migrates to 4", "[Sett
     std::filesystem::remove(path);
     REQUIRE(migrated.Save(path));
     const std::string saved = ReadAll(path);
-    CHECK(saved.find("contextControlsVersion=5;") != std::string::npos);
+    CHECK(saved.find("contextControlsVersion=6;") != std::string::npos);
     CHECK(saved.find("ctxInfantryOptics[]={81921,25,131078};") != std::string::npos);
     CHECK(saved.find("ctxInfantryLockTarget[]={23};") != std::string::npos);
     CHECK(saved.find("ctxInfantryWatch[]={18,262146};") != std::string::npos);
@@ -560,7 +563,7 @@ TEST_CASE("ContextControlsConfig: a file newer than the build is treated as unkn
     CHECK(optics[1].code == InputCode::MouseButton(4));
 
     REQUIRE(cfg.Save(path));
-    CHECK(ReadAll(path).find("contextControlsVersion=5;") != std::string::npos);
+    CHECK(ReadAll(path).find("contextControlsVersion=6;") != std::string::npos);
     ContextControlsConfig reloaded;
     REQUIRE(reloaded.Load(path));
     CHECK_FALSE(reloaded.migratedOnLoad);
@@ -637,7 +640,7 @@ TEST_CASE("ContextControlsConfig: migration preserves every customized serialize
     CHECK(cfg.profiles[(int)InputContext::Infantry].HasBinding(UAZoomTemp, InputCode::MouseButton(1)));
 
     REQUIRE(cfg.Save(path));
-    CHECK(ReadAll(path).find("contextControlsVersion=5;") != std::string::npos);
+    CHECK(ReadAll(path).find("contextControlsVersion=6;") != std::string::npos);
     ContextControlsConfig reloaded;
     REQUIRE(reloaded.Load(path));
     CHECK_FALSE(reloaded.migratedOnLoad);
@@ -680,11 +683,127 @@ TEST_CASE("ContextControlsConfig: a current version never rewrites old defaults 
           "[Settings][ContextControlsConfig]")
 {
     const std::vector<InputBinding> bindings{InputCode::Key(SDL_SCANCODE_V), InputCode::Key(SDL_SCANCODE_KP_0)};
-    const std::string path = WriteProfileRow(5, "Optics", bindings);
+    const std::string path = WriteProfileRow(6, "Optics", bindings);
     ContextControlsConfig cfg;
     REQUIRE(cfg.Load(path));
     CHECK_FALSE(cfg.migratedOnLoad);
     CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAOptics) == bindings);
     CHECK(cfg.profiles[(int)InputContext::Infantry].BindingCount(UAZoomTemp) == 0);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Aircraft preset replaces keyboard rows and preserves exact controller entries",
+          "[Settings][ContextControlsConfig][aircraft]")
+{
+    ContextControlsConfig cfg;
+    cfg.LoadDefaults();
+    const InputBinding pad(InputCode::GamepadAx(1), InputCode::GamepadBtn(4), ActivationMode::OnHold, -0.65f);
+    auto& heli = cfg.profiles[(int)InputContext::HeliPilot];
+    auto& plane = cfg.profiles[(int)InputContext::PlanePilot];
+    const auto foot = cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAMoveForward);
+    heli.SetBindingEntries(UAMoveForward, {InputBinding{}, pad, InputCode::Key(SDL_SCANCODE_F1), pad});
+    plane.SetBindingEntries(UAMoveDown, {pad, InputCode::Key(SDL_SCANCODE_F2), pad});
+    cfg.ApplyArma3Preset();
+    const std::vector<InputBinding> expectedHeli{InputCode::Key(SDL_SCANCODE_W), pad, pad};
+    const std::vector<InputBinding> expectedPlane{InputCode::Key(SDL_SCANCODE_W), pad, pad};
+    CHECK(heli.GetBindingEntries(UAMoveForward) == expectedHeli);
+    CHECK(plane.GetBindingEntries(UAMoveDown) == expectedPlane);
+    cfg.ApplyArma3Preset();
+    CHECK(heli.GetBindingEntries(UAMoveForward) == expectedHeli);
+    CHECK(plane.GetBindingEntries(UAMoveDown) == expectedPlane);
+    CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAMoveForward) == foot);
+    CHECK(heli.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_LSHIFT)));
+    CHECK(plane.HasBinding(UAMoveForward, InputCode::Key(SDL_SCANCODE_LSHIFT)));
+    CHECK(heli.HasBinding(UAMoveRight, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK(plane.HasBinding(UAMoveRight, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK(heli.HasBinding(UAAircraftAutoHover, InputCode::Key(SDL_SCANCODE_X)));
+    CHECK(plane.HasBinding(UAAircraftGear, InputCode::Key(SDL_SCANCODE_G)));
+    for (auto* profile : {&heli, &plane})
+    {
+        CHECK(profile->BindingCount(UATurbo) == 0);
+        CHECK(profile->BindingCount(UAMoveFastForward) == 0);
+        CHECK(profile->BindingCount(UAMoveSlowForward) == 0);
+        CHECK(profile->HasBinding(UACompass, InputCode::Key(SDL_SCANCODE_K)));
+    }
+    const std::string path = TmpPath("aircraft_preset.cfg");
+    REQUIRE(cfg.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+        for (int a = 0; a < UAN; ++a)
+            CHECK(reloaded.profiles[c].GetBindingEntries((UserAction)a) ==
+                  cfg.profiles[c].GetBindingEntries((UserAction)a));
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Aircraft migration keeps old custom and omitted cleared rows until preset adoption",
+          "[Settings][ContextControlsConfig][aircraft]")
+{
+    const int version = GENERATE(1, 2, 3, 4, 5, 99);
+    const std::string path = TmpPath("aircraft_old.cfg");
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=" << version
+             << ";\n"
+                "ctxHeliPilotMoveForward[]={58,58,0,196609};\n"
+                "ctxHeliPilotMoveForward_mod[]={224,224,-1,131076};\n"
+                "ctxHeliPilotMoveForward_scale[]={0.5,0.5,1,-0.65};\n"
+                "ctxPlanePilotMoveUp[]={26};\n"
+                "ctxHeliPilotMoveUp[]={};\n";
+    }
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    auto& heli = cfg.profiles[(int)InputContext::HeliPilot];
+    auto& plane = cfg.profiles[(int)InputContext::PlanePilot];
+    const auto original = heli.GetBindingEntries(UAMoveForward);
+    REQUIRE(original.size() == 4);
+    CHECK(original[0] == original[1]);
+    CHECK(original[0].modifier == InputCode::Key(SDL_SCANCODE_LCTRL));
+    CHECK(original[0].scale == 0.5f);
+    CHECK_FALSE(original[2].code.valid());
+    CHECK(heli.BindingCount(UAMoveUp) == 0);
+    CHECK(plane.BindingCount(UAMoveForward) == 0); // v5 omitted cleared arrays
+    CHECK(plane.HasBinding(UAMoveUp, InputCode::Key(SDL_SCANCODE_W)));
+    CHECK(heli.BindingCount(UAAircraftAutoHover) == 0);
+    CHECK(plane.BindingCount(UAAircraftGear) == 0);
+    REQUIRE(cfg.Save(path));
+    CHECK(ReadAll(path).find("ctxPlanePilotMoveForward[]={};") != std::string::npos);
+    ContextControlsConfig reload;
+    REQUIRE(reload.Load(path));
+    CHECK_FALSE(reload.migratedOnLoad);
+    CHECK(reload.profiles[(int)InputContext::HeliPilot].GetBindingEntries(UAMoveForward) == original);
+    CHECK(reload.profiles[(int)InputContext::PlanePilot].BindingCount(UAMoveForward) == 0);
+    reload.ApplyArma3Preset();
+    CHECK(
+        reload.profiles[(int)InputContext::PlanePilot].HasBinding(UAMoveForward, InputCode::Key(SDL_SCANCODE_LSHIFT)));
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("Version five migration preserves a complete saved layout including non-aircraft clears",
+          "[Settings][ContextControlsConfig][aircraft]")
+{
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const std::string path = TmpPath("aircraft_complete_v5.cfg");
+    std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
+    ReplaceLine(text, "contextControlsVersion=3;", "contextControlsVersion=5;");
+    {
+        std::ofstream file(path);
+        file << text;
+    }
+    ContextControlsConfig old;
+    REQUIRE(old.Load(path));
+    CHECK(old.migratedOnLoad);
+    ReplaceLine(text, "contextControlsVersion=5;", "contextControlsVersion=6;");
+    {
+        std::ofstream file(path);
+        file << text;
+    }
+    ContextControlsConfig current;
+    REQUIRE(current.Load(path));
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+        for (int a = 0; a < UAN; ++a)
+            CHECK(old.profiles[c].GetBindingEntries((UserAction)a) ==
+                  current.profiles[c].GetBindingEntries((UserAction)a));
+    CHECK(old.profiles[(int)InputContext::Infantry].BindingCount(UAZoomTemp) == 0);
     std::filesystem::remove(path);
 }
