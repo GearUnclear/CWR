@@ -4,9 +4,15 @@ player setPos [7500, 5700, 0]
 player setDir 0
 leanStart = time
 triSimUntil { time > leanStart + 2 }
+// A desktop window that is not in the foreground reports focus loss, which
+// correctly suspends leaning. Claim focus the way a real click would.
+triWindowFocus true
+triSimFrames 3
 triLeanPose player
 leanNeutral = triLeanPose player
 leanRoot = getPos player
+// [pose, index, pose, index] -> distance between two triLeanPose points
+leanGap = { private ["_a", "_b", "_i", "_j", "_dx", "_dy", "_dz"]; _a = _this select 0; _i = _this select 1; _b = _this select 2; _j = _this select 3; _dx = (_a select _i) - (_b select _j); _dy = (_a select (_i + 1)) - (_b select (_j + 1)); _dz = (_a select (_i + 2)) - (_b select (_j + 2)); sqrt (_dx * _dx + _dy * _dy + _dz * _dz) }
 // SDL scancodes Q=20, E=8. Exercise production events and default bindings.
 triKeyDown 20
 triSimUntil { ((triLeanPose player) select 0) < -0.95 }
@@ -21,13 +27,18 @@ triKeyUp 20
 triSimUntil { ((triLeanPose player) select 0) > 0.95 }
 leanRight = triLeanPose player
 triAssertGt [leanRight select 2, (leanNeutral select 2) + 0.1]
-triAssertGt [leanRight select 5, (leanNeutral select 5) + 0.1]
+// The right lean rolls the weapon down and right; it moves with the eye
+// and keeps its distance to it (one rigid upper body).
+triAssertGt [[leanRight, 5, leanNeutral, 5] call leanGap, 0.1]
+triAssertNear [[leanRight, 5, leanRight, 2] call leanGap, [leanNeutral, 5, leanNeutral, 2] call leanGap, 0.01]
 triKeyUp 8
 triSimUntil { abs ((triLeanPose player) select 0) < 0.01 }
 triAssertLt [player distance leanRoot, 0.1]
-// Both first-person and sights use the same upper-body displacement.
-triAssertNear [(leanRight select 12) - (leanNeutral select 12), 0.28, 0.01]
-triAssertNear [(leanRight select 15) - (leanNeutral select 15), 0.28, 0.01]
+// First person and sights share that pose: the internal camera is the eye,
+// and the sight camera moves with it, keeping its distance to the eye.
+triAssertLt [[leanRight, 12, leanRight, 2] call leanGap, 0.01]
+triAssertGt [[leanRight, 15, leanNeutral, 15] call leanGap, 0.1]
+triAssertNear [[leanRight, 15, leanRight, 12] call leanGap, [leanNeutral, 15, leanNeutral, 12] call leanGap, 0.01]
 triKeyDown 25
 triKeyUp 25
 triSimUntil { triCamView == "GUNNER" }

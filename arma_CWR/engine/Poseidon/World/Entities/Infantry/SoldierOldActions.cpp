@@ -574,7 +574,8 @@ void Soldier::KeyboardPilot(float deltaT, SimulationImportance prec)
                 // the normal interruption/release requirement.
                 const ActionMap* destination = Type()->GetActionMap(item.id);
                 const bool leanStanceChange = (selAction == ManActUp || selAction == ManActDown) &&
-                    CanLeanInStance(actPos) && destination && CanLeanInStance(destination->GetUpDegree());
+                                              CanLeanInStance(actPos) && destination &&
+                                              CanLeanInStance(destination->GetUpDegree());
                 _leanStanceMove = leanStanceChange ? item.id : MoveIdNone;
             }
         }
@@ -1861,7 +1862,13 @@ static Matrix3 CreateZRotation(float sinr, float cosr)
 
 void Man::RecalcGunTransform()
 {
-    Vector3 gunAxis = GetWeaponCenter(0);
+    // The lean roll is applied after the aim and head turns, so their pivots
+    // are taken from the unleaned pose.
+    const int memoryLevel = _shape->FindMemoryLevel();
+    const ManType* type = Type();
+    Vector3 gunAxis = memoryLevel >= 0 && type->_aimingAxisPoint >= 0
+                          ? AnimatePointUnleaned(memoryLevel, type->_aimingAxisPoint)
+                          : VZero;
     if (QIsManual())
     {
         Matrix4 correctBank;
@@ -1888,7 +1895,8 @@ void Man::RecalcGunTransform()
 
     // head rotation axis is the world-up direction, not the gun pivot
     Matrix4 headOrient(MIdentity);
-    Vector3 headAxis = GetHeadCenter();
+    Vector3 headAxis =
+        memoryLevel >= 0 && type->_headAxisPoint >= 0 ? AnimatePointUnleaned(memoryLevel, type->_headAxisPoint) : VZero;
 
     headOrient.SetPosition(headAxis);
 

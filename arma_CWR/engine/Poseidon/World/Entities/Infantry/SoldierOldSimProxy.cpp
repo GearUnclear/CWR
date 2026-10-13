@@ -977,10 +977,23 @@ void Man::Animate(int level)
         if (_leanAmount != 0)
         {
             BLEND_ANIM(aiming);
-            const BlendAnimSelections& selections = GetAiming(aiming);
+            BLEND_ANIM(legs);
+            const BlendAnimSelections& aimingSel = GetAiming(aiming);
+            const BlendAnimSelections& legsSel = GetLegs(legs);
             // Every LOD, including Fire Geometry and Memory, shares this pose.
-            AnimationRT::CombineTransform(type->GetWeights(), _shape, memory, matrix, _leanTrans,
-                                          selections.Data(), selections.Size());
+            // Each bone gets its own rigid move (LeanBoneMatrix), never a
+            // full-angle matrix blended toward identity.
+            for (const BlendAnimSelections* set : {&aimingSel, &legsSel})
+            {
+                for (int bi = 0; bi < set->Size(); ++bi)
+                {
+                    const int index = (*set)[bi].matrixIndex;
+                    if (index >= 0 && index < matrix.Size() && (*set)[bi].factor > 0)
+                    {
+                        matrix[index] = LeanBoneMatrix(index, aimingSel, legsSel) * matrix[index];
+                    }
+                }
+            }
         }
         AnimationRT::ApplyMatrices(type->GetWeights(), _shape, level, matrix);
     }
@@ -1444,6 +1457,57 @@ void ManType::InitShape()
         }
     }
 
+    // Lean pivot. The memory points named after the spine sit near the chest,
+    // so prefer the belly mesh itself: the centroid of its points is the lower
+    // spine, low enough for the legs to stay planted and the spine to bend.
+    _leanPivotSel = -1;
+    _leanPivotPoint = -1;
+    _leanNeckSel = -1;
+    if (_shape->NLevels() > 0 && _shape->Level(0) && _shape->FindMemoryLevel() != 0)
+    {
+        auto findPart = [&](const char* name)
+        {
+            const int sel = _shape->Level(0)->FindNamedSel(name);
+            return sel >= 0 && _shape->Level(0)->NamedSel(sel).Size() > 0 ? sel : -1;
+        };
+        _leanPivotSel = findPart("bricho");
+        _leanNeckSel = findPart("krk");
+    }
+    if (mem)
+    {
+        _leanPivotPoint = mem->PointIndex("bricho");
+        if (_leanPivotPoint < 0)
+        {
+            _leanPivotPoint = mem->PointIndex("zebra");
+        }
+    }
+    if (_leanPivotPoint < 0)
+    {
+        _leanPivotPoint = _aimingAxisPoint;
+    }
+    // The ankles the legs sway about, and which leg each bone belongs to: the
+    // skeleton names left and right bones with an 'l' and a 'p' (pravy) prefix.
+    _leanAnklePoint[0] = mem ? mem->PointIndex("lchodidlo") : -1;
+    _leanAnklePoint[1] = mem ? mem->PointIndex("pchodidlo") : -1;
+    // The corners of the collision body (Geometry LOD). A lean must not push
+    // them into cover, or the contact solver shoves the whole soldier.
+    _leanBodyPoints.Clear();
+    if (Shape* geometry = _shape->GeometryLevel())
+    {
+        for (int i = 0; i < geometry->NPos(); i++)
+        {
+            bool duplicate = false;
+            for (int j = 0; j < _leanBodyPoints.Size() && !duplicate; j++)
+            {
+                duplicate = geometry->Pos(_leanBodyPoints[j]).Distance2(geometry->Pos(i)) < Square(0.001f);
+            }
+            if (!duplicate)
+            {
+                _leanBodyPoints.Add(i);
+            }
+        }
+    }
+
     int level;
     level = _shape->FindSpecLevel(VIEW_PILOT);
     if (level >= 0)
@@ -1490,6 +1554,16 @@ void ManType::InitShape()
         if (_rightHandMatIndex < 0)
         {
             LOG_ERROR(Physics, "Bone 'pruka' not found in {}", (const char*)_shape->GetName());
+        }
+    }
+    _leanBoneSide.Clear();
+    if (Skeleton* skeleton = _moveType->GetSkeleton())
+    {
+        for (int i = 0; i < skeleton->NBones(); i++)
+        {
+            const char* bone = skeleton->GetBone(i);
+            const char first = bone ? static_cast<char>(tolower(bone[0])) : 0;
+            _leanBoneSide.Add(static_cast<signed char>(first == 'l' ? 0 : (first == 'p' || first == 'r') ? 1 : -1));
         }
     }
     else

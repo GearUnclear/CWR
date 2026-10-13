@@ -4,6 +4,10 @@ player setDir 0
 leanSettle = time
 triSimUntil { time > leanSettle + 2 }
 triAssertEq [getMove player, "combat"]
+// A desktop window that is not in the foreground reports focus loss, which
+// correctly suspends leaning. Claim focus the way a real click would.
+triWindowFocus true
+triSimFrames 3
 // Rifle: held Q survives standing to crouching, including the transition.
 triKeyDown 20
 triSimUntil { ((triLeanPose player) select 0) < -0.95 }

@@ -11,6 +11,7 @@
 #include <Poseidon/World/Simulation/EnvTracker.hpp>
 #include <Poseidon/World/Entities/Infantry/ManActs.hpp>
 #include <Poseidon/World/Entities/Infantry/Wounds.hpp>
+#include <Poseidon/World/Entities/Infantry/LeanState.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 
 namespace Poseidon
@@ -414,6 +415,18 @@ class ManType: public EntityAIType, public MotionType
 	int _aimingAxisPoint;
 	int _headAxisPoint;
 	int _cameraPoint;
+    // Lean roll pivot: the belly selection of the first graphical LOD (its
+    // centroid is the lower spine), else this memory point index.
+    int _leanPivotSel = -1;
+    int _leanPivotPoint = -1;
+    // The neck selection of the first graphical LOD: the upper roll pivot.
+    int _leanNeckSel = -1;
+    // Distinct vertices of the Geometry LOD, probed by the lean cover clamp.
+    AutoArray<int> _leanBodyPoints;
+    // Memory points of the ankles the legs sway about (left, right), and the
+    // side of each skeleton bone (0 left, 1 right, -1 neither) by its name.
+    int _leanAnklePoint[2] = {-1, -1};
+    AutoArray<signed char> _leanBoneSide;
 
 	int _nvGogglesProxyIndex[MAX_LOD_LEVELS];
 
@@ -511,9 +524,15 @@ class Man: public Person
 	bool _leanRequireRelease = false;
     MoveId _leanStanceMove = MoveIdNone;
     unsigned _leanInputEpoch = 0;
-	Matrix4 _leanTrans = MIdentity;
+    // Pivots, ankles and roll axis, captured from the unleaned pose by PrepareLeanRoll.
+    LeanRig _leanRig;
 	void SimulateLean(float deltaT);
 	void ResetLean();
+    void PrepareLeanRoll();
+    Matrix4 LeanBoneMatrix(int matrixIndex, const BlendAnimSelections& aiming, const BlendAnimSelections& legs) const;
+    Matrix4 LeanUpperMatrix() const { return _leanRig.Spine(_leanAmount, 1); }
+    float LeanFactor(int matrixIndex, const BlendAnimSelections& aiming) const;
+    Vector3 AnimatePointUnleaned(int level, int index) const;
     static bool CanLeanInStance(int stance);
 	bool _headTransIdent,_gunTransIdent;
 
@@ -669,6 +688,15 @@ class Man: public Person
 	// layer can classify the weapon show (Game/Guerrilla/Undercover.cpp)
 	int GetActUpDegree() const;
 	float GetLeanAmount() const { return _leanAmount; }
+    // Current roll in radians (+ = soldier's right) and its model-space pivot and axis.
+    float GetLeanAngle() const;
+    Vector3 GetLeanPivot() const { return _leanRig.pivot; }
+    Vector3 GetLeanAxis() const { return _leanRig.frame.Direction(); }
+    // Test probe: animated model-space centroid, bounds and bone orientation of
+    // a named selection (memory LOD unless `lod` >= 0), plus that bone's aiming
+    // blend factor (-1 if absent).
+    bool ProbeMemoryPoint(const char* name, Vector3& position, Matrix3& orientation, float& aimingFactor,
+                          int lod = -1, Vector3* minimum = nullptr, Vector3* maximum = nullptr) const;
     Vector3 GetSafeInfantryFiringPoint(int weapon, Vector3Par direction) const;
 	int GetAutoUpDegree() const; // based on unit combat mode
 	MoveId GetDefaultMove() const; // based on unit combat mode

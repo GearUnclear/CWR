@@ -3,11 +3,17 @@ player setPos [7500,5700,0]
 player setDir 0
 leanSettle = time
 triSimUntil { time > leanSettle + 2 }
-leanWall = "UDLeanWall" createVehicle [7500.75,5700,0]
-leanWall setPos [7500.75,5700,0]
+// The swaying hips and rolled head box reach this wall partway through a
+// right lean.
+leanWall = "UDLeanWall" createVehicle [7500.73,5700,0]
+leanWall setPos [7500.73,5700,0]
 leanWall setDir 0
 triAssertEq [typeOf leanWall, "UDLeanWall"]
 leanRoot = getPos player
+// A desktop window that is not in the foreground reports focus loss, which
+// correctly suspends leaning. Claim focus the way a real click would.
+triWindowFocus true
+triSimFrames 3
 triKeyDown 8
 leanSettle = time
 triSimUntil { time > leanSettle + 1 }
@@ -36,8 +42,12 @@ triAssertLt [player distance leanRoot, 0.1]
 triKeyUp 20
 triSimUntil { abs ((triLeanPose player) select 0) < 0.01 }
 // Escaping the first wall must still respect a second obstacle on the left.
-leanOtherWall = "UDLeanWall" createVehicle [7499.74,5700,0]
-leanOtherWall setPos [7499.74,5700,0]
+// The rolled head and shoulders reach little past the body's own width on
+// this side, and a full-height wall that close would sit inside the crude
+// torso collision box and shove the soldier. So the obstacle hangs at head
+// height, its bottom 1.4 m up, where only the leaning upper body meets it.
+leanOtherWall = "UDLeanWall" createVehicle [7499.9,5700,0]
+leanOtherWall setPos [7499.9,5700,1.4]
 leanOtherWall setDir 0
 triKeyDown 20
 leanSettle = time

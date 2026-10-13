@@ -195,15 +195,100 @@ void Man::BasicSimulationCore(float deltaT, SimulationImportance prec)
 void Man::ResetLean()
 {
     _leanAmount = 0;
-    _leanTrans = MIdentity;
     _leanRequireRelease = true;
     _leanStanceMove = MoveIdNone;
 }
 
+void Man::PrepareLeanRoll()
+{
+    // Runs with _leanAmount == 0, so every query below sees the unleaned pose.
+    const ManType* type = Type();
+    const int memory = _shape->FindMemoryLevel();
+    LeanRig& rig = _leanRig;
+
+    // Centroid of a first-LOD selection (the middle of that body part).
+    auto centroid = [&](int selection)
+    {
+        const NamedSelection& part = _shape->Level(0)->NamedSel(selection);
+        Vector3 sum = VZero;
+        for (int i = 0; i < part.Size(); i++)
+        {
+            sum += AnimatePointUnleaned(0, part[i]);
+        }
+        return sum / static_cast<float>(part.Size());
+    };
+    // Lower pivot: the belly, low enough for the legs to stay planted while
+    // the spine above it bends (see ManType::InitShape for the fallbacks).
+    rig.pivot = VZero;
+    if (type->_leanPivotSel >= 0)
+    {
+        rig.pivot = centroid(type->_leanPivotSel);
+    }
+    else if (type->_leanPivotPoint >= 0 && memory >= 0)
+    {
+        rig.pivot = AnimatePointUnleaned(memory, type->_leanPivotPoint);
+    }
+    // Upper pivot: the neck, where the head and shoulders meet the chest.
+    // Without a neck mesh use the head turning axis, else the lower pivot.
+    if (type->_leanNeckSel >= 0)
+    {
+        rig.neck = centroid(type->_leanNeckSel);
+    }
+    else
+    {
+        rig.neck =
+            type->_headAxisPoint >= 0 && memory >= 0 ? AnimatePointUnleaned(memory, type->_headAxisPoint) : rig.pivot;
+    }
+
+    // Roll about the bore of the selected weapon: the canted weapon and its
+    // sight picture keep their point of aim. Without a weapon proxy, use the
+    // aim direction (gun yaw and pitch, recoil excluded).
+    Vector3 axis = Matrix3(MRotationY, _gunYRot) * (Matrix3(MRotationX, -_gunXRot) * VForward);
+    if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
+    {
+        const WeaponType* info = GetMagazineSlot(_currentWeapon)._weapon;
+        if (info && (info->_weaponType & (MaskSlotPrimary | MaskSlotSecondary | MaskSlotHandGun)))
+        {
+            axis = GetWeaponRelDirection(_currentWeapon);
+        }
+    }
+    if (axis.SquareSize() < 1e-6f || std::fabs(axis.Normalized().Y()) > 0.98f)
+    {
+        axis = VForward;
+    }
+    rig.frame.SetDirectionAndUp(axis.Normalized(), VUp);
+
+    // The upper body group is the factor-1 bones; the spine below scales its
+    // share of the roll by factor relative to the largest factor under them.
+    BLEND_ANIM(aiming);
+    BLEND_ANIM(legs);
+    const BlendAnimSelections& aimingSel = GetAiming(aiming);
+    rig.lowerMax = 0;
+    for (int i = 0; i < aimingSel.Size(); i++)
+    {
+        if (aimingSel[i].factor < LeanRig::UpperFactor)
+        {
+            rig.lowerMax = std::max(rig.lowerMax, aimingSel[i].factor);
+        }
+    }
+    if (rig.lowerMax <= 0)
+    {
+        rig.lowerMax = 1;
+    }
+
+    // Hip sway needs both ankles and a leg blend set to carry the legs.
+    rig.sway =
+        memory >= 0 && type->_leanAnklePoint[0] >= 0 && type->_leanAnklePoint[1] >= 0 && GetLegs(legs).Size() > 0;
+    for (int side = 0; side < 2 && rig.sway; side++)
+    {
+        rig.ankle[side] = AnimatePointUnleaned(memory, type->_leanAnklePoint[side]);
+    }
+}
+
 bool Man::CanLeanInStance(int stance)
 {
-    return stance == ManPosCombat || stance == ManPosCrouch ||
-           stance == ManPosHandGunStand || stance == ManPosHandGunCrouch;
+    return stance == ManPosCombat || stance == ManPosCrouch || stance == ManPosHandGunStand ||
+           stance == ManPosHandGunCrouch;
 }
 
 void Man::SimulateLean(float deltaT)
@@ -230,81 +315,139 @@ void Man::SimulateLean(float deltaT)
             // animation/blend is finished. Preserve only that contribution.
             const AnimationRT* transition = Type()->GetAnimation(_leanStanceMove);
             stanceTransition = transition && !transition->GetLooped() &&
-                ((_primaryMove.id == _leanStanceMove && _primaryFactor > 0) ||
-                 (_secondaryMove.id == _leanStanceMove && _primaryFactor < 1));
+                               ((_primaryMove.id == _leanStanceMove && _primaryFactor > 0) ||
+                                (_secondaryMove.id == _leanStanceMove && _primaryFactor < 1));
         }
         if (!stanceTransition)
             _leanStanceMove = MoveIdNone;
     }
     // The first release is single-player. Never expose an unreplicated pose
     // on a network peer. A negotiated network format is a separate release gate.
-    const bool eligible = QIsManual() && GWorld->GetMode() != GModeNetware &&
-                          input.GetContext() == InputContext::Infantry && input.HasGameFocus() &&
-                          !GWorld->GetPlayerSuspended() &&
-                          !_isDead && !_ladderBuilding && stanceAllows && _waterDepth < 0.6f &&
-                          _externalMove.id == MoveIdNone && (_forceMove.id == MoveIdNone || stanceTransition) &&
-                          (!WeaponsDisabled() || stanceTransition) && !IsActionInProgress(MFReload) && !LauncherSelected() &&
-                          !BinocularSelected() && Speed().SquareSize() <= Square(3.0f) &&
-                          input.GetAction(UATurbo) < 0.1f;
+    const bool eligible =
+        QIsManual() && GWorld->GetMode() != GModeNetware && input.GetContext() == InputContext::Infantry &&
+        input.HasGameFocus() && !GWorld->GetPlayerSuspended() && !_isDead && !_ladderBuilding && stanceAllows &&
+        _waterDepth < 0.6f && _externalMove.id == MoveIdNone && (_forceMove.id == MoveIdNone || stanceTransition) &&
+        (!WeaponsDisabled() || stanceTransition) && !IsActionInProgress(MFReload) && !LauncherSelected() &&
+        !BinocularSelected() && Speed().SquareSize() <= Square(3.0f) && input.GetAction(UATurbo) < 0.1f;
     LeanState state{_leanAmount, _leanRequireRelease};
     const float left = input.GetAction(InputContext::Infantry, UALeanLeft, false);
     const float right = input.GetAction(InputContext::Infantry, UALeanRight, false);
     const float requested = state.Advance(left, right, eligible, deltaT);
     _leanRequireRelease = state.requireRelease;
     _leanAmount = 0;
-    _leanTrans = MIdentity;
 
-    if (requested != 0 && _shape->FindMemoryLevel() >= 0 && Type()->_pilotPoint >= 0)
+    const int memoryLevel = _shape->FindMemoryLevel();
+    if (requested != 0 && memoryLevel >= 0 && Type()->_pilotPoint >= 0)
     {
-        // Evaluate both ends using the production point/proxy deformation. A
-        // model without upper-body weights therefore cannot acquire a camera-only lean.
-        const Vector3 eye = CalculateCameraPosition(*this);
-        const Vector3 muzzle = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
-        const Vector3 aim = CalculateAimingPosition(*this);
-        _leanAmount = requested;
-        _leanTrans.SetPosition(Vector3(LeanState::Distance * requested, 0, 0));
-        const Vector3 eyeEnd = CalculateCameraPosition(*this);
-        const Vector3 muzzleEnd = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
-        const Vector3 aimEnd = CalculateAimingPosition(*this);
-        float fraction = eyeEnd.Distance2(eye) > Square(0.001f) ? 1.0f : 0.0f;
-
-        auto sweep = [&](Vector3Par from, Vector3Par to, float radius)
+        PrepareLeanRoll();
+        // Sample the production point/proxy deformation along the roll. A model
+        // without upper-body weights therefore cannot acquire a camera-only
+        // lean. Each probe sweeps the chords of the arc in LeanSteps pieces;
+        // two keep a point 0.8 m from the pivot within about 1 cm of its
+        // curved path at 35 degrees.
+        constexpr int LeanSteps = 2;
+        const Selection& pilot = _shape->LevelOpaque(memoryLevel)->NamedSel(Type()->_pilotPoint);
+        const Vector3 eyeModel = AnimatePoint(memoryLevel, pilot[0]);
+        Vector3 eye[LeanSteps + 1], aim[LeanSteps + 1], muzzle[LeanSteps + 1];
+        Vector3 shoulderL[LeanSteps + 1], shoulderR[LeanSteps + 1];
+        for (int k = 0; k <= LeanSteps; ++k)
         {
+            _leanAmount = requested * k / LeanSteps;
+            eye[k] = CalculateCameraPosition(*this);
+            muzzle[k] = PositionModelToWorld(GetWeaponPoint(_currentWeapon));
+            aim[k] = CalculateAimingPosition(*this);
+            // The shoulders turn with the head, so they ride the full roll.
+            const Matrix4 roll = LeanUpperMatrix();
+            shoulderL[k] = PositionModelToWorld(roll.FastTransform(eyeModel + Vector3(-0.16f, -0.3f, 0)));
+            shoulderR[k] = PositionModelToWorld(roll.FastTransform(eyeModel + Vector3(0.16f, -0.3f, 0)));
+        }
+
+        // The collision body (Geometry LOD) moves too: the hips sway, the
+        // torso bends and the head box swings past the probes above. Track
+        // every corner the lean moves so it never presses one into cover,
+        // where the contact solver would shove the soldier.
+        constexpr int MaxBodyProbes = 128;
+        Vector3 bodyPath[MaxBodyProbes][LeanSteps + 1];
+        int bodyIndex[MaxBodyProbes];
+        int bodyCount = 0;
+        const int geometryLevel = _shape->FindGeometryLevel();
+        if (geometryLevel >= 0)
+        {
+            _leanAmount = requested;
+            const AutoArray<int>& corners = Type()->_leanBodyPoints;
+            for (int i = 0; i < corners.Size() && bodyCount < MaxBodyProbes; i++)
+            {
+                const float travel =
+                    AnimatePoint(geometryLevel, corners[i]).Distance2(AnimatePointUnleaned(geometryLevel, corners[i]));
+                if (travel >= Square(0.01f))
+                    bodyIndex[bodyCount++] = corners[i];
+            }
+            for (int k = 0; k <= LeanSteps; ++k)
+            {
+                _leanAmount = requested * k / LeanSteps;
+                for (int b = 0; b < bodyCount; b++)
+                    bodyPath[b][k] = PositionModelToWorld(AnimatePoint(geometryLevel, bodyIndex[b]));
+            }
+        }
+        _leanAmount = 0;
+        float fraction = eye[LeanSteps].Distance2(eye[0]) > Square(0.001f) ? 1.0f : 0.0f;
+
+        // Returns the clear part of one straight sweep, 1 when unobstructed.
+        // A body corner that already rests inside cover at the start of a
+        // sweep (the crude Geometry LOD boxes may) is the contact solver's
+        // business; the clamp only stops it entering new cover.
+        auto sweep = [&](Vector3Par from, Vector3Par to, float radius, bool body)
+        {
+            float clear = 1.0f;
             const float distance = from.Distance(to);
             if (distance < 1e-6f)
-                return;
+                return clear;
             CollisionBuffer hits;
             GLandscape->ObjectCollision(hits, this, this, from, to, radius, ObjIntersectGeomSweep);
             for (int i = 0; i < hits.Size(); ++i)
             {
                 const CollisionInfo& hit = hits[i];
-                if (hit.object && !hit.object->IsPassable())
-                    fraction = std::min(fraction, std::clamp(hit.under - 0.01f / distance, 0.0f, 1.0f));
+                if (hit.object && !hit.object->IsPassable() && !(body && hit.under <= 0))
+                    clear = std::min(clear, std::clamp(hit.under - 0.01f / distance, 0.0f, 1.0f));
             }
             // Terrain is not part of ObjectCollision. Sample the short sweep
-            // conservatively; each step is at most a few centimetres.
-            for (int i = 0; i <= 8; ++i)
+            // conservatively; each step is at most a few centimetres. The
+            // body boxes are left to the ground contact solver.
+            for (int i = 0; i <= 8 && !body; ++i)
             {
                 const float t = i / 8.0f;
                 const Vector3 p = from + (to - from) * t;
                 if (p.Y() - radius < GLandscape->SurfaceY(p.X(), p.Z()))
                 {
-                    fraction = std::min(fraction, std::max(0.0f, (i - 1) / 8.0f));
+                    clear = std::min(clear, std::max(0.0f, (i - 1) / 8.0f));
                     break;
+                }
+            }
+            return clear;
+        };
+        // The roll angle scales linearly with the clear part of the path.
+        auto sweepPath = [&](const Vector3* path, float radius, bool body = false)
+        {
+            for (int k = 0; k < LeanSteps; ++k)
+            {
+                const float clear = sweep(path[k], path[k + 1], radius, body);
+                if (clear < 1.0f)
+                {
+                    fraction = std::min(fraction, (k + clear) / LeanSteps);
+                    return;
                 }
             }
         };
         // Eye sphere also reserves space for the camera near plane. Two
         // shoulder probes and the torso cover the visible upper-body width.
-        sweep(eye, eyeEnd, 0.14f);
-        sweep(aim, aimEnd, 0.18f);
-        const Vector3 shoulder = DirectionAside() * 0.16f;
-        const Vector3 down = DirectionUp() * -0.3f;
-        sweep(eye + down + shoulder, eyeEnd + down + shoulder, 0.13f);
-        sweep(eye + down - shoulder, eyeEnd + down - shoulder, 0.13f);
-        sweep(muzzle, muzzleEnd, 0.04f);
+        sweepPath(eye, 0.14f);
+        sweepPath(aim, 0.18f);
+        sweepPath(shoulderL, 0.13f);
+        sweepPath(shoulderR, 0.13f);
+        sweepPath(muzzle, 0.04f);
+        for (int b = 0; b < bodyCount; b++)
+            sweepPath(bodyPath[b], 0.0f, true);
         _leanAmount = requested * fraction;
-        _leanTrans.SetPosition(Vector3(LeanState::Distance * _leanAmount, 0, 0));
     }
     if (previous != 0 || _leanAmount != 0)
     {

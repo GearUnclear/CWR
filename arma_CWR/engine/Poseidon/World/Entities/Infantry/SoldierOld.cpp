@@ -1,6 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/World/Entities/Infantry/LeanState.hpp>
 #include <limits.h>
 #include <utility>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -838,17 +839,99 @@ void Man::AnimateMatrix(Matrix4& mat, int level, int selection) const
     if (_leanAmount != 0)
     {
         BLEND_ANIM(aiming);
-        const BlendAnimSelections& selections = GetAiming(aiming);
-        for (int bi = 0; bi < selections.Size(); ++bi)
+        BLEND_ANIM(legs);
+        mat = LeanBoneMatrix(matIndex, GetAiming(aiming), GetLegs(legs)) * mat;
+    }
+}
+
+float Man::GetLeanAngle() const
+{
+    return _leanAmount * LeanState::MaxAngle;
+}
+
+float Man::LeanFactor(int matrixIndex, const BlendAnimSelections& aiming) const
+{
+    for (int bi = 0; bi < aiming.Size(); ++bi)
+    {
+        if (aiming[bi].matrixIndex == matrixIndex)
         {
-            const BlendAnimInfo& blend = selections[bi];
-            if (blend.matrixIndex == matIndex)
-            {
-                BlendMatrix(mat, _leanTrans, blend.factor);
-                break;
-            }
+            return aiming[bi].factor;
         }
     }
+    return 0;
+}
+
+Matrix4 Man::LeanBoneMatrix(int matrixIndex, const BlendAnimSelections& aiming, const BlendAnimSelections& legs) const
+{
+    // Every bone moves rigidly (see LeanRig): the upper body by its aiming
+    // blend factor, the legs about their ankles. Interpolating one full-angle
+    // matrix toward identity by the factor instead would shrink and shear
+    // partially weighted parts.
+    if (_leanAmount == 0)
+    {
+        return MIdentity;
+    }
+    const float factor = LeanFactor(matrixIndex, aiming);
+    if (factor > 0)
+    {
+        return _leanRig.Spine(_leanAmount, factor);
+    }
+    // Feet and toes (full legs blend) stay planted; the shins, thighs and
+    // buttocks above them sway with the hips.
+    const float legFactor = LeanFactor(matrixIndex, legs);
+    const AutoArray<signed char>& sides = Type()->_leanBoneSide;
+    if (legFactor > 0 && legFactor < 0.99f && matrixIndex >= 0 && matrixIndex < sides.Size() && sides[matrixIndex] >= 0)
+    {
+        return _leanRig.Leg(_leanAmount, sides[matrixIndex]);
+    }
+    return MIdentity;
+}
+
+bool Man::ProbeMemoryPoint(const char* name, Vector3& position, Matrix3& orientation, float& aimingFactor, int lod,
+                           Vector3* minimum, Vector3* maximum) const
+{
+    const int level = lod >= 0 ? lod : _shape->FindMemoryLevel();
+    if (level < 0 || level >= _shape->NLevels() || !_shape->Level(level))
+    {
+        return false;
+    }
+    Shape* memory = _shape->Level(level);
+    const int selection = memory->FindNamedSel(name);
+    if (selection < 0 || memory->NamedSel(selection).Size() <= 0)
+    {
+        return false;
+    }
+    const NamedSelection& sel = memory->NamedSel(selection);
+    // Centroid of the selection's animated points (one point in the memory LOD).
+    position = VZero;
+    Vector3 low(1e10f, 1e10f, 1e10f), high(-1e10f, -1e10f, -1e10f);
+    for (int i = 0; i < sel.Size(); i++)
+    {
+        const Vector3 point = AnimatePoint(level, sel[i]);
+        position += point;
+        low = VectorMin(low, point);
+        high = VectorMax(high, point);
+    }
+    position = position / static_cast<float>(sel.Size());
+    if (minimum)
+    {
+        *minimum = low;
+    }
+    if (maximum)
+    {
+        *maximum = high;
+    }
+    Matrix4 bone = MIdentity;
+    AnimateMatrix(bone, level, selection);
+    orientation = bone.Orientation();
+    aimingFactor = -1;
+    const AnimationRTWeight& weight = GetSelWeights(level, selection);
+    if (weight.Size() > 0)
+    {
+        BLEND_ANIM(aiming);
+        aimingFactor = LeanFactor(weight[0].GetSel(), GetAiming(aiming));
+    }
+    return true;
 }
 
 Vector3 Man::COMPosition() const
@@ -857,6 +940,31 @@ Vector3 Man::COMPosition() const
 }
 
 Vector3 Man::AnimatePoint(int level, int index) const
+{
+    Vector3 res = AnimatePointUnleaned(level, index);
+    if (_leanAmount == 0 || index < 0)
+    {
+        return res;
+    }
+    // Same per-weight rigid roll as Animate() applies to the skin matrices.
+    const AnimationRTWeight& wg = Type()->GetWeights()[level][index];
+    if (wg.Size() <= 0)
+    {
+        return res;
+    }
+    BLEND_ANIM(aiming);
+    BLEND_ANIM(legs);
+    const BlendAnimSelections& aimingSel = GetAiming(aiming);
+    const BlendAnimSelections& legsSel = GetLegs(legs);
+    Vector3 leaned = res;
+    for (int i = 0; i < wg.Size(); i++)
+    {
+        leaned += (LeanBoneMatrix(wg[i].GetSel(), aimingSel, legsSel).FastTransform(res) - res) * wg[i].GetWeight();
+    }
+    return leaned;
+}
+
+Vector3 Man::AnimatePointUnleaned(int level, int index) const
 {
     const ManType* type = Type();
     Vector3 res = VZero;
@@ -890,14 +998,6 @@ Vector3 Man::AnimatePoint(int level, int index) const
     const BlendAnimSelections& legsRes = GetLegs(legs);
     AnimationRT::TransformPoint(res, rtw[level], _shape->Level(level), _legTrans, legsRes.Data(), legsRes.Size(),
                                 index);
-
-    if (_leanAmount != 0)
-    {
-        BLEND_ANIM(aiming);
-        const BlendAnimSelections& selections = GetAiming(aiming);
-        AnimationRT::TransformPoint(res, rtw[level], _shape->Level(level), _leanTrans, selections.Data(),
-                                    selections.Size(), index);
-    }
 
     return res;
 }
@@ -937,6 +1037,13 @@ Matrix4 Man::InsideCamera(CameraType camType) const
     Vector3 relUp = WorldToModel().DirectionUp();
 
     transform.SetDirectionAndUp(VForward, relUp);
+    if (_leanAmount != 0)
+    {
+        // The eye rolls with the head. The roll axis is the bore, so the view
+        // keeps its heading while the horizon tilts, and the canted weapon
+        // stays where it was on screen.
+        transform.SetOrientation(LeanUpperMatrix().Orientation() * transform.Orientation());
+    }
     transform.SetPosition(pilotPos);
     // calculate recoil camera angle
     if (_recoil)

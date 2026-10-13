@@ -4,6 +4,10 @@ player setPos [7500,5700,0]
 player setDir 0
 leanSettle = time
 triSimUntil { time > leanSettle + 2 }
+// A desktop window that is not in the foreground reports focus loss, which
+// correctly suspends leaning. Claim focus the way a real click would.
+triWindowFocus true
+triSimFrames 3
 triKeyDown 8
 triSimUntil { ((triLeanPose player) select 0) > 0.95 }
 // Pausing can stop simulation, so context changes must still invalidate lean.

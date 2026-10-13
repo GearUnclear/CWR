@@ -21,6 +21,8 @@ using namespace Poseidon;
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 
 #include <cstdint>
 #include <string>
@@ -522,6 +524,68 @@ GameValue TriGetCameraEffectActive(const GameState* /*state*/)
     return GameValue(static_cast<float>(GWorld && GWorld->GetCameraEffect() ? 1 : 0));
 }
 
+/// triGetLeanRig [man, [selection, ...], (lod)] - read the production lean roll
+/// and the animated pose of named selections (memory LOD by default; the
+/// centroid of the selection's points in LOD `lod` otherwise), in model space:
+/// [angleRad, [pivot xyz], [axis xyz], [[name, [pos xyz], [boneUp xyz], aimingFactor, [min xyz], [max xyz]], ...],
+///  [bore xyz]] where bore is the selected weapon's firing direction.
+/// A selection the model lacks reports empty arrays and factor -1. Read only.
+GameValue TriGetLeanRig(const GameState* state, GameValuePar arg)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& result = value;
+    if (arg.GetType() != GameArray)
+        return value;
+    const GameArrayType& args = arg;
+    if (args.Size() < 1 || args[0].GetType() != GameObject)
+        return value;
+    Man* man = dyn_cast<Man>(GetObject(args[0]));
+    if (!man)
+        return value;
+    auto vector = [&](Vector3Par v)
+    {
+        GameValue item = state->CreateGameValue(GameArray);
+        GameArrayType& xyz = item;
+        xyz.Add(GameValue(v.X()));
+        xyz.Add(GameValue(v.Y()));
+        xyz.Add(GameValue(v.Z()));
+        return item;
+    };
+    result.Add(GameValue(man->GetLeanAngle()));
+    result.Add(vector(man->GetLeanPivot()));
+    result.Add(vector(man->GetLeanAxis()));
+    GameValue points = state->CreateGameValue(GameArray);
+    GameArrayType& pointList = points;
+    const int lod =
+        args.Size() >= 3 && args[2].GetType() == GameScalar ? toInt(static_cast<GameScalarType>(args[2])) : -1;
+    if (args.Size() >= 2 && args[1].GetType() == GameArray)
+    {
+        const GameArrayType& names = args[1];
+        for (int i = 0; i < names.Size(); ++i)
+        {
+            if (names[i].GetType() != GameString)
+                continue;
+            const RString name = names[i];
+            GameValue entry = state->CreateGameValue(GameArray);
+            GameArrayType& fields = entry;
+            fields.Add(GameValue(name));
+            Vector3 position, low, high;
+            Matrix3 orientation;
+            float factor = -1;
+            const bool found = man->ProbeMemoryPoint(name, position, orientation, factor, lod, &low, &high);
+            fields.Add(found ? vector(position) : state->CreateGameValue(GameArray));
+            fields.Add(found ? vector(orientation.DirectionUp()) : state->CreateGameValue(GameArray));
+            fields.Add(GameValue(factor));
+            fields.Add(found ? vector(low) : state->CreateGameValue(GameArray));
+            fields.Add(found ? vector(high) : state->CreateGameValue(GameArray));
+            pointList.Add(entry);
+        }
+    }
+    result.Add(points);
+    result.Add(vector(man->GetWeaponRelDirection(man->SelectedWeapon())));
+    return value;
+}
+
 // Called from GameStateExtTestAudio.cpp's INIT_MODULE to force this TU into
 // the link when building PoseidonGame (where no other game code references
 // the TriGet* family directly).
@@ -570,6 +634,7 @@ INIT_MODULE(GameStateExtTestGetters, 3)
     GGameState.NewNularOp(GameNular(GameString, "triGetCommandMenuOpen", TriGetCommandMenuOpen));
     GGameState.NewNularOp(GameNular(GameString, "triGetDevPanelVisible", TriGetDevPanelVisible));
     GGameState.NewNularOp(GameNular(GameScalar, "triGetCameraEffectActive", TriGetCameraEffectActive));
+    GGameState.NewFunction(GameFunction(GameArray, "triGetLeanRig", TriGetLeanRig, GameArray));
 
     // Options
     GGameState.NewNularOp(GameNular(GameString, "triGetLanguage", TriGetLanguage));
