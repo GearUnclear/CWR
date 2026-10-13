@@ -29,7 +29,21 @@
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory. This is the working
     directory the game runs from (AddOns/, Missions/, Campaigns/, etc. live
-    here). Default: D:\Arma_CWA\ARMA Cold War Assault [Classic]
+    here). Default: the setup-prepared Remaster shadow, chosen by
+    Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1): $env:UD_DATA_DIR,
+    else the target of packages\RemasterUD, else
+    D:\Arma_CWA\tmp\remaster-shadow-67 or D:\Arma_CWA\tmp\remaster-shadow.
+    Only when none exists does it fall back, with a warning, to the legacy
+    D:\Arma_CWA\ARMA Cold War Assault [Classic].
+
+.PARAMETER Mod
+    Mod folder(s) to mount, in mount order (later entries shadow earlier
+    ones), passed to the engine as one ';'-separated --mod value. Alias:
+    -Mods. An entry is an absolute path, or a relative path resolved against
+    DataDir, then the repo root (D:\Arma_CWA, where @LoBo lives). Every entry
+    is checked here, because an unresolvable --mod entry is fatal at startup
+    and the detached game would only report it in the stderr log. This adds
+    no @lobofixup and no --mods-dir; run-game-with-mods.ps1 does that.
 
 .PARAMETER Preset
     The CMake configure preset / build dir name under build/.
@@ -70,11 +84,16 @@
 .EXAMPLE
     .\run-game.ps1 -SkipBuild
         Launch the existing build with no rebuild.
+
+.EXAMPLE
+    .\run-game.ps1 -SkipBuild -Mod '@LoBo' -Mission 'Missions\Guerrilla.Sinai'
+        Mount the shadow's @LoBo and boot the Sinai template.
 #>
 param(
-    [string]$DataDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',
+    [string]$DataDir,
     [string]$Preset = 'win-x64-clang-rwdi',
     [string]$Mission,
+    [Alias('Mods')][string[]]$Mod = @(),
     [switch]$SkipBuild,
     [string]$LogDir = "$PSScriptRoot\logs",
     [switch]$NoLog,
@@ -84,8 +103,35 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
 
+if (-not $DataDir) {
+    Import-Module (Join-Path $RepoRoot 'tools\runtime\UDDataDir.psm1') -Force
+    $DataDir = Get-UDDefaultDataDir -EngineRoot $RepoRoot
+}
 if (-not (Test-Path -LiteralPath $DataDir -PathType Container)) {
     throw "DataDir not found: $DataDir"
+}
+
+# Start-Process joins -ArgumentList elements with spaces and quotes nothing,
+# so a value this script adds must carry its own quotes (Windows argv rules:
+# backslashes double only before a quote or the closing quote).
+function ConvertTo-NativeArgument([string]$Value) {
+    if ($Value -and $Value -notmatch '[\s"]') { return $Value }
+    $escaped = [regex]::Replace($Value, '(\\*)"', { param($m) ($m.Groups[1].Value * 2) + '\"' })
+    $escaped = [regex]::Replace($escaped, '(\\+)$', { param($m) $m.Groups[1].Value * 2 })
+    return '"' + $escaped + '"'
+}
+
+$modPaths = @()
+foreach ($entry in $Mod) {
+    if (-not $entry) { continue }
+    $candidates = if ([IO.Path]::IsPathRooted($entry)) { @($entry) } else {
+        @((Join-Path $DataDir $entry), (Join-Path (Split-Path -Parent $RepoRoot) $entry)) }
+    $found = $null
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $found = [IO.Path]::GetFullPath($candidate); break }
+    }
+    if (-not $found) { throw "Mod '$entry' not found; tried: $($candidates -join ', ')" }
+    $modPaths += $found
 }
 
 if (-not $SkipBuild) {
@@ -118,18 +164,24 @@ if (-not (Test-Path -LiteralPath $exe)) {
 
 $gameArgs = @('--window', '--no-splash')
 if ($Mission) {
-    $gameArgs += @('--test-mission', $Mission)
+    $gameArgs += @('--test-mission', (ConvertTo-NativeArgument $Mission))
+}
+if ($modPaths) {
+    # One scalar --mod option whose value is the ';'-joined list (AppConfig.cpp).
+    $gameArgs += @('--mod', (ConvertTo-NativeArgument ($modPaths -join ';')))
 }
 if ($ExtraArgs) {
     $gameArgs += $ExtraArgs
 }
 
 Write-Host "Launching $exe (cwd=$DataDir)$(if ($Mission) { " -> $Mission" })"
-# Start-Process globs -WorkingDirectory (PS 5.1), so the bracketed data dir
+if ($modPaths) { Write-Host "Mods (mount order): $($modPaths -join '; ')" }
+# Start-Process globs -WorkingDirectory (PS 5.1 and 7), so a bracketed data dir
 # ("[Classic]") must be wildcard-escaped or the launch fails to resolve (#12).
 $wd = [Management.Automation.WildcardPattern]::Escape($DataDir)
 if ($NoLog) {
-    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd
+    $process = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd -PassThru
+    Write-Host "Started PoseidonGame (PID $($process.Id))."
 } else {
     # Full console-output capture (see .DESCRIPTION): the engine logger gets
     # a file sink (--log-file), and raw stdout/stderr are redirected too -
@@ -140,9 +192,10 @@ if ($NoLog) {
     $engineLog = Join-Path $LogDir "game-$stamp.log"
     $stdoutLog = Join-Path $LogDir "game-$stamp.stdout.log"
     $stderrLog = Join-Path $LogDir "game-$stamp.stderr.log"
-    $gameArgs += @('--log-file', $engineLog)
-    Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+    $gameArgs += @('--log-file', (ConvertTo-NativeArgument $engineLog))
+    $process = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd `
+        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
+    Write-Host "Started PoseidonGame (PID $($process.Id))."
     Write-Host "Logs:"
     Write-Host "  engine: $engineLog"
     Write-Host "  stdout: $stdoutLog"

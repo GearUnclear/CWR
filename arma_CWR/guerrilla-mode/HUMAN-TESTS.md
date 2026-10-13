@@ -4,12 +4,15 @@ The **HUMAN TESTS** action in Showcase opens 43 guided cases (105 steps). These 
 
 ## Launch
 
-From `arma_CWR`:
+From `arma_CWR`, on the setup-prepared Remaster shadow (build it once with [FULL-SCALE-SESSION.md](FULL-SCALE-SESSION.md) part A1; never the Steam folder):
 
 ```powershell
-.\guerrilla-mode\install-missions.ps1
-.\run-game.ps1 -SkipBuild -Mission 'Missions\Showcase.Abel'
+$S = 'D:\Arma_CWA\tmp\remaster-shadow-67'   # your Remaster shadow
+.\guerrilla-mode\install-missions.ps1 -GameDir $S
+.\run-game.ps1 -DataDir $S -SkipBuild -Mission 'Missions\Showcase.Abel'
 ```
+
+`run-game.ps1` writes the engine log, stdout and stderr to `logs\game-<ts>.*` and prints the PID; stop that process when you are done. Add `-ExtraArgs '--dev'` for the dev panel's Console and Profile tabs. With `-GameDir`/`-DataDir` left out, both scripts default to the Remaster shadow (`$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else `D:\Arma_CWA\tmp\remaster-shadow-67`), and fall back to Classic only with a warning.
 
 Or use the installed **SHOWCASE** main-menu reference mission, then **HUMAN TESTS: open guided suite** from the action menu. Use a current build and the full official Remaster with UD installed by `setup-guerrilla.ps1` in Remaster mode (a shadow copy for testing, see [FULL-SCALE-SESSION.md](FULL-SCALE-SESSION.md)); Classic 1.99 is legacy. Start a **fresh** Showcase after installing changes: saved SQS scripts retain the old source text.
 

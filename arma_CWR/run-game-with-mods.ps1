@@ -48,7 +48,10 @@
 
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory, passed through.
-    Default: D:\Arma_CWA\ARMA Cold War Assault [Classic]
+    Default: the setup-prepared Remaster shadow, chosen by
+    Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1), with the legacy
+    D:\Arma_CWA\ARMA Cold War Assault [Classic] as a warned fallback. See
+    run-game.ps1 -DataDir.
 
 .PARAMETER Preset
     CMake configure preset / build dir name, passed through.
@@ -85,7 +88,7 @@ param(
     [string[]]$Mod = @('@LoBo'),
     [string]$ModsDir = 'D:\Arma_CWA',
     [switch]$NoLoBoFixup,
-    [string]$DataDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',
+    [string]$DataDir,
     [string]$Preset = 'win-x64-clang-rwdi',
     [string]$Mission,
     [switch]$SkipBuild,
@@ -95,6 +98,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
+
+if (-not $DataDir) {
+    Import-Module (Join-Path $RepoRoot 'tools\runtime\UDDataDir.psm1') -Force
+    $DataDir = Get-UDDefaultDataDir -EngineRoot $RepoRoot
+}
 
 if (-not $Mod -or $Mod.Count -eq 0) {
     throw "-Mod is empty; use run-game.ps1 for an unmodded launch."

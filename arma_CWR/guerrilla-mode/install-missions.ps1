@@ -75,8 +75,15 @@
     is now world-gated out is REMOVED; unrelated missions are untouched).
 
 .PARAMETER GameDir
-    The Arma: Cold War Assault install (data) directory.
-    Default: D:\Arma_CWA\ARMA Cold War Assault [Classic]
+    The Arma: Cold War Assault install (data) directory. Pass it explicitly
+    (setup-guerrilla.ps1 always does). Default: the setup-prepared Remaster
+    shadow, chosen by Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1):
+    $env:UD_DATA_DIR, else the real target of packages\RemasterUD, else
+    D:\Arma_CWA\tmp\remaster-shadow-67 or D:\Arma_CWA\tmp\remaster-shadow.
+    Only when none exists does it fall back, with a warning, to the legacy
+    D:\Arma_CWA\ARMA Cold War Assault [Classic]. Never the Steam folder: on
+    the Remaster, run setup-guerrilla.ps1 once first, since it backs up
+    Bohemia's bin\config-extra.cpp before this script appends to it.
 
 .PARAMETER ModDir
     Mod folders whose addons\ dir is scanned for worlds. Defaults to every
@@ -95,13 +102,18 @@
     .\install-missions.ps1 -IncludeWorld Sinai,Lebanon80
 #>
 param(
-    [string]$GameDir = 'D:\Arma_CWA\ARMA Cold War Assault [Classic]',
+    [string]$GameDir,
     [string[]]$ModDir = @(),
     [string[]]$IncludeWorld = @()
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '../tools/runtime/InstallTree.psm1') -Force
+if (-not $GameDir) {
+    Import-Module (Join-Path $PSScriptRoot '../tools/runtime/UDDataDir.psm1') -Force
+    $GameDir = Get-UDDefaultDataDir -EngineRoot (Split-Path -Parent $PSScriptRoot)
+    Write-Output "GameDir not given; using the default $GameDir"
+}
 $GameDir = [IO.Path]::GetFullPath($GameDir)
 Assert-PlainPath $GameDir
 
@@ -115,7 +127,7 @@ if (-not (Test-Path -LiteralPath $missionRoot -PathType Container)) {
 }
 
 # ---- helpers --------------------------------------------------------------
-# Every path API below is the literal .NET one: the default data dir is
+# Every path API below is the literal .NET one: a data dir may be named like
 # "...[Classic]", and the bracket pair is a character class to PowerShell's
 # own path globbing, so Get-ChildItem -Path / New-Item -Path silently find
 # nothing there. -LiteralPath and [System.IO.*] are the safe forms.

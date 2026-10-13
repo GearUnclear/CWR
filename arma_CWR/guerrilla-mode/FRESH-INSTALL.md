@@ -145,7 +145,11 @@ pwsh -File ./play-guerrilla.ps1 `
 This launches the rebuilt engine and mounts LoBo plus `deps/@LoBo_Deps` when
 present. Add `-Mission 'Missions/Guerrilla.Sinai'` for a direct launch. The old
 `@lobofixup` shadow mod is not needed for normal play after setup. Leave out
-`-LoBoDir` to play the stock islands without LoBo.
+`-LoBoDir` to play the stock islands without LoBo. The game starts detached;
+the script prints its PID and writes the engine log, stdout and stderr to
+`logs/game-<ts>.log`, `.stdout.log` and `.stderr.log` (crash traces land in
+stderr). Add `-Dev` for the dev panel's Console and Profile tabs, `-NoLog` to
+skip the logs, or `-LogDir <dir>` to write them elsewhere.
 
 ## Development tests
 

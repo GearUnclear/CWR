@@ -45,10 +45,11 @@ pwsh -File ./play-guerrilla.ps1 -GameDir $S -LoBoDir "$S/@LoBo" -GameExe ./dist/
 
 Main menu, GUERRILLA, pick the island (S2: Sinai, defaults IDF occupier and
 EgyptFrontier resistance), START. Run at 1920x1080 with the default view
-distance. Add `--dev` (the dev panel, Ctrl+`) when you want the Console and
-Profile tabs; `run-game.ps1 -DataDir $S -SkipBuild -ExtraArgs '--dev'`
-captures the engine log to `logs\game-<ts>.log`. Stop the PID you started
-when you are done.
+distance. `play-guerrilla.ps1` writes the engine log, stdout and stderr to
+`logs\game-<ts>.log`, `.stdout.log` and `.stderr.log` (crash traces land in
+stderr) and prints their paths and the PID; `-NoLog` turns that off. Add
+`-Dev` for the dev panel (Ctrl+`) with its Console and Profile tabs. Stop
+the PID you started when you are done.
 
 Record at the top of your notes: the build commit, the data dir, the mods,
 the view distance, the resolution and the hardware.

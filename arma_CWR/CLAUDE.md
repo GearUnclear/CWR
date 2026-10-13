@@ -95,9 +95,15 @@ the exe windowed against the game data dir.
 .\run-game.ps1 -SkipBuild                           # launch the existing dist/ build as-is
 ```
 
-Default `-DataDir` is `D:\Arma_CWA\ARMA Cold War Assault [Classic]`. `-Mission` is resolved relative
+Default `-DataDir` is the setup-prepared Remaster shadow (`tools/runtime/UDDataDir.psm1`:
+`$env:UD_DATA_DIR`, else the target of `packages\RemasterUD`, else
+`D:\Arma_CWA\tmp\remaster-shadow-67`); only when none exists does it fall back, with a
+warning, to the legacy `D:\Arma_CWA\ARMA Cold War Assault [Classic]`. `guerrilla-mode/install-missions.ps1`
+and `run-game-with-mods.ps1` share that default. `-Mod`/`-Mods` mounts mod folders (one
+`--mod` value, `;`-joined, mount order kept). `-Mission` is resolved relative
 to `-DataDir` and passed as `--test-mission` (omit it to boot to the main menu, where
-GUERRILLA lets you pick island/faction interactively).
+GUERRILLA lets you pick island/faction interactively). `play-guerrilla.ps1` captures the
+same three log files below by default and takes `-Dev` (adds `--dev`) and `-NoLog`.
 
 ### Console-output capture (default on — read the files, don't run the exe in a terminal)
 
