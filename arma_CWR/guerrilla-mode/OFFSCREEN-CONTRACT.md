@@ -18,7 +18,7 @@ and this file disagree, check the code, then fix whichever is wrong.
 | B | Budgets are pass/fail thresholds: 100 live AI typical, 130 hard cap, 40 groups per side, hub-scene frame time p95 <= 25 ms. Breaches log a WARN. | Landed (`[gmsim]` line, keys `budgetLiveBodies`, `budgetSideGroups`) |
 | R | Liberated MILITARY zones are permanent in v1: nothing flips a resistance-held post back to the occupier, on or off screen. Towns are the exception since issue #79: a held town with occupier presence in it (live units, or an abstract counter-attack force, decision C) and no resistance presence drains `supportRate` per tick and reverts to occupier administration below `townRevertSupport` (default 30, under the flip line `supportFlip` 60, so a town just taken does not fall on the first occupier tick after the fighters walk out; section 3, row 2b). | Acknowledged; military recapture is a #38 follow-up |
 | T | Towns have standing defenders (issue #79 B2, #72 first slice): every CITY the resistance does not hold is occupier-administered and keeps a `cityGarrison` reserve that the GarrisonCache materializes like a post's. Support cannot rise while any of it lives. | Landed (`ZoneRegistry::IsAdministeredTown`, keys `cityGarrison`, `townRetake`) |
-| C | The occupier answers a town's rising (issue #79, the #77 counter-attack scoped to towns): a retake force drawn from the nearest occupier base's garrison comes whether or not the player is there. Inside the bubble it is a live squad; outside, an abstract force that travels, then holds the empty town (the retake drain does the rest) or rolls the odds against the fighters left in it. The first town the resistance ever takes is answered 4 times in 10; from the second town on every town is answered, with no decay, by a force that grows with the war level, so two towns can be under attack at once (section 9). Holding towns gives the resistance no bonus. Shakedown pairs no longer spawn in held towns (issue #79 D8). An occupier forces pool, a standing retake director and reinforcement waves are being designed separately. | Landed (`CounterAttack`, keys `counterAttack*`, `townRevertSupport`) |
+| C | The occupier answers a town's rising (issue #79, the #77 counter-attack scoped to towns): a retake force drawn from the nearest occupier base's garrison comes whether or not the player is there. Inside the bubble it is a live squad born unseen on its road and walking it to the town; outside, an abstract force that travels, then holds the empty town (the retake drain does the rest) or rolls the odds against the fighters left in it. The first town the resistance ever takes is answered 4 times in 10; from the second town on every town is answered, with no decay, by a force that grows with the war level, so two towns can be under attack at once (section 9). Holding towns gives the resistance no bonus. Shakedown pairs no longer spawn in held towns (issue #79 D8). An occupier forces pool, a standing retake director and reinforcement waves are being designed separately. | Landed (`CounterAttack`, keys `counterAttack*`, `townRevertSupport`) |
 | X | Deferred to #38: the Sinai dealer cap (Sinai seeds 37 towns and draws 26 dealers) and the Sinai town-seeding fix (`seedCities = 1` seeds labels, airbases and borders as towns). | Deferred |
 
 ## 2. Definitions
@@ -56,7 +56,7 @@ reconciled back to records only through defined write-backs: garrisons
 >= 1500 m, despawn edge band + 300 m), the QRF (on a RED zone), shakedown
 pairs and assailants. *Always-live* entities are never cached: the player's
 group and companions, friendly hold squads, Legend bosses and guards, dealers,
-town flags and a launched counter-attack squad (decision C). Both classes count against the budgets in section 6. "The
+town flags and a counter-attack squad that has reached its town (decision C; a squad still on its road may return to the abstract road unseen). Both classes count against the budgets in section 6. "The
 bubble" means `cacheRadius` (800 m) around the player.
 
 ## 3. Per-system policy
@@ -69,7 +69,7 @@ the section 2 rules. LIVE ONLY: exists only as entities near the player.
 | 1 | Capture meter (occupier OUTPOST/AIRFIELD/SEAPORT) | ABSTRACT (D1) when live resistance units are in `zoneArea` or `capture > 0`; otherwise FREEZE. The stored reserve counts as a defender. | `ZoneRegistry::EvaluateTick` |
 | 2 | Town support (NEUTRAL or occupier CITY) | ABSTRACT (D1), gain only: +`supportRate` per tick with fighters present and no occupier presence; flips on the in-bubble rule. Occupier presence is a live unit in `zoneArea`, the town's stored garrison reserve, or a live body of its own garrison anywhere, so a remote town with a reserve and a squad is a frozen standoff. No remote intimidation. Script ledgers (resentment, civilian-kill deltas) run regardless of distance. | `ZoneRegistry::EvaluateTick`, `civilians.sqs` |
 | 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while occupier presence stands in it: live units, or an abstract counter-attack force holding the town (decision C, `ZoneTickInputs::abstractOcc`). Occupiers alone: -`supportRate` per tick, revert below `townRevertSupport` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled to `garrisonMax`; `townLost` event). Fighters alone: +`supportRate` per tick up to 100. Both: frozen. | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
-| 2c | Counter-attack on a risen town (decision C) | Dispatch, delay and travel ABSTRACT and deterministic (rolls hashed from the flip). Town inside the bubble: LIVE squad (a base in the bubble marches its own garrison out; a stored reserve appears at the staging point after its road time), counted in the budgets, never cached back. Town outside: ABSTRACT arrival, then hold-and-drain (empty town) or one odds roll (fighters there); no entity created or deleted. | `CounterAttack`, `capture.sqs` |
+| 2c | Counter-attack on a risen town (decision C) | Dispatch, delay and travel ABSTRACT and deterministic (rolls hashed from the flip). Town inside the bubble: LIVE squad walking its road to the town (a base in the bubble marches its own garrison out; a stored reserve is born unseen on its road, section 9), counted in the budgets; a marching squad nobody can perceive returns to the abstract road. Town outside: ABSTRACT arrival, then hold-and-drain (empty town) or one odds roll (fighters there); no entity created or deleted. | `CounterAttack`, `capture.sqs` |
 | 3 | Flip side effects | Identical on and off screen: heat +40, income tap, hold squad, journal line, hint. | `EvaluateTick`, `capture.sqs` |
 | 4 | Garrison reserve (posts and occupier-administered towns) | Count FREEZE (no attrition, no remote combat). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while garrisonable (occupier post, or administered town not exempt), not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. | `GarrisonCache::StepRecover` |
 | 5 | Patrols | LIVE ONLY (traffic band); no off-screen position or schedule. | `Traffic` |
@@ -110,12 +110,13 @@ All live in `class CfgGuerrillaZones` of a template's `description.ext`.
 | `counterAttackWarLevelStep` | 0.25 | force x max(1, 1 + step x (war level - 1)), capped at one group of 12; range 0..2, 0 = flat size |
 | `counterAttackDelayMin` / `Max` | 120 / 300 | seconds between the flip and the launch (drawn per flip) |
 | `counterAttackSourceKeep` | 0.25 | share of a base's `garrisonMax` that never leaves it |
-| `counterAttackSpeed` | 4 | abstract road speed (m/s) |
+| `counterAttackSpeed` | 4 | abstract road speed (m/s); the abstract leg is the whole road from the base to the town |
 | `counterAttackRoadFactor` | 1.3 | road distance per straight-line metre |
-| `counterAttackStageDistance` | 500 | a live squad from a stored reserve appears this far from the town, on its base's side, road-snapped |
+| `counterAttackBirthMinToTarget` | 250 | no counter-attack force is ever born this close to its target town (m, range 0..2000) |
+| `counterAttackBirthGiveUp` | 600 | seconds a force with no unseen birth point waits before it turns back and its strength returns to the base (range 30..86400) |
 | `counterAttackDefenderWeight` | 3 | one fighter in his town is worth this many attackers in the odds roll |
 | `counterAttackRepelLoss` | 0.5 | share of a beaten force that does not come home |
-| `counterAttackLiveTimeout` | 1200 | seconds before an unresolved live squad withdraws (only out of the player's sight) |
+| `counterAttackLiveTimeout` | 1200 | seconds an unresolved live squad stays in its town before it withdraws (only out of the player's sight); the road march before it gets its own allowance (road left at 1 m/s + 120 s) |
 | `counterAttackMaxLive` | 2 | live counter-attack squads at once (more wait) |
 | `simDiagInterval` | 60 | seconds between `[gmsim]` log lines (0 = off) |
 | `budgetLiveBodies` | 130 | WARN above this many live AI bodies, all sides |
@@ -320,14 +321,37 @@ drawn from: a base that cannot spare a man sends nobody.
 A standing retake director, an occupier forces pool and reinforcement waves
 are being designed separately; they are not part of this rule.
 
-**Live squads and the bubble.** A live squad stays live until it resolves,
-whichever way the player moves (the simpler rule: no cache transition, no
-write-back mid-march); its bodies count against the budgets wherever it is,
-and off-screen it works the town through the ordinary remote retake tick. It
+**Unseen births (the invariant, user rule of 2026-10-13).** A counter-attack
+soldier is never created where the player can perceive him: every force walks
+the road from its base to the town (cross-country only when the road is
+longer than twice the straight distance plus 300 m). A base's live garrison
+marches out (it already exists). A stored reserve travels abstractly over the whole road
+(distance x `counterAttackRoadFactor` / `counterAttackSpeed`) and is born as a
+live squad only when the town or its progress point enters the player's
+bubble, at a road point that passes Traffic's issue #53 gate: never inside
+Traffic's audible floor (`trafficMinSpawnDist`), hidden by the draw distance
+or terrain, or by the view cone alone only within 300 m of its base, and never
+within `counterAttackBirthMinToTarget` of the town. A force launched with the
+town already in the bubble searches from the base toward the town; a force the
+player walked up to searches back from its progress point toward the base,
+and one already inside the bound stays abstract at the town edge. No such
+point: it waits (one WARN, retried every 30 s, its arrival clock stopped, doing
+nothing to the town) and turns back after `counterAttackBirthGiveUp`. A
+holding force is never born at the town centre: with the town in the bubble
+it is suspended (no drain, no odds roll). A marching squad that is out of the
+player's perception and bubble for 10 s returns to the abstract road at its
+progress, survivors and clock carried over. A live squad counts as occupier
+presence only in its own target town.
+
+**Live squads and the bubble.** A live squad in its town stays live until it
+resolves, whichever way the player moves; only a squad still marching its
+road returns to the abstract road when nobody can perceive it (the invariant
+above). Its bodies count against the budgets wherever it is, and off-screen
+it works the town through the ordinary remote retake tick. It
 resolves as: wiped out (repelled); the town reverts under it (it becomes the
 town's garrison, the stored reserve tops it up to `garrisonMax`); or
 `counterAttackLiveTimeout` passes and it is out of the player's sight
-(withdraws, survivors home). A live spawn over the live-AI hard cap (130),
+(withdraws, survivors home). A live birth over the live-AI hard cap (130),
 the side's group budget (40) or `counterAttackMaxLive` waits and retries
 every 30 s, logged once; it is never dropped.
 

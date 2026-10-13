@@ -3641,65 +3641,55 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
 // which sits at the player outside cutscenes.
 // ---------------------------------------------------------------------------
 
-void Traffic::RefreshPerception()
+PerceptionCamera PerceptionCamera::Capture()
 {
-    _percept = Perception();
-    _percept.band = ConfigBand(_tuning);
+    PerceptionCamera p;
     const Camera* cam = GScene ? GScene->GetCamera() : nullptr;
     if (!cam)
     {
-        // dedicated server / no scene: no perception - the config band and
-        // the pre-perception distance rules apply verbatim
-        return;
+        return p; // dedicated server / no scene: no viewer
     }
-    _percept.hasCamera = true;
-    _percept.camPos = cam->Position();
+    p.hasCamera = true;
+    p.camPos = cam->Position();
     Vector3 heading = cam->Direction();
     heading[1] = 0;
     if (heading.SquareSize() > 1e-6f)
     {
-        _percept.camDir = heading.Normalized();
-        _percept.camDirValid = true;
+        p.camDir = heading.Normalized();
+        p.camDirValid = true;
     }
     // near-vertical camera: no usable 2D heading - camDirValid stays false
     // and the cone test treats everything as in frustum (conservative both
     // ways: no despawn legalized by the cone, no cone-escape spawns)
-    // conservative lights bound: past the darkest randomized threshold ANY
-    // AI car may already show headlights (TransportCore's per-vehicle roll)
-    bool lightsOn = false;
-    if (GScene->MainLight())
-    {
-        lightsOn = GScene->MainLight()->NightEffect() > HeadlightNightEffect;
-    }
-    _percept.band = EffectiveBand(_tuning, ENGINE_CONFIG.objectsZ, lightsOn, ENGINE_CONFIG.horizontZ);
+    return p;
 }
 
-bool Traffic::PointInFrustum(Vector3Par pos) const
+bool PerceptionCamera::InFrustum(Vector3Par pos, float cosHalfAngle) const
 {
-    if (!_percept.hasCamera || !_percept.camDirValid)
+    if (!hasCamera || !camDirValid)
     {
         return true; // no information (or no usable heading): never legalizes a despawn
     }
-    float dx = pos.X() - _percept.camPos.X();
-    float dz = pos.Z() - _percept.camPos.Z();
+    float dx = pos.X() - camPos.X();
+    float dz = pos.Z() - camPos.Z();
     float len2 = dx * dx + dz * dz;
     if (len2 < 1.0f)
     {
         return true; // on top of the camera
     }
-    float dot = _percept.camDir.X() * dx + _percept.camDir.Z() * dz;
-    return dot >= FrustumCosHalfAngle * sqrtf(len2);
+    float dot = camDir.X() * dx + camDir.Z() * dz;
+    return dot >= cosHalfAngle * sqrtf(len2);
 }
 
-bool Traffic::PointLosBlocked(Vector3Par pos) const
+bool PerceptionCamera::LosBlocked(Vector3Par pos, float targetHeight) const
 {
-    if (!_percept.hasCamera || !GLandscape)
+    if (!hasCamera || !GLandscape)
     {
         return false; // nothing hides anything
     }
     Vector3 tgt = pos;
-    tgt[1] += LosTargetHeight;
-    Vector3 delta = tgt - _percept.camPos;
+    tgt[1] += targetHeight;
+    Vector3 delta = tgt - camPos;
     float dist = delta.Size();
     if (dist < 1.0f)
     {
@@ -3709,8 +3699,39 @@ bool Traffic::PointLosBlocked(Vector3Par pos) const
     // the canonical LOS idiom (InGameUIMenuSim): a ground hit before the
     // target means the terrain hides it
     Vector3 hit;
-    float isect = GLandscape->IntersectWithGroundOrSea(&hit, _percept.camPos, dirN, 0, dist * 1.1f);
+    float isect = GLandscape->IntersectWithGroundOrSea(&hit, camPos, dirN, 0, dist * 1.1f);
     return isect <= dist;
+}
+
+void Traffic::RefreshPerception()
+{
+    _percept = Perception();
+    _percept.band = ConfigBand(_tuning);
+    static_cast<PerceptionCamera&>(_percept) = PerceptionCamera::Capture();
+    if (!_percept.hasCamera)
+    {
+        // dedicated server / no scene: no perception - the config band and
+        // the pre-perception distance rules apply verbatim
+        return;
+    }
+    // conservative lights bound: past the darkest randomized threshold ANY
+    // AI car may already show headlights (TransportCore's per-vehicle roll)
+    bool lightsOn = false;
+    if (GScene && GScene->MainLight())
+    {
+        lightsOn = GScene->MainLight()->NightEffect() > HeadlightNightEffect;
+    }
+    _percept.band = EffectiveBand(_tuning, ENGINE_CONFIG.objectsZ, lightsOn, ENGINE_CONFIG.horizontZ);
+}
+
+bool Traffic::PointInFrustum(Vector3Par pos) const
+{
+    return _percept.InFrustum(pos, FrustumCosHalfAngle);
+}
+
+bool Traffic::PointLosBlocked(Vector3Par pos) const
+{
+    return _percept.LosBlocked(pos, LosTargetHeight);
 }
 
 void Traffic::BuildExposeObs(const AutoArray<Vector3>& pts, Vector3Par playerPos,

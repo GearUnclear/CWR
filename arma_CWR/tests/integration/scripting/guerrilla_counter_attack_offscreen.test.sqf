@@ -12,7 +12,8 @@
 //        walks out; the flip's counter-attack launches inside
 //        the delay window (tuned to 5..10 s) as an ABSTRACT force: 5 of the
 //        Outpost's 6 leave its stored reserve (1 stays home) and TRAVEL, no
-//        entity is created;
+//        entity is created (speed tuned to 40 m/s: the abstract leg covers
+//        the whole road from the base);
 //    o3  it arrives in the empty town (counterAttack event) and HOLDS it as
 //        abstract occupier presence; the remote retake drain takes support
 //        below townRevertSupport (30) and Houdan reverts to NEUTRAL with its
@@ -40,6 +41,9 @@ coFar = [7922, 8500, 0]
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMin", 5]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMax", 10]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["townsTaken", 1]]), "true"]
+// the abstract leg is the whole road now (535 m x 1.3 at 4 m/s = 174 s): a
+// fast column keeps the wait inside the assert window
+triAssertEq [(format ["%1", gmCounterAttackTune ["speed", 40]]), "true"]
 
 // ---- o1: kill the town garrison, leave a fighter, walk away -----------------
 triSimUntil { gmGarrisonSpawned coV }

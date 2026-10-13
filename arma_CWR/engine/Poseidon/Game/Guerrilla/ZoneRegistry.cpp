@@ -2539,8 +2539,14 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
 // currently reading civilian to any occupier observer" position stays
 // infeasible until the Phase-3 N-subject undercover generalization
 // (#19/#20/#21) exists; revisit there.
+//
+// counter (occupier census only, may be null): a live counter-attack squad
+// counts only in its own target town (issue #79 review M1), so a column
+// marching through another held town on its road neither drains it nor is
+// adopted as its garrison.
 static void CountSidePresence(AICenter* center, const AutoArray<ZoneRecord>& zones, float areaSq,
-                              const Person* excludePerson, AutoArray<int>& out)
+                              const Person* excludePerson, AutoArray<int>& out, const CounterAttack* counter = nullptr,
+                              const ZoneRegistry* registry = nullptr)
 {
     if (!center)
     {
@@ -2553,6 +2559,7 @@ static void CountSidePresence(AICenter* center, const AutoArray<ZoneRecord>& zon
         {
             continue;
         }
+        const int onlyZone = counter && registry ? counter->GroupTarget(*registry, grp) : -1;
         for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
         {
             AIUnit* unit = grp->UnitWithID(u + 1);
@@ -2567,6 +2574,10 @@ static void CountSidePresence(AICenter* center, const AutoArray<ZoneRecord>& zon
             Vector3 pos = unit->Position();
             for (int i = 0; i < zones.Size(); i++)
             {
+                if (!CounterAttack::CountsInZone(onlyZone, i))
+                {
+                    continue;
+                }
                 if (Dist2DSq(pos.X(), pos.Z(), zones[i].pos.X(), zones[i].pos.Z()) < areaSq)
                 {
                     out[i]++;
@@ -2625,7 +2636,8 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
         }
     }
     CountSidePresence(FindSideCenter(_resistanceSide), _zones, areaSq, exclude, in.guerCount);
-    CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount);
+    CountSidePresence(FindSideCenter(_occupierSide), _zones, areaSq, nullptr, in.occCount, &CounterAttack::Instance(),
+                      this);
 
     // each zone's own garrison bodies, wherever they stand (town support gate)
     const GarrisonCache& cache = GarrisonCache::Instance();

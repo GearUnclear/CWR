@@ -19,6 +19,8 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <filesystem>
+#include <functional>
+#include <math.h>
 #include <string.h>
 #include <string>
 
@@ -237,9 +239,9 @@ TEST_CASE("CounterAttack - pure rules: chance, size, odds, travel, spare", "[gam
     CHECK(CounterAttack::HoldOdds(t, 0, 6) == Approx(0.0f));
     CHECK(CounterAttack::HoldOdds(t, 3, 0) == Approx(1.0f));
     CHECK(CounterAttack::HoldOdds(t, 3, 4) > CounterAttack::HoldOdds(t, 3, 6));
-    // travel covers the road leg short of the staging point
-    CHECK(CounterAttack::TravelTime(t, 2500.0f) == Approx(2000.0f * 1.3f / 4.0f));
-    CHECK(CounterAttack::TravelTime(t, 300.0f) == Approx(CounterAttack::MinTravel));
+    // travel covers the whole road leg from the base to the town
+    CHECK(CounterAttack::TravelTime(t, 2500.0f) == Approx(2500.0f * 1.3f / 4.0f));
+    CHECK(CounterAttack::TravelTime(t, 20.0f) == Approx(CounterAttack::MinTravel));
     // a base keeps a quarter of its strength home
     CHECK(CounterAttack::Spare(t, 6.0f, 0, 6.0f, false) == 5);
     CHECK(CounterAttack::Spare(t, 0.0f, 6, 6.0f, true) == 5);
@@ -646,22 +648,24 @@ TEST_CASE("CounterAttack - inside the bubble the live squad waits, it is never s
     f.RaiseTown(f.town);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     // the player stands in the town; no world (ops null): the live spawn
-    // cannot happen, so the force stays on the road and retries
+    // cannot happen, so the force waits on the road with its clock stopped
     const CounterAttackView near = Fixture::View(f.Z(f.town).pos.X(), f.Z(f.town).pos.Z());
     AutoArray<ZoneEventRecord> fired;
     f.ca.Step(f.registry, near, 300.0f, nullptr, fired);
     REQUIRE(f.ca.Get(0)->phase == CATravel);
+    const float travel = f.ca.Get(0)->clock;
+    CHECK(f.ca.Get(0)->travel == Approx(travel));
     f.ca.Step(f.registry, near, 1000.0f, nullptr, fired);
     REQUIRE(f.ca.Count() == 1);
     CHECK(f.ca.Get(0)->phase == CATravel);
-    CHECK(f.ca.Get(0)->clock == Approx(CounterAttack::RetryInterval));
+    CHECK(f.ca.Get(0)->clock == Approx(travel));
     CHECK(fired.Size() == 0);
     CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
     // a dead player freezes the clocks
     CounterAttackView dead = near;
     dead.playerValid = false;
     f.ca.Step(f.registry, dead, 1000.0f, nullptr, fired);
-    CHECK(f.ca.Get(0)->clock == Approx(CounterAttack::RetryInterval));
+    CHECK(f.ca.Get(0)->clock == Approx(travel));
 }
 
 TEST_CASE("CounterAttack - pending attacks survive save/load", "[game][guerrilla][counterattack][save][load]")
@@ -705,6 +709,7 @@ TEST_CASE("CounterAttack - pending attacks survive save/load", "[game][guerrilla
     CHECK(Fixture::Str(r->source) == "Post");
     CHECK(r->phase == CATravel);
     CHECK(r->clock == Approx(saved.clock));
+    CHECK(r->travel == Approx(saved.travel));
     CHECK(r->strength == 5);
     CHECK(r->size == 6);
     CHECK(r->seed == saved.seed);
@@ -720,4 +725,447 @@ TEST_CASE("CounterAttack - pending attacks survive save/load", "[game][guerrilla
 
     ExtParsMission.Clear();
     std::filesystem::remove(path);
+}
+
+namespace
+{
+
+float Dist2DTest(Vector3Par a, Vector3Par b)
+{
+    const float dx = a.X() - b.X();
+    const float dz = a.Z() - b.Z();
+    return sqrtf(dx * dx + dz * dz);
+}
+
+typedef std::function<int(Vector3Par)> ExposureFn;
+
+ExposureFn AllHidden()
+{
+    return [](Vector3Par) { return (int)CAExposeHidden; };
+}
+
+ExposureFn AllSeen()
+{
+    return [](Vector3Par) { return (int)CAExposeSeen; };
+}
+
+// hidden at least d from c, seen inside
+ExposureFn HiddenFrom(Vector3 c, float d)
+{
+    return [c, d](Vector3Par p) { return Dist2DTest(p, c) >= d ? (int)CAExposeHidden : (int)CAExposeSeen; };
+}
+
+// a perception predicate for the birth rule
+struct FakeGate final : CounterAttackGate
+{
+    ExposureFn exposure;
+    explicit FakeGate(ExposureFn e) : exposure(std::move(e)) {}
+    int Exposure(Vector3Par pos) const override { return exposure(pos); }
+};
+
+// a world with no groups: it records where a squad was asked to be born and
+// refuses to create it (no AIGroup exists in the unit-test process), so the
+// record stays where the rules left it
+struct FakeOps final : CounterAttackOps
+{
+    ExposureFn exposure = AllHidden();
+    int spawns = 0;
+    Vector3 lastFrom = VZero;
+    Vector3 lastLeg = VZero;
+    int Exposure(Vector3Par pos) const override { return exposure(pos); }
+    AIGroup* SpawnSquad(int, Vector3Par from, Vector3Par firstLeg) override
+    {
+        spawns++;
+        lastFrom = from;
+        lastLeg = firstLeg;
+        return nullptr;
+    }
+    AIGroup* DetachFromGarrison(int, int, Vector3Par, int& taken) override
+    {
+        taken = 0;
+        return nullptr;
+    }
+    int Alive(AIGroup*, Vector3&) override { return 0; }
+    void MoveOn(AIGroup*, Vector3Par) override {}
+    void Assault(AIGroup*, Vector3Par) override {}
+    void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+    {
+        route.Clear();
+        route.Add(from);
+        route.Add(to);
+    }
+    void Remove(AIGroup*) override {}
+    void Adopt(int, AIGroup*) override {}
+    bool SquadUnseen(AIGroup*) const override { return false; }
+};
+
+// a straight 1000 m road along X from the base (0) to the town (1000),
+// RouteStep apart
+AutoArray<Vector3> StraightRoad()
+{
+    AutoArray<Vector3> raw;
+    raw.Add(Vector3(0, 0, 0));
+    raw.Add(Vector3(1000, 0, 0));
+    AutoArray<Vector3> route;
+    CounterAttack::ResampleRoute(raw, CounterAttack::RouteStep, route);
+    return route;
+}
+
+// launch: from the base toward the town
+CounterAttackSpawnPick Launch(const AutoArray<Vector3>& road, ExposureFn e)
+{
+    const FakeGate gate(std::move(e));
+    return CounterAttack::PickSpawnPoint(road, 0.0f, true, 250.0f, gate);
+}
+
+// a force the player walked up to: back from its progress point
+CounterAttackSpawnPick Rejoin(const AutoArray<Vector3>& road, float progress, ExposureFn e)
+{
+    const FakeGate gate(std::move(e));
+    return CounterAttack::PickSpawnPoint(road, progress, false, 250.0f, gate);
+}
+
+ExposureFn HiddenX(float lo, float hi, int tier = CAExposeHidden)
+{
+    return [lo, hi, tier](Vector3Par p) { return p.X() >= lo && p.X() <= hi ? tier : (int)CAExposeSeen; };
+}
+
+} // namespace
+
+TEST_CASE("CounterAttack - route geometry: length, points, resampling, progress", "[game][guerrilla][counterattack]")
+{
+    AutoArray<Vector3> raw;
+    raw.Add(Vector3(0, 0, 0));
+    raw.Add(Vector3(300, 0, 0));
+    raw.Add(Vector3(300, 0, 400));
+    CHECK(CounterAttack::RouteLength(raw) == Approx(700.0f));
+    const Vector3 mid = CounterAttack::RoutePoint(raw, 0.5f);
+    CHECK(mid.X() == Approx(300.0f));
+    CHECK(mid.Z() == Approx(50.0f));
+    CHECK(CounterAttack::RoutePoint(raw, 0.0f).X() == Approx(0.0f));
+    CHECK(CounterAttack::RoutePoint(raw, 1.0f).Z() == Approx(400.0f));
+    AutoArray<Vector3> route;
+    CounterAttack::ResampleRoute(raw, 50.0f, route);
+    CHECK(route.Size() == 15); // 6 legs of 50 m, then 8
+    CHECK(CounterAttack::RouteLength(route) == Approx(700.0f));
+    CHECK(route[6].X() == Approx(300.0f)); // the corner is kept
+    CHECK(route[6].Z() == Approx(0.0f));
+    CounterAttack::Record r;
+    r.travel = 100.0f;
+    r.clock = 25.0f;
+    CHECK(CounterAttack::Progress(r) == Approx(0.75f));
+    r.clock = 150.0f;
+    CHECK(CounterAttack::Progress(r) == Approx(0.0f));
+    r.travel = 0;
+    CHECK(CounterAttack::Progress(r) == Approx(0.0f));
+    // a road that winds far round is not walked (Abel: Le Port Harbour to
+    // Houdan 3064 m of road for 2707 m straight is; the Outpost's 1816 m for
+    // 535 m is not)
+    CHECK(CounterAttack::RoadIsReasonable(3064.0f, 2707.0f));
+    CHECK_FALSE(CounterAttack::RoadIsReasonable(1816.0f, 535.0f));
+    // the march allowance covers the road still ahead
+    const AutoArray<Vector3> road = StraightRoad();
+    CHECK(CounterAttack::MarchAllowance(road, 0.5f) ==
+          Approx(500.0f / CounterAttack::MarchSpeed + CounterAttack::MarchSlack));
+}
+
+TEST_CASE("CounterAttack - birth point: the first unseen point from the base, never near the town",
+          "[game][guerrilla][counterattack]")
+{
+    const AutoArray<Vector3> road = StraightRoad();
+    REQUIRE(road.Size() == 21);
+
+    // launch: nobody sees the base, born at the base
+    CounterAttackSpawnPick pick = Launch(road, AllHidden());
+    CHECK(pick.reason == CASpawnBase);
+    CHECK(pick.pos.X() == Approx(0.0f));
+    CHECK(pick.fraction == Approx(0.0f));
+
+    // the base is watched (everything short of 400 m is seen): the first
+    // route point from the base that nobody sees
+    pick = Launch(road, HiddenX(399.0f, 2000.0f));
+    CHECK(pick.reason == CASpawnRoute);
+    CHECK(pick.pos.X() == Approx(400.0f));
+    CHECK(pick.fraction == Approx(0.4f));
+
+    // the player sees the whole road: deferred
+    CHECK(Launch(road, AllSeen()).reason == CASpawnDeferred);
+    CHECK(Launch(AutoArray<Vector3>(), AllHidden()).reason == CASpawnDeferred);
+
+    // only the last 250 m before the town are unseen: never born there
+    CHECK(Launch(road, HiddenX(760.0f, 2000.0f)).reason == CASpawnDeferred);
+    pick = Launch(road, HiddenX(749.0f, 2000.0f));
+    CHECK(pick.reason == CASpawnRoute);
+    CHECK(pick.pos.X() == Approx(750.0f));
+
+    // cone-only points rank last and count only within 300 m of the base
+    pick = Launch(road, HiddenX(-1.0f, 2000.0f, CAExposeConeOnly));
+    CHECK(pick.reason == CASpawnBase);
+    pick = Launch(road, HiddenX(199.0f, 2000.0f, CAExposeConeOnly));
+    CHECK(pick.reason == CASpawnRoute);
+    CHECK(pick.pos.X() == Approx(200.0f));
+    CHECK(Launch(road, HiddenX(349.0f, 2000.0f, CAExposeConeOnly)).reason == CASpawnDeferred);
+    pick = Launch(road, [](Vector3Par p)
+                  { return p.X() >= 599.0f && p.X() <= 601.0f ? (int)CAExposeHidden : (int)CAExposeConeOnly; });
+    CHECK(pick.pos.X() == Approx(600.0f)); // a hidden point beats a cone-only base
+
+    // a force the player walked up to searches BACKWARD from its progress
+    // point: a column 70% of the way is born there, not at its base
+    pick = Rejoin(road, 0.7f, AllHidden());
+    CHECK(pick.reason == CASpawnRoute);
+    CHECK(pick.pos.X() == Approx(700.0f));
+    // its progress point watched: the first unseen point behind it
+    pick = Rejoin(road, 0.7f, HiddenX(-1.0f, 451.0f));
+    CHECK(pick.pos.X() == Approx(450.0f));
+    pick = Rejoin(road, 0.37f, HiddenX(-1.0f, 2000.0f));
+    CHECK(pick.pos.X() == Approx(370.0f)); // the progress point itself, between two road points
+    // never ahead of it
+    CHECK(Rejoin(road, 0.5f, HiddenX(549.0f, 2000.0f)).reason == CASpawnDeferred);
+    // a cone-only point behind it still counts only near the base
+    CHECK(Rejoin(road, 0.7f, HiddenX(-1.0f, 2000.0f, CAExposeConeOnly)).pos.X() == Approx(300.0f));
+    // its progress point already inside the bound: it holds at the town edge
+    CHECK(Rejoin(road, 0.9f, AllHidden()).reason == CASpawnHold);
+    CHECK(Rejoin(road, 0.8f, AllHidden()).reason == CASpawnHold);
+}
+
+TEST_CASE("CounterAttack - a travelling force is born on its road behind its progress point, or waits",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    // off-screen launch from the Post's stored reserve: abstract travel
+    f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    REQUIRE(Fixture::Str(f.ca.Get(0)->source) == "Post");
+    CHECK_FALSE(f.ca.Get(0)->wholeRoad);
+    const float travel = f.ca.Get(0)->travel;
+    REQUIRE(travel > 100.0f);
+    // 40% of the road covered with nobody watching
+    f.ca.Step(f.registry, far, travel * 0.4f, &ops, fired);
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    CHECK(CounterAttack::Progress(*f.ca.Get(0)) == Approx(0.4f).margin(0.001f));
+    CHECK(ops.spawns == 0);
+
+    // the player walks into the town: the force is born at its progress
+    // point (268 m from the Post) when he cannot see it there
+    const Vector3 post = f.Z(f.post).pos;
+    const Vector3 town = f.Z(f.town).pos;
+    const CounterAttackView near = Fixture::View(town.X(), town.Z());
+    const float clock = f.ca.Get(0)->clock;
+    ops.exposure = AllHidden();
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+    REQUIRE(ops.spawns == 1);
+    CHECK(Dist2DTest(ops.lastFrom, post) == Approx(0.4f * 670.82f).margin(1.0f));
+    // the first leg runs down the same road, toward the town
+    CHECK(Dist2DTest(ops.lastLeg, town) < Dist2DTest(ops.lastFrom, town));
+    // the spawn failed (no world): it waits, the arrival clock stopped
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+
+    // its progress point is watched, a point behind it is not: born there,
+    // the first such point back toward the base
+    ops.exposure = [post](Vector3Par p)
+    { return Dist2DTest(p, post) <= 150.0f ? (int)CAExposeHidden : (int)CAExposeSeen; };
+    f.ca.Step(f.registry, near, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+    REQUIRE(ops.spawns == 2);
+    CHECK(Dist2DTest(ops.lastFrom, post) <= 150.0f);
+    CHECK(Dist2DTest(ops.lastFrom, post) > 100.0f);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+
+    // nothing between the base and the progress point is unseen: deferred,
+    // retried every RetryInterval, the clock stopped, nothing done to the town
+    ops.exposure = HiddenFrom(post, 300.0f);
+    f.ca.Step(f.registry, near, CounterAttack::RetryInterval + 1.0f, &ops, fired); // the retry runs out
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired);                                // tried: nothing unseen
+    CHECK(ops.spawns == 2);
+    for (int i = 0; i < 10; i++)
+    {
+        f.ca.Step(f.registry, near, 25.0f, &ops, fired);
+    }
+    CHECK(ops.spawns == 2);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+    CHECK(fired.Size() == 0);
+    CHECK(f.Z(f.post).garrison == Approx(1.0f));
+
+    // ... and after counterAttackBirthGiveUp it turns back: the reserve is
+    // refunded, nothing reached the town
+    for (int i = 0; i < 30 && f.ca.Count() > 0; i++)
+    {
+        f.ca.Step(f.registry, near, 25.0f, &ops, fired);
+    }
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    CHECK(fired.Size() == 0);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+}
+
+TEST_CASE("CounterAttack - a force that has nearly arrived stays abstract at the town edge in the bubble",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+    const float travel = f.ca.Get(0)->travel;
+    f.ca.Step(f.registry, far, travel * 0.7f, &ops, fired); // 201 m from the town
+    const float clock = f.ca.Get(0)->clock;
+    const Vector3 town = f.Z(f.town).pos;
+    const CounterAttackView near = Fixture::View(town.X(), town.Z());
+    for (int i = 0; i < 40; i++)
+    {
+        f.ca.Step(f.registry, near, 25.0f, &ops, fired); // 1000 s, past the give-up
+    }
+    CHECK(ops.spawns == 0);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+    CHECK(fired.Size() == 0);
+    // the player leaves: it arrives off-screen
+    f.ca.Step(f.registry, far, clock + 1.0f, &ops, fired);
+    CHECK(f.ca.Get(0)->phase == CAHolding);
+}
+
+TEST_CASE("CounterAttack - a town inside the bubble at launch: born at the base when unseen, never at a watched base",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeOps ops;
+    const Vector3 town = f.Z(f.town).pos;
+    const Vector3 post = f.Z(f.post).pos;
+    // the player in the town; the gate passes anything 300 m from him (the
+    // Post is 671 m away)
+    ops.exposure = HiddenFrom(town, 300.0f);
+    const CounterAttackView near = Fixture::View(town.X(), town.Z());
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, near, 300.0f, &ops, fired); // launch: stored reserve, abstract
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->wholeRoad);
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired); // birth
+    REQUIRE(ops.spawns == 1);
+    CHECK(ops.lastFrom.X() == Approx(post.X()).margin(0.5f));
+    CHECK(ops.lastFrom.Z() == Approx(post.Z()).margin(0.5f));
+
+    // the player standing at the Post: never there, farther down the road
+    // (a force launched into the bubble may be born anywhere on its road)
+    Fixture g;
+    g.Load(Certain());
+    g.RaiseTown(g.town);
+    REQUIRE(g.ca.OnTownFlipped(g.registry, g.town, Fixture::GroupSize));
+    FakeOps watched;
+    const Vector3 gpost = g.Z(g.post).pos;
+    watched.exposure = HiddenFrom(gpost, 300.0f);
+    const CounterAttackView atBase = Fixture::View(gpost.X(), gpost.Z());
+    g.ca.Step(g.registry, atBase, 300.0f, &watched, fired);
+    REQUIRE(g.ca.Get(0)->phase == CATravel);
+    g.ca.Step(g.registry, atBase, 1.0f, &watched, fired);
+    REQUIRE(watched.spawns == 1);
+    CHECK(Dist2DTest(watched.lastFrom, gpost) >= 300.0f);
+    CHECK(Dist2DTest(watched.lastFrom, gpost) < 350.0f);
+}
+
+TEST_CASE("CounterAttack - a holding force does nothing to a town in the player's bubble",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+    f.ca.Step(f.registry, far, 5000.0f, &ops, fired);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    CHECK(f.ca.AbstractPresence(f.registry, f.town) == 5);
+    // the player walks in: never born at the town centre, no drain, no roll
+    const Vector3 town = f.Z(f.town).pos;
+    const CounterAttackView near = Fixture::View(town.X() + 100.0f, town.Z());
+    f.Z(f.town).lastGuer = 3;
+    fired.Clear();
+    for (int i = 0; i < 10; i++)
+    {
+        f.ca.Step(f.registry, near, 30.0f, &ops, fired);
+    }
+    CHECK(ops.spawns == 0);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(f.ca.Get(0)->phase == CAHolding);
+    CHECK(f.ca.AbstractPresence(f.registry, f.town) == 0);
+    CHECK(fired.Size() == 0);
+    // he leaves: the force works the town again (here: the odds roll)
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(fired.Size() == 1);
+}
+
+TEST_CASE("CounterAttack - a live squad counts as occupier presence only in its own target town",
+          "[game][guerrilla][counterattack]")
+{
+    // the census predicate (ZoneRegistry::GatherInputs): an ordinary group
+    // counts everywhere, a counter-attack column only in its target
+    CHECK(CounterAttack::CountsInZone(-1, 0));
+    CHECK(CounterAttack::CountsInZone(-1, 3));
+    CHECK(CounterAttack::CountsInZone(2, 2));
+    CHECK_FALSE(CounterAttack::CountsInZone(2, 1));
+    CHECK_FALSE(CounterAttack::CountsInZone(2, 3));
+    // no live record: no group is a counter-attack group
+    Fixture f;
+    f.Load(Certain());
+    CHECK(f.ca.GroupTarget(f.registry, nullptr) == -1);
+}
+
+TEST_CASE("CounterAttack - a squad that leaves the player's world returns to the abstract road seamlessly",
+          "[game][guerrilla][counterattack]")
+{
+    // where along the road the column is
+    AutoArray<Vector3> road = StraightRoad();
+    CHECK(CounterAttack::RouteFractionNear(road, Vector3(300, 0, 20)) == Approx(0.3f));
+    CHECK(CounterAttack::RouteFractionNear(road, Vector3(-50, 0, 0)) == Approx(0.0f));
+    CHECK(CounterAttack::RouteFractionNear(road, Vector3(1200, 0, 0)) == Approx(1.0f));
+
+    // a force born from the abstract road at 40%, marched to 70%: back on
+    // the abstract road at 70%, its four survivors the whole strength, the
+    // arrival clock where an unbroken abstract march would have it
+    CounterAttack::Record r;
+    r.phase = CALive;
+    r.strength = 6;
+    r.travel = 200.0f;
+    r.clock = -300.0f; // the live march allowance
+    r.leg = CounterAttack::LegRoad;
+    r.wholeRoad = true;
+    CounterAttack::ReturnToRoad(r, 0.7f, 4, 999.0f);
+    CHECK(r.phase == CATravel);
+    CHECK(r.strength == 4);
+    CHECK(r.travel == Approx(200.0f));
+    CHECK(r.clock == Approx(60.0f));
+    CHECK(CounterAttack::Progress(r) == Approx(0.7f));
+    CHECK_FALSE(r.wholeRoad); // re-born later from its progress point, backward
+    CHECK(r.leg == CounterAttack::LegUnknown);
+    // a garrison that marched out never travelled: its leg is the base distance
+    CounterAttack::Record g;
+    g.phase = CALive;
+    g.strength = 5;
+    CounterAttack::ReturnToRoad(g, 0.25f, 5, 400.0f);
+    CHECK(g.travel == Approx(400.0f));
+    CHECK(g.clock == Approx(300.0f));
+    CHECK(CounterAttack::Progress(g) == Approx(0.25f));
+
+    // re-born by the birth rule from where it got to, not from its base
+    const FakeGate gate(AllHidden());
+    const CounterAttackSpawnPick pick =
+        CounterAttack::PickSpawnPoint(road, CounterAttack::Progress(r), r.wholeRoad, 250.0f, gate);
+    CHECK(pick.pos.X() == Approx(700.0f));
 }

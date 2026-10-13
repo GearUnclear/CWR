@@ -3,20 +3,27 @@
 // JournalCommands.cpp / CampaignEndCommands.cpp pattern.
 //
 //   gmCounterAttacks            -> [[town, source, phase, clock, strength,
-//                                     size, townsBefore, group], ...]
+//                                     size, townsBefore, group, spawnPos,
+//                                     spawnReason], ...]
 //                                  one row per pending or running
 //                                  counter-attack; phase is SCHEDULED /
 //                                  TRAVEL / HOLDING / LIVE, clock the
-//                                  seconds left (SCHEDULED, TRAVEL) or alive
-//                                  (LIVE), group grpNull unless LIVE
+//                                  seconds left (SCHEDULED, TRAVEL) or since
+//                                  the town edge (LIVE; negative while the
+//                                  squad is still on the road), group grpNull
+//                                  unless LIVE; spawnPos where the live squad
+//                                  was instantiated ([] before, and after a
+//                                  reload), spawnReason "base" / "route" /
+//                                  "garrison" ("" before)
 //   gmCounterAttackTune [key, value]
 //                                  runtime override of one tuning value
 //                                  (tests, debugging); keys: "enabled",
 //                                  "firstTownChance", "chance",
 //                                  "warLevelStep", "delayMin", "delayMax",
-//                                  "size", "speed", "stageDistance",
-//                                  "liveTimeout", "sourceKeep", "maxLive",
-//                                  "townsTaken" (the saved k counter).  A
+//                                  "size", "speed", "liveTimeout",
+//                                  "birthMinToTarget", "birthGiveUp",
+//                                  "sourceKeep", "maxLive", "townsTaken"
+//                                  (the saved k counter).  A
 //                                  pending SCHEDULED clock is clamped to the
 //                                  new delayMax.  Returns true when the key
 //                                  is known.
@@ -47,7 +54,7 @@ static GameValue GmCounterAttacks(const GameState* state)
         const CounterAttack::Record* r = ca.Get(i);
         GameValue rowValue = state->CreateGameValue(GameArray);
         GameArrayType& row = rowValue;
-        row.Resize(8);
+        row.Resize(10);
         row[0] = GameStringType(r->target);
         row[1] = GameStringType(r->source);
         row[2] = GameStringType(CounterAttack::PhaseName(r->phase));
@@ -56,6 +63,18 @@ static GameValue GmCounterAttacks(const GameState* state)
         row[5] = (float)r->size;
         row[6] = (float)r->townsBefore;
         row[7] = GameValueExt(r->phase == CALive ? r->group.GetLink() : (AIGroup*)nullptr);
+        GameValue posValue = state->CreateGameValue(GameArray);
+        if (r->spawnReason != CASpawnNone)
+        {
+            // script order [easting, northing, height above ground]
+            GameArrayType& pos = posValue;
+            pos.Resize(3);
+            pos[0] = r->spawnPos.X();
+            pos[1] = r->spawnPos.Z();
+            pos[2] = 0.0f;
+        }
+        row[8] = posValue;
+        row[9] = GameStringType(CounterAttack::SpawnReasonName(r->spawnReason));
         rows.Add(rowValue);
     }
     return value;
@@ -117,9 +136,13 @@ static GameValue GmCounterAttackTune(const GameState* /*state*/, GameValuePar op
     {
         t.speed = v < 0.5f ? 0.5f : v;
     }
-    else if (stricmp(key, "stageDistance") == 0)
+    else if (stricmp(key, "birthMinToTarget") == 0)
     {
-        t.stageDistance = v < 50 ? 50 : v;
+        t.birthMinToTarget = v < 0 ? 0 : v;
+    }
+    else if (stricmp(key, "birthGiveUp") == 0)
+    {
+        t.birthGiveUp = v < 1 ? 1 : v;
     }
     else if (stricmp(key, "liveTimeout") == 0)
     {

@@ -2,10 +2,14 @@
 
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // IsMilitaryType
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/Traffic.hpp> // the shared perception gate (issue #53)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
+
+#include <Poseidon/Core/Application.hpp>         // GApp (ENGINE_CONFIG)
+#include <Poseidon/Core/Config/EngineConfig.hpp> // ENGINE_CONFIG.objectsZ / horizontZ (perception gate)
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp> // surface Y, dry-land test
@@ -18,12 +22,19 @@
 
 #include <Random/randomGen.hpp>
 
+#include <Poseidon/Foundation/Common/FltOpts.hpp> // toIntFloor / toIntCeil (road survey)
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
 #include <string.h>
+
+#include <functional>
+#include <queue>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 // Shared command internals (global namespace, the GarrisonCache idiom):
 // createUnit / deleteVehicle without the script-value parsing, and the body of
@@ -58,6 +69,42 @@ static float Dist2D(float ax, float az, float bx, float bz)
 static int MinInt(int a, int b)
 {
     return a < b ? a : b;
+}
+
+static int MaxInt(int a, int b)
+{
+    return a > b ? a : b;
+}
+
+static float Dist2D(Vector3Par a, Vector3Par b)
+{
+    return Dist2D(a.X(), a.Z(), b.X(), b.Z());
+}
+
+static float Clamp01(float v)
+{
+    return v < 0 ? 0 : (v > 1 ? 1 : v);
+}
+
+// the index of the first route point at or past fraction of its length
+static int RouteIndexAt(const AutoArray<Vector3>& route, float fraction)
+{
+    const int n = route.Size();
+    if (n == 0)
+    {
+        return 0;
+    }
+    const float want = Clamp01(fraction) * CounterAttack::RouteLength(route) - 0.01f;
+    float arc = 0;
+    for (int i = 1; i < n; i++)
+    {
+        if (arc >= want)
+        {
+            return i - 1;
+        }
+        arc += Dist2D(route[i - 1], route[i]);
+    }
+    return n - 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,11 +174,12 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     t.sourceKeep = ReadRanged(c, "counterAttackSourceKeep", t.sourceKeep, 0.0f, 1.0f);
     t.speed = ReadRanged(c, "counterAttackSpeed", t.speed, 0.5f, 100.0f);
     t.roadFactor = ReadRanged(c, "counterAttackRoadFactor", t.roadFactor, 1.0f, 5.0f);
-    t.stageDistance = ReadRanged(c, "counterAttackStageDistance", t.stageDistance, 50.0f, 2000.0f);
     t.defenderWeight = ReadRanged(c, "counterAttackDefenderWeight", t.defenderWeight, 0.0f, 100.0f);
     t.repelLoss = ReadRanged(c, "counterAttackRepelLoss", t.repelLoss, 0.0f, 1.0f);
     t.liveTimeout = ReadRanged(c, "counterAttackLiveTimeout", t.liveTimeout, 60.0f, 86400.0f);
     t.maxLive = (int)ReadRanged(c, "counterAttackMaxLive", (float)t.maxLive, 0.0f, 8.0f);
+    t.birthMinToTarget = ReadRanged(c, "counterAttackBirthMinToTarget", t.birthMinToTarget, 0.0f, 2000.0f);
+    t.birthGiveUp = ReadRanged(c, "counterAttackBirthGiveUp", t.birthGiveUp, 30.0f, 86400.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,13 +241,278 @@ float CounterAttack::HoldOdds(const CounterAttackTuning& t, int defenders, int a
 
 float CounterAttack::TravelTime(const CounterAttackTuning& t, float straightDistance)
 {
-    float leg = straightDistance - t.stageDistance;
-    if (leg < 0)
-    {
-        leg = 0;
-    }
+    // the whole road leg from the base to the town: a live squad appears on
+    // that road (unseen) and walks the rest, so nothing is cut off the end
+    const float leg = straightDistance > 0 ? straightDistance : 0;
     const float seconds = leg * t.roadFactor / (t.speed > 0 ? t.speed : 1.0f);
     return seconds < MinTravel ? MinTravel : seconds;
+}
+
+float CounterAttack::RouteLength(const AutoArray<Vector3>& route)
+{
+    float len = 0;
+    for (int i = 1; i < route.Size(); i++)
+    {
+        len += Dist2D(route[i - 1], route[i]);
+    }
+    return len;
+}
+
+Vector3 CounterAttack::RoutePoint(const AutoArray<Vector3>& route, float fraction)
+{
+    const int n = route.Size();
+    if (n == 0)
+    {
+        return VZero;
+    }
+    if (fraction <= 0 || n == 1)
+    {
+        return route[0];
+    }
+    const float want = Clamp01(fraction) * RouteLength(route);
+    float walked = 0;
+    for (int i = 1; i < n; i++)
+    {
+        const float seg = Dist2D(route[i - 1], route[i]);
+        if (seg > 0 && walked + seg >= want)
+        {
+            const float k = (want - walked) / seg;
+            return route[i - 1] + (route[i] - route[i - 1]) * k;
+        }
+        walked += seg;
+    }
+    return route[n - 1];
+}
+
+void CounterAttack::ResampleRoute(const AutoArray<Vector3>& in, float step, AutoArray<Vector3>& out)
+{
+    out.Clear();
+    if (in.Size() == 0)
+    {
+        return;
+    }
+    out.Add(in[0]);
+    for (int i = 1; i < in.Size(); i++)
+    {
+        const Vector3 a = in[i - 1];
+        const Vector3 b = in[i];
+        const float seg = Dist2D(a, b);
+        if (seg < 0.01f)
+        {
+            continue; // a repeated vertex
+        }
+        const int parts = step > 0 ? (int)ceilf(seg / step) : 1;
+        for (int k = 1; k < parts; k++)
+        {
+            out.Add(a + (b - a) * ((float)k / (float)parts));
+        }
+        out.Add(b);
+    }
+}
+
+CounterAttackSpawnPick CounterAttack::PickSpawnPoint(const AutoArray<Vector3>& route, float progress, bool launch,
+                                                     float minToTarget, const CounterAttackGate& gate)
+{
+    CounterAttackSpawnPick pick; // CASpawnDeferred
+    const int n = route.Size();
+    if (n == 0)
+    {
+        return pick;
+    }
+    const Vector3 town = route[n - 1];
+    const float len = RouteLength(route);
+    const float min2 = minToTarget * minToTarget;
+    // the candidates in search order, with their arc from the base
+    AutoArray<Vector3> pts;
+    AutoArray<float> arcs;
+    AutoArray<float> arcOf;
+    arcOf.Resize(n);
+    float arc = 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (i > 0)
+        {
+            arc += Dist2D(route[i - 1], route[i]);
+        }
+        arcOf[i] = arc;
+    }
+    if (launch)
+    {
+        // no progress yet: from the base toward the town
+        for (int i = 0; i < n; i++)
+        {
+            pts.Add(route[i]);
+            arcs.Add(arcOf[i]);
+        }
+    }
+    else
+    {
+        // a force the player walked up to: its progress point, then back
+        // toward the base - never ahead of where it has got to, and never
+        // further back than it must
+        const float at = Clamp01(progress) * len;
+        const Vector3 here = RoutePoint(route, Clamp01(progress));
+        const float hx = here.X() - town.X();
+        const float hz = here.Z() - town.Z();
+        if (hx * hx + hz * hz < min2)
+        {
+            // already at the town edge: it stays there, abstract
+            pick.reason = CASpawnHold;
+            pick.pos = here;
+            pick.fraction = Clamp01(progress);
+            return pick;
+        }
+        pts.Add(here);
+        arcs.Add(at);
+        for (int i = n - 1; i >= 0; i--)
+        {
+            if (arcOf[i] < at - 0.01f)
+            {
+                pts.Add(route[i]);
+                arcs.Add(arcOf[i]);
+            }
+        }
+    }
+    // the first hidden candidate wins; a point hidden only by the cone counts
+    // only near the base, and only when no hidden point exists (Traffic's
+    // tiers, issue #53 T2)
+    int coneOnly = -1;
+    for (int k = 0; k < pts.Size(); k++)
+    {
+        const float dx = pts[k].X() - town.X();
+        const float dz = pts[k].Z() - town.Z();
+        if (dx * dx + dz * dz < min2)
+        {
+            continue; // never born on top of the town
+        }
+        const int exposure = gate.Exposure(pts[k]);
+        if (exposure == CAExposeHidden)
+        {
+            pick.reason = arcs[k] < BaseReach ? CASpawnBase : CASpawnRoute;
+            pick.pos = pts[k];
+            pick.fraction = len > 0 ? Clamp01(arcs[k] / len) : 0.0f;
+            return pick;
+        }
+        if (exposure == CAExposeConeOnly && coneOnly < 0 && arcs[k] <= ConeOnlyBaseRadius)
+        {
+            coneOnly = k;
+        }
+    }
+    if (coneOnly >= 0)
+    {
+        pick.reason = arcs[coneOnly] < BaseReach ? CASpawnBase : CASpawnRoute;
+        pick.pos = pts[coneOnly];
+        pick.fraction = len > 0 ? Clamp01(arcs[coneOnly] / len) : 0.0f;
+    }
+    return pick;
+}
+
+float CounterAttack::RouteFractionNear(const AutoArray<Vector3>& route, Vector3Par pos)
+{
+    const int n = route.Size();
+    const float len = RouteLength(route);
+    if (n < 2 || len <= 0)
+    {
+        return 0;
+    }
+    // the nearest point on any segment, by arc
+    float best = -1;
+    float bestArc = 0;
+    float arc = 0;
+    for (int i = 1; i < n; i++)
+    {
+        const Vector3 a = route[i - 1];
+        const Vector3 b = route[i];
+        const float seg = Dist2D(a, b);
+        float k = 0;
+        if (seg > 0)
+        {
+            k = ((pos.X() - a.X()) * (b.X() - a.X()) + (pos.Z() - a.Z()) * (b.Z() - a.Z())) / (seg * seg);
+            k = Clamp01(k);
+        }
+        const Vector3 q = a + (b - a) * k;
+        const float d = Dist2D(q, pos);
+        if (best < 0 || d < best)
+        {
+            best = d;
+            bestArc = arc + seg * k;
+        }
+        arc += seg;
+    }
+    return Clamp01(bestArc / len);
+}
+
+void CounterAttack::ReturnToRoad(Record& r, float fraction, int alive, float wholeTravel)
+{
+    if (r.travel <= 0)
+    {
+        r.travel = wholeTravel > MinTravel ? wholeTravel : MinTravel;
+    }
+    // the arrival clock picks up where the march got to: progress = fraction
+    r.phase = CATravel;
+    r.strength = alive;
+    r.clock = r.travel * (1.0f - Clamp01(fraction));
+    r.group = nullptr;
+    r.leg = LegUnknown;
+    r.wp = 0;
+    r.retry = 0;
+    r.deferTime = 0;
+    r.hiddenLogged = false;
+    r.deferLogged = false;
+    r.wholeRoad = false;
+    r.unseenFor = 0;
+}
+
+bool CounterAttack::RoadIsReasonable(float roadLength, float straightDistance)
+{
+    return roadLength <= straightDistance * MaxRoadDetour + RoadDetourSlack;
+}
+
+float CounterAttack::Progress(const Record& r)
+{
+    if (r.travel <= 0)
+    {
+        return 0;
+    }
+    return Clamp01((r.travel - r.clock) / r.travel);
+}
+
+float CounterAttack::MarchAllowance(const AutoArray<Vector3>& route, float fraction)
+{
+    return RouteLength(route) * (1.0f - Clamp01(fraction)) / MarchSpeed + MarchSlack;
+}
+
+int CounterAttack::GroupTarget(const ZoneRegistry& registry, const AIGroup* grp) const
+{
+    if (!grp)
+    {
+        return -1;
+    }
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        if (_records[i].phase == CALive && _records[i].group.GetLink() == grp)
+        {
+            return registry.FindZoneIndex(_records[i].target);
+        }
+    }
+    return -1;
+}
+
+const char* CounterAttack::SpawnReasonName(int reason)
+{
+    switch (reason)
+    {
+        case CASpawnBase:
+            return "base";
+        case CASpawnRoute:
+            return "route";
+        case CASpawnGarrison:
+            return "garrison";
+        case CASpawnDeferred:
+            return "deferred";
+        default:
+            return "";
+    }
 }
 
 int CounterAttack::Spare(const CounterAttackTuning& t, float stored, int live, float garrisonMax, bool useLive)
@@ -286,7 +599,9 @@ int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex)
     int bodies = 0;
     for (int i = 0; i < _records.Size(); i++)
     {
-        if (_records[i].phase == CAHolding && stricmp(_records[i].target, z->name) == 0)
+        // a suspended force (its town in the player's bubble) does nothing
+        // to the town until the player leaves
+        if (_records[i].phase == CAHolding && !_records[i].suspended && stricmp(_records[i].target, z->name) == 0)
         {
             bodies += _records[i].strength;
         }
@@ -415,6 +730,7 @@ bool CounterAttack::LaunchFrom(ZoneRegistry& registry, const CounterAttackView& 
     {
         return false;
     }
+    r.wholeRoad = r.phase == CATravel && InBubble(registry, view, target);
     _records.Add(r);
     return true;
 }
@@ -467,47 +783,127 @@ int CounterAttack::PickSource(const ZoneRegistry& registry, const CounterAttackV
     return best;
 }
 
-Vector3 CounterAttack::StagePoint(const CounterAttackTuning& t, Vector3Par town, Vector3Par source)
+const AutoArray<Vector3>& CounterAttack::RouteOf(const ZoneRegistry& registry, Record& r, CounterAttackOps* ops)
 {
-    float dx = source.X() - town.X();
-    float dz = source.Z() - town.Z();
-    const float len = sqrtf(dx * dx + dz * dz);
-    if (len < 1.0f)
+    if (r.route.Size() > 0)
     {
-        dx = 1;
-        dz = 0;
+        return r.route;
     }
-    else
+    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
+    const ZoneRecord* town = registry.GetZone(registry.FindZoneIndex(r.target));
+    if (!src || !town)
     {
-        dx /= len;
-        dz /= len;
+        return r.route;
     }
-    const float reach = len > 1.0f && len < t.stageDistance ? len : t.stageDistance;
-    // the full distance first, then shorter, so a coast between the town and
-    // the base pulls the squad in rather than dropping it in the sea
-    static const float shares[] = {1.0f, 0.6f, 0.3f};
-    for (float share : shares)
+    AutoArray<Vector3> raw;
+    if (ops)
     {
-        Vector3 p(town.X() + dx * reach * share, town.Y(), town.Z() + dz * reach * share);
-        if (GRoadNet)
+        ops->BuildRoute(src->pos, town->pos, raw);
+    }
+    const float straight = Dist2D(src->pos, town->pos);
+    if (raw.Size() >= 2 && !RoadIsReasonable(RouteLength(raw), straight))
+    {
+        // men on foot do not walk a road that winds this far round: the
+        // straight line instead
+        LOG_INFO(Core, "CounterAttack: the road from {} to {} is {:.0f} m for {:.0f} m straight; cross-country",
+                 (const char*)r.source, (const char*)r.target, RouteLength(raw), straight);
+        raw.Clear();
+    }
+    if (raw.Size() < 2)
+    {
+        // no road net (or no connection): the straight line, base to town
+        raw.Clear();
+        raw.Add(src->pos);
+        raw.Add(town->pos);
+    }
+    ResampleRoute(raw, RouteStep, r.route);
+    return r.route;
+}
+
+bool CounterAttack::MustGoLive(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                               CounterAttackOps* ops) const
+{
+    if (!view.playerValid)
+    {
+        return false;
+    }
+    if (InBubble(registry, view, target))
+    {
+        return true;
+    }
+    // the player stands on the road ahead of (or at) the force
+    const Vector3 at = RoutePoint(RouteOf(registry, r, ops), Progress(r));
+    return Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
+}
+
+void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
+                          float elapsed)
+{
+    const ZoneRecord* town = registry.GetZone(target);
+    if (!town || !ops)
+    {
+        return;
+    }
+    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+    const int n = route.Size();
+    const float edge = registry.Tuning().zoneArea + TownEdgeMargin;
+    if (n == 0 || Dist2D(leader, town->pos) <= edge)
+    {
+        // the town edge: deploy and move in; the live timeout starts now
+        r.leg = LegTown;
+        if (r.clock < 0)
         {
-            const Vector3 road = GRoadNet->GetNearestRoadPoint(p);
-            if (Dist2D(road.X(), road.Z(), p.X(), p.Z()) < 150.0f)
-            {
-                p = road;
-            }
+            r.clock = 0;
         }
-        if (!GLandscape)
+        r.resend = ResendInterval;
+        ops->Assault(r.group, town->pos);
+        LOG_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out); it moves in",
+                 (const char*)r.target, Dist2D(leader, town->pos));
+        return;
+    }
+    // the route point nearest the leader, searched around the current leg
+    // (the whole road after a reload)
+    const bool known = r.leg == LegRoad;
+    const int lo = known ? MaxInt(0, r.wp - 2 * WaypointStride) : 0;
+    const int hi = known ? MinInt(n - 1, r.wp + 2 * WaypointStride) : n - 1;
+    int at = lo;
+    float atD = -1;
+    for (int i = lo; i <= hi; i++)
+    {
+        const float d = Dist2D(leader, route[i]);
+        if (atD < 0 || d < atD)
         {
-            return p;
-        }
-        if (GLandscape->SurfaceY(p.X(), p.Z()) >= 0.5f)
-        {
-            p[1] = GLandscape->SurfaceY(p.X(), p.Z());
-            return p;
+            atD = d;
+            at = i;
         }
     }
-    return town;
+    bool issue = false;
+    if (!known)
+    {
+        r.leg = LegRoad;
+        r.wp = MinInt(at + WaypointStride, n - 1);
+        issue = true;
+    }
+    else if (r.wp >= 0 && r.wp < n && (at >= r.wp - 1 || Dist2D(leader, route[r.wp]) < WaypointReach))
+    {
+        // this leg is done: the next one ends WaypointStride points on
+        const int next = MinInt(at + WaypointStride, n - 1);
+        if (next != r.wp)
+        {
+            r.wp = next;
+            issue = true;
+        }
+    }
+    r.resend -= elapsed;
+    if (r.resend <= 0)
+    {
+        issue = true; // a stalled leg is re-sent
+    }
+    if (issue && r.wp >= 0 && r.wp < n)
+    {
+        r.resend = ResendInterval;
+        ops->MoveOn(r.group, route[r.wp]);
+    }
 }
 
 void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies)
@@ -570,13 +966,13 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
     return true;
 }
 
-bool CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
-                           CounterAttackOps* ops, bool announce, AutoArray<ZoneEventRecord>& fired)
+int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                          CounterAttackOps* ops, float fraction, AutoArray<ZoneEventRecord>& fired)
 {
     const ZoneRecord* town = registry.GetZone(target);
     if (!ops || !town)
     {
-        return false;
+        return BirthWait;
     }
     const ZoneTuning& zt = registry.Tuning();
     const bool overLive = LiveSquads() >= _tuning.maxLive;
@@ -593,27 +989,59 @@ bool CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view
                      zt.budgetLiveBodies, view.occGroups, zt.budgetSideGroups, RetryInterval);
             r.deferLogged = true;
         }
-        return false;
+        return BirthWait;
     }
-    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
-    const Vector3 from = StagePoint(_tuning, town->pos, src ? src->pos : town->pos);
-    AIGroup* grp = ops->SpawnSquad(r.strength, from, town->pos);
+    // the user's rule: a force is only ever born where the player cannot
+    // perceive it, on its road between the base and the town, and walks
+    // the rest
+    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+    const CounterAttackSpawnPick pick = PickSpawnPoint(route, fraction, r.wholeRoad, _tuning.birthMinToTarget, *ops);
+    if (pick.reason == CASpawnHold)
+    {
+        return BirthHold;
+    }
+    if (pick.reason == CASpawnDeferred)
+    {
+        if (!r.hiddenLogged)
+        {
+            LOG_WARN(Core,
+                     "CounterAttack: force on {} from {} deferred: no point of its road ({}) is out of the player's"
+                     " perception; retrying every {:.0f}s, its clock stopped, turning back after {:.0f}s",
+                     (const char*)r.target, (const char*)r.source,
+                     r.wholeRoad ? "from the base" : "behind its progress point", RetryInterval, _tuning.birthGiveUp);
+            r.hiddenLogged = true;
+        }
+        return BirthNoPoint;
+    }
+    const int n = route.Size();
+    const int legEnd = MinInt(RouteIndexAt(route, pick.fraction) + WaypointStride, n - 1);
+    AIGroup* grp = ops->SpawnSquad(r.strength, pick.pos, route[legEnd]);
     if (!grp)
     {
-        return false;
+        return BirthWait;
     }
+    const bool afterDeferral = r.deferLogged || r.hiddenLogged;
     r.group = grp;
     r.phase = CALive;
-    r.clock = 0;
+    r.clock = -MarchAllowance(route, pick.fraction);
     r.resend = ResendInterval;
+    r.retry = 0;
+    r.deferTime = 0;
+    r.leg = LegRoad;
+    r.wp = legEnd;
+    r.spawnReason = pick.reason;
+    r.spawnPos = pick.pos;
     r.deferLogged = false;
-    LOG_INFO(Core, "CounterAttack: {} soldier(s) from {} move on {} from [{:.0f}, {:.0f}]", r.strength,
-             (const char*)r.source, (const char*)r.target, from.X(), from.Z());
-    if (announce)
-    {
-        AddEvent(fired, ZECounterAttack, target);
-    }
-    return true;
+    r.hiddenLogged = false;
+    const float toPlayer = view.playerValid ? Dist2D(pick.pos.X(), pick.pos.Z(), view.playerX, view.playerZ) : -1.0f;
+    LOG_INFO(Core,
+             "CounterAttack: {} soldier(s) from {} appear at [{:.0f}, {:.0f}], {:.0f} m from the player (reason: {}{}, "
+             "{:.0f}% along {:.0f} m of road); they march on {}",
+             r.strength, (const char*)r.source, pick.pos.X(), pick.pos.Z(), toPlayer,
+             pick.reason == CASpawnBase ? "base" : "route point", afterDeferral ? ", after a deferral" : "",
+             pick.fraction * 100.0f, RouteLength(route), (const char*)r.target);
+    AddEvent(fired, ZECounterAttack, target);
+    return BirthDone;
 }
 
 bool CounterAttack::RoomLive(const ZoneRegistry& registry, const CounterAttackView& view) const
@@ -634,9 +1062,12 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
     r.source = s->name;
     if (live)
     {
-        // the base is in the bubble: its own soldiers march out
+        // the base is in the bubble: its own soldiers (already there, in the
+        // player's world) march out and take the road to the town
+        const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+        const int legEnd = MinInt(WaypointStride, route.Size() - 1);
         int taken = 0;
-        AIGroup* grp = ops ? ops->DetachFromGarrison(src, n, town->pos, taken) : nullptr;
+        AIGroup* grp = ops && legEnd >= 0 ? ops->DetachFromGarrison(src, n, route[legEnd], taken) : nullptr;
         if (!grp || taken <= 0)
         {
             return false;
@@ -644,10 +1075,14 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
         r.strength = taken;
         r.group = grp;
         r.phase = CALive;
-        r.clock = 0;
+        r.clock = -MarchAllowance(route, 0);
         r.resend = ResendInterval;
-        LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {}", taken, (const char*)s->name,
-                 (const char*)r.target);
+        r.leg = LegRoad;
+        r.wp = legEnd;
+        r.spawnReason = CASpawnGarrison;
+        r.spawnPos = s->pos;
+        LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {} ({:.0f} m of road)", taken,
+                 (const char*)s->name, (const char*)r.target, RouteLength(route));
         AddEvent(fired, ZECounterAttack, target);
         return true;
     }
@@ -659,6 +1094,8 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
     r.strength = n;
     r.phase = CATravel;
     r.clock = TravelTime(_tuning, Dist2D(s->pos.X(), s->pos.Z(), town->pos.X(), town->pos.Z()));
+    r.travel = r.clock;
+    r.retry = 0;
     LOG_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
              (const char*)s->name, (const char*)r.target, r.clock, s->garrison);
     return true;
@@ -711,6 +1148,9 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             {
                 r.clock = RetryInterval;
             }
+            // launched with the town already in the bubble: born anywhere on
+            // its road (from the base), not only behind its progress point
+            r.wholeRoad = r.phase == CATravel && inBubble;
             return false;
         }
         case CATravel:
@@ -722,17 +1162,48 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 ReturnToSource(registry, view, r, r.strength);
                 return true;
             }
+            if (MustGoLive(registry, view, target, r, ops))
+            {
+                // the force would come into the player's world: it is born
+                // on its road where the player cannot see it, or waits; its
+                // arrival clock does not run meanwhile and it does nothing to
+                // the town
+                if (r.hiddenLogged)
+                {
+                    r.deferTime += elapsed;
+                    if (r.deferTime >= _tuning.birthGiveUp)
+                    {
+                        LOG_INFO(Core,
+                                 "CounterAttack: the force on {} found no unseen road for {:.0f}s; it turns back to {}",
+                                 (const char*)r.target, r.deferTime, (const char*)r.source);
+                        ReturnToSource(registry, view, r, r.strength);
+                        return true;
+                    }
+                }
+                if (r.retry > 0)
+                {
+                    r.retry -= elapsed;
+                    return false;
+                }
+                const int birth = GoLive(registry, view, target, r, ops, Progress(r), fired);
+                if (birth == BirthHold)
+                {
+                    // already at the town edge: it stays there, abstract and
+                    // idle, until the player leaves or it can be born
+                    r.retry = RetryInterval;
+                }
+                else if (birth != BirthDone)
+                {
+                    r.retry = RetryInterval;
+                }
+                return false;
+            }
+            r.retry = 0;
+            r.deferTime = 0;
+            r.hiddenLogged = false;
             r.clock -= elapsed;
             if (r.clock > 0)
             {
-                return false;
-            }
-            if (InBubble(registry, view, target))
-            {
-                if (!GoLive(registry, view, target, r, ops, true, fired))
-                {
-                    r.clock = RetryInterval;
-                }
                 return false;
             }
             // off-screen arrival
@@ -753,7 +1224,11 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 LOG_INFO(Core, "CounterAttack: {} retaken by the holding force", (const char*)r.target);
                 return true;
             }
-            if (InBubble(registry, view, target) && GoLive(registry, view, target, r, ops, false, fired))
+            // the town in the player's bubble: the force is never born at the
+            // town centre; it is suspended (no drain, no odds roll) until he
+            // leaves
+            r.suspended = InBubble(registry, view, target);
+            if (r.suspended)
             {
                 return false;
             }
@@ -781,14 +1256,50 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 AddEvent(fired, ZECounterRepelled, target);
                 return true;
             }
-            r.clock += elapsed;
-            r.resend -= elapsed;
-            if (r.resend <= 0)
+            if (r.leg == LegRoad)
             {
-                r.resend = ResendInterval;
-                if (Dist2D(leader.X(), leader.Z(), town->pos.X(), town->pos.Z()) > registry.Tuning().zoneArea * 0.5f)
+                // a marching squad nobody can perceive, away from the
+                // player's bubble, returns to the abstract road (Traffic's
+                // despawn rule): its slot and budget are freed, its
+                // survivors and its progress carried over
+                const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                const bool away = Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge &&
+                                  Dist2D(town->pos.X(), town->pos.Z(), view.playerX, view.playerZ) > edge;
+                r.unseenFor = away && ops->SquadUnseen(r.group) ? r.unseenFor + elapsed : 0.0f;
+                if (r.unseenFor >= VanishHold)
                 {
-                    ops->MoveOn(r.group, town->pos);
+                    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+                    const float fraction = RouteFractionNear(route, leader);
+                    const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
+                    const float whole =
+                        src ? TravelTime(_tuning, Dist2D(src->pos.X(), src->pos.Z(), town->pos.X(), town->pos.Z()))
+                            : MinTravel;
+                    ops->Remove(r.group);
+                    ReturnToRoad(r, fraction, alive, whole);
+                    LOG_INFO(Core,
+                             "CounterAttack: the force on {} ({} soldier(s)) leaves the player's world {:.0f}% along"
+                             " its road; abstract again, {:.0f}s from the town",
+                             (const char*)r.target, alive, fraction * 100.0f, r.clock);
+                    return false;
+                }
+            }
+            r.clock += elapsed;
+            if (r.leg != LegTown)
+            {
+                // on the road: leg by leg to the town edge
+                March(registry, target, r, ops, leader, elapsed);
+            }
+            else
+            {
+                r.resend -= elapsed;
+                if (r.resend <= 0)
+                {
+                    r.resend = ResendInterval;
+                    if (Dist2D(leader.X(), leader.Z(), town->pos.X(), town->pos.Z()) >
+                        registry.Tuning().zoneArea * 0.5f)
+                    {
+                        ops->MoveOn(r.group, town->pos);
+                    }
                 }
             }
             if (r.clock >= _tuning.liveTimeout)
@@ -865,12 +1376,224 @@ Vector3 Grounded(float x, float z, float y)
     return Vector3(x, y, z);
 }
 
+// m from a zone centre a road link may be to anchor the route there
+constexpr float RouteSnapRadius = 300.0f;
+// road-graph search budget (links expanded); an island's whole net fits
+constexpr int MaxRouteNodes = 60000;
+// m above the ground the terrain ray aims (a standing man)
+constexpr float InfantryLosHeight = 1.8f;
+
+float Dist2DSq(Vector3Par a, Vector3Par b)
+{
+    const float dx = a.X() - b.X();
+    const float dz = a.Z() - b.Z();
+    return dx * dx + dz * dz;
+}
+
+// the road link whose centre is nearest pos within radius (the Traffic road
+// survey idiom), null when none
+const RoadLink* NearestRoadLink(Vector3Par pos, float radius)
+{
+    if (!GRoadNet)
+    {
+        return nullptr;
+    }
+    const RoadLink* best = nullptr;
+    float bestD2 = radius * radius;
+    const int cells = toIntCeil(radius * InvLandGrid);
+    const int cx = toIntFloor(pos.X() * InvLandGrid);
+    const int cz = toIntFloor(pos.Z() * InvLandGrid);
+    for (int zz = cz - cells; zz <= cz + cells; zz++)
+    {
+        for (int xx = cx - cells; xx <= cx + cells; xx++)
+        {
+            if (!InRange(zz, xx))
+            {
+                continue;
+            }
+            const RoadList& list = GRoadNet->GetRoadList(xx, zz);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                const RoadLink* link = list[i];
+                if (!link)
+                {
+                    continue;
+                }
+                const float d2 = Dist2DSq(link->GetCenter(), pos);
+                if (d2 < bestD2)
+                {
+                    bestD2 = d2;
+                    best = link;
+                }
+            }
+        }
+    }
+    return best;
+}
+
 class EngineOps final : public CounterAttackOps
 {
   public:
-    static void Posture(AIGroup* grp)
+    // the per-step perception snapshot (Simulate, before Step)
+    void Refresh(const CounterAttackView& view)
     {
-        grp->SetCombatModeMajor(CMAware);
+        _cam = PerceptionCamera::Capture();
+        const TrafficTuning& tt = Traffic::Instance().Tuning();
+        _audible = tt.minSpawnDist;
+        // infantry shows no headlights: the object cull alone bounds what is drawn
+        _band = Traffic::EffectiveBand(tt, ENGINE_CONFIG.objectsZ, false, ENGINE_CONFIG.horizontZ);
+        _playerValid = view.playerValid;
+        _player = Vector3(view.playerX, 0, view.playerZ);
+    }
+
+    // Traffic's spawn gate (issue #53) for a squad on foot: the config
+    // minSpawnDist is the hard audible floor (from the player), then the
+    // exposure legs from the camera, tiered: past the cull + margin or
+    // terrain-hidden = hidden (survives a turn-around), outside the view cone
+    // only = cone-only.  Never in the sea.
+    int Exposure(Vector3Par pos) const override
+    {
+        if (!_playerValid)
+        {
+            return CAExposeSeen;
+        }
+        if (GLandscape && GLandscape->SurfaceY(pos.X(), pos.Z()) < 0.5f)
+        {
+            return CAExposeSeen;
+        }
+        if (Dist2DSq(pos, _player) < _audible * _audible)
+        {
+            return CAExposeSeen; // audible even unseen
+        }
+        const float camD2 = Dist2DSq(pos, _cam.hasCamera ? _cam.camPos : _player);
+        if (camD2 >= _band.minSpawn * _band.minSpawn)
+        {
+            return CAExposeHidden; // past the draw distance
+        }
+        // inside the draw distance: the terrain ray decides "hidden" whichever
+        // way the camera looks (no camera: nothing hides anything)
+        if (_cam.LosBlocked(pos, InfantryLosHeight))
+        {
+            return CAExposeHidden;
+        }
+        return _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle) ? CAExposeSeen : CAExposeConeOnly;
+    }
+
+    // A* over the road links (RoadNet::SearchPath gives up after 100 nodes,
+    // too short for a base-to-town road): link centres from the link nearest
+    // the base to the link nearest the town, then the town centre
+    void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+    {
+        route.Clear();
+        const RoadLink* start = NearestRoadLink(from, RouteSnapRadius);
+        const RoadLink* goal = NearestRoadLink(to, RouteSnapRadius);
+        if (!start || !goal)
+        {
+            LOG_INFO(Core,
+                     "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}] or [{:.0f}, {:.0f}]; straight line",
+                     RouteSnapRadius, from.X(), from.Z(), to.X(), to.Z());
+            return;
+        }
+        struct Node
+        {
+            const RoadLink* link;
+            int parent;
+            float g;
+            bool closed;
+        };
+        std::vector<Node> nodes;
+        std::unordered_map<const RoadLink*, int> index;
+        typedef std::pair<float, int> Entry;
+        std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> open;
+        const Vector3 goalC = goal->GetCenter();
+        nodes.push_back(Node{start, -1, 0.0f, false});
+        index[start] = 0;
+        open.push(Entry(Dist2D(start->GetCenter(), goalC), 0));
+        int found = -1;
+        int expanded = 0;
+        while (!open.empty() && expanded < MaxRouteNodes)
+        {
+            const int cur = open.top().second;
+            open.pop();
+            if (nodes[cur].closed)
+            {
+                continue;
+            }
+            nodes[cur].closed = true;
+            expanded++;
+            const RoadLink* link = nodes[cur].link;
+            if (link == goal)
+            {
+                found = cur;
+                break;
+            }
+            const Vector3 c = link->GetCenter();
+            for (int k = 0; k < link->NConnections(); k++)
+            {
+                const RoadLink* next = link->Connections()[k];
+                if (!next)
+                {
+                    continue;
+                }
+                const Vector3 nc = next->GetCenter();
+                const float g = nodes[cur].g + Dist2D(c, nc);
+                int ni;
+                auto it = index.find(next);
+                if (it == index.end())
+                {
+                    ni = (int)nodes.size();
+                    nodes.push_back(Node{next, cur, g, false});
+                    index[next] = ni;
+                }
+                else
+                {
+                    ni = it->second;
+                    if (nodes[ni].closed || g >= nodes[ni].g)
+                    {
+                        continue;
+                    }
+                    nodes[ni].g = g;
+                    nodes[ni].parent = cur;
+                }
+                open.push(Entry(g + Dist2D(nc, goalC), ni));
+            }
+        }
+        if (found < 0)
+        {
+            LOG_INFO(Core,
+                     "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
+                     "straight line",
+                     from.X(), from.Z(), to.X(), to.Z(), expanded);
+            return;
+        }
+        AutoArray<Vector3> back;
+        for (int i = found; i >= 0; i = nodes[i].parent)
+        {
+            back.Add(nodes[i].link->GetCenter());
+        }
+        for (int i = back.Size() - 1; i >= 0; i--)
+        {
+            route.Add(Grounded(back[i].X(), back[i].Z(), back[i].Y()));
+        }
+        route.Add(Grounded(to.X(), to.Z(), to.Y()));
+    }
+
+    // on the road: SAFE keeps the unit planner on the road net
+    // (AIUnit::CreatePath -> CreateRoadPath and the planner's road bonus are
+    // both off while cautious); the squad still fires at will, and contact
+    // raises it to COMBAT on its own
+    static void MarchPosture(AIGroup* grp)
+    {
+        grp->SetCombatModeMajor(CMSafe);
+        if (grp->MainSubgroup())
+        {
+            grp->MainSubgroup()->SetFormation(AI::FormColumn);
+        }
+        SemaphoreAll(grp);
+    }
+
+    static void SemaphoreAll(AIGroup* grp)
+    {
         grp->SetSemaphore(AI::SemaphoreRed);
         PackedBoolArray all;
         for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
@@ -881,6 +1604,24 @@ class EngineOps final : public CounterAttackOps
             }
         }
         grp->SendSemaphore(AI::SemaphoreRed, all);
+    }
+
+    void Assault(AIGroup* grp, Vector3Par town) override
+    {
+        if (!grp)
+        {
+            return;
+        }
+        Posture(grp);
+        MoveOn(grp, town);
+        GetNetworkManager().UpdateObject(grp);
+    }
+
+    // in the town: AWARE, fire at will
+    static void Posture(AIGroup* grp)
+    {
+        grp->SetCombatModeMajor(CMAware);
+        SemaphoreAll(grp);
     }
 
     // the doMove idiom (Traffic::IssueRoute): one Command::Move to every
@@ -909,7 +1650,7 @@ class EngineOps final : public CounterAttackOps
         grp->IssueCommand(cmd, all);
     }
 
-    AIGroup* SpawnSquad(int n, Vector3Par from, Vector3Par target) override
+    AIGroup* SpawnSquad(int n, Vector3Par from, Vector3Par firstLeg) override
     {
         ZoneRegistry& registry = ZoneRegistry::Instance();
         const RString side = registry.OccupierSide();
@@ -940,13 +1681,13 @@ class EngineOps final : public CounterAttackOps
             grp->RemoveFromCenter();
             return nullptr;
         }
-        Posture(grp);
-        MoveOn(grp, target);
+        MarchPosture(grp);
+        MoveOn(grp, firstLeg);
         GetNetworkManager().UpdateObject(grp);
         return grp;
     }
 
-    AIGroup* DetachFromGarrison(int sourceZone, int n, Vector3Par target, int& taken) override
+    AIGroup* DetachFromGarrison(int sourceZone, int n, Vector3Par firstLeg, int& taken) override
     {
         taken = 0;
         const GarrisonCache& cache = GarrisonCache::Instance();
@@ -994,8 +1735,8 @@ class EngineOps final : public CounterAttackOps
             grp->RemoveFromCenter();
             return nullptr;
         }
-        Posture(grp);
-        MoveOn(grp, target);
+        MarchPosture(grp);
+        MoveOn(grp, firstLeg);
         GetNetworkManager().UpdateObject(grp);
         return grp;
     }
@@ -1062,6 +1803,54 @@ class EngineOps final : public CounterAttackOps
     }
 
     void Adopt(int townZone, AIGroup* grp) override { GarrisonCache::Instance().AdoptGroup(townZone, grp); }
+
+    // Traffic's despawn rule for every living body: outside the view cone
+    // and (past the draw distance or terrain-hidden), never inside the
+    // audible close hold.  No camera: the distance rule alone.
+    bool SquadUnseen(AIGroup* grp) const override
+    {
+        if (!grp || !_playerValid)
+        {
+            return false;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            const Vector3 pos = unit->Position();
+            if (!_cam.hasCamera)
+            {
+                if (Dist2DSq(pos, _player) <= _band.despawnEdge * _band.despawnEdge)
+                {
+                    return false;
+                }
+                continue;
+            }
+            const float camD2 = Dist2DSq(pos, _cam.camPos);
+            if (Dist2DSq(pos, _player) < _band.closeHold * _band.closeHold)
+            {
+                return false;
+            }
+            const bool inFrustum = _cam.InFrustum(pos, Traffic::FrustumCosHalfAngle);
+            const bool losBlocked =
+                !inFrustum && camD2 < _band.minSpawn * _band.minSpawn && _cam.LosBlocked(pos, InfantryLosHeight);
+            if (!Traffic::CanExposeDespawn(camD2, losBlocked, inFrustum, _band))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+  private:
+    PerceptionCamera _cam;
+    TrafficEffectiveBand _band;
+    float _audible = 300.0f;
+    bool _playerValid = false;
+    Vector3 _player = VZero;
 };
 
 #pragma clang diagnostic push
@@ -1150,6 +1939,7 @@ void CounterAttack::Simulate(float deltaT)
     view.occGroups = diag.grpOcc;
 
     AutoArray<ZoneEventRecord> fired;
+    Ops().Refresh(view);
     Step(registry, view, elapsed, &Ops(), fired);
     registry.FireEvents(fired);
 }
@@ -1164,6 +1954,9 @@ LSError CounterAttack::Record::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("source", source, 1, RString()))
     PARAM_CHECK(ar.Serialize("phase", phase, 1, (int)CAScheduled))
     PARAM_CHECK(ar.Serialize("clock", clock, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("travel", travel, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("wholeRoad", wholeRoad, 1, false))
+    PARAM_CHECK(ar.Serialize("deferTime", deferTime, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("strength", strength, 1, 0))
     PARAM_CHECK(ar.Serialize("size", size, 1, 0))
     PARAM_CHECK(ar.Serialize("townsBefore", townsBefore, 1, 0))
@@ -1189,7 +1982,17 @@ LSError CounterAttack::Serialize(ParamArchive& ar)
     {
         for (int i = 0; i < _records.Size(); i++)
         {
-            _records[i].deferLogged = false;
+            Record& r = _records[i];
+            r.deferLogged = false;
+            r.hiddenLogged = false;
+            r.retry = 0;
+            r.suspended = false;
+            r.route.Clear();    // rebuilt from the zone positions on demand
+            r.leg = LegUnknown; // a live squad re-derives its leg from its leader
+            if (r.phase == CATravel && r.travel < r.clock)
+            {
+                r.travel = r.clock; // a save without the field: progress restarts at the base
+            }
         }
         _accum = 0;
         if (ar.GetPass() == ParamArchive::PassSecond)

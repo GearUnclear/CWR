@@ -351,6 +351,28 @@ struct TrafficExposeObs
                              // legs fall back to the player distance
 };
 
+// The viewer half of the perception gate (issue #53), shared by every
+// service that must not create things in the player's sight (Traffic, the
+// counter-attack's road spawns): the scene camera's position and 2D heading,
+// snapshotted once per pass.  No scene (dedicated server) = hasCamera false:
+// the cone test answers "in view" and the terrain ray "not hidden", so only
+// the distance legs of a gate apply.
+struct PerceptionCamera
+{
+    bool hasCamera = false;
+    Vector3 camPos = VZero;
+    bool camDirValid = false;  // false = near-vertical camera: no usable 2D heading, the
+                               // cone test degrades to "everything in frustum" (conservative)
+    Vector3 camDir = VForward; // 2D unit heading (meaningless while !camDirValid)
+
+    // the scene camera now; a default (no camera) snapshot without a scene
+    static PerceptionCamera Capture();
+    // generous 2D cone test: within acos(cosHalfAngle) of the heading
+    bool InFrustum(Vector3Par pos, float cosHalfAngle) const;
+    // terrain ray from the camera to targetHeight above pos
+    bool LosBlocked(Vector3Par pos, float targetHeight) const;
+};
+
 // one coalesced danger episode in the transient ring buffer (never
 // serialized; events landing near a live episode merge into it, so automatic
 // fire stays one episode instead of flooding the ring)
@@ -953,13 +975,8 @@ class Traffic : public SerializeClass
     // perception (world layer; refreshed once per traffic pass) --------------
     // no camera (dedicated server) = no perception: the config band and the
     // pre-perception distance rules apply verbatim
-    struct Perception
+    struct Perception : PerceptionCamera
     {
-        bool hasCamera = false;
-        Vector3 camPos = VZero;
-        bool camDirValid = false;  // false = near-vertical camera: no usable 2D heading, the
-                                   // cone test degrades to "everything in frustum" (conservative)
-        Vector3 camDir = VForward; // 2D unit heading (meaningless while !camDirValid)
         TrafficEffectiveBand band; // ConfigBand when no camera
     };
     void RefreshPerception();
