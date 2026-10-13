@@ -15,6 +15,7 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
@@ -2181,6 +2182,27 @@ LSError World::Serialize(ParamArchive& ar, int message)
     else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
     {
         Guerrilla::CounterAttack::Instance().InitMission();
+    }
+
+    // Guerrilla occupier forces pool (OCCUPIER-FORCES.md section 11): the
+    // pool, its sizing (roster, K towns, R, G), the band, control, wave
+    // state and the director's saved clocks.  Save-gated on HasState() (the
+    // service was sized, or a block was loaded).  A save without the block
+    // loaded with occupierForces = 1 is a campaign started before the
+    // service (D20): the pool is derived from the zone state, which the
+    // GuerrillaZones block above restored on this same second pass.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::OccupierForces::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::OccupierForces::Instance().HasState() : ar.IsSubclass("GuerrillaOccupierForces"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaOccupierForces", Guerrilla::OccupierForces::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        Guerrilla::OccupierForces::Instance().InitMission();
+        Guerrilla::OccupierForces::Instance().DeriveFromExistingSave(Guerrilla::ZoneRegistry::Instance());
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

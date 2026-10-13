@@ -4,8 +4,20 @@
 (section 0.2, D1-D20) are binding and override anything older.
 
 **In the code already.** `4400fe9` (the first-town curve) and `450327e`
-(counter-attack forces born out of sight, marching from their base).
-Nothing else here is implemented.
+(counter-attack forces born out of sight, marching from their base), plus the
+phases marked landed below.
+
+**Implementation status** (branch `occupier-forces`, updated as phases land):
+
+| Phase | Status | Notes |
+|---|---|---|
+| 1 | Landed | U1 to U5 (pending deposits on the zone row, 3x3 hidden-release grid, phase-1 refunds go to the origin post or are discarded), any-enemy census, HOLD and CAPTURE predicates (`gmPlayerPresence` slots 6 `holds`, 7 `weaponSeen`; `gmUndercoverWeaponSeen`), `GuerrillaBase::HqZone()` (falls back to the establishing zone when the HQ sits just outside its 150 m area, instead of -1) with the legacy dispatch skipping the HQ town. `guerrilla_town_defenders` t4 to t6 and `guerrilla_counter_attack_watched_base` updated for S5. |
+| 2 | Landed | `OccupierForces` core: roster, K, pool, refill, bands, control, war-level split, `GuerrillaOccupierForces` block with old-save derivation, `gmOccupierForces` / `gmForcesTune` / `gmForcesForce`, `guerrilla_forces_pool_off` / `_on`. Inert with `occupierForces = 0` (every pool call passes through). Not yet wired: D2 `Draw`, the pending refund hook, the 5.5 routing rows (phase 3). Measured on Abel: garrisons full at about 2.57 h, not 2.38 h, and the band leaves SPENT (pool past 10 %) just before the last short garrisons fill, once, with no flapping; 5.2 and 5.6 below are corrected to say so. |
+| 3 | Pending | |
+| 4 | Pending | |
+| 5 | Pending | |
+| 6 | Pending | |
+| 7 | Pending | |
 
 **Reading guide.**
 - Section 16 is the internal knob reference.
@@ -443,10 +455,12 @@ still owns empty) is FULL again (pool at poolStart, every garrison at
   per zone. Whatever D2 does not take accumulates in the pool, up to
   poolStart.
 - **Abel.** (60 + 32 + 56) / 4 = 37 per hour. An exhausted Abel refills its
-  88 garrison bodies in about 2.4 h, then its pool in about 1.6 h, so 4 h in
-  all.
-- **Why the observed figure holds.** The per-zone D2 cap never binds at that
-  rate: Abel's 18 zones can take up to 108 an hour.
+  88 garrison bodies in about 2.6 h (measured in the unit simulation; the
+  naive 2.4 h ignores the tail), then its pool, so 4 h in all.
+- **The per-zone cap binds only in the tail.** Abel's 18 zones can take up to
+  108 an hour, so the cap is slack while many posts are short; in the last
+  minutes only a few posts are still filling at 1 body per 600 s, the pool
+  accrues meanwhile and reaches about 12 % just before they are full.
 - **Waves** can push the pool above poolStart.
 - **The quiet player's push-out** (6.4) starts once the pool is STRONG
   again, at about 3.5 h after full exhaustion, sooner from partial
@@ -524,7 +538,7 @@ The unit tests assert it.
 | STRONG | pool > 66 % | pool < 60 % | One token per 30 min; base operations (D16) and push-out on towns AND bases allowed |
 | STRETCHED | between | | One token per 45 min |
 | THIN | pool < 33 % | pool > 40 % | One token per 60 min; no operation below 20 %; alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`) |
-| SPENT | pool = 0 | pool > 10 % | No tokens; reverts left hollow; no alarm answers. D2 KEEPS RUNNING on the refill: garrisons first, as D15 says. The pool stays near 0 while garrisons are short, and the band leaves SPENT once, when they are full and the pool passes 10 %, so it does not flap. |
+| SPENT | pool = 0 | pool > 10 % | No tokens; reverts left hollow; no alarm answers. D2 KEEPS RUNNING on the refill: garrisons first, as D15 says. The pool stays near 0 while garrisons are short, and the band leaves SPENT once, when the pool passes 10 % (measured: moments before the last short posts are full, because the per-zone D2 cap binds in the tail), so it does not flap. A pool that genuinely drains to 0 again re-enters SPENT; that is a real drain, not flapping. |
 
 All shares are of poolStart.
 

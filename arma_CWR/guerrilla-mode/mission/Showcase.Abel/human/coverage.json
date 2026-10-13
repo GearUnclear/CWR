@@ -118,6 +118,14 @@
     "../engine/Poseidon/Game/Guerrilla/CounterAttackCommands.cpp": [
       "town_support"
     ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForces.cpp": [
+      "garrison",
+      "escalation",
+      "persistence"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp": [
+      "garrison"
+    ],
     "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
       "garrison"
     ],

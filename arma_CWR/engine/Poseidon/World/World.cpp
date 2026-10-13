@@ -63,6 +63,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
@@ -1741,6 +1742,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // registry; checks the win rule at CampaignEnd::TickInterval, then
         // runs the end clock and asks for END1 once.
         Guerrilla::CampaignEnd::Instance().Simulate(deltaT);
+        // Guerrilla occupier forces pool (OCCUPIER-FORCES.md phase 2) -
+        // inert unless occupierForces = 1; sizes the pool on the first
+        // active frame, then ticks at forcesDirectorInterval.
+        Guerrilla::OccupierForces::Instance().Simulate(deltaT);
         // Guerrilla occupier counter-attacks (issue #79) - idle until a town
         // flips; steps its records at CounterAttack::TickInterval.
         Guerrilla::CounterAttack::Instance().Simulate(deltaT);
