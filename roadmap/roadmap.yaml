@@ -1913,7 +1913,7 @@ items:
     priority: 1
     depends_on: [offscreen-contract]
     gh_issues: [77, 35, 72, 79, 86]
-    commits: ["84fbbce", "e37e79a"]
+    commits: ["84fbbce", "e37e79a", "71d7396", "8f9482a", "7a143ec"]
     summary: >
       Implements guerrilla-mode/OCCUPIER-FORCES.md (owner decisions D1 to
       D24) in seven phases on the occupier-forces branch: phase 1 the
@@ -1931,6 +1931,7 @@ items:
       armour and REINFORCE columns; phase 6 air; phase 7 defaults on and the
       OFFSCREEN-CONTRACT rewrite.
     log:
+      - "2026-10-13: phase 3 landed (8f9482a director + ForcePackages, 7a143ec movement + hulls + birth chain + pool routing); gate green on build/win-x64-clang-rwdi (569 unit cases, 31/31 tri on the Remaster lane, one retry). Abel opts in (occupierForces = 1), fixtures and reference slices pin it off. Problems hit: DoGetOut at speed killed 5 of 6 riders (brake first; set InCargo after moveInCargo); Malden's Southeast Compound road net is not joined to the island network, so forces from it stall against the compound (watched_route asserts re-source + departure); forcesOpsMax read by both services; a default-parallelism clang-cl build crashes under memory pressure (agents and the gate build with -j 5). Phase 4 in flight: waves/base recapture/standing (A) and HQ model/lose state (B)."
       - "2026-10-13: phases 1 and 2 landed on the branch (84fbbce, e37e79a) through two parallel Opus agents with their own build dirs and Remaster shadows; integration gate on build/win-x64-clang-rwdi green (531 unit cases, 24/24 tri on the Remaster lane). Problems hit: S5 made guerrilla_counter_attack_watched_base count a pending deposit; the design's 2.4 h garrison refill figure measured 2.6 h with the band leaving SPENT just before (doc corrected); a full parallel rebuild hit 'paging file too small' (agents build with -j 5). Phase 3 in flight as director + movement agents meeting through CounterAttackOrders.hpp."
 
   # ---------------------------------------------------------------- phase 3
