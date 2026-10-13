@@ -79,6 +79,7 @@ a file Bohemia ships is appended `#include` lines.** Concretely:
   `// Uslu dur! ...` comment. A rerun finds the line and appends nothing.
 - Added beside them (UD's own files): `bin/ud-mainmenu.hpp` (the UD menu),
   `bin/guerrilla-factions.hpp`, `bin/guerrilla-hq.hpp`,
+  `bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv` (UD-owned aircraft controls text),
   `fonts/UD_FONT_CREDITS.md`, any UD font Bohemia does not ship, `gmcore/`,
   the `Missions/Guerrilla.*` and reference templates, and
   `bin/STRINGTABLE_UD.utf8.csv` with its `bin/UD_OPTIONS_APL-SA_NOTICE.txt`.
@@ -201,3 +202,18 @@ The old Classic test bed used renamed Microsoft fonts. Fresh installs instead
 use Roboto, Caveat, Unuaranga Kuriero, Vollkorn and Oswald from the Remaster,
 matching the engine's mappings. Text appearance differs from that local
 workaround. Those Microsoft font bytes are not included in the repository.
+
+## Original Arma 3 aircraft controls
+
+Open **Options → Controls → Arma 3 controls** and confirm the preset to adopt the
+original launch-era Arma 3 Classic aircraft keys. Existing saved aircraft layouts
+remain in place until you apply the preset or reset an aircraft category. Controller
+bindings are preserved. Under **Keyboard & Mouse**, **Helicopter** and **Plane**
+can be edited or reset independently.
+
+Both use W/S for nose down/up, A/D for bank and Q/E for pedals or rudder. In a
+helicopter, Left Shift/Z raises/lowers the existing terrain-relative height target;
+X toggles autohover. In a plane, Left Shift/Z increases/decreases requested speed;
+G toggles supported retracting gear under manual control. K shows the aircraft
+compass. Use the action menu for flaps and automatic landing. Mouse movement
+continues to look around, and flight assistance remains unchanged.

@@ -1,1 +1,4 @@
-tags = ["exclusive", "headful", "controls"]
+# Original Arma 3 Classic preset on a setup-prepared full Remaster shadow.
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["exclusive", "headful", "controls", "remaster_ud"]

@@ -171,6 +171,12 @@ try {
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor -CheckOnly
     Assert ((Get-TreeState $steam) -eq $steamState) 'Remaster CheckOnly wrote files'
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    $aircraftStrings = Join-Path $steam 'BIN/STRINGTABLE_UD_AIRCRAFT.utf8.csv'
+    Assert (Test-Path -LiteralPath $aircraftStrings) 'UD aircraft controls shard missing'
+    $aircraftText = [IO.File]::ReadAllText($aircraftStrings)
+    Assert ($aircraftText.Contains('STR_UD_CTL_CAT_HELICOPTER,Helicopter')) 'Helicopter category text missing'
+    Assert ($aircraftText.Contains('STR_UD_CTL_CAT_PLANE,Plane')) 'Plane category text missing'
+    Assert ($aircraftText.Contains('original Arma 3 Classic')) 'Aircraft preset description missing'
     $appended = @('BIN\resource-extra.cpp', 'BIN\config-extra.cpp') | ForEach-Object { $_ -replace '\\', [IO.Path]::DirectorySeparatorChar }
     foreach ($relative in $steamBefore.Keys) {
         if ($relative -in $appended) { continue }

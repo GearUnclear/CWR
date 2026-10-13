@@ -35,7 +35,7 @@ TEST_CASE("ControlsCategory: category names match the doc", "[Input][ControlsCat
 {
     CHECK(std::string(GetControlsCategoryName(ControlsCategoryOnFoot)) == "On foot");
     CHECK(std::string(GetControlsCategoryName(ControlsCategoryVehicles)) == "Vehicles");
-    CHECK(std::string(GetControlsCategoryName(ControlsCategoryPilot)) == "Pilot");
+    CHECK(std::string(GetControlsCategoryName(ControlsCategoryHelicopter)) == "Helicopter");
     CHECK(std::string(GetControlsCategoryName(ControlsCategoryGunner)) == "Gunner");
     CHECK(std::string(GetControlsCategoryName(ControlsCategoryCommon)) == "Common");
 }
@@ -52,7 +52,7 @@ TEST_CASE("ControlsCategory: Fire shows in OnFoot/Vehicles/Pilot/Gunner, not Com
 {
     CHECK(IsActionInControlsCategory(UAFire, ControlsCategoryOnFoot));
     CHECK(IsActionInControlsCategory(UAFire, ControlsCategoryVehicles));
-    CHECK(IsActionInControlsCategory(UAFire, ControlsCategoryPilot));
+    CHECK(IsActionInControlsCategory(UAFire, ControlsCategoryHelicopter));
     CHECK(IsActionInControlsCategory(UAFire, ControlsCategoryGunner));
     CHECK_FALSE(IsActionInControlsCategory(UAFire, ControlsCategoryCommon));
 }
@@ -186,7 +186,7 @@ TEST_CASE("ControlsCategory: Aim* lives under OnFoot and Gunner", "[Input][Contr
     {
         CHECK(IsActionInControlsCategory(a, ControlsCategoryOnFoot));
         CHECK_FALSE(IsActionInControlsCategory(a, ControlsCategoryVehicles));
-        CHECK_FALSE(IsActionInControlsCategory(a, ControlsCategoryPilot));
+        CHECK_FALSE(IsActionInControlsCategory(a, ControlsCategoryHelicopter));
         CHECK(IsActionInControlsCategory(a, ControlsCategoryGunner));
         CHECK_FALSE(IsActionInControlsCategory(a, ControlsCategoryCommon));
     }
@@ -225,7 +225,7 @@ TEST_CASE("ControlsCategory: Walk (UASlow) shows under OnFoot only", "[Input][Co
     // player who rebound F off it has no way to restore it.
     CHECK(IsActionInControlsCategory(UASlow, ControlsCategoryOnFoot));
     CHECK_FALSE(IsActionInControlsCategory(UASlow, ControlsCategoryVehicles));
-    CHECK_FALSE(IsActionInControlsCategory(UASlow, ControlsCategoryPilot));
+    CHECK_FALSE(IsActionInControlsCategory(UASlow, ControlsCategoryHelicopter));
     CHECK_FALSE(IsActionInControlsCategory(UASlow, ControlsCategoryGunner));
     CHECK_FALSE(IsActionInControlsCategory(UASlow, ControlsCategoryCommon));
 }
@@ -324,7 +324,7 @@ TEST_CASE("ControlsCategory: ZoomTemp sits right after ZoomOut in the four gamep
           "[Input][ControlsCategory]")
 {
     for (ControlsCategory cat :
-         {ControlsCategoryOnFoot, ControlsCategoryVehicles, ControlsCategoryPilot, ControlsCategoryGunner})
+         {ControlsCategoryOnFoot, ControlsCategoryVehicles, ControlsCategoryHelicopter, ControlsCategoryGunner})
     {
         CAPTURE((int)cat);
         CHECK(IsActionInControlsCategory(UAZoomTemp, cat));
@@ -379,4 +379,20 @@ TEST_CASE("Defaults: Arma 3 right mouse layout (tap RMB optics, RMB zoom, T lock
     CHECK(std::string(descs[UAZoomTemp].name) == "ZoomTemp");
     CHECK(std::string(descs[UALockTarget].name) == "LockTarget");
     CHECK(std::string(descs[UAZoomOut].name) == "ZoomOut");
+}
+
+TEST_CASE("Aircraft categories isolate helicopter and plane contexts and shortcuts",
+          "[Input][ControlsCategory][aircraft]")
+{
+    const auto heli = ContextsForCategory(ControlsCategoryHelicopter);
+    const auto plane = ContextsForCategory(ControlsCategoryPlane);
+    REQUIRE(heli.count == 1);
+    REQUIRE(plane.count == 1);
+    CHECK(heli.data[0] == InputContext::HeliPilot);
+    CHECK(plane.data[0] == InputContext::PlanePilot);
+    CHECK(std::string(GetControlsCategoryName(ControlsCategoryPlane)) == "Plane");
+    CHECK(IsActionInControlsCategory(UAAircraftAutoHover, ControlsCategoryHelicopter));
+    CHECK_FALSE(IsActionInControlsCategory(UAAircraftAutoHover, ControlsCategoryPlane));
+    CHECK(IsActionInControlsCategory(UAAircraftGear, ControlsCategoryPlane));
+    CHECK_FALSE(IsActionInControlsCategory(UAAircraftGear, ControlsCategoryHelicopter));
 }

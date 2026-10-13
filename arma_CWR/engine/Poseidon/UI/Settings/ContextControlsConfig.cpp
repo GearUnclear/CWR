@@ -19,7 +19,7 @@ namespace
 {
 // v4 (2026-09): Arma 3 right mouse.  Optics = tap RMB + V (Numpad 0 dropped),
 // LockTarget = T (was RMB, "Lock or Zoom"), Watch = O (was T), new ZoomTemp = RMB.
-constexpr int kContextControlsVersion = 5;
+constexpr int kContextControlsVersion = 6;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -190,7 +190,7 @@ void ApplyDriverGamepadDefaults(InputProfile& profile)
     BindButton(profile, UAFire, kGamepadButtonLB);
 }
 
-void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
+void ApplyContextDefaults(InputContext ctx, InputProfile& profile, bool aircraftDefaults = true)
 {
     ApplyCommonGamepadDefaults(profile);
 
@@ -204,6 +204,11 @@ void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
         case InputContext::CarDriver:
             ApplyDriverGamepadDefaults(profile);
             ApplyDirectFreelookDefaults(profile);
+            break;
+        case InputContext::HeliPilot:
+        case InputContext::PlanePilot:
+            if (aircraftDefaults)
+                ContextControlsConfig::ApplyAircraftKeyboardDefaults(ctx, profile);
             break;
         case InputContext::Map:
         case InputContext::Menu:
@@ -294,6 +299,82 @@ void RewriteV3DefaultsToV4(InputProfile& profile, const UserActionDesc* descs)
 }
 } // namespace
 
+namespace
+{
+// -1 means the aircraft has no keyboard default for this action.
+int AircraftKey(InputContext context, UserAction action)
+{
+    const bool helicopter = context == InputContext::HeliPilot;
+    if (!helicopter && context != InputContext::PlanePilot)
+        return -2; // Use the global default in other contexts.
+    switch (action)
+    {
+        case UAMoveForward:
+            return helicopter ? SDL_SCANCODE_W : SDL_SCANCODE_LSHIFT;
+        case UAMoveBack:
+            return helicopter ? SDL_SCANCODE_S : SDL_SCANCODE_Z;
+        case UATurnLeft:
+            return SDL_SCANCODE_A;
+        case UATurnRight:
+            return SDL_SCANCODE_D;
+        case UAMoveLeft:
+            return SDL_SCANCODE_Q;
+        case UAMoveRight:
+            return SDL_SCANCODE_E;
+        case UAMoveUp:
+            return helicopter ? SDL_SCANCODE_LSHIFT : SDL_SCANCODE_S;
+        case UAMoveDown:
+            return helicopter ? SDL_SCANCODE_Z : SDL_SCANCODE_W;
+        case UAAircraftAutoHover:
+            return helicopter ? SDL_SCANCODE_X : -1;
+        case UAAircraftGear:
+            return helicopter ? -1 : SDL_SCANCODE_G;
+        case UACompass:
+            return SDL_SCANCODE_K;
+        case UATurbo:
+        case UAMoveFastForward:
+        case UAMoveSlowForward:
+            return -1;
+        default:
+            return -2;
+    }
+}
+} // namespace
+
+void ContextControlsConfig::ResetKeyboardAction(InputContext context, InputProfile& profile, UserAction action)
+{
+    std::vector<InputBinding> bindings;
+    const int key = AircraftKey(context, action);
+    if (key >= 0)
+        bindings.emplace_back(InputCode::Key(static_cast<SDL_Scancode>(key)));
+    else if (key == -2)
+    {
+        const KeyList& defaults = InputSubsystem::GetUserActionDesc()[action].keys;
+        for (int i = 0; i < defaults.Size(); ++i)
+        {
+            InputCode code = InputCode::FromLegacy(defaults[i]);
+            if (!code.valid() || !IsKbmCode(code))
+                continue;
+            const int modifier = DefaultModifierForDefaultKey(action, defaults[i]);
+            bindings.emplace_back(code, modifier >= 0 ? InputCode::FromLegacy(modifier) : InputCode{});
+        }
+    }
+    // Keep full device entries, including repeated codes, modifiers and scales.
+    for (const InputBinding& binding : profile.GetBindingEntries(action))
+        if (binding.code.valid() && !IsKbmCode(binding.code))
+            bindings.push_back(binding);
+    profile.SetBindingEntries(action, std::move(bindings));
+}
+
+void ContextControlsConfig::ApplyAircraftKeyboardDefaults(InputContext context, InputProfile& profile)
+{
+    if (context != InputContext::HeliPilot && context != InputContext::PlanePilot)
+        return;
+    for (int a = 0; a < UAN; ++a)
+        if (AircraftKey(context, static_cast<UserAction>(a)) != -2)
+            ResetKeyboardAction(context, profile, static_cast<UserAction>(a));
+}
+
 void ContextControlsConfig::LoadDefaults()
 {
     for (int i = 0; i < ContextCount; ++i)
@@ -326,6 +407,8 @@ void ContextControlsConfig::ApplyArma3Preset()
         }
     }
     ApplyInfantryLeanDefaults(profiles[static_cast<int>(InputContext::Infantry)]);
+    ApplyAircraftKeyboardDefaults(InputContext::HeliPilot, profiles[static_cast<int>(InputContext::HeliPilot)]);
+    ApplyAircraftKeyboardDefaults(InputContext::PlanePilot, profiles[static_cast<int>(InputContext::PlanePilot)]);
 }
 
 void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
@@ -387,16 +470,25 @@ bool ContextControlsConfig::Load(const std::string& path)
         InputContext ctx = static_cast<InputContext>(c);
         InputProfile& profile = profiles[c];
         profile.ClearAll();
-        if (seedDefaults)
+        // v5 -> v6 only adds unbound aircraft commands. Missing v5 rows were
+        // deliberately cleared, so keep the entire saved layout verbatim.
+        if (seedDefaults && version != 5)
         {
             profile.LoadDefaults();
-            ApplyContextDefaults(ctx, profile);
+            ApplyContextDefaults(ctx, profile, false);
         }
         for (int a = 0; a < UAN; ++a)
         {
             const ParamEntry* entry = cfg.FindEntry(BindingName(ctx, descs[a]));
             if (!entry)
+            {
+                // v5 omitted cleared rows. Never replace a saved aircraft layout
+                // (including those clears) with new defaults during migration.
+                if (AircraftKey(ctx, static_cast<UserAction>(a)) != -2 || a == UAAircraftAutoHover ||
+                    a == UAAircraftGear)
+                    profile.ClearBindings(static_cast<UserAction>(a));
                 continue;
+            }
             const ParamEntry* modEntry = cfg.FindEntry(ModifierName(ctx, descs[a]));
             const ParamEntry* scaleEntry = cfg.FindEntry(ScaleName(ctx, descs[a]));
             const int n = entry->GetSize();
@@ -443,9 +535,6 @@ bool ContextControlsConfig::Save(const std::string& path) const
         for (int a = 0; a < UAN; ++a)
         {
             const auto& entries = profile.GetBindingEntries(static_cast<UserAction>(a));
-            if (entries.empty())
-                continue;
-
             ParamEntry* codes = cfg.AddArray(BindingName(ctx, descs[a]));
             codes->Clear();
             ParamEntry* mods = cfg.AddArray(ModifierName(ctx, descs[a]));

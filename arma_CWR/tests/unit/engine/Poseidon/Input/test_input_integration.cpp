@@ -1,4 +1,5 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 #include <Poseidon/Input/InputBinding.hpp>
 #include <Poseidon/Input/InputContext.hpp>
 #include <Poseidon/Input/InputProfile.hpp>
@@ -7,6 +8,7 @@
 #include <Poseidon/Input/UserAction.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 using namespace Poseidon;
 namespace Poseidon
@@ -863,4 +865,166 @@ TEST_CASE("InputSubsystem gamepad steering toggle strips stick bindings from dri
 
     GInput.keyboard.keys[SDL_SCANCODE_D] = savedD;
     GInput.gamepad.stickAxis[0] = 0.0f;
+}
+
+TEST_CASE("Aircraft keyboard requests pitch independently from lift or requested speed",
+          "[input][integration][aircraft]")
+{
+    auto& sub = InputSubsystem::Instance();
+    const auto savedKeyboard = GInput.keyboard;
+    const auto savedContext = sub.GetContext();
+    const int savedFocus = GInput.gameFocusLost;
+    ProfileSnapshot heliSnapshot(sub, InputContext::HeliPilot);
+    ProfileSnapshot planeSnapshot(sub, InputContext::PlanePilot);
+    ContextControlsConfig defaults;
+    defaults.LoadDefaults();
+    sub.GetProfile(InputContext::HeliPilot) = defaults.profiles[(int)InputContext::HeliPilot];
+    sub.GetProfile(InputContext::PlanePilot) = defaults.profiles[(int)InputContext::PlanePilot];
+    GInput.gameFocusLost = 0;
+    GInput.keyboard.ForgetKeys();
+    for (auto key : {SDL_SCANCODE_W, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_E})
+        GInput.keyboard.BufferKeyEvent(key, true, 100);
+    GInput.keyboard.Update(132, 32, true);
+    sub.SetContext(InputContext::HeliPilot);
+    CHECK(sub.GetMoveForward(InputContext::HeliPilot) == 1);
+    CHECK(sub.GetAction(UAMoveUp) == 1);
+    CHECK(sub.GetAction(UAMoveRight) == 1);
+    CHECK(sub.GetMoveFastForward(InputContext::HeliPilot) == 0);
+    CHECK(sub.GetAction(UAMoveSlowForward) == 0);
+    sub.SetContext(InputContext::PlanePilot);
+    CHECK(sub.GetAction(UAMoveDown) == 1);
+    CHECK(sub.GetMoveForward(InputContext::PlanePilot) == 1);
+    CHECK(sub.GetMoveFastForward(InputContext::PlanePilot) == 0);
+    CHECK(sub.GetAction(UAMoveRight) == 1);
+    for (auto key : {SDL_SCANCODE_W, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_E})
+        GInput.keyboard.BufferKeyEvent(key, false, 164);
+    for (auto key : {SDL_SCANCODE_S, SDL_SCANCODE_Z})
+        GInput.keyboard.BufferKeyEvent(key, true, 164);
+    GInput.keyboard.Update(196, 32, true);
+    CHECK(sub.GetAction(UAMoveUp) == 1);
+    CHECK(sub.GetAction(UAMoveBack) == 1);
+    CHECK(sub.GetAction(UAMoveForward) == 0);
+    CHECK(sub.GetAction(UAMoveRight) == 0);
+    sub.SetContext(InputContext::HeliPilot);
+    CHECK(sub.GetAction(UAMoveBack) == 1);
+    CHECK(sub.GetAction(UAMoveDown) == 1);
+    GInput.keyboard = savedKeyboard;
+    GInput.gameFocusLost = savedFocus;
+    sub.SetContext(savedContext);
+}
+
+TEST_CASE("Aircraft shortcut edges require release after focus or control transfer", "[input][integration][aircraft]")
+{
+    const bool helicopter = GENERATE(true, false);
+    const UserAction action = helicopter ? UAAircraftAutoHover : UAAircraftGear;
+    const InputContext context = helicopter ? InputContext::HeliPilot : InputContext::PlanePilot;
+    const auto scancode = helicopter ? SDL_SCANCODE_X : SDL_SCANCODE_G;
+    auto& sub = InputSubsystem::Instance();
+    const auto savedKeyboard = GInput.keyboard;
+    const auto savedContext = sub.GetContext();
+    const int savedFocus = GInput.gameFocusLost;
+    const bool savedWindowFocus = sub.HasWindowFocus();
+    ProfileSnapshot aircraftSnapshot(sub, context);
+    ContextControlsConfig defaults;
+    defaults.LoadDefaults();
+    sub.GetProfile(context) = defaults.profiles[(int)context];
+    GInput.gameFocusLost = 0;
+    sub.SetWindowFocused(true);
+    sub.SetContext(context);
+    const bool savedDone = GInput.actionDone[action];
+    int vehicleA = 0, vehicleB = 0;
+    GInput.keyboard.ForgetKeys();
+    DWORD timestamp = 100;
+    auto key = [&](bool held, bool /*edge*/)
+    {
+        GInput.keyboard.BufferKeyEvent(scancode, held, timestamp);
+        timestamp += 16;
+        GInput.keyboard.Update(timestamp, 16, true);
+        GInput.actionDone[action] = false;
+    };
+    key(false, false);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(true, true);
+    CHECK(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(true, true); // SDL repeats or another frame cannot toggle again.
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(false, false);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(true, true);
+    CHECK(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    sub.SetWindowFocused(false);
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    sub.SetWindowFocused(true);
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(false, false);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleA));
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleB));
+    key(false, false);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, false, &vehicleB));
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, false, &vehicleB));
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleB));
+    key(false, false);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleB));
+    key(true, true);
+    CHECK(sub.GetAircraftShortcutToDo(action, true, &vehicleB));
+    sub.SetContext(InputContext::Menu);
+    key(true, true);
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(action, true, &vehicleB));
+    GInput.keyboard = savedKeyboard;
+    GInput.actionDone[action] = savedDone;
+    GInput.gameFocusLost = savedFocus;
+    sub.SetWindowFocused(savedWindowFocus);
+    sub.SetContext(savedContext);
+}
+
+TEST_CASE("Aircraft tap shortcut uses the release edge and rejects a focus-spanning tap",
+          "[input][integration][aircraft]")
+{
+    auto& sub = InputSubsystem::Instance();
+    ProfileSnapshot snapshot(sub, InputContext::HeliPilot);
+    const auto savedKeyboard = GInput.keyboard;
+    const auto savedContext = sub.GetContext();
+    const int savedFocus = GInput.gameFocusLost;
+    const bool savedWindowFocus = sub.HasWindowFocus();
+    const bool savedDone = GInput.actionDone[UAAircraftAutoHover];
+    sub.GetProfile(InputContext::HeliPilot)
+        .SetBindingEntries(UAAircraftAutoHover, {InputCode::FromLegacy(InputBindingTapCode(SDL_SCANCODE_X))});
+    GInput.keyboard.ForgetKeys();
+    GInput.gameFocusLost = 0;
+    sub.SetWindowFocused(true);
+    sub.SetContext(InputContext::HeliPilot);
+    int vehicle = 0;
+    auto poll = [&]()
+    {
+        GInput.actionDone[UAAircraftAutoHover] = false;
+        return sub.GetAircraftShortcutToDo(UAAircraftAutoHover, true, &vehicle);
+    };
+    CHECK_FALSE(poll());
+    GInput.keyboard.BufferKeyEvent(SDL_SCANCODE_X, true, 100);
+    GInput.keyboard.Update(116, 16, true);
+    CHECK_FALSE(poll());
+    GInput.keyboard.BufferKeyEvent(SDL_SCANCODE_X, false, 120);
+    GInput.keyboard.Update(132, 16, true);
+    CHECK(poll());
+    CHECK_FALSE(sub.GetAircraftShortcutToDo(UAAircraftAutoHover, true, &vehicle));
+    GInput.keyboard.BufferKeyEvent(SDL_SCANCODE_X, true, 150);
+    GInput.keyboard.Update(166, 16, true);
+    CHECK_FALSE(poll());
+    sub.ChangeGameFocus(1);
+    CHECK_FALSE(poll());
+    sub.ChangeGameFocus(-1);
+    CHECK_FALSE(poll());
+    GInput.keyboard.BufferKeyEvent(SDL_SCANCODE_X, false, 170);
+    GInput.keyboard.Update(182, 16, true);
+    CHECK_FALSE(poll());
+    GInput.keyboard = savedKeyboard;
+    GInput.actionDone[UAAircraftAutoHover] = savedDone;
+    GInput.gameFocusLost = savedFocus;
+    sub.SetWindowFocused(savedWindowFocus);
+    sub.SetContext(savedContext);
 }

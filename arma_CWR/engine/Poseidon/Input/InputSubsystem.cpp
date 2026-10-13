@@ -38,43 +38,6 @@ std::string ContextControlsCfgPath()
 {
     return GamePaths::Instance().UserDir() + "contextControls.cfg";
 }
-
-struct ContextList
-{
-    const InputContext* data = nullptr;
-    int count = 0;
-};
-
-ContextList ContextsForCategory(ControlsCategory cat)
-{
-    static constexpr InputContext onFoot[] = {InputContext::Infantry};
-    static constexpr InputContext vehicles[] = {InputContext::CarDriver, InputContext::TankDriver,
-                                                InputContext::ShipDriver};
-    static constexpr InputContext pilot[] = {InputContext::HeliPilot, InputContext::PlanePilot};
-    static constexpr InputContext gunner[] = {InputContext::TankGunner, InputContext::Gunner};
-    static constexpr InputContext common[] = {
-        InputContext::Menu,       InputContext::Infantry,  InputContext::CarDriver,  InputContext::TankDriver,
-        InputContext::TankGunner, InputContext::HeliPilot, InputContext::PlanePilot, InputContext::ShipDriver,
-        InputContext::Gunner,     InputContext::Spectator, InputContext::Map,        InputContext::Chat,
-        InputContext::Editor,
-    };
-
-    switch (cat)
-    {
-        case ControlsCategoryOnFoot:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-        case ControlsCategoryVehicles:
-            return {vehicles, static_cast<int>(std::size(vehicles))};
-        case ControlsCategoryPilot:
-            return {pilot, static_cast<int>(std::size(pilot))};
-        case ControlsCategoryGunner:
-            return {gunner, static_cast<int>(std::size(gunner))};
-        case ControlsCategoryCommon:
-            return {common, static_cast<int>(std::size(common))};
-        default:
-            return {onFoot, static_cast<int>(std::size(onFoot))};
-    }
-}
 } // namespace
 
 static float QueryKey(const Input& in, int dik, bool checkFocus)
@@ -719,6 +682,49 @@ bool InputSubsystem::GetActionToDo(UserAction action, bool reset, bool checkFocu
     return QueryProfileActionToDo(GInput, profiles_[idx], action, actionDoneByContext_[idx][action], reset, checkFocus);
 }
 
+bool InputSubsystem::GetAircraftShortcutToDo(UserAction action, bool eligible, const void* controlledVehicle,
+                                             const void* controlledUnit)
+{
+    if (action != UAAircraftAutoHover && action != UAAircraftGear)
+        return false;
+    const InputContext expected = action == UAAircraftAutoHover ? InputContext::HeliPilot : InputContext::PlanePilot;
+    eligible = eligible && context_ == expected && HasGameFocus();
+    auto& state = aircraftShortcuts_[action == UAAircraftAutoHover ? 0 : 1];
+    bool held = false;
+    const auto& profile = GetProfile(context_);
+    for (const auto& binding : profile.GetBindingEntries(action))
+    {
+        if (!ProfileModifierHeld(GInput, binding.modifier, false))
+            continue;
+        const InputCode code = InputCode::FromLegacy(InputBindingBaseCode(binding.code.toLegacy()));
+        if (code.device() == InputDevice::Keyboard)
+            held = held || (code.code() < SDL_SCANCODE_COUNT && GInput.keyboard.keyPressed[code.code()] != 0);
+        else
+            held = held || QueryProfileCode(GInput, code, false) > 0;
+    }
+    const bool edge = GetActionToDo(action, true, false);
+    const bool transferred = state.epoch != gameplayInputEpoch_ || state.vehicle != controlledVehicle ||
+                             state.unit != controlledUnit || state.eligible != eligible;
+    state.epoch = gameplayInputEpoch_;
+    state.vehicle = controlledVehicle;
+    state.unit = controlledUnit;
+    state.eligible = eligible;
+    if (!eligible || transferred)
+        state.armed = !held;
+    if (!held)
+    {
+        const bool wasArmed = state.armed;
+        state.armed = true;
+        // A tap edge occurs on release. A key held through a transfer still
+        // needs a neutral release before it can issue another command.
+        return eligible && !transferred && edge && wasArmed;
+    }
+    if (!eligible || !state.armed || !edge)
+        return false;
+    state.armed = false;
+    return true;
+}
+
 float InputSubsystem::GetMoveForward(InputContext ctx) const
 {
     // Turbo held promotes MoveForward into fast-forward, so bare forward is zero.
@@ -1339,41 +1345,20 @@ UserAction InputSubsystem::FindBindingConflict(int packedCode, UserAction exclud
 
 void InputSubsystem::ResetCategoryDefaults(ControlsCategory cat)
 {
-    UserActionDesc* descs = GetUserActionDesc();
-    const UserAction* list = GetControlsCategoryActions(cat);
+    const UserAction* actions = GetControlsCategoryActions(cat);
     ContextList contexts = ContextsForCategory(cat);
-    for (int i = 0; list[i] != UAN; i++)
-    {
-        int idx = (int)list[i];
-        if (idx < 0 || idx >= UAN)
-            continue;
-
-        std::vector<InputBinding> defaultBindings;
-        const KeyList& defaultKeys = descs[idx].keys;
-        for (int j = 0; j < defaultKeys.Size(); j++)
-        {
-            if (!GamepadConfig::IsGamepadCode(defaultKeys[j]))
-            {
-                int mod = DefaultModifierForDefaultKey(static_cast<UserAction>(idx), defaultKeys[j]);
-                InputCode modCode = mod >= 0 ? InputCode::FromLegacy(mod) : InputCode{};
-                defaultBindings.push_back(InputBinding(InputCode::FromLegacy(defaultKeys[j]), modCode));
-            }
-        }
-
-        for (int c = 0; c < contexts.count; ++c)
-        {
-            InputProfile& profile = GetProfile(contexts.data[c]);
-            profile.ClearBindings(static_cast<UserAction>(idx));
-            for (const InputBinding& binding : defaultBindings)
-                profile.Bind(static_cast<UserAction>(idx), binding);
-        }
-    }
+    for (int c = 0; c < contexts.count; ++c)
+        for (int a = 0; actions[a] != UAN; ++a)
+            ContextControlsConfig::ResetKeyboardAction(contexts.data[c], GetProfile(contexts.data[c]), actions[a]);
     if (cat == ControlsCategoryOnFoot)
         ContextControlsConfig::ApplyInfantryLeanDefaults(GetProfile(InputContext::Infantry));
+    if (cat == ControlsCategoryHelicopter || cat == ControlsCategoryPlane)
+        ContextControlsConfig::ApplyAircraftKeyboardDefaults(contexts.data[0], GetProfile(contexts.data[0]));
 }
 
 UserActionDesc* InputSubsystem::GetUserActionDesc()
 {
+    static int aircraftLabel = -1; // Contextual UD-owned labels are resolved by the controls UI.
     static UserActionDesc userActionDesc[] = {
         UserActionDesc("MoveForward", IDS_USRACT_MOVE_FORWARD, SDL_SCANCODE_W, SDL_SCANCODE_UP, -1),
         UserActionDesc("MoveBack", IDS_USRACT_MOVE_BACK, SDL_SCANCODE_S, SDL_SCANCODE_DOWN, -1),
@@ -1451,6 +1436,8 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("CheatEntry", IDS_USRACT_CHEAT_ENTRY, SDL_SCANCODE_KP_MINUS, -1),
         UserActionDesc("LeanLeft", IDS_USRACT_LEAN_LEFT, SDL_SCANCODE_Q, -1),
         UserActionDesc("LeanRight", IDS_USRACT_LEAN_RIGHT, SDL_SCANCODE_E, -1),
+        UserActionDesc("AircraftAutoHover", aircraftLabel, -1),
+        UserActionDesc("AircraftGear", aircraftLabel, -1),
 #if _ENABLE_CHEATS
         UserActionDesc("Cheat1", IDS_USRACT_CHEAT_1, SDL_SCANCODE_RGUI, -1),
         UserActionDesc("Cheat2", IDS_USRACT_CHEAT_2, SDL_SCANCODE_RALT, -1),

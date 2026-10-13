@@ -12,10 +12,51 @@
 namespace Poseidon
 {
 
-const char* ControlActionLabel(UserAction action)
+const char* ControlActionLabel(UserAction action, ControlsCategory category)
 {
     if (action < 0 || action >= UAN)
         return "";
+    const bool helicopter = category == ControlsCategoryHelicopter;
+    const bool aircraft = helicopter || category == ControlsCategoryPlane;
+    const char* key = nullptr;
+    if (aircraft)
+    {
+        switch (action)
+        {
+            case UAMoveForward:
+                key = helicopter ? "STR_UD_CTL_NOSE_DOWN" : "STR_UD_CTL_SPEED_UP";
+                break;
+            case UAMoveBack:
+                key = helicopter ? "STR_UD_CTL_NOSE_UP" : "STR_UD_CTL_SPEED_DOWN";
+                break;
+            case UAMoveUp:
+                key = helicopter ? "STR_UD_CTL_LIFT_UP" : "STR_UD_CTL_NOSE_UP";
+                break;
+            case UAMoveDown:
+                key = helicopter ? "STR_UD_CTL_LIFT_DOWN" : "STR_UD_CTL_NOSE_DOWN";
+                break;
+            case UATurnLeft:
+                key = "STR_UD_CTL_BANK_LEFT";
+                break;
+            case UATurnRight:
+                key = "STR_UD_CTL_BANK_RIGHT";
+                break;
+            case UAMoveLeft:
+                key = helicopter ? "STR_UD_CTL_PEDAL_LEFT" : "STR_UD_CTL_RUDDER_LEFT";
+                break;
+            case UAMoveRight:
+                key = helicopter ? "STR_UD_CTL_PEDAL_RIGHT" : "STR_UD_CTL_RUDDER_RIGHT";
+                break;
+            default:
+                break;
+        }
+    }
+    if (action == UAAircraftAutoHover)
+        key = "STR_UD_CTL_AUTOHOVER";
+    if (action == UAAircraftGear)
+        key = "STR_UD_CTL_GEAR";
+    if (key)
+        return LocalizeString(key);
     UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
     // Never hand a negative id to LocalizeString: it LOG_ERRORs per call and
     // renders "!!! UNREGISTERED STRING" in cheat builds.
@@ -39,6 +80,19 @@ const char* ControlActionLabel(UserAction action)
             break;
     }
     return descs[action].name ? descs[action].name : "";
+}
+
+const char* AircraftActionDescription(UserAction action, ControlsCategory category)
+{
+    if (category == ControlsCategoryHelicopter && (action == UAMoveUp || action == UAMoveDown))
+        return LocalizeString("STR_UD_CTL_LIFT_DESC");
+    if (category == ControlsCategoryPlane && (action == UAMoveForward || action == UAMoveBack))
+        return LocalizeString("STR_UD_CTL_SPEED_DESC");
+    if (action == UAAircraftAutoHover)
+        return LocalizeString("STR_UD_CTL_AUTOHOVER_DESC");
+    if (action == UAAircraftGear)
+        return LocalizeString("STR_UD_CTL_GEAR_DESC");
+    return nullptr;
 }
 
 void OptionsPage::SetCtrlText(Display& display, int idc, const char* text)

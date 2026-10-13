@@ -37,6 +37,9 @@ class InputSubsystem
     float GetAction(UserAction action, bool checkFocus = true) const;
     float GetAction(InputContext ctx, UserAction action, bool checkFocus = true) const;
     bool GetActionToDo(UserAction action, bool reset = true, bool checkFocus = true);
+    // Aircraft command edges require release after focus/control transfer.
+    bool GetAircraftShortcutToDo(UserAction action, bool eligible, const void* controlledVehicle,
+                                 const void* controlledUnit = nullptr);
 
     // Forward / fast-forward for a context with the Turbo modifier folded in (Turbo
     // promotes MoveForward to fast). Vehicle pilots read these, not the raw actions.
@@ -277,6 +280,15 @@ class InputSubsystem
     InputContext context_ = InputContext::Menu;
     unsigned gameplayInputEpoch_ = 0;
     bool windowFocused_ = true; // headless backends have no native focus events
+    struct AircraftShortcutState
+    {
+        unsigned epoch = ~0u;
+        const void* vehicle = nullptr;
+        const void* unit = nullptr;
+        bool eligible = false;
+        bool armed = false;
+    };
+    std::array<AircraftShortcutState, 2> aircraftShortcuts_{};
 
     // Computed movement state
     float moveForward_ = 0, moveFastForward_ = 0, moveSlowForward_ = 0, moveBack_ = 0;

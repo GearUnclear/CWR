@@ -2055,7 +2055,7 @@ items:
   - id: arma3-aircraft-keyboard-controls
     title: "Arma 3 aircraft keyboard controls with permanent mouse freelook"
     phase: phase-2
-    status: planned
+    status: in-progress
     priority: 2
     depends_on: [build-toolchain]
     gh_issues: [82]
@@ -2071,3 +2071,4 @@ items:
       implementation how-to, player instructions and Remaster acceptance matrix.
     log:
       - "2026-10-12: filed #82 after official Arma 3 binding research and independent source review. User confirmed aircraft mouse freelook is desired; controls only, no flight-model changes. Planning commit covers hidden Shift Turbo and Q/E collisions, shared Pilot UI/reset behavior, safe saved/cleared-profile handling, Remaster localization and existing-command shortcuts. Flaps stay on the action menu and an independent speedbrake policy is out of scope. Implementation and runtime acceptance remain pending; no game launched."
+      - "2026-10-12: implementing #82 against the original Arma 3 Classic preset per user correction (not Apex). Shared aircraft defaults and categories, saved-profile preservation, command shortcuts through existing menu operations, and UD-owned Remaster text added. PoseidonGame/PoseidonTests build and 356 focused cases (12729 assertions) pass. Available-data engine suite passes 2967 cases, 2300066 assertions, 15 skips (external-data and GameData excluded; loopback sockets enabled). Runtime manifest hashes pass. No full-Remaster flight/UI or PowerShell installer execution claimed."

@@ -1,0 +1,22 @@
+LANGUAGE,English
+STR_UD_CTL_CAT_HELICOPTER,Helicopter
+STR_UD_CTL_CAT_PLANE,Plane
+STR_UD_CTL_NOSE_DOWN,Nose down
+STR_UD_CTL_NOSE_UP,Nose up
+STR_UD_CTL_SPEED_UP,Increase speed
+STR_UD_CTL_SPEED_DOWN,Decrease speed
+STR_UD_CTL_LIFT_UP,Raise lift
+STR_UD_CTL_LIFT_DOWN,Lower lift
+STR_UD_CTL_BANK_LEFT,Bank left
+STR_UD_CTL_BANK_RIGHT,Bank right
+STR_UD_CTL_PEDAL_LEFT,Left pedal
+STR_UD_CTL_PEDAL_RIGHT,Right pedal
+STR_UD_CTL_RUDDER_LEFT,Rudder left
+STR_UD_CTL_RUDDER_RIGHT,Rudder right
+STR_UD_CTL_AUTOHOVER,Toggle autohover
+STR_UD_CTL_GEAR,Toggle landing gear
+STR_UD_CTL_LIFT_DESC,Adjust the existing height target above terrain. Flight assistance stays enabled.
+STR_UD_CTL_SPEED_DESC,Adjust the existing requested speed. Automatic thrust and braking stay enabled.
+STR_UD_CTL_AUTOHOVER_DESC,Toggle existing autohover while piloting a helicopter.
+STR_UD_CTL_GEAR_DESC,Toggle supported retracting plane gear while under manual control. Damaged gear cannot operate.
+STR_UD_CTL_ARMA3_CLASSIC_BODY,"Apply original Arma 3 Classic controls? Replace aircraft movement and X autohover/G gear/K compass, RMB tap sights/hold zoom, T lock, O watch and Q/E infantry lean. Keep other keys, controllers, mouse freelook and flight assistance."

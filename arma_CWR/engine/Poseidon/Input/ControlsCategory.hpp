@@ -2,8 +2,8 @@
 
 // User-facing categorization of UserAction values for the Controls UI.
 //
-// 5 categories are shown to the user under Controls > Keyboard & Mouse:
-//   On foot · Vehicles · Pilot · Gunner · Common
+// 6 categories are shown to the user under Controls > Keyboard & Mouse:
+//   On foot · Vehicles · Helicopter · Plane · Gunner · Common
 //
 // Each UserAction can appear in multiple categories — the table is a
 // display projection over the flat v1 binding storage, not a per-context
@@ -15,19 +15,28 @@
 // of build).  Their entries simply don't appear in any category list.
 
 #include <Poseidon/Input/UserAction.hpp>
+#include <Poseidon/Input/InputContext.hpp>
 
 namespace Poseidon
 {
 
 enum ControlsCategory : int
 {
-    ControlsCategoryOnFoot   = 0,
+    ControlsCategoryOnFoot = 0,
     ControlsCategoryVehicles = 1,
-    ControlsCategoryPilot    = 2,
-    ControlsCategoryGunner   = 3,
-    ControlsCategoryCommon   = 4,
-    ControlsCategoryCount    = 5,
+    ControlsCategoryHelicopter = 2,
+    ControlsCategoryPlane = 3,
+    ControlsCategoryGunner = 4,
+    ControlsCategoryCommon = 5,
+    ControlsCategoryCount = 6,
 };
+
+struct ContextList
+{
+    const InputContext* data = nullptr;
+    int count = 0;
+};
+ContextList ContextsForCategory(ControlsCategory category);
 
 // Returns a pointer to a static array of UserAction values for the
 // given category, terminated by UAN.  Callers iterate until they hit

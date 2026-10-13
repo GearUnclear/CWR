@@ -60,7 +60,7 @@ bool ControlsPage::OnNav(OptionsShell& shell, int idc)
             };
             shell.PushPage(std::make_unique<ConfirmPage>(
                 std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_TITLE")),
-                std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_BODY")), std::move(onYes),
+                std::string((const char*)LocalizeString("STR_UD_CTL_ARMA3_CLASSIC_BODY")), std::move(onYes),
                 std::string((const char*)LocalizeString("STR_DISP_OPT_CTL_ARMA3_APPLY")),
                 std::string((const char*)LocalizeString("STR_DISP_OPT_CAP_CANCEL"))));
             return true;

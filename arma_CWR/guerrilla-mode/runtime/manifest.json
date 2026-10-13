@@ -107,6 +107,12 @@
       "source": "thirdparty/guerrilla-fonts/README.md",
       "sha256": "339c12ea02e3ba2254b93daf17ef01d5fdb9eface9699b4b704ca22715f1919d",
       "remaster": "install"
+    },
+    {
+      "destination": "bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv",
+      "source": "guerrilla-mode/runtime/common/bin/STRINGTABLE_UD_AIRCRAFT.utf8.csv",
+      "sha256": "3d3371149d770da7fa351356f7e74c4b9606189afdd6ca363362971003bd09e1",
+      "remaster": "install"
     }
   ]
 }
