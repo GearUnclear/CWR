@@ -2096,7 +2096,7 @@ items:
     status: planned
     priority: 2
     depends_on: [setup-remaster-mode]
-    gh_issues: [92]
+    gh_issues: [92, 93]
     summary: >
       The local .trident.env still points OFPR_DATA_DIR at the legacy Classic
       install and .trident.env.example still recommends packages/Demo, so the
@@ -2107,6 +2107,7 @@ items:
       Steam folder itself) move to the shadow.
     log:
       - "2026-10-13: filed #92 from the agent-guide audit. Overlaps #79 P3/P4, which cover the same default for the playtest only."
+      - "2026-10-13: filed #93 for the packages/Game half: copy the retail Remaster out of the Steam folder and point the junction at the copy, so the 13 full_game tests stop reading Steam."
 
   - id: trident-ctest-data-dir
     title: "TridentCTest.cmake expects packages/Remaster, which no setup creates (issue #91)"
