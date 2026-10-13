@@ -29,8 +29,7 @@ class CfgGuerrillaZones
     // mission, which under --autotest quits the game mid-test.
     campaignEnd = 0;
     // Town captures here assert the pre-#79 town arc: no occupier
-    // counter-attack answering a flip, and no momentum on support gains
-    // (the counter-attack pacing layer, OFFSCREEN-CONTRACT.md decision C).
+    // counter-attack answering a flip (OFFSCREEN-CONTRACT.md decision C).
     counterAttack = 0;
     // Engine tuning left at stock defaults (tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;

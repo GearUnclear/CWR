@@ -12,11 +12,14 @@
 //   gmCounterAttackTune [key, value]
 //                                  runtime override of one tuning value
 //                                  (tests, debugging); keys: "enabled",
-//                                  "chance", "delayMin", "delayMax", "size",
-//                                  "speed", "stageDistance", "liveTimeout",
-//                                  "sourceKeep".  A pending SCHEDULED clock
-//                                  is clamped to the new delayMax.  Returns
-//                                  true when the key is known.
+//                                  "firstTownChance", "chance",
+//                                  "warLevelStep", "delayMin", "delayMax",
+//                                  "size", "speed", "stageDistance",
+//                                  "liveTimeout", "sourceKeep", "maxLive",
+//                                  "townsTaken" (the saved k counter).  A
+//                                  pending SCHEDULED clock is clamped to the
+//                                  new delayMax.  Returns true when the key
+//                                  is known.
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 
@@ -73,9 +76,25 @@ static GameValue GmCounterAttackTune(const GameState* /*state*/, GameValuePar op
     {
         t.enabled = v != 0;
     }
+    else if (stricmp(key, "firstTownChance") == 0)
+    {
+        t.firstTownChance = v < 0 ? 0 : (v > 1 ? 1 : v);
+    }
     else if (stricmp(key, "chance") == 0)
     {
         t.chance = v < 0 ? 0 : (v > 1 ? 1 : v);
+    }
+    else if (stricmp(key, "warLevelStep") == 0)
+    {
+        t.warLevelStep = v < 0 ? 0 : v;
+    }
+    else if (stricmp(key, "maxLive") == 0)
+    {
+        t.maxLive = v < 0 ? 0 : (int)v;
+    }
+    else if (stricmp(key, "townsTaken") == 0)
+    {
+        ca.SetTownsTaken((int)v);
     }
     else if (stricmp(key, "delayMin") == 0)
     {

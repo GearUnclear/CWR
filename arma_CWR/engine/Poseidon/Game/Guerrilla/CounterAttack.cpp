@@ -69,6 +69,7 @@ void CounterAttack::Clear()
     _tuning = CounterAttackTuning();
     _records.Clear();
     _accum = 0;
+    _townsTaken = 0;
 }
 
 void CounterAttack::InitMission()
@@ -112,7 +113,9 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     CounterAttackTuning& t = _tuning;
     t.enabled = c.ReadValue("counterAttack", 1.0f) != 0.0f;
     t.size = ReadRanged(c, "counterAttackSize", t.size, 0.0f, 4.0f);
+    t.firstTownChance = ReadRanged(c, "counterAttackFirstTownChance", t.firstTownChance, 0.0f, 1.0f);
     t.chance = ReadRanged(c, "counterAttackChance", t.chance, 0.0f, 1.0f);
+    t.warLevelStep = ReadRanged(c, "counterAttackWarLevelStep", t.warLevelStep, 0.0f, 2.0f);
     t.delayMin = ReadRanged(c, "counterAttackDelayMin", t.delayMin, 0.0f, 86400.0f);
     t.delayMax = ReadRanged(c, "counterAttackDelayMax", t.delayMax, 0.0f, 86400.0f);
     if (t.delayMax < t.delayMin)
@@ -121,8 +124,6 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
                  (double)t.delayMax, (double)t.delayMin);
         t.delayMax = t.delayMin;
     }
-    t.sizeDecay = ReadRanged(c, "counterAttackSizeDecay", t.sizeDecay, 0.0f, 1.0f);
-    t.chanceDecay = ReadRanged(c, "counterAttackChanceDecay", t.chanceDecay, 0.0f, 1.0f);
     t.sourceKeep = ReadRanged(c, "counterAttackSourceKeep", t.sourceKeep, 0.0f, 1.0f);
     t.speed = ReadRanged(c, "counterAttackSpeed", t.speed, 0.5f, 100.0f);
     t.roadFactor = ReadRanged(c, "counterAttackRoadFactor", t.roadFactor, 1.0f, 5.0f);
@@ -143,16 +144,37 @@ float CounterAttack::DispatchChance(const CounterAttackTuning& t, int townsBefor
     {
         return 0;
     }
-    const int k = townsBefore > 0 ? townsBefore : 0;
-    return t.chance * powf(1.0f - t.chanceDecay, (float)k);
+    // the first town ever taken is a probe the occupier may ignore; from the
+    // second on it answers every one
+    return townsBefore > 0 ? t.chance : t.firstTownChance;
 }
 
-int CounterAttack::ForceSize(const CounterAttackTuning& t, int groupSize, int townsBefore)
+int CounterAttack::ForceSize(const CounterAttackTuning& t, int groupSize, float warLevel)
 {
-    const int k = townsBefore > 0 ? townsBefore : 0;
-    const float bodies = t.size * (float)(groupSize > 0 ? groupSize : 1) * powf(1.0f - t.sizeDecay, (float)k);
+    // the war level only ever scales the force up
+    float scale = 1.0f + t.warLevelStep * (warLevel - 1.0f);
+    if (scale < 1.0f)
+    {
+        scale = 1.0f;
+    }
+    const float bodies = t.size * (float)(groupSize > 0 ? groupSize : 1) * scale;
     const int n = (int)floorf(bodies + 0.5f);
+    if (n > MaxForce)
+    {
+        return MaxForce;
+    }
     return n < 1 ? 1 : n;
+}
+
+CounterAttackDecision CounterAttack::Decide(const CounterAttackTuning& t, const char* /*town*/, int townsBefore,
+                                            const CounterAttackContext& ctx)
+{
+    CounterAttackDecision d;
+    d.chance = DispatchChance(t, townsBefore);
+    d.roll = Roll01(ctx.seed, 0);
+    d.go = d.roll < d.chance;
+    d.size = d.go ? ForceSize(t, ctx.groupSize, ctx.warLevel) : 0;
+    return d;
 }
 
 float CounterAttack::HoldOdds(const CounterAttackTuning& t, int defenders, int attackers)
@@ -206,7 +228,7 @@ float CounterAttack::Roll01(unsigned int seed, int salt)
 
 unsigned int CounterAttack::MakeSeed(const char* town, int flipDay, int flipMinute, int townsBefore)
 {
-    // FNV-1a over the town name, then the flip stamp and the momentum count
+    // FNV-1a over the town name, then the flip stamp and k (towns taken before)
     unsigned int h = 2166136261u;
     for (const char* p = town ? town : ""; *p; p++)
     {
@@ -293,7 +315,22 @@ int CounterAttack::LiveSquads() const
     return n;
 }
 
-bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize)
+int CounterAttack::HeldTowns(const ZoneRegistry& registry)
+{
+    int n = 0;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 &&
+            stricmp(z->owner, registry.ResistanceSide()) == 0)
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel)
 {
     if (!_tuning.enabled)
     {
@@ -310,33 +347,75 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         // to come back to, and the HQ is the campaign's anchor)
         return false;
     }
+    // k: the towns taken before this one, the most of the saved count and the
+    // towns held now (this town already counts as held at the event)
+    int held = HeldTowns(registry) - 1;
+    if (held < 0)
+    {
+        held = 0;
+    }
+    const int before = _townsTaken > held ? _townsTaken : held;
+    _townsTaken = before + 1;
     if (FindByTarget(z->name) >= 0)
     {
         return false; // one record per town
-    }
-    int before = registry.LiberatedTownCount() - 1;
-    if (before < 0)
-    {
-        before = 0;
     }
     Record r;
     r.target = z->name;
     r.townsBefore = before;
     r.seed = MakeSeed(z->name, z->flipDay, z->flipMinute, before);
-    const float chance = DispatchChance(_tuning, before);
-    if (Roll01(r.seed, 0) >= chance)
+    CounterAttackContext ctx;
+    ctx.groupSize = groupSize;
+    ctx.warLevel = warLevel;
+    ctx.seed = r.seed;
+    const CounterAttackDecision d = Decide(_tuning, z->name, before, ctx);
+    if (!d.go)
     {
-        LOG_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) held before)",
-                 (const char*)z->name, chance, before);
+        LOG_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) taken before)",
+                 (const char*)z->name, d.chance, before);
         return false;
     }
-    r.size = ForceSize(_tuning, groupSize, before);
+    r.size = d.size;
     r.phase = CAScheduled;
     r.clock = _tuning.delayMin + (_tuning.delayMax - _tuning.delayMin) * Roll01(r.seed, 1);
     _records.Add(r);
-    LOG_INFO(Core,
-             "CounterAttack: {} rose; a force of {} will move on it in {:.0f}s (chance {:.2f}, {} town(s) held before)",
-             (const char*)z->name, r.size, r.clock, chance, before);
+    LOG_INFO(
+        Core,
+        "CounterAttack: {} rose; a force of {} will move on it in {:.0f}s (chance {:.2f}, {} town(s) taken before, "
+        "war level {:.0f})",
+        (const char*)z->name, r.size, r.clock, d.chance, before, warLevel);
+    return true;
+}
+
+bool CounterAttack::LaunchFrom(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
+                               CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired)
+{
+    const ZoneRecord* town = registry.GetZone(target);
+    const ZoneRecord* src = registry.GetZone(source);
+    if (!_tuning.enabled || !town || !src || size < 1 || stricmp(town->type, "CITY") != 0 ||
+        stricmp(town->owner, registry.ResistanceSide()) != 0 || town->garrisonExempt ||
+        stricmp(src->owner, registry.OccupierSide()) != 0 || FindByTarget(town->name) >= 0)
+    {
+        return false;
+    }
+    const int liveBodies = source < view.garrisonLive.Size() ? view.garrisonLive[source] : 0;
+    const bool live = ops != nullptr && liveBodies > 0 && InBubble(registry, view, target) && RoomLive(registry, view);
+    const int spare = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, live);
+    const int n = MinInt(size, spare);
+    if (n < 1)
+    {
+        return false;
+    }
+    Record r;
+    r.target = town->name;
+    r.townsBefore = _townsTaken;
+    r.seed = MakeSeed(town->name, town->flipDay, town->flipMinute, _townsTaken) ^ 0x5A17C0DEu;
+    r.size = size;
+    if (!Launch(registry, target, source, n, live, ops, r, fired))
+    {
+        return false;
+    }
+    _records.Add(r);
     return true;
 }
 
@@ -537,6 +616,54 @@ bool CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view
     return true;
 }
 
+bool CounterAttack::RoomLive(const ZoneRegistry& registry, const CounterAttackView& view) const
+{
+    const ZoneTuning& zt = registry.Tuning();
+    return LiveSquads() < _tuning.maxLive && (zt.budgetSideGroups <= 0 || view.occGroups + 1 <= zt.budgetSideGroups);
+}
+
+bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, bool live, CounterAttackOps* ops,
+                           Record& r, AutoArray<ZoneEventRecord>& fired)
+{
+    const ZoneRecord* town = registry.GetZone(target);
+    ZoneRecord* s = registry.GetZoneMutable(src);
+    if (!town || !s || n < 1)
+    {
+        return false;
+    }
+    r.source = s->name;
+    if (live)
+    {
+        // the base is in the bubble: its own soldiers march out
+        int taken = 0;
+        AIGroup* grp = ops ? ops->DetachFromGarrison(src, n, town->pos, taken) : nullptr;
+        if (!grp || taken <= 0)
+        {
+            return false;
+        }
+        r.strength = taken;
+        r.group = grp;
+        r.phase = CALive;
+        r.clock = 0;
+        r.resend = ResendInterval;
+        LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {}", taken, (const char*)s->name,
+                 (const char*)r.target);
+        AddEvent(fired, ZECounterAttack, target);
+        return true;
+    }
+    s->garrison -= (float)n;
+    if (s->garrison < 0)
+    {
+        s->garrison = 0;
+    }
+    r.strength = n;
+    r.phase = CATravel;
+    r.clock = TravelTime(_tuning, Dist2D(s->pos.X(), s->pos.Z(), town->pos.X(), town->pos.Z()));
+    LOG_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
+             (const char*)s->name, (const char*)r.target, r.clock, s->garrison);
+    return true;
+}
+
 bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
                             Record& r, AutoArray<ZoneEventRecord>& fired)
 {
@@ -572,49 +699,18 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             // marching a live garrison out adds a group, not bodies: it still
             // respects the live-squad and group budgets, else the force is
             // drawn from a stored reserve and waits on the road instead
-            const ZoneTuning& zt = registry.Tuning();
-            const bool roomLive = LiveSquads() < _tuning.maxLive &&
-                                  (zt.budgetSideGroups <= 0 || view.occGroups + 1 <= zt.budgetSideGroups);
-            const int src = PickSource(registry, view, target, inBubble && ops != nullptr && roomLive, spare, live);
+            const int src =
+                PickSource(registry, view, target, inBubble && ops != nullptr && RoomLive(registry, view), spare, live);
             if (src < 0)
             {
                 LOG_INFO(Core, "CounterAttack: no occupier base can spare a man for {}; no counter-attack",
                          (const char*)r.target);
                 return true;
             }
-            ZoneRecord* s = registry.GetZoneMutable(src);
-            const int n = MinInt(r.size, spare);
-            r.source = s->name;
-            if (live)
+            if (!Launch(registry, target, src, MinInt(r.size, spare), live, ops, r, fired))
             {
-                // the base is in the bubble: its own soldiers march out
-                int taken = 0;
-                AIGroup* grp = ops->DetachFromGarrison(src, n, town->pos, taken);
-                if (!grp || taken <= 0)
-                {
-                    r.clock = RetryInterval;
-                    return false;
-                }
-                r.strength = taken;
-                r.group = grp;
-                r.phase = CALive;
-                r.clock = 0;
-                r.resend = ResendInterval;
-                LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {}", taken,
-                         (const char*)s->name, (const char*)r.target);
-                AddEvent(fired, ZECounterAttack, target);
-                return false;
+                r.clock = RetryInterval;
             }
-            s->garrison -= (float)n;
-            if (s->garrison < 0)
-            {
-                s->garrison = 0;
-            }
-            r.strength = n;
-            r.phase = CATravel;
-            r.clock = TravelTime(_tuning, Dist2D(s->pos.X(), s->pos.Z(), town->pos.X(), town->pos.Z()));
-            LOG_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
-                     (const char*)s->name, (const char*)r.target, r.clock, s->garrison);
             return false;
         }
         case CATravel:
@@ -987,7 +1083,7 @@ void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
-            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize);
+            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize, ReadWarLevel());
         }
         else if (ev.type == ZETownLost)
         {
@@ -1086,6 +1182,9 @@ LSError CounterAttack::Serialize(ParamArchive& ar)
 {
     // both load passes read the rows (the second resolves the group refs)
     PARAM_CHECK(ar.Serialize("Attacks", _records, 1))
+    // towns taken so far (k of the next flip); absent in older saves: 0, and
+    // the towns held at the next flip stand in for it
+    PARAM_CHECK(ar.Serialize("townsTaken", _townsTaken, 1, 0))
     if (ar.IsLoading())
     {
         for (int i = 0; i < _records.Size(); i++)

@@ -5,8 +5,9 @@
 //  Houdan (the "Village" CITY zone, ~490 m from the Camp, inside the 800 m
 //  cacheRadius) with the player standing at the Camp:
 //    l1  kill Houdan's garrison and raise it with one fighter; the flip
-//        schedules exactly one counter-attack (first town: full force of 6,
-//        no towns held before);
+//        schedules exactly one counter-attack (first town, k = 0; its 0.4
+//        roll is tuned to 1 here so the answer is certain; the force is 6,
+//        counterAttackSize x groupSize, scaled up by the war level);
 //    l2  within the delay window (tuned to 5..10 s here) the Outpost, whose
 //        garrison is live in the bubble, marches 5 of its 6 soldiers out
 //        (keeping a quarter of its strength home): the row turns LIVE, the
@@ -39,6 +40,7 @@ triAssertGe [caO, 0]
 caPos = (gmZone caV) select 8
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMin", 5]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMax", 10]]), "true"]
+triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 1]]), "true"]
 triAssertEq [(count gmCounterAttacks), 0]
 
 // both garrisons are live: the player stands at the Camp, inside both bubbles
@@ -66,7 +68,12 @@ triAssertEq [(count gmCounterAttacks), 1]
 caRow = gmCounterAttacks select 0
 triAssertEq [(caRow select 0), "Village"]
 triAssertEq [(caRow select 2), "SCHEDULED"]
-triAssertEq [(caRow select 5), 6]
+// the force: 6 at war level 1, x (1 + 0.25 x (war level - 1)), one group at most
+triAssertGe [(caRow select 5), 6]
+triAssertGe [12, (caRow select 5)]
+caExp = caRow select 5
+if (gmWarLevel <= 1) then {caExp = 6}
+triAssertEq [(caRow select 5), caExp]
 triAssertEq [(caRow select 6), 0]
 
 // ---- l2: LIVE within the window, drawn from the Outpost's own garrison -----

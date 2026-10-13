@@ -6,15 +6,25 @@
 // "Pacing" subsection); this header is the code-side summary.
 //
 // DISPATCH.  When a CITY flips to the resistance (ZoneRegistry's captured
-// event; the start-town HQ, exempt from its garrison, is never a target) the
-// service rolls once whether the occupier answers.  The chance and the force
-// size shrink with every town the resistance already held at the flip
-// (momentum).  An answered flip waits a delay drawn from
+// event; the start-town HQ, exempt from its garrison, is never a target and
+// never counts) the service makes one dispatch decision (Decide).  k is the
+// number of towns the resistance had already taken before this flip: the
+// larger of the towns it ever took (a saved counter) and the non-exempt
+// towns it holds right now.  The very first town (k = 0) is answered with
+// counterAttackFirstTownChance (0.4): most of the time nothing comes.  From
+// the second town on (k >= 1) every flip is answered with
+// counterAttackChance (1.0), no decay.  The force is counterAttackSize *
+// groupSize, scaled UP (never down) by the war level, capped at one group.
+// An answered flip waits a delay drawn from
 // [counterAttackDelayMin, counterAttackDelayMax], then LAUNCHES: it picks the
 // nearest occupier military zone that can spare bodies (its stored reserve,
 // or its live cache garrison when the town is inside the player's bubble),
 // keeping counterAttackSourceKeep of the base's strength at home.  No such
 // base anywhere: no counter-attack.  One record per target town.
+//
+// SEAMS for a later occupier forces service: Decide() is the whole dispatch
+// decision (town, k, context in; go / no-go and size out), and LaunchFrom()
+// sends a force of an explicit size from an explicit source zone.
 //
 // TWO PATHS.  A source whose garrison is live (inside the bubble) marches its
 // own soldiers out: they leave the post's cache groups and walk on the town
@@ -73,13 +83,13 @@ struct ZoneEventRecord;
 
 struct CounterAttackTuning
 {
-    bool enabled = true;          // counterAttack (0 = off, and momentum off too)
-    float size = 0.5f;            // counterAttackSize: the first force, a fraction of groupSize
-    float chance = 1.0f;          // counterAttackChance: dispatch probability for the first town
+    bool enabled = true;          // counterAttack (0 = off)
+    float size = 0.5f;            // counterAttackSize: the force, a fraction of groupSize
+    float firstTownChance = 0.4f; // counterAttackFirstTownChance: the first town ever taken (k = 0)
+    float chance = 1.0f;          // counterAttackChance: every later town (k >= 1)
+    float warLevelStep = 0.25f;   // counterAttackWarLevelStep: force * (1 + step * (warLevel - 1)), never below x1
     float delayMin = 120.0f;      // counterAttackDelayMin (s after the flip)
     float delayMax = 300.0f;      // counterAttackDelayMax
-    float sizeDecay = 0.15f;      // counterAttackSizeDecay: force * (1 - d)^townsHeldBefore
-    float chanceDecay = 0.15f;    // counterAttackChanceDecay: chance * (1 - d)^townsHeldBefore
     float sourceKeep = 0.25f;     // counterAttackSourceKeep: share of garrisonMax a base keeps home
     float speed = 4.0f;           // counterAttackSpeed: abstract travel speed (m/s)
     float roadFactor = 1.3f;      // counterAttackRoadFactor: road distance / straight distance
@@ -88,6 +98,24 @@ struct CounterAttackTuning
     float repelLoss = 0.5f;       // counterAttackRepelLoss: share of a repelled force that does not come home
     float liveTimeout = 1200.0f;  // counterAttackLiveTimeout: s before an unresolved live squad withdraws
     int maxLive = 2;              // counterAttackMaxLive: live squads out at once
+};
+
+// What the dispatch decision may look at besides the town and k.  The engine
+// fills it from the live campaign (GarrisonCache groupSize, the script war
+// level); a later occupier forces service can extend it.
+struct CounterAttackContext
+{
+    int groupSize = 12;
+    float warLevel = 1.0f;
+    unsigned int seed = 0; // the flip's roll seed (MakeSeed)
+};
+
+struct CounterAttackDecision
+{
+    bool go = false;
+    float chance = 0; // the dispatch probability used
+    float roll = 0;   // the deterministic roll it was compared with
+    int size = 0;     // planned bodies (0 when not going)
 };
 
 enum CounterAttackPhase
@@ -159,7 +187,7 @@ class CounterAttack : public SerializeClass
         float clock = 0;
         int strength = 0;    // bodies drawn from the source (0 while scheduled)
         int size = 0;        // planned force at the flip
-        int townsBefore = 0; // towns the resistance held before this flip
+        int townsBefore = 0; // k: towns the resistance had taken before this flip
         unsigned int seed = 0;
         int salt = 2;     // next roll salt (0 dispatch, 1 delay)
         float resend = 0; // Live: seconds to the next re-send check
@@ -176,8 +204,17 @@ class CounterAttack : public SerializeClass
     CounterAttackTuning& TuningMutable() { return _tuning; }
 
     // pure rules (unit-tested) ------------------------------------------------
+    // the largest force: one group (MAX_UNITS_PER_GROUP)
+    static constexpr int MaxForce = 12;
+    // counterAttackFirstTownChance for k = 0, counterAttackChance after; 0 when off
     static float DispatchChance(const CounterAttackTuning& t, int townsBefore);
-    static int ForceSize(const CounterAttackTuning& t, int groupSize, int townsBefore);
+    // counterAttackSize * groupSize * max(1, 1 + warLevelStep * (warLevel - 1)),
+    // rounded, 1..MaxForce
+    static int ForceSize(const CounterAttackTuning& t, int groupSize, float warLevel);
+    // the dispatch decision for one town: go / no-go and the force size (the
+    // seam a later occupier forces service would wrap or replace)
+    static CounterAttackDecision Decide(const CounterAttackTuning& t, const char* town, int townsBefore,
+                                        const CounterAttackContext& ctx);
     // probability the town holds: D*w / (A + D*w); 0 with no defenders, 1
     // with no attackers
     static float HoldOdds(const CounterAttackTuning& t, int defenders, int attackers);
@@ -190,9 +227,23 @@ class CounterAttack : public SerializeClass
     static unsigned int MakeSeed(const char* town, int flipDay, int flipMinute, int townsBefore);
 
     // the service ---------------------------------------------------------------
-    // a CITY just flipped to the resistance: roll and schedule.  True when a
-    // counter-attack was scheduled.
-    bool OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize);
+    // a CITY just flipped to the resistance: count it, decide and schedule.
+    // True when a counter-attack was scheduled.
+    bool OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel = 1.0f);
+    // send a force of up to size bodies from an explicit source zone on a
+    // held town NOW (no delay, no roll): the launch seam for a later occupier
+    // forces service.  The source's spare still caps it.  True when a force
+    // left (a record is added); false when the town is not a valid target or
+    // already has a record, or the source cannot spare a man or cannot march
+    // its live garrison out.
+    bool LaunchFrom(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
+                    CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
+    // towns the resistance took so far (non-exempt flips counted by
+    // OnTownFlipped; saved).  k of the next flip is max(this, towns held).
+    int TownsTaken() const { return _townsTaken; }
+    void SetTownsTaken(int n) { _townsTaken = n > 0 ? n : 0; }
+    // non-exempt CITY zones the resistance holds now
+    static int HeldTowns(const ZoneRegistry& registry);
     // the registry's events of one zone tick (engine wrapper: flips and
     // town losses)
     void OnZoneEvents(const AutoArray<ZoneEventRecord>& fired);
@@ -216,7 +267,7 @@ class CounterAttack : public SerializeClass
     // engine hook: per frame, throttled to TickInterval
     void Simulate(float deltaT);
 
-    bool HasState() const { return _records.Size() > 0; }
+    bool HasState() const { return _records.Size() > 0 || _townsTaken > 0; }
     LSError Serialize(ParamArchive& ar) override;
 
   private:
@@ -230,6 +281,13 @@ class CounterAttack : public SerializeClass
     static void ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies);
     bool InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const;
     int LiveSquads() const;
+    // room for one more live group (live squads and the side's group budget)
+    bool RoomLive(const ZoneRegistry& registry, const CounterAttackView& view) const;
+    // send r's force of n from src: live (march the base's garrison out) or
+    // abstract (debit the stored reserve, travel).  False = not launched (a
+    // live detach failed); the caller retries or gives up.
+    bool Launch(ZoneRegistry& registry, int target, int src, int n, bool live, CounterAttackOps* ops, Record& r,
+                AutoArray<ZoneEventRecord>& fired);
     // the abstract fight on arrival: true when the record is finished
     bool Fight(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                AutoArray<ZoneEventRecord>& fired);
@@ -245,6 +303,7 @@ class CounterAttack : public SerializeClass
     CounterAttackTuning _tuning;
     AutoArray<Record> _records;
     float _accum = 0;
+    int _townsTaken = 0;
 };
 
 } // namespace Guerrilla

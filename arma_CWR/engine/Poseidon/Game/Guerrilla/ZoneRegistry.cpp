@@ -708,24 +708,6 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
                  (double)_tuning.townRevertSupport, (double)fixed, (double)_tuning.supportFlip);
         _tuning.townRevertSupport = fixed;
     }
-    // momentum: support gains grow with the towns held (counter-attack
-    // pacing); counterAttack = 0 switches the whole pacing layer off
-    _tuning.momentumSupportStep = cfg.ReadValue("momentumSupportStep", _tuning.momentumSupportStep);
-    _tuning.momentumSupportCap = cfg.ReadValue("momentumSupportCap", _tuning.momentumSupportCap);
-    if (_tuning.momentumSupportStep < 0)
-    {
-        LOG_WARN(Core, "ZoneRegistry: momentumSupportStep = {} repaired to 0", (double)_tuning.momentumSupportStep);
-        _tuning.momentumSupportStep = 0;
-    }
-    if (_tuning.momentumSupportCap < 1)
-    {
-        LOG_WARN(Core, "ZoneRegistry: momentumSupportCap = {} repaired to 1", (double)_tuning.momentumSupportCap);
-        _tuning.momentumSupportCap = 1;
-    }
-    if (cfg.ReadValue("counterAttack", 1.0f) == 0.0f)
-    {
-        _tuning.momentumSupportStep = 0;
-    }
     // already read (and acted on) in LoadFromParams; re-read so the tuning
     // struct is complete for anyone inspecting it
     _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
@@ -1720,16 +1702,6 @@ void ZoneRegistry::ExemptTownGarrison(int index)
     z->recoverClock = 0;
 }
 
-float ZoneRegistry::SupportMomentum(const ZoneTuning& t, int townsHeld)
-{
-    float m = 1.0f + t.momentumSupportStep * (float)(townsHeld > 0 ? townsHeld : 0);
-    if (m > t.momentumSupportCap)
-    {
-        m = t.momentumSupportCap;
-    }
-    return m < 1.0f ? 1.0f : m;
-}
-
 int ZoneRegistry::LiberatedTownCount() const
 {
     int count = 0;
@@ -2270,9 +2242,6 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     int seenDay = 0;
     int seenMinute = 0;
     const bool haveClock = JournalClockNow(seenDay, seenMinute);
-    // momentum (counter-attack pacing): the rise of an administered town
-    // scales with the towns already held, sampled once per tick
-    const float gainRate = _tuning.supportRate * SupportMomentum(_tuning, LiberatedTownCount());
 
     for (int i = 0; i < n; i++)
     {
@@ -2440,7 +2409,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             bool occHere = occ > 0 || z.garrison >= 1 || z.lastGarrisonLive > 0;
             if (guerHere && !occHere)
             {
-                z.support += gainRate;
+                z.support += _tuning.supportRate;
                 if (z.support > 100)
                 {
                     z.support = 100;
@@ -2492,8 +2461,6 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             bool occHere = occ > 0;
             if (guerHere && !occHere)
             {
-                // consolidation runs at the plain rate: momentum speeds the
-                // rise of the NEXT town, not the hold on this one
                 z.support += _tuning.supportRate;
                 if (z.support > 100)
                 {

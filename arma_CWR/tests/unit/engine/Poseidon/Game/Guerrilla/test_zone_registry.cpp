@@ -947,9 +947,6 @@ namespace
 const char* kTownConfig =
     "class CfgGuerrillaZones\n"
     "{\n"
-    // the held town would otherwise speed every gain by the momentum step
-    // (counter-attack pacing); these cases pin the plain supportRate
-    "    momentumSupportStep = 0;\n"
     "    class Zones\n"
     "    {\n"
     "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; support=100; "

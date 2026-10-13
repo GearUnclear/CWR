@@ -18,7 +18,7 @@ and this file disagree, check the code, then fix whichever is wrong.
 | B | Budgets are pass/fail thresholds: 100 live AI typical, 130 hard cap, 40 groups per side, hub-scene frame time p95 <= 25 ms. Breaches log a WARN. | Landed (`[gmsim]` line, keys `budgetLiveBodies`, `budgetSideGroups`) |
 | R | Liberated MILITARY zones are permanent in v1: nothing flips a resistance-held post back to the occupier, on or off screen. Towns are the exception since issue #79: a held town with occupier presence in it (live units, or an abstract counter-attack force, decision C) and no resistance presence drains `supportRate` per tick and reverts to occupier administration below `townRevertSupport` (default 30, under the flip line `supportFlip` 60, so a town just taken does not fall on the first occupier tick after the fighters walk out; section 3, row 2b). | Acknowledged; military recapture is a #38 follow-up |
 | T | Towns have standing defenders (issue #79 B2, #72 first slice): every CITY the resistance does not hold is occupier-administered and keeps a `cityGarrison` reserve that the GarrisonCache materializes like a post's. Support cannot rise while any of it lives. | Landed (`ZoneRegistry::IsAdministeredTown`, keys `cityGarrison`, `townRetake`) |
-| C | The occupier answers a town's rising (issue #79, the #77 counter-attack scoped to towns): a retake force drawn from the nearest occupier base's garrison comes whether or not the player is there. Inside the bubble it is a live squad; outside, an abstract force that travels, then holds the empty town (the retake drain does the rest) or rolls the odds against the fighters left in it. Each town already held makes the answer smaller and less likely and speeds the rise of the next town (section 9). Shakedown pairs no longer spawn in held towns (issue #79 D8). | Landed (`CounterAttack`, keys `counterAttack*`, `townRevertSupport`, `momentumSupport*`) |
+| C | The occupier answers a town's rising (issue #79, the #77 counter-attack scoped to towns): a retake force drawn from the nearest occupier base's garrison comes whether or not the player is there. Inside the bubble it is a live squad; outside, an abstract force that travels, then holds the empty town (the retake drain does the rest) or rolls the odds against the fighters left in it. The first town the resistance ever takes is answered 4 times in 10; from the second town on every town is answered, with no decay, by a force that grows with the war level, so two towns can be under attack at once (section 9). Holding towns gives the resistance no bonus. Shakedown pairs no longer spawn in held towns (issue #79 D8). An occupier forces pool, a standing retake director and reinforcement waves are being designed separately. | Landed (`CounterAttack`, keys `counterAttack*`, `townRevertSupport`) |
 | X | Deferred to #38: the Sinai dealer cap (Sinai seeds 37 towns and draws 26 dealers) and the Sinai town-seeding fix (`seedCities = 1` seeds labels, airbases and borders as towns). | Deferred |
 
 ## 2. Definitions
@@ -68,7 +68,7 @@ the section 2 rules. LIVE ONLY: exists only as entities near the player.
 |---|---|---|---|
 | 1 | Capture meter (occupier OUTPOST/AIRFIELD/SEAPORT) | ABSTRACT (D1) when live resistance units are in `zoneArea` or `capture > 0`; otherwise FREEZE. The stored reserve counts as a defender. | `ZoneRegistry::EvaluateTick` |
 | 2 | Town support (NEUTRAL or occupier CITY) | ABSTRACT (D1), gain only: +`supportRate` per tick with fighters present and no occupier presence; flips on the in-bubble rule. Occupier presence is a live unit in `zoneArea`, the town's stored garrison reserve, or a live body of its own garrison anywhere, so a remote town with a reserve and a squad is a frozen standoff. No remote intimidation. Script ledgers (resentment, civilian-kill deltas) run regardless of distance. | `ZoneRegistry::EvaluateTick`, `civilians.sqs` |
-| 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while occupier presence stands in it: live units, or an abstract counter-attack force holding the town (decision C, `ZoneTickInputs::abstractOcc`). Occupiers alone: -`supportRate` per tick, revert below `townRevertSupport` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled to `garrisonMax`; `townLost` event). Fighters alone: +`supportRate` per tick up to 100 (no momentum on the hold). Both: frozen. | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
+| 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while occupier presence stands in it: live units, or an abstract counter-attack force holding the town (decision C, `ZoneTickInputs::abstractOcc`). Occupiers alone: -`supportRate` per tick, revert below `townRevertSupport` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled to `garrisonMax`; `townLost` event). Fighters alone: +`supportRate` per tick up to 100. Both: frozen. | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
 | 2c | Counter-attack on a risen town (decision C) | Dispatch, delay and travel ABSTRACT and deterministic (rolls hashed from the flip). Town inside the bubble: LIVE squad (a base in the bubble marches its own garrison out; a stored reserve appears at the staging point after its road time), counted in the budgets, never cached back. Town outside: ABSTRACT arrival, then hold-and-drain (empty town) or one odds roll (fighters there); no entity created or deleted. | `CounterAttack`, `capture.sqs` |
 | 3 | Flip side effects | Identical on and off screen: heat +40, income tap, hold squad, journal line, hint. | `EvaluateTick`, `capture.sqs` |
 | 4 | Garrison reserve (posts and occupier-administered towns) | Count FREEZE (no attrition, no remote combat). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while garrisonable (occupier post, or administered town not exempt), not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. | `GarrisonCache::StepRecover` |
@@ -103,12 +103,12 @@ All live in `class CfgGuerrillaZones` of a template's `description.ext`.
 | `cityGarrison` | 4 | occupier defenders of every administered town (whole number 0..24, repaired and logged otherwise); a CITY's own `garrison` overrides it; 0 = the pre-#79 free towns |
 | `townRetake` | 1 | town retake on (0 = liberated towns are permanent and inert, the pre-#79 rule) |
 | `townRevertSupport` | 30 | a held town reverts below this support, not below `supportFlip` (range 0..`supportFlip`, repaired and logged; `= supportFlip` is the pre-hysteresis rule) |
-| `counterAttack` | 1 | 0 = no counter-attacks and no momentum (the whole pacing layer off) |
-| `counterAttackSize` | 0.5 | first force, as a share of `groupSize` (12): 6 bodies |
-| `counterAttackChance` | 1.0 | dispatch probability for the first town |
+| `counterAttack` | 1 | 0 = no counter-attacks at all |
+| `counterAttackFirstTownChance` | 0.4 | dispatch probability for the first town the resistance ever takes (k = 0); range 0..1 |
+| `counterAttackChance` | 1.0 | dispatch probability for every later town (k >= 1), no decay; range 0..1 |
+| `counterAttackSize` | 0.5 | the force, as a share of `groupSize` (12): 6 bodies at war level 1 |
+| `counterAttackWarLevelStep` | 0.25 | force x max(1, 1 + step x (war level - 1)), capped at one group of 12; range 0..2, 0 = flat size |
 | `counterAttackDelayMin` / `Max` | 120 / 300 | seconds between the flip and the launch (drawn per flip) |
-| `counterAttackSizeDecay` | 0.15 | force size x (1 - d) per town held before the flip |
-| `counterAttackChanceDecay` | 0.15 | dispatch chance x (1 - d) per town held before the flip |
 | `counterAttackSourceKeep` | 0.25 | share of a base's `garrisonMax` that never leaves it |
 | `counterAttackSpeed` | 4 | abstract road speed (m/s) |
 | `counterAttackRoadFactor` | 1.3 | road distance per straight-line metre |
@@ -117,8 +117,6 @@ All live in `class CfgGuerrillaZones` of a template's `description.ext`.
 | `counterAttackRepelLoss` | 0.5 | share of a beaten force that does not come home |
 | `counterAttackLiveTimeout` | 1200 | seconds before an unresolved live squad withdraws (only out of the player's sight) |
 | `counterAttackMaxLive` | 2 | live counter-attack squads at once (more wait) |
-| `momentumSupportStep` | 0.1 | support-rate multiplier step per town held |
-| `momentumSupportCap` | 2.0 | ceiling of that multiplier |
 | `simDiagInterval` | 60 | seconds between `[gmsim]` log lines (0 = off) |
 | `budgetLiveBodies` | 130 | WARN above this many live AI bodies, all sides |
 | `budgetSideGroups` | 40 | WARN above this many groups on one side (engine cap 63) |
@@ -196,9 +194,10 @@ Instruments:
   `simDiagInterval` seconds.
 
 Worst case at a hub, from the current defaults: garrisons in the bubble 24,
-QRF 6, counter-attacks 12 (two squads of 6; a squad marched out of a base in
-the bubble moves bodies, it adds none), traffic crews about 10, civilians 24,
-shakedown 2, assailants 8 (about 86 bubble-bound), plus always-live Legends (up to 18), the player group (up to
+QRF 6, counter-attacks 12 (two squads of 6 at war level 1, up to 24 from war
+level 5; a squad marched out of a base in the bubble moves bodies, it adds
+none), traffic crews about 10, civilians 24, shakedown 2, assailants 8 (about
+86 bubble-bound, 98 at war level 5), plus always-live Legends (up to 18), the player group (up to
 12), 3 per captured military zone in hold squads, and dealers. Sinai's 26
 dealers are the known outlier (decision X).
 
@@ -219,12 +218,13 @@ runway, 3.3 km from the Outpost.
 | (d) Cross simulation boundaries and save/reload | A bled garrison stays bled across the bubble edge and across near and far saves reloaded in fresh processes; a distant standoff survives | Nothing, except D2 steps (kept out of the test's windows) | `scripting/guerrilla_offscreen_save_reload.seq` |
 
 Counter-attacks (decision C) on the shipped Abel template, Houdan:
-`scripting/guerrilla_counter_attack_live` (player at the Camp: the Outpost
-marches 5 of its 6 out within the delay window, they walk on the town, the
-drain retakes it below 30 and the squad stays as its garrison) and
-`scripting/guerrilla_counter_attack_offscreen` (player 2.5 km away: 5 leave
-the Outpost's stored reserve, travel, hold the empty town and it reverts
-with no entity created).
+`scripting/guerrilla_counter_attack_live` (player at the Camp; a first town,
+its 0.4 roll tuned to 1: the Outpost marches 5 of its 6 out within the delay
+window, they walk on the town, the drain retakes it below 30 and the squad
+stays as its garrison) and `scripting/guerrilla_counter_attack_offscreen`
+(player 2.5 km away; one town already counted as taken, so the default
+chances answer it for certain: 5 leave the Outpost's stored reserve, travel,
+hold the empty town and it reverts with no entity created).
 
 Budget soaks tour whole islands through the GUERRILLA menu with the shipped
 templates: `ui/remaster/remaster_ud_offscreen_budget_abel` and
@@ -256,18 +256,31 @@ Owned elsewhere; this contract only fixes the rules they must follow.
   still sends every cached garrison group, town garrisons included, toward
   the last-known position.
 
-## 9. Pacing: the counter-attack and momentum (decision C)
+## 9. Pacing: the counter-attack (decision C)
 
-The brief (issue #79): a force answers the taking of a town, whether or not
-the player is there; the first town is roughly even, slightly in the
-resistance's favour; after that the resistance accelerates.
+The rule (issue #79, set by the user on 2026-10-12): the first town the
+resistance takes may or may not draw an immediate answer. From the second
+town on, the occupier answers every town it loses, so two towns can be under
+attack at the same time and both can be retaken. The resistance gets no
+bonus for holding towns: every town rises at the plain `supportRate`.
 
-**Dispatch.** A town that rises (a CITY flipping to the resistance, the
-start-town HQ excepted) is answered with probability
-`chance(k) = counterAttackChance * (1 - counterAttackChanceDecay)^k`, where k
-is the number of towns the resistance held before this flip. The force is
-`size(k) = max(1, round(counterAttackSize * groupSize * (1 - counterAttackSizeDecay)^k))`
-bodies, capped by what the nearest occupier base can spare:
+**Counting towns.** k is the number of towns the resistance had already
+taken before this flip. It is the larger of two numbers: a saved counter that
+every flip of a non-exempt CITY to the resistance raises by one (a town taken
+a second time after it fell counts again), and the non-exempt towns the
+resistance holds at the flip (so a mission that opens with a town in
+resistance hands has no "first town"). The start-town HQ never counts and is
+never a target.
+
+**Dispatch.** The first town (k = 0) is answered with probability
+`counterAttackFirstTownChance` (0.4): six times in ten nothing comes for it.
+Every later town (k >= 1) is answered with `counterAttackChance` (1.0), with
+no decay however many towns are held. The roll is a hash of the flip (town,
+flip stamp, k), never the engine RNG. The force is
+`min(12, max(1, round(counterAttackSize * groupSize * max(1, 1 + counterAttackWarLevelStep * (warLevel - 1)))))`
+bodies: 6 at war level 1, 8 at 2, 9 at 3, 11 at 4 and a full group of 12
+from war level 5. The war level only scales the force up, never down. The
+force is then capped by what the nearest occupier base can spare:
 `(stored reserve + live garrison) - floor(garrisonMax * counterAttackSourceKeep)`,
 taken from the base's live garrison when the town is inside the bubble and
 that garrison is materialized (the soldiers march out of the post), else from
@@ -286,23 +299,26 @@ force loses `ceil(A * counterAttackRepelLoss)`; the rest return to their base.
 An empty town is not rolled for: the force holds it and the retake drain
 reverts it after `(support - townRevertSupport) / supportRate` zone ticks.
 
-**How later towns tilt.** With the defaults, three fighters left in the k-th
-next town face:
+**What the player should expect.** With the defaults, off-screen, for a town
+with three fighters left in it, or left empty:
 
-| Towns held before (k) | Answered | Force | Town holds if answered | Town lost |
-|---|---|---|---|---|
-| 0 | 1.00 | 6 | 0.60 | 0.40 |
-| 1 | 0.85 | 5 | 0.64 | 0.30 |
-| 2 | 0.72 | 4 | 0.69 | 0.22 |
-| 3 | 0.61 | 4 | 0.69 | 0.19 |
-| 5 | 0.44 | 3 | 0.75 | 0.11 |
+| | Town 1 (k = 0) | Town 2 (k = 1) | Town 3 (k = 2) |
+|---|---|---|---|
+| A force comes | 4 times in 10 | always | always |
+| When | 2 to 5 min after the flip | 2 to 5 min after the flip | 2 to 5 min after the flip |
+| Force planned, war level 1 / 3 / 5+ (a base's spare caps what leaves) | 6 / 9 / 12 | 6 / 9 / 12 | 6 / 9 / 12 |
+| Three fighters stay, war level 1: town lost | 0.4 x 0.4 = 0.16 | 0.40 | 0.40 |
+| Three fighters stay, war level 3: town lost | 0.4 x 0.5 = 0.20 | 0.50 | 0.50 |
+| Left empty: town lost | 0.40 | 1.00 | 1.00 |
 
-and every town held speeds the rise of the next administered town: its
-support gain per tick is `supportRate * min(momentumSupportCap, 1 +
-momentumSupportStep * townsHeld)` (1.1x with one town, 1.5x with five,
-capped at 2x). A held town consolidates at the plain rate. Losing towns
-loses the momentum, and wiping bases empties the reserves the answers are
-drawn from, so both sides of the war feed the same ledger.
+Each flip draws its own force, one record per town, so after town 2 falls
+to the resistance the answers to town 1 (if it drew one) and town 2 can be
+on the road together; `counterAttackMaxLive` (2) caps the live squads in the
+bubble, and more wait. Wiping bases empties the reserves the answers are
+drawn from: a base that cannot spare a man sends nobody.
+
+A standing retake director, an occupier forces pool and reinforcement waves
+are being designed separately; they are not part of this rule.
 
 **Live squads and the bubble.** A live squad stays live until it resolves,
 whichever way the player moves (the simpler rule: no cache transition, no
@@ -327,5 +343,13 @@ it unless fighters stay.
 
 **Saves.** Pending and running counter-attacks are saved
 (`GuerrillaCounterAttack` block: town and base by name, phase, clocks, the
-roll seed, a live squad's group). Every roll is a hash of a seed fixed at the
-flip, so a save and reload never changes an outcome.
+roll seed, a live squad's group, and the towns-taken counter that sets k).
+Every roll is a hash of a seed fixed at the flip, so a save and reload never
+changes an outcome. A save without the counter loads with 0, and the towns
+held at the next flip stand in for it.
+
+**Seams.** `CounterAttack::Decide(tuning, town, k, context)` is the whole
+dispatch decision (go or no-go, and the force size), and
+`CounterAttack::LaunchFrom(registry, view, town, source, size, ...)` sends a
+force of a chosen size from a chosen base through the ordinary launch,
+travel and arrival code. A later occupier forces service hooks in there.

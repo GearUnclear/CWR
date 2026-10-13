@@ -1,5 +1,6 @@
 // Occupier counter-attack service (issue #79, CounterAttack.hpp): dispatch on
-// a town's flip, the momentum decay, reserve debit and write-back, the
+// a town's flip (the first town a 0.4 roll, every later town answered), the
+// war-level force size, reserve debit and write-back, the
 // abstract off-screen resolution against the zone tick's retake drain, the
 // odds roll, the off switch and the save contract.  Pure: the registry is
 // built from inline config, flips run through EvaluateTick, the service is
@@ -55,6 +56,12 @@ std::string ConfigWith(const char* keys)
     const std::string anchor = "class CfgGuerrillaZones\n{\n";
     cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
     return cfg;
+}
+
+// the first town answered for certain: the resolution cases need a force
+std::string Certain(const char* keys = "")
+{
+    return ConfigWith((std::string("counterAttackFirstTownChance = 1; ") + keys).c_str());
 }
 
 struct Fixture
@@ -161,41 +168,70 @@ TEST_CASE("CounterAttack - config defaults, keys and range checks", "[game][guer
     const CounterAttackTuning& t = f.ca.Tuning();
     CHECK(t.enabled);
     CHECK(t.size == Approx(0.5f));
+    CHECK(t.firstTownChance == Approx(0.4f));
     CHECK(t.chance == Approx(1.0f));
+    CHECK(t.warLevelStep == Approx(0.25f));
     CHECK(t.delayMin == Approx(120.0f));
     CHECK(t.delayMax == Approx(300.0f));
     CHECK(t.defenderWeight == Approx(3.0f));
+    CHECK(t.maxLive == 2);
     CHECK(f.registry.Tuning().townRevertSupport == Approx(30.0f));
-    CHECK(f.registry.Tuning().momentumSupportStep == Approx(0.1f));
-    CHECK(f.registry.Tuning().momentumSupportCap == Approx(2.0f));
+    CHECK(f.ca.TownsTaken() == 0);
 
     Fixture g;
-    g.Load(ConfigWith("counterAttackChance = 3; counterAttackDelayMin = 50; counterAttackDelayMax = 10; "
-                      "counterAttackSize = -1; momentumSupportCap = 0.5;"));
+    g.Load(ConfigWith("counterAttackChance = 3; counterAttackFirstTownChance = -1; counterAttackDelayMin = 50; "
+                      "counterAttackDelayMax = 10; counterAttackSize = -1; counterAttackWarLevelStep = 9;"));
     CHECK(g.ca.Tuning().chance == Approx(1.0f));
+    CHECK(g.ca.Tuning().firstTownChance == Approx(0.0f));
     CHECK(g.ca.Tuning().delayMin == Approx(50.0f));
     CHECK(g.ca.Tuning().delayMax == Approx(50.0f)); // raised to the minimum
     CHECK(g.ca.Tuning().size == Approx(0.0f));
-    CHECK(g.registry.Tuning().momentumSupportCap == Approx(1.0f));
+    CHECK(g.ca.Tuning().warLevelStep == Approx(2.0f));
 }
 
 TEST_CASE("CounterAttack - pure rules: chance, size, odds, travel, spare", "[game][guerrilla][counterattack]")
 {
     CounterAttackTuning t;
-    // the first town: the full force, always answered
-    CHECK(CounterAttack::DispatchChance(t, 0) == Approx(1.0f));
-    CHECK(CounterAttack::ForceSize(t, 12, 0) == 6);
-    // momentum: every town already held shrinks both
-    CHECK(CounterAttack::DispatchChance(t, 1) == Approx(0.85f));
-    CHECK(CounterAttack::DispatchChance(t, 3) == Approx(0.614125f));
-    CHECK(CounterAttack::ForceSize(t, 12, 1) == 5);
-    CHECK(CounterAttack::ForceSize(t, 12, 3) == 4);
-    CHECK(CounterAttack::ForceSize(t, 12, 20) == 1); // never below one body
-    for (int k = 0; k < 6; k++)
+    // the first town ever taken: a 0.4 chance; every later town: certain, no
+    // decay however many are held
+    CHECK(CounterAttack::DispatchChance(t, 0) == Approx(0.4f));
+    for (int k = 1; k < 12; k++)
     {
-        CHECK(CounterAttack::DispatchChance(t, k + 1) < CounterAttack::DispatchChance(t, k));
-        CHECK(CounterAttack::ForceSize(t, 12, k + 1) <= CounterAttack::ForceSize(t, 12, k));
+        CHECK(CounterAttack::DispatchChance(t, k) == Approx(1.0f));
     }
+    // the force: counterAttackSize * groupSize, scaled UP by the war level
+    CHECK(CounterAttack::ForceSize(t, 12, 1.0f) == 6);
+    CHECK(CounterAttack::ForceSize(t, 12, 3.0f) == 9);                        // x1.5
+    CHECK(CounterAttack::ForceSize(t, 12, 5.0f) == 12);                       // x2
+    CHECK(CounterAttack::ForceSize(t, 12, 0.0f) == 6);                        // never scaled down
+    CHECK(CounterAttack::ForceSize(t, 12, 10.0f) == CounterAttack::MaxForce); // one group at most
+    for (int wl = 1; wl < 10; wl++)
+    {
+        CHECK(CounterAttack::ForceSize(t, 12, (float)(wl + 1)) >= CounterAttack::ForceSize(t, 12, (float)wl));
+    }
+    CounterAttackTuning flat;
+    flat.warLevelStep = 0;
+    CHECK(CounterAttack::ForceSize(flat, 12, 6.0f) == 6);
+    CounterAttackTuning tiny;
+    tiny.size = 0.01f;
+    CHECK(CounterAttack::ForceSize(tiny, 12, 1.0f) == 1); // never below one body
+    // switched off: never answered
+    CounterAttackTuning off;
+    off.enabled = false;
+    CHECK(CounterAttack::DispatchChance(off, 0) == Approx(0.0f));
+    CHECK(CounterAttack::DispatchChance(off, 3) == Approx(0.0f));
+    // the decision seam: go = roll < chance, size only when going
+    CounterAttackContext ctx;
+    ctx.groupSize = 12;
+    ctx.warLevel = 3.0f;
+    ctx.seed = CounterAttack::MakeSeed("Town", 1, 600, 1);
+    const CounterAttackDecision later = CounterAttack::Decide(t, "Town", 1, ctx);
+    CHECK(later.go);
+    CHECK(later.size == 9);
+    CHECK(later.roll == Approx(CounterAttack::Roll01(ctx.seed, 0)));
+    const CounterAttackDecision none = CounterAttack::Decide(off, "Town", 1, ctx);
+    CHECK_FALSE(none.go);
+    CHECK(none.size == 0);
     // the 60/40 baseline: three fighters against six attackers
     CHECK(CounterAttack::HoldOdds(t, 3, 6) == Approx(0.6f));
     CHECK(CounterAttack::HoldOdds(t, 0, 6) == Approx(0.0f));
@@ -210,11 +246,6 @@ TEST_CASE("CounterAttack - pure rules: chance, size, odds, travel, spare", "[gam
     CHECK(CounterAttack::Spare(t, 0.0f, 6, 6.0f, false) == 0); // a live garrison has no stored reserve
     CHECK(CounterAttack::Spare(t, 1.0f, 0, 6.0f, false) == 0);
     CHECK(CounterAttack::Spare(t, 12.0f, 0, 12.0f, false) == 9);
-    // the momentum multiplier on support gains
-    ZoneTuning zt;
-    CHECK(ZoneRegistry::SupportMomentum(zt, 0) == Approx(1.0f));
-    CHECK(ZoneRegistry::SupportMomentum(zt, 3) == Approx(1.3f));
-    CHECK(ZoneRegistry::SupportMomentum(zt, 40) == Approx(2.0f)); // capped
 }
 
 TEST_CASE("CounterAttack - rolls are deterministic and match the 60/40 baseline", "[game][guerrilla][counterattack]")
@@ -251,10 +282,42 @@ TEST_CASE("CounterAttack - rolls are deterministic and match the 60/40 baseline"
     CHECK(share < 0.63f);
 }
 
+TEST_CASE("CounterAttack - the first town is answered about 40% of the time, later towns always",
+          "[game][guerrilla][counterattack]")
+{
+    CounterAttackTuning t;
+    const char* towns[] = {"Houdan", "Le Port", "Goisse", "Larche", "Cancon", "Meaux", "Chapoi"};
+    int first = 0;
+    int later = 0;
+    int total = 0;
+    for (const char* name : towns)
+    {
+        for (int day = 1; day <= 6; day++)
+        {
+            for (int minute = 0; minute < 1440; minute += 20)
+            {
+                CounterAttackContext ctx;
+                ctx.seed = CounterAttack::MakeSeed(name, day, minute, 0);
+                first += CounterAttack::Decide(t, name, 0, ctx).go ? 1 : 0;
+                for (int k = 1; k <= 4; k++)
+                {
+                    ctx.seed = CounterAttack::MakeSeed(name, day, minute, k);
+                    later += CounterAttack::Decide(t, name, k, ctx).go ? 1 : 0;
+                }
+                total++;
+            }
+        }
+    }
+    const float share = (float)first / (float)total;
+    CHECK(share > 0.37f);
+    CHECK(share < 0.43f);
+    CHECK(later == total * 4);
+}
+
 TEST_CASE("CounterAttack - a town's flip schedules exactly one counter-attack", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     AutoArray<ZoneEventRecord> fired = f.RaiseTown(f.town);
     REQUIRE(CountEvents(fired, ZECaptured, f.town) == 1);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
@@ -264,6 +327,7 @@ TEST_CASE("CounterAttack - a town's flip schedules exactly one counter-attack", 
     CHECK(r->phase == CAScheduled);
     CHECK(r->size == 6);
     CHECK(r->townsBefore == 0);
+    CHECK(f.ca.TownsTaken() == 1);
     CHECK(r->clock >= 120.0f);
     CHECK(r->clock <= 300.0f);
     // the same flip seen again does not add a second force
@@ -273,32 +337,38 @@ TEST_CASE("CounterAttack - a town's flip schedules exactly one counter-attack", 
     CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.other, Fixture::GroupSize));
     CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.post, Fixture::GroupSize));
     CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.camp, Fixture::GroupSize));
-    // the start-town HQ is never a target
+    // the start-town HQ is never a target and does not count as a town taken:
+    // the next town is still the first (k = 0)
     Fixture hq;
-    hq.Load(kCounterConfig);
+    hq.Load(Certain());
     hq.registry.ExemptTownGarrison(hq.town);
     hq.RaiseTown(hq.town);
     CHECK_FALSE(hq.ca.OnTownFlipped(hq.registry, hq.town, Fixture::GroupSize));
+    CHECK(hq.ca.TownsTaken() == 0);
+    hq.Z(hq.other).garrison = 0;
+    hq.RaiseTown(hq.other);
+    REQUIRE(hq.ca.OnTownFlipped(hq.registry, hq.other, Fixture::GroupSize));
+    CHECK(hq.ca.Get(0)->townsBefore == 0);
 }
 
 TEST_CASE("CounterAttack - counterAttack = 0 restores the old behaviour", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(ConfigWith("counterAttack = 0;"));
+    f.Load(ConfigWith("counterAttack = 0; counterAttackFirstTownChance = 1;"));
     CHECK_FALSE(f.ca.Tuning().enabled);
-    CHECK(f.registry.Tuning().momentumSupportStep == Approx(0.0f));
     f.RaiseTown(f.town);
     CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     CHECK(f.ca.Count() == 0);
-    // and no momentum: Other rises at the plain supportRate with a town held
-    AutoArray<ZoneEventRecord> fired;
+    CHECK(f.ca.TownsTaken() == 0);
+    // a second town: still nothing
     f.Z(f.other).garrison = 0;
-    ZoneTickInputs in = f.Inputs(f.Z(f.other).pos.X(), f.Z(f.other).pos.Z(), f.other, 1);
-    f.registry.EvaluateTick(in, fired);
-    CHECK(f.Z(f.other).support == Approx(25.0f));
+    f.RaiseTown(f.other);
+    CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.other, Fixture::GroupSize));
+    CHECK(f.ca.Count() == 0);
 }
 
-TEST_CASE("CounterAttack - momentum speeds support gains elsewhere", "[game][guerrilla][counterattack]")
+TEST_CASE("CounterAttack - support gains are the plain supportRate whatever is held (no momentum)",
+          "[game][guerrilla][counterattack]")
 {
     Fixture f;
     f.Load(kCounterConfig);
@@ -307,32 +377,115 @@ TEST_CASE("CounterAttack - momentum speeds support gains elsewhere", "[game][gue
     AutoArray<ZoneEventRecord> fired;
     ZoneTickInputs in = f.Inputs(f.Z(f.other).pos.X(), f.Z(f.other).pos.Z(), f.other, 1);
     f.registry.EvaluateTick(in, fired);
-    CHECK(f.Z(f.other).support == Approx(20.0f + 5.0f * 1.1f));
+    CHECK(f.Z(f.other).support == Approx(25.0f));
 }
 
-TEST_CASE("CounterAttack - the second town gets a smaller, less certain answer", "[game][guerrilla][counterattack]")
+TEST_CASE("CounterAttack - from the second town on every flip is answered", "[game][guerrilla][counterattack]")
 {
+    // the first town is never answered here; the second always is, with the
+    // full force, and so is the first town taken again after it fell
     Fixture f;
-    f.Load(ConfigWith("counterAttackChanceDecay = 0;")); // keep the dispatch certain, test the size
-    f.Z(f.other).owner = "GUER";                         // a town already held
+    f.Load(ConfigWith("counterAttackFirstTownChance = 0;"));
     f.RaiseTown(f.town);
-    REQUIRE(f.registry.LiberatedTownCount() == 2);
-    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    CHECK(f.ca.TownsTaken() == 1);
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.other, Fixture::GroupSize));
     CHECK(f.ca.Get(0)->townsBefore == 1);
-    CHECK(f.ca.Get(0)->size == 5);
+    CHECK(f.ca.Get(0)->size == 6); // no decay
+    CHECK(f.ca.TownsTaken() == 2);
+    // Town falls and is taken again: k counts towns taken, not held, so it
+    // is no longer a first town
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.registry.RevertTown(f.town, fired));
+    f.Z(f.town).garrison = 0;
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    CHECK(f.ca.Get(1)->townsBefore == 2);
+    CHECK(f.ca.Count() == 2); // both towns are under attack
 
-    // with the chance decaying to nothing the occupier stops answering
+    // towns held at the start count: a mission that opens with a town in
+    // resistance hands has no "first town"
     Fixture g;
-    g.Load(ConfigWith("counterAttackChanceDecay = 1;"));
+    g.Load(ConfigWith("counterAttackFirstTownChance = 0;"));
     g.Z(g.other).owner = "GUER";
     g.RaiseTown(g.town);
-    CHECK_FALSE(g.ca.OnTownFlipped(g.registry, g.town, Fixture::GroupSize));
+    REQUIRE(g.ca.OnTownFlipped(g.registry, g.town, Fixture::GroupSize));
+    CHECK(g.ca.Get(0)->townsBefore == 1);
+
+    // later towns are always answered, whatever the flip stamp
+    for (int minute = 0; minute < 120; minute++)
+    {
+        Fixture h;
+        h.Load(ConfigWith("counterAttackFirstTownChance = 0;"));
+        h.ca.SetTownsTaken(1 + minute % 5);
+        h.RaiseTown(h.town);
+        h.Z(h.town).flipDay = 2;
+        h.Z(h.town).flipMinute = minute;
+        CHECK(h.ca.OnTownFlipped(h.registry, h.town, Fixture::GroupSize));
+    }
+}
+
+TEST_CASE("CounterAttack - the war level scales the force up, capped at one group", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize, 3.0f));
+    CHECK(f.ca.Get(0)->size == 9);
+
+    Fixture g;
+    g.Load(Certain());
+    g.RaiseTown(g.town);
+    REQUIRE(g.ca.OnTownFlipped(g.registry, g.town, Fixture::GroupSize, 6.0f));
+    CHECK(g.ca.Get(0)->size == CounterAttack::MaxForce);
+
+    // the base's spare still caps what leaves: Post spares 5 of its 6
+    AutoArray<ZoneEventRecord> fired;
+    g.ca.Step(g.registry, Fixture::View(FarX, FarZ), 300.0f, nullptr, fired);
+    REQUIRE(g.ca.Get(0)->phase == CATravel);
+    CHECK(Fixture::Str(g.ca.Get(0)->source) == "Post");
+    CHECK(g.ca.Get(0)->strength == 5);
+}
+
+TEST_CASE("CounterAttack - the launch seam sends a chosen force from a chosen base", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("counterAttackFirstTownChance = 0;"));
+    f.RaiseTown(f.town);
+    REQUIRE_FALSE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    // the far base, not the nearest, with three men
+    REQUIRE(f.ca.LaunchFrom(f.registry, far, f.town, f.farBase, 3, nullptr, fired));
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(Fixture::Str(f.ca.Get(0)->source) == "FarBase");
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(0)->strength == 3);
+    CHECK(f.Z(f.farBase).garrison == Approx(9.0f));
+    // one record per town; never against an administered town, from a
+    // resistance zone, or more than the base can spare
+    CHECK_FALSE(f.ca.LaunchFrom(f.registry, far, f.town, f.post, 2, nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFrom(f.registry, far, f.other, f.post, 2, nullptr, fired));
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    CHECK_FALSE(f.ca.LaunchFrom(f.registry, far, f.other, f.camp, 2, nullptr, fired));
+    f.Z(f.post).garrison = 1; // keeps its one man home
+    CHECK_FALSE(f.ca.LaunchFrom(f.registry, far, f.other, f.post, 2, nullptr, fired));
+    f.Z(f.post).garrison = 6;
+    REQUIRE(f.ca.LaunchFrom(f.registry, far, f.other, f.post, 12, nullptr, fired));
+    CHECK(f.ca.Get(1)->strength == 5);
+    // the force resolves on the ordinary path: it arrives and holds
+    f.ca.Step(f.registry, far, 5000.0f, nullptr, fired);
+    CHECK(f.ca.Get(0)->phase == CAHolding);
+    CHECK(CountEvents(fired, ZECounterAttack, f.town) == 1);
 }
 
 TEST_CASE("CounterAttack - no base with a reserve: no counter-attack", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     f.Z(f.post).garrison = 1;    // keeps its one man home (25% of 6)
     f.Z(f.farBase).garrison = 0; // wiped
     f.RaiseTown(f.town);
@@ -349,7 +502,7 @@ TEST_CASE("CounterAttack - off-screen: an empty town is drained and reverted aft
           "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     f.RaiseTown(f.town);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     const CounterAttackView far = Fixture::View(FarX, FarZ);
@@ -403,7 +556,7 @@ TEST_CASE("CounterAttack - off-screen: an empty town is drained and reverted aft
 TEST_CASE("CounterAttack - off-screen: fighters in the town face one odds roll", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     f.RaiseTown(f.town);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     const CounterAttackView far = Fixture::View(FarX, FarZ);
@@ -444,7 +597,7 @@ TEST_CASE("CounterAttack - a repelled force writes its survivors back to its bas
     for (int minute = 0; minute < 200 && !(sawRepel && sawRetake); minute++)
     {
         Fixture f;
-        f.Load(kCounterConfig);
+        f.Load(Certain());
         f.RaiseTown(f.town);
         f.Z(f.town).flipDay = 1;
         f.Z(f.town).flipMinute = minute;
@@ -472,7 +625,7 @@ TEST_CASE("CounterAttack - a repelled force writes its survivors back to its bas
 TEST_CASE("CounterAttack - a force on the road turns back when the town falls", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     f.RaiseTown(f.town);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     AutoArray<ZoneEventRecord> fired;
@@ -489,7 +642,7 @@ TEST_CASE("CounterAttack - inside the bubble the live squad waits, it is never s
           "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Certain());
     f.RaiseTown(f.town);
     REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
     // the player stands in the town; no world (ops null): the live spawn
@@ -516,7 +669,7 @@ TEST_CASE("CounterAttack - pending attacks survive save/load", "[game][guerrilla
     const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
     std::filesystem::create_directories(dir);
     const std::filesystem::path path = dir / "counter-attack.bin";
-    const std::string config = ConfigWith("counterAttackDelayMin = 200; counterAttackDelayMax = 200;");
+    const std::string config = Certain("counterAttackDelayMin = 200; counterAttackDelayMax = 200;");
     {
         QIStream in(config.c_str(), config.size());
         ExtParsMission.Parse(in);
@@ -556,7 +709,9 @@ TEST_CASE("CounterAttack - pending attacks survive save/load", "[game][guerrilla
     CHECK(r->size == 6);
     CHECK(r->seed == saved.seed);
     CHECK(r->salt == saved.salt);
+    CHECK(loaded.TownsTaken() == 1);                   // k of the next flip survives the reload
     CHECK(loaded.Tuning().delayMin == Approx(200.0f)); // reread from the mission config
+    CHECK(loaded.Tuning().firstTownChance == Approx(1.0f));
 
     // the loaded record resolves exactly like the original: arrival in the
     // empty town holds it

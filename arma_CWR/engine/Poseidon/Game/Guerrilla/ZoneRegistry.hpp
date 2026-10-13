@@ -86,15 +86,6 @@ struct ZoneTuning
     // Range-checked at load to 0..supportFlip; townRevertSupport = supportFlip
     // restores the pre-hysteresis rule.
     float townRevertSupport = 30.0f;
-    // Momentum (issue #79 counter-attack pacing, OFFSCREEN-CONTRACT.md):
-    // every town the resistance holds speeds the rise of the towns it does
-    // not hold yet: an administered town gains supportRate *
-    // min(momentumSupportCap, 1 + momentumSupportStep * towns held) per tick
-    // (a held town consolidates at the plain supportRate).  counterAttack = 0
-    // switches the pacing layer off and
-    // with it the momentum (step 0, multiplier 1).
-    float momentumSupportStep = 0.1f;
-    float momentumSupportCap = 2.0f;
     // defenders >= ratio * attackers treats a contested zone as DEFENDED
     // (a token straggler cannot hold a re-secured post hostage); 0 disables.
     // Any live defender still blocks SECURING regardless of this ratio.
@@ -498,12 +489,8 @@ class ZoneRegistry : public SerializeClass
     // START TOWN headquarters).  Zeroes the reserve; persistent.
     void ExemptTownGarrison(int index);
     // CITY zones currently held by the resistance (the "towns liberated"
-    // count for a counter-attack / momentum service)
+    // count, gmZoneStats)
     int LiberatedTownCount() const;
-    // the momentum multiplier on resistance support gains for this many
-    // towns held: min(momentumSupportCap, 1 + momentumSupportStep * towns),
-    // never below 1 (pure)
-    static float SupportMomentum(const ZoneTuning& t, int townsHeld);
     // Is className one of the resistance descriptor's civilian-outfit bodies
     // (issue #25 Civ-family keys: playerClassCiv, companionClassCiv,
     // recruitFighterCiv, recruitSpecialistCiv, holdClassCiv, civTier[])?

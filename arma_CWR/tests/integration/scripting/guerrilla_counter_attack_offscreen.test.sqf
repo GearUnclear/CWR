@@ -6,7 +6,10 @@
 //    o1  Houdan's garrison is killed, one fighter is left in the town and the
 //        player leaves; the Outpost caches back to its stored reserve of 6
 //        and the town rises on the remote tick (D1) with nobody watching;
-//    o2  the fighter walks out; the flip's counter-attack launches inside
+//    o2  the occupier already counts one town taken (townsTaken tuned to 1,
+//        so this is a second town, k = 1, answered with certainty at the
+//        default chances: no tuning of the first-town roll); the fighter
+//        walks out; the flip's counter-attack launches inside
 //        the delay window (tuned to 5..10 s) as an ABSTRACT force: 5 of the
 //        Outpost's 6 leave its stored reserve (1 stays home) and TRAVEL, no
 //        entity is created;
@@ -36,6 +39,7 @@ coPos = (gmZone coV) select 8
 coFar = [7922, 8500, 0]
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMin", 5]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["delayMax", 10]]), "true"]
+triAssertEq [(format ["%1", gmCounterAttackTune ["townsTaken", 1]]), "true"]
 
 // ---- o1: kill the town garrison, leave a fighter, walk away -----------------
 triSimUntil { gmGarrisonSpawned coV }
@@ -60,6 +64,9 @@ triSimUntil { ((gmZone coV) select 2) == gmResistanceSide }
 {deleteVehicle _x} forEach (units coSq)
 coFlipT = time
 triAssertEq [(count gmCounterAttacks), 1]
+coRow = gmCounterAttacks select 0
+triAssertEq [(coRow select 6), 1]
+triAssertGe [(coRow select 5), 6]
 triSimUntil { (((gmCounterAttacks + [["", "", "NONE"]]) select 0) select 2) != "SCHEDULED" }
 triAssertGe [coFlipT + 20, time]
 coRow = gmCounterAttacks select 0
