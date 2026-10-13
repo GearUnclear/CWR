@@ -29,6 +29,9 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Not a campaign: a tester who clears this fixture's only base must not be
+    // sent to the win debriefing (campaign win rule, issue #79 B3).
+    campaignEnd = 0;
     // Engine tuning stays at stock defaults (undercoverNoticeRadius=20;
     // undercoverBackArcCos=-0.2; boosts 2.0/1.4; alertHeatBreak=25;
     // undercoverHeatWitness=8). Direct-launch faction fallbacks:

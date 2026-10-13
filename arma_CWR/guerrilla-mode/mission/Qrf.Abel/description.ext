@@ -50,6 +50,9 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Not a campaign: a tester who clears this fixture's only base must not be
+    // sent to the win debriefing (campaign win rule, issue #79 B3).
+    campaignEnd = 0;
     // Engine tuning stays at stock defaults (alertInterval=5;
     // alertYellowKnows=0.5; alertRedKnows=1.5; alertWindowSeconds=20;
     // zoneArea=150; cacheRadius=800; revealRadius=1500). Direct-launch
