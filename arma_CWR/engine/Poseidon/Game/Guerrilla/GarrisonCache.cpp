@@ -666,6 +666,22 @@ void GarrisonCache::Simulate(float deltaT)
     DispatchEvents(fired);
 }
 
+void GarrisonCache::AdoptGroup(int zoneIndex, AIGroup* grp)
+{
+    SyncStates();
+    ZoneRecord* z = ZoneRegistry::Instance().GetZoneMutable(zoneIndex);
+    if (!grp || !z || zoneIndex >= _states.Size())
+    {
+        return;
+    }
+    GarrisonState& state = _states[zoneIndex];
+    state.groups.Compact();
+    SetHoldPosture(grp, z->pos, state.groups.Size() == 0);
+    state.groups.Add(grp);
+    state.spawned = true;
+    z->liveOccupiers = (float)CountAlive(state);
+}
+
 void GarrisonCache::ForceDespawn(int zoneIndex)
 {
     SyncStates();

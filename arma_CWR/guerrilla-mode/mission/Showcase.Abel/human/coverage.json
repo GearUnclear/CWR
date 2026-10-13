@@ -111,6 +111,13 @@
       "alert",
       "heat"
     ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttack.cpp": [
+      "town_support",
+      "garrison"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttackCommands.cpp": [
+      "town_support"
+    ],
     "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
       "garrison"
     ],

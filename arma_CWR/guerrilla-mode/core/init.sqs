@@ -205,6 +205,8 @@ gmPlayer = player
 ;    gmEvtContested  [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtCapLost    [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtTownLost   [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtCounter    [zoneIndex, zoneName, ownerString]  -> capture.sqs
+;    gmEvtRepelled   [zoneIndex, zoneName, ownerString]  -> capture.sqs
 ;    gmEvtLoaded     [saveVersion]                       -> campaign.sqs
 ;    gmEvtAlert      [zoneIndex, zoneName, old, new]     -> qrf.sqs
 ;    gmEvtUcBroken   [reason, zoneName]                  -> undercover.sqs
@@ -217,6 +219,8 @@ gmEvtCapStart    = []
 gmEvtContested   = []
 gmEvtCapLost     = []
 gmEvtTownLost    = []
+gmEvtCounter     = []
+gmEvtRepelled    = []
 gmEvtLoaded      = []
 gmEvtAlert       = []
 gmEvtUcBroken    = []
@@ -260,6 +264,10 @@ gmZoneOnEvent ["captureStarted", {gmEvtCapStart = gmEvtCapStart + [_this]}]
 gmZoneOnEvent ["contested", {gmEvtContested = gmEvtContested + [_this]}]
 gmZoneOnEvent ["captureLost", {gmEvtCapLost = gmEvtCapLost + [_this]}]
 gmZoneOnEvent ["townLost", {gmEvtTownLost = gmEvtTownLost + [_this]}]
+; the native occupier counter-attack (issue #79): a force reached a held
+; town, or was beaten off / withdrew
+gmZoneOnEvent ["counterAttack", {gmEvtCounter = gmEvtCounter + [_this]}]
+gmZoneOnEvent ["counterRepelled", {gmEvtRepelled = gmEvtRepelled + [_this]}]
 ; Native events have ONE handler slot: fan out the load notification here,
 ; preserving campaign.sqs's queue while asking the civilian menu to remount.
 gmZoneOnEvent ["campaignLoaded", {gmEvtLoaded = gmEvtLoaded + [_this]; GM_CI_REMOUNT = true}]

@@ -74,10 +74,27 @@ struct ZoneTuning
     // Town retake (issue #79 scope addition): a resistance-held CITY with
     // living occupier units inside zoneArea and no resistance presence loses
     // supportRate per tick and reverts to occupier administration (garrison
-    // refilled) once support falls below supportFlip; resistance presence
+    // refilled) once support falls below townRevertSupport; resistance presence
     // in a held town consolidates it at the same rate.  0 = liberated towns
     // are permanent and inert (the pre-#79 rule).
     bool townRetake = true;
+    // Retake hysteresis (issue #79, the counter-attack follow-up): a held
+    // town reverts only once occupier boots have drained its support below
+    // this line, not below supportFlip.  A town flips at supportFlip (60) and
+    // reverts below townRevertSupport (30), so walking out of a town you
+    // just took no longer hands it back on the first occupier tick.
+    // Range-checked at load to 0..supportFlip; townRevertSupport = supportFlip
+    // restores the pre-hysteresis rule.
+    float townRevertSupport = 30.0f;
+    // Momentum (issue #79 counter-attack pacing, OFFSCREEN-CONTRACT.md):
+    // every town the resistance holds speeds the rise of the towns it does
+    // not hold yet: an administered town gains supportRate *
+    // min(momentumSupportCap, 1 + momentumSupportStep * towns held) per tick
+    // (a held town consolidates at the plain supportRate).  counterAttack = 0
+    // switches the pacing layer off and
+    // with it the momentum (step 0, multiplier 1).
+    float momentumSupportStep = 0.1f;
+    float momentumSupportCap = 2.0f;
     // defenders >= ratio * attackers treats a contested zone as DEFENDED
     // (a token straggler cannot hold a re-secured post hostage); 0 disables.
     // Any live defender still blocks SECURING regardless of this ratio.
@@ -314,6 +331,8 @@ enum ZoneEventType
     ZEContested,        // both sides in a zone with capture in progress
     ZECaptureLost,      // capture meter decayed back to 0
     ZETownLost,         // "townLost": a resistance-held CITY reverted to occupier administration
+    ZECounterAttack,    // "counterAttack": an occupier retake force reached a held town (CounterAttack)
+    ZECounterRepelled,  // "counterRepelled": that force was beaten off or withdrew
     NZoneEventTypes
 };
 
@@ -342,6 +361,11 @@ struct ZoneTickInputs
     // the 150 m circle (chasing, posted at an approach) still hold the town;
     // read by the CITY support gate only.
     AutoArray<int> garrisonLive;
+    // per zone (optional, missing = 0): ABSTRACT occupier presence, the
+    // bodies of an off-screen counter-attack force holding a resistance-held
+    // town (CounterAttack::AbstractPresence).  Read by the town retake only:
+    // it drains the town exactly like live occupiers would.
+    AutoArray<int> abstractOcc;
 };
 
 // D1 (issue #79, decided by the user): when does the real player count as
@@ -476,6 +500,10 @@ class ZoneRegistry : public SerializeClass
     // CITY zones currently held by the resistance (the "towns liberated"
     // count for a counter-attack / momentum service)
     int LiberatedTownCount() const;
+    // the momentum multiplier on resistance support gains for this many
+    // towns held: min(momentumSupportCap, 1 + momentumSupportStep * towns),
+    // never below 1 (pure)
+    static float SupportMomentum(const ZoneTuning& t, int townsHeld);
     // Is className one of the resistance descriptor's civilian-outfit bodies
     // (issue #25 Civ-family keys: playerClassCiv, companionClassCiv,
     // recruitFighterCiv, recruitSpecialistCiv, holdClassCiv, civTier[])?
@@ -518,6 +546,10 @@ class ZoneRegistry : public SerializeClass
     void SetEventHandler(ZoneEventType type, RString handler);
     RString GetEventHandler(ZoneEventType type) const;
     static int EventTypeFromName(const char* name); // -1 when unknown
+    // run the script handlers for events another Guerrilla service raised on
+    // a zone (CounterAttack's counterAttack / counterRepelled); same payload
+    // [zoneIndex, zoneName, owner] as the registry's own events
+    void FireEvents(const AutoArray<ZoneEventRecord>& fired) { DispatchEvents(fired); }
 
     // pure town enumeration (unit-tested; no world access) -------------------
     // One Names entry (CfgWorlds >> <world> >> Names) -> (name, pos) when it

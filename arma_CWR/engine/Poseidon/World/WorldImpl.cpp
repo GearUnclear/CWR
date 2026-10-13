@@ -12,6 +12,7 @@
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
@@ -2161,6 +2162,25 @@ LSError World::Serialize(ParamArchive& ar, int message)
         // no block: only the tuning is missing, read it from the mission
         // config the first pass reparsed
         Guerrilla::CampaignEnd::Instance().InitMission();
+    }
+
+    // Guerrilla occupier counter-attacks (issue #79): pending and running
+    // retake forces (target and source by zone name, phase, clocks, the
+    // roll seed, a live squad's group ref).  Save-gated on a record
+    // existing; the live squad's bodies ride the world's vehicle
+    // serializer and its group ref resolves on the second pass.  Without
+    // the block only the tuning is read back from the mission config.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        Guerrilla::CounterAttack::Instance().Clear();
+    }
+    if (ar.IsSaving() ? Guerrilla::CounterAttack::Instance().HasState() : ar.IsSubclass("GuerrillaCounterAttack"))
+    {
+        PARAM_CHECK(ar.Serialize("GuerrillaCounterAttack", Guerrilla::CounterAttack::Instance(), 14))
+    }
+    else if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassSecond)
+    {
+        Guerrilla::CounterAttack::Instance().InitMission();
     }
 
     PARAM_CHECK(ar.Serialize("actualOvercast", _actualOvercast, 1))

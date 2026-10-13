@@ -20,7 +20,8 @@
 ;  and reacts inside its own ~ loop.
 ;
 ;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed / gmEvtCapStart /
-;        gmEvtContested / gmEvtCapLost / gmEvtTownLost (consumer side), GM_HOLD_* and
+;        gmEvtContested / gmEvtCapLost / gmEvtTownLost / gmEvtCounter /
+;        gmEvtRepelled (consumer side), GM_HOLD_* and
 ;        GM_TT_* tunables. Spawned hold groups are fire-and-forget (the old
 ;        GM_HOLD_GROUPS array was never read by anything; dropped).
 ;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
@@ -69,6 +70,8 @@ GM_cStart = gmEvtCapStart + []; gmEvtCapStart = []
 GM_cCont  = gmEvtContested + []; gmEvtContested = []
 GM_cLost  = gmEvtCapLost + []; gmEvtCapLost = []
 GM_cTown  = gmEvtTownLost + []; gmEvtTownLost = []
+GM_cCtr   = gmEvtCounter + []; gmEvtCounter = []
+GM_cRep   = gmEvtRepelled + []; gmEvtRepelled = []
 
 ; ---- capture-started: the meter left 0 --------------------------------------
 GM_cI = 0
@@ -109,6 +112,27 @@ gmJournalNote ["Their soldiers walked back in and nobody stood in the street. Th
 GM_cI = GM_cI + 1
 goto "tlev"
 #tlfin
+
+; ---- counter-attack: the occupier sent a force back for a held town (native
+;      CounterAttack service, issue #79), whether or not anyone is there -----
+GM_cI = 0
+#caev
+? GM_cI >= (count GM_cCtr) : goto "cafin"
+hint format ["Occupier soldiers are moving on %1. Get fighters into the streets or lose it.", (GM_cCtr select GM_cI) select 1]
+gmJournalNote ["Word came up the road that their soldiers were coming back for the town. People pulled their shutters down early.", (GM_cCtr select GM_cI) select 1, "danger"]
+GM_cI = GM_cI + 1
+goto "caev"
+#cafin
+
+; ---- counter-attack repelled: the force was beaten off or gave up ----------
+GM_cI = 0
+#crev
+? GM_cI >= (count GM_cRep) : goto "crfin"
+hint format ["%1 held. The occupier pulled back.", (GM_cRep select GM_cI) select 1]
+gmJournalNote ["They came back for the town and went home short of men. Our flag is still on the pole.", (GM_cRep select GM_cI) select 1, "good"]
+GM_cI = GM_cI + 1
+goto "crev"
+#crfin
 
 ; ---- town ready: support crossed the threshold, needs fighters in town ------
 GM_cI = 0

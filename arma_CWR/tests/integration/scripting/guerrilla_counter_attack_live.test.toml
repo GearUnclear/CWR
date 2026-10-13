@@ -1,0 +1,18 @@
+# Occupier counter-attack, live path (issue #79 B2 follow-up, native
+# CounterAttack service). Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "counterattack"]
+# zone tick 3 s, cache pass 5 s; the rise from ~20 to 60 is 8 ticks, the
+# delay window is tuned to 5..10 s, the walk check needs 25 m, the drain
+# from ~60 to below 30 is 7 ticks
+timeout = 420
+assert_timeout = 150
+extra_args = ["--dev"]

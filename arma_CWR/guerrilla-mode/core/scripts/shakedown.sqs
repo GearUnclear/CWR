@@ -127,6 +127,10 @@ gmShkI = 0
 ? gmShkI >= gmZoneCount : goto "loopTail"
 gmShkZt = gmZone gmShkI
 ? (gmShkZt select GM_Z_TYPE) != "CITY" : goto "scannext"
+; a town the resistance holds has no occupier patrol to stage a shakedown:
+; a pair spawned there would also drain the town by accident (the native
+; retake counts any living occupier in the zone, issue #79 D8)
+? (gmShkZt select GM_Z_OWNER) == gmResistanceSide : goto "scannext"
 ? (gmShkZt select GM_Z_NAME) in GM_PANIC_ZONES : goto "scannext"
 ? ((getPos aP) distance (gmShkZt select GM_Z_POS)) > GM_SHK_RANGE : goto "scannext"
 ; cooldown lookup in two steps: `and` evaluates BOTH operands in this
@@ -146,6 +150,8 @@ gmShkI = gmShkI + 1
 goto "scan"
 
 ; ---- forced selection: nearest POPULATED CITY to the player, no gates --------
+;      (the owner gate too: the debug/test hook may stage a scene in a held
+;      town on purpose, e.g. guerrilla_civ_shakedown pins its support there)
 #forcepick
 gmShkBest = -1; gmShkBd = 999999; gmShkI = 0; while {gmShkI < gmZoneCount} do {gmShkZt = gmZone gmShkI; if ((gmShkZt select GM_Z_TYPE) == "CITY") then {gmShkN = 0; gmShkJ = 0; while {gmShkJ < (count GM_CIV_GROUP_ZONE)} do {if ((GM_CIV_GROUP_ZONE select gmShkJ) == (gmShkZt select GM_Z_NAME)) then {gmShkN = gmShkN + 1}; gmShkJ = gmShkJ + 1}; if (gmShkN > 0) then {gmShkD = (getPos aP) distance (gmShkZt select GM_Z_POS); if (gmShkD < gmShkBd) then {gmShkBd = gmShkD; gmShkBest = gmShkI}}}; gmShkI = gmShkI + 1}
 ; no populated CITY yet: flag stays set, retried next tick (tests wait on

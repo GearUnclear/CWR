@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Global.hpp>      // Glob.header.worldname
 #include <Poseidon/Core/SaveVersion.hpp> // GuerrillaSaveVersion
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp>  // flip hook + abstract presence (issue #79)
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>  // GatherSimDiag census
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>        // GatherSimDiag census
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>        // GatherSimDiag gm/frame timings
@@ -697,6 +698,34 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.cityGarrison = ReadTownGarrison(cfg.ReadValue("cityGarrison", (float)_tuning.cityGarrison), "cityGarrison",
                                             "CfgGuerrillaZones");
     _tuning.townRetake = cfg.ReadValue("townRetake", _tuning.townRetake ? 1.0f : 0.0f) != 0.0f;
+    // retake hysteresis: revert below townRevertSupport, never above the flip
+    // line (a value above it would hand a town back the tick it rose)
+    _tuning.townRevertSupport = cfg.ReadValue("townRevertSupport", _tuning.townRevertSupport);
+    if (_tuning.townRevertSupport < 0 || _tuning.townRevertSupport > _tuning.supportFlip)
+    {
+        const float fixed = _tuning.townRevertSupport < 0 ? 0.0f : _tuning.supportFlip;
+        LOG_WARN(Core, "ZoneRegistry: townRevertSupport = {} repaired to {} (0..supportFlip {})",
+                 (double)_tuning.townRevertSupport, (double)fixed, (double)_tuning.supportFlip);
+        _tuning.townRevertSupport = fixed;
+    }
+    // momentum: support gains grow with the towns held (counter-attack
+    // pacing); counterAttack = 0 switches the whole pacing layer off
+    _tuning.momentumSupportStep = cfg.ReadValue("momentumSupportStep", _tuning.momentumSupportStep);
+    _tuning.momentumSupportCap = cfg.ReadValue("momentumSupportCap", _tuning.momentumSupportCap);
+    if (_tuning.momentumSupportStep < 0)
+    {
+        LOG_WARN(Core, "ZoneRegistry: momentumSupportStep = {} repaired to 0", (double)_tuning.momentumSupportStep);
+        _tuning.momentumSupportStep = 0;
+    }
+    if (_tuning.momentumSupportCap < 1)
+    {
+        LOG_WARN(Core, "ZoneRegistry: momentumSupportCap = {} repaired to 1", (double)_tuning.momentumSupportCap);
+        _tuning.momentumSupportCap = 1;
+    }
+    if (cfg.ReadValue("counterAttack", 1.0f) == 0.0f)
+    {
+        _tuning.momentumSupportStep = 0;
+    }
     // already read (and acted on) in LoadFromParams; re-read so the tuning
     // struct is complete for anyone inspecting it
     _tuning.playerSide = cfg.ReadValue("playerSide", _tuning.playerSide);
@@ -1621,7 +1650,8 @@ void ZoneRegistry::HeatDecay(int index, float amount)
 //     flips at supportFlip with fighters present.
 //   * resistance-held town (townRetake): the mirror image.  Living occupier
 //     units inside zoneArea with no resistance presence drain supportRate
-//     per tick; below supportFlip the town reverts to administration and its
+//     per tick; below townRevertSupport (default 30, under the flip line
+//     supportFlip 60: hysteresis) the town reverts to administration and its
 //     garrison is refilled (RevertTown).  Resistance presence with no
 //     occupier presence consolidates it, +supportRate per tick up to 100.
 //     Both present: frozen.  This runs off-screen too while occupier units
@@ -1688,6 +1718,16 @@ void ZoneRegistry::ExemptTownGarrison(int index)
     z->garrisonExempt = true;
     z->garrison = 0;
     z->recoverClock = 0;
+}
+
+float ZoneRegistry::SupportMomentum(const ZoneTuning& t, int townsHeld)
+{
+    float m = 1.0f + t.momentumSupportStep * (float)(townsHeld > 0 ? townsHeld : 0);
+    if (m > t.momentumSupportCap)
+    {
+        m = t.momentumSupportCap;
+    }
+    return m < 1.0f ? 1.0f : m;
 }
 
 int ZoneRegistry::LiberatedTownCount() const
@@ -2073,6 +2113,14 @@ int ZoneRegistry::EventTypeFromName(const char* name)
     {
         return ZETownLost;
     }
+    if (stricmp(name, "counterAttack") == 0)
+    {
+        return ZECounterAttack;
+    }
+    if (stricmp(name, "counterRepelled") == 0)
+    {
+        return ZECounterRepelled;
+    }
     return -1;
 }
 
@@ -2155,6 +2203,10 @@ void ZoneRegistry::Simulate(float deltaT)
     AutoArray<ZoneEventRecord> fired;
     EvaluateTick(in, fired);
     UpdateMarkers();
+    // the counter-attack service (issue #79) schedules a retake force on a
+    // town's flip and adopts a live force as the garrison of a town it
+    // retook; native, so it sees every flip whatever the script handlers do
+    CounterAttack::Instance().OnZoneEvents(fired);
     // handlers run only after the registry's own state mutation completed
     DispatchEvents(fired);
 }
@@ -2218,6 +2270,9 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     int seenDay = 0;
     int seenMinute = 0;
     const bool haveClock = JournalClockNow(seenDay, seenMinute);
+    // momentum (counter-attack pacing): the rise of an administered town
+    // scales with the towns already held, sampled once per tick
+    const float gainRate = _tuning.supportRate * SupportMomentum(_tuning, LiberatedTownCount());
 
     for (int i = 0; i < n; i++)
     {
@@ -2232,6 +2287,12 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         bool cityEligible = IsAdministeredTown(z);
         // a resistance-held town can be retaken (townRetake)
         bool retakeEligible = _tuning.townRetake && isCity && stricmp(z.owner, _resistanceSide) == 0;
+        // an off-screen counter-attack force holding this town counts as
+        // occupier presence for the retake (and only for it)
+        if (retakeEligible && i < in.abstractOcc.Size())
+        {
+            occ += in.abstractOcc[i];
+        }
         const bool inBubble = Dist2DSq(z.pos.X(), z.pos.Z(), in.playerX, in.playerZ) <= cacheSq;
         z.lastInBubble = inBubble;
         if (inBubble)
@@ -2379,7 +2440,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             bool occHere = occ > 0 || z.garrison >= 1 || z.lastGarrisonLive > 0;
             if (guerHere && !occHere)
             {
-                z.support += _tuning.supportRate;
+                z.support += gainRate;
                 if (z.support > 100)
                 {
                     z.support = 100;
@@ -2431,6 +2492,8 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             bool occHere = occ > 0;
             if (guerHere && !occHere)
             {
+                // consolidation runs at the plain rate: momentum speeds the
+                // rise of the NEXT town, not the hold on this one
                 z.support += _tuning.supportRate;
                 if (z.support > 100)
                 {
@@ -2446,7 +2509,10 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
                 }
             }
             z.contestedLastTick = guerHere && occHere;
-            if (occHere && !guerHere && z.support < _tuning.supportFlip)
+            // hysteresis: the revert line sits below the flip line
+            // (townRevertSupport), so a town just taken survives the first
+            // occupier ticks after the fighters walk out
+            if (occHere && !guerHere && z.support < _tuning.townRevertSupport)
             {
                 RevertTown(i, fired);
             }
@@ -2600,6 +2666,14 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
     for (int i = 0; i < n; i++)
     {
         in.garrisonLive[i] = cache.LiveCount(i);
+    }
+
+    // abstract counter-attack forces holding a held town off-screen
+    const CounterAttack& counter = CounterAttack::Instance();
+    in.abstractOcc.Resize(n);
+    for (int i = 0; i < n; i++)
+    {
+        in.abstractOcc[i] = counter.AbstractPresence(*this, i);
     }
 }
 
@@ -3051,6 +3125,10 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onCaptureLost", _handlers[ZECaptureLost], 1, RString()))
     // town retake (issue #79): absent in older saves, same degradation
     PARAM_CHECK(ar.Serialize("onTownLost", _handlers[ZETownLost], 1, RString()))
+    // counter-attack narration (issue #79): absent in older saves, same
+    // degradation
+    PARAM_CHECK(ar.Serialize("onCounterAttack", _handlers[ZECounterAttack], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onCounterRepelled", _handlers[ZECounterRepelled], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

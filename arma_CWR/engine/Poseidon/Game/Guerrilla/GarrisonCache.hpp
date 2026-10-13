@@ -133,6 +133,11 @@ class GarrisonCache : public SerializeClass
     void Simulate(float deltaT);
     // script escape hatch: immediate despawn write-back for one zone
     void ForceDespawn(int zoneIndex);
+    // take a live occupier group as (part of) a zone's garrison: the
+    // counter-attack squad that retook a town stays as its defenders
+    // (issue #79).  It gets the hold posture and is written back, cached
+    // and counted like any garrison group from here on.
+    void AdoptGroup(int zoneIndex, AIGroup* grp);
     // test aid: force a zone's spawned flag without world access, so the
     // save/load bookkeeping (spawned rows, dead-group reconciliation) is
     // unit-testable

@@ -947,6 +947,9 @@ namespace
 const char* kTownConfig =
     "class CfgGuerrillaZones\n"
     "{\n"
+    // the held town would otherwise speed every gain by the momentum step
+    // (counter-attack pacing); these cases pin the plain supportRate
+    "    momentumSupportStep = 0;\n"
     "    class Zones\n"
     "    {\n"
     "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; support=100; "
@@ -1222,18 +1225,22 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
     TownFixture t;
     t.Load(kTownConfig);
 
-    SECTION("occupiers alone drain a held town at supportRate and it reverts below the line")
+    SECTION("occupiers alone drain a held town at supportRate and it reverts below townRevertSupport")
     {
+        REQUIRE(t.f.registry.Tuning().townRevertSupport == Approx(30.0f));
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
         in.occCount[t.held] = 2;
-        Ticks(t.f.registry, in, fired, 2); // 70 -> 60: still held
-        REQUIRE(t.Z(t.held).support == Approx(60.0f));
+        Ticks(t.f.registry, in, fired, 3); // 70 -> 55: under the flip line, still held (hysteresis)
+        REQUIRE(t.Z(t.held).support == Approx(55.0f));
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        Ticks(t.f.registry, in, fired, 5); // -> 30: on the revert line, still held
+        REQUIRE(t.Z(t.held).support == Approx(30.0f));
         REQUIRE(Str(t.Z(t.held).owner) == "GUER");
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 0);
-        t.f.registry.EvaluateTick(in, fired); // 55 < 60: retaken
+        t.f.registry.EvaluateTick(in, fired); // 25 < 30: retaken
         const ZoneRecord& z = t.Z(t.held);
-        REQUIRE(z.support == Approx(55.0f));
+        REQUIRE(z.support == Approx(25.0f));
         // authored RESISTANCE falls to plain NEUTRAL administration
         REQUIRE(Str(z.owner) == "NEUTRAL");
         REQUIRE(z.garrison == Approx(4.0f)); // refilled to the town's strength
@@ -1247,7 +1254,7 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         ZoneTickInputs back = MakeInputs(t.f.registry, t.held, t.held);
         Ticks(t.f.registry, back, fired, 5);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
-        REQUIRE(t.Z(t.held).support == Approx(55.0f));
+        REQUIRE(t.Z(t.held).support == Approx(25.0f));
     }
 
     SECTION("a town that rose reverts to its authored owner with its garrison back")
@@ -1260,7 +1267,9 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         ZoneTickInputs occ = MakeInputs(t.f.registry, t.town, -1);
         occ.occCount[t.town] = 1;
         fired.Clear();
-        t.f.registry.EvaluateTick(occ, fired);
+        Ticks(t.f.registry, occ, fired, 6); // 60 -> 30: still held
+        REQUIRE(Str(t.Z(t.town).owner) == "GUER");
+        t.f.registry.EvaluateTick(occ, fired); // 25
         REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.town).garrison == Approx(4.0f));
         REQUIRE(CountEvents(fired, ZETownLost, t.town) == 1);
@@ -1298,7 +1307,9 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         t.f.registry.EvaluateTick(in, fired);
         REQUIRE(t.Z(t.held).lastRemote);
         REQUIRE(t.Z(t.held).support == Approx(65.0f));
-        Ticks(t.f.registry, in, fired, 2);
+        Ticks(t.f.registry, in, fired, 7); // -> 30: still held
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        Ticks(t.f.registry, in, fired, 1);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
 
@@ -1319,7 +1330,7 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         AutoArray<ZoneEventRecord> fired;
         ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
         in.occCount[t.held] = 1;
-        Ticks(t.f.registry, in, fired, 3);
+        Ticks(t.f.registry, in, fired, 9);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.held).garrison == Approx(0.0f));
     }
@@ -1352,10 +1363,33 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(CountEvents(fired, ZETownLost, legacy.held) == 0);
     }
 
+    SECTION("townRevertSupport = supportFlip restores the pre-hysteresis rule")
+    {
+        TownFixture old;
+        old.Load(TownConfigWith("townRevertSupport = 60;"));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(old.f.registry, old.held, -1);
+        in.occCount[old.held] = 1;
+        Ticks(old.f.registry, in, fired, 3); // 55 < 60
+        REQUIRE(Str(old.Z(old.held).owner) == "NEUTRAL");
+    }
+
+    SECTION("townRevertSupport is range-checked to 0..supportFlip")
+    {
+        TownFixture high;
+        high.Load(TownConfigWith("townRevertSupport = 90;"));
+        REQUIRE(high.f.registry.Tuning().townRevertSupport == Approx(60.0f));
+        TownFixture low;
+        low.Load(TownConfigWith("townRevertSupport = -5;"));
+        REQUIRE(low.f.registry.Tuning().townRevertSupport == Approx(0.0f));
+    }
+
     SECTION("event name mapping")
     {
         REQUIRE(ZoneRegistry::EventTypeFromName("townLost") == ZETownLost);
         REQUIRE(ZoneRegistry::EventTypeFromName("TOWNLOST") == ZETownLost);
+        REQUIRE(ZoneRegistry::EventTypeFromName("counterAttack") == ZECounterAttack);
+        REQUIRE(ZoneRegistry::EventTypeFromName("counterRepelled") == ZECounterRepelled);
     }
 }
 
