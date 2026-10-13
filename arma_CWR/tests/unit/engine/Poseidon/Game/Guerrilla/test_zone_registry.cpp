@@ -436,6 +436,65 @@ TEST_CASE("ZoneRegistry - military capture rules", "[game][guerrilla]")
         REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
     }
 
+    SECTION("U4: a live body of the post's own garrison within 800 m still defends it")
+    {
+        // the reserve is all materialized and nobody is inside the 150 m
+        // circle, but one of the post's own garrison stepped 200 m out to
+        // fight (GarrisonCache::LiveCountWithin, cacheRadius)
+        ZoneRecord* z = f.registry.GetZoneMutable(outpost);
+        z->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
+        in.garrisonNear.Resize(f.registry.NZones());
+        for (int i = 0; i < in.garrisonNear.Size(); i++)
+        {
+            in.garrisonNear[i] = 0;
+        }
+        in.garrisonNear[outpost] = 1;
+        Ticks(f.registry, in, fired, 5);
+        REQUIRE(Str(z->owner) == "EAST");
+        REQUIRE(z->capture == Approx(0.0f));
+        REQUIRE(z->contestedLastTick);
+        REQUIRE(z->lastGarrisonNear == 1);
+        REQUIRE(CountEvents(fired, ZECaptureStarted, outpost) == 0);
+
+        // the decay choice reads it too: a half capture with only that
+        // defender re-secures at captureDecayDefended (10), not the
+        // abandoned fade (2)
+        z->capture = 50;
+        ZoneTickInputs noGuer = MakeInputs(f.registry, outpost, -1);
+        noGuer.garrisonNear = in.garrisonNear;
+        f.registry.EvaluateTick(noGuer, fired);
+        REQUIRE(z->capture == Approx(40.0f));
+        noGuer.garrisonNear[outpost] = 0;
+        f.registry.EvaluateTick(noGuer, fired);
+        REQUIRE(z->capture == Approx(38.0f));
+
+        // the body killed (or beyond 800 m): the meter climbs again
+        in.garrisonNear[outpost] = 0;
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(z->capture == Approx(44.0f));
+    }
+
+    SECTION("U4 does not touch towns: garrisonNear is read by the military branch only")
+    {
+        // a town's support gate keeps its own inputs (occ, reserve,
+        // garrisonLive); a stray garrisonNear value changes nothing there
+        const int village = f.registry.FindZoneIndex("Village");
+        REQUIRE(village >= 0);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, village, village);
+        in.garrisonNear.Resize(f.registry.NZones());
+        for (int i = 0; i < in.garrisonNear.Size(); i++)
+        {
+            in.garrisonNear[i] = 0;
+        }
+        in.garrisonNear[village] = 3;
+        const float before = f.registry.GetZone(village)->support;
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(before + 5.0f));
+    }
+
     // Off-screen contract D1 (issue #71): outside cacheRadius a zone keeps
     // ticking while live resistance units hold it or its meter is above 0.
     // The player is parked at FarPost (20 km away) in every remote section.
@@ -1240,18 +1299,53 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(z.support == Approx(25.0f));
         // authored RESISTANCE falls to plain NEUTRAL administration
         REQUIRE(Str(z.owner) == "NEUTRAL");
-        REQUIRE(z.garrison == Approx(4.0f)); // refilled to the town's strength
+        // refilled to the town's strength; the player stands in the town, so
+        // the refill is a PENDING deposit (S5), not bodies at his feet
+        REQUIRE(z.garrison == Approx(0.0f));
+        REQUIRE(z.pending == 4);
+        REQUIRE(z.pendingOrigin == -1); // from nothing (no pool in phase 1)
+        REQUIRE(z.revertRefill == 4);
         REQUIRE(t.f.registry.IsGarrisonable(z));
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
         REQUIRE(CountEvents(fired, ZECaptured, t.held) == 0);
         REQUIRE(t.f.registry.LiberatedTownCount() == 0);
 
-        // administered again: the refilled reserve now blocks the rise
+        // administered again: the occupiers still standing in it block the
+        // rise (the pending refill itself never defends)
         fired.Clear();
         ZoneTickInputs back = MakeInputs(t.f.registry, t.held, t.held);
+        back.occCount[t.held] = 2;
         Ticks(t.f.registry, back, fired, 5);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.held).support == Approx(25.0f));
+        REQUIRE(t.Z(t.held).revertRefill == 0); // the adoption's window was the revert tick
+    }
+
+    SECTION("S5: a pending refill does not defend; a direct one off-screen does")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 2;
+        Ticks(t.f.registry, in, fired, 9);
+        REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.held).pending == 4);
+        // the occupiers gone, one fighter: support rises past the pending
+        // deposit (it is not a defender) - the gate sees no reserve
+        ZoneTickInputs rise = MakeInputs(t.f.registry, t.held, t.held);
+        t.f.registry.EvaluateTick(rise, fired);
+        REQUIRE(t.Z(t.held).support == Approx(30.0f));
+
+        // the same retake with the player far away: the refill is a direct
+        // reserve write, which defends as before
+        TownFixture far;
+        far.Load(kTownConfig);
+        AutoArray<ZoneEventRecord> fired2;
+        ZoneTickInputs remote = MakeInputs(far.f.registry, far.farPost, -1);
+        remote.occCount[far.held] = 2;
+        Ticks(far.f.registry, remote, fired2, 9);
+        REQUIRE(Str(far.Z(far.held).owner) == "NEUTRAL");
+        REQUIRE(far.Z(far.held).garrison == Approx(4.0f));
+        REQUIRE(far.Z(far.held).pending == 0);
     }
 
     SECTION("a town that rose reverts to its authored owner with its garrison back")
@@ -1268,7 +1362,9 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(Str(t.Z(t.town).owner) == "GUER");
         t.f.registry.EvaluateTick(occ, fired); // 25
         REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
-        REQUIRE(t.Z(t.town).garrison == Approx(4.0f));
+        // the player in the town: the refill is pending (S5)
+        REQUIRE(t.Z(t.town).garrison + (float)t.Z(t.town).pending == Approx(4.0f));
+        REQUIRE(t.Z(t.town).pending == 4);
         REQUIRE(CountEvents(fired, ZETownLost, t.town) == 1);
     }
 
@@ -1330,6 +1426,7 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         Ticks(t.f.registry, in, fired, 9);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.held).garrison == Approx(0.0f));
+        REQUIRE(t.Z(t.held).pending == 0);
     }
 
     SECTION("RevertTown is a no-op on anything but a resistance-held CITY")
@@ -1390,37 +1487,160 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
     }
 }
 
-TEST_CASE("PlayerCountsAsPresence - the D1 rule (issue #79)", "[game][guerrilla]")
+TEST_CASE("Player presence - the HOLD and CAPTURE predicates (OCCUPIER-FORCES 8.1, D11, D23, #86)",
+          "[game][guerrilla]")
 {
+    // gmUndercover is true for the whole campaign, so the matrix is drawn
+    // undercover; "not undercover" is the last row
     PlayerPresenceInput in;
-    SECTION("not undercover: always counts")
+    in.undercover = true;
+    SECTION("uniformed, rifle slung, unseen: holds, does not capture")
+    {
+        in.warriorOutfit = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("uniformed, weapon in hands: both")
+    {
+        in.warriorOutfit = true;
+        in.weaponInHands = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, rifle slung, unseen: neither")
+    {
+        REQUIRE_FALSE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, weapon seen by an occupier observer: holds, does not capture")
+    {
+        in.weaponSeen = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, exposed: both")
+    {
+        in.exposed = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, weapon in hands: both")
+    {
+        in.weaponInHands = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("not undercover: both, whatever else")
     {
         in.undercover = false;
-        REQUIRE(PlayerCountsAsPresence(in));
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
     }
-    SECTION("disguised and unseen: does not count")
+}
+
+TEST_CASE("ZoneRegistry - HOLD presence freezes a held town's drain; only CAPTURE raises support",
+          "[game][guerrilla]")
+{
+    TownFixture t;
+    t.Load(kTownConfig);
+    const int n = t.f.registry.NZones();
+    auto zeroHold = [n](ZoneTickInputs& in)
     {
-        in.undercover = true;
-        REQUIRE_FALSE(PlayerCountsAsPresence(in));
-    }
-    SECTION("an observer holds an exposed verdict: counts")
+        in.guerHold.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            in.guerHold[i] = 0;
+        }
+    };
+
+    SECTION("a uniformed player with his rifle slung (HOLD, not CAPTURE) freezes the drain; gone, it drains")
     {
-        in.undercover = true;
-        in.exposed = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 1;
+        zeroHold(in);
+        in.guerHold[t.held] = 1; // the player holds; the capture count stays 0
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.held).support == Approx(70.0f)); // no drain, no rise
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        REQUIRE(t.Z(t.held).contestedLastTick);
+        REQUIRE(t.Z(t.held).lastGuer == 0);
+        REQUIRE(t.Z(t.held).lastGuerHold == 1);
+
+        // the player walks away: the occupier drains the town
+        ZoneTickInputs gone = MakeInputs(t.f.registry, t.farPost, -1);
+        gone.occCount[t.held] = 1;
+        t.f.registry.EvaluateTick(gone, fired);
+        REQUIRE(t.Z(t.held).support == Approx(65.0f));
     }
-    SECTION("overtly armed: counts")
+
+    SECTION("HOLD alone never raises an administered town; CAPTURE does")
     {
-        in.undercover = true;
-        in.weaponInHands = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        t.Z(t.town).garrison = 0; // its defenders are dead
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, -1);
+        zeroHold(in);
+        in.guerHold[t.town] = 1;
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.town).support == Approx(20.0f));
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        // weapon in hands: he captures
+        in.guerCount[t.town] = 1;
+        t.f.registry.EvaluateTick(in, fired);
+        REQUIRE(t.Z(t.town).support == Approx(25.0f));
     }
-    SECTION("warrior outfit: counts")
+
+    SECTION("HOLD consolidates an unopposed held town (D18)")
     {
-        in.undercover = true;
-        in.warriorOutfit = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        zeroHold(in);
+        in.guerHold[t.held] = 1;
+        Ticks(t.f.registry, in, fired, 2);
+        REQUIRE(t.Z(t.held).support == Approx(80.0f));
     }
+
+    SECTION("HOLD alone never raises a post's capture meter")
+    {
+        t.Z(t.post).garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.post, -1);
+        zeroHold(in);
+        in.guerHold[t.post] = 1;
+        Ticks(t.f.registry, in, fired, 3);
+        REQUIRE(t.Z(t.post).capture == Approx(0.0f));
+    }
+}
+
+TEST_CASE("ZoneRegistry - U3: authored reserves are whole bodies", "[game][guerrilla]")
+{
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Half  { name=\"Half\";  type=\"OUTPOST\"; owner=\"EAST\"; garrison=5.5; "
+                         "garrisonMax=7.9; position[]={1000.0, 1000.0, 0.0}; };\n"
+                         "        class Neg   { name=\"Neg\";   type=\"OUTPOST\"; owner=\"EAST\"; garrison=-2; "
+                         "position[]={2000.0, 1000.0, 0.0}; };\n"
+                         "        class Burg  { name=\"Burg\";  type=\"CITY\";    owner=\"NEUTRAL\"; "
+                         "garrisonMax=4.5; position[]={3000.0, 1000.0, 0.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class CfgGuerrillaFactions { class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; }; };\n";
+    RegistryFixture f;
+    f.Load(config);
+    const ZoneRecord* half = f.registry.GetZone(f.registry.FindZoneIndex("Half"));
+    const ZoneRecord* neg = f.registry.GetZone(f.registry.FindZoneIndex("Neg"));
+    const ZoneRecord* burg = f.registry.GetZone(f.registry.FindZoneIndex("Burg"));
+    REQUIRE(half != nullptr);
+    REQUIRE(neg != nullptr);
+    REQUIRE(burg != nullptr);
+    CHECK(half->garrison == 5.0f); // floored, exactly
+    CHECK(half->garrisonMax == 7.0f);
+    CHECK(neg->garrison == 0.0f);
+    CHECK(neg->garrisonMax == 0.0f);
+    CHECK(burg->garrisonMax == 4.0f);
+    CHECK(burg->garrison == 4.0f); // cityGarrison, whole already
 }
 
 TEST_CASE("ZoneRegistry - IsCivilianOutfitClass reads the resistance Civ-family keys (issue #79 D1)",
@@ -1454,6 +1674,9 @@ TEST_CASE("ZoneRegistry - town defender state survives save/load (issue #79)", "
         t.Z(t.hamlet).garrison = 0;
         t.Z(t.held).flipDay = 3; // the counter-attack seam
         t.Z(t.held).flipMinute = 615;
+        t.Z(t.town).pending = 3; // an S5 deposit on its way into the reserve
+        t.Z(t.town).pendingOrigin = t.post;
+        t.Z(t.post).garrison = 2.5f; // a fractional reserve, as an older save may carry
         t.f.registry.SetEventHandler(ZETownLost, "hTownLost");
         ParamArchiveSave ar(WorldSerializeVersion);
         REQUIRE(t.f.registry.Serialize(ar) == LSOK);
@@ -1483,6 +1706,13 @@ TEST_CASE("ZoneRegistry - town defender state survives save/load (issue #79)", "
     CHECK(held->flipMinute == 615);
     CHECK(Str(held->owner) == "GUER");
     CHECK(held->garrison == Approx(0.0f));
+    // the pending deposit survives with its origin (saved by name)
+    CHECK(town->pending == 3);
+    CHECK(town->pendingOrigin == loaded.FindZoneIndex("Post"));
+    CHECK(held->pending == 0);
+    CHECK(held->pendingOrigin == -1);
+    // U3: the reserve loads as whole bodies
+    CHECK(loaded.GetZone(loaded.FindZoneIndex("Post"))->garrison == 2.0f);
     CHECK(Str(loaded.GetEventHandler(ZETownLost)) == "hTownLost");
     ExtParsMission.Clear();
     std::filesystem::remove(archivePath);

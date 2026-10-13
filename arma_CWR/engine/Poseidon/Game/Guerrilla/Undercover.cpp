@@ -81,6 +81,21 @@ UCVerdict EvaluateUndercoverRule(const UCObservation& obs, const UndercoverTunin
     return UCCivil; // unarmed and not previously identified
 }
 
+bool UndercoverWeaponSeenVerdict(UCVerdict verdict, UCWeaponShow weapon, float visibility,
+                                 const UndercoverTuning& tuning)
+{
+    if (weapon == UCWNone || visibility < tuning.undercoverMinVisibility)
+    {
+        return false;
+    }
+    return verdict == UCSuspect || verdict == UCExposed;
+}
+
+bool UndercoverWeaponSeenCurrent(float now, float stampTime)
+{
+    return now - stampTime <= UndercoverSystem::WeaponSeenWindow;
+}
+
 UCVerdict EvaluateUndercoverVehicleRule(const UCVehicleObservation& obs, const UndercoverTuning& tuning,
                                         float& outBoostedAccuracy)
 {
@@ -338,7 +353,8 @@ void UndercoverSystem::ResolvePerceivedSide(EntityAI* observer, AIUnit* observer
     float boosted = sensorSideAccuracy;
     UCVerdict verdict = EvaluateUndercoverRule(obs, _tuning, boosted);
     const char* reason = obs.weapon == UCWInHands ? "weapon" : (obs.weapon == UCWSlung ? "slung" : "recognized");
-    ApplyVerdict(verdict, boosted, observer, ai, target, reason);
+    ApplyVerdict(verdict, boosted, observer, ai, target, reason,
+                 UndercoverWeaponSeenVerdict(verdict, obs.weapon, visibility, _tuning));
 }
 
 void UndercoverSystem::ResolvePerceivedSideVehicle(EntityAI* observer, AIUnit* observerUnit, EntityAI* ai,
@@ -382,10 +398,16 @@ void UndercoverSystem::ResolvePerceivedSideVehicle(EntityAI* observer, AIUnit* o
 }
 
 void UndercoverSystem::ApplyVerdict(UCVerdict verdict, float boostedAccuracy, EntityAI* observer, EntityAI* ai,
-                                    Target* target, const char* reason)
+                                    Target* target, const char* reason, bool stampWeaponSeen)
 {
     // stay inside the vanilla side-accuracy range (sensor path caps at 4)
     saturate(boostedAccuracy, 0, 4);
+    // the weapon-seen stamp (WeaponSeenCount, the HOLD presence clause): this
+    // observer rates him suspect or exposed because a weapon was in view
+    if (stampWeaponSeen)
+    {
+        target->ucWeaponSeenTime = Glob.time;
+    }
     switch (verdict)
     {
         case UCExposed:
@@ -647,6 +669,39 @@ int UndercoverSystem::LivingWitnessCount() const
         const Target* t = grp->FindTargetAll(subject);
         const Target* tv = vehicle ? grp->FindTargetAll(vehicle) : nullptr;
         if ((t && !t->destroyed && IsCompromised(*t)) || (tv && !tv->destroyed && IsCompromised(*tv)))
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+int UndercoverSystem::WeaponSeenCount() const
+{
+    if (!GWorld)
+    {
+        return 0;
+    }
+    Person* subject = Subject();
+    if (!subject)
+    {
+        return 0;
+    }
+    AICenter* occupier = FindSideCenter(ZoneRegistry::Instance().OccupierSide());
+    if (!occupier)
+    {
+        return 0;
+    }
+    int count = 0;
+    for (int g = 0; g < occupier->NGroups(); g++)
+    {
+        AIGroup* grp = occupier->GetGroup(g);
+        if (!grp || !GroupHasLivingMember(grp))
+        {
+            continue;
+        }
+        const Target* t = grp->FindTargetAll(subject);
+        if (t && !t->destroyed && Glob.time - t->ucWeaponSeenTime <= WeaponSeenWindow)
         {
             count++;
         }

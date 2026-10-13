@@ -48,6 +48,7 @@ class EntityAI;
 
 namespace Guerrilla
 {
+class ZoneRegistry;
 
 // optional keys inside class CfgGuerrillaZones
 struct BaseTuning
@@ -109,6 +110,15 @@ class GuerrillaBase : public SerializeClass
     int MoveCount() const { return _moveCount; }
     // the zone (any type) whose area contains pos; -1 when none
     int ZoneAt(Vector3Par pos) const;
+    // the same against an explicit registry (unit tests)
+    static int ZoneAt(const ZoneRegistry& registry, Vector3Par pos);
+    // The zone the HQ stands in (OCCUPIER-FORCES.md 9.1): the zone whose
+    // area (zoneArea) contains HqPos, nearest first; an edge-of-town HQ whose
+    // spot lies just outside the area falls back to the zone it was
+    // established in (ZoneName).  -1 while unestablished.  The legacy
+    // counter-attack dispatch never targets it (N4a).
+    int HqZone() const;
+    int HqZone(const ZoneRegistry& registry) const;
     bool CanEstablish(Vector3Par pos) const { return IsActive() && ZoneAt(pos) >= 0; }
     // inside garageRadius (2D) of the garage spot; false while unestablished
     bool InGarageRange(Vector3Par pos) const;

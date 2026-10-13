@@ -90,7 +90,9 @@ triAssertEq [(format ["%1", (((gmZone wbV) select 2) == gmResistanceSide) or wbO
 // ---- w3: no unseen road: it turns back, the Outpost is whole again ---------
 triSimUntil { player setDir wbToTown; if ((((gmCounterAttacks + [["", "", "NONE"]]) select 0) select 2) == "LIVE") then {wbSawLive = true}; if (((gmZoneSim wbV) select 2) > 0) then {wbOccSeen = true}; (count gmCounterAttacks) == 0 }
 triAssertEq [(format ["%1", wbSawLive]), "false"]
-triSimUntil { (((gmZone wbO) select 3) + (gmGarrisonLive wbO)) == 6 }
+// the turned-back force is a pending deposit (S5) while the player stands on
+// the Outpost: stored + live + pending make the post whole again
+triSimUntil { (((gmZone wbO) select 3) + (gmGarrisonLive wbO) + ((gmZoneSim wbO) select 13)) == 6 }
 triAssertEq [(format ["%1", (((gmZone wbV) select 2) == gmResistanceSide) or wbOccSeen]), "true"]
 gmSimDiagLog
 

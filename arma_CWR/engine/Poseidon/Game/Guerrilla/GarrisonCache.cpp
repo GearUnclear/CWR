@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate (S5 pending release)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // D2 recovery: zone alert GREEN
 
@@ -26,6 +27,7 @@
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 
 // Shared command internals from Game/Commands/GameStateExtWorld.cpp - the
@@ -138,6 +140,39 @@ int GarrisonCache::LiveCount(int zoneIndex) const
         return 0;
     }
     return CountAlive(_states[zoneIndex]);
+}
+
+int GarrisonCache::LiveCountWithin(int zoneIndex, Vector3Par pos, float radius) const
+{
+    if (zoneIndex < 0 || zoneIndex >= _states.Size() || !_states[zoneIndex].spawned)
+    {
+        return 0;
+    }
+    const float radiusSq = radius * radius;
+    const GarrisonState& state = _states[zoneIndex];
+    int alive = 0;
+    for (int g = 0; g < state.groups.Size(); g++)
+    {
+        AIGroup* grp = state.groups[g];
+        if (!grp)
+        {
+            continue;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            {
+                continue;
+            }
+            const Vector3 at = unit->Position();
+            if (Dist2DSq(at.X(), at.Z(), pos.X(), pos.Z()) <= radiusSq)
+            {
+                alive++;
+            }
+        }
+    }
+    return alive;
 }
 
 int GarrisonCache::NGroups(int zoneIndex) const
@@ -285,6 +320,181 @@ int GarrisonCache::StepRecover(const GarrisonRecoverInput& in, float elapsed, fl
     return gained;
 }
 
+// ---------------------------------------------------------------------------
+// S5 pending deposits (OCCUPIER-FORCES.md 3.3; pure, unit-tested)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// the phase-2 refund seam (SetPendingRefundHook); constant-initialized, so
+// no global constructor
+GarrisonCache::PendingRefundHook GPendingRefundHook = nullptr;
+
+int MinBodies(int a, int b)
+{
+    return a < b ? a : b;
+}
+} // namespace
+
+void GarrisonCache::SetPendingRefundHook(PendingRefundHook hook)
+{
+    GPendingRefundHook = hook;
+}
+
+GarrisonCache::PendingRefundHook GarrisonCache::GetPendingRefundHook()
+{
+    return GPendingRefundHook;
+}
+
+bool GarrisonCache::OccupierHolds(const ZoneRegistry& registry, const ZoneRecord& z)
+{
+    const bool post = stricmp(z.type, "CITY") != 0 && stricmp(z.owner, registry.OccupierSide()) == 0;
+    const bool town = registry.IsAdministeredTown(z) && !z.garrisonExempt;
+    return post || town;
+}
+
+void GarrisonCache::Deposit(ZoneRegistry& registry, int zone, int bodies, int originZone)
+{
+    ZoneRecord* z = registry.GetZoneMutable(zone);
+    if (!z || bodies < 1)
+    {
+        return;
+    }
+    if (z->pending <= 0)
+    {
+        z->pending = 0;
+        z->pendingOrigin = originZone;
+    }
+    else if (z->pendingOrigin != originZone)
+    {
+        z->pendingOrigin = -1; // mixed origins: no single zone to refund to
+    }
+    z->pending += bodies;
+    LOG_INFO(Core,
+             "Guerrilla: {} body(ies) pending at {} (pending {}, reserve {}); they join the reserve once the player "
+             "leaves or their spawn points are hidden",
+             bodies, (const char*)z->name, z->pending, z->garrison);
+}
+
+void GarrisonCache::Deposit(int zone, int bodies, int originZone)
+{
+    Deposit(ZoneRegistry::Instance(), zone, bodies, originZone);
+}
+
+bool GarrisonCache::InDepositBubble(const ZoneRecord& z, bool playerValid, float px, float pz, float cacheRadius)
+{
+    if (!playerValid)
+    {
+        return false;
+    }
+    const float edge = cacheRadius + DespawnHysteresis;
+    return Dist2DSq(px, pz, z.pos.X(), z.pos.Z()) <= edge * edge;
+}
+
+bool GarrisonCache::AddReserve(ZoneRegistry& registry, int zone, int bodies, int originZone, bool playerValid,
+                               float px, float pz)
+{
+    ZoneRecord* z = registry.GetZoneMutable(zone);
+    if (!z || bodies < 1)
+    {
+        return false;
+    }
+    if (InDepositBubble(*z, playerValid, px, pz, registry.Tuning().cacheRadius))
+    {
+        Deposit(registry, zone, bodies, originZone);
+        return true;
+    }
+    z->garrison = floorf(z->garrison) + (float)bodies;
+    return false;
+}
+
+bool GarrisonCache::PendingSpawnHidden(Vector3Par centre, float spread, const CounterAttackGate& gate)
+{
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            const Vector3 at(centre.X() + (float)dx * spread, centre.Y(), centre.Z() + (float)dz * spread);
+            if (gate.Exposure(at) != CAExposeHidden)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+int GarrisonCache::FlushPending(ZoneRegistry& registry, int zone, bool playerValid, float px, float pz,
+                                const CounterAttackGate* gate)
+{
+    ZoneRecord* z = registry.GetZoneMutable(zone);
+    if (!z || z->pending <= 0)
+    {
+        return PFNone;
+    }
+    if (!OccupierHolds(registry, *z))
+    {
+        RefundPending(registry, zone, playerValid, px, pz);
+        return PFRefunded;
+    }
+    if (!playerValid)
+    {
+        return PFNone; // a dead player freezes the deposit like every other zone clock
+    }
+    int result = PFNone;
+    if (!InDepositBubble(*z, playerValid, px, pz, registry.Tuning().cacheRadius))
+    {
+        result = PFReleasedBubble;
+    }
+    else if (gate && PendingSpawnHidden(z->pos, registry.Tuning().zoneArea / 3.0f, *gate))
+    {
+        result = PFReleasedHidden;
+    }
+    if (result == PFNone)
+    {
+        return PFNone;
+    }
+    const int bodies = z->pending;
+    z->garrison = floorf(z->garrison) + (float)bodies;
+    z->pending = 0;
+    z->pendingOrigin = -1;
+    LOG_INFO(Core, "Guerrilla: {} pending body(ies) join the reserve at {} ({}; reserve {})", bodies,
+             (const char*)z->name, result == PFReleasedBubble ? "the player left" : "every spawn point is hidden",
+             z->garrison);
+    return result;
+}
+
+void GarrisonCache::RefundPending(ZoneRegistry& registry, int zone, bool playerValid, float px, float pz)
+{
+    ZoneRecord* z = registry.GetZoneMutable(zone);
+    if (!z || z->pending <= 0)
+    {
+        return;
+    }
+    const int bodies = z->pending;
+    const int origin = z->pendingOrigin;
+    z->pending = 0;
+    z->pendingOrigin = -1;
+    if (GPendingRefundHook && GPendingRefundHook(registry, zone, origin, bodies))
+    {
+        LOG_INFO(Core, "Guerrilla: {} changed hands with {} body(ies) pending; handed to the refund hook",
+                 (const char*)z->name, bodies);
+        return;
+    }
+    ZoneRecord* o = origin != zone ? registry.GetZoneMutable(origin) : nullptr;
+    if (o && OccupierHolds(registry, *o))
+    {
+        const float room = o->garrisonMax - floorf(o->garrison) - (float)o->pending;
+        const int back = MinBodies(bodies, room > 0 ? (int)floorf(room) : 0);
+        AddReserve(registry, origin, back, origin, playerValid, px, pz);
+        LOG_INFO(Core, "Guerrilla: {} changed hands with {} body(ies) pending; {} back to {}, {} discarded",
+                 (const char*)z->name, bodies, back, (const char*)o->name, bodies - back);
+        return;
+    }
+    LOG_INFO(Core, "Guerrilla: {} changed hands with {} body(ies) pending; discarded (no occupier-held origin)",
+             (const char*)z->name, bodies);
+}
+
 int GarrisonCache::PlanGroups(int reserve, int groupSize, AutoArray<int>& takes)
 {
     takes.Clear();
@@ -318,6 +528,32 @@ static Vector3 RandomNear(Vector3Par center, float radius)
     }
     return Vector3(x, y, z);
 }
+
+namespace
+{
+// The engine perception gate (CounterAttack::EngineGate) for pending-release
+// samples: the gate's terrain ray aims from the ground under a point, so
+// each sample is put on the surface first (the zone centre's elevation is
+// not the ground 50 m away).
+class GroundedGate final : public CounterAttackGate
+{
+  public:
+    explicit GroundedGate(const CounterAttackGate& inner) : _inner(inner) {}
+    int Exposure(Vector3Par pos) const override
+    {
+        Vector3 at = pos;
+        if (GLandscape)
+        {
+            float dx, dz;
+            at[1] = GLOB_LAND->SurfaceYAboveWater(at.X(), at.Z(), &dx, &dz);
+        }
+        return _inner.Exposure(at);
+    }
+
+  private:
+    const CounterAttackGate& _inner;
+};
+} // namespace
 
 // Center + group creation are the shared Guerrilla helpers EnsureSideCenter /
 // CreateSideGroup (ZoneRegistry.hpp) - the occupier may have no seeded units,
@@ -537,8 +773,11 @@ void GarrisonCache::DespawnGarrison(int zoneIndex, AutoArray<GarrisonEventRecord
     state.groups.Clear();
     state.spawned = false;
 
-    // authoritative survivor write-back (spawning.sqs #dsDone)
-    z->garrison = (float)survivors;
+    // survivor write-back (spawning.sqs #dsDone), ADDED to the reserve still
+    // stored (U1, OCCUPIER-FORCES.md 5.5): a group-budget remainder, D2
+    // regrowth or a top-up written while the garrison was live (AdoptLive,
+    // RevertTown, a pending release) is kept, never overwritten
+    z->garrison = floorf(z->garrison) + (float)survivors;
     z->liveOccupiers = 0;
 
     GarrisonEventRecord ev;
@@ -587,6 +826,9 @@ void GarrisonCache::Simulate(float deltaT)
 
     const float warLevel = ReadWarLevel();
     const float cacheRadius = registry.Tuning().cacheRadius;
+    // the perception gate for S5 releases: refreshed at most once per pass,
+    // and only when some zone has a deposit pending
+    const CounterAttackGate* engineGate = nullptr;
 
     AutoArray<GarrisonEventRecord> fired;
     for (int i = 0; i < registry.NZones(); i++)
@@ -609,15 +851,34 @@ void GarrisonCache::Simulate(float deltaT)
         // garrison was wiped and the record refilled before this pass could
         // release it (a town retaken between two cache passes, issue #79),
         // or a group-budget remainder outlived the bodies that did spawn.
-        // Release the dead groups (the same write-back as any despawn) and
-        // keep the reserve, so Decide can materialize it this very pass;
-        // otherwise the reserve would sit unspawned forever and hold a
-        // town's support gate shut.
+        // Release the dead groups (the same write-back as any despawn; under
+        // U1 it adds 0 and keeps the reserve).  S5: with the player inside
+        // the deposit bubble the waiting reserve becomes a PENDING deposit,
+        // so it is not re-materialized beside the player who just killed the
+        // last defender; it appears when its spawn points are hidden or he
+        // leaves.  Outside the bubble Decide materializes it as before.
         if (state.spawned && z->garrison >= 1 && CountAlive(state) == 0 && registry.IsGarrisonable(*z))
         {
-            const float waiting = z->garrison;
             DespawnGarrison(i, fired);
-            z->garrison = waiting;
+            if (InDepositBubble(*z, playerValid, playerX, playerZ, cacheRadius))
+            {
+                const int waiting = (int)floorf(z->garrison);
+                z->garrison = 0;
+                Deposit(registry, i, waiting, i);
+            }
+        }
+
+        // S5: a pending deposit is checked before Decide (a released reserve
+        // may materialize this pass, every spawn point hidden) and before
+        // StepRecover (a deposit never sits beside a regrowing reserve)
+        if (z->pending > 0)
+        {
+            if (!engineGate)
+            {
+                engineGate = &CounterAttack::EngineGate(playerValid, playerX, playerZ);
+            }
+            const GroundedGate grounded(*engineGate);
+            FlushPending(registry, i, playerValid, playerX, playerZ, &grounded);
         }
 
         GarrisonDecisionInput in;
@@ -790,12 +1051,18 @@ void GarrisonCache::ApplyPendingLoad()
         else
         {
             // spawned zone with no surviving group refs: the garrison was
-            // wiped out before the save - reconcile to an empty zone
+            // wiped out before the save - reconcile to a despawned zone.  A
+            // reserve stored beside it (a group-budget remainder or a top-up,
+            // kept under U1) becomes a pending deposit (S5): it joins the
+            // reserve on the first cache pass that finds the zone out of the
+            // player's bubble or its spawn points hidden, never at his feet.
             state.spawned = false;
             if (z)
             {
+                const int waiting = (int)floorf(z->garrison);
                 z->garrison = 0;
                 z->liveOccupiers = 0;
+                Deposit(registry, index, waiting, index);
             }
         }
     }

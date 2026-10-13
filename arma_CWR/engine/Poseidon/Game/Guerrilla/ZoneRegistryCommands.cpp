@@ -16,6 +16,7 @@
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <initializer_list>
+#include <math.h> // floorf (WholeBodies)
 
 using namespace Poseidon;
 using namespace Poseidon::Guerrilla;
@@ -85,7 +86,16 @@ static GameValue GmZoneIndex(const GameState* /*state*/, GameValuePar oper1)
     return (float)ZoneRegistry::Instance().FindZoneIndex(name);
 }
 
-// gmZoneSet [index, "field", value]; unknown field -> no-op
+// U3 (OCCUPIER-FORCES.md 5.5): a scripted garrison / garrisonMax is a count
+// of whole soldiers, floored, never below 0
+static float WholeBodies(float value)
+{
+    const float bodies = floorf(value);
+    return bodies > 0 ? bodies : 0.0f;
+}
+
+// gmZoneSet [index, "field", value]; unknown field -> no-op.  garrison and
+// garrisonMax are floored to whole bodies (at least 0)
 static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -122,7 +132,7 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     }
     else if (stricmp(field, "garrison") == 0)
     {
-        z->garrison = (float)array[2];
+        z->garrison = WholeBodies((float)array[2]);
     }
     else if (stricmp(field, "support") == 0)
     {
@@ -151,7 +161,7 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     }
     else if (stricmp(field, "garrisonMax") == 0)
     {
-        z->garrisonMax = (float)array[2];
+        z->garrisonMax = WholeBodies((float)array[2]);
     }
     else if (stricmp(field, "recoverClock") == 0)
     {
@@ -171,10 +181,14 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 // gmZoneSim <index> -> the zone's off-screen contract state (issue #71):
 // [inBubble, guer, occ, seenDay, seenMinute, contested, lastRemote,
 //  garrisonMax, recoverClock, garrisonLive, garrisonExempt, flipDay,
-//  flipMinute] as of the last zone tick; empty array out of range.  The last
-// four are the town-defender / retake fields (issue #79): the zone's own live
-// garrison bodies wherever they stand, the start-town exemption, and the
-// campaign day/minute of the last flip to the resistance (0 = never)
+//  flipMinute, pending] as of the last zone tick; empty array out of range.
+// Slots 9..12 are the town-defender / retake fields (issue #79): the zone's
+// own live garrison bodies wherever they stand, the start-town exemption, and
+// the campaign day/minute of the last flip to the resistance (0 = never).
+// guer (slot 1) is the resistance CAPTURE presence (the player per
+// PlayerCapturesPresence).  Slot 13 is the S5 pending deposit
+// (OCCUPIER-FORCES.md 3.3): whole bodies on their way into the reserve that
+// neither defend nor materialize yet (live, not as of the tick)
 static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -184,7 +198,7 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     {
         return value;
     }
-    array.Resize(13);
+    array.Resize(14);
     array[0] = z->lastInBubble;
     array[1] = (float)z->lastGuer;
     array[2] = (float)z->lastOcc;
@@ -198,17 +212,24 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     array[10] = z->garrisonExempt;
     array[11] = (float)z->flipDay;
     array[12] = (float)z->flipMinute;
+    array[13] = (float)z->pending;
     return value;
 }
 
-// gmPlayerPresence -> the D1 player-presence rule (issue #79) sampled now:
-// [counts, undercover, exposed, weaponInHands, warriorOutfit, liberatedTowns].
-// counts is PlayerCountsAsPresence; [false, false, ...] without a live player
+// gmPlayerPresence -> the player-presence predicates (OCCUPIER-FORCES.md 8.1)
+// sampled now: [counts, undercover, exposed, weaponInHands, warriorOutfit,
+// liberatedTowns, holds, weaponSeen].  counts (slot 0) is CAPTURE
+// (PlayerCapturesPresence, issue #86: not undercover, exposed or a weapon in
+// hands); warriorOutfit (slot 4) is informational (it feeds HOLD only); holds
+// (slot 6) is HOLD (PlayerHoldsPresence: a uniform always holds, D23; a
+// disguised player only exposed, armed or with his weapon seen, D11);
+// weaponSeen (slot 7) is UndercoverSystem::WeaponSeenCount() > 0.  The
+// booleans read false without a live player.
 static GameValue GmPlayerPresence(const GameState* state)
 {
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(6);
+    array.Resize(8);
     PlayerPresenceInput in;
     Person* player = GWorld ? GWorld->GetRealPlayer() : nullptr;
     bool alive = player && !player->IsDammageDestroyed();
@@ -216,12 +237,14 @@ static GameValue GmPlayerPresence(const GameState* state)
     {
         ZoneRegistry::Instance().SamplePlayerPresence(player, in);
     }
-    array[0] = alive && PlayerCountsAsPresence(in);
+    array[0] = alive && PlayerCapturesPresence(in);
     array[1] = in.undercover;
     array[2] = in.exposed;
     array[3] = in.weaponInHands;
     array[4] = in.warriorOutfit;
     array[5] = (float)ZoneRegistry::Instance().LiberatedTownCount();
+    array[6] = alive && PlayerHoldsPresence(in);
+    array[7] = in.weaponSeen;
     return value;
 }
 

@@ -2,6 +2,7 @@
 
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // IsMilitaryType
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HqZone: the HQ's town is never a target (N4a)
 #include <Poseidon/Game/Guerrilla/Traffic.hpp> // the shared perception gate (issue #53)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -482,22 +483,6 @@ float CounterAttack::MarchAllowance(const AutoArray<Vector3>& route, float fract
     return RouteLength(route) * (1.0f - Clamp01(fraction)) / MarchSpeed + MarchSlack;
 }
 
-int CounterAttack::GroupTarget(const ZoneRegistry& registry, const AIGroup* grp) const
-{
-    if (!grp)
-    {
-        return -1;
-    }
-    for (int i = 0; i < _records.Size(); i++)
-    {
-        if (_records[i].phase == CALive && _records[i].group.GetLink() == grp)
-        {
-            return registry.FindZoneIndex(_records[i].target);
-        }
-    }
-    return -1;
-}
-
 const char* CounterAttack::SpawnReasonName(int reason)
 {
     switch (reason)
@@ -645,7 +630,8 @@ int CounterAttack::HeldTowns(const ZoneRegistry& registry)
     return n;
 }
 
-bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel)
+bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel,
+                                  int hqZone)
 {
     if (!_tuning.enabled)
     {
@@ -671,6 +657,15 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
     }
     const int before = _townsTaken > held ? _townsTaken : held;
     _townsTaken = before + 1;
+    if (zoneIndex == hqZone)
+    {
+        // the town the player's HQ stands in (N4a): never the object of a
+        // flip answer before the director exists.  The flip still counts as
+        // a town taken (only the target is skipped).
+        LOG_INFO(Core, "CounterAttack: {} rose; it holds the player's headquarters, no answer",
+                 (const char*)z->name);
+        return false;
+    }
     if (FindByTarget(z->name) >= 0)
     {
         return false; // one record per town
@@ -708,7 +703,7 @@ bool CounterAttack::LaunchFrom(ZoneRegistry& registry, const CounterAttackView& 
     const ZoneRecord* town = registry.GetZone(target);
     const ZoneRecord* src = registry.GetZone(source);
     if (!_tuning.enabled || !town || !src || size < 1 || stricmp(town->type, "CITY") != 0 ||
-        stricmp(town->owner, registry.ResistanceSide()) != 0 || town->garrisonExempt ||
+        stricmp(town->owner, registry.ResistanceSide()) != 0 || town->garrisonExempt || target == view.hqZone ||
         stricmp(src->owner, registry.OccupierSide()) != 0 || FindByTarget(town->name) >= 0)
     {
         return false;
@@ -921,15 +916,16 @@ void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackVi
         return;
     }
     const int live = src < view.garrisonLive.Size() ? view.garrisonLive[src] : 0;
-    float room = s->garrisonMax - (float)live - s->garrison;
-    if (room < 0)
-    {
-        room = 0;
-    }
-    const float back = (float)bodies < room ? (float)bodies : room;
-    s->garrison += back;
-    LOG_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {} (reserve {} of {})", back, bodies,
-             (const char*)s->name, s->garrison, s->garrisonMax);
+    // whole bodies (U3): the room is floored, the pending deposit counts
+    // against it (S5 bodies are on their way into this reserve)
+    const float room = s->garrisonMax - (float)live - floorf(s->garrison) - (float)s->pending;
+    const int back = MinInt(bodies, room > 0 ? (int)floorf(room) : 0);
+    // inside the player's deposit bubble the survivors are a pending deposit
+    // (S5): they join the reserve unseen or once he leaves
+    const bool pending = GarrisonCache::AddReserve(registry, src, back, src, view.playerValid, view.playerX,
+                                                   view.playerZ);
+    LOG_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {})", back, bodies,
+             (const char*)s->name, pending ? " as a pending deposit" : "", s->garrison, s->pending, s->garrisonMax);
 }
 
 static void AddEvent(AutoArray<ZoneEventRecord>& fired, ZoneEventType type, int zone)
@@ -1129,6 +1125,14 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             if (r.clock > 0)
             {
                 return false;
+            }
+            if (target == view.hqZone)
+            {
+                // the player set up his headquarters in the town meanwhile
+                // (N4a): the HQ's town is never a target
+                LOG_INFO(Core, "CounterAttack: {} now holds the player's headquarters; the force is cancelled",
+                         (const char*)r.target);
+                return true;
             }
             const bool inBubble = InBubble(registry, view, target);
             int spare = 0;
@@ -1332,11 +1336,31 @@ void CounterAttack::AdoptLive(ZoneRegistry& registry, int target, Record& r, Cou
         return;
     }
     ops->Adopt(target, r.group);
-    // the squad IS the new garrison; the stored reserve only tops it up
-    float top = town->garrisonExempt ? 0.0f : town->garrisonMax - (float)alive;
-    town->garrison = top > 0 ? top : 0.0f;
-    LOG_INFO(Core, "CounterAttack: {} soldier(s) stay in {} as its garrison (reserve {})", alive, (const char*)r.target,
-             town->garrison);
+    // the squad IS (part of) the new garrison: it comes off the refill (U2),
+    // never assigned over the reserve
+    const int cut = SubtractAdopted(*town, alive);
+    LOG_INFO(Core, "CounterAttack: {} soldier(s) stay in {} as its garrison ({} taken off the refill; reserve {}, "
+                   "pending {})",
+             alive, (const char*)r.target, cut, town->garrison, town->pending);
+}
+
+int CounterAttack::SubtractAdopted(ZoneRecord& town, int alive)
+{
+    // from the pending deposit first (where an in-bubble refill went), then
+    // from the reserve; only as much as the refill added
+    int cut = MinInt(alive > 0 ? alive : 0, town.revertRefill > 0 ? town.revertRefill : 0);
+    const int fromPending = MinInt(cut, town.pending);
+    town.pending -= fromPending;
+    if (town.pending <= 0)
+    {
+        town.pending = 0;
+        town.pendingOrigin = -1;
+    }
+    cut -= fromPending;
+    const int fromReserve = MinInt(cut, (int)floorf(town.garrison > 0 ? town.garrison : 0));
+    town.garrison = floorf(town.garrison > 0 ? town.garrison : 0) - (float)fromReserve;
+    town.revertRefill = 0;
+    return fromPending + fromReserve;
 }
 
 void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
@@ -1864,6 +1888,16 @@ EngineOps& Ops()
 
 } // namespace
 
+const CounterAttackGate& CounterAttack::EngineGate(bool playerValid, float px, float pz)
+{
+    CounterAttackView view;
+    view.playerValid = playerValid;
+    view.playerX = px;
+    view.playerZ = pz;
+    Ops().Refresh(view);
+    return Ops();
+}
+
 void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
 {
     ZoneRegistry& registry = ZoneRegistry::Instance();
@@ -1872,7 +1906,8 @@ void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
-            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize, ReadWarLevel());
+            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize, ReadWarLevel(),
+                          GuerrillaBase::Instance().HqZone());
         }
         else if (ev.type == ZETownLost)
         {
@@ -1937,6 +1972,7 @@ void CounterAttack::Simulate(float deltaT)
     GatherSimDiag(diag);
     view.liveBodies = diag.liveTotal;
     view.occGroups = diag.grpOcc;
+    view.hqZone = GuerrillaBase::Instance().HqZone();
 
     AutoArray<ZoneEventRecord> fired;
     Ops().Refresh(view);

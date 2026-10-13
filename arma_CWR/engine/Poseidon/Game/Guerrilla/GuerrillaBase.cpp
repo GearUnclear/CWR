@@ -159,7 +159,26 @@ EntityAI* GuerrillaBase::Prop() const
 
 int GuerrillaBase::ZoneAt(Vector3Par pos) const
 {
-    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    return ZoneAt(ZoneRegistry::Instance(), pos);
+}
+
+int GuerrillaBase::HqZone() const
+{
+    return HqZone(ZoneRegistry::Instance());
+}
+
+int GuerrillaBase::HqZone(const ZoneRegistry& registry) const
+{
+    if (!_established)
+    {
+        return -1;
+    }
+    const int at = ZoneAt(registry, _hqPos);
+    return at >= 0 ? at : registry.FindZoneIndex(_zone);
+}
+
+int GuerrillaBase::ZoneAt(const ZoneRegistry& registry, Vector3Par pos)
+{
     float area = registry.Tuning().zoneArea;
     int best = -1;
     float bestDist = 0;

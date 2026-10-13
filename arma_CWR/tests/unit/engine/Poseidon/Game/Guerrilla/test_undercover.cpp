@@ -533,3 +533,48 @@ TEST_CASE("Undercover - vehicle rule boundaries", "[game][guerrilla]")
                                               tuning, out) == UCExposed);
     }
 }
+
+TEST_CASE("Undercover - the weapon-seen stamp (HOLD presence, OCCUPIER-FORCES 8.1)", "[game][guerrilla]")
+{
+    UndercoverTuning tuning; // defaults
+    float boosted = 0;
+    // a slung rifle seen from behind at 60 m: suspect because of the weapon
+    UCObservation back = MakeObs(UCWSlung, 3600.0f, -0.8f, 0.5f, 0.6f);
+    UCVerdict v = EvaluateUndercoverRule(back, tuning, boosted);
+    REQUIRE(v == UCSuspect);
+    CHECK(UndercoverWeaponSeenVerdict(v, back.weapon, back.visibility, tuning));
+    // the same rifle front-on: civil, no stamp
+    UCObservation front = MakeObs(UCWSlung, 3600.0f, 0.8f, 0.5f, 0.6f);
+    v = EvaluateUndercoverRule(front, tuning, boosted);
+    REQUIRE(v == UCCivil);
+    CHECK_FALSE(UndercoverWeaponSeenVerdict(v, front.weapon, front.visibility, tuning));
+    // slung at conversational range: exposed, stamped
+    UCObservation close = MakeObs(UCWSlung, 100.0f, 0.8f, 0.5f, 0.6f);
+    v = EvaluateUndercoverRule(close, tuning, boosted);
+    REQUIRE(v == UCExposed);
+    CHECK(UndercoverWeaponSeenVerdict(v, close.weapon, close.visibility, tuning));
+    // in hands: suspect or exposed, stamped either way
+    UCObservation hands = MakeObs(UCWInHands, 3600.0f, 0.8f, 0.5f, 0.3f);
+    v = EvaluateUndercoverRule(hands, tuning, boosted);
+    REQUIRE(v == UCSuspect);
+    CHECK(UndercoverWeaponSeenVerdict(v, hands.weapon, hands.visibility, tuning));
+    // unarmed but already identified: exposed, not because of a weapon
+    UCObservation known = MakeObs(UCWNone, 3600.0f, 0.8f, 0.5f, 0.6f, true);
+    v = EvaluateUndercoverRule(known, tuning, boosted);
+    REQUIRE(v == UCExposed);
+    CHECK_FALSE(UndercoverWeaponSeenVerdict(v, known.weapon, known.visibility, tuning));
+    // a compromised record of an armed subject the observer cannot see now:
+    // exposed by memory, no fresh weapon-seen stamp
+    UCObservation blind = MakeObs(UCWSlung, 3600.0f, -0.8f, 0.0f, 0.6f, true);
+    v = EvaluateUndercoverRule(blind, tuning, boosted);
+    REQUIRE(v == UCExposed);
+    CHECK_FALSE(UndercoverWeaponSeenVerdict(v, blind.weapon, blind.visibility, tuning));
+
+    // the stamp is current for one alert interval
+    CHECK(UndercoverSystem::WeaponSeenWindow == 5.0f);
+    CHECK(UndercoverWeaponSeenCurrent(100.0f, 100.0f));
+    CHECK(UndercoverWeaponSeenCurrent(105.0f, 100.0f));
+    CHECK_FALSE(UndercoverWeaponSeenCurrent(105.5f, 100.0f));
+    // no world: nobody has seen anything
+    CHECK(UndercoverSystem::Instance().WeaponSeenCount() == 0);
+}

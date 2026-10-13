@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate (S5 release)
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -10,6 +11,8 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <filesystem>
+#include <functional>
+#include <math.h>
 #include <string.h>
 #include <string>
 
@@ -53,7 +56,281 @@ std::string Str(const RString& s)
 const float kRadius = 800.0f;
 const float kHyst = GarrisonCache::DespawnHysteresis;
 
+// S5 fixture: a post near the Camp, a second post, a town and a far post
+const char* kDepositConfig =
+    "class CfgGuerrillaZones\n"
+    "{\n"
+    "    class Zones\n"
+    "    {\n"
+    "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"GUER\"; "
+    "position[]={1000.0, 1000.0, 0.0}; };\n"
+    "        class Post    { name=\"Post\";    type=\"OUTPOST\"; owner=\"EAST\"; garrison=6; "
+    "position[]={1600.0, 1000.0, 0.0}; };\n"
+    "        class Base    { name=\"Base\";    type=\"AIRFIELD\"; owner=\"EAST\"; garrison=10; "
+    "position[]={5000.0, 5000.0, 0.0}; };\n"
+    "        class Town    { name=\"Town\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+    "position[]={1000.0, 1400.0, 0.0}; };\n"
+    "    };\n"
+    "};\n"
+    "class CfgGuerrillaFactions { class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; }; };\n";
+
+struct DepositFixture
+{
+    ParamFile file;
+    ZoneRegistry registry;
+    int camp = -1, post = -1, base = -1, town = -1;
+
+    DepositFixture()
+    {
+        QIStream in(kDepositConfig, strlen(kDepositConfig));
+        file.Parse(in);
+        registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("CfgGuerrillaFactions"));
+        camp = registry.FindZoneIndex("Camp");
+        post = registry.FindZoneIndex("Post");
+        base = registry.FindZoneIndex("Base");
+        town = registry.FindZoneIndex("Town");
+        REQUIRE(town >= 0);
+    }
+    ZoneRecord& Z(int i) { return *registry.GetZoneMutable(i); }
+};
+
+struct FakeGate final : CounterAttackGate
+{
+    std::function<int(Vector3Par)> exposure;
+    mutable int calls = 0;
+    explicit FakeGate(std::function<int(Vector3Par)> e) : exposure(std::move(e)) {}
+    int Exposure(Vector3Par pos) const override
+    {
+        calls++;
+        return exposure(pos);
+    }
+};
+
+// a refund hook for the phase-2 seam test
+int GHookBodies = 0;
+int GHookOrigin = -2;
+bool TestRefundHook(ZoneRegistry&, int, int originZone, int bodies)
+{
+    GHookBodies += bodies;
+    GHookOrigin = originZone;
+    return true;
+}
+
 } // namespace
+
+TEST_CASE("GarrisonCache - S5: routing a reserve write by the deposit bubble", "[game][guerrilla]")
+{
+    DepositFixture f;
+    const Vector3 post = f.Z(f.post).pos;
+    // the player at the Camp, 600 m from the Post: inside cacheRadius + 50
+    CHECK(GarrisonCache::InDepositBubble(f.Z(f.post), true, 1000.0f, 1000.0f, kRadius));
+    CHECK_FALSE(GarrisonCache::InDepositBubble(f.Z(f.base), true, 1000.0f, 1000.0f, kRadius));
+    // the edge is the despawn edge (850 m), not the spawn edge (800 m)
+    CHECK(GarrisonCache::InDepositBubble(f.Z(f.post), true, post.X() - 849.0f, post.Z(), kRadius));
+    CHECK_FALSE(GarrisonCache::InDepositBubble(f.Z(f.post), true, post.X() - 851.0f, post.Z(), kRadius));
+    CHECK_FALSE(GarrisonCache::InDepositBubble(f.Z(f.post), false, post.X(), post.Z(), kRadius));
+
+    // inside: pending, the reserve untouched
+    CHECK(GarrisonCache::AddReserve(f.registry, f.post, 3, f.base, true, 1000.0f, 1000.0f));
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    CHECK(f.Z(f.post).pending == 3);
+    CHECK(f.Z(f.post).pendingOrigin == f.base);
+    // a second deposit from elsewhere marks it mixed
+    GarrisonCache::Deposit(f.registry, f.post, 1, f.town);
+    CHECK(f.Z(f.post).pending == 4);
+    CHECK(f.Z(f.post).pendingOrigin == -1);
+    // outside: a direct reserve write, as before S5
+    CHECK_FALSE(GarrisonCache::AddReserve(f.registry, f.base, 2, -1, true, 1000.0f, 1000.0f));
+    CHECK(f.Z(f.base).garrison == Approx(12.0f));
+    CHECK(f.Z(f.base).pending == 0);
+    // nothing to write: no-op
+    CHECK_FALSE(GarrisonCache::AddReserve(f.registry, f.base, 0, -1, true, 1000.0f, 1000.0f));
+    CHECK(f.Z(f.base).garrison == Approx(12.0f));
+}
+
+TEST_CASE("GarrisonCache - S5: a pending deposit neither defends nor materializes", "[game][guerrilla]")
+{
+    DepositFixture f;
+    f.Z(f.post).garrison = 0;
+    GarrisonCache::Deposit(f.registry, f.post, 5, f.post);
+    // the cache decision reads the reserve only: nothing to spawn
+    GarrisonDecisionInput in = MakeInput(true, false, f.Z(f.post).garrison, true, 100.0f);
+    CHECK(GarrisonCache::Decide(in, kRadius, kHyst) == GActNone);
+    // the capture meter climbs as against an empty post
+    AutoArray<ZoneEventRecord> fired;
+    ZoneTickInputs tick;
+    tick.guerCount.Resize(f.registry.NZones());
+    tick.occCount.Resize(f.registry.NZones());
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        tick.guerCount[i] = 0;
+        tick.occCount[i] = 0;
+    }
+    tick.playerValid = true;
+    tick.playerX = f.Z(f.post).pos.X();
+    tick.playerZ = f.Z(f.post).pos.Z();
+    tick.guerCount[f.post] = 1;
+    f.registry.EvaluateTick(tick, fired);
+    CHECK(f.Z(f.post).capture > 0);
+    CHECK(f.Z(f.post).pending == 5);
+    // a town: the support gate ignores it too
+    f.Z(f.town).garrison = 0;
+    GarrisonCache::Deposit(f.registry, f.town, 4, -1);
+    tick.guerCount[f.post] = 0;
+    tick.guerCount[f.town] = 1;
+    tick.playerX = f.Z(f.town).pos.X();
+    tick.playerZ = f.Z(f.town).pos.Z();
+    f.registry.EvaluateTick(tick, fired);
+    CHECK(f.Z(f.town).support == Approx(25.0f));
+}
+
+TEST_CASE("GarrisonCache - S5: release on leaving the bubble or when every spawn point is hidden",
+          "[game][guerrilla]")
+{
+    DepositFixture f;
+    GarrisonCache::Deposit(f.registry, f.post, 3, f.post);
+    const Vector3 post = f.Z(f.post).pos;
+    const float spread = f.registry.Tuning().zoneArea / 3.0f;
+
+    SECTION("the player in the bubble, no gate (unit test or no world): it waits")
+    {
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, nullptr) == PFNone);
+        CHECK(f.Z(f.post).pending == 3);
+        CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    }
+    SECTION("the player beyond the despawn edge: it joins the reserve")
+    {
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, post.X() - 851.0f, post.Z(), nullptr) ==
+              PFReleasedBubble);
+        CHECK(f.Z(f.post).pending == 0);
+        CHECK(f.Z(f.post).pendingOrigin == -1);
+        CHECK(f.Z(f.post).garrison == Approx(9.0f));
+    }
+    SECTION("every sample hidden: it joins the reserve (and may materialize)")
+    {
+        FakeGate hidden([](Vector3Par) { return (int)CAExposeHidden; });
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, &hidden) == PFReleasedHidden);
+        CHECK(hidden.calls == 9);
+        CHECK(f.Z(f.post).garrison == Approx(9.0f));
+        CHECK(f.Z(f.post).pending == 0);
+    }
+    SECTION("one cone-only sample (a corner of the placement square): it stays pending")
+    {
+        const Vector3 corner(post.X() + spread, 0, post.Z() + spread);
+        FakeGate oneCone(
+            [corner](Vector3Par p)
+            {
+                const bool atCorner = fabsf(p.X() - corner.X()) < 0.5f && fabsf(p.Z() - corner.Z()) < 0.5f;
+                return atCorner ? (int)CAExposeConeOnly : (int)CAExposeHidden;
+            });
+        CHECK_FALSE(GarrisonCache::PendingSpawnHidden(post, spread, oneCone));
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, &oneCone) == PFNone);
+        CHECK(f.Z(f.post).pending == 3);
+        CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    }
+    SECTION("the samples are the centre, the edge midpoints and the corners of the square")
+    {
+        int inside = 0;
+        FakeGate probe(
+            [&inside, post, spread](Vector3Par p)
+            {
+                if (fabsf(p.X() - post.X()) <= spread + 0.01f && fabsf(p.Z() - post.Z()) <= spread + 0.01f)
+                {
+                    inside++;
+                }
+                return (int)CAExposeHidden;
+            });
+        CHECK(GarrisonCache::PendingSpawnHidden(post, spread, probe));
+        CHECK(inside == 9);
+    }
+    SECTION("a dead player freezes it")
+    {
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, false, 0, 0, nullptr) == PFNone);
+        CHECK(f.Z(f.post).pending == 3);
+    }
+}
+
+TEST_CASE("GarrisonCache - S5: an owner change refunds the deposit to its origin or discards it",
+          "[game][guerrilla]")
+{
+    SECTION("origin still occupier-held: back to its reserve, capped at its strength")
+    {
+        DepositFixture f;
+        f.Z(f.base).garrison = 7; // room for 3 of 10
+        GarrisonCache::Deposit(f.registry, f.post, 5, f.base);
+        f.Z(f.post).owner = "GUER"; // the Post fell
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, nullptr) == PFRefunded);
+        CHECK(f.Z(f.post).pending == 0);
+        CHECK(f.Z(f.post).garrison == Approx(6.0f)); // the new owner gets nothing
+        CHECK(f.Z(f.base).garrison == Approx(10.0f));
+    }
+    SECTION("origin lost (or the zone itself): discarded")
+    {
+        DepositFixture f;
+        GarrisonCache::Deposit(f.registry, f.post, 5, f.base);
+        f.Z(f.base).owner = "GUER";
+        f.Z(f.post).owner = "GUER";
+        f.Z(f.base).garrison = 0;
+        GarrisonCache::RefundPending(f.registry, f.post, true, 1000.0f, 1000.0f);
+        CHECK(f.Z(f.post).pending == 0);
+        CHECK(f.Z(f.base).garrison == Approx(0.0f));
+
+        DepositFixture g;
+        GarrisonCache::Deposit(g.registry, g.post, 4, g.post); // a wiped garrison's remainder
+        g.Z(g.post).owner = "GUER";
+        CHECK(GarrisonCache::FlushPending(g.registry, g.post, true, 1000.0f, 1000.0f, nullptr) == PFRefunded);
+        CHECK(g.Z(g.post).pending == 0);
+    }
+    SECTION("the capture flip refunds at once (EvaluateTick)")
+    {
+        DepositFixture f;
+        f.Z(f.post).garrison = 0;
+        f.Z(f.base).garrison = 5;
+        GarrisonCache::Deposit(f.registry, f.post, 2, f.base);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs tick;
+        tick.guerCount.Resize(f.registry.NZones());
+        tick.occCount.Resize(f.registry.NZones());
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            tick.guerCount[i] = 0;
+            tick.occCount[i] = 0;
+        }
+        tick.playerValid = true;
+        tick.playerX = f.Z(f.post).pos.X();
+        tick.playerZ = f.Z(f.post).pos.Z();
+        tick.guerCount[f.post] = 3;
+        for (int i = 0; i < 10 && Str(f.Z(f.post).owner) == "EAST"; i++)
+        {
+            f.registry.EvaluateTick(tick, fired);
+        }
+        REQUIRE(Str(f.Z(f.post).owner) == "GUER");
+        CHECK(f.Z(f.post).pending == 0);
+        CHECK(f.Z(f.base).garrison == Approx(7.0f)); // the base is far from the player: direct
+    }
+    SECTION("the phase-2 hook takes the refund when set")
+    {
+        DepositFixture f;
+        GarrisonCache::Deposit(f.registry, f.post, 4, f.base);
+        f.Z(f.post).owner = "GUER";
+        GHookBodies = 0;
+        GHookOrigin = -2;
+        GarrisonCache::SetPendingRefundHook(&TestRefundHook);
+        GarrisonCache::RefundPending(f.registry, f.post, true, 1000.0f, 1000.0f);
+        GarrisonCache::SetPendingRefundHook(nullptr);
+        CHECK(GHookBodies == 4);
+        CHECK(GHookOrigin == f.base);
+        CHECK(f.Z(f.base).garrison == Approx(10.0f)); // untouched: the hook took them
+        CHECK(GarrisonCache::GetPendingRefundHook() == nullptr);
+    }
+}
+
+TEST_CASE("GarrisonCache - U4 count of live bodies near a zone is safe on an empty cache", "[game][guerrilla]")
+{
+    GarrisonCache cache;
+    CHECK(cache.LiveCountWithin(0, Vector3(0, 0, 0), 800.0f) == 0);
+    CHECK(cache.LiveCountWithin(-1, Vector3(0, 0, 0), 800.0f) == 0);
+}
 
 TEST_CASE("GarrisonCache - config parse of cacheInterval/groupSize", "[game][guerrilla]")
 {
@@ -383,12 +660,16 @@ TEST_CASE("GarrisonCache - handlers and spawned-row reconciliation survive save/
     CHECK(Str(loaded.GetEventHandler(GEDespawned)) == "hDespawned");
 
     // wiped-out reconciliation: a spawned row with no surviving group refs
-    // reconciles to an empty zone (spawned = false, reserve zeroed)
+    // reconciles to a despawned zone; the reserve stored beside it (here the
+    // config 8, kept under U1) becomes a PENDING deposit (S5) that joins the
+    // reserve on the first pass that finds it out of the player's sight
     CHECK_FALSE(loaded.IsSpawned(outpost));
     CHECK(loaded.LiveCount(outpost) == 0);
     const ZoneRecord* z = ZoneRegistry::Instance().GetZone(outpost);
     REQUIRE(z != nullptr);
     CHECK(z->garrison == Approx(0.0f));
+    CHECK(z->pending == 8);
+    CHECK(z->pendingOrigin == outpost);
     CHECK(z->liveOccupiers == Approx(0.0f));
     // the untouched zone keeps its config reserve
     CHECK(ZoneRegistry::Instance().GetZone(depot)->garrison == Approx(4.0f));

@@ -995,13 +995,17 @@ TEST_CASE("CounterAttack - a travelling force is born on its road behind its pro
     CHECK(f.Z(f.post).garrison == Approx(1.0f));
 
     // ... and after counterAttackBirthGiveUp it turns back: the reserve is
-    // refunded, nothing reached the town
+    // refunded, nothing reached the town.  The player in the town is 671 m
+    // from the Post, inside its deposit bubble: the five come home as a
+    // PENDING deposit (S5), not bodies appearing in his world
     for (int i = 0; i < 30 && f.ca.Count() > 0; i++)
     {
         f.ca.Step(f.registry, near, 25.0f, &ops, fired);
     }
     CHECK(f.ca.Count() == 0);
-    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    CHECK(f.Z(f.post).garrison == Approx(1.0f));
+    CHECK(f.Z(f.post).pending == 5);
+    CHECK(f.Z(f.post).pendingOrigin == f.post);
     CHECK(fired.Size() == 0);
     CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
 }
@@ -1111,20 +1115,167 @@ TEST_CASE("CounterAttack - a holding force does nothing to a town in the player'
     CHECK(fired.Size() == 1);
 }
 
-TEST_CASE("CounterAttack - a live squad counts as occupier presence only in its own target town",
+TEST_CASE("CounterAttack - a live squad counts as occupier presence in whatever town it stands in (D5)",
           "[game][guerrilla][counterattack]")
 {
-    // the census predicate (ZoneRegistry::GatherInputs): an ordinary group
-    // counts everywhere, a counter-attack column only in its target
-    CHECK(CounterAttack::CountsInZone(-1, 0));
-    CHECK(CounterAttack::CountsInZone(-1, 3));
-    CHECK(CounterAttack::CountsInZone(2, 2));
-    CHECK_FALSE(CounterAttack::CountsInZone(2, 1));
-    CHECK_FALSE(CounterAttack::CountsInZone(2, 3));
-    // no live record: no group is a counter-attack group
+    // the occupier census (ZoneRegistry::GatherInputs) has no ownership or
+    // target filter (OCCUPIER-FORCES.md D5, D24, reverting 450327e's
+    // own-target rule): a column bound for Town that marches through Other,
+    // a town the resistance also holds, drains Other like any patrol
     Fixture f;
     f.Load(Certain());
-    CHECK(f.ca.GroupTarget(f.registry, nullptr) == -1);
+    f.RaiseTown(f.town);
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    REQUIRE(Fixture::Str(f.ca.Get(0)->target) == "Town");
+    f.Z(f.other).support = 60.0f;
+    AutoArray<ZoneEventRecord> fired;
+    ZoneTickInputs in = f.Inputs(FarX, FarZ, -1, 0);
+    in.occCount[f.other] = 5; // the passing column, counted where it stands
+    f.registry.EvaluateTick(in, fired);
+    CHECK(f.Z(f.other).support == Approx(55.0f));
+    for (int tick = 0; tick < 6; tick++)
+    {
+        f.registry.EvaluateTick(in, fired);
+    }
+    CHECK(Fixture::Str(f.Z(f.other).owner) == "NEUTRAL");
+    CHECK(CountEvents(fired, ZETownLost, f.other) == 1);
+    // its own target is untouched (it is not there yet)
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+}
+
+TEST_CASE("CounterAttack - U2: an adopted squad comes off the revert refill, never over the reserve",
+          "[game][guerrilla][counterattack]")
+{
+    // the player in the town at the revert: the refill (4) is pending
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    AutoArray<ZoneEventRecord> fired;
+    ZoneTickInputs in = f.Inputs(f.Z(f.town).pos.X(), f.Z(f.town).pos.Z(), -1, 0);
+    in.occCount[f.town] = 5; // the live squad standing in the street
+    for (int tick = 0; tick < 20 && Fixture::Str(f.Z(f.town).owner) == "GUER"; tick++)
+    {
+        f.registry.EvaluateTick(in, fired);
+    }
+    REQUIRE(Fixture::Str(f.Z(f.town).owner) == "NEUTRAL");
+    REQUIRE(f.Z(f.town).pending == 4);
+    REQUIRE(f.Z(f.town).revertRefill == 4);
+    // a squad of 5 adopted: the whole refill comes off, nothing below 0
+    CHECK(CounterAttack::SubtractAdopted(f.Z(f.town), 5) == 4);
+    CHECK(f.Z(f.town).pending == 0);
+    CHECK(f.Z(f.town).garrison == Approx(0.0f));
+    CHECK(f.Z(f.town).revertRefill == 0);
+
+    // off-screen revert (direct refill) and a squad of 3: reserve 4 - 3 = 1
+    Fixture g;
+    g.Load(Certain());
+    g.RaiseTown(g.town);
+    ZoneRecord& z = g.Z(g.town);
+    ZoneTickInputs farTick = g.Inputs(FarX, FarZ, -1, 0);
+    farTick.occCount[g.town] = 3;
+    for (int tick = 0; tick < 20 && Fixture::Str(g.Z(g.town).owner) == "GUER"; tick++)
+    {
+        g.registry.EvaluateTick(farTick, fired);
+    }
+    REQUIRE(Fixture::Str(z.owner) == "NEUTRAL");
+    REQUIRE(z.garrison == Approx(4.0f));
+    REQUIRE(z.revertRefill == 4);
+    CHECK(CounterAttack::SubtractAdopted(z, 3) == 3);
+    CHECK(z.garrison == Approx(1.0f)); // reserve + adopted = garrisonMax
+
+    // a reserve the town already held beyond the refill is kept: 2 stored
+    // before the revert, a refill of 2, a squad of 3 takes only the refill
+    Fixture h;
+    h.Load(Certain());
+    h.RaiseTown(h.town);
+    h.Z(h.town).garrison = 2; // e.g. survivors written back onto the held record
+    for (int tick = 0; tick < 20 && Fixture::Str(h.Z(h.town).owner) == "GUER"; tick++)
+    {
+        h.registry.EvaluateTick(farTick, fired);
+    }
+    REQUIRE(Fixture::Str(h.Z(h.town).owner) == "NEUTRAL");
+    REQUIRE(h.Z(h.town).garrison == Approx(4.0f));
+    REQUIRE(h.Z(h.town).revertRefill == 2);
+    CHECK(CounterAttack::SubtractAdopted(h.Z(h.town), 3) == 2);
+    CHECK(h.Z(h.town).garrison == Approx(2.0f));
+    // no refill to cut (no revert this tick): adoption takes nothing
+    CHECK(CounterAttack::SubtractAdopted(h.Z(h.town), 3) == 0);
+    CHECK(h.Z(h.town).garrison == Approx(2.0f));
+}
+
+TEST_CASE("CounterAttack - U3 and S5: survivors go home as whole bodies, pending inside the bubble",
+          "[game][guerrilla][counterattack]")
+{
+    // a fractional room (garrisonMax 6.5 set by hand) never stores a fraction
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    f.ca.Step(f.registry, far, 300.0f, nullptr, fired);
+    REQUIRE(f.Z(f.post).garrison == Approx(1.0f));
+    f.Z(f.post).garrisonMax = 6.5f;
+    REQUIRE(f.registry.RevertTown(f.town, fired)); // the town fell under the force
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.post).garrison == 6.0f); // 1 + floor(6.5 - 1) = 6, exactly
+    CHECK(f.Z(f.post).pending == 0);     // the player is far: a direct write
+
+    // the same turn-back with the player standing at the Post: pending
+    Fixture g;
+    g.Load(Certain());
+    g.RaiseTown(g.town);
+    REQUIRE(g.ca.OnTownFlipped(g.registry, g.town, Fixture::GroupSize));
+    g.ca.Step(g.registry, far, 300.0f, nullptr, fired);
+    REQUIRE(g.registry.RevertTown(g.town, fired));
+    const CounterAttackView atPost = Fixture::View(g.Z(g.post).pos.X(), g.Z(g.post).pos.Z());
+    g.ca.Step(g.registry, atPost, 1.0f, nullptr, fired);
+    CHECK(g.ca.Count() == 0);
+    CHECK(g.Z(g.post).garrison == Approx(1.0f));
+    CHECK(g.Z(g.post).pending == 5);
+    // reserve + pending is the base's whole strength again
+    CHECK(g.Z(g.post).garrison + (float)g.Z(g.post).pending == Approx(6.0f));
+}
+
+TEST_CASE("CounterAttack - the HQ's town is never a target (N4a)", "[game][guerrilla][counterattack]")
+{
+    // OnTownFlipped: the flip counts as a town taken, nothing is scheduled
+    Fixture f;
+    f.Load(Certain());
+    f.RaiseTown(f.town);
+    CHECK_FALSE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize, 1.0f, f.town));
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.ca.TownsTaken() == 1);
+    // the next town is answered as a second town (k = 1)
+    f.Z(f.other).garrison = 0;
+    f.RaiseTown(f.other);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.other, Fixture::GroupSize, 1.0f, f.town));
+    CHECK(f.ca.Get(0)->townsBefore == 1);
+
+    // LaunchFrom refuses the HQ's town
+    Fixture g;
+    g.Load(ConfigWith("counterAttackFirstTownChance = 0;"));
+    g.RaiseTown(g.town);
+    CounterAttackView far = Fixture::View(FarX, FarZ);
+    far.hqZone = g.town;
+    AutoArray<ZoneEventRecord> fired;
+    CHECK_FALSE(g.ca.LaunchFrom(g.registry, far, g.town, g.post, 3, nullptr, fired));
+    far.hqZone = -1;
+    CHECK(g.ca.LaunchFrom(g.registry, far, g.town, g.post, 3, nullptr, fired));
+
+    // a scheduled force whose town became the HQ's meanwhile is cancelled
+    Fixture h;
+    h.Load(Certain());
+    h.RaiseTown(h.town);
+    REQUIRE(h.ca.OnTownFlipped(h.registry, h.town, Fixture::GroupSize));
+    CounterAttackView hq = Fixture::View(FarX, FarZ);
+    hq.hqZone = h.town;
+    h.ca.Step(h.registry, hq, 300.0f, nullptr, fired);
+    CHECK(h.ca.Count() == 0);
+    CHECK(h.Z(h.post).garrison == Approx(6.0f)); // nothing left the Post
 }
 
 TEST_CASE("CounterAttack - a squad that leaves the player's world returns to the abstract road seamlessly",

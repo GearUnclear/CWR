@@ -175,6 +175,8 @@ TEST_CASE("GuerrillaBase - unestablished queries are safe and empty", "[game][gu
     CHECK_FALSE(base.InGarageRange(Vector3(0, 0, 0)));
     // no zone registry content: nothing can be established anywhere
     CHECK_FALSE(base.CanEstablish(Vector3(100, 0, 100)));
+    // no HQ, no HQ zone (the counter-attack dispatch skip stays inert)
+    CHECK(base.HqZone() == -1);
     base.Simulate(10.0f); // inactive registry: no-op, no crash
 }
 
@@ -289,4 +291,46 @@ TEST_CASE("GuerrillaBase - an unestablished base round-trips as unestablished", 
     CHECK_FALSE(loaded.IsEstablished());
     CHECK(loaded.GarageCount() == 0);
     std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("GuerrillaBase - HqZone: the zone the HQ stands in (OCCUPIER-FORCES 9.1, N4a)", "[game][guerrilla][base]")
+{
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    zoneArea = 150;\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Camp   { name=\"Camp\";   type=\"CAMP\"; owner=\"GUER\"; "
+                         "position[]={1000.0, 1000.0, 0.0}; };\n"
+                         "        class Houdan { name=\"Houdan\"; type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={2000.0, 3000.0, 0.0}; };\n"
+                         "        class Other  { name=\"Other\";  type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={5000.0, 5000.0, 0.0}; };\n"
+                         "    };\n"
+                         "};\n";
+    ParamFile file;
+    QIStream in(config, strlen(config));
+    file.Parse(in);
+    ZoneRegistry registry;
+    registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), nullptr);
+    const int houdan = registry.FindZoneIndex("Houdan");
+    REQUIRE(houdan >= 0);
+
+    GuerrillaBase base;
+    CHECK(base.HqZone(registry) == -1); // unestablished
+    // indoors, 40 m from the centre (engine axes: X easting, Z northing)
+    base.MarkEstablishedForTest("Houdan", Vector3(2040, 0, 3000), Vector3(2060, 0, 3000), Vector3(2040, 0, 3000),
+                                true);
+    CHECK(base.HqZone(registry) == houdan);
+    CHECK(GuerrillaBase::ZoneAt(registry, Vector3(2040, 0, 3000)) == houdan);
+    // an edge-of-town HQ just outside the zone area (0.9 x zoneArea + the
+    // tent offset): still the zone it was established in
+    base.MarkEstablishedForTest("Houdan", Vector3(2160, 0, 3000), Vector3(2145, 0, 3000), Vector3(2164, 0, 3000),
+                                false);
+    CHECK(GuerrillaBase::ZoneAt(registry, Vector3(2160, 0, 3000)) == -1);
+    CHECK(base.HqZone(registry) == houdan);
+    // a HQ standing in another zone's area answers that zone
+    base.MarkEstablishedForTest("Houdan", Vector3(5010, 0, 5000), Vector3(5030, 0, 5000), Vector3(5010, 0, 5000),
+                                true);
+    CHECK(base.HqZone(registry) == registry.FindZoneIndex("Other"));
 }

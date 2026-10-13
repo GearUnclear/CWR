@@ -101,6 +101,17 @@ struct UCObservation
 // side accuracy the caller should record.  Pure and world-free.
 UCVerdict EvaluateUndercoverRule(const UCObservation& obs, const UndercoverTuning& tuning, float& outBoostedAccuracy);
 
+// The weapon-seen stamp (OCCUPIER-FORCES.md 8.1, D11): does this observation
+// rate the subject suspect or exposed BECAUSE of a visible weapon?  True for
+// a Suspect or Exposed verdict while a weapon shows (slung or in hands) and
+// the observation is above the visibility floor; an unarmed recognition or a
+// civil verdict never stamps.  Pure and world-free.
+bool UndercoverWeaponSeenVerdict(UCVerdict verdict, UCWeaponShow weapon, float visibility,
+                                 const UndercoverTuning& tuning);
+// a stamp taken at stampTime is current at now: at most
+// UndercoverSystem::WeaponSeenWindow seconds old.  Pure.
+bool UndercoverWeaponSeenCurrent(float now, float stampTime);
+
 // The weapon-show classifier behind UCWeaponShow: a ManPos partition - every
 // raised-weapon pose reads in-hands, the patrol walk / binocular poses and
 // the civilian moves with a long gun read slung (the back proxy still shows
@@ -199,10 +210,20 @@ class UndercoverSystem
     // count of occupier groups holding a compromised record
     int WitnessCount() const;
     // WitnessCount restricted to groups with at least one ALIVE member: the
-    // "a living occupier observer holds an exposed verdict" half of the D1
-    // player-presence rule (issue #79, ZoneRegistry PlayerCountsAsPresence).
-    // A wiped group's record no longer blows the cover.
+    // "a living occupier observer holds an exposed verdict" clause of the
+    // player-presence predicates (ZoneRegistry PlayerHoldsPresence /
+    // PlayerCapturesPresence).  A wiped group's record no longer blows the
+    // cover.
     int LivingWitnessCount() const;
+    // How long a weapon-seen verdict stays current (s): one alert interval.
+    static constexpr float WeaponSeenWindow = 5.0f;
+    // occupier groups with at least one ALIVE member whose record of the
+    // subject was rated suspect or exposed BECAUSE of a visible weapon
+    // (slung or in hands, the per-observer EvaluateUndercoverRule) within
+    // the last WeaponSeenWindow seconds (Target::ucWeaponSeenTime, stamped by
+    // ApplyVerdict).  The weapon-seen clause of the HOLD presence predicate
+    // (OCCUPIER-FORCES.md 8.1, D11).
+    int WeaponSeenCount() const;
 
     // save/load; called from inside ZoneRegistry::Serialize as the nested
     // "Undercover" subclass (next to "Alert")
@@ -211,9 +232,11 @@ class UndercoverSystem
   private:
     void ResolvePerceivedSideVehicle(EntityAI* observer, AIUnit* observerUnit, EntityAI* ai, Target* target,
                                      float sensorSideAccuracy, float dist2, float visibility);
-    // shared verdict writer; queues the notification on the compromise edge
+    // shared verdict writer; queues the notification on the compromise edge.
+    // stampWeaponSeen (UndercoverWeaponSeenVerdict) stamps the record's
+    // ucWeaponSeenTime for WeaponSeenCount
     void ApplyVerdict(UCVerdict verdict, float boostedAccuracy, EntityAI* observer, EntityAI* ai, Target* target,
-                      const char* reason);
+                      const char* reason, bool stampWeaponSeen = false);
     void QueueCompromise(Vector3Par witnessPos, RString reason);
     // subject resolution for on-demand queries (cache, else the real player)
     Person* Subject() const;

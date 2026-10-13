@@ -68,14 +68,21 @@
 // abstract occupier presence and the zone tick drains it down to
 // townRevertSupport and reverts it (RevertTown).  A repelled force loses
 // counterAttackRepelLoss of its strength; survivors return to the source's
-// reserve, and D2 recovery regrows the rest.  A live squad counts as
-// occupier presence only in its own target town (GroupTarget): a column
-// marching through another held town on its road neither drains it nor
-// joins its garrison.
+// reserve, and D2 recovery regrows the rest.  A live squad is occupier
+// presence wherever it stands (OCCUPIER-FORCES.md D5): a column marching
+// through another held town on its road drains that town too.  A return to
+// a base inside the player's bubble is a pending deposit (S5,
+// GarrisonCache::AddReserve), never bodies at his feet.
+//
+// THE HQ (OCCUPIER-FORCES.md 9.1, N4a).  The town the player's headquarters
+// stands in (GuerrillaBase::HqZone) is never a target: OnTownFlipped and
+// LaunchFrom refuse it, and a scheduled force whose town became the HQ's is
+// cancelled at launch.
 // A live squad stays live until it resolves, whatever the player's bubble
 // does (it is never cached back to abstract): wiped out = repelled; the town
 // reverts under it = it becomes the town's garrison (GarrisonCache adopts the
-// group, the stored reserve tops it up to garrisonMax); still there after
+// group, and its bodies come off the revert refill, SubtractAdopted); still
+// there after
 // counterAttackLiveTimeout and out of the player's sight = it withdraws and
 // its survivors return to the source (the timeout counts from the town edge;
 // the road march gets its own allowance first, see MarchAllowance).
@@ -112,6 +119,7 @@ namespace Guerrilla
 {
 class ZoneRegistry;
 struct ZoneEventRecord;
+struct ZoneRecord;
 
 struct CounterAttackTuning
 {
@@ -169,6 +177,9 @@ struct CounterAttackView
     float playerZ = 0;
     // per zone (optional, missing = 0): the zone's live GarrisonCache bodies
     AutoArray<int> garrisonLive;
+    // the zone the player's HQ stands in (GuerrillaBase::HqZone), -1 when
+    // none: never a target (N4a)
+    int hqZone = -1;
     // budget census (GatherSimDiag): live AI bodies, all sides, and occupier groups
     int liveBodies = 0;
     int occGroups = 0;
@@ -382,13 +393,14 @@ class CounterAttack : public SerializeClass
     static float Progress(const Record& r);
     // seconds the live march may take from fraction to the town
     static float MarchAllowance(const AutoArray<Vector3>& route, float fraction);
-    // a live counter-attack squad counts as occupier presence only in its
-    // own target town; groupTarget -1 = not a counter-attack group
-    static bool CountsInZone(int groupTarget, int zone) { return groupTarget < 0 || groupTarget == zone; }
-    // the target zone of the live counter-attack squad grp, -1 when grp is
-    // not one (ZoneRegistry's occupier census)
-    int GroupTarget(const ZoneRegistry& registry, const AIGroup* grp) const;
     static const char* SpawnReasonName(int reason);
+    // U2 (OCCUPIER-FORCES.md 5.5): a squad of alive bodies adopted as the
+    // garrison of a town RevertTown just refilled is subtracted from that
+    // refill (ZoneRecord::revertRefill): from the pending deposit first,
+    // then from the reserve, never below 0.  Any reserve beyond the refill
+    // is kept, so reserve + pending + adopted <= garrisonMax unless the town
+    // already held more.  Returns the bodies taken off; clears revertRefill.
+    static int SubtractAdopted(ZoneRecord& town, int alive);
     // bodies a base can spare: (stored + live) - floor(garrisonMax * keep),
     // drawn from the live garrison when useLive, else from the stored reserve
     static int Spare(const CounterAttackTuning& t, float stored, int live, float garrisonMax, bool useLive);
@@ -398,14 +410,17 @@ class CounterAttack : public SerializeClass
 
     // the service ---------------------------------------------------------------
     // a CITY just flipped to the resistance: count it, decide and schedule.
-    // True when a counter-attack was scheduled.
-    bool OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel = 1.0f);
+    // True when a counter-attack was scheduled.  hqZone is the zone the
+    // player's HQ stands in (GuerrillaBase::HqZone at the engine call site,
+    // -1 none): that town is never a target, like the exempt start town.
+    bool OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel = 1.0f,
+                       int hqZone = -1);
     // send a force of up to size bodies from an explicit source zone on a
     // held town NOW (no delay, no roll): the launch seam for a later occupier
     // forces service.  The source's spare still caps it.  True when a force
-    // left (a record is added); false when the town is not a valid target or
-    // already has a record, or the source cannot spare a man or cannot march
-    // its live garrison out.
+    // left (a record is added); false when the town is not a valid target
+    // (view.hqZone included) or already has a record, or the source cannot
+    // spare a man or cannot march its live garrison out.
     bool LaunchFrom(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
                     CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
     // towns the resistance took so far (non-exempt flips counted by
@@ -428,6 +443,13 @@ class CounterAttack : public SerializeClass
     // runtime knob (gmCounterAttackTune "delayMax"): a pending delay never
     // outlasts the new ceiling
     void ClampScheduled(float maxDelay);
+
+    // The engine's perception gate (Traffic's issue #53 tiers, the gate the
+    // counter-attack births use) refreshed for the player at (px, pz) now.
+    // GarrisonCache's S5 pending release samples it.  Engine path only: the
+    // reference stays valid for the process, its snapshot until the next
+    // refresh.
+    static const CounterAttackGate& EngineGate(bool playerValid, float px, float pz);
 
     int Count() const { return _records.Size(); }
     const Record* Get(int i) const { return i >= 0 && i < _records.Size() ? &_records[i] : nullptr; }
@@ -455,7 +477,9 @@ class CounterAttack : public SerializeClass
     // the live squad's road march: legs, the town edge, re-sends
     static void March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
                       float elapsed);
-    // survivors go home, capped at the base's strength
+    // survivors go home, whole bodies, capped at the base's room
+    // (garrisonMax - live - reserve - pending); inside the player's deposit
+    // bubble they are a pending deposit (S5), else a reserve write
     static void ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies);
     bool InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const;
     int LiveSquads() const;
@@ -484,7 +508,9 @@ class CounterAttack : public SerializeClass
     // one record's step: true when it is finished
     bool Advance(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops, Record& r,
                  AutoArray<ZoneEventRecord>& fired);
-    // a live squad in the town it retook becomes the town's garrison
+    // a live squad in the town it retook becomes the town's garrison; the
+    // squad is subtracted from the revert refill (U2), never assigned over
+    // the reserve
     static void AdoptLive(ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, int alive);
 
     CounterAttackTuning _tuning;

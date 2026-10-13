@@ -145,7 +145,7 @@ struct ZoneRecord
 
     // dynamic, serialized (matched by zone name on load)
     RString owner;           // concrete side: resistance / occupier / "NEUTRAL" / ...
-    float garrison = 0;      // occupier body count while despawned
+    float garrison = 0;      // occupier reserve: whole stored bodies, not materialized (U3)
     float support = 0;       // 0..100, CITY flips on this
     float income = 0;        // per economy tick when GUER-owned
     float heat = 0;          // 0..100 per-zone Heat
@@ -173,16 +173,32 @@ struct ZoneRecord
     // counter-attack service.  Serialized (absent in older saves: 0).
     int flipDay = 0;
     int flipMinute = 0;
+    // S5 pending deposit (OCCUPIER-FORCES.md 3.3, GarrisonCache::Deposit):
+    // whole bodies written toward this zone's reserve while the player was
+    // within cacheRadius + GarrisonCache::DespawnHysteresis of it.  They do
+    // NOT defend (no capture, defenders or support-gate predicate reads them)
+    // and do NOT materialize; GarrisonCache moves them into the reserve when
+    // the zone leaves the bubble or every spawn point is hidden, and refunds
+    // them (pendingOrigin) when the occupier loses the zone.  Serialized
+    // (absent in older saves: 0).
+    int pending = 0;
+    int pendingOrigin = -1; // zone the pending bodies came from; -1 none or mixed (saved by name)
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
     bool supportReadyNotified = false; // supportThreshold fired for the current crossing
     // last zone tick's presence and bubble state (gmZoneSim, D2 eligibility)
-    int lastGuer = 0;
+    int lastGuer = 0;     // resistance CAPTURE presence (the player per PlayerCapturesPresence)
+    int lastGuerHold = 0; // resistance HOLD presence (the player per PlayerHoldsPresence)
     int lastOcc = 0;
     int lastGarrisonLive = 0; // the zone's own live cache-garrison bodies, wherever they stand
+    int lastGarrisonNear = 0; // ... of those, within cacheRadius of the zone centre (U4)
     bool lastInBubble = false;
     bool lastRemote = false; // the last tick ran this zone's meters from outside the bubble
+    // bodies the last RevertTown refill added (to the reserve or the pending
+    // deposit); CounterAttack::AdoptLive subtracts an adopted squad from it
+    // (U2).  Transient: the adoption runs in the same tick as the revert.
+    int revertRefill = 0;
 };
 
 // One gmSimDiag / [gmsim] sample (issue #71 section 6): what the off-screen
@@ -342,16 +358,29 @@ struct ZoneTickInputs
     float playerZ = 0;             // northing
     bool playerUndercover = false; // script-owned gmUndercover global
     // per zone: live units within zoneArea, positionally counted per side.
-    // The resistance count excludes the real player only while his cover
-    // holds (PlayerCountsAsPresence false): undercover, unexposed and not
-    // overtly a fighter.
+    // guerCount is the resistance CAPTURE presence: it includes the real
+    // player only while PlayerCapturesPresence holds (issue #86: not
+    // undercover, exposed, or a weapon in hands).  Read by the military
+    // capture meter and the administered-town support rise.
     AutoArray<int> guerCount;
     AutoArray<int> occCount;
+    // per zone (optional, missing = guerCount): the resistance HOLD presence,
+    // the same count with the player included while PlayerHoldsPresence
+    // holds (D11, D23: a uniformed player always holds; a disguised one only
+    // exposed, armed or with his weapon seen).  Read by the town retake
+    // (the drain of a held town and its consolidation) only.
+    AutoArray<int> guerHold;
     // per zone (optional, missing = 0): live bodies of the zone's own
     // GarrisonCache garrison WHEREVER they stand.  Town defenders who left
     // the 150 m circle (chasing, posted at an approach) still hold the town;
     // read by the CITY support gate only.
     AutoArray<int> garrisonLive;
+    // per zone (optional, missing = 0): live bodies of the zone's own
+    // GarrisonCache garrison within cacheRadius (800 m) of the zone centre
+    // (GarrisonCache::LiveCountWithin).  U4 (OCCUPIER-FORCES.md 5.5): a
+    // post's garrison that stepped out of the 150 m circle to fight still
+    // defends it.  Read by the military capture branch only.
+    AutoArray<int> garrisonNear;
     // per zone (optional, missing = 0): ABSTRACT occupier presence, the
     // bodies of an off-screen counter-attack force holding a resistance-held
     // town (CounterAttack::AbstractPresence).  Read by the town retake only:
@@ -359,33 +388,43 @@ struct ZoneTickInputs
     AutoArray<int> abstractOcc;
 };
 
-// D1 (issue #79, decided by the user): when does the real player count as
-// resistance presence for zone capture and town support?  Always while he
-// is not undercover (gmUndercover false or nil).  While undercover his cover
-// is BLOWN, and he counts, when EITHER
+// When does the real player count as resistance presence?  Two predicates
+// over one sample (OCCUPIER-FORCES.md 8.1; owner decisions D11, D23 and
+// issue #86).  Inputs:
+//   undercover     - the script-owned gmUndercover global (true for the
+//                    whole campaign; exposure is per observer);
 //   exposed        - a living occupier observer holds an exposed
 //                    (compromised) verdict on him: some occupier group with
 //                    at least one alive member has a ucCompromised record of
 //                    him or his vehicle (UndercoverSystem::LivingWitnessCount);
 //   weaponInHands  - he is overtly armed: the undercover weapon-show
 //                    classifier reads UCWInHands (any raised-weapon pose with
-//                    a weapon carried, the same predicate that reads hostile
-//                    to an observer; a drawn pistol counts, a slung rifle
+//                    a weapon carried; a drawn pistol counts, a slung rifle
 //                    does not);
 //   warriorOutfit  - he wears a warrior body, i.e. NOT a civilian outfit
 //                    (ZoneRegistry::IsCivilianOutfitClass false and the body
-//                    class's typical side is not civilian).
-// Rationale: a cleared town has no observers left, so exposure alone could
-// never let a lone armed player take it.  gmUndercover itself stays true for
-// the whole campaign (exposure is per observer).
+//                    class's typical side is not civilian);
+//   weaponSeen     - a living occupier observer currently rates him suspect
+//                    or exposed because of a visible weapon, slung or in
+//                    hands (UndercoverSystem::WeaponSeenCount: the per-group
+//                    stamp ApplyVerdict writes, at most WeaponSeenWindow old).
+// HOLD (PlayerHoldsPresence) blocks the drain of a held town: not undercover,
+// or a uniform (weapon out or not, D23); in a civilian outfit only when
+// exposed, armed, or with his weapon seen (D11).
+// CAPTURE (PlayerCapturesPresence) raises an administered town's support and
+// a military zone's capture meter: not undercover, or exposed, or a weapon
+// in hands (issue #86); the outfit alone never counts, and weapon-seen is a
+// HOLD clause only (the design text of 8.1).
 struct PlayerPresenceInput
 {
     bool undercover = false;
     bool exposed = false;
     bool weaponInHands = false;
     bool warriorOutfit = false;
+    bool weaponSeen = false;
 };
-bool PlayerCountsAsPresence(const PlayerPresenceInput& in);
+bool PlayerHoldsPresence(const PlayerPresenceInput& in);
+bool PlayerCapturesPresence(const PlayerPresenceInput& in);
 
 class ZoneRegistry : public SerializeClass
 {
@@ -479,14 +518,18 @@ class ZoneRegistry : public SerializeClass
     bool IsGarrisonable(const ZoneRecord& z) const;
     // Revert a resistance-held CITY to occupier administration (the town
     // retake): owner back to its authored token (NEUTRAL when that token is
-    // the resistance), garrison reserve refilled to garrisonMax unless
-    // exempt (materialized by GarrisonCache on its next pass inside the
-    // bubble), meters reset, ZETownLost queued.  False (no-op) for a zone
-    // that is not a resistance-held CITY.  The seam a counter-attack service
-    // can call directly.
+    // the resistance), garrison refilled up to garrisonMax unless exempt,
+    // meters reset, ZETownLost queued.  The refill is whole bodies; with the
+    // player inside the deposit bubble (cacheRadius + DespawnHysteresis, as
+    // of the last zone tick) it is a PENDING deposit (S5, GarrisonCache::
+    // AddReserve), else a direct reserve write that GarrisonCache
+    // materializes on its next pass inside cacheRadius.  False (no-op) for a
+    // zone that is not a resistance-held CITY.  The seam a counter-attack
+    // service can call directly.
     bool RevertTown(int index, AutoArray<ZoneEventRecord>& fired);
     // Exempt a town from its occupier garrison (GuerrillaBase: the new-game
-    // START TOWN headquarters).  Zeroes the reserve; persistent.
+    // START TOWN headquarters).  Zeroes the reserve and any pending deposit;
+    // persistent.
     void ExemptTownGarrison(int index);
     // CITY zones currently held by the resistance (the "towns liberated"
     // count, gmZoneStats)
@@ -496,9 +539,10 @@ class ZoneRegistry : public SerializeClass
     // recruitFighterCiv, recruitSpecialistCiv, holdClassCiv, civTier[])?
     // Case-insensitive; false for an empty name.
     bool IsCivilianOutfitClass(const char* className) const;
-    // D1 (issue #79): sample the real player's cover state for
-    // PlayerCountsAsPresence - gmUndercover, the living-witness exposure,
-    // the weapon-show classifier and the outfit.  World-touching.
+    // Sample the real player's cover state for PlayerHoldsPresence and
+    // PlayerCapturesPresence: gmUndercover, the living-witness exposure, the
+    // weapon-show classifier, the outfit and the weapon-seen verdicts.
+    // World-touching.
     void SamplePlayerPresence(Person* player, PlayerPresenceInput& out) const;
 
     // The campaign-aware faction lookup, and the one every side-keyed query
@@ -575,6 +619,14 @@ class ZoneRegistry : public SerializeClass
     // the last EvaluateTick's bubble census (gmSimDiag)
     int LastTickInBubble() const { return _lastTickInBubble; }
     int LastTickRemote() const { return _lastTickRemote; }
+    // the player as the last EvaluateTick saw him (the S5 deposit bubble of
+    // RevertTown's refill); false before the first tick
+    bool LastTickPlayer(float& x, float& z) const
+    {
+        x = _tickPlayerX;
+        z = _tickPlayerZ;
+        return _tickPlayerValid;
+    }
     // sample GatherSimDiag and log one [gmsim] INFO line, plus a WARN per
     // breached budget; returns the SimBudgetBreach bits
     int LogSimDiag();
@@ -601,6 +653,8 @@ class ZoneRegistry : public SerializeClass
         bool garrisonExempt = false;
         int flipDay = 0;
         int flipMinute = 0;
+        int pending = 0;       // S5 pending deposit
+        RString pendingOrigin; // its origin zone by name (empty: none or mixed)
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -665,6 +719,10 @@ class ZoneRegistry : public SerializeClass
     float _simDiagAccum = 0;   // [gmsim] cadence
     int _lastTickInBubble = 0; // transient census of the last EvaluateTick
     int _lastTickRemote = 0;
+    // transient: the player as the last EvaluateTick saw him (LastTickPlayer)
+    bool _tickPlayerValid = false;
+    float _tickPlayerX = 0;
+    float _tickPlayerZ = 0;
     // deserialized rows waiting for the mission config (applied on the
     // second load pass, once description.ext has been reparsed)
     AutoArray<ZoneSaveState> _pending;
