@@ -74,6 +74,7 @@ void OccupierForces::Clear()
     _roster.Clear();
     _towns.Clear();
     _excluded.Clear();
+    _probedOut = 0;
     _townsEver.Clear();
     _urgent.Clear();
     _redPaid.Clear();
@@ -535,9 +536,11 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
         {
             reason = "exempt from its garrison";
         }
-        else if (seeded && i < seeded->Size() && (*seeded)[i] && probe && !probe->IsSettlement(z->name, z->pos))
+        else if (seeded ? (i < seeded->Size() && (*seeded)[i] && probe && !probe->IsSettlement(z->name, z->pos))
+                        : (z->seeded && z->settlement < 0))
         {
             reason = "a seeded label, not a settlement";
+            out.labels.Add(z->name);
         }
         if (reason)
         {
@@ -632,6 +635,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
         row.name = s.excluded[i];
         _excluded.Add(row);
     }
+    _probedOut = s.labels.Size();
     _R = s.R;
     _G = s.G;
     _poolStart = s.poolStart;
@@ -652,11 +656,39 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     _active = true;
     _control = ComputeControl(registry);
     LOG_INFO(Core,
-             "OccupierForces: active, poolStart {} (R {}, K {}, G {}), roster {} zone(s), {} town(s) not counted, "
-             "refill {:.1f}/h, band {}, sized in {:.1f} ms",
-             _poolStart, _R, _towns.Size(), _G, _roster.Size(), _excluded.Size(),
+             "OccupierForces: active, poolStart {} (R {}, K {}, G {}), roster {} zone(s), {} town(s) not counted "
+             "({} probed out), refill {:.1f}/h, band {}, sized in {:.1f} ms",
+             _poolStart, _R, _towns.Size(), _G, _roster.Size(), _excluded.Size(), _probedOut,
              (double)RefillPerHour(_poolStart, _R, _G, _tuning.refillHours, _meanStanding), BandName(_band), ms);
+    if (_probedOut > 0)
+    {
+        RString names;
+        for (int i = 0; i < s.labels.Size(); i++)
+        {
+            names = i == 0 ? s.labels[i] : names + RString(", ") + s.labels[i];
+        }
+        LOG_INFO(Core, "OccupierForces: {} seeded town(s) not counted in K, not a settlement: {}", _probedOut,
+                 (const char*)names);
+    }
     return true;
+}
+
+bool OccupierForces::ActivateProbed(ZoneRegistry& registry, const SettlementProbe* probe, bool authoredOwner)
+{
+    if (registry.IsActive())
+    {
+        LandscapeSettlementProbe landscape;
+        landscape.log = false; // the probe's own line names the town and its building count
+        const auto start = std::chrono::steady_clock::now();
+        const int probed = registry.ProbeSeededSettlements(probe ? *probe : landscape);
+        if (probed > 0)
+        {
+            const double ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            LOG_INFO(Core, "OccupierForces: settlement probe ran on {} seeded town(s) in {:.1f} ms", probed, ms);
+        }
+    }
+    return Activate(registry, nullptr, nullptr, authoredOwner);
 }
 
 float OccupierForces::ComputeControl(const ZoneRegistry& registry) const
@@ -1002,10 +1034,10 @@ void OccupierForces::Simulate(float deltaT)
     {
         if (!_activationTried)
         {
-            // the first active frame: the roster, K and the pool.  The engine
-            // passes no seeded table yet (ZoneRecord has no seeded flag), so
-            // every administered non-exempt CITY counts.
-            Activate(registry);
+            // the first active frame: the settlement probe on the seeded
+            // towns (once per campaign, stored on the rows), then the
+            // roster, K and the pool
+            ActivateProbed(registry);
         }
         return;
     }
@@ -3634,7 +3666,7 @@ void OccupierForces::ScanWorld(const ZoneRegistry& registry)
 // persistence
 // ---------------------------------------------------------------------------
 
-void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
+void OccupierForces::DeriveFromExistingSave(ZoneRegistry& registry, const SettlementProbe* probe)
 {
     if (!_tuning.enabled || !registry.IsActive() || _active)
     {
@@ -3642,7 +3674,7 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
     }
     // K by the authored owners (M7): the towns the player already holds stay
     // in K, and control measures them lost
-    if (!Activate(registry, nullptr, nullptr, true))
+    if (!ActivateProbed(registry, probe, true))
     {
         return;
     }
@@ -3771,6 +3803,8 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("Roster", _roster, 1))
     PARAM_CHECK(ar.Serialize("Towns", _towns, 1))
     PARAM_CHECK(ar.Serialize("Excluded", _excluded, 1))
+    // the settlement probe (5.1): absent in older blocks = none probed out
+    PARAM_CHECK(ar.Serialize("probedOut", _probedOut, 1, 0))
     PARAM_CHECK(ar.Serialize("TownsEver", _townsEver, 1))
     PARAM_CHECK(ar.Serialize("posture", _posture, 1, (int)OFDormant))
     PARAM_CHECK(ar.Serialize("tokens", _tokens, 1, 0))

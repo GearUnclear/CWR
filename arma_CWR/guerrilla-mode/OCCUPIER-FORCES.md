@@ -570,21 +570,35 @@ raised view distance can still show pop-in.
 (`IsMilitaryType && IsAuthoredOccupier`, independent of `campaignEnd`) and
 computes:
 - **R**: the roster's summed `garrisonMax`.
-- **K**: every administered, non-exempt CITY zone. The engine runs no
-  settlement probe: `OccupierForces::Activate(registry)` passes no seeded
-  table, so a seeded town counts like an authored one. An old save's K
-  counts by the AUTHORED owner, so towns the player already holds stay in
-  K (review M7).
-  - Open: the probe may return in phase 7 or be dropped (section 17).
+- **K**: every administered, non-exempt CITY zone, where a SEEDED town
+  (one the scaffold made from a map label, `seedCities`) counts only when
+  it passes the settlement probe. An authored (template) CITY always
+  counts.
+  - **The probe** is the Auto seed's own `LandscapeSettlementProbe`: the
+    label stands on dry land and at least 3 house-sized buildings
+    (bounding sphere over 4 m) stand within 300 m of it (16). Water or
+    fewer buildings make it a label, not a settlement.
+  - **When.** `OccupierForces::ActivateProbed` runs it once, at the first
+    active tick, on every seeded CITY whose zone row holds no verdict yet
+    (`ZoneRegistry::ProbeSeededSettlements`), and stores the verdict on
+    the row (`settlement`: 1 or -1, saved). It then sizes from the rows,
+    so K is the same in every session. A save without the block probes
+    when it derives (`DeriveFromExistingSave`). A block saved before the
+    probe keeps its saved K; nothing re-sizes a running pool.
+  - **Reporting.** One INFO line per town ("not counted (a seeded label,
+    not a settlement)"), one listing every probed-out town, the probed-out
+    count in the sizing line and in `gmOccupierForces` slot 29.
+  - An old save's K counts by the AUTHORED owner, so towns the player
+    already holds stay in K (review M7).
 - **G**: the summed `garrisonMax` of the K towns.
 - `poolStart = max(24, R + 2K)`.
 
 An empty roster turns the service off.
 
-| Template | R | K (measured; upper value) | poolStart | Wave (half, 12..48) |
+| Template | R | K (measured) | poolStart | Wave (half, 12..48) |
 |---|---|---|---|---|
-| Abel | 32 | at most 14 | at most 60 | at most 30 |
-| Sinai | 14 | at most 37 (no probe runs, so seeded labels count) | at most 88 | at most 44 |
+| Abel | 32 | 14 (13 seeded towns probed, all settlements) | 60 | 30 |
+| Sinai | 14 | 26 (37 before the probe; 11 seeded labels probed out: 6 in the water, 5 with 0 or 1 building) | 66 (88 before) | 33 (44 before) |
 | Lebanon80 | 14 | 3 | 24 | 12 |
 | Eden | 18 | 18 + Auto seeds | at least 54 | at least 27 |
 
@@ -1422,9 +1436,15 @@ within one heat-decay step.
 ### 12.1 Unit (`test_occupier_forces.cpp` `[occupierforces]`, plus existing suites)
 
 - **Pool.**
-  - K over every administered non-exempt CITY (no probe runs; open:
-    the probe may return in phase 7 or be dropped) and the exemption; an
+  - K over every administered non-exempt CITY and the exemption; an
     empty roster; `campaignEnd = 0`.
+  - The settlement probe (5.1): a seeded label the probe rejects is not
+    counted (the table path and the stored-verdict path); the verdict is
+    probed once and stored (a later probe that answers otherwise changes
+    nothing); the probed-out count survives the save; a save without the
+    block probes when it derives; an unprobed seeded town counts. In
+    `test_zone_registry.cpp`: `ProbeSeededSettlements` probes seeded rows
+    only, once, and the row's verdict survives save and load.
   - The refill formula: the 4 h figure from full exhaustion with D2
     drawing first.
   - Band hysteresis: no SPENT/THIN flapping, including the recovery phase
@@ -1590,6 +1610,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 |---|---|---|---|---|
 | `occupierForces` | OF | 1 from phase 7 (`OccupierForcesTuning::KeyDefault`; 0 before it, Abel 1 from phase 3); `campaignEnd = 0` missions author 0 | 0/1 | Layer on/off |
 | `forcesPoolMin` / `forcesPoolPerTown` | OF | 24 / 2 | 0..200 / 0..8 | `poolStart = max(Min, R + PerTown * K)` |
+| settlement probe (`LandscapeSettlementProbe::kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZoneRegistry | 3 / 300 m / 4 m | constants | A seeded CITY counts in K only on dry land with at least 3 buildings of bounding sphere over 4 m within 300 m; the Auto seed applies the same rule. Probed once, stored on the zone row (5.1) |
 | `forcesPoolRefillHours` | OF | 4 | 0.5..48 h | Exhausted to full, garrisons included |
 | `forcesPoolFloor` | OF | 0.2 | 0..1 | THIN operations floor |
 | band enter / leave | OF | STRONG 66/60, THIN 33/40, SPENT 0/10 % | constants | Hysteresis; D2 keeps running in SPENT |
@@ -1654,9 +1675,6 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 
 Every owner question is answered (D1-D24). Open implementation items, as of
 `bcca80e` and the phase 7 work:
-- **K and the settlement probe** (5.1). The engine counts every
-  administered non-exempt CITY; whether the probe returns or is dropped
-  from this doc is decided in a later phase.
 - **The air re-plan's price bypasses the director's ledger** (3.1 step 6):
   the airframe is spent through `OccupierForces::Spend` and refunded or
   lost straight to the pool (`airReplanned`), not through the director's
@@ -1668,6 +1686,10 @@ Every owner question is answered (D1-D24). Open implementation items, as of
 - **The HQ-respawn issue** (separate, D13).
 - **Player messaging** for the director, waves, strikes and the HQ (D12:
   INFO lines and gm* commands only for now).
+
+Closed after `402ece6`: **K and the settlement probe** (5.1): the probe
+returns for K. A seeded town counts only when it passes it, the verdict is
+stored on the zone row once, and Sinai's K falls from 37 to 26.
 
 Closed after `08c6ae2`: the live adoption cap (5.5, 8.2: a live top-up
 or alarm answer joins up to the room, the surplus walks home); the LOW
@@ -1709,6 +1731,7 @@ now wait for the dead too, `BodiesUnseen`, `bcca80e`); the default flip
 | 2026-10-14 (phase 6, `bcca80e`: the landmass finding) | **Malden's Southeast Compound is an island.** About 800 m of deep sea part it from Le Port; the road-route join's cross-country leg from it crossed the sea, and its W and S gates are closed wire gates; the squad stall inside its west gate (open since phase 3) is resolved with it. The rule: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass (`RoadRoute::Landmass`, 50 m geography cells joined over land, a road over water a bridge); the join lands only on the source's landmass; such a base is an AIR-ONLY source (`PackageSource::airOnly`), and the birth chain re-plans as an insertion at once when no other base shares the target's landmass. This replaces the phase 4 deviation's "the straight cross-country line counts as reaching the target" for bases off the target's landmass. The offscreen fixture's SEBase moved to the Le Port quay (3.1). |
 | 2026-10-14 (LOW review fixes after `08c6ae2`) | **Known bisect gap (L15):** `8f9482a` does not build on its own (it includes `CounterAttackOrders.hpp` and calls `LaunchFunded`, which arrive in `7a143ec`); history is not rewritten, so a bisect skips `8f9482a` (`git bisect skip`). The live top-up cap supersedes the phase 6 deviation "a live alarm answer adopts its whole squad". |
 | 2026-10-14 (phase 6 accepted deviations, `bcca80e`) | No attack-helicopter escort for an insertion (one airframe per insertion); a live alarm answer adopts its whole squad (no `garrisonMax` cap on the live path); strikes are live only in the bubble, abstract elsewhere; wave strikes buy no air opener; an HQ strike with no report aims at `HqPos`; a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter price bypasses the director ledger; alarm answers take no token and run while DORMANT (otherwise a key-on campaign has no answer before the second town). Open with them: the descriptor lint does not check the `forces*` keys; a slow native answer could contest a later Showcase capture chapter (17). |
+| 2026-10-14 (orchestrator, after `402ece6`) | **The settlement probe returns for K** (5.1). A seeded CITY counts in K and G only when the Auto seed's probe (dry land, 3 house-sized buildings within 300 m, 16) accepts it; authored towns always count. The verdict is probed once and saved on the zone row, so K is stable across sessions. Deviation: a block saved before the probe keeps its saved K (re-sizing a running pool would break the ledger, 5.5); only a save without the block probes on load. Measured: Abel K 14 (unchanged), Sinai K 37 to 26, poolStart 88 to 66. |
 
 ## 19. Residual risks the owner accepts
 

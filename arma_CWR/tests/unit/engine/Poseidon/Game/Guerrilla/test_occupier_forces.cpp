@@ -365,10 +365,103 @@ TEST_CASE("OccupierForces - a seeded town counts only when the settlement probe 
     CHECK(s.G == 4);
     REQUIRE(s.excluded.Size() == 3);
     CHECK(Str(s.excluded[0]) == "Other");
+    CHECK(s.labels.Size() == 1);
     // the probe never touches an authored (unseeded) town
     seeded[f.registry.FindZoneIndex("Other")] = false;
     OccupierForces::Size(f.registry, f.of.Tuning(), s, &seeded, &probe);
     CHECK(s.K() == 2);
+    CHECK(s.labels.Size() == 0);
+}
+
+TEST_CASE("OccupierForces - the engine path probes the seeded towns once and sizes K from the stored verdicts",
+          "[game][guerrilla][occupierforces][save]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-probe.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    // Town and Other stand in for seeded labels (seedCities = 1)
+    f.Z("Town").seeded = true;
+    f.Z("Other").seeded = true;
+    FakeSettlement probe;
+    probe.labels.push_back("Other");
+    REQUIRE(f.of.ActivateProbed(f.registry, &probe));
+    CHECK(f.Z("Town").settlement == 1);
+    CHECK(f.Z("Other").settlement == -1);
+    CHECK(f.Z("Held").settlement == 0); // authored: never probed
+    CHECK(f.of.TownCount() == 1);       // K: Town only
+    CHECK(f.of.TownGarrisons() == 4);
+    CHECK(f.of.ProbedOutCount() == 1);
+    CHECK(f.of.PoolStart() == 24); // max(24, 18 + 2 * 1)
+    bool otherExcluded = false;
+    for (int i = 0; i < f.of.ExcludedCount(); i++)
+    {
+        otherExcluded = otherExcluded || Str(f.of.ExcludedName(i)) == "Other";
+    }
+    CHECK(otherExcluded);
+
+    // the verdict is stored: a later sizing with a probe that now rejects
+    // everything keeps the first answer (K stable across sessions)
+    FakeSettlement rejectAll;
+    rejectAll.labels = {"Town", "Other"};
+    OccupierForces again;
+    again.LoadFromParams(f.file.FindEntry("CfgGuerrillaZones"));
+    REQUIRE(again.ActivateProbed(f.registry, &rejectAll));
+    CHECK(again.TownCount() == 1);
+    CHECK(again.ProbedOutCount() == 1);
+
+    // the probed-out count rides in the block
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.TownCount() == 1);
+    CHECK(loaded.ProbedOutCount() == 1);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("OccupierForces - a save without the block probes its seeded towns when it derives the pool",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.Z("Other").seeded = true;
+    FakeSettlement probe;
+    probe.labels.push_back("Other");
+    f.of.DeriveFromExistingSave(f.registry, &probe);
+    REQUIRE(f.of.Active());
+    CHECK(f.Z("Other").settlement == -1);
+    CHECK(f.of.TownCount() == 1);
+    CHECK(f.of.ProbedOutCount() == 1);
+}
+
+TEST_CASE("OccupierForces - an unprobed seeded town counts in K", "[game][guerrilla][occupierforces]")
+{
+    // settlement 0 (never probed: the test path, or no landscape) keeps the
+    // phase-7 answer
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.Z("Other").seeded = true;
+    REQUIRE(f.of.Activate(f.registry));
+    CHECK(f.of.TownCount() == 2);
+    CHECK(f.of.ProbedOutCount() == 0);
 }
 
 TEST_CASE("OccupierForces - an empty roster switches the service off", "[game][guerrilla][occupierforces]")

@@ -33,7 +33,9 @@
 //                                  Phase 6: [24] towns struck, [25] strikes
 //                                  applied (any zone), [26] alarm answers
 //                                  launched, [27] legacySave, [28]
-//                                  gmLegacyQrf.
+//                                  gmLegacyQrf.  [29] the seeded towns the
+//                                  settlement probe kept out of K (5.1;
+//                                  their names are in excludedTowns).
 //   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
 //                                  (D20): the key off, the service sized
 //                                  off, or a legacy save (a block older than
@@ -240,6 +242,8 @@ static GameValue GmOccupierForces(const GameState* state)
     row.Add(GameValue((float)of.AlarmAnswers()));
     row.Add(GameValue(of.LegacySave()));
     row.Add(GameValue(of.LegacyQrf()));
+    // the settlement probe (5.1)
+    row.Add(GameValue((float)of.ProbedOutCount()));
     return value;
 }
 

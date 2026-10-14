@@ -1456,7 +1456,14 @@ bool LandscapeSettlementProbe::IsSettlement(const char* name, const Vector3& pos
     // spot sampler applies, with its margin against the wash)
     if (GLandscape->SurfaceY(pos.X(), pos.Z()) < 0.1f)
     {
-        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - it is in the water", name);
+        if (log)
+        {
+            LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - it is in the water", name);
+        }
+        else
+        {
+            LOG_INFO(Core, "ZoneRegistry: seeded town '{}' is not a settlement: it is in the water", name);
+        }
         return false;
     }
     int buildings = 0;
@@ -1480,8 +1487,17 @@ bool LandscapeSettlementProbe::IsSettlement(const char* name, const Vector3& pos
     }
     if (buildings < kMinBuildings)
     {
-        LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - {} building(s) within {} m, a town needs {}", name,
-                 buildings, (int)kRadius, kMinBuildings);
+        if (log)
+        {
+            LOG_INFO(Core, "ZoneRegistry: Names entry '{}' not seeded - {} building(s) within {} m, a town needs {}",
+                     name, buildings, (int)kRadius, kMinBuildings);
+        }
+        else
+        {
+            LOG_INFO(Core,
+                     "ZoneRegistry: seeded town '{}' is not a settlement: {} building(s) within {} m, a town needs {}",
+                     name, buildings, (int)kRadius, kMinBuildings);
+        }
         return false;
     }
     return true;
@@ -1944,6 +1960,22 @@ bool ZoneRegistry::RevertBase(int index, AutoArray<ZoneEventRecord>& fired, int 
     ev.zoneIndex = index;
     fired.Add(ev);
     return true;
+}
+
+int ZoneRegistry::ProbeSeededSettlements(const SettlementProbe& probe)
+{
+    int probed = 0;
+    for (int i = 0; i < _zones.Size(); i++)
+    {
+        ZoneRecord& z = _zones[i];
+        if (!z.seeded || z.settlement != 0 || stricmp(z.type, "CITY") != 0)
+        {
+            continue;
+        }
+        z.settlement = probe.IsSettlement(z.name, z.pos) ? 1 : -1;
+        probed++;
+    }
+    return probed;
 }
 
 void ZoneRegistry::ExemptTownGarrison(int index)
@@ -3393,6 +3425,9 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("struckUntil", struckUntil, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("lostCount", lostCount, 1, 0))
     PARAM_CHECK(ar.Serialize("pendingOrigin", pendingOrigin, 1, RString()))
+    // the settlement probe's verdict on a seeded town (OCCUPIER-FORCES.md
+    // 5.1): absent in older saves = not probed yet
+    PARAM_CHECK(ar.Serialize("settlement", settlement, 1, 0))
     return LSOK;
 }
 
@@ -3435,6 +3470,12 @@ void ZoneRegistry::ApplyPendingLoad()
         }
         z.struckUntil = row.struckUntil;
         z.lostCount = row.lostCount > 0 ? row.lostCount : 0;
+        // a stored verdict wins; 0 (an older save, or never probed) keeps
+        // the row's own value
+        if (row.settlement != 0)
+        {
+            z.settlement = row.settlement > 0 ? 1 : -1;
+        }
         // reconstruct the one-shot threshold edge from the loaded value: a
         // town saved in the READY-waiting state must not re-announce itself
         // on every reload
@@ -3470,6 +3511,7 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.standing = z.standing;
             row.struckUntil = z.struckUntil;
             row.lostCount = z.lostCount;
+            row.settlement = z.settlement;
             row.pending = z.pending;
             const ZoneRecord* origin = GetZone(z.pendingOrigin);
             row.pendingOrigin = z.pending > 0 && origin ? origin->name : RString();

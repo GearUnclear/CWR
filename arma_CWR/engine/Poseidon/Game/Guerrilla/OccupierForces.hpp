@@ -24,9 +24,14 @@
 // IsAuthoredOccupier), independent of campaignEnd.  R is the roster's summed
 // garrisonMax.  K is the administered, non-exempt CITY zones; a SEEDED town
 // counts only when it passes the settlement probe (an authored town always
-// counts).  ZoneRecord carries no seeded flag yet, so the engine path passes
-// no seeded table and every administered non-exempt CITY counts (one INFO
-// line per town).  G is the K towns' summed garrisonMax.
+// counts).  The engine path (ActivateProbed) first stores the probe's verdict
+// on every seeded CITY row that has none (ZoneRegistry::
+// ProbeSeededSettlements: LandscapeSettlementProbe, at least 3 house-sized
+// buildings within 300 m), then sizes from the rows: a seeded town whose row
+// says -1 is not counted.  The verdict is saved on the zone row, so the
+// probe runs once per campaign (an old save without verdicts probes when it
+// sizes).  One INFO line per town, one listing the probed-out towns.
+// G is the K towns' summed garrisonMax.
 // poolStart = max(forcesPoolMin, R + forcesPoolPerTown * K).  An empty
 // roster switches the service off for the session (one INFO line).
 //
@@ -362,6 +367,7 @@ struct OccupierForcesSizing
     AutoArray<RString> roster;   // military zones with an authored occupier owner
     AutoArray<RString> towns;    // the K towns
     AutoArray<RString> excluded; // CITY zones not counted in K
+    AutoArray<RString> labels;   // excluded seeded towns the settlement probe rejected
     int R = 0;                   // the roster's summed garrisonMax
     int G = 0;                   // the K towns' summed garrisonMax
     int poolStart = 0;
@@ -491,7 +497,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     }
     // the roster, K, G and poolStart of a registry.  seeded (optional, per
     // zone index) marks auto-seeded towns, which count only when the probe
-    // (optional) accepts them.  log: one INFO line per town.  authoredOwner:
+    // (optional) accepts them.  With no seeded table the zone rows decide:
+    // a seeded town whose stored settlement verdict is -1 is not counted
+    // (0, never probed, counts).  log: one INFO line per town.  authoredOwner:
     // a town counts in K by its AUTHORED owner (ownerConfig resolved: the
     // occupier or NEUTRAL), not the current one; the old-save derivation
     // only (M7), so the towns the resistance holds at load still count.
@@ -514,6 +522,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // (the old-save derivation).
     bool Activate(const ZoneRegistry& registry, const AutoArray<bool>* seeded = nullptr,
                   const SettlementProbe* probe = nullptr, bool authoredOwner = false);
+    // the engine path: store the settlement verdict on every seeded town
+    // that has none (probe; null = the landscape probe), then Activate from
+    // the rows
+    bool ActivateProbed(ZoneRegistry& registry, const SettlementProbe* probe = nullptr, bool authoredOwner = false);
     // one director tick: the refill, control and the band.  No-op while not
     // Active().
     void Tick(const ZoneRegistry& registry, float elapsed);
@@ -577,6 +589,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     RString TownName(int i) const { return i >= 0 && i < _towns.Size() ? _towns[i].name : RString(); }
     int ExcludedCount() const { return _excluded.Size(); }
     RString ExcludedName(int i) const { return i >= 0 && i < _excluded.Size() ? _excluded[i].name : RString(); }
+    // the seeded towns the settlement probe kept out of K (saved)
+    int ProbedOutCount() const { return _probedOut; }
     int TownsEverCount() const { return _townsEver.Size(); }
     // L8: a block saved before the native alarm answers (format below
     // SaveFormat) that loaded an empty distinct-town set came from a
@@ -768,8 +782,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
 
     // persistence -----------------------------------------------------------------
     // a save without the block, loaded with the key on (D20): size, then
-    // derive the pool and wave state from the zone state
-    void DeriveFromExistingSave(const ZoneRegistry& registry);
+    // derive the pool and wave state from the zone state.  K runs the
+    // settlement probe (ActivateProbed; probe null = the landscape probe).
+    void DeriveFromExistingSave(ZoneRegistry& registry, const SettlementProbe* probe = nullptr);
     bool HasState() const { return _active || _restored; }
     LSError Serialize(ParamArchive& ar) override;
 
@@ -874,6 +889,7 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     AutoArray<NameRow> _roster;
     AutoArray<NameRow> _towns;
     AutoArray<NameRow> _excluded;
+    int _probedOut = 0;                 // seeded towns the settlement probe kept out of K
     AutoArray<NameRow> _townsEver;      // distinct towns ever taken
     AutoArray<NameRow> _urgent;         // urgency latches
     AutoArray<NameRow> _redPaid;        // held zones whose RED edge already paid a repel's heat

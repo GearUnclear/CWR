@@ -221,6 +221,14 @@ struct ZoneRecord
     // RevertBase); capture.sqs writes "Retaken" instead of "Liberated" for a
     // zone with lostCount > 0 (gmZoneSim slot 15)
     int lostCount = 0;
+    // the settlement probe's verdict on a SEEDED CITY for the occupier pool's
+    // K (OCCUPIER-FORCES.md 5.1): 0 not probed yet, 1 a settlement, -1 a
+    // label with no settlement under it (not counted in K or G).  Written
+    // once (ProbeSeededSettlements, when the pool sizes: its first active
+    // tick, or the old-save derivation) and serialized, so K is the same in
+    // every session.  Authored zones stay 0.  Absent in older saves: 0,
+    // probed when the pool next sizes.
+    int settlement = 0;
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
@@ -358,11 +366,15 @@ struct SettlementProbe
 // (bounding sphere > kMinBuildingRadius) within kRadius metres. A run with
 // no landscape or world loaded (headless config tests) accepts everything,
 // which is the pre-C3 behaviour.
+// The occupier pool's K (OCCUPIER-FORCES.md 5.1, 16) applies the same rule to
+// the towns seedCities = 1 seeded without it.  log: the Auto seed's INFO line
+// per rejected entry ("not seeded"); the pool passes false and writes its own.
 struct LandscapeSettlementProbe final : SettlementProbe
 {
     static constexpr float kRadius = 300.0f; // the seed dedup radius: one town, one circle
     static constexpr int kMinBuildings = 3;
     static constexpr float kMinBuildingRadius = 4.0f; // fences, poles and sheds do not make a town
+    bool log = true;
     bool IsSettlement(const char* name, const Vector3& pos) const override;
 };
 
@@ -632,6 +644,12 @@ class ZoneRegistry : public SerializeClass
     // START TOWN headquarters).  Zeroes the reserve and any pending deposit;
     // persistent.
     void ExemptTownGarrison(int index);
+    // The occupier pool's settlement pass (OCCUPIER-FORCES.md 5.1): every
+    // SEEDED CITY whose settlement verdict is still 0 is put to the probe
+    // once and the verdict stored on its row (1 or -1, serialized).  Rows
+    // already probed, and authored zones, are never touched.  Returns the
+    // number of rows probed now.
+    int ProbeSeededSettlements(const SettlementProbe& probe);
     // CITY zones currently held by the resistance (the "towns liberated"
     // count, gmZoneStats)
     int LiberatedTownCount() const;
@@ -792,6 +810,7 @@ class ZoneRegistry : public SerializeClass
         float standing = -1; // -1: absent in the save, the config value stays
         float struckUntil = 0;
         int lostCount = 0;
+        int settlement = 0; // 0: absent in the save (or never probed), the row keeps its value
 
         LSError Serialize(ParamArchive& ar);
     };

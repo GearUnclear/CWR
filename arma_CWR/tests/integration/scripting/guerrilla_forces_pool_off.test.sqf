@@ -14,7 +14,9 @@ ofT0 = time
 triSimUntil { time > ofT0 + 3 }
 
 ofRow = gmOccupierForces
-triAssertEq [(count ofRow), 29]
+triAssertEq [(count ofRow), 30]
+// slot 29: the seeded towns the settlement probe kept out of K (none: the service is inert)
+triAssertEq [(ofRow select 29), 0]
 // phase 6 slots, the key off: no strikes, no alarm answers, the script QRF fields
 triAssertEq [(ofRow select 24), 0]
 triAssertEq [(ofRow select 25), 0]

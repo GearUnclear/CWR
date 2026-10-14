@@ -340,12 +340,13 @@ Instruments:
   from 900001; the units it spends get a lever ledger row, which settles
   refunds and losses through 5.5 and drives no director action, review L14); since `bcca80e`
   it also has air and alarm forms.
-- `gmOccupierForces` returns 29 slots [code]: `[pool, poolStart, band,
+- `gmOccupierForces` returns 30 slots [code]: `[pool, poolStart, band,
   tokens, posture, control, wavesFired, K, excludedTowns, lost, townsEver,
   urgent, cooldowns, opCounter, tokenClock, waveInbound, waveClock,
   waveBodies, waveName, finalFired, surgeZone, surgeBodies, wavesLanded,
   occupierWarLevel, townsStruck, strikesApplied, alarmAnswers, legacySave,
-  legacyQrf]`; band and posture "OFF" with the key off.
+  legacyQrf, probedOut]`; band and posture "OFF" with the key off;
+  probedOut the seeded towns the settlement probe kept out of K (10.1).
   `gmWarLevelOccupier` gives slot 23 alone; `gmLegacyQrf` slot 28 alone
   (true while `qrf.sqs` fields its script QRF, row 7).
 - `gmOccupierOps` returns `[id, kind, origin, package, source, target,
@@ -886,10 +887,14 @@ occupier, independent of `campaignEnd`. R is the roster's summed
 `garrisonMax`; K the administered, non-exempt CITY zones; G their summed
 `garrisonMax`. `poolStart = max(forcesPoolMin, R + forcesPoolPerTown x K)`
 (24, 2 [16]). An empty roster switches the service off for the session.
-On the engine path every administered non-exempt CITY counts in K: the
-activation passes no seeded table and no settlement probe [code] (doc 5.1
-says a seeded town counts only when it passes the probe). **Open for phase
-7:** decide whether the engine runs the probe or the doc drops it. An old
+A SEEDED town (a map label, `seedCities`) counts in K and G only when it
+passes the settlement probe: dry land and at least 3 house-sized buildings
+within 300 m (OCCUPIER-FORCES.md 5.1, 16) [code]; authored towns always
+count. The probe runs once, at the first active tick (or when a save
+without the block derives), and its verdict is saved on the zone row
+(`settlement`), so K is the same in every session [code]. A block saved
+before the probe keeps its saved K. Sinai: K 26, poolStart 66 (37 and 88
+before; 11 labels probed out); Abel unchanged (K 14) [measured]. An old
 save's K counts by the AUTHORED owner, so towns the player already holds
 stay in K (review M7) [code].
 

@@ -2968,7 +2968,73 @@ void Unship(FakeProbe& probe, const char* className)
                          probe.vehicles.end());
 }
 
+// a settlement probe that rejects the listed names and counts its calls
+struct CountingSettlement final : SettlementProbe
+{
+    std::vector<std::string> labels;
+    mutable int calls = 0;
+    bool IsSettlement(const char* name, const Vector3&) const override
+    {
+        calls++;
+        for (const std::string& l : labels)
+        {
+            if (stricmp(l.c_str(), name) == 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 } // namespace
+
+TEST_CASE("ZoneRegistry - the occupier pool's settlement pass stores a verdict on each seeded town once",
+          "[game][guerrilla][occupierforces]")
+{
+    // seedCities = 1 seeds every Names town without the probe; the pool's
+    // pass (OCCUPIER-FORCES.md 5.1) then probes the seeded rows only
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    seedCities = 1;\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
+                         "position[]={6500.0, 6500.0, 100.0}; };\n"
+                         "        class Village { name=\"Village\"; type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={1000.0, 1000.0, 0.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class Names\n"
+                         "{\n"
+                         "    class Houdan { name=\"Houdan\"; position[]={3500.0, 4200.0}; };\n"
+                         "    class Hamlet { name=\"Hamlet\"; position[]={9000.0, 9000.0}; };\n"
+                         "};\n";
+    RegistryFixture f;
+    f.Load(config, nullptr, nullptr, "Names");
+    const ZoneRecord* houdan = f.registry.GetZone(f.registry.FindZoneIndex("Houdan"));
+    const ZoneRecord* hamlet = f.registry.GetZone(f.registry.FindZoneIndex("Hamlet"));
+    const ZoneRecord* village = f.registry.GetZone(f.registry.FindZoneIndex("Village"));
+    REQUIRE(houdan != nullptr);
+    REQUIRE(hamlet != nullptr);
+    REQUIRE(village != nullptr);
+    CHECK(houdan->settlement == 0); // seeding (All) never probes
+    CHECK(hamlet->settlement == 0);
+
+    CountingSettlement probe;
+    probe.labels = {"Hamlet", "Village"};
+    CHECK(f.registry.ProbeSeededSettlements(probe) == 2);
+    CHECK(probe.calls == 2); // the authored Village and the Camp are never probed
+    CHECK(houdan->settlement == 1);
+    CHECK(hamlet->settlement == -1);
+    CHECK(village->settlement == 0);
+
+    // a second pass finds every seeded row decided and probes nothing
+    probe.labels = {"Houdan"};
+    CHECK(f.registry.ProbeSeededSettlements(probe) == 0);
+    CHECK(probe.calls == 2);
+    CHECK(houdan->settlement == 1);
+}
 
 TEST_CASE("ZoneRegistry - plan-15 resolution keeps a fully-shipped descriptor verbatim", "[game][guerrilla]")
 {
@@ -3525,6 +3591,9 @@ TEST_CASE("ZoneRegistry - occCapture, standing, struckUntil, lostCount and the n
         b.Z(b.rebel).lostCount = 2;
         b.Z(b.town).standing = 12.5f;
         b.Z(b.plain).struckUntil = 4321.0f;
+        // the settlement verdict rides on the row (OCCUPIER-FORCES.md 5.1)
+        b.Z(b.town).settlement = -1;
+        b.Z(b.plain).settlement = 1;
         b.f.registry.SetEventHandler(ZEBaseLost, "hBase");
         b.f.registry.SetEventHandler(ZEHqLost, "hHq");
         ParamArchiveSave ar(WorldSerializeVersion);
@@ -3551,6 +3620,9 @@ TEST_CASE("ZoneRegistry - occCapture, standing, struckUntil, lostCount and the n
     CHECK(town->standing == Approx(12.5f));
     CHECK(plain->standing == Approx(50.0f));
     CHECK(plain->struckUntil == Approx(4321.0f));
+    CHECK(town->settlement == -1);
+    CHECK(plain->settlement == 1);
+    CHECK(rebel->settlement == 0); // never probed: absent from the row, the default stays
     CHECK(Str(loaded.GetEventHandler(ZEBaseLost)) == "hBase");
     CHECK(Str(loaded.GetEventHandler(ZEHqLost)) == "hHq");
     ExtParsMission.Clear();
