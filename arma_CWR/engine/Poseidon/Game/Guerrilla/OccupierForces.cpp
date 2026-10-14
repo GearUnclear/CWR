@@ -466,8 +466,21 @@ int OccupierForces::ConservationImbalance(int pool, int reserves, int pending, i
     return (pool + reserves + pending + opStrength) - (poolStart + R + G + refill + waves - losses);
 }
 
+RString OccupierForces::AuthoredOwnerOf(const ZoneRegistry& registry, const ZoneRecord& z)
+{
+    if (stricmp(z.ownerConfig, "OCCUPIER") == 0)
+    {
+        return registry.OccupierSide();
+    }
+    if (stricmp(z.ownerConfig, "RESISTANCE") == 0)
+    {
+        return registry.ResistanceSide();
+    }
+    return z.ownerConfig;
+}
+
 void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuning& t, OccupierForcesSizing& out,
-                          const AutoArray<bool>* seeded, const SettlementProbe* probe, bool log)
+                          const AutoArray<bool>* seeded, const SettlementProbe* probe, bool log, bool authoredOwner)
 {
     out = OccupierForcesSizing();
     for (int i = 0; i < registry.NZones(); i++)
@@ -491,9 +504,23 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
             continue;
         }
         const char* reason = nullptr;
-        if (!registry.IsAdministeredTown(*z))
+        // M7: a save that predates the block classifies K by the authored
+        // owner, so a town the resistance holds at load still counts (T, over
+        // the current owners, then shows it lost).  A fresh campaign sizes on
+        // its first frame, where the current owner IS the authored one.
+        bool administered = false;
+        if (authoredOwner)
         {
-            reason = "not administered";
+            const RString owner = AuthoredOwnerOf(registry, *z);
+            administered = stricmp(owner, "NEUTRAL") == 0 || stricmp(owner, registry.OccupierSide()) == 0;
+        }
+        else
+        {
+            administered = registry.IsAdministeredTown(*z);
+        }
+        if (!administered)
+        {
+            reason = authoredOwner ? "not administered as authored" : "not administered";
         }
         else if (z->garrisonExempt)
         {
@@ -557,7 +584,8 @@ const char* OccupierForces::PostureName(int posture)
 // the service
 // ---------------------------------------------------------------------------
 
-bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool>* seeded, const SettlementProbe* probe)
+bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool>* seeded, const SettlementProbe* probe,
+                              bool authoredOwner)
 {
     _activationTried = true;
     if (!registry.IsActive())
@@ -566,7 +594,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     }
     const auto start = std::chrono::steady_clock::now();
     OccupierForcesSizing s;
-    Size(registry, _tuning, s, seeded, probe, true);
+    Size(registry, _tuning, s, seeded, probe, true, authoredOwner);
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     if (s.roster.Size() == 0)
     {
@@ -1659,22 +1687,55 @@ bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view,
     {
         return false;
     }
-    const DirectorAction a = PlanFor(registry, view, target, origin);
-    if (!a.go)
+    // M1: when CounterAttack refuses the chosen source, the same target is
+    // re-planned without it (a local copy of the view with its spare at 0),
+    // a bounded number of times.  Still one operation per tick: the loop
+    // ends at the first launch.
+    DirectorView local;
+    const DirectorView* v = &view;
+    for (int attempt = 0; attempt <= MaxSourceRetries; attempt++)
     {
-        if (LogAllowed())
+        const DirectorAction a = PlanFor(registry, *v, target, origin);
+        if (!a.go)
         {
-            LOG_INFO(Core, "OccupierForces: no operation on {}: {}{}", hq ? "the HQ" : (const char*)z->name,
-                     (const char*)a.choice.why, _logSuppressed > 0 ? " (other lines suppressed)" : "");
-            _logSuppressed = 0;
+            if (LogAllowed())
+            {
+                LOG_INFO(Core, "OccupierForces: no operation on {}: {}{}", hq ? "the HQ" : (const char*)z->name,
+                         (const char*)a.choice.why, _logSuppressed > 0 ? " (other lines suppressed)" : "");
+                _logSuppressed = 0;
+            }
+            return false;
         }
-        return false;
+        bool refused = false;
+        if (LaunchAction(registry, *v, launcher, a, true, false, 0, &refused))
+        {
+            return true;
+        }
+        const int source = a.choice.quote.source;
+        if (!refused || source < 0)
+        {
+            return false; // the pool refused: no other source changes that
+        }
+        if (v != &local)
+        {
+            local = view;
+            v = &local;
+        }
+        if (source < local.spare.Size())
+        {
+            local.spare[source] = 0;
+        }
+        if (source < local.spareStored.Size())
+        {
+            local.spareStored[source] = 0;
+        }
     }
-    return LaunchAction(registry, view, launcher, a, true, false, 0);
+    return false;
 }
 
 bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
-                                  const DirectorAction& a, bool spendToken, bool staged, int waveNo)
+                                  const DirectorAction& a, bool spendToken, bool staged, int waveNo,
+                                  bool* launcherRefused)
 {
     const bool hq = a.kind == CAKHqAssault;
     const ZoneRecord* z = registry.GetZone(a.target);
@@ -1684,6 +1745,13 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     }
     const char* targetName = z ? (const char*)z->name : "the HQ";
     const PackageQuote& q = a.choice.quote;
+    if (launcherRefused)
+    {
+        *launcherRefused = false;
+    }
+    // L1: a refused launch must not leave the band demoted by its own
+    // debit (the band's hysteresis would keep it there after the refund)
+    const int bandBefore = _band;
     const int opId = _opCounter + 1;
     CounterAttackOrder order;
     order.opId = opId;
@@ -1700,6 +1768,10 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     order.abstractSpeed = q.speed;
     order.funded = true;
     order.destPos = a.destPos;
+    // a column's escort (6.5, phase 5): CounterAttack splits its share off
+    order.escortClass = q.escortClass;
+    order.escortCrew = q.escortCrew;
+    order.escortPriceUnits = q.EscortPoolPrice();
     // the pool pays hull and crew BEFORE the launch, and gets it back when
     // CounterAttack refuses the order
     if (q.poolPrice > 0 && !Spend(q.poolPrice, "operation hull and crew"))
@@ -1717,6 +1789,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         if (stagedBodies <= 0)
         {
             Refund(q.poolPrice, "wave staging refused");
+            _band = bandBefore;
             return false;
         }
         src->garrison = floorf(src->garrison > 0 ? src->garrison : 0) + (float)stagedBodies;
@@ -1751,8 +1824,19 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         {
             _ops.Delete(r);
         }
-        _opCounter = opId - 1;
-        LOG_INFO(Core, "OccupierForces: CounterAttack refused the {} operation from {} to {}",
+        // the debit and its refund leave the pool where it was, so the band
+        // goes back too.  The op id stays spent (L1): CounterAttack's
+        // "[op N] refused" line and the next "[op N]" are never the same id.
+        if (_band != bandBefore)
+        {
+            LOG_DEBUG(Core, "OccupierForces: band back to {} after the refusal", BandName(bandBefore));
+            _band = bandBefore;
+        }
+        if (launcherRefused)
+        {
+            *launcherRefused = true;
+        }
+        LOG_INFO(Core, "OccupierForces: [op {}] CounterAttack refused the {} operation from {} to {}", opId,
                  ForcePackages::PackageName(q.package), ZoneNameOf(registry, q.source), targetName);
         return false;
     }
@@ -2534,15 +2618,21 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         case CAOpCancelledUnseen:
         {
             // nothing could be born: the hull price comes back, the target
-            // rests (3.1 step 5)
-            int refund = 0;
-            if (mine)
+            // rests (3.1 step 5).  Only the director's own operations: a
+            // legacy record (op 0) drives no director action, not even
+            // while DORMANT (invariant W, M6).
+            if (!mine)
             {
-                refund = _ops[row].outstanding;
-                _ops[row].outstanding = 0;
-                _ops[row].finished = true;
-                Refund(refund, "cancelled unborn");
+                LOG_DEBUG(Core, "OccupierForces: [op {}] cancelled unborn (not a director operation)", ev.opId);
+                break;
             }
+            // L3: CounterAttack names the units still owed (the carrier's and
+            // the escort's prices not yet settled); crew it already booked
+            // lost are not in them, so the rest of the row is written off
+            const int refund = MinInt(ev.units > 0 ? ev.units : 0, _ops[row].outstanding);
+            _ops[row].outstanding = 0;
+            _ops[row].finished = true;
+            Refund(refund, "cancelled unborn");
             SetCooldown(target, _tuning.townCooldown);
             LOG_INFO(Core,
                      "OccupierForces: [op {}] Cancelled unborn: {}; {} unit(s) back to the pool, {} rests {:.0f} s",
@@ -2553,7 +2643,14 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         case CAOpRepelled:
         {
             // the target rests, and the occupier's anger shows as heat unless
-            // a RED edge during the fight already paid it
+            // a RED edge during the fight already paid it.  Only the
+            // director's own operations (M6, invariant W): a legacy repel
+            // raises no heat and rests nothing.
+            if (!mine)
+            {
+                LOG_DEBUG(Core, "OccupierForces: [op {}] repelled (not a director operation)", ev.opId);
+                break;
+            }
             const bool paid = RedPaid(target);
             if (!paid && ev.target >= 0 && ev.kind != CAKReinforce)
             {
@@ -2561,10 +2658,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             }
             RemoveName(_redPaid, target);
             SetCooldown(target, _tuning.townCooldown);
-            if (mine)
-            {
-                _ops[row].finished = true;
-            }
+            _ops[row].finished = true;
             LOG_INFO(Core, "OccupierForces: [op {}] Repelled at {}: {} lost, {} going home; {} rests {:.0f} s{}",
                      ev.opId, target, ev.units, ev.bodies, target, (double)_tuning.townCooldown,
                      paid ? " (a RED edge already raised the heat)" : ", heat +15");
@@ -2588,6 +2682,14 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         case CAOpHullRefund:
             if (mine)
             {
+                // CounterAttack found no stored spare for the hull at launch
+                // and sent the force on foot (it rewrote its record's
+                // package): the ledger row follows, so gmOccupierOps and the
+                // row agree.  The note is CounterAttack::LaunchCore's.
+                if (!_ops[row].born && ev.note && strncmp(ev.note, "no stored spare", 15) == 0)
+                {
+                    _ops[row].package = FPFoot;
+                }
                 const int units = MinInt(ev.units > 0 ? ev.units : 0, _ops[row].outstanding);
                 _ops[row].outstanding -= units;
                 Refund(units, "hull home intact");
@@ -2635,9 +2737,10 @@ void OccupierForces::BuildEngineCatalogue(const ZoneRegistry& registry)
     }
     ConfigHullInspector inspector;
     ForcePackages::BuildCatalogue(ladder, overrides, inspector, _catalogue, true);
-    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); phase 3 offers foot{}",
+    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}",
              (const char*)occupier, f ? (const char*)f->className : "no descriptor", ladder.Size(),
-             _catalogue.Offered(FPTruck) ? " and truck" : " only (no truck in the ladder)");
+             _catalogue.Offered(FPTruck) ? ", truck" : "", _catalogue.Offered(FPArmedCar) ? ", armed car" : "",
+             _catalogue.Offered(FPApc) ? ", APC" : "", _catalogue.Offered(FPTank) ? ", tank" : "");
 }
 
 void OccupierForces::FillEngineView(const ZoneRegistry& registry, DirectorView& view) const
@@ -2665,9 +2768,14 @@ void OccupierForces::FillEngineView(const ZoneRegistry& registry, DirectorView& 
         const int live = view.garrisonLive[i];
         // the final stand's surge is never spare (7.1)
         const float stock = z->garrison - (float)SurgeAt(z->name);
+        // M1: CounterAttack grants a funded order from the source's STORED
+        // reserve (it marches live bodies only as an invisible fallback and
+        // refuses an order it cannot fill), so the quote is the stored spare
+        // alone.  D9: whether the base is live (the player's proximity) no
+        // longer steers the choice, beyond the physical fact that a
+        // materialized garrison holds no stored reserve.
         const int stored = CounterAttack::Spare(ca.Tuning(), stock, live, z->garrisonMax, false);
-        const int marched = live > 0 ? CounterAttack::Spare(ca.Tuning(), stock, live, z->garrisonMax, true) : 0;
-        view.spare[i] = MaxInt(stored, marched);
+        view.spare[i] = stored;
         view.spareStored[i] = stored;
     }
     view.hqZone = GuerrillaBase::Instance().HqZone();
@@ -2742,6 +2850,12 @@ void OccupierForces::ScanWorld(const ZoneRegistry& registry)
                 {
                     continue;
                 }
+                // known but never reported (posReported still the origin):
+                // nothing to place yet (L9)
+                if (t->posReported.X() == 0 && t->posReported.Z() == 0)
+                {
+                    continue;
+                }
                 SightingReport rep;
                 rep.id = (unsigned long long)(uintptr_t)t->idExact.GetLink();
                 rep.pos = t->posReported; // what the group reported, never the true position
@@ -2763,7 +2877,9 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
     {
         return;
     }
-    if (!Activate(registry))
+    // K by the authored owners (M7): the towns the player already holds stay
+    // in K, and control measures them lost
+    if (!Activate(registry, nullptr, nullptr, true))
     {
         return;
     }
@@ -2774,13 +2890,15 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
     // thresholds already crossed never fire, nor a final stand already due
     _wavesFired = WavesCrossed(_tuning, _control);
     _finalFired = RosterBasesHeld(registry) <= 1;
-    // the distinct-town set from the towns the resistance holds now
+    // the distinct-town set from the towns the resistance holds now, less
+    // the ones it was authored to hold (never taken, L12)
     _townsEver.Clear();
     const RString resistance = registry.ResistanceSide();
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
-        if (z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 && stricmp(z->owner, resistance) == 0)
+        if (z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 && stricmp(z->owner, resistance) == 0 &&
+            stricmp(AuthoredOwnerOf(registry, *z), resistance) != 0)
         {
             NameRow row;
             row.name = z->name;

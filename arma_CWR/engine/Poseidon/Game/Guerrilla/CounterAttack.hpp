@@ -145,8 +145,8 @@
 // (ZoneRegistry handler slots): counterAttack when a force reaches a town
 // (live squad sent in, or abstract arrival) and counterRepelled when one is
 // beaten off or withdraws.  Config keys (CfgGuerrillaZones): counterAttack
-// and every counterAttack* key in CounterAttackTuning, plus occupierForces,
-// forcesOpsMax and forcesLiveHullsMax.
+// and every counterAttack* key in CounterAttackTuning, plus occupierForces
+// and forcesLiveHullsMax (forcesOpsMax is OccupierForces' key: OpsCap).
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -193,7 +193,7 @@ struct CounterAttackTuning
     float birthGiveUp = 600.0f;      // counterAttackBirthGiveUp: s a force with no birth point waits, then turns back
     // occupier forces (OCCUPIER-FORCES.md 16) ---------------------------------
     bool forcesOn = false;      // occupierForces: real speeds, key-on resolution, settle on revert
-    int forcesOpsMax = 2;       // forcesOpsMax (0..6): born funded operations in flight
+    int forcesOpsMax = 2;       // the default OpsCap uses while OccupierForces is inactive (not read from config)
     int forcesLiveHullsMax = 6; // forcesLiveHullsMax (0..20): live hulls at once
     // transient test lever: gmCounterAttackTune "speed" was set at run time,
     // so `speed` (with roadFactor) wins over the real speeds
@@ -347,6 +347,22 @@ class CounterAttackOps : public CounterAttackGate
     virtual void DriveOn(AIGroup* crewGroup, Vector3Par target) { (void)crewGroup, (void)target; }
     // the infantry of grp gets out of the hull (cargo of another group)
     virtual void Dismount(AIGroup* grp, Entity* hull) { (void)grp, (void)hull; }
+    // an armed hull at the town edge (6.5, phase 5; ForcePackages::EdgeRole
+    // FERSupport): its crew AWARE and firing, the hull driven up to edgePos
+    // through the driver (the Traffic Move idiom).  A truck never gets it.
+    virtual void Support(AIGroup* crewGroup, Vector3Par edgePos) { (void)crewGroup, (void)edgePos; }
+    // a column's escort hull (6.5, phase 5): a crewed hull of hullClass on
+    // the road at from facing dir, its crew (crew bodies) a group of their
+    // own, no cargo.  Returns the hull, or null when the hull or its driver
+    // could not be created (nothing left in the world); crewGroup is set on
+    // success.
+    virtual Entity* SpawnEscort(const RString& hullClass, int crew, Vector3Par from, Vector3Par dir,
+                                AIGroup*& crewGroup)
+    {
+        (void)hullClass, (void)crew, (void)from, (void)dir;
+        crewGroup = nullptr;
+        return nullptr;
+    }
     enum HullStatus
     {
         HullGone,      // the link is dead (deleted)
@@ -377,12 +393,28 @@ class CounterAttackOps : public CounterAttackGate
         const float dz = leader.Z() - centre.Z();
         return alive > 0 && dx * dx + dz * dz <= radius * radius ? alive : 0;
     }
-    // the hull and every living crewman could vanish unnoticed right now
+    // the hull and every member of crewGroup (living or dead, seated or
+    // not) could vanish unnoticed right now (M4: a crewman who bailed out
+    // next to the player keeps the whole crew in the world)
     virtual bool HullUnseen(Entity* hull, AIGroup* crewGroup) const
     {
         (void)hull, (void)crewGroup;
         return false;
     }
+    // every member of grp, living or dead, could vanish unnoticed right now
+    // (the leftover cleanup deletes corpses too).  Default: SquadUnseen.
+    virtual bool BodiesUnseen(AIGroup* grp) const { return SquadUnseen(grp); }
+    // anyone sits in the hull (crew or cargo, the player included): an
+    // abandoned hull is never deleted from under him.  Default: nobody.
+    virtual bool HullOccupied(Entity* hull) const
+    {
+        (void)hull;
+        return false;
+    }
+    // the gate's mode for the next Exposure calls: on, a ground hull is
+    // being born (its headlights show at night, M8: the night light band);
+    // off, men on foot.  Default: nothing (the unit tests' fakes).
+    virtual void SetHullGate(bool on) { (void)on; }
     // delete the crew FIRST (deleting a transport ejects its crew), then the hull
     virtual void RemoveHull(Entity* hull, AIGroup* crewGroup) { (void)hull, (void)crewGroup; }
 };
@@ -483,13 +515,28 @@ class CounterAttack : public SerializeClass
         RString tried;            // bases the birth chain already used, ';'-joined (D6)
         LLink<Entity> hull;       // the live hull (second-pass ref; the hull rides the vehicle serializer)
         LLink<AIGroup> crewGroup; // its crew (counts 1 against the group budget)
+        // phase 5 (serialized; absent in older saves: no escort).  A column's
+        // escort hull (6.5): born behind the carrier, driven with it,
+        // supporting at the town edge.  priceUnits is the carrier's share
+        // only; the escort's hull + crew are escortPriceUnits.
+        RString escortClass;              // empty: no escort
+        int escortCrew = 0;               // its crew bodies (re-created with it at the next birth)
+        int escortPriceUnits = 0;         // escort hull + crew
+        bool escortDone = false;          // the escort was settled (lost, refunded or cancelled)
+        LLink<Entity> escort;             // the live escort hull (second-pass ref)
+        LLink<AIGroup> escortCrewGroup;   // its crew (counts 1 against the group budget)
         // phase 4 (serialized): the explicit march destination (an
         // HQ_ASSAULT's HqPos; VZero = the target zone's centre), and an
         // HQ_ASSAULT whose HQ fell: its live squad leaves the world unseen,
         // its bodies to the pool
         Vector3 destPos = VZero;
         bool hqDone = false;
+        // serialized (absent: false): a live top-up squad whose town was
+        // lost walks home and leaves the world only unseen (M5)
+        bool withdrawing = false;
         // transient (rebuilt after a load) ---------------------------------
+        bool edgeHold = false;    // Travel: the last birth attempt was BirthHold (at the town edge)
+        bool escortWait = false;  // Live, mounted: the carrier waits for its escort to close up
         float retry = 0;          // Travel / Holding: seconds to the next live attempt
         AutoArray<Vector3> route; // the road route, base to town, at most RouteStep apart
         int leg = LegUnknown;     // Live: MarchLeg
@@ -503,6 +550,33 @@ class CounterAttack : public SerializeClass
         // the hull's share of priceUnits (the crew are bodies, priced 1 each)
         int HullPrice() const { return priceUnits - crew > 0 ? priceUnits - crew : 0; }
         bool HasHullPackage() const { return hullClass.GetLength() > 0; }
+        bool HasEscort() const { return escortClass.GetLength() > 0; }
+        int EscortHullPrice() const { return escortPriceUnits - escortCrew > 0 ? escortPriceUnits - escortCrew : 0; }
+        // the pool units the director is still owed for unsettled hulls:
+        // the carrier's priceUnits while its hull is unsettled, plus the
+        // escort's escortPriceUnits while it is (crew already booked lost or
+        // refunded are no longer in either: priceUnits drops with crew)
+        int OwedUnits() const
+        {
+            return (HasHullPackage() && !hullDone ? priceUnits : 0) + (HasEscort() && !escortDone ? escortPriceUnits : 0);
+        }
+        LSError Serialize(ParamArchive& ar);
+    };
+
+    // what a lost hull or a wiped squad leaves in the world (M3, L7): an
+    // abandoned intact hull, a crew or squad group whose members are dead or
+    // stragglers.  Each part is deleted where nobody sees it (an abandoned
+    // hull by HullUnseen, a group by BodiesUnseen, living stragglers only
+    // away from the player); a wreck stays.  Living stragglers go home as
+    // bodies (CrewHome) when removed; those who die meanwhile are lost.
+    // Serialized.
+    struct Leftover
+    {
+        RString source;  // where living stragglers go home
+        int living = 0;  // living members when it was left (booked when it ends)
+        float retry = 0;
+        LLink<Entity> hull;      // an abandoned intact hull (null: none, or a wreck)
+        LLink<AIGroup> group;    // the crew or squad group (null: none)
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -625,12 +699,14 @@ class CounterAttack : public SerializeClass
     // occupier-held non-exempt zone other than the source, no record on it;
     // CAKAlarm / CAKStrike are later phases and refused), the source
     // (occupier-held) and the slots (BornOps() < OpsCap(), one more for a
-    // CAOWave order: wave operations come on top); caps order.bodies to the
-    // source's spare (the Launched event reports the actual count) and
-    // starts the record: a foot force with the town in the bubble and a live
-    // source garrison marches out live, anything else travels abstractly
-    // (hull packages always: their infantry is debited from the stored
-    // reserve) at order.abstractSpeed (> 0) or the legacy pacing (0).  Live
+    // CAOWave order: wave operations come on top); refuses an order its
+    // source cannot grant whole (M1: the stored reserve's FundedSpare, the
+    // figure the director quoted) and starts the record: it travels
+    // abstractly, its bodies debited from the stored reserve, at
+    // order.abstractSpeed (> 0) or the legacy pacing (0).  Only when the
+    // stored reserve cannot pay it and the source's live garrison can (its
+    // town in the bubble) does a foot force march out live, and a hull
+    // package goes on foot first (6.5 downgrade, the hull price refunded).  Live
     // and hull budgets do not refuse: a birth over them waits (6.5).  False
     // = nothing launched, nothing debited.
     bool LaunchFunded(ZoneRegistry& registry, const CounterAttackView& view, const CounterAttackOrder& order,
@@ -648,8 +724,20 @@ class CounterAttack : public SerializeClass
     // records with origin CAOWave
     int WaveRecords() const;
     // the born-operation cap: forcesOpsMax, raised by one per living wave
-    // record (7.1: wave operations are in addition to the director's)
-    int OpsCap() const { return _tuning.forcesOpsMax + WaveRecords(); }
+    // record (7.1: wave operations are in addition to the director's).
+    // forcesOpsMax has one reader and one writer: OccupierForces' tuning
+    // (config forcesOpsMax, gmForcesTune "opsMax") while that service is
+    // active; the local default (2) otherwise (a CounterAttack on its own,
+    // the unit tests)
+    int OpsCap() const;
+    // the bodies a funded order may take from a source (M1): its STORED
+    // reserve's spare (Spare with useLive false).  The director quotes
+    // exactly this (OccupierForces::FillEngineView), and LaunchFunded
+    // refuses an order it cannot grant whole.
+    static int FundedSpare(const CounterAttackTuning& t, float stored, int live, float garrisonMax)
+    {
+        return Spare(t, stored, live, garrisonMax, false);
+    }
     // the HQ_ASSAULT record, -1 none (at most one exists)
     int FindHqAssault() const;
     // OCCUPIER-FORCES.md 9.1, D14: the bodies that count at the HQ meter
@@ -666,6 +754,9 @@ class CounterAttack : public SerializeClass
     // live hulls: records' hulls plus hulls driving home
     int LiveHulls() const;
     int HomeHullCount() const { return _homeHulls.Size(); }
+    // lost hulls and dead or straggling groups awaiting an unseen deletion
+    int LeftoverCount() const { return _leftovers.Size(); }
+    const Leftover* GetLeftover(int i) const { return i >= 0 && i < _leftovers.Size() ? &_leftovers[i] : nullptr; }
     const HomeHull* GetHomeHull(int i) const { return i >= 0 && i < _homeHulls.Size() ? &_homeHulls[i] : nullptr; }
     // the view and ops Simulate steps with (the engine wrapper of the
     // director launches with the same pair; it fires the returned events
@@ -678,6 +769,8 @@ class CounterAttack : public SerializeClass
     int SettlePresence(const ZoneRegistry& registry, int zoneIndex) const;
     // the record's live hull (0 / 1), for diagnostics (gmCounterAttacks, gmOccupierOps)
     static int LiveHullOf(const Record& r);
+    // the record's live escort hull (0 / 1); LiveHulls counts both
+    static int LiveEscortOf(const Record& r);
     // engine diagnostics (gmCounterAttacks): living infantry seated in the
     // record's hull, and the squad's leader (null when none)
     static int MountedOf(const Record& r);
@@ -688,10 +781,17 @@ class CounterAttack : public SerializeClass
     // slow below this, or StopMax seconds
     static constexpr float DismountSpeed = 1.5f;
     static constexpr float StopMax = 15.0f;
+    // a column's escort is born this far behind the carrier on its road (m);
+    // the carrier waits while the escort is more than EscortSpread behind
+    // and drives on once it is within EscortRejoin
+    static constexpr float EscortGap = 20.0f;
+    static constexpr float EscortSpread = 150.0f;
+    static constexpr float EscortRejoin = 60.0f;
     // send an intact hull home (the end of its operation); the engine path
     // and the unit tests' fake ops
+    // units / hullClass: the escort's price and class (defaults: the carrier's)
     void SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive, CounterAttackOps* ops,
-                      const ZoneRegistry& registry);
+                      const ZoneRegistry& registry, int units = -1, const char* hullClass = nullptr);
     // towns the resistance took so far (non-exempt flips counted by
     // OnTownFlipped; saved).  k of the next flip is max(this, towns held).
     int TownsTaken() const { return _townsTaken; }
@@ -734,7 +834,10 @@ class CounterAttack : public SerializeClass
     // engine hook: per frame, throttled to TickInterval
     void Simulate(float deltaT);
 
-    bool HasState() const { return _records.Size() > 0 || _townsTaken > 0 || _homeHulls.Size() > 0; }
+    bool HasState() const
+    {
+        return _records.Size() > 0 || _townsTaken > 0 || _homeHulls.Size() > 0 || _leftovers.Size() > 0;
+    }
     LSError Serialize(ParamArchive& ar) override;
 
   private:
@@ -758,13 +861,27 @@ class CounterAttack : public SerializeClass
     void FinishHull(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops);
     // a live record's hull check (destroyed, crewless): true when it was lost now
     bool CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOps* ops);
+    // the same for a column's escort (its loss leaves the infantry mounted)
+    bool CheckEscort(ZoneRegistry& registry, Record& r, CounterAttackOps* ops);
+    // a record ended: its escort (live: home; abstract: refunded now)
+    void FinishEscort(ZoneRegistry& registry, const CounterAttackView& view, Record& r, CounterAttackOps* ops);
     // hulls driving home
     void StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
     // crew bodies home to the source (room-capped, surplus and a lost base to the pool)
     static void CrewHome(ZoneRegistry& registry, const CounterAttackView& view, const char* source, int crew);
-    // the key-on arrival at a town with defenders: born at the edge, or wait
-    void ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
-                    AutoArray<ZoneEventRecord>& fired);
+    // bodies back into a zone's reserve, room-capped (garrisonMax - live -
+    // reserve - pending; a pending deposit inside the player's bubble), the
+    // surplus and a zone no longer the occupier's to the pool (L2, 5.5).
+    // Returns the bodies that went into the zone.
+    static int ReturnBodies(ZoneRegistry& registry, const CounterAttackView& view, int zone, int bodies);
+    // what a lost hull or a dead group leaves: tracked until an unseen
+    // deletion (M3, L7)
+    void AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living);
+    void StepLeftovers(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
+    // the key-on arrival at a town with defenders: born at the edge, or
+    // wait.  Returns the GoLive outcome (BirthDone when born)
+    int ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
+                   AutoArray<ZoneEventRecord>& fired);
     // 5.4: the town reverted under a travelling record
     bool RevertedUnder(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r);
     // nearest occupier military zone with bodies to spare; -1 when none
@@ -827,6 +944,7 @@ class CounterAttack : public SerializeClass
     CounterAttackTuning _tuning;
     AutoArray<Record> _records;
     AutoArray<HomeHull> _homeHulls;
+    AutoArray<Leftover> _leftovers;
     float _accum = 0;
     int _townsTaken = 0;
 };

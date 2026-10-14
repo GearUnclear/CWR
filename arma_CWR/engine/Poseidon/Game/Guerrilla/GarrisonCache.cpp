@@ -526,7 +526,9 @@ void GarrisonCache::RefundPending(ZoneRegistry& registry, int zone, bool playerV
     ZoneRecord* o = origin != zone ? registry.GetZoneMutable(origin) : nullptr;
     if (o && OccupierHolds(registry, *o))
     {
-        const float room = o->garrisonMax - floorf(o->garrison) - (float)o->pending;
+        // the origin's live garrison counts against its room too (L2)
+        const float room =
+            o->garrisonMax - (float)Instance().LiveCount(origin) - floorf(o->garrison) - (float)o->pending;
         const int back = MinBodies(bodies, room > 0 ? (int)floorf(room) : 0);
         AddReserve(registry, origin, back, origin, playerValid, px, pz);
         LOG_INFO(Core, "Guerrilla: {} changed hands with {} body(ies) pending; {} back to {}, {} discarded",

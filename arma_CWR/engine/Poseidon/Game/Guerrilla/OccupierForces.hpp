@@ -340,8 +340,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr float RepelHeat = 15.0f;
     static constexpr int MaxSightingPositions = 12;
     static constexpr int MaxOpRows = 32;
-    // phase 3 offers only foot and truck packages (phase 5 armour, phase 6 air)
-    static constexpr unsigned int OfferedPackages = ForcePackages::Phase3Packages;
+    // a director operation CounterAttack refuses is re-planned from the next
+    // source at most this many times in the same tick (M1)
+    static constexpr int MaxSourceRetries = 4;
+    // phase 5 offers every ground package (foot, truck, armed car, APC,
+    // tank); phase 6 adds air
+    static constexpr unsigned int OfferedPackages = ForcePackages::DefaultPackages;
     // phase 4: the HQ in the candidate list (Candidates, PlanFor), its
     // cooldown row's name, the "in a wave" window after a landing (s), the
     // standing recovery (s per point toward 50), the informant tip (roll
@@ -421,9 +425,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     }
     // the roster, K, G and poolStart of a registry.  seeded (optional, per
     // zone index) marks auto-seeded towns, which count only when the probe
-    // (optional) accepts them.  log: one INFO line per town.
+    // (optional) accepts them.  log: one INFO line per town.  authoredOwner:
+    // a town counts in K by its AUTHORED owner (ownerConfig resolved: the
+    // occupier or NEUTRAL), not the current one; the old-save derivation
+    // only (M7), so the towns the resistance holds at load still count.
     static void Size(const ZoneRegistry& registry, const OccupierForcesTuning& t, OccupierForcesSizing& out,
-                     const AutoArray<bool>* seeded = nullptr, const SettlementProbe* probe = nullptr, bool log = false);
+                     const AutoArray<bool>* seeded = nullptr, const SettlementProbe* probe = nullptr, bool log = false,
+                     bool authoredOwner = false);
+    // a zone's authored owner side: ownerConfig with the OCCUPIER /
+    // RESISTANCE tokens resolved (ZoneRegistry::ResolveOwnerToken's rule)
+    static RString AuthoredOwnerOf(const ZoneRegistry& registry, const ZoneRecord& z);
     static const char* BandName(int band);
     static const char* PostureName(int posture);
 
@@ -433,9 +444,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the key now off is restored but inert
     bool Active() const { return _active && _tuning.enabled; }
     // take the roster and size the pool (the first active tick).  False and
-    // off for the session on an empty roster.
+    // off for the session on an empty roster.  authoredOwner: Size's flag
+    // (the old-save derivation).
     bool Activate(const ZoneRegistry& registry, const AutoArray<bool>* seeded = nullptr,
-                  const SettlementProbe* probe = nullptr);
+                  const SettlementProbe* probe = nullptr, bool authoredOwner = false);
     // one director tick: the refill, control and the band.  No-op while not
     // Active().
     void Tick(const ZoneRegistry& registry, float elapsed);
@@ -602,6 +614,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the ledger row of a director operation, -1 none
     int FindOp(int opId) const;
     int OpOutstanding(int row) const { return row >= 0 && row < _ops.Size() ? _ops[row].outstanding : 0; }
+    // the ledger row's package (follows a launch-time downgrade to foot)
+    int OpPackage(int row) const { return row >= 0 && row < _ops.Size() ? _ops[row].package : FPFoot; }
 
     // test levers (gmForcesForce / gmForcesTune) --------------------------------
     void SetPool(int units);
@@ -678,8 +692,11 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // infantry: a deposit into the source's reserve the launch debits), the
     // ledger row, LaunchFunded, the INFO line.  spendToken: a director token
     // (not for wave operations).  waveNo > 0 labels a wave operation.
+    // launcherRefused (optional): set true when CounterAttack refused the
+    // order (not the pool), so the caller may try another source.
     bool LaunchAction(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
-                      const DirectorAction& a, bool spendToken, bool staged, int waveNo);
+                      const DirectorAction& a, bool spendToken, bool staged, int waveNo,
+                      bool* launcherRefused = nullptr);
     static bool HasName(const AutoArray<NameRow>& rows, const char* name);
     static void AddName(AutoArray<NameRow>& rows, const char* name);
     static void RemoveName(AutoArray<NameRow>& rows, const char* name);

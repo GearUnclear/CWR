@@ -105,6 +105,13 @@ struct CounterAttackOrder
     // zone's centre as the place the force marches to and resolves at.  Set
     // for CAKHqAssault (GuerrillaBase::HqPos()); VZero for every other kind.
     Vector3 destPos = VZero;
+    // appended by phase 5 (OCCUPIER-FORCES.md 6.5 columns) ----------------
+    // the column's escort hull (it carries nobody): its class, its crew
+    // bodies, and its share of priceUnits (escort hull + its crew), refunded
+    // apart from the carrier's.  Empty class = no escort.
+    RString escortClass;
+    int escortCrew = 0;
+    int escortPriceUnits = 0;
 };
 
 // what CounterAttack reports back (one event per state change)

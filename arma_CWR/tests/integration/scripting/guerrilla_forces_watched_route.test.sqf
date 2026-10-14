@@ -16,7 +16,12 @@
 //        re-sourced to the next base back, the Southeast Compound
 //        (gmOccupierOps shows its source change), the Harbour is refunded;
 //    w4  it is born at the Compound, 1.7 km away and out of sight, and the
-//        player watches it set off toward Le Port.
+//        player watches it set off.  The Compound's roads are not joined to
+//        the island's net in Abel's data, so the road route leaves them by
+//        the west gate track and crosses country to the town's road
+//        (RoadRoute.hpp stage 2).  The arrival is not asserted: the squad
+//        stalls just inside the west gate (parked, see OCCUPIER-FORCES.md
+//        phase 3 known gaps).
 //  The companion roster and the QRF director are parked; the player is
 //  damage-shielded.
 // ============================================================================
@@ -46,6 +51,11 @@ triAssertGe [wrC, 0]
 wrLPos = (gmZone wrL) select 8
 wrHPos = (gmZone wrH) select 8
 wrCPos = (gmZone wrC) select 8
+// the Compound's roads are a pocket of their own: the road route leaves
+// them and joins the town's net (found, joined)
+wrRr = gmRoadRoute [wrCPos, wrLPos]
+triAssertEq [(format ["%1 %2", wrRr select 0, wrRr select 9]), "true true"]
+triAssertEq [(format ["%1", (gmRoadRoute [wrCPos, wrLPos, 0]) select 0]), "false"]
 // far from the player: no live garrison anywhere down there
 triAssertEq [(format ["%1", gmGarrisonSpawned wrL]), "false"]
 triAssertEq [(format ["%1", gmGarrisonSpawned wrH]), "false"]
@@ -98,14 +108,11 @@ triAssertGe [300, (wrSpawn distance wrCPos)]
 triAssertGe [(wrSpawn distance player), 750]
 triAssertEq [(wrCa select 21), 4]
 wrLead = wrCa select 20
-wrD0 = wrLead distance wrLPos
 wrT1 = time
-// it sets off toward Le Port.  On Abel the Compound's yard roads are not
-// joined to the island's net (the route search exhausts them), so the
-// column takes the straight line and the compound's walls slow it: the test
-// asserts it sets off, not the whole 1.7 km walk
-triSimUntil { ((wrLead distance wrLPos) < (wrD0 - 20)) or (time > wrT1 + 180) }
-triAssertGe [(wrD0 - 20), (wrLead distance wrLPos)]
+// it sets off: the lead leaves its birth point (its road runs north-west to
+// the west gate first, so the distance to Le Port barely changes yet)
+triSimUntil { ((wrLead distance wrSpawn) > 20) or (time > wrT1 + 180) }
+triAssertGe [(wrLead distance wrSpawn), 20]
 triAssertEq [((gmZone wrL) select 2), gmResistanceSide]
 gmSimDiagLog
 

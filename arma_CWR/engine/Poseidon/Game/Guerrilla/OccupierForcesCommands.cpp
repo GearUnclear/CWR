@@ -46,15 +46,21 @@
 //                                  "ALARM" / "REINFORCE" / "STRIKE"; origin
 //                                  "LEGACY" / "DIRECTOR" / "PUSHOUT" /
 //                                  "WAVE" / "ALARM"; package "FOOT" /
-//                                  "TRUCK" / ...; source and target zone
-//                                  names; phase "SCHEDULED" / "TRAVEL" /
-//                                  "HOLDING" / "LIVE"; bodies the infantry
-//                                  (the planned size while scheduled); hulls
-//                                  the live hulls (0 / 1); eta the seconds
-//                                  left on the abstract clock (scheduled or
-//                                  travelling; 0 otherwise); birthReason the
-//                                  spawn reason ("base", "route", ...; ""
-//                                  while unborn).
+//                                  "TRUCK" / ... (a hull package CounterAttack
+//                                  sent on foot at launch shows "FOOT");
+//                                  source and target zone names; phase
+//                                  "SCHEDULED" / "TRAVEL" / "HOLDING" /
+//                                  "LIVE"; bodies the infantry (the planned
+//                                  size while scheduled); hulls the live
+//                                  hulls, the carrier's and the escort's (0
+//                                  to 2); eta the seconds left on the
+//                                  abstract clock (scheduled or travelling;
+//                                  0 otherwise); birthReason the spawn
+//                                  reason ("base", "route", ...; "" while
+//                                  unborn).  Two slots follow the eleven
+//                                  (phase 5): [11] the carrier's hull class
+//                                  ("" on foot), [12] the escort's hull
+//                                  class ("" with no escort).
 //   gmOccupierIntel             -> the director's sightings (6.1, D9): one
 //                                  row per zone with a report, [zone, count,
 //                                  ageSeconds, [positions...]]; zone "" for
@@ -219,7 +225,7 @@ static GameValue GmOccupierOps(const GameState* state)
         }
         GameValue rowValue = state->CreateGameValue(GameArray);
         GameArrayType& row = rowValue;
-        row.Resize(11);
+        row.Resize(13);
         row[0] = (float)r->opId;
         row[1] = GameStringType(ForcePackages::KindName(r->kind));
         row[2] = GameStringType(ForcePackages::OriginName(r->origin));
@@ -228,9 +234,11 @@ static GameValue GmOccupierOps(const GameState* state)
         row[5] = GameStringType(r->target);
         row[6] = GameStringType(CounterAttack::PhaseName(r->phase));
         row[7] = (float)(r->phase == CAScheduled ? r->size : r->strength);
-        row[8] = (float)CounterAttack::LiveHullOf(*r);
+        row[8] = (float)(CounterAttack::LiveHullOf(*r) + CounterAttack::LiveEscortOf(*r));
         row[9] = (r->phase == CAScheduled || r->phase == CATravel) && r->clock > 0 ? r->clock : 0.0f;
         row[10] = GameStringType(CounterAttack::SpawnReasonName(r->spawnReason));
+        row[11] = GameStringType(r->hullClass);
+        row[12] = GameStringType(r->escortClass);
         rows.Add(rowValue);
     }
     return value;

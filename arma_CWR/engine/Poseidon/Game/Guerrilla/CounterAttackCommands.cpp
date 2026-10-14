@@ -24,7 +24,10 @@
 //                                  [18] the live hull (objNull when none),
 //                                  [19] infantry seated in it, [20] the
 //                                  squad's leader (objNull when none), [21]
-//                                  its living infantry (0 unless LIVE)
+//                                  its living infantry (0 unless LIVE),
+//                                  [22] the column's escort class ("" none),
+//                                  [23] the live escort hull (objNull when
+//                                  none)
 //   gmCounterAttackTune [key, value]
 //                                  runtime override of one tuning value
 //                                  (tests, debugging); keys: "enabled",
@@ -33,8 +36,9 @@
 //                                  "size", "speed", "liveTimeout",
 //                                  "birthMinToTarget", "birthGiveUp",
 //                                  "sourceKeep", "maxLive", "townsTaken"
-//                                  (the saved k counter), "forcesOpsMax",
-//                                  "forcesLiveHullsMax".  A pending
+//                                  (the saved k counter),
+//                                  "forcesLiveHullsMax" (forcesOpsMax is
+//                                  gmForcesTune "opsMax").  A pending
 //                                  SCHEDULED clock is clamped to the new
 //                                  delayMax.  "speed" is a TEST LEVER with
 //                                  occupierForces on: once set it wins over
@@ -42,7 +46,7 @@
 //                                  for every leg computed afterwards.
 //                                  Returns true when the key is known.
 //   gmCounterAttackLaunchFunded [target, source, package, bodies, urgent,
-//                                hullClass, kind]
+//                                hullClass, kind, escortClass]
 //                                  TEST LEVER: a director-style funded
 //                                  operation straight into
 //                                  CounterAttack::LaunchFunded.  target and
@@ -62,10 +66,18 @@
 //                                  ladder with transportSoldier >= 6).  The
 //                                  hull price (truck 3 + 1 crew) is spent
 //                                  from the occupier pool when it is active
-//                                  (0 when it refuses).  Returns the opId
-//                                  (900001 on), 0 when refused.
+//                                  (0 when it refuses).  escortClass
+//                                  (optional, 8th; a hull package only): a
+//                                  column's escort (6.5): an armed car, APC
+//                                  or tank class, its crew hasDriver +
+//                                  hasGunner + hasCommander, its price the
+//                                  class's hull price plus that crew (spent
+//                                  from the pool like the carrier's).
+//                                  Returns the opId (900001 on), 0 when
+//                                  refused.
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp>  // ConfigHullInspector (the escort of the test lever)
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>  // HqPos (the HQ_ASSAULT test lever)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the test lever spends the hull price
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
@@ -96,7 +108,7 @@ static GameValue GmCounterAttacks(const GameState* state)
         const CounterAttack::Record* r = ca.Get(i);
         GameValue rowValue = state->CreateGameValue(GameArray);
         GameArrayType& row = rowValue;
-        row.Resize(22);
+        row.Resize(24);
         row[0] = GameStringType(r->target);
         row[1] = GameStringType(r->source);
         row[2] = GameStringType(CounterAttack::PhaseName(r->phase));
@@ -129,6 +141,8 @@ static GameValue GmCounterAttacks(const GameState* state)
         row[19] = (float)CounterAttack::MountedOf(*r);
         row[20] = GameValueExt((Object*)(r->phase == CALive ? CounterAttack::LeaderOf(*r) : nullptr));
         row[21] = (float)CounterAttack::AliveOf(*r);
+        row[22] = GameStringType(r->escortClass);
+        row[23] = GameValueExt((Object*)r->escort.GetLink());
         rows.Add(rowValue);
     }
     return value;
@@ -190,10 +204,6 @@ static GameValue GmCounterAttackTune(const GameState* /*state*/, GameValuePar op
     {
         t.speed = v < 0.5f ? 0.5f : v;
         t.speedLever = true; // the test lever wins over the real speeds (3.2)
-    }
-    else if (stricmp(key, "forcesOpsMax") == 0)
-    {
-        t.forcesOpsMax = v < 0 ? 0 : (int)v;
     }
     else if (stricmp(key, "forcesLiveHullsMax") == 0)
     {
@@ -324,8 +334,42 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
         {
             order.bodies = cargo;
         }
-        // the hull and its driver, paid by the pool (6.5: truck 3, crew 1)
-        order.priceUnits = OccupierForces::Instance().Spend(3 + order.crew, "test lever") ? 3 + order.crew : 0;
+        // a column's escort (6.5, phase 5): classified natively, priced as
+        // its hull plus its crew
+        int escortPrice = 0;
+        if (args.Size() > 7 && args[7].GetType() == GameString)
+        {
+            const RString escortClass = (GameStringType)args[7];
+            ConfigHullInspector inspector;
+            HullFacts facts;
+            if (!inspector.Inspect(escortClass, facts) || !facts.exists)
+            {
+                return GameValue(0.0f);
+            }
+            const int escortPackage = ForcePackages::Classify(facts);
+            if (!ForcePackages::IsEscort(escortPackage))
+            {
+                return GameValue(0.0f);
+            }
+            order.escortClass = escortClass;
+            order.escortCrew = facts.crew > 0 ? facts.crew : 1;
+            escortPrice = ForcePackages::HullPrice(escortPackage) + order.escortCrew;
+            order.escortPriceUnits = escortPrice;
+            // the column moves at the slower hull's pace
+            const float escortSpeed = CounterAttack::RealSpeed(order.package, facts.maxSpeedKmh);
+            if (escortSpeed > 0 && escortSpeed < order.abstractSpeed)
+            {
+                order.abstractSpeed = escortSpeed;
+            }
+        }
+        // the hull and its driver, paid by the pool (6.5: truck 3, crew 1),
+        // plus the escort's share
+        const int price = 3 + order.crew + escortPrice;
+        order.priceUnits = OccupierForces::Instance().Spend(price, "test lever") ? price : 0;
+        if (order.priceUnits == 0)
+        {
+            order.escortPriceUnits = 0;
+        }
     }
     order.opId = nextOpId;
     CounterAttackView view;

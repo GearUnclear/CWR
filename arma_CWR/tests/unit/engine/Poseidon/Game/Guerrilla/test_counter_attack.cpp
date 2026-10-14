@@ -10,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/AI/AI.hpp> // AIGroup (the record's group link)
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp> // Entity / EntityType (the column fakes' hulls)
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // the win latch freeze (7.4)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
@@ -1588,7 +1589,10 @@ TEST_CASE("CounterAttack - occupier forces keys and the real speeds (3.2)", "[ga
     Fixture g;
     g.Load(ConfigWith("occupierForces = 1; forcesOpsMax = 9; forcesLiveHullsMax = 3;"));
     CHECK(g.ca.Tuning().forcesOn);
-    CHECK(g.ca.Tuning().forcesOpsMax == 6); // repaired into 0..6
+    // forcesOpsMax has one reader, OccupierForces (OpsCap reads its tuning
+    // while it is active): this service keeps its own default only
+    CHECK(g.ca.Tuning().forcesOpsMax == 2);
+    CHECK(g.ca.OpsCap() == 2); // OccupierForces inactive here: the local default
     CHECK(g.ca.Tuning().forcesLiveHullsMax == 3);
 
     // foot 1.5 m/s; a ground hull 0.6 x and an aircraft 0.8 x maxSpeed (km/h)
@@ -1657,9 +1661,15 @@ TEST_CASE("CounterAttack - LaunchFunded: refusals, the spare cap and the abstrac
     CHECK(ear.events.empty());
     CHECK(f.Z(f.post).garrison == Approx(6.0f));
 
-    // twelve ordered, the Post spares five (it keeps one home): five leave,
-    // and the Launched event says five
-    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 12), nullptr, fired));
+    // twelve ordered, the Post spares five (it keeps one home): refused
+    // whole (M1: a funded order the source cannot grant whole never goes
+    // out undersized; the director quotes the same stored spare)
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 12), nullptr, fired));
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+    CHECK(CounterAttack::FundedSpare(f.ca.Tuning(), f.Z(f.post).garrison, 0, f.Z(f.post).garrisonMax) == 5);
+    // five ordered: five leave, and the Launched event says five
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 5), nullptr, fired));
     REQUIRE(f.ca.Count() == 1);
     const CounterAttack::Record* r = f.ca.Get(0);
     CHECK(r->strength == 5);
@@ -2686,4 +2696,504 @@ TEST_CASE("CounterAttack - destPos and hqDone survive save/load; the lose latch 
     CHECK(loaded.FindHqAssault() == 0);
     ExtParsMission.Clear();
     std::filesystem::remove(path);
+}
+
+// ===========================================================================
+// Phase 5 columns (OCCUPIER-FORCES.md 6.5) and the review fixes M2, M3, M5,
+// L2, L3: a fake world that hands out real (inert) groups and hulls, so the
+// birth, the escort, the town edge, losses, refunds and the leftover cleanup
+// run through the record's links.
+// ===========================================================================
+
+namespace
+{
+
+struct ColumnOps final : CounterAttackOps
+{
+    Ref<EntityType> type = new EntityType(nullptr);
+    Ref<Entity> carrier = new Entity(nullptr, type, -1);
+    Ref<Entity> escort = new Entity(nullptr, type, -1);
+    Ref<AIGroup> inf = new AIGroup();
+    Ref<AIGroup> carrierCrew = new AIGroup();
+    Ref<AIGroup> escortCrew = new AIGroup();
+    // the fake world's state
+    int infAlive = 4;
+    Vector3 infAt = VZero;
+    int carrierCrewAlive = 1, carrierSeated = 1, carrierState = HullIntact;
+    int escortCrewAlive = 2, escortSeated = 2, escortState = HullIntact;
+    Vector3 carrierCrewAt = VZero, escortCrewAt = VZero;
+    int exposure = CAExposeHidden;
+    bool squadUnseen = false, hullUnseen = false, bodiesUnseen = false;
+    // what the service asked for
+    int mounts = 0, escorts = 0, squads = 0, dismounts = 0, moves = 0;
+    int carrierSupports = 0, escortSupports = 0, escortDrives = 0;
+    std::vector<std::string> removals; // "inf", "carrierCrew", "escortCrew", "hull:carrier", "hull:escort"
+    Vector3 lastMountFrom = VZero, lastEscortFrom = VZero;
+
+    std::string Name(AIGroup* g) const
+    {
+        if (g == inf.GetRef())
+        {
+            return "inf";
+        }
+        return g == carrierCrew.GetRef() ? "carrierCrew" : (g ? "escortCrew" : "null");
+    }
+    int Exposure(Vector3Par) const override { return exposure; }
+    AIGroup* SpawnSquad(int, Vector3Par, Vector3Par) override
+    {
+        squads++;
+        return inf;
+    }
+    AIGroup* DetachFromGarrison(int, int, Vector3Par, int& taken) override
+    {
+        taken = 0;
+        return nullptr;
+    }
+    int Alive(AIGroup* g, Vector3& at) override
+    {
+        if (g == inf.GetRef())
+        {
+            at = infAt;
+            return infAlive;
+        }
+        if (g == carrierCrew.GetRef())
+        {
+            at = carrierCrewAt;
+            return carrierCrewAlive;
+        }
+        if (g == escortCrew.GetRef())
+        {
+            at = escortCrewAt;
+            return escortCrewAlive;
+        }
+        return 0;
+    }
+    void MoveOn(AIGroup*, Vector3Par) override { moves++; }
+    void Assault(AIGroup*, Vector3Par) override {}
+    void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+    {
+        route.Clear();
+        route.Add(from);
+        route.Add(to);
+    }
+    void Remove(AIGroup* g) override { removals.push_back(Name(g)); }
+    void Adopt(int, AIGroup*) override {}
+    bool SquadUnseen(AIGroup*) const override { return squadUnseen; }
+    bool BodiesUnseen(AIGroup*) const override { return bodiesUnseen; }
+    AIGroup* SpawnMounted(const RString&, int, int, Vector3Par from, Vector3Par, Entity*& hull,
+                          AIGroup*& crewGroup) override
+    {
+        mounts++;
+        lastMountFrom = from;
+        hull = carrier;
+        crewGroup = carrierCrew;
+        return inf;
+    }
+    Entity* SpawnEscort(const RString&, int, Vector3Par from, Vector3Par, AIGroup*& crewGroup) override
+    {
+        escorts++;
+        lastEscortFrom = from;
+        crewGroup = escortCrew;
+        return escort;
+    }
+    void DriveOn(AIGroup* g, Vector3Par) override { escortDrives += g == escortCrew.GetRef() ? 1 : 0; }
+    void Dismount(AIGroup*, Entity*) override { dismounts++; }
+    void Support(AIGroup* g, Vector3Par) override
+    {
+        carrierSupports += g == carrierCrew.GetRef() ? 1 : 0;
+        escortSupports += g == escortCrew.GetRef() ? 1 : 0;
+    }
+    int HullState(Entity* hull, AIGroup*, int& crew) const override
+    {
+        crew = 0;
+        if (hull && hull == carrier.GetRef())
+        {
+            crew = carrierSeated;
+            return carrierState;
+        }
+        if (hull && hull == escort.GetRef())
+        {
+            crew = escortSeated;
+            return escortState;
+        }
+        return HullGone;
+    }
+    float HullSpeed(Entity*) const override { return 0.0f; }
+    bool HullUnseen(Entity*, AIGroup*) const override { return hullUnseen; }
+    void RemoveHull(Entity* hull, AIGroup* crewGroup) override
+    {
+        if (crewGroup)
+        {
+            removals.push_back(Name(crewGroup)); // the crew FIRST
+        }
+        removals.push_back(hull == carrier.GetRef() ? "hull:carrier" : "hull:escort");
+    }
+};
+
+int Removed(const ColumnOps& ops, const char* what)
+{
+    int n = 0;
+    for (const std::string& s : ops.removals)
+    {
+        n += s == what ? 1 : 0;
+    }
+    return n;
+}
+
+// a truck carrier with an APC escort: 4 bodies, the truck and its driver
+// (4), the M113 and its two crew (10)
+CounterAttackOrder ColumnOrder(int target, int source, int opId = 21)
+{
+    CounterAttackOrder o = TruckOrder(target, source, 4, opId);
+    o.escortClass = "M113";
+    o.escortCrew = 2;
+    o.escortPriceUnits = 10;
+    o.priceUnits = 14;
+    return o;
+}
+
+// the player standing in the town (the force must be live)
+CounterAttackView AtTown(Fixture& f)
+{
+    return Fixture::View(f.Z(f.town).pos.X(), f.Z(f.town).pos.Z());
+}
+
+// a point d metres from the town toward the Post
+Vector3 TowardPost(Fixture& f, float d)
+{
+    Vector3 dir = f.Z(f.post).pos - f.Z(f.town).pos;
+    dir[1] = 0;
+    return f.Z(f.town).pos + dir.Normalized() * d;
+}
+
+// a column launched and born at the Post with the player in the town
+void BornColumn(Fixture& f, ColumnOps& ops, AutoArray<ZoneEventRecord>& fired)
+{
+    ops.infAt = f.Z(f.post).pos;
+    ops.carrierCrewAt = f.Z(f.post).pos;
+    ops.escortCrewAt = f.Z(f.post).pos;
+    REQUIRE(f.ca.LaunchFunded(f.registry, AtTown(f), ColumnOrder(f.town, f.post), &ops, fired));
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    REQUIRE(f.ca.Get(0)->phase == CALive);
+}
+
+} // namespace
+
+TEST_CASE("CounterAttack - a column: the escort is born unseen behind the carrier, drives with it and supports",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    BornColumn(f, ops, fired);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // both hulls born, each hull's share of the price kept apart
+    CHECK(ops.mounts == 1);
+    CHECK(ops.escorts == 1);
+    CHECK(f.ca.LiveHulls() == 2);
+    CHECK(CounterAttack::LiveEscortOf(*r) == 1);
+    CHECK(r->priceUnits == 4);
+    CHECK(r->escortPriceUnits == 10);
+    CHECK(r->EscortHullPrice() == 8);
+    CHECK(r->OwedUnits() == 14);
+    // EscortGap behind the carrier, on the side away from the town
+    CHECK(Dist2DTest(ops.lastEscortFrom, ops.lastMountFrom) == Approx(CounterAttack::EscortGap).margin(0.1f));
+    CHECK(Dist2DTest(ops.lastEscortFrom, f.Z(f.town).pos) > Dist2DTest(ops.lastMountFrom, f.Z(f.town).pos));
+
+    // a return to abstract travel (everyone out of sight, the player far):
+    // the cargo, then each hull crew first; the prices stay for the rebirth
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    ops.squadUnseen = true;
+    ops.hullUnseen = true;
+    f.ca.Step(f.registry, far, CounterAttack::VanishHold + 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->phase == CATravel);
+    CHECK(f.ca.LiveHulls() == 0);
+    const std::vector<std::string> crewFirst = {"inf", "carrierCrew", "hull:carrier", "escortCrew", "hull:escort"};
+    CHECK(ops.removals == crewFirst);
+    CHECK(r->priceUnits == 4);
+    CHECK(r->escortPriceUnits == 10);
+    CHECK(r->OwedUnits() == 14);
+    CHECK(ear.Count(CAOpHullLost) == 2);
+    CHECK(ear.Last(CAOpHullLost)->units == 0);
+
+    // re-born together when the player comes back
+    ops.removals.clear();
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(r->phase == CALive);
+    CHECK(ops.mounts == 2);
+    CHECK(ops.escorts == 2);
+    CHECK(f.ca.LiveHulls() == 2);
+
+    // the escort drives the carrier's legs; at the 250 m mark the truck stops,
+    // the infantry gets out, the truck holds back and the escort supports
+    ops.infAt = TowardPost(f, 600.0f);
+    ops.squadUnseen = false;
+    ops.hullUnseen = false;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::ResendInterval + 1.0f, &ops, fired);
+    CHECK(ops.escortDrives > 0);
+    CHECK_FALSE(r->escortWait);
+    // the column keeps together: the carrier waits for a lagging escort
+    ops.infAt = TowardPost(f, 400.0f); // the escort still at the Post, 271 m back
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(r->escortWait);
+    ops.escortCrewAt = TowardPost(f, 440.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK_FALSE(r->escortWait);
+    ops.infAt = TowardPost(f, 200.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(ops.escortSupports >= 1); // it closes up as the carrier brakes
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(ops.dismounts == 1);
+    CHECK(r->dismounted);
+    CHECK(ops.carrierSupports == 0); // a truck holds back
+    CHECK(ops.escortSupports >= 2);
+    CHECK(ear.Count(CAOpArrived) == 1);
+
+    // the infantry is wiped out: both intact hulls drive home and are
+    // deleted unseen, each refunding its own hull price, the crews home
+    // (the player stands within the deposit bubble of the Post: the crews
+    // come home as a pending deposit, S5)
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    ops.infAlive = 0;
+    ops.hullUnseen = true;
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.ca.HomeHullCount() == 0);
+    REQUIRE(ear.Count(CAOpHullRefund) == 2);
+    int refunded = 0, crewHome = 0;
+    for (const CounterAttackOpEvent& ev : ear.events)
+    {
+        if (ev.type == CAOpHullRefund)
+        {
+            refunded += ev.units;
+            crewHome += ev.bodies;
+        }
+    }
+    CHECK(refunded == 3 + 8);
+    CHECK(crewHome == 1 + 2);
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 3.0f));
+    // the wiped squad's dead group left unseen (L7)
+    CHECK(f.ca.LeftoverCount() == 0);
+    CHECK(Removed(ops, "inf") == 1);
+}
+
+TEST_CASE("CounterAttack - lost hulls leave a cleanup: wrecks stay, abandoned hulls and crews go unseen (M3)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    BornColumn(f, ops, fired);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    const int lostBefore = OccupierForces::Instance().Lost();
+
+    // the escort is destroyed; one of its two crew bailed out alive next to
+    // the player
+    ops.escortState = CounterAttackOps::HullDestroyed;
+    ops.escortSeated = 0;
+    ops.escortCrewAlive = 1;
+    ops.escortCrewAt = f.Z(f.town).pos;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(r->escortDone);
+    CHECK(CounterAttack::LiveEscortOf(*r) == 0);
+    REQUIRE(ear.Count(CAOpHullLost) == 1);
+    CHECK(ear.Last(CAOpHullLost)->units == 8);
+    CHECK(OccupierForces::Instance().Lost() == lostBefore + 1); // only the dead crewman (L4)
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    CHECK(f.ca.GetLeftover(0)->hull.GetLink() == nullptr); // the wreck stays in the world
+    CHECK(f.ca.GetLeftover(0)->living == 1);
+    // the column carries on with its carrier
+    CHECK(r->phase == CALive);
+    CHECK(f.ca.LiveHulls() == 1);
+
+    // next to the player the straggler stays, even unseen
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 1);
+    // away from him and unseen: deleted, home as a body
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    ops.escortCrewAt = Vector3(FarX, 0, FarZ);
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 0);
+    CHECK(Removed(ops, "escortCrew") == 1);
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 1.0f));
+
+    // the truck's driver dies in his seat: the intact truck is abandoned; it
+    // and the dead crew's group leave only where nobody sees them
+    ops.removals.clear();
+    ops.carrierSeated = 0;
+    ops.carrierCrewAlive = 0;
+    ops.hullUnseen = false;
+    ops.bodiesUnseen = false;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(r->hullDone);
+    CHECK(r->OwedUnits() == 0);
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    CHECK(f.ca.GetLeftover(0)->hull.GetLink() == ops.carrier.GetRef());
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 1); // seen: kept
+    ops.hullUnseen = true;
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 0);
+    CHECK(Removed(ops, "hull:carrier") == 1);
+    CHECK(Removed(ops, "carrierCrew") == 1);
+}
+
+TEST_CASE("CounterAttack - a force held at the town edge by the player gives up: born there or cancelled unseen (M2)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.exposure = CAExposeSeen; // every road point is in the player's view
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4, 31), &ops, fired));
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // almost there, off-screen
+    f.ca.Step(f.registry, far, r->travel - 5.0f, &ops, fired);
+    REQUIRE(r->phase == CATravel);
+    // the player walks into his town: the force holds at the edge
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->edgeHold);
+    f.ca.Step(f.registry, AtTown(f), 60.0f, &ops, fired);
+    CHECK(f.ca.Count() == 1); // not yet
+    // the give-up: no unseen point at the town edge either, so it is called
+    // off unseen; its bodies go home and the town is free for other operations
+    f.ca.Step(f.registry, AtTown(f), f.ca.Tuning().birthGiveUp, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.ca.FindByTarget("Town") < 0);
+    REQUIRE(ear.Count(CAOpCancelledUnseen) == 1);
+    CHECK(ear.Last(CAOpCancelledUnseen)->units == 0); // foot: no hull price owed
+    // home as a pending deposit (the Post is inside the player's bubble, S5)
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(6.0f));
+    CHECK(ops.squads == 0);
+    f.Z(f.post).garrison = 6; // the deposit released
+    f.Z(f.post).pending = 0;
+    f.Z(f.post).pendingOrigin = -1;
+
+    // with an unseen point at the edge the held force is born there instead
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4, 32), &ops, fired));
+    r = f.ca.Get(0);
+    f.ca.Step(f.registry, far, r->travel - 5.0f, &ops, fired);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(r->edgeHold);
+    ops.exposure = CAExposeHidden;
+    f.ca.Step(f.registry, AtTown(f), f.ca.Tuning().birthGiveUp, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->phase == CALive);
+    CHECK(r->arrivalLive);
+    CHECK(ops.squads == 1);
+}
+
+TEST_CASE("CounterAttack - a live top-up squad whose town is lost walks home and leaves unseen (M5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAt = f.Z(f.post).pos;
+    // the Town is the occupier's (NEUTRAL, administered): a top-up column
+    REQUIRE(f.ca.LaunchFunded(f.registry, AtTown(f), KindOrder(CAKReinforce, f.town, f.post, 4, 41), &ops, fired));
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    REQUIRE(r->phase == CALive);
+    CHECK(f.Z(f.post).garrison == Approx(2.0f));
+    // the player takes the town while the squad walks in
+    f.RaiseTown(f.town);
+    const int movesBefore = ops.moves;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->withdrawing);
+    CHECK(ops.removals.empty()); // never deleted in view
+    CHECK(ops.moves > movesBefore);
+    // out of his sight and away: it leaves, its bodies home
+    ops.squadUnseen = true;
+    ops.infAt = f.Z(f.post).pos;
+    f.ca.Step(f.registry, Fixture::View(FarX, FarZ), 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(Removed(ops, "inf") == 1);
+    REQUIRE(ear.Count(CAOpAborted) == 1);
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+}
+
+TEST_CASE("CounterAttack - REINFORCE columns top up a post through the room cap, refuse and return (phase 5, 5.5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    // a bled base (4 of 12): four bodies from the Post travel and join it
+    f.Z(f.farBase).garrison = 4;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.farBase, f.post, 4, 51), nullptr, fired));
+    CHECK(f.Z(f.post).garrison == Approx(2.0f));
+    f.ca.Step(f.registry, far, 100000.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.farBase).garrison == Approx(8.0f));
+    REQUIRE(ear.Count(CAOpSettled) == 1);
+    CHECK(ear.Last(CAOpSettled)->bodies == 4);
+
+    // only two fit: two join, two go home to the Post (its room)
+    f.Z(f.farBase).garrison = 10;
+    f.Z(f.post).garrison = 6;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.farBase, f.post, 4, 52), nullptr, fired));
+    f.ca.Step(f.registry, far, 100000.0f, nullptr, fired);
+    CHECK(f.Z(f.farBase).garrison == Approx(12.0f));
+    CHECK(f.Z(f.post).garrison == Approx(4.0f));
+    CHECK(ear.Last(CAOpSettled)->bodies == 2);
+
+    // a post the resistance holds is refused, and one lost on the way sends
+    // the column home
+    f.Z(f.farBase).garrison = 4;
+    f.Z(f.post).garrison = 6;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.farBase, f.post, 4, 53), nullptr, fired));
+    f.Z(f.farBase).owner = "GUER";
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.farBase, f.post, 1, 54), nullptr, fired));
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(ear.Count(CAOpAborted) == 1);
+    CHECK(f.Z(f.post).garrison == Approx(6.0f));
+}
+
+TEST_CASE("CounterAttack - forcesOpsMax has one reader: OccupierForces' tuning while it is active",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    CHECK(f.ca.OpsCap() == 2);
+    f.ca.TuningMutable().forcesOpsMax = 0;
+    CHECK(f.ca.OpsCap() == 0); // inactive: the local default
+    {
+        PoolGuard pool(f);
+        OccupierForces::Instance().TuningMutable().opsMax = 5;
+        CHECK(f.ca.OpsCap() == 5);
+    }
+    CHECK(f.ca.OpsCap() == 0);
 }

@@ -972,21 +972,26 @@ TEST_CASE("OccupierForces - a save without the block derives the pool from contr
     REQUIRE(f.of.Active());
     CHECK(f.of.HasState());
     CHECK(f.of.LegacySave());
-    // the K towns are the ones administered now: Other only (Town is held)
-    CHECK(f.of.TownCount() == 1);
-    CHECK(f.of.PoolStart() == 24); // max(24, 18 + 2)
-    // M = 6 / 18, T = 1 / 1: C = 0.2 + 0.4 = 0.6
-    CHECK(f.of.Control() == Approx(0.6f));
-    CHECK(f.of.Pool() == 14);      // round(24 * 0.6)
-    CHECK(f.of.WavesFired() == 1); // 0.75 crossed, 0.50 not
+    // M7: K by the AUTHORED owners: Town (held now, authored NEUTRAL) still
+    // counts with Other; Held (authored RESISTANCE) and the exempt HQ town
+    // do not
+    CHECK(f.of.TownCount() == 2);
+    CHECK(f.of.ExcludedCount() == 2);
+    CHECK(f.of.PoolStart() == 24); // max(24, 18 + 2 * 2)
+    // M = 6 / 18, T over the current owners = 1 / 2: C = 0.2 + 0.2 = 0.4
+    CHECK(f.of.Control() == Approx(0.4f));
+    CHECK(f.of.Pool() == 10);      // round(24 * 0.4)
+    CHECK(f.of.WavesFired() == 2); // 0.75 and 0.50 crossed
     CHECK(f.of.Tokens() == 0);
     CHECK(f.of.Band() == OFBandStretched);
-    // the distinct towns: the ones the resistance holds (the exempt HQ town
-    // and Camp never count)
-    CHECK(f.of.TownsEverCount() == 2);
+    // the distinct towns: the ones the resistance took (L12: Held was
+    // authored to it and was never taken; the exempt HQ town and Camp never
+    // count)
+    CHECK(f.of.TownsEverCount() == 1);
     CHECK(f.of.TownEver("Town"));
-    CHECK(f.of.TownEver("Held"));
+    CHECK_FALSE(f.of.TownEver("Held"));
     CHECK_FALSE(f.of.TownEver("HqTown"));
+    CHECK(f.of.Posture() == OFDormant); // one town taken, wakeTowns 2
     // a second call (or a later first tick) never re-derives
     f.of.SetPool(3);
     f.of.DeriveFromExistingSave(f.registry);
@@ -1024,11 +1029,15 @@ struct FakeLauncher final : DirectorLauncher
     std::vector<int> records; // targets with a record
     int born = 0;
     bool refuse = false;
+    std::vector<int> refuseSources; // CounterAttack cannot grant from these
+    std::vector<CounterAttackOrder> refused;
 
     bool Launch(const CounterAttackOrder& order) override
     {
-        if (refuse)
+        if (refuse ||
+            std::find(refuseSources.begin(), refuseSources.end(), order.source) != refuseSources.end())
         {
+            refused.push_back(order);
             return false;
         }
         orders.push_back(order);
@@ -1106,7 +1115,7 @@ TEST_CASE("OccupierForces - director knobs default to the knob table", "[game][g
     CHECK(t.urgentCostShare == Approx(1.5f));
     CHECK(t.intelDecay == Approx(1800.0f));
     CHECK(OccupierForces::UrgentExitHeat == Approx(35.0f));
-    CHECK(OccupierForces::OfferedPackages == ForcePackages::Phase3Packages);
+    CHECK(OccupierForces::OfferedPackages == ForcePackages::DefaultPackages);
 
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1; forcesWakeTowns = 1; forcesOpsMax = 9; forcesHeatFull = 30; "
@@ -1391,7 +1400,7 @@ TEST_CASE("OccupierForces - a motorized order is paid by the pool first and refu
     CHECK(launcher.orders.empty());
     CHECK(f.of.Pool() == pool0); // spent and refunded
     CHECK(f.of.Tokens() == 2);   // the token is kept
-    CHECK(f.of.OpCounter() == 0);
+    CHECK(f.of.OpCounter() == 1); // the refused op id stays spent (L1)
     CHECK(f.of.OpRows() == 0);
 
     launcher.refuse = false;
@@ -1441,10 +1450,35 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     const int town = f.registry.FindZoneIndex("Town");
     const int other = f.registry.FindZoneIndex("Other");
 
-    // a repel with no RED edge: +15 heat and a 30 min rest
+    // M6: a legacy record's repel or unborn cancel (op 0) drives nothing:
+    // no heat, no rest, no pool change (invariant W)
     f.Z("Town").heat = 20;
+    const int poolLegacy = f.of.Pool();
     CounterAttackOpEvent ev;
-    ev.opId = 0; // a legacy record counts too: the cooldown is the target's
+    ev.opId = 0;
+    ev.type = CAOpRepelled;
+    ev.target = town;
+    ev.units = 3;
+    ev.bodies = 2;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.Z("Town").heat == Approx(20.0f));
+    CHECK(f.of.Cooldown("Town") == Approx(0.0f));
+    ev.type = CAOpCancelledUnseen;
+    ev.units = 4;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Cooldown("Town") == Approx(0.0f));
+    CHECK(f.of.Pool() == poolLegacy);
+
+    // a director operation on Town (the hottest), repelled with no RED
+    // edge: +15 heat and a 30 min rest
+    f.Z("Town").heat = 60;
+    f.Z("Other").heat = 0;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    REQUIRE(launcher.orders[0].target == town);
+    f.Z("Town").heat = 20;
+    ev = CounterAttackOpEvent();
+    ev.opId = launcher.orders[0].opId;
     ev.type = CAOpRepelled;
     ev.target = town;
     ev.units = 3;
@@ -1469,7 +1503,14 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     f.of.Direct(f.registry, ViewOf(f.registry), idle, 120.0f);
     CHECK(f.of.Cooldown("Town") == Approx(0.0f));
 
-    // a RED edge during the op already paid the heat
+    // a director operation on Other; a RED edge during it already paid the
+    // heat
+    f.Z("Town").heat = 0;
+    f.Z("Other").heat = 60;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 2);
+    REQUIRE(launcher.orders[1].target == other);
+    ev.opId = launcher.orders[1].opId;
     AutoArray<int> states;
     states.Resize(f.registry.NZones());
     for (int i = 0; i < states.Size(); i++)
@@ -1487,8 +1528,9 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     CHECK(f.of.Cooldown("Other") == Approx(1800.0f));
     CHECK_FALSE(f.of.RedPaid("Other")); // consumed
 
-    // a cancelled unborn director op: the full hull and crew price back,
-    // and the rest
+    // a cancelled unborn director op: the units CounterAttack still owes
+    // (the full hull and crew price here) back, and the rest
+    launcher.Resolve(town);
     f.Z("Town").heat = 60;
     f.Z("Other").heat = 0;
     AutoArray<SightingReport> reports;
@@ -1504,16 +1546,187 @@ TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel a
     view.spare[f.registry.FindZoneIndex("Post")] = 0;
     const int pool0 = f.of.Pool();
     f.of.Direct(f.registry, view, launcher, 60.0f);
-    REQUIRE(launcher.orders.size() == 1);
-    REQUIRE(launcher.orders[0].priceUnits == 4);
+    REQUIRE(launcher.orders.size() == 3);
+    REQUIRE(launcher.orders[2].target == town);
+    REQUIRE(launcher.orders[2].priceUnits == 4);
     CHECK(f.of.Pool() == pool0 - 4);
     ev = CounterAttackOpEvent();
-    ev.opId = launcher.orders[0].opId;
+    ev.opId = launcher.orders[2].opId;
     ev.type = CAOpCancelledUnseen;
     ev.target = town;
+    ev.units = 4;
     f.of.NoteOpEvent(f.registry, ev);
     CHECK(f.of.Pool() == pool0);
     CHECK(f.of.Cooldown("Town") == Approx(1800.0f));
+}
+
+namespace
+{
+
+// the motorized setup above: AWAKE with two tokens, Town hot and urgent with
+// three fighters reported, the near Post unable to spare the minimum, so a
+// truck from FarBase (9 infantry, 4 pool units) is the plan
+DirectorView MotorizedSetup(Fixture& f)
+{
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 60;
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = f.registry.FindZoneIndex("Town");
+        r.id = 100 + i;
+        r.pos = f.Z("Town").pos;
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0;
+    return view;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - a source CounterAttack refuses is skipped: the target is re-planned from the next base",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 60;
+    const int town = f.registry.FindZoneIndex("Town");
+    const int post = f.registry.FindZoneIndex("Post");
+    const int farBase = f.registry.FindZoneIndex("FarBase");
+    const DirectorView view = ViewOf(f.registry);
+    REQUIRE(view.spare[post] >= 4);
+    REQUIRE(view.spare[farBase] >= 4);
+
+    // CounterAttack cannot grant from the near post: FarBase goes instead,
+    // in the same tick, and only one operation launches
+    launcher.refuseSources.push_back(post);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.refused.size() == 1);
+    CHECK(launcher.refused[0].source == post);
+    CHECK(launcher.refused[0].opId == 1);
+    REQUIRE(launcher.orders.size() == 1);
+    CHECK(launcher.orders[0].source == farBase);
+    CHECK(launcher.orders[0].target == town);
+    CHECK(launcher.orders[0].opId == 2); // the refused id stays spent (L1)
+    CHECK(f.of.OpCounter() == 2);
+    CHECK(f.of.OpRows() == 1);
+    CHECK(f.of.FindOp(1) < 0);
+    CHECK(f.of.FindOp(2) >= 0);
+    CHECK(f.of.Tokens() == 1);
+
+    // every source refused: nothing launches, the token is kept, and the
+    // re-planning is bounded
+    launcher.Resolve(town);
+    launcher.refused.clear();
+    launcher.refuseSources.push_back(farBase);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == 1);
+    CHECK(launcher.refused.size() >= 2);
+    CHECK(launcher.refused.size() <= (size_t)(2 * (OccupierForces::MaxSourceRetries + 1)));
+    CHECK(f.of.Tokens() == 1);
+    CHECK(f.of.OpRows() == 1);
+}
+
+TEST_CASE("OccupierForces - a refused launch leaves the band where it was (L1)", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    const DirectorView view = MotorizedSetup(f);
+    FakeLauncher launcher;
+    // 15 of 24 (62 %): STRONG holds above 60 %; the truck's 4 units would
+    // drop it to 46 % (STRETCHED), and the refund alone (62 %) cannot climb
+    // back over 66 %
+    f.of.SetPool(15);
+    REQUIRE(f.of.Band() == OFBandStrong);
+    launcher.refuse = true;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.refused.size() >= 1);
+    CHECK(launcher.refused[0].priceUnits == 4);
+    CHECK(launcher.orders.empty());
+    CHECK(f.of.Pool() == 15);
+    CHECK(f.of.Band() == OFBandStrong);
+    CHECK(f.of.Tokens() == 2);
+    CHECK(f.of.OpRows() == 0);
+    CHECK(f.of.OpCounter() == (int)launcher.refused.size()); // never rolled back
+}
+
+TEST_CASE("OccupierForces - an unborn cancel refunds only what CounterAttack still owes (L3)",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    const DirectorView view = MotorizedSetup(f);
+    FakeLauncher launcher;
+    const int pool0 = f.of.Pool();
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    REQUIRE(o.priceUnits == 4);
+    CHECK(f.of.Pool() == pool0 - 4);
+    const int row = f.of.FindOp(o.opId);
+    REQUIRE(row >= 0);
+    // the crew (1) were already booked lost: CounterAttack owes the hull's 3
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.type = CAOpCancelledUnseen;
+    ev.target = o.target;
+    ev.units = 3;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0 - 1);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 0);
+    CHECK(f.of.Cooldown("Town") == Approx(1800.0f));
+    // a claim above the row never pays more than the row held
+    Fixture g;
+    const DirectorView gview = MotorizedSetup(g);
+    FakeLauncher glauncher;
+    const int gpool0 = g.of.Pool();
+    g.of.Direct(g.registry, gview, glauncher, 60.0f);
+    REQUIRE(glauncher.orders.size() == 1);
+    ev.opId = glauncher.orders[0].opId;
+    ev.units = 10;
+    g.of.NoteOpEvent(g.registry, ev);
+    CHECK(g.of.Pool() == gpool0);
+}
+
+TEST_CASE("OccupierForces - a hull package CounterAttack sends on foot at launch shows foot in the ledger",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    const DirectorView view = MotorizedSetup(f);
+    FakeLauncher launcher;
+    const int pool0 = f.of.Pool();
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    REQUIRE(o.package == FPTruck);
+    REQUIRE(f.of.OpPackage(f.of.FindOp(o.opId)) == FPTruck);
+    // another hull refund (a hull home) never changes the package
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.target = o.target;
+    ev.type = CAOpHullRefund;
+    ev.units = 0;
+    ev.note = "abstract: home";
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.OpPackage(f.of.FindOp(o.opId)) == FPTruck);
+    // CounterAttack's launch-time downgrade (LaunchCore's note)
+    ev.units = 4;
+    ev.note = "no stored spare: on foot";
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.OpPackage(f.of.FindOp(o.opId)) == FPFoot);
+    CHECK(f.of.Pool() == pool0);
 }
 
 TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 operations",
@@ -1755,11 +1968,9 @@ TEST_CASE("OccupierForces - the director survives save/load", "[game][guerrilla]
     f.of.Tick(f.registry, 60.0f);
     f.of.Direct(f.registry, view, launcher, 60.0f); // a motorized op on Town
     REQUIRE(launcher.orders.size() == 1);
-    // a repel elsewhere: a cooldown; a RED edge: a payment
-    CounterAttackOpEvent ev;
-    ev.type = CAOpRepelled;
-    ev.target = f.registry.FindZoneIndex("Other");
-    f.of.NoteOpEvent(f.registry, ev);
+    // a rest elsewhere (a legacy repel no longer rests a zone, M6: the test
+    // lever stands in); a RED edge: a payment
+    f.of.ForceCooldown("Other", 1800.0f);
     AutoArray<int> states;
     states.Resize(f.registry.NZones());
     for (int i = 0; i < states.Size(); i++)
