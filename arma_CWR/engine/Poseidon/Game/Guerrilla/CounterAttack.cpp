@@ -934,6 +934,53 @@ void CounterAttack::Emit(const ZoneRegistry& registry, const Record& r, int type
     Dispatch(ev);
 }
 
+void CounterAttack::SettleCrew(const ZoneRegistry& registry, const Record& r, int crew, const char* note)
+{
+    // a re-plan no ledger row took (airReplanned) put nothing on a row
+    if (crew <= 0 || r.airReplanned)
+    {
+        return;
+    }
+    Emit(registry, r, CAOpCrewSettled, crew, crew, note);
+}
+
+int CounterAttack::OwedOnOp(int opId, int* crew) const
+{
+    int owed = 0;
+    int crewOwed = 0;
+    for (int i = 0; i < _records.Size() && opId != 0; i++)
+    {
+        const Record& r = _records[i];
+        if (r.opId != opId || r.airReplanned)
+        {
+            continue;
+        }
+        owed += r.OwedUnits();
+        crewOwed += (r.HasHullPackage() && !r.hullDone ? r.crew : 0) + (r.HasEscort() && !r.escortDone ? r.escortCrew : 0);
+    }
+    for (int i = 0; i < _homeHulls.Size() && opId != 0; i++)
+    {
+        if (_homeHulls[i].opId == opId)
+        {
+            owed += _homeHulls[i].units + _homeHulls[i].crew;
+            crewOwed += _homeHulls[i].crew;
+        }
+    }
+    for (int i = 0; i < _airHomes.Size() && opId != 0; i++)
+    {
+        if (_airHomes[i].opId == opId && !_airHomes[i].direct)
+        {
+            owed += _airHomes[i].units + _airHomes[i].crew;
+            crewOwed += _airHomes[i].crew;
+        }
+    }
+    if (crew)
+    {
+        *crew = crewOwed;
+    }
+    return owed;
+}
+
 int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex) const
 {
     const ZoneRecord* z = registry.GetZone(zoneIndex);
@@ -1895,6 +1942,7 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
             // L3: the price drops with the crew, so HullPrice (the hull's
             // share) stays what it was
             OccupierForces::Instance().Refund(r.crew - crewAlive, "partial spawn");
+            SettleCrew(registry, r, r.crew - crewAlive, "partial spawn: refunded");
             r.priceUnits -= r.crew - crewAlive;
             r.crew = crewAlive;
         }
@@ -1944,6 +1992,7 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
             if (escortAlive < r.escortCrew)
             {
                 OccupierForces::Instance().Refund(r.escortCrew - escortAlive, "partial spawn");
+                SettleCrew(registry, r, r.escortCrew - escortAlive, "escort partial spawn: refunded");
                 r.escortPriceUnits -= r.escortCrew - escortAlive;
                 r.escortCrew = escortAlive;
             }
@@ -2653,6 +2702,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                         if (living < r.crew)
                         {
                             OccupierForces::Instance().NoteLoss(r.crew - living, "crew");
+                            SettleCrew(registry, r, r.crew - living, "crew lost on the march");
                             r.priceUnits -= r.crew - living;
                             r.crew = living;
                         }
@@ -2671,6 +2721,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                         if (escortAlive < r.escortCrew)
                         {
                             OccupierForces::Instance().NoteLoss(r.escortCrew - escortAlive, "escort crew");
+                            SettleCrew(registry, r, r.escortCrew - escortAlive, "escort crew lost on the march");
                             r.escortPriceUnits -= r.escortCrew - escortAlive;
                             r.escortCrew = escortAlive;
                         }
@@ -3117,6 +3168,9 @@ bool CounterAttack::CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOp
         r.dismounted = true;
     }
     AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.hull.GetLink() : nullptr, r.crewGroup, living);
+    // the dead booked lost, the living handed to the Leftover list (home as
+    // bodies from there): the whole crew leaves the operation's price
+    SettleCrew(registry, r, r.crew, "crew lost or left behind");
     r.hull = nullptr;
     r.crewGroup = nullptr;
     r.hullDone = true;
@@ -3152,6 +3206,7 @@ bool CounterAttack::CheckEscort(ZoneRegistry& registry, Record& r, CounterAttack
              living, r.escortCrew);
     AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.escort.GetLink() : nullptr, r.escortCrewGroup,
                 living);
+    SettleCrew(registry, r, r.escortCrew, "escort crew lost or left behind");
     r.escort = nullptr;
     r.escortCrewGroup = nullptr;
     r.escortDone = true;
@@ -3181,6 +3236,8 @@ void CounterAttack::FinishEscort(ZoneRegistry& registry, const CounterAttackView
             // it drives home and is deleted only where nobody sees it; both
             // prices come back apart (each hull its own HomeHull).  Its whole
             // living crew goes with it (the home deletion waits for them all)
+            // (the living stay on the row until it is home; the dead leave it now)
+            SettleCrew(registry, r, r.escortCrew - living, "escort crew lost");
             SendHullHome(r, r.escort, r.escortCrewGroup, living, ops, registry, r.EscortHullPrice(), r.escortClass);
         }
         else
@@ -3188,6 +3245,7 @@ void CounterAttack::FinishEscort(ZoneRegistry& registry, const CounterAttackView
             // lost: the group and an abandoned intact hull to the cleanup (M3)
             AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.escort.GetLink() : nullptr,
                         r.escortCrewGroup, living);
+            SettleCrew(registry, r, r.escortCrew, "escort crew lost or left behind");
             Emit(registry, r, CAOpHullLost, 0, r.EscortHullPrice(), "escort lost at the end of the operation");
         }
         r.escort = nullptr;
@@ -3197,6 +3255,7 @@ void CounterAttack::FinishEscort(ZoneRegistry& registry, const CounterAttackView
     // an abstract escort (never born, or back on the abstract road): home
     // unseen at once, its price back, its crew home as bodies
     CrewHome(registry, view, r.source, r.escortCrew);
+    SettleCrew(registry, r, r.escortCrew, "escort crew home");
     Emit(registry, r, CAOpHullRefund, r.escortCrew, r.EscortHullPrice(), "escort abstract: home");
 }
 
@@ -3222,6 +3281,8 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
         {
             // it drives home and is deleted only where nobody sees it (its
             // whole living crew with it: the home deletion waits for them all)
+            // (the living stay on the row until it is home; the dead leave it now)
+            SettleCrew(registry, r, r.crew - living, "crew lost");
             SendHullHome(r, r.hull, r.crewGroup, living, ops, registry);
         }
         else
@@ -3229,6 +3290,7 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
             // lost: the group and an abandoned intact hull to the cleanup (M3)
             AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.hull.GetLink() : nullptr, r.crewGroup,
                         living);
+            SettleCrew(registry, r, r.crew, "crew lost or left behind");
             Emit(registry, r, CAOpHullLost, 0, r.HullPrice(), "lost at the end of the operation");
         }
         r.hull = nullptr;
@@ -3238,6 +3300,7 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
     // an abstract hull (never born, or back on the abstract road) drives
     // home unseen at once: its price back, its crew home as bodies
     CrewHome(registry, view, r.source, r.crew);
+    SettleCrew(registry, r, r.crew, "crew home"); // nothing for a re-plan no row took
     if (r.airReplanned)
     {
         OccupierForces::Instance().Refund(r.HullPrice(), "air re-plan hull home");
@@ -3319,6 +3382,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             OccupierForces::Instance().NoteLoss(h.crew - living, "crew");
             AddLeftover(h.source, state == CounterAttackOps::HullIntact ? h.hull.GetLink() : nullptr, h.crewGroup,
                         living);
+            SettleCrew(registry, ref, h.crew, "crew lost or left behind on the way home");
             LOG_INFO(Core, "CounterAttack: [op {}] the hull driving home to {} is lost", h.opId, (const char*)h.source);
             Emit(registry, ref, CAOpHullLost, 0, h.units, "lost on the way home");
             _homeHulls.Delete(i);
@@ -3341,6 +3405,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             }
             ops->RemoveHull(h.hull, h.crewGroup);
             CrewHome(registry, view, h.source, living);
+            SettleCrew(registry, ref, h.crew, "crew home");
             LOG_INFO(Core, "CounterAttack: [op {}] the hull is home unseen ({} crew back at {})", h.opId, living,
                      (const char*)h.source);
             Emit(registry, ref, CAOpHullRefund, living, h.units, "home");

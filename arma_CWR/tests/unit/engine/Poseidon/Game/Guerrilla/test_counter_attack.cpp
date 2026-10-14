@@ -3930,7 +3930,10 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through 
     // flies home, it is refunded while still abstract, it is shot down.  The
     // ledger row holds the airframe like a ground hull, so pool + outstanding
     // is conserved by the re-plan and by every refund; a loss moves exactly
-    // the hull price from the row to the losses.
+    // the hull price from the row to the losses.  The crew (2, priced as
+    // bodies) leave the row as they settle (CAOpCrewSettled): home into the
+    // Post's reserve, or lost, so a settled row reads 0 and pool +
+    // outstanding + the Post's bodies + losses is conserved (5.5).
     for (int ending = 0; ending < 3; ending++)
     {
         INFO("ending " << ending << " (0 lands, 1 refunded abstract, 2 shot down)");
@@ -3952,8 +3955,10 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through 
         CounterAttack::Record& r = const_cast<CounterAttack::Record&>(*f.ca.Get(0));
         REQUIRE(r.phase == CATravel);
         auto held = [&]() { return of.Pool() + of.OpOutstanding(of.FindOp(order.opId)); };
+        auto postBodies = [&]() { return (int)floorf(f.Z(f.post).garrison) + f.Z(f.post).pending; };
         const int held0 = held();
         const int lost0 = of.Lost();
+        const int post0 = postBodies();
 
         ForcePackageCatalogue cat;
         cat.hulls[FPTransportHeli].className = "Mi17";
@@ -3977,8 +3982,11 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through 
             f.Z(f.town).owner = "OCCUPIER";
             f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
             CHECK(f.ca.Count() == 0);
-            CHECK(held() == held0);
-            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2); // the crew settle as bodies (5.5)
+            // the airframe's 10 back to the pool through the row, the crew's
+            // 2 off the row into the Post with the 4 infantry
+            CHECK(held() == held0 - 2);
+            CHECK(postBodies() == post0 + 2 + 4);
+            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0);
             CHECK(of.Lost() == lost0);
             continue;
         }
@@ -4007,8 +4015,11 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through 
             ops.status.gone = true;
             f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
             CHECK(f.ca.AirHomes() == 0);
-            CHECK(held() == held0);
-            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2);
+            // the airframe's 10 back, the crew's 2 home as bodies (the
+            // infantry fights on at the town)
+            CHECK(held() == held0 - 2);
+            CHECK(postBodies() == post0 + 2);
+            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0);
             CHECK(of.Lost() == lost0);
             continue;
         }
@@ -4016,10 +4027,50 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through 
         // the losses, the crew are lost as bodies
         ops.status.hullLost = true;
         f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
-        CHECK(held() == held0 - 10);
-        CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2);
+        CHECK(held() == held0 - 10 - 2);
+        CHECK(postBodies() == post0);
+        CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0);
         CHECK(of.Lost() == lost0 + 10 + 2);
     }
+}
+
+TEST_CASE("CounterAttack - the crew ledger: a ground hull's row reads 0 once its hull and crew are home (5.5)",
+          "[game][guerrilla][counterattack][occupierforces]")
+{
+    // a truck (3 hull + 1 driver on the row) goes home abstract when its
+    // target reverts: the hull's 3 back to the pool through the row, the
+    // driver home into the Post as a body (CAOpCrewSettled: off the row,
+    // nothing credited).  pool + outstanding + the Post's bodies is
+    // conserved (the 4 infantry come home too) and the row settles to 0
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    ListenerGuard guard(&of);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    const CounterAttackOrder order = TruckOrder(f.town, f.post, 4);
+    REQUIRE(of.Spend(order.priceUnits, "test launch"));
+    REQUIRE(of.BookLeverOp(order.opId, "Town", order.kind, order.package, order.priceUnits));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, order, nullptr, fired));
+    f.Z(f.post).garrisonMax = 100;
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    auto postBodies = [&]() { return (int)floorf(f.Z(f.post).garrison) + f.Z(f.post).pending; };
+    auto total = [&]() { return of.Pool() + of.OpOutstanding(of.FindOp(order.opId)) + postBodies(); };
+    const int total0 = total();
+    const int lost0 = of.Lost();
+    REQUIRE(of.OpOutstanding(of.FindOp(order.opId)) == 4);
+    int crewOwed = 0;
+    CHECK(f.ca.OwedOnOp(order.opId, &crewOwed) == 4); // what the row holds, as CounterAttack sees it
+    CHECK(crewOwed == 1);
+    f.Z(f.town).owner = "OCCUPIER";
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0);
+    CHECK(total() == total0 + 4); // the 4 infantry back from the road
+    CHECK(of.Lost() == lost0);
+    CHECK(f.ca.OwedOnOp(order.opId) == 0);
 }
 
 TEST_CASE("CounterAttack - phase 6A: an abstract alarm answer reaches the zone, answers once and settles",

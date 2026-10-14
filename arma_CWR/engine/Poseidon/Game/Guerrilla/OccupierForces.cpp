@@ -1269,9 +1269,17 @@ void OccupierForces::PruneOps()
             }
             if (drop >= 0 && _ops[drop].outstanding > 0)
             {
-                LOG_DEBUG(Core, "OccupierForces: [op {}] ledger row pruned: {} outstanding unit(s) settled to the pool",
-                          _ops[drop].opId, _ops[drop].outstanding);
-                Refund(_ops[drop].outstanding, "ledger row pruned");
+                // crew CounterAttack still holds for it settle as bodies
+                // (CrewHome, NoteLoss) once its hull is home or lost: only the
+                // rest is the pool's, or they would be counted twice (5.5)
+                int crew = 0;
+                CounterAttack::Instance().OwedOnOp(_ops[drop].opId, &crew);
+                const int refund = _ops[drop].outstanding - MinInt(crew, _ops[drop].outstanding);
+                LOG_DEBUG(Core,
+                          "OccupierForces: [op {}] ledger row pruned: {} outstanding unit(s) settled to the pool"
+                          " ({} crew still to settle as bodies)",
+                          _ops[drop].opId, refund, _ops[drop].outstanding - refund);
+                Refund(refund, "ledger row pruned");
                 _ops[drop].outstanding = 0;
             }
         }
@@ -1280,6 +1288,38 @@ void OccupierForces::PruneOps()
             break;
         }
         _ops.Delete(drop);
+    }
+}
+
+void OccupierForces::ReconcileLegacyOpRows()
+{
+    int rows = 0;
+    int units = 0;
+    for (int i = 0; i < _ops.Size(); i++)
+    {
+        OpRow& r = _ops[i];
+        if (r.crewLedger)
+        {
+            continue;
+        }
+        r.crewLedger = true;
+        const int owed = CounterAttack::Instance().OwedOnOp(r.opId);
+        if (r.outstanding > owed)
+        {
+            // the crew it kept were already settled as bodies (home, the
+            // pool or the losses): the residue is written off, never
+            // refunded, or PruneOps would create units from it
+            units += r.outstanding - (owed > 0 ? owed : 0);
+            r.outstanding = owed > 0 ? owed : 0;
+            rows++;
+        }
+    }
+    if (rows > 0)
+    {
+        LOG_INFO(Core,
+                 "OccupierForces: {} ledger row(s) from a save before the crew ledger held {} settled crew unit(s);"
+                 " written off (nothing credited)",
+                 rows, units);
     }
 }
 
@@ -1339,6 +1379,12 @@ void OccupierForces::NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev)
             r.outstanding -= units;
             NoteLoss(units, "test lever hull lost");
             break;
+        case CAOpCrewSettled:
+            // the crew were settled as bodies where they went (home, the
+            // pool or the losses): the row lets go of them, the pool gets
+            // nothing
+            r.outstanding -= units;
+            break;
         case CAOpRepelled:
         case CAOpSettled:
         case CAOpAborted:
@@ -1353,7 +1399,8 @@ void OccupierForces::NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev)
         default:
             break;
     }
-    if (r.kind == CAKStrike && (ev.type == CAOpHullRefund || ev.type == CAOpHullLost) && r.outstanding <= 0)
+    if (r.kind == CAKStrike &&
+        (ev.type == CAOpHullRefund || ev.type == CAOpHullLost || ev.type == CAOpCrewSettled) && r.outstanding <= 0)
     {
         r.finished = true;
     }
@@ -3034,6 +3081,21 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 NoteLoss(units, "hull lost");
             }
             break;
+        case CAOpCrewSettled:
+            if (mine)
+            {
+                // the crew are priced as bodies (1 each) on the row, but they
+                // settle as bodies: CounterAttack already sent them home
+                // (CrewHome: the reserve, the surplus to the pool), refunded
+                // them or booked them lost.  The row lets go of them and the
+                // pool is credited nothing, so pool + reserves + pending +
+                // outstanding holds and a settled row reads 0 (5.5)
+                const int units = MinInt(ev.units > 0 ? ev.units : 0, _ops[row].outstanding);
+                _ops[row].outstanding -= units;
+                LOG_DEBUG(Core, "OccupierForces: [op {}] {} crew settled ({}); {} outstanding", ev.opId, units,
+                          ev.note ? ev.note : "", _ops[row].outstanding);
+            }
+            break;
         case CAOpReturned:
             // an alarm answer or a strike has no settle: its return ends it
             if (mine && (_ops[row].kind == CAKAlarm || _ops[row].kind == CAKStrike))
@@ -3065,7 +3127,8 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             break;
     }
     // a strike's airframe home (refund) or lost ends the strike
-    if (mine && _ops[row].kind == CAKStrike && (ev.type == CAOpHullRefund || ev.type == CAOpHullLost) &&
+    if (mine && _ops[row].kind == CAKStrike &&
+        (ev.type == CAOpHullRefund || ev.type == CAOpHullLost || ev.type == CAOpCrewSettled) &&
         _ops[row].outstanding <= 0)
     {
         _ops[row].finished = true;
@@ -3798,6 +3861,8 @@ LSError OccupierForces::OpRow::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("born", born, 1, false))
     PARAM_CHECK(ar.Serialize("finished", finished, 1, false))
     PARAM_CHECK(ar.Serialize("lever", lever, 1, false))
+    // absent in a save before the crew ledger: false, reconciled on load
+    PARAM_CHECK(ar.Serialize("crewLedger", crewLedger, 1, false))
     return LSOK;
 }
 
@@ -3815,6 +3880,9 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
         {
             SeedTownsEverOnLoad(ZoneRegistry::Instance());
         }
+        // CounterAttack's block precedes this one: its records, hulls and
+        // airframes driving home are restored by now
+        ReconcileLegacyOpRows();
         return LSOK;
     }
     PARAM_CHECK(ar.Serialize("active", _active, 1, false))

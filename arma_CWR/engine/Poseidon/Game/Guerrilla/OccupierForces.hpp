@@ -776,6 +776,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the lever's launch was refused: what the row still holds goes back to
     // the pool and the row goes
     void CancelLeverOp(int opId);
+    // unit tests: make a row look like one loaded from a save before the
+    // crew ledger, then run the load-time reconcile on it
+    void MarkOpRowLegacy(int row)
+    {
+        if (row >= 0 && row < _ops.Size())
+        {
+            _ops[row].crewLedger = false;
+        }
+    }
+    void ReconcileLegacyOpRowsForTest() { ReconcileLegacyOpRows(); }
     void SetPool(int units);
     void SetMeanStanding(float standing);
     // gmForcesForce ["wave", n]: wave n fires now (n beyond the thresholds:
@@ -820,7 +830,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         LSError Serialize(ParamArchive& ar);
     };
     // the ledger of one director operation: the pool units it still holds
-    // (hull + crew) until they are refunded or lost
+    // (hull + crew) until they are refunded or lost; the crew leave it as
+    // they settle as bodies (CAOpCrewSettled), so a settled row reads 0
     struct OpRow
     {
         int opId = 0;
@@ -833,6 +844,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         bool finished = false;
         // a test lever's row (BookLeverOp): the ledger only
         bool lever = false;
+        // the row lets go of its crew on CAOpCrewSettled (every row made
+        // since the crew ledger); false = a row from an older save, which
+        // kept its crew for good: reconciled once on load
+        bool crewLedger = true;
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -865,6 +880,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // a fresh flip or a lost town: its urgency latch, cooldown and RED payment go
     void ForgetZone(const char* zone);
     void PruneOps();
+    // load (second pass): a row from a save before the crew ledger kept its
+    // settled crew for good; it drops to what CounterAttack still owes it
+    // (CounterAttack::OwedOnOp), crediting nothing, one INFO line
+    void ReconcileLegacyOpRows();
     // a lever row's event (BookLeverOp): refunds, losses and the finish only
     void NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev);
     // engine path: the catalogue, the view, the scan

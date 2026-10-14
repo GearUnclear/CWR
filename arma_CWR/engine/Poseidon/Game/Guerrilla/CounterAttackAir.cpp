@@ -512,6 +512,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         LOG_INFO(Core, "CounterAttack: [op {}] {} lost with its crew; {} of {} soldier(s) survive", r.opId,
                  (const char*)r.hullClass, out, r.strength);
         OccupierForces::Instance().NoteLoss(r.crew, "air crew lost");
+        SettleCrew(registry, r, r.crew, "air crew lost");
         if (r.airReplanned)
         {
             OccupierForces::Instance().NoteLoss(r.HullPrice(), "airframe lost");
@@ -560,6 +561,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         r.crewGroup = nullptr;
         r.hullDone = true;
         CrewHome(registry, view, r.source, r.crew);
+        SettleCrew(registry, r, r.crew, "air crew home");
         if (r.airReplanned)
         {
             OccupierForces::Instance().Refund(r.HullPrice(), "air re-plan hull home");
@@ -619,9 +621,11 @@ void CounterAttack::StepAirHomes(ZoneRegistry& registry, const CounterAttackView
         r.origin = h.origin;
         r.target = h.target;
         r.source = h.source;
+        r.airReplanned = h.direct; // SettleCrew: a direct airframe is on no row
         if (known && st.hullLost)
         {
             OccupierForces::Instance().NoteLoss(h.crew, "air crew lost");
+            SettleCrew(registry, r, h.crew, "air crew lost on the way home");
             if (h.direct)
             {
                 OccupierForces::Instance().NoteLoss(h.units, "airframe lost");
@@ -631,6 +635,7 @@ void CounterAttack::StepAirHomes(ZoneRegistry& registry, const CounterAttackView
         else
         {
             CrewHome(registry, view, h.source, h.crew);
+            SettleCrew(registry, r, h.crew, "air crew home");
             if (h.direct)
             {
                 OccupierForces::Instance().Refund(h.units, "air re-plan hull home");
@@ -853,10 +858,12 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
         {
             LOG_INFO(Core, "CounterAttack: [op {}] the strike airframe {} was lost", r.opId, (const char*)r.hullClass);
             OccupierForces::Instance().NoteLoss(r.crew, "air crew lost");
+            SettleCrew(registry, r, r.crew, "strike crew lost");
             Emit(registry, r, CAOpHullLost, 0, r.HullPrice(), "strike airframe lost");
             return true;
         }
         CrewHome(registry, view, r.source, r.crew);
+        SettleCrew(registry, r, r.crew, "strike crew home");
         Emit(registry, r, CAOpHullRefund, r.crew, r.HullPrice(), "strike airframe home");
         return true;
     }
@@ -913,6 +920,7 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
     struck("abstract");
     r.hullDone = true;
     CrewHome(registry, view, r.source, r.crew);
+    SettleCrew(registry, r, r.crew, "strike crew home");
     Emit(registry, r, CAOpHullRefund, r.crew, r.HullPrice(), "abstract: home");
     return true;
 }

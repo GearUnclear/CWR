@@ -931,6 +931,7 @@ fills its garrisons before its pool.
 | A flipped base's live garrison | pool (key on); onto nothing else |
 | Partial-spawn failures (garrisons, operations, crews) | pool |
 | Surviving hull | price refunded when deleted at home unseen |
+| Crew of a hull or airframe | priced as bodies (1 each) on the operation's ledger row, settled as bodies: home up to the room (the surplus to the pool), the dead lost, the living of a lost hull through the Leftover list. Each settle leaves the row by `CAOpCrewSettled`, crediting nothing, so a settled row reads 0 and a row pruned past `MaxOpRows` x 4 refunds only what is not crew still on the way home. A row from a save before this rule drops on load to what `CounterAttack::OwedOnOp` still owes it, crediting nothing (one INFO line) |
 | Destroyed hull, dead bodies | lost (the `lost` diagnostic) |
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
 | Cancelled unborn operation | bodies to the source up to its room, the rest to the pool; hull and escort prices refunded (L2) |

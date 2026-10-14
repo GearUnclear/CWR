@@ -153,6 +153,10 @@ enum CounterAttackOpEventType
     CAOpStruck,          // a strike reached its target area, ONCE per op (zone = strikeZone, pos = strikePos):
                          // the director applies the town-strike effects (D17) on it
     CAOpAlarmAnswered,   // an alarm answer reached alarmPos (zone = alarmZone, pos = alarmPos)
+    // appended after #97 (the crew ledger) -----------------------------------
+    CAOpCrewSettled,     // crew left the operation's price (home as bodies, refunded or lost, handed to the
+                         // Leftover list): units = bodies = that crew; the ledger row drops by it, the pool
+                         // is credited nothing (the bodies were already settled where they went, 5.5)
     NCounterAttackOpEventTypes
 };
 

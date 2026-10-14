@@ -995,7 +995,8 @@ class CounterAttack : public SerializeClass
 
     bool HasState() const
     {
-        return _records.Size() > 0 || _townsTaken > 0 || _homeHulls.Size() > 0 || _leftovers.Size() > 0;
+        return _records.Size() > 0 || _townsTaken > 0 || _homeHulls.Size() > 0 || _leftovers.Size() > 0 ||
+               _airHomes.Size() > 0;
     }
     LSError Serialize(ParamArchive& ar) override;
 
@@ -1003,6 +1004,11 @@ class CounterAttack : public SerializeClass
     void LoadFromConfig();
     // one event to the listener (queued while a listener call is running)
     void Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units, const char* note);
+    // crew leave the operation's price (home as bodies, refunded, lost, or
+    // handed to the Leftover list): CAOpCrewSettled, so the ledger row lets
+    // go of them without crediting the pool (5.5).  Nothing for crew <= 0 or
+    // an airReplanned record (no row holds its airframe)
+    void SettleCrew(const ZoneRegistry& registry, const Record& r, int crew, const char* note);
     static void Dispatch(const CounterAttackOpEvent& ev);
     // the shared launch core (LaunchFrom, LaunchFunded): r carries the
     // order's fields; false = nothing launched
@@ -1115,6 +1121,12 @@ class CounterAttack : public SerializeClass
     // there.  False = every other base is air-only for this target
     bool GroundSourceShares(const ZoneRegistry& registry, const Record& r) const;
     int AirHomes() const { return _airHomes.Size(); }
+    // the pool units CounterAttack still owes operation opId's ledger row:
+    // its records' unsettled hull prices (crew included, OwedUnits), its
+    // hulls and airframes driving home (price + living crew); a re-plan no
+    // row took (airReplanned, direct) is not on a row.  0 for op 0.
+    // crew (optional): the part of it that is crew, settled as bodies
+    int OwedOnOp(int opId, int* crew = nullptr) const;
     const AirHome* GetAirHome(int i) const { return i >= 0 && i < _airHomes.Size() ? &_airHomes[i] : nullptr; }
 
   private:

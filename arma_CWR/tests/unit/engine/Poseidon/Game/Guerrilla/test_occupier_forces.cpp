@@ -1530,11 +1530,18 @@ TEST_CASE("OccupierForces - a motorized order is paid by the pool first and refu
     f.of.NoteOpEvent(f.registry, ev);
     CHECK(f.of.Pool() == pool0 - 1);
     CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 1);
+    // the crewman comes home as a body (CounterAttack put him in a reserve):
+    // the row lets go of him, the pool is credited nothing, the row reads 0
+    ev.type = CAOpCrewSettled;
+    ev.units = 1;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Pool() == pool0 - 1);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 0);
     // a second refund never pays more than the op still holds
+    ev.type = CAOpHullRefund;
+    ev.units = 3;
     f.of.NoteOpEvent(f.registry, ev);
-    CHECK(f.of.Pool() == pool0);
-    f.of.NoteOpEvent(f.registry, ev);
-    CHECK(f.of.Pool() == pool0);
+    CHECK(f.of.Pool() == pool0 - 1);
 }
 
 TEST_CASE("OccupierForces - the air re-plan's airframe goes on the operation's ledger row (3.1 step 6, 5.5)",
@@ -3338,6 +3345,83 @@ TEST_CASE("OccupierForces - L6: the ledger never drops a row with units outstand
         held += f.of.OpOutstanding(r);
     }
     CHECK(f.of.Pool() + held == pool0);
+}
+
+TEST_CASE("OccupierForces - the crew ledger: settled crew leave the row, so pruning past the cap creates nothing",
+          "[game][guerrilla][occupierforces]")
+{
+    // a truck is 3 hull + 1 crew on the row.  The hull comes home (its 3 back
+    // to the pool), the crewman comes home as a body (CounterAttack's
+    // CrewHome puts him in a reserve; CAOpCrewSettled lets the row go of him
+    // and credits nothing).  140 such operations, past MaxOpRows * 4: every
+    // row reads 0 when settled, so no prune ever refunds a crewman twice.
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetPool(1000);
+    const int pool0 = f.of.Pool();
+    const int town = f.registry.FindZoneIndex("Town");
+    int crewHome = 0; // bodies the crews brought home (a reserve, not the pool)
+    auto held = [&]()
+    {
+        int h = 0;
+        for (int r = 0; r < f.of.OpRows(); r++)
+        {
+            h += f.of.OpOutstanding(r);
+        }
+        return h;
+    };
+    for (int i = 1; i <= 140; i++)
+    {
+        REQUIRE(f.of.Spend(4, "op"));
+        REQUIRE(f.of.BookLeverOp(i, "Town", CAKRetake, FPTruck, 4));
+        f.of.NoteOpEvent(f.registry, OpEvent(i, CAOpSettled, town));
+        f.of.NoteOpEvent(f.registry, OpEvent(i, CAOpCrewSettled, town, 1));
+        crewHome += 1;
+        f.of.NoteOpEvent(f.registry, OpEvent(i, CAOpHullRefund, town, 3));
+        CHECK(f.of.Pool() + held() + crewHome == pool0);
+    }
+    CHECK(f.of.OpRows() <= OccupierForces::MaxOpRows);
+    CHECK(held() == 0);
+    CHECK(f.of.Pool() == pool0 - 140);
+    // a crew settle never takes more than the row holds, and never pays
+    const int pool1 = f.of.Pool();
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(141, "Town", CAKRetake, FPTruck, 4));
+    f.of.NoteOpEvent(f.registry, OpEvent(141, CAOpCrewSettled, town, 9));
+    CHECK(f.of.OpOutstanding(f.of.FindOp(141)) == 0);
+    CHECK(f.of.Pool() == pool1 - 4);
+}
+
+TEST_CASE("OccupierForces - a ledger row from a save before the crew ledger drops its settled crew on load",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    // an older save's row kept its crew after they settled as bodies: a
+    // truck whose hull came home reads 1, not 0.  The load reconcile drops
+    // it to what CounterAttack still owes the operation (nothing here),
+    // crediting nothing; a row made since is left alone
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetPool(100);
+    const int town = f.registry.FindZoneIndex("Town");
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(900101, "Town", CAKRetake, FPTruck, 4));
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(900102, "Town", CAKRetake, FPTruck, 4));
+    f.of.NoteOpEvent(f.registry, OpEvent(900101, CAOpSettled, town));
+    f.of.NoteOpEvent(f.registry, OpEvent(900101, CAOpHullRefund, town, 3)); // the old code's residue: 1
+    REQUIRE(f.of.OpOutstanding(f.of.FindOp(900101)) == 1);
+    REQUIRE(CounterAttack::Instance().OwedOnOp(900101) == 0);
+    f.of.MarkOpRowLegacy(f.of.FindOp(900101));
+    const int pool = f.of.Pool();
+    f.of.ReconcileLegacyOpRowsForTest();
+    CHECK(f.of.OpOutstanding(f.of.FindOp(900101)) == 0);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(900102)) == 4); // a current row: untouched
+    CHECK(f.of.Pool() == pool);                           // nothing credited
+    f.of.ReconcileLegacyOpRowsForTest();                  // once only
+    CHECK(f.of.OpOutstanding(f.of.FindOp(900102)) == 4);
+    CHECK(f.of.Pool() == pool);
 }
 
 TEST_CASE("OccupierForces - L8: a phase-2 block with an empty distinct-town set is seeded from the owners",
