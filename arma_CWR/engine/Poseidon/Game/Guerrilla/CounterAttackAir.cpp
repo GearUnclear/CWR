@@ -706,7 +706,12 @@ bool CounterAttack::AirReplan(ZoneRegistry& registry, const CounterAttackView& v
     }
     const int crew = ForcePackages::CrewOf(FPTransportHeli, catalogue);
     const int price = ForcePackages::HullPrice(FPTransportHeli, field < 0) + crew;
-    if (!OccupierForces::Instance().Spend(price, "air re-plan"))
+    // the operation's ledger row holds the airframe like a ground hull, so
+    // its refund or loss settles through the row (gmOccupierOps and the row
+    // agree); with no row to take it the price is settled straight to the
+    // pool (airReplanned)
+    bool booked = false;
+    if (!OccupierForces::Instance().SpendOnOp(r.opId, price, FPTransportHeli, "air re-plan", booked))
     {
         return false;
     }
@@ -725,7 +730,7 @@ bool CounterAttack::AirReplan(ZoneRegistry& registry, const CounterAttackView& v
     r.escortCrew = 0;
     r.escortPriceUnits = 0;
     r.escortDone = true;
-    r.airReplanned = true;
+    r.airReplanned = !booked;
     r.airOrigin = field;
     r.route.Clear();
     r.deferTime = 0;
@@ -747,9 +752,10 @@ bool CounterAttack::AirReplan(ZoneRegistry& registry, const CounterAttackView& v
     r.clock = r.travel;
     LOG_INFO(Core,
              "CounterAttack: [op {}] no road to {} passes the gate; re-planned as a {} insertion from {} ({} units,"
-             " {:.0f}s in the air)",
+             " {:.0f}s in the air{})",
              r.opId, (const char*)r.target, (const char*)r.hullClass,
-             field >= 0 ? (const char*)registry.GetZone(field)->name : "off-map", price, r.travel);
+             field >= 0 ? (const char*)registry.GetZone(field)->name : "off-map", price, r.travel,
+             booked ? ", on the ledger row" : ", settled to the pool directly");
     return true;
 }
 

@@ -886,6 +886,28 @@ bool OccupierForces::Spend(int units, const char* why)
     return true;
 }
 
+bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why, bool& booked)
+{
+    booked = false;
+    if (!Spend(units, why))
+    {
+        return false;
+    }
+    const int row = FindOp(opId);
+    // only a row whose events reach this ledger: a unit test's listener
+    // would leave the units outstanding for good
+    if (!Active() || units <= 0 || row < 0 || CounterAttack::Listener() != this)
+    {
+        return true;
+    }
+    _ops[row].outstanding += units;
+    _ops[row].package = package;
+    booked = true;
+    LOG_INFO(Core, "OccupierForces: [op {}] {}: {} unit(s) on the ledger row ({} outstanding)", opId,
+             why ? why : "", units, _ops[row].outstanding);
+    return true;
+}
+
 void OccupierForces::Refund(int units, const char* why)
 {
     if (!Active() || units <= 0)
@@ -2991,8 +3013,11 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 // CounterAttack found no stored spare for the hull at launch
                 // and sent the force on foot (it rewrote its record's
                 // package): the ledger row follows, so gmOccupierOps and the
-                // row agree.  The note is CounterAttack::LaunchCore's.
-                if (!_ops[row].born && ev.note && strncmp(ev.note, "no stored spare", 15) == 0)
+                // row agree.  The notes are CounterAttack::LaunchCore's and
+                // AirGoLive's (an insertion with no LZ or no airframe).
+                if (!_ops[row].born && ev.note &&
+                    (strncmp(ev.note, "no stored spare", 15) == 0 ||
+                     strncmp(ev.note, "insertion impossible", 20) == 0))
                 {
                     _ops[row].package = FPFoot;
                 }

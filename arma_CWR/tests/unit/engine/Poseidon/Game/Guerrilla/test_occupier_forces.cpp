@@ -1537,6 +1537,84 @@ TEST_CASE("OccupierForces - a motorized order is paid by the pool first and refu
     CHECK(f.of.Pool() == pool0);
 }
 
+TEST_CASE("OccupierForces - the air re-plan's airframe goes on the operation's ledger row (3.1 step 6, 5.5)",
+          "[game][guerrilla][occupierforces][air]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 60; // urgent
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = f.registry.FindZoneIndex("Town");
+        r.id = 100 + i;
+        r.pos = f.Z("Town").pos;
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    REQUIRE(o.package == FPTruck);
+    auto held = [&]() { return f.of.Pool() + f.of.OpOutstanding(f.of.FindOp(o.opId)); };
+    const int held0 = held();
+
+    // another listener hears CounterAttack's events: nothing is booked on the
+    // row (it would never be settled), the caller settles directly
+    bool booked = true;
+    REQUIRE(f.of.SpendOnOp(o.opId, 12, FPTransportHeli, "air re-plan", booked));
+    CHECK_FALSE(booked);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 4);
+    f.of.Refund(12, "test: settled directly");
+    CHECK(held() == held0);
+
+    // the director's own ledger hears them: the row holds the airframe
+    struct Ear
+    {
+        explicit Ear(CounterAttackListener* l) { CounterAttack::SetListener(l); }
+        ~Ear() { CounterAttack::SetListener(nullptr); }
+    } ear(&f.of);
+    REQUIRE(f.of.SpendOnOp(o.opId, 12, FPTransportHeli, "air re-plan", booked));
+    CHECK(booked);
+    const int row = f.of.FindOp(o.opId);
+    CHECK(f.of.OpPackage(row) == FPTransportHeli);
+    CHECK(f.of.OpOutstanding(row) == 16);
+    CHECK(held() == held0);
+    // the ground hull goes back as CounterAttack names it
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.target = o.target;
+    ev.type = CAOpHullRefund;
+    ev.units = 4;
+    ev.note = "air re-plan: ground hull not used";
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.OpOutstanding(f.of.FindOp(o.opId)) == 12);
+    CHECK(f.of.OpPackage(f.of.FindOp(o.opId)) == FPTransportHeli);
+    CHECK(held() == held0);
+    // shot down: the airframe's 10 from the row to the losses
+    const int lost0 = f.of.Lost();
+    ev.type = CAOpHullLost;
+    ev.units = 10;
+    ev.note = "airframe lost";
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(held() == held0 - 10);
+    CHECK(f.of.Lost() == lost0 + 10);
+    // refused: nothing debited, nothing booked
+    f.of.SetPool(5);
+    CHECK_FALSE(f.of.SpendOnOp(o.opId, 12, FPTransportHeli, "air re-plan", booked));
+    CHECK_FALSE(booked);
+    CHECK(f.of.Pool() == 5);
+}
+
 TEST_CASE("OccupierForces - repels and unborn cancels rest the target; a repel adds heat unless RED paid it",
           "[game][guerrilla][occupierforces]")
 {

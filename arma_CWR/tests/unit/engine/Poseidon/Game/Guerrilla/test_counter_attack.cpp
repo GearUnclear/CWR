@@ -3923,6 +3923,105 @@ TEST_CASE("CounterAttack - phase 6A: the air re-plan of the birth chain buys a h
     CHECK(OccupierForces::Instance().Pool() >= mid);
 }
 
+TEST_CASE("CounterAttack - phase 6A: the air re-plan's airframe settles through the operation's ledger row (5.5)",
+          "[game][guerrilla][counterattack][occupierforces][air]")
+{
+    // three endings of a re-planned insertion: it lands and the airframe
+    // flies home, it is refunded while still abstract, it is shot down.  The
+    // ledger row holds the airframe like a ground hull, so pool + outstanding
+    // is conserved by the re-plan and by every refund; a loss moves exactly
+    // the hull price from the row to the losses.
+    for (int ending = 0; ending < 3; ending++)
+    {
+        INFO("ending " << ending << " (0 lands, 1 refunded abstract, 2 shot down)");
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        PoolGuard pool(f);
+        OccupierForces& of = OccupierForces::Instance();
+        ListenerGuard guard(&of); // the director's own ledger hears the events
+        AutoArray<ZoneEventRecord> fired;
+        const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+        const CounterAttackView atTown = WithMap(AtTown(f));
+        // the director's side of a truck launch: the pool pays, a row holds it
+        const CounterAttackOrder order = TruckOrder(f.town, f.post, 4);
+        REQUIRE(of.Spend(order.priceUnits, "test launch"));
+        REQUIRE(of.BookLeverOp(order.opId, "Town", order.kind, order.package, order.priceUnits));
+        REQUIRE(f.ca.LaunchFunded(f.registry, far, order, nullptr, fired));
+        f.Z(f.post).garrisonMax = 100; // room: bodies and crew home never spill into the pool
+        CounterAttack::Record& r = const_cast<CounterAttack::Record&>(*f.ca.Get(0));
+        REQUIRE(r.phase == CATravel);
+        auto held = [&]() { return of.Pool() + of.OpOutstanding(of.FindOp(order.opId)); };
+        const int held0 = held();
+        const int lost0 = of.Lost();
+
+        ForcePackageCatalogue cat;
+        cat.hulls[FPTransportHeli].className = "Mi17";
+        cat.hulls[FPTransportHeli].maxSpeedKmh = 240.0f;
+        cat.hulls[FPTransportHeli].cargo = 14;
+        cat.hulls[FPTransportHeli].crew = 2;
+        REQUIRE(f.ca.AirReplan(f.registry, far, r, cat));
+        // the row took the airframe: the truck's 4 back, the airframe's 12 on
+        CHECK_FALSE(r.airReplanned);
+        CHECK(r.package == FPTransportHeli); // gmOccupierOps column 3
+        CHECK(Fixture::Str(r.hullClass) == "Mi17"); // column 11
+        REQUIRE(of.FindOp(order.opId) >= 0);
+        CHECK(of.OpPackage(of.FindOp(order.opId)) == FPTransportHeli);
+        CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 12);
+        CHECK(held() == held0);
+
+        if (ending == 1)
+        {
+            // the target reverts while it is abstract: the hull price back
+            // through the row, the crew home as bodies
+            f.Z(f.town).owner = "OCCUPIER";
+            f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+            CHECK(f.ca.Count() == 0);
+            CHECK(held() == held0);
+            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2); // the crew settle as bodies (5.5)
+            CHECK(of.Lost() == lost0);
+            continue;
+        }
+        // born airborne near the town
+        AirOps ops;
+        for (int i = 0; i < 5 && ops.inserts == 0; i++)
+        {
+            f.ca.Step(f.registry, atTown, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+        }
+        REQUIRE(ops.inserts == 1);
+        CHECK(r.phase == CALive);
+        CHECK(CounterAttack::LiveHullOf(r) == 1); // gmOccupierOps column 8
+        CHECK(held() == held0);
+        ops.cargoAlive = 4;
+        ops.cargoAt = ops.lastLz;
+        if (ending == 0)
+        {
+            // down on the LZ and unloaded; the airframe flies home and is
+            // removed unseen: its price back through the row
+            ops.status.landed = true;
+            ops.status.landedOffset = 5.0f;
+            ops.status.landedAt = ops.lastLz;
+            ops.status.state = 3; // AISDeparting
+            f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+            REQUIRE(f.ca.AirHomes() == 1);
+            ops.status.gone = true;
+            f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+            CHECK(f.ca.AirHomes() == 0);
+            CHECK(held() == held0);
+            CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2);
+            CHECK(of.Lost() == lost0);
+            continue;
+        }
+        // shot down with its cargo out: the hull price moves from the row to
+        // the losses, the crew are lost as bodies
+        ops.status.hullLost = true;
+        f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+        CHECK(held() == held0 - 10);
+        CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 2);
+        CHECK(of.Lost() == lost0 + 10 + 2);
+    }
+}
+
 TEST_CASE("CounterAttack - phase 6A: an abstract alarm answer reaches the zone, answers once and settles",
           "[game][guerrilla][counterattack]")
 {

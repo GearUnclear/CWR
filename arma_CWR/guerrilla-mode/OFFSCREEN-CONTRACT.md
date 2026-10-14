@@ -490,12 +490,12 @@ Owned elsewhere; this contract only fixes the rules they must follow.
   cancels unseen and the holding path waits at the edge by design, 6.5);
   `gmForcesTune "enabled"` not persisted (a test lever; the key is the
   mission config).
-- **Phase 6 leftovers** [commit bcca80e]: the air re-plan's helicopter
-  price bypasses the director's ledger (spent through
-  `OccupierForces::Spend`, refunded directly, `airReplanned`); a slow native
-  alarm answer could contest a later Showcase capture chapter. Closed in
-  phase 7A: the descriptor lint probes the `forces*` classes (a missing one
-  is WARNed and cleared). Accepted deviations, not defects: no attack-helicopter escort
+- **Phase 6 leftovers** [commit bcca80e]: a slow native alarm answer could
+  contest a later Showcase capture chapter. Closed in phase 7A: the
+  descriptor lint probes the `forces*` classes (a missing one is WARNed and
+  cleared). Closed after `509e30d` (#97): the air re-plan's helicopter price
+  now goes on the operation's ledger row (`OccupierForces::SpendOnOp`,
+  section 9.3 step 7) instead of bypassing it. Accepted deviations, not defects: no attack-helicopter escort
   for an insertion; strikes are live only in the bubble; wave strikes buy
   no air opener; an HQ strike with no report aims at `HqPos`; a
   base-opener strike cuts only the 2 km ring.
@@ -732,9 +732,13 @@ The chain:
    no other untried base shares the target's landmass (waiting cannot help
    a ground force). The airframe flies from the occupier-held AIRFIELD
    nearest the target, else off-map at x 1.5; the ground hull's price goes
-   back through the ledger, and the airframe's price is spent and later
-   refunded or lost straight to the pool (`airReplanned`), not through the
-   director's row (open, section 8). The insertion then follows row 25.
+   back through the ledger, and the airframe's price goes on the
+   operation's ledger row like a ground hull (`OccupierForces::SpendOnOp`:
+   the row's package becomes the transport helicopter, its outstanding
+   grows by the price), so the airframe's refund or loss settles through
+   the row. Only a re-plan no row can take (no row for the operation, or a
+   save from before this change) is settled straight to the pool
+   (`airReplanned`). The insertion then follows row 25.
    A legacy (unfunded) record never re-plans.
 8. **Cancel unseen.** Otherwise the operation is cancelled while still
    abstract: bodies back to their current source room-capped (the rest to

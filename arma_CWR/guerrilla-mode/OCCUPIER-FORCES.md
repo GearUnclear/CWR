@@ -334,13 +334,15 @@ rates imperceptible.
    the wait's last re-source fails, a FUNDED ground operation becomes a
    helicopter insertion when the catalogue offers the transport
    helicopter, its seats hold the bodies and the pool pays it
-   (`OccupierForces::Spend`); it does so at once, without the wait, when
-   no other base shares the target's landmass. The airframe flies from the
-   occupier-held AIRFIELD nearest the target, else off-map; the ground
-   hull's price goes back through the ledger, and the airframe's price is
-   refunded straight to the pool (`airReplanned`), bypassing the
-   director's ledger row (open, section 17). A legacy record never
-   re-plans.
+   (`OccupierForces::SpendOnOp`); it does so at once, without the wait,
+   when no other base shares the target's landmass. The airframe flies
+   from the occupier-held AIRFIELD nearest the target, else off-map; the
+   ground hull's price goes back through the ledger, and the airframe goes
+   on the operation's ledger row like a ground hull (the row's package
+   becomes the transport helicopter, its outstanding grows by the price),
+   so its refund or loss settles through the row. Only a re-plan no row
+   can take is settled straight to the pool (`airReplanned`). A legacy
+   record never re-plans.
 7. **Cancel unseen.** Otherwise the operation is cancelled while still
    abstract:
    - its bodies return to their current source up to its room, the rest to
@@ -1675,10 +1677,6 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 
 Every owner question is answered (D1-D24). Open implementation items, as of
 `bcca80e` and the phase 7 work:
-- **The air re-plan's price bypasses the director's ledger** (3.1 step 6):
-  the airframe is spent through `OccupierForces::Spend` and refunded or
-  lost straight to the pool (`airReplanned`), not through the director's
-  operation row.
 - **A slow native alarm answer could contest a later Showcase capture
   chapter.** Chapter 6 and the human "alert" case accept a native ALARM
   operation as the answer; one still marching when a later chapter
@@ -1686,6 +1684,15 @@ Every owner question is answered (D1-D24). Open implementation items, as of
 - **The HQ-respawn issue** (separate, D13).
 - **Player messaging** for the director, waves, strikes and the HQ (D12:
   INFO lines and gm* commands only for now).
+
+Closed after `509e30d` (#97): **the air re-plan's price no longer
+bypasses the director's ledger** (3.1 step 6). `OccupierForces::SpendOnOp`
+puts the airframe on the operation's row (package and outstanding), so its
+`CAOpHullRefund` / `CAOpHullLost` settle through the row like a ground
+hull's; `airReplanned` now marks only a re-plan no row could take (and
+saves from before the change), which still settles straight to the pool.
+The unit cases assert pool + outstanding across a re-plan that lands, one
+refunded while abstract, and one shot down.
 
 Closed after `402ece6`: **K and the settlement probe** (5.1): the probe
 returns for K. A seeded town counts only when it passes it, the verdict is

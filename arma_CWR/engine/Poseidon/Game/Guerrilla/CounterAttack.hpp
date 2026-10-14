@@ -655,9 +655,11 @@ class CounterAttack : public SerializeClass
         Vector3 airFrom = VZero;  // where its straight flight line starts (airfield or off-map edge)
         int airReplans = 0;       // failed insertions re-planned (once, 3.2)
         bool airLanded = false;   // CAOpLanded went out for the current airframe
-        // the air re-plan of the birth chain (3.1 step 4) bought the
-        // airframe: its price was spent from the pool directly, so it is
-        // refunded (or lost) directly, not through the director's ledger
+        // the air re-plan of the birth chain (3.1 step 6) bought the
+        // airframe and no ledger row took it (OccupierForces::SpendOnOp: no
+        // row, or a save older than the ledger booking): its price is
+        // refunded (or lost) straight to the pool.  A re-plan the row took
+        // leaves this false and settles like any hull, through the row.
         bool airReplanned = false;
         float alarmQuiet = 0;     // CAKAlarm, live at the alarm: s below RED with no contact
         float revealClock = 0;    // CAKStrike, live: s to the next limited reveal
@@ -704,7 +706,7 @@ class CounterAttack : public SerializeClass
         int units = 0;       // the airframe's price
         int crew = 0;        // crew bodies
         int airId = 0;
-        bool direct = false; // airReplanned: refund / loss straight to the pool
+        bool direct = false; // airReplanned (no ledger row): refund / loss straight to the pool
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -1103,7 +1105,9 @@ class CounterAttack : public SerializeClass
     // the air re-plan of the birth chain (3.1 step 4): no base's road passes
     // the gate, so a ground operation becomes a helicopter insertion when
     // the catalogue offers a transport helicopter, its seats hold the
-    // bodies and the pool pays it (OccupierForces::Spend).  True = re-planned.
+    // bodies and the pool pays it (OccupierForces::SpendOnOp: the
+    // operation's ledger row holds the airframe like a ground hull).  True =
+    // re-planned.
     bool AirReplan(ZoneRegistry& registry, const CounterAttackView& view, Record& r,
                    const ForcePackageCatalogue& catalogue);
     // some occupier base other than r's source (and not yet tried, D6)

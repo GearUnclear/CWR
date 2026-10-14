@@ -542,6 +542,14 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // an operation's price (5.3): false (nothing debited) when units exceed
     // the pool or !CanOperate().  Inactive: true, nothing debited.
     bool Spend(int units, const char* why);
+    // the birth chain's air re-plan (3.1 step 6): Spend, then the operation's
+    // ledger row holds the airframe like a ground hull (its package becomes
+    // package, outstanding grows by units), so the airframe's CAOpHullRefund
+    // / CAOpHullLost settle through the row.  booked: a row took it (false:
+    // inactive, no row for opId, or the events go to another listener; the
+    // caller then settles the price straight to the pool).  False: refused,
+    // nothing debited.
+    bool SpendOnOp(int opId, int units, int package, const char* why, bool& booked);
     // units back into the pool (survivors with no base, surplus, a flipped
     // base's live garrison, partial-spawn failures, hull refunds: 5.5).
     // May exceed poolStart.  Inactive: no-op.
