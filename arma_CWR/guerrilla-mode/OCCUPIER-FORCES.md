@@ -279,41 +279,91 @@ rates imperceptible.
 - cone-only points only within 300 m of a ground force's source base;
 - for aircraft, the gate is evaluated **at the birth altitude**, because a
   ridge that hides a ground point need not hide an aircraft 100-150 m above
-  it.
+  it (`OccupierAir::ExposureAt` with `AirViewer`: Traffic's camera, band and
+  terrain ray at the aircraft's height). The audible floor for aircraft is
+  `airAudible` (800 m), not 300 m; a point beyond the effective band in 3D
+  from the eye is hidden even inside the view cone;
+- ground hulls are born and deleted under the **hull band**: at night
+  (`NightEffect` above 0.2) Traffic's headlight band, with a 2.5 m
+  (roof-high) terrain ray in place of the infantry 1.8 m (review M8).
 
 **The ground chain**, in order:
 1. **At launch.** The road-snapped source base, then route points toward
    the target, never within 250 m of it.
 2. **On the road.** Backward from the force's progress point toward its
    base.
-3. **Next base back (D6).** If nothing between base A and the 250 m bound
-   passes, re-source the operation to the nearest other occupier base B
-   whose route reaches the target: A is refunded, B pays, and the search
-   runs on B's route. Then each further base.
-4. **Air re-plan** (phase 6 on). If no base's route passes and the director
-   can afford air, the operation becomes a helicopter insertion.
-5. **Cancel unseen.** If nothing can be born (phases 3 to 5 always end
-   here), the operation is cancelled while still abstract:
-   - its bodies return to their source or the pool;
+3. **The road route** (`RoadRoute`). Stage 1 is a multi-start road A*
+   (starts within 300 m, widening to 900 m). Stage 2, the join, runs when
+   the source's roads never reach the target's net: the route follows the
+   source's pocket road, leaves it at the link with the best cost (road so
+   far + 2 x the cross-country gap + the straight distance on to the
+   target) and crosses country to a town-net link within 2000 m of the
+   source (`RoadRouteServiceJoinRadius`), the best by that cost, not the
+   nearest. The Southeast Compound on Abel is such a base: its roads are
+   pockets 1292 m from the island net, and its routes leave by the west
+   gate and cross about 1237 m to the Le Port road. A squad still stalls
+   inside that gate (open, section 17).
+4. **Next base back, at once (D6).** If nothing between base A and the
+   250 m bound passes, the operation is re-sourced immediately
+   (`CounterAttack::Resource`) to the next other occupier base B, nearest
+   the target first, whose STORED spare covers the whole force and whose
+   route yields a point passing the gate (the probe runs under the hull
+   gate). A base route is the road A*, else the straight cross-country
+   line (an accepted deviation). A is refunded up to its room, the surplus
+   (or a lost base's share) to the pool; B pays; the arrival clock restarts
+   from B. Then each further base.
+5. **Wait.** Only when no base passes: the force waits with its arrival
+   clock stopped, doing nothing to the target, and retries its own route
+   and the re-source every 30 s. After `counterAttackBirthGiveUp` (600 s)
+   it tries the re-source once more.
+6. **Air re-plan** (phase 6, in progress). If no base's route passes and
+   the director can afford air, the operation becomes a helicopter
+   insertion.
+7. **Cancel unseen.** Otherwise the operation is cancelled while still
+   abstract:
+   - its bodies return to their current source up to its room, the rest to
+     the pool; the hull and escort prices are refunded;
    - the town gets the 30 min cooldown;
    - one INFO line.
 
    An unborn force vanishing off-map is not a visible turn-back, so D6
    holds.
-6. **Slots.** An operation that has not been born yet does not count
-   against `forcesOpsMax`.
+8. **Edge hold.** A force whose progress point is already inside the
+   bound while the player stands in (or the bubble covers) the target is
+   held at the target edge, doing nothing. The hold counts toward
+   `counterAttackBirthGiveUp`; then the force is born at the edge out of
+   sight (`ArriveLive`, searching back from the last route point beyond
+   the bound) or, with no such point, cancelled unseen. A suspended
+   HOLDING force does the same (review M2). A born-at-edge attempt that
+   must wait for a budget drops back into the hold for another full
+   give-up.
+9. **Every record, key on.** With `occupierForces` on, legacy (DORMANT)
+   records take the same chain and never turn back (D6). With the key off
+   an unfunded record waits and turns back after `counterAttackBirthGiveUp`,
+   its strength returning to the base, and an edge hold retries every 30 s
+   with no give-up.
+10. **Slots.** An operation that has not been born yet does not count
+    against `forcesOpsMax`.
 
-**Air births:**
-- **Helicopters** are born **airborne**: native creation plus
-  `MakeAirborne()` and `_defPilotHeight`. The place is over the occupier's
-  airfield, or **beyond the map edge** at the parent nation's side
-  (`forcesOffMapEdge`, default the edge nearest the target).
+**Air births** (the spike's recipe, `AIR-SPIKE.md`, `OccupierAir`):
+- **Helicopters** are born **airborne**: `NewNonAIVehicle`, oriented and
+  `SetTransform` first, then `SetFlyingHeight(altAgl)` (writes
+  `_defPilotHeight`) BEFORE `MakeAirborne()`, which returns the height to
+  add, then `SetTransform`, `Init`, `AddVehicle`. Crew and cargo are two
+  groups, crew CARELESS / GREEN, cargo SAFE. The place is over the
+  occupier's airfield, or **beyond the map edge** at the parent nation's
+  side (`forcesOffMapEdge`, default the edge nearest the target). The
+  spike takes the birth point as given; the airfield source and the edge
+  choice are phase 6, in progress.
 - **Jets** are always born airborne over or beyond the airfield, never on
   the ground: `AirplaneAuto` would otherwise taxi the world's single ILS
   path.
 - **Off-map is sea and it renders.** An off-map point is admissible only
-  where the gate passes at altitude, or beyond the effective view band plus
-  `exposeMargin` from the player. Off-map is not automatically unseen.
+  where the gate passes at altitude (above). Off-map is not automatically
+  unseen.
+- **Wiring** (phase 6, in progress). `OccupierAir` is native and
+  self-contained; nothing in `CounterAttack` or the director calls it yet,
+  and its records are transient.
 
 ### 3.2 Movement at real speed (D3, D4)
 
@@ -333,33 +383,79 @@ keep today's pacing, so existing templates and tests keep their outcomes.
 **Ground vehicles.**
 - They are driven with the Traffic idiom: `Command::Move` through
   `IssueCommand` to the drivers.
-- At the town edge (250 m) the infantry dismounts and assaults. Armed hulls
-  support; trucks hold back.
+- At the town edge (250 m) the carrier brakes and the infantry dismounts
+  once the hull is at or below 1.5 m/s, or after 15 s of braking (so the
+  dismount may happen inside the bound), and assaults. Armed hulls
+  support; a truck holds back where it stopped.
+- **Columns** (phase 5): a carrier (truck or APC) plus at most one escort
+  (armed car, APC or tank). The escort is born `EscortGap` (20 m) behind
+  the carrier's birth point under the same hull gate, and both drive the
+  same legs: the carrier waits while the escort is more than
+  `EscortSpread` (150 m) behind and drives on once it is inside
+  `EscortRejoin` (60 m). From the carrier's first braking frame the escort
+  drives up to the town edge and supports, crew AWARE and firing; an armed
+  carrier supports too.
 - On returning to abstract travel the hull is DELETED with no refund, and
-  re-created on the next birth. The record holds its price.
+  re-created on the next birth. The record holds its price. A seated man is
+  moved out of the vehicle first, then deleted, crew before hull
+  (`EngineOps`; `Traffic.cpp` keeps the old idiom, open).
+- **Leftovers** (review M3, L7). A lost hull's crew group, an intact hull
+  whose crew is dead or gone, and every wiped or dead squad group go onto
+  a saved list (`Leftovers`), checked every 30 s: a hull is deleted when
+  intact, unoccupied and `HullUnseen`; a group when all are dead or its
+  leader is beyond 850 m and every body, living or dead, is unseen. Living
+  stragglers go home as bodies up to the room. A wreck stays. Entries count
+  against the 40-group budget until deleted.
 
 **Helicopter insertion.**
 - **LZ.** 300-500 m from the target, on the side away from reported
   fighters, chosen natively: object-free, dry, gradient within the engine's
   landing limit.
-- **Landing.** An invisible helipad (`HeliH`) is placed at the LZ. The stop
-  starts only within range and with no nearer `HeliH`.
+- **LZ probe** (as built). Candidates on the 300..500 m ring, the side away
+  from a threat first; each snaps to the centre of its 50 m terrain cell,
+  which must pass the engine's landing test (no water, not full, no
+  objects, gradient below 4) plus no forest flag and a slope of at most
+  0.25 across 22 m.
+- **Landing.** An invisible `HeliHEmpty` pad (falling back to `HeliH`) is
+  placed at the LZ with `GWorld->AddBuilding`, not `AddVehicle`, because
+  `FindStopPosition` walks only the buildings list, within 500 m. The
+  pilot is moved with a `Command::Move` through `IssueCommand`;
+  `LandStarted(LMLand)` is ordered within `landOrderDist` (450 m) of the
+  pad and re-issued every 5 s until down (a single order waved off).
+  Touchdown is height at most 5 m and speed at most 3 m/s for 1 s.
 - **Groups.** Crew and cargo are TWO groups. TR UNLOAD ejects only a foreign
   group's cargo; both count against the 40-group budget.
-- **Orders.** Pilots are moved with `IssueCommand`, a fresh Move to lift off
-  after unloading.
+- **Unload.** The cargo gets `OrderGetIn(false)`, `AllowGetIn(false)`,
+  `DoGetOut`, then a per-unit `AIUnit::UnassignVehicle` (never the
+  group's, which clears the crew's seats; without it the helicopter landed
+  again beside the squad), and walks on the target.
+- **Lift-off.** With no cargo seated: `LandFinished()`, the pilot set to
+  Wait when Stopping or Stopped (without it a 30 m hover over the LZ), then
+  a fresh `Command::Move` home, re-issued every 45 s while it stays down.
+  The pad goes at departure.
 - **Failure.** A landing more than 100 m from the LZ is a failed insertion:
-  logged, re-planned.
+  logged, re-planned (phase 6, in progress).
 - **D20.** The landing may be in plain view.
 - **Removal.** The airframe returns to its origin and is deleted only where
-  `CanExposeDespawn` passes at its altitude. That also applies beyond the
-  map edge, which is rendered sea, not automatically out of view. The CREW
-  is deleted FIRST, then the hull, because deleting a transport ejects its
-  crew.
+  it is unseen at its altitude for 2 s, beyond the map edge included
+  (rendered sea, not automatically out of view): the CREW FIRST (with any
+  cargo still seated), the hull one step later, then the pad, because
+  deleting a transport ejects its crew. **Unseen for an aircraft**
+  (orchestrator decision, 2026-10-14): out of the view cone, or
+  terrain-masked at altitude, or BEYOND the perception band in 3D even
+  inside the cone; `departTimeout` (900 s) stays as the backstop. The
+  beyond-band leg inside the cone is phase 6, in progress: today
+  `UnseenAt` still requires out-of-cone and the band leg applies only
+  after `departTimeout`.
 
 **Jet or attack-helicopter strike** (D17):
-- It flies to the target and searches (Move, then search-and-destroy
-  behaviour) for `forcesSortieTime` (300 s).
+- It flies to the target (AWARE / RED) and, within 1.25 x the orbit radius,
+  searches in COMBAT / open fire on an 8-point orbit 900 m out, a leg every
+  20 s, for `forcesSortieTime` (300 s; the spike takes it as a
+  `gmAirSortie` argument), then flies home and is removed as above. The
+  spike proved birth, search, reveal and removal, not damage on a target;
+  attack helicopters share the jet's path, untrialled. Director use is
+  phase 6, in progress.
 - Its own sensors acquire targets.
 - `AIGroup::AddTarget` (reveal) is used only for sightings younger than
   60 s, with accuracy < 1, re-issued while in range. The crew never gets an
@@ -425,12 +521,12 @@ raised view distance can still show pop-in.
 (`IsMilitaryType && IsAuthoredOccupier`, independent of `campaignEnd`) and
 computes:
 - **R**: the roster's summed `garrisonMax`.
-- **K**: the administered, non-exempt CITY zones that pass the settlement
-  probe.
-  - Seeded towns carry a new static `seeded` flag; authored towns always
-    count.
-  - It logs one INFO line per town and the elapsed time, and spreads the
-    probe over frames above about 50 ms.
+- **K**: every administered, non-exempt CITY zone. The engine runs no
+  settlement probe: `OccupierForces::Activate(registry)` passes no seeded
+  table, so a seeded town counts like an authored one. An old save's K
+  counts by the AUTHORED owner, so towns the player already holds stay in
+  K (review M7).
+  - Open: the probe may return in phase 7 or be dropped (section 17).
 - **G**: the summed `garrisonMax` of the K towns.
 - `poolStart = max(24, R + 2K)`.
 
@@ -439,7 +535,7 @@ An empty roster turns the service off.
 | Template | R | K (measured; upper value) | poolStart | Wave (half, 12..48) |
 |---|---|---|---|---|
 | Abel | 32 | at most 14 | at most 60 | at most 30 |
-| Sinai | 14 | at most 37 (the probe removes labels) | at most 88 | at most 44 |
+| Sinai | 14 | at most 37 (no probe runs, so seeded labels count) | at most 88 | at most 44 |
 | Lebanon80 | 14 | 3 | 24 | 12 |
 | Eden | 18 | 18 + Auto seeds | at least 54 | at least 27 |
 
@@ -514,14 +610,21 @@ erodes until the player or his fighters come back (section 19).
 
 | Path | Fix |
 |---|---|
-| Holding force at revert | settle |
+| Holding force at revert | settle: its bodies first, up to the room; the surplus to the pool; the rest of the room a pool-funded `Deposit` |
 | `Fight` win (key off only; with forces on every fight against present defenders is live, 6.5) | winners lose `min(A_bodies - 1, ceil(A_bodies * holdOdds * repelLoss))`; the rest settle |
 | Adopted live squad | settled once in `RevertTown` |
 | No base to return to | pool |
 | Surplus over a base's room | pool |
 | Flipped base's live garrison | pool |
-| Partial-spawn failures | pool |
-| Surviving hull | price refunded when deleted at home |
+| Partial-spawn failures (garrisons, operations, crews) | pool |
+| Re-sourced operation | the old base refunded up to its room, the surplus (or a lost base's share) to the pool; the new base debited |
+| Cancelled unborn operation | bodies to the current source up to its room, the rest to the pool; hull and escort prices refunded |
+| Abstract REINFORCE arrival | into the target up to its room (`garrisonMax` - live - reserve - pending; pending inside the deposit bubble); the remainder home through the room-capped return, surplus to the pool |
+| Live top-up squad adopted at its town | whole, with no room cap (open, section 17) |
+| Leftover stragglers (3.2) | home as bodies up to the room; a shortfall booked "left behind" |
+| Pending deposit, owner changed | key on: the pool (`GarrisonCache::SetPendingRefundHook`); key off: back to the origin up to its room, else discarded |
+| HQ_ASSAULT on `hqLost` | an abstract record's bodies to the pool; a live squad leaves unseen and comes home |
+| Surviving hull | price refunded when deleted at home unseen; each hull of a column apart |
 | Destroyed hull | lost |
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
 
@@ -562,7 +665,12 @@ Both decay after 30 min.
 states, sightings, and its own forces' reports.
 
 **Never used:**
-- the true census (`guerCount`);
+- the true census (`guerCount`), with one exception: an informant tip
+  (7.3). Each director tick a CITY with standing >= 50 and resistance HOLD
+  presence rolls (hashed, salt 11) against `standing / 200`; a tip writes
+  the town's TRUE HOLD count at the town centre, jittered up to 100 m per
+  axis, into the sighting table, and a fresher soldiers' report wins over
+  it. Accepted as D9-legal per 7.3 ("a local talked");
 - the player's position;
 - `AlertMachine`'s player-position fallback.
 
@@ -599,17 +707,22 @@ the same heat rule (their flip also gave +40). A quiet base is also reached
 through push-out (6.4), so a strong occupier goes for bases whenever it is
 strong, not only after a fresh flip.
 
-**HQ candidate (D13, D14, D24).** Only while STRONG or in a wave. It uses
-the heat of the zone the HQ stands in, or no zone heat at all for an HQ
-outside every zone. It becomes a candidate unconditionally once the
-resistance holds no base or town: the final push. The operation is always
-an HQ_ASSAULT on `HqPos` (9.1).
+**HQ candidate (D13, D14, D24).** Only with an established HQ, no HQ
+record and no "@HQ" cooldown. While STRONG or in a wave (a wave inbound, or
+landed within 1800 s: an accepted deviation) it uses the heat of the zone
+the HQ stands in; an HQ outside every zone is never a heat candidate. It
+becomes a candidate unconditionally, and first, once the resistance owns no
+base and no town besides the HQ's own zone (`FinalPush`; the exemption flag
+is not checked): the final push. The operation is always an HQ_ASSAULT on
+`HqPos` (9.1), minimum `forcesHqAssaultMin` (6) bodies.
 
 **Tokens.**
 - 0..2 tokens, full at the wake, refilled by band.
 - Each 60 s tick with a token and a candidate launches one operation on the
   hottest candidate.
-- At most 2 born operations are in flight.
+- At most `forcesOpsMax` (2) born operations are in flight, plus one per
+  living wave record (`CounterAttack::OpsCap`); wave operations take no
+  token.
 - A repelled operation puts its target on a 30 min cooldown, with +15 heat
   unless a RED edge already paid it.
 
@@ -707,12 +820,18 @@ as bodies on top of the hull price.
 **The choice.**
 1. **Required lethality.** `L_req = 1.2 * counterAttackDefenderWeight (3) * knownFighters`.
 2. **Minimum bodies.**
-   - town and base retakes: `max(4, garrisonMax(target))`;
+   - town and base retakes: `max(4, garrisonMax(target))`, capped at 12
+     for a base (`min(max(forcesRetakeMin, garrisonMax), 12)`);
    - alarm answers: 4;
    - HQ assaults: 6.
 3. **Pick.** The cheapest package meeting both. An URGENT target takes the
    fastest package costing at most 1.5 x that. If none meets `L_req`, the
    most lethal affordable package goes, and its line says so.
+4. **Grant (review M1).** The director quotes each source's STORED spare
+   (minus a wave surge), the same figure `CounterAttack::LaunchCore`
+   grants from; a funded order is granted only in full from that reserve,
+   else refused. A refused source is zeroed and the launch re-planned on up
+   to 4 other sources (`MaxSourceRetries`), stopping if the pool refused.
 
 **Resolution: always a real fight against present defenders.**
 - **Defenders are always live.** Every resistance body is live AI wherever
@@ -774,11 +893,15 @@ crews, not hulls. A launch over budget waits like a live squad does.
 "Starved: no answer to X alarm" is written once per alarm edge.
 
 **Read-only commands:**
-- `gmOccupierOps`: `[id, kind, origin, package, source, target, phase, bodies, hulls, eta s, birthReason]` per pending or active operation.
-- `gmOccupierForces`: `[pool, poolStart, band, tokens, posture, control, wavesFired, K, excludedTowns, lost]`.
-- `gmOccupierIntel`: the sightings.
+- `gmOccupierOps`: `[id, kind, origin, package, source, target, phase, bodies, hulls (0..2), eta s, birthReason, hullClass, escortClass]` per pending or active operation (13 columns; the last two are the carrier and escort class).
+- `gmOccupierForces` (24 slots): `[pool, poolStart, band, tokens, posture, control, wavesFired, K, excludedTowns, lost, townsEver, urgent, cooldowns, opCounter, tokenClock, waveInbound, waveClock, waveBodies, waveName, finalFired, surgeZone, surgeBodies, wavesLanded, occupierWarLevel]`; band and posture "OFF" with the key off. `gmWarLevelOccupier` gives slot 23 alone.
+- `gmCounterAttacks` (24 slots per record): `[town, source, phase, clock, strength, size, townsBefore, group, spawnPos, spawnReason, opId, kind, origin, package, liveHull, eta, hullClass, funded, hull, seatedInfantry, leader, livingInfantry, escortClass, escort]`.
+- `gmOccupierIntel`: the sightings `[zone, count, age s, positions]`.
+- `gmRoadRoute [from, to, joinRadius?]` (the route with its join fields) and `gmRoadComponents [pos, radius]` (the road components near a point).
+- `gmHqState` `[hasHq, destroyed, epoch, hqCapture, zoneIndex, pos]`, `gmHqEpoch`, `gmHqForceCapture`; `gmCampaignEnd` gains slot 8 `lost`, `gmCampaignLost` the latch.
+- The air spike: `gmOccupierAir` and the levers `gmAirInsert`, `gmAirSortie`, `gmAirExposure`, `gmAirUnseen`, `gmAirAbort`, `gmAirReveal`, `gmAirTune` (column layout in `OccupierAirCommands.cpp`).
 
-**Test levers:** `gmForcesTune [key, value]` and `gmForcesForce ["pool" | "wave" | "refillHours", value]`. Test ranges reach down to 0.01 h.
+**Test levers:** `gmForcesTune [key, value]` and `gmForcesForce ["pool" | "wave" | "refillHours" | "cooldown", value]`. Test ranges reach down to 0.01 h. `gmCounterAttackLaunchFunded` launches a funded order directly (op ids from 900001; it spends with no ledger row, review L14).
 
 There are no hints or journal lines from the director.
 
@@ -804,22 +927,32 @@ the occupier-side war level by 1; resistance readers keep
 
 The best cluster is the target.
 
-**Hub.** The occupier-held AIRFIELD, else SEAPORT, else the strongest base.
-With no hub left the wave strikes by air from off-map (phase 6). Until
-phase 6 its strikes depart from the nearest occupier base.
+**Hub.** The named `forcesWaveHub`, else the occupier-held AIRFIELD, else
+SEAPORT, else the strongest base. With no hub left the strikes depart from
+the occupier base nearest each target and no REINFORCE column goes (they
+need a hub); phase 6 (in progress) adds off-map air for that case.
 
 **Allocation** from the pool, in order:
 1. Hub top-up: a reserve deposit through `Deposit`.
-2. Strikes on the cluster: the HQ if in it, then bases, then towns.
+2. Final-stand surge (below).
+3. Strikes on the cluster: the HQ if in it, then bases, then towns.
    - Up to `forcesWaveRetakeShare` (0.5) of the wave, on up to
-     `forcesWaveOps` (4) targets.
+     `forcesWaveOps` (4) targets (origin `CAOWave`).
    - Each target gets its own package.
-   - They launch together, only once the director is AWAKE (W).
-3. Reinforce columns to bled bases.
-4. The rest stays in the pool.
+   - They launch together, only once the director is AWAKE (W); a DORMANT
+     director logs "no strikes".
+4. REINFORCE columns on foot from the hub to the most-bled held bases, at
+   most 12 bodies each and `forcesWaveOps` columns.
+5. The rest stays in the pool.
+
+Wave operations take no command token. Each living wave record raises the
+born-operation cap by one (`CounterAttack::OpsCap`), and a wave order gets
+one more headroom at launch.
 
 **Final stand.** The last base gets a surge of up to 12 above its strength.
-The surge is never spare, and the last base never sources a strike.
+The surge is never spare, and the last base never sources a strike. The
+surge is excluded from spare only in the director's source choice (an
+accepted deviation).
 
 ### 7.2 Base recapture (D16, D19)
 
@@ -828,15 +961,22 @@ player's capture, in its OWN field, `occCapture` (0..100, on `ZoneRecord`
 and `ZoneSaveState`). It is not the player's `capture`, so `capture.sqs`'s
 "Securing X" ticker, `ZECaptureStarted` and the marker labels never
 misreport it as the player's progress.
-- **Rising.** With occupier presence and no resistance presence it rises by
-  `captureRate` x crew (cap 3) per tick.
-- **Frozen.** Resistance presence (the 3-man hold squad counts) freezes it.
+- **Rising.** With occupier presence and no resistance HOLD presence it
+  rises by `captureRate` (6, a per-zone override wins) x min(crew,
+  `captureCrewCap` 3) per 3 s tick.
+- **Frozen.** Both sides present freeze it.
+- **Defended decay.** Resistance presence alone (the 3-man hold squad
+  counts) decays it at `captureDecayDefended` (10 per tick), an accepted
+  deviation from "resistance freezes it".
 - **Decay.** With nobody present it decays at `captureDecayAbandoned`
   (2 per tick).
 - **Who counts.** Any occupier unit (D19), so a patrol that kills the hold
   squad and stays takes the base in about 18 s.
-- **Off-screen.** `abstractOcc` is extended from held towns to the holding
-  BASE and HQ_ASSAULT records, so off-screen base retakes tick.
+- **Off-screen.** `abstractOcc` is extended from held towns to every
+  abstract force of any kind holding the post, not suspended
+  (`CounterAttack::AbstractPresence`), so off-screen base retakes tick.
+- **Key.** `baseRetake` follows `occupierForces` unless authored (an
+  accepted deviation); with `baseRetake = 0` held posts stay permanent.
 
 **Strikes against live defenders.** A strike on a base whose hold squad
 lives goes LIVE: hold squads are always-live, so the fight is real.
@@ -847,12 +987,18 @@ lives goes LIVE: hold squads are always-live, so the fight is real.
 **Remote tick.** It is opened for resistance-held non-CITY zones with
 occupier presence, as it is for held towns.
 
-**At 100:**
-- the owner returns to the occupier;
-- the garrison is settled (5.4);
-- the income tap closes;
+**At 100** (`RevertBase`):
+- the owner returns to its authored occupier token;
+- the garrison is settled (5.4): the holding force's bodies first, up to
+  the room, the surplus to the pool, else a pool-funded deposit (pending
+  inside the deposit bubble);
+- the income tap closes (income 0);
+- `lostCount` + 1 (saved; `capture.sqs` writes "Retaken" by it);
 - a new `baseLost` zone event fires, with a serialized handler slot like
   `townLost`.
+
+Once the campaign is won or lost `RevertBase` refuses; the meter itself may
+still climb to 100 and sit there.
 
 **Re-capture by the player.** It re-fires `captured`. The consumers are
 audited:
@@ -1005,10 +1151,15 @@ today.
 **One HQ model.** `GuerrillaBase` is the only source of truth for where the
 HQ is. Two changes make it so:
 - **The default start is a real HQ.** With no START TOWN picked (the
-  "(camp)" default or a direct launch), the first active tick ESTABLISHES
-  the HQ at the first CAMP zone through `Establish`, exactly as a start town
-  is established. Old saves with no HQ get the same on load, unless the HQ
-  was destroyed.
+  "(camp)" default, a direct launch or a failed pick), the first active
+  tick of a campaign (`campaignEnd` on) ESTABLISHES the HQ at the first
+  CAMP zone through `Establish`, tried once per session and never after a
+  destruction (`TryAutoElection`, `WantsDefaultHq`); `campaignEnd = 0`
+  fixtures keep no HQ at boot. Old saves with no HQ get the same on load,
+  unless the HQ was destroyed.
+- **The start-town exemption.** A START TOWN HQ keeps the #79 B2 garrison
+  exemption (tied to the start-town pick, not to the HQ); a re-established
+  HQ never gets it (an accepted deviation).
 - **A saved `_hqDestroyed` flag** separates "destroyed" from "never
   elected". New accessors:
   - `HasHq()`: established and not destroyed;
@@ -1025,14 +1176,19 @@ instead of the first CAMP zone. While there is no HQ there is no recruiting.
 **The HQ meter (D24).** The HQ falls through its own meter, tied to `HqPos`
 and independent of zone ownership:
 - `hqCapture` (0..100), saved in the `GuerrillaBase` block.
-- **Rising.** It rises by `captureRate` x crew (cap 3) per tick while
-  HQ_ASSAULT units, live or abstract, are within 150 m of `HqPos` and no
+- **Rising.** It rises by `captureRate` x min(assault units, 3) per 3 s
+  zone tick while units of CAKHqAssault records, live or abstract, are
+  within 150 m of `HqPos` (`CounterAttack::HqAssaultPresence`) and no
   resistance HOLD presence (8.1) is there. That counts the player under the
-  hold rule, his recruits and companions.
-- **Frozen** while both sides are present.
-- **Decay.** With no assault units it decays at `captureDecayAbandoned`.
-- **Who counts.** Only HQ_ASSAULT units, so passing patrols, columns and
-  QRFs never touch it (D14).
+  hold rule and every live resistance unit, his recruits and companions
+  included.
+- **Frozen** by resistance HOLD presence within 150 m while assault units
+  are there.
+- **Decay.** With no assault units it decays at `captureDecayAbandoned`
+  (2). There is no defended-decay path (`GuerrillaBase::NextHqCapture`).
+- **Who counts.** Only HQ_ASSAULT records, so passing patrols, columns and
+  QRFs never touch it (D14), a patrol parked on the HQ included. HQ
+  records settle on `hqLost` (5.5).
 - **Where it works.** The same everywhere: at the Camp, in a held town, in
   an unheld start town, or in an enemy zone (D24).
 - **The zone around it is unaffected.** The HQ never suppresses that zone's
@@ -1044,8 +1200,8 @@ and independent of zone ownership:
 
 | Asset | What happens |
 |---|---|
-| Weapon cache | Emptied at once (no looting the ruins), then the holder is deleted out of perception (Traffic despawn rule, else at the next out-of-view moment). |
-| Garage (D22) | Every vehicle locked in the garage is DESTROYED: damage 1, wrecks left where they stood. The ring is removed. |
+| Weapon cache | Emptied at once (no looting the ruins); the holder and the prop are queued as `Ruins` (saved) and deleted once the perception gate rates them hidden (`SweepRuins`). |
+| Garage (D22) | Every vehicle locked in the garage is DESTROYED in place: unlocked, damage 1, wrecks left where they stood. The ring is removed. |
 | Recruit point | Gone with the HQ (it follows `HqPos`). |
 | The zone around it | Unchanged: it keeps its owner and its ordinary rules (D24). |
 | State | `_hqDestroyed` set, `_established` cleared. A new `_hqEpoch` counter is bumped, so scripts can tell this HQ from the next. |
@@ -1080,8 +1236,12 @@ HQ itself is safe until then.
 after the win check, never once won, and absent with `campaignEnd = 0`.
 The latch is stored only there. The campaign is LOST when ALL of these hold:
 - the player has NO HQ (`!HasHq()`: destroyed and not re-established);
-- he holds no base (any resistance-held non-CITY zone, the Camp included);
-- he holds no town.
+- the resistance owns no zone of any type (`HoldsAnything`: towns, posts
+  and the Camp alike; the HQ's own zone counts only if the resistance owns
+  it);
+- the campaign "had something to lose": an HQ was ever established
+  (`HqEver`: established, destroyed or epoch > 0) or a zone was ever held
+  (`OnceHeld`, saved). A campaign that never had either is not lost.
 
 **The opening is safe.** The HQ falls only to a deliberate, AWAKE-only
 assault (D14), so a patrol can never end the game in the first minutes.
@@ -1111,7 +1271,8 @@ He is beaten in either of two cases:
    taken while doomed reloads into the same loss; that is accepted.
 6. OccupierForces and CounterAttack freeze on the latch.
 
-**Test.** `guerrilla_forces_lose` follows `remaster_ud_guerrilla_abel_win_screen`:
+**Test.** `remaster_ud_guerrilla_forces_lose` (under
+`tests/integration/ui/remaster`) follows `remaster_ud_guerrilla_abel_win_screen`:
 - no `--autotest` on the end leg;
 - `gmCampaignEndDelay` holds the window;
 - it asserts `triDisplay == 50` and the lose text on control 102.
@@ -1157,18 +1318,26 @@ He is beaten in either of two cases:
 - the wave state and surges;
 - cooldowns;
 - the sightings (zone, count, positions, stamp);
-- `lost` diagnostics.
+- `lost` diagnostics;
+- RED payments, the op ledger and `legacySave`.
 
 **Elsewhere:**
-- On `ZoneSaveState`: pending deposits, `occCapture`, `standing` and
-  `struckUntil`.
-- The lose latch only in `GuerrillaCampaignEnd`.
-- In the `GuerrillaBase` block: `_hqDestroyed`, `_hqEpoch` and `hqCapture`
-  (absent in older saves = not destroyed, epoch 0, meter 0).
+- On `ZoneSaveState`: pending deposits, `occCapture`, `standing` (-1 =
+  absent in an old save), `struckUntil` (nothing writes it until the phase 6
+  strikes) and `lostCount`.
+- In `GuerrillaCampaignEnd` only: the win latch, the lose latch (`lost`,
+  `lostDay`, `lostMinute`) and `OnceHeld`.
+- In the `GuerrillaBase` block: `hqDestroyed`, `hqEpoch`, `hqCapture` and
+  the queued `Ruins` (absent in older saves = not destroyed, epoch 0,
+  meter 0).
 - New zone-event handler slots `baseLost` and `hqLost`.
 - CounterAttack `Record` gains `kind`, `origin`, `package`, `funding`,
-  `priceUnits` and hull refs (second-pass resolution). Hulls ride the
-  world's vehicle serializer.
+  `priceUnits`, `destPos`, `hqDone`, `withdrawing` (a top-up squad walking
+  home) and hull refs (second-pass resolution), plus the escort fields
+  (class, crew, price, hull and crew-group links). The block also saves
+  the `Leftovers` list. Hulls ride the world's vehicle serializer.
+- `OccupierAir` records are transient in the spike (not saved); phase 6
+  decides whether they persist.
 
 **Old saves (D20).**
 - The pool derives from config scaled by the current C.
@@ -1194,7 +1363,9 @@ within one heat-decay step.
 ### 12.1 Unit (`test_occupier_forces.cpp` `[occupierforces]`, plus existing suites)
 
 - **Pool.**
-  - K with the probe and the exemption; an empty roster; `campaignEnd = 0`.
+  - K over every administered non-exempt CITY (no probe runs; open:
+    the probe may return in phase 7 or be dropped) and the exemption; an
+    empty roster; `campaignEnd = 0`.
   - The refill formula: the 4 h figure from full exhaustion with D2
     drawing first.
   - Band hysteresis: no SPENT/THIN flapping, including the recovery phase
@@ -1277,18 +1448,22 @@ distance, and is not `headless`.
 |---|---|
 | existing `counter_attack_*` | Unchanged with the key off (legacy speeds); conservation changes asserted with it on |
 | existing `guerrilla_town_defenders` (edited in phase 1) | t5 captures with a weapon in hands (asserts that slot, not the outfit); a new case: a uniformed player with a slung rifle holds a town against a drain (D23) |
-| `guerrilla_forces_watched_route` | Whole Harbour route watched: re-sourced to the Compound's route, arrival watched |
+| `guerrilla_forces_watched_route` | Whole Harbour route watched: re-sourced to the Southeast Compound; asserts the joined road route and the birth, not the arrival (the squad stalls inside the Compound's west gate, open) |
 | `guerrilla_forces_passerby_revert` | A parked patrol reverts an empty town; the refill is pending and pool-paid; the patrol leaves |
 | `guerrilla_forces_no_popin`, `guerrilla_forces_wiped_release` | S5 |
 | `guerrilla_forces_both_towns` | Two ops; INFO lines joined to `gmOccupierOps` ids |
 | `guerrilla_forces_motorized` | Urgent far target: a truck squad drives and dismounts at 250 m |
 | `guerrilla_forces_base_retake` | STRONG pool: the director retakes a base; a hold squad forces a live fight |
 | `guerrilla_forces_hq_assault` | Default camp start has a real HQ. A patrol through the Camp does nothing to the HQ. An assault fills the HQ meter; the HQ is destroyed: cache emptied, garage vehicles wrecked, marker removed. The player re-establishes in an enemy town; that town's garrison still defends it (D24). |
-| `guerrilla_forces_lose` | No HQ, base or town: the defeat debriefing (the win_screen pattern) |
+| `ui/remaster/remaster_ud_guerrilla_forces_lose` | No HQ, base or town: the defeat debriefing (the win_screen pattern) |
 | `guerrilla_forces_refill_pushout` | `gmForcesForce ["refillHours", 0.05]`: refill, then push-out |
 | `guerrilla_forces_wave_base` | Wave 1 strikes the densest cluster and retakes a base; no win while it is enemy-held |
-| `guerrilla_forces_heli_insertion` | Phase 6, tag `slow_air`, retries 3, not in the default `-j` run: off-map airborne birth gated at altitude; helipad LZ; two groups; unload; crew deleted before the hull |
-| `guerrilla_forces_town_strike` | Phase 6, `slow_air`: a jet strike on a held town; -40/-40 there, -10/-10 within 2 km, `townStruck` panic, half income until `struckUntil` |
+| `guerrilla_forces_armoured_column` | Phase 5 (landed): a carrier and its escort born unseen under the headlight gate, kept together (150 m / 60 m), the escort supporting at the edge |
+| `guerrilla_forces_heli_insertion` | Air spike (landed as a spike test, `c5cfa44`), tag `slow_air`, retries 3, not in the default `-j` run: off-map airborne birth gated at altitude on an explicit birth point; helipad LZ; two groups; unload; crew deleted before the hull |
+| `guerrilla_forces_jet_sortie` | Air spike (landed as a spike test), `slow_air`: an airborne jet birth, the search orbit, the limited reveal, removal crew first |
+| `guerrilla_forces_air_op` | Phase 6, in progress, `slow_air`: an air operation launched by the director through `CounterAttack` |
+| `guerrilla_forces_town_strike` | Phase 6, in progress, `slow_air`: a jet strike on a held town; -40/-40 there, -10/-10 within 2 km, `townStruck` panic, half income until `struckUntil` |
+| `guerrilla_forces_alarm_answer` | Phase 6, in progress: a RED occupier zone answered by an ALARM operation in place of the script QRF |
 | `guerrilla_forces_save_reload.seq` | Pool, bands, posture, tokens, waves, ops and hull refs across a fresh process |
 
 ### 12.3 Human session
@@ -1364,32 +1539,42 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | reveal limits | OF | sightings under 60 s, accuracy < 1 | constants | Strike crews only |
 | `forcesWakeTowns` | OF | 2 | 2..99 | Distinct towns to wake |
 | `forcesTokensMax` / `forcesTokenInterval[]` | OF | 2 / {1800, 2700, 3600, 0} | | Command budget |
-| `forcesOpsMax` | OF | 2 | 0..6 | Born operations in flight |
+| `forcesOpsMax` | OF | 2 | 0..6 | Born operations in flight; one source, the `OccupierForces` tuning (`CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record; a wave order gets one more headroom at launch) |
 | `forcesHeatFull` | OF | 40 | 1..100 | Candidate heat |
 | `gmHeatDecayHeld` | Script | 0.25 | per 10 s | Held-town decay |
 | `forcesUrgentHeat` / urgency exit | OF | 50 / 35 | 1..100 | Urgency band |
 | `forcesTownCooldown` | OF | 1800 | s | After a repel or a cancel |
 | `forcesPushoutQuiet` | OF | 1800 | s | Quiet-town threshold |
-| `forcesRetakeMin` / alarm minimum / HQ assault minimum | OF | 4 / 4 / 6 | 1..12 | Minimum bodies |
+| `forcesRetakeMin` / alarm minimum | OF | 4 / 4 | 1..12 | Minimum bodies; a base retake takes `min(max(forcesRetakeMin, garrisonMax), 12)` |
+| `forcesHqAssaultMin` | OF | 6 | 1..12 | Minimum HQ assault bodies |
 | `forcesLethalityMargin` / `forcesUrgentCostShare` | OF | 1.2 / 1.5 | 1..3 | Package choice |
 | prices: body, truck, armed car, APC, tank | OF | 1, 3, 4, 8, 14 | pool units | 6.5 |
 | prices: transport heli, attack heli, jet / off-map multiplier | OF | 10, 18, 22 / 1.5 | | 6.5 |
 | lethality: tiers / motorized / armed car / APC / tank / attack heli / jet | OF | 1.0-1.25-1.5 / 1.25 / 3 / 6 / 12 / 14 / 16 | | 6.5 |
 | foot speed / ground cruise / air cruise | OF | 1.5 m/s / 0.6 / 0.8 of `maxSpeed` (km/h converted) | | Key on only |
-| `forcesLiveHullsMax` | OF | 6 | 0..20 | Live hulls at once |
-| `forcesSortieTime` | OF | 300 | 60..1800 s | Strike time over target |
+| `forcesLiveHullsMax` | CA | 6 | 0..20 | Live hulls at once (read by `CounterAttack`, not `OccupierForcesTuning`) |
+| `forcesSortieTime` | OF | 300 | 60..1800 s | Strike time over target (read from config in phase 6; the spike takes it as a `gmAirSortie` argument, 300 when <= 0) |
 | heli LZ / landing tolerance | OF | 300-500 m / 100 m | | Insertion |
-| `forcesOffMapEdge` | OF (template) | nearest edge | N/S/E/W | Parent-nation side |
+| `forcesOffMapEdge` | OF (template) | nearest edge | N/S/E/W | Parent-nation side (read from config in phase 6; the spike takes the birth point as given) |
+| `airAudible` | `OccupierAir` | 800 m | `gmAirTune` | Audible floor for aircraft |
+| `landOrderDist` | `OccupierAir` | 450 m | `gmAirTune` | Distance to the pad where `LandStarted` is ordered, re-issued every 5 s |
+| `departTimeout` | `OccupierAir` | 900 s | `gmAirTune` | Backstop: past it a departing airframe beyond the band is removed regardless of the cone |
+| `EscortGap` / `EscortSpread` / `EscortRejoin` | CA | 20 / 150 / 60 m | constants | Escort birth offset; the carrier waits past 150 m, drives on inside 60 m |
+| dismount speed / `StopMax` | CA | 1.5 m/s / 15 s | constants | The carrier brakes at the 250 m edge; dismount at or below the speed, or after `StopMax` |
+| road-route join radius | CA (`RoadRouteServiceJoinRadius`) | 2000 m | constant | Stage 2 crosses to a town-net link within this distance of the source |
+| hull gate | CA | night above `NightEffect` 0.2: the headlight band; 2.5 m ray | constants | Hull births and deletions (review M8) |
+| Leftover check | CA | 30 s | constant | Leftover entries retried |
 | town strike effect | OF | struck town: support -40, standing -40, heat +15, panic, `struckUntil` +1200 s; towns within 2 km: -10 / -10 | | D17, D21 |
 | occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 | 0..100 | Recovers +1 per 600 s toward 50; drives informant tips (chance `standing / 200` when >= 50), morale (skill x 0.8 below 25) and the refill factor `0.75 + 0.5 * mean / 100` |
-| HQ meter | GuerrillaBase | `captureRate` x crew (cap 3) per tick within 150 m of `HqPos`; decay `captureDecayAbandoned` | | D24 |
-| `occCapture` | ZoneRegistry | same rates as the player's capture | 0..100 | Enemy base-retake meter, separate field |
-| hull keys `forcesTruck` ... `forcesJet` | descriptor | ladder classification | class names | Overrides (optional; the shipped descriptors author none, their `vehicles[]` ladders classify the ground hulls) |
+| HQ meter | GuerrillaBase | `captureRate` x min(HQ_ASSAULT units, 3) per tick within 150 m of `HqPos`; frozen by HOLD presence; decay `captureDecayAbandoned` | | D24 |
+| `occCapture` | ZoneRegistry | `captureRate` (6) x min(crew, `captureCrewCap` 3) per 3 s tick; both present: frozen; resistance alone: - `captureDecayDefended` (10); nobody: - `captureDecayAbandoned` (2) | 0..100 | Enemy base-retake meter, separate field |
+| `baseRetake` | ZoneRegistry | follows `occupierForces` unless authored | 0/1 | Base recapture on; 0 = held posts permanent |
+| hull keys `forcesTruck` ... `forcesJet` | faction descriptor (not `CfgGuerrillaZones`) | ladder classification | class names | Overrides (optional; the shipped descriptors author none, their `vehicles[]` ladders classify the ground hulls); the air keys are read but unused until phase 6 |
 | offered packages | OF | every ground package (`DefaultPackages`); air from phase 6 | bit mask | Phase 5 |
 | hull crew / infantry seats | OF | `hasDriver + hasGunner + hasCommander` (min 1) / `min(12, transportSoldier)` | config | Crew paid as bodies; a hull whose seats cannot hold the minimum is never chosen alone |
 | columns | OF | carrier truck or APC + at most one escort (armed car, APC, tank) | | Escort price, crew and bonus added; pace of the slower hull; 3 groups, 2 hulls |
 | town-edge role | CA (flag from OF) | truck holds back; armed car, APC, tank and every escort support | constants | 3.2 |
-| `forcesControlMilWeight` / control dwell | OF | 0.6 / 2 ticks | | Control |
+| `forcesControlMilWeight` / `forcesControlDwell` | OF | 0.6 / 2 ticks | dwell 1..10 | Control; consecutive due ticks before a wave fires |
 | `forcesWaveThresholds[]` / `forcesWaveFinal` | OF | {0.75, 0.50} / 1 | at most 3 | Waves |
 | `forcesWaveShare` / `Min` / `Max` | OF | 0.5 / 12 / 48 | | Wave size |
 | `forcesWaveLead` / `LeadFinal` | OF | 600 / 120 | s | Inbound time |
@@ -1398,7 +1583,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | `counterAttackFirstTownChance` / `counterAttackChance` | CA | 0.4 / 1.0 | 0..1 | DORMANT dispatch |
 | `counterAttackSize` / `counterAttackWarLevelStep` | CA | 0.5 / 0.25 | | `ForceSize` |
 | `counterAttackSpeed` / `counterAttackRoadFactor` / `MarchSpeed` | CA | 4 / 1.3 / 1.0 m/s | | Legacy pacing (key off) |
-| `counterAttackBirthMinToTarget` / `counterAttackBirthGiveUp` | CA | 250 m / 600 s | | Birth bound; give-up (key off: turn back; key on: next step of the chain) |
+| `counterAttackBirthMinToTarget` / `counterAttackBirthGiveUp` | CA | 250 m / 600 s | | Birth bound; give-up. Key on: the wait when no base passes (retries every 30 s), then one more re-source, then cancel unseen, every record, legacy DORMANT ones included; an edge hold counts toward it too, then `ArriveLive` at the edge unseen or cancel unseen. Key off: turn back, strength to the base |
 | cone-only base radius / audible floor | CA / Traffic | 300 m / 300 m | | Birth gate |
 | `counterAttackSourceKeep` / `counterAttackDelayMin` / `Max` | CA | 0.25 / 120 / 300 s | | Source and delay |
 | `counterAttackDefenderWeight` / `counterAttackRepelLoss` | CA | 3 / 0.5 | | `Fight` |
@@ -1407,7 +1592,33 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 
 ## 17. Still open
 
-Nothing. Every owner question is answered (D1-D24).
+Every owner question is answered (D1-D24). Open implementation items, as of
+`c5cfa44` and the phase 6 work:
+- **K and the settlement probe** (5.1). The engine counts every
+  administered non-exempt CITY; phase 7 decides whether the probe returns
+  or is dropped from this doc.
+- **The default flip** (phase 7). `occupierForces` code default is 0; only
+  `Guerrilla.Abel` authors 1 (`Showcase.Abel` inherits it). Flip the code
+  default, or author 1 in the templates and 0 in the remaining fixtures.
+- **The Southeast Compound gate stall.** Routes from the Compound join the
+  island net (3.1 step 3), but a squad still stalls inside its west gate,
+  so `guerrilla_forces_watched_route` does not assert the arrival.
+- **The live top-up adoption cap.** A LIVE REINFORCE squad reaching its
+  town is adopted whole, with no room cap (5.5).
+- **LOW review items** (`tmp/of-review-phases-1-3.md`): L6 (`PruneOps` can
+  lose refunds past 32 rows), L8 (phase-2 saves wake with an empty
+  `_townsEver`), L10 (`RevertTown` before the first tick after a load),
+  L11 (the S5 release grid samples 9 points of a random placement square),
+  L13 (routing traps: `ArriveLive` with the source inside the bound, a
+  return-to-road livelock, a home hull driving into a lost base), L14 (test
+  levers spend with no ledger row), L15 (bisect). Also: the return-to-
+  abstract and top-up removals test living members only, then delete every
+  member, so a corpse in view could vanish.
+- **Seated deletion in `Traffic.cpp`** (in hand) and in `OccupierAir`
+  (`DeletePerson`): both delete a seated man without moving him out first.
+- **The HQ-respawn issue** (separate, D13).
+- **Player messaging** for the director, waves and the HQ (D12: INFO lines
+  and gm* commands only for now).
 
 ## 18. Decision and critique log
 
@@ -1421,6 +1632,10 @@ Nothing. Every owner question is answered (D1-D24).
 | 5 (owner answers) | D13-D20 applied: HQ destruction and re-establish, lose only with no HQ, base or town (9); HQ only to deliberate assaults (5.4, 8.1, 9.1); refill full in 4 h with garrisons (5.2) and band hysteresis (5.6); base retakes when strong (6.3); town strikes (7.3); towns stay weakened (5.4); any-enemy base recapture (7.2); plain-view landings and old saves (3.2, 11). |
 | 5 critique items | **M1:** D14. **M2:** D18. **M3:** the `EMLoser` debriefing branch, no `EMEnd2`, the Continue reload, the test pattern (9.2). **M4:** lethality `Fight`, live base fights (6.5, 7.2). **M5:** airborne native birth, gate at altitude, off-map as sea, helipad, two groups, `IssueCommand`, crew-first delete (3.1, 3.2). **M6:** 5 s sightings, dead group's last report, limited reveal, alarm sizing from sightings (6.1, 8.2). **M7:** urgency with hysteresis (6.3). **M8:** cancel unseen, unborn not counted, re-sourcing, a phase-4 hub fallback (3.1, 7.1). **M9:** D19, remote tick, the `capture.sqs` audit (7.2). **M10:** D15 (5.2, 5.6). **M11:** ladder classification (6.5). **M12:** the undercover gate, `EvaluateUndercoverRule` reused (8.1). **MINOR 1:** CA keys, speeds key-on only (3.2, 16). **2:** km/h. **3:** crew priced in the examples. **4:** the ALARM kind, minimum 4, RED at a held town is a candidate (6.3, 8.2). **5:** a name set. **6:** one lose latch, none with `campaignEnd = 0`. **7:** travelling records become top-ups. **8:** hulls on return to abstract travel. **9:** group counting. **10:** HQ garrison ceiling, new kinds, GuerrillaBase assets. **11:** wave wording and keys (7.1). **12:** log prefix, rate limit, `gmOccupierIntel`. **13:** test levers, `slow_air`. **14:** hull budget. |
 | 6 (owner answers + critique 5) | D21-D24 applied. **D21:** per-town occupier `standing` (informants, morale, refill factor), strikes -40 / -40 with -10 / -10 within 2 km (7.3). **D22:** garage vehicles destroyed (9.1). **D23:** uniform holds, #86 narrows capture only, the town_defenders edit (8.1, 12.2). **D24:** the HQ meter at `HqPos`, independent of zone ownership, re-establish anywhere, no zone census exception (9.1, 8.1). **Critique 5:** N1 (one HQ model: default camp HQ, `HasHq` / `HqZone`, `_hqDestroyed`, no silent Camp re-HQ, recruit anchor on `gmHqPos`); N2 (bases in push-out and on held-zone decay, 6.3, 6.4); N3 (D2 runs in SPENT, single exit at 10 %, 5.6); N4a (phase-1 `HqZone()` dispatch skip, 9.1, 14); N4b (D23). MINOR: live fights against all present defenders, `A_lethal` / `A_bodies` (6.5, 5.5); `occCapture` field and `abstractOcc` for BASE records (7.2); per-zone hold groups, income item moot (7.2); `townStruck` / `struckUntil` and the bought-when rule (7.3); 1.6 h best case (5.2); airframe removal gated beyond the edge (3.2); APC before Tank (6.5); U5 key-off refund (3.3); cache emptied at the fall (9.1); `_hqEpoch` marker re-arm (9.1); `legacySave` flag and migrated saves at 0 tokens (11). Section 17 emptied. |
+| 2026-10-13 (orchestrator, phase 5) | **Armour escorts a carrier.** A column is a carrier (truck or APC) plus at most one escort (armed car, APC or tank); a lone tank or a two-seat armed car is never chosen (`seatsShort`), only bought as an escort; a launch-time foot downgrade refunds the whole column (3.2, 6.5). |
+| 2026-10-13 (orchestrator, phase 4 accepted deviations) | `baseRetake` follows `occupierForces` unless authored; resistance alone decays `occCapture` at `captureDecayDefended`; "in a wave" means a wave inbound or landed within 1800 s; the final-stand surge is excluded from spare only in the director's sources; a base route is the road A*, else the straight cross-country line, which counts as reaching the target; a START TOWN HQ keeps the #79 B2 exemption, a re-established HQ never gets it (3.1, 6.3, 7.1, 7.2, 9.1). |
+| 2026-10-14 (orchestrator, phase 6) | **Aircraft "unseen" in 3D.** For removal, an aircraft is unseen out of the view cone, terrain-masked at altitude, or beyond the perception band in 3D even inside the cone; `departTimeout` (900 s) stays as the backstop (3.2). The air spike's verdict is GO (`AIR-SPIKE.md`). |
+| 2026-10-14 (reconciliation) | The code wins: 3.1 (immediate re-source, the road-route join, the wait, the edge hold, legacy records on the chain), 3.2 (air recipe, columns, the dismount), 5.1 (K without the probe), 5.5 (routing rows), 6.1 (informant tips), 6.3 (final push, wave HQ candidate, born cap), 6.5 (M1, the base minimum cap), 6.6 (instruments), 7.1 (allocation order, tokens, no hub), 7.2 (`occCapture` rates, every holding force, `RevertBase`), 9.1 (the HQ meter and default HQ), 9.2 (had something to lose, the lose test), 11, 12, 16 and 17 brought to the committed code. |
 
 ## 19. Residual risks the owner accepts
 
