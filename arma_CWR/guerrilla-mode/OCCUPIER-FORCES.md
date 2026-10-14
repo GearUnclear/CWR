@@ -14,7 +14,7 @@ phases marked landed below.
 | 1 | Landed | U1 to U5 (pending deposits on the zone row, 3x3 hidden-release grid, phase-1 refunds go to the origin post or are discarded), any-enemy census, HOLD and CAPTURE predicates (`gmPlayerPresence` slots 6 `holds`, 7 `weaponSeen`; `gmUndercoverWeaponSeen`), `GuerrillaBase::HqZone()` (falls back to the establishing zone when the HQ sits just outside its 150 m area, instead of -1) with the legacy dispatch skipping the HQ town. `guerrilla_town_defenders` t4 to t6 and `guerrilla_counter_attack_watched_base` updated for S5. |
 | 2 | Landed | `OccupierForces` core: roster, K, pool, refill, bands, control, war-level split, `GuerrillaOccupierForces` block with old-save derivation, `gmOccupierForces` / `gmForcesTune` / `gmForcesForce`, `guerrilla_forces_pool_off` / `_on`. Inert with `occupierForces = 0` (every pool call passes through). Not yet wired: D2 `Draw`, the pending refund hook, the 5.5 routing rows (phase 3). Measured on Abel: garrisons full at about 2.57 h, not 2.38 h, and the band leaves SPENT (pool past 10 %) just before the last short garrisons fill, once, with no flapping; 5.2 and 5.6 below are corrected to say so. |
 | 3 | Landed | Director in `OccupierForces` (sightings-only intel per D9 at the alert cadence, `gmOccupierIntel`; DORMANT until the second distinct town; heat candidates with the per-flip roll, urgency with hysteresis, tokens by band, 30 min cooldowns, push-out; `gmOccupierOps`), `ForcePackages` (ladder classification with the seven descriptor overrides, prices, lethality, the choice with both worked examples; phase 3 offers Foot and Truck), real speeds, `gmHeatDecayHeld` 0.25. Movement in `CounterAttack`: record kinds and fields, `LaunchFunded`, the listener events (`CounterAttackOrders.hpp`), truck hull lifecycle (crew group, cargo, `IssueCommand` driving, brake and dismount at 250 m, delete without refund on a return to abstract travel, refund when home unseen), the birth chain with next-base-back re-sourcing and cancel-unseen for funded records, key-on live resolution against present defenders, the 5.5 routing rows, the won freeze, `ZoneRecord::seeded`. Abel opts in; the fixtures and reference slices pin the key off. Known gaps: Malden's Southeast Compound road net is not joined to the island network (A* exhausts it), so `guerrilla_forces_watched_route` asserts the re-source and the departure, not the arrival; `forcesOpsMax` is read by both services separately; a hull package needs stored spare at its source (no foot downgrade); arrival-live births are on foot with the hull held back. |
-| 4 | Pending | |
+| 4 | Pending | 4B: the HQ model and the lose state, on disk and verified, not committed. With no START TOWN a campaign (campaignEnd on) establishes its HQ at the first CAMP zone through `Establish` (once per session, never after a destruction; `campaignEnd = 0` fixtures keep no HQ at boot; an old save with no HQ gets it on load). `HasHq`, `HqDestroyed`, `HqEpoch`, the HQ meter `hqCapture` at `HqPos` (only `CounterAttack::HqAssaultPresence` fills it; resistance HOLD presence within 150 m freezes it; decay otherwise), `Destroy` (cache emptied, holder and prop deleted once Hidden, garaged vehicles unlocked and damage 1, ring dropped, epoch bumped, INFO line, `ZEHqLost`), free re-establish anywhere; `gmHqState`, `gmHqEpoch`, `gmHqForceCapture`; recruit menu on `gmHqPos` (none without an HQ); `market.sqs` marker and objective re-arm on an epoch change. `CampaignEnd` lose latch (no HQ, no held zone, and an HQ or a held zone once), `EMLoser` after `campaignEndDelay`, the lose debriefing in `UIMapDialogs`, `gmCampaignLost`, `gmCampaignEnd` slot 8, all saved. Deviation: a start-town HQ still gets the pre-existing #79 B2 garrison exemption (tied to the start-town pick, not to the HQ). Tri green: `guerrilla_forces_hq_assault`, `remaster_ud_guerrilla_forces_lose`. 4A: waves, base recapture, standing and the director's base and HQ operations, on disk and verified, not committed. `ZoneRecord` `occCapture`, `standing`, `struckUntil`, `lostCount` (saved); `RevertBase` and the base branch of `EvaluateTick` (any occupier unit or an abstract BASE / HQ_ASSAULT force raises `occCapture` by `captureRate` x min(crew, 3) with no resistance HOLD presence; both present freeze it; nobody decays it at `captureDecayAbandoned`; at 100 the post reverts, the holding force settles, else a pool deposit, income 0, `baseLost`; never after a win or loss); `gmZoneSim` slots 14 to 17, `gmZoneSet` `occCapture` / `standing`; `capture.sqs` per-zone hold groups, "Retaken" by `lostCount`, the `baseLost` handler. CounterAttack: BASE, HQ_ASSAULT and REINFORCE launches validated per kind, `destPos` / `hqDone` saved, `HqAssaultPresence` (HQ_ASSAULT records only, D14), HQ records settle on `ZEHqLost`, `OpsCap` = `forcesOpsMax` + live wave records, the Won / Lost freeze. Director: base candidates only while STRONG (D16), bases in push-out, the HQ candidate while STRONG or in a wave, the final push unconditional; waves (two-tick dwell, merge, size 12..48, lead 600 / 120 s, hub AIRFIELD then SEAPORT then the strongest base, hub top-up, cluster strikes up to `forcesWaveRetakeShare` on `forcesWaveOps` targets, REINFORCE columns, final-stand surge); `OccupierWarLevel` (`gmWarLevelOccupier`) for garrison tiers, CounterAttack, Traffic, Undercover and `qrf.sqs`, which also skips the YELLOW chase in THIN / SPENT; standing (recovery toward 50 at 1 per 600 s, informant tips at `standing / 200` from 50, morale 0.8 below 25, the mean scales the refill; the strike that cuts it is phase 6, the hook is `ZoneRecord::standing` / `gmZoneSet "standing"`). Phase 3 gaps closed with it: the S5 pending refund goes to the pool with the key on (`OccupierForces` installs `GarrisonCache::SetPendingRefundHook`); a force with no unseen birth point is re-sourced at once to the next base whose road passes the gate, waits only when none passes, then is cancelled unseen; with the key on legacy (DORMANT) records take the same chain and never turn back (D6). Accepted deviations: the `baseRetake` key (follows `occupierForces` unless authored); resistance alone decays `occCapture` at `captureDecayDefended`; "in a wave" means a wave inbound or landed within 1800 s; the final-stand surge is excluded from spare only in the director's sources; a base route is the road A*, else the straight cross-country line, which counts as reaching the target. Tri green: `guerrilla_forces_base_retake`, `guerrilla_forces_wave_base`, `guerrilla_forces_refill_pushout`; `guerrilla_counter_attack_watched_base` now asserts the re-source (key on) and `guerrilla_forces_pool_off` the 24-slot row. |
 | 5 | Pending | |
 | 6 | Pending | |
 | 7 | Pending | |
@@ -657,6 +657,39 @@ Examples:
 A package missing for the faction is simply not offered. No war-level gate
 applies; war level picks the infantry tier.
 
+**Armour packages (phase 5).** Every ground package (foot, truck, armed car,
+APC, tank) is offered by default (`ForcePackages::DefaultPackages`); air
+waits for phase 6. A test can still pin the phase 3 ladder
+(`Phase3Packages`).
+- **Crew.** What the class needs: `hasDriver + hasGunner + hasCommander`, at
+  least a driver. Paid by the pool as bodies on top of the hull. The spawn
+  seats a driver, a gunner where the hull has one and a commander where it
+  has one; crew without a seat stay home and go back to the pool.
+- **Seats.** A hull carries at most `min(12, transportSoldier)` infantry. A
+  hull whose seats cannot hold the minimum bodies is quoted (`seatsShort`)
+  but never chosen, so a tank (no cargo) or a two-seat armed car does not go
+  to a retake on its own.
+- **Columns.** A quote may be a CARRIER (truck or APC: it carries the
+  bodies) plus at most ONE ESCORT hull (armed car, APC or tank: it carries
+  nobody). Foot never takes an escort.
+  - Price: bodies + carrier + escort + both crews (crews paid as bodies).
+  - Lethality: the carrier's (carried infantry x 1.25, an APC carrier's +6)
+    plus the escort's bonus (+3 / +6 / +12). An APC escort adds its +6 and
+    carries nobody.
+  - Abstract speed: 0.6 x the slower hull's `maxSpeed`.
+  - The choice runs over packages and columns alike, with the same rule.
+    This is how a tank or a small armed car is bought: as an escort.
+- **At the town edge.** The infantry dismounts and assaults. An armed hull
+  (armed car, APC, tank, and every escort) then supports: it drives up to
+  the town edge with its crew AWARE and firing. A truck holds back where it
+  stopped (`ForcePackages::EdgeRole`).
+- **Downgrade.** A hull package's infantry is debited from the source's
+  STORED reserve. If at launch that reserve cannot pay the bodies but the
+  source can on foot, the package goes on foot: same source and bodies, no
+  hull or crew, the pool price refunded. A column goes on foot whole, both
+  hulls refunded (`MustDowngrade` / `Downgrade`, applied in
+  `CounterAttack::LaunchCore`).
+
 **Prices and lethality.** All prices are in pool units. Crew bodies are paid
 as bodies on top of the hull price.
 
@@ -708,7 +741,13 @@ an add-on to a ground operation. Strikes on a town itself follow 7.3.
   Urgent; `L_req = 10.8`; minimum 4.
   - Foot 11: 11 units, about 39 min.
   - Motorized 9 + a driver: 13 units, lethality 11.25, about 5 min.
-  - 13 <= 1.5 x 11, so the choice is **motorized**.
+  - APC 4 + its crew (2 for an M113, 3 for a BMP) + 8: 14 or 15 units,
+    lethality 11.0, also within 1.5 x 11 but slower than the truck.
+  - The tank carries nobody, so it cannot bring the minimum 4 alone.
+  - Columns: truck + APC 4 + a driver + 3 + 2 crew + 8 = 18 units,
+    truck + tank 25 units; both above 1.5 x 11 = 16.5.
+  - 13 <= 1.5 x 11 and the truck is the fastest, so the choice is
+    **motorized**.
 
 **Group budget.** Each package counts its groups against the 40-group budget:
 infantry 1, each crewed hull 1, a helicopter insertion 2.
@@ -1345,7 +1384,11 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 | 0..100 | Recovers +1 per 600 s toward 50; drives informant tips (chance `standing / 200` when >= 50), morale (skill x 0.8 below 25) and the refill factor `0.75 + 0.5 * mean / 100` |
 | HQ meter | GuerrillaBase | `captureRate` x crew (cap 3) per tick within 150 m of `HqPos`; decay `captureDecayAbandoned` | | D24 |
 | `occCapture` | ZoneRegistry | same rates as the player's capture | 0..100 | Enemy base-retake meter, separate field |
-| hull keys `forcesTruck` ... `forcesJet` | descriptor | ladder classification | class names | Overrides |
+| hull keys `forcesTruck` ... `forcesJet` | descriptor | ladder classification | class names | Overrides (optional; the shipped descriptors author none, their `vehicles[]` ladders classify the ground hulls) |
+| offered packages | OF | every ground package (`DefaultPackages`); air from phase 6 | bit mask | Phase 5 |
+| hull crew / infantry seats | OF | `hasDriver + hasGunner + hasCommander` (min 1) / `min(12, transportSoldier)` | config | Crew paid as bodies; a hull whose seats cannot hold the minimum is never chosen alone |
+| columns | OF | carrier truck or APC + at most one escort (armed car, APC, tank) | | Escort price, crew and bonus added; pace of the slower hull; 3 groups, 2 hulls |
+| town-edge role | CA (flag from OF) | truck holds back; armed car, APC, tank and every escort support | constants | 3.2 |
 | `forcesControlMilWeight` / control dwell | OF | 0.6 / 2 ticks | | Control |
 | `forcesWaveThresholds[]` / `forcesWaveFinal` | OF | {0.75, 0.50} / 1 | at most 3 | Waves |
 | `forcesWaveShare` / `Min` / `Max` | OF | 0.5 / 12 / 48 | | Wave size |

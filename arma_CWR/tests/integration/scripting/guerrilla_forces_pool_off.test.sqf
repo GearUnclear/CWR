@@ -4,7 +4,8 @@
 //  occupierForces = 0 (the shipped Guerrilla.Abel opts in from phase 3), so
 //  the service must stay inert: gmOccupierForces reports band and posture
 //  "OFF" with an unsized pool and an empty director (the ten documented
-//  slots plus the five phase-3 director slots), and the test levers answer
+//  slots plus the five phase-3 director slots and the nine phase-4 wave
+//  slots, no wave inbound, fired or landed), and the test levers answer
 //  without moving anything.
 // ============================================================================
 
@@ -13,7 +14,10 @@ ofT0 = time
 triSimUntil { time > ofT0 + 3 }
 
 ofRow = gmOccupierForces
-triAssertEq [(count ofRow), 15]
+triAssertEq [(count ofRow), 24]
+triAssertEq [(format ["%1", ofRow select 15]), "false"]
+triAssertEq [(ofRow select 18), 0]
+triAssertEq [(ofRow select 22), 0]
 triAssertEq [(ofRow select 2), "OFF"]
 triAssertEq [(ofRow select 4), "OFF"]
 triAssertEq [(ofRow select 0), 0]

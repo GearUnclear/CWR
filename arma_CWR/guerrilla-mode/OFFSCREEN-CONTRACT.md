@@ -66,12 +66,12 @@ the section 2 rules. LIVE ONLY: exists only as entities near the player.
 
 | # | System | Off-screen policy | Where |
 |---|---|---|---|
-| 1 | Capture meter (occupier OUTPOST/AIRFIELD/SEAPORT) | ABSTRACT (D1) when live resistance units are in `zoneArea` or `capture > 0`; otherwise FREEZE. The stored reserve counts as a defender, and so does a live body of the post's own garrison within `cacheRadius` (800 m) of it, wherever he stepped to fight (U4). The player raises the meter only with CAPTURE presence. | `ZoneRegistry::EvaluateTick` |
+| 1 | Capture meter (occupier OUTPOST/AIRFIELD/SEAPORT), and its mirror on a resistance-held post | ABSTRACT (D1) when live resistance units are in `zoneArea` or `capture > 0`; otherwise FREEZE. The stored reserve counts as a defender, and so does a live body of the post's own garrison within `cacheRadius` (800 m) of it, wherever he stepped to fight (U4). The player raises the meter only with CAPTURE presence. **The base recapture (OCCUPIER-FORCES.md 7.2, D19; key `baseRetake`, which follows `occupierForces` unless authored, replacing decision R):** a resistance-held post (not CAMP, not CITY) carries the occupier's own meter `occCapture` (0..100, saved, never shown as the player's progress, no `captureStarted` event). Any occupier unit in `zoneArea`, or an abstract BASE or HQ_ASSAULT force holding the post, with no resistance HOLD presence (hold squad, recruits, the player under the HOLD rule) raises it by `captureRate` x min(crew, 3) per tick; both present freeze it; resistance alone decays it at `captureDecayDefended`, nobody at `captureDecayAbandoned`. The zone also ticks off-screen while occupiers stand in it or `occCapture > 0`. At 100 the post reverts: owner back to the authored occupier token, the garrison settled (the holding force's bodies first, else a pool-funded deposit, pending inside the deposit bubble, row 4), income 0, `baseLost` event. | `ZoneRegistry::EvaluateTick`, `RevertBase` |
 | 2 | Town support (NEUTRAL or occupier CITY) | ABSTRACT (D1), gain only: +`supportRate` per tick with fighters present and no occupier presence; flips on the in-bubble rule. Occupier presence is a live unit in `zoneArea`, the town's stored garrison reserve, or a live body of its own garrison anywhere, so a remote town with a reserve and a squad is a frozen standoff. No remote intimidation. Script ledgers (resentment, civilian-kill deltas) run regardless of distance. | `ZoneRegistry::EvaluateTick`, `civilians.sqs` |
-| 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while occupier presence stands in it: live units, or an abstract counter-attack force holding the town (decision C, `ZoneTickInputs::abstractOcc`). Occupiers alone: -`supportRate` per tick, revert below `townRevertSupport` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled up to `garrisonMax`, a pending deposit while the player is within `cacheRadius` + 50 m, row 4; `townLost` event). Fighters alone: +`supportRate` per tick up to 100. Both: frozen. Here the player counts by his HOLD presence: in uniform he always holds, weapon out or not; in a civilian outfit only when exposed, armed, or with his weapon seen by an occupier observer (section 6). | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
+| 2b | Town retake (resistance-held CITY, `townRetake`) | ABSTRACT: the zone also ticks off-screen while occupier presence stands in it: live units, or an abstract counter-attack force holding the town (decision C, `ZoneTickInputs::abstractOcc`; an HQ_ASSAULT force holding at an HQ inside the town counts too, OCCUPIER-FORCES.md 8.1). The same remote rule now opens resistance-held posts for the base recapture (row 1). Occupiers alone: -`supportRate` per tick, revert below `townRevertSupport` (owner back to its authored token, NEUTRAL for a resistance-authored town; garrison refilled up to `garrisonMax`, a pending deposit while the player is within `cacheRadius` + 50 m, row 4; `townLost` event). Fighters alone: +`supportRate` per tick up to 100. Both: frozen. Here the player counts by his HOLD presence: in uniform he always holds, weapon out or not; in a civilian outfit only when exposed, armed, or with his weapon seen by an occupier observer (section 6). | `ZoneRegistry::EvaluateTick`, `RevertTown`, `capture.sqs` |
 | 2c | Counter-attack on a risen town (decision C) | Dispatch, delay and travel ABSTRACT and deterministic (rolls hashed from the flip). Town inside the bubble: LIVE squad walking its road to the town (a base in the bubble marches its own garrison out; a stored reserve is born unseen on its road, section 9), counted in the budgets; a marching squad nobody can perceive returns to the abstract road. Town outside: ABSTRACT arrival, then hold-and-drain (empty town) or one odds roll (fighters there); no entity created or deleted. | `CounterAttack`, `capture.sqs` |
 | 3 | Flip side effects | Identical on and off screen: heat +40, income tap, hold squad, journal line, hint. | `EvaluateTick`, `capture.sqs` |
-| 4 | Garrison reserve (posts and occupier-administered towns) | Count FREEZE (no attrition, no remote combat). Whole bodies only (U3). Despawn ADDS the survivors to whatever reserve is still stored (U1). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while garrisonable (occupier post, or administered town not exempt), not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. **No pop-in (S5):** a reserve write while the player is within `cacheRadius` + 50 m of the zone (the revert refill, survivors returning to a base, the reserve left waiting beside a wiped garrison) is a PENDING deposit: it does not defend and does not materialize. It joins the reserve once the player is beyond that edge, or once every sampled spawn point of the zone (a 3 x 3 grid over the +-`zoneArea`/3 placement square) is hidden to Traffic's perception gate, and it is checked before D2 runs. If the occupier loses the zone first, the deposit goes back to its origin zone's reserve while the occupier holds that zone, else it is discarded (one INFO line). Ordinary materialization at 800 m stays ungated, so a raised view distance can still show pop-in. | `GarrisonCache::StepRecover`, `GarrisonCache::Deposit` |
+| 4 | Garrison reserve (posts and occupier-administered towns) | Count FREEZE (no attrition, no remote combat). Whole bodies only (U3). Despawn ADDS the survivors to whatever reserve is still stored (U1). Recovery ABSTRACT (D2): +1 per `garrisonRecoverInterval` up to `garrisonMax`, only while garrisonable (occupier post, or administered town not exempt), not materialized, the player alive and beyond the despawn edge, alert GREEN, `capture == 0` and no live resistance in the zone. Any disqualifier restarts the clock; a dead player freezes it. **No pop-in (S5):** a reserve write while the player is within `cacheRadius` + 50 m of the zone (the revert refill, survivors returning to a base, the reserve left waiting beside a wiped garrison) is a PENDING deposit: it does not defend and does not materialize. It joins the reserve once the player is beyond that edge, or once every sampled spawn point of the zone (a 3 x 3 grid over the +-`zoneArea`/3 placement square) is hidden to Traffic's perception gate, and it is checked before D2 runs. If the occupier loses the zone first, the deposit goes to the occupier forces pool when `occupierForces` is on (OCCUPIER-FORCES.md 3.3, 5.5); with the key off it goes back to its origin zone's reserve while the occupier holds that zone, else it is discarded (one INFO line). Ordinary materialization at 800 m stays ungated, so a raised view distance can still show pop-in. | `GarrisonCache::StepRecover`, `GarrisonCache::Deposit` |
 | 5 | Patrols | LIVE ONLY (traffic band); no off-screen position or schedule. | `Traffic` |
 | 6 | Convoys | LIVE ONLY. A wiped convoy feeds the alert ledger (ambush floor, heat) and nothing else: no cargo, no logistics. | `Traffic`, `AlertMachine` |
 | 7 | QRF | LIVE ONLY, free (no reserve debit), deleted on stand-down. Independent of the counter-attack (2c), which is fed by town flips, not alerts, and is debited from a base's garrison. | `qrf.sqs` |
@@ -83,7 +83,7 @@ the section 2 rules. LIVE ONLY: exists only as entities near the player.
 | 13 | Civilians | LIVE ONLY; their ledgers (panic expiry, resentment) are ABSTRACT. | `civilians.sqs` |
 | 14 | Civilian traffic | LIVE ONLY; entries persist in saves, remains clear at 1200 s or by distance. | `Traffic` |
 | 15 | Enemy expansion | Absent. When built: ABSTRACT, never inside the bubble or in view, capped by `MaxZones` (64) and the war level. | #38 |
-| 16 | Occupier recapture | Towns only: the counter-attack (row 2c) and the retake drain (row 2b). Liberated military zones stay permanent (decision R). | `CounterAttack`; posts are #38 |
+| 16 | Occupier recapture | Towns: the counter-attack (row 2c) and the retake drain (row 2b). Posts: the base recapture (row 1), which replaces decision R wherever `baseRetake` is on (by default wherever `occupierForces` is on): any occupier unit that clears the hold squad and stands in a held post takes it back, and with the pool on the director sends BASE operations while STRONG and through push-out, and reinforcement waves strike the densest cluster of held zones (OCCUPIER-FORCES.md 6.3, 6.4, 7.1). With `baseRetake` off liberated posts stay permanent (the old decision R). The HQ falls only to an HQ_ASSAULT through its own meter at `HqPos` (9.1, D14). | `ZoneRegistry::RevertBase`, `CounterAttack`, `OccupierForces` |
 
 **These rules apply to every mission.** U1 to U5 (rows 1, 2b and 4), the
 "any enemy drains" census (decision C) and the HOLD and CAPTURE presence
@@ -118,7 +118,7 @@ All live in `class CfgGuerrillaZones` of a template's `description.ext`.
 | `counterAttackSpeed` | 4 | abstract road speed (m/s); the abstract leg is the whole road from the base to the town |
 | `counterAttackRoadFactor` | 1.3 | road distance per straight-line metre |
 | `counterAttackBirthMinToTarget` | 250 | no counter-attack force is ever born this close to its target town (m, range 0..2000) |
-| `counterAttackBirthGiveUp` | 600 | seconds a force with no unseen birth point waits before it turns back and its strength returns to the base (range 30..86400) |
+| `counterAttackBirthGiveUp` | 600 | seconds a force with no unseen birth point (and, with `occupierForces` on, no other base whose road passes the gate) waits before it turns back and its strength returns to the base; with `occupierForces` on it is cancelled unseen instead (range 30..86400) |
 | `counterAttackDefenderWeight` | 3 | one fighter in his town is worth this many attackers in the odds roll |
 | `counterAttackRepelLoss` | 0.5 | share of a beaten force that does not come home |
 | `counterAttackLiveTimeout` | 1200 | seconds an unresolved live squad stays in its town before it withdraws (only out of the player's sight); the road march before it gets its own allowance (road left at 1 m/s + 120 s) |
@@ -335,7 +335,22 @@ bubble, and more wait. Wiping bases empties the reserves the answers are
 drawn from: a base that cannot spare a man sends nobody.
 
 A standing retake director, an occupier forces pool and reinforcement waves
-are being designed separately; they are not part of this rule.
+live in OCCUPIER-FORCES.md (key `occupierForces`); with that key on the
+director takes every flip from the second distinct town on, and the
+dispatch above answers only while it is DORMANT.
+
+**Posts change hands too (base recapture, replacing decision R).** With
+`baseRetake` on (by default wherever `occupierForces` is), a held post is
+retaken the way the player takes one, in mirror: occupier units in it with
+no resistance HOLD presence fill its `occCapture` meter at `captureRate` x
+min(crew, 3) per 3 s tick, so a patrol that kills the 3-man hold squad and
+stays takes the post in about 18 s; an abstract BASE force holding it does
+the same off-screen. A BASE operation that arrives while the hold squad
+lives goes live (born at the 250 m bound, even off-screen) and fights it.
+The retaken post settles the holding force's bodies as its garrison (else a
+pool-funded deposit), closes its income tap and fires `baseLost`; taking it
+back fires `captured` again ("Retaken" in the journal, a new hold squad only
+if the old one is dead).
 
 **Unseen births (the invariant, user rule of 2026-10-13).** A counter-attack
 soldier is never created where the player can perceive him: every force walks
@@ -351,8 +366,16 @@ within `counterAttackBirthMinToTarget` of the town. A force launched with the
 town already in the bubble searches from the base toward the town; a force the
 player walked up to searches back from its progress point toward the base,
 and one already inside the bound stays abstract at the town edge. No such
-point: it waits (one WARN, retried every 30 s, its arrival clock stopped, doing
-nothing to the town) and turns back after `counterAttackBirthGiveUp`. A
+point, with `occupierForces` on (director and legacy records alike): it is
+re-sourced at once to the next occupier base, nearest the town first, that can
+spare the whole force and whose road (the road A*, else the straight
+cross-country line) yields a point passing the gate; the first base refunds,
+the new one pays, and the force is born from it. Only when no base passes does
+it wait (one WARN, retried every 30 s, its arrival clock stopped, doing
+nothing to the town); after `counterAttackBirthGiveUp` it tries the re-source
+once more and is then cancelled unseen, never turned back (OCCUPIER-FORCES.md
+3.1, D6). With the key off it waits the same way and turns back after
+`counterAttackBirthGiveUp`, as before. A
 holding force is never born at the town centre: with the town in the bubble
 it is suspended (no drain, no odds roll). A marching squad that is out of the
 player's perception and bubble for 10 s returns to the abstract road at its

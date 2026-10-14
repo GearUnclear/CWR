@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>
 
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // FindSideCenter / occupier side
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the occupier-side war level (7.1)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Evaluator/express.hpp> // GameState / GameValue (VarGet)
@@ -94,6 +95,15 @@ bool UndercoverWeaponSeenVerdict(UCVerdict verdict, UCWeaponShow weapon, float v
 bool UndercoverWeaponSeenCurrent(float now, float stampTime)
 {
     return now - stampTime <= UndercoverSystem::WeaponSeenWindow;
+}
+
+bool UndercoverWeaponSeenStampCurrent(Foundation::Time now, Foundation::Time stamp)
+{
+    if (stamp == TIME_MIN)
+    {
+        return false; // never stamped (or reset on load): no weapon seen
+    }
+    return stamp >= now - UndercoverSystem::WeaponSeenWindow;
 }
 
 UCVerdict EvaluateUndercoverVehicleRule(const UCVehicleObservation& obs, const UndercoverTuning& tuning,
@@ -221,7 +231,7 @@ void UndercoverSystem::SyncCaches()
                 _subject = player;
                 EntityAI* veh = unit->GetVehicle();
                 _subjectVehicle = veh && veh != player ? veh : nullptr;
-                _warDetect = warLevel * 0.1f;
+                _warDetect = OccupierForces::Instance().OccupierWarLevelFrom(warLevel) * 0.1f;
                 _active = true;
             }
         }
@@ -701,7 +711,7 @@ int UndercoverSystem::WeaponSeenCount() const
             continue;
         }
         const Target* t = grp->FindTargetAll(subject);
-        if (t && !t->destroyed && Glob.time - t->ucWeaponSeenTime <= WeaponSeenWindow)
+        if (t && !t->destroyed && UndercoverWeaponSeenStampCurrent(Glob.time, t->ucWeaponSeenTime))
         {
             count++;
         }

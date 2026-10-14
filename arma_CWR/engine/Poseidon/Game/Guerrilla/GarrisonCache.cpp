@@ -682,6 +682,9 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     PlanGroups(reserve, _tuning.groupSize, takes);
 
     const float spread = registry.Tuning().zoneArea / 3.0f;
+    // garrison morale (OCCUPIER-FORCES.md 7.3, D21): a town that turned on
+    // the occupier (standing < 25) fields its garrison at skill x 0.8
+    const float morale = OccupierForces::MoraleFactor(*z);
     int spawned = 0;
     int remaining = reserve;
     bool firstGroup = true;
@@ -706,7 +709,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
             RString unitClass = u < classes.Size() ? classes[u] : tierClass;
             Vector3 pos = RandomNear(z->pos, spread);
             int before = grp->NUnits();
-            ::CreateUnit(grp, officer ? officerClass : unitClass, pos, RString(), officer ? 0.6f : 0.5f,
+            ::CreateUnit(grp, officer ? officerClass : unitClass, pos, RString(), (officer ? 0.6f : 0.5f) * morale,
                          officer ? RankSergeant : RankPrivate);
             if (grp->NUnits() > before)
             {
@@ -873,7 +876,7 @@ void GarrisonCache::Simulate(float deltaT)
         playerZ = player->Position().Z();
     }
 
-    const float warLevel = ReadWarLevel();
+    const float warLevel = OccupierForces::Instance().OccupierWarLevel(); // the occupier-side level (7.1)
     const float cacheRadius = registry.Tuning().cacheRadius;
     // the perception gate for S5 releases: refreshed at most once per pass,
     // and only when some zone has a deposit pending

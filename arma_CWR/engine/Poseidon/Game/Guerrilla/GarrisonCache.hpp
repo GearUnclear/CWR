@@ -71,7 +71,7 @@ enum PendingFlush
     PFNone,           // nothing pending, or it waits (the zone is in the bubble and a spawn point is seen)
     PFReleasedBubble, // moved into the reserve: the player is beyond the despawn edge
     PFReleasedHidden, // moved into the reserve: every sampled spawn point is CAExposeHidden
-    PFRefunded        // the occupier lost the zone: refunded to the origin or discarded
+    PFRefunded        // the occupier lost the zone: refunded to the pool (occupierForces on), else to the origin or discarded
 };
 
 // Per-zone observations for the D2 recovery step (StepRecover).

@@ -42,14 +42,22 @@
 //                                  for every leg computed afterwards.
 //                                  Returns true when the key is known.
 //   gmCounterAttackLaunchFunded [target, source, package, bodies, urgent,
-//                                hullClass]
+//                                hullClass, kind]
 //                                  TEST LEVER: a director-style funded
 //                                  operation straight into
 //                                  CounterAttack::LaunchFunded.  target and
 //                                  source are zone names or indices; package
 //                                  "foot" / "truck" (or the ForcePackage
 //                                  number); urgent (optional, default
-//                                  false); hullClass (optional; default the
+//                                  false).  The 5th element may instead be
+//                                  the kind STRING ("RETAKE" | "BASE" |
+//                                  "HQ_ASSAULT" | "REINFORCE", default
+//                                  RETAKE; urgent then false); with urgent
+//                                  given, kind may follow as the 7th.  For
+//                                  HQ_ASSAULT target may be -1 (an HQ
+//                                  outside every zone) and the destination
+//                                  is GuerrillaBase::HqPos().  hullClass
+//                                  (optional, 6th; default the
 //                                  first class of the occupier's vehicles[]
 //                                  ladder with transportSoldier >= 6).  The
 //                                  hull price (truck 3 + 1 crew) is spent
@@ -58,6 +66,7 @@
 //                                  (900001 on), 0 when refused.
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>  // HqPos (the HQ_ASSAULT test lever)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the test lever spends the hull price
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars (hull facts for the test lever)
@@ -252,6 +261,36 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
     order.bodies = args[3].GetType() == GameScalar ? (int)(float)args[3] : 0;
     order.urgent = args.Size() > 4 && args[4].GetType() == GameBool && (bool)(GameBoolType)args[4];
     order.kind = CAKRetake;
+    // the kind: a string 5th element (part B's HQ meter tests), or a 7th
+    RString kindName;
+    if (args.Size() > 4 && args[4].GetType() == GameString)
+    {
+        kindName = (GameStringType)args[4];
+    }
+    else if (args.Size() > 6 && args[6].GetType() == GameString)
+    {
+        kindName = (GameStringType)args[6];
+    }
+    if (kindName.GetLength() > 0)
+    {
+        if (stricmp(kindName, "BASE") == 0)
+        {
+            order.kind = CAKBase;
+        }
+        else if (stricmp(kindName, "HQ_ASSAULT") == 0)
+        {
+            order.kind = CAKHqAssault;
+            order.destPos = GuerrillaBase::Instance().HqPos();
+        }
+        else if (stricmp(kindName, "REINFORCE") == 0)
+        {
+            order.kind = CAKReinforce;
+        }
+        else if (stricmp(kindName, "RETAKE") != 0)
+        {
+            return GameValue(0.0f);
+        }
+    }
     order.origin = CAODirector;
     order.funded = true;
     order.abstractSpeed = CounterAttack::FootSpeed;

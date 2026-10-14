@@ -1,9 +1,10 @@
 #pragma once
 
 // Guerrilla Mode occupier forces: the strategic pool and the director
-// (guerrilla-mode/OCCUPIER-FORCES.md, phases 2 and 3).  This header is the
+// (guerrilla-mode/OCCUPIER-FORCES.md, phases 2 to 4).  This header is the
 // code-side summary of the design's sections 5 (the pool), 6 (the director),
-// 7.1 (control) and 11 (persistence).  Waves and the HQ are later phases.
+// 7.1 (control and waves), 7.3 (occupier standing, the model) and 11
+// (persistence).  Air, alarm answers and town strikes are later phases.
 // The service owns the ledger every operation spends from and decides WHAT
 // to send; CounterAttack moves it (CounterAttackOrders.hpp is the contract).
 //
@@ -46,8 +47,57 @@
 //
 // WAR LEVEL SPLIT (7.1).  OccupierWarLevel() = the territory war level
 // (ReadWarLevel) + forcesWaveWarLevel per landed wave, capped at
-// MaxWarLevel.  No reader uses it yet (phase 4 switches the occupier-side
-// readers; the resistance keeps the territory level).
+// MaxWarLevel.  The occupier-side readers use it (phase 4): garrison tiers
+// (GarrisonCache), the counter-attack squad tiers and ForceSize
+// (CounterAttack), the convoy / patrol class pick and the traffic
+// modulation (Traffic), the undercover detection factor (Undercover), the
+// script QRF (qrf.sqs through gmWarLevelOccupier).  The resistance keeps the
+// territory level (gmWarLevel: hold squads, the recruit cap, the journal,
+// escalation.sqs).  With the key off it equals the territory level.
+//
+// WAVES (7.1, D7; phase 4).  Each director tick reads the control C and the
+// roster bases the occupier holds as Tick measured them.  A trigger is due
+// when C is at or below a forcesWaveThresholds[] entry not yet fired, or
+// (forcesWaveFinal) when exactly one roster base is left: the final stand.
+// A due trigger fires after forcesControlDwell consecutive due ticks; every
+// trigger fires once; triggers due together, or due while a wave is
+// inbound, merge into one wave (the merged final stand shortens the lead).
+// Size = forcesWaveShare x poolStart, clamped to [forcesWaveMin,
+// forcesWaveMax]; it lands after forcesWaveLead s (forcesWaveLeadFinal for
+// the final stand) through LandWave, then the allocation runs in order:
+//   1. the hub top-up: the hub (forcesWaveHub by name, else the
+//      occupier-held AIRFIELD, else SEAPORT, else the strongest base) is
+//      filled to garrisonMax by a pool-funded deposit;
+//   2. the final stand: the last base gets a surge of up to forcesWaveSurge
+//      above its strength (a deposit above garrisonMax that nothing trims;
+//      it is never spare, and the last base never sources a strike);
+//   3. strikes on the best cluster (score of a held zone z: the sum over
+//      held zones y within forcesWaveCluster of 4 for the HQ's zone, 3 for
+//      a base, 1 for a town, plus heat(y) / 40; an HQ outside every held
+//      zone adds 4 when it stands within the radius): the HQ if it is in
+//      the cluster, then bases, then towns, up to forcesWaveRetakeShare of
+//      the wave on up to forcesWaveOps targets, each its own package, from
+//      the hub (with no hub, from the nearest occupier base), launched
+//      together with origin CAOWave, only once the director is AWAKE.  Wave
+//      operations take no token and come on top of forcesOpsMax
+//      (CounterAttack::OpsCap raises the born cap by one per living wave
+//      record).  Their infantry is staged: a pool-funded deposit straight
+//      into the source's reserve that the launch debits in the same tick;
+//   4. REINFORCE columns from the hub to bled bases (CAKReinforce, topping
+//      them up on arrival), up to forcesWaveOps columns;
+//   5. the rest stays in the pool.
+// "In a wave" (the HQ candidate) is a wave inbound or landed less than
+// WaveWindow s ago.  gmForcesForce ["wave", n] fires wave n now.
+//
+// STANDING (7.3, D21: the model only; strikes are phase 6).  Each director
+// tick every CITY's ZoneRecord::standing recovers toward 50 at 1 per
+// StandingRecoverSeconds, the mean over the K towns feeds the refill
+// factor (SetMeanStanding), and a town with standing >= 50 where resistance
+// units stand may yield an informant TIP with chance standing / 200 (a
+// deterministic hashed roll): a sighting of the true count at the town
+// centre jittered +-TipJitter m.  This is the one place the director reads
+// the true census: a local talked.  Garrisons spawned in a town with
+// standing < 25 fight at skill x 0.8 (GarrisonCache::MoraleFactor).
 //
 // PERSISTENCE (11).  Block GuerrillaOccupierForces, gated on HasState().  A
 // save without the block loaded with the key on is derived from the zone
@@ -75,8 +125,15 @@
 //   AWAKE; while DORMANT CounterAttack answers with the legacy Decide.
 //   CANDIDATES (6.3).  A held town (not the HQ's, not on cooldown, no record
 //   on it) is a candidate while heat / forcesHeatFull >= u, u =
-//   Roll01(MakeSeed(town, flipDay, flipMinute, 0), 7).  Bases (D16) are
-//   phase 4: computed while STRONG, logged once, never ordered here.
+//   Roll01(MakeSeed(town, flipDay, flipMinute, 0), 7).  A held base (D16)
+//   by the same rule, only while STRONG (CAKBase, minimum max(4,
+//   garrisonMax)).  The HQ (HqCandidate; D13, D14, D24) only while STRONG
+//   or in a wave, by the heat of the zone it stands in (none for an HQ
+//   outside every zone), and unconditionally (first in the list) once the
+//   resistance holds no base and no town besides the HQ's own zone: the
+//   final push.  The HQ operation is always a CAKHqAssault of at least
+//   forcesHqAssaultMin bodies on HqPos; its cooldown is kept under the name
+//   HqCooldownName.
 //   URGENCY.  Latched by a YELLOW / RED alert edge on a held town (since its
 //   flip) or heat >= forcesUrgentHeat; released when heat < UrgentExitHeat.
 //   TOKENS.  0..forcesTokensMax, full at the wake, one per
@@ -87,13 +144,14 @@
 //   forcesTownCooldown with +15 heat unless a RED edge already paid it; a
 //   cancelled-unseen one gets the cooldown.
 //   PUSH-OUT (6.4).  STRONG, a token and no heat candidate: the held town
-//   nearest an occupier base with no sighting for forcesPushoutQuiet, with
-//   the minimal package.
+//   or base nearest an occupier base with no sighting for
+//   forcesPushoutQuiet, with the minimal package.
 //   PACKAGES (6.5).  ForcePackages: the cheapest lethal package, the fastest
 //   within forcesUrgentCostShare when urgent; phase 3 offers Foot and Truck.
 //   The pool pays hull + crew (Spend before LaunchFunded, Refund when it is
 //   refused); the source base pays the infantry from its spare.
-//   WON.  Nothing is launched once CampaignEnd has latched the win.
+//   WON / LOST.  Nothing is launched, and no wave fires or lands, once
+//   CampaignEnd has latched the win or the loss.
 //
 // Script surface (OccupierForcesCommands.cpp): gmOccupierForces,
 // gmOccupierOps, gmOccupierIntel, gmForcesTune, gmForcesForce.  Every INFO
@@ -167,6 +225,20 @@ struct OccupierForcesTuning
     float lethalityMargin = 1.2f; // forcesLethalityMargin, 1..3
     float urgentCostShare = 1.5f; // forcesUrgentCostShare, 1..3
     float intelDecay = 1800.0f;   // forcesIntelDecay, s: sightings expire
+    // phase 4: the HQ assault and the waves (7.1, 16)
+    int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
+    int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
+    bool waveFinal = true;         // forcesWaveFinal (0/1): the final stand when one roster base is left
+    float waveShare = 0.5f;        // forcesWaveShare, 0..2: wave size, share of poolStart
+    int waveMin = 12;              // forcesWaveMin, 0..200
+    int waveMax = 48;              // forcesWaveMax, 0..400
+    float waveLead = 600.0f;       // forcesWaveLead, 0..7200 s inbound
+    float waveLeadFinal = 120.0f;  // forcesWaveLeadFinal, 0..7200 s inbound for the final stand
+    float waveRetakeShare = 0.5f;  // forcesWaveRetakeShare, 0..1: strikes' share of the wave
+    int waveOps = 4;               // forcesWaveOps, 0..8: strike targets (and reinforce columns)
+    float waveCluster = 2000.0f;   // forcesWaveCluster, 100..20000 m
+    int waveSurge = 12;            // forcesWaveSurge, 0..48: final-stand surge above strength
+    RString waveHub;               // forcesWaveHub: the template's hub by zone name ("" = the rule)
 };
 
 // One resistance unit an occupier group reports (the 6.1 scan)
@@ -184,8 +256,15 @@ struct DirectorView
     AutoArray<int> alert;        // per zone: AlertState (index-aligned; missing = GREEN)
     AutoArray<int> spare;        // per zone: bodies an occupier base can spare (CounterAttack::Spare)
     AutoArray<int> spareStored;  // per zone: ... from its stored reserve (hull packages); missing = spare
-    int hqZone = -1;             // the zone the player's HQ stands in: never a target (N4a)
+    int hqZone = -1;             // the zone the player's HQ stands in: never a retake target (N4a)
     bool won = false;            // CampaignEnd latched the win: launch nothing (7.4)
+    bool lost = false;           // CampaignEnd latched the loss: the same freeze (9.2)
+    // the HQ (9.1): established, and where (the HQ assault's destination)
+    bool hqEstablished = false;
+    Vector3 hqPos = VZero;
+    // per zone (optional, missing = 0): the live GarrisonCache bodies (the
+    // wave hub's strength and top-up)
+    AutoArray<int> garrisonLive;
     float tierFactor = 1.0f;     // the occupier infantry tier's lethality factor
     float defenderWeight = 3.0f; // counterAttackDefenderWeight
 };
@@ -202,17 +281,20 @@ class DirectorLauncher
     virtual int BornOps() const = 0;
     // a record already targets this zone
     virtual bool HasRecord(int zoneIndex) const = 0;
+    // an HQ_ASSAULT record exists (phase 4; the default for fakes: none)
+    virtual bool HasHqRecord() const { return false; }
 };
 
 // One planned operation (PlanFor)
 struct DirectorAction
 {
     bool go = false;
-    int target = -1;
+    int target = -1; // zone index; for CAKHqAssault the HQ's zone, -1 outside every zone
     int kind = CAKRetake;
     int origin = CAODirector;
     bool urgent = false;
     float fighters = 0;
+    Vector3 destPos = VZero; // CAKHqAssault: HqPos
     PackageChoice choice;
 };
 
@@ -232,6 +314,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
 {
   public:
     OccupierForces() = default;
+    // drops the S5 refund hook when this service is its target
+    ~OccupierForces();
 
     static OccupierForces& Instance();
 
@@ -258,6 +342,18 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr int MaxOpRows = 32;
     // phase 3 offers only foot and truck packages (phase 5 armour, phase 6 air)
     static constexpr unsigned int OfferedPackages = ForcePackages::Phase3Packages;
+    // phase 4: the HQ in the candidate list (Candidates, PlanFor), its
+    // cooldown row's name, the "in a wave" window after a landing (s), the
+    // standing recovery (s per point toward 50), the informant tip (roll
+    // salt, position jitter m), morale (standing below LowStanding)
+    static constexpr int HqCandidate = -2;
+    static constexpr const char* HqCooldownName = "@HQ";
+    static constexpr float WaveWindow = 1800.0f;
+    static constexpr float StandingRecoverSeconds = 600.0f;
+    static constexpr int TipSalt = 11;
+    static constexpr float TipJitter = 100.0f;
+    static constexpr float LowStanding = 25.0f;
+    static constexpr float MoraleSkill = 0.8f;
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -287,6 +383,30 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // how many wave thresholds control is at or below (thresholds descend,
     // so they are crossed in order)
     static int WavesCrossed(const OccupierForcesTuning& t, float control);
+    // forcesWaveShare x poolStart, rounded, clamped to [waveMin, waveMax]
+    static int WaveSize(const OccupierForcesTuning& t, int poolStart);
+    // the cluster score of a resistance-held zone z (7.1): the sum over
+    // resistance-held zones y within radius of z of (4 if y is hqZone, 3 if
+    // a base, 1 if a town, else 0) + heat(y) / 40, plus 4 when the HQ stands
+    // within radius of z and its zone is not a held zone counted above
+    // (hqPos VZero: no HQ)
+    static float ClusterScore(const ZoneRegistry& registry, int z, float radius, int hqZone, Vector3Par hqPos);
+    // the best cluster centre (highest score, zone order on ties), -1 when
+    // the resistance holds nothing
+    static int BestCluster(const ZoneRegistry& registry, float radius, int hqZone, Vector3Par hqPos);
+    // the wave hub (7.1): forcesWaveHub when it names an occupier-held
+    // military zone, else the occupier-held AIRFIELD, else SEAPORT, else the
+    // strongest (reserve + live) occupier-held military zone; ties go to the
+    // stronger, then the zone order; -1 none.  live optional per zone.
+    static int PickHub(const ZoneRegistry& registry, const OccupierForcesTuning& t, const AutoArray<int>* live);
+    // roster bases the occupier holds now
+    int RosterBasesHeld(const ZoneRegistry& registry) const;
+    // the final push (6.3): the resistance holds no base and no town besides
+    // the HQ's own zone
+    static bool FinalPush(const ZoneRegistry& registry, int hqZone);
+    // the morale skill factor of a garrison spawned in z: MoraleSkill in a
+    // CITY with standing < LowStanding, else 1
+    static float MoraleFactor(const ZoneRecord& z);
     // territory + step * wavesLanded, never above MaxWarLevel (a territory
     // level already above it is kept)
     static float OccupierWarLevelOf(float territory, int wavesLanded, float step);
@@ -341,6 +461,17 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // a reinforcement wave lands (the phase-4 seam): bodies into the pool,
     // above poolStart if need be, and the occupier war level rises
     void LandWave(int bodies);
+    // S5 (3.3): a pending deposit whose zone changed owner is refunded to
+    // this service's pool (GarrisonCache::SetPendingRefundHook).  The hook
+    // credits the pool and claims the bodies only while Active(); otherwise
+    // GarrisonCache's phase-1 path runs (origin post, else discarded).
+    // InitMission and Clear of the process-wide instance install it; a unit
+    // test's local service installs it explicitly and drops it on Remove or
+    // destruction.
+    void InstallPendingRefundHook();
+    void RemovePendingRefundHook();
+    // the hook body: true when the pool took the bodies
+    static bool RefundPendingToPool(ZoneRegistry& registry, int zone, int originZone, int bodies);
 
     // queries -------------------------------------------------------------------
     int Pool() const { return _pool; }
@@ -372,6 +503,22 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     bool TownEver(const char* name) const;
     // the occupier-side war level (live: ReadWarLevel + landed waves)
     float OccupierWarLevel() const;
+    // the same over a territory level the caller already read
+    float OccupierWarLevelFrom(float territory) const;
+    // waves (phase 4)
+    bool WaveInbound() const { return _waveInbound; }
+    float WaveClock() const { return _waveClock; }
+    int WaveBodies() const { return _waveBodies; }
+    bool WaveFinalStand() const { return _waveFinalStand; }
+    int WaveCount() const { return _waveCount; }
+    bool FinalFired() const { return _finalFired; }
+    int ControlDwell() const { return _controlDwell; }
+    float WaveWindowLeft() const { return _waveWindow; }
+    bool InWave() const { return _waveInbound || _waveWindow > 0; }
+    RString SurgeZone() const { return _surgeZone; }
+    int SurgeBodies() const { return _surgeBodies; }
+    // the surge bodies stored at zone (0 elsewhere)
+    int SurgeAt(const char* zone) const;
 
     // the director (phase 3) -----------------------------------------------------
     // CounterAttackListener: CounterAttack calls these from its own tick
@@ -398,11 +545,28 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
                     AutoArray<int>& out);
     // the push-out target (6.4), -1 none (STRONG is the caller's check)
     int PushoutTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher);
-    // the package and source for an operation on target (no side effects)
-    DirectorAction PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin) const;
-    // one director step: tokens, urgency, cooldowns, intel decay, then at
-    // most one launch.  No-op unless Active().
+    // the package and source for an operation on target (no side effects).
+    // target HqCandidate plans the HQ assault.  fixedSource >= 0 offers only
+    // that base, with fixedSpare bodies to spare (a wave strike's staging).
+    DirectorAction PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
+                           int fixedSource = -1, int fixedSpare = 0) const;
+    // one director step: tokens, urgency, cooldowns, intel decay, standing,
+    // the waves, then at most one launch.  No-op unless Active().
     void Direct(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, float elapsed);
+    // the waves' step (7.1): triggers with dwell and merge, the inbound
+    // clock, the landing and its allocation.  Called by Direct.
+    void StepWaves(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, float elapsed);
+    // fire a wave now (the triggers due, or gmForcesForce "wave"): final
+    // marks the final stand.  A wave already inbound absorbs it (merge).
+    void FireWave(const ZoneRegistry& registry, const DirectorView& view, bool final, const char* why);
+    // the landing's allocation (7.1 order); returns the bodies left in the pool
+    int AllocateWave(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int bodies,
+                     bool final);
+    // standing (7.3): recovery toward 50, the K towns' mean into the refill
+    // factor, informant tips.  Called by Direct.
+    void StepStanding(ZoneRegistry& registry, float elapsed);
+    // one informant tip into the sighting table (a local talked: count at pos)
+    void IngestTip(const ZoneRegistry& registry, int zone, int count, Vector3Par pos);
     // the package catalogue (built from the occupier's ladder at the first
     // director tick on the engine path; tests set it)
     void SetCatalogue(const ForcePackageCatalogue& cat)
@@ -442,8 +606,11 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // test levers (gmForcesForce / gmForcesTune) --------------------------------
     void SetPool(int units);
     void SetMeanStanding(float standing);
-    // gmForcesForce "wave": a request parked for phase 4 (no effect yet)
-    void RequestWave();
+    // gmForcesForce ["wave", n]: wave n fires now (n beyond the thresholds:
+    // the final stand); its thresholds are marked fired.  Inactive: parked
+    // (counted, no effect).  The engine path; the test path takes a view.
+    void RequestWave(int n = 0);
+    void RequestWave(const ZoneRegistry& registry, const DirectorView& view, int n);
 
     // engine hook: activation on the first active frame, then a director
     // tick every forcesDirectorInterval
@@ -507,6 +674,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void DecaySightings();
     bool TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
                    int origin);
+    // launch a planned action: the pool pays hull and crew (and, staged, the
+    // infantry: a deposit into the source's reserve the launch debits), the
+    // ledger row, LaunchFunded, the INFO line.  spendToken: a director token
+    // (not for wave operations).  waveNo > 0 labels a wave operation.
+    bool LaunchAction(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
+                      const DirectorAction& a, bool spendToken, bool staged, int waveNo);
     static bool HasName(const AutoArray<NameRow>& rows, const char* name);
     static void AddName(AutoArray<NameRow>& rows, const char* name);
     static void RemoveName(AutoArray<NameRow>& rows, const char* name);
@@ -559,9 +732,20 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // transient
     float _scanAccum = 0;
     AutoArray<int> _alertPrev; // the last scan's alert states (-1 unknown)
-    bool _basesDeferredLogged = false;
     bool _catalogueBuilt = false;
     ForcePackageCatalogue _catalogue;
+    // waves (phase 4; serialized)
+    bool _waveInbound = false;
+    float _waveClock = 0;        // s until the inbound wave lands
+    int _waveBodies = 0;         // its size
+    bool _waveFinalStand = false; // it carries the final stand (surge)
+    int _waveCount = 0;          // waves fired so far ("Wave N")
+    int _controlDwell = 0;       // consecutive director ticks with a trigger due
+    float _waveWindow = 0;       // s left of "in a wave" after the last landing
+    RString _surgeZone;          // the final stand's base
+    int _surgeBodies = 0;        // the surge stored there (never spare)
+    // transient: the roster bases held as of the last Tick (-1 before one)
+    int _basesHeld = -1;
 };
 
 } // namespace Guerrilla

@@ -21,6 +21,7 @@
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // the S5 refund hook (3.3)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -765,6 +766,101 @@ TEST_CASE("OccupierForces - the ledger is conserved through draws, operations, r
     CHECK(f.of.WavesTotal() == 30);
 }
 
+TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes back to the pool, the ledger holds",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.InstallPendingRefundHook();
+    REQUIRE(GarrisonCache::GetPendingRefundHook() == &OccupierForces::RefundPendingToPool);
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    // the fake reserves start full; pending is read from the registry
+    int reserves = R + G;
+    const int op = 0;
+    const int losses = 0;
+    auto pending = [&]()
+    {
+        int n = 0;
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            n += f.registry.GetZone(i)->pending;
+        }
+        return n;
+    };
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), reserves, pending(), op, P, R, G, f.of.RefillTotal(),
+                                                f.of.WavesTotal(), losses));
+    };
+    check();
+    // a revert refill of 4 into T0, paid by the pool, with the player
+    // standing in the town: a PENDING deposit (S5)
+    const int t0 = f.registry.FindZoneIndex("T0");
+    REQUIRE(t0 >= 0);
+    const float px = f.Z("T0").pos.X();
+    const float pz = f.Z("T0").pos.Z();
+    const int dep = f.of.Deposit(4, "revert");
+    REQUIRE(dep == 4);
+    REQUIRE(GarrisonCache::AddReserve(f.registry, t0, dep, -1, true, px, pz));
+    CHECK(pending() == 4);
+    check();
+    // the town changes owner while the deposit waits: the four go back to
+    // the pool, not to an origin post and not discarded
+    const int poolBefore = f.of.Pool();
+    f.GiveToResistance("T0");
+    CHECK(GarrisonCache::FlushPending(f.registry, t0, true, px, pz, nullptr) == PFRefunded);
+    CHECK(pending() == 0);
+    CHECK(f.Z("T0").pendingOrigin == -1);
+    CHECK(f.of.Pool() == poolBefore + 4);
+    check();
+    // a deposit from a named post (a survivor return) is pooled the same way
+    const int base1 = f.registry.FindZoneIndex("Base1");
+    REQUIRE(base1 >= 0);
+    reserves -= 3; // three leave Base1's reserve ...
+    f.Z("Base1").garrison -= 3.0f;
+    const float base1Left = f.Z("Base1").garrison;
+    const int t1 = f.registry.FindZoneIndex("T1");
+    GarrisonCache::Deposit(f.registry, t1, 3, base1); // ... and wait at T1
+    check();
+    f.GiveToResistance("T1");
+    GarrisonCache::RefundPending(f.registry, t1, true, px, pz);
+    CHECK(f.Z("Base1").garrison == Approx(base1Left)); // the origin gets nothing back
+    CHECK(f.of.Pool() == poolBefore + 7);
+    check();
+    f.of.RemovePendingRefundHook();
+    CHECK(GarrisonCache::GetPendingRefundHook() == nullptr);
+}
+
+TEST_CASE("OccupierForces - S5: with the key off the refund hook declines and the phase-1 path runs",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(kForcesConfig);
+    REQUIRE_FALSE(f.of.Active());
+    f.of.InstallPendingRefundHook();
+    CHECK_FALSE(OccupierForces::RefundPendingToPool(f.registry, 0, -1, 3));
+    // a deposit at the Town from FarBase; the Town falls: back to FarBase
+    // (room 4), as before the pool existed
+    const int town = f.registry.FindZoneIndex("Town");
+    const int farBase = f.registry.FindZoneIndex("FarBase");
+    f.Z("FarBase").garrison = 8.0f;
+    GarrisonCache::Deposit(f.registry, town, 5, farBase);
+    f.GiveToResistance("Town");
+    CHECK(GarrisonCache::FlushPending(f.registry, town, true, 20000.0f, 20000.0f, nullptr) == PFRefunded);
+    CHECK(f.Z("Town").pending == 0);
+    CHECK(f.Z("FarBase").garrison == Approx(12.0f));
+    CHECK(f.of.Pool() == 0);
+    // a local service gives the hook up when it goes away
+    {
+        OccupierForces local;
+        local.InstallPendingRefundHook();
+        CHECK(GarrisonCache::GetPendingRefundHook() == &OccupierForces::RefundPendingToPool);
+    }
+    CHECK(GarrisonCache::GetPendingRefundHook() == nullptr);
+    CHECK_FALSE(OccupierForces::RefundPendingToPool(f.registry, 0, -1, 3));
+}
+
 // ---------------------------------------------------------------------------
 // persistence (11)
 // ---------------------------------------------------------------------------
@@ -1125,8 +1221,17 @@ TEST_CASE("OccupierForces - a held town is a candidate while heat / 40 >= its fl
     REQUIRE(c.Size() == 2);
     CHECK(c[0] == f.registry.FindZoneIndex("Other"));
     CHECK(c[1] == town);
-    // a hot resistance base is never a phase-3 candidate (BASE is phase 4)
+    // a hot resistance base is a candidate while STRONG (D16, phase 4), by
+    // heat with the towns; never while the band is lower
     f.Z("RebelPost").heat = 100;
+    REQUIRE(f.of.Band() == OFBandStrong);
+    f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
+    REQUIRE(c.Size() == 3);
+    CHECK(c[0] == f.registry.FindZoneIndex("RebelPost"));
+    const DirectorAction a = f.of.PlanFor(f.registry, ViewOf(f.registry), c[0], CAODirector);
+    CHECK(a.kind == CAKBase);
+    f.of.SetPool(12);
+    REQUIRE(f.of.Band() == OFBandStretched);
     f.of.Candidates(f.registry, ViewOf(f.registry), launcher, c);
     CHECK(c.Size() == 2);
 }
@@ -1461,7 +1566,7 @@ TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 
     CHECK(launcher.orders.size() < 4);
 }
 
-TEST_CASE("OccupierForces - push-out only when STRONG, on the quiet town nearest a base",
+TEST_CASE("OccupierForces - push-out only when STRONG, on the quiet town or base nearest a base",
           "[game][guerrilla][occupierforces]")
 {
     Fixture f;
@@ -1488,14 +1593,16 @@ TEST_CASE("OccupierForces - push-out only when STRONG, on the quiet town nearest
     f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
     CHECK(launcher.orders.empty());
 
-    // STRONG: the quiet town nearest an occupier base (Held, 1.5 km from the
-    // Post; Town is nearer but not quiet)
+    // STRONG: the quiet held zone nearest an occupier base.  Since phase 4
+    // (6.4, N2) bases are in push-out too: RebelPost (566 m from the Post)
+    // beats Held (1.5 km); Town is nearer still but not quiet
     f.of.SetPool(24);
     REQUIRE(f.of.Band() == OFBandStrong);
     f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
     REQUIRE(launcher.orders.size() == 1);
     CHECK(launcher.orders[0].origin == CAOPushout);
-    CHECK(launcher.orders[0].target == f.registry.FindZoneIndex("Held"));
+    CHECK(launcher.orders[0].target == f.registry.FindZoneIndex("RebelPost"));
+    CHECK(launcher.orders[0].kind == CAKBase);
     CHECK(launcher.orders[0].package == FPFoot); // the minimal package
     CHECK_FALSE(launcher.orders[0].urgent);
     CHECK(launcher.orders[0].bodies == 4);
@@ -1714,6 +1821,572 @@ TEST_CASE("OccupierForces - the director survives save/load", "[game][guerrilla]
     refund.units = 3;
     loaded.NoteOpEvent(f.registry, refund);
     CHECK(loaded.Pool() == pool + 3);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+#include <math.h> // fabsf (phase-4 cases)
+
+// ===========================================================================
+// Phase 4 (OCCUPIER-FORCES.md 6.3, 6.4, 7.1, 7.3, 11): base and HQ
+// candidates, the final push, waves (triggers with dwell and merge, size,
+// cluster, hub, allocation order, the final-stand surge), the war-level
+// split, occupier standing (recovery, the refill mean, informant tips,
+// morale) and the wave state across a save.
+// ===========================================================================
+
+namespace
+{
+
+// a launcher that can report an HQ_ASSAULT in flight
+struct HqLauncher final : DirectorLauncher
+{
+    std::vector<CounterAttackOrder> orders;
+    std::vector<int> records;
+    bool hq = false;
+    bool Launch(const CounterAttackOrder& order) override
+    {
+        orders.push_back(order);
+        if (order.kind == CAKHqAssault)
+        {
+            hq = true;
+        }
+        else
+        {
+            records.push_back(order.target);
+        }
+        return true;
+    }
+    int BornOps() const override { return 0; }
+    bool HasRecord(int zoneIndex) const override
+    {
+        return std::find(records.begin(), records.end(), zoneIndex) != records.end();
+    }
+    bool HasHqRecord() const override { return hq; }
+};
+
+bool HasCandidate(const AutoArray<int>& c, int v)
+{
+    for (int i = 0; i < c.Size(); i++)
+    {
+        if (c[i] == v)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the HQ standing at the Camp
+DirectorView HqView(Fixture& f)
+{
+    DirectorView v = ViewOf(f.registry);
+    v.hqEstablished = true;
+    v.hqZone = f.registry.FindZoneIndex("Camp");
+    v.hqPos = f.Z("Camp").pos;
+    return v;
+}
+
+// one director tick as the engine runs it: Tick (refill, control, the
+// roster bases held), then Direct
+void DirectorTick(Fixture& f, const DirectorView& v, DirectorLauncher& l, float elapsed)
+{
+    f.of.Tick(f.registry, elapsed);
+    f.of.Direct(f.registry, v, l, elapsed);
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - the HQ is a candidate only while STRONG, in a wave, or as the final push",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    HqLauncher launcher;
+    DirectorView v = HqView(f);
+    f.Z("Held").heat = 0;
+    f.Z("RebelPost").heat = 0;
+    AutoArray<int> c;
+
+    // STRONG and the HQ's zone hot: a candidate
+    f.Z("Camp").heat = 100;
+    REQUIRE(f.of.Band() == OFBandStrong);
+    f.of.Candidates(f.registry, v, launcher, c);
+    CHECK(HasCandidate(c, OccupierForces::HqCandidate));
+    // STRETCHED, not in a wave, the resistance still holds a town and a base
+    f.of.SetPool(12);
+    REQUIRE(f.of.Band() == OFBandStretched);
+    f.of.Candidates(f.registry, v, launcher, c);
+    CHECK_FALSE(HasCandidate(c, OccupierForces::HqCandidate));
+    // in a wave (inbound) it is a candidate whatever the band
+    f.of.RequestWave(f.registry, v, 1);
+    REQUIRE(f.of.InWave());
+    f.of.Candidates(f.registry, v, launcher, c);
+    CHECK(HasCandidate(c, OccupierForces::HqCandidate));
+
+    // a cold HQ zone is never a heat candidate (unless its roll is 0)
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(g.of.Activate(g.registry));
+    g.of.SetCatalogue(TruckCatalogue());
+    DirectorView gv = HqView(g);
+    g.Z("Held").heat = 0;
+    g.Z("RebelPost").heat = 0;
+    g.Z("Camp").heat = 0;
+    if (OccupierForces::CandidateRoll(g.Z("Camp")) > 0.0f)
+    {
+        g.of.Candidates(g.registry, gv, launcher, c);
+        CHECK_FALSE(HasCandidate(c, OccupierForces::HqCandidate));
+    }
+    // the final push: no held base, no held town besides the HQ's zone; the
+    // HQ goes first, cold and STRETCHED
+    g.Z("Held").owner = RString("NEUTRAL");
+    g.Z("RebelPost").owner = RString("EAST");
+    CHECK(OccupierForces::FinalPush(g.registry, gv.hqZone));
+    g.of.SetPool(12);
+    g.of.Candidates(g.registry, gv, launcher, c);
+    REQUIRE(c.Size() >= 1);
+    CHECK(c[0] == OccupierForces::HqCandidate);
+    // never with an assault already on it, never without an HQ
+    HqLauncher busy;
+    busy.hq = true;
+    g.of.Candidates(g.registry, gv, busy, c);
+    CHECK_FALSE(HasCandidate(c, OccupierForces::HqCandidate));
+    DirectorView none = gv;
+    none.hqEstablished = false;
+    g.of.Candidates(g.registry, none, launcher, c);
+    CHECK_FALSE(HasCandidate(c, OccupierForces::HqCandidate));
+
+    // the plan: always an HQ_ASSAULT of at least 6 on HqPos
+    const DirectorAction a = g.of.PlanFor(g.registry, gv, OccupierForces::HqCandidate, CAODirector);
+    REQUIRE(a.go);
+    CHECK(a.kind == CAKHqAssault);
+    CHECK(a.target == gv.hqZone);
+    CHECK(a.destPos.X() == Approx(gv.hqPos.X()));
+    CHECK(a.destPos.Z() == Approx(gv.hqPos.Z()));
+    CHECK(a.choice.quote.bodies >= 6);
+    CHECK(a.choice.quote.source == g.registry.FindZoneIndex("FarBase")); // the Post cannot spare 6
+    // an HQ outside every zone: target -1, still HqPos
+    DirectorView outside = gv;
+    outside.hqZone = -1;
+    const DirectorAction b = g.of.PlanFor(g.registry, outside, OccupierForces::HqCandidate, CAODirector);
+    CHECK(b.go);
+    CHECK(b.target == -1);
+}
+
+TEST_CASE("OccupierForces - the director launches the final push as an HQ assault", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    HqLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2)); // AWAKE, two tokens
+    // the towns fall back, the base and Held are gone: only the HQ is left
+    f.Z("Town").owner = RString("NEUTRAL");
+    f.Z("Other").owner = RString("NEUTRAL");
+    f.Z("Held").owner = RString("NEUTRAL");
+    f.Z("RebelPost").owner = RString("EAST");
+    const DirectorView v = HqView(f);
+    f.of.Direct(f.registry, v, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder& o = launcher.orders[0];
+    CHECK(o.kind == CAKHqAssault);
+    CHECK(o.origin == CAODirector);
+    CHECK(o.bodies >= 6);
+    CHECK(o.destPos.X() == Approx(v.hqPos.X()));
+    CHECK(f.of.Tokens() == 1);
+    // a repelled assault rests the HQ, not the Camp zone
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.type = CAOpRepelled;
+    ev.kind = CAKHqAssault;
+    ev.target = v.hqZone;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.Cooldown(OccupierForces::HqCooldownName) > 0);
+    CHECK(f.of.Cooldown("Camp") == Approx(0.0f));
+}
+
+TEST_CASE("OccupierForces - wave size, cluster score and the hub", "[game][guerrilla][occupierforces]")
+{
+    OccupierForcesTuning t;
+    CHECK(t.waveDwell == 2);
+    CHECK(t.waveFinal);
+    CHECK(t.waveShare == Approx(0.5f));
+    CHECK(t.waveMin == 12);
+    CHECK(t.waveMax == 48);
+    CHECK(t.waveLead == Approx(600.0f));
+    CHECK(t.waveLeadFinal == Approx(120.0f));
+    CHECK(t.waveRetakeShare == Approx(0.5f));
+    CHECK(t.waveOps == 4);
+    CHECK(t.waveCluster == Approx(2000.0f));
+    CHECK(t.waveSurge == 12);
+    CHECK(t.hqAssaultMin == 6);
+    CHECK(OccupierForces::WaveSize(t, 24) == 12);
+    CHECK(OccupierForces::WaveSize(t, 60) == 30);
+    CHECK(OccupierForces::WaveSize(t, 88) == 44);
+    CHECK(OccupierForces::WaveSize(t, 200) == 48);
+    CHECK(OccupierForces::WaveSize(t, 10) == 12);
+
+    Fixture f;
+    f.Load(AbelLikeConfig());
+    REQUIRE(f.of.Activate(f.registry));
+    // the hub: the occupier-held AIRFIELD, then the SEAPORT, then the strongest
+    CHECK(OccupierForces::PickHub(f.registry, f.of.Tuning(), nullptr) == f.registry.FindZoneIndex("Base0"));
+    f.GiveToResistance("Base0");
+    CHECK(OccupierForces::PickHub(f.registry, f.of.Tuning(), nullptr) == f.registry.FindZoneIndex("Base1"));
+    f.GiveToResistance("Base1");
+    f.Z("Base3").garrison = 2;
+    CHECK(OccupierForces::PickHub(f.registry, f.of.Tuning(), nullptr) == f.registry.FindZoneIndex("Base2"));
+    // a template hub by name wins while the occupier holds it
+    f.of.TuningMutable().waveHub = "Base3";
+    CHECK(OccupierForces::PickHub(f.registry, f.of.Tuning(), nullptr) == f.registry.FindZoneIndex("Base3"));
+    f.GiveToResistance("Base2");
+    f.GiveToResistance("Base3");
+    CHECK(OccupierForces::PickHub(f.registry, f.of.Tuning(), nullptr) == -1);
+
+    // the cluster: held zones within 2 km, 4 for the HQ's zone, 3 a base, 1
+    // a town, plus heat / 40
+    Fixture g;
+    g.Load(AbelLikeConfig());
+    g.GiveToResistance("T0"); // (1000, 3000)
+    g.GiveToResistance("T1"); // (1500, 3000), 500 m away
+    g.GiveToResistance("Base3");
+    g.Z("T0").heat = 40;
+    g.Z("T1").heat = 20;
+    g.Z("Base3").heat = 0;
+    const int t0 = g.registry.FindZoneIndex("T0");
+    const int b3 = g.registry.FindZoneIndex("Base3");
+    CHECK(OccupierForces::ClusterScore(g.registry, t0, 2000.0f, -1, VZero) == Approx(1 + 1 + 1 + 0.5f));
+    CHECK(OccupierForces::ClusterScore(g.registry, b3, 2000.0f, -1, VZero) == Approx(3.0f));
+    CHECK(OccupierForces::BestCluster(g.registry, 2000.0f, -1, VZero) == t0);
+    // the HQ's zone counts 4; an HQ standing outside every held zone adds 4
+    CHECK(OccupierForces::ClusterScore(g.registry, t0, 2000.0f, t0, g.Z("T0").pos) == Approx(4 + 1 + 1 + 0.5f));
+    CHECK(OccupierForces::ClusterScore(g.registry, b3, 2000.0f, -1, g.Z("Base3").pos) == Approx(3 + 4));
+    g.Z("Base3").heat = 100;
+    CHECK(OccupierForces::BestCluster(g.registry, 2000.0f, -1, VZero) == b3);
+}
+
+TEST_CASE("OccupierForces - wave triggers: dwell, each fires once, the final stand and its surge",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig());
+    REQUIRE(f.of.Activate(f.registry)); // poolStart 60: waves of 30
+    FakeLauncher launcher;
+    DirectorView v = ViewOf(f.registry);
+    // two of four bases fall: C = 0.6 x 0.5 + 0.4 = 0.70 <= 0.75
+    f.GiveToResistance("Base2");
+    f.GiveToResistance("Base3");
+    DirectorTick(f, v, launcher, 60.0f);
+    CHECK(f.of.Control() == Approx(0.7f));
+    CHECK_FALSE(f.of.WaveInbound()); // the first due tick: dwell 1 of 2
+    CHECK(f.of.ControlDwell() == 1);
+    DirectorTick(f, v, launcher, 60.0f);
+    REQUIRE(f.of.WaveInbound());
+    CHECK(f.of.WaveCount() == 1);
+    CHECK(f.of.WaveBodies() == 30);
+    CHECK(f.of.WavesFired() == 1);
+    CHECK_FALSE(f.of.WaveFinalStand());
+    CHECK(f.of.WaveClock() == Approx(600.0f));
+    CHECK(f.of.InWave());
+    const int pool = f.of.Pool();
+    // it lands after the lead: the pool grows, the occupier war level rises;
+    // DORMANT, so no strike goes out, and the full hub needs no top-up
+    DirectorTick(f, v, launcher, 300.0f);
+    CHECK(f.of.WaveInbound());
+    DirectorTick(f, v, launcher, 300.0f);
+    CHECK_FALSE(f.of.WaveInbound());
+    CHECK(f.of.WavesLanded() == 1);
+    CHECK(f.of.Pool() >= pool + 30);
+    CHECK(launcher.orders.empty());
+    CHECK(f.of.InWave()); // the window after a landing
+    // the threshold never fires again
+    for (int i = 0; i < 5; i++)
+    {
+        DirectorTick(f, v, launcher, 60.0f);
+    }
+    CHECK(f.of.WaveCount() == 1);
+
+    // one roster base left: the final stand (C 0.55, the 0.50 line not crossed)
+    f.GiveToResistance("Base1");
+    DirectorTick(f, v, launcher, 60.0f);
+    CHECK_FALSE(f.of.WaveInbound());
+    DirectorTick(f, v, launcher, 60.0f);
+    REQUIRE(f.of.WaveInbound());
+    CHECK(f.of.WaveFinalStand());
+    CHECK(f.of.FinalFired());
+    CHECK(f.of.WaveCount() == 2);
+    CHECK(f.of.WaveClock() == Approx(120.0f));
+    const float before = f.Z("Base0").garrison;
+    DirectorTick(f, v, launcher, 120.0f);
+    CHECK(f.of.WavesLanded() == 2);
+    // the surge: 12 above the last base's strength, never trimmed, never spare
+    CHECK(Str(f.of.SurgeZone()) == "Base0");
+    CHECK(f.of.SurgeBodies() == 12);
+    CHECK(f.Z("Base0").garrison == Approx(before + 12));
+    CHECK(f.Z("Base0").garrison > f.Z("Base0").garrisonMax);
+    CHECK(f.of.SurgeAt("Base0") == 12);
+    // the last base never sources an operation
+    const DirectorAction a = f.of.PlanFor(f.registry, v, f.registry.FindZoneIndex("Base1"), CAODirector);
+    CHECK_FALSE(a.go);
+    for (int i = 0; i < 5; i++)
+    {
+        DirectorTick(f, v, launcher, 60.0f);
+    }
+    CHECK(f.of.WaveCount() == 2);
+    // losing the base takes the surge with it
+    f.GiveToResistance("Base0");
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.SurgeBodies() == 0);
+}
+
+TEST_CASE("OccupierForces - triggers due together merge into one wave; nothing moves after the win or loss",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig());
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    DirectorView v = ViewOf(f.registry);
+    // three bases and seven towns at once: both thresholds and the final stand
+    f.GiveToResistance("Base1");
+    f.GiveToResistance("Base2");
+    f.GiveToResistance("Base3");
+    for (int i = 0; i < 7; i++)
+    {
+        f.GiveToResistance(("T" + std::to_string(i)).c_str());
+    }
+    DirectorTick(f, v, launcher, 60.0f);
+    DirectorTick(f, v, launcher, 60.0f);
+    REQUIRE(f.of.WaveInbound());
+    CHECK(f.of.WaveCount() == 1);
+    CHECK(f.of.WavesFired() == 2);
+    CHECK(f.of.FinalFired());
+    CHECK(f.of.WaveFinalStand());
+    CHECK(f.of.WaveClock() == Approx(120.0f));
+
+    // a trigger due while a wave is inbound merges into it
+    Fixture g;
+    g.Load(AbelLikeConfig());
+    REQUIRE(g.of.Activate(g.registry));
+    DirectorView gv = ViewOf(g.registry);
+    g.of.RequestWave(g.registry, gv, 1);
+    REQUIRE(g.of.WaveInbound());
+    g.GiveToResistance("Base1");
+    g.GiveToResistance("Base2");
+    g.GiveToResistance("Base3");
+    DirectorTick(g, gv, launcher, 60.0f);
+    DirectorTick(g, gv, launcher, 60.0f);
+    CHECK(g.of.WaveCount() == 1);
+    CHECK(g.of.WaveFinalStand()); // the merged final stand
+    CHECK(g.of.WaveClock() <= 120.0f);
+
+    // won (or lost): the inbound wave holds still
+    const float clock = g.of.WaveClock();
+    DirectorView won = gv;
+    won.won = true;
+    DirectorTick(g, won, launcher, 60.0f);
+    CHECK(g.of.WaveClock() == Approx(clock));
+    DirectorView lost = gv;
+    lost.lost = true;
+    DirectorTick(g, lost, launcher, 60.0f);
+    CHECK(g.of.WaveClock() == Approx(clock));
+    CHECK(g.of.WavesLanded() == 0);
+}
+
+TEST_CASE("OccupierForces - a landed wave: hub top-up, strikes on the cluster, reinforce columns, the rest pooled",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig());
+    REQUIRE(f.of.Activate(f.registry)); // poolStart 60
+    f.of.SetCatalogue(TruckCatalogue());
+    FakeLauncher launcher;
+    REQUIRE(FlipTown(f, "T13", 1) == false);
+    REQUIRE(FlipTown(f, "T12", 2)); // AWAKE
+    const int tokens = f.of.Tokens();
+    // a held, hot base (the densest cluster), a bled base, a short hub
+    f.GiveToResistance("Base3");
+    f.Z("Base3").heat = 100;
+    f.Z("Base2").garrison = 3;
+    f.Z("Base0").garrison = 5;
+    f.of.TuningMutable().waveLead = 0;
+    DirectorView v = ViewOf(f.registry);
+    f.of.RequestWave(f.registry, v, 1); // wave 1 (30) inbound, lead 0
+    REQUIRE(f.of.WaveInbound());
+    const int pool = f.of.Pool();
+    f.of.Direct(f.registry, v, launcher, 60.0f); // lands now
+    CHECK(f.of.WavesLanded() == 1);
+    // 1. the hub (Base0, the airfield) is topped up to its garrisonMax
+    // 3. one strike on Base3, from the hub, its infantry staged there
+    // 4. a reinforce column from the hub to the bled Base2
+    REQUIRE(launcher.orders.size() >= 2);
+    const CounterAttackOrder& strike = launcher.orders[0];
+    CHECK(strike.kind == CAKBase);
+    CHECK(strike.origin == CAOWave);
+    CHECK(strike.target == f.registry.FindZoneIndex("Base3"));
+    CHECK(strike.source == f.registry.FindZoneIndex("Base0"));
+    CHECK(strike.bodies == 8); // max(4, garrisonMax 8), within the 15 the strikes may take
+    const CounterAttackOrder& column = launcher.orders[1];
+    CHECK(column.kind == CAKReinforce);
+    CHECK(column.origin == CAOWave);
+    CHECK(column.target == f.registry.FindZoneIndex("Base2"));
+    CHECK(column.source == f.registry.FindZoneIndex("Base0"));
+    CHECK(column.bodies == 5);
+    // the fake launcher debits nothing: the hub holds its top-up plus both
+    // staged forces (5 + 3 + 8 + 5)
+    CHECK(f.Z("Base0").garrison == Approx(21.0f));
+    // wave operations take no director token
+    for (size_t i = 2; i < launcher.orders.size(); i++)
+    {
+        CHECK(launcher.orders[i].origin == CAODirector);
+    }
+    if (launcher.orders.size() == 2)
+    {
+        CHECK(f.of.Tokens() == tokens);
+    }
+    // the pool: + 30, - 3 (top-up), - 8, - 5 (staging); 14 stay
+    CHECK(f.of.Pool() == pool + 14);
+}
+
+TEST_CASE("OccupierForces - the occupier war level: territory plus landed waves; equal with the key off",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture off;
+    off.Load(ConfigWith("occupierForces = 0;"));
+    CHECK(off.of.OccupierWarLevelFrom(2.0f) == Approx(2.0f));
+    off.of.LandWave(30); // inert: nothing lands
+    CHECK(off.of.OccupierWarLevelFrom(3.5f) == Approx(3.5f));
+
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    CHECK(f.of.OccupierWarLevelFrom(2.0f) == Approx(2.0f));
+    f.of.LandWave(12);
+    CHECK(f.of.OccupierWarLevelFrom(2.0f) == Approx(3.0f));
+    f.of.LandWave(12);
+    CHECK(f.of.OccupierWarLevelFrom(2.0f) == Approx(4.0f));
+    CHECK(f.of.OccupierWarLevelFrom(5.5f) == Approx(6.0f)); // capped
+    f.of.TuningMutable().waveWarLevel = 0;
+    CHECK(f.of.OccupierWarLevelFrom(2.0f) == Approx(2.0f));
+}
+
+TEST_CASE("OccupierForces - standing: recovery toward 50, the refill mean, informant tips, morale",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    // recovery: 1 point per 600 s toward 50, from either side; posts untouched
+    f.Z("Town").standing = 20;
+    f.Z("Other").standing = 80;
+    f.Z("Post").standing = 10;
+    f.of.StepStanding(f.registry, 600.0f);
+    CHECK(f.Z("Town").standing == Approx(21.0f));
+    CHECK(f.Z("Other").standing == Approx(79.0f));
+    CHECK(f.Z("Post").standing == Approx(10.0f));
+    f.Z("Other").standing = 50.5f;
+    f.of.StepStanding(f.registry, 600.0f);
+    CHECK(f.Z("Other").standing == Approx(50.0f)); // never past 50
+    // the refill factor reads the mean of the K towns (Town 22, Other 50)
+    CHECK(f.of.MeanStanding() == Approx(36.0f));
+
+    // tips: never from a town below 50, however long fighters stand there
+    f.Z("Town").standing = 0;
+    f.Z("Town").lastGuerHold = 3;
+    for (int i = 0; i < 60; i++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        f.of.StepStanding(f.registry, 60.0f);
+    }
+    CHECK(f.of.KnownFighters(f.registry, f.registry.FindZoneIndex("Town")) == 0);
+    // a trusting town (standing near 100: chance about 0.5 a tick) talks
+    f.Z("Other").standing = 100;
+    f.Z("Other").lastGuerHold = 2;
+    for (int i = 0; i < 40 && f.of.KnownFighters(f.registry, f.registry.FindZoneIndex("Other")) == 0; i++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        f.of.StepStanding(f.registry, 60.0f);
+    }
+    CHECK(f.of.KnownFighters(f.registry, f.registry.FindZoneIndex("Other")) == 2);
+    bool near = false;
+    for (int r = 0; r < f.of.SightingRows(); r++)
+    {
+        if (Str(f.of.SightingZone(r)) == "Other")
+        {
+            const AutoArray<Vector3>* p = f.of.SightingPositions(r);
+            REQUIRE(p != nullptr);
+            REQUIRE(p->Size() == 1);
+            const float dx = (*p)[0].X() - f.Z("Other").pos.X();
+            const float dz = (*p)[0].Z() - f.Z("Other").pos.Z();
+            near = fabsf(dx) <= OccupierForces::TipJitter + 0.01f && fabsf(dz) <= OccupierForces::TipJitter + 0.01f;
+        }
+    }
+    CHECK(near);
+
+    // morale: a garrison in a town that turned on the occupier
+    ZoneRecord town = f.Z("Town");
+    town.standing = 20;
+    CHECK(OccupierForces::MoraleFactor(town) == Approx(0.8f));
+    town.standing = 25;
+    CHECK(OccupierForces::MoraleFactor(town) == Approx(1.0f));
+    ZoneRecord post = f.Z("Post");
+    post.standing = 0;
+    CHECK(OccupierForces::MoraleFactor(post) == Approx(1.0f));
+}
+
+TEST_CASE("OccupierForces - the wave state survives save/load", "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-waves.bin";
+    const std::string config = AbelLikeConfig();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    DirectorView v = ViewOf(f.registry);
+    // a forced final stand lands (the surge), then wave 2 is inbound
+    f.of.RequestWave(f.registry, v, 3);
+    REQUIRE(f.of.WaveFinalStand());
+    f.of.Direct(f.registry, v, launcher, 120.0f);
+    REQUIRE(f.of.SurgeBodies() > 0);
+    f.of.RequestWave(f.registry, v, 1);
+    f.of.Direct(f.registry, v, launcher, 100.0f);
+    REQUIRE(f.of.WaveInbound());
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.WaveInbound());
+    CHECK(loaded.WaveClock() == Approx(f.of.WaveClock()));
+    CHECK(loaded.WaveBodies() == f.of.WaveBodies());
+    CHECK(loaded.WaveCount() == 2);
+    CHECK_FALSE(loaded.WaveFinalStand());
+    CHECK(loaded.FinalFired());
+    CHECK(loaded.WavesFired() == 1);
+    CHECK(loaded.WavesLanded() == 1);
+    CHECK(Str(loaded.SurgeZone()) == Str(f.of.SurgeZone()));
+    CHECK(loaded.SurgeBodies() == f.of.SurgeBodies());
+    CHECK(loaded.WaveWindowLeft() == Approx(f.of.WaveWindowLeft()));
     ExtParsMission.Clear();
     std::filesystem::remove(path);
 }

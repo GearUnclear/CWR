@@ -759,6 +759,12 @@ ExposureFn HiddenFrom(Vector3 c, float d)
     return [c, d](Vector3Par p) { return Dist2DTest(p, c) >= d ? (int)CAExposeHidden : (int)CAExposeSeen; };
 }
 
+// hidden within d of c, seen beyond (only the ground round one base is unseen)
+ExposureFn HiddenNear(Vector3 c, float d)
+{
+    return [c, d](Vector3Par p) { return Dist2DTest(p, c) <= d ? (int)CAExposeHidden : (int)CAExposeSeen; };
+}
+
 // a perception predicate for the birth rule
 struct FakeGate final : CounterAttackGate
 {
@@ -1795,10 +1801,12 @@ TEST_CASE("CounterAttack - birth chain: launch, backward, the next base back, ca
         REQUIRE(ops.spawns == 1);
         CHECK(Dist2DTest(ops.lastFrom, f.Z(f.post).pos) == Approx(0.4f * 670.82f).margin(1.0f));
     }
-    // every road watched: after counterAttackBirthGiveUp the operation moves
-    // to the next base back (the old one refunded, the new one debited, a
-    // base that cannot spare the whole force passed over), then, with no
-    // base left, it is cancelled unseen; it never counted as born
+    // the Post's road watched, FarBase's not: the operation moves to the
+    // next base back AT ONCE, with no wait (the old one refunded, the new one
+    // debited, a base that cannot spare the whole force passed over); once
+    // FarBase's road is watched too and no base passes, it waits
+    // counterAttackBirthGiveUp and is cancelled unseen; it never counted as
+    // born
     Fixture f;
     f.Load(kChainConfig);
     f.RaiseTown(f.town);
@@ -1808,17 +1816,19 @@ TEST_CASE("CounterAttack - birth chain: launch, backward, the next base back, ca
     FakeListener ear;
     ListenerGuard guard(&ear);
     FakeOps ops;
-    ops.exposure = AllSeen();
+    const Vector3 farPos = f.Z(f.farBase).pos;
+    ops.exposure = HiddenNear(farPos, 2000.0f); // only round FarBase is unseen
+    REQUIRE(ops.exposure(farPos) == CAExposeHidden);
+    REQUIRE(ops.exposure(f.Z(f.post).pos) == CAExposeSeen);
     const Vector3 town = f.Z(f.town).pos;
     const CounterAttackView near = Fixture::View(town.X(), town.Z());
     AutoArray<ZoneEventRecord> fired;
     REQUIRE(f.ca.LaunchFunded(f.registry, near, FootOrder(f.town, f.post, 5), &ops, fired));
     CHECK(f.Z(f.post).garrison == Approx(1.0f));
-    f.ca.Step(f.registry, near, 1.0f, &ops, fired); // tried: nothing unseen
-    CHECK(f.ca.Get(0)->hiddenLogged);
-    f.ca.Step(f.registry, near, f.ca.Tuning().birthGiveUp + 1.0f, &ops, fired);
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired); // tried: nothing unseen from the Post, re-sourced at once
     REQUIRE(f.ca.Count() == 1);
     CHECK(Fixture::Str(f.ca.Get(0)->source) == "FarBase");
+    CHECK(f.ca.Get(0)->deferTime == Approx(0.0f));
     REQUIRE(ear.Count(CAOpResourced) == 1);
     CHECK(ear.Last(CAOpResourced)->source == f.farBase);
     CHECK(ear.Last(CAOpResourced)->bodies == 5);
@@ -1828,19 +1838,149 @@ TEST_CASE("CounterAttack - birth chain: launch, backward, the next base back, ca
     CHECK(f.Z(mid).garrison == Approx(3.0f));
     CHECK(f.Z(f.farBase).garrison == Approx(7.0f));
     CHECK(f.ca.BornOps() == 0);
-    // FarBase's road is watched too: nothing further back, cancelled unseen
+    // the next step births it at FarBase (the test world refuses the squad)
     f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+    CHECK(ops.spawns == 1);
+    CHECK(Dist2DTest(ops.lastFrom, farPos) < 1.0f);
+    // FarBase's road is watched too: no base passes, it waits, then is
+    // cancelled unseen
+    ops.exposure = AllSeen();
+    f.ca.Step(f.registry, near, CounterAttack::RetryInterval + 1.0f, &ops, fired); // the retry runs out
+    f.ca.Step(f.registry, near, 1.0f, &ops, fired);                                // nothing passes: waits
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(f.ca.Get(0)->hiddenLogged);
+    CHECK(ear.Count(CAOpResourced) == 1);
     f.ca.Step(f.registry, near, f.ca.Tuning().birthGiveUp + 1.0f, &ops, fired);
     CHECK(f.ca.Count() == 0);
     REQUIRE(ear.Count(CAOpCancelledUnseen) == 1);
     CHECK(ear.Last(CAOpCancelledUnseen)->bodies == 5);
     CHECK(ear.Last(CAOpCancelledUnseen)->opId == 7);
     CHECK(f.Z(f.farBase).garrison == Approx(12.0f));
-    CHECK(ops.spawns == 0);
+    CHECK(ops.spawns == 1);
     CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
     // nothing visible ever happened: no counterAttack event, no turn-back
     CHECK(CountEvents(fired, ZECounterAttack, f.town) == 0);
     CHECK(ear.Count(CAOpAborted) == 0);
+}
+
+TEST_CASE("CounterAttack - birth chain: a nearer base whose road is watched is passed over; none passes, it waits",
+          "[game][guerrilla][counterattack]")
+{
+    // Mid (nearer the town, spares the five) has a watched road; FarBase's
+    // is not: the re-source skips Mid for FarBase
+    {
+        Fixture f;
+        f.Load(kChainConfig);
+        f.RaiseTown(f.town);
+        const int mid = f.registry.FindZoneIndex("Mid");
+        REQUIRE(mid >= 0);
+        REQUIRE(f.Z(mid).garrison == Approx(8.0f));
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        FakeOps ops;
+        ops.exposure = HiddenNear(f.Z(f.farBase).pos, 2000.0f);
+        REQUIRE(ops.exposure(f.Z(mid).pos) == CAExposeSeen);
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView near = Fixture::View(town.X(), town.Z());
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE(f.ca.LaunchFunded(f.registry, near, FootOrder(f.town, f.post, 5), &ops, fired));
+        f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+        REQUIRE(f.ca.Count() == 1);
+        CHECK(Fixture::Str(f.ca.Get(0)->source) == "FarBase");
+        CHECK(f.Z(mid).garrison == Approx(8.0f)); // not debited
+        CHECK(f.Z(f.farBase).garrison == Approx(7.0f));
+        CHECK(ear.Count(CAOpResourced) == 1);
+    }
+    // every road watched: no re-source before the give-up wait, then cancel
+    {
+        Fixture f;
+        f.Load(kChainConfig);
+        f.RaiseTown(f.town);
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        FakeOps ops;
+        ops.exposure = AllSeen();
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView near = Fixture::View(town.X(), town.Z());
+        AutoArray<ZoneEventRecord> fired;
+        REQUIRE(f.ca.LaunchFunded(f.registry, near, FootOrder(f.town, f.post, 5), &ops, fired));
+        for (int i = 0; i < 10; i++)
+        {
+            f.ca.Step(f.registry, near, 30.0f, &ops, fired); // 300 s, half the give-up
+        }
+        REQUIRE(f.ca.Count() == 1);
+        CHECK(Fixture::Str(f.ca.Get(0)->source) == "Post");
+        CHECK(ear.Count(CAOpResourced) == 0);
+        CHECK(ear.Count(CAOpCancelledUnseen) == 0);
+        for (int i = 0; i < 12 && f.ca.Count() > 0; i++)
+        {
+            f.ca.Step(f.registry, near, 30.0f, &ops, fired);
+        }
+        CHECK(f.ca.Count() == 0);
+        CHECK(ear.Count(CAOpResourced) == 0);
+        CHECK(ear.Count(CAOpCancelledUnseen) == 1);
+        CHECK(ear.Count(CAOpAborted) == 0);
+        CHECK(ops.spawns == 0);
+    }
+}
+
+TEST_CASE("CounterAttack - key on, director DORMANT: a legacy record takes the birth chain, never turns back (D6)",
+          "[game][guerrilla][counterattack]")
+{
+    // the legacy Decide path with the key on: the Post's road watched,
+    // FarBase's not; the legacy record is re-sourced, not turned back
+    {
+        Fixture f;
+        f.Load(Certain("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        FakeOps ops;
+        ops.exposure = HiddenNear(f.Z(f.farBase).pos, 2000.0f);
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView near = Fixture::View(town.X(), town.Z());
+        AutoArray<ZoneEventRecord> fired;
+        f.ca.Step(f.registry, near, 300.0f, &ops, fired); // launched with the town in the bubble
+        REQUIRE(f.ca.Count() == 1);
+        CHECK_FALSE(f.ca.Get(0)->funded);
+        CHECK(f.ca.Get(0)->origin == CAOLegacy);
+        for (int i = 0; i < 3 && ear.Count(CAOpResourced) == 0; i++)
+        {
+            f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+        }
+        REQUIRE(ear.Count(CAOpResourced) == 1);
+        CHECK(Fixture::Str(f.ca.Get(0)->source) == "FarBase");
+        CHECK(ear.Count(CAOpAborted) == 0);
+    }
+    // every road watched: after the give-up wait it is cancelled unseen,
+    // its bodies back to the Post, never a visible turn-back (Aborted)
+    {
+        Fixture f;
+        f.Load(Certain("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        FakeOps ops;
+        ops.exposure = AllSeen();
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView near = Fixture::View(town.X(), town.Z());
+        AutoArray<ZoneEventRecord> fired;
+        f.ca.Step(f.registry, near, 300.0f, &ops, fired);
+        REQUIRE(f.ca.Count() == 1);
+        const int strength = f.ca.Get(0)->strength;
+        REQUIRE(strength > 0);
+        for (int i = 0; i < 40 && f.ca.Count() > 0; i++)
+        {
+            f.ca.Step(f.registry, near, 25.0f, &ops, fired);
+        }
+        CHECK(f.ca.Count() == 0);
+        CHECK(ear.Count(CAOpCancelledUnseen) == 1);
+        CHECK(ear.Count(CAOpAborted) == 0);
+        CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(6.0f));
+        CHECK(CountEvents(fired, ZECounterAttack, f.town) == 0);
+    }
 }
 
 TEST_CASE("CounterAttack - key on: an arrival against defenders goes live, waits over budget, never rolls",
@@ -2280,4 +2420,270 @@ TEST_CASE("CounterAttack - the win latch freezes launches, steps and reverts (7.
     CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
     end.Clear();
     CHECK(f.registry.RevertTown(f.town, fired));
+}
+
+// ===========================================================================
+// Occupier forces, phase 4 part A (OCCUPIER-FORCES.md 7.1, 7.2, 9.1): BASE,
+// HQ_ASSAULT and REINFORCE launches, HqAssaultPresence (D14), the HQ's fall,
+// the moved HQ, a BASE force retaking an empty base, the wave cap, the
+// record fields across a save and the lose freeze.
+// ===========================================================================
+
+namespace
+{
+
+// the HQ at the Camp, the player far away
+CounterAttackView HqFar(Fixture& f)
+{
+    CounterAttackView v = Fixture::View(FarX, FarZ);
+    v.hqEstablished = true;
+    v.hqPos = f.Z(f.camp).pos;
+    v.hqZone = f.camp;
+    return v;
+}
+
+CounterAttackOrder KindOrder(int kind, int target, int source, int bodies, int opId)
+{
+    CounterAttackOrder o = FootOrder(target, source, bodies, opId);
+    o.kind = kind;
+    return o;
+}
+
+} // namespace
+
+TEST_CASE("CounterAttack - phase 4 launches: BASE, HQ_ASSAULT and REINFORCE validation",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    f.Z(f.farBase).owner = "GUER"; // a held base
+    const CounterAttackView far = HqFar(f);
+    AutoArray<ZoneEventRecord> fired;
+
+    // BASE: only on a held military zone
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKBase, f.town, f.post, 4, 1), nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKBase, f.camp, f.post, 4, 1), nullptr, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKBase, f.farBase, f.post, 4, 1), nullptr, fired));
+    CHECK(f.ca.Get(0)->kind == CAKBase);
+    CHECK(f.ca.FindByTarget("FarBase") == 0);
+    // one record per target
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKBase, f.farBase, f.post, 1, 2), nullptr, fired));
+
+    // HQ_ASSAULT: needs an established HQ; target -1 allowed; destination HqPos
+    CounterAttackView noHq = far;
+    noHq.hqEstablished = false;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, noHq, KindOrder(CAKHqAssault, -1, f.post, 1, 3), nullptr, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, -1, f.post, 1, 3), nullptr, fired));
+    const int hq = f.ca.FindHqAssault();
+    REQUIRE(hq >= 0);
+    const CounterAttack::Record* r = f.ca.Get(hq);
+    CHECK(r->kind == CAKHqAssault);
+    CHECK(Fixture::Str(r->target).empty());
+    CHECK(r->destPos.X() == Approx(far.hqPos.X()));
+    CHECK(r->destPos.Z() == Approx(far.hqPos.Z()));
+    CHECK(CounterAttack::DestOf(f.registry, *r).X() == Approx(far.hqPos.X()));
+    // one assault at a time; an HQ record never takes a zone's slot
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.post, 1, 4), nullptr, fired));
+    CHECK(f.ca.FindByTarget("") < 0);
+
+    // REINFORCE: an occupier-held post other than the source
+    f.Z(f.farBase).owner = "EAST";
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.town, f.post, 1, 5), nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKReinforce, f.post, f.post, 1, 5), nullptr, fired));
+    // alarms and strikes are later phases
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKAlarm, f.town, f.post, 1, 6), nullptr, fired));
+    // the lose latch refuses everything
+    CounterAttackView lost = far;
+    lost.lost = true;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, lost, FootOrder(f.town, f.post, 1, 7), nullptr, fired));
+}
+
+TEST_CASE("CounterAttack - HqAssaultPresence counts only HQ_ASSAULT forces at the HQ (D14)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town); // the town 300 m from the Camp: a passer-by's target
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    const CounterAttackView far = HqFar(f);
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4, 1), nullptr, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 2), nullptr, fired));
+    f.ca.Step(f.registry, far, 20000.0f, nullptr, fired);
+    // both arrived: the retake holds the empty town, the assault holds the
+    // undefended HQ; only the assault counts at the HQ
+    const int hq = f.ca.FindHqAssault();
+    REQUIRE(hq >= 0);
+    REQUIRE(f.ca.Get(hq)->phase == CAHolding);
+    REQUIRE(f.ca.Get(f.ca.FindByTarget("Town"))->phase == CAHolding);
+    const Vector3 hqPos = far.hqPos;
+    CHECK(f.ca.HqAssaultPresence(hqPos, 150.0f, nullptr) == 6);
+    CHECK(f.ca.HqAssaultPresence(f.Z(f.town).pos, 150.0f, nullptr) == 0); // the town is 300 m off
+    // the assault holding at a Camp HQ never settles as a zone garrison
+    CHECK(f.ca.SettlePresence(f.registry, f.camp) == 0);
+    // the player near the HQ suspends the holding force: it counts no more
+    CounterAttackView near = far;
+    near.playerX = hqPos.X();
+    near.playerZ = hqPos.Z();
+    f.ca.Step(f.registry, near, 1.0f, nullptr, fired);
+    CHECK(f.ca.HqAssaultPresence(hqPos, 150.0f, nullptr) == 0);
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.HqAssaultPresence(hqPos, 150.0f, nullptr) == 6);
+    // defenders at the HQ: the holding force goes live (it waits at the edge
+    // here: no world), and an abstract force at the edge counts nothing
+    CounterAttackView defended = far;
+    defended.hqDefenders = 2;
+    f.ca.Step(f.registry, defended, 1.0f, nullptr, fired);
+    CHECK(f.ca.Get(f.ca.FindHqAssault())->phase == CATravel);
+    CHECK(f.ca.HqAssaultPresence(hqPos, 150.0f, nullptr) == 0);
+}
+
+TEST_CASE("CounterAttack - the HQ falls: the assault settles, its bodies to the pool; a moved HQ sends it home",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    const CounterAttackView far = HqFar(f);
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 2), nullptr, fired));
+    f.ca.Step(f.registry, far, 20000.0f, nullptr, fired);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    const int before = of.Pool();
+    // GuerrillaBase::Destroy un-establishes the HQ (and queues hqLost)
+    CounterAttackView fallen = far;
+    fallen.hqEstablished = false;
+    CHECK(f.ca.SettleHqAssaults(f.registry, fallen, nullptr) == 1);
+    CHECK(f.ca.Count() == 0);
+    CHECK(of.Pool() == before + 6);
+    REQUIRE(ear.Last(CAOpSettled) != nullptr);
+    CHECK(ear.Last(CAOpSettled)->kind == CAKHqAssault);
+    CHECK(ear.Last(CAOpSettled)->bodies == 6);
+
+    // the same through the step (the HQ no longer established)
+    f.Z(f.farBase).garrison = 12;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 3), nullptr, fired));
+    f.ca.Step(f.registry, fallen, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+
+    // a moved HQ: the force goes home to its base
+    f.Z(f.farBase).garrison = 12;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 4), nullptr, fired));
+    const float reserve = f.Z(f.farBase).garrison; // 6 left after the launch
+    CounterAttackView moved = far;
+    moved.hqPos = f.Z(f.other).pos;
+    f.ca.Step(f.registry, moved, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.Z(f.farBase).garrison == Approx(reserve + 6));
+    CHECK(ear.Last(CAOpAborted) != nullptr);
+}
+
+TEST_CASE("CounterAttack - a BASE force holds an empty base and retakes it through occCapture",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.registry.Tuning().baseRetake);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    f.Z(f.farBase).owner = "GUER"; // a held base, empty
+    f.Z(f.farBase).garrison = 0;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKBase, f.farBase, f.post, 5, 9), nullptr, fired));
+    f.ca.Step(f.registry, far, 50000.0f, nullptr, fired);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    CHECK(f.ca.AbstractPresence(f.registry, f.farBase) == 5);
+    CHECK(f.ca.SettlePresence(f.registry, f.farBase) == 5);
+    // the zone tick runs the base meter off-screen on the abstract presence
+    ZoneTickInputs in = f.Inputs(FarX, FarZ, -1, 0, f.farBase, 5);
+    in.settleOcc.Resize(f.registry.NZones());
+    for (int i = 0; i < in.settleOcc.Size(); i++)
+    {
+        in.settleOcc[i] = 0;
+    }
+    in.settleOcc[f.farBase] = 5;
+    AutoArray<ZoneEventRecord> zf;
+    for (int tick = 0; tick < 10 && stricmp(f.Z(f.farBase).owner, "GUER") == 0; tick++)
+    {
+        f.registry.EvaluateTick(in, zf);
+    }
+    CHECK(CountEvents(zf, ZEBaseLost, f.farBase) == 1);
+    CHECK(Fixture::Str(f.Z(f.farBase).owner) == "EAST");
+    // the holding bodies are the base's new garrison; the record settles
+    CHECK(f.Z(f.farBase).garrison >= 5.0f);
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Last(CAOpSettled) != nullptr);
+    CHECK(ear.Last(CAOpSettled)->kind == CAKBase);
+}
+
+TEST_CASE("CounterAttack - wave operations come on top of forcesOpsMax (OpsCap)", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    AutoArray<ZoneEventRecord> fired;
+    f.ca.TuningMutable().forcesOpsMax = 0;
+    CHECK(f.ca.OpsCap() == 0);
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4, 1), nullptr, fired));
+    CounterAttackOrder wave = FootOrder(f.town, f.post, 4, 2);
+    wave.origin = CAOWave;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, wave, nullptr, fired));
+    CHECK(f.ca.WaveRecords() == 1);
+    CHECK(f.ca.OpsCap() == 1);
+    CHECK(f.ca.BornOps(false) == 0);
+}
+
+TEST_CASE("CounterAttack - destPos and hqDone survive save/load; the lose latch freezes the step",
+          "[game][guerrilla][counterattack][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "counter-attack-phase4.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    const CounterAttackView far = HqFar(f);
+    AutoArray<ZoneEventRecord> fired;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, -1, f.farBase, 6, 12), nullptr, fired));
+    const_cast<CounterAttack::Record*>(f.ca.Get(0))->hqDone = true;
+    const float clock = f.ca.Get(0)->clock;
+    // lost: nothing steps
+    CounterAttackView lost = far;
+    lost.lost = true;
+    f.ca.Step(f.registry, lost, 500.0f, nullptr, fired);
+    CHECK(f.ca.Get(0)->clock == Approx(clock));
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.ca.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    CounterAttack loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.Count() == 1);
+    CHECK(loaded.Get(0)->kind == CAKHqAssault);
+    CHECK(loaded.Get(0)->destPos.X() == Approx(far.hqPos.X()));
+    CHECK(loaded.Get(0)->destPos.Z() == Approx(far.hqPos.Z()));
+    CHECK(loaded.Get(0)->hqDone);
+    CHECK(loaded.FindHqAssault() == 0);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
 }

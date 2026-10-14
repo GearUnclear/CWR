@@ -1,6 +1,7 @@
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // GetZoneState (modulation)
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the occupier-side war level (7.1)
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>   // ClassifyWeaponShow
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -1903,7 +1904,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
     RString escortType;
     RString crewType;
     const char* sideName = nullptr;
-    const float warLevel = ReadWarLevel();
+    const float warLevel = OccupierForces::Instance().OccupierWarLevel();
     RString occ = registry.OccupierSide();
     if (kind == TKCiv)
     {
@@ -3984,7 +3985,7 @@ void Traffic::Simulate(float deltaT)
             PickRoute(TKPatrol, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
         in.hasConvoyRoute =
             PickRoute(TKConvoy, zones, playerPos.X(), playerPos.Z(), _tuning, 0.0f, o, d, -1, &_percept.band);
-        in.warLevel = ReadWarLevel();
+        in.warLevel = OccupierForces::Instance().OccupierWarLevel();
         _diag.hasCivRoute = in.hasCivRoute;
         _diag.hasPatrolRoute = in.hasPatrolRoute;
         _diag.hasConvoyRoute = in.hasConvoyRoute;

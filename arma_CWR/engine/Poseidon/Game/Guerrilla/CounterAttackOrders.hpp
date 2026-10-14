@@ -16,6 +16,7 @@
 // Names here are fixed by the orchestrator; both services include this file.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
+#include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
 namespace Poseidon
@@ -99,6 +100,11 @@ struct CounterAttackOrder
     // appended by CounterAttack (phase 3 part B) ---------------------------
     float lethality = 0;     // A_lethal per infantry body (6.5, item 12); 0 = 1.0.  The legacy Fight's odds use
                              // bodies x this, its losses the bodies.
+    // appended by phase 4 part A (OCCUPIER-FORCES.md 9.1) ------------------
+    // explicit march destination: when non-zero it replaces the target
+    // zone's centre as the place the force marches to and resolves at.  Set
+    // for CAKHqAssault (GuerrillaBase::HqPos()); VZero for every other kind.
+    Vector3 destPos = VZero;
 };
 
 // what CounterAttack reports back (one event per state change)

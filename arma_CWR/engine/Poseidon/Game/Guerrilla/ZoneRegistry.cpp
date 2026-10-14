@@ -234,6 +234,7 @@ void ZoneRegistry::Clear()
     _tickPlayerX = 0;
     _tickPlayerZ = 0;
     _pending.Clear();
+    _queued.Clear();
     _pendingOccupierSide = RString();
     _pendingResistanceSide = RString();
     _pendingOccupierFaction = RString();
@@ -722,6 +723,10 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.cityGarrison = ReadTownGarrison(cfg.ReadValue("cityGarrison", (float)_tuning.cityGarrison), "cityGarrison",
                                             "CfgGuerrillaZones");
     _tuning.townRetake = cfg.ReadValue("townRetake", _tuning.townRetake ? 1.0f : 0.0f) != 0.0f;
+    // base recapture (OCCUPIER-FORCES.md 7.2): follows the occupier forces
+    // layer key unless authored on its own
+    _tuning.baseRetake =
+        cfg.ReadValue("baseRetake", cfg.ReadValue("occupierForces", _tuning.baseRetake ? 1.0f : 0.0f)) != 0.0f;
     // retake hysteresis: revert below townRevertSupport, never above the flip
     // line (a value above it would hand a town back the tick it rose)
     _tuning.townRevertSupport = cfg.ReadValue("townRevertSupport", _tuning.townRevertSupport);
@@ -781,6 +786,14 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
         z.marker = e.ReadValue("marker", RString());
         // per-zone pacing: big installations author a slower rate (0 = tuning)
         z.captureRateOverride = e.ReadValue("captureRate", 0.0f);
+        // occupier standing (OCCUPIER-FORCES.md 7.3, D21): an authored
+        // per-CITY start value, default 50, clamped to 0..100; the save
+        // overlays the live value
+        if (stricmp(z.type, "CITY") == 0)
+        {
+            const float standing = e.ReadValue("standing", 50.0f);
+            z.standing = standing < 0 ? 0.0f : (standing > 100 ? 100.0f : standing);
+        }
         const ParamEntry* pos = e.FindEntry("position");
         if (pos && pos->IsArray() && pos->GetSize() >= 2)
         {
@@ -1692,9 +1705,9 @@ bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int 
     {
         return false;
     }
-    if (CampaignEnd::Instance().Won())
+    if (CampaignEnd::Instance().Won() || CampaignEnd::Instance().Lost())
     {
-        return false; // OCCUPIER-FORCES.md 7.4: once the win latches nothing reverts
+        return false; // OCCUPIER-FORCES.md 7.4: once the win (or lose) latches nothing reverts
     }
     // back to the authored administration; a town authored as the
     // resistance's own falls to plain NEUTRAL administration
@@ -1737,12 +1750,74 @@ bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int 
     z->recoverClock = 0;
     z->contestedLastTick = false;
     z->supportReadyNotified = z->support >= _tuning.supportFlip;
+    z->lostCount++;
     LOG_INFO(Core,
              "Guerrilla: town {} retaken by the occupier (support {}, garrison refill {}{}{}; reserve {}, pending {})",
              (const char*)z->name, z->support, settle + refill, pending ? " pending" : "",
              settle > 0 ? " (the holding force settled)" : "", z->garrison, z->pending);
     ZoneEventRecord ev;
     ev.type = ZETownLost;
+    ev.zoneIndex = index;
+    fired.Add(ev);
+    return true;
+}
+
+bool ZoneRegistry::IsHeldBase(const ZoneRecord& z) const
+{
+    return CampaignEnd::IsMilitaryType(z.type) && stricmp(z.owner, _resistanceSide) == 0;
+}
+
+bool ZoneRegistry::RevertBase(int index, AutoArray<ZoneEventRecord>& fired, int settled)
+{
+    ZoneRecord* z = GetZoneMutable(index);
+    if (!z || !IsHeldBase(*z))
+    {
+        return false;
+    }
+    if (CampaignEnd::Instance().Won() || CampaignEnd::Instance().Lost())
+    {
+        return false; // 7.4: once the win (or lose) latches nothing reverts
+    }
+    // back to the authored owner; a base authored as the resistance's own
+    // (or as nobody's) goes to the occupier that took it
+    RString owner = ResolveOwnerToken(z->ownerConfig);
+    if (stricmp(owner, _resistanceSide) == 0 || stricmp(owner, "NEUTRAL") == 0 || owner.GetLength() == 0)
+    {
+        owner = _occupierSide;
+    }
+    z->owner = owner;
+    // 5.4: the capturing record's holding bodies are the new garrison first
+    // (up to garrisonMax, the surplus to the pool); the rest of the room is
+    // a pool-funded deposit, a pending one inside the player's deposit
+    // bubble (S5).  A live squad standing there is adopted by CounterAttack
+    // and comes off the pool-funded part (revertRefill, U2).
+    z->garrison = floorf(z->garrison > 0 ? z->garrison : 0);
+    const float missing = floorf(z->garrisonMax) - z->garrison - (float)z->pending;
+    const int room = missing > 0 ? (int)missing : 0;
+    const int settle = settled > 0 ? (settled < room ? settled : room) : 0;
+    if (settled > settle)
+    {
+        OccupierForces::Instance().Refund(settled - settle, "surplus");
+    }
+    const int refill = room > settle ? OccupierForces::Instance().Deposit(room - settle, "base retaken") : 0;
+    float px = 0;
+    float pz = 0;
+    const bool playerValid = LastTickPlayer(px, pz);
+    const bool pending = GarrisonCache::AddReserve(*this, index, settle + refill, -1, playerValid, px, pz);
+    z->revertRefill = refill;
+    // the income tap closes with the base (economy.sqs pays only while held)
+    z->income = 0;
+    z->liveOccupiers = 0;
+    z->capture = 0;
+    z->occCapture = 0;
+    z->recoverClock = 0;
+    z->contestedLastTick = false;
+    z->lostCount++;
+    LOG_INFO(Core, "Guerrilla: base {} retaken by the occupier (garrison {}{}{}; reserve {}, pending {})",
+             (const char*)z->name, settle + refill, pending ? " pending" : "",
+             settle > 0 ? " (the holding force settled)" : "", z->garrison, z->pending);
+    ZoneEventRecord ev;
+    ev.type = ZEBaseLost;
     ev.zoneIndex = index;
     fired.Add(ev);
     return true;
@@ -2165,6 +2240,14 @@ int ZoneRegistry::EventTypeFromName(const char* name)
     {
         return ZECounterRepelled;
     }
+    if (stricmp(name, "baseLost") == 0)
+    {
+        return ZEBaseLost;
+    }
+    if (stricmp(name, "hqLost") == 0)
+    {
+        return ZEHqLost;
+    }
     return -1;
 }
 
@@ -2245,6 +2328,14 @@ void ZoneRegistry::Simulate(float deltaT)
     GatherInputs(in);
 
     AutoArray<ZoneEventRecord> fired;
+    // events other services queued since the last tick (QueueEvent: the
+    // HQ's hqLost) go out first, through the same native listeners and
+    // script handlers as the registry's own
+    for (int i = 0; i < _queued.Size(); i++)
+    {
+        fired.Add(_queued[i]);
+    }
+    _queued.Clear();
     EvaluateTick(in, fired);
     UpdateMarkers();
     // the counter-attack service (issue #79) schedules a retake force on a
@@ -2340,9 +2431,11 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
         bool cityEligible = IsAdministeredTown(z);
         // a resistance-held town can be retaken (townRetake)
         bool retakeEligible = _tuning.townRetake && isCity && stricmp(z.owner, _resistanceSide) == 0;
-        // an off-screen counter-attack force holding this town counts as
-        // occupier presence for the retake (and only for it)
-        if (retakeEligible && i < in.abstractOcc.Size())
+        // a resistance-held military zone can be retaken (baseRetake, 7.2)
+        const bool baseEligible = _tuning.baseRetake && IsHeldBase(z);
+        // an off-screen counter-attack force holding this town (or base)
+        // counts as occupier presence for the retake (and only for it)
+        if ((retakeEligible || baseEligible) && i < in.abstractOcc.Size())
         {
             occ += in.abstractOcc[i];
         }
@@ -2357,7 +2450,8 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
                 z.seenMinute = seenMinute;
             }
         }
-        else if (!_tuning.remoteTick || (guer == 0 && guerHold == 0 && z.capture <= 0 && !(retakeEligible && occ > 0)))
+        else if (!_tuning.remoteTick || (guer == 0 && guerHold == 0 && z.capture <= 0 && !(retakeEligible && occ > 0) &&
+                                         !(baseEligible && (occ > 0 || z.occCapture > 0))))
         {
             // Off-screen contract D1 (issue #71): outside the bubble a zone
             // holds still UNLESS live resistance units stand in it (fighters
@@ -2368,11 +2462,17 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
             // frozen standoff.  Remote towns gain support but never lose it
             // to intimidation (below).  The town retake (issue #79) adds one
             // trigger: live occupier units standing in a resistance-held
-            // town (a dispatched counter-attack) work it remotely too.
+            // town (a dispatched counter-attack) work it remotely too, and
+            // the base recapture (7.2) the same for a held base, plus a held
+            // base whose occCapture is above 0 (it decays).
             continue;
         }
 
-        if (!milEligible && !cityEligible && !retakeEligible)
+        // the base recapture works only while occupiers stand in the base or
+        // its meter is above 0 (a held base with only its hold squad is not
+        // ticked, as before: no remote count, no contested state)
+        const bool baseActive = baseEligible && (occ > 0 || z.occCapture > 0);
+        if (!milEligible && !cityEligible && !retakeEligible && !baseActive)
         {
             z.contestedLastTick = false;
             continue;
@@ -2385,6 +2485,47 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
 
         bool milCap = false;
         bool cityCap = false;
+
+        if (baseActive)
+        {
+            // THE BASE RECAPTURE (OCCUPIER-FORCES.md 7.2, D19): the mirror of
+            // the player's military meter, in its own field (occCapture), so
+            // nothing script-side reads it as the player's progress.  Any
+            // occupier unit counts (positional occCount: patrols, columns,
+            // counter-attack squads alike, plus an abstract BASE / HQ_ASSAULT
+            // force holding the zone); the resistance counts by its HOLD
+            // presence (hold squads, recruits, the player under the HOLD
+            // rule).  No ZECaptureStarted / ZEContested / ZECaptureLost: the
+            // player's own events stay his.
+            const bool occHere = occ > 0;
+            const bool guerHere = guerHold > 0;
+            if (occHere && !guerHere)
+            {
+                const float rate = z.captureRateOverride > 0 ? z.captureRateOverride : _tuning.captureRate;
+                const float crew = (float)occ > _tuning.captureCrewCap ? _tuning.captureCrewCap : (float)occ;
+                z.occCapture += rate * crew;
+                if (z.occCapture > 100)
+                {
+                    z.occCapture = 100;
+                }
+            }
+            else if (!occHere)
+            {
+                // the resistance re-secures fast; an abandoned base fades slowly
+                z.occCapture -= guerHere ? _tuning.captureDecayDefended : _tuning.captureDecayAbandoned;
+                if (z.occCapture < 0)
+                {
+                    z.occCapture = 0;
+                }
+            }
+            // both present: frozen (the firefight decides it)
+            z.contestedLastTick = occHere && guerHere;
+            if (z.occCapture >= 100)
+            {
+                RevertBase(i, fired, i < in.settleOcc.Size() ? in.settleOcc[i] : 0);
+            }
+            continue;
+        }
 
         if (milEligible)
         {
@@ -3119,6 +3260,13 @@ LSError ZoneRegistry::ZoneSaveState::Serialize(ParamArchive& ar)
     // S5 pending deposit (OCCUPIER-FORCES.md 3.3): absent in older saves =
     // nothing pending; the origin is a zone NAME (empty = none or mixed)
     PARAM_CHECK(ar.Serialize("pending", pending, 1, 0))
+    // occupier forces phase 4 (OCCUPIER-FORCES.md 7.2, 7.3, 11): absent in
+    // older saves = no base recapture in progress, the default standing,
+    // never struck, never lost
+    PARAM_CHECK(ar.Serialize("occCapture", occCapture, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("standing", standing, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("struckUntil", struckUntil, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("lostCount", lostCount, 1, 0))
     PARAM_CHECK(ar.Serialize("pendingOrigin", pendingOrigin, 1, RString()))
     return LSOK;
 }
@@ -3154,6 +3302,14 @@ void ZoneRegistry::ApplyPendingLoad()
         z.garrisonExempt = row.garrisonExempt;
         z.flipDay = row.flipDay;
         z.flipMinute = row.flipMinute;
+        z.occCapture = row.occCapture < 0 ? 0.0f : (row.occCapture > 100 ? 100.0f : row.occCapture);
+        // an older save carries no standing (-1): the config value stays
+        if (row.standing >= 0)
+        {
+            z.standing = row.standing > 100 ? 100.0f : row.standing;
+        }
+        z.struckUntil = row.struckUntil;
+        z.lostCount = row.lostCount > 0 ? row.lostCount : 0;
         // reconstruct the one-shot threshold edge from the loaded value: a
         // town saved in the READY-waiting state must not re-announce itself
         // on every reload
@@ -3185,6 +3341,10 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
             row.garrisonExempt = z.garrisonExempt;
             row.flipDay = z.flipDay;
             row.flipMinute = z.flipMinute;
+            row.occCapture = z.occCapture;
+            row.standing = z.standing;
+            row.struckUntil = z.struckUntil;
+            row.lostCount = z.lostCount;
             row.pending = z.pending;
             const ZoneRecord* origin = GetZone(z.pendingOrigin);
             row.pendingOrigin = z.pending > 0 && origin ? origin->name : RString();
@@ -3234,6 +3394,10 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     // degradation
     PARAM_CHECK(ar.Serialize("onCounterAttack", _handlers[ZECounterAttack], 1, RString()))
     PARAM_CHECK(ar.Serialize("onCounterRepelled", _handlers[ZECounterRepelled], 1, RString()))
+    // occupier forces phase 4 (OCCUPIER-FORCES.md 7.2, 9.1): absent in older
+    // saves, same degradation
+    PARAM_CHECK(ar.Serialize("onBaseLost", _handlers[ZEBaseLost], 1, RString()))
+    PARAM_CHECK(ar.Serialize("onHqLost", _handlers[ZEHqLost], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

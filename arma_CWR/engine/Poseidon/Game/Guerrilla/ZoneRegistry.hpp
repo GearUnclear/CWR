@@ -86,6 +86,18 @@ struct ZoneTuning
     // Range-checked at load to 0..supportFlip; townRevertSupport = supportFlip
     // restores the pre-hysteresis rule.
     float townRevertSupport = 30.0f;
+    // Base recapture (OCCUPIER-FORCES.md 7.2, D16, D19): a resistance-held
+    // military zone (CampaignEnd::IsMilitaryType: not CAMP, not CITY) carries
+    // the occupier's mirror of the player's capture meter, occCapture.  Any
+    // occupier presence (positional, plus an abstract BASE / HQ_ASSAULT force
+    // holding it) with no resistance HOLD presence raises it by captureRate x
+    // min(crew, captureCrewCap) per tick; both present freeze it; resistance
+    // alone decays it at captureDecayDefended, nobody at
+    // captureDecayAbandoned.  At 100 the zone reverts (RevertBase).  Config
+    // key baseRetake (0/1); absent, it follows the occupierForces layer key,
+    // so with the layer off liberated posts stay permanent (the old decision
+    // R) and nothing changes for missions that pin the layer off.
+    bool baseRetake = false;
     // defenders >= ratio * attackers treats a contested zone as DEFENDED
     // (a token straggler cannot hold a re-secured post hostage); 0 disables.
     // Any live defender still blocks SECURING regardless of this ratio.
@@ -188,6 +200,25 @@ struct ZoneRecord
     // (absent in older saves: 0).
     int pending = 0;
     int pendingOrigin = -1; // zone the pending bodies came from; -1 none or mixed (saved by name)
+    // occupier forces phase 4 (OCCUPIER-FORCES.md 7.2, 7.3, 11; serialized,
+    // absent in older saves = the defaults):
+    // the occupier's base-recapture meter (0..100), the mirror of capture on
+    // a resistance-held military zone.  Its own field, so capture.sqs's
+    // "Securing" ticker, ZECaptureStarted and the marker labels never read
+    // it as the player's progress.
+    float occCapture = 0;
+    // occupier standing in a CITY (0..100, D21): authored per CITY (key
+    // standing, default 50); recovers toward 50 at 1 per 600 s
+    // (OccupierForces); drives informant tips (>= 50), garrison morale
+    // (< 25: skill x 0.8) and the refill factor (the K towns' mean)
+    float standing = 50.0f;
+    // the town-strike stamp (phase 6: strike + 1200 s, half income until
+    // then).  Saved now so phase 6 needs no layout change; nothing reads it.
+    float struckUntil = 0;
+    // times the resistance lost this zone back to the occupier (RevertTown,
+    // RevertBase); capture.sqs writes "Retaken" instead of "Liberated" for a
+    // zone with lostCount > 0 (gmZoneSim slot 15)
+    int lostCount = 0;
 
     // transient tick bookkeeping, never serialized
     bool contestedLastTick = false;    // edge detection for the contested event/marker
@@ -345,6 +376,14 @@ enum ZoneEventType
     ZETownLost,         // "townLost": a resistance-held CITY reverted to occupier administration
     ZECounterAttack,    // "counterAttack": an occupier retake force reached a held town (CounterAttack)
     ZECounterRepelled,  // "counterRepelled": that force was beaten off or withdrew
+    // "baseLost": a resistance-held military zone (CAMP / AIRFIELD / SEAPORT /
+    // OUTPOST) went back to the occupier: its occCapture meter reached 100
+    // (OCCUPIER-FORCES.md 7.2, the base recapture)
+    ZEBaseLost,
+    // "hqLost": the resistance HQ was destroyed (GuerrillaBase::Destroy queues
+    // it through QueueEvent; the zone index is the zone the HQ stood in, or
+    // -1 when it stood outside every zone)
+    ZEHqLost,
     NZoneEventTypes
 };
 
@@ -544,6 +583,22 @@ class ZoneRegistry : public SerializeClass
     // pool is inactive and grants nothing in SPENT: a hollow revert).
     // revertRefill records the pool-funded part.
     bool RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int settled = 0);
+    // Revert a resistance-held military zone to the occupier (the base
+    // recapture, OCCUPIER-FORCES.md 7.2): its occCapture reached 100.  Owner
+    // back to the authored token (the occupier side when that token is the
+    // resistance or neutral), the garrison settled exactly as RevertTown
+    // does (settled holding bodies first up to garrisonMax, their surplus to
+    // the pool, the rest of the room a pool-funded deposit through
+    // OccupierForces::Deposit, pending inside the player's deposit bubble;
+    // revertRefill records the pool-funded part so an adopted live squad
+    // comes off it), income tap closed, capture and occCapture reset,
+    // lostCount + 1, ZEBaseLost queued.  False (no-op) for a zone that is
+    // not a resistance-held military zone, and after CampaignEnd's win or
+    // lose latch.
+    bool RevertBase(int index, AutoArray<ZoneEventRecord>& fired, int settled = 0);
+    // a resistance-held military zone the base recapture works on
+    // (CampaignEnd::IsMilitaryType, owner the resistance)
+    bool IsHeldBase(const ZoneRecord& z) const;
     // Exempt a town from its occupier garrison (GuerrillaBase: the new-game
     // START TOWN headquarters).  Zeroes the reserve and any pending deposit;
     // persistent.
@@ -598,6 +653,20 @@ class ZoneRegistry : public SerializeClass
     // a zone (CounterAttack's counterAttack / counterRepelled); same payload
     // [zoneIndex, zoneName, owner] as the registry's own events
     void FireEvents(const AutoArray<ZoneEventRecord>& fired) { DispatchEvents(fired); }
+    // the public event queue: another service raises a zone event (the HQ's
+    // hqLost, GuerrillaBase::Destroy) without running handlers from inside
+    // its own update.  The next zone tick prepends the queued events to its
+    // own, so CounterAttack / OccupierForces hear them natively and the
+    // script handler runs with the usual payload.  zoneIndex may be -1 (an
+    // HQ outside every zone): native listeners hear it, the script handler
+    // is skipped (no zone to name).  Transient, never serialized.
+    void QueueEvent(ZoneEventType type, int zoneIndex)
+    {
+        ZoneEventRecord ev;
+        ev.type = type;
+        ev.zoneIndex = zoneIndex;
+        _queued.Add(ev);
+    }
 
     // pure town enumeration (unit-tested; no world access) -------------------
     // One Names entry (CfgWorlds >> <world> >> Names) -> (name, pos) when it
@@ -672,6 +741,10 @@ class ZoneRegistry : public SerializeClass
         int flipMinute = 0;
         int pending = 0;       // S5 pending deposit
         RString pendingOrigin; // its origin zone by name (empty: none or mixed)
+        float occCapture = 0;
+        float standing = -1; // -1: absent in the save, the config value stays
+        float struckUntil = 0;
+        int lostCount = 0;
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -749,6 +822,8 @@ class ZoneRegistry : public SerializeClass
     RString _pendingResistanceSide;
     RString _pendingOccupierFaction;
     RString _pendingResistanceFaction;
+    // QueueEvent's events, drained by the next Simulate tick
+    AutoArray<ZoneEventRecord> _queued;
     // queued campaignLoaded notification (see MarkCampaignLoaded)
     bool _pendingLoaded = false;
     int _loadedSaveVersion = 0;

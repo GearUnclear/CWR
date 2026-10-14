@@ -111,6 +111,11 @@ bool UndercoverWeaponSeenVerdict(UCVerdict verdict, UCWeaponShow weapon, float v
 // a stamp taken at stampTime is current at now: at most
 // UndercoverSystem::WeaponSeenWindow seconds old.  Pure.
 bool UndercoverWeaponSeenCurrent(float now, float stampTime);
+// the same test on the engine clock, as Target::ucWeaponSeenTime stores it.
+// A record never stamped holds TIME_MIN; raw Time subtraction from it
+// overflows in release builds (and asserts in debug), so a TIME_MIN stamp is
+// never current and the window is compared on the clock itself.  Pure.
+bool UndercoverWeaponSeenStampCurrent(Foundation::Time now, Foundation::Time stamp);
 
 // The weapon-show classifier behind UCWeaponShow: a ManPos partition - every
 // raised-weapon pose reads in-hands, the patrol walk / binocular poses and

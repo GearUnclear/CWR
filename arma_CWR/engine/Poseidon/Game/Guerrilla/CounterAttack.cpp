@@ -621,12 +621,72 @@ int CounterAttack::FindByTarget(const char* town) const
 {
     for (int i = 0; i < _records.Size(); i++)
     {
-        if (stricmp(_records[i].target, town) == 0)
+        // an HQ_ASSAULT is about the HQ, not the zone it stands in: it never
+        // occupies the zone's one-record slot (FindHqAssault finds it)
+        if (_records[i].kind != CAKHqAssault && stricmp(_records[i].target, town) == 0)
         {
             return i;
         }
     }
     return -1;
+}
+
+int CounterAttack::FindHqAssault() const
+{
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        if (_records[i].kind == CAKHqAssault)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int CounterAttack::WaveRecords() const
+{
+    int n = 0;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        n += _records[i].origin == CAOWave ? 1 : 0;
+    }
+    return n;
+}
+
+Vector3 CounterAttack::DestOf(const ZoneRegistry& registry, const Record& r)
+{
+    if (r.destPos.X() != 0 || r.destPos.Z() != 0)
+    {
+        return r.destPos;
+    }
+    const ZoneRecord* z = registry.GetZone(registry.FindZoneIndex(r.target));
+    return z ? z->pos : VZero;
+}
+
+int CounterAttack::HqAssaultPresence(Vector3Par hqPos, float radius, CounterAttackOps* ops) const
+{
+    int bodies = 0;
+    const float rSq = radius * radius;
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        const Record& r = _records[i];
+        if (r.kind != CAKHqAssault)
+        {
+            continue; // D14: passers-by, columns and every other kind never count
+        }
+        if (r.phase == CALive)
+        {
+            AIGroup* grp = r.group;
+            bodies += ops && grp ? ops->AliveWithin(grp, hqPos, radius) : 0;
+        }
+        else if (r.phase == CAHolding && !r.suspended)
+        {
+            const float dx = r.destPos.X() - hqPos.X();
+            const float dz = r.destPos.Z() - hqPos.Z();
+            bodies += dx * dx + dz * dz <= rSq ? r.strength : 0;
+        }
+    }
+    return bodies;
 }
 
 int CounterAttack::FindByOpId(int opId) const
@@ -646,12 +706,16 @@ int CounterAttack::LiveHullOf(const Record& r)
     return r.hull.GetLink() != nullptr ? 1 : 0;
 }
 
-int CounterAttack::BornOps() const
+int CounterAttack::BornOps(bool includeWave) const
 {
     int n = 0;
     for (int i = 0; i < _records.Size(); i++)
     {
         const Record& r = _records[i];
+        if (!includeWave && r.origin == CAOWave)
+        {
+            continue;
+        }
         n += r.funded && (r.phase == CALive || LiveHullOf(r) > 0) ? 1 : 0;
     }
     return n;
@@ -682,8 +746,11 @@ int CounterAttack::SettlePresence(const ZoneRegistry& registry, int zoneIndex) c
     for (int i = 0; i < _records.Size(); i++)
     {
         // a holding force (suspended in the player's bubble or not) is the
-        // town's new garrison when it reverts (5.4); its bodies are not lost
-        if (_records[i].phase == CAHolding && stricmp(_records[i].target, z->name) == 0)
+        // town's (or base's) new garrison when it reverts (5.4); its bodies
+        // are not lost.  An HQ_ASSAULT holds the HQ, not the zone: it never
+        // settles there.
+        if (_records[i].phase == CAHolding && _records[i].kind != CAKHqAssault &&
+            stricmp(_records[i].target, z->name) == 0)
         {
             bodies += _records[i].strength;
         }
@@ -792,7 +859,10 @@ int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex)
     for (int i = 0; i < _records.Size(); i++)
     {
         // a suspended force (its town in the player's bubble) does nothing
-        // to the town until the player leaves
+        // to the town until the player leaves.  Every kind counts: a BASE
+        // force holding a base works its occCapture, and an HQ_ASSAULT
+        // holding at the HQ is occupier presence in the zone the HQ stands
+        // in (OCCUPIER-FORCES.md 7.2, 8.1)
         if (_records[i].phase == CAHolding && !_records[i].suspended && stricmp(_records[i].target, z->name) == 0)
         {
             bodies += _records[i].strength;
@@ -881,7 +951,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
             return false;
         }
     }
-    if (zoneIndex == hqZone)
+    if (zoneIndex == hqZone && hqZone >= 0)
     {
         // the town the player's HQ stands in (N4a): never the object of a
         // flip answer before the director exists.  The flip still counts as
@@ -945,37 +1015,74 @@ bool CounterAttack::LaunchFunded(ZoneRegistry& registry, const CounterAttackView
 {
     const ZoneRecord* town = registry.GetZone(order.target);
     const ZoneRecord* src = registry.GetZone(order.source);
+    const bool hq = order.kind == CAKHqAssault;
+    const Vector3 hqDest = order.destPos.X() != 0 || order.destPos.Z() != 0 ? order.destPos : view.hqPos;
+    // wave operations come on top of the director's slots (7.1)
+    const int opsCap = OpsCap() + (order.origin == CAOWave ? 1 : 0);
     const char* why = nullptr;
-    if (view.won)
+    if (view.won || view.lost)
     {
-        why = "the campaign is won";
+        why = view.won ? "the campaign is won" : "the campaign is lost";
     }
-    else if (order.kind != CAKRetake)
+    else if (order.kind == CAKRetake)
     {
-        why = "only town retakes move in this phase";
+        if (!town || stricmp(town->type, "CITY") != 0 || stricmp(town->owner, registry.ResistanceSide()) != 0 ||
+            town->garrisonExempt)
+        {
+            why = "the target is not a held town";
+        }
+        else if (order.target == view.hqZone)
+        {
+            why = "the target holds the player's headquarters";
+        }
     }
-    else if (!town || stricmp(town->type, "CITY") != 0 || stricmp(town->owner, registry.ResistanceSide()) != 0 ||
-             town->garrisonExempt)
+    else if (order.kind == CAKBase)
     {
-        why = "the target is not a held town";
+        if (!town || !CampaignEnd::IsMilitaryType(town->type) || stricmp(town->owner, registry.ResistanceSide()) != 0)
+        {
+            why = "the target is not a held base";
+        }
     }
-    else if (order.target == view.hqZone)
+    else if (hq)
     {
-        why = "the target holds the player's headquarters";
+        if (!view.hqEstablished || (hqDest.X() == 0 && hqDest.Z() == 0))
+        {
+            why = "there is no HQ to assault";
+        }
+        else if (FindHqAssault() >= 0)
+        {
+            why = "an HQ assault is already under way";
+        }
+        else if (order.target >= 0 && !town)
+        {
+            why = "the HQ zone is unknown";
+        }
     }
-    else if (FindByTarget(town->name) >= 0)
+    else if (order.kind == CAKReinforce)
     {
-        why = "the town already has an operation";
+        if (!town || town->garrisonExempt || !GarrisonCache::OccupierHolds(registry, *town) ||
+            order.target == order.source)
+        {
+            why = "the target is not an occupier-held post to top up";
+        }
     }
-    else if (!src || stricmp(src->owner, registry.OccupierSide()) != 0)
+    else
+    {
+        why = "alarm answers and strikes move in a later phase";
+    }
+    if (!why && !hq && FindByTarget(town->name) >= 0)
+    {
+        why = "the target already has an operation";
+    }
+    else if (!why && (!src || stricmp(src->owner, registry.OccupierSide()) != 0))
     {
         why = "the source is not occupier-held";
     }
-    else if (order.bodies < 1)
+    else if (!why && order.bodies < 1)
     {
         why = "no bodies ordered";
     }
-    else if (BornOps() >= _tuning.forcesOpsMax)
+    else if (!why && BornOps() >= opsCap)
     {
         why = "forcesOpsMax born operations are in flight";
     }
@@ -985,9 +1092,12 @@ bool CounterAttack::LaunchFunded(ZoneRegistry& registry, const CounterAttackView
         return false;
     }
     Record r;
-    r.target = town->name;
+    r.target = town ? town->name : RString();
     r.townsBefore = _townsTaken;
-    r.seed = MakeSeed(town->name, town->flipDay, town->flipMinute, _townsTaken) ^ (0x0F0F1E5Du + (unsigned)order.opId);
+    r.seed = MakeSeed(town ? (const char*)town->name : "HQ", town ? town->flipDay : 0, town ? town->flipMinute : 0,
+                      _townsTaken) ^
+             (0x0F0F1E5Du + (unsigned)order.opId);
+    r.destPos = hq ? hqDest : order.destPos;
     r.size = order.bodies;
     r.opId = order.opId;
     r.kind = order.kind;
@@ -1015,8 +1125,10 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
     // a foot force with its town in the bubble marches the live garrison
     // out; a hull package always leaves from the stored reserve (its hull is
     // born unseen on the road, never in a watched motor pool)
-    const bool live = !r.HasHullPackage() && ops != nullptr && liveBodies > 0 && InBubble(registry, view, target) &&
-                      RoomLive(registry, view) && (!r.funded || BornOps() < _tuning.forcesOpsMax);
+    const int opsCap = OpsCap() + (r.origin == CAOWave ? 1 : 0);
+    const bool live = !r.HasHullPackage() && ops != nullptr && liveBodies > 0 &&
+                      InBubbleAt(registry, view, DestOf(registry, r)) && RoomLive(registry, view) &&
+                      (!r.funded || BornOps() < opsCap);
     const int spare = Spare(_tuning, src->garrison, liveBodies, src->garrisonMax, live);
     const int n = MinInt(size, spare);
     if (n < 1)
@@ -1032,7 +1144,7 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
     {
         return false;
     }
-    r.wholeRoad = r.phase == CATravel && InBubble(registry, view, target);
+    r.wholeRoad = r.phase == CATravel && InBubbleAt(registry, view, DestOf(registry, r));
     _records.Add(r);
     const Record& added = _records[_records.Size() - 1];
     Emit(registry, added, CAOpLaunched, added.strength, added.priceUnits, live ? "live" : "abstract");
@@ -1041,6 +1153,15 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
         Emit(registry, added, CAOpBorn, added.strength, 0, SpawnReasonName(added.spawnReason));
     }
     return true;
+}
+
+bool CounterAttack::InBubbleAt(const ZoneRegistry& registry, const CounterAttackView& view, Vector3Par pos)
+{
+    if (!view.playerValid || (pos.X() == 0 && pos.Z() == 0))
+    {
+        return false;
+    }
+    return Dist2D(pos.X(), pos.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
 }
 
 bool CounterAttack::InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const
@@ -1098,17 +1219,17 @@ const AutoArray<Vector3>& CounterAttack::RouteOf(const ZoneRegistry& registry, R
         return r.route;
     }
     const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
-    const ZoneRecord* town = registry.GetZone(registry.FindZoneIndex(r.target));
-    if (!src || !town)
+    const Vector3 dest = DestOf(registry, r);
+    if (!src || (dest.X() == 0 && dest.Z() == 0))
     {
         return r.route;
     }
     AutoArray<Vector3> raw;
     if (ops)
     {
-        ops->BuildRoute(src->pos, town->pos, raw);
+        ops->BuildRoute(src->pos, dest, raw);
     }
-    const float straight = Dist2D(src->pos, town->pos);
+    const float straight = Dist2D(src->pos, dest);
     if (raw.Size() >= 2 && !RoadIsReasonable(RouteLength(raw), straight))
     {
         // men on foot do not walk a road that winds this far round: the
@@ -1123,7 +1244,7 @@ const AutoArray<Vector3>& CounterAttack::RouteOf(const ZoneRegistry& registry, R
         // no road net (or no connection): the straight line, base to town
         raw.Clear();
         raw.Add(src->pos);
-        raw.Add(town->pos);
+        raw.Add(dest);
     }
     ResampleRoute(raw, RouteStep, r.route);
     return r.route;
@@ -1136,7 +1257,8 @@ bool CounterAttack::MustGoLive(const ZoneRegistry& registry, const CounterAttack
     {
         return false;
     }
-    if (InBubble(registry, view, target))
+    (void)target;
+    if (InBubbleAt(registry, view, DestOf(registry, r)))
     {
         return true;
     }
@@ -1148,8 +1270,9 @@ bool CounterAttack::MustGoLive(const ZoneRegistry& registry, const CounterAttack
 void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
                           float elapsed)
 {
-    const ZoneRecord* town = registry.GetZone(target);
-    if (!town || !ops)
+    (void)target;
+    const Vector3 dest = DestOf(registry, r);
+    if ((dest.X() == 0 && dest.Z() == 0) || !ops)
     {
         return;
     }
@@ -1159,7 +1282,7 @@ void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, C
     // there (3.2); men on foot deploy at the zone edge plus TownEdgeMargin
     const bool mounted = LiveHullOf(r) > 0 && !r.dismounted;
     const float edge = mounted ? _tuning.birthMinToTarget : registry.Tuning().zoneArea + TownEdgeMargin;
-    if (n == 0 || Dist2D(leader, town->pos) <= edge)
+    if (n == 0 || Dist2D(leader, dest) <= edge)
     {
         // the town edge: deploy and move in; the live timeout starts now
         r.leg = LegTown;
@@ -1192,9 +1315,10 @@ void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, C
             r.dismounted = true;
             r.stopping = -1;
         }
-        ops->Assault(r.group, town->pos);
+        ops->Assault(r.group, dest);
         LOG_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out){}; it moves in",
-                 (const char*)r.target, Dist2D(leader, town->pos), mounted ? " and dismounts" : "");
+                 r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, Dist2D(leader, dest),
+                 mounted ? " and dismounts" : "");
         Emit(registry, r, CAOpArrived, r.strength, 0, mounted ? "live, dismounted" : "live");
         return;
     }
@@ -1302,7 +1426,8 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
 {
     // the legacy abstract fight (key off; OCCUPIER-FORCES.md 6.5): the odds
     // weigh the attackers' lethality (A_lethal = bodies x lethality), the
-    // losses count bodies (A_bodies)
+    // losses count bodies (A_bodies).  A won fight on a base reverts it
+    // through the base recapture's seam (never reached with the key on).
     const ZoneRecord* town = registry.GetZone(target);
     const int defenders = town ? town->lastGuer : 0;
     const float lethal = (float)r.strength * (r.lethality > 0 ? r.lethality : 1.0f);
@@ -1325,7 +1450,14 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
     }
     LOG_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
              (const char*)r.target, defenders, hold, roll);
-    registry.RevertTown(target, fired);
+    if (town && stricmp(town->type, "CITY") != 0)
+    {
+        registry.RevertBase(target, fired, r.strength);
+    }
+    else
+    {
+        registry.RevertTown(target, fired);
+    }
     Emit(registry, r, CAOpSettled, r.strength, 0, "abstract fight");
     return true;
 }
@@ -1333,8 +1465,8 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
 int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                           CounterAttackOps* ops, float fraction, AutoArray<ZoneEventRecord>& fired)
 {
-    const ZoneRecord* town = registry.GetZone(target);
-    if (!ops || !town)
+    const Vector3 dest = DestOf(registry, r);
+    if (!ops || (dest.X() == 0 && dest.Z() == 0))
     {
         return BirthWait;
     }
@@ -1349,7 +1481,8 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
     const bool overBodies = zt.budgetLiveBodies > 0 && view.liveBodies + bodies > zt.budgetLiveBodies;
     const bool overGroups = zt.budgetSideGroups > 0 && view.occGroups + groups > zt.budgetSideGroups;
     // forcesOpsMax counts born operations; an unborn one waits for a slot
-    const bool overOps = r.funded && BornOps() >= _tuning.forcesOpsMax;
+    // (OpsCap: wave operations raise it by their own count)
+    const bool overOps = r.funded && BornOps() >= OpsCap();
     const bool overHulls = mounted && LiveHulls() >= _tuning.forcesLiveHullsMax;
     if (overLive || overBodies || overGroups || overOps || overHulls)
     {
@@ -1360,7 +1493,7 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
                 "CounterAttack: force on {} deferred (live squads {}/{}, live AI {}+{}/{}, occupier groups {}+{}/{},"
                 " born ops {}/{}, live hulls {}/{}); retrying every {:.0f}s",
                 (const char*)r.target, LiveSquads(), _tuning.maxLive, view.liveBodies, bodies, zt.budgetLiveBodies,
-                view.occGroups, groups, zt.budgetSideGroups, BornOps(), _tuning.forcesOpsMax, LiveHulls(),
+                view.occGroups, groups, zt.budgetSideGroups, BornOps(), OpsCap(), LiveHulls(),
                 _tuning.forcesLiveHullsMax, RetryInterval);
             r.deferLogged = true;
         }
@@ -1384,7 +1517,8 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
                      " perception; retrying every {:.0f}s, its clock stopped, {} after {:.0f}s",
                      (const char*)r.target, (const char*)r.source,
                      r.wholeRoad ? "from the base" : "behind its progress point", RetryInterval,
-                     r.funded ? "the next base back" : "turning back", _tuning.birthGiveUp);
+                     r.funded || _tuning.forcesOn ? "the next base back or cancelled unseen" : "turning back",
+                     _tuning.birthGiveUp);
             r.hiddenLogged = true;
         }
         return BirthNoPoint;
@@ -1481,12 +1615,12 @@ bool CounterAttack::RoomLive(const ZoneRegistry& registry, const CounterAttackVi
 float CounterAttack::LegTime(const ZoneRegistry& registry, Record& r, CounterAttackOps* ops) const
 {
     const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
-    const ZoneRecord* town = registry.GetZone(registry.FindZoneIndex(r.target));
-    if (!src || !town)
+    const Vector3 dest = DestOf(registry, r);
+    if (!src || (dest.X() == 0 && dest.Z() == 0))
     {
         return MinTravel;
     }
-    const float straight = Dist2D(src->pos.X(), src->pos.Z(), town->pos.X(), town->pos.Z());
+    const float straight = Dist2D(src->pos.X(), src->pos.Z(), dest.X(), dest.Z());
     float road = 0;
     if (!_tuning.speedLever && (_tuning.forcesOn || r.abstractSpeed > 0))
     {
@@ -1502,7 +1636,7 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
 {
     const ZoneRecord* town = registry.GetZone(target);
     ZoneRecord* s = registry.GetZoneMutable(src);
-    if (!town || !s || n < 1)
+    if ((!town && r.kind != CAKHqAssault) || !s || n < 1) // an HQ assault may target no zone
     {
         return false;
     }
@@ -1553,7 +1687,11 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
 {
     const int target = registry.FindZoneIndex(r.target);
     ZoneRecord* town = registry.GetZoneMutable(target);
-    if (!town)
+    // an HQ_ASSAULT marches on HqPos (9.1): its target zone may be -1 (an HQ
+    // outside every zone), and it is valid while that HQ stands where it
+    // was sent
+    const bool hq = r.kind == CAKHqAssault;
+    if (!town && !hq)
     {
         if (r.phase == CALive && ops && r.group)
         {
@@ -1562,17 +1700,58 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         Emit(registry, r, CAOpAborted, r.strength, 0, "target gone");
         return true;
     }
-    const bool held = stricmp(town->owner, registry.ResistanceSide()) == 0;
-    // a top-up column (5.4) goes to a town the occupier holds; everything
-    // else goes to a town the resistance holds
+    const Vector3 dest = DestOf(registry, r);
+    bool held = false;
+    bool valid = false;
     const bool reinforce = r.kind == CAKReinforce;
-    const bool valid = reinforce ? GarrisonCache::OccupierHolds(registry, *town) : held;
+    if (hq)
+    {
+        if (!view.hqEstablished && !r.hqDone)
+        {
+            // the HQ fell (destroyed: only Destroy un-establishes it): the
+            // assault succeeded.  An abstract force settles now, its bodies
+            // to the pool (there is no garrison to join); a live one leaves
+            // the world once nobody sees it (below)
+            if (r.phase != CALive)
+            {
+                LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+                         r.opId, r.strength);
+                OccupierForces::Instance().Refund(r.strength, "HQ assault done");
+                Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");
+                return true;
+            }
+            r.hqDone = true;
+            LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it", r.opId);
+        }
+        const bool moved =
+            view.hqEstablished && Dist2D(view.hqPos.X(), view.hqPos.Z(), dest.X(), dest.Z()) > registry.Tuning().zoneArea;
+        held = view.hqEstablished && !moved;
+        valid = held;
+        if (moved && r.phase == CALive && !r.hqDone && r.clock < _tuning.liveTimeout)
+        {
+            // the HQ it was sent at moved away: the squad withdraws (the
+            // live timeout path: home once out of the player's sight)
+            LOG_INFO(Core, "CounterAttack: [op {}] the HQ moved; the assault squad withdraws", r.opId);
+            r.clock = _tuning.liveTimeout;
+        }
+    }
+    else
+    {
+        held = stricmp(town->owner, registry.ResistanceSide()) == 0;
+        // a top-up column (5.4) goes to a town the occupier holds; everything
+        // else goes to a town the resistance holds
+        valid = reinforce ? GarrisonCache::OccupierHolds(registry, *town) : held;
+    }
+    // defenders present at the target (6.5): the town's or base's HOLD
+    // presence, or the HQ's (view.hqDefenders)
+    const bool defendersHere =
+        hq ? view.hqDefenders > 0 : (town->lastGuer > 0 || (_tuning.forcesOn && town->lastGuerHold > 0));
 
     switch (r.phase)
     {
         case CAScheduled:
         {
-            if (!held)
+            if (!held || hq)
             {
                 LOG_INFO(Core, "CounterAttack: {} fell before the force left; cancelled", (const char*)r.target);
                 Emit(registry, r, CAOpAborted, 0, 0, "the town fell before the force left");
@@ -1628,12 +1807,13 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         {
             if (!valid)
             {
-                if (reinforce)
+                if (reinforce || hq)
                 {
-                    LOG_INFO(Core, "CounterAttack: {} is no longer the occupier's; the top-up column goes home",
-                             (const char*)r.target);
+                    LOG_INFO(Core, "CounterAttack: {} is no longer a valid target; the force goes home",
+                             hq ? "the HQ" : (const char*)r.target);
                     ReturnToSource(registry, view, r, r.strength);
-                    Emit(registry, r, CAOpAborted, r.strength, 0, "the top-up target was lost");
+                    Emit(registry, r, CAOpAborted, r.strength, 0,
+                         hq ? "the HQ moved" : "the top-up target was lost");
                     return true;
                 }
                 if (_tuning.forcesOn)
@@ -1652,12 +1832,16 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 // on its road where the player cannot see it, or waits; its
                 // arrival clock does not run meanwhile and it does nothing to
                 // the town
+                // the birth chain (3.1, D6) runs for funded records and, with
+                // the key on, for legacy (director DORMANT) records too: no
+                // turn-back as normal behaviour.  Key off: the legacy turn-back
+                const bool chain = r.funded || _tuning.forcesOn;
                 if (r.hiddenLogged)
                 {
                     r.deferTime += elapsed;
                     if (r.deferTime >= _tuning.birthGiveUp)
                     {
-                        if (r.funded)
+                        if (chain)
                         {
                             // the birth chain (3.1, D6): the next base back,
                             // then cancel unseen; never a visible turn-back
@@ -1682,6 +1866,13 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     return false;
                 }
                 const int birth = GoLive(registry, view, target, r, ops, Progress(r), fired);
+                if (birth == BirthNoPoint && chain && Resource(registry, view, target, r, ops))
+                {
+                    // 3.1 step 3 at once: the next base back whose road the
+                    // gate passes; born from there on the next step.  Only
+                    // when no base passes does the force wait (BirthGiveUp)
+                    return false;
+                }
                 if (birth != BirthDone)
                 {
                     // BirthHold: already at the town edge, it stays there,
@@ -1724,10 +1915,9 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 Emit(registry, r, CAOpSettled, in, 0, "topped up");
                 return true;
             }
-            const bool defenders = town->lastGuer > 0 || (_tuning.forcesOn && town->lastGuerHold > 0);
-            if (defenders)
+            if (defendersHere)
             {
-                if (!_tuning.forcesOn)
+                if (!_tuning.forcesOn && !hq)
                 {
                     return Fight(registry, view, target, r, fired);
                 }
@@ -1743,12 +1933,26 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             }
             r.phase = CAHolding;
             r.retry = 0;
-            LOG_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {})", r.strength,
-                     (const char*)r.target, town->support);
+            if (hq)
+            {
+                LOG_INFO(Core, "CounterAttack: [op {}] {} attacker(s) stand at the undefended HQ", r.opId, r.strength);
+            }
+            else
+            {
+                LOG_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {}, occCapture {})",
+                         r.strength, (const char*)r.target, town->support, town->occCapture);
+            }
             return false;
         }
         case CAHolding:
         {
+            if (!valid && hq)
+            {
+                LOG_INFO(Core, "CounterAttack: [op {}] the HQ moved; the holding force goes home", r.opId);
+                ReturnToSource(registry, view, r, r.strength);
+                Emit(registry, r, CAOpAborted, r.strength, 0, "the HQ moved");
+                return true;
+            }
             if (!valid)
             {
                 // the drain reverted the town (or someone else did): with the
@@ -1761,12 +1965,12 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             // the town in the player's bubble: the force is never born at the
             // town centre; it is suspended (no drain, no odds roll) until he
             // leaves
-            r.suspended = InBubble(registry, view, target);
+            r.suspended = InBubbleAt(registry, view, dest);
             if (r.suspended)
             {
                 return false;
             }
-            if (!_tuning.forcesOn)
+            if (!_tuning.forcesOn && !hq)
             {
                 if (town->lastGuer > 0)
                 {
@@ -1774,7 +1978,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 }
                 return false;
             }
-            if (town->lastGuer > 0 || town->lastGuerHold > 0)
+            if (hq ? view.hqDefenders > 0 : (town->lastGuer > 0 || town->lastGuerHold > 0))
             {
                 // 6.5: defenders came back; the holding force fights them
                 // live, born at the town edge (it waits there over budget)
@@ -1793,7 +1997,32 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             {
                 CheckHull(registry, r, ops);
             }
-            if (!valid)
+            if (hq && r.hqDone)
+            {
+                // the HQ fell under the squad: it leaves the world where
+                // nobody sees it (never a visible vanish), its bodies to the
+                // pool (no garrison to join)
+                if (alive == 0)
+                {
+                    Emit(registry, r, CAOpSettled, 0, 0, "the HQ fell; nobody left standing");
+                    return true;
+                }
+                const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+                const bool away =
+                    !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+                const bool hullUnseen = LiveHullOf(r) == 0 || (ops && ops->HullUnseen(r.hull, r.crewGroup));
+                if (ops && away && ops->SquadUnseen(r.group) && hullUnseen)
+                {
+                    ops->Remove(r.group);
+                    OccupierForces::Instance().Refund(alive, "HQ assault done");
+                    LOG_INFO(Core, "CounterAttack: [op {}] the HQ assault squad ({}) leaves unseen; back to the pool",
+                             r.opId, alive);
+                    Emit(registry, r, CAOpSettled, alive, alive, "the HQ fell");
+                    return true;
+                }
+                return false;
+            }
+            if (!valid && !hq)
             {
                 if (reinforce)
                 {
@@ -1844,7 +2073,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 // once).
                 const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
                 const bool away = Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge &&
-                                  Dist2D(town->pos.X(), town->pos.Z(), view.playerX, view.playerZ) > edge;
+                                  Dist2D(dest.X(), dest.Z(), view.playerX, view.playerZ) > edge;
                 const bool hullUnseen = LiveHullOf(r) == 0 || ops->HullUnseen(r.hull, r.crewGroup);
                 r.unseenFor = away && ops->SquadUnseen(r.group) && hullUnseen ? r.unseenFor + elapsed : 0.0f;
                 if (r.unseenFor >= VanishHold)
@@ -1889,10 +2118,9 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 if (r.resend <= 0)
                 {
                     r.resend = ResendInterval;
-                    if (Dist2D(leader.X(), leader.Z(), town->pos.X(), town->pos.Z()) >
-                        registry.Tuning().zoneArea * 0.5f)
+                    if (Dist2D(leader.X(), leader.Z(), dest.X(), dest.Z()) > registry.Tuning().zoneArea * 0.5f)
                     {
-                        ops->MoveOn(r.group, town->pos);
+                        ops->MoveOn(r.group, dest);
                     }
                 }
             }
@@ -1949,16 +2177,17 @@ void CounterAttack::ArriveLive(ZoneRegistry& registry, const CounterAttackView& 
     // the birth search starts at the last route point at least the bound
     // from the town and runs back toward the base (the gate passes trivially
     // far from the player, so off-screen it is that point)
-    const ZoneRecord* town = registry.GetZone(target);
+    const Vector3 dest = DestOf(registry, r);
+    const bool haveDest = dest.X() != 0 || dest.Z() != 0;
     const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
     const float len = RouteLength(route);
     float fraction = 0;
-    if (town && len > 0)
+    if (haveDest && len > 0)
     {
         float arc = len;
         for (int i = route.Size() - 1; i > 0; i--)
         {
-            if (Dist2D(route[i], town->pos) >= _tuning.birthMinToTarget + 1.0f)
+            if (Dist2D(route[i], dest) >= _tuning.birthMinToTarget + 1.0f)
             {
                 fraction = Clamp01(arc / len);
                 break;
@@ -2005,18 +2234,20 @@ static bool NameListed(const char* list, const char* name)
 bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                              CounterAttackOps* ops)
 {
-    const ZoneRecord* town = registry.GetZone(target);
+    (void)target;
+    const Vector3 dest = DestOf(registry, r);
     const int a = registry.FindZoneIndex(r.source);
-    if (!town)
+    if (dest.X() == 0 && dest.Z() == 0)
     {
         return false;
     }
     // the bases already used (D6: then each further base)
     const RString tried = r.tried.GetLength() > 0 ? r.tried + RString(";") + r.source : r.source;
-    // the nearest other occupier base whose stored reserve can spare the
-    // whole force (a base that cannot is passed over for the next)
-    int best = -1;
-    float bestDist = 0;
+    // the other occupier bases whose stored reserve can spare the whole force
+    // (a base that cannot is passed over for the next), nearest the target
+    // first by straight distance
+    AutoArray<int> cands;
+    AutoArray<float> dists;
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
@@ -2029,12 +2260,52 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
         {
             continue;
         }
-        const float d = Dist2D(z->pos, town->pos);
-        if (best < 0 || d < bestDist)
+        const float d = Dist2D(z->pos, dest);
+        cands.Add(i);
+        dists.Add(d);
+        for (int at = cands.Size() - 1; at > 0 && dists[at - 1] > dists[at]; at--)
         {
-            best = i;
-            bestDist = d;
+            const int ci = cands[at];
+            cands[at] = cands[at - 1];
+            cands[at - 1] = ci;
+            const float di = dists[at];
+            dists[at] = dists[at - 1];
+            dists[at - 1] = di;
         }
+    }
+    // 3.1 step 3: the first of them whose route to the target has a point the
+    // gate passes (the same search the birth will run: from the base when the
+    // target is in the bubble, else the base point).  The route is the road
+    // net's (ops->BuildRoute, the road A*), else the straight line
+    // cross-country, so every base's route reaches the target; the gate is
+    // what decides.  No ops (no world, no gate): the nearest, as before.
+    const bool wholeRoad = InBubbleAt(registry, view, dest);
+    int best = -1;
+    AutoArray<Vector3> bestRoute;
+    bool bestIsRoad = false;
+    for (int c = 0; c < cands.Size() && best < 0; c++)
+    {
+        if (!ops)
+        {
+            best = cands[c];
+            break;
+        }
+        Record probe;
+        probe.target = r.target;
+        probe.source = registry.GetZone(cands[c])->name;
+        probe.kind = r.kind;
+        probe.destPos = r.destPos;
+        const AutoArray<Vector3>& route = RouteOf(registry, probe, ops);
+        const CounterAttackSpawnPick pick = PickSpawnPoint(route, 0.0f, wholeRoad, _tuning.birthMinToTarget, *ops);
+        if (pick.reason == CASpawnDeferred)
+        {
+            LOG_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: its road is watched too", r.opId,
+                     (const char*)probe.source, (const char*)r.target);
+            continue;
+        }
+        best = cands[c];
+        bestRoute = probe.route;
+        bestIsRoad = probe.routeIsRoad;
     }
     if (best < 0)
     {
@@ -2062,7 +2333,8 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
              r.opId, (const char*)r.source, (const char*)r.target, (const char*)b->name, r.strength, b->garrison);
     r.tried = tried;
     r.source = b->name;
-    r.route.Clear();
+    r.route = bestRoute; // empty without ops: RouteOf rebuilds it
+    r.routeIsRoad = bestIsRoad;
     r.travel = 0;
     r.clock = LegTime(registry, r, ops);
     r.travel = r.clock;
@@ -2070,7 +2342,7 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
     r.retry = 0;
     r.hiddenLogged = false;
     r.deferLogged = false;
-    r.wholeRoad = InBubble(registry, view, target);
+    r.wholeRoad = wholeRoad;
     Emit(registry, r, CAOpResourced, r.strength, 0, "next base back");
     return true;
 }
@@ -2321,9 +2593,9 @@ void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, 
     {
         return; // a dead player freezes every campaign clock
     }
-    if (view.won)
+    if (view.won || view.lost)
     {
-        return; // 7.4: once the win latches nothing in flight steps
+        return; // 7.4, 9.2: once the win (or lose) latches nothing in flight steps
     }
     for (int i = 0; i < _records.Size();)
     {
@@ -2748,7 +3020,7 @@ class EngineOps final : public CounterAttackOps
     {
         ZoneRegistry& registry = ZoneRegistry::Instance();
         const RString side = registry.OccupierSide();
-        const float warLevel = ReadWarLevel();
+        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
         const RString tier = registry.FactionTierClass(side, warLevel);
         if (tier.GetLength() == 0)
         {
@@ -2833,6 +3105,25 @@ class EngineOps final : public CounterAttackOps
         MoveOn(grp, firstLeg);
         GetNetworkManager().UpdateObject(grp);
         return grp;
+    }
+
+    int AliveWithin(AIGroup* grp, Vector3Par centre, float radius) override
+    {
+        if (!grp)
+        {
+            return 0;
+        }
+        int n = 0;
+        const float rSq = radius * radius;
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (unit && unit->GetLifeState() == AIUnit::LSAlive && Dist2DSq(unit->Position(), centre) <= rSq)
+            {
+                n++;
+            }
+        }
+        return n;
     }
 
     int Alive(AIGroup* grp, Vector3& leaderPos) override
@@ -3054,7 +3345,7 @@ class EngineOps final : public CounterAttackOps
         crewOut = nullptr;
         ZoneRegistry& registry = ZoneRegistry::Instance();
         const RString side = registry.OccupierSide();
-        const float warLevel = ReadWarLevel();
+        const float warLevel = OccupierForces::Instance().OccupierWarLevel();
         const RString crewType = registry.FactionTierClass(side, warLevel);
         AICenter* center = crewType.GetLength() > 0 ? EnsureSideCenter(side) : nullptr;
         if (!center)
@@ -3283,7 +3574,53 @@ EngineOps& Ops()
 }
 #pragma clang diagnostic pop
 
+// the resistance HOLD presence within radius of pos (the HQ's defenders,
+// CounterAttackView::hqDefenders): every living resistance unit but the
+// real player, plus the player while PlayerHoldsPresence holds (8.1)
+int HoldPresenceAt(const ZoneRegistry& registry, Vector3Par pos, float radius)
+{
+    World* world = GWorld;
+    if (!world)
+    {
+        return 0;
+    }
+    Person* player = world->GetRealPlayer();
+    const bool playerAlive = player && !player->IsDammageDestroyed();
+    const float rSq = radius * radius;
+    int n = 0;
+    AICenter* center = FindSideCenter(registry.ResistanceSide());
+    for (int g = 0; center && g < center->NGroups(); g++)
+    {
+        AIGroup* grp = center->GetGroup(g);
+        if (!grp)
+        {
+            continue;
+        }
+        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive || (playerAlive && unit->GetPerson() == player))
+            {
+                continue;
+            }
+            n += Dist2DSq(unit->Position(), pos) <= rSq ? 1 : 0;
+        }
+    }
+    if (playerAlive && Dist2DSq(player->Position(), pos) <= rSq)
+    {
+        PlayerPresenceInput presence;
+        registry.SamplePlayerPresence(player, presence);
+        n += PlayerHoldsPresence(presence) ? 1 : 0;
+    }
+    return n;
+}
+
 } // namespace
+
+int CounterAttack::HqAssaultPresence(Vector3Par hqPos, float radius) const
+{
+    return HqAssaultPresence(hqPos, radius, &Ops());
+}
 
 int CounterAttack::MountedOf(const Record& r)
 {
@@ -3329,13 +3666,23 @@ void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
-            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize, ReadWarLevel(),
-                          GuerrillaBase::Instance().HqZone());
+            // the force size reads the occupier-side war level (7.1)
+            OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize,
+                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone());
         }
-        else if (ev.type == ZETownLost)
+        else if (ev.type == ZEHqLost)
         {
-            // a live squad standing in the town it just retook becomes its
-            // garrison before GarrisonCache materializes the refill
+            // the HQ fell to an assault (GuerrillaBase::Destroy): every
+            // HQ_ASSAULT record succeeded
+            CounterAttackView view;
+            BuildView(view);
+            SettleHqAssaults(registry, view, &Ops());
+        }
+        else if (ev.type == ZETownLost || ev.type == ZEBaseLost)
+        {
+            // a live squad standing in the town (or base) it just retook
+            // becomes its garrison before GarrisonCache materializes the
+            // refill
             const ZoneRecord* z = registry.GetZone(ev.zoneIndex);
             const int r = z ? FindByTarget(z->name) : -1;
             if (r < 0 || _records[r].kind == CAKReinforce)
@@ -3400,7 +3747,46 @@ void CounterAttack::BuildView(CounterAttackView& view) const
     }
     view.hqZone = GuerrillaBase::Instance().HqZone();
     view.won = CampaignEnd::Instance().Won();
+    view.lost = CampaignEnd::Instance().Lost();
+    const GuerrillaBase& base = GuerrillaBase::Instance();
+    view.hqEstablished = base.IsEstablished();
+    view.hqPos = view.hqEstablished ? base.HqPos() : VZero;
+    view.hqDefenders = view.hqEstablished ? HoldPresenceAt(registry, view.hqPos, registry.Tuning().zoneArea) : 0;
     Ops().Refresh(view);
+}
+
+int CounterAttack::SettleHqAssaults(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops)
+{
+    int settled = 0;
+    for (int i = 0; i < _records.Size();)
+    {
+        Record& r = _records[i];
+        if (r.kind != CAKHqAssault)
+        {
+            i++;
+            continue;
+        }
+        if (r.phase == CALive)
+        {
+            // a live squad leaves the world once nobody sees it (Advance)
+            if (!r.hqDone)
+            {
+                r.hqDone = true;
+                LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it",
+                         r.opId);
+            }
+            i++;
+            continue;
+        }
+        LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+                 r.opId, r.strength);
+        OccupierForces::Instance().Refund(r.strength, "HQ assault done");
+        Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");
+        FinishHull(registry, view, r, ops);
+        _records.Delete(i);
+        settled++;
+    }
+    return settled;
 }
 
 CounterAttackOps* CounterAttack::EngineOps()
@@ -3478,6 +3864,15 @@ LSError CounterAttack::Record::Serialize(ParamArchive& ar)
     // resolve on the second pass like the group
     PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
     PARAM_CHECK(ar.SerializeRef("crewGroup", crewGroup, 1))
+    // phase 4 (absent in older saves: the target zone's centre, not done)
+    float destX = destPos.X();
+    float destY = destPos.Y();
+    float destZ = destPos.Z();
+    PARAM_CHECK(ar.Serialize("destX", destX, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("destY", destY, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("destZ", destZ, 1, 0.0f))
+    destPos = Vector3(destX, destY, destZ);
+    PARAM_CHECK(ar.Serialize("hqDone", hqDone, 1, false))
     return LSOK;
 }
 

@@ -50,7 +50,8 @@
 // whose progress point is already inside the bound stays abstract at the
 // town edge.  No candidate = deferred: retried every RetryInterval with one
 // WARN, its arrival clock stopped, and after counterAttackBirthGiveUp
-// seconds it turns back and its strength returns to the base.
+// seconds it turns back and its strength returns to the base (the key off;
+// with occupierForces on the birth chain below replaces the turn-back).
 // While the town is in the bubble an unborn force does nothing to it (no
 // arrival, no odds roll, no retake drain: a HOLDING force is suspended, it
 // is never born at the town centre).  A born squad marches the road route
@@ -117,10 +118,13 @@
 //     LIVE (born under S at the 250 m bound, even off-screen); over budget
 //     it waits at the town edge doing nothing; no abstract Fight; an empty
 //     town is held and drained as before;
-//   * the birth chain (3.1, D6) for FUNDED records: at launch, on the road,
-//     then the next base back (re-source: the old base refunded, the new one
-//     debited, CAOpResourced), then cancel unseen (CAOpCancelledUnseen);
-//     legacy records keep the turn-back at counterAttackBirthGiveUp;
+//   * the birth chain (3.1, D6) for every record, funded or legacy (the
+//     director DORMANT): at launch, on the road, then AT ONCE the next base
+//     back whose route has a point the gate passes (re-source: the old base
+//     refunded, the new one debited, CAOpResourced; nearest the target first,
+//     a base whose road is watched too passed over), and only when no base
+//     passes a wait of counterAttackBirthGiveUp, then cancel unseen
+//     (CAOpCancelledUnseen).  The turn-back stays with the key off only;
 //   * a holding force settles as the reverted town's garrison (5.4,
 //     ZoneRegistry::RevertTown via ZoneTickInputs::settleOcc); a travelling
 //     force whose town reverts under it tops the town up (CAKReinforce) when
@@ -240,6 +244,16 @@ struct CounterAttackView
     int occGroups = 0;
     // CampaignEnd's win latch (7.4): nothing launches, nothing steps
     bool won = false;
+    // CampaignEnd's lose latch (9.2): the same freeze
+    bool lost = false;
+    // the HQ (OCCUPIER-FORCES.md 9.1; GuerrillaBase::IsEstablished / HqPos):
+    // an HQ_ASSAULT record marches on hqPos and resolves there.  hqDefenders
+    // is the resistance HOLD presence within zoneArea of hqPos (hold squads,
+    // recruits, companions, the player per PlayerHoldsPresence): the HQ's
+    // "defenders present" for the arrival rule (6.5), never the HQ meter
+    bool hqEstablished = false;
+    Vector3 hqPos = VZero;
+    int hqDefenders = 0;
 };
 
 // How a squad appearing at a point would be perceived, Traffic's tiers
@@ -352,6 +366,17 @@ class CounterAttackOps : public CounterAttackGate
         (void)hull;
         return 0;
     }
+    // living bodies of grp within radius (2D) of centre.  The default counts
+    // every living body when the leader stands within radius (the unit
+    // tests' fakes); the engine counts body by body.
+    virtual int AliveWithin(AIGroup* grp, Vector3Par centre, float radius)
+    {
+        Vector3 leader = VZero;
+        const int alive = Alive(grp, leader);
+        const float dx = leader.X() - centre.X();
+        const float dz = leader.Z() - centre.Z();
+        return alive > 0 && dx * dx + dz * dz <= radius * radius ? alive : 0;
+    }
     // the hull and every living crewman could vanish unnoticed right now
     virtual bool HullUnseen(Entity* hull, AIGroup* crewGroup) const
     {
@@ -458,6 +483,12 @@ class CounterAttack : public SerializeClass
         RString tried;            // bases the birth chain already used, ';'-joined (D6)
         LLink<Entity> hull;       // the live hull (second-pass ref; the hull rides the vehicle serializer)
         LLink<AIGroup> crewGroup; // its crew (counts 1 against the group budget)
+        // phase 4 (serialized): the explicit march destination (an
+        // HQ_ASSAULT's HqPos; VZero = the target zone's centre), and an
+        // HQ_ASSAULT whose HQ fell: its live squad leaves the world unseen,
+        // its bodies to the pool
+        Vector3 destPos = VZero;
+        bool hqDone = false;
         // transient (rebuilt after a load) ---------------------------------
         float retry = 0;          // Travel / Holding: seconds to the next live attempt
         AutoArray<Vector3> route; // the road route, base to town, at most RouteStep apart
@@ -587,9 +618,14 @@ class CounterAttack : public SerializeClass
     bool LaunchFrom(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size,
                     CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
     // the director's launch (CounterAttackOrders.hpp): validates the target
-    // (CAKRetake: a held non-exempt CITY, not view.hqZone, no record on it;
-    // other kinds are later phases and refused), the source (occupier-held)
-    // and the slots (BornOps() < forcesOpsMax); caps order.bodies to the
+    // by kind (CAKRetake: a held non-exempt CITY, not view.hqZone, no record
+    // on it; CAKBase: a resistance-held military zone, no record on it;
+    // CAKHqAssault: an established HQ, no other HQ_ASSAULT, target the HQ's
+    // zone or -1, destination order.destPos or view.hqPos; CAKReinforce: an
+    // occupier-held non-exempt zone other than the source, no record on it;
+    // CAKAlarm / CAKStrike are later phases and refused), the source
+    // (occupier-held) and the slots (BornOps() < OpsCap(), one more for a
+    // CAOWave order: wave operations come on top); caps order.bodies to the
     // source's spare (the Launched event reports the actual count) and
     // starts the record: a foot force with the town in the bubble and a live
     // source garrison marches out live, anything else travels abstractly
@@ -605,8 +641,28 @@ class CounterAttack : public SerializeClass
     static CounterAttackListener* Listener();
     // record queries for the director
     int FindByOpId(int opId) const;
-    // funded records that are LIVE or hold a live hull (forcesOpsMax counts these)
-    int BornOps() const;
+    // funded records that are LIVE or hold a live hull (forcesOpsMax counts
+    // these); includeWave false leaves out CAOWave records (the director's
+    // own slots: a wave's strikes come on top of them)
+    int BornOps(bool includeWave = true) const;
+    // records with origin CAOWave
+    int WaveRecords() const;
+    // the born-operation cap: forcesOpsMax, raised by one per living wave
+    // record (7.1: wave operations are in addition to the director's)
+    int OpsCap() const { return _tuning.forcesOpsMax + WaveRecords(); }
+    // the HQ_ASSAULT record, -1 none (at most one exists)
+    int FindHqAssault() const;
+    // OCCUPIER-FORCES.md 9.1, D14: the bodies that count at the HQ meter
+    // right now.  Live units of CAKHqAssault records within radius (2D) of
+    // hqPos, plus the strength of an abstract CAKHqAssault record HOLDING
+    // within radius of hqPos (not while suspended in the player's bubble).
+    // Passers-by, columns, QRFs and every other kind never count.  The
+    // engine overload counts live bodies through the engine ops.
+    int HqAssaultPresence(Vector3Par hqPos, float radius) const;
+    int HqAssaultPresence(Vector3Par hqPos, float radius, CounterAttackOps* ops) const;
+    // where a record marches and resolves: destPos when set, else the
+    // target zone's centre (VZero when neither exists)
+    static Vector3 DestOf(const ZoneRegistry& registry, const Record& r);
     // live hulls: records' hulls plus hulls driving home
     int LiveHulls() const;
     int HomeHullCount() const { return _homeHulls.Size(); }
@@ -642,9 +698,15 @@ class CounterAttack : public SerializeClass
     void SetTownsTaken(int n) { _townsTaken = n > 0 ? n : 0; }
     // non-exempt CITY zones the resistance holds now
     static int HeldTowns(const ZoneRegistry& registry);
-    // the registry's events of one zone tick (engine wrapper: flips and
-    // town losses)
+    // the registry's events of one zone tick (engine wrapper: flips, town
+    // and base losses, the HQ's fall)
     void OnZoneEvents(const AutoArray<ZoneEventRecord>& fired);
+    // the HQ fell (ZEHqLost, or the HQ is no longer established): every
+    // HQ_ASSAULT record succeeded.  Abstract ones settle now (CAOpSettled,
+    // their bodies to the pool: no garrison to join); a live one is marked
+    // hqDone and leaves the world once nobody sees it.  Returns the records
+    // settled now.
+    int SettleHqAssaults(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops);
     // advance every record by elapsed seconds.  ops may be null (no world:
     // the live path waits).  Raises counterAttack / counterRepelled into
     // fired, and townLost through RevertTown.
@@ -684,7 +746,10 @@ class CounterAttack : public SerializeClass
     // order's fields; false = nothing launched
     bool LaunchCore(ZoneRegistry& registry, const CounterAttackView& view, int target, int source, int size, Record& r,
                     CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
-    // the birth chain's next base back (D6): true when re-sourced
+    // the birth chain's next base back (D6): the nearest other occupier base
+    // (straight distance to the target) that can spare the whole force and
+    // whose route (ops' road net, else the straight line) has a point the
+    // gate passes; without ops the nearest.  True when re-sourced
     bool Resource(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops);
     // the chain's end: bodies back to their source (or the pool), the
     // terminal CAOpCancelledUnseen
@@ -722,6 +787,10 @@ class CounterAttack : public SerializeClass
     // CAOpReturned.
     void ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies);
     bool InBubble(const ZoneRegistry& registry, const CounterAttackView& view, int zone) const;
+    static bool InBubbleAt(const ZoneRegistry& registry, const CounterAttackView& view, Vector3Par pos);
+    // the HQ_ASSAULT record's step (9.1): true when it is finished
+    bool AdvanceHq(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
+                   Record& r, AutoArray<ZoneEventRecord>& fired);
     int LiveSquads() const;
     // room for one more live group (live squads and the side's group budget)
     bool RoomLive(const ZoneRegistry& registry, const CounterAttackView& view) const;

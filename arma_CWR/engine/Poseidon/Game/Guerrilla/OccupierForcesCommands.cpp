@@ -23,6 +23,19 @@
 //                                  [12] cooldowns ([[zone, seconds left]]),
 //                                  [13] the operation counter, [14] the
 //                                  token clock (s toward the next token).
+//                                  Phase 4 (waves, 7.1): [15] a wave is
+//                                  inbound, [16] its clock (s to landing),
+//                                  [17] its bodies, [18] waves fired so far
+//                                  (the "Wave N" count), [19] the final
+//                                  stand fired, [20] the surge zone ("" none),
+//                                  [21] the surge bodies, [22] waves landed,
+//                                  [23] the occupier war level.
+//   gmWarLevelOccupier          -> the occupier-side war level (7.1): the
+//                                  territory level (gmWarLevel) plus
+//                                  forcesWaveWarLevel per landed wave, capped
+//                                  at 6; the territory level with the key off.
+//                                  qrf.sqs reads it; resistance readers keep
+//                                  gmWarLevel.
 //   gmOccupierOps               -> one row per pending or active operation
 //                                  (every CounterAttack record, legacy ones
 //                                  included): [id, kind, origin, package,
@@ -68,17 +81,29 @@
 //                                  "pushoutQuiet" (0..86400 s), "retakeMin"
 //                                  (1..12), "lethalityMargin" (0..3),
 //                                  "urgentCostShare" (1..3), "intelDecay"
-//                                  (1..86400 s).  Returns true when the key
-//                                  is known.
+//                                  (1..86400 s); phase 4: "hqAssaultMin"
+//                                  (1..12), "waveDwell" (1..10 ticks),
+//                                  "waveFinal" (0/1), "waveShare" (0..2),
+//                                  "waveMin" (0..200), "waveMax" (0..400),
+//                                  "waveLead" / "waveLeadFinal" (0..7200 s),
+//                                  "waveRetakeShare" (0..1), "waveOps"
+//                                  (0..8), "waveCluster" (100..20000 m),
+//                                  "waveSurge" (0..48).  Returns true when
+//                                  the key is known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
 //                                                re-steps the band (no-op
 //                                                while inert);
 //                                  "refillHours" sets the refill duration
 //                                                (0.01..48 h);
-//                                  "wave"        parks a wave request for
-//                                                the wave phase (logged, no
-//                                                effect yet);
+//                                  "wave"        ["wave", n] fires wave n
+//                                                now (n omitted or 0: the
+//                                                next threshold; n beyond the
+//                                                thresholds: the final
+//                                                stand); its thresholds are
+//                                                marked fired; a wave already
+//                                                inbound absorbs it; parked
+//                                                (no effect) while inert;
 //                                  "cooldown"    ["cooldown", zoneIndex,
 //                                                seconds] rests a zone as a
 //                                                repel would (false for an
@@ -162,7 +187,22 @@ static GameValue GmOccupierForces(const GameState* state)
     row.Add(coolValue);
     row.Add(GameValue((float)of.OpCounter()));
     row.Add(GameValue(of.TokenClock()));
+    // the waves (phase 4)
+    row.Add(GameValue(of.WaveInbound()));
+    row.Add(GameValue(of.WaveClock()));
+    row.Add(GameValue((float)of.WaveBodies()));
+    row.Add(GameValue((float)of.WaveCount()));
+    row.Add(GameValue(of.FinalFired()));
+    row.Add(GameValue(GameStringType(of.SurgeZone())));
+    row.Add(GameValue((float)of.SurgeBodies()));
+    row.Add(GameValue((float)of.WavesLanded()));
+    row.Add(GameValue(of.OccupierWarLevel()));
     return value;
+}
+
+static GameValue GmWarLevelOccupier(const GameState* /*state*/)
+{
+    return GameValue(OccupierForces::Instance().OccupierWarLevel());
 }
 
 static GameValue GmOccupierOps(const GameState* state)
@@ -325,6 +365,54 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     {
         t.intelDecay = ClampF(v, 1, 86400);
     }
+    else if (stricmp(key, "hqAssaultMin") == 0)
+    {
+        t.hqAssaultMin = (int)ClampF(v, 1, 12);
+    }
+    else if (stricmp(key, "waveDwell") == 0)
+    {
+        t.waveDwell = (int)ClampF(v, 1, 10);
+    }
+    else if (stricmp(key, "waveFinal") == 0)
+    {
+        t.waveFinal = v != 0;
+    }
+    else if (stricmp(key, "waveShare") == 0)
+    {
+        t.waveShare = ClampF(v, 0, 2);
+    }
+    else if (stricmp(key, "waveMin") == 0)
+    {
+        t.waveMin = (int)ClampF(v, 0, 200);
+    }
+    else if (stricmp(key, "waveMax") == 0)
+    {
+        t.waveMax = (int)ClampF(v, 0, 400);
+    }
+    else if (stricmp(key, "waveLead") == 0)
+    {
+        t.waveLead = ClampF(v, 0, 7200);
+    }
+    else if (stricmp(key, "waveLeadFinal") == 0)
+    {
+        t.waveLeadFinal = ClampF(v, 0, 7200);
+    }
+    else if (stricmp(key, "waveRetakeShare") == 0)
+    {
+        t.waveRetakeShare = ClampF(v, 0, 1);
+    }
+    else if (stricmp(key, "waveOps") == 0)
+    {
+        t.waveOps = (int)ClampF(v, 0, 8);
+    }
+    else if (stricmp(key, "waveCluster") == 0)
+    {
+        t.waveCluster = ClampF(v, 100, 20000);
+    }
+    else if (stricmp(key, "waveSurge") == 0)
+    {
+        t.waveSurge = (int)ClampF(v, 0, 48);
+    }
     else
     {
         return GameValue(false);
@@ -354,7 +442,7 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
     }
     else if (stricmp(what, "wave") == 0)
     {
-        of.RequestWave();
+        of.RequestWave((int)(v + 0.5f));
     }
     else if (stricmp(what, "cooldown") == 0)
     {
@@ -380,6 +468,7 @@ INIT_MODULE(GuerrillaOccupierForces, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierForces", GmOccupierForces));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierOps", GmOccupierOps));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierIntel", GmOccupierIntel));
+    GGameState.NewNularOp(GameNular(GameScalar, "gmWarLevelOccupier", GmWarLevelOccupier));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
 }

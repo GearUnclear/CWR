@@ -575,6 +575,16 @@ TEST_CASE("Undercover - the weapon-seen stamp (HOLD presence, OCCUPIER-FORCES 8.
     CHECK(UndercoverWeaponSeenCurrent(100.0f, 100.0f));
     CHECK(UndercoverWeaponSeenCurrent(105.0f, 100.0f));
     CHECK_FALSE(UndercoverWeaponSeenCurrent(105.5f, 100.0f));
+    // the engine-clock form WeaponSeenCount uses: a never-stamped record
+    // (TIME_MIN, also the state after a load) is never current, at any time
+    // (raw Time subtraction from TIME_MIN overflowed in release builds and
+    // read true, so a disguised player held every town, D11)
+    CHECK_FALSE(UndercoverWeaponSeenStampCurrent(Foundation::Time(0), TIME_MIN));
+    CHECK_FALSE(UndercoverWeaponSeenStampCurrent(Foundation::Time(100000), TIME_MIN));
+    CHECK_FALSE(UndercoverWeaponSeenStampCurrent(Foundation::Time(2000000000), TIME_MIN));
+    CHECK(UndercoverWeaponSeenStampCurrent(Foundation::Time(100000), Foundation::Time(100000)));
+    CHECK(UndercoverWeaponSeenStampCurrent(Foundation::Time(105000), Foundation::Time(100000)));
+    CHECK_FALSE(UndercoverWeaponSeenStampCurrent(Foundation::Time(105500), Foundation::Time(100000)));
     // no world: nobody has seen anything
     CHECK(UndercoverSystem::Instance().WeaponSeenCount() == 0);
 }

@@ -3218,3 +3218,276 @@ TEST_CASE("ZoneRegistry - plan-15 squad composition", "[game][guerrilla]")
         }
     }
 }
+
+// ===========================================================================
+// Occupier forces phase 4 (OCCUPIER-FORCES.md 7.2, 7.3, 11): the base
+// recapture (occCapture, the remote tick, RevertBase, baseLost), the new
+// zone events, standing and the phase-4 save fields.
+// ===========================================================================
+
+namespace
+{
+
+// a Camp, a town with an authored standing, a plain town, a post that the
+// fixture hands to the resistance (Rebel, garrison 6), an occupier post and a
+// far post (the "away" anchor)
+const char* kBaseConfig = "class CfgGuerrillaZones\n"
+                          "{\n"
+                          "    class Zones\n"
+                          "    {\n"
+                          "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; "
+                          "position[]={1000.0, 1000.0, 0.0}; };\n"
+                          "        class Town    { name=\"Town\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+                          "standing=20; position[]={1000.0, 1300.0, 0.0}; };\n"
+                          "        class Plain   { name=\"Plain\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+                          "position[]={1300.0, 1300.0, 0.0}; };\n"
+                          "        class Rebel   { name=\"Rebel\";   type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=6; "
+                          "position[]={2000.0, 2000.0, 0.0}; };\n"
+                          "        class Post    { name=\"Post\";    type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                          "position[]={3000.0, 3000.0, 0.0}; };\n"
+                          "        class FarPost { name=\"FarPost\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                          "position[]={20000.0, 20000.0, 0.0}; };\n"
+                          "    };\n"
+                          "};\n";
+
+std::string BaseConfigWith(const char* keys)
+{
+    std::string cfg = kBaseConfig;
+    const std::string anchor = "class CfgGuerrillaZones\n{\n";
+    cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
+    return cfg;
+}
+
+struct BaseFixture
+{
+    std::string text;
+    RegistryFixture f;
+    int camp = -1, town = -1, plain = -1, rebel = -1, post = -1, farPost = -1;
+
+    // Rebel is authored OCCUPIER and handed to the resistance here, as a
+    // capture leaves it (income tap open, no reserve)
+    void Load(const std::string& config)
+    {
+        text = config;
+        f.Load(text.c_str());
+        camp = f.registry.FindZoneIndex("Camp");
+        town = f.registry.FindZoneIndex("Town");
+        plain = f.registry.FindZoneIndex("Plain");
+        rebel = f.registry.FindZoneIndex("Rebel");
+        post = f.registry.FindZoneIndex("Post");
+        farPost = f.registry.FindZoneIndex("FarPost");
+        REQUIRE(farPost >= 0);
+        Z(rebel).owner = f.registry.ResistanceSide();
+        Z(rebel).garrison = 0;
+        Z(rebel).income = 25;
+    }
+    ZoneRecord& Z(int i) { return *f.registry.GetZoneMutable(i); }
+    // the player at zone `at` (-1: far away); occ occupiers / hold fighters,
+    // an abstract holding force and its settled bodies, all at Rebel
+    ZoneTickInputs Inputs(int at, int occ, int hold, int abstractOcc = 0, int settle = 0)
+    {
+        ZoneTickInputs in = MakeInputs(f.registry, at >= 0 ? at : farPost, -1);
+        const int n = f.registry.NZones();
+        in.guerHold.Resize(n);
+        in.abstractOcc.Resize(n);
+        in.settleOcc.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            in.guerHold[i] = 0;
+            in.abstractOcc[i] = 0;
+            in.settleOcc[i] = 0;
+        }
+        in.occCount[rebel] = occ;
+        in.guerHold[rebel] = hold;
+        in.abstractOcc[rebel] = abstractOcc;
+        in.settleOcc[rebel] = settle;
+        return in;
+    }
+};
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - base recapture: the key follows occupierForces unless authored", "[game][guerrilla]")
+{
+    BaseFixture off;
+    off.Load(kBaseConfig);
+    CHECK_FALSE(off.f.registry.Tuning().baseRetake);
+    AutoArray<ZoneEventRecord> fired;
+    // with the key off a liberated post is permanent (the old decision R)
+    Ticks(off.f.registry, off.Inputs(off.rebel, 3, 0), fired, 20);
+    CHECK(off.Z(off.rebel).occCapture == Approx(0.0f));
+    CHECK(Str(off.Z(off.rebel).owner) == "GUER");
+
+    BaseFixture on;
+    on.Load(BaseConfigWith("occupierForces = 1;"));
+    CHECK(on.f.registry.Tuning().baseRetake);
+    BaseFixture own;
+    own.Load(BaseConfigWith("occupierForces = 1; baseRetake = 0;"));
+    CHECK_FALSE(own.f.registry.Tuning().baseRetake);
+    BaseFixture solo;
+    solo.Load(BaseConfigWith("baseRetake = 1;"));
+    CHECK(solo.f.registry.Tuning().baseRetake);
+}
+
+TEST_CASE("ZoneRegistry - base recapture: occCapture rises in its own field, freezes, decays", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    ZoneRecord& z = b.Z(b.rebel);
+    AutoArray<ZoneEventRecord> fired;
+
+    // one occupier, no hold presence: captureRate (6) x 1 per tick; the
+    // player's meter and his events stay untouched
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 1, 0), fired);
+    CHECK(z.occCapture == Approx(6.0f));
+    CHECK(z.capture == Approx(0.0f));
+    CHECK(CountEvents(fired, ZECaptureStarted, b.rebel) == 0);
+    // three or more: the crew cap (x3)
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 5, 0), fired);
+    CHECK(z.occCapture == Approx(24.0f));
+    // a hold squad freezes it (both present)
+    Ticks(b.f.registry, b.Inputs(b.rebel, 5, 3), fired, 5);
+    CHECK(z.occCapture == Approx(24.0f));
+    CHECK(z.contestedLastTick);
+    CHECK(CountEvents(fired, ZEContested, b.rebel) == 0);
+    // the resistance alone re-secures fast (captureDecayDefended 10)
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 0, 3), fired);
+    CHECK(z.occCapture == Approx(14.0f));
+    // nobody: the slow fade (captureDecayAbandoned 2), off-screen too
+    b.f.registry.EvaluateTick(b.Inputs(-1, 0, 0), fired);
+    CHECK(z.occCapture == Approx(12.0f));
+    CHECK(z.lastRemote);
+    Ticks(b.f.registry, b.Inputs(-1, 0, 0), fired, 10);
+    CHECK(z.occCapture == Approx(0.0f));
+    CHECK(Str(z.owner) == "GUER");
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 0);
+    CHECK(CountEvents(fired, ZECaptureLost, b.rebel) == 0);
+    // a held base with only its hold squad is not ticked (no remote count)
+    b.f.registry.EvaluateTick(b.Inputs(-1, 0, 3), fired);
+    CHECK_FALSE(z.lastRemote);
+    CHECK_FALSE(z.contestedLastTick);
+}
+
+TEST_CASE("ZoneRegistry - base recapture: an abstract force ticks it off-screen; at 100 the base reverts",
+          "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    ZoneRecord& z = b.Z(b.rebel);
+    AutoArray<ZoneEventRecord> fired;
+    // a holding BASE force of 4 (abstractOcc) with the player far away: the
+    // remote tick opens and the meter runs at the crew cap
+    ZoneTickInputs in = b.Inputs(-1, 0, 0, 4, 4);
+    b.f.registry.EvaluateTick(in, fired);
+    CHECK(z.lastRemote);
+    CHECK(z.occCapture == Approx(18.0f));
+    Ticks(b.f.registry, in, fired, 5); // 18 per tick: 100 on the sixth tick
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+    CHECK(Str(z.owner) == "EAST"); // the authored OCCUPIER token
+    CHECK(z.income == Approx(0.0f)); // the tap closes
+    CHECK(z.occCapture == Approx(0.0f));
+    CHECK(z.capture == Approx(0.0f));
+    CHECK(z.lostCount == 1);
+    // the holding force's 4 bodies settle first, the rest of the room is a
+    // pool deposit (the pool is inert here: it passes through)
+    CHECK(z.garrison == Approx(6.0f));
+    CHECK(z.revertRefill == 2);
+    // the occupier's post again: no more base ticks
+    Ticks(b.f.registry, in, fired, 3);
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+
+    // the player re-captures it: ZECaptured again, lostCount kept ("Retaken")
+    z.garrison = 0;
+    ZoneTickInputs take = MakeInputs(b.f.registry, b.rebel, b.rebel, 3);
+    Ticks(b.f.registry, take, fired, 10);
+    CHECK(Str(z.owner) == "GUER");
+    CHECK(CountEvents(fired, ZECaptured, b.rebel) == 1);
+    CHECK(z.lostCount == 1);
+    CHECK(z.income == Approx(25.0f)); // the defensive income < 1 rule reopens the tap
+}
+
+TEST_CASE("ZoneRegistry - RevertBase refuses towns, occupier posts and the camp; settled surplus", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    AutoArray<ZoneEventRecord> fired;
+    CHECK_FALSE(b.f.registry.RevertBase(b.post, fired));
+    CHECK_FALSE(b.f.registry.RevertBase(b.camp, fired)); // a CAMP is not a base (CampaignEnd::IsMilitaryType)
+    b.Z(b.town).owner = "GUER";
+    CHECK_FALSE(b.f.registry.RevertBase(b.town, fired));
+    CHECK(fired.Size() == 0);
+    CHECK(b.f.registry.IsHeldBase(b.Z(b.rebel)));
+    CHECK_FALSE(b.f.registry.IsHeldBase(b.Z(b.camp)));
+    // 9 settled bodies into a room of 6: 6 stay (the surplus goes to the pool)
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(6.0f));
+    CHECK(b.Z(b.rebel).revertRefill == 0);
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+}
+
+TEST_CASE("ZoneRegistry - the phase-4 zone events and the authored standing", "[game][guerrilla]")
+{
+    CHECK(ZoneRegistry::EventTypeFromName("baseLost") == ZEBaseLost);
+    CHECK(ZoneRegistry::EventTypeFromName("hqLost") == ZEHqLost);
+    CHECK(ZoneRegistry::EventTypeFromName("BASELOST") == ZEBaseLost);
+    BaseFixture b;
+    b.Load(kBaseConfig);
+    // standing: authored per CITY, default 50, clamped to 0..100
+    CHECK(b.Z(b.town).standing == Approx(20.0f));
+    CHECK(b.Z(b.plain).standing == Approx(50.0f));
+    CHECK(b.Z(b.rebel).struckUntil == Approx(0.0f));
+    std::string high = kBaseConfig;
+    high.replace(high.find("standing=20"), 11, "standing=900");
+    BaseFixture c;
+    c.Load(high);
+    CHECK(c.Z(c.town).standing == Approx(100.0f));
+}
+
+TEST_CASE("ZoneRegistry - occCapture, standing, struckUntil, lostCount and the new handlers survive save/load",
+          "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-phase4.bin";
+    {
+        QIStream in(kBaseConfig, strlen(kBaseConfig));
+        ExtParsMission.Parse(in);
+    }
+    {
+        BaseFixture b;
+        b.Load(kBaseConfig);
+        b.Z(b.rebel).occCapture = 42.0f;
+        b.Z(b.rebel).lostCount = 2;
+        b.Z(b.town).standing = 12.5f;
+        b.Z(b.plain).struckUntil = 4321.0f;
+        b.f.registry.SetEventHandler(ZEBaseLost, "hBase");
+        b.f.registry.SetEventHandler(ZEHqLost, "hHq");
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(b.f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    const ZoneRecord* rebel = loaded.GetZone(loaded.FindZoneIndex("Rebel"));
+    const ZoneRecord* town = loaded.GetZone(loaded.FindZoneIndex("Town"));
+    const ZoneRecord* plain = loaded.GetZone(loaded.FindZoneIndex("Plain"));
+    REQUIRE(rebel != nullptr);
+    REQUIRE(town != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(rebel->occCapture == Approx(42.0f));
+    CHECK(rebel->lostCount == 2);
+    CHECK(town->standing == Approx(12.5f));
+    CHECK(plain->standing == Approx(50.0f));
+    CHECK(plain->struckUntil == Approx(4321.0f));
+    CHECK(Str(loaded.GetEventHandler(ZEBaseLost)) == "hBase");
+    CHECK(Str(loaded.GetEventHandler(ZEHqLost)) == "hHq");
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}

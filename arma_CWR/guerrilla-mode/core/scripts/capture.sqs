@@ -21,11 +21,18 @@
 ;
 ;  OWNS: gmEvtCaptured / gmEvtSupport / gmEvtRevealed / gmEvtCapStart /
 ;        gmEvtContested / gmEvtCapLost / gmEvtTownLost / gmEvtCounter /
-;        gmEvtRepelled (consumer side), GM_HOLD_* and
-;        GM_TT_* tunables. Spawned hold groups are fire-and-forget (the old
-;        GM_HOLD_GROUPS array was never read by anything; dropped).
-;  READS: gmZone tuples, gmResistanceSide, faction keys holdClass/holdCount,
-;        aP (spawn side = side aP: the player IS the resistance).
+;        gmEvtRepelled (consumer side), gmEvtBaseLost (registered and
+;        consumed here: the occupier retook a base, OCCUPIER-FORCES.md 7.2),
+;        GM_HOLD_* and GM_TT_* tunables, and the per-zone hold groups
+;        GM_HOLD_ZONES / GM_HOLD_GRPS (parallel arrays: zone name -> its
+;        hold squad).  A base can change hands again (the occupier's base
+;        recapture), so a re-captured zone gets a new hold squad only when
+;        none of its old one is alive.
+;  READS: gmZone tuples, gmZoneSim slot 15 (lostCount: the zone was lost
+;        back before, so its capture reads "Retaken" and the starter
+;        objectives do not re-complete), gmResistanceSide, faction keys
+;        holdClass/holdCount, aP (spawn side = side aP: the player IS the
+;        resistance).
 ;
 ;  gmEvtRevealed is drained without a reaction: reveal handling (marker
 ;  repaint) is fully native. gmEvtSupport now has its UX: the town crossed
@@ -50,6 +57,13 @@ GM_CAP_TICK   = 2
 GM_TT_RANGE   = 150
 GM_TT_EVERY   = 12
 GM_cNextTT    = 0
+; per-zone hold squads (zone name -> group), so a re-captured base gets a new
+; squad only when none of its old one lives
+GM_HOLD_ZONES = []
+GM_HOLD_GRPS  = []
+; the occupier's base recapture (native baseLost, OCCUPIER-FORCES.md 7.2)
+gmEvtBaseLost = []
+gmZoneOnEvent ["baseLost", {gmEvtBaseLost = gmEvtBaseLost + [_this]}]
 
 ; ---- journal (native Journal behind the map's Notes/Plan pages) ---------------
 ; Two starter objectives on the Plan page; this manager flips them DONE on
@@ -72,6 +86,7 @@ GM_cLost  = gmEvtCapLost + []; gmEvtCapLost = []
 GM_cTown  = gmEvtTownLost + []; gmEvtTownLost = []
 GM_cCtr   = gmEvtCounter + []; gmEvtCounter = []
 GM_cRep   = gmEvtRepelled + []; gmEvtRepelled = []
+GM_cBase  = gmEvtBaseLost + []; gmEvtBaseLost = []
 
 ; ---- capture-started: the meter left 0 --------------------------------------
 GM_cI = 0
@@ -113,6 +128,18 @@ GM_cI = GM_cI + 1
 goto "tlev"
 #tlfin
 
+; ---- base lost: the occupier retook a held base (native base recapture,
+;      OCCUPIER-FORCES.md 7.2): its men stood in it with nobody of ours
+;      holding it until the occupier's meter filled ----------------------------
+GM_cI = 0
+#blev
+? GM_cI >= (count GM_cBase) : goto "blfin"
+hint format ["%1 is back in occupier hands", (GM_cBase select GM_cI) select 1]
+gmJournalNote ["They came back through the wire with nobody left to stop them. The base is theirs again.", (GM_cBase select GM_cI) select 1, "danger"]
+GM_cI = GM_cI + 1
+goto "blev"
+#blfin
+
 ; ---- counter-attack: the occupier sent a force back for a held town (native
 ;      CounterAttack service, issue #79), whether or not anyone is there -----
 GM_cI = 0
@@ -151,27 +178,50 @@ GM_cI = 0
 GM_cEv  = GM_cBatch select GM_cI
 GM_cIdx = GM_cEv select 0
 GM_cRec = gmZone GM_cIdx
+; held before and lost back to the occupier (gmZoneSim slot 15, lostCount)
+GM_cAgain = ((gmZoneSim GM_cIdx) select 15) > 0
 
 ; military zones get a live holding garrison; cities hold themselves (support).
 ; The hold squad is role-mixed when the resistance descriptor authors tier
 ; role arrays (native gmFactionSquad, plan 15); a tier-less descriptor keeps
 ; the classic holdClass x holdCount monoculture.
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : goto "cnotify"
+; one hold squad per zone: a re-captured base whose old squad still lives
+; keeps it (no duplicate squad)
+GM_cName = GM_cEv select 1
+GM_cAt = GM_HOLD_ZONES find GM_cName
+GM_cAlive = 0
+? GM_cAt >= 0 : GM_cOld = GM_HOLD_GRPS select GM_cAt
+? GM_cAt >= 0 : GM_cAlive = {alive _x} count (units GM_cOld)
+? GM_cAlive > 0 : goto "cnotify"
+GM_cGrp = grpNull
 ; civilian outfit: monoculture through the tier-less path, skipping the
 ; role-mixed native composer (see the GM_HOLD_CIV tunable note above)
 ? GM_HOLD_CIV != "" : GM_cGrp = [side aP, GM_HOLD_CIV, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
-? GM_HOLD_CIV != "" : goto "cnotify"
+? GM_HOLD_CIV != "" : goto "chold"
 GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
 ? (count GM_cSquad) > 0 : GM_cGrp = [side aP, GM_cSquad, GM_cRec select GM_Z_POS] call GM_fnSpawnSquad
 ? ((count GM_cSquad) == 0) and (GM_HOLD_CLASS != "") : GM_cGrp = [side aP, GM_HOLD_CLASS, GM_HOLD_COUNT, GM_cRec select GM_Z_POS] call GM_fnSpawnGroup
+#chold
+? GM_cAt >= 0 : GM_HOLD_GRPS set [GM_cAt, GM_cGrp]
+? GM_cAt < 0 : GM_HOLD_ZONES = GM_HOLD_ZONES + [GM_cName]
+? GM_cAt < 0 : GM_HOLD_GRPS = GM_HOLD_GRPS + [GM_cGrp]
 
 #cnotify
+? GM_cAgain : goto "cagain"
 hint format ["%1 liberated", GM_cEv select 1]
 ; journal: diary line + the matching starter objective flips DONE
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["Risen. The town is ours.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalObjective ["firstTown", "", "DONE"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalNote ["Liberated. Garrison gone; holding squad in place.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalObjective ["firstZone", "", "DONE"]
+goto "cnext"
+#cagain
+; a zone we held before: "Retaken", and the starter objectives stay as they were
+hint format ["%1 retaken", GM_cEv select 1]
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["Retaken. The town stood up again.", GM_cEv select 1, "good"]
+? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalNote ["Retaken. We threw them out a second time; holding squad in place.", GM_cEv select 1, "good"]
+#cnext
 GM_cI = GM_cI + 1
 goto "cev"
 #cdone

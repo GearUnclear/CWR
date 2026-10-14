@@ -95,7 +95,9 @@ static float WholeBodies(float value)
 }
 
 // gmZoneSet [index, "field", value]; unknown field -> no-op.  garrison and
-// garrisonMax are floored to whole bodies (at least 0)
+// garrisonMax are floored to whole bodies (at least 0); occCapture (the
+// occupier's base-recapture meter) and standing (occupier standing) are
+// clamped to 0..100.  An owner write resets both capture meters.
 static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 {
     const GameArrayType& array = oper1;
@@ -128,6 +130,7 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
         // without this a script-flipped zone keeps a stale meter forever
         // (frozen once ineligible) and hands it to a future re-occupier
         z->capture = 0;
+        z->occCapture = 0;
         z->contestedLastTick = false;
     }
     else if (stricmp(field, "garrison") == 0)
@@ -167,6 +170,16 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
     {
         z->recoverClock = (float)array[2];
     }
+    else if (stricmp(field, "occCapture") == 0)
+    {
+        const float v = (float)array[2];
+        z->occCapture = v < 0 ? 0.0f : (v > 100 ? 100.0f : v);
+    }
+    else if (stricmp(field, "standing") == 0)
+    {
+        const float v = (float)array[2];
+        z->standing = v < 0 ? 0.0f : (v > 100 ? 100.0f : v);
+    }
     else if (stricmp(field, "heatRaise") == 0)
     {
         registry.HeatRaise(index, (float)array[2]);
@@ -188,7 +201,11 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 // guer (slot 1) is the resistance CAPTURE presence (the player per
 // PlayerCapturesPresence).  Slot 13 is the S5 pending deposit
 // (OCCUPIER-FORCES.md 3.3): whole bodies on their way into the reserve that
-// neither defend nor materialize yet (live, not as of the tick)
+// neither defend nor materialize yet (live, not as of the tick).
+// Occupier forces phase 4 (live values): slot 14 occCapture (the occupier's
+// base-recapture meter on a resistance-held military zone, OCCUPIER-FORCES.md
+// 7.2), 15 lostCount (times the resistance lost the zone back), 16 standing
+// (occupier standing, 7.3), 17 struckUntil (phase 6; 0 until then).
 static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -198,7 +215,7 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     {
         return value;
     }
-    array.Resize(14);
+    array.Resize(18);
     array[0] = z->lastInBubble;
     array[1] = (float)z->lastGuer;
     array[2] = (float)z->lastOcc;
@@ -213,6 +230,10 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     array[11] = (float)z->flipDay;
     array[12] = (float)z->flipMinute;
     array[13] = (float)z->pending;
+    array[14] = z->occCapture;
+    array[15] = (float)z->lostCount;
+    array[16] = z->standing;
+    array[17] = z->struckUntil;
     return value;
 }
 
@@ -297,7 +318,12 @@ static GameValue GmSimDiagLog(const GameState* /*state*/)
 }
 
 // gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
-//               "captureStarted"|"contested"|"captureLost"|"townLost", handler]
+//               "captureStarted"|"contested"|"captureLost"|"townLost"|
+//               "counterAttack"|"counterRepelled"|"baseLost"|"hqLost", handler]
+// baseLost: a resistance-held military zone went back to the occupier (its
+// occCapture meter reached 100, OCCUPIER-FORCES.md 7.2).  hqLost: the HQ was
+// destroyed (GuerrillaBase::Destroy through ZoneRegistry::QueueEvent); the
+// handler runs only when the HQ stood in a zone (zoneIndex >= 0).
 // handler may be a STRING or a CODE value (GameDataCode's GetString returns
 // the source, so the plain string coercion covers both)
 static GameValue GmZoneOnEvent(const GameState* state, GameValuePar oper1)
