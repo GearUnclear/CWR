@@ -8,6 +8,17 @@ class CfgGuerrillaZones
     supportRate = 0;
     supportDecayOccupied = 0;
     trafficEnabled = 0;
+    // Town defenders (issue #79 B2) PINNED OFF: this fixture predates them,
+    // and its tests park an armed player at the Village centre. With the
+    // default cityGarrison the occupier-administered Village keeps four EAST
+    // bodies, and since GarrisonCache::SpawnPoint hashes their spawn points
+    // per zone (OCCUPIER-FORCES.md L11) one stands about 21 m from the centre
+    // with a line of fire every run: once cover is blown it kills the player,
+    // and under --autotest the mission end shuts the game down mid-test
+    // (guerrilla_assailants: harness dropped at triAssertEq [asAdmitted, 8]).
+    // cityGarrison = 0 is the legacy free-town rule; defended towns are
+    // covered by guerrilla_town_defenders on the shipped Guerrilla.Abel.
+    cityGarrison = 0;
     class Zones
     {
         class Camp
