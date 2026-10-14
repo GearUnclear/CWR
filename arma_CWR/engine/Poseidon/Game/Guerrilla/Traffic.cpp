@@ -1810,6 +1810,149 @@ void Traffic::IssueRoute(TrafficEntry& e, Vector3Par dest, int combatMode, int s
     e.dest = dest;
 }
 
+// Seated-man deletion (the CounterAttack EngineOps idiom, 37e24ba).
+// ::DeleteVehicle only flags a man sitting in a vehicle: he stays in the
+// world's out-vehicle list, which never purges deleted entries, so every
+// crewman, rider or corpse deleted in his seat lived on as an invisible
+// object (and was written into every save).  Every traffic deletion of a
+// person therefore moves him out of his seat first (no sound, where the hull
+// stands; the caller deletes him and the hull unseen), and every hull
+// deletion empties its seats first.
+
+// the seat test against one hull
+static bool SitsIn(const Person* person, const Transport* veh)
+{
+    if (!person || !veh)
+    {
+        return false;
+    }
+    if (veh->Driver() == person || veh->Gunner() == person || veh->Commander() == person)
+    {
+        return true;
+    }
+    const ManCargo& cargo = veh->GetManCargo();
+    for (int m = 0; m < cargo.Size(); m++)
+    {
+        if (cargo[m] == person)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the hull a man sits in: his brain's vehicle, else (a corpse whose brain is
+// gone still sits in his seat) the first of the candidate hulls holding him
+static Transport* SeatHull(Person* person, Transport* const* hulls, int nHulls)
+{
+    AIUnit* unit = person ? person->Brain() : nullptr;
+    Transport* veh = unit ? unit->GetVehicleIn() : nullptr;
+    if (veh && SitsIn(person, veh))
+    {
+        return veh;
+    }
+    for (int h = 0; h < nHulls; h++)
+    {
+        if (SitsIn(person, hulls[h]))
+        {
+            return hulls[h];
+        }
+    }
+    return nullptr;
+}
+
+static void LeaveSeat(Person* person, Transport* veh)
+{
+    if (!person || !veh || !person->IsLocal())
+    {
+        return;
+    }
+    const Matrix4 at = veh->WorldTransform();
+    if (veh->Driver() == person)
+    {
+        veh->GetOutDriver(at, false);
+    }
+    else if (veh->Gunner() == person)
+    {
+        veh->GetOutGunner(at, false);
+    }
+    else if (veh->Commander() == person)
+    {
+        veh->GetOutCommander(at, false);
+    }
+    else
+    {
+        veh->GetOutCargo(person, at, false);
+    }
+}
+
+// delete one traffic person (living or dead), out of his seat first
+static void DeleteTrafficPerson(Person* person, Transport* const* hulls = nullptr, int nHulls = 0)
+{
+    if (!person)
+    {
+        return;
+    }
+    LeaveSeat(person, SeatHull(person, hulls, nHulls));
+    if (person->IsLocal())
+    {
+        ::DeleteVehicle(person);
+    }
+    else
+    {
+        GetNetworkManager().AskForDeleteVehicle(person);
+    }
+}
+
+// delete a traffic hull with its seats emptied first: the dead, the
+// brainless and members of the traffic group 'own' are deleted with it; any
+// other living man (somebody else who climbed in) only steps out, which is
+// what the engine's own hull deletion does for him
+static void DeleteTrafficHull(Transport* veh, AIGroup* own)
+{
+    if (!veh)
+    {
+        return;
+    }
+    AutoArray<Person*> seated;
+    Person* seats[3] = {veh->Driver(), veh->Gunner(), veh->Commander()};
+    for (int s = 0; s < 3; s++)
+    {
+        if (seats[s])
+        {
+            seated.Add(seats[s]);
+        }
+    }
+    const ManCargo& cargo = veh->GetManCargo();
+    for (int m = 0; m < cargo.Size(); m++)
+    {
+        if (cargo[m])
+        {
+            seated.Add(cargo[m]);
+        }
+    }
+    for (int i = 0; i < seated.Size(); i++)
+    {
+        Person* person = seated[i];
+        AIUnit* unit = person->Brain();
+        if (unit && unit->IsAnyPlayer())
+        {
+            LeaveSeat(person, veh);
+            continue;
+        }
+        bool ours = !unit || person->IsDammageDestroyed() || (own && unit->GetGroup() == own);
+        if (ours)
+        {
+            DeleteTrafficPerson(person, &veh, 1);
+        }
+        else
+        {
+            LeaveSeat(person, veh);
+        }
+    }
+    ::DeleteVehicle(veh);
+}
+
 // extra crew (gunner / cargo / escort seats): a refused seat leaves a body on
 // foot next to the hull that no route ever addresses - delete it instead
 static void SeatOrDelete(Person* person, Transport* veh)
@@ -1821,7 +1964,7 @@ static void SeatOrDelete(Person* person, Transport* veh)
     AIUnit* unit = person->Brain();
     if (!unit || unit->GetVehicleIn() != veh)
     {
-        ::DeleteVehicle(person);
+        DeleteTrafficPerson(person, &veh, 1);
     }
 }
 
@@ -1996,7 +2139,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
         // no driver = no traffic; tear the hull down again
         DeleteCrew(grp);
         grp->RemoveFromCenter();
-        ::DeleteVehicle(veh);
+        DeleteTrafficHull(veh, grp);
         why = TSFDriverSeat;
         LOG_WARN(Core, "Traffic: could not seat a '{}' driver into '{}'", (const char*)crewType, (const char*)hullType);
         return false;
@@ -2050,7 +2193,7 @@ bool Traffic::SpawnEntry(int kind, int originIndex, int destIndex, Vector3Par pl
                 }
                 if (!escort->Driver())
                 {
-                    ::DeleteVehicle(escort);
+                    DeleteTrafficHull(escort, grp); // its seated gunner and riflemen go with it
                     escort = nullptr;
                 }
             }
@@ -2170,14 +2313,7 @@ void Traffic::DeleteCrew(AIGroup* grp) const
     }
     for (int b = 0; b < bodies.Size(); b++)
     {
-        if (bodies[b]->IsLocal())
-        {
-            ::DeleteVehicle(bodies[b]);
-        }
-        else
-        {
-            GetNetworkManager().AskForDeleteVehicle(bodies[b]);
-        }
+        DeleteTrafficPerson(bodies[b]); // a seated man (or corpse) leaves his seat first
     }
 }
 
@@ -2300,14 +2436,9 @@ void Traffic::DespawnEntry(int index, const char* reason, bool keepHull, AutoArr
         {
             grp->RemoveFromCenter();
         }
-        if (veh)
-        {
-            ::DeleteVehicle(veh);
-        }
-        if (escort)
-        {
-            ::DeleteVehicle(escort);
-        }
+        // seats emptied first (a corpse no longer in the group still sits)
+        DeleteTrafficHull(veh, grp);
+        DeleteTrafficHull(escort, grp);
     }
 
     TrafficEventRecord ev;
@@ -3461,6 +3592,17 @@ static bool FreeSpentGroup(AIGroup* grp)
 
 void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
 {
+    // every roadside hull: a body filed under one row may sit in another
+    // row's hull (a convoy's dead in the escort), and a corpse whose brain is
+    // gone is found by its seat
+    AutoArray<Transport*> hulls;
+    for (int h = 0; h < _released.Size(); h++)
+    {
+        if (_released[h].vehicle)
+        {
+            hulls.Add(_released[h].vehicle);
+        }
+    }
     for (int i = _released.Size() - 1; i >= 0; i--)
     {
         ReleasedEntry& r = _released[i];
@@ -3479,7 +3621,7 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 if (r.bodies[b].GetLink())
                 {
-                    ::DeleteVehicle(r.bodies[b]);
+                    DeleteTrafficPerson(r.bodies[b], hulls.Data(), hulls.Size());
                 }
             }
             AIGroup* grp = r.group;
@@ -3558,7 +3700,7 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 if (r.bodies[b].GetLink())
                 {
-                    ::DeleteVehicle(r.bodies[b]);
+                    DeleteTrafficPerson(r.bodies[b], hulls.Data(), hulls.Size());
                 }
             }
             AIGroup* grp = r.group;
@@ -3566,7 +3708,15 @@ void Traffic::CleanupReleased(Vector3Par playerPos, bool playerValid, float dt)
             {
                 grp->RemoveFromCenter();
             }
-            ::DeleteVehicle(veh);
+            for (int h = 0; h < hulls.Size(); h++)
+            {
+                if (hulls[h] == veh)
+                {
+                    hulls.Delete(h);
+                    break;
+                }
+            }
+            DeleteTrafficHull(veh, grp); // any corpse left in a seat goes with it
             _released.Delete(i);
         }
     }
@@ -3622,7 +3772,7 @@ void Traffic::CleanupFleeing(Vector3Par playerPos, bool playerValid, float dt)
                 continue;
             }
             AIGroup* grp = f.group;
-            ::DeleteVehicle(p);
+            DeleteTrafficPerson(p);
             if (grp && grp->NUnits() == 0)
             {
                 grp->RemoveFromCenter();
