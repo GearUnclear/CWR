@@ -48,9 +48,44 @@
 // Infantry is paid by the source base (its spare); the hull and its crew are
 // paid by the pool (poolPrice).
 //
-// PHASES.  Every package is classified now, but phase 3 offers only Foot and
-// Truck to the chooser (OfferedMask = Phase3Packages); phase 5 adds armour,
-// phase 6 air.
+// SEATS AND CREW (phase 5).  A hull's infantry rides in its cargo seats:
+// at most min(MaxGroup, transportSoldier) bodies (SeatCap).  A hull whose
+// seats cannot hold the minimum is quoted but never chosen (seatsShort): an
+// armed car with one cargo seat, or a tank with none, does not go to a
+// retake on its own (4 bodies at least).  Its crew is what its class needs:
+// hasDriver + hasGunner + hasCommander (a driver at least), paid by the pool
+// as bodies on top of the hull.
+//
+// COLUMNS (phase 5, the owner's option b).  A quote may be a CARRIER (Truck
+// or APC: it carries the bodies) plus at most ONE ESCORT hull (armed car,
+// APC or tank: it carries nobody).  Foot never takes an escort.  A column's
+// price is the bodies + the carrier + the escort + both crews; its
+// lethality is the carrier's (carried infantry x 1.25, an APC carrier's
+// +6) plus the escort's bonus (+3 / +6 / +12); its abstract speed is 0.6 x
+// the slower hull's maxSpeed (3.2).  The choice runs over packages and
+// columns alike.  PackageQuote::package stays the carrier (every phase 3
+// accessor keeps its meaning); the escort sits in escort / escortClass /
+// escortCrew / escortHullPrice, and poolPrice / price include it.
+//
+// AT THE TOWN EDGE (3.2, phase 5).  The infantry dismounts at the edge and
+// assaults; an armed hull (armed car, APC, tank) then SUPPORTS: it drives up
+// to the town edge with its crew AWARE and firing.  A truck HOLDS BACK where
+// it stopped.  EdgeRole(package) is the flag the hull lifecycle
+// (CounterAttack) reads.
+//
+// DOWNGRADE (phase 5).  A hull package's infantry is always debited from the
+// source's STORED reserve (CounterAttack::LaunchCore).  When at launch the
+// stored reserve cannot pay the bodies but the source can on foot, the
+// package downgrades to Foot (MustDowngrade, Downgrade): same source and
+// bodies, no hull and no crew, the pool price refunded.  A column goes on
+// foot whole: carrier and escort both refunded.  CounterAttack
+// applies it at the launch (LaunchCore), the director never needs to,
+// because its quotes already price a hull's infantry against spareStored.
+//
+// PHASES.  Every package is classified now.  Phase 3 offered only Foot and
+// Truck (Phase3Packages, kept so tests can pin the old ladder); phase 5
+// offers every ground package (DefaultPackages = GroundPackages); phase 6
+// adds air.
 
 #include <Poseidon/Game/Guerrilla/CounterAttackOrders.hpp>
 
@@ -106,7 +141,18 @@ struct PackageQuote
     float seconds = 0;   // straight distance / speed from the source
     bool lethal = false; // lethality >= L_req
     bool affordable = false;
+    bool seatsShort = false; // the hull's cargo seats cannot hold the minimum (never chosen)
     RString hullClass;
+    // the column's escort (phase 5): -1 = none.  It carries nobody; its
+    // crew and hull are in poolPrice and price, not in crew / hullPrice.
+    int escort = -1;
+    int escortCrew = 0;
+    int escortHullPrice = 0;
+    RString escortClass;
+    bool HasEscort() const { return escort >= 0; }
+    // pool units for the escort alone (hull + crew): the CounterAttack
+    // record refunds it apart from the carrier's
+    int EscortPoolPrice() const { return HasEscort() ? escortHullPrice + escortCrew : 0; }
 };
 
 // A base the infantry may come from
@@ -133,7 +179,17 @@ struct PackageRequest
     float tierFactor = 1.0f;      // 1.0 / 1.25 / 1.5
     int pool = 0;                 // pool units available for hulls and crews
     bool poolActive = true;       // false: the pool is inert (nothing is debited)
-    unsigned int offered = 0;     // OfferedMask bits (ForcePackages::Phase3Packages)
+    // OfferedMask bits; the default offers every ground package
+    // (ForcePackages::DefaultPackages, phase 5)
+    unsigned int offered = (1u << FPFoot) | (1u << FPTruck) | (1u << FPArmedCar) | (1u << FPApc) | (1u << FPTank);
+};
+
+// what a hull does once its infantry is out at the town edge (3.2)
+enum ForceEdgeRole
+{
+    FERNone,     // no hull (foot), or air (phase 6)
+    FERHoldBack, // a truck: it stays where it stopped
+    FERSupport   // an armed hull: it drives up to the town edge and fights
 };
 
 struct PackageChoice
@@ -143,8 +199,11 @@ struct PackageChoice
     float lReq = 0;
     PackageQuote quote;
     int nQuotes = 0;
-    PackageQuote quotes[NForcePackages]; // every package considered (diagnostics, tests)
-    RString why;                         // when !ok
+    // every package and column considered (diagnostics, tests): the
+    // packages, then carrier x escort columns
+    static constexpr int MaxQuotes = 24;
+    PackageQuote quotes[MaxQuotes];
+    RString why; // when !ok
 };
 
 class ForcePackages
@@ -153,6 +212,12 @@ class ForcePackages
     // bit masks of ForcePackage values offered to the chooser
     static constexpr unsigned int Bit(int package) { return 1u << (unsigned int)package; }
     static constexpr unsigned int Phase3Packages = (1u << FPFoot) | (1u << FPTruck);
+    static constexpr unsigned int GroundPackages =
+        Phase3Packages | (1u << FPArmedCar) | (1u << FPApc) | (1u << FPTank);
+    static constexpr unsigned int AirPackages = (1u << FPTransportHeli) | (1u << FPAttackHeli) | (1u << FPJet);
+    // what the director offers now: every ground package (phase 5); phase 6
+    // adds AirPackages
+    static constexpr unsigned int DefaultPackages = GroundPackages;
     static constexpr unsigned int AllPackages = (1u << NForcePackages) - 1u;
 
     // classification thresholds (6.5)
@@ -197,6 +262,32 @@ class ForcePackages
     static bool CarriesInfantry(int package);
     static float TierFactor(int tierIndex); // 1.0 / 1.25 / 1.5 (index clamped 0..2)
     static int CrewOf(int package, const ForcePackageCatalogue& cat);
+    // the infantry a package can carry: MaxGroup on foot, else
+    // min(MaxGroup, the hull's cargo seats); 0 for a package not offered
+    static int SeatCap(int package, const ForcePackageCatalogue& cat);
+    // FERHoldBack for a truck, FERSupport for an armed car, an APC or a
+    // tank, FERNone for foot and air (the hull lifecycle reads it)
+    static int EdgeRole(int package);
+    static bool SupportsAtEdge(int package) { return EdgeRole(package) == FERSupport; }
+    static bool IsGroundHull(int package) { return package >= FPTruck && package <= FPTank; }
+    // a column's two roles: carriers carry the bodies (Truck, APC), escorts
+    // carry nobody and add their bonus (armed car, APC, tank)
+    static bool IsCarrier(int package) { return package == FPTruck || package == FPApc; }
+    static bool IsEscort(int package) { return package == FPArmedCar || package == FPApc || package == FPTank; }
+    // a column's lethality: the carrier's (Lethality) + the escort's bonus
+    static float ColumnLethality(int carrier, int escort, int bodies, float tierFactor);
+    // groups and hulls a quote adds: a column has a second crewed hull
+    static int GroupsOf(const PackageQuote& q) { return GroupsOf(q.package) + (q.HasEscort() ? 1 : 0); }
+    static int HullsOf(const PackageQuote& q) { return HullsOf(q.package) + (q.HasEscort() ? 1 : 0); }
+    // the downgrade: a hull package whose source's stored reserve cannot pay
+    // bodies (storedSpare < bodies) while the source can on foot
+    // (spare >= bodies) goes on foot.  Foot and air never downgrade.
+    static bool MustDowngrade(int package, int bodies, int storedSpare, int spare);
+    // the foot quote for the same source and bodies: no hull, no crew,
+    // foot speed, lethality and lethal recomputed (tierFactor, lReq);
+    // refund = the pool units the hull package had cost (its poolPrice,
+    // the escort's included: the whole column goes on foot)
+    static PackageQuote Downgrade(const PackageQuote& q, float tierFactor, float lReq, int& refund);
     // the abstract leg's speed (m/s): foot 1.5, ground 0.6 x maxSpeed, air 0.8 x
     static float SpeedOf(int package, const ForcePackageCatalogue& cat);
     static float Lethality(int package, int bodies, float tierFactor);
@@ -213,6 +304,12 @@ class ForcePackages
     // one package's quote for the sources (sorted or not); quote.source -1
     // when no source can spare the minimum
     static PackageQuote Quote(int package, const PackageRequest& req, const ForcePackageCatalogue& cat,
+                              const AutoArray<PackageSource>& sources);
+    // a column: carrier (Truck or APC) + one escort (armed car, APC or
+    // tank); escort -1 is the plain package (the overload above).  An
+    // invalid pair (foot, air, a non-carrier, a non-escort, a hull the
+    // catalogue lacks) quotes source -1.
+    static PackageQuote Quote(int package, int escort, const PackageRequest& req, const ForcePackageCatalogue& cat,
                               const AutoArray<PackageSource>& sources);
     // the choice (6.5)
     static PackageChoice Choose(const PackageRequest& req, const ForcePackageCatalogue& cat,

@@ -363,6 +363,75 @@ int ForcePackages::CrewOf(int package, const ForcePackageCatalogue& cat)
     return cat.hulls[package].crew > 0 ? cat.hulls[package].crew : 1;
 }
 
+int ForcePackages::SeatCap(int package, const ForcePackageCatalogue& cat)
+{
+    if (package == FPFoot)
+    {
+        return MaxGroup;
+    }
+    if (package < FPFoot || package >= NForcePackages || !cat.Offered(package))
+    {
+        return 0;
+    }
+    const int cargo = cat.hulls[package].cargo;
+    return MinInt(MaxGroup, cargo > 0 ? cargo : 0);
+}
+
+int ForcePackages::EdgeRole(int package)
+{
+    switch (package)
+    {
+        case FPTruck:
+            return FERHoldBack;
+        case FPArmedCar:
+        case FPApc:
+        case FPTank:
+            return FERSupport;
+        default:
+            return FERNone;
+    }
+}
+
+bool ForcePackages::MustDowngrade(int package, int bodies, int storedSpare, int spare)
+{
+    if (!IsGroundHull(package) || bodies < 1)
+    {
+        return false;
+    }
+    return storedSpare < bodies && spare >= bodies;
+}
+
+PackageQuote ForcePackages::Downgrade(const PackageQuote& q, float tierFactor, float lReq, int& refund)
+{
+    refund = 0;
+    if (q.package == FPFoot || !IsGroundHull(q.package))
+    {
+        return q;
+    }
+    PackageQuote f = q;
+    refund = q.poolPrice > 0 ? q.poolPrice : 0; // carrier and escort, both crews
+    const float distance = q.seconds * q.speed;
+    const float tf = tierFactor > 0 ? tierFactor : 1.0f;
+    f.package = FPFoot;
+    f.crew = 0;
+    f.hullPrice = 0;
+    f.poolPrice = 0;
+    f.hullClass = RString();
+    f.seatsShort = false;
+    f.escort = -1;
+    f.escortCrew = 0;
+    f.escortHullPrice = 0;
+    f.escortClass = RString();
+    f.bodies = MinInt(q.bodies, MaxGroup);
+    f.price = f.bodies;
+    f.lethality = Lethality(FPFoot, f.bodies, tf);
+    f.lethal = f.lethality + 1e-4f >= lReq;
+    f.affordable = true; // foot costs the pool nothing
+    f.speed = FootSpeed;
+    f.seconds = distance / FootSpeed;
+    return f;
+}
+
 float ForcePackages::SpeedOf(int package, const ForcePackageCatalogue& cat)
 {
     if (package <= FPFoot || package >= NForcePackages || !cat.Offered(package))
@@ -381,6 +450,11 @@ float ForcePackages::SpeedOf(int package, const ForcePackageCatalogue& cat)
 float ForcePackages::Lethality(int package, int bodies, float tierFactor)
 {
     return (float)(bodies > 0 ? bodies : 0) * tierFactor * CarriedFactor(package) + LethalityAdd(package);
+}
+
+float ForcePackages::ColumnLethality(int carrier, int escort, int bodies, float tierFactor)
+{
+    return Lethality(carrier, bodies, tierFactor) + (escort >= 0 ? LethalityAdd(escort) : 0.0f);
 }
 
 int ForcePackages::GroupsOf(int package)
@@ -414,23 +488,43 @@ float ForcePackages::RequiredLethality(const PackageRequest& req)
 PackageQuote ForcePackages::Quote(int package, const PackageRequest& req, const ForcePackageCatalogue& cat,
                                   const AutoArray<PackageSource>& sources)
 {
+    return Quote(package, -1, req, cat, sources);
+}
+
+PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest& req, const ForcePackageCatalogue& cat,
+                                  const AutoArray<PackageSource>& sources)
+{
     PackageQuote q;
     q.package = package;
     q.speed = SpeedOf(package, cat);
     q.hullClass = package > FPFoot && package < NForcePackages ? cat.hulls[package].className : RString();
+    if (escort >= 0)
+    {
+        q.escort = escort;
+        if (!IsCarrier(package) || !IsEscort(escort) || !cat.Offered(package) || !cat.Offered(escort))
+        {
+            q.source = -1; // not a column
+            return q;
+        }
+        q.escortClass = cat.hulls[escort].className;
+        q.escortCrew = CrewOf(escort, cat);
+        q.escortHullPrice = HullPrice(escort);
+        const float es = SpeedOf(escort, cat);
+        q.speed = es < q.speed ? es : q.speed; // the slower hull sets the pace (3.2)
+    }
     const float tf = req.tierFactor > 0 ? req.tierFactor : 1.0f;
     const float lReq = RequiredLethality(req);
     const float mult = CarriedFactor(package);
-    const float add = LethalityAdd(package);
+    const float add = LethalityAdd(package) + (escort >= 0 ? LethalityAdd(escort) : 0.0f);
     int need = req.minBodies > 0 ? req.minBodies : 1;
     if (lReq > add)
     {
         need = MaxInt(need, (int)ceilf((lReq - add) / (tf * mult) - 1e-4f));
     }
     // infantry rides in the hull: one group at most, and no more than its
-    // cargo (an armed car or a tank carries what its cargo seats hold; phase
-    // 5 revisits armour escorting infantry on foot)
-    const int cap = package == FPFoot ? MaxGroup : MinInt(MaxGroup, cat.hulls[package].cargo);
+    // cargo seats (SeatCap).  An armed car or a tank whose seats cannot hold
+    // the minimum is quoted (diagnostics) but never chosen.
+    const int cap = SeatCap(package, cat);
     // the nearest base (by travel time at this package's speed, so by
     // distance) whose spare reaches the minimum
     int best = -1;
@@ -449,8 +543,9 @@ PackageQuote ForcePackages::Quote(int package, const PackageRequest& req, const 
     }
     q.crew = CrewOf(package, cat);
     q.hullPrice = HullPrice(package);
-    q.poolPrice = q.hullPrice + q.crew;
-    if (best < 0 || cap < req.minBodies)
+    q.poolPrice = q.hullPrice + q.crew + q.EscortPoolPrice();
+    q.seatsShort = cap < req.minBodies;
+    if (best < 0 || q.seatsShort)
     {
         q.source = -1;
         q.price = q.poolPrice;
@@ -459,7 +554,7 @@ PackageQuote ForcePackages::Quote(int package, const PackageRequest& req, const 
     q.source = sources[best].zone;
     q.bodies = MinInt(MinInt(need, cap), sources[best].SpareFor(package));
     q.price = q.bodies + q.poolPrice;
-    q.lethality = Lethality(package, q.bodies, tf);
+    q.lethality = ColumnLethality(package, escort, q.bodies, tf);
     q.lethal = q.lethality + 1e-4f >= lReq;
     q.affordable = !req.poolActive || q.poolPrice <= req.pool;
     q.seconds = q.speed > 0 ? sources[best].distance / q.speed : 0;
@@ -483,6 +578,25 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
         c.quotes[c.nQuotes++] = q;
         anySource = anySource || q.source >= 0;
         anyAffordable = anyAffordable || (q.source >= 0 && q.affordable);
+    }
+    // the columns: an offered carrier with one offered escort (phase 5)
+    for (int p = 0; p < NForcePackages; p++)
+    {
+        if (!IsCarrier(p) || (req.offered & Bit(p)) == 0 || !cat.Offered(p))
+        {
+            continue;
+        }
+        for (int e = 0; e < NForcePackages && c.nQuotes < PackageChoice::MaxQuotes; e++)
+        {
+            if (!IsEscort(e) || (req.offered & Bit(e)) == 0 || !cat.Offered(e))
+            {
+                continue;
+            }
+            const PackageQuote q = Quote(p, e, req, cat, sources);
+            c.quotes[c.nQuotes++] = q;
+            anySource = anySource || q.source >= 0;
+            anyAffordable = anyAffordable || (q.source >= 0 && q.affordable);
+        }
     }
     auto valid = [&req](const PackageQuote& q) { return q.source >= 0 && q.bodies >= req.minBodies && q.affordable; };
     // the cheapest package meeting the minimum and L_req
