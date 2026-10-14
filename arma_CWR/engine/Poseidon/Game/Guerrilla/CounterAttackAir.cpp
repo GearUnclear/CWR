@@ -40,6 +40,7 @@
 #include <Poseidon/AI/AICore.hpp>
 
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
@@ -428,7 +429,7 @@ int CounterAttack::AirGoLive(ZoneRegistry& registry, const CounterAttackView& vi
     // timeout starts counting (the town edge resets it)
     const float speed = r.abstractSpeed > 0 ? r.abstractSpeed / ForcePackages::AirCruise : 50.0f;
     r.clock = -(AirDist2D(birth, lz) / (speed > 1 ? speed : 1.0f) + 600.0f);
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: [op {}] {} with {} soldier(s) born airborne at [{:.0f}, {:.0f}] ({:.0f} m up) for {}; LZ"
              " [{:.0f}, {:.0f}] {:.0f} m out{}",
              r.opId, (const char*)r.hullClass, r.strength, birth.X(), birth.Z(), alt, (const char*)r.target, lz.X(),
@@ -478,7 +479,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
     if (st.landed && !r.airLanded)
     {
         r.airLanded = true;
-        LOG_INFO(Core, "CounterAttack: [op {}] {} down {:.0f} m from its LZ at {}", r.opId, (const char*)r.hullClass,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} down {:.0f} m from its LZ at {}", r.opId, (const char*)r.hullClass,
                  st.landedOffset, (const char*)r.target);
         EmitAt(registry, r, CAOpLanded, target, st.landedAt, r.strength, 0,
                st.landedOffset > LandTolerance ? "off the LZ" : "on the LZ");
@@ -490,7 +491,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         // from the LZ; the airframe flies home (AirHome)
         Vector3 leader = VZero;
         const int alive = ops->Alive(r.group, leader);
-        LOG_INFO(Core, "CounterAttack: [op {}] {} soldier(s) out at the LZ for {}; the airframe departs", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} soldier(s) out at the LZ for {}; the airframe departs", r.opId,
                  alive, (const char*)r.target);
         r.dismounted = true;
         r.leg = LegUnknown;
@@ -509,7 +510,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
     {
         // shot down or wrecked: the airframe and its crew are lost; whoever
         // got out alive fights on
-        LOG_INFO(Core, "CounterAttack: [op {}] {} lost with its crew; {} of {} soldier(s) survive", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} lost with its crew; {} of {} soldier(s) survive", r.opId,
                  (const char*)r.hullClass, out, r.strength);
         OccupierForces::Instance().NoteLoss(r.crew, "air crew lost");
         SettleCrew(registry, r, r.crew, "air crew lost");
@@ -546,7 +547,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
     {
         // part of the cargo got out before the airframe left (an unload
         // timeout): the men on the ground are the squad, the airframe is home
-        LOG_INFO(Core, "CounterAttack: [op {}] {} of {} soldier(s) got out before the airframe left", r.opId, out,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} of {} soldier(s) got out before the airframe left", r.opId, out,
                  r.strength);
         if (out < r.strength)
         {
@@ -590,11 +591,11 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         r.travel = r.travel > 0 ? r.travel : LegTime(registry, r, ops);
         r.clock = r.travel;
         r.retry = 0;
-        LOG_INFO(Core, "CounterAttack: [op {}] failed insertion on {} ({}); re-planned once", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] failed insertion on {} ({}); re-planned once", r.opId,
                  (const char*)r.target, st.failReason);
         return false;
     }
-    LOG_INFO(Core, "CounterAttack: [op {}] the insertion on {} failed twice; cancelled unseen", r.opId,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the insertion on {} failed twice; cancelled unseen", r.opId,
              (const char*)r.target);
     CancelUnseen(registry, view, r);
     return true;
@@ -640,7 +641,7 @@ void CounterAttack::StepAirHomes(ZoneRegistry& registry, const CounterAttackView
             {
                 OccupierForces::Instance().Refund(h.units, "air re-plan hull home");
             }
-            LOG_INFO(Core, "CounterAttack: [op {}] the airframe of the insertion on {} is home", h.opId,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the airframe of the insertion on {} is home", h.opId,
                      (const char*)h.target);
             Emit(registry, r, CAOpHullRefund, h.crew, h.direct ? 0 : h.units, "airframe home");
         }
@@ -755,7 +756,7 @@ bool CounterAttack::AirReplan(ZoneRegistry& registry, const CounterAttackView& v
         r.travel = MinTravel;
     }
     r.clock = r.travel;
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: [op {}] no road to {} passes the gate; re-planned as a {} insertion from {} ({} units,"
              " {:.0f}s in the air{})",
              r.opId, (const char*)r.target, (const char*)r.hullClass,
@@ -802,7 +803,7 @@ bool CounterAttack::LaunchStrike(ZoneRegistry& registry, const CounterAttackView
     r.clock = r.travel;
     _records.Add(r);
     const Record& added = _records[_records.Size() - 1];
-    LOG_INFO(Core, "CounterAttack: [op {}] strike by {} on {} at [{:.0f}, {:.0f}] from {}; {:.0f}s in the air",
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] strike by {} on {} at [{:.0f}, {:.0f}] from {}; {:.0f}s in the air",
              added.opId, (const char*)added.hullClass, z ? (const char*)z->name : "a reported position",
              added.strikePos.X(), added.strikePos.Z(), field ? (const char*)field->name : "off-map", added.clock);
     Emit(registry, added, CAOpLaunched, 0, added.priceUnits, "strike");
@@ -816,7 +817,7 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
         if (!r.struck)
         {
             r.struck = true;
-            LOG_INFO(Core, "CounterAttack: [op {}] the strike by {} reaches {} ({})", r.opId,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the strike by {} reaches {} ({})", r.opId,
                      (const char*)r.hullClass, r.target.GetLength() > 0 ? (const char*)r.target : "the reported position",
                      how);
             EmitAt(registry, r, CAOpStruck, r.strikeZone, r.strikePos, 0, 0, how);
@@ -856,7 +857,7 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
         r.airId = 0;
         if (known && st.hullLost)
         {
-            LOG_INFO(Core, "CounterAttack: [op {}] the strike airframe {} was lost", r.opId, (const char*)r.hullClass);
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the strike airframe {} was lost", r.opId, (const char*)r.hullClass);
             OccupierForces::Instance().NoteLoss(r.crew, "air crew lost");
             SettleCrew(registry, r, r.crew, "strike crew lost");
             Emit(registry, r, CAOpHullLost, 0, r.HullPrice(), "strike airframe lost");
@@ -895,7 +896,7 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
                 r.crewGroup = crewGroup;
                 r.spawnPos = birth;
                 r.revealClock = 0;
-                LOG_INFO(Core, "CounterAttack: [op {}] strike {} born airborne at [{:.0f}, {:.0f}] ({:.0f} m up)",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] strike {} born airborne at [{:.0f}, {:.0f}] ({:.0f} m up)",
                          r.opId, (const char*)r.hullClass, birth.X(), birth.Z(), alt);
                 Emit(registry, r, CAOpBorn, 0, 0, "airborne");
                 EmitAt(registry, r, CAOpAirborne, r.airOrigin, birth, 0, 0,

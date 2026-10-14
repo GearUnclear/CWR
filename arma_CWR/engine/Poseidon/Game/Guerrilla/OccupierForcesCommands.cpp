@@ -106,7 +106,9 @@
 //                                  "waveLead" / "waveLeadFinal" (0..7200 s),
 //                                  "waveRetakeShare" (0..1), "waveOps"
 //                                  (0..8), "waveCluster" (100..20000 m),
-//                                  "waveSurge" (0..48).  Returns true when
+//                                  "waveSurge" (0..48); "log" (0/1, the
+//                                  forcesLog director log toggle,
+//                                  DirectorLog.hpp).  Returns true when
 //                                  the key is known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
@@ -152,6 +154,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO
 #include <Poseidon/Foundation/Modules/Modules.hpp>
 #include <Poseidon/Core/Global.hpp> // Glob.time (strikeEffects)
 #include <Poseidon/Foundation/platform.hpp>
@@ -467,11 +470,15 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     {
         t.waveSurge = (int)ClampF(v, 0, 48);
     }
+    else if (stricmp(key, "log") == 0)
+    {
+        t.log = v != 0;
+    }
     else
     {
         return GameValue(false);
     }
-    LOG_INFO(Core, "OccupierForces: gmForcesTune {} = {}", (const char*)key, (double)v);
+    GM_DIRECTOR_INFO(Core, "OccupierForces: gmForcesTune {} = {}", (const char*)key, (double)v);
     return GameValue(true);
 }
 
@@ -492,7 +499,7 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(what, "refillHours") == 0)
     {
         of.TuningMutable().refillHours = ClampF(v, 0.01f, 48.0f);
-        LOG_INFO(Core, "OccupierForces: refill forced to {} h", (double)of.Tuning().refillHours);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: refill forced to {} h", (double)of.Tuning().refillHours);
     }
     else if (stricmp(what, "wave") == 0)
     {
@@ -508,7 +515,7 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
             return GameValue(false);
         }
         of.ForceCooldown(z->name, seconds);
-        LOG_INFO(Core, "OccupierForces: {} forced to rest {:.0f} s", (const char*)z->name, (double)seconds);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: {} forced to rest {:.0f} s", (const char*)z->name, (double)seconds);
     }
     else if (stricmp(what, "strike") == 0)
     {
@@ -531,7 +538,7 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(what, "legacySave") == 0)
     {
         of.SetLegacySave(v != 0);
-        LOG_INFO(Core, "OccupierForces: legacySave forced {}", v != 0 ? "on" : "off");
+        GM_DIRECTOR_INFO(Core, "OccupierForces: legacySave forced {}", v != 0 ? "on" : "off");
     }
     else
     {

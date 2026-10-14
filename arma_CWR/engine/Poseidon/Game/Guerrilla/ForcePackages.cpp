@@ -3,6 +3,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars
 
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO (the package catalogue line)
 #include <Poseidon/Foundation/platform.hpp> // stricmp
 
 #include <math.h>
@@ -209,7 +210,7 @@ void ForcePackages::BuildCatalogue(const AutoArray<RString>& ladder, const RStri
         {
             if (out.hulls[p].className.GetLength() > 0)
             {
-                LOG_INFO(Core, "OccupierForces: package {} uses {} (cargo {}, crew {}, {:.0f} km/h)", PackageName(p),
+                GM_DIRECTOR_INFO(Core, "OccupierForces: package {} uses {} (cargo {}, crew {}, {:.0f} km/h)", PackageName(p),
                          (const char*)out.hulls[p].className, out.hulls[p].cargo, out.hulls[p].crew,
                          (double)out.hulls[p].maxSpeedKmh);
             }

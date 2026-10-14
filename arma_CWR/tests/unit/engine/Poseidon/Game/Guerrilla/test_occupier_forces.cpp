@@ -21,6 +21,7 @@
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // ASRed (the alarm answers, phase 6)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // the director log toggle (forcesLog)
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // the S5 refund hook (3.3)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -29,6 +30,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp> // DevMode (the director log toggle)
 
 #include <algorithm>
 #include <filesystem>
@@ -268,6 +270,53 @@ TEST_CASE("OccupierForces - config keys are read and repaired into range", "[gam
     CHECK(t.nWaveThresholds == 3); // at most three
     CHECK(t.waveThresholds[2] == Approx(0.4f));
     CHECK(t.waveWarLevel == Approx(2.0f));
+}
+
+TEST_CASE("OccupierForces - forcesLog: default off, 0..1, and the director log level it selects",
+          "[game][guerrilla][occupierforces]")
+{
+    CHECK_FALSE(OccupierForcesTuning().log); // default 0: the per-action lines are DEBUG outside --dev
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        CHECK_FALSE(f.of.Tuning().log); // not authored
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesLog = 1;"));
+        CHECK(f.of.Tuning().log);
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesLog = 7;"));
+        CHECK(f.of.Tuning().log); // repaired to 1
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesLog = -3;"));
+        CHECK_FALSE(f.of.Tuning().log); // repaired to 0
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 0; forcesLog = 1;"));
+        CHECK(f.of.Tuning().log); // read with the service off too: CounterAttack logs through it
+    }
+
+    // the level comes from the singleton's tuning (or --dev)
+    OccupierForcesTuning& live = OccupierForces::Instance().TuningMutable();
+    const bool saved = live.log;
+    live.log = true;
+    CHECK(DirectorLogLevel() == spdlog::level::info);
+    live.log = false;
+    if (!Poseidon::Foundation::AppConfig::Instance().DevMode())
+    {
+        CHECK(DirectorLogLevel() == spdlog::level::debug);
+    }
+    else
+    {
+        CHECK(DirectorLogLevel() == spdlog::level::info);
+    }
+    live.log = saved;
 }
 
 TEST_CASE("OccupierForces - key off: inert, the seams pass through, nothing to save",

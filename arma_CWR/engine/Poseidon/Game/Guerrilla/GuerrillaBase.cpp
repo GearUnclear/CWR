@@ -29,6 +29,7 @@
 
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO (the HQ-destroyed director line)
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
@@ -1413,7 +1414,7 @@ int GuerrillaBase::Destroy()
     _building = nullptr;
     _cache = nullptr;
     _prop = nullptr;
-    LOG_INFO(Core, "OccupierForces: HQ at {} destroyed (epoch {}); cache emptied, {} garaged vehicle(s) wrecked",
+    GM_DIRECTOR_INFO(Core, "OccupierForces: HQ at {} destroyed (epoch {}); cache emptied, {} garaged vehicle(s) wrecked",
              where, _hqEpoch, wrecked);
     // the hqLost zone event (serialized handler slot onHqLost); the registry
     // dispatches it on its next tick, natively and to the script handler

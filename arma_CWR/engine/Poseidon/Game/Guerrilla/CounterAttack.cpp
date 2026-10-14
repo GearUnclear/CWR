@@ -33,6 +33,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toIntFloor / toIntCeil (road survey)
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
@@ -1079,7 +1080,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         DrainEvents();
         if (taken)
         {
-            LOG_INFO(Core, "CounterAttack: {} rose; the occupier director takes it ({} town(s) taken before)",
+            GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; the occupier director takes it ({} town(s) taken before)",
                      (const char*)z->name, before);
             return false;
         }
@@ -1089,7 +1090,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         // the town the player's HQ stands in (N4a): never the object of a
         // flip answer before the director exists.  The flip still counts as
         // a town taken (only the target is skipped).
-        LOG_INFO(Core, "CounterAttack: {} rose; it holds the player's headquarters, no answer", (const char*)z->name);
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; it holds the player's headquarters, no answer", (const char*)z->name);
         return false;
     }
     if (FindByTarget(z->name) >= 0)
@@ -1107,7 +1108,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
     const CounterAttackDecision d = Decide(_tuning, z->name, before, ctx);
     if (!d.go)
     {
-        LOG_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) taken before)",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} rose; the occupier does not answer (chance {:.2f}, {} town(s) taken before)",
                  (const char*)z->name, d.chance, before);
         return false;
     }
@@ -1115,7 +1116,7 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
     r.phase = CAScheduled;
     r.clock = _tuning.delayMin + (_tuning.delayMax - _tuning.delayMin) * Roll01(r.seed, 1);
     _records.Add(r);
-    LOG_INFO(
+    GM_DIRECTOR_INFO(
         Core,
         "CounterAttack: {} rose; a force of {} will move on it in {:.0f}s (chance {:.2f}, {} town(s) taken before, "
         "war level {:.0f})",
@@ -1258,7 +1259,7 @@ bool CounterAttack::LaunchFunded(ZoneRegistry& registry, const CounterAttackView
     }
     if (why)
     {
-        LOG_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
         return false;
     }
     if (!hq && FindByTarget(town->name) >= 0)
@@ -1279,7 +1280,7 @@ bool CounterAttack::LaunchFunded(ZoneRegistry& registry, const CounterAttackView
     }
     if (why)
     {
-        LOG_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {}", order.opId, why);
         return false;
     }
     Record r;
@@ -1357,7 +1358,7 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
     int hullRefund = 0;
     if (r.HasHullPackage() && ForcePackages::MustDowngrade(r.package, size, stored, liveFoot ? marched : stored))
     {
-        LOG_INFO(Core, "CounterAttack: [op {}] {} can spare {} stored of the {} bodies for the {}: on foot", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} can spare {} stored of the {} bodies for the {}: on foot", r.opId,
                  (const char*)src->name, stored, size, (const char*)r.hullClass);
         hullRefund = r.priceUnits + r.escortPriceUnits; // the whole column: carrier and escort
         r.package = FPFoot;
@@ -1381,7 +1382,7 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
     {
         if (r.opId != 0)
         {
-            LOG_INFO(Core, "CounterAttack: [op {}] refused: {} can spare {} of the {} ordered ({} stored, {} live)",
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] refused: {} can spare {} of the {} ordered ({} stored, {} live)",
                      r.opId, (const char*)src->name, n, size, src->garrison, liveBodies);
         }
         return false;
@@ -1503,7 +1504,7 @@ const AutoArray<Vector3>& CounterAttack::RouteOf(const ZoneRegistry& registry, R
     {
         // men on foot do not walk a road that winds this far round: the
         // straight line instead
-        LOG_INFO(Core, "CounterAttack: the road from {} to {} is {:.0f} m for {:.0f} m straight; cross-country",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: the road from {} to {} is {:.0f} m for {:.0f} m straight; cross-country",
                  (const char*)r.source, (const char*)r.target, RouteLength(raw), straight);
         raw.Clear();
     }
@@ -1610,7 +1611,7 @@ void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, C
             ops->Support(r.escortCrewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
         }
         ops->Assault(r.group, dest);
-        LOG_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out){}; it moves in",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out){}; it moves in",
                  r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, Dist2D(leader, dest),
                  mounted ? " and dismounts" : "");
         Emit(registry, r, CAOpArrived, r.strength, 0, mounted ? "live, dismounted" : "live");
@@ -1717,7 +1718,7 @@ void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackVi
     {
         // no base to go home to: the pool (5.5; inactive, they are gone as before)
         OccupierForces::Instance().Refund(bodies, "no base");
-        LOG_INFO(Core, "CounterAttack: {} survivor(s) of the force on {} have no base to return to ('{}' is gone)",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} survivor(s) of the force on {} have no base to return to ('{}' is gone)",
                  bodies, (const char*)r.target, (const char*)r.source);
         Emit(registry, r, CAOpReturned, 0, bodies, "no base");
         return;
@@ -1736,7 +1737,7 @@ void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackVi
     {
         OccupierForces::Instance().Refund(bodies - back, "surplus");
     }
-    LOG_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {})", back, bodies,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {})", back, bodies,
              (const char*)s->name, pending ? " as a pending deposit" : "", s->garrison, s->pending, s->garrisonMax);
     Emit(registry, r, CAOpReturned, back, bodies - back, pending ? "home, pending" : "home");
 }
@@ -1768,7 +1769,7 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
         {
             lost = r.strength;
         }
-        LOG_INFO(Core, "CounterAttack: {} fighter(s) in {} beat off {} attacker(s) (odds {:.2f}, roll {:.2f}); {} lost",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} fighter(s) in {} beat off {} attacker(s) (odds {:.2f}, roll {:.2f}); {} lost",
                  defenders, (const char*)r.target, r.strength, hold, roll, lost);
         OccupierForces::Instance().NoteLoss(lost, "repelled");
         ReturnToSource(registry, view, r, r.strength - lost);
@@ -1776,7 +1777,7 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
         Emit(registry, r, CAOpRepelled, r.strength - lost, lost, "abstract fight");
         return true;
     }
-    LOG_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
              (const char*)r.target, defenders, hold, roll);
     if (town && stricmp(town->type, "CITY") != 0)
     {
@@ -2017,7 +2018,7 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
     r.deferLogged = false;
     r.hiddenLogged = false;
     const float toPlayer = view.playerValid ? Dist2D(pick.pos.X(), pick.pos.Z(), view.playerX, view.playerZ) : -1.0f;
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: {} soldier(s) from {} appear at [{:.0f}, {:.0f}], {:.0f} m from the player (reason: {}{}, "
              "{:.0f}% along {:.0f} m of road){}; they march on {}",
              r.strength, (const char*)r.source, pick.pos.X(), pick.pos.Z(), toPlayer,
@@ -2084,7 +2085,7 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
         r.wp = legEnd;
         r.spawnReason = CASpawnGarrison;
         r.spawnPos = s->pos;
-        LOG_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {} ({:.0f} m of road)", taken,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: {} soldier(s) of the {} garrison march on {} ({:.0f} m of road)", taken,
                  (const char*)s->name, (const char*)r.target, RouteLength(route));
         AddEvent(fired, ZECounterAttack, target);
         return true;
@@ -2099,7 +2100,7 @@ bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, b
     r.clock = LegTime(registry, r, ops);
     r.travel = r.clock;
     r.retry = 0;
-    LOG_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of the {} reserve leave for {}; on the road {:.0f}s (reserve now {})", n,
              (const char*)s->name, (const char*)r.target, r.clock, s->garrison);
     return true;
 }
@@ -2143,14 +2144,14 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             // the world once nobody sees it (below)
             if (r.phase != CALive)
             {
-                LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
                          r.opId, r.strength);
                 OccupierForces::Instance().Refund(r.strength, "HQ assault done");
                 Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");
                 return true;
             }
             r.hqDone = true;
-            LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it", r.opId);
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it", r.opId);
         }
         const bool moved =
             view.hqEstablished && Dist2D(view.hqPos.X(), view.hqPos.Z(), dest.X(), dest.Z()) > registry.Tuning().zoneArea;
@@ -2160,7 +2161,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         {
             // the HQ it was sent at moved away: the squad withdraws (the
             // live timeout path: home once out of the player's sight)
-            LOG_INFO(Core, "CounterAttack: [op {}] the HQ moved; the assault squad withdraws", r.opId);
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ moved; the assault squad withdraws", r.opId);
             r.clock = _tuning.liveTimeout;
         }
     }
@@ -2182,7 +2183,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         {
             if (!held || hq)
             {
-                LOG_INFO(Core, "CounterAttack: {} fell before the force left; cancelled", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} fell before the force left; cancelled", (const char*)r.target);
                 Emit(registry, r, CAOpAborted, 0, 0, "the town fell before the force left");
                 return true;
             }
@@ -2195,7 +2196,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             {
                 // the player set up his headquarters in the town meanwhile
                 // (N4a): the HQ's town is never a target
-                LOG_INFO(Core, "CounterAttack: {} now holds the player's headquarters; the force is cancelled",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} now holds the player's headquarters; the force is cancelled",
                          (const char*)r.target);
                 Emit(registry, r, CAOpAborted, 0, 0, "the town holds the player's headquarters");
                 return true;
@@ -2210,7 +2211,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 PickSource(registry, view, target, inBubble && ops != nullptr && RoomLive(registry, view), spare, live);
             if (src < 0)
             {
-                LOG_INFO(Core, "CounterAttack: no occupier base can spare a man for {}; no counter-attack",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: no occupier base can spare a man for {}; no counter-attack",
                          (const char*)r.target);
                 Emit(registry, r, CAOpAborted, 0, 0, "no base can spare a man");
                 return true;
@@ -2238,7 +2239,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             {
                 if (reinforce || hq)
                 {
-                    LOG_INFO(Core, "CounterAttack: {} is no longer a valid target; the force goes home",
+                    GM_DIRECTOR_INFO(Core, "CounterAttack: {} is no longer a valid target; the force goes home",
                              hq ? "the HQ" : (const char*)r.target);
                     ReturnToSource(registry, view, r, r.strength);
                     Emit(registry, r, CAOpAborted, r.strength, 0,
@@ -2249,7 +2250,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 {
                     return RevertedUnder(registry, view, target, r);
                 }
-                LOG_INFO(Core, "CounterAttack: {} fell while the force was on the road; it turns back",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} fell while the force was on the road; it turns back",
                          (const char*)r.target);
                 ReturnToSource(registry, view, r, r.strength);
                 Emit(registry, r, CAOpAborted, r.strength, 0, "the town fell while the force was on the road");
@@ -2300,7 +2301,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                             CancelUnseen(registry, view, r);
                             return true;
                         }
-                        LOG_INFO(Core,
+                        GM_DIRECTOR_INFO(Core,
                                  "CounterAttack: the force on {} found no unseen road for {:.0f}s; it turns back to {}",
                                  (const char*)r.target, r.deferTime, (const char*)r.source);
                         ReturnToSource(registry, view, r, r.strength);
@@ -2316,7 +2317,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 const int birth = GoLive(registry, view, target, r, ops, Progress(r), fired);
                 if (birth == BirthHold && !r.edgeHold && chain)
                 {
-                    LOG_INFO(Core,
+                    GM_DIRECTOR_INFO(Core,
                              "CounterAttack: [op {}] the force on {} holds at the town edge (the player is in the"
                              " town); born there unseen or cancelled after {:.0f}s",
                              r.opId, (const char*)r.target, _tuning.birthGiveUp);
@@ -2380,7 +2381,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 const int in = MinInt(r.strength, room > 0 ? (int)floorf(room) : 0);
                 GarrisonCache::AddReserve(registry, target, in, registry.FindZoneIndex(r.source), view.playerValid,
                                           view.playerX, view.playerZ);
-                LOG_INFO(Core, "CounterAttack: {} of {} soldier(s) top up {} (reserve {}, pending {})", in, r.strength,
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} soldier(s) top up {} (reserve {}, pending {})", in, r.strength,
                          (const char*)r.target, town->garrison, town->pending);
                 if (alarm)
                 {
@@ -2416,11 +2417,11 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             r.retry = 0;
             if (hq)
             {
-                LOG_INFO(Core, "CounterAttack: [op {}] {} attacker(s) stand at the undefended HQ", r.opId, r.strength);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} attacker(s) stand at the undefended HQ", r.opId, r.strength);
             }
             else
             {
-                LOG_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {}, occCapture {})",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} attacker(s) walk into empty {} (support {}, occCapture {})",
                          r.strength, (const char*)r.target, town->support, town->occCapture);
             }
             return false;
@@ -2429,7 +2430,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         {
             if (!valid && hq)
             {
-                LOG_INFO(Core, "CounterAttack: [op {}] the HQ moved; the holding force goes home", r.opId);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ moved; the holding force goes home", r.opId);
                 ReturnToSource(registry, view, r, r.strength);
                 Emit(registry, r, CAOpAborted, r.strength, 0, "the HQ moved");
                 return true;
@@ -2439,7 +2440,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 // the drain reverted the town (or someone else did): with the
                 // key on the holding bodies are its new garrison (settled by
                 // RevertTown through ZoneTickInputs::settleOcc)
-                LOG_INFO(Core, "CounterAttack: {} retaken by the holding force", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} retaken by the holding force", (const char*)r.target);
                 Emit(registry, r, CAOpSettled, r.strength, 0, _tuning.forcesOn ? "holding force settled" : "held");
                 return true;
             }
@@ -2532,7 +2533,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 {
                     ops->Remove(r.group);
                     OccupierForces::Instance().Refund(alive, "HQ assault done");
-                    LOG_INFO(Core, "CounterAttack: [op {}] the HQ assault squad ({}) leaves unseen; back to the pool",
+                    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ assault squad ({}) leaves unseen; back to the pool",
                              r.opId, alive);
                     Emit(registry, r, CAOpSettled, alive, alive, "the HQ fell");
                     return true;
@@ -2563,7 +2564,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     {
                         r.withdrawing = true;
                         r.resend = 0;
-                        LOG_INFO(Core, "CounterAttack: {} is no longer the occupier's; the top-up squad goes home",
+                        GM_DIRECTOR_INFO(Core, "CounterAttack: {} is no longer the occupier's; the top-up squad goes home",
                                  (const char*)r.target);
                     }
                     r.resend -= elapsed;
@@ -2589,7 +2590,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                         {
                             OccupierForces::Instance().NoteLoss(r.strength - alive, "top-up squad"); // L4
                         }
-                        LOG_INFO(Core, "CounterAttack: the top-up squad for {} ({}) leaves unseen for {}",
+                        GM_DIRECTOR_INFO(Core, "CounterAttack: the top-up squad for {} ({}) leaves unseen for {}",
                                  (const char*)r.target, alive, (const char*)r.source);
                         ReturnToSource(registry, view, r, alive);
                         Emit(registry, r, CAOpAborted, alive, 0, "the top-up target was lost");
@@ -2611,7 +2612,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             }
             if (alive == 0)
             {
-                LOG_INFO(Core, "CounterAttack: the force on {} is gone; the town held", (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} is gone; the town held", (const char*)r.target);
                 AddEvent(fired, ZECounterRepelled, target);
                 OccupierForces::Instance().NoteLoss(r.strength, "repelled");
                 AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group leaves unseen
@@ -2650,7 +2651,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 }
                 // up to the town's room; the rest walks home (5.5)
                 const int joined = AdoptTopUp(registry, view, target, r, ops, alive);
-                LOG_INFO(Core, "CounterAttack: {} soldier(s) join the {} garrison", joined, (const char*)r.target);
+                GM_DIRECTOR_INFO(Core, "CounterAttack: {} soldier(s) join the {} garrison", joined, (const char*)r.target);
                 Emit(registry, r, CAOpSettled, joined, 0, "topped up");
                 return true;
             }
@@ -2732,7 +2733,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                         Emit(registry, r, CAOpHullLost, 0, 0, "abstract travel: escort re-created at the next birth");
                     }
                     ReturnToRoad(r, fraction, alive, whole);
-                    LOG_INFO(Core,
+                    GM_DIRECTOR_INFO(Core,
                              "CounterAttack: the force on {} ({} soldier(s)) leaves the player's world {:.0f}% along"
                              " its road; abstract again, {:.0f}s from the town",
                              (const char*)r.target, alive, fraction * 100.0f, r.clock);
@@ -2764,7 +2765,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
                 if (unseen)
                 {
-                    LOG_INFO(Core, "CounterAttack: the force on {} gives up after {:.0f}s; {} go home",
+                    GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} gives up after {:.0f}s; {} go home",
                              (const char*)r.target, r.clock, alive);
                     ReturnToSource(registry, view, r, alive);
                     ops->Remove(r.group);
@@ -2793,11 +2794,11 @@ bool CounterAttack::RevertedUnder(ZoneRegistry& registry, const CounterAttackVie
         have < floorf(town->garrisonMax))
     {
         r.kind = CAKReinforce;
-        LOG_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; it goes on as a top-up column ({} of {})",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; it goes on as a top-up column ({} of {})",
                  r.opId, (const char*)r.target, have, town->garrisonMax);
         return false;
     }
-    LOG_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; its garrison is whole, the force goes home",
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} reverted under the force; its garrison is whole, the force goes home",
              r.opId, (const char*)r.target);
     ReturnToSource(registry, view, r, r.strength);
     Emit(registry, r, CAOpAborted, r.strength, 0, "the town reverted under it");
@@ -2839,7 +2840,7 @@ int CounterAttack::ArriveLive(ZoneRegistry& registry, const CounterAttackView& v
         r.retry = RetryInterval;
         if (!r.deferLogged && !r.hiddenLogged)
         {
-            LOG_INFO(Core, "CounterAttack: [op {}] the force at {} waits at the town edge (defenders present)", r.opId,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the force at {} waits at the town edge (defenders present)", r.opId,
                      (const char*)r.target);
             r.deferLogged = true;
         }
@@ -2900,7 +2901,7 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
         }
         if (!RoadRoute::SameLandmass(z->pos, dest))
         {
-            LOG_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: it stands on another landmass", r.opId,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: it stands on another landmass", r.opId,
                      (const char*)z->name, (const char*)r.target);
             continue;
         }
@@ -2944,7 +2945,7 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
         const CounterAttackSpawnPick pick = PickSpawnPoint(route, 0.0f, wholeRoad, _tuning.birthMinToTarget, *ops);
         if (pick.reason == CASpawnDeferred)
         {
-            LOG_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: its road is watched too", r.opId,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} passed over for {}: its road is watched too", r.opId,
                      (const char*)probe.source, (const char*)r.target);
             continue;
         }
@@ -2965,7 +2966,7 @@ bool CounterAttack::Resource(ZoneRegistry& registry, const CounterAttackView& vi
     {
         b->garrison = 0;
     }
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: [op {}] every road from {} to {} is watched; re-sourced to {} ({} soldier(s); reserve "
              "{} there)",
              r.opId, (const char*)r.source, (const char*)r.target, (const char*)b->name, r.strength, b->garrison);
@@ -2994,7 +2995,7 @@ void CounterAttack::CancelUnseen(ZoneRegistry& registry, const CounterAttackView
     // starts the town's cooldown on the event.
     // (room-capped, the surplus to the pool, L2)
     ReturnBodies(registry, view, registry.FindZoneIndex(r.source), r.strength);
-    LOG_INFO(Core, "CounterAttack: [op {}] cancelled unborn: every route to {} watched ({} soldier(s) back to {})",
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] cancelled unborn: every route to {} watched ({} soldier(s) back to {})",
              r.opId, (const char*)r.target, r.strength, (const char*)r.source);
     // the unsettled hull prices go back through the event: exactly what is
     // still owed (L3: crew already booked lost or refunded are not in it)
@@ -3157,7 +3158,7 @@ bool CounterAttack::CheckHull(ZoneRegistry& registry, Record& r, CounterAttackOp
     const int price = r.HullPrice();
     const int living = LivingCrew(ops, r.crewGroup, crewAlive, r.crew);
     OccupierForces::Instance().NoteLoss(r.crew - living, "crew");
-    LOG_INFO(Core, "CounterAttack: [op {}] the {} of the force on {} is lost ({}; {} of {} crew alive)", r.opId,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} of the force on {} is lost ({}; {} of {} crew alive)", r.opId,
              (const char*)r.hullClass, (const char*)r.target,
              state == CounterAttackOps::HullDestroyed ? "destroyed"
                                                       : (state == CounterAttackOps::HullGone ? "gone" : "abandoned"),
@@ -3199,7 +3200,7 @@ bool CounterAttack::CheckEscort(ZoneRegistry& registry, Record& r, CounterAttack
     const int price = r.EscortHullPrice();
     const int living = LivingCrew(ops, r.escortCrewGroup, crewAlive, r.escortCrew);
     OccupierForces::Instance().NoteLoss(r.escortCrew - living, "escort crew");
-    LOG_INFO(Core, "CounterAttack: [op {}] the escort {} of the force on {} is lost ({}; {} of {} crew alive)",
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the escort {} of the force on {} is lost ({}; {} of {} crew alive)",
              r.opId, (const char*)r.escortClass, (const char*)r.target,
              state == CounterAttackOps::HullDestroyed ? "destroyed"
                                                       : (state == CounterAttackOps::HullGone ? "gone" : "abandoned"),
@@ -3352,7 +3353,7 @@ void CounterAttack::SendHullHome(const Record& r, Entity* hull, AIGroup* crewGro
     {
         ops->DriveOn(crewGroup, src->pos);
     }
-    LOG_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId,
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId,
              hullClass ? hullClass : (const char*)r.hullClass, (const char*)r.source, crewAlive);
 }
 
@@ -3383,7 +3384,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             AddLeftover(h.source, state == CounterAttackOps::HullIntact ? h.hull.GetLink() : nullptr, h.crewGroup,
                         living);
             SettleCrew(registry, ref, h.crew, "crew lost or left behind on the way home");
-            LOG_INFO(Core, "CounterAttack: [op {}] the hull driving home to {} is lost", h.opId, (const char*)h.source);
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hull driving home to {} is lost", h.opId, (const char*)h.source);
             Emit(registry, ref, CAOpHullLost, 0, h.units, "lost on the way home");
             _homeHulls.Delete(i);
             continue;
@@ -3406,7 +3407,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             ops->RemoveHull(h.hull, h.crewGroup);
             CrewHome(registry, view, h.source, living);
             SettleCrew(registry, ref, h.crew, "crew home");
-            LOG_INFO(Core, "CounterAttack: [op {}] the hull is home unseen ({} crew back at {})", h.opId, living,
+            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hull is home unseen ({} crew back at {})", h.opId, living,
                      (const char*)h.source);
             Emit(registry, ref, CAOpHullRefund, living, h.units, "home");
             _homeHulls.Delete(i);
@@ -3427,7 +3428,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             {
                 src = registry.GetZone(alt);
                 h.source = src->name;
-                LOG_INFO(Core, "CounterAttack: [op {}] {} fell; the hull drives home to {} instead", h.opId,
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} fell; the hull drives home to {} instead", h.opId,
                          (const char*)lost, (const char*)h.source);
             }
             else
@@ -3435,7 +3436,7 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
                 src = nullptr;
                 h.source = RString();
                 ops->DriveOn(h.crewGroup, at);
-                LOG_INFO(Core, "CounterAttack: [op {}] {} fell and no base is left; the hull stops and waits", h.opId,
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} fell and no base is left; the hull stops and waits", h.opId,
                          (const char*)lost);
             }
         }
@@ -3469,7 +3470,7 @@ void CounterAttack::AdoptLive(ZoneRegistry& registry, int target, Record& r, Cou
     // pool-funded and go back to the pool (5.5, settled once)
     const int cut = SubtractAdopted(*town, alive);
     OccupierForces::Instance().Refund(cut, "adopted squad");
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "CounterAttack: {} soldier(s) stay in {} as its garrison ({} taken off the refill; reserve {}, "
              "pending {})",
              alive, (const char*)r.target, cut, town->garrison, town->pending);
@@ -3537,7 +3538,7 @@ int CounterAttack::AdoptTopUp(ZoneRegistry& registry, const CounterAttackView& v
                          r.opId, surplus - taken, surplus, (const char*)r.target);
             }
         }
-        LOG_INFO(Core, "CounterAttack: [op {}] {} is full: {} soldier(s) walk home to {}", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} is full: {} soldier(s) walk home to {}", r.opId,
                  (const char*)r.target, alive - joined, (const char*)r.source);
     }
     if (joined > 0)
@@ -3546,7 +3547,7 @@ int CounterAttack::AdoptTopUp(ZoneRegistry& registry, const CounterAttackView& v
     }
     if (traded > 0)
     {
-        LOG_INFO(Core, "CounterAttack: [op {}] {} stored body(ies) of {} give way to the live top-up (pool)", r.opId,
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} stored body(ies) of {} give way to the live top-up (pool)", r.opId,
                  traded, (const char*)r.target);
     }
     return joined;
@@ -3759,12 +3760,12 @@ class EngineOps final : public CounterAttackOps
         {
             if (st.goalCandidates == 0)
             {
-                LOG_INFO(Core, "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}]; straight line",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: no road within {:.0f} m of [{:.0f}, {:.0f}]; straight line",
                          RouteSnapRadius, to.X(), to.Z());
             }
             else
             {
-                LOG_INFO(Core,
+                GM_DIRECTOR_INFO(Core,
                          "CounterAttack: no road route from [{:.0f}, {:.0f}] to [{:.0f}, {:.0f}] ({} links searched); "
                          "straight line",
                          from.X(), from.Z(), to.X(), to.Z(), st.linksSearched);
@@ -3778,14 +3779,14 @@ class EngineOps final : public CounterAttackOps
         route.Add(Grounded(to.X(), to.Z(), to.Y()));
         if (st.joined)
         {
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "CounterAttack: the roads at [{:.0f}, {:.0f}] are not joined to the town's; the route leaves "
                      "them at [{:.0f}, {:.0f}] and crosses {:.0f} m of country to the road at [{:.0f}, {:.0f}]",
                      from.X(), from.Z(), st.joinFrom.X(), st.joinFrom.Z(), st.joinGap, st.joinTo.X(), st.joinTo.Z());
         }
         else if (st.startIndex > 0)
         {
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "CounterAttack: the road nearest [{:.0f}, {:.0f}] is not joined to the town's; the route "
                      "starts {:.0f} m from it",
                      from.X(), from.Z(), st.startOffset);
@@ -4978,13 +4979,13 @@ int CounterAttack::SettleHqAssaults(ZoneRegistry& registry, const CounterAttackV
             if (!r.hqDone)
             {
                 r.hqDone = true;
-                LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it",
+                GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the assault squad leaves once nobody sees it",
                          r.opId);
             }
             i++;
             continue;
         }
-        LOG_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the HQ fell; the {} soldier(s) of the assault go back to the pool",
                  r.opId, r.strength);
         OccupierForces::Instance().Refund(r.strength, "HQ assault done");
         Emit(registry, r, CAOpSettled, r.strength, r.strength, "the HQ fell");

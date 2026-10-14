@@ -295,6 +295,10 @@ struct OccupierForcesTuning
     float waveCluster = 2000.0f;   // forcesWaveCluster, 100..20000 m
     int waveSurge = 12;            // forcesWaveSurge, 0..48: final-stand surge above strength
     RString waveHub;               // forcesWaveHub: the template's hub by zone name ("" = the rule)
+    // forcesLog (0/1, default 0; gmForcesTune "log"): the director log toggle
+    // (DirectorLog.hpp).  On, the per-action lines of this service,
+    // CounterAttack and OccupierAir log at INFO; off (and not --dev), DEBUG.
+    bool log = false;
 };
 
 // One resistance unit an occupier group reports (the 6.1 scan)

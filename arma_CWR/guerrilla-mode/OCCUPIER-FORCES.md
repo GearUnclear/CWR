@@ -61,7 +61,7 @@ code wins and this file gets fixed.
 | D9 | The director knows only what its men saw (sightings, alarms, heat, flips), never the player's true position. |
 | D10 | The campaign is lost in the final case of D13. The end path mirrors END1 with a lose debriefing, and saves stay available. |
 | D11 | A disguised player does not hold a town. A slung weapon is visible to an observer who sees his back. Drain presence is: exposed, or a weapon visible to an occupier observer. |
-| D12 | Player messaging is deferred. Each director action writes one INFO log line, and a gm* command lists operations. No hints or journal lines from the director yet. |
+| D12 | Player messaging is deferred. Each director action writes one INFO log line, and a gm* command lists operations. No hints or journal lines from the director yet. (2026-10-14: the per-action INFO lines are dev-only, at INFO under `--dev` or `forcesLog = 1` and at DEBUG otherwise, 6.6; journal integration is GearUnclear/CWR#98.) |
 | D13 | When the occupier takes the player's HQ (the Camp or a moved HQ town), the HQ is DESTROYED and the player must establish a new one through the existing HQ establish flow. Losing the HQ is not the end. The campaign is lost only when the player has no HQ and holds no base and no town. Respawn at the HQ is out of scope (its own issue). |
 | D14 | Only a force the director deliberately sends against the HQ can take it. Passing patrols, columns and QRFs never drain or capture the HQ. |
 | D15 | The passive refill takes an exhausted occupier back to full in about 4 hours of play, garrison regrowth included. The pool bands have hysteresis. |
@@ -957,6 +957,19 @@ crews, not hulls. A launch over budget waits like a live squad does.
 
 "Starved: no answer to X alarm" is written once per alarm edge.
 
+**Dev-only since 2026-10-14 (owner decision).** These per-action lines, and
+the same INFO trail of `CounterAttack` / `CounterAttackAir` ("CounterAttack:
+..."), `OccupierAir` ("OccupierAir: ...") and the director's startup lines
+(the sizing line "OccupierForces: active, poolStart ...", the settlement
+probe lines, the package catalogue, the HQ-destroyed line), log at INFO only
+while the director log toggle is on, and at DEBUG otherwise, so
+`--log-level debug` still shows them. The toggle is on when the game runs
+with `--dev` (`AppConfig::DevMode()`) or the mission authors `forcesLog = 1`
+in CfgGuerrillaZones (`gmForcesTune ["log", 1]` turns it on at run time).
+One helper carries it: `GM_DIRECTOR_INFO` / `DirectorLogLevel()` in
+`DirectorLog.hpp`. WARN and ERROR lines always log. Every tri test of the
+layer passes `--dev`, so test logs keep the trail.
+
 **Read-only commands:**
 - `gmOccupierOps`: `[id, kind, origin, package, source, target, phase, bodies, hulls (0..2), eta s, birthReason, hullClass, escortClass]` per pending or active operation (13 columns; the last two are the carrier and escort class).
 - `gmOccupierForces` (24 slots): `[pool, poolStart, band, tokens, posture, control, wavesFired, K, excludedTowns, lost, townsEver, urgent, cooldowns, opCounter, tokenClock, waveInbound, waveClock, waveBodies, waveName, finalFired, surgeZone, surgeBodies, wavesLanded, occupierWarLevel]`; band and posture "OFF" with the key off. `gmWarLevelOccupier` gives slot 23 alone.
@@ -968,7 +981,8 @@ crews, not hulls. A launch over budget waits like a live squad does.
 
 **Test levers:** `gmForcesTune [key, value]` and `gmForcesForce ["pool" | "wave" | "refillHours" | "cooldown", value]`. Test ranges reach down to 0.01 h. `gmCounterAttackLaunchFunded` launches a funded order directly (op ids from 900001; it spends with no ledger row, review L14).
 
-There are no hints or journal lines from the director.
+There are no hints or journal lines from the director. How the director
+reaches the journal is open: GearUnclear/CWR#98.
 
 ## 7. Control, waves, bases and town strikes
 
@@ -1611,6 +1625,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | Key / value | Owner | Default | Range | Meaning |
 |---|---|---|---|---|
 | `occupierForces` | OF | 1 from phase 7 (`OccupierForcesTuning::KeyDefault`; 0 before it, Abel 1 from phase 3); `campaignEnd = 0` missions author 0 | 0/1 | Layer on/off |
+| `forcesLog` | OF (`OccupierForcesTuning::log`; `gmForcesTune "log"`) | 0 | 0..1 | Director log toggle (6.6): 1 logs the per-action lines of OF, CA and `OccupierAir` at INFO; 0 logs them at DEBUG unless the game runs with `--dev`. Read with the layer off too |
 | `forcesPoolMin` / `forcesPoolPerTown` | OF | 24 / 2 | 0..200 / 0..8 | `poolStart = max(Min, R + PerTown * K)` |
 | settlement probe (`LandscapeSettlementProbe::kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZoneRegistry | 3 / 300 m / 4 m | constants | A seeded CITY counts in K only on dry land with at least 3 buildings of bounding sphere over 4 m within 300 m; the Auto seed applies the same rule. Probed once, stored on the zone row (5.1) |
 | `forcesPoolRefillHours` | OF | 4 | 0.5..48 h | Exhausted to full, garrisons included |
@@ -1683,7 +1698,18 @@ Every owner question is answered (D1-D24). Open implementation items, as of
   captures a zone could interfere.
 - **The HQ-respawn issue** (separate, D13).
 - **Player messaging** for the director, waves, strikes and the HQ (D12:
-  INFO lines and gm* commands only for now).
+  gm* commands, and INFO lines only under `--dev` or `forcesLog = 1` since
+  2026-10-14, 6.6). Journal integration is filed as GearUnclear/CWR#98, with
+  the form left open.
+- **Parked on the vehicle system: the Southeast Compound stays air-only.**
+  The Compound is an island (3.1, `bcca80e`), so it sends only aircraft;
+  boats are a later vehicle-system item, not an occupier-forces one (owner,
+  2026-10-14: the vehicle system is not fully developed yet).
+
+Closed 2026-10-14 (owner decision): **alarm answers beside the player.** An
+alarm answer is born at its source base and travels at real speed even when
+its target is beside the player, as built (3.1 step 1); no birth near the
+target is added.
 
 Closed after `509e30d` (#97): **the air re-plan's price no longer
 bypasses the director's ledger** (3.1 step 6). `OccupierForces::SpendOnOp`
@@ -1739,6 +1765,7 @@ now wait for the dead too, `BodiesUnseen`, `bcca80e`); the default flip
 | 2026-10-14 (LOW review fixes after `08c6ae2`) | **Known bisect gap (L15):** `8f9482a` does not build on its own (it includes `CounterAttackOrders.hpp` and calls `LaunchFunded`, which arrive in `7a143ec`); history is not rewritten, so a bisect skips `8f9482a` (`git bisect skip`). The live top-up cap supersedes the phase 6 deviation "a live alarm answer adopts its whole squad". |
 | 2026-10-14 (phase 6 accepted deviations, `bcca80e`) | No attack-helicopter escort for an insertion (one airframe per insertion); a live alarm answer adopts its whole squad (no `garrisonMax` cap on the live path); strikes are live only in the bubble, abstract elsewhere; wave strikes buy no air opener; an HQ strike with no report aims at `HqPos`; a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter price bypasses the director ledger; alarm answers take no token and run while DORMANT (otherwise a key-on campaign has no answer before the second town). Open with them: the descriptor lint does not check the `forces*` keys; a slow native answer could contest a later Showcase capture chapter (17). |
 | 2026-10-14 (orchestrator, after `402ece6`) | **The settlement probe returns for K** (5.1). A seeded CITY counts in K and G only when the Auto seed's probe (dry land, 3 house-sized buildings within 300 m, 16) accepts it; authored towns always count. The verdict is probed once and saved on the zone row, so K is stable across sessions. Deviation: a block saved before the probe keeps its saved K (re-sizing a running pool would break the ledger, 5.5); only a save without the block probes on load. Measured: Abel K 14 (unchanged), Sinai K 37 to 26, poolStart 88 to 66. |
+| 2026-10-14 (owner decisions) | **Director lines are dev-only (D12 kept).** The per-action INFO lines of the director, `CounterAttack` and `OccupierAir` log at INFO only under `--dev` or with `forcesLog = 1` (default 0), and at DEBUG otherwise; WARN and ERROR are unchanged (6.6, 16). Journal integration is GearUnclear/CWR#98, form open (17). **Alarm answers are born at their base** and travel at real speed even when the target is beside the player (3.1 step 1 as built; the open item is closed). **The Southeast Compound stays an air-only base** for now; boats wait for the vehicle system (17, parked). |
 
 ## 19. Residual risks the owner accepts
 

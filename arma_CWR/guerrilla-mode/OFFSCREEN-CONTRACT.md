@@ -352,13 +352,21 @@ Instruments:
 - `gmOccupierOps` returns `[id, kind, origin, package, source, target,
   phase, bodies, hulls (0..2), eta s, birthReason, hullClass, escortClass]`
   per pending or active operation (13 slots [code]). Every director action
-  writes one INFO line starting `OccupierForces: [op N]`, N the same id
+  writes one line starting `OccupierForces: [op N]`, N the same id
   (OF D12).
+- The director log toggle [code, 2026-10-14]: the per-action lines of the
+  director (`OccupierForces:`), `CounterAttack` / `CounterAttackAir`
+  (`CounterAttack:`) and `OccupierAir` (`OccupierAir:`) log at INFO only
+  under `--dev` or with `forcesLog = 1` in CfgGuerrillaZones (default 0,
+  range 0..1, `gmForcesTune ["log", 1]` at run time), and at DEBUG
+  otherwise (`--log-level debug` shows them). WARN and ERROR lines always
+  log. Tests that read these lines from the game log pass `--dev` (OF 6.6).
 - `gmOccupierIntel` returns the sighting table `[zone, count, age s,
   positions]`, so tests can pin OF D9.
 - `gmForcesTune [key, value]` (every scalar `OccupierForcesTuning` key, not
   the arrays or the hub; some test ranges are wider than config: wakeTowns
-  1, lethalityMargin 0, refillHours 0.01 h, directorInterval 1 s) and
+  1, lethalityMargin 0, refillHours 0.01 h, directorInterval 1 s; "log"
+  the forcesLog toggle) and
   `gmForcesForce ["pool" | "wave" | "refillHours" | "cooldown" | "strike"
   | "strikeEffects" | "alarm" | "legacySave", value]` are test levers
   [code] (the last four since `bcca80e`).

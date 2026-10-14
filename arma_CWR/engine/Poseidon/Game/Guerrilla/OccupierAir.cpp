@@ -21,6 +21,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toIntFloor
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp> // GM_DIRECTOR_INFO
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
@@ -1116,7 +1117,7 @@ bool OccupierAir::PickLz(Vector3Par target, const Vector3* awayFrom, float minR,
     const bool ok = PickLzPure(target, awayFrom, t, probe, lz, why, &tried);
     if (ok)
     {
-        LOG_INFO(Core, "OccupierAir: LZ [{:.0f}, {:.0f}] {:.0f} m from [{:.0f}, {:.0f}] after {} tries", lz.X(), lz.Z(),
+        GM_DIRECTOR_INFO(Core, "OccupierAir: LZ [{:.0f}, {:.0f}] {:.0f} m from [{:.0f}, {:.0f}] after {} tries", lz.X(), lz.Z(),
                  Dist2D(lz, target), target.X(), target.Z(), tried);
     }
     else
@@ -1263,7 +1264,7 @@ bool OccupierAir::SpawnInsertion(const AirInsertionPlan& plan, int& id, RString&
     _insertions.Add(rec);
     id = rec.id;
     const Vector3 p = veh->Position();
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "OccupierAir: insertion #{} {} born airborne at [{:.0f}, {:.0f}] {:.0f} m above ground, {} cargo, LZ "
              "[{:.0f}, {:.0f}]",
              id, (const char*)plan.heliClass, p.X(), p.Z(), p.Y() - GLOB_LAND->SurfaceYAboveWater(p.X(), p.Z()), born,
@@ -1355,7 +1356,7 @@ bool OccupierAir::SpawnSortie(const RString& planeClass, Vector3Par birthPos, fl
     _sorties.Add(rec);
     id = rec.id;
     const Vector3 p = veh->Position();
-    LOG_INFO(Core, "OccupierAir: sortie #{} {} born airborne at [{:.0f}, {:.0f}] {:.0f} m above ground, target "
+    GM_DIRECTOR_INFO(Core, "OccupierAir: sortie #{} {} born airborne at [{:.0f}, {:.0f}] {:.0f} m above ground, target "
                    "[{:.0f}, {:.0f}] for {:.0f} s",
              id, (const char*)planeClass, p.X(), p.Z(), p.Y() - GLOB_LAND->SurfaceYAboveWater(p.X(), p.Z()),
              target.X(), target.Z(), rec.core.sortieTime);
@@ -1376,14 +1377,14 @@ bool OccupierAir::Reveal(int sortieId, Entity* target, float ageSeconds, float a
         AIGroup* crew = s.crew;
         if (!crew || !ai || !RevealAllowed(ageSeconds, accuracy, _tuning))
         {
-            LOG_INFO(Core, "OccupierAir: sortie #{} reveal refused (age {:.0f} s, accuracy {:.2f})", sortieId,
+            GM_DIRECTOR_INFO(Core, "OccupierAir: sortie #{} reveal refused (age {:.0f} s, accuracy {:.2f})", sortieId,
                      ageSeconds, accuracy);
             return false;
         }
         // never an exact fix (D9): the position sharpens only with accuracy
         crew->AddTarget(ai, accuracy, accuracy, 0);
         s.reveals++;
-        LOG_INFO(Core, "OccupierAir: sortie #{} revealed a target (age {:.0f} s, accuracy {:.2f})", sortieId,
+        GM_DIRECTOR_INFO(Core, "OccupierAir: sortie #{} revealed a target (age {:.0f} s, accuracy {:.2f})", sortieId,
                  ageSeconds, accuracy);
         return true;
     }
@@ -1533,7 +1534,7 @@ void OccupierAir::AfterLoad()
             continue;
         }
         r.pad = CreatePad(r.core.lz);
-        LOG_INFO(Core, "OccupierAir: insertion #{} helipad re-created at [{:.0f}, {:.0f}] after a load", r.id,
+        GM_DIRECTOR_INFO(Core, "OccupierAir: insertion #{} helipad re-created at [{:.0f}, {:.0f}] after a load", r.id,
                  r.core.lz.X(), r.core.lz.Z());
     }
 }
@@ -1579,7 +1580,7 @@ int OccupierAir::Abort(int id, bool hullFirst)
         ops.RemovePad(r.pad);
         r.core.crewRemoved = r.core.hullRemoved = true;
         r.core.state = AISGone;
-        LOG_INFO(Core, "OccupierAir: insertion #{} aborted ({}), {} crew ejected alive", id,
+        GM_DIRECTOR_INFO(Core, "OccupierAir: insertion #{} aborted ({}), {} crew ejected alive", id,
                  hullFirst ? "hull first" : "crew first", ejected);
         return ejected;
     }
@@ -1608,7 +1609,7 @@ int OccupierAir::Abort(int id, bool hullFirst)
         }
         s.core.crewRemoved = s.core.hullRemoved = true;
         s.core.state = ASSGone;
-        LOG_INFO(Core, "OccupierAir: sortie #{} aborted ({}), {} crew ejected alive", id,
+        GM_DIRECTOR_INFO(Core, "OccupierAir: sortie #{} aborted ({}), {} crew ejected alive", id,
                  hullFirst ? "hull first" : "crew first", ejected);
         return ejected;
     }
@@ -1639,7 +1640,7 @@ void OccupierAir::Step(float dt, const AirViewer& viewer, AirOps& ops)
             ops.Land(r.hull, r.crew, r.pad, r.core.lz);
             if (before == AISLanding)
             {
-                LOG_INFO(Core, "OccupierAir: insertion #{} landing order re-issued ({}) at {:.0f} s, {:.0f} m up, {:.0f} m from the LZ",
+                GM_DIRECTOR_INFO(Core, "OccupierAir: insertion #{} landing order re-issued ({}) at {:.0f} s, {:.0f} m up, {:.0f} m from the LZ",
                          r.id, r.core.landOrders, r.core.age, f.heightAgl, Dist2D(f.pos, r.core.lz));
             }
         }
@@ -1669,13 +1670,13 @@ void OccupierAir::Step(float dt, const AirViewer& viewer, AirOps& ops)
         }
         if (trace)
         {
-            LOG_INFO(Core, "OccupierAir: trace #{} {} t={:.1f} [{:.0f}, {:.0f}] h={:.1f} v={:.1f} lz={:.0f} crew={} cargo={}/{} unseen={}",
+            GM_DIRECTOR_INFO(Core, "OccupierAir: trace #{} {} t={:.1f} [{:.0f}, {:.0f}] h={:.1f} v={:.1f} lz={:.0f} crew={} cargo={}/{} unseen={}",
                      r.id, StateName(r.core.state), r.core.age, f.pos.X(), f.pos.Z(), f.heightAgl, f.speed,
                      Dist2D(f.pos, r.core.lz), f.crewAlive, f.cargoSeated, f.cargoAlive, f.unseen ? 1 : 0);
         }
         if (r.core.state != before)
         {
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "OccupierAir: insertion #{} {} -> {} at {:.0f} s ([{:.0f}, {:.0f}] {:.0f} m up, {:.1f} m/s, "
                      "cargo {}/{} seated, LZ offset {:.0f} m){}{}",
                      r.id, StateName(before), StateName(r.core.state), r.core.age, f.pos.X(), f.pos.Z(),
@@ -1723,13 +1724,13 @@ void OccupierAir::Step(float dt, const AirViewer& viewer, AirOps& ops)
         }
         if (trace)
         {
-            LOG_INFO(Core, "OccupierAir: trace sortie #{} {} t={:.1f} [{:.0f}, {:.0f}] h={:.1f} v={:.1f} tgt={:.0f} unseen={}",
+            GM_DIRECTOR_INFO(Core, "OccupierAir: trace sortie #{} {} t={:.1f} [{:.0f}, {:.0f}] h={:.1f} v={:.1f} tgt={:.0f} unseen={}",
                      s.id, SortieStateName(s.core.state), s.core.age, f.pos.X(), f.pos.Z(), f.heightAgl, f.speed,
                      Dist2D(f.pos, s.core.target), f.unseen ? 1 : 0);
         }
         if (s.core.state != before)
         {
-            LOG_INFO(Core, "OccupierAir: sortie #{} {} -> {} at {:.0f} s ([{:.0f}, {:.0f}] {:.0f} m up, {:.0f} m/s){}{}",
+            GM_DIRECTOR_INFO(Core, "OccupierAir: sortie #{} {} -> {} at {:.0f} s ([{:.0f}, {:.0f}] {:.0f} m up, {:.0f} m/s){}{}",
                      s.id, SortieStateName(before), SortieStateName(s.core.state), s.core.age, f.pos.X(), f.pos.Z(),
                      f.heightAgl, f.speed, s.core.failReason ? ", failed: " : "", FailName(s.core.failReason));
         }

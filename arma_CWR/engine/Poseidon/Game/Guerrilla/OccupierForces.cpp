@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
+#include <Poseidon/Game/Guerrilla/DirectorLog.hpp>
 
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp>  // alert states, alertInterval (read only)
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>   // IsMilitaryType / IsAuthoredOccupier, the win latch
@@ -17,6 +18,7 @@
 #include <Poseidon/AI/VehicleAI.hpp> // Target / TargetList (the sightings scan)
 
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp> // DevMode: the director log toggle
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
@@ -55,6 +57,13 @@ static int MaxInt(int a, int b)
 static int RoundToInt(float v)
 {
     return (int)floorf(v + 0.5f);
+}
+
+// The director log toggle (DirectorLog.hpp): --dev or forcesLog = 1
+spdlog::level::level_enum DirectorLogLevel()
+{
+    const bool on = Poseidon::Foundation::AppConfig::Instance().DevMode() || OccupierForces::Instance().Tuning().log;
+    return on ? spdlog::level::info : spdlog::level::debug;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +184,7 @@ bool OccupierForces::RefundPendingToPool(ZoneRegistry& registry, int zone, int o
     }
     of->Refund(bodies, "pending deposit, zone changed hands");
     const ZoneRecord* z = registry.GetZone(zone);
-    LOG_INFO(Core, "OccupierForces: {} pending body(ies) at {} back to the pool (the zone changed hands), pool {}",
+    GM_DIRECTOR_INFO(Core, "OccupierForces: {} pending body(ies) at {} back to the pool (the zone changed hands), pool {}",
              bodies, z ? (const char*)z->name : "?", of->Pool());
     return true;
 }
@@ -270,6 +279,7 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.waveCluster = ReadRanged(c, "forcesWaveCluster", t.waveCluster, 100.0f, 20000.0f);
     t.waveSurge = RoundToInt(ReadRanged(c, "forcesWaveSurge", (float)t.waveSurge, 0.0f, 48.0f));
     t.waveHub = c.ReadValue("forcesWaveHub", RString());
+    t.log = RoundToInt(ReadRanged(c, "forcesLog", t.log ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
 
     // forcesTokenInterval[]: one entry per band; a short array keeps the
     // defaults of the bands it leaves out
@@ -547,7 +557,7 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
             out.excluded.Add(z->name);
             if (log)
             {
-                LOG_INFO(Core, "OccupierForces: town {} not counted ({})", (const char*)z->name, reason);
+                GM_DIRECTOR_INFO(Core, "OccupierForces: town {} not counted ({})", (const char*)z->name, reason);
             }
             continue;
         }
@@ -555,7 +565,7 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
         out.G += RoundToInt(z->garrisonMax);
         if (log)
         {
-            LOG_INFO(Core, "OccupierForces: town {} counted (garrison {})", (const char*)z->name,
+            GM_DIRECTOR_INFO(Core, "OccupierForces: town {} counted (garrison {})", (const char*)z->name,
                      RoundToInt(z->garrisonMax));
         }
     }
@@ -611,7 +621,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     if (s.roster.Size() == 0)
     {
         _active = false;
-        LOG_INFO(Core, "OccupierForces: no military zone with an authored occupier owner, the service is off");
+        GM_DIRECTOR_INFO(Core, "OccupierForces: no military zone with an authored occupier owner, the service is off");
         return false;
     }
     _roster.Clear();
@@ -655,7 +665,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     _legacySave = false;
     _active = true;
     _control = ComputeControl(registry);
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "OccupierForces: active, poolStart {} (R {}, K {}, G {}), roster {} zone(s), {} town(s) not counted "
              "({} probed out), refill {:.1f}/h, band {}, sized in {:.1f} ms",
              _poolStart, _R, _towns.Size(), _G, _roster.Size(), _excluded.Size(), _probedOut,
@@ -667,7 +677,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
         {
             names = i == 0 ? s.labels[i] : names + RString(", ") + s.labels[i];
         }
-        LOG_INFO(Core, "OccupierForces: {} seeded town(s) not counted in K, not a settlement: {}", _probedOut,
+        GM_DIRECTOR_INFO(Core, "OccupierForces: {} seeded town(s) not counted in K, not a settlement: {}", _probedOut,
                  (const char*)names);
     }
     return true;
@@ -685,7 +695,7 @@ bool OccupierForces::ActivateProbed(ZoneRegistry& registry, const SettlementProb
         {
             const double ms =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            LOG_INFO(Core, "OccupierForces: settlement probe ran on {} seeded town(s) in {:.1f} ms", probed, ms);
+            GM_DIRECTOR_INFO(Core, "OccupierForces: settlement probe ran on {} seeded town(s) in {:.1f} ms", probed, ms);
         }
     }
     return Activate(registry, nullptr, nullptr, authoredOwner);
@@ -743,7 +753,7 @@ void OccupierForces::UpdateBand()
     const int next = StepBand(_band, _pool, _poolStart);
     if (next != _band)
     {
-        LOG_INFO(Core, "OccupierForces: band {} -> {} (pool {} of {})", BandName(_band), BandName(next), _pool,
+        GM_DIRECTOR_INFO(Core, "OccupierForces: band {} -> {} (pool {} of {})", BandName(_band), BandName(next), _pool,
                  _poolStart);
         _band = next;
     }
@@ -847,7 +857,7 @@ int OccupierForces::Deposit(int bodies, const char* why)
     {
         if (LogAllowed())
         {
-            LOG_INFO(Core, "OccupierForces: SPENT, no deposit of {} ({}){}", bodies, why ? why : "",
+            GM_DIRECTOR_INFO(Core, "OccupierForces: SPENT, no deposit of {} ({}){}", bodies, why ? why : "",
                      _logSuppressed > 0 ? " (other lines suppressed)" : "");
             _logSuppressed = 0;
         }
@@ -873,7 +883,7 @@ bool OccupierForces::Spend(int units, const char* why)
     {
         if (LogAllowed())
         {
-            LOG_INFO(Core, "OccupierForces: refused {} unit(s) for {} (pool {} of {}, band {}){}", units,
+            GM_DIRECTOR_INFO(Core, "OccupierForces: refused {} unit(s) for {} (pool {} of {}, band {}){}", units,
                      why ? why : "", _pool, _poolStart, BandName(_band),
                      _logSuppressed > 0 ? " (other lines suppressed)" : "");
             _logSuppressed = 0;
@@ -903,7 +913,7 @@ bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why
     _ops[row].outstanding += units;
     _ops[row].package = package;
     booked = true;
-    LOG_INFO(Core, "OccupierForces: [op {}] {}: {} unit(s) on the ledger row ({} outstanding)", opId,
+    GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] {}: {} unit(s) on the ledger row ({} outstanding)", opId,
              why ? why : "", units, _ops[row].outstanding);
     return true;
 }
@@ -938,7 +948,7 @@ void OccupierForces::LandWave(int bodies)
     _pool += bodies;
     _wavesTotal += bodies;
     _wavesLanded++;
-    LOG_INFO(Core, "OccupierForces: wave of {} landed, pool {} of {}, {} wave(s) landed", bodies, _pool, _poolStart,
+    GM_DIRECTOR_INFO(Core, "OccupierForces: wave of {} landed, pool {} of {}, {} wave(s) landed", bodies, _pool, _poolStart,
              _wavesLanded);
     UpdateBand();
 }
@@ -972,7 +982,7 @@ void OccupierForces::SetPool(int units)
         return;
     }
     _pool = units < 0 ? 0 : units;
-    LOG_INFO(Core, "OccupierForces: pool forced to {} of {}", _pool, _poolStart);
+    GM_DIRECTOR_INFO(Core, "OccupierForces: pool forced to {} of {}", _pool, _poolStart);
     UpdateBand();
 }
 
@@ -986,7 +996,7 @@ void OccupierForces::RequestWave(const ZoneRegistry& registry, const DirectorVie
     _waveRequests++;
     if (!Active())
     {
-        LOG_INFO(Core, "OccupierForces: wave {} requested while the service is inert; parked, no effect", n);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: wave {} requested while the service is inert; parked, no effect", n);
         return;
     }
     // wave n: its thresholds are marked fired (each fires once); beyond the
@@ -1316,7 +1326,7 @@ void OccupierForces::ReconcileLegacyOpRows()
     }
     if (rows > 0)
     {
-        LOG_INFO(Core,
+        GM_DIRECTOR_INFO(Core,
                  "OccupierForces: {} ledger row(s) from a save before the crew ledger held {} settled crew unit(s);"
                  " written off (nothing credited)",
                  rows, units);
@@ -1981,7 +1991,7 @@ bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view,
         {
             if (LogAllowed())
             {
-                LOG_INFO(Core, "OccupierForces: no operation on {}: {}{}", hq ? "the HQ" : (const char*)z->name,
+                GM_DIRECTOR_INFO(Core, "OccupierForces: no operation on {}: {}{}", hq ? "the HQ" : (const char*)z->name,
                          (const char*)a.choice.why, _logSuppressed > 0 ? " (other lines suppressed)" : "");
                 _logSuppressed = 0;
             }
@@ -2124,7 +2134,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         {
             *launcherRefused = true;
         }
-        LOG_INFO(Core, "OccupierForces: [op {}] CounterAttack refused the {} operation from {} to {}", opId,
+        GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] CounterAttack refused the {} operation from {} to {}", opId,
                  ForcePackages::PackageName(q.package), ZoneNameOf(registry, q.source), targetName);
         return false;
     }
@@ -2156,7 +2166,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
                                                            : ForcePackages::PackageName(q.package);
         if (q.package == FPFoot)
         {
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "OccupierForces: [op {}] {}{} ({}) from {} to {} ({} unit(s), the pool pays {}, lethality {:.2f} "
                      "of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
                      opId, push ? "Push-out: " : "", label, q.bodies, ZoneNameOf(registry, q.source), targetName,
@@ -2177,7 +2187,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
             {
                 snprintf(from, sizeof(from), "%s", ZoneNameOf(registry, q.source));
             }
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "OccupierForces: [op {}] {}{} ({}, {}) from {} to {} ({} unit(s), the pool pays {}, lethality "
                      "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
                      opId, push ? "Push-out: " : "", label, q.bodies, (const char*)q.hullClass, from, targetName,
@@ -2191,7 +2201,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         // 6.6: "Jet strike over Houdan (town)"
         const char* air = q.package == FPJet ? "Jet strike" : "Attack helicopter strike";
         const char* what = z && stricmp(z->type, "CITY") == 0 ? "town" : (hq ? "the HQ" : "opener");
-        LOG_INFO(Core,
+        GM_DIRECTOR_INFO(Core,
                  "OccupierForces: [op {}] {} over {} ({}, {}) from {} (the pool pays {}, {} fighter(s) reported, at "
                  "{}){}",
                  opId, air, targetName, what, (const char*)q.hullClass,
@@ -2213,7 +2223,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         {
             snprintf(from, sizeof(from), "%s", ZoneNameOf(registry, q.source));
         }
-        LOG_INFO(Core,
+        GM_DIRECTOR_INFO(Core,
                  "OccupierForces: [op {}] Alarm answer: {} ({}{}{}) from {} to {} ({} unit(s), the pool pays {}, "
                  "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
                  opId, ForcePackages::PackageName(q.package), q.bodies, q.package != FPFoot ? ", " : "",
@@ -2228,7 +2238,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
                        : a.kind == CAKReinforce    ? "Reinforce column"
                                                    : "Town retake";
     const char* pkg = q.package == FPFoot ? "foot" : (q.package == FPTruck ? "motorized" : "package");
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "OccupierForces: [op {}] {}{}{} ({} {}{}{}) from {} on {} ({} unit(s), the pool pays {}{}, lethality "
              "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
              opId, push ? "Push-out: " : "", wave, what, pkg, q.bodies, q.package != FPFoot ? ", " : "",
@@ -2464,7 +2474,7 @@ void OccupierForces::FireWave(const ZoneRegistry& registry, const DirectorView& 
                 _waveClock = _tuning.waveLeadFinal;
             }
         }
-        LOG_INFO(Core, "OccupierForces: Wave {} absorbs a further trigger ({}){}", _waveCount, why ? why : "",
+        GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {} absorbs a further trigger ({}){}", _waveCount, why ? why : "",
                  final ? ": it carries the final stand" : "");
         return;
     }
@@ -2474,7 +2484,7 @@ void OccupierForces::FireWave(const ZoneRegistry& registry, const DirectorView& 
     _waveBodies = WaveSize(_tuning, _poolStart);
     _waveClock = final ? _tuning.waveLeadFinal : _tuning.waveLead;
     const int hub = PickHub(registry, _tuning, &view.garrisonLive);
-    LOG_INFO(Core, "OccupierForces: Wave {} ({}) inbound to {}, control {:.2f}{} ({}; lands in {:.0f} s)", _waveCount,
+    GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {} ({}) inbound to {}, control {:.2f}{} ({}; lands in {:.0f} s)", _waveCount,
              _waveBodies, hub >= 0 ? ZoneNameOf(registry, hub) : "off-map", (double)_control,
              final ? ", the final stand" : "", why ? why : "", (double)_waveClock);
 }
@@ -2544,7 +2554,7 @@ void OccupierForces::StepWaves(ZoneRegistry& registry, const DirectorView& view,
     _waveWindow = WaveWindow;
     LandWave(bodies);
     const int rest = AllocateWave(registry, view, launcher, bodies, final);
-    LOG_INFO(Core, "OccupierForces: Wave {}: {} stay in the pool (pool {} of {})", _waveCount, rest, _pool,
+    GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: {} stay in the pool (pool {} of {})", _waveCount, rest, _pool,
              _poolStart);
 }
 
@@ -2576,7 +2586,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
         {
             const bool pending = registry.AddReserveNow(hub, got, -1);
             budget -= got;
-            LOG_INFO(Core, "OccupierForces: Wave {}: hub top-up {} at {}{}", _waveCount, got,
+            GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: hub top-up {} at {}{}", _waveCount, got,
                      ZoneNameOf(registry, hub), pending ? " (pending)" : "");
         }
     }
@@ -2607,7 +2617,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
             }
             _surgeZone = z->name;
             _surgeBodies += got;
-            LOG_INFO(Core, "OccupierForces: Wave {}: final-stand surge {} at {}{} (never spare)", _waveCount, got,
+            GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: final-stand surge {} at {}{} (never spare)", _waveCount, got,
                      (const char*)z->name, pending ? " (pending)" : "");
         }
     }
@@ -2615,7 +2625,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
     int ops = 0;
     if (_posture != OFAwake)
     {
-        LOG_INFO(Core, "OccupierForces: Wave {}: no strikes, the director is DORMANT", _waveCount);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: no strikes, the director is DORMANT", _waveCount);
     }
     else if (budget > 0 && _tuning.waveOps > 0)
     {
@@ -2655,7 +2665,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
                     }
                 }
             }
-            LOG_INFO(Core, "OccupierForces: Wave {}: strikes on the cluster around {} ({} target(s), up to {})",
+            GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: strikes on the cluster around {} ({} target(s), up to {})",
                      _waveCount, (const char*)c->name, targets.Size(), strikeBudget);
         }
         for (int t = 0; t < targets.Size() && ops < _tuning.waveOps && strikeBudget > 0; t++)
@@ -2690,13 +2700,13 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
             }
             if (source < 0)
             {
-                LOG_INFO(Core, "OccupierForces: Wave {}: no base can send a strike", _waveCount);
+                GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: no base can send a strike", _waveCount);
                 break;
             }
             const DirectorAction a = PlanFor(registry, view, targets[t], CAOWave, source, strikeBudget);
             if (!a.go || a.choice.quote.bodies > strikeBudget)
             {
-                LOG_INFO(Core, "OccupierForces: Wave {}: no strike on {}: {}", _waveCount,
+                GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {}: no strike on {}: {}", _waveCount,
                          targets[t] == HqCandidate ? "the HQ" : ZoneNameOf(registry, targets[t]),
                          a.go ? "over the strike budget" : (const char*)a.choice.why);
                 continue;
@@ -2858,7 +2868,7 @@ void OccupierForces::StepStanding(ZoneRegistry& registry, float elapsed)
         IngestTip(registry, i, z->lastGuerHold, at);
         if (LogAllowed())
         {
-            LOG_INFO(Core, "OccupierForces: a local in {} talked: {} fighter(s) reported (standing {:.0f}){}",
+            GM_DIRECTOR_INFO(Core, "OccupierForces: a local in {} talked: {} fighter(s) reported (standing {:.0f}){}",
                      (const char*)z->name, z->lastGuerHold, (double)z->standing,
                      _logSuppressed > 0 ? " (other lines suppressed)" : "");
             _logSuppressed = 0;
@@ -2900,7 +2910,7 @@ bool OccupierForces::NoteTownFlipped(const ZoneRegistry& registry, int zoneIndex
     if (!TownEver(z->name))
     {
         AddName(_townsEver, z->name);
-        LOG_INFO(Core, "OccupierForces: {} taken, {} distinct town(s) so far", (const char*)z->name, _townsEver.Size());
+        GM_DIRECTOR_INFO(Core, "OccupierForces: {} taken, {} distinct town(s) so far", (const char*)z->name, _townsEver.Size());
     }
     if (_posture == OFDormant && _townsEver.Size() >= _tuning.wakeTowns)
     {
@@ -2909,7 +2919,7 @@ bool OccupierForces::NoteTownFlipped(const ZoneRegistry& registry, int zoneIndex
         _posture = OFAwake;
         _tokens = _tuning.tokensMax;
         _tokenClock = 0;
-        LOG_INFO(Core, "OccupierForces: AWAKE after {} distinct towns ({} the latest), {} token(s)", _townsEver.Size(),
+        GM_DIRECTOR_INFO(Core, "OccupierForces: AWAKE after {} distinct towns ({} the latest), {} token(s)", _townsEver.Size(),
                  (const char*)z->name, _tokens);
     }
     return _posture == OFAwake;
@@ -2984,7 +2994,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         case CAOpResourced:
             if (mine)
             {
-                LOG_INFO(Core, "OccupierForces: [op {}] Re-sourced to {}: the nearer base's road was watched", ev.opId,
+                GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Re-sourced to {}: the nearer base's road was watched", ev.opId,
                          ZoneNameOf(registry, ev.source));
             }
             break;
@@ -3007,7 +3017,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             _ops[row].finished = true;
             Refund(refund, "cancelled unborn");
             SetCooldown(target, _tuning.townCooldown);
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "OccupierForces: [op {}] Cancelled unborn: {}; {} unit(s) back to the pool, {} rests {:.0f} s",
                      ev.opId, ev.note && *ev.note ? ev.note : "every route watched", refund, target,
                      (double)_tuning.townCooldown);
@@ -3034,7 +3044,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             RemoveName(_redPaid, target);
             SetCooldown(target, _tuning.townCooldown);
             _ops[row].finished = true;
-            LOG_INFO(Core, "OccupierForces: [op {}] Repelled at {}: {} lost, {} going home; {} rests {:.0f} s{}",
+            GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Repelled at {}: {} lost, {} going home; {} rests {:.0f} s{}",
                      ev.opId, target, ev.units, ev.bodies, target, (double)_tuning.townCooldown,
                      paid ? " (a RED edge already raised the heat)" : ", heat +15");
             break;
@@ -3043,7 +3053,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             if (mine)
             {
                 _ops[row].finished = true;
-                LOG_INFO(Core, "OccupierForces: [op {}] {} retaken: {} stay as its garrison", ev.opId, target,
+                GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] {} retaken: {} stay as its garrison", ev.opId, target,
                          ev.bodies);
             }
             break;
@@ -3051,7 +3061,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             if (mine)
             {
                 _ops[row].finished = true;
-                LOG_INFO(Core, "OccupierForces: [op {}] Aborted: {}", ev.opId, ev.note ? ev.note : "");
+                GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Aborted: {}", ev.opId, ev.note ? ev.note : "");
             }
             break;
         case CAOpHullRefund:
@@ -3117,7 +3127,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         case CAOpAlarmAnswered:
             if (mine)
             {
-                LOG_INFO(Core, "OccupierForces: [op {}] Alarm answer at {}: searching the reported positions", ev.opId,
+                GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Alarm answer at {}: searching the reported positions", ev.opId,
                          ZoneNameOf(registry, ev.zone >= 0 ? ev.zone : ev.target));
             }
             break;
@@ -3347,7 +3357,7 @@ int OccupierForces::ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3
     if (town)
     {
         _townStrikes++;
-        LOG_INFO(Core,
+        GM_DIRECTOR_INFO(Core,
                  "OccupierForces: [op {}] Struck {}: support {:.0f}, standing {:.0f} (-{:.0f} each), heat +{:.0f}, "
                  "half income until {:.0f}; {} town(s) within {:.0f} m -{:.0f} each",
                  opId, (const char*)z->name, (double)z->support, (double)z->standing, (double)ZoneRegistry::StrikeCut,
@@ -3356,7 +3366,7 @@ int OccupierForces::ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3
     }
     else
     {
-        LOG_INFO(Core, "OccupierForces: [op {}] Struck {}: {} town(s) within {:.0f} m -{:.0f} support and standing",
+        GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Struck {}: {} town(s) within {:.0f} m -{:.0f} support and standing",
                  opId, z ? (const char*)z->name : "a reported position", ring, (double)ZoneRegistry::StrikeRingRadius,
                  (double)ZoneRegistry::StrikeRingCut);
     }
@@ -3497,7 +3507,7 @@ void OccupierForces::AnswerAlarms(ZoneRegistry& registry, const DirectorView& vi
         if (!HasName(_alarmStarved, z->name))
         {
             AddName(_alarmStarved, z->name);
-            LOG_INFO(Core, "OccupierForces: Starved: no answer to {} alarm ({})", (const char*)z->name, why);
+            GM_DIRECTOR_INFO(Core, "OccupierForces: Starved: no answer to {} alarm ({})", (const char*)z->name, why);
         }
         return;
     }
@@ -3547,7 +3557,7 @@ bool OccupierForces::ForceStrike(ZoneRegistry& registry, const DirectorView& vie
     const DirectorAction a = PlanStrike(registry, view, zone, true);
     if (!a.go)
     {
-        LOG_INFO(Core, "OccupierForces: forced strike refused: {}", (const char*)a.choice.why);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: forced strike refused: {}", (const char*)a.choice.why);
         return false;
     }
     return LaunchAction(registry, view, launcher, a, false, false, 0);
@@ -3562,7 +3572,7 @@ bool OccupierForces::ForceAlarm(ZoneRegistry& registry, const DirectorView& view
     const DirectorAction a = PlanAlarm(registry, view, zone);
     if (!a.go)
     {
-        LOG_INFO(Core, "OccupierForces: forced alarm answer refused: {}", (const char*)a.choice.why);
+        GM_DIRECTOR_INFO(Core, "OccupierForces: forced alarm answer refused: {}", (const char*)a.choice.why);
         return false;
     }
     if (!LaunchAction(registry, view, launcher, a, false, false, 0))
@@ -3617,7 +3627,7 @@ void OccupierForces::BuildEngineCatalogue(const ZoneRegistry& registry)
     }
     ConfigHullInspector inspector;
     ForcePackages::BuildCatalogue(ladder, overrides, inspector, _catalogue, true);
-    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}{}{}{}",
+    GM_DIRECTOR_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}{}{}{}",
              (const char*)occupier, f ? (const char*)f->className : "no descriptor", ladder.Size(),
              _catalogue.Offered(FPTruck) ? ", truck" : "", _catalogue.Offered(FPArmedCar) ? ", armed car" : "",
              _catalogue.Offered(FPApc) ? ", APC" : "", _catalogue.Offered(FPTank) ? ", tank" : "",
@@ -3783,7 +3793,7 @@ void OccupierForces::DeriveFromExistingSave(ZoneRegistry& registry, const Settle
     _posture = _townsEver.Size() >= _tuning.wakeTowns ? OFAwake : OFDormant;
     _legacySave = true; // D20: the old save keeps its own script QRF
     _band = InitialBand(_pool, _poolStart);
-    LOG_INFO(Core,
+    GM_DIRECTOR_INFO(Core,
              "OccupierForces: derived from a save without the block: pool {} of {} (control {:.2f}), {} wave "
              "threshold(s) marked fired, {} town(s) taken, band {}",
              _pool, _poolStart, (double)_control, _wavesFired, _townsEver.Size(), BandName(_band));
@@ -3824,7 +3834,7 @@ void OccupierForces::SeedTownsEverOnLoad(const ZoneRegistry& registry)
     {
         _posture = OFAwake;
     }
-    LOG_INFO(Core, "OccupierForces: the block predates the distinct-town set: {} town(s) seeded from the owners, {}",
+    GM_DIRECTOR_INFO(Core, "OccupierForces: the block predates the distinct-town set: {} town(s) seeded from the owners, {}",
              _townsEver.Size(), _posture == OFAwake ? "AWAKE" : "DORMANT");
 }
 
@@ -3950,7 +3960,7 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
         if (format < SaveFormat && _active && !_legacySave)
         {
             _legacySave = true;
-            LOG_INFO(Core,
+            GM_DIRECTOR_INFO(Core,
                      "OccupierForces: block format {} predates the native alarm answers: legacySave, the script QRF "
                      "stays",
                      format);
