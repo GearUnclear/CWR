@@ -742,6 +742,24 @@ class ZoneRegistry : public SerializeClass
         z = _tickPlayerZ;
         return _tickPlayerValid;
     }
+    // L10: a reserve write outside EvaluateTick (RevertTown, RevertBase, a
+    // wave's allocation) through the S5 deposit bubble.  The bubble's player
+    // is the last tick's; before the first tick since a load or activation
+    // it is the world's living player now (the engine registry), and with
+    // neither known the write is a pending deposit, which the next tick
+    // releases once the player is away or the points are hidden.  True
+    // when the write went pending.
+    bool AddReserveNow(int zone, int bodies, int originZone);
+    bool TickSeen() const { return _tickSeen; }
+    // the player as a zone tick sees him (EvaluateTick calls it; unit tests
+    // stand in for the tick with it)
+    void NoteTickPlayer(bool valid, float x, float z)
+    {
+        _tickPlayerValid = valid;
+        _tickPlayerX = x;
+        _tickPlayerZ = z;
+        _tickSeen = true;
+    }
     // sample GatherSimDiag and log one [gmsim] INFO line, plus a WARN per
     // breached budget; returns the SimBudgetBreach bits
     int LogSimDiag();
@@ -840,6 +858,8 @@ class ZoneRegistry : public SerializeClass
     int _lastTickRemote = 0;
     // transient: the player as the last EvaluateTick saw him (LastTickPlayer)
     bool _tickPlayerValid = false;
+    // L10: an EvaluateTick ran since the last Clear (a load clears)
+    bool _tickSeen = false;
     float _tickPlayerX = 0;
     float _tickPlayerZ = 0;
     // deserialized rows waiting for the mission config (applied on the

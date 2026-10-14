@@ -231,6 +231,7 @@ void ZoneRegistry::Clear()
     _lastTickInBubble = 0;
     _lastTickRemote = 0;
     _tickPlayerValid = false;
+    _tickSeen = false;
     _tickPlayerX = 0;
     _tickPlayerZ = 0;
     _pending.Clear();
@@ -1834,10 +1835,7 @@ bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int 
     // inactive it passes through (from nothing, as before); SPENT grants
     // nothing and the town is left hollow
     const int refill = room > settle ? OccupierForces::Instance().Deposit(room - settle, "revert") : 0;
-    float px = 0;
-    float pz = 0;
-    const bool playerValid = LastTickPlayer(px, pz);
-    const bool pending = GarrisonCache::AddReserve(*this, index, settle + refill, -1, playerValid, px, pz);
+    const bool pending = AddReserveNow(index, settle + refill, -1);
     z->revertRefill = refill;
     z->liveOccupiers = 0;
     z->capture = 0;
@@ -1854,6 +1852,40 @@ bool ZoneRegistry::RevertTown(int index, AutoArray<ZoneEventRecord>& fired, int 
     ev.zoneIndex = index;
     fired.Add(ev);
     return true;
+}
+
+bool ZoneRegistry::AddReserveNow(int zone, int bodies, int originZone)
+{
+    if (bodies < 1 || !GetZone(zone))
+    {
+        return false;
+    }
+    float px = _tickPlayerX;
+    float pz = _tickPlayerZ;
+    bool valid = _tickPlayerValid;
+    if (!_tickSeen)
+    {
+        // no tick since the load: the player where he stands now
+        bool known = false;
+        if (this == &Instance() && GWorld)
+        {
+            Person* player = GWorld->GetRealPlayer();
+            if (player)
+            {
+                known = true;
+                valid = !player->IsDammageDestroyed();
+                px = player->Position().X();
+                pz = player->Position().Z();
+            }
+        }
+        if (!known)
+        {
+            // nobody to ask: pending, never a body beside an unknown player
+            GarrisonCache::Deposit(*this, zone, bodies, originZone);
+            return true;
+        }
+    }
+    return GarrisonCache::AddReserve(*this, zone, bodies, originZone, valid, px, pz);
 }
 
 bool ZoneRegistry::IsHeldBase(const ZoneRecord& z) const
@@ -1894,10 +1926,7 @@ bool ZoneRegistry::RevertBase(int index, AutoArray<ZoneEventRecord>& fired, int 
         OccupierForces::Instance().Refund(settled - settle, "surplus");
     }
     const int refill = room > settle ? OccupierForces::Instance().Deposit(room - settle, "base retaken") : 0;
-    float px = 0;
-    float pz = 0;
-    const bool playerValid = LastTickPlayer(px, pz);
-    const bool pending = GarrisonCache::AddReserve(*this, index, settle + refill, -1, playerValid, px, pz);
+    const bool pending = AddReserveNow(index, settle + refill, -1);
     z->revertRefill = refill;
     // the income tap closes with the base (economy.sqs pays only while held)
     z->income = 0;
@@ -2483,9 +2512,7 @@ void ZoneRegistry::EvaluateTick(const ZoneTickInputs& in, AutoArray<ZoneEventRec
     _lastTickInBubble = 0;
     _lastTickRemote = 0;
     // the player as this tick sees him: RevertTown's S5 deposit bubble
-    _tickPlayerValid = in.playerValid;
-    _tickPlayerX = in.playerX;
-    _tickPlayerZ = in.playerZ;
+    NoteTickPlayer(in.playerValid, in.playerX, in.playerZ);
     for (int i = 0; i < n; i++)
     {
         ZoneRecord& z = _zones[i];

@@ -362,6 +362,15 @@ class CounterAttackOps : public CounterAttackGate
     virtual void Remove(AIGroup* grp) = 0;
     // hand the group to GarrisonCache as the town's garrison
     virtual void Adopt(int townZone, AIGroup* grp) = 0;
+    // move up to n living non-leaders of grp (on foot) into a new group in
+    // march order sent on firstLeg; taken = bodies moved.  Default: no
+    // split (null), the caller keeps the group whole.
+    virtual AIGroup* SplitOff(AIGroup* grp, int n, Vector3Par firstLeg, int& taken)
+    {
+        (void)grp, (void)n, (void)firstLeg;
+        taken = 0;
+        return nullptr;
+    }
     // every living body of grp could vanish unnoticed right now (Traffic's
     // despawn rule, Traffic::CanExposeDespawn from the camera)
     virtual bool SquadUnseen(AIGroup* grp) const = 0;
@@ -786,6 +795,9 @@ class CounterAttack : public SerializeClass
                                                  float minToTarget, const CounterAttackGate& gate);
     // the fraction of the route's length at its point nearest pos
     static float RouteFractionNear(const AutoArray<Vector3>& route, Vector3Par pos);
+    // a point of route at or beyond fraction (by arc) lies within radius
+    // (2D) of (px, pz): the road still ahead passes there (L13)
+    static bool RouteAheadWithin(const AutoArray<Vector3>& route, float fraction, float px, float pz, float radius);
     // a live squad back to the abstract road at fraction of its route with
     // alive bodies: TRAVEL, clock = travel * (1 - fraction) (travel = the
     // whole leg, set from the base distance when the squad never travelled)
@@ -1137,6 +1149,18 @@ class CounterAttack : public SerializeClass
     // squad is subtracted from the revert refill (U2), never assigned over
     // the reserve
     void AdoptLive(ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, int alive);
+    // a live top-up (REINFORCE or alarm answer) squad at its town joins the
+    // garrison up to the room (garrisonMax - live - reserve - pending): the
+    // stored reserve, then the pending deposit, give way to it first (back
+    // to the pool, nothing visible), and what still does not fit splits off
+    // and walks home as a Leftover (removed unseen, home through CrewHome up
+    // to its source's room, the rest to the pool).  Returns the bodies that
+    // joined.  The 5.5 "live top-up" row.
+    int AdoptTopUp(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                   CounterAttackOps* ops, int alive);
+    // the occupier base nearest at on its landmass (-1 none): a hull whose
+    // base fell drives there instead (L13)
+    static int NearestOccupierBase(const ZoneRegistry& registry, Vector3Par at);
 
     CounterAttackTuning _tuning;
     AutoArray<Record> _records;

@@ -455,9 +455,23 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
     CounterAttackView view;
     ca.BuildView(view);
     AutoArray<ZoneEventRecord> fired;
+    // L14: the units spent get a ledger row before the launch (events raised
+    // while CounterAttack starts the record find it), so they come back
+    OccupierForces& of = OccupierForces::Instance();
+    const ZoneRecord* targetZone = registry.GetZone(order.target);
+    const bool booked =
+        order.priceUnits > 0 && of.BookLeverOp(order.opId, targetZone ? (const char*)targetZone->name : "",
+                                               order.kind, order.package, order.priceUnits);
     if (!ca.LaunchFunded(registry, view, order, ca.EngineOps(), fired))
     {
-        OccupierForces::Instance().Refund(order.priceUnits, "test lever refused");
+        if (booked)
+        {
+            of.CancelLeverOp(order.opId);
+        }
+        else
+        {
+            of.Refund(order.priceUnits, "test lever refused");
+        }
         return GameValue(0.0f);
     }
     registry.FireEvents(fired);

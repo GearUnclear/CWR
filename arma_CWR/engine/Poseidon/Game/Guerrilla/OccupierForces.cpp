@@ -118,6 +118,7 @@ void OccupierForces::Clear()
     _strikesApplied = 0;
     _alarmAnswers = 0;
     _loadedFormat = 0;
+    _townsEverPending = false;
     _missionNow = 0;
     _alarmStarved.Clear();
     // the S5 refund hook (3.3): the process-wide service always owns it (it
@@ -1187,19 +1188,122 @@ int OccupierForces::FindOp(int opId) const
 
 void OccupierForces::PruneOps()
 {
+    // L6: only a settled row goes (finished, nothing outstanding): a row
+    // whose hull is still driving home keeps its refund, and a live
+    // operation keeps its row.  When nothing is settled the ledger grows
+    // past MaxOpRows (opsMax and the waves bound the live ones); past
+    // MaxOpRows * 4 the oldest finished row is settled to the pool first
+    // (as if its hull came home) so its units are never lost.
     while (_ops.Size() > MaxOpRows)
     {
-        int drop = 0;
-        for (int i = 0; i < _ops.Size(); i++)
+        int drop = -1;
+        for (int i = 0; i < _ops.Size() && drop < 0; i++)
         {
-            if (_ops[i].finished)
+            if (_ops[i].finished && _ops[i].outstanding <= 0)
             {
                 drop = i;
-                break;
             }
+        }
+        if (drop < 0 && _ops.Size() > MaxOpRows * 4)
+        {
+            for (int i = 0; i < _ops.Size() && drop < 0; i++)
+            {
+                if (_ops[i].finished)
+                {
+                    drop = i;
+                }
+            }
+            if (drop >= 0 && _ops[drop].outstanding > 0)
+            {
+                LOG_DEBUG(Core, "OccupierForces: [op {}] ledger row pruned: {} outstanding unit(s) settled to the pool",
+                          _ops[drop].opId, _ops[drop].outstanding);
+                Refund(_ops[drop].outstanding, "ledger row pruned");
+                _ops[drop].outstanding = 0;
+            }
+        }
+        if (drop < 0)
+        {
+            break;
         }
         _ops.Delete(drop);
     }
+}
+
+bool OccupierForces::BookLeverOp(int opId, const char* target, int kind, int package, int units)
+{
+    if (!Active() || units <= 0 || opId <= 0 || FindOp(opId) >= 0)
+    {
+        return false;
+    }
+    OpRow row;
+    row.opId = opId;
+    row.target = target ? target : "";
+    row.kind = kind;
+    row.origin = CAODirector;
+    row.package = package;
+    row.outstanding = units;
+    row.lever = true;
+    _ops.Add(row);
+    LOG_DEBUG(Core, "OccupierForces: [op {}] test lever booked {} unit(s)", opId, units);
+    PruneOps();
+    return true;
+}
+
+void OccupierForces::CancelLeverOp(int opId)
+{
+    const int row = FindOp(opId);
+    if (row < 0 || !_ops[row].lever)
+    {
+        return;
+    }
+    const int units = _ops[row].outstanding;
+    _ops.Delete(row);
+    Refund(units, "test lever refused");
+}
+
+void OccupierForces::NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev)
+{
+    OpRow& r = _ops[row];
+    const int units = MinInt(ev.units > 0 ? ev.units : 0, r.outstanding);
+    switch (ev.type)
+    {
+        case CAOpBorn:
+        case CAOpAirborne:
+            r.born = true;
+            break;
+        case CAOpCancelledUnseen:
+            // what CounterAttack still owes comes back; the rest was booked
+            r.outstanding = 0;
+            r.finished = true;
+            Refund(units, "test lever cancelled unborn");
+            break;
+        case CAOpHullRefund:
+            r.outstanding -= units;
+            Refund(units, "test lever hull home intact");
+            break;
+        case CAOpHullLost:
+            r.outstanding -= units;
+            NoteLoss(units, "test lever hull lost");
+            break;
+        case CAOpRepelled:
+        case CAOpSettled:
+        case CAOpAborted:
+            r.finished = true;
+            break;
+        case CAOpReturned:
+            if (r.kind == CAKAlarm || r.kind == CAKStrike)
+            {
+                r.finished = true;
+            }
+            break;
+        default:
+            break;
+    }
+    if (r.kind == CAKStrike && (ev.type == CAOpHullRefund || ev.type == CAOpHullLost) && r.outstanding <= 0)
+    {
+        r.finished = true;
+    }
+    PruneOps();
 }
 
 bool OccupierForces::IsHeldTown(const ZoneRegistry& registry, const ZoneRecord& z)
@@ -2348,11 +2452,8 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
 {
     int budget = bodies;
     const RString occupier = registry.OccupierSide();
-    float px = 0;
-    float pz = 0;
-    // the S5 deposit bubble only (where the player stood at the last zone
-    // tick decides pending vs reserve, never what the director sends)
-    const bool playerValid = registry.LastTickPlayer(px, pz);
+    // the S5 deposit bubble only (where the player stands decides pending vs
+    // reserve, never what the director sends): ZoneRegistry::AddReserveNow
     auto liveAt = [&view](int i) { return i >= 0 && i < view.garrisonLive.Size() ? view.garrisonLive[i] : 0; };
     auto shortfall = [&registry, &liveAt](int i) {
         const ZoneRecord* z = registry.GetZone(i);
@@ -2372,7 +2473,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
         const int got = want > 0 ? Deposit(want, "wave hub top-up") : 0;
         if (got > 0)
         {
-            const bool pending = GarrisonCache::AddReserve(registry, hub, got, -1, playerValid, px, pz);
+            const bool pending = registry.AddReserveNow(hub, got, -1);
             budget -= got;
             LOG_INFO(Core, "OccupierForces: Wave {}: hub top-up {} at {}{}", _waveCount, got,
                      ZoneNameOf(registry, hub), pending ? " (pending)" : "");
@@ -2396,7 +2497,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
         const int got = last >= 0 && want > 0 ? Deposit(want, "wave final-stand surge") : 0;
         if (got > 0)
         {
-            const bool pending = GarrisonCache::AddReserve(registry, last, got, -1, playerValid, px, pz);
+            const bool pending = registry.AddReserveNow(last, got, -1);
             budget -= got;
             const ZoneRecord* z = registry.GetZone(last);
             if (stricmp(_surgeZone, z->name) != 0)
@@ -2761,6 +2862,11 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         return;
     }
     const int row = FindOp(ev.opId);
+    if (row >= 0 && _ops[row].lever)
+    {
+        NoteLeverOpEvent(row, ev);
+        return;
+    }
     const ZoneRecord* z = registry.GetZone(ev.target);
     // an HQ assault rests the HQ, not the zone it stands in
     const char* target = ev.kind == CAKHqAssault ? HqCooldownName : (z ? (const char*)z->name : "");
@@ -3549,6 +3655,22 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
     _finalFired = RosterBasesHeld(registry) <= 1;
     // the distinct-town set from the towns the resistance holds now, less
     // the ones it was authored to hold (never taken, L12)
+    FillTownsEverFromOwners(registry);
+    _sightings.Clear();
+    _tokens = 0; // a migrated save does not launch at once
+    // invariant W from the derived set: awake with no tokens when enough
+    // distinct towns are already held
+    _posture = _townsEver.Size() >= _tuning.wakeTowns ? OFAwake : OFDormant;
+    _legacySave = true; // D20: the old save keeps its own script QRF
+    _band = InitialBand(_pool, _poolStart);
+    LOG_INFO(Core,
+             "OccupierForces: derived from a save without the block: pool {} of {} (control {:.2f}), {} wave "
+             "threshold(s) marked fired, {} town(s) taken, band {}",
+             _pool, _poolStart, (double)_control, _wavesFired, _townsEver.Size(), BandName(_band));
+}
+
+void OccupierForces::FillTownsEverFromOwners(const ZoneRegistry& registry)
+{
     _townsEver.Clear();
     const RString resistance = registry.ResistanceSide();
     for (int i = 0; i < registry.NZones(); i++)
@@ -3562,17 +3684,28 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
             _townsEver.Add(row);
         }
     }
-    _sightings.Clear();
-    _tokens = 0; // a migrated save does not launch at once
-    // invariant W from the derived set: awake with no tokens when enough
-    // distinct towns are already held
-    _posture = _townsEver.Size() >= _tuning.wakeTowns ? OFAwake : OFDormant;
-    _legacySave = true; // D20: the old save keeps its own script QRF
-    _band = InitialBand(_pool, _poolStart);
-    LOG_INFO(Core,
-             "OccupierForces: derived from a save without the block: pool {} of {} (control {:.2f}), {} wave "
-             "threshold(s) marked fired, {} town(s) taken, band {}",
-             _pool, _poolStart, (double)_control, _wavesFired, _townsEver.Size(), BandName(_band));
+}
+
+void OccupierForces::SeedTownsEverOnLoad(const ZoneRegistry& registry)
+{
+    if (!_townsEverPending)
+    {
+        return;
+    }
+    _townsEverPending = false;
+    if (!registry.IsActive())
+    {
+        return;
+    }
+    FillTownsEverFromOwners(registry);
+    // invariant W from the seeded set; tokens stay as saved (a phase-2 block
+    // holds none)
+    if (_posture == OFDormant && _townsEver.Size() >= _tuning.wakeTowns)
+    {
+        _posture = OFAwake;
+    }
+    LOG_INFO(Core, "OccupierForces: the block predates the distinct-town set: {} town(s) seeded from the owners, {}",
+             _townsEver.Size(), _posture == OFAwake ? "AWAKE" : "DORMANT");
 }
 
 LSError OccupierForces::NameRow::Serialize(ParamArchive& ar)
@@ -3607,6 +3740,7 @@ LSError OccupierForces::OpRow::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("outstanding", outstanding, 1, 0))
     PARAM_CHECK(ar.Serialize("born", born, 1, false))
     PARAM_CHECK(ar.Serialize("finished", finished, 1, false))
+    PARAM_CHECK(ar.Serialize("lever", lever, 1, false))
     return LSOK;
 }
 
@@ -3618,6 +3752,12 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     {
         // the mission config was reparsed during the first pass
         LoadFromConfig();
+        // L8: the zone owners are restored by now (the GuerrillaZones block
+        // precedes this one)
+        if (this == &Instance())
+        {
+            SeedTownsEverOnLoad(ZoneRegistry::Instance());
+        }
         return LSOK;
     }
     PARAM_CHECK(ar.Serialize("active", _active, 1, false))
@@ -3675,6 +3815,8 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     if (ar.IsLoading())
     {
         _loadedFormat = format;
+        // L8: a phase-2 block carries the field but never filled it
+        _townsEverPending = format < SaveFormat && _active && _townsEver.Size() == 0;
         // D20: a block saved before the native alarm answers existed keeps
         // the campaign's own script QRF (its text rides in the save) and no
         // native answers run beside it

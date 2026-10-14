@@ -103,6 +103,9 @@ struct Fixture
         {
             registry.ExemptTownGarrison(hq);
         }
+        // a zone tick saw the player far away (L10: before any tick a
+        // reserve write would go pending)
+        registry.NoteTickPlayer(true, 99999.0f, 99999.0f);
     }
     ZoneRecord& Z(const char* name)
     {
@@ -3098,4 +3101,191 @@ TEST_CASE("OccupierForces - phase 6 state survives save/load; an older block bec
     ExtParsMission.Clear();
     std::filesystem::remove(path);
     std::filesystem::remove(oldPath);
+}
+
+// ---------------------------------------------------------------------------
+// LOW review items L6, L8, L14 (tmp/of-review-phases-1-3.md)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+CounterAttackOpEvent OpEvent(int opId, int type, int target, int units = 0)
+{
+    CounterAttackOpEvent ev;
+    ev.opId = opId;
+    ev.type = type;
+    ev.target = target;
+    ev.units = units;
+    return ev;
+}
+} // namespace
+
+TEST_CASE("OccupierForces - L6: the ledger never drops a row with units outstanding", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetPool(1000);
+    const int pool0 = f.of.Pool();
+    const int town = f.registry.FindZoneIndex("Town");
+    int outstanding = 0;
+    // 40 operations, each settled with its truck (4 units) still driving home
+    for (int i = 1; i <= 40; i++)
+    {
+        REQUIRE(f.of.Spend(4, "op"));
+        REQUIRE(f.of.BookLeverOp(i, "Town", CAKRetake, FPTruck, 4));
+        f.of.NoteOpEvent(f.registry, OpEvent(i, CAOpSettled, town));
+        outstanding += 4;
+    }
+    CHECK(f.of.OpRows() == 40); // past MaxOpRows: nothing is settled, nothing goes
+    REQUIRE(f.of.FindOp(1) >= 0);
+    CHECK(f.of.Pool() + outstanding == pool0);
+    // the oldest truck comes home: its price back, and its settled row goes
+    f.of.NoteOpEvent(f.registry, OpEvent(1, CAOpHullRefund, town, 4));
+    outstanding -= 4;
+    CHECK(f.of.FindOp(1) < 0);
+    CHECK(f.of.OpRows() == 39);
+    CHECK(f.of.Pool() + outstanding == pool0);
+    // a live operation (not finished) is never dropped either
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(41, "Town", CAKRetake, FPTruck, 4));
+    outstanding += 4;
+    // past MaxOpRows * 4 rows the oldest finished row is settled to the pool
+    // first: the units are never lost
+    for (int i = 42; i <= 140; i++)
+    {
+        REQUIRE(f.of.Spend(4, "op"));
+        REQUIRE(f.of.BookLeverOp(i, "Town", CAKRetake, FPTruck, 4));
+        f.of.NoteOpEvent(f.registry, OpEvent(i, CAOpSettled, town));
+        outstanding += 4;
+    }
+    CHECK(f.of.OpRows() <= OccupierForces::MaxOpRows * 4);
+    CHECK(f.of.FindOp(41) >= 0);
+    int held = 0;
+    for (int r = 0; r < f.of.OpRows(); r++)
+    {
+        held += f.of.OpOutstanding(r);
+    }
+    CHECK(f.of.Pool() + held == pool0);
+}
+
+TEST_CASE("OccupierForces - L8: a phase-2 block with an empty distinct-town set is seeded from the owners",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-phase2.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    // the campaign: two towns taken while the block never filled the set
+    f.GiveToResistance("Town");
+    f.GiveToResistance("Other");
+    {
+        // a phase-2 block, written field by field: no TownsEver rows, no
+        // director, no "format"
+        ParamArchiveSave ar(WorldSerializeVersion);
+        bool active = true;
+        int pool = 10, poolStart = 24, posture = OFDormant;
+        REQUIRE(ar.Serialize("active", active, 1, false) == LSOK);
+        REQUIRE(ar.Serialize("pool", pool, 1, 0) == LSOK);
+        REQUIRE(ar.Serialize("poolStart", poolStart, 1, 0) == LSOK);
+        REQUIRE(ar.Serialize("posture", posture, 1, 0) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.Active());
+    CHECK(loaded.TownsEverCount() == 0);
+    CHECK(loaded.TownsEverPending());
+    CHECK(loaded.Posture() == OFDormant);
+    // the engine runs it on the second pass with the restored registry
+    loaded.SeedTownsEverOnLoad(f.registry);
+    CHECK_FALSE(loaded.TownsEverPending());
+    CHECK(loaded.TownsEverCount() == 2);
+    CHECK(loaded.TownEver("Town"));
+    CHECK(loaded.TownEver("Other"));
+    CHECK_FALSE(loaded.TownEver("Held")); // authored to the resistance: never taken (L12)
+    CHECK(loaded.Posture() == OFAwake);    // wakeTowns 2
+    // once per load
+    f.Z("Town").owner = RString("NEUTRAL");
+    loaded.SeedTownsEverOnLoad(f.registry);
+    CHECK(loaded.TownsEverCount() == 2);
+
+    // a current block (format SaveFormat) is never re-seeded, even empty
+    REQUIRE(f.of.Activate(f.registry));
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces current;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(current.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(current.Serialize(ar) == LSOK);
+    }
+    CHECK_FALSE(current.TownsEverPending());
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("OccupierForces - L14: a test lever's funded operation books a ledger row and balances 5.5",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    const int reserves = R + G;
+    int op = 0;
+    int losses = 0;
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), reserves, 0, op, P, R, G, f.of.RefillTotal(),
+                                                f.of.WavesTotal(), losses));
+    };
+    const int t0 = f.registry.FindZoneIndex("T0");
+    const float heat0 = f.Z("T0").heat;
+    // gmCounterAttackLaunchFunded's order: a column of truck (3 + 1) and an
+    // APC escort (8 + 2)
+    REQUIRE(f.of.Spend(14, "test lever"));
+    REQUIRE(f.of.BookLeverOp(900001, "T0", CAKRetake, FPTruck, 14));
+    op += 14;
+    check();
+    CHECK_FALSE(f.of.BookLeverOp(900001, "T0", CAKRetake, FPTruck, 4)); // one row per op id
+    CHECK_FALSE(f.of.BookLeverOp(900002, "T0", CAKRetake, FPTruck, 0)); // nothing spent, nothing booked
+    // repelled: a lever row drives no director action (no heat, no rest)
+    f.of.NoteOpEvent(f.registry, OpEvent(900001, CAOpRepelled, t0));
+    CHECK(f.Z("T0").heat == Approx(heat0));
+    CHECK(f.of.Cooldown("T0") == Approx(0.0f));
+    // the escort comes home, the truck is destroyed
+    f.of.NoteOpEvent(f.registry, OpEvent(900001, CAOpHullRefund, t0, 10));
+    op -= 10;
+    check();
+    f.of.NoteOpEvent(f.registry, OpEvent(900001, CAOpHullLost, t0, 4));
+    op -= 4;
+    losses += 4;
+    check();
+    CHECK(f.of.OpOutstanding(f.of.FindOp(900001)) == 0);
+    // a refused lever launch gives the row back
+    REQUIRE(f.of.Spend(4, "test lever"));
+    REQUIRE(f.of.BookLeverOp(900003, "T0", CAKRetake, FPTruck, 4));
+    f.of.CancelLeverOp(900003);
+    CHECK(f.of.FindOp(900003) < 0);
+    check();
 }

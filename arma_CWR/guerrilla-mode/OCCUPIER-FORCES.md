@@ -507,7 +507,10 @@ keep today's pacing, so existing templates and tests keep their outcomes.
 A body may enter a zone within `cacheRadius` + 50 m of the player only:
 - (i) as a live force that moved in; or
 - (ii) by `GarrisonCache` materialization when every body's spawn point
-  passes the gate's turn-proof tier.
+  passes the gate's turn-proof tier. The points are
+  `GarrisonCache::SpawnPoint` (hashed from the zone name and the body's
+  index), the same ones `SpawnGarrison` places the bodies on; the release
+  test checks them and the 3 x 3 grid of the placement square (L11).
 
 **Every other reserve write there is a PENDING deposit**
 (`GarrisonCache::Deposit(zone, n, origin)`):
@@ -519,6 +522,11 @@ A body may enter a zone within `cacheRadius` + 50 m of the player only:
   occupier-held, and is otherwise discarded, as such bodies are today;
 - it is saved on `ZoneSaveState`;
 - it is flushed before `StepRecover`.
+
+**Where the player stands.** A write outside the zone tick (a revert, a
+wave's allocation) takes the player from the last zone tick. Before the
+first tick since a load it asks the world for the player now, and with no
+player known the write is pending (`ZoneRegistry::AddReserveNow`, L10).
 
 **The writes it catches:** revert refills, returns to a base, revert surplus,
 and the wiped-garrison remainder, which no longer appears beside the player
@@ -661,7 +669,7 @@ erodes until the player or his fighters come back (section 19).
 | Re-sourced operation | the old base refunded up to its room, the surplus (or a lost base's share) to the pool; the new base debited |
 | Cancelled unborn operation | bodies to the current source up to its room, the rest to the pool; hull and escort prices refunded |
 | Abstract REINFORCE arrival | into the target up to its room (`garrisonMax` - live - reserve - pending; pending inside the deposit bubble); the remainder home through the room-capped return, surplus to the pool |
-| Live top-up squad adopted at its town | whole, with no room cap (open, section 17) |
+| Live top-up squad (REINFORCE or alarm answer) at its town | up to its room (`garrisonMax` - live - reserve - pending): the stored reserve, then the pending deposit, give way to it (to the pool); the surplus splits off and walks home as Leftover stragglers (removed unseen, home up to the room, the rest to the pool) |
 | Leftover stragglers (3.2) | home as bodies up to the room; a shortfall booked "left behind" |
 | Pending deposit, owner changed | key on: the pool (`GarrisonCache::SetPendingRefundHook`); key off: back to the origin up to its room, else discarded |
 | HQ_ASSAULT on `hqLost` | an abstract record's bodies to the pool; a live squad leaves unseen and comes home |
@@ -1180,7 +1188,8 @@ because `LaunchFrom` takes only towns:
   destination.
 - **End.** At arrival it searches the last-known positions. It ends when
   the zone is below RED and it found no contact. Survivors join the
-  garrison up to `garrisonMax`; the rest go to the pool.
+  garrison up to its room, as a live top-up does (5.5); the rest walk
+  home as stragglers.
 - **Limits.** One alarm answer at a time. THIN answers only with the
   cheapest package; SPENT does not answer.
 
@@ -1362,7 +1371,11 @@ He is beaten in either of two cases:
 - cooldowns;
 - the sightings (zone, count, positions, stamp);
 - `lost` diagnostics;
-- RED payments, the op ledger and `legacySave`.
+- RED payments, the op ledger and `legacySave`. A test lever's funded
+  operation (`gmCounterAttackLaunchFunded`) books a `lever` row: it settles
+  refunds and losses and drives no director action (L14). A row leaves the
+  ledger only when it is finished with nothing outstanding; past four times
+  `MaxOpRows` the oldest finished row is settled to the pool first (L6).
 
 **Elsewhere:**
 - On `ZoneSaveState`: pending deposits, `occCapture`, `standing` (-1 =
@@ -1385,7 +1398,10 @@ He is beaten in either of two cases:
 **Old saves (D20).**
 - The pool derives from config scaled by the current C.
 - Crossed thresholds are marked fired.
-- `_townsEver` is seeded from the towns held.
+- `_townsEver` is seeded from the towns held. So is a block saved before
+  format 6 that loaded the set empty (phase 2 never filled it), on the
+  second load pass with the restored zone owners; invariant W is
+  re-stepped (L8).
 - The sightings start empty.
 - **Tokens start at 0** (not full), so a migrated save does not launch two
   operations within a minute of loading.
@@ -1641,16 +1657,6 @@ Every owner question is answered (D1-D24). Open implementation items, as of
 - **K and the settlement probe** (5.1). The engine counts every
   administered non-exempt CITY; whether the probe returns or is dropped
   from this doc is decided in a later phase.
-- **The live adoption cap.** A LIVE REINFORCE squad reaching its town is
-  adopted whole, with no room cap (5.5); so is a live alarm answer joining
-  its garrison (8.2, a phase 6 accepted deviation).
-- **LOW review items** (`tmp/of-review-phases-1-3.md`): L6 (`PruneOps` can
-  lose refunds past 32 rows), L8 (phase-2 saves wake with an empty
-  `_townsEver`), L10 (`RevertTown` before the first tick after a load),
-  L11 (the S5 release grid samples 9 points of a random placement square),
-  L13 (routing traps: `ArriveLive` with the source inside the bound, a
-  return-to-road livelock, a home hull driving into a lost base), L14 (test
-  levers spend with no ledger row), L15 (bisect).
 - **The air re-plan's price bypasses the director's ledger** (3.1 step 6):
   the airframe is spent through `OccupierForces::Spend` and refunded or
   lost straight to the pool (`airReplanned`), not through the director's
@@ -1662,6 +1668,19 @@ Every owner question is answered (D1-D24). Open implementation items, as of
 - **The HQ-respawn issue** (separate, D13).
 - **Player messaging** for the director, waves, strikes and the HQ (D12:
   INFO lines and gm* commands only for now).
+
+Closed after `08c6ae2`: the live adoption cap (5.5, 8.2: a live top-up
+or alarm answer joins up to the room, the surplus walks home); the LOW
+review items L6, L8, L10, L11 (3.3, 11), L13 (a live force whose road ahead
+passes the player stays live instead of returning to abstract travel and
+being re-born behind him; a hull driving home to a base the resistance took
+turns for the nearest occupier base on its landmass, else stops and waits
+to leave unseen), L14 (lever ledger rows; NaN `gmForcesTune` /
+`gmForcesForce` values take the low bound) and L15 (section 18). Declined:
+L13's `ArriveLive` trap (it needs a source base within 251 m of its
+target; the give-up path then cancels unseen and the holding path waits
+at the edge by design), and L14's `gmForcesTune "enabled"` not surviving a
+load (a test lever; the key is the mission config).
 
 Closed since `c5cfa44`: the Southeast Compound gate stall (the Compound is
 an island: an air-only source, resolved by the landmass rule, 3.1);
@@ -1688,6 +1707,7 @@ now wait for the dead too, `BodiesUnseen`, `bcca80e`); the default flip
 | 2026-10-14 (orchestrator, phase 6) | **Aircraft "unseen" in 3D.** For removal, an aircraft is unseen out of the view cone, terrain-masked at altitude, or beyond the perception band in 3D even inside the cone; `departTimeout` (900 s) stays as the backstop (3.2). The air spike's verdict is GO (`AIR-SPIKE.md`). |
 | 2026-10-14 (reconciliation) | The code wins: 3.1 (immediate re-source, the road-route join, the wait, the edge hold, legacy records on the chain), 3.2 (air recipe, columns, the dismount), 5.1 (K without the probe), 5.5 (routing rows), 6.1 (informant tips), 6.3 (final push, wave HQ candidate, born cap), 6.5 (M1, the base minimum cap), 6.6 (instruments), 7.1 (allocation order, tokens, no hub), 7.2 (`occCapture` rates, every holding force, `RevertBase`), 9.1 (the HQ meter and default HQ), 9.2 (had something to lose, the lose test), 11, 12, 16 and 17 brought to the committed code. |
 | 2026-10-14 (phase 6, `bcca80e`: the landmass finding) | **Malden's Southeast Compound is an island.** About 800 m of deep sea part it from Le Port; the road-route join's cross-country leg from it crossed the sea, and its W and S gates are closed wire gates; the squad stall inside its west gate (open since phase 3) is resolved with it. The rule: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass (`RoadRoute::Landmass`, 50 m geography cells joined over land, a road over water a bridge); the join lands only on the source's landmass; such a base is an AIR-ONLY source (`PackageSource::airOnly`), and the birth chain re-plans as an insertion at once when no other base shares the target's landmass. This replaces the phase 4 deviation's "the straight cross-country line counts as reaching the target" for bases off the target's landmass. The offscreen fixture's SEBase moved to the Le Port quay (3.1). |
+| 2026-10-14 (LOW review fixes after `08c6ae2`) | **Known bisect gap (L15):** `8f9482a` does not build on its own (it includes `CounterAttackOrders.hpp` and calls `LaunchFunded`, which arrive in `7a143ec`); history is not rewritten, so a bisect skips `8f9482a` (`git bisect skip`). The live top-up cap supersedes the phase 6 deviation "a live alarm answer adopts its whole squad". |
 | 2026-10-14 (phase 6 accepted deviations, `bcca80e`) | No attack-helicopter escort for an insertion (one airframe per insertion); a live alarm answer adopts its whole squad (no `garrisonMax` cap on the live path); strikes are live only in the bubble, abstract elsewhere; wave strikes buy no air opener; an HQ strike with no report aims at `HqPos`; a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter price bypasses the director ledger; alarm answers take no token and run while DORMANT (otherwise a key-on campaign has no answer before the second town). Open with them: the descriptor lint does not check the `forces*` keys; a slow native answer could contest a later Showcase capture chapter (17). |
 
 ## 19. Residual risks the owner accepts

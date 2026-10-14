@@ -521,6 +521,51 @@ float CounterAttack::RouteFractionNear(const AutoArray<Vector3>& route, Vector3P
     return Clamp01(bestArc / len);
 }
 
+bool CounterAttack::RouteAheadWithin(const AutoArray<Vector3>& route, float fraction, float px, float pz,
+                                     float radius)
+{
+    const int n = route.Size();
+    if (n == 0)
+    {
+        return false;
+    }
+    const Vector3 p(px, 0, pz);
+    if (n == 1)
+    {
+        return Dist2D(route[0], p) <= radius;
+    }
+    const float from = Clamp01(fraction) * RouteLength(route);
+    float arc = 0;
+    for (int i = 1; i < n; i++)
+    {
+        const Vector3 a = route[i - 1];
+        const Vector3 b = route[i];
+        const float seg = Dist2D(a, b);
+        if (arc + seg < from)
+        {
+            arc += seg;
+            continue;
+        }
+        // the part of this segment at or beyond the fraction
+        const float k0 = seg > 0 && from > arc ? (from - arc) / seg : 0.0f;
+        const Vector3 s0 = a + (b - a) * k0;
+        const float len = Dist2D(s0, b);
+        float k = 0;
+        if (len > 0)
+        {
+            k = ((px - s0.X()) * (b.X() - s0.X()) + (pz - s0.Z()) * (b.Z() - s0.Z())) / (len * len);
+            k = Clamp01(k);
+        }
+        const Vector3 q = s0 + (b - s0) * k;
+        if (Dist2D(q, p) <= radius)
+        {
+            return true;
+        }
+        arc += seg;
+    }
+    return false;
+}
+
 void CounterAttack::ReturnToRoad(Record& r, float fraction, int alive, float wholeTravel)
 {
     if (r.travel <= 0)
@@ -2554,9 +2599,10 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     ops->Dismount(r.group, r.hull);
                     r.dismounted = true;
                 }
-                ops->Adopt(target, r.group);
-                LOG_INFO(Core, "CounterAttack: {} soldier(s) join the {} garrison", alive, (const char*)r.target);
-                Emit(registry, r, CAOpSettled, alive, 0, "topped up");
+                // up to the town's room; the rest walks home (5.5)
+                const int joined = AdoptTopUp(registry, view, target, r, ops, alive);
+                LOG_INFO(Core, "CounterAttack: {} soldier(s) join the {} garrison", joined, (const char*)r.target);
+                Emit(registry, r, CAOpSettled, joined, 0, "topped up");
                 return true;
             }
             if (r.leg == LegRoad && !r.arrivalLive)
@@ -2573,7 +2619,18 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 const bool hullUnseen = (LiveHullOf(r) == 0 || ops->HullUnseen(r.hull, r.crewGroup)) &&
                                         (LiveEscortOf(r) == 0 || ops->HullUnseen(r.escort, r.escortCrewGroup));
                 // every member, the dead included: a corpse in view never vanishes (reader defect 3)
-                r.unseenFor = away && ops->BodiesUnseen(r.group) && hullUnseen ? r.unseenFor + elapsed : 0.0f;
+                bool vanish = away && ops->BodiesUnseen(r.group) && hullUnseen;
+                if (vanish && view.playerValid)
+                {
+                    // L13: never while the road still ahead passes the
+                    // player's bubble: abstract again, it would be re-born
+                    // behind him as soon as it got there (a return-to-road
+                    // livelock that re-created its hull each round)
+                    const AutoArray<Vector3>& ahead = RouteOf(registry, r, ops);
+                    vanish = !RouteAheadWithin(ahead, RouteFractionNear(ahead, leader), view.playerX, view.playerZ,
+                                               edge);
+                }
+                r.unseenFor = vanish ? r.unseenFor + elapsed : 0.0f;
                 if (r.unseenFor >= VanishHold)
                 {
                     const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
@@ -3190,6 +3247,28 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
     Emit(registry, r, CAOpHullRefund, r.crew, r.HullPrice(), "abstract: home");
 }
 
+int CounterAttack::NearestOccupierBase(const ZoneRegistry& registry, Vector3Par at)
+{
+    int best = -1;
+    float bestDist = 0;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || !CampaignEnd::IsMilitaryType(z->type) || stricmp(z->owner, registry.OccupierSide()) != 0 ||
+            !RoadRoute::SameLandmass(z->pos, at))
+        {
+            continue;
+        }
+        const float d = Dist2D(z->pos.X(), z->pos.Z(), at.X(), at.Z());
+        if (best < 0 || d < bestDist)
+        {
+            best = i;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
 void CounterAttack::SendHullHome(const Record& r, Entity* hull, AIGroup* crewGroup, int crewAlive,
                                  CounterAttackOps* ops, const ZoneRegistry& registry, int units, const char* hullClass)
 {
@@ -3269,6 +3348,32 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             continue;
         }
         const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(h.source));
+        if (src && stricmp(src->owner, registry.OccupierSide()) != 0)
+        {
+            // L13: its base fell behind it.  It never drives into the
+            // resistance's base: the nearest occupier base on its landmass
+            // instead, else it stops where it is and waits to leave unseen
+            // (its crew then go to the pool, CrewHome's "no base")
+            Vector3 at = src->pos;
+            ops->Alive(h.crewGroup, at);
+            const int alt = NearestOccupierBase(registry, at);
+            const RString lost = h.source;
+            if (alt >= 0)
+            {
+                src = registry.GetZone(alt);
+                h.source = src->name;
+                LOG_INFO(Core, "CounterAttack: [op {}] {} fell; the hull drives home to {} instead", h.opId,
+                         (const char*)lost, (const char*)h.source);
+            }
+            else
+            {
+                src = nullptr;
+                h.source = RString();
+                ops->DriveOn(h.crewGroup, at);
+                LOG_INFO(Core, "CounterAttack: [op {}] {} fell and no base is left; the hull stops and waits", h.opId,
+                         (const char*)lost);
+            }
+        }
         if (src)
         {
             ops->DriveOn(h.crewGroup, src->pos);
@@ -3304,6 +3409,82 @@ void CounterAttack::AdoptLive(ZoneRegistry& registry, int target, Record& r, Cou
              "pending {})",
              alive, (const char*)r.target, cut, town->garrison, town->pending);
     Emit(registry, r, CAOpSettled, alive, cut, "adopted");
+}
+
+int CounterAttack::AdoptTopUp(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                              CounterAttackOps* ops, int alive)
+{
+    ZoneRecord* town = registry.GetZoneMutable(target);
+    if (!town || !r.group || alive <= 0)
+    {
+        return 0;
+    }
+    const int live = target < view.garrisonLive.Size() ? view.garrisonLive[target] : 0;
+    const int reserve = (int)floorf(town->garrison > 0 ? town->garrison : 0);
+    const float room = floorf(town->garrisonMax) - (float)live - (float)reserve - (float)town->pending;
+    int surplus = alive - (room > 0 ? (int)room : 0);
+    int traded = 0;
+    if (surplus > 0)
+    {
+        // the stored reserve gives way first, then the pending deposit:
+        // abstract bodies, nobody sees them go; back to the pool (5.5)
+        const int fromReserve = MinInt(surplus, reserve);
+        town->garrison = (float)(reserve - fromReserve);
+        surplus -= fromReserve;
+        const int fromPending = MinInt(surplus, town->pending);
+        town->pending -= fromPending;
+        if (town->pending <= 0)
+        {
+            town->pending = 0;
+            town->pendingOrigin = -1;
+        }
+        surplus -= fromPending;
+        traded = fromReserve + fromPending;
+        OccupierForces::Instance().Refund(traded, "top-up over the room: stored bodies give way");
+    }
+    int joined = alive;
+    if (surplus > 0)
+    {
+        const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+        const Vector3 homePos = home ? home->pos : town->pos;
+        if (surplus >= alive)
+        {
+            // nothing fits: the whole squad walks home
+            ops->MoveOn(r.group, homePos);
+            AddLeftover(r.source, nullptr, r.group, alive);
+            r.group = nullptr;
+            joined = 0;
+        }
+        else
+        {
+            int taken = 0;
+            AIGroup* rest = ops->SplitOff(r.group, surplus, homePos, taken);
+            if (rest && taken > 0)
+            {
+                AddLeftover(r.source, nullptr, rest, taken);
+                joined = alive - taken;
+            }
+            if (taken < surplus)
+            {
+                LOG_WARN(Core,
+                         "CounterAttack: [op {}] {} of {} surplus soldier(s) could not split off at {}; they join "
+                         "over its garrisonMax",
+                         r.opId, surplus - taken, surplus, (const char*)r.target);
+            }
+        }
+        LOG_INFO(Core, "CounterAttack: [op {}] {} is full: {} soldier(s) walk home to {}", r.opId,
+                 (const char*)r.target, alive - joined, (const char*)r.source);
+    }
+    if (joined > 0)
+    {
+        ops->Adopt(target, r.group);
+    }
+    if (traded > 0)
+    {
+        LOG_INFO(Core, "CounterAttack: [op {}] {} stored body(ies) of {} give way to the live top-up (pool)", r.opId,
+                 traded, (const char*)r.target);
+    }
+    return joined;
 }
 
 int CounterAttack::SubtractAdopted(ZoneRecord& town, int alive)
@@ -3795,6 +3976,49 @@ class EngineOps final : public CounterAttackOps
     }
 
     void Adopt(int townZone, AIGroup* grp) override { GarrisonCache::Instance().AdoptGroup(townZone, grp); }
+
+    AIGroup* SplitOff(AIGroup* grp, int n, Vector3Par firstLeg, int& taken) override
+    {
+        taken = 0;
+        if (!grp || n <= 0)
+        {
+            return nullptr;
+        }
+        // living non-leaders, last first, on foot only (a seated man stays
+        // with the group that brought him)
+        OLinkArray<AIUnit> units;
+        for (int u = MAX_UNITS_PER_GROUP - 1; u >= 0 && units.Size() < n; u--)
+        {
+            AIUnit* unit = grp->UnitWithID(u + 1);
+            if (!unit || unit->GetLifeState() != AIUnit::LSAlive || unit == grp->Leader() || unit->GetVehicleIn())
+            {
+                continue;
+            }
+            units.Add(unit);
+        }
+        if (units.Size() == 0)
+        {
+            return nullptr;
+        }
+        AICenter* center = EnsureSideCenter(ZoneRegistry::Instance().OccupierSide());
+        AIGroup* rest = center ? CreateSideGroup(center) : nullptr;
+        if (!rest)
+        {
+            return nullptr;
+        }
+        ::ProcessJoinGroups(units, rest);
+        taken = rest->NUnits();
+        if (taken == 0)
+        {
+            rest->RemoveFromCenter();
+            return nullptr;
+        }
+        MarchPosture(rest);
+        MoveOn(rest, firstLeg);
+        GetNetworkManager().UpdateObject(rest);
+        GetNetworkManager().UpdateObject(grp);
+        return rest;
+    }
 
     // Traffic's despawn rule for every living body: outside the view cone
     // and (past the draw distance or terrain-hidden), never inside the

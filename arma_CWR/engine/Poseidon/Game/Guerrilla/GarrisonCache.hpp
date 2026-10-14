@@ -186,11 +186,19 @@ class GarrisonCache : public SerializeClass
     // Returns true when they went to the pending deposit.
     static bool AddReserve(ZoneRegistry& registry, int zone, int bodies, int originZone, bool playerValid, float px,
                            float pz);
-    // the turn-proof test for a release: every sample of the +-spread
-    // placement square SpawnGarrison draws from (a 3 x 3 grid: the centre,
-    // the four edge midpoints and the four corners) rates CAExposeHidden.
-    // A single cone-only or seen sample keeps the deposit pending.
-    static bool PendingSpawnHidden(Vector3Par centre, float spread, const CounterAttackGate& gate);
+    // the k-th body's spawn point in a zone's +-spread placement square:
+    // hashed from the zone name and k (no engine RNG), so SpawnGarrison
+    // places the body exactly where the release test looked (L11).  XZ only;
+    // Y is the centre's (SpawnGarrison puts it on the surface).
+    static Vector3 SpawnPoint(const char* zoneName, Vector3Par centre, float spread, int k);
+    // the turn-proof test for a release: the 3 x 3 grid of the placement
+    // square (the centre, the four edge midpoints and the four corners) AND
+    // the spawn points of the first `bodies` bodies (SpawnPoint 0 ..
+    // bodies - 1, the ones the next SpawnGarrison uses) all rate
+    // CAExposeHidden.  A single cone-only or seen sample keeps the deposit
+    // pending.
+    static bool PendingSpawnHidden(const char* zoneName, Vector3Par centre, float spread, int bodies,
+                                   const CounterAttackGate& gate);
     // one zone's pending check (run every cache pass before Decide and before
     // StepRecover): refund when the occupier no longer holds the zone, else
     // release into the reserve when the zone is out of the deposit bubble,

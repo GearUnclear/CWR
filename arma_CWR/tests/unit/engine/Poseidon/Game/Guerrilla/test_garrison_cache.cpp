@@ -211,7 +211,7 @@ TEST_CASE("GarrisonCache - S5: release on leaving the bubble or when every spawn
     {
         FakeGate hidden([](Vector3Par) { return (int)CAExposeHidden; });
         CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, &hidden) == PFReleasedHidden);
-        CHECK(hidden.calls == 9);
+        CHECK(hidden.calls == 9 + 9); // the grid, then the 6 + 3 bodies' own points (L11)
         CHECK(f.Z(f.post).garrison == Approx(9.0f));
         CHECK(f.Z(f.post).pending == 0);
     }
@@ -224,7 +224,7 @@ TEST_CASE("GarrisonCache - S5: release on leaving the bubble or when every spawn
                 const bool atCorner = fabsf(p.X() - corner.X()) < 0.5f && fabsf(p.Z() - corner.Z()) < 0.5f;
                 return atCorner ? (int)CAExposeConeOnly : (int)CAExposeHidden;
             });
-        CHECK_FALSE(GarrisonCache::PendingSpawnHidden(post, spread, oneCone));
+        CHECK_FALSE(GarrisonCache::PendingSpawnHidden(f.Z(f.post).name, post, spread, 9, oneCone));
         CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, &oneCone) == PFNone);
         CHECK(f.Z(f.post).pending == 3);
         CHECK(f.Z(f.post).garrison == Approx(6.0f));
@@ -241,8 +241,38 @@ TEST_CASE("GarrisonCache - S5: release on leaving the bubble or when every spawn
                 }
                 return (int)CAExposeHidden;
             });
-        CHECK(GarrisonCache::PendingSpawnHidden(post, spread, probe));
+        CHECK(GarrisonCache::PendingSpawnHidden(f.Z(f.post).name, post, spread, 0, probe));
         CHECK(inside == 9);
+    }
+    SECTION("L11: a body's own spawn point between the grid samples keeps it pending")
+    {
+        // the spawn points are hashed from the zone name and k: stable, and
+        // inside the placement square
+        const RString name = f.Z(f.post).name;
+        for (int k = 0; k < 9; k++)
+        {
+            const Vector3 a = GarrisonCache::SpawnPoint(name, post, spread, k);
+            const Vector3 b = GarrisonCache::SpawnPoint(name, post, spread, k);
+            CHECK(a.X() == b.X());
+            CHECK(a.Z() == b.Z());
+            CHECK(fabsf(a.X() - post.X()) <= spread);
+            CHECK(fabsf(a.Z() - post.Z()) <= spread);
+        }
+        // the 9th body's point (k = 8) is watched, every grid sample hidden:
+        // the old 3 x 3 test released it; now it waits
+        const Vector3 watched = GarrisonCache::SpawnPoint(name, post, spread, 8);
+        FakeGate gap(
+            [watched](Vector3Par p)
+            {
+                const bool at = fabsf(p.X() - watched.X()) < 0.01f && fabsf(p.Z() - watched.Z()) < 0.01f;
+                return at ? (int)CAExposeConeOnly : (int)CAExposeHidden;
+            });
+        CHECK(GarrisonCache::PendingSpawnHidden(name, post, spread, 8, gap)); // 8 bodies never use k = 8
+        CHECK_FALSE(GarrisonCache::PendingSpawnHidden(name, post, spread, 9, gap));
+        // reserve 6 + pending 3: the release checks k = 0..8
+        CHECK(GarrisonCache::FlushPending(f.registry, f.post, true, 1000.0f, 1000.0f, &gap) == PFNone);
+        CHECK(f.Z(f.post).pending == 3);
+        CHECK(f.Z(f.post).garrison == Approx(6.0f));
     }
     SECTION("a dead player freezes it")
     {

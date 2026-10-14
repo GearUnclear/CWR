@@ -578,6 +578,14 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int ExcludedCount() const { return _excluded.Size(); }
     RString ExcludedName(int i) const { return i >= 0 && i < _excluded.Size() ? _excluded[i].name : RString(); }
     int TownsEverCount() const { return _townsEver.Size(); }
+    // L8: a block saved before the native alarm answers (format below
+    // SaveFormat) that loaded an empty distinct-town set came from a
+    // version that never filled it (phase 2): the set is seeded from the
+    // towns the resistance holds now (less the authored ones, as the D20
+    // derivation does) and invariant W re-stepped.  The engine runs it on
+    // the second load pass with the restored registry; once per load.
+    bool TownsEverPending() const { return _townsEverPending; }
+    void SeedTownsEverOnLoad(const ZoneRegistry& registry);
     bool TownEver(const char* name) const;
     // the occupier-side war level (live: ReadWarLevel + landed waves)
     float OccupierWarLevel() const;
@@ -736,6 +744,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int OpPackage(int row) const { return row >= 0 && row < _ops.Size() ? _ops[row].package : FPFoot; }
 
     // test levers (gmForcesForce / gmForcesTune) --------------------------------
+    // L14: a test lever's funded operation (gmCounterAttackLaunchFunded)
+    // books a ledger row for the units it spent, so its hull and crew come
+    // back (or are booked lost) through the 5.5 rows like a director
+    // operation's.  A lever row carries the ledger only: no cooldown, heat
+    // or director action follows its events.  False (nothing booked) when
+    // inert, units <= 0 or opId already has a row.
+    bool BookLeverOp(int opId, const char* target, int kind, int package, int units);
+    // the lever's launch was refused: what the row still holds goes back to
+    // the pool and the row goes
+    void CancelLeverOp(int opId);
     void SetPool(int units);
     void SetMeanStanding(float standing);
     // gmForcesForce ["wave", n]: wave n fires now (n beyond the thresholds:
@@ -790,6 +808,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         int outstanding = 0;
         bool born = false;
         bool finished = false;
+        // a test lever's row (BookLeverOp): the ledger only
+        bool lever = false;
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -822,6 +842,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // a fresh flip or a lost town: its urgency latch, cooldown and RED payment go
     void ForgetZone(const char* zone);
     void PruneOps();
+    // a lever row's event (BookLeverOp): refunds, losses and the finish only
+    void NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev);
     // engine path: the catalogue, the view, the scan
     void BuildEngineCatalogue(const ZoneRegistry& registry);
     void FillEngineView(const ZoneRegistry& registry, DirectorView& view) const;
@@ -903,6 +925,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // transient: the block format loaded (0: none or older than phase 6),
     // mission time, the alarm zones whose starvation was logged
     int _loadedFormat = 0;
+    // L8: the loaded block's distinct-town set needs seeding (SeedTownsEverOnLoad)
+    bool _townsEverPending = false;
+    void FillTownsEverFromOwners(const ZoneRegistry& registry);
     float _missionNow = 0;
     AutoArray<NameRow> _alarmStarved;
 };

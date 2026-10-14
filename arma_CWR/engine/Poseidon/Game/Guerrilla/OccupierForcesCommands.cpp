@@ -164,6 +164,11 @@ void EnsureOccupierForcesCommandsLinked() {}
 
 static float ClampF(float v, float lo, float hi)
 {
+    // L14: NaN fails every compare; it takes the low end, never the knob
+    if (!(v == v))
+    {
+        return lo;
+    }
     return v < lo ? lo : (v > hi ? hi : v);
 }
 

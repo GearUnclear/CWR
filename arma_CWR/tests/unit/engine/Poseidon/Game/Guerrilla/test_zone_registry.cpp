@@ -1450,6 +1450,7 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(room >= 2);
         t.Z(t.held).garrison = 0;
         t.Z(t.held).pending = 0;
+        t.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f); // a zone tick saw the player far away
         // more settled bodies than room: the town is full, nothing is refilled
         REQUIRE(t.f.registry.RevertTown(t.held, fired, room + 2));
         CHECK(t.Z(t.held).garrison == Approx((float)room));
@@ -3439,6 +3440,36 @@ TEST_CASE("ZoneRegistry - base recapture: an abstract force ticks it off-screen;
     CHECK(z.income == Approx(25.0f)); // the defensive income < 1 rule reopens the tap
 }
 
+TEST_CASE("ZoneRegistry - L10: a revert before the first zone tick since a load goes pending", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    AutoArray<ZoneEventRecord> fired;
+    // no tick yet (a load clears the tick's player): nobody knows where the
+    // player stands, so the refill never lands as reserve beside him
+    REQUIRE_FALSE(b.f.registry.TickSeen());
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(0.0f));
+    CHECK(b.Z(b.rebel).pending == 6);
+    // after a tick that saw him far away the same write is reserve
+    b.Z(b.rebel).owner = "GUER";
+    b.Z(b.rebel).pending = 0;
+    b.Z(b.rebel).pendingOrigin = -1;
+    b.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f);
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(6.0f));
+    CHECK(b.Z(b.rebel).pending == 0);
+    // and beside him it is pending again
+    b.Z(b.rebel).owner = "GUER";
+    b.Z(b.rebel).garrison = 0;
+    b.f.registry.NoteTickPlayer(true, b.Z(b.rebel).pos.X(), b.Z(b.rebel).pos.Z());
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).pending == 6);
+    // a Clear (as at a load) forgets the tick
+    b.f.registry.Clear();
+    CHECK_FALSE(b.f.registry.TickSeen());
+}
+
 TEST_CASE("ZoneRegistry - RevertBase refuses towns, occupier posts and the camp; settled surplus", "[game][guerrilla]")
 {
     BaseFixture b;
@@ -3452,6 +3483,7 @@ TEST_CASE("ZoneRegistry - RevertBase refuses towns, occupier posts and the camp;
     CHECK(b.f.registry.IsHeldBase(b.Z(b.rebel)));
     CHECK_FALSE(b.f.registry.IsHeldBase(b.Z(b.camp)));
     // 9 settled bodies into a room of 6: 6 stay (the surplus goes to the pool)
+    b.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f); // a zone tick saw the player far away
     REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
     CHECK(b.Z(b.rebel).garrison == Approx(6.0f));
     CHECK(b.Z(b.rebel).revertRefill == 0);

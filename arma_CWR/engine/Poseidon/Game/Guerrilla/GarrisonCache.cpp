@@ -450,7 +450,16 @@ bool GarrisonCache::AddReserve(ZoneRegistry& registry, int zone, int bodies, int
     return false;
 }
 
-bool GarrisonCache::PendingSpawnHidden(Vector3Par centre, float spread, const CounterAttackGate& gate)
+Vector3 GarrisonCache::SpawnPoint(const char* zoneName, Vector3Par centre, float spread, int k)
+{
+    const unsigned int seed = CounterAttack::MakeSeed(zoneName, 0, 0, k);
+    const float x = centre.X() + (CounterAttack::Roll01(seed, 0x51A7) * 2.0f - 1.0f) * spread;
+    const float z = centre.Z() + (CounterAttack::Roll01(seed, 0x7E3D) * 2.0f - 1.0f) * spread;
+    return Vector3(x, centre.Y(), z);
+}
+
+bool GarrisonCache::PendingSpawnHidden(const char* zoneName, Vector3Par centre, float spread, int bodies,
+                                       const CounterAttackGate& gate)
 {
     for (int dz = -1; dz <= 1; dz++)
     {
@@ -461,6 +470,14 @@ bool GarrisonCache::PendingSpawnHidden(Vector3Par centre, float spread, const Co
             {
                 return false;
             }
+        }
+    }
+    // L11: the points the bodies will actually stand on
+    for (int k = 0; k < bodies; k++)
+    {
+        if (gate.Exposure(SpawnPoint(zoneName, centre, spread, k)) != CAExposeHidden)
+        {
+            return false;
         }
     }
     return true;
@@ -488,7 +505,8 @@ int GarrisonCache::FlushPending(ZoneRegistry& registry, int zone, bool playerVal
     {
         result = PFReleasedBubble;
     }
-    else if (gate && PendingSpawnHidden(z->pos, registry.Tuning().zoneArea / 3.0f, *gate))
+    else if (gate && PendingSpawnHidden(z->name, z->pos, registry.Tuning().zoneArea / 3.0f,
+                                        (int)floorf(z->garrison > 0 ? z->garrison : 0) + z->pending, *gate))
     {
         result = PFReleasedHidden;
     }
@@ -560,17 +578,17 @@ int GarrisonCache::PlanGroups(int reserve, int groupSize, AutoArray<int>& takes)
 // world-touching internals (engine path only)
 // ---------------------------------------------------------------------------
 
-static Vector3 RandomNear(Vector3Par center, float radius)
+// the k-th garrison body's point (SpawnPoint, L11) on the surface
+static Vector3 GarrisonPointOnSurface(const char* zoneName, Vector3Par center, float radius, int k)
 {
-    float x = center.X() + (GRandGen.RandomValue() * 2.0f - 1.0f) * radius;
-    float z = center.Z() + (GRandGen.RandomValue() * 2.0f - 1.0f) * radius;
+    const Vector3 at = GarrisonCache::SpawnPoint(zoneName, center, radius, k);
     float y = center.Y();
     if (GLandscape)
     {
         float dx, dz;
-        y = GLOB_LAND->SurfaceYAboveWater(x, z, &dx, &dz);
+        y = GLOB_LAND->SurfaceYAboveWater(at.X(), at.Z(), &dx, &dz);
     }
-    return Vector3(x, y, z);
+    return Vector3(at.X(), y, at.Z());
 }
 
 namespace
@@ -690,6 +708,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
     int spawned = 0;
     int remaining = reserve;
     bool firstGroup = true;
+    int point = 0; // the k of SpawnPoint (L11): what the release test checked
     for (int g = 0; g < takes.Size(); g++)
     {
         AIGroup* grp = CreateSideGroup(center);
@@ -709,7 +728,7 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
         {
             bool officer = firstGroup && u == 0;
             RString unitClass = u < classes.Size() ? classes[u] : tierClass;
-            Vector3 pos = RandomNear(z->pos, spread);
+            Vector3 pos = GarrisonPointOnSurface(z->name, z->pos, spread, point++);
             int before = grp->NUnits();
             ::CreateUnit(grp, officer ? officerClass : unitClass, pos, RString(), (officer ? 0.6f : 0.5f) * morale,
                          officer ? RankSergeant : RankPrivate);
