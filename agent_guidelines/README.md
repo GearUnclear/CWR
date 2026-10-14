@@ -14,3 +14,4 @@ main guide.
 When you add a file: one finding per file, the date it was verified, code cited
 as `path:line`, and a clear line between what was observed and what was
 inferred. No em dashes.
+- [tri splits a test line on every top-level semicolon](tri-splits-lines-on-semicolons.md): one-line set/measure/clear sequences are several harness commands; wrap them in a block.
