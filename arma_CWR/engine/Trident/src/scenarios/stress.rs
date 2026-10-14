@@ -214,6 +214,7 @@ pub async fn run_stress_scenario(
         .with_context(|| format!("failed to parse {}", stress_toml.display()))?;
 
     validate_config(&config)?;
+    let global_slots = u32::try_from(config.instances.len()).unwrap_or(u32::MAX);
 
     let scenario_name = stress_name(
         scenario_dir
@@ -221,6 +222,7 @@ pub async fn run_stress_scenario(
             .unwrap_or(scenario_dir),
     );
     let scenario_output = output_dir.join(scenario_name.replace('/', "_"));
+    let _global = crate::slots::acquire(global_slots, &scenario_name, data_dir).await?;
     std::fs::create_dir_all(&scenario_output)
         .with_context(|| format!("failed to create {}", scenario_output.display()))?;
 

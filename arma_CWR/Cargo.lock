@@ -2960,6 +2960,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "dotenvy",
+ "fd-lock",
  "glob",
  "indicatif",
  "papa-bear-archive",

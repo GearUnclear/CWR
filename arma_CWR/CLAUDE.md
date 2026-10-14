@@ -163,11 +163,27 @@ plus `ShouldWriteAutoLog`).
 **Always close what you open.** No human is at the keyboard to close game windows, and a
 lingering instance poisons the next Trident connection ("connection error: eval failed").
 Every automated command that spawns game instances (run-game.ps1, `tri test`) must
-guarantee cleanup in the same command, e.g. append:
-`powershell -NoProfile -Command "Get-Process PoseidonGame -ErrorAction SilentlyContinue | Stop-Process -Force"`
-— and for run-game.ps1 launches, stop the specific PID once done reading logs. Run `tri`
-with `--retries` (guerrilla_native_spawn's doMove assert is known-flaky) and check for
-stray `PoseidonGame` processes before diagnosing connection failures.
+guarantee cleanup of **its own** instances in the same command. **Never kill
+`PoseidonGame` globally** (`Get-Process PoseidonGame | Stop-Process` and the like are
+forbidden): other sessions run Trident tests on this machine at the same time, and a
+global kill ends their runs with exit -1 and an empty stderr. Use the scoped
+`tools/stop-owned-games.ps1` instead:
+- `tri test` games normally need nothing: Trident kills its own child (`kill_on_drop`,
+  `engine/Trident/src/client/instance.rs`). After a crashed tri run, stop that run's
+  games by data dir: `powershell -NoProfile -File tools/stop-owned-games.ps1 -DataDir <your shadow>`
+  (matches the `-C <dir>` tri puts on the game's command line).
+- run-game.ps1 prints the PID; stop it with `... stop-owned-games.ps1 -Pid <pid>` once done
+  reading logs.
+- By process tree: `-OwnerPid <pid>` (from Git Bash: `-OwnerPid $(cat /proc/$$/winpid)`).
+  `-Orphans` selects games whose parent has exited; another session's run-game launch
+  also counts, so prefer `-Pid`/`-DataDir`.
+
+Give each agent its own shadow data dir under `D:\Arma_CWA\tmp\` and its own build dir
+so `-DataDir` selection stays unambiguous (see `agent_guidelines/scoped-game-cleanup.md`).
+Run `tri` with `--retries` (guerrilla_native_spawn's doMove assert is known-flaky) and,
+before diagnosing connection failures, check for stray games with
+`powershell -NoProfile -File tools/stop-owned-games.ps1 -DryRun` (lists every
+`PoseidonGame` with PID, parent, age and data dir, and kills nothing).
 
 ## Tests
 
@@ -186,7 +202,9 @@ ctest --test-dir build/win-x64-clang-rwdi -R "<test name>" --output-on-failure  
   ```sh
   cargo build --manifest-path engine/Trident/Cargo.toml
   tri test -j6 --retries 2 tests/integration   # binary: target/debug/tri[.exe] (Cargo workspace root is arma_CWR/; engine/Trident/target/ is a stale pre-workspace leftover)
+  tri slots                                    # machine-wide game-slot limit, held slots, and the ledger of who runs what
   ```
+  **Machine-wide game budget:** besides the per-run `-j`, every game-spawning `tri` command (`test`, `exec`, `stress`, `console`) takes `--global-slots <N>` (env `TRI_GLOBAL_SLOTS`; flag > env > default **4**; `0` = unlimited), a cap on simultaneous game instances shared by every `tri` on the machine. A test takes as many global slots as local ones (clamped to N). Slots are OS file locks in `%LOCALAPPDATA%\Trident\game-slots` (override `TRI_GLOBAL_SLOT_DIR`), released automatically if a `tri` dies; holders are listed in `D:\Arma_CWA\tmp\engine-slots\<pid>-<seq>.json` (override `TRI_SLOT_LEDGER_DIR`). A launch that waits logs `waiting for N global game slot(s)` with the holders, so a quiet run is queueing, not hung. Each `tri` enforces its own N; keep sessions on the default.
   Test layouts: `<name>.test.sqf` with an optional `<name>.test.toml` sidecar (tags, `data_dir`, `mission`, `extra_args`, timeouts); multi-instance `<name>.test/` directories whose `test.toml` lists `[[instances]]`; and sequences, a `<name>.seq/` directory of ordered `*.test.sqf` phases (each a fresh launch sharing one user dir; phases may carry their own `.test.toml`) with an optional sibling `<name>.seq.toml` for the sequence's tags.
 
   Copy `.trident.env.example` to `.trident.env` and set `OFPR_GAME_DIR` (build/dist dir with binaries) and `OFPR_DATA_DIR` (data for tests that pin no `data_dir`; a pinned `data_dir` wins over `--data-dir`). New setups target the full Remaster through a setup-prepared shadow, never the Steam folder itself: see "Development tests" in [`guerrilla-mode/FRESH-INSTALL.md`](guerrilla-mode/FRESH-INSTALL.md). The example file still says `packages/Demo`, pending the migration of the `full_cwa`/`lobo` lanes to Remaster data.

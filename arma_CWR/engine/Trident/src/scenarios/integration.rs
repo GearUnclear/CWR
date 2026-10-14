@@ -1136,6 +1136,19 @@ fn insert_effective_data_dir(
     }
 }
 
+/// The data dir a test will actually boot, for the engine-slot ledger.
+fn ledger_data_dir(test: &IntegrationTest, default_dir: Option<&str>) -> Option<String> {
+    let pinned = match &test.kind {
+        TestKind::Sqf(path) | TestKind::Mission(path) => load_test_meta(path).data_dir,
+        TestKind::Multi(path) => super::multi::configured_data_dir(path).ok().flatten(),
+        TestKind::Seq(_) => None,
+    };
+    pinned
+        .as_deref()
+        .or(default_dir)
+        .map(|d| super::multi::resolve_data_dir_path(d).display().to_string())
+}
+
 fn effective_data_dirs(
     tests: &[IntegrationTest],
     default_dir: Option<&str>,
@@ -1958,6 +1971,7 @@ pub async fn run_all(
         let kind = test.kind.clone();
         let tags = test.tags.clone();
         let slots = test.parallel_slots(max_slots);
+        let ledger_dir = ledger_data_dir(test, data_dir);
         let game_dir = game_dir.to_string();
         let data_dir = data_dir.map(String::from);
         let render = render.map(String::from);
@@ -1969,6 +1983,10 @@ pub async fn run_all(
 
         handles.spawn(async move {
             let _permit = sem.acquire_many(slots).await.expect("semaphore closed");
+            let _global = match crate::slots::acquire(slots, &name, ledger_dir.as_deref()).await {
+                Ok(permit) => permit,
+                Err(e) => return (name, Err(e)),
+            };
 
             // Track this test as running after it has acquired runner slots.
             {
@@ -2063,6 +2081,7 @@ pub async fn run_all(
             let tkind = test.kind.clone();
             let ttags = test.tags.clone();
             let slots = test.parallel_slots(max_slots);
+            let ledger_dir = ledger_data_dir(test, data_dir);
             let gdir = game_dir.to_string();
             let ddir = data_dir.map(String::from);
             let render = render.map(String::from);
@@ -2075,6 +2094,11 @@ pub async fn run_all(
 
             retry_handles.spawn(async move {
                 let _permit = sem.acquire_many(slots).await.expect("semaphore closed");
+                let _global =
+                    match crate::slots::acquire(slots, &tname, ledger_dir.as_deref()).await {
+                        Ok(permit) => permit,
+                        Err(e) => return (ridx, tname, Err(e)),
+                    };
 
                 {
                     let mut names = rn.lock().unwrap();
@@ -2148,6 +2172,12 @@ async fn run_all_sequential(
 
     for test in tests {
         running_pb.set_message(test.name.clone());
+        let _global = crate::slots::acquire(
+            test.instance_count(),
+            &test.name,
+            ledger_data_dir(test, data_dir).as_deref(),
+        )
+        .await?;
         let result = run_test(
             test,
             game_dir,
@@ -2213,6 +2243,12 @@ async fn run_all_sequential(
         for idx in failed {
             let test = &tests[idx];
             running_pb.set_message(test.name.clone());
+            let _global = crate::slots::acquire(
+                test.instance_count(),
+                &test.name,
+                ledger_data_dir(test, data_dir).as_deref(),
+            )
+            .await?;
             let result = run_test(
                 test,
                 game_dir,
