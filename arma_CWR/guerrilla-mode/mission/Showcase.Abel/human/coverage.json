@@ -130,9 +130,12 @@
       "garrison",
       "escalation"
     ],
-    "../engine/Poseidon/Game/Guerrilla/RoadRoute.cpp": [
-      "town_support",
-      "garrison"
+    "../engine/Poseidon/Game/Guerrilla/OccupierAir.cpp": [
+      "escalation",
+      "town_support"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierAirCommands.cpp": [
+      "escalation"
     ],
     "../engine/Poseidon/Game/Guerrilla/GarrisonCache.cpp": [
       "garrison"
@@ -174,6 +177,10 @@
       "traffic_commandeer",
       "traffic_patrol",
       "traffic_convoy"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/RoadRoute.cpp": [
+      "town_support",
+      "garrison"
     ],
     "../engine/Poseidon/Game/Guerrilla/TrafficEncounter.cpp": [
       "traffic_commandeer"

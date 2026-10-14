@@ -61,6 +61,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -1749,6 +1750,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // Guerrilla occupier counter-attacks (issue #79) - idle until a town
         // flips; steps its records at CounterAttack::TickInterval.
         Guerrilla::CounterAttack::Instance().Simulate(deltaT);
+        // Guerrilla occupier air (OCCUPIER-FORCES.md phase 6, the air spike) -
+        // idle until an insertion or sortie exists; steps at OccupierAir::TickInterval.
+        Guerrilla::OccupierAir::Instance().Simulate(deltaT);
         perf.Mark(Dev::FrameProfiler::PhaseGuerrilla);
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }

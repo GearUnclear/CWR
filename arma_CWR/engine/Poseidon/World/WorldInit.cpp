@@ -66,6 +66,7 @@
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -706,6 +707,8 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // Occupier counter-attacks (issue #79): Clear + read the counterAttack*
     // keys; records are created by town flips only.
     Guerrilla::CounterAttack::Instance().InitMission();
+    // Occupier air (phase 6 spike): records are transient, a new mission starts empty.
+    Guerrilla::OccupierAir::Instance().Clear();
     Guerrilla::PortraitService::Instance().Teardown();
     if (!Guerrilla::PrepareCampaignPortraits())
         return false;
