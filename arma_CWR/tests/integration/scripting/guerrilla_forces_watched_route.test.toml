@@ -11,7 +11,8 @@ mission = "guerrilla-mode/mission/Guerrilla.Abel"
 binary = "PoseidonGame"
 data_dir = "packages/RemasterUD"
 tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
-# the deferral waits out a 20 s give-up; the re-sourced squad walks a while
-timeout = 600
-assert_timeout = 240
+# the deferral waits out a 20 s give-up; the re-sourced squad walks up to
+# 10 simulated minutes (setAccTime 2)
+timeout = 1200
+assert_timeout = 900
 extra_args = ["--dev"]

@@ -36,9 +36,13 @@
 //
 // World hooks: World.cpp calls Simulate every frame (idle with no records;
 // the call also pulls this module and its command TU into the link) and
-// WorldInit.cpp calls Clear at mission start.  Not wired into CounterAttack
-// or the director yet: phase 6 proper calls SpawnInsertion / SpawnSortie.
-// Records are transient (not serialized).
+// WorldInit.cpp calls Clear at mission start.  Phase 6A: CounterAttack
+// (CounterAttackAir.cpp) calls SpawnInsertion / SpawnSortie for its air
+// records and reads them back by id (FindInsertion / FindSortie).  Records
+// are saved inside CounterAttack's block (SerializeRecords): the hull, crew,
+// cargo and pad refs resolve on the second pass after the world's vehicle
+// serializer recreated them; a pad missing after a load is re-created
+// (AfterLoad).
 //
 // Script surface (OccupierAirCommands.cpp): gmAirInsert, gmAirSortie,
 // gmOccupierAir, gmAirExposure, gmAirUnseen, gmAirAbort, gmAirReveal,
@@ -50,6 +54,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate, CounterAttackExposure tiers
+#include <Poseidon/IO/Serialization/SerializeClass.hpp> // LSError, ParamArchive
 
 namespace Poseidon
 {
@@ -268,6 +273,7 @@ struct AirInsertion
     float hullGoneAt = -1; // age when the hull was deleted
     int removeSeq = 0;     // 1 = crew first then hull (the rule), 2 = hull first (the gmAirAbort probe)
     AirInsertionCore core;
+    LSError Serialize(ParamArchive& ar);
 };
 
 // a live sortie
@@ -283,6 +289,7 @@ struct AirSortie
     float hullGoneAt = -1;
     int reveals = 0; // AddTarget calls that passed RevealAllowed
     AirSortieCore core;
+    LSError Serialize(ParamArchive& ar);
 };
 
 // the world-touching half (OccupierAir.cpp: EngineAirOps); unit tests fake it
@@ -370,6 +377,15 @@ class OccupierAir
     }
     int SortieCount() const { return _sorties.Size(); }
     const AirSortie* GetSortie(int i) const { return i >= 0 && i < _sorties.Size() ? &_sorties[i] : nullptr; }
+    // phase 6A: a record by id (null: unknown, e.g. dropped as finished)
+    const AirInsertion* FindInsertion(int id) const;
+    const AirSortie* FindSortie(int id) const;
+    // phase 6A persistence (inside CounterAttack's block): the records and
+    // the id counter; refs resolve on the second pass
+    LSError SerializeRecords(ParamArchive& ar);
+    // after a load: re-create the helipad of an insertion still inbound or
+    // landing whose pad did not come back
+    void AfterLoad();
     // live airframes (insertions and sorties not yet gone) and the groups they hold
     int LiveAirframes() const;
     int LiveGroups() const;

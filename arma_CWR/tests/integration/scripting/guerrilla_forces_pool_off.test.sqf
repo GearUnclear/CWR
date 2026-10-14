@@ -14,7 +14,13 @@ ofT0 = time
 triSimUntil { time > ofT0 + 3 }
 
 ofRow = gmOccupierForces
-triAssertEq [(count ofRow), 24]
+triAssertEq [(count ofRow), 29]
+// phase 6 slots, the key off: no strikes, no alarm answers, the script QRF fields
+triAssertEq [(ofRow select 24), 0]
+triAssertEq [(ofRow select 25), 0]
+triAssertEq [(ofRow select 26), 0]
+triAssertEq [(format ["%1", ofRow select 27]), "false"]
+triAssertEq [(format ["%1", ofRow select 28]), "true"]
 triAssertEq [(format ["%1", ofRow select 15]), "false"]
 triAssertEq [(ofRow select 18), 0]
 triAssertEq [(ofRow select 22), 0]

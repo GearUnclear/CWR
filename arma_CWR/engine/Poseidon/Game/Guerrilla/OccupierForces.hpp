@@ -4,7 +4,9 @@
 // (guerrilla-mode/OCCUPIER-FORCES.md, phases 2 to 4).  This header is the
 // code-side summary of the design's sections 5 (the pool), 6 (the director),
 // 7.1 (control and waves), 7.3 (occupier standing, the model) and 11
-// (persistence).  Air, alarm answers and town strikes are later phases.
+// (persistence).  Phase 6 (the B half): the director's air buying, town
+// strikes and alarm answers; the airframes themselves are OccupierAir's and
+// CounterAttack's.
 // The service owns the ledger every operation spends from and decides WHAT
 // to send; CounterAttack moves it (CounterAttackOrders.hpp is the contract).
 //
@@ -153,8 +155,51 @@
 //   WON / LOST.  Nothing is launched, and no wave fires or lands, once
 //   CampaignEnd has latched the win or the loss.
 //
+// AIR (phase 6B; 6.5, D2, D3, D4).  Insertions: the transport helicopter
+// joins the package choice whenever the catalogue offers one, chosen like
+// any package (the cheapest meeting L_req and the minimum; URGENT takes the
+// fastest within forcesUrgentCostShare, which is where the helicopter
+// wins).  Its airOrigin is the occupier-held AIRFIELD nearest the target,
+// else -1 (off-map), and off-map it is priced at the off-map price
+// (ForcePackages::HullPrice(.., true)); the infantry is still paid by the
+// source base.  STRIKES (7.3, D17): a jet or attack helicopter, bought ONLY
+// while STRONG, either on an URGENT held town with knownFighters >=
+// StrikeMinFighters that is not inside its strike window, or as the opener
+// of a director base retake or HQ assault.  It is bought right after the
+// ground operation on that target launches (a town strike alone when no
+// ground package can go) and takes no extra token.  The package: the
+// cheapest offered strike airframe the pool can pay (hull at the airfield
+// or off-map price, plus its crew), the fastest within
+// forcesUrgentCostShare when urgent.  strikePos is the centroid of the
+// target zone's REPORTED positions (D9), VZero (the town centre) without a
+// sighting row; never a hidden player position.
+// STRIKE EFFECTS (7.3, D21).  On CAOpStruck the director calls
+// ZoneRegistry::ApplyStrike (-40 support and standing in the struck town,
+// +15 heat, struckUntil = now + 1200 s; -10 / -10 in every town within
+// 2 km) and queues ZETownStruck for the scripts (civilians.sqs panics,
+// economy.sqs halves the income through gmZoneStruck).  Applied for every
+// CAOpStruck, director operation or test lever alike.
+// ALARM ANSWERS (8.2, D4).  A zone the resistance does not hold that sits
+// RED is an alarm.  At the sighting cadence the director answers ONE alarm
+// at a time with a CAKAlarm order (origin CAOAlarm): minimum
+// ForcePackages::AlarmMinBodies, always urgent (THIN: the cheapest package
+// only), lethality against the zone's sightings, sources every occupier base
+// but the alarm zone, ground packages and the transport helicopter.
+// alarmPos is the zone's latest reported position (VZero = the centre).
+// SPENT does not answer ("Starved" logged once per alarm).  The zone's
+// cooldown (a repel) applies.  Deviation from the phase brief's "same
+// tokens": an alarm answer takes no director token and is answered while
+// DORMANT too (8.2 sets its own limits), so a key-on campaign never goes
+// without an answer before the second town.  None while legacySave is set.
+// LEGACY QRF (D20, 11).  The block saves "format" (SaveFormat).  A block
+// with an older format, or derived from a save without the block, sets
+// legacySave: the native alarm answers stay off and gmLegacyQrf is true, so
+// an old campaign keeps its own script QRF (whose text the save carries).
+// gmLegacyQrf (LegacyQrf) is also true with the key off or the service
+// sized off; qrf.sqs fields its QRF only while it is true.
+//
 // Script surface (OccupierForcesCommands.cpp): gmOccupierForces,
-// gmOccupierOps, gmOccupierIntel, gmForcesTune, gmForcesForce.  Every INFO
+// gmOccupierOps, gmOccupierIntel, gmForcesTune, gmForcesForce, gmLegacyQrf.  Every INFO
 // line starts "OccupierForces:"; a director action "OccupierForces: [op N]".
 
 #include <Poseidon/Game/Guerrilla/CounterAttackOrders.hpp>
@@ -265,6 +310,7 @@ struct DirectorView
     // per zone (optional, missing = 0): the live GarrisonCache bodies (the
     // wave hub's strength and top-up)
     AutoArray<int> garrisonLive;
+    float now = 0;               // mission time (s): the town-strike windows (phase 6)
     float tierFactor = 1.0f;     // the occupier infantry tier's lethality factor
     float defenderWeight = 3.0f; // counterAttackDefenderWeight
 };
@@ -296,6 +342,12 @@ struct DirectorAction
     float fighters = 0;
     Vector3 destPos = VZero; // CAKHqAssault: HqPos
     PackageChoice choice;
+    // phase 6: air and the new kinds (copied into the order)
+    int airOrigin = -1;        // the occupier-held AIRFIELD an airframe starts from, -1 off-map
+    int strikeZone = -1;       // CAKStrike
+    Vector3 strikePos = VZero; // CAKStrike: reported fighters, VZero = the zone's centre
+    int alarmZone = -1;        // CAKAlarm
+    Vector3 alarmPos = VZero;  // CAKAlarm: the latest reported position, VZero = the centre
 };
 
 // The first-tick roster and town census (5.1)
@@ -358,6 +410,14 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr float TipJitter = 100.0f;
     static constexpr float LowStanding = 25.0f;
     static constexpr float MoraleSkill = 0.8f;
+    // phase 6: a town strike needs this many reported fighters (7.3); the
+    // block format that knows the native alarm answers (older = legacySave);
+    // the rest of an alarm zone after CounterAttack refused its answer (s)
+    static constexpr int StrikeMinFighters = 3;
+    static constexpr int SaveFormat = 6;
+    static constexpr float AlarmRefusedRest = 60.0f;
+    // the strike airframes the director may buy
+    static constexpr unsigned int StrikePackages = (1u << FPAttackHeli) | (1u << FPJet);
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -579,6 +639,58 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void StepStanding(ZoneRegistry& registry, float elapsed);
     // one informant tip into the sighting table (a local talked: count at pos)
     void IngestTip(const ZoneRegistry& registry, int zone, int count, Vector3Par pos);
+    // phase 6 (air, strikes, alarms) ------------------------------------------
+    // the occupier-held AIRFIELD nearest pos, -1 none (air is off-map)
+    static int HeldAirfield(const ZoneRegistry& registry, Vector3Par pos);
+    // the bought-when rule (7.3): may a strike go with an operation of
+    // launchedKind on target (HqCandidate for the HQ)?  STRONG, a strike
+    // airframe offered, and either a base / HQ opener, or an URGENT held
+    // town with >= StrikeMinFighters reported and outside its strike window
+    bool StrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target, int launchedKind) const;
+    // the strike package on target (HqCandidate for the HQ): go false when
+    // no strike airframe is offered or the pool cannot pay any
+    DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent) const;
+    // the centroid of a zone's reported positions, VZero without a row
+    Vector3 ReportedCentroid(const ZoneRegistry& registry, int zone) const;
+    // the latest reported position in a zone, VZero without a row
+    Vector3 LatestReport(const ZoneRegistry& registry, int zone) const;
+    // the alarm to answer now (8.2): a zone the resistance does not hold,
+    // RED, not on cooldown, no record on it; the most reported fighters
+    // first, then the zone order; -1 none
+    int AlarmTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher) const;
+    // the alarm answer's package and source (no side effects)
+    DirectorAction PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone) const;
+    // an alarm answer of the director's is still in flight (its record
+    // lives); rows whose record is gone are closed here
+    bool AlarmInFlight(const ZoneRegistry& registry, const DirectorLauncher& launcher);
+    // one alarm step: at most one answer (Direct calls it; the engine also at
+    // the sighting cadence).  No-op unless Active() and not legacySave.
+    void AnswerAlarms(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher);
+    // the strike effects (CAOpStruck): ZoneRegistry::ApplyStrike, the
+    // ZETownStruck event queued, the tallies, one INFO line.  Returns the
+    // ring towns cut.
+    int ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3Par pos, float now, int opId);
+    // test levers (gmForcesForce "strike" / "alarm"): plan and launch now,
+    // bypassing the bought-when rule / the RED requirement (the package
+    // choice, the pool and the launcher still apply).  The engine path.
+    bool ForceStrike(int zone);
+    bool ForceAlarm(int zone);
+    // the same over an explicit registry, view and launcher (unit tests)
+    bool ForceStrike(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int zone);
+    bool ForceAlarm(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int zone);
+    // D20: the script QRF runs (gmLegacyQrf): the key off, the service sized
+    // off, or a legacy save.  False before the first sizing with the key on.
+    bool LegacyQrf() const;
+    void SetLegacySave(bool on) { _legacySave = on; }
+    // mission time (s) for the strike stamps: the engine sets it from
+    // Glob.time each frame; unit tests set it
+    void SetMissionNow(float now) { _missionNow = now; }
+    float MissionNow() const { return _missionNow; }
+    int TownStrikes() const { return _townStrikes; }
+    int StrikesApplied() const { return _strikesApplied; }
+    int AlarmAnswers() const { return _alarmAnswers; }
+    int LoadedFormat() const { return _loadedFormat; }
+
     // the package catalogue (built from the occupier's ladder at the first
     // director tick on the engine path; tests set it)
     void SetCatalogue(const ForcePackageCatalogue& cat)
@@ -708,6 +820,20 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void BuildEngineCatalogue(const ZoneRegistry& registry);
     void FillEngineView(const ZoneRegistry& registry, DirectorView& view) const;
     void ScanWorld(const ZoneRegistry& registry);
+    // the occupier bases an operation on dest may come from (PlanFor's list):
+    // fixedSource >= 0 offers only that base with fixedSpare; exclude (>= 0)
+    // is never offered (an alarm's own zone)
+    void BuildSources(const ZoneRegistry& registry, const DirectorView& view, Vector3Par dest, int fixedSource,
+                      int fixedSpare, int exclude, AutoArray<PackageSource>& sources) const;
+    // ForcePackages::Choose with the transport helicopter offered when the
+    // catalogue has one, priced off-map when airOrigin < 0 (phase 6)
+    PackageChoice ChooseWithAir(const PackageRequest& req, const AutoArray<PackageSource>& sources,
+                                int airOrigin) const;
+    // after a director launch on target: the strike that goes with it (7.3)
+    void MaybeStrike(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
+                     int launchedKind);
+    // the engine view (FillEngineView) for the levers and the alarm cadence
+    void EngineView(DirectorView& view);
 
     OccupierForcesTuning _tuning;
     bool _active = false;
@@ -763,6 +889,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int _surgeBodies = 0;        // the surge stored there (never spare)
     // transient: the roster bases held as of the last Tick (-1 before one)
     int _basesHeld = -1;
+    // phase 6 (serialized): the strike tallies (CITY strikes, every applied
+    // strike) and the alarm answers launched
+    int _townStrikes = 0;
+    int _strikesApplied = 0;
+    int _alarmAnswers = 0;
+    // transient: the block format loaded (0: none or older than phase 6),
+    // mission time, the alarm zones whose starvation was logged
+    int _loadedFormat = 0;
+    float _missionNow = 0;
+    AutoArray<NameRow> _alarmStarved;
 };
 
 } // namespace Guerrilla

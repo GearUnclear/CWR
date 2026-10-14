@@ -30,6 +30,16 @@
 //                                  stand fired, [20] the surge zone ("" none),
 //                                  [21] the surge bodies, [22] waves landed,
 //                                  [23] the occupier war level.
+//                                  Phase 6: [24] towns struck, [25] strikes
+//                                  applied (any zone), [26] alarm answers
+//                                  launched, [27] legacySave, [28]
+//                                  gmLegacyQrf.
+//   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
+//                                  (D20): the key off, the service sized
+//                                  off, or a legacy save (a block older than
+//                                  phase 6, or derived from a save without
+//                                  the block).  False with the native alarm
+//                                  answers in charge.
 //   gmWarLevelOccupier          -> the occupier-side war level (7.1): the
 //                                  territory level (gmWarLevel) plus
 //                                  forcesWaveWarLevel per landed wave, capped
@@ -113,7 +123,22 @@
 //                                  "cooldown"    ["cooldown", zoneIndex,
 //                                                seconds] rests a zone as a
 //                                                repel would (false for an
-//                                                unknown zone).
+//                                                unknown zone);
+//                                  "strike"      ["strike", zoneIndex] buys
+//                                                and launches a strike on
+//                                                the zone now (the package
+//                                                choice and the pool apply,
+//                                                the bought-when rule does
+//                                                not); false when refused;
+//                                  "strikeEffects" ["strikeEffects",
+//                                                zoneIndex] applies a
+//                                                strike's effects at once
+//                                                (7.3; no airframe);
+//                                  "alarm"       ["alarm", zoneIndex]
+//                                                answers the zone as an
+//                                                alarm now (RED or not);
+//                                  "legacySave"  ["legacySave", 0/1] sets
+//                                                the flag (gmLegacyQrf).
 //                                  Returns true when what is known.
 
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -126,6 +151,7 @@
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/Core/Global.hpp> // Glob.time (strikeEffects)
 #include <Poseidon/Foundation/platform.hpp>
 
 using namespace Poseidon;
@@ -203,7 +229,18 @@ static GameValue GmOccupierForces(const GameState* state)
     row.Add(GameValue((float)of.SurgeBodies()));
     row.Add(GameValue((float)of.WavesLanded()));
     row.Add(GameValue(of.OccupierWarLevel()));
+    // phase 6
+    row.Add(GameValue((float)of.TownStrikes()));
+    row.Add(GameValue((float)of.StrikesApplied()));
+    row.Add(GameValue((float)of.AlarmAnswers()));
+    row.Add(GameValue(of.LegacySave()));
+    row.Add(GameValue(of.LegacyQrf()));
     return value;
+}
+
+static GameValue GmLegacyQrf(const GameState* /*state*/)
+{
+    return GameValue(OccupierForces::Instance().LegacyQrf());
 }
 
 static GameValue GmWarLevelOccupier(const GameState* /*state*/)
@@ -464,6 +501,29 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
         of.ForceCooldown(z->name, seconds);
         LOG_INFO(Core, "OccupierForces: {} forced to rest {:.0f} s", (const char*)z->name, (double)seconds);
     }
+    else if (stricmp(what, "strike") == 0)
+    {
+        return GameValue(of.ForceStrike((int)v));
+    }
+    else if (stricmp(what, "strikeEffects") == 0)
+    {
+        ZoneRegistry& registry = ZoneRegistry::Instance();
+        if (!registry.GetZone((int)v))
+        {
+            return GameValue(false);
+        }
+        of.SetMissionNow(Glob.time - Foundation::Time(0));
+        of.ApplyStrikeEffects(registry, (int)v, VZero, of.MissionNow(), 0);
+    }
+    else if (stricmp(what, "alarm") == 0)
+    {
+        return GameValue(of.ForceAlarm((int)v));
+    }
+    else if (stricmp(what, "legacySave") == 0)
+    {
+        of.SetLegacySave(v != 0);
+        LOG_INFO(Core, "OccupierForces: legacySave forced {}", v != 0 ? "on" : "off");
+    }
     else
     {
         return GameValue(false);
@@ -477,6 +537,7 @@ INIT_MODULE(GuerrillaOccupierForces, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierOps", GmOccupierOps));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierIntel", GmOccupierIntel));
     GGameState.NewNularOp(GameNular(GameScalar, "gmWarLevelOccupier", GmWarLevelOccupier));
+    GGameState.NewNularOp(GameNular(GameBool, "gmLegacyQrf", GmLegacyQrf));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
 }

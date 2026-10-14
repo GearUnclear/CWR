@@ -2,12 +2,13 @@
 // #71, guerrilla-mode/OFFSCREEN-CONTRACT.md). A copy of guerrilla_native.abel
 // (same shared-core bootstrap, same Camp/Village/Outpost geometry, same
 // faction descriptors) plus:
-//   * SEBase   (OCCUPIER OUTPOST, garrison 4) at Malden's fenced south-east
-//     military compound (garages and watchtower around [9640..9745, 3920..4010],
-//     verified with `PoseidonTools terrain objects abel.wrp --near 9720 4000 120`
-//     on the full Remaster). 2.7 km from the Camp: a second occupier post the
+//   * SEBase   (OCCUPIER OUTPOST, garrison 4) on the Le Port quay road (the
+//     Guerrilla.Abel Le Port Harbour position): a second occupier post the
 //     player can leave behind, and the pair that makes patrol/convoy routes
-//     admissible (contract C3).
+//     admissible (contract C3). It stood at Malden's fenced south-east
+//     compound until 2026-10-14, but that compound is an island of its own
+//     (800 m of sea to Le Port, `gmLandmass`), so no road leg reaches it and
+//     Traffic no longer sends a convoy there.
 //   * garrisonRecoverInterval = 15 (stock 600) so the D2 reserve recovery is
 //     observable inside an assert window.
 //   * remoteTick = 1 and simDiagInterval = 20 stated explicitly.
@@ -138,7 +139,7 @@ class CfgGuerrillaZones
             garrison = 4;           // garrisonMax defaults to this (D2 ceiling)
             income = 25;
             marker = "gmZoneMarker_3";
-            position[] = {9690, 3990, 40};
+            position[] = {8410, 3690, 8};  // the Le Port quay (Guerrilla.Abel's Harbour), same landmass as the Outpost
         };
     };
 };

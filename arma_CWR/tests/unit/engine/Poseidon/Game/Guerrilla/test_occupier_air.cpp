@@ -224,11 +224,11 @@ TEST_CASE("OccupierAir: an insertion lands, unloads, departs, removed crew first
         retries += (OccupierAir::StepInsertionPure(c, down, dt, t) & AAUnload) ? 1 : 0;
     }
     CHECK(retries == 1);
-    // everyone out: Move home, the pad goes
+    // everyone out: Move home; the pad stays until the hull is gone
     down.cargoSeated = 0;
     a = OccupierAir::StepInsertionPure(c, down, dt, t);
     CHECK((a & AAMoveHome) != 0);
-    CHECK((a & AARemovePad) != 0);
+    CHECK((a & AARemovePad) == 0);
     CHECK(c.state == AISDeparting);
     // lifting off
     OccupierAir::StepInsertionPure(c, Flying(Vector3(4900, 0, 5410), 30.0f, 10.0f), dt, t);
@@ -254,6 +254,7 @@ TEST_CASE("OccupierAir: an insertion lands, unloads, departs, removed crew first
         if (a & AARemoveHull)
         {
             hullAt = i;
+            CHECK((a & AARemovePad) != 0); // the pad goes with the hull, after the crew
         }
     }
     CHECK(crewAt >= 3); // removeHold 2 s at 0.5 s steps
@@ -426,7 +427,9 @@ TEST_CASE("OccupierAir: exposure at altitude", "[game][guerrilla][occupierforces
     CHECK_FALSE(OccupierAir::UnseenAt(v, Vector3(1000, 150, 2000)));
     CHECK_FALSE(OccupierAir::UnseenAt(v, Vector3(1000, 30, 300)));       // behind but audible
     CHECK(OccupierAir::UnseenAt(v, Vector3(1000, 120, -500)));           // behind, past the band
-    CHECK_FALSE(OccupierAir::UnseenAt(v, Vector3(1000, 120, 2300)));     // past the band but in the cone
+    // past the band in 3D, even in the cone: a speck at altitude is not drawn
+    // (phase 6A, the orchestrator's decision on the spike's open item)
+    CHECK(OccupierAir::UnseenAt(v, Vector3(1000, 120, 2300)));
     v.player = Vector3(1000, 20, 1000);
     v.ridgeZ = 0; // a ridge behind the camera at z = 0
     v.ridgeY = 200;

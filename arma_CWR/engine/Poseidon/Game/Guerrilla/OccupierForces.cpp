@@ -5,11 +5,13 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // LaunchFunded, the listener, Roll01 / MakeSeed / Spare
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // live garrison bodies (a base's spare)
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HqZone: never a target
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass: ground sources share the target's land
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
+#include <Poseidon/Core/Global.hpp> // Glob.time (the town-strike stamps)
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/VehicleAI.hpp> // Target / TargetList (the sightings scan)
@@ -112,6 +114,12 @@ void OccupierForces::Clear()
     _meanStanding = DefaultStanding;
     _logClock = LogQuiet;
     _logSuppressed = 0;
+    _townStrikes = 0;
+    _strikesApplied = 0;
+    _alarmAnswers = 0;
+    _loadedFormat = 0;
+    _missionNow = 0;
+    _alarmStarved.Clear();
     // the S5 refund hook (3.3): the process-wide service always owns it (it
     // claims nothing while inactive, so a save loaded after Clear keeps it); a
     // local service that installed it gives it up
@@ -1000,16 +1008,31 @@ void OccupierForces::Simulate(float deltaT)
         }
         return;
     }
+    _missionNow = Glob.time - Foundation::Time(0);
     _directorAccum += deltaT;
     // the sightings scan at the alert cadence (6.1)
     _scanAccum += deltaT;
     const float scanEvery = AlertMachine::Instance().Tuning().alertInterval;
+    const bool directorDue = _directorAccum >= _tuning.directorInterval;
     if (_scanAccum >= (scanEvery > 0 ? scanEvery : 5.0f))
     {
         _scanAccum = 0;
         ScanWorld(registry);
+        // alarm answers at the sighting cadence (8.2): a RED zone is answered
+        // within one scan, not one director tick (Direct runs them too)
+        if (!directorDue && !_legacySave)
+        {
+            if (!_catalogueBuilt)
+            {
+                BuildEngineCatalogue(registry);
+            }
+            DirectorView view;
+            FillEngineView(registry, view);
+            EngineDirectorLauncher launcher(registry);
+            AnswerAlarms(registry, view, launcher);
+        }
     }
-    if (_directorAccum < _tuning.directorInterval)
+    if (!directorDue)
     {
         return;
     }
@@ -1628,8 +1651,20 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
-    const RString occupier = registry.OccupierSide();
     AutoArray<PackageSource> sources;
+    BuildSources(registry, view, dest, fixedSource, fixedSpare, -1, sources);
+    // phase 6: a helicopter insertion competes like any package (6.5, D3)
+    a.airOrigin = HeldAirfield(registry, dest);
+    a.choice = ChooseWithAir(req, sources, a.airOrigin);
+    a.go = a.choice.ok;
+    return a;
+}
+
+void OccupierForces::BuildSources(const ZoneRegistry& registry, const DirectorView& view, Vector3Par dest,
+                                  int fixedSource, int fixedSpare, int exclude, AutoArray<PackageSource>& sources) const
+{
+    sources.Clear();
+    const RString occupier = registry.OccupierSide();
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* s = registry.GetZone(i);
@@ -1637,7 +1672,7 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
         {
             continue;
         }
-        if (fixedSource >= 0 && i != fixedSource)
+        if ((fixedSource >= 0 && i != fixedSource) || i == exclude)
         {
             continue;
         }
@@ -1646,8 +1681,13 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
         {
             continue;
         }
+        // ground packages walk or drive: a base on another landmass than the
+        // target (Malden's Southeast Compound) is an AIR-ONLY source (phase
+        // 6A): its reserve can still pay a helicopter insertion, never a
+        // ground package (ForcePackages::Quote skips it for those)
         PackageSource src;
         src.zone = i;
+        src.airOnly = !RoadRoute::SameLandmass(s->pos, dest);
         if (fixedSource >= 0)
         {
             src.spare = fixedSpare;
@@ -1667,9 +1707,45 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
         src.distance = sqrtf(dx * dx + dz * dz);
         sources.Add(src);
     }
-    a.choice = ForcePackages::Choose(req, _catalogue, sources);
-    a.go = a.choice.ok;
-    return a;
+}
+
+PackageChoice OccupierForces::ChooseWithAir(const PackageRequest& reqIn, const AutoArray<PackageSource>& sources,
+                                            int airOrigin) const
+{
+    // the transport helicopter competes like any package (6.5); off-map (no
+    // occupier-held airfield, D3) ForcePackages quotes it at the off-map
+    // price.  The strike airframes carry nobody (SeatCap 0): never chosen.
+    PackageRequest req = reqIn;
+    if (_catalogue.Offered(FPTransportHeli))
+    {
+        req.offered |= ForcePackages::Bit(FPTransportHeli);
+    }
+    req.airOffMap = airOrigin < 0;
+    return ForcePackages::Choose(req, _catalogue, sources);
+}
+
+int OccupierForces::HeldAirfield(const ZoneRegistry& registry, Vector3Par pos)
+{
+    const RString occupier = registry.OccupierSide();
+    int best = -1;
+    float bestSq = 0;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || stricmp(z->type, "AIRFIELD") != 0 || stricmp(z->owner, occupier) != 0)
+        {
+            continue;
+        }
+        const float dx = z->pos.X() - pos.X();
+        const float dz = z->pos.Z() - pos.Z();
+        const float dSq = dx * dx + dz * dz;
+        if (best < 0 || dSq < bestSq)
+        {
+            best = i;
+            bestSq = dSq;
+        }
+    }
+    return best;
 }
 
 static const char* ZoneNameOf(const ZoneRegistry& registry, int index)
@@ -1739,11 +1815,12 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
 {
     const bool hq = a.kind == CAKHqAssault;
     const ZoneRecord* z = registry.GetZone(a.target);
-    if (!z && !hq)
+    // a strike on the HQ outside every zone has no zone either
+    if (!z && !hq && !(a.kind == CAKStrike && a.strikePos.X() != 0))
     {
         return false;
     }
-    const char* targetName = z ? (const char*)z->name : "the HQ";
+    const char* targetName = z ? (const char*)z->name : (hq ? "the HQ" : "a reported position");
     const PackageQuote& q = a.choice.quote;
     if (launcherRefused)
     {
@@ -1772,6 +1849,12 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     order.escortClass = q.escortClass;
     order.escortCrew = q.escortCrew;
     order.escortPriceUnits = q.EscortPoolPrice();
+    // phase 6: air and the new kinds (CounterAttackOrders.hpp)
+    order.airOrigin = a.airOrigin;
+    order.strikeZone = a.strikeZone;
+    order.strikePos = a.strikePos;
+    order.alarmZone = a.alarmZone;
+    order.alarmPos = a.alarmPos;
     // the pool pays hull and crew BEFORE the launch, and gets it back when
     // CounterAttack refuses the order
     if (q.poolPrice > 0 && !Spend(q.poolPrice, "operation hull and crew"))
@@ -1799,7 +1882,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     // CounterAttack starts the record find it
     OpRow row;
     row.opId = opId;
-    row.target = z ? z->name : RString(HqCooldownName);
+    row.target = z ? z->name : RString(hq ? HqCooldownName : "");
     row.kind = a.kind;
     row.origin = a.origin;
     row.package = q.package;
@@ -1862,9 +1945,10 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     if (a.kind == CAKRetake && waveNo == 0)
     {
         // the phase-3 wording, unchanged (tri tests read it)
-        const char* label = q.package == FPFoot    ? (push ? "foot squad" : "Foot squad")
-                            : q.package == FPTruck ? (push ? "motorized squad" : "Motorized squad")
-                                                   : ForcePackages::PackageName(q.package);
+        const char* label = q.package == FPFoot            ? (push ? "foot squad" : "Foot squad")
+                            : q.package == FPTruck         ? (push ? "motorized squad" : "Motorized squad")
+                            : q.package == FPTransportHeli ? (push ? "helicopter insertion" : "Helicopter insertion")
+                                                           : ForcePackages::PackageName(q.package);
         if (q.package == FPFoot)
         {
             LOG_INFO(Core,
@@ -1876,14 +1960,61 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         }
         else
         {
+            char from[96];
+            if (q.package == FPTransportHeli)
+            {
+                // the airframe's origin, then the base that pays the infantry
+                snprintf(from, sizeof(from), "%s (infantry of %s)",
+                         a.airOrigin >= 0 ? ZoneNameOf(registry, a.airOrigin) : "off-map",
+                         ZoneNameOf(registry, q.source));
+            }
+            else
+            {
+                snprintf(from, sizeof(from), "%s", ZoneNameOf(registry, q.source));
+            }
             LOG_INFO(Core,
                      "OccupierForces: [op {}] {}{} ({}, {}) from {} to {} ({} unit(s), the pool pays {}, lethality "
                      "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
-                     opId, push ? "Push-out: " : "", label, q.bodies, (const char*)q.hullClass,
-                     ZoneNameOf(registry, q.source), targetName, q.price, q.poolPrice, (double)q.lethality,
-                     (double)a.choice.lReq, RoundToInt(a.fighters), a.urgent ? ", urgent" : "", shortNote,
-                     (double)q.seconds);
+                     opId, push ? "Push-out: " : "", label, q.bodies, (const char*)q.hullClass, from, targetName,
+                     q.price, q.poolPrice, (double)q.lethality, (double)a.choice.lReq, RoundToInt(a.fighters),
+                     a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
         }
+        return true;
+    }
+    if (a.kind == CAKStrike)
+    {
+        // 6.6: "Jet strike over Houdan (town)"
+        const char* air = q.package == FPJet ? "Jet strike" : "Attack helicopter strike";
+        const char* what = z && stricmp(z->type, "CITY") == 0 ? "town" : (hq ? "the HQ" : "opener");
+        LOG_INFO(Core,
+                 "OccupierForces: [op {}] {} over {} ({}, {}) from {} (the pool pays {}, {} fighter(s) reported, at "
+                 "{}){}",
+                 opId, air, targetName, what, (const char*)q.hullClass,
+                 a.airOrigin >= 0 ? ZoneNameOf(registry, a.airOrigin) : "off-map", q.poolPrice,
+                 RoundToInt(a.fighters), a.strikePos.X() != 0 ? "the reported fighters" : "the town centre",
+                 a.urgent ? ", urgent" : "");
+        return true;
+    }
+    if (a.kind == CAKAlarm)
+    {
+        // 6.6: "Alarm answer: APC squad from Airfield to Outpost"
+        char from[96];
+        if (q.package == FPTransportHeli)
+        {
+            snprintf(from, sizeof(from), "%s (infantry of %s)",
+                     a.airOrigin >= 0 ? ZoneNameOf(registry, a.airOrigin) : "off-map", ZoneNameOf(registry, q.source));
+        }
+        else
+        {
+            snprintf(from, sizeof(from), "%s", ZoneNameOf(registry, q.source));
+        }
+        LOG_INFO(Core,
+                 "OccupierForces: [op {}] Alarm answer: {} ({}{}{}) from {} to {} ({} unit(s), the pool pays {}, "
+                 "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
+                 opId, ForcePackages::PackageName(q.package), q.bodies, q.package != FPFoot ? ", " : "",
+                 (const char*)q.hullClass, from, targetName, q.price, q.poolPrice, (double)q.lethality,
+                 (double)a.choice.lReq, RoundToInt(a.fighters), a.urgent ? ", urgent" : ", THIN: the cheapest",
+                 shortNote, (double)q.seconds);
         return true;
     }
     // base retakes, HQ assaults and wave strikes (6.6 wording)
@@ -1919,6 +2050,8 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
         return;
     }
     StepWaves(registry, view, launcher, elapsed);
+    // alarm answers (8.2, phase 6): their own limits, no token, any posture
+    AnswerAlarms(registry, view, launcher);
     // W: before the wake the director considers nothing
     if (_posture != OFAwake || _tokens <= 0 || !CanOperate())
     {
@@ -1932,9 +2065,27 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
     Candidates(registry, view, launcher, candidates);
     for (int i = 0; i < candidates.Size(); i++)
     {
-        if (TryLaunch(registry, view, launcher, candidates[i], CAODirector))
+        const int target = candidates[i];
+        const ZoneRecord* tz = registry.GetZone(target);
+        const int kind = target == HqCandidate ? CAKHqAssault
+                         : (tz && CampaignEnd::IsMilitaryType(tz->type)) ? CAKBase
+                                                                        : CAKRetake;
+        if (TryLaunch(registry, view, launcher, target, CAODirector))
         {
+            // the strike that goes with it (7.3): a base / HQ opener, or an
+            // urgent town with fighters reported
+            MaybeStrike(registry, view, launcher, target, kind);
             return; // one operation per tick
+        }
+        // no ground package could go: an urgent town with fighters may still
+        // be struck from the air on its own (it takes the token)
+        if (kind == CAKRetake && StrikeDue(registry, view, target, kind))
+        {
+            const DirectorAction sa = PlanStrike(registry, view, target, true);
+            if (sa.go && LaunchAction(registry, view, launcher, sa, true, false, 0))
+            {
+                return;
+            }
         }
     }
     if (candidates.Size() == 0 && _band == OFBandStrong)
@@ -2321,7 +2472,7 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
                 {
                     const ZoneRecord* s = registry.GetZone(i);
                     if (!s || !CampaignEnd::IsMilitaryType(s->type) || stricmp(s->owner, occupier) != 0 ||
-                        SurgeAt(s->name) > 0)
+                        SurgeAt(s->name) > 0 || !RoadRoute::SameLandmass(s->pos, dest))
                     {
                         continue;
                     }
@@ -2520,6 +2671,9 @@ bool OccupierForces::OnTownFlipped(int zoneIndex, int /*k*/)
 
 void OccupierForces::OnCounterAttackOp(const CounterAttackOpEvent& ev)
 {
+    // CounterAttack's tick may run before ours this frame: the strike stamp
+    // takes the mission time now
+    _missionNow = Glob.time - Foundation::Time(0);
     NoteOpEvent(ZoneRegistry::Instance(), ev);
 }
 
@@ -2590,6 +2744,18 @@ void OccupierForces::NoteZoneEvents(const ZoneRegistry& registry, const AutoArra
 
 void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEvent& ev)
 {
+    if (ev.type == CAOpStruck)
+    {
+        // D17, D21: whoever ordered it (a director strike or a test lever),
+        // the struck town and its neighbours pay
+        ApplyStrikeEffects(registry, ev.zone >= 0 ? ev.zone : ev.target, ev.pos, _missionNow, ev.opId);
+        const int r = FindOp(ev.opId);
+        if (r >= 0 && _ops[r].kind == CAKStrike)
+        {
+            _ops[r].born = true;
+        }
+        return;
+    }
     if (!Active())
     {
         return;
@@ -2652,7 +2818,9 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 break;
             }
             const bool paid = RedPaid(target);
-            if (!paid && ev.target >= 0 && ev.kind != CAKReinforce)
+            // an alarm answer fights at an occupier zone and a strike is no
+            // retake: neither raises the resistance zone's heat
+            if (!paid && ev.target >= 0 && ev.kind != CAKReinforce && ev.kind != CAKAlarm && ev.kind != CAKStrike)
             {
                 registry.HeatRaise(ev.target, RepelHeat);
             }
@@ -2703,12 +2871,498 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 NoteLoss(units, "hull lost");
             }
             break;
+        case CAOpReturned:
+            // an alarm answer or a strike has no settle: its return ends it
+            if (mine && (_ops[row].kind == CAKAlarm || _ops[row].kind == CAKStrike))
+            {
+                _ops[row].finished = true;
+            }
+            break;
+        case CAOpAirborne:
+            if (mine)
+            {
+                _ops[row].born = true;
+            }
+            LOG_DEBUG(Core, "OccupierForces: [op {}] airborne from {}", ev.opId,
+                      ev.zone >= 0 ? ZoneNameOf(registry, ev.zone) : "off-map");
+            break;
+        case CAOpLanded:
+            LOG_DEBUG(Core, "OccupierForces: [op {}] landed near {}", ev.opId, target);
+            break;
+        case CAOpAlarmAnswered:
+            if (mine)
+            {
+                LOG_INFO(Core, "OccupierForces: [op {}] Alarm answer at {}: searching the reported positions", ev.opId,
+                         ZoneNameOf(registry, ev.zone >= 0 ? ev.zone : ev.target));
+            }
+            break;
         default:
-            // Launched, Arrived, Returned: CounterAttack routes the bodies
-            // (5.5) itself; nothing for the ledger
+            // Launched, Arrived: CounterAttack routes the bodies (5.5)
+            // itself; nothing for the ledger
             break;
     }
+    // a strike's airframe home (refund) or lost ends the strike
+    if (mine && _ops[row].kind == CAKStrike && (ev.type == CAOpHullRefund || ev.type == CAOpHullLost) &&
+        _ops[row].outstanding <= 0)
+    {
+        _ops[row].finished = true;
+    }
     PruneOps();
+}
+
+// ---------------------------------------------------------------------------
+// phase 6: air strikes, strike effects, alarm answers (7.3, 8.2, D4, D17, D20,
+// D21)
+// ---------------------------------------------------------------------------
+
+Vector3 OccupierForces::ReportedCentroid(const ZoneRegistry& registry, int zone) const
+{
+    const ZoneRecord* z = registry.GetZone(zone);
+    if (!z)
+    {
+        return VZero;
+    }
+    for (int i = 0; i < _sightings.Size(); i++)
+    {
+        const SightingRow& row = _sightings[i];
+        if (stricmp(row.zone, z->name) != 0 || row.positions.Size() == 0 ||
+            Now() - row.stamp > _tuning.intelDecay)
+        {
+            continue;
+        }
+        float x = 0, y = 0, zz = 0;
+        for (int k = 0; k < row.positions.Size(); k++)
+        {
+            x += row.positions[k].X();
+            y += row.positions[k].Y();
+            zz += row.positions[k].Z();
+        }
+        const float n = (float)row.positions.Size();
+        return Vector3(x / n, y / n, zz / n);
+    }
+    return VZero;
+}
+
+Vector3 OccupierForces::LatestReport(const ZoneRegistry& registry, int zone) const
+{
+    const ZoneRecord* z = registry.GetZone(zone);
+    if (!z)
+    {
+        return VZero;
+    }
+    for (int i = 0; i < _sightings.Size(); i++)
+    {
+        const SightingRow& row = _sightings[i];
+        if (stricmp(row.zone, z->name) == 0 && row.positions.Size() > 0 && Now() - row.stamp <= _tuning.intelDecay)
+        {
+            return row.positions[row.positions.Size() - 1];
+        }
+    }
+    return VZero;
+}
+
+bool OccupierForces::StrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target,
+                               int launchedKind) const
+{
+    if (!Active() || _band != OFBandStrong)
+    {
+        return false;
+    }
+    if (!_catalogue.Offered(FPJet) && !_catalogue.Offered(FPAttackHeli))
+    {
+        return false;
+    }
+    // the opener of a base retake or an HQ assault
+    if (launchedKind == CAKBase || launchedKind == CAKHqAssault)
+    {
+        return true;
+    }
+    const ZoneRecord* z = registry.GetZone(target);
+    if (!z || !IsHeldTown(registry, *z) || !Urgent(z->name))
+    {
+        return false;
+    }
+    if (KnownFighters(registry, target) < StrikeMinFighters)
+    {
+        return false;
+    }
+    // a town inside its strike window is not struck again
+    return !registry.IsStruck(target, view.now);
+}
+
+DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target,
+                                          bool urgent) const
+{
+    DirectorAction a;
+    a.kind = CAKStrike;
+    a.origin = CAODirector;
+    a.urgent = urgent;
+    const bool hq = target == HqCandidate;
+    const int zone = hq ? view.hqZone : target;
+    const ZoneRecord* z = registry.GetZone(zone);
+    if (!z && !(hq && view.hqEstablished))
+    {
+        a.choice.why = "no such zone";
+        return a;
+    }
+    a.target = z ? zone : -1;
+    a.strikeZone = a.target;
+    a.fighters = z ? (float)KnownFighters(registry, zone) : 0.0f;
+    // D9: what was reported, else the town (or the HQ the assault marches
+    // on); never a hidden player position
+    a.strikePos = z ? ReportedCentroid(registry, zone) : VZero;
+    if (hq && a.strikePos.X() == 0 && a.strikePos.Z() == 0)
+    {
+        a.strikePos = view.hqPos;
+    }
+    const Vector3 dest = a.strikePos.X() != 0 || a.strikePos.Z() != 0 ? a.strikePos : (z ? z->pos : view.hqPos);
+    a.airOrigin = HeldAirfield(registry, dest);
+    const bool offMap = a.airOrigin < 0;
+    const ZoneRecord* origin = registry.GetZone(a.airOrigin);
+    PackageQuote best;
+    best.source = -1;
+    bool found = false;
+    PackageQuote quotes[2];
+    int n = 0;
+    for (int p = FPAttackHeli; p <= FPJet; p++)
+    {
+        if ((StrikePackages & ForcePackages::Bit(p)) == 0 || !_catalogue.Offered(p))
+        {
+            continue;
+        }
+        PackageQuote q;
+        q.package = p;
+        q.source = -1;
+        q.bodies = 0;
+        q.crew = ForcePackages::CrewOf(p, _catalogue);
+        q.hullPrice = ForcePackages::HullPrice(p, offMap);
+        q.poolPrice = q.hullPrice + q.crew;
+        q.price = q.poolPrice;
+        q.lethality = ForcePackages::LethalityAdd(p);
+        q.lethal = true;
+        q.affordable = !Active() || (q.poolPrice <= _pool);
+        q.speed = ForcePackages::SpeedOf(p, _catalogue);
+        q.hullClass = _catalogue.hulls[p].className;
+        if (origin && q.speed > 0)
+        {
+            const float dx = origin->pos.X() - dest.X();
+            const float dz = origin->pos.Z() - dest.Z();
+            q.seconds = sqrtf(dx * dx + dz * dz) / q.speed;
+        }
+        quotes[n++] = q;
+    }
+    a.choice.nQuotes = 0;
+    int cheapest = -1;
+    for (int i = 0; i < n; i++)
+    {
+        a.choice.quotes[a.choice.nQuotes++] = quotes[i];
+        if (quotes[i].affordable && (cheapest < 0 || quotes[i].price < quotes[cheapest].price))
+        {
+            cheapest = i;
+        }
+    }
+    if (cheapest < 0)
+    {
+        a.choice.why = n == 0 ? "no strike airframe offered" : "the pool cannot pay a strike";
+        return a;
+    }
+    int pick = cheapest;
+    if (urgent)
+    {
+        // the fastest within the urgent cost share of the cheapest (6.5)
+        const float share = _tuning.urgentCostShare > 1 ? _tuning.urgentCostShare : 1.0f;
+        for (int i = 0; i < n; i++)
+        {
+            if (quotes[i].affordable && (float)quotes[i].price <= share * (float)quotes[cheapest].price + 1e-4f &&
+                quotes[i].speed > quotes[pick].speed)
+            {
+                pick = i;
+            }
+        }
+    }
+    best = quotes[pick];
+    found = true;
+    a.choice.ok = found;
+    a.choice.quote = best;
+    a.go = true;
+    return a;
+}
+
+void OccupierForces::MaybeStrike(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
+                                 int target, int launchedKind)
+{
+    if (!StrikeDue(registry, view, target, launchedKind))
+    {
+        return;
+    }
+    const DirectorAction a = PlanStrike(registry, view, target, true);
+    if (!a.go)
+    {
+        LOG_DEBUG(Core, "OccupierForces: no strike with the operation: {}", (const char*)a.choice.why);
+        return;
+    }
+    // no extra token: the strike goes with the operation just launched
+    LaunchAction(registry, view, launcher, a, false, false, 0);
+}
+
+int OccupierForces::ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3Par pos, float now, int opId)
+{
+    AutoArray<ZoneEventRecord> fired;
+    const ZoneRecord* z = registry.GetZone(zone);
+    const bool town = z && stricmp(z->type, "CITY") == 0;
+    const int ring = registry.ApplyStrike(zone, pos, now, fired);
+    // the script handler (civilians.sqs: the panic) runs on the next zone
+    // tick, never inside CounterAttack's
+    for (int i = 0; i < fired.Size(); i++)
+    {
+        registry.QueueEvent(fired[i].type, fired[i].zoneIndex);
+    }
+    _strikesApplied++;
+    if (town)
+    {
+        _townStrikes++;
+        LOG_INFO(Core,
+                 "OccupierForces: [op {}] Struck {}: support {:.0f}, standing {:.0f} (-{:.0f} each), heat +{:.0f}, "
+                 "half income until {:.0f}; {} town(s) within {:.0f} m -{:.0f} each",
+                 opId, (const char*)z->name, (double)z->support, (double)z->standing, (double)ZoneRegistry::StrikeCut,
+                 (double)ZoneRegistry::StrikeHeat, (double)z->struckUntil, ring,
+                 (double)ZoneRegistry::StrikeRingRadius, (double)ZoneRegistry::StrikeRingCut);
+    }
+    else
+    {
+        LOG_INFO(Core, "OccupierForces: [op {}] Struck {}: {} town(s) within {:.0f} m -{:.0f} support and standing",
+                 opId, z ? (const char*)z->name : "a reported position", ring, (double)ZoneRegistry::StrikeRingRadius,
+                 (double)ZoneRegistry::StrikeRingCut);
+    }
+    return ring;
+}
+
+int OccupierForces::AlarmTarget(const ZoneRegistry& registry, const DirectorView& view,
+                                const DirectorLauncher& launcher) const
+{
+    const RString resistance = registry.ResistanceSide();
+    int best = -1;
+    int bestFighters = -1;
+    for (int i = 0; i < registry.NZones() && i < view.alert.Size(); i++)
+    {
+        if (view.alert[i] < (int)ASRed)
+        {
+            continue;
+        }
+        const ZoneRecord* z = registry.GetZone(i);
+        if (!z || stricmp(z->owner, resistance) == 0 || Cooldown(z->name) > 0 || launcher.HasRecord(i))
+        {
+            continue;
+        }
+        const int f = KnownFighters(registry, i);
+        if (f > bestFighters)
+        {
+            best = i;
+            bestFighters = f;
+        }
+    }
+    return best;
+}
+
+DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone) const
+{
+    DirectorAction a;
+    a.kind = CAKAlarm;
+    a.origin = CAOAlarm;
+    const ZoneRecord* z = registry.GetZone(zone);
+    if (!z)
+    {
+        a.choice.why = "no such zone";
+        return a;
+    }
+    a.target = zone;
+    a.alarmZone = zone;
+    a.alarmPos = LatestReport(registry, zone);
+    // 8.2: always urgent; a THIN occupier answers with the cheapest package
+    a.urgent = _band != OFBandThin;
+    a.fighters = (float)KnownFighters(registry, zone);
+    const Vector3 dest = a.alarmPos.X() != 0 || a.alarmPos.Z() != 0 ? a.alarmPos : z->pos;
+    PackageRequest req;
+    req.fighters = a.fighters;
+    req.defenderWeight = view.defenderWeight;
+    req.margin = _tuning.lethalityMargin;
+    req.minBodies = ForcePackages::AlarmMinBodies;
+    req.urgent = a.urgent;
+    req.urgentCostShare = _tuning.urgentCostShare;
+    req.tierFactor = view.tierFactor;
+    req.pool = _pool;
+    req.poolActive = Active();
+    req.offered = OfferedPackages;
+    AutoArray<PackageSource> sources;
+    // never the zone under attack (8.2)
+    BuildSources(registry, view, dest, -1, 0, zone, sources);
+    a.airOrigin = HeldAirfield(registry, dest);
+    if (a.airOrigin == zone)
+    {
+        a.airOrigin = -1; // the airfield under attack launches nothing
+    }
+    a.choice = ChooseWithAir(req, sources, a.airOrigin);
+    a.go = a.choice.ok;
+    return a;
+}
+
+bool OccupierForces::AlarmInFlight(const ZoneRegistry& registry, const DirectorLauncher& launcher)
+{
+    bool any = false;
+    for (int i = 0; i < _ops.Size(); i++)
+    {
+        OpRow& row = _ops[i];
+        if (row.kind != CAKAlarm || row.finished)
+        {
+            continue;
+        }
+        // the record is gone without a closing event: the row closes here
+        if (!launcher.HasRecord(registry.FindZoneIndex(row.target)))
+        {
+            row.finished = true;
+            continue;
+        }
+        any = true;
+    }
+    return any;
+}
+
+void OccupierForces::AnswerAlarms(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher)
+{
+    if (!Active() || _legacySave || view.won || view.lost)
+    {
+        return;
+    }
+    // forget the starvation notes of zones no longer RED
+    for (int i = _alarmStarved.Size() - 1; i >= 0; i--)
+    {
+        const int zi = registry.FindZoneIndex(_alarmStarved[i].name);
+        if (zi < 0 || zi >= view.alert.Size() || view.alert[zi] < (int)ASRed)
+        {
+            _alarmStarved.Delete(i);
+        }
+    }
+    if (AlarmInFlight(registry, launcher))
+    {
+        return; // one alarm answer at a time (8.2)
+    }
+    const int zone = AlarmTarget(registry, view, launcher);
+    if (zone < 0)
+    {
+        return;
+    }
+    const ZoneRecord* z = registry.GetZone(zone);
+    DirectorAction a;
+    const char* why = nullptr;
+    if (_band == OFBandSpent)
+    {
+        why = "the pool is spent";
+    }
+    else
+    {
+        a = PlanAlarm(registry, view, zone);
+        if (!a.go)
+        {
+            why = a.choice.why.GetLength() > 0 ? (const char*)a.choice.why : "no package";
+        }
+    }
+    if (why)
+    {
+        if (!HasName(_alarmStarved, z->name))
+        {
+            AddName(_alarmStarved, z->name);
+            LOG_INFO(Core, "OccupierForces: Starved: no answer to {} alarm ({})", (const char*)z->name, why);
+        }
+        return;
+    }
+    if (LaunchAction(registry, view, launcher, a, false, false, 0))
+    {
+        _alarmAnswers++;
+    }
+    else
+    {
+        SetCooldown(z->name, AlarmRefusedRest);
+    }
+}
+
+bool OccupierForces::LegacyQrf() const
+{
+    if (!_tuning.enabled)
+    {
+        return true; // the key off: the script QRF as before
+    }
+    if (Active())
+    {
+        return _legacySave;
+    }
+    // sized off (no roster) or a restored block now inert: the script QRF;
+    // before the first sizing: neither yet
+    return _activationTried || _restored;
+}
+
+void OccupierForces::EngineView(DirectorView& view)
+{
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    _missionNow = Glob.time - Foundation::Time(0);
+    if (!_catalogueBuilt && Active())
+    {
+        BuildEngineCatalogue(registry);
+    }
+    FillEngineView(registry, view);
+}
+
+bool OccupierForces::ForceStrike(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
+                                 int zone)
+{
+    if (!Active())
+    {
+        return false;
+    }
+    const DirectorAction a = PlanStrike(registry, view, zone, true);
+    if (!a.go)
+    {
+        LOG_INFO(Core, "OccupierForces: forced strike refused: {}", (const char*)a.choice.why);
+        return false;
+    }
+    return LaunchAction(registry, view, launcher, a, false, false, 0);
+}
+
+bool OccupierForces::ForceAlarm(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int zone)
+{
+    if (!Active())
+    {
+        return false;
+    }
+    const DirectorAction a = PlanAlarm(registry, view, zone);
+    if (!a.go)
+    {
+        LOG_INFO(Core, "OccupierForces: forced alarm answer refused: {}", (const char*)a.choice.why);
+        return false;
+    }
+    if (!LaunchAction(registry, view, launcher, a, false, false, 0))
+    {
+        return false;
+    }
+    _alarmAnswers++;
+    return true;
+}
+
+bool OccupierForces::ForceStrike(int zone)
+{
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    DirectorView view;
+    EngineView(view);
+    EngineDirectorLauncher launcher(registry);
+    return ForceStrike(registry, view, launcher, zone);
+}
+
+bool OccupierForces::ForceAlarm(int zone)
+{
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    DirectorView view;
+    EngineView(view);
+    EngineDirectorLauncher launcher(registry);
+    return ForceAlarm(registry, view, launcher, zone);
 }
 
 // engine path ---------------------------------------------------------------
@@ -2737,10 +3391,12 @@ void OccupierForces::BuildEngineCatalogue(const ZoneRegistry& registry)
     }
     ConfigHullInspector inspector;
     ForcePackages::BuildCatalogue(ladder, overrides, inspector, _catalogue, true);
-    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}",
+    LOG_INFO(Core, "OccupierForces: package catalogue for {} ({}, {} ladder class(es)); offers foot{}{}{}{}{}{}{}",
              (const char*)occupier, f ? (const char*)f->className : "no descriptor", ladder.Size(),
              _catalogue.Offered(FPTruck) ? ", truck" : "", _catalogue.Offered(FPArmedCar) ? ", armed car" : "",
-             _catalogue.Offered(FPApc) ? ", APC" : "", _catalogue.Offered(FPTank) ? ", tank" : "");
+             _catalogue.Offered(FPApc) ? ", APC" : "", _catalogue.Offered(FPTank) ? ", tank" : "",
+             _catalogue.Offered(FPTransportHeli) ? ", transport helicopter" : "",
+             _catalogue.Offered(FPAttackHeli) ? ", attack helicopter" : "", _catalogue.Offered(FPJet) ? ", jet" : "");
 }
 
 void OccupierForces::FillEngineView(const ZoneRegistry& registry, DirectorView& view) const
@@ -2778,6 +3434,7 @@ void OccupierForces::FillEngineView(const ZoneRegistry& registry, DirectorView& 
         view.spare[i] = stored;
         view.spareStored[i] = stored;
     }
+    view.now = _missionNow;
     view.hqZone = GuerrillaBase::Instance().HqZone();
     view.won = CampaignEnd::Instance().Won();
     view.lost = CampaignEnd::Instance().Lost();
@@ -2910,7 +3567,7 @@ void OccupierForces::DeriveFromExistingSave(const ZoneRegistry& registry)
     // invariant W from the derived set: awake with no tokens when enough
     // distinct towns are already held
     _posture = _townsEver.Size() >= _tuning.wakeTowns ? OFAwake : OFDormant;
-    _legacySave = true;
+    _legacySave = true; // D20: the old save keeps its own script QRF
     _band = InitialBand(_pool, _poolStart);
     LOG_INFO(Core,
              "OccupierForces: derived from a save without the block: pool {} of {} (control {:.2f}), {} wave "
@@ -3009,8 +3666,27 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("waveWindow", _waveWindow, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("surgeZone", _surgeZone, 1, RString()))
     PARAM_CHECK(ar.Serialize("surgeBodies", _surgeBodies, 1, 0))
+    // phase 6 (absent in older blocks: 0, which marks the block legacy)
+    PARAM_CHECK(ar.Serialize("townStrikes", _townStrikes, 1, 0))
+    PARAM_CHECK(ar.Serialize("strikesApplied", _strikesApplied, 1, 0))
+    PARAM_CHECK(ar.Serialize("alarmAnswers", _alarmAnswers, 1, 0))
+    int format = SaveFormat;
+    PARAM_CHECK(ar.Serialize("format", format, 1, 0))
     if (ar.IsLoading())
     {
+        _loadedFormat = format;
+        // D20: a block saved before the native alarm answers existed keeps
+        // the campaign's own script QRF (its text rides in the save) and no
+        // native answers run beside it
+        if (format < SaveFormat && _active && !_legacySave)
+        {
+            _legacySave = true;
+            LOG_INFO(Core,
+                     "OccupierForces: block format {} predates the native alarm answers: legacySave, the script QRF "
+                     "stays",
+                     format);
+        }
+        _alarmStarved.Clear();
         // transient director state is re-derived: the alert baseline from
         // the next scan (no false edges), the catalogue from the config
         _alertPrev.Clear();

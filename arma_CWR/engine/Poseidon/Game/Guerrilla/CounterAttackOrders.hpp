@@ -112,6 +112,25 @@ struct CounterAttackOrder
     RString escortClass;
     int escortCrew = 0;
     int escortPriceUnits = 0;
+    // appended by phase 6A (OCCUPIER-FORCES.md 3.2, 6.5, 8.2, D4, D9, D17) --
+    // air: the package field carries FPTransportHeli / FPAttackHeli / FPJet
+    // and hullClass the airframe.  airOrigin is an occupier-held AIRFIELD
+    // zone index the airframe is born at the edge of, or -1 = off-map (the
+    // map edge beyond the perception band toward the origin side, D3).  For
+    // an air order `source` still names the base that pays the infantry
+    // (FPTransportHeli) or may be -1 (a strike carries no infantry).
+    int airOrigin = -1;
+    // CAKStrike (D17): what is struck.  strikeZone is the town or zone
+    // index (-1 none); strikePos is where the fighters were REPORTED, or the
+    // town's centre (VZero = the strikeZone's centre).  Never a hidden player
+    // position (D9).
+    int strikeZone = -1;
+    Vector3 strikePos = VZero;
+    // CAKAlarm (D4, 8.2): the RED occupier zone answered and the reported
+    // position the force travels to (VZero = the alarm zone's centre)
+    int alarmZone = -1;
+    Vector3 alarmPos = VZero;
+    bool IsAirPackage() const { return package == FPTransportHeli || package == FPAttackHeli || package == FPJet; }
 };
 
 // what CounterAttack reports back (one event per state change)
@@ -128,6 +147,12 @@ enum CounterAttackOpEventType
     CAOpHullRefund,      // a hull deleted at home intact: units = its price
     CAOpHullLost,        // a hull destroyed (or deleted on a return to abstract travel, no refund): units = its price
     CAOpAborted,         // any other end (timeout, source lost, won/lost freeze)
+    // appended by phase 6A (air, alarm) -------------------------------------
+    CAOpAirborne,        // an airframe was born unseen in the air (zone = airOrigin or -1, pos = birth point)
+    CAOpLanded,          // a transport heli set down (zone = target, pos = the touchdown point)
+    CAOpStruck,          // a strike reached its target area, ONCE per op (zone = strikeZone, pos = strikePos):
+                         // the director applies the town-strike effects (D17) on it
+    CAOpAlarmAnswered,   // an alarm answer reached alarmPos (zone = alarmZone, pos = alarmPos)
     NCounterAttackOpEventTypes
 };
 
@@ -142,6 +167,10 @@ struct CounterAttackOpEvent
     int bodies = 0;          // infantry bodies the event is about
     int units = 0;           // pool units the event is about (hull prices, losses)
     const char* note = "";   // free text for the INFO line (never stored)
+    // appended by phase 6A: the place the event is about (CAOpAirborne,
+    // CAOpLanded, CAOpStruck, CAOpAlarmAnswered); -1 / VZero otherwise
+    int zone = -1;
+    Vector3 pos = VZero;
 };
 
 // The director's ear.  CounterAttack calls it from its own tick; the listener

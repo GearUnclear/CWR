@@ -392,6 +392,7 @@ struct TrafficZoneCandidate
     float z = 0;    // northing
     bool isCity = false;
     bool occupierOwned = false; // owner == the campaign's occupier side
+    int landmass = -1;          // RoadRoute::Landmass of the centre, -1 unknown (any leg allowed)
 };
 
 // One encounter check for the pure StepEncounter (issue #66): the world

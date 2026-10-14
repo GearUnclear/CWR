@@ -1633,6 +1633,72 @@ void ZoneRegistry::HeatRaise(int index, float amount)
     }
 }
 
+int ZoneRegistry::ApplyStrike(int index, Vector3Par pos, float now, AutoArray<ZoneEventRecord>& fired)
+{
+    ZoneRecord* struck = GetZoneMutable(index);
+    // the ring is measured from the struck town (7.3: "every town within
+    // 2 km"), from the strike point when no town was struck
+    Vector3 centre = pos;
+    if (struck && ((centre.X() == 0 && centre.Z() == 0) || stricmp(struck->type, "CITY") == 0))
+    {
+        centre = struck->pos;
+    }
+    if (!struck && centre.X() == 0 && centre.Z() == 0)
+    {
+        return 0; // nowhere to strike
+    }
+    auto cut = [](float v, float amount) {
+        v -= amount;
+        return v < 0 ? 0.0f : v;
+    };
+    if (struck && stricmp(struck->type, "CITY") == 0)
+    {
+        struck->support = cut(struck->support, StrikeCut);
+        struck->standing = cut(struck->standing, StrikeCut);
+        struck->heat += StrikeHeat;
+        if (struck->heat > 100)
+        {
+            struck->heat = 100;
+        }
+        struck->struckUntil = now + StrikeStampSeconds;
+        ZoneEventRecord ev;
+        ev.type = ZETownStruck;
+        ev.zoneIndex = index;
+        fired.Add(ev);
+    }
+    int ring = 0;
+    const float r2 = StrikeRingRadius * StrikeRingRadius;
+    for (int i = 0; i < _zones.Size(); i++)
+    {
+        if (i == index)
+        {
+            continue;
+        }
+        ZoneRecord& z = _zones[i];
+        if (stricmp(z.type, "CITY") != 0)
+        {
+            continue;
+        }
+        const float dx = z.pos.X() - centre.X();
+        const float dz = z.pos.Z() - centre.Z();
+        if (dx * dx + dz * dz > r2)
+        {
+            continue;
+        }
+        // fear spreads; no panic, no stamp (7.3)
+        z.support = cut(z.support, StrikeRingCut);
+        z.standing = cut(z.standing, StrikeRingCut);
+        ring++;
+    }
+    return ring;
+}
+
+bool ZoneRegistry::IsStruck(int index, float now) const
+{
+    const ZoneRecord* z = GetZone(index);
+    return z && stricmp(z->type, "CITY") == 0 && z->struckUntil > 0 && now < z->struckUntil;
+}
+
 void ZoneRegistry::HeatDecay(int index, float amount)
 {
     ZoneRecord* z = GetZoneMutable(index);
@@ -2247,6 +2313,10 @@ int ZoneRegistry::EventTypeFromName(const char* name)
     if (stricmp(name, "hqLost") == 0)
     {
         return ZEHqLost;
+    }
+    if (stricmp(name, "townStruck") == 0)
+    {
+        return ZETownStruck;
     }
     return -1;
 }
@@ -3398,6 +3468,9 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     // saves, same degradation
     PARAM_CHECK(ar.Serialize("onBaseLost", _handlers[ZEBaseLost], 1, RString()))
     PARAM_CHECK(ar.Serialize("onHqLost", _handlers[ZEHqLost], 1, RString()))
+    // occupier forces phase 6 (OCCUPIER-FORCES.md 7.3): absent in older
+    // saves, same degradation
+    PARAM_CHECK(ar.Serialize("onTownStruck", _handlers[ZETownStruck], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
     if (ar.IsSaving())

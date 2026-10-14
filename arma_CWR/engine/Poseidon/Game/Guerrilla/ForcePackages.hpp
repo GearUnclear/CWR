@@ -165,7 +165,11 @@ struct PackageSource
     // always debited from the reserve (CounterAttack::LaunchFunded); -1 =
     // the same as spare
     int spareStored = -1;
+    // phase 6A: the base stands on another landmass than the target (an
+    // island of its own): only a transport helicopter can carry its bodies
+    bool airOnly = false;
     int SpareFor(int package) const { return package != FPFoot && spareStored >= 0 ? spareStored : spare; }
+    bool Serves(int package) const { return !airOnly || package == FPTransportHeli; }
 };
 
 struct PackageRequest
@@ -179,9 +183,14 @@ struct PackageRequest
     float tierFactor = 1.0f;      // 1.0 / 1.25 / 1.5
     int pool = 0;                 // pool units available for hulls and crews
     bool poolActive = true;       // false: the pool is inert (nothing is debited)
-    // OfferedMask bits; the default offers every ground package
-    // (ForcePackages::DefaultPackages, phase 5)
-    unsigned int offered = (1u << FPFoot) | (1u << FPTruck) | (1u << FPArmedCar) | (1u << FPApc) | (1u << FPTank);
+    // OfferedMask bits; the default offers every package
+    // (ForcePackages::DefaultPackages: ground since phase 5, air since 6A)
+    unsigned int offered = (1u << FPFoot) | (1u << FPTruck) | (1u << FPArmedCar) | (1u << FPApc) | (1u << FPTank) |
+                           (1u << FPTransportHeli) | (1u << FPAttackHeli) | (1u << FPJet);
+    // phase 6A: an air package flies from off-map (no occupier-held
+    // airfield): its hull is quoted at the off-map price (x1.5, D3).  False =
+    // the airfield price (the director may re-price itself).
+    bool airOffMap = false;
 };
 
 // what a hull does once its infantry is out at the town edge (3.2)
@@ -215,9 +224,13 @@ class ForcePackages
     static constexpr unsigned int GroundPackages =
         Phase3Packages | (1u << FPArmedCar) | (1u << FPApc) | (1u << FPTank);
     static constexpr unsigned int AirPackages = (1u << FPTransportHeli) | (1u << FPAttackHeli) | (1u << FPJet);
-    // what the director offers now: every ground package (phase 5); phase 6
-    // adds AirPackages
-    static constexpr unsigned int DefaultPackages = GroundPackages;
+    // what the director offers now: every ground package (phase 5) and the
+    // air packages (phase 6A).  An air bit offers nothing unless the faction
+    // descriptor authors its class (forcesTransportHeli / forcesAttackHeli /
+    // forcesJet: air is never classified from the ladder), and the strike
+    // airframes (attack helicopter, jet) carry no infantry (SeatCap 0), so a
+    // ground operation never chooses one: strikes are ordered as CAKStrike.
+    static constexpr unsigned int DefaultPackages = GroundPackages | AirPackages;
     static constexpr unsigned int AllPackages = (1u << NForcePackages) - 1u;
 
     // classification thresholds (6.5)
@@ -263,7 +276,8 @@ class ForcePackages
     static float TierFactor(int tierIndex); // 1.0 / 1.25 / 1.5 (index clamped 0..2)
     static int CrewOf(int package, const ForcePackageCatalogue& cat);
     // the infantry a package can carry: MaxGroup on foot, else
-    // min(MaxGroup, the hull's cargo seats); 0 for a package not offered
+    // min(MaxGroup, the hull's cargo seats); 0 for a package not offered and
+    // for the strike airframes (attack helicopter, jet: they insert nobody)
     static int SeatCap(int package, const ForcePackageCatalogue& cat);
     // FERHoldBack for a truck, FERSupport for an armed car, an APC or a
     // tank, FERNone for foot and air (the hull lifecycle reads it)

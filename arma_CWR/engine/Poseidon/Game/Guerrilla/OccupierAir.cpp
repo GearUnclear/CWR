@@ -4,6 +4,7 @@
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // EnsureSideCenter, CreateSideGroup, faction squads
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars (CfgVehicles crew)
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
 
 #include <Poseidon/Core/Application.hpp>         // GApp (ENGINE_CONFIG)
 #include <Poseidon/Core/Config/EngineConfig.hpp> // ENGINE_CONFIG.objectsZ / horizontZ
@@ -115,14 +116,21 @@ bool OccupierAir::UnseenAt(const AirViewer& v, Vector3Par pos)
     {
         return Dist2DSq(pos, v.PlayerPos()) > bound * bound;
     }
-    // Traffic::CanExposeDespawn at altitude: outside the view cone AND (past
-    // the bound OR terrain-hidden)
+    // the aircraft rule (phase 6A, the orchestrator's decision on the
+    // spike's open item): past the band's bound in 3D from the camera an
+    // airframe is not drawn, so it is unseen even inside the view cone (a
+    // speck at altitude).  Closer: Traffic::CanExposeDespawn at altitude,
+    // outside the view cone AND terrain-hidden.
+    const float d2 = (pos - v.CamPos()).SquareSize();
+    if (d2 >= bound * bound)
+    {
+        return true;
+    }
     if (v.InFrustum(pos))
     {
         return false;
     }
-    const float d2 = (pos - v.CamPos()).SquareSize();
-    return d2 >= bound * bound || v.LosBlocked(pos);
+    return v.LosBlocked(pos);
 }
 
 void OccupierAir::LzCandidate(int i, const AirTuning& t, float& angleOffset, float& radius)
@@ -255,10 +263,11 @@ int OccupierAir::StepInsertionPure(AirInsertionCore& c, const AirFacts& f, float
         c.stateTime = 0;
         c.touchFor = 0;
     };
+    // the pad stays until the hull is gone (crew, then hull, then pad)
     auto fail = [&](int reason) {
         c.failReason = reason;
         enter(AISFailed);
-        return AAMoveHome | AARemovePad;
+        return (int)AAMoveHome;
     };
     // the second half of the removal: the hull, one step after the crew
     if (c.crewRemoved)
@@ -288,7 +297,6 @@ int OccupierAir::StepInsertionPure(AirInsertionCore& c, const AirFacts& f, float
         // nobody flies it home: removed where unseen, as a failure
         c.failReason = AFRCrewLost;
         enter(AISFailed);
-        act |= AARemovePad;
     }
     switch (c.state)
     {
@@ -339,12 +347,12 @@ int OccupierAir::StepInsertionPure(AirInsertionCore& c, const AirFacts& f, float
             if (f.cargoSeated == 0)
             {
                 enter(AISDeparting);
-                act |= AAMoveHome | AARemovePad;
+                act |= AAMoveHome;
             }
             else if (c.stateTime > t.unloadTimeout)
             {
                 enter(AISDeparting); // leaves with what would not get out (counted in the rows)
-                act |= AAMoveHome | AARemovePad;
+                act |= AAMoveHome;
             }
             else if (f.heightAgl <= t.landedHeight && c.age - c.unloadAt >= UnloadRetry)
             {
@@ -620,12 +628,44 @@ const ParamEntry* VehicleClass(const RString& cls)
     return c && c->IsClass() ? c : nullptr;
 }
 
+// a seated man leaves his seat first, at the hull, with no sound (the
+// CounterAttack EngineOps::LeaveVehicle idiom): ::DeleteVehicle only flags a
+// seated man, who then lingers in the world's out-vehicle list and reaches
+// every save.  Living and dead alike.
+void LeaveVehicle(Person* person)
+{
+    AIUnit* unit = person ? person->Brain() : nullptr;
+    Transport* veh = unit ? unit->GetVehicleIn() : nullptr;
+    if (!veh || !person->IsLocal())
+    {
+        return;
+    }
+    const Matrix4 at = veh->WorldTransform();
+    if (veh->Driver() == person)
+    {
+        veh->GetOutDriver(at, false);
+    }
+    else if (veh->Gunner() == person)
+    {
+        veh->GetOutGunner(at, false);
+    }
+    else if (veh->Commander() == person)
+    {
+        veh->GetOutCommander(at, false);
+    }
+    else
+    {
+        veh->GetOutCargo(person, at, false);
+    }
+}
+
 void DeletePerson(Person* person)
 {
     if (!person)
     {
         return;
     }
+    LeaveVehicle(person);
     if (person->IsLocal())
     {
         ::DeleteVehicle(person);
@@ -1348,6 +1388,154 @@ bool OccupierAir::Reveal(int sortieId, Entity* target, float ageSeconds, float a
         return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// phase 6A: lookup and persistence
+// ---------------------------------------------------------------------------
+
+const AirInsertion* OccupierAir::FindInsertion(int id) const
+{
+    for (int i = 0; i < _insertions.Size(); i++)
+    {
+        if (_insertions[i].id == id)
+        {
+            return &_insertions[i];
+        }
+    }
+    return nullptr;
+}
+
+const AirSortie* OccupierAir::FindSortie(int id) const
+{
+    for (int i = 0; i < _sorties.Size(); i++)
+    {
+        if (_sorties[i].id == id)
+        {
+            return &_sorties[i];
+        }
+    }
+    return nullptr;
+}
+
+namespace
+{
+LSError SerializeVec(ParamArchive& ar, const char* name, Vector3& v)
+{
+    RString kx = RString(name) + "X";
+    RString ky = RString(name) + "Y";
+    RString kz = RString(name) + "Z";
+    float x = v.X();
+    float y = v.Y();
+    float z = v.Z();
+    PARAM_CHECK(ar.Serialize((const char*)kx, x, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize((const char*)ky, y, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize((const char*)kz, z, 1, 0.0f))
+    v = Vector3(x, y, z);
+    return LSOK;
+}
+} // namespace
+
+LSError AirInsertion::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("id", id, 1, 0))
+    PARAM_CHECK(ar.Serialize("heliClass", heliClass, 1, RString()))
+    PARAM_CHECK(ar.Serialize("side", side, 1, RString()))
+    // the airframe, its crew and cargo ride the world's vehicle serializer;
+    // the refs resolve on the second pass
+    PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
+    PARAM_CHECK(ar.SerializeRef("crew", crew, 1))
+    PARAM_CHECK(ar.SerializeRef("cargo", cargo, 1))
+    PARAM_CHECK(ar.SerializeRef("pad", pad, 1))
+    PARAM_CHECK(ar.Serialize("cargoBorn", cargoBorn, 1, 0))
+    PARAM_CHECK(SerializeVec(ar, "birth", birthPos))
+    PARAM_CHECK(SerializeVec(ar, "target", target))
+    PARAM_CHECK(ar.Serialize("crewGoneAt", crewGoneAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("hullGoneAt", hullGoneAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("removeSeq", removeSeq, 1, 0))
+    AirInsertionCore& c = core;
+    PARAM_CHECK(ar.Serialize("state", c.state, 1, (int)AISInbound))
+    PARAM_CHECK(ar.Serialize("stateTime", c.stateTime, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("age", c.age, 1, 0.0f))
+    PARAM_CHECK(SerializeVec(ar, "lz", c.lz))
+    PARAM_CHECK(SerializeVec(ar, "home", c.home))
+    PARAM_CHECK(SerializeVec(ar, "landedAt", c.landedAt))
+    PARAM_CHECK(ar.Serialize("landed", c.landed, 1, false))
+    PARAM_CHECK(ar.Serialize("landedOffset", c.landedOffset, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("landings", c.landings, 1, 0))
+    PARAM_CHECK(ar.Serialize("liftedOffAt", c.liftedOffAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("unloadAt", c.unloadAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("landOrderAt", c.landOrderAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("landOrders", c.landOrders, 1, 0))
+    PARAM_CHECK(ar.Serialize("unloadOrdered", c.unloadOrdered, 1, false))
+    PARAM_CHECK(ar.Serialize("crewRemoved", c.crewRemoved, 1, false))
+    PARAM_CHECK(ar.Serialize("hullRemoved", c.hullRemoved, 1, false))
+    PARAM_CHECK(ar.Serialize("failReason", c.failReason, 1, 0))
+    if (ar.IsLoading())
+    {
+        c.unseenFor = 0;
+        c.touchFor = 0;
+    }
+    return LSOK;
+}
+
+LSError AirSortie::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("id", id, 1, 0))
+    PARAM_CHECK(ar.Serialize("planeClass", planeClass, 1, RString()))
+    PARAM_CHECK(ar.Serialize("side", side, 1, RString()))
+    PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
+    PARAM_CHECK(ar.SerializeRef("crew", crew, 1))
+    PARAM_CHECK(SerializeVec(ar, "birth", birthPos))
+    PARAM_CHECK(ar.Serialize("crewGoneAt", crewGoneAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("hullGoneAt", hullGoneAt, 1, -1.0f))
+    PARAM_CHECK(ar.Serialize("reveals", reveals, 1, 0))
+    AirSortieCore& c = core;
+    PARAM_CHECK(ar.Serialize("state", c.state, 1, (int)ASSInbound))
+    PARAM_CHECK(ar.Serialize("stateTime", c.stateTime, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("age", c.age, 1, 0.0f))
+    PARAM_CHECK(SerializeVec(ar, "target", c.target))
+    PARAM_CHECK(SerializeVec(ar, "home", c.home))
+    PARAM_CHECK(ar.Serialize("sortieTime", c.sortieTime, 1, 300.0f))
+    PARAM_CHECK(ar.Serialize("orbitClock", c.orbitClock, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("orbitIndex", c.orbitIndex, 1, 0))
+    PARAM_CHECK(ar.Serialize("touchedGround", c.touchedGround, 1, false))
+    PARAM_CHECK(ar.Serialize("crewRemoved", c.crewRemoved, 1, false))
+    PARAM_CHECK(ar.Serialize("hullRemoved", c.hullRemoved, 1, false))
+    PARAM_CHECK(ar.Serialize("failReason", c.failReason, 1, 0))
+    if (ar.IsLoading())
+    {
+        c.unseenFor = 0;
+    }
+    return LSOK;
+}
+
+LSError OccupierAir::SerializeRecords(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("AirInsertions", _insertions, 1))
+    PARAM_CHECK(ar.Serialize("AirSorties", _sorties, 1))
+    PARAM_CHECK(ar.Serialize("airNextId", _nextId, 1, 1))
+    if (ar.IsLoading())
+    {
+        _accum = 0;
+        _traceClock = 0;
+    }
+    return LSOK;
+}
+
+void OccupierAir::AfterLoad()
+{
+    for (int i = 0; i < _insertions.Size(); i++)
+    {
+        AirInsertion& r = _insertions[i];
+        if (r.core.hullRemoved || r.pad || (r.core.state != AISInbound && r.core.state != AISLanding))
+        {
+            continue;
+        }
+        r.pad = CreatePad(r.core.lz);
+        LOG_INFO(Core, "OccupierAir: insertion #{} helipad re-created at [{:.0f}, {:.0f}] after a load", r.id,
+                 r.core.lz.X(), r.core.lz.Z());
+    }
 }
 
 int OccupierAir::Abort(int id, bool hullFirst)

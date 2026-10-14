@@ -2910,6 +2910,7 @@ TEST_CASE("CounterAttack - a column: the escort is born unseen behind the carrie
     // the cargo, then each hull crew first; the prices stay for the rebirth
     const CounterAttackView far = Fixture::View(FarX, FarZ);
     ops.squadUnseen = true;
+    ops.bodiesUnseen = true; // every member, the dead too (the vanish checks corpses)
     ops.hullUnseen = true;
     f.ca.Step(f.registry, far, CounterAttack::VanishHold + 1.0f, &ops, fired);
     REQUIRE(f.ca.Count() == 1);
@@ -2935,6 +2936,7 @@ TEST_CASE("CounterAttack - a column: the escort is born unseen behind the carrie
     // the infantry gets out, the truck holds back and the escort supports
     ops.infAt = TowardPost(f, 600.0f);
     ops.squadUnseen = false;
+    ops.bodiesUnseen = false;
     ops.hullUnseen = false;
     f.ca.Step(f.registry, AtTown(f), CounterAttack::ResendInterval + 1.0f, &ops, fired);
     CHECK(ops.escortDrives > 0);
@@ -3132,6 +3134,7 @@ TEST_CASE("CounterAttack - a live top-up squad whose town is lost walks home and
     CHECK(ops.moves > movesBefore);
     // out of his sight and away: it leaves, its bodies home
     ops.squadUnseen = true;
+    ops.bodiesUnseen = true; // every member, the dead too (the vanish checks corpses)
     ops.infAt = f.Z(f.post).pos;
     f.ca.Step(f.registry, Fixture::View(FarX, FarZ), 1.0f, &ops, fired);
     CHECK(f.ca.Count() == 0);
@@ -3196,4 +3199,565 @@ TEST_CASE("CounterAttack - forcesOpsMax has one reader: OccupierForces' tuning w
         CHECK(f.ca.OpsCap() == 5);
     }
     CHECK(f.ca.OpsCap() == 0);
+}
+
+// ---------------------------------------------------------------------------
+// phase 6A: air packages, strikes and alarm answers (OCCUPIER-FORCES.md 3.1,
+// 3.2, 6.5, 8.2, D3, D4, D9, D17, D20)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// a world with air: one helicopter (or jet) entity, its crew and its cargo
+// groups; the airframe's status is whatever the case sets
+struct AirOps final : CounterAttackOps
+{
+    Ref<EntityType> type = new EntityType(nullptr);
+    Ref<Entity> heli = new Entity(nullptr, type, -1);
+    Ref<AIGroup> cargo = new AIGroup();
+    Ref<AIGroup> crew = new AIGroup();
+    int exposure = CAExposeHidden;
+    bool lzOk = true;
+    bool known = true;
+    CounterAttackAirStatus status;
+    int cargoAlive = 0;
+    Vector3 cargoAt = VZero;
+    int inserts = 0, sorties = 0, reveals = 0, removed = 0;
+    int nextId = 1;
+    Vector3 lastBirth = VZero, lastLz = VZero, lastTarget = VZero;
+    float lastAlt = 0;
+    int lastN = 0;
+    std::string lastClass;
+
+    int Exposure(Vector3Par) const override { return exposure; }
+    AIGroup* SpawnSquad(int, Vector3Par, Vector3Par) override { return nullptr; }
+    AIGroup* DetachFromGarrison(int, int, Vector3Par, int& taken) override
+    {
+        taken = 0;
+        return nullptr;
+    }
+    int Alive(AIGroup* g, Vector3& at) override
+    {
+        if (g && g == cargo.GetRef())
+        {
+            at = cargoAt;
+            return cargoAlive;
+        }
+        return 0;
+    }
+    void MoveOn(AIGroup*, Vector3Par) override {}
+    void Assault(AIGroup*, Vector3Par) override {}
+    void BuildRoute(Vector3Par from, Vector3Par to, AutoArray<Vector3>& route) override
+    {
+        route.Clear();
+        route.Add(from);
+        route.Add(to);
+    }
+    void Remove(AIGroup*) override { removed++; }
+    void Adopt(int, AIGroup*) override {}
+    bool SquadUnseen(AIGroup*) const override { return false; }
+    bool AirPickLz(Vector3Par target, const Vector3*, Vector3& lz) override
+    {
+        lz = target + Vector3(400.0f, 0, 0);
+        return lzOk;
+    }
+    int AirInsert(const RString& hullClass, int n, Vector3Par birth, float altAgl, Vector3Par lz, Vector3Par target,
+                  AIGroup*& cargoOut, Entity*& hull, AIGroup*& crewGroup) override
+    {
+        inserts++;
+        lastClass = (const char*)hullClass;
+        lastN = n;
+        lastBirth = birth;
+        lastAlt = altAgl;
+        lastLz = lz;
+        lastTarget = target;
+        cargoOut = cargo;
+        hull = heli;
+        crewGroup = crew;
+        status.cargoBorn = n;
+        return nextId++;
+    }
+    int AirSortie(const RString& hullClass, Vector3Par birth, float altAgl, Vector3Par target, float,
+                  Entity*& hull, AIGroup*& crewGroup) override
+    {
+        sorties++;
+        lastClass = (const char*)hullClass;
+        lastBirth = birth;
+        lastAlt = altAgl;
+        lastTarget = target;
+        hull = heli;
+        crewGroup = crew;
+        return nextId++;
+    }
+    bool AirStatus(int, CounterAttackAirStatus& out) const override
+    {
+        out = status;
+        return known;
+    }
+    int AirRevealNear(int, Vector3Par, float) override { return ++reveals; }
+};
+
+CounterAttackOrder StrikeOrder(int zone, int opId = 61)
+{
+    CounterAttackOrder o;
+    o.opId = opId;
+    o.kind = CAKStrike;
+    o.origin = CAODirector;
+    o.package = FPJet;
+    o.hullClass = "Su25";
+    o.crew = 1;
+    o.priceUnits = 23; // jet 22 + its pilot
+    o.funded = true;
+    o.strikeZone = zone;
+    o.source = -1;
+    o.abstractSpeed = 200.0f;
+    return o;
+}
+
+CounterAttackOrder HeliOrder(int target, int source, int airfield, int opId = 62)
+{
+    CounterAttackOrder o = FootOrder(target, source, 4, opId);
+    o.package = FPTransportHeli;
+    o.hullClass = "Mi17";
+    o.crew = 2;
+    o.priceUnits = 12; // transport heli 10 + two crew
+    o.airOrigin = airfield;
+    o.abstractSpeed = CounterAttack::RealSpeed(FPTransportHeli, 240.0f);
+    return o;
+}
+
+CounterAttackView WithMap(CounterAttackView v)
+{
+    v.mapSize = 10000.0f;
+    return v;
+}
+
+} // namespace
+
+TEST_CASE("CounterAttack - phase 6A: the off-map edge and the birth altitudes", "[game][guerrilla][counterattack]")
+{
+    const Vector3 t(1000, 0, 1300);
+    // nearest edge: x = 1000 is the closest (west)
+    Vector3 p = CounterAttack::OffMapEdgePoint(t, 10000.0f, -1, 1500.0f);
+    CHECK(p.X() == Approx(-1500.0f));
+    CHECK(p.Z() == Approx(1300.0f));
+    p = CounterAttack::OffMapEdgePoint(t, 10000.0f, CAEdgeNorth, 1500.0f);
+    CHECK(p.X() == Approx(1000.0f));
+    CHECK(p.Z() == Approx(11500.0f));
+    p = CounterAttack::OffMapEdgePoint(t, 10000.0f, CAEdgeEast, 500.0f);
+    CHECK(p.X() == Approx(10500.0f));
+    p = CounterAttack::OffMapEdgePoint(t, 10000.0f, CAEdgeSouth, 500.0f);
+    CHECK(p.Z() == Approx(-500.0f));
+    CHECK(CounterAttack::OffMapEdgePoint(t, 0.0f, -1, 1500.0f).X() == 0.0f); // no map: no edge
+    CHECK(CounterAttack::AirBirthAlt(FPJet) == Approx(250.0f));
+    CHECK(CounterAttack::AirBirthAlt(FPTransportHeli) == Approx(100.0f));
+    CHECK(CounterAttack::AirBirthAlt(FPAttackHeli) == Approx(100.0f));
+}
+
+TEST_CASE("CounterAttack - phase 6A: forcesSortieTime and forcesOffMapEdge are read with the 16 defaults",
+          "[game][guerrilla][counterattack]")
+{
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        CHECK(f.ca.Tuning().sortieTime == Approx(300.0f));
+        CHECK(f.ca.Tuning().offMapEdge == -1);
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesSortieTime = 9999; forcesOffMapEdge = \"E\";"));
+        CHECK(f.ca.Tuning().sortieTime == Approx(1800.0f));
+        CHECK(f.ca.Tuning().offMapEdge == CAEdgeEast);
+    }
+}
+
+TEST_CASE("CounterAttack - phase 6A: strike and alarm validation in LaunchFunded", "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+
+    // strikes: a jet or an attack helicopter, an airframe, a target
+    CounterAttackOrder bad = StrikeOrder(f.town);
+    bad.package = FPTruck;
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, bad, nullptr, fired));
+    bad = StrikeOrder(f.town);
+    bad.hullClass = RString();
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, bad, nullptr, fired));
+    bad = StrikeOrder(-1);
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, bad, nullptr, fired)); // no town, no reported position
+    bad = StrikeOrder(f.town);
+    bad.airOrigin = f.post; // an OUTPOST is no airfield
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, bad, nullptr, fired));
+    CHECK(f.ca.Count() == 0);
+    // a valid strike needs no source and no bodies; a second one on the same town is refused
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, StrikeOrder(f.town), nullptr, fired));
+    CHECK_FALSE(f.ca.LaunchFunded(f.registry, far, StrikeOrder(f.town, 63), nullptr, fired));
+    // a reported position works without a town
+    CounterAttackOrder reported = StrikeOrder(-1, 64);
+    reported.strikePos = Vector3(3000, 0, 3000);
+    reported.package = FPAttackHeli;
+    reported.hullClass = "Mi24";
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, reported, nullptr, fired));
+    CHECK(f.ca.Get(1)->strikeZone == -1);
+    CHECK(f.ca.Get(1)->strikePos.X() == Approx(3000.0f));
+    // a strike does not take the town's one-record slot: a retake still goes
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, FootOrder(f.town, f.post, 4, 65), nullptr, fired));
+    CHECK(f.ca.Count() == 3);
+
+    // alarm answers (8.2): an occupier-held zone, never its own source, one at a time
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1;"));
+    g.RaiseTown(g.town);
+    CounterAttackOrder alarm = KindOrder(CAKAlarm, -1, g.farBase, 4, 71);
+    alarm.alarmZone = g.town; // a resistance-held town is no occupier zone
+    CHECK_FALSE(g.ca.LaunchFunded(g.registry, far, alarm, nullptr, fired));
+    alarm.alarmZone = g.farBase; // the zone under attack never answers itself
+    CHECK_FALSE(g.ca.LaunchFunded(g.registry, far, alarm, nullptr, fired));
+    alarm.alarmZone = g.post;
+    alarm.alarmPos = g.Z(g.post).pos + Vector3(50, 0, 0);
+    REQUIRE(g.ca.LaunchFunded(g.registry, far, alarm, nullptr, fired));
+    const CounterAttack::Record* a = g.ca.Get(0);
+    CHECK(a->kind == CAKAlarm);
+    CHECK(a->alarmZone == g.post);
+    CHECK(Fixture::Str(a->target) == "Post");
+    CHECK(a->destPos.X() == Approx(g.Z(g.post).pos.X() + 50.0f)); // it travels to the reported position
+    CHECK(g.ca.FindAlarm() == 0);
+    alarm.opId = 72;
+    CHECK_FALSE(g.ca.LaunchFunded(g.registry, far, alarm, nullptr, fired)); // one at a time
+}
+
+TEST_CASE("CounterAttack - phase 6A: an abstract strike reaches its town once, then flies home",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, StrikeOrder(f.town), nullptr, fired));
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // off-map: the west edge 1500 m out, 2500 m from the town at 200 m/s
+    CHECK(r->travel == Approx(12.5f));
+    CHECK(r->airFrom.X() == Approx(-1500.0f));
+    CHECK(ear.Count(CAOpLaunched) == 1);
+    f.ca.Step(f.registry, far, 5.0f, nullptr, fired);
+    CHECK(ear.Count(CAOpStruck) == 0);
+    f.ca.Step(f.registry, far, 10.0f, nullptr, fired);
+    REQUIRE(ear.Count(CAOpStruck) == 1);
+    const CounterAttackOpEvent* s = ear.Last(CAOpStruck);
+    CHECK(s->zone == f.town);
+    CHECK(s->pos.X() == Approx(f.Z(f.town).pos.X()));
+    CHECK(s->pos.Z() == Approx(f.Z(f.town).pos.Z()));
+    CHECK(s->kind == CAKStrike);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 22); // the jet; its pilot home as a body
+    CHECK(ear.Last(CAOpHullRefund)->bodies == 1);
+}
+
+TEST_CASE("CounterAttack - phase 6A: a live strike is born unseen at altitude and strikes once over its target",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    AirOps ops;
+    const CounterAttackView atTown = WithMap(AtTown(f));
+    REQUIRE(f.ca.LaunchFunded(f.registry, atTown, StrikeOrder(f.town), &ops, fired));
+    // everything in view: it stays abstract and waits
+    ops.exposure = CAExposeSeen;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(ops.sorties == 0);
+    // hidden at altitude: born airborne, 250 m up for a jet
+    ops.exposure = CAExposeHidden;
+    f.ca.Step(f.registry, atTown, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    REQUIRE(ops.sorties == 1);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    CHECK(r->phase == CALive);
+    CHECK(ops.lastAlt == Approx(250.0f));
+    CHECK(Dist2DTest(ops.lastBirth, f.Z(f.town).pos) >= 250.0f);
+    CHECK(ear.Count(CAOpBorn) == 1);
+    REQUIRE(ear.Count(CAOpAirborne) == 1);
+    CHECK(ear.Last(CAOpAirborne)->zone == -1); // off-map
+    // inbound: nothing struck yet
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(ear.Count(CAOpStruck) == 0);
+    // over the target: struck once, reveals only fresh sightings (none here)
+    ops.status.sortie = true;
+    ops.status.loiter = true;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ear.Count(CAOpStruck) == 1);
+    CHECK(ops.reveals == 0);
+    // removed crew first by OccupierAir: the price back, the pilot home
+    ops.status.gone = true;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 22);
+    CHECK(ear.Count(CAOpStruck) == 1);
+}
+
+TEST_CASE("CounterAttack - phase 6A: a helicopter insertion is born airborne, lands, unloads and flies home",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    AirOps ops;
+    const CounterAttackView atTown = WithMap(AtTown(f));
+    REQUIRE(f.ca.LaunchFunded(f.registry, atTown, HeliOrder(f.town, f.post, f.farBase), &ops, fired));
+    const CounterAttack::Record* r = f.ca.Get(0);
+    CHECK(r->IsAir());
+    CHECK(r->airOrigin == f.farBase);
+    CHECK(r->airFrom.X() == Approx(9000.0f)); // its flight line starts at the airfield
+    CHECK(r->phase == CATravel);
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ops.inserts == 1);
+    CHECK(r->phase == CALive);
+    CHECK(ops.lastClass == "Mi17");
+    CHECK(ops.lastN == 4);
+    CHECK(ops.lastAlt == Approx(100.0f));
+    CHECK(Dist2DTest(ops.lastBirth, f.Z(f.town).pos) >= 250.0f);
+    CHECK(Dist2DTest(ops.lastLz, f.Z(f.town).pos) == Approx(400.0f));
+    CHECK(r->airLz.X() == Approx(ops.lastLz.X()));
+    CHECK(ear.Count(CAOpBorn) == 1);
+    REQUIRE(ear.Count(CAOpAirborne) == 1);
+    CHECK(ear.Last(CAOpAirborne)->zone == f.farBase);
+    CHECK(f.ca.LiveHulls() == 1);
+    // flying in: the record waits on OccupierAir
+    ops.cargoAlive = 4;
+    ops.cargoAt = ops.lastLz;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK_FALSE(r->dismounted);
+    // down 5 m from the LZ and unloaded: the infantry is the live squad
+    ops.status.landed = true;
+    ops.status.landedOffset = 5.0f;
+    ops.status.landedAt = ops.lastLz;
+    ops.status.state = 3; // AISDeparting
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ear.Count(CAOpLanded) == 1);
+    CHECK(ear.Last(CAOpLanded)->zone == f.town);
+    CHECK(r->dismounted);
+    CHECK(r->hullDone);
+    CHECK(f.ca.AirHomes() == 1);
+    CHECK(f.ca.LiveHulls() == 1); // the airframe flying home still counts
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+    // removed crew first where unseen: the price back, the crew home as bodies
+    ops.status.gone = true;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(f.ca.AirHomes() == 0);
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 10);
+    CHECK(ear.Last(CAOpHullRefund)->bodies == 2);
+}
+
+TEST_CASE("CounterAttack - phase 6A: a landing off the LZ is a failed insertion, re-planned once, then cancelled",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    AirOps ops;
+    const CounterAttackView atTown = WithMap(AtTown(f));
+    REQUIRE(f.ca.LaunchFunded(f.registry, atTown, HeliOrder(f.town, f.post, f.farBase), &ops, fired));
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ops.inserts == 1);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // down 150 m off: failed (the airframe flies home with its cargo)
+    ops.status.landed = true;
+    ops.status.landedOffset = 150.0f;
+    ops.status.failReason = 1; // AFROffLz
+    ops.status.state = 5;      // AISFailed
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ear.Count(CAOpLanded) == 1);
+    CHECK(ear.notes.back() == "off the LZ");
+    CHECK(r->phase == CALive);
+    // removed unseen with its cargo aboard: back to abstract flight, re-planned once
+    ops.status.gone = true;
+    ops.cargoAlive = 0;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->phase == CATravel);
+    CHECK(r->airReplans == 1);
+    CHECK(r->strength == 4);
+    CHECK(ear.Count(CAOpCancelledUnseen) == 0);
+    // the second insertion is born again
+    ops.status = CounterAttackAirStatus();
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    REQUIRE(ops.inserts == 2);
+    CHECK(r->phase == CALive);
+    // and fails again: cancelled unseen, the bodies home, the airframe's price owed back
+    ops.status.landed = true;
+    ops.status.landedOffset = 300.0f;
+    ops.status.failReason = 1;
+    ops.status.state = 5;
+    ops.status.gone = true;
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpCancelledUnseen) == 1);
+    CHECK(ear.Last(CAOpCancelledUnseen)->units == 12);
+    CHECK(ear.Last(CAOpCancelledUnseen)->bodies == 4);
+}
+
+TEST_CASE("CounterAttack - phase 6A: no LZ or no airframe sends the insertion on foot, its price back",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    AirOps ops;
+    ops.lzOk = false;
+    const CounterAttackView atTown = WithMap(AtTown(f));
+    REQUIRE(f.ca.LaunchFunded(f.registry, atTown, HeliOrder(f.town, f.post, f.farBase), &ops, fired));
+    f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+    CHECK(ops.inserts == 0);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    CHECK(r->package == FPFoot);
+    CHECK_FALSE(r->IsAir());
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 12);
+}
+
+TEST_CASE("CounterAttack - phase 6A: the air re-plan of the birth chain buys a helicopter from the pool",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, TruckOrder(f.town, f.post, 4), nullptr, fired));
+    CounterAttack::Record& r = const_cast<CounterAttack::Record&>(*f.ca.Get(0));
+    REQUIRE(r.phase == CATravel);
+    ForcePackageCatalogue none;
+    CHECK_FALSE(f.ca.AirReplan(f.registry, far, r, none)); // no helicopter authored: cancel as before
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240.0f;
+    cat.hulls[FPTransportHeli].cargo = 14;
+    cat.hulls[FPTransportHeli].crew = 2;
+    const int before = OccupierForces::Instance().Pool();
+    REQUIRE(f.ca.AirReplan(f.registry, far, r, cat));
+    CHECK(r.package == FPTransportHeli);
+    CHECK(Fixture::Str(r.hullClass) == "Mi17");
+    CHECK(r.crew == 2);
+    CHECK(r.airReplanned);
+    CHECK(r.airOrigin == f.farBase); // the occupier-held airfield: the airfield price
+    CHECK(r.priceUnits == 12);
+    CHECK(OccupierForces::Instance().Pool() == before - 12);
+    REQUIRE(ear.Count(CAOpHullRefund) == 1);
+    CHECK(ear.Last(CAOpHullRefund)->units == 4); // the truck goes back through the ledger
+    CHECK(r.airFrom.X() == Approx(9000.0f));
+    CHECK(r.clock == Approx(r.travel));
+    // re-planned air is not re-planned again
+    CHECK_FALSE(f.ca.AirReplan(f.registry, far, r, cat));
+    // cancelled while abstract: the directly spent price comes back directly
+    const int mid = OccupierForces::Instance().Pool();
+    f.Z(f.town).owner = "OCCUPIER"; // the target reverts: the record goes home
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(OccupierForces::Instance().Pool() >= mid);
+}
+
+TEST_CASE("CounterAttack - phase 6A: an abstract alarm answer reaches the zone, answers once and settles",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    f.Z(f.post).garrison = 2; // room for the answer
+    CounterAttackOrder alarm = KindOrder(CAKAlarm, -1, f.farBase, 4, 81);
+    alarm.alarmZone = f.post;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, alarm, nullptr, fired));
+    for (int i = 0; i < 100 && f.ca.Count() > 0; i++)
+    {
+        f.ca.Step(f.registry, far, 100.0f, nullptr, fired);
+    }
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpAlarmAnswered) == 1);
+    CHECK(ear.Last(CAOpAlarmAnswered)->zone == f.post);
+    CHECK(ear.Last(CAOpAlarmAnswered)->kind == CAKAlarm);
+    CHECK(ear.Count(CAOpSettled) == 1);
+}
+
+TEST_CASE("CounterAttack - phase 6A: air fields and strikes survive save/load",
+          "[game][guerrilla][counterattack][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "counter-attack-air.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    f.RaiseTown(f.town);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, StrikeOrder(f.town), nullptr, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, HeliOrder(f.town, f.post, f.farBase), nullptr, fired));
+    f.ca.Step(f.registry, far, 2.0f, nullptr, fired);
+    REQUIRE(f.ca.Count() == 2);
+    const CounterAttack::Record strike = *f.ca.Get(0);
+    const CounterAttack::Record heli = *f.ca.Get(1);
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.ca.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    CounterAttack loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.Count() == 2);
+    const CounterAttack::Record* s = loaded.Get(0);
+    CHECK(s->kind == CAKStrike);
+    CHECK(s->package == FPJet);
+    CHECK(s->strikeZone == f.town);
+    CHECK(s->strikePos.X() == Approx(strike.strikePos.X()));
+    CHECK(s->strikePos.Z() == Approx(strike.strikePos.Z()));
+    CHECK(s->airFrom.X() == Approx(strike.airFrom.X()));
+    CHECK(s->clock == Approx(strike.clock));
+    CHECK_FALSE(s->struck);
+    const CounterAttack::Record* h = loaded.Get(1);
+    CHECK(h->package == FPTransportHeli);
+    CHECK(h->airOrigin == f.farBase);
+    CHECK(h->airFrom.X() == Approx(heli.airFrom.X()));
+    CHECK(h->airFrom.Z() == Approx(heli.airFrom.Z()));
+    CHECK(h->clock == Approx(heli.clock));
+    CHECK(h->priceUnits == 12);
+    CHECK(h->crew == 2);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
 }

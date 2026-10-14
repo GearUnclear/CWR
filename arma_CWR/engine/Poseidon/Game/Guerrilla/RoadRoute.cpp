@@ -6,7 +6,8 @@
 //           the town (-1 none), links expanded, m from `from` to the first
 //           route link, start candidates, goal candidates, joined (stage 2),
 //           m of the cross-country join leg, [x, z] where it leaves the
-//           pocket road, [x, z] of the town network's link it reaches]
+//           pocket road, [x, z] of the town network's link it reaches,
+//           [[x, z], ...] the route's points in order]
 //       the search the counter-attack service runs; joinRadius defaults to
 //       the service's (RoadRouteServiceJoinRadius), 0 = road all the way only
 //   gmRoadComponents [pos, radius]
@@ -15,12 +16,20 @@
 //            ends, m from its nearest unconnected end to another component's
 //            link end (-1 none within 80 m), [x, z] of that end], ...]
 //       one row per road component touching the circle, nearest first
+//   gmLandmass [pos]
+//       -> the walkable landmass id of pos (RoadRoute::Landmass), -1 at sea
+//   gmGeoGrid [pos, halfCells, step?]
+//       -> the strategic planner's geography cells around pos (every
+//          step-th cell), one string per row north to south ('~' deep
+//          water, '#' full, 'R' road, 'F' forest, else the gradient 0..7,
+//          7 too steep on foot)
 //
 // Registered from this TU's INIT_MODULE at stage 3 (the TrafficCommands.cpp
 // pattern); the TU is in the link through RoadRoute::Search.
 
 #include <Poseidon/Game/Guerrilla/RoadRoute.hpp>
 
+#include <Poseidon/AI/Path/AITypes.hpp> // GeographyInfo (gmGeoGrid)
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>   // InvLandGrid / InRange
@@ -32,6 +41,7 @@
 #include <math.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <queue>
 #include <unordered_map>
@@ -255,6 +265,155 @@ int RoadRoute::ComponentSize(const RoadLink* start, int cap)
     return (int)comp.size();
 }
 
+namespace
+{
+
+// a geography cell a soldier may stand on: the cost rule of
+// Soldier::GetCost (deep water is closed unless a road or track crosses it)
+bool LandCell(int x, int z)
+{
+    const GeographyInfo g = GLandscape->GetGeography(x, z);
+    return g.u.road || g.u.track || g.u.waterDepth < 2;
+}
+
+struct LandmassLabels
+{
+    const void* landscape = nullptr;
+    int range = 0;
+    unsigned sample = 0;
+    std::vector<int> label; // z * range + x -> landmass id, -1 sea
+};
+
+// a cheap fingerprint of the loaded terrain: a new world on the same
+// landscape object relabels
+unsigned GeographySample(int range)
+{
+    unsigned h = 2166136261u;
+    const int stride = std::max(range / 32, 1);
+    for (int z = 0; z < range; z += stride)
+    {
+        for (int x = 0; x < range; x += stride)
+        {
+            h = (h ^ GLandscape->GetGeography(x, z).packed) * 16777619u;
+        }
+    }
+    return h;
+}
+
+const LandmassLabels* Labels()
+{
+    static LandmassLabels cache;
+    if (!GLandscape)
+    {
+        return nullptr;
+    }
+    const int range = LandRange;
+    if (range <= 0)
+    {
+        return nullptr;
+    }
+    const unsigned sample = GeographySample(range);
+    if (cache.landscape == GLandscape && cache.range == range && cache.sample == sample)
+    {
+        return &cache;
+    }
+    cache.landscape = GLandscape;
+    cache.range = range;
+    cache.sample = sample;
+    cache.label.assign((size_t)range * range, -1);
+    std::vector<int> stack;
+    int next = 0;
+    for (int z0 = 0; z0 < range; z0++)
+    {
+        for (int x0 = 0; x0 < range; x0++)
+        {
+            const size_t i0 = (size_t)z0 * range + x0;
+            if (cache.label[i0] >= 0 || !LandCell(x0, z0))
+            {
+                continue;
+            }
+            const int id = next++;
+            cache.label[i0] = id;
+            stack.clear();
+            stack.push_back((int)i0);
+            while (!stack.empty())
+            {
+                const int i = stack.back();
+                stack.pop_back();
+                const int x = i % range;
+                const int z = i / range;
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        const int nx = x + dx;
+                        const int nz = z + dz;
+                        if ((dx == 0 && dz == 0) || nx < 0 || nz < 0 || nx >= range || nz >= range)
+                        {
+                            continue;
+                        }
+                        const size_t ni = (size_t)nz * range + nx;
+                        if (cache.label[ni] >= 0 || !LandCell(nx, nz))
+                        {
+                            continue;
+                        }
+                        cache.label[ni] = id;
+                        stack.push_back((int)ni);
+                    }
+                }
+            }
+        }
+    }
+    return &cache;
+}
+
+} // namespace
+
+int RoadRoute::Landmass(Vector3Par pos)
+{
+    const LandmassLabels* labels = Labels();
+    if (!labels)
+    {
+        return -1;
+    }
+    const int range = labels->range;
+    const int cx = toIntFloor(pos.X() * InvLandGrid);
+    const int cz = toIntFloor(pos.Z() * InvLandGrid);
+    // the cell itself, then its rings out to 2 cells (a quay or a pier)
+    for (int ring = 0; ring <= 2; ring++)
+    {
+        for (int dz = -ring; dz <= ring; dz++)
+        {
+            for (int dx = -ring; dx <= ring; dx++)
+            {
+                if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                {
+                    continue;
+                }
+                const int x = cx + dx;
+                const int z = cz + dz;
+                if (x < 0 || z < 0 || x >= range || z >= range)
+                {
+                    continue;
+                }
+                const int id = labels->label[(size_t)z * range + x];
+                if (id >= 0)
+                {
+                    return id;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+bool RoadRoute::SameLandmass(Vector3Par a, Vector3Par b)
+{
+    const int la = Landmass(a);
+    const int lb = Landmass(b);
+    return la < 0 || lb < 0 || la == lb;
+}
+
 bool RoadRoute::Search(Vector3Par from, Vector3Par to, const RoadRouteParams& params, AutoArray<Vector3>& centres,
                        RoadRouteStats* stats)
 {
@@ -335,12 +494,21 @@ bool RoadRoute::Search(Vector3Par from, Vector3Par to, const RoadRouteParams& pa
     const LinkSet townSet(townNet.begin(), townNet.end());
     std::vector<const RoadLink*> landing;
     const float jr2 = params.joinRadius * params.joinRadius;
+    // the cross-country leg is walked: only the town network's links on the
+    // source's own landmass are landings (no leg across the sea)
+    const int fromLand = Landmass(from);
     for (size_t i = 0; i < townNet.size(); i++)
     {
-        if (RrDist2DSq(townNet[i]->GetCenter(), from) <= jr2)
+        if (RrDist2DSq(townNet[i]->GetCenter(), from) > jr2)
         {
-            landing.push_back(townNet[i]);
+            continue;
         }
+        const int linkLand = Landmass(townNet[i]->GetCenter());
+        if (fromLand >= 0 && linkLand >= 0 && linkLand != fromLand)
+        {
+            continue;
+        }
+        landing.push_back(townNet[i]);
     }
     if (landing.empty())
     {
@@ -526,6 +694,13 @@ static GameValue GmRoadRoute(const GameState* state, GameValuePar oper1)
     out.Add(GameValue(st.joinGap));
     out.Add(PosXZ(state, st.joinFrom));
     out.Add(PosXZ(state, st.joinTo));
+    GameValue points = state->CreateGameValue(GameArray);
+    GameArrayType& pts = points;
+    for (int i = 0; i < centres.Size(); i++)
+    {
+        pts.Add(PosXZ(state, centres[i]));
+    }
+    out.Add(points);
     return value;
 }
 
@@ -628,8 +803,93 @@ static GameValue GmRoadComponents(const GameState* state, GameValuePar oper1)
     return value;
 }
 
+// gmGeoGrid [pos, halfCells, step?]: the landscape's geography cells (the
+// strategic planner's grid) around pos, one string per row from north to
+// south, one character per cell from west to east (every step-th cell, so a
+// coarse map of a whole island fits): '~' deep water, '#' full (no way
+// through on foot), 'R' road or track, 'F' forest, else the gradient 0..7
+// (7 = too steep on foot)
+static GameValue GmGeoGrid(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    const GameArrayType& args = oper1;
+    if (args.Size() < 2 || args[1].GetType() != GameScalar)
+    {
+        CheckSize(state, args, 2);
+        return value;
+    }
+    Vector3 pos;
+    if (!GetPos(state, pos, args[0]) || !GLandscape)
+    {
+        return value;
+    }
+    int step = 1;
+    if (args.Size() >= 3 && args[2].GetType() == GameScalar)
+    {
+        step = std::min(std::max(toIntFloor((float)args[2]), 1), 16);
+    }
+    const int half = std::min(std::max(toIntFloor((float)args[1]), 0), 40);
+    const int cx = toIntFloor(pos.X() * InvLandGrid);
+    const int cz = toIntFloor(pos.Z() * InvLandGrid);
+    for (int zr = half; zr >= -half; zr--)
+    {
+        const int zz = cz + zr * step;
+        char row[96];
+        int n = 0;
+        for (int xr = -half; xr <= half; xr++)
+        {
+            const int xx = cx + xr * step;
+            char c = '?';
+            if (InRange(zz, xx))
+            {
+                const GeographyInfo g = GLandscape->GetGeography(xx, zz);
+                const bool road = g.u.road || g.u.track;
+                if (road)
+                {
+                    c = 'R';
+                }
+                else if (g.u.waterDepth >= 2)
+                {
+                    c = '~';
+                }
+                else if (g.u.full && !g.u.forestOuter)
+                {
+                    c = '#';
+                }
+                else if (g.u.forestOuter || g.u.forestInner)
+                {
+                    c = 'F';
+                }
+                else
+                {
+                    c = (char)('0' + g.u.gradient);
+                }
+            }
+            row[n++] = c;
+        }
+        row[n] = 0;
+        out.Add(GameValue(RString(row)));
+    }
+    return value;
+}
+
+// gmLandmass [pos]: the walkable landmass id of pos (RoadRoute::Landmass),
+// -1 at sea or without a landscape
+static GameValue GmLandmass(const GameState* state, GameValuePar oper1)
+{
+    Vector3 pos;
+    if (!GetPos(state, pos, oper1))
+    {
+        return GameValue(-1.0f);
+    }
+    return GameValue((float)RoadRoute::Landmass(pos));
+}
+
 INIT_MODULE(GuerrillaRoadRoute, 3)
 {
+    GGameState.NewFunction(GameFunction(GameScalar, "gmLandmass", GmLandmass, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "gmGeoGrid", GmGeoGrid, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadRoute", GmRoadRoute, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadComponents", GmRoadComponents, GameArray));
 }

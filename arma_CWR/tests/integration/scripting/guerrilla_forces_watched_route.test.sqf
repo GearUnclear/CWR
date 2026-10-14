@@ -13,15 +13,16 @@
 //        of the Harbour road behind the column is in his view or inside the
 //        audible floor, so the force cannot be born there;
 //    w3  after counterAttackBirthGiveUp (tuned to 20 s) the operation is
-//        re-sourced to the next base back, the Southeast Compound
-//        (gmOccupierOps shows its source change), the Harbour is refunded;
-//    w4  it is born at the Compound, 1.7 km away and out of sight, and the
-//        player watches it set off.  The Compound's roads are not joined to
-//        the island's net in Abel's data, so the road route leaves them by
-//        the west gate track and crosses country to the town's road
-//        (RoadRoute.hpp stage 2).  The arrival is not asserted: the squad
-//        stalls just inside the west gate (parked, see OCCUPIER-FORCES.md
-//        phase 3 known gaps).
+//        re-sourced to the next base back.  The nearest, the Southeast
+//        Compound (1.7 km), stands on an island of its own, 800 m of sea
+//        east of Le Port (gmLandmass; its roads are a pocket for that
+//        reason and no road route leaves it), so a foot force from it could
+//        never arrive: it is passed over (its reserve untouched) for the next
+//        base on Le Port's landmass (the Airfield on Abel's roster), the
+//        Harbour is refunded;
+//    w4  it is born at that base, out of sight, and marches: within 10
+//        simulated minutes the lead is 300 m from its birth point and 300 m
+//        nearer Le Port (the whole 8 km road is not waited out).
 //  The companion roster and the QRF director are parked; the player is
 //  damage-shielded.
 // ============================================================================
@@ -51,11 +52,15 @@ triAssertGe [wrC, 0]
 wrLPos = (gmZone wrL) select 8
 wrHPos = (gmZone wrH) select 8
 wrCPos = (gmZone wrC) select 8
-// the Compound's roads are a pocket of their own: the road route leaves
-// them and joins the town's net (found, joined)
-wrRr = gmRoadRoute [wrCPos, wrLPos]
-triAssertEq [(format ["%1 %2", wrRr select 0, wrRr select 9]), "true true"]
-triAssertEq [(format ["%1", (gmRoadRoute [wrCPos, wrLPos, 0]) select 0]), "false"]
+// the Compound stands on another landmass than Le Port and the Harbour: no
+// road route, not even the cross-country join (it would swim the strait)
+wrLandC = gmLandmass wrCPos
+wrLandL = gmLandmass wrLPos
+triAssertGe [wrLandC, 0]
+triAssertGe [wrLandL, 0]
+triAssertEq [(format ["%1", wrLandC == wrLandL]), "false"]
+triAssertEq [(gmLandmass wrHPos), wrLandL]
+triAssertEq [(format ["%1", (gmRoadRoute [wrCPos, wrLPos]) select 0]), "false"]
 // far from the player: no live garrison anywhere down there
 triAssertEq [(format ["%1", gmGarrisonSpawned wrL]), "false"]
 triAssertEq [(format ["%1", gmGarrisonSpawned wrH]), "false"]
@@ -89,30 +94,38 @@ player setDir wrLook
 triAssertGe [800, (player distance wrLPos)]
 
 // ---- w3: nothing behind the column is unseen: the next base back -------------
-triSimUntil { player setDir wrLook; (((gmOccupierOps + [wrNone]) select 0) select 4) == "Southeast Compound" }
+triSimUntil { player setDir wrLook; (((gmOccupierOps + [wrNone]) select 0) select 4) != "Le Port Harbour" }
 wrRow = gmOccupierOps select 0
 triAssertEq [(wrRow select 0), wrOp]
 triAssertEq [(wrRow select 7), 4]
+// passed over: the new source shares Le Port's landmass
+wrS = gmZoneIndex (wrRow select 4)
+triAssertGe [wrS, 0]
+triAssertEq [(gmLandmass ((gmZone wrS) select 8)), wrLandL]
 // the Harbour got its four back (a pending deposit: the player stands at it)
 triSimUntil { (((gmZone wrH) select 3) + ((gmZoneSim wrH) select 13) + (gmGarrisonLive wrH)) >= wrH0 }
-// the Compound paid them
-triAssertEq [((gmZone wrC) select 3), wrC0 - 4]
+// the Compound did not pay
+triAssertEq [((gmZone wrC) select 3), wrC0]
 
-// ---- w4: born at the Compound out of sight; it comes on ------------------------
+// ---- w4: born at the new source out of sight; it comes on --------------------
 triSimUntil { player setDir wrLook; (((gmOccupierOps + [wrNone]) select 0) select 6) == "LIVE" }
 wrRow = gmOccupierOps select 0
 triAssertEq [(wrRow select 10), "base"]
 wrCa = gmCounterAttacks select 0
 wrSpawn = wrCa select 8
-triAssertGe [300, (wrSpawn distance wrCPos)]
+triAssertGe [300, (wrSpawn distance ((gmZone wrS) select 8))]
 triAssertGe [(wrSpawn distance player), 750]
 triAssertEq [(wrCa select 21), 4]
 wrLead = wrCa select 20
+wrD0 = wrSpawn distance wrLPos
 wrT1 = time
-// it sets off: the lead leaves its birth point (its road runs north-west to
-// the west gate first, so the distance to Le Port barely changes yet)
-triSimUntil { ((wrLead distance wrSpawn) > 20) or (time > wrT1 + 180) }
-triAssertGe [(wrLead distance wrSpawn), 20]
+// it marches, never stalls: 300 m from its birth point and 300 m nearer
+// Le Port within 10 simulated minutes (about 4 at a walk)
+setAccTime 2
+triSimUntil { player setDir wrLook; (((wrLead distance wrSpawn) > 300) and ((wrLead distance wrLPos) < wrD0 - 300)) or (time > wrT1 + 600) or (not alive wrLead) }
+setAccTime 1
+triAssertGe [(wrLead distance wrSpawn), 300]
+triAssertGe [wrD0 - 300, (wrLead distance wrLPos)]
 triAssertEq [((gmZone wrL) select 2), gmResistanceSide]
 gmSimDiagLog
 

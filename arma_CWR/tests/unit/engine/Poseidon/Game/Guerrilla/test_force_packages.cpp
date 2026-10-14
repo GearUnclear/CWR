@@ -559,23 +559,104 @@ const PackageQuote* ColumnOf(const PackageChoice& c, int carrier, int escort)
 
 } // namespace
 
-TEST_CASE("ForcePackages - phase 5 offers every ground package by default, air not yet",
+TEST_CASE("ForcePackages - phase 6A offers every package by default; air only where authored",
           "[game][guerrilla][occupierforces][packages]")
 {
     const PackageRequest req;
     CHECK(req.offered == ForcePackages::DefaultPackages);
-    CHECK(ForcePackages::DefaultPackages == ForcePackages::GroundPackages);
-    for (int p = FPFoot; p <= FPTank; p++)
-    {
-        CHECK((ForcePackages::DefaultPackages & ForcePackages::Bit(p)) != 0);
-    }
+    CHECK(ForcePackages::DefaultPackages == (ForcePackages::GroundPackages | ForcePackages::AirPackages));
+    CHECK(ForcePackages::DefaultPackages == ForcePackages::AllPackages);
+    CHECK_FALSE(req.airOffMap);
     for (int p = FPTransportHeli; p < NForcePackages; p++)
     {
-        CHECK((ForcePackages::DefaultPackages & ForcePackages::Bit(p)) == 0);
         CHECK((ForcePackages::AirPackages & ForcePackages::Bit(p)) != 0);
+        CHECK((ForcePackages::GroundPackages & ForcePackages::Bit(p)) == 0);
     }
     CHECK((ForcePackages::GroundPackages | ForcePackages::AirPackages) == ForcePackages::AllPackages);
     CHECK((ForcePackages::Phase3Packages & ForcePackages::GroundPackages) == ForcePackages::Phase3Packages);
+    // a ladder catalogue offers no air: the default offer changes nothing
+    // until the descriptor authors a class
+    const ForcePackageCatalogue cat = WestCatalogue();
+    CHECK_FALSE(cat.Offered(FPTransportHeli));
+    CHECK_FALSE(cat.Offered(FPAttackHeli));
+    CHECK_FALSE(cat.Offered(FPJet));
+}
+
+TEST_CASE("ForcePackages - air packages: prices on and off map, seats, lethality, speed and the choice",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("Mi17", "helicopter", 14, 240, 40, true, 2);
+    in.Add("Mi24", "helicopter", 8, 300, 60, true, 2);
+    in.Add("Su25", "airplane", 0, 900, 60, true, 1);
+    RString overrides[NForcePackages];
+    overrides[FPTransportHeli] = "Mi17";
+    overrides[FPAttackHeli] = "Mi24";
+    overrides[FPJet] = "Su25";
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UAZ", "Ural", "BMP", "T72"}), overrides, in, cat);
+    REQUIRE(cat.Offered(FPTransportHeli));
+    REQUIRE(cat.Offered(FPAttackHeli));
+    REQUIRE(cat.Offered(FPJet));
+    // prices 10 / 18 / 22, x1.5 off map (6.5, D3)
+    CHECK(ForcePackages::HullPrice(FPTransportHeli) == 10);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli) == 18);
+    CHECK(ForcePackages::HullPrice(FPJet) == 22);
+    CHECK(ForcePackages::HullPrice(FPTransportHeli, true) == 15);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli, true) == 27);
+    CHECK(ForcePackages::HullPrice(FPJet, true) == 33);
+    // the transport carries min(12, transportSoldier); the strike airframes nobody
+    CHECK(ForcePackages::SeatCap(FPTransportHeli, cat) == 12);
+    CHECK(ForcePackages::SeatCap(FPAttackHeli, cat) == 0);
+    CHECK(ForcePackages::SeatCap(FPJet, cat) == 0);
+    // lethality: inserted infantry x 1.25; +14 / +16 for the strike airframes
+    CHECK(ForcePackages::Lethality(FPTransportHeli, 8, 1.0f) == Approx(10.0f));
+    CHECK(ForcePackages::LethalityAdd(FPAttackHeli) == Approx(14.0f));
+    CHECK(ForcePackages::LethalityAdd(FPJet) == Approx(16.0f));
+    // the abstract leg: 0.8 x maxSpeed, straight line
+    CHECK(ForcePackages::SpeedOf(FPTransportHeli, cat) == Approx(0.8f * 240.0f / 3.6f));
+    CHECK(ForcePackages::GroupsOf(FPTransportHeli) == 2);
+    CHECK(ForcePackages::EdgeRole(FPTransportHeli) == FERNone);
+
+    PackageRequest req;
+    req.fighters = 0;
+    req.minBodies = 4;
+    req.pool = 200;
+    const AutoArray<PackageSource> src = OneSource(3, 6000.0f, 12);
+    // a quote: bodies + crew + hull; off map the hull costs 15
+    PackageQuote q = ForcePackages::Quote(FPTransportHeli, req, cat, src);
+    CHECK(q.source == 3);
+    CHECK(q.bodies == 4);
+    CHECK(q.crew == 2);
+    CHECK(q.hullPrice == 10);
+    CHECK(q.poolPrice == 12);
+    CHECK(q.price == 16);
+    req.airOffMap = true;
+    q = ForcePackages::Quote(FPTransportHeli, req, cat, src);
+    CHECK(q.hullPrice == 15);
+    CHECK(q.price == 21);
+    req.airOffMap = false;
+    // the strike airframes are quoted seats-short and never chosen for a ground operation
+    CHECK(ForcePackages::Quote(FPAttackHeli, req, cat, src).seatsShort);
+    CHECK(ForcePackages::Quote(FPJet, req, cat, src).seatsShort);
+    PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package != FPAttackHeli);
+    CHECK(c.quote.package != FPJet);
+    // urgent: the helicopter is the fastest package; it goes when it costs
+    // within the urgent share of the cheapest lethal one (foot, 4 units here,
+    // so a share of 5 lets the 16-unit insertion through)
+    req.urgent = true;
+    req.urgentCostShare = 5.0f;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.lethal);
+    // a pool that cannot pay the helicopter: the ground package goes
+    req.pool = 5;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package != FPTransportHeli);
 }
 
 TEST_CASE("ForcePackages - the armour ladders: armed car, wheeled and tracked APC, tank; the lowest rung wins",
@@ -1138,4 +1219,38 @@ TEST_CASE("ForcePackages - a column goes on foot whole: the downgrade refunds bo
     CHECK(f.lethality == Approx(9.0f));
     CHECK(ForcePackages::GroupsOf(f) == 1);
     CHECK(ForcePackages::HullsOf(f) == 0);
+}
+
+TEST_CASE("ForcePackages - a base on another landmass is an air-only source (phase 6A)",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("Mi17", "helicopter", 14, 240, 40, true, 2);
+    RString overrides[NForcePackages];
+    overrides[FPTransportHeli] = "Mi17";
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UAZ", "Ural", "BMP", "T72"}), overrides, in, cat);
+    PackageRequest req;
+    req.minBodies = 4;
+    req.pool = 200;
+    // the only base with spare stands on an island of its own (Malden's
+    // Southeast Compound): no ground package can come from it
+    AutoArray<PackageSource> island = OneSource(5, 1700.0f, 8);
+    island[0].airOnly = true;
+    CHECK(ForcePackages::Quote(FPFoot, req, cat, island).source == -1);
+    CHECK(ForcePackages::Quote(FPTruck, req, cat, island).source == -1);
+    CHECK(ForcePackages::Quote(FPApc, req, cat, island).source == -1);
+    const PackageQuote heli = ForcePackages::Quote(FPTransportHeli, req, cat, island);
+    CHECK(heli.source == 5);
+    CHECK(heli.bodies == 4);
+    // its reserve still pays an insertion: the helicopter is the choice
+    PackageChoice c = ForcePackages::Choose(req, cat, island);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 5);
+    // a base on the target's landmass serves every package again
+    island[0].airOnly = false;
+    c = ForcePackages::Choose(req, cat, island);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
 }

@@ -75,6 +75,21 @@
 //                                  from the pool like the carrier's).
 //                                  Returns the opId (900001 on), 0 when
 //                                  refused.
+//                                  Phase 6A: package also "heli" (a
+//                                  transport helicopter insertion),
+//                                  "attackHeli" or "jet" (strikes); kind
+//                                  also "ALARM" (target = the occupier zone
+//                                  answered) and "STRIKE" (target = the
+//                                  struck zone, source ignored, bodies 0).
+//                                  An air hullClass is required (6th).
+//                                  9th: the air origin, an occupier-held
+//                                  AIRFIELD zone (name or index), or -1 /
+//                                  absent = off-map (x1.5 price).  10th:
+//                                  [easting, northing] the reported position
+//                                  (STRIKE strikePos, ALARM alarmPos).
+//                                  The airframe and its crew (config hasDriver
+//                                  + hasGunner + hasCommander) are spent from
+//                                  the pool at the 6.5 price.
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>  // ConfigHullInspector (the escort of the test lever)
@@ -108,7 +123,7 @@ static GameValue GmCounterAttacks(const GameState* state)
         const CounterAttack::Record* r = ca.Get(i);
         GameValue rowValue = state->CreateGameValue(GameArray);
         GameArrayType& row = rowValue;
-        row.Resize(24);
+        row.Resize(29);
         row[0] = GameStringType(r->target);
         row[1] = GameStringType(r->source);
         row[2] = GameStringType(CounterAttack::PhaseName(r->phase));
@@ -143,6 +158,22 @@ static GameValue GmCounterAttacks(const GameState* state)
         row[21] = (float)CounterAttack::AliveOf(*r);
         row[22] = GameStringType(r->escortClass);
         row[23] = GameValueExt((Object*)r->escort.GetLink());
+        // phase 6A: the live airframe's OccupierAir id, the LZ [easting,
+        // northing], the air origin zone (-1 off-map), the infantry out of
+        // the airframe, CAOpStruck sent
+        row[24] = (float)r->airId;
+        GameValue lzValue = state->CreateGameValue(GameArray);
+        if (r->airLz.X() != 0 || r->airLz.Z() != 0)
+        {
+            GameArrayType& lz = lzValue;
+            lz.Resize(2);
+            lz[0] = r->airLz.X();
+            lz[1] = r->airLz.Z();
+        }
+        row[25] = lzValue;
+        row[26] = (float)r->airOrigin;
+        row[27] = r->dismounted;
+        row[28] = r->struck;
         rows.Add(rowValue);
     }
     return value;
@@ -262,7 +293,11 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
     if (args[2].GetType() == GameString)
     {
         const RString p = (GameStringType)args[2];
-        order.package = stricmp(p, "truck") == 0 ? FPTruck : FPFoot;
+        order.package = stricmp(p, "truck") == 0        ? FPTruck
+                        : stricmp(p, "heli") == 0       ? FPTransportHeli
+                        : stricmp(p, "attackHeli") == 0 ? FPAttackHeli
+                        : stricmp(p, "jet") == 0        ? FPJet
+                                                        : FPFoot;
     }
     else
     {
@@ -296,6 +331,18 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
         {
             order.kind = CAKReinforce;
         }
+        else if (stricmp(kindName, "ALARM") == 0)
+        {
+            order.kind = CAKAlarm;
+            order.alarmZone = order.target;
+        }
+        else if (stricmp(kindName, "STRIKE") == 0)
+        {
+            order.kind = CAKStrike;
+            order.strikeZone = order.target;
+            order.source = -1;
+            order.bodies = 0;
+        }
         else if (stricmp(kindName, "RETAKE") != 0)
         {
             return GameValue(0.0f);
@@ -304,7 +351,40 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
     order.origin = CAODirector;
     order.funded = true;
     order.abstractSpeed = CounterAttack::FootSpeed;
-    if (order.package != FPFoot)
+    // phase 6A: the air origin (9th) and the reported position (10th)
+    order.airOrigin = args.Size() > 8 ? ZoneArg(registry, args[8]) : -1;
+    if (args.Size() > 9 && args[9].GetType() == GameArray)
+    {
+        const GameArrayType& at = args[9];
+        if (at.Size() >= 2)
+        {
+            const Vector3 pos((float)at[0], 0.0f, (float)at[1]);
+            order.strikePos = order.kind == CAKStrike ? pos : VZero;
+            order.alarmPos = order.kind == CAKAlarm ? pos : VZero;
+        }
+    }
+    if (order.IsAirPackage())
+    {
+        // an air package must name its airframe (6.5: air is authored)
+        const RString hull =
+            args.Size() > 5 && args[5].GetType() == GameString ? RString((GameStringType)args[5]) : RString();
+        ConfigHullInspector inspector;
+        HullFacts facts;
+        if (hull.GetLength() == 0 || !inspector.Inspect(hull, facts) || !facts.exists)
+        {
+            return GameValue(0.0f);
+        }
+        order.hullClass = hull;
+        order.crew = facts.crew > 0 ? facts.crew : 1;
+        order.abstractSpeed = CounterAttack::RealSpeed(order.package, facts.maxSpeedKmh);
+        if (order.package == FPTransportHeli && facts.cargo > 0 && order.bodies > facts.cargo)
+        {
+            order.bodies = facts.cargo;
+        }
+        const int price = ForcePackages::HullPrice(order.package, order.airOrigin < 0) + order.crew;
+        order.priceUnits = OccupierForces::Instance().Spend(price, "test lever") ? price : 0;
+    }
+    else if (order.package != FPFoot)
     {
         RString hull =
             args.Size() > 5 && args[5].GetType() == GameString ? RString((GameStringType)args[5]) : RString();

@@ -19,6 +19,7 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Core/SaveVersion.hpp>
+#include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // ASRed (the alarm answers, phase 6)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // the S5 refund hook (3.3)
@@ -2600,4 +2601,498 @@ TEST_CASE("OccupierForces - the wave state survives save/load", "[game][guerrill
     CHECK(loaded.WaveWindowLeft() == Approx(f.of.WaveWindowLeft()));
     ExtParsMission.Clear();
     std::filesystem::remove(path);
+}
+
+// ===========================================================================
+// Phase 6B: the director's air buying, town strikes and their effects, alarm
+// answers, legacySave and gmLegacyQrf (OCCUPIER-FORCES.md 6.5, 7.3, 8.2, 11;
+// D3, D4, D9, D17, D18, D20, D21)
+// ===========================================================================
+
+namespace
+{
+
+// the truck plus every airframe (FarBase is an occupier AIRFIELD in the fixture)
+ForcePackageCatalogue AirCatalogue()
+{
+    ForcePackageCatalogue cat = TruckCatalogue();
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 250;
+    cat.hulls[FPTransportHeli].cargo = 12;
+    cat.hulls[FPTransportHeli].crew = 2;
+    cat.hulls[FPAttackHeli].className = "Mi24";
+    cat.hulls[FPAttackHeli].maxSpeedKmh = 300;
+    cat.hulls[FPAttackHeli].cargo = 8;
+    cat.hulls[FPAttackHeli].crew = 2;
+    cat.hulls[FPJet].className = "Su25";
+    cat.hulls[FPJet].maxSpeedKmh = 1000;
+    cat.hulls[FPJet].cargo = 0;
+    cat.hulls[FPJet].crew = 1;
+    return cat;
+}
+
+void Report(Fixture& f, const char* zone, int count, Vector3Par at)
+{
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < count; i++)
+    {
+        SightingReport r;
+        r.zone = f.registry.FindZoneIndex(zone);
+        r.id = 500 + (unsigned long long)i;
+        r.pos = at;
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+}
+
+// awake, two towns held, Town hot (urgent), Other cold, a rich pool
+void StrikeSetup(Fixture& f)
+{
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(AirCatalogue());
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 60;
+    f.of.SetPool(60);
+    REQUIRE(f.of.Band() == OFBandStrong);
+}
+
+int CountKind(const FakeLauncher& l, int kind)
+{
+    int n = 0;
+    for (const CounterAttackOrder& o : l.orders)
+    {
+        n += o.kind == kind ? 1 : 0;
+    }
+    return n;
+}
+
+const CounterAttackOrder* FirstKind(const FakeLauncher& l, int kind)
+{
+    for (const CounterAttackOrder& o : l.orders)
+    {
+        if (o.kind == kind)
+        {
+            return &o;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - a town strike goes with an urgent town retake while STRONG with 3 fighters",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    const int town = f.registry.FindZoneIndex("Town");
+    const Vector3 seen(1010.0f, 0.0f, 1320.0f);
+    Report(f, "Town", 3, seen);
+    FakeLauncher launcher;
+    DirectorView view = ViewOf(f.registry);
+    const int pool0 = f.of.Pool();
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 2);
+    CHECK(launcher.orders[0].kind == CAKRetake);
+    const CounterAttackOrder& s = launcher.orders[1];
+    CHECK(s.kind == CAKStrike);
+    CHECK(s.origin == CAODirector);
+    CHECK(s.target == town);
+    CHECK(s.strikeZone == town);
+    // D9: the reported position, never the true one
+    CHECK(s.strikePos.X() == Approx(seen.X()));
+    CHECK(s.strikePos.Z() == Approx(seen.Z()));
+    // FarBase is an occupier AIRFIELD: the airfield prices.  Attack heli 18 +
+    // 2 crew = 20, jet 22 + 1 = 23: urgent takes the faster jet within 1.5 x 20
+    CHECK(s.package == FPJet);
+    CHECK(std::string((const char*)s.hullClass) == "Su25");
+    CHECK(s.airOrigin == f.registry.FindZoneIndex("FarBase"));
+    CHECK(s.priceUnits == 23);
+    CHECK(s.bodies == 0);
+    CHECK(s.source == -1);
+    CHECK(s.funded);
+    CHECK(f.of.Tokens() == 1); // the strike takes no extra token
+    CHECK(f.of.Pool() == pool0 - launcher.orders[0].priceUnits - 23);
+    const int row = f.of.FindOp(s.opId);
+    REQUIRE(row >= 0);
+    CHECK(f.of.OpPackage(row) == FPJet);
+    CHECK(f.of.OpOutstanding(row) == 23);
+}
+
+TEST_CASE("OccupierForces - the bought-when rule refuses strikes outside 7.3", "[game][guerrilla][occupierforces]")
+{
+    const Vector3 seen(1000.0f, 0.0f, 1300.0f);
+    SECTION("two fighters are not enough")
+    {
+        Fixture f;
+        StrikeSetup(f);
+        Report(f, "Town", 2, seen);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(CountKind(launcher, CAKRetake) == 1);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+    }
+    SECTION("not urgent")
+    {
+        Fixture f;
+        StrikeSetup(f);
+        f.Z("Town").heat = 45; // a candidate, but below forcesUrgentHeat and no edge
+        Report(f, "Town", 3, seen);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+        CHECK_FALSE(f.of.StrikeDue(f.registry, ViewOf(f.registry), f.registry.FindZoneIndex("Town"), CAKRetake));
+    }
+    SECTION("not STRONG")
+    {
+        Fixture f;
+        StrikeSetup(f);
+        f.of.SetPool(12); // 50 %: STRETCHED
+        REQUIRE(f.of.Band() == OFBandStretched);
+        Report(f, "Town", 3, seen);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+    }
+    SECTION("inside its strike window")
+    {
+        Fixture f;
+        StrikeSetup(f);
+        Report(f, "Town", 3, seen);
+        f.Z("Town").struckUntil = 1000.0f;
+        DirectorView view = ViewOf(f.registry);
+        FakeLauncher latch; // a refused tick latches the urgency (heat 60)
+        latch.refuse = true;
+        f.of.Direct(f.registry, view, latch, 1.0f);
+        REQUIRE(f.of.Urgent("Town"));
+        view.now = 500.0f;
+        CHECK_FALSE(f.of.StrikeDue(f.registry, view, f.registry.FindZoneIndex("Town"), CAKRetake));
+        view.now = 1000.0f;
+        CHECK(f.of.StrikeDue(f.registry, view, f.registry.FindZoneIndex("Town"), CAKRetake));
+    }
+    SECTION("no strike airframe offered")
+    {
+        Fixture f;
+        StrikeSetup(f);
+        f.of.SetCatalogue(TruckCatalogue());
+        Report(f, "Town", 3, seen);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+        CHECK_FALSE(f.of.PlanStrike(f.registry, ViewOf(f.registry), f.registry.FindZoneIndex("Town"), true).go);
+    }
+}
+
+TEST_CASE("OccupierForces - a strike opens a base retake while STRONG", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    f.Z("Town").heat = 0;
+    f.Z("Other").heat = 0;
+    // the resistance-held post flipped loud: a base candidate while STRONG
+    ZoneRecord& rebel = f.Z("RebelPost");
+    rebel.flipDay = 1;
+    rebel.flipMinute = 3;
+    rebel.heat = 80;
+    FakeLauncher launcher;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(CountKind(launcher, CAKBase) == 1);
+    const CounterAttackOrder* s = FirstKind(launcher, CAKStrike);
+    REQUIRE(s != nullptr);
+    CHECK(s->strikeZone == f.registry.FindZoneIndex("RebelPost"));
+    CHECK(s->strikePos.X() == Approx(0.0f)); // nothing reported: the zone centre
+    CHECK(f.of.StrikeDue(f.registry, ViewOf(f.registry), f.registry.FindZoneIndex("RebelPost"), CAKBase));
+}
+
+TEST_CASE("OccupierForces - strike prices off-map without an occupier airfield", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    f.GiveToResistance("FarBase");
+    CHECK(OccupierForces::HeldAirfield(f.registry, f.Z("Town").pos) == -1);
+    DirectorView view = ViewOf(f.registry);
+    const DirectorAction a = f.of.PlanStrike(f.registry, view, f.registry.FindZoneIndex("Town"), true);
+    REQUIRE(a.go);
+    CHECK(a.airOrigin == -1);
+    // off-map: attack heli 27 + 2 = 29, jet 33 + 1 = 34 (within 1.5 x 29)
+    CHECK(a.choice.quote.package == FPJet);
+    CHECK(a.choice.quote.poolPrice == 34);
+    const DirectorAction slow = f.of.PlanStrike(f.registry, view, f.registry.FindZoneIndex("Town"), false);
+    REQUIRE(slow.go);
+    CHECK(slow.choice.quote.package == FPAttackHeli); // not urgent: the cheapest
+    CHECK(slow.choice.quote.poolPrice == 29);
+    // a pool that pays neither: no strike
+    f.of.SetPool(20);
+    CHECK_FALSE(f.of.PlanStrike(f.registry, view, f.registry.FindZoneIndex("Town"), true).go);
+}
+
+TEST_CASE("OccupierForces - a helicopter insertion competes as a package; airOrigin and the off-map price",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    const int town = f.registry.FindZoneIndex("Town");
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("Post")] = 0; // the infantry comes from FarBase (about 11 km)
+    // urgent, nothing reported: L_req 0, minimum 4.  Foot 4 (4 units), truck
+    // 4 + 1 + 3 = 8, helicopter 4 + 2 + 10 = 16: a cost share of 4 lets the
+    // fastest (the helicopter) win
+    f.of.TuningMutable().urgentCostShare = 4.0f;
+    FakeLauncher latch; // a refused tick latches the urgency (heat 60)
+    latch.refuse = true;
+    f.of.Direct(f.registry, view, latch, 1.0f);
+    REQUIRE(f.of.Urgent("Town"));
+    DirectorAction a = f.of.PlanFor(f.registry, view, town, CAODirector);
+    REQUIRE(a.go);
+    CHECK(a.urgent);
+    CHECK(a.choice.quote.package == FPTransportHeli);
+    CHECK(a.choice.quote.poolPrice == 12);
+    CHECK(a.airOrigin == f.registry.FindZoneIndex("FarBase"));
+    // without the airfield the helicopter is quoted at the off-map price (15)
+    f.GiveToResistance("FarBase");
+    view.spare[f.registry.FindZoneIndex("Post")] = 4;
+    a = f.of.PlanFor(f.registry, view, town, CAODirector);
+    REQUIRE(a.go);
+    CHECK(a.airOrigin == -1);
+    bool quoted = false;
+    for (int i = 0; i < a.choice.nQuotes; i++)
+    {
+        if (a.choice.quotes[i].package == FPTransportHeli && !a.choice.quotes[i].HasEscort())
+        {
+            CHECK(a.choice.quotes[i].hullPrice == 15);
+            quoted = true;
+        }
+    }
+    CHECK(quoted);
+}
+
+TEST_CASE("OccupierForces - CAOpStruck applies the strike effects and the tallies", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    const int town = f.registry.FindZoneIndex("Town");
+    f.Z("Town").support = 70;
+    f.Z("Town").standing = 50;
+    f.Z("Held").support = 80; // 1.7 km from Town
+    f.Z("Held").standing = 50;
+    f.Z("HqTown").support = 30; // 2.02 km: outside the ring
+    f.of.SetMissionNow(300.0f);
+    CounterAttackOpEvent ev;
+    ev.opId = 9; // not a director operation (a test lever): applied all the same
+    ev.type = CAOpStruck;
+    ev.kind = CAKStrike;
+    ev.target = town;
+    ev.zone = town;
+    ev.pos = Vector3(1010.0f, 0.0f, 1310.0f);
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.Z("Town").support == Approx(30.0f));
+    CHECK(f.Z("Town").standing == Approx(10.0f));
+    CHECK(f.Z("Town").struckUntil == Approx(1500.0f));
+    CHECK(f.Z("Held").support == Approx(70.0f));
+    CHECK(f.Z("Held").standing == Approx(40.0f));
+    CHECK(f.Z("HqTown").support == Approx(30.0f));
+    CHECK(f.of.TownStrikes() == 1);
+    CHECK(f.of.StrikesApplied() == 1);
+    // a struck town is easy to retake: at or below townRevertSupport the next
+    // enemy standing in it reverts it (D5, D18), the occupier motive
+    CHECK(f.Z("Town").support <= f.registry.Tuning().townRevertSupport);
+    // a strike that hits a base cuts the ring only
+    ev.zone = f.registry.FindZoneIndex("Post");
+    ev.pos = VZero;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.of.TownStrikes() == 1);
+    CHECK(f.of.StrikesApplied() == 2);
+}
+
+TEST_CASE("OccupierForces - a RED occupier zone is answered with one CAKAlarm order", "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    REQUIRE(f.of.Posture() == OFDormant); // answered before the wake (8.2)
+    const int post = f.registry.FindZoneIndex("Post");
+    const int far = f.registry.FindZoneIndex("FarBase");
+    const Vector3 seen(1620.0f, 0.0f, 1590.0f);
+    Report(f, "Post", 2, seen);
+    FakeLauncher launcher;
+    DirectorView view = ViewOf(f.registry);
+    // nothing RED: nothing
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.empty());
+    view.alert[post] = ASRed;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder o = launcher.orders[0];
+    CHECK(o.kind == CAKAlarm);
+    CHECK(o.origin == CAOAlarm);
+    CHECK(o.target == post);
+    CHECK(o.alarmZone == post);
+    CHECK(o.alarmPos.X() == Approx(seen.X())); // the reported position (D9)
+    CHECK(o.source == far);                    // never the zone under attack
+    CHECK(o.bodies >= ForcePackages::AlarmMinBodies);
+    CHECK(o.urgent);
+    CHECK(f.of.AlarmAnswers() == 1);
+    CHECK(f.of.Tokens() == 0); // none taken (none held while DORMANT)
+    // one at a time: the record lives
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.size() == 1);
+    // the record ends: the next scan answers again while it is still RED
+    launcher.Resolve(post);
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    REQUIRE(launcher.orders.size() == 2);
+    // a repelled answer rests the zone (the cooldown), no heat on an occupier zone
+    const float heat = f.Z("Post").heat;
+    CounterAttackOpEvent ev;
+    ev.opId = launcher.orders[1].opId;
+    ev.type = CAOpRepelled;
+    ev.kind = CAKAlarm;
+    ev.target = post;
+    f.of.NoteOpEvent(f.registry, ev);
+    CHECK(f.Z("Post").heat == Approx(heat));
+    CHECK(f.of.Cooldown("Post") > 0);
+    launcher.Resolve(post);
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.size() == 2);
+}
+
+TEST_CASE("OccupierForces - alarm limits: THIN the cheapest, SPENT none, legacySave none, resistance zones none",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    const int post = f.registry.FindZoneIndex("Post");
+    FakeLauncher launcher;
+    DirectorView view = ViewOf(f.registry);
+    // a RED zone the resistance holds is no alarm
+    view.alert[f.registry.FindZoneIndex("RebelPost")] = ASRed;
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.empty());
+    view.alert[post] = ASRed;
+    // legacySave: the script QRF answers, never the director
+    f.of.SetLegacySave(true);
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.empty());
+    f.of.SetLegacySave(false);
+    // SPENT: starved
+    f.of.SetPool(0);
+    REQUIRE(f.of.Band() == OFBandSpent);
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.empty());
+    // THIN: answered, not urgent (the cheapest package)
+    f.of.SetPool(9); // 37.5 %: out of SPENT (above 10 %), THIN until above 40 %
+    REQUIRE(f.of.Band() == OFBandThin);
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    REQUIRE(launcher.orders.size() == 1);
+    CHECK_FALSE(launcher.orders[0].urgent);
+    CHECK(launcher.orders[0].package == FPFoot);
+    // the won freeze
+    launcher.Resolve(post);
+    view.won = true;
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    CHECK(launcher.orders.size() == 1);
+}
+
+TEST_CASE("OccupierForces - gmLegacyQrf: key off, legacy save; false with the native answers",
+          "[game][guerrilla][occupierforces]")
+{
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 0;"));
+        CHECK(f.of.LegacyQrf());
+    }
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        CHECK_FALSE(f.of.LegacyQrf()); // before the first sizing
+        REQUIRE(f.of.Activate(f.registry));
+        CHECK_FALSE(f.of.LegacyQrf());
+        f.of.SetLegacySave(true);
+        CHECK(f.of.LegacyQrf());
+    }
+    {
+        // an old save without the block (D20)
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.of.DeriveFromExistingSave(f.registry);
+        REQUIRE(f.of.Active());
+        CHECK(f.of.LegacySave());
+        CHECK(f.of.LegacyQrf());
+    }
+}
+
+TEST_CASE("OccupierForces - phase 6 state survives save/load; an older block becomes legacySave",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-phase6.bin";
+    const std::filesystem::path oldPath = dir / "occupier-forces-phase5.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    StrikeSetup(f);
+    f.of.SetMissionNow(10.0f);
+    f.of.ApplyStrikeEffects(f.registry, f.registry.FindZoneIndex("Town"), VZero, 10.0f, 0);
+    FakeLauncher launcher;
+    DirectorView view = ViewOf(f.registry);
+    view.alert[f.registry.FindZoneIndex("Post")] = ASRed;
+    f.of.AnswerAlarms(f.registry, view, launcher);
+    REQUIRE(f.of.AlarmAnswers() == 1);
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    {
+        // the same block as a phase-5 build wrote it: no "format" key
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        ar.GetParamFile()->Delete("format");
+        REQUIRE(ar.SaveBin(oldPath.string().c_str()));
+    }
+    auto load = [](const std::filesystem::path& p, OccupierForces& into) {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(p.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(into.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(into.Serialize(ar) == LSOK);
+    };
+    OccupierForces loaded;
+    load(path, loaded);
+    CHECK(loaded.Active());
+    CHECK(loaded.LoadedFormat() == OccupierForces::SaveFormat);
+    CHECK_FALSE(loaded.LegacySave());
+    CHECK_FALSE(loaded.LegacyQrf());
+    CHECK(loaded.TownStrikes() == 1);
+    CHECK(loaded.StrikesApplied() == 1);
+    CHECK(loaded.AlarmAnswers() == 1);
+    const int row = loaded.FindOp(launcher.orders[0].opId);
+    REQUIRE(row >= 0);
+    CHECK(loaded.OpPackage(row) == launcher.orders[0].package);
+
+    OccupierForces old;
+    load(oldPath, old);
+    CHECK(old.Active());
+    CHECK(old.LoadedFormat() == 0);
+    CHECK(old.LegacySave());
+    CHECK(old.LegacyQrf());
+    // no native answer beside the old save's script QRF
+    FakeLauncher l2;
+    old.SetCatalogue(TruckCatalogue());
+    old.AnswerAlarms(f.registry, view, l2);
+    CHECK(l2.orders.empty());
+
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+    std::filesystem::remove(oldPath);
 }

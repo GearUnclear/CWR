@@ -11,6 +11,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>           // Pars (gmClassExists probe)
 #include <Poseidon/Foundation/Common/FltOpts.hpp> // toInt
 #include <Poseidon/Foundation/Modules/Modules.hpp>
+#include <Poseidon/Core/Global.hpp> // Glob.time (gmZoneStruck)
 #include <Poseidon/World/World.hpp>                    // GWorld (gmPlayerPresence)
 #include <Poseidon/World/Entities/Infantry/Person.hpp> // real player
 #include <Poseidon/Foundation/platform.hpp>
@@ -180,6 +181,13 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
         const float v = (float)array[2];
         z->standing = v < 0 ? 0.0f : (v > 100 ? 100.0f : v);
     }
+    else if (stricmp(field, "struckUntil") == 0)
+    {
+        // the town-strike stamp (mission time, OCCUPIER-FORCES.md 7.3): a test
+        // lever for economy.sqs's half income
+        const float v = (float)array[2];
+        z->struckUntil = v < 0 ? 0.0f : v;
+    }
     else if (stricmp(field, "heatRaise") == 0)
     {
         registry.HeatRaise(index, (float)array[2]);
@@ -205,7 +213,8 @@ static GameValue GmZoneSet(const GameState* state, GameValuePar oper1)
 // Occupier forces phase 4 (live values): slot 14 occCapture (the occupier's
 // base-recapture meter on a resistance-held military zone, OCCUPIER-FORCES.md
 // 7.2), 15 lostCount (times the resistance lost the zone back), 16 standing
-// (occupier standing, 7.3), 17 struckUntil (phase 6; 0 until then).
+// (occupier standing, 7.3), 17 struckUntil (the town-strike stamp in mission
+// time, phase 6; 0 = never struck).
 static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -235,6 +244,15 @@ static GameValue GmZoneSim(const GameState* state, GameValuePar oper1)
     array[16] = z->standing;
     array[17] = z->struckUntil;
     return value;
+}
+
+// gmZoneStruck <index> -> true while a CITY is inside its town-strike window
+// (mission time < struckUntil, OCCUPIER-FORCES.md 7.3): economy.sqs pays it
+// half income and no manpower.  False out of range.
+static GameValue GmZoneStruck(const GameState* /*state*/, GameValuePar oper1)
+{
+    const float now = Glob.time - Poseidon::Foundation::Time(0);
+    return ZoneRegistry::Instance().IsStruck(toInt((float)oper1), now);
 }
 
 // gmPlayerPresence -> the player-presence predicates (OCCUPIER-FORCES.md 8.1)
@@ -319,7 +337,10 @@ static GameValue GmSimDiagLog(const GameState* /*state*/)
 
 // gmZoneOnEvent ["captured"|"supportThreshold"|"revealed"|"campaignLoaded"|
 //               "captureStarted"|"contested"|"captureLost"|"townLost"|
-//               "counterAttack"|"counterRepelled"|"baseLost"|"hqLost", handler]
+//               "counterAttack"|"counterRepelled"|"baseLost"|"hqLost"|
+//               "townStruck", handler]
+// townStruck: an occupier air strike hit the town (OCCUPIER-FORCES.md 7.3;
+// civilians.sqs starts its panic).
 // baseLost: a resistance-held military zone went back to the occupier (its
 // occCapture meter reached 100, OCCUPIER-FORCES.md 7.2).  hqLost: the HQ was
 // destroyed (GuerrillaBase::Destroy through ZoneRegistry::QueueEvent); the
@@ -553,6 +574,7 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
 
     GGameState.NewFunction(GameFunction(GameArray, "gmZone", GmZone, GameScalar));
     GGameState.NewFunction(GameFunction(GameArray, "gmZoneSim", GmZoneSim, GameScalar));
+    GGameState.NewFunction(GameFunction(GameBool, "gmZoneStruck", GmZoneStruck, GameScalar));
     GGameState.NewNularOp(GameNular(GameArray, "gmPlayerPresence", GmPlayerPresence));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));

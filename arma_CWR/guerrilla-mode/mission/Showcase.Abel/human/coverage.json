@@ -112,13 +112,19 @@
       "heat"
     ],
     "../engine/Poseidon/Game/Guerrilla/CounterAttack.cpp": [
+      "alert",
       "town_support",
       "garrison"
     ],
     "../engine/Poseidon/Game/Guerrilla/CounterAttackCommands.cpp": [
       "town_support"
     ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttackAir.cpp": [
+      "escalation",
+      "town_support"
+    ],
     "../engine/Poseidon/Game/Guerrilla/OccupierForces.cpp": [
+      "alert",
       "garrison",
       "escalation",
       "persistence"

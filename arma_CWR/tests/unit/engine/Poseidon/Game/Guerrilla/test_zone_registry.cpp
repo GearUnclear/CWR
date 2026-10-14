@@ -3491,3 +3491,162 @@ TEST_CASE("ZoneRegistry - occCapture, standing, struckUntil, lostCount and the n
     ExtParsMission.Clear();
     std::filesystem::remove(archivePath);
 }
+
+// ===========================================================================
+// Occupier forces phase 6 (OCCUPIER-FORCES.md 7.3, D17, D18, D21): the town
+// strike's effects, the strike window and the townStruck event.
+// ===========================================================================
+
+namespace
+{
+
+// a struck town (held), a town 1.5 km away, one exactly 2 km away, one
+// 2.1 km away, a town already near the floor 1 km away, and an occupier post
+// beside the struck town (not a CITY: the ring never touches it)
+const char* kStrikeConfig = "class CfgGuerrillaZones\n"
+                            "{\n"
+                            "    class Zones\n"
+                            "    {\n"
+                            "        class Camp   { name=\"Camp\";   type=\"CAMP\";    owner=\"RESISTANCE\"; "
+                            "position[]={9000.0, 9000.0, 0.0}; };\n"
+                            "        class Struck { name=\"Struck\"; type=\"CITY\";    owner=\"RESISTANCE\"; support=80; "
+                            "standing=80; position[]={1000.0, 1000.0, 0.0}; };\n"
+                            "        class Near   { name=\"Near\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={2500.0, 1000.0, 0.0}; };\n"
+                            "        class Edge   { name=\"Edge\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={3000.0, 1000.0, 0.0}; };\n"
+                            "        class Far    { name=\"Far\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={3100.0, 1000.0, 0.0}; };\n"
+                            "        class Low    { name=\"Low\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=5; "
+                            "standing=5; position[]={1000.0, 2000.0, 0.0}; };\n"
+                            "        class Post   { name=\"Post\";   type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                            "position[]={1200.0, 1000.0, 0.0}; };\n"
+                            "    };\n"
+                            "};\n";
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - a town strike: -40 / -40 there, -10 / -10 within 2 km, floors, stamp and event",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    REQUIRE(f.registry.IsActive());
+    ZoneRegistry& r = f.registry;
+    const int struck = r.FindZoneIndex("Struck");
+    auto Z = [&r](const char* name) -> ZoneRecord& { return *r.GetZoneMutable(r.FindZoneIndex(name)); };
+    Z("Struck").heat = 20;
+    const float heatPost = Z("Post").heat;
+    CHECK(ZoneRegistry::EventTypeFromName("townStruck") == ZETownStruck);
+    CHECK_FALSE(r.IsStruck(struck, 100.0f));
+
+    AutoArray<ZoneEventRecord> fired;
+    const int ring = r.ApplyStrike(struck, VZero, 100.0f, fired);
+    CHECK(ring == 3); // Near, Edge (exactly 2 km) and Low; not Far
+    CHECK(Z("Struck").support == Approx(40.0f));
+    CHECK(Z("Struck").standing == Approx(40.0f));
+    CHECK(Z("Struck").heat == Approx(35.0f));
+    CHECK(Z("Struck").struckUntil == Approx(1300.0f));
+    CHECK(Z("Near").support == Approx(50.0f));
+    CHECK(Z("Near").standing == Approx(50.0f));
+    CHECK(Z("Edge").support == Approx(50.0f));
+    CHECK(Z("Far").support == Approx(60.0f)); // 2.1 km: untouched
+    CHECK(Z("Far").standing == Approx(60.0f));
+    CHECK(Z("Low").support == Approx(0.0f)); // floors at 0
+    CHECK(Z("Low").standing == Approx(0.0f));
+    CHECK(Z("Near").struckUntil == Approx(0.0f)); // the ring is not stamped
+    CHECK(Z("Post").heat == Approx(heatPost));
+    REQUIRE(fired.Size() == 1);
+    CHECK(fired[0].type == ZETownStruck);
+    CHECK(fired[0].zoneIndex == struck);
+    // the strike window
+    CHECK(r.IsStruck(struck, 100.0f));
+    CHECK(r.IsStruck(struck, 1299.0f));
+    CHECK_FALSE(r.IsStruck(struck, 1300.0f));
+    CHECK_FALSE(r.IsStruck(r.FindZoneIndex("Near"), 200.0f));
+    // a second strike floors the town and restamps it
+    r.ApplyStrike(struck, VZero, 500.0f, fired);
+    CHECK(Z("Struck").support == Approx(0.0f));
+    CHECK(Z("Struck").standing == Approx(0.0f));
+    CHECK(Z("Struck").struckUntil == Approx(1700.0f));
+    CHECK(Z("Near").support == Approx(40.0f));
+}
+
+TEST_CASE("ZoneRegistry - a strike on a base or a reported position cuts the ring only",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    ZoneRegistry& r = f.registry;
+    auto Z = [&r](const char* name) -> ZoneRecord& { return *r.GetZoneMutable(r.FindZoneIndex(name)); };
+    AutoArray<ZoneEventRecord> fired;
+    // the base opener: Post is no CITY; the ring is centred on it (Struck at
+    // 200 m, Near 1.3 km, Edge 1.8 km, Far 1.9 km, Low 1.02 km)
+    CHECK(r.ApplyStrike(r.FindZoneIndex("Post"), VZero, 10.0f, fired) == 5);
+    CHECK(fired.Size() == 0); // no townStruck, no stamp
+    CHECK(Z("Struck").support == Approx(70.0f));
+    CHECK(Z("Struck").struckUntil == Approx(0.0f));
+    CHECK(Z("Far").support == Approx(50.0f));
+    // a reported position outside every zone (index -1): the ring around it
+    CHECK(r.ApplyStrike(-1, Vector3(5200.0f, 0.0f, 1000.0f), 10.0f, fired) == 0);
+    CHECK(r.ApplyStrike(-1, Vector3(4500.0f, 0.0f, 1000.0f), 10.0f, fired) == 3); // Near, Edge, Far
+    CHECK(Z("Far").support == Approx(40.0f));
+    // nowhere at all: nothing
+    CHECK(r.ApplyStrike(-1, VZero, 10.0f, fired) == 0);
+}
+
+TEST_CASE("ZoneRegistry - D18: a struck held town does not recover without presence",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    ZoneRegistry& r = f.registry;
+    const int struck = r.FindZoneIndex("Struck");
+    AutoArray<ZoneEventRecord> fired;
+    r.ApplyStrike(struck, VZero, 0.0f, fired);
+    const float after = r.GetZone(struck)->support;
+    // nobody there: the town stays weakened
+    ZoneTickInputs empty = MakeInputs(r, -1, -1);
+    Ticks(r, empty, fired, 20);
+    CHECK(r.GetZone(struck)->support <= after + 1e-3f);
+    CHECK(r.GetZone(struck)->standing == Approx(40.0f));
+}
+
+TEST_CASE("ZoneRegistry - the townStruck handler survives save/load", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-phase6.bin";
+    {
+        QIStream in(kStrikeConfig, strlen(kStrikeConfig));
+        ExtParsMission.Parse(in);
+    }
+    {
+        RegistryFixture f;
+        f.Load(kStrikeConfig);
+        f.registry.SetEventHandler(ZETownStruck, "hStruck");
+        AutoArray<ZoneEventRecord> fired;
+        f.registry.ApplyStrike(f.registry.FindZoneIndex("Struck"), VZero, 50.0f, fired);
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    const ZoneRecord* z = loaded.GetZone(loaded.FindZoneIndex("Struck"));
+    REQUIRE(z != nullptr);
+    CHECK(z->struckUntil == Approx(1250.0f));
+    CHECK(z->support == Approx(40.0f));
+    CHECK(z->standing == Approx(40.0f));
+    CHECK(loaded.IsStruck(loaded.FindZoneIndex("Struck"), 1000.0f));
+    CHECK(Str(loaded.GetEventHandler(ZETownStruck)) == "hStruck");
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}

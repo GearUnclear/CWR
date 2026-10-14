@@ -244,3 +244,77 @@ The jet orbits at 270 to 310 m above ground and 115 to 170 m/s.
   and Su25 (`su25.pbo`, loaded without an `addOns[]` entry on the Remaster).
 - **Attack helicopters** (Mi24, Cobra) as sorties: the code path is the
   jet's (no landing), not trialled.
+
+## Phase 6 proper (6A: air in CounterAttack)
+
+The spike's module is now wired into `CounterAttack`
+(`engine/Poseidon/Game/Guerrilla/CounterAttackAir.cpp`). The contract with
+the director is `CounterAttackOrders.hpp`: the kinds `CAKStrike` and
+`CAKAlarm`, the order fields `airOrigin`, `strikeZone` / `strikePos` and
+`alarmZone` / `alarmPos`, and the events `CAOpAirborne`, `CAOpLanded`,
+`CAOpStruck` (once per strike, with its zone and position) and
+`CAOpAlarmAnswered`.
+
+- **Packages.** `ForcePackages::DefaultPackages` now includes the air
+  packages; one is offered only when the faction descriptor authors its class
+  (`forcesTransportHeli`, `forcesAttackHeli`, `forcesJet`: EAST Mi17 / Mi24 /
+  Su25, WEST UH60 / Cobra / A10, and the @LoBo rosters where a class of the
+  right side exists, in `config/guerrilla-factions.hpp` and
+  `config/lobo-factions.hpp`). Prices 10 / 18 / 22, x1.5 off map
+  (`PackageRequest::airOffMap`); speed 0.8 x `maxSpeed` on a straight line;
+  the transport carries `min(12, transportSoldier)`. The strike airframes
+  carry nobody (`SeatCap` 0), so a ground operation never chooses one.
+- **Insertion.** An ordinary record (RETAKE, BASE, HQ_ASSAULT, REINFORCE,
+  ALARM) with `package = FPTransportHeli`. Abstract, it flies the straight
+  line from `airFrom` (the airfield, else the off-map edge, fixed at launch).
+  When it must go live it is born AIRBORNE (100 m up) at the first point the
+  altitude-aware gate rates hidden, searched back from its progress point to
+  the origin, then 1500 to 5500 m beyond the map edge (`forcesOffMapEdge`,
+  default the edge nearest the target). The LZ is `OccupierAir::PickLz`'s,
+  the side away from the reported fighters' centre (OccupierForces
+  sightings, D9). The cargo group becomes the record's live squad once
+  unloaded and walks the straight line from the LZ; the airframe goes to the
+  record's `AirHome` list and is refunded (`CAOpHullRefund`) once OccupierAir
+  removed it crew first, or booked lost (`CAOpHullLost`). No LZ, or no
+  airframe: the force goes on foot, its price refunded.
+- **Failure and re-plan.** A touchdown more than 100 m from the LZ (or a
+  timeout, or no pilot) fails: OccupierAir flies the airframe home with its
+  cargo and removes it unseen; the record goes back to abstract flight once
+  (the airframe re-created at the next birth, no refund), then is cancelled
+  unseen. A shot-down airframe is lost; whoever got out fights on.
+- **Birth chain (3.1 step 4).** After the next base back, a funded ground
+  operation with no unseen birth point is re-planned as a helicopter
+  insertion when the catalogue offers one, its seats hold the bodies and the
+  pool pays it (`OccupierForces::Spend`): the ground hull goes back through
+  the ledger, the airframe's price is spent and later refunded directly
+  (`Record::airReplanned`), not through the director's row.
+- **Strikes (D17).** A `CAKStrike` record carries no bodies. Abstract, it
+  reaches `strikePos` on its clock; live (the target in the bubble, the
+  budgets free) it is an OccupierAir sortie born airborne (250 m for a jet)
+  under the same gate, orbiting for `forcesSortieTime` (300 s, now read from
+  config with `forcesOffMapEdge`), with the limited reveal every 10 s of a
+  sighting younger than 60 s (resistance AI within 100 m, accuracy 0.5,
+  never the player). `CAOpStruck` goes out once, live or abstract; the
+  director applies the 7.3 effects on it.
+- **Alarm answers (8.2).** A `CAKAlarm` record travels to `alarmPos` like a
+  top-up column, emits `CAOpAlarmAnswered` on arrival, and live it holds
+  there until the zone is below RED with no resistance presence for 60 s
+  (`AlarmQuietHold`) or the live timeout, then joins the garrison; abstract,
+  it tops the garrison up at once and the surplus goes to the pool.
+- **The open item, decided.** For aircraft, `OccupierAir::UnseenAt` also
+  accepts "beyond the perception band in 3D from the camera", inside the view
+  cone too (nothing is drawn there); `departTimeout` (900 s) stays as the
+  backstop. Removal order is crew, then hull, then pad (the pad no longer
+  goes at departure), and every crewman leaves his seat before he is deleted
+  (the `EngineOps::LeaveVehicle` idiom), so none lingers in the world's
+  out-vehicle list or reaches a save.
+- **Persistence.** The record's air fields, the `AirHomes` list and
+  OccupierAir's insertions and sorties are saved inside the `CounterAttack`
+  block (refs resolve on the second pass; a pad missing after a load is
+  re-created). `guerrilla_forces_air_save_reload.seq` saves an insertion
+  mid-flight and resumes it in a fresh process.
+- **Not done.** An attack helicopter as the escort of an insertion (an
+  insertion carries one airframe; the strike path covers the attack
+  helicopter on its own). The descriptor lint passes the `forces*` keys
+  through without checking the class exists (ZoneRegistry's key predicates do
+  not list them); a typo shows only as BuildCatalogue's runtime WARN.

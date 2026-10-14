@@ -2,6 +2,7 @@
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // GetZoneState (modulation)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the occupier-side war level (7.1)
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>      // Landmass: no leg across the sea
 #include <Poseidon/Game/Guerrilla/Undercover.hpp>   // ClassifyWeaponShow
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -896,6 +897,12 @@ static int PickDest(int kind, const AutoArray<TrafficZoneCandidate>& zones, int 
         {
             continue;
         }
+        // a car never drives across the sea (Malden's Southeast Compound is
+        // an island of its own: its patrols and convoys stalled at the shore)
+        if (origin->landmass >= 0 && z.landmass >= 0 && z.landmass != origin->landmass)
+        {
+            continue;
+        }
         if (kind == TKCiv)
         {
             float d2 = Dist2DSq(z.x, z.z, origin->x, origin->z);
@@ -1498,6 +1505,7 @@ void Traffic::BuildZoneCandidates(AutoArray<TrafficZoneCandidate>& out) const
         c.z = z->pos.Z();
         c.isCity = stricmp(z->type, "CITY") == 0;
         c.occupierOwned = stricmp(z->owner, occ) == 0;
+        c.landmass = RoadRoute::Landmass(z->pos);
         out.Add(c);
     }
 }

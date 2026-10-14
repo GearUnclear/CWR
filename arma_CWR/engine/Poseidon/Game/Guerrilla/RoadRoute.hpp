@@ -13,15 +13,17 @@
 //      WITHOUT spending the start budget (maxStarts counts searches run).
 //   2. Join (joinRadius > 0), when stage 1 finds nothing: the source's own
 //      roads are a pocket the island's data never joined to the town's
-//      network (Malden's Southeast Compound: its gate tracks and the roads
-//      east of it are separate components, the nearest link of the island's
-//      net 1.3 km away).  The route then follows one of the source's pocket
+//      network.  The route then follows one of the source's pocket
 //      roads (a link within snapRadius, so a walled base leaves by a gate),
 //      leaves it at the link that minimises
 //          pocket road so far + joinWeight x cross-country gap + straight
 //          remainder to the town,
 //      crosses to the town network's link at the end of that gap (within
-//      joinRadius of the source), and follows the town's road from there.
+//      joinRadius of the source and on the source's own landmass: the gap is
+//      walked, never swum), and follows the town's road from there.  A source
+//      on another landmass than the town has no route (Malden's Southeast
+//      Compound stands on an island of its own, 800 m of sea east of Le
+//      Port; its roads are a pocket for that reason).
 //      Starting from the source itself (no pocket road) is a candidate too.
 //      A joined route's first point is the source itself (a force is born
 //      at the route's first point: a base's yard, not its gate).
@@ -84,6 +86,18 @@ class RoadRoute
     // the links reachable from start over the engine's connections, at most
     // cap of them (cap reached = "the island's net")
     static int ComponentSize(const RoadLink* start, int cap);
+
+    // the walkable landmass of pos: the landscape's geography cells joined
+    // to each other over land (8 neighbours; deep water parts them, a road
+    // or track across it is a bridge), labelled once per landscape.  A pos
+    // on deep water takes the nearest land cell within 2 cells.  -1 without
+    // a landscape, off the map or out at sea.  Malden's Southeast Compound
+    // stands on an island of its own, 800 m of sea east of Le Port: no foot
+    // or wheeled force crosses from it.
+    static int Landmass(Vector3Par pos);
+
+    // false only when both ends have a known landmass and they differ
+    static bool SameLandmass(Vector3Par a, Vector3Par b);
 };
 
 } // namespace Poseidon::Guerrilla

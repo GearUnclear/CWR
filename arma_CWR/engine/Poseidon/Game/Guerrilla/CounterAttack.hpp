@@ -195,6 +195,9 @@ struct CounterAttackTuning
     bool forcesOn = false;      // occupierForces: real speeds, key-on resolution, settle on revert
     int forcesOpsMax = 2;       // the default OpsCap uses while OccupierForces is inactive (not read from config)
     int forcesLiveHullsMax = 6; // forcesLiveHullsMax (0..20): live hulls at once
+    // phase 6A air (OCCUPIER-FORCES.md 3.1, 3.2, 16)
+    float sortieTime = 300.0f; // forcesSortieTime (60..1800 s): a strike's time over its target
+    int offMapEdge = -1;       // forcesOffMapEdge: -1 the edge nearest the target, else CAEdgeNorth..CAEdgeWest
     // transient test lever: gmCounterAttackTune "speed" was set at run time,
     // so `speed` (with roadFactor) wins over the real speeds
     bool speedLever = false;
@@ -216,6 +219,17 @@ struct CounterAttackDecision
     float chance = 0; // the dispatch probability used
     float roll = 0;   // the deterministic roll it was compared with
     int size = 0;     // planned bodies (0 when not going)
+};
+
+// forcesOffMapEdge (3.1): the parent nation's side of the map, where
+// off-map air is born and goes home to
+enum CounterAttackMapEdge
+{
+    CAEdgeNorth, // high Z
+    CAEdgeSouth, // Z = 0
+    CAEdgeEast,  // high X
+    CAEdgeWest,  // X = 0
+    NCounterAttackMapEdges
 };
 
 enum CounterAttackPhase
@@ -254,6 +268,30 @@ struct CounterAttackView
     bool hqEstablished = false;
     Vector3 hqPos = VZero;
     int hqDefenders = 0;
+    // phase 6A: per-zone AlertMachine state (AlertState; empty = unknown,
+    // read as below RED) and the map's side length in metres (0 = unknown:
+    // no off-map edge, air is born at its airfield only)
+    AutoArray<int> alertState;
+    float mapSize = 0;
+};
+
+// phase 6A: what CounterAttack reads back about one of its airframes
+// (OccupierAir's records through CounterAttackOps::AirStatus)
+struct CounterAttackAirStatus
+{
+    bool sortie = false;     // a strike sortie (else an insertion)
+    int state = 0;           // AirInsertionState / AirSortieState
+    bool landed = false;     // insertion: touched down at least once
+    float landedOffset = -1; // insertion: 2D m from the LZ at touchdown
+    Vector3 landedAt = VZero;
+    int failReason = 0;      // AirFailReason
+    bool loiter = false;     // sortie: reached its target area (orbiting, or past it)
+    bool crewRemoved = false;
+    bool gone = false;       // crew and hull removed, or the hull lost
+    bool hullLost = false;   // destroyed (or deleted under it)
+    int cargoBorn = 0;       // insertion: bodies seated at birth
+    int cargoSeated = 0;     // ... living, still aboard (last step)
+    int crewAlive = 0;       // living crew aboard (last step)
 };
 
 // How a squad appearing at a point would be perceived, Traffic's tiers
@@ -417,6 +455,63 @@ class CounterAttackOps : public CounterAttackGate
     virtual void SetHullGate(bool on) { (void)on; }
     // delete the crew FIRST (deleting a transport ejects its crew), then the hull
     virtual void RemoveHull(Entity* hull, AIGroup* crewGroup) { (void)hull, (void)crewGroup; }
+
+    // phase 6A air (OccupierAir).  Defaults: a world without air (the plain
+    // unit-test fakes), where every air birth fails and the force goes on
+    // under the ground rules instead.
+    // the altitude-aware gate (OccupierAir::ExposureAt): posAsl.Y is the
+    // height above sea level.  Default: the ground gate.
+    virtual int AirExposure(Vector3Par posAsl) const { return Exposure(posAsl); }
+    // the surface height (sea = 0)
+    virtual float GroundY(float x, float z) const
+    {
+        (void)x, (void)z;
+        return 0;
+    }
+    // an LZ 300..500 m from target, the side away from awayFrom first
+    virtual bool AirPickLz(Vector3Par target, const Vector3* awayFrom, Vector3& lz)
+    {
+        (void)target, (void)awayFrom;
+        lz = VZero;
+        return false;
+    }
+    // a transport helicopter born airborne at birth (altAgl above ground),
+    // n infantry as cargo of a second group, flown to lz, unloading on
+    // target, home = birth.  Returns its OccupierAir id (0 = failed, nothing
+    // left in the world) and sets cargo / hull / crewGroup.
+    virtual int AirInsert(const RString& hullClass, int n, Vector3Par birth, float altAgl, Vector3Par lz,
+                          Vector3Par target, AIGroup*& cargo, Entity*& hull, AIGroup*& crewGroup)
+    {
+        (void)hullClass, (void)n, (void)birth, (void)altAgl, (void)lz, (void)target;
+        cargo = nullptr;
+        hull = nullptr;
+        crewGroup = nullptr;
+        return 0;
+    }
+    // a jet or attack helicopter sortie over target for sortieTime
+    virtual int AirSortie(const RString& hullClass, Vector3Par birth, float altAgl, Vector3Par target,
+                          float sortieTime, Entity*& hull, AIGroup*& crewGroup)
+    {
+        (void)hullClass, (void)birth, (void)altAgl, (void)target, (void)sortieTime;
+        hull = nullptr;
+        crewGroup = nullptr;
+        return 0;
+    }
+    // the airframe's status; false = unknown id (dropped or never born)
+    virtual bool AirStatus(int airId, CounterAttackAirStatus& out) const
+    {
+        (void)airId;
+        out = CounterAttackAirStatus();
+        return false;
+    }
+    // the limited reveal (3.2, D9): reported fighters near pos, sighted
+    // ageSeconds ago, to the sortie's crew (OccupierAir::RevealAllowed).
+    // Returns the targets revealed.
+    virtual int AirRevealNear(int airId, Vector3Par pos, float ageSeconds)
+    {
+        (void)airId, (void)pos, (void)ageSeconds;
+        return 0;
+    }
 };
 
 class CounterAttack : public SerializeClass
@@ -435,6 +530,9 @@ class CounterAttack : public SerializeClass
     static constexpr float ResendInterval = 30.0f;
     // shortest abstract road leg (s)
     static constexpr float MinTravel = 10.0f;
+    // phase 6A: s an alarm answer holds quiet (below RED, no resistance
+    // presence) at the reported position before it settles (8.2)
+    static constexpr float AlarmQuietHold = 60.0f;
     // a road route longer than MaxRoadDetour x the straight distance +
     // RoadDetourSlack is not walked: men on foot cut across instead
     static constexpr float MaxRoadDetour = 2.0f;
@@ -534,6 +632,26 @@ class CounterAttack : public SerializeClass
         // serialized (absent: false): a live top-up squad whose town was
         // lost walks home and leaves the world only unseen (M5)
         bool withdrawing = false;
+        // phase 6A (serialized; absent in older saves: no air, no strike, no
+        // alarm).  CounterAttackOrders.hpp documents each field.
+        int airOrigin = -1;       // an occupier-held AIRFIELD zone index, -1 = off-map
+        int strikeZone = -1;      // CAKStrike: the struck zone (-1 none)
+        Vector3 strikePos = VZero; // CAKStrike: the reported position or the town centre
+        int alarmZone = -1;       // CAKAlarm: the RED zone answered
+        Vector3 alarmPos = VZero; // CAKAlarm: the reported position (VZero = the zone centre)
+        bool struck = false;      // CAKStrike: CAOpStruck went out (once per op)
+        bool answered = false;    // CAKAlarm: CAOpAlarmAnswered went out
+        int airId = 0;            // the live airframe's OccupierAir id (0 none)
+        Vector3 airLz = VZero;    // an insertion's LZ (its squad's route starts there)
+        Vector3 airFrom = VZero;  // where its straight flight line starts (airfield or off-map edge)
+        int airReplans = 0;       // failed insertions re-planned (once, 3.2)
+        bool airLanded = false;   // CAOpLanded went out for the current airframe
+        // the air re-plan of the birth chain (3.1 step 4) bought the
+        // airframe: its price was spent from the pool directly, so it is
+        // refunded (or lost) directly, not through the director's ledger
+        bool airReplanned = false;
+        float alarmQuiet = 0;     // CAKAlarm, live at the alarm: s below RED with no contact
+        float revealClock = 0;    // CAKStrike, live: s to the next limited reveal
         // transient (rebuilt after a load) ---------------------------------
         bool edgeHold = false;    // Travel: the last birth attempt was BirthHold (at the town edge)
         bool escortWait = false;  // Live, mounted: the carrier waits for its escort to close up
@@ -551,6 +669,7 @@ class CounterAttack : public SerializeClass
         int HullPrice() const { return priceUnits - crew > 0 ? priceUnits - crew : 0; }
         bool HasHullPackage() const { return hullClass.GetLength() > 0; }
         bool HasEscort() const { return escortClass.GetLength() > 0; }
+        bool IsAir() const { return package == FPTransportHeli || package == FPAttackHeli || package == FPJet; }
         int EscortHullPrice() const { return escortPriceUnits - escortCrew > 0 ? escortPriceUnits - escortCrew : 0; }
         // the pool units the director is still owed for unsettled hulls:
         // the carrier's priceUnits while its hull is unsettled, plus the
@@ -560,6 +679,23 @@ class CounterAttack : public SerializeClass
         {
             return (HasHullPackage() && !hullDone ? priceUnits : 0) + (HasEscort() && !escortDone ? escortPriceUnits : 0);
         }
+        LSError Serialize(ParamArchive& ar);
+    };
+
+    // an airframe whose insertion is done (unloaded, or the record ended):
+    // OccupierAir flies it home and removes it crew first where unseen;
+    // then CAOpHullRefund (crew home as bodies), or CAOpHullLost.  Serialized.
+    struct AirHome
+    {
+        int opId = 0;
+        int kind = CAKRetake;
+        int origin = CAOLegacy;
+        RString target;
+        RString source;
+        int units = 0;       // the airframe's price
+        int crew = 0;        // crew bodies
+        int airId = 0;
+        bool direct = false; // airReplanned: refund / loss straight to the pool
         LSError Serialize(ParamArchive& ar);
     };
 
@@ -697,7 +833,12 @@ class CounterAttack : public SerializeClass
     // CAKHqAssault: an established HQ, no other HQ_ASSAULT, target the HQ's
     // zone or -1, destination order.destPos or view.hqPos; CAKReinforce: an
     // occupier-held non-exempt zone other than the source, no record on it;
-    // CAKAlarm / CAKStrike are later phases and refused), the source
+    // CAKAlarm (phase 6A, 8.2): an occupier-held zone (order.alarmZone, or
+    // order.target when -1) other than the source, one at a time, travelling
+    // to order.alarmPos; CAKStrike (phase 6A, D17): an FPJet / FPAttackHeli
+    // order with a hullClass and a strikeZone or strikePos, no source or
+    // bodies needed; an air package's airOrigin is -1 or an occupier-held
+    // AIRFIELD), the source
     // (occupier-held) and the slots (BornOps() < OpsCap(), one more for a
     // CAOWave order: wave operations come on top); refuses an order its
     // source cannot grant whole (M1: the stored reserve's FundedSpare, the
@@ -711,6 +852,10 @@ class CounterAttack : public SerializeClass
     // = nothing launched, nothing debited.
     bool LaunchFunded(ZoneRegistry& registry, const CounterAttackView& view, const CounterAttackOrder& order,
                       CounterAttackOps* ops, AutoArray<ZoneEventRecord>& fired);
+    // phase 6A queries: the record of the one alarm answer (-1 none); a
+    // strike record already on the order's strikeZone / strikePos (-1 none)
+    int FindAlarm() const;
+    int FindStrikeOn(const CounterAttackOrder& order) const;
     // the director's ear (CounterAttackOrders.hpp); null = none (unit tests,
     // the key off).  Not owned.
     static void SetListener(CounterAttackListener* listener);
@@ -934,6 +1079,58 @@ class CounterAttack : public SerializeClass
     int GoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
                float fraction, AutoArray<ZoneEventRecord>& fired);
     // one record's step: true when it is finished
+    // phase 6A (CounterAttackAir.cpp) ------------------------------------
+  public:
+    // the off-map edge point for a target (3.1, forcesOffMapEdge): on the
+    // chosen edge (edge < 0: the one nearest the target) beyond the map by
+    // margin, level with the target along the edge.  mapSize 0 = no map:
+    // VZero.
+    static Vector3 OffMapEdgePoint(Vector3Par target, float mapSize, int edge, float margin);
+    // the height above ground air is born at: a jet 250 m, a helicopter 100 m
+    static float AirBirthAlt(int package);
+    // the air re-plan of the birth chain (3.1 step 4): no base's road passes
+    // the gate, so a ground operation becomes a helicopter insertion when
+    // the catalogue offers a transport helicopter, its seats hold the
+    // bodies and the pool pays it (OccupierForces::Spend).  True = re-planned.
+    bool AirReplan(ZoneRegistry& registry, const CounterAttackView& view, Record& r,
+                   const ForcePackageCatalogue& catalogue);
+    // some occupier base other than r's source (and not yet tried, D6)
+    // stands on the target's landmass: a ground force could still come from
+    // there.  False = every other base is air-only for this target
+    bool GroundSourceShares(const ZoneRegistry& registry, const Record& r) const;
+    int AirHomes() const { return _airHomes.Size(); }
+    const AirHome* GetAirHome(int i) const { return i >= 0 && i < _airHomes.Size() ? &_airHomes[i] : nullptr; }
+
+  private:
+    // the point air comes from: the occupier-held airfield (r.airOrigin), else the off-map edge
+    Vector3 AirOriginPos(const ZoneRegistry& registry, const CounterAttackView& view, const Record& r,
+                         Vector3Par dest) const;
+    // the unseen birth point at altitude, searched back from the abstract
+    // progress point to the origin, then off-map; false = none passes
+    bool PickAirBirth(const ZoneRegistry& registry, const CounterAttackView& view, const Record& r,
+                      const CounterAttackOps& ops, Vector3Par dest, float progress, Vector3& birth) const;
+    // a helicopter insertion goes live (GoLive's air branch): BirthDone /
+    // BirthNoPoint / BirthWait
+    int AirGoLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
+                  float fraction);
+    // a live insertion before its infantry is out; true = the record ends
+    bool AdvanceAirLive(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops, Record& r);
+    // hand a record's airframe to the home list (the record keeps its infantry)
+    void SendAirHome(Record& r);
+    void StepAirHomes(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops);
+    // the reported fighters' centre near a zone (OccupierForces sightings),
+    // for the LZ side and the limited reveal; age = the youngest sighting
+    static bool ReportedNear(const ZoneRegistry& registry, int zone, Vector3& centre, float* age = nullptr);
+    // why a CAKStrike order is refused (null = valid)
+    static const char* StrikeRefusal(const ZoneRegistry& registry, const CounterAttackOrder& order);
+    // start a strike record (no source, no bodies): true when it exists
+    bool LaunchStrike(ZoneRegistry& registry, const CounterAttackView& view, const CounterAttackOrder& order);
+    // one step of a strike record; true = the record ends
+    bool AdvanceStrike(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
+                       Record& r);
+    // an event with a place (CAOpAirborne, CAOpLanded, CAOpStruck, CAOpAlarmAnswered)
+    void EmitAt(const ZoneRegistry& registry, const Record& r, int type, int zone, Vector3Par pos, int bodies,
+                int units, const char* note);
     bool Advance(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops, Record& r,
                  AutoArray<ZoneEventRecord>& fired);
     // a live squad in the town it retook becomes the town's garrison; the
@@ -944,6 +1141,8 @@ class CounterAttack : public SerializeClass
     CounterAttackTuning _tuning;
     AutoArray<Record> _records;
     AutoArray<HomeHull> _homeHulls;
+    AutoArray<AirHome> _airHomes; // phase 6A: airframes flying home after an insertion
+    float _mapSize = 0;           // phase 6A: the last map size a view reported (the off-map edge)
     AutoArray<Leftover> _leftovers;
     float _accum = 0;
     int _townsTaken = 0;

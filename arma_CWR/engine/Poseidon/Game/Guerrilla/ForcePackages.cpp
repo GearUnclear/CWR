@@ -373,6 +373,10 @@ int ForcePackages::SeatCap(int package, const ForcePackageCatalogue& cat)
     {
         return 0;
     }
+    if (package == FPAttackHeli || package == FPJet)
+    {
+        return 0; // a strike airframe inserts nobody (6.5: strikes are CAKStrike orders)
+    }
     const int cargo = cat.hulls[package].cargo;
     return MinInt(MaxGroup, cargo > 0 ? cargo : 0);
 }
@@ -531,9 +535,9 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
     for (int i = 0; i < sources.Size(); i++)
     {
         const PackageSource& s = sources[i];
-        if (s.zone < 0 || s.SpareFor(package) < req.minBodies)
+        if (s.zone < 0 || s.SpareFor(package) < req.minBodies || !s.Serves(package))
         {
-            continue;
+            continue; // an air-only base (another landmass) sources only a helicopter insertion
         }
         if (best < 0 || s.distance < sources[best].distance ||
             (s.distance == sources[best].distance && s.zone < sources[best].zone))
@@ -542,7 +546,8 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
         }
     }
     q.crew = CrewOf(package, cat);
-    q.hullPrice = HullPrice(package);
+    const bool air = package == FPTransportHeli || package == FPAttackHeli || package == FPJet;
+    q.hullPrice = HullPrice(package, air && req.airOffMap);
     q.poolPrice = q.hullPrice + q.crew + q.EscortPoolPrice();
     q.seatsShort = cap < req.minBodies;
     if (best < 0 || q.seatsShort)

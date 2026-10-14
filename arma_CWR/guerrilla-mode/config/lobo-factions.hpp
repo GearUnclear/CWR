@@ -28,7 +28,10 @@
 //
 // Every class this file names is validated by
 //   PoseidonTools guerrilla lint --data-dir "<Classic>" --mod "<@LoBo>"
-// which must report the eight rosters with zero unresolved keys.
+// which must report the eight rosters with zero unresolved keys. The
+// forces* air keys (OCCUPIER-FORCES.md 6.5) are the exception: the lint
+// prints them but does not probe them yet, so their classes were checked by
+// hand against the pbo configs named beside each one.
 
 class CfgGuerrillaFactions
 {
@@ -70,6 +73,17 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBoHMWV_Mag_Patrol", "LoBo_Zelda", "LoBoM60A1", "LoBo_Centurion2"};
         vehicleThresholds[] = {3, 6, 9};
         officer = "LoBoGolaniWBo";
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6; air is never
+        // classified off vehicles[], it must be authored here). All three are
+        // side=1 scope=2 IAF classes: Bell 212 Anafa (LoboIDFhelo.pbo, 12
+        // cargo, M240 door gun), AH-1S Tzefa (LoboIDFhelo.pbo, 20 mm, TOW,
+        // rockets), A-4N Ayit (LoBo_A4.pbo, 30 mm, rockets, Mk 81 bombs). The
+        // Skyhawk and the Huey-family lift keep the '73-era feel of the
+        // ground ladder; the F-15/F-16/Apache/UH-60 are 1980s-on airframes.
+        forcesTransportHeli = "LoBoB212";
+        forcesAttackHeli = "LoBo_AH1";
+        forcesJet = "LoBo_A4";
 
         // Resistance-capable keys (plan 16, purely additive - every key above
         // is byte-identical to the shipped/tested occupier descriptor). An IDF
@@ -149,6 +163,13 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBo_EToymg", "LoBo_BTR60", "LoBo_BMP_EGY", "LoBo_T55_EGY_1"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Egypt_FrtCrpo";
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6): the corps flies
+        // nothing of its own, so it calls on the same Egyptian Air Force
+        // hulls as EgyptArmy below (see there for the class facts).
+        forcesTransportHeli = "LoBo_Mi8_egy";
+        forcesAttackHeli = "LoBo_Gazelle_Guns";
+        forcesJet = "LoBo_E_mig21bis_CAS1";
 
         holdClass = "LoBo_Egypt_FrtCrp";
         holdCount = 3;
@@ -231,6 +252,16 @@ class CfgGuerrillaFactions
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Egypt_infantryO";   // Mulazim Awwal (Lt)
 
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6), all side=0 scope=2
+        // EAF classes: Mi-8 (LoBoEghelo.pbo, : Mi17, 12 cargo, unarmed),
+        // SA-341 Gazelle with the 20 mm M621 (LoBoEghelo.pbo; the cannon
+        // variant over the HOT one, an insurgency is not a tank war), and
+        // MiG-21bis CAS 1 (LoBoMig.pbo, gun, rocket pods, Mk 20 cluster
+        // bombs). The EAF AH-64s are 1990s airframes and are left out.
+        forcesTransportHeli = "LoBo_Mi8_egy";
+        forcesAttackHeli = "LoBo_Gazelle_Guns";
+        forcesJet = "LoBo_E_mig21bis_CAS1";
+
         holdClass = "LoBo_Egypt_infantry";
         holdCount = 3;
         recruitFighter = "LoBo_Egypt_infantry";
@@ -296,6 +327,16 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBo_BTR60_Syria", "LoBo_bmp_syr", "LoBo_bmp2_syr", "LoBo_T72M_Syria"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_Liz_Infantry_SyriaO2";   // Mulazim Awwal (Lt); O1 = Sgt
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6). @LoBo ships NO
+        // Syrian helicopter, so the two helicopter keys borrow the vanilla
+        // side=0 Mi17 and Mi24 (Soviet-built types Syria flew; their crews are
+        // Soviet pilots, which reads as advisers). The jet is the mod's own
+        // side=0 scope=2 SyAF MiG-23BN (LoBoMig.pbo, gun, rocket pods,
+        // FAB-250 bombs).
+        forcesTransportHeli = "Mi17";
+        forcesAttackHeli = "Mi24";
+        forcesJet = "LoBo_MiG23BN_Syria_GA";
 
         holdClass = "LoBo_Liz_Infantry_Syria";
         holdCount = 3;
@@ -370,6 +411,15 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBo_m113_jor", "LoBo_Ratel20_jor", "LoBo_BMP2_Jor", "LoBo_M60A3_jor"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_inf_jor_D_off";
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6), all side=2 scope=2
+        // RJAF classes, matching this roster's GUER side: UH-1H (LoBoJorHelo.pbo,
+        // 13 cargo, M240 door gun), AH-1S Cobra (LoBoJorHelo.pbo, 20 mm, TOW,
+        // rockets) and F-5E multi-role (LoboF5.pbo, 20 mm, Mavericks, Mk 20
+        // cluster bombs, AIM-9).
+        forcesTransportHeli = "LoBo_UH1H_jor";
+        forcesAttackHeli = "LoBo_AH1S_Jor";
+        forcesJet = "LoBo_F5_mir_Jor";
 
         holdClass = "LoBo_inf_jor_D";
         holdCount = 3;
@@ -460,6 +510,8 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBo_Ural_Hizballah", "LoBo_JeepMG_Hizballah", "LoBo_ural_Hizbal_zsu23", "LoBo_JeepAT_Hizballah"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "LoBo_HizballahLeader";
+        // No forces* air keys: an irregular militia flies nothing, so as an
+        // occupier it is offered no air packages (OCCUPIER-FORCES.md 6.5).
 
         holdClass = "LoBo_HizballahRifle4";
         holdCount = 3;
@@ -549,6 +601,8 @@ class CfgGuerrillaFactions
         // rifleman variant standing in as squad leader, so the QRF leader has
         // no leadership kit.
         officer = "LoBo_Terror_03R";
+        // No forces* air keys: irregulars fly nothing, so as an occupier this
+        // roster is offered no air packages (OCCUPIER-FORCES.md 6.5).
 
         holdClass = "LoBo_Terror_01R";
         holdCount = 3;
@@ -603,6 +657,7 @@ class CfgGuerrillaFactions
         vehicles[] = {"LoBo_Ter_Toy_E", "LoBo_Ter_ToyMG_E"};
         vehicleThresholds[] = {4};
         officer = "LoBo_Terror_03E";   // no officer class - cosmetic stand-in
+        // No forces* air keys, as for PLO: irregulars fly nothing (6.5).
 
         holdClass = "LoBo_Terror_01E";
         holdCount = 3;

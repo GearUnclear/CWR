@@ -212,8 +212,10 @@ struct ZoneRecord
     // (OccupierForces); drives informant tips (>= 50), garrison morale
     // (< 25: skill x 0.8) and the refill factor (the K towns' mean)
     float standing = 50.0f;
-    // the town-strike stamp (phase 6: strike + 1200 s, half income until
-    // then).  Saved now so phase 6 needs no layout change; nothing reads it.
+    // the town-strike stamp (phase 6, 7.3): mission time (the script `time`,
+    // Glob.time) of the strike + StrikeStampSeconds.  Until then the town
+    // pays half income and no manpower (economy.sqs through gmZoneStruck).
+    // 0 = never struck.
     float struckUntil = 0;
     // times the resistance lost this zone back to the occupier (RevertTown,
     // RevertBase); capture.sqs writes "Retaken" instead of "Liberated" for a
@@ -384,6 +386,10 @@ enum ZoneEventType
     // it through QueueEvent; the zone index is the zone the HQ stood in, or
     // -1 when it stood outside every zone)
     ZEHqLost,
+    // "townStruck": an occupier air strike hit this town (OCCUPIER-FORCES.md
+    // 7.3, D17, D21; phase 6).  ApplyStrike queues it; civilians.sqs starts
+    // the town's panic on it
+    ZETownStruck,
     NZoneEventTypes
 };
 
@@ -554,6 +560,29 @@ class ZoneRegistry : public SerializeClass
     // clamped Heat writes (script surface)
     void HeatRaise(int index, float amount); // clamp at 100
     void HeatDecay(int index, float amount); // clamp at 0
+
+    // Town strikes (OCCUPIER-FORCES.md 7.3, D17, D21; phase 6) ---------------
+    // the 7.3 table: the struck town loses StrikeCut resistance support and
+    // StrikeCut occupier standing, gains StrikeHeat heat and is stamped
+    // struckUntil = now + StrikeStampSeconds; every OTHER CITY whose centre
+    // lies within StrikeRingRadius of the strike point loses StrikeRingCut of
+    // each.  Both values floor at 0.
+    static constexpr float StrikeCut = 40.0f;
+    static constexpr float StrikeRingCut = 10.0f;
+    static constexpr float StrikeRingRadius = 2000.0f;
+    static constexpr float StrikeHeat = 15.0f;
+    static constexpr float StrikeStampSeconds = 1200.0f;
+    // Apply one strike's effects.  index: the struck zone (-1: a strike on
+    // reported fighters outside every zone: the ring only).  The full cut,
+    // the heat, the stamp and ZETownStruck (queued into fired) apply only
+    // when index is a CITY; a strike on another zone type (a base's opener)
+    // takes the ring only.  pos: the strike point (the ring's centre); VZero
+    // = the zone's centre.  now: mission time (s).  Returns the number of
+    // ring towns cut.  D18 is unchanged: nothing here raises a value, and a
+    // struck town recovers only by the existing presence rules.
+    int ApplyStrike(int index, Vector3Par pos, float now, AutoArray<ZoneEventRecord>& fired);
+    // a CITY inside its strike window (now < struckUntil)
+    bool IsStruck(int index, float now) const;
 
     // Town defenders (issue #79 B2) ------------------------------------------
     // An occupier-ADMINISTERED town: a CITY owned NEUTRAL or by the occupier
