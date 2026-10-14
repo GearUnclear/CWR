@@ -25,6 +25,18 @@
 //     locked (beep-beep) - lock state and invulnerability are re-asserted
 //     every tick for the live rows, so neither needs its own serialization;
 //     a garaged vehicle that ends up far outside the ring is released.
+//   * One HQ model (OCCUPIER-FORCES.md 9.1): with no START TOWN picked (the
+//     "(camp)" default or a direct launch) the first active tick of a
+//     campaign (campaignEnd on) establishes the HQ at the first CAMP zone
+//     through Establish, without moving the player.  An old save with no HQ
+//     gets the same on load unless its HQ was destroyed.
+//   * HQ loss (D13, D14, D22, D24): the HQ meter (hqCapture, 0..100) at
+//     HqPos rises only while a deliberate HQ_ASSAULT force stands within
+//     HqRadius and no resistance HOLD presence does; at 100 Destroy() empties
+//     the cache, wrecks the garaged vehicles, removes the ring and queues the
+//     hqLost zone event.  The zone around the HQ is never touched.  A new HQ
+//     needs an establish action (free: it is not a move); _hqEpoch counts
+//     destructions so scripts can tell one HQ from the next.
 //
 // Native core in the TownFlags / StashRegistry mold: pure, unit-testable
 // pickers under a thin world layer, Serialize + a *Commands.cpp script
@@ -49,6 +61,7 @@ class EntityAI;
 namespace Guerrilla
 {
 class ZoneRegistry;
+struct ZoneTuning;
 
 // optional keys inside class CfgGuerrillaZones
 struct BaseTuning
@@ -98,7 +111,18 @@ class GuerrillaBase : public SerializeClass
     // queries ---------------------------------------------------------------
     bool IsActive() const; // mirrors ZoneRegistry::IsActive
     const BaseTuning& Tuning() const { return _tuning; }
+    // established and not destroyed (Destroy clears _established, so the
+    // two always agree; HasHq is the name the occupier-forces plan uses)
     bool IsEstablished() const { return _established; }
+    bool HasHq() const { return _established && !_hqDestroyed; }
+    // the HQ fell and no new one was established since
+    bool HqDestroyed() const { return _hqDestroyed; }
+    // the campaign has had an HQ at some point (CampaignEnd's lose guard)
+    bool HqEver() const { return _established || _hqDestroyed || _hqEpoch > 0; }
+    // HQ destructions so far (0 for the first HQ); unchanged by re-establishing
+    int HqEpoch() const { return _hqEpoch; }
+    // the HQ meter, 0..100 (D24)
+    float HqCapture() const { return _hqCapture; }
     bool IsIndoors() const { return _established && _indoors; }
     RString ZoneName() const { return _established ? _zone : RString(); }
     Vector3 HqPos() const { return _established ? _hqPos : VZero; }
@@ -127,8 +151,45 @@ class GuerrillaBase : public SerializeClass
     // Establish (or move) the HQ in the zone containing pos.  World path:
     // picks the building / edge spot, creates or moves the cache holder,
     // relocates the garage ring.  False when no zone contains pos or the
-    // world is not up.
+    // world is not up.  After a destruction it is a first establishment
+    // (not a move): fresh empty cache, fresh ring, _hqDestroyed cleared.
     bool Establish(Vector3Par pos);
+    // the first CAMP zone (registry order, case-insensitive type); -1 none
+    static int FirstCampZone(const ZoneRegistry& registry);
+    // the default-HQ rule (9.1): a campaign (campaignEnd on) with no HQ that
+    // was never destroyed gets one at the Camp; a destroyed HQ never comes
+    // back by itself (a retaken Camp is not an HQ again)
+    bool WantsDefaultHq(bool campaignEnabled) const { return campaignEnabled && !_established && !_hqDestroyed; }
+
+    // HQ meter and destruction (OCCUPIER-FORCES.md 9.1) ---------------------
+    static constexpr float HqRadius = 150.0f; // m around HqPos, both sides
+    // the pure meter step: rises by captureRate x min(assault, captureCrewCap)
+    // with assault units and no hold presence, frozen with both, decays by
+    // captureDecayAbandoned with no assault units; clamped to 0..100
+    static float NextHqCapture(float meter, int assault, int hold, const ZoneTuning& tuning);
+    // presence seams: bodies within radius (2D) of pos.  The defaults are the
+    // engine's: CounterAttack::HqAssaultPresence (HQ_ASSAULT units only, live
+    // or abstract) and the resistance HOLD count (the player under
+    // PlayerHoldsPresence, plus every living resistance unit).  Unit tests
+    // inject fakes; null restores the engine default.
+    using HqPresenceFn = int (*)(Vector3Par pos, float radius);
+    static void SetHqPresenceSources(HqPresenceFn assault, HqPresenceFn hold);
+    // one meter tick at HqPos (the zone tick cadence); Destroy at 100.
+    // No-op without an HQ.
+    void TickHqMeter(const ZoneTuning& tuning);
+    // the gmHqForceCapture lever: sets the meter (clamped 0..100); 100 with
+    // an HQ standing destroys it at once
+    void ForceHqCapture(float value);
+    // D13 / D22: the HQ falls.  Empties the cache now and queues the holder
+    // and the HQ prop for deletion out of the player's perception, wrecks
+    // every garaged vehicle (damage 1, left where it stands) and drops the
+    // ring, sets _hqDestroyed, clears _established, bumps _hqEpoch, logs one
+    // INFO line and queues ZEHqLost with the HQ zone (or -1).  Returns the
+    // garage rows it took (the destroy list, null links included); -1 when
+    // there was no HQ.
+    int Destroy();
+    // ruins (emptied holder, prop) still waiting for an unseen moment
+    int PendingRuins() const { return _ruins.Size(); }
 
     // garage ------------------------------------------------------------------
     // lock: the vehicle must be a Transport inside the ring and not carry
@@ -163,10 +224,14 @@ class GuerrillaBase : public SerializeClass
                                 bool indoors);
     // a garage row with a null vehicle link (pruned on the load pass)
     void AddGarageRowForTest();
+    // the one-shot start-town flag as a save carries it (old-save tests)
+    bool AutoTried() const { return _autoTried; }
+    void SetAutoTriedForTest(bool tried) { _autoTried = tried; }
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; the garage pass throttles to TickInterval, the
-    // beep FSM and the one-shot start-town election run per frame
+    // beep FSM and the one-shot start-town / Camp election run per frame,
+    // the HQ meter at the zone tick interval
     void Simulate(float deltaT);
 
     // save/load; the cache holder and the garaged vehicles ride the world's
@@ -179,6 +244,15 @@ class GuerrillaBase : public SerializeClass
     {
         // OLink semantics: a deleted vehicle reads back as null -> row dropped
         LLink<EntityAI> veh;
+
+        LSError Serialize(ParamArchive& ar);
+    };
+
+    // an object of a fallen HQ waiting to be deleted unseen (the emptied
+    // cache holder, the desk or tent); rides the world's building serializer
+    struct RuinRow
+    {
+        LLink<EntityAI> obj;
 
         LSError Serialize(ParamArchive& ar);
     };
@@ -204,7 +278,16 @@ class GuerrillaBase : public SerializeClass
     void Beep(EntityAI* veh);
     void SimulateBeep(float deltaT);
     void TryAutoElection();
+    // the start-town tail: move the player beside the HQ, exempt the town
+    void OnStartTownEstablished(int zoneIndex, const RString& town);
     void RelocatePlayer() const;
+    // the shared state commit of Establish and MarkEstablishedForTest; true
+    // when it was a move (an HQ already stood)
+    bool CommitEstablished(const RString& zone, Vector3Par hqPos, Vector3Par garagePos, Vector3Par cachePos,
+                           bool indoors);
+    // delete the ruins nobody can see right now (Traffic's despawn rule
+    // through CounterAttack::EngineGate)
+    void SweepRuins();
 
     BaseTuning _tuning;
     // tuning read for the current mission (cleared by Clear; a save written
@@ -224,6 +307,12 @@ class GuerrillaBase : public SerializeClass
     AutoArray<GarageRow> _rows;
     int _moveCount = 0;
     bool _autoTried = false; // start-town election attempted (serialized)
+    bool _campTried = false; // default Camp HQ attempted this session (transient)
+    bool _hqDestroyed = false; // the HQ fell and none stands (serialized)
+    int _hqEpoch = 0;          // destructions so far (serialized)
+    float _hqCapture = 0;      // the HQ meter (serialized)
+    float _hqAccum = 0;        // meter cadence (transient)
+    AutoArray<RuinRow> _ruins; // serialized (second-pass refs)
     bool _cacheWarned = false;
     float _accum = 0;
     BeepState _beep;

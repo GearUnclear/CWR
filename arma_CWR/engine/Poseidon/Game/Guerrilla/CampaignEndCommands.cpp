@@ -4,8 +4,9 @@
 // JournalCommands.cpp.
 //
 //   gmCampaignWon               -> bool, the saved win latch
+//   gmCampaignLost              -> bool, the saved lose latch (OCCUPIER-FORCES 9.2)
 //   gmCampaignEnd               -> [won, endPending, endIssued, endClock,
-//                                   held, total, wonDay, lastTaken]
+//                                   held, total, wonDay, lastTaken, lost]
 //                                  held / total count the campaign's enemy
 //                                  military zones (the roster); total is 0
 //                                  until the roster is taken on the first
@@ -38,13 +39,18 @@ static GameValue GmCampaignWon(const GameState* /*state*/)
     return CampaignEnd::Instance().Won();
 }
 
+static GameValue GmCampaignLost(const GameState* /*state*/)
+{
+    return CampaignEnd::Instance().Lost();
+}
+
 static GameValue GmCampaignEnd(const GameState* state)
 {
     const CampaignEnd& end = CampaignEnd::Instance();
     const ZoneRegistry& registry = ZoneRegistry::Instance();
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(8);
+    array.Resize(9);
     array[0] = GameValue(end.Won());
     array[1] = GameValue(end.EndPending());
     array[2] = GameValue(end.EndIssued());
@@ -53,6 +59,7 @@ static GameValue GmCampaignEnd(const GameState* state)
     array[5] = (float)end.RosterSize();
     array[6] = (float)end.WonDay();
     array[7] = GameStringType(end.LastTaken());
+    array[8] = GameValue(end.Lost());
     return value;
 }
 
@@ -65,6 +72,7 @@ static GameValue GmCampaignEndDelay(const GameState* /*state*/, GameValuePar ope
 INIT_MODULE(GuerrillaCampaignEnd, 3)
 {
     GGameState.NewNularOp(GameNular(GameBool, "gmCampaignWon", GmCampaignWon));
+    GGameState.NewNularOp(GameNular(GameBool, "gmCampaignLost", GmCampaignLost));
     GGameState.NewNularOp(GameNular(GameArray, "gmCampaignEnd", GmCampaignEnd));
     GGameState.NewFunction(GameFunction(GameNothing, "gmCampaignEndDelay", GmCampaignEndDelay, GameScalar));
 }

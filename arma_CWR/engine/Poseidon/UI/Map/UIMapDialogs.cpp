@@ -1090,10 +1090,13 @@ void DisplayDebriefing::CreateDebriefing()
     {
         _right->CopySection(src, rSection);
     }
-    else if (GWorld->GetEndMode() == EMEnd1)
+    else if ((GWorld->GetEndMode() == EMEnd1 && Guerrilla::CampaignEnd::Instance().Won()) ||
+             (GWorld->GetEndMode() == EMLoser && Guerrilla::CampaignEnd::Instance().Lost()))
     {
-        // a won Guerrilla campaign (issue #79 B3) names its win even though
-        // the templates ship no briefing.html with a Debriefing:End1 section
+        // a won Guerrilla campaign (issue #79 B3) names its win, and a lost
+        // one its defeat (OCCUPIER-FORCES.md 9.2, EMLoser), even though the
+        // templates ship no briefing.html with a Debriefing:End1 / :Loser
+        // section
         RString title;
         RString body;
         if (Guerrilla::CampaignEnd::Instance().DebriefingText(title, body))

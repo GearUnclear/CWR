@@ -5,7 +5,14 @@
 //
 //   gmHqCanEstablish [x,y,z]   -> bool  (a zone's area contains the position)
 //   gmHqEstablish [x,y,z]      -> bool  (establish / move the HQ there)
-//   gmHqEstablished            -> bool
+//   gmHqEstablished            -> bool (an HQ stands: established, not destroyed)
+//   gmHqState                  -> [hasHq, destroyed, epoch, hqCapture, zoneIndex,
+//                                  pos] (OCCUPIER-FORCES.md 9.1); zoneIndex is
+//                                  HqZone (-1 none), pos is gmHqPos ([] none)
+//   gmHqEpoch                  -> scalar, HQ destructions so far (market.sqs
+//                                  re-arms its marker and objective on a change)
+//   gmHqForceCapture <value>   test lever: sets the HQ meter (0..100); 100
+//                                  with an HQ standing destroys it at once
 //   gmHqZone                   -> zone name, "" while unestablished
 //   gmHqPos / gmHqGaragePos / gmHqCachePos -> [x,y,z] (getPos order), [] none
 //   gmHqBuilding / gmHqCache   -> object (objNull while unestablished / gone)
@@ -120,6 +127,35 @@ static GameValue GmHqCachePos(const GameState* state)
     return PosValue(state, base.CachePos(), base.IsEstablished());
 }
 
+// gmHqState -> [hasHq, destroyed, epoch, hqCapture, zoneIndex, pos]
+static GameValue GmHqState(const GameState* state)
+{
+    const GuerrillaBase& base = GuerrillaBase::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(6);
+    array[0] = GameValue(base.HasHq());
+    array[1] = GameValue(base.HqDestroyed());
+    array[2] = (float)base.HqEpoch();
+    array[3] = base.HqCapture();
+    array[4] = (float)base.HqZone();
+    array[5] = PosValue(state, base.HqPos(), base.HasHq());
+    return value;
+}
+
+// gmHqEpoch -> scalar
+static GameValue GmHqEpoch(const GameState* /*state*/)
+{
+    return (float)GuerrillaBase::Instance().HqEpoch();
+}
+
+// gmHqForceCapture <value>
+static GameValue GmHqForceCapture(const GameState* /*state*/, GameValuePar oper1)
+{
+    GuerrillaBase::Instance().ForceHqCapture((float)oper1);
+    return NOTHING;
+}
+
 // gmHqBuilding -> object
 static GameValue GmHqBuilding(const GameState* /*state*/)
 {
@@ -228,6 +264,9 @@ INIT_MODULE(GuerrillaBase, 3)
     GGameState.NewFunction(GameFunction(GameBool, "gmHqCanEstablish", GmHqCanEstablish, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmHqEstablish", GmHqEstablish, GameArray));
     GGameState.NewNularOp(GameNular(GameBool, "gmHqEstablished", GmHqEstablished));
+    GGameState.NewNularOp(GameNular(GameArray, "gmHqState", GmHqState));
+    GGameState.NewNularOp(GameNular(GameScalar, "gmHqEpoch", GmHqEpoch));
+    GGameState.NewFunction(GameFunction(GameNothing, "gmHqForceCapture", GmHqForceCapture, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "gmHqZone", GmHqZone));
     GGameState.NewNularOp(GameNular(GameArray, "gmHqPos", GmHqPos));
     GGameState.NewNularOp(GameNular(GameArray, "gmHqGaragePos", GmHqGaragePos));
