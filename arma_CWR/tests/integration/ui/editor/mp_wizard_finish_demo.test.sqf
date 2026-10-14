@@ -1,5 +1,7 @@
 // Regression: the multiplayer editor wizard must be able to finish a template
-// mission from Demo data and launch it as a hosted multiplayer game.
+// mission from stock template data and launch it as a hosted multiplayer game.
+// Runs on the Remaster shadow (packages/RemasterUD) on Abel: the local Demo
+// package ships no Templates folder, so its wizard has nothing to offer.
 
 triSetLanguage "Czech"
 triAssertEq [(triDisplay), 0]
@@ -10,8 +12,8 @@ triAssertEq [(triDisplay), 8]
 triClick 104
 triAssertEq [(triDisplay), 17]
 
-// Pick the Demo island and the "new wizard" mission row.
-triAssertEq [triSelectListByData [101, "Demo"], true]
+// Pick Abel and the "new wizard" mission row.
+triAssertEq [triSelectListByData [101, "Abel"], true]
 triAssertEq [(triAssertListText [102, "<< Nová - Průvodce >>"]), "OK"]
 triAssertEq [triSelectList [102, 1], true]
 triScreenshot "00_server_new_wizard"

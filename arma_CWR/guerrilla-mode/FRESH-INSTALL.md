@@ -182,9 +182,14 @@ reach the Steam files.
 Some older LoBo tests still mount `tests/fixtures/mods-lobo/@lobofixup` for its
 tracked `bin/config.cpp` (addon preload roster and LoBo factions); it needs no
 generation step, and the LoBo repair it once stood in for is the `mod doctor`
-pass setup already runs. Tests with relative `@LoBo` paths assume the mod is
-beside the data folder or the checkout; check the test's `--mods-dir` for other
-layouts. The `full_cwa`/`lobo` lanes still default to prepared Classic data.
+pass setup already runs. Unpinned tests mount `@LoBo` with `--mods-dir "."`,
+so they expect the mod INSIDE the data dir, where `new-remaster-shadow.ps1`
+puts it, and reach repo fixtures through tri's `${repo_root}` token (the
+engine checkout root), so they run on any shadow under `tmp\` as well as on
+`packages\RemasterUD`. A legacy Classic data dir with `@LoBo` beside it no
+longer satisfies them. The `full_cwa`/`lobo` lanes still default to prepared
+Classic data through `.trident.env`; pass `--data-dir <shadow>` to run them on
+the Remaster.
 The Demo and the unmodified retail Remaster are only needed for their own
 integration/UI lanes; see `../CLAUDE.md` for the `packages/Demo` and
 `packages/Game` paths.

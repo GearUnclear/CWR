@@ -1,9 +1,9 @@
 # Boots the Names-classification copy of Guerrilla.Lebanon80 (issue #54 C3) on the
 # @LoBo mod's Lebanon (80's) world. Requires the FULL CWA install
-# (OFPR_DATA_DIR) plus the @LoBo mod folder next to it: --mods-dir ".."
-# resolves relative to the game CWD (the data dir, D:\Arma_CWA\ARMA Cold War
-# Assault [Classic]), so "@LoBo" mounts D:\Arma_CWA\@LoBo. The repo fixture
-# mod @lobofixup mounts AFTER it: its tracked bin/config.cpp preloads the
+# (a Remaster shadow as the data dir) with the @LoBo mod folder INSIDE it:
+# --mods-dir "." resolves against the game CWD (the data dir), so "@LoBo"
+# mounts <data dir>\@LoBo. The repo fixture mod @lobofixup (an absolute
+# ${repo_root}/... path, expanded by tri) mounts AFTER it: its tracked bin/config.cpp preloads the
 # LoBo addons the template spawns from.
 #
 # SINCE ISSUE #54 A4 the fixture also carries the whole @LoBo
@@ -26,4 +26,4 @@ tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
 # slow - generous budgets on purpose (same as guerrilla_sinai_swap).
 timeout = 420
 assert_timeout = 240
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup"]

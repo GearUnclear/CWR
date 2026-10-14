@@ -15,6 +15,16 @@
 //!   `no_menu` = true                      — don't require main menu IDD 0
 //!   `no_player` = true                    — mission has no player; skip player-ready wait
 //!   `extra_args` = \["--flag", "value"\]  — additional CLI args
+//!
+//! `extra_args` values may use `${repo_root}`, expanded to the engine checkout
+//! root (`arma_CWR`, the root a relative `data_dir` or `mission` resolves
+//! against). Use it for repo fixtures, e.g.
+//! `"--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup"`: a
+//! path relative to the game CWD (the data dir) only lands in the repo when
+//! the data dir happens to sit at a fixed depth inside it. A mod that lives
+//! inside the data dir itself (`@LoBo` on a Remaster shadow) uses
+//! `"--mods-dir", "."`. Multi-instance `test.toml` files get the same token
+//! next to `${output}` and `${env.NAME}`.
 
 use crate::client::GameInstance;
 use crate::scenarios::ScenarioResult;
@@ -1245,7 +1255,7 @@ async fn run_mission_test(
     // Automated tests run strict (the rwdi build players run defaults to --no-strict).
     // Injected before extra_args so a per-test `--no-strict` in the sidecar toml wins.
     cmd.args(["--strict"]);
-    cmd.args(&meta.extra_args);
+    cmd.args(super::multi::expand_single_test_args(&meta.extra_args));
     cmd.args(cli_game_args);
     if effective_data_dir.is_some() {
         cmd.arg("-C").arg(&work_dir);
@@ -1533,7 +1543,7 @@ async fn run_sqf_test(
     // Automated tests run strict (the rwdi build players run defaults to --no-strict).
     // Pushed before the sidecar toml's extra_args so a per-test `--no-strict` wins.
     extra_args.push("--strict".into());
-    extra_args.extend(meta.extra_args.iter().cloned());
+    extra_args.extend(super::multi::expand_single_test_args(&meta.extra_args));
     extra_args.extend(cli_game_args.iter().cloned());
     tracing::debug!("[{name}] game extra_args: {:?}", extra_args);
     let extra_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();

@@ -5,8 +5,8 @@
 #       --mod tests/fixtures/mods-island/@udisland
 #       --out tests/integration/missions/Guerrilla.UdIsland
 # so the whole island (terrain, houses, roads, config) is GPL-clean and lives
-# in git. The mod is mounted through --mods-dir ".." (relative to the game CWD,
-# the data dir). What still needs the Classic package is the ENGINE BOOT: fonts,
+# in git. The mod is mounted by an absolute ${repo_root}/... path (tri expands
+# the token to the engine checkout root). What still needs the Classic package is the ENGINE BOOT: fonts,
 # resource.cpp, the stringtable and the menu world are not in any fixture, so
 # this stays in the full_cwa lane; the scaffold half of the same fixture runs
 # data-free in CI (tests/ci/mod-intake-lanes.sh). Needs the shared core +
@@ -16,4 +16,4 @@ binary = "PoseidonGame"
 tags = ["scripting", "guerrilla", "full_cwa", "headless"]
 timeout = 300
 assert_timeout = 180
-extra_args = ["--dev", "--mods-dir", "..", "--mod", "arma_CWR/tests/fixtures/mods-island/@udisland"]
+extra_args = ["--dev", "--mods-dir", ".", "--mod", "${repo_root}/tests/fixtures/mods-island/@udisland"]
