@@ -235,7 +235,7 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     }
     const ParamEntry& c = *zonesCfg;
     OccupierForcesTuning& t = _tuning;
-    t.enabled = c.ReadValue("occupierForces", 0.0f) != 0.0f;
+    t.enabled = c.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault) != 0.0f;
     t.poolMin = RoundToInt(ReadRanged(c, "forcesPoolMin", (float)t.poolMin, 0.0f, 200.0f));
     t.poolPerTown = RoundToInt(ReadRanged(c, "forcesPoolPerTown", (float)t.poolPerTown, 0.0f, 8.0f));
     t.refillHours = ReadRanged(c, "forcesPoolRefillHours", t.refillHours, 0.5f, 48.0f);

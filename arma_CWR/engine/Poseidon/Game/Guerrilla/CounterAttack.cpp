@@ -200,7 +200,7 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     t.birthGiveUp = ReadRanged(c, "counterAttackBirthGiveUp", t.birthGiveUp, 30.0f, 86400.0f);
     // occupier forces (OCCUPIER-FORCES.md 16): the layer key is read here
     // too, so the movement rules know the key without the pool service
-    t.forcesOn = c.ReadValue("occupierForces", 0.0f) != 0.0f;
+    t.forcesOn = c.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault) != 0.0f;
     // forcesOpsMax is OccupierForces' key (one reader, one writer: its
     // tuning and gmForcesTune "opsMax"); OpsCap reads it from there
     t.forcesLiveHullsMax = (int)ReadRanged(c, "forcesLiveHullsMax", (float)t.forcesLiveHullsMax, 0.0f, 20.0f);

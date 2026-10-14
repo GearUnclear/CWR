@@ -56,12 +56,25 @@ const char* kCounterConfig =
     "    };\n"
     "};\n";
 
+// occupierForces defaults on since phase 7: a case that does not author the
+// key is a legacy (key off) case and gets occupierForces = 0 pinned
 std::string ConfigWith(const char* keys)
 {
     std::string cfg = kCounterConfig;
     const std::string anchor = "class CfgGuerrillaZones\n{\n";
-    cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
+    std::string body = std::string("    ") + keys + "\n";
+    if (std::string(keys).find("occupierForces") == std::string::npos)
+    {
+        body += "    occupierForces = 0;\n";
+    }
+    cfg.insert(anchor.size(), body);
     return cfg;
+}
+
+// the legacy fixture: the zones with the occupier forces layer pinned off
+std::string Legacy()
+{
+    return ConfigWith("");
 }
 
 // the first town answered for certain: the resolution cases need a force
@@ -171,7 +184,7 @@ constexpr float FarZ = 20000.0f;
 TEST_CASE("CounterAttack - config defaults, keys and range checks", "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Legacy());
     const CounterAttackTuning& t = f.ca.Tuning();
     CHECK(t.enabled);
     CHECK(t.size == Approx(0.5f));
@@ -378,7 +391,7 @@ TEST_CASE("CounterAttack - support gains are the plain supportRate whatever is h
           "[game][guerrilla][counterattack]")
 {
     Fixture f;
-    f.Load(kCounterConfig);
+    f.Load(Legacy());
     f.RaiseTown(f.town); // one town held
     f.Z(f.other).garrison = 0;
     AutoArray<ZoneEventRecord> fired;
@@ -1583,7 +1596,10 @@ TEST_CASE("CounterAttack - occupier forces keys and the real speeds (3.2)", "[ga
 {
     Fixture f;
     f.Load(kCounterConfig);
-    CHECK_FALSE(f.ca.Tuning().forcesOn);
+    CHECK(f.ca.Tuning().forcesOn); // phase 7: the key defaults on
+    Fixture off;
+    off.Load(Legacy());
+    CHECK_FALSE(off.ca.Tuning().forcesOn);
     CHECK(f.ca.Tuning().forcesOpsMax == 2);
     CHECK(f.ca.Tuning().forcesLiveHullsMax == 6);
     Fixture g;
@@ -2057,7 +2073,7 @@ TEST_CASE("CounterAttack - key off: the legacy Fight keeps A_lethal for the odds
     for (int opId = 1; opId < 200 && !(sawRepel && sawRetake); opId++)
     {
         Fixture f;
-        f.Load(kCounterConfig);
+        f.Load(Legacy());
         f.RaiseTown(f.town);
         CounterAttackOrder o = FootOrder(f.town, f.post, 5, opId);
         o.funded = false;

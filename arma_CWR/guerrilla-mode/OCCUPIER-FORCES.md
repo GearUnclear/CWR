@@ -16,8 +16,8 @@ phases marked landed below.
 | 3 | Landed | Director in `OccupierForces` (sightings-only intel per D9 at the alert cadence, `gmOccupierIntel`; DORMANT until the second distinct town; heat candidates with the per-flip roll, urgency with hysteresis, tokens by band, 30 min cooldowns, push-out; `gmOccupierOps`), `ForcePackages` (ladder classification with the seven descriptor overrides, prices, lethality, the choice with both worked examples; phase 3 offers Foot and Truck), real speeds, `gmHeatDecayHeld` 0.25. Movement in `CounterAttack`: record kinds and fields, `LaunchFunded`, the listener events (`CounterAttackOrders.hpp`), truck hull lifecycle (crew group, cargo, `IssueCommand` driving, brake and dismount at 250 m, delete without refund on a return to abstract travel, refund when home unseen), the birth chain with next-base-back re-sourcing and cancel-unseen for funded records, key-on live resolution against present defenders, the 5.5 routing rows, the won freeze, `ZoneRecord::seeded`. Abel opts in; the fixtures and reference slices pin the key off. Known gaps: Malden's Southeast Compound road net is not joined to the island network (A* exhausts it), so `guerrilla_forces_watched_route` asserts the re-source and the departure, not the arrival; `forcesOpsMax` is read by both services separately; a hull package needs stored spare at its source (no foot downgrade); arrival-live births are on foot with the hull held back. |
 | 4 | Landed | Commits c825a5f (4B) and 6e1ee27 (4A); gate green 2026-10-13 (626 unit cases, 33/33 tri on shadow-67, four one-off flakes). 4B: the HQ model and the lose state, on disk and verified, not committed. With no START TOWN a campaign (campaignEnd on) establishes its HQ at the first CAMP zone through `Establish` (once per session, never after a destruction; `campaignEnd = 0` fixtures keep no HQ at boot; an old save with no HQ gets it on load). `HasHq`, `HqDestroyed`, `HqEpoch`, the HQ meter `hqCapture` at `HqPos` (only `CounterAttack::HqAssaultPresence` fills it; resistance HOLD presence within 150 m freezes it; decay otherwise), `Destroy` (cache emptied, holder and prop deleted once Hidden, garaged vehicles unlocked and damage 1, ring dropped, epoch bumped, INFO line, `ZEHqLost`), free re-establish anywhere; `gmHqState`, `gmHqEpoch`, `gmHqForceCapture`; recruit menu on `gmHqPos` (none without an HQ); `market.sqs` marker and objective re-arm on an epoch change. `CampaignEnd` lose latch (no HQ, no held zone, and an HQ or a held zone once), `EMLoser` after `campaignEndDelay`, the lose debriefing in `UIMapDialogs`, `gmCampaignLost`, `gmCampaignEnd` slot 8, all saved. Deviation: a start-town HQ still gets the pre-existing #79 B2 garrison exemption (tied to the start-town pick, not to the HQ). Tri green: `guerrilla_forces_hq_assault`, `remaster_ud_guerrilla_forces_lose`. 4A: waves, base recapture, standing and the director's base and HQ operations, on disk and verified, not committed. `ZoneRecord` `occCapture`, `standing`, `struckUntil`, `lostCount` (saved); `RevertBase` and the base branch of `EvaluateTick` (any occupier unit or an abstract BASE / HQ_ASSAULT force raises `occCapture` by `captureRate` x min(crew, 3) with no resistance HOLD presence; both present freeze it; nobody decays it at `captureDecayAbandoned`; at 100 the post reverts, the holding force settles, else a pool deposit, income 0, `baseLost`; never after a win or loss); `gmZoneSim` slots 14 to 17, `gmZoneSet` `occCapture` / `standing`; `capture.sqs` per-zone hold groups, "Retaken" by `lostCount`, the `baseLost` handler. CounterAttack: BASE, HQ_ASSAULT and REINFORCE launches validated per kind, `destPos` / `hqDone` saved, `HqAssaultPresence` (HQ_ASSAULT records only, D14), HQ records settle on `ZEHqLost`, `OpsCap` = `forcesOpsMax` + live wave records, the Won / Lost freeze. Director: base candidates only while STRONG (D16), bases in push-out, the HQ candidate while STRONG or in a wave, the final push unconditional; waves (two-tick dwell, merge, size 12..48, lead 600 / 120 s, hub AIRFIELD then SEAPORT then the strongest base, hub top-up, cluster strikes up to `forcesWaveRetakeShare` on `forcesWaveOps` targets, REINFORCE columns, final-stand surge); `OccupierWarLevel` (`gmWarLevelOccupier`) for garrison tiers, CounterAttack, Traffic, Undercover and `qrf.sqs`, which also skips the YELLOW chase in THIN / SPENT; standing (recovery toward 50 at 1 per 600 s, informant tips at `standing / 200` from 50, morale 0.8 below 25, the mean scales the refill; the strike that cuts it is phase 6, the hook is `ZoneRecord::standing` / `gmZoneSet "standing"`). Phase 3 gaps closed with it: the S5 pending refund goes to the pool with the key on (`OccupierForces` installs `GarrisonCache::SetPendingRefundHook`); a force with no unseen birth point is re-sourced at once to the next base whose road passes the gate, waits only when none passes, then is cancelled unseen; with the key on legacy (DORMANT) records take the same chain and never turn back (D6). Accepted deviations: the `baseRetake` key (follows `occupierForces` unless authored); resistance alone decays `occCapture` at `captureDecayDefended`; "in a wave" means a wave inbound or landed within 1800 s; the final-stand surge is excluded from spare only in the director's sources; a base route is the road A*, else the straight cross-country line, which counts as reaching the target. Tri green: `guerrilla_forces_base_retake`, `guerrilla_forces_wave_base`, `guerrilla_forces_refill_pushout`; `guerrilla_counter_attack_watched_base` now asserts the re-source (key on) and `guerrilla_forces_pool_off` the 24-slot row. |
 | 5 | Landed | Every ground package offered (`DefaultPackages`). Column decision: armour escorts a carrier (truck or APC); one escort per column at most; a lone tank or two-seat armed car is never chosen (`seatsShort`), only bought as an escort. The escort is born `EscortGap` (20 m) behind the carrier under the same unseen rule, drives the carrier's legs (the carrier waits while the escort is more than 150 m behind), closes up to the town edge and supports there (armed carriers support too; a truck holds back); each hull refunds its own price when deleted unseen at home; a return to abstract travel deletes both hulls crew-first, no refund, re-created at the next birth. Launch-time foot downgrade refunds the whole column. Funded orders are granted from the stored reserve the director quoted, else refused (review M1); a hold at the town edge gives up after `counterAttackBirthGiveUp` into a town-edge birth or a cancel unseen (M2); lost hulls, crews and dead squads go to an unseen cleanup list, saved as `Leftovers` (M3, L7); hull births and despawns use the headlight band at night (M8). REINFORCE columns top up through the 5.5 room rows; a top-up squad whose town is lost walks home and leaves unseen (M5). `forcesOpsMax` is read only from `OccupierForces`. Tri: `guerrilla_forces_armoured_column`. |
-| 6 | Pending | |
-| 7 | Pending | |
+| 6 | Landed | Commit bcca80e; gate phase 6: (pending; the orchestrator fills the numbers). Also in it: the landmass rule (3.1: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass; Malden's Southeast Compound is an island and an air-only source). 6A: air in CounterAttack on disk, not committed (CounterAttackAir.cpp; contract in CounterAttackOrders.hpp: CAKStrike, CAKAlarm, `airOrigin`, `strikeZone` / `strikePos`, `alarmZone` / `alarmPos`, CAOpAirborne / CAOpLanded / CAOpStruck / CAOpAlarmAnswered with `zone` and `pos`). Air packages join `DefaultPackages`, offered only where the descriptor authors `forcesTransportHeli` / `forcesAttackHeli` / `forcesJet` (EAST Mi17 / Mi24 / Su25, WEST UH60 / Cobra / A10, @LoBo IDF, Egypt, Syria, Jordan; FIA and the irregulars none); prices 10 / 18 / 22, x1.5 off map; the strike airframes carry nobody. Insertions: abstract on the straight line from `airFrom` (the airfield, else the `forcesOffMapEdge` edge, 1500 m out), born airborne at the first point the altitude gate hides, LZ 300..500 m away from the reported fighters, unload, the cargo becomes the live squad, the airframe home through `AirHome` and refunded once OccupierAir removed it crew first; a landing over 100 m off the LZ re-plans once, then cancels unseen; no LZ or airframe goes on foot. Birth chain step 4: a funded ground operation with no unseen birth point after the next base back is re-planned as an insertion bought from the pool (refunded directly, `airReplanned`). Strikes: abstract on their clock, live as an OccupierAir sortie only while the target is in the bubble, `forcesSortieTime`, limited reveal every 10 s of sightings under 60 s (resistance AI, accuracy 0.5); CAOpStruck once. Alarm answers travel to `alarmPos`, answer once, hold until below RED with no contact for 60 s, then join the garrison. Owner decision applied: aircraft are unseen past the band in 3D even in the view cone (`departTimeout` the backstop). Fixed in OccupierAir: crew leave their seats before deletion, the pad goes after the hull. CounterAttack's vanish and top-up removals now wait for the dead too (`BodiesUnseen`). Air records, `AirHomes` and OccupierAir's records are saved in the CounterAttack block. Tri green: `guerrilla_forces_air_op`, `guerrilla_forces_air_save_reload.seq`. Deviations: no attack helicopter escort for insertions; a live alarm answer adopts its whole squad (no garrisonMax cap on the live path); the descriptor lint checks the `forces*` classes since phase 7A. 6B: director side on disk, not committed. Air buying: the transport helicopter joins every package choice when the catalogue offers it (`airOrigin` = the occupier-held AIRFIELD nearest the target, else -1 and the off-map price through `PackageRequest::airOffMap`). Strikes (7.3): bought only while STRONG, as an add-on right after a director ground launch on an URGENT held town with 3+ reported fighters outside its strike window, or on a base retake / HQ assault (the opener; launched just after the ground order, the jet arrives first), or alone on such a town when no ground package can go; jet or attack helicopter, the cheapest the pool pays, the fastest within `forcesUrgentCostShare` (always urgent); `strikePos` the centroid of the zone's reported positions (D9). Effects on every `CAOpStruck` (`ZoneRegistry::ApplyStrike`): -40 support / -40 standing / +15 heat / `struckUntil` = mission time + 1200 s in a struck CITY, -10 / -10 in every other CITY within 2 km of it (a strike on a base or a position: the ring only), `townStruck` queued (civilians.sqs panics through `GM_fnPanicStart`), `gmZoneStruck` halves the town's income and stops its manpower (economy.sqs). Alarm answers (8.2): any zone the resistance does not hold at RED, one CAKAlarm at a time at the 5 s scan cadence, sources every occupier base but the alarm zone, minimum 4, urgent unless THIN, none when SPENT ("Starved" once), `alarmPos` the latest report. qrf.sqs launches only while `gmLegacyQrf` (key off, sized off, or `legacySave`); the block saves `format` 6, an older block loads as `legacySave`. Deviations: alarm answers take no token and run while DORMANT (8.2 sets their limits; otherwise a key-on campaign has no answer before the second town); wave strikes buy no air opener; the HQ strike aims at `HqPos` when nothing was reported there. |
+| 7 | In progress | Defaults on (7A: `occupierForces` defaults to 1 in the engine, `OccupierForcesTuning::KeyDefault`; `campaignEnd = 0` missions author 0; the descriptor lint checks the `forces*` keys), the contract rewrite (7B: OFFSCREEN-CONTRACT.md replaced by the reconciled draft with phase 6 folded in; these docs), the fork issue, the roadmap, the PR. |
 
 **Reading guide.**
 - Section 16 is the internal knob reference.
@@ -299,26 +299,48 @@ rates imperceptible.
    far + 2 x the cross-country gap + the straight distance on to the
    target) and crosses country to a town-net link within 2000 m of the
    source (`RoadRouteServiceJoinRadius`), the best by that cost, not the
-   nearest. The Southeast Compound on Abel is such a base: its roads are
-   pockets 1292 m from the island net, and its routes leave by the west
-   gate and cross about 1237 m to the Le Port road. A squad still stalls
-   inside that gate (open, section 17).
+   nearest. The join lands only on the source's landmass (below): it never
+   crosses the sea. The Southeast Compound on Abel was routed this way
+   until `bcca80e`, but it stands on its own island (about 800 m of deep
+   sea to Le Port; the old join leg crossed the sea, and its W and S gates
+   are closed wire gates), so it is now an air-only source.
+   **The landmass rule** (`bcca80e`). `RoadRoute::Landmass` labels the
+   landscape's 50 m geography cells joined over land (8 neighbours; deep
+   water parts them, a road over water is a bridge); `SameLandmass` is
+   false only when both ends are known and differ (`gmLandmass`,
+   `gmGeoGrid`). A ground force never comes from, and a Traffic vehicle
+   never drives to, a base on another landmass than its target
+   (`PickSource`, `Resource` with an INFO line, `BuildSources`, the wave
+   fallback, Traffic's `PickDest`). Such a base is an AIR-ONLY source
+   (`PackageSource::airOnly`): the director quotes only a helicopter
+   insertion from it, and step 6 re-plans as air at once when no other
+   base shares the target's landmass.
 4. **Next base back, at once (D6).** If nothing between base A and the
    250 m bound passes, the operation is re-sourced immediately
-   (`CounterAttack::Resource`) to the next other occupier base B, nearest
-   the target first, whose STORED spare covers the whole force and whose
-   route yields a point passing the gate (the probe runs under the hull
-   gate). A base route is the road A*, else the straight cross-country
-   line (an accepted deviation). A is refunded up to its room, the surplus
+   (`CounterAttack::Resource`) to the next other occupier base B on the
+   target's landmass, nearest the target first, whose STORED spare covers
+   the whole force and whose route yields a point passing the gate (the
+   probe runs under the hull gate). A base route is the road A*, else the
+   straight cross-country line (an accepted deviation); ground sources
+   share the target's landmass, so that line stays on land, and a base on
+   another landmass is never tried. A is refunded up to its room, the surplus
    (or a lost base's share) to the pool; B pays; the arrival clock restarts
    from B. Then each further base.
 5. **Wait.** Only when no base passes: the force waits with its arrival
    clock stopped, doing nothing to the target, and retries its own route
    and the re-source every 30 s. After `counterAttackBirthGiveUp` (600 s)
    it tries the re-source once more.
-6. **Air re-plan** (phase 6, in progress). If no base's route passes and
-   the director can afford air, the operation becomes a helicopter
-   insertion.
+6. **Air re-plan** (landed, `bcca80e`; `CounterAttack::AirReplan`). After
+   the wait's last re-source fails, a FUNDED ground operation becomes a
+   helicopter insertion when the catalogue offers the transport
+   helicopter, its seats hold the bodies and the pool pays it
+   (`OccupierForces::Spend`); it does so at once, without the wait, when
+   no other base shares the target's landmass. The airframe flies from the
+   occupier-held AIRFIELD nearest the target, else off-map; the ground
+   hull's price goes back through the ledger, and the airframe's price is
+   refunded straight to the pool (`airReplanned`), bypassing the
+   director's ledger row (open, section 17). A legacy record never
+   re-plans.
 7. **Cancel unseen.** Otherwise the operation is cancelled while still
    abstract:
    - its bodies return to their current source up to its room, the rest to
@@ -352,18 +374,24 @@ rates imperceptible.
   add, then `SetTransform`, `Init`, `AddVehicle`. Crew and cargo are two
   groups, crew CARELESS / GREEN, cargo SAFE. The place is over the
   occupier's airfield, or **beyond the map edge** at the parent nation's
-  side (`forcesOffMapEdge`, default the edge nearest the target). The
-  spike takes the birth point as given; the airfield source and the edge
-  choice are phase 6, in progress.
+  side (`forcesOffMapEdge`, default the edge nearest the target; the point
+  lies 1500 m beyond the map, level with the target). Landed in `bcca80e`:
+  the origin is the occupier-held AIRFIELD nearest the target, else the
+  edge, fixed at launch; the birth is the first point the altitude gate
+  rates hidden, searched back from the progress point to the origin, then
+  1500 to 5500 m beyond the edge, never within 250 m of the target.
 - **Jets** are always born airborne over or beyond the airfield, never on
   the ground: `AirplaneAuto` would otherwise taxi the world's single ILS
   path.
 - **Off-map is sea and it renders.** An off-map point is admissible only
   where the gate passes at altitude (above). Off-map is not automatically
   unseen.
-- **Wiring** (phase 6, in progress). `OccupierAir` is native and
-  self-contained; nothing in `CounterAttack` or the director calls it yet,
-  and its records are transient.
+- **Wiring** (landed, `bcca80e`). `CounterAttack` drives `OccupierAir`
+  (`CounterAttackAir.cpp`; the contract in `CounterAttackOrders.hpp`:
+  `CAKStrike`, `CAKAlarm`, `airOrigin`, `strikeZone` / `strikePos`,
+  `alarmZone` / `alarmPos`, `CAOpAirborne` / `CAOpLanded` / `CAOpStruck` /
+  `CAOpAlarmAnswered`). The record's air fields, the `AirHomes` list and
+  `OccupierAir`'s records are saved in the CounterAttack block.
 
 ### 3.2 Movement at real speed (D3, D4)
 
@@ -432,34 +460,47 @@ keep today's pacing, so existing templates and tests keep their outcomes.
 - **Lift-off.** With no cargo seated: `LandFinished()`, the pilot set to
   Wait when Stopping or Stopped (without it a 30 m hover over the LZ), then
   a fresh `Command::Move` home, re-issued every 45 s while it stays down.
-  The pad goes at departure.
-- **Failure.** A landing more than 100 m from the LZ is a failed insertion:
-  logged, re-planned (phase 6, in progress).
+  The pad stays until the hull is deleted (`bcca80e`; the spike removed it
+  at departure). The unloaded cargo becomes the record's live squad and
+  walks the straight line from the LZ.
+- **Failure** (landed, `bcca80e`). A landing more than 100 m from the LZ
+  (or a timeout, or no pilot) is a failed insertion: the airframe flies
+  home with its cargo and is removed unseen; the record goes back to
+  abstract flight once (the airframe re-created at the next birth, no
+  refund), then is cancelled unseen. No LZ, or no airframe: the force goes
+  on foot, its price refunded. A shot-down airframe is lost; whoever got
+  out fights on.
 - **D20.** The landing may be in plain view.
 - **Removal.** The airframe returns to its origin and is deleted only where
   it is unseen at its altitude for 2 s, beyond the map edge included
   (rendered sea, not automatically out of view): the CREW FIRST (with any
   cargo still seated), the hull one step later, then the pad, because
-  deleting a transport ejects its crew. **Unseen for an aircraft**
-  (orchestrator decision, 2026-10-14): out of the view cone, or
-  terrain-masked at altitude, or BEYOND the perception band in 3D even
-  inside the cone; `departTimeout` (900 s) stays as the backstop. The
-  beyond-band leg inside the cone is phase 6, in progress: today
-  `UnseenAt` still requires out-of-cone and the band leg applies only
-  after `departTimeout`.
+  deleting a transport ejects its crew. Every crewman leaves his seat
+  before he is deleted (the `EngineOps::LeaveVehicle` idiom), so none
+  lingers in the world's out-vehicle list. **Unseen for an aircraft**
+  (orchestrator decision, 2026-10-14, landed in `bcca80e`): out of the
+  view cone and terrain-masked at altitude, or BEYOND the perception band
+  in 3D even inside the cone (`OccupierAir::UnseenAt`); `departTimeout`
+  (900 s) stays as the backstop. The price is then refunded
+  (`CAOpHullRefund`) and the crew go home as bodies; a destroyed airframe
+  is lost (`CAOpHullLost`).
 
 **Jet or attack-helicopter strike** (D17):
 - It flies to the target (AWARE / RED) and, within 1.25 x the orbit radius,
   searches in COMBAT / open fire on an 8-point orbit 900 m out, a leg every
-  20 s, for `forcesSortieTime` (300 s; the spike takes it as a
-  `gmAirSortie` argument), then flies home and is removed as above. The
-  spike proved birth, search, reveal and removal, not damage on a target;
-  attack helicopters share the jet's path, untrialled. Director use is
-  phase 6, in progress.
+  20 s, for `forcesSortieTime` (300 s, read from config since
+  `bcca80e`), then flies home and is removed as above. The spike proved
+  birth, search, reveal and removal, not damage on a target; attack
+  helicopters share the jet's path. Landed in `bcca80e`: a strike
+  (`CAKStrike`, no bodies) is abstract on its clock and live as an
+  `OccupierAir` sortie only while its target is in the bubble (an accepted
+  deviation); `CAOpStruck` goes out once, live or abstract, and the
+  director applies the 7.3 effects on it.
 - Its own sensors acquire targets.
 - `AIGroup::AddTarget` (reveal) is used only for sightings younger than
-  60 s, with accuracy < 1, re-issued while in range. The crew never gets an
-  exact hidden position (D9).
+  60 s, with accuracy < 1 (0.5 as built), re-issued every 10 s while in
+  range, and only for resistance AI within 100 m of the sighting, never
+  the player. The crew never gets an exact hidden position (D9).
 
 ### 3.3 No pop-in (S5)
 
@@ -929,8 +970,10 @@ The best cluster is the target.
 
 **Hub.** The named `forcesWaveHub`, else the occupier-held AIRFIELD, else
 SEAPORT, else the strongest base. With no hub left the strikes depart from
-the occupier base nearest each target and no REINFORCE column goes (they
-need a hub); phase 6 (in progress) adds off-map air for that case.
+the occupier base nearest each target on that target's landmass (`bcca80e`)
+and no REINFORCE column goes (they need a hub). Phase 6 added no off-map
+air for that case: wave strikes buy no air opener (an accepted deviation,
+section 18).
 
 **Allocation** from the pool, in order:
 1. Hub top-up: a reserve deposit through `Deposit`.
@@ -1448,7 +1491,7 @@ distance, and is not `headless`.
 |---|---|
 | existing `counter_attack_*` | Unchanged with the key off (legacy speeds); conservation changes asserted with it on |
 | existing `guerrilla_town_defenders` (edited in phase 1) | t5 captures with a weapon in hands (asserts that slot, not the outfit); a new case: a uniformed player with a slung rifle holds a town against a drain (D23) |
-| `guerrilla_forces_watched_route` | Whole Harbour route watched: re-sourced to the Southeast Compound; asserts the joined road route and the birth, not the arrival (the squad stalls inside the Compound's west gate, open) |
+| `guerrilla_forces_watched_route` | Whole Harbour route watched: the landmasses (the Southeast Compound on its own island), no road route from the Compound, and the re-source to the Airfield (updated in `bcca80e`; before it the test re-sourced to the Compound and its squad stalled inside the west gate) |
 | `guerrilla_forces_passerby_revert` | A parked patrol reverts an empty town; the refill is pending and pool-paid; the patrol leaves |
 | `guerrilla_forces_no_popin`, `guerrilla_forces_wiped_release` | S5 |
 | `guerrilla_forces_both_towns` | Two ops; INFO lines joined to `gmOccupierOps` ids |
@@ -1461,9 +1504,10 @@ distance, and is not `headless`.
 | `guerrilla_forces_armoured_column` | Phase 5 (landed): a carrier and its escort born unseen under the headlight gate, kept together (150 m / 60 m), the escort supporting at the edge |
 | `guerrilla_forces_heli_insertion` | Air spike (landed as a spike test, `c5cfa44`), tag `slow_air`, retries 3, not in the default `-j` run: off-map airborne birth gated at altitude on an explicit birth point; helipad LZ; two groups; unload; crew deleted before the hull |
 | `guerrilla_forces_jet_sortie` | Air spike (landed as a spike test), `slow_air`: an airborne jet birth, the search orbit, the limited reveal, removal crew first |
-| `guerrilla_forces_air_op` | Phase 6, in progress, `slow_air`: an air operation launched by the director through `CounterAttack` |
-| `guerrilla_forces_town_strike` | Phase 6, in progress, `slow_air`: a jet strike on a held town; -40/-40 there, -10/-10 within 2 km, `townStruck` panic, half income until `struckUntil` |
-| `guerrilla_forces_alarm_answer` | Phase 6, in progress: a RED occupier zone answered by an ALARM operation in place of the script QRF |
+| `guerrilla_forces_air_op` | Phase 6 (landed, `bcca80e`), `slow_air`: a RETAKE bought as a helicopter insertion from the Airfield through `CounterAttack`; the Mi17 born airborne beyond perception, the LZ 300..500 m out, a landing within 100 m of it, the cargo the live squad, the airframe removed unseen crew first |
+| `guerrilla_forces_air_save_reload.seq` | Phase 6 (landed, `bcca80e`), `slow_air`: an insertion saved mid-flight (`01_inflight`) resumes in a fresh process (`02_resume`) with its air fields and the OccupierAir hull, crew, cargo and pad refs |
+| `guerrilla_forces_town_strike` | Phase 6 (landed, `bcca80e`), `slow_air`: a strike on a held town; -40/-40 there, -10/-10 within 2 km, nothing beyond, `townStruck` panic, D18 (no passive recovery), half income until `struckUntil` |
+| `guerrilla_forces_alarm_answer` | Phase 6 (landed, `bcca80e`): a RED occupier zone answered by one ALARM operation from another base while DORMANT, with `qrf.sqs` silent; `legacySave` brings the script QRF back |
 | `guerrilla_forces_save_reload.seq` | Pool, bands, posture, tokens, waves, ops and hull refs across a fresh process |
 
 ### 12.3 Human session
@@ -1528,7 +1572,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 
 | Key / value | Owner | Default | Range | Meaning |
 |---|---|---|---|---|
-| `occupierForces` | OF | 0 until phase 7 (Abel 1 from phase 3) | 0/1 | Layer on/off |
+| `occupierForces` | OF | 1 from phase 7 (`OccupierForcesTuning::KeyDefault`; 0 before it, Abel 1 from phase 3); `campaignEnd = 0` missions author 0 | 0/1 | Layer on/off |
 | `forcesPoolMin` / `forcesPoolPerTown` | OF | 24 / 2 | 0..200 / 0..8 | `poolStart = max(Min, R + PerTown * K)` |
 | `forcesPoolRefillHours` | OF | 4 | 0.5..48 h | Exhausted to full, garrisons included |
 | `forcesPoolFloor` | OF | 0.2 | 0..1 | THIN operations floor |
@@ -1553,9 +1597,9 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | lethality: tiers / motorized / armed car / APC / tank / attack heli / jet | OF | 1.0-1.25-1.5 / 1.25 / 3 / 6 / 12 / 14 / 16 | | 6.5 |
 | foot speed / ground cruise / air cruise | OF | 1.5 m/s / 0.6 / 0.8 of `maxSpeed` (km/h converted) | | Key on only |
 | `forcesLiveHullsMax` | CA | 6 | 0..20 | Live hulls at once (read by `CounterAttack`, not `OccupierForcesTuning`) |
-| `forcesSortieTime` | OF | 300 | 60..1800 s | Strike time over target (read from config in phase 6; the spike takes it as a `gmAirSortie` argument, 300 when <= 0) |
+| `forcesSortieTime` | OF | 300 | 60..1800 s | Strike time over target (read from config since `bcca80e`; the spike lever `gmAirSortie` still takes it as an argument, 300 when <= 0) |
 | heli LZ / landing tolerance | OF | 300-500 m / 100 m | | Insertion |
-| `forcesOffMapEdge` | OF (template) | nearest edge | N/S/E/W | Parent-nation side (read from config in phase 6; the spike takes the birth point as given) |
+| `forcesOffMapEdge` | OF (template) | nearest edge | N/S/E/W | Parent-nation side (read from config since `bcca80e`; the point lies 1500 m beyond the map, level with the target) |
 | `airAudible` | `OccupierAir` | 800 m | `gmAirTune` | Audible floor for aircraft |
 | `landOrderDist` | `OccupierAir` | 450 m | `gmAirTune` | Distance to the pad where `LandStarted` is ordered, re-issued every 5 s |
 | `departTimeout` | `OccupierAir` | 900 s | `gmAirTune` | Backstop: past it a departing airframe beyond the band is removed regardless of the cone |
@@ -1593,32 +1637,39 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 ## 17. Still open
 
 Every owner question is answered (D1-D24). Open implementation items, as of
-`c5cfa44` and the phase 6 work:
+`bcca80e` and the phase 7 work:
 - **K and the settlement probe** (5.1). The engine counts every
-  administered non-exempt CITY; phase 7 decides whether the probe returns
-  or is dropped from this doc.
-- **The default flip** (phase 7). `occupierForces` code default is 0; only
-  `Guerrilla.Abel` authors 1 (`Showcase.Abel` inherits it). Flip the code
-  default, or author 1 in the templates and 0 in the remaining fixtures.
-- **The Southeast Compound gate stall.** Routes from the Compound join the
-  island net (3.1 step 3), but a squad still stalls inside its west gate,
-  so `guerrilla_forces_watched_route` does not assert the arrival.
-- **The live top-up adoption cap.** A LIVE REINFORCE squad reaching its
-  town is adopted whole, with no room cap (5.5).
+  administered non-exempt CITY; whether the probe returns or is dropped
+  from this doc is decided in a later phase.
+- **The live adoption cap.** A LIVE REINFORCE squad reaching its town is
+  adopted whole, with no room cap (5.5); so is a live alarm answer joining
+  its garrison (8.2, a phase 6 accepted deviation).
 - **LOW review items** (`tmp/of-review-phases-1-3.md`): L6 (`PruneOps` can
   lose refunds past 32 rows), L8 (phase-2 saves wake with an empty
   `_townsEver`), L10 (`RevertTown` before the first tick after a load),
   L11 (the S5 release grid samples 9 points of a random placement square),
   L13 (routing traps: `ArriveLive` with the source inside the bound, a
   return-to-road livelock, a home hull driving into a lost base), L14 (test
-  levers spend with no ledger row), L15 (bisect). Also: the return-to-
-  abstract and top-up removals test living members only, then delete every
-  member, so a corpse in view could vanish.
-- **Seated deletion in `Traffic.cpp`** (in hand) and in `OccupierAir`
-  (`DeletePerson`): both delete a seated man without moving him out first.
+  levers spend with no ledger row), L15 (bisect).
+- **The air re-plan's price bypasses the director's ledger** (3.1 step 6):
+  the airframe is spent through `OccupierForces::Spend` and refunded or
+  lost straight to the pool (`airReplanned`), not through the director's
+  operation row.
+- **A slow native alarm answer could contest a later Showcase capture
+  chapter.** Chapter 6 and the human "alert" case accept a native ALARM
+  operation as the answer; one still marching when a later chapter
+  captures a zone could interfere.
 - **The HQ-respawn issue** (separate, D13).
-- **Player messaging** for the director, waves and the HQ (D12: INFO lines
-  and gm* commands only for now).
+- **Player messaging** for the director, waves, strikes and the HQ (D12:
+  INFO lines and gm* commands only for now).
+
+Closed since `c5cfa44`: the Southeast Compound gate stall (the Compound is
+an island: an air-only source, resolved by the landmass rule, 3.1);
+seated deletion in `Traffic.cpp` (`2524c3a`) and in `OccupierAir`
+(`bcca80e`), both now moving a seated man out first; the corpse that could
+vanish in view on a return to abstract travel or a top-up removal (both
+now wait for the dead too, `BodiesUnseen`, `bcca80e`); the default flip
+(phase 7A, status table).
 
 ## 18. Decision and critique log
 
@@ -1636,6 +1687,8 @@ Every owner question is answered (D1-D24). Open implementation items, as of
 | 2026-10-13 (orchestrator, phase 4 accepted deviations) | `baseRetake` follows `occupierForces` unless authored; resistance alone decays `occCapture` at `captureDecayDefended`; "in a wave" means a wave inbound or landed within 1800 s; the final-stand surge is excluded from spare only in the director's sources; a base route is the road A*, else the straight cross-country line, which counts as reaching the target; a START TOWN HQ keeps the #79 B2 exemption, a re-established HQ never gets it (3.1, 6.3, 7.1, 7.2, 9.1). |
 | 2026-10-14 (orchestrator, phase 6) | **Aircraft "unseen" in 3D.** For removal, an aircraft is unseen out of the view cone, terrain-masked at altitude, or beyond the perception band in 3D even inside the cone; `departTimeout` (900 s) stays as the backstop (3.2). The air spike's verdict is GO (`AIR-SPIKE.md`). |
 | 2026-10-14 (reconciliation) | The code wins: 3.1 (immediate re-source, the road-route join, the wait, the edge hold, legacy records on the chain), 3.2 (air recipe, columns, the dismount), 5.1 (K without the probe), 5.5 (routing rows), 6.1 (informant tips), 6.3 (final push, wave HQ candidate, born cap), 6.5 (M1, the base minimum cap), 6.6 (instruments), 7.1 (allocation order, tokens, no hub), 7.2 (`occCapture` rates, every holding force, `RevertBase`), 9.1 (the HQ meter and default HQ), 9.2 (had something to lose, the lose test), 11, 12, 16 and 17 brought to the committed code. |
+| 2026-10-14 (phase 6, `bcca80e`: the landmass finding) | **Malden's Southeast Compound is an island.** About 800 m of deep sea part it from Le Port; the road-route join's cross-country leg from it crossed the sea, and its W and S gates are closed wire gates; the squad stall inside its west gate (open since phase 3) is resolved with it. The rule: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass (`RoadRoute::Landmass`, 50 m geography cells joined over land, a road over water a bridge); the join lands only on the source's landmass; such a base is an AIR-ONLY source (`PackageSource::airOnly`), and the birth chain re-plans as an insertion at once when no other base shares the target's landmass. This replaces the phase 4 deviation's "the straight cross-country line counts as reaching the target" for bases off the target's landmass. The offscreen fixture's SEBase moved to the Le Port quay (3.1). |
+| 2026-10-14 (phase 6 accepted deviations, `bcca80e`) | No attack-helicopter escort for an insertion (one airframe per insertion); a live alarm answer adopts its whole squad (no `garrisonMax` cap on the live path); strikes are live only in the bubble, abstract elsewhere; wave strikes buy no air opener; an HQ strike with no report aims at `HqPos`; a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter price bypasses the director ledger; alarm answers take no token and run while DORMANT (otherwise a key-on campaign has no answer before the second town). Open with them: the descriptor lint does not check the `forces*` keys; a slow native answer could contest a later Showcase capture chapter (17). |
 
 ## 19. Residual risks the owner accepts
 

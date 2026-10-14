@@ -3119,6 +3119,36 @@ TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming factio
     }
 }
 
+TEST_CASE("ZoneRegistry - plan-15 resolution checks the forces* hull keys and clears a missing one",
+          "[game][guerrilla][packages]")
+{
+    // the occupier force package overrides (OCCUPIER-FORCES.md 6.5) name
+    // vehicle classes: a missing one is never substituted with a soldier, it
+    // is cleared so the package falls back to the vehicles[] ladder
+    std::string cfg = kPlan15Config;
+    const std::string anchor = "        officer=\"OfficerE\";\n";
+    const size_t at = cfg.find(anchor);
+    REQUIRE(at != std::string::npos);
+    cfg.insert(at, "        forcesTruck=\"Ural\";\n        forcesJet=\"Su25\";\n");
+    SECTION("a shipped hull is kept verbatim")
+    {
+        FakeProbe probe = FullClassicProbe();
+        probe.vehicles.push_back("Su25");
+        RegistryFixture f;
+        f.Load(cfg.c_str(), nullptr, nullptr, nullptr, &probe);
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesTruck")) == "Ural");
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesJet")) == "Su25");
+    }
+    SECTION("a missing hull is cleared, never replaced by tier 0")
+    {
+        FakeProbe probe = FullClassicProbe(); // no Su25 in this package
+        RegistryFixture f;
+        f.Load(cfg.c_str(), nullptr, nullptr, nullptr, &probe);
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesTruck")) == "Ural");
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesJet")) == "");
+    }
+}
+
 TEST_CASE("ZoneRegistry - plan-15 squad composition", "[game][guerrilla]")
 {
     RegistryFixture f;
@@ -3309,8 +3339,11 @@ struct BaseFixture
 
 TEST_CASE("ZoneRegistry - base recapture: the key follows occupierForces unless authored", "[game][guerrilla]")
 {
+    BaseFixture dflt;
+    dflt.Load(kBaseConfig);
+    CHECK(dflt.f.registry.Tuning().baseRetake); // phase 7: occupierForces defaults on
     BaseFixture off;
-    off.Load(kBaseConfig);
+    off.Load(BaseConfigWith("occupierForces = 0;"));
     CHECK_FALSE(off.f.registry.Tuning().baseRetake);
     AutoArray<ZoneEventRecord> fired;
     // with the key off a liberated post is permanent (the old decision R)

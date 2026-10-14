@@ -726,7 +726,7 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     // base recapture (OCCUPIER-FORCES.md 7.2): follows the occupier forces
     // layer key unless authored on its own
     _tuning.baseRetake =
-        cfg.ReadValue("baseRetake", cfg.ReadValue("occupierForces", _tuning.baseRetake ? 1.0f : 0.0f)) != 0.0f;
+        cfg.ReadValue("baseRetake", cfg.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault)) != 0.0f;
     // retake hysteresis: revert below townRevertSupport, never above the flip
     // line (a value above it would hand a town back the tick it rose)
     _tuning.townRevertSupport = cfg.ReadValue("townRevertSupport", _tuning.townRevertSupport);
@@ -959,6 +959,25 @@ bool IsUnitClassKey(const char* key)
     return false;
 }
 
+// keys valued with a CfgVehicles HULL classname: the occupier force package
+// overrides (OCCUPIER-FORCES.md 6.5, ForcePackages::OverrideKey).  Unlike a
+// unit key a missing hull has no sensible substitute (a soldier is not a
+// truck), so the resolution pass clears it and the package falls back to the
+// vehicles[] ladder, or is not offered (air is never derived from the ladder).
+bool IsForceHullKey(const char* key)
+{
+    static const char* const kKeys[] = {"forcesTruck",         "forcesArmedCar",   "forcesApc", "forcesTank",
+                                        "forcesTransportHeli", "forcesAttackHeli", "forcesJet"};
+    for (const char* k : kKeys)
+    {
+        if (stricmp(key, k) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // keys valued with a CfgWeapons classname (OFP-era magazines are CfgWeapons
 // entries too, so both kinds probe the same bank)
 bool IsWeaponKey(const char* key)
@@ -1005,7 +1024,7 @@ void ZoneRegistry::CollectFactionAddons(const ParamEntry* vehiclesCfg, const Par
             size_t len = strlen(key);
             bool civUnit = (len > 3 && stricmp(key + len - 3, "Civ") == 0) ||
                            (len > 8 && strnicmp(key, "civClass", 8) == 0 && stricmp(key, "civClassCount") != 0);
-            if (IsUnitClassKey(key) || civUnit || stricmp(key, "playerClassWarrior") == 0 ||
+            if (IsUnitClassKey(key) || civUnit || IsForceHullKey(key) || stricmp(key, "playerClassWarrior") == 0 ||
                 stricmp(key, "playerClassCiv") == 0)
             {
                 CollectVehicleClassAddons(vehiclesCfg, weaponsCfg, magazinesCfg, value, addons);
@@ -1280,7 +1299,16 @@ void ZoneRegistry::ResolveFactionClasses(const ClassProbe& probe)
             {
                 continue;
             }
-            if (IsUnitClassKey(v.key))
+            if (IsForceHullKey(v.key))
+            {
+                if (probe.Spawnable(v.value))
+                {
+                    continue;
+                }
+                logSub(v.key, v.value, "");
+                v.value = RString(); // the package uses the vehicles[] ladder, or is not offered
+            }
+            else if (IsUnitClassKey(v.key))
             {
                 if (probe.Spawnable(v.value))
                 {

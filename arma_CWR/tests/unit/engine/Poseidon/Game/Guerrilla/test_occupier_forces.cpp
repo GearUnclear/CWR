@@ -270,8 +270,11 @@ TEST_CASE("OccupierForces - config keys are read and repaired into range", "[gam
 TEST_CASE("OccupierForces - key off: inert, the seams pass through, nothing to save",
           "[game][guerrilla][occupierforces]")
 {
+    Fixture on;
+    on.Load(kForcesConfig);
+    CHECK(on.of.Enabled()); // phase 7: the key defaults on when not authored
     Fixture f;
-    f.Load(kForcesConfig);
+    f.Load(ConfigWith("occupierForces = 0;"));
     CHECK_FALSE(f.of.Enabled());
     CHECK_FALSE(f.of.Active());
     f.of.Tick(f.registry, 3600.0f);
@@ -837,7 +840,7 @@ TEST_CASE("OccupierForces - S5: with the key off the refund hook declines and th
           "[game][guerrilla][occupierforces]")
 {
     Fixture f;
-    f.Load(kForcesConfig);
+    f.Load(ConfigWith("occupierForces = 0;"));
     REQUIRE_FALSE(f.of.Active());
     f.of.InstallPendingRefundHook();
     CHECK_FALSE(OccupierForces::RefundPendingToPool(f.registry, 0, -1, 3));

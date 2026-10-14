@@ -10,7 +10,9 @@
 // The service owns the ledger every operation spends from and decides WHAT
 // to send; CounterAttack moves it (CounterAttackOrders.hpp is the contract).
 //
-// KEY.  occupierForces (CfgGuerrillaZones, 0/1, default 0).  With it 0 the
+// KEY.  occupierForces (CfgGuerrillaZones, 0/1, default 1 since phase 7;
+// OccupierForcesTuning::KeyDefault, missions with campaignEnd = 0 author
+// 0).  With it 0 the
 // service loads its tuning and stays inert: no pool, HasState() false unless
 // a saved block was loaded, gmOccupierForces reports band "OFF", and the
 // pool seams (Draw, Deposit, Spend) pass everything through, so a caller
@@ -243,8 +245,12 @@ enum OccupierPosture
 struct OccupierForcesTuning
 {
     static constexpr int MaxWaveThresholds = 3;
+    // the occupierForces value when the mission does not author the key
+    // (phase 7: on).  Every reader of the key (this service, CounterAttack's
+    // forcesOn, ZoneRegistry's baseRetake fallback) uses this one default.
+    static constexpr float KeyDefault = 1.0f;
 
-    bool enabled = false;           // occupierForces (0/1)
+    bool enabled = false;           // occupierForces (0/1); false until a CfgGuerrillaZones is read
     int poolMin = 24;               // forcesPoolMin, 0..200
     int poolPerTown = 2;            // forcesPoolPerTown, 0..8
     float refillHours = 4.0f;       // forcesPoolRefillHours, 0.5..48 (gmForcesTune: 0.01..48)

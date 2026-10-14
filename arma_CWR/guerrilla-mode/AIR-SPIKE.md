@@ -315,6 +315,7 @@ the director is `CounterAttackOrders.hpp`: the kinds `CAKStrike` and
   mid-flight and resumes it in a fresh process.
 - **Not done.** An attack helicopter as the escort of an insertion (an
   insertion carries one airframe; the strike path covers the attack
-  helicopter on its own). The descriptor lint passes the `forces*` keys
-  through without checking the class exists (ZoneRegistry's key predicates do
-  not list them); a typo shows only as BuildCatalogue's runtime WARN.
+  helicopter on its own). The descriptor lint now checks the `forces*`
+  classes (phase 7A: `IsForceHullKey`, probed with `Spawnable`; a missing
+  one is WARNed and cleared, so the package falls back to the ladder and air
+  is not offered).

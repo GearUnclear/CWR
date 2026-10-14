@@ -23,6 +23,9 @@ class CfgGuerrillaZones
     // Town captures here assert the pre-#79 town arc: no occupier
     // counter-attack answering a flip (OFFSCREEN-CONTRACT.md decision C).
     counterAttack = 0;
+    // and no occupier forces director (OCCUPIER-FORCES.md, on by default
+    // since phase 7): the fixture's pace stays the pre-director one.
+    occupierForces = 0;
     // Engine tuning (all left at stock defaults): tickInterval=3; zoneArea=150;
     // revealRadius=1500; cacheRadius=800; supportRate=5; supportFlip=60;
     // heatCapSpike=40; defaultIncome=25; cacheInterval=5; groupSize=12;
