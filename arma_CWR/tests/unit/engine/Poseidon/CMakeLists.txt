@@ -510,6 +510,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/test_displayUI.cpp
     UI/test_audio_page.cpp
     UI/test_flat_menu_page.cpp
+    UI/test_controls_page_resource.cpp
     UI/test_game_page.cpp
     UI/test_font_renderer.cpp
     UI/test_gamepad_page.cpp

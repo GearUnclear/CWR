@@ -73,11 +73,14 @@ a file Bohemia ships is appended `#include` lines.** Concretely:
   `bin/mainMenu.hpp`, `splashLogo.hpp`, `modsTable.hpp`, every
   `STRINGTABLE*.csv`, and the `fonts/` Bohemia already ships (its `cwr_*.ttf`
   are the same fonts UD uses; its own `OFL.txt` stays).
-- Appended, once each: `#include "ud-mainmenu.hpp"` to `bin/resource-extra.cpp`
-  (by setup) and `#include "guerrilla-factions.hpp"` / `"guerrilla-hq.hpp"` to
+- Appended, once each: `#include "ud-mainmenu.hpp"` and
+  `#include "ud-options.hpp"` to `bin/resource-extra.cpp` (by setup) and
+  `#include "guerrilla-factions.hpp"` / `"guerrilla-hq.hpp"` to
   `bin/config-extra.cpp` (by `install-missions.ps1`), each under a one-line
-  `// Uslu dur! ...` comment. A rerun finds the line and appends nothing.
+  `// Uslu dur! ...` comment. A rerun finds each line and appends nothing; an
+  older install that has only the menu line gains the Options line.
 - Added beside them (UD's own files): `bin/ud-mainmenu.hpp` (the UD menu),
+  `bin/ud-options.hpp` (the UD Options additions, see below),
   `bin/guerrilla-factions.hpp`, `bin/guerrilla-hq.hpp`,
   `fonts/UD_FONT_CREDITS.md`, any UD font Bohemia does not ship, `gmcore/`,
   the `Missions/Guerrilla.*` and reference templates, and
@@ -104,6 +107,22 @@ and it already defines `RscDisplayMainRemaster`. The UD menu therefore uses its
 own class, `RscDisplayMainUD`, which the engine prefers when present, and
 Bohemia's menu stays loaded but unused. MODS stays reachable through the
 button the engine injects next to QUIT GAME.
+
+The UD-only Options controls work the same way. Bohemia's `optionsShell.hpp`
+defines a six-row Controls page (`RscOptionsPageControls`) without UD's
+"Arma 3 controls" preset row (idc 1407), and redefining that class in the same
+parse would be a "Member already defined" error. `bin/ud-options.hpp` instead
+defines `RscOptionsPageControlsUD`, inheriting Bohemia's page and its
+`OptIdxMenuItem` template, adding the row and moving Close down one; the
+Controls page mounts the UD class when it is present and the stock page
+otherwise (`SelectControlsPageResourceClass`, `UI/Options/ControlsPage.cpp`).
+Only that row is resource-driven: the other UD Options texts (gamepad
+steering, lean, temporary zoom) are rows the engine builds itself and need
+only their keys from the gap stringtable shard. The Classic shim's
+`optionsShell.hpp` already carries the row, so Classic does not include the
+shard. `tests/integration/ui/remaster/remaster_ud_options_controls` covers
+the row on the shadow; `tests/unit/.../UI/test_controls_page_resource.cpp`
+covers the parse.
 
 After a Steam update or "verify integrity of game files", Bohemia's
 `resource-extra.cpp` or `config-extra.cpp` may be restored without our lines.

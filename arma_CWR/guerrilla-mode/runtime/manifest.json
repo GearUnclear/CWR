@@ -25,6 +25,12 @@
       "remaster": "install"
     },
     {
+      "destination": "bin/ud-options.hpp",
+      "source": "guerrilla-mode/runtime/common/bin/ud-options.hpp",
+      "sha256": "f15427c84507483b1c733e589cbb63bc47a2cf04657dc6b2929788de4a403c5e",
+      "remaster": "install"
+    },
+    {
       "destination": "bin/optionsShell.hpp",
       "source": "thirdparty/classic-ui/optionsShell.hpp",
       "sha256": "ce201502b9ff5f5b79876595a9d5e0e3e1e1ad936df0355ef76ec88265763644",
