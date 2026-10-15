@@ -1,5 +1,7 @@
 # Uslu dur! — Guerrilla Mode
 
+For this review branch, see [the branch guide and running change list](REVIEWABLE_FORCES.md).
+
 Engine and gameplay source lives in [`arma_CWR`](arma_CWR). To develop or play
 on another machine, clone this repository and supply fresh **Classic 1.99 game
 data** and the complete **LoBo** mod folder.

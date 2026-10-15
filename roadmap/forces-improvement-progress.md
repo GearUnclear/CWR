@@ -1,5 +1,8 @@
 # Forces improvement campaign
 
+For a concise explanation of the delivery branch and its accepted changes, see
+[REVIEWABLE_FORCES.md](../REVIEWABLE_FORCES.md). This file retains the detailed execution history.
+
 **Status: batch complete; reviewed changes integrated and final headless checks passed.** Earlier sections retain the investigation history; final results and restart instructions are at the end.
 
 Started 2026-10-15. Delivery branch: `reviewable_forces`. Integration writer: coordinator in `/root/mobile-dev/CWR`.
