@@ -49,8 +49,8 @@
 .PARAMETER DataDir
     The Arma: Cold War Assault install (data) directory, passed through.
     Default: the setup-prepared Remaster shadow, chosen by
-    Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1), with the legacy
-    D:\Arma_CWA\ARMA Cold War Assault [Classic] as a warned fallback. See
+    Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1). Classic and incomplete
+    packages are refused. See
     run-game.ps1 -DataDir.
 
 .PARAMETER Preset
@@ -99,10 +99,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
 
+Import-Module (Join-Path $PSScriptRoot 'tools/runtime/UDDataDir.psm1') -Force
 if (-not $DataDir) {
-    Import-Module (Join-Path $RepoRoot 'tools\runtime\UDDataDir.psm1') -Force
     $DataDir = Get-UDDefaultDataDir -EngineRoot $RepoRoot
 }
+$DataDir = Assert-UDRemasterDataDir -DataDir $DataDir
 
 if (-not $Mod -or $Mod.Count -eq 0) {
     throw "-Mod is empty; use run-game.ps1 for an unmodded launch."
