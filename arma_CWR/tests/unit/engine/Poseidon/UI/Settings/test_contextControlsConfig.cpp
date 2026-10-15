@@ -377,6 +377,168 @@ std::string WriteProfileRow(int version, const char* action, const std::vector<I
 }
 } // namespace
 
+TEST_CASE("ContextControlsConfig: saved clears survive migration and its automatic resave",
+          "[Settings][ContextControlsConfig]")
+{
+    const int version = GENERATE(4, 99);
+    CAPTURE(version);
+    const std::string path = TmpPath("cleared_bindings_migration.cfg");
+    ContextControlsConfig src;
+    src.LoadDefaults();
+    for (auto& profile : src.profiles)
+    {
+        // Clearing the last visible slot in the controls UI leaves an empty
+        // vector after TrimTrailingEmptySlots/RebindProfile.
+        profile.ClearBindings(UAFire);
+        profile.ClearBindings(UAMoveUp);
+        profile.ClearBindings(UAMapZoomIn);
+    }
+    REQUIRE(src.Save(path));
+
+    // Exercise both the old-version and unknown-version migration paths with
+    // exactly the rows Save wrote, including its representation of clears.
+    std::string text = ReadAll(path);
+    ReplaceLine(text, "contextControlsVersion=5;", "contextControlsVersion=" + std::to_string(version) + ";");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(path));
+    REQUIRE(migrated.migratedOnLoad);
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+    {
+        CAPTURE(c);
+        CHECK(migrated.profiles[c].BindingCount(UAFire) == 0);
+        CHECK(migrated.profiles[c].BindingCount(UAMoveUp) == 0);
+        CHECK(migrated.profiles[c].BindingCount(UAMapZoomIn) == 0);
+        CHECK(migrated.profiles[c].GetBindingEntries(UAMoveForward) ==
+              src.profiles[c].GetBindingEntries(UAMoveForward));
+    }
+
+    // InputSubsystem::LoadKeys immediately persists a migrated profile.
+    REQUIRE(migrated.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    for (const auto& profile : reloaded.profiles)
+    {
+        CHECK(profile.BindingCount(UAFire) == 0);
+        CHECK(profile.BindingCount(UAMoveUp) == 0);
+        CHECK(profile.BindingCount(UAMapZoomIn) == 0);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: lean migration preserves an explicitly cleared stand-up action",
+          "[Settings][ContextControlsConfig][lean]")
+{
+    const int version = GENERATE(1, 2, 3, 4);
+    CAPTURE(version);
+    const std::string path = WriteProfileRow(version, "MoveUp", {});
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    REQUIRE(cfg.migratedOnLoad);
+    const auto& foot = cfg.profiles[(int)InputContext::Infantry];
+    CHECK(foot.BindingCount(UAMoveUp) == 0);
+    CHECK(foot.HasBinding(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UALeanRight, InputCode::Key(SDL_SCANCODE_E)));
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: known legacy layouts keep omitted existing actions cleared",
+          "[Settings][ContextControlsConfig]")
+{
+    REQUIRE_FIXTURE("cfg/contextControls_v3_full.cfg");
+    const int version = GENERATE(3, 4);
+    CAPTURE(version);
+    // Start with the old writer's full v3 fixture, not a file produced by the
+    // new Save implementation. Removing all three rows is how that writer
+    // serialized an action after the user cleared its last binding.
+    std::string text = ReadAll(GET_FIXTURE("cfg/contextControls_v3_full.cfg"));
+    ReplaceLine(text, "contextControlsVersion=3;", "contextControlsVersion=" + std::to_string(version) + ";");
+    for (const char* row : {"ctxInfantryFire", "ctxInfantryMoveUp", "ctxInfantryMapZoomIn", "ctxCarDriverFire"})
+    {
+        for (const char* suffix : {"[]=", "_mod[]=", "_scale[]="})
+        {
+            const size_t begin = text.find(std::string(row) + suffix);
+            REQUIRE(begin != std::string::npos);
+            const size_t end = text.find(';', begin);
+            REQUIRE(end != std::string::npos);
+            text.erase(begin, end - begin + 1);
+        }
+    }
+    // The v4 variant deliberately keeps the old optics keys as a custom layout
+    // and clears ZoomTemp too. Unlike v3, v4 already knew that action.
+    const std::string path = TmpPath("legacy_omitted_clears.cfg");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(path));
+    REQUIRE(migrated.migratedOnLoad);
+    const auto& foot = migrated.profiles[(int)InputContext::Infantry];
+    CHECK(foot.BindingCount(UAFire) == 0);
+    CHECK(foot.BindingCount(UAMoveUp) == 0);
+    CHECK(foot.BindingCount(UAMapZoomIn) == 0);
+    CHECK(migrated.profiles[(int)InputContext::CarDriver].BindingCount(UAFire) == 0);
+    CHECK(migrated.profiles[(int)InputContext::Gunner].HasBinding(UAFire, InputCode::Key(SDL_SCANCODE_LCTRL)));
+    CHECK(foot.HasBinding(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UALeanRight, InputCode::Key(SDL_SCANCODE_E)));
+    CHECK(foot.HasBinding(UAZoomTemp, InputCode::MouseButton(1)) == (version == 3));
+    REQUIRE(migrated.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+        for (int a = 0; a < UAN; ++a)
+        {
+            CAPTURE(c, a);
+            CHECK(reloaded.profiles[c].GetBindingEntries(static_cast<UserAction>(a)) ==
+                  migrated.profiles[c].GetBindingEntries(static_cast<UserAction>(a)));
+        }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: lean fallback counts live bindings rather than positional slots",
+          "[Settings][ContextControlsConfig][lean]")
+{
+    const int version = GENERATE(1, 2, 3, 4);
+    CAPTURE(version);
+    const InputBinding empty;
+    const InputBinding q(InputCode::Key(SDL_SCANCODE_Q));
+    const InputBinding custom(InputCode::Key(SDL_SCANCODE_H));
+    const InputBinding modified(InputCode::Key(SDL_SCANCODE_Q), InputCode::Key(SDL_SCANCODE_LCTRL));
+    const InputBinding pad(InputCode::GamepadBtn(6), InputCode::GamepadBtn(4), ActivationMode::OnHold, 0.5f);
+    std::vector<InputBinding> bindings;
+    std::vector<InputBinding> expected;
+    SECTION("empty primary with Q alternate needs PageUp")
+    {
+        bindings = {empty, q};
+        expected = {empty, InputCode::Key(SDL_SCANCODE_PAGEUP)};
+    }
+    SECTION("empty slot alone stays cleared") { bindings = expected = {empty}; }
+    SECTION("custom keyboard binding stays unchanged") { bindings = expected = {empty, custom}; }
+    SECTION("modified Q stays unchanged") { bindings = expected = {empty, modified}; }
+    SECTION("controller binding stays unchanged") { bindings = expected = {empty, pad}; }
+    SECTION("surviving keyboard alternate prevents fallback")
+    {
+        bindings = {empty, q, custom};
+        expected = {empty, custom};
+    }
+    SECTION("surviving controller alternate prevents fallback")
+    {
+        bindings = {empty, q, pad};
+        expected = {empty, pad};
+    }
+    const std::string path = WriteProfileRow(version, "MoveUp", bindings);
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.profiles[(int)InputContext::Infantry].GetBindingEntries(UAMoveUp) == expected);
+    std::filesystem::remove(path);
+}
+
 // A version-3 file written by the pre-Arma-3-right-mouse build: Optics = V +
 // Numpad 0, LockTarget = RMB, Watch = T, no ZoomTemp.  Loading must rewrite the
 // three pristine KB&M defaults to their v4 values (keeping the gamepad entries

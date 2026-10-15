@@ -10,6 +10,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
+#include <algorithm>
 #include <iterator>
 #include <utility>
 
@@ -20,6 +21,12 @@ namespace
 // v4 (2026-09): Arma 3 right mouse.  Optics = tap RMB + V (Numpad 0 dropped),
 // LockTarget = T (was RMB, "Lock or Zoom"), Watch = O (was T), new ZoomTemp = RMB.
 constexpr int kContextControlsVersion = 5;
+
+bool ActionAddedAfterV3(UserAction action, int version)
+{
+    return (version < 4 && action == UAZoomTemp) ||
+           (version < 5 && (action == UALeanLeft || action == UALeanRight));
+}
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -332,6 +339,7 @@ void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
 {
     // Bare Q/E previously also moved the player out of cover. Preserve every
     // other binding, including modified chords and controller inputs.
+    bool removedMoveUpKey = false;
     for (int a = 0; a < UAN; ++a)
     {
         UserAction action = static_cast<UserAction>(a);
@@ -341,7 +349,10 @@ void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
             const bool leanKey = binding.code == InputCode::Key(SDL_SCANCODE_Q) ||
                                  binding.code == InputCode::Key(SDL_SCANCODE_E);
             if (leanKey && !binding.modifier.valid())
+            {
+                removedMoveUpKey |= action == UAMoveUp;
                 continue;
+            }
             if ((action == UALeanLeft || action == UALeanRight) && IsKbmCode(binding.code))
                 continue;
             kept.push_back(binding);
@@ -351,8 +362,11 @@ void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
     profile.Bind(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q));
     profile.Bind(UALeanRight, InputCode::Key(SDL_SCANCODE_E));
     // The old default also had Page Up. Retain a reachable stand-up action
-    // when migrating a profile which only had Q.
-    if (profile.BindingCount(UAMoveUp) == 0)
+    // when migrating a profile which only had Q, but preserve an explicit clear.
+    const auto& moveUp = profile.GetBindingEntries(UAMoveUp);
+    const bool hasMoveUpBinding = std::any_of(moveUp.begin(), moveUp.end(),
+                                            [](const InputBinding& binding) { return binding.code.valid(); });
+    if (removedMoveUpKey && !hasMoveUpBinding)
         profile.Bind(UAMoveUp, InputCode::Key(SDL_SCANCODE_PAGEUP));
 }
 
@@ -366,9 +380,10 @@ bool ContextControlsConfig::Load(const std::string& path)
     if (auto* e = cfg.FindEntry("contextControlsVersion"))
         version = (int)*e;
 
-    // A file written before newer actions existed has no entries for them. Seed
-    // each profile with defaults first so those actions come up bound, then let
-    // the file override the actions it does list.
+    // Seed defaults for actions added after the saved layout. The v3/v4 writer
+    // omitted cleared rows, so missing actions that already existed must stay
+    // empty. Earlier/experimental layouts are not reliable action inventories
+    // (a captured v2 file predates push-to-talk); retain their recovery policy.
     //
     // A file claiming a version ABOVE this build's (written by a newer or an
     // experimental build) cannot be trusted to carry this build's layout either:
@@ -396,7 +411,12 @@ bool ContextControlsConfig::Load(const std::string& path)
         {
             const ParamEntry* entry = cfg.FindEntry(BindingName(ctx, descs[a]));
             if (!entry)
+            {
+                if (version >= 3 && version < kContextControlsVersion &&
+                    !ActionAddedAfterV3(static_cast<UserAction>(a), version))
+                    profile.ClearBindings(static_cast<UserAction>(a));
                 continue;
+            }
             const ParamEntry* modEntry = cfg.FindEntry(ModifierName(ctx, descs[a]));
             const ParamEntry* scaleEntry = cfg.FindEntry(ScaleName(ctx, descs[a]));
             const int n = entry->GetSize();
@@ -443,11 +463,14 @@ bool ContextControlsConfig::Save(const std::string& path) const
         for (int a = 0; a < UAN; ++a)
         {
             const auto& entries = profile.GetBindingEntries(static_cast<UserAction>(a));
+            ParamEntry* codes = cfg.AddArray(BindingName(ctx, descs[a]));
+            codes->Clear();
+            // Missing rows receive defaults during migration. Persist cleared
+            // actions explicitly so a later migration can distinguish them
+            // from actions that did not exist when this file was written.
             if (entries.empty())
                 continue;
 
-            ParamEntry* codes = cfg.AddArray(BindingName(ctx, descs[a]));
-            codes->Clear();
             ParamEntry* mods = cfg.AddArray(ModifierName(ctx, descs[a]));
             mods->Clear();
             ParamEntry* scales = cfg.AddArray(ScaleName(ctx, descs[a]));
