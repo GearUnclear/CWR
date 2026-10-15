@@ -3713,9 +3713,29 @@ void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, 
     {
         return; // 7.4, 9.2: once the win (or lose) latches nothing in flight steps
     }
+    // BuildView's census predates every birth in this tick. Charge each
+    // successful birth before admitting the next record; failed/partial
+    // spawns consume only what appeared. Do not release departures here:
+    // home-going hulls and adopted groups can still be in the world, and
+    // the next engine census will account for their actual removal.
+    CounterAttackView tickView = view;
     for (int i = 0; i < _records.Size();)
     {
-        if (Advance(registry, view, elapsed, ops, _records[i], fired))
+        Record& r = _records[i];
+        const bool wasLive = r.phase == CALive;
+        const bool ended = Advance(registry, tickView, elapsed, ops, r, fired);
+        if (!wasLive && r.phase == CALive)
+        {
+            tickView.occGroups += (r.group ? 1 : 0) + (r.crewGroup ? 1 : 0) + (r.escortCrewGroup ? 1 : 0);
+            // A garrison detachment creates a group from already-counted
+            // bodies. All other births add infantry and any actual crews.
+            if (r.group && r.spawnReason != CASpawnGarrison)
+            {
+                tickView.liveBodies += r.strength;
+            }
+            tickView.liveBodies += (r.crewGroup ? r.crew : 0) + (r.escortCrewGroup ? r.escortCrew : 0);
+        }
+        if (ended)
         {
             // the operation ended: its hull drives home (or is refunded)
             FinishHull(registry, view, _records[i], ops);
