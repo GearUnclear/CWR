@@ -1,5 +1,7 @@
 # Forces improvement campaign
 
+**Status: batch complete; reviewed changes integrated and final headless checks passed.** Earlier sections retain the investigation history; final results and restart instructions are at the end.
+
 Started 2026-10-15. Delivery branch: `reviewable_forces`. Integration writer: coordinator in `/root/mobile-dev/CWR`.
 
 ## Source and safeguards
@@ -54,6 +56,39 @@ Read this log, inspect all worktrees and agent messages, fetch origin, compare u
 
 ## Executed baseline and red regressions
 
-- Full original-upstream build passed. Normal-access CI baseline: Foundation496/496, Core826/826, Poseidon3231 passed/12 skipped, all eight synthetic mod-intake checks passed. Sandbox-only run had read-only user-directory and socket failures and hung during audio shutdown; stopped only verified own runner/test PIDs379697/379827. Normal-access rerun passed, so these are environmental. Logs: `tmp/forces-evidence/baseline-unsandboxed-*`.
-- Tests-only regression build on unchanged production passed compilation. `[birthbudget],[poolfloor],[town-capture-batch],[ContextControlsConfig]`:26 cases,17 passed/9 failed,206 failed assertions. Failures reproduce capture overcount, oversubscribed births, exact30% boundary, and cleared-binding migration; log `red-regressions.log`.
+- Full original-upstream build passed. Normal-access CI baseline: Foundation 496/496, Core 826/826, Poseidon3231 passed/12 skipped, all eight synthetic mod-intake checks passed. Sandbox-only run had read-only user-directory and socket failures and hung during audio shutdown; stopped only verified own runner/test PIDs379697/379827. Normal-access rerun passed, so these are environmental. Logs: `tmp/forces-evidence/baseline-unsandboxed-*`.
+- Tests-only regression build on unchanged production passed compilation. `[birthbudget],[poolfloor],[town-capture-batch],[ContextControlsConfig]`:26 cases,17 passed/9 failed,206 failed assertions. Failures reproduce capture overcount, oversubscribed births, exact 30% boundary, and cleared-binding migration; log `red-regressions.log`.
 - Pre-integration fetch found upstream advanced to `197a7d33a1f4c9b704bbeef38ba27dc6e2a5e28c` (arrival diagnostics, group-ID reuse, atomic air-replan band accounting). Explicit merge pending; independent Astra revalidation requested. Preserve upstream and worker EOF test additions deliberately.
+
+## Integration at new upstream
+
+- Upstream 197a7d3 explicitly merged in `ee9699a`. Astra revalidation found no semantic conflict: group-ID reuse is independent of pointer-based birth accounting; air-replan band hold ends before later admission; diagnostic wording does not alter eligibility.
+- Town merged `82a57cf`, budget merged `155e2c9`, controls merged `d09ce3b`. Budget merge conflicted only at EOF in the two existing regression files. Resolution preserves each entire upstream file plus the exact worker-added suffix; FakeOps retains the worker change allowing BudgetOps inheritance. No test side discarded.
+- Combined build:221 affected actions. Final independent integration review and execution pending. Market/Portrait patch applied but not committed; independent Astra review accepted it and verified three old-pass/new-fail mutations.
+
+## Combined and mutation evidence
+
+- Combined build at 197a7d3 plus accepted worker merges passed. Focused `[counterattack],[occupierforces],[ContextControlsConfig],[town-capture-batch],[town-presence-order],[market],[portrait]`:244 cases,278813 assertions passed (`combined-focused.log`). Python contracts:9/9 passed.
+- Presence behavioral red used the new callable signature but restored ONLY the original cached `!r.suspended` predicate; this is explicitly a compatibility mutation, not an unchanged-old-header build. All3 presence cases failed with10 assertions, including premature town retake and stale base meter (`presence-old-predicate.log`). Accepted source restored byte-for-byte; final rebuild/full gate pending. Production GatherInputs wiring is source-reviewed; these unit cases inject current samples rather than booting the game.
+- Final independent source/conflict review preserved in `roadmap/forces-independent-review.txt`. Market/Portrait tests/evidence landed separately as `6c3dcde`.
+
+## Batch complete: final verification and delivery
+
+- Final accepted build passed. Unit results: Foundation 496 passed, Core 826 passed, Poseidon 3250 passed/12 skipped, total 4572 passed. All 12 skips report unavailable OpenAL device. Eight synthetic mod-intake checks and nine Python contracts passed. Full logs remain in `tmp/forces-evidence/final-*`; local scratch is preserved for restart.
+- Final fetch confirms upstream unchanged at 197a7d3. All accepted source changes have independent Astra review, including final merge conflict resolution. Separate Market/Portrait task model was unspecified; its contribution was independently Astra-reviewed and mutation-validated.
+- Finding → fix → evidence: capture overcount →384b283→original-production red + focused/full green; stale suspension →93cd5c9→old-predicate 3-case/10-assert red + restored focused/full green; shared budgets and 30% boundary →b6901d6→original-production red + focused/full green; cleared controls →bad1530/44a8254→original-production red + authentic known-v3/v4 fixture/focused/full green; weak Market/Portrait assertions →6c3dcde→three actual-source mutation comparisons,20-case isolated green and combined green.
+- Publishing only `HEAD:reviewable_forces` is authorized; upstream and main were never pushed. No PR/issues published. Worker branches/worktrees and the original checkout branch remain preserved.
+
+### Manual/runtime checks still needed
+
+1. On a prepared full Remaster shadow, capture two towns in one tick; verify history/first-town response and save/reload state.
+2. Enter and leave a holding force's town/base and an offset HQ near the retake threshold; observe immediate suspension/resumption and no premature retake. Unit sampling is covered; actual World/GatherInputs execution is not run here.
+3. Admit multiple simultaneous foot/mounted/air operations under tight body/group budgets; verify actual spawned crews, partial births and later census recovery. This fix is not universal cap enforcement; the pre-existing strike body-cap omission is separate.
+4. Load authentic user v3/v4 controls files with cleared rows; verify UI mappings and save/restart on Windows. Earlier/unknown layouts retain previous recovery, and already resurrected/saved preferences cannot be recovered from absent history.
+5. Run real campaign save compatibility and companion immediate-save/death sequence once RemasterUD and Trident are available. Saved running SQS text requires a deliberate old-save strategy.
+
+No graphical gameplay, real save compatibility, Windows behavior or performance verification is claimed. F008/F062/F078 remain reviewed leads, not landed fixes.
+
+### Resume after this batch
+
+Inspect branch and worktrees; fetch origin and explicitly merge any new occupier-forces tip before another batch. Read final evidence and deferred leads above. Do not redo the accepted five fixes, reapply rejected old findings, or rerun mutations against the delivery source without restoring and verifying it. Default final gate is the CI direct test binaries and synthetic tools; normal filesystem/loopback access was required here.

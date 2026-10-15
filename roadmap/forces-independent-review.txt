@@ -1,0 +1,183 @@
+Independent review, 2026-10-15
+
+Archive inspected read-only via Python zipfile; nothing extracted/executed.
+Latest checkpoint: CWR Review/2026-10-15 1832 UTC - START HERE.txt and
+2026-10-15 1832 UTC - CWR Review Timeline.txt. 278/328 bounded assessments,
+118 findings; PR95 pinned at 887ce31. Archive is source evidence, not runtime
+certification. Prior snapshots and main-only dispositions are not new defects.
+
+Current campaign priority (source mechanisms verified locally):
+1. F110 town history: CounterAttack.cpp OnTownFlipped derives HeldTowns-1 for
+   every callback after ZoneRegistry has changed the whole batch. Test two
+   same-tick CITY captures, already held towns, saved history ahead of live
+   total, first/later callback counts, excluded towns and serialization.
+2. F111 support suspension: ZoneRegistry.cpp GatherInputs consumes
+   CounterAttack::AbstractPresence's previous suspended flag before the next
+   counter-attack step. Test registry-first bubble entry/exit and throttled
+   passes with support near retake, not just a refreshed getter.
+3. F109 admissions: CounterAttack.cpp Step passes the same immutable view to
+   every Advance. Charge actual successful admissions across one pass; test
+   multiple ready records, partial births, failed births and fresh next-pass
+   budgets. Existing lower engine gates do not repair the pure admission seam.
+4. F093/F106 controls: ContextControlsConfig.cpp old-version seed-all revives
+   omitted actions; Save omits empty rows; stand-up fallback counts slots.
+   Cover v3/v4 omissions outside aircraft overrides, explicit empties,
+   empty-primary/Q-alternate, modified/controller keys and new lean actions.
+5. F113 pool floor: OccupierForces.cpp CanOperateIn multiplies float 0.3 by 50
+   and rejects pool=15. Test 14/15/16, default floor, and near boundaries;
+   merely widening the product cannot undo float input rounding.
+
+Rejected stale duplicates:
+- F107 authored/setter fractional reserve normalization already landed on
+  PR95 (84fbbce). No claim that every imaginable mutation is clamped.
+- F112 SPENT/full-garrison prose already corrected on PR95 (e37e79a).
+- H081 return-before-Fight, H082 restored Always-live actors table and other
+  historical transitions are not fresh bugs. H082's earlier attribution to
+  position 320 was explicitly withdrawn; the correction is at 321.
+
+Next three high-value leads beyond current scope (read-only source check,
+not runtime reproduction):
+- F008 save/death race: core/scripts/campaign.sqs:99 nulls a dead restored
+  companion while GM_COMP_ALIVE remains true; companions.sqs:130-134 sees
+  null and takes the spawn path instead of recording death. Test kill then
+  immediate save before poll, reload; preserve genuinely missing-body repair.
+- F062 campaign-lifetime traffic arrays: core/init.sqs:233-236 initializes
+  four gmEvtTr* queues, 286-289 appends; rg across core finds no consumer.
+  They accumulate completed events independently of live actor caps. Remove
+  fixture-only listeners from gameplay or bound/consume deliberately; test
+  long-run size separately from traffic count. No measured slowdown claimed.
+- F078 captured-zone traffic alert: AlertMachine.cpp:371-383 applies stored
+  stimulusKnows/timer without rechecking zone owner. Initial attribution is
+  owner-checked. Test alarm -> capture -> zero contact before expiry while
+  preserving real contact and deliberate last-known-position memory. Do not
+  infer a downstream QRF launch from the stale scalar alert alone.
+
+Independent worker review (central execution pending):
+- Capture test 39d67cf and production 384b283: ACCEPT at source level.
+  Batch countedTownFlip exactly matches HeldTowns eligibility plus event type.
+  Later-event subtraction preserves max(saved history, live pre-batch floor),
+  then increments once per capture. HQ still counts but suppresses dispatch;
+  exempt cities/military remain excluded. Regression invokes EvaluateTick and
+  actual OnZoneEvents with meaningful preheld/saved-count cases.
+- Budget tests d779fd6 + eb54da9, production b6901d6: ACCEPT at source level.
+  Step-local census charges successful nonlive->live groups/actual infantry,
+  carrier and escort crew, air crew. Garrison detachment does not recharge
+  existing bodies. Failed births do not charge; no premature release while
+  groups/hulls may remain in world. Followup eb54da9 adds exact 15/50 and
+  garrison-detach group/body regressions. Worker correctly replaced the first
+  18/60 test, which rounds exactly and was not a red case, with 30/100 public
+  config and 15/50 pure helper. Ratio comparison is
+  appropriate for float-tuned shares. Existing strike body-cap omission is
+  separate; do not advertise universal cap enforcement from this patch.
+- Initial controls patch bad1530: REQUEST CHANGES (P2 scope
+  gaps, not a new regression). Old v3/v4 writers already omitted cleared rows;
+  Load still seeds them. Saving with the NEW writer then changing the version
+  tests prevention, not legacy migration. Also [invalid,Q] MoveUp remains an
+  invalid positional slot after Q removal: BindingCount still prevents the
+  fallback. Need usable-code before/after and removed-key evidence. Sent to
+  coordinator; revision underway. Prevention alone may be useful but cannot
+  close F093/F106. RESOLVED by revised tests 886c52e and production 44a8254:
+  ACCEPT at source level. Known v3/v4 missing rows preserve clears, only new
+  ZoomTemp/lean actions seed; authentic v3 fixture with removed old-writer
+  action rows exercises v3/v4 migration and exact resave. F106 now tracks real
+  Q/E removal and valid surviving codes, with empty/Q, explicit-empty,
+  modified, custom and controller rows. Pre-v3/unknown recovery is deliberately
+  retained. Already resurrected-and-saved choices cannot be reconstructed.
+- Preserved commit 8041799: REJECT AS REDUNDANT. 6163d400 already added its
+  identical early <fstream> diff to occupier-forces (same resulting blob).
+  Only historical roadmap prose differs; no missing compile prerequisite.
+- Suspension test 855658f / production 93cd5c9: ACCEPT at source level. Fresh
+  view uses exact existing InBubbleAt(DestOf) predicate; GatherInputs supplies
+  the current player sample before consuming abstract strength. Tests cover
+  both crossings/exact radius, base meter and offset HQ destination, leaving
+  cached suspended unchanged. Followup 758e308 also ACCEPTED at source level:
+  support starts exactly at townRevertSupport, entry preserves the town,
+  departure with stale suspension resumes drain and emits exactly one loss;
+  settleOcc sampling now matches production. Required AI/Vehicle includes
+  cover complete types. Followup 5f3cacd corrects expected post-retake owner
+  to NEUTRAL for the resistance-authored fixture, consistent with RevertTown.
+  Validation limitations: tests manually assemble
+  current inputs rather than invoking GatherInputs; no actual throttled
+  Simulate run. Added overload means tests
+  alone do not compile against old source. Behavioral red needs the production
+  GatherInputs path or a disclosed old-behavior signature compatibility shim.
+
+All acceptance above concerns reviewed source/tests; coordinator owns actual
+central compile and red/green execution. No shared build run by this reviewer.
+
+Separate regression-audit patch, /tmp/cwr-regression-audit/tests.patch:
+ACCEPT at source level, mutation execution pending. Reviewed refreshed indexed
+AutoArray iteration and both production methods. Changes are confined to
+test_market.cpp and test_portrait_service.cpp. Market compares the entire
+sorted (canonical town, dealer kind) multiset, authored positions/flags,
+replacement of prior output, empty-input reset and unknown-only per-kind
+suppression. Portrait tests retain exact completed identities/pixels, remove
+cancelled identities, permit rerequest, keep cache reuse, and require a nonzero
+cache-hit counter before checking teardown reset. Fixed inputs, serial writes,
+no new sleep/timing dependencies. No production behavior changes.
+
+Reviewed run.py mutation setup without executing it. It copies real production
+TUs and compiles replacement objects, linked before the production archive:
+retain old market output; duplicate every full-share town; erase a Ready entry
+instead of queued identity; omit cache-hit reset. Each maps directly to a new
+assertion. Original-pass/strengthened-fail claims require final run logs, not
+just compilation or these source predictions. These are focused regression
+checks, not renderer/gameplay/complete mutation-coverage certification.
+
+Observed first runtime logs: clean original passes 202 assertions/20 cases;
+clean strengthened passes 262/20. Retain-stale-market-rows mutation survives
+original and fails strengthened (three assertions), substantiating that gain.
+IMPORTANT EVIDENCE CORRECTION: original-market-duplicates-full-share.log fails
+the existing serialization test at original/test_market.cpp:457 (loaded count
+6 versus 4). Therefore that mutation is NOT an original-suite survivor and
+cannot support a claim of four previously undetected mutants. run.py expects
+original exit zero and may stop there; portrait outcomes not yet observed.
+Coordinator notified to revise mutation or narrow the reported claim.
+
+FINAL REGRESSION-AUDIT APPROVAL: reviewed regression-test-audit.md and final
+evidence logs. Report now correctly claims THREE old-pass/new-fail mutations:
+stale market rows (3 failures), wrong portrait cancellation identity (2), and
+retained teardown cache-hit count (1). Each original run passes 20 cases/202
+assertions. Both full-share duplication and wrong-kind probes are explicitly
+discarded because original tests caught them. Clean strengthened suite passes
+20 cases/262 assertions; final-clean.log repeats that with RNG seed 20261015.
+These logs support the report's scoped claims. APPROVE test-only patch for
+integration; normal integrated suite remains coordinator-owned. No claim of
+actual game/rendering validation or general mutation completeness.
+
+UPSTREAM REVALIDATION, 887ce31 -> 197a7d3 (read-only): APPROVE union integration.
+- fe228a0 only expands the abstract-arrival diagnostic in Advance. Preserve
+  that block and its stdio include alongside our distinct Step accounting.
+- 2921bcf reuses lowest free AICenter group IDs. Our census counts actual group
+  pointers and new bodies, not IDs; no uniqueness/monotonic-ID assumption.
+- 197a7d3 holds band updates across AirReplan's debit/refund. Replanning keeps
+  the record abstract; the birth census is charged only on later GoLive.
+  Scoped BandHold closes before the next Step record; our CanOperateIn ratio
+  comparison still gates Spend using current pool and the intentionally held
+  band. No duplicate fix or conflicting pool update introduced.
+- EOF test conflicts must retain BOTH upstream CounterAttack cases (BASE
+  arrival diagnostic, air re-plan ledger), upstream OccupierForces nested
+  BandHold case, and every worker budget/floor case. Keep worker FakeOps
+  non-final change so BudgetOps can derive from it. Other hunks are distinct.
+Old-baseline execution does not validate the newly fetched upstream tests;
+include them in the post-combination counterattack/occupierforces/AI gate.
+
+FINAL DELIVERED-TREE REVIEW at d09ce3b (after merges ee9699a,82a57cf,155e2c9):
+APPROVE combined source and test changes, subject to coordinator's integrated
+execution results. Independently checked exact blobs, not only test names:
+- test_counter_attack.cpp equals complete 197a7d3 upstream file (only FakeOps
+  final removed) plus exact worker suffix beyond 887ce31. All 79 test names
+  retained, including five worker additions and both new upstream cases.
+- test_occupier_forces.cpp equals complete upstream plus exact worker suffix;
+  all 69 test names retained, including poolfloor and upstream BandHold case.
+- Controls production/tests, both town tests (including corrected NEUTRAL
+  retake expectation), and ZoneRegistry exactly match reviewed worker blobs.
+- CounterAttack production diff preserves upstream arrival diagnostic and
+  adds only reviewed capture/suspension/birth-census hunks; OccupierForces
+  preserves BandHold and changes only reviewed ratio comparison.
+- Uncommitted Market/Portrait tests are byte-identical to the mutation-validated
+  strengthened copies. git diff --check passes.
+No missing tests, merge-induced behavior changes or new blocker found. This
+is final independent source acceptance; full integrated test results remain
+the coordinator's evidence. Coordinator should copy this note into durable
+review evidence before push; this reviewer did not alter the delivery tree.
