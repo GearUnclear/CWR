@@ -1069,7 +1069,8 @@ int CounterAttack::OwedOnOp(int opId, int* crew) const
     return owed;
 }
 
-int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex) const
+int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex,
+                                   const CounterAttackView* currentView) const
 {
     const ZoneRecord* z = registry.GetZone(zoneIndex);
     if (!z)
@@ -1084,9 +1085,11 @@ int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex)
         // force holding a base works its occCapture, and an HQ_ASSAULT
         // holding at the HQ is occupier presence in the zone the HQ stands
         // in (OCCUPIER-FORCES.md 7.2, 8.1)
-        if (_records[i].phase == CAHolding && !_records[i].suspended && stricmp(_records[i].target, z->name) == 0)
+        const Record& r = _records[i];
+        if (r.phase == CAHolding && stricmp(r.target, z->name) == 0 &&
+            !(currentView ? InBubbleAt(registry, *currentView, DestOf(registry, r)) : r.suspended))
         {
-            bodies += _records[i].strength;
+            bodies += r.strength;
         }
     }
     return bodies;

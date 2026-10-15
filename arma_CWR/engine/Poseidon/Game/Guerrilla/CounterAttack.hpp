@@ -998,8 +998,12 @@ class CounterAttack : public SerializeClass
     // fired, and townLost through RevertTown.
     void Step(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops,
               AutoArray<ZoneEventRecord>& fired);
-    // abstract occupier bodies holding a zone (ZoneTickInputs::abstractOcc)
-    int AbstractPresence(const ZoneRegistry& registry, int zoneIndex) const;
+    // abstract occupier bodies holding a zone (ZoneTickInputs::abstractOcc).
+    // The zone census supplies its current player view: it runs before our
+    // Step, so the record's suspended snapshot may still describe the last
+    // position.  Other callers may omit it to inspect that snapshot.
+    int AbstractPresence(const ZoneRegistry& registry, int zoneIndex,
+                         const CounterAttackView* currentView = nullptr) const;
 
     // runtime knob (gmCounterAttackTune "delayMax"): a pending delay never
     // outlasts the new ceiling

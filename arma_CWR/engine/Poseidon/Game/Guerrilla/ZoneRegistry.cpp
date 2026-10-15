@@ -3403,11 +3403,15 @@ void ZoneRegistry::GatherInputs(ZoneTickInputs& in) const
 
     // abstract counter-attack forces holding a held town off-screen
     const CounterAttack& counter = CounterAttack::Instance();
+    CounterAttackView currentView;
+    currentView.playerValid = in.playerValid;
+    currentView.playerX = in.playerX;
+    currentView.playerZ = in.playerZ;
     in.abstractOcc.Resize(n);
     in.settleOcc.Resize(n);
     for (int i = 0; i < n; i++)
     {
-        in.abstractOcc[i] = counter.AbstractPresence(*this, i);
+        in.abstractOcc[i] = counter.AbstractPresence(*this, i, &currentView);
         in.settleOcc[i] = counter.SettlePresence(*this, i);
     }
 }
