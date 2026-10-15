@@ -850,8 +850,10 @@ class CounterAttack : public SerializeClass
     // True when a counter-attack was scheduled.  hqZone is the zone the
     // player's HQ stands in (GuerrillaBase::HqZone at the engine call site,
     // -1 none): that town is never a target, like the exempt start town.
+    // laterTownFlips are eligible captures already applied by the registry
+    // in this event batch but not yet counted by this service.
     bool OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel = 1.0f,
-                       int hqZone = -1);
+                       int hqZone = -1, int laterTownFlips = 0);
     // send a force of up to size bodies from an explicit source zone on a
     // held town NOW (no delay, no roll): the launch seam for a later occupier
     // forces service.  The source's spare still caps it.  True when a force

@@ -1129,7 +1129,7 @@ int CounterAttack::HeldTowns(const ZoneRegistry& registry)
 }
 
 bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel,
-                                  int hqZone)
+                                  int hqZone, int laterTownFlips)
 {
     if (!_tuning.enabled || CampaignEnd::Instance().Won())
     {
@@ -1147,8 +1147,9 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         return false;
     }
     // k: the towns taken before this one, the most of the saved count and the
-    // towns held now (this town already counts as held at the event)
-    int held = HeldTowns(registry) - 1;
+    // towns held before this event.  EvaluateTick applies the whole batch
+    // before dispatch, so later captures must not enter the history early.
+    int held = HeldTowns(registry) - 1 - laterTownFlips;
     if (held < 0)
     {
         held = 0;
@@ -4972,14 +4973,27 @@ const CounterAttackGate& CounterAttack::EngineGate(bool playerValid, float px, f
 void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
 {
     ZoneRegistry& registry = ZoneRegistry::Instance();
+    const auto countedTownFlip = [&](const ZoneEventRecord& ev)
+    {
+        const ZoneRecord* z = registry.GetZone(ev.zoneIndex);
+        return ev.type == ZECaptured && z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 &&
+               stricmp(z->owner, registry.ResistanceSide()) == 0;
+    };
+    int laterTownFlips = 0;
+    for (int i = 0; i < fired.Size(); i++)
+    {
+        laterTownFlips += countedTownFlip(fired[i]) ? 1 : 0;
+    }
     for (int i = 0; i < fired.Size(); i++)
     {
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
+            laterTownFlips -= countedTownFlip(ev) ? 1 : 0;
             // the force size reads the occupier-side war level (7.1)
             OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize,
-                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone());
+                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone(),
+                          laterTownFlips);
         }
         else if (ev.type == ZEHqLost)
         {
