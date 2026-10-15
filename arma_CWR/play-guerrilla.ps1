@@ -1,4 +1,4 @@
-<# Launch a prepared Remaster (or legacy Classic) installation using a built UD
+<# Launch a prepared full official Remaster installation using a built UD
    executable. -LoBoDir is optional: leave it out to play the stock islands.
 
    The game starts detached. Output capture is on by default, exactly like
@@ -23,7 +23,8 @@ param(
     [string]$LogDir = (Join-Path $PSScriptRoot 'logs')
 )
 $ErrorActionPreference = 'Stop'
-$GameDir = (Resolve-Path -LiteralPath $GameDir).ProviderPath
+Import-Module (Join-Path $PSScriptRoot 'tools/runtime/UDDataDir.psm1') -Force
+$GameDir = Assert-UDRemasterDataDir -DataDir $GameDir
 if ($LoBoDir) { $LoBoDir = (Resolve-Path -LiteralPath $LoBoDir).ProviderPath }
 $GameExe = (Resolve-Path -LiteralPath $GameExe).ProviderPath
 foreach ($relative in @('bin/remaster.cpp','bin/resource-extra.cpp','bin/ud-mainmenu.hpp','gmcore/init.sqs','fonts/cwr_body.ttf')) {

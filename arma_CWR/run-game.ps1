@@ -33,8 +33,7 @@
     Get-UDDefaultDataDir (tools/runtime/UDDataDir.psm1): $env:UD_DATA_DIR,
     else the target of packages\RemasterUD, else
     D:\Arma_CWA\tmp\remaster-shadow-67 or D:\Arma_CWA\tmp\remaster-shadow.
-    Only when none exists does it fall back, with a warning, to the legacy
-    D:\Arma_CWA\ARMA Cold War Assault [Classic].
+    Missing or unsupported data is refused; Classic 1.99 is no longer supported.
 
 .PARAMETER Mod
     Mod folder(s) to mount, in mount order (later entries shadow earlier
@@ -103,10 +102,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
 
+Import-Module (Join-Path $PSScriptRoot 'tools/runtime/UDDataDir.psm1') -Force
 if (-not $DataDir) {
-    Import-Module (Join-Path $RepoRoot 'tools\runtime\UDDataDir.psm1') -Force
     $DataDir = Get-UDDefaultDataDir -EngineRoot $RepoRoot
 }
+$DataDir = Assert-UDRemasterDataDir -DataDir $DataDir
 if (-not (Test-Path -LiteralPath $DataDir -PathType Container)) {
     throw "DataDir not found: $DataDir"
 }
@@ -177,7 +177,7 @@ if ($ExtraArgs) {
 Write-Host "Launching $exe (cwd=$DataDir)$(if ($Mission) { " -> $Mission" })"
 if ($modPaths) { Write-Host "Mods (mount order): $($modPaths -join '; ')" }
 # Start-Process globs -WorkingDirectory (PS 5.1 and 7), so a bracketed data dir
-# ("[Classic]") must be wildcard-escaped or the launch fails to resolve (#12).
+# ("[Remaster]") must be wildcard-escaped or the launch fails to resolve (#12).
 $wd = [Management.Automation.WildcardPattern]::Escape($DataDir)
 if ($NoLog) {
     $process = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd -PassThru
