@@ -95,3 +95,24 @@ No graphical gameplay, real save compatibility, Windows behavior or performance 
 ### Resume after this batch
 
 Inspect branch and worktrees; fetch origin and explicitly merge any new occupier-forces tip before another batch. Read final evidence and deferred leads above. Do not redo the accepted five fixes, reapply rejected old findings, or rerun mutations against the delivery source without restoring and verifying it. Default final gate is the CI direct test binaries and synthetic tools; normal filesystem/loopback access was required here.
+
+## Remaster setup/launch batch, 2026-10-15
+
+- Delivered by separate task `01a14171-8b36-7783-985c-8f87eaf89bdb`: implementation and independent reviewer explicitly configured as `gpt-6-astra`. Root coordinator alone applied/committed the scratch patches; no shared worker writes or C++ build.
+- Baseline delivery `9cc010d` (documentation-only changes since `a6fe940`); origin/occupier-forces refreshed and unchanged at `197a7d3`. Runtime implementation/tests committed as `d773dd5`.
+- Shared Remaster layout check now covers defaults, environment and explicit paths before setup/install/build/launch. Classic fallback and Classic setup path retired. Existing Classic data/profiles/saves are preserved; no schema or profile conversion. Full-package guard is a heuristic, not authentication/version compatibility.
+- Worker before/after: existing setup baseline passes; new tests on old production fail 22/28, including actual disposable Classic writes and intercepted launch. Candidate and independent reviewer pass all 28 guard checks. Root re-ran the old setup baseline (exit 0), applied content exactly matching the reviewed scratch candidate, then ran the full updated setup suite (exit 0, 28 helper/entrypoint checks and four preservation summary groups).
+- Existing trusted PowerShell 7.6.6 used, no software installed. Exact coordinator invocation: `XDG_CACHE_HOME=/tmp/cwr-remaster-integration/cache XDG_CONFIG_HOME=/tmp/cwr-remaster-integration/config XDG_DATA_HOME=/tmp/cwr-remaster-integration/data /tmp/casenoter-powershell/runtime/pwsh -NonInteractive -NoProfile -File arma_CWR/tests/runtime/test-setup.ps1`. Logs: `tmp/remaster-evidence/baseline-setup.log` and `combined-setup.log`; worker red and independent logs: `/tmp/cwr-remaster-batch/evidence/`.
+- The branch guide's pending Remaster row is now a landed change plus remaining runtime acceptance. README, setup docs, both CLAUDE guides and Trident example consistently target a prepared full Remaster shadow. Existing local env files and per-test pins remain unchanged.
+- No C++ source changes: earlier 4,572-unit result remains tied to `6c3dcde`; it was not rerun or used to claim runtime compatibility for this scripts/docs batch. No Windows/PowerShell 5.1, actual engine startup, Steam build identity or authentic save compatibility verified. FRESH-INSTALL carries the detailed matrix and checklist.
+- Coordinator independently checked the official Bohemia release note cited by the docs. Its statement about separate official Remaster/Classic profiles and incompatible Classic saves is not a claim about this fork's older UD save schemas.
+
+### Integration ownership handoff after Remaster publication
+
+The separate user-requested F062/F078 task `01a14176-7c0c-7ea2-a360-45a08e6ae7ca`
+owns the uncommitted AlertMachine/traffic regression work. It paused shared writes,
+commits and builds for this publication; those files are preserved and excluded
+from the Remaster batch. Its roadmap start note is retained as in-progress.
+After this docs commit/push, integration/build ownership transfers to that task.
+It must keep the branch guide current with actual landed commits and test evidence;
+no traffic/alarm changes are covered by the Remaster runtime test result.

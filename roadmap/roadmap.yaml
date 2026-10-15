@@ -848,6 +848,7 @@ items:
       save/reload seq carries a forced car's row across the reload; civ
       ambient + save/reload regression green.
     log:
+      - "2026-10-15: started F062/F078 follow-up on reviewable_forces at 9cc010d; two Astra xhigh implementation agents and an independent Astra xhigh reviewer. Scope: unused traffic-event collectors, including saved-handler compatibility, and ownership invalidation of traffic alert floors. Executable regressions and final checks pending; full Remaster data unavailable."
       - "2026-08-22: user decision - fully native C++ (not SQS) so the road system, commandeer and ledger hookup are one testable engine service; script stays a thin handler layer."
       - "2026-08-22 probe finding: an arcade ACMOVE waypoint (and AIGroup::Move / `group move`) never moved a freshly seated vehicle crew - even a pure-script createVehicle + moveInDriver + `group move` car sat with unitReady false and speed 0 for 90 s - while `doMove` (IssueCommand, silent) drove at 72 km/h at once. Both group paths deliver through SendCommand (the radio channel). Traffic issues its route legs / Stop / flee as direct IssueCommand Moves to the drivers; noted in STATUS.md known edges for whoever needs waypoint convoys next."
       - "Accepted gaps (STATUS.md): patrol traffic feeds no AlertMachine input (optional follow-up: attribute IsTrafficGroup patrol groups to the nearest occupier zone); the civ kill ledger consumer still drops kills > GM_CIV_EFFECT_R from the attributed town, so deep-countryside road murders are recorded but unpunished; boarded released hulls become ordinary world objects - the persistent garage is cache-and-garage (#28)."
@@ -2016,24 +2017,22 @@ items:
       - "Asset-pointing must accept the Classic 1.99 install specifically (the Demo package is not a gameplay target per the 2026-07-14 policy), and the bracketed '[Classic]' directory name is a wildcard-glob hazard in PowerShell and gitignore alike - use -LiteralPath, as #12 had to."
 
   - id: setup-remaster-mode
-    title: "Setup: Remaster install mode, keeping Bohemia's files and adding UD's beside them (issue #67)"
+    title: "Setup: full Remaster only, preserving Bohemia files and adding UD resources (issue #67)"
     phase: release
     status: done
     priority: 2
     depends_on: [portable-classic-runtime]
     gh_issues: [67]
-    commits: [f9e7c99]
+    commits: [f9e7c99, d773dd5]
     summary: >
-      Turn setup-guerrilla.ps1's refusal of an official Remaster folder into a
-      second install mode for the full Steam Remastered package. Keep
-      Bohemia's remaster.cpp and options headers, install UD's fonts and
-      missions as additions, and split the UD main menu out of our
-      resource-extra.cpp into its own file that setup #includes from
-      Bohemia's resource-extra.cpp, the same append-only pattern
-      install-missions.ps1 already uses for config-extra.cpp. A concrete step
-      on #65's question of retargeting from Classic plus shim to the full
-      Remaster.
+      Require full official Remaster data for UD setup, launch and mission
+      installation. Validate shared package layout before writes/build/launch;
+      retire Classic fallback and installation while preserving existing user
+      data. Keep Bohemia resources, append backed-up includes, and install UD
+      additions with existing font and gap-only string policies. Actual release
+      identity and runtime/save compatibility still require full-package checks.
     log:
+      - "2026-10-15: d773dd5 retires Classic setup/fallback and validates explicit/env/default paths in all UD helpers. Astra implementation and independent review; Linux PowerShell 7.6.6 merged setup suite passed all 28 guard cases plus four preservation summary groups. New guard suite on unchanged old production: 22 failures/6 passes. No Windows, game startup, real-save or Steam-build verification; see FRESH-INSTALL compatibility matrix and forces progress log."
       - "2026-10-11: filed. The engine reads exactly one bin/resource-extra.cpp, and on the Remaster that file is Bohemia's (Options, mods table, splash, main menu), so the UD menu needs its own file. Open risk: Bohemia's mainMenu.hpp and ours both define RscDisplayMainRemaster; check the merge in game, with and without @LoBo, on a copy of the Remaster folder only."
       - "2026-10-11 trap: setup's Remaster guard (96e6e0a) treats bin/mainMenu.hpp and bin/splashLogo.hpp as Bohemia-only markers, so the split-out UD menu file must not use either name, or every Classic rerun is refused (test-setup.ps1's rerun case would go red)."
       - "2026-10-11: the #71 off-screen scenarios and budget soaks run on this setup-prepared shadow (packages/RemasterUD), the first gameplay tests on the full Remaster lane."
@@ -2136,19 +2135,18 @@ items:
   - id: trident-lanes-remaster
     title: "Migrate Trident full_cwa/lobo lanes from Classic data to the Remaster (issue #92)"
     phase: release
-    status: planned
+    status: in-progress
     priority: 2
     depends_on: [setup-remaster-mode]
     gh_issues: [92, 93]
     summary: >
-      The local .trident.env still points OFPR_DATA_DIR at the legacy Classic
-      install and .trident.env.example still recommends packages/Demo, so the
-      full_cwa and lobo lanes run on Classic data although the Remaster is the
-      target. Pick the Remaster shadow default, update the example env and the
-      guerrilla-mode README, rerun both lanes, triage reds and retire Classic as
-      the default. Also decide whether the packages/Game pins (a junction to the
-      Steam folder itself) move to the shadow.
+      The example environment and setup guides now select a prepared full
+      Remaster shadow. Existing local .trident.env files and explicit per-test
+      data_dir pins are not rewritten. Execute full_cwa/lobo/remaster_ud on the
+      shadow, triage failures, and resolve packages/Game pins that still point
+      at the Steam folder before declaring runtime migration complete.
     log:
+      - "2026-10-15: example OFPR_DATA_DIR now packages/RemasterUD and current setup guidance follows the shadow. This is a defaults/docs change, not execution of full_cwa/lobo/remaster_ud; real data is absent here. Remaining runtime and packages/Game work stays open."
       - "2026-10-13: filed #92 from the agent-guide audit. Overlaps #79 P3/P4, which cover the same default for the playtest only."
       - "2026-10-13: filed #93 for the packages/Game half: copy the retail Remaster out of the Steam folder and point the junction at the copy, so the 13 full_game tests stop reading Steam."
 

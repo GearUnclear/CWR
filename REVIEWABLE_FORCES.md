@@ -1,9 +1,10 @@
 # reviewable_forces
 
 `reviewable_forces` is the review and delivery branch for a focused reliability
-batch in **Uslu dur! (UD)**: town capture, occupier counterattacks, saved controls,
-and stronger dealer/portrait regression tests. The accepted batch is integrated,
-independently reviewed, tested headlessly, and published.
+campaign in **Uslu dur! (UD)**: town capture, occupier counterattacks, saved controls,
+stronger dealer/portrait regression tests, and full-Remaster setup/launch guards.
+Accepted changes are independently reviewed and tested headlessly; dated entries
+below distinguish each batch and its validation.
 
 The target is the **full official Arma: Cold War Assault Remaster** and its
 `remaster.cpp` contract. Classic 1.99 compatibility is being dropped. Remaining
@@ -16,8 +17,9 @@ Remaster Demo's smaller asset set is not a gameplay target.
 | --- | --- |
 | Branch created from `origin/occupier-forces` | [`887ce31`](https://github.com/GearUnclear/CWR/commit/887ce31) |
 | Upstream explicitly merged before integration | [`197a7d3`](https://github.com/GearUnclear/CWR/commit/197a7d3), through merge [`ee9699a`](https://github.com/GearUnclear/CWR/commit/ee9699a) |
-| Final tested code and test content | [`6c3dcde`](https://github.com/GearUnclear/CWR/commit/6c3dcde) |
-| Documented and published batch checkpoint | [`a6fe940`](https://github.com/GearUnclear/CWR/commit/a6fe940) |
+| First batch: tested C++ and unit-test content | [`6c3dcde`](https://github.com/GearUnclear/CWR/commit/6c3dcde) |
+| First batch: documented and published checkpoint | [`a6fe940`](https://github.com/GearUnclear/CWR/commit/a6fe940) |
+| Remaster setup/launch scripts and runtime tests checked | [`d773dd5`](https://github.com/GearUnclear/CWR/commit/d773dd5) |
 
 The upstream branch is **`origin/occupier-forces`**. There was no remote branch
 named `forces` when this batch began. Publication went only to
@@ -115,9 +117,26 @@ the strengthened one. Production dealer/portrait behavior is unchanged.
 results, review evidence, and remaining runtime checks. The published code/test
 content is the tested `6c3dcde` content; this checkpoint adds documentation.
 
+### 2026-10-15 — Require full Remaster data before setup and launch
+
+[`d773dd5`](https://github.com/GearUnclear/CWR/commit/d773dd5) removes the Classic
+setup branch and fallback. Before, missing shadows could select Classic, and
+explicit/environment paths could bypass package checks. After, all UD setup,
+launch and mission-install helpers validate the same full-Remaster layout before
+writing, building or launching. Invalid overrides fail rather than silently
+selecting a different package. Existing Classic data is not deleted or converted.
+
+The Trident example and setup documentation now point to a prepared Remaster
+shadow. The guard rejects Classic, Demo, incomplete and case-ambiguous layouts;
+it checks filenames/layout, not authenticity or a particular Steam release.
+Astra implementation and independent review were followed by the merged Linux
+PowerShell runtime checks below. No C++ code, save schema or profile migration
+changed. The [setup guide](arma_CWR/guerrilla-mode/FRESH-INSTALL.md#verified-contract-and-remaining-checks)
+records the compatibility assessment and remaining real-package checks.
+
 ## Executed verification
 
-The final Linux Clang/Ninja build passed. Direct binaries used the CI selection
+The first batch at `6c3dcde` passed its Linux Clang/Ninja build. Direct binaries used the CI selection
 `~[GameData] ~[gamescan] ~[external-data]` without proprietary game data.
 
 | Final check | Result |
@@ -141,6 +160,18 @@ Successful runs needed normal filesystem and loopback access. The [progress log]
 [test audit](roadmap/regression-test-audit.md) retain evidence and caveats.
 Local full logs are under `tmp/forces-evidence/final-*`; they are not committed.
 
+The later Remaster runtime batch at `d773dd5` passed
+`pwsh -NonInteractive -NoProfile -File arma_CWR/tests/runtime/test-setup.ps1`
+on Linux PowerShell 7.6.6: **28 helper/entrypoint checks** plus the installer
+preservation, repeat-install, backup and rejection checks (four summary groups).
+New regression tests failed 22 of 28 checks against the old production helpers, then passed
+all 28 after the patch; independent Astra review also reran the helper suite.
+The coordinator repeated the existing baseline and the full updated setup suite.
+Applied content matched the reviewed candidate. Logs are local under
+`tmp/remaster-evidence/`; the [progress log](roadmap/forces-improvement-progress.md)
+records the exact runner and evidence. The earlier C++ suite was not rerun for
+this scripts/docs-only batch, and its counts are not runtime compatibility proof.
+
 ## Remaining work and limits
 
 No graphical gameplay, real-save compatibility, Windows behavior, or performance
@@ -152,9 +183,9 @@ cap enforcement: the pre-existing strike body-cap omission is a separate issue.
 | Unlanded follow-up | Scope and status |
 | --- | --- |
 | F008 | Companion death/immediate-save/reload race: source mechanism reviewed, no runtime reproduction or fix landed. Running SQS text saved in old campaigns needs a deliberate compatibility strategy. |
-| F062 | Traffic event queues with no consumer: reviewed lead only; no fix or measured slowdown claim. |
-| F078 | Stored traffic-alert stimulus after a zone changes owner: reviewed lead only; no fix or demonstrated downstream QRF launch. |
-| Separate Remaster-only task | Runtime data selection, launch/setup guards, associated tests/docs, and default Trident environment. Not merged or validated in this batch. |
+| F062 | Traffic event queues with no consumer: a separate Astra implementation/review task is in progress; no fix published at this checkpoint and no measured slowdown claim. |
+| F078 | Stored traffic-alert stimulus after a zone changes owner: the separate traffic/alarm task is implementing and testing it; no fix published at this checkpoint or demonstrated downstream QRF launch. |
+| Full Remaster runtime acceptance | Setup guards/defaults are landed above. Windows/PowerShell 5.1 execution, actual engine launch, Steam build identity and authentic UD save compatibility remain unverified. |
 
 Real-game follow-up should use a setup-prepared full Remaster shadow: simultaneous
 town captures, bubble crossings near retake, concurrent foot/mounted/air births,

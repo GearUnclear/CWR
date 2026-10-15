@@ -3,21 +3,23 @@
 For this review branch, see [the branch guide and running change list](REVIEWABLE_FORCES.md).
 
 Engine and gameplay source lives in [`arma_CWR`](arma_CWR). To develop or play
-on another machine, clone this repository and supply fresh **Classic 1.99 game
-data** and the complete **LoBo** mod folder.
+on another machine, clone this repository and supply the **full official Arma:
+Cold War Assault Remastered data** and the complete **LoBo** mod folder. Use a
+separate Remaster shadow/copy prepared as described below; Classic is unsupported.
 
 Follow [the fresh-install guide](arma_CWR/guerrilla-mode/FRESH-INSTALL.md) to
 build the engine, install its runtime resources and launch. From `arma_CWR`,
 after building `PoseidonGame` and `PoseidonTools`:
 
 ```powershell
-pwsh -File ./setup-guerrilla.ps1 -GameDir 'C:/Games/CWA Classic' -LoBoDir 'C:/Games/@LoBo' -Tools './dist/x64-win-rwdi/PoseidonTools.exe'
-pwsh -File ./play-guerrilla.ps1 -GameDir 'C:/Games/CWA Classic' -LoBoDir 'C:/Games/@LoBo' -GameExe './dist/x64-win-rwdi/PoseidonGame.exe'
+pwsh -File ./setup-guerrilla.ps1 -GameDir 'D:/Arma_CWA/tmp/remaster-shadow' -LoBoDir 'C:/Games/@LoBo' -Tools './dist/x64-win-rwdi/PoseidonTools.exe'
+pwsh -File ./play-guerrilla.ps1 -GameDir 'D:/Arma_CWA/tmp/remaster-shadow' -LoBoDir 'C:/Games/@LoBo' -GameExe './dist/x64-win-rwdi/PoseidonGame.exe'
 ```
 
-Use your actual paths. Setup installs the previously local-only compatibility
-and menu files, the licensed UI/font resources, missions, factions and LoBo
-repairs. Game PBOs remain external; the repo supplies the reproducible setup.
+Create the shadow first using the fresh-install guide; never run setup against
+the Steam installation. Use your actual shadow paths. Setup adds UD menu and
+Options resources, missions, factions and LoBo repairs while preserving
+Bohemia's files apart from backed-up include additions. Game PBOs remain external.
 
 See the [engine README](arma_CWR/README.md), [licenses and notices](arma_CWR/THIRD_PARTY_NOTICES.md),
 [Guerrilla documentation](arma_CWR/guerrilla-mode/README.md), and

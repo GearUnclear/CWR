@@ -72,8 +72,11 @@ reports Skipped instead of erroring.
 Trident integration, screenshot, and other game-data-backed tests need a local
 `.trident.env` file. Copy `.trident.env.example` to `.trident.env`, set
 `OFPR_GAME_DIR` to the build or distribution directory containing the binaries,
-and set `OFPR_DATA_DIR` to the Demo game data. The recommended local layout is
-`packages/Demo`; the whole `packages/` tree is ignored by Git.
+and set `OFPR_DATA_DIR` to a setup-prepared **full Remaster** shadow. The example
+uses `packages/RemasterUD`; follow [the setup guide](../guerrilla-mode/FRESH-INSTALL.md).
+Explicit per-test `data_dir` pins still win: retain `packages/Demo` only for
+Demo-specific engine tests. Classic is unsupported. The whole `packages/` tree
+is ignored by Git; no game data is present on the headless campaign server.
 
 Build the Trident CLI before running integration tests:
 

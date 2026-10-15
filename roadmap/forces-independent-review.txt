@@ -181,3 +181,44 @@ No missing tests, merge-induced behavior changes or new blocker found. This
 is final independent source acceptance; full integrated test results remain
 the coordinator's evidence. Coordinator should copy this note into durable
 review evidence before push; this reviewer did not alter the delivery tree.
+
+REMASTER RUNTIME BATCH: separate independent Astra review follows.
+Independent Remaster-only setup/launch review
+Date: 2026-10-15
+Reviewer task: /root/remaster_review, configured model gpt-6-astra.
+Scope: scratch /tmp/cwr-remaster-batch/source versus shared checkout baseline;
+reviewer did not edit production, tests, shared checkout, index or build.
+
+Decision: ACCEPT source and documentation candidate. No remaining blocking findings.
+
+Reviewed production: UDDataDir.psm1, setup-guerrilla.ps1, play-guerrilla.ps1,
+run-game.ps1, run-game-with-mods.ps1, guerrilla-mode/install-missions.ps1.
+The common guard rejects Classic (including prior shims/copied UD binaries),
+Demo, incomplete and ambiguous packages before mutation/build/launch. Explicit
+overrides fail closed. Autodiscovery skips invalid candidates. Provider-relative
+paths and relative package links are handled. Setup retains package snapshots,
+append-only verification/backups, keep-existing fonts and gap-only stringtable
+policy; Classic install branching is removed without deleting legacy user data.
+
+Reviewed test changes and matching eight documentation/default files. Found and
+fixed before acceptance: case-only dtaExt/DTAEXT fixture names collided on Windows;
+rejection snapshots needed content hashes rather than names alone; actual setup
+rejection was added beside CheckOnly. Requested provider-relative and package-link
+coverage, and a hard cmake stub alongside Start-Process interception. Docs now
+list required payload files as well as markers, preserve branch-guide link, and
+separate layout validation/source version from unverified official release/runtime.
+
+Evidence: independently executed final tests/runtime/test-data-dir.ps1 on Linux
+PowerShell with separate XDG directories: exit 0, all 28 checks pass, captured in
+reviewer-data-dir.log. Inspected worker baseline and final setup output; final-setup.log
+ends with all preservation, mirror, preflight and package-rejection PASS sections.
+Final direct-helper tests use the existing Get-UDDefaultDataDir API, permitting
+behavioral red checks on old production. Old-source evidence proves Classic default/
+env/setup/install acceptance and actual disposable Classic writes; old play reached
+intercepted process start. Missing executable/mod paths in old run-game/wrapper are
+not evidence of successful game launch.
+
+Limits: no Windows/PowerShell 5.1 execution, real game assets, engine launch,
+Steam build identity, actual save compatibility or gameplay validated. Package
+layout is a heuristic, not authentication or full asset/config validation. Runtime
+checklist and unresolved release evidence remain explicitly documented.
