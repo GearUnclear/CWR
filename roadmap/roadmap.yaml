@@ -318,6 +318,7 @@ items:
       tests (capture flip, garrison spawn + doMove, undercover break, save/reload
       x2 sequences, Sinai swap, new-game UI e2e) on Demo and full-CWA data.
     log:
+      - "2026-10-15: strengthened Market/Portrait identity, stale-output, cancellation and nonzero reset assertions. Separate Codex task, independent Astra review; isolated full two-file selection passes 20 cases/262 assertions and catches three real-source mutants missed by all original selected tests. See roadmap/regression-test-audit.md. Combined post-upstream-merge gate pending in forces campaign."
       - "World-side effects (marker repaint, real AI spawn) are integration-only by design; pure cores were built for injection-based unit testing."
       - "guerrilla_native_undercover deliberately avoids a literal 'player fire': force-firing headless crashed the engine pre-193a280; the perception-to-fired-EH front half remains untested end-to-end."
       - "Coverage gap: the 11-script SQS core's economy/recruit/companion/QRF/escalation managers have no behavioral integration tests, only byte-parity."

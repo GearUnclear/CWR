@@ -117,10 +117,22 @@ TEST_CASE("portrait failure completes once and cancellation retains completed en
     service.Request(appearance);
     service.Advance();
     CHECK(service.RenderCount() == 1);
-    service.Request({"Next", "Face18"});
+    const auto next = service.Request({"Next", "Face18"});
+    REQUIRE(service.Find(next) != nullptr);
+    REQUIRE(service.Find(next)->status == PortraitStatus::Queued);
+    REQUIRE(service.Pending());
+    REQUIRE(service.Total() == 2);
     service.Cancel();
     CHECK_FALSE(service.Pending());
+    CHECK(service.Find(next) == nullptr);
+    REQUIRE(service.Find(id) != nullptr);
     CHECK(service.Find(id)->status == PortraitStatus::Unavailable);
+    CHECK(service.Completed() == 1);
+    CHECK(service.Total() == 1);
+    const auto revision = service.Revision();
+    service.Advance();
+    CHECK(service.RenderCount() == 1);
+    CHECK(service.Revision() == revision);
 }
 
 TEST_CASE("portrait cache rejects wrong dimensions and nonopaque decoded images", "[portrait][guerrilla]")
@@ -214,18 +226,63 @@ TEST_CASE("portrait queue prioritizes open dossier and recovers after teardown",
     Backend(service);
     const auto first = service.Request(appearance);
     const auto open = service.Request({"LaterBody", "Face18"}, true);
+    REQUIRE(first != open);
+    REQUIRE(service.Find(first)->status == PortraitStatus::Queued);
+    REQUIRE(service.Find(open)->status == PortraitStatus::Queued);
+    REQUIRE(service.Pending());
     service.Advance();
-    CHECK(service.Find(open)->status == PortraitStatus::Ready);
-    CHECK(service.Find(first)->status == PortraitStatus::Queued);
+    REQUIRE(service.Find(open)->status == PortraitStatus::Ready);
+    REQUIRE(service.Find(first)->status == PortraitStatus::Queued);
     const auto pixels = service.Find(open)->pixels;
+    REQUIRE(pixels.size() == 256 * 256 * 4);
     service.ReleaseGraphics();
     CHECK(service.Find(open)->pixels == pixels);
+    REQUIRE(service.Total() == 2);
+    REQUIRE(service.Pending());
     service.Cancel();
     CHECK(service.Total() == 1);
+    CHECK_FALSE(service.Pending());
+    CHECK(service.Find(first) == nullptr);
+    REQUIRE(service.Find(open) != nullptr);
+    CHECK(service.Find(open)->status == PortraitStatus::Ready);
+    CHECK(service.Find(open)->pixels == pixels);
+
+    // A cancelled identity is requestable again; a completed one stays cached.
+    CHECK(service.Request(appearance) == first);
+    REQUIRE(service.Find(first)->status == PortraitStatus::Queued);
+    CHECK(service.Request({"LaterBody", "Face18"}, true) == open);
+    service.Advance();
+    REQUIRE(service.Find(first)->status == PortraitStatus::Ready);
+    CHECK(service.Find(open)->pixels == pixels);
+    CHECK(service.RenderCount() == 2);
+    CHECK(service.Completed() == 2);
+    CHECK_FALSE(service.Pending());
+
+    // Seed a real cache hit so teardown's counter reset cannot pass at zero.
+    PortraitService warm(cache.root);
+    Backend(warm);
+    CHECK(warm.Request(appearance) == first);
+    warm.Advance();
+    REQUIRE(warm.CacheHits() == 1);
+    warm.Teardown();
+    CHECK(warm.CacheHits() == 0);
+    CHECK(warm.Find(first) == nullptr);
+
+    REQUIRE(service.RenderCount() == 2);
     service.Teardown();
     CHECK(service.Total() == 0);
     CHECK(service.RenderCount() == 0);
     CHECK(service.CacheHits() == 0);
+    CHECK(service.Find(first) == nullptr);
+    CHECK(service.Find(open) == nullptr);
+    CHECK_FALSE(service.Pending());
+
+    CHECK(service.Request(appearance) == first);
+    REQUIRE(service.Find(first)->status == PortraitStatus::Queued);
+    service.Advance();
+    REQUIRE(service.Find(first)->status == PortraitStatus::Ready);
+    CHECK(service.CacheHits() == 1);
+    CHECK(service.RenderCount() == 0);
 }
 TEST_CASE("portrait exceptions terminate one request and leave queue usable", "[portrait][guerrilla]")
 {
