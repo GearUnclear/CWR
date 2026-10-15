@@ -309,6 +309,14 @@ struct SimDiag
     int trafficConvoy = 0;
     float gmAvg = 0, gmP95 = 0, gmMax = 0;          // FrameProfiler "gm" phase (ms)
     float frameAvg = 0, frameP95 = 0, frameMax = 0; // whole frame (ms)
+    // CounterAttack's live occupier groups beyond 850 m of the player
+    // (cacheRadius + DespawnHysteresis), by cause (CounterAttackFarCensus)
+    int farOcc = 0;
+    int farArrival = 0;
+    int farMarch = 0;
+    int farLeftover = 0;
+    int farHomeHull = 0;
+    int farAir = 0;
 };
 
 enum SimBudgetBreach

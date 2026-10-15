@@ -404,8 +404,13 @@ Instruments:
 - `gmSimDiag` returns `[zonesInBubble, zonesRemoteTicked, [liveOcc, liveRes,
   liveCiv, liveTotal], [grpOcc, grpRes, grpCiv, grpMaxSide],
   garrisonSpawnedZones, garrisonLiveBodies, [civ, parked, patrol, convoy],
-  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], breachBits]`.
-  Timings cover the profiler's last 256 frames.
+  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], breachBits,
+  [farOcc, arrival, march, leftover, homeHull, air]]`.
+  Timings cover the profiler's last 256 frames. The last slot (and
+  `[gmsim] far occ=`) counts `CounterAttack`'s live occupier groups beyond
+  850 m of the player by cause (`CounterAttackFarCensus`) [code]; with the
+  director log on, every `CAOpArrived` logs `arrived abstract|live`, and
+  every `CAOpBorn` its `spawnReason`, each with the player distance.
 - `gmSimDiagLog` writes one `[gmsim]` line now and returns the breach bits
   (1 = live bodies, 2 = groups on one side). The same line is written every
   `simDiagInterval` seconds.

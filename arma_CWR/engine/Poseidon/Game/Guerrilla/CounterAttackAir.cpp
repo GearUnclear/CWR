@@ -435,6 +435,7 @@ int CounterAttack::AirGoLive(ZoneRegistry& registry, const CounterAttackView& vi
              r.opId, (const char*)r.hullClass, r.strength, birth.X(), birth.Z(), alt, (const char*)r.target, lz.X(),
              lz.Z(), AirDist2D(lz, dest), reported ? ", away from the reported fighters" : "");
     Emit(registry, r, CAOpBorn, r.strength, 0, "airborne");
+    TraceBorn(view, r, "airborne", birth);
     EmitAt(registry, r, CAOpAirborne, r.airOrigin, birth, r.strength, 0, r.airOrigin >= 0 ? "airfield" : "off-map");
     return BirthDone;
 }
@@ -899,6 +900,7 @@ bool CounterAttack::AdvanceStrike(ZoneRegistry& registry, const CounterAttackVie
                 GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] strike {} born airborne at [{:.0f}, {:.0f}] ({:.0f} m up)",
                          r.opId, (const char*)r.hullClass, birth.X(), birth.Z(), alt);
                 Emit(registry, r, CAOpBorn, 0, 0, "airborne");
+                TraceBorn(view, r, "airborne", birth);
                 EmitAt(registry, r, CAOpAirborne, r.airOrigin, birth, 0, 0,
                        r.airOrigin >= 0 ? "airfield" : "off-map");
                 return false;

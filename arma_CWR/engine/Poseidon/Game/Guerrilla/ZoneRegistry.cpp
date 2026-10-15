@@ -3549,6 +3549,14 @@ void GatherSimDiag(SimDiag& out)
     out.frameAvg = frame.avgMs;
     out.frameP95 = frame.p95Ms;
     out.frameMax = frame.maxMs;
+    CounterAttackFarCensus far;
+    CounterAttack::Instance().GatherFarCensus(far);
+    out.farOcc = far.Total();
+    out.farArrival = far.arrival;
+    out.farMarch = far.march;
+    out.farLeftover = far.leftover;
+    out.farHomeHull = far.homeHull;
+    out.farAir = far.air;
 }
 
 int ZoneRegistry::LogSimDiag()
@@ -3558,10 +3566,12 @@ int ZoneRegistry::LogSimDiag()
     LOG_INFO(Core,
              "[gmsim] zones bubble={} remote={} live occ={} res={} civ={} total={} groups occ={} res={} civ={} "
              "maxSide={} garrison zones={} bodies={} traffic civ={} parked={} patrol={} convoy={} "
-             "gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms",
+             "gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms "
+             "far occ={} arrival={} march={} leftover={} home={} air={}",
              d.zonesInBubble, d.zonesRemoteTicked, d.liveOcc, d.liveRes, d.liveCiv, d.liveTotal, d.grpOcc, d.grpRes,
              d.grpCiv, d.grpMaxSide, d.garrisonSpawnedZones, d.garrisonLiveBodies, d.trafficCiv, d.trafficParked,
-             d.trafficPatrol, d.trafficConvoy, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg, d.frameP95, d.frameMax);
+             d.trafficPatrol, d.trafficConvoy, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg, d.frameP95, d.frameMax,
+             d.farOcc, d.farArrival, d.farMarch, d.farLeftover, d.farHomeHull, d.farAir);
     const int bits = SimBudgetBreaches(d, _tuning);
     if (bits & SBLiveBodies)
     {

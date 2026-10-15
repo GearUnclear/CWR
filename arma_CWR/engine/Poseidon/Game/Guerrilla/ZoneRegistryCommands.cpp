@@ -379,16 +379,18 @@ static GameValue ScalarArray(const GameState* state, std::initializer_list<float
 // [zonesInBubble, zonesRemoteTicked, [liveOcc, liveRes, liveCiv, liveTotal],
 //  [grpOcc, grpRes, grpCiv, grpMaxSide], garrisonSpawnedZones,
 //  garrisonLiveBodies, [trafficCiv, parked, patrol, convoy],
-//  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits]
+//  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits,
+//  [farOcc, arrival, march, leftover, homeHull, air]]
 // (ms timings over the FrameProfiler's 256-frame ring; breach bits 1 = live
-// bodies, 2 = groups on one side)
+// bodies, 2 = groups on one side; the last slot counts CounterAttack's live
+// occupier groups beyond 850 m of the player by cause, CounterAttackFarCensus)
 static GameValue GmSimDiag(const GameState* state)
 {
     SimDiag d;
     GatherSimDiag(d);
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(10);
+    array.Resize(11);
     array[0] = (float)d.zonesInBubble;
     array[1] = (float)d.zonesRemoteTicked;
     array[2] = ScalarArray(state, {(float)d.liveOcc, (float)d.liveRes, (float)d.liveCiv, (float)d.liveTotal});
@@ -400,6 +402,8 @@ static GameValue GmSimDiag(const GameState* state)
     array[7] = ScalarArray(state, {d.gmAvg, d.gmP95, d.gmMax});
     array[8] = ScalarArray(state, {d.frameAvg, d.frameP95, d.frameMax});
     array[9] = (float)SimBudgetBreaches(d, ZoneRegistry::Instance().Tuning());
+    array[10] = ScalarArray(state, {(float)d.farOcc, (float)d.farArrival, (float)d.farMarch, (float)d.farLeftover,
+                                    (float)d.farHomeHull, (float)d.farAir});
     return value;
 }
 

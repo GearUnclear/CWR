@@ -611,6 +611,27 @@ float CounterAttack::MarchAllowance(const AutoArray<Vector3>& route, float fract
     return RouteLength(route) * (1.0f - Clamp01(fraction)) / MarchSpeed + MarchSlack;
 }
 
+// the player's 2D distance from at, -1 without a player
+static float PlayerDistance(const CounterAttackView& view, Vector3Par at)
+{
+    return view.playerValid ? Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) : -1.0f;
+}
+
+void CounterAttack::TraceArrived(const CounterAttackView& view, const Record& r, const char* mode, const char* how,
+                                 Vector3Par at)
+{
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] arrived {} at {} ({}), {:.0f} m from the player", r.opId, mode,
+                     r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, how, PlayerDistance(view, at));
+}
+
+void CounterAttack::TraceBorn(const CounterAttackView& view, const Record& r, const char* reason, Vector3Par at)
+{
+    GM_DIRECTOR_INFO(Core,
+                     "CounterAttack: [op {}] born for {} (spawnReason {}) at [{:.0f}, {:.0f}], {:.0f} m from the player",
+                     r.opId, r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, reason, at.X(), at.Z(),
+                     PlayerDistance(view, at));
+}
+
 const char* CounterAttack::SpawnReasonName(int reason)
 {
     switch (reason)
@@ -820,6 +841,72 @@ int CounterAttack::LiveHulls() const
         n += _homeHulls[i].hull.GetLink() != nullptr ? 1 : 0;
     }
     return n + _airHomes.Size(); // phase 6A: airframes flying home
+}
+
+void CounterAttack::FarCensus(const ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops,
+                              CounterAttackFarCensus& out) const
+{
+    out = CounterAttackFarCensus();
+    if (!ops || !view.playerValid)
+    {
+        return;
+    }
+    const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+    // a group can sit on two lists for a moment (a record's link and the
+    // Leftover it was just handed to): the first cause counts it
+    AutoArray<AIGroup*> seen;
+    auto far = [&](AIGroup* grp) {
+        if (!grp)
+        {
+            return false;
+        }
+        for (int i = 0; i < seen.Size(); i++)
+        {
+            if (seen[i] == grp)
+            {
+                return false;
+            }
+        }
+        seen.Add(grp);
+        Vector3 leader = VZero;
+        return ops->Alive(grp, leader) > 0 &&
+               Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
+    };
+    auto farAir = [&](int airId) {
+        CounterAttackAirStatus st;
+        return airId > 0 && ops->AirStatus(airId, st) && !st.gone && !st.crewRemoved && st.hasPos &&
+               Dist2D(st.pos.X(), st.pos.Z(), view.playerX, view.playerZ) > edge;
+    };
+    for (int i = 0; i < _leftovers.Size(); i++)
+    {
+        out.leftover += far(_leftovers[i].group) ? 1 : 0;
+    }
+    for (int i = 0; i < _homeHulls.Size(); i++)
+    {
+        out.homeHull += far(_homeHulls[i].crewGroup) ? 1 : 0;
+    }
+    for (int i = 0; i < _airHomes.Size(); i++)
+    {
+        out.air += farAir(_airHomes[i].airId) ? 1 : 0;
+    }
+    for (int i = 0; i < _records.Size(); i++)
+    {
+        const Record& r = _records[i];
+        int& cause = r.arrivalLive ? out.arrival : out.march;
+        if (r.airId > 0)
+        {
+            // the airframe counts by its own position (its crew group may
+            // be OccupierAir's, not ours to census)
+            seen.Add(r.crewGroup.GetLink());
+            out.air += farAir(r.airId) ? 1 : 0;
+        }
+        else
+        {
+            cause += far(r.crewGroup) ? 1 : 0;
+        }
+        cause += far(r.group) ? 1 : 0;
+        cause += far(r.escortCrewGroup) ? 1 : 0;
+    }
 }
 
 int CounterAttack::SettlePresence(const ZoneRegistry& registry, int zoneIndex) const
@@ -1402,6 +1489,7 @@ bool CounterAttack::LaunchCore(ZoneRegistry& registry, const CounterAttackView& 
     if (added.phase == CALive)
     {
         Emit(registry, added, CAOpBorn, added.strength, 0, SpawnReasonName(added.spawnReason));
+        TraceBorn(view, added, SpawnReasonName(added.spawnReason), added.spawnPos);
     }
     return true;
 }
@@ -1547,8 +1635,8 @@ static Vector3 EdgePoint(float edgeR, Vector3Par pos, Vector3Par dest)
     return d > edgeR && d > 1e-3f ? dest + back * (edgeR / d) : Vector3(pos);
 }
 
-void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
-                          float elapsed)
+void CounterAttack::March(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                          CounterAttackOps* ops, Vector3Par leader, float elapsed)
 {
     (void)target;
     const Vector3 dest = DestOf(registry, r);
@@ -1615,6 +1703,7 @@ void CounterAttack::March(const ZoneRegistry& registry, int target, Record& r, C
                  r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, Dist2D(leader, dest),
                  mounted ? " and dismounts" : "");
         Emit(registry, r, CAOpArrived, r.strength, 0, mounted ? "live, dismounted" : "live");
+        TraceArrived(view, r, "live", mounted ? "dismounts and moves in" : "moves in", leader);
         return;
     }
     // a column keeps together (6.5): the carrier waits where it is while its
@@ -2026,6 +2115,7 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
              pick.fraction * 100.0f, RouteLength(route), hull ? " in a hull" : "", (const char*)r.target);
     AddEvent(fired, ZECounterAttack, target);
     Emit(registry, r, CAOpBorn, r.strength, 0, SpawnReasonName(pick.reason));
+    TraceBorn(view, r, SpawnReasonName(pick.reason), pick.pos);
     return BirthDone;
 }
 
@@ -2226,6 +2316,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 if (r.phase == CALive)
                 {
                     Emit(registry, r, CAOpBorn, r.strength, 0, SpawnReasonName(r.spawnReason));
+                    TraceBorn(view, r, SpawnReasonName(r.spawnReason), r.spawnPos);
                 }
             }
             // launched with the town already in the bubble: born anywhere on
@@ -2366,6 +2457,18 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 // off-screen arrival
                 AddEvent(fired, ZECounterAttack, target);
                 Emit(registry, r, CAOpArrived, r.strength, 0, "abstract");
+                // what follows decides the cost: a hold of an empty target
+                // stays abstract, defenders present make it a live fight
+                const char* how = "holds the empty target";
+                if (reinforce)
+                {
+                    how = alarm ? "answers the alarm" : "tops up the garrison";
+                }
+                else if (defendersHere)
+                {
+                    how = _tuning.forcesOn || hq ? "defenders present: goes live at the edge" : "defenders present: odds roll";
+                }
+                TraceArrived(view, r, "abstract", how, DestOf(registry, r));
             }
             if (alarm && !r.answered)
             {
@@ -2744,7 +2847,7 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             if (r.leg != LegTown)
             {
                 // on the road: leg by leg to the town edge
-                March(registry, target, r, ops, leader, elapsed);
+                March(registry, view, target, r, ops, leader, elapsed);
             }
             else
             {
@@ -4698,6 +4801,11 @@ class EngineOps final : public CounterAttackOps
             out.gone = r->core.hullRemoved;
             out.hullLost = r->core.failReason == AFRHullLost;
             out.cargoBorn = r->cargoBorn;
+            if (Entity* hull = r->hull.GetLink())
+            {
+                out.hasPos = true;
+                out.pos = hull->Position();
+            }
             Transport* veh = dyn_cast<Transport>(r->hull.GetLink());
             for (int u = 0; r->cargo && u < MAX_UNITS_PER_GROUP; u++)
             {
@@ -4718,6 +4826,11 @@ class EngineOps final : public CounterAttackOps
             out.crewRemoved = r->core.crewRemoved;
             out.gone = r->core.hullRemoved;
             out.hullLost = r->core.failReason == AFRHullLost;
+            if (Entity* hull = r->hull.GetLink())
+            {
+                out.hasPos = true;
+                out.pos = hull->Position();
+            }
             return true;
         }
         return false;
@@ -4960,6 +5073,22 @@ void CounterAttack::BuildView(CounterAttackView& view) const
     }
     view.mapSize = GLandscape ? (float)GLandscape->GetLandRange() * GLandscape->GetLandGrid() : 0.0f;
     Ops().Refresh(view);
+}
+
+void CounterAttack::GatherFarCensus(CounterAttackFarCensus& out) const
+{
+    out = CounterAttackFarCensus();
+    World* world = GWorld;
+    Person* player = world ? world->GetRealPlayer() : nullptr;
+    if (!player || player->IsDammageDestroyed())
+    {
+        return;
+    }
+    CounterAttackView view;
+    view.playerValid = true;
+    view.playerX = player->Position().X();
+    view.playerZ = player->Position().Z();
+    FarCensus(ZoneRegistry::Instance(), view, &Ops(), out);
 }
 
 int CounterAttack::SettleHqAssaults(ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops)

@@ -14,12 +14,16 @@
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // the win latch freeze (7.4)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // DespawnHysteresis (the far census edge)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (5.5)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp> // LogDetail (the trace capture)
+
+#include <spdlog/sinks/callback_sink.h>
 
 #include <filesystem>
 #include <functional>
@@ -4153,4 +4157,220 @@ TEST_CASE("CounterAttack - phase 6A: air fields and strikes survive save/load",
     CHECK(h->crew == 2);
     ExtParsMission.Clear();
     std::filesystem::remove(path);
+}
+
+namespace
+{
+
+// every Core log payload while it lives (the director trace lines log at
+// DirectorLogLevel; the capture opens the logger to trace and restores it)
+struct CoreLogCapture
+{
+    spdlog::logger* logger = LogDetail::Get(Poseidon::Foundation::LogCategory::Core);
+    std::vector<spdlog::sink_ptr> saved;
+    spdlog::level::level_enum savedLevel = spdlog::level::off;
+    std::vector<std::string> lines;
+    CoreLogCapture()
+    {
+        saved = logger->sinks();
+        savedLevel = logger->level();
+        logger->sinks().clear();
+        logger->sinks().push_back(std::make_shared<spdlog::sinks::callback_sink_mt>(
+            [this](const spdlog::details::log_msg& m) { lines.emplace_back(m.payload.data(), m.payload.size()); }));
+        logger->set_level(spdlog::level::trace);
+    }
+    ~CoreLogCapture()
+    {
+        logger->sinks() = saved;
+        logger->set_level(savedLevel);
+    }
+    // the lines containing every needle
+    std::vector<std::string> With(std::initializer_list<const char*> needles) const
+    {
+        std::vector<std::string> out;
+        for (const std::string& l : lines)
+        {
+            bool all = true;
+            for (const char* n : needles)
+            {
+                all = all && l.find(n) != std::string::npos;
+            }
+            if (all)
+            {
+                out.push_back(l);
+            }
+        }
+        return out;
+    }
+};
+
+} // namespace
+
+TEST_CASE("CounterAttack - the far census counts live groups beyond 850 m of the player by cause",
+          "[game][guerrilla][counterattack]")
+{
+    CounterAttackFarCensus c;
+    SECTION("a column: march groups at the edge, a leftover, a home hull")
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        PoolGuard pool(f);
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        AutoArray<ZoneEventRecord> fired;
+        ColumnOps ops;
+        BornColumn(f, ops, fired);
+        const Vector3 town = f.Z(f.town).pos;
+        const CounterAttackView atTown = AtTown(f);
+        const float edge = f.registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
+        CHECK(edge == Approx(850.0f));
+        // no ops, or no player: nothing to count
+        f.ca.FarCensus(f.registry, atTown, nullptr, c);
+        CHECK(c.Total() == 0);
+        f.ca.FarCensus(f.registry, CounterAttackView(), &ops, c);
+        CHECK(c.Total() == 0);
+        // the infantry just inside the edge, the carrier crew just beyond
+        // it, the escort crew at the player
+        ops.infAt = town + Vector3(edge - 1.0f, 0, 0);
+        ops.carrierCrewAt = town + Vector3(0, 0, edge + 1.0f);
+        ops.escortCrewAt = town;
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.march == 1);
+        CHECK(c.Total() == 1);
+        // a group without a living member is not a live group
+        ops.carrierCrewAlive = 0;
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.Total() == 0);
+        ops.carrierCrewAlive = 1;
+        ops.infAt = town;
+        ops.carrierCrewAt = town;
+
+        // the escort is destroyed, one crewman alive: a Leftover
+        ops.escortState = CounterAttackOps::HullDestroyed;
+        ops.escortSeated = 0;
+        ops.escortCrewAlive = 1;
+        f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+        REQUIRE(f.ca.LeftoverCount() == 1);
+        ops.escortCrewAt = town + Vector3(2000.0f, 0, 0);
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.leftover == 1);
+        CHECK(c.Total() == 1);
+
+        // the infantry is wiped: the intact carrier drives home with its crew
+        ops.infAlive = 0;
+        f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+        REQUIRE(f.ca.Count() == 0);
+        REQUIRE(f.ca.HomeHullCount() == 1);
+        ops.carrierCrewAt = town + Vector3(0, 0, 3000.0f);
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.homeHull == 1);
+        CHECK(c.leftover == 1);
+        CHECK(c.Total() == 2);
+    }
+    SECTION("an arrival against defenders is a live arrival fight at any distance")
+    {
+        Fixture f;
+        f.Load(Certain("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+        AutoArray<ZoneEventRecord> fired;
+        ColumnOps ops;
+        const CounterAttackView far = Fixture::View(FarX, FarZ);
+        f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+        f.Z(f.town).lastGuer = 3;
+        f.ca.Step(f.registry, far, 5000.0f, &ops, fired);
+        REQUIRE(f.ca.Count() == 1);
+        REQUIRE(f.ca.Get(0)->phase == CALive);
+        REQUIRE(f.ca.Get(0)->arrivalLive);
+        ops.infAt = f.Z(f.town).pos;
+        f.ca.FarCensus(f.registry, far, &ops, c);
+        CHECK(c.arrival == 1);
+        CHECK(c.Total() == 1);
+        // the player walks up to it: inside the edge it is not counted
+        f.ca.FarCensus(f.registry, AtTown(f), &ops, c);
+        CHECK(c.Total() == 0);
+    }
+    SECTION("airframes: an insertion in flight, then flying home")
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.RaiseTown(f.town);
+        FakeListener ear;
+        ListenerGuard guard(&ear);
+        AutoArray<ZoneEventRecord> fired;
+        AirOps ops;
+        const CounterAttackView atTown = WithMap(AtTown(f));
+        REQUIRE(f.ca.LaunchFunded(f.registry, atTown, HeliOrder(f.town, f.post, f.farBase), &ops, fired));
+        f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+        REQUIRE(ops.inserts == 1);
+        // an airframe without a known position is not counted
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.Total() == 0);
+        ops.status.hasPos = true;
+        ops.status.pos = f.Z(f.town).pos + Vector3(2000.0f, 0, 0);
+        ops.cargoAlive = 4;
+        ops.cargoAt = ops.status.pos;
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.air == 1);
+        CHECK(c.march == 1); // its cargo squad aboard
+        CHECK(c.Total() == 2);
+        // down and unloaded at the LZ (400 m out): the airframe flies home
+        ops.cargoAt = ops.lastLz;
+        ops.status.landed = true;
+        ops.status.landedOffset = 5.0f;
+        ops.status.landedAt = ops.lastLz;
+        ops.status.state = 3; // AISDeparting
+        f.ca.Step(f.registry, atTown, 1.0f, &ops, fired);
+        REQUIRE(f.ca.AirHomes() == 1);
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.air == 1);
+        CHECK(c.Total() == 1);
+        // its crew removed: nothing live remains
+        ops.status.crewRemoved = true;
+        f.ca.FarCensus(f.registry, atTown, &ops, c);
+        CHECK(c.Total() == 0);
+    }
+}
+
+TEST_CASE("CounterAttack - every arrival and birth logs abstract or live, the spawn reason and the player distance",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(Certain("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    CoreLogCapture log;
+    f.ca.Step(f.registry, far, 300.0f, &ops, fired);
+    REQUIRE(f.ca.Get(0)->phase == CATravel);
+    // defenders in the town: an abstract arrival that goes live at the
+    // edge, 26659 m from the player at (20000, 20000)
+    f.Z(f.town).lastGuer = 3;
+    f.ca.Step(f.registry, far, 5000.0f, &ops, fired);
+    REQUIRE(ear.Count(CAOpArrived) == 1);
+    REQUIRE(ear.Count(CAOpBorn) == 1);
+    const std::vector<std::string> arrived = log.With({"arrived abstract at Town"});
+    REQUIRE(arrived.size() == 1);
+    CHECK(arrived[0].find("defenders present: goes live at the edge") != std::string::npos);
+    CHECK(arrived[0].find(", 26659 m from the player") != std::string::npos);
+    const std::vector<std::string> born = log.With({"born for Town (spawnReason ", "m from the player"});
+    REQUIRE(born.size() == 1);
+    const char* reason = CounterAttack::SpawnReasonName(f.ca.Get(0)->spawnReason);
+    CHECK(born[0].find(std::string("(spawnReason ") + reason + ")") != std::string::npos);
+    // the squad walks to the town edge: a live arrival, from its leader
+    ops.infAt = f.Z(f.town).pos;
+    const CounterAttackView near = AtTown(f);
+    for (int i = 0; i < 3 && ear.Count(CAOpArrived) < 2; i++)
+    {
+        f.ca.Step(f.registry, near, 1.0f, &ops, fired);
+    }
+    REQUIRE(ear.Count(CAOpArrived) == 2);
+    const std::vector<std::string> live = log.With({"arrived live at Town"});
+    REQUIRE(live.size() == 1);
+    CHECK(live[0].find(", 0 m from the player") != std::string::npos);
 }

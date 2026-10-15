@@ -292,6 +292,25 @@ struct CounterAttackAirStatus
     int cargoBorn = 0;       // insertion: bodies seated at birth
     int cargoSeated = 0;     // ... living, still aboard (last step)
     int crewAlive = 0;       // living crew aboard (last step)
+    // the airframe's position while its hull exists (the far census)
+    bool hasPos = false;
+    Vector3 pos = VZero;
+};
+
+// The far census (gmSimDiag, [gmsim]; the abstract-director assessment's
+// step 1): this service's live occupier groups with a living member standing
+// beyond cacheRadius + GarrisonCache::DespawnHysteresis (850 m) of the
+// player, by why they are still in the world.  An airframe counts once (its
+// crew); a group is counted under the first cause in field order below
+// that holds it.
+struct CounterAttackFarCensus
+{
+    int leftover = 0; // Leftover groups with living stragglers (M3, L7)
+    int homeHull = 0; // crews of intact hulls driving home
+    int air = 0;      // airframes: an insertion or sortie in flight, or flying home
+    int arrival = 0;  // a live arrival fight (Record::arrivalLive: born at the town edge against defenders)
+    int march = 0;    // any other born operation group (on its road, at its town, withdrawing)
+    int Total() const { return leftover + homeHull + air + arrival + march; }
 };
 
 // How a squad appearing at a point would be perceived, Traffic's tiers
@@ -923,6 +942,12 @@ class CounterAttack : public SerializeClass
     // engine perception snapshot too.
     void BuildView(CounterAttackView& view) const;
     CounterAttackOps* EngineOps();
+    // the far census (CounterAttackFarCensus) against view's player; zero
+    // without a player or ops.  GatherFarCensus is the engine path
+    // (GatherSimDiag): the real player and the engine ops.
+    void FarCensus(const ZoneRegistry& registry, const CounterAttackView& view, CounterAttackOps* ops,
+                   CounterAttackFarCensus& out) const;
+    void GatherFarCensus(CounterAttackFarCensus& out) const;
     // the HOLDING bodies on a zone a revert settles as its garrison (5.4):
     // every holding record on it (suspended ones too), 0 with the key off
     int SettlePresence(const ZoneRegistry& registry, int zoneIndex) const;
@@ -1060,8 +1085,15 @@ class CounterAttack : public SerializeClass
     bool MustGoLive(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
                     CounterAttackOps* ops) const;
     // the live squad's road march: legs, the town edge, re-sends
-    void March(const ZoneRegistry& registry, int target, Record& r, CounterAttackOps* ops, Vector3Par leader,
-               float elapsed);
+    void March(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+               CounterAttackOps* ops, Vector3Par leader, float elapsed);
+    // the playtest trail (assessment step 1, director log level): one line
+    // per CAOpArrived, "abstract" or "live" (how = what follows the
+    // arrival), and per CAOpBorn with its spawn reason, each with the
+    // player's distance from at
+    static void TraceArrived(const CounterAttackView& view, const Record& r, const char* mode, const char* how,
+                             Vector3Par at);
+    static void TraceBorn(const CounterAttackView& view, const Record& r, const char* reason, Vector3Par at);
     // survivors go home, whole bodies, capped at the base's room
     // (garrisonMax - live - reserve - pending); inside the player's deposit
     // bubble they are a pending deposit (S5), else a reserve write.  The
