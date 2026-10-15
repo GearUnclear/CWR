@@ -25,6 +25,8 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // Not a campaign: the capture tests take this fixture's only enemy
     // base(s), and the campaign win rule (issue #79 B3) would then end the
     // mission, which under --autotest quits the game mid-test.

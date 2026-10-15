@@ -2807,9 +2807,6 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
     const char* config = "class CfgGuerrillaZones\n"
                          "{\n"
                          "    seedCities = 1; seedCitySupport = 35;\n"
-                         // Le Ville [12000, 12000] lies past the default play
-                         // region (Camp + 5 km, issue #76)
-                         "    playRegion[] = {0, 0, 20000, 20000};\n"
                          "    class Zones\n"
                          "    {\n"
                          "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
@@ -2891,9 +2888,6 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         std::string bigConfig = "class CfgGuerrillaZones\n"
                                 "{\n"
                                 "    seedCities = 1;\n"
-                                // the Names row runs far past the default
-                                // play region (Camp + 5 km, issue #76)
-                                "    playRegion[] = {0, 0, 200000, 200000};\n"
                                 "    class Zones\n"
                                 "    {\n"
                                 "        class Camp { name=\"Camp\"; position[]={100.0, 100.0, 0.0}; };\n"
@@ -4112,13 +4106,16 @@ TEST_CASE("ZoneRegistry - playRegion keeps towns and bases off the unplayed map 
         AutoArray<RString> towns;
         ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
         CHECK(towns.Size() == 3);
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(r)) == "default box for bases only [-4000, -4000, 11000, 11000]");
     }
 
-    SECTION("the default box keeps a far town and a far base out")
+    SECTION("the default box keeps a far base out but never a far town")
     {
         // only the Camp at [1000, 1000]: the box is -4000..6000, so the
-        // airfield apron [3500, 4100] and Hilltop are in; Eastend [7000,
-        // 2000], Portville [8000, 6000] and the harbour [~8970, ~6000] are out
+        // airfield apron [3500, 4100] is in and the harbour [~8970, ~6000]
+        // is out; Eastend [7000, 2000] and Portville [8000, 6000] lie outside
+        // the box too, but the default bounds bases only: the city seed and
+        // the START TOWN list stay unbounded
         std::string config = kBaseSeedConfig;
         const std::string post = "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; "
                                  "garrison=4; position[]={6000.0, 6000.0, 20.0}; };\n";
@@ -4127,7 +4124,46 @@ TEST_CASE("ZoneRegistry - playRegion keeps towns and bases off the unplayed map 
         SeedBaseFixture f;
         f.Load(config);
         REQUIRE(f.registry.Tuning().playRegion.valid);
+        CHECK_FALSE(f.registry.Tuning().playRegion.authored);
         CHECK(f.registry.Tuning().playRegion.maxX == Approx(6000.0f));
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        // the far towns still seed as CITY zones
+        REQUIRE(f.Z("Eastend") != nullptr);
+        CHECK(Str(f.Z("Eastend")->type) == "CITY");
+        REQUIRE(f.Z("Portville") != nullptr);
+        CHECK(Str(f.Z("Portville")->type) == "CITY");
+        // the far harbour does not
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(Str(f.registry.DetectedBases()[1].type) == "SEAPORT");
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        CHECK(towns.Size() == 3);
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(f.registry.Tuning().playRegion)) ==
+              "default box for bases only [-4000, -4000, 6000, 6000]");
+
+        // an authored region overrides the default box
+        SeedBaseFixture g;
+        g.Load(WithKey(config, "playRegion[] = {0, 0, 12800, 12800};"));
+        CHECK(g.registry.Tuning().playRegion.authored);
+        CHECK(g.registry.NSeededBases() == 2);
+        CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
+        CHECK(g.registry.FindZoneIndex("Portville") >= 0);
+    }
+
+    SECTION("an authored region bounds the far town and the far base alike")
+    {
+        // the same Camp-only config, with an authored region of the default
+        // box's size: Eastend, Portville and the harbour all stay out
+        std::string config = kBaseSeedConfig;
+        const std::string post = "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; "
+                                 "garrison=4; position[]={6000.0, 6000.0, 20.0}; };\n";
+        REQUIRE(config.find(post) != std::string::npos);
+        config.erase(config.find(post), post.size());
+        SeedBaseFixture f;
+        f.Load(WithKey(config, "playRegion[] = {-4000, -4000, 6000, 6000};"));
+        REQUIRE(f.registry.Tuning().playRegion.authored);
         CHECK(f.Z("Testland Airfield") != nullptr);
         CHECK(f.registry.FindZoneIndex("Eastend") == -1);
         CHECK(f.registry.FindZoneIndex("Portville") == -1);
@@ -4138,14 +4174,14 @@ TEST_CASE("ZoneRegistry - playRegion keeps towns and bases off the unplayed map 
         ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
         REQUIRE(towns.Size() == 1);
         CHECK(Str(towns[0]) == "Hilltop");
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(f.registry.Tuning().playRegion)) ==
+              "playRegion authored [-4000, -4000, 6000, 6000]");
+    }
 
-        // an authored region overrides the default box
-        SeedBaseFixture g;
-        g.Load(WithKey(config, "playRegion[] = {0, 0, 12800, 12800};"));
-        CHECK(g.registry.Tuning().playRegion.authored);
-        CHECK(g.registry.NSeededBases() == 2);
-        CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
-        CHECK(g.registry.FindZoneIndex("Portville") >= 0);
+    SECTION("the INFO clause without any region")
+    {
+        ZoneTuning::PlayRegion none;
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(none)) == "no playRegion (whole map)");
     }
 
     SECTION("a malformed region falls back to the default box")

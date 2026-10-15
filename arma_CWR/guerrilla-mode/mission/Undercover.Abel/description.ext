@@ -29,6 +29,8 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // Not a campaign: a tester who clears this fixture's only base must not be
     // sent to the win debriefing (campaign win rule, issue #79 B3).
     campaignEnd = 0;

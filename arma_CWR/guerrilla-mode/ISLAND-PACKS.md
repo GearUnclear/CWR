@@ -532,14 +532,23 @@ class CfgGuerrillaZones
 };
 ```
 
-Base seeding and the CITY seed only consider ground inside the box; a
-candidate outside it reports `outside-region`. **Default (key absent, or not a
-valid box): the bounding box of the template's authored zones, padded by 5 km
-on every side.** That is what keeps a theatre map such as Lebanon80 from
-seeding Beirut's harbour 9 km past its last authored town. Author the key when
-the default is wrong for your campaign. `guerrilla scaffold --play-region minX
-minZ maxX maxZ` writes it and also keeps the generated towns, camp and outposts
-inside it. (The START TOWN menu is not bounded by it yet.)
+What the box bounds depends on whether the template authors it:
+
+| `playRegion[]` | Base seed (AIRFIELD / SEAPORT) | CITY seed and START TOWN list |
+|---|---|---|
+| authored (a valid box) | inside the box only | inside the box only |
+| absent, or not a valid box | **the default box: the authored zones' bounding box, padded by 5 km on every side** | unbounded, every Names town as before issue #76 |
+| absent, and no authored zone has a position | whole map | unbounded |
+
+A base candidate outside the box reports `outside-region`. The default box is
+for bases only: it is what keeps a theatre map such as Lebanon80 from seeding
+Beirut's harbour 9 km past its last authored town, while the town seed keeps
+the whole map it always had. Author the key when you want the towns bounded
+too, or when the default is wrong for your bases. `guerrilla scaffold
+--play-region minX minZ maxX maxZ` writes it and also keeps the generated
+towns, camp and outposts inside it. The runtime's base detection INFO line
+ends with which applies: `playRegion authored [minX, minZ, maxX, maxZ]`,
+`default box for bases only [...]` or `no playRegion (whole map)`.
 
 ### `seedBases`: absent means "only if the template authors none"
 

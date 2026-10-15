@@ -128,12 +128,14 @@ struct ZoneTuning
     // landscape is loaded (gmDetectedBases); this key gates the seeding.
     bool seedBases = false;
     // playRegion[] = {minX, minZ, maxX, maxZ} (easting / northing): the part
-    // of the map the campaign is played on.  A Names town outside it is not
-    // seeded as a CITY nor offered as a START TOWN, and a detected base
-    // outside it is not seeded.  Absent (or malformed: warned, ignored) = the
-    // bounding box of the authored zones' positions padded by
-    // DefaultRegionPad on every side; no positioned authored zone = the whole
-    // map.
+    // of the map the campaign is played on.  An AUTHORED region bounds
+    // everything: a Names town outside it is not seeded as a CITY nor offered
+    // as a START TOWN, and a detected base outside it is not seeded.  Absent
+    // (or malformed: warned, ignored) = the default box, the bounding box of
+    // the authored zones' positions padded by DefaultRegionPad on every side,
+    // which bounds the BASE seed only: the city seed and the START TOWN list
+    // stay unbounded, as before issue #76.  No positioned authored zone = no
+    // region at all (the whole map).
     static constexpr float DefaultRegionPad = 5000.0f;
     struct PlayRegion
     {
@@ -144,6 +146,12 @@ struct ZoneTuning
         bool Contains(float x, float z) const
         {
             return !valid || (x >= minX && x <= maxX && z >= minZ && z <= maxZ);
+        }
+        // the town bound (city seed, START TOWN list): only an authored
+        // region applies, the default box bounds bases alone
+        bool ContainsTown(float x, float z) const
+        {
+            return !authored || Contains(x, z);
         }
     };
     PlayRegion playRegion;
@@ -819,6 +827,10 @@ class ZoneRegistry : public SerializeClass
     // no region without a positioned zone).  Malformed (not 4 numbers, or
     // min >= max) = the default box, with one WARN when warn is set.
     static ZoneTuning::PlayRegion ReadPlayRegion(const ParamEntry* zonesCfg, bool warn);
+    // The play region clause of the base detection INFO line: "playRegion
+    // authored [minX, minZ, maxX, maxZ]", "default box for bases only [..]"
+    // or "no playRegion (whole map)".
+    static RString PlayRegionInfo(const ZoneTuning::PlayRegion& r);
     // The town names a campaign on this zones config + world Names class
     // carries as CITY zones, in zone-table order: the authored CITY zones
     // (config order), then - only when seedCities is set - every Names town
@@ -826,8 +838,8 @@ class ZoneRegistry : public SerializeClass
     // the authored zones and the towns already collected, same MaxZones
     // cap).  The new-game START TOWN cycler lists exactly this, so a pick
     // always names a zone of the launched campaign.  Either entry may be null.
-    // A Names town outside playRegion[] is not listed (SeedCityZones skips it
-    // too).  Menu time has no landscape, so a Names town the runtime base
+    // A Names town outside an AUTHORED playRegion[] is not listed
+    // (SeedCityZones skips it too); the default box never bounds towns.  Menu time has no landscape, so a Names town the runtime base
     // seed absorbs (within 300 m of a seeded AIRFIELD / SEAPORT) is still
     // listed; such a pick falls back to the camp like any unseeded town.
     static void CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out);

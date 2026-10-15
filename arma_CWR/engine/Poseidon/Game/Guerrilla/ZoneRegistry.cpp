@@ -1485,6 +1485,19 @@ bool ZoneRegistry::ReadSeedBases(const ParamEntry* zonesCfg)
     return true;
 }
 
+RString ZoneRegistry::PlayRegionInfo(const ZoneTuning::PlayRegion& r)
+{
+    if (!r.valid)
+    {
+        return "no playRegion (whole map)";
+    }
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%s [%.0f, %.0f, %.0f, %.0f]",
+             r.authored ? "playRegion authored" : "default box for bases only", (double)r.minX, (double)r.minZ,
+             (double)r.maxX, (double)r.maxZ);
+    return buf;
+}
+
 ZoneTuning::PlayRegion ZoneRegistry::ReadPlayRegion(const ParamEntry* zonesCfg, bool warn)
 {
     ZoneTuning::PlayRegion r;
@@ -1643,9 +1656,10 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementPro
     {
         RString name;
         Vector3 pos;
-        // the play region first (issue #76): a town off the played part of
-        // the map is not even put to the settlement probe
-        if (!NamesEntryIsTown(namesCfg.GetEntry(i), name, pos) || !_tuning.playRegion.Contains(pos.X(), pos.Z()))
+        // an authored play region first (issue #76): a town off the played
+        // part of the map is not even put to the settlement probe; the
+        // default box bounds bases only
+        if (!NamesEntryIsTown(namesCfg.GetEntry(i), name, pos) || !_tuning.playRegion.ContainsTown(pos.X(), pos.Z()))
         {
             continue;
         }
@@ -1825,9 +1839,10 @@ void ZoneRegistry::SeedBaseZones(const ParamEntry* namesCfg, const BaseWorldProb
     }
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     LOG_INFO(Core, "ZoneRegistry: base detection on '{}': {} object(s), {} ILS entr{}, {} AIRFIELD/SEAPORT candidate(s) in "
-                   "{:.1f} ms; seedBases {}",
+                   "{:.1f} ms; seedBases {}; {}",
              (const char*)in.worldClass, (int)in.objects.size(), (int)in.ils.size(), in.ils.size() == 1 ? "y" : "ies",
-             (int)_detectedBases.size(), ms, _tuning.seedBases ? "on" : "off");
+             (int)_detectedBases.size(), ms, _tuning.seedBases ? "on" : "off",
+             (const char*)PlayRegionInfo(_tuning.playRegion));
 
     for (int i = 0; i < (int)_detectedBases.size(); i++)
     {
@@ -1892,8 +1907,9 @@ void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry
     // GuerrillaBase); Off lists none; All lists them all.
     ZoneTuning::SeedCities mode = ReadSeedCitiesMode(zonesCfg);
     bool seedCities = mode != ZoneTuning::SeedCities::Off;
-    // the same play region SeedCityZones honours (issue #76); the mission
-    // load warns about a malformed one, the menu stays quiet
+    // the same town bound SeedCityZones honours (issue #76: an authored
+    // region only); the mission load warns about a malformed one, the menu
+    // stays quiet
     const ZoneTuning::PlayRegion region = ReadPlayRegion(zonesCfg, false);
     if (zonesCfg)
     {
@@ -1931,7 +1947,7 @@ void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry
     {
         RString name;
         Vector3 pos;
-        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos) || !region.Contains(pos.X(), pos.Z()))
+        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos) || !region.ContainsTown(pos.X(), pos.Z()))
         {
             continue;
         }

@@ -1695,7 +1695,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | `counterAttackMaxLive` / `counterAttackLiveTimeout` | CA | 2 / 1200 s | | Live squads |
 | `campaignEndDelay` | CampaignEnd | 10 s | | Win and lose delay |
 | `seedBases` | ZoneRegistry (`BaseDetect`) | absent: 1 when the template authors no AIRFIELD and no SEAPORT, else 0 | 0/1 | Runtime seed of the detected AIRFIELD / SEAPORT zones (status `seed`); OUTPOSTs are never seeded. `gmSeededBases` lists what it added, `gmDetectedBases` every AIRFIELD / SEAPORT candidate with its status. Detection rules and numbers: ISLAND-PACKS.md section 10 (one place) |
-| `playRegion[]` | ZoneRegistry | absent: the authored zones' bounding box + 5 km on every side | {minX, minZ, maxX, maxZ} | The theatre: base seeding and the CITY seed stay inside it (a candidate outside reports `outside-region`); the START TOWN menu is not bounded by it yet |
+| `playRegion[]` | ZoneRegistry | absent: the authored zones' bounding box + 5 km on every side, for the base seed only | {minX, minZ, maxX, maxZ} | The theatre. Authored: base seeding, the CITY seed and the START TOWN list stay inside it. Absent (or malformed): only the AIRFIELD / SEAPORT seed is bounded, by the default box; the CITY seed and the START TOWN list stay unbounded. A base candidate outside reports `outside-region`; the base detection INFO line says which applies (ISLAND-PACKS.md section 10) |
 | seeded base garrison / income | `BaseDetectOptions` | AIRFIELD 12, SEAPORT 8 / the OUTPOST income (`defaultIncome`) | | Plan 13 yields are not implemented |
 
 ## 17. Still open
@@ -1719,7 +1719,8 @@ Every owner question is answered (D1-D24). Open implementation items, as of
   **outpost ladder** is the author's (detected OUTPOSTs are suggestions,
   never seeded), the AIRFIELD / SEAPORT **yields of plan 13** (heavy-vehicle
   unlock, WL3 gate) are not implemented, so a base pays like an OUTPOST, and
-  the START TOWN menu does not honour `playRegion[]` yet.
+  the START TOWN menu honours only an AUTHORED `playRegion[]` (the default
+  box bounds the base seed alone).
 - **Parked on the vehicle system: the Southeast Compound stays air-only.**
   The Compound is an island (3.1, `bcca80e`), so it sends only aircraft;
   boats are a later vehicle-system item, not an occupier-forces one (owner,

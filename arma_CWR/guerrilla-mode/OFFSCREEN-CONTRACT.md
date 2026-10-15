@@ -249,8 +249,11 @@ campaign end block are in section 10.5.
 ## 5. Island coverage targets
 
 Observable checks, not marker counts. All apply inside the playable region:
-`playRegion[]` when the template authors it, else the bounding box of its
-authored zones padded by 5 km (issue #76, ISLAND-PACKS.md section 10).
+`playRegion[]` when the template authors it (it then bounds the base seed,
+the city seed and the START TOWN list); with no authored region the default
+box (the authored zones' bounding box padded by 5 km) bounds the base seed
+only and towns are seeded over the whole map (issue #76, ISLAND-PACKS.md
+section 10).
 
 | ID | Criterion |
 |---|---|

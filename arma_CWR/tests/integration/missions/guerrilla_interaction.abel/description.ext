@@ -2,6 +2,8 @@
 // covered separately; this test diffs the exact interaction ledger after load.
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     defaultOccupier = "EAST";
     defaultResistance = "GUER";
     seedCities = 0;
