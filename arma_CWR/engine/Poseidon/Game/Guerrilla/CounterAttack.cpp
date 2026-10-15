@@ -823,10 +823,11 @@ int CounterAttack::BornOps(bool includeWave) const
 
 int CounterAttack::OpsCap() const
 {
-    // the one forcesOpsMax: OccupierForces' while it is active; the local
-    // default when this service runs on its own (the key off, unit tests)
+    // the one forcesOpsMax: OccupierForces' while it is active (its band
+    // cap: forcesOpsMaxStrong while STRONG); the local default when this
+    // service runs on its own (the key off, unit tests)
     const OccupierForces& of = OccupierForces::Instance();
-    const int opsMax = of.Active() ? of.Tuning().opsMax : _tuning.forcesOpsMax;
+    const int opsMax = of.Active() ? of.OpsMax() : _tuning.forcesOpsMax;
     return opsMax + WaveRecords();
 }
 

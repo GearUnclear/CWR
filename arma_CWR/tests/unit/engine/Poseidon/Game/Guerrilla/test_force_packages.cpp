@@ -1254,3 +1254,165 @@ TEST_CASE("ForcePackages - a base on another landmass is an air-only source (pha
     REQUIRE(c.ok);
     CHECK(c.quote.package == FPFoot);
 }
+
+// ---------------------------------------------------------------------------
+// 2026-10-15: the arrival rule (forcesSlowEta / forcesSlowCostShare /
+// forcesAirEta) and the refusal that names the shortfall
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// the EAST hulls the director buys on Malden: Ural (80 km/h, crew 1, 12
+// seats) and Mi17 (240 km/h, crew 2, 12 seats)
+ForcePackageCatalogue EastWithMi17()
+{
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTruck].className = "Ural";
+    cat.hulls[FPTruck].maxSpeedKmh = 80;
+    cat.hulls[FPTruck].cargo = 12;
+    cat.hulls[FPTruck].crew = 1;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240;
+    cat.hulls[FPTransportHeli].cargo = 12;
+    cat.hulls[FPTransportHeli].crew = 2;
+    return cat;
+}
+
+// the director's defaults for the rule
+PackageRequest MaldenRequest()
+{
+    PackageRequest req;
+    req.minBodies = 4;
+    req.pool = 60;
+    req.slowEta = 900.0f;
+    req.slowCostShare = 3.0f;
+    req.airEta = 1500.0f;
+    return req;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - the arrival rule is off by default in the pure chooser",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const PackageRequest req;
+    CHECK(req.slowEta == Approx(0.0f));
+    CHECK(req.slowCostShare == Approx(3.0f));
+    CHECK(req.airEta == Approx(0.0f));
+    // a 4.6 km walk with the rule off: foot, as before
+    PackageRequest r = req;
+    r.minBodies = 4;
+    r.pool = 60;
+    const PackageChoice c = ForcePackages::Choose(r, EastWithMi17(), OneSource(1, 4600.0f, 5));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.etaRule == PackageChoice::EtaNone);
+}
+
+TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck to 1500 s, then an insertion",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = MaldenRequest();
+    // prices: foot 4; truck 4 + 1 + 3 = 8 (2 x); Mi17 4 + 2 + 10 = 16 (4 x)
+    // Houdan, 0.5 km: foot about 333 s
+    const PackageChoice houdan = ForcePackages::Choose(req, cat, OneSource(1, 500.0f, 5));
+    REQUIRE(houdan.ok);
+    CHECK(houdan.quote.package == FPFoot);
+    CHECK(houdan.etaRule == PackageChoice::EtaNone);
+    // Dourdan, 1.0 km: foot about 667 s, still under 900
+    CHECK(ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 5)).quote.package == FPFoot);
+    // La Trinite, 1.7 km: foot about 1133 s; the truck within 3 x
+    const PackageChoice trinite = ForcePackages::Choose(req, cat, OneSource(1, 1700.0f, 5));
+    REQUIRE(trinite.ok);
+    CHECK(trinite.cheapestPackage == FPFoot);
+    CHECK(trinite.cheapestSeconds == Approx(1133.3f).margin(1.0f));
+    CHECK(trinite.quote.package == FPTruck);
+    CHECK(trinite.quote.price == 8);
+    CHECK(trinite.quote.seconds == Approx(1700.0f / (0.6f * 80.0f / 3.6f)).margin(1.0f));
+    CHECK(trinite.etaRule == PackageChoice::EtaSlow);
+    // Chapoi, 2.6 km: foot about 1733 s, past 1500: the insertion goes
+    const PackageChoice chapoi = ForcePackages::Choose(req, cat, OneSource(1, 2600.0f, 6));
+    REQUIRE(chapoi.ok);
+    CHECK(chapoi.quote.package == FPTransportHeli);
+    CHECK(chapoi.etaRule == PackageChoice::EtaAir);
+    // Goisse, 4.6 km (66 min on foot by road): the insertion, about 86 s
+    const PackageChoice goisse = ForcePackages::Choose(req, cat, OneSource(1, 4600.0f, 5));
+    REQUIRE(goisse.ok);
+    CHECK(goisse.quote.package == FPTransportHeli);
+    CHECK(goisse.quote.price == 16);
+    CHECK(goisse.quote.seconds == Approx(4600.0f / (0.8f * 240.0f / 3.6f)).margin(1.0f));
+    CHECK(goisse.etaRule == PackageChoice::EtaAir);
+    // off-map (no occupier airfield): 4 + 2 + 15 = 21, still the insertion
+    PackageRequest offMap = req;
+    offMap.airOffMap = true;
+    const PackageChoice far = ForcePackages::Choose(offMap, cat, OneSource(1, 4600.0f, 5));
+    CHECK(far.quote.package == FPTransportHeli);
+    CHECK(far.quote.price == 21);
+    // no helicopter in the catalogue: the truck carries the far town
+    ForcePackageCatalogue ground = cat;
+    ground.hulls[FPTransportHeli] = ForceHull();
+    const PackageChoice truck = ForcePackages::Choose(req, ground, OneSource(1, 4600.0f, 5));
+    CHECK(truck.quote.package == FPTruck);
+    CHECK(truck.etaRule == PackageChoice::EtaSlow);
+    // the pool cannot pay the Mi17 (12 units for hull and crew): the truck
+    PackageRequest poor = req;
+    poor.pool = 8;
+    CHECK(ForcePackages::Choose(poor, cat, OneSource(1, 4600.0f, 5)).quote.package == FPTruck);
+}
+
+TEST_CASE("ForcePackages - the arrival rule keeps L_req, the URGENT share and the slow share apart",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    // urgent and slow: the wider share wins (3 x), the rule is named
+    PackageRequest req = MaldenRequest();
+    req.urgent = true;
+    const PackageChoice u = ForcePackages::Choose(req, cat, OneSource(1, 1700.0f, 5));
+    CHECK(u.quote.package == FPTruck);
+    CHECK(u.etaRule == PackageChoice::EtaSlow);
+    // urgent with the old 2 x truck-to-foot ratio under 900 s: the URGENT
+    // share (1.5 x) still keeps it on foot, no arrival rule
+    const PackageChoice near = ForcePackages::Choose(req, cat, OneSource(1, 800.0f, 5));
+    CHECK(near.quote.package == FPFoot);
+    CHECK(near.etaRule == PackageChoice::EtaNone);
+    // the slow share bound: at 1.5 x nothing but foot fits under 1500 s
+    PackageRequest tight = MaldenRequest();
+    tight.slowCostShare = 1.5f;
+    CHECK(ForcePackages::Choose(tight, cat, OneSource(1, 1700.0f, 5)).quote.package == FPFoot);
+    // L_req still binds: three fighters (L_req 10.8).  Foot needs 11 bodies
+    // (11 units, about 1133 s), the truck 9 (13 units, lethality 11.25), the
+    // Mi17 9 (21 units, about 32 s).  Foot is the cheapest lethal package
+    // and slow, so every lethal package within 3 x 11 = 33 may go: with
+    // more bodies the airframe's fixed price weighs less, and the Mi17 is
+    // the fastest
+    PackageRequest loud = MaldenRequest();
+    loud.fighters = 3;
+    const PackageChoice l = ForcePackages::Choose(loud, cat, OneSource(1, 1700.0f, 12));
+    REQUIRE(l.ok);
+    CHECK(l.cheapestPackage == FPFoot);
+    CHECK(l.quote.package == FPTransportHeli);
+    CHECK(l.quote.bodies == 9);
+    CHECK(l.quote.price == 21);
+    CHECK(l.quote.lethal);
+    CHECK(l.etaRule == PackageChoice::EtaSlow);
+}
+
+TEST_CASE("ForcePackages - a refusal names the shortfall against the largest single-base spare",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    PackageRequest req;
+    req.minBodies = 12;
+    req.pool = 60;
+    AutoArray<PackageSource> sources = OneSource(1, 3000.0f, 6);
+    PackageSource other;
+    other.zone = 2;
+    other.distance = 2000.0f;
+    other.spare = 5;
+    sources.Add(other);
+    const PackageChoice c = ForcePackages::Choose(req, EastWithMi17(), sources);
+    CHECK_FALSE(c.ok);
+    CHECK(c.largestSpare == 6);
+    CHECK(Str(c.why) == "no occupier base can spare the minimum (12 needed, the largest single-base spare is 6: short 6)");
+}

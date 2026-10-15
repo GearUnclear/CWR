@@ -45,6 +45,12 @@
 // L_req is chosen; an URGENT target takes the fastest package costing at
 // most forcesUrgentCostShare x that cheapest one.  If no package meets
 // L_req, the most lethal affordable package goes (the INFO line says so).
+// The arrival rule (2026-10-15, PackageRequest::slowEta / slowCostShare /
+// airEta, off unless set): when the cheapest lethal package's seconds
+// exceed slowEta, the fastest package within slowCostShare x its price
+// goes; past airEta a transport helicopter insertion is eligible at any
+// price.  With no source able to spare the minimum, why names the
+// shortfall against the largest single-base spare.
 // Infantry is paid by the source base (its spare); the hull and its crew are
 // paid by the pool (poolPrice).
 //
@@ -191,6 +197,16 @@ struct PackageRequest
     // airfield): its hull is quoted at the off-map price (x1.5, D3).  False =
     // the airfield price (the director may re-price itself).
     bool airOffMap = false;
+    // the arrival rule (2026-10-15; 0 = off, the default of the pure
+    // chooser: the director sets them from forcesSlowEta /
+    // forcesSlowCostShare / forcesAirEta).  When the cheapest lethal
+    // package's arrival (seconds) exceeds slowEta, any faster package costing
+    // at most slowCostShare x the cheapest may go; when it exceeds airEta, a
+    // transport helicopter insertion may go whatever its price.  The fastest
+    // eligible package is chosen, as for URGENT.
+    float slowEta = 0;
+    float slowCostShare = 3.0f;
+    float airEta = 0;
 };
 
 // what a hull does once its infantry is out at the town edge (3.2)
@@ -203,10 +219,23 @@ enum ForceEdgeRole
 
 struct PackageChoice
 {
+    // which arrival rule changed the pick (etaRule): none, the slow share,
+    // or the insertion past airEta
+    static constexpr int EtaNone = 0;
+    static constexpr int EtaSlow = 1;
+    static constexpr int EtaAir = 2;
     bool ok = false;
     bool shortOfLethality = false; // no package met L_req: the most lethal affordable one went
     float lReq = 0;
     PackageQuote quote;
+    // the cheapest lethal package and its arrival (s), and the rule that
+    // picked another one instead (EtaNone when the pick is the cheapest or
+    // the URGENT share alone explains it)
+    int cheapestPackage = FPFoot;
+    float cheapestSeconds = 0;
+    int etaRule = EtaNone;
+    // when no base can spare the minimum: the largest spare a source offers
+    int largestSpare = 0;
     int nQuotes = 0;
     // every package and column considered (diagnostics, tests): the
     // packages, then carrier x escort columns

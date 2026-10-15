@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/platform.hpp> // stricmp
 
 #include <math.h>
+#include <stdio.h> // snprintf (the refusal names the shortfall)
 
 namespace Poseidon::Guerrilla
 {
@@ -623,14 +624,29 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
     if (cheapest >= 0)
     {
         int pick = cheapest;
-        if (req.urgent)
+        const PackageQuote& cq = c.quotes[cheapest];
+        c.cheapestPackage = cq.package;
+        c.cheapestSeconds = cq.seconds;
+        // the arrival rule (2026-10-15): a slow cheapest package widens the
+        // share; past airEta a helicopter insertion is eligible at any price
+        const bool slow = req.slowEta > 0 && cq.seconds > req.slowEta;
+        const bool airDue = req.airEta > 0 && cq.package != FPTransportHeli && cq.seconds > req.airEta;
+        const float urgentShare = req.urgent ? req.urgentCostShare : 1.0f;
+        const float slowShare = slow && req.slowCostShare > urgentShare ? req.slowCostShare : urgentShare;
+        if (req.urgent || slow || airDue)
         {
             // the fastest package costing at most share x the cheapest
-            const float ceiling = req.urgentCostShare * (float)c.quotes[cheapest].price + 1e-4f;
+            const float ceiling = slowShare * (float)cq.price + 1e-4f;
             for (int i = 0; i < c.nQuotes; i++)
             {
                 const PackageQuote& q = c.quotes[i];
-                if (!valid(q) || !q.lethal || (float)q.price > ceiling)
+                if (!valid(q) || !q.lethal)
+                {
+                    continue;
+                }
+                const bool inShare = (float)q.price <= ceiling;
+                const bool insertion = airDue && q.package == FPTransportHeli;
+                if (!inShare && !insertion)
                 {
                     continue;
                 }
@@ -639,6 +655,18 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
                 {
                     pick = i;
                 }
+            }
+        }
+        if (pick != cheapest)
+        {
+            // which rule let the pick in: the URGENT share alone explains a
+            // price within it; otherwise the slow share or the insertion
+            const float urgentCeiling = urgentShare * (float)cq.price + 1e-4f;
+            const PackageQuote& pq = c.quotes[pick];
+            if ((float)pq.price > urgentCeiling || (!req.urgent && pq.price > cq.price))
+            {
+                const float slowCeiling = slowShare * (float)cq.price + 1e-4f;
+                c.etaRule = slow && (float)pq.price <= slowCeiling ? PackageChoice::EtaSlow : PackageChoice::EtaAir;
             }
         }
         c.ok = true;
@@ -670,7 +698,31 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
     c.ok = false;
     if (!anySource)
     {
-        c.why = "no occupier base can spare the minimum";
+        // name the shortfall: the minimum against the largest spare one
+        // source offers to a package it can serve
+        int largest = 0;
+        for (int i = 0; i < sources.Size(); i++)
+        {
+            const PackageSource& s = sources[i];
+            if (s.zone < 0)
+            {
+                continue;
+            }
+            for (int p = 0; p < NForcePackages; p++)
+            {
+                if ((req.offered & Bit(p)) != 0 && cat.Offered(p) && SeatCap(p, cat) > 0 && s.Serves(p))
+                {
+                    largest = MaxInt(largest, s.SpareFor(p));
+                }
+            }
+        }
+        c.largestSpare = largest;
+        const int minimum = req.minBodies > 0 ? req.minBodies : 1;
+        char why[160];
+        snprintf(why, sizeof(why),
+                 "no occupier base can spare the minimum (%d needed, the largest single-base spare is %d: short %d)",
+                 minimum, largest, minimum > largest ? minimum - largest : 0);
+        c.why = why;
     }
     else if (!anyAffordable)
     {

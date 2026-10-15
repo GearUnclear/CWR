@@ -1,0 +1,15 @@
+# Occupier forces, the spare cap: a base retake of the Airfield (garrison 12) that no single base can source goes with the largest single-base spare (OCCUPIER-FORCES.md 7.2, 16; owner 2026-10-15). Not headless: the force is born under S (a real camera).
+# Boots the SHIPPED Guerrilla.Abel template (repo-root-relative; it opts in
+# with occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a
+# regression.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 720
+assert_timeout = 300
+extra_args = ["--dev"]

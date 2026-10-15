@@ -3444,6 +3444,14 @@ TEST_CASE("CounterAttack - forcesOpsMax has one reader: OccupierForces' tuning w
         PoolGuard pool(f);
         OccupierForces::Instance().TuningMutable().opsMax = 5;
         CHECK(f.ca.OpsCap() == 5);
+        // 2026-10-15: the band cap, forcesOpsMaxStrong (3) while STRONG
+        OccupierForces& of = OccupierForces::Instance();
+        of.TuningMutable().opsMax = 2;
+        REQUIRE(of.Band() == OFBandStrong);
+        CHECK(f.ca.OpsCap() == 3);
+        of.SetPool(of.PoolStart() / 2);
+        REQUIRE(of.Band() == OFBandStretched);
+        CHECK(f.ca.OpsCap() == 2);
     }
     CHECK(f.ca.OpsCap() == 0);
 }

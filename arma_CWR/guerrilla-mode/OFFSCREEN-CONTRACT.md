@@ -41,7 +41,7 @@ and this file disagree, check the code, then fix whichever is wrong.
 |---|---|---|
 | D1 | A zone outside the bubble keeps ticking while live resistance units stand in it, or while its capture meter is above 0. Same rules as in the bubble: troops against an empty post secure and flip it, troops against a stored reserve are a frozen standoff, a half-finished capture decays when nobody holds it. Towns gain support remotely but never lose it to remote intimidation. A resistance-held town or post also ticks off-screen while occupier presence stands in it, or (a post) while its `occCapture` is above 0 (rows 1b, 2b). | Landed (`ZoneRegistry::EvaluateTick`, key `remoteTick`; the post half in `6e1ee27`) |
 | D2 | A distant, calm, untouched enemy post regains 1 soldier per 600 s [contract], up to its authored strength. With `occupierForces` on every regrown body is drawn from the pool (`OccupierForces::Draw`): an empty pool grants nothing and the zone's clock is clamped, so no owed bodies are banked. | Landed (`GarrisonCache::StepRecover`, `ApplyRecover`, keys `garrisonRecoverInterval`, `garrisonMax`) |
-| B | Budgets are pass/fail thresholds: 100 live AI typical, 130 hard cap, 40 groups per side, hub-scene frame time p95 <= 25 ms [contract]. Breaches log a WARN. Occupier operations add a command-token budget, a born-operation cap (`forcesOpsMax` 2, read only from the occupier forces service, `gmForcesTune "opsMax"`; each living wave record raises it by one) and a live-hull cap (`forcesLiveHullsMax` 6). Per column: one infantry group and one crew group per hull, at most two hulls (carrier and escort), so 3 groups and 2 hulls; a birth that would exceed any budget waits. Lost hulls, crew groups and dead squads stay counted until the unseen cleanup deletes them (section 9.6) [commit 37e24ba]. Section 6. | Landed (`[gmsim]` line, keys `budgetLiveBodies`, `budgetSideGroups`; `forcesTokensMax`, `forcesOpsMax`, `forcesLiveHullsMax`) |
+| B | Budgets are pass/fail thresholds: 100 live AI typical, 130 hard cap, 40 groups per side, hub-scene frame time p95 <= 25 ms [contract]. Breaches log a WARN. Occupier operations add a command-token budget, a born-operation cap (`forcesOpsMax` 2, `forcesOpsMaxStrong` 3 while the pool is STRONG [2026-10-15], read only from the occupier forces service, `gmForcesTune "opsMax"` / `"opsMaxStrong"`; each living wave record raises it by one) and a live-hull cap (`forcesLiveHullsMax` 6). Per column: one infantry group and one crew group per hull, at most two hulls (carrier and escort), so 3 groups and 2 hulls; a birth that would exceed any budget waits. Lost hulls, crew groups and dead squads stay counted until the unseen cleanup deletes them (section 9.6) [commit 37e24ba]. Section 6. | Landed (`[gmsim]` line, keys `budgetLiveBodies`, `budgetSideGroups`; `forcesTokensMax`, `forcesOpsMax`, `forcesLiveHullsMax`) |
 | R | **Liberated zones change hands both ways.** A held town with occupier presence and no resistance HOLD presence drains `supportRate` per tick and reverts below `townRevertSupport` (row 2b). A held post (not CAMP, not CITY) with occupier presence and no resistance HOLD presence fills the occupier's own meter `occCapture` and reverts at 100 (row 1b, OF D19). Any occupier unit counts, deliberate or passing (OF D5, OF D19). The player's HQ is not a zone and falls only to a deliberate assault (decision H). *Superseded:* until phase 4, liberated MILITARY zones were permanent ("nothing flips a resistance-held post back"); with `baseRetake = 0` they still are. | Towns landed (#79); posts landed (`6e1ee27`, `ZoneRegistry::RevertBase`, key `baseRetake`) |
 | T | Towns have standing defenders (issue #79 B2, #72 first slice): every CITY the resistance does not hold is occupier-administered and keeps a `cityGarrison` reserve of whole bodies that the GarrisonCache materializes like a post's. Support cannot rise while any of it lives. A pending deposit (decision S5) is not a defender. Only the player's CAPTURE presence raises support (decision P). | Landed (`ZoneRegistry::IsAdministeredTown`, keys `cityGarrison`, `townRetake`) |
 | C | **The occupier answers from a pool, not one force per town.** A finite theatre pool, counted in soldier-equivalents, pays for every occupier body that is not already standing somewhere: garrison regrowth, the refill of a retaken town or post, and every operation (decision F, section 10). The first town the resistance takes is answered by the old dispatch, 4 times in 10 [contract]. From the second distinct town on (OF D7 invariant W, `forcesWakeTowns` 2 [16]) a director answers instead: it sees only what its men saw (OF D9), spends 0 to 2 command tokens [16] on the hottest held towns, on held posts and the HQ while STRONG, and on quiet held zones through push-out (section 9.2). Three reinforcement waves refill the pool when control collapses and strike the densest cluster of held zones (decision W). An occupier zone at RED is answered by an ALARM operation (row 7), and air inserts troops and strikes towns (decision A). Every ground force walks or drives from a base on the target's landmass where its birth is unseen (decision S, the landmass rule of section 9.3); air flies in from an airfield or the map edge. Any occupier unit standing in a held town drains it, passing columns included (OF D5); the HQ's town is never the target of a town answer (N4a). Shakedown pairs do not spawn in held towns (issue #79 D8). *Superseded:* the #79 rule that answered every flip from k >= 1 with its own force (`counterAttackChance` 1.0, one record per town, no pool) runs only with `occupierForces = 0`, or while the director is DORMANT. | Pool and director landed (phase 3, `8f9482a`, `7a143ec`); posts, HQ and waves (phase 4, `6e1ee27`); every ground package and columns (phase 5, `863b8aa`, `37e24ba`); air, alarm answers, town strikes and the landmass rule (phase 6, `bcca80e`) |
@@ -204,8 +204,9 @@ except `gmHeatDecayHeld` (a script global set in `core/init.sqs`).
 | `forcesPoolRefillHours` | 4 | hours from exhausted to full, garrisons included (0.5..48) |
 | `forcesPoolFloor` | 0.2 | no operation in THIN below this share of poolStart |
 | `forcesDirectorInterval` | 60 | director tick (s, 10..600) |
-| `forcesTokensMax` / `forcesTokenInterval[]` | 2 / {1800, 2700, 3600, 0} | command tokens; seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none) |
-| `forcesOpsMax` | 2 | born operations in flight (0..6); unborn ones do not count; one source, the `OccupierForces` tuning (`CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record) [commit 37e24ba] |
+| `forcesTokensMax` / `forcesTokenInterval[]` | 2 / {600, 1050, 1800, 0} [2026-10-15; was {1800, 2700, 3600, 0}] | command tokens; seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none) |
+| `forcesOpsMax` | 2 | born operations in flight (0..6) outside STRONG; unborn ones do not count; one source, the `OccupierForces` tuning (`OccupierForces::OpsMax`; `CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record) [commit 37e24ba] |
+| `forcesOpsMaxStrong` | 3 [2026-10-15; 0 or 2 restores the old cap] | born operations in flight while STRONG: max(`forcesOpsMax`, this) (0..6) |
 | `forcesLiveHullsMax` | 6 | live hulls at once (0..20) |
 | `forcesWakeTowns` | 2 | distinct towns that wake the director (2..99) |
 | `forcesHeatFull` | 40 | candidate heat (1..100) |
@@ -214,6 +215,8 @@ except `gmHeatDecayHeld` (a script global set in `core/init.sqs`).
 | `forcesPushoutQuiet` | 1800 | seconds without a sighting that make a held zone quiet |
 | `forcesIntelDecay` | 1800 | seconds a sighting row lives |
 | `forcesRetakeMin` | 4 | minimum retake bodies (1..12) |
+| `forcesSpareCap` / `forcesSpareCapFloor` | 1 / 6 [2026-10-15; `forcesSpareCap = 0` restores the one-source rule] | a post retake or HQ assault no single base can source takes the largest single-base spare, never below the floor (OCCUPIER-FORCES.md 7.2) |
+| `forcesSlowEta` / `forcesSlowCostShare` / `forcesAirEta` | 900 s / 3.0 / 1500 s [2026-10-15; 0 = off, the old choice] | the arrival rule of the package choice (OCCUPIER-FORCES.md 6.5) |
 | `forcesHqAssaultMin` | 6 | minimum HQ assault bodies (1..12) [code] |
 | `forcesLethalityMargin` / `forcesUrgentCostShare` | 1.2 / 1.5 | package choice (1..3) |
 | `forcesControlMilWeight` | 0.6 | weight of the roster in control C |
@@ -303,9 +306,9 @@ so every base pays like an OUTPOST.
 | Live AI bodies, hard cap | <= 130 (WARN above); a live birth over it waits, retried every 30 s [code], never dropped | same |
 | Groups per side | <= 40 (WARN above; engine cap 63). A package counts its groups: foot 1, a mounted squad 2 (infantry and crew), a column 3 (plus the escort crew) (`ForcePackages::GroupsOf`, `GoLive` [code]); a helicopter insertion 2 (crew and cargo), a strike sortie 1 [commit bcca80e]; a birth over budget waits. Leftover groups (section 9.6) stay counted until deleted | `gmSimDiag` element 3, `[gmsim] maxSide=` |
 | Live infantry records | `counterAttackMaxLive` (2, 0..8 [code]); strikes count as groups, not as live squads | `gmCounterAttacks` |
-| Born operations | `forcesOpsMax` (2); an unborn operation does not count; `CounterAttack::OpsCap` adds one per wave record (origin `CAOWave`) in any phase, and a wave order gets one more headroom at launch [code] | `gmOccupierOps` |
+| Born operations | `forcesOpsMax` (2), `forcesOpsMaxStrong` (3) while STRONG [2026-10-15]; an unborn operation does not count; `CounterAttack::OpsCap` adds one per wave record (origin `CAOWave`) in any phase, and a wave order gets one more headroom at launch [code] | `gmOccupierOps` |
 | Live hulls | `forcesLiveHullsMax` (6, 0..20, read by `CounterAttack`): a column counts 2, a live airframe 1; the AI census counts crews, not hulls | `gmOccupierOps` element 8 |
-| Command tokens | 0..`forcesTokensMax` (2), full at the wake; one per 1800 / 2700 / 3600 s in STRONG / STRETCHED / THIN, none in SPENT [16]; one launch per director tick at most | `gmOccupierForces` element 3 |
+| Command tokens | 0..`forcesTokensMax` (2), full at the wake; one per 600 / 1050 / 1800 s in STRONG / STRETCHED / THIN, none in SPENT [16, 2026-10-15; was 1800 / 2700 / 3600]; one launch per director tick at most | `gmOccupierForces` element 3 |
 | Guerrilla service block ("gm" frame phase) | avg <= 0.5 ms, p95 <= 1.5 ms; spawn-burst frames are logged, not gated | `triPerfStats` `gm=`, `[gmsim] gm=avg/p95/max` |
 | Frame time at a hub scene, 1080p, default view distance | p95 <= 25 ms (pass); p95 > 33.3 ms is a fail | dev panel Profile tab, `[gmsim] frame=` |
 
@@ -423,7 +426,7 @@ assailants 8 (about 86 bubble-bound, 98 at war level 5), plus always-live
 Legends (up to 18), the player group (up to 12), 3 per captured military
 zone in hold squads, and dealers. Sinai's 26 dealers are the known outlier
 (decision X). With `occupierForces` on, the counter-attack line becomes the
-born operations: `forcesOpsMax` (2) records of at most one infantry group of
+born operations: `forcesOpsMax` (2, 3 while STRONG) records of at most one infantry group of
 12 [code] each, plus the crews of up to `forcesLiveHullsMax` (6) hulls
 (a column brings 2 hulls and 3 groups, a helicopter insertion 1 airframe
 and 2 groups), plus one more operation per wave
@@ -620,7 +623,11 @@ this exception.
   (salt 7 [code]). A fresh quiet flip (+40) is a sure candidate, then fades
   with `gmHeatDecayHeld`.
 - *Posts* (OF D16). The same rule, only while STRONG, never the HQ's zone;
-  minimum bodies `min(max(forcesRetakeMin, garrisonMax), 12)` [code].
+  minimum bodies `min(max(forcesRetakeMin, garrisonMax), 12)` [code],
+  lowered by the spare cap when no single base can spare it: the largest
+  single-base spare, never below `forcesSpareCapFloor` (6) [2026-10-15].
+  Below the floor the operation is refused and the line names the
+  shortfall ("12 needed, the largest single-base spare is 6: short 6").
 - *The HQ* (OF D13, OF D14, OF D24). Only with an established HQ, no HQ
   record and no "@HQ" cooldown. While STRONG or in a wave (inbound, or
   landed within 1800 s) by the heat of the zone it stands in; an HQ outside
@@ -635,7 +642,7 @@ or heat >= 50; released when heat < 35 [16]. A fresh quiet flip is never
 urgent.
 
 **Tokens and launches.** Each director tick with a token, a candidate,
-`CanOperate()` and fewer than `forcesOpsMax` born operations launches ONE
+`CanOperate()` and fewer than `forcesOpsMax` born operations (`forcesOpsMaxStrong` while STRONG) launches ONE
 operation on the hottest candidate (the next one when the hottest cannot be
 served). The director quotes each source's STORED spare (minus a wave
 surge), the same figure `CounterAttack::LaunchCore` grants from; a refused
@@ -659,7 +666,13 @@ attack helicopter + 14, jet + 16. Required lethality `L_req = 1.2 x 3 x
 knownFighters`; minimum bodies `max(forcesRetakeMin, garrisonMax(target))`
 for retakes, 4 for alarm answers, 6 for HQ assaults. The cheapest package
 meeting both goes; an URGENT target takes the fastest costing at most 1.5 x
-that. No war-level gate. The source base pays the infantry from its stored
+that. The arrival rule [2026-10-15]: when the cheapest lethal package needs
+more than `forcesSlowEta` (900 s, straight distance over its speed), any
+faster package within `forcesSlowCostShare` (3.0) x its price may go, and
+past `forcesAirEta` (1500 s) a helicopter insertion may go whatever its
+price; the fastest eligible goes. It applies to the director's own
+operations and to alarm answers outside THIN, not to push-out or wave
+strikes. No war-level gate. The source base pays the infantry from its stored
 spare; the pool pays hulls and crews. Offered: every ground package, foot,
 truck, armed car, APC and tank, and columns (`DefaultPackages` [code]);
 and since `bcca80e` the air packages, each only when the occupier faction

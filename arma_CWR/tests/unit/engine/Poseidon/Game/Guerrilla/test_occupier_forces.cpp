@@ -236,10 +236,16 @@ TEST_CASE("OccupierForces - defaults match the knob table and the key is off", "
     CHECK(t.poolFloor == Approx(0.2f));
     CHECK(t.directorInterval == Approx(60.0f));
     CHECK(t.tokensMax == 2);
-    CHECK(t.tokenInterval[OFBandStrong] == Approx(1800.0f));
-    CHECK(t.tokenInterval[OFBandStretched] == Approx(2700.0f));
-    CHECK(t.tokenInterval[OFBandThin] == Approx(3600.0f));
+    // the playable-rate intervals (owner, 2026-10-15); the phase 3 ones stay
+    // reachable by authoring LegacyTokenInterval
+    CHECK(t.tokenInterval[OFBandStrong] == Approx(600.0f));
+    CHECK(t.tokenInterval[OFBandStretched] == Approx(1050.0f));
+    CHECK(t.tokenInterval[OFBandThin] == Approx(1800.0f));
     CHECK(t.tokenInterval[OFBandSpent] == Approx(0.0f));
+    CHECK(OccupierForcesTuning::LegacyTokenInterval[OFBandStrong] == Approx(1800.0f));
+    CHECK(OccupierForcesTuning::LegacyTokenInterval[OFBandStretched] == Approx(2700.0f));
+    CHECK(OccupierForcesTuning::LegacyTokenInterval[OFBandThin] == Approx(3600.0f));
+    CHECK(OccupierForcesTuning::LegacyTokenInterval[OFBandSpent] == Approx(0.0f));
     CHECK(t.controlMilWeight == Approx(0.6f));
     CHECK(t.nWaveThresholds == 2);
     CHECK(t.waveThresholds[0] == Approx(0.75f));
@@ -729,9 +735,9 @@ TEST_CASE("OccupierForces - band hysteresis", "[game][guerrilla][occupierforces]
 TEST_CASE("OccupierForces - token intervals by band", "[game][guerrilla][occupierforces]")
 {
     OccupierForcesTuning t;
-    CHECK(OccupierForces::TokenInterval(t, OFBandStrong) == Approx(1800.0f));
-    CHECK(OccupierForces::TokenInterval(t, OFBandStretched) == Approx(2700.0f));
-    CHECK(OccupierForces::TokenInterval(t, OFBandThin) == Approx(3600.0f));
+    CHECK(OccupierForces::TokenInterval(t, OFBandStrong) == Approx(600.0f));
+    CHECK(OccupierForces::TokenInterval(t, OFBandStretched) == Approx(1050.0f));
+    CHECK(OccupierForces::TokenInterval(t, OFBandThin) == Approx(1800.0f));
     CHECK(OccupierForces::TokenInterval(t, OFBandSpent) == Approx(0.0f));
     CHECK(OccupierForces::TokenInterval(t, 9) == Approx(0.0f));
     CHECK(Str(OccupierForces::BandName(OFBandStretched)) == "STRETCHED");
@@ -1493,24 +1499,28 @@ TEST_CASE("OccupierForces - tokens, one launch per tick, the born-operation slot
     CHECK(launcher.orders[1].opId == 2);
     CHECK(f.of.Tokens() == 0);
 
-    // no token: nothing until the STRONG interval (1800 s) refills one
+    // no token: nothing until the STRONG interval (600 s since 2026-10-15)
+    // refills one
     launcher.Resolve(o.target);
     f.of.Direct(f.registry, view, launcher, 60.0f);
     CHECK(launcher.orders.size() == 2);
-    f.of.Direct(f.registry, view, launcher, 1800.0f);
+    f.of.Direct(f.registry, view, launcher, 600.0f);
     CHECK(launcher.orders.size() == 3);
 
-    // born operations at forcesOpsMax hold every launch (unborn ones do not count)
+    // born operations at the band's cap hold every launch (unborn ones do
+    // not count): STRONG allows forcesOpsMaxStrong (3) since 2026-10-15
+    REQUIRE(f.of.Band() == OFBandStrong);
+    REQUIRE(f.of.OpsMax() == 3);
     launcher.Resolve(f.registry.FindZoneIndex("Town"));
     f.of.Direct(f.registry, view, launcher, 1800.0f);
     const size_t before = launcher.orders.size();
-    launcher.born = 2;
+    launcher.born = 3;
     launcher.Resolve(f.registry.FindZoneIndex("Town"));
     launcher.Resolve(f.registry.FindZoneIndex("Other"));
     f.of.Direct(f.registry, view, launcher, 1800.0f);
     CHECK(launcher.orders.size() == before);
     CHECK(f.of.Tokens() >= 1);
-    launcher.born = 1;
+    launcher.born = 2;
     f.of.Direct(f.registry, view, launcher, 60.0f);
     CHECK(launcher.orders.size() == before + 1);
 }
@@ -1963,15 +1973,21 @@ TEST_CASE("OccupierForces - a hull package CounterAttack sends on foot at launch
     CHECK(f.of.Pool() == pool0);
 }
 
-TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 operations",
-          "[game][guerrilla][occupierforces]")
+namespace
+{
+
+// the anti-1:1 hour: four flips 15 min apart; an operation is over 10 min
+// after it left.  Returns the director's orders; legacy counts the flips
+// CounterAttack answers with Decide.
+std::vector<CounterAttackOrder> FourFlipsHour(const std::string& config, int& legacy, int& awakeMinute)
 {
     Fixture f;
-    f.Load(AbelLikeConfig(), false);
+    f.Load(config, false);
     REQUIRE(f.of.Activate(f.registry));
     FakeLauncher launcher;
     const char* towns[4] = {"T0", "T1", "T2", "T3"};
-    int legacy = 0;
+    legacy = 0;
+    awakeMinute = -1;
     std::vector<int> launchedAt;
     for (int minute = 0; minute <= 60; minute++)
     {
@@ -1999,6 +2015,10 @@ TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 
                 launcher.Resolve(launcher.orders[k].target);
             }
         }
+        if (awakeMinute < 0 && f.of.Posture() == OFAwake)
+        {
+            awakeMinute = minute;
+        }
         const size_t before = launcher.orders.size();
         f.of.Tick(f.registry, 60.0f);
         f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
@@ -2007,10 +2027,54 @@ TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 
             launchedAt.push_back(minute);
         }
     }
-    CHECK(legacy == 1);
     CHECK(f.of.Posture() == OFAwake);
-    CHECK(launcher.orders.size() >= 1);
-    CHECK(launcher.orders.size() < 4);
+    return launcher.orders;
+}
+
+std::string WithKeys(const std::string& config, const char* keys)
+{
+    std::string cfg = config;
+    const std::string anchor = "class CfgGuerrillaZones\n{\n";
+    cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
+    return cfg;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - anti-1:1: four flips 15 min apart give fewer than 4 operations",
+          "[game][guerrilla][occupierforces]")
+{
+    // the phase 3 cadence (the legacy token intervals, the old STRONG cap)
+    // keeps the property: about one answer per two flips
+    int legacy = 0;
+    int awake = -1;
+    const std::vector<CounterAttackOrder> old = FourFlipsHour(
+        WithKeys(AbelLikeConfig(), "forcesTokenInterval[] = {1800, 2700, 3600, 0}; forcesOpsMaxStrong = 0;"), legacy,
+        awake);
+    CHECK(legacy == 1);
+    CHECK(old.size() >= 1);
+    CHECK(old.size() < 4);
+}
+
+TEST_CASE("OccupierForces - the playable rate: a STRONG director spends a token every 10 minutes",
+          "[game][guerrilla][occupierforces]")
+{
+    // the same hour at the 2026-10-15 defaults: the pool, not the flip count,
+    // decides (the director is not 1:1 with flips: it spends its budget on
+    // the hottest town, then pushes out on quiet ones).  Two tokens at the
+    // wake, then one per 600 s while STRONG: at most 2 + awake minutes / 10.
+    int legacy = 0;
+    int awake = -1;
+    const std::vector<CounterAttackOrder> now = FourFlipsHour(AbelLikeConfig(), legacy, awake);
+    CHECK(legacy == 1);
+    REQUIRE(awake >= 0);
+    const int bound = 2 + (60 - awake) / 10;
+    CHECK((int)now.size() >= 4);
+    CHECK((int)now.size() <= bound);
+    for (const CounterAttackOrder& o : now)
+    {
+        CHECK((o.origin == CAODirector || o.origin == CAOPushout));
+    }
 }
 
 TEST_CASE("OccupierForces - push-out only when STRONG, on the quiet town or base nearest a base",
@@ -2215,7 +2279,7 @@ TEST_CASE("OccupierForces - the director survives save/load", "[game][guerrilla]
     states[f.registry.FindZoneIndex("Town")] = 2;
     f.of.NoteAlertStates(f.registry, states);
     f.of.Tick(f.registry, 90.0f);
-    launcher.born = 2;                              // the slots are full: no push-out now
+    launcher.born = 3;                              // the STRONG slots (3) are full: no push-out now
     f.of.Direct(f.registry, view, launcher, 90.0f); // the token clock runs
     const int tokens = f.of.Tokens();
     const float tokenClock = f.of.TokenClock();
@@ -2686,16 +2750,20 @@ TEST_CASE("OccupierForces - a landed wave: hub top-up, strikes on the cluster, r
     // staged forces (5 + 3 + 8 + 5)
     CHECK(f.Z("Base0").garrison == Approx(21.0f));
     // wave operations take no director token
+    int directorPaid = 0;
     for (size_t i = 2; i < launcher.orders.size(); i++)
     {
         CHECK(launcher.orders[i].origin == CAODirector);
+        directorPaid += launcher.orders[i].priceUnits;
     }
     if (launcher.orders.size() == 2)
     {
         CHECK(f.of.Tokens() == tokens);
     }
-    // the pool: + 30, - 3 (top-up), - 8, - 5 (staging); 14 stay
-    CHECK(f.of.Pool() == pool + 14);
+    // the pool: + 30, - 3 (top-up), - 8, - 5 (staging); 14 stay, less what a
+    // director operation of the same tick paid for its hull (the arrival
+    // rule sends a truck to a far town since 2026-10-15)
+    CHECK(f.of.Pool() == pool + 14 - directorPaid);
 }
 
 TEST_CASE("OccupierForces - the occupier war level: territory plus landed waves; equal with the key off",
@@ -3639,4 +3707,309 @@ TEST_CASE("OccupierForces - a band hold steps the band once, on the net pool, wh
         OccupierForces::BandHold hold(f.of);
     }
     CHECK(f.of.Band() == OFBandStretched);
+}
+
+// ===========================================================================
+// 2026-10-15, the playable rate (owner): the band cadence and the STRONG
+// operation cap, the spare cap on base retakes and HQ assaults, and the
+// arrival rule in the package choice (OCCUPIER-FORCES.md 6.3, 6.5, 7.2, 16)
+// ===========================================================================
+
+namespace
+{
+
+// one hour of a director that always has a hot candidate and whose
+// operations end at once: the operations it launches after spending the
+// tokens of its wake.  bandPool sets the band (poolStart 24 in the fixture).
+int LaunchesPerHour(const std::string& config, int bandPool, int expectBand)
+{
+    Fixture f;
+    f.Load(config);
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.of.SetPool(bandPool);
+    REQUIRE(f.of.Band() == expectBand);
+    const DirectorView view = ViewOf(f.registry);
+    auto tick = [&]() {
+        f.Z("Town").heat = 45.0f;
+        f.Z("Other").heat = 45.0f;
+        launcher.Resolve(f.registry.FindZoneIndex("Town"));
+        launcher.Resolve(f.registry.FindZoneIndex("Other"));
+        f.of.Direct(f.registry, view, launcher, 60.0f);
+    };
+    // the wake's tokens go first
+    for (int i = 0; i < 4 && f.of.Tokens() > 0; i++)
+    {
+        tick();
+    }
+    if (expectBand != OFBandSpent)
+    {
+        REQUIRE(f.of.Tokens() == 0);
+    }
+    const size_t before = launcher.orders.size();
+    for (int minute = 0; minute < 60; minute++)
+    {
+        tick();
+    }
+    return (int)(launcher.orders.size() - before);
+}
+
+// Malden's eastern bases and three towns at the distances of
+// of-generated-bases-design.md section 1: Houdan 0.5 km from the Outpost,
+// a La Trinite at 1.7 km, a Goisse 4.6 km west (6.0 km from the Harbour,
+// 6.2 km from the Airfield).  R 26, K 3, poolStart 32.
+const char* kMaldenLike = "class CfgGuerrillaZones\n"
+                          "{\n"
+                          "    occupierForces = 1;\n"
+                          "    class Zones\n"
+                          "    {\n"
+                          "        class Camp     { name=\"Camp\";     type=\"CAMP\";     owner=\"RESISTANCE\"; "
+                          "position[]={7515.0, 5790.0, 0.0}; };\n"
+                          "        class Outpost  { name=\"Outpost\";  type=\"OUTPOST\";  owner=\"OCCUPIER\"; "
+                          "garrison=6; position[]={7600.0, 6300.0, 0.0}; };\n"
+                          "        class Harbour  { name=\"Harbour\";  type=\"SEAPORT\";  owner=\"OCCUPIER\"; "
+                          "garrison=8; position[]={8410.0, 3690.0, 0.0}; };\n"
+                          "        class Airfield { name=\"Airfield\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; "
+                          "garrison=12; position[]={8030.0, 9905.0, 0.0}; };\n"
+                          "        class Houdan   { name=\"Houdan\";   type=\"CITY\";     owner=\"NEUTRAL\"; "
+                          "support=20; position[]={7117.0, 6069.0, 0.0}; };\n"
+                          "        class Trinite  { name=\"Trinite\";  type=\"CITY\";     owner=\"NEUTRAL\"; "
+                          "support=20; position[]={7600.0, 8000.0, 0.0}; };\n"
+                          "        class Goisse   { name=\"Goisse\";   type=\"CITY\";     owner=\"NEUTRAL\"; "
+                          "support=20; position[]={3000.0, 6300.0, 0.0}; };\n"
+                          "    };\n"
+                          "};\n";
+
+// the EAST ladder as the director sees it: a Ural (80 km/h, one driver, 12
+// seats) and a Mi17 (crew 2, 12 seats)
+ForcePackageCatalogue UralMi17()
+{
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTruck].className = "Ural";
+    cat.hulls[FPTruck].maxSpeedKmh = 80;
+    cat.hulls[FPTruck].cargo = 12;
+    cat.hulls[FPTruck].crew = 1;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240;
+    cat.hulls[FPTransportHeli].cargo = 12;
+    cat.hulls[FPTransportHeli].crew = 2;
+    return cat;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - the cadence per band: 10 / 17.5 / 30 minutes, none SPENT, old intervals reachable",
+          "[game][guerrilla][occupierforces]")
+{
+    // poolStart 24: STRONG at 24, STRETCHED at 12 (50 %), THIN at 7 (29 %,
+    // above the 20 % operations floor), SPENT at 0
+    const std::string now = ConfigWith("occupierForces = 1;");
+    CHECK(LaunchesPerHour(now, 24, OFBandStrong) == 6);    // 3600 / 600
+    CHECK(LaunchesPerHour(now, 12, OFBandStretched) == 3); // 3600 / 1050 = 3.4
+    CHECK(LaunchesPerHour(now, 7, OFBandThin) == 2);       // 3600 / 1800
+    CHECK(LaunchesPerHour(now, 0, OFBandSpent) == 0);      // no tokens, no operations
+    // the phase 3 intervals, authored
+    const std::string old = ConfigWith("occupierForces = 1; forcesTokenInterval[] = {1800, 2700, 3600, 0};");
+    CHECK(LaunchesPerHour(old, 24, OFBandStrong) == 2);
+    CHECK(LaunchesPerHour(old, 12, OFBandStretched) == 1);
+    CHECK(LaunchesPerHour(old, 7, OFBandThin) == 1);
+}
+
+TEST_CASE("OccupierForces - three born operations while STRONG, two otherwise; forcesOpsMaxStrong 0 is the old cap",
+          "[game][guerrilla][occupierforces]")
+{
+    OccupierForcesTuning t;
+    CHECK(t.opsMax == 2);
+    CHECK(t.opsMaxStrong == 3);
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandStrong) == 3);
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandStretched) == 2);
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandThin) == 2);
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandSpent) == 2);
+    t.opsMaxStrong = 0; // the old rule: forcesOpsMax in every band
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandStrong) == 2);
+    t.opsMaxStrong = 3;
+    t.opsMax = 5; // a larger forcesOpsMax is never lowered by the STRONG key
+    CHECK(OccupierForces::OpsMaxFor(t, OFBandStrong) == 5);
+
+    Fixture r;
+    r.Load(ConfigWith("occupierForces = 1; forcesOpsMaxStrong = 9;"));
+    CHECK(r.of.Tuning().opsMaxStrong == 6); // repaired into 0..6
+
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Town").heat = 60;
+    const DirectorView view = ViewOf(f.registry);
+    // STRONG: two born operations leave a slot
+    launcher.born = 2;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == 1);
+    // STRETCHED: two fill it
+    launcher.Resolve(f.registry.FindZoneIndex("Town"));
+    f.of.SetPool(12);
+    REQUIRE(f.of.Band() == OFBandStretched);
+    REQUIRE(f.of.Tokens() >= 1);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == 1);
+    launcher.born = 1;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    CHECK(launcher.orders.size() == 2);
+}
+
+TEST_CASE("OccupierForces - the spare cap: a 12-man base retake no base can source goes with the largest spare",
+          "[game][guerrilla][occupierforces]")
+{
+    // the rule alone
+    CHECK(OccupierForces::SpareCappedMin(12, 6, 6) == 6);   // the Airfield from the Harbour
+    CHECK(OccupierForces::SpareCappedMin(12, 9, 6) == 9);   // the largest spare, not the floor
+    CHECK(OccupierForces::SpareCappedMin(12, 4, 6) == 6);   // never below the floor
+    CHECK(OccupierForces::SpareCappedMin(12, 14, 6) == 12); // never above the minimum
+    CHECK(OccupierForces::SpareCappedMin(4, 2, 6) == 4);    // a smaller minimum stays
+    CHECK(OccupierForces::SpareCappedMin(6, 5, 6) == 6);    // an HQ assault keeps its 6
+
+    Fixture f;
+    f.Load(kMaldenLike, false);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(UralMi17());
+    // the Airfield falls; the Outpost spares 5, the Harbour 6 (garrisonMax x
+    // 0.25 stays home)
+    f.GiveToResistance("Airfield");
+    f.Z("Airfield").heat = 100;
+    const int airfield = f.registry.FindZoneIndex("Airfield");
+    const DirectorView view = ViewOf(f.registry);
+    REQUIRE(view.spare[f.registry.FindZoneIndex("Outpost")] == 5);
+    REQUIRE(view.spare[f.registry.FindZoneIndex("Harbour")] == 6);
+
+    const DirectorAction a = f.of.PlanFor(f.registry, view, airfield, CAODirector);
+    CHECK(a.kind == CAKBase);
+    CHECK(a.minAsked == 12); // min(max(4, 12), 12)
+    CHECK(a.minUsed == 6);
+    REQUIRE(a.go);
+    CHECK(a.choice.quote.source == f.registry.FindZoneIndex("Harbour"));
+    CHECK(a.choice.quote.bodies == 6);
+
+    // forcesSpareCap 0: the one-source rule refuses, naming the shortfall
+    f.of.TuningMutable().spareCap = false;
+    const DirectorAction b = f.of.PlanFor(f.registry, view, airfield, CAODirector);
+    CHECK_FALSE(b.go);
+    CHECK(b.minUsed == 12);
+    CHECK(Str(b.choice.why) ==
+          "no occupier base can spare the minimum (12 needed, the largest single-base spare is 6: short 6)");
+    CHECK(b.choice.largestSpare == 6);
+
+    // a floor above every spare: still refused, the shortfall named
+    f.of.TuningMutable().spareCap = true;
+    f.of.TuningMutable().spareCapFloor = 8;
+    const DirectorAction c = f.of.PlanFor(f.registry, view, airfield, CAODirector);
+    CHECK_FALSE(c.go);
+    CHECK(c.minUsed == 8);
+    CHECK(Str(c.choice.why) ==
+          "no occupier base can spare the minimum (8 needed, the largest single-base spare is 6: short 2)");
+
+    // the director launches it: a BASE operation of 6 from one base
+    f.of.TuningMutable().spareCapFloor = 6;
+    FakeLauncher launcher;
+    FlipTown(f, "Houdan", 1);
+    REQUIRE(FlipTown(f, "Trinite", 2));
+    f.Z("Houdan").heat = 0;
+    f.Z("Trinite").heat = 0;
+    f.of.ForceCooldown("Houdan", 9999.0f);
+    f.of.ForceCooldown("Trinite", 9999.0f);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() >= 1);
+    const CounterAttackOrder& o = launcher.orders[0];
+    CHECK(o.kind == CAKBase);
+    CHECK(o.target == airfield);
+    CHECK(o.bodies == 6);
+    CHECK(o.source == f.registry.FindZoneIndex("Harbour"));
+}
+
+TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a truck at 1.7 km, a helicopter at 4.6 km",
+          "[game][guerrilla][occupierforces][air]")
+{
+    Fixture f;
+    f.Load(kMaldenLike, false);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(UralMi17());
+    CHECK(f.of.Tuning().slowEta == Approx(900.0f));
+    CHECK(f.of.Tuning().slowCostShare == Approx(3.0f));
+    CHECK(f.of.Tuning().airEta == Approx(1500.0f));
+    FakeLauncher launcher;
+    FlipTown(f, "Houdan", 1);
+    REQUIRE(FlipTown(f, "Trinite", 2));
+    REQUIRE(f.of.Posture() == OFAwake);
+    FlipTown(f, "Goisse", 3);
+    // quiet flips (heat 45: candidates, not urgent): the rule alone decides
+    f.Z("Houdan").heat = 45;
+    f.Z("Trinite").heat = 45;
+    f.Z("Goisse").heat = 45;
+    const DirectorView view = ViewOf(f.registry);
+    const int houdan = f.registry.FindZoneIndex("Houdan");
+    const int trinite = f.registry.FindZoneIndex("Trinite");
+    const int goisse = f.registry.FindZoneIndex("Goisse");
+
+    // Houdan, 0.5 km: foot in about 330 s, under forcesSlowEta
+    const DirectorAction h = f.of.PlanFor(f.registry, view, houdan, CAODirector);
+    REQUIRE(h.go);
+    CHECK_FALSE(h.urgent);
+    CHECK(h.choice.quote.package == FPFoot);
+    CHECK(h.choice.etaRule == PackageChoice::EtaNone);
+
+    // La Trinite, 1.7 km: foot needs about 1133 s (> 900); the truck (4 +
+    // 1 + 3 = 8 units, 2 x foot) arrives in about 128 s; the Mi17 (4 + 2 +
+    // 10 = 16, 4 x) is outside the share and the foot ETA is under 1500 s
+    const DirectorAction t = f.of.PlanFor(f.registry, view, trinite, CAODirector);
+    REQUIRE(t.go);
+    CHECK(t.choice.cheapestPackage == FPFoot);
+    CHECK(t.choice.cheapestSeconds == Approx(1700.0f / 1.5f).margin(1.0f));
+    CHECK(t.choice.quote.package == FPTruck);
+    CHECK(t.choice.quote.price == 8);
+    CHECK(t.choice.etaRule == PackageChoice::EtaSlow);
+
+    // Goisse, 4.6 km: foot needs about 3067 s (a 51-minute walk, 65 by road);
+    // past forcesAirEta the insertion goes whatever its price
+    const DirectorAction g = f.of.PlanFor(f.registry, view, goisse, CAODirector);
+    REQUIRE(g.go);
+    CHECK(g.choice.cheapestSeconds == Approx(4600.0f / 1.5f).margin(1.0f));
+    CHECK(g.choice.quote.package == FPTransportHeli);
+    CHECK(g.choice.etaRule == PackageChoice::EtaAir);
+    CHECK(g.airOrigin == f.registry.FindZoneIndex("Airfield"));
+    CHECK(g.choice.quote.poolPrice == 12); // the Mi17 10 + its crew 2
+
+    // the old choice is reachable: both rules off, everything walks
+    f.of.TuningMutable().slowEta = 0;
+    f.of.TuningMutable().airEta = 0;
+    CHECK(f.of.PlanFor(f.registry, view, trinite, CAODirector).choice.quote.package == FPFoot);
+    CHECK(f.of.PlanFor(f.registry, view, goisse, CAODirector).choice.quote.package == FPFoot);
+    // the slow rule alone sends Goisse a truck (about 345 s)
+    f.of.TuningMutable().slowEta = 900;
+    const DirectorAction gt = f.of.PlanFor(f.registry, view, goisse, CAODirector);
+    CHECK(gt.choice.quote.package == FPTruck);
+    CHECK(gt.choice.etaRule == PackageChoice::EtaSlow);
+    // a push-out keeps the minimal package (6.4)
+    f.of.TuningMutable().airEta = 1500;
+    CHECK(f.of.PlanFor(f.registry, view, goisse, CAOPushout).choice.quote.package == FPFoot);
+
+    // the director launches them: La Trinite first (hotter), then Goisse
+    f.Z("Houdan").heat = 0;
+    f.of.ForceCooldown("Houdan", 9999.0f);
+    f.Z("Trinite").heat = 48;
+    const int pool0 = f.of.Pool();
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    CHECK(launcher.orders[0].target == trinite);
+    CHECK(launcher.orders[0].package == FPTruck);
+    CHECK(launcher.orders[0].priceUnits == 4);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 2);
+    CHECK(launcher.orders[1].target == goisse);
+    CHECK(launcher.orders[1].package == FPTransportHeli);
+    CHECK(launcher.orders[1].airOrigin == f.registry.FindZoneIndex("Airfield"));
+    CHECK(launcher.orders[1].priceUnits == 12);
+    CHECK(f.of.Pool() == pool0 - 4 - 12);
 }

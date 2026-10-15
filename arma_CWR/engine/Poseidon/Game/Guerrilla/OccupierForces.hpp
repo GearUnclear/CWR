@@ -146,17 +146,22 @@
 //   URGENCY.  Latched by a YELLOW / RED alert edge on a held town (since its
 //   flip) or heat >= forcesUrgentHeat; released when heat < UrgentExitHeat.
 //   TOKENS.  0..forcesTokensMax, full at the wake, one per
-//   forcesTokenInterval[band].  Each director tick with a token, a
-//   candidate, CanOperate() and fewer than forcesOpsMax BORN operations
-//   launches ONE operation on the hottest candidate (the next one when the
-//   hottest cannot be served).  A repelled operation puts its target on
+//   forcesTokenInterval[band] ({600, 1050, 1800, 0} s since 2026-10-15).
+//   Each director tick with a token, a candidate, CanOperate() and fewer
+//   than OpsMax() BORN operations (forcesOpsMax, max(forcesOpsMax,
+//   forcesOpsMaxStrong) while STRONG) launches ONE operation on the hottest
+//   candidate (the next one when the hottest cannot be served).  A repelled operation puts its target on
 //   forcesTownCooldown with +15 heat unless a RED edge already paid it; a
 //   cancelled-unseen one gets the cooldown.
 //   PUSH-OUT (6.4).  STRONG, a token and no heat candidate: the held town
 //   or base nearest an occupier base with no sighting for
 //   forcesPushoutQuiet, with the minimal package.
 //   PACKAGES (6.5).  ForcePackages: the cheapest lethal package, the fastest
-//   within forcesUrgentCostShare when urgent; phase 3 offers Foot and Truck.
+//   within forcesUrgentCostShare when urgent; the arrival rule (forcesSlowEta,
+//   forcesSlowCostShare, forcesAirEta) for the director's own operations and
+//   non-THIN alarm answers, never push-out or wave strikes.  A base retake
+//   or an HQ assault no single base can source takes the spare cap
+//   (forcesSpareCap, forcesSpareCapFloor: SpareCappedMin, 7.2).
 //   The pool pays hull + crew (Spend before LaunchFunded, Refund when it is
 //   refused); the source base pays the infantry from its spare.
 //   WON / LOST.  Nothing is launched, and no wave fires or lands, once
@@ -250,6 +255,9 @@ enum OccupierPosture
 struct OccupierForcesTuning
 {
     static constexpr int MaxWaveThresholds = 3;
+    // the token intervals before 2026-10-15 (5.6): authoring
+    // forcesTokenInterval[] = {1800, 2700, 3600, 0} restores them
+    static constexpr float LegacyTokenInterval[4] = {1800.0f, 2700.0f, 3600.0f, 0.0f};
     // the occupierForces value when the mission does not author the key
     // (phase 7: on).  Every reader of the key (this service, CounterAttack's
     // forcesOn, ZoneRegistry's baseRetake fallback) uses this one default.
@@ -263,8 +271,11 @@ struct OccupierForcesTuning
     float directorInterval = 60.0f; // forcesDirectorInterval, 10..600 s (gmForcesTune: 1..600)
     int tokensMax = 2;              // forcesTokensMax, 0..6
     // forcesTokenInterval[] by band (STRONG, STRETCHED, THIN, SPENT), s;
-    // 0 = no tokens in that band
-    float tokenInterval[NOccupierBands] = {1800.0f, 2700.0f, 3600.0f, 0.0f};
+    // 0 = no tokens in that band.  The playable-rate defaults of 2026-10-15
+    // (owner): one operation about every 10 min STRONG, 17.5 min STRETCHED,
+    // 30 min THIN, none SPENT; the old {1800, 2700, 3600, 0} stays reachable
+    // by authoring the array (LegacyTokenInterval)
+    float tokenInterval[NOccupierBands] = {600.0f, 1050.0f, 1800.0f, 0.0f};
     float controlMilWeight = 0.6f; // forcesControlMilWeight, 0..1
     // forcesWaveThresholds[], descending control shares, at most 3
     float waveThresholds[MaxWaveThresholds] = {0.75f, 0.50f, 0.0f};
@@ -273,6 +284,10 @@ struct OccupierForcesTuning
     // the director (6, phase 3)
     int wakeTowns = 2;            // forcesWakeTowns, 2..99: distinct towns to wake
     int opsMax = 2;               // forcesOpsMax, 0..6: born operations in flight
+    // forcesOpsMaxStrong, 0..6: the born-operation cap while STRONG is
+    // max(forcesOpsMax, this); 0 (or 2) gives the old cap of forcesOpsMax
+    // in every band
+    int opsMaxStrong = 3;
     float heatFull = 40.0f;       // forcesHeatFull, 1..100: candidate heat
     float urgentHeat = 50.0f;     // forcesUrgentHeat, 1..100: urgency entry
     float townCooldown = 1800.0f; // forcesTownCooldown, s: after a repel or a cancel
@@ -281,6 +296,20 @@ struct OccupierForcesTuning
     float lethalityMargin = 1.2f; // forcesLethalityMargin, 1..3
     float urgentCostShare = 1.5f; // forcesUrgentCostShare, 1..3
     float intelDecay = 1800.0f;   // forcesIntelDecay, s: sightings expire
+    // the spare cap (7.2, 2026-10-15): a base retake or an HQ assault whose
+    // minimum no single base can spare takes the largest single-base spare
+    // instead, never below spareCapFloor (and never above the minimum).
+    // forcesSpareCap 0 restores the one-source rule (min(max(forcesRetakeMin,
+    // garrisonMax), 12) from one base, else refused)
+    bool spareCap = true;          // forcesSpareCap (0/1)
+    int spareCapFloor = 6;         // forcesSpareCapFloor, 1..12
+    // the arrival rule (6.5, 2026-10-15): when the cheapest lethal package
+    // needs more than slowEta s, any faster package within slowCostShare x
+    // its price may go; when it needs more than airEta s, a helicopter
+    // insertion may go whatever its price.  0 = off (the old choice)
+    float slowEta = 900.0f;        // forcesSlowEta, 0..86400 s
+    float slowCostShare = 3.0f;    // forcesSlowCostShare, 1..5
+    float airEta = 1500.0f;        // forcesAirEta, 0..86400 s
     // phase 4: the HQ assault and the waves (7.1, 16)
     int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
     int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
@@ -363,6 +392,10 @@ struct DirectorAction
     Vector3 strikePos = VZero; // CAKStrike: reported fighters, VZero = the zone's centre
     int alarmZone = -1;        // CAKAlarm
     Vector3 alarmPos = VZero;  // CAKAlarm: the latest reported position, VZero = the centre
+    // the spare cap (7.2): the minimum the kind asks (minAsked) and the one
+    // the choice used (minUsed); they differ when the cap lowered it
+    int minAsked = 0;
+    int minUsed = 0;
 };
 
 // The first-tick roster and town census (5.1)
@@ -457,6 +490,17 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static bool CanOperateIn(int band, int pool, int poolStart, float floor);
     // seconds per token in a band (0 = no tokens)
     static float TokenInterval(const OccupierForcesTuning& t, int band);
+    // the born-operation cap in a band: max(forcesOpsMax,
+    // forcesOpsMaxStrong) while STRONG, forcesOpsMax otherwise
+    static int OpsMaxFor(const OccupierForcesTuning& t, int band);
+    // the spare cap (7.2): the minimum a base retake or an HQ assault asks
+    // (minBodies), lowered to the largest single-base spare when no base can
+    // spare it, never below min(floor, minBodies)
+    static int SpareCappedMin(int minBodies, int largestSpare, int floor);
+    // the largest spare one source offers to the packages a request offers
+    // (a ground source: its spare or stored spare; an air-only source: its
+    // stored spare, only when the transport helicopter is offered)
+    static int LargestSpare(const AutoArray<PackageSource>& sources, bool heliOffered);
     // weight * M + (1 - weight) * T.  M = rosterHeld / rosterTotal (1 for an
     // empty total), T = townsAdministered / townsTotal; with no towns C = M
     static float ControlOf(float rosterHeld, float rosterTotal, int townsAdministered, int townsTotal, float milWeight);
@@ -605,6 +649,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int TownGarrisons() const { return _G; }
     int Band() const { return _band; }
     bool CanOperate() const { return CanOperateIn(_band, _pool, _poolStart, _tuning.poolFloor); }
+    // the born-operation cap now (OpsMaxFor the current band); CounterAttack::
+    // OpsCap reads it while the service is active
+    int OpsMax() const { return OpsMaxFor(_tuning, _band); }
     float Control() const { return _control; }
     int Posture() const { return _posture; }
     int Tokens() const { return _tokens; }
@@ -1004,6 +1051,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void FillTownsEverFromOwners(const ZoneRegistry& registry);
     float _missionNow = 0;
     AutoArray<NameRow> _alarmStarved;
+    // transient: the minimum rule of base retakes and HQ assaults (the spare
+    // cap or the one-source rule) was logged this session (PlanFor is const)
+    mutable bool _minRuleLogged = false;
 };
 
 } // namespace Guerrilla

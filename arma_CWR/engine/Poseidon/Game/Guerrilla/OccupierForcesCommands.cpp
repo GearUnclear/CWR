@@ -99,7 +99,11 @@
 //                                  "pushoutQuiet" (0..86400 s), "retakeMin"
 //                                  (1..12), "lethalityMargin" (0..3),
 //                                  "urgentCostShare" (1..3), "intelDecay"
-//                                  (1..86400 s); phase 4: "hqAssaultMin"
+//                                  (1..86400 s); 2026-10-15: "opsMaxStrong"
+//                                  (0..6), "spareCap" (0/1),
+//                                  "spareCapFloor" (1..12), "slowEta"
+//                                  (0..86400 s), "slowCostShare" (1..5),
+//                                  "airEta" (0..86400 s); phase 4: "hqAssaultMin"
 //                                  (1..12), "waveDwell" (1..10 ticks),
 //                                  "waveFinal" (0/1), "waveShare" (0..2),
 //                                  "waveMin" (0..200), "waveMax" (0..400),
@@ -417,6 +421,30 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "urgentCostShare") == 0)
     {
         t.urgentCostShare = ClampF(v, 1, 3);
+    }
+    else if (stricmp(key, "opsMaxStrong") == 0)
+    {
+        t.opsMaxStrong = (int)ClampF(v, 0, 6);
+    }
+    else if (stricmp(key, "spareCap") == 0)
+    {
+        t.spareCap = v != 0;
+    }
+    else if (stricmp(key, "spareCapFloor") == 0)
+    {
+        t.spareCapFloor = (int)ClampF(v, 1, 12);
+    }
+    else if (stricmp(key, "slowEta") == 0)
+    {
+        t.slowEta = ClampF(v, 0, 86400);
+    }
+    else if (stricmp(key, "slowCostShare") == 0)
+    {
+        t.slowCostShare = ClampF(v, 1, 5);
+    }
+    else if (stricmp(key, "airEta") == 0)
+    {
+        t.airEta = ClampF(v, 0, 86400);
     }
     else if (stricmp(key, "intelDecay") == 0)
     {

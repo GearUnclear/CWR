@@ -131,6 +131,7 @@ void OccupierForces::Clear()
     _townsEverPending = false;
     _missionNow = 0;
     _alarmStarved.Clear();
+    _minRuleLogged = false;
     // the S5 refund hook (3.3): the process-wide service always owns it (it
     // claims nothing while inactive, so a save loaded after Clear keeps it); a
     // local service that installed it gives it up
@@ -257,6 +258,7 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.waveWarLevel = ReadRanged(c, "forcesWaveWarLevel", t.waveWarLevel, 0.0f, 3.0f);
     t.wakeTowns = RoundToInt(ReadRanged(c, "forcesWakeTowns", (float)t.wakeTowns, 2.0f, 99.0f));
     t.opsMax = RoundToInt(ReadRanged(c, "forcesOpsMax", (float)t.opsMax, 0.0f, 6.0f));
+    t.opsMaxStrong = RoundToInt(ReadRanged(c, "forcesOpsMaxStrong", (float)t.opsMaxStrong, 0.0f, 6.0f));
     t.heatFull = ReadRanged(c, "forcesHeatFull", t.heatFull, 1.0f, 100.0f);
     t.urgentHeat = ReadRanged(c, "forcesUrgentHeat", t.urgentHeat, 1.0f, 100.0f);
     t.townCooldown = ReadRanged(c, "forcesTownCooldown", t.townCooldown, 0.0f, 86400.0f);
@@ -265,6 +267,12 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.lethalityMargin = ReadRanged(c, "forcesLethalityMargin", t.lethalityMargin, 1.0f, 3.0f);
     t.urgentCostShare = ReadRanged(c, "forcesUrgentCostShare", t.urgentCostShare, 1.0f, 3.0f);
     t.intelDecay = ReadRanged(c, "forcesIntelDecay", t.intelDecay, 1.0f, 86400.0f);
+    // 2026-10-15: the spare cap (7.2) and the arrival rule (6.5)
+    t.spareCap = RoundToInt(ReadRanged(c, "forcesSpareCap", t.spareCap ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
+    t.spareCapFloor = RoundToInt(ReadRanged(c, "forcesSpareCapFloor", (float)t.spareCapFloor, 1.0f, 12.0f));
+    t.slowEta = ReadRanged(c, "forcesSlowEta", t.slowEta, 0.0f, 86400.0f);
+    t.slowCostShare = ReadRanged(c, "forcesSlowCostShare", t.slowCostShare, 1.0f, 5.0f);
+    t.airEta = ReadRanged(c, "forcesAirEta", t.airEta, 0.0f, 86400.0f);
     // phase 4: the HQ assault and the waves (16)
     t.hqAssaultMin = RoundToInt(ReadRanged(c, "forcesHqAssaultMin", (float)t.hqAssaultMin, 1.0f, 12.0f));
     t.waveDwell = RoundToInt(ReadRanged(c, "forcesControlDwell", (float)t.waveDwell, 1.0f, 10.0f));
@@ -442,6 +450,39 @@ bool OccupierForces::CanOperateIn(int band, int pool, int poolStart, float floor
 float OccupierForces::TokenInterval(const OccupierForcesTuning& t, int band)
 {
     return band >= 0 && band < NOccupierBands ? t.tokenInterval[band] : 0.0f;
+}
+
+int OccupierForces::OpsMaxFor(const OccupierForcesTuning& t, int band)
+{
+    const int base = t.opsMax > 0 ? t.opsMax : 0;
+    return band == OFBandStrong ? MaxInt(base, t.opsMaxStrong) : base;
+}
+
+int OccupierForces::SpareCappedMin(int minBodies, int largestSpare, int floor)
+{
+    // never above the minimum asked, never below the floor (or the minimum
+    // when it is smaller): a 12-man base retake no base can source becomes
+    // one of the largest spare, a 6-man HQ assault stays 6
+    return MinInt(minBodies, MaxInt(largestSpare, floor));
+}
+
+int OccupierForces::LargestSpare(const AutoArray<PackageSource>& sources, bool heliOffered)
+{
+    int best = 0;
+    for (int i = 0; i < sources.Size(); i++)
+    {
+        const PackageSource& s = sources[i];
+        if (s.zone < 0)
+        {
+            continue;
+        }
+        // an air-only source (another landmass) pays only an insertion,
+        // always from its stored reserve
+        const int spare = s.airOnly ? (heliOffered ? s.SpareFor(FPTransportHeli) : 0)
+                                    : MaxInt(s.spare, s.SpareFor(FPTruck));
+        best = MaxInt(best, spare);
+    }
+    return best;
 }
 
 float OccupierForces::ControlOf(float rosterHeld, float rosterTotal, int townsAdministered, int townsTotal,
@@ -1889,8 +1930,50 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
+    // the arrival rule (6.5, 2026-10-15) for the director's own operations;
+    // a push-out keeps the minimal package (6.4) and a wave strike its
+    // staged hub budget (7.1)
+    if (origin == CAODirector)
+    {
+        req.slowEta = _tuning.slowEta;
+        req.slowCostShare = _tuning.slowCostShare;
+        req.airEta = _tuning.airEta;
+    }
     AutoArray<PackageSource> sources;
     BuildSources(registry, view, dest, fixedSource, fixedSpare, -1, sources);
+    // the spare cap (7.2, 2026-10-15): a base retake or an HQ assault whose
+    // minimum no single base can spare takes the largest single-base spare,
+    // never below forcesSpareCapFloor.  Two-source launches are not built:
+    // CounterAttack keeps one record per target zone (FindByTarget) and one
+    // HQ_ASSAULT at a time, and the revert adopts that one record.  A wave
+    // strike (fixedSource) stages its own infantry and needs no cap.
+    a.minAsked = req.minBodies;
+    const bool capKind = hq || a.kind == CAKBase;
+    if (capKind && fixedSource < 0)
+    {
+        if (!_minRuleLogged)
+        {
+            _minRuleLogged = true;
+            if (_tuning.spareCap)
+            {
+                GM_DIRECTOR_INFO(Core,
+                                 "OccupierForces: base retakes and HQ assaults take the spare cap: one source, at "
+                                 "least the largest single-base spare, never below {} (forcesSpareCap 1)",
+                                 _tuning.spareCapFloor);
+            }
+            else
+            {
+                GM_DIRECTOR_INFO(Core, "OccupierForces: base retakes and HQ assaults need their whole minimum from "
+                                       "one source (forcesSpareCap 0)");
+            }
+        }
+        if (_tuning.spareCap)
+        {
+            const bool heli = _catalogue.Offered(FPTransportHeli);
+            req.minBodies = SpareCappedMin(req.minBodies, LargestSpare(sources, heli), _tuning.spareCapFloor);
+        }
+    }
+    a.minUsed = req.minBodies;
     // phase 6: a helicopter insertion competes like any package (6.5, D3)
     a.airOrigin = HeldAirfield(registry, dest);
     a.choice = ChooseWithAir(req, sources, a.airOrigin);
@@ -2172,6 +2255,25 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     }
     PruneOps();
 
+    // the 2026-10-15 rules, one line each when they changed the operation
+    if (a.minUsed > 0 && a.minUsed < a.minAsked)
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "OccupierForces: [op {}] spare cap: no base can spare the {} bodies {} asks, {} from {} "
+                         "(the largest single-base spare, floor {})",
+                         opId, a.minAsked, targetName, q.bodies, ZoneNameOf(registry, q.source),
+                         _tuning.spareCapFloor);
+    }
+    if (a.choice.etaRule != PackageChoice::EtaNone)
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs about {:.0f} s; {} goes, "
+                         "about {:.0f} s",
+                         opId, a.choice.etaRule == PackageChoice::EtaAir ? "forcesAirEta" : "forcesSlowEta",
+                         ForcePackages::PackageName(a.choice.cheapestPackage), (double)a.choice.cheapestSeconds,
+                         ForcePackages::PackageName(q.package), (double)q.seconds);
+    }
+
     const bool push = a.origin == CAOPushout;
     const char* shortNote =
         a.choice.shortOfLethality ? ", short of the required lethality: the most lethal affordable package" : "";
@@ -2295,9 +2397,9 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
     {
         return;
     }
-    if (launcher.BornOps() >= _tuning.opsMax)
+    if (launcher.BornOps() >= OpsMax())
     {
-        return; // unborn operations do not count, born ones do
+        return; // unborn operations do not count, born ones do (forcesOpsMaxStrong while STRONG)
     }
     AutoArray<int> candidates;
     Candidates(registry, view, launcher, candidates);
@@ -3452,6 +3554,15 @@ DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const Dir
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
+    // the arrival rule (6.5) answers alarms too, except THIN (the cheapest)
+    if (a.urgent)
+    {
+        req.slowEta = _tuning.slowEta;
+        req.slowCostShare = _tuning.slowCostShare;
+        req.airEta = _tuning.airEta;
+    }
+    a.minAsked = req.minBodies;
+    a.minUsed = req.minBodies;
     AutoArray<PackageSource> sources;
     // never the zone under attack (8.2)
     BuildSources(registry, view, dest, -1, 0, zone, sources);

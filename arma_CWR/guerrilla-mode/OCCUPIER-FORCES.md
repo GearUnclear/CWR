@@ -17,6 +17,7 @@ phases marked landed below.
 | 4 | Landed | Commits c825a5f (4B) and 6e1ee27 (4A); gate green 2026-10-13 (626 unit cases, 33/33 tri on shadow-67, four one-off flakes). 4B: the HQ model and the lose state, on disk and verified, not committed. With no START TOWN a campaign (campaignEnd on) establishes its HQ at the first CAMP zone through `Establish` (once per session, never after a destruction; `campaignEnd = 0` fixtures keep no HQ at boot; an old save with no HQ gets it on load). `HasHq`, `HqDestroyed`, `HqEpoch`, the HQ meter `hqCapture` at `HqPos` (only `CounterAttack::HqAssaultPresence` fills it; resistance HOLD presence within 150 m freezes it; decay otherwise), `Destroy` (cache emptied, holder and prop deleted once Hidden, garaged vehicles unlocked and damage 1, ring dropped, epoch bumped, INFO line, `ZEHqLost`), free re-establish anywhere; `gmHqState`, `gmHqEpoch`, `gmHqForceCapture`; recruit menu on `gmHqPos` (none without an HQ); `market.sqs` marker and objective re-arm on an epoch change. `CampaignEnd` lose latch (no HQ, no held zone, and an HQ or a held zone once), `EMLoser` after `campaignEndDelay`, the lose debriefing in `UIMapDialogs`, `gmCampaignLost`, `gmCampaignEnd` slot 8, all saved. Deviation: a start-town HQ still gets the pre-existing #79 B2 garrison exemption (tied to the start-town pick, not to the HQ). Tri green: `guerrilla_forces_hq_assault`, `remaster_ud_guerrilla_forces_lose`. 4A: waves, base recapture, standing and the director's base and HQ operations, on disk and verified, not committed. `ZoneRecord` `occCapture`, `standing`, `struckUntil`, `lostCount` (saved); `RevertBase` and the base branch of `EvaluateTick` (any occupier unit or an abstract BASE / HQ_ASSAULT force raises `occCapture` by `captureRate` x min(crew, 3) with no resistance HOLD presence; both present freeze it; nobody decays it at `captureDecayAbandoned`; at 100 the post reverts, the holding force settles, else a pool deposit, income 0, `baseLost`; never after a win or loss); `gmZoneSim` slots 14 to 17, `gmZoneSet` `occCapture` / `standing`; `capture.sqs` per-zone hold groups, "Retaken" by `lostCount`, the `baseLost` handler. CounterAttack: BASE, HQ_ASSAULT and REINFORCE launches validated per kind, `destPos` / `hqDone` saved, `HqAssaultPresence` (HQ_ASSAULT records only, D14), HQ records settle on `ZEHqLost`, `OpsCap` = `forcesOpsMax` + live wave records, the Won / Lost freeze. Director: base candidates only while STRONG (D16), bases in push-out, the HQ candidate while STRONG or in a wave, the final push unconditional; waves (two-tick dwell, merge, size 12..48, lead 600 / 120 s, hub AIRFIELD then SEAPORT then the strongest base, hub top-up, cluster strikes up to `forcesWaveRetakeShare` on `forcesWaveOps` targets, REINFORCE columns, final-stand surge); `OccupierWarLevel` (`gmWarLevelOccupier`) for garrison tiers, CounterAttack, Traffic, Undercover and `qrf.sqs`, which also skips the YELLOW chase in THIN / SPENT; standing (recovery toward 50 at 1 per 600 s, informant tips at `standing / 200` from 50, morale 0.8 below 25, the mean scales the refill; the strike that cuts it is phase 6, the hook is `ZoneRecord::standing` / `gmZoneSet "standing"`). Phase 3 gaps closed with it: the S5 pending refund goes to the pool with the key on (`OccupierForces` installs `GarrisonCache::SetPendingRefundHook`); a force with no unseen birth point is re-sourced at once to the next base whose road passes the gate, waits only when none passes, then is cancelled unseen; with the key on legacy (DORMANT) records take the same chain and never turn back (D6). Accepted deviations: the `baseRetake` key (follows `occupierForces` unless authored); resistance alone decays `occCapture` at `captureDecayDefended`; "in a wave" means a wave inbound or landed within 1800 s; the final-stand surge is excluded from spare only in the director's sources; a base route is the road A*, else the straight cross-country line, which counts as reaching the target. Tri green: `guerrilla_forces_base_retake`, `guerrilla_forces_wave_base`, `guerrilla_forces_refill_pushout`; `guerrilla_counter_attack_watched_base` now asserts the re-source (key on) and `guerrilla_forces_pool_off` the 24-slot row. |
 | 5 | Landed | Every ground package offered (`DefaultPackages`). Column decision: armour escorts a carrier (truck or APC); one escort per column at most; a lone tank or two-seat armed car is never chosen (`seatsShort`), only bought as an escort. The escort is born `EscortGap` (20 m) behind the carrier under the same unseen rule, drives the carrier's legs (the carrier waits while the escort is more than 150 m behind), closes up to the town edge and supports there (armed carriers support too; a truck holds back); each hull refunds its own price when deleted unseen at home; a return to abstract travel deletes both hulls crew-first, no refund, re-created at the next birth. Launch-time foot downgrade refunds the whole column. Funded orders are granted from the stored reserve the director quoted, else refused (review M1); a hold at the town edge gives up after `counterAttackBirthGiveUp` into a town-edge birth or a cancel unseen (M2); lost hulls, crews and dead squads go to an unseen cleanup list, saved as `Leftovers` (M3, L7); hull births and despawns use the headlight band at night (M8). REINFORCE columns top up through the 5.5 room rows; a top-up squad whose town is lost walks home and leaves unseen (M5). `forcesOpsMax` is read only from `OccupierForces`. Tri: `guerrilla_forces_armoured_column`. |
 | 6 | Landed | Commit bcca80e; gate phase 6 green 2026-10-14 (663 unit cases, 45/45 tri on shadow-67 incl. the slow_air tests, human suite OK). Also in it: the landmass rule (3.1: a ground force never comes from, and a Traffic vehicle never drives to, a base on another landmass; Malden's Southeast Compound is an island and an air-only source). 6A: air in CounterAttack on disk, not committed (CounterAttackAir.cpp; contract in CounterAttackOrders.hpp: CAKStrike, CAKAlarm, `airOrigin`, `strikeZone` / `strikePos`, `alarmZone` / `alarmPos`, CAOpAirborne / CAOpLanded / CAOpStruck / CAOpAlarmAnswered with `zone` and `pos`). Air packages join `DefaultPackages`, offered only where the descriptor authors `forcesTransportHeli` / `forcesAttackHeli` / `forcesJet` (EAST Mi17 / Mi24 / Su25, WEST UH60 / Cobra / A10, @LoBo IDF, Egypt, Syria, Jordan; FIA and the irregulars none); prices 10 / 18 / 22, x1.5 off map; the strike airframes carry nobody. Insertions: abstract on the straight line from `airFrom` (the airfield, else the `forcesOffMapEdge` edge, 1500 m out), born airborne at the first point the altitude gate hides, LZ 300..500 m away from the reported fighters, unload, the cargo becomes the live squad, the airframe home through `AirHome` and refunded once OccupierAir removed it crew first; a landing over 100 m off the LZ re-plans once, then cancels unseen; no LZ or airframe goes on foot. Birth chain step 4: a funded ground operation with no unseen birth point after the next base back is re-planned as an insertion bought from the pool (refunded directly, `airReplanned`). Strikes: abstract on their clock, live as an OccupierAir sortie only while the target is in the bubble, `forcesSortieTime`, limited reveal every 10 s of sightings under 60 s (resistance AI, accuracy 0.5); CAOpStruck once. Alarm answers travel to `alarmPos`, answer once, hold until below RED with no contact for 60 s, then join the garrison. Owner decision applied: aircraft are unseen past the band in 3D even in the view cone (`departTimeout` the backstop). Fixed in OccupierAir: crew leave their seats before deletion, the pad goes after the hull. CounterAttack's vanish and top-up removals now wait for the dead too (`BodiesUnseen`). Air records, `AirHomes` and OccupierAir's records are saved in the CounterAttack block. Tri green: `guerrilla_forces_air_op`, `guerrilla_forces_air_save_reload.seq`. Deviations: no attack helicopter escort for insertions; a live alarm answer adopts its whole squad (no garrisonMax cap on the live path); the descriptor lint checks the `forces*` classes since phase 7A. 6B: director side on disk, not committed. Air buying: the transport helicopter joins every package choice when the catalogue offers it (`airOrigin` = the occupier-held AIRFIELD nearest the target, else -1 and the off-map price through `PackageRequest::airOffMap`). Strikes (7.3): bought only while STRONG, as an add-on right after a director ground launch on an URGENT held town with 3+ reported fighters outside its strike window, or on a base retake / HQ assault (the opener; launched just after the ground order, the jet arrives first), or alone on such a town when no ground package can go; jet or attack helicopter, the cheapest the pool pays, the fastest within `forcesUrgentCostShare` (always urgent); `strikePos` the centroid of the zone's reported positions (D9). Effects on every `CAOpStruck` (`ZoneRegistry::ApplyStrike`): -40 support / -40 standing / +15 heat / `struckUntil` = mission time + 1200 s in a struck CITY, -10 / -10 in every other CITY within 2 km of it (a strike on a base or a position: the ring only), `townStruck` queued (civilians.sqs panics through `GM_fnPanicStart`), `gmZoneStruck` halves the town's income and stops its manpower (economy.sqs). Alarm answers (8.2): any zone the resistance does not hold at RED, one CAKAlarm at a time at the 5 s scan cadence, sources every occupier base but the alarm zone, minimum 4, urgent unless THIN, none when SPENT ("Starved" once), `alarmPos` the latest report. qrf.sqs launches only while `gmLegacyQrf` (key off, sized off, or `legacySave`); the block saves `format` 6, an older block loads as `legacySave`. Deviations: alarm answers take no token and run while DORMANT (8.2 sets their limits; otherwise a key-on campaign has no answer before the second town); wave strikes buy no air opener; the HQ strike aims at `HqPos` when nothing was reported there. |
+| Rate | On disk, not committed | 2026-10-15, the owner's "a more playable rate" (6.3, 6.5, 7.2, 16). Cadence: `forcesTokenInterval[]` {600, 1050, 1800, 0} (was {1800, 2700, 3600, 0}) and `forcesOpsMaxStrong` 3 (the born cap while STRONG; 2 otherwise), the arithmetic against the pool in 6.3. The base retake minimum: the spare cap (`forcesSpareCap` 1, floor `forcesSpareCapFloor` 6) instead of two-source launches, which CounterAttack's one-record-per-target model does not allow (7.2); the refusal line names the shortfall. The arrival rule: `forcesSlowEta` 900 s, `forcesSlowCostShare` 3.0, `forcesAirEta` 1500 s (6.5). Every old value stays reachable through its key (16). Unit: the `[occupierforces]`, `[packages]`, `[counterattack]` and `[air]` cases; tri: `guerrilla_forces_cadence`, `guerrilla_forces_spare_cap`, `guerrilla_forces_arrival_rule`. Section 5.6's band table and section 10's pacing rows still quote the old cadence; the "cadence at a glance" table in 6.3 supersedes them. |
 | 7 | Landed | Commit fff2c0b; gate phase 7 green 2026-10-14 (664 unit cases; tri 75/80 on shadow-67 where the five reds are the main-menu lane's --mods-dir .. spawn failures on a tmp shadow and the pre-existing mp_wizard_template_overview, every forces / off-screen / reference / remaster test green; human suite OK). Defaults on (7A: `occupierForces` defaults to 1 in the engine, `OccupierForcesTuning::KeyDefault`; `campaignEnd = 0` missions author 0; the descriptor lint checks the `forces*` keys), the contract rewrite (7B: OFFSCREEN-CONTRACT.md replaced by the reconciled draft with phase 6 folded in; these docs), the fork issue, the roadmap, the PR. |
 
 **Reading guide.**
@@ -782,14 +783,58 @@ is not checked): the final push. The operation is always an HQ_ASSAULT on
 `HqPos` (9.1), minimum `forcesHqAssaultMin` (6) bodies.
 
 **Tokens.**
-- 0..2 tokens, full at the wake, refilled by band.
+- 0..2 tokens, full at the wake, refilled by band: one per 600 s while
+  STRONG, 1050 s STRETCHED, 1800 s THIN, none SPENT
+  (`forcesTokenInterval[]`; until 2026-10-15 {1800, 2700, 3600, 0}, still
+  reachable by authoring the array).
 - Each 60 s tick with a token and a candidate launches one operation on the
   hottest candidate.
-- At most `forcesOpsMax` (2) born operations are in flight, plus one per
-  living wave record (`CounterAttack::OpsCap`); wave operations take no
-  token.
+- At most `forcesOpsMax` (2) born operations are in flight, raised to
+  `forcesOpsMaxStrong` (3) while STRONG (`OccupierForces::OpsMax`; the cap
+  is the larger of the two keys, so `forcesOpsMaxStrong = 0` restores 2 in
+  every band), plus one per living wave record (`CounterAttack::OpsCap`);
+  wave operations take no token.
 - A repelled operation puts its target on a 30 min cooldown, with +15 heat
   unless a RED edge already paid it.
+
+**Cadence at a glance** (owner, 2026-10-15: "a more playable rate"). A
+token buys one operation only when there is something to do: a heat
+candidate, or while STRONG a quiet held zone for push-out (6.4). Alarm
+answers (8.2) and wave strikes (7.1) take no token and come on top.
+
+| Band (share of poolStart) | Token interval | Born cap | What the player sees per hour |
+|---|---|---|---|
+| STRONG (above 66 %, until below 60 %) | 600 s (was 1800) | 3 (was 2) | up to 6 operations, one about every 10 minutes, two at once after a quiet spell (a full purse) |
+| STRETCHED | 1050 s (was 2700) | 2 | about 3.4, one every 15 to 20 minutes |
+| THIN (below 33 %, until above 40 %) | 1800 s (was 3600) | 2 | 2, and none below `forcesPoolFloor` (20 %) |
+| SPENT (0, until above 10 %) | none | 2 | none |
+
+**The cadence against the pool** (Abel: poolStart 60, R 32, G 56, so the
+refill is (60 + 32 + 56) / 4 = 37 units an hour, 5.2; refill and waves are
+unchanged). What a STRONG hour of six operations debits:
+- *Foot.* Nothing at launch: the source base pays the infantry from its
+  stored reserve (5.3). The pool pays it back through D2 regrowth, at most
+  1 body per 600 s per base, so at most 6 bodies per base per hour whether
+  the squad died or settled as a garrison. Abel's three ground sources
+  (Outpost, Harbour, Airfield) draw at most 18 an hour.
+- *Truck.* Hull 3 + driver 1 = 4 units while it is out, refunded when the
+  hull is deleted at home unseen, lost only when it is destroyed.
+- *Insertion* (the arrival rule, 6.5). Mi17 10 + crew 2 = 12 units (17
+  off-map), refunded when the airframe is removed at home, lost when shot
+  down.
+
+Worst hour of foot and truck operations (six trucks, every hull destroyed,
+every squad lost): 6 x 4 + 18 = 42 units against the refill of 37, so the
+pool falls by 5, from 60 to 55, and stays STRONG (it leaves STRONG below
+36). Foot only: 18 against 37, the pool stays full. With insertions in the
+mix, four trucks and two insertions all lost cost 16 + 24 + 18 = 58: the
+pool falls from 60 to 39 in the hour, still STRONG, and the next hour runs
+at the STRETCHED rate. In flight at once: at most three operations
+(`forcesOpsMaxStrong`), so at most 3 x 12 = 36 units of hulls are out
+together and a pool of 60 keeps 24 in hand. A STRONG pool of 60 cannot run
+dry inside an hour at this cadence; what stops the director first is spare
+infantry (the three ground bases hold about 20 spare bodies when full and
+regrow 18 an hour), which the refusal line names (6.5).
 
 **Urgency (with hysteresis).** A target is URGENT from either of these until
 its heat falls below 35:
@@ -802,7 +847,9 @@ A fresh quiet flip (40) is therefore not urgent, whatever the tick phase.
 
 When STRONG with a free token and no heat candidate, the director retakes a
 QUIET town or base: the held zone nearest an occupier base with no sighting
-for 30 min, under the usual cooldown. It uses the minimal package. D2
+for 30 min, under the usual cooldown. It uses the minimal package: the
+arrival rule (6.5) does not apply to a push-out, which is meant to creep
+back. The spare cap (7.2) does. D2
 regrowth refills posts at the same time, so a quiet player watches the
 occupier creep back.
 
@@ -889,9 +936,42 @@ as bodies on top of the hull price.
      for a base (`min(max(forcesRetakeMin, garrisonMax), 12)`);
    - alarm answers: 4;
    - HQ assaults: 6.
+   - A base retake or an HQ assault whose minimum no single base can spare
+     takes the spare cap (7.2).
 3. **Pick.** The cheapest package meeting both. An URGENT target takes the
    fastest package costing at most 1.5 x that. If none meets `L_req`, the
    most lethal affordable package goes, and its line says so.
+   - **The arrival rule** (owner, 2026-10-15). When the cheapest lethal
+     package's arrival (`PackageQuote::seconds`: the straight distance from
+     its source over the package's speed, the "about N s" of the INFO line)
+     exceeds `forcesSlowEta` (900 s), any faster package costing at most
+     `forcesSlowCostShare` (3.0) x the cheapest may go. When it exceeds
+     `forcesAirEta` (1500 s), a transport helicopter insertion may go
+     whatever its price (from the occupier-held airfield, else off-map at
+     x 1.5). The fastest eligible package is chosen, as for URGENT; an
+     URGENT target that is also slow takes the wider share. The rule needs
+     the transport helicopter in the catalogue (the faction authors
+     `forcesTransportHeli`) for the second clause, and it keeps `L_req`, the
+     minimum, the pool's affordability and the stored-spare rule for hulls.
+     It applies to the director's heat candidates, base retakes and HQ
+     assaults (origin `CAODirector`) and to alarm answers outside THIN;
+     not to push-out (6.4) or wave strikes (7.1), which keep the minimal
+     package of their budget. One INFO line names it: "[op N] arrival rule
+     (forcesSlowEta): the cheapest, FOOT, needs about 1133 s; TRUCK goes,
+     about 128 s".
+   - **On Malden** (the distances of the base-generation diagnosis: foot
+     1.5 m/s, a Ural 13.3 m/s, a Mi17 53 m/s; a quiet 4-body retake: foot
+     4, truck 4 + 1 + 3 = 8, Mi17 4 + 2 + 10 = 16 units; distances
+     straight to the nearest ground base). Houdan (0.5 km), Le Port (0.6),
+     Dourdan (1.0) and Saint Louis (1.3, about 870 s) still get foot. La
+     Trinite (1.7 km, about 1130 s) and Arudy (2.2 km, about 1470 s) get a
+     truck (2 x foot, 2 to 3 minutes). Larche, Chapoi, Sainte Marie,
+     Cancon, Goisse, La Pessagne, Vigny and La Riviere (2.4 to 4.7 km,
+     foot 27 to 52 minutes straight, up to 68 by road) get a helicopter
+     insertion instead of the walk, when the pool can pay its 12 units.
+   - **The refusal names the shortfall.** With no source able to spare the
+     minimum, the line reads "no occupier base can spare the minimum (12
+     needed, the largest single-base spare is 6: short 6)".
 4. **Grant (review M1).** The director quotes each source's STORED spare
    (minus a wave surge), the same figure `CounterAttack::LaunchCore`
    grants from; a funded order is granted only in full from that reserve,
@@ -1066,6 +1146,32 @@ misreport it as the player's progress.
 - **Key.** `baseRetake` follows `occupierForces` unless authored (an
   accepted deviation); with `baseRetake = 0` held posts stay permanent.
 
+**The minimum and the spare cap** (owner, 2026-10-15). A base retake asks
+`min(max(forcesRetakeMin, garrisonMax), 12)` bodies from ONE source (6.5),
+so on Malden the Airfield (12) could be retaken only by a wave once it
+fell: the best spare left is the Harbour's 6 ("no occupier base can spare
+the minimum", repeated through the director video's run 3). Now a base
+retake or an HQ assault whose minimum no single base can spare takes the
+largest single-base spare instead, never below `forcesSpareCapFloor` (6)
+and never above the minimum (`OccupierForces::SpareCappedMin`): the
+Airfield is retaken by 6 from the Harbour, a 6-man HQ assault stays 6. A
+base on another landmass counts with its stored spare only when the
+transport helicopter is offered. Below the floor it is still refused, and
+the refusal names the shortfall (6.5). `forcesSpareCap = 0` restores the
+one-source rule. The director logs which rule applies once per session
+("base retakes and HQ assaults take the spare cap ..."), and each operation
+the cap lowered gets a line ("[op N] spare cap: no base can spare the 12
+bodies Airfield asks, 6 from Le Port Harbour ..."). A wave strike stages
+its own infantry at the hub (7.1) and takes no cap.
+- **Why not two sources.** The design step preferred two records from two
+  bases on one target. `CounterAttack` keeps one record per target zone
+  (`FindByTarget` refuses a second, "the target already has an operation"),
+  one HQ_ASSAULT at a time, and the revert adopts that one record as the
+  new garrison (`ZETownLost` / `ZEBaseLost`); events and the ledger row are
+  keyed by one operation id (`FindByOpId`). A second record on the same
+  target would need those rules rewritten, so the cap ships instead (D16
+  and D19 fix no number).
+
 **Strikes against live defenders.** A strike on a base whose hold squad
 lives goes LIVE: hold squads are always-live, so the fight is real.
 - Born under S, even off-screen.
@@ -1219,8 +1325,9 @@ A RED occupier zone is an alarm. The answer is an ALARM record, a new kind,
 because `LaunchFrom` takes only towns:
 - **Source.** The nearest OTHER occupier base by travel time, the airfield,
   or off-map air, never the zone under attack.
-- **Package.** As in 6.5: minimum 4, always urgent. Lethality is set
-  against the SIGHTINGS for that zone, not the alert `knows`.
+- **Package.** As in 6.5: minimum 4, always urgent, the arrival rule
+  (6.5) applied outside THIN. Lethality is set against the SIGHTINGS for
+  that zone, not the alert `knows`.
 - **Movement.** Born under 3.1, moves at real speed, commits to its
   destination.
 - **End.** At arrival it searches the last-known positions. It ends when
@@ -1643,14 +1750,18 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | `forcesIntelDecay` | OF | 1800 | s | Sightings expire |
 | reveal limits | OF | sightings under 60 s, accuracy < 1 | constants | Strike crews only |
 | `forcesWakeTowns` | OF | 2 | 2..99 | Distinct towns to wake |
-| `forcesTokensMax` / `forcesTokenInterval[]` | OF | 2 / {1800, 2700, 3600, 0} | | Command budget |
-| `forcesOpsMax` | OF | 2 | 0..6 | Born operations in flight; one source, the `OccupierForces` tuning (`CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record; a wave order gets one more headroom at launch) |
+| `forcesTokensMax` / `forcesTokenInterval[]` | OF | 2 / {600, 1050, 1800, 0} since 2026-10-15 (was {1800, 2700, 3600, 0}: author the array to restore it, `OccupierForcesTuning::LegacyTokenInterval`) | 0..6 / 0..86400 s per band | Command budget; seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none); the cadence table in 6.3 |
+| `forcesOpsMax` | OF | 2 | 0..6 | Born operations in flight outside STRONG; one source, the `OccupierForces` tuning (`OccupierForces::OpsMax`; `CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record; a wave order gets one more headroom at launch) |
+| `forcesOpsMaxStrong` | OF (`gmForcesTune "opsMaxStrong"`) | 3 since 2026-10-15 (old: 0 or 2, the cap of `forcesOpsMax` in every band) | 0..6 | The born cap while STRONG is max(`forcesOpsMax`, this) |
 | `forcesHeatFull` | OF | 40 | 1..100 | Candidate heat |
 | `gmHeatDecayHeld` | Script | 0.25 | per 10 s | Held-town decay |
 | `forcesUrgentHeat` / urgency exit | OF | 50 / 35 | 1..100 | Urgency band |
 | `forcesTownCooldown` | OF | 1800 | s | After a repel or a cancel |
 | `forcesPushoutQuiet` | OF | 1800 | s | Quiet-town threshold |
-| `forcesRetakeMin` / alarm minimum | OF | 4 / 4 | 1..12 | Minimum bodies; a base retake takes `min(max(forcesRetakeMin, garrisonMax), 12)` |
+| `forcesRetakeMin` / alarm minimum | OF | 4 / 4 | 1..12 | Minimum bodies; a base retake takes `min(max(forcesRetakeMin, garrisonMax), 12)`, lowered by the spare cap |
+| `forcesSpareCap` / `forcesSpareCapFloor` | OF (`gmForcesTune "spareCap"` / `"spareCapFloor"`) | 1 / 6 since 2026-10-15 (old: 0, the one-source rule) | 0/1 / 1..12 | The spare cap (7.2): a base retake or HQ assault no single base can source takes the largest single-base spare, never below the floor or above the minimum |
+| `forcesSlowEta` / `forcesSlowCostShare` | OF (`gmForcesTune "slowEta"` / `"slowCostShare"`) | 900 s / 3.0 since 2026-10-15 (old: `forcesSlowEta = 0`, off) | 0..86400 s (0 = off) / 1..5 | The arrival rule (6.5): past this ETA of the cheapest lethal package, any faster package within the share may go |
+| `forcesAirEta` | OF (`gmForcesTune "airEta"`) | 1500 s since 2026-10-15 (old: 0, off) | 0..86400 s (0 = off) | The arrival rule (6.5): past this ETA a transport helicopter insertion may go whatever its price |
 | `forcesHqAssaultMin` | OF | 6 | 1..12 | Minimum HQ assault bodies |
 | `forcesLethalityMargin` / `forcesUrgentCostShare` | OF | 1.2 / 1.5 | 1..3 | Package choice |
 | prices: body, truck, armed car, APC, tank | OF | 1, 3, 4, 8, 14 | pool units | 6.5 |

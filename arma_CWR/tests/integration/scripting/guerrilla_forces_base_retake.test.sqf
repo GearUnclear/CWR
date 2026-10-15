@@ -6,7 +6,8 @@
 //    r1  a real camera at the default view distance in daylight; the pool is
 //        full (STRONG); test levers: director tick 1 s, the first-town roll
 //        0, one distinct town wakes the director, the abstract leg at
-//        100 m/s (gmCounterAttackTune "speed");
+//        100 m/s (gmCounterAttackTune "speed"), the arrival rule off
+//        (forcesSlowEta and forcesAirEta 0: the ground package);
 //    r2  the Outpost (515 m from the Camp) loses its garrison and is handed
 //        to the resistance, hot (heat 100); a 3-man hold squad stands in it,
 //        invulnerable and on hold fire; the player walks 2.2 km away;
@@ -43,6 +44,12 @@ triAssertEq [(format ["%1", gmForcesTune ["directorInterval", 1]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["wakeTowns", 1]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"]
 triAssertEq [(format ["%1", gmCounterAttackTune ["speed", 100]]), "true"]
+// the arrival rule off (2026-10-15): from the Harbour the Outpost is a
+// 30-minute walk, so the rule would send a Mi17; this test is about the
+// recapture meter against a ground squad (guerrilla_forces_arrival_rule
+// covers the rule)
+triAssertEq [(format ["%1", gmForcesTune ["slowEta", 0]]), "true"]
+triAssertEq [(format ["%1", gmForcesTune ["airEta", 0]]), "true"]
 brRes = gmResistanceSide call GM_fnSideFromString
 
 // ---- r2: the Outpost, held and hot, with a hold squad ------------------------
