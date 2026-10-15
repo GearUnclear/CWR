@@ -377,6 +377,75 @@ std::string WriteProfileRow(int version, const char* action, const std::vector<I
 }
 } // namespace
 
+TEST_CASE("ContextControlsConfig: saved clears survive migration and its automatic resave",
+          "[Settings][ContextControlsConfig]")
+{
+    const int version = GENERATE(4, 99);
+    CAPTURE(version);
+    const std::string path = TmpPath("cleared_bindings_migration.cfg");
+    ContextControlsConfig src;
+    src.LoadDefaults();
+    for (auto& profile : src.profiles)
+    {
+        // Clearing the last visible slot in the controls UI leaves an empty
+        // vector after TrimTrailingEmptySlots/RebindProfile.
+        profile.ClearBindings(UAFire);
+        profile.ClearBindings(UAMoveUp);
+        profile.ClearBindings(UAMapZoomIn);
+    }
+    REQUIRE(src.Save(path));
+
+    // Exercise both the old-version and unknown-version migration paths with
+    // exactly the rows Save wrote, including its representation of clears.
+    std::string text = ReadAll(path);
+    ReplaceLine(text, "contextControlsVersion=5;", "contextControlsVersion=" + std::to_string(version) + ";");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << text;
+    }
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(path));
+    REQUIRE(migrated.migratedOnLoad);
+    for (int c = 0; c < ContextControlsConfig::ContextCount; ++c)
+    {
+        CAPTURE(c);
+        CHECK(migrated.profiles[c].BindingCount(UAFire) == 0);
+        CHECK(migrated.profiles[c].BindingCount(UAMoveUp) == 0);
+        CHECK(migrated.profiles[c].BindingCount(UAMapZoomIn) == 0);
+        CHECK(migrated.profiles[c].GetBindingEntries(UAMoveForward) ==
+              src.profiles[c].GetBindingEntries(UAMoveForward));
+    }
+
+    // InputSubsystem::LoadKeys immediately persists a migrated profile.
+    REQUIRE(migrated.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    for (const auto& profile : reloaded.profiles)
+    {
+        CHECK(profile.BindingCount(UAFire) == 0);
+        CHECK(profile.BindingCount(UAMoveUp) == 0);
+        CHECK(profile.BindingCount(UAMapZoomIn) == 0);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: lean migration preserves an explicitly cleared stand-up action",
+          "[Settings][ContextControlsConfig][lean]")
+{
+    const int version = GENERATE(1, 2, 3, 4);
+    CAPTURE(version);
+    const std::string path = WriteProfileRow(version, "MoveUp", {});
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    REQUIRE(cfg.migratedOnLoad);
+    const auto& foot = cfg.profiles[(int)InputContext::Infantry];
+    CHECK(foot.BindingCount(UAMoveUp) == 0);
+    CHECK(foot.HasBinding(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q)));
+    CHECK(foot.HasBinding(UALeanRight, InputCode::Key(SDL_SCANCODE_E)));
+    std::filesystem::remove(path);
+}
+
 // A version-3 file written by the pre-Arma-3-right-mouse build: Optics = V +
 // Numpad 0, LockTarget = RMB, Watch = T, no ZoomTemp.  Loading must rewrite the
 // three pristine KB&M defaults to their v4 values (keeping the gamepad entries
