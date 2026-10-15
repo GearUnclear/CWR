@@ -177,7 +177,7 @@ TEST_CASE("CounterAttack - entering the bubble prevents a premature town loss",
     // Leaving resumes the drain on this zone tick, before Step refreshes
     // suspension.  One tick below the revert threshold really loses it.
     f.TickZone(f.far);
-    CHECK(stricmp(f.Target().owner, f.registry.OccupierSide()) == 0);
+    CHECK(stricmp(f.Target().owner, "NEUTRAL") == 0); // a resistance-authored town reverts to neutral administration
     CHECK(f.Target().lostCount == 1);
     int losses = 0;
     for (int i = 0; i < f.fired.Size(); i++)
