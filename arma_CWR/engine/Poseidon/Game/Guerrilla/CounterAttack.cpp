@@ -37,6 +37,7 @@
 #include <Poseidon/Foundation/platform.hpp>
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
@@ -2464,9 +2465,27 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 {
                     how = alarm ? "answers the alarm" : "tops up the garrison";
                 }
-                else if (defendersHere)
+                char census[256];
+                if (!reinforce && defendersHere)
                 {
-                    how = _tuning.forcesOn || hq ? "defenders present: goes live at the edge" : "defenders present: odds roll";
+                    // name what the census counted (OCCUPIER-FORCES.md 7.2,
+                    // contract row 2c): the target's resistance presence
+                    // within zoneArea of its centre (a captured base's live
+                    // hold squad counts), or the HQ's (view.hqDefenders),
+                    // and whether the player stands inside that radius
+                    const float radius = registry.Tuning().zoneArea;
+                    const Vector3 at = hq ? view.hqPos : town->pos;
+                    const int counted =
+                        hq ? view.hqDefenders
+                           : (_tuning.forcesOn ? MaxInt(town->lastGuer, town->lastGuerHold) : town->lastGuer);
+                    const bool playerInside =
+                        view.playerValid && Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) < radius;
+                    snprintf(census, sizeof(census),
+                             "defenders present: %s; counted %d resistance unit(s) within %.0f m of %s, %s",
+                             _tuning.forcesOn || hq ? "goes live at the edge" : "odds roll", counted, (double)radius,
+                             hq ? "the HQ" : "its centre",
+                             playerInside ? "the player inside that radius" : "the player not among them");
+                    how = census;
                 }
                 TraceArrived(view, r, "abstract", how, DestOf(registry, r));
             }
