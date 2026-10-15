@@ -794,7 +794,7 @@ struct FakeGate final : CounterAttackGate
 // a world with no groups: it records where a squad was asked to be born and
 // refuses to create it (no AIGroup exists in the unit-test process), so the
 // record stays where the rules left it
-struct FakeOps final : CounterAttackOps
+struct FakeOps : CounterAttackOps
 {
     ExposureFn exposure = AllHidden();
     int spawns = 0;
@@ -4375,6 +4375,35 @@ TEST_CASE("CounterAttack - every arrival and birth logs abstract or live, the sp
     CHECK(live[0].find(", 0 m from the player") != std::string::npos);
 }
 
+namespace
+{
+// Each successful birth owns a distinct group, as the engine callbacks do.
+struct BudgetOps final : FakeOps
+{
+    std::vector<Ref<AIGroup>> groups;
+    int bornAlive = 4;
+    int detaches = 0;
+
+    AIGroup* NewGroup()
+    {
+        groups.emplace_back(new AIGroup());
+        return groups.back();
+    }
+    AIGroup* SpawnSquad(int n, Vector3Par from, Vector3Par leg) override
+    {
+        FakeOps::SpawnSquad(n, from, leg);
+        return NewGroup();
+    }
+    AIGroup* DetachFromGarrison(int, int n, Vector3Par, int& taken) override
+    {
+        detaches++;
+        taken = n;
+        return NewGroup();
+    }
+    int Alive(AIGroup*, Vector3&) override { return bornAlive; }
+};
+} // namespace
+
 TEST_CASE("CounterAttack - simultaneous births share the tick's body and group budgets",
           "[game][guerrilla][counterattack][birthbudget]")
 {
@@ -4440,13 +4469,13 @@ TEST_CASE("CounterAttack - partial births charge only the bodies actually create
     f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
     PoolGuard pool(f);
     AutoArray<ZoneEventRecord> fired;
-    ColumnOps ops;
-    ops.infAlive = 2;
+    BudgetOps ops;
+    ops.bornAlive = 2;
     const CounterAttackView view = AtTown(f);
     REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.town, f.post, 4, 211), &ops, fired));
     REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.other, f.farBase, 4, 212), &ops, fired));
     f.ca.Step(f.registry, view, 1.0f, &ops, fired);
-    CHECK(ops.squads == 2);
+    CHECK(ops.spawns == 2);
     CHECK(f.ca.Get(0)->phase == CALive);
     CHECK(f.ca.Get(1)->phase == CALive);
     CHECK(f.ca.Get(0)->strength == 2);
@@ -4487,4 +4516,45 @@ TEST_CASE("CounterAttack - strike births share the tick's group budget",
     CHECK(ops.sorties == 1);
     CHECK(f.ca.Get(0)->phase == CALive);
     CHECK(f.ca.Get(1)->phase == CATravel);
+}
+
+TEST_CASE("CounterAttack - garrison detachments charge groups but not existing bodies",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    bool roomForBirth = false;
+    SECTION("the detachment uses the last group slot")
+    {
+        roomForBirth = false;
+    }
+    SECTION("existing garrison bodies leave room for the next birth")
+    {
+        roomForBirth = true;
+    }
+    Fixture f;
+    f.Load(Certain(roomForBirth ? "budgetLiveBodies = 8; budgetSideGroups = 3;"
+                                : "budgetLiveBodies = 8; budgetSideGroups = 2;"));
+    f.RaiseTown(f.town);
+    f.Z(f.other).owner = f.registry.ResistanceSide();
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    f.Z(f.post).garrison = 0;
+    CounterAttackView view = AtTown(f);
+    view.liveBodies = 4;
+    view.occGroups = 1;
+    view.garrisonLive.Resize(f.registry.NZones());
+    for (int i = 0; i < view.garrisonLive.Size(); i++)
+    {
+        view.garrisonLive[i] = 0;
+    }
+    view.garrisonLive[f.post] = 4;
+    AutoArray<ZoneEventRecord> fired;
+    BudgetOps ops;
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.other, f.farBase, 4, 241), &ops, fired));
+    f.ca.Step(f.registry, view, 300.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 2);
+    CHECK(ops.detaches == 1);
+    CHECK(f.ca.Get(0)->spawnReason == CASpawnGarrison);
+    CHECK(f.ca.Get(0)->phase == CALive);
+    CHECK(ops.spawns == (roomForBirth ? 1 : 0));
+    CHECK(f.ca.Get(1)->phase == (roomForBirth ? CALive : CATravel));
 }

@@ -3598,24 +3598,24 @@ TEST_CASE("OccupierForces - a configured pool floor admits its exact fractional 
           "[game][guerrilla][occupierforces][poolfloor]")
 {
     Fixture f;
-    f.Load(ConfigWith("forcesPoolFloor = 0.3;", AbelLikeConfig().c_str()), false);
+    f.Load(ConfigWith("forcesPoolFloor = 0.3; forcesPoolMin = 100;", AbelLikeConfig().c_str()), false);
     REQUIRE(f.of.Activate(f.registry));
-    REQUIRE(f.of.PoolStart() == 60);
+    REQUIRE(f.of.PoolStart() == 100);
     // Enter THIN below its 30% entry edge, then recover to the floor.
-    f.of.SetPool(17);
+    f.of.SetPool(29);
     REQUIRE(f.of.Band() == OFBandThin);
     CHECK_FALSE(f.of.CanOperate());
     CHECK_FALSE(f.of.Spend(1, "below floor"));
-    f.of.SetPool(18);
+    f.of.SetPool(30);
     REQUIRE(f.of.Band() == OFBandThin);
     CHECK(f.of.CanOperate());
     CHECK(f.of.Spend(1, "at floor"));
-    CHECK(f.of.Pool() == 17);
+    CHECK(f.of.Pool() == 29);
     CHECK_FALSE(f.of.CanOperate());
 
-    CHECK(OccupierForces::CanOperateIn(OFBandThin, 18, 60, 0.3f));
-    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandThin, 17, 60, 0.3f));
-    CHECK(OccupierForces::CanOperateIn(OFBandThin, 19, 60, 0.3f));
-    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandThin, 18, 60, 0.3001f));
-    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandSpent, 18, 60, 0.3f));
+    CHECK(OccupierForces::CanOperateIn(OFBandThin, 15, 50, 0.3f));
+    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandThin, 14, 50, 0.3f));
+    CHECK(OccupierForces::CanOperateIn(OFBandThin, 16, 50, 0.3f));
+    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandThin, 15, 50, 0.3001f));
+    CHECK_FALSE(OccupierForces::CanOperateIn(OFBandSpent, 15, 50, 0.3f));
 }
