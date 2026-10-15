@@ -8,6 +8,9 @@
 #include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Game/Commands/GameStateExt.hpp> // GGameState (gmSeededBases, issue #76)
+#include <Poseidon/Foundation/Modules/Modules.hpp> // InitModules (command registration)
+#include <Evaluator/express.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -2804,6 +2807,9 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
     const char* config = "class CfgGuerrillaZones\n"
                          "{\n"
                          "    seedCities = 1; seedCitySupport = 35;\n"
+                         // Le Ville [12000, 12000] lies past the default play
+                         // region (Camp + 5 km, issue #76)
+                         "    playRegion[] = {0, 0, 20000, 20000};\n"
                          "    class Zones\n"
                          "    {\n"
                          "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
@@ -2885,6 +2891,9 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         std::string bigConfig = "class CfgGuerrillaZones\n"
                                 "{\n"
                                 "    seedCities = 1;\n"
+                                // the Names row runs far past the default
+                                // play region (Camp + 5 km, issue #76)
+                                "    playRegion[] = {0, 0, 200000, 200000};\n"
                                 "    class Zones\n"
                                 "    {\n"
                                 "        class Camp { name=\"Camp\"; position[]={100.0, 100.0, 0.0}; };\n"
@@ -3786,4 +3795,521 @@ TEST_CASE("ZoneRegistry - the townStruck handler survives save/load", "[game][gu
     CHECK(Str(loaded.GetEventHandler(ZETownStruck)) == "hStruck");
     ExtParsMission.Clear();
     std::filesystem::remove(archivePath);
+}
+
+// ---------------------------------------------------------------------------
+// issue #76: the AIRFIELD / SEAPORT seed (BaseWorldProbe + BaseDetect)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// land west of x = 9000 (20 m up), sea east of it (5 m down)
+struct CoastHeight final : HeightField
+{
+    float Height(float x, float /*z*/) const override { return x < 9000.0f ? 20.0f : -5.0f; }
+};
+
+// a synthetic world: one ILS strip (touchdown [4000, 4000], runway west to
+// [3200, 4000], apron [3500, 4100]) and a concrete quay pair on the coast
+// at [9000, 6025].  enabled = false stands in for a headless run.
+struct FakeBaseWorld final : BaseWorldProbe
+{
+    CoastHeight height;
+    bool enabled = true;
+    mutable int calls = 0;
+    bool Gather(BaseDetectInputs& in) const override
+    {
+        calls++;
+        if (!enabled)
+        {
+            return false;
+        }
+        in.worldClass = "Testland";
+        in.worldDisplay = "Testland";
+        in.worldSize = 12800.0f;
+        in.height = &height;
+        IlsEntry e;
+        e.x = 4000.0f;
+        e.z = 4000.0f;
+        e.dirX = 1.0f;
+        e.dirZ = 0.0f;
+        e.taxiOff.push_back(ScaffoldPoint{3200.0f, 4000.0f});
+        e.taxiIn.push_back(ScaffoldPoint{3500.0f, 4100.0f});
+        e.taxiIn.push_back(ScaffoldPoint{3600.0f, 4100.0f});
+        e.source = "CfgWorlds >> Testland";
+        in.ils.push_back(e);
+        DetectObject pier;
+        pier.x = 9010.0f;
+        pier.z = 6000.0f;
+        pier.model = "data3d\\molo_beton.p3d";
+        in.objects.push_back(pier);
+        DetectObject quay;
+        quay.x = 8990.0f;
+        quay.z = 6050.0f;
+        quay.model = "data3d\\molo_krychle.p3d";
+        in.objects.push_back(quay);
+        // houses: Portville is a settlement, so it may name the harbour
+        // (BaseDetect names bases after settlements only, never a bare label)
+        for (int i = 0; i < 3; i++)
+        {
+            DetectObject house;
+            house.x = 8000.0f + 30.0f * (float)i;
+            house.z = 6000.0f;
+            house.model = "data3d\\dum01.p3d";
+            house.radius = 9.0f;
+            in.objects.push_back(house);
+        }
+        return true;
+    }
+};
+
+// defaultIncome 30 so the seeded income is visibly the tuning's; no authored
+// AIRFIELD / SEAPORT, so seedBases resolves on by default
+const char* kBaseSeedConfig = "class CfgGuerrillaZones\n"
+                              "{\n"
+                              "    defaultIncome = 30;\n"
+                              "    class Zones\n"
+                              "    {\n"
+                              "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"RESISTANCE\"; "
+                              "position[]={1000.0, 1000.0, 20.0}; };\n"
+                              "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                              "position[]={6000.0, 6000.0, 20.0}; };\n"
+                              "    };\n"
+                              "};\n"
+                              "class Names\n"
+                              "{\n"
+                              "    class Hilltop     { name=\"Hilltop\"; position[]={3550.0, 4150.0}; };\n"
+                              "    class Portville   { name=\"Portville\";    position[]={8000.0, 6000.0}; };\n"
+                              "    class Eastend     { name=\"Eastend\";      position[]={7000.0, 2000.0}; };\n"
+                              "};\n"
+                              "class CfgGuerrillaFactions\n"
+                              "{\n"
+                              "    class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; };\n"
+                              "    class Guer { side=\"GUER\"; holdClass=\"SoldierGB\"; };\n"
+                              "};\n";
+
+struct SeedBaseFixture
+{
+    ParamFile file;
+    ZoneRegistry registry;
+    FakeBaseWorld world;
+
+    void Load(const std::string& config, bool names = true)
+    {
+        QIStream in(config.c_str(), config.size());
+        file.Parse(in);
+        registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("CfgGuerrillaFactions"), nullptr,
+                                nullptr, names ? file.FindEntry("Names") : nullptr, nullptr, nullptr, &world);
+    }
+    const ZoneRecord* Z(const char* name) const { return registry.GetZone(registry.FindZoneIndex(name)); }
+};
+
+std::string WithKey(const std::string& config, const char* key)
+{
+    std::string s(config);
+    const std::string anchor = "defaultIncome = 30;";
+    s.replace(s.find(anchor), anchor.size(), anchor + " " + key);
+    return s;
+}
+
+std::string WithZone(const std::string& config, const char* zoneLine)
+{
+    std::string s(config);
+    const std::string anchor = "    };\n};\nclass Names";
+    s.insert(s.find(anchor), zoneLine);
+    return s;
+}
+
+std::string ArrStr(const GameValue& v)
+{
+    return Str((RString)(GameStringType)v);
+}
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - seedBases resolves on without an authored AIRFIELD / SEAPORT (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    auto read = [](const std::string& config) {
+        ParamFile file;
+        QIStream in(config.c_str(), config.size());
+        file.Parse(in);
+        return ZoneRegistry::ReadSeedBases(file.FindEntry("CfgGuerrillaZones"));
+    };
+    CHECK(read(kBaseSeedConfig));
+    CHECK_FALSE(ZoneRegistry::ReadSeedBases(nullptr));
+    const char* airfield = "        class AF { name=\"AF\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; "
+                           "position[]={100.0, 100.0, 0.0}; };\n";
+    const char* seaport = "        class SP { name=\"SP\"; type=\"SEAPORT\"; owner=\"OCCUPIER\"; "
+                          "position[]={100.0, 100.0, 0.0}; };\n";
+    CHECK_FALSE(read(WithZone(kBaseSeedConfig, airfield)));
+    CHECK_FALSE(read(WithZone(kBaseSeedConfig, seaport)));
+    // the explicit key wins both ways
+    CHECK_FALSE(read(WithKey(kBaseSeedConfig, "seedBases = 0;")));
+    CHECK(read(WithKey(WithZone(kBaseSeedConfig, airfield), "seedBases = 1;")));
+    // a template without AIRFIELD / SEAPORT (kDemoConfig) resolves on
+    RegistryFixture f;
+    f.Load(kDemoConfig);
+    CHECK(f.registry.Tuning().seedBases);
+}
+
+TEST_CASE("ZoneRegistry - detected AIRFIELD and SEAPORT seed as occupier zones (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.Load(kBaseSeedConfig);
+    REQUIRE(f.registry.BaseDetectionRan());
+    REQUIRE(f.world.calls == 1);
+    REQUIRE(f.registry.NSeededBases() == 2);
+
+    const ZoneRecord* air = f.Z("Testland Airfield");
+    REQUIRE(air != nullptr);
+    CHECK(Str(air->type) == "AIRFIELD");
+    CHECK(Str(air->ownerConfig) == "OCCUPIER");
+    CHECK(Str(air->owner) == Str(f.registry.OccupierSide()));
+    CHECK(air->seeded);
+    CHECK(air->garrison == Approx(12.0f));
+    CHECK(air->garrisonMax == Approx(12.0f));
+    CHECK(air->income == Approx(30.0f)); // ZoneTuning::defaultIncome
+    CHECK(Str(air->marker) == "gmZoneBase_0");
+    // the apron (first ilsTaxiIn point) is dry, so it is the centre; pos is
+    // engine axes (X easting, Y height, Z northing)
+    CHECK(air->pos.X() == Approx(3500.0f));
+    CHECK(air->pos.Z() == Approx(4100.0f));
+    CHECK(air->pos.Y() == Approx(20.0f));
+
+    const ZoneRecord* port = f.Z("Portville Harbour");
+    REQUIRE(port != nullptr);
+    CHECK(Str(port->type) == "SEAPORT");
+    CHECK(Str(port->owner) == Str(f.registry.OccupierSide()));
+    CHECK(port->seeded);
+    CHECK(port->garrison == Approx(8.0f));
+    CHECK(port->garrisonMax == Approx(8.0f));
+    CHECK(port->income == Approx(30.0f));
+    CHECK(Str(port->marker) == "gmZoneBase_1");
+    CHECK(port->pos.X() < 9000.0f - 25.0f); // walked inland to a dry spawn square
+
+    // seeded bases are garrisonable occupier posts, never seeded towns
+    CHECK(f.registry.IsGarrisonable(*air));
+    CHECK_FALSE(f.registry.IsAdministeredTown(*air));
+    CountingSettlement probe;
+    f.registry.ProbeSeededSettlements(probe);
+    CHECK(air->settlement == 0);
+    CHECK(port->settlement == 0);
+
+    // seeding order: AIRFIELDs, then SEAPORTs
+    REQUIRE(f.registry.SeededBase(0) != nullptr);
+    CHECK(Str(f.registry.SeededBase(0)->name) == "Testland Airfield");
+    CHECK(Str(f.registry.SeededBase(1)->name) == "Portville Harbour");
+    CHECK(f.registry.SeededBase(2) == nullptr);
+    CHECK(f.registry.SeededBase(0)->confidence >= 0.5f);
+    CHECK_FALSE(f.registry.SeededBase(0)->evidence.empty());
+
+    // the base seed runs before the city seed: the Names label 71 m from the
+    // airfield is absorbed by the 300 m dedup instead of becoming a CITY
+    CHECK(f.registry.FindZoneIndex("Hilltop") == -1);
+    REQUIRE(f.Z("Portville") != nullptr);
+    CHECK(Str(f.Z("Portville")->type) == "CITY");
+    CHECK(f.Z("Portville")->seeded);
+    // authored zones are untouched
+    CHECK_FALSE(f.Z("Camp")->seeded);
+    CHECK_FALSE(f.Z("Post")->seeded);
+}
+
+TEST_CASE("ZoneRegistry - seedBases = 0 detects but seeds nothing (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.Load(WithKey(kBaseSeedConfig, "seedBases = 0;"));
+    CHECK_FALSE(f.registry.Tuning().seedBases);
+    CHECK(f.registry.BaseDetectionRan());
+    CHECK(f.registry.DetectedBases().size() == 2);
+    CHECK(f.registry.NSeededBases() == 0);
+    CHECK(f.registry.FindZoneIndex("Testland Airfield") == -1);
+    // with no airfield zone, the Names label near the strip seeds as a CITY
+    CHECK(f.registry.FindZoneIndex("Hilltop") >= 0);
+}
+
+TEST_CASE("ZoneRegistry - an authored AIRFIELD covers the detected one (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    // seedBases forced on: the authored AIRFIELD alone would turn it off
+    const char* authored = "        class Field { name=\"Field\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; garrison=10; "
+                           "position[]={3400.0, 4100.0, 20.0}; };\n";
+    SeedBaseFixture f;
+    f.Load(WithKey(WithZone(kBaseSeedConfig, authored), "seedBases = 1;"));
+    REQUIRE(f.registry.Tuning().seedBases);
+    REQUIRE(f.registry.DetectedBases().size() == 2);
+    const BaseCandidate& air = f.registry.DetectedBases()[0];
+    CHECK(Str(air.type) == "AIRFIELD");
+    CHECK(air.status == BaseStatus::Covered);
+    CHECK(Str(air.coveredBy) == "Field");
+    // only the harbour seeds
+    REQUIRE(f.registry.NSeededBases() == 1);
+    CHECK(Str(f.registry.SeededBase(0)->type) == "SEAPORT");
+    CHECK(f.Z("Testland Airfield") == nullptr);
+    CHECK_FALSE(f.Z("Field")->seeded);
+    CHECK(f.Z("Field")->garrison == Approx(10.0f));
+}
+
+TEST_CASE("ZoneRegistry - no world, no detection (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.world.enabled = false;
+    f.Load(kBaseSeedConfig);
+    CHECK_FALSE(f.registry.BaseDetectionRan());
+    CHECK(f.registry.DetectedBases().empty());
+    CHECK(f.registry.NSeededBases() == 0);
+    // the default LoadFromParams (no probe) never detects either
+    RegistryFixture plain;
+    plain.Load(kBaseSeedConfig);
+    CHECK_FALSE(plain.registry.BaseDetectionRan());
+    // nor does a mission without a zones config
+    FakeBaseWorld world;
+    ZoneRegistry none;
+    none.LoadFromParams(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &world);
+    CHECK(world.calls == 0);
+    CHECK_FALSE(none.IsActive());
+}
+
+TEST_CASE("ZoneRegistry - playRegion keeps towns and bases off the unplayed map (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    SECTION("the west of the map only")
+    {
+        // Eastend [7000, 2000], Portville [8000, 6000] and the harbour
+        // [~8970, ~6000] lie outside
+        SeedBaseFixture f;
+        f.Load(WithKey(kBaseSeedConfig, "playRegion[] = {0, 0, 6000, 12800};"));
+        REQUIRE(f.registry.Tuning().playRegion.valid);
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        CHECK(f.registry.FindZoneIndex("Eastend") == -1);
+        CHECK(f.registry.FindZoneIndex("Portville") == -1);
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+
+        // the START TOWN list honours the same bounds
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        REQUIRE(towns.Size() == 1);
+        // menu time cannot see the airfield that absorbs this one at runtime
+        CHECK(Str(towns[0]) == "Hilltop");
+    }
+
+    SECTION("not authored: the authored zones' box + 5 km, which here holds everything")
+    {
+        // Camp [1000, 1000] and Post [6000, 6000]: -4000..11000 both ways
+        SeedBaseFixture f;
+        f.Load(kBaseSeedConfig);
+        const ZoneTuning::PlayRegion& r = f.registry.Tuning().playRegion;
+        REQUIRE(r.valid);
+        CHECK_FALSE(r.authored);
+        CHECK(r.minX == Approx(-4000.0f));
+        CHECK(r.minZ == Approx(-4000.0f));
+        CHECK(r.maxX == Approx(11000.0f));
+        CHECK(r.maxZ == Approx(11000.0f));
+        CHECK(f.registry.NSeededBases() == 2);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        CHECK(towns.Size() == 3);
+    }
+
+    SECTION("the default box keeps a far town and a far base out")
+    {
+        // only the Camp at [1000, 1000]: the box is -4000..6000, so the
+        // airfield apron [3500, 4100] and Hilltop are in; Eastend [7000,
+        // 2000], Portville [8000, 6000] and the harbour [~8970, ~6000] are out
+        std::string config = kBaseSeedConfig;
+        const std::string post = "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; "
+                                 "garrison=4; position[]={6000.0, 6000.0, 20.0}; };\n";
+        REQUIRE(config.find(post) != std::string::npos);
+        config.erase(config.find(post), post.size());
+        SeedBaseFixture f;
+        f.Load(config);
+        REQUIRE(f.registry.Tuning().playRegion.valid);
+        CHECK(f.registry.Tuning().playRegion.maxX == Approx(6000.0f));
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        CHECK(f.registry.FindZoneIndex("Eastend") == -1);
+        CHECK(f.registry.FindZoneIndex("Portville") == -1);
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        REQUIRE(towns.Size() == 1);
+        CHECK(Str(towns[0]) == "Hilltop");
+
+        // an authored region overrides the default box
+        SeedBaseFixture g;
+        g.Load(WithKey(config, "playRegion[] = {0, 0, 12800, 12800};"));
+        CHECK(g.registry.Tuning().playRegion.authored);
+        CHECK(g.registry.NSeededBases() == 2);
+        CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
+        CHECK(g.registry.FindZoneIndex("Portville") >= 0);
+    }
+
+    SECTION("a malformed region falls back to the default box")
+    {
+        for (const char* bad :
+             {"playRegion[] = {0, 0, 6000};", "playRegion[] = {6000, 0, 0, 12800};", "playRegion = 5;"})
+        {
+            SeedBaseFixture g;
+            g.Load(WithKey(kBaseSeedConfig, bad));
+            CHECK(g.registry.Tuning().playRegion.valid);
+            CHECK_FALSE(g.registry.Tuning().playRegion.authored);
+            CHECK(g.registry.NSeededBases() == 2);
+            CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
+        }
+    }
+}
+
+TEST_CASE("ZoneRegistry - a seeded base survives save/load by name (issue #76)",
+          "[game][guerrilla][zones][bases][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-bases.bin";
+    // the load pass rebuilds from ExtParsMission (no world Names in the unit
+    // run, so the harbour takes the world's name both times)
+    {
+        QIStream in(kBaseSeedConfig, strlen(kBaseSeedConfig));
+        ExtParsMission.Parse(in);
+    }
+    FakeBaseWorld world;
+    {
+        SeedBaseFixture f;
+        f.Load(kBaseSeedConfig, false);
+        const int port = f.registry.FindZoneIndex("Testland Harbour");
+        REQUIRE(port >= 0);
+        ZoneRecord& z = *f.registry.GetZoneMutable(port);
+        z.owner = f.registry.ResistanceSide(); // liberated
+        z.garrison = 3;
+        z.capture = 40;
+        z.occCapture = 25;
+        z.lostCount = 1;
+        // a deposit on the authored post whose origin is the seeded base
+        ZoneRecord& post = *f.registry.GetZoneMutable(f.registry.FindZoneIndex("Post"));
+        post.pending = 2;
+        post.pendingOrigin = port;
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    SECTION("the detector reproduces the base: its dynamic state comes back")
+    {
+        ZoneRegistry loaded;
+        loaded.SetBaseProbeOverride(&world);
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        const int port = loaded.FindZoneIndex("Testland Harbour");
+        const ZoneRecord* z = loaded.GetZone(port);
+        REQUIRE(z != nullptr);
+        CHECK(z->seeded);
+        CHECK(Str(z->ownerConfig) == "OCCUPIER");
+        CHECK(Str(z->owner) == Str(loaded.ResistanceSide()));
+        CHECK(z->garrison == Approx(3.0f));
+        CHECK(z->garrisonMax == Approx(8.0f)); // static, config-rebuilt
+        CHECK(z->capture == Approx(40.0f));
+        CHECK(z->occCapture == Approx(25.0f));
+        CHECK(z->lostCount == 1);
+        CHECK(loaded.IsHeldBase(*z));
+        CHECK(loaded.NSeededBases() == 2);
+        CHECK(loaded.GetZone(loaded.FindZoneIndex("Post"))->pendingOrigin == port);
+    }
+
+    SECTION("a row for a base the detector no longer produces is dropped")
+    {
+        FakeBaseWorld gone;
+        gone.enabled = false;
+        ZoneRegistry loaded;
+        loaded.SetBaseProbeOverride(&gone);
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        CHECK(loaded.FindZoneIndex("Testland Harbour") == -1);
+        CHECK(loaded.FindZoneIndex("Testland Airfield") == -1);
+        CHECK(loaded.NZones() == 2);
+        const ZoneRecord* post = loaded.GetZone(loaded.FindZoneIndex("Post"));
+        REQUIRE(post != nullptr);
+        CHECK(post->pending == 2);
+        CHECK(post->pendingOrigin == -1); // the origin's name no longer resolves
+    }
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("ZoneRegistry - gmSeededBases / gmDetectedBases / gmZone seeded slot (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+    ParamFile file;
+    {
+        QIStream in(kBaseSeedConfig, strlen(kBaseSeedConfig));
+        file.Parse(in);
+    }
+    FakeBaseWorld world;
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    registry.Clear();
+
+    // before any load: detection did not run, both lists are empty
+    {
+        GameValue seeded = GGameState.Evaluate("gmSeededBases");
+        REQUIRE(seeded.GetType() == GameArray);
+        CHECK(((const GameArrayType&)seeded).Size() == 0);
+        GameValue detected = GGameState.Evaluate("gmDetectedBases");
+        REQUIRE(detected.GetType() == GameArray);
+        CHECK(((const GameArrayType&)detected).Size() == 0);
+    }
+
+    registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), nullptr, nullptr, nullptr, file.FindEntry("Names"),
+                            nullptr, nullptr, &world);
+    GameValue seeded = GGameState.Evaluate("gmSeededBases");
+    REQUIRE(seeded.GetType() == GameArray);
+    const GameArrayType& rows = seeded;
+    REQUIRE(rows.Size() == 2);
+    const GameArrayType& air = rows[0];
+    REQUIRE(air.Size() == 5);
+    CHECK(ArrStr(air[0]) == "Testland Airfield");
+    CHECK(ArrStr(air[1]) == "AIRFIELD");
+    const GameArrayType& pos = air[2];
+    REQUIRE(pos.Size() == 3);
+    CHECK((float)pos[0] == Approx(3500.0f)); // easting
+    CHECK((float)pos[1] == Approx(4100.0f)); // northing
+    CHECK((float)pos[2] == Approx(20.0f));   // height
+    CHECK((float)air[3] >= 0.5f);
+    CHECK(((const GameArrayType&)air[4]).Size() > 0);
+
+    GameValue detected = GGameState.Evaluate("gmDetectedBases");
+    REQUIRE(detected.GetType() == GameArray);
+    const GameArrayType& drows = detected;
+    REQUIRE(drows.Size() == 2);
+    const GameArrayType& port = drows[1];
+    REQUIRE(port.Size() == 7);
+    CHECK(ArrStr(port[1]) == "SEAPORT");
+    CHECK(ArrStr(port[5]) == "seed");
+    CHECK(ArrStr(port[6]) == "");
+
+    // gmZone slot 10: the seeded flag, for bases and towns alike
+    char expr[64];
+    snprintf(expr, sizeof(expr), "gmZone %d", registry.FindZoneIndex("Testland Airfield"));
+    GameValue zone = GGameState.Evaluate(expr);
+    const GameArrayType& zrow = zone;
+    REQUIRE(zrow.Size() == 11);
+    CHECK((bool)zrow[10]);
+    snprintf(expr, sizeof(expr), "gmZone %d", registry.FindZoneIndex("Camp"));
+    GameValue camp = GGameState.Evaluate(expr);
+    const GameArrayType& crow = camp;
+    REQUIRE(crow.Size() == 11);
+    CHECK_FALSE((bool)crow[10]);
+
+    registry.Clear();
 }

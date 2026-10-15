@@ -13,6 +13,9 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/IO/Serialization/SerializeClass.hpp>
+#include <Poseidon/Game/Guerrilla/BaseDetect.hpp> // the AIRFIELD / SEAPORT seed (issue #76)
+
+#include <vector>
 
 class ParamArchive;
 namespace Poseidon
@@ -117,6 +120,33 @@ struct ZoneTuning
     };
     SeedCities seedCities = SeedCities::Auto;
     float seedCitySupport = 20.0f; // starting support of each seeded CITY
+    // AIRFIELD / SEAPORT auto-seed from the loaded landscape (issue #76,
+    // BaseDetect): every SEED candidate the detector finds becomes an
+    // occupier zone.  Config key seedBases (0/1); absent = on exactly when
+    // the template's Zones block authors no AIRFIELD and no SEAPORT zone
+    // (authored zones keep precedence).  Detection itself runs whenever a
+    // landscape is loaded (gmDetectedBases); this key gates the seeding.
+    bool seedBases = false;
+    // playRegion[] = {minX, minZ, maxX, maxZ} (easting / northing): the part
+    // of the map the campaign is played on.  A Names town outside it is not
+    // seeded as a CITY nor offered as a START TOWN, and a detected base
+    // outside it is not seeded.  Absent (or malformed: warned, ignored) = the
+    // bounding box of the authored zones' positions padded by
+    // DefaultRegionPad on every side; no positioned authored zone = the whole
+    // map.
+    static constexpr float DefaultRegionPad = 5000.0f;
+    struct PlayRegion
+    {
+        bool valid = false;
+        bool authored = false; // from playRegion[]; false = the default box (or none)
+        float minX = 0, minZ = 0, maxX = 0, maxZ = 0;
+        // true for every point when no region is set
+        bool Contains(float x, float z) const
+        {
+            return !valid || (x >= minX && x <= maxX && z >= minZ && z <= maxZ);
+        }
+    };
+    PlayRegion playRegion;
     // The side the template's mission.sqm welds the player's unit to.  The
     // resistance is counted out of that side's center (GatherInputs), so a
     // resistance pick may move the ROSTER onto this side but never move the
@@ -154,10 +184,12 @@ struct ZoneRecord
     // per-zone garrison override) even when the town starts resistance-held,
     // so a retaken town refills to it.
     float garrisonMax = 0;
-    // an auto-seeded town (SeedCityZones), not an authored one.  Static,
-    // config-rebuilt, never serialized: the occupier pool counts a seeded
-    // town in K only when it passes the settlement probe (OCCUPIER-FORCES.md
-    // 5.1).
+    // an auto-seeded zone, not an authored one: a CITY from the world's
+    // Names (SeedCityZones) or an AIRFIELD / SEAPORT from the base detector
+    // (SeedBaseZones, issue #76).  Static, config-rebuilt, never serialized:
+    // the occupier pool counts a seeded town in K only when it passes the
+    // settlement probe (OCCUPIER-FORCES.md 5.1).  Every reader of this flag
+    // that means "a seeded town" must also test type == CITY.
     bool seeded = false;
 
     // dynamic, serialized (matched by zone name on load)
@@ -378,6 +410,34 @@ struct LandscapeSettlementProbe final : SettlementProbe
     bool IsSettlement(const char* name, const Vector3& pos) const override;
 };
 
+// World seam of the AIRFIELD / SEAPORT seed (issue #76): fills the
+// world-side half of the detector's inputs (worldClass, worldDisplay, ils,
+// objects, height, worldSize).  The registry adds the rest itself (the Names
+// towns, the authored zones, the playRegion), so a fake only has to model the
+// world.  The HeightField it points in.height at must outlive the call's
+// caller (DetectBases runs right after Gather).  False = no world to detect
+// on (headless): no detection, no seeding.
+struct BaseWorldProbe
+{
+    virtual ~BaseWorldProbe() = default;
+    virtual bool Gather(BaseDetectInputs& in) const = 0;
+};
+
+// The engine's BaseWorldProbe: Glob.header.worldname, CfgWorlds >> world
+// (description, the ILS entries), every landscape object whose model
+// ClassifyBaseModel weighs or that is a house-sized Building (bounding
+// sphere > LandscapeSettlementProbe::kMinBuildingRadius), the landscape's
+// SurfaceY (sea level 0) and land size.  False without a landscape.
+struct LandscapeBaseProbe final : BaseWorldProbe
+{
+    struct SurfaceHeight final : HeightField
+    {
+        float Height(float x, float z) const override;
+    };
+    SurfaceHeight height;
+    bool Gather(BaseDetectInputs& in) const override;
+};
+
 enum ZoneEventType
 {
     ZECaptured,         // a flip TO the resistance (military capture or town rising)
@@ -501,7 +561,7 @@ class ZoneRegistry : public SerializeClass
     // engine-wide instance (used by the World hooks and script commands)
     static ZoneRegistry& Instance();
 
-    // hard ceiling on the zone table (explicit + seeded CITY zones)
+    // hard ceiling on the zone table (explicit + seeded bases + seeded CITY zones)
     static constexpr int MaxZones = 64;
 
     // lifecycle -----------------------------------------------------------
@@ -526,10 +586,32 @@ class ZoneRegistry : public SerializeClass
     // faction-descriptor class-resolution pass (plan 15): every
     // classname-valued key is checked against the loaded data package and
     // unresolvable entries are substituted (logged via LOG_WARN) instead of
-    // producing fatal/sterile spawns downstream.
+    // producing fatal/sterile spawns downstream.  bases, when non-null and
+    // the zones config is present, runs the AIRFIELD / SEAPORT detector
+    // (issue #76) after the authored zones load and before the CITY seed, and
+    // seeds its SEED candidates when seedBases resolves on (SeedBaseZones).
     void LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier = nullptr,
                         const char* selResistance = nullptr, const ParamEntry* worldNamesCfg = nullptr,
-                        const ClassProbe* probe = nullptr, const SettlementProbe* settlement = nullptr);
+                        const ClassProbe* probe = nullptr, const SettlementProbe* settlement = nullptr,
+                        const BaseWorldProbe* bases = nullptr);
+    // Test seam: the BaseWorldProbe LoadFromConfig (and so a save's load
+    // pass) hands LoadFromParams instead of the LandscapeBaseProbe.  Null
+    // restores the landscape.  Not owned; Clear resets it.
+    void SetBaseProbeOverride(const BaseWorldProbe* probe) { _baseProbeOverride = probe; }
+
+    // the AIRFIELD / SEAPORT detector's last run (issue #76) ----------------
+    // every AIRFIELD and SEAPORT candidate, all statuses, in detector order;
+    // empty when detection did not run.  Transient, config-rebuilt, never
+    // serialized (gmDetectedBases).
+    const std::vector<BaseCandidate>& DetectedBases() const { return _detectedBases; }
+    bool BaseDetectionRan() const { return _baseDetectionRan; }
+    // the candidates seeded as zones, in seeding order (gmSeededBases); each
+    // is an index into DetectedBases()
+    int NSeededBases() const { return (int)_seededBases.size(); }
+    const BaseCandidate* SeededBase(int i) const
+    {
+        return i >= 0 && i < (int)_seededBases.size() ? &_detectedBases[_seededBases[i]] : nullptr;
+    }
 
     // queries -------------------------------------------------------------
     bool IsActive() const { return _zones.Size() > 0; }
@@ -728,6 +810,15 @@ class ZoneRegistry : public SerializeClass
                                        RString& name, Vector3& pos);
     // The seedCities key: absent = Auto, 0 = Off, anything else = All.
     static ZoneTuning::SeedCities ReadSeedCitiesMode(const ParamEntry* zonesCfg);
+    // The seedBases key (issue #76): 0 = off, anything else = on; absent =
+    // on exactly when the Zones block authors no AIRFIELD and no SEAPORT.
+    // False for a null config.
+    static bool ReadSeedBases(const ParamEntry* zonesCfg);
+    // The playRegion[] key: {minX, minZ, maxX, maxZ}.  Absent = the default
+    // box (the authored zones' bounding box + ZoneTuning::DefaultRegionPad;
+    // no region without a positioned zone).  Malformed (not 4 numbers, or
+    // min >= max) = the default box, with one WARN when warn is set.
+    static ZoneTuning::PlayRegion ReadPlayRegion(const ParamEntry* zonesCfg, bool warn);
     // The town names a campaign on this zones config + world Names class
     // carries as CITY zones, in zone-table order: the authored CITY zones
     // (config order), then - only when seedCities is set - every Names town
@@ -735,6 +826,10 @@ class ZoneRegistry : public SerializeClass
     // the authored zones and the towns already collected, same MaxZones
     // cap).  The new-game START TOWN cycler lists exactly this, so a pick
     // always names a zone of the launched campaign.  Either entry may be null.
+    // A Names town outside playRegion[] is not listed (SeedCityZones skips it
+    // too).  Menu time has no landscape, so a Names town the runtime base
+    // seed absorbs (within 300 m of a seeded AIRFIELD / SEAPORT) is still
+    // listed; such a pick falls back to the camp like any unseeded town.
     static void CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out);
 
     // campaign load notification: queued by Serialize at the end of a load,
@@ -826,6 +921,11 @@ class ZoneRegistry : public SerializeClass
     // shared tiers[] index selection for FactionTierClass / FactionSquad
     static int TierIndex(const FactionRecord& f, float warLevel);
     void SeedCityZones(const ParamEntry& namesCfg, const SettlementProbe* settlement);
+    // issue #76: run the base detector over the probe's world (plus the
+    // Names towns, the authored zones and the playRegion), keep every
+    // AIRFIELD / SEAPORT candidate, and add the SEED ones as occupier zones
+    // when seedBases is on.  Runs after LoadZones, before SeedCityZones.
+    void SeedBaseZones(const ParamEntry* namesCfg, const BaseWorldProbe& probe);
     // side match first, then faction class name (both case-insensitive)
     const FactionRecord* FindFaction(const char* sideOrClass) const;
     // class name only - the key FindFaction reaches last and FindFactionForSide
@@ -864,6 +964,12 @@ class ZoneRegistry : public SerializeClass
     ZoneTuning _tuning;
     AutoArray<ZoneRecord> _zones;
     AutoArray<FactionRecord> _factions;
+    // the base detector's last run (issue #76): transient, config-rebuilt by
+    // every LoadFromParams, never serialized
+    std::vector<BaseCandidate> _detectedBases;
+    std::vector<int> _seededBases; // indices into _detectedBases, seeding order
+    bool _baseDetectionRan = false;
+    const BaseWorldProbe* _baseProbeOverride = nullptr; // test seam, not owned
     // campaign faction sides; defaults match the Phase-1 Demo campaign
     RString _occupierSide = RString("EAST");
     RString _resistanceSide = RString("GUER");

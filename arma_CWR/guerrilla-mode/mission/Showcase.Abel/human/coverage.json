@@ -90,6 +90,9 @@
       "assailant_rogue",
       "assailant_resist"
     ],
+    "../engine/Poseidon/Game/Guerrilla/BaseDetect.cpp": [
+      "zones"
+    ],
     "../engine/Poseidon/Game/Guerrilla/ZoneRegistry.cpp": [
       "zones",
       "town_support",

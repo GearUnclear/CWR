@@ -1013,6 +1013,13 @@ and no REINFORCE column goes (they need a hub). Phase 6 added no off-map
 air for that case: wave strikes buy no air opener (an accepted deviation,
 section 18).
 
+The AIRFIELD and SEAPORT candidates include **seeded bases** (#76): a
+template that authors no AIRFIELD and no SEAPORT zone gets the ones the
+runtime detector finds (`seedBases`, ISLAND-PACKS.md section 10), seeded
+occupier-owned and saved by name, so they are hubs like authored ones. A
+template that authors either keeps exactly its authored hubs (seedBases
+resolves to 0) unless it sets `seedBases = 1`.
+
 **Allocation** from the pool, in order:
 1. Hub top-up: a reserve deposit through `Deposit`.
 2. Final-stand surge (below).
@@ -1687,6 +1694,9 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | `counterAttackDefenderWeight` / `counterAttackRepelLoss` | CA | 3 / 0.5 | | `Fight` |
 | `counterAttackMaxLive` / `counterAttackLiveTimeout` | CA | 2 / 1200 s | | Live squads |
 | `campaignEndDelay` | CampaignEnd | 10 s | | Win and lose delay |
+| `seedBases` | ZoneRegistry (`BaseDetect`) | absent: 1 when the template authors no AIRFIELD and no SEAPORT, else 0 | 0/1 | Runtime seed of the detected AIRFIELD / SEAPORT zones (status `seed`); OUTPOSTs are never seeded. `gmSeededBases` lists what it added, `gmDetectedBases` every AIRFIELD / SEAPORT candidate with its status. Detection rules and numbers: ISLAND-PACKS.md section 10 (one place) |
+| `playRegion[]` | ZoneRegistry | absent: the authored zones' bounding box + 5 km on every side | {minX, minZ, maxX, maxZ} | The theatre: base seeding and the CITY seed stay inside it (a candidate outside reports `outside-region`); the START TOWN menu is not bounded by it yet |
+| seeded base garrison / income | `BaseDetectOptions` | AIRFIELD 12, SEAPORT 8 / the OUTPOST income (`defaultIncome`) | | Plan 13 yields are not implemented |
 
 ## 17. Still open
 
@@ -1701,6 +1711,15 @@ Every owner question is answered (D1-D24). Open implementation items, as of
   gm* commands, and INFO lines only under `--dev` or `forcesLog = 1` since
   2026-10-14, 6.6). Journal integration is filed as GearUnclear/CWR#98, with
   the form left open.
+- **#76 occupation network: what remains after auto-detection.** The
+  runtime seed (`seedBases`, `playRegion[]`) and the offline detector
+  (`guerrilla scaffold` writes detected AIRFIELD / SEAPORT / OUTPOST zones
+  with evidence, `guerrilla lint --bases` audits a template) landed
+  2026-10-14 (ISLAND-PACKS.md section 10). Still open: each template's
+  **outpost ladder** is the author's (detected OUTPOSTs are suggestions,
+  never seeded), the AIRFIELD / SEAPORT **yields of plan 13** (heavy-vehicle
+  unlock, WL3 gate) are not implemented, so a base pays like an OUTPOST, and
+  the START TOWN menu does not honour `playRegion[]` yet.
 - **Parked on the vehicle system: the Southeast Compound stays air-only.**
   The Compound is an island (3.1, `bcca80e`), so it sends only aircraft;
   boats are a later vehicle-system item, not an occupier-forces one (owner,

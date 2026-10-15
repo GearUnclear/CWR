@@ -36,6 +36,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
+#include <chrono> // the base detection timing (issue #76)
 #include <math.h> // floorf (whole-body reserves, U3)
 #include <stdio.h>
 #include <string.h>
@@ -217,6 +218,10 @@ void ZoneRegistry::Clear()
 {
     _zones.Clear();
     _factions.Clear();
+    _detectedBases.clear();
+    _seededBases.clear();
+    _baseDetectionRan = false;
+    _baseProbeOverride = nullptr;
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
     _resistanceSide = "GUER";
@@ -334,7 +339,11 @@ void ZoneRegistry::LoadFromConfig()
     // landscape (dry land, buildings around) unless the template forces the
     // legacy seed-everything or seed-nothing (issue #54 C3)
     LandscapeSettlementProbe settlement;
-    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe, &settlement);
+    // the AIRFIELD / SEAPORT detector reads the loaded landscape (issue #76);
+    // headless (no landscape) it detects nothing
+    LandscapeBaseProbe landscapeBases;
+    const BaseWorldProbe* bases = _baseProbeOverride ? _baseProbeOverride : &landscapeBases;
+    LoadFromParams(zones, factions, selOccupier, selResistance, names, &probe, &settlement, bases);
     // alert and undercover tunables share the CfgGuerrillaZones class;
     // loading here (not in LoadFromParams) keeps the testable core free of
     // singleton side effects
@@ -344,12 +353,15 @@ void ZoneRegistry::LoadFromConfig()
 
 void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* factionsCfg, const char* selOccupier,
                                   const char* selResistance, const ParamEntry* worldNamesCfg, const ClassProbe* probe,
-                                  const SettlementProbe* settlement)
+                                  const SettlementProbe* settlement, const BaseWorldProbe* bases)
 {
     // rebuilds the config-derived tables only; event handlers and any
     // pending savegame rows are preserved (see Serialize)
     _zones.Clear();
     _factions.Clear();
+    _detectedBases.clear();
+    _seededBases.clear();
+    _baseDetectionRan = false;
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
     _resistanceSide = "GUER";
@@ -391,6 +403,14 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     if (zonesCfg)
     {
         LoadZones(*zonesCfg);
+    }
+    // issue #76: the AIRFIELD / SEAPORT seed runs BEFORE the CITY seed, so a
+    // Names label sitting on an airfield or a harbour (Sinai's "Egyptian
+    // Airbase") falls to the city seed's 300 m dedup instead of becoming a
+    // CITY.  Only a Guerrilla mission (a zones config) pays for detection.
+    if (zonesCfg && bases)
+    {
+        SeedBaseZones(worldNamesCfg, *bases);
     }
     if (_tuning.seedCities != ZoneTuning::SeedCities::Off && worldNamesCfg)
     {
@@ -708,6 +728,9 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
     _tuning.seedCities = ReadSeedCitiesMode(&cfg);
     _tuning.seedCitySupport = cfg.ReadValue("seedCitySupport", _tuning.seedCitySupport);
+    // issue #76: the AIRFIELD / SEAPORT seed and the play region
+    _tuning.seedBases = ReadSeedBases(&cfg);
+    _tuning.playRegion = ReadPlayRegion(&cfg, true);
     _tuning.captureRate = cfg.ReadValue("captureRate", _tuning.captureRate);
     _tuning.captureCrewCap = cfg.ReadValue("captureCrewCap", _tuning.captureCrewCap);
     _tuning.captureDecayDefended = cfg.ReadValue("captureDecayDefended", _tuning.captureDecayDefended);
@@ -1431,6 +1454,116 @@ ZoneTuning::SeedCities ZoneRegistry::ReadSeedCitiesMode(const ParamEntry* zonesC
     return zonesCfg->ReadValue("seedCities", 0.0f) != 0.0f ? ZoneTuning::SeedCities::All : ZoneTuning::SeedCities::Off;
 }
 
+bool ZoneRegistry::ReadSeedBases(const ParamEntry* zonesCfg)
+{
+    if (!zonesCfg)
+    {
+        return false;
+    }
+    if (zonesCfg->FindEntry("seedBases"))
+    {
+        return zonesCfg->ReadValue("seedBases", 0.0f) != 0.0f;
+    }
+    // auto: on unless the template authors an AIRFIELD or a SEAPORT itself
+    // (the same type default LoadZones applies)
+    if (const ParamEntry* zones = zonesCfg->FindEntry("Zones"))
+    {
+        for (int i = 0; i < zones->GetEntryCount(); i++)
+        {
+            const ParamEntry& e = zones->GetEntry(i);
+            if (!e.IsClass())
+            {
+                continue;
+            }
+            const RString type = e.ReadValue("type", RString("OUTPOST"));
+            if (stricmp(type, "AIRFIELD") == 0 || stricmp(type, "SEAPORT") == 0)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+ZoneTuning::PlayRegion ZoneRegistry::ReadPlayRegion(const ParamEntry* zonesCfg, bool warn)
+{
+    ZoneTuning::PlayRegion r;
+    const ParamEntry* e = zonesCfg ? zonesCfg->FindEntry("playRegion") : nullptr;
+    // the default when nothing (usable) is authored: the bounding box of the
+    // authored zones' positions, padded by DefaultRegionPad on every side; no
+    // positioned zone = no region (the whole map)
+    auto byDefault = [zonesCfg]() {
+        ZoneTuning::PlayRegion d;
+        const ParamEntry* zones = zonesCfg ? zonesCfg->FindEntry("Zones") : nullptr;
+        for (int i = 0; zones && i < zones->GetEntryCount(); i++)
+        {
+            const ParamEntry& z = zones->GetEntry(i);
+            const ParamEntry* pos = z.IsClass() ? z.FindEntry("position") : nullptr;
+            if (!pos || !pos->IsArray() || pos->GetSize() < 2)
+            {
+                continue;
+            }
+            const float x = (*pos)[0];
+            const float n = (*pos)[1];
+            if (!d.valid)
+            {
+                d.valid = true;
+                d.minX = d.maxX = x;
+                d.minZ = d.maxZ = n;
+                continue;
+            }
+            d.minX = x < d.minX ? x : d.minX;
+            d.maxX = x > d.maxX ? x : d.maxX;
+            d.minZ = n < d.minZ ? n : d.minZ;
+            d.maxZ = n > d.maxZ ? n : d.maxZ;
+        }
+        if (d.valid)
+        {
+            d.minX -= ZoneTuning::DefaultRegionPad;
+            d.minZ -= ZoneTuning::DefaultRegionPad;
+            d.maxX += ZoneTuning::DefaultRegionPad;
+            d.maxZ += ZoneTuning::DefaultRegionPad;
+        }
+        return d;
+    };
+    if (!e)
+    {
+        return byDefault();
+    }
+    if (!e->IsArray() || e->GetSize() != 4)
+    {
+        if (warn)
+        {
+            LOG_WARN(Core, "ZoneRegistry: playRegion[] ignored - it needs 4 numbers {{minX, minZ, maxX, maxZ}}; "
+                           "the authored zones' box + {} m stands",
+                     (int)ZoneTuning::DefaultRegionPad);
+        }
+        return byDefault();
+    }
+    const float minX = (*e)[0];
+    const float minZ = (*e)[1];
+    const float maxX = (*e)[2];
+    const float maxZ = (*e)[3];
+    if (!(minX < maxX) || !(minZ < maxZ))
+    {
+        if (warn)
+        {
+            LOG_WARN(Core,
+                     "ZoneRegistry: playRegion[] = {{{}, {}, {}, {}}} ignored - min must be below max; the authored "
+                     "zones' box + {} m stands",
+                     (double)minX, (double)minZ, (double)maxX, (double)maxZ, (int)ZoneTuning::DefaultRegionPad);
+        }
+        return byDefault();
+    }
+    r.valid = true;
+    r.authored = true;
+    r.minX = minX;
+    r.minZ = minZ;
+    r.maxX = maxX;
+    r.maxZ = maxZ;
+    return r;
+}
+
 bool ZoneRegistry::NamesEntryIsSettlement(const ParamEntry& e, ZoneTuning::SeedCities mode,
                                           const SettlementProbe* probe, RString& name, Vector3& pos)
 {
@@ -1510,6 +1643,12 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementPro
     {
         RString name;
         Vector3 pos;
+        // the play region first (issue #76): a town off the played part of
+        // the map is not even put to the settlement probe
+        if (!NamesEntryIsTown(namesCfg.GetEntry(i), name, pos) || !_tuning.playRegion.Contains(pos.X(), pos.Z()))
+        {
+            continue;
+        }
         if (!NamesEntryIsSettlement(namesCfg.GetEntry(i), _tuning.seedCities, settlement, name, pos))
         {
             continue;
@@ -1552,6 +1691,193 @@ void ZoneRegistry::SeedCityZones(const ParamEntry& namesCfg, const SettlementPro
     }
 }
 
+// ---------------------------------------------------------------------------
+// AIRFIELD / SEAPORT seed (issue #76)
+// ---------------------------------------------------------------------------
+
+float LandscapeBaseProbe::SurfaceHeight::Height(float x, float z) const
+{
+    // sea level is Y = 0 (Landscape::WaterDepth is a stub)
+    return GLandscape ? GLandscape->SurfaceY(x, z) : 0.0f;
+}
+
+bool LandscapeBaseProbe::Gather(BaseDetectInputs& in) const
+{
+    if (!GLandscape || !GWorld)
+    {
+        return false; // headless: nothing to detect on
+    }
+    in.worldClass = Glob.header.worldname;
+    if (const ParamEntry* worlds = Pars.FindEntry("CfgWorlds"))
+    {
+        if (const ParamEntry* world = worlds->FindEntry(Glob.header.worldname))
+        {
+            in.worldDisplay = world->ReadValue("description", RString());
+            ReadIlsEntries(*world, in.ils);
+        }
+    }
+    in.height = &height;
+    const int range = GLandscape->GetLandRange();
+    in.worldSize = (float)range * GLandscape->GetLandGrid();
+    // every object the detector may weigh: a harbour / military model, or a
+    // house-sized building (the water-edge evidence)
+    for (int x = 0; x < range; x++)
+    {
+        for (int z = 0; z < range; z++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                Object* obj = list[i];
+                if (!obj)
+                {
+                    continue;
+                }
+                LODShapeWithShadow* shape = obj->GetShape();
+                if (!shape)
+                {
+                    continue;
+                }
+                const char* model = shape->Name();
+                const BaseModelClass cls = ClassifyBaseModel(model ? model : "");
+                const float radius = shape->BoundingSphere();
+                if (cls.harbour <= 0 && cls.military <= 0 &&
+                    !(radius > LandscapeSettlementProbe::kMinBuildingRadius && dyn_cast<Poseidon::Building>(obj)))
+                {
+                    continue;
+                }
+                DetectObject o;
+                o.x = obj->Position().X();
+                o.z = obj->Position().Z();
+                o.model = model ? model : "";
+                o.radius = radius;
+                in.objects.push_back(o);
+            }
+        }
+    }
+    return true;
+}
+
+void ZoneRegistry::SeedBaseZones(const ParamEntry* namesCfg, const BaseWorldProbe& probe)
+{
+    const auto start = std::chrono::steady_clock::now();
+    BaseDetectInputs in;
+    if (!probe.Gather(in) || !in.height)
+    {
+        return; // no world loaded: no detection, gmDetectedBases stays []
+    }
+    // the registry's half of the inputs: the Names towns (they name the
+    // harbours), the authored zones (every zone loaded so far: the seed runs
+    // before SeedCityZones) and the play region
+    if (namesCfg)
+    {
+        for (int i = 0; i < namesCfg->GetEntryCount(); i++)
+        {
+            RString name;
+            Vector3 pos;
+            if (NamesEntryIsTown(namesCfg->GetEntry(i), name, pos))
+            {
+                DetectPlace p;
+                p.name = name;
+                p.x = pos.X();
+                p.z = pos.Z();
+                in.towns.push_back(p);
+            }
+        }
+    }
+    for (int i = 0; i < _zones.Size(); i++)
+    {
+        DetectAuthoredZone a;
+        a.name = _zones[i].name;
+        a.type = _zones[i].type;
+        a.x = _zones[i].pos.X();
+        a.z = _zones[i].pos.Z();
+        in.authored.push_back(a);
+    }
+    if (_tuning.playRegion.valid)
+    {
+        in.hasRegion = true;
+        in.regionMinX = _tuning.playRegion.minX;
+        in.regionMinZ = _tuning.playRegion.minZ;
+        in.regionMaxX = _tuning.playRegion.maxX;
+        in.regionMaxZ = _tuning.playRegion.maxZ;
+    }
+    BaseDetectOptions opt;
+    // plan 13 yields are not implemented: a base pays like an OUTPOST
+    opt.income = (int)_tuning.defaultIncome;
+    // the cover distance for a non-military authored zone is its presence
+    // circle, and the spawn square is a third of it (BaseDetect.hpp)
+    opt.coverAnyDist = _tuning.zoneArea;
+    opt.spawnHalfSize = _tuning.zoneArea / 6.0f;
+    BaseDetectResult result;
+    DetectBases(in, opt, result);
+    _baseDetectionRan = true;
+    for (const BaseCandidate& c : result.candidates)
+    {
+        if (stricmp(c.type, "AIRFIELD") == 0 || stricmp(c.type, "SEAPORT") == 0)
+        {
+            _detectedBases.push_back(c);
+        }
+    }
+    for (const std::string& note : result.notes)
+    {
+        LOG_INFO(Core, "ZoneRegistry: base detection: {}", note);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    LOG_INFO(Core, "ZoneRegistry: base detection on '{}': {} object(s), {} ILS entr{}, {} AIRFIELD/SEAPORT candidate(s) in "
+                   "{:.1f} ms; seedBases {}",
+             (const char*)in.worldClass, (int)in.objects.size(), (int)in.ils.size(), in.ils.size() == 1 ? "y" : "ies",
+             (int)_detectedBases.size(), ms, _tuning.seedBases ? "on" : "off");
+
+    for (int i = 0; i < (int)_detectedBases.size(); i++)
+    {
+        const BaseCandidate& c = _detectedBases[i];
+        if (c.status != BaseStatus::Seed)
+        {
+            LOG_INFO(Core, "ZoneRegistry: detected {} '{}' at [{:.0f}, {:.0f}] not seeded ({}{}{})", (const char*)c.type,
+                     (const char*)c.name, (double)c.x, (double)c.z, BaseStatusName(c.status),
+                     c.coveredBy.GetLength() > 0 ? " by " : "", (const char*)c.coveredBy);
+            continue;
+        }
+        if (!_tuning.seedBases)
+        {
+            continue;
+        }
+        // authored zones and earlier seeds keep their names (the save key)
+        if (FindZoneIndex(c.name) >= 0)
+        {
+            LOG_INFO(Core, "ZoneRegistry: detected {} '{}' not seeded - a zone of that name exists",
+                     (const char*)c.type, (const char*)c.name);
+            continue;
+        }
+        if (_zones.Size() >= MaxZones)
+        {
+            LOG_WARN(Core, "ZoneRegistry: zone cap ({}) reached seeding bases - remaining candidates skipped", MaxZones);
+            break;
+        }
+        ZoneRecord z;
+        z.name = c.name;
+        z.type = c.type;
+        // an occupier base, resolved like an authored OCCUPIER zone (the token
+        // is kept for re-resolution on a save load)
+        z.ownerConfig = "OCCUPIER";
+        z.owner = ResolveOwnerToken(z.ownerConfig);
+        z.garrison = c.garrison > 0 ? (float)c.garrison : 0.0f;
+        z.garrisonMax = z.garrison;
+        z.income = (float)c.income;
+        z.seeded = true;
+        char marker[32];
+        snprintf(marker, sizeof(marker), "gmZoneBase_%d", (int)_seededBases.size());
+        z.marker = marker;
+        z.pos = Vector3(c.x, c.y, c.z);
+        _zones.Add(z);
+        _seededBases.push_back(i);
+        LOG_INFO(Core, "ZoneRegistry: seeded {} '{}' at [{:.0f}, {:.0f}] (garrison {}, confidence {:.2f})",
+                 (const char*)c.type, (const char*)c.name, (double)c.x, (double)c.z, c.garrison,
+                 (double)c.confidence);
+    }
+}
+
 void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry* namesCfg, AutoArray<RString>& out)
 {
     out.Clear();
@@ -1566,6 +1892,9 @@ void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry
     // GuerrillaBase); Off lists none; All lists them all.
     ZoneTuning::SeedCities mode = ReadSeedCitiesMode(zonesCfg);
     bool seedCities = mode != ZoneTuning::SeedCities::Off;
+    // the same play region SeedCityZones honours (issue #76); the mission
+    // load warns about a malformed one, the menu stays quiet
+    const ZoneTuning::PlayRegion region = ReadPlayRegion(zonesCfg, false);
     if (zonesCfg)
     {
         if (const ParamEntry* zones = zonesCfg->FindEntry("Zones"))
@@ -1602,7 +1931,7 @@ void ZoneRegistry::CollectTownNames(const ParamEntry* zonesCfg, const ParamEntry
     {
         RString name;
         Vector3 pos;
-        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos))
+        if (!NamesEntryIsTown(namesCfg->GetEntry(i), name, pos) || !region.Contains(pos.X(), pos.Z()))
         {
             continue;
         }
@@ -3438,7 +3767,9 @@ void ZoneRegistry::ApplyPendingLoad()
         const ZoneSaveState& row = _pending[i];
         // saved rows are matched to the config table by zone NAME; rows
         // without a config zone are dropped, config zones without a row
-        // keep their defaults
+        // keep their defaults.  Seeded zones (Names towns, detected bases,
+        // issue #76) are rebuilt by LoadFromConfig like authored ones, so a
+        // row for a base the detector no longer produces is dropped here.
         int index = FindZoneIndex(row.name);
         if (index < 0)
         {

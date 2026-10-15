@@ -248,30 +248,49 @@ campaign end block are in section 10.5.
 
 ## 5. Island coverage targets
 
-Observable checks, not marker counts. All apply inside the playable region.
+Observable checks, not marker counts. All apply inside the playable region:
+`playRegion[]` when the template authors it, else the bounding box of its
+authored zones padded by 5 km (issue #76, ISLAND-PACKS.md section 10).
 
 | ID | Criterion |
 |---|---|
-| C1 | Every military hub the map models in the region is a zone of the matching type: airfield as AIRFIELD, harbour as SEAPORT, garrisoned compound as OUTPOST. A map with none says so in its template header. |
+| C1 | Every military hub the map models in the region is a zone of the matching type: airfield as AIRFIELD, harbour as SEAPORT, garrisoned compound as OUTPOST. An AIRFIELD or SEAPORT may be authored or seeded at runtime (`seedBases`, issue #76); an OUTPOST is always authored. A map with none says so in its template header. `guerrilla lint --bases` lists what the detector finds and what the template leaves out. |
 | C2 | From the default Camp, a garrisoned occupier zone lies within 1.5 km and is reachable on foot in under 5 minutes. |
 | C3 | At least one occupier zone pair within 3 km with a road path, so patrols are admissible from minute one (`gmTrafficDiag` at the Camp). |
 | C4 | A progression ladder: at least 3 occupier military zones of rising garrison (about 6 / 8 / 12), the AIRFIELD (where one exists) the strongest. |
 | C5 | Every CITY is within 3 km road distance of an occupier military zone at campaign start. |
 | C6 | No zone centre in water or inside a walled compound; every centre reaches open terrain. |
-| C7 | Seeded CITY zones are settlements inside the region (no labels, airbases, borders or islands). |
+| C7 | Seeded CITY zones are settlements inside the region (no labels, airbases, borders or islands). A Names label that names a detected airfield ("Egyptian Airbase") becomes that AIRFIELD's name and is dropped from the CITY seed by name (issue #76). |
 | C8 | Every occupier base's road net joins the island network, so an operation sourced there can route to the towns it answers. The code tolerates a base whose roads are a pocket on the same landmass (the road-route join, section 9.3), but the cross-country leg is slower and less natural, so a template should still pass. A base on another landmass than the towns (an island) is never a ground source at all: it is an air-only source (section 9.3), so a template should not rely on it for ground answers. Abel: the Southeast Compound stands on its own island, about 800 m of deep sea from Le Port; the earlier join leg crossed the sea, and its W and S gates are closed wire gates [commit bcca80e]. The squad stall inside its west gate is resolved by the landmass rule: the Compound sources air only, and the offscreen fixture's SEBase moved to the Le Port quay. |
 
-Candidate hubs found in the world data (anchors to verify against C6, not
-final positions):
+The occupation network per template, after the runtime base seed (issue
+#76). "Authored" is what the template's `class Zones` carries; `seedBases`
+is the template's resolved value (absent: 1 when it authors no AIRFIELD and
+no SEAPORT, else 0); "Seeded" is what `gmSeededBases` reports on a fresh
+start. Detection rules: ISLAND-PACKS.md section 10.
 
-| Template | Hubs missing today |
-|---|---|
-| Abel (Malden) | None: the Airfield, Le Port Harbour and the Southeast Compound are authored (issue #76, Abel part). C1, C3, C4 and C6 pass. C5 fails: Goisse, La Pessagne, Vigny, La Riviere and Cancon are 3.1 to 4.6 km from any hub, Sainte Marie, Chapoi and Larche 2.4 to 2.9 km straight-line; #76 names no western hub. C8: the Southeast Compound is an island, an air-only source (above). |
-| Eden (Everon) | Airfield (near [4772, 10923]), a pier near [7392, 6835] to confirm as a harbour, and a real ladder in place of three generated garrison-6 outposts. |
-| Sinai | Wadi airstrip next to WadiCheckpoint, the Egyptian Airbase (currently seeded as a CITY, a C7 defect), Sharm and El Tor harbours, the El Tor garrison. |
-| Lebanon80 | No airfield or harbour inside the theatre by design (airpower is off-map, #35). Missing: the Tyre HQ compound, two border posts, the Mt Dov post. |
+| Template | Authored hubs | `seedBases` | Seeded at runtime | Author's work left |
+|---|---|---|---|---|
+| Abel (Malden) | Airfield, Le Port Harbour (SEAPORT), Southeast Compound and Outpost (OUTPOST) | 0 (default: authors both) | none (the detector's airfield and harbour are covered by the authored ones: `gmDetectedBases`) | the western hub C5 asks for (Goisse, La Pessagne, Vigny, La Riviere and Cancon are 3.1 to 4.6 km from any hub). C8: the Southeast Compound is an island, an air-only source (above). |
+| Eden (Everon) | Outpost 1 to 3 (generated, garrison 6 each) | 1 (default: authors neither) | Everon Airfield [4841, 11323] (AIRFIELD, garrison 12: the ILS apron) and Chotain Harbour [7358, 6803] (SEAPORT, garrison 8: the concrete pier and quay block at [7392, 6835]); R 18 to 38, poolStart 74 | a real garrison ladder in place of the three generated outposts (C4) |
+| Sinai | Wadi Checkpoint, Ras Nasrani Outpost (OUTPOST) | 1 (default: authors neither) | inside the default region {1827, -2192, 14100, 9600}: Egyptian Airbase [3038, 1595] (both hangar groups, one AIRFIELD; the Names label is no longer a CITY), Wadi Mandar Airfield [8068, 3725] (the Wadi strip), Egyptian Fire Base Airfield [7006, 9194], Aqaba Internation Airport [10894, 8176], El Tor Harbour [5997, 3233], Maqnah Harbour [10727, 3550] (the Sharm port), Israel-Jordan Border Harbour 2 [10696, 9548] (the Aqaba port). Outside it, not seeded: the Israeli Airbase (the world's ILS entry), Eilat's strip, the Suez and Taba harbours. R 86, poolStart 112 | the El Tor garrison, the ladder (C4) |
+| Lebanon80 | Litani Checkpoint, Marjayoun Barracks (OUTPOST) | 0 (set by the template: no airfield or harbour inside the theatre by design, airpower is off-map, #35; Ramat David is the only ILS entry, 7 km south of it, and the Tyre quay wall is not a harbour) | none by design | the Tyre HQ compound, two border posts, the Mt Dov post |
 
-Authoring these is #38 work (see section 8).
+Coverage verdicts per template, from the #76 verification runs:
+
+| Template | C1 | C2 | C3 | C4 | C5 | C6 | C7 | C8 |
+|---|---|---|---|---|---|---|---|---|
+| Abel | pass (lint: the detected airfield, harbour and compound are covered by the authored zones) | unchanged by #76 | pass (above) | pass (Outpost 6, Compound 6, Harbour 8, Airfield 12) | fail (the western towns, above) | unchanged by #76 | unchanged by #76 | Compound air-only (above) |
+| Eden | partial: airfield and harbour seeded; the detected walled army base [5122, 10475] and the Levie post [7524, 4182] are OUTPOST candidates the template does not author | not measured | not measured | pass (Outposts 6, Harbour 8, Airfield 12) | not measured | seeded centres on dry ground by rule (spawn square dry), not walked in game | unchanged by #76 | not measured |
+| Sinai | partial: 4 airfields and 3 harbours seeded in the region; the El Tor garrison and other compounds are OUTPOST candidates only. Aqaba's airport and port (Jordan) fall inside the default region | not measured | not measured | pass (Outposts, Harbour 8, Airfield 12) | not measured | as Eden | pass for the airbase label (guerrilla_bases_detect_sinai: no CITY named Egyptian Airbase) | not measured |
+| Lebanon80 | pass by design (seedBases = 0, the header says so) | unchanged by #76 | unchanged by #76 | unchanged by #76 | unchanged by #76 | unchanged by #76 | unchanged by #76 | unchanged by #76 |
+
+"Not measured" means the #76 runs did not test that criterion; it is open,
+not passed. "Unchanged by #76" means no zone was added there.
+
+The outpost ladders and the western Abel hub are #38 / #76 authoring work
+(see section 8); AIRFIELD and SEAPORT yields (plan 13) are not implemented,
+so every base pays like an OUTPOST.
 
 ## 6. Budgets and instruments
 

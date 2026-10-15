@@ -46,7 +46,10 @@ static GameValue GmResistanceSide(const GameState* /*state*/)
     return GameStringType(ZoneRegistry::Instance().ResistanceSide());
 }
 
-// gmZone <index> -> 10-field tuple in GM_Z_* order; empty array out of range
+// gmZone <index> -> 11-field tuple in GM_Z_* order; empty array out of range.
+// Slot 10 is the seeded flag (bool): a CITY seeded from the world's Names or
+// an AIRFIELD / SEAPORT the base detector seeded (issue #76); false for an
+// authored zone.
 static GameValue GmZone(const GameState* state, GameValuePar oper1)
 {
     GameValue value = state->CreateGameValue(GameArray);
@@ -59,7 +62,7 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
         return value;
     }
 
-    array.Resize(10);
+    array.Resize(11);
     array[0] = GameStringType(z->name);
     array[1] = GameStringType(z->type);
     array[2] = GameStringType(z->owner);
@@ -78,6 +81,78 @@ static GameValue GmZone(const GameState* state, GameValuePar oper1)
     pos[2] = z->pos.Y();
     array[8] = posValue;
     array[9] = z->capture;
+    array[10] = z->seeded;
+    return value;
+}
+
+// one gmSeededBases / gmDetectedBases row (issue #76):
+// [name, type, [easting, northing, height], confidence, [evidence lines]]
+// plus, when full, [..., status, coveredBy]
+static GameValue BaseRow(const GameState* state, const BaseCandidate& c, bool full)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& row = value;
+    row.Resize(full ? 7 : 5);
+    row[0] = GameStringType(c.name);
+    row[1] = GameStringType(c.type);
+    GameValue posValue = state->CreateGameValue(GameArray);
+    GameArrayType& pos = posValue;
+    pos.Resize(3);
+    pos[0] = c.x;
+    pos[1] = c.z;
+    pos[2] = c.y;
+    row[2] = posValue;
+    row[3] = c.confidence;
+    GameValue evidenceValue = state->CreateGameValue(GameArray);
+    GameArrayType& evidence = evidenceValue;
+    evidence.Resize((int)c.evidence.size());
+    for (int i = 0; i < (int)c.evidence.size(); i++)
+    {
+        evidence[i] = GameStringType(RString(c.evidence[i].c_str()));
+    }
+    row[4] = evidenceValue;
+    if (full)
+    {
+        row[5] = GameStringType(RString(BaseStatusName(c.status)));
+        row[6] = GameStringType(c.status == BaseStatus::Covered ? c.coveredBy : RString());
+    }
+    return value;
+}
+
+// gmSeededBases -> one row per zone the runtime base seed added
+// (CfgGuerrillaZones >> seedBases), in seeding order:
+// [name, type, [easting, northing, height], confidence, [evidence lines]].
+// [] when nothing was seeded (seedBases off, no candidate passed, or no
+// landscape).  Authored zones are never listed.
+static GameValue GmSeededBases(const GameState* state)
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(registry.NSeededBases());
+    for (int i = 0; i < registry.NSeededBases(); i++)
+    {
+        array[i] = BaseRow(state, *registry.SeededBase(i), false);
+    }
+    return value;
+}
+
+// gmDetectedBases -> every AIRFIELD and SEAPORT candidate the runtime
+// detector found, seeded or not, in detector order:
+// [name, type, [easting, northing, height], confidence, [evidence lines],
+//  status ("seed" | "covered" | "outside-region" | "low-confidence"),
+//  coveredBy ("" unless covered)].  [] when detection did not run (no
+// landscape, or no CfgGuerrillaZones).
+static GameValue GmDetectedBases(const GameState* state)
+{
+    const std::vector<BaseCandidate>& bases = ZoneRegistry::Instance().DetectedBases();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize((int)bases.size());
+    for (int i = 0; i < (int)bases.size(); i++)
+    {
+        array[i] = BaseRow(state, bases[i], true);
+    }
     return value;
 }
 
@@ -576,6 +651,9 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     GGameState.NewFunction(GameFunction(GameArray, "gmZoneSim", GmZoneSim, GameScalar));
     GGameState.NewFunction(GameFunction(GameBool, "gmZoneStruck", GmZoneStruck, GameScalar));
     GGameState.NewNularOp(GameNular(GameArray, "gmPlayerPresence", GmPlayerPresence));
+    // issue #76: the AIRFIELD / SEAPORT seed
+    GGameState.NewNularOp(GameNular(GameArray, "gmSeededBases", GmSeededBases));
+    GGameState.NewNularOp(GameNular(GameArray, "gmDetectedBases", GmDetectedBases));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));

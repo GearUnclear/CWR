@@ -91,10 +91,15 @@ second run writes somewhere scratch. Point `--out` at
 `guerrilla-mode\mission\Guerrilla.<class>` when you are scaffolding a world that
 has no template yet.)
 
-Options: `--outposts <0-32>` (default 3) and `--keep-zones`, which splices the
-existing `<out>/description.ext` `class Zones { ... }` block in verbatim instead
-of generating a new one, so hand edits survive a re-run. `--mod` is repeatable
-and in `-mod` order.
+Options: `--outposts <0-32>` (default 3, the OUTPOST total: detected outposts
+first, see section 10), `--play-region minX minZ maxX maxZ` (writes
+`playRegion[]` and keeps the towns, camp and outposts inside it) and
+`--keep-zones`, which splices the existing `<out>/description.ext`
+`class Zones { ... }` block in verbatim instead of generating a new one, so hand
+edits survive a re-run. `--mod` is repeatable and in `-mod` order.
+
+The scaffold also runs the base detector and writes the AIRFIELD, SEAPORT and
+OUTPOST zones the world models, each with its evidence (section 10).
 
 **The output directory holds exactly three files**, which is the whole of a
 template:
@@ -117,14 +122,15 @@ CLASSIFIED roads=4670 buildings=387
 PLAYER SoldierGB side=GUER at 2378,7049
 ADDONS (none: base-game world and player)
 CIV classes=10 vehicles=9
+BASE seed AIRFIELD Everon Airfield 4841 11323 conf=0.90
+  evidence: ...
+BASE seed SEAPORT Chotain Harbour 7358 6803 conf=0.70
+BASE offline OUTPOST Saint Phillippe Post 5122 10475 conf=0.90
+BASE offline OUTPOST Levie Post 7524 4182 conf=0.90
 ZONE CAMP      RESISTANCE Camp                       2373   7045    53.7
-ZONE OUTPOST   OCCUPIER   Outpost 1                  7535   8760     8.3
-ZONE OUTPOST   OCCUPIER   Outpost 2                 11439   1557    46.1
-ZONE OUTPOST   OCCUPIER   Outpost 3                  9267   4432   122.6
-ZONE CITY      NEUTRAL    Saint Phillippe            4674  10730    17.6
-ZONE CITY      NEUTRAL    Montignac                  4935   6994   159.0
+ZONE AIRFIELD  OCCUPIER   Everon Airfield            4841  11323    ...
 ...
-SUMMARY zones=22 cities=18 outposts=3 warnings=0
+SUMMARY zones=24 cities=18 outposts=3 (detected 2) bases=4 warnings=0
 WROTE ...\Guerrilla.Eden (description.ext, mission.sqm, init.sqs)
 ```
 
@@ -229,7 +235,8 @@ class CfgGuerrillaZones
     defaultResistance = "GUER";     // (single-mission browser, --test-mission)
     playerSide = "GUER";            // the side mission.sqm welds the player to
     seedCitySupport = 20;
-    // seedCities: see below
+    // seedCities: see section 6
+    // seedBases, playRegion[]: see section 10
     class Zones { /* ... */ };
 };
 ```
@@ -269,8 +276,9 @@ The generated `description.ext` says this in its own header:
    [OFFSCREEN-CONTRACT.md](OFFSCREEN-CONTRACT.md) section 5: every airfield,
    harbour and garrisoned compound the map models should be a zone of the
    matching type, with a rising garrison ladder and an occupier pair within
-   3 km of the Camp. The scaffold does not detect airfields or harbours yet
-   (a #38 follow-up), so add them by hand.
+   3 km of the Camp. The scaffold writes the airfields, harbours and
+   military compounds it detects (section 10); check them, and add what the
+   detector cannot see by hand.
 4. **Add a `CfgGuerrillaMarket` block** if this island should have dealers.
 
 ## 6. `seedCities` is tri-state
@@ -433,6 +441,182 @@ the faction doc, not an island problem.
 
 ---
 
+## 10. Detected bases: AIRFIELD, SEAPORT and OUTPOST (issue #76)
+
+An island's occupation network is its airfields, harbours and garrisoned
+compounds. The engine finds the ones a world models on its own
+(`Game/Guerrilla/BaseDetect`), so a new island gets AIRFIELD and SEAPORT zones
+without a hand survey. The same detector runs in two places:
+
+- **At mission load** (`ZoneRegistry`, gated by `seedBases`): it reads the
+  loaded landscape and adds every AIRFIELD and SEAPORT candidate with status
+  `seed` as an occupier zone. **OUTPOSTs are never seeded at runtime**: the
+  garrison ladder is the author's.
+- **Offline** (`guerrilla scaffold` and `guerrilla lint --bases`): it reads the
+  `.wrp` and prints every candidate, OUTPOSTs included, with its evidence.
+
+Authored zones always win. A candidate an authored zone already models is
+`covered` and never seeded.
+
+### What is detected, and how
+
+All numbers live in `BaseDetectOptions` (`BaseDetect.hpp`); this table is the
+one place the docs restate them.
+
+| Type | Evidence | Rule | Confidence |
+|------|----------|------|------------|
+| AIRFIELD (ILS) | `CfgWorlds >> <world>`: `ilsPosition[]`, `ilsDirection[]`, `ilsTaxiIn[]`, `ilsTaxiOff[]`, plus every subclass of an optional `class SecondaryAirports` with the same keys | One per entry. Rejected at the map origin, outside the map, or with the runway (touchdown, far end, midpoint) in the water. A second entry within 1500 m of an airfield already found is merged into it. | 0.9 with taxi paths (two or more taxi points), 0.7 without, 0.3 when the world only **inherits** `ilsPosition[]` from a base class |
+| AIRFIELD (objects) | hangars, aircraft shelters (weight 1) and control towers (0.5), single-link clustered at 300 m | at least 3 aviation objects, 2 of them hangars or shelters, and more than 1500 m from an airfield already found (or outside its footprint); a weaker strip within 1500 m of a stronger one folds into it and widens its footprint. This is how a map with more airfields than its one config runway gets them (Sinai's Wadi strip and Egyptian Airbase) | 0.5 + 0.05 per object, at most 0.85 |
+| SEAPORT | harbour-named objects, single-link clustered at 150 m: a concrete pier, quay block, crane, dock or harbour structure weighs 1; a wooden jetty, quay wall (`nabrezi`), mooring or boat 0.5; port crates 0.25. Inside a port set directory (`ags_port` and the like) everything weighs 1 except buoys and signals (0) and crates (0.25). A building whose footprint touches water within 150 m of the cluster adds 0.25 (at most 0.5 in all, never enough on its own) | at least 2 objects, a score of at least 1.5, and water within 30 m of at least one member | 0.3 + 0.2 x score, at most 0.95; **at most 0.4 without one weight-1 structure** (two jetties are a fishing landing, not a harbour) |
+| OUTPOST | military-named objects (fortress, bunker, watchtower `hlaska` / `strazni_vez`, barracks, military garage `garaz_s_tankem` / `garaz_bez_tanku`, hangar, `repair_center`, `fuelstation_army`), single-link clustered at 120 m | at least 4 members (3 gave about 70 border-tower "posts" on @LoBo's Sinai), and not inside an AIRFIELD or SEAPORT candidate's footprint | 0.4 + 0.1 per member, at most 0.9 |
+
+The zone centre is placed on **dry ground the garrison can spawn on**: at least
+2 m above sea level, with the 50 m spawn square at least 0.5 m dry at every
+corner. An airfield centres on its apron (the first `ilsTaxiIn[]` point) when
+that is dry, else the runway footprint's midpoint; a cluster's centre is walked
+inland up to 300 m until it fits. No dry ground, no candidate (the reason is a
+`BASENOTE`).
+
+Model vocabulary is a **name guess**, like `ModelIsBuilding`: the ground truth
+is the Remaster's `abel.wrp` and `eden.wrp` plus @LoBo's Sinai and Lebanon80
+(the token lists and the reasoning are at the top of `BaseDetect.cpp`). Road
+signs, fences and walls never count. A mod pier named something unrelated in a
+directory that says nothing is invisible: run the scaffold and read the BASE
+lines before trusting it.
+
+### Status
+
+Each candidate gets exactly one status, in this order:
+
+| Status | When | Seeded at runtime? |
+|--------|------|--------------------|
+| `outside-region` | the centre lies outside the theatre (`playRegion[]`, below) | no |
+| `covered` | within 300 m (or the candidate's own footprint radius, whichever is larger) of an authored AIRFIELD, SEAPORT or OUTPOST, or within 150 m (`zoneArea`) of any other authored zone. `coveredBy` names that zone | no |
+| `low-confidence` | below 0.5 | no |
+| `seed` | an AIRFIELD or SEAPORT that passed everything | yes, when `seedBases` is on |
+| `offline` | an OUTPOST that passed everything | never: the tool reports it, the author decides |
+
+### Naming
+
+- An AIRFIELD takes the name of a `Names` label that reads like an airfield
+  (`airbase`, `airfield`, `airport`, `airstrip`, `air base`, `air field`,
+  `letiste`, `aerodrom`, `runway`, `flugplatz`) inside its footprint or within
+  300 m of its rim ("Egyptian Airbase"). That keeps the label out of the CITY
+  seed, whose name dedup then drops it; the scaffold drops it from the
+  generated CITY set the same way (a `WARN town '...' skipped: the label names
+  a detected AIRFIELD` line).
+- Otherwise an ILS airfield is "`<World>` Airfield" ("Malden Airfield", the
+  display name unless it is an unresolved `$STR` key), and an object airfield
+  "`<nearest town>` Airfield".
+- A harbour is "`<nearest town within 4 km>` Harbour", an outpost
+  "`<nearest town>` Post"; with no town in reach, the world's name. "Town"
+  here means a `Names` entry that passes the settlement rule (dry, at least 3
+  buildings within 300 m) and does not read like an airfield: a bare label
+  (an islet in the sea, a border, an airbase) names nothing, so the Sharm port
+  is not "Tiran Is Harbour". Stray spaces in a label are collapsed.
+- Two object airfields within 1500 m of each other are one airbase: the
+  weaker folds into the stronger, which re-centres on the middle of the
+  clusters and widens its footprint over them (Sinai's Egyptian Airbase,
+  hangar rows about 1 km apart behind one fence).
+- Every name is made unique against the authored zones and the other
+  candidates with a numeric suffix ("Le Port Post 2"). The name is the zone's
+  savegame key, as for any zone.
+
+### The theatre: `playRegion[]`
+
+```cpp
+class CfgGuerrillaZones
+{
+    playRegion[] = {minX, minZ, maxX, maxZ}; // engine metres: x easting, z northing
+    ...
+};
+```
+
+Base seeding and the CITY seed only consider ground inside the box; a
+candidate outside it reports `outside-region`. **Default (key absent, or not a
+valid box): the bounding box of the template's authored zones, padded by 5 km
+on every side.** That is what keeps a theatre map such as Lebanon80 from
+seeding Beirut's harbour 9 km past its last authored town. Author the key when
+the default is wrong for your campaign. `guerrilla scaffold --play-region minX
+minZ maxX maxZ` writes it and also keeps the generated towns, camp and outposts
+inside it. (The START TOWN menu is not bounded by it yet.)
+
+### `seedBases`: absent means "only if the template authors none"
+
+| Value | Behaviour |
+|-------|-----------|
+| key absent | **1 when the template authors no AIRFIELD and no SEAPORT zone, else 0.** An island that authors its network keeps exactly what it authored; a bare island gets its bases for free. |
+| `seedBases = 1` | Seed every `seed` candidate even next to authored bases (authored zones still cover the candidates they model). |
+| `seedBases = 0` | Seed nothing. The opt-out for a theatre whose bases are scenery (`Guerrilla.Lebanon80`: Ramat David is the only ILS entry, 7 km south of the theatre, and the Tyre quay wall is not a harbour). |
+
+Seeded bases are occupier-owned, carry the type's garrison (AIRFIELD 12,
+SEAPORT 8; detected OUTPOSTs in the scaffold get 6, Abel's authored ladder)
+and pay installation income like an OUTPOST, since the plan 13 AIRFIELD and
+SEAPORT yields are not implemented. They are saved by name like any zone.
+`gmSeededBases` lists what the seed added and `gmDetectedBases` every AIRFIELD
+and SEAPORT candidate with its status (`OCCUPIER-FORCES.md` section 16).
+
+### Checking a world: `scaffold` and `lint --bases`
+
+The scaffold runs the detector against the zones it generates (the CAMP and
+the CITYs, or the kept block with `--keep-zones`) and writes:
+
+- every `seed` AIRFIELD and SEAPORT as a real occupier zone class, inserted
+  after the CAMP;
+- `offline` OUTPOSTs, strongest first, as real OUTPOST classes up to the
+  `--outposts N` budget. **N is the OUTPOST total**: detected outposts first,
+  heuristically placed ones fill the rest and keep 800 m clear of every
+  detected base; detected outposts over the budget become notes;
+- the evidence as `// evidence:` comments above each zone class;
+- every other candidate (`covered`, `outside-region`, `low-confidence`, over
+  budget) as a commented-out `// NOT EMITTED:` note at the end of the Zones
+  block;
+- a `seedBases` comment in the header. Since the scaffolded block usually
+  authors its AIRFIELD and SEAPORT zones, the runtime seed resolves to 0 for
+  it; when the world has none, the comment says the seed is on.
+
+It prints one line per candidate, plus the evidence:
+
+```
+BASE seed AIRFIELD Malden Airfield 7991 9990 conf=0.90
+  evidence: ILS CfgWorlds >> Abel: ilsPosition [7922, 9590], ilsTaxiIn 6 point(s), ilsTaxiOff 6 point(s)
+  evidence: runway [7922, 9590]..[7983, 10458], 870 m; centre on the apron (first ilsTaxiIn point)
+BASE seed SEAPORT Le Port Harbour 8446 3736 conf=0.70
+  evidence: data3d\molo_beton.p3d at [8476, 3754]
+  evidence: data3d\molo_krychle.p3d at [8472, 3774]
+BASE offline OUTPOST Le Port Post 9725 4004 conf=0.90
+```
+
+`lint --bases` judges an existing template against its world (the world is
+the folder suffix, or `--world`):
+
+```powershell
+dist\x64-win-rwdi\PoseidonTools.exe guerrilla lint --bases `
+  --data-dir D:\Arma_CWA\tmp\remaster-shadow-67 `
+  --island arma_CWR\guerrilla-mode\mission\Guerrilla.Abel
+```
+
+```
+BASES Guerrilla.Abel seedBases=0 (default: the template authors 1 AIRFIELD / 1 SEAPORT) authored=6 candidates=5 playRegion={2117, -1310, 14715, 14905} (default: authored zones + 5 km)
+BASE Guerrilla.Abel COVERED AIRFIELD "Malden Airfield" at 7991 9990 conf=0.90 by "Airfield" (AIRFIELD, 94 m)
+BASE Guerrilla.Abel MISSING OUTPOST "Saint Louis Post" at 7490 10569 conf=0.80: offline candidate, never seeded (the outpost ladder is the author's)
+```
+
+`COVERED` names the authored zone that models the candidate and how far away
+it is; `MISSING` is a candidate the template does not author, with whether the
+runtime will seed it under the template's resolved `seedBases` (an OUTPOST
+never is); `SKIPPED` is outside the theatre or below 0.5. The base audit is
+advisory: it never fails the run (an unreadable world exits 2).
+
+### Opting out
+
+- the whole seed: `seedBases = 0;`
+- one place: author a zone there (any type within 150 m, a military type
+  within 300 m covers it), or draw `playRegion[]` so it falls outside;
+- one model family: none. Detection is not configurable per template; if a
+  model is misread, fix the vocabulary in `BaseDetect.cpp` and say so in the
+  commit.
+
 ## Pitfalls
 
 1. **Folder suffix must be the `CfgWorlds` class**, not the display name. A
@@ -450,6 +634,10 @@ the faction doc, not an island problem.
 6. **The scaffold cannot pick your factions.** `defaultOccupier` and
    `defaultResistance` ship as `EAST`/`GUER` placeholders and are wrong for any
    modded island.
-7. **A world without roads is playable but quiet.** Traffic bottoms out in
+7. **Detected bases are a name guess.** Read the scaffold's `BASE` lines and
+   their evidence before shipping, and run `guerrilla lint --bases` after hand
+   edits: a template that authors no AIRFIELD or SEAPORT gets the runtime seed
+   (section 10), which may not be the network you meant.
+8. **A world without roads is playable but quiet.** Traffic bottoms out in
    `GRoadNet` for routes and spawn points, so it simply produces nothing. That is
    a content property of the world, not something the template can fix.

@@ -63,6 +63,9 @@ struct Parsed
 const char* kZonesAuto =
     "class CfgGuerrillaZones\n"
     "{\n"
+    // the whole sample map: these cases test classification, not the
+    // default play region (the authored zones' box + 5 km, issue #76)
+    "    playRegion[] = {0, 0, 30000, 30000};\n"
     "    class Zones\n"
     "    {\n"
     "        class Camp  { name=\"Camp\";  type=\"CAMP\"; owner=\"GUER\"; position[]={1000.0, 1000.0, 0.0}; };\n"
@@ -73,6 +76,7 @@ const char* kZonesAuto =
 const char* kZonesAll = "class CfgGuerrillaZones\n"
                         "{\n"
                         "    seedCities = 1;\n"
+                        "    playRegion[] = {0, 0, 30000, 30000};\n"
                         "    class Zones { class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
                         "position[]={1000.0, 1000.0, 0.0}; }; };\n"
                         "};\n";
