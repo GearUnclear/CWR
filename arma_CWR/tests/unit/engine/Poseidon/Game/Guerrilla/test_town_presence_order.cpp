@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <Poseidon/AI/AI.hpp>
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -91,9 +93,11 @@ struct PresenceOrderFixture
         in.playerX = view.playerX;
         in.playerZ = view.playerZ;
         in.abstractOcc.Resize(registry.NZones());
+        in.settleOcc.Resize(registry.NZones());
         for (int i = 0; i < registry.NZones(); i++)
         {
             in.abstractOcc[i] = counter.AbstractPresence(registry, i, &view);
+            in.settleOcc[i] = counter.SettlePresence(registry, i);
         }
         registry.EvaluateTick(in, fired);
     }
@@ -154,4 +158,31 @@ TEST_CASE("CounterAttack - current bubble follows the holding HQ destination",
     REQUIRE(f.counter.Get(0)->suspended);
     const CounterAttackView nearZone = f.At(1000 - f.registry.Tuning().cacheRadius);
     CHECK(f.counter.AbstractPresence(f.registry, 0, &nearZone) == 5);
+}
+
+TEST_CASE("CounterAttack - entering the bubble prevents a premature town loss",
+          "[game][guerrilla][counterattack][town-presence-order]")
+{
+    PresenceOrderFixture f;
+    f.Hold(CAKRetake);
+    f.Target().support = f.registry.Tuning().townRevertSupport;
+    const CounterAttackView near = f.At(1000 + f.registry.Tuning().cacheRadius);
+    f.TickZone(near);
+    REQUIRE(stricmp(f.Target().owner, f.registry.ResistanceSide()) == 0);
+    CHECK(f.Target().lostCount == 0);
+    CHECK(f.Target().support == Approx(f.registry.Tuning().townRevertSupport));
+
+    f.counter.Step(f.registry, near, 1.0f, nullptr, f.fired);
+    REQUIRE(f.counter.Get(0)->suspended);
+    // Leaving resumes the drain on this zone tick, before Step refreshes
+    // suspension.  One tick below the revert threshold really loses it.
+    f.TickZone(f.far);
+    CHECK(stricmp(f.Target().owner, f.registry.OccupierSide()) == 0);
+    CHECK(f.Target().lostCount == 1);
+    int losses = 0;
+    for (int i = 0; i < f.fired.Size(); i++)
+    {
+        losses += f.fired[i].type == ZETownLost ? 1 : 0;
+    }
+    CHECK(losses == 1);
 }

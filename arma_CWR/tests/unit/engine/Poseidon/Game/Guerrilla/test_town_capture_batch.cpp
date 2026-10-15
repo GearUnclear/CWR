@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <Poseidon/AI/AI.hpp>
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
