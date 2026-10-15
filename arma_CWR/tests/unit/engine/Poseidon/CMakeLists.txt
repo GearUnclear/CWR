@@ -383,6 +383,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/Guerrilla/test_campaign_end.cpp
     Game/Guerrilla/test_counter_attack.cpp
     Game/Guerrilla/test_town_capture_batch.cpp
+    Game/Guerrilla/test_town_presence_order.cpp
     Game/Guerrilla/test_occupier_forces.cpp
     Game/Guerrilla/test_force_packages.cpp
     Game/Guerrilla/test_occupier_air.cpp
