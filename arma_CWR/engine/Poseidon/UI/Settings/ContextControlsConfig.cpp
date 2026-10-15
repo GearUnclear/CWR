@@ -332,6 +332,7 @@ void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
 {
     // Bare Q/E previously also moved the player out of cover. Preserve every
     // other binding, including modified chords and controller inputs.
+    const bool hadMoveUpBinding = profile.BindingCount(UAMoveUp) > 0;
     for (int a = 0; a < UAN; ++a)
     {
         UserAction action = static_cast<UserAction>(a);
@@ -351,8 +352,8 @@ void ContextControlsConfig::ApplyInfantryLeanDefaults(InputProfile& profile)
     profile.Bind(UALeanLeft, InputCode::Key(SDL_SCANCODE_Q));
     profile.Bind(UALeanRight, InputCode::Key(SDL_SCANCODE_E));
     // The old default also had Page Up. Retain a reachable stand-up action
-    // when migrating a profile which only had Q.
-    if (profile.BindingCount(UAMoveUp) == 0)
+    // when migrating a profile which only had Q, but preserve an explicit clear.
+    if (hadMoveUpBinding && profile.BindingCount(UAMoveUp) == 0)
         profile.Bind(UAMoveUp, InputCode::Key(SDL_SCANCODE_PAGEUP));
 }
 
@@ -443,11 +444,14 @@ bool ContextControlsConfig::Save(const std::string& path) const
         for (int a = 0; a < UAN; ++a)
         {
             const auto& entries = profile.GetBindingEntries(static_cast<UserAction>(a));
+            ParamEntry* codes = cfg.AddArray(BindingName(ctx, descs[a]));
+            codes->Clear();
+            // Missing rows receive defaults during migration. Persist cleared
+            // actions explicitly so a later migration can distinguish them
+            // from actions that did not exist when this file was written.
             if (entries.empty())
                 continue;
 
-            ParamEntry* codes = cfg.AddArray(BindingName(ctx, descs[a]));
-            codes->Clear();
             ParamEntry* mods = cfg.AddArray(ModifierName(ctx, descs[a]));
             mods->Clear();
             ParamEntry* scales = cfg.AddArray(ScaleName(ctx, descs[a]));
