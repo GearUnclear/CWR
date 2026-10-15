@@ -3593,3 +3593,50 @@ TEST_CASE("OccupierForces - L14: a test lever's funded operation books a ledger 
     CHECK(f.of.FindOp(900003) < 0);
     check();
 }
+
+TEST_CASE("OccupierForces - a band hold steps the band once, on the net pool, when the last hold closes",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    const int start = f.of.PoolStart();
+    REQUIRE(start >= 20);
+    const int strongFloor = (OccupierForces::StrongLeavePct * start + 99) / 100;
+    // a debit that demotes and a credit that would not restore (hysteresis)
+    // net to a STRONG pool: no edge at all
+    f.of.SetPool(strongFloor + 2);
+    REQUIRE(f.of.Band() == OFBandStrong);
+    {
+        OccupierForces::BandHold outer(f.of);
+        {
+            OccupierForces::BandHold inner(f.of); // holds nest
+            REQUIRE(f.of.Spend(6, "test debit"));
+            CHECK(f.of.Band() == OFBandStrong); // held: not stepped
+        }
+        CHECK(f.of.Band() == OFBandStrong); // the outer hold is still open
+        f.of.Refund(4, "test credit");
+        CHECK(f.of.Pool() == strongFloor);
+    }
+    CHECK(f.of.Band() == OFBandStrong);
+    // the same moves without a hold: the false edge sticks
+    f.of.SetPool(strongFloor + 2);
+    REQUIRE(f.of.Spend(6, "test debit"));
+    f.of.Refund(4, "test credit");
+    CHECK(f.of.Pool() == strongFloor);
+    CHECK(f.of.Band() == OFBandStretched);
+    // a real net demotion is still taken, once, when the hold closes
+    f.of.SetPool(start);
+    REQUIRE(f.of.Band() == OFBandStrong);
+    {
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(start - strongFloor + 1, "test debit"));
+        CHECK(f.of.Band() == OFBandStrong);
+    }
+    CHECK(f.of.Band() == OFBandStretched);
+    // a hold with no pool change steps nothing
+    {
+        OccupierForces::BandHold hold(f.of);
+    }
+    CHECK(f.of.Band() == OFBandStretched);
+}

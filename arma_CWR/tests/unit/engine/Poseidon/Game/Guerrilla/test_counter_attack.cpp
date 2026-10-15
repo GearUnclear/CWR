@@ -4374,3 +4374,145 @@ TEST_CASE("CounterAttack - every arrival and birth logs abstract or live, the sp
     REQUIRE(live.size() == 1);
     CHECK(live[0].find(", 0 m from the player") != std::string::npos);
 }
+
+// The director-video run (2026-10-14, op 3): a push-out on a held Outpost
+// logged "defenders present" although the scenario had deleted the cell that
+// took it.  The census was right: capture.sqs leaves a live 3-man hold squad
+// (GM_HOLD_GRPS) on every captured military zone, the zone tick counts it
+// within zoneArea (150 m) of the base's centre (OCCUPIER-FORCES.md 7.2, "the
+// 3-man hold squad counts"), and a live hold squad makes the arrival a live
+// fight (7.2 "Strikes against live defenders", contract row 2c).  The HQ
+// 500 m away and its own defenders (view.hqDefenders) never count for a base.
+// The arrival line names what it counted, so a reader can tell a hold squad
+// from a phantom.
+TEST_CASE("CounterAttack - a BASE arrival counts only the base's own census and the log names it",
+          "[game][guerrilla][counterattack]")
+{
+    // the HQ 500 m from the held base, with four defenders of its own; the
+    // player far away
+    auto hqNearBase = [](Fixture& f)
+    {
+        CounterAttackView v = Fixture::View(FarX, FarZ);
+        v.hqEstablished = true;
+        v.hqPos = f.Z(f.farBase).pos + Vector3(500.0f, 0.0f, 0.0f);
+        v.hqZone = -1;
+        v.hqDefenders = 4;
+        return v;
+    };
+
+    SECTION("the base's hold squad lives: the arrival goes live and the line names the count")
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.Z(f.farBase).owner = "GUER";
+        f.Z(f.farBase).garrison = 0;
+        f.Z(f.farBase).lastGuer = 3; // the hold squad capture.sqs left there
+        f.Z(f.farBase).lastGuerHold = 3;
+        const CounterAttackView view = hqNearBase(f);
+        FakeOps ops;
+        AutoArray<ZoneEventRecord> fired;
+        CoreLogCapture log;
+        REQUIRE(f.ca.LaunchFunded(f.registry, view, KindOrder(CAKBase, f.farBase, f.post, 5, 3), &ops, fired));
+        f.ca.Step(f.registry, view, 50000.0f, &ops, fired);
+        CHECK(ops.spawns == 1);
+        REQUIRE(f.ca.Count() == 1);
+        CHECK(f.ca.Get(0)->phase == CATravel); // at the edge, born (the test world refuses the squad)
+        const std::vector<std::string> arrived = log.With({"arrived abstract at FarBase"});
+        REQUIRE(arrived.size() == 1);
+        CHECK(arrived[0].find("defenders present: goes live at the edge; counted 3 resistance unit(s) within 150 m "
+                              "of its centre, the player not among them") != std::string::npos);
+    }
+
+    SECTION("the hold squad is gone: the HQ 500 m away is no defender, the base is held empty and retaken")
+    {
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        f.Z(f.farBase).owner = "GUER";
+        f.Z(f.farBase).garrison = 0;
+        f.Z(f.farBase).lastGuer = 0; // the cell and its hold squad deleted
+        f.Z(f.farBase).lastGuerHold = 0;
+        const CounterAttackView view = hqNearBase(f);
+        FakeOps ops;
+        AutoArray<ZoneEventRecord> fired;
+        CoreLogCapture log;
+        REQUIRE(f.ca.LaunchFunded(f.registry, view, KindOrder(CAKBase, f.farBase, f.post, 5, 3), &ops, fired));
+        f.ca.Step(f.registry, view, 50000.0f, &ops, fired);
+        CHECK(ops.spawns == 0);
+        REQUIRE(f.ca.Count() == 1);
+        CHECK(f.ca.Get(0)->phase == CAHolding);
+        CHECK(f.ca.AbstractPresence(f.registry, f.farBase) == 5);
+        const std::vector<std::string> arrived = log.With({"arrived abstract at FarBase"});
+        REQUIRE(arrived.size() == 1);
+        CHECK(arrived[0].find("(holds the empty target)") != std::string::npos);
+        CHECK(arrived[0].find("defenders present") == std::string::npos);
+        // the zone tick runs occCapture off-screen on the abstract presence
+        ZoneTickInputs in = f.Inputs(FarX, FarZ, -1, 0, f.farBase, 5);
+        AutoArray<ZoneEventRecord> zf;
+        for (int tick = 0; tick < 10 && stricmp(f.Z(f.farBase).owner, "GUER") == 0; tick++)
+        {
+            f.registry.EvaluateTick(in, zf);
+        }
+        CHECK(CountEvents(zf, ZEBaseLost, f.farBase) == 1);
+        CHECK(Fixture::Str(f.Z(f.farBase).owner) == "EAST");
+    }
+}
+
+TEST_CASE("CounterAttack - the air re-plan is one ledger movement: the band is stepped once, on the net pool",
+          "[game][guerrilla][counterattack][occupierforces][air]")
+{
+    // the director run of 2026-10-14 (op 4, tmp/of-director-video run3): a
+    // funded column re-planned as a Mi17 insertion logged STRONG -> STRETCHED
+    // (the airframe charged) and STRETCHED -> STRONG (the ground hull
+    // refunded) in the same tick.  Here the pool sits where the debit alone
+    // demotes the band and the credit alone cannot restore it (STRETCHED
+    // leaves only above 66 %), while the net movement keeps the pool on the
+    // 60 % STRONG floor: one re-plan must leave the band STRONG with no edge
+    // logged, and move the pool by exactly the price difference
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    ListenerGuard guard(&of); // the director's own ledger hears the events
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    const CounterAttackOrder order = TruckOrder(f.town, f.post, 4); // the row holds 4: truck 3 + its driver
+    REQUIRE(of.Spend(order.priceUnits, "test launch"));
+    REQUIRE(of.BookLeverOp(order.opId, "Town", order.kind, order.package, order.priceUnits));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, order, nullptr, fired));
+    CounterAttack::Record& r = const_cast<CounterAttack::Record&>(*f.ca.Get(0));
+    REQUIRE(r.phase == CATravel);
+    REQUIRE(r.OwedUnits() == order.priceUnits);
+
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240.0f;
+    cat.hulls[FPTransportHeli].cargo = 14;
+    cat.hulls[FPTransportHeli].crew = 2;
+    const int heli = ForcePackages::HullPrice(FPTransportHeli, false) + 2; // from FarBase, the airfield
+    const int net = heli - order.priceUnits;
+    REQUIRE(net > 0);
+    const int start = of.PoolStart();
+    // the lowest pool STRONG still holds (not below 60 %); the re-plan nets to it
+    const int strongFloor = (OccupierForces::StrongLeavePct * start + 99) / 100;
+    const int before = strongFloor + net;
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before, start) == OFBandStrong);
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before - heli, start) == OFBandStretched); // the debit alone
+    REQUIRE(OccupierForces::StepBand(OFBandStretched, before - net, start) == OFBandStretched); // then the credit
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before - net, start) == OFBandStrong); // the net movement
+    of.SetPool(before);
+    REQUIRE(of.Band() == OFBandStrong);
+    auto held = [&]() { return of.Pool() + of.OpOutstanding(of.FindOp(order.opId)); };
+    const int held0 = held();
+
+    CoreLogCapture log;
+    REQUIRE(f.ca.AirReplan(f.registry, far, r, cat));
+    CHECK_FALSE(r.airReplanned); // the row took the airframe
+    CHECK(r.priceUnits == heli);
+    CHECK(of.OpOutstanding(of.FindOp(order.opId)) == heli);
+    CHECK(of.Pool() == before - net); // one net movement: the price difference
+    CHECK(held() == held0);
+    CHECK(of.Band() == OFBandStrong);
+    CHECK(log.With({"OccupierForces: band"}).empty()); // no edge, not even a transient one
+    CHECK(log.With({"air re-plan", "on the ledger row"}).size() == 1);
+}

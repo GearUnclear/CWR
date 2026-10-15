@@ -716,9 +716,15 @@ bool CounterAttack::AirReplan(ZoneRegistry& registry, const CounterAttackView& v
     // the operation's ledger row holds the airframe like a ground hull, so
     // its refund or loss settles through the row (gmOccupierOps and the row
     // agree); with no row to take it the price is settled straight to the
-    // pool (airReplanned)
+    // pool (airReplanned).  The airframe's debit and the ground hull's credit
+    // below are one ledger movement: the band is stepped once, on the net
+    // pool, when the hold closes (stepped between them, a STRONG pool read
+    // STRETCHED and STRONG again in the same tick, a false edge the player
+    // saw through gmOccupierForces and the hysteresis could keep)
+    OccupierForces& forces = OccupierForces::Instance();
+    OccupierForces::BandHold hold(forces);
     bool booked = false;
-    if (!OccupierForces::Instance().SpendOnOp(r.opId, price, FPTransportHeli, "air re-plan", booked))
+    if (!forces.SpendOnOp(r.opId, price, FPTransportHeli, "air re-plan", booked))
     {
         return false;
     }

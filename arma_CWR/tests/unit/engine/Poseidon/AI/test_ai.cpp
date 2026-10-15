@@ -138,3 +138,75 @@ TEST_CASE("mission arcade user text decodes legacy CP1250 on load", "[ai][arcade
         REQUIRE(Poseidon::SetLanguage(oldLanguage));
     }
 }
+
+// AICenter::AddGroup with no id: a released slot must come back, or a long
+// session of groups created and released at runtime walks the id past
+// MaxGroups (the letter and colour register; 9 x 7 = 63 on the Remaster)
+// with only a handful of groups alive (director scenario, 2026-10-15).
+TEST_CASE("new group id takes the lowest free slot of the register", "[ai][groupid]")
+{
+    const int maxGroups = 63;
+
+    SECTION("an empty center starts at 1")
+    {
+        REQUIRE(AICenter::PickNewGroupId(nullptr, 0, maxGroups) == 1);
+    }
+    SECTION("a dense register continues past its last id")
+    {
+        const int used[] = {1, 2, 3};
+        REQUIRE(AICenter::PickNewGroupId(used, 3, maxGroups) == 4);
+    }
+    SECTION("a gap a released group left is reused before a higher id")
+    {
+        const int used[] = {1, 40, 3};
+        REQUIRE(AICenter::PickNewGroupId(used, 3, maxGroups) == 2);
+    }
+    SECTION("non-positive ids do not occupy a slot")
+    {
+        const int used[] = {0, -1, 1};
+        REQUIRE(AICenter::PickNewGroupId(used, 3, maxGroups) == 2);
+    }
+    SECTION("a full register falls back to one past the largest id")
+    {
+        int used[63];
+        for (int i = 0; i < 63; i++)
+        {
+            used[i] = 63 - i;
+        }
+        REQUIRE(AICenter::PickNewGroupId(used, 63, maxGroups) == 64);
+    }
+    SECTION("no register (no config) keeps the upstream one-past-largest rule")
+    {
+        const int used[] = {1, 5};
+        REQUIRE(AICenter::PickNewGroupId(used, 2, 0) == 6);
+    }
+}
+
+TEST_CASE("overlapping group churn never leaves the register", "[ai][groupid]")
+{
+    // one long-lived group (the player's) plus two short-lived ones whose
+    // lifetimes overlap: each new group is created before the previous one
+    // is released.  Upstream's one-past-largest rule climbed by one per cycle
+    // and left the register after 61 cycles; the lowest-free rule must stay
+    // at ids 1..3 for any number of cycles.
+    const int maxGroups = 63;
+    int live[3] = {1, 0, 0};
+    live[1] = AICenter::PickNewGroupId(live, 2, maxGroups);
+    REQUIRE(live[1] == 2);
+    int highest = live[1];
+    for (int cycle = 0; cycle < 10000; cycle++)
+    {
+        live[2] = AICenter::PickNewGroupId(live, 2, maxGroups);
+        REQUIRE(live[2] >= 1);
+        REQUIRE(live[2] <= maxGroups);
+        REQUIRE(live[2] != live[0]);
+        REQUIRE(live[2] != live[1]);
+        if (live[2] > highest)
+        {
+            highest = live[2];
+        }
+        live[1] = live[2]; // release the older squad, keep the newer one
+        live[2] = 0;
+    }
+    REQUIRE(highest <= 3);
+}
