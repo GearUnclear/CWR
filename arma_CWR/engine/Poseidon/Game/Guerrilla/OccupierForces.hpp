@@ -554,6 +554,28 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // caller then settles the price straight to the pool).  False: refused,
     // nothing debited.
     bool SpendOnOp(int opId, int units, int package, const char* why, bool& booked);
+    // one ledger movement made of a debit and its matching credit in the same
+    // step (the air re-plan: the airframe charged, the ground hull it
+    // replaces refunded through the row).  While a hold is open the band is
+    // not re-stepped; it is stepped once when the outermost hold closes, so a
+    // step that nets out never shows a band edge between its debit and its
+    // credit (STRONG to STRETCHED and back in one tick; the hysteresis can
+    // even keep the false edge).  Holds nest.  The pool itself moves as
+    // usual, and Spend's CanOperate() reads the band as it was before the
+    // movement.
+    void HoldBand() { _bandHold++; }
+    void ReleaseBand();
+    class BandHold
+    {
+    public:
+        explicit BandHold(OccupierForces& of) : _of(of) { _of.HoldBand(); }
+        ~BandHold() { _of.ReleaseBand(); }
+        BandHold(const BandHold&) = delete;
+        BandHold& operator=(const BandHold&) = delete;
+
+    private:
+        OccupierForces& _of;
+    };
     // units back into the pool (survivors with no base, surplus, a flipped
     // base's live garrison, partial-spawn failures, hull refunds: 5.5).
     // May exceed poolStart.  Inactive: no-op.
@@ -856,7 +878,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     };
 
     void LoadFromConfig();
-    // re-step the band after a pool change; logs a change
+    // re-step the band after a pool change; logs a change.  Deferred while a
+    // BandHold is open
     void UpdateBand();
     void Refill(float elapsed);
     // an INFO line at most every LogQuiet seconds (others counted)
@@ -935,6 +958,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int _opCounter = 0;
     float _refillAccum = 0;
     int _band = OFBandStrong;
+    // BandHold: the open holds, and whether a pool change waited for the last
+    // to close (transient, never saved)
+    int _bandHold = 0;
+    bool _bandDirty = false;
     float _control = 1.0f;
     int _wavesFired = 0;
     bool _finalFired = false;

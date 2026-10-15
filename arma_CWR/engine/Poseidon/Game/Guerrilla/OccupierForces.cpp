@@ -750,12 +750,35 @@ float OccupierForces::ComputeControl(const ZoneRegistry& registry) const
 
 void OccupierForces::UpdateBand()
 {
+    if (_bandHold > 0)
+    {
+        _bandDirty = true; // stepped once when the last hold closes
+        return;
+    }
     const int next = StepBand(_band, _pool, _poolStart);
     if (next != _band)
     {
         GM_DIRECTOR_INFO(Core, "OccupierForces: band {} -> {} (pool {} of {})", BandName(_band), BandName(next), _pool,
                  _poolStart);
         _band = next;
+    }
+}
+
+void OccupierForces::ReleaseBand()
+{
+    if (_bandHold <= 0)
+    {
+        return;
+    }
+    _bandHold--;
+    if (_bandHold == 0 && _bandDirty)
+    {
+        _bandDirty = false;
+        // the whole movement at once: one band step on the net pool
+        if (Active())
+        {
+            UpdateBand();
+        }
     }
 }
 

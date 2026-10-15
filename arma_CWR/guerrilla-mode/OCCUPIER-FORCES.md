@@ -1738,7 +1738,13 @@ puts the airframe on the operation's row (package and outstanding), so its
 hull's; `airReplanned` now marks only a re-plan no row could take (and
 saves from before the change), which still settles straight to the pool.
 The unit cases assert pool + outstanding across a re-plan that lands, one
-refunded while abstract, and one shot down.
+refunded while abstract, and one shot down. The airframe's debit and the
+ground hull's credit are one ledger movement: the band is stepped once on
+the net pool (`OccupierForces::BandHold`), so a re-plan can no longer show
+a false STRONG to STRETCHED edge between the two (found in the director
+video run of 2026-10-15; `guerrilla_forces_replan_band` pins it).
+Affordability stays gross: `Spend` still judges the helicopter price
+against the pool before the hull returns.
 
 Closed after `402ece6`: **K and the settlement probe** (5.1): the probe
 returns for K. A seeded town counts only when it passes it, the verdict is
