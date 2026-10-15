@@ -432,7 +432,11 @@ bool OccupierForces::CanOperateIn(int band, int pool, int poolStart, float floor
     {
         return false;
     }
-    if (band == OFBandThin && (float)pool < floor * (float)poolStart)
+    // Compare shares at the tuning's precision: e.g. 15/50 equals 0.3f,
+    // whereas 0.3f * 50 rounds above 15 and rejects that exact boundary.
+    const bool belowFloor =
+        poolStart > 0 ? (float)pool / (float)poolStart < floor : (float)pool < floor * (float)poolStart;
+    if (band == OFBandThin && belowFloor)
     {
         return false;
     }
