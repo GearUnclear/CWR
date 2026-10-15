@@ -26,7 +26,8 @@ void ScrollListPage::Mount(OptionsShell& shell)
 
 void ScrollListPage::Unmount(OptionsShell& shell)
 {
-    m_list.reset();
+    // Detach, do not destroy: the caller may be running inside this list.
+    m_detachedList = std::move(m_list);
     OptionsPage::Unmount(shell);
 }
 

@@ -949,7 +949,12 @@ bool OptionsScrollList::PollPointerActionClick()
         if (slot >= 0)
             hoverRow = RowAtSlot(slot);
     }
-    if (hoverRow < 0 && m_provider.RowKind(m_rowFocus) == KindAction)
+    // m_rowFocus can trail a provider whose row count just shrank; never
+    // hand the provider a row it does not have.
+    const int rowCount = m_provider.RowCount();
+    if (hoverRow >= rowCount)
+        hoverRow = -1;
+    if (hoverRow < 0 && m_rowFocus >= 0 && m_rowFocus < rowCount && m_provider.RowKind(m_rowFocus) == KindAction)
         hoverRow = m_rowFocus;
 
     if (down && !m_pointerLeftWasDown)
@@ -970,12 +975,15 @@ bool OptionsScrollList::PollPointerActionClick()
         bool captured = m_pointerActionCaptured;
         m_pointerActionRow = -1;
         m_pointerActionCaptured = false;
-        if (row >= 0 && !captured && hoverRow == row)
+        if (row >= 0 && row < rowCount && !captured && hoverRow == row)
         {
             m_rowFocus = row;
             FocusFocusedRow();
-            m_provider.OnRowAction(row, m_host);
             m_pointerLeftWasDown = down;
+            // Last statement on purpose: the action may pop this page (Close
+            // row -> IDC_CANCEL -> PopPage), which unmounts it and detaches
+            // this list.  Touch no member after the call.
+            m_provider.OnRowAction(row, m_host);
             return true;
         }
     }
