@@ -68,7 +68,9 @@ triSimUntil { fsOps = []; {if ((_x select 2) == "DIRECTOR") then {fsOps = fsOps 
 triAssertEq [(format ["%1", gmForcesTune ["directorInterval", 600]]), "true"]
 triAssertEq [(format ["%1", gmForcesForce ["cooldown", fsB, 1500]]), "true"]
 fsRow = gmOccupierForces
-triAssertEq [(count fsRow), 15]
+// 30 slots: the ten documented, five director (phase 3), nine wave (phase 4),
+// five phase 6, and the settlement probe count (OccupierForcesCommands.cpp)
+triAssertEq [(count fsRow), 30]
 fsPool = fsRow select 0
 fsBand = fsRow select 2
 fsTokens = fsRow select 3

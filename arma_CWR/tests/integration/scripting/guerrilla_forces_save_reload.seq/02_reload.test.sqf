@@ -18,7 +18,7 @@ triAssertEq [(triLoadGame "forcesdir"), "OK"]
 triSimFrames 5
 player allowDammage false
 frRow = gmOccupierForces
-triAssertEq [(count frRow), 15]
+triAssertEq [(count frRow), 30]
 triAssertEq [(frRow select 0), fsPool]
 triAssertEq [(frRow select 2), fsBand]
 triAssertEq [(frRow select 3), fsTokens]
