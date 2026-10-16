@@ -69,6 +69,15 @@ brHold setCombatMode "BLUE"
 {_x allowDammage false} forEach (units brHold)
 doStop (units brHold)
 triAssertEq [((gmZoneSim brO) select 14), 0]
+// the source is Le Port Harbour (the road quote, 2026-10-16): by road the
+// Airfield is the nearer base (4986 m against 5089 m, the shortest leg wins,
+// 6.5), but its road passes the player in the north, so its force would be
+// born there and walk 3.8 km live.  The Airfield's reserve is held at its
+// keep (3 of 12: no spare), so the Harbour is the one base that can staff
+// the 6
+brAf = gmZoneIndex "Airfield"
+triAssertGe [brAf, 0]
+gmZoneSet [brAf, "garrison", 3]
 
 // the player leaves for the north (2.2 km from the Outpost)
 brFar = [7922, 8500, 0]
@@ -93,7 +102,7 @@ triSimUntil { ((gmOccupierForces) select 4) == "AWAKE" }
 brOp = []
 triSimUntil { brOp = []; {if (((_x select 1) == "BASE") and ((_x select 5) == "Outpost")) then {brOp = _x}} forEach gmOccupierOps; (count brOp) > 0 }
 triAssertEq [(brOp select 2), "DIRECTOR"]
-triAssertEq [(format ["%1", (brOp select 4) != ""]), "true"]
+triAssertEq [(brOp select 4), "Le Port Harbour"]
 triAssertGe [(brOp select 7), 4]
 brId = brOp select 0
 
