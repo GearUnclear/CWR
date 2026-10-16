@@ -37,6 +37,20 @@ phases:
     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
 
 items:
+  - id: gl33-fragment-sunlight
+    title: "GL33 per-fragment sunlight on normal-bearing meshes"
+    phase: hardening
+    status: in-progress
+    gh_issues: []
+    depends_on: []
+    commits: []
+    summary: >
+      Move mesh sun diffuse evaluation to the fragment shader for normal, detail,
+      and grass materials. Preserve prelit screen draws and existing water,
+      specular, shadow, fog, alpha, and local-light paths. This is a focused
+      lighting step, not a full landscape or asset overhaul.
+    log:
+      - "2026-10-16: 11 shader compile/link combinations and 15 synthetic pixel cases pass on Mesa llvmpipe OpenGL 4.5. Baseline comparisons use main 16259cc. Full engine build and demo before/after comparison remain blocked after the execution service cancelled long-running dependency/download jobs. No in-game visual acceptance or hardware performance claim."
   - id: native-infantry-leaning
     title: "Native infantry leaning with consistent camera, weapon and hit geometry"
     phase: phase-2

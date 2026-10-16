@@ -48,6 +48,11 @@ layout(location = 4) in vec2 aUV0;
 layout(location = 5) in vec2 aUV1;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -55,6 +60,10 @@ out float vFogTC;
 out vec3 vWorldRel;
 
 void main() {
+    vLightNormal = vec3(0.0);
+    vIndirectLight = vec3(0.0);
+    vSunTerm = vec4(0.0);
+    vSunDirection = vec3(0.0);
     float w = 1.0 / aRhw;
     gl_Position.x = (aPos.x * vpScale.x - 1.0) * w;
     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
@@ -111,6 +120,11 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -175,7 +189,12 @@ void main() {
         litColor.rgb += contrib;
     }
 
-    vColor = clamp(litColor, 0.0, 1.0);
+    vColor = clamp(litColor, 0.0, 1.0); // retained for water/flat/legacy consumers
+    vLightNormal = worldNormal;
+    vSunTerm = vec4(diffuse.rgb * sunEn.x, 1.0);
+    vSunDirection = -sunDir.xyz;
+    // Keep emissive, ambient and local-light contributions; evaluate only sunlight per fragment.
+    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x;
 
     vec3 spec = vec3(0.0);
     if (specEn.x > 0.5 && sunEn.x > 0.0) {
@@ -216,6 +235,11 @@ layout(std140) uniform PSConstants {
 uniform sampler2D tex0;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
@@ -226,6 +250,14 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+vec3 surfaceLighting() {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(n, vSunDirection), 0.0);
+    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+}
+
 void main() {
     // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
     // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
@@ -234,7 +266,7 @@ void main() {
     // accumulator pass) is idempotent.  Removing the late-test forcing
     // lets early-Z and hierarchical-Z work — meaningful perf win on
     // opaque-heavy scenes.
-    vec4 r0 = vColor * texture(tex0, vUV0);
+    vec4 r0 = vec4(surfaceLighting(), vColor.a) * texture(tex0, vUV0);
     r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
     r0.rgb += vSpecColor.rgb;
 
@@ -336,6 +368,11 @@ uniform sampler2D tex0;
 uniform sampler2D tex1;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
@@ -346,11 +383,19 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+vec3 surfaceLighting() {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(n, vSunDirection), 0.0);
+    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+}
+
 void main() {
     // No gl_FragDepth — see PSNormal.
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
-    vec4 r0 = vColor * t0;
+    vec4 r0 = vec4(surfaceLighting(), vColor.a) * t0;
     r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
     r0.rgb *= t1.a * 2.0;
     r0 += vSpecColor;
@@ -453,6 +498,11 @@ uniform sampler2D tex0;
 uniform sampler2D tex1;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
@@ -463,6 +513,14 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+vec3 surfaceLighting() {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(n, vSunDirection), 0.0);
+    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+}
+
 void main() {
     // No gl_FragDepth — see PSNormal.
     vec4 t0 = texture(tex0, vUV0);
@@ -471,7 +529,7 @@ void main() {
     if (vFogTC < 0.0) discard;
 
     vec4 r0;
-    r0.rgb = vColor.rgb * t0.rgb;
+    r0.rgb = surfaceLighting() * t0.rgb;
     r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
     r0.rgb = clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0);
     if (shadowCtl.x > 0.5) {
@@ -625,6 +683,11 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -632,6 +695,10 @@ out float vFogTC;
 out vec3 vWorldRel;
 
 void main() {
+    vLightNormal = vec3(0.0);
+    vIndirectLight = vec3(0.0);
+    vSunTerm = vec4(0.0);
+    vSunDirection = vec3(0.0);
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
     gl_Position   = proj * view * worldPos;
     vColor        = diffuse;        // unlit — direct from material.diffuse
