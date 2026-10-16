@@ -445,6 +445,7 @@ items:
       budget, and global state round-trips a saveGame. Everything Phase 2 waits on
       this signal.
     log:
+      - "2026-10-12: planned the requested interactive Malden test lab in arma_CWR/guerrilla-mode/GATE-ZERO-TEST-MISSION-PLAN.md: reuse the human-suite runner, add audited station teleports, in-game blocker-policy comparisons/preferences, isolated real-menu save/quit/resume checks and durable log/report collection. Separate campaign observations, fixtures, policy experiments and human verdicts. Implementation and human results remain pending."
       - "2026-10-05: refreshed the local Classic/LoBo runtime and recorded campaign acceptance at arma_CWR/guerrilla-mode/acceptance/2026-10-05-campaign.md. All four automated human-suite selectors passed (action/ledger plumbing, native road fixture, two-process save/load and rendered menu captures). These harness confirmations do not constitute human acceptance: all 43 human cases / 104 steps and the island/faction/outfit matrix remain UNTESTED. Gate-Zero stays in progress."
       - "run-game.ps1 log capture + Guerrilla.Abel template + world-gated installer are all groundwork for exactly this."
       - "2026-10-11: #71 added a full-scale session runbook for the Remaster (arma_CWR/guerrilla-mode/FULL-SCALE-SESSION.md, S1 Malden and S2 Sinai + @LoBo, OFF-a..d rows and a budget table in HUMAN-TEST-RUN.md) and its automated half on the packages/RemasterUD lane (all green; worst stop 61 live AI, frame p95 13.6 ms in an 800x600 window). The 1080p human session is still to be run."
@@ -1349,6 +1350,48 @@ items:
       - "2026-07-16: landed as 04c4c06. Re-verified pre-commit on this machine: PoseidonTests build green, [guerrilla] 81 cases + [gameStateExt] 29 cases pass (the [vehicleAI] SIGSEGV under an explicit tag filter is the deliberate hidden [oobWeapon] crash-repro test, not a regression)."
       - "Holder contents already persisted (ResourceSupply::Serialize rides the world _buildings serialization); the tiers add script access and the keep-when-empty lifetime."
 
+  - id: persistent-crash-loot-sites
+    title: "Persistent vehicle crash loot sites with timed expiry and AI search patrols"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [arms-stash-engine, ambient-traffic, offscreen-contract]
+    gh_issues: [80]
+    summary: >
+      Generated road accidents (enemy vehicle plus destroyed civilian vehicle),
+      helicopter crashes and rare feasible shoreline boat wrecks hold physical
+      supplies and persist across distance changes and save/load. Roll a 20-60
+      minute simulation-time lifetime
+      once per site; dispatch a helicopter, light vehicle or infantry search before
+      expiry, then withdraw and clean up. Proposed native CrashSiteRegistry owns
+      saved phases, deadlines, loot and actor references, reusing persistent stash
+      cargo and Traffic placement/perception patterns. Actual helicopter flight
+      requires new validated faction capabilities. Keep response budgets bounded
+      and preserve depleted cargo, player property and cleanup ownership.
+    log:
+      - "2026-10-12: filed #80 after auditing StashRegistry, loot/campaign/QRF scripts, Traffic wreck cleanup and the off-screen contract. Design only; implementation pending. Proposed defaults: two sites, one live search team, dispatch five minutes before expiry. Physical removal may wait for a safe perception window after loot expiry. Optional adoption of real traffic wrecks must transfer cleanup ownership; loaded-convoy destruction depends on resolving #78."
+      - "2026-10-12: clarified scene roster with the user: enemy/civilian road collision, helicopter crash, seldom a boat if feasible. Updated #80 with per-scene placement and rarity, separate scene/response pools, two-hull cleanup ownership and coastal/inland tests. Boat probes must account for floating dead ships sinking and Landscape::WaterDepth returning zero; grounded/static wrecks with reachable shore loot are the proposed first delivery."
+
+  - id: realistic-town-recruiting
+    title: "Optional realistic town recruiting: local volunteers, upfront fees and dormant wages"
+    phase: phase-2
+    status: planned
+    priority: 2
+    depends_on: [engine-native-systems, civilian-ambience-layer]
+    gh_issues: [81]
+    summary: >
+      Saved new-game alternative to Traditional recruiting. Hire from owned,
+      supportive, calm CITYs using bounded local candidate pools and the existing
+      treasury; disable HR in this mode. Preserve faction/outfit/gear progression,
+      add recoverable owned-town goodwill and failure-safe purchase commits.
+      Wages default silently to zero, with saved prospective developer tuning.
+      See guerrilla-mode/REALISTIC-RECRUITING.md for rules, source grounding,
+      Astra critique history and Remaster opening/balance/persistence gates.
+    log:
+      - "2026-10-12: three user-requested Astra critique rounds refined and approved the design against recruiting, economy, support, undercover, journal and saved-script behavior. Planning only; no material unresolved design issues. Proposed 30/60 R fees, 2 initial candidates, cap 3 per town and one per 600 eligible simulation seconds remain playtest values; wages stay zero unless the user changes them. No aggregate fighter cap or new currency. Shared prerequisites: monotonic training and failure-safe hiring."
+      - "2026-10-12: issue preparation corrected the companion-loss opening: undercover.sqs keeps gmUndercover true after exposure, so there is no existing exposed-player capture route (#79 D1). Resolving this is a release blocker. GitHub issue draft prepared, but automatic approval review rejected publishing the detailed internal plan to GearUnclear/CWR; explicit destination/payload approval pending."
+      - "2026-10-12: user explicitly authorized publication after Astra improved the document. Filed #81 with the full specification, six illustrative code snippets, ownership map, bounded requests, transaction/failure checks, clock/payroll rules and launch/load/journal wiring. Explicit organizing intent preserves undercover perception and covers clear neutral/occupier-administered CITYs. Implementation and Remaster opening/balance verification remain pending; wages default silently to zero."
+
   - id: stash-recruit-arming
     title: "Recruit arming from physical stashes + stash UX (stash tier 3, issue #17)"
     phase: phase-2
@@ -1766,6 +1809,26 @@ items:
       - "Its Phase-3 systems (Protected Villages/cordon, trackers, detention/rescue, expansion-under-passivity, informers) live in the full-mode item."
       - "2026-10-11: #71 off-screen contract posted its rules for this director on #35: town security (#72) keeps a persistent reserve that is live only in the bubble with survivor write-back and no remote intimidation; checkpoints are persistent records; QRF/Fireforce should draw from a pool and write survivors back; convoys may carry D2 reinforcements; remote closures run on the abstract tick, deterministic and journaled."
       - "2026-10-11: filed #72 as a researched first slice for town security: CITY zones are excluded from native garrisons, START TOWN moves HQ/player without guaranteeing nearby enemy content, and existing garrisons use random marker-centered placement. Scope covers persistent occupier security, road/building anchors, fixed guards versus responders, spawn accounting, and full-Remaster placement/lifecycle acceptance; broader off-screen simulation remains #71. Source audit only, no new live-play verification."
+
+  - id: roadblock-checkpoint-inspections
+    title: "Staffed roadblock inspections: expanding queues and civilian/occupier participation"
+    phase: phase-2
+    status: planned
+    priority: 3
+    depends_on: [ambient-traffic, nearest-roads-command, deep-undercover-system]
+    gh_issues: [87]
+    summary: >
+      Native checkpoint coordinator: acquire approaching vehicles within 100 m,
+      extend queue intake behind the tail along the road, and retain exclusive
+      movement control through inspection and downstream release. Civilian and
+      occupier drivers both exit, report to a guard, wait for a vehicle search,
+      reboard and resume their original trip; independent participation toggles
+      default on. Includes player voice/subtitle instructions, actual weapon
+      searches, rejection of stolen military vehicles, convoy regrouping,
+      persistent guard reserves/session state and full-Remaster acceptance.
+      First delivery is one authored checkpoint; automatic placement follows.
+    log:
+      - "2026-10-12: filed #87 with the owner's agreed behavior, source integration map, configuration and state contracts, expanding queue/overflow rules, seven implementation stages and acceptance matrix. Child scope of #35; coordinate guard roles with #72 and off-screen lifecycle with #71. Planning only; no checkpoint implementation or new gameplay verification claimed."
 
   - id: guerrilla-journal
     title: "Resistance dossier: the map notepad as the campaign's own record (Contents / Dispatches / Operations + Objectives, Suggested actions, Supplies, Resistance strength / People + The roster / Places + a page per zone / Chronicles + The record / Reference + the handbook chapters)"
