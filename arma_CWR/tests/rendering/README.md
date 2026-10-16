@@ -363,3 +363,47 @@ The current wiring guard explicitly supports the original P inline ownership tes
 and the P3 terrainEligible definition with both diagnostic and relief zero-reset
 expressions. The current P3 suite passes the same assertion counts. Use the
 published N3 baseline extracted above; historical local snapshots are optional.
+
+
+### Authored-cloud registration diagnostic (Q, default-off experiment)
+
+`CWR_CLOUD_REGISTRATION=1` requests a bounded transmission-map diagnostic. It is
+not beauty attenuation: eligible terrain displays sampled transmission as
+grayscale. The map uses original uncompressed authored-cloud quads, not their
+camera-compressed sky display positions. Actual registration requires separate
+engine capture review; synthetic checks cannot establish it.
+
+From a checkout containing the published P3 commit:
+
+```sh
+git show e37b7280e65706f1b371e8aabdd77c2c9a4ac22c:arma_CWR/engine/Poseidon/World/Terrain/LandscapeRender.cpp > /tmp/cwr-P3-landscape.cpp
+git show e37b7280e65706f1b371e8aabdd77c2c9a4ac22c:arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp > /tmp/cwr-P3-shaders.cpp
+cd arma_CWR
+python tests/rendering/test_cloud_registration_gl33.py \
+  --legacy-landscape /tmp/cwr-P3-landscape.cpp \
+  --baseline /tmp/cwr-P3-shaders.cpp --report /tmp/cloud-registration.json
+python tests/rendering/test_cloud_bindings_gl33.py --report /tmp/cloud-bindings.json
+```
+
+Current source paths default to this checkout; explicit `--engine-root` and
+`--source` overrides support frozen complete trees. The state test additionally
+needs a C++ compiler, OpenGL development headers/library and supports optional
+`--include-dir`/`--gl-library` overrides. No private snapshots or game assets are
+needed for these tests.
+
+The suite compiles the unchanged shared layout helper alongside extracted legacy
+expressions using a deterministic synthetic RNG (not actual engine random-value
+distribution). 1,269 native checks cover exact visible-instance parity, negative
+cells/phase wraps, ray-plane projection and receiver-height shear. 240 actual-EGL
+checks cover synthetic AI88 intensity/alpha swizzle, weather-scaled multiplicative
+overlap, asymmetric UV alpha orientation, out-of-range authored-clamp edges, exact map boundaries, diagnostic receiver sampling, outside-map neutrality and disabled,
+prelit and material exclusions. Requires a C++17 compiler, Python numpy/moderngl
+and EGL/OpenGL 3.3. Actual assets, visual registration, missing-texture/overflow
+engine execution and hardware performance are not covered by this suite.
+
+The separate test_cloud_bindings_gl33.py compiles the exact scoped binding owner
+with real GL state. Its 2,112 cases exercise restoration and synthetic failure
+exits; seven explicitly source-only guards are not whole-engine failure tests.
+
+Three source guards require the canonical descriptor sampler route, reject either unclamped axis, and require matching clamp sampler S/T.
+They do not execute engine missing-texture or unsupported-face failure branches.

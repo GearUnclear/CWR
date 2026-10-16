@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <Poseidon/World/Terrain/CloudInstanceLayout.hpp>
+#include <vector>
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
@@ -1737,6 +1740,58 @@ void Landscape::DrawClouds(Scene& scene)
             _cloudObj[i] = new ObjectPlain(GScene->Preloaded(CloudShapes[i]), -1);
         }
     }
+    // Q diagnostic uses original virtual-world quads, never compressed display transforms.
+    if (GEngine->CloudRegistrationEnabled()) {
+        CloudRegistrationInput input;
+        input.camera = camera.Position();
+        input.towardSun = -scene.MainLight()->SunDirection();
+        input.centreX = std::floor(input.camera.X()/256.0f)*256.0f;
+        input.centreZ = std::floor(input.camera.Z()/256.0f)*256.0f;
+        input.alpha = CloudsAlpha(); input.phase = CloudsPosition();
+        std::vector<CloudRegistrationInstance> instances;
+        bool valid = std::isfinite(input.camera.X()) && std::isfinite(input.camera.Y()) && std::isfinite(input.camera.Z()) &&
+                     std::abs(input.camera.X())<1000000 && std::abs(input.camera.Y())<100000 && std::abs(input.camera.Z())<1000000 &&
+                     std::isfinite(input.towardSun.X()) && std::isfinite(input.towardSun.Z()) && std::isfinite(CloudsBrightness()) &&
+                     std::isfinite(input.phase) && std::abs(input.phase)<1000000 &&
+                     std::isfinite(input.towardSun.Y()) && input.towardSun.Y()>.15f &&
+                     std::isfinite(input.alpha) && input.alpha>=0 && input.alpha<=1;
+        float radius = 0;
+        for (int type=0; type<N_CLOUDS && valid; ++type) {
+            const auto* lod = _cloudObj[type]->GetShape();
+            const Shape* shape = lod && lod->NLevels()>0 ? lod->Level(0) : nullptr;
+            if (!shape || shape->NPos()!=4 || shape->NFaces()!=1 || shape->NProxies()!=0) { valid=false; break; }
+            for (int v=0; v<4; ++v) {
+                const Vector3& p=shape->Pos(v);
+                if (!std::isfinite(p.X()) || !std::isfinite(p.Y()) || !std::isfinite(p.Z()) || std::abs(p.Y())>.01f) { valid=false; break; }
+                radius=std::max(radius,std::sqrt(p.X()*p.X()+p.Z()*p.Z()));
+            }
+        }
+        valid = valid && radius>0 && radius<16000;
+        int cells=0;
+        for (int layer=0; layer<3 && valid; ++layer) {
+            static constexpr float heights[3]={6000,4000,2000};
+            float y=heights[layer]*std::clamp(CloudsBrightness(),.6f,1.0f);
+            auto phase=Poseidon::clouds::MakePhase(input.phase,layer);
+            float sx=input.towardSun.X()*(y-input.camera.Y())/input.towardSun.Y();
+            float sz=input.towardSun.Z()*(y-input.camera.Y())/input.towardSun.Y();
+            // Include phase/random-centre offset and every rotated model corner.
+            int x0=static_cast<int>(std::floor((input.centreX-2048+sx-radius-phase.xOffset-3000)/6000));
+            int x1=static_cast<int>(std::ceil((input.centreX+2048+sx+radius-phase.xOffset)/6000));
+            int z0=static_cast<int>(std::floor((input.centreZ-2048+sz-radius-phase.zOffset-3000)/6000));
+            int z1=static_cast<int>(std::ceil((input.centreZ+2048+sz+radius-phase.zOffset)/6000));
+            for (int z=z0; z<=z1 && valid; ++z) for (int x=x0; x<=x1 && valid; ++x) {
+                if (++cells>1024) { valid=false; break; }
+                auto item=Poseidon::clouds::AtCell(_randGen,phase,x,z,layer);
+                if (item.type>=N_CLOUDS) continue;
+                if (instances.size()>=512) { valid=false; break; }
+                Matrix4 transform(MRotationY,item.azimuth);
+                transform.SetPosition(Vector3(item.x,y,item.z));
+                instances.push_back({_cloudObj[item.type]->GetShape()->Level(0),transform,layer,x,z,item.type});
+            }
+        }
+        input.instances=instances.data(); input.count=static_cast<int>(instances.size()); input.complete=valid;
+        GEngine->PrepareCloudRegistration(input);
+    }
     // scene.GetCamera()->SetUserClip(1);
     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
@@ -1751,25 +1806,10 @@ void Landscape::DrawClouds(Scene& scene)
         clouds2.Resize(0);
         clouds3.Resize(0);
         const static float skyY[SKY_LEVELS] = {6000, 4000, 2000};
-#define SP (2.0f)
-        const static float skyXSpeed[SKY_LEVELS] = {+0.020 * SP, +0.012 * SP, +0.010 * SP};
-        const static float skyZSpeed[SKY_LEVELS] = {+0.004 * SP, -0.002 * SP, -0.004 * SP};
         int xx, zz;
-
-        float cPos = CloudsPosition();
-        float xMove = cPos * skyXSpeed[skyLevel];
-        float zMove = cPos * skyZSpeed[skyLevel];
-
+        const auto phase = Poseidon::clouds::MakePhase(CloudsPosition(), skyLevel);
         float height = CloudsBrightness();
         saturate(height, 0.6, 1);
-
-        int xMoveInt = toIntFloor(xMove);
-        int zMoveInt = toIntFloor(zMove);
-        xMove -= xMoveInt;
-        zMove -= zMoveInt;
-
-        xMove *= SKY_GRID;
-        zMove *= SKY_GRID;
 
         float posY = skyY[skyLevel] * height;
 
@@ -1778,23 +1818,13 @@ void Landscape::DrawClouds(Scene& scene)
             for (xx = skyBegEnd.xBeg; xx <= skyBegEnd.xEnd; xx++)
             {
                 // preloaded objects _cloud[]
-                int seedXZ = _randGen.GetSeed(xx - xMoveInt, zz - zMoveInt, skyLevel);
-                float isHereF = _randGen.RandomValue(seedXZ);
-                // RandBegin(xx-xMoveInt,zz-zMoveInt,skyLevel);
-                int isHere = toIntFloor(isHereF * 8);
-                if (isHere >= N_CLOUDS)
-                {
-                    continue;
-                }
-                CloudArray& array = *clouds[isHere];
+                const auto instance = Poseidon::clouds::AtCell(_randGen, phase, xx, zz, skyLevel);
+                if (instance.type >= N_CLOUDS) continue;
+                CloudArray& array = *clouds[instance.type];
                 CloudInfo& info = array.Append();
-
-                float xOffset = xMove + _randGen.RandomValue(seedXZ + 1) * (SKY_GRID * 0.5);
-                float zOffset = zMove + _randGen.RandomValue(seedXZ + 2) * (SKY_GRID * 0.5);
-
-                info.posX = xx * SKY_GRID + xOffset;
-                info.posZ = zz * SKY_GRID + zOffset;
-                info.azimut = _randGen.RandomValue(seedXZ + 3) * (2 * H_PI / 2);
+                info.posX = instance.x;
+                info.posZ = instance.z;
+                info.azimut = instance.azimuth;
                 // Point3 pos=Vector3(xx*SKY_GRID+xOffset,skyY[skyLevel]*height,zz*SKY_GRID+zOffset);
             }
         }

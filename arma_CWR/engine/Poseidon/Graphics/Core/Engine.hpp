@@ -1,3 +1,4 @@
+#include <Poseidon/Graphics/Core/CloudRegistration.hpp>
 #ifdef _MSC_VER
 #pragma once
 #endif
@@ -431,6 +432,8 @@ class Engine : public IGraphicsEngine
 
     // Experimental world-sky replacement; false preserves the authored dome.
     virtual bool DrawExperimentalSky(float /*skyThrough*/) { return false; }
+    virtual bool CloudRegistrationEnabled() const { return false; }
+    virtual void PrepareCloudRegistration(const CloudRegistrationInput&) {}
 
     // Instanced-run mode: the scene batches a sorted run of
     // identical static shapes; backends that support it draw every TL section

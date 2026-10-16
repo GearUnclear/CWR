@@ -6,11 +6,13 @@ No game assets, captured screenshots, or executable binaries belong in this tree
 
 ## Alphabetical milestone progress
 
-Current numbered stage: **K (11 of 703)**. The requested target is **AAA (703)**
+Current numbered stage: **Q (17 of 703)**. The requested target is **AAA (703)**
 using A–Z, AA–AZ, and onward. This is a longer-running iteration milestone,
 separate from the 15 screenshot deliveries over 10 hours; neither is complete.
 F2 is a subvariant of F. Diagnostics, time-of-day repeats, camera angles, and
 scene surveys are validation subruns, not additional numbered iterations.
+
+### Historical checkpoint notes (superseded by the later entries)
 
 E is published on `graphics/lighting-improvements` at
 [`ab100b1`](https://github.com/GearUnclear/CWR/commit/ab100b1ac4c6a9e179ef128fd859e9ec57180b8f)
@@ -565,3 +567,55 @@ The diagnostic suite's strict wiring guard now explicitly supports P3's factored
 terrainEligible predicate and both zero resets. Current P3 rerun passes all
 589,824 descriptor assertions, 15 guards and 360 actual-GLSL checks against the
 published N3 baseline. No ownership or exclusion assertion was relaxed.
+
+
+## Q: authored-cloud registration diagnostic (stage 17)
+
+Q is a default-off diagnostic, not a cloud-shadow beauty improvement. Enable
+CWR_CLOUD_REGISTRATION=1 before launch to display projected transmission on
+explicitly owned, normal-bearing base terrain. Ordinary objects remain normally
+shaded. It shares the exact legacy cloud-cell placement with the visible sky,
+but projects original uncompressed authored quads along the sun direction.
+No procedural cloud artwork or game assets are added.
+
+The 512-square R16F field spans 4096m (8m texels), centered on a 256m grid.
+Authored alpha and CloudsAlpha multiply transmission through overlapping quads.
+Receiver height is accounted for. Unsupported geometry, missing resources,
+invalid inputs and bounded enumeration failures leave ordinary shading intact.
+ClampU/ClampV are routed through the render descriptor, not backend raw flags.
+The first REPEAT-sampler candidate and the raw-flag integration revision are
+superseded; their failed results remain preserved. Source filtering is linear,
+without the visible sky's mip/anisotropic filtering, so this is an approximation.
+
+Independent review inspected five matched OFF/diagnostic views and 24 additional
+actual-engine images. Broad, soft lobes remain plausibly anchored to road and
+woodland landmarks across camera translation, height change and recentering.
+The return image equals the initial image exactly. Sampled phase progression is
+coherent, with no visible discontinuity around 33. That is NOT a cloud-cell wrap:
+separate actual captures subsequently straddled 25, 41.666667 and 50. The critic
+found no visible reset in the six ground/sky pairs at those true boundaries. The metadata log's camera
+field is not independent verification of the capture camera; scripted viewpoints
+and their visible changes provide the camera evidence.
+
+Disposition: KEEP diagnostic for further work, not beauty acceptance, exact
+sky/ground correspondence, continuous-animation proof or hardware performance.
+The grayscale override exposes a bright distant terrain edge; final beauty must
+preserve ordinary fog and avoid that diagnostic appearance. No attenuation is
+applied to production lighting yet. A clean full suite passed 3,021 cases and
+2,306,966 assertions, with 12 OpenAL skips and the previously disclosed synthetic
+fixture staging. Focused layout/projection, actual-GL and state-restoration tests
+are separate synthetic evidence, not substitutes for engine captures.
+
+P3's subsequent source-cell crossing check also passed at the verified 50m
+boundary. Adjacent texture IDs remain unverified, so it is not mixed-material
+acceptance. The very low camera still exposes etched/blocky detail.
+
+Final-source focused reruns pass 1,269 native layout/projection checks, 240
+actual-GL cases and three strict clamp guards, plus 2,112 scoped-state cases
+and seven source guards. Those counts do not certify whole-engine failure paths.
+
+The exact clean Q binary rendered five integration views at effective 4x MSAA /
+150% scale. Independent review passed diagnostic routing and found no obvious
+corruption or resolve failure. Phase was uncontrolled and adaptive LOD enabled,
+so these are not exact-pattern comparisons. The wide-view fog/object mismatch
+remains a diagnostic limitation, not accepted beauty lighting.

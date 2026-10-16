@@ -455,6 +455,14 @@ class EngineGL33 : public Engine
     // Composite the gamma curve onto the finished frame.
     void ApplyGammaPass();
     bool DrawExperimentalSky(float skyThrough) override;
+    bool CloudRegistrationEnabled() const override;
+    void PrepareCloudRegistration(const CloudRegistrationInput&) override;
+    void ApplyCloudRegistration(bool terrain);
+    void DestroyCloudRegistration();
+    unsigned _cloudMap = 0, _cloudFbo = 0, _cloudProgram = 0, _cloudVao = 0, _cloudVbo = 0;
+    unsigned _cloudSampler = 0, _cloudMapSampler = 0;
+    bool _cloudValid = false, _cloudFailed = false;
+    float _cloudLookup[4] = {}, _cloudProjection[4] = {};
     unsigned _experimentalSkyProgram = 0, _experimentalSkyVao = 0;
     bool _experimentalSkyFailed = false;
     void DestroyGammaTarget();

@@ -335,6 +335,7 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
         reliefLogged = true;
     }
     UploadPSConstant(27, terrainControl);
+    ApplyCloudRegistration(d.terrainDetail);
     static bool terrainLogged = false;
     if (terrainControl[0] > 0 && !terrainLogged) {
         LOG_INFO(Graphics, "P terrain diagnostic active: mode={}, explicit base-terrain mesh, Detail shader, tex1={}",

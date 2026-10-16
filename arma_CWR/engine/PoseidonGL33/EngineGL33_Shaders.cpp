@@ -241,6 +241,8 @@ layout(std140) uniform PSConstants {
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
@@ -443,10 +445,13 @@ layout(std140) uniform PSConstants {
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
 uniform sampler2D tex1;
+uniform sampler2D cloudTransmittance;
 
 in vec4 vColor;
 in vec3 vLightNormal;
@@ -661,6 +666,13 @@ void main() {
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+    // Q is registration-only, not a cloud illumination/attenuation feature.
+    if (cloudLookup.w > .5 && vSunTerm.w > .5) {
+        vec2 projected = vWorldRel.xz - cloudProjection.xy * vWorldRel.y;
+        vec2 mapUV = projected * cloudLookup.z + cloudLookup.xy;
+        if (all(greaterThanEqual(mapUV,vec2(0))) && all(lessThanEqual(mapUV,vec2(1))))
+            fragColor.rgb = vec3(texture(cloudTransmittance,mapUV).r);
+    }
     // Diagnostic outputs only; no micro-relief or material-lighting change yet.
     if (terrainControl.x > 0.5 && vSunTerm.w > 0.5) {
         fragColor.rgb = terrainControl.x < 1.5 ? vec3(0.0, 1.0, 1.0) : vec3(t1.a);
@@ -684,6 +696,8 @@ layout(std140) uniform PSConstants {
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
@@ -1115,7 +1129,7 @@ static GLuint LinkGLProgram(GLuint vs, GLuint fs, const char* name)
 }
 
 static float s_vsShadow[280] = {}; // 70 vec4 slots — through SlotLightVP (c66-c69)
-static float s_psShadow[112] = {}; // 28 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
+static float s_psShadow[120] = {}; // 28 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
 
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
@@ -1914,6 +1928,8 @@ void EngineGL33::InitPixelShaders()
         GLint locShadow = glGetUniformLocation(prog, "shadowMap");
         if (locShadow >= 0)
             glUniform1i(locShadow, 2); // shadow depth map on texture unit 2
+        GLint locCloud = glGetUniformLocation(prog, "cloudTransmittance");
+        if (locCloud >= 0) glUniform1i(locCloud, 3);
         glUseProgram(0);
     };
 
@@ -2117,6 +2133,7 @@ void EngineGL33::DeinitPixelShaders()
     if (_shadowCompareSampler) glDeleteSamplers(1, &_shadowCompareSampler);
     _shadowCompareSampler = 0;
     _shadowComparePcf = false;
+    DestroyCloudRegistration();
     if (_experimentalSkyProgram) glDeleteProgram(_experimentalSkyProgram);
     if (_experimentalSkyVao) glDeleteVertexArrays(1, &_experimentalSkyVao);
     _experimentalSkyProgram = _experimentalSkyVao = 0;
