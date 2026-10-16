@@ -381,3 +381,47 @@ The exact candidate GameDemo and full no-game-data target built. The suite passe
 3,021 cases and 2,306,963 assertions with 12 OpenAL-device skips, reusing the same
 previously staged synthetic-fixture layout described above. Actual GL context-loss
 recovery and effective-AA menu labeling remain unverified/separate work.
+
+## O / O2: opt-in comparison-filtered shadows (stage 15)
+
+O changes only shadow-map sampling: hardware bilinear depth comparisons reduce
+stepping in the existing nine-tap footprint. A dedicated comparison sampler and
+shader-cache discriminator keep the legacy raw-depth mode separate. Depth storage,
+raw diagnostic readback, bias, cascades, fades and material lighting remain unchanged.
+The independent critic retained this as a modest edge-quality refinement, not a
+whole-scene transformation. Selected paused-camera motion showed no obvious new
+flashes or contact detachment; this is not quantified temporal stability.
+
+O's initial nine-fetch comparison filter cost more in local software-renderer
+measurements. O2 regroups the same bilinear kernel into four weighted hardware
+fetches for positive reciprocal map sizes. Nonpositive diagnostic inputs preserve
+the original fallback. O2 is a subtest, not an additional numbered stage.
+
+Six alternating runs (legacy, O, O2, O2, O, legacy) used the same three scenes,
+fixed-LOD QA override, 1x scale and no MSAA. Mean frame milliseconds averaged over
+the paired runs were legacy 59.77/58.72/62.18, O 63.65/62.65/70.10, and O2
+62.01/57.23/63.97. Draw calls matched at 883/892/877. O2 was cheaper than O in
+this test, with mixed small differences against legacy. These are Mesa llvmpipe
+results, not hardware-GPU performance promises. The QA override is not published.
+
+Verification includes 504 direct O2 shader checks with legacy comparisons, plus
+942 O-versus-O2 equivalence cases over D24 and D32F, including 600 additional raw
+path bitwise checks. Maximum observed comparison RGBA error was 5.96e-8 against
+3e-5 tolerance. D32F also uses an independent CPU oracle; D24 compares the two
+shaders on identical quantized storage. Surviving-fragment alpha is tested, not
+cutout/discard rasterization. These tests do not establish universal GPU identity.
+The exact clean final build passed 3,021 cases / 2,306,963 assertions with 12 audio
+skips, using the previously described staged synthetic fixtures. All 11 embedded
+GLSL strings remained identical through the final log-only wording correction.
+
+Default remains legacy. Opt in before launch with CWR_SHADOW_COMPARE_PCF=1 and
+enable Depth-map Shadows separately. No UI default, game data or assets change.
+Broader scenes, hardware cost, full Remaster content and long temporal behavior
+remain unverified. Preserve the earlier O and O2 captures and binaries for comparison.
+
+Final clean integration gate passed: three exact-candidate gameplay views at
+1440x960 internal / 960x640 output, effective 4x MSAA and 150% scale, plus the
+preserved clean O2 night capture. The reviewer found no obvious new contact,
+resolve, seam or night-sky bleed issue. Adaptive LOD changes net/tree detail; these
+high-AA frames do not expose the net-shadow stripes as clearly as the earlier
+fixed-LOD comparisons, which remain the evidence for edge-quality improvement.

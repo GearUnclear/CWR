@@ -242,3 +242,17 @@ MSAA resolve then linear supersampling downsample remains unchanged.
 Explicit target reset plus capability requery is covered; actual GL context-loss
 recovery is not simulated. This is an engineering stability follow-up, not a new
 artistic lighting iteration.
+
+## Opt-in comparison-filtered shadows (O2)
+
+```sh
+python arma_CWR/tests/rendering/test_shadow_compare_gl33.py --source arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp --baseline path/to/legacy/EngineGL33_Shaders.cpp --report shadow-compare-report.json
+```
+
+Requires NumPy, ModernGL, desktop GL and EGL. The current production source supports comparison PCF. Actual normal/detail/grass fragment shaders are extracted unchanged; only the supported compile-time define is prepended after `#version`. Synthetic vertex outputs and a depth32F array isolate fragment semantics. The CPU oracle evaluates nearest raw or bilinear LEQUAL comparisons across the unchanged nine-tap kernel, cascade blending/fallthrough and material visibility.
+
+Checks cover nonuniform stepped/checkerboard depth, subtexel smoothness, map/depth bounds, layer isolation, equality, bias scaling, fog, daylight/night coefficients, sun-off, disabled shadows and alpha. With `--baseline`, every raw result is also compared bitwise to the selected legacy source. Sampler filters and comparison mode are queried from real GL; texture storage remains raw. Source guards cover shader-cache discrimination and sampler selection, not engine execution. This does not validate real vertex transforms, depth24 quantization, runtime cache/sampler lifecycle, temporal gameplay or hardware performance. Engine captures remain required.
+
+For historical optimization reproduction, use the preserved O1 source as --source and add `--comparison-source path/to/optimized/EngineGL33_Shaders.cpp`. This preserves the original 504 checks when a legacy baseline is supplied and adds 942 actual-GL equivalence cases over D24 and D32F storage, deterministic random/nonuniform arrays, subtexel positions, borders, cascade/layer cases and nonpositive texel-size fallback. The D32F path also checks the independent nine-bilinear CPU oracle; D24 compares both shaders on identical quantized storage. 600 of these cases additionally require bitwise raw-path identity. Comparison output uses absolute RGBA tolerance 3e-5 to allow driver interpolation precision; passing one implementation is not a universal hardware guarantee. Reports identify baseline and optimized source SHA256 values. Alpha checks cover only surviving fragments, not cutout/discard rasterization or alpha-tested casters.
+
+Set `CWR_SHADOW_COMPARE_PCF=1` before launching to opt in. Depth-map Shadows must also be enabled, with Shadow Quality above Off. The default remains legacy sampling. Production uses four weighted fetches for the existing nine-bilinear-tap footprint; this is not physically varying penumbra or PCSS. Historical baseline/comparison snapshots are optional and must be preserved separately.

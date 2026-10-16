@@ -11,6 +11,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -255,7 +257,11 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -341,9 +347,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -429,7 +459,11 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -515,9 +549,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -600,7 +658,11 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -686,9 +748,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -757,7 +843,11 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -862,7 +952,11 @@ uniform sampler2D tex0;
 in vec4 vColor;
 in vec2 vUV0;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -888,7 +982,11 @@ void main() {
 // PSFlat — vertex color passthrough (no texture)
 static const char s_psFlatGLSL[] = R"(#version 330 core
 in vec4 vColor;
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -1232,6 +1330,8 @@ void EngineGL33::UploadVSProjection(const FrameState& frame)
 
 void EngineGL33::UpdateShadowMapLitState()
 {
+    // Explicitly restore the pairing even after auxiliary passes/context reset.
+    glBindSampler(2, _shadowComparePcf ? _shadowCompareSampler : 0);
     // PS UBO: shadowCtl c2 {enable, 0, darkness, texelSize}; cascadeVP[4] c8-c23;
     // cascadeSplits c24 (per-tier select distance: a camera 3D radius for the first
     // omniCount omni tiers, a far eye-depth for frustum tiers); cascadeCtl c25
@@ -1537,7 +1637,7 @@ struct ShaderCacheEntry
 constexpr uint32_t kCacheMagic = 0x53484348; // 'SHCH'
 constexpr uint32_t kCacheVersion = 1;
 
-uint64_t HashShaderSources()
+uint64_t HashShaderSources(bool comparisonPcf)
 {
     uint64_t h = 0xcbf29ce484222325ull;
     auto add = [&](const char* s)
@@ -1548,6 +1648,7 @@ uint64_t HashShaderSources()
             h *= 0x100000001b3ull;
         }
     };
+    add(comparisonPcf ? "comparison-pcf-linear-four-fetch-v2" : "raw-pcf-nearest-v1");
     add(s_vsScreenGLSL);
     add(s_vsTransformGLSL);
     add(s_vsShadowGLSL);
@@ -1685,6 +1786,30 @@ GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
 
 void EngineGL33::InitPixelShaders()
 {
+    // Immutable for this shader set: no live toggle can mismatch sampler type
+    // and compare state. Texture objects retain raw depth settings for dumps.
+    const char* compareOption = std::getenv("CWR_SHADOW_COMPARE_PCF");
+    _shadowComparePcf = compareOption && std::strcmp(compareOption, "1") == 0;
+    if (_shadowComparePcf)
+    {
+        glGenSamplers(1, &_shadowCompareSampler);
+        if (!_shadowCompareSampler)
+            _shadowComparePcf = false;
+        else
+        {
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+        }
+    }
+    glBindSampler(2, _shadowComparePcf ? _shadowCompareSampler : 0);
+    LOG_INFO(Graphics, "GL33 shadow PCF: {} (unchanged bias/cascades)",
+             _shadowComparePcf ? "experimental linear comparison: four fetches, nine-tap-equivalent filter"
+                               : "legacy nearest raw depth: nine fetches");
     struct PSCompileInfo
     {
         PixelShaderID id;
@@ -1699,7 +1824,7 @@ void EngineGL33::InitPixelShaders()
 
     // Try the binary cache first.  Only compile FS objects on miss — we
     // need them only as link inputs, and a fully-cached run skips compile.
-    const uint64_t srcHash = HashShaderSources();
+    const uint64_t srcHash = HashShaderSources(_shadowComparePcf);
     std::map<uint32_t, ShaderCacheEntry> cache;
     const bool cacheLoaded = LoadShaderCacheFile(srcHash, cache);
     if (cacheLoaded)
@@ -1716,7 +1841,12 @@ void EngineGL33::InitPixelShaders()
             return;
         fsCompiled = true;
         for (auto& info : psInfos)
-            s_fsObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, info.source, info.name);
+        {
+            std::string source(info.source);
+            if (_shadowComparePcf)
+                source.insert(source.find('\n') + 1, "#define CWR_SHADOW_COMPARE_PCF 1\n");
+            s_fsObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, source.c_str(), info.name);
+        }
     };
 
     auto bindProgramSamplersAndBlocks = [](GLuint prog)
@@ -1939,6 +2069,10 @@ void EngineGL33::ApplyGammaPass()
 
 void EngineGL33::DeinitPixelShaders()
 {
+    glBindSampler(2, 0);
+    if (_shadowCompareSampler) glDeleteSamplers(1, &_shadowCompareSampler);
+    _shadowCompareSampler = 0;
+    _shadowComparePcf = false;
     if (_experimentalSkyProgram) glDeleteProgram(_experimentalSkyProgram);
     if (_experimentalSkyVao) glDeleteVertexArrays(1, &_experimentalSkyVao);
     _experimentalSkyProgram = _experimentalSkyVao = 0;

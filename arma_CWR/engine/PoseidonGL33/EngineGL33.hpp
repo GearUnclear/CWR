@@ -386,6 +386,8 @@ class EngineGL33 : public Engine
 
     // GL sampler objects: 8 combos of point(4) | clampU(1) | clampV(2)
     unsigned int _samplerObjects[8] = {};
+    unsigned int _shadowCompareSampler = 0;
+    bool _shadowComparePcf = false;
     void CreateSamplerStates();
     void DestroySamplerStates();
     void ApplySamplerState();
