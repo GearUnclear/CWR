@@ -699,12 +699,38 @@ erodes until the player or his fighters come back (section 19).
 **The ceiling (2026-10-16).** Nothing but a wave puts the pool above
 poolStart. Every row above that credits the pool goes through
 `OccupierForces::Refund`, which caps the credit at `PoolCeiling()`
-(poolStart plus the wave headroom) and drops the rest, with one INFO line
-`ledger: N unit(s) over poolStart dropped` per refund and the count kept in
-`Dropped()` (saved). Without the cap the refill topped the pool back up
-while an operation was out, and the operation's refund then landed above
-poolStart (the comparison video: 51 of 50 after a jet opener, 53 of 50
-after an APC came home).
+(poolStart plus the wave headroom). Without the cap the refill topped the
+pool back up while an operation was out, and the operation's refund then
+landed above poolStart (the comparison video: 51 of 50 after a jet opener,
+53 of 50 after an APC came home).
+- **The excess is banked** (owner decision, 2026-10-16: "bank surplus
+  survivors into garrisons instead of dropping them"). What the ceiling
+  keeps out of the pool becomes garrison at an occupier-held military base
+  with room below its `garrisonMax` (room = `garrisonMax` - live -
+  reserve - pending, as every room in this section). The base: the credit's source
+  base when the caller names it and it has room; else the base nearest the
+  credit's position (the source base's own position when only the source
+  is named); else the base with the most room (ties: the zone order). A
+  base takes what fits and the next one by the same rule takes the rest.
+  The bodies go in through the S5 pending deposit (`GarrisonCache::Deposit`,
+  3.3), so they join the reserve unseen or once the player has left, never
+  beside him, and the director can spend them again from the reserve. One
+  INFO line per base, `ledger: N unit(s) over poolStart banked at <base>`;
+  `Banked()` counts them for the session (the bodies are saved on the zone
+  rows, so nothing new is saved). Hull refunds bank like bodies: a pool
+  unit is a body when D2 draws it into a garrison, so a hull home to a full
+  pool becomes the garrison the pool would have bought with it.
+- **Dropped, only when every base is full.** Only what no occupier base has
+  room for is dropped, with one INFO line `ledger: N unit(s) over poolStart
+  dropped (...; every occupier base at garrisonMax; ...)` per refund and
+  the count kept in `Dropped()` (saved).
+- **Sources named today.** The director's own refunds name the source
+  (`LaunchAction`'s refusals, the hull refunds and cancelled-unborn refunds
+  of `NoteOpEvent` and the test-lever rows), and the S5 refund hook names
+  the deposit's origin and the lost zone's position. `CounterAttack`'s
+  survivor, surplus, crew and HQ-assault refunds and `GarrisonCache`'s
+  flipped-base refund do not yet, so they bank by the most room until their
+  call sites pass the record's source (a follow-up in those files).
 - **Wave headroom.** A landed wave lifts the pool above poolStart, as 7.1
   says, and the headroom rises to that overshoot, so wave strength spent
   and refunded comes back above poolStart. At each refund the headroom
@@ -720,8 +746,11 @@ after an APC came home).
 
 `pool + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped`
 
-`dropped` is the units the ceiling dropped (`Dropped()`); `losses` (the
-`lost` field) stays the bodies killed. The unit tests assert it.
+`dropped` is the units the ceiling dropped (`Dropped()`), only when no base
+had room; `losses` (the `lost` field) stays the bodies killed. The banked
+excess needs no term of its own: it moves from op strength into `pending`
+(and later `reserves`), so the equation balances unchanged. The unit tests
+assert it, banked and dropped.
 
 ### 5.6 Bands with hysteresis (D8, D15)
 
@@ -1860,7 +1889,7 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | Leftover check | CA | 30 s | constant | Leftover entries retried |
 | town strike effect | OF | struck town: support -40, standing -40, heat +15, panic, `struckUntil` +1200 s; towns within 2 km: -10 / -10 | | D17, D21 |
 | strike fighters (`StrikeMinFighters` / `StrikeOpenerMinFighters` / `OpenerHqRadius`) | OF | 3 / 1 / 150 m since 2026-10-16 (old: an opener needed none) | constants | Reported fighters a town strike needs; a base or HQ opener needs; the radius around `HqPos` an HQ outside every zone counts them in (7.3) |
-| pool ceiling (`PoolCeiling()`, wave headroom, `Dropped()`) | OF | poolStart + headroom; headroom = a landed wave's overshoot, shrunk at each refund to the overshoot + ledger rows + the refund | saved | Refunds never lift the pool above it; the rest is dropped and logged once per refund (5.5) |
+| pool ceiling (`PoolCeiling()`, wave headroom, `Banked()`, `Dropped()`) | OF | poolStart + headroom; headroom = a landed wave's overshoot, shrunk at each refund to the overshoot + ledger rows + the refund | saved (`Banked()` session only) | Refunds never lift the pool above it; the excess banks as a pending deposit at the occupier bases with room (source base, else nearest, else most room), one line per base; only what no base can take is dropped and logged once per refund (5.5) |
 | occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 | 0..100 | Recovers +1 per 600 s toward 50; drives informant tips (chance `standing / 200` when >= 50), morale (skill x 0.8 below 25) and the refill factor `0.75 + 0.5 * mean / 100` |
 | HQ meter | GuerrillaBase | `captureRate` x min(HQ_ASSAULT units, 3) per tick within 150 m of `HqPos`; frozen by HOLD presence; decay `captureDecayAbandoned` | | D24 |
 | `occCapture` | ZoneRegistry | `captureRate` (6) x min(crew, `captureCrewCap` 3) per 3 s tick; both present: frozen; resistance alone: - `captureDecayDefended` (10); nobody: - `captureDecayAbandoned` (2) | 0..100 | Enemy base-retake meter, separate field |

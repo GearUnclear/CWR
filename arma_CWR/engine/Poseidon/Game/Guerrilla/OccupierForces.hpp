@@ -46,9 +46,24 @@
 // THE CEILING (5.5, 2026-10-16).  Nothing but a wave puts the pool above
 // poolStart.  Every Refund (hull refunds, crew and survivors sent home, the
 // surplus over a base's room, partial-spawn failures, cancelled operations)
-// is capped at PoolCeiling() = poolStart + the wave headroom, and the rest
-// is dropped with one INFO line "ledger: N unit(s) over poolStart dropped"
-// and booked in Dropped() (a term of the 5.5 equation beside the losses).
+// is capped at PoolCeiling() = poolStart + the wave headroom.  The excess is
+// BANKED as garrison (the owner, 2026-10-16: "bank surplus survivors into
+// garrisons instead of dropping them"): a pending deposit
+// (GarrisonCache::Deposit, so the bodies join the reserve hidden or once
+// the player is away, never beside him) at an occupier-held military base
+// with room below its garrisonMax (room = garrisonMax - live - reserve -
+// pending): the credit's source base first when known, else the base
+// nearest the credit's position (the source's own position when only the
+// source is known), else the base with the most room; a base takes what
+// fits and the next one the rest.  One INFO line per base, "ledger: N
+// unit(s) over poolStart banked at <base>", counted in Banked() (session
+// only: the bodies themselves are saved on the zone rows).  Only what no
+// base has room for is dropped, with one INFO line "ledger: N unit(s) over
+// poolStart dropped" and booked in Dropped() (a term of the 5.5 equation
+// beside the losses).  Banking moves units from op strength into pending,
+// so the equation needs no new term.  The registry banked into: the one
+// BindRegistry named, else for the process-wide service ZoneRegistry::
+// Instance(); a local service with none drops (unit tests bind theirs).
 // Without the cap the refill topped the pool up to poolStart while an
 // operation was out, and the operation's refund then landed above it (the
 // comparison video: 51 of 50, 53 of 50).  The headroom is what the landed
@@ -655,9 +670,25 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     };
     // units back into the pool (survivors with no base, surplus, a flipped
     // base's live garrison, partial-spawn failures, hull refunds: 5.5).
-    // Capped at PoolCeiling(): the rest is dropped (Dropped(), one INFO
-    // line).  Returns the units the pool took.  Inactive: no-op, 0.
-    int Refund(int units, const char* why);
+    // Capped at PoolCeiling(): the excess is banked as garrison at the
+    // occupier bases with room (THE CEILING above; Banked(), one INFO line
+    // per base), and only what no base can take is dropped (Dropped(), one
+    // INFO line).  sourceZone: the base the units come from (-1 unknown);
+    // near: where they are (null unknown).  Returns the units the pool took.
+    // Inactive: no-op, 0.  The first form banks into BankRegistry().
+    int Refund(int units, const char* why, int sourceZone = -1, const Vector3* near = nullptr);
+    int Refund(ZoneRegistry& registry, int units, const char* why, int sourceZone = -1,
+               const Vector3* near = nullptr);
+    // the registry Refund banks into without one named: the bound one, else
+    // ZoneRegistry::Instance() for the process-wide service, else null (a
+    // local service drops).  Clear unbinds.
+    void BindRegistry(ZoneRegistry* registry) { _bankRegistry = registry; }
+    ZoneRegistry* BankRegistry() const;
+    // the room an excess may be banked into at zone (THE CEILING): an
+    // occupier-held military zone's garrisonMax - live - reserve - pending,
+    // floored, never below 0; 0 for any other zone.  live: the zone's live
+    // garrison bodies
+    static int BankRoom(const ZoneRegistry& registry, int zone, int live);
     // diagnostics: bodies the occupier lost for good (the `lost` field)
     void NoteLoss(int units, const char* why);
     // a reinforcement wave lands (the phase-4 seam): bodies into the pool,
@@ -667,8 +698,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the most the pool may hold after a refund: poolStart + the wave headroom
     int PoolCeiling() const { return _poolStart + _waveHeadroom; }
     int WaveHeadroom() const { return _waveHeadroom; }
-    // refunded units the ceiling dropped (5.5: booked beside the losses)
+    // refunded units the ceiling dropped (5.5: booked beside the losses):
+    // only what no occupier base had room to bank
     int Dropped() const { return _dropped; }
+    // refunded units the ceiling banked as garrison this session (5.5;
+    // diagnostics, not saved: the bodies are saved on the zone rows)
+    int Banked() const { return _banked; }
     // S5 (3.3): a pending deposit whose zone changed owner is refunded to
     // this service's pool (GarrisonCache::SetPendingRefundHook).  The hook
     // credits the pool and claims the bodies only while Active(); otherwise
@@ -974,6 +1009,11 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     };
 
     void LoadFromConfig();
+    // the two Refund forms: registry null drops the excess
+    int RefundInto(ZoneRegistry* registry, int units, const char* why, int sourceZone, const Vector3* near);
+    // the excess over the ceiling into the bases with room (THE CEILING):
+    // returns the units banked, the rest is the caller's to drop
+    int BankExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near);
     // re-step the band after a pool change; logs a change.  Deferred while a
     // BandHold is open
     void UpdateBand();
@@ -1068,6 +1108,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // and the refunded units the ceiling dropped
     int _waveHeadroom = 0;
     int _dropped = 0;
+    // transient: the excess banked as garrison this session, and the
+    // registry Refund banks into (BindRegistry; null = BankRegistry's rule)
+    int _banked = 0;
+    ZoneRegistry* _bankRegistry = nullptr;
     int _refillTotal = 0;
     int _wavesTotal = 0;
     bool _legacySave = false;

@@ -1422,6 +1422,9 @@ struct PoolGuard
         of.LoadFromParams(file.FindEntry("CfgGuerrillaZones"));
         REQUIRE(of.Activate(f.registry));
         REQUIRE(of.Active());
+        // the ceiling banks its excess into the fixture's bases (5.5); Clear
+        // unbinds
+        of.BindRegistry(&f.registry);
     }
     ~PoolGuard() { OccupierForces::Instance().Clear(); }
     ParamFile file;
@@ -2604,9 +2607,15 @@ TEST_CASE("CounterAttack - the HQ falls: the assault settles, its bodies to the 
     REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 3), nullptr, fired));
     f.ca.Step(f.registry, fallen, 1.0f, nullptr, fired);
     CHECK(f.ca.Count() == 0);
+    // the pool had room for 2 of these six; the 4 over poolStart banked at
+    // FarBase, the base with room (5.5), as a pending deposit
+    CHECK(of.Pool() == of.PoolStart());
+    CHECK(f.Z(f.farBase).pending == 4);
+    CHECK(of.Dropped() == 0);
 
     // a moved HQ: the force goes home to its base
     f.Z(f.farBase).garrison = 12;
+    f.Z(f.farBase).pending = 0;
     REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 4), nullptr, fired));
     const float reserve = f.Z(f.farBase).garrison; // 6 left after the launch
     CounterAttackView moved = far;
@@ -4724,11 +4733,15 @@ TEST_CASE("CounterAttack - a strike's airframe home never lifts the pool above p
     // poolStart when a jet opener was bought, the refill topped it up again
     // while the jet was out, and the jet's refund landed it at 51 of 50.
     // Here the refill fills the pool while the strike flies; the airframe
-    // and its pilot come home over the ceiling and are dropped, booked
+    // and its pilot come home over the ceiling with every base at its
+    // garrisonMax, so they are dropped, booked (with room they bank: the
+    // next case)
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1;"));
     f.RaiseTown(f.town);
     PoolGuard pool(f);
+    REQUIRE(f.Z(f.post).garrison == Approx(f.Z(f.post).garrisonMax));
+    REQUIRE(f.Z(f.farBase).garrison == Approx(f.Z(f.farBase).garrisonMax));
     OccupierForces& of = OccupierForces::Instance();
     ListenerGuard guard(&of); // the director's own ledger hears the events
     AutoArray<ZoneEventRecord> fired;
@@ -4750,4 +4763,90 @@ TEST_CASE("CounterAttack - a strike's airframe home never lifts the pool above p
     CHECK(of.Dropped() - dropped0 <= order.priceUnits);
     CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0); // the row holds nothing more
     CHECK(log.With({"ledger:", "over poolStart dropped"}).size() >= 1);
+}
+
+TEST_CASE("CounterAttack - a strike's airframe home after the refill banks as garrison at a base with room (5.5)",
+          "[game][guerrilla][counterattack][occupierforces][air]")
+{
+    // the owner, 2026-10-16: "bank surplus survivors into garrisons instead
+    // of dropping them".  The case above with room at FarBase: the airframe's
+    // price and its pilot come home over the ceiling and bank there as a
+    // pending deposit; the pool stays at poolStart and nothing is dropped
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    f.Z(f.farBase).garrison = 0;
+    f.Z(f.farBase).garrisonMax = 30; // room 30; the Post stays full
+    OccupierForces& of = OccupierForces::Instance();
+    ListenerGuard guard(&of);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    const CounterAttackOrder order = StrikeOrder(f.town);
+    const int start = of.PoolStart();
+    REQUIRE(of.Pool() == start);
+    REQUIRE(of.Spend(order.priceUnits, "test strike"));
+    REQUIRE(of.BookLeverOp(order.opId, "Town", order.kind, order.package, order.priceUnits));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, order, nullptr, fired));
+    of.Tick(f.registry, 4.0f * 3600.0f); // the refill tops the pool back up
+    REQUIRE(of.Pool() == start);
+    const int dropped0 = of.Dropped();
+    const int banked0 = of.Banked();
+    CoreLogCapture log;
+    f.ca.Step(f.registry, far, 30.0f, nullptr, fired); // strikes, flies home, refunds
+    CHECK(f.ca.Count() == 0);
+    CHECK(of.Pool() == start); // never above poolStart
+    CHECK(of.Dropped() == dropped0);
+    CHECK(of.Banked() - banked0 == order.priceUnits); // the jet's 22 and its pilot
+    CHECK(f.Z(f.farBase).pending == order.priceUnits);
+    CHECK(f.Z(f.post).pending == 0);
+    CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0);
+    CHECK(log.With({"ledger:", "over poolStart banked at FarBase"}).size() >= 1);
+    CHECK(log.With({"over poolStart dropped"}).empty());
+}
+
+TEST_CASE("CounterAttack - the HQ falls at a full pool: the assault's bodies bank at a base with room (5.5)",
+          "[game][guerrilla][counterattack][occupierforces]")
+{
+    // 3c9947b dropped them (an HQ assault done at 60 of 60 dropped 4); the
+    // owner's rule banks them: FarBase sent the six and has room for them
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    const CounterAttackView far = HqFar(f);
+    AutoArray<ZoneEventRecord> fired;
+    const int start = of.PoolStart();
+    REQUIRE(of.Pool() == start);
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 2), nullptr, fired));
+    REQUIRE(f.Z(f.farBase).garrison == Approx(6.0f)); // room 6 now
+    f.ca.Step(f.registry, far, 20000.0f, nullptr, fired);
+    REQUIRE(f.ca.Get(0)->phase == CAHolding);
+    CoreLogCapture log;
+    CounterAttackView fallen = far;
+    fallen.hqEstablished = false;
+    CHECK(f.ca.SettleHqAssaults(f.registry, fallen, nullptr) == 1);
+    CHECK(f.ca.Count() == 0);
+    CHECK(of.Pool() == start);
+    CHECK(of.Dropped() == 0);
+    CHECK(of.Banked() == 6);
+    CHECK(f.Z(f.farBase).pending == 6);
+    CHECK(f.Z(f.farBase).garrison == Approx(6.0f)); // pending: they join it unseen (S5)
+    CHECK(log.With({"ledger: 6 unit(s) over poolStart banked at FarBase"}).size() == 1);
+    CHECK(log.With({"over poolStart dropped"}).empty());
+    // a second assault with FarBase full again: the Post is full too, so
+    // these six are dropped with the line
+    f.Z(f.farBase).garrison = 12;
+    f.Z(f.farBase).pending = 0;
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, KindOrder(CAKHqAssault, f.camp, f.farBase, 6, 3), nullptr, fired));
+    f.Z(f.farBase).garrison = 12; // refilled behind it: no room anywhere
+    f.ca.Step(f.registry, far, 20000.0f, nullptr, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(f.ca.SettleHqAssaults(f.registry, fallen, nullptr) == 1);
+    CHECK(of.Pool() == start);
+    CHECK(of.Banked() == 6);
+    CHECK(of.Dropped() == 6);
+    CHECK(log.With({"ledger: 6 unit(s) over poolStart dropped", "every occupier base at garrisonMax"}).size() == 1);
 }

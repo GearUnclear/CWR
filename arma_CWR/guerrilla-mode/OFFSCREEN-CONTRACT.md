@@ -1002,9 +1002,16 @@ With nothing live,
 goes through `OccupierForces::Refund`, capped at poolStart plus the wave
 headroom (what landed waves put above poolStart, shrunk at each refund to
 the pool's overshoot plus the units the ledger rows still hold plus the
-refund); the rest is dropped (`dropped`, saved) with one INFO line
-`ledger: N unit(s) over poolStart dropped`. Only a landed wave puts the
-pool above poolStart (OCCUPIER-FORCES.md 5.5).
+refund). The excess is banked as garrison (owner, 2026-10-16): a pending
+deposit (S5, so it joins the reserve unseen or once the player has left)
+at an occupier-held military base with room below its `garrisonMax`, the
+source base first, else the nearest to the credit, else the one with the
+most room, one INFO line `ledger: N unit(s) over poolStart banked at
+<base>` per base. Banking moves units from op strength into `pending`, so
+the equation needs no new term. Only what no base has room for is dropped
+(`dropped`, saved) with one INFO line `ledger: N unit(s) over poolStart
+dropped`. Only a landed wave puts the pool above poolStart
+(OCCUPIER-FORCES.md 5.5).
 
 holds after every path in 10.2. The unit tests (`[occupierforces]`,
 `ConservationCheck`) assert it. U1 to U5 hold with the key on or off.

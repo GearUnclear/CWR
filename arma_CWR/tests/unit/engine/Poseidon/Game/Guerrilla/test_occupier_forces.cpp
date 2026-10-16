@@ -104,6 +104,8 @@ struct Fixture
         file.Parse(in);
         registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), nullptr);
         of.LoadFromParams(file.FindEntry("CfgGuerrillaZones"));
+        // the ceiling banks its excess into this registry's bases (5.5)
+        of.BindRegistry(&registry);
         REQUIRE(registry.IsActive());
         const int hq = registry.FindZoneIndex("HqTown");
         if (exemptHq && hq >= 0)
@@ -796,8 +798,10 @@ TEST_CASE("OccupierForces - Draw grants what the pool holds; the floor stops ope
     CHECK(f.of.Deposit(2, "revert") == 0);
     CHECK(f.of.Draw(1) == 1); // ... but D2 keeps running (D15)
     // a refund never pushes the pool above poolStart (5.5, the ceiling):
-    // the rest is dropped and booked
+    // every base sits at its garrisonMax here, so the rest is dropped and
+    // booked (a base with room banks it: the banking cases below)
     CHECK(f.of.Refund(80, "surplus") == 58);
+    CHECK(f.of.Banked() == 0);
     CHECK(f.of.Pool() == 60);
     CHECK(f.of.Dropped() == 22);
     CHECK(f.of.Band() == OFBandStrong);
@@ -1127,6 +1131,197 @@ TEST_CASE("OccupierForces - the ceiling survives save/load", "[game][guerrilla][
     std::filesystem::remove(path);
 }
 
+namespace
+{
+// the S5 pending deposits over every zone of a fixture
+int PendingOf(Fixture& f)
+{
+    int n = 0;
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        n += f.registry.GetZone(i)->pending;
+    }
+    return n;
+}
+} // namespace
+
+TEST_CASE("OccupierForces - the ceiling banks the excess as garrison at a base with room, drops nothing",
+          "[game][guerrilla][occupierforces]")
+{
+    // the owner, 2026-10-16: "bank surplus survivors into garrisons instead
+    // of dropping them".  Refund(80) on an empty pool of poolStart 60: 60 go
+    // back into the pool, the 20 over poolStart bank at the one base with
+    // room, as a pending deposit, and nothing is dropped
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    REQUIRE(P == 60);
+    f.Z("Base1").garrisonMax = 30; // room 22 (8 of 30)
+    f.of.SetPool(0);
+    CoreLines log;
+    CHECK(f.of.Refund(80, "survivors home") == 60);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 20);
+    CHECK(f.Z("Base1").pending == 20);
+    CHECK(f.Z("Base1").garrison == Approx(8.0f)); // pending first: S5, never beside the player
+    CHECK(f.Z("Base0").pending == 0);
+    CHECK(log.With({"ledger: 20 unit(s) over poolStart banked at Base1"}).size() == 1);
+    CHECK(log.With({"over poolStart dropped"}).empty());
+    // the deposit joins the reserve once the player is away, so the
+    // director can spend it again (Spare reads the reserve)
+    const int base1 = f.registry.FindZoneIndex("Base1");
+    CHECK(GarrisonCache::FlushPending(f.registry, base1, true, 99999.0f, 99999.0f, nullptr) == PFReleasedBubble);
+    CHECK(f.Z("Base1").garrison == Approx(28.0f));
+    CHECK(f.Z("Base1").pending == 0);
+    // the base is 2 short of its garrisonMax now: the next excess banks 2
+    // there and drops the rest, every base being full
+    CHECK(f.of.Refund(5, "surplus") == 0);
+    CHECK(f.of.Banked() == 22);
+    CHECK(f.of.Dropped() == 3);
+    CHECK(log.With({"ledger: 2 unit(s) over poolStart banked at Base1"}).size() == 1);
+    CHECK(log.With({"ledger: 3 unit(s) over poolStart dropped"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - the ceiling banks at the source base first, then the nearest base with room",
+          "[game][guerrilla][occupierforces]")
+{
+    // Base0..Base3 stand 1 km apart on a line (x = 2000..5000)
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    const int b0 = f.registry.FindZoneIndex("Base0");
+    const int b3 = f.registry.FindZoneIndex("Base3");
+    REQUIRE(b0 >= 0);
+    REQUIRE(b3 >= 0);
+    f.Z("Base1").garrison = 3; // room 5
+    f.Z("Base3").garrison = 2; // room 6
+    REQUIRE(f.of.Pool() == P);
+    CoreLines log;
+
+    // two bases with room, the nearer one (Base0) full: the excess banks at
+    // the nearest with room, Base1, not at Base3
+    const Vector3 atBase0 = f.Z("Base0").pos;
+    CHECK(f.of.Refund(4, "survivors near Base0", -1, &atBase0) == 0);
+    CHECK(f.Z("Base1").pending == 4);
+    CHECK(f.Z("Base3").pending == 0);
+    // the source base is full, so its position decides: Base1 again (room
+    // 1 left), then the next nearest, Base3, for the rest
+    CHECK(f.of.Refund(3, "surplus over Base0's room", b0) == 0);
+    CHECK(f.Z("Base1").pending == 5);
+    CHECK(f.Z("Base3").pending == 2);
+    CHECK(f.Z("Base1").pendingOrigin == -1); // two origins on one deposit: mixed (3.3)
+    CHECK(f.Z("Base3").pendingOrigin == b0);
+    CHECK(log.With({"ledger: 1 unit(s) over poolStart banked at Base1"}).size() == 1);
+    CHECK(log.With({"ledger: 2 unit(s) over poolStart banked at Base3"}).size() == 1);
+    // a source base with room takes it before any nearer one
+    f.Z("Base1").garrison = 0; // room 3 again, and nearer to Base0 than Base3 is
+    CHECK(f.of.Refund(2, "home to Base3", b3, &atBase0) == 0);
+    CHECK(f.Z("Base3").pending == 4);
+    CHECK(f.Z("Base1").pending == 5);
+    // nothing known: the base with the most room (Base1, 3, over Base3, 2)
+    CHECK(f.of.Refund(2, "partial spawn") == 0);
+    CHECK(f.Z("Base1").pending == 7);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 11);
+    // only occupier-held military zones bank: a resistance-held base with
+    // room and the towns take nothing; the rest is dropped with the line
+    f.GiveToResistance("Base3");
+    f.Z("Base1").garrison = 1; // full again (1 + 7 pending of 8)
+    CHECK(f.of.Refund(6, "survivors with no base") == 0);
+    CHECK(f.Z("Base3").pending == 4);
+    CHECK(f.of.Banked() == 11);
+    CHECK(f.of.Dropped() == 6);
+    CHECK(log.With({"ledger: 6 unit(s) over poolStart dropped", "every occupier base at garrisonMax"}).size() == 1);
+    CHECK(f.of.Pool() == P);
+}
+
+TEST_CASE("OccupierForces - the ceiling: every base full drops the excess with the line; a live garrison is room "
+          "taken",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    CoreLines log;
+    CHECK(f.of.Refund(7, "HQ assault done") == 0);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Banked() == 0);
+    CHECK(f.of.Dropped() == 7);
+    CHECK(PendingOf(f) == 0);
+    CHECK(log.With({"ledger: 7 unit(s) over poolStart dropped", "every occupier base at garrisonMax"}).size() == 1);
+    CHECK(log.With({"over poolStart banked"}).empty());
+    // the room counts the live garrison and the pending deposit (5.5)
+    const int b2 = f.registry.FindZoneIndex("Base2");
+    f.Z("Base2").garrison = 0;
+    CHECK(OccupierForces::BankRoom(f.registry, b2, 0) == 8);
+    CHECK(OccupierForces::BankRoom(f.registry, b2, 5) == 3);
+    f.Z("Base2").pending = 2;
+    CHECK(OccupierForces::BankRoom(f.registry, b2, 5) == 1);
+    CHECK(OccupierForces::BankRoom(f.registry, b2, 9) == 0);
+    CHECK(OccupierForces::BankRoom(f.registry, f.registry.FindZoneIndex("T0"), 0) == 0); // a town
+    // a local service with no registry bound has nowhere to bank: it drops
+    OccupierForces local;
+    CHECK(local.BankRegistry() == nullptr);
+    CHECK(OccupierForces::Instance().BankRegistry() == &ZoneRegistry::Instance());
+}
+
+TEST_CASE("OccupierForces - the ledger is conserved with the excess banked as garrison",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    // the fake reserves start full; pending is read from the registry
+    int reserves = R + G;
+    int op = 0;
+    int losses = 0;
+    auto check = [&]()
+    {
+        // banking moves units from op strength into pending: no new term;
+        // only the units no base could take leave beside the losses
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), reserves, PendingOf(f), op, P, R, G,
+                                                f.of.RefillTotal(), f.of.WavesTotal(), losses + f.of.Dropped()));
+    };
+    check();
+    // a truck column of 8 leaves Base2's whole reserve; 4 of them die
+    f.Z("Base2").garrison = 0;
+    reserves -= 8;
+    REQUIRE(f.of.Spend(4, "truck and driver"));
+    op += 8 + 4;
+    check();
+    op -= 4;
+    losses += 4;
+    f.of.NoteLoss(4, "repelled");
+    check();
+    // the refill tops the pool back up while the column is out
+    f.of.Tick(f.registry, 3600.0f);
+    REQUIRE(f.of.Pool() == P);
+    check();
+    // the hull and the four survivors come home to a full pool: Base2 has
+    // room 8, so all eight bank there and nothing is dropped
+    CHECK(f.of.Refund(4, "hull home intact", f.registry.FindZoneIndex("Base2")) == 0);
+    op -= 4;
+    check();
+    CHECK(f.of.Refund(4, "surplus") == 0);
+    op -= 4;
+    check();
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 8);
+    CHECK(f.Z("Base2").pending == 8);
+    CHECK(op == 0);
+    // with no room left, the last two are dropped and still balance
+    CHECK(f.of.Pool() == P);
+    reserves -= 2;
+    CHECK(f.of.Refund(2, "survivors") == 0); // 2 more out of the fake reserves
+    CHECK(f.of.Dropped() == 2);
+    check();
+}
+
 TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes back to the pool, the ledger holds",
           "[game][guerrilla][occupierforces]")
 {
@@ -1187,12 +1382,16 @@ TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes 
     check();
     f.GiveToResistance("T1");
     GarrisonCache::RefundPending(f.registry, t1, true, px, pz);
-    CHECK(f.Z("Base1").garrison == Approx(base1Left)); // the origin gets nothing back
-    // the pool is back at poolStart: the three are over the ceiling (5.5),
-    // dropped and booked, and the ledger still holds
+    CHECK(f.Z("Base1").garrison == Approx(base1Left)); // the reserve itself gets nothing back
+    // the pool is back at poolStart: the three are over the ceiling (5.5)
+    // and bank as a pending deposit at the post they came from, which has
+    // room for them; nothing is dropped and the ledger still holds
     REQUIRE(poolBefore + 4 == P);
     CHECK(f.of.Pool() == P);
-    CHECK(f.of.Dropped() == 3);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 3);
+    CHECK(f.Z("Base1").pending == 3);
+    CHECK(f.Z("Base1").pendingOrigin == base1);
     check();
     f.of.RemovePendingRefundHook();
     CHECK(GarrisonCache::GetPendingRefundHook() == nullptr);
