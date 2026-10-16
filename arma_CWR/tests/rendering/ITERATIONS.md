@@ -241,3 +241,33 @@ K identifies authored tree/bush cutout sections correctly, but its leaf-transmis
 ## Saved shadow controls
 
 A separate usability checkpoint exposes depth-map shadows as a default-off Advanced option. Real menu interaction and restart verified persistence and Shadow Quality Off gating; it does not count as another artistic iteration or certify every shadow scene. The exact clean H3+option binary was built, with 479 focused assertions passing. No rejected rendering prototypes are included.
+
+## L linear-material experiment (not retained)
+
+L0 decoded ordinary albedo for selected opaque/cutout environment material paths,
+not a full HDR pipeline. It lifted some vehicle detail but compressed terrain
+detail contrast. L1 moved detail composition before decoding, restoring that
+contrast; matched actual-engine comparisons still preferred the existing H3
+sun/shadow separation overall. Both remain experimental, default-off, and
+excluded from this published renderer. Existing higher MSAA/render-scale settings
+improved edges independently and are not credited to L1.
+
+## M procedural near-field grass (rejected first beauty pass)
+
+M is the thirteenth research stage; M1 eligibility diagnostics and M2/M2b density
+subtests are not extra stages. M2b rendered generated, asset-free opaque blades
+through the normal mesh path with existing lighting and shadow settings. Matched
+960x640 software-rendered off/on captures used the same binary, demo fixture and
+fixed LOD. Both exited successfully, with 154/152/125 clumps in the three views.
+
+Independent visual review rejected promotion: blades were nearly black, sparse
+and repetitive; the vehicle-close view also showed a six-pixel black segment
+above a treetop where the disabled view showed sky. These are unresolved visual
+failures, not evidence of improved lighting. Preserve the captures and prototype
+while diagnosing material/normal/placement behavior. Source checks and successful
+GLSL compilation did not establish correct appearance.
+
+The bounded occupancy checks cover authored static structures and Thing-derived
+loose objects, not all moving actors. Runtime motion, shadow reception, hardware
+cost and official Remaster acceptance remain open. No procedural-grass source,
+game assets, screenshots or binaries are included in the published checkpoint.
