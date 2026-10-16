@@ -1,0 +1,16 @@
+# Spent hold squads are released (decision 8, video 5 finding; capture.sqs
+# GM_fnHoldPrune, OFFSCREEN-CONTRACT.md section 6). Boots the SHIPPED
+# Guerrilla.Abel template (repo-root-relative) on the full Remaster lane:
+# data_dir "packages/RemasterUD" is a gitignored junction to a setup-prepared
+# shadow of the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1,
+# then setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "offscreen"]
+# the capture meter (up to 300 s), then up to 150 s for the release
+timeout = 900
+assert_timeout = 360
+extra_args = ["--dev"]
