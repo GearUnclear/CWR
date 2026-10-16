@@ -50,6 +50,7 @@ layout(location = 5) in vec2 aUV1;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
 
@@ -61,6 +62,7 @@ out vec3 vWorldRel;
 
 void main() {
     vLightNormal = vec3(0.0);
+    vForcedSun = vec3(0.0);
     vIndirectLight = vec3(0.0);
     vSunTerm = vec4(0.0);
     vSunDirection = vec3(0.0);
@@ -95,7 +97,7 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19: {enabled, 0, 0, 0}
     vec4 sunEn;         // c20: {enabled, 0, 0, 0}
     vec4 vpScale;       // c21: {2/width, 2/height, 0, 0} — VSScreen only, declared here for layout parity
-    vec4 _pad22;
+    vec4 forcedSun; // c22: normal-independent sun-derived material contribution
     vec4 _pad23;
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
@@ -122,6 +124,7 @@ layout(location = 2) in vec2 uv;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
 
@@ -191,10 +194,12 @@ void main() {
 
     vColor = clamp(litColor, 0.0, 1.0); // retained for water/flat/legacy consumers
     vLightNormal = worldNormal;
+    vForcedSun = forcedSun.rgb * sunEn.x;
     vSunTerm = vec4(diffuse.rgb * sunEn.x, 1.0);
     vSunDirection = -sunDir.xyz;
     // Keep emissive, ambient and local-light contributions; evaluate only sunlight per fragment.
-    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x;
+    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x; // retains legacy combined ambient
+    // Separate forced sunlight only for shadow attenuation; unshadowed arithmetic stays identical.
 
     vec3 spec = vec3(0.0);
     if (specEn.x > 0.5 && sunEn.x > 0.0) {
@@ -237,6 +242,7 @@ uniform sampler2D tex0;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
 
@@ -250,26 +256,19 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-vec3 surfaceLighting() {
+vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+    // Subtract only occluded forced sunlight: at visibility 1 the original
+    // combined-light arithmetic is preserved, including legacy saturation.
+    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
+                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
 }
 
 void main() {
-    // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
-    // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
-    // before discard, REPLACE 0 to a stencil already 0 (cleared at
-    // frame start, never written non-zero outside the shadow
-    // accumulator pass) is idempotent.  Removing the late-test forcing
-    // lets early-Z and hierarchical-Z work — meaningful perf win on
-    // opaque-heavy scenes.
-    vec4 r0 = vec4(surfaceLighting(), vColor.a) * texture(tex0, vUV0);
-    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
-    r0.rgb += vSpecColor.rgb;
-
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -324,10 +323,27 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
+    // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
+    // before discard, REPLACE 0 to a stencil already 0 (cleared at
+    // frame start, never written non-zero outside the shadow
+    // accumulator pass) is idempotent.  Removing the late-test forcing
+    // lets early-Z and hierarchical-Z work — meaningful perf win on
+    // opaque-heavy scenes.
+    vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * texture(tex0, vUV0);
+    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
+    r0.rgb += vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0);
+
+
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -370,6 +386,7 @@ uniform sampler2D tex1;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
 
@@ -383,23 +400,19 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-vec3 surfaceLighting() {
+vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+    // Subtract only occluded forced sunlight: at visibility 1 the original
+    // combined-light arithmetic is preserved, including legacy saturation.
+    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
+                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
 }
 
 void main() {
-    // No gl_FragDepth — see PSNormal.
-    vec4 t0 = texture(tex0, vUV0);
-    vec4 t1 = texture(tex1, vUV1);
-    vec4 r0 = vec4(surfaceLighting(), vColor.a) * t0;
-    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
-    r0.rgb *= t1.a * 2.0;
-    r0 += vSpecColor;
-
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -454,10 +467,24 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — see PSNormal.
+    vec4 t0 = texture(tex0, vUV0);
+    vec4 t1 = texture(tex1, vUV1);
+    vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * t0;
+    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
+    r0.rgb *= t1.a * 2.0;
+    r0 += vec4(vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0), vSpecColor.a);
+
+
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -500,6 +527,7 @@ uniform sampler2D tex1;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
 
@@ -513,25 +541,19 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-vec3 surfaceLighting() {
+vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    return clamp(vIndirectLight + vSunTerm.rgb * nDotL, 0.0, 1.0);
+    // Subtract only occluded forced sunlight: at visibility 1 the original
+    // combined-light arithmetic is preserved, including legacy saturation.
+    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
+                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
 }
 
 void main() {
-    // No gl_FragDepth — see PSNormal.
-    vec4 t0 = texture(tex0, vUV0);
-    vec4 t1 = texture(tex1, vUV1);
-
-    if (vFogTC < 0.0) discard;
-
-    vec4 r0;
-    r0.rgb = surfaceLighting() * t0.rgb;
-    r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
-    r0.rgb = clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -586,11 +608,27 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — see PSNormal.
+    vec4 t0 = texture(tex0, vUV0);
+    vec4 t1 = texture(tex1, vUV1);
+
+    if (vFogTC < 0.0) discard;
+
+    vec4 r0;
+    r0.rgb = surfaceLighting(sunVisibility) * t0.rgb;
+    r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
+    r0.rgb = clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+
     r0.a = clamp(grassCoef2.a * r0.a * 2.0, 0.0, 1.0);
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -664,7 +702,7 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19
     vec4 sunEn;         // c20
     vec4 vpScale;       // c21 — VSScreen only, declared for layout parity
-    vec4 _pad22;
+    vec4 forcedSun; // c22: normal-independent sun-derived material contribution
     vec4 _pad23;
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
@@ -685,6 +723,7 @@ layout(location = 2) in vec2 uv;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
 
@@ -696,6 +735,7 @@ out vec3 vWorldRel;
 
 void main() {
     vLightNormal = vec3(0.0);
+    vForcedSun = vec3(0.0);
     vIndirectLight = vec3(0.0);
     vSunTerm = vec4(0.0);
     vSunDirection = vec3(0.0);
@@ -1187,6 +1227,12 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
 
     Color dif = sun->Diffuse() * mat.diffuse;
     Color amb = sun->Ambient() * mat.ambient + sun->Diffuse() * mat.forcedDiffuse;
+
+    // forcedDiffuse is a normal-independent sun term, not sky ambient.
+    // Keep the legacy combined ambient upload for vColor/alpha and water/flat.
+    const Color forced = sun->Diffuse() * mat.forcedDiffuse;
+    const float forcedSun[4] = {forced.R(), forced.G(), forced.B(), 0};
+    memcpy(s_vsShadow + 22 * 4, forcedSun, 16);
 
     float ambient[4] = {amb.R(), amb.G(), amb.B(), amb.A()};
     float diffuse[4] = {dif.R(), dif.G(), dif.B(), dif.A()};

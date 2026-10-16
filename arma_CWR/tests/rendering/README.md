@@ -45,6 +45,16 @@ night/local lights, fog and cascaded shadows. Then repeat the relevant checks wi
 full official Remaster data. Demo renderer checks do not certify full-game or
 Guerrilla content compatibility. Do not commit demo or retail assets.
 
-As of 2026-10-16, local shader tests pass; the full engine build and demo A/B run
-are **not completed**. Dependency and asset jobs were interrupted by an execution
-service approval cancellation, including after the user authorized resumption.
+## Current progress (2026-10-16)
+
+The initial dependency/download interruptions were resolved. Both compiled-main
+and modified demo clients now build and render the same controlled gameplay
+fixture. This is not full Remaster acceptance. The interpolation-only comparison
+was visually subtle; further shadow/light separation is documented in
+[ITERATIONS.md](ITERATIONS.md), including rejected experiments and limitations.
+
+Run `test_shadow_lighting_gl33.py` for the additional semantic shadow-component
+regressions. These cover true ambient, emissive/local light, direct and forced
+sunlight, alpha, and material ordering using controlled synthetic GLSL fixtures.
+The new suite does not execute C++ upload, exercise cascade edges, or benchmark
+hardware. The draft remains pending broader visual and runtime acceptance.
