@@ -263,6 +263,9 @@ GM_cvD = (getPos aP) distance (GM_cvZ select GM_Z_POS)
 ? GM_cvD > GM_CIV_RADIUS : goto "cachenext"
 ? (GM_cvZ select GM_Z_NAME) in GM_PANIC_ZONES : goto "cachenext"
 ? (count GM_CIV_GROUPS) >= GM_CIV_MAX_GROUPS : goto "cachenext"
+; the live-AI budget (OFFSCREEN-CONTRACT.md section 6): a group that would
+; breach budgetLiveBodies or the side's group budget waits for a later tick
+? (gmSimAdmit [format ["%1", GM_CIV_SIDE], GM_CIV_GROUP_SIZE, 1]) > 0 : goto "cachenext"
 gmCvN = 0; gmCvJ = 0; while {gmCvJ < (count GM_CIV_GROUP_ZONE)} do {if ((GM_CIV_GROUP_ZONE select gmCvJ) == (GM_cvZ select GM_Z_NAME)) then {gmCvN = gmCvN + 1}; gmCvJ = gmCvJ + 1}
 ? gmCvN >= GM_CIV_PER_TOWN : goto "cachenext"
 GM_cvG = [gmCvI] call GM_fnCivSpawnTown

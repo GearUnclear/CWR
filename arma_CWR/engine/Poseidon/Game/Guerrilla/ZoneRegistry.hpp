@@ -307,6 +307,9 @@ struct SimDiag
     int trafficParked = 0;
     int trafficPatrol = 0;
     int trafficConvoy = 0;
+    // ambient traffic spawns the live-AI budget refused since mission start
+    // (TrafficDiag::skippedBudget; [gmsim] skippedBudget=)
+    int trafficSkippedBudget = 0;
     float gmAvg = 0, gmP95 = 0, gmMax = 0;          // FrameProfiler "gm" phase (ms)
     float frameAvg = 0, frameP95 = 0, frameMax = 0; // whole frame (ms)
     // CounterAttack's live occupier groups beyond 850 m of the player
@@ -330,6 +333,24 @@ enum SimBudgetBreach
 int SimBudgetBreaches(const SimDiag& d, const ZoneTuning& t);
 // world-touching sampler (engine path); zero sample without a world
 void GatherSimDiag(SimDiag& out);
+
+// The census an ambient spawner reads before it adds bodies (round 3 A,
+// OFFSCREEN-CONTRACT.md section 6): the living AI bodies on every side
+// center (the [gmsim] total=) and the groups on the one side the spawn
+// joins.  Filled by GatherLiveCensus; unit tests fill it directly.
+struct LiveCensus
+{
+    int liveTotal = 0;
+    int sideGroups = 0;
+};
+// pure admission check (unit-tested): the SimBudgetBreach bits a spawn of
+// bodies in groups new groups WOULD cause (at the cap is within budget),
+// 0 = admitted.  A budget <= 0 is off.
+int SimBudgetAdmit(const LiveCensus& census, int bodies, int groups, const ZoneTuning& t);
+// world-touching census (engine path): liveTotal over every side center,
+// sideGroups on sideName's center (0 for an unknown side or no center); a
+// zero census without a world
+void GatherLiveCensus(const char* sideName, LiveCensus& out);
 
 // One occupier or resistance faction entry (a subclass of
 // CfgGuerrillaFactions).  Non-array text entries (officer, holdClass, ...)

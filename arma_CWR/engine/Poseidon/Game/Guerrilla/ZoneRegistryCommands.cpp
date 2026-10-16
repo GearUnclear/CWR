@@ -407,6 +407,26 @@ static GameValue GmSimDiag(const GameState* state)
     return value;
 }
 
+// gmSimAdmit [side, bodies, groups] -> the SimBudgetBreach bits a spawn of
+// bodies in groups new groups on that side would cause against the live
+// census (0 = it fits; 1 = budgetLiveBodies, 2 = budgetSideGroups).  The
+// admission Traffic applies before every ambient spawn (round 3 A), for the
+// script spawners (civilians.sqs) to apply the same hard cap
+static GameValue GmSimAdmit(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 3) || !CheckType(state, array[0], GameString) ||
+        !CheckType(state, array[1], GameScalar) || !CheckType(state, array[2], GameScalar))
+    {
+        return 0.0f;
+    }
+    GameStringType side = array[0];
+    LiveCensus census;
+    GatherLiveCensus(side, census);
+    return (float)SimBudgetAdmit(census, toInt((float)array[1]), toInt((float)array[2]),
+                                 ZoneRegistry::Instance().Tuning());
+}
+
 // gmSimDiagLog -> write one [gmsim] line now (plus budget WARNs); returns the
 // breach bits.  The periodic line runs every simDiagInterval regardless.
 static GameValue GmSimDiagLog(const GameState* /*state*/)
@@ -660,6 +680,7 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmDetectedBases", GmDetectedBases));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
+    GGameState.NewFunction(GameFunction(GameScalar, "gmSimAdmit", GmSimAdmit, GameArray));
     GGameState.NewFunction(GameFunction(GameScalar, "gmZoneIndex", GmZoneIndex, GameString));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneSet", GmZoneSet, GameArray));
     GGameState.NewFunction(GameFunction(GameNothing, "gmZoneOnEvent", GmZoneOnEvent, GameArray));

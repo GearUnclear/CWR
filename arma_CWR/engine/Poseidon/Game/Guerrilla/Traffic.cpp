@@ -107,6 +107,7 @@ void Traffic::Clear()
     _subAccum = 0;
     _percept = Perception();
     _diag = TrafficDiag();
+    _budgetWarnAge = BudgetWarnInterval;
     for (int k = 0; k < NTrafficKinds; k++)
     {
         _lastLogged[k] = TSFNone;
@@ -435,6 +436,8 @@ const char* Traffic::SpawnFailureName(int failure)
             return "hullCreate";
         case TSFDriverSeat:
             return "driverSeat";
+        case TSFLiveBudget:
+            return "liveBudget";
         default:
             return "unknown";
     }
@@ -1481,6 +1484,120 @@ TrafficCrewDisposal Traffic::CrewDisposal(bool personDead, bool seated)
         return TCDBody; // only the actual dead ride the bodies table
     }
     return seated ? TCDDismountFlee : TCDFlee;
+}
+
+// ---------------------------------------------------------------------------
+// the live-AI budget gate (round 3 A, OFFSCREEN-CONTRACT.md section 6)
+// ---------------------------------------------------------------------------
+
+int Traffic::SpawnBodiesMax(int kind)
+{
+    switch (kind)
+    {
+        case TKCiv:
+            return 1; // the driver
+        case TKPatrol:
+            return 3; // driver, gunner on a turret, one passenger on a cargo hull
+        case TKConvoy:
+            return 7; // the truck's three, the escort's driver, gunner and two riflemen
+        default:
+            return 0;
+    }
+}
+
+int Traffic::BudgetVerdict(bool forced, const LiveCensus& census, int bodies, int groups, const ZoneTuning& zoneTuning)
+{
+    if (forced)
+    {
+        return 0; // test levers place deliberately, as they bypass the chance roll
+    }
+    return SimBudgetAdmit(census, bodies, groups, zoneTuning);
+}
+
+bool Traffic::AdmitAmbientSpawn(int kind, const LiveCensus& census, const ZoneTuning& zoneTuning)
+{
+    const int bodies = SpawnBodiesMax(kind);
+    const int bits = BudgetVerdict(false, census, bodies, SpawnGroups, zoneTuning);
+    if (bits == 0)
+    {
+        return true;
+    }
+    _diag.skippedBudget++;
+    if (bits & SBLiveBodies)
+    {
+        _diag.skippedBudgetBodies++;
+    }
+    if (bits & SBSideGroups)
+    {
+        _diag.skippedBudgetGroups++;
+    }
+    // the coroner's line names the verdict (gmTrafficDiag), but it is not a
+    // failed attempt: the road is silent by design until there is room
+    _diag.lastFailKind = kind;
+    _diag.lastFail = TSFLiveBudget;
+    _diag.lastFailDetail = (bits & SBLiveBodies) ? "budgetLiveBodies" : "budgetSideGroups";
+    if (_budgetWarnAge >= BudgetWarnInterval)
+    {
+        _budgetWarnAge = 0;
+        _diag.budgetWarnings++;
+        LOG_WARN(Core,
+                 "Traffic: {} spawn skipped for the live-AI budget (live AI {}+{}/{}, side groups {}+{}/{}); {} "
+                 "ambient spawns skipped so far, next WARN in {:.0f}s at the earliest",
+                 KindName(kind), census.liveTotal, bodies, zoneTuning.budgetLiveBodies, census.sideGroups, SpawnGroups,
+                 zoneTuning.budgetSideGroups, _diag.skippedBudget, BudgetWarnInterval);
+    }
+    return false;
+}
+
+bool Traffic::SetTuneValue(const char* key, float value)
+{
+    if (!key)
+    {
+        return false;
+    }
+    auto prob = [](float v) { return v < 0 ? 0.0f : (v > 1 ? 1.0f : v); };
+    auto cap = [](float v) { return v < 0 ? 0 : toInt(v); };
+    if (stricmp(key, "interval") == 0)
+    {
+        _tuning.interval = value < 0.5f ? 0.5f : value; // the config floor
+    }
+    else if (stricmp(key, "civChance") == 0)
+    {
+        _tuning.civChance = prob(value);
+    }
+    else if (stricmp(key, "patrolChance") == 0)
+    {
+        _tuning.patrolChance = prob(value);
+    }
+    else if (stricmp(key, "convoyChance") == 0)
+    {
+        _tuning.convoyChance = prob(value);
+    }
+    else if (stricmp(key, "parkChance") == 0)
+    {
+        _tuning.parkChance = prob(value);
+    }
+    else if (stricmp(key, "maxCiv") == 0)
+    {
+        _tuning.maxCiv = cap(value);
+    }
+    else if (stricmp(key, "maxPatrols") == 0)
+    {
+        _tuning.maxPatrols = cap(value);
+    }
+    else if (stricmp(key, "maxConvoys") == 0)
+    {
+        _tuning.maxConvoys = cap(value);
+    }
+    else if (stricmp(key, "maxParked") == 0)
+    {
+        _tuning.maxParked = cap(value);
+    }
+    else
+    {
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -4116,6 +4233,7 @@ void Traffic::Simulate(float deltaT)
     // latch, wreck age, walker age) counts it, never the nominal interval
     AutoArray<TrafficEventRecord> fired;
     _diag.passes++;
+    AdvanceBudgetClock(tick);
     UpdateEntries(playerPos, playerValid, tick, fired);
     CleanupReleased(playerPos, playerValid, tick);
     CleanupFleeing(playerPos, playerValid, tick);
@@ -4198,6 +4316,20 @@ void Traffic::Simulate(float deltaT)
             decide.maxPatrols = ScaleCap(_tuning.maxPatrols, _percept.band.radius, _tuning.radius);
         }
         int kind = DecideSpawn(in, decide);
+        if (kind >= 0)
+        {
+            // the live-AI budget (OFFSCREEN-CONTRACT.md section 6): the same
+            // census CounterAttack's births read, fresh every pass, so a
+            // crowded map silences the road and an emptier one reopens it on
+            // the next pass.  The hard cap holds against the most bodies this
+            // kind can seat; forced spawns (ForceSpawn) never come here
+            LiveCensus census;
+            GatherLiveCensus(kind == TKCiv ? "CIV" : (const char*)ZoneRegistry::Instance().OccupierSide(), census);
+            if (!AdmitAmbientSpawn(kind, census, ZoneRegistry::Instance().Tuning()))
+            {
+                kind = -1;
+            }
+        }
         if (kind == TKCiv)
         {
             // reuse the modulated route: the spawn happens from the origin

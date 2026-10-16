@@ -1793,6 +1793,24 @@ TEST_CASE("SimBudgetBreaches - live bodies and per-side groups (issue #71)", "[g
     REQUIRE(SimBudgetBreaches(d, t) == 0);
 }
 
+TEST_CASE("SimBudgetAdmit - a spawn checked against the census before it lands (round 3 A)",
+          "[game][guerrilla][traffic]")
+{
+    ZoneTuning t; // budgetLiveBodies 130, budgetSideGroups 40
+    LiveCensus c;
+    c.liveTotal = 128;
+    c.sideGroups = 39;
+    REQUIRE(SimBudgetAdmit(c, 2, 1, t) == 0); // 130 of 130 and 40 of 40: at the cap is within budget
+    REQUIRE(SimBudgetAdmit(c, 3, 1, t) == SBLiveBodies);
+    REQUIRE(SimBudgetAdmit(c, 2, 2, t) == SBSideGroups);
+    REQUIRE(SimBudgetAdmit(c, 3, 2, t) == (SBLiveBodies | SBSideGroups));
+    c.liveTotal = 140; // already over: nothing more fits, not even an empty group
+    REQUIRE(SimBudgetAdmit(c, 0, 0, t) == SBLiveBodies);
+    t.budgetLiveBodies = 0; // a budget <= 0 is off
+    t.budgetSideGroups = 0;
+    REQUIRE(SimBudgetAdmit(c, 50, 50, t) == 0);
+}
+
 TEST_CASE("ZoneRegistry - heat clamps", "[game][guerrilla]")
 {
     RegistryFixture f;

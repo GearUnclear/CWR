@@ -303,7 +303,7 @@ so every base pays like an OUTPOST.
 | Budget | Threshold | Instrument |
 |---|---|---|
 | Live AI bodies, typical | <= 100 | `gmSimDiag` element 2, `[gmsim] total=` |
-| Live AI bodies, hard cap | <= 130 (WARN above); a live birth over it waits, retried every 30 s [code], never dropped | same |
+| Live AI bodies, hard cap | <= 130 (WARN above); a live birth over it waits, retried every 30 s [code], never dropped. An ambient traffic spawn that would breach it or the side's group budget (counting the most bodies its kind seats: civ 1, patrol 3, convoy 7) is skipped for that pass, counted (`gmTrafficDiag` slots 17 to 20, `[gmsim] skippedBudget=`) and WARNed at most once a minute; forced spawns are exempt, and `gmSimAdmit [side, bodies, groups]` gives scripts the same check, which the town population (`civilians.sqs`) and the garrison cache do not apply yet [code, round 3 A] | same |
 | Groups per side | <= 40 (WARN above; engine cap 63). A package counts its groups: foot 1, a mounted squad 2 (infantry and crew), a column 3 (plus the escort crew) (`ForcePackages::GroupsOf`, `GoLive` [code]); a helicopter insertion 2 (crew and cargo), a strike sortie 1 [commit bcca80e]; a birth over budget waits. Leftover groups (section 9.6) stay counted until deleted | `gmSimDiag` element 3, `[gmsim] maxSide=` |
 | Live infantry records | `counterAttackMaxLive` (2, 0..8 [code]); strikes count as groups, not as live squads | `gmCounterAttacks` |
 | Born operations | `forcesOpsMax` (2), `forcesOpsMaxStrong` (3) while STRONG [2026-10-15]; an unborn operation does not count; `CounterAttack::OpsCap` adds one per wave record (origin `CAOWave`) in any phase, and a wave order gets one more headroom at launch [code] | `gmOccupierOps` |

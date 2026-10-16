@@ -3463,6 +3463,20 @@ int SimBudgetBreaches(const SimDiag& d, const ZoneTuning& t)
     return bits;
 }
 
+int SimBudgetAdmit(const LiveCensus& census, int bodies, int groups, const ZoneTuning& t)
+{
+    int bits = 0;
+    if (t.budgetLiveBodies > 0 && census.liveTotal + bodies > t.budgetLiveBodies)
+    {
+        bits |= SBLiveBodies;
+    }
+    if (t.budgetSideGroups > 0 && census.sideGroups + groups > t.budgetSideGroups)
+    {
+        bits |= SBSideGroups;
+    }
+    return bits;
+}
+
 // live bodies and allocated groups on one side center (null: none)
 static void CensusCenter(AICenter* center, int& bodies, int& groups)
 {
@@ -3487,6 +3501,31 @@ static void CensusCenter(AICenter* center, int& bodies, int& groups)
             {
                 bodies++;
             }
+        }
+    }
+}
+
+void GatherLiveCensus(const char* sideName, LiveCensus& out)
+{
+    out = LiveCensus();
+    if (!GWorld)
+    {
+        return;
+    }
+    // the same side centers and the same per-center count as GatherSimDiag,
+    // so a spawner's admission and the [gmsim] total= never disagree
+    static const TargetSide kSides[] = {TEast, TWest, TGuerrila, TCivilian};
+    AICenter* own = FindSideCenter(sideName);
+    for (TargetSide side : kSides)
+    {
+        AICenter* center = GWorld->GetCenter(side);
+        int bodies = 0;
+        int groups = 0;
+        CensusCenter(center, bodies, groups);
+        out.liveTotal += bodies;
+        if (center && center == own)
+        {
+            out.sideGroups = groups;
         }
     }
 }
@@ -3544,6 +3583,7 @@ void GatherSimDiag(SimDiag& out)
     out.trafficParked = traffic.CountParked();
     out.trafficPatrol = traffic.Count(TKPatrol);
     out.trafficConvoy = traffic.Count(TKConvoy);
+    out.trafficSkippedBudget = traffic.Diag().skippedBudget;
     const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
     const Dev::FrameProfiler::PhaseStats gm = perf.Stats(Dev::FrameProfiler::PhaseGuerrilla);
     const Dev::FrameProfiler::PhaseStats frame = perf.TotalStats();
@@ -3570,12 +3610,12 @@ int ZoneRegistry::LogSimDiag()
     LOG_INFO(Core,
              "[gmsim] zones bubble={} remote={} live occ={} res={} civ={} total={} groups occ={} res={} civ={} "
              "maxSide={} garrison zones={} bodies={} traffic civ={} parked={} patrol={} convoy={} "
-             "gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms "
+             "skippedBudget={} gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms "
              "far occ={} arrival={} march={} leftover={} home={} air={}",
              d.zonesInBubble, d.zonesRemoteTicked, d.liveOcc, d.liveRes, d.liveCiv, d.liveTotal, d.grpOcc, d.grpRes,
              d.grpCiv, d.grpMaxSide, d.garrisonSpawnedZones, d.garrisonLiveBodies, d.trafficCiv, d.trafficParked,
-             d.trafficPatrol, d.trafficConvoy, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg, d.frameP95, d.frameMax,
-             d.farOcc, d.farArrival, d.farMarch, d.farLeftover, d.farHomeHull, d.farAir);
+             d.trafficPatrol, d.trafficConvoy, d.trafficSkippedBudget, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg,
+             d.frameP95, d.frameMax, d.farOcc, d.farArrival, d.farMarch, d.farLeftover, d.farHomeHull, d.farAir);
     const int bits = SimBudgetBreaches(d, _tuning);
     if (bits & SBLiveBodies)
     {
