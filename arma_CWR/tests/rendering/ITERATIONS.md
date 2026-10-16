@@ -732,7 +732,35 @@ were OFF 60.405/95.835/60.200 and ON 71.670/108.245/66.855, with unchanged draw 
 This is not a representative GPU estimate, a speedup, or a negligible-cost claim.
 S1 is retained as a default-off visual experiment with that cost disclosed.
 
-A separate S2 fog-free-work shortcut is being investigated, not included here.
-Its strict HDR bitwise-parity hypothesis failed despite tiny measured differences;
-that report remains preserved rather than being called a pass. Performance and
-bounded-numeric/actual-image gates are separate from S1's published contract.
+S2, an exact-fog-free early skip at four mesh/water callsites, is parked and not
+included in production. Its 3,780-case strict HDR parity characterization found
+45 RGBA mismatches, all at fog exactly1; maximum absolute difference9.54e-7,
+relative3.08e-6 and32output ULP. Alpha and adjacent-float cases were exact. The
+strict FAIL remains preserved. A separately reviewed gamma4 arithmetic budget
+with source-derived bounds passed for the declared finite fixture only, not
+unrestricted HDR or every driver.
+
+Matched native scene review found no visible difference. The west image matched
+exactly, east differed by one level in two pixels, and north changes were localized
+to the armored vehicle/detail edges, not broad atmospheric color. Their underlying
+cause is unproven and is not mislabeled shader-rounding equivalence.
+
+A new four-arm software comparison found paired S1 means68.220/105.325/66.080ms
+versus S2 69.085/109.225/67.850ms, same901/766/727calls. No measured speedup justified
+the extra branch; preserve the experiment and keep the simpler S1. This does not
+establish hardware-GPU performance. No S2 source is published.
+
+
+## Owner artistic review, 2026-10-16
+
+The owner rejected S's haze appearance. That supersedes the earlier independent
+critic's localized KEEP verdict; passing technical checks is not artistic approval.
+S production and S-specific tests are removed from the current candidate, while
+commit caaea1bba7b64364464514886e80062cdf320ef8, reports and images preserve the
+experiment. Fixture UBO corrections remain. Future beauty comparisons keep S off.
+
+The required primary comparison is the original first-person LightingLowSun.Demo
+view: jeep, M113, soldier and net, clear08:00,960x640,effective4xMSAA/150%scale,
+with existing sky/PCF/terrain-relief settings held fixed. Deliver matched BEFORE
+and AFTER pairs; panoramas are supporting diagnostics, not a substitute. Pursue
+meaningfully different approaches rather than escalating the rejected blue wash.

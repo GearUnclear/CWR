@@ -243,7 +243,6 @@ layout(std140) uniform PSConstants {
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
     vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
     vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
-    vec4 aerialControl; // c30: toward-sun XYZ + explicit world-atmosphere weight
 };
 
 uniform sampler2D tex0;
@@ -269,25 +268,6 @@ uniform sampler2DArray shadowMap;
 in vec3 vWorldRel;
 
 out vec4 fragColor;
-
-// S: change only scattering color; preserve the authored fog transmittance.
-vec3 directionalAerialColor(vec3 base, vec3 ray, vec3 towardSun, float weight) {
-    if (weight <= 0.0) return base;
-    if (any(isnan(base)) || any(isinf(base)) || any(lessThan(base,vec3(0.0))) ||
-        any(isnan(ray)) || any(isinf(ray)) || any(isnan(towardSun)) || any(isinf(towardSun))) return base;
-    float rayLength2=dot(ray,ray), sunLength2=dot(towardSun,towardSun);
-    if (rayLength2<=1e-12 || sunLength2<=1e-12) return base;
-    vec3 luma=vec3(.2126,.7152,.0722);
-    float originalLuma=dot(base,luma);
-    if (originalLuma<=1e-8) return base;
-    vec3 cool=base*vec3(.80,.96,1.14), warm=base*vec3(1.12,1.02,.86);
-    cool*=originalLuma/max(dot(cool,luma),1e-8);
-    warm*=originalLuma/max(dot(warm,luma),1e-8);
-    float mu=max(dot(ray*inversesqrt(rayLength2),towardSun*inversesqrt(sunLength2)),0.0);
-    float lobe=mu*mu; lobe*=lobe;
-    return mix(base,mix(cool,warm,lobe),clamp(weight,0.0,1.0));
-}
-
 
 vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
@@ -444,12 +424,7 @@ void main() {
     float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
     r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
 
-    vec3 scattering = fogColor.rgb;
-    if (aerialControl.w > 0.0) {
-        float distanceWeight = smoothstep(120.0,350.0,length(vWorldRel));
-        scattering = directionalAerialColor(fogColor.rgb,vWorldRel,aerialControl.xyz,aerialControl.w*distanceWeight);
-    }
-    r0.rgb = mix(scattering, r0.rgb, vFogTC);
+    r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -472,7 +447,6 @@ layout(std140) uniform PSConstants {
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
     vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
     vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
-    vec4 aerialControl; // c30: toward-sun XYZ + explicit world-atmosphere weight
 };
 
 uniform sampler2D tex0;
@@ -500,25 +474,6 @@ uniform sampler2DArray shadowMap;
 in vec3 vWorldRel;
 
 out vec4 fragColor;
-
-// S: change only scattering color; preserve the authored fog transmittance.
-vec3 directionalAerialColor(vec3 base, vec3 ray, vec3 towardSun, float weight) {
-    if (weight <= 0.0) return base;
-    if (any(isnan(base)) || any(isinf(base)) || any(lessThan(base,vec3(0.0))) ||
-        any(isnan(ray)) || any(isinf(ray)) || any(isnan(towardSun)) || any(isinf(towardSun))) return base;
-    float rayLength2=dot(ray,ray), sunLength2=dot(towardSun,towardSun);
-    if (rayLength2<=1e-12 || sunLength2<=1e-12) return base;
-    vec3 luma=vec3(.2126,.7152,.0722);
-    float originalLuma=dot(base,luma);
-    if (originalLuma<=1e-8) return base;
-    vec3 cool=base*vec3(.80,.96,1.14), warm=base*vec3(1.12,1.02,.86);
-    cool*=originalLuma/max(dot(cool,luma),1e-8);
-    warm*=originalLuma/max(dot(warm,luma),1e-8);
-    float mu=max(dot(ray*inversesqrt(rayLength2),towardSun*inversesqrt(sunLength2)),0.0);
-    float lobe=mu*mu; lobe*=lobe;
-    return mix(base,mix(cool,warm,lobe),clamp(weight,0.0,1.0));
-}
-
 
 // Approximate authored detail alpha as a small height field, not geometry/AO.
 // Derivatives are evaluated before shadow control flow and alpha discard.
@@ -709,12 +664,7 @@ void main() {
     float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
     r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
 
-    vec3 scattering = fogColor.rgb;
-    if (aerialControl.w > 0.0) {
-        float distanceWeight = smoothstep(120.0,350.0,length(vWorldRel));
-        scattering = directionalAerialColor(fogColor.rgb,vWorldRel,aerialControl.xyz,aerialControl.w*distanceWeight);
-    }
-    r0.rgb = mix(scattering, r0.rgb, vFogTC);
+    r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
     // Q is registration-only, not a cloud illumination/attenuation feature.
     if (cloudLookup.w > .5 && vSunTerm.w > .5) {
@@ -748,7 +698,6 @@ layout(std140) uniform PSConstants {
     vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
     vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
     vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
-    vec4 aerialControl; // c30: toward-sun XYZ + explicit world-atmosphere weight
 };
 
 uniform sampler2D tex0;
@@ -775,25 +724,6 @@ uniform sampler2DArray shadowMap;
 in vec3 vWorldRel;
 
 out vec4 fragColor;
-
-// S: change only scattering color; preserve the authored fog transmittance.
-vec3 directionalAerialColor(vec3 base, vec3 ray, vec3 towardSun, float weight) {
-    if (weight <= 0.0) return base;
-    if (any(isnan(base)) || any(isinf(base)) || any(lessThan(base,vec3(0.0))) ||
-        any(isnan(ray)) || any(isinf(ray)) || any(isnan(towardSun)) || any(isinf(towardSun))) return base;
-    float rayLength2=dot(ray,ray), sunLength2=dot(towardSun,towardSun);
-    if (rayLength2<=1e-12 || sunLength2<=1e-12) return base;
-    vec3 luma=vec3(.2126,.7152,.0722);
-    float originalLuma=dot(base,luma);
-    if (originalLuma<=1e-8) return base;
-    vec3 cool=base*vec3(.80,.96,1.14), warm=base*vec3(1.12,1.02,.86);
-    cool*=originalLuma/max(dot(cool,luma),1e-8);
-    warm*=originalLuma/max(dot(warm,luma),1e-8);
-    float mu=max(dot(ray*inversesqrt(rayLength2),towardSun*inversesqrt(sunLength2)),0.0);
-    float lobe=mu*mu; lobe*=lobe;
-    return mix(base,mix(cool,warm,lobe),clamp(weight,0.0,1.0));
-}
-
 
 vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
@@ -944,12 +874,7 @@ void main() {
         r0.a = cov;
     } else if (r0.a - alphaRef.x * alphaRef.y < 0.0) discard;
 
-    vec3 scattering = fogColor.rgb;
-    if (aerialControl.w > 0.0) {
-        float distanceWeight = smoothstep(120.0,350.0,length(vWorldRel));
-        scattering = directionalAerialColor(fogColor.rgb,vWorldRel,aerialControl.xyz,aerialControl.w*distanceWeight);
-    }
-    r0.rgb = mix(scattering, r0.rgb, vFogTC);
+    r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -965,8 +890,6 @@ layout(std140) uniform PSConstants {
     vec4 grassCoef1;
     vec4 grassCoef2;
     vec4 rgbEyeCoef;
-    vec4 _aerialPad8to29[22];
-    vec4 aerialControl; // c30; water lightDir remains untouched at c4
 };
 
 uniform sampler2D tex0;
@@ -987,25 +910,6 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-// S: change only scattering color; preserve the authored fog transmittance.
-vec3 directionalAerialColor(vec3 base, vec3 ray, vec3 towardSun, float weight) {
-    if (weight <= 0.0) return base;
-    if (any(isnan(base)) || any(isinf(base)) || any(lessThan(base,vec3(0.0))) ||
-        any(isnan(ray)) || any(isinf(ray)) || any(isnan(towardSun)) || any(isinf(towardSun))) return base;
-    float rayLength2=dot(ray,ray), sunLength2=dot(towardSun,towardSun);
-    if (rayLength2<=1e-12 || sunLength2<=1e-12) return base;
-    vec3 luma=vec3(.2126,.7152,.0722);
-    float originalLuma=dot(base,luma);
-    if (originalLuma<=1e-8) return base;
-    vec3 cool=base*vec3(.80,.96,1.14), warm=base*vec3(1.12,1.02,.86);
-    cool*=originalLuma/max(dot(cool,luma),1e-8);
-    warm*=originalLuma/max(dot(warm,luma),1e-8);
-    float mu=max(dot(ray*inversesqrt(rayLength2),towardSun*inversesqrt(sunLength2)),0.0);
-    float lobe=mu*mu; lobe*=lobe;
-    return mix(base,mix(cool,warm,lobe),clamp(weight,0.0,1.0));
-}
-
-
 void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
@@ -1013,12 +917,7 @@ void main() {
     float spec = clamp(dot(lightDir.xyz, bumpNormal), 0.0, 1.0);
     vec4 r0 = vColor * t0;
     r0.rgb += spec;
-    vec3 scattering = fogColor.rgb;
-    if (aerialControl.w > 0.0) {
-        float distanceWeight = smoothstep(120.0,350.0,length(vWorldRel));
-        scattering = directionalAerialColor(fogColor.rgb,vWorldRel,aerialControl.xyz,aerialControl.w*distanceWeight);
-    }
-    r0.rgb = mix(scattering, r0.rgb, vFogTC);
+    r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -1230,7 +1129,7 @@ static GLuint LinkGLProgram(GLuint vs, GLuint fs, const char* name)
 }
 
 static float s_vsShadow[280] = {}; // 70 vec4 slots — through SlotLightVP (c66-c69)
-static float s_psShadow[124] = {}; // 31 vec4 slots; c30 is the dedicated world-atmosphere control
+static float s_psShadow[120] = {}; // 28 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
 
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;

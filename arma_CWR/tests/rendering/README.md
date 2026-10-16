@@ -422,46 +422,9 @@ use the same rule. Tests select exact frozen source explicitly; the original26
 suite now accepts --source while retaining all26 assertions.
 
 
-### Directional aerial color regression checks
+### Rejected S aerial-color experiment
 
-`CWR_AERIAL_COLOR=1` opts into directional fog scattering color, not increased
-fog density or changed transmittance. Also set `CWR_EXPERIMENTAL_SKY=1`; it requires a successful, fully active
-analytic sky overlay. Activation fades between sun elevations 15–20 degrees;
-mesh color weight fades over 120–350 m. Night, NVG and excluded draws upload
-zero control. The analytic sky and supported mesh families share the same
-luminance-preserving cool/warm directional color helper.
-
-From `arma_CWR` in a fresh checkout, obtain the published pre-S shader baseline
-(no experimental snapshot or game asset is required):
-
-```sh
-git show 2eb8e25cf19d44471f74ecf5d6552a8c762f006c:arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp > /tmp/cwr-Q-shaders.cpp
-python tests/rendering/test_aerial_color_gl33.py \
-  --baseline /tmp/cwr-Q-shaders.cpp --report /tmp/aerial-color.json
-python tests/rendering/test_aerial_eligibility.py --report /tmp/aerial-gates.json
-```
-
-The baseline commit must be available in Git; a shallow clone may need to fetch
-that commit first. The GL suite requires Python `numpy`, `moderngl` and an
-EGL/OpenGL 3.3 implementation. The CPU suite requires a C++17 GNU-style compiler
-(`--compiler` or `CXX`). Sources default to the checkout; explicit `--source`,
-`--sky-source` (GL) and `--engine-root` (CPU) support coherent frozen sources.
-Both reports include tested source hashes; the GL report includes driver details.
-
-- **1,158 actual-GL checks:** Normal, Detail, Grass and Water; independent color
-  and luminance oracle; unchanged foreground and fog transmittance against Q;
-  Water bump/specular slot c4; surviving-fragment alpha; exact nearfield,
-  disabled and no-fog identity; distance continuity; matched true-horizon
-  analytic sky/mesh color. Newly appended UBO slots are explicitly zeroed.
-- **97,933 CPU assertions plus 21 strict source guards:** 50,688 receiver rows,
-  31 named materials, 99 sequential upload/reset cases, a 2,001-sample activation
-  oracle and 144 fresh-process environment combinations. Exact production
-  headers and complete extracted functions execute in a recording shell;
-  external scene, GL and upload dependencies are stubs, not a full engine.
-
-These are S-specific contracts against published Q, not the parked R cloud-sun
-attenuation experiment. Synthetic checks do not establish atmospheric artistic
-quality, physical scattering accuracy, cutout rasterization, continuous-motion
-stability, full Remaster compatibility or hardware performance. Engine capture
-and visual review evidence is separate; shader identity is not proof of actual
-runtime gating or successful framebuffer rendering.
+The owner rejected the artistic result. S production and S-specific tests are
+not part of this candidate. They remain reproducible by checking out historical
+commit caaea1bba7b64364464514886e80062cdf320ef8 and following its README. Existing
+uniform-block fixture sizing corrections are retained; no assertions were weakened.
