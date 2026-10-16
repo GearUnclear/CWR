@@ -159,3 +159,9 @@ The current test defaults to `--palette h3`. Use `--palette h2 --source /tmp/H2.
 Options → Graphics → Advanced → Depth-map Shadows now exposes the existing depth-map path. It defaults off and presets do not change it. Shadow Quality Off suppresses the backend without erasing the saved preference; restoring quality re-enables the opted-in path. Close the page to persist the choice. This remains an experimental option with a performance cost.
 
 Verification: 479 assertions across 40 focused GraphicsConfig/GraphicsPage cases; exact H3+option demo build; actual menu toggle, Shadow Quality Off/restore, saved config, and process restart into gameplay with maps enabled without the test enable command. The complete local PoseidonTests target hit an untouched relative PackageMount.hpp include error in test_package_mount.cpp; the focused executable passed, not the full suite. New-head CI is separate.
+
+## External-build verification follow-up (#211)
+
+A separate one-line test include correction now lets PackageMount.hpp resolve directly from the source directory instead of relying on the in-tree build layout. The affected object and full PoseidonTests target compiled in the external build. PackageMount cases passed: 3 cases/18 assertions.
+
+The no-game-data suite then passed 3,021 cases with 12 explicit OpenAL-device skips and 2,306,960 assertions. This required staging the repository synthetic fixtures into the external build output: the first run failed because the PAA fixture lookup expected fixtures/paa, while staging supplied fixtures/texture/paa. No fixture or gameplay files were changed by this commit. The full local test binary included frozen experimental M sources; it is not an exact published-head replay. Published-head CI remains a separate verification.
