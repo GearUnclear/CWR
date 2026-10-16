@@ -17,10 +17,12 @@
 //        forcesSlowEta 900, under forcesAirEta 1500), and a far one past
 //        2.7 km (Goisse, 4.6 km: on foot over 3000 s);
 //    a3  the near town is handed to the resistance, hot: the director's
-//        operation on it is a TRUCK (the truck costs 2 x foot, inside the
-//        3 x slow share; the helicopter, 4 x, is not);
-//    a4  the far town is handed over, hot: the director's operation on it
-//        is a TRANSPORT_HELI insertion (past forcesAirEta at any price).
+//        operation on it is a TRUCK (past forcesSlowEta on foot, the truck
+//        is the cheapest package that meets it);
+//    a4  the far town is handed over, hot and empty: the director's
+//        operation on it is a TRUCK too (2026-10-16, phase 1 C: the Ural is
+//        there well under forcesAirEta and nobody is reported, so no air;
+//        guerrilla_forces_air_rule covers the insertions).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -89,7 +91,7 @@ triAssertEq [(arOp select 1), "RETAKE"]
 triAssertEq [(arOp select 2), "DIRECTOR"]
 triAssertEq [(arOp select 3), "TRUCK"]
 
-// ---- a4: the far town gets a helicopter insertion ----------------------------
+// ---- a4: the far town gets a truck as well -----------------------------------
 gmZoneSet [arFar, "garrison", 0]
 gmZoneSet [arFar, "owner", gmResistanceSide]
 gmZoneSet [arFar, "heatRaise", 100]
@@ -97,7 +99,7 @@ arOp2 = []
 triSimUntil { arOp2 = []; {if ((_x select 5) == arFarName) then {arOp2 = _x}} forEach gmOccupierOps; (count arOp2) > 0 }
 triAssertEq [(arOp2 select 1), "RETAKE"]
 triAssertEq [(arOp2 select 2), "DIRECTOR"]
-triAssertEq [(arOp2 select 3), "TRANSPORT_HELI"]
+triAssertEq [(arOp2 select 3), "TRUCK"]
 gmSimDiagLog
 
 triEndTest
