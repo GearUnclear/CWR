@@ -11,6 +11,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -48,6 +50,13 @@ layout(location = 4) in vec2 aUV0;
 layout(location = 5) in vec2 aUV1;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
+flat out vec3 vForcedSun;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -55,6 +64,12 @@ out float vFogTC;
 out vec3 vWorldRel;
 
 void main() {
+    vLightNormal = vec3(0.0);
+    vIndirectLight = vec3(0.0);
+    vSkyAmbient = vec4(0.0);
+    vForcedSun = vec3(0.0);
+    vSunTerm = vec4(0.0);
+    vSunDirection = vec3(0.0);
     float w = 1.0 / aRhw;
     gl_Position.x = (aPos.x * vpScale.x - 1.0) * w;
     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
@@ -86,8 +101,8 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19: {enabled, 0, 0, 0}
     vec4 sunEn;         // c20: {enabled, 0, 0, 0}
     vec4 vpScale;       // c21: {2/width, 2/height, 0, 0} — VSScreen only, declared here for layout parity
-    vec4 _pad22;
-    vec4 _pad23;
+    vec4 skyAmbient; // true ambient RGB, daylight ramp W
+    vec4 forcedSun; // normal-independent sun-derived diffuse
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
     vec4 texCtrl;       // c32: {genTex0, genTex1, 0, 0}
@@ -111,6 +126,13 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
+flat out vec3 vForcedSun;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -175,7 +197,14 @@ void main() {
         litColor.rgb += contrib;
     }
 
-    vColor = clamp(litColor, 0.0, 1.0);
+    vColor = clamp(litColor, 0.0, 1.0); // retained for water/flat/legacy consumers
+    vLightNormal = worldNormal;
+    vSunTerm = vec4(diffuse.rgb * sunEn.x, 1.0);
+    vSunDirection = -sunDir.xyz;
+    // Keep emissive, ambient and local-light contributions; evaluate only sunlight per fragment.
+    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x;
+    vSkyAmbient = vec4(skyAmbient.rgb * sunEn.x, skyAmbient.w * sunEn.x);
+    vForcedSun = forcedSun.rgb * sunEn.x;
 
     vec3 spec = vec3(0.0);
     if (specEn.x > 0.5 && sunEn.x > 0.0) {
@@ -211,33 +240,74 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
+flat in vec3 vForcedSun;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-void main() {
-    // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
-    // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
-    // before discard, REPLACE 0 to a stencil already 0 (cleared at
-    // frame start, never written non-zero outside the shadow
-    // accumulator pass) is idempotent.  Removing the late-test forcing
-    // lets early-Z and hierarchical-Z work — meaningful perf win on
-    // opaque-heavy scenes.
-    vec4 r0 = vColor * texture(tex0, vUV0);
-    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
-    r0.rgb += vSpecColor.rgb;
+vec3 surfaceLighting(float sunVisibility) {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(n, vSunDirection), 0.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
 
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
+}
+
+void main() {
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -280,9 +350,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -292,10 +386,30 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
+    // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
+    // before discard, REPLACE 0 to a stencil already 0 (cleared at
+    // frame start, never written non-zero outside the shadow
+    // accumulator pass) is idempotent.  Removing the late-test forcing
+    // lets early-Z and hierarchical-Z work — meaningful perf win on
+    // opaque-heavy scenes.
+    vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * texture(tex0, vUV0);
+    // Bound only the newly deferred base diffuse product. Preserve legacy HDR
+    // tint/detail/specular ordering and its later fog/night processing.
+    if (vSunTerm.w > 0.5) r0.rgb = mix(clamp(r0.rgb, 0.0, 1.0), texturedLighting(texture(tex0, vUV0).rgb, sunVisibility), vSkyAmbient.w);
+    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
+    r0.rgb += vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0);
+
+
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -330,31 +444,113 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
 uniform sampler2D tex1;
+uniform sampler2D cloudTransmittance;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
+flat in vec3 vForcedSun;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
 
-void main() {
-    // No gl_FragDepth — see PSNormal.
-    vec4 t0 = texture(tex0, vUV0);
-    vec4 t1 = texture(tex1, vUV1);
-    vec4 r0 = vColor * t0;
-    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
-    r0.rgb *= t1.a * 2.0;
-    r0 += vSpecColor;
+// Approximate authored detail alpha as a small height field, not geometry/AO.
+// Derivatives are evaluated before shadow control flow and alpha discard.
+vec3 terrainLambertNormal;
+vec3 terrainReliefNormal(vec3 n, vec3 dpdx, vec3 dpdy, vec2 dh, float distanceToCamera) {
+    if (terrainControl.y <= 0.0 || vSkyAmbient.w <= 0.0 || vSunTerm.w < 0.5) return n;
+    if (any(isnan(dpdx)) || any(isinf(dpdx)) || any(isnan(dpdy)) || any(isinf(dpdy)) ||
+        any(isnan(dh)) || any(isinf(dh))) return n;
+    float footprint = max(length(dpdx), length(dpdy));
+    vec3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
+    float determinant = dot(dpdx, r1);
+    float frameScale = length(dpdx) * length(dpdy);
+    if (frameScale < 1e-12 || abs(determinant) <= frameScale * 1e-5) return n;
+    // Signed determinant preserves the same world slope for mirrored frames.
+    vec3 slope = terrainControl.y * (r1 * dh.x + r2 * dh.y) / determinant;
+    if (any(isnan(slope)) || any(isinf(slope))) return n;
+    float magnitude = length(slope);
+    if (magnitude == 0.0) return n; // exact constant-height identity
+    slope *= min(1.0, terrainControl.z / max(magnitude, 1e-8));
+    // Restrain grazing-light embossing using the unperturbed geometric normal.
+    // High-incidence response is unchanged; this is not ambient/exposure scaling.
+    float incidenceFade = smoothstep(.15, .45, max(dot(n, vSunDirection), 0.0));
+    // Artistic low-sun safeguard: sun-facing slopes can have high local incidence
+    // at dawn. Reuse the same bounded transition, without changing daylight energy.
+    float elevationFade = smoothstep(.15, .45, max(vSunDirection.y, 0.0));
+    float fade = (1.0 - smoothstep(.06, .35, footprint))
+               * (1.0 - smoothstep(15.0, 60.0, distanceToCamera)) * vSkyAmbient.w
+               * incidenceFade * elevationFade;
+    if (fade <= 0.0) return n; // exact low-sun/grazing/distant/large-footprint identity
+    return normalize(n - slope * fade);
+}
 
+vec3 surfaceLighting(float sunVisibility) {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(terrainControl.y > 0.0 ? terrainLambertNormal : n, vSunDirection), 0.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
+
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
+}
+
+void main() {
+    terrainLambertNormal = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    if (terrainControl.y > 0.0 && vSunTerm.w > 0.5 && vSkyAmbient.w > 0.0) {
+        float detailHeight = texture(tex1, vUV1).a;
+        terrainLambertNormal = terrainReliefNormal(terrainLambertNormal, dFdx(vWorldRel), dFdy(vWorldRel),
+                                                  vec2(dFdx(detailHeight), dFdy(detailHeight)), length(vWorldRel));
+    }
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -397,9 +593,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -409,10 +629,27 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — see PSNormal.
+    vec4 t0 = texture(tex0, vUV0);
+    vec4 t1 = texture(tex1, vUV1);
+    vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * t0;
+    // Bound only the newly deferred base diffuse product. Preserve legacy HDR
+    // tint/detail/specular ordering and its later fog/night processing.
+    if (vSunTerm.w > 0.5) r0.rgb = mix(clamp(r0.rgb, 0.0, 1.0), texturedLighting(texture(tex0, vUV0).rgb, sunVisibility), vSkyAmbient.w);
+    r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
+    r0.rgb *= t1.a * 2.0;
+    r0 += vec4(vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0), vSpecColor.a);
+
+
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -429,6 +666,17 @@ void main() {
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+    // Q is registration-only, not a cloud illumination/attenuation feature.
+    if (cloudLookup.w > .5 && vSunTerm.w > .5) {
+        vec2 projected = vWorldRel.xz - cloudProjection.xy * vWorldRel.y;
+        vec2 mapUV = projected * cloudLookup.z + cloudLookup.xy;
+        if (all(greaterThanEqual(mapUV,vec2(0))) && all(lessThanEqual(mapUV,vec2(1))))
+            fragColor.rgb = vec3(texture(cloudTransmittance,mapUV).r);
+    }
+    // Diagnostic outputs only; no micro-relief or material-lighting change yet.
+    if (terrainControl.x > 0.5 && vSunTerm.w > 0.5) {
+        fragColor.rgb = terrainControl.x < 1.5 ? vec3(0.0, 1.0, 1.0) : vec3(t1.a);
+    }
 }
 )";
 
@@ -447,33 +695,75 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
+    vec4 cloudLookup; // c28: camera-relative XZ map offset, inverse extent, valid
+    vec4 cloudProjection; // c29: toward-sun XZ/Y ratios
 };
 
 uniform sampler2D tex0;
 uniform sampler2D tex1;
 
 in vec4 vColor;
+in vec3 vLightNormal;
+in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
+flat in vec3 vForcedSun;
+flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat in vec3 vSunDirection;
+
 in vec4 vSpecColor;
 in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+vec3 surfaceLighting(float sunVisibility) {
+    // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
+    if (vSunTerm.w < 0.5) return vColor.rgb;
+    vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    float nDotL = max(dot(n, vSunDirection), 0.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
+
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
+}
+
 void main() {
-    // No gl_FragDepth — see PSNormal.
-    vec4 t0 = texture(tex0, vUV0);
-    vec4 t1 = texture(tex1, vUV1);
-
-    if (vFogTC < 0.0) discard;
-
-    vec4 r0;
-    r0.rgb = vColor.rgb * t0.rgb;
-    r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
-    r0.rgb = clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+    float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
         // (selected by 3D distance, so a caster in ANY direction around the player —
@@ -516,9 +806,33 @@ void main() {
                 if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
                     float bias = cascadeCtl.z * float(c + 1) * float(c + 1);
                     float lit = 0.0;
+#ifdef CWR_SHADOW_COMPARE_PCF
+                    // Mathematically equivalent 3x3 bilinear-comparison box footprint, grouped
+                    // into two weighted bilinear fetches per axis (four total).
+                    // Clamp-to-edge applies to each underlying depth comparison.
+                    if (ts > 0.0) {
+                        vec2 pixel = suv / ts - 0.5;
+                        vec2 base = floor(pixel);
+                        vec2 f = fract(pixel);
+                        vec2 w0 = 2.0 - f;
+                        vec2 w1 = 1.0 + f;
+                        vec2 uv0 = (base - 0.5 + 1.0 / w0) * ts;
+                        vec2 uv1 = (base + 1.5 + f / w1) * ts;
+                        lit = w0.x * w0.y * texture(shadowMap, vec4(uv0, float(c), sc.z - bias))
+                            + w1.x * w0.y * texture(shadowMap, vec4(uv1.x, uv0.y, float(c), sc.z - bias))
+                            + w0.x * w1.y * texture(shadowMap, vec4(uv0.x, uv1.y, float(c), sc.z - bias))
+                            + w1.x * w1.y * texture(shadowMap, vec4(uv1, float(c), sc.z - bias));
+                    } else {
+                        // Preserve the original behavior for a nonpositive texel size.
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                lit += texture(shadowMap, vec4(suv + vec2(float(dx), float(dy)) * ts, float(c), sc.z - bias));
+                    }
+#else
                     for (int dy = -1; dy <= 1; ++dy)
                         for (int dx = -1; dx <= 1; ++dx)
                             lit += (sc.z - bias > texture(shadowMap, vec3(suv + vec2(float(dx), float(dy)) * ts, float(c))).r) ? 0.0 : 1.0;
+#endif
                     litSum += w * (lit / 9.0);
                     wSum += w;
                 }
@@ -528,11 +842,28 @@ void main() {
                 float lastSplit = cascadeSplits[nC - 1];
                 float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
                 float strength = (1.0 - lit) * fade * clamp(vFogTC, 0.0, 1.0); // dimmer in fog / far
-                r0.rgb *= mix(1.0, shadowCtl.z, strength);
+                sunVisibility = mix(1.0, shadowCtl.z, strength);
             }
         }
     }
+
+    // No gl_FragDepth — see PSNormal.
+    vec4 t0 = texture(tex0, vUV0);
+    vec4 t1 = texture(tex1, vUV1);
+
+    if (vFogTC < 0.0) discard;
+
+    vec4 r0;
+    r0.rgb = surfaceLighting(sunVisibility) * t0.rgb;
+    r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
+    r0.rgb = mix(clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0),
+                 texturedLighting(t0.rgb, sunVisibility) * t1.rgb * 2.0, vSkyAmbient.w);
+
     r0.a = clamp(grassCoef2.a * r0.a * 2.0, 0.0, 1.0);
+
+    // CPU-prelit TL colours have no recoverable sun/ambient split. Preserve their
+    // legacy combined-colour shadow fallback; only mesh lighting is separated.
+    if (vSunTerm.w < 0.5) r0.rgb *= sunVisibility;
 
     if (alphaRef.z > 0.5) {
         // Alpha-to-coverage: sharpen alpha around the cutout threshold so the
@@ -570,7 +901,11 @@ in vec2 vUV0;
 in vec2 vUV1;
 in float vFogTC;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -606,8 +941,8 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19
     vec4 sunEn;         // c20
     vec4 vpScale;       // c21 — VSScreen only, declared for layout parity
-    vec4 _pad22;
-    vec4 _pad23;
+    vec4 skyAmbient; // true ambient RGB, daylight ramp W
+    vec4 forcedSun; // normal-independent sun-derived diffuse
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
     vec4 texCtrl;       // c32
@@ -625,6 +960,13 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 uv;
 
 out vec4 vColor;
+out vec3 vLightNormal;
+out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
+flat out vec3 vForcedSun;
+flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
+flat out vec3 vSunDirection;
+
 out vec4 vSpecColor;
 out vec2 vUV0;
 out vec2 vUV1;
@@ -632,6 +974,12 @@ out float vFogTC;
 out vec3 vWorldRel;
 
 void main() {
+    vLightNormal = vec3(0.0);
+    vIndirectLight = vec3(0.0);
+    vSkyAmbient = vec4(0.0);
+    vForcedSun = vec3(0.0);
+    vSunTerm = vec4(0.0);
+    vSunDirection = vec3(0.0);
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
     gl_Position   = proj * view * worldPos;
     vColor        = diffuse;        // unlit — direct from material.diffuse
@@ -662,7 +1010,11 @@ uniform sampler2D tex0;
 in vec4 vColor;
 in vec2 vUV0;
 
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -688,7 +1040,11 @@ void main() {
 // PSFlat — vertex color passthrough (no texture)
 static const char s_psFlatGLSL[] = R"(#version 330 core
 in vec4 vColor;
-uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused unless shadowCtl.x>0.5)
+#ifdef CWR_SHADOW_COMPARE_PCF
+uniform sampler2DArrayShadow shadowMap;
+#else
+uniform sampler2DArray shadowMap;
+#endif // unit 2; sampler object and shader variant are selected together at initialization
 in vec3 vWorldRel;
 
 out vec4 fragColor;
@@ -773,7 +1129,7 @@ static GLuint LinkGLProgram(GLuint vs, GLuint fs, const char* name)
 }
 
 static float s_vsShadow[280] = {}; // 70 vec4 slots — through SlotLightVP (c66-c69)
-static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
+static float s_psShadow[120] = {}; // 28 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
 
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
@@ -1032,6 +1388,8 @@ void EngineGL33::UploadVSProjection(const FrameState& frame)
 
 void EngineGL33::UpdateShadowMapLitState()
 {
+    // Explicitly restore the pairing even after auxiliary passes/context reset.
+    glBindSampler(2, _shadowComparePcf ? _shadowCompareSampler : 0);
     // PS UBO: shadowCtl c2 {enable, 0, darkness, texelSize}; cascadeVP[4] c8-c23;
     // cascadeSplits c24 (per-tier select distance: a camera 3D radius for the first
     // omniCount omni tiers, a far eye-depth for frustum tiers); cascadeCtl c25
@@ -1118,7 +1476,7 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
 {
     LightSun* sun = GScene->MainLight();
 
-    Color dif = sun->Diffuse() * mat.diffuse;
+    Color dif = sun->ScaleLambertDiffuse(sun->Diffuse() * mat.diffuse);
     Color amb = sun->Ambient() * mat.ambient + sun->Diffuse() * mat.forcedDiffuse;
 
     float ambient[4] = {amb.R(), amb.G(), amb.B(), amb.A()};
@@ -1128,6 +1486,13 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
     memcpy(s_vsShadow + VSConst::SlotAmbient * 4, ambient, 16);
     memcpy(s_vsShadow + VSConst::SlotDiffuse * 4, diffuse, 16);
     memcpy(s_vsShadow + VSConst::SlotEmissive * 4, emissive, 16);
+
+    Color trueAmbient = sun->Ambient() * mat.ambient;
+    Color forced = sun->Diffuse() * mat.forcedDiffuse;
+    float sky[4] = {trueAmbient.R(), trueAmbient.G(), trueAmbient.B(), 1.0f - sun->NightEffect()};
+    float forcedRGB[4] = {forced.R(), forced.G(), forced.B(), 0.0f};
+    memcpy(s_vsShadow + 22 * 4, sky, 16);
+    memcpy(s_vsShadow + 23 * 4, forcedRGB, 16);
 
     Color specCol = sun->Diffuse() * mat.specular;
     float spec[4] = {specCol.R(), specCol.G(), specCol.B(), static_cast<float>(mat.specularPower)};
@@ -1330,7 +1695,7 @@ struct ShaderCacheEntry
 constexpr uint32_t kCacheMagic = 0x53484348; // 'SHCH'
 constexpr uint32_t kCacheVersion = 1;
 
-uint64_t HashShaderSources()
+uint64_t HashShaderSources(bool comparisonPcf)
 {
     uint64_t h = 0xcbf29ce484222325ull;
     auto add = [&](const char* s)
@@ -1341,6 +1706,7 @@ uint64_t HashShaderSources()
             h *= 0x100000001b3ull;
         }
     };
+    add(comparisonPcf ? "comparison-pcf-linear-four-fetch-v2" : "raw-pcf-nearest-v1");
     add(s_vsScreenGLSL);
     add(s_vsTransformGLSL);
     add(s_vsShadowGLSL);
@@ -1478,6 +1844,30 @@ GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
 
 void EngineGL33::InitPixelShaders()
 {
+    // Immutable for this shader set: no live toggle can mismatch sampler type
+    // and compare state. Texture objects retain raw depth settings for dumps.
+    const char* compareOption = std::getenv("CWR_SHADOW_COMPARE_PCF");
+    _shadowComparePcf = compareOption && std::strcmp(compareOption, "1") == 0;
+    if (_shadowComparePcf)
+    {
+        glGenSamplers(1, &_shadowCompareSampler);
+        if (!_shadowCompareSampler)
+            _shadowComparePcf = false;
+        else
+        {
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+            glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+        }
+    }
+    glBindSampler(2, _shadowComparePcf ? _shadowCompareSampler : 0);
+    LOG_INFO(Graphics, "GL33 shadow PCF: {} (unchanged bias/cascades)",
+             _shadowComparePcf ? "experimental linear comparison: four fetches, nine-tap-equivalent filter"
+                               : "legacy nearest raw depth: nine fetches");
     struct PSCompileInfo
     {
         PixelShaderID id;
@@ -1492,7 +1882,7 @@ void EngineGL33::InitPixelShaders()
 
     // Try the binary cache first.  Only compile FS objects on miss — we
     // need them only as link inputs, and a fully-cached run skips compile.
-    const uint64_t srcHash = HashShaderSources();
+    const uint64_t srcHash = HashShaderSources(_shadowComparePcf);
     std::map<uint32_t, ShaderCacheEntry> cache;
     const bool cacheLoaded = LoadShaderCacheFile(srcHash, cache);
     if (cacheLoaded)
@@ -1509,7 +1899,12 @@ void EngineGL33::InitPixelShaders()
             return;
         fsCompiled = true;
         for (auto& info : psInfos)
-            s_fsObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, info.source, info.name);
+        {
+            std::string source(info.source);
+            if (_shadowComparePcf)
+                source.insert(source.find('\n') + 1, "#define CWR_SHADOW_COMPARE_PCF 1\n");
+            s_fsObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, source.c_str(), info.name);
+        }
     };
 
     auto bindProgramSamplersAndBlocks = [](GLuint prog)
@@ -1533,6 +1928,8 @@ void EngineGL33::InitPixelShaders()
         GLint locShadow = glGetUniformLocation(prog, "shadowMap");
         if (locShadow >= 0)
             glUniform1i(locShadow, 2); // shadow depth map on texture unit 2
+        GLint locCloud = glGetUniformLocation(prog, "cloudTransmittance");
+        if (locCloud >= 0) glUniform1i(locCloud, 3);
         glUseProgram(0);
     };
 
@@ -1732,6 +2129,15 @@ void EngineGL33::ApplyGammaPass()
 
 void EngineGL33::DeinitPixelShaders()
 {
+    glBindSampler(2, 0);
+    if (_shadowCompareSampler) glDeleteSamplers(1, &_shadowCompareSampler);
+    _shadowCompareSampler = 0;
+    _shadowComparePcf = false;
+    DestroyCloudRegistration();
+    if (_experimentalSkyProgram) glDeleteProgram(_experimentalSkyProgram);
+    if (_experimentalSkyVao) glDeleteVertexArrays(1, &_experimentalSkyVao);
+    _experimentalSkyProgram = _experimentalSkyVao = 0;
+    _experimentalSkyFailed = false;
     glUseProgram(0);
     for (int v = 0; v < NVertexShaders; v++)
         for (int s = 0; s < NPixelShaderSpecular; s++)

@@ -168,3 +168,32 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
     CHECK(p.RowKind(9) == OptionsScrollList::KindHeader);
     CHECK_FALSE(OptionsScrollList::CanRowReceiveFocus(p.RowKind(9)));
 }
+
+TEST_CASE("GraphicsPage depth-map shadows are opt-in and independent of quality presets", "[UI][GraphicsPage]")
+{
+    TestableGraphicsPage page;
+    auto& p = page.Provider();
+    constexpr int row = 13;
+    CHECK(p.RowCount() == 15); // Includes the trailing Close action.
+    CHECK(p.RowKind(row) == OptionsScrollList::KindBoolean);
+    CHECK(p.RowFor(row).count == 2);
+    CHECK(p.RowValue(row) == 0);
+    CHECK(std::string(p.RowLabel(row)) == "Depth-map Shadows");
+    CHECK(std::string(p.RowDescription(row)).find("Requires Shadow Quality above Off") != std::string::npos);
+
+    for (int preset = GraphicsConfig::PresetLow; preset <= GraphicsConfig::PresetUltra; ++preset)
+    {
+        p.SetRowValue(0, preset);
+        CHECK(p.RowValue(row) == 0);
+    }
+    p.SetRowValue(row, 1);
+    CHECK(p.RowValue(row) == 1);
+    CHECK(p.RowValue(0) == GraphicsConfig::PresetUltra);
+    p.SetRowValue(0, GraphicsConfig::PresetLow);
+    CHECK(p.RowValue(row) == 1);
+    CHECK(p.RowValue(3) == GraphicsConfig::TierOff);
+    p.SetRowValue(3, GraphicsConfig::TierHigh);
+    CHECK(p.RowValue(row) == 1);
+    p.SetRowValue(row, 0);
+    CHECK(p.RowValue(row) == 0);
+}

@@ -1,3 +1,4 @@
+#include <Poseidon/Graphics/Core/CloudRegistration.hpp>
 #ifdef _MSC_VER
 #pragma once
 #endif
@@ -293,6 +294,7 @@ class Engine : public IGraphicsEngine
     float _avgBrightness; // average screen brightness
     bool _nightVision;
     bool _multitexturing;
+    bool _terrainBaseDraw = false; // producer provenance, captured at mesh preparation
     render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
     int _showFps;
     AspectSettings _aspectSettings;
@@ -428,6 +430,11 @@ class Engine : public IGraphicsEngine
     virtual void SetMsaaSamples(int /*samples*/) {}
     virtual int GetMsaaSamples() const { return 0; }
 
+    // Experimental world-sky replacement; false preserves the authored dome.
+    virtual bool DrawExperimentalSky(float /*skyThrough*/) { return false; }
+    virtual bool CloudRegistrationEnabled() const { return false; }
+    virtual void PrepareCloudRegistration(const CloudRegistrationInput&) {}
+
     // Instanced-run mode: the scene batches a sorted run of
     // identical static shapes; backends that support it draw every TL section
     // once with K instances. Defaults keep unsupporting backends scalar
@@ -443,6 +450,8 @@ class Engine : public IGraphicsEngine
     // family explicitly rather than inferring it from `NoDropdown` bit
     // propagation.  Defaults to `None`, where the descriptor falls back to
     // `NoDropdown` inference.
+    bool GetTerrainBaseDraw() const { return _terrainBaseDraw; }
+    void SetTerrainBaseDraw(bool value) { _terrainBaseDraw = value; }
     render::PassKindHint GetPassKindHint() const { return _passKindHint; }
     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }

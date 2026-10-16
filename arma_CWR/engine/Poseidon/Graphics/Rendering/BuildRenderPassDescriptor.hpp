@@ -23,6 +23,7 @@ struct BuildContext
 {
     bool isIn3DPass = true;
     bool isMultitexturing = false;
+    bool terrainBaseOwner = false; // explicit mesh producer provenance
 
     // Alpha-test reference for the shadow path (`(shadowFactor * 7) >> 4`
     // in the legacy ApplyPassState body).  0..255.
@@ -192,6 +193,12 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
         d.pass = PassKind::SurfaceOverlay;
     }
 
+    d.terrainDetail = ctx.terrainBaseOwner && ctx.isIn3DPass &&
+                      d.pass == PassKind::WorldOpaque && d.depth == DepthMode::Normal &&
+                      d.blend == BlendMode::Opaque && d.alpha == AlphaMode::Disabled &&
+                      d.lighting == LightingMode::Lit && d.surface == SurfaceMode::Default &&
+                      d.shader == ShaderFamily::Detail && Has(backend, Backend::DetailTexture) &&
+                      !Has(backend, Backend::SpecularTexture) && !Has(backend, Backend::GrassTexture);
     return d;
 }
 

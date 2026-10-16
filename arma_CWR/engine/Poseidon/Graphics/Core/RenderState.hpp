@@ -124,6 +124,8 @@ struct DrawItem
     int firstIndex = 0;
     int indexCount = 0;
     void* vertexBuffer = nullptr; // mesh/vertex buffer reference
+    bool terrainBaseOwner = false; // captured producer, never inferred from material
+    bool terrainDetail = false; // resolved section eligibility for frame observer
     bool isTLDraw = false;        // true = DrawSectionTL path, false = queued path
     // Backend-specific opaque mesh handle (GL: VAO id; D3D: pointer cast).
     // Captured at draw time so the frame layer's SceneExtractor can resolve the mesh

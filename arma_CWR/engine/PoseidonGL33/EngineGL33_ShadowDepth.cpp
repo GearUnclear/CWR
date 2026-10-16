@@ -104,10 +104,29 @@ bool EnsureProgram()
     return true;
 }
 
+// Resource initialization may bind a new FBO before the render pass starts.
+// Preserve read and draw targets independently on success AND every failure path.
+struct ShadowFramebufferBindings
+{
+    GLint read = 0, draw = 0;
+    ShadowFramebufferBindings()
+    {
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    }
+    ~ShadowFramebufferBindings()
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(read));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(draw));
+    }
+};
+
 bool EnsureTarget(int res)
 {
+    ShadowFramebufferBindings restoreFramebuffer;
     if (s_fbo && s_res == res)
         return true;
+    s_res = 0; // failed recreation must never advertise the previous dimensions
     if (s_tex)
     {
         GL33Bind::OnTexDeleted(s_tex);
@@ -135,10 +154,11 @@ bool EnsureTarget(int res)
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
         LOG_ERROR(Graphics, "GL33 shadow-depth FBO incomplete: {}", static_cast<unsigned>(status));
+        glDeleteFramebuffers(1, &s_fbo);
+        s_fbo = 0;
         return false;
     }
     s_res = res;
@@ -147,8 +167,10 @@ bool EnsureTarget(int res)
 
 bool EnsureArrayTarget(int res, int layers)
 {
+    ShadowFramebufferBindings restoreFramebuffer;
     if (s_arrFbo && s_arrRes == res && s_arrLayers == layers)
         return true;
+    s_arrRes = s_arrLayers = 0; // invalidate metadata before any failing allocation
     if (s_arrTex)
     {
         glDeleteTextures(1, &s_arrTex);
@@ -175,10 +197,11 @@ bool EnsureArrayTarget(int res, int layers)
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
         LOG_ERROR(Graphics, "GL33 cascade FBO incomplete: {}", static_cast<unsigned>(status));
+        glDeleteFramebuffers(1, &s_arrFbo);
+        s_arrFbo = 0;
         return false;
     }
     s_arrRes = res;
@@ -269,12 +292,12 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 {
     if (!glContext || !lightVP16 || !triXYZ || vertCount < 3 || res <= 0)
         return false;
+    ShadowFramebufferBindings restoreFramebuffer;
     if (!EnsureProgram() || !EnsureTarget(res) || !EnsureMesh())
         return false;
 
-    GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
+    GLint prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
     glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
@@ -299,7 +322,6 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
     if (outDepthOrNull)
         glReadPixels(0, 0, res, res, GL_DEPTH_COMPONENT, GL_FLOAT, outDepthOrNull);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));
     glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));
@@ -320,14 +342,14 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
     if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha))
         return false;
+    ShadowFramebufferBindings restoreFramebuffer;
     if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh())
         return false;
     if (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh()))
         return false;
 
-    GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
+    GLint prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
     glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
@@ -391,7 +413,6 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         }
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));
     glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));

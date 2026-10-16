@@ -37,6 +37,25 @@ phases:
     goal: "Tracker hygiene, deferred cleanups, known-edge decisions."
 
 items:
+  - id: gl33-fragment-sunlight
+    title: "GL33 per-fragment sunlight on normal-bearing meshes"
+    phase: hardening
+    status: in-progress
+    gh_issues: []
+    depends_on: []
+    commits: []
+    summary: >
+      Move mesh sun diffuse evaluation to the fragment shader for normal, detail,
+      and grass materials. Preserve prelit screen draws and existing water,
+      specular, shadow, fog, alpha, and local-light paths. This is a focused
+      lighting step, not a full landscape or asset overhaul.
+    log:
+      - "2026-10-16: 11 shader compile/link combinations and 15 synthetic pixel cases pass on Mesa llvmpipe OpenGL 4.5. Baseline comparisons use main 16259cc. Full engine build and demo before/after comparison remain blocked after the execution service cancelled long-running dependency/download jobs. No in-game visual acceptance or hardware performance claim."
+      - "2026-10-16: initial build/download blockers resolved. Compiled baseline and modified demo clients rendered matched gameplay views under Mesa llvmpipe. Interpolation alone was visually subtle. Retained tested direct/forced-sun shadow separation with 270 independent semantic GLSL checks plus the original 26; full Remaster and hardware performance acceptance remain open. Rejected ambient-only tuning is preserved outside production; deferred-clamp work remains experimental."
+      - "2026-10-16: retained H2 hemisphere/highlight lighting and isolated first-enable shadow framebuffer restoration. Exact combined demo client builds and captures hillside/barn scenes. Current material tests 457, original 26, allocator tests 11; artistic balance remains provisional. I atmosphere and J contact AO remain excluded experiments; adaptive LOD confounds software performance comparisons."
+      - "2026-10-16: H3 adjusts only lateral ambient RGB for cooler readable shade, preserving plaster detail. Exact clean candidate builds and renders both barn views; 457 current palette checks pass and H2 remains explicitly reproducible. Some sunlit warmth is lost; artistic acceptance stays provisional. K foliage transmission is excluded after weak visual results."
+      - "2026-10-16: added default-off persistent Advanced depth-map shadow option; presets preserve explicit choice and Shadow Quality Off gates the backend. Exact H3+option demo build, live menu toggle, saved preference and process restart into gameplay verified. Focused tests: 479 assertions/40 cases; full local target has an unrelated existing include blocker."
+      - "2026-10-16: test-only PackageMount relative include fixed for external build directories (#211). Affected object/full target compile; dedicated 3 cases/18 assertions pass. Local no-game-data suite passes 3021 cases with 12 audio skips after synthetic-fixture staging; that binary includes frozen experimental sources, not an exact published-head replay."
   - id: native-infantry-leaning
     title: "Native infantry leaning with consistent camera, weapon and hit geometry"
     phase: phase-2
