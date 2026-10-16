@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Synthetic semantic-E regressions using unmodified production GLSL and EGL.
+"""Historical semantic-E regressions using unmodified GLSL and EGL.
 
 Requires Python 3 and moderngl plus an EGL/OpenGL 3.3 implementation. No game
-assets are required. --source can select a preserved C++ source snapshot;
+assets are required. --source is required and must select a preserved E C++ source snapshot;
 --baseline optionally compares disabled/unoccluded output to an older source.
+This is not the current H2 material suite. E and H2 have different UBO layouts
+and lighting contracts. Assertions are intentionally preserved, not relaxed.
 This does not execute C++ material upload or establish visual/performance quality.
 """
 import argparse
@@ -265,7 +267,7 @@ def run(fixture, baseline=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source', type=Path, default=SOURCE)
+    parser.add_argument('--source', type=Path, required=True, help='Preserved E source; do not use H2/current production')
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()

@@ -50,6 +50,7 @@ layout(location = 5) in vec2 aUV1;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
 flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
@@ -62,8 +63,9 @@ out vec3 vWorldRel;
 
 void main() {
     vLightNormal = vec3(0.0);
-    vForcedSun = vec3(0.0);
     vIndirectLight = vec3(0.0);
+    vSkyAmbient = vec4(0.0);
+    vForcedSun = vec3(0.0);
     vSunTerm = vec4(0.0);
     vSunDirection = vec3(0.0);
     float w = 1.0 / aRhw;
@@ -97,8 +99,8 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19: {enabled, 0, 0, 0}
     vec4 sunEn;         // c20: {enabled, 0, 0, 0}
     vec4 vpScale;       // c21: {2/width, 2/height, 0, 0} — VSScreen only, declared here for layout parity
-    vec4 forcedSun; // c22: normal-independent sun-derived material contribution
-    vec4 _pad23;
+    vec4 skyAmbient; // true ambient RGB, daylight ramp W
+    vec4 forcedSun; // normal-independent sun-derived diffuse
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
     vec4 texCtrl;       // c32: {genTex0, genTex1, 0, 0}
@@ -124,6 +126,7 @@ layout(location = 2) in vec2 uv;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
 flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
@@ -194,12 +197,12 @@ void main() {
 
     vColor = clamp(litColor, 0.0, 1.0); // retained for water/flat/legacy consumers
     vLightNormal = worldNormal;
-    vForcedSun = forcedSun.rgb * sunEn.x;
     vSunTerm = vec4(diffuse.rgb * sunEn.x, 1.0);
     vSunDirection = -sunDir.xyz;
     // Keep emissive, ambient and local-light contributions; evaluate only sunlight per fragment.
-    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x; // retains legacy combined ambient
-    // Separate forced sunlight only for shadow attenuation; unshadowed arithmetic stays identical.
+    vIndirectLight = litColor.rgb - diffuse.rgb * NdotL * sunEn.x;
+    vSkyAmbient = vec4(skyAmbient.rgb * sunEn.x, skyAmbient.w * sunEn.x);
+    vForcedSun = forcedSun.rgb * sunEn.x;
 
     vec3 spec = vec3(0.0);
     if (specEn.x > 0.5 && sunEn.x > 0.0) {
@@ -242,6 +245,7 @@ uniform sampler2D tex0;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
 flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
@@ -261,10 +265,36 @@ vec3 surfaceLighting(float sunVisibility) {
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    // Subtract only occluded forced sunlight: at visibility 1 the original
-    // combined-light arithmetic is preserved, including legacy saturation.
-    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
-                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
+
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
 }
 
 void main() {
@@ -336,6 +366,9 @@ void main() {
     // lets early-Z and hierarchical-Z work — meaningful perf win on
     // opaque-heavy scenes.
     vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * texture(tex0, vUV0);
+    // Bound only the newly deferred base diffuse product. Preserve legacy HDR
+    // tint/detail/specular ordering and its later fog/night processing.
+    if (vSunTerm.w > 0.5) r0.rgb = mix(clamp(r0.rgb, 0.0, 1.0), texturedLighting(texture(tex0, vUV0).rgb, sunVisibility), vSkyAmbient.w);
     r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
     r0.rgb += vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0);
 
@@ -386,6 +419,7 @@ uniform sampler2D tex1;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
 flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
@@ -405,10 +439,36 @@ vec3 surfaceLighting(float sunVisibility) {
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    // Subtract only occluded forced sunlight: at visibility 1 the original
-    // combined-light arithmetic is preserved, including legacy saturation.
-    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
-                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
+
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
 }
 
 void main() {
@@ -476,6 +536,9 @@ void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
     vec4 r0 = vec4(surfaceLighting(sunVisibility), vColor.a) * t0;
+    // Bound only the newly deferred base diffuse product. Preserve legacy HDR
+    // tint/detail/specular ordering and its later fog/night processing.
+    if (vSunTerm.w > 0.5) r0.rgb = mix(clamp(r0.rgb, 0.0, 1.0), texturedLighting(texture(tex0, vUV0).rgb, sunVisibility), vSkyAmbient.w);
     r0 *= constColor; // per-object IsColored tint (opacity + fade); white = no-op
     r0.rgb *= t1.a * 2.0;
     r0 += vec4(vSpecColor.rgb * (vSunTerm.w > 0.5 ? sunVisibility : 1.0), vSpecColor.a);
@@ -527,6 +590,7 @@ uniform sampler2D tex1;
 in vec4 vColor;
 in vec3 vLightNormal;
 in vec3 vIndirectLight;
+flat in vec4 vSkyAmbient;
 flat in vec3 vForcedSun;
 flat in vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat in vec3 vSunDirection;
@@ -546,10 +610,36 @@ vec3 surfaceLighting(float sunVisibility) {
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
     float nDotL = max(dot(n, vSunDirection), 0.0);
-    // Subtract only occluded forced sunlight: at visibility 1 the original
-    // combined-light arithmetic is preserved, including legacy saturation.
-    return clamp(vIndirectLight - vForcedSun * (1.0 - sunVisibility)
-                 + vSunTerm.rgb * nDotL * sunVisibility, 0.0, 1.0);
+    // Do not discard irradiance above1 before the albedo can attenuate it.
+    // Material-stage RGB is bounded below, then saturated after texturing.
+    // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
+    // environment approximation, not occlusion. Never attenuate local/emissive light.
+    float up = clamp(n.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 hemisphere = up >= 0.0
+        ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
+        : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
+    vec3 ambient = vSkyAmbient.rgb * mix(vec3(1.0), hemisphere, vSkyAmbient.w);
+    float directVisibility = mix(sunVisibility, sunVisibility * sunVisibility, vSkyAmbient.w);
+    vec3 protectedLight = vIndirectLight - vSkyAmbient.rgb - vForcedSun;
+    return max(protectedLight + ambient + vForcedSun * mix(1.0, directVisibility, vSkyAmbient.w)
+               + vSunTerm.rgb * nDotL * directVisibility, vec3(0.0));
+}
+
+
+// Roll off only textured environmental illumination. Local/emissive contributions
+// remain additive and legacy material tint/detail/specular/fog ordering is retained.
+vec3 texturedLighting(vec3 albedo, float visibility) {
+    vec3 total = surfaceLighting(visibility) * albedo;
+    if (vSunTerm.w < 0.5 || vSkyAmbient.w <= 0.0) return total;
+    vec3 protectedLight = max(vIndirectLight - vSkyAmbient.rgb - vForcedSun, vec3(0.0)) * albedo;
+    vec3 environment = max(total - protectedLight, vec3(0.0));
+    // Identity below .55; continuous slope-one shoulder with asymptote 1.
+    float luminance = dot(environment, vec3(0.2126, 0.7152, 0.0722));
+    float excess = max(luminance - 0.55, 0.0);
+    float mapped = min(luminance, 0.55) + excess / (1.0 + excess / 0.45);
+    vec3 shoulder = environment * (mapped / max(luminance, 1e-8));
+    return shoulder + protectedLight;
 }
 
 void main() {
@@ -622,7 +712,8 @@ void main() {
     vec4 r0;
     r0.rgb = surfaceLighting(sunVisibility) * t0.rgb;
     r0.a = clamp((grassCoef1.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
-    r0.rgb = clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0);
+    r0.rgb = mix(clamp(r0.rgb * t1.rgb * 2.0, 0.0, 1.0),
+                 texturedLighting(t0.rgb, sunVisibility) * t1.rgb * 2.0, vSkyAmbient.w);
 
     r0.a = clamp(grassCoef2.a * r0.a * 2.0, 0.0, 1.0);
 
@@ -702,8 +793,8 @@ layout(std140) uniform VSConstants {
     vec4 specEn;        // c19
     vec4 sunEn;         // c20
     vec4 vpScale;       // c21 — VSScreen only, declared for layout parity
-    vec4 forcedSun; // c22: normal-independent sun-derived material contribution
-    vec4 _pad23;
+    vec4 skyAmbient; // true ambient RGB, daylight ramp W
+    vec4 forcedSun; // normal-independent sun-derived diffuse
     mat4 texMat0;       // c24-c27
     mat4 texMat1;       // c28-c31
     vec4 texCtrl;       // c32
@@ -723,6 +814,7 @@ layout(location = 2) in vec2 uv;
 out vec4 vColor;
 out vec3 vLightNormal;
 out vec3 vIndirectLight;
+flat out vec4 vSkyAmbient;
 flat out vec3 vForcedSun;
 flat out vec4 vSunTerm; // rgb: material sun diffuse, w: mesh lighting enabled
 flat out vec3 vSunDirection;
@@ -735,8 +827,9 @@ out vec3 vWorldRel;
 
 void main() {
     vLightNormal = vec3(0.0);
-    vForcedSun = vec3(0.0);
     vIndirectLight = vec3(0.0);
+    vSkyAmbient = vec4(0.0);
+    vForcedSun = vec3(0.0);
     vSunTerm = vec4(0.0);
     vSunDirection = vec3(0.0);
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
@@ -1225,14 +1318,8 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
 {
     LightSun* sun = GScene->MainLight();
 
-    Color dif = sun->Diffuse() * mat.diffuse;
+    Color dif = sun->ScaleLambertDiffuse(sun->Diffuse() * mat.diffuse);
     Color amb = sun->Ambient() * mat.ambient + sun->Diffuse() * mat.forcedDiffuse;
-
-    // forcedDiffuse is a normal-independent sun term, not sky ambient.
-    // Keep the legacy combined ambient upload for vColor/alpha and water/flat.
-    const Color forced = sun->Diffuse() * mat.forcedDiffuse;
-    const float forcedSun[4] = {forced.R(), forced.G(), forced.B(), 0};
-    memcpy(s_vsShadow + 22 * 4, forcedSun, 16);
 
     float ambient[4] = {amb.R(), amb.G(), amb.B(), amb.A()};
     float diffuse[4] = {dif.R(), dif.G(), dif.B(), dif.A()};
@@ -1241,6 +1328,13 @@ void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnable
     memcpy(s_vsShadow + VSConst::SlotAmbient * 4, ambient, 16);
     memcpy(s_vsShadow + VSConst::SlotDiffuse * 4, diffuse, 16);
     memcpy(s_vsShadow + VSConst::SlotEmissive * 4, emissive, 16);
+
+    Color trueAmbient = sun->Ambient() * mat.ambient;
+    Color forced = sun->Diffuse() * mat.forcedDiffuse;
+    float sky[4] = {trueAmbient.R(), trueAmbient.G(), trueAmbient.B(), 1.0f - sun->NightEffect()};
+    float forcedRGB[4] = {forced.R(), forced.G(), forced.B(), 0.0f};
+    memcpy(s_vsShadow + 22 * 4, sky, 16);
+    memcpy(s_vsShadow + 23 * 4, forcedRGB, 16);
 
     Color specCol = sun->Diffuse() * mat.specular;
     float spec[4] = {specCol.R(), specCol.G(), specCol.B(), static_cast<float>(mat.specularPower)};

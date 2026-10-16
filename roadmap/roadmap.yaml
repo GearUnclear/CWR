@@ -52,6 +52,7 @@ items:
     log:
       - "2026-10-16: 11 shader compile/link combinations and 15 synthetic pixel cases pass on Mesa llvmpipe OpenGL 4.5. Baseline comparisons use main 16259cc. Full engine build and demo before/after comparison remain blocked after the execution service cancelled long-running dependency/download jobs. No in-game visual acceptance or hardware performance claim."
       - "2026-10-16: initial build/download blockers resolved. Compiled baseline and modified demo clients rendered matched gameplay views under Mesa llvmpipe. Interpolation alone was visually subtle. Retained tested direct/forced-sun shadow separation with 270 independent semantic GLSL checks plus the original 26; full Remaster and hardware performance acceptance remain open. Rejected ambient-only tuning is preserved outside production; deferred-clamp work remains experimental."
+      - "2026-10-16: retained H2 hemisphere/highlight lighting and isolated first-enable shadow framebuffer restoration. Exact combined demo client builds and captures hillside/barn scenes. Current material tests 457, original 26, allocator tests 11; artistic balance remains provisional. I atmosphere and J contact AO remain excluded experiments; adaptive LOD confounds software performance comparisons."
   - id: native-infantry-leaning
     title: "Native infantry leaning with consistent camera, weapon and hit geometry"
     phase: phase-2

@@ -420,7 +420,7 @@ void TLVertexTable::DoMaterialLightingQ(const TLMaterial& mat, const Matrix4& wo
     Vector3 sunDirection = worldToModel.Rotate(sun->Direction());
     sunDirection.Normalize();
 
-    Color diffuse = sun->DiffusePrecalc();
+    Color diffuse = sun->ScaleLambertDiffuse(sun->DiffusePrecalc());
     Color ambient = sun->AmbientPrecalc() + mat.emmisive;
 
     int spec = mat.specFlags;
