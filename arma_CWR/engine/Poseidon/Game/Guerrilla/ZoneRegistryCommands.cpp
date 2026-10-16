@@ -380,17 +380,20 @@ static GameValue ScalarArray(const GameState* state, std::initializer_list<float
 //  [grpOcc, grpRes, grpCiv, grpMaxSide], garrisonSpawnedZones,
 //  garrisonLiveBodies, [trafficCiv, parked, patrol, convoy],
 //  [gmAvg, gmP95, gmMax], [frameAvg, frameP95, frameMax], budgetBreachBits,
-//  [farOcc, arrival, march, leftover, homeHull, air]]
+//  [farOcc, arrival, march, leftover, homeHull, air], [emptyGroups, released]]
 // (ms timings over the FrameProfiler's 256-frame ring; breach bits 1 = live
-// bodies, 2 = groups on one side; the last slot counts CounterAttack's live
-// occupier groups beyond 850 m of the player by cause, CounterAttackFarCensus)
+// bodies, 2 = groups on one side; element 3 counts only groups with a living
+// member; element 10 counts CounterAttack's live occupier groups beyond 850 m
+// of the player by cause, CounterAttackFarCensus; element 11 is the groups
+// with no living member on every side center, outside the budget, and the
+// idle empty groups the registry released since mission start)
 static GameValue GmSimDiag(const GameState* state)
 {
     SimDiag d;
     GatherSimDiag(d);
     GameValue value = state->CreateGameValue(GameArray);
     GameArrayType& array = value;
-    array.Resize(11);
+    array.Resize(12);
     array[0] = (float)d.zonesInBubble;
     array[1] = (float)d.zonesRemoteTicked;
     array[2] = ScalarArray(state, {(float)d.liveOcc, (float)d.liveRes, (float)d.liveCiv, (float)d.liveTotal});
@@ -404,12 +407,14 @@ static GameValue GmSimDiag(const GameState* state)
     array[9] = (float)SimBudgetBreaches(d, ZoneRegistry::Instance().Tuning());
     array[10] = ScalarArray(state, {(float)d.farOcc, (float)d.farArrival, (float)d.farMarch, (float)d.farLeftover,
                                     (float)d.farHomeHull, (float)d.farAir});
+    array[11] = ScalarArray(state, {(float)d.grpEmpty, (float)d.grpReleased});
     return value;
 }
 
 // gmSimAdmit [side, bodies, groups] -> the SimBudgetBreach bits a spawn of
 // bodies in groups new groups on that side would cause against the live
-// census (0 = it fits; 1 = budgetLiveBodies, 2 = budgetSideGroups).  The
+// census (0 = it fits; 1 = budgetLiveBodies, 2 = budgetSideGroups, which
+// counts the side's groups with a living member).  The
 // admission Traffic applies before every ambient spawn (round 3 A), for the
 // script spawners (civilians.sqs) to apply the same hard cap
 static GameValue GmSimAdmit(const GameState* state, GameValuePar oper1)

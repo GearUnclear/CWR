@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <Poseidon/AI/AI.hpp>            // AIGroup / AISubgroup (ForeignGroupLinks)
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
@@ -1811,6 +1812,127 @@ TEST_CASE("SimBudgetAdmit - a spawn checked against the census before it lands (
     REQUIRE(SimBudgetAdmit(c, 50, 50, t) == 0);
 }
 
+// Video 4 (2026-10-16): a scenario that deleteVehicle'd its squads but not
+// their groups ran the resistance group census from 1 to 14 with 11 bodies.
+// The budget counts groups with a living member; the empty ones are reported.
+TEST_CASE("Census - an empty group is reported, not counted against the group budget", "[game][guerrilla]")
+{
+    CenterCensus tally;
+    CensusTallyGroup(0, tally); // deleteVehicle'd squad: no members left
+    CensusTallyGroup(0, tally); // a wiped squad: dead bodies only
+    REQUIRE(tally.groups == 0);
+    REQUIRE(tally.emptyGroups == 2);
+    REQUIRE(tally.bodies == 0);
+
+    SECTION("a group with one living member is counted")
+    {
+        CensusTallyGroup(1, tally);
+        REQUIRE(tally.groups == 1);
+        REQUIRE(tally.emptyGroups == 2);
+        REQUIRE(tally.bodies == 1);
+    }
+    SECTION("empty groups leave the budget's room to a real spawn")
+    {
+        ZoneTuning t; // budgetSideGroups 40
+        for (int i = 0; i < 39; i++)
+        {
+            CensusTallyGroup(3, tally);
+        }
+        for (int i = 0; i < 20; i++)
+        {
+            CensusTallyGroup(0, tally);
+        }
+        REQUIRE(tally.groups == 39);
+        REQUIRE(tally.emptyGroups == 22);
+        LiveCensus c;
+        c.liveTotal = tally.bodies;
+        c.sideGroups = tally.groups;
+        REQUIRE(SimBudgetAdmit(c, 3, 1, t) == 0); // 40 of 40 counting the living only
+        REQUIRE(SimBudgetAdmit(c, 3, 2, t) == SBSideGroups);
+        SimDiag d;
+        d.grpMaxSide = tally.groups;
+        d.grpEmpty = tally.emptyGroups;
+        REQUIRE(SimBudgetBreaches(d, t) == 0); // 61 allocated, 39 within budget
+    }
+}
+
+TEST_CASE("EmptyGroupReleaseVerdict - only an unlinked group with no members, after the hold", "[game][guerrilla]")
+{
+    const float hold = 60.0f;
+    EmptyGroupFacts f; // no members, local, nobody's, unlinked
+    REQUIRE(EmptyGroupReleaseVerdict(f, 0.0f, hold) == EGVWait);
+    REQUIRE(EmptyGroupReleaseVerdict(f, 60.0f, hold) == EGVWait); // more than the hold, not at it
+    REQUIRE(EmptyGroupReleaseVerdict(f, 60.5f, hold) == EGVRelease);
+
+    SECTION("a dead body keeps its group")
+    {
+        f.members = 1;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never the player's group")
+    {
+        f.playerGroup = true;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never a remote group or in a network session")
+    {
+        f.local = false;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+        f.local = true;
+        f.networkSession = true;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never a group a script or a service still links (a pending spawn)")
+    {
+        f.foreignLinks = 1;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("a hold of 0 turns the release off")
+    {
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, 0.0f) == EGVKeep);
+    }
+}
+
+TEST_CASE("ForeignGroupLinks - a group's own radio and subgroup links do not count", "[game][guerrilla]")
+{
+    Ref<AIGroup> grp = new AIGroup(); // stands in for the center's ref
+    REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+
+    SECTION("its own subgroups' back links are its own")
+    {
+        Ref<AISubgroup> sub = new AISubgroup();
+        grp->AddSubgroup(sub);
+        REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+    }
+    SECTION("a script handle or a service record is foreign")
+    {
+        LLink<AIGroup> handle = grp.GetRef();
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+        LLink<AIGroup> record = grp.GetRef();
+        REQUIRE(ForeignGroupLinks(grp, 1) == 2);
+    }
+    SECTION("a second strong ref is foreign")
+    {
+        Ref<AIGroup> other = grp;
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+    }
+    SECTION("a Target naming the group outside its own target list is foreign")
+    {
+        // the group's own list entries are its own (the tri test's emptied
+        // squads kept 45 of them); one held anywhere else is not
+        Ref<Target> held = new Target(grp);
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+    }
+    SECTION("dropped links stop counting")
+    {
+        {
+            LLink<AIGroup> handle = grp.GetRef();
+            REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+        }
+        REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+    }
+}
+
 TEST_CASE("ZoneRegistry - heat clamps", "[game][guerrilla]")
 {
     RegistryFixture f;
@@ -2298,7 +2420,7 @@ TEST_CASE("ZoneRegistry - playerSide pins the resistance side (roster pick, not 
         REQUIRE(occ != res); // two records, not one aliased twice
         REQUIRE(Str(occ->side) == "WEST");
         REQUIRE(Str(res->side) == "GUER");
-        // same order of battle on both sides — that IS what a mirror match is
+        // same order of battle on both sides: that IS what a mirror match is
         REQUIRE(Str(occ->tiers[0]) == "SoldierGB");
         REQUIRE(Str(res->tiers[0]) == "SoldierGB");
         REQUIRE(Str(f.registry.FactionValue("WEST", "flag")) == "guer.pac");

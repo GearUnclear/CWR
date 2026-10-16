@@ -51,7 +51,11 @@ struct ZoneTuning
     // live-entity budgets it warns on (issue #71 section 6)
     float simDiagInterval = 60.0f;
     int budgetLiveBodies = 130;  // live AI bodies, every side (hard cap)
-    int budgetSideGroups = 40;   // groups on any one side center (engine cap 63)
+    int budgetSideGroups = 40;   // groups with a living member on any one side center (engine cap 63)
+    // seconds a group may sit with no members at all, linked by nobody,
+    // before the registry releases it from its center (0 = never); see
+    // EmptyGroupReleaseVerdict.  Config key emptyGroupRelease.
+    float emptyGroupRelease = 60.0f;
     float supportRate = 5.0f;    // CITY support gained per tick while GUER present
     float supportFlip = 60.0f;   // CITY support threshold for NEUTRAL -> GUER
     float heatCapSpike = 40.0f;  // Heat added on capture (clamped to 100)
@@ -297,10 +301,19 @@ struct SimDiag
     int liveRes = 0;
     int liveCiv = 0;
     int liveTotal = 0; // every side center, player included
+    // groups with at least one living member (CensusTallyGroup): the count
+    // the group budget is held to
     int grpOcc = 0;
     int grpRes = 0;
     int grpCiv = 0;
-    int grpMaxSide = 0; // largest group count on any one side center
+    int grpMaxSide = 0; // largest such group count on any one side center
+    // groups with no living member (dead bodies only, or no members at all)
+    // on every side center: outside the budget, reported so a script that
+    // deletes units but not their groups stays visible ([gmsim] emptyGroups=)
+    int grpEmpty = 0;
+    // idle empty groups the registry released since the mission started
+    // (ZoneRegistry::SweepEmptyGroups; [gmsim] released=)
+    int grpReleased = 0;
     int garrisonSpawnedZones = 0;
     int garrisonLiveBodies = 0;
     int trafficCiv = 0;
@@ -334,10 +347,55 @@ int SimBudgetBreaches(const SimDiag& d, const ZoneTuning& t);
 // world-touching sampler (engine path); zero sample without a world
 void GatherSimDiag(SimDiag& out);
 
+// One side center's census (CensusCenter folds its groups through
+// CensusTallyGroup; unit tests tally directly).
+struct CenterCensus
+{
+    int bodies = 0;      // living members
+    int groups = 0;      // groups with at least one living member (the budget's)
+    int emptyGroups = 0; // groups with none: dead bodies only, or no members
+};
+// pure (unit-tested): fold one group with aliveMembers living members into
+// the tally.  An empty group still holds a slot of the engine's 63-id
+// register, which CreateSideGroup and createGroup check on their own.
+void CensusTallyGroup(int aliveMembers, CenterCensus& tally);
+
+// What the empty-group sweep knows about one group (pure facts; the engine
+// path fills them from the AIGroup, unit tests directly).
+struct EmptyGroupFacts
+{
+    int members = 0;             // AIGroup::NUnits, dead bodies included
+    bool local = true;           // AIGroup::IsLocal
+    bool playerGroup = false;    // the player's group (any player)
+    bool networkSession = false; // a multiplayer world: never swept
+    // strong refs and weak links (script handles, service records, radio
+    // messages, waypoint links) beyond the center's own ref and the group's
+    // own radio channel and subgroups (ForeignGroupLinks)
+    int foreignLinks = 0;
+};
+enum EmptyGroupVerdict
+{
+    EGVKeep = 0,    // not a candidate: its idle clock restarts
+    EGVWait = 1,    // a candidate that has not been idle long enough
+    EGVRelease = 2, // release it from its center now
+};
+// pure (unit-tested): a group is a candidate only with no members at all
+// (a dead body keeps its group), local, not a player's, outside a network
+// session and linked by nobody, so no script handle or service record can
+// refill it; it is released once it has been a candidate for MORE than hold
+// seconds (idleFor).  hold <= 0 turns the release off (always EGVKeep).
+int EmptyGroupReleaseVerdict(const EmptyGroupFacts& facts, float idleFor, float hold);
+// strong refs beyond expectedRefs plus weak links beyond the group's own
+// radio channel (AIGroup's constructor links it), its own subgroups' back
+// links and the Targets of its own target list (Target::group); 0 = nobody
+// else can reach the group
+int ForeignGroupLinks(const AIGroup* group, int expectedRefs);
+
 // The census an ambient spawner reads before it adds bodies (round 3 A,
 // OFFSCREEN-CONTRACT.md section 6): the living AI bodies on every side
-// center (the [gmsim] total=) and the groups on the one side the spawn
-// joins.  Filled by GatherLiveCensus; unit tests fill it directly.
+// center (the [gmsim] total=) and the groups with a living member on the
+// one side the spawn joins (empty groups are outside the budget, as in
+// SimDiag::grpOcc).  Filled by GatherLiveCensus; unit tests fill it directly.
 struct LiveCensus
 {
     int liveTotal = 0;
@@ -348,7 +406,8 @@ struct LiveCensus
 // 0 = admitted.  A budget <= 0 is off.
 int SimBudgetAdmit(const LiveCensus& census, int bodies, int groups, const ZoneTuning& t);
 // world-touching census (engine path): liveTotal over every side center,
-// sideGroups on sideName's center (0 for an unknown side or no center); a
+// sideGroups (with a living member) on sideName's center (0 for an unknown
+// side or no center); a
 // zero census without a world
 void GatherLiveCensus(const char* sideName, LiveCensus& out);
 
@@ -917,6 +976,12 @@ class ZoneRegistry : public SerializeClass
     // sample GatherSimDiag and log one [gmsim] INFO line, plus a WARN per
     // breached budget; returns the SimBudgetBreach bits
     int LogSimDiag();
+    // the empty-group sweep (every zone tick, engine path): releases each
+    // group EmptyGroupReleaseVerdict calls idle for more than
+    // emptyGroupRelease seconds of mission time; returns how many it released
+    int SweepEmptyGroups(float deltaT);
+    // idle empty groups released since the last Clear ([gmsim] released=)
+    int EmptyGroupsReleased() const { return _emptyReleased; }
 
     // save/load; dynamic per-zone state keyed by zone name
     LSError Serialize(ParamArchive& ar) override;
@@ -1020,6 +1085,20 @@ class ZoneRegistry : public SerializeClass
     RString _handlers[NZoneEventTypes];
     float _accum = 0;
     float _simDiagAccum = 0;   // [gmsim] cadence
+    // the empty-group sweep, transient (a load clears it and every idle clock
+    // restarts): mission seconds the sweep has run, the candidates it is
+    // timing (keyed by the group's address and id, compared only against
+    // groups a center still lists, so a stale key is never dereferenced) and
+    // the release count
+    struct EmptyGroupWatch
+    {
+        const AIGroup* group = nullptr;
+        int id = 0;
+        float since = 0;
+    };
+    float _emptyClock = 0;
+    std::vector<EmptyGroupWatch> _emptyWatch;
+    int _emptyReleased = 0;
     int _lastTickInBubble = 0; // transient census of the last EvaluateTick
     int _lastTickRemote = 0;
     // transient: the player as the last EvaluateTick saw him (LastTickPlayer)

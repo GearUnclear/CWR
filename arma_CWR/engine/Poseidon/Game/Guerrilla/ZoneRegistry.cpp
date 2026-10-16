@@ -233,6 +233,9 @@ void ZoneRegistry::Clear()
     }
     _accum = 0;
     _simDiagAccum = 0;
+    _emptyClock = 0;
+    _emptyWatch.clear();
+    _emptyReleased = 0;
     _lastTickInBubble = 0;
     _lastTickRemote = 0;
     _tickPlayerValid = false;
@@ -617,7 +620,7 @@ bool ZoneRegistry::ApplyCampaignFriendship()
         return false; // transient: no world yet
     }
     // (const char*), not the RString: GetEnumValue overloads on const char* AND
-    // const RStringB&, and RString converts to both — the raw call is ambiguous
+    // const RStringB&, and RString converts to both: the raw call is ambiguous
     TargetSide occ = GetEnumValue<TargetSide>((const char*)_occupierSide);
     TargetSide res = GetEnumValue<TargetSide>((const char*)_resistanceSide);
     if ((int)occ < 0 || (int)res < 0 || occ >= TSideUnknown || res >= TSideUnknown)
@@ -743,6 +746,7 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.simDiagInterval = cfg.ReadValue("simDiagInterval", _tuning.simDiagInterval);
     _tuning.budgetLiveBodies = (int)cfg.ReadValue("budgetLiveBodies", (float)_tuning.budgetLiveBodies);
     _tuning.budgetSideGroups = (int)cfg.ReadValue("budgetSideGroups", (float)_tuning.budgetSideGroups);
+    _tuning.emptyGroupRelease = cfg.ReadValue("emptyGroupRelease", _tuning.emptyGroupRelease);
     // town defenders (issue #79 B2) and the town retake
     _tuning.cityGarrison = ReadTownGarrison(cfg.ReadValue("cityGarrison", (float)_tuning.cityGarrison), "cityGarrison",
                                             "CfgGuerrillaZones");
@@ -2826,6 +2830,9 @@ void ZoneRegistry::Simulate(float deltaT)
     {
         return;
     }
+    // the empty-group sweep runs on the zone tick, with the tick's elapsed
+    // mission time
+    SweepEmptyGroups(_accum);
     _accum = 0;
 
     ZoneTickInputs in;
@@ -3477,14 +3484,46 @@ int SimBudgetAdmit(const LiveCensus& census, int bodies, int groups, const ZoneT
     return bits;
 }
 
-// live bodies and allocated groups on one side center (null: none)
-static void CensusCenter(AICenter* center, int& bodies, int& groups)
+void CensusTallyGroup(int aliveMembers, CenterCensus& tally)
 {
-    bodies = 0;
-    groups = 0;
+    if (aliveMembers > 0)
+    {
+        tally.bodies += aliveMembers;
+        tally.groups++;
+    }
+    else
+    {
+        tally.emptyGroups++;
+    }
+}
+
+// living members of one group (dead bodies stay members until deleted)
+static int AliveMembers(const AIGroup* grp)
+{
+    int alive = 0;
+    for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
+    {
+        AIUnit* unit = grp->UnitWithID(u + 1);
+        if (unit && unit->GetLifeState() == AIUnit::LSAlive)
+        {
+            alive++;
+        }
+    }
+    return alive;
+}
+
+// live bodies, groups with a living member and empty groups on one side
+// center (null: none).  The video 4 trace (2026-10-16) is why the empty ones
+// are kept apart: a scenario that deleteVehicle'd its squads but not their
+// groups ran the resistance group count from 1 to 14 with 11 bodies, and the
+// engine has no empty-group sweep of its own (GroupRemoved runs only from
+// deleteGroup, join and the services' own RemoveFromCenter).
+static CenterCensus CensusCenter(AICenter* center)
+{
+    CenterCensus tally;
     if (!center)
     {
-        return;
+        return tally;
     }
     for (int g = 0; g < center->NGroups(); g++)
     {
@@ -3493,16 +3532,9 @@ static void CensusCenter(AICenter* center, int& bodies, int& groups)
         {
             continue;
         }
-        groups++;
-        for (int u = 0; u < MAX_UNITS_PER_GROUP; u++)
-        {
-            AIUnit* unit = grp->UnitWithID(u + 1);
-            if (unit && unit->GetLifeState() == AIUnit::LSAlive)
-            {
-                bodies++;
-            }
-        }
+        CensusTallyGroup(AliveMembers(grp), tally);
     }
+    return tally;
 }
 
 void GatherLiveCensus(const char* sideName, LiveCensus& out)
@@ -3519,13 +3551,11 @@ void GatherLiveCensus(const char* sideName, LiveCensus& out)
     for (TargetSide side : kSides)
     {
         AICenter* center = GWorld->GetCenter(side);
-        int bodies = 0;
-        int groups = 0;
-        CensusCenter(center, bodies, groups);
-        out.liveTotal += bodies;
+        const CenterCensus tally = CensusCenter(center);
+        out.liveTotal += tally.bodies;
         if (center && center == own)
         {
-            out.sideGroups = groups;
+            out.sideGroups = tally.groups;
         }
     }
 }
@@ -3544,10 +3574,11 @@ void GatherSimDiag(SimDiag& out)
         for (TargetSide side : kSides)
         {
             AICenter* center = GWorld->GetCenter(side);
-            int bodies = 0;
-            int groups = 0;
-            CensusCenter(center, bodies, groups);
+            const CenterCensus tally = CensusCenter(center);
+            const int bodies = tally.bodies;
+            const int groups = tally.groups;
             out.liveTotal += bodies;
+            out.grpEmpty += tally.emptyGroups;
             if (groups > out.grpMaxSide)
             {
                 out.grpMaxSide = groups;
@@ -3569,6 +3600,7 @@ void GatherSimDiag(SimDiag& out)
             }
         }
     }
+    out.grpReleased = registry.EmptyGroupsReleased();
     const GarrisonCache& cache = GarrisonCache::Instance();
     for (int i = 0; i < registry.NZones(); i++)
     {
@@ -3609,13 +3641,14 @@ int ZoneRegistry::LogSimDiag()
     GatherSimDiag(d);
     LOG_INFO(Core,
              "[gmsim] zones bubble={} remote={} live occ={} res={} civ={} total={} groups occ={} res={} civ={} "
-             "maxSide={} garrison zones={} bodies={} traffic civ={} parked={} patrol={} convoy={} "
-             "skippedBudget={} gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms "
+             "maxSide={} emptyGroups={} released={} garrison zones={} bodies={} traffic civ={} parked={} patrol={} "
+             "convoy={} skippedBudget={} gm={:.2f}/{:.2f}/{:.2f}ms frame={:.2f}/{:.2f}/{:.2f}ms "
              "far occ={} arrival={} march={} leftover={} home={} air={}",
              d.zonesInBubble, d.zonesRemoteTicked, d.liveOcc, d.liveRes, d.liveCiv, d.liveTotal, d.grpOcc, d.grpRes,
-             d.grpCiv, d.grpMaxSide, d.garrisonSpawnedZones, d.garrisonLiveBodies, d.trafficCiv, d.trafficParked,
-             d.trafficPatrol, d.trafficConvoy, d.trafficSkippedBudget, d.gmAvg, d.gmP95, d.gmMax, d.frameAvg,
-             d.frameP95, d.frameMax, d.farOcc, d.farArrival, d.farMarch, d.farLeftover, d.farHomeHull, d.farAir);
+             d.grpCiv, d.grpMaxSide, d.grpEmpty, d.grpReleased, d.garrisonSpawnedZones, d.garrisonLiveBodies,
+             d.trafficCiv, d.trafficParked, d.trafficPatrol, d.trafficConvoy, d.trafficSkippedBudget, d.gmAvg, d.gmP95,
+             d.gmMax, d.frameAvg, d.frameP95, d.frameMax, d.farOcc, d.farArrival, d.farMarch, d.farLeftover,
+             d.farHomeHull, d.farAir);
     const int bits = SimBudgetBreaches(d, _tuning);
     if (bits & SBLiveBodies)
     {
@@ -3628,6 +3661,153 @@ int ZoneRegistry::LogSimDiag()
                  _tuning.budgetSideGroups);
     }
     return bits;
+}
+
+int EmptyGroupReleaseVerdict(const EmptyGroupFacts& facts, float idleFor, float hold)
+{
+    if (hold <= 0)
+    {
+        return EGVKeep;
+    }
+    // a dead body keeps its group (RemoveFromCenter requires no members);
+    // a remote group is its owner's; a player's group is never touched
+    if (facts.members > 0 || !facts.local || facts.playerGroup || facts.networkSession)
+    {
+        return EGVKeep;
+    }
+    // a script handle (createGroup's result in a variable, GM_PLAYER_GROUPS),
+    // a service record (Traffic, CounterAttack, GarrisonCache, Market, ...),
+    // a waypoint or a queued radio message can still refill or read it
+    if (facts.foreignLinks > 0)
+    {
+        return EGVKeep;
+    }
+    return idleFor > hold ? EGVRelease : EGVWait;
+}
+
+int ForeignGroupLinks(const AIGroup* group, int expectedRefs)
+{
+    if (!group)
+    {
+        return 0;
+    }
+    int foreign = group->RefCounter() - expectedRefs;
+    if (foreign < 0)
+    {
+        foreign = 0;
+    }
+    const auto* track = group->Track();
+    if (track)
+    {
+        // the group's own: its radio channel (RadioChannel::_object, set by
+        // AIGroup's constructor), each of its subgroups' back link, and each
+        // Target of its own target list (Target::group names the group that
+        // tracks it; an emptied group keeps the list its units last built,
+        // 45 entries on a Guerrilla.Abel squad, and frees it with itself)
+        int own = 1;
+        for (int i = 0; i < group->NSubgroups(); i++)
+        {
+            const AISubgroup* sub = group->GetSubgroup(i);
+            if (sub && sub->GetGroup() == group)
+            {
+                own++;
+            }
+        }
+        const TargetList& targets = group->GetTargetList();
+        for (int i = 0; i < targets.Size(); i++)
+        {
+            const Target* target = targets[i];
+            if (target && target->group == group)
+            {
+                own++;
+            }
+        }
+        const int links = track->RefCounter() - own;
+        if (links > 0)
+        {
+            foreign += links;
+        }
+    }
+    return foreign;
+}
+
+int ZoneRegistry::SweepEmptyGroups(float deltaT)
+{
+    _emptyClock += deltaT;
+    if (!GWorld || _tuning.emptyGroupRelease <= 0)
+    {
+        _emptyWatch.clear();
+        return 0;
+    }
+    const bool network = GWorld->GetMode() == GModeNetware;
+    Person* player = GWorld->GetRealPlayer();
+    AIUnit* playerBrain = player ? player->Brain() : nullptr;
+    const AIGroup* playerGroup = playerBrain ? playerBrain->GetGroup() : nullptr;
+    std::vector<EmptyGroupWatch> next;
+    int released = 0;
+    int releasedBySide[4] = {0, 0, 0, 0};
+    static const TargetSide kSides[] = {TEast, TWest, TGuerrila, TCivilian};
+    for (int s = 0; s < 4; s++)
+    {
+        AICenter* center = GWorld->GetCenter(kSides[s]);
+        if (!center)
+        {
+            continue;
+        }
+        // backwards: a release deletes the center's entry in place
+        for (int g = center->NGroups() - 1; g >= 0; g--)
+        {
+            AIGroup* grp = center->GetGroup(g);
+            if (!grp)
+            {
+                continue;
+            }
+            EmptyGroupFacts facts;
+            facts.members = grp->NUnits();
+            facts.local = grp->IsLocal();
+            facts.playerGroup = grp == playerGroup || grp->IsAnyPlayerGroup();
+            facts.networkSession = network;
+            // 1: the center's RefArray entry
+            facts.foreignLinks = facts.members > 0 ? 0 : ForeignGroupLinks(grp, 1);
+            float since = _emptyClock;
+            for (const EmptyGroupWatch& w : _emptyWatch)
+            {
+                if (w.group == grp && w.id == grp->ID())
+                {
+                    since = w.since;
+                    break;
+                }
+            }
+            const int verdict = EmptyGroupReleaseVerdict(facts, _emptyClock - since, _tuning.emptyGroupRelease);
+            if (verdict == EGVWait)
+            {
+                EmptyGroupWatch w;
+                w.group = grp;
+                w.id = grp->ID();
+                w.since = since;
+                next.push_back(w);
+            }
+            else if (verdict == EGVRelease)
+            {
+                // the deleteGroup path (GroupDelete): nobody links the group,
+                // so the center's ref was the last and it is destroyed here
+                grp->RemoveFromCenter();
+                released++;
+                releasedBySide[s]++;
+            }
+        }
+    }
+    _emptyWatch.swap(next);
+    if (released > 0)
+    {
+        _emptyReleased += released;
+        LOG_INFO(Core,
+                 "[gmsim] released {} empty group(s) idle over {:.0f}s with no members and no links (east {} west {} "
+                 "guer {} civ {}); {} since mission start",
+                 released, _tuning.emptyGroupRelease, releasedBySide[0], releasedBySide[1], releasedBySide[2],
+                 releasedBySide[3], _emptyReleased);
+    }
+    return released;
 }
 
 // a CfgMarkerColors class the installed config overlay defines, else the stock
