@@ -811,3 +811,54 @@ No U production is included. Source, binary, reports and screenshots are preserv
 locally; no game assets or captures are committed. Both submodes and their controls
 belong to this single stage. The next terrain experiment starts from clean9167b6b,
 not from the parked U material response.
+
+## V / 22: Intermediate-scale authored terrain detail (PARK)
+
+A default-off base-terrain-only experiment sampled the existing detail alpha at
+four cycles per base tile rather than the fine layer's32. It applied bounded
+plus/minus12% RGB albedo modulation before both legacy lighting and the shoulder,
+with a15–45m near fade and projected-footprint fade. Integer scaling preserves
+wrapped phase through tile resets; no procedural noise or asset replacement was
+introduced. Actual detail-handle gating prevents fallback-white brightening.
+
+The source audit covered shared corner jitter, clamped transition tiles and
+segment resets.1,457 actual-GL checks and35,413,800 CPU checks across120 processes
+passed, including neutral/fade cases, active-P3 coexistence, alpha/fog preservation,
+UV periods and fallback/state resets. Clean demo and full test target built;
+3,021 cases/2,306,966 assertions passed with12OpenAL-device skips.
+
+Matched fixed-LOD .08 gameplay mode0/1/2 captures retained the owner's selected
+first-person framing, clear08:00,phase32.25,960x640,effective4xMSAA/150%scale.
+Independent native-size review PARKED both gains: finer mottling was detectable,
+but read as grain over the same smeared, repeating base texture rather than
+convincing new ground structure. No obvious seam or hard fade boundary appeared
+in that still; this is not motion or full-content acceptance. Unchanged objects
+and sky are preservation, not visual gains. Do not escalate strength to force a win.
+
+No V production is published. Both gains and controls are subtests of this stage.
+Frozen source/binaries/reports and actual captures remain preserved locally.
+
+
+## W / 23: Short stubble canopies (W1 REJECT; revision pending)
+
+The local default-off prototype changes representation rather than increasing
+M's blade density: four deterministic runtime RGBA variants on three crossed
+cutout cards, six triangles per cluster, world-stable irregular sites and bounded
+frustum/chunk submission. No external texture files, wind, casting or fixture
+changes. Ownership is explicitly recorded so only generated cutouts use two-sided
+culling and alpha96/255. Source review corrected direction-dependent budget fade
+and renderer-lifecycle cleanup before the actual engine trial.
+
+W1 built cleanly and passed the full3,021-case suite with12audio skips. Focused
+checks passed72actual-GL cases,1,130,470CPU assertions and32static lifecycle guards.
+The selected actual gameplay frame emitted91clusters/546triangles in4batches;
+shadow enablement was logged, but that alone does not prove visible reception.
+Both off/on runs exited0 with clean engine shutdown. Reset/remount remain separate
+runtime gates.
+
+Independent review REJECTED the pale comb-like clumps: visible new geometry, but
+unconvincing roots, repeated strip silhouettes and poor integration. A bounded
+W2 atlas-only revision changes grouping, bent/broken short-biased stalks and
+root/tip color; density, geometry and render scope stay fixed. Its visual result
+and further validation are pending. No W production is published at this point.
+All revisions remain subtests of one stage, with original scene and W1 preserved.
