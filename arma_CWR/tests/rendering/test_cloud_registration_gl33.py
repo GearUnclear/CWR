@@ -164,7 +164,8 @@ def gl_checks(root,baseline):
             try:
                 for k,v in [('world',world),('bearing',bearing)]:
                     if k in p:p[k].value=v
-                ps=np.zeros(120,np.float32);ps[12:16]=1;ps[28:32]=(.3,.6,.1,1);ps[112:116]=(.5,.5,1/4096,enabled);ps[116:120]=(.75,-.25,0,0)
+                # Explicitly zero appended controls through the linked UBO size.
+                ps=np.zeros(max(120,(p['PSConstants'].size+3)//4),np.float32);ps[12:16]=1;ps[28:32]=(.3,.6,.1,1);ps[112:116]=(.5,.5,1/4096,enabled);ps[116:120]=(.75,-.25,0,0)
                 ubo=ctx.buffer(ps.tobytes());resources.append(ubo);p['PSConstants'].binding=0;ubo.bind_to_uniform_block(0)
                 for unit,name,value in [(0,'tex0',[.3,.4,.5,.8]),(1,'tex1',[.5,.5,.5,.5]),(3,'cloudTransmittance',[transmission])]:
                     if name in p:

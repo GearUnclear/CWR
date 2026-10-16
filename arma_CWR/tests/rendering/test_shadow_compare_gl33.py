@@ -94,7 +94,8 @@ class Fixture:
         for name,value in {'distanceValue':case.get('distance',.5),'fogValue':case.get('fog',1),
                            'daylight':case.get('day',0),'sunEnabled':case.get('sun',1)}.items():
             program[name].value=value
-        ps=np.zeros(108,dtype='f4')
+        # Linked size avoids relying on undefined out-of-range UBO reads.
+        ps=np.zeros(max(108,(program['PSConstants'].size+3)//4),dtype='f4')
         def slot(i,v):ps[i*4:i*4+len(v)]=v
         slot(0,(.1,.2,.3,1));slot(2,(case.get('enabled',1),0,.25,case.get('texel_size',1/depth.shape[1])));slot(3,(1,1,1,1))
         slot(5,(0,0,0,.75));slot(6,(0,0,0,.35));slot(7,(.3,.6,.1,1))

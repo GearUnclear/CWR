@@ -128,7 +128,8 @@ class Fixture:
             self.programs[key]=self.ctx.program(vertex_shader=VERTEX,fragment_shader=self.shaders[variant][FRAGMENTS[fragment]])
         program=self.programs[key]
         for name,value in [('normalBearing',normal_bearing),('day',day),('fog',fog)]:program[name].value=value
-        ps=np.zeros(112,dtype='f4')
+        # New opt-in slots remain explicitly zero, not out-of-bounds reads.
+        ps=np.zeros(max(112,(program['PSConstants'].size+3)//4),dtype='f4')
         def slot(i,data):ps[i*4:i*4+len(data)]=data
         slot(0,(.1,.2,.3,1));slot(3,(1,1,1,1));slot(5,(0,0,0,.75));slot(6,(0,0,0,.35));slot(7,(.3,.6,.1,1));slot(27,(mode,0,0,0))
         resources=[]

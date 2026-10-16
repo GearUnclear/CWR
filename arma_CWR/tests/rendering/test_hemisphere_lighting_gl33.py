@@ -96,7 +96,8 @@ class Fixture:
             buffer[4*index:4*index+len(values)] = values
 
         try:
-            vs, ps = [0.] * 280, [0.] * 108
+            # Zero appended opt-in slots through the actual linked uniform block.
+            vs, ps = [0.] * 280, [0.] * max(108, (program['PSConstants'].size + 3) // 4)
             for index in (0, 4, 8, 24, 28):
                 slot(vs, index, IDENTITY)
             slot(vs, 12, (0, 0, -1, 0))

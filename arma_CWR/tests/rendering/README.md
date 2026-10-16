@@ -407,3 +407,16 @@ exits; seven explicitly source-only guards are not whole-engine failure tests.
 
 Three source guards require the canonical descriptor sampler route, reject either unclamped axis, and require matching clamp sampler S/T.
 They do not execute engine missing-texture or unsupported-face failure branches.
+
+
+### Linked uniform-block sizing in regression fixtures
+
+Current fixtures allocate at least the linked PSConstants block size and zero
+all added slots. Historical 432-byte Normal/Detail/Grass buffers fit E/N3, but
+P3/Q/S declare 448/480/496 bytes. Earlier later-source llvmpipe passes with shorter
+buffers were not portable evidence. Assertions are unchanged; historical sources
+and original26 compile-only checks are not reclassified as failures.
+
+The terrain diagnostic (previously448 bytes) and cloud diagnostic (previously480)
+use the same rule. Tests select exact frozen source explicitly; the original26
+suite now accepts --source while retaining all26 assertions.

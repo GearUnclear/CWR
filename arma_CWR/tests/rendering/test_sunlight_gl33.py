@@ -52,7 +52,8 @@ def pixel(ctx, source, normals, *, sun=1, diffuse=.6, ambient=.1,
         slot(15, [0, 0, 0, 1])
         slot(20, [sun, 0, 0, 0])
         slot(21, [2 / 65, 2 / 65, 0, 0])
-        ps = [0.] * 108
+        # Zero appended opt-in slots through the actual linked uniform block.
+        ps = [0.] * max(108, (program['PSConstants'].size + 3) // 4)
         ps[12:16] = [1] * 4  # object tint
         ps[20:24] = [0, 0, 0, .75]  # grass alpha: .5 + texture alpha .5 = 1
         ps[24:28] = [0, 0, 0, .5]  # grass alpha multiplier
@@ -104,11 +105,12 @@ def close(actual, expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--source', type=Path, default=SOURCE)
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()
     ctx = moderngl.create_standalone_context(backend='egl', require=330)
-    current = shaders(SOURCE)
+    current = shaders(args.source)
     baseline = shaders(args.baseline) if args.baseline else None
     results = []
     for vs in ('s_vsScreenGLSL', 's_vsTransformGLSL'):

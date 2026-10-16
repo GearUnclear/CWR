@@ -6,7 +6,7 @@ No game assets, captured screenshots, or executable binaries belong in this tree
 
 ## Alphabetical milestone progress
 
-Current numbered stage: **Q (17 of 703)**. The requested target is **AAA (703)**
+Current numbered stage: **S (19 of 703)**. The requested target is **AAA (703)**
 using A–Z, AA–AZ, and onward. This is a longer-running iteration milestone,
 separate from the 15 screenshot deliveries over 10 hours; neither is complete.
 F2 is a subvariant of F. Diagnostics, time-of-day repeats, camera angles, and
@@ -619,3 +619,75 @@ The exact clean Q binary rendered five integration views at effective 4x MSAA /
 corruption or resolve failure. Phase was uncontrolled and adaptive LOD enabled,
 so these are not exact-pattern comparisons. The wide-view fog/object mismatch
 remains a diagnostic limitation, not accepted beauty lighting.
+
+## R: bounded cloud sunlight experiment (stage 18, local)
+
+R1 reuses Q's authored-cloud coverage but applies one separate factor capped at
+12% additional attenuation to direct Lambert, forced sunlight and sun specular.
+Ambient, local/emissive terms, PCF visibility, fog and surviving alpha are not
+multiplied. Existing weather lighting remains, so this is additional artistic
+modulation, not a physical energy correction. Default off, with separate cyan
+receiver classification. Lit world Normal/Detail opaque/cutout meshes participate;
+prelit, water, roads/decals, grass shader and alpha-blended meshes do not.
+
+A camera-relative projected radius fades from 1400 to 1600m, inside every snapped
+4096m map window. This prevents the outer fade envelope moving with 256m map
+recentering. It does not prove raster-map temporal stability. Invalid/nonfinite
+coordinates and samples return unity; all nonreceiver draws reset both controls.
+
+Independent review of five paired actual views rejected R1 as an artistic gain:
+mostly slight dimming, with cloud bands hard to distinguish beneath terrain texture
+and fog. Three additional paired phases at the lower 100m road-landmark camera
+confirmed insufficient visible gain. No obvious new horizon seam or sky change
+was found; sky controls were pixel-identical. The diagnostic hard horizon does
+not appear in ordinary beauty mode. Classification exposes excluded patches on
+net/poles, road, vehicle markings and wheel/track details; actual material auditing
+is separate, and absence of glaring mismatch at 12% is not full coverage approval.
+
+R1 passes 474 actual-GL lighting cases plus 17,287 descriptor assertions, 2,030
+extracted upload assertions and 20 source guards. Eleven deliberate mutations
+are rejected. These isolate selected code with explicit harness/stub limitations,
+not whole-engine acceptance. The unchanged full C++ suite passed with the prior
+audio skips and fixture-staging caveats. Prior sources, tests and captures remain
+preserved. R2 is a strength-only 40% calibration with the same GLSL/eligibility;
+its explicit model passes the same tests. Independent review of its matched
+normal views and three lower-camera phases recommends PARK: stronger modulation
+is detectable, but ordinary gameplay mainly looks dimmer, not persuasively better.
+All three phase sky images match OFF exactly. Further strength-only tuning is
+not justified by these captures. Neither R1 nor R2 production changes are published.
+
+A later read-only authored-section audit confirmed IsAlpha+IsAlphaOrdered on
+Shed net/rope and M113 star/wheel-endcap sections, without depth-disable,
+DisableSun or AlphaFog flags. R's transparent-phase exclusion therefore omitted
+some genuinely lit solid-object sections, not only effects. Wooden poles are
+opaque in the audited asset; their visible nonparticipation is not explained
+by those section bits alone. No speculative classification is treated as proven.
+
+## S: directional aerial color (stage 19, local candidate)
+
+S leaves fog transmittance, lighting and alpha unchanged, but shifts distant
+atmospheric color cooler away from the sun and warmer sunward. Nearfield color
+is protected by a 120–350m fade. Activation occurs only with successful full N
+sky, fading from 15 to 20 degrees sun elevation, with night/NVG fallback.
+
+Initial independent review of three matched actual views retains a localized
+experimental gain: westward mountains recede more coherently while near ground
+and middle-distance trees stay distinct. Sampled foreground regions match OFF.
+North/east change little; the existing sunward gray horizon band remains. The
+central far ridge loses definition, so this is not universally better visibility.
+Three paired night views also pass qualitative review without daytime-blue leakage.
+Further NVG, transition, clean integration and cost gates remain pending.
+No S production changes are included in this test-fixture checkpoint.
+
+## Regression fixture UBO sizing correction
+
+Historical original26/H3/shadow fixtures allocated 432-byte PS buffers. That fits
+E/N3, but later P3/Q/S linked Normal/Detail/Grass blocks require 448/480/496 bytes.
+Their earlier later-source llvmpipe passes did not establish portable binding
+validity. The fixtures now inspect the linked block size and zero-fill additional
+storage, preserving every existing assertion. Original26's compile-only
+Water/Flat/shadow checks were unaffected. The original fixture is preserved.
+Terrain diagnostic's 448-byte buffer fit P3 but not Q/S; cloud diagnostic's
+480-byte buffer fit Q but not S. Those allocations receive the same correction.
+Reruns against frozen Q and S retain the original expectations rather than
+weakening them. This is a verification fix, not another artistic stage.
