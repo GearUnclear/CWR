@@ -7,6 +7,9 @@
 
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
+#include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -51,6 +54,7 @@ TEST_CASE("GraphicsConfig: factory defaults match spec", "[Settings][GraphicsCon
     CHECK(c.brightness == 1.6f);
     CHECK(c.gamma == 1.2f);
     CHECK(c.version == GraphicsConfig::kVersion);
+    CHECK_FALSE(c.depthMapShadows);
 }
 
 // Migrate only touches a version-0 file whose gamma is still the stamped 1.0.
@@ -204,6 +208,7 @@ TEST_CASE("GraphicsConfig: Save then Load round-trips every field", "[Settings][
     src.renderScale = 1.5f;
     src.alphaToCoverage = false;
     src.multitexturing = false;
+    src.depthMapShadows = true;
     src.brightness = 1.2f;
     src.gamma = 0.9f;
     REQUIRE(src.Save(path));
@@ -221,6 +226,7 @@ TEST_CASE("GraphicsConfig: Save then Load round-trips every field", "[Settings][
     CHECK(dst.renderScale == src.renderScale);
     CHECK(dst.alphaToCoverage == src.alphaToCoverage);
     CHECK(dst.multitexturing == src.multitexturing);
+    CHECK(dst.depthMapShadows == src.depthMapShadows);
     CHECK(dst.brightness == src.brightness);
     CHECK(dst.gamma == src.gamma);
 }
@@ -408,5 +414,99 @@ TEST_CASE("GraphicsConfig: Allowed FPS cap values pass through unchanged", "[Set
         c.fpsCap = allowed;
         c.Normalize(env);
         CHECK(c.fpsCap == allowed);
+    }
+}
+
+TEST_CASE("GraphicsConfig: old files leave depth-map shadows disabled", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("legacy.cfg");
+    {
+        std::ofstream out(path);
+        out << "version=2;\nshadowQuality=3;\n";
+    }
+    GraphicsConfig c;
+    c.depthMapShadows = true; // Reloading must not inherit a previous session's opt-in.
+    REQUIRE(c.Load(path));
+    CHECK_FALSE(c.depthMapShadows);
+    CHECK(c.shadowQuality == GraphicsConfig::TierHigh);
+}
+
+TEST_CASE("GraphicsConfig: presets preserve the explicit depth-map preference", "[Settings][GraphicsConfig]")
+{
+    for (bool enabled : {false, true})
+    {
+        GraphicsConfig c;
+        c.depthMapShadows = enabled;
+        for (int preset = GraphicsConfig::PresetLow; preset <= GraphicsConfig::PresetUltra; ++preset)
+        {
+            c.ApplyPresetToTiers(static_cast<GraphicsConfig::Preset>(preset));
+            CHECK(c.depthMapShadows == enabled);
+            CHECK(c.DerivePresetFromTiers() == preset);
+        }
+    }
+}
+
+TEST_CASE("GraphicsConfig: depth-map preference round-trips both states with shadows off",
+          "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("depth-maps.cfg");
+    for (bool enabled : {false, true})
+    {
+        GraphicsConfig src;
+        src.depthMapShadows = enabled;
+        src.shadowQuality = GraphicsConfig::TierOff;
+        REQUIRE(src.Save(path));
+        GraphicsConfig dst;
+        dst.depthMapShadows = !enabled;
+        REQUIRE(dst.Load(path));
+        CHECK(dst.depthMapShadows == enabled);
+        CHECK(dst.shadowQuality == GraphicsConfig::TierOff);
+    }
+}
+
+TEST_CASE("GraphicsConfig: live depth maps require explicit opt-in and non-Off quality",
+          "[Settings][GraphicsConfig]")
+{
+    using namespace Poseidon;
+    class ShadowRecordingEngine : public EngineDummy
+    {
+      public:
+        bool enabled = false;
+        void SetShadowMapsEnabled(bool value) override { enabled = value; }
+    } engine;
+    struct RestoreGlobals
+    {
+        Engine* engine = GEngine;
+        Scene* scene = GScene;
+        int fpsCap = gUserFpsCap;
+        ~RestoreGlobals()
+        {
+            GEngine = engine;
+            GScene = scene;
+            gUserFpsCap = fpsCap;
+        }
+    } restore;
+    GEngine = &engine;
+    GScene = nullptr;
+    GraphicsConfig c;
+    for (auto tier : {GraphicsConfig::TierLow, GraphicsConfig::TierMedium, GraphicsConfig::TierHigh})
+    {
+        c.shadowQuality = tier;
+        c.depthMapShadows = false;
+        ApplyGraphicsConfigToEngine(c);
+        CHECK_FALSE(engine.enabled);
+        c.depthMapShadows = true;
+        ApplyGraphicsConfigToEngine(c);
+        CHECK(engine.enabled);
+        c.shadowQuality = GraphicsConfig::TierOff;
+        ApplyGraphicsConfigToEngine(c);
+        CHECK_FALSE(engine.enabled);
+        CHECK(c.depthMapShadows);
+        c.shadowQuality = tier;
+        ApplyGraphicsConfigToEngine(c);
+        CHECK(engine.enabled);
+        c.depthMapShadows = false;
+        ApplyGraphicsConfigToEngine(c);
+        CHECK_FALSE(engine.enabled);
     }
 }

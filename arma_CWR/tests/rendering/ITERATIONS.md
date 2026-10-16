@@ -237,3 +237,7 @@ Current material coverage: 457 checks (475 with G controls), original 26 checks,
 H3 is a subvariant, not another alphabetical stage. It changes lateral sky fill at approximately matched luminance in an illustrative input, not global exposure. Actual shaded/sunlit barn comparisons favor its cooler shade and retained texture, with reduced warmth on lit plaster as a known tradeoff. A clean source candidate based on c6b89fe changes only the three coefficients; it built and rendered both barn views.
 
 K identifies authored tree/bush cutout sections correctly, but its leaf-transmission beauty effect remained unconvincing even at a diagnostic 4x strength. K2 contribution and orientation captures verified an active, small effect following broad foliage-card triangles. Preserve K/K2 locally; exclude them from the preferred stack rather than amplify card artifacts. A fixed-LOD QA override was used in those comparisons and is not part of this published checkpoint.
+
+## Saved shadow controls
+
+A separate usability checkpoint exposes depth-map shadows as a default-off Advanced option. Real menu interaction and restart verified persistence and Shadow Quality Off gating; it does not count as another artistic iteration or certify every shadow scene. The exact clean H3+option binary was built, with 479 focused assertions passing. No rejected rendering prototypes are included.

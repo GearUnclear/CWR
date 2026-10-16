@@ -153,3 +153,9 @@ explicitly rather than silently skipping MSAA coverage.
 Only the three lateral ambient coefficients change from H2: `(0.70, 0.65, 0.52)` to `(0.60, 0.66, 0.63)`. Shade reads cooler while plaster detail remains. The lit facade also loses some warmth, so this remains a provisional artistic direction. The exact clean candidate built and rendered shaded and sunlit barn scenes; no experimental foliage or benchmark code is included.
 
 The current test defaults to `--palette h3`. Use `--palette h2 --source /tmp/H2.cpp` to reproduce the preserved H2 contract. Both matched models pass 457 checks (475 with G controls); mismatched source/palette pairs fail. Historical E assertions remain separate and unchanged.
+
+## Persistent depth-map option
+
+Options → Graphics → Advanced → Depth-map Shadows now exposes the existing depth-map path. It defaults off and presets do not change it. Shadow Quality Off suppresses the backend without erasing the saved preference; restoring quality re-enables the opted-in path. Close the page to persist the choice. This remains an experimental option with a performance cost.
+
+Verification: 479 assertions across 40 focused GraphicsConfig/GraphicsPage cases; exact H3+option demo build; actual menu toggle, Shadow Quality Off/restore, saved config, and process restart into gameplay with maps enabled without the test enable command. The complete local PoseidonTests target hit an untouched relative PackageMount.hpp include error in test_package_mount.cpp; the focused executable passed, not the full suite. New-head CI is separate.
