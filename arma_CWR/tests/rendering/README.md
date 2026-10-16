@@ -165,3 +165,15 @@ Verification: 479 assertions across 40 focused GraphicsConfig/GraphicsPage cases
 A separate one-line test include correction now lets PackageMount.hpp resolve directly from the source directory instead of relying on the in-tree build layout. The affected object and full PoseidonTests target compiled in the external build. PackageMount cases passed: 3 cases/18 assertions.
 
 The no-game-data suite then passed 3,021 cases with 12 explicit OpenAL-device skips and 2,306,960 assertions. This required staging the repository synthetic fixtures into the external build output: the first run failed because the PAA fixture lookup expected fixtures/paa, while staging supplied fixtures/texture/paa. No fixture or gameplay files were changed by this commit. The full local test binary included frozen experimental M sources; it is not an exact published-head replay. Published-head CI remains a separate verification.
+
+### UV sampling regression and driver diagnostic
+
+Requires Python `moderngl` and an EGL/OpenGL 3.3 implementation. From the repository root:
+
+```sh
+python arma_CWR/tests/rendering/test_uv_sampling_gl33.py --report uv-sampling-report.json
+```
+
+The self-contained synthetic shader probe asserts finite opaque-white sampling with nondegenerate triangle UVs, using ordinary filtering and the supported maximum anisotropy capped at 16. Unsupported anisotropy cases are explicitly skipped; context/dependency errors are not successful skips. The JSON report includes driver/version, requested/applied anisotropy, sampler/texture settings and all repeated samples.
+
+Constant-UV samples are recorded without asserting a driver-specific failure. Mesa 25.0.7 llvmpipe produced NaN with constant UV at 16x while nondegenerate UV remained white; other drivers may correctly sample both. This does not test engine GLSL, material distribution, full-game behavior or hardware performance. Run separately from timed rendering benchmarks to avoid contention.

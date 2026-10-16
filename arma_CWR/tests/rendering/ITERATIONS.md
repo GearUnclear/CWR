@@ -275,3 +275,30 @@ The bounded occupancy checks cover authored static structures and Thing-derived
 loose objects, not all moving actors. Runtime motion, shadow reception, hardware
 cost and official Remaster acceptance remain open. No procedural-grass source,
 game assets, screenshots or binaries are included in the published checkpoint.
+
+### M2h diagnosis and retained local correction
+
+Draw-time GPU readback showed nonzero lighting, white tint and the expected
+opaque-white texture. A constant-red fragment diagnostic rendered correctly;
+pre-texture lighting rendered olive green, while the normal final RGB was
+nonfinite. A separate repeated EGL probe reproduced NaN sampling from constant
+UVs at 16x anisotropy on Mesa 25.0.7 llvmpipe. Ordinary triangle UVs sampled white.
+This is evidence about that tested driver, not a universal anisotropy defect.
+
+M2h changed only generated triangle UV coordinates relative to M2c. Actual engine
+captures in all three matched views then rendered olive-green blades instead of
+black. Independent review retained this technical correction locally, but still
+requested better groundcover. Selected camera-motion frames showed no obvious
+clump jumps or black relapse; this is not exhaustive temporal acceptance.
+
+A separate depth-map toggle comparison demonstrated darker grass under the net
+while all sampled sunlit control blade pixels remained identical. The tested
+vehicle-edge tuft did not change, so vehicle shadow reception was not established
+there. Legacy projected shadows remained in the depth-map-disabled comparison.
+
+M3 shorter bent blades and more jittered sites reduced the rigid-spike look, but
+independent review still found tiny sparse sprouts rather than coherent grass.
+Its greater draw/triangle ceiling is not justified by the observed art result.
+M remains one research stage with diagnostic and art subtests; no grass prototype
+code is included in this checkpoint. The standalone UV probe is published for
+reproducibility, not as proof of full engine acceptance.
