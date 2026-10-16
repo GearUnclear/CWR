@@ -3634,9 +3634,11 @@ TEST_CASE("OccupierForces - the band stays steady across an opener bought and re
           "[game][guerrilla][occupierforces]")
 {
     // the operation and its opener are one ledger movement (BandHold, as
-    // the air re-plan of 197a7d3): the jet's debit alone would demote the
-    // band, its refund in the same step must leave no edge, not even one
-    // that the launcher could see
+    // the air re-plan of 197a7d3): an opener bought and refunded in the same
+    // step must leave no edge, not even one that the launcher could see.
+    // Since 2026-10-16 (video 4) the director buys no airframe that would
+    // take the pool below STRONG, so at this pool the jet is out and the
+    // cheaper attack helicopter (20, which keeps STRONG) is the opener
     Fixture f;
     BaseOpenerSetup(f);
     const int rebel = f.registry.FindZoneIndex("RebelPost");
@@ -3661,6 +3663,7 @@ TEST_CASE("OccupierForces - the band stays steady across an opener bought and re
 
     BandProbeLauncher launcher;
     launcher.of = &f.of;
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before - g - 20, start) == OFBandStrong);
     f.of.Direct(f.registry, view, launcher, 60.0f);
     REQUIRE(launcher.orders.size() == 1);
     CHECK(launcher.orders[0].kind == CAKBase);
@@ -4613,9 +4616,17 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     const DirectorAction gt = f.of.PlanFor(f.registry, view, goisse, CAODirector);
     CHECK(gt.choice.quote.package == FPTruck);
     CHECK(gt.choice.etaRule == PackageChoice::EtaSlow);
-    // a push-out keeps the minimal package (6.4)
+    // a push-out takes the arrival rule too since 2026-10-16 (6.4, video 4:
+    // a push-out walked 55 minutes from the Airfield): Goisse gets the
+    // insertion, while Houdan's foot quote, under forcesSlowEta, stays foot
     f.of.TuningMutable().airEta = 1500;
-    CHECK(f.of.PlanFor(f.registry, view, goisse, CAOPushout).choice.quote.package == FPFoot);
+    const DirectorAction gp = f.of.PlanFor(f.registry, view, goisse, CAOPushout);
+    CHECK(gp.choice.quote.package == FPTransportHeli);
+    CHECK(gp.choice.etaRule == PackageChoice::EtaAir);
+    CHECK_FALSE(gp.urgent);
+    const DirectorAction hp = f.of.PlanFor(f.registry, view, houdan, CAOPushout);
+    CHECK(hp.choice.quote.package == FPFoot);
+    CHECK(hp.choice.etaRule == PackageChoice::EtaNone);
 
     // the director launches them: La Trinite first (hotter), then Goisse
     f.Z("Houdan").heat = 0;
@@ -4634,4 +4645,449 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     CHECK(launcher.orders[1].airOrigin == f.registry.FindZoneIndex("Airfield"));
     CHECK(launcher.orders[1].priceUnits == 12);
     CHECK(f.of.Pool() == pool0 - 4 - 12);
+}
+
+// ===========================================================================
+// Round 3.5 (tmp/of-director-video-4, 2026-10-16): the re-arm after a rest
+// (6.3), a director strike keeps STRONG after both debits (7.3), the HQ
+// assault's settled line and the escort in the launch line (6.6), push-outs
+// under the arrival rule (6.4).
+// ===========================================================================
+
+namespace
+{
+
+// a flip minute whose candidate roll for name is at least floor: the old
+// rule then lists the town only at heat >= 40 x floor
+int MinuteWithRoll(const char* name, float floor)
+{
+    for (int m = 1; m < 1440; m++)
+    {
+        if (CounterAttack::Roll01(CounterAttack::MakeSeed(name, 1, m, 0), OccupierForces::CandidateSalt) >= floor)
+        {
+            return m;
+        }
+    }
+    return 1;
+}
+
+// Arudy's timeline in video 4: a defended held town (3 fighters, a local
+// talks every tipEvery s) is attacked and repelled, rests 1800 s while its
+// heat decays at 0.25 per 10 s, and the director comes back for it (or does
+// not).  Every other held zone rests for good, so nothing else is a
+// candidate or a push-out.  Returns the director's orders on Town and, per
+// repel, the second the rest ended.
+struct ArudyRun
+{
+    std::vector<float> launchedAt; // director orders on Town
+    std::vector<float> restEnds;
+    int rearmLines = 0;
+    int pushouts = 0;
+    float heatAtEnd = 0;
+};
+
+ArudyRun RunArudy(float rearmHeat, int repels, float seconds, float tipEvery)
+{
+    ArudyRun run;
+    CoreLines log;
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    f.of.TuningMutable().rearmHeat = rearmHeat;
+    FakeLauncher launcher;
+    FlipTown(f, "Other", 1);
+    REQUIRE(FlipTown(f, "Town", MinuteWithRoll("Town", 0.75f))); // the second town: AWAKE
+    REQUIRE(OccupierForces::CandidateRoll(f.Z("Town")) >= 0.75f);
+    f.Z("Town").heat = 50; // a loud flip: the first operation goes at once
+    f.Z("Other").heat = 0;
+    for (const char* rest : {"Other", "Held", "RebelPost", "Camp"})
+    {
+        f.of.ForceCooldown(rest, 1.0e6f);
+    }
+    const int town = f.registry.FindZoneIndex("Town");
+    const Vector3 at = f.Z("Town").pos;
+    int done = 0;
+    int pendingOp = 0;
+    float repelAt = -1;
+    bool resting = false;
+    for (float t = 0; t <= seconds; t += 60.0f)
+    {
+        // the held-zone heat decay: 0.25 per 10 s
+        for (int i = 0; i < f.registry.NZones(); i++)
+        {
+            if (stricmp(f.registry.GetZone(i)->owner, f.registry.ResistanceSide()) == 0)
+            {
+                f.registry.HeatDecay(i, 1.5f);
+            }
+        }
+        // "a local in Arudy talked": the true count, every tipEvery s
+        if (tipEvery > 0 && fmodf(t, tipEvery) < 1.0f)
+        {
+            f.of.IngestTip(f.registry, town, 3, at);
+        }
+        // the operation in flight is repelled a minute after it left
+        if (pendingOp > 0 && t >= repelAt)
+        {
+            CounterAttackOpEvent ev;
+            ev.opId = pendingOp;
+            ev.type = CAOpRepelled;
+            ev.kind = CAKRetake;
+            ev.target = town;
+            ev.units = 4;
+            f.of.NoteOpEvent(f.registry, ev);
+            launcher.Resolve(town);
+            resting = true;
+            pendingOp = 0;
+            done++;
+        }
+        const size_t before = launcher.orders.size();
+        f.of.Tick(f.registry, 60.0f);
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        if (resting && f.of.Cooldown("Town") <= 0)
+        {
+            run.restEnds.push_back(t); // the tick the rest ran out
+            resting = false;
+        }
+        for (size_t k = before; k < launcher.orders.size(); k++)
+        {
+            const CounterAttackOrder& o = launcher.orders[k];
+            run.pushouts += o.origin == CAOPushout ? 1 : 0;
+            if (o.target != town)
+            {
+                continue;
+            }
+            run.launchedAt.push_back(t);
+            if (done < repels)
+            {
+                pendingOp = o.opId;
+                repelAt = t + 60.0f;
+            }
+        }
+    }
+    run.heatAtEnd = f.Z("Town").heat;
+    run.rearmLines = (int)log.With({"Town rested with", "re-armed"}).size();
+    return run;
+}
+
+} // namespace
+
+TEST_CASE("OccupierForces - re-arm: a defended town repelled twice is a candidate again within one token interval",
+          "[game][guerrilla][occupierforces]")
+{
+    OccupierForcesTuning t;
+    CHECK(t.rearmHeat == Approx(40.0f)); // forcesHeatFull's: every roll u < 1 lists the town
+    CHECK(t.rearmHeat == Approx(t.heatFull));
+    const float interval = OccupierForces::TokenInterval(t, OFBandStrong);
+    REQUIRE(interval == Approx(600.0f));
+
+    // video 4: Arudy repelled op 5 and op 7, tips kept it from being quiet,
+    // its heat decayed to 0 inside the rest: from then a STRONG director
+    // with two tokens never went back.  With the re-arm, each rest's end
+    // brings the operation within one token interval
+    const ArudyRun fixed = RunArudy(40.0f, 2, 6000.0f, 240.0f);
+    REQUIRE(fixed.restEnds.size() == 2);
+    REQUIRE(fixed.launchedAt.size() == 3);
+    CHECK(fixed.launchedAt[1] >= fixed.restEnds[0]);
+    CHECK(fixed.launchedAt[1] - fixed.restEnds[0] <= interval);
+    CHECK(fixed.launchedAt[2] >= fixed.restEnds[1]);
+    CHECK(fixed.launchedAt[2] - fixed.restEnds[1] <= interval);
+    CHECK(fixed.rearmLines == 2);
+    CHECK(fixed.pushouts == 0); // a reported town is never quiet
+
+    // the old rule (forcesRearmHeat 0): the heat left by the repel decays
+    // inside the rest, the roll (>= 0.75) keeps the town out, the tips keep
+    // it from push-out: one operation, then nothing for the rest of the run
+    const ArudyRun old = RunArudy(0.0f, 2, 6000.0f, 240.0f);
+    REQUIRE(old.restEnds.size() == 1);
+    CHECK(old.launchedAt.size() == 1);
+    CHECK(old.rearmLines == 0);
+    CHECK(old.pushouts == 0);
+    CHECK(old.heatAtEnd < 1.0f);
+
+    // nobody reported when the rest ends (no tips): no re-arm; the town is
+    // quiet, and the STRONG director's push-out goes for it (6.4)
+    const ArudyRun quiet = RunArudy(40.0f, 1, 6000.0f, 0.0f);
+    REQUIRE(quiet.restEnds.size() == 1);
+    CHECK(quiet.rearmLines == 0);
+    REQUIRE(quiet.launchedAt.size() >= 2);
+    CHECK(quiet.pushouts >= 1);
+}
+
+TEST_CASE("OccupierForces - re-arm: released by the launch, a lost town or decayed reports; saved",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    const int town = f.registry.FindZoneIndex("Town");
+    f.of.IngestTip(f.registry, town, 3, f.Z("Town").pos);
+    f.of.ForceCooldown("Town", 120.0f);
+    f.Z("Town").heat = 0;
+    FakeLauncher idle;
+    idle.born = 99; // every slot full: the re-armed town waits
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, 60.0f);
+    CHECK_FALSE(f.of.Rearmed("Town")); // still resting
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, 60.0f);
+    REQUIRE(f.of.Rearmed("Town"));
+    CHECK(f.Z("Town").heat == Approx(40.0f));
+    // held at the floor on every tick while it waits
+    f.registry.HeatDecay(town, 30.0f);
+    f.of.Direct(f.registry, ViewOf(f.registry), idle, 60.0f);
+    CHECK(f.Z("Town").heat == Approx(40.0f));
+    AutoArray<int> c;
+    f.of.Candidates(f.registry, ViewOf(f.registry), idle, c);
+    CHECK(HasCandidate(c, town));
+
+    // saved and loaded with the block
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-rearm.bin";
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.Rearmed("Town"));
+    CHECK(loaded.RearmedCount() == 1);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+
+    // the launch releases it
+    FakeLauncher launcher;
+    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+    REQUIRE(launcher.orders.size() >= 1);
+    CHECK(launcher.orders[0].target == town);
+    CHECK_FALSE(f.of.Rearmed("Town"));
+
+    // reports that decay release it (the town is quiet then: push-out's)
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(g.of.Activate(g.registry));
+    FlipTown(g, "Town", 1);
+    REQUIRE(FlipTown(g, "Other", 2));
+    g.of.IngestTip(g.registry, g.registry.FindZoneIndex("Town"), 3, g.Z("Town").pos);
+    g.of.ForceCooldown("Town", 60.0f);
+    g.of.Direct(g.registry, ViewOf(g.registry), idle, 60.0f);
+    REQUIRE(g.of.Rearmed("Town"));
+    g.of.Tick(g.registry, g.of.Tuning().intelDecay + 60.0f);
+    g.of.Direct(g.registry, ViewOf(g.registry), idle, 60.0f);
+    CHECK_FALSE(g.of.Rearmed("Town"));
+
+    // a town the resistance lost releases it (an owner change forgets it)
+    Fixture h;
+    h.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(h.of.Activate(h.registry));
+    FlipTown(h, "Town", 1);
+    REQUIRE(FlipTown(h, "Other", 2));
+    h.of.IngestTip(h.registry, h.registry.FindZoneIndex("Town"), 3, h.Z("Town").pos);
+    h.of.ForceCooldown("Town", 60.0f);
+    h.of.Direct(h.registry, ViewOf(h.registry), idle, 60.0f);
+    REQUIRE(h.of.Rearmed("Town"));
+    h.Z("Town").owner = RString("NEUTRAL");
+    h.of.Direct(h.registry, ViewOf(h.registry), idle, 60.0f);
+    CHECK_FALSE(h.of.Rearmed("Town"));
+    // forcesRearmHeat 0 is the old rule: nothing re-armed
+    Fixture k;
+    k.Load(ConfigWith("occupierForces = 1; forcesRearmHeat = 0;"));
+    REQUIRE(k.of.Activate(k.registry));
+    CHECK(k.of.Tuning().rearmHeat == Approx(0.0f));
+    FlipTown(k, "Town", 1);
+    REQUIRE(FlipTown(k, "Other", 2));
+    k.of.IngestTip(k.registry, k.registry.FindZoneIndex("Town"), 3, k.Z("Town").pos);
+    k.of.ForceCooldown("Town", 60.0f);
+    k.of.Direct(k.registry, ViewOf(k.registry), idle, 60.0f);
+    CHECK_FALSE(k.of.Rearmed("Town"));
+    // the key is read and repaired into 0..100
+    Fixture r;
+    r.Load(ConfigWith("occupierForces = 1; forcesRearmHeat = 250;"));
+    CHECK(r.of.Tuning().rearmHeat == Approx(100.0f));
+}
+
+TEST_CASE("OccupierForces - a director strike keeps STRONG after the ground debit and its own",
+          "[game][guerrilla][occupierforces][air]")
+{
+    // video 4: a 22-unit column on Le Port took a pool of 62 to 40, still
+    // STRONG, and the 23-unit jet then took it to 17 (THIN) for 38 s against
+    // 4 reported fighters.  The strike rule judges the pool after both
+    // debits; the test lever keeps the old affordability
+    const Vector3 seen(1010.0f, 0.0f, 1320.0f);
+    const int town = 1; // checked below
+    auto setup = [&](Fixture& f, int ground, int extra) {
+        StrikeSetup(f);
+        REQUIRE(f.registry.FindZoneIndex("Town") == town);
+        Report(f, "Town", 4, seen);
+        const int start = f.of.PoolStart();
+        const int strongFloor = (OccupierForces::StrongLeavePct * start + 99) / 100;
+        f.of.SetPool(ground + strongFloor + extra);
+        REQUIRE(f.of.Band() == OFBandStrong);
+        return strongFloor;
+    };
+    // the ground package's pool price at a rich pool
+    int g = 0;
+    {
+        Fixture f;
+        StrikeSetup(f);
+        Report(f, "Town", 4, seen);
+        const DirectorAction a = f.of.PlanFor(f.registry, ViewOf(f.registry), town, CAODirector);
+        REQUIRE(a.go);
+        g = a.choice.quote.poolPrice;
+    }
+    SECTION("neither airframe keeps STRONG: no strike, one INFO line")
+    {
+        CoreLines log;
+        Fixture f;
+        setup(f, g, 19); // the attack helicopter (20) and the jet (23) both demote
+        FakeLauncher launcher;
+        const int before = f.of.Pool();
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        CHECK(CountKind(launcher, CAKRetake) == 1);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+        CHECK(f.of.Pool() == before - g);
+        CHECK(f.of.Band() == OFBandStrong);
+        CHECK(log.With({"no strike with the operation on Town", "a strike would take the pool below STRONG"}).size() ==
+              1);
+        // the test lever bypasses the band rule: the pool can pay, it goes
+        FakeLauncher lever;
+        CHECK(f.of.ForceStrike(f.registry, ViewOf(f.registry), lever, town));
+        CHECK(CountKind(lever, CAKStrike) == 1);
+    }
+    SECTION("the attack helicopter keeps STRONG, the jet would not: the helicopter goes")
+    {
+        Fixture f;
+        setup(f, g, 20);
+        FakeLauncher launcher;
+        const int before = f.of.Pool();
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        const CounterAttackOrder* s = FirstKind(launcher, CAKStrike);
+        REQUIRE(s != nullptr);
+        CHECK(s->package == FPAttackHeli);
+        CHECK(s->priceUnits == 20);
+        CHECK(f.of.Pool() == before - g - 20);
+        CHECK(f.of.Band() == OFBandStrong);
+    }
+    SECTION("both keep STRONG: the urgent pick, the faster jet")
+    {
+        Fixture f;
+        setup(f, g, 23);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        const CounterAttackOrder* s = FirstKind(launcher, CAKStrike);
+        REQUIRE(s != nullptr);
+        CHECK(s->package == FPJet);
+        CHECK(f.of.Band() == OFBandStrong);
+    }
+    SECTION("the planner alone: keepStrong refuses, the lever form does not")
+    {
+        Fixture f;
+        setup(f, 0, 19);
+        const DirectorAction keep = f.of.PlanStrike(f.registry, ViewOf(f.registry), town, true, true);
+        CHECK_FALSE(keep.go);
+        CHECK(Str(keep.choice.why) == OccupierForces::StrikeKeepsStrongWhy);
+        CHECK(f.of.PlanStrike(f.registry, ViewOf(f.registry), town, true).go);
+    }
+}
+
+TEST_CASE("OccupierForces - the HQ assault's settled line says where the bodies went, not a retake",
+          "[game][guerrilla][occupierforces]")
+{
+    CoreLines log;
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.SetCatalogue(TruckCatalogue());
+    HqLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Town").owner = RString("NEUTRAL");
+    f.Z("Other").owner = RString("NEUTRAL");
+    f.Z("Held").owner = RString("NEUTRAL");
+    f.Z("RebelPost").owner = RString("EAST");
+    const DirectorView v = HqView(f);
+    f.of.Direct(f.registry, v, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    const CounterAttackOrder& o = launcher.orders[0];
+    REQUIRE(o.kind == CAKHqAssault);
+    // the pool has room for 4 of the 6; the Post has room for the rest
+    f.of.SetPool(f.of.PoolStart() - 4);
+    f.Z("Post").garrison = 2;
+    f.Z("Post").pending = 0;
+    // CounterAttack's order: the refund, then the settle (the HQ fell)
+    f.of.Refund(f.registry, 6, "HQ assault done");
+    CounterAttackOpEvent ev;
+    ev.opId = o.opId;
+    ev.type = CAOpSettled;
+    ev.kind = CAKHqAssault;
+    ev.target = v.hqZone;
+    ev.bodies = 6;
+    ev.units = 6;
+    ev.note = "the HQ fell";
+    f.of.NoteOpEvent(f.registry, ev);
+    const std::string id = "[op " + std::to_string(o.opId) + "]";
+    CHECK(log.With({id.c_str(), "HQ assault done: 4 back to the pool, 2 banked at Post"}).size() == 1);
+    CHECK(log.With({id.c_str(), "retaken"}).empty());
+    CHECK(log.With({id.c_str(), "stay as its garrison"}).empty());
+    // nobody left standing
+    CounterAttackOpEvent none = ev;
+    none.bodies = 0;
+    none.units = 0;
+    none.note = "the HQ fell; nobody left standing";
+    f.of.NoteOpEvent(f.registry, none);
+    CHECK(log.With({id.c_str(), "HQ assault done: nobody of the assault left standing"}).size() == 1);
+    // a town retake keeps its line
+    CHECK(log.With({"retaken: "}).empty());
+}
+
+TEST_CASE("OccupierForces - a column's launch line names its escort", "[game][guerrilla][occupierforces]")
+{
+    // video 4, op 1: "Motorized squad (4, Ural) from Le Port Harbour to Le
+    // Port (25 unit(s), the pool pays 21, ...)": 4 + 17 of the 21 were a
+    // T72 the line did not name
+    CoreLines log;
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    REQUIRE(f.of.Activate(f.registry));
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTruck].className = "Ural";
+    cat.hulls[FPTruck].maxSpeedKmh = 80;
+    cat.hulls[FPTruck].cargo = 12;
+    cat.hulls[FPTruck].crew = 1;
+    cat.hulls[FPTank].className = "T72";
+    cat.hulls[FPTank].maxSpeedKmh = 60;
+    cat.hulls[FPTank].cargo = 0;
+    cat.hulls[FPTank].crew = 3;
+    f.of.SetCatalogue(cat);
+    FakeLauncher launcher;
+    FlipTown(f, "Town", 1);
+    REQUIRE(FlipTown(f, "Other", 2));
+    f.Z("Other").heat = 0;
+    f.Z("Town").heat = 45;
+    // four fighters (L_req 14.4) and a Post that spares only 4: the truck
+    // alone is 5, the column with the T72 17
+    Report(f, "Town", 4, f.Z("Town").pos);
+    DirectorView view = ViewOf(f.registry);
+    view.spare[f.registry.FindZoneIndex("FarBase")] = 0;
+    view.spare[f.registry.FindZoneIndex("Post")] = 4;
+    f.of.SetPool(60);
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() >= 1);
+    REQUIRE(std::string((const char*)launcher.orders[0].escortClass) == "T72");
+    CHECK(log.With({"Motorized squad (4, Ural) with T72 from Post to Town"}).size() == 1);
 }

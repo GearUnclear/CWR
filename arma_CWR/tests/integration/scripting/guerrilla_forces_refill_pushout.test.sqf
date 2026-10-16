@@ -79,7 +79,11 @@ rpOp = []
 triSimUntil { rpOp = []; {if ((_x select 2) == "PUSHOUT") then {rpOp = _x}} forEach gmOccupierOps; (count rpOp) > 0 }
 triAssertEq [(rpOp select 5), rpQName]
 triAssertEq [(rpOp select 1), "RETAKE"]
-triAssertEq [(rpOp select 3), "FOOT"]
+// since round 3.5 a push-out takes the arrival rule (OCCUPIER-FORCES.md 6.4):
+// foot under forcesSlowEta (900 s), else a truck within 3 x foot's price or,
+// past forcesAirEta, a helicopter insertion; the quiet town here is far
+// enough from its base that the walk may be past 900 s
+triAssertEq [(format ["%1", (rpOp select 3) in ["FOOT", "TRUCK", "TRANSPORT_HELI"]]), "true"]
 triAssertEq [(format ["%1", (rpOp select 4) != ""]), "true"]
 gmSimDiagLog
 

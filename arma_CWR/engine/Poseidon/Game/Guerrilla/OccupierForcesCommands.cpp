@@ -36,6 +36,9 @@
 //                                  gmLegacyQrf.  [29] the seeded towns the
 //                                  settlement probe kept out of K (5.1;
 //                                  their names are in excludedTowns).
+//                                  2026-10-16: [30] the re-armed zones
+//                                  (6.3: rested with fighters reported,
+//                                  heat held at forcesRearmHeat).
 //   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
 //                                  (D20): the key off, the service sized
 //                                  off, or a legacy save (a block older than
@@ -104,7 +107,8 @@
 //                                  "spareCapFloor" (1..12), "slowEta"
 //                                  (0..86400 s), "slowCostShare" (1..5),
 //                                  "airEta" (0..86400 s); 2026-10-16:
-//                                  "roadFactor" (1..5); phase 4: "hqAssaultMin"
+//                                  "roadFactor" (1..5), "rearmHeat" (0..100);
+//                                  phase 4: "hqAssaultMin"
 //                                  (1..12), "waveDwell" (1..10 ticks),
 //                                  "waveFinal" (0/1), "waveShare" (0..2),
 //                                  "waveMin" (0..200), "waveMax" (0..400),
@@ -252,6 +256,14 @@ static GameValue GmOccupierForces(const GameState* state)
     row.Add(GameValue(of.LegacyQrf()));
     // the settlement probe (5.1)
     row.Add(GameValue((float)of.ProbedOutCount()));
+    // the re-armed zones (6.3, 2026-10-16)
+    GameValue rearmValue = state->CreateGameValue(GameArray);
+    GameArrayType& rearm = rearmValue;
+    for (int i = 0; i < of.RearmedCount(); i++)
+    {
+        rearm.Add(GameStringType(of.RearmedName(i)));
+    }
+    row.Add(rearmValue);
     return value;
 }
 
@@ -450,6 +462,10 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "roadFactor") == 0)
     {
         t.roadFactor = ClampF(v, 1, 5);
+    }
+    else if (stricmp(key, "rearmHeat") == 0)
+    {
+        t.rearmHeat = ClampF(v, 0, 100);
     }
     else if (stricmp(key, "intelDecay") == 0)
     {

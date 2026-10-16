@@ -183,13 +183,24 @@
 //   candidate (the next one when the hottest cannot be served).  A repelled operation puts its target on
 //   forcesTownCooldown with +15 heat unless a RED edge already paid it; a
 //   cancelled-unseen one gets the cooldown.
+//   RE-ARM (6.3, 2026-10-16, video 4).  A rest that ends on a zone the
+//   resistance still holds while the sighting table still reports fighters
+//   there (a soldiers' report or an informant tip, D9) re-arms the zone:
+//   each director tick its heat is held at least forcesRearmHeat (40), so
+//   it stays a heat candidate whatever its roll, until an operation is
+//   launched on it, its reports decay (it is then quiet, and push-out
+//   reaches it while STRONG) or it changes hands.  The re-armed names are
+//   saved ("Rearm").  Without it the +15 of a repel decayed inside the
+//   rest, tips kept the town from ever being quiet, and a defended held
+//   town fell out of reach.
 //   PUSH-OUT (6.4).  STRONG, a token and no heat candidate: the held town
 //   or base nearest an occupier base with no sighting for
-//   forcesPushoutQuiet, with the minimal package.
+//   forcesPushoutQuiet, with the cheapest package; since 2026-10-16 the
+//   arrival rule applies to it (a foot quote under forcesSlowEta stays foot).
 //   PACKAGES (6.5).  ForcePackages: the cheapest lethal package, the fastest
 //   within forcesUrgentCostShare when urgent; the arrival rule (forcesSlowEta,
-//   forcesSlowCostShare, forcesAirEta) for the director's own operations and
-//   non-THIN alarm answers, never push-out or wave strikes.  A base retake
+//   forcesSlowCostShare, forcesAirEta) for the director's own operations,
+//   push-outs and non-THIN alarm answers, never wave strikes.  A base retake
 //   or an HQ assault no single base can source takes the spare cap
 //   (forcesSpareCap, forcesSpareCapFloor: SpareCappedMin, 7.2).
 //   The pool pays hull + crew (Spend before LaunchFunded, Refund when it is
@@ -205,6 +216,13 @@
 // a base retake on an empty base buys no jet.  The launch and its opener are
 // one ledger movement under a BandHold, so the band is stepped once on the
 // net pool and an opener bought and refunded in the same step shows no edge.
+// STRONG AFTER BOTH DEBITS (2026-10-16, video 4).  A director-bought strike
+// (an opener, a town strike with or without a ground operation) goes only
+// on an airframe whose price leaves the pool STRONG after the ground
+// operation's debit AND its own (PlanStrike keepStrong): a 22-unit column
+// plus a 23-unit jet against 4 reported fighters took a pool of 62 to 17
+// (THIN) for 38 s.  The test lever gmForcesForce "strike" keeps the old
+// affordability (the pool can pay).
 //
 // AIR (phase 6B; 6.5, D2, D3, D4).  Insertions: the transport helicopter
 // joins the package choice whenever the catalogue offers one, chosen like
@@ -331,6 +349,13 @@ struct OccupierForcesTuning
     float heatFull = 40.0f;       // forcesHeatFull, 1..100: candidate heat
     float urgentHeat = 50.0f;     // forcesUrgentHeat, 1..100: urgency entry
     float townCooldown = 1800.0f; // forcesTownCooldown, s: after a repel or a cancel
+    // forcesRearmHeat, 0..100 (2026-10-16, video 4): when a rest ends on a
+    // zone the resistance still holds and the sighting table still reports
+    // fighters there, the zone is re-armed: its heat is held at least here
+    // until an operation goes for it, its reports decay or it changes hands
+    // (RE-ARM below).  The default is forcesHeatFull's, so heat / 40 >= u for
+    // every flip roll: the town stays a candidate.  0 = off (the old rule)
+    float rearmHeat = 40.0f;
     float pushoutQuiet = 1800.0f; // forcesPushoutQuiet, s: no sighting this long = quiet
     int retakeMin = 4;            // forcesRetakeMin, 1..12: minimum retake bodies
     float lethalityMargin = 1.2f; // forcesLethalityMargin, 1..3
@@ -515,6 +540,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr float AlarmRefusedRest = 60.0f;
     // the strike airframes the director may buy
     static constexpr unsigned int StrikePackages = (1u << FPAttackHeli) | (1u << FPJet);
+    // PlanStrike's why when keepStrong refused every payable airframe (7.3)
+    static constexpr const char* StrikeKeepsStrongWhy = "a strike would take the pool below STRONG";
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -841,8 +868,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // of HqPos (D9: the sighting table, never the true census)
     int OpenerFighters(const ZoneRegistry& registry, const DirectorView& view, int target) const;
     // the strike package on target (HqCandidate for the HQ): go false when
-    // no strike airframe is offered or the pool cannot pay any
-    DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent) const;
+    // no strike airframe is offered or the pool cannot pay any.  keepStrong
+    // (the director's own strikes, 7.3): an airframe is payable only when
+    // the pool after its price still steps to STRONG from BandNow(), so a
+    // strike never takes the band below STRONG; the test lever passes false
+    DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent,
+                              bool keepStrong = false) const;
     // the centroid of a zone's reported positions, VZero without a row
     Vector3 ReportedCentroid(const ZoneRegistry& registry, int zone) const;
     // the latest reported position in a zone, VZero without a row
@@ -897,6 +928,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int KnownFighters(const ZoneRegistry& registry, int zoneIndex) const;
     bool Urgent(const char* zone) const { return HasName(_urgent, zone); }
     bool RedPaid(const char* zone) const { return HasName(_redPaid, zone); }
+    // re-armed after a rest (RE-ARM, 6.3): its heat is held at forcesRearmHeat
+    bool Rearmed(const char* zone) const { return HasName(_rearm, zone); }
+    int RearmedCount() const { return _rearm.Size(); }
+    RString RearmedName(int i) const { return i >= 0 && i < _rearm.Size() ? _rearm[i].name : RString(); }
     float Cooldown(const char* zone) const;
     int OpCounter() const { return _opCounter; }
     int SightingRows() const { return _sightings.Size(); }
@@ -1023,7 +1058,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the director's pieces
     void RefillTokens(float elapsed);
     void UpdateUrgency(const ZoneRegistry& registry);
-    void CountDownCooldowns(float elapsed);
+    // ended (optional): the zones whose rest ran out in this step
+    void CountDownCooldowns(float elapsed, AutoArray<RString>* ended = nullptr);
+    // RE-ARM (6.3): the rests that ended re-arm a held zone with fighters
+    // reported; every re-armed zone still held and reported keeps its heat
+    // at forcesRearmHeat; the others are released
+    void StepRearm(ZoneRegistry& registry, const DirectorView& view, const AutoArray<RString>& ended);
     void DecaySightings();
     bool TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
                    int origin);
@@ -1084,6 +1124,7 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     AutoArray<NameRow> _urgent;         // urgency latches
     AutoArray<NameRow> _redPaid;        // held zones whose RED edge already paid a repel's heat
     AutoArray<ZoneClockRow> _cooldowns; // seconds left
+    AutoArray<NameRow> _rearm;          // re-armed after a rest (6.3, saved)
     AutoArray<SightingRow> _sightings;
     AutoArray<OpRow> _ops;
     float _clock = 0; // seconds of active director time (sighting stamps)
@@ -1112,6 +1153,19 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // registry Refund banks into (BindRegistry; null = BankRegistry's rule)
     int _banked = 0;
     ZoneRegistry* _bankRegistry = nullptr;
+    // transient: how the last Refund split (the pool, banked and where,
+    // dropped), so the HQ assault's settled line can say it (6.6)
+    struct RefundTally
+    {
+        bool valid = false;
+        RString why;
+        int units = 0;
+        int pooled = 0;
+        int banked = 0;
+        int dropped = 0;
+        RString bankedAt; // the bases, ", "-joined
+    };
+    RefundTally _lastRefund;
     int _refillTotal = 0;
     int _wavesTotal = 0;
     bool _legacySave = false;
