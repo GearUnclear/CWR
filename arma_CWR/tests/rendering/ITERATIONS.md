@@ -261,11 +261,15 @@ through the normal mesh path with existing lighting and shadow settings. Matched
 fixed LOD. Both exited successfully, with 154/152/125 clumps in the three views.
 
 Independent visual review rejected promotion: blades were nearly black, sparse
-and repetitive; the vehicle-close view also showed a six-pixel black segment
-above a treetop where the disabled view showed sky. These are unresolved visual
-failures, not evidence of improved lighting. Preserve the captures and prototype
-while diagnosing material/normal/placement behavior. Source checks and successful
-GLSL compilation did not establish correct appearance.
+and repetitive. A suspected stray segment was subsequently identified as an
+antenna-tip difference also present at a different position in the disabled
+view; it is not established as a grass defect. The black blade material remains
+a real failure, not evidence of improved lighting. Preserve the captures and
+prototype while diagnosing material/normal behavior. Source checks and successful
+GLSL compilation did not establish correct appearance. M2c replaced the white
+texture asset with the renderer's white fallback without changing geometry or
+palette; actual captures still showed pure-black blade interiors, so that
+texture-path experiment did not resolve the defect.
 
 The bounded occupancy checks cover authored static structures and Thing-derived
 loose objects, not all moving actors. Runtime motion, shadow reception, hardware
