@@ -15,6 +15,8 @@ hybrid (native core + event-driven scripts); the old all-SQS spine sections
 are kept there marked SUPERSEDED.
 Modding contracts: [`FACTION-PACKS.md`](FACTION-PACKS.md) (ship a roster) and
 [`ISLAND-PACKS.md`](ISLAND-PACKS.md) (ship an island).
+Optional town hiring proposal: [`REALISTIC-RECRUITING.md`](REALISTIC-RECRUITING.md)
+(design only; includes the Astra critique loop and implementation gates).
 
 **Core requirement (delivered as data, Phase 1.5):** factions and islands are
 **swappable at new-game**. Island facts (zones, positions, tuning, the civilian
@@ -414,6 +416,9 @@ logistics, soldier/AI behavior and campaign persistence. Select **HUMAN TESTS**
 before running staged demos; see the guide for prerequisites, separate test
 sessions, the explicit enemy-road fixture and the new-game content matrix.
 Its automated runner tests verify the suite plumbing, not human acceptance.
+The planned Malden test lab for the Gate-Zero blockers is in
+[`GATE-ZERO-TEST-MISSION-PLAN.md`](GATE-ZERO-TEST-MISSION-PLAN.md) (plan only;
+the mission is not built yet).
 
 The native systems carry unit coverage over their pure cores
 (`ZoneRegistry::EvaluateTick`, `AlertMachine::EvaluateAlert`,
