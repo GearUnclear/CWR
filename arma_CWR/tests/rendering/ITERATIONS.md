@@ -105,7 +105,8 @@ python arma_CWR/tests/rendering/test_hemisphere_lighting_gl33.py \
   --report /tmp/current-material-results.json
 ```
 
-The original 26 checks in `test_sunlight_gl33.py` remain untouched. The current
+The original 26 assertions in `test_sunlight_gl33.py` remain intact;
+see the later uniform-block fixture correction for allocation changes. The current
 H2 suite and historical E suite independently extract unmodified GLSL without
 rewriting shaders or executing rewritten test source. E remains a separate
 historical contract, including its old UBO layout and upper clamp. Its source
@@ -675,9 +676,40 @@ experimental gain: westward mountains recede more coherently while near ground
 and middle-distance trees stay distinct. Sampled foreground regions match OFF.
 North/east change little; the existing sunward gray horizon band remains. The
 central far ridge loses definition, so this is not universally better visibility.
-Three paired night views also pass qualitative review without daytime-blue leakage.
-Further NVG, transition, clean integration and cost gates remain pending.
-No S production changes are included in this test-fixture checkpoint.
+Three paired night views pass qualitative review without daytime-blue leakage.
+Actual NVG input and map toggles also pass: green NVG activates, the notebook/map
+is visible without an S tint, and returning restores ordinary rendering. Daylight
+NVG saturation is shared with OFF, not an improvement. No whole-image identity
+claim is made for those checks.
+
+Sixteen matched yaw/low-sun images retain coherent distance color. Base/return
+images match within each mode, and 06:00 ON/OFF matches exactly. Actual sun-Y
+samples are .24799727/.29411823/.34005442/.3856089 at 06:00/15/30/45.
+Later samples gradually introduce cooler distance without a hard onset band;
+the ridge can become powder-blue. These are sparse west-facing samples, not
+continuous-motion or sunward low-sun acceptance.
+
+The exact clean binary rendered three OFF/ON high-AA views at effective 4x MSAA
+and 150% render scale. Independent review retained the localized westward gain
+without obvious new resolve/material/horizon artifacts. Ordinary adaptive LOD
+and uncontrolled cloud phase prevent exact whole-image comparisons. Near-field
+lighting/fog density are not changed by this experiment.
+
+Production scope includes explicit fog-enabled hardware world mesh families and
+both ordinary hardware terrain sea (Normal/Detail) and the special Water shader.
+Only the final fog RGB operand changes; water bump, lighting, specular and alpha
+remain original. CPU-prelit/software water and unsupported materials retain the
+legacy path. The shared helper's true-horizon agreement is not a claim that every
+visible skyline pixel or the old sunward gray band is fixed.
+
+Verification: 1,158 actual-GL checks plus 97,933 CPU assertions and 21 source
+guards. These use exact extracted helpers/functions with recorded stub limits,
+not full-engine failure execution. Full local suite passes 3,021 cases and
+2,306,966 assertions with 12 OpenAL-device skips and prior fixture staging.
+Corrected, linked-size original26/H3/shadow/terrain/cloud fixtures pass against
+frozen Q/S as applicable. No R attenuation or QA metadata/LOD overrides belong
+in the S production candidate. Representative GPU cost and full Remaster content
+remain unverified.
 
 ## Regression fixture UBO sizing correction
 
@@ -691,3 +723,16 @@ Terrain diagnostic's 448-byte buffer fit P3 but not Q/S; cloud diagnostic's
 480-byte buffer fit Q but not S. Those allocations receive the same correction.
 Reruns against frozen Q and S retain the original expectations rather than
 weakening them. This is a verification fix, not another artistic stage.
+
+
+S1 four-arm software timing used one fixed-LOD QA binary, identical clear-weather
+phase, no MSAA and unchanged settings. Paired mean milliseconds for north/east/west
+were OFF 60.405/95.835/60.200 and ON 71.670/108.245/66.855, with unchanged draw calls
+901/766/727. The cost is material on llvmpipe; north ON repeats also varied notably.
+This is not a representative GPU estimate, a speedup, or a negligible-cost claim.
+S1 is retained as a default-off visual experiment with that cost disclosed.
+
+A separate S2 fog-free-work shortcut is being investigated, not included here.
+Its strict HDR bitwise-parity hypothesis failed despite tiny measured differences;
+that report remains preserved rather than being called a pass. Performance and
+bounded-numeric/actual-image gates are separate from S1's published contract.

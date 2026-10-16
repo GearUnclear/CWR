@@ -463,6 +463,7 @@ class EngineGL33 : public Engine
     unsigned _cloudSampler = 0, _cloudMapSampler = 0;
     bool _cloudValid = false, _cloudFailed = false;
     float _cloudLookup[4] = {}, _cloudProjection[4] = {};
+    float _aerialControl[4] = {}; // toward-sun XYZ + successful-sky frame weight
     unsigned _experimentalSkyProgram = 0, _experimentalSkyVao = 0;
     bool _experimentalSkyFailed = false;
     void DestroyGammaTarget();

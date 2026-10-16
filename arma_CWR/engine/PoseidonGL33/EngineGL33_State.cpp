@@ -9,6 +9,7 @@
 #include <Poseidon/Graphics/Core/GLSampler.hpp>
 #include <Poseidon/Graphics/Shared/RenderDocCapture.hpp>
 #include <Poseidon/Graphics/Rendering/ValidateRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/AerialColorEligibility.hpp>
 
 #include <glad/gl.h>
 #include <cstdlib>
@@ -336,6 +337,11 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
     }
     UploadPSConstant(27, terrainControl);
     ApplyCloudRegistration(d.terrainDetail);
+    const bool aerialEligible = Poseidon::render::IsAerialColorReceiver(d, vertexInput == PipelineVertexInput::Mesh);
+    const float aerial[4] = {_aerialControl[0], _aerialControl[1], _aerialControl[2],
+                            aerialEligible ? _aerialControl[3] : 0.0f};
+    UploadPSConstant(30, aerial); // Dedicated slot; reset for every excluded draw.
+
     static bool terrainLogged = false;
     if (terrainControl[0] > 0 && !terrainLogged) {
         LOG_INFO(Graphics, "P terrain diagnostic active: mode={}, explicit base-terrain mesh, Detail shader, tex1={}",

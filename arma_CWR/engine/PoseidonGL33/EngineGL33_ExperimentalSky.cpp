@@ -22,8 +22,26 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.0-1.0;gl_Posit
 const char* skyFS = R"(#version 330 core
 in vec2 ndc;
 uniform vec3 forwardRay,rightRay,upRay,sunRay,horizonColor,skyColor,sunColor;
-uniform float clearSky, overlayWeight;
+uniform float clearSky, overlayWeight, aerialWeight;
 out vec4 fragColor;
+// S: change only scattering color; preserve the authored fog transmittance.
+vec3 directionalAerialColor(vec3 base, vec3 ray, vec3 towardSun, float weight) {
+    if (weight <= 0.0) return base;
+    if (any(isnan(base)) || any(isinf(base)) || any(lessThan(base,vec3(0.0))) ||
+        any(isnan(ray)) || any(isinf(ray)) || any(isnan(towardSun)) || any(isinf(towardSun))) return base;
+    float rayLength2=dot(ray,ray), sunLength2=dot(towardSun,towardSun);
+    if (rayLength2<=1e-12 || sunLength2<=1e-12) return base;
+    vec3 luma=vec3(.2126,.7152,.0722);
+    float originalLuma=dot(base,luma);
+    if (originalLuma<=1e-8) return base;
+    vec3 cool=base*vec3(.80,.96,1.14), warm=base*vec3(1.12,1.02,.86);
+    cool*=originalLuma/max(dot(cool,luma),1e-8);
+    warm*=originalLuma/max(dot(warm,luma),1e-8);
+    float mu=max(dot(ray*inversesqrt(rayLength2),towardSun*inversesqrt(sunLength2)),0.0);
+    float lobe=mu*mu; lobe*=lobe;
+    return mix(base,mix(cool,warm,lobe),clamp(weight,0.0,1.0));
+}
+
 void main(){
  vec3 ray=normalize(forwardRay+ndc.x*rightRay+ndc.y*upRay);
  if(ray.y<0.0) discard;
@@ -43,7 +61,8 @@ void main(){
  // Exact true-horizon fog match, with zero first derivative and a smooth
  // two-degree transition, rather than a broad five-degree gray lock.
  float horizonBlend=smoothstep(0.0,.035,ray.y)*clearSky;
- vec3 color=mix(horizonColor,directional,horizonBlend);
+ vec3 horizon=directionalAerialColor(horizonColor,ray,sunRay,aerialWeight);
+ vec3 color=mix(horizon,directional,horizonBlend);
  fragColor=vec4(clamp(color,0.0,1.0),overlayWeight);
 }
 )";
@@ -71,6 +90,13 @@ float ExperimentalSkyActivation(float sunY)
     return t * t * (3.0f - 2.0f * t);
 }
 
+float ExperimentalAerialActivation(float sunY)
+{
+    if (!std::isfinite(sunY)) return 0.0f;
+    const float t = std::clamp((sunY - .25881905f) / (.34202014f - .25881905f), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 bool finite3(Vector3Par v)
 {
     return std::isfinite(v.X()) && std::isfinite(v.Y()) && std::isfinite(v.Z());
@@ -79,6 +105,13 @@ bool finite3(Vector3Par v)
 
 bool EngineGL33::DrawExperimentalSky(float skyThrough)
 {
+    // A failed/unsupported sky attempt cannot leave an earlier frame's atmosphere active.
+    if (_aerialControl[3] != 0) InvalidatePipelineCache();
+    _aerialControl[3] = 0;
+    static const bool aerialEnabled = [] {
+        const char* v = std::getenv("CWR_AERIAL_COLOR");
+        return v && v[0] == '1' && v[1] == '\0';
+    }();
     static const bool enabled = []
     {
         const char* v = std::getenv("CWR_EXPERIMENTAL_SKY");
@@ -97,6 +130,9 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     if (!std::isfinite(sunY)) return false;
     const float overlayWeight = ExperimentalSkyActivation(sunY);
     if (overlayWeight <= 0.0f) return false;
+    // S starts only once N3 is fully opaque, avoiding an authored-underlay horizon mismatch.
+    const float aerialWeight = aerialEnabled && overlayWeight >= 1.0f
+        ? ExperimentalAerialActivation(sunY) * std::clamp(skyThrough,0.0f,1.0f) : 0.0f;
     const Vector3 forward = camera->Direction(), right = camera->DirectionAside() * camera->Left(),
                   up = camera->DirectionUp() * camera->Top();
     if (!finite3(forward) || !finite3(right) || !finite3(up) || !finite3(sun->SunDirection()) || camera->Left() <= 0 ||
@@ -216,7 +252,17 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     uniform3("sunColor", aureole.R(), aureole.G(), aureole.B());
     glUniform1f(glGetUniformLocation(_experimentalSkyProgram, "clearSky"), std::clamp(skyThrough, 0.0f, 1.0f));
     glUniform1f(glGetUniformLocation(_experimentalSkyProgram, "overlayWeight"), overlayWeight);
+    glUniform1f(glGetUniformLocation(_experimentalSkyProgram, "aerialWeight"), aerialWeight);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    _aerialControl[0] = -sun->SunDirection().X();
+    _aerialControl[1] = -sun->SunDirection().Y();
+    _aerialControl[2] = -sun->SunDirection().Z();
+    _aerialControl[3] = aerialWeight;
+    static bool aerialLogged = false;
+    if (aerialWeight > 0 && !aerialLogged) {
+        LOG_INFO(Graphics,"S aerial color: weight={}, sunY={}, skyThrough={}, distanceFade=120..350m, activation=15..20deg, luminance-normalized cool/warm; transmittance unchanged",aerialWeight,sunY,skyThrough);
+        aerialLogged = true;
+    }
     glUseProgram(oldProgram);
     glBindVertexArray(oldVao);
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);

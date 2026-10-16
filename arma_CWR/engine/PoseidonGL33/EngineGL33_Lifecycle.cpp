@@ -223,6 +223,8 @@ void EngineGL33::NextFrame()
     BackToFront();
     if (_cloudValid) InvalidatePipelineCache();
     _cloudValid = false; // Never reuse a cloud map from a previous world frame.
+    if (_aerialControl[3] != 0) InvalidatePipelineCache();
+    _aerialControl[3] = 0; // S requires a successful analytic sky in this world frame.
     base::NextFrame();
 }
 
