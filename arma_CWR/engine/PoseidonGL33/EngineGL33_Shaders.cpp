@@ -270,7 +270,7 @@ vec3 surfaceLighting(float sunVisibility) {
     // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
     // environment approximation, not occlusion. Never attenuate local/emissive light.
     float up = clamp(n.y, -1.0, 1.0);
-    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
     vec3 hemisphere = up >= 0.0
         ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
         : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
@@ -444,7 +444,7 @@ vec3 surfaceLighting(float sunVisibility) {
     // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
     // environment approximation, not occlusion. Never attenuate local/emissive light.
     float up = clamp(n.y, -1.0, 1.0);
-    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
     vec3 hemisphere = up >= 0.0
         ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
         : mix(horizon, vec3(0.28, 0.23, 0.16), -up);
@@ -615,7 +615,7 @@ vec3 surfaceLighting(float sunVisibility) {
     // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
     // environment approximation, not occlusion. Never attenuate local/emissive light.
     float up = clamp(n.y, -1.0, 1.0);
-    vec3 horizon = vec3(0.70, 0.65, 0.52);
+    vec3 horizon = vec3(0.60, 0.66, 0.63);
     vec3 hemisphere = up >= 0.0
         ? mix(horizon, vec3(0.55, 0.60, 0.70), up)
         : mix(horizon, vec3(0.28, 0.23, 0.16), -up);

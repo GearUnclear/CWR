@@ -2,7 +2,7 @@
 
 These optional tests compile the actual embedded GLSL and draw synthetic triangles
 in an EGL OpenGL context. They require Python 3 and `moderngl` (tested with 5.13.0).
-They do not need game assets. Run the original smoke suite and current H2-material
+They do not need game assets. Run the original smoke suite and current H3-palette material
 contract against production:
 
 ```sh
@@ -57,13 +57,13 @@ was visually subtle; further shadow/light separation is documented in
 
 ## Candidate checkpoint versus historical contracts
 
-This checkpoint contains H2 material lighting, its four G CPU lighting files, and
+This checkpoint contains the H3 palette on H2 material lighting, its four G CPU lighting files, and
 the isolated J2 shadow-framebuffer initialization fix. I height atmosphere and
 J/J2 contact AO remain local/unproven and are not part of that candidate.
 The iteration record describes research history, not the set of published
 features. The exact combined checkpoint compiled and rendered hillside and barn demo scenes. It remains a draft visual direction, not full-game acceptance.
 
-- `test_hemisphere_lighting_gl33.py` is the current H2-material contract and
+- `test_hemisphere_lighting_gl33.py` is the current hemisphere/material contract and
   defaults to production source. `--source /tmp/H2.cpp` selects a frozen snapshot;
   optional `--baseline /tmp/G.cpp` adds night/TL identity comparisons. It checks
   hemisphere/shoulder behaviour, protected lighting, ABI/upload wiring,
@@ -147,3 +147,9 @@ motion history. It does not certify silhouette halos, temporal stability,
 material-aware AO, or hardware performance. The resolve test exercises the GL
 API operation, not the production C++ call path. Unsupported contexts fail
 explicitly rather than silently skipping MSAA coverage.
+
+## H3 palette checkpoint
+
+Only the three lateral ambient coefficients change from H2: `(0.70, 0.65, 0.52)` to `(0.60, 0.66, 0.63)`. Shade reads cooler while plaster detail remains. The lit facade also loses some warmth, so this remains a provisional artistic direction. The exact clean candidate built and rendered shaded and sunlit barn scenes; no experimental foliage or benchmark code is included.
+
+The current test defaults to `--palette h3`. Use `--palette h2 --source /tmp/H2.cpp` to reproduce the preserved H2 contract. Both matched models pass 457 checks (475 with G controls); mismatched source/palette pairs fail. Historical E assertions remain separate and unchanged.

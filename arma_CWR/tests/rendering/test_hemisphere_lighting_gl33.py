@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Actual-GLSL regression guard for the experimental H2 lighting model.
+"""Actual-GLSL regression guard for the H2/H3 hemisphere lighting model.
 
 Select a frozen C++ snapshot with --source. Production is the default, but later
-experiments may intentionally fail this H2 contract. The E tests remain separate
-and unchanged. Requires moderngl and EGL/OpenGL 3.3; no game assets are used.
+experiments may intentionally fail this contract. --palette h3 is the default;
+use --palette h2 for the preserved H2 coefficients. Selection is explicit, never
+inferred from source. E tests remain separate and unchanged. Requires moderngl
+and EGL/OpenGL 3.3; no game assets are used.
 """
 import argparse
 from dataclasses import dataclass, replace
@@ -21,7 +23,8 @@ IDENTITY = (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 POSITIONS = ((-.8, -.8, 0), (.8, -.8, 0), (0, .8, 0))
 FRAGMENTS = {'normal': 's_psNormalGLSL', 'detail': 's_psDetailGLSL', 'grass': 's_psGrassGLSL'}
 LUMA = (.2126, .7152, .0722)
-HORIZON, SKY, GROUND = (.70, .65, .52), (.55, .60, .70), (.28, .23, .16)
+PALETTES = {'h2': (.70, .65, .52), 'h3': (.60, .66, .63)}
+SKY, GROUND = (.55, .60, .70), (.28, .23, .16)
 
 
 def extract(path):
@@ -160,10 +163,10 @@ class Fixture:
                 resource.release()
 
 
-def hemisphere(normal):
+def hemisphere(normal, horizon):
     up = normal[1] / math.sqrt(sum(x*x for x in normal))
     endpoint = SKY if up >= 0 else GROUND
-    return tuple(h+(end-h)*abs(up) for h, end in zip(HORIZON, endpoint))
+    return tuple(h+(end-h)*abs(up) for h, end in zip(horizon, endpoint))
 
 
 def shoulder(rgb):
@@ -176,8 +179,8 @@ def shoulder(rgb):
     return tuple(x*mapped/luminance for x in rgb)
 
 
-def expected(s):
-    """Independent H2 oracle, with legacy fog and full-colour postprocess.
+def expected(s, horizon):
+    """Independent hemisphere oracle, with legacy fog and full-colour postprocess.
 
     I's opt-in height fog is deliberately disabled by fog.w=0, camera altitude=0.
     Pixel centre has barycentric weights (1/4, 1/4, 1/2).
@@ -192,7 +195,7 @@ def expected(s):
     forced_vis = 1-day+direct_vis*day
     ndotl = max(0, s.normal[2]/math.sqrt(sum(x*x for x in s.normal)))
     environment = tuple(s.sun*(a*(1-day+hemi*day)+s.forced*forced_vis+s.diffuse*ndotl*direct_vis)*albedo
-                        for a, hemi, albedo in zip(s.ambient, hemisphere(s.normal), s.albedo))
+                        for a, hemi, albedo in zip(s.ambient, hemisphere(s.normal, horizon), s.albedo))
     protected = tuple((s.local+s.emissive)*a for a in s.albedo)
     raw = tuple(e+p for e, p in zip(environment, protected))
     mapped = tuple(e+p for e, p in zip(shoulder(environment), protected))
@@ -218,7 +221,7 @@ def expected(s):
 
 
 def check_wiring(source, shaders):
-    """Static H2 ABI/upload guard; this does not execute C++ material uploads."""
+    """Shared H2/H3 ABI guard; this does not execute C++ material uploads."""
     for name in ('s_vsTransformGLSL', 's_vsShadowGLSL'):
         clean = re.sub(r'//[^\n]*', '', shaders[name])
         block = re.search(r'uniform VSConstants\s*\{(.*?)\}', clean, re.S).group(1)
@@ -228,7 +231,7 @@ def check_wiring(source, shaders):
             offset += (4 if kind == 'mat4' else 1)*int(count or 1)
         for field, wanted in {'vpScale':21, 'skyAmbient':22, 'forcedSun':23, 'texMat0':24, 'texMat1':28}.items():
             if offsets.get(field) != wanted:
-                raise AssertionError(f'H2 ABI: {name}.{field} must occupy slot {wanted}')
+                raise AssertionError(f'H2/H3 ABI: {name}.{field} must occupy slot {wanted}')
     patterns = (
         r'Color\s+trueAmbient\s*=\s*sun->Ambient\(\)\s*\*\s*mat\.ambient\s*;',
         r'Color\s+forced\s*=\s*sun->Diffuse\(\)\s*\*\s*mat\.forcedDiffuse\s*;',
@@ -241,16 +244,17 @@ def check_wiring(source, shaders):
     )
     for pattern in patterns:
         if not re.search(pattern, source):
-            raise AssertionError(f'H2 upload/varying wiring missing: {pattern}')
+            raise AssertionError(f'H2/H3 upload/varying wiring missing: {pattern}')
 
 
-def run(fixture, baseline=None):
+def run(fixture, baseline=None, *, palette='h3'):
+    horizon = PALETTES[palette]
     rows = []
 
     def check(label, scene, target=None):
         actual = fixture.pixel(scene)
         try:
-            close(actual, expected(scene) if target is None else target)
+            close(actual, expected(scene, horizon) if target is None else target)
         except AssertionError as error:
             raise AssertionError(f'{scene.fragment}/{label}: {error}') from error
         rows.append({'case': f'{scene.fragment}/{label}', 'pixel': actual, 'result': 'PASS'})
@@ -262,9 +266,10 @@ def run(fixture, baseline=None):
             n = (math.sqrt(max(0, 1-y*y)), y, 0)
             for day in (0, .5, 1):
                 check(f'hemisphere/y{y}/day{day}', replace(base, normal=n, daylight=day))
-        # Lateral cool balance is input-dependent: H2 is not intrinsically neutral.
+        # Lateral cool balance is input-dependent, not intrinsically neutral.
         lateral = check('blue_sky_neutral_cool_lateral', replace(base, ambient=(.3, .35, .45), albedo=(1,)*3))
-        close(lateral, (.21, .2275, .234, 1))
+        lateral_targets = {'h2': (.21, .2275, .234, 1), 'h3': (.18, .231, .2835, 1)}
+        close(lateral, lateral_targets[palette])
         for channel in ('diffuse', 'forced'):
             for day in (0, .25, .5, 1):
                 for visibility in (0, .25, .5, 1):
@@ -277,7 +282,7 @@ def run(fixture, baseline=None):
         for strength in (0, .1, .5499, .55, .5501, .8, 1, 2, 4, 16):
             # Compensate hemisphere to supply known post-hemisphere colour ratios.
             color = (.8, 1, 1.2)
-            rgb = tuple(strength*c/h for c, h in zip(color, HORIZON))
+            rgb = tuple(strength*c/h for c, h in zip(color, horizon))
             pixel = check(f'shoulder/strength{strength}', replace(base, ambient=rgb, albedo=(1,)*3))
             lum = sum(a*b for a, b in zip(pixel, LUMA))
             if lum < previous_luminance-1e-6 or lum >= 1+1e-6:
@@ -334,6 +339,8 @@ def run(fixture, baseline=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=SOURCE)
+    parser.add_argument('--palette', choices=tuple(PALETTES), default='h3',
+                        help='Expected horizon coefficients, never auto-detected (default: h3)')
     parser.add_argument('--baseline', type=Path, help='Optional G source for night and TL identity comparisons')
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()
@@ -345,12 +352,13 @@ def main():
     fixture = Fixture(ctx, shaders)
     baseline = Fixture(ctx, extract(args.baseline)) if args.baseline else None
     try:
-        rows = run(fixture, baseline)
-        rows.append({'case':'H2_ABI_and_upload/static_guard', 'result':'PASS'})
+        rows = run(fixture, baseline, palette=args.palette)
+        rows.append({'case':'H2_H3_ABI_and_upload/static_guard', 'result':'PASS'})
         report = {'source':str(args.source.resolve()), 'source_sha256':hashlib.sha256(source_bytes).hexdigest(),
                   'baseline':str(args.baseline.resolve()) if args.baseline else None,
+                  'palette':args.palette, 'horizon_coefficients':PALETTES[args.palette],
                   'renderer':ctx.info['GL_RENDERER'], 'version':ctx.info['GL_VERSION'],
-                  'scope':'H2 actual GLSL, synthetic triangle; not C++ upload execution, visual acceptance, or hardware performance.',
+                  'scope':'H2/H3 actual GLSL with explicit expected palette, synthetic triangle; not C++ upload execution, visual acceptance, or hardware performance.',
                   'optional_effects':'I height-fog disabled: VS fogParam.w=0; camPos.w=0. Separate J fullscreen contact pass is not executed.',
                   'tests':len(rows), 'results':rows}
         text = json.dumps(report, indent=2)

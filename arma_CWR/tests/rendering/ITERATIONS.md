@@ -6,7 +6,7 @@ No game assets, captured screenshots, or executable binaries belong in this tree
 
 ## Alphabetical milestone progress
 
-Current numbered stage: **J (10 of 703)**. The requested target is **AAA (703)**
+Current numbered stage: **K (11 of 703)**. The requested target is **AAA (703)**
 using A–Z, AA–AZ, and onward. This is a longer-running iteration milestone,
 separate from the 15 screenshot deliveries over 10 hours; neither is complete.
 F2 is a subvariant of F. Diagnostics, time-of-day repeats, camera angles, and
@@ -231,3 +231,9 @@ reference photograph is committed.
 This checkpoint contains H2 lighting plus the independent J2 shadow initialization fix, not the I atmosphere or J contact-shading prototypes. The exact combined client built with Clang and rendered both hillside and barn fixtures. H2 preserves recovered plaster highlights with more readable side fill; the warm/olive balance and flat roof remain unfinished. The initialization fix preserves separate read/draw framebuffer bindings through allocation and failure; its runtime first-enable trace no longer showed the earlier unsupported-target skip.
 
 Current material coverage: 457 checks (475 with G controls), original 26 checks, and 11 real-GL extracted allocator checks. Full official Remaster, cascade edges, all material paths and hardware performance remain unverified. Software performance comparisons were confounded by the engine’s existing adaptive LOD and are not isolated GPU-cost claims.
+
+## H3 palette and K disposition
+
+H3 is a subvariant, not another alphabetical stage. It changes lateral sky fill at approximately matched luminance in an illustrative input, not global exposure. Actual shaded/sunlit barn comparisons favor its cooler shade and retained texture, with reduced warmth on lit plaster as a known tradeoff. A clean source candidate based on c6b89fe changes only the three coefficients; it built and rendered both barn views.
+
+K identifies authored tree/bush cutout sections correctly, but its leaf-transmission beauty effect remained unconvincing even at a diagnostic 4x strength. K2 contribution and orientation captures verified an active, small effect following broad foliage-card triangles. Preserve K/K2 locally; exclude them from the preferred stack rather than amplify card artifacts. A fixed-LOD QA override was used in those comparisons and is not part of this published checkpoint.
