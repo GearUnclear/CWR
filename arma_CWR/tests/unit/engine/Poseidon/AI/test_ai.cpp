@@ -6,6 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 
 using namespace Poseidon;
 
@@ -209,4 +212,83 @@ TEST_CASE("overlapping group churn never leaves the register", "[ai][groupid]")
         live[2] = 0;
     }
     REQUIRE(highest <= 3);
+}
+
+// ---------------------------------------------------------------------------
+// The cargo seat-in contract (round 3 B, issue #78 family).  Guerrilla
+// traffic seats its cargo riders through NativeMoveIn, which seats and
+// assigns but never set the AI state; the first get-out then failed
+// "check failed: _state == InCargo" in AIUnit::DoGetOut and strict mode shut
+// the game down.  AssignAsCargo now completes the seat-in.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a seated and assigned cargo rider enters InCargo", "[ai][incargo]")
+{
+    // the native traffic rider: local, alive, seated, still in his spawn state
+    CHECK(CargoSeatEntersInCargo(true, true, true, AIUnit::Wait));
+    CHECK(CargoSeatEntersInCargo(true, true, true, AIUnit::Busy));
+    CHECK(CargoSeatEntersInCargo(true, true, true, AIUnit::Completed));
+    CHECK(CargoSeatEntersInCargo(true, true, true, AIUnit::Init));
+    // already InCargo (moveInCargo, the mission loader, DoGetIn): no change
+    CHECK_FALSE(CargoSeatEntersInCargo(true, true, true, AIUnit::InCargo));
+    // assigned before boarding (the ordinary get-in order): not seated yet,
+    // the state belongs to the walk to the hull
+    CHECK_FALSE(CargoSeatEntersInCargo(true, true, false, AIUnit::Wait));
+    // a remote brain: its owner sets the state, DoGetOut only checks local ones
+    CHECK_FALSE(CargoSeatEntersInCargo(false, true, true, AIUnit::Wait));
+    // a corpse in a cargo seat never gets out through DoGetOut
+    CHECK_FALSE(CargoSeatEntersInCargo(true, false, true, AIUnit::Wait));
+}
+
+TEST_CASE("AI unit state names cover every state", "[ai][incargo]")
+{
+    CHECK(std::string(AIUnitStateName(AIUnit::Wait)) == "WAIT");
+    CHECK(std::string(AIUnitStateName(AIUnit::Init)) == "INIT");
+    CHECK(std::string(AIUnitStateName(AIUnit::Busy)) == "BUSY");
+    CHECK(std::string(AIUnitStateName(AIUnit::Completed)) == "OK");
+    CHECK(std::string(AIUnitStateName(AIUnit::Delay)) == "DELAY");
+    CHECK(std::string(AIUnitStateName(AIUnit::InCargo)) == "CARGO");
+    CHECK(std::string(AIUnitStateName(AIUnit::Stopping)) == "STOPPING");
+    CHECK(std::string(AIUnitStateName(AIUnit::Replan)) == "REPLAN");
+    CHECK(std::string(AIUnitStateName(AIUnit::Stopped)) == "STOPPED");
+    CHECK(std::string(AIUnitStateName(AIUnit::Sending)) == "SENDING");
+}
+
+namespace
+{
+std::string ReadAISource(const char* relative)
+{
+    const std::filesystem::path path = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / relative;
+    std::ifstream input(path, std::ios::binary);
+    REQUIRE(input);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+} // namespace
+
+TEST_CASE("AssignAsCargo completes the seat-in and DoGetOut keeps its InCargo check", "[ai][incargo]")
+{
+    const std::string source = ReadAISource("engine/Poseidon/AI/AIUnitImpl.cpp");
+
+    // both successful exits of AssignAsCargo run the seat-in completion
+    const size_t assign = source.find("bool AIUnit::AssignAsCargo(Transport* veh)");
+    REQUIRE(assign != std::string::npos);
+    const size_t assignEnd = source.find("RString AIUnit::GetDebugName() const", assign);
+    REQUIRE(assignEnd != std::string::npos);
+    const std::string body = source.substr(assign, assignEnd - assign);
+    const size_t first = body.find("CompleteCargoSeatIn(this, veh);");
+    REQUIRE(first != std::string::npos);
+    CHECK(first < body.find("return true; // already assigned as cargo"));
+    const size_t second = body.find("CompleteCargoSeatIn(this, veh);", first + 1);
+    REQUIRE(second != std::string::npos);
+    CHECK(body.find("_vehicleAssigned = veh;", first) < second);
+
+    // the invariant check itself is not downgraded: it stays an AI_ERROR
+    // (fatal in strict mode), and the named diagnostic comes before it
+    const size_t getOut = source.find("void AIUnit::DoGetOut(Transport* veh, bool parachute)");
+    REQUIRE(getOut != std::string::npos);
+    const size_t warn = source.find("DoGetOut: cargo {} leaves {} in state {}", getOut);
+    const size_t check = source.find("AI_ERROR(_state == InCargo);", getOut);
+    REQUIRE(warn != std::string::npos);
+    REQUIRE(check != std::string::npos);
+    CHECK(warn < check);
 }
