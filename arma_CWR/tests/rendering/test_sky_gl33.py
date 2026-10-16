@@ -4,9 +4,17 @@
 Requires numpy, moderngl and EGL/OpenGL 3.3. This tests shader behavior, not C++
 activation/fallback gates, GL state restoration, visual acceptance or performance.
 In particular clearSky=0 tests shader horizon-color identity, not engine weather
-fallback (which may skip this shader entirely).
+fallback (which may skip this shader entirely). Explicit --model n3 additionally
+compiles the exact pure activation function and tests synthetic framebuffer
+compositing; it still does not execute engine early returns or allocation failure.
 """
 import argparse
+import ctypes
+import ctypes.util
+import os
+import shlex
+import subprocess
+import tempfile
 import hashlib
 import json
 import math
@@ -30,7 +38,7 @@ def extract(source, name):
 
 
 class SkyFixture:
-    def __init__(self, source):
+    def __init__(self, source, model):
         self.context = moderngl.create_standalone_context(backend='egl', require=330)
         self.program = self.context.program(vertex_shader=extract(source, 'skyVS'),
                                             fragment_shader=extract(source, 'skyFS'))
@@ -40,6 +48,8 @@ class SkyFixture:
         self.framebuffer.use()
         self.context.viewport = (0, 0, 32, 32)
         self.checks = []
+        if model=='n3':
+            self.set('overlayWeight',1)
         for name, value in dict(rightRay=(0, 0, 0), upRay=(0, 0, 0),
                                 sunRay=(0, .8, .6), horizonColor=tuple(HORIZON),
                                 skyColor=(.3, .5, .8), sunColor=(.4, .3, .15),
@@ -145,17 +155,120 @@ def run_checks(f):
     return rows
 
 
+def activation_checks(source, compiler):
+    """Compile the exact pure production gate; no engine calls or rewritten body."""
+    match = re.search(r'float\s+ExperimentalSkyActivation\s*\(float\s+sunY\)\s*\{.*?\n\}', source, re.S)
+    if not match:
+        raise ValueError('Missing pure ExperimentalSkyActivation definition')
+    with tempfile.TemporaryDirectory(prefix='cwr-sky-activation-') as directory:
+        root=Path(directory)
+        unit='#include <cmath>\n#include <algorithm>\n'+match[0]+'\nextern "C" float evaluate(float y){return ExperimentalSkyActivation(y);}\n'
+        (root/'probe.cpp').write_text(unit)
+        subprocess.run(shlex.split(compiler)+['-std=c++17','-shared','-fPIC',str(root/'probe.cpp'),'-o',str(root/'probe.so')],check=True,capture_output=True,text=True)
+        library=ctypes.CDLL(str(root/'probe.so'));library.evaluate.argtypes=[ctypes.c_float];library.evaluate.restype=ctypes.c_float
+        low,high=.17364818,.25881905
+        values=[-1,0,low-1e-5,low,low+1e-5,(low+high)/2,high-1e-5,high,high+1e-5,1]
+        values += [low+(high-low)*i/20 for i in range(21)]
+        rows=[];weights=[]
+        for y in values:
+            actual=library.evaluate(y);t=min(1,max(0,(y-low)/(high-low)));expected=t*t*(3-2*t)
+            rows.append(dict(check=f'actual activation y={y}',passed=abs(actual-expected)<2e-6))
+            weights.append(actual)
+        for y,label in [(math.nan,'NaN'),(math.inf,'+Infinity'),(-math.inf,'-Infinity')]:
+            rows.append(dict(check='actual activation rejects '+label,passed=library.evaluate(y)==0))
+        sweep=[library.evaluate(low+(high-low)*i/100) for i in range(101)]
+        rows.append(dict(check='sunrise monotonic',passed=all(a<=b for a,b in zip(sweep,sweep[1:]))))
+        rows.append(dict(check='sunset reverses same continuous weights',passed=all(a>=b for a,b in zip(sweep[::-1],sweep[-2::-1]))))
+        rows.append(dict(check='threshold zero first derivative numerically',passed=weights[4]<1e-6 and 1-weights[6]<1e-6))
+        return rows
+
+
+def overlay_checks(f):
+    """Real framebuffer blending with RGB-only writes over synthetic underlay."""
+    rows=[]
+    f.set('rightRay',(0,0,0));f.set('upRay',(0,0,0))
+    f.set('skyColor',(.3,.5,.8));f.set('sunColor',(.4,.3,.15))
+    f.set('horizonColor',tuple(HORIZON));f.set('overlayWeight',1)
+    ctx=f.context
+    gl=ctypes.CDLL(ctypes.util.find_library('GL'))
+    gl.glColorMask.argtypes=[ctypes.c_ubyte]*4
+    gl.glColorMask.restype=None
+    for angle in [-5,0,2,45,89]:
+        ray=elevation_ray(angle)
+        ctx.disable(moderngl.BLEND);gl.glColorMask(1,1,1,1)
+        source=f.render(ray)[0,0,:3].copy()
+        for alpha in [0,.37,1]:
+            underlay=np.array([.13,.17,.19,alpha])
+            for weight in [0,.1,.5,.9,1]:
+                gl.glColorMask(1,1,1,1)
+                f.framebuffer.clear(*underlay)
+                gl.glColorMask(1,1,1,0)
+                ctx.enable(moderngl.BLEND)
+                ctx.blend_func=(moderngl.SRC_ALPHA,moderngl.ONE_MINUS_SRC_ALPHA,moderngl.ONE,moderngl.ZERO)
+                ctx.blend_equation=moderngl.FUNC_ADD
+                f.set('overlayWeight',weight);f.set('forwardRay',ray)
+                f.vao.render(vertices=3)
+                pixels=np.frombuffer(f.texture.read(),np.float32).reshape(32,32,4)
+                rgb=underlay[:3] if angle<0 else source*weight+underlay[:3]*(1-weight)
+                rows.append(dict(check=f'overlay RGB elevation={angle} alpha={alpha} weight={weight}',passed=bool(np.max(abs(pixels[:,:,:3]-rgb))<3e-6)))
+                rows.append(dict(check=f'framebuffer alpha elevation={angle} alpha={alpha} weight={weight}',passed=bool(np.max(abs(pixels[:,:,3]-alpha))<1e-6)))
+    ctx.disable(moderngl.BLEND);gl.glColorMask(1,1,1,1)
+    f.set('overlayWeight',1)
+    return rows
+
+
+def failure_route_guards(clean, qa):
+    """Source-order checks only; these do not execute engine failure/fallback."""
+    checks=[]
+    def check(condition,label):checks.append(dict(check=label,passed=bool(condition)))
+    marker='CWR_QA_SKY_COMPILE_FAILURE'
+    check(marker not in clean,'forced-failure control absent from clean source')
+    activation=qa.find('if (overlayWeight <= 0.0f) return false;')
+    flush=qa.find('FlushQueues();')
+    allocation=qa.find('if (!_experimentalSkyProgram)')
+    override=qa.find(marker)
+    compile_call=qa.find('compileSky(GL_FRAGMENT_SHADER, forceFailure ?')
+    guards=qa.find('Poseidon::render::depthstencil::ScopedBackground')
+    check(0<=activation<flush<allocation<override<compile_call<guards,
+          'zero-weight return precedes flush; QA failure compile precedes draw-state guards')
+    check("failure[0] == '1' && failure[1] == '\\0'" in qa,'QA flag exact1 gate')
+    check(bool(re.search(r'compileSky\(GL_FRAGMENT_SHADER,\s*forceFailure\s*\?\s*"#version 330 core\\ninvalid QA shader"\s*:\s*skyFS\)',qa)),
+          'QA forces actual fragment compilation failure, not fake draw success')
+    check(bool(re.search(r'if\s*\(!program\)\s*\{\s*_experimentalSkyFailed\s*=\s*true;\s*return false;',qa)),
+          'program failure marks failed and returns false')
+    check(bool(re.search(r'if\s*\(vs\)\s*glDeleteShader\(vs\);\s*if\s*\(fs\)\s*glDeleteShader\(fs\);',qa)),
+          'compiled shader objects released before failure return')
+    check(qa.find('_experimentalSkyFailed ||')>=0,'persistent failed flag participates in early fallback gate')
+    return checks
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=SOURCE)
+    parser.add_argument('--failure-qa-source', type=Path, help='Run source-only QA failure guards and exit without GL; --source must be clean source')
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--model', choices=['n2','n3'], default='n3', help='Explicit contract; N3 adds activation and compositing checks')
+    parser.add_argument('--compiler', default=os.environ.get('CXX','clang++'))
     args = parser.parse_args()
     source_bytes = args.source.read_bytes()
-    fixture = SkyFixture(source_bytes.decode())
+    if args.failure_qa_source:
+        qa_bytes=args.failure_qa_source.read_bytes()
+        checks=failure_route_guards(source_bytes.decode(),qa_bytes.decode())
+        report=dict(result='PASS' if all(x['passed'] for x in checks) else 'FAIL',checks=len(checks),
+                    assertions=checks,scope='Source guards only; no GL, engine failure or fallback image executed.',
+                    clean_sha256=hashlib.sha256(source_bytes).hexdigest(),qa_sha256=hashlib.sha256(qa_bytes).hexdigest())
+        text=json.dumps(report,indent=2)
+        if args.report:args.report.write_text(text+'\n')
+        print(text)
+        return 0 if report['result']=='PASS' else 1
+    fixture = SkyFixture(source_bytes.decode(),args.model)
     try:
         rows = run_checks(fixture)
-        failures = [c for c in fixture.checks if not c['passed']]
-        report = dict(checks=len(fixture.checks), result='FAIL' if failures else 'PASS',
+        extra=[]
+        if args.model=='n3':
+            extra=activation_checks(source_bytes.decode(),args.compiler)+overlay_checks(fixture)
+        failures = [c for c in fixture.checks+extra if not c['passed']]
+        report = dict(checks=len(fixture.checks), model=args.model, additional_checks=len(extra), additional_assertions=extra, result='FAIL' if failures else 'PASS',
                       failures=failures, source=str(args.source),
                       source_sha256=hashlib.sha256(source_bytes).hexdigest(),
                       renderer={k: fixture.context.info.get(k) for k in

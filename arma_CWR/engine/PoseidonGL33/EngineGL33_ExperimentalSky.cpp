@@ -1,6 +1,7 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+#include <Poseidon/Graphics/Core/GLBlendState.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -21,7 +22,7 @@ void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);ndc=p*2.0-1.0;gl_Posit
 const char* skyFS = R"(#version 330 core
 in vec2 ndc;
 uniform vec3 forwardRay,rightRay,upRay,sunRay,horizonColor,skyColor,sunColor;
-uniform float clearSky;
+uniform float clearSky, overlayWeight;
 out vec4 fragColor;
 void main(){
  vec3 ray=normalize(forwardRay+ndc.x*rightRay+ndc.y*upRay);
@@ -43,7 +44,7 @@ void main(){
  // two-degree transition, rather than a broad five-degree gray lock.
  float horizonBlend=smoothstep(0.0,.035,ray.y)*clearSky;
  vec3 color=mix(horizonColor,directional,horizonBlend);
- fragColor=vec4(clamp(color,0.0,1.0),1.0);
+ fragColor=vec4(clamp(color,0.0,1.0),overlayWeight);
 }
 )";
 GLuint compileSky(GLenum type, const char* source)
@@ -63,6 +64,13 @@ GLuint compileSky(GLenum type, const char* source)
     }
     return shader;
 }
+float ExperimentalSkyActivation(float sunY)
+{
+    if (!std::isfinite(sunY)) return 0.0f;
+    const float t = std::clamp((sunY - .17364818f) / (.25881905f - .17364818f), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 bool finite3(Vector3Par v)
 {
     return std::isfinite(v.X()) && std::isfinite(v.Y()) && std::isfinite(v.Z());
@@ -81,8 +89,14 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     const auto* sun = GScene->MainLight();
     const auto* camera = GScene->GetCamera();
     if (!sun || !camera || !std::isfinite(sun->NightEffect()) || sun->NightEffect() != 0 ||
-        !std::isfinite(skyThrough) || skyThrough <= 0 || -sun->SunDirection().Y() <= .17364818f)
+        !std::isfinite(skyThrough) || skyThrough <= 0)
         return false;
+    // Fade in over 10..15 degrees in either time direction. The authored dome
+    // is already queued underneath; weight zero leaves it untouched without GL.
+    const float sunY = -sun->SunDirection().Y();
+    if (!std::isfinite(sunY)) return false;
+    const float overlayWeight = ExperimentalSkyActivation(sunY);
+    if (overlayWeight <= 0.0f) return false;
     const Vector3 forward = camera->Direction(), right = camera->DirectionAside() * camera->Left(),
                   up = camera->DirectionUp() * camera->Top();
     if (!finite3(forward) || !finite3(right) || !finite3(up) || !finite3(sun->SunDirection()) || camera->Left() <= 0 ||
@@ -166,11 +180,11 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     glGetIntegerv(GL_POLYGON_MODE, polygon);
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
     glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
-    const GLenum caps[] = {GL_BLEND,          GL_CULL_FACE,         GL_SCISSOR_TEST, GL_SAMPLE_ALPHA_TO_COVERAGE,
+    const GLenum caps[] = {GL_CULL_FACE, GL_SCISSOR_TEST, GL_SAMPLE_ALPHA_TO_COVERAGE,
                            GL_COLOR_LOGIC_OP, GL_RASTERIZER_DISCARD};
-    GLboolean states[6];
+    GLboolean states[5];
     const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST), stencilEnabled = glIsEnabled(GL_STENCIL_TEST);
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         states[i] = glIsEnabled(caps[i]);
         glDisable(caps[i]);
@@ -187,6 +201,7 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     glViewport(x0, height - y1, x1 - x0, y1 - y0);
     Poseidon::render::depthstencil::ScopedBackground backgroundState;
     Poseidon::render::pipeline::ScopedRgbOnly colorWriteState;
+    Poseidon::render::blend::ScopedAlphaOverlay blendState;
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glUseProgram(_experimentalSkyProgram);
     glBindVertexArray(_experimentalSkyVao);
@@ -200,14 +215,16 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     uniform3("skyColor", sky.R(), sky.G(), sky.B());
     uniform3("sunColor", aureole.R(), aureole.G(), aureole.B());
     glUniform1f(glGetUniformLocation(_experimentalSkyProgram, "clearSky"), std::clamp(skyThrough, 0.0f, 1.0f));
+    glUniform1f(glGetUniformLocation(_experimentalSkyProgram, "overlayWeight"), overlayWeight);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glUseProgram(oldProgram);
     glBindVertexArray(oldVao);
     glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
     backgroundState.Restore();
     colorWriteState.Restore();
+    blendState.Restore();
     glPolygonMode(GL_FRONT_AND_BACK, polygon[0]);
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         if (states[i])
             glEnable(caps[i]);
@@ -236,12 +253,12 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
         glGetIntegerv(GL_POLYGON_MODE, poly);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &dm);
         glGetBooleanv(GL_COLOR_WRITEMASK, cm);
-        bool restored = glIsEnabled(GL_DEPTH_TEST) == depthEnabled && glIsEnabled(GL_STENCIL_TEST) == stencilEnabled &&
+        bool restored = blendState.MatchesSavedState() && glIsEnabled(GL_DEPTH_TEST) == depthEnabled && glIsEnabled(GL_STENCIL_TEST) == stencilEnabled &&
                         program == oldProgram && vao == oldVao && fb == drawFbo && dm == depthMask &&
                         poly[0] == polygon[0] && poly[1] == polygon[1];
         for (int i = 0; i < 4; ++i)
             restored = restored && vp[i] == viewport[i] && cm[i] == colorMask[i];
-        for (int i = 0; i < 6; ++i)
+        for (int i = 0; i < 5; ++i)
             restored = restored && glIsEnabled(caps[i]) == states[i];
         for (int i = 0; i < clipCount; ++i)
             restored = restored && glIsEnabled(GL_CLIP_DISTANCE0 + i) == clip[i];
@@ -249,8 +266,8 @@ bool EngineGL33::DrawExperimentalSky(float skyThrough)
     }
     if (!logged)
     {
-        LOG_INFO(Graphics, "N sky active: target={}, viewport={}x{}, sunElevationY={}, clearSky={}, exact fog horizon",
-                 drawFbo, x1 - x0, y1 - y0, -sun->SunDirection().Y(), skyThrough);
+        LOG_INFO(Graphics, "N sky active: target={}, viewport={}x{}, sunElevationY={}, clearSky={}, overlayWeight={}, exact analytic fog horizon",
+                 drawFbo, x1 - x0, y1 - y0, -sun->SunDirection().Y(), skyThrough, overlayWeight);
         logged = true;
     }
     return true;

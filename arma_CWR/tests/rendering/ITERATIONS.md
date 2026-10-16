@@ -425,3 +425,54 @@ preserved clean O2 night capture. The reviewer found no obvious new contact,
 resolve, seam or night-sky bleed issue. Adaptive LOD changes net/tree detail; these
 high-AA frames do not expose the net-shadow stripes as clearly as the earlier
 fixed-LOD comparisons, which remain the evidence for edge-quality improvement.
+
+## N3: sunrise activation continuity (subtest of stage 14)
+
+Actual matched upward-view captures exposed a large whole-sky change at the old
+10-degree activation threshold: authored pink/cloud bands abruptly switched to
+the darker analytic sky. Both ascending and descending time samples reproduced
+it. N3 keeps the authored dome underneath and blends the analytic overlay using
+smoothstep in sun-direction Y between 10 and 15 degrees. Zero weight does no GL
+work; full weight preserves N2 analytic RGB. The always-present underlay protects
+failure and discarded below-horizon pixels, but adds work at full activation.
+Night/NVG guards and later cloud/celestial draw ordering remain unchanged.
+
+The independent critic retained the 14-frame sampled sequence: nominal 9.9, 10,
+11, 12.5, 14, 15 and 15.1 degrees in each direction. Candidate ascending/descending
+images match at each sampled angle. The endpoint pop is removed and intermediate
+mixed clouds look plausible, but a gentle brightness hump remains (slightly
+brighter near 11 degrees, then darker toward 14-15). This is sampled continuity,
+not a continuous-video or perfect-photometry claim. Exact fog matching applies to
+the analytic contribution; the partial-weight composite also includes authored sky.
+
+New Core blend ownership restores enable, all four factors and both equations;
+RGB-only and depth protection remain separate scoped owners. Tests preserve the
+118 prior sky checks and 512 prior state cases, adding 187 activation/compositing
+checks and 800 blend cases. Seven optional QA-only source guards check forced
+shader-failure routing; these alone do not prove executed fallback. Full local
+suite passes again with the existing fixture-layout and OpenAL-skip limitations.
+
+Actual QA failure injection compiled an invalid fragment shader through the real
+compiler after the dome was flushed, then used the normal failed-state fallback.
+All three gameplay views retained a coherent authored sky, with no blank region
+or overlay remnant. Sky pixels differed slightly from the sky-disabled control;
+this is qualitative fallback acceptance, not exact image identity. QA failure
+injection, activation logs and fixed-LOD override are excluded from production.
+
+A four-arm full-weight cost check measured exactly one extra draw per scene
+(883/892/877 before, 884/893/878 after). Mean frame times varied substantially
+between repeated runs, so this test does not isolate the added underlay cost and
+supports neither a speedup nor a negligible-overhead claim. Hardware cost remains
+open; the always-present underlay is retained for simple, reliable fallback.
+
+Actual first-person NVG input was tested with confirmed NVGoggles possession and
+normal N-key events, not a debug bypass. With NVG active, both sky-enabled and
+sky-disabled groups visibly use the same green/vignetted fallback; toggling off
+restores each group's normal sky. This is qualitative comparison, not pixel
+identity; daylight NVG saturation remains present in both controls.
+
+The exact clean N3 binary also rendered three midpoint dawn views at effective
+4x MSAA / 150% scale, without the QA override. Independent review retained the
+midpoint's blended cloud structure and grounded scene without an obvious resolve
+or horizon regression. These integration images do not replace the controlled
+14-frame transition sequence or establish all-weather acceptance.

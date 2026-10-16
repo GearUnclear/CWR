@@ -178,21 +178,21 @@ The self-contained synthetic shader probe asserts finite opaque-white sampling w
 
 Constant-UV samples are recorded without asserting a driver-specific failure. Mesa 25.0.7 llvmpipe produced NaN with constant UV at 16x while nondegenerate UV remained white; other drivers may correctly sample both. This does not test engine GLSL, material distribution, full-game behavior or hardware performance. Run separately from timed rendering benchmarks to avoid contention.
 
-### Experimental N2 daytime sky shader
+### Experimental daytime sky shader (N3, retaining N2 contract)
 
 Requires Python `numpy`, `moderngl` and EGL/OpenGL 3.3. From the repository root:
 
 ```sh
 python arma_CWR/tests/rendering/test_sky_gl33.py --report sky-report.json
 # To test a preserved variant rather than the current checkout:
-python arma_CWR/tests/rendering/test_sky_gl33.py --source path/to/EngineGL33_ExperimentalSky.cpp --report sky-report.json
+python arma_CWR/tests/rendering/test_sky_gl33.py --model n2 --source path/to/N2/EngineGL33_ExperimentalSky.cpp --report sky-report.json
 ```
 
-The fixture extracts both GLSL literals unchanged from the selected C++ file and executes 118 named checks: horizon continuity, lower-hemisphere discard, finite/bounded output, cropped viewport, pitched/rolled camera ray registration, authored-color scaling, mission-value highlight bounds, blue zenith and haze. Reports include the exact source SHA256 and driver/version. No game assets are needed.
+The fixture extracts both GLSL literals unchanged from the selected C++ file and preserves 118 named checks: horizon continuity, lower-hemisphere discard, finite/bounded output, cropped viewport, pitched/rolled camera ray registration, authored-color scaling, mission-value highlight bounds, blue zenith and haze. Reports include the exact source SHA256 and driver/version. No game assets are needed.
 
 `clearSky=0` verifies the shader's horizon-color identity only. It does not execute the engine's weather/night/NVG activation or legacy fallback gates, C++ GL-state restoration, cloud ordering, camera motion or renderer integration. These need separate actual-engine validation. This is a default-off clear-day candidate, not all-weather acceptance or a hardware-performance benchmark.
 
-Activation: set `CWR_EXPERIMENTAL_SKY=1` in the game process environment before launch. It is disabled by default and currently has no graphics-menu toggle. GL33 uses the analytic sky only in full daylight with sun elevation above 10 degrees, night vision off, supported world target/projection and positive sky-through. Unsupported conditions or shader failure retain the original dome. Existing separate cloud/celestial passes remain, but the replaced dome's baked texture contribution does not. Low-sun/weather activation transitions and extreme HDR clipping remain experimental limits.
+Activation: set `CWR_EXPERIMENTAL_SKY=1` in the game process environment before launch. It is disabled by default and currently has no graphics-menu toggle. GL33 uses the analytic sky only in full daylight with sun elevation above 10 degrees, night vision off, supported world target/projection and positive sky-through. Unsupported conditions or shader failure retain the original dome. N3 always retains the authored dome underneath and smoothly increases analytic overlay weight from 10 to 15 degrees. Separate cloud/celestial passes remain. At full weight the analytic upper sky replaces the dome texture; below the horizon the underlay survives. Weather transitions, extreme HDR clipping, and a gentle intermediate brightness hump remain experimental limits.
 
 ### Scoped background write-state helpers
 
@@ -256,3 +256,22 @@ Checks cover nonuniform stepped/checkerboard depth, subtexel smoothness, map/dep
 For historical optimization reproduction, use the preserved O1 source as --source and add `--comparison-source path/to/optimized/EngineGL33_Shaders.cpp`. This preserves the original 504 checks when a legacy baseline is supplied and adds 942 actual-GL equivalence cases over D24 and D32F storage, deterministic random/nonuniform arrays, subtexel positions, borders, cascade/layer cases and nonpositive texel-size fallback. The D32F path also checks the independent nine-bilinear CPU oracle; D24 compares both shaders on identical quantized storage. 600 of these cases additionally require bitwise raw-path identity. Comparison output uses absolute RGBA tolerance 3e-5 to allow driver interpolation precision; passing one implementation is not a universal hardware guarantee. Reports identify baseline and optimized source SHA256 values. Alpha checks cover only surviving fragments, not cutout/discard rasterization or alpha-tested casters.
 
 Set `CWR_SHADOW_COMPARE_PCF=1` before launching to opt in. Depth-map Shadows must also be enabled, with Shadow Quality above Off. The default remains legacy sampling. Production uses four weighted fetches for the existing nine-bilinear-tap footprint; this is not physically varying penumbra or PCSS. Historical baseline/comparison snapshots are optional and must be preserved separately.
+
+### N3 smooth sky activation and blend restoration
+
+```sh
+python arma_CWR/tests/rendering/test_sky_gl33.py --model n3 --source arma_CWR/engine/PoseidonGL33/EngineGL33_ExperimentalSky.cpp --report sky-N3.json
+python arma_CWR/tests/rendering/test_background_state_gl33.py --blend-header arma_CWR/engine/Poseidon/Graphics/Core/GLBlendState.hpp --report blend-N3.json
+```
+
+The explicit N3 sky contract preserves the original 118 checks and adds 187 checks: the exact pure C++ activation function is compiled, its finite guards and smooth thresholds are checked, and actual extracted GLSL is composited over a synthetic framebuffer at five overlay weights with RGB-only writes. Destination alpha is preserved for zero, fractional and full alpha. N3 requires a C++17 compiler (`--compiler`, default `CXX` or `clang++`); N2's original shader-only contract remains available with `--model n2`.
+
+The optional blend header preserves the original 512 state cases and adds 800 cases across blend enable, four distinct factor profiles, all 25 pairs of RGB/alpha equations (add/subtract/reverse/min/max), early-return destruction, repeated explicit restoration, inert restoration after later state changes and nesting. Exact selected production headers compile unchanged against real GL declarations. This tests helper early-return behavior, not the complete engine's early-return or allocation-failure paths. Authored dome integration, all weather/low-sun conditions, long motion, state-cache behavior and hardware cost still require engine validation.
+
+Optional source-only QA failure-route guards:
+
+```sh
+python arma_CWR/tests/rendering/test_sky_gl33.py --source path/to/clean/EngineGL33_ExperimentalSky.cpp --failure-qa-source path/to/ExperimentalSky.QA-failure.cpp --report sky-failure-guards.json
+```
+
+This exits without a GL context. Seven source checks cover QA-only injection isolation, zero-weight/compile ordering, real invalid fragment compilation, shader cleanup and failed-state fallback returns. They are not executed engine-failure or fallback-image tests; the QA source is preserved separately and is not production code.

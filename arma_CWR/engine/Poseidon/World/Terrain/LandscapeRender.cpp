@@ -1673,8 +1673,10 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
-    if (!GEngine->DrawExperimentalSky(SkyThrough()))
-        _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    // Keep the authored dome as the fallback and blend underlay, even when the
+    // experimental overlay reaches full weight. Celestial/cloud ordering stays unchanged.
+    _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    GEngine->DrawExperimentalSky(SkyThrough());
     float starsVisibility = (
         // see TLVertexMesh::DoStarLighting
         // overcast limitation

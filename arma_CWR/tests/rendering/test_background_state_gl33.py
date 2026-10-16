@@ -4,7 +4,8 @@
 Requires moderngl, a C++17 compiler and desktop GL development headers/library.
 The exact selected headers are copied unchanged. A temporary glad/gl.h adapter
 only includes system GL declarations: calls reach real GL, with no state mocks.
-This does not execute engine cache invalidation, caller gates or render ordering.
+Optional --blend-header adds N3 blend restoration cases. This does not execute
+engine cache invalidation, caller gates, allocation failures or render ordering.
 """
 import argparse
 import ctypes
@@ -102,10 +103,68 @@ extern "C" int run_case(int depth,int stencil,int write,int mask,int mode) {
 '''
 
 
+BLEND_HARNESS = r'''
+#include "GLBlendState.hpp"
+using Overlay = Poseidon::render::blend::ScopedAlphaOverlay;
+static_assert(!std::is_copy_constructible_v<Overlay> && !std::is_copy_assignable_v<Overlay>);
+const GLenum blendFields[] = {GL_BLEND_SRC_RGB,GL_BLEND_DST_RGB,GL_BLEND_SRC_ALPHA,
+ GL_BLEND_DST_ALPHA,GL_BLEND_EQUATION_RGB,GL_BLEND_EQUATION_ALPHA};
+struct BlendState {
+ GLboolean enabled; GLint fields[6];
+ BlendState() : enabled(glIsEnabled(GL_BLEND)) {
+  for(int i=0;i<6;++i) glGetIntegerv(blendFields[i],fields+i);
+ }
+ bool same(const BlendState& other) const {
+  return enabled==other.enabled && std::equal(fields,fields+6,other.fields);
+ }
+};
+const GLenum profiles[4][4] = {
+ {GL_ONE,GL_ZERO,GL_ONE,GL_ZERO},
+ {GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_DST_ALPHA,GL_ONE_MINUS_DST_ALPHA},
+ {GL_DST_COLOR,GL_ONE_MINUS_SRC_COLOR,GL_ONE_MINUS_DST_ALPHA,GL_SRC_ALPHA},
+ {GL_CONSTANT_COLOR,GL_ONE_MINUS_CONSTANT_COLOR,GL_CONSTANT_ALPHA,GL_ONE_MINUS_CONSTANT_ALPHA}
+};
+const GLenum equations[] = {GL_FUNC_ADD,GL_FUNC_SUBTRACT,GL_FUNC_REVERSE_SUBTRACT,GL_MIN,GL_MAX};
+void configureBlend(int enabled,int profile,int rgb,int alpha) {
+ (enabled?glEnable:glDisable)(GL_BLEND);
+ glBlendFuncSeparate(profiles[profile][0],profiles[profile][1],profiles[profile][2],profiles[profile][3]);
+ glBlendEquationSeparate(equations[rgb],equations[alpha]);
+}
+int blendScope(const BlendState& before,int mode) {
+ Overlay overlay; BlendState active;
+ const GLint expected[]={GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ZERO,GL_FUNC_ADD,GL_FUNC_ADD};
+ if(!active.enabled || !std::equal(active.fields,active.fields+6,expected)) return 11;
+ if(mode==0) return 0;
+ if(mode==3) { { Overlay nested; } if(!BlendState().same(active)) return 12; }
+ overlay.Restore();
+ if(!BlendState().same(before) || !overlay.MatchesSavedState()) return 13;
+ if(mode==2) {
+  configureBlend(!before.enabled,3,3,4); BlendState changed;
+  overlay.Restore();
+  if(!BlendState().same(changed)) return 14;
+ } else {
+  overlay.Restore();
+  if(!BlendState().same(before) || !overlay.MatchesSavedState()) return 15;
+ }
+ return 0;
+}
+extern "C" int run_blend_case(int enabled,int profile,int rgb,int alpha,int mode) {
+ configureBlend(enabled,profile,rgb,alpha); BlendState before; State unrelatedBefore;
+ int result=blendScope(before,mode); if(result) return result;
+ if(!State().same(unrelatedBefore)) return 16;
+ BlendState after;
+ if(mode==2) {
+  configureBlend(!enabled,3,3,4); if(!after.same(BlendState())) return 17;
+ } else if(!after.same(before)) return 18;
+ return glGetError()==GL_NO_ERROR?0:19;
+}
+'''
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--depth-header', type=Path, default=CORE / 'GLDepthStencilState.hpp')
     parser.add_argument('--pipeline-header', type=Path, default=CORE / 'GLPipelineState.hpp')
+    parser.add_argument('--blend-header', type=Path, help='Optional N3 GLBlendState.hpp; enables exhaustive blend-state cases')
     parser.add_argument('--compiler', default=os.environ.get('CXX', 'c++'))
     parser.add_argument('--include-dir', action='append', default=[])
     parser.add_argument('--gl-library', default='-lGL')
@@ -113,13 +172,15 @@ def main():
     args = parser.parse_args()
     headers = {name: path.read_bytes() for name, path in
                [('GLDepthStencilState.hpp', args.depth_header), ('GLPipelineState.hpp', args.pipeline_header)]}
+    if args.blend_header:
+        headers['GLBlendState.hpp'] = args.blend_header.read_bytes()
     with tempfile.TemporaryDirectory(prefix='cwr-background-state-') as directory:
         root = Path(directory)
         for name, content in headers.items():
             (root / name).write_bytes(content)
         (root / 'glad').mkdir()
         (root / 'glad/gl.h').write_text('#define GL_GLEXT_PROTOTYPES\n#include <GL/gl.h>\n#include <GL/glext.h>\n')
-        (root / 'probe.cpp').write_text(HARNESS)
+        (root / 'probe.cpp').write_text(HARNESS + (BLEND_HARNESS if args.blend_header else ''))
         library_path = root / 'probe.so'
         command = shlex.split(args.compiler) + ['-std=c++17', '-shared', '-fPIC', '-I', str(root)]
         for include in args.include_dir:
@@ -145,14 +206,28 @@ def main():
                                 cases.append(row)
                                 if result:
                                     failures.append(row)
-            report = dict(result='FAIL' if failures else 'PASS', cases=len(cases), failures=failures,
+            blend_cases=[]
+            if args.blend_header:
+                library.run_blend_case.argtypes=[ctypes.c_int]*5
+                library.run_blend_case.restype=ctypes.c_int
+                for enabled in (0,1):
+                    for profile in range(4):
+                        for rgb in range(5):
+                            for alpha in range(5):
+                                for mode,name in enumerate(modes):
+                                    code=library.run_blend_case(enabled,profile,rgb,alpha,mode)
+                                    row=dict(enabled=enabled,factor_profile=profile,rgb_equation=rgb,
+                                             alpha_equation=alpha,mode=name,error_code=code)
+                                    blend_cases.append(row)
+                                    if code:failures.append(row)
+            report = dict(result='FAIL' if failures else 'PASS', cases=len(cases), blend_cases=len(blend_cases), failures=failures,
                           source_sha256={name: hashlib.sha256(data).hexdigest() for name, data in headers.items()},
-                          source_paths=[str(args.depth_header), str(args.pipeline_header)],
+                          source_paths=[str(args.depth_header), str(args.pipeline_header)]+([str(args.blend_header)] if args.blend_header else []),
                           renderer={k: ctx.info.get(k) for k in ('GL_VENDOR', 'GL_RENDERER', 'GL_VERSION')},
                           compiler=args.compiler, backend='EGL', modes=modes,
                           coverage='128 initial enable/write-mask combinations x4 lifecycle modes; '
                                    'depth function and distinct front/back stencil function/ref/value/write masks/ops preserved; '
-                                   'compile-time noncopyability checks.', scope=__doc__, results=cases)
+                                   'compile-time noncopyability checks.', scope=__doc__, results=cases, blend_results=blend_cases)
             text = json.dumps(report, indent=2)
             if args.report:
                 args.report.write_text(text + '\n')
