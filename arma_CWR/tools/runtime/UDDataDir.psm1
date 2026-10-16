@@ -6,9 +6,9 @@ Set-StrictMode -Version Latest
 function Resolve-UDPackageChild {
     param([string]$Parent, [string]$Name)
     if (Test-Path -LiteralPath $Parent -PathType Container) {
-        $matches = @(Get-ChildItem -LiteralPath $Parent -Force | Where-Object Name -IEQ $Name)
-        if ($matches.Count -gt 1) { throw "Case-ambiguous entries for $Name in $Parent" }
-        if ($matches.Count -eq 1) { return $matches[0].FullName }
+        $entries = @(Get-ChildItem -LiteralPath $Parent -Force | Where-Object Name -IEQ $Name)
+        if ($entries.Count -gt 1) { throw "Case-ambiguous entries for $Name in $Parent" }
+        if ($entries.Count -eq 1) { return $entries[0].FullName }
     }
     return Join-Path $Parent $Name
 }
