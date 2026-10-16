@@ -1011,15 +1011,17 @@ as bodies on top of the hull price.
    - **On Malden** (foot 1.5 m/s, a Ural 13.3 m/s, a Mi17 53 m/s; a quiet
      4-body retake: foot 4, truck 4 + 1 + 3 = 8, Mi17 4 + 2 + 10 = 16
      units; road lengths from `gmRoadRoute` on Guerrilla.Abel, 2026-10-16,
-     to the ground base with the shortest leg). Le Port (0.5 km of road
+     to the ground base with the shortest leg, link to link: the quote adds
+     the last link to the town centre, a few hundred metres more). Le Port (0.5 km of road
      from Le Port Harbour), Dourdan (0.7 km from the Outpost), the Village
      (the Outpost's road winds 1.5 km for 0.5 km straight, past the detour
      rule: line x1.5, 0.8 km) and Saint Louis (1.3 km from the Airfield,
      about 880 s) still get foot. La Trinite (1.7 km by road, about
      1140 s) gets a truck (2 x foot, about 2 minutes). Arudy is the town
      the road quote changes: 2.2 km straight from the Outpost (about
-     1480 s, a truck by the straight line) but 2.7 km by road (about
-     1790 s), so it gets the insertion. Larche, Chapoi, Sainte Marie,
+     1480 s, a truck by the straight line) but 2.7 km by road link to link
+     and 3.0 km to the centre (the director's quote: "road 1994 s"), so it
+     gets the insertion. Larche, Chapoi, Sainte Marie,
      Cancon, Goisse, La Pessagne, Vigny and La Riviere (by road from 2.9 km
      for Chapoi to 6.5 km for La Riviere, foot 32 to 72 minutes) get a
      helicopter insertion instead of the walk, when the pool can pay its 12

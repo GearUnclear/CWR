@@ -14,7 +14,7 @@
 //        base (on foot 900 to 1500 s by the straight line: the old quote
 //        sent a TRUCK), more than 850 m from the player;
 //    a3  Arudy is handed to the resistance, hot: the director quotes the
-//        Outpost's road (2691 m, on foot about 1794 s, past forcesAirEta
+//        Outpost's road (about 2990 m to the centre, on foot about 1994 s, past forcesAirEta
 //        1500) and the operation is a TRANSPORT_HELI insertion;
 //    a4  the INFO line named the road quote: gmForcesEtaNotes holds the
 //        cheapest package's words, FOOT from the operation's source, kind

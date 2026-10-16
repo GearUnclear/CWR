@@ -6,7 +6,7 @@
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // LaunchFunded, the listener, Roll01 / MakeSeed / Spare
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // live garrison bodies (a base's spare)
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp> // HqZone: never a target
-#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass: ground sources share the target's land
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>     // SameLandmass, RoadQuoteCache (the road quote)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
 #include <Poseidon/IO/ParamFileExt.hpp> // Pars / ExtParsMission
@@ -275,6 +275,8 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.slowEta = ReadRanged(c, "forcesSlowEta", t.slowEta, 0.0f, 86400.0f);
     t.slowCostShare = ReadRanged(c, "forcesSlowCostShare", t.slowCostShare, 1.0f, 5.0f);
     t.airEta = ReadRanged(c, "forcesAirEta", t.airEta, 0.0f, 86400.0f);
+    // 2026-10-16: the road quote (6.5)
+    t.roadFactor = ReadRanged(c, "forcesRoadFactor", t.roadFactor, 1.0f, 5.0f);
     // phase 4: the HQ assault and the waves (16)
     t.hqAssaultMin = RoundToInt(ReadRanged(c, "forcesHqAssaultMin", (float)t.hqAssaultMin, 1.0f, 12.0f));
     t.waveDwell = RoundToInt(ReadRanged(c, "forcesControlDwell", (float)t.waveDwell, 1.0f, 10.0f));
@@ -1968,6 +1970,7 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
+    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
     // the arrival rule (6.5, 2026-10-15) for the director's own operations;
     // a push-out keeps the minimal package (6.4) and a wave strike its
     // staged hub budget (7.1)
@@ -2064,6 +2067,11 @@ void OccupierForces::BuildSources(const ZoneRegistry& registry, const DirectorVi
         const float dx = s->pos.X() - dest.X();
         const float dz = s->pos.Z() - dest.Z();
         src.distance = sqrtf(dx * dx + dz * dz);
+        // the road quote (6.5, 2026-10-16): the road route the service will
+        // march, cached per pair (RoadQuoteCache, planned at most once a
+        // tick); -1 = the straight line x forcesRoadFactor.  Air flies the
+        // straight line.
+        src.road = src.airOnly ? -1.0f : RoadQuoteCache::Instance().Length(s->pos, dest);
         sources.Add(src);
     }
 }
@@ -2308,11 +2316,13 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     if (a.choice.etaRule != PackageChoice::EtaNone)
     {
         GM_DIRECTOR_INFO(Core,
-                         "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs about {:.0f} s; {} goes, "
-                         "about {:.0f} s",
+                         "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs {}; {} goes, {}",
                          opId, a.choice.etaRule == PackageChoice::EtaAir ? "forcesAirEta" : "forcesSlowEta",
-                         ForcePackages::PackageName(a.choice.cheapestPackage), (double)a.choice.cheapestSeconds,
-                         ForcePackages::PackageName(q.package), (double)q.seconds);
+                         ForcePackages::PackageName(a.choice.cheapestPackage),
+                         a.choice.cheapestIndex >= 0
+                             ? (const char*)ForcePackages::LogEtaNote(a.choice.quotes[a.choice.cheapestIndex])
+                             : "?",
+                         ForcePackages::PackageName(q.package), (const char*)ForcePackages::EtaNote(q));
     }
 
     const bool push = a.origin == CAOPushout;
@@ -2334,10 +2344,10 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         {
             GM_DIRECTOR_INFO(Core,
                      "OccupierForces: [op {}] {}{} ({}) from {} to {} ({} unit(s), the pool pays {}, lethality {:.2f} "
-                     "of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
+                     "of {:.2f}, {} fighter(s) reported{}{}, {})",
                      opId, push ? "Push-out: " : "", label, q.bodies, ZoneNameOf(registry, q.source), targetName,
                      q.price, q.poolPrice, (double)q.lethality, (double)a.choice.lReq, RoundToInt(a.fighters),
-                     a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
+                     a.urgent ? ", urgent" : "", shortNote, (const char*)ForcePackages::LogEtaNote(q));
         }
         else
         {
@@ -2355,10 +2365,10 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
             }
             GM_DIRECTOR_INFO(Core,
                      "OccupierForces: [op {}] {}{} ({}, {}) from {} to {} ({} unit(s), the pool pays {}, lethality "
-                     "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
+                     "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
                      opId, push ? "Push-out: " : "", label, q.bodies, (const char*)q.hullClass, from, targetName,
                      q.price, q.poolPrice, (double)q.lethality, (double)a.choice.lReq, RoundToInt(a.fighters),
-                     a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
+                     a.urgent ? ", urgent" : "", shortNote, (const char*)ForcePackages::LogEtaNote(q));
         }
         return true;
     }
@@ -2391,11 +2401,11 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
         }
         GM_DIRECTOR_INFO(Core,
                  "OccupierForces: [op {}] Alarm answer: {} ({}{}{}) from {} to {} ({} unit(s), the pool pays {}, "
-                 "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
+                 "lethality {:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
                  opId, ForcePackages::PackageName(q.package), q.bodies, q.package != FPFoot ? ", " : "",
                  (const char*)q.hullClass, from, targetName, q.price, q.poolPrice, (double)q.lethality,
                  (double)a.choice.lReq, RoundToInt(a.fighters), a.urgent ? ", urgent" : ", THIN: the cheapest",
-                 shortNote, (double)q.seconds);
+                 shortNote, (const char*)ForcePackages::LogEtaNote(q));
         return true;
     }
     // base retakes, HQ assaults and wave strikes (6.6 wording)
@@ -2406,11 +2416,12 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     const char* pkg = q.package == FPFoot ? "foot" : (q.package == FPTruck ? "motorized" : "package");
     GM_DIRECTOR_INFO(Core,
              "OccupierForces: [op {}] {}{}{} ({} {}{}{}) from {} on {} ({} unit(s), the pool pays {}{}, lethality "
-             "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, about {:.0f} s)",
+             "{:.2f} of {:.2f}, {} fighter(s) reported{}{}, {})",
              opId, push ? "Push-out: " : "", wave, what, pkg, q.bodies, q.package != FPFoot ? ", " : "",
              (const char*)q.hullClass, ZoneNameOf(registry, q.source), targetName, q.price, q.poolPrice,
              stagedBodies > 0 ? " and stages the infantry" : "", (double)q.lethality, (double)a.choice.lReq,
-             RoundToInt(a.fighters), a.urgent ? ", urgent" : "", shortNote, (double)q.seconds);
+             RoundToInt(a.fighters), a.urgent ? ", urgent" : "", shortNote,
+             (const char*)ForcePackages::LogEtaNote(q));
     return true;
 }
 
@@ -3639,6 +3650,7 @@ DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const Dir
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
+    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
     // the arrival rule (6.5) answers alarms too, except THIN (the cheapest)
     if (a.urgent)
     {

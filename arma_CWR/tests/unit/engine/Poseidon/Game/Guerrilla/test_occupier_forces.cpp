@@ -4357,6 +4357,11 @@ TEST_CASE("OccupierForces - the arrival rule on Malden distances: foot near, a t
     CHECK(f.of.Tuning().slowEta == Approx(900.0f));
     CHECK(f.of.Tuning().slowCostShare == Approx(3.0f));
     CHECK(f.of.Tuning().airEta == Approx(1500.0f));
+    // the road quote (2026-10-16): no road net in the fixture, so a ground
+    // leg is the straight line x forcesRoadFactor (1.5); this case pins the
+    // straight line (factor 1) to keep its distances
+    CHECK(f.of.Tuning().roadFactor == Approx(1.5f));
+    f.of.TuningMutable().roadFactor = 1.0f;
     FakeLauncher launcher;
     FlipTown(f, "Houdan", 1);
     REQUIRE(FlipTown(f, "Trinite", 2));

@@ -335,6 +335,10 @@ struct OccupierForcesTuning
     float slowEta = 900.0f;        // forcesSlowEta, 0..86400 s
     float slowCostShare = 3.0f;    // forcesSlowCostShare, 1..5
     float airEta = 1500.0f;        // forcesAirEta, 0..86400 s
+    // the road quote (6.5, 2026-10-16): a ground leg whose road route is not
+    // known (none, a detour the service does not march, or not planned this
+    // tick) is quoted as the straight distance x roadFactor
+    float roadFactor = 1.5f;       // forcesRoadFactor, 1..5
     // phase 4: the HQ assault and the waves (7.1, 16)
     int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
     int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires

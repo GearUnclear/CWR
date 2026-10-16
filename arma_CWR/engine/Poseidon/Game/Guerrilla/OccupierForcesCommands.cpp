@@ -103,7 +103,8 @@
 //                                  (0..6), "spareCap" (0/1),
 //                                  "spareCapFloor" (1..12), "slowEta"
 //                                  (0..86400 s), "slowCostShare" (1..5),
-//                                  "airEta" (0..86400 s); phase 4: "hqAssaultMin"
+//                                  "airEta" (0..86400 s); 2026-10-16:
+//                                  "roadFactor" (1..5); phase 4: "hqAssaultMin"
 //                                  (1..12), "waveDwell" (1..10 ticks),
 //                                  "waveFinal" (0/1), "waveShare" (0..2),
 //                                  "waveMin" (0..200), "waveMax" (0..400),
@@ -445,6 +446,10 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "airEta") == 0)
     {
         t.airEta = ClampF(v, 0, 86400);
+    }
+    else if (stricmp(key, "roadFactor") == 0)
+    {
+        t.roadFactor = ClampF(v, 1, 5);
     }
     else if (stricmp(key, "intelDecay") == 0)
     {
