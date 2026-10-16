@@ -1932,12 +1932,17 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
     }
     const ZoneTuning& zt = registry.Tuning();
     // a hull package is born mounted (its hull re-created after a return to
-    // abstract travel), except at the town edge, where the infantry is
-    // already on foot (6.5 arrival births) or once the hull was lost
-    const bool mounted = r.HasHullPackage() && !r.hullDone && !r.arrivalLive;
+    // abstract travel), at a route point and at an arrival birth alike (6.5:
+    // the director paid for the hull at the town edge), until the hull is
+    // lost or settled.  Over the hull gate the birth waits like any
+    // over-budget birth; it never goes on foot to fit.  An insertion that
+    // arrived abstract is the exception: its infantry is already on the
+    // ground (inserted at its LZ), so it is born on foot at the edge and the
+    // airframe goes home abstract (FinishHull)
+    const bool mounted = r.HasHullPackage() && !r.hullDone && !(r.arrivalLive && r.IsAir());
     // a column's escort is born with it (6.5, phase 5), even after the
-    // carrier was lost
-    const bool escorted = r.HasEscort() && !r.escortDone && !r.arrivalLive;
+    // carrier was lost; at the town edge it drives up and supports
+    const bool escorted = r.HasEscort() && !r.escortDone;
     const int groups = (mounted ? 2 : 1) + (escorted ? 1 : 0);
     const int bodies = r.strength + (mounted ? r.crew : 0) + (escorted ? r.escortCrew : 0);
     const bool overLive = LiveSquads() >= _tuning.maxLive;

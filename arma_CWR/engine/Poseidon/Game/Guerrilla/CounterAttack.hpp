@@ -136,7 +136,8 @@
 //   to the driver, the infantry dismounts at counterAttackBirthMinToTarget;
 //   deleted with no refund on a return to abstract travel and re-created at
 //   the next birth.  Born operations (forcesOpsMax) and live hulls
-//   (forcesLiveHullsMax) gate births; a birth over them waits.  After
+//   (forcesLiveHullsMax) gate births, an arrival birth at the town edge
+//   too (6.5: its hulls are born with it); a birth over them waits.  After
 //   CampaignEnd's win latch nothing launches or steps (CounterAttackView::
 //   won) and RevertTown refuses.
 //
@@ -1074,8 +1075,10 @@ class CounterAttack : public SerializeClass
     // deletion (M3, L7)
     void AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living);
     void StepLeftovers(ZoneRegistry& registry, const CounterAttackView& view, float elapsed, CounterAttackOps* ops);
-    // the key-on arrival at a town with defenders: born at the edge, or
-    // wait.  Returns the GoLive outcome (BirthDone when born)
+    // the key-on arrival at a town with defenders: born at the edge (a hull
+    // package with its carrier, escort and crews, as on a route birth), or
+    // wait (over any budget, the hull gate included; never on foot to fit).
+    // Returns the GoLive outcome (BirthDone when born)
     int ArriveLive(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r, CounterAttackOps* ops,
                    AutoArray<ZoneEventRecord>& fired);
     // 5.4: the town reverted under a travelling record

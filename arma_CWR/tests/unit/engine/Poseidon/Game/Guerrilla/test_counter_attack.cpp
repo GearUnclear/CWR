@@ -3181,6 +3181,193 @@ TEST_CASE("CounterAttack - a force held at the town edge by the player gives up:
     CHECK(ops.squads == 1);
 }
 
+namespace
+{
+// a column launched with the player far away, travelled abstract to just
+// short of the town, where three fighters stand
+const CounterAttack::Record* ColumnNearArrival(Fixture& f, ColumnOps& ops, AutoArray<ZoneEventRecord>& fired,
+                                               const CounterAttackOrder& order)
+{
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, order, &ops, fired));
+    const CounterAttack::Record* r = f.ca.Get(0);
+    REQUIRE(r->phase == CATravel);
+    f.ca.Step(f.registry, far, r->travel - 5.0f, &ops, fired);
+    REQUIRE(r->phase == CATravel);
+    f.Z(f.town).lastGuer = 3;
+    return r;
+}
+} // namespace
+
+TEST_CASE("CounterAttack - an arrival-live column is born with its carrier, its escort and their crews (6.5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    const CounterAttack::Record* r = ColumnNearArrival(f, ops, fired, ColumnOrder(f.town, f.post));
+    f.ca.Step(f.registry, far, 10.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    REQUIRE(r->phase == CALive);
+    CHECK(r->arrivalLive);
+    // both hulls and their crews, the infantry seated in the carrier: no
+    // squad on foot, nothing refunded
+    CHECK(ops.mounts == 1);
+    CHECK(ops.escorts == 1);
+    CHECK(ops.squads == 0);
+    CHECK(f.ca.LiveHulls() == 2);
+    CHECK(CounterAttack::LiveHullOf(*r) == 1);
+    CHECK(CounterAttack::LiveEscortOf(*r) == 1);
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+    CHECK(r->OwedUnits() == 14);
+    // the 250 m rule holds: born at the last route point past the bound, the
+    // escort EscortGap behind it, away from the town
+    CHECK(Dist2DTest(ops.lastMountFrom, f.Z(f.town).pos) >= 250.0f);
+    CHECK(Dist2DTest(ops.lastMountFrom, f.Z(f.town).pos) < 320.0f);
+    CHECK(Dist2DTest(ops.lastEscortFrom, ops.lastMountFrom) == Approx(CounterAttack::EscortGap).margin(0.1f));
+    CHECK(Dist2DTest(ops.lastEscortFrom, f.Z(f.town).pos) > Dist2DTest(ops.lastMountFrom, f.Z(f.town).pos));
+
+    // it never returns to the abstract road (it would be re-born at once),
+    // even unseen with the player far
+    ops.infAt = ops.lastMountFrom;
+    ops.carrierCrewAt = ops.lastMountFrom;
+    ops.escortCrewAt = ops.lastEscortFrom;
+    ops.squadUnseen = true;
+    ops.bodiesUnseen = true;
+    ops.hullUnseen = true;
+    f.ca.Step(f.registry, far, CounterAttack::VanishHold + 1.0f, &ops, fired);
+    REQUIRE(r->phase == CALive);
+    CHECK(ops.removals.empty());
+    CHECK(f.ca.LiveHulls() == 2);
+    ops.squadUnseen = false;
+    ops.bodiesUnseen = false;
+    ops.hullUnseen = false;
+
+    // at the 250 m mark the truck stops, the infantry gets out, the truck
+    // holds back and the escort drives up to the town edge and supports
+    ops.infAt = TowardPost(f, 200.0f);
+    ops.carrierCrewAt = ops.infAt;
+    ops.escortCrewAt = TowardPost(f, 220.0f);
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(ops.escortSupports >= 1);
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(ops.dismounts == 1);
+    CHECK(r->dismounted);
+    CHECK(ops.carrierSupports == 0);
+    CHECK(ops.escortSupports >= 2);
+    CHECK(ear.Count(CAOpArrived) == 2); // the abstract arrival, then the live one at the edge
+    CHECK(ear.Last(CAOpArrived)->bodies == 4);
+
+    // the ledger after the fight: the infantry is wiped, both intact hulls
+    // drive home and are deleted unseen, each its own price back, every
+    // crewman settled once
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    ops.infAlive = 0;
+    ops.hullUnseen = true;
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(f.ca.HomeHullCount() == 0);
+    CHECK(CountEvents(fired, ZECounterRepelled, f.town) == 1);
+    REQUIRE(ear.Count(CAOpHullRefund) == 2);
+    CHECK(ear.Count(CAOpHullLost) == 0);
+    int refunded = 0, crewHome = 0, crewSettled = 0;
+    for (size_t i = 0; i < ear.events.size(); i++)
+    {
+        const CounterAttackOpEvent& ev = ear.events[i];
+        if (ev.type == CAOpHullRefund)
+        {
+            refunded += ev.units;
+            crewHome += ev.bodies;
+            CHECK(ear.notes[i].find("abstract") == std::string::npos); // born live, not held back
+        }
+        if (ev.type == CAOpCrewSettled)
+        {
+            crewSettled += ev.bodies;
+        }
+    }
+    CHECK(refunded == 3 + 8);
+    CHECK(crewHome == 1 + 2);
+    CHECK(crewSettled == 1 + 2);
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 3.0f));
+    CHECK(f.ca.LeftoverCount() == 0);
+}
+
+TEST_CASE("CounterAttack - an arrival-live column over the hull gate waits at the edge, never on foot (6.5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    f.ca.TuningMutable().forcesLiveHullsMax = 1; // the column needs two
+    const CounterAttack::Record* r = ColumnNearArrival(f, ops, fired, ColumnOrder(f.town, f.post));
+    f.ca.Step(f.registry, far, 10.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(ear.Count(CAOpArrived) == 1);
+    for (int i = 0; i < 4; i++)
+    {
+        f.ca.Step(f.registry, far, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    }
+    // deferred: nothing born, no hull refunded, the hull prices still owed
+    CHECK(r->phase == CATravel);
+    CHECK_FALSE(r->arrivalLive);
+    CHECK(ops.mounts == 0);
+    CHECK(ops.escorts == 0);
+    CHECK(ops.squads == 0);
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+    CHECK_FALSE(r->hullDone);
+    CHECK_FALSE(r->escortDone);
+    CHECK(r->OwedUnits() == 14);
+    CHECK(Fixture::Str(f.Z(f.town).owner) == "GUER");
+    // room on the gate: the next retry is born whole
+    f.ca.TuningMutable().forcesLiveHullsMax = 6;
+    f.ca.Step(f.registry, far, CounterAttack::RetryInterval + 1.0f, &ops, fired); // the retry clock runs out
+    f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    REQUIRE(r->phase == CALive);
+    CHECK(r->arrivalLive);
+    CHECK(ops.mounts == 1);
+    CHECK(ops.escorts == 1);
+    CHECK(ops.squads == 0);
+    CHECK(f.ca.LiveHulls() == 2);
+}
+
+TEST_CASE("CounterAttack - an arrival-live foot package is still born on foot (6.5)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    const CounterAttack::Record* r = ColumnNearArrival(f, ops, fired, FootOrder(f.town, f.post, 4, 33));
+    f.ca.TuningMutable().forcesLiveHullsMax = 0; // no hull room: a foot package does not need any
+    f.ca.Step(f.registry, far, 10.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    REQUIRE(r->phase == CALive);
+    CHECK(r->arrivalLive);
+    CHECK(ops.squads == 1);
+    CHECK(ops.mounts == 0);
+    CHECK(ops.escorts == 0);
+    CHECK(f.ca.LiveHulls() == 0);
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+}
+
 TEST_CASE("CounterAttack - a live top-up squad whose town is lost walks home and leaves unseen (M5)",
           "[game][guerrilla][counterattack]")
 {
