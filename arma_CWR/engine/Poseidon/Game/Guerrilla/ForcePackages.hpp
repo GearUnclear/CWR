@@ -51,6 +51,14 @@
 // goes; past airEta a transport helicopter insertion is eligible at any
 // price.  With no source able to spare the minimum, why names the
 // shortfall against the largest single-base spare.
+// THE ROAD QUOTE (2026-10-16, round 3 D).  A ground package's seconds are
+// the leg the counter-attack service marches over the package's speed: the
+// road route's length (PackageSource::road, RoadQuoteCache in RoadRoute.hpp)
+// when one is known, else the straight distance x PackageRequest::roadFactor
+// (forcesRoadFactor, 1.5 on the director; 1 in the pure chooser).  Air flies
+// the straight distance.  The source of a package is the base with the
+// shortest leg for it.  PackageQuote::eta names the quote (EtaNote: "road
+// 1794 s", "line x1.5 2733 s", "line 42 s").
 // Infantry is paid by the source base (its spare); the hull and its crew are
 // paid by the pool (poolPrice).
 //
@@ -132,6 +140,14 @@ class ConfigHullInspector final : public HullInspector
     bool Inspect(const char* className, HullFacts& out) const override;
 };
 
+// which leg a quote's seconds stand on (the road quote, 6.5)
+enum ForceEtaQuote
+{
+    FEQLine,       // the straight distance: air, or a road factor of 1
+    FEQRoad,       // the road route the counter-attack service marches
+    FEQLineFactor  // no road route known: the straight distance x forcesRoadFactor
+};
+
 // One package's offer for a target (PackageChoice and the quote table)
 struct PackageQuote
 {
@@ -144,7 +160,10 @@ struct PackageQuote
     int price = 0;     // bodies + crew + hull: the package's whole cost
     float lethality = 0;
     float speed = 0;     // m/s, the abstract leg (3.2)
-    float seconds = 0;   // straight distance / speed from the source
+    float seconds = 0;   // travel / speed from the source (the road quote)
+    float travel = 0;    // m: the leg the seconds are quoted on
+    int eta = FEQLine;   // ForceEtaQuote: which leg (road, line x factor, line)
+    float etaFactor = 1; // the road factor of an FEQLineFactor quote
     bool lethal = false; // lethality >= L_req
     bool affordable = false;
     bool seatsShort = false; // the hull's cargo seats cannot hold the minimum (never chosen)
@@ -166,6 +185,11 @@ struct PackageSource
 {
     int zone = -1;
     float distance = 0; // straight distance to the target (m)
+    // m of the road route the counter-attack service would march from this
+    // base to the target (RoadQuoteCache::Length); -1 = none known (no
+    // route, a detour the service does not walk, or not planned this tick):
+    // a ground quote then stands on distance x PackageRequest::roadFactor
+    float road = -1;
     int spare = 0;      // bodies the base can spare now (CounterAttack::Spare, live or stored)
     // bodies its STORED reserve can spare: a hull package's infantry is
     // always debited from the reserve (CounterAttack::LaunchFunded); -1 =
@@ -207,6 +231,11 @@ struct PackageRequest
     float slowEta = 0;
     float slowCostShare = 3.0f;
     float airEta = 0;
+    // the road quote (2026-10-16): a ground leg with no road route known
+    // (PackageSource::road < 0) is the straight distance x roadFactor.  1 =
+    // the straight line, the default of the pure chooser; the director sets
+    // it from forcesRoadFactor (1.5).
+    float roadFactor = 1.0f;
 };
 
 // what a hull does once its infantry is out at the town edge (3.2)
@@ -233,6 +262,7 @@ struct PackageChoice
     // the URGENT share alone explains it)
     int cheapestPackage = FPFoot;
     float cheapestSeconds = 0;
+    int cheapestIndex = -1; // into quotes[]: the cheapest lethal quote (its eta, EtaNote)
     int etaRule = EtaNone;
     // when no base can spare the minimum: the largest spare a source offers
     int largestSpare = 0;
@@ -354,6 +384,35 @@ class ForcePackages
     // catalogue lacks) quotes source -1.
     static PackageQuote Quote(int package, int escort, const PackageRequest& req, const ForcePackageCatalogue& cat,
                               const AutoArray<PackageSource>& sources);
+    // the road quote (6.5, 2026-10-16): the leg (m) a package's seconds
+    // stand on from source s, and which leg it is (ForceEtaQuote).  Air:
+    // the straight distance.  Ground: s.road when known, else s.distance x
+    // req.roadFactor (FEQLine when the factor is 1).
+    static float TravelOf(int package, const PackageSource& s, const PackageRequest& req, int* eta = nullptr,
+                          float* factor = nullptr);
+    static bool IsAirPackage(int package)
+    {
+        return package == FPTransportHeli || package == FPAttackHeli || package == FPJet;
+    }
+    // the words of an INFO line for a quote's arrival: "road 1794 s",
+    // "line x1.5 2733 s", "line 42 s"
+    static RString EtaNote(const PackageQuote& q);
+    // EtaNote, kept in a ring of the last EtaNoteRing notes the director's
+    // INFO lines printed (gmForcesEtaNotes, tri): call it from the line
+    static constexpr int EtaNoteRing = 16;
+    static RString LogEtaNote(const PackageQuote& q);
+    struct EtaNoteRow
+    {
+        RString text;
+        int package = FPFoot;
+        int source = -1;
+        int eta = FEQLine;
+        float seconds = 0;
+    };
+    // oldest first; at most EtaNoteRing
+    static int EtaNoteCount();
+    static const EtaNoteRow& EtaNoteAt(int i);
+    static void ClearEtaNotes();
     // the choice (6.5)
     static PackageChoice Choose(const PackageRequest& req, const ForcePackageCatalogue& cat,
                                 const AutoArray<PackageSource>& sources);

@@ -416,7 +416,9 @@ PackageQuote ForcePackages::Downgrade(const PackageQuote& q, float tierFactor, f
     }
     PackageQuote f = q;
     refund = q.poolPrice > 0 ? q.poolPrice : 0; // carrier and escort, both crews
-    const float distance = q.seconds * q.speed;
+    // the same leg on foot (the road quote's travel; a pre-road quote has
+    // only its seconds)
+    const float distance = q.travel > 0 ? q.travel : q.seconds * q.speed;
     const float tf = tierFactor > 0 ? tierFactor : 1.0f;
     f.package = FPFoot;
     f.crew = 0;
@@ -434,6 +436,7 @@ PackageQuote ForcePackages::Downgrade(const PackageQuote& q, float tierFactor, f
     f.lethal = f.lethality + 1e-4f >= lReq;
     f.affordable = true; // foot costs the pool nothing
     f.speed = FootSpeed;
+    f.travel = distance;
     f.seconds = distance / FootSpeed;
     return f;
 }
@@ -488,6 +491,110 @@ float ForcePackages::RequiredLethality(const PackageRequest& req)
 }
 
 // ---------------------------------------------------------------------------
+// the road quote (6.5, 2026-10-16)
+// ---------------------------------------------------------------------------
+
+float ForcePackages::TravelOf(int package, const PackageSource& s, const PackageRequest& req, int* eta, float* factor)
+{
+    const float straight = s.distance > 0 ? s.distance : 0;
+    int kind = FEQLine;
+    float f = 1.0f;
+    float travel = straight;
+    if (!IsAirPackage(package))
+    {
+        if (s.road > 0)
+        {
+            kind = FEQRoad;
+            travel = s.road;
+        }
+        else if (req.roadFactor > 1.0f + 1e-4f)
+        {
+            kind = FEQLineFactor;
+            f = req.roadFactor;
+            travel = straight * f;
+        }
+    }
+    if (eta)
+    {
+        *eta = kind;
+    }
+    if (factor)
+    {
+        *factor = f;
+    }
+    return travel;
+}
+
+RString ForcePackages::EtaNote(const PackageQuote& q)
+{
+    char text[48];
+    const double seconds = q.seconds > 0 ? (double)q.seconds : 0.0;
+    if (q.eta == FEQRoad)
+    {
+        snprintf(text, sizeof(text), "road %.0f s", seconds);
+    }
+    else if (q.eta == FEQLineFactor)
+    {
+        snprintf(text, sizeof(text), "line x%.1f %.0f s", (double)q.etaFactor, seconds);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "line %.0f s", seconds);
+    }
+    return RString(text);
+}
+
+namespace
+{
+struct NoteRing
+{
+    ForcePackages::EtaNoteRow rows[ForcePackages::EtaNoteRing];
+    int next = 0;  // the slot the next note takes
+    int count = 0; // at most EtaNoteRing
+};
+
+NoteRing& Notes()
+{
+    static NoteRing ring;
+    return ring;
+}
+} // namespace
+
+RString ForcePackages::LogEtaNote(const PackageQuote& q)
+{
+    const RString text = EtaNote(q);
+    NoteRing& ring = Notes();
+    EtaNoteRow& row = ring.rows[ring.next];
+    row.text = text;
+    row.package = q.package;
+    row.source = q.source;
+    row.eta = q.eta;
+    row.seconds = q.seconds;
+    ring.next = (ring.next + 1) % EtaNoteRing;
+    ring.count = MinInt(ring.count + 1, EtaNoteRing);
+    return text;
+}
+
+int ForcePackages::EtaNoteCount()
+{
+    return Notes().count;
+}
+
+const ForcePackages::EtaNoteRow& ForcePackages::EtaNoteAt(int i)
+{
+    const NoteRing& ring = Notes();
+    const int n = ring.count;
+    const int k = i < 0 ? 0 : (i >= n ? n - 1 : i);
+    const int first = (ring.next - n + EtaNoteRing) % EtaNoteRing;
+    return ring.rows[(first + (k < 0 ? 0 : k)) % EtaNoteRing];
+}
+
+void ForcePackages::ClearEtaNotes()
+{
+    Notes() = NoteRing();
+}
+
+// ---------------------------------------------------------------------------
 // the choice
 // ---------------------------------------------------------------------------
 
@@ -531,9 +638,11 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
     // cargo seats (SeatCap).  An armed car or a tank whose seats cannot hold
     // the minimum is quoted (diagnostics) but never chosen.
     const int cap = SeatCap(package, cat);
-    // the nearest base (by travel time at this package's speed, so by
-    // distance) whose spare reaches the minimum
+    // the nearest base by travel time at this package's speed (so by its
+    // leg: the road route for a ground package, the straight line for air)
+    // whose spare reaches the minimum
     int best = -1;
+    float bestTravel = 0;
     for (int i = 0; i < sources.Size(); i++)
     {
         const PackageSource& s = sources[i];
@@ -541,14 +650,15 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
         {
             continue; // an air-only base (another landmass) sources only a helicopter insertion
         }
-        if (best < 0 || s.distance < sources[best].distance ||
-            (s.distance == sources[best].distance && s.zone < sources[best].zone))
+        const float travel = TravelOf(package, s, req);
+        if (best < 0 || travel < bestTravel || (travel == bestTravel && s.zone < sources[best].zone))
         {
             best = i;
+            bestTravel = travel;
         }
     }
     q.crew = CrewOf(package, cat);
-    const bool air = package == FPTransportHeli || package == FPAttackHeli || package == FPJet;
+    const bool air = IsAirPackage(package);
     q.hullPrice = HullPrice(package, air && req.airOffMap);
     q.poolPrice = q.hullPrice + q.crew + q.EscortPoolPrice();
     q.seatsShort = cap < req.minBodies;
@@ -564,7 +674,8 @@ PackageQuote ForcePackages::Quote(int package, int escort, const PackageRequest&
     q.lethality = ColumnLethality(package, escort, q.bodies, tf);
     q.lethal = q.lethality + 1e-4f >= lReq;
     q.affordable = !req.poolActive || q.poolPrice <= req.pool;
-    q.seconds = q.speed > 0 ? sources[best].distance / q.speed : 0;
+    q.travel = TravelOf(package, sources[best], req, &q.eta, &q.etaFactor);
+    q.seconds = q.speed > 0 ? q.travel / q.speed : 0;
     return q;
 }
 
@@ -627,6 +738,7 @@ PackageChoice ForcePackages::Choose(const PackageRequest& req, const ForcePackag
         const PackageQuote& cq = c.quotes[cheapest];
         c.cheapestPackage = cq.package;
         c.cheapestSeconds = cq.seconds;
+        c.cheapestIndex = cheapest;
         // the arrival rule (2026-10-15): a slow cheapest package widens the
         // share; past airEta a helicopter insertion is eligible at any price
         const bool slow = req.slowEta > 0 && cq.seconds > req.slowEta;

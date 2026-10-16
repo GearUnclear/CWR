@@ -8,15 +8,22 @@
 // crew included, no war-level gate, and the group and hull budgets.  Phase 5:
 // the default offer of every ground package, the armour ladders and crews,
 // the seat cap, the choice with armour affordable and not, the town-edge
-// role, and the downgrade to foot.  Pure:
-// the class facts come from a fake inspector, not the game config.
+// role, and the downgrade to foot.  2026-10-16: the road quote (a ground
+// leg on the road route, the straight line x forcesRoadFactor without one,
+// air on the straight line) and the road quote cache ([roadroute]).  Pure:
+// the class facts come from a fake inspector, not the game config, and the
+// road routes from a fake planner, not the road net.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>
 
+#include <math.h>
 #include <string.h>
+#include <chrono>
+#include <vector>
 #include <map>
 #include <string>
 
@@ -1415,4 +1422,382 @@ TEST_CASE("ForcePackages - a refusal names the shortfall against the largest sin
     CHECK_FALSE(c.ok);
     CHECK(c.largestSpare == 6);
     CHECK(Str(c.why) == "no occupier base can spare the minimum (12 needed, the largest single-base spare is 6: short 6)");
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-16 (round 3 D): the road quote.  A ground package's seconds stand
+// on the road route the counter-attack service marches (RoadQuoteCache), the
+// straight line x forcesRoadFactor when no route is known; air flies the
+// straight line.  Malden figures from gmRoadRoute on Guerrilla.Abel
+// (2026-10-16, the service's parameters): Arudy is 2224 m straight from the
+// Outpost and 2691 m by road; Sainte Marie is 2513 m from the Camp (road
+// 5529 m, past the service's detour rule) and 2901 m from Le Port Harbour
+// (road 3635 m).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+AutoArray<PackageSource> RoadSource(int zone, float distance, float road, int spare)
+{
+    AutoArray<PackageSource> s = OneSource(zone, distance, spare);
+    s[0].road = road;
+    return s;
+}
+
+constexpr float UralSpeed = 0.6f * 80.0f / 3.6f;  // 13.3 m/s
+constexpr float Mi17Speed = 0.8f * 240.0f / 3.6f; // 53.3 m/s
+
+} // namespace
+
+TEST_CASE("ForcePackages - the road quote on Malden: Arudy is a truck by the straight line, a helicopter by the road",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = MaldenRequest();
+    // the straight line (no route known, factor 1): foot about 1483 s, past
+    // forcesSlowEta, under forcesAirEta: the truck goes
+    const PackageChoice line = ForcePackages::Choose(req, cat, OneSource(1, 2224.0f, 5));
+    REQUIRE(line.ok);
+    CHECK(line.cheapestPackage == FPFoot);
+    CHECK(line.cheapestSeconds == Approx(2224.0f / 1.5f).margin(1.0f));
+    CHECK(line.quote.package == FPTruck);
+    CHECK(line.etaRule == PackageChoice::EtaSlow);
+    CHECK(line.quote.eta == FEQLine);
+    CHECK(Str(ForcePackages::EtaNote(line.quote)) == "line 167 s");
+    // the road route (2691 m): foot about 1794 s, past forcesAirEta: the
+    // insertion goes; the truck would need about 202 s by road
+    const PackageChoice road = ForcePackages::Choose(req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    REQUIRE(road.ok);
+    CHECK(road.cheapestPackage == FPFoot);
+    CHECK(road.cheapestSeconds == Approx(2691.0f / 1.5f).margin(1.0f));
+    REQUIRE(road.cheapestIndex >= 0);
+    CHECK(road.quotes[road.cheapestIndex].eta == FEQRoad);
+    CHECK(Str(ForcePackages::EtaNote(road.quotes[road.cheapestIndex])) == "road 1794 s");
+    CHECK(road.quote.package == FPTransportHeli);
+    CHECK(road.etaRule == PackageChoice::EtaAir);
+    // the helicopter flies the straight line whatever the road
+    CHECK(road.quote.eta == FEQLine);
+    CHECK(road.quote.travel == Approx(2224.0f));
+    CHECK(road.quote.seconds == Approx(2224.0f / Mi17Speed).margin(0.5f));
+    const PackageQuote truck = ForcePackages::Quote(FPTruck, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    CHECK(truck.eta == FEQRoad);
+    CHECK(truck.travel == Approx(2691.0f));
+    CHECK(truck.seconds == Approx(2691.0f / UralSpeed).margin(0.5f));
+    // La Trinite (1707 m straight, 1708 m by road) keeps its truck
+    const PackageChoice trinite = ForcePackages::Choose(req, cat, RoadSource(1, 1707.0f, 1708.0f, 5));
+    CHECK(trinite.quote.package == FPTruck);
+    CHECK(trinite.etaRule == PackageChoice::EtaSlow);
+}
+
+TEST_CASE("ForcePackages - no road route known: the straight line x forcesRoadFactor",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    CHECK(PackageRequest().roadFactor == Approx(1.0f)); // the pure chooser: the straight line
+    req.roadFactor = 1.5f;
+    // Arudy with no route: 2224 x 1.5 = 3336 m on foot, about 2224 s
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(foot.eta == FEQLineFactor);
+    CHECK(foot.etaFactor == Approx(1.5f));
+    CHECK(foot.travel == Approx(3336.0f));
+    CHECK(foot.seconds == Approx(2224.0f).margin(0.5f));
+    CHECK(Str(ForcePackages::EtaNote(foot)) == "line x1.5 2224 s");
+    const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.etaRule == PackageChoice::EtaAir);
+    // a known road wins over the factor
+    const PackageQuote road = ForcePackages::Quote(FPFoot, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    CHECK(road.eta == FEQRoad);
+    CHECK(road.travel == Approx(2691.0f));
+    // the factor at 1: the plain straight line, as before
+    req.roadFactor = 1.0f;
+    const PackageQuote plain = ForcePackages::Quote(FPFoot, req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(plain.eta == FEQLine);
+    CHECK(plain.travel == Approx(2224.0f));
+    // the downgrade walks the same leg
+    req.roadFactor = 1.5f;
+    const PackageQuote t = ForcePackages::Quote(FPTruck, req, cat, OneSource(1, 2224.0f, 5));
+    int refund = 0;
+    const PackageQuote down = ForcePackages::Downgrade(t, 1.0f, 0.0f, refund);
+    CHECK(down.package == FPFoot);
+    CHECK(down.travel == Approx(3336.0f));
+    CHECK(down.seconds == Approx(2224.0f).margin(0.5f));
+}
+
+TEST_CASE("ForcePackages - air is quoted on the straight line, whatever the road and the factor",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 2.0f;
+    const PackageQuote a = ForcePackages::Quote(FPTransportHeli, req, cat, RoadSource(1, 4650.0f, 7283.0f, 5));
+    const PackageQuote b = ForcePackages::Quote(FPTransportHeli, req, cat, OneSource(1, 4650.0f, 5));
+    CHECK(a.eta == FEQLine);
+    CHECK(b.eta == FEQLine);
+    CHECK(a.seconds == Approx(4650.0f / Mi17Speed).margin(0.5f));
+    CHECK(b.seconds == Approx(a.seconds));
+}
+
+TEST_CASE("ForcePackages - the source is the base with the shortest leg for the package",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    // Sainte Marie: the Camp is nearer straight but its road is past the
+    // detour rule (no road known: 2513 x 1.5 = 3769 m); Le Port Harbour's
+    // road is 3635 m
+    AutoArray<PackageSource> sources = OneSource(0, 2513.0f, 6);
+    PackageSource harbour;
+    harbour.zone = 3;
+    harbour.distance = 2901.0f;
+    harbour.road = 3635.0f;
+    harbour.spare = 6;
+    sources.Add(harbour);
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, cat, sources);
+    CHECK(foot.source == 3);
+    CHECK(foot.eta == FEQRoad);
+    // the helicopter flies from the straight-nearest base's infantry
+    CHECK(ForcePackages::Quote(FPTransportHeli, req, cat, sources).source == 0);
+    // with the straight line only, the Camp is nearest on foot too
+    req.roadFactor = 1.0f;
+    sources[1].road = -1;
+    CHECK(ForcePackages::Quote(FPFoot, req, cat, sources).source == 0);
+}
+
+TEST_CASE("ForcePackages - the INFO line's arrival words are kept for gmForcesEtaNotes",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    ForcePackages::ClearEtaNotes();
+    CHECK(ForcePackages::EtaNoteCount() == 0);
+    PackageQuote q;
+    q.package = FPFoot;
+    q.source = 2;
+    q.eta = FEQRoad;
+    q.seconds = 3393.4f;
+    CHECK(Str(ForcePackages::LogEtaNote(q)) == "road 3393 s");
+    q.eta = FEQLineFactor;
+    q.etaFactor = 1.5f;
+    q.seconds = 2733.0f;
+    CHECK(Str(ForcePackages::LogEtaNote(q)) == "line x1.5 2733 s");
+    REQUIRE(ForcePackages::EtaNoteCount() == 2);
+    CHECK(Str(ForcePackages::EtaNoteAt(0).text) == "road 3393 s");
+    CHECK(ForcePackages::EtaNoteAt(0).source == 2);
+    CHECK(ForcePackages::EtaNoteAt(1).eta == FEQLineFactor);
+    // a ring: the oldest go first
+    for (int i = 0; i < ForcePackages::EtaNoteRing + 3; i++)
+    {
+        q.seconds = (float)i;
+        q.eta = FEQLine;
+        ForcePackages::LogEtaNote(q);
+    }
+    CHECK(ForcePackages::EtaNoteCount() == ForcePackages::EtaNoteRing);
+    CHECK(Str(ForcePackages::EtaNoteAt(0).text) == "line 3 s");
+    CHECK(Str(ForcePackages::EtaNoteAt(ForcePackages::EtaNoteRing - 1).text) == "line 18 s");
+    ForcePackages::ClearEtaNotes();
+}
+
+// ---------------------------------------------------------------------------
+// the road quote cache (RoadRoute.hpp): a fake planner stands in for the
+// road net
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+struct FakeRoads
+{
+    int calls = 0;
+    float factor = 1.3f; // road length / straight distance
+    bool none = false;   // no route at all
+};
+
+FakeRoads& Roads()
+{
+    static FakeRoads r;
+    return r;
+}
+
+bool FakePlanner(Vector3Par from, Vector3Par to, float& length)
+{
+    FakeRoads& r = Roads();
+    r.calls++;
+    if (r.none)
+    {
+        return false;
+    }
+    const float dx = from.X() - to.X();
+    const float dz = from.Z() - to.Z();
+    length = sqrtf(dx * dx + dz * dz) * r.factor;
+    return true;
+}
+
+// the cache with the fake planner, restored to the road net on exit
+struct QuoteGuard
+{
+    explicit QuoteGuard(int plansPerTick = RoadQuoteCache::DefaultPlansPerTick,
+                        float ttl = RoadQuoteCache::DefaultTtl)
+    {
+        Roads() = FakeRoads();
+        RoadQuoteCache::Instance().SetPlanner(FakePlanner);
+        RoadQuoteCache::Instance().SetBudget(plansPerTick, ttl);
+        RoadQuoteCache::Instance().ResetStats();
+    }
+    ~QuoteGuard()
+    {
+        RoadQuoteCache::Instance().SetPlanner(nullptr);
+        RoadQuoteCache::Instance().SetBudget(RoadQuoteCache::DefaultPlansPerTick, RoadQuoteCache::DefaultTtl);
+        RoadQuoteCache::Instance().ResetStats();
+    }
+};
+
+} // namespace
+
+TEST_CASE("RoadQuoteCache - a pair is planned once and then answered from the cache",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard;
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 outpost(7600, 25, 6300);
+    const Vector3 arudy(5400, 0, 6630);
+    const float straight = sqrtf(2200.0f * 2200.0f + 330.0f * 330.0f);
+    CHECK(cache.Length(outpost, arudy, 100.0f) == Approx(straight * 1.3f));
+    CHECK(Roads().calls == 1);
+    // the same tick, a later tick: the cache answers
+    CHECK(cache.Length(outpost, arudy, 100.0f) == Approx(straight * 1.3f));
+    CHECK(cache.Length(outpost, arudy, 160.0f) == Approx(straight * 1.3f));
+    CHECK(Roads().calls == 1);
+    CHECK(cache.Stats().plans == 1);
+    CHECK(cache.Stats().hits == 2);
+    // the key is the pair to the metre: the reverse leg is its own pair
+    cache.Length(arudy, outpost, 160.0f);
+    CHECK(Roads().calls == 2);
+    CHECK(cache.Size() == 2);
+    // a route the service already planned (a service Search records it) is
+    // reused without planning
+    const Vector3 harbour(8410, 8, 3690);
+    cache.Record(harbour, arudy, true, 5759.0f, 160.0f);
+    CHECK(cache.Length(harbour, arudy, 170.0f) == Approx(5759.0f));
+    CHECK(Roads().calls == 2);
+    CHECK(cache.Stats().recorded == 1);
+}
+
+TEST_CASE("RoadQuoteCache - no route, the detour rule and no road net answer -1",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard;
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 a(1000, 0, 1000);
+    const Vector3 b(3000, 0, 1000);
+    // no route: -1, and the failure is cached for the tick and the TTL
+    Roads().none = true;
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(Roads().calls == 1);
+    // the service's detour rule (road > 2 x straight + 300 m): not marched
+    Roads() = FakeRoads();
+    Roads().factor = 2.3f;
+    const Vector3 c(1000, 0, 5000);
+    CHECK(cache.Length(a, c, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().detours == 1);
+    Roads().factor = 2.0f;
+    const Vector3 d(5000, 0, 1000);
+    CHECK(cache.Length(a, d, 10.0f) == Approx(8000.0f)); // 2 x 4000, within the slack
+    // no road net (unit tests) and no planner: -1 without planning
+    const int plans = cache.Stats().plans;
+    cache.SetPlanner(nullptr);
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().plans == plans);
+}
+
+TEST_CASE("RoadQuoteCache - the tick's plan budget, the TTL and a new mission",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard(2, 300.0f);
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 base(0, 0, 0);
+    const Vector3 t1(1000, 0, 0);
+    const Vector3 t2(2000, 0, 0);
+    const Vector3 t3(3000, 0, 0);
+    // two plans a tick: the third pair is over budget (-1: the director
+    // quotes the straight line x forcesRoadFactor) and is not cached
+    CHECK(cache.Length(base, t1, 50.0f) == Approx(1300.0f));
+    CHECK(cache.Length(base, t2, 50.0f) == Approx(2600.0f));
+    CHECK(cache.Length(base, t3, 50.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().overBudget == 1);
+    CHECK(Roads().calls == 2);
+    // the next tick plans it
+    CHECK(cache.Length(base, t3, 51.0f) == Approx(3900.0f));
+    CHECK(Roads().calls == 3);
+    // past the TTL an entry is planned again when the tick has budget...
+    Roads().factor = 1.4f;
+    CHECK(cache.Length(base, t1, 400.0f) == Approx(1400.0f));
+    CHECK(cache.Length(base, t2, 400.0f) == Approx(2800.0f));
+    CHECK(Roads().calls == 5);
+    // ...and served as it is when the budget is spent (the road net does not
+    // change)
+    CHECK(cache.Length(base, t3, 400.0f) == Approx(3900.0f));
+    CHECK(Roads().calls == 5);
+    // a clock running backwards (a new mission) clears the cache
+    CHECK(cache.Length(base, t3, 5.0f) == Approx(4200.0f));
+    CHECK(Roads().calls == 6);
+    CHECK(cache.Size() == 1);
+}
+
+TEST_CASE("RoadQuoteCache - quoting 6 sources x 14 towns with the cache warm stays under 2 ms",
+          "[game][guerrilla][occupierforces][roadroute][packages]")
+{
+    QuoteGuard guard(1000, 600.0f);
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    std::vector<Vector3> bases;
+    std::vector<Vector3> towns;
+    for (int b = 0; b < 6; b++)
+    {
+        bases.push_back(Vector3(1000.0f + 1300.0f * (float)b, 0, 2000.0f + 900.0f * (float)(b % 3)));
+    }
+    for (int t = 0; t < 14; t++)
+    {
+        towns.push_back(Vector3(500.0f + 650.0f * (float)t, 0, 7000.0f - 350.0f * (float)(t % 5)));
+    }
+    // warm: one director tick plans every pair
+    for (const Vector3& t : towns)
+    {
+        for (const Vector3& b : bases)
+        {
+            REQUIRE(cache.Length(b, t, 100.0f) > 0);
+        }
+    }
+    const int plans = cache.Stats().plans;
+    CHECK(plans == 84);
+    // a later tick: the director's quotes for every town, warm
+    int chosen = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (size_t t = 0; t < towns.size(); t++)
+    {
+        AutoArray<PackageSource> sources;
+        for (size_t b = 0; b < bases.size(); b++)
+        {
+            PackageSource s;
+            s.zone = (int)b;
+            const float dx = bases[b].X() - towns[t].X();
+            const float dz = bases[b].Z() - towns[t].Z();
+            s.distance = sqrtf(dx * dx + dz * dz);
+            s.road = cache.Length(bases[b], towns[t], 160.0f);
+            s.spare = 6;
+            sources.Add(s);
+        }
+        const PackageChoice c = ForcePackages::Choose(req, cat, sources);
+        chosen += c.ok ? 1 : 0;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    CHECK(cache.Stats().plans == plans); // every lookup a hit
+    CHECK(chosen == 14);
+    INFO("6 x 14 warm quotes took " << ms << " ms");
+    CHECK(ms < 2.0);
 }

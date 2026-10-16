@@ -18,6 +18,14 @@
 //       one row per road component touching the circle, nearest first
 //   gmLandmass [pos]
 //       -> the walkable landmass id of pos (RoadRoute::Landmass), -1 at sea
+//   gmRoadQuote [from, to]
+//       -> [length m or -1, lookups, hits, plans, over budget, recorded,
+//           detours, entries, plan ms in total, the last plan's ms]: the
+//          director's road quote of the pair (RoadQuoteCache) and its counters
+//   gmForcesEtaNotes
+//       -> [[words, package, source zone index, seconds, kind], ...]: the
+//          arrival words ("road 1794 s", "line x1.5 2733 s") of the
+//          director's last INFO lines, oldest first
 //   gmGeoGrid [pos, halfCells, step?]
 //       -> the strategic planner's geography cells around pos (every
 //          step-th cell), one string per row north to south ('~' deep
@@ -28,6 +36,10 @@
 // pattern); the TU is in the link through RoadRoute::Search.
 
 #include <Poseidon/Game/Guerrilla/RoadRoute.hpp>
+
+#include <Poseidon/Core/Global.hpp>                  // Glob.time (the road quote's clock)
+#include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // RoadIsReasonable (the service's detour rule)
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp> // gmForcesEtaNotes
 
 #include <Poseidon/AI/Path/AITypes.hpp> // GeographyInfo (gmGeoGrid)
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
@@ -41,6 +53,7 @@
 #include <math.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <functional>
 #include <queue>
@@ -414,12 +427,54 @@ bool RoadRoute::SameLandmass(Vector3Par a, Vector3Par b)
     return la < 0 || lb < 0 || la == lb;
 }
 
+RoadRouteParams RoadRoute::ServiceParams()
+{
+    RoadRouteParams p;
+    p.joinRadius = RoadRouteServiceJoinRadius;
+    return p;
+}
+
+bool RoadRoute::IsServiceParams(const RoadRouteParams& p)
+{
+    const RoadRouteParams s = ServiceParams();
+    return p.snapRadius == s.snapRadius && p.startWide == s.startWide && p.maxStarts == s.maxStarts &&
+           p.maxNodes == s.maxNodes && p.joinRadius == s.joinRadius && p.joinWeight == s.joinWeight;
+}
+
+float RoadRoute::ServiceLength(const AutoArray<Vector3>& centres, Vector3Par to)
+{
+    if (centres.Size() == 0)
+    {
+        return 0;
+    }
+    float length = 0;
+    for (int i = 1; i < centres.Size(); i++)
+    {
+        length += RrDist2D(centres[i - 1], centres[i]);
+    }
+    return length + RrDist2D(centres[centres.Size() - 1], to);
+}
+
 bool RoadRoute::Search(Vector3Par from, Vector3Par to, const RoadRouteParams& params, AutoArray<Vector3>& centres,
                        RoadRouteStats* stats)
 {
-    centres.Clear();
     RoadRouteStats local;
     RoadRouteStats& st = stats ? *stats : local;
+    const bool found = SearchCore(from, to, params, centres, st);
+    // the service's search: its length is the road quote of the pair
+    // (RoadQuoteCache), so a route CounterAttack planned is quoted as it is
+    if (GRoadNet && IsServiceParams(params))
+    {
+        RoadQuoteCache::Instance().Record(from, to, found, found ? ServiceLength(centres, to) : 0.0f,
+                                          RoadQuoteCache::WorldNow());
+    }
+    return found;
+}
+
+bool RoadRoute::SearchCore(Vector3Par from, Vector3Par to, const RoadRouteParams& params, AutoArray<Vector3>& centres,
+                           RoadRouteStats& st)
+{
+    centres.Clear();
     st = RoadRouteStats();
 
     std::vector<const RoadLink*> starts;
@@ -630,6 +685,217 @@ bool RoadRoute::Search(Vector3Par from, Vector3Par to, const RoadRouteParams& pa
     st.joinGap = RrDist2D(st.joinFrom, st.joinTo);
     st.startOffset = 0;
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// the road quote cache (OCCUPIER-FORCES.md 6.5, 2026-10-16)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+struct QuoteKey
+{
+    int fx, fz, tx, tz; // both ends to the metre
+    bool operator==(const QuoteKey& o) const { return fx == o.fx && fz == o.fz && tx == o.tx && tz == o.tz; }
+};
+
+struct QuoteKeyHash
+{
+    size_t operator()(const QuoteKey& k) const
+    {
+        size_t h = 1469598103934665603ull;
+        const int v[4] = {k.fx, k.fz, k.tx, k.tz};
+        for (int i = 0; i < 4; i++)
+        {
+            h = (h ^ (size_t)(unsigned)v[i]) * 1099511628211ull;
+        }
+        return h;
+    }
+};
+
+struct QuoteEntry
+{
+    bool found = false;
+    float length = 0;
+    float stamp = 0; // mission time it was planned or recorded
+};
+
+QuoteKey KeyOf(Vector3Par from, Vector3Par to)
+{
+    return QuoteKey{toIntFloor(from.X() + 0.5f), toIntFloor(from.Z() + 0.5f), toIntFloor(to.X() + 0.5f),
+                    toIntFloor(to.Z() + 0.5f)};
+}
+
+bool RoadNetPlanner(Vector3Par from, Vector3Par to, float& length)
+{
+    AutoArray<Vector3> centres;
+    RoadRouteStats st;
+    if (!RoadRoute::Search(from, to, RoadRoute::ServiceParams(), centres, &st))
+    {
+        return false;
+    }
+    length = RoadRoute::ServiceLength(centres, to);
+    return true;
+}
+
+// the road net (or the test planner) the entries belong to, and the clock:
+// a new net, or a clock running backwards (a new mission), clears them
+bool SameWorld(const void* net, const void*& seen, float now, float& lastNow)
+{
+    bool same = true;
+    if (net != seen)
+    {
+        seen = net;
+        same = false;
+    }
+    if (lastNow >= 0 && now + 1e-3f < lastNow)
+    {
+        same = false;
+    }
+    lastNow = now;
+    return same;
+}
+
+} // namespace
+
+struct RoadQuoteCache::Impl
+{
+    std::unordered_map<QuoteKey, QuoteEntry, QuoteKeyHash> entries;
+};
+
+RoadQuoteCache::RoadQuoteCache() : _impl(new Impl)
+{
+}
+
+RoadQuoteCache& RoadQuoteCache::Instance()
+{
+    static RoadQuoteCache cache;
+    return cache;
+}
+
+float RoadQuoteCache::WorldNow()
+{
+    return Glob.time - Foundation::Time(0);
+}
+
+void RoadQuoteCache::Clear()
+{
+    _impl->entries.clear();
+    _tickNow = -1;
+    _tickPlans = 0;
+    _lastNow = -1;
+}
+
+void RoadQuoteCache::SetPlanner(Planner planner)
+{
+    _planner = planner;
+    Clear();
+    _net = nullptr;
+}
+
+void RoadQuoteCache::SetBudget(int plansPerTick, float ttl)
+{
+    _plansPerTick = plansPerTick > 0 ? plansPerTick : 0;
+    _ttl = ttl > 0 ? ttl : 0;
+}
+
+int RoadQuoteCache::Size() const
+{
+    return (int)_impl->entries.size();
+}
+
+const void* RoadQuoteCache::NetId() const
+{
+    return _planner ? reinterpret_cast<const void*>(_planner) : static_cast<const void*>(GRoadNet);
+}
+
+void RoadQuoteCache::Record(Vector3Par from, Vector3Par to, bool found, float length, float now)
+{
+    const void* net = NetId();
+    if (!net)
+    {
+        return;
+    }
+    if (!SameWorld(net, _net, now, _lastNow))
+    {
+        _impl->entries.clear();
+        _tickNow = -1;
+        _tickPlans = 0;
+    }
+    QuoteEntry& e = _impl->entries[KeyOf(from, to)];
+    e.found = found && length > 0;
+    e.length = e.found ? length : 0;
+    e.stamp = now;
+    _stats.recorded++;
+}
+
+float RoadQuoteCache::Length(Vector3Par from, Vector3Par to)
+{
+    return Length(from, to, WorldNow());
+}
+
+float RoadQuoteCache::Length(Vector3Par from, Vector3Par to, float now)
+{
+    _stats.lookups++;
+    const void* net = NetId();
+    if (!net)
+    {
+        return -1; // no road net: the straight line x forcesRoadFactor
+    }
+    if (!SameWorld(net, _net, now, _lastNow))
+    {
+        _impl->entries.clear();
+        _tickNow = -1;
+        _tickPlans = 0;
+    }
+    if (now != _tickNow)
+    {
+        _tickNow = now; // a new tick: a fresh plan budget
+        _tickPlans = 0;
+    }
+    const QuoteKey key = KeyOf(from, to);
+    auto it = _impl->entries.find(key);
+    const bool budget = _tickPlans < _plansPerTick;
+    QuoteEntry e;
+    if (it != _impl->entries.end() && (now - it->second.stamp <= _ttl || !budget))
+    {
+        // fresh, or expired with no budget left to refresh it (the road net
+        // has not changed)
+        _stats.hits++;
+        e = it->second;
+    }
+    else if (!budget)
+    {
+        _stats.overBudget++;
+        return -1;
+    }
+    else
+    {
+        _tickPlans++;
+        _stats.plans++;
+        const auto t0 = std::chrono::steady_clock::now();
+        float length = 0;
+        const bool found = (_planner ? _planner : RoadNetPlanner)(from, to, length);
+        const auto t1 = std::chrono::steady_clock::now();
+        _stats.lastPlanMs = std::chrono::duration<float, std::milli>(t1 - t0).count();
+        _stats.planMs += _stats.lastPlanMs;
+        e.found = found && length > 0;
+        e.length = e.found ? length : 0;
+        e.stamp = now;
+        _impl->entries[key] = e;
+    }
+    if (!e.found)
+    {
+        return -1;
+    }
+    // the service's detour rule: a road this far round is not marched
+    if (!CounterAttack::RoadIsReasonable(e.length, RrDist2D(from, to)))
+    {
+        _stats.detours++;
+        return -1;
+    }
+    return e.length;
 }
 
 } // namespace Poseidon::Guerrilla
@@ -874,6 +1140,62 @@ static GameValue GmGeoGrid(const GameState* state, GameValuePar oper1)
     return value;
 }
 
+// gmRoadQuote [from, to] -> [length m or -1, lookups, hits, plans, over
+// budget, recorded, detours, entries, plan ms in total, the last plan's ms]:
+// the director's road quote of the pair (RoadQuoteCache::Length, at the
+// world clock), then the cache's counters
+static GameValue GmRoadQuote(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    const GameArrayType& args = oper1;
+    if (!CheckSize(state, args, 2))
+    {
+        return value;
+    }
+    Vector3 from, to;
+    if (!GetPos(state, from, args[0]) || !GetPos(state, to, args[1]))
+    {
+        return value;
+    }
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const float length = cache.Length(from, to);
+    const RoadQuoteStats& st = cache.Stats();
+    out.Add(GameValue(length));
+    out.Add(GameValue((float)st.lookups));
+    out.Add(GameValue((float)st.hits));
+    out.Add(GameValue((float)st.plans));
+    out.Add(GameValue((float)st.overBudget));
+    out.Add(GameValue((float)st.recorded));
+    out.Add(GameValue((float)st.detours));
+    out.Add(GameValue((float)cache.Size()));
+    out.Add(GameValue(st.planMs));
+    out.Add(GameValue(st.lastPlanMs));
+    return value;
+}
+
+// gmForcesEtaNotes -> [[words, package, source zone index, seconds,
+// "ROAD" / "LINE_FACTOR" / "LINE"], ...]: the arrival words of the
+// director's last INFO lines, oldest first (ForcePackages::LogEtaNote)
+static GameValue GmForcesEtaNotes(const GameState* state)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    for (int i = 0; i < ForcePackages::EtaNoteCount(); i++)
+    {
+        const ForcePackages::EtaNoteRow& n = ForcePackages::EtaNoteAt(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Add(GameValue(n.text));
+        row.Add(GameValue(RString(ForcePackages::PackageName(n.package))));
+        row.Add(GameValue((float)n.source));
+        row.Add(GameValue(n.seconds));
+        row.Add(GameValue(RString(n.eta == FEQRoad ? "ROAD" : (n.eta == FEQLineFactor ? "LINE_FACTOR" : "LINE"))));
+        out.Add(rowValue);
+    }
+    return value;
+}
+
 // gmLandmass [pos]: the walkable landmass id of pos (RoadRoute::Landmass),
 // -1 at sea or without a landscape
 static GameValue GmLandmass(const GameState* state, GameValuePar oper1)
@@ -892,4 +1214,6 @@ INIT_MODULE(GuerrillaRoadRoute, 3)
     GGameState.NewFunction(GameFunction(GameArray, "gmGeoGrid", GmGeoGrid, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadRoute", GmRoadRoute, GameArray));
     GGameState.NewFunction(GameFunction(GameArray, "gmRoadComponents", GmRoadComponents, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "gmRoadQuote", GmRoadQuote, GameArray));
+    GGameState.NewNularOp(GameNular(GameArray, "gmForcesEtaNotes", GmForcesEtaNotes));
 }
