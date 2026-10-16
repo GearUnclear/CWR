@@ -6,7 +6,10 @@
 // military zone is resistance-owned.  "Enemy military zone" is every zone
 // whose type is neither CAMP nor CITY and whose authored owner (the config
 // owner: the OCCUPIER token or the occupier's literal side) is the
-// campaign's occupier.  The set (the "roster") is taken once, on the first
+// campaign's occupier, plus every generated occupier base (OCCUPIER-FORCES.md
+// 5.7).  Minor posts are left out (the owner, 2026-10-16): a zone whose
+// countsForWin flag is false, and every CHECKPOINT, COASTAL, HELIPAD or RADAR
+// zone (IsMinorPostType); they capture, source and alarm like any base.  The set (the "roster") is taken once, on the first
 // tick with an active ZoneRegistry, and saved with the campaign; a template
 // that later gains or renames a zone does not move an existing campaign's
 // goal.  A campaign whose roster is empty can never win.  Town support is
@@ -86,8 +89,20 @@ class CampaignEnd : public SerializeClass
     // the rule (pure, unit-tested) ------------------------------------------
     // every type that is not CAMP and not CITY (case-insensitive)
     static bool IsMilitaryType(const char* type);
-    // the zone's AUTHORED owner names the campaign's occupier
+    // the zone's AUTHORED owner names the campaign's occupier.  False for a
+    // generated base (ZoneRecord::generated): it is not authored.  The
+    // occupier pool sizes R through this predicate, so a generated garrison
+    // adds nothing to R or poolStart (the conservation stand-in of
+    // OCCUPIER-FORCES.md 5.7 until the pool sizes generated bases itself)
     static bool IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry& registry);
+    // a generated base whose config owner is the occupier (the OCCUPIER token)
+    static bool IsGeneratedOccupier(const ZoneRecord& zone, const ZoneRegistry& registry);
+    // the minor kinds of the base catalogue: CHECKPOINT, COASTAL, HELIPAD,
+    // RADAR (case-insensitive)
+    static bool IsMinorPostType(const char* type);
+    // a military zone that counts toward the win: its countsForWin flag and
+    // not a minor kind
+    static bool CountsForWin(const ZoneRecord& zone);
     // take the roster from the registry; a no-op once taken (also after a load)
     void TakeRoster(const ZoneRegistry& registry);
     bool HasRoster() const { return _rosterTaken; }

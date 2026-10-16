@@ -27,6 +27,8 @@
 //    s4  every AIRFIELD / SEAPORT is occupier-owned with a garrison, and the
 //        roster R (the authored 6 + 8 = 14 plus every base added) sizes
 //        poolStart = max(24, R + 2K).
+//    s5  no generated bases (generateBases = 0 until the Sinai playRegion[],
+//        #75; OCCUPIER-FORCES.md 5.7).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -88,5 +90,8 @@ while {bdI < gmZoneCount} do {bdZ = gmZone bdI; if (((bdZ select 1) in ["AIRFIEL
 triAssertEq [(call bdFnR), bdAuth + (call bdFnSeededR)]
 triAssertGe [bdAuth, 14]
 triAssertEq [((gmOccupierForces) select 1), (call bdFnPool)]
+
+// ---- s5: no generated bases --------------------------------------------------
+triAssertEq [(count gmGeneratedBases), 0]
 
 triEndTest

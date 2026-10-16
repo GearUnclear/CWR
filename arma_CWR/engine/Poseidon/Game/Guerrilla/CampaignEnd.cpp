@@ -103,6 +103,12 @@ bool CampaignEnd::IsMilitaryType(const char* type)
 
 bool CampaignEnd::IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry& registry)
 {
+    // a generated base is not authored (OCCUPIER-FORCES.md 5.7): the pool
+    // gives it no share of R through this predicate
+    if (zone.generated)
+    {
+        return false;
+    }
     // the AUTHORED owner, not the live one: a campaign derived from a save
     // written before this service existed still knows which bases were the
     // enemy's, even if some have fallen since
@@ -112,6 +118,35 @@ bool CampaignEnd::IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry&
     }
     const RString occupier = registry.OccupierSide();
     return occupier.GetLength() > 0 && stricmp(zone.ownerConfig, occupier) == 0;
+}
+
+bool CampaignEnd::IsGeneratedOccupier(const ZoneRecord& zone, const ZoneRegistry& registry)
+{
+    if (!zone.generated)
+    {
+        return false;
+    }
+    if (stricmp(zone.ownerConfig, "OCCUPIER") == 0)
+    {
+        return true;
+    }
+    const RString occupier = registry.OccupierSide();
+    return occupier.GetLength() > 0 && stricmp(zone.ownerConfig, occupier) == 0;
+}
+
+bool CampaignEnd::IsMinorPostType(const char* type)
+{
+    if (!type || !*type)
+    {
+        return false;
+    }
+    return stricmp(type, "CHECKPOINT") == 0 || stricmp(type, "COASTAL") == 0 || stricmp(type, "HELIPAD") == 0 ||
+           stricmp(type, "RADAR") == 0;
+}
+
+bool CampaignEnd::CountsForWin(const ZoneRecord& zone)
+{
+    return zone.countsForWin && !IsMinorPostType(zone.type);
 }
 
 void CampaignEnd::TakeRoster(const ZoneRegistry& registry)
@@ -124,7 +159,8 @@ void CampaignEnd::TakeRoster(const ZoneRegistry& registry)
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
-        if (!z || !IsMilitaryType(z->type) || !IsAuthoredOccupier(*z, registry))
+        if (!z || !IsMilitaryType(z->type) ||
+            !(IsAuthoredOccupier(*z, registry) || IsGeneratedOccupier(*z, registry)) || !CountsForWin(*z))
         {
             continue;
         }

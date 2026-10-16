@@ -237,6 +237,7 @@ class CfgGuerrillaZones
     seedCitySupport = 20;
     // seedCities: see section 6
     // seedBases, playRegion[]: see section 10
+    // generateBases, generateBasesSeed: see section 11
     class Zones { /* ... */ };
 };
 ```
@@ -450,8 +451,9 @@ without a hand survey. The same detector runs in two places:
 
 - **At mission load** (`ZoneRegistry`, gated by `seedBases`): it reads the
   loaded landscape and adds every AIRFIELD and SEAPORT candidate with status
-  `seed` as an occupier zone. **OUTPOSTs are never seeded at runtime**: the
-  garrison ladder is the author's.
+  `seed` as an occupier zone. OUTPOSTs are never seeded by this pass; with
+  `generateBases = 1` they are the preferred sites of the generated bases
+  (section 11), which reverses the #76 rule.
 - **Offline** (`guerrilla scaffold` and `guerrilla lint --bases`): it reads the
   `.wrp` and prints every candidate, OUTPOSTs included, with its evidence.
 
@@ -494,7 +496,7 @@ Each candidate gets exactly one status, in this order:
 | `covered` | within 300 m (or the candidate's own footprint radius, whichever is larger) of an authored AIRFIELD, SEAPORT or OUTPOST, or within 150 m (`zoneArea`) of any other authored zone. `coveredBy` names that zone | no |
 | `low-confidence` | below 0.5 | no |
 | `seed` | an AIRFIELD or SEAPORT that passed everything | yes, when `seedBases` is on |
-| `offline` | an OUTPOST that passed everything | never: the tool reports it, the author decides |
+| `offline` | an OUTPOST that passed everything | not by `seedBases`; with `generateBases = 1` it is a preferred site of the generated bases (section 11) when it passes their rules |
 
 ### Naming
 
@@ -625,6 +627,55 @@ advisory: it never fails the run (an unreadable world exits 2).
 - one model family: none. Detection is not configurable per template; if a
   model is misread, fix the vocabulary in `BaseDetect.cpp` and say so in the
   commit.
+
+## 11. Generated bases: `generateBases` (OCCUPIER-FORCES.md 5.7)
+
+A template whose authored and seeded bases leave towns out of reach can let the
+engine add occupier OUTPOST zones at new game. The contract:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `generateBases` | 0 (absent = 0) | 1: a NEW game adds OUTPOST zones by the density rule below, after the CITY seed. 0: nothing is generated. |
+| `generateBasesSeed` | absent (one random draw) | A non-zero integer pins the placement seed (tests, reproducible campaigns). |
+
+**The density rule** (owner decisions of 2026-10-16). K is the CITY zones.
+Every town gets a ground base on its own landmass within 2.5 km; every landmass
+with towns gets at least three ground bases; the occupier's military zones end
+between ceil(K / 3) and ceil(K / 2), never more than 10, and generation only
+adds until the coverage, the three sources and the floor hold. A generated base
+stands 1.6 km from every occupier base, the Camp, the HQ (the START TOWN pick)
+and the player's start, 300 m from any zone and 500 m from any town, inside the
+theatre (`playRegion[]`, else the default base box) and 200 m from the map
+edge, with its centre 60 to 250 m from a road that joins the island network and
+never on a road. A third of them (rounded up) sit on a track 400 m or more from
+the trunk road, and each town's two nearest sources should be 60 degrees apart
+(a scoring term). Its 150 m footprint (3 x 3 geography cells) is dry, flat
+(slope under 0.10), forest-free and object-free, 2 m above the sea at the
+centre. The detected OUTPOST candidates (section 10, status `offline`) are the
+preferred sites and keep their names; they skip the terrain-cell tests.
+
+**What it adds.** OUTPOST zones owned by the occupier (garrison and reserve 6),
+named "<nearest town> Outpost" (else "Hill <elevation> Outpost"), marker
+`gmZoneGen_<n>`, revealed by proximity like authored zones, flagged `seeded` in
+`gmZone`. `gmGeneratedBases` lists them: `[name, type, [easting, northing,
+height], garrisonMax, countsForWin, detected, track, heading]`. They count in
+the win roster (minor kinds CHECKPOINT, COASTAL, HELIPAD and RADAR never do)
+and add nothing to the occupier pool's R (the conservation stand-in).
+
+**Stored, not re-derived.** The rows ride the save (`GeneratedBases`, version
+1). A loaded campaign gets exactly its stored bases, whatever the key, the
+seed or a later build's scorer say; a save from before the feature generates
+nothing. Changing the template's key changes new games only.
+
+**Diagnostics.** The mission log carries one INFO line per generated base, a
+summary (K, the floor and ceiling, the towns beyond 2.5 km before and after,
+the track share, the seed), the site refusal counts, and for every town still
+open after generation the refusals of the cells in its reach ("Regina is
+open: 0 site(s) in reach ...").
+
+**Templates.** Abel and Eden opt in; Sinai stays off until its
+`playRegion[]` (#75) is drawn (inside the default box every town already has a
+base in reach); Lebanon80 is off by design, like its `seedBases = 0`.
 
 ## Pitfalls
 

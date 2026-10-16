@@ -156,6 +156,45 @@ static GameValue GmDetectedBases(const GameState* state)
     return value;
 }
 
+// gmGeneratedBases (OCCUPIER-FORCES.md 5.7) -> one row per generated base of
+// this campaign, in generation order (the new game's picks, or the rows the
+// save stored):
+// [name, type, [easting, northing, height], garrisonMax, countsForWin,
+//  detected (a BaseDetect outpost, not empty ground), track (on a track off
+//  the trunk road), heading (degrees, the centre towards its road)].
+// [] when generateBases is off, the save predates the feature, or no site
+// served an open need.
+static GameValue GmGeneratedBases(const GameState* state)
+{
+    const ZoneRegistry& registry = ZoneRegistry::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    array.Resize(registry.NGeneratedBases());
+    for (int i = 0; i < registry.NGeneratedBases(); i++)
+    {
+        const GeneratedBaseRow& b = *registry.GeneratedBaseAt(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(8);
+        row[0] = GameStringType(b.name);
+        row[1] = GameStringType(b.type);
+        GameValue posValue = state->CreateGameValue(GameArray);
+        GameArrayType& pos = posValue;
+        pos.Resize(3);
+        pos[0] = b.x;
+        pos[1] = b.z;
+        pos[2] = b.y;
+        row[2] = posValue;
+        row[3] = (float)b.garrisonMax;
+        row[4] = b.countsForWin;
+        row[5] = b.detected;
+        row[6] = b.track;
+        row[7] = b.heading;
+        array[i] = rowValue;
+    }
+    return value;
+}
+
 static GameValue GmZoneIndex(const GameState* /*state*/, GameValuePar oper1)
 {
     GameStringType name = oper1;
@@ -683,6 +722,8 @@ INIT_MODULE(GuerrillaZoneRegistry, 3)
     // issue #76: the AIRFIELD / SEAPORT seed
     GGameState.NewNularOp(GameNular(GameArray, "gmSeededBases", GmSeededBases));
     GGameState.NewNularOp(GameNular(GameArray, "gmDetectedBases", GmDetectedBases));
+    // OCCUPIER-FORCES.md 5.7: the generated bases
+    GGameState.NewNularOp(GameNular(GameArray, "gmGeneratedBases", GmGeneratedBases));
     GGameState.NewNularOp(GameNular(GameArray, "gmSimDiag", GmSimDiag));
     GGameState.NewNularOp(GameNular(GameScalar, "gmSimDiagLog", GmSimDiagLog));
     GGameState.NewFunction(GameFunction(GameScalar, "gmSimAdmit", GmSimAdmit, GameArray));

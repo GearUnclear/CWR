@@ -106,6 +106,12 @@ class CfgGuerrillaZones
     // The resistance cycler therefore picks a ROSTER, not a side.
     playerSide = "GUER";
     seedCities = 1;       // auto-seed CITY zones from Abel's named towns
+    // Generated occupier bases (OCCUPIER-FORCES.md 5.7): at new game the
+    // engine adds OUTPOST zones where the density rule finds a town more than
+    // 2.5 km from a ground base, stored in the save and never re-derived.
+    // Malden's west and south-west (Vigny, La Pessagne, Goisse, Cancon, La
+    // Riviere, Chapoi, Sainte Marie) are 2.6 to 4.7 km from the four hubs.
+    generateBases = 1;
     seedCitySupport = 20; // their starting support (markers "gmZoneCity_<n>")
 
     class Zones

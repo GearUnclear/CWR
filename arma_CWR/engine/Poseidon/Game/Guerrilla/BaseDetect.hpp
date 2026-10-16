@@ -10,8 +10,10 @@
 // the template authors, and gets back a candidate list.  Two callers:
 //   * the runtime seed (ZoneRegistry, CfgGuerrillaZones >> seedBases): feeds
 //     the loaded landscape and adds every SEED candidate of type AIRFIELD or
-//     SEAPORT as a seeded occupier zone.  OUTPOST candidates are never seeded:
-//     the garrison ladder is the template author's (#76).
+//     SEAPORT as a seeded occupier zone.  OUTPOST candidates are never seeded
+//     by this pass; with generateBases on they are the preferred sites of the
+//     generated bases (BaseGenerate.hpp, OCCUPIER-FORCES.md 5.7: the owner's
+//     2026-10-16 reversal of the #76 rule), kept in DetectedOutposts().
 //   * the offline tool (PoseidonTools guerrilla scaffold / lint): feeds the
 //     .wrp and prints every candidate, OUTPOSTs included, with its evidence.
 //
@@ -202,7 +204,7 @@ struct BaseDetectOptions
 enum class BaseStatus
 {
     Seed,          // passes every rule: the runtime seeds it (AIRFIELD / SEAPORT only)
-    Offline,       // an OUTPOST candidate: reported by the tool, never seeded
+    Offline,       // an OUTPOST candidate: reported by the tool; a generated-base site (generateBases)
     Covered,       // an authored zone already models it (coveredBy names it)
     OutsideRegion, // centre outside playRegion[]
     LowConfidence, // below seedConfidence

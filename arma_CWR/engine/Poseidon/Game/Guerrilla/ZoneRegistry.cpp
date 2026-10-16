@@ -222,6 +222,13 @@ void ZoneRegistry::Clear()
     _seededBases.clear();
     _baseDetectionRan = false;
     _baseProbeOverride = nullptr;
+    _detectedOutposts.clear();
+    _generated.Clear();
+    _genDecided = false;
+    _genOldSave = false;
+    _siteProbeOverride = nullptr;
+    _pendingGenerated.Clear();
+    _pendingGenVersion = 0;
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
     _resistanceSide = "GUER";
@@ -364,6 +371,7 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     _factions.Clear();
     _detectedBases.clear();
     _seededBases.clear();
+    _detectedOutposts.clear();
     _baseDetectionRan = false;
     _tuning = ZoneTuning();
     _occupierSide = "EAST";
@@ -418,6 +426,14 @@ void ZoneRegistry::LoadFromParams(const ParamEntry* zonesCfg, const ParamEntry* 
     if (_tuning.seedCities != ZoneTuning::SeedCities::Off && worldNamesCfg)
     {
         SeedCityZones(*worldNamesCfg, settlement);
+    }
+    // generated occupier bases (OCCUPIER-FORCES.md 5.7): AFTER the CITY seed,
+    // so the density rule sees every town and the 300 m city dedup can never
+    // delete a town a generated base stands near; behind generateBases (a new
+    // game), or the stored rows (a load)
+    if (zonesCfg)
+    {
+        GenerateBaseZones(*zonesCfg, settlement);
     }
 }
 
@@ -1835,6 +1851,12 @@ void ZoneRegistry::SeedBaseZones(const ParamEntry* namesCfg, const BaseWorldProb
         if (stricmp(c.type, "AIRFIELD") == 0 || stricmp(c.type, "SEAPORT") == 0)
         {
             _detectedBases.push_back(c);
+        }
+        else if (stricmp(c.type, "OUTPOST") == 0)
+        {
+            // never seeded here: the generated bases prefer them as sites
+            // (OCCUPIER-FORCES.md 5.7, the owner's 2026-10-16 reversal of #76)
+            _detectedOutposts.push_back(c);
         }
     }
     for (const std::string& note : result.notes)
@@ -4151,8 +4173,26 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("onTownStruck", _handlers[ZETownStruck], 1, RString()))
     PARAM_CHECK(ar.Serialize("Zones", _pending, 1))
 
+    // generated bases (OCCUPIER-FORCES.md 5.7): STORED, never re-derived.  A
+    // save carries the version marker and the campaign's rows (none when the
+    // campaign generated none); a save without the marker predates the
+    // feature and generates nothing.  The rows are read on the first pass and
+    // applied on the second, before the zone table is rebuilt.
+    int genVersion = GeneratedBasesVersion;
     if (ar.IsSaving())
     {
+        _pendingGenerated = _generated;
+    }
+    PARAM_CHECK(ar.Serialize("generatedBasesVersion", genVersion, 1, 0))
+    if (!ar.IsSaving() && ar.GetPass() == ParamArchive::PassFirst)
+    {
+        _pendingGenVersion = genVersion;
+    }
+    PARAM_CHECK(ar.Serialize("GeneratedBases", _pendingGenerated, 1))
+
+    if (ar.IsSaving())
+    {
+        _pendingGenerated.Clear();
         _pending.Clear();
         _pendingOccupierSide = RString();
         _pendingResistanceSide = RString();
@@ -4166,6 +4206,13 @@ LSError ZoneRegistry::Serialize(ParamArchive& ar)
         // table can be rebuilt now; the saved dynamic state then overlays
         // it.  Doing this on the first pass would read a stale or empty
         // ExtParsMission.
+        // The stored generated bases replace whatever this session decided
+        // (GenerateBaseZones re-injects them inside LoadFromConfig).
+        _generated = _pendingGenerated;
+        _genDecided = true;
+        _genOldSave = _pendingGenVersion <= 0;
+        _pendingGenerated.Clear();
+        _pendingGenVersion = 0;
         LoadFromConfig();
         // a campaign remembers its factions: the saved sides win over the
         // config/var-resolved ones, and the zone table's OCCUPIER/RESISTANCE

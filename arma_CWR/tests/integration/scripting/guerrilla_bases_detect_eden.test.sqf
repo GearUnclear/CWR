@@ -13,11 +13,13 @@
 //        garrison, flagged seeded (gmZone slot 10) and listed by
 //        gmSeededBases with confidence > 0 and evidence;
 //    e2  one seeded SEAPORT within 300 m of the pier, likewise;
-//    e3  nothing else: exactly one AIRFIELD, one SEAPORT, the three authored
-//        OUTPOSTs (OUTPOST candidates are never seeded), and the explicit
+//    e3  nothing else seeded: exactly one AIRFIELD, one SEAPORT, the three
+//        authored OUTPOSTs plus the generated ones (generateBases = 1,
+//        OCCUPIER-FORCES.md 5.7: gmGeneratedBases, never gmSeededBases;
+//        guerrilla_bases_generate_eden has their rules), and the explicit
 //        CITY Saint Phillippe (216 m from the ILS anchor) still stands;
-//    e4  the roster: R = 18 + the seeded garrisons, poolStart =
-//        max(24, R + 2K).
+//    e4  the roster: R = 18 + the seeded garrisons (the generated bases add
+//        nothing to R), poolStart = max(24, R + 2K).
 //  The save round trip of the seeded bases is guerrilla_bases_detect_eden_save.seq.
 // ============================================================================
 
@@ -33,8 +35,12 @@ bdFnNear = {bdNT = _this select 0; bdNP = [_this select 1, _this select 2, 0]; b
 // zones of any type within r of [x, z]: [x, z, r] call bdFnWithin
 bdFnWithin = {bdWP = [_this select 0, _this select 1, 0]; bdWN = 0; bdWI = 0; while {bdWI < gmZoneCount} do {bdWZ = gmZone bdWI; if (([(bdWZ select 8) select 0, (bdWZ select 8) select 1, 0] distance bdWP) <= (_this select 2)) then {bdWN = bdWN + 1}; bdWI = bdWI + 1}; bdWN}
 // R: the occupier roster's summed garrisonMax (OCCUPIER-FORCES.md 5.1: every
-// military zone the occupier owns at boot; gmZoneSim slot 7 is garrisonMax)
-bdFnR = {bdRS = 0; bdRI = 0; while {bdRI < gmZoneCount} do {bdRZ = gmZone bdRI; if (((bdRZ select 1) in ["AIRFIELD", "SEAPORT", "OUTPOST"]) and ((bdRZ select 2) == gmOccupierSide)) then {bdRS = bdRS + ((gmZoneSim bdRI) select 7)}; bdRI = bdRI + 1}; bdRS}
+// military zone the occupier owns at boot; gmZoneSim slot 7 is garrisonMax).
+// Generated bases (5.7, gmGeneratedBases) are not in R: the pool gives them
+// no share (the conservation stand-in), so they are skipped here.
+bdGenNames = []
+{bdGenNames = bdGenNames + [_x select 0]} forEach gmGeneratedBases
+bdFnR = {bdRS = 0; bdRI = 0; while {bdRI < gmZoneCount} do {bdRZ = gmZone bdRI; if (((bdRZ select 1) in ["AIRFIELD", "SEAPORT", "OUTPOST"]) and ((bdRZ select 2) == gmOccupierSide) and (not ((bdRZ select 0) in bdGenNames))) then {bdRS = bdRS + ((gmZoneSim bdRI) select 7)}; bdRI = bdRI + 1}; bdRS}
 // garrisonMax summed over the gmSeededBases rows' zones
 bdFnSeededR = {bdQS = 0; {bdQI = gmZoneIndex (_x select 0); if (bdQI >= 0) then {bdQS = bdQS + ((gmZoneSim bdQI) select 7)}} forEach gmSeededBases; bdQS}
 // the poolStart the roster implies: max(forcesPoolMin 24, R + forcesPoolPerTown 2 * K)
@@ -78,7 +84,7 @@ triAssertGe [(count (bdRowS select 4)), 2]
 
 // ---- e3: nothing else ------------------------------------------------------
 triAssertEq [(count bdSeeded), 2]
-triAssertEq [("OUTPOST" call bdFnCount), 3]
+triAssertEq [("OUTPOST" call bdFnCount), 3 + (count gmGeneratedBases)]
 bdSP = gmZoneIndex "Saint Phillippe"
 triAssertGe [bdSP, 0]
 triAssertEq [((gmZone bdSP) select 1), "CITY"]
