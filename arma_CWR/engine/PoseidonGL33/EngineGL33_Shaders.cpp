@@ -1939,6 +1939,10 @@ void EngineGL33::ApplyGammaPass()
 
 void EngineGL33::DeinitPixelShaders()
 {
+    if (_experimentalSkyProgram) glDeleteProgram(_experimentalSkyProgram);
+    if (_experimentalSkyVao) glDeleteVertexArrays(1, &_experimentalSkyVao);
+    _experimentalSkyProgram = _experimentalSkyVao = 0;
+    _experimentalSkyFailed = false;
     glUseProgram(0);
     for (int v = 0; v < NVertexShaders; v++)
         for (int s = 0; s < NPixelShaderSpecular; s++)

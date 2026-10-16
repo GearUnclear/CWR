@@ -446,6 +446,9 @@ class EngineGL33 : public Engine
 
     // Composite the gamma curve onto the finished frame.
     void ApplyGammaPass();
+    bool DrawExperimentalSky(float skyThrough) override;
+    unsigned _experimentalSkyProgram = 0, _experimentalSkyVao = 0;
+    bool _experimentalSkyFailed = false;
     void DestroyGammaTarget();
     unsigned int _gammaTex = 0;
     unsigned int _gammaVao = 0;

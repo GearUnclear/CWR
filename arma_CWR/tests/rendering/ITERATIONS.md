@@ -302,3 +302,56 @@ Its greater draw/triangle ceiling is not justified by the observed art result.
 M remains one research stage with diagnostic and art subtests; no grass prototype
 code is included in this checkpoint. The standalone UV probe is published for
 reproducibility, not as proof of full engine acceptance.
+
+### M4 disposition
+
+M4b increased local patch density and batched the shared blades. Patches became
+visible at native output size, but independent review still found modest sparse
+sprouts rather than compelling groundcover. In one ordered software-renderer
+fixed-LOD comparison, mean frame times changed from 57.28/56.15/62.68 ms to
+67.07/60.00/69.93 ms; a moving-camera window changed from 56.40 to 61.12 ms.
+Instancing limited additional stationary draw calls to 8/8/7. These are local
+measurements, not representative hardware costs or isolated universal estimates.
+M4b is preserved locally and parked, not included in the published renderer.
+
+Centered barrel spawning/movement/deletion exercised Thing exclusion and recovery:
+9 sites suppressed after spawn, 3 at the moved destination, zero after deletion;
+the final image exactly matched its baseline. The static index did not rebuild.
+A road-area capture rejected all samples through nongrass/mixed-surface gating;
+it did not exercise the roadway-specific rejection branch.
+
+## N: analytic clear-day sky, retained N2 opt-in checkpoint
+
+N is the fourteenth research stage. Its initial smooth background was rejected:
+a gray/overcast appearance mismatched crisp sunlight, and near-white authored
+sky modulation multiplied by accommodation caused broad highlight clipping.
+N2 uses those inputs as bounded brightness/tint for an explicit artistic blue
+profile, pale low-angle haze and a localized sunward aureole. The true horizon
+matches existing fog color; terrain lighting and final exposure/gamma are unchanged.
+
+Independent review of matched native-resolution gameplay and higher-angle views
+retains N2 as a modest, coherent clear-day improvement. Repeated dome texture
+bands are reduced while separate cloud wisps, sun and halo remain. The dome's
+own baked texture contribution is intentionally replaced. Qualitative night
+ON/OFF captures remained dark without a bright-sky regression; they are not
+bitwise-equivalence or all-weather acceptance evidence.
+
+The first clean candidate's full suite caught a raw depth-mask ownership
+violation. Candidate v2 fixes this through scoped Core depth/stencil and color
+write-state helpers without weakening the audit. Exact v2 demo captures rendered
+all three scenes successfully and passed independent appearance review. Clean
+captures use ordinary adaptive LOD, so foreground-detail differences are not
+attributed to the sky; controlled comparisons used separately preserved QA builds.
+
+Verification: 118 extracted-sky GLSL checks, 512 actual-GL helper restoration
+cases, original 26 and material 475 rendering checks, and 11 allocator checks.
+The full candidate no-game-data suite passed 3,021 cases, with 12 OpenAL-device
+skips and 2,306,963 passing assertions. Its external build reused 198 previously
+staged tracked synthetic fixture files; it was not a fresh CMake-only fixture
+layout. Helper tests isolate actual state restoration, not complete caller cache
+integration. The engine's first-draw touched-state verifier also reported success.
+
+Default remains off; activation is `CWR_EXPERIMENTAL_SKY=1`. Hard activation
+transitions, other weather/viewport/material combinations, extreme HDR behavior,
+representative hardware cost and full official Remaster acceptance remain open.
+No grass, fixed-LOD QA, game assets, screenshots or binaries are published with N2.

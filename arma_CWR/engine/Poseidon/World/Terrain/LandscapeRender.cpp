@@ -1673,7 +1673,8 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
-    _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    if (!GEngine->DrawExperimentalSky(SkyThrough()))
+        _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
     float starsVisibility = (
         // see TLVertexMesh::DoStarLighting
         // overcast limitation

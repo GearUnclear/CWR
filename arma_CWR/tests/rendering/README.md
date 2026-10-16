@@ -177,3 +177,29 @@ python arma_CWR/tests/rendering/test_uv_sampling_gl33.py --report uv-sampling-re
 The self-contained synthetic shader probe asserts finite opaque-white sampling with nondegenerate triangle UVs, using ordinary filtering and the supported maximum anisotropy capped at 16. Unsupported anisotropy cases are explicitly skipped; context/dependency errors are not successful skips. The JSON report includes driver/version, requested/applied anisotropy, sampler/texture settings and all repeated samples.
 
 Constant-UV samples are recorded without asserting a driver-specific failure. Mesa 25.0.7 llvmpipe produced NaN with constant UV at 16x while nondegenerate UV remained white; other drivers may correctly sample both. This does not test engine GLSL, material distribution, full-game behavior or hardware performance. Run separately from timed rendering benchmarks to avoid contention.
+
+### Experimental N2 daytime sky shader
+
+Requires Python `numpy`, `moderngl` and EGL/OpenGL 3.3. From the repository root:
+
+```sh
+python arma_CWR/tests/rendering/test_sky_gl33.py --report sky-report.json
+# To test a preserved variant rather than the current checkout:
+python arma_CWR/tests/rendering/test_sky_gl33.py --source path/to/EngineGL33_ExperimentalSky.cpp --report sky-report.json
+```
+
+The fixture extracts both GLSL literals unchanged from the selected C++ file and executes 118 named checks: horizon continuity, lower-hemisphere discard, finite/bounded output, cropped viewport, pitched/rolled camera ray registration, authored-color scaling, mission-value highlight bounds, blue zenith and haze. Reports include the exact source SHA256 and driver/version. No game assets are needed.
+
+`clearSky=0` verifies the shader's horizon-color identity only. It does not execute the engine's weather/night/NVG activation or legacy fallback gates, C++ GL-state restoration, cloud ordering, camera motion or renderer integration. These need separate actual-engine validation. This is a default-off clear-day candidate, not all-weather acceptance or a hardware-performance benchmark.
+
+Activation: set `CWR_EXPERIMENTAL_SKY=1` in the game process environment before launch. It is disabled by default and currently has no graphics-menu toggle. GL33 uses the analytic sky only in full daylight with sun elevation above 10 degrees, night vision off, supported world target/projection and positive sky-through. Unsupported conditions or shader failure retain the original dome. Existing separate cloud/celestial passes remain, but the replaced dome's baked texture contribution does not. Low-sun/weather activation transitions and extreme HDR clipping remain experimental limits.
+
+### Scoped background write-state helpers
+
+```sh
+python arma_CWR/tests/rendering/test_background_state_gl33.py --report background-state-report.json
+```
+
+Requires ModernGL/EGL, a C++17 compiler, desktop OpenGL headers and linker library. `--depth-header` and `--pipeline-header` select frozen headers; `--compiler`, repeatable `--include-dir` and `--gl-library` override local build discovery. The exact headers are compiled unchanged into a temporary shared library. A temporary `glad/gl.h` adapter supplies system GL declarations; calls execute real GL, not state mocks.
+
+512 cases cover all depth/stencil enable combinations, depth write masks and RGBA write masks through early-return destruction, explicit repeated restoration, inert restoration after later state changes, and nested scopes. Depth comparison and distinct front/back stencil functions, references, masks and operations must remain untouched. Ownership noncopyability is checked at compile time. This isolates helper behavior, not engine cache invalidation, caller gates, full render ordering or hardware performance.

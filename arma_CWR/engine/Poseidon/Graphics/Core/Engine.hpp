@@ -428,6 +428,9 @@ class Engine : public IGraphicsEngine
     virtual void SetMsaaSamples(int /*samples*/) {}
     virtual int GetMsaaSamples() const { return 0; }
 
+    // Experimental world-sky replacement; false preserves the authored dome.
+    virtual bool DrawExperimentalSky(float /*skyThrough*/) { return false; }
+
     // Instanced-run mode: the scene batches a sorted run of
     // identical static shapes; backends that support it draw every TL section
     // once with K instances. Defaults keep unsupporting backends scalar
