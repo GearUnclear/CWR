@@ -293,6 +293,7 @@ class Engine : public IGraphicsEngine
     float _avgBrightness; // average screen brightness
     bool _nightVision;
     bool _multitexturing;
+    bool _terrainBaseDraw = false; // producer provenance, captured at mesh preparation
     render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
     int _showFps;
     AspectSettings _aspectSettings;
@@ -446,6 +447,8 @@ class Engine : public IGraphicsEngine
     // family explicitly rather than inferring it from `NoDropdown` bit
     // propagation.  Defaults to `None`, where the descriptor falls back to
     // `NoDropdown` inference.
+    bool GetTerrainBaseDraw() const { return _terrainBaseDraw; }
+    void SetTerrainBaseDraw(bool value) { _terrainBaseDraw = value; }
     render::PassKindHint GetPassKindHint() const { return _passKindHint; }
     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }

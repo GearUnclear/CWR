@@ -262,6 +262,7 @@ void EngineGL33::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // end-of-frame; the actual GL draw happens inline below).
     DrawItem item = _currentDrawItem;
     item.isTLDraw = true;
+    item.terrainDetail = _lastApplied.valid && _lastApplied.d.terrainDetail;
     item.sectionBegin = beg;
     item.sectionEnd = end;
     item.firstIndex = siBeg.beg;

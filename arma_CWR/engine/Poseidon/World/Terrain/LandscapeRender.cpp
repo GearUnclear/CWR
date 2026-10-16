@@ -1338,6 +1338,13 @@ void Landscape::DrawGround(const LandBegEnd& bigRect, Scene& scene, const Ground
                             animLand.SetBrigth(layer.bright);
                         }
 #if 1
+                        struct TerrainBaseScope {
+                            Engine& engine;
+                            bool previous;
+                            TerrainBaseScope(Engine& e, bool base) : engine(e), previous(e.GetTerrainBaseDraw())
+                            { engine.SetTerrainBaseDraw(base); }
+                            ~TerrainBaseScope() { engine.SetTerrainBaseDraw(previous); }
+                        } terrainScope(*GEngine, !layer.isAlpha);
                         shape->Draw(anim, lights, ClipAll, 0, trans, iTrans);
 #endif
                         if (layer.isAlpha)

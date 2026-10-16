@@ -476,3 +476,92 @@ The exact clean N3 binary also rendered three midpoint dawn views at effective
 midpoint's blended cloud structure and grounded scene without an obvious resolve
 or horizon regression. These integration images do not replace the controlled
 14-frame transition sequence or establish all-weather acceptance.
+
+## P / P1: terrain-only detail relief (stage 16)
+
+P first established routing and signal, not a beauty improvement. An explicit
+hardware base-terrain owner is captured into deferred draw state and then gated
+by each section descriptor. PSDetail alone is not a terrain identifier. Default-off
+cyan and detail-alpha display modes showed eligible terrain in three actual
+views while sky, opaque objects, foliage, weapon and net/poles stayed separate.
+The sampled detail-alpha signal varied locally and approached uniform gray at
+distance. Display gamma/MSAA mean diagnostic gray is not raw numeric alpha.
+
+P1 treats that authored detail alpha as an approximate small height field, not
+new geometry or an authored normal map. Only direct Lambert sunlight uses the
+perturbed normal. Ambient hemisphere, forced sun, specular, shadow visibility,
+fog and alpha keep their original inputs. Nominal height scale is 0.04m, slope
+cap 0.35, with smooth pixel-footprint fade from 0.06 to 0.35m and distance fade
+from 15 to 60m. Degenerate/mirrored frames are guarded; constant-height and fully
+faded paths return the original normal exactly. Default remains off.
+
+Independent matched-still review retained a modest default-off candidate:
+near-ground roughness is visible at native 960x640, strongest in first-person,
+but it can look slightly etched/pebbled. No stronger beauty tuning was attempted.
+Selected adjacent pairs from 16 small lateral and 24 forward steps per mode showed
+no obvious new discontinuity, broad pulse, fade ring or contact detachment. This
+is sampled-frame review, not zero shimmer or continuous-video acceptance.
+
+Diagnostics passed 589,824 descriptor assertions across 196,608 configurations,
+15 source ownership guards and 360 actual-GLSL checks. P1 adds 130 actual-GL checks
+covering slope/finite/mirrored/degenerate behavior, reversed sun response, constant
+and faded identity, excluded/default-off paths, protected lighting and surviving
+alpha. The exact candidate full suite passed 3,021 cases / 2,306,963 assertions
+with the same 12 audio skips and staged-fixture limitations described above.
+
+P1 failed the broader dawn artistic gate: at approximately 12.5 degrees sun
+height, all three views became conspicuously stippled/etched, like a pebble or
+emboss filter. The original dawn palette and grounded shadows remained intact;
+the new grain was the issue. Disposition: daytime KEEP experimentally, low-sun
+REVISE; P1 is not published as an accepted feature. P2 will test a bounded
+geometric-incidence fade rather than increase strength or change global exposure.
+
+P2 (not published) added a smooth slope multiplier driven by the original
+geometric sun incidence, zero at/below 0.15 and full at/above 0.45. It passed 175
+actual-GL checks, preserving the 130 P1 cases plus 45 incidence checks, and the
+full suite. Actual dawn review nevertheless found no meaningful correction:
+one fixed-camera foreground region was pixel-identical to P1 and other near-ground
+regions differed only slightly. Disposition: REVISE, not an improvement. Further
+motion/performance testing was deferred pending actual incidence/upload diagnosis;
+no stale-light or terrain-normal cause is assumed without measurement.
+
+P1 source-cell crossing showed no new seam at the verified 50m boundary Z=5400,
+X=6710.5. Forward/reverse images matched within each mode. Adjacent texture IDs
+were not decoded, so this is not proof of mixed-material transition handling.
+The low 0.45m camera also makes the existing etched/blocky appearance more obvious.
+
+P2 diagnostic readback showed uploaded and current sun directions agreeing at
+sampled dawn/day draws. Actual fragment incidence/fade views showed the sloping
+foreground retaining the full local gate. Screenshot channels were gamma-affected,
+not raw float measurements. This evidence did not support a stale-sun hypothesis.
+
+P3 retains the local gate and adds the same smoothstep to world sun-direction Y
+(0.15 to 0.45), explicitly an artistic low-sun safeguard. It genuinely suppresses
+P1/P2's dawn etching while keeping the modest daytime gain. The critic retained
+it as a default-off candidate, not a scene-wide transformation. Selected matched
+motion pairs showed no obvious new pop, broad pulse or detached contact shadow;
+this does not prove continuous-video or mixed-material stability.
+
+Four alternating performance runs used one QA binary and unchanged settings.
+Paired mean milliseconds in the three views were OFF 63.795/57.785/66.315 and ON
+62.295/61.435/67.26. Calls stayed 884/893/878. Costs were mixed and view-dependent,
+including a slower middle view; no zero-overhead, speedup or hardware-GPU claim.
+
+P3 passed 205 actual-GL checks with preserved historical snapshots. The published
+suite also supports a fresh checkout using the published N3 baseline: 195 checks
+plus ten historical parity checks explicitly marked NOT RUN when old snapshots
+are absent. An independent vector oracle replaces reliance on unpublished P2
+output for elevation expectations. Original 26, current H3 material 457 and O2
+shadow-comparison 504 checks also pass against the frozen P3 shader.
+
+Final exact clean P3 integration passed independent review: paired daytime OFF/ON,
+dawn ON and night ON, three views each, effective 4x MSAA / 150% scale with no QA
+LOD override. Modest daylight foreground relief survives AA; dawn stays restrained
+and night stays dark without obvious glow. Adaptive-LOD detail differences are
+not relief gains. P3-specific cell crossings, mixed-material boundaries, sunrise
+motion and representative hardware performance remain unverified.
+
+The diagnostic suite's strict wiring guard now explicitly supports P3's factored
+terrainEligible predicate and both zero resets. Current P3 rerun passes all
+589,824 descriptor assertions, 15 guards and 360 actual-GLSL checks against the
+published N3 baseline. No ownership or exclusion assertion was relaxed.

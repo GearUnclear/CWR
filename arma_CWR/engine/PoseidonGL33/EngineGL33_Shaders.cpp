@@ -240,6 +240,7 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
 };
 
 uniform sampler2D tex0;
@@ -441,6 +442,7 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
 };
 
 uniform sampler2D tex0;
@@ -468,11 +470,42 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+// Approximate authored detail alpha as a small height field, not geometry/AO.
+// Derivatives are evaluated before shadow control flow and alpha discard.
+vec3 terrainLambertNormal;
+vec3 terrainReliefNormal(vec3 n, vec3 dpdx, vec3 dpdy, vec2 dh, float distanceToCamera) {
+    if (terrainControl.y <= 0.0 || vSkyAmbient.w <= 0.0 || vSunTerm.w < 0.5) return n;
+    if (any(isnan(dpdx)) || any(isinf(dpdx)) || any(isnan(dpdy)) || any(isinf(dpdy)) ||
+        any(isnan(dh)) || any(isinf(dh))) return n;
+    float footprint = max(length(dpdx), length(dpdy));
+    vec3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
+    float determinant = dot(dpdx, r1);
+    float frameScale = length(dpdx) * length(dpdy);
+    if (frameScale < 1e-12 || abs(determinant) <= frameScale * 1e-5) return n;
+    // Signed determinant preserves the same world slope for mirrored frames.
+    vec3 slope = terrainControl.y * (r1 * dh.x + r2 * dh.y) / determinant;
+    if (any(isnan(slope)) || any(isinf(slope))) return n;
+    float magnitude = length(slope);
+    if (magnitude == 0.0) return n; // exact constant-height identity
+    slope *= min(1.0, terrainControl.z / max(magnitude, 1e-8));
+    // Restrain grazing-light embossing using the unperturbed geometric normal.
+    // High-incidence response is unchanged; this is not ambient/exposure scaling.
+    float incidenceFade = smoothstep(.15, .45, max(dot(n, vSunDirection), 0.0));
+    // Artistic low-sun safeguard: sun-facing slopes can have high local incidence
+    // at dawn. Reuse the same bounded transition, without changing daylight energy.
+    float elevationFade = smoothstep(.15, .45, max(vSunDirection.y, 0.0));
+    float fade = (1.0 - smoothstep(.06, .35, footprint))
+               * (1.0 - smoothstep(15.0, 60.0, distanceToCamera)) * vSkyAmbient.w
+               * incidenceFade * elevationFade;
+    if (fade <= 0.0) return n; // exact low-sun/grazing/distant/large-footprint identity
+    return normalize(n - slope * fade);
+}
+
 vec3 surfaceLighting(float sunVisibility) {
     // Preserve prelit TL/screen draws exactly; only normal-bearing meshes use this path.
     if (vSunTerm.w < 0.5) return vColor.rgb;
     vec3 n = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
-    float nDotL = max(dot(n, vSunDirection), 0.0);
+    float nDotL = max(dot(terrainControl.y > 0.0 ? terrainLambertNormal : n, vSunDirection), 0.0);
     // Do not discard irradiance above1 before the albedo can attenuate it.
     // Material-stage RGB is bounded below, then saturated after texturing.
     // Experimental hemispheric irradiance: world Y is up. This is a sky/ground
@@ -506,6 +539,12 @@ vec3 texturedLighting(vec3 albedo, float visibility) {
 }
 
 void main() {
+    terrainLambertNormal = vLightNormal * inversesqrt(max(dot(vLightNormal, vLightNormal), 1e-8));
+    if (terrainControl.y > 0.0 && vSunTerm.w > 0.5 && vSkyAmbient.w > 0.0) {
+        float detailHeight = texture(tex1, vUV1).a;
+        terrainLambertNormal = terrainReliefNormal(terrainLambertNormal, dFdx(vWorldRel), dFdy(vWorldRel),
+                                                  vec2(dFdx(detailHeight), dFdy(detailHeight)), length(vWorldRel));
+    }
     float sunVisibility = 1.0;
     if (shadowCtl.x > 0.5) {
         // Tiered shadow maps: the first omniCount tiers are camera-centred spheres
@@ -622,6 +661,10 @@ void main() {
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+    // Diagnostic outputs only; no micro-relief or material-lighting change yet.
+    if (terrainControl.x > 0.5 && vSunTerm.w > 0.5) {
+        fragColor.rgb = terrainControl.x < 1.5 ? vec3(0.0, 1.0, 1.0) : vec3(t1.a);
+    }
 }
 )";
 
@@ -640,6 +683,7 @@ layout(std140) uniform PSConstants {
     vec4 cascadeSplits;// c24: per-tier select distance (omni: radius; frustum: far eye-depth)
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26: camera forward (eye-depth = dot(vWorldRel, camFwd))
+    vec4 terrainControl; // c27: diagnostic mode, explicit terrain provenance
 };
 
 uniform sampler2D tex0;
@@ -1071,7 +1115,7 @@ static GLuint LinkGLProgram(GLuint vs, GLuint fs, const char* name)
 }
 
 static float s_vsShadow[280] = {}; // 70 vec4 slots — through SlotLightVP (c66-c69)
-static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
+static float s_psShadow[112] = {}; // 28 vec4 slots — c8-c23 cascadeVP[4], c24 splits, c25 ctl, c26 camFwd
 
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;

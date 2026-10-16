@@ -275,3 +275,91 @@ python arma_CWR/tests/rendering/test_sky_gl33.py --source path/to/clean/EngineGL
 ```
 
 This exits without a GL context. Seven source checks cover QA-only injection isolation, zero-weight/compile ordering, real invalid fragment compilation, shader cleanup and failed-state fallback returns. They are not executed engine-failure or fallback-image tests; the QA source is preserved separately and is not production code.
+
+### Experimental terrain direct-sun relief (P3, default off)
+
+`CWR_TERRAIN_RELIEF=1` enables the nominal terrain-only prototype (.04 height
+scale, .35 maximum slope). `CWR_TERRAIN_RELIEF=2` is an exaggerated diagnostic
+(.08/.70), not the recommended visual setting. Unset or other values disable it.
+Only explicitly owned, opaque, lit detail-textured terrain is eligible. The
+perturbed normal affects direct-sun Lambert response, not geometry, ambient,
+local/emissive light, or shadow-map visibility.
+
+Separate `CWR_TERRAIN_DIAGNOSTIC=1` shows eligible terrain cyan;
+`CWR_TERRAIN_DIAGNOSTIC=2` displays sampled detail alpha as grayscale. These are
+routing/signal views, not relief or beauty modes. Leave this flag unset when
+reviewing relief. Displayed grayscale is not raw numeric texture analysis.
+
+P1's daytime result was retained experimentally but dawn looked conspicuously
+etched. P2's local geometric-incidence fade did not sufficiently suppress tilted
+terrain at dawn. Actual uploaded/current sun directions agreed: this was not a
+stale-uniform diagnosis. P3 retains that local gate and adds a global sun-elevation
+smoothstep (.15 to .45 in direction Y), explicitly an artistic low-sun safeguard,
+not a physical lighting correction. Distance and pixel-footprint fades remain.
+Actual day/dawn and sampled-motion reviews retained a modest default-off candidate.
+See ITERATIONS.md for capture and cost evidence; do not infer visual or performance
+acceptance from these automated tests.
+
+From a repository checkout containing the published N3 commit:
+
+```sh
+git show a514a696700ce4acf1479d9c4daf42b211ca8a04:arma_CWR/engine/PoseidonGL33/EngineGL33_Shaders.cpp > /tmp/cwr-N3-shaders.cpp
+cd arma_CWR
+python arma_CWR/tests/rendering/test_terrain_relief_gl33.py \
+  --baseline /tmp/cwr-N3-shaders.cpp --report /tmp/terrain-relief.json
+```
+
+The source defaults to the checkout shader and the model defaults to P3. This
+reproducible mode runs 195 checks and explicitly reports ten unavailable
+historical parity checks as NOT RUN, not PASS. The independent Python oracle
+solves the tangent-plane gradient with linear algebra and applies the bounded
+slope and fades; it neither rewrites current GLSL nor relies on unpublished P2
+output. Requires Python numpy/moderngl and EGL/OpenGL 3.3.
+
+To additionally reproduce all 205 checks, supply preserved experimental shaders
+with `--p1-source /path/to/P1/EngineGL33_Shaders.cpp` and
+`--p2-source /path/to/P2/EngineGL33_Shaders.cpp`. These enable six exact P1 and four
+exact P2 parity comparisons. Historical `--model p1` and `--model p2` remain
+explicit; sources/models are never silently auto-detected. The original full
+205-check reports remain preserved separately from the fresh-checkout report.
+
+The suite compiles unchanged extracted GLSL and its original helper with
+synthetic planar geometry/detail ramps. Coverage includes finite/slope bounds,
+constant height, mirrored/degenerate frames, fade continuity, independent
+geometric/global elevation oracles, protected-light contribution,
+disabled/excluded paths and surviving fragment alpha.
+
+This is not actual-engine ownership/cache execution, proof of terrain art quality,
+cutout rasterization, temporal stability, full Remaster validation, or hardware
+performance. The diagnostic suite separately tests descriptor classification and
+synthetic cyan/detail-alpha output. No game assets or capture images are included.
+
+Current diagnostic suite, from `arma_CWR`, with the same published N3 baseline:
+
+```sh
+python arma_CWR/tests/rendering/test_terrain_diagnostic_gl33.py \
+  --engine-root engine --baseline /tmp/cwr-N3-shaders.cpp \
+  --report /tmp/terrain-diagnostic.json
+```
+
+Use a complete engine source tree, not a changed-files-only patch snapshot:
+the exact descriptor compile also needs unchanged `RenderFlags.hpp`. Current
+P3 passes all 589,824 descriptor assertions, 15 ownership/reset source guards
+and 360 synthetic actual-GL diagnostic checks. The source guard recognizes
+both the original inline eligibility expression and P3's explicitly factored
+ownership expression with zero resets; it does not waive ownership conditions.
+
+### Terrain-detail diagnostic contract (not a beauty effect)
+
+```sh
+python arma_CWR/tests/rendering/test_terrain_diagnostic_gl33.py --engine-root arma_CWR/engine --baseline /tmp/cwr-N3-shaders.cpp --report terrain-diagnostic.json
+```
+
+Requires C++17 (`--compiler`), NumPy, ModernGL and EGL/OpenGL 3.3. The coherent engine root must include the diagnostic source files and unchanged RenderFlags.hpp. Exact descriptor headers compile without mocks. 196,608 classification configurations yield 589,824 assertions including descriptor equality and nonowner reset. Fifteen source guards cover captured mesh provenance, scoped restoration/defaults, dedicated UBO slot and explicit zero upload; they do not execute engine draw-queue or state-cache transitions.
+
+360 actual-fragment checks use synthetic vertex outputs and controlled detail-alpha textures. Mode0 is bitwise identical to the selected pre-diagnostic source. Modes1/2 produce cyan or sampled detail alpha only for normal-bearing Detail fragments; normal, grass and prelit exclusions preserve baseline results. Surviving-fragment alpha is retained. These are diagnostic validation tests, not proof that real terrain assets provide a useful relief signal, correct terrain eligibility in actual captures, a beauty improvement, alpha-discard coverage or hardware performance.
+
+The current wiring guard explicitly supports the original P inline ownership test
+and the P3 terrainEligible definition with both diagnostic and relief zero-reset
+expressions. The current P3 suite passes the same assertion counts. Use the
+published N3 baseline extracted above; historical local snapshots are optional.
