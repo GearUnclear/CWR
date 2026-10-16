@@ -43,6 +43,21 @@
 // draws first through Draw(): it takes from the pool between director
 // ticks, so an exhausted occupier fills its garrisons before its pool.
 //
+// THE CEILING (5.5, 2026-10-16).  Nothing but a wave puts the pool above
+// poolStart.  Every Refund (hull refunds, crew and survivors sent home, the
+// surplus over a base's room, partial-spawn failures, cancelled operations)
+// is capped at PoolCeiling() = poolStart + the wave headroom, and the rest
+// is dropped with one INFO line "ledger: N unit(s) over poolStart dropped"
+// and booked in Dropped() (a term of the 5.5 equation beside the losses).
+// Without the cap the refill topped the pool up to poolStart while an
+// operation was out, and the operation's refund then landed above it (the
+// comparison video: 51 of 50, 53 of 50).  The headroom is what the landed
+// waves put above poolStart (LandWave raises it to the overshoot), so wave
+// strength spent and refunded comes back above poolStart.  At each refund
+// it shrinks to at most the strength that can still come back: the pool's
+// own overshoot, the units the ledger rows still hold and the refund
+// itself; wave strength lost in the field takes its headroom with it.
+//
 // BANDS (5.6).  Shares of poolStart with hysteresis: STRONG enter > 66 %,
 // leave < 60 %; THIN enter < 33 %, leave > 40 %; SPENT enter at 0, leave
 // > 10 %; STRETCHED between.  The band is re-stepped on every pool change.
@@ -167,6 +182,15 @@
 //   WON / LOST.  Nothing is launched, and no wave fires or lands, once
 //   CampaignEnd has latched the win or the loss.
 //
+// OPENERS (7.3, 2026-10-16).  A strike opener needs a defender to strike: at
+// least StrikeOpenerMinFighters reported in the target zone (for the HQ: its
+// zone, or, for an HQ outside every zone, the reported positions within
+// OpenerHqRadius of HqPos).  The director's census of defenders is its
+// sighting table (D9); with nobody reported there is nothing to strike, and
+// a base retake on an empty base buys no jet.  The launch and its opener are
+// one ledger movement under a BandHold, so the band is stepped once on the
+// net pool and an opener bought and refunded in the same step shows no edge.
+//
 // AIR (phase 6B; 6.5, D2, D3, D4).  Insertions: the transport helicopter
 // joins the package choice whenever the catalogue offers one, chosen like
 // any package (the cheapest meeting L_req and the minimum; URGENT takes the
@@ -177,7 +201,8 @@
 // source base.  STRIKES (7.3, D17): a jet or attack helicopter, bought ONLY
 // while STRONG, either on an URGENT held town with knownFighters >=
 // StrikeMinFighters that is not inside its strike window, or as the opener
-// of a director base retake or HQ assault.  It is bought right after the
+// of a director base retake or HQ assault with a defender reported
+// (OPENERS above).  It is bought right after the
 // ground operation on that target launches (a town strike alone when no
 // ground package can go) and takes no extra token.  The package: the
 // cheapest offered strike airframe the pool can pay (hull at the airfield
@@ -463,6 +488,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // block format that knows the native alarm answers (older = legacySave);
     // the rest of an alarm zone after CounterAttack refused its answer (s)
     static constexpr int StrikeMinFighters = 3;
+    // a base or HQ opener needs a defender reported (7.3, 2026-10-16); for an
+    // HQ outside every zone, a reported position this close to HqPos (m)
+    static constexpr int StrikeOpenerMinFighters = 1;
+    static constexpr float OpenerHqRadius = 150.0f;
     static constexpr int SaveFormat = 6;
     static constexpr float AlarmRefusedRest = 60.0f;
     // the strike airframes the director may buy
@@ -622,13 +651,20 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     };
     // units back into the pool (survivors with no base, surplus, a flipped
     // base's live garrison, partial-spawn failures, hull refunds: 5.5).
-    // May exceed poolStart.  Inactive: no-op.
-    void Refund(int units, const char* why);
+    // Capped at PoolCeiling(): the rest is dropped (Dropped(), one INFO
+    // line).  Returns the units the pool took.  Inactive: no-op, 0.
+    int Refund(int units, const char* why);
     // diagnostics: bodies the occupier lost for good (the `lost` field)
     void NoteLoss(int units, const char* why);
     // a reinforcement wave lands (the phase-4 seam): bodies into the pool,
-    // above poolStart if need be, and the occupier war level rises
+    // above poolStart if need be (never capped), and the occupier war level
+    // rises; the wave headroom rises to the pool's overshoot
     void LandWave(int bodies);
+    // the most the pool may hold after a refund: poolStart + the wave headroom
+    int PoolCeiling() const { return _poolStart + _waveHeadroom; }
+    int WaveHeadroom() const { return _waveHeadroom; }
+    // refunded units the ceiling dropped (5.5: booked beside the losses)
+    int Dropped() const { return _dropped; }
     // S5 (3.3): a pending deposit whose zone changed owner is refunded to
     // this service's pool (GarrisonCache::SetPendingRefundHook).  The hook
     // credits the pool and claims the bodies only while Active(); otherwise
@@ -648,6 +684,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int TownCount() const { return _towns.Size(); }
     int TownGarrisons() const { return _G; }
     int Band() const { return _band; }
+    // the band on the pool as it stands: Band(), or inside a BandHold the
+    // band the pending movement would step to (not yet logged or stored)
+    int BandNow() const { return _bandHold > 0 ? StepBand(_band, _pool, _poolStart) : _band; }
     bool CanOperate() const { return CanOperateIn(_band, _pool, _poolStart, _tuning.poolFloor); }
     // the born-operation cap now (OpsMaxFor the current band); CounterAttack::
     // OpsCap reads it while the service is active
@@ -753,9 +792,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static int HeldAirfield(const ZoneRegistry& registry, Vector3Par pos);
     // the bought-when rule (7.3): may a strike go with an operation of
     // launchedKind on target (HqCandidate for the HQ)?  STRONG, a strike
-    // airframe offered, and either a base / HQ opener, or an URGENT held
+    // airframe offered, and either a base / HQ opener with at least
+    // StrikeOpenerMinFighters reported (OpenerFighters), or an URGENT held
     // town with >= StrikeMinFighters reported and outside its strike window
     bool StrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target, int launchedKind) const;
+    // the defenders a base or HQ opener would strike: the reported fighters
+    // of the target zone; for the HQ (HqCandidate) those of its zone, or with
+    // the HQ outside every zone the reported positions within OpenerHqRadius
+    // of HqPos (D9: the sighting table, never the true census)
+    int OpenerFighters(const ZoneRegistry& registry, const DirectorView& view, int target) const;
     // the strike package on target (HqCandidate for the HQ): go false when
     // no strike airframe is offered or the pool cannot pay any
     DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent) const;
@@ -1015,6 +1060,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int _wavesLanded = 0;
     int _waveRequests = 0;
     int _lost = 0;
+    // the ceiling (5.5, saved): wave units the pool may hold above poolStart,
+    // and the refunded units the ceiling dropped
+    int _waveHeadroom = 0;
+    int _dropped = 0;
     int _refillTotal = 0;
     int _wavesTotal = 0;
     bool _legacySave = false;

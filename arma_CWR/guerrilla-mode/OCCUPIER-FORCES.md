@@ -696,11 +696,32 @@ erodes until the player or his fighters come back (section 19).
 | Destroyed hull | lost |
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
 
+**The ceiling (2026-10-16).** Nothing but a wave puts the pool above
+poolStart. Every row above that credits the pool goes through
+`OccupierForces::Refund`, which caps the credit at `PoolCeiling()`
+(poolStart plus the wave headroom) and drops the rest, with one INFO line
+`ledger: N unit(s) over poolStart dropped` per refund and the count kept in
+`Dropped()` (saved). Without the cap the refill topped the pool back up
+while an operation was out, and the operation's refund then landed above
+poolStart (the comparison video: 51 of 50 after a jet opener, 53 of 50
+after an APC came home).
+- **Wave headroom.** A landed wave lifts the pool above poolStart, as 7.1
+  says, and the headroom rises to that overshoot, so wave strength spent
+  and refunded comes back above poolStart. At each refund the headroom
+  shrinks to at most what can still come back as wave strength: the
+  pool's own overshoot, the units the ledger rows still hold and the
+  refund itself. Wave strength lost in the field takes its headroom with
+  it.
+- **The refill** still fills only up to poolStart.
+- **A forced pool** (`gmForcesForce ["pool", n]`) carries its own headroom
+  (n - poolStart, or none).
+
 **The equation.** With nothing live:
 
-`pool + reserves + pending + op strength = poolStart + R + G + refill + waves - losses`
+`pool + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped`
 
-The unit tests assert it.
+`dropped` is the units the ceiling dropped (`Dropped()`); `losses` (the
+`lost` field) stays the bodies killed. The unit tests assert it.
 
 ### 5.6 Bands with hysteresis (D8, D15)
 
@@ -944,9 +965,9 @@ as bodies on top of the hull price.
    fastest package costing at most 1.5 x that. If none meets `L_req`, the
    most lethal affordable package goes, and its line says so.
    - **The arrival rule** (owner, 2026-10-15). When the cheapest lethal
-     package's arrival (`PackageQuote::seconds`: the straight distance from
-     its source over the package's speed, the "about N s" of the INFO line)
-     exceeds `forcesSlowEta` (900 s), any faster package costing at most
+     package's arrival (`PackageQuote::seconds`: the road quote below, the
+     "road N s" or "line x1.5 N s" of the INFO line) exceeds
+     `forcesSlowEta` (900 s), any faster package costing at most
      `forcesSlowCostShare` (3.0) x the cheapest may go. When it exceeds
      `forcesAirEta` (1500 s), a transport helicopter insertion may go
      whatever its price (from the occupier-held airfield, else off-map at
@@ -959,18 +980,50 @@ as bodies on top of the hull price.
      assaults (origin `CAODirector`) and to alarm answers outside THIN;
      not to push-out (6.4) or wave strikes (7.1), which keep the minimal
      package of their budget. One INFO line names it: "[op N] arrival rule
-     (forcesSlowEta): the cheapest, FOOT, needs about 1133 s; TRUCK goes,
-     about 128 s".
-   - **On Malden** (the distances of the base-generation diagnosis: foot
-     1.5 m/s, a Ural 13.3 m/s, a Mi17 53 m/s; a quiet 4-body retake: foot
-     4, truck 4 + 1 + 3 = 8, Mi17 4 + 2 + 10 = 16 units; distances
-     straight to the nearest ground base). Houdan (0.5 km), Le Port (0.6),
-     Dourdan (1.0) and Saint Louis (1.3, about 870 s) still get foot. La
-     Trinite (1.7 km, about 1130 s) and Arudy (2.2 km, about 1470 s) get a
-     truck (2 x foot, 2 to 3 minutes). Larche, Chapoi, Sainte Marie,
-     Cancon, Goisse, La Pessagne, Vigny and La Riviere (2.4 to 4.7 km,
-     foot 27 to 52 minutes straight, up to 68 by road) get a helicopter
-     insertion instead of the walk, when the pool can pay its 12 units.
+     (forcesSlowEta): the cheapest, FOOT, needs road 1139 s; TRUCK goes,
+     road 128 s".
+   - **The road quote** (2026-10-16, after the comparison video: a base
+     operation quoted at 1822 s straight arrived after 3393 s). A ground
+     package's seconds are the leg the counter-attack service marches (the
+     leg `CounterAttack::LegTime` times) over the package's speed:
+     - the road route's length when one is known: the service's own search
+       (`RoadRoute::Search` with the service's snap and join radii, from
+       the base to the target, then the last link to the target), cached
+       per (base, target) pair by `RoadQuoteCache` (`RoadRoute.hpp`). A
+       route CounterAttack already planned for the pair is reused (its
+       search records the length); otherwise the director plans the pair
+       itself, at most once per tick (a failure is cached too) and at most
+       6 pairs per tick. An entry lives 600 s of mission time; past that it
+       is planned again when the tick has budget, else served as it is;
+     - else the straight distance x `forcesRoadFactor` (1.5): no road route
+       (a pocket base, no road near the target), a road past the service's
+       detour rule (longer than 2 x the straight distance + 300 m: the force
+       cuts across), or a pair past the tick's plan budget.
+     Air (the helicopter insertion, the strike airframes) flies the straight
+     line, unchanged. The source of a package is the base with the
+     shortest leg for it (by road for a ground package, so a nearer base
+     whose road winds the long way round loses to one with the shorter
+     road). The INFO line names the quote it used: "road 1794 s", "line
+     x1.5 2733 s", or "line 42 s" for air (`ForcePackages::EtaNote`; the
+     last 16 are kept for `gmForcesEtaNotes`). Cost: a warm quote is one
+     hash lookup; the unit timing case holds 6 sources x 14 towns under
+     2 ms.
+   - **On Malden** (foot 1.5 m/s, a Ural 13.3 m/s, a Mi17 53 m/s; a quiet
+     4-body retake: foot 4, truck 4 + 1 + 3 = 8, Mi17 4 + 2 + 10 = 16
+     units; road lengths from `gmRoadRoute` on Guerrilla.Abel, 2026-10-16,
+     to the ground base with the shortest leg). Le Port (0.5 km of road
+     from Le Port Harbour), Dourdan (0.7 km from the Outpost), the Village
+     (the Outpost's road winds 1.5 km for 0.5 km straight, past the detour
+     rule: line x1.5, 0.8 km) and Saint Louis (1.3 km from the Airfield,
+     about 880 s) still get foot. La Trinite (1.7 km by road, about
+     1140 s) gets a truck (2 x foot, about 2 minutes). Arudy is the town
+     the road quote changes: 2.2 km straight from the Outpost (about
+     1480 s, a truck by the straight line) but 2.7 km by road (about
+     1790 s), so it gets the insertion. Larche, Chapoi, Sainte Marie,
+     Cancon, Goisse, La Pessagne, Vigny and La Riviere (by road from 2.9 km
+     for Chapoi to 6.5 km for La Riviere, foot 32 to 72 minutes) get a
+     helicopter insertion instead of the walk, when the pool can pay its 12
+     units.
    - **The refusal names the shortfall.** With no source able to spare the
      minimum, the line reads "no occupier base can spare the minimum (12
      needed, the largest single-base spare is 6: short 6)".
@@ -1266,9 +1319,28 @@ pays half income and no manpower.
   standing loss.
 
 **When a town strike is bought** (phase 6):
-- only while STRONG;
+- only while STRONG, read on the pool the ground operation leaves;
 - only on an URGENT held town with `knownFighters >= 3`, or as the opening
-  of a base or HQ assault.
+  of a base or HQ assault with at least one defender reported (2026-10-16).
+
+**The opener is a strike on defenders.** With nobody reported there is
+nothing to strike, so a base retake or HQ assault on a target whose
+sighting row is empty (or decayed) buys no opener, and the town rule above
+already keeps a standalone strike off a town with fewer than 3 reported.
+The director's census of defenders is its sighting table (D9, 6.1), never
+the true census. For the HQ the count is that of the zone it stands in;
+an HQ outside every zone counts the reported positions within 150 m of
+`HqPos`. The comparison video (tmp/of-director-video-3, both branches)
+showed the old rule buying a 23-unit jet for an empty base with 0 fighters
+reported. The `gmForcesForce ["strike", zone]` test lever still bypasses
+the rule.
+
+**One ledger movement.** The ground operation and its opener are bought
+under one `BandHold` (as the air re-plan, 197a7d3): the band is stepped
+once, on the net pool, when the hold closes, so an opener bought and
+refunded in the same step (a refused launch) shows no band edge. A
+strike that flies and comes home later is a real movement: its refund is
+capped at the ceiling (5.5) like any other.
 
 It never targets a hidden player position (D9).
 
@@ -1764,6 +1836,8 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | `forcesSpareCap` / `forcesSpareCapFloor` | OF (`gmForcesTune "spareCap"` / `"spareCapFloor"`) | 1 / 6 since 2026-10-15 (old: 0, the one-source rule) | 0/1 / 1..12 | The spare cap (7.2): a base retake or HQ assault no single base can source takes the largest single-base spare, never below the floor or above the minimum |
 | `forcesSlowEta` / `forcesSlowCostShare` | OF (`gmForcesTune "slowEta"` / `"slowCostShare"`) | 900 s / 3.0 since 2026-10-15 (old: `forcesSlowEta = 0`, off) | 0..86400 s (0 = off) / 1..5 | The arrival rule (6.5): past this ETA of the cheapest lethal package, any faster package within the share may go |
 | `forcesAirEta` | OF (`gmForcesTune "airEta"`) | 1500 s since 2026-10-15 (old: 0, off) | 0..86400 s (0 = off) | The arrival rule (6.5): past this ETA a transport helicopter insertion may go whatever its price |
+| `forcesRoadFactor` | OF (`gmForcesTune "roadFactor"`) | 1.5 since 2026-10-16 (old: the straight line, 1) | 1..5 | The road quote (6.5): a ground leg with no road route known (none, past the service's detour rule, or past the tick's plan budget) is quoted as the straight distance x this. A known road route is quoted as its length. Air always flies the straight line |
+| road quote cache (`RoadQuoteCache::DefaultTtl` / `DefaultPlansPerTick`) | OF (`RoadRoute.hpp`) | 600 s / 6 | constants | The road quote (6.5): an entry lives 600 s of mission time; the director plans at most 6 new pairs per tick, each pair at most once |
 | `forcesHqAssaultMin` | OF | 6 | 1..12 | Minimum HQ assault bodies |
 | `forcesLethalityMargin` / `forcesUrgentCostShare` | OF | 1.2 / 1.5 | 1..3 | Package choice |
 | prices: body, truck, armed car, APC, tank | OF | 1, 3, 4, 8, 14 | pool units | 6.5 |
@@ -1783,6 +1857,8 @@ Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
 | hull gate | CA | night above `NightEffect` 0.2: the headlight band; 2.5 m ray | constants | Hull births and deletions (review M8) |
 | Leftover check | CA | 30 s | constant | Leftover entries retried |
 | town strike effect | OF | struck town: support -40, standing -40, heat +15, panic, `struckUntil` +1200 s; towns within 2 km: -10 / -10 | | D17, D21 |
+| strike fighters (`StrikeMinFighters` / `StrikeOpenerMinFighters` / `OpenerHqRadius`) | OF | 3 / 1 / 150 m since 2026-10-16 (old: an opener needed none) | constants | Reported fighters a town strike needs; a base or HQ opener needs; the radius around `HqPos` an HQ outside every zone counts them in (7.3) |
+| pool ceiling (`PoolCeiling()`, wave headroom, `Dropped()`) | OF | poolStart + headroom; headroom = a landed wave's overshoot, shrunk at each refund to the overshoot + ledger rows + the refund | saved | Refunds never lift the pool above it; the rest is dropped and logged once per refund (5.5) |
 | occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 | 0..100 | Recovers +1 per 600 s toward 50; drives informant tips (chance `standing / 200` when >= 50), morale (skill x 0.8 below 25) and the refill factor `0.75 + 0.5 * mean / 100` |
 | HQ meter | GuerrillaBase | `captureRate` x min(HQ_ASSAULT units, 3) per tick within 150 m of `HqPos`; frozen by HOLD presence; decay `captureDecayAbandoned` | | D24 |
 | `occCapture` | ZoneRegistry | `captureRate` (6) x min(crew, `captureCrewCap` 3) per 3 s tick; both present: frozen; resistance alone: - `captureDecayDefended` (10); nobody: - `captureDecayAbandoned` (2) | 0..100 | Enemy base-retake meter, separate field |

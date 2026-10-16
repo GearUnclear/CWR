@@ -31,6 +31,11 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp> // DevMode (the director log toggle)
+#include <Poseidon/Foundation/Framework/Log.hpp>      // LogDetail (the ceiling line capture)
+
+#include <spdlog/sinks/callback_sink.h>
+#include <initializer_list>
+#include <memory>
 
 #include <algorithm>
 #include <filesystem>
@@ -790,9 +795,11 @@ TEST_CASE("OccupierForces - Draw grants what the pool holds; the floor stops ope
     CHECK(f.of.Band() == OFBandSpent);
     CHECK(f.of.Deposit(2, "revert") == 0);
     CHECK(f.of.Draw(1) == 1); // ... but D2 keeps running (D15)
-    // refunds may push the pool above poolStart
-    f.of.Refund(80, "surplus");
-    CHECK(f.of.Pool() == 82);
+    // a refund never pushes the pool above poolStart (5.5, the ceiling):
+    // the rest is dropped and booked
+    CHECK(f.of.Refund(80, "surplus") == 58);
+    CHECK(f.of.Pool() == 60);
+    CHECK(f.of.Dropped() == 22);
     CHECK(f.of.Band() == OFBandStrong);
     CHECK(OccupierForces::CanOperateIn(OFBandThin, 12, 60, 0.2f));
     CHECK_FALSE(OccupierForces::CanOperateIn(OFBandThin, 11, 60, 0.2f));
@@ -921,6 +928,205 @@ TEST_CASE("OccupierForces - the ledger is conserved through draws, operations, r
     CHECK(f.of.WavesTotal() == 30);
 }
 
+namespace
+{
+// every Core log payload while it lives (the director lines log at
+// DirectorLogLevel; the capture opens the logger to trace and restores it)
+struct CoreLines
+{
+    spdlog::logger* logger = LogDetail::Get(Poseidon::Foundation::LogCategory::Core);
+    std::vector<spdlog::sink_ptr> saved;
+    spdlog::level::level_enum savedLevel = spdlog::level::off;
+    std::vector<std::string> lines;
+    CoreLines()
+    {
+        saved = logger->sinks();
+        savedLevel = logger->level();
+        logger->sinks().clear();
+        logger->sinks().push_back(std::make_shared<spdlog::sinks::callback_sink_mt>(
+            [this](const spdlog::details::log_msg& m) { lines.emplace_back(m.payload.data(), m.payload.size()); }));
+        logger->set_level(spdlog::level::trace);
+    }
+    ~CoreLines()
+    {
+        logger->sinks() = saved;
+        logger->set_level(savedLevel);
+    }
+    // the lines containing every needle
+    std::vector<std::string> With(std::initializer_list<const char*> needles) const
+    {
+        std::vector<std::string> out;
+        for (const std::string& l : lines)
+        {
+            bool all = true;
+            for (const char* n : needles)
+            {
+                all = all && l.find(n) != std::string::npos;
+            }
+            if (all)
+            {
+                out.push_back(l);
+            }
+        }
+        return out;
+    }
+};
+} // namespace
+
+TEST_CASE("OccupierForces - the ceiling: a refund over poolStart is dropped once, booked, and the ledger holds",
+          "[game][guerrilla][occupierforces]")
+{
+    // the comparison video (tmp/of-director-video-3): the refill topped the
+    // pool back up while an operation was out, and the operation's refund
+    // then landed it above poolStart (A: 51 of 50; B: 53 of 50 after an APC
+    // came home).  Nothing but a wave lifts the pool above poolStart
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    int reserves = R + G;
+    int op = 0;
+    int losses = 0;
+    auto check = [&]()
+    {
+        // the dropped units leave the ledger beside the losses (5.5)
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), reserves, 0, op, P, R, G, f.of.RefillTotal(),
+                                                f.of.WavesTotal(), losses + f.of.Dropped()));
+    };
+    check();
+    REQUIRE(f.of.WaveHeadroom() == 0);
+    REQUIRE(f.of.PoolCeiling() == P);
+    // an APC of 11 leaves; the refill tops the pool back up meanwhile
+    REQUIRE(f.of.Spend(11, "APC"));
+    op += 11;
+    check();
+    f.of.Tick(f.registry, 3600.0f);
+    REQUIRE(f.of.Pool() == P);
+    check();
+    // the hull and its crew come home: nothing above poolStart, one line
+    CoreLines log;
+    CHECK(f.of.Refund(10, "hull home intact") == 0);
+    op -= 10;
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Dropped() == 10);
+    CHECK(log.With({"ledger: 10 unit(s) over poolStart dropped"}).size() == 1);
+    check();
+    // a partial refund: what fits goes in, the rest is dropped
+    REQUIRE(f.of.Spend(4, "truck"));
+    op += 4;
+    CHECK(f.of.Refund(1, "partial spawn") == 1); // room for it
+    op -= 1;
+    check();
+    CHECK(f.of.Refund(3, "surplus") == 3);
+    op -= 3;
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Dropped() == 10); // nothing over: nothing dropped, no line
+    CHECK(log.With({"over poolStart dropped"}).size() == 1);
+    check();
+    // the ledger never reads above the ceiling, whatever comes back
+    CHECK(f.of.Refund(25, "survivors with no base") == 0);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Dropped() == 35);
+    // those 25 were reserve bodies with no room: the fake ledger books them
+    reserves -= 25;
+    check();
+    CHECK(f.of.Lost() == 0); // the `lost` field still names the bodies killed only
+}
+
+TEST_CASE("OccupierForces - the ceiling keeps a landed wave's headroom; lost wave strength takes it",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    // a wave lifts the pool above poolStart (7.1) and the ceiling with it
+    f.of.LandWave(12);
+    CHECK(f.of.Pool() == P + 12);
+    CHECK(f.of.WaveHeadroom() == 12);
+    CHECK(f.of.PoolCeiling() == P + 12);
+    // wave strength spent and refunded comes back above poolStart
+    REQUIRE(f.of.Spend(10, "wave strike hull"));
+    CHECK(f.of.Refund(10, "hull home intact") == 10);
+    CHECK(f.of.Pool() == P + 12);
+    CHECK(f.of.Dropped() == 0);
+    // spent below poolStart, the refill tops the pool up meanwhile: the
+    // column home brings the pool back to the wave's level, and the units
+    // the refill credited in the meantime are the ones dropped
+    REQUIRE(f.of.Spend(20, "column"));
+    REQUIRE(f.of.Pool() == P - 8);
+    const int refill0 = f.of.RefillTotal();
+    f.of.Tick(f.registry, 300.0f);
+    const int credited = f.of.RefillTotal() - refill0;
+    REQUIRE(credited > 0);
+    REQUIRE(credited < 8);
+    CHECK(f.of.Refund(20, "column home") == 20 - credited);
+    CHECK(f.of.Pool() == P + 12);
+    CHECK(f.of.Dropped() == credited);
+    CHECK(f.of.WaveHeadroom() == 12);
+    // a second wave raises the headroom to its own overshoot
+    f.of.LandWave(3);
+    CHECK(f.of.Pool() == P + 15);
+    CHECK(f.of.WaveHeadroom() == 15);
+    // wave strength lost in the field takes its headroom with it: of 15
+    // spent, 12 are lost, so a later refund lifts the pool at most by what
+    // can still come back
+    REQUIRE(f.of.Spend(15, "column"));
+    f.of.NoteLoss(12, "column lost");
+    const int dropped0 = f.of.Dropped();
+    CHECK(f.of.Refund(3, "survivors") == 3);
+    CHECK(f.of.WaveHeadroom() == 3);
+    CHECK(f.of.Refund(4, "a surplus the refill already replaced") == 0);
+    CHECK(f.of.Pool() == P + 3);
+    CHECK(f.of.Dropped() == dropped0 + 4);
+    // a forced pool carries its own headroom (the gmForcesForce lever)
+    f.of.SetPool(P);
+    CHECK(f.of.WaveHeadroom() == 0);
+    f.of.SetPool(P + 5);
+    CHECK(f.of.WaveHeadroom() == 5);
+}
+
+TEST_CASE("OccupierForces - the ceiling survives save/load", "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-ceiling.bin";
+    const std::string config = AbelLikeConfig();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config, false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    f.of.LandWave(6);
+    REQUIRE(f.of.Spend(6, "op"));
+    f.of.Tick(f.registry, 1.0f); // the pool sits at poolStart: no refill, no headroom used
+    REQUIRE(f.of.Refund(9, "op home") == 6);
+    REQUIRE(f.of.Dropped() == 3);
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.Pool() == P + 6);
+    CHECK(loaded.WaveHeadroom() == 6);
+    CHECK(loaded.PoolCeiling() == P + 6);
+    CHECK(loaded.Dropped() == 3);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes back to the pool, the ledger holds",
           "[game][guerrilla][occupierforces]")
 {
@@ -945,8 +1151,9 @@ TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes 
     };
     auto check = [&]()
     {
+        // the units the ceiling dropped leave the ledger beside the losses
         CHECK(OccupierForces::ConservationCheck(f.of.Pool(), reserves, pending(), op, P, R, G, f.of.RefillTotal(),
-                                                f.of.WavesTotal(), losses));
+                                                f.of.WavesTotal(), losses + f.of.Dropped()));
     };
     check();
     // a revert refill of 4 into T0, paid by the pool, with the player
@@ -981,7 +1188,11 @@ TEST_CASE("OccupierForces - S5: a pending deposit whose zone changes owner goes 
     f.GiveToResistance("T1");
     GarrisonCache::RefundPending(f.registry, t1, true, px, pz);
     CHECK(f.Z("Base1").garrison == Approx(base1Left)); // the origin gets nothing back
-    CHECK(f.of.Pool() == poolBefore + 7);
+    // the pool is back at poolStart: the three are over the ceiling (5.5),
+    // dropped and booked, and the ledger still holds
+    REQUIRE(poolBefore + 4 == P);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Dropped() == 3);
     check();
     f.of.RemovePendingRefundHook();
     CHECK(GarrisonCache::GetPendingRefundHook() == nullptr);
@@ -3087,25 +3298,206 @@ TEST_CASE("OccupierForces - the bought-when rule refuses strikes outside 7.3", "
     }
 }
 
-TEST_CASE("OccupierForces - a strike opens a base retake while STRONG", "[game][guerrilla][occupierforces]")
+namespace
 {
-    Fixture f;
+// StrikeSetup with the towns cold and the resistance-held post flipped loud:
+// a base candidate while STRONG
+void BaseOpenerSetup(Fixture& f)
+{
     StrikeSetup(f);
     f.Z("Town").heat = 0;
     f.Z("Other").heat = 0;
-    // the resistance-held post flipped loud: a base candidate while STRONG
     ZoneRecord& rebel = f.Z("RebelPost");
     rebel.flipDay = 1;
     rebel.flipMinute = 3;
     rebel.heat = 80;
-    FakeLauncher launcher;
-    f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
-    REQUIRE(CountKind(launcher, CAKBase) == 1);
-    const CounterAttackOrder* s = FirstKind(launcher, CAKStrike);
-    REQUIRE(s != nullptr);
-    CHECK(s->strikeZone == f.registry.FindZoneIndex("RebelPost"));
-    CHECK(s->strikePos.X() == Approx(0.0f)); // nothing reported: the zone centre
-    CHECK(f.of.StrikeDue(f.registry, ViewOf(f.registry), f.registry.FindZoneIndex("RebelPost"), CAKBase));
+}
+} // namespace
+
+TEST_CASE("OccupierForces - a strike opens a base retake while STRONG only on a defender reported",
+          "[game][guerrilla][occupierforces]")
+{
+    // the comparison video (tmp/of-director-video-3, both branches): a base
+    // retake on an EMPTY base, 0 fighters reported, still bought a 23-unit
+    // jet opener.  The opener is a strike on defenders: with nobody reported
+    // there is nothing to strike (7.3)
+    SECTION("0 reported: the retake goes, no opener")
+    {
+        Fixture f;
+        BaseOpenerSetup(f);
+        const int rebel = f.registry.FindZoneIndex("RebelPost");
+        FakeLauncher launcher;
+        const int pool0 = f.of.Pool();
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(CountKind(launcher, CAKBase) == 1);
+        CHECK(CountKind(launcher, CAKStrike) == 0);
+        CHECK(f.of.Pool() == pool0 - FirstKind(launcher, CAKBase)->priceUnits); // no 23 for a jet
+        CHECK(f.of.OpenerFighters(f.registry, ViewOf(f.registry), rebel) == 0);
+        CHECK_FALSE(f.of.StrikeDue(f.registry, ViewOf(f.registry), rebel, CAKBase));
+    }
+    SECTION("3 reported: the opener strikes the reported positions")
+    {
+        Fixture f;
+        BaseOpenerSetup(f);
+        const int rebel = f.registry.FindZoneIndex("RebelPost");
+        const Vector3 seen(f.Z("RebelPost").pos.X() + 20.0f, 0.0f, f.Z("RebelPost").pos.Z() - 10.0f);
+        Report(f, "RebelPost", 3, seen);
+        FakeLauncher launcher;
+        f.of.Direct(f.registry, ViewOf(f.registry), launcher, 60.0f);
+        REQUIRE(CountKind(launcher, CAKBase) == 1);
+        const CounterAttackOrder* s = FirstKind(launcher, CAKStrike);
+        REQUIRE(s != nullptr);
+        CHECK(s->strikeZone == rebel);
+        CHECK(s->strikePos.X() == Approx(seen.X())); // D9: what was reported
+        CHECK(s->strikePos.Z() == Approx(seen.Z()));
+        CHECK(f.of.OpenerFighters(f.registry, ViewOf(f.registry), rebel) == 3);
+        CHECK(f.of.StrikeDue(f.registry, ViewOf(f.registry), rebel, CAKBase));
+    }
+    SECTION("a decayed report is nobody")
+    {
+        Fixture f;
+        BaseOpenerSetup(f);
+        const int rebel = f.registry.FindZoneIndex("RebelPost");
+        Report(f, "RebelPost", 3, f.Z("RebelPost").pos);
+        f.of.Tick(f.registry, f.of.Tuning().intelDecay + 60.0f); // the report ages out
+        CHECK(f.of.OpenerFighters(f.registry, ViewOf(f.registry), rebel) == 0);
+        CHECK_FALSE(f.of.StrikeDue(f.registry, ViewOf(f.registry), rebel, CAKBase));
+    }
+}
+
+TEST_CASE("OccupierForces - an HQ assault opener needs a defender reported at the HQ",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    StrikeSetup(f);
+    DirectorView v = ViewOf(f.registry);
+    v.hqEstablished = true;
+    v.hqZone = f.registry.FindZoneIndex("Camp");
+    v.hqPos = f.Z("Camp").pos;
+    // the HQ in a zone: that zone's reported fighters
+    CHECK(f.of.OpenerFighters(f.registry, v, OccupierForces::HqCandidate) == 0);
+    CHECK_FALSE(f.of.StrikeDue(f.registry, v, OccupierForces::HqCandidate, CAKHqAssault));
+    Report(f, "Camp", 2, v.hqPos);
+    CHECK(f.of.OpenerFighters(f.registry, v, OccupierForces::HqCandidate) == 2);
+    CHECK(f.of.StrikeDue(f.registry, v, OccupierForces::HqCandidate, CAKHqAssault));
+    // an HQ outside every zone: the reported positions within 150 m of HqPos
+    DirectorView out = v;
+    out.hqZone = -1;
+    out.hqPos = Vector3(5000.0f, 0.0f, 5000.0f);
+    CHECK(f.of.OpenerFighters(f.registry, out, OccupierForces::HqCandidate) == 0);
+    AutoArray<SightingReport> reports;
+    for (int i = 0; i < 3; i++)
+    {
+        SightingReport r;
+        r.zone = -1;
+        r.id = 700 + (unsigned long long)i;
+        // two near the HQ, one 400 m away
+        r.pos = i < 2 ? Vector3(5040.0f + 10.0f * i, 0.0f, 4980.0f) : Vector3(5400.0f, 0.0f, 5000.0f);
+        reports.Add(r);
+    }
+    f.of.IngestSightings(f.registry, reports);
+    CHECK(f.of.OpenerFighters(f.registry, out, OccupierForces::HqCandidate) == 2);
+    CHECK(f.of.StrikeDue(f.registry, out, OccupierForces::HqCandidate, CAKHqAssault));
+}
+
+namespace
+{
+// records the band the service shows at every launch and refuses strikes:
+// an opener bought, then refunded in the same step
+struct BandProbeLauncher final : DirectorLauncher
+{
+    OccupierForces* of = nullptr;
+    std::vector<CounterAttackOrder> orders;
+    std::vector<int> records;
+    std::vector<int> bands; // Band() as each Launch saw it
+    int strikesRefused = 0;
+    bool Launch(const CounterAttackOrder& order) override
+    {
+        bands.push_back(of->Band());
+        if (order.kind == CAKStrike)
+        {
+            strikesRefused++;
+            return false;
+        }
+        orders.push_back(order);
+        records.push_back(order.target);
+        return true;
+    }
+    int BornOps() const override { return 0; }
+    bool HasRecord(int zoneIndex) const override
+    {
+        return std::find(records.begin(), records.end(), zoneIndex) != records.end();
+    }
+};
+} // namespace
+
+TEST_CASE("OccupierForces - the band stays steady across an opener bought and refunded in one step",
+          "[game][guerrilla][occupierforces]")
+{
+    // the operation and its opener are one ledger movement (BandHold, as
+    // the air re-plan of 197a7d3): the jet's debit alone would demote the
+    // band, its refund in the same step must leave no edge, not even one
+    // that the launcher could see
+    Fixture f;
+    BaseOpenerSetup(f);
+    const int rebel = f.registry.FindZoneIndex("RebelPost");
+    Report(f, "RebelPost", 3, f.Z("RebelPost").pos);
+    const DirectorView view = ViewOf(f.registry);
+    const int start = f.of.PoolStart();
+    const int strongFloor = (OccupierForces::StrongLeavePct * start + 99) / 100;
+    // the prices at a rich pool: the ground package and the urgent strike
+    const DirectorAction ground = f.of.PlanFor(f.registry, view, rebel, CAODirector);
+    REQUIRE(ground.go);
+    const int g = ground.choice.quote.poolPrice;
+    const DirectorAction strike = f.of.PlanStrike(f.registry, view, rebel, true);
+    REQUIRE(strike.go);
+    const int s = strike.choice.quote.poolPrice;
+    // the ground debit keeps STRONG, the jet's debit would demote it
+    const int before = g + s + strongFloor - 1;
+    f.of.SetPool(before);
+    REQUIRE(f.of.Band() == OFBandStrong);
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before - g, start) == OFBandStrong);
+    REQUIRE(OccupierForces::StepBand(OFBandStrong, before - g - s, start) == OFBandStretched);
+    REQUIRE(f.of.PlanFor(f.registry, view, rebel, CAODirector).choice.quote.poolPrice == g);
+
+    BandProbeLauncher launcher;
+    launcher.of = &f.of;
+    f.of.Direct(f.registry, view, launcher, 60.0f);
+    REQUIRE(launcher.orders.size() == 1);
+    CHECK(launcher.orders[0].kind == CAKBase);
+    CHECK(launcher.strikesRefused == 1); // the opener was bought, then refunded
+    REQUIRE(launcher.bands.size() == 2);
+    CHECK(launcher.bands[0] == OFBandStrong);
+    CHECK(launcher.bands[1] == OFBandStrong); // not demoted while the jet's price was out
+    CHECK(f.of.Band() == OFBandStrong);
+    CHECK(f.of.Pool() == before - g); // the net movement: the ground package only
+    CHECK(f.of.Dropped() == 0);       // the refund is the debit coming back, never over the ceiling
+}
+
+TEST_CASE("OccupierForces - an opener is bought only on a band the ground operation leaves STRONG",
+          "[game][guerrilla][occupierforces]")
+{
+    // inside the hold the band is not re-stepped, but the bought-when rule
+    // reads the pool as it stands (BandNow): a ground debit that takes the
+    // pool below the STRONG floor buys no opener
+    Fixture f;
+    BaseOpenerSetup(f);
+    const int rebel = f.registry.FindZoneIndex("RebelPost");
+    Report(f, "RebelPost", 3, f.Z("RebelPost").pos);
+    const DirectorView view = ViewOf(f.registry);
+    const int start = f.of.PoolStart();
+    const int strongFloor = (OccupierForces::StrongLeavePct * start + 99) / 100;
+    f.of.SetPool(strongFloor + 2);
+    REQUIRE(f.of.StrikeDue(f.registry, view, rebel, CAKBase));
+    {
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(3, "the ground package"));
+        CHECK(f.of.Band() == OFBandStrong);       // held: not stepped, not logged
+        CHECK(f.of.BandNow() == OFBandStretched); // where the movement goes
+        CHECK_FALSE(f.of.StrikeDue(f.registry, view, rebel, CAKBase));
+    }
+    CHECK(f.of.Band() == OFBandStretched);
+    CHECK(f.of.BandNow() == OFBandStretched);
 }
 
 TEST_CASE("OccupierForces - strike prices off-map without an occupier airfield", "[game][guerrilla][occupierforces]")

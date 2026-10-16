@@ -118,6 +118,8 @@ void OccupierForces::Clear()
     _wavesLanded = 0;
     _waveRequests = 0;
     _lost = 0;
+    _waveHeadroom = 0;
+    _dropped = 0;
     _refillTotal = 0;
     _wavesTotal = 0;
     _legacySave = false;
@@ -707,6 +709,8 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     _finalFired = false;
     _wavesLanded = 0;
     _lost = 0;
+    _waveHeadroom = 0;
+    _dropped = 0;
     _legacySave = false;
     _active = true;
     _control = ComputeControl(registry);
@@ -986,15 +990,40 @@ bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why
     return true;
 }
 
-void OccupierForces::Refund(int units, const char* why)
+int OccupierForces::Refund(int units, const char* why)
 {
     if (!Active() || units <= 0)
     {
-        return;
+        return 0;
     }
-    _pool += units;
-    LOG_DEBUG(Core, "OccupierForces: refund {} ({}), pool {}", units, why ? why : "", _pool);
+    // the ceiling (5.5): nothing but a wave lifts the pool above poolStart.
+    // The wave headroom never exceeds the strength that can still come back
+    // as wave strength: the pool's own overshoot, what the ledger rows still
+    // hold and this refund (strength lost in the field shrinks it).  A refund
+    // over the ceiling is cut there and the rest is dropped, booked beside
+    // the losses so the equation holds
+    if (_waveHeadroom > 0)
+    {
+        int held = MaxInt(_pool - _poolStart, 0) + units;
+        for (int i = 0; i < _ops.Size(); i++)
+        {
+            held += MaxInt(_ops[i].outstanding, 0);
+        }
+        _waveHeadroom = MinInt(_waveHeadroom, held);
+    }
+    const int room = MaxInt(PoolCeiling() - _pool, 0);
+    const int credit = MinInt(units, room);
+    const int dropped = units - credit;
+    _pool += credit;
+    if (dropped > 0)
+    {
+        _dropped += dropped;
+        GM_DIRECTOR_INFO(Core, "OccupierForces: ledger: {} unit(s) over poolStart dropped ({}; pool {} of {})", dropped,
+                         why ? why : "", _pool, _poolStart);
+    }
+    LOG_DEBUG(Core, "OccupierForces: refund {} of {} ({}), pool {}", credit, units, why ? why : "", _pool);
     UpdateBand();
+    return credit;
 }
 
 void OccupierForces::NoteLoss(int units, const char* why)
@@ -1016,6 +1045,8 @@ void OccupierForces::LandWave(int bodies)
     _pool += bodies;
     _wavesTotal += bodies;
     _wavesLanded++;
+    // what the wave put above poolStart may come back there after it is spent
+    _waveHeadroom = MaxInt(_waveHeadroom, _pool - _poolStart);
     GM_DIRECTOR_INFO(Core, "OccupierForces: wave of {} landed, pool {} of {}, {} wave(s) landed", bodies, _pool, _poolStart,
              _wavesLanded);
     UpdateBand();
@@ -1050,6 +1081,9 @@ void OccupierForces::SetPool(int units)
         return;
     }
     _pool = units < 0 ? 0 : units;
+    // a forced pool is the ledger now: above poolStart it carries its own
+    // headroom, at or below it none
+    _waveHeadroom = MaxInt(_pool - _poolStart, 0);
     GM_DIRECTOR_INFO(Core, "OccupierForces: pool forced to {} of {}", _pool, _poolStart);
     UpdateBand();
 }
@@ -2151,6 +2185,9 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     {
         *launcherRefused = false;
     }
+    // the debit, a staging deposit and a refusal's refund are one ledger
+    // movement: the band is stepped once, on the net pool (2026-10-16)
+    BandHold hold(*this);
     // L1: a refused launch must not leave the band demoted by its own
     // debit (the band's hysteresis would keep it there after the refund)
     const int bandBefore = _band;
@@ -2414,10 +2451,15 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
         const int kind = target == HqCandidate ? CAKHqAssault
                          : (tz && CampaignEnd::IsMilitaryType(tz->type)) ? CAKBase
                                                                         : CAKRetake;
+        // the operation and its opener are one ledger movement (2026-10-16):
+        // the band is stepped once on the net pool when the hold closes, so
+        // an opener bought and refunded in this step never shows an edge.
+        // StrikeDue still reads the band the ground operation left (BandNow)
+        BandHold hold(*this);
         if (TryLaunch(registry, view, launcher, target, CAODirector))
         {
-            // the strike that goes with it (7.3): a base / HQ opener, or an
-            // urgent town with fighters reported
+            // the strike that goes with it (7.3): a base / HQ opener with a
+            // defender reported, or an urgent town with fighters reported
             MaybeStrike(registry, view, launcher, target, kind);
             return; // one operation per tick
         }
@@ -3329,7 +3371,9 @@ Vector3 OccupierForces::LatestReport(const ZoneRegistry& registry, int zone) con
 bool OccupierForces::StrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target,
                                int launchedKind) const
 {
-    if (!Active() || _band != OFBandStrong)
+    // STRONG on the pool as it stands: inside a BandHold (the operation and
+    // its opener) the band the ground operation's debit would step to
+    if (!Active() || BandNow() != OFBandStrong)
     {
         return false;
     }
@@ -3337,10 +3381,12 @@ bool OccupierForces::StrikeDue(const ZoneRegistry& registry, const DirectorView&
     {
         return false;
     }
-    // the opener of a base retake or an HQ assault
+    // the opener of a base retake or an HQ assault: a strike on defenders,
+    // so only with one reported (2026-10-16: an empty base retake bought a
+    // 23-unit jet on 0 reported fighters)
     if (launchedKind == CAKBase || launchedKind == CAKHqAssault)
     {
-        return true;
+        return OpenerFighters(registry, view, target) >= StrikeOpenerMinFighters;
     }
     const ZoneRecord* z = registry.GetZone(target);
     if (!z || !IsHeldTown(registry, *z) || !Urgent(z->name))
@@ -3353,6 +3399,41 @@ bool OccupierForces::StrikeDue(const ZoneRegistry& registry, const DirectorView&
     }
     // a town inside its strike window is not struck again
     return !registry.IsStruck(target, view.now);
+}
+
+int OccupierForces::OpenerFighters(const ZoneRegistry& registry, const DirectorView& view, int target) const
+{
+    if (target != HqCandidate)
+    {
+        return KnownFighters(registry, target);
+    }
+    if (registry.GetZone(view.hqZone))
+    {
+        return KnownFighters(registry, view.hqZone);
+    }
+    if (!view.hqEstablished)
+    {
+        return 0;
+    }
+    // an HQ outside every zone: the reported positions near it, from the
+    // rows of reports outside every zone that have not decayed
+    int n = 0;
+    const float r2 = OpenerHqRadius * OpenerHqRadius;
+    for (int i = 0; i < _sightings.Size(); i++)
+    {
+        const SightingRow& row = _sightings[i];
+        if (row.zone.GetLength() > 0 || Now() - row.stamp > _tuning.intelDecay)
+        {
+            continue;
+        }
+        for (int p = 0; p < row.positions.Size(); p++)
+        {
+            const float dx = row.positions[p].X() - view.hqPos.X();
+            const float dz = row.positions[p].Z() - view.hqPos.Z();
+            n += dx * dx + dz * dz <= r2 ? 1 : 0;
+        }
+    }
+    return n;
 }
 
 DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target,
@@ -4085,6 +4166,16 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("townStrikes", _townStrikes, 1, 0))
     PARAM_CHECK(ar.Serialize("strikesApplied", _strikesApplied, 1, 0))
     PARAM_CHECK(ar.Serialize("alarmAnswers", _alarmAnswers, 1, 0))
+    // the ceiling (5.5, 2026-10-16).  A block without it loads the headroom
+    // as whatever the saved pool already holds above poolStart (-1 marks the
+    // key absent), so an older save with a landed wave keeps it
+    int headroom = _waveHeadroom;
+    PARAM_CHECK(ar.Serialize("waveHeadroom", headroom, 1, -1))
+    PARAM_CHECK(ar.Serialize("dropped", _dropped, 1, 0))
+    if (ar.IsLoading())
+    {
+        _waveHeadroom = headroom >= 0 ? headroom : MaxInt(_pool - _poolStart, 0);
+    }
     int format = SaveFormat;
     PARAM_CHECK(ar.Serialize("format", format, 1, 0))
     if (ar.IsLoading())

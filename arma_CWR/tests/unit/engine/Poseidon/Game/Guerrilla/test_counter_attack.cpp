@@ -2239,6 +2239,8 @@ TEST_CASE("CounterAttack - pool routing: a holding force settles as the town's g
     f.Load(Certain("occupierForces = 1;"));
     f.RaiseTown(f.town);
     PoolGuard pool(f);
+    // room under the ceiling (5.5): the bodies sent to the pool fit
+    OccupierForces::Instance().SetPool(OccupierForces::Instance().PoolStart() - 8);
     OccupierForces& of = OccupierForces::Instance();
     FakeListener ear;
     ListenerGuard guard(&ear);
@@ -2576,6 +2578,8 @@ TEST_CASE("CounterAttack - the HQ falls: the assault settles, its bodies to the 
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1;"));
     PoolGuard pool(f);
+    // room under the ceiling (5.5): the bodies sent to the pool fit
+    OccupierForces::Instance().SetPool(OccupierForces::Instance().PoolStart() - 8);
     OccupierForces& of = OccupierForces::Instance();
     FakeListener ear;
     ListenerGuard guard(&ear);
@@ -3265,6 +3269,8 @@ TEST_CASE("CounterAttack - a live top-up squad joins up to the room; the surplus
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1;"));
     PoolGuard pool(f);
+    // room under the ceiling (5.5): the bodies sent to the pool fit
+    OccupierForces::Instance().SetPool(OccupierForces::Instance().PoolStart() - 8);
     FakeListener ear;
     ListenerGuard guard(&ear);
     AutoArray<ZoneEventRecord> fired;
@@ -3332,6 +3338,8 @@ TEST_CASE("CounterAttack - a hull driving home never drives into a base the resi
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1;"));
     PoolGuard pool(f);
+    // room under the ceiling (5.5): the bodies sent to the pool fit
+    OccupierForces::Instance().SetPool(OccupierForces::Instance().PoolStart() - 8);
     FakeListener ear;
     ListenerGuard guard(&ear);
     AutoArray<ZoneEventRecord> fired;
@@ -4707,4 +4715,39 @@ TEST_CASE("CounterAttack - garrison detachments charge groups but not existing b
     CHECK(f.ca.Get(0)->phase == CALive);
     CHECK(ops.spawns == (roomForBirth ? 1 : 0));
     CHECK(f.ca.Get(1)->phase == (roomForBirth ? CALive : CATravel));
+}
+
+TEST_CASE("CounterAttack - a strike's airframe home never lifts the pool above poolStart (5.5, the ceiling)",
+          "[game][guerrilla][counterattack][occupierforces][air]")
+{
+    // the comparison video (tmp/of-director-video-3, run A): the pool sat at
+    // poolStart when a jet opener was bought, the refill topped it up again
+    // while the jet was out, and the jet's refund landed it at 51 of 50.
+    // Here the refill fills the pool while the strike flies; the airframe
+    // and its pilot come home over the ceiling and are dropped, booked
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    OccupierForces& of = OccupierForces::Instance();
+    ListenerGuard guard(&of); // the director's own ledger hears the events
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    const CounterAttackOrder order = StrikeOrder(f.town);
+    const int start = of.PoolStart();
+    REQUIRE(of.Pool() == start);
+    REQUIRE(of.Spend(order.priceUnits, "test strike"));
+    REQUIRE(of.BookLeverOp(order.opId, "Town", order.kind, order.package, order.priceUnits));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, order, nullptr, fired));
+    of.Tick(f.registry, 4.0f * 3600.0f); // the refill tops the pool back up
+    REQUIRE(of.Pool() == start);
+    const int dropped0 = of.Dropped();
+    CoreLogCapture log;
+    f.ca.Step(f.registry, far, 30.0f, nullptr, fired); // strikes, flies home, refunds
+    CHECK(f.ca.Count() == 0);
+    CHECK(of.Pool() == start); // never above poolStart
+    CHECK(of.Dropped() > dropped0);
+    CHECK(of.Dropped() - dropped0 <= order.priceUnits);
+    CHECK(of.OpOutstanding(of.FindOp(order.opId)) == 0); // the row holds nothing more
+    CHECK(log.With({"ledger:", "over poolStart dropped"}).size() >= 1);
 }
