@@ -355,3 +355,29 @@ Default remains off; activation is `CWR_EXPERIMENTAL_SKY=1`. Hard activation
 transitions, other weather/viewport/material combinations, extreme HDR behavior,
 representative hardware cost and full official Remaster acceptance remain open.
 No grass, fixed-LOD QA, game assets, screenshots or binaries are published with N2.
+
+## Engineering follow-up: stable MSAA capability clamp (#212)
+
+This is not another artistic stage. The previous target-reuse comparison used
+requested MSAA before hardware clamping. On a max-4 device, a retained 8x request
+therefore rebuilt the same 4x target every frame. Failed allocations also retried
+unchanged requests and discarded the requested render scale.
+
+The fix keys attempts on effective dimensions, normalized scale and supported
+sample count. Success is reused; unchanged failure stays in a documented fallback
+until an effective setting/size change or explicit reset permits another attempt.
+Requested preferences remain intact. Defaults, preset policy, resolve filtering
+and graphics-menu choices are unchanged.
+
+149 executable checks pass, including five real-EGL allocation cases; the baseline
+fails 77. The compiled production methods use an explicit class/SDL shim, and only
+the real-GL mode exercises genuine allocations. Full engine evidence separately
+shows 325 target-allocation log entries before versus two after: one initial target
+and one configured 1440x960 4x-MSAA target. Both runs requested 8x and 150% scale;
+settings remained saved. All three actual after-captures passed independent visual
+regression review. No FPS gain or hardware-general cost is inferred from these runs.
+
+The exact candidate GameDemo and full no-game-data target built. The suite passed
+3,021 cases and 2,306,963 assertions with 12 OpenAL-device skips, reusing the same
+previously staged synthetic-fixture layout described above. Actual GL context-loss
+recovery and effective-AA menu labeling remain unverified/separate work.

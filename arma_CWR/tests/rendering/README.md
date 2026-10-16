@@ -203,3 +203,42 @@ python arma_CWR/tests/rendering/test_background_state_gl33.py --report backgroun
 Requires ModernGL/EGL, a C++17 compiler, desktop OpenGL headers and linker library. `--depth-header` and `--pipeline-header` select frozen headers; `--compiler`, repeatable `--include-dir` and `--gl-library` override local build discovery. The exact headers are compiled unchanged into a temporary shared library. A temporary `glad/gl.h` adapter supplies system GL declarations; calls execute real GL, not state mocks.
 
 512 cases cover all depth/stencil enable combinations, depth write masks and RGBA write masks through early-return destruction, explicit repeated restoration, inert restoration after later state changes, and nested scopes. Depth comparison and distinct front/back stencil functions, references, masks and operations must remain untouched. Ownership noncopyability is checked at compile time. This isolates helper behavior, not engine cache invalidation, caller gates, full render ordering or hardware performance.
+
+## Frame-target capability clamp and bounded retry (#212)
+
+`test_frame_target_gl33.py` extracts the exact four production frame-target methods
+and their header member initializers, compiles them as C++17, and executes them.
+The default 144 checks use counted GL/SDL stubs for deterministic capability and
+failure transitions. Optional `--real-gl` adds five genuine EGL OpenGL allocation
+checks on Linux, requiring `moderngl` and the desktop `libGL` runtime.
+
+```sh
+python arma_CWR/tests/rendering/test_frame_target_gl33.py --real-gl \
+  --report /tmp/frame-target-results.json
+```
+
+`--source` and `--header` select preserved source/header snapshots together;
+`--compiler` selects the C++17 compiler (default `CXX` or `clang++`). Reports hash
+both files and the exact extracted code. The pre-fix snapshot fails 77 of 149
+checks; the candidate passes all 149. Real Mesa llvmpipe reports `GL_MAX_SAMPLES=4`:
+requesting 8x over 120 unchanged frames previously allocated 120 targets, versus
+one after the fix. Resize, scale/capability changes, both framebuffer failure
+stages, separate engine instances, and explicit reset are covered. The real-GL
+zero-size failure attempts allocation and warns once, then recovers once after
+size restoration without losing the requested 150% scale or 8x preference.
+
+Failed effective requests remain suppressed until target size, normalized scale,
+effective sample count, or explicit target reset changes. This intentionally does
+not retry transient allocation failure every frame. The fallback's effective
+MSAA/scale becomes off/1 while the user's requested settings are retained.
+Defaults, presets, and Advanced UI choices are unchanged. Effective-versus-requested
+AA labeling in the normal graphics UI remains separate follow-up work.
+
+The test uses a class-state/SDL shim and, in real-GL mode, counted framebuffer
+creation and no-op logging. It is not a full engine, full Remaster, visual-quality,
+or representative-hardware performance test. The existing equal-size nearest
+MSAA resolve then linear supersampling downsample remains unchanged.
+
+Explicit target reset plus capability requery is covered; actual GL context-loss
+recovery is not simulated. This is an engineering stability follow-up, not a new
+artistic lighting iteration.

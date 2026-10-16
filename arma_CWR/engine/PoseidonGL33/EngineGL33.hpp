@@ -429,6 +429,12 @@ class EngineGL33 : public Engine
     unsigned int _ssaaResolveRb = 0;
     int _ssaaW = 0;
     int _ssaaH = 0;
+    // Last effective allocation request, including failures. Retry only when
+    // it changes or DestroySSAATarget explicitly invalidates the attempt.
+    int _ssaaAttemptW = 0;
+    int _ssaaAttemptH = 0;
+    float _ssaaAttemptScale = 1.0f;
+    int _ssaaAttemptSamples = -1;
 
     bool SSAAActive() const { return _ssaaFbo != 0; }
     // Pixel size of the current render target: the scaled offscreen target

@@ -427,6 +427,10 @@ void EngineGL33::DestroySSAATarget()
         glDeleteRenderbuffers(1, &_ssaaResolveRb);
     _ssaaFbo = _ssaaResolveFbo = _ssaaColorRb = _ssaaDepthRb = _ssaaResolveRb = 0;
     _ssaaW = _ssaaH = 0;
+    _renderScale = 1.0f;
+    _msaaSamples = 0;
+    _msaaActive = false;
+    _ssaaAttemptSamples = -1;
 }
 
 void EngineGL33::ApplyPendingRenderScale()
@@ -443,13 +447,17 @@ void EngineGL33::ApplyPendingRenderScale()
     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
     const int sw = static_cast<int>(winW * want + 0.5f);
     const int sh = static_cast<int>(winH * want + 0.5f);
-    if (SSAAActive() && sw == _ssaaW && sh == _ssaaH && want == _renderScale && _pendingMsaaSamples == _msaaSamples)
-        return;
-    DestroySSAATarget();
-
     GLint maxSamples = 1;
     glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
     const GLsizei samples = maxSamples < _pendingMsaaSamples ? maxSamples : _pendingMsaaSamples;
+    // Compare effective samples, not the retained user preference: e.g. an
+    // 8x request on a 4x device must not recreate the target every frame.
+    // Cache failed attempts too, so allocation failure falls back without an
+    // unbounded per-frame retry. Size/scale/capability changes or an explicit
+    // target reset allow another attempt; requested preferences stay intact.
+    if (sw == _ssaaAttemptW && sh == _ssaaAttemptH && want == _ssaaAttemptScale && samples == _ssaaAttemptSamples)
+        return;
+    DestroySSAATarget();
 
     glGenRenderbuffers(1, &_ssaaColorRb);
     glBindRenderbuffer(GL_RENDERBUFFER, _ssaaColorRb);
@@ -476,23 +484,26 @@ void EngineGL33::ApplyPendingRenderScale()
     if (scaledStatus != GL_FRAMEBUFFER_COMPLETE || resolveStatus != GL_FRAMEBUFFER_COMPLETE)
     {
         LOG_WARN(Graphics,
-                 "GL33: frame target {}x{} incomplete (0x{:x}/0x{:x}) — rendering directly to the window (no MSAA/SSAA)",
+                 "GL33: frame target {}x{} incomplete (0x{:x}/0x{:x}) — rendering directly to the window (no MSAA/SSAA); "
+                 "retrying only after effective target settings change or reset",
                  sw, sh, scaledStatus, resolveStatus);
         DestroySSAATarget();
-        _renderScale = 1.0f;
-        _pendingRenderScale = 1.0f;
-        _msaaActive = false;
-        return;
     }
-
-    _ssaaW = sw;
-    _ssaaH = sh;
-    _renderScale = want;
-    _msaaSamples = static_cast<int>(samples);
-    // Alpha-to-coverage gate: the frame target carries the samples now.
-    _msaaActive = samples > 1;
-    LOG_INFO(Graphics, "GL33: frame target {}x{} ({}x MSAA, render scale {}), window {}x{}", sw, sh,
-             static_cast<int>(samples), want, winW, winH);
+    else
+    {
+        _ssaaW = sw;
+        _ssaaH = sh;
+        _renderScale = want;
+        _msaaSamples = static_cast<int>(samples);
+        // Alpha-to-coverage gate: the frame target carries the samples now.
+        _msaaActive = samples > 1;
+        LOG_INFO(Graphics, "GL33: frame target {}x{} ({}x MSAA, render scale {}), window {}x{}", sw, sh,
+                 static_cast<int>(samples), want, winW, winH);
+    }
+    _ssaaAttemptW = sw;
+    _ssaaAttemptH = sh;
+    _ssaaAttemptScale = want;
+    _ssaaAttemptSamples = static_cast<int>(samples);
 }
 
 void EngineGL33::ResolveSSAAToDefault()
