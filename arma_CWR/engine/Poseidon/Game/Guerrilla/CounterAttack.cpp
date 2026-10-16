@@ -1071,7 +1071,8 @@ int CounterAttack::OwedOnOp(int opId, int* crew) const
     return owed;
 }
 
-int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex) const
+int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex,
+                                   const CounterAttackView* currentView) const
 {
     const ZoneRecord* z = registry.GetZone(zoneIndex);
     if (!z)
@@ -1086,9 +1087,11 @@ int CounterAttack::AbstractPresence(const ZoneRegistry& registry, int zoneIndex)
         // force holding a base works its occCapture, and an HQ_ASSAULT
         // holding at the HQ is occupier presence in the zone the HQ stands
         // in (OCCUPIER-FORCES.md 7.2, 8.1)
-        if (_records[i].phase == CAHolding && !_records[i].suspended && stricmp(_records[i].target, z->name) == 0)
+        const Record& r = _records[i];
+        if (r.phase == CAHolding && stricmp(r.target, z->name) == 0 &&
+            !(currentView ? InBubbleAt(registry, *currentView, DestOf(registry, r)) : r.suspended))
         {
-            bodies += _records[i].strength;
+            bodies += r.strength;
         }
     }
     return bodies;
@@ -1131,7 +1134,7 @@ int CounterAttack::HeldTowns(const ZoneRegistry& registry)
 }
 
 bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, int groupSize, float warLevel,
-                                  int hqZone)
+                                  int hqZone, int laterTownFlips)
 {
     if (!_tuning.enabled || CampaignEnd::Instance().Won())
     {
@@ -1149,8 +1152,9 @@ bool CounterAttack::OnTownFlipped(const ZoneRegistry& registry, int zoneIndex, i
         return false;
     }
     // k: the towns taken before this one, the most of the saved count and the
-    // towns held now (this town already counts as held at the event)
-    int held = HeldTowns(registry) - 1;
+    // towns held before this event.  EvaluateTick applies the whole batch
+    // before dispatch, so later captures must not enter the history early.
+    int held = HeldTowns(registry) - 1 - laterTownFlips;
     if (held < 0)
     {
         held = 0;
@@ -3710,9 +3714,29 @@ void CounterAttack::Step(ZoneRegistry& registry, const CounterAttackView& view, 
     {
         return; // 7.4, 9.2: once the win (or lose) latches nothing in flight steps
     }
+    // BuildView's census predates every birth in this tick. Charge each
+    // successful birth before admitting the next record; failed/partial
+    // spawns consume only what appeared. Do not release departures here:
+    // home-going hulls and adopted groups can still be in the world, and
+    // the next engine census will account for their actual removal.
+    CounterAttackView tickView = view;
     for (int i = 0; i < _records.Size();)
     {
-        if (Advance(registry, view, elapsed, ops, _records[i], fired))
+        Record& r = _records[i];
+        const bool wasLive = r.phase == CALive;
+        const bool ended = Advance(registry, tickView, elapsed, ops, r, fired);
+        if (!wasLive && r.phase == CALive)
+        {
+            tickView.occGroups += (r.group ? 1 : 0) + (r.crewGroup ? 1 : 0) + (r.escortCrewGroup ? 1 : 0);
+            // A garrison detachment creates a group from already-counted
+            // bodies. All other births add infantry and any actual crews.
+            if (r.group && r.spawnReason != CASpawnGarrison)
+            {
+                tickView.liveBodies += r.strength;
+            }
+            tickView.liveBodies += (r.crewGroup ? r.crew : 0) + (r.escortCrewGroup ? r.escortCrew : 0);
+        }
+        if (ended)
         {
             // the operation ended: its hull drives home (or is refunded)
             FinishHull(registry, view, _records[i], ops);
@@ -4992,14 +5016,27 @@ const CounterAttackGate& CounterAttack::EngineGate(bool playerValid, float px, f
 void CounterAttack::OnZoneEvents(const AutoArray<ZoneEventRecord>& fired)
 {
     ZoneRegistry& registry = ZoneRegistry::Instance();
+    const auto countedTownFlip = [&](const ZoneEventRecord& ev)
+    {
+        const ZoneRecord* z = registry.GetZone(ev.zoneIndex);
+        return ev.type == ZECaptured && z && !z->garrisonExempt && stricmp(z->type, "CITY") == 0 &&
+               stricmp(z->owner, registry.ResistanceSide()) == 0;
+    };
+    int laterTownFlips = 0;
+    for (int i = 0; i < fired.Size(); i++)
+    {
+        laterTownFlips += countedTownFlip(fired[i]) ? 1 : 0;
+    }
     for (int i = 0; i < fired.Size(); i++)
     {
         const ZoneEventRecord& ev = fired[i];
         if (ev.type == ZECaptured)
         {
+            laterTownFlips -= countedTownFlip(ev) ? 1 : 0;
             // the force size reads the occupier-side war level (7.1)
             OnTownFlipped(registry, ev.zoneIndex, GarrisonCache::Instance().Tuning().groupSize,
-                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone());
+                          OccupierForces::Instance().OccupierWarLevel(), GuerrillaBase::Instance().HqZone(),
+                          laterTownFlips);
         }
         else if (ev.type == ZEHqLost)
         {

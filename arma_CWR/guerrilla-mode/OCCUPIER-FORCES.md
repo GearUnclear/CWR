@@ -120,7 +120,9 @@ Citations name functions; line numbers drift.
 
 **Dispatch (`4400fe9`): `Decide`.**
 - k is the larger of `_townsTaken` (every flip) and the non-exempt towns
-  held now.
+  held before this event in the tick's batch: when several towns flip in
+  one zone tick, `OnZoneEvents` excludes the later captures of the same
+  batch, so the first sees k and the second k + 1 [code].
 - k = 0 uses `counterAttackFirstTownChance` (0.4); k >= 1 uses
   `counterAttackChance` (1.0).
 - `ForceSize = counterAttackSize (0.5) * 12 * max(1, 1 + counterAttackWarLevelStep (0.25) * (WL - 1))`,

@@ -794,7 +794,7 @@ struct FakeGate final : CounterAttackGate
 // a world with no groups: it records where a squad was asked to be born and
 // refuses to create it (no AIGroup exists in the unit-test process), so the
 // record stays where the rules left it
-struct FakeOps final : CounterAttackOps
+struct FakeOps : CounterAttackOps
 {
     ExposureFn exposure = AllHidden();
     int spawns = 0;
@@ -4523,4 +4523,188 @@ TEST_CASE("CounterAttack - the air re-plan is one ledger movement: the band is s
     CHECK(of.Band() == OFBandStrong);
     CHECK(log.With({"OccupierForces: band"}).empty()); // no edge, not even a transient one
     CHECK(log.With({"air re-plan", "on the ledger row"}).size() == 1);
+}
+
+namespace
+{
+// Each successful birth owns a distinct group, as the engine callbacks do.
+struct BudgetOps final : FakeOps
+{
+    std::vector<Ref<AIGroup>> groups;
+    int bornAlive = 4;
+    int detaches = 0;
+
+    AIGroup* NewGroup()
+    {
+        groups.emplace_back(new AIGroup());
+        return groups.back();
+    }
+    AIGroup* SpawnSquad(int n, Vector3Par from, Vector3Par leg) override
+    {
+        FakeOps::SpawnSquad(n, from, leg);
+        return NewGroup();
+    }
+    AIGroup* DetachFromGarrison(int, int n, Vector3Par, int& taken) override
+    {
+        detaches++;
+        taken = n;
+        return NewGroup();
+    }
+    int Alive(AIGroup*, Vector3&) override { return bornAlive; }
+};
+} // namespace
+
+TEST_CASE("CounterAttack - simultaneous births share the tick's body and group budgets",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    bool column = false;
+    const char* budget = "";
+    SECTION("foot bodies")
+    {
+        budget = "budgetLiveBodies = 14;";
+    }
+    SECTION("foot groups")
+    {
+        budget = "budgetSideGroups = 6;";
+    }
+    SECTION("column bodies")
+    {
+        column = true;
+        budget = "budgetLiveBodies = 17;";
+    }
+    SECTION("column groups")
+    {
+        column = true;
+        budget = "budgetSideGroups = 8;";
+    }
+    Fixture f;
+    f.Load(ConfigWith((std::string("occupierForces = 1; forcesLiveHullsMax = 6; ") + budget).c_str()));
+    f.RaiseTown(f.town);
+    f.Z(f.other).owner = f.registry.ResistanceSide();
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    CounterAttackView view = AtTown(f);
+    view.liveBodies = 10;
+    view.occGroups = 5;
+    ColumnOps ops;
+    const auto order = [&](int target, int source, int id)
+    { return column ? ColumnOrder(target, source, id) : FootOrder(target, source, 4, id); };
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, order(f.town, f.post, 201), &ops, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, order(f.other, f.farBase, 202), &ops, fired));
+    f.ca.Step(f.registry, view, 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 2);
+    CHECK(f.ca.Get(0)->phase == CALive);
+    CHECK(f.ca.Get(1)->phase == CATravel);
+    CHECK((column ? ops.mounts : ops.squads) == 1);
+    CHECK(view.liveBodies == 10); // the caller's snapshot is unchanged
+    CHECK(view.occGroups == 5);
+
+    // The next engine census includes the first birth; it must not be
+    // charged twice or forgotten when the deferred force retries.
+    view.liveBodies += column ? 7 : 4;
+    view.occGroups += column ? 3 : 1;
+    f.ca.Step(f.registry, view, CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.Get(1)->phase == CATravel);
+    CHECK((column ? ops.mounts : ops.squads) == 1);
+}
+
+TEST_CASE("CounterAttack - partial births charge only the bodies actually created",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; budgetLiveBodies = 6;"));
+    f.RaiseTown(f.town);
+    f.Z(f.other).owner = f.registry.ResistanceSide();
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    BudgetOps ops;
+    ops.bornAlive = 2;
+    const CounterAttackView view = AtTown(f);
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.town, f.post, 4, 211), &ops, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.other, f.farBase, 4, 212), &ops, fired));
+    f.ca.Step(f.registry, view, 1.0f, &ops, fired);
+    CHECK(ops.spawns == 2);
+    CHECK(f.ca.Get(0)->phase == CALive);
+    CHECK(f.ca.Get(1)->phase == CALive);
+    CHECK(f.ca.Get(0)->strength == 2);
+    CHECK(f.ca.Get(1)->strength == 2);
+}
+
+TEST_CASE("CounterAttack - failed births leave capacity for later attempts in the tick",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; budgetLiveBodies = 4; budgetSideGroups = 1;"));
+    f.RaiseTown(f.town);
+    f.Z(f.other).owner = f.registry.ResistanceSide();
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    AutoArray<ZoneEventRecord> fired;
+    FakeOps ops;
+    const CounterAttackView view = AtTown(f);
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.town, f.post, 4, 221), &ops, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.other, f.farBase, 4, 222), &ops, fired));
+    f.ca.Step(f.registry, view, 1.0f, &ops, fired);
+    CHECK(ops.spawns == 2);
+    CHECK(f.ca.Get(0)->phase == CATravel);
+    CHECK(f.ca.Get(1)->phase == CATravel);
+}
+
+TEST_CASE("CounterAttack - strike births share the tick's group budget",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; budgetSideGroups = 1; forcesLiveHullsMax = 6;"));
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    AutoArray<ZoneEventRecord> fired;
+    AirOps ops;
+    const CounterAttackView view = WithMap(AtTown(f));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, StrikeOrder(f.town, 231), &ops, fired));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, StrikeOrder(f.other, 232), &ops, fired));
+    f.ca.Step(f.registry, view, 1.0f, &ops, fired);
+    CHECK(ops.sorties == 1);
+    CHECK(f.ca.Get(0)->phase == CALive);
+    CHECK(f.ca.Get(1)->phase == CATravel);
+}
+
+TEST_CASE("CounterAttack - garrison detachments charge groups but not existing bodies",
+          "[game][guerrilla][counterattack][birthbudget]")
+{
+    bool roomForBirth = false;
+    SECTION("the detachment uses the last group slot")
+    {
+        roomForBirth = false;
+    }
+    SECTION("existing garrison bodies leave room for the next birth")
+    {
+        roomForBirth = true;
+    }
+    Fixture f;
+    f.Load(Certain(roomForBirth ? "budgetLiveBodies = 8; budgetSideGroups = 3;"
+                                : "budgetLiveBodies = 8; budgetSideGroups = 2;"));
+    f.RaiseTown(f.town);
+    f.Z(f.other).owner = f.registry.ResistanceSide();
+    f.Z(f.other).pos = f.Z(f.town).pos + Vector3(100, 0, 0);
+    f.Z(f.post).garrison = 0;
+    CounterAttackView view = AtTown(f);
+    view.liveBodies = 4;
+    view.occGroups = 1;
+    view.garrisonLive.Resize(f.registry.NZones());
+    for (int i = 0; i < view.garrisonLive.Size(); i++)
+    {
+        view.garrisonLive[i] = 0;
+    }
+    view.garrisonLive[f.post] = 4;
+    AutoArray<ZoneEventRecord> fired;
+    BudgetOps ops;
+    REQUIRE(f.ca.OnTownFlipped(f.registry, f.town, Fixture::GroupSize));
+    REQUIRE(f.ca.LaunchFunded(f.registry, view, FootOrder(f.other, f.farBase, 4, 241), &ops, fired));
+    f.ca.Step(f.registry, view, 300.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 2);
+    CHECK(ops.detaches == 1);
+    CHECK(f.ca.Get(0)->spawnReason == CASpawnGarrison);
+    CHECK(f.ca.Get(0)->phase == CALive);
+    CHECK(ops.spawns == (roomForBirth ? 1 : 0));
+    CHECK(f.ca.Get(1)->phase == (roomForBirth ? CALive : CATravel));
 }
