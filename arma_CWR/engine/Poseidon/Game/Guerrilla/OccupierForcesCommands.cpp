@@ -39,6 +39,16 @@
 //                                  2026-10-16: [30] the re-armed zones
 //                                  (6.3: rested with fighters reported,
 //                                  heat held at forcesRearmHeat).
+//   gmOccupierRepels            -> the repel ladder (OCCUPIER-FORCES.md 6.3,
+//                                  2026-10-16): one row per zone the
+//                                  director remembers, [zone, repels,
+//                                  lastPackage, lastSource, contained];
+//                                  lastPackage "FOOT" / "TRUCK" / ...,
+//                                  lastSource the base name ("" unknown).
+//   gmOccupierMassing           -> [target, ticks, forcesMassingMax]: the
+//                                  candidate the director is massing for
+//                                  ("" none; "@HQ" the HQ) and the director
+//                                  ticks it has held its token.
 //   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
 //                                  (D20): the key off, the service sized
 //                                  off, or a legacy save (a block older than
@@ -117,7 +127,14 @@
 //                                  (0..8), "waveCluster" (100..20000 m),
 //                                  "waveSurge" (0..48); "log" (0/1, the
 //                                  forcesLog director log toggle,
-//                                  DirectorLog.hpp).  Returns true when
+//                                  DirectorLog.hpp); the repel ladder
+//                                  (6.3, 2026-10-16; constants, no config
+//                                  key): "escalateLethality" (1..3),
+//                                  "escalateInfantry" (0..4),
+//                                  "approachRepels" / "containRepels"
+//                                  (0..9, 0 = never), "massingMax"
+//                                  (0..20 ticks), "restJitter" (0..0.5),
+//                                  "adjacentTown" (0..5000 m).  Returns true when
 //                                  the key is known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
@@ -151,7 +168,13 @@
 //                                                answers the zone as an
 //                                                alarm now (RED or not);
 //                                  "legacySave"  ["legacySave", 0/1] sets
-//                                                the flag (gmLegacyQrf).
+//                                                the flag (gmLegacyQrf);
+//                                  "repels"      ["repels", zoneIndex, n]
+//                                                makes the director remember
+//                                                n repels on the zone (0
+//                                                forgets; containRepels or
+//                                                more contains it, no surge;
+//                                                false for an unknown zone).
 //                                  Returns true when what is known.
 
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
@@ -264,6 +287,71 @@ static GameValue GmOccupierForces(const GameState* state)
         rearm.Add(GameStringType(of.RearmedName(i)));
     }
     row.Add(rearmValue);
+    return value;
+}
+
+namespace Poseidon::Guerrilla
+{
+// the "repels" lever's body (gmForcesForce, OccupierForces.hpp ForceRepels):
+// kept with the command surface it serves
+void OccupierForces::ForceRepels(const char* zone, int count)
+{
+    if (!zone || !*zone)
+    {
+        return;
+    }
+    int r = FindRepel(zone);
+    if (count <= 0)
+    {
+        if (r >= 0)
+        {
+            _repels.Delete(r);
+        }
+        return;
+    }
+    if (r < 0)
+    {
+        RepelRow row;
+        row.zone = zone;
+        _repels.Add(row);
+        r = _repels.Size() - 1;
+    }
+    _repels[r].count = count;
+    _repels[r].contained = _tuning.containRepels > 0 && count >= _tuning.containRepels;
+    GM_DIRECTOR_INFO(Core, "OccupierForces: {} forced to remember {} repel(s){}", zone, count,
+                     _repels[r].contained ? ", contained" : "");
+}
+} // namespace Poseidon::Guerrilla
+
+static GameValue GmOccupierRepels(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < of.RepelRows(); i++)
+    {
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(5);
+        row[0] = GameStringType(of.RepelZone(i));
+        row[1] = (float)of.RepelCount(i);
+        row[2] = GameStringType(ForcePackages::PackageName(of.RepelPackage(i)));
+        row[3] = GameStringType(of.RepelSource(i));
+        row[4] = GameValue(of.RepelContained(i));
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static GameValue GmOccupierMassing(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& row = value;
+    row.Resize(3);
+    row[0] = GameStringType(of.MassingTarget());
+    row[1] = (float)of.MassingTicks();
+    row[2] = (float)of.Tuning().massingMax;
     return value;
 }
 
@@ -462,6 +550,7 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "roadFactor") == 0)
     {
         t.roadFactor = ClampF(v, 1, 5);
+        ForcePackages::SetRoadFactor(t.roadFactor);
     }
     else if (stricmp(key, "rearmHeat") == 0)
     {
@@ -522,6 +611,34 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "log") == 0)
     {
         t.log = v != 0;
+    }
+    else if (stricmp(key, "escalateLethality") == 0)
+    {
+        t.escalateLethality = ClampF(v, 1, 3);
+    }
+    else if (stricmp(key, "escalateInfantry") == 0)
+    {
+        t.escalateInfantry = ClampF(v, 0, 4);
+    }
+    else if (stricmp(key, "approachRepels") == 0)
+    {
+        t.approachRepels = (int)ClampF(v, 0, 9);
+    }
+    else if (stricmp(key, "containRepels") == 0)
+    {
+        t.containRepels = (int)ClampF(v, 0, 9);
+    }
+    else if (stricmp(key, "massingMax") == 0)
+    {
+        t.massingMax = (int)ClampF(v, 0, 20);
+    }
+    else if (stricmp(key, "restJitter") == 0)
+    {
+        t.restJitter = ClampF(v, 0, 0.5f);
+    }
+    else if (stricmp(key, "adjacentTown") == 0)
+    {
+        t.adjacentTown = ClampF(v, 0, 5000);
     }
     else
     {
@@ -589,6 +706,16 @@ static GameValue GmForcesForce(const GameState* /*state*/, GameValuePar oper1)
         of.SetLegacySave(v != 0);
         GM_DIRECTOR_INFO(Core, "OccupierForces: legacySave forced {}", v != 0 ? "on" : "off");
     }
+    else if (stricmp(what, "repels") == 0)
+    {
+        // ["repels", zoneIndex, n]: the repel ladder remembers n repels
+        const ZoneRecord* z = ZoneRegistry::Instance().GetZone((int)v);
+        if (!z)
+        {
+            return GameValue(false);
+        }
+        of.ForceRepels(z->name, args.Size() >= 3 ? (int)(ArgValue(args[2]) + 0.5f) : 0);
+    }
     else
     {
         return GameValue(false);
@@ -603,6 +730,8 @@ INIT_MODULE(GuerrillaOccupierForces, 3)
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierIntel", GmOccupierIntel));
     GGameState.NewNularOp(GameNular(GameScalar, "gmWarLevelOccupier", GmWarLevelOccupier));
     GGameState.NewNularOp(GameNular(GameBool, "gmLegacyQrf", GmLegacyQrf));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierRepels", GmOccupierRepels));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierMassing", GmOccupierMassing));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
 }

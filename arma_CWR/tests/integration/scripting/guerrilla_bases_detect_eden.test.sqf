@@ -18,8 +18,9 @@
 //        OCCUPIER-FORCES.md 5.7: gmGeneratedBases, never gmSeededBases;
 //        guerrilla_bases_generate_eden has their rules), and the explicit
 //        CITY Saint Phillippe (216 m from the ILS anchor) still stands;
-//    e4  the roster: R = 18 + the seeded garrisons (the generated bases add
-//        nothing to R), poolStart = max(24, R + 2K).
+//    e4  the roster: R = 18 + the seeded garrisons (the generated bases
+//        counted apart), poolStart = max(24, R + 2K) less the generated
+//        garrisons (OCCUPIER-FORCES.md 5.7 conservation).
 //  The save round trip of the seeded bases is guerrilla_bases_detect_eden_save.seq.
 // ============================================================================
 
@@ -36,15 +37,18 @@ bdFnNear = {bdNT = _this select 0; bdNP = [_this select 1, _this select 2, 0]; b
 bdFnWithin = {bdWP = [_this select 0, _this select 1, 0]; bdWN = 0; bdWI = 0; while {bdWI < gmZoneCount} do {bdWZ = gmZone bdWI; if (([(bdWZ select 8) select 0, (bdWZ select 8) select 1, 0] distance bdWP) <= (_this select 2)) then {bdWN = bdWN + 1}; bdWI = bdWI + 1}; bdWN}
 // R: the occupier roster's summed garrisonMax (OCCUPIER-FORCES.md 5.1: every
 // military zone the occupier owns at boot; gmZoneSim slot 7 is garrisonMax).
-// Generated bases (5.7, gmGeneratedBases) are not in R: the pool gives them
-// no share (the conservation stand-in), so they are skipped here.
+// Generated bases (5.7, gmGeneratedBases) are counted apart (bdFnRgen): their
+// garrisons come out of poolStart (the owner's conservation rule).
 bdGenNames = []
 {bdGenNames = bdGenNames + [_x select 0]} forEach gmGeneratedBases
 bdFnR = {bdRS = 0; bdRI = 0; while {bdRI < gmZoneCount} do {bdRZ = gmZone bdRI; if (((bdRZ select 1) in ["AIRFIELD", "SEAPORT", "OUTPOST"]) and ((bdRZ select 2) == gmOccupierSide) and (not ((bdRZ select 0) in bdGenNames))) then {bdRS = bdRS + ((gmZoneSim bdRI) select 7)}; bdRI = bdRI + 1}; bdRS}
 // garrisonMax summed over the gmSeededBases rows' zones
 bdFnSeededR = {bdQS = 0; {bdQI = gmZoneIndex (_x select 0); if (bdQI >= 0) then {bdQS = bdQS + ((gmZoneSim bdQI) select 7)}} forEach gmSeededBases; bdQS}
-// the poolStart the roster implies: max(forcesPoolMin 24, R + forcesPoolPerTown 2 * K)
-bdFnPool = {bdPE = (call bdFnR) + 2 * ((gmOccupierForces) select 7); if (bdPE < 24) then {bdPE = 24}; bdPE}
+// the generated garrisons (5.7: Rgen, subtracted from poolStart)
+bdFnRgen = {bdGS = 0; {bdGI = gmZoneIndex (_x select 0); if (bdGI >= 0) then {bdGS = bdGS + ((gmZoneSim bdGI) select 7)}} forEach gmGeneratedBases; bdGS}
+// the poolStart the roster implies: max(forcesPoolMin 24, R + forcesPoolPerTown
+// 2 * K) less the generated garrisons (OCCUPIER-FORCES.md 5.7 conservation)
+bdFnPool = {bdPE = (call bdFnR) + 2 * ((gmOccupierForces) select 7); if (bdPE < 24) then {bdPE = 24}; bdPE = bdPE - (call bdFnRgen); if (bdPE < 0) then {bdPE = 0}; bdPE}
 
 triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 bdSeeded = gmSeededBases

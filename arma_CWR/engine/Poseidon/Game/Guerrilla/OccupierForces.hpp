@@ -34,6 +34,11 @@
 // G is the K towns' summed garrisonMax.
 // poolStart = max(forcesPoolMin, R + forcesPoolPerTown * K).  An empty
 // roster switches the service off for the session (one INFO line).
+// GENERATED BASES (5.7, the owner's conservation rule of 2026-10-16): a
+// generated occupier base (CampaignEnd::IsGeneratedOccupier) joins the
+// roster and R, and its garrisonMax (Rgen, saved) comes out of poolStart:
+// poolStart = max(0, max(forcesPoolMin, (R - Rgen) + perTown * K) - Rgen).
+// Waves stay a share of poolStart + Rgen (Abel: poolStart 48, waves 30).
 //
 // REFILL (5.2, D8, D15).  Each director tick (forcesDirectorInterval) the
 // pool accrues (poolStart + R + G) / forcesPoolRefillHours per hour, scaled
@@ -179,10 +184,11 @@
 //   forcesTokenInterval[band] ({600, 1050, 1800, 0} s since 2026-10-15).
 //   Each director tick with a token, a candidate, CanOperate() and fewer
 //   than OpsMax() BORN operations (forcesOpsMax, max(forcesOpsMax,
-//   forcesOpsMaxStrong) while STRONG) launches ONE operation on the hottest
-//   candidate (the next one when the hottest cannot be served).  A repelled operation puts its target on
+//   forcesOpsMaxStrong) while STRONG) launches ONE operation on the first
+//   candidate (Candidates' order; the next one when the first cannot be
+//   served).  A repelled operation puts its target on a JitteredRest of
 //   forcesTownCooldown with +15 heat unless a RED edge already paid it; a
-//   cancelled-unseen one gets the cooldown.
+//   cancelled-unseen one gets the rest.
 //   RE-ARM (6.3, 2026-10-16, video 4).  A rest that ends on a zone the
 //   resistance still holds while the sighting table still reports fighters
 //   there (a soldiers' report or an informant tip, D9) re-arms the zone:
@@ -193,6 +199,32 @@
 //   saved ("Rearm").  Without it the +15 of a repel decayed inside the
 //   rest, tips kept the town from ever being quiet, and a defended held
 //   town fell out of reach.
+//   THE REPEL LADDER (6.3, 2026-10-16, video 5: seven identical columns on
+//   Le Port, five identical APCs on Arudy).  Per zone the director remembers
+//   the repels of its own operations (retakes and base retakes, any origin;
+//   never the HQ) with the last package and source; saved ("Repels"),
+//   forgotten when the zone changes hands.  One repel with fighters
+//   reported: the next plan needs L_req x escalateLethality (1.5) and at
+//   least escalateInfantry (2) x the fighters as infantry (one group at
+//   most).  approachRepels (2): a different approach, another source base
+//   that can staff it, else an insertion (from a ground answer) or a ground
+//   answer (from an insertion); and an escalation strike may go with it if
+//   the pool stays STRETCHED (EscalationStrikeDue).  containRepels (3): the
+//   zone is CONTAINED (saved): no candidate, no push-out, no re-arm, and the
+//   nearest occupier base on its landmass is surged by the bodies the next
+//   operation would have needed (a pool-funded deposit, above garrisonMax
+//   if need be).  Containment lifts when the zone's reports decay, when a
+//   wave fires, or when control changes band (crosses a forcesWaveThresholds
+//   entry, either way).  One INFO line per rung.
+//   MASSING.  A director candidate whose escalated plan is under strength
+//   (the escalated infantry above every base's spare, the second rung
+//   blocked, or no package meeting the escalated L_req) holds the token and logs "massing for X"
+//   each tick; the hold ends when a base can staff it, when a further token
+//   arrives (then the strongest package goes), or after forcesMassingMax (3)
+//   ticks (the strongest package goes: PlanFor best).
+//   JITTER.  Every rest is JitteredRest: townCooldown +- restJitter (20 %),
+//   hashed on the zone and the operation id; the re-arm, which comes at the
+//   rest's end, carries it.
 //   PUSH-OUT (6.4).  STRONG, a token and no heat candidate: the held town
 //   or base nearest an occupier base with no sighting for
 //   forcesPushoutQuiet, with the cheapest package; since 2026-10-16 the
@@ -200,7 +232,8 @@
 //   PACKAGES (6.5).  ForcePackages: the cheapest lethal package, the fastest
 //   within forcesUrgentCostShare when urgent; the arrival rule (forcesSlowEta,
 //   forcesSlowCostShare, forcesAirEta) for the director's own operations,
-//   push-outs and non-THIN alarm answers, never wave strikes.  A base retake
+//   push-outs, non-THIN alarm answers and, since 2026-10-16 (video 5: a
+//   41-minute walk on the HQ), wave strikes from the hub.  A base retake
 //   or an HQ assault no single base can source takes the spare cap
 //   (forcesSpareCap, forcesSpareCapFloor: SpareCappedMin, 7.2).
 //   The pool pays hull + crew (Spend before LaunchFunded, Refund when it is
@@ -397,6 +430,17 @@ struct OccupierForcesTuning
     // (DirectorLog.hpp).  On, the per-action lines of this service,
     // CounterAttack and OccupierAir log at INFO; off (and not --dev), DEBUG.
     bool log = false;
+    // the repel ladder, massing, the value weights and the rest jitter (6.3,
+    // 2026-10-16, video 5).  Constants, NOT config keys: each has a
+    // gmForcesTune lever of the same name (tests, tuning), so a later fold
+    // into the eight author levers can take them or keep them constant.
+    float escalateLethality = 1.5f; // "escalateLethality", 1..3: L_req x this after one repel
+    float escalateInfantry = 2.0f;  // "escalateInfantry", 0..4: infantry >= this x the fighters reported
+    int approachRepels = 2;         // "approachRepels", 0..9: from this repel a different approach (0 = never)
+    int containRepels = 3;          // "containRepels", 0..9: this repel contains the zone (0 = never)
+    int massingMax = 3;             // forcesMassingMax ("massingMax", 0..20): director ticks a hold lasts
+    float restJitter = 0.2f;        // "restJitter", 0..0.5: the rest's hashed share, +- (0 = clockwork)
+    float adjacentTown = 1000.0f;   // "adjacentTown", 0..5000 m: a town this near an occupier base weighs 2
 };
 
 // One resistance unit an occupier group reports (the 6.1 scan)
@@ -465,6 +509,15 @@ struct DirectorAction
     // the choice used (minUsed); they differ when the cap lowered it
     int minAsked = 0;
     int minUsed = 0;
+    // the repel ladder (6.3, 2026-10-16): the target's repel count when the
+    // ladder shaped the plan (0 = not), the infantry the plan needed, the
+    // largest single-base spare on offer, the approach the second rung
+    // took ("" = none) or, blocked, why no different approach could go
+    int escalation = 0;
+    int needBodies = 0;
+    int bestSpare = 0;
+    bool approachBlocked = false;
+    RString approach;
 };
 
 // The first-tick roster and town census (5.1)
@@ -475,6 +528,7 @@ struct OccupierForcesSizing
     AutoArray<RString> excluded; // CITY zones not counted in K
     AutoArray<RString> labels;   // excluded seeded towns the settlement probe rejected
     int R = 0;                   // the roster's summed garrisonMax
+    int Rgen = 0;                // ... of which generated bases (5.7)
     int G = 0;                   // the K towns' summed garrisonMax
     int poolStart = 0;
     int K() const { return towns.Size(); }
@@ -542,6 +596,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr unsigned int StrikePackages = (1u << FPAttackHeli) | (1u << FPJet);
     // PlanStrike's why when keepStrong refused every payable airframe (7.3)
     static constexpr const char* StrikeKeepsStrongWhy = "a strike would take the pool below STRONG";
+    // ... and when the escalation strike (the second repel, 7.3) would leave STRETCHED
+    static constexpr const char* StrikeKeepsStretchedWhy = "a strike would take the pool below STRETCHED";
+    // the rest jitter's roll salt (6.3, 2026-10-16), and the candidate value
+    // weights (bases, towns within adjacentTown of an occupier base, far
+    // towns, the HQ): ranks, the tiebreak within the same urgency and heat
+    static constexpr int RestJitterSalt = 13;
+    static constexpr int ValueBase = 3;
+    static constexpr int ValueAdjacentTown = 2;
+    static constexpr int ValueFarTown = 1;
+    static constexpr int ValueHq = 2;
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -568,6 +632,18 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the born-operation cap in a band: max(forcesOpsMax,
     // forcesOpsMaxStrong) while STRONG, forcesOpsMax otherwise
     static int OpsMaxFor(const OccupierForcesTuning& t, int band);
+    // the rest of a zone after a repel or an unborn cancel (6.3): townCooldown
+    // x (1 + restJitter x (2u - 1)), u = Roll01(MakeSeed(zone, salt, 0, 0),
+    // RestJitterSalt); salt is the operation id, so each rest differs and a
+    // replay gives the same rests
+    static float JitteredRest(const OccupierForcesTuning& t, const char* zone, int salt);
+    // the ordinal of a repel count in the ladder's lines ("first", "second",
+    // "third", then "further")
+    static const char* RepelOrdinal(int count)
+    {
+        static const char* words[4] = {"", "first", "second", "third"};
+        return count >= 1 && count <= 3 ? words[count] : "further";
+    }
     // the spare cap (7.2): the minimum a base retake or an HQ assault asks
     // (minBodies), lowered to the largest single-base spare when no base can
     // spare it, never below min(floor, minBodies)
@@ -747,6 +823,7 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int Pool() const { return _pool; }
     int PoolStart() const { return _poolStart; }
     int RosterStrength() const { return _R; }
+    int GeneratedStrength() const { return _Rgen; }
     int TownCount() const { return _towns.Size(); }
     int TownGarrisons() const { return _G; }
     int Band() const { return _band; }
@@ -826,16 +903,38 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static bool IsHeldTown(const ZoneRegistry& registry, const ZoneRecord& z);
     // the candidate roll u of a held zone's current flip (6.3)
     static float CandidateRoll(const ZoneRecord& z);
-    // the held towns that are heat candidates now, hottest first
+    // the held towns, bases and the HQ that are heat candidates now: urgent
+    // first, then by whole heat points, then by value (CandidateValue: a tie
+    // of the same urgency and heat goes to bases, then towns by an occupier
+    // base, then far towns), then by heat; the final push first of all.  A
+    // contained zone (the repel ladder) is never a candidate.
     void Candidates(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher,
                     AutoArray<int>& out);
+    // the value weight of a candidate (6.3, 2026-10-16): ValueBase for a base,
+    // ValueAdjacentTown for a town within adjacentTown of an occupier-held
+    // base, ValueFarTown for another town, ValueHq for HqCandidate
+    int CandidateValue(const ZoneRegistry& registry, int target) const;
     // the push-out target (6.4), -1 none (STRONG is the caller's check)
     int PushoutTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher);
     // the package and source for an operation on target (no side effects).
     // target HqCandidate plans the HQ assault.  fixedSource >= 0 offers only
     // that base, with fixedSpare bodies to spare (a wave strike's staging).
+    // The repel ladder shapes a director or push-out plan on a zone it
+    // remembers (6.3): one repel with fighters reported raises L_req by
+    // escalateLethality and the minimum to escalateInfantry x the fighters
+    // (at most one group); approachRepels needs a different approach (another
+    // source base that can staff it, else an insertion; blocked: go false).
+    // best (the massing fallback): the minimum lowered to the largest
+    // single-base spare (never below the kind's own minimum), and the
+    // approach rule takes any different approach that can go at all (else
+    // the plain choice), so the strongest package one base can bring goes.
     DirectorAction PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
-                           int fixedSource = -1, int fixedSpare = 0) const;
+                           int fixedSource = -1, int fixedSpare = 0, bool best = false) const;
+    // why a director plan holds its token and masses (6.3, 2026-10-16), ""
+    // when it may go.  Only a plan the repel ladder shaped (escalation >= 1):
+    // the escalated infantry above every base's spare, the second rung
+    // blocked, or no package meeting the escalated L_req
+    static RString MassingReason(const DirectorAction& a);
     // one director step: tokens, urgency, cooldowns, intel decay, standing,
     // the waves, then at most one launch.  No-op unless Active().
     void Direct(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, float elapsed);
@@ -872,8 +971,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // (the director's own strikes, 7.3): an airframe is payable only when
     // the pool after its price still steps to STRONG from BandNow(), so a
     // strike never takes the band below STRONG; the test lever passes false
+    // stretchedOk (the escalation strike, with keepStrong): the pool after the
+    // price may step to STRETCHED, never below (StrikeKeepsStretchedWhy)
     DirectorAction PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target, bool urgent,
-                              bool keepStrong = false) const;
+                              bool keepStrong = false, bool stretchedOk = false) const;
+    // the escalation strike (7.3, 2026-10-16): a held town or base repelled
+    // approachRepels times, with StrikeMinFighters (a base: the opener's
+    // StrikeOpenerMinFighters) reported, outside its strike window, a strike
+    // airframe offered, the band STRONG or STRETCHED
+    bool EscalationStrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target) const;
     // the centroid of a zone's reported positions, VZero without a row
     Vector3 ReportedCentroid(const ZoneRegistry& registry, int zone) const;
     // the latest reported position in a zone, VZero without a row
@@ -950,6 +1056,31 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     float CooldownLeft(int i) const { return i >= 0 && i < _cooldowns.Size() ? _cooldowns[i].seconds : 0.0f; }
     // test lever (gmForcesForce "cooldown"): rest a zone for seconds
     void ForceCooldown(const char* zone, float seconds) { SetCooldown(zone, seconds); }
+    // the repel ladder (6.3, 2026-10-16; saved "Repels"): per zone the repels
+    // of the director's operations since it last changed hands, the last
+    // repelled package and source, and the containment flag
+    int Repels(const char* zone) const
+    {
+        const int r = FindRepel(zone);
+        return r >= 0 ? _repels[r].count : 0;
+    }
+    bool Contained(const char* zone) const
+    {
+        const int r = FindRepel(zone);
+        return r >= 0 && _repels[r].contained;
+    }
+    int RepelRows() const { return _repels.Size(); }
+    RString RepelZone(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].zone : RString(); }
+    int RepelCount(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].count : 0; }
+    int RepelPackage(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].package : FPFoot; }
+    RString RepelSource(int i) const { return i >= 0 && i < _repels.Size() ? _repels[i].source : RString(); }
+    bool RepelContained(int i) const { return i >= 0 && i < _repels.Size() && _repels[i].contained; }
+    // test lever (gmForcesForce "repels"): the zone remembers count repels
+    // (0 forgets it); package and source unknown; containment as the ladder
+    void ForceRepels(const char* zone, int count);
+    // massing (6.3, transient): the held target ("" none) and the ticks held
+    RString MassingTarget() const { return _massTarget; }
+    int MassingTicks() const { return _massTicks; }
     int OpRows() const { return _ops.Size(); }
     // the ledger row of a director operation, -1 none
     int FindOp(int opId) const;
@@ -1042,8 +1173,33 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         bool crewLedger = true;
         LSError Serialize(ParamArchive& ar);
     };
+    // the repel ladder of one zone (6.3, 2026-10-16)
+    struct RepelRow
+    {
+        RString zone;
+        int count = 0;          // repels since the zone last changed hands
+        int package = FPFoot;   // the last repelled package
+        RString source;         // the base its infantry came from ("" unknown)
+        bool contained = false; // the director stops spending on it
+        LSError Serialize(ParamArchive& ar);
+    };
+    // TryLaunch's outcome: launched, holding the token (massing), or not
+    enum LaunchOutcome
+    {
+        LOFailed,
+        LOLaunched,
+        LOMassing
+    };
 
     void LoadFromConfig();
+    int FindRepel(const char* zone) const;
+    // a director operation on zone was repelled: the ladder's next rung, its
+    // INFO line, and at containRepels the containment and its surge
+    void NoteRepel(ZoneRegistry& registry, int zone, int package, int source);
+    // containment lifts (6.3): a zone whose reports decayed, or every zone
+    // (a wave fires, control changes band); why names it in the INFO line
+    void StepContainment(const ZoneRegistry& registry);
+    void LiftContainment(const char* why);
     // the two Refund forms: registry null drops the excess
     int RefundInto(ZoneRegistry* registry, int units, const char* why, int sourceZone, const Vector3* near);
     // the excess over the ceiling into the bases with room (THE CEILING):
@@ -1065,8 +1221,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // at forcesRearmHeat; the others are released
     void StepRearm(ZoneRegistry& registry, const DirectorView& view, const AutoArray<RString>& ended);
     void DecaySightings();
-    bool TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
-                   int origin);
+    // LOMassing only for a director candidate (CAODirector): the token stays
+    int TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target, int origin);
     // launch a planned action: the pool pays hull and crew (and, staged, the
     // infantry: a deposit into the source's reserve the launch debits), the
     // ledger row, LaunchFunded, the INFO line.  spendToken: a director token
@@ -1115,6 +1271,7 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int _pool = 0;
     int _poolStart = 0;
     int _R = 0;
+    int _Rgen = 0; // the generated garrisons in _R (5.7, saved)
     int _G = 0;
     AutoArray<NameRow> _roster;
     AutoArray<NameRow> _towns;
@@ -1125,6 +1282,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     AutoArray<NameRow> _redPaid;        // held zones whose RED edge already paid a repel's heat
     AutoArray<ZoneClockRow> _cooldowns; // seconds left
     AutoArray<NameRow> _rearm;          // re-armed after a rest (6.3, saved)
+    AutoArray<RepelRow> _repels;        // the repel ladder (6.3, saved)
+    // massing (6.3, transient): the held target, the ticks it has held, the
+    // tokens when the hold began (a further token ends it)
+    RString _massTarget;
+    int _massTicks = 0;
+    int _massTokens = 0;
+    // transient: the control band (WavesCrossed) of the last Tick, -1 none;
+    // a change lifts every containment
+    int _controlBand = -1;
     AutoArray<SightingRow> _sightings;
     AutoArray<OpRow> _ops;
     float _clock = 0; // seconds of active director time (sighting stamps)

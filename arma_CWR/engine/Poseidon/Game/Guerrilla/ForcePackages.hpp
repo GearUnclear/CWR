@@ -47,8 +47,8 @@
 // L_req, the most lethal affordable package goes (the INFO line says so).
 // THE ARRIVAL RULE (2026-10-15; reworked 2026-10-16, phase 1 C, after
 // video 5 where all five insertions flew to empty targets).  Off unless
-// PackageRequest::slowEta or airEta is set (the pure chooser and wave
-// strikes keep the plain choice above).  The threshold T is slowEta (airEta
+// PackageRequest::slowEta or airEta is set (the pure chooser keeps the
+// plain choice above).  The threshold T is slowEta (airEta
 // when slowEta is 0).
 //   Air.  A transport helicopter insertion goes only when one of these holds
 //   (PackageChoice::reason, ForcePackages::ReasonWords):

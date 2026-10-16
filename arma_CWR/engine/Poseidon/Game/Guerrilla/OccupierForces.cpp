@@ -33,6 +33,8 @@ namespace Poseidon::Guerrilla
 
 // Defined in OccupierForcesCommands.cpp (keeps the command TU in the link).
 void EnsureOccupierForcesCommandsLinked();
+// a zone's name for the INFO lines ("off-map" for -1); defined with the director
+static const char* ZoneNameOf(const ZoneRegistry& registry, int index);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wexit-time-destructors"
@@ -73,12 +75,14 @@ spdlog::level::level_enum DirectorLogLevel()
 void OccupierForces::Clear()
 {
     _tuning = OccupierForcesTuning();
+    ForcePackages::SetRoadFactor(_tuning.roadFactor);
     _active = false;
     _restored = false;
     _activationTried = false;
     _pool = 0;
     _poolStart = 0;
     _R = 0;
+    _Rgen = 0;
     _G = 0;
     _roster.Clear();
     _towns.Clear();
@@ -89,6 +93,11 @@ void OccupierForces::Clear()
     _redPaid.Clear();
     _cooldowns.Clear();
     _rearm.Clear();
+    _repels.Clear();
+    _massTarget = RString();
+    _massTicks = 0;
+    _massTokens = 0;
+    _controlBand = -1;
     _sightings.Clear();
     _ops.Clear();
     _lastRefund = RefundTally();
@@ -284,6 +293,7 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.airEta = ReadRanged(c, "forcesAirEta", t.airEta, 0.0f, 86400.0f);
     // 2026-10-16: the road quote (6.5)
     t.roadFactor = ReadRanged(c, "forcesRoadFactor", t.roadFactor, 1.0f, 5.0f);
+    ForcePackages::SetRoadFactor(t.roadFactor); // the theatre's one road factor (quote and march)
     // phase 4: the HQ assault and the waves (16)
     t.hqAssaultMin = RoundToInt(ReadRanged(c, "forcesHqAssaultMin", (float)t.hqAssaultMin, 1.0f, 12.0f));
     t.waveDwell = RoundToInt(ReadRanged(c, "forcesControlDwell", (float)t.waveDwell, 1.0f, 10.0f));
@@ -473,6 +483,13 @@ int OccupierForces::OpsMaxFor(const OccupierForcesTuning& t, int band)
     return band == OFBandStrong ? MaxInt(base, t.opsMaxStrong) : base;
 }
 
+float OccupierForces::JitteredRest(const OccupierForcesTuning& t, const char* zone, int salt)
+{
+    const float share = t.restJitter > 0 ? t.restJitter : 0.0f;
+    const float u = CounterAttack::Roll01(CounterAttack::MakeSeed(zone ? zone : "", salt, 0, 0), RestJitterSalt);
+    return t.townCooldown * (1.0f + share * (2.0f * u - 1.0f));
+}
+
 int OccupierForces::SpareCappedMin(int minBodies, int largestSpare, int floor)
 {
     // never above the minimum asked, never below the floor (or the minimum
@@ -573,6 +590,13 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
                 out.roster.Add(z->name);
                 out.R += RoundToInt(z->garrisonMax);
             }
+            else if (CampaignEnd::IsGeneratedOccupier(*z, registry))
+            {
+                // a generated base (5.7): in R, its garrison out of poolStart
+                out.roster.Add(z->name);
+                out.R += RoundToInt(z->garrisonMax);
+                out.Rgen += RoundToInt(z->garrisonMax);
+            }
             continue;
         }
         if (stricmp(z->type, "CITY") != 0)
@@ -625,7 +649,8 @@ void OccupierForces::Size(const ZoneRegistry& registry, const OccupierForcesTuni
                      RoundToInt(z->garrisonMax));
         }
     }
-    out.poolStart = PoolStartOf(t, out.R, out.K());
+    // conservation (5.7, the owner, 2026-10-16): presence, not strength
+    out.poolStart = MaxInt(PoolStartOf(t, out.R - out.Rgen, out.K()) - out.Rgen, 0);
 }
 
 const char* OccupierForces::BandName(int band)
@@ -703,6 +728,7 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     }
     _probedOut = s.labels.Size();
     _R = s.R;
+    _Rgen = s.Rgen;
     _G = s.G;
     _poolStart = s.poolStart;
     _pool = _poolStart;
@@ -890,6 +916,16 @@ void OccupierForces::Tick(const ZoneRegistry& registry, float elapsed)
     _clock += elapsed;
     Refill(elapsed);
     _control = ComputeControl(registry);
+    // control crossing a wave threshold (either way) lifts every containment
+    const int controlBand = WavesCrossed(_tuning, _control);
+    if (_controlBand >= 0 && controlBand != _controlBand)
+    {
+        char why[80];
+        snprintf(why, sizeof(why), "control %.2f crossed a wave threshold (band %d -> %d)", (double)_control,
+                 _controlBand, controlBand);
+        LiftContainment(why);
+    }
+    _controlBand = controlBand;
     // the final stand's trigger reads this (StepWaves); a surge on a base
     // the occupier lost is gone with it
     _basesHeld = RosterBasesHeld(registry);
@@ -1474,7 +1510,8 @@ void OccupierForces::StepRearm(ZoneRegistry& registry, const DirectorView& view,
     for (int i = 0; i < ended.Size(); i++)
     {
         const int zi = registry.FindZoneIndex(ended[i]);
-        if (zi < 0 || !heldTarget(zi) || HasName(_rearm, ended[i]))
+        // a contained zone is not attacked (the repel ladder, 6.3)
+        if (zi < 0 || !heldTarget(zi) || HasName(_rearm, ended[i]) || Contained(ended[i]))
         {
             continue;
         }
@@ -1493,9 +1530,10 @@ void OccupierForces::StepRearm(ZoneRegistry& registry, const DirectorView& view,
     {
         const RString name = _rearm[i].name;
         const int zi = registry.FindZoneIndex(name);
-        if (zi < 0 || !heldTarget(zi) || KnownFighters(registry, zi) <= 0)
+        if (zi < 0 || !heldTarget(zi) || KnownFighters(registry, zi) <= 0 || Contained(name))
         {
-            LOG_DEBUG(Core, "OccupierForces: {} no longer re-armed (not held, or nobody reported)", (const char*)name);
+            LOG_DEBUG(Core, "OccupierForces: {} no longer re-armed (not held, nobody reported, or contained)",
+                      (const char*)name);
             _rearm.Delete(i);
             continue;
         }
@@ -1512,6 +1550,19 @@ void OccupierForces::ForgetZone(const char* zone)
     RemoveName(_urgent, zone);
     RemoveName(_redPaid, zone);
     RemoveName(_rearm, zone);
+    // the repel ladder resets when the zone changes hands (6.3)
+    const int rr = FindRepel(zone);
+    if (rr >= 0)
+    {
+        GM_DIRECTOR_INFO(Core, "OccupierForces: {} changed hands: the repel ladder resets ({} repel(s){})", zone,
+                         _repels[rr].count, _repels[rr].contained ? ", contained" : "");
+        _repels.Delete(rr);
+    }
+    if (zone && stricmp(_massTarget, zone) == 0)
+    {
+        _massTarget = RString();
+        _massTicks = 0;
+    }
     for (int i = _cooldowns.Size() - 1; i >= 0; i--)
     {
         if (zone && stricmp(_cooldowns[i].zone, zone) == 0)
@@ -1519,6 +1570,202 @@ void OccupierForces::ForgetZone(const char* zone)
             _cooldowns.Delete(i);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// the repel ladder (6.3, 2026-10-16, video 5)
+// ---------------------------------------------------------------------------
+
+int OccupierForces::FindRepel(const char* zone) const
+{
+    for (int i = 0; zone && i < _repels.Size(); i++)
+    {
+        if (stricmp(_repels[i].zone, zone) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void OccupierForces::NoteRepel(ZoneRegistry& registry, int zone, int package, int source)
+{
+    const ZoneRecord* z = registry.GetZone(zone);
+    if (!z)
+    {
+        return;
+    }
+    int r = FindRepel(z->name);
+    if (r < 0)
+    {
+        RepelRow fresh;
+        fresh.zone = z->name;
+        _repels.Add(fresh);
+        r = _repels.Size() - 1;
+    }
+    RepelRow& row = _repels[r];
+    row.count++;
+    row.package = package;
+    const ZoneRecord* src = registry.GetZone(source);
+    row.source = src ? src->name : RString();
+    const int fighters = KnownFighters(registry, zone);
+    const char* nth = RepelOrdinal(row.count);
+    char last[96];
+    snprintf(last, sizeof(last), "%s from %s", ForcePackages::PackageName(package),
+             src ? (const char*)src->name : "an unknown base");
+    if (_tuning.containRepels > 0 && row.count >= _tuning.containRepels)
+    {
+        // contain: the next operation's bodies surge the nearest base instead
+        const int baseMin = MinInt(MaxInt(_tuning.retakeMin, RoundToInt(z->garrisonMax)), ForcePackages::MaxGroup);
+        const int need = MinInt(MaxInt(baseMin, (int)ceilf(_tuning.escalateInfantry * (float)fighters - 1e-3f)),
+                                ForcePackages::MaxGroup);
+        const RString occupier = registry.OccupierSide();
+        int base = -1;
+        float bestSq = 0;
+        for (int i = 0; i < registry.NZones(); i++)
+        {
+            const ZoneRecord* b = registry.GetZone(i);
+            if (!b || !CampaignEnd::IsMilitaryType(b->type) || stricmp(b->owner, occupier) != 0 ||
+                !RoadRoute::SameLandmass(b->pos, z->pos))
+            {
+                continue;
+            }
+            const float dx = b->pos.X() - z->pos.X();
+            const float dz = b->pos.Z() - z->pos.Z();
+            if (base < 0 || dx * dx + dz * dz < bestSq)
+            {
+                base = i;
+                bestSq = dx * dx + dz * dz;
+            }
+        }
+        const int got = base >= 0 ? Deposit(need, "containment surge") : 0;
+        const bool pending = got > 0 && registry.AddReserveNow(base, got, -1);
+        row.contained = true;
+        RemoveName(_rearm, z->name);
+        GM_DIRECTOR_INFO(Core,
+                         "OccupierForces: {}: {} repel ({}), contained: no more attacks on it; {} surged by {}{} (the "
+                         "containment lifts when its reports decay, a wave fires or control changes band)",
+                         (const char*)z->name, nth, last, base >= 0 ? ZoneNameOf(registry, base) : "no base", got,
+                         pending ? " (pending)" : "");
+        return;
+    }
+    if (_tuning.approachRepels > 0 && row.count >= _tuning.approachRepels)
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "OccupierForces: {}: {} repel ({}), next attack from a different source or by air; a strike "
+                         "may go with it if the pool stays STRETCHED",
+                         (const char*)z->name, nth, last);
+        return;
+    }
+    if (fighters > 0)
+    {
+        GM_DIRECTOR_INFO(
+            Core,
+            "OccupierForces: {}: {} repel ({}, {} fighter(s) reported), next attack needs lethality x{:.1f} "
+            "and at least {} infantry",
+            (const char*)z->name, nth, last, fighters, (double)_tuning.escalateLethality,
+            MinInt((int)ceilf(_tuning.escalateInfantry * (float)fighters - 1e-3f), ForcePackages::MaxGroup));
+    }
+    else
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "OccupierForces: {}: {} repel ({}), nobody reported: the next attack escalates once "
+                         "fighters are reported",
+                         (const char*)z->name, nth, last);
+    }
+}
+
+void OccupierForces::StepContainment(const ZoneRegistry& registry)
+{
+    const RString resistance = registry.ResistanceSide();
+    for (int i = _repels.Size() - 1; i >= 0; i--)
+    {
+        RepelRow& row = _repels[i];
+        const int zi = registry.FindZoneIndex(row.zone);
+        const ZoneRecord* z = registry.GetZone(zi);
+        if (!z || stricmp(z->owner, resistance) != 0)
+        {
+            // a scripted owner change sends no event: it changed hands all the same
+            GM_DIRECTOR_INFO(Core, "OccupierForces: {} changed hands: the repel ladder resets ({} repel(s))",
+                             (const char*)row.zone, row.count);
+            _repels.Delete(i);
+            continue;
+        }
+        if (row.contained && KnownFighters(registry, zi) <= 0)
+        {
+            row.contained = false;
+            GM_DIRECTOR_INFO(Core,
+                             "OccupierForces: {}: containment lifted: its reports decayed ({} repel(s) remembered)",
+                             (const char*)row.zone, row.count);
+        }
+    }
+}
+
+void OccupierForces::LiftContainment(const char* why)
+{
+    for (int i = 0; i < _repels.Size(); i++)
+    {
+        if (_repels[i].contained)
+        {
+            _repels[i].contained = false;
+            GM_DIRECTOR_INFO(Core, "OccupierForces: {}: containment lifted: {} ({} repel(s) remembered)",
+                             (const char*)_repels[i].zone, why ? why : "", _repels[i].count);
+        }
+    }
+}
+
+int OccupierForces::CandidateValue(const ZoneRegistry& registry, int target) const
+{
+    if (target == HqCandidate)
+    {
+        return ValueHq;
+    }
+    const ZoneRecord* z = registry.GetZone(target);
+    if (!z)
+    {
+        return ValueFarTown;
+    }
+    if (CampaignEnd::IsMilitaryType(z->type))
+    {
+        return ValueBase;
+    }
+    const RString occupier = registry.OccupierSide();
+    const float r2 = _tuning.adjacentTown * _tuning.adjacentTown;
+    for (int i = 0; i < registry.NZones(); i++)
+    {
+        const ZoneRecord* b = registry.GetZone(i);
+        if (!b || !CampaignEnd::IsMilitaryType(b->type) || stricmp(b->owner, occupier) != 0)
+        {
+            continue;
+        }
+        const float dx = b->pos.X() - z->pos.X();
+        const float dz = b->pos.Z() - z->pos.Z();
+        if (dx * dx + dz * dz <= r2)
+        {
+            return ValueAdjacentTown;
+        }
+    }
+    return ValueFarTown;
+}
+
+RString OccupierForces::MassingReason(const DirectorAction& a)
+{
+    // a first attempt never masses: the ladder says when more is needed
+    char buf[192] = "";
+    if (a.escalation >= 1 && a.needBodies > a.bestSpare)
+    {
+        snprintf(buf, sizeof(buf), "need %d infantry, best source spares %d", a.needBodies, a.bestSpare);
+    }
+    else if (a.approachBlocked)
+    {
+        snprintf(buf, sizeof(buf), "%s", (const char*)a.choice.why);
+    }
+    else if (a.escalation >= 1 && a.go && a.choice.shortOfLethality)
+    {
+        snprintf(buf, sizeof(buf), "need lethality %.1f, the best package brings %.1f", (double)a.choice.lReq,
+                 (double)a.choice.quote.lethality);
+    }
+    return buf[0] ? RString(buf) : RString();
 }
 
 int OccupierForces::FindOp(int opId) const
@@ -1961,31 +2208,53 @@ void OccupierForces::Candidates(const ZoneRegistry& registry, const DirectorView
     const RString resistance = registry.ResistanceSide();
     const float full = _tuning.heatFull > 0 ? _tuning.heatFull : 1.0f;
     const bool strong = _band == OFBandStrong;
-    // hottest first (stable on the zone order)
-    auto insertByHeat = [&registry, &out](int zone, float heat) {
-        int at = out.Size();
-        while (at > 0)
+    // the order (6.3, 2026-10-16): urgent, whole heat points, value (the tiebreak
+    // of video 5's two towns re-armed at 40), heat; stable on the zone order
+    struct Entry
+    {
+        int zone;
+        float heat;
+        bool urgent;
+        int value;
+    };
+    AutoArray<Entry> entries;
+    auto before = [](const Entry& a, const Entry& b)
+    {
+        if (a.urgent != b.urgent)
         {
-            const ZoneRecord* prev = out[at - 1] >= 0 ? registry.GetZone(out[at - 1]) : nullptr;
-            if (!prev || prev->heat >= heat)
-            {
-                break;
-            }
+            return a.urgent;
+        }
+        if (floorf(a.heat) != floorf(b.heat))
+        {
+            return floorf(a.heat) > floorf(b.heat);
+        }
+        if (a.value != b.value)
+        {
+            return a.value > b.value;
+        }
+        return a.heat > b.heat;
+    };
+    auto insert = [&](int zone, float heat, const char* name)
+    {
+        Entry e{zone, heat, Urgent(name), CandidateValue(registry, zone)};
+        int at = entries.Size();
+        while (at > 0 && before(e, entries[at - 1]))
+        {
             at--;
         }
-        out.Add(zone);
-        for (int k = out.Size() - 1; k > at; k--)
+        entries.Add(e);
+        for (int k = entries.Size() - 1; k > at; k--)
         {
-            out[k] = out[k - 1];
+            entries[k] = entries[k - 1];
         }
-        out[at] = zone;
+        entries[at] = e;
     };
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
-        if (!z || stricmp(z->owner, resistance) != 0)
+        if (!z || stricmp(z->owner, resistance) != 0 || Contained(z->name))
         {
-            continue;
+            continue; // a contained zone is not attacked (the repel ladder)
         }
         const bool hot = z->heat / full >= CandidateRoll(*z);
         if (CampaignEnd::IsMilitaryType(z->type))
@@ -1996,52 +2265,37 @@ void OccupierForces::Candidates(const ZoneRegistry& registry, const DirectorView
             {
                 continue;
             }
-            insertByHeat(i, z->heat);
+            insert(i, z->heat, z->name);
             continue;
         }
         if (!IsHeldTown(registry, *z) || i == view.hqZone || Cooldown(z->name) > 0 || launcher.HasRecord(i) || !hot)
         {
             continue;
         }
-        insertByHeat(i, z->heat);
+        insert(i, z->heat, z->name);
     }
     // the HQ (D13, D14, D24): an established HQ with no assault on it and no
     // cooldown; while STRONG or in a wave by the heat of the zone it stands
     // in (none for an HQ outside every zone), and unconditionally once the
     // resistance holds no base and no town besides the HQ's zone
+    bool finalPush = false;
     if (view.hqEstablished && !launcher.HasHqRecord() && Cooldown(HqCooldownName) <= 0)
     {
         const ZoneRecord* hz = registry.GetZone(view.hqZone);
-        const bool finalPush = FinalPush(registry, view.hqZone);
+        finalPush = FinalPush(registry, view.hqZone);
         const bool hotHq = hz && hz->heat / full >= CandidateRoll(*hz);
-        if (finalPush)
+        if (!finalPush && (strong || InWave()) && hotHq)
         {
-            out.Add(HqCandidate);
-            for (int k = out.Size() - 1; k > 0; k--)
-            {
-                out[k] = out[k - 1];
-            }
-            out[0] = HqCandidate;
+            insert(HqCandidate, hz->heat, hz->name);
         }
-        else if ((strong || InWave()) && hotHq)
-        {
-            int at = out.Size();
-            while (at > 0)
-            {
-                const ZoneRecord* prev = out[at - 1] >= 0 ? registry.GetZone(out[at - 1]) : nullptr;
-                if (!prev || prev->heat >= hz->heat)
-                {
-                    break;
-                }
-                at--;
-            }
-            out.Add(HqCandidate);
-            for (int k = out.Size() - 1; k > at; k--)
-            {
-                out[k] = out[k - 1];
-            }
-            out[at] = HqCandidate;
-        }
+    }
+    if (finalPush)
+    {
+        out.Add(HqCandidate);
+    }
+    for (int i = 0; i < entries.Size(); i++)
+    {
+        out.Add(entries[i].zone);
     }
 }
 
@@ -2055,7 +2309,7 @@ int OccupierForces::PushoutTarget(const ZoneRegistry& registry, const DirectorVi
     for (int i = 0; i < registry.NZones(); i++)
     {
         const ZoneRecord* z = registry.GetZone(i);
-        if (!z || i == view.hqZone || Cooldown(z->name) > 0 || launcher.HasRecord(i))
+        if (!z || i == view.hqZone || Cooldown(z->name) > 0 || launcher.HasRecord(i) || Contained(z->name))
         {
             continue;
         }
@@ -2105,8 +2359,8 @@ int OccupierForces::PushoutTarget(const ZoneRegistry& registry, const DirectorVi
     return best;
 }
 
-DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target,
-                                       int origin, int fixedSource, int fixedSpare) const
+DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
+                                       int fixedSource, int fixedSpare, bool best) const
 {
     DirectorAction a;
     a.origin = origin;
@@ -2153,12 +2407,14 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
-    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
+    req.roadFactor = ForcePackages::RoadFactor(); // the road quote (6.5): a ground leg with no road route known
     // the arrival rule (6.5, 2026-10-15) for the director's own operations
     // and, since 2026-10-16 (video 4: a push-out walked 55 minutes from the
     // Airfield), push-outs (6.4): a foot quote under forcesSlowEta stays the
-    // cheapest and goes.  A wave strike keeps its staged hub budget (7.1)
-    if (origin == CAODirector || origin == CAOPushout)
+    // cheapest and goes.  Wave strikes too since 2026-10-16 (video 5: the
+    // wave's HQ assault walked 41 minutes from the harbour that had just
+    // landed it): chosen from the hub within its staged budget (7.1)
+    if (origin == CAODirector || origin == CAOPushout || origin == CAOWave)
     {
         req.slowEta = _tuning.slowEta;
         req.slowCostShare = _tuning.slowCostShare;
@@ -2199,8 +2455,89 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
         }
     }
     a.minUsed = req.minBodies;
+    // the repel ladder (6.3, 2026-10-16) on a director or push-out plan
+    const bool heli = _catalogue.Offered(FPTransportHeli);
+    const int ri = !hq && fixedSource < 0 && (origin == CAODirector || origin == CAOPushout) ? FindRepel(z->name) : -1;
+    const RepelRow* rr = ri >= 0 ? &_repels[ri] : nullptr;
+    a.bestSpare = LargestSpare(sources, heli);
+    if (rr && rr->count >= 1 && a.fighters > 0)
+    {
+        // escalate: more lethality, and infantry to assault, not hulls alone
+        a.escalation = rr->count;
+        req.margin *= _tuning.escalateLethality > 1 ? _tuning.escalateLethality : 1.0f;
+        const int need = MinInt((int)ceilf(_tuning.escalateInfantry * a.fighters - 1e-3f), ForcePackages::MaxGroup);
+        req.minBodies = MaxInt(req.minBodies, need);
+    }
+    a.needBodies = req.minBodies;
+    if (best && req.minBodies > a.bestSpare)
+    {
+        // the massing fallback: the strongest package one base can bring
+        req.minBodies = MaxInt(a.minUsed, a.bestSpare);
+    }
     // phase 6: a helicopter insertion competes like any package (6.5, D3)
     a.airOrigin = HeldAirfield(registry, dest);
+    if (rr && _tuning.approachRepels > 0 && rr->count >= _tuning.approachRepels)
+    {
+        // a different approach: another base, else an insertion (ground after air)
+        a.escalation = rr->count;
+        const int lastSource = registry.FindZoneIndex(rr->source);
+        const bool lastAir = rr->package == FPTransportHeli;
+        AutoArray<PackageSource> others;
+        for (int i = 0; i < sources.Size(); i++)
+        {
+            if (sources[i].zone != lastSource)
+            {
+                others.Add(sources[i]);
+            }
+        }
+        const PackageChoice other = ChooseWithAir(req, others, a.airOrigin);
+        PackageRequest rb = req;
+        rb.airOffMap = a.airOrigin < 0;
+        rb.offered = lastAir ? ForcePackages::GroundPackages : (heli ? ForcePackages::Bit(FPTransportHeli) : 0u);
+        PackageChoice mode;
+        if (rb.offered != 0)
+        {
+            mode = ForcePackages::Choose(rb, _catalogue, sources);
+        }
+        const PackageChoice* pick = other.ok && !other.shortOfLethality ? &other
+                                    : mode.ok && !mode.shortOfLethality ? &mode
+                                    : other.ok                          ? &other
+                                    : mode.ok                           ? &mode
+                                                                        : nullptr;
+        if (!pick && best)
+        {
+            // the massing fallback: no other approach can go, so any
+            a.choice = ChooseWithAir(req, sources, a.airOrigin);
+            a.go = a.choice.ok;
+            return a;
+        }
+        if (!pick)
+        {
+            a.approachBlocked = true;
+            a.choice = other;
+            a.choice.ok = false;
+            a.choice.why = "no different approach yet: no other base can staff it and no insertion can go";
+            a.go = false;
+            return a;
+        }
+        a.choice = *pick;
+        a.go = true;
+        char note[160];
+        const char* lastName = rr->source.GetLength() > 0 ? (const char*)rr->source : "the last source";
+        if (pick == &other)
+        {
+            snprintf(note, sizeof(note), "%s from %s instead of %s from %s",
+                     ForcePackages::PackageName(pick->quote.package), ZoneNameOf(registry, pick->quote.source),
+                     ForcePackages::PackageName(rr->package), lastName);
+        }
+        else
+        {
+            snprintf(note, sizeof(note), "%s instead of %s from %s", lastAir ? "on the ground" : "by air",
+                     ForcePackages::PackageName(rr->package), lastName);
+        }
+        a.approach = note;
+        return a;
+    }
     a.choice = ChooseWithAir(req, sources, a.airOrigin);
     a.go = a.choice.ok;
     return a;
@@ -2305,15 +2642,16 @@ static const char* ZoneNameOf(const ZoneRegistry& registry, int index)
     return z ? (const char*)z->name : "off-map";
 }
 
-bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
-                               int origin)
+int OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher, int target,
+                              int origin)
 {
     const bool hq = target == HqCandidate;
     const ZoneRecord* z = registry.GetZone(target);
     if (!z && !hq)
     {
-        return false;
+        return LOFailed;
     }
+    const RString name = hq ? RString(HqCooldownName) : z->name;
     // M1: when CounterAttack refuses the chosen source, the same target is
     // re-planned without it (a local copy of the view with its spare at 0),
     // a bounded number of times.  Still one operation per tick: the loop
@@ -2322,7 +2660,42 @@ bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view,
     const DirectorView* v = &view;
     for (int attempt = 0; attempt <= MaxSourceRetries; attempt++)
     {
-        const DirectorAction a = PlanFor(registry, *v, target, origin);
+        DirectorAction a = PlanFor(registry, *v, target, origin);
+        // massing (6.3): under strength, a director candidate holds its token
+        const RString mass = origin == CAODirector ? MassingReason(a) : RString();
+        if (mass.GetLength() > 0)
+        {
+            if (stricmp(_massTarget, name) != 0)
+            {
+                _massTarget = name;
+                _massTicks = 0;
+                _massTokens = _tokens;
+            }
+            _massTicks++;
+            const bool token = _tokens > _massTokens;
+            if (!token && _massTicks <= _tuning.massingMax)
+            {
+                GM_DIRECTOR_INFO(Core, "OccupierForces: massing for {}: {} (the token is held, tick {} of {})",
+                                 hq ? "the HQ" : (const char*)name, (const char*)mass, _massTicks, _tuning.massingMax);
+                return LOMassing;
+            }
+            GM_DIRECTOR_INFO(Core, "OccupierForces: massing for {} ends ({}): {}, the strongest package goes",
+                             hq ? "the HQ" : (const char*)name, (const char*)mass,
+                             token ? "a further token" : "forcesMassingMax ticks held");
+            _massTarget = RString();
+            _massTicks = 0;
+            a = PlanFor(registry, *v, target, origin, -1, 0, true);
+        }
+        else if (stricmp(_massTarget, name) == 0)
+        {
+            if (a.go)
+            {
+                GM_DIRECTOR_INFO(Core, "OccupierForces: massing for {} ends: {} can staff it",
+                                 hq ? "the HQ" : (const char*)name, ZoneNameOf(registry, a.choice.quote.source));
+            }
+            _massTarget = RString();
+            _massTicks = 0;
+        }
         if (!a.go)
         {
             if (LogAllowed())
@@ -2331,17 +2704,26 @@ bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view,
                          (const char*)a.choice.why, _logSuppressed > 0 ? " (other lines suppressed)" : "");
                 _logSuppressed = 0;
             }
-            return false;
+            return LOFailed;
         }
         bool refused = false;
         if (LaunchAction(registry, *v, launcher, a, true, false, 0, &refused))
         {
-            return true;
+            if (a.escalation > 0)
+            {
+                // the repel ladder's rung on this launch (6.3)
+                GM_DIRECTOR_INFO(Core,
+                                 "OccupierForces: [op {}] the repel ladder on {} ({} repel(s)): lethality {:.2f} "
+                                 "needed, at least {} infantry{}{}",
+                                 _opCounter, (const char*)name, a.escalation, (double)a.choice.lReq, a.needBodies,
+                                 a.approach.GetLength() > 0 ? "; a different approach: " : "", (const char*)a.approach);
+            }
+            return LOLaunched;
         }
         const int source = a.choice.quote.source;
         if (!refused || source < 0)
         {
-            return false; // the pool refused: no other source changes that
+            return LOFailed; // the pool refused: no other source changes that
         }
         if (v != &local)
         {
@@ -2357,7 +2739,7 @@ bool OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view,
             local.spareStored[source] = 0;
         }
     }
-    return false;
+    return LOFailed;
 }
 
 bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
@@ -2503,7 +2885,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     {
         GM_DIRECTOR_INFO(Core,
                          "OccupierForces: [op {}] arrival rule ({}): the cheapest, {}, needs {}; {} goes, {}",
-                         opId, a.choice.etaRule == PackageChoice::EtaAir ? "forcesAirEta" : "forcesSlowEta",
+                         opId, ForcePackages::ReasonWords(a.choice.reason),
                          ForcePackages::PackageName(a.choice.cheapestPackage),
                          a.choice.cheapestIndex >= 0
                              ? (const char*)ForcePackages::LogEtaNote(a.choice.quotes[a.choice.cheapestIndex])
@@ -2626,6 +3008,8 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
     AutoArray<RString> rested;
     CountDownCooldowns(elapsed, &rested);
     DecaySightings();
+    // the repel ladder: changed hands, decayed reports (6.3)
+    StepContainment(registry);
     // a defended held zone whose rest ran out stays a candidate (6.3)
     StepRearm(registry, view, rested);
     UpdateUrgency(registry);
@@ -2650,6 +3034,33 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
     }
     AutoArray<int> candidates;
     Candidates(registry, view, launcher, candidates);
+    auto nameOf = [&registry](int target)
+    {
+        const ZoneRecord* cz = registry.GetZone(target);
+        return target == HqCandidate ? RString(HqCooldownName) : (cz ? cz->name : RString());
+    };
+    // massing (6.3): the held target first; dropped when no longer a candidate
+    if (_massTarget.GetLength() > 0)
+    {
+        int at = -1;
+        for (int i = 0; i < candidates.Size() && at < 0; i++)
+        {
+            at = stricmp(nameOf(candidates[i]), _massTarget) == 0 ? i : -1;
+        }
+        if (at < 0)
+        {
+            GM_DIRECTOR_INFO(Core, "OccupierForces: massing for {} dropped: no longer a candidate",
+                             (const char*)_massTarget);
+            _massTarget = RString();
+            _massTicks = 0;
+        }
+        for (int k = at; k > 0; k--)
+        {
+            const int t = candidates[k];
+            candidates[k] = candidates[k - 1];
+            candidates[k - 1] = t;
+        }
+    }
     for (int i = 0; i < candidates.Size(); i++)
     {
         const int target = candidates[i];
@@ -2662,12 +3073,29 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
         // an opener bought and refunded in this step never shows an edge.
         // StrikeDue still reads the band the ground operation left (BandNow)
         BandHold hold(*this);
-        if (TryLaunch(registry, view, launcher, target, CAODirector))
+        const int outcome = TryLaunch(registry, view, launcher, target, CAODirector);
+        if (outcome == LOLaunched)
         {
+            // the candidate line (6.3, 2026-10-16): its value weight
+            const int value = CandidateValue(registry, target);
+            const ZoneRecord* hz = target == HqCandidate ? registry.GetZone(view.hqZone) : tz;
+            GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] candidate {}, {} of {}: {} (weight {}), heat {:.0f}{}",
+                             _opCounter, target == HqCandidate ? "the HQ" : (const char*)nameOf(target), i + 1,
+                             candidates.Size(),
+                             target == HqCandidate        ? "the HQ"
+                             : value == ValueBase         ? "a base"
+                             : value == ValueAdjacentTown ? "a town by an occupier base"
+                                                          : "a far town",
+                             value, hz ? (double)hz->heat : 0.0, hz && Urgent(hz->name) ? ", urgent" : "");
             // the strike that goes with it (7.3): a base / HQ opener with a
-            // defender reported, or an urgent town with fighters reported
+            // defender reported, an urgent town with fighters reported, or
+            // the repel ladder's escalation strike
             MaybeStrike(registry, view, launcher, target, kind);
             return; // one operation per tick
+        }
+        if (outcome == LOMassing)
+        {
+            return; // the token is kept: massing, nothing else goes this tick
         }
         // no ground package could go: an urgent town with fighters may still
         // be struck from the air on its own (it takes the token)
@@ -2858,7 +3286,10 @@ void OccupierForces::FireWave(const ZoneRegistry& registry, const DirectorView& 
     _waveCount++;
     _waveInbound = true;
     _waveFinalStand = final;
-    _waveBodies = WaveSize(_tuning, _poolStart);
+    // the parent nation sends more: contained zones are weighed again (6.3)
+    LiftContainment("a wave fired");
+    // a wave is a share of poolStart + Rgen (5.7): generated bases cost no wave
+    _waveBodies = WaveSize(_tuning, _poolStart + _Rgen);
     _waveClock = final ? _tuning.waveLeadFinal : _tuning.waveLead;
     const int hub = PickHub(registry, _tuning, &view.garrisonLive);
     GM_DIRECTOR_INFO(Core, "OccupierForces: Wave {} ({}) inbound to {}, control {:.2f}{} ({}; lands in {:.0f} s)", _waveCount,
@@ -3393,11 +3824,12 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             _ops[row].outstanding = 0;
             _ops[row].finished = true;
             Refund(registry, refund, "cancelled unborn", ev.source);
-            SetCooldown(target, _tuning.townCooldown);
-            GM_DIRECTOR_INFO(Core,
-                     "OccupierForces: [op {}] Cancelled unborn: {}; {} unit(s) back to the pool, {} rests {:.0f} s",
-                     ev.opId, ev.note && *ev.note ? ev.note : "every route watched", refund, target,
-                     (double)_tuning.townCooldown);
+            // the rest carries the hashed jitter (6.3, 2026-10-16)
+            const float rest = JitteredRest(_tuning, target, ev.opId);
+            SetCooldown(target, rest);
+            GM_DIRECTOR_INFO(
+                Core, "OccupierForces: [op {}] Cancelled unborn: {}; {} unit(s) back to the pool, {} rests {:.0f} s",
+                ev.opId, ev.note && *ev.note ? ev.note : "every route watched", refund, target, (double)rest);
             break;
         }
         case CAOpRepelled:
@@ -3419,11 +3851,19 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 registry.HeatRaise(ev.target, RepelHeat);
             }
             RemoveName(_redPaid, target);
-            SetCooldown(target, _tuning.townCooldown);
+            // the rest carries the hashed jitter (6.3, 2026-10-16): no clockwork
+            const float rest = JitteredRest(_tuning, target, ev.opId);
+            SetCooldown(target, rest);
             _ops[row].finished = true;
-            GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] Repelled at {}: {} lost, {} going home; {} rests {:.0f} s{}",
-                     ev.opId, target, ev.units, ev.bodies, target, (double)_tuning.townCooldown,
-                     paid ? " (a RED edge already raised the heat)" : ", heat +15");
+            GM_DIRECTOR_INFO(Core,
+                             "OccupierForces: [op {}] Repelled at {}: {} lost, {} going home; {} rests {:.0f} s{}",
+                             ev.opId, target, ev.units, ev.bodies, target, (double)rest,
+                             paid ? " (a RED edge already raised the heat)" : ", heat +15");
+            // the repel ladder (6.3): town and base retakes, any origin, never the HQ
+            if (ev.target >= 0 && (ev.kind == CAKRetake || ev.kind == CAKBase))
+            {
+                NoteRepel(registry, ev.target, _ops[row].package, ev.source);
+            }
             break;
         }
         case CAOpSettled:
@@ -3677,7 +4117,7 @@ int OccupierForces::OpenerFighters(const ZoneRegistry& registry, const DirectorV
 }
 
 DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const DirectorView& view, int target,
-                                          bool urgent, bool keepStrong) const
+                                          bool urgent, bool keepStrong, bool stretchedOk) const
 {
     DirectorAction a;
     a.kind = CAKStrike;
@@ -3730,8 +4170,10 @@ DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const Di
         q.affordable = !Active() || (q.poolPrice <= _pool);
         // the director's own strike (7.3, 2026-10-16): STRONG must hold after
         // the ground operation's debit (BandNow) and this price
+        // (the escalation strike, stretchedOk: STRETCHED must hold)
+        const int after = StepBand(BandNow(), _pool - q.poolPrice, _poolStart);
         if (keepStrong && Active() && q.affordable &&
-            StepBand(BandNow(), _pool - q.poolPrice, _poolStart) != OFBandStrong)
+            !(after == OFBandStrong || (stretchedOk && after == OFBandStretched)))
         {
             q.affordable = false;
             keptStrong = true;
@@ -3759,7 +4201,7 @@ DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const Di
     if (cheapest < 0)
     {
         a.choice.why = n == 0       ? "no strike airframe offered"
-                       : keptStrong ? StrikeKeepsStrongWhy
+                       : keptStrong ? (stretchedOk ? StrikeKeepsStretchedWhy : StrikeKeepsStrongWhy)
                                     : "the pool cannot pay a strike";
         return a;
     }
@@ -3788,16 +4230,20 @@ DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const Di
 void OccupierForces::MaybeStrike(ZoneRegistry& registry, const DirectorView& view, DirectorLauncher& launcher,
                                  int target, int launchedKind)
 {
-    if (!StrikeDue(registry, view, target, launchedKind))
+    // the escalation strike (7.3): from the second repel, while STRETCHED holds
+    const bool due = StrikeDue(registry, view, target, launchedKind);
+    const bool escalation = !due && EscalationStrikeDue(registry, view, target);
+    if (!due && !escalation)
     {
         return;
     }
-    const DirectorAction a = PlanStrike(registry, view, target, true, true);
+    const DirectorAction a = PlanStrike(registry, view, target, true, true, escalation);
     if (!a.go)
     {
         // the band rule is a director decision worth a line (7.3); the rest
         // (nothing offered, nothing payable) stays at DEBUG
-        if (strcmp((const char*)a.choice.why, StrikeKeepsStrongWhy) == 0)
+        if (strcmp((const char*)a.choice.why, StrikeKeepsStrongWhy) == 0 ||
+            strcmp((const char*)a.choice.why, StrikeKeepsStretchedWhy) == 0)
         {
             GM_DIRECTOR_INFO(Core, "OccupierForces: no strike with the operation on {}: {} (pool {} of {})",
                              target == HqCandidate ? "the HQ" : ZoneNameOf(registry, target),
@@ -3810,7 +4256,47 @@ void OccupierForces::MaybeStrike(ZoneRegistry& registry, const DirectorView& vie
         return;
     }
     // no extra token: the strike goes with the operation just launched
-    LaunchAction(registry, view, launcher, a, false, false, 0);
+    if (LaunchAction(registry, view, launcher, a, false, false, 0) && escalation)
+    {
+        GM_DIRECTOR_INFO(
+            Core,
+            "OccupierForces: [op {}] escalation strike: {} repelled {} time(s), the pool stays {} (pool {} "
+            "of {})",
+            _opCounter, ZoneNameOf(registry, target), Repels(ZoneNameOf(registry, target)), BandName(BandNow()), _pool,
+            _poolStart);
+    }
+}
+
+bool OccupierForces::EscalationStrikeDue(const ZoneRegistry& registry, const DirectorView& view, int target) const
+{
+    if (!Active() || target == HqCandidate || _tuning.approachRepels <= 0)
+    {
+        return false;
+    }
+    const int band = BandNow();
+    if (band != OFBandStrong && band != OFBandStretched)
+    {
+        return false;
+    }
+    if (!_catalogue.Offered(FPJet) && !_catalogue.Offered(FPAttackHeli))
+    {
+        return false;
+    }
+    const ZoneRecord* z = registry.GetZone(target);
+    if (!z || Repels(z->name) < _tuning.approachRepels)
+    {
+        return false;
+    }
+    const bool base = registry.IsHeldBase(*z);
+    if (!base && !IsHeldTown(registry, *z))
+    {
+        return false;
+    }
+    if (KnownFighters(registry, target) < (base ? StrikeOpenerMinFighters : StrikeMinFighters))
+    {
+        return false;
+    }
+    return !registry.IsStruck(target, view.now);
 }
 
 int OccupierForces::ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3Par pos, float now, int opId)
@@ -3901,7 +4387,7 @@ DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const Dir
     req.pool = _pool;
     req.poolActive = Active();
     req.offered = OfferedPackages;
-    req.roadFactor = _tuning.roadFactor; // the road quote (6.5): a ground leg with no road route known
+    req.roadFactor = ForcePackages::RoadFactor(); // the road quote (6.5): a ground leg with no road route known
     // the arrival rule (6.5) answers alarms too, except THIN (the cheapest)
     if (a.urgent)
     {
@@ -4358,6 +4844,16 @@ LSError OccupierForces::OpRow::Serialize(ParamArchive& ar)
     return LSOK;
 }
 
+LSError OccupierForces::RepelRow::Serialize(ParamArchive& ar)
+{
+    PARAM_CHECK(ar.Serialize("zone", zone, 1, RString()))
+    PARAM_CHECK(ar.Serialize("count", count, 1, 0))
+    PARAM_CHECK(ar.Serialize("package", package, 1, (int)FPFoot))
+    PARAM_CHECK(ar.Serialize("source", source, 1, RString()))
+    PARAM_CHECK(ar.Serialize("contained", contained, 1, false))
+    return LSOK;
+}
+
 LSError OccupierForces::Serialize(ParamArchive& ar)
 {
     // plain values and name rows only (the CampaignEnd idiom): the World
@@ -4384,6 +4880,8 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     int k = _towns.Size(); // informational: K is the Towns row count
     PARAM_CHECK(ar.Serialize("K", k, 1, 0))
     PARAM_CHECK(ar.Serialize("G", _G, 1, 0))
+    // the generated garrisons in R (5.7; absent in older blocks: none)
+    PARAM_CHECK(ar.Serialize("Rgen", _Rgen, 1, 0))
     // empty arrays write no subclass and load back empty
     PARAM_CHECK(ar.Serialize("Roster", _roster, 1))
     PARAM_CHECK(ar.Serialize("Towns", _towns, 1))
@@ -4407,6 +4905,8 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("Cooldowns", _cooldowns, 1))
     // the re-armed zones (6.3, 2026-10-16; absent in older blocks: none)
     PARAM_CHECK(ar.Serialize("Rearm", _rearm, 1))
+    // the repel ladder (6.3, 2026-10-16; absent in older blocks: none)
+    PARAM_CHECK(ar.Serialize("Repels", _repels, 1))
     PARAM_CHECK(ar.Serialize("Sightings", _sightings, 1))
     PARAM_CHECK(ar.Serialize("lost", _lost, 1, 0))
     PARAM_CHECK(ar.Serialize("refillTotal", _refillTotal, 1, 0))
@@ -4460,6 +4960,10 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
                      format);
         }
         _alarmStarved.Clear();
+        _massTarget = RString(); // massing is transient: re-weighed next tick
+        _massTicks = 0;
+        _massTokens = 0;
+        _controlBand = -1;
         // transient director state is re-derived: the alert baseline from
         // the next scan (no false edges), the catalogue from the config
         _alertPrev.Clear();

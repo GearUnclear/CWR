@@ -17,8 +17,9 @@
 //        60..250 m band, with the road-piece tolerance); dry ground over its
 //        spawn square (centre 2 m, corners 0.5 m up).
 //    g5  at least one generated base sits on a track (a third, rounded up).
-//    g6  the pool does not grow (the conservation stand-in): R over the
-//        authored roster is 32 and poolStart max(24, R + 2K) = 60.
+//    g6  conservation (OCCUPIER-FORCES.md 5.7, the owner's rule): R over the
+//        authored roster is 32, the generated garrisons Rgen 12, and
+//        poolStart max(24, R + 2K) - Rgen = 60 - 12 = 48.
 //    g7  the win roster takes all six.
 // ============================================================================
 
@@ -32,6 +33,7 @@ bgFnMil = {bgMI = 0; bgML = []; while {bgMI < gmZoneCount} do {bgMZ = gmZone bgM
 bgFnD = {bgDA = _this select 0; bgDB = _this select 1; [bgDA select 0, bgDA select 1, 0] distance [bgDB select 0, bgDB select 1, 0]}
 // R over the authored roster (generated bases excluded)
 bgFnR = {bgRS = 0; {if (not (((gmZone _x) select 0) in bgGenNames)) then {bgRS = bgRS + ((gmZoneSim _x) select 7)}} forEach (call bgFnMil); bgRS}
+bgFnRgen = {bgGS = 0; {bgGI = gmZoneIndex (_x select 0); if (bgGI >= 0) then {bgGS = bgGS + ((gmZoneSim bgGI) select 7)}} forEach gmGeneratedBases; bgGS}
 
 triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
 
@@ -68,12 +70,15 @@ bgTracks = 0
 {if (_x select 6) then {bgTracks = bgTracks + 1}} forEach bgGen
 triAssertGe [bgTracks, 1]
 
-// ---- g6: the pool does not grow --------------------------------------------
+// ---- g6: the generated garrisons come out of poolStart ---------------------
 triAssertEq [(call bgFnR), 32]
+triAssertEq [(call bgFnRgen), 12]
 bgPool = (call bgFnR) + 2 * ((gmOccupierForces) select 7)
 if (bgPool < 24) then {bgPool = 24}
+bgPool = bgPool - (call bgFnRgen)
+if (bgPool < 0) then {bgPool = 0}
 triAssertEq [((gmOccupierForces) select 1), bgPool]
-triAssertEq [((gmOccupierForces) select 1), 60]
+triAssertEq [((gmOccupierForces) select 1), 48]
 
 // ---- g7: the win roster takes all six ---------------------------------------
 triSimUntil { ((gmCampaignEnd) select 5) > 0 }

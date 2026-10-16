@@ -13,8 +13,9 @@
 //    e3  at most one town (of the six open before) is still more than 2.5 km
 //        from an occupier military zone on its landmass.
 //    e4  the placement rules, as guerrilla_bases_generate_abel g4.
-//    e5  the pool does not grow: R over the authored and seeded roster is
-//        18 + the seeded garrisons, poolStart max(24, R + 2K).
+//    e5  conservation (OCCUPIER-FORCES.md 5.7): R over the authored and
+//        seeded roster is 18 + the seeded garrisons, poolStart
+//        max(24, R + 2K) less the generated garrisons (Rgen).
 //    e6  the win roster takes every one of them.
 // ============================================================================
 
@@ -24,6 +25,7 @@ bgGenNames = []
 bgFnMil = {bgMI = 0; bgML = []; while {bgMI < gmZoneCount} do {bgMZ = gmZone bgMI; if (((bgMZ select 1) != "CAMP") and ((bgMZ select 1) != "CITY") and ((bgMZ select 2) == gmOccupierSide)) then {bgML = bgML + [bgMI]}; bgMI = bgMI + 1}; bgML}
 bgFnD = {bgDA = _this select 0; bgDB = _this select 1; [bgDA select 0, bgDA select 1, 0] distance [bgDB select 0, bgDB select 1, 0]}
 bgFnR = {bgRS = 0; {if (not (((gmZone _x) select 0) in bgGenNames)) then {bgRS = bgRS + ((gmZoneSim _x) select 7)}} forEach (call bgFnMil); bgRS}
+bgFnRgen = {bgGS = 0; {bgGI = gmZoneIndex (_x select 0); if (bgGI >= 0) then {bgGS = bgGS + ((gmZoneSim bgGI) select 7)}} forEach gmGeneratedBases; bgGS}
 bgFnSeededR = {bgQS = 0; {bgQI = gmZoneIndex (_x select 0); if (bgQI >= 0) then {bgQS = bgQS + ((gmZoneSim bgQI) select 7)}} forEach gmSeededBases; bgQS}
 
 triSimUntil { ((gmOccupierForces) select 2) != "OFF" }
@@ -58,8 +60,11 @@ triAssertEq [bgBad, ""]
 
 // ---- e5 ---------------------------------------------------------------------
 triAssertEq [(call bgFnR), 18 + (call bgFnSeededR)]
+triAssertGe [(call bgFnRgen), 12]
 bgPool = (call bgFnR) + 2 * ((gmOccupierForces) select 7)
 if (bgPool < 24) then {bgPool = 24}
+bgPool = bgPool - (call bgFnRgen)
+if (bgPool < 0) then {bgPool = 0}
 triAssertEq [((gmOccupierForces) select 1), bgPool]
 
 // ---- e6 ---------------------------------------------------------------------
