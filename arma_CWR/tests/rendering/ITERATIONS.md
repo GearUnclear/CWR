@@ -764,3 +764,50 @@ view: jeep, M113, soldier and net, clear08:00,960x640,effective4xMSAA/150%scale,
 with existing sky/PCF/terrain-relief settings held fixed. Deliver matched BEFORE
 and AFTER pairs; panoramas are supporting diagnostics, not a substitute. Pursue
 meaningfully different approaches rather than escalating the rejected blue wash.
+
+## T / 20: Horizon producer attribution (REJECT as visual improvement)
+
+Two preserved QA versions tested omitting the existing horizon polygon. The final
+version guards only its Draw call, retaining setup, clip and flush operations;
+this is source isolation, not proof of identical internal draw side effects.
+Supporting east-facing captures remove one upper gray strip while leaving a
+sharper boundary below. West remains unchanged. This attributes part of the band,
+not all water or fog pixels, and is not an accepted replacement horizon.
+
+The owner's selected first-person baseline/omission pair uses S off, clear08:00,
+960x640, effective4xMSAA/150%scale and the same QA binary. Independent review found
+no meaningful gain because the hillside hides the low horizon. Minor sampling
+and soldier-pose differences prevent pixel-equivalence claims. REJECT as an
+improvement; preserve the evidence as a negative diagnostic. No T production is
+published. Both versions, supporting views and selected-scene comparison are
+subtests of this one stage, not additional iterations.
+
+
+## U / 21: Directional daylight materials (U1 REJECT; U2 PARK)
+
+Two default-off submodes tested a coordinated environmental material response:
+U1 redistributed ambient/forced sunlight toward surface orientation in encoded
+space; U2 additionally decoded detail/tint-composed albedo, applied an environmental
+shoulder and encoded once. Neither was full HDR. Protected local/emissive light,
+authored specular, alpha and downstream fog retained the legacy path. Eligibility
+excluded non-world/unsupported passes, NVG, night-eye, portraits and diagnostics.
+
+Independent source review corrected the subtraction to exactly reconstruct the
+baseline environmental component. 960 extracted real-GL checks and 3,345,920 CPU
+checks across 50 processes passed. The clean demo and full test target built;
+3,021 cases / 2,306,966 assertions passed with 12 OpenAL-device skips. Synthetic
+checks establish only their stated scope; appearance is a separate gate.
+
+Real same-binary captures used the owner's selected first-person view, clear08:00,
+phase32.25,960x640,effective4xMSAA/150%scale, with existing sky/PCF/P3 held fixed.
+Both original adaptive-LOD and separate .08 fixed-LOD mode0/1/2 sets were preserved.
+Independent review rejected U1's mustard ground, crushed APC/soldier shadows and
+flattened tree crowns. U2 was less extreme but chiefly darkened the scene rather
+than producing convincing new material form: PARK. Apparent camouflage-net detail
+softening persisted in fixed-LOD controls; its cause is unresolved and must not be
+dismissed as adaptive LOD or called literal blur without further evidence.
+
+No U production is included. Source, binary, reports and screenshots are preserved
+locally; no game assets or captures are committed. Both submodes and their controls
+belong to this single stage. The next terrain experiment starts from clean9167b6b,
+not from the parked U material response.
