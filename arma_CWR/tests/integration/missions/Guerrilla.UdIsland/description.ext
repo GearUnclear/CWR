@@ -29,6 +29,8 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // PLACEHOLDERS - see note 1 in the header. These are the direct-launch
     // fallbacks used when the GUERRILLA new-game UI published no selection.
     defaultOccupier = "EAST";

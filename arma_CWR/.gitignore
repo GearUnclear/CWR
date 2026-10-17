@@ -68,6 +68,7 @@ __pycache__/
 # Rust
 target/
 **/target/
+target-*/
 
 # Local binaries and shared libraries produced by builds
 *.dll

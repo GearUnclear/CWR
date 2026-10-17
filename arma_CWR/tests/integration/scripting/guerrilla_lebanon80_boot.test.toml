@@ -1,8 +1,8 @@
 # Boots the real Guerrilla.Lebanon80 template (repo-root-relative) on the
 # @LoBo mod's Lebanon (80's) world. Requires the FULL CWA install
-# (OFPR_DATA_DIR) plus the @LoBo mod folder next to it: --mods-dir ".."
-# resolves relative to the game CWD (the data dir, D:\Arma_CWA\ARMA Cold War
-# Assault [Classic]), so "@LoBo" mounts D:\Arma_CWA\@LoBo.
+# (a Remaster shadow as the data dir) with the @LoBo mod folder INSIDE it:
+# --mods-dir "." resolves against the game CWD (the data dir), so "@LoBo"
+# mounts <data dir>\@LoBo, as new-remaster-shadow.ps1 lays it out.
 #
 # SINCE ISSUE #56 TASK 2 the lane mounts @LoBo ALONE: no @lobofixup fixture.
 # The three jobs the fixture used to do are all covered at source now:
@@ -19,7 +19,7 @@
 #
 # PRECONDITIONS (one-time, rerun after an @LoBo reinstall):
 #   tools/lobo/install-lobo-factions.ps1
-#   PoseidonTools mod doctor D:\Arma_CWA\@LoBo --fix
+#   PoseidonTools mod doctor <data dir>\@LoBo --fix
 #   guerrilla-mode/install-missions.ps1
 mission = "guerrilla-mode/mission/Guerrilla.Lebanon80"
 binary = "PoseidonGame"
@@ -31,4 +31,4 @@ tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless"]
 # slow - generous budgets on purpose (same as guerrilla_sinai_swap).
 timeout = 420
 assert_timeout = 240
-extra_args = ["--dev", "--no-strict", "--mods-dir", "..", "--mod", "@LoBo"]
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo"]

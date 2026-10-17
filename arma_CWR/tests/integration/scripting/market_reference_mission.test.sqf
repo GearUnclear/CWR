@@ -48,6 +48,10 @@ triAssertEq [mkV, mkQuota]
 // every dealer body stands (CIV class, alive) once the spawn tick has run
 GM_tstDealersUp = {GM_tstAll = true; GM_tstI = 0; while {GM_tstI < gmDealerCount} do {GM_tstN = (gmDealer GM_tstI) select 3; if ((isNull GM_tstN) or (not (alive GM_tstN))) then {GM_tstAll = false}; GM_tstI = GM_tstI + 1}; GM_tstAll}
 triSimUntil { call GM_tstDealersUp }
+// the record (gmDealer's position, the map marker) sits on the body, not on
+// the planned spot createUnit's free-position search may have moved it off
+GM_tstDealersOnBody = {GM_tstAll = true; GM_tstI = 0; while {GM_tstI < gmDealerCount} do {GM_tstR = gmDealer GM_tstI; GM_tstP = GM_tstR select 2; GM_tstB = getPos (GM_tstR select 3); GM_tstDx = (GM_tstP select 0) - (GM_tstB select 0); GM_tstDz = (GM_tstP select 1) - (GM_tstB select 1); if ((GM_tstDx * GM_tstDx + GM_tstDz * GM_tstDz) > 1) then {GM_tstAll = false}; GM_tstI = GM_tstI + 1}; GM_tstAll}
+triAssert [call GM_tstDealersOnBody]
 
 // -- buy at the arms dealer, delivery "here" ------------------------------------
 [] exec "act_tp_arms.sqs"

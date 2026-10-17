@@ -1,0 +1,15 @@
+# Generated occupier bases (OCCUPIER-FORCES.md 5.7, step 1), Eden: the
+# shipped Guerrilla.Eden template sets generateBases = 1, so a new game adds
+# OUTPOST zones where Everon's west and south towns are more than 2.5 km from
+# the three authored outposts and the seeded airfield and harbour. Boots the
+# SHIPPED template (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow
+# of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The
+# shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+mission = "guerrilla-mode/mission/Guerrilla.Eden"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "occupierforces", "bases", "basegenerate"]
+timeout = 240
+assert_timeout = 60
+extra_args = ["--dev"]

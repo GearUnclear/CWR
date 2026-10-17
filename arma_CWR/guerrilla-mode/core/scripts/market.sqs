@@ -60,6 +60,10 @@ GM_MKT_fnNearDealer = {GM_tmpDb = -1; GM_tmpDd = GM_MKT_DEALER_RADIUS; GM_tmpDw 
 ;   gmMktBuyActs/BuyActive/Dealer/DealerRec/DealerKind/Stock/DelivAct/DelivHq/BuyDirty
 ;   GM_MKT_MARKED / GM_MKT_HQMARK / gmMktHqMoves   one-time map markers (serialized)
 ;   gmMktHqSeen        first sighting of an established HQ (objective + diary)
+;   gmMktHqEpoch       the gmHqEpoch this loop last saw (OCCUPIER-FORCES.md 9.1):
+;                      a change means the HQ was destroyed - the marker goes,
+;                      gmMktHqSeen and the hqEstablish objective re-arm, and
+;                      the next HQ (free: a first establishment) re-marks
 gmMktReqPending = false
 gmMktReqId      = -1
 gmMktReqCaller  = aP
@@ -87,6 +91,7 @@ GM_MKT_MARKED   = false
 GM_MKT_HQMARK   = false
 gmMktHqMoves    = -1
 gmMktHqSeen     = false
+gmMktHqEpoch    = gmHqEpoch
 
 ; journal: the starter objective (flips DONE the first time an HQ exists -
 ; whether the start-town election or the action menu put it there)
@@ -98,7 +103,11 @@ GM_MKT_READY = true
 ? gmMktReqPending : goto "request"
 gmMktOnFoot = (vehicle aP) == aP
 
-; ---- first sighting of an HQ (start-town election lands on tick 1) -----------
+; ---- the HQ fell (gmHqEpoch moved): marker off, objective re-armed -----------
+? gmHqEpoch != gmMktHqEpoch : goto "hqLost"
+#hqLostDone
+
+; ---- first sighting of an HQ (start-town / Camp election lands on tick 1) ----
 ? gmHqEstablished and (not gmMktHqSeen) : goto "hqSeen"
 #hqSeenDone
 
@@ -181,6 +190,20 @@ goto "mkLoop"
 #mkEnd
 GM_MKT_MARKED = true
 goto "mkDone"
+
+; the HQ was destroyed (D13): nothing new is said (D12); the existing UI just
+; reverts to "no HQ yet". The establish action re-labels on its remount
+; (gmHqEstablished is false, so it reads "Establish" and costs nothing).
+#hqLost
+gmMktHqEpoch = gmHqEpoch
+? GM_MKT_HQMARK : deleteMarker "gmHqMarker"
+GM_MKT_HQMARK = false
+gmMktHqMoves = -1
+gmMktHqSeen = false
+gmJournalObjective ["hqEstablish", "Set up a headquarters in a town or at the Camp", "ACTIVE"]
+gmMktHqDirty = true
+gmMktBuyDirty = true
+goto "hqLostDone"
 
 #hqMarker
 ? not GM_MKT_HQMARK : gmMktM = createMarker ["gmHqMarker", gmHqPos]

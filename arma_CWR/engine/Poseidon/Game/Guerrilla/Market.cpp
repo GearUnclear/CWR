@@ -762,6 +762,26 @@ AIGroup* Market::DealerGroup(int kind)
     return grp;
 }
 
+bool Market::SyncDealerPos(DealerRecord& row)
+{
+    const EntityAI* body = row.npc.GetLink();
+    if (!body)
+    {
+        return false;
+    }
+    const Vector3 at = body->Position();
+    if (Dist2D(at, row.pos) < DealerPosSlack)
+    {
+        return false;
+    }
+    if (row.lotPos.X() == row.pos.X() && row.lotPos.Z() == row.pos.Z())
+    {
+        row.lotPos = at; // a weapon dealer's lot is its own spot
+    }
+    row.pos = at;
+    return true;
+}
+
 void Market::SpawnDealer(DealerRecord& row)
 {
     if (!GWorld)
@@ -823,6 +843,10 @@ void Market::SpawnDealer(DealerRecord& row)
     row.npc = person;
     row.spawned = true;
     row.respawnIn = -1;
+    // createUnit's free-position search may have moved the body off the
+    // planned spot (up to ~7 m in a built-up town): the record, the map
+    // marker and gmDealer follow the body
+    SyncDealerPos(row);
     LOG_INFO(Core, "Market: {} dealer {} in '{}' at [{:.0f},{:.0f}]", KindName(row.kind),
              first ? "spawned" : "respawned", (const char*)row.zoneName, row.pos.X(), row.pos.Z());
 }
@@ -866,6 +890,9 @@ void Market::Simulate(float deltaT)
         if (alive)
         {
             row.respawnIn = -1;
+            // a body that came back elsewhere (a load, a push): the record
+            // follows it
+            SyncDealerPos(row);
             continue;
         }
         if (!row.spawned)
@@ -931,6 +958,9 @@ void Market::ApplyPendingLoad()
             continue;
         }
         row.warned = false;
+        // the body as the save restored it: the record follows it (a save
+        // written before the record tracked its body keeps the planned spot)
+        SyncDealerPos(row);
         _rows.Add(row);
     }
 }

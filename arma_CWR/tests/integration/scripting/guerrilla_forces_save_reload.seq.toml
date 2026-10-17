@@ -1,0 +1,7 @@
+# Occupier forces director across a save (OCCUPIER-FORCES.md phase 3,
+# section 11): wake the director with two town flips, let it launch, save,
+# and reload in a fresh process (shared user dir across the ordered phases
+# 01_wake and 02_reload). Full Remaster lane: data_dir "packages/RemasterUD"
+# is a gitignored junction to a setup-prepared shadow of the Steam Remastered
+# folder (see guerrilla-mode/FULL-SCALE-SESSION.md).
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "save-load", "headless"]

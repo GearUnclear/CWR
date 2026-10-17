@@ -1,0 +1,19 @@
+# Occupier forces, the wave surge (OCCUPIER-FORCES.md 7.1 "The wave surge", 5.5;
+# owner decision 5 of 2026-10-16): the excess a landed wave's ceiling keeps out
+# is a surge above garrisonMax at the bases nearest the wave's cluster, which
+# decays back; nothing is dropped. Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative; occupierForces = 1) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md). The shadow
+# must carry the current gmcore and faction library
+# (guerrilla-mode/install-missions.ps1): EAST's forcesJet / forcesAttackHeli
+# keys make the strike airframe. Without the junction the test reports spawn
+# failed, which is not a regression. Not headless: the real-camera assert of
+# the strike tests is kept.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+timeout = 1200
+assert_timeout = 600
+extra_args = ["--dev"]

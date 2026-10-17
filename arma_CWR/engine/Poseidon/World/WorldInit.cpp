@@ -66,13 +66,16 @@
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 #include <Poseidon/Game/Guerrilla/LegendRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Market.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForces.hpp>
 #include <Poseidon/Game/Guerrilla/OutfitSelect.hpp>
 #include <Poseidon/Game/Guerrilla/AddonActivation.hpp> // placed-unit addon closure (issue #54 C1)
 #include <Poseidon/Game/Guerrilla/StashRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/Journal.hpp>
 #include <Poseidon/Game/Guerrilla/TownFlags.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 
@@ -671,6 +674,10 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     Guerrilla::GarrisonCache::Instance().InitMission();
     // Town flagpoles follow the registry too (no config of their own).
     Guerrilla::TownFlags::Instance().InitMission();
+    // Generated-base props (OCCUPIER-FORCES.md 5.7 step 2): a new game's
+    // outpost layouts are created here, behind the loading screen and
+    // before any garrison spawns; a load re-binds the saved ones instead.
+    Guerrilla::BaseProps::Instance().InitMission();
     // Ambient road traffic follows the registry: Clear + read its own
     // optional CfgGuerrillaZones traffic* keys.
     Guerrilla::Traffic::Instance().InitMission();
@@ -698,9 +705,15 @@ bool World::InitVehicles(GameMode gameMode, ArcadeTemplate& t)
     // roster of enemy military zones is taken on the first active tick,
     // never here, for the same reason as the Legend seed.
     Guerrilla::CampaignEnd::Instance().InitMission();
+    // Occupier forces pool (OCCUPIER-FORCES.md phase 2): Clear + read the
+    // occupierForces / forces* keys.  The roster and the pool are sized on
+    // the first active tick, never here.
+    Guerrilla::OccupierForces::Instance().InitMission();
     // Occupier counter-attacks (issue #79): Clear + read the counterAttack*
     // keys; records are created by town flips only.
     Guerrilla::CounterAttack::Instance().InitMission();
+    // Occupier air (phase 6 spike): records are transient, a new mission starts empty.
+    Guerrilla::OccupierAir::Instance().Clear();
     Guerrilla::PortraitService::Instance().Teardown();
     if (!Guerrilla::PrepareCampaignPortraits())
         return false;

@@ -7,7 +7,8 @@
 # would win. The test asserts both rosters took effect.
 #
 # PRECONDITIONS (same as the other lobo-lane tests):
-#   * full CWA 1.99 as OFPR_DATA_DIR, @LoBo next to it
+#   * a Remaster shadow as the data dir with @LoBo inside it (--mods-dir ".");
+#     the repo fixtures are absolute ${repo_root}/... paths expanded by tri
 #   * one-time, rerun after an @LoBo reinstall:
 #     PoseidonTools mod doctor <@LoBo> --fix
 mission = "guerrilla-mode/mission/Guerrilla.Sinai"
@@ -20,6 +21,6 @@ assert_timeout = 240
 extra_args = [
     "--dev",
     "--no-strict",
-    "--mods-dir", "..",
-    "--mod", "@LoBo;arma_CWR/tests/fixtures/mods-lobo/@lobofixup;arma_CWR/tests/fixtures/mods-propsafety/@propsafety",
+    "--mods-dir", ".",
+    "--mod", "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup;${repo_root}/tests/fixtures/mods-propsafety/@propsafety",
 ]

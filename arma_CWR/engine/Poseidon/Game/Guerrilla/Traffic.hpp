@@ -58,6 +58,9 @@ class RoadNet;
 namespace Guerrilla
 {
 
+struct LiveCensus; // ZoneRegistry.hpp: the live-AI budget census
+struct ZoneTuning; // ZoneRegistry.hpp: budgetLiveBodies / budgetSideGroups
+
 // optional keys inside class CfgGuerrillaZones (all prefixed traffic*)
 struct TrafficTuning
 {
@@ -249,6 +252,7 @@ enum TrafficSpawnFailure
     TSFGroupBudget,   // the side's AI group budget (MaxGroups) is spent
     TSFHullCreate,    // the hull class refused to materialize
     TSFDriverSeat,    // the driver could not be seated
+    TSFLiveBudget,    // the live-AI budget (budgetLiveBodies / budgetSideGroups) has no room
     NTrafficSpawnFailures
 };
 
@@ -266,6 +270,14 @@ struct TrafficDiag
     int spawned = 0;                        // successful spawns
     int failed = 0;                         // failed attempts
     int encounterRolls = 0;                 // surrender/escape rolls drawn (issue #66; gmTrafficDiag slot 16)
+    // the live-AI budget gate (round 3 A, OFFSCREEN-CONTRACT.md section 6):
+    // ambient spawns refused because they would breach budgetLiveBodies or
+    // budgetSideGroups (one attempt can count under both causes, the total
+    // counts it once), and the rate-limited WARNs issued for them
+    int skippedBudget = 0;       // gmTrafficDiag slot 17, [gmsim] skippedBudget=
+    int skippedBudgetBodies = 0; // slot 18
+    int skippedBudgetGroups = 0; // slot 19
+    int budgetWarnings = 0;      // slot 20
 };
 
 // combat gate verdict for one patrol/convoy entry per pass (convoy
@@ -392,6 +404,7 @@ struct TrafficZoneCandidate
     float z = 0;    // northing
     bool isCity = false;
     bool occupierOwned = false; // owner == the campaign's occupier side
+    int landmass = -1;          // RoadRoute::Landmass of the centre, -1 unknown (any leg allowed)
 };
 
 // One encounter check for the pure StepEncounter (issue #66): the world
@@ -749,6 +762,30 @@ class Traffic : public SerializeClass
     // DespawnEntry(keepHull) crew filing: only the actual dead ride
     // ReleasedEntry::bodies (which CleanupReleased deletes wholesale)
     static TrafficCrewDisposal CrewDisposal(bool personDead, bool seated);
+    // live-AI budget gate (round 3 A, OFFSCREEN-CONTRACT.md section 6).  The
+    // most bodies one spawn of a kind can seat (SpawnEntry): a civ driver; a
+    // patrol driver, gunner and one passenger; a convoy truck of three plus
+    // an escort of driver, gunner and two riflemen.  Every kind is ONE group.
+    static int SpawnBodiesMax(int kind);
+    static constexpr int SpawnGroups = 1;
+    // the gate's verdict: SimBudgetBreach bits (0 = admitted).  forced
+    // (gmTrafficForceSpawn) is always admitted, like its chance-roll bypass
+    static int BudgetVerdict(bool forced, const LiveCensus& census, int bodies, int groups,
+                             const ZoneTuning& zoneTuning);
+    // one ambient attempt through the gate: false = skipped, counted in
+    // TrafficDiag (skippedBudget and the per-cause counters), lastFail set to
+    // TSFLiveBudget, and a WARN at most once per BudgetWarnInterval s of
+    // game time (the clock is AdvanceBudgetClock).  No latch: the next pass
+    // reads a fresh census, so traffic resumes as soon as there is room
+    bool AdmitAmbientSpawn(int kind, const LiveCensus& census, const ZoneTuning& zoneTuning);
+    void AdvanceBudgetClock(float dt) { _budgetWarnAge += dt; }
+    static constexpr float BudgetWarnInterval = 60.0f;
+    // test/debug lever (gmTrafficTune): override one scalar tuning key at run
+    // time; the next LoadFromParams (mission start, every save load) restores
+    // the config.  Keys: interval, civChance, patrolChance, convoyChance,
+    // maxCiv, maxPatrols, maxConvoys, maxParked, parkChance.  False for an
+    // unknown key; the value is clamped to the config ranges
+    bool SetTuneValue(const char* key, float value);
 
     // simulation ------------------------------------------------------------
     // per-frame engine hook; internally throttled to interval (+ a 0.5 s
@@ -1014,6 +1051,9 @@ class Traffic : public SerializeClass
     float _subAccum = 0;
     Perception _percept; // transient per-pass snapshot
     TrafficDiag _diag;   // transient per-pass diagnostics (issue #55)
+    // game seconds since the last budget WARN (transient; starts past the
+    // interval so the first refusal is logged)
+    float _budgetWarnAge = BudgetWarnInterval;
     TrafficSpawnFailure _lastLogged[NTrafficKinds] = {TSFNone, TSFNone, TSFNone}; // log-once-per-verdict latch
     mutable AutoArray<RoadSpotCache> _roadCache;                                  // per-origin road survey (issue #55)
     mutable const RoadNet* _roadCacheNet = nullptr;                               // the net the cache was surveyed on

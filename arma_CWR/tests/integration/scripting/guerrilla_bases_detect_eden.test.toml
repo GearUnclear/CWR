@@ -1,0 +1,14 @@
+# Occupation-network detection (issue #76), Eden: the runtime base seed adds
+# the Everon airfield and the pier at [7392, 6835] as occupier AIRFIELD and
+# SEAPORT zones, counted in the occupier roster. Boots the SHIPPED
+# Guerrilla.Eden template (repo-root-relative) on the full Remaster lane:
+# data_dir "packages/RemasterUD" is a gitignored junction to a setup-prepared
+# shadow of the Steam Remastered folder (see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+mission = "guerrilla-mode/mission/Guerrilla.Eden"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "occupierforces", "bases"]
+timeout = 240
+assert_timeout = 60
+extra_args = ["--dev"]

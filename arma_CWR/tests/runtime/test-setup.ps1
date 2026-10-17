@@ -182,15 +182,18 @@ try {
     $resourceAfter = [IO.File]::ReadAllText((Join-Path $steam 'BIN/resource-extra.cpp'))
     Assert ($resourceAfter.StartsWith($bohemiaResource)) 'Bohemia resource-extra.cpp prefix changed'
     $tail = $resourceAfter.Substring($bohemiaResource.Length)
-    Assert (@($tail -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '^(//.*|#include "ud-mainmenu\.hpp")$' }).Count -eq 0) "Unexpected resource-extra tail: $tail"
+    Assert (@($tail -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '^(//.*|#include "ud-(mainmenu|options)\.hpp")$' }).Count -eq 0) "Unexpected resource-extra tail: $tail"
     Assert (([regex]::Matches($resourceAfter, '#include "ud-mainmenu.hpp"')).Count -eq 1) 'Menu include missing or duplicated'
+    Assert (([regex]::Matches($resourceAfter, '#include "ud-options.hpp"')).Count -eq 1) 'Options include missing or duplicated'
+    # The Options shard comes after Bohemia's optionsShell.hpp include and after the menu.
+    Assert ($resourceAfter.IndexOf('#include "ud-options.hpp"') -gt $resourceAfter.IndexOf('#include "ud-mainmenu.hpp"')) 'Options include precedes the menu include'
     $configAfter = [IO.File]::ReadAllText((Join-Path $steam 'BIN/config-extra.cpp'))
     Assert ($configAfter.StartsWith($bohemiaConfig)) 'Bohemia config-extra.cpp prefix changed'
     foreach ($library in @('guerrilla-factions.hpp', 'guerrilla-hq.hpp')) {
         Assert (([regex]::Matches($configAfter, "#include `"$library`"")).Count -eq 1) "Config include missing or duplicated: $library"
     }
     # UD's own files land beside Bohemia's; the Classic shims do not.
-    foreach ($rel in @('BIN/ud-mainmenu.hpp','fonts/UD_FONT_CREDITS.md','fonts/cwr_mono.ttf','gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','BIN/guerrilla-factions.hpp')) {
+    foreach ($rel in @('BIN/ud-mainmenu.hpp','BIN/ud-options.hpp','fonts/UD_FONT_CREDITS.md','fonts/cwr_mono.ttf','gmcore/init.sqs','Missions/Guerrilla.Abel/mission.sqm','BIN/guerrilla-factions.hpp')) {
         Assert (Test-Path -LiteralPath (Join-Path $steam $rel)) "Missing Remaster install output: $rel"
     }
     foreach ($rel in @('BIN/optionsTemplates.hpp','BIN/optionsScrollList.hpp','BIN/optionsScrollListSlots.hpp','BIN/STRINGTABLE_OPTIONS.utf8.csv')) {
@@ -198,6 +201,8 @@ try {
     }
     $udMenu = $manifest.files | Where-Object destination -EQ 'bin/ud-mainmenu.hpp'
     Assert ((Get-FileHash -LiteralPath (Join-Path $steam 'BIN/ud-mainmenu.hpp')).Hash -ieq $udMenu.sha256) 'UD menu payload drift'
+    $udOptions = $manifest.files | Where-Object destination -EQ 'bin/ud-options.hpp'
+    Assert ((Get-FileHash -LiteralPath (Join-Path $steam 'BIN/ud-options.hpp')).Hash -ieq $udOptions.sha256) 'UD options payload drift'
     # The gap shard holds exactly the keys Bohemia lacks, in our text.
     $gapShard = Join-Path $steam 'BIN/STRINGTABLE_UD.utf8.csv'
     Assert (Test-Path -LiteralPath $gapShard) 'UD gap shard missing'
@@ -212,10 +217,19 @@ try {
     $afterFirst = Get-TreeState $steam
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
     Assert ((Get-TreeState $steam) -eq $afterFirst) 'Remaster rerun was not idempotent'
-    # Steam update/verify restores Bohemia's pristine file: the include comes back once.
+    # Steam update/verify restores Bohemia's pristine file: the includes come back once.
     [IO.File]::WriteAllText((Join-Path $steam 'BIN/resource-extra.cpp'), $bohemiaResource)
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
     Assert ([IO.File]::ReadAllText((Join-Path $steam 'BIN/resource-extra.cpp')) -eq $resourceAfter) 'Re-append after a Steam restore differs'
+    # An install from before the Options shard existed (menu include only) gains just that line.
+    $menuOnly = $resourceAfter.Substring(0, $resourceAfter.IndexOf("`n// Uslu dur! Options additions"))
+    [IO.File]::WriteAllText((Join-Path $steam 'BIN/resource-extra.cpp'), $menuOnly + "`n")
+    & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor
+    $upgraded = [IO.File]::ReadAllText((Join-Path $steam 'BIN/resource-extra.cpp'))
+    Assert ($upgraded.StartsWith($menuOnly)) 'Upgrade rewrote the menu-only prefix'
+    Assert (([regex]::Matches($upgraded, '#include "ud-mainmenu.hpp"')).Count -eq 1) 'Upgrade duplicated the menu include'
+    Assert (([regex]::Matches($upgraded, '#include "ud-options.hpp"')).Count -eq 1) 'Upgrade did not add the options include once'
+    [IO.File]::WriteAllText((Join-Path $steam 'BIN/resource-extra.cpp'), $resourceAfter)
     # Bohemia ships the missing keys: our shard retires so it cannot shadow theirs.
     [IO.File]::AppendAllText((Join-Path $steam 'BIN/STRINGTABLE_MAINMENU.utf8.csv'), "STR_USRACT_LEAN_LEFT,Bohemia lean`nSTR_USRACT_LEAN_RIGHT,Bohemia lean`n")
     & $setup -GameDir $steam -LoBoDir $lobo -Tools $doctor

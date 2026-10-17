@@ -182,6 +182,7 @@ $wd = [Management.Automation.WildcardPattern]::Escape($DataDir)
 if ($NoLog) {
     $process = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd -PassThru
     Write-Host "Started PoseidonGame (PID $($process.Id))."
+    Write-Host "Stop it with: powershell -NoProfile -File `"$RepoRoot\tools\stop-owned-games.ps1`" -Pid $($process.Id)"
 } else {
     # Full console-output capture (see .DESCRIPTION): the engine logger gets
     # a file sink (--log-file), and raw stdout/stderr are redirected too -
@@ -196,6 +197,7 @@ if ($NoLog) {
     $process = Start-Process -FilePath $exe -ArgumentList $gameArgs -WorkingDirectory $wd `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
     Write-Host "Started PoseidonGame (PID $($process.Id))."
+    Write-Host "Stop it with: powershell -NoProfile -File `"$RepoRoot\tools\stop-owned-games.ps1`" -Pid $($process.Id)"
     Write-Host "Logs:"
     Write-Host "  engine: $engineLog"
     Write-Host "  stdout: $stdoutLog"

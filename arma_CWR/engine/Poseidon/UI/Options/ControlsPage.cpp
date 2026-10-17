@@ -7,6 +7,8 @@
 #include <Poseidon/UI/Options/MousePage.hpp>
 #include <Poseidon/UI/Options/OptionsShell.hpp>
 
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 
@@ -20,9 +22,22 @@
 namespace Poseidon
 {
 
+const char* SelectControlsPageResourceClass(const ParamClass& res)
+{
+    const ParamEntry* ud = res.FindEntry(kControlsPageClassUD);
+    if (ud && ud->IsClass())
+        return kControlsPageClassUD;
+    return kControlsPageClassStock;
+}
+
 const char* ControlsPage::TitleText() const
 {
     return LocalizeString("STR_DISP_OPT_CONTROLS");
+}
+
+const char* ControlsPage::ResourceClassName() const
+{
+    return SelectControlsPageResourceClass(Res);
 }
 
 bool ControlsPage::OnNav(OptionsShell& shell, int idc)
@@ -66,7 +81,7 @@ bool ControlsPage::OnNav(OptionsShell& shell, int idc)
             return true;
         }
 
-        case 1403: // Reset all to defaults — confirm first
+        case 1403: // Reset all to defaults: confirm first
         {
             auto onYes = []()
             {

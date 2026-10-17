@@ -379,6 +379,23 @@ no-CIV-layer path). Every substitution is RptF-logged. This is the
 descriptor authored for one package degrades on another instead of
 boot-failing or silently spawning nothing.
 
+**Occupier forces hulls (OCCUPIER-FORCES.md 6.5, occupier-side, all
+optional, engine-read):** seven plain keys name the hulls of the occupier
+forces packages: `forcesTruck`, `forcesArmedCar`, `forcesApc`, `forcesTank`,
+`forcesTransportHeli`, `forcesAttackHeli`, `forcesJet`. No script reads them;
+`OccupierForces::BuildEngineCatalogue` fetches them from the occupier's
+descriptor (`ZoneRegistry::FactionValue`) and `ForcePackages::BuildCatalogue`
+turns them into the package catalogue. The four ground keys override the
+classification of the `vehicles[]` ladder (APC, tank, armed car, truck,
+first match wins; a key naming no vehicle class is WARN-logged and ignored);
+the three air keys are the only source of aircraft, since air is never
+classified from the ladder, so a faction that authors none is never offered
+a helicopter insertion or a strike. Shipped air: EAST Mi17 / Mi24 / Su25,
+WEST UH60 / Cobra / A10, and the @LoBo IDF, Egypt (EgyptFrontier and
+EgyptArmy), Syria and Jordan rosters; none for GUER, Hizballah or PLO. The
+plan-15 resolution pass does not probe these keys. Full table and classes:
+FACTION-PACKS.md section 4, "Occupier forces keys".
+
 **Character outfit family (issue #25, all optional, resistance-side):** the
 warrior/civilian outfit axis picked on the new-game screen (`gmSelOutfit`,
 cycler idc 153; `WARRIOR` is defined as "the authored class" so publishing it

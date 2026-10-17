@@ -2219,3 +2219,122 @@ TEST_CASE("Traffic - the coroner's names and the diag block", "[game][guerrilla]
         REQUIRE(t.NFleeing() == 0);
     }
 }
+
+TEST_CASE("Traffic - live-AI budget gate (round 3 A)", "[game][guerrilla][traffic]")
+{
+    ZoneTuning zt; // budgetLiveBodies 130, budgetSideGroups 40
+    LiveCensus census;
+
+    SECTION("the verdict: a 2-body car refused at 129 of 130, allowed at 100, forced allowed at 140")
+    {
+        census.liveTotal = 129;
+        REQUIRE(Traffic::BudgetVerdict(false, census, 2, 1, zt) == SBLiveBodies);
+        census.liveTotal = 128;
+        REQUIRE(Traffic::BudgetVerdict(false, census, 2, 1, zt) == 0); // lands on the cap exactly
+        census.liveTotal = 100;
+        REQUIRE(Traffic::BudgetVerdict(false, census, 2, 1, zt) == 0);
+        census.liveTotal = 140;
+        REQUIRE(Traffic::BudgetVerdict(true, census, 2, 1, zt) == 0); // gmTrafficForceSpawn
+        REQUIRE(Traffic::BudgetVerdict(false, census, 2, 1, zt) == SBLiveBodies);
+    }
+
+    SECTION("the side's group budget refuses on its own")
+    {
+        census.liveTotal = 50;
+        census.sideGroups = 40;
+        REQUIRE(Traffic::BudgetVerdict(false, census, 1, 1, zt) == SBSideGroups);
+        census.sideGroups = 39;
+        REQUIRE(Traffic::BudgetVerdict(false, census, 1, 1, zt) == 0);
+    }
+
+    SECTION("the most bodies one spawn of a kind can seat")
+    {
+        REQUIRE(Traffic::SpawnBodiesMax(TKCiv) == 1);
+        REQUIRE(Traffic::SpawnBodiesMax(TKPatrol) == 3);
+        REQUIRE(Traffic::SpawnBodiesMax(TKConvoy) == 7);
+        REQUIRE(Traffic::SpawnBodiesMax(-1) == 0);
+        REQUIRE(Traffic::SpawnGroups == 1);
+    }
+
+    SECTION("the counter: skips counted by cause, the coroner names the verdict, no latch")
+    {
+        Traffic t;
+        census.liveTotal = 130; // full: a civ driver no longer fits
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().skippedBudget == 1);
+        REQUIRE(t.Diag().skippedBudgetBodies == 1);
+        REQUIRE(t.Diag().skippedBudgetGroups == 0);
+        REQUIRE(t.Diag().failed == 0); // a budget skip is not a failed attempt
+        REQUIRE(t.Diag().lastFail == TSFLiveBudget);
+        REQUIRE(t.Diag().lastFailKind == TKCiv);
+        REQUIRE(Str(Traffic::SpawnFailureName(TSFLiveBudget)) == "liveBudget");
+
+        census.liveTotal = 124; // a convoy needs 7: 131 of 130
+        census.sideGroups = 40; // and a 41st occupier group
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKConvoy, census, zt));
+        REQUIRE(t.Diag().skippedBudget == 2); // one attempt, both causes, counted once in the total
+        REQUIRE(t.Diag().skippedBudgetBodies == 2);
+        REQUIRE(t.Diag().skippedBudgetGroups == 1);
+
+        // traffic resumes as soon as the census is under again (counter-attack
+        // births or parked bodies gone): nothing is latched
+        census.liveTotal = 123;
+        census.sideGroups = 39;
+        REQUIRE(t.AdmitAmbientSpawn(TKConvoy, census, zt));
+        census.liveTotal = 129;
+        REQUIRE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().skippedBudget == 2);
+    }
+
+    SECTION("the WARN is rate-limited to once per minute of game time")
+    {
+        Traffic t;
+        census.liveTotal = 135;
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().budgetWarnings == 1); // the first refusal is news
+        t.AdvanceBudgetClock(30.0f);
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKPatrol, census, zt));
+        t.AdvanceBudgetClock(29.0f);
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().budgetWarnings == 1);
+        t.AdvanceBudgetClock(1.0f); // 60 s since the last WARN
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().budgetWarnings == 2);
+        REQUIRE(t.Diag().skippedBudget == 4);
+        t.Clear(); // a new mission: the counters and the clock start over
+        REQUIRE(t.Diag().skippedBudget == 0);
+        REQUIRE_FALSE(t.AdmitAmbientSpawn(TKCiv, census, zt));
+        REQUIRE(t.Diag().budgetWarnings == 1);
+    }
+
+    SECTION("the budgets off admit everything")
+    {
+        Traffic t;
+        zt.budgetLiveBodies = 0;
+        zt.budgetSideGroups = 0;
+        census.liveTotal = 500;
+        census.sideGroups = 63;
+        REQUIRE(t.AdmitAmbientSpawn(TKConvoy, census, zt));
+        REQUIRE(t.Diag().skippedBudget == 0);
+    }
+}
+
+TEST_CASE("Traffic - gmTrafficTune lever keys and clamps (round 3 A)", "[game][guerrilla][traffic]")
+{
+    Traffic t;
+    REQUIRE(t.SetTuneValue("civChance", 2.0f));
+    REQUIRE(t.Tuning().civChance == Approx(1.0f));
+    REQUIRE(t.SetTuneValue("patrolChance", -1.0f));
+    REQUIRE(t.Tuning().patrolChance == Approx(0.0f));
+    REQUIRE(t.SetTuneValue("interval", 0.1f));
+    REQUIRE(t.Tuning().interval == Approx(0.5f)); // the config floor
+    REQUIRE(t.SetTuneValue("MAXCIV", 6.0f));      // keys are case-insensitive
+    REQUIRE(t.Tuning().maxCiv == 6);
+    REQUIRE(t.SetTuneValue("maxParked", -3.0f));
+    REQUIRE(t.Tuning().maxParked == 0);
+    REQUIRE_FALSE(t.SetTuneValue("radius", 900.0f)); // not a lever key
+    REQUIRE_FALSE(t.SetTuneValue(nullptr, 1.0f));
+    t.LoadFromParams(nullptr); // the next config load restores the defaults
+    REQUIRE(t.Tuning().civChance == Approx(TrafficTuning().civChance));
+    REQUIRE(t.Tuning().maxCiv == TrafficTuning().maxCiv);
+}

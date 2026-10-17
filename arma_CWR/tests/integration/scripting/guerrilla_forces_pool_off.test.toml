@@ -1,0 +1,16 @@
+# Occupier forces pool, key off (OCCUPIER-FORCES.md phase 2, native
+# OccupierForces service). Boots the guerrilla_offscreen.abel fixture
+# (repo-root-relative; it pins occupierForces = 0, since the shipped
+# Guerrilla.Abel opts in from phase 3) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+mission = "tests/integration/missions/guerrilla_offscreen.abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "headless", "occupierforces"]
+timeout = 240
+assert_timeout = 60
+extra_args = ["--dev"]

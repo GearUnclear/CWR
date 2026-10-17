@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/IslandScaffold.hpp>
 
+#include <Poseidon/Game/Guerrilla/BaseDetect.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Foundation/platform.hpp>
@@ -405,6 +406,12 @@ RString UniqueClassName(const std::vector<ScaffoldZone>& zones, RString candidat
     return RString(tryName.c_str());
 }
 
+// playRegion[] (issue #76): the bounds are inclusive; no region = the whole map.
+bool InRegion(const ScaffoldInputs& in, float x, float z)
+{
+    return !in.hasRegion || (x >= in.regionMinX && x <= in.regionMaxX && z >= in.regionMinZ && z <= in.regionMaxZ);
+}
+
 struct Candidate
 {
     float x = 0, z = 0, y = 0;
@@ -491,6 +498,10 @@ void GenerateCandidates(const ScaffoldInputs& in, const ScaffoldOptions& opt, co
                 {
                     continue; // the map border is water or the engine's out-of-map height
                 }
+                if (!InRegion(in, c.x, c.z))
+                {
+                    continue; // outside playRegion[]
+                }
                 c.y = h.Height(c.x, c.z);
                 if (c.y < opt.minDryHeight)
                 {
@@ -546,6 +557,22 @@ void SelectTownZones(const ScaffoldInputs& in, const ScaffoldOptions& opt, Scaff
         }
         float x = pos.X();
         float z = pos.Z();
+        if (!InRegion(in, x, z))
+        {
+            out.warnings.push_back(Fmt("town '%s' skipped: outside playRegion[]", (const char*)name));
+            continue;
+        }
+        bool isBaseLabel = false;
+        for (const RString& skip : in.skipTownNames)
+        {
+            isBaseLabel = isBaseLabel || stricmp((const char*)skip, (const char*)name) == 0;
+        }
+        if (isBaseLabel)
+        {
+            out.warnings.push_back(
+                Fmt("town '%s' skipped: the label names a detected AIRFIELD, not a town", (const char*)name));
+            continue;
+        }
         // pos.Y() is position[2] of the Names entry, which in an OFP-era Names
         // block is the map-LABEL size, not an elevation (Houdan ships 100 and
         // sits at 72 m). Always sample the terrain.
@@ -739,6 +766,13 @@ bool BuildZones(const ScaffoldInputs& in, const ScaffoldOptions& opt, ScaffoldRe
     // of clustered on whichever road happened to sample well.
     std::vector<ScaffoldZone> placed = out.zones;
     placed.insert(placed.end(), towns.begin(), towns.end());
+    for (const ScaffoldPoint& r : in.reserved)
+    {
+        ScaffoldZone reservedZone; // only the position takes part in the spread
+        reservedZone.x = r.x;
+        reservedZone.z = r.z;
+        placed.push_back(reservedZone);
+    }
     bool nearTownsOnly = !towns.empty();
     for (int n = 0; n < opt.outposts; n++)
     {
@@ -829,6 +863,121 @@ bool BuildZones(const ScaffoldInputs& in, const ScaffoldOptions& opt, ScaffoldRe
     out.playerY = in.height->Height(out.playerX, out.playerZ);
     out.ok = true;
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// detected bases (issue #76)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+bool IsType(const RString& type, const char* want)
+{
+    return stricmp((const char*)type, want) == 0;
+}
+
+std::string CandidateLine(const BaseCandidate& c)
+{
+    std::string s = Fmt("%s %s \"%s\" at [%.0f, %.0f], confidence %.2f", BaseStatusName(c.status), (const char*)c.type,
+                        (const char*)c.name, c.x, c.z, c.confidence);
+    if (c.status == BaseStatus::Covered && c.coveredBy.GetLength() > 0)
+    {
+        s += Fmt(", covered by \"%s\"", (const char*)c.coveredBy);
+    }
+    return s;
+}
+
+} // namespace
+
+int DetectedOutpostsToEmit(const BaseDetectResult& bases, int outpostBudget)
+{
+    int offline = 0;
+    for (const BaseCandidate& c : bases.candidates)
+    {
+        if (c.status == BaseStatus::Offline && IsType(c.type, "OUTPOST"))
+        {
+            offline++;
+        }
+    }
+    return std::max(0, std::min(outpostBudget, offline));
+}
+
+void MergeBaseCandidates(const BaseDetectResult& bases, int outpostBudget, ScaffoldResult& out)
+{
+    const int outpostsToEmit = DetectedOutpostsToEmit(bases, outpostBudget);
+    std::vector<ScaffoldZone> merged;
+    int outpostsEmitted = 0;
+    for (const BaseCandidate& c : bases.candidates)
+    {
+        const bool hub = IsType(c.type, "AIRFIELD") || IsType(c.type, "SEAPORT");
+        bool emit = false;
+        std::string why;
+        if (c.status == BaseStatus::Seed && hub)
+        {
+            emit = true;
+        }
+        else if (c.status == BaseStatus::Offline && IsType(c.type, "OUTPOST"))
+        {
+            emit = outpostsEmitted < outpostsToEmit;
+            if (emit)
+            {
+                outpostsEmitted++;
+            }
+            else
+            {
+                why = Fmt(" (over the --outposts budget of %d)", outpostBudget);
+            }
+        }
+        if (!emit)
+        {
+            out.baseNotes.push_back("NOT EMITTED: " + CandidateLine(c) + why);
+            for (const std::string& e : c.evidence)
+            {
+                out.baseNotes.push_back("  evidence: " + e);
+            }
+            continue;
+        }
+
+        std::vector<ScaffoldZone> taken = out.zones;
+        taken.insert(taken.end(), merged.begin(), merged.end());
+        ScaffoldZone zone;
+        zone.className = UniqueClassName(taken, SanitizeClassName((const char*)c.name, (const char*)c.type));
+        zone.name = c.name;
+        zone.type = c.type;
+        zone.owner = "OCCUPIER";
+        zone.x = c.x;
+        zone.z = c.z;
+        zone.y = c.y;
+        zone.garrison = c.garrison;
+        zone.income = c.income;
+        zone.note = RString(("detected (issue #76): " + CandidateLine(c)).c_str());
+        for (const std::string& e : c.evidence)
+        {
+            zone.evidence.push_back("evidence: " + e);
+        }
+        merged.push_back(zone);
+    }
+
+    // CAMP first, then the bases, then whatever BuildZones placed after it
+    // (heuristic OUTPOSTs, CITYs)
+    const size_t insertAt = std::min(out.campIndex >= 0 ? (size_t)out.campIndex + 1 : (size_t)0, out.zones.size());
+    std::vector<ScaffoldZone> zones(out.zones.begin(), out.zones.begin() + (std::ptrdiff_t)insertAt);
+    zones.insert(zones.end(), merged.begin(), merged.end());
+    zones.insert(zones.end(), out.zones.begin() + (std::ptrdiff_t)insertAt, out.zones.end());
+    out.zones = zones;
+    out.baseCount += (int)merged.size();
+    out.outpostCount += outpostsEmitted;
+    for (size_t i = 0; i < out.zones.size(); i++)
+    {
+        out.zones[i].marker = RString(Fmt("gmZoneMarker_%d", (int)i).c_str());
+    }
+    if (!merged.empty() && out.zones.size() > (size_t)ZoneRegistry::MaxZones)
+    {
+        out.warnings.push_back(Fmt("%d zones with the detected bases exceeds the engine cap of %d; the tail will be "
+                                   "dropped at mission load",
+                                   (int)out.zones.size(), ZoneRegistry::MaxZones));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -975,6 +1124,26 @@ const char* InitSqsText()
 namespace
 {
 
+// A generated // comment line must stay one line through the preprocessor: no
+// embedded line break, and no trailing backslash (a line splice would pull the
+// next config line into the comment).
+std::string CommentSafe(const std::string& line)
+{
+    std::string out = line;
+    for (char& c : out)
+    {
+        if (c == '\n' || c == '\r')
+        {
+            c = ' ';
+        }
+    }
+    while (!out.empty() && (out.back() == '\\' || out.back() == ' '))
+    {
+        out.pop_back();
+    }
+    return out;
+}
+
 void AppendZones(std::string& s, const ScaffoldResult& zones)
 {
     s += "    class Zones\n    {\n";
@@ -989,6 +1158,10 @@ void AppendZones(std::string& s, const ScaffoldResult& zones)
         if (z.note.GetLength() > 0)
         {
             s += Fmt("            // %s\n", (const char*)z.note);
+        }
+        for (const std::string& line : z.evidence)
+        {
+            s += "            // " + CommentSafe(line) + "\n";
         }
         s += Fmt("            name = \"%s\";\n", (const char*)z.name);
         s += Fmt("            type = \"%s\";\n", (const char*)z.type);
@@ -1006,7 +1179,30 @@ void AppendZones(std::string& s, const ScaffoldResult& zones)
         s += Fmt("            position[] = {%.0f, %.0f, %.1f};\n", z.x, z.z, z.y);
         s += "        };\n";
     }
+    if (!zones.baseNotes.empty())
+    {
+        s += "        // Detected bases left out of this block (issue #76). If the detector\n";
+        s += "        // was right and no authored zone models the place, write it up as a\n";
+        s += "        // zone class like the ones above.\n";
+        for (const std::string& line : zones.baseNotes)
+        {
+            s += "        // " + CommentSafe(line) + "\n";
+        }
+    }
     s += "    };\n";
+}
+
+int CountBaseZones(const ScaffoldResult& zones)
+{
+    int n = 0;
+    for (const ScaffoldZone& z : zones.zones)
+    {
+        if (stricmp((const char*)z.type, "AIRFIELD") == 0 || stricmp((const char*)z.type, "SEAPORT") == 0)
+        {
+            n++;
+        }
+    }
+    return n;
 }
 
 } // namespace
@@ -1042,6 +1238,11 @@ std::string RenderDescriptionExt(const TemplateInfo& info, const ScaffoldResult&
     s += "//      or minefields, so a spot can be legal and still be walled in.\n";
     s += "//   3. Rename the Outposts to real places and tune garrison / income.\n";
     s += "//   4. Add a CfgGuerrillaMarket block if this island should have dealers.\n";
+    s += "//   5. Check the detected AIRFIELD / SEAPORT / OUTPOST zones (issue #76). Each\n";
+    s += "//      carries its evidence as comments; detection reads the ILS table and\n";
+    s += "//      model names, so walk them in the editor like the Outposts. The rules\n";
+    s += "//      are in guerrilla-mode/ISLAND-PACKS.md; `guerrilla lint --bases`\n";
+    s += "//      re-checks a template against the world.\n";
     s += "\n";
     s += Fmt("onLoadMission = \"Guerrilla Mode - %s\";\n", (const char*)info.worldDisplay);
     s += Fmt("onLoadIntro  = \"Liberate %s, one zone at a time.\";\n", (const char*)info.worldDisplay);
@@ -1058,6 +1259,28 @@ std::string RenderDescriptionExt(const TemplateInfo& info, const ScaffoldResult&
     s += "    // classifier runs over the loaded landscape and adds any town this offline\n";
     s += "    // pass missed, deduped against the explicit CITY zones below at 300 m.\n";
     s += Fmt("    seedCitySupport = %d;\n", opt.seedCitySupport);
+    const int baseZones = keepZones.empty() ? CountBaseZones(zones) : info.keptBaseZones;
+    s += "    // seedBases is deliberately ABSENT (= Auto, issue #76): the runtime seeds\n";
+    s += "    // the AIRFIELD / SEAPORT zones its detector finds on the loaded landscape\n";
+    s += "    // only when the template authors none (default 1 with none, else 0).\n";
+    if (baseZones > 0)
+    {
+        s += Fmt("    // The Zones block below authors %d AIRFIELD / SEAPORT zone(s), so the\n", baseZones);
+        s += "    // runtime seed is OFF for this template. seedBases = 1; forces it on\n";
+        s += "    // (an authored zone still wins over a seed it covers).\n";
+    }
+    else
+    {
+        s += "    // The Zones block below authors none, so the runtime seed is ON for this\n";
+        s += "    // template. seedBases = 0; opts out.\n";
+    }
+    if (info.hasRegion)
+    {
+        s += "    // The theatre (--play-region): town seeding, base seeding and the START\n";
+        s += "    // TOWN picker ignore everything outside {minX, minZ, maxX, maxZ}.\n";
+        s += Fmt("    playRegion[] = {%.0f, %.0f, %.0f, %.0f};\n", info.regionMinX, info.regionMinZ, info.regionMaxX,
+                 info.regionMaxZ);
+    }
     s += "\n";
     if (!keepZones.empty())
     {
