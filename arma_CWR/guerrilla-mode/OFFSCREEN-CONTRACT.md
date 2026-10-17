@@ -863,7 +863,11 @@ hull's pace. Born squads march SAFE by road and take their combat posture
 at the target edge (foot: `zoneArea` + 100 m). Vehicles are driven by
 `IssueCommand` to the driver; the mounted edge is 250 m, where the carrier
 brakes and the infantry dismounts once it is at or below 1.5 m/s or after
-15 s (so the dismount can happen inside the bound). A marching force whose
+15 s (so the dismount can happen inside the bound). A mounted force that has
+not closed 20 m on its target for 45 s within 100 m past the 250 m mark, or
+for 90 s anywhere, dismounts where it stands (the stall rule,
+OCCUPIER-FORCES.md 6.5): near the mark it assaults from there, farther out it
+walks on. A marching force whose
 leader and target are both beyond the deposit bubble, whose squad is
 unseen and whose hulls pass `HullUnseen` for 10 s (`VanishHold` [code])
 returns to abstract travel at its progress, survivors and clock carried

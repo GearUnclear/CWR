@@ -1490,6 +1490,23 @@ waits for phase 6. A test can still pin the phase 3 ladder
     Tests: the three "arrival-live" `[counterattack]` cases and the tri test
     `guerrilla_forces_arrival_armour` (a Ural and BMP column on a Houdan
     held by three fighters, the player in the western hills).
+  - **The stall rule** (video 6, 2026-10-17: op 13's Ural, born at the
+    arrival point 306 m from Sainte Marie on a cross-country leg, never
+    answered its driver's Move there and sat with nine men seated for
+    1617 s; the dismount was keyed on the distance alone). A mounted force
+    that has not closed `CounterAttack::StallProgress` (20 m) on its
+    target for `StallNearTime` (45 s) within `DismountReach` (100 m) past
+    the 250 m mark, or for `StallTime` (90 s) anywhere on its route,
+    dismounts where it stands (`CounterAttackMarch.cpp`). Near the mark
+    the infantry assaults from there and the live timeout starts, as at
+    the mark; farther out it walks the rest of its route and deploys at
+    the town edge like a foot squad. A truck holds back where it stuck, an
+    armed hull still supports. The clock also runs while a carrier waits
+    for its escort, so an escort that never closes up cannot hold the
+    infantry seated. One INFO line names the hull, the seconds and the
+    distance. Tests: the stall `[counterattack]` cases and the tri test
+    `guerrilla_forces_stuck_carrier` (the video's Ural and T72 from the
+    Outpost on a Sainte Marie held by six fighters).
   - **Break-off** (decision 4, the feel assessment's item 7, NEXT question
     2; after video 5, where hulls drove home while their riflemen died and a
     lone survivor stood 47 m from Arudy for 18 minutes). A live RETAKE,
@@ -1510,7 +1527,12 @@ waits for phase 6. A test can still pin the phase 3 ladder
     home every 30 s, removed only beyond 850 m of the player and unseen,
     then home as bodies room-capped (CrewHome), the dead among them lost.
     The live timeout withdraws this way too, in the open, with the player
-    near or not (it no longer waits for him to leave).
+    near or not (it no longer waits for him to leave). Its clock starts at
+    the town edge, or earlier once the road march's allowance (the route
+    left at 1 m/s plus 120 s, from the birth) is spent short of the edge;
+    the withdrawal line then reads "counterAttackLiveTimeout 1200 s short
+    of the town edge, the march allowance spent" instead of "at the
+    target".
   - **The hulls leave after the infantry** (item 2). Infantry still seated
     rides home in its carrier (the HomeHull carries it as cargo; deleted
     unseen cargo first). Infantry on foot is waited for: every hull holds

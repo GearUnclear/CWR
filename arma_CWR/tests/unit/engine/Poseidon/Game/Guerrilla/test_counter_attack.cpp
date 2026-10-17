@@ -5595,3 +5595,167 @@ TEST_CASE(
     CHECK(Fixture::Str(of.StoredHullZone(of.StoredHullRows() - 1)) == "FarBase");
     CHECK(of.StoredHullPackage(of.StoredHullRows() - 1) == FPTransportHeli);
 }
+
+TEST_CASE("CounterAttack - the stall rule: progress marks and the verdict near and far from the mark (6.5)",
+          "[game][guerrilla][counterattack]")
+{
+    // the first measure sets the mark; standing still adds the seconds
+    float mark = -1, stalled = 0;
+    CHECK(CounterAttack::StallStep(mark, stalled, 306.0f, 1.0f) == 0.0f);
+    CHECK(mark == 306.0f);
+    CHECK(CounterAttack::StallStep(mark, stalled, 306.0f, 10.0f) == 10.0f);
+    // creeping less than StallProgress is no progress
+    CHECK(CounterAttack::StallStep(mark, stalled, 306.0f - CounterAttack::StallProgress + 1.0f, 10.0f) == 20.0f);
+    // StallProgress closer: a new mark, the seconds cleared
+    CHECK(CounterAttack::StallStep(mark, stalled, 306.0f - CounterAttack::StallProgress, 10.0f) == 0.0f);
+    CHECK(mark == 306.0f - CounterAttack::StallProgress);
+    // backing away is no progress either
+    CHECK(CounterAttack::StallStep(mark, stalled, 400.0f, 5.0f) == 5.0f);
+
+    // near the 250 m mark (within DismountReach past it) the short wait,
+    // farther out the long one
+    const float birthMin = 250.0f;
+    const float nearMark = birthMin + CounterAttack::DismountReach;
+    CHECK(CounterAttack::StallVerdict(306.0f, birthMin, CounterAttack::StallNearTime - 1.0f) ==
+          CounterAttack::StallNone);
+    CHECK(CounterAttack::StallVerdict(306.0f, birthMin, CounterAttack::StallNearTime) == CounterAttack::StallAtMark);
+    CHECK(CounterAttack::StallVerdict(nearMark, birthMin, CounterAttack::StallNearTime) == CounterAttack::StallAtMark);
+    CHECK(CounterAttack::StallVerdict(nearMark + 1.0f, birthMin, CounterAttack::StallNearTime) ==
+          CounterAttack::StallNone);
+    CHECK(CounterAttack::StallVerdict(nearMark + 1.0f, birthMin, CounterAttack::StallTime) ==
+          CounterAttack::StallOnRoute);
+    // the short wait outlasts the first leg's resend after a birth
+    CHECK(CounterAttack::StallNearTime > CounterAttack::ResendInterval);
+    CHECK(CounterAttack::StallTime > CounterAttack::StallNearTime);
+}
+
+TEST_CASE("CounterAttack - an arrival-live carrier that never moves dismounts near the mark and assaults (video 6)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    CoreLogCapture log;
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    const CounterAttackView far = Fixture::View(FarX, FarZ);
+    const CounterAttack::Record* r = ColumnNearArrival(f, ops, fired, ColumnOrder(f.town, f.post));
+    f.ca.Step(f.registry, far, 10.0f, &ops, fired);
+    REQUIRE(r->phase == CALive);
+    REQUIRE(r->arrivalLive);
+    const float born = Dist2DTest(ops.lastMountFrom, f.Z(f.town).pos);
+    REQUIRE(born > f.ca.Tuning().birthMinToTarget);
+    REQUIRE(born <= f.ca.Tuning().birthMinToTarget + CounterAttack::DismountReach);
+    // op 13: the hull never answers its driver; every man stays seated where
+    // he was born.  Before StallNearTime nothing changes
+    ops.infAt = ops.lastMountFrom;
+    ops.carrierCrewAt = ops.lastMountFrom;
+    ops.escortCrewAt = ops.lastEscortFrom;
+    for (int s = 0; s < (int)CounterAttack::StallNearTime - 15; s++)
+    {
+        f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    }
+    CHECK(ops.dismounts == 0);
+    CHECK_FALSE(r->dismounted);
+    CHECK(r->leg == CounterAttack::LegRoad);
+    // past it: the hull stops, the infantry gets out where it stands and
+    // assaults; the truck holds back, the escort supports at the edge
+    for (int s = 0; s < 25 && !r->dismounted; s++)
+    {
+        f.ca.Step(f.registry, far, 1.0f, &ops, fired);
+    }
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(ops.dismounts == 1);
+    CHECK(r->dismounted);
+    CHECK(r->leg == CounterAttack::LegTown);
+    CHECK(r->clock >= 0.0f); // the live timeout counts from here
+    CHECK(ops.carrierSupports == 0);
+    CHECK(ops.escortSupports >= 1);
+    CHECK(ear.Count(CAOpArrived) == 2); // the abstract arrival, then the live one where it stands
+    CHECK(ear.Count(CAOpRepelled) == 0);
+    CHECK(log.With({"made no progress for", "the infantry gets out where it stands and assaults from there"}).size() ==
+          1);
+    // no further dismount and no withdrawal while it fights on foot
+    f.ca.Step(f.registry, far, 30.0f, &ops, fired);
+    CHECK(ops.dismounts == 1);
+    CHECK(f.ca.Count() == 1);
+}
+
+TEST_CASE("CounterAttack - a carrier stalled far out on its road dismounts and marches on on foot (video 6)",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    CoreLogCapture log;
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    BornColumn(f, ops, fired);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // stuck 600 m out, the escort beside it
+    ops.infAt = TowardPost(f, 600.0f);
+    ops.carrierCrewAt = ops.infAt;
+    ops.escortCrewAt = TowardPost(f, 610.0f);
+    for (int s = 0; s < (int)CounterAttack::StallTime - 15; s++)
+    {
+        f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    }
+    CHECK(ops.dismounts == 0);
+    for (int s = 0; s < 25 && !r->dismounted; s++)
+    {
+        f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    }
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(ops.dismounts == 1);
+    CHECK(r->dismounted);
+    // not at the edge: the live clock is still the march allowance, and the
+    // squad walks the rest of the road
+    CHECK(r->leg != CounterAttack::LegTown);
+    CHECK(r->clock < 0.0f);
+    CHECK(ear.Count(CAOpArrived) == 0);
+    CHECK(log.With({"made no progress for", "and marches on"}).size() == 1);
+    const int movesBefore = ops.moves;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(ops.moves > movesBefore);
+    // on foot it reaches the town edge like any squad and moves in
+    ops.infAt = TowardPost(f, 200.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(r->leg == CounterAttack::LegTown);
+    CHECK(ops.dismounts == 1);
+    CHECK(ear.Count(CAOpArrived) == 1);
+}
+
+TEST_CASE("CounterAttack - a moving carrier is never stalled: it still dismounts at the 250 m mark",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    BornColumn(f, ops, fired);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    // closing 25 m every 20 s for a long, slow approach: never a stall
+    for (float d = 640.0f; d > 260.0f; d -= 25.0f)
+    {
+        ops.infAt = TowardPost(f, d);
+        ops.carrierCrewAt = ops.infAt;
+        ops.escortCrewAt = TowardPost(f, d + 20.0f);
+        f.ca.Step(f.registry, AtTown(f), 20.0f, &ops, fired);
+        REQUIRE(f.ca.Count() == 1);
+        CHECK_FALSE(r->dismounted);
+    }
+    ops.infAt = TowardPost(f, 240.0f);
+    ops.carrierCrewAt = ops.infAt;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(ops.dismounts == 1);
+    CHECK(r->leg == CounterAttack::LegTown);
+}

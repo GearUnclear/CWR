@@ -132,6 +132,9 @@
       "escalation",
       "town_support"
     ],
+    "../engine/Poseidon/Game/Guerrilla/CounterAttackMarch.cpp": [
+      "town_support"
+    ],
     "../engine/Poseidon/Game/Guerrilla/OccupierForces.cpp": [
       "alert",
       "garrison",

@@ -639,6 +639,9 @@ void CounterAttack::ReturnToRoad(Record& r, float fraction, int alive, float who
     r.dismounted = false;
     r.stopping = -1;
     r.escortWait = false;
+    r.stallMark = -1;
+    r.stallFor = 0;
+    r.stallVerdict = StallNone;
 }
 
 bool CounterAttack::RoadIsReasonable(float roadLength, float straightDistance)
@@ -1702,176 +1705,6 @@ bool CounterAttack::MustGoLive(const ZoneRegistry& registry, const CounterAttack
     return Dist2D(at.X(), at.Z(), view.playerX, view.playerZ) <= registry.Tuning().cacheRadius;
 }
 
-// the town edge (zoneArea from dest) on the line from dest to pos: where an
-// armed hull supports (6.5, phase 5); pos itself when already inside
-static Vector3 EdgePoint(float edgeR, Vector3Par pos, Vector3Par dest)
-{
-    Vector3 back = pos - dest;
-    back[1] = 0;
-    const float d = back.Size();
-    return d > edgeR && d > 1e-3f ? dest + back * (edgeR / d) : Vector3(pos);
-}
-
-void CounterAttack::March(const ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
-                          CounterAttackOps* ops, Vector3Par leader, float elapsed)
-{
-    (void)target;
-    const Vector3 dest = DestOf(registry, r);
-    if ((dest.X() == 0 && dest.Z() == 0) || !ops)
-    {
-        return;
-    }
-    const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
-    const int n = route.Size();
-    // a mounted force rides to counterAttackBirthMinToTarget and dismounts
-    // there (3.2); men on foot deploy at the zone edge plus TownEdgeMargin
-    const bool mounted = LiveHullOf(r) > 0 && !r.dismounted;
-    const float edge = mounted ? _tuning.birthMinToTarget : registry.Tuning().zoneArea + TownEdgeMargin;
-    if (n == 0 || Dist2D(leader, dest) <= edge)
-    {
-        // the town edge: deploy and move in; the live timeout starts now
-        r.leg = LegTown;
-        if (r.clock < 0)
-        {
-            r.clock = 0;
-        }
-        r.resend = ResendInterval;
-        if (mounted)
-        {
-            // the hull stops first: a cargo seat ejects its man with the
-            // hull's speed, and at road speed that kills him
-            if (r.stopping < 0)
-            {
-                r.stopping = 0;
-                ops->DriveOn(r.crewGroup, leader);
-                if (LiveEscortOf(r) > 0)
-                {
-                    // the escort does not overtake into the town: it closes
-                    // up to the town edge and supports from there (6.5)
-                    ops->Support(r.escortCrewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
-                }
-                r.leg = LegRoad;
-                return;
-            }
-            r.stopping += elapsed;
-            if (ops->HullSpeed(r.hull) > DismountSpeed && r.stopping < StopMax)
-            {
-                r.leg = LegRoad;
-                return;
-            }
-            // stopped: the infantry gets out and assaults; a truck holds
-            // back where it stands, an armed hull drives up to the town
-            // edge and supports (ForcePackages::EdgeRole, phase 5)
-            ops->Dismount(r.group, r.hull);
-            r.dismounted = true;
-            r.stopping = -1;
-            if (ForcePackages::SupportsAtEdge(r.package))
-            {
-                ops->Support(r.crewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
-            }
-        }
-        if (LiveEscortOf(r) > 0)
-        {
-            // a column's escort always supports (6.5)
-            ops->Support(r.escortCrewGroup, EdgePoint(registry.Tuning().zoneArea, leader, dest));
-        }
-        ops->Assault(r.group, dest);
-        GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} reached the town edge ({:.0f} m out){}; it moves in",
-                 r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target, Dist2D(leader, dest),
-                 mounted ? " and dismounts" : "");
-        Emit(registry, r, CAOpArrived, r.strength, 0, mounted ? "live, dismounted" : "live");
-        TraceArrived(view, r, "live", mounted ? "dismounts and moves in" : "moves in", leader);
-        return;
-    }
-    // a column keeps together (6.5): the carrier waits where it is while its
-    // escort (a slower tank, say) is more than EscortSpread behind, and
-    // drives on once it has closed to EscortRejoin
-    if (mounted && LiveEscortOf(r) > 0)
-    {
-        Vector3 escortAt = VZero;
-        if (ops->Alive(r.escortCrewGroup, escortAt) > 0)
-        {
-            const float spread = Dist2D(escortAt, leader);
-            if (!r.escortWait && spread > EscortSpread)
-            {
-                r.escortWait = true;
-                ops->DriveOn(r.crewGroup, leader);
-                ops->DriveOn(r.escortCrewGroup, leader);
-            }
-            else if (r.escortWait && spread <= EscortRejoin)
-            {
-                r.escortWait = false;
-                r.resend = 0; // the leg is re-sent below
-            }
-            if (r.escortWait)
-            {
-                return;
-            }
-        }
-        else
-        {
-            r.escortWait = false;
-        }
-    }
-    // a hull covers ground fast: longer legs, so it does not stop at every
-    // 200 m point
-    const int stride = mounted ? 3 * WaypointStride : WaypointStride;
-    // the route point nearest the leader, searched around the current leg
-    // (the whole road after a reload)
-    const bool known = r.leg == LegRoad;
-    const int lo = known ? MaxInt(0, r.wp - 2 * stride) : 0;
-    const int hi = known ? MinInt(n - 1, r.wp + 2 * stride) : n - 1;
-    int at = lo;
-    float atD = -1;
-    for (int i = lo; i <= hi; i++)
-    {
-        const float d = Dist2D(leader, route[i]);
-        if (atD < 0 || d < atD)
-        {
-            atD = d;
-            at = i;
-        }
-    }
-    bool issue = false;
-    if (!known)
-    {
-        r.leg = LegRoad;
-        r.wp = MinInt(at + stride, n - 1);
-        issue = true;
-    }
-    else if (r.wp >= 0 && r.wp < n && (at >= r.wp - 1 || Dist2D(leader, route[r.wp]) < WaypointReach))
-    {
-        // this leg is done: the next one ends WaypointStride points on
-        const int next = MinInt(at + stride, n - 1);
-        if (next != r.wp)
-        {
-            r.wp = next;
-            issue = true;
-        }
-    }
-    r.resend -= elapsed;
-    if (r.resend <= 0)
-    {
-        issue = true; // a stalled leg is re-sent
-    }
-    if (issue && r.wp >= 0 && r.wp < n)
-    {
-        r.resend = ResendInterval;
-        if (mounted)
-        {
-            ops->DriveOn(r.crewGroup, route[r.wp]); // the Traffic idiom: the driver, never an arcade waypoint
-        }
-        else
-        {
-            ops->MoveOn(r.group, route[r.wp]);
-        }
-        if (LiveEscortOf(r) > 0)
-        {
-            ops->DriveOn(r.escortCrewGroup, route[r.wp]); // the escort drives the same legs (6.5)
-        }
-    }
-}
-
 void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackView& view, const Record& r, int bodies)
 {
     if (bodies <= 0)
@@ -1898,13 +1731,19 @@ void CounterAttack::ReturnToSource(ZoneRegistry& registry, const CounterAttackVi
     // (S5): they join the reserve unseen or once he leaves
     const bool pending =
         GarrisonCache::AddReserve(registry, src, back, src, view.playerValid, view.playerX, view.playerZ);
-    // the surplus over the base's room: the pool (5.5)
-    if (bodies > back)
+    // the surplus over the base's room: the pool (5.5), which may bank or
+    // drop what it cannot take over its ceiling (its own ledger line)
+    const int surplus = bodies - back;
+    const int pooled = surplus > 0 ? OccupierForces::Instance().Refund(surplus, "surplus") : 0;
+    char rest[96] = "";
+    if (surplus > 0)
     {
-        OccupierForces::Instance().Refund(bodies - back, "surplus");
+        snprintf(rest, sizeof(rest), "; %d over its room to the pool (%d taken, %d banked or dropped)", surplus, pooled,
+                 surplus - pooled);
     }
-    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {})", back, bodies,
-             (const char*)s->name, pending ? " as a pending deposit" : "", s->garrison, s->pending, s->garrisonMax);
+    GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} survivor(s) back at {}{} (reserve {}, pending {}, of {}){}", back,
+                     bodies, (const char*)s->name, pending ? " as a pending deposit" : "", s->garrison, s->pending,
+                     s->garrisonMax, rest);
     Emit(registry, r, CAOpReturned, back, bodies - back, pending ? "home, pending" : "home");
 }
 
@@ -2177,6 +2016,9 @@ int CounterAttack::GoLive(ZoneRegistry& registry, const CounterAttackView& view,
     r.escort = escortHull;
     r.escortCrewGroup = escortGroup;
     r.dismounted = false;
+    r.stallMark = -1; // the stall rule measures from the birth point
+    r.stallFor = 0;
+    r.stallVerdict = StallNone;
     r.phase = CALive;
     r.clock = -MarchAllowance(route, pick.fraction);
     r.resend = ResendInterval;
@@ -2584,8 +2426,19 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 const int in = MinInt(r.strength, room > 0 ? (int)floorf(room) : 0);
                 GarrisonCache::AddReserve(registry, target, in, registry.FindZoneIndex(r.source), view.playerValid,
                                           view.playerX, view.playerZ);
-                GM_DIRECTOR_INFO(Core, "CounterAttack: {} of {} soldier(s) top up {} (reserve {}, pending {})", in, r.strength,
-                         (const char*)r.target, town->garrison, town->pending);
+                // the line says where every body goes: the garrison, home
+                // to the source (ReturnToSource writes what it took), or the
+                // pool for an alarm answer
+                char rest[96] = "";
+                if (r.strength > in)
+                {
+                    snprintf(rest, sizeof(rest), "; %d over its room go %s%s", r.strength - in,
+                             alarm ? "to the pool" : "home to ", alarm ? "" : (const char*)r.source);
+                }
+                GM_DIRECTOR_INFO(
+                    Core, "CounterAttack: [op {}] {} of {} soldier(s) top up {} (reserve {}, pending {}, of {}){}",
+                    r.opId, in, r.strength, (const char*)r.target, town->garrison, town->pending, town->garrisonMax,
+                    rest);
                 if (alarm)
                 {
                     if (r.strength > in)
@@ -3008,8 +2861,10 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 }
                 else
                 {
-                    snprintf(rule, sizeof(rule), "counterAttackLiveTimeout %.0f s at the target",
-                             (double)_tuning.liveTimeout);
+                    // the clock starts at the town edge, or once the road
+                    // march's allowance ran out short of it (video 6)
+                    snprintf(rule, sizeof(rule), "counterAttackLiveTimeout %.0f s %s", (double)_tuning.liveTimeout,
+                             r.leg == LegTown ? "at the target" : "short of the town edge, the march allowance spent");
                 }
                 return Withdraw(registry, view, target, r, ops, alive, leader, CAERWithdrew, rule, fired);
             }

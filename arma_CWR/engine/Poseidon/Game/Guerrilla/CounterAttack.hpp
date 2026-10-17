@@ -729,6 +729,9 @@ class CounterAttack : public SerializeClass
         bool suspended = false;   // Holding: the town is in the bubble, the force does nothing
         float unseenFor = 0;      // Live, LegRoad: seconds every body has been out of perception
         float stopping = -1;      // Live, mounted at the edge: seconds the hull has been braking (-1 not yet)
+        float stallMark = -1;     // Live, mounted: the distance to the town at the last progress mark (-1 none)
+        float stallFor = 0;       // Live, mounted: seconds since the hull last closed StallProgress
+        int stallVerdict = 0;     // Live, mounted: the StallVerdict being acted on (StallNone)
         int spawnReason = CASpawnNone;
         Vector3 spawnPos = VZero; // where the live squad was instantiated
         bool routeIsRoad = false; // route came from the road net (no roadFactor on its length)
@@ -1065,6 +1068,29 @@ class CounterAttack : public SerializeClass
     // slow below this, or StopMax seconds
     static constexpr float DismountSpeed = 1.5f;
     static constexpr float StopMax = 15.0f;
+    // the stall rule (6.5, video 6): a mounted force that has not closed
+    // StallProgress metres on its town for StallNearTime seconds within
+    // DismountReach past the 250 m mark (born or stalled near the target),
+    // or for StallTime seconds anywhere on its route, dismounts where it
+    // stands (CounterAttackMarch.cpp).  StallNearTime covers the first
+    // ResendInterval a hull waits for its first leg after a birth.
+    static constexpr float StallProgress = 20.0f;
+    static constexpr float DismountReach = 100.0f;
+    static constexpr float StallNearTime = 45.0f;
+    static constexpr float StallTime = 90.0f;
+    enum StallKind
+    {
+        StallNone,
+        StallAtMark,  // near the mark: dismount and assault from there
+        StallOnRoute  // farther out: dismount and march on on foot
+    };
+    // one progress measure: mark is the distance at the last progress mark
+    // (-1: none yet), stalledFor the seconds since; a step StallProgress
+    // closer than the mark moves it and clears the seconds.  Returns them.
+    static float StallStep(float& mark, float& stalledFor, float toDest, float elapsed);
+    // the StallKind for a hull toDest metres from its town after stalledFor
+    // seconds without progress (birthMin: counterAttackBirthMinToTarget)
+    static int StallVerdict(float toDest, float birthMin, float stalledFor);
     // a column's escort is born this far behind the carrier on its road (m);
     // the carrier waits while the escort is more than EscortSpread behind
     // and drives on once it is within EscortRejoin
