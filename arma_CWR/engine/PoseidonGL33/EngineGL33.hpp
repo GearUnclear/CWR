@@ -683,7 +683,10 @@ class EngineGL33 : public Engine
     void SetShadowMapsEnabled(bool enabled) override { _shadowTuning.enabled = enabled; }
     // The remastered lighting asked for but not running (its programs failed to
     // build) falls back to Classic, and Classic shadows are the projected ones.
-    bool ShadowMapsEnabled() const override { return _shadowTuning.enabled && (_lightingActive || !_lighting.remastered); }
+    bool ShadowMapsEnabled() const override
+    {
+        return _shadowTuning.enabled && (_lightingActive || !_lighting.remastered);
+    }
 
     // --- Remastered lighting (EngineGL33_Lighting.cpp, EngineGL33_LightingShaders.cpp,
     // EngineGL33_PostFX.cpp) ---
@@ -714,7 +717,7 @@ class EngineGL33 : public Engine
     // (not a portrait capture or a 3D preview drawn inside a dialog).
     bool _worldPassOpen = false;
     bool _worldEffectsOn = false;
-    bool _worldSceneEnded = false; // EndWorldScene ran this frame: later 3D passes are UI previews
+    bool _worldSceneEnded = false;   // EndWorldScene ran this frame: later 3D passes are UI previews
     bool _worldDepthCleared = false; // a depth clear inside the world pass (vehicle interior view)
     bool _worldOverlayDrawn = false; // a screen overlay drawn inside the world pass (gunner optics)
     // Dev: rebuild every program from the built-in sources and the override
@@ -788,8 +791,7 @@ class EngineGL33 : public Engine
         int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
         unsigned int vao = 0;
-        unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0,
-                     progComposite = 0;
+        unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
         bool programsTried = false;
         bool unavailable = false;
     } _post;

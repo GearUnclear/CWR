@@ -521,7 +521,8 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
         GEngine->SetLightingTuning(t);
         GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
         LOG_INFO(Core, "[tri] triSetLighting {}", setting);
-        return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK" : "FAIL:remastered shaders unavailable");
+        return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK"
+                                                                           : "FAIL:remastered shaders unavailable");
     }
     const size_t eq = setting.find('=');
     if (eq == std::string::npos)
@@ -531,7 +532,7 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
     struct Knob
     {
         const char* name;
-        float remaster::LightingTuning::*field;
+        float remaster::LightingTuning::* field;
     };
     static const Knob kKnobs[] = {
         {"exposure", &remaster::LightingTuning::exposure},

@@ -21,8 +21,8 @@
 #include <string>
 #include <vector>
 
-#include <Poseidon/Graphics/Core/RenderState.hpp> // DrawItem (for GetRecordedDraws())
-#include <Poseidon/Graphics/Remaster/LightRig.hpp>  // remaster::LightingTuning
+#include <Poseidon/Graphics/Core/RenderState.hpp>  // DrawItem (for GetRecordedDraws())
+#include <Poseidon/Graphics/Remaster/LightRig.hpp> // remaster::LightingTuning
 
 namespace Poseidon::remaster
 {

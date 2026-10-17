@@ -103,7 +103,8 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         remaster::LightingTuning lighting = GEngine->GetLightingTuning();
         lighting.remastered = cfg.lighting == GraphicsConfig::LightingRemastered;
         GEngine->SetLightingTuning(lighting);
-        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive() && cfg.shadowQuality != GraphicsConfig::TierOff);
+        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive() &&
+                                      cfg.shadowQuality != GraphicsConfig::TierOff);
     }
     gUserFpsCap = cfg.fpsCap;
 }

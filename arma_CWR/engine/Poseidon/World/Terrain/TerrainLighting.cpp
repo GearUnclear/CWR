@@ -58,7 +58,8 @@ struct BuildState
     void DropFinished()
     {
         retired.erase(std::remove_if(retired.begin(), retired.end(),
-                                     [](Build& b) {
+                                     [](Build& b)
+                                     {
                                          return !b.result.valid() ||
                                                 b.result.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
                                      }),
