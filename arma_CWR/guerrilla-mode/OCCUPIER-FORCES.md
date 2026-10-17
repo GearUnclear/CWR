@@ -864,6 +864,50 @@ stands within 60 m of its road, and neither pick is on a track (the share is
 reported short). Tests: `test_base_generate.cpp` (`[basegenerate]`),
 `guerrilla_bases_generate_{abel,eden}`, `guerrilla_bases_generate_save.seq`.
 
+**Step 2: the outpost layout.** Every generated OUTPOST on empty ground gets
+one layout of stock statics, read from `CfgGuerrillaBaseLayouts >> Outpost` in
+`guerrilla-mode/config/guerrilla-hq.hpp` (installed to `BIN\` with the HQ
+classes): rows of `{class, dx, dz, dir[, jitter]}` in base-local metres, +dz
+towards the access road (the stored heading), rotated by the heading. The
+shipped Outpost has 12 rows: two `Fortress1` bunkers at the gate on the road
+side, two `ViewTower` (the stock hlaska, scope 1) on opposite corners, four
+`Wire` on the flanks, two tents (`CampEast|Camp`, `Camp`) and a `FlagCarrier`
+at the rear (each 5 s pass pushes the base owner's flag texture), and a
+`FuelStationNew2` fuel point on the road side as the one asymmetry. The
+service is `BaseProps.{hpp,cpp}`, shaped like TownFlags: `InitMission` plans
+and creates the props behind the loading screen at new game, before any
+garrison spawns (2.6 ms for 19 props on Abel), keeps `LLink` rows, and
+re-creates a prop only when its link comes back null (a deleted prop comes
+back once, at its planned spot, within the 5 s pass). The props are world
+buildings, so a save carries them in `_buildings` and the `GuerrillaBaseProps`
+block carries only the rows and the planned base names: a load re-binds the
+refs and never plans or creates a second set; a save from before step 2 gets
+its layouts on the first tick. Rules: a 25 m yard at the centre stays clear (a
+row whose footprint reaches into it is refused); nothing within 6 m of a road
+link, measured from the footprint (`GRoadNet::IsOnRoad` with the footprint
+radius plus 6 m); dry ground and no landscape object in the footprint; a
+refused spot tries its left-right mirror, then both pushed 4 and 8 m outward,
+then the row is dropped with an INFO line; class alternates (`A|B`) take the
+first class the package can spawn (the plan-15 `Spawnable` probe) and none
+skips the row with a WARN; fewer than `minProps` (8) placed warns, never
+fails. A detected outpost (real map props) gets no layout. Statics stand
+upright, seated by `PlaceOnSurface` with the buried-origin net; Fortress1 and
+ViewTower sit 1.0 to 1.1 m dug in by their authoring, the rest at ground level.
+Each created prop drops the cached oper fields of its 3 x 3 cells (the
+`Object::SetDestroyed` idiom, Dammage.cpp), so pathing sees it.
+`GarrisonCache` pushes a generated base's garrison spawn point out of every
+prop's box plus 1.5 m before `CreateUnit` (its `FindFreePosition` only clears a
+body out of the geometry), and `OccupierAir`'s LZ probe counts any cell centre
+within 60 m of a prop as an object, since the probe reads geography fixed at
+map load. Abel ground truth (2026-10-16): La Riviere Outpost places 10 of 12
+rows and Vigny Outpost 9 (both gate bunkers there stand on landscape
+objects), every prop within 60 m of its centre. Save size: the start-of-game
+save of `guerrilla_bases_generate_save.seq` grows from 185,944 to 190,835
+bytes (+4,891, about 257 bytes a prop). Frame cost: one pass of about twenty
+link checks every 5 s. `gmBaseProps`, `gmBasePropsInside` and `gmBasePropsLz`
+are the script surface. Tests: `test_base_props.cpp` (`[baseprops]`),
+`guerrilla_bases_props_abel`, `guerrilla_bases_props_save.seq`.
+
 ## 6. The director
 
 ### 6.1 Intel (D9)

@@ -1,4 +1,5 @@
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp> // CounterAttackGate (S5 pending release)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // D2 recovery: zone alert GREEN
@@ -729,6 +730,20 @@ void GarrisonCache::SpawnGarrison(int zoneIndex, float warLevel, AutoArray<Garri
             bool officer = firstGroup && u == 0;
             RString unitClass = u < classes.Size() ? classes[u] : tierClass;
             Vector3 pos = GarrisonPointOnSurface(z->name, z->pos, spread, point++);
+            // a generated base's layout props (OCCUPIER-FORCES.md 5.7 step 2)
+            // stand inside the spawn square: CreateUnit's FindFreePosition
+            // only clears a body out of the props' geometry, so first push
+            // the point out of every prop box (plus BaseProps::NudgeMargin)
+            if (z->generated)
+            {
+                float nx = pos.X(), nz = pos.Z();
+                if (BaseProps::Instance().NudgeClear(nx, nz))
+                {
+                    float sdx, sdz;
+                    const float ny = GLandscape ? GLOB_LAND->SurfaceYAboveWater(nx, nz, &sdx, &sdz) : pos.Y();
+                    pos = Vector3(nx, ny, nz);
+                }
+            }
             int before = grp->NUnits();
             ::CreateUnit(grp, officer ? officerClass : unitClass, pos, RString(), (officer ? 0.6f : 0.5f) * morale,
                          officer ? RankSergeant : RankPrivate);

@@ -673,6 +673,31 @@ the track share, the seed), the site refusal counts, and for every town still
 open after generation the refusals of the cells in its reach ("Regina is
 open: 0 site(s) in reach ...").
 
+**The outpost layout (step 2).** Each generated OUTPOST on empty ground is
+built at new game from the config class `CfgGuerrillaBaseLayouts` (the shipped
+copy lives in `guerrilla-mode/config/guerrilla-hq.hpp`; a mod may override a
+layout class or add one, merged last like any config). The contract:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `type` | required | The zone type the layout serves (`"OUTPOST"`). |
+| `items[]` | required | Rows `{class, dx, dz, dir}` or `{class, dx, dz, dir, jitter}`: base-local metres, +dz towards the base's road (the stored heading), +dx to the right when facing it; `dir` in degrees relative to the heading (0 faces the road); `jitter` 1 = a seeded turn of up to `jitterDeg`. `class` may list alternates `"A|B"`: the first the loaded package can spawn wins. |
+| `yard` | 25 | Metres at the centre kept prop-free (births, the hold posture, capture presence); a row whose footprint reaches into it is refused. |
+| `roadMargin` | 6 | Metres between a prop's footprint and any road link. |
+| `jitterDeg` | 5 | The largest seeded turn of a jitter row (tents, sandbags; keep towers, wire and buildings on the grid). |
+| `minProps` | 8 | Fewer placed props log a WARN; never fatal. |
+
+A refused spot (road, water, a landscape object, another prop) tries its
+left-right mirror, then both pushed 4 and 8 m outward, then the row is dropped
+with an INFO line; an unresolvable class skips the row with a WARN. Keep rows
+within 52 m of the centre so a row pushed 8 m still stands inside 60 m (the LZ
+exclusion radius and the tests' bound), and author static classes only
+(barrels and pallets are physics `Thing`s; `ReammoBox*` crates come
+prefilled). A detected outpost gets no layout (its map props already read as
+a base). The props are saved as world objects and re-bound on load, a deleted
+one is re-created once, and the planned rows (`gmBaseProps`) never move after
+new game.
+
 **Templates.** Abel and Eden opt in; Sinai stays off until its
 `playRegion[]` (#75) is drawn (inside the default box every town already has a
 base in reach); Lebanon80 is off by design, like its `seedBases = 0`.

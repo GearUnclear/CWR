@@ -381,6 +381,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Game/test_game_state_ext.cpp
     Game/Guerrilla/test_zone_registry.cpp
     Game/Guerrilla/test_base_generate.cpp
+    Game/Guerrilla/test_base_props.cpp
     Game/Guerrilla/test_campaign_end.cpp
     Game/Guerrilla/test_counter_attack.cpp
     Game/Guerrilla/test_town_capture_batch.cpp

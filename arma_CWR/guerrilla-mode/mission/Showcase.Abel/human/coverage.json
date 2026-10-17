@@ -96,6 +96,9 @@
     "../engine/Poseidon/Game/Guerrilla/BaseGenerate.cpp": [
       "zones"
     ],
+    "../engine/Poseidon/Game/Guerrilla/BaseProps.cpp": [
+      "zones"
+    ],
     "../engine/Poseidon/Game/Guerrilla/ZoneRegistry.cpp": [
       "zones",
       "town_support",
@@ -137,6 +140,11 @@
     ],
     "../engine/Poseidon/Game/Guerrilla/OccupierForcesCommands.cpp": [
       "garrison"
+    ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesLedger.cpp": [
+      "garrison",
+      "escalation",
+      "persistence"
     ],
     "../engine/Poseidon/Game/Guerrilla/ForcePackages.cpp": [
       "garrison",

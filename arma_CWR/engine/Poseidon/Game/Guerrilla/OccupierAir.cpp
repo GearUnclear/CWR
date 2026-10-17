@@ -1,5 +1,6 @@
 #include <Poseidon/Game/Guerrilla/OccupierAir.hpp>
 
+#include <Poseidon/Game/Guerrilla/BaseProps.hpp>    // ExcludesLz (generated-base props, OCCUPIER-FORCES.md 5.7)
 #include <Poseidon/Game/Guerrilla/Traffic.hpp>      // PerceptionCamera, EffectiveBand (issue #53)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp> // EnsureSideCenter, CreateSideGroup, faction squads
 
@@ -591,6 +592,13 @@ class EngineLzProbe final : public AirLzProbe
         if (g.u.gradient >= 4)
         {
             f.gradient = f.gradient > 0.25f ? f.gradient : 0.25f + 1e-3f; // the engine refuses this cell
+        }
+        // generated-base props are runtime statics the load-time geography
+        // bits never see: a cell centre within BaseProps::LzClear of one
+        // counts as an object (OCCUPIER-FORCES.md 5.7 step 2)
+        if (BaseProps::Instance().ExcludesLz(x, z))
+        {
+            f.objects++;
         }
         return f;
     }
