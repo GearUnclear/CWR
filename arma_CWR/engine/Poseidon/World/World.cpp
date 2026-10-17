@@ -1559,6 +1559,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 perf.Mark(Dev::FrameProfiler::PhaseDrawObjects);
                 GEngine->EnableNightEye(0);
 
+                // The remastered post pass runs on the world alone: camera
+                // effects (cinema borders, cutscene overlays) draw over it
+                // untouched. The call below is then a no-op.
+                GEngine->EndWorldScene();
                 if (_cameraEffect)
                 {
                     _cameraEffect->Draw();
@@ -1604,7 +1608,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
     {
         // World/HUD boundary: the remastered lighting's post pass (ambient
         // occlusion, bloom, sun shafts) runs on the finished 3D frame before the
-        // map, HUD and dialogs draw over it.
+        // map, HUD and dialogs draw over it (if the landscape branch above has
+        // not run it already).
         GEngine->EndWorldScene();
 
         if (_map && (_showMap || _forceMap))

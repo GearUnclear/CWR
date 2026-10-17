@@ -148,6 +148,18 @@ void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
             glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
         _a2cBound = alphaToCoverage;
     }
+    // Remastered: the covered samples store alpha 1 (no sky-light share), so a
+    // cutout's resolved edge does not read as extra share in the post pass's
+    // occlusion. Classic never enables it.
+    const bool alphaToOne = alphaToCoverage && _remasterPrograms;
+    if (alphaToOne != _a2oneBound)
+    {
+        if (alphaToOne)
+            glEnable(GL_SAMPLE_ALPHA_TO_ONE);
+        else
+            glDisable(GL_SAMPLE_ALPHA_TO_ONE);
+        _a2oneBound = alphaToOne;
+    }
 }
 
 // Atomic pipeline bind reading from `RenderPassDescriptor`.  Declares

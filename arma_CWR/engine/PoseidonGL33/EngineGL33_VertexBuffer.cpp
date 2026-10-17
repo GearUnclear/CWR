@@ -361,6 +361,8 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
     }
     if (clearZ)
     {
+        if (_worldPassOpen)
+            _worldDepthCleared = true; // the post pass has no world depth this frame
         mask |= GL_DEPTH_BUFFER_BIT;
         if (_hasStencilBuffer)
             mask |= GL_STENCIL_BUFFER_BIT;

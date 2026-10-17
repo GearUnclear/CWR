@@ -232,7 +232,9 @@ void main() {
     vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
     vec3 col = pow(lin, vec3(1.0 / 2.2));
-    if (compParams.w > 0.5) {
+    // Dither only what the composite changed: elsewhere the frame passes
+    // through exactly (the 2.2 round trip is exact on 8-bit values).
+    if (compParams.w > 0.5 && (keep < 0.9999 || max(glow.r, max(glow.g, glow.b)) > 1e-5)) {
         float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
         float m = fract(52.9829189 * fract(dot(gl_FragCoord.yx + 17.0, vec2(0.06711056, 0.00583715))));
         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
@@ -478,9 +480,13 @@ void EngineGL33::EndWorldScene()
     _worldEffectsOn = false;
     _worldSceneEnded = true;
     UpdateRemasterPrograms();
+    if (_lightingActive)
+        UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
         _portraitTargetSize)
         return;
+    if (_lighting.ambientOcclusion <= 0.0f && _lighting.bloom <= 0.0f && _lighting.sunShafts <= 0.0f)
+        return; // nothing to add: leave the frame as drawn
 
     FlushAndFreeAllQueues(_queueNo);
     int w = 0, h = 0;
@@ -540,7 +546,11 @@ void EngineGL33::EndWorldScene()
 
     const int hw = (w + 1) / 2;
     const int hh = (h + 1) / 2;
-    const float aoStrength = _lighting.ambientOcclusion;
+    // A vehicle interior clears the world's depth and draws itself with its own
+    // near plane (Transport::Draw): no world depth to reconstruct from, so no
+    // occlusion and no depth-tested shafts this frame. Bloom does not need it.
+    const bool worldDepth = !_worldDepthCleared;
+    const float aoStrength = worldDepth ? _lighting.ambientOcclusion : 0.0f;
     const float bloomStrength = _lighting.bloom;
 
     // 1. Ambient occlusion + blur.
@@ -611,7 +621,7 @@ void EngineGL33::EndWorldScene()
     float shaftWeight = 0.0f;
     float sunU = 0.5f, sunV = 0.5f;
     Color shaftTint(1, 1, 1, 1);
-    if (_lighting.sunShafts > 0.0f && GScene)
+    if (worldDepth && _lighting.sunShafts > 0.0f && GScene)
     {
         LightSun* sun = GScene->MainLight();
         Camera* cam = GScene->GetCamera();

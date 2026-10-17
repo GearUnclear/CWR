@@ -326,8 +326,9 @@ const vec2 kPoisson[12] = vec2[](
 // position the depth pass used. Casters self-shadow, so their lookup point is
 // pushed out along the normal by a fraction of a texel facing the sun and up to
 // two texels at grazing sun (no stripes on walls and leaf cards). The terrain
-// never casts into the map and passes offsetScale 0: an offset there would
-// slide every shadow away from its caster by metres at a low sun.
+// never casts into the map and passes offsetScale 0, and up-facing surfaces fade
+// the offset out: an offset there would slide every shadow away from its caster
+// by metres at a low sun.
 float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
     if (shadowCtl.x < 0.5) return 1.0;
     vec3 rel = vWorldRel + litShadowDelta.xyz;
@@ -356,7 +357,12 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
         if (w <= 0.0) continue;
         float texelWorld = 2.0 * ts / max(length(vec3(cascadeVP[c][0][0], cascadeVP[c][1][0], cascadeVP[c][2][0])), 1e-6);
         float slope = sqrt(max(1.0 - nl * nl, 0.0));
-        vec4 cp = cascadeVP[c] * vec4(rel + n * (texelWorld * offsetScale * (0.4 + 1.6 * slope)), 1.0);
+        // Up-facing receivers (roads, decals, runways, roofs) do not need it
+        // either: the depth pass stores back faces, so they never shadow
+        // themselves, and an offset would shift their shadow edges against the
+        // terrain beside them.
+        float offset = texelWorld * offsetScale * (0.4 + 1.6 * slope) * (1.0 - smoothstep(0.75, 0.97, n.y));
+        vec4 cp = cascadeVP[c] * vec4(rel + n * offset, 1.0);
         vec3 sc = cp.xyz / cp.w;
         vec2 suv = sc.xy * 0.5 + 0.5;
         if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -491,10 +497,10 @@ vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
     // Normalised Blinn-Phong (tighter lobes are brighter) with a Schlick-style
     // grazing boost.
     float norm = (p + 8.0) / 28.0;
-    float fresnel = 1.0 + 2.0 * pow(1.0 - vh, 5.0);
+    float fresnel = 1.0 + 2.0 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
     vec3 sunSpec = litMatSpecular.rgb * litSun.rgb * (pow(nh, p) * norm * fresnel * smoothstep(0.0, 0.15, nl) * sunVisibility);
     vec3 r = reflect(-v, n);
-    float fv = pow(1.0 - max(dot(n, v), 0.0), 5.0);
+    float fv = pow(clamp(1.0 - dot(n, v), 0.0, 1.0), 5.0);
     float gloss = clamp(dot(litMatSpecular.rgb, kLuma), 0.0, 1.0);
     vec3 skySpec = skyIrradiance(r) * (gloss * (0.04 + 0.96 * fv) * 0.6);
     return (sunSpec + skySpec) * litHorizon.w;

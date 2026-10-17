@@ -342,9 +342,6 @@ void EngineGL33::BeginPass(PassId passId)
         _currentDrawItem = DrawItem{};
 
         UploadFrameConstants(_frameState);
-        // Bind the (previous frame's) shadow depth map + light-VP for the lit
-        // shaders.  No-op until a depth pass has run with shadow maps enabled.
-        UpdateShadowMapLitState();
         // Remastered lighting: the world's 3D passes (not a portrait capture, a
         // 3D preview drawn in a dialog after the world, or the night-vision
         // intensifier) draw through the remastered programs, get the terrain
@@ -355,6 +352,9 @@ void EngineGL33::BeginPass(PassId passId)
         if (_worldEffectsOn)
             _worldPassOpen = true;
         UpdateRemasterPrograms();
+        // Bind the (previous frame's) shadow depth map + light-VP for the lit
+        // shaders.  No-op until a depth pass has run with shadow maps enabled.
+        UpdateShadowMapLitState();
         UploadLitFrameConstants();
     }
 

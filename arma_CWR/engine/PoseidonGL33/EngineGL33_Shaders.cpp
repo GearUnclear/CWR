@@ -842,6 +842,10 @@ static GLuint s_vsRemasterObj[NVertexShaders] = {};
 
 void EngineGL33::InitVertexShaders()
 {
+    // A soft reset re-runs Init3DState without the matching deinit: release
+    // what a previous init created instead of leaking it.
+    if (s_vsUBO)
+        DeinitVertexShaders();
     s_vsScreenObj = CompileGLShader(GL_VERTEX_SHADER, s_vsScreenGLSL, "vsScreen");
     s_vsTransformObj = CompileGLShader(GL_VERTEX_SHADER, s_vsTransformGLSL, "vsTransform");
     s_vsShadowObj = CompileGLShader(GL_VERTEX_SHADER, s_vsShadowGLSL, "vsShadow");
@@ -1101,7 +1105,11 @@ void EngineGL33::UpdateShadowMapLitState()
     float splits[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float cascadeCtl[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float camFwd[4] = {0.0f, 0.0f, 1.0f, 0.0f};
-    if (_shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
+    // With the remastered lighting on, only its world pass shadows: the classic
+    // programs it hands the HUD, dialogs, 3D previews and night vision to would
+    // otherwise darken them by the shadow at the camera point.
+    const bool shadowPass = !_lightingActive || _remasterPrograms;
+    if (shadowPass && _shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
     {
         ctl[0] = 1.0f; // enable the per-fragment shadow test
         // Lit-colour multiplier where shadowed, faded toward 1.0 (no shadow) as the
@@ -1585,6 +1593,9 @@ GLuint LinkProgramRetrievable(GLuint vs, GLuint fs, const char* name)
 
 void EngineGL33::InitPixelShaders()
 {
+    // As InitVertexShaders: a soft reset re-runs this without the deinit.
+    if (s_psUBO)
+        DeinitPixelShaders();
     struct PSCompileInfo
     {
         PixelShaderID id;

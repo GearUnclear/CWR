@@ -425,6 +425,7 @@ class EngineGL33 : public Engine
     bool _msaaActive = false;
     bool _alphaToCoverageCfg = true;
     bool _a2cBound = false;
+    bool _a2oneBound = false; // GL_SAMPLE_ALPHA_TO_ONE (remastered programs with alpha-to-coverage)
     bool _debugFlatColor = false;
 
     // SSAA render-scale state.  _ssaaFbo != 0 == active.  The scaled target is
@@ -707,6 +708,7 @@ class EngineGL33 : public Engine
     bool _worldPassOpen = false;
     bool _worldEffectsOn = false;
     bool _worldSceneEnded = false; // EndWorldScene ran this frame: later 3D passes are UI previews
+    bool _worldDepthCleared = false; // a depth clear inside the world pass (vehicle interior view)
     // Dev: rebuild every program from the built-in sources and the override
     // directory at the start of the next frame (EngineGL33_Shaders.cpp).
     bool _shaderReloadPending = false;

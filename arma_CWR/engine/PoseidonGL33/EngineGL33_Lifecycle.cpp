@@ -179,6 +179,7 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     _worldPassOpen = false;
     _worldEffectsOn = false;
     _worldSceneEnded = false;
+    _worldDepthCleared = false;
     UpdateRemasterPrograms();
 
     TLMaterial invalidMat;
