@@ -176,6 +176,36 @@ void OccupierForces::ReleaseBand()
     }
 }
 
+void OccupierForces::StepBandFrame()
+{
+    // close the previous frame's hold: one step on what every service booked
+    // since (5.6), then hold the band for this frame and the services after
+    // OccupierForces in it
+    if (_frameHold)
+    {
+        _frameHold = false;
+        ReleaseBand();
+    }
+    HoldBand();
+    _frameHold = true;
+}
+
+void OccupierForces::SettleBand()
+{
+    const int explicitHolds = _bandHold - (_frameHold ? 1 : 0);
+    if (explicitHolds > 0 || _bandHold <= 0)
+    {
+        UpdateBand(); // inside a BandHold: deferred; with no hold: at once
+        return;
+    }
+    // only the frame hold is open: step through it now, on the strength the
+    // frame has left so far (the frame's later movements step at its end)
+    _bandHold = 0;
+    _bandDirty = false;
+    UpdateBand();
+    _bandHold = 1;
+}
+
 bool OccupierForces::LogAllowed()
 {
     if (_logClock >= LogQuiet)
@@ -346,6 +376,9 @@ bool OccupierForces::Spend(int units, const char* why)
 bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why, bool& booked)
 {
     booked = false;
+    // the debit and the airframe's commitment are one movement: the band
+    // never sees the pool short of the airframe it has not committed yet
+    BandHold hold(*this);
     if (!Spend(units, why))
     {
         return false;
@@ -784,6 +817,55 @@ void OccupierForces::NoteLoss(int units, const char* why)
     UpdateBand();
 }
 
+void OccupierForces::NoteTopUpSettled(const ZoneRegistry& registry, OpRow& row, const CounterAttackOpEvent& ev,
+                                      const char* target)
+{
+    // one honest line (6.6, D12; video 6: "[op 11] Le Port Harbour retaken:
+    // 0 stay as its garrison" for a REINFORCE on a base never lost, its 2
+    // bodies gone to the pool above poolStart with no line saying so)
+    const bool alarm = row.kind == CAKAlarm;
+    const int joined = ev.bodies > 0 ? ev.bodies : 0;
+    char rest[256] = "";
+    if (row.returnHome >= 0)
+    {
+        const ZoneRecord* home = registry.GetZone(row.returnZone);
+        int n = snprintf(rest, sizeof(rest), "; %d back at %s", row.returnHome,
+                         home ? (const char*)home->name : "its source");
+        if (row.returnPool > 0 && n > 0 && n < (int)sizeof(rest))
+        {
+            n += snprintf(rest + n, sizeof(rest) - n, ", %d to the pool", row.returnPooled);
+            if (row.returnBanked > 0 && n < (int)sizeof(rest))
+            {
+                n += snprintf(rest + n, sizeof(rest) - n, ", %d banked", row.returnBanked);
+            }
+            if (row.returnDropped > 0 && n < (int)sizeof(rest))
+            {
+                snprintf(rest + n, sizeof(rest) - n, ", %d dropped (every base full)", row.returnDropped);
+            }
+        }
+    }
+    else if (_lastRefund.valid && _lastRefund.units > 0 &&
+             (stricmp((const char*)_lastRefund.why, "alarm answer surplus") == 0 ||
+              strncmp((const char*)_lastRefund.why, "top-up over the room", 20) == 0))
+    {
+        // the surplus an alarm answer leaves, or the stored bodies a live
+        // top-up displaced: both went back to the pool just before the settle
+        snprintf(rest, sizeof(rest), "; %d %s the pool", _lastRefund.units,
+                 alarm ? "over its room to" : "stored bodies gave way to it, to");
+    }
+    // a pool over poolStart is the wave headroom (5.5): say so
+    char over[96] = "";
+    if (_pool > _poolStart)
+    {
+        snprintf(over, sizeof(over), ", %d over poolStart in the wave headroom", _pool - _poolStart);
+    }
+    GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] {} {}: {} joined its garrison{} (pool {} of {}{})", ev.opId, target,
+                     alarm ? "alarm answer settled" : "reinforced", joined, rest, _pool, _poolStart, over);
+    row.returnHome = -1;
+    row.returnPool = 0;
+    _lastRefund.valid = false;
+}
+
 void OccupierForces::LandWave(int bodies)
 {
     if (!Active() || bodies <= 0)
@@ -800,7 +882,10 @@ void OccupierForces::LandWave(int bodies)
     _surgeWindow = WaveWindow;
     GM_DIRECTOR_INFO(Core, "OccupierForces: wave of {} landed, pool {} of {}, {} wave(s) landed", bodies, _pool, _poolStart,
              _wavesLanded);
-    UpdateBand();
+    // the landing is a transaction by itself, and the allocation after it in
+    // this tick spends the landed bodies: stepped now (a SPENT band would
+    // refuse the hub top-up and every wave strike)
+    SettleBand();
 }
 
 // ---------------------------------------------------------------------------

@@ -619,9 +619,11 @@ still owns empty) is FULL again (pool at poolStart, every garrison at
 - **Who takes it.** D2 regrowth draws first, still at most 1 body per 600 s
   per zone. Whatever D2 does not take accumulates in the pool, up to
   poolStart.
-- **Abel.** (60 + 32 + 56) / 4 = 37 per hour. An exhausted Abel refills its
-  88 garrison bodies in about 2.6 h (measured in the unit simulation; the
-  naive 2.4 h ignores the tail), then its pool, so 4 h in all.
+- **Abel.** (48 + 44 + 56) / 4 = 37 per hour (poolStart 48 and R 44 since
+  the generated bases, 5.7). An exhausted Abel refills its 100 garrison
+  bodies first (the unit simulation measured 2.6 h for the 88 bodies before
+  the generated bases; the naive figure is now 2.7 h), then its pool, so 4 h
+  in all.
 - **The per-zone cap binds only in the tail.** Abel's 18 zones can take up to
   108 an hour, so the cap is slack while many posts are short; in the last
   minutes only a few posts are still filling at 1 body per 600 s, the pool
@@ -632,8 +634,8 @@ still owns empty) is FULL again (pool at poolStart, every garrison at
   exhaustion.
 - **4 h is the WORST case:** everything the occupier owns is empty. When
   exhaustion happens in play the player usually holds much of the island,
-  so few occupier garrisons are short, and the pool alone refills 0 to 60
-  at 37 an hour: about 1.6 h on Abel. The rate stays fixed from R + G on
+  so few occupier garrisons are short, and the pool alone refills 0 to 48
+  at 37 an hour: about 1.3 h on Abel. The rate stays fixed from R + G on
   purpose; a beaten occupier rebuilds faster on what little it still holds.
 - **Occupier standing** (7.3) scales the refill by
   `0.75 + 0.5 * meanStanding / 100`. At the default standing of 50 that is
@@ -837,20 +839,60 @@ above, on the STRENGTH
   pool, and a director strike's keep-STRONG rule (7.3) still reads the
   pool after its price, so strikes stay as rare as before.
 
-**On Malden** (Guerrilla.Abel: poolStart 60 from R 32, K 14, G 56; refill
-37 an hour). STRONG is left when the strength falls under 36, so 25
-unrepaid losses inside an hour demote it; THIN starts under 20, so 41. A
-cell that kills 37 occupiers inside an hour while D2 regrowth repays 12 of
-them (two source bases at 1 body per 600 s) leaves 25 unrepaid: strength
-35 of 60, STRETCHED, while the pool itself reads 58 to 60 (STRONG by its
-own number). The player sees it as the director slowing to one operation
-every 17.5 minutes, no push-outs, no base operations and no strikes until
-the refill has repaid enough to lift the strength over 66 % (40: at most
-20 unrepaid) or the losses leave the hour. Before this rule the same hour
-changed nothing a player could see. `gmOccupierLedger` reports the
-strength, `committed`, `lost` and `repaid`; the band line names them
-(`band STRONG -> STRETCHED (pool 60 of 60; strength 35: 0 committed in the
-air, 37 lost and 12 repaid in the last 1.0 h)`).
+**When the band is stepped** (round 5, video 6). Once per transaction,
+never between the bookings of one. Video 6 logged "band STRONG ->
+STRETCHED (pool 23 of 48 ...)" and "STRETCHED -> STRONG (pool 34 of 48
+...)" in the same second at 9982 s while the sampled pool read 34 before
+and after: the repel's containment surge (a pool-funded deposit of 12) was
+booked, the band stepped, then the column's refunds came home. The same
+shape at 6414 s (a base revert's deposit for the new garrison, then the
+adopted squad's refund), and at 8348 s a refill credit made the band
+STRONG for zero time and admitted a STRONG-only push-out (op 14) whose
+debit took it back. The rule now: `OccupierForces::Simulate` first closes
+the previous frame's hold and steps the band ONCE on the strength
+everything booked since left (ZoneRegistry's reverts, CounterAttack's and
+OccupierAir's events, script levers), one line at most, then holds the
+band for the new frame (`StepBandFrame`). Every gate in the frame reads
+that one band: the director's whole tick (its refill, its candidates, its
+tokens, `OpsMax`, push-out, the alarm answers), a deposit's SPENT test,
+`CanOperate`. The tick's own refill and launches are stepped at the next
+frame, so a refill that lifts the pool over 66 % opens STRONG for the next
+director tick, not for the launch in the same tick. Two movements step
+through the frame hold at once (`SettleBand`): a wave landing (its
+allocation spends the landed bodies in the same tick, and a SPENT band
+would refuse the hub top-up and every strike) and a forced pool (a lever
+is a transaction by itself). An explicit `BandHold` (the launch and its
+opener, the air re-plan, 197a7d3 and 3c9947b) still defers even those;
+they nest inside the frame hold. Why a frame and not one step per director
+tick: both keep intermediate ledger states out of the log and the gates,
+but a step per tick would leave a genuine movement booked between ticks
+(a repel, a column home, a base revert) unread by the alarm answers and
+the deposits for up to 60 s, while every
+booking of one transaction completes inside one service's frame call, so
+the frame is the smallest boundary that is never inside one. It matches
+5.6 and D15: the hysteresis holds the band against noise, and a band that
+can be entered for zero time between two bookings of one movement is noise
+the hysteresis never sees. Without `Simulate` (a bare ledger, the unit
+tests) no frame hold is open and every seam steps at once, as before.
+
+**On Malden** (Guerrilla.Abel: poolStart 48, the authored roster's 32 plus
+2 x 14 towns less the 12 of the two generated outposts, conservation, 5.7;
+R reads 44 with them, K 14, G 56; refill (48 + 44 + 56) / 4 = 37 an hour).
+STRONG is left when the strength falls under 60 % (28.8: at 28), so 20
+unrepaid losses inside an hour demote a full pool; THIN starts under 33 %
+(15.84: at 15), so 33. A cell that kills 37 occupiers inside an hour while
+D2 regrowth repays 12 of them (two source bases at 1 body per 600 s) leaves
+25 unrepaid: strength 23 of 48, STRETCHED, while the pool itself reads 46
+to 48 (STRONG by its own number). The player sees it as the director
+slowing to one operation every 17.5 minutes, no push-outs, no base
+operations and no strikes until the refill has repaid enough to lift the
+strength over 66 % (31.68: 32, at most 16 unrepaid) or the losses leave the
+hour. Before this rule the same hour changed nothing a player could see.
+`gmOccupierLedger` reports the strength, `committed`, `lost` and `repaid`;
+the band line names them (`band STRONG -> STRETCHED (pool 48 of 48;
+strength 23: 0 committed in the air, 37 lost and 12 repaid in the last 1.0
+h)`). The arithmetic is checked against the code's `PctBelow` /
+`PctAbove` comparisons, not measured on a run.
 
 ### 5.7 Generated bases
 
@@ -1287,9 +1329,11 @@ Airfield to the Outpost).
 | THIN (below 33 %, until above 40 %) | 1800 s (was 3600) | 2 | 2, and none below `forcesPoolFloor` (20 %) |
 | SPENT (0, until above 10 %) | none | 2 | none |
 
-**The cadence against the pool** (Abel: poolStart 60, R 32, G 56, so the
-refill is (60 + 32 + 56) / 4 = 37 units an hour, 5.2; refill and waves are
-unchanged). What a STRONG hour of six operations debits:
+**The cadence against the pool** (the shipped Abel: poolStart 48, R 44
+with the two generated outposts, G 56, so the refill is (48 + 44 + 56) / 4
+= 37 units an hour, 5.2 and 5.6; STRONG is left under 28.8 and THIN is
+entered under 15.84, the director's floor is 20 %, 9.6). What a STRONG hour
+of six operations debits:
 - *Foot.* Nothing at launch: the source base pays the infantry from its
   stored reserve (5.3). The pool pays it back through D2 regrowth, at most
   1 body per 600 s per base, so at most 6 bodies per base per hour whether
@@ -1303,16 +1347,37 @@ unchanged). What a STRONG hour of six operations debits:
 
 Worst hour of foot and truck operations (six trucks, every hull destroyed,
 every squad lost): 6 x 4 + 18 = 42 units against the refill of 37, so the
-pool falls by 5, from 60 to 55, and stays STRONG (it leaves STRONG below
-36). Foot only: 18 against 37, the pool stays full. With insertions in the
-mix, four trucks and two insertions all lost cost 16 + 24 + 18 = 58: the
-pool falls from 60 to 39 in the hour, still STRONG, and the next hour runs
-at the STRETCHED rate. In flight at once: at most three operations
-(`forcesOpsMaxStrong`), so at most 3 x 12 = 36 units of hulls are out
-together and a pool of 60 keeps 24 in hand. A STRONG pool of 60 cannot run
-dry inside an hour at this cadence; what stops the director first is spare
-infantry (the three ground bases hold about 20 spare bodies when full and
-regrow 18 an hour), which the refusal line names (6.5).
+pool falls by 5, from 48 to 43, and stays STRONG. The band reads the
+strength (5.6), which counts the same 42 lost units less what the refill
+has repaid: 37 by the hour's end, so it too ends near 43; earlier in the
+hour, before the refill has caught up, the unrepaid part is larger and 20
+of it demote a full pool. Foot only: 18 against 37, the pool stays full. With
+insertions in the mix, four trucks and two insertions all lost cost 16 +
+24 + 18 = 58: the pool falls from 48 to 27 in the hour, under 28.8, so
+STRETCHED by the pool alone, and the next hour runs at the STRETCHED rate.
+
+**One ground launch can take most of the pool** (video 6). Trucks and
+insertions are the cheap end. The chooser buys the cheapest package that
+meets the lethality required and the ETA (6.5), and when none meets it
+(the repel ladder's x1.5, the end of massing) it takes the most lethal one
+the pool can pay; the only checks on the price are `Spend`'s (units <=
+pool, and `CanOperate`, which refuses only SPENT, or THIN under the 20 %
+floor). No rule keeps a ground launch inside a band. An APC with a tank
+escort is 8 + 3 + 14 + 3 = 28 units: at 2823 s in video 6 op 4 ("APC (6,
+BMP) with T72 from Le Port Harbour to Sainte Marie ... the pool pays 28,
+... short of the required lethality: the most lethal affordable package")
+took the pool from 32 to 4 in one launch, STRONG to THIN and under the
+floor, so the director launched nothing more until op 3's T72 and Ural came
+home at 3007 s and refunded the pool to 22 (STRETCHED); 184 s of refill
+alone would have added about 2. So a STRONG pool of 48 CAN run nearly dry
+inside an hour, from one escalated operation. In flight at once: at most
+three operations (`forcesOpsMaxStrong`), and the units out together are
+whatever their packages cost, up to the whole pool. When the pool is not
+the limit, what stops the director first is spare infantry (the three
+ground bases hold about 20 spare bodies when full and regrow 18 an hour),
+which the refusal line names (6.5). Whether a single ground launch should
+keep a floor of the pool in hand (like the keep-STRONG rule a director
+strike obeys, 7.3) is an owner decision, open.
 
 **Urgency (with hysteresis).** A target is URGENT from either of these until
 its heat falls below 35:
@@ -1668,6 +1733,8 @@ crews, not hulls. A launch over budget waits like a live squad does.
 - "... Jet strike over Houdan (town)"
 - "... HQ assault (APC squad) from Airfield on Camp"
 - "... Base retake (foot 8) from Airfield on Le Port Harbour"
+- "... La Riviere Outpost retaken: 6 stay as its garrison" (the settle of a retake: the zone was lost and is the occupier's again)
+- "... Le Port Harbour reinforced: 0 joined its garrison; 0 back at Airfield, 2 to the pool (pool 50 of 48, 2 over poolStart in the wave headroom)" (the settle of a REINFORCE top-up or, as "alarm answer settled", of an alarm answer that topped up: the zone was never lost, so never "retaken"; it names the bodies that joined, those back at their source and those credited to the pool, banked or dropped, and the wave headroom when the pool stands over poolStart. Round 5: video 6 wrote "[op 11] Le Port Harbour retaken: 0 stay as its garrison" for a top-up whose 2 bodies went to the pool unannounced)
 - "... Alarm answer: APC squad from Airfield to Outpost"
 - "... Cancelled unborn: every route watched"
 - "Wave 1 (30) inbound to Airfield, control 0.74"
@@ -1675,6 +1742,12 @@ crews, not hulls. A launch over budget waits like a live squad does.
 - "CounterAttack: [op 12] Broken off at Arudy: 3 lost, 1 going home (born 4, alive 1; rule: living infantry below a third of the strength born, the target still held); on foot toward Outpost, 47 m from the player" (the movement side's withdrawal line, 6.5 "At the town edge")
 
 "Starved: no answer to X alarm" is written once per alarm edge.
+
+The band line ("band STRONG -> STRETCHED (pool P of S; strength N: ...)")
+is written at most once per frame, when the frame's one step changes the
+band, plus one for a wave landing or a forced pool, which step at once
+(5.6, "When the band is stepped"): a debit and its matching credit
+booked in one transaction never write a pair.
 
 **Dev-only since 2026-10-14 (owner decision).** These per-action lines, and
 the same INFO trail of `CounterAttack` / `CounterAttackAir` ("CounterAttack:
@@ -1754,7 +1827,14 @@ resolves to 0) unless it sets `seedBases = 1`.
    - They launch together, only once the director is AWAKE (W); a DORMANT
      director logs "no strikes".
 4. REINFORCE columns on foot from the hub to the most-bled held bases, at
-   most 12 bodies each and `forcesWaveOps` columns.
+   most 12 bodies each and `forcesWaveOps` columns. A column joins its base
+   up to the room the base has when it arrives; the rest goes home to the
+   hub up to its room, and what neither takes is credited to the pool
+   (5.5), above poolStart only inside the wave headroom. Its settle line
+   says so: "[op 11] Le Port Harbour reinforced: 0 joined its garrison; 0
+   back at Airfield, 2 to the pool (pool 50 of 48, 2 over poolStart in the
+   wave headroom)" (6.6; video 6's column arrived 85 minutes after the
+   wave, with both bases full again).
 5. The rest stays in the pool (above poolStart: the wave headroom, 5.5).
 
 **The wave surge** (decision 5, 2026-10-16). Video 5: after wave 1 every
@@ -1945,7 +2025,8 @@ pays half income and no manpower.
   takes the cheaper attack helicopter when the jet would demote the band,
   and buys no strike when neither keeps STRONG (one INFO line, "no strike
   with the operation on Le Port: a strike would take the pool below STRONG
-  (pool 40 of 60)"). Video 4: an urgent retake of Le Port (a BMP column,
+  (pool 40 of 60)", video 4's figures, when Abel's poolStart was 60; it is
+  48 since the generated bases, 5.7). Video 4: an urgent retake of Le Port (a BMP column,
   the pool paying 22) took a pool of 62 to 40, still STRONG, and the 23-unit
   jet bought with it against 4 reported fighters took it to 17, THIN, for
   38 s. The `gmForcesForce ["strike", zone]` lever keeps the old
@@ -1960,7 +2041,13 @@ pays half income and no manpower.
   after the ground debit and its own (`PlanStrike` stretchedOk), never
   THIN ("no strike with the operation on Arudy: a strike would take the
   pool below STRETCHED"). Line: "[op N] escalation strike: Arudy repelled 2
-  time(s), the pool stays STRETCHED (pool 25 of 60)". This answers the
+  time(s), the pool stays STRETCHED (pool 16 of 48)". The band it names is
+  the one the rule tested, the POOL's band after both debits
+  (`PoolBandAfter`), not the band on the strength (5.6), which counts the
+  airframe just bought as committed and so reads higher. Round 5: video 6
+  wrote "the pool stays STRONG (pool 16 of 48)" at 5345 s, the strength
+  (16 plus the 32 units of airframe committed) STRONG while the pool, 16 of
+  48 (33.3 %, over THIN's 33 % entry), was STRETCHED. This answers the
   owner's tuning question 1 the way the feel assessment proposes: no price
   change, a strike after ground has failed.
 
@@ -1977,11 +2064,14 @@ reported. The `gmForcesForce ["strike", zone]` test lever still bypasses
 the rule.
 
 **One ledger movement.** The ground operation and its opener are bought
-under one `BandHold` (as the air re-plan, 197a7d3): the band is stepped
-once, on the net pool, when the hold closes, so an opener bought and
-refunded in the same step (a refused launch) shows no band edge. A
-strike that flies and comes home later is a real movement: its refund is
-capped at the ceiling (5.5) like any other.
+under one `BandHold` (as the air re-plan, 197a7d3): the band is not
+stepped while the hold is open, so an opener bought and refunded in the
+same step (a refused launch) shows no band edge. In the running game the
+hold nests inside the frame hold (5.6, "When the band is stepped"), so the
+launch's net movement is stepped once at the next frame, with the rest of
+the director's tick; without the frame hold (a bare ledger) it is stepped
+when the hold closes. A strike that flies and comes home later is a real
+movement: its refund is capped at the ceiling (5.5) like any other.
 
 It never targets a hidden player position (D9).
 
@@ -2472,7 +2562,7 @@ mission load only. Tuning is not saved: a load re-reads the mission config.
 |---|---|---|---|
 | `forcesDifficulty` ("difficulty") | preset, 0..3 | 0 / 1 / 2 / 3 | every lever below at that preset |
 | `forcesCadence` ("cadence") | c, seconds per operation while STRONG, 60..7200 | 1200 / 600 / 420 / 300 | `forcesTokenInterval[]` = {c, 1.75c, 3c, 0} ({600, 1050, 1800, 0}); `forcesTownCooldown` = 3c (1800 s) |
-| `forcesStrength` ("strength") | s, poolStart scale, 0.25..4 | 0.75 / 1 / 1.25 / 1.5 | poolStart = max(`forcesPoolMin`, round(s x (R + `forcesPoolPerTown` x K))), less the generated garrisons (5.5, 5.7); the Abel-like 60 becomes 45 / 60 / 75 / 90. Strike prices do not scale with it (NEXT question 1 stays open) |
+| `forcesStrength` ("strength") | s, poolStart scale, 0.25..4 | 0.75 / 1 / 1.25 / 1.5 | poolStart = max(`forcesPoolMin`, round(s x (R + `forcesPoolPerTown` x K))) over the authored roster R, less the generated garrisons (5.5, 5.7); the shipped Abel (authored R 32 + 2 x 14 = 60, less its 12 generated) reads 33 / 48 / 63 / 78. Strike prices do not scale with it (NEXT question 1 stays open) |
 | `forcesRecovery` ("recovery") | hours from exhausted to full, 0.5..48 | 8 / 4 / 3 / 2 | `forcesPoolRefillHours` (4, D15) |
 | `forcesReach` ("reach") | r, seconds of ETA before it rides or flies, 0..86400 (0 = the arrival rule off) | 3000 / 1500 / 1200 / 900 | `forcesAirEta` = r (1500 s); `forcesSlowEta` = 0.6r (900 s) |
 | `forcesAggression` ("aggression") | a, 0.25..4 | 0.75 / 1 / 1.25 / 1.5 | `forcesHeatFull` = `forcesRearmHeat` = 40/a (40); `forcesUrgentHeat` = 50/a (50) with its exit at 0.7 x (35); `forcesLethalityMargin` = 1.2a (1.2: with `counterAttackDefenderWeight` 3, L_req = 3.6a per fighter); the town strike's reported fighters round(3/a) (3; 4 / 3 / 2 / 2); `counterAttackFirstTownChance` = 0.4a (0.4); ZoneRegistry `heatCapSpike` = 40/a (40) |
@@ -2509,12 +2599,12 @@ WARN. Owners: OF = `OccupierForces`, CA = `CounterAttack`, ZR =
 | `forcesWaveHub` | OF | "" | author (geography) | the template's wave hub by zone name ("" = the rule, 7.1) |
 | `forcesOffMapEdge` | CA | nearest edge | author (geography) | N / S / E / W: the parent nation's side; the point lies 1500 m beyond the map, level with the target |
 | `forcesTruck` ... `forcesJet` | faction descriptor | ladder classification (air: none) | author (content) | hull class overrides; an air package is offered only when its class is authored |
-| `forcesPoolMin` ("poolMin") | OF | 24 (0..200) | constant (key) | poolStart's floor; dead on Malden (R + 2K = 60); read at activation |
+| `forcesPoolMin` ("poolMin") | OF | 24 (0..200) | constant (key) | poolStart's floor, applied before the generated garrisons come off; dead on Malden (authored R + 2K = 60, then 48 after the 12 generated); read at activation |
 | `forcesPoolPerTown` ("poolPerTown") | OF | 2 (0..8) | lever: Strength scales it | the K weight in poolStart; read at activation |
 | settlement probe (`kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZR | 3 / 300 m / 4 m | constant | a seeded CITY counts in K only on dry land with 3 buildings over 4 m within 300 m; probed once, stored on the zone row (5.1) |
 | `forcesPoolRefillHours` ("refillHours") | OF | 4 (0.5..48 h; tune 0.01..48) | lever: Recovery | exhausted to full, garrisons included: (poolStart + R + G) / h an hour, x the standing factor |
 | `forcesPoolFloor` ("poolFloor") | OF | 0.2 (0..1) | constant (key) | the THIN operations floor |
-| band enter / leave | OF | STRONG 66 / 60, THIN 33 / 40, SPENT 0 / 10 % | constant | hysteresis on the strength (5.6) |
+| band enter / leave | OF | STRONG 66 / 60, THIN 33 / 40, SPENT 0 / 10 % | constant | hysteresis on the strength (5.6), stepped once per frame on what the frame left (`StepBandFrame`; a wave landing and a forced pool at once) |
 | `forcesDirectorInterval` ("directorInterval") | OF | 60 (10..600 s; tune 1..600) | constant (key), a test lever | the tick; tokens accrue on elapsed time, so it adds lag, not cadence |
 | sighting cadence | OF | 5 s (`alertInterval`) | constant | intel sampling |
 | `forcesIntelDecay` ("intelDecay") | OF | 1800 (1..86400 s) | constant (key) | a sighting's life; it also caps `forcesPushoutQuiet` |

@@ -1048,7 +1048,14 @@ fills its garrisons before its pool.
 the strength, `min(pool + committed, max(poolStart, pool) - (lost -
 repaid))` (OCCUPIER-FORCES.md 5.6, round 4a [code]): an airframe out is
 committed, not spent, and losses the refill has not repaid within
-`lossWindowHours` (1 h) count against it. The token intervals are
+`lossWindowHours` (1 h) count against it. It is stepped once per frame
+(`StepBandFrame`, first in `OccupierForces::Simulate`, round 5 [code]) on
+the strength everything booked since the last step left, so the bookings
+of one transaction (a revert's deposit and the adoption's refund, a
+repel's surge and the column's refunds, the director tick's refill and
+launch) never log or gate an intermediate band; every gate in the frame
+reads that one band, and a wave landing and a forced pool step at once
+(OCCUPIER-FORCES.md 5.6). The token intervals are
 `forcesTokenInterval[]`, {600, 1050, 1800, 0} since acf2311 (2026-10-15;
 was {1800, 2700, 3600, 0}), derived from the `forcesCadence` lever as {c,
 1.75c, 3c, 0} (c = 600 at Normal) [code].
@@ -1079,7 +1086,7 @@ was {1800, 2700, 3600, 0}), derived from the `forcesCadence` lever as {c,
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
 | Cancelled unborn operation | bodies to the source up to its room, the rest to the pool; hull and escort prices refunded (L2) |
 | Re-sourced operation | the old base refunded up to its room, the surplus to the pool; the new base debited (L2) |
-| Abstract REINFORCE arrival | into the target up to its room; the rest home through the room-capped return |
+| Abstract REINFORCE arrival | into the target up to its room; the rest home through the room-capped return, its surplus to the pool (inside the wave headroom above poolStart); the director's settle line says "reinforced" and names each share, never "retaken" (OCCUPIER-FORCES.md 6.6) |
 | Live top-up squad (REINFORCE or alarm answer) at its town | joins up to its room (`garrisonMax` - live - reserve - pending): the stored reserve, then the pending deposit, give way to it (to the pool); the surplus splits off (`CounterAttackOps::SplitOff`) and walks home as Leftover stragglers, removed unseen and home up to the room |
 | Leftover stragglers | home up to the room; a shortfall booked "left behind" |
 | Pending deposit, zone lost | key on: the pool (the refund hook); key off: back to the origin up to its room, else discarded [code] |
@@ -1135,7 +1142,8 @@ dropped`. Only a landed wave puts the pool above poolStart
   of the last lossWindowHours)`, not on the pool: an airframe out does not
   demote it, a shot-down airframe or an hour of losses the refill has not
   repaid does. The pool arithmetic, affordability (`Spend`) and the
-  keep-STRONG strike rule read the pool as before.
+  keep-STRONG strike rule read the pool as before; the escalation strike's
+  line names that pool band (`PoolBandAfter`), not the strength's.
 - Saved in the GuerrillaOccupierForces block (`StoredHulls`, `Surge`,
   `stoodDown`, `surgeWindow`, `surgeAnchorX`/`Z`, `Losses`, each operation
   row's `airOrigin`); an older block loads with none.

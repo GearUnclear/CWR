@@ -123,6 +123,7 @@ void OccupierForces::Clear()
     _opCounter = 0;
     _refillAccum = 0;
     _band = OFBandStrong;
+    _bandDirty = false; // a pending step belongs to the ledger cleared here
     _control = 1.0f;
     _wavesFired = 0;
     _finalFired = false;
@@ -766,7 +767,7 @@ void OccupierForces::SetPool(int units)
     // headroom, at or below it none
     _waveHeadroom = MaxInt(_pool - _poolStart, 0);
     GM_DIRECTOR_INFO(Core, "OccupierForces: pool forced to {} of {}", _pool, _poolStart);
-    UpdateBand();
+    SettleBand(); // a lever is its own transaction: the band reads it at once
 }
 
 void OccupierForces::SetMeanStanding(float standing)
@@ -840,6 +841,9 @@ class EngineDirectorLauncher final : public DirectorLauncher
 
 void OccupierForces::Simulate(float deltaT)
 {
+    // first of all: the band's one step for everything booked since the last
+    // frame, and the hold for this one (5.6, StepBandFrame)
+    StepBandFrame();
     ZoneRegistry& registry = ZoneRegistry::Instance();
     if (!registry.IsActive() || !_tuning.enabled)
     {
@@ -3443,6 +3447,12 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 }
                 _lastRefund.valid = false;
             }
+            else if (mine && (_ops[row].kind == CAKReinforce || _ops[row].kind == CAKAlarm))
+            {
+                // a top-up on a zone never lost: reinforced, not retaken
+                _ops[row].finished = true;
+                NoteTopUpSettled(registry, _ops[row], ev, target);
+            }
             else if (mine)
             {
                 _ops[row].finished = true;
@@ -3517,6 +3527,19 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
             if (mine && (_ops[row].kind == CAKAlarm || _ops[row].kind == CAKStrike))
             {
                 _ops[row].finished = true;
+            }
+            // a top-up's return (the bodies that did not fit): its settle,
+            // next in this step, names where they went
+            if (mine && (_ops[row].kind == CAKReinforce || _ops[row].kind == CAKAlarm))
+            {
+                OpRow& o = _ops[row];
+                o.returnHome = ev.bodies > 0 ? ev.bodies : 0;
+                o.returnZone = ev.source;
+                o.returnPool = ev.units > 0 ? ev.units : 0;
+                const bool tally = _lastRefund.valid && _lastRefund.units == o.returnPool && o.returnPool > 0;
+                o.returnPooled = tally ? _lastRefund.pooled : o.returnPool;
+                o.returnBanked = tally ? _lastRefund.banked : 0;
+                o.returnDropped = tally ? _lastRefund.dropped : 0;
             }
             break;
         case CAOpAirborne:
@@ -3729,7 +3752,7 @@ DirectorAction OccupierForces::PlanStrike(const ZoneRegistry& registry, const Di
         // the director's own strike (7.3, 2026-10-16): STRONG must hold after
         // the ground operation's debit (BandNow) and this price
         // (the escalation strike, stretchedOk: STRETCHED must hold)
-        const int after = StepBand(BandNow(), _pool - q.poolPrice, _poolStart);
+        const int after = PoolBandAfter(q.poolPrice);
         if (keepStrong && Active() && q.affordable &&
             !(after == OFBandStrong || (stretchedOk && after == OFBandStretched)))
         {
@@ -3813,6 +3836,11 @@ void OccupierForces::MaybeStrike(ZoneRegistry& registry, const DirectorView& vie
         }
         return;
     }
+    // the quantity the rule tested (PlanStrike stretchedOk): the band the
+    // POOL steps to after the ground debit and this price, not the band on
+    // the strength, which counts the airframe as committed (5.6) and stays
+    // STRONG (video 6: "stays STRONG (pool 16 of 48)", the pool STRETCHED)
+    const int poolBand = PoolBandAfter(a.choice.quote.poolPrice);
     // no extra token: the strike goes with the operation just launched
     if (LaunchAction(registry, view, launcher, a, false, false, 0) && escalation)
     {
@@ -3820,7 +3848,7 @@ void OccupierForces::MaybeStrike(ZoneRegistry& registry, const DirectorView& vie
             Core,
             "OccupierForces: [op {}] escalation strike: {} repelled {} time(s), the pool stays {} (pool {} "
             "of {})",
-            _opCounter, ZoneNameOf(registry, target), Repels(ZoneNameOf(registry, target)), BandName(BandNow()), _pool,
+            _opCounter, ZoneNameOf(registry, target), Repels(ZoneNameOf(registry, target)), BandName(poolBand), _pool,
             _poolStart);
     }
 }

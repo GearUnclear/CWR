@@ -813,6 +813,19 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // movement.
     void HoldBand() { _bandHold++; }
     void ReleaseBand();
+    // THE FRAME'S ONE BAND STEP (5.6, round 5, video 6).  A booking spread
+    // over services is one transaction: ZoneRegistry's revert deposit and
+    // CounterAttack's adoption refund, CounterAttack's repel (the repel
+    // ladder's surge deposit) and its home-coming refunds, the director tick's
+    // refill credit and its launch debit.  Simulate calls this first every
+    // frame: it closes the frame hold opened by the previous call (one step,
+    // one line, on the strength everything since left) and opens the next,
+    // so every gate this frame (the director's whole tick, the alarm
+    // answers, a deposit's SPENT test) reads one band.  Without Simulate (a
+    // bare ledger, the unit tests) no frame hold is open and each seam steps
+    // at once, as before.
+    void StepBandFrame();
+    bool FrameHoldOpen() const { return _frameHold; }
     class BandHold
     {
     public:
@@ -922,6 +935,11 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the band on the pool as it stands: Band(), or inside a BandHold the
     // band the pending movement would step to (not yet logged or stored)
     int BandNow() const { return _bandHold > 0 ? StepBand(_band, BandStrength(), _poolStart) : _band; }
+    // the director strike's band test (7.3): the band the POOL steps to from
+    // BandNow() after a further debit of `price`, the airframe not counted as
+    // committed.  PlanStrike's keep-STRONG / keep-STRETCHED rule reads it and
+    // the escalation strike's line names it
+    int PoolBandAfter(int price) const { return StepBand(BandNow(), _pool - price, _poolStart); }
     bool CanOperate() const { return CanOperateIn(_band, BandStrength(), _poolStart, _tuning.poolFloor); }
     // THE BAND'S INPUT (5.6, 2026-10-16): the strength the band is stepped
     // on, BandStrengthOf(pool, poolStart, CommittedAir(), LossDebt())
@@ -1282,6 +1300,16 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         // the occupier AIRFIELD an airframe flew from (-1 off-map or ground):
         // where its hull is stored over the ceiling (RefundHull)
         int airOrigin = -1;
+        // transient, never saved: a top-up's (REINFORCE, alarm answer)
+        // return, booked by CAOpReturned just before its CAOpSettled in the
+        // same CounterAttack step, so the settle line can say where the
+        // bodies that did not join went (6.6, video 6)
+        int returnHome = -1; // bodies back at returnZone; -1 = no return seen
+        int returnZone = -1;
+        int returnPool = 0; // bodies sent to the pool: pooled + banked + dropped
+        int returnPooled = 0;
+        int returnBanked = 0;
+        int returnDropped = 0;
         LSError Serialize(ParamArchive& ar);
     };
     // the repel ladder of one zone (6.3, 2026-10-16)
@@ -1363,8 +1391,13 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the refill repays the window's losses, oldest first
     void RepayLosses(int units);
     // re-step the band after a pool change; logs a change.  Deferred while a
-    // BandHold is open
+    // BandHold (the frame hold included) is open
     void UpdateBand();
+    // a movement that is a whole transaction by itself and that the gates
+    // after it in the same frame must see (a wave landing: its allocation
+    // spends the landed bodies; a forced pool): stepped now through the
+    // frame hold, still deferred inside an explicit BandHold
+    void SettleBand();
     void Refill(float elapsed);
     // an INFO line at most every LogQuiet seconds (others counted)
     bool LogAllowed();
@@ -1402,6 +1435,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     void ReconcileLegacyOpRows();
     // a lever row's event (BookLeverOp): refunds, losses and the finish only
     void NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev);
+    // a top-up's settle line (REINFORCE or alarm answer; 6.6, video 6): what
+    // it reinforced and where every body went, never "retaken" (the zone
+    // was never lost)
+    void NoteTopUpSettled(const ZoneRegistry& registry, OpRow& row, const CounterAttackOpEvent& ev, const char* target);
     // engine path: the catalogue, the view, the scan
     void BuildEngineCatalogue(const ZoneRegistry& registry);
     void FillEngineView(const ZoneRegistry& registry, DirectorView& view) const;
@@ -1462,6 +1499,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // to close (transient, never saved)
     int _bandHold = 0;
     bool _bandDirty = false;
+    // the frame hold (StepBandFrame): one of the _bandHold count while open
+    bool _frameHold = false;
     float _control = 1.0f;
     int _wavesFired = 0;
     bool _finalFired = false;
