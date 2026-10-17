@@ -11,9 +11,10 @@
 // no shading. The remastered path lights in linear HDR instead and tonemaps
 // per fragment; this rig supplies the light it integrates:
 //
-//   - a sun whose colour follows its elevation (neutral at noon, golden low,
-//     red at the horizon) and whose strength follows the classic overcast and
-//     night ramps,
+//   - a sun whose colour follows its elevation (near-neutral by day; below 16
+//     degrees it takes the classic sunset colour, so evenings are as warm on
+//     screen as the original's) and whose strength follows the classic
+//     overcast and night ramps,
 //   - a sky hemisphere (zenith, ground bounce and a horizon band split into a
 //     sunward half and an anti-sun half). The sunward horizon takes the engine
 //     fog colour, so a mod's sky tints the light and a low sun gives warm light
@@ -116,6 +117,12 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
 
 // Sun chroma at an elevation (degrees), normalised to unit luminance.
 Rgb SunChroma(float elevationDeg, float warmth);
+
+// The sun chroma the rig uses: SunChroma by day, and in the evening (below
+// 16 degrees, nearly fully by 7) the classic sunset colour `classicSun` (display
+// space, LightSun's colorFull or Diffuse) taken to linear, so evenings keep the
+// original's warm hue on screen. `warmth` 0 = neutral.
+Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
 
 // Ellipsoid that stands in for a tree crown when lighting foliage, from the
 // model's bounding box (min, max; y up). Trunks make the box taller than the

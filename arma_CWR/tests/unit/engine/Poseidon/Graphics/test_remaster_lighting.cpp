@@ -99,6 +99,57 @@ TEST_CASE("Remaster light rig: golden hour is darker, warmer and more contrasty 
     CHECK(sunWall > 4.0f * Luminance(low.skyHorizon));
 }
 
+TEST_CASE("Remaster light rig: evening sun keeps the original's sunset hue on screen", "[Graphics][remaster]")
+{
+    const LightingTuning tuning;
+    // LightSun at 7 degrees: colorFull between FullSunColor and SunsetColor,
+    // ambient = BackgroundColor (0.55, 0.6, 0.8) * sinSun * 1.5.
+    const Rgb classicSunset(0.814f, 0.43f, 0.279f);
+    const float ambientI = std::sin(7.0f * kPi / 180.0f) * 1.5f;
+    const Rgb classicAmbient(0.55f * ambientI, 0.6f * ambientI, 0.8f * ambientI);
+    LightRigInputs in = ClearSky(7.0f);
+    in.classicSunDiffuse = classicSunset;
+
+    // A hull side half-turned to the sun (N.L 0.5, 60 degrees off its
+    // azimuth): classic clamps sun + ambient; remastered adds the sky that a
+    // vertical surface facing that way sees (shader skyIrradiance).
+    constexpr float kNdotL = 0.5f;
+    auto classicHull = [&](float sun, float ambient) { return std::min((sun * kNdotL + ambient) * kBrightness, 1.0f); };
+    const Rgb classic(classicHull(classicSunset.r, classicAmbient.r), classicHull(classicSunset.g, classicAmbient.g),
+                      classicHull(classicSunset.b, classicAmbient.b));
+    auto remasteredHull = [&](const LightRig& rig)
+    {
+        const float toward = 0.5f + 0.5f * kNdotL;
+        auto channel = [&](float sun, float horizon, float horizonSun)
+        { return Shown(sun * kNdotL + horizon + (horizonSun - horizon) * toward, rig.exposure); };
+        return Rgb(channel(rig.sun.r, rig.skyHorizon.r, rig.skyHorizonSun.r),
+                   channel(rig.sun.g, rig.skyHorizon.g, rig.skyHorizonSun.g),
+                   channel(rig.sun.b, rig.skyHorizon.b, rig.skyHorizonSun.b));
+    };
+    const Rgb shown = remasteredHull(ComputeLightRig(in, tuning));
+    CAPTURE(classic.r, classic.g, classic.b, shown.r, shown.g, shown.b);
+    CHECK(shown.r / shown.b == Catch::Approx(classic.r / classic.b).epsilon(0.1));
+    CHECK(shown.g / shown.r == Catch::Approx(classic.g / classic.r).epsilon(0.1));
+    // The physical sun alone (no classic colour) shows a far paler hull: the
+    // ~5600 K look the classic hue replaces.
+    LightRigInputs physicalIn = in;
+    physicalIn.classicSunDiffuse = Rgb(0.0f, 0.0f, 0.0f);
+    const Rgb physical = remasteredHull(ComputeLightRig(physicalIn, tuning));
+    CHECK(RedOverBlue(shown) > 1.15f * RedOverBlue(physical));
+
+    // By day the yellow classic sun is not taken (no mustard).
+    LightRigInputs day = ClearSky(30.0f);
+    day.classicSunDiffuse = Rgb(0.85f, 0.75f, 0.4f);
+    const LightRig noonish = ComputeLightRig(day, tuning);
+    CHECK(RedOverBlue(noonish.sun) < 1.15f);
+
+    // warmth 0 = a neutral sun at any height.
+    LightingTuning neutral;
+    neutral.warmth = 0.0f;
+    const LightRig flat = ComputeLightRig(in, neutral);
+    CHECK(RedOverBlue(flat.sun) < 1.1f);
+}
+
 TEST_CASE("Remaster light rig: twilight fill never outshines the visible sky", "[Graphics][remaster]")
 {
     const LightingTuning tuning;

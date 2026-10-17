@@ -148,6 +148,26 @@ void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3
     }
 }
 
+Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
+{
+    const Rgb physical = SunChroma(elevationDeg, warmth);
+    // Classic tints the sun from its art-directed sunset colour (LightSun's
+    // colorFull) and applies it in display space; taken to linear, that hue
+    // shows on screen as classic's does. Classic's blue ambient then cools its
+    // sunlit side, so the sun itself takes kClassicHueShare of that hue: a
+    // sunlit hull ends up with classic's hue (red/blue, green/red within a few
+    // percent in the lab's golden-hour views). The last hour (about 7 degrees
+    // and below) takes it in full, fading to the near-neutral physical sun by
+    // 16 degrees: classic's yellow day sun is what turned the olive textures to
+    // mustard, and above that classic's clamp hides its tint anyway.
+    constexpr float kClassicHueShare = 0.65f;
+    const Rgb classicLinear = ToLinear(classicSun);
+    if (Luminance(classicLinear) < 1e-5f)
+        return physical;
+    const float w = (1.0f - Smoothstep(5.0f, 16.0f, elevationDeg)) * Clamp01(warmth) * kClassicHueShare;
+    return NormaliseLuminance(Mix(physical, NormaliseLuminance(classicLinear), w));
+}
+
 LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
 {
     LightRig rig;
@@ -171,7 +191,7 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
     const float clearSun = kSunNoon * extinction * aboveHorizon;
     const float sunPower = clearSun * overcastDim * tuning.sun;
-    rig.sun = SunChroma(elevation, tuning.warmth) * sunPower;
+    rig.sun = EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth) * sunPower;
 
     // --- sky hemisphere ------------------------------------------------------
     const float clearSky = kSkyNoon * SkyDayFraction(sinSun);
