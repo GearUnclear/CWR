@@ -13,6 +13,11 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/AI/Path/AITypes.hpp> // GeographyInfo
+#include <Poseidon/World/MapTypes.hpp>  // MapTree .. (BaseSiteObjectClass)
+
+#include <Poseidon/Game/Commands/GameStateExt.hpp>
+#include <Poseidon/Game/Commands/GameStateExtCommon.hpp> // CheckSize
+#include <Poseidon/Foundation/Modules/Modules.hpp>       // INIT_MODULE
 
 #include <Random/randomGen.hpp> // GRandGen: the one draw of a generation without a pinned seed
 
@@ -37,10 +42,11 @@ namespace Poseidon::Guerrilla
 
 const GenBaseKindInfo& GenBaseKindOf(GenBaseKind kind)
 {
-    static const GenBaseKindInfo kOutpost = {"OUTPOST", "Outpost", 6, 6, true};
-    static const GenBaseKindInfo kCheckpoint = {"CHECKPOINT", "Checkpoint", 5, 5, false};
-    static const GenBaseKindInfo kCoastal = {"COASTAL", "Coastal Post", 5, 5, false};
-    static const GenBaseKindInfo kHelipad = {"HELIPAD", "Helipad", 6, 6, false};
+    // type, noun, garrisonMax, reserve, countsForWin, footprint, roadMax, placed
+    static const GenBaseKindInfo kOutpost = {"OUTPOST", "Outpost", 6, 6, true, 1, 250.0f, true};
+    static const GenBaseKindInfo kCheckpoint = {"CHECKPOINT", "Checkpoint", 5, 5, false, 0, 100.0f, true};
+    static const GenBaseKindInfo kCoastal = {"COASTAL", "Coastal Post", 5, 5, false, 0, 250.0f, true};
+    static const GenBaseKindInfo kHelipad = {"HELIPAD", "Helipad", 6, 6, false, 1, 250.0f, false};
     switch (kind)
     {
         case GenBaseKind::Checkpoint:
@@ -325,6 +331,13 @@ struct Site
     RString name; // detected candidates only
     unsigned long long key = 0; // the jitter key: the cell index or the detected name
     bool used = false;
+    // the kind it can take: an outpost (the 3 x 3 footprint passed), else a
+    // minor kind (only the centre cell passed): Coastal near deep water,
+    // else Checkpoint
+    GenBaseKind kind = GenBaseKind::Outpost;
+    bool minor = false;
+    int solids = 0; // map objects in the 3 x 3 (GenCell::solids / trees)
+    int trees = 0;
 };
 
 struct Source
@@ -435,6 +448,102 @@ enum RejectReason
 const char* const kRejectNames[NRejects] = {"region", "edge",    "landmass", "water",  "forest",
                                             "objects", "slope",  "low",      "keepout", "zone",
                                             "town",    "spacing", "on-road", "no-network-road", "far"};
+// the order the common rules report their first failure in (a site's "why")
+const int kCommonOrder[] = {RjRegion, RjEdge,    RjLandmass, RjLow,  RjKeepout, RjZone,
+                            RjTown,   RjSpacing, RjFar,      RjOnRoad, RjNoRoad};
+
+int FirstReason(unsigned mask)
+{
+    if (mask & (1u << RjWater))
+    {
+        return RjWater;
+    }
+    if (mask & (1u << RjObjects))
+    {
+        return RjObjects;
+    }
+    if (mask & (1u << RjForest))
+    {
+        return RjForest;
+    }
+    if (mask & (1u << RjSlope))
+    {
+        return RjSlope;
+    }
+    for (int r : kCommonOrder)
+    {
+        if (mask & (1u << r))
+        {
+            return r;
+        }
+    }
+    return -1;
+}
+
+int PopCount(unsigned m)
+{
+    int n = 0;
+    for (; m; m &= m - 1)
+    {
+        n++;
+    }
+    return n;
+}
+
+// the terrain-cell rules of one cell as a site centre: footprint 1 = the
+// 3 x 3 (an outpost), 0 = the centre cell (a minor kind; the water rule
+// still covers the 3 x 3, the garrison's spawn square).  Returns the failed
+// rules as a bit mask (all of them, not the first) and the relief.
+unsigned TerrainMask(const BaseGenInputs& in, const BaseGenOptions& opt, int cx, int cz, int footprint, float& relief)
+{
+    unsigned mask = 0;
+    float lo = kNone, hi = -kNone;
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            const GenCell& n = in.cells[(size_t)(cz + dz) * in.cellsX + (cx + dx)];
+            lo = std::min(lo, n.height);
+            hi = std::max(hi, n.height);
+            if (n.water)
+            {
+                mask |= 1u << RjWater;
+            }
+            const bool inFootprint = footprint >= 1 || (dx == 0 && dz == 0);
+            if (!inFootprint)
+            {
+                continue;
+            }
+            if (n.full)
+            {
+                mask |= 1u << RjObjects;
+            }
+            if (n.forestInner)
+            {
+                mask |= 1u << RjForest;
+            }
+            if (n.gradient >= opt.maxGradientBand)
+            {
+                mask |= 1u << RjSlope;
+            }
+        }
+    }
+    const GenCell& c = in.cells[(size_t)cz * in.cellsX + cx];
+    if (c.forestOuter)
+    {
+        mask |= 1u << RjForest;
+    }
+    if (c.road)
+    {
+        mask |= 1u << RjOnRoad;
+    }
+    if (c.hardObjects > 0 || c.objects > 1)
+    {
+        mask |= 1u << RjObjects;
+    }
+    relief = hi - lo;
+    return mask;
+}
 
 } // namespace
 
@@ -518,54 +627,98 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
     };
 
     int rejects[NRejects] = {};
-    // per cell: the reason it was refused (-1 a site, -2 not scanned), for
-    // the open-town diagnostics
+    // per cell: the reason it was refused (-1 an outpost site, -3 a site only
+    // a minor kind fits, -2 not scanned), for the open-town diagnostics
     std::vector<signed char> cellWhy((size_t)in.cellsX * in.cellsZ, (signed char)-2);
+    // deep water within coastDist of a point (a coastal post's site)
+    auto nearSea = [&](float x, float z) {
+        const int r = (int)ceilf(opt.coastDist / in.cellSize);
+        const int cx = (int)floorf(x / in.cellSize);
+        const int cz = (int)floorf(z / in.cellSize);
+        for (int zz = std::max(0, cz - r); zz <= std::min(in.cellsZ - 1, cz + r); zz++)
+        {
+            for (int xx = std::max(0, cx - r); xx <= std::min(in.cellsX - 1, cx + r); xx++)
+            {
+                if (in.cells[(size_t)zz * in.cellsX + xx].deep &&
+                    Dist2D(x, z, ((float)xx + 0.5f) * in.cellSize, ((float)zz + 0.5f) * in.cellSize) <= opt.coastDist)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    // the map objects within the layout's reach of a centre (a bucket grid
+    // over the object list, one bucket per cell)
+    std::vector<std::vector<int>> objBuckets((size_t)in.cellsX * in.cellsZ);
+    for (int i = 0; i < (int)in.objects.size(); i++)
+    {
+        const int bx = std::min(std::max((int)floorf(in.objects[i].x / in.cellSize), 0), in.cellsX - 1);
+        const int bz = std::min(std::max((int)floorf(in.objects[i].z / in.cellSize), 0), in.cellsZ - 1);
+        objBuckets[(size_t)bz * in.cellsX + bx].push_back(i);
+    }
+    auto census = [&](float x, float z, int& solids, int& trees) {
+        solids = trees = 0;
+        const int r = (int)ceilf((opt.layoutReach + 10.0f) / in.cellSize);
+        const int cx = (int)floorf(x / in.cellSize);
+        const int cz = (int)floorf(z / in.cellSize);
+        for (int zz = std::max(0, cz - r); zz <= std::min(in.cellsZ - 1, cz + r); zz++)
+        {
+            for (int xx = std::max(0, cx - r); xx <= std::min(in.cellsX - 1, cx + r); xx++)
+            {
+                for (int i : objBuckets[(size_t)zz * in.cellsX + xx])
+                {
+                    const GenObject& o = in.objects[i];
+                    if (Dist2D(x, z, o.x, o.z) - o.radius < opt.layoutReach)
+                    {
+                        solids += o.solid ? 1 : 0;
+                        trees += o.solid ? 0 : 1;
+                    }
+                }
+            }
+        }
+    };
     // the rules a site shares with a detected outpost (everything but the
-    // terrain cells): false and the reason when it fails
-    auto commonRules = [&](Site& s, int& why) {
+    // terrain cells), EVERY one evaluated: the failed rules as a bit mask
+    // (FirstReason names the one a refusal is counted under).  roadMax is
+    // the kind's road band ceiling.  A site with a network road in its band
+    // gets its road distance, heading and track flag.
+    auto commonMask = [&](Site& s, float roadMax) {
+        unsigned mask = 0;
         if (!inRegion(s.x, s.z))
         {
-            why = RjRegion;
-            return false;
+            mask |= 1u << RjRegion;
         }
         if (s.x < opt.edgeMargin || s.z < opt.edgeMargin || s.x > extentX - opt.edgeMargin ||
             s.z > extentZ - opt.edgeMargin)
         {
-            why = RjEdge;
-            return false;
+            mask |= 1u << RjEdge;
         }
         if (s.landmass < 0 || townLands.find(s.landmass) == townLands.end())
         {
-            why = RjLandmass;
-            return false;
-        }
-        if (s.y < opt.minDryHeight)
-        {
-            why = RjLow;
-            return false;
+            mask |= 1u << RjLandmass;
         }
         const float h = opt.spawnHalfSize;
-        if (heightAt(s.x - h, s.z - h) < opt.minCornerHeight || heightAt(s.x + h, s.z - h) < opt.minCornerHeight ||
-            heightAt(s.x - h, s.z + h) < opt.minCornerHeight || heightAt(s.x + h, s.z + h) < opt.minCornerHeight)
+        if (s.y < opt.minDryHeight || heightAt(s.x - h, s.z - h) < opt.minCornerHeight ||
+            heightAt(s.x + h, s.z - h) < opt.minCornerHeight || heightAt(s.x - h, s.z + h) < opt.minCornerHeight ||
+            heightAt(s.x + h, s.z + h) < opt.minCornerHeight)
         {
-            why = RjLow;
-            return false;
+            mask |= 1u << RjLow;
         }
         for (const ScaffoldPoint& k : in.keepouts)
         {
             if (Dist2D(s.x, s.z, k.x, k.z) < opt.keepoutDist)
             {
-                why = RjKeepout;
-                return false;
+                mask |= 1u << RjKeepout;
+                break;
             }
         }
         for (const ScaffoldPoint& k : in.zones)
         {
             if (Dist2D(s.x, s.z, k.x, k.z) < opt.zoneMinDist)
             {
-                why = RjZone;
-                return false;
+                mask |= 1u << RjZone;
+                break;
             }
         }
         bool serves = false;
@@ -574,8 +727,7 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
             const float d = Dist2D(s.x, s.z, t.x, t.z);
             if (d < opt.townMinDist)
             {
-                why = RjTown;
-                return false;
+                mask |= 1u << RjTown;
             }
             serves = serves || (d <= opt.coverDist && SameLand(t.landmass, s.landmass));
         }
@@ -583,32 +735,73 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         {
             if (Dist2D(s.x, s.z, src.x, src.z) < opt.baseSpacing)
             {
-                why = RjSpacing;
-                return false;
+                mask |= 1u << RjSpacing;
+                break;
             }
         }
         if (!serves)
         {
-            why = RjFar;
-            return false;
+            mask |= 1u << RjFar;
         }
         if (roads.Nearest(s.x, s.z, opt.roadMin, anyRoad) < opt.roadMin)
         {
-            why = RjOnRoad;
-            return false;
+            mask |= 1u << RjOnRoad;
         }
         int ri = -1;
-        s.roadDist = roads.Nearest(s.x, s.z, opt.roadMax, netRoad, &ri);
+        s.roadDist = roads.Nearest(s.x, s.z, roadMax, netRoad, &ri);
         if (ri < 0)
         {
-            why = RjNoRoad;
-            return false;
+            mask |= 1u << RjNoRoad;
         }
-        const GenRoadPoint& r = in.roads[ri];
-        s.heading = BaseGenBearingDeg(s.x, s.z, r.x, r.z);
-        s.trunkDist = roads.Nearest(s.x, s.z, opt.trackTrunkDist, trunkRoad);
-        s.track = r.track && s.trunkDist >= opt.trackTrunkDist;
-        return true;
+        else
+        {
+            const GenRoadPoint& r = in.roads[ri];
+            s.heading = BaseGenBearingDeg(s.x, s.z, r.x, r.z);
+            s.trunkDist = roads.Nearest(s.x, s.z, opt.trackTrunkDist, trunkRoad);
+            s.track = r.track && s.trunkDist >= opt.trackTrunkDist;
+        }
+        return mask;
+    };
+    auto kindRoadMax = [&](GenBaseKind kind) { return std::min(opt.roadMax, GenBaseKindOf(kind).roadMax); };
+    // one cell as a site: the outpost's 3 x 3 footprint first, then (when
+    // that fails the terrain rules) the minor kind's centre cell.  Returns
+    // the failure mask of the better of the two (0: s is a site).
+    auto evalCell = [&](int cx, int cz, Site& s, bool allowMinor, bool full) {
+        const GenCell& c = in.cells[(size_t)cz * in.cellsX + cx];
+        s = Site();
+        s.x = ((float)cx + 0.5f) * in.cellSize;
+        s.z = ((float)cz + 0.5f) * in.cellSize;
+        s.y = c.height;
+        s.landmass = label[(size_t)cz * in.cellsX + cx];
+        s.key = (unsigned long long)cz * (unsigned long long)in.cellsX + (unsigned long long)cx;
+        float relief = 0;
+        const unsigned t3 = TerrainMask(in, opt, cx, cz, 1, relief);
+        s.relief = relief;
+        if (t3 == 0)
+        {
+            return commonMask(s, kindRoadMax(GenBaseKind::Outpost)); // an outpost site, or no kind passes here
+        }
+        float r1 = 0;
+        const unsigned t1 = allowMinor ? TerrainMask(in, opt, cx, cz, 0, r1) : ~0u;
+        if (t1 != 0 && !full)
+        {
+            return t3; // no kind's terrain fits: the terrain refusal (the cheap path of the scan)
+        }
+        const unsigned m3 = full ? (t3 | commonMask(s, kindRoadMax(GenBaseKind::Outpost))) : t3;
+        if (t1 == ~0u)
+        {
+            return m3;
+        }
+        Site m = s;
+        m.minor = true;
+        m.kind = nearSea(m.x, m.z) ? GenBaseKind::Coastal : GenBaseKind::Checkpoint;
+        const unsigned m1 = t1 | commonMask(m, kindRoadMax(m.kind));
+        if (m1 == 0 || PopCount(m1) < PopCount(m3))
+        {
+            s = m;
+            return m1;
+        }
+        return m3;
     };
 
     std::vector<Site> sites;
@@ -623,12 +816,12 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         s.detected = true;
         s.name = d.name;
         s.key = HashKey(d.name, in.seed);
-        int why = 0;
-        if (!commonRules(s, why))
+        const unsigned m = commonMask(s, kindRoadMax(GenBaseKind::Outpost));
+        if (m != 0)
         {
             char buf[200];
             snprintf(buf, sizeof(buf), "detected outpost '%s' at [%.0f, %.0f] not used: %s", (const char*)d.name,
-                     (double)d.x, (double)d.z, kRejectNames[why]);
+                     (double)d.x, (double)d.z, kRejectNames[FirstReason(m)]);
             out.notes.push_back(buf);
             continue;
         }
@@ -648,76 +841,31 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         sites.push_back(s);
     }
     // empty ground: every cell whose 3 x 3 footprint (150 m on a 50 m grid)
-    // passes the terrain rules
+    // passes the terrain rules, else (a minor kind) whose centre cell does
     for (int cz = 1; cz < in.cellsZ - 1; cz++)
     {
         for (int cx = 1; cx < in.cellsX - 1; cx++)
         {
-            const GenCell& c = in.cells[(size_t)cz * in.cellsX + cx];
-            int why = -1;
-            float lo = kNone, hi = -kNone;
-            for (int dz = -1; dz <= 1 && why < 0; dz++)
-            {
-                for (int dx = -1; dx <= 1 && why < 0; dx++)
-                {
-                    const GenCell& n = in.cells[(size_t)(cz + dz) * in.cellsX + (cx + dx)];
-                    if (n.water)
-                    {
-                        why = RjWater;
-                    }
-                    else if (n.full || n.forestInner)
-                    {
-                        why = n.full ? RjObjects : RjForest;
-                    }
-                    else if (n.gradient >= opt.maxGradientBand)
-                    {
-                        why = RjSlope;
-                    }
-                    lo = std::min(lo, n.height);
-                    hi = std::max(hi, n.height);
-                }
-            }
-            if (why < 0)
-            {
-                if (c.forestOuter)
-                {
-                    why = RjForest;
-                }
-                else if (c.road)
-                {
-                    why = RjOnRoad;
-                }
-                else if (c.hardObjects > 0 || c.objects > 1)
-                {
-                    why = RjObjects;
-                }
-            }
-            if (why >= 0)
-            {
-                rejects[why]++;
-                cellWhy[(size_t)cz * in.cellsX + cx] = (signed char)why;
-                continue;
-            }
             Site s;
-            s.x = ((float)cx + 0.5f) * in.cellSize;
-            s.z = ((float)cz + 0.5f) * in.cellSize;
-            s.y = c.height;
-            s.landmass = label[(size_t)cz * in.cellsX + cx];
-            s.relief = hi - lo;
-            s.key = (unsigned long long)cz * (unsigned long long)in.cellsX + (unsigned long long)cx;
-            if (!commonRules(s, why))
+            const unsigned m = evalCell(cx, cz, s, opt.minorKinds, false);
+            const size_t ci = (size_t)cz * in.cellsX + cx;
+            if (m != 0)
             {
+                const int why = FirstReason(m);
                 rejects[why]++;
-                cellWhy[(size_t)cz * in.cellsX + cx] = (signed char)why;
+                cellWhy[ci] = (signed char)why;
                 continue;
             }
-            cellWhy[(size_t)cz * in.cellsX + cx] = (signed char)-1;
+            cellWhy[ci] = (signed char)(s.minor ? -3 : -1);
+            out.minorCandidates += s.minor ? 1 : 0;
+            census(s.x, s.z, s.solids, s.trees);
             sites.push_back(s);
         }
     }
     out.candidates = (int)sites.size();
     {
-        std::string line = "sites: " + std::to_string(sites.size()) + " passed; rejected";
+        std::string line = "sites: " + std::to_string(sites.size()) + " passed (" +
+                           std::to_string(out.minorCandidates) + " only for a minor kind); rejected";
         for (int i = 0; i < NRejects; i++)
         {
             if (rejects[i] > 0)
@@ -760,63 +908,73 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
             break; // every rule holds: nothing more to add
         }
         // still valid (spacing to this pass's picks), and the primary gain
-        // under the most urgent need that some site can serve
+        // under the most urgent need that some site can serve.  Within a
+        // need the outposts go first (tier 0, with the detected outposts);
+        // the minor kinds (tier 1) serve only a need no outpost site can.
         std::vector<int> gain(sites.size(), 0);
         int maxGain = 0;
         int need = NeedCover;
-        for (; need < NNeeds && maxGain == 0; need++)
+        int tier = 0;
+        bool found = false;
+        for (need = NeedCover; need < NNeeds && !found; need++)
         {
             if ((need == NeedCover && uncovered == 0) || (need == NeedRedundancy && !anyRedundancy) ||
                 (need == NeedFloor && !wantFloor))
             {
                 continue;
             }
-            for (int i = 0; i < (int)sites.size(); i++)
+            for (tier = 0; tier < 2 && !found; tier++)
             {
-                Site& s = sites[i];
-                gain[i] = 0;
-                if (s.used)
+                maxGain = 0;
+                for (int i = 0; i < (int)sites.size(); i++)
                 {
-                    continue;
-                }
-                bool spaced = true;
-                for (int k = out.existing; k < (int)sources.size() && spaced; k++)
-                {
-                    spaced = Dist2D(s.x, s.z, sources[k].x, sources[k].z) >= opt.baseSpacing;
-                }
-                if (!spaced)
-                {
-                    s.used = true; // a later pick never revives it
-                    continue;
-                }
-                if (need == NeedCover)
-                {
-                    for (const TownState& t : towns)
+                    Site& s = sites[i];
+                    gain[i] = 0;
+                    if (s.used || (s.minor ? 1 : 0) != tier)
                     {
-                        gain[i] += (t.d1 > opt.coverDist && SameLand(t.landmass, s.landmass) &&
-                                    Dist2D(s.x, s.z, t.x, t.z) <= opt.coverDist)
-                                       ? 1
-                                       : 0;
+                        continue;
                     }
+                    bool spaced = true;
+                    for (int k = out.existing; k < (int)sources.size() && spaced; k++)
+                    {
+                        spaced = Dist2D(s.x, s.z, sources[k].x, sources[k].z) >= opt.baseSpacing;
+                    }
+                    if (!spaced)
+                    {
+                        s.used = true; // a later pick never revives it
+                        continue;
+                    }
+                    if (need == NeedCover)
+                    {
+                        for (const TownState& t : towns)
+                        {
+                            gain[i] += (t.d1 > opt.coverDist && SameLand(t.landmass, s.landmass) &&
+                                        Dist2D(s.x, s.z, t.x, t.z) <= opt.coverDist)
+                                           ? 1
+                                           : 0;
+                        }
+                    }
+                    else if (need == NeedRedundancy)
+                    {
+                        gain[i] = needsRedundancy(s.landmass) ? 1 : 0;
+                    }
+                    else
+                    {
+                        gain[i] = 1; // every site serves a town (RjFar)
+                    }
+                    maxGain = std::max(maxGain, gain[i]);
                 }
-                else if (need == NeedRedundancy)
-                {
-                    gain[i] = needsRedundancy(s.landmass) ? 1 : 0;
-                }
-                else
-                {
-                    gain[i] = 1; // every site serves a town (RjFar)
-                }
-                maxGain = std::max(maxGain, gain[i]);
+                found = maxGain > 0;
             }
         }
-        need--;
-        if (maxGain == 0)
+        if (!found)
         {
             out.notes.push_back("no site left that serves an open need: generation stops at " +
                                 std::to_string(out.bases.size()) + " base(s)");
             break;
         }
+        need--; // the loops stepped once past the need and tier that served
+        tier--;
         // the bearing violations now
         int violBefore = 0;
         for (const TownState& t : towns)
@@ -892,13 +1050,24 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
                 minSrc = std::min(minSrc, Dist2D(s.x, s.z, src.x, src.z));
             }
             const float flat = std::max(0.0f, std::min(1.0f, 1.0f - s.relief / 10.0f)) * 100.0f;
-            const float mid = 0.5f * (opt.roadMin + opt.roadMax);
-            const float band = std::max(0.0f, 1.0f - fabsf(s.roadDist - mid) / (opt.roadMax - opt.roadMin)) * 100.0f;
+            const float bandMax = s.detected ? opt.roadMax : kindRoadMax(s.kind);
+            const float mid = 0.5f * (opt.roadMin + bandMax);
+            const float band =
+                std::max(0.0f, 1.0f - fabsf(s.roadDist - mid) / std::max(1.0f, bandMax - opt.roadMin)) * 100.0f;
             const float spread =
                 std::max(0.0f, std::min(1.0f, (minSrc - opt.baseSpacing) / 2400.0f)) * 100.0f;
             const float jit = (float)Roll(s.key, 0x6E42A5u, 1000) * 0.001f * opt.jitter;
             const float quality = std::max(0.0f, std::min(300.0f, flat + band + spread + jit));
-            float score = opt.townWeight * (float)gain[i] + bearing + quality;
+            // object-free footprints: a building, a wall, a fence or a gate
+            // in the layout's reach costs nearly a town, trees a little; a
+            // detected outpost's own props are the point of it
+            float clutter = 0;
+            if (!s.detected)
+            {
+                clutter = std::min(opt.clutterMax,
+                                   (s.solids > 0 ? opt.solidPenalty : 0.0f) + opt.treePenalty * (float)s.trees);
+            }
+            float score = opt.townWeight * (float)gain[i] + bearing + quality - clutter;
             score += s.detected ? opt.detectedBonus : 0.0f;
             score += (trackShort && s.track) ? opt.trackBonus : 0.0f;
             if (score > bestScore)
@@ -914,7 +1083,7 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         Site& s = sites[best];
         s.used = true;
         GeneratedBase b;
-        b.kind = GenBaseKind::Outpost;
+        b.kind = s.detected ? GenBaseKind::Outpost : s.kind;
         b.x = s.x;
         b.z = s.z;
         b.y = s.y;
@@ -924,6 +1093,8 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         b.roadDist = s.roadDist;
         b.trunkDist = s.trunkDist;
         b.covers = need == NeedCover ? gain[best] : 0;
+        b.solids = s.solids;
+        b.trees = s.trees;
         if (s.detected)
         {
             b.name = UniqueName(std::string((const char*)s.name), taken);
@@ -952,8 +1123,14 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
             }
             b.name = UniqueName(base, taken);
         }
+        if (tier == 1)
+        {
+            out.notes.push_back(std::string((const char*)b.name) + ": no outpost site serves the open need, so a " +
+                                GenBaseKindOf(b.kind).noun + " (its centre cell passes the terrain rules) takes it");
+        }
         taken.push_back(b.name);
         out.tracks += b.track ? 1 : 0;
+        out.minor += GenBaseKindOf(b.kind).countsForWin ? 0 : 1;
         out.bases.push_back(b);
         Source src;
         src.name = b.name;
@@ -1004,20 +1181,31 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
         if (t.d1 > opt.coverDist)
         {
             open += (open.empty() ? "" : ", ") + std::string((const char*)t.name);
-            // why no site served it: the refusals of the cells in reach
+            // why no site served it: the refusals of the cells in reach, and
+            // the near misses (cells one rule short of a site, for an outpost
+            // or a minor kind), each with the nearest such cell
             int why[NRejects] = {};
+            int miss[NRejects] = {};
+            float missD[NRejects];
+            float missX[NRejects];
+            float missZ[NRejects];
+            for (int i = 0; i < NRejects; i++)
+            {
+                missD[i] = kNone;
+                missX[i] = missZ[i] = 0;
+            }
             int passed = 0;
             const int reach = (int)ceilf(opt.coverDist / in.cellSize);
             const int tx = (int)floorf(t.x / in.cellSize);
             const int tz = (int)floorf(t.z / in.cellSize);
-            for (int cz = std::max(0, tz - reach); cz <= std::min(in.cellsZ - 1, tz + reach); cz++)
+            for (int cz = std::max(1, tz - reach); cz <= std::min(in.cellsZ - 2, tz + reach); cz++)
             {
-                for (int cx = std::max(0, tx - reach); cx <= std::min(in.cellsX - 1, tx + reach); cx++)
+                for (int cx = std::max(1, tx - reach); cx <= std::min(in.cellsX - 2, tx + reach); cx++)
                 {
                     const float x = ((float)cx + 0.5f) * in.cellSize;
                     const float z = ((float)cz + 0.5f) * in.cellSize;
-                    if (Dist2D(x, z, t.x, t.z) > opt.coverDist ||
-                        !SameLand(label[(size_t)cz * in.cellsX + cx], t.landmass))
+                    const float dt = Dist2D(x, z, t.x, t.z);
+                    if (dt > opt.coverDist || !SameLand(label[(size_t)cz * in.cellsX + cx], t.landmass))
                     {
                         continue;
                     }
@@ -1026,7 +1214,20 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
                     {
                         why[w]++;
                     }
-                    passed += w == -1 ? 1 : 0;
+                    passed += (w == -1 || w == -3) ? 1 : 0;
+                    Site s;
+                    const unsigned m = evalCell(cx, cz, s, opt.minorKinds, true);
+                    if (PopCount(m) == 1)
+                    {
+                        const int r1 = FirstReason(m);
+                        miss[r1]++;
+                        if (dt < missD[r1])
+                        {
+                            missD[r1] = dt;
+                            missX[r1] = x;
+                            missZ[r1] = z;
+                        }
+                    }
                 }
             }
             std::string line = std::string((const char*)t.name) + " is open: " + std::to_string(passed) +
@@ -1039,6 +1240,20 @@ void GenerateBases(const BaseGenInputs& in, const BaseGenOptions& opt, BaseGenRe
                 }
             }
             out.notes.push_back(line);
+            std::string near = std::string((const char*)t.name) + " near misses (one rule short of a site):";
+            bool anyMiss = false;
+            for (int i = 0; i < NRejects; i++)
+            {
+                if (miss[i] > 0)
+                {
+                    char buf[160];
+                    snprintf(buf, sizeof(buf), " %s %d (nearest [%.0f, %.0f], %.0f m)", kRejectNames[i], miss[i],
+                             (double)missX[i], (double)missZ[i], (double)missD[i]);
+                    near += buf;
+                    anyMiss = true;
+                }
+            }
+            out.notes.push_back(anyMiss ? near : near + " none");
         }
         out.towns.push_back(r);
     }
@@ -1079,6 +1294,97 @@ float LandscapeBaseSiteProbe::SurfaceHeight::Height(float x, float z) const
     return GLandscape ? GLandscape->SurfaceY(x, z) : 0.0f;
 }
 
+int BaseSiteObjectClass(const Object* obj)
+{
+    // map objects only (roads are Network, runtime entities are vehicles),
+    // with geometry: what a layout prop would stand on or against
+    if (!obj || obj->GetType() != Primary || !obj->HasGeometry())
+    {
+        return 0;
+    }
+    const LODShapeWithShadow* shape = obj->GetShape();
+    if (!shape)
+    {
+        return 0;
+    }
+    switch (shape->GetMapType())
+    {
+        case MapTree:
+        case MapSmallTree:
+        case MapBush:
+        case MapForestBorder:
+        case MapForestTriangle:
+        case MapForestSquare:
+            return 1;
+        default:
+            break;
+    }
+    if (obj->GetDestructType() == DestructTree)
+    {
+        return 1;
+    }
+    // a sign or a stone never blocks a prop row
+    return shape->BoundingSphere() < 0.75f ? 0 : 2;
+}
+
+void BaseSiteObjectsNear(float x, float z, float r, std::vector<BaseSiteObject>& out)
+{
+    out.clear();
+    if (!GLandscape)
+    {
+        return;
+    }
+    const float grid = GLandscape->GetLandGrid();
+    const int range = GLandscape->GetLandRange();
+    const int x0 = std::max(0, (int)floorf((x - r) / grid));
+    const int x1 = std::min(range - 1, (int)floorf((x + r) / grid));
+    const int z0 = std::max(0, (int)floorf((z - r) / grid));
+    const int z1 = std::min(range - 1, (int)floorf((z + r) / grid));
+    for (int zz = z0; zz <= z1; zz++)
+    {
+        for (int xx = x0; xx <= x1; xx++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(zz, xx);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                const Object* obj = list[i];
+                const int kind = BaseSiteObjectClass(obj);
+                if (kind == 0 || Dist2D(obj->Position().X(), obj->Position().Z(), x, z) > r)
+                {
+                    continue;
+                }
+                BaseSiteObject o;
+                const char* name = obj->GetShape()->Name();
+                const char* slash = name ? strrchr(name, '\\') : nullptr;
+                o.model = slash ? slash + 1 : (name ? name : "");
+                o.x = obj->Position().X();
+                o.z = obj->Position().Z();
+                o.radius = obj->GetShape()->BoundingSphere();
+                o.solid = kind == 2;
+                out.push_back(o);
+            }
+        }
+    }
+}
+
+namespace
+{
+// the last generation's notes (gmBaseGenNotes; transient diagnostics)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wexit-time-destructors"
+std::vector<std::string>& LastNotes()
+{
+    static std::vector<std::string> notes;
+    return notes;
+}
+#pragma clang diagnostic pop
+} // namespace
+
+const std::vector<std::string>& BaseGenLastNotes()
+{
+    return LastNotes();
+}
+
 bool LandscapeBaseSiteProbe::Gather(BaseGenInputs& in) const
 {
     if (!GLandscape || !GWorld)
@@ -1113,6 +1419,23 @@ bool LandscapeBaseSiteProbe::Gather(BaseGenInputs& in) const
             c.objects = (int)g.u.howManyObjects;
             c.hardObjects = (int)g.u.howManyHardObjects;
             c.gradient = (int)g.u.gradient;
+            // the object grid, as the layout props see it (step 3)
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                const Object* obj = list[i];
+                const int kind = BaseSiteObjectClass(obj);
+                if (kind == 0)
+                {
+                    continue;
+                }
+                GenObject o;
+                o.x = obj->Position().X();
+                o.z = obj->Position().Z();
+                o.radius = obj->GetShape()->BoundingSphere();
+                o.solid = kind == 2;
+                in.objects.push_back(o);
+            }
         }
     }
     // every road link once, labelled by component (the island network: a
@@ -1378,6 +1701,12 @@ void ZoneRegistry::GenerateBaseZones(const ParamEntry& zonesCfg, const Settlemen
     }
     in.zoneRoom = MaxZones - _zones.Size();
     BaseGenOptions opt;
+    // generateBasesMinor = 0: no minor kinds (an island author's switch;
+    // absent = 1, the step 3 rule)
+    if (zonesCfg.FindEntry("generateBasesMinor"))
+    {
+        opt.minorKinds = zonesCfg.ReadValue("generateBasesMinor", 1.0f) != 0.0f;
+    }
     BaseGenResult result;
     GenerateBases(in, opt, result);
     for (const GeneratedBase& b : result.bases)
@@ -1405,21 +1734,98 @@ void ZoneRegistry::GenerateBaseZones(const ParamEntry& zonesCfg, const Settlemen
     }
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     LOG_INFO(Core,
-             "ZoneRegistry: generated {} base(s) on '{}' (K {}, existing {}, floor {}, ceiling {}; towns beyond "
-             "{} m: {} before, {} after; {} on a track of {} asked) from seed {} in {:.1f} ms",
-             (int)result.bases.size(), (const char*)Glob.header.worldname, result.K, result.existing, result.floor,
+             "ZoneRegistry: generated {} base(s), {} of a minor kind, on '{}' (K {}, existing {}, floor {}, ceiling "
+             "{}; towns beyond {} m: {} before, {} after; {} on a track of {} asked) from seed {} in {:.1f} ms",
+             (int)result.bases.size(), result.minor, (const char*)Glob.header.worldname, result.K, result.existing,
+             result.floor,
              result.ceiling, (int)opt.coverDist, result.uncoveredBefore, result.uncoveredAfter, result.tracks,
              result.trackNeed, (unsigned long long)seed, ms);
+    std::vector<BaseSiteObject> objs;
     for (const GeneratedBase& b : result.bases)
     {
+        // the solids in the layout's reach, by model (an empty-ground pick
+        // should have none: the clutter penalty)
+        std::string solids;
+        if (!b.detected && !_siteProbeOverride)
+        {
+            BaseSiteObjectsNear(b.x, b.z, opt.layoutReach, objs);
+            for (const BaseSiteObject& o : objs)
+            {
+                if (o.solid)
+                {
+                    solids += (solids.empty() ? "" : ", ") + o.model;
+                }
+            }
+        }
         LOG_INFO(Core,
                  "ZoneRegistry: generated {} '{}' at [{:.0f}, {:.0f}] ({}, road {:.0f} m, trunk {}, heading {:.0f}, "
-                 "covers {} town(s))",
+                 "covers {} town(s); within {:.0f} m {} solid and {} tree object(s){}{})",
                  GenBaseKindOf(b.kind).type, (const char*)b.name, (double)b.x, (double)b.z,
                  b.detected ? "detected outpost" : (b.track ? "on a track" : "empty ground"), (double)b.roadDist,
                  b.trunkDist >= 1e8f ? std::string("none in reach") : std::to_string((int)b.trunkDist) + " m",
-                 (double)b.heading, b.covers);
+                 (double)b.heading, b.covers, (double)opt.layoutReach, b.solids, b.trees, solids.empty() ? "" : ": ", solids);
     }
+    LastNotes() = result.notes;
 }
 
 } // namespace Poseidon::Guerrilla
+
+// ---------------------------------------------------------------------------
+// script surface (step 3 diagnostics)
+// ---------------------------------------------------------------------------
+
+using namespace Poseidon;
+using namespace Poseidon::Guerrilla;
+
+// gmBaseGenNotes -> the last generation's notes, one string each (the
+// "ZoneRegistry: base generation:" INFO lines: the refusal counts, an open
+// town's refusals and near misses, a minor kind taking a need)
+static GameValue GmBaseGenNotes(const GameState* state)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& array = value;
+    for (const std::string& note : BaseGenLastNotes())
+    {
+        array.Add(GameValue(GameStringType(RString(note.c_str()))));
+    }
+    return value;
+}
+
+// gmBaseSiteObjects [easting, northing, radius] -> the map objects the site
+// scorer and the layout props count there: [[model, [easting, northing],
+// radius, solid], ...] (solid false = a tree, a bush or a forest piece)
+static GameValue GmBaseSiteObjects(const GameState* state, GameValuePar oper1)
+{
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 3))
+    {
+        return value;
+    }
+    std::vector<BaseSiteObject> objs;
+    BaseSiteObjectsNear((float)array[0], (float)array[1], (float)array[2], objs);
+    for (const BaseSiteObject& o : objs)
+    {
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(4);
+        row[0] = GameStringType(RString(o.model.c_str()));
+        GameValue posValue = state->CreateGameValue(GameArray);
+        GameArrayType& pos = posValue;
+        pos.Resize(2);
+        pos[0] = o.x;
+        pos[1] = o.z;
+        row[1] = posValue;
+        row[2] = o.radius;
+        row[3] = o.solid;
+        out.Add(rowValue);
+    }
+    return value;
+}
+
+INIT_MODULE(GuerrillaBaseGenerate, 3)
+{
+    GGameState.NewNularOp(GameNular(GameArray, "gmBaseGenNotes", GmBaseGenNotes));
+    GGameState.NewFunction(GameFunction(GameArray, "gmBaseSiteObjects", GmBaseSiteObjects, GameArray));
+}

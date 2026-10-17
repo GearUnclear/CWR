@@ -16,6 +16,7 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -53,6 +54,9 @@ struct FakeWorld final : BasePropWorld
     float roadX = 0;
     std::vector<std::pair<float, float>> trees;
     float treeR = 1.0f;
+    std::vector<std::pair<float, float>> walls; // solid map objects (the lane applies)
+    float wallR = 1.0f;
+    std::vector<std::pair<std::string, std::string>> faction; // the occupier descriptor's keys
     float half = 2.0f;
     mutable std::map<std::string, int> live;
     mutable int creates = 0;
@@ -86,7 +90,7 @@ struct FakeWorld final : BasePropWorld
         return (roadEW && fabsf(z - roadZ) < clearance) || (roadNS && fabsf(x - roadX) < clearance);
     }
     bool Wet(float, float) const override { return false; }
-    bool Blocked(float x, float z, float r) const override
+    bool Blocked(float x, float z, float r, float lane) const override
     {
         for (const auto& t : trees)
         {
@@ -95,7 +99,26 @@ struct FakeWorld final : BasePropWorld
                 return true;
             }
         }
+        // solids (walls, gate posts) keep the lane as well
+        for (const auto& w : walls)
+        {
+            if (D(x, z, w.first, w.second) < r + wallR + lane)
+            {
+                return true;
+            }
+        }
         return false;
+    }
+    RString FactionClass(const char* key) const override
+    {
+        for (const auto& f : faction)
+        {
+            if (stricmp(f.first.c_str(), key) == 0)
+            {
+                return RString(f.second.c_str());
+            }
+        }
+        return RString();
     }
     bool Exists(const BasePropState& s) const override { return live.count(Key(s)) > 0; }
     bool Create(BasePropState& s) const override
@@ -444,7 +467,7 @@ TEST_CASE("BaseProps - the shipped outpost layout meets the contract", "[guerril
         const BasePropRow& r = outpost->rows[i];
         const std::string c = S(r.cls);
         flag = flag || c == "FlagCarrier";
-        tower = tower || c == "ViewTower";
+        tower = tower || c.find("ViewTower") != std::string::npos; // "$basePropTower|ViewTower"
         wire = wire || c == "Wire";
         tent = tent || c.find("Camp") != std::string::npos;
         gate = gate || (c == "Fortress1" && r.dz > 30);
@@ -461,6 +484,125 @@ TEST_CASE("BaseProps - the shipped outpost layout meets the contract", "[guerril
     FakeWorld world;
     AutoArray<BasePropState> out;
     CHECK(BaseProps::PlanLayout(*outpost, Base("F", 5000, 5000, 120), world, out, nullptr) == outpost->rows.Size());
+}
+
+TEST_CASE("BaseProps - every generated kind has its own shipped layout", "[guerrilla][baseprops]")
+{
+    ParamFile pf;
+    pf.Parse((ConfigDir() / "guerrilla-hq.hpp").string().c_str());
+    BaseProps props;
+    props.LoadLayouts(pf.FindEntry("CfgGuerrillaBaseLayouts"));
+    CHECK(props.NLayouts() == 4);
+    const char* types[] = {"OUTPOST", "CHECKPOINT", "COASTAL", "HELIPAD"};
+    std::vector<std::string> names;
+    for (const char* type : types)
+    {
+        INFO(type);
+        const BaseLayout* l = props.FindLayout(type);
+        REQUIRE(l != nullptr);
+        names.push_back(S(l->name));
+        CHECK(l->rows.Size() >= l->minProps);
+        CHECK(l->rows.Size() <= 12);
+        CHECK(l->minProps >= 6);
+        CHECK(l->lane == Approx(4.0f));
+        CHECK(l->roadMargin == Approx(6.0f));
+        bool flag = false, tower = false;
+        for (int i = 0; i < l->rows.Size(); i++)
+        {
+            const BasePropRow& r = l->rows[i];
+            const std::string c = S(r.cls);
+            flag = flag || c == "FlagCarrier";
+            tower = tower || c.find("ViewTower") != std::string::npos;
+            const float d = sqrtf(r.dx * r.dx + r.dz * r.dz);
+            CHECK(d > l->yard);
+            CHECK(d <= 52.0f);
+            // a "$key" alternate always has a stock class after it
+            if (c[0] == '$')
+            {
+                CHECK(c.find('|') != std::string::npos);
+            }
+        }
+        CHECK(flag);
+        CHECK(tower);
+        // on flat empty ground every row places, whatever the heading
+        for (float heading : {0.0f, 77.0f, 200.0f})
+        {
+            FakeWorld world;
+            AutoArray<BasePropState> out;
+            GeneratedBaseRow base = Base("K", 5000, 5000, heading);
+            base.type = type;
+            CHECK(BaseProps::PlanLayout(*l, base, world, out, nullptr) == l->rows.Size());
+        }
+    }
+    // four distinct layouts, not one reused
+    std::sort(names.begin(), names.end());
+    CHECK(std::unique(names.begin(), names.end()) == names.end());
+    // a checkpoint plans its own rows, not the outpost's
+    FakeWorld world;
+    AutoArray<BasePropState> out;
+    GeneratedBaseRow cp = Base("Gate Checkpoint", 5000, 5000, 0);
+    cp.type = "CHECKPOINT";
+    const BaseLayout* layout = props.FindLayout(cp.type);
+    REQUIRE(layout != nullptr);
+    BaseProps::PlanLayout(*layout, cp, world, out, nullptr);
+    CHECK(out.Size() == props.FindLayout("CHECKPOINT")->rows.Size());
+    CHECK(out.Size() != props.FindLayout("OUTPOST")->rows.Size());
+}
+
+TEST_CASE("BaseProps - a $key row takes the occupier faction's style, else the stock class", "[guerrilla][baseprops]")
+{
+    FakeWorld world;
+    CHECK(S(BaseProps::ResolveClass("$basePropTower|ViewTower", world)) == "ViewTower"); // no key
+    world.faction.push_back({"basePropTower", "Brown_Turm"});
+    CHECK(S(BaseProps::ResolveClass("$basePropTower|ViewTower", world)) == "Brown_Turm");
+    world.missing.push_back("Brown_Turm"); // a package without @LoBo
+    CHECK(S(BaseProps::ResolveClass("$basePropTower|ViewTower", world)) == "ViewTower");
+    world.missing.push_back("ViewTower");
+    CHECK(S(BaseProps::ResolveClass("$basePropTower|ViewTower", world)).empty()); // skipped, never thrown
+    CHECK(S(BaseProps::ResolveClass("$", world)).empty());
+}
+
+TEST_CASE("BaseProps - a prop keeps a lane from a solid map object, not from a tree", "[guerrilla][baseprops]")
+{
+    BaseLayout l;
+    l.name = "One";
+    l.type = "OUTPOST";
+    BasePropRow row;
+    row.cls = "Fortress1";
+    row.dx = 0;
+    row.dz = 40;
+    l.rows.Add(row);
+    const GeneratedBaseRow base = Base("Lane", 5000, 5000, 0); // the row lands at [5000, 5040]
+    // a tree 3.5 m from the prop's footprint edge: no matter
+    {
+        FakeWorld world;
+        world.trees.push_back({5000.0f + 2.0f * 1.4143f + 1.0f + 3.5f, 5040.0f});
+        AutoArray<BasePropState> out;
+        REQUIRE(BaseProps::PlanLayout(l, base, world, out, nullptr) == 1);
+        CHECK(out[0].x == Approx(5000.0f));
+    }
+    // a wall post at the same spot: inside the 4 m lane, so the row moves
+    // (pushed outward: a gap a soldier walks through is never closed)
+    {
+        FakeWorld world;
+        world.walls.push_back({5000.0f + 2.0f * 1.4143f + 1.0f + 3.5f, 5040.0f});
+        AutoArray<BasePropState> out;
+        std::vector<std::string> notes;
+        REQUIRE(BaseProps::PlanLayout(l, base, world, out, &notes) == 1);
+        CHECK(out[0].z > 5040.0f);
+        CHECK(D(out[0].x, out[0].z, world.walls[0].first, world.walls[0].second) >=
+              out[0].box.Radius() + world.wallR + l.lane);
+    }
+    // a lane of 0 (an author's choice) allows it
+    {
+        FakeWorld world;
+        world.walls.push_back({5000.0f + 2.0f * 1.4143f + 1.0f + 3.5f, 5040.0f});
+        BaseLayout tight = l;
+        tight.lane = 0;
+        AutoArray<BasePropState> out;
+        REQUIRE(BaseProps::PlanLayout(tight, base, world, out, nullptr) == 1);
+        CHECK(out[0].z == Approx(5040.0f));
+    }
 }
 
 TEST_CASE("BaseProps - a garrison point inside a prop box is nudged clear", "[guerrilla][baseprops]")

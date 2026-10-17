@@ -142,6 +142,10 @@ bool BaseProps::ParseLayout(const ParamEntry& cls, BaseLayout& out, std::vector<
     {
         out.jitterDeg = (float)*e;
     }
+    if (const ParamEntry* e = cls.FindEntry("lane"))
+    {
+        out.lane = (float)*e;
+    }
     if (const ParamEntry* e = cls.FindEntry("minProps"))
     {
         out.minProps = (int)*e;
@@ -260,6 +264,12 @@ RString BaseProps::ResolveClass(const char* alternates, const BasePropWorld& wor
         {
             one.pop_back();
         }
+        if (!one.empty() && one[0] == '$')
+        {
+            // the faction style: the occupier descriptor's key, when it has it
+            const RString styled = world.FactionClass(one.c_str() + 1);
+            one = styled.GetLength() > 0 ? std::string((const char*)styled) : std::string();
+        }
         if (!one.empty() && world.Spawnable(one.c_str()))
         {
             return RString(one.c_str());
@@ -359,7 +369,7 @@ int BaseProps::PlanLayout(const BaseLayout& layout, const GeneratedBaseRow& base
                 why = "water";
                 continue;
             }
-            if (world.Blocked(x, z, rad))
+            if (world.Blocked(x, z, rad, layout.lane))
             {
                 why = "object";
                 continue;
@@ -653,7 +663,13 @@ class EngineBasePropWorld final : public BasePropWorld
         return GLOB_LAND->SurfaceY(x, z) < 0.5f || GLOB_LAND->WaterDepth(x, z) > 0.0f;
     }
 
-    bool Blocked(float x, float z, float r) const override
+    RString FactionClass(const char* key) const override
+    {
+        const ZoneRegistry& registry = ZoneRegistry::Instance();
+        return registry.FactionValue(registry.OccupierSide(), key);
+    }
+
+    bool Blocked(float x, float z, float r, float lane) const override
     {
         if (!GLandscape)
         {
@@ -688,7 +704,9 @@ class EngineBasePropWorld final : public BasePropWorld
                     b.maxX = mx.X();
                     b.minZ = mn.Z();
                     b.maxZ = mx.Z();
-                    const float rr = b.Radius() + r;
+                    // a tree may stand at the edge of a prop; a solid (a
+                    // wall, a fence, a gate, a building) keeps the lane
+                    const float rr = b.Radius() + r + (BaseSiteObjectClass(obj) == 1 ? 0.0f : lane);
                     const float dx = obj->Position().X() - x;
                     const float dz = obj->Position().Z() - z;
                     if (dx * dx + dz * dz < rr * rr)

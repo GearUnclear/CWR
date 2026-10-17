@@ -659,10 +659,16 @@ the trunk road, and each town's two nearest sources should be 60 degrees apart
 (a scoring term). Its 150 m footprint (3 x 3 geography cells) is dry, flat
 (slope under 0.10), forest-free and object-free, 2 m above the sea at the
 centre. The detected OUTPOST candidates (section 10, status `offline`) are the
-preferred sites and keep their names; they skip the terrain-cell tests.
+preferred sites and keep their names; they skip the terrain-cell tests. Among
+the sites serving a need, one with no map object within 60 m wins (a solid
+costs nearly a town, a tree a little: never an extra base), and where no
+150 m square fits, a minor post (CHECKPOINT, else COASTAL within 400 m of deep
+water) whose centre 50 m cell passes the terrain rules takes the need
+(`generateBasesMinor = 0` turns that off).
 
-**What it adds.** OUTPOST zones owned by the occupier (garrison and reserve 6),
-named "<nearest town> Outpost" (else "Hill <elevation> Outpost"), marker
+**What it adds.** OUTPOST zones owned by the occupier (garrison and reserve 6;
+a CHECKPOINT or COASTAL minor post 5), named "<nearest town> <noun>" (else
+"Hill <elevation> <noun>": Outpost, Checkpoint, Coastal Post), marker
 `gmZoneGen_<n>`, revealed by proximity like authored zones, flagged `seeded` in
 `gmZone`. `gmGeneratedBases` lists them: `[name, type, [easting, northing,
 height], garrisonMax, countsForWin, detected, track, heading]`. They count in
@@ -677,21 +683,24 @@ nothing. Changing the template's key changes new games only.
 **Diagnostics.** The mission log carries one INFO line per generated base, a
 summary (K, the floor and ceiling, the towns beyond 2.5 km before and after,
 the track share, the seed), the site refusal counts, and for every town still
-open after generation the refusals of the cells in its reach ("Regina is
-open: 0 site(s) in reach ...").
+open after generation the refusals of the cells in its reach and its near
+misses, the cells one rule short of a site ("<town> near misses (one rule
+short of a site): slope 231 (nearest [x, z], d m)"); `gmBaseGenNotes` returns
+these notes and `gmBaseSiteObjects [x, z, r]` the map objects the scorer counts.
 
-**The outpost layout (step 2).** Each generated OUTPOST on empty ground is
+**The layouts (steps 2 and 3).** Each generated base on empty ground is
 built at new game from the config class `CfgGuerrillaBaseLayouts` (the shipped
 copy lives in `guerrilla-mode/config/guerrilla-hq.hpp`; a mod may override a
 layout class or add one, merged last like any config). The contract:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `type` | required | The zone type the layout serves (`"OUTPOST"`). |
-| `items[]` | required | Rows `{class, dx, dz, dir}` or `{class, dx, dz, dir, jitter}`: base-local metres, +dz towards the base's road (the stored heading), +dx to the right when facing it; `dir` in degrees relative to the heading (0 faces the road); `jitter` 1 = a seeded turn of up to `jitterDeg`. `class` may list alternates `"A|B"`: the first the loaded package can spawn wins. |
+| `type` | required | The zone type the layout serves: one layout per kind (`"OUTPOST"`, `"CHECKPOINT"`, `"COASTAL"`, `"HELIPAD"`; the shipped classes are Outpost, Checkpoint, Coastal and Helipad). |
+| `items[]` | required | Rows `{class, dx, dz, dir}` or `{class, dx, dz, dir, jitter}`: base-local metres, +dz towards the base's road (the stored heading), +dx to the right when facing it; `dir` in degrees relative to the heading (0 faces the road); `jitter` 1 = a seeded turn of up to `jitterDeg`. `class` may list alternates `"A|B"`: the first the loaded package can spawn wins; an alternate `"$key"` is the occupier faction descriptor's value of that key (`basePropTower`, `basePropHut`: the faction style), skipped when the descriptor has none. |
 | `yard` | 25 | Metres at the centre kept prop-free (births, the hold posture, capture presence); a row whose footprint reaches into it is refused. |
 | `roadMargin` | 6 | Metres between a prop's footprint and any road link. |
 | `jitterDeg` | 5 | The largest seeded turn of a jitter row (tents, sandbags; keep towers, wire and buildings on the grid). |
+| `lane` | 4 | Metres a prop keeps from any solid map object (a wall, a fence, a gate, a building); trees only need to clear the footprint. |
 | `minProps` | 8 | Fewer placed props log a WARN; never fatal. |
 
 A refused spot (road, water, a landscape object, another prop) tries its

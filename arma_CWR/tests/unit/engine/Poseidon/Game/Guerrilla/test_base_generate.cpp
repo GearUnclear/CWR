@@ -125,6 +125,30 @@ struct Grid
         in.keepouts.push_back(ScaffoldPoint{x, z});
         in.zones.push_back(ScaffoldPoint{x, z});
     }
+    // a hillside: every cell sloped (band 2) but a lattice of single flat
+    // cells every step cells, so no 150 m outpost footprint passes and a
+    // minor kind's centre cell does (offset 1 puts flat cells 75 m from
+    // the scenario's roads, which run on cell edges: a checkpoint's band)
+    void Lattice(int step, int offset = 1)
+    {
+        for (int z = 0; z < n; z++)
+        {
+            for (int x = 0; x < n; x++)
+            {
+                in.cells[(size_t)z * n + x].gradient = (x % step == offset && z % step == offset) ? 0 : 2;
+            }
+        }
+    }
+    // a map object (the object grid)
+    void Object(float x, float z, bool solid, float radius = 3.0f)
+    {
+        GenObject o;
+        o.x = x;
+        o.z = z;
+        o.radius = radius;
+        o.solid = solid;
+        in.objects.push_back(o);
+    }
 };
 
 // Scenario A, 6.4 km square: a trunk road along z 3200, a track north from
@@ -465,6 +489,186 @@ TEST_CASE("BaseGenerate - a town on an island is served from its own landmass", 
         CHECK(b.x > 3300.0f);
     }
     CHECK(r.uncoveredAfter == 0);
+}
+
+// ---------------------------------------------------------------------------
+// step 3: object-free footprints, the minor kinds, the open-town diagnostics
+// ---------------------------------------------------------------------------
+
+TEST_CASE("BaseGenerate - the kind catalogue: footprints, road bands, what is placed", "[guerrilla][basegenerate]")
+{
+    const GenBaseKindInfo& outpost = GenBaseKindOf(GenBaseKind::Outpost);
+    const GenBaseKindInfo& checkpoint = GenBaseKindOf(GenBaseKind::Checkpoint);
+    const GenBaseKindInfo& coastal = GenBaseKindOf(GenBaseKind::Coastal);
+    const GenBaseKindInfo& helipad = GenBaseKindOf(GenBaseKind::Helipad);
+    CHECK(outpost.footprint == 1);
+    CHECK(helipad.footprint == 1);
+    CHECK(checkpoint.footprint == 0);
+    CHECK(coastal.footprint == 0);
+    CHECK(checkpoint.roadMax == Approx(100.0f));
+    CHECK(outpost.roadMax == Approx(250.0f));
+    CHECK(outpost.placed);
+    CHECK(checkpoint.placed);
+    CHECK(coastal.placed);
+    CHECK_FALSE(helipad.placed); // an air origin first (HeldAirfield), never generated yet
+    // every minor kind can source a town retake (spare = garrison - floor(garrison / 4) >= 4)
+    for (const GenBaseKindInfo* k : {&checkpoint, &coastal, &helipad})
+    {
+        INFO(k->type);
+        CHECK(k->garrisonMax - k->garrisonMax / 4 >= 4);
+        CHECK_FALSE(k->countsForWin);
+    }
+    CHECK(std::string(coastal.noun) == "Coastal Post");
+}
+
+TEST_CASE("BaseGenerate - the scorer prefers an object-free footprint, never at the cost of a base",
+          "[guerrilla][basegenerate]")
+{
+    BaseGenOptions opt;
+    // the clear scenario's pick
+    Grid g0 = ScenarioA();
+    BaseGenResult r0;
+    GenerateBases(g0.in, opt, r0);
+    REQUIRE(r0.bases.size() == 1);
+    const float x0 = r0.bases[0].x;
+    const float z0 = r0.bases[0].z;
+    CHECK(r0.bases[0].solids == 0);
+    CHECK(r0.bases[0].trees == 0);
+    // an orchard over that pick: the base moves to clear ground, still one
+    // base covering both open towns
+    Grid g1 = ScenarioA();
+    for (int i = 0; i < 40; i++)
+    {
+        g1.Object(x0 - 50.0f + (float)(i % 8) * 14.0f, z0 - 40.0f + (float)(i / 8) * 20.0f, false);
+    }
+    BaseGenResult r1;
+    GenerateBases(g1.in, opt, r1);
+    REQUIRE(r1.bases.size() == 1);
+    CHECK(D(r1.bases[0].x, r1.bases[0].z, x0, z0) > 50.0f);
+    CHECK(r1.bases[0].trees == 0);
+    CHECK(r1.uncoveredAfter == 0);
+    CheckRules(g1.in, opt, r1);
+    // one wall beside the new pick moves it again: a solid weighs nearly a town
+    Grid g2 = g1;
+    g2.Object(r1.bases[0].x + 30.0f, r1.bases[0].z, true, 6.0f);
+    BaseGenResult r2;
+    GenerateBases(g2.in, opt, r2);
+    REQUIRE(r2.bases.size() == 1);
+    CHECK(r2.bases[0].solids == 0);
+    CHECK(D(r2.bases[0].x, r2.bases[0].z, r1.bases[0].x + 30.0f, r1.bases[0].z) >= opt.layoutReach);
+    CHECK(r2.uncoveredAfter == 0);
+    // clutter everywhere: still exactly one base (it never costs a base or
+    // a covered town), and it reports what stands there
+    Grid g3 = ScenarioA();
+    for (float x = 100; x < 6400; x += 40)
+    {
+        for (float z = 100; z < 6400; z += 40)
+        {
+            g3.Object(x, z, false, 2.0f);
+        }
+    }
+    BaseGenResult r3;
+    GenerateBases(g3.in, opt, r3);
+    REQUIRE(r3.bases.size() == 1);
+    CHECK(r3.bases[0].trees > 0);
+    CHECK(r3.uncoveredAfter == 0);
+    // a detected outpost's own props are no clutter: it stays preferred
+    Grid g4 = ScenarioA();
+    GenDetected d;
+    d.name = "Oldfort Post";
+    d.x = 4950;
+    d.z = 4200;
+    d.y = 20;
+    g4.in.detected.push_back(d);
+    for (int i = 0; i < 6; i++)
+    {
+        g4.Object(4950.0f + (float)i * 8.0f, 4200.0f, true);
+    }
+    BaseGenResult r4;
+    GenerateBases(g4.in, opt, r4);
+    REQUIRE(r4.bases.size() == 1);
+    CHECK(S(r4.bases[0].name) == "Oldfort Post");
+}
+
+TEST_CASE("BaseGenerate - a minor kind closes a gap no outpost footprint fits", "[guerrilla][basegenerate]")
+{
+    BaseGenOptions opt;
+    {
+        // a hillside: no 150 m square is under 0.10, single flat cells are
+        Grid g = ScenarioA();
+        g.Lattice(2);
+        BaseGenResult r;
+        GenerateBases(g.in, opt, r);
+        CHECK(r.candidates > 0);
+        CHECK(r.minorCandidates == r.candidates); // nothing fits an outpost
+        REQUIRE(!r.bases.empty());
+        CHECK(r.minor == (int)r.bases.size());
+        for (const GeneratedBase& b : r.bases)
+        {
+            INFO(S(b.name));
+            CHECK(b.kind == GenBaseKind::Checkpoint);
+            CHECK(S(b.name).find("Checkpoint") != std::string::npos);
+            // the checkpoint's road band: at the shoulder, 60 to 100 m out
+            CHECK(b.roadDist >= opt.roadMin);
+            CHECK(b.roadDist <= GenBaseKindOf(GenBaseKind::Checkpoint).roadMax);
+        }
+        CHECK(r.uncoveredAfter < r.uncoveredBefore);
+        CheckRules(g.in, opt, r);
+        bool noted = false;
+        for (const std::string& n : r.notes)
+        {
+            noted = noted || n.find("no outpost site serves the open need") != std::string::npos;
+        }
+        CHECK(noted);
+    }
+    {
+        // near the sea the minor kind is a coastal post
+        Grid g = ScenarioA();
+        g.Lattice(2);
+        g.Paint(6250, 0, 6400, 6400, [](GenCell& c) {
+            c.deep = true;
+            c.water = true;
+        });
+        BaseGenOptions wide = opt;
+        wide.coastDist = 3000.0f; // every site of the scenario is "near the sea"
+        BaseGenResult r;
+        GenerateBases(g.in, wide, r);
+        REQUIRE(!r.bases.empty());
+        CHECK(r.bases[0].kind == GenBaseKind::Coastal);
+        CHECK(S(r.bases[0].name).find("Coastal Post") != std::string::npos);
+    }
+    {
+        // an outpost site and minor sites both serving: the outpost wins
+        Grid g = ScenarioA();
+        g.Lattice(2);
+        g.Paint(4850, 3900, 5300, 4500, [](GenCell& c) { c.gradient = 0; }); // one flat field by the track
+        BaseGenResult r;
+        GenerateBases(g.in, opt, r);
+        REQUIRE(!r.bases.empty());
+        CHECK(r.bases[0].kind == GenBaseKind::Outpost);
+        CHECK(r.minor == 0);
+    }
+    {
+        // the minor kinds off: the town stays open, and the log names the
+        // near misses (cells one rule short of a site) with the nearest one
+        Grid g = ScenarioA();
+        g.Lattice(2);
+        BaseGenOptions off = opt;
+        off.minorKinds = false;
+        BaseGenResult r;
+        GenerateBases(g.in, off, r);
+        CHECK(r.bases.empty());
+        CHECK(r.uncoveredAfter == 2);
+        bool open = false, near = false;
+        for (const std::string& n : r.notes)
+        {
+            open = open || n.find("Northend is open") != std::string::npos;
+            near = near || (n.find("Northend near misses") != std::string::npos &&
+                            n.find("slope") != std::string::npos && n.find("nearest [") != std::string::npos);
+        }
+        CHECK(open);
+        CHECK(near);
+    }
 }
 
 // ---------------------------------------------------------------------------

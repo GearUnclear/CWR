@@ -26,6 +26,12 @@
 // The OUTPOST candidates BaseDetect finds (real props on the map) are
 // preferred sites: they pass the same rules except the terrain-cell tests
 // (their props are the objects those tests refuse).
+// Step 3 (2026-10-17): among the sites serving a need, one with no map
+// object (GenObject) within layoutReach wins (a penalty below one town, so
+// clutter never costs a base); where no outpost footprint (3 x 3 cells)
+// serves the need, a minor kind whose centre cell passes the terrain rules
+// takes it (Checkpoint, or Coastal near deep water); minor kinds count as
+// ground sources and stay out of the win roster (CampaignEnd).
 //
 // PURE, like BaseDetect: the caller injects the landscape's per-cell facts
 // (one cell per geography square, 50 m on every stock world), the road
@@ -54,6 +60,8 @@
 
 namespace Poseidon
 {
+class Object;
+
 namespace Guerrilla
 {
 
@@ -78,6 +86,20 @@ struct GenBaseKindInfo
     // minor posts (the owner, 2026-10-16) capture, source and alarm like any
     // base but are left out of the win roster (CampaignEnd::CountsForWin)
     bool countsForWin;
+    // the cells around the centre the forest, slope and object rules cover:
+    // 1 = the 3 x 3 (150 m) footprint of an outpost or a helipad, 0 = the
+    // centre cell (50 m) of a checkpoint or a coastal post, whose layouts
+    // are 30 to 40 m across (design catalogue).  The water rule always
+    // covers the 3 x 3: a garrison spawns over the +-50 m square.
+    int footprint;
+    // the centre's road band ceiling (m): a checkpoint stands at the road
+    // shoulder, so its centre is 60 to 100 m from the road and its hut and
+    // barrier rows reach to the margin; the other kinds keep 250 m
+    float roadMax;
+    // generation places this kind by itself (step 3: Outpost first, then
+    // Checkpoint and Coastal where no outpost fits).  The Helipad is an air
+    // origin, which needs the HeldAirfield extension first: never placed.
+    bool placed;
 };
 const GenBaseKindInfo& GenBaseKindOf(GenBaseKind kind);
 // the kind of a zone type; false for any type that is not in the catalogue
@@ -103,6 +125,20 @@ struct GenCell
     int objects = 0;     // howManyObjects (0..3)
     int hardObjects = 0; // howManyHardObjects (0..3)
     int gradient = 0;    // the slope band 0..7: 1 from 0.05, 2 from 0.10, 3 from 0.15 rise over run
+};
+
+// A map object from the landscape object grid (step 3), as the layout props
+// see it (BasePropWorld::Blocked): a solid (a building, a wall, a fence or a
+// gate, a rock) or a tree (a tree, a bush, a forest piece).  The geography
+// bits of GenCell skip light objects and test objects at the centre cell
+// only, so the trees under a layout's rows went unseen: Vigny Outpost lost
+// both gate bunkers and its fuel point to them (2026-10-16 ground truth).
+struct GenObject
+{
+    float x = 0;
+    float z = 0;
+    float radius = 1.0f;
+    bool solid = false;
 };
 
 // A point on a road (a link centre or a connection end).
@@ -142,6 +178,7 @@ struct BaseGenInputs
     // the nearest cell centre's height
     const HeightField* height = nullptr;
     std::vector<GenRoadPoint> roads;
+    std::vector<GenObject> objects; // the map objects (the object-free footprint preference)
     std::vector<GenPlace> towns;   // the K towns
     std::vector<GenPlace> sources; // the occupier's military zones now (authored and seeded)
     std::vector<ScaffoldPoint> zones;    // every zone centre (the zoneMinDist exclusion)
@@ -186,6 +223,21 @@ struct BaseGenOptions
     float trackBonus = 600.0f;
     float bearingWeight = 100.0f; // per town whose bearing rule a pick fixes (capped at +-200)
     float jitter = 50.0f;         // seeded jitter, 0..jitter
+    // object-free footprints (step 3): the map objects within layoutReach of
+    // the centre (the layout rows stand within 52 m, pushed out at most 8 m)
+    // cost solidPenalty when any is a solid, plus treePenalty a tree, the
+    // whole at most clutterMax.  That stays below one town, so a clear site
+    // wins among the sites serving the same need and clutter never costs an
+    // extra base.
+    float layoutReach = 60.0f;
+    float solidPenalty = 900.0f;
+    float treePenalty = 30.0f;
+    float clutterMax = 900.0f;
+    // the minor kinds (step 3): where no outpost site serves an open need, a
+    // site whose centre cell passes the terrain rules takes a checkpoint, or
+    // a coastal post when deep water lies within coastDist of the centre
+    bool minorKinds = true;
+    float coastDist = 400.0f;
 };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +258,9 @@ struct GeneratedBase
     float trunkDist = 0;   // to the nearest trunk (non-track) road point, 1e9 when none
     int covers = 0;        // towns this pick newly covered
     RString nearTown;      // the town it is named after (empty for a "Hill" name)
+    // the map objects within layoutReach of its centre (GenObject)
+    int solids = 0;
+    int trees = 0;
 };
 
 struct BaseGenTownReport
@@ -231,6 +286,8 @@ struct BaseGenResult
     int tracks = 0;    // generated bases on a track
     int trackNeed = 0; // ceil(generated / 3)
     int candidates = 0; // sites that passed every hard rule
+    int minorCandidates = 0; // of those, sites only a minor kind's smaller footprint fits
+    int minor = 0;           // generated bases of a minor kind
     std::vector<BaseGenTownReport> towns;
     std::vector<std::string> notes;
 };
@@ -290,6 +347,25 @@ struct BaseSiteProbe
     // settlement under it is not a town the density rule serves
     virtual bool IsSettlement(const char* /*name*/, float /*x*/, float /*z*/) const { return true; }
 };
+
+// The landscape object grid as the layout props see it (step 3): 0 = not an
+// obstacle (no geometry, a road, a runtime entity, a sign or a stone), 1 = a
+// tree, a bush or a forest piece, 2 = a solid (a building, a wall, a fence or
+// a gate, a rock).
+int BaseSiteObjectClass(const Object* obj);
+struct BaseSiteObject
+{
+    std::string model; // the p3d's file name
+    float x = 0;
+    float z = 0;
+    float radius = 0;
+    bool solid = false;
+};
+// the map objects (class 1 or 2) whose origin lies within r of (x, z)
+// (gmBaseSiteObjects, the generation log)
+void BaseSiteObjectsNear(float x, float z, float r, std::vector<BaseSiteObject>& out);
+// the notes of the last generation (gmBaseGenNotes; transient, the INFO lines)
+const std::vector<std::string>& BaseGenLastNotes();
 
 // The engine's BaseSiteProbe: GLandscape's geography cells and SurfaceY,
 // RoadRoute::Landmass, every GRoadNet link (centre and connection ends;

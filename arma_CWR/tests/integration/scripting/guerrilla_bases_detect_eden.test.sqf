@@ -14,8 +14,8 @@
 //        gmSeededBases with confidence > 0 and evidence;
 //    e2  one seeded SEAPORT within 300 m of the pier, likewise;
 //    e3  nothing else seeded: exactly one AIRFIELD, one SEAPORT, the three
-//        authored OUTPOSTs plus the generated ones (generateBases = 1,
-//        OCCUPIER-FORCES.md 5.7: gmGeneratedBases, never gmSeededBases;
+//        authored OUTPOSTs plus the generated ones of that type (generateBases = 1,
+//        OCCUPIER-FORCES.md 5.7: gmGeneratedBases, never gmSeededBases; a minor post such as Regina's COASTAL is no OUTPOST;
 //        guerrilla_bases_generate_eden has their rules), and the explicit
 //        CITY Saint Phillippe (216 m from the ILS anchor) still stands;
 //    e4  the roster: R = 18 + the seeded garrisons (the generated bases
@@ -88,7 +88,9 @@ triAssertGe [(count (bdRowS select 4)), 2]
 
 // ---- e3: nothing else ------------------------------------------------------
 triAssertEq [(count bdSeeded), 2]
-triAssertEq [("OUTPOST" call bdFnCount), 3 + (count gmGeneratedBases)]
+bdGenOutposts = 0
+{if ((_x select 1) == "OUTPOST") then {bdGenOutposts = bdGenOutposts + 1}} forEach gmGeneratedBases
+triAssertEq [("OUTPOST" call bdFnCount), 3 + bdGenOutposts]
 bdSP = gmZoneIndex "Saint Phillippe"
 triAssertGe [bdSP, 0]
 triAssertEq [((gmZone bdSP) select 1), "CITY"]

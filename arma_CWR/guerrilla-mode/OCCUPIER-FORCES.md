@@ -897,10 +897,12 @@ share is short. The bonuses stay below one town, so they never cost an extra
 base. The #76 detector's OUTPOST candidates (real props on the map) are the
 preferred sites, which reverses the #76 rule that they are never seeded; they
 pass the same rules except the terrain-cell tests, which their props would
-fail. Every generated base is an OUTPOST (garrison and reserve 6, spare 5,
-enough for a town retake); the catalogue's minor kinds (CHECKPOINT and COASTAL
-5, HELIPAD 6) exist for step 3 and are never placed yet. Names follow
-"<nearest town within 2.5 km> Outpost", else "Hill <elevation> Outpost", made
+fail. A generated base is an OUTPOST (garrison and reserve 6, spare 5,
+enough for a town retake) wherever an outpost's footprint fits; since step 3
+a minor kind (CHECKPOINT or COASTAL, garrison 5, spare 4) takes a need no
+outpost site can serve (below), and the HELIPAD (6) is catalogued but never
+placed. Names follow
+"<nearest town within 2.5 km> <noun>", else "Hill <elevation> <noun>", made
 unique with a number; a detected outpost keeps its detector name. The marker
 is `gmZoneGen_<n>`; the zone is revealed by proximity like an authored one.
 
@@ -946,8 +948,9 @@ OUTPOSTs, La Riviere Outpost about [3975, 4775] (south-west, covers six towns)
 and Vigny Outpost about [4175, 7025] (west, on a track); every town within
 2.5 km of a base afterwards, six military zones, the win roster six. Eden:
 two, Le Moule Outpost about [3525, 4925] and Tyrone Outpost about [5425, 9375];
-Regina stays open (no dry, flat, object-free 150 m square in reach: the
-"Regina is open" INFO line counts the refusals), the detected Levie Post
+Regina stayed open under step 1 (no dry, flat, object-free 150 m square in
+reach: the "Regina is open" INFO line counts the refusals; step 3 closes it
+with a minor kind, below), the detected Levie Post
 stands within 60 m of its road, and neither pick is on a track (the share is
 reported short). Tests: `test_base_generate.cpp` (`[basegenerate]`),
 `guerrilla_bases_generate_{abel,eden}`, `guerrilla_bases_generate_save.seq`.
@@ -995,6 +998,71 @@ bytes (+4,891, about 257 bytes a prop). Frame cost: one pass of about twenty
 link checks every 5 s. `gmBaseProps`, `gmBasePropsInside` and `gmBasePropsLz`
 are the script surface. Tests: `test_base_props.cpp` (`[baseprops]`),
 `guerrilla_bases_props_abel`, `guerrilla_bases_props_save.seq`.
+
+**Step 3: the kinds, object-free footprints, Regina** (2026-10-17).
+- *Object-free footprints.* The geography bits test objects at the centre
+  cell only and skip light objects, so the step 2 picks stood among trees:
+  Vigny Outpost lost both gate bunkers and its fuel point to them, La
+  Riviere Outpost stood in an orchard (58 trees in its 3 x 3). The engine
+  probe now hands the scorer every map object from the landscape object
+  grid (`BaseSiteObjectClass`: a solid is a building, a wall, a fence or a
+  gate, a rock; a tree is a tree, a bush, a forest piece; signs and stones
+  under 0.75 m do not count), and a site whose layout reach (60 m) holds a
+  solid costs 900, each tree 30, at most 900 in all: below one town, so a
+  clear site wins among the sites serving the same need and clutter never
+  costs a base. A detected outpost's own props are not clutter. The props
+  keep a 4 m lane from every solid map object (the design's lanes; the
+  layout key `lane`), so a prop never closes a gap a soldier or a car walks
+  through; trees only need to clear the footprint. Abel ground truth: La
+  Riviere Outpost moves to about [3775, 4675] (3 trees within 60 m, 11 of 12
+  rows placed) and Vigny Outpost to about [4225, 7075] (5 trees, all 12 rows,
+  the gate kept and walked through by a soldier, `guerrilla_bases_props_abel`
+  p7 and p8); neither has a solid within 60 m.
+- *The kinds.* Each kind has its own layout in `CfgGuerrillaBaseLayouts`:
+  Outpost (12 rows), Checkpoint (9: a hut and the MG nest on the road side,
+  the tower, tent and flag behind, yard 15 m), Coastal (10: tower, two
+  bunkers, a sandbag line, hut, tent, flag, yard 20 m) and Helipad (8: two
+  `HeliH` pads 44 m apart, the fuel point, sandbag rings, tower). A row
+  alternate `$key` names the occupier descriptor's key, the faction style:
+  `lobo-factions.hpp` gives the IDF, the Egyptian army and Syria LoBo's brown
+  Baracken pieces (`basePropTower = "Brown_Turm"`, `basePropHut =
+  "Brown_Wachhaus"`); a descriptor without the key, or a package without the
+  class, falls through to the stock class after the bar.
+- *The minor kinds placed.* The density rule is unchanged and decides how
+  many bases and where; the kind follows the site. Within each need
+  (coverage, redundancy, the floor) the outpost sites are tried first; only
+  when none serves the need does a site whose centre 50 m cell passes the
+  forest, slope and object rules take it, as a COASTAL post when deep water
+  lies within 400 m, else a CHECKPOINT (its centre 60 to 100 m from the
+  road, so its road-side rows stand on the shoulder). The water rule and the
+  spawn square's height test still cover the whole 3 x 3 (the garrison
+  spawns over +-50 m). Minor posts count as ground sources for coverage,
+  redundancy, the floor and the ceiling, spare 4 for a town retake, and stay
+  out of the win roster (`countsForWin` false and `IsMinorPostType`, the rule
+  of step 1, unchanged). The HELIPAD is never generated: its role, the air
+  origin when no airfield is held, needs the `HeldAirfield` extension first.
+  `generateBasesMinor = 0` in `CfgGuerrillaZones` turns the minor kinds off.
+- *Regina* (Eden). Logged with the minor kinds off: of the cells within
+  2.5 km of Regina, 3,819 are refused for water (the coast), 1,666 for
+  objects, 2,261 for slope, and 231 cells are one rule short of a site, every
+  one of them the outpost's slope rule (the nearest 510 m from the town, at
+  [7375, 2825]): the hills round Regina have flat 50 m cells but no flat
+  150 m square. So the fix is the minor kinds' footprint, not a wider ring or
+  an exception: a minor post's slope rule covers its own 50 m footprint.
+  Ground truth: Morton Coastal Post about [5625, 3775] (deep water within
+  400 m, 9 of 10 rows) closes Regina, and every Eden town is within 2.5 km of
+  a ground base; Eden now generates three bases (Rgen 17), the win roster
+  leaves the coastal post out.
+- *Diagnostics.* For a town still open the log names its refusals and its
+  near misses ("<town> near misses (one rule short of a site): slope 231
+  (nearest [x, z], d m)"); each generated base's line names the solid and
+  tree objects within 60 m. `gmBaseGenNotes` returns the notes,
+  `gmBaseSiteObjects [x, z, r]` the map objects the scorer counts. Tests:
+  `test_base_generate.cpp` (the kind catalogue, the clutter preference, the
+  minor fallback and the near-miss notes), `test_base_props.cpp` (every
+  kind's shipped layout, `$key`, the lane), `guerrilla_bases_generate_abel`
+  g8, `guerrilla_bases_generate_eden` e2, e3, e6 to e8,
+  `guerrilla_bases_props_abel` p7 and p8.
 
 ## 6. The director
 

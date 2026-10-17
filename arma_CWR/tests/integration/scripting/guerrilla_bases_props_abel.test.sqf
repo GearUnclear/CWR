@@ -21,6 +21,15 @@
 //    p6  the player walks into the bubble of one outpost: its garrison is
 //        released and every soldier stands outside every prop's box
 //        (gmBasePropsInside is 0 at each).
+//    p7  each outpost keeps its gate (step 3, the object-free footprint):
+//        both gate bunkers (Fortress1, rows 0 and 1, base-local [-10, 40]
+//        and [10, 40]) stand within 12 m of the gate point 40 m from the
+//        centre towards the road.  Ground truth 2026-10-16: Vigny Outpost
+//        lost both to trees; with the scorer preferring clear footprints
+//        neither base drops them.
+//    p8  the gate is passable: a soldier created 80 m out on the road side
+//        and sent (doMove) to the yard walks through the gate and arrives
+//        within 10 m of the centre.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -69,5 +78,25 @@ triAssertGe [(count bpUnits), 4]
 bpBad = ""
 {bpU = getPos _x; if ((gmBasePropsInside [bpU select 0, bpU select 1]) > 0) then {bpBad = bpBad + format ["[%1 at %2]", _x, bpU]}} forEach bpUnits
 triAssertEq [bpBad, ""]
+
+// ---- p7: each outpost keeps its gate -------------------------------------------
+bpBad = ""
+{bpName = _x select 0; bpC = _x select 2; bpH = _x select 7; bpGate = [(bpC select 0) + 40 * (sin bpH), (bpC select 1) + 40 * (cos bpH)]; bpN = 0; {if (((_x select 0) == bpName) and ((_x select 1) == "Fortress1") and (([_x select 2, bpGate] call bpFnD) < 12)) then {bpN = bpN + 1}} forEach bpProps; if (bpN != 2) then {bpBad = bpBad + format ["[%1]gate %2 ", bpName, bpN]}} forEach bpGen
+triAssertEq [bpBad, ""]
+
+// ---- p8: the gate is passable --------------------------------------------------
+// the other outpost (p6 woke the first one's garrison; the player stays by
+// the first, so this one's garrison is still abstract)
+bpRow = bpGen select 1
+bpC = bpRow select 2
+bpH = bpRow select 7
+bpWalker = objNull
+bpGrp = createGroup east
+"SoldierEB" createUnit [[(bpC select 0) + 80 * (sin bpH), (bpC select 1) + 80 * (cos bpH), 0], bpGrp, "bpWalker = this", 0.5, "PRIVATE"]
+triSimUntil { not (isNull bpWalker) }
+bpWalker allowDammage false
+bpWalker doMove [bpC select 0, bpC select 1, 0]
+triSimUntil { ([getPos bpWalker, bpC] call bpFnD) < 10 }
+triAssertLt [([getPos bpWalker, bpC] call bpFnD), 10]
 
 triEndTest

@@ -20,6 +20,10 @@
 //     refused;
 //   * nothing within roadMargin (6 m) of a road link, measured from the
 //     prop's footprint (GRoadNet::IsOnRoad with the footprint radius);
+//   * a solid landscape object (a wall, a fence, a gate, a building) stays
+//     lane (4 m) clear of the footprint, a tree only clear of it (step 3);
+//   * one layout per generated kind (the zone type); a "$key" alternate is
+//     the occupier faction descriptor's value of key (the faction style);
 //   * dry ground, no landscape object in the footprint; a refused spot tries
 //     its left-right mirror, then both pushed outward by ShiftStep and twice
 //     that, then the row is dropped (logged);
@@ -59,7 +63,11 @@ struct GeneratedBaseRow;
 // one authored layout row (base-local)
 struct BasePropRow
 {
-    RString cls; // "Class" or "ClassA|ClassB" (the first spawnable wins)
+    // "Class" or "ClassA|ClassB" (the first spawnable wins); an alternate
+    // "$key" names the occupier faction's descriptor key (the faction style:
+    // LoBo's brown towers for the IDF and the Arab armies), skipped when the
+    // descriptor has no such key
+    RString cls;
     float dx = 0;
     float dz = 0;
     float dir = 0;       // degrees, relative to the base heading
@@ -73,7 +81,8 @@ struct BaseLayout
     float yard = 25.0f;
     float roadMargin = 6.0f;
     float jitterDeg = 5.0f;
-    int minProps = 8; // fewer placed props log a WARN (never fatal)
+    float lane = 4.0f; // m between a prop and a solid map object (the design's 4 m lanes)
+    int minProps = 8;  // fewer placed props log a WARN (never fatal)
     AutoArray<BasePropRow> rows;
 };
 
@@ -116,7 +125,13 @@ struct BasePropWorld
     virtual bool Wet(float x, float z) const = 0;
     // a landscape object (not one of the layout's own props) overlaps the
     // circle of radius r around (x, z)
-    virtual bool Blocked(float x, float z, float r) const = 0;
+    // a solid one (a building, a wall, a fence or a gate: anything but a
+    // tree) must also stay lane metres clear, so a prop never closes a gap
+    // a soldier or a car walks through
+    virtual bool Blocked(float x, float z, float r, float lane) const = 0;
+    // the occupier faction's descriptor value of key (a "$key" alternate:
+    // the faction-style props, basePropTower, basePropHut, ...); "" = none
+    virtual RString FactionClass(const char* /*key*/) const { return RString(); }
     // the prop object of s still stands (a destroyed one still stands)
     virtual bool Exists(const BasePropState& s) const = 0;
     // create s's prop and bind it (s.prop, or s.token in a fake)

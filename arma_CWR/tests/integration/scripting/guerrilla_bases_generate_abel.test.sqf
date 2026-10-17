@@ -21,6 +21,11 @@
 //        authored roster is 32, the generated garrisons Rgen 12, and
 //        poolStart max(24, R + 2K) - Rgen = 60 - 12 = 48.
 //    g7  the win roster takes all six.
+//    g8  object-free footprints (step 3): no solid map object (a building,
+//        a wall, a fence, a gate, a rock: gmBaseSiteObjects) stands within
+//        60 m of a generated base's centre, the reach of its layout.  Ground
+//        truth 2026-10-17: both picks also carry no minor kind (outpost
+//        sites serve every Abel need, so the fallback never fires).
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }
@@ -83,5 +88,10 @@ triAssertEq [((gmOccupierForces) select 1), 48]
 // ---- g7: the win roster takes all six ---------------------------------------
 triSimUntil { ((gmCampaignEnd) select 5) > 0 }
 triAssertEq [((gmCampaignEnd) select 5), 6]
+
+// ---- g8: object-free footprints ---------------------------------------------
+bgBad = ""
+{bgName = _x select 0; bgP = _x select 2; {if (_x select 3) then {bgBad = bgBad + format ["[%1: %2 at %3]", bgName, _x select 0, _x select 1]}} forEach (gmBaseSiteObjects [bgP select 0, bgP select 1, 60])} forEach bgGen
+triAssertEq [bgBad, ""]
 
 triEndTest
