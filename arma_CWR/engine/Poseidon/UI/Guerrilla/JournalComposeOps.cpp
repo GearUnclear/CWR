@@ -292,7 +292,7 @@ void ComposeOperations(JournalDocument& doc, const ComposeContext& ctx)
     pen.Subtitle(Standing(in, OpenLine(CountObjectives(ctx))));
 
     static const MenuEntry kOperations[] = {
-        {"Objectives", "#GM_OBJECTIVES", "What we mean to do, and what is done."},
+        {"Objectives", "#GM_OBJECTIVES", "Open ones first, then failed, then done."},
         {"Suggested actions", "#GM_ACTIONS", "The next moves, in order."},
         {"Supplies", "#GM_SUPPLY", "Treasury, manpower, caches, dealers."},
         {"Resistance strength", "#GM_FACTION", "War level, ground held, the occupier."},
@@ -664,7 +664,8 @@ void ComposeStrength(JournalDocument& doc, const ComposeContext& ctx)
             tiers = tiers + Fmt("WL %d", toInt(in.occupierTierThresholds[i]));
         }
         pen.Line(RString("The occupier steps up at ") + tiers +
-                     RString(": better troops, heavier vehicles, sharper eyes."),
+                     RString(". Each time they bring better troops and heavier vehicles, and see through our "
+                             "cover sooner."),
                  VoiceType, InkPencil);
     }
 

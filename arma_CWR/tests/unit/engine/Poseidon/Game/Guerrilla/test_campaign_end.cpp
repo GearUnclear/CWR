@@ -394,11 +394,11 @@ TEST_CASE("CampaignEnd - roster, latch and end clock survive save/load", "[game]
 TEST_CASE("CampaignEnd - the victory and debriefing text", "[game][guerrilla][campaignend]")
 {
     const std::string line = Str(CampaignEnd::VictoryLine("on Malden", "Outpost"));
-    CHECK(line == "Outpost is ours, the last base they held. No occupier flag flies on Malden now.");
+    CHECK(line == "Outpost is ours. It was the last base they held on Malden.");
     CHECK(Str(CampaignEnd::VictoryLine("in the Sinai", "")) ==
-          "Their last base is ours. No occupier flag flies in the Sinai now.");
+          "We took their last base. They hold nothing in the Sinai now.");
     CHECK(Str(CampaignEnd::VictoryLine(nullptr, nullptr)) ==
-          "Their last base is ours. No occupier flag flies on the island now.");
+          "We took their last base. They hold nothing on the island now.");
     CHECK(Str(CampaignEnd::DebriefingTitle("Malden")) == "Malden is free.");
     CHECK(Str(CampaignEnd::DebriefingTitle("")) == "The island is free.");
     CHECK(Str(CampaignEnd::DebriefingBody("on Malden", 4, 9)) ==

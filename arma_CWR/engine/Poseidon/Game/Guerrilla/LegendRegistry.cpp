@@ -1255,8 +1255,8 @@ RString LegendRegistry::ApplySnapshot(const CompanionSnapshot& snapshot, bool li
                 }
                 else
                 {
-                    RecordDeed(row, RString("Became a legend of the resistance."), LDAward);
-                    snprintf(line, sizeof(line), "%s has become a legend of the resistance.", (const char*)after);
+                    RecordDeed(row, RString("Became one of our legends."), LDAward);
+                    snprintf(line, sizeof(line), "%s is one of our legends now.", (const char*)after);
                 }
                 WriteEntry(row, RString(line), JKGood);
                 if (announcement.GetLength() > 0)

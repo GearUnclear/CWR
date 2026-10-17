@@ -260,7 +260,7 @@ RString CharacterCaption(const JournalCharacterView& ch)
 // something the title has not already said.
 const char* HistoryBeatGloss(int k)
 {
-    static const char* const kGloss[3] = {"The ancient grievance.", "The broken settlement.", "The stand remembered."};
+    static const char* const kGloss[3] = {"The old grudge.", "The deal that fell apart.", "What they still remember."};
     return (k >= 0 && k < 3) ? kGloss[k] : "";
 }
 

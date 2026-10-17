@@ -280,12 +280,11 @@ RString CampaignEnd::VictoryLine(const char* islandPhrase, const char* lastZone)
     char line[384];
     if (lastZone && *lastZone)
     {
-        snprintf(line, sizeof(line), "%s is ours, the last base they held. No occupier flag flies %s now.", lastZone,
-                 where);
+        snprintf(line, sizeof(line), "%s is ours. It was the last base they held %s.", lastZone, where);
     }
     else
     {
-        snprintf(line, sizeof(line), "Their last base is ours. No occupier flag flies %s now.", where);
+        snprintf(line, sizeof(line), "We took their last base. They hold nothing %s now.", where);
     }
     return RString(line);
 }

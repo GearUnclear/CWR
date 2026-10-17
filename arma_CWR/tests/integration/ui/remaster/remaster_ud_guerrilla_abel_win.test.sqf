@@ -62,7 +62,7 @@ triAssertGe [(cwState select 6), 1]
 triAssertEq [(cwState select 7), cwLast]
 
 // -- the native victory line, exactly once -------------------------------------
-cwLine = format ["%1 is ours, the last base they held. No occupier flag flies on Malden now.", cwLast]
+cwLine = format ["%1 is ours. It was the last base they held on Malden.", cwLast]
 cwHits = 0
 cwI = 0
 while {cwI < gmJournalCount} do {if (((gmJournalEntry cwI) select 1) == cwLine) then {cwHits = cwHits + 1}; cwI = cwI + 1}

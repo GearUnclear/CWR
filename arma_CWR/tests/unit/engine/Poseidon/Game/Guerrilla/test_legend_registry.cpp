@@ -487,12 +487,12 @@ TEST_CASE("Legend registry - each award fires exactly once, at its own threshold
     // COLONEL: the second award takes a DIFFERENT slot and makes a Legend
     Journal::Instance().Clear();
     const std::string secondNotice = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 1900.0f)));
-    CHECK(secondNotice.find("has become a legend of the resistance") != std::string::npos);
+    CHECK(secondNotice.find("is one of our legends now") != std::string::npos);
     CHECK(secondNotice.find(Str(registry.CompanionDisplayName(0))) != std::string::npos);
     CHECK(registry.Row(r).awardMask == (LAFirst | LASecond));
     CHECK(FilledSlots(registry.Row(r)) == 2); // added, never swapped
     CHECK(registry.Row(r).legend);
-    CHECK(AnyEntryIncludes(Journal::Instance(), "has become a legend of the resistance"));
+    CHECK(AnyEntryIncludes(Journal::Instance(), "is one of our legends now"));
     CHECK(CountDeeds(registry.Row(r), LDAward) == 2);
     const std::string legend = Str(registry.DisplayName(registry.Row(r)));
     CHECK(legend != awarded);
@@ -529,7 +529,7 @@ TEST_CASE("Legend registry - both thresholds crossed in one jump award both slot
     CHECK(CountDeeds(registry.Row(r), LDAward) == 2);
     // exactly two award lines, plus the one promotion line for the ladder step
     CHECK(AnyEntryIncludes(Journal::Instance(), "is now known as"));
-    CHECK(AnyEntryIncludes(Journal::Instance(), "has become a legend of the resistance"));
+    CHECK(AnyEntryIncludes(Journal::Instance(), "is one of our legends now"));
     CHECK(AnyEntryIncludes(Journal::Instance(), "promoted to COLONEL"));
     CHECK(Journal::Instance().EntryCount() == 3);
     CHECK(CountEntriesFor(Journal::Instance(), id) == 3);
@@ -1698,7 +1698,7 @@ TEST_CASE("Legend registry - earned names and announcements survive death and re
     CHECK(promoted.find("promoted to CORPORAL") != std::string::npos);
     const std::string awards = Str(registry.PollCompanionsForTest(OneCompanion("Petra", 1900)));
     CHECK(awards.find("is now known as") != std::string::npos);
-    CHECK(awards.find("has become a legend of the resistance") != std::string::npos);
+    CHECK(awards.find("is one of our legends now") != std::string::npos);
     const std::string name = Str(registry.CompanionDisplayName(0));
     const int at = registry.FindByCompIndex(0);
     REQUIRE(at >= 0);

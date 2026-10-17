@@ -1546,17 +1546,17 @@ TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Ma
 
     CHECK(Str(rec.openingPage1) ==
           "The people of Malden still tell how families near Larche lost rights their grandparents had "
-          "expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. A "
-          "complaint could bring armed visitors to the same door where neighbours once gathered.");
+          "expected to leave to the children. Soviet Army troops arrived with orders to enforce obedience. From "
+          "then on, anyone who complained could expect armed men at the door.");
     CHECK(Str(rec.openingPage2) ==
           "People near Houdan accepted a settlement they could live with. When the authorities broke it, even "
-          "patient neighbours talked of fighting. Fighting followed. FIA fighters remember the dead through "
-          "surviving friends, who can still describe their laughter as readily as their deaths.");
+          "patient neighbours talked of fighting. Fighting followed. FIA fighters remember the dead mostly "
+          "through the friends who survived them. Those friends still tell funny stories about them.");
     CHECK(Str(rec.eventTitle[0]) == "Terrace Claims near Larche");
     CHECK(Str(rec.eventText[0]) ==
           "Families near Larche built terraces on the slopes and farmed them for generations. Surveyors later "
           "divided the land into plots and registered it under outside owners. The families who had built and "
-          "maintained the terraces were left without a recognised claim to the ground that fed them.");
+          "maintained the terraces were left with no recognised claim to them.");
     CHECK(Str(rec.eventTitle[1]) == "Closed Roads near Houdan");
     CHECK(Str(rec.eventText[1]) ==
           "Representatives near Houdan agreed that the high ground would remain common and the roads open. "
@@ -1570,7 +1570,7 @@ TEST_CASE("Faction history - worked example A, FIA against the Soviet Army on Ma
 
     const RString bio = GenerateBioForced(rec, 0, RString("Petra"), RString("FIA"), false, 0, 0);
     CHECK(Str(bio) == "Petra worked as a farmhand near Larche until the landlord evicted the family from its rented "
-                      "fields. The farmhand kept writing poems and still hoped to publish a collection.");
+                      "fields. The farmhand still writes poems and talks about publishing a collection.");
 }
 
 TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance on Lebanon",
@@ -1594,14 +1594,13 @@ TEST_CASE("Faction history - worked example B, the IDF fielded as the resistance
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "Near Ghajar, families in Lebanon inherited an old dispute along with their grandparents' "
-          "belongings. Outsiders had claimed what kept those families fed. Hizballah units controlled the main "
-          "roads. People learned which guards would listen, which would shout, and when to turn around without "
-          "arguing.");
+          "Near Ghajar, families in Lebanon have been in the same dispute since their grandparents' time. "
+          "Outsiders had claimed what they lived on. Hizballah units controlled the main roads. People learned "
+          "which guards would listen, which would shout, and when to turn around without arguing.");
     CHECK(Str(rec.openingPage2) ==
           "Representatives near Tyre came home with an agreement and promises. When the authorities broke it, "
           "neighbours demanded to know what happened. IDF troops lost people in the fighting that followed. "
-          "Some families still ask returning fighters for news nobody wants to give.");
+          "Some families still ask returning fighters about relatives who never came back.");
     CHECK(Str(rec.eventTitle[1]) == "Pump Restrictions near Tyre");
     CHECK(Str(rec.eventText[1]) ==
           "Witnesses from six villages signed an agreement near Tyre to share water and keep the coast road "
@@ -1642,14 +1641,14 @@ TEST_CASE("Faction history - worked example C, the PLO against the IDF in the Si
     const HistoryRecord rec = GenerateHistoryForced(in, forced);
 
     CHECK(Str(rec.openingPage1) ==
-          "For generations, families near Nuweiba in the Sinai taught children where they belonged. Then "
-          "outsiders arrived with papers saying the children had no claim. Once IDF forces arrived, residents "
-          "watched their words in public. Families argued behind closed doors about whether silence was keeping "
-          "anyone safe anymore.");
+          "For generations, families near Nuweiba in the Sinai showed their children which ground was theirs. "
+          "Later, outsiders came with papers giving it to other owners. Once IDF forces arrived, residents "
+          "watched what they said in public. At home, families argued over whether keeping quiet was doing them "
+          "any good.");
     CHECK(Str(rec.openingPage2) ==
           "Near El Tor, both sides agreed to a settlement. After the authorities broke it, residents brought "
-          "copies to confront the guards. Later fighting left empty places at family tables. PLO fighters "
-          "keep the names, including those neighbours still find difficult to discuss.");
+          "copies to confront the guards. Later fighting cost many families a son or daughter. PLO fighters "
+          "keep the names, including some that neighbours would rather not talk about.");
     CHECK(Str(rec.eventTitle[0]) == "Water Rights near Nuweiba");
     CHECK(Str(rec.eventTitle[2]) == "Delaying Action near Ras Nasrani");
     CHECK(Str(rec.eventText[2]) ==

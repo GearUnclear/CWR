@@ -144,7 +144,7 @@ triAssertIncludes [(gmJournalStatusText "Companions"), gmLegAward2]
 gmLegNew2 = ""
 gmLegI = gmLegJ1
 while {gmLegI < gmJournalCount} do {gmLegNew2 = gmLegNew2 + " " + ((gmJournalEntry gmLegI) select 1); gmLegI = gmLegI + 1}
-triAssertIncludes [gmLegNew2, "become a legend of the resistance"]
+triAssertIncludes [gmLegNew2, "is one of our legends now"]
 
 // -- nothing rerolls. The history is generated once, in the seeding tick, and
 //    persisted as resolved prose ------------------------------------------------
