@@ -81,6 +81,11 @@ orObs setCombatMode "BLUE"
 {_x allowDammage false} forEach (units orObs)
 doStop (units orObs)
 {orObs reveal _x} forEach (units orHold)
+// the observers face the hold squad and watch it: reveal makes the three known
+// but never seen, and the group reports a contact (posReported, which the
+// sighting scan reads) only after one of its men sees it inside his eye cone;
+// a stopped unit spawns facing north, away from a squad to its south-west
+{_x setDir (((orOPos select 0) - ((getPos _x) select 0)) atan2 ((orOPos select 1) - ((getPos _x) select 1))); _x doWatch orOPos} forEach (units orObs)
 player setPos [7922, 8500, 0]
 triSimUntil { call orSample; not ((gmZoneSim orO) select 0) }
 triAssertEq [((gmZone orO) select 2), gmResistanceSide]

@@ -4,19 +4,28 @@
 //  "bank surplus survivors into garrisons instead of dropping them").  The
 //  companion of guerrilla_forces_bank_garrison: the same strike home to a
 //  full pool, but with EVERY occupier base pinned at its garrisonMax there is
-//  no room to bank into, and the units over poolStart are dropped.  Boots the
+//  no room to bank into, and the crew over poolStart are dropped.  Boots the
 //  SHIPPED Guerrilla.Abel template (occupierForces = 1) on the full Remaster:
-//    f1  as b1 of the companion (a real camera, STRONG, DORMANT, the fast
-//        refill on a 1 s director tick);
-//    f2  the player walks out west; every occupier base is stored and
-//        pinned at its garrisonMax, the Southeast Compound included;
-//    f3  a test-lever strike on a held town far from the player; the pool is
-//        forced back to poolStart while it is out;
+//    f1  as b1 of the companion (a real camera, STRONG, DORMANT, wakeTowns
+//        99 so the director never wakes, the fast refill on a 1 s director
+//        tick);
+//    f2  the player walks out west; every occupier base that is not a CITY
+//        or CAMP (the generated bases included) is stored and pinned at its
+//        garrisonMax, the Southeast Compound among them;
+//    f3  a held CITY more than 2 km from the player is handed to the
+//        resistance and a test-lever strike (gmForcesForce "strike") flies
+//        at it abstract; the pool is forced back to poolStart while it is
+//        out;
 //    f4  the airframe and its pilot come home: the pool stays at poolStart
-//        (sampled every frame) and no base's reserve plus pending moved, so
-//        the units over poolStart left the ledger: dropped.
-//  tri reads no engine log: the "dropped" line itself is pinned in the unit
-//  cases ([occupierforces], [counterattack]); here the ledger shows it.
+//        (sampled every frame) and no base's reserve plus pending moved.
+//        The crew has no room at its base and none anywhere to bank, so it
+//        is dropped; the hull's units are not banked as bodies either:
+//        under forcesBankHulls 0 (the default since 7765904) they become a
+//        stored spare hull at a base (gmOccupierLedger), which neither the
+//        pool nor a base's reserve plus pending counts.
+//  tri reads no engine log: the "dropped" and "stored as a spare hull" lines
+//  are pinned in the unit cases ([occupierforces], [counterattack]); here the
+//  pool and the bases show them.
 // ============================================================================
 
 triSimUntil { GM_LIB_READY }

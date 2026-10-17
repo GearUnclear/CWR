@@ -117,6 +117,11 @@ afObs = [afOcc, gmFactionSquad [gmOccupierSide, 1, 2], afObsPos] call GM_fnSpawn
 afObs setCombatMode "BLUE"
 {_x allowDammage false} forEach (units afObs)
 doStop (units afObs)
+// the observers face the hold squad and watch it: reveal makes the three known
+// but never seen, and the group reports a contact (posReported, which the
+// sighting scan reads) only after one of its men sees it inside his eye cone;
+// a stopped unit spawns facing north, away from a squad to its south-west
+{_x setDir (((afGPos select 0) - ((getPos _x) select 0)) atan2 ((afGPos select 1) - ((getPos _x) select 1))); _x doWatch afGPos} forEach (units afObs)
 // the sighting scan (5 s) reports the three at Goisse
 afRep = 0
 afT1 = time
