@@ -1,6 +1,7 @@
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/ParticleDrop.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -2311,17 +2312,67 @@ bool IsParticleDropArgumentCountSupported(int count)
     return count == 18 || count == 19;
 }
 
-GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
+bool GetParticleDropWorldPosition(Vector3& ret, GameValuePar oper, ParticleDropSurfaceY surfaceY)
 {
-    // GetPos is the global ::GetPos (declared at file scope above).
+    // The array form of the script position commands (::GetRelPos then ::GetPos):
+    // [x, y] or [x, y, z], z the height above the land or sea surface (0 when
+    // left out). The inverse of the position the OnTimer script receives.
+    const GameArrayType& Array = oper;
+    if (Array.Size() < 2 || Array.Size() > 3)
+    {
+        return false;
+    }
+    for (int i = 0; i < Array.Size(); i++)
+    {
+        if (Array[i].GetType() != GameScalar)
+        {
+            return false;
+        }
+    }
+    const float x = Array[0];
+    const float z = Array[1];
+    const float aboveSurface = Array.Size() == 3 ? static_cast<float>(Array[2]) : 0.0f;
+    ret = Vector3(x, aboveSurface + surfaceY(x, z), z);
+    return true;
+}
 
-    const GameArrayType& Array = oper1;
+namespace
+{
+// ParseParticleDrop reports through the script state when it has one; the
+// unit tests parse without one.
+void DropTypeError(const GameState* state, GameType expected, GameType was)
+{
+    if (state)
+    {
+        state->TypeError(expected, was);
+    }
+}
 
+void DropGenericError(const GameState* state)
+{
+    if (state)
+    {
+        state->SetError(EvalGen);
+    }
+}
+
+float LandscapeSurfaceYAboveWater(float x, float z)
+{
+    return GLandscape->SurfaceYAboveWater(x, z);
+}
+} // namespace
+
+ParticleDropParse ParseParticleDrop(const GameState* state, const GameArrayType& Array, ParticleDropRequest& out,
+                                    ParticleDropSurfaceY surfaceY)
+{
     // In case number of parameters doesn't match required number.
     if (!IsParticleDropArgumentCountSupported(Array.Size()))
     {
-        state->SetError(EvalDim, Array.Size(), 19);
-        return GameValue();
+        if (state)
+        {
+            state->SetError(EvalDim, Array.Size(), 19);
+        }
+        return ParticleDropParse::Rejected;
     }
 
     // Match the required types of parameters and get its values
@@ -2329,200 +2380,170 @@ GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
     // ShapeName
     if (Array[0].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[0].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[0].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // AnimationName
     if (Array[1].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[1].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[1].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _Type
     if (Array[2].GetType() != GameString)
     {
-        state->TypeError(GameString, Array[2].GetType());
-        return GameValue();
+        DropTypeError(state, GameString, Array[2].GetType());
+        return ParticleDropParse::Rejected;
     }
-    EParticleType ParticleType;
     RString STRPT = Array[2];
     if (STRPT == RString("Billboard"))
     {
-        ParticleType = PT_Billboard;
+        out.type = PT_Billboard;
     }
     else if (STRPT == RString("SpaceObject"))
     {
-        ParticleType = PT_SpaceObject;
+        out.type = PT_SpaceObject;
     }
     else
     {
-        state->SetError(EvalGen);
-        return GameValue();
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
     }
 
     // _TimerPeriod
     if (Array[3].GetType() != GameScalar)
     {
-        state->TypeError(GameScalar, Array[3].GetType());
-        return GameValue();
+        DropTypeError(state, GameScalar, Array[3].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _LifeTime
     if (Array[4].GetType() != GameScalar)
     {
-        state->TypeError(GameScalar, Array[4].GetType());
-        return GameValue();
+        DropTypeError(state, GameScalar, Array[4].GetType());
+        return ParticleDropParse::Rejected;
     }
 
     // _MoveVelocity
     if (Array[6].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[6].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[6].GetType());
+        return ParticleDropParse::Rejected;
     }
-    Vector3 MoveVelocity;
-    if (!GetVector3(MoveVelocity, Array[6]))
+    if (!GetVector3(out.moveVelocity, Array[6]))
     {
-        state->SetError(EvalGen);
-        return GameValue();
-    }
-
-    // _RotationVelocity
-    if (Array[7].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[7].GetType());
-        return GameValue();
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
     }
 
-    // _Weight
-    if (Array[8].GetType() != GameScalar)
+    // _RotationVelocity, _Weight, _Volume, _Rubbing
+    for (int i = 7; i <= 10; i++)
     {
-        state->TypeError(GameScalar, Array[8].GetType());
-        return GameValue();
-    }
-
-    // _Volume
-    if (Array[9].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[9].GetType());
-        return GameValue();
-    }
-
-    // _Rubbing
-    if (Array[10].GetType() != GameScalar)
-    {
-        state->TypeError(GameScalar, Array[10].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameScalar)
+        {
+            DropTypeError(state, GameScalar, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
     // _Size
     if (Array[11].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[11].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[11].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArraySize = Array[11];
-    AutoArray<float> Size(ArraySize.Size());
-    Size.Resize(ArraySize.Size());
+    out.size.Resize(ArraySize.Size());
     for (int i = 0; i < ArraySize.Size(); i++)
     {
         if (ArraySize[i].GetType() != GameScalar)
         {
-            state->TypeError(GameScalar, ArraySize[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameScalar, ArraySize[i].GetType());
+            return ParticleDropParse::Rejected;
         }
-        Size[i] = ArraySize[i];
+        out.size[i] = ArraySize[i];
     }
 
     // _Color
     if (Array[12].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[12].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[12].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArrayColor = Array[12];
-    AutoArray<Color> PColor(ArrayColor.Size());
-    PColor.Resize(ArrayColor.Size());
+    out.color.Resize(ArrayColor.Size());
     for (int i = 0; i < ArrayColor.Size(); i++)
     {
         if (ArrayColor[i].GetType() != GameArray)
         {
-            state->TypeError(GameArray, ArrayColor[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameArray, ArrayColor[i].GetType());
+            return ParticleDropParse::Rejected;
         }
         Color AuxColor;
         if (!GetColor(AuxColor, ArrayColor[i]))
         {
-            state->SetError(EvalGen);
-            return GameValue();
+            DropGenericError(state);
+            return ParticleDropParse::Rejected;
         }
-        PColor[i] = AuxColor;
+        out.color[i] = AuxColor;
     }
 
     // _AnimationPhase
     if (Array[13].GetType() != GameArray)
     {
-        state->TypeError(GameArray, Array[13].GetType());
-        return GameValue();
+        DropTypeError(state, GameArray, Array[13].GetType());
+        return ParticleDropParse::Rejected;
     }
     const GameArrayType& ArrayAnimationPhase = Array[13];
-    AutoArray<float> AnimationPhase(ArrayAnimationPhase.Size());
-    AnimationPhase.Resize(ArrayAnimationPhase.Size());
+    out.animationPhase.Resize(ArrayAnimationPhase.Size());
     for (int i = 0; i < ArrayAnimationPhase.Size(); i++)
     {
         if (ArrayAnimationPhase[i].GetType() != GameScalar)
         {
-            state->TypeError(GameScalar, ArrayAnimationPhase[i].GetType());
-            return GameValue();
+            DropTypeError(state, GameScalar, ArrayAnimationPhase[i].GetType());
+            return ParticleDropParse::Rejected;
         }
-        AnimationPhase[i] = ArrayAnimationPhase[i];
+        out.animationPhase[i] = ArrayAnimationPhase[i];
     }
 
-    // _RandomDirectionPeriod
-    if (Array[14].GetType() != GameScalar)
+    // _RandomDirectionPeriod, _RandomDirectionIntensity
+    for (int i = 14; i <= 15; i++)
     {
-        state->TypeError(GameScalar, Array[14].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameScalar)
+        {
+            DropTypeError(state, GameScalar, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
-    // _RandomDirectionIntensity
-    if (Array[15].GetType() != GameScalar)
+    // OnTimer, BeforeDestroy
+    for (int i = 16; i <= 17; i++)
     {
-        state->TypeError(GameScalar, Array[15].GetType());
-        return GameValue();
-    }
-
-    // OnTimer
-    if (Array[16].GetType() != GameString)
-    {
-        state->TypeError(GameString, Array[16].GetType());
-        return GameValue();
-    }
-
-    // BeforeDestroy
-    if (Array[17].GetType() != GameString)
-    {
-        state->TypeError(GameString, Array[17].GetType());
-        return GameValue();
+        if (Array[i].GetType() != GameString)
+        {
+            DropTypeError(state, GameString, Array[i].GetType());
+            return ParticleDropParse::Rejected;
+        }
     }
 
     // Object
-    Vector3 Position;
     if (Array.Size() == 19 && Array[18].GetType() == GameObject)
     {
         const Object* pObject = static_cast<GameDataObject*>(Array[18].GetData())->GetObject();
         if (pObject == nullptr)
         {
-            return GameValue();
+            return ParticleDropParse::NoTarget;
         }
+        Vector3 Position;
         if (Array[5].GetType() == GameArray)
         {
+            // Model space, exactly [x, y, z].
             if (!GetVector3(Position, Array[5]))
             {
-                state->SetError(EvalGen);
-                return GameValue();
+                DropGenericError(state);
+                return ParticleDropParse::Rejected;
             }
         }
         else if (Array[5].GetType() == GameString)
@@ -2533,36 +2554,46 @@ GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
         }
         else
         {
-            state->TypeError(GameArray, Array[5].GetType());
-            return GameValue();
+            DropTypeError(state, GameArray, Array[5].GetType());
+            return ParticleDropParse::Rejected;
         }
-        Position = pObject->PositionModelToWorld(Position);
-        MoveVelocity = pObject->DirectionModelToWorld(MoveVelocity);
+        out.position = pObject->PositionModelToWorld(Position);
+        out.moveVelocity = pObject->DirectionModelToWorld(out.moveVelocity);
+        return ParticleDropParse::Ready;
     }
-    else
+
+    // No object (an 18-element array, or a 19th element that is not an object,
+    // such as "" or a string naming a variable): a world position, read the way
+    // the position commands read one.
+    if (Array[5].GetType() != GameArray)
     {
-        // In case there is no object assigned and position reference is not an array...
-        if (Array[5].GetType() != GameArray)
-        {
-            state->TypeError(GameArray, Array[5].GetType());
-            return GameValue();
-        }
-        else
-        {
-            if (!GetVector3(Position, Array[5]))
-            {
-                state->SetError(EvalGen);
-                return GameValue();
-            }
-        }
+        DropTypeError(state, GameArray, Array[5].GetType());
+        return ParticleDropParse::Rejected;
+    }
+    if (!GetParticleDropWorldPosition(out.position, Array[5], surfaceY))
+    {
+        DropGenericError(state);
+        return ParticleDropParse::Rejected;
+    }
+    return ParticleDropParse::Ready;
+}
+
+GameValue ParticleDrop(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& Array = oper1;
+    ParticleDropRequest request;
+    if (ParseParticleDrop(state, Array, request, &LandscapeSurfaceYAboveWater) != ParticleDropParse::Ready)
+    {
+        return GameValue();
     }
 
     LODShapeWithShadow* shape = Shapes.New(GetShapeName(Array[0]), false, false);
     if (shape)
     {
-        CParticle* Particle = new CParticle(shape, Array[1], ParticleType, Array[3], Array[4], Position, MoveVelocity,
-                                            Array[7], Array[8], Array[9], Array[10], Size, PColor, AnimationPhase,
-                                            Array[14], Array[15], Array[16], Array[17]);
+        CParticle* Particle =
+            new CParticle(shape, Array[1], request.type, Array[3], Array[4], request.position, request.moveVelocity,
+                          Array[7], Array[8], Array[9], Array[10], request.size, request.color, request.animationPhase,
+                          Array[14], Array[15], Array[16], Array[17]);
         GLOB_WORLD->AddCloudlet(Particle);
     }
 
