@@ -168,7 +168,7 @@ GM_cSquad = gmFactionSquad [gmResistanceSide, gmWarLevel, GM_HOLD_COUNT]
 #cnotify
 hint format ["%1 liberated", GM_cEv select 1]
 ; journal: diary line + the matching starter objective flips DONE
-? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["Risen. The town is ours.", GM_cEv select 1, "good"]
+? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalNote ["The town has risen. It's ours now.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) == "CITY") : gmJournalObjective ["firstTown", "", "DONE"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalNote ["Liberated. Garrison gone; holding squad in place.", GM_cEv select 1, "good"]
 ? ((GM_cRec select GM_Z_TYPE) != "CITY") : gmJournalObjective ["firstZone", "", "DONE"]

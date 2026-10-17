@@ -34,8 +34,8 @@ const ManualTopic kManual[] = {
     {"GM_MAN_MODE",
      "The campaign",
      "what this is",
-     {"One fighter, one camp, an occupied island. There is no script to follow: take the island zone by zone, "
-      "build a cell, and hold what you take against an occupier that grows stronger as you do.",
+     {"You start with one fighter and a camp on an occupied island. Nothing is scripted. Take the island a zone "
+      "at a time, build a cell, and hold what you take; the occupier gets stronger as you do.",
       "This dossier is written as the campaign runs. Dispatches is the day's page; Operations carries the "
       "objectives and the next moves; People and Places are the ledgers; Chronicles is the whole record; "
       "Reference is this handbook.",
@@ -51,7 +51,7 @@ const ManualTopic kManual[] = {
      {"Every place that matters is a zone with a flag on the map. Green is ours, red the occupier, yellow "
       "neutral, white contested.",
       "!TYPE|WHAT IT IS, AND HOW IT IS WON",
-      "|~wCAMP|yours from the start; recruit, train and keep the record here, and keep it",
+      "|~wCAMP|yours from the start; recruit, train and keep the record here. Hold on to it",
       "|~wBASE|outpost, airfield or port with an occupier garrison; clear the garrison, hold the ground",
       "|~wTOWN|civilians with a support figure 0 to 100; support past 60, then fighters in the town",
       "A held base pays income and gets a holding squad. A risen town pays too and counts toward the war.",
@@ -66,8 +66,8 @@ const ManualTopic kManual[] = {
       "!IF|THEN", "|~yoccupier in|the meter is contested and freezes; kill or drive them out",
       "|~yyou leave|the meter fades; alone, the defenders drive it down fast",
       "|~gmeter 100|the base flips: income opens, a holding squad forms, regional heat spikes",
-      "A patrol or a QRF that walks in contests the base like a garrison does. A capture is never safe until it "
-      "is done.",
+      "A patrol or a QRF that walks in contests the base just as a garrison does, so a capture can still stall "
+      "until the meter reaches 100.",
       nullptr}},
     {"GM_MAN_TOWNS",
      "Towns and support",
@@ -97,8 +97,8 @@ const ManualTopic kManual[] = {
       "!AT THE CAMP|COSTS|GIVES", "|~wRecruit|1 HR|a rifleman in your group with the best pattern in issue",
       "|~wSpecialist|R|a medic, gunner or anti-tank man",
       "|~wTrain squad|R|skill for the whole group, up to a cap that grows with the war level",
-      "Manpower is bodies: one HR is one recruit, and the pool has a ceiling. Resources buy specialists and "
-      "training; they do nothing in the treasury.",
+      "Each HR is one recruit, and the HR pool has a ceiling. Resources buy specialists and training, and are "
+      "no use left sitting in the treasury.",
       nullptr}},
     {"GM_MAN_LOOT",
      "Arms and caches",
@@ -114,15 +114,15 @@ const ManualTopic kManual[] = {
      "named fighters",
      {"Named companions fight in your group, gain standing from kills and survival, and are promoted through the "
       "ranks. Each promotion raises their skill; the roster shows the progress to the next rank.",
-      "Death is permanent. A fallen companion is gone for good and the record keeps the line.",
+      "Death is permanent. When a companion dies, the record keeps a line for them.",
       "Companions are rebuilt beside you after a load from their saved record: rank, standing, kit.", nullptr}},
     {"GM_MAN_UNDERCOVER",
      "Undercover",
      "how the occupier reads you",
-     {"To occupier eyes you begin as a civilian. Each occupier group judges you separately, from what it can see.",
+     {"To the occupier you start out as a civilian. Each occupier group judges you separately, from what it can see.",
       "!YOU ARE|SEEN AS|RANGE", "|~wUnarmed|~gCIVILIAN|any", "|~wRifle slung|~ySUSPECTED|under 20 m, or from behind",
-      "|~wWeapon out|~ySUSPECTED|any, with line of sight", "|~wFiring|~rBLOWN|every group in view",
-      "@standing", "|~gCLEAN|no group has identified you", "|~ySUSPECTED|a group is checking you",
+      "|~wWeapon out|~ySUSPECTED|any, with line of sight", "|~wFiring|~rBLOWN|every group in view", "@standing",
+      "|~gCLEAN|no group has identified you", "|~ySUSPECTED|a group is checking you",
       "|~rBLOWN|identified; the journal counts the patrols who know you", "#Cover returns when",
       "- You walk away from every group that identified you.", "- The weapon is stowed and no witness is left.",
       "#Cover also fails when", "- A stolen occupier vehicle is seen close up.",
@@ -130,8 +130,8 @@ const ManualTopic kManual[] = {
     {"GM_MAN_SAVE",
      "Keeping the record",
      "saving and the record",
-     {"Save whenever you like: the whole campaign is kept. Zones, garrisons, alert, the cell, companions, "
-      "patterns, caches, this dossier.",
+     {"Save whenever you like. A save keeps the whole campaign: zones, garrisons, alert, the cell, companions, "
+      "patterns, caches and this dossier.",
       "The record under Chronicles is the running account of the campaign: captures, risings, quick reaction "
       "forces, blown cover, promotions, losses, patterns, saves and restores. It survives saving and loading.",
       "After a restore the record notes it and everything resumes where it was.", nullptr}},

@@ -1340,7 +1340,8 @@ TEST_CASE("Journal compose - the PR #61 content pins hold at the document level"
         const std::string res = Joined(Page(doc, "GM_FACTION"));
         CHECK(Has(res, "War level 2 of 10."));
         CHECK(Has(res, "Island held: 25%. Level 3 at 40%; the ladder runs 20, 40, 55, 70, 85."));
-        CHECK(Has(res, "The occupier steps up at WL 3, WL 5: better troops, heavier vehicles, sharper eyes."));
+        CHECK(Has(res, "The occupier steps up at WL 3, WL 5. Each time they bring better troops and heavier vehicles, "
+                       "and see through our cover sooner."));
         CHECK(Has(res, "Towns: 1 risen, 1 rising, 1 neutral, 1 occupied, 1 unscouted."));
         CHECK(Has(res, "Bases: 1 held, 1 contested, 1 occupied."));
         CHECK(Has(res, "Occupier under arms: 21 known. Airfield 9, Chapoi 2, Seaport 6, La Trinite 4."));

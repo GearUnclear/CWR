@@ -71,14 +71,14 @@ static const char* const kGenericPlace[] = {"the old crossing", "the high pass",
 static const char* const kOpenA[kVariants] = {
     "The people of {Island} still tell how families near {Place} lost rights their grandparents had "
     "expected to leave to the children.",
-    "Near {Place}, families {IslandIn} inherited an old dispute along with their grandparents' "
-    "belongings. Outsiders had claimed what kept those families fed.",
-    "For generations, families near {Place} {IslandIn} taught children where they belonged. Then "
-    "outsiders arrived with papers saying the children had no claim.",
+    "Near {Place}, families {IslandIn} have been in the same dispute since their grandparents' time. "
+    "Outsiders had claimed what they lived on.",
+    "For generations, families near {Place} {IslandIn} showed their children which ground was theirs. "
+    "Later, outsiders came with papers giving it to other owners.",
     "People {IslandIn} trace the trouble to {Place}, where outside owners dismissed local agreements. "
     "Families kept copies that nobody in authority would read.",
-    "Families near {Place} {IslandIn} kept old agreements long after outsiders stopped respecting them. "
-    "Each generation tried to reclaim those rights.",
+    "Families near {Place} {IslandIn} kept to old agreements long after outsiders stopped honouring them. "
+    "Each generation took the matter up again.",
     "Families near {Place} {IslandIn} inherited their grandparents' old unanswered petitions. They kept "
     "sending new ones, asking for the same rights."};
 
@@ -86,31 +86,31 @@ static const char* const kOpenA[kVariants] = {
 // opening slot B - the coming of the occupier's line ({Occupier})
 // ---------------------------------------------------------------------------
 static const char* const kOpenB[kVariants] = {
-    "{OccupierCap} arrived with orders to enforce obedience. A complaint could bring armed visitors to "
-    "the same door where neighbours once gathered.",
+    "{OccupierCap} arrived with orders to enforce obedience. From then on, anyone who complained could "
+    "expect armed men at the door.",
     "{OccupierCap} controlled the main roads. People learned which guards would listen, which would "
     "shout, and when to turn around without arguing.",
-    "Once {Occupier} arrived, residents watched their words in public. Families argued behind closed doors "
-    "about whether silence was keeping anyone safe anymore.",
+    "Once {Occupier} arrived, residents watched what they said in public. At home, families argued over "
+    "whether keeping quiet was doing them any good.",
     "{OccupierCap} posted guards and demanded obedience. Some residents tried written petitions; others "
     "stopped expecting an answer and began meeting behind shutters.",
-    "{OccupierCap} made the rules, but local people still had to eat. Neighbours traded small favours "
+    "{OccupierCap} made the rules. Local people still had to eat, so neighbours traded small favours "
     "and warned each other about patrols.",
-    "When {Occupier} took control, arguments with officials became arguments with armed soldiers. Even "
-    "close friends disagreed about how much they could endure."};
+    "When {Occupier} took control, officials had armed soldiers behind them in every dispute. Close "
+    "friends fell out over how much more to put up with."};
 
 // ---------------------------------------------------------------------------
 // opening slot C - the breach ({Place} = the beat-1 place)
 // ---------------------------------------------------------------------------
 static const char* const kOpenC[kVariants] = {
-    "An agreement near {Place} briefly gave families reason to hope. The authorities broke its terms, "
-    "leaving its signers to explain.",
+    "An agreement near {Place} held for a while. The authorities broke its terms, and people blamed the "
+    "local signers.",
     "Representatives near {Place} came home with an agreement and promises. When the authorities broke "
     "it, neighbours demanded to know what happened.",
     "Near {Place}, both sides agreed to a settlement. After the authorities broke it, residents brought "
     "copies to confront the guards.",
-    "An agreement near {Place} promised peace. The authorities broke it, and residents who trusted the "
-    "negotiators felt betrayed.",
+    "An agreement near {Place} was supposed to end the trouble. The authorities broke it, and residents "
+    "stopped trusting the negotiators.",
     "People near {Place} accepted a settlement they could live with. When the authorities broke it, even "
     "patient neighbours talked of fighting.",
     "Near {Place}, negotiators promised an agreement would protect local rights. After the authorities "
@@ -120,18 +120,18 @@ static const char* const kOpenC[kVariants] = {
 // opening slot D - the inheritance ({Resistance}, {Place} = the beat-0 place)
 // ---------------------------------------------------------------------------
 static const char* const kOpenD[kVariants] = {
-    "Fighting followed. {ResistanceCap} remember the dead through surviving friends, who can still "
-    "describe their laughter as readily as their deaths.",
+    "Fighting followed. {ResistanceCap} remember the dead mostly through the friends who survived them. "
+    "Those friends still tell funny stories about them.",
     "{ResistanceCap} lost people in the fighting that followed. Some families still ask returning "
-    "fighters for news nobody wants to give.",
-    "Later fighting left empty places at family tables. {ResistanceCap} keep the names, including those "
-    "neighbours still find difficult to discuss.",
+    "fighters about relatives who never came back.",
+    "Later fighting cost many families a son or daughter. {ResistanceCap} keep the names, including some "
+    "that neighbours would rather not talk about.",
     "Fighting killed residents. {ResistanceCap} hear from families still wanting to know where their "
     "relatives were taken or buried.",
-    "The fighting left families grieving. {ResistanceCap} still hear from survivors who remember who "
-    "came back and who never came home.",
-    "People died when the dispute became fighting. {ResistanceCap} carry those losses into every "
-    "argument about what another battle might cost."};
+    "Many did not come home from the fighting. {ResistanceCap} still write down what survivors remember "
+    "about each of them.",
+    "People died when the dispute turned into fighting. {ResistanceCap} bring those deaths up whenever "
+    "someone argues for another battle."};
 
 // ---------------------------------------------------------------------------
 // beat 0 - the ancient grievance. NO faction construction: the grievance
@@ -144,7 +144,7 @@ static const char* const kTitle0[kVariants] = {"Terrace Claims near {Place}", "W
 static const char* const kText0[kVariants] = {
     "Families near {Place} built terraces on the slopes and farmed them for generations. Surveyors later "
     "divided the land into plots and registered it under outside owners. The families who had built and "
-    "maintained the terraces were left without a recognised claim to the ground that fed them.",
+    "maintained the terraces were left with no recognised claim to them.",
     "Families near {Place} dug and maintained four wells that supplied the valley. Water was shared "
     "under arrangements passed down through nine generations. An outside clerk later registered the "
     "wells as private property, giving an absent owner control over water the families had previously "
@@ -233,7 +233,7 @@ static const char* const kText2[kVariants] = {
 // ---------------------------------------------------------------------------
 static const char* const kBio0Friendly[kVariants] = {
     "{Name} worked as a farmhand near {Place} until the landlord evicted the family from its rented "
-    "fields. The farmhand kept writing poems and still hoped to publish a collection.",
+    "fields. The farmhand still writes poems and talks about publishing a collection.",
     "When fighting scattered the family, {Name}, a furniture maker from {Place}, fled with a younger "
     "sibling. The siblings later rented a shed and began making tables and chairs again.",
     "{Name}, a survey assistant from {Place}, accepted a bribe to falsify a boundary, costing a family "
@@ -252,7 +252,7 @@ static const char* const kBio0Hostile[kVariants] = {
     "army needed more transport, the quartermaster confiscated civilian carts and sent them to military "
     "supply depots.",
     "{Name} earned a living playing at weddings before enlisting for regular wages. Posted near {Place}, "
-    "the musician hoped to leave the army and earn money performing again.",
+    "the musician meant to leave the army and go back to playing for money.",
     "While posted near {Place}, military engineer {Name} approved an unsafe bridge repair. The bridge "
     "collapsed, killing two comrades. Since then, the engineer has personally checked every repair "
     "before allowing soldiers to cross.",
@@ -272,7 +272,7 @@ static const char* const kBio1Friendly[kVariants] = {
     "clinics. Police searched the workshop and seized the spare parts, leaving several couriers without "
     "working bicycles.",
     "{Name}, a bookkeeper from {Place}, kept records for a resistance cell but left after its leader "
-    "ordered the bookkeeper's friend beaten as an informer. The leader had no evidence.",
+    "ordered the bookkeeper's friend beaten as an informer on no evidence.",
     "{Name}, a tailor from {Place}, made the clothes for a younger sibling's wedding. The authorities "
     "refused the tailor permission to travel, and the wedding went ahead without them.",
     "{Name} skipped classes to print leaflets against rent increases near {Place}, but dreaded speaking "
@@ -296,7 +296,8 @@ static const char* const kBio1Hostile[kVariants] = {
 
 static const char* const kBio2Friendly[kVariants] = {
     "{Name}, a radio repairer from {Place}, joined a resistance transmitter crew after fighting "
-    "destroyed the shop. The repairer maintained equipment and hoped to host music programmes someday.",
+    "destroyed the shop. The repairer maintained the equipment and planned to host music programmes after "
+    "the war.",
     "{Name}, a quarry worker from {Place}, deserted a resistance position during an attack. A surviving "
     "fighter later reported that a companion had stayed to defend the position and been killed.",
     "An orchard worker from {Place}, {Name} led relatives away from fighting along familiar farm roads. "

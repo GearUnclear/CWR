@@ -56,7 +56,7 @@
 
 GM_pWonSeen = false
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
-gmJournalNote ["Reached the Camp alone. One rifle.", "Camp", "plain"]
+gmJournalNote ["Reached the Camp alone with one rifle.", "Camp", "plain"]
 
 ; ============================================================================
 ;  MAIN LOOP - idle until the native campaignLoaded event arrives
@@ -99,7 +99,7 @@ aP removeAction GM_pSaveAct
 GM_pSaveAct = aP addAction ["Save Game", "\gmcore\scripts\campaign.sqs"]
 
 hint "Guerrilla campaign restored."
-gmJournalNote ["Record restored. The campaign resumes where it stood.", "", "plain"]
+gmJournalNote ["Record restored. Picking up where we left off.", "", "plain"]
 goto "loop"
 
 ;  #won - the win latch fired: say so once while the end clock runs. The
