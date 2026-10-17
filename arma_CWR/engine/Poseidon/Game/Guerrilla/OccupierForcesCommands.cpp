@@ -150,8 +150,23 @@
 //                                  (0/1, the forcesBankHulls key),
 //                                  "surgeDecayHours" (0.001..24 h),
 //                                  "surgeShare" (0..2), "lossWindowHours"
-//                                  (0.01..24 h; constants, no config key).
-//                                  Returns true when the key is known.
+//                                  (0.01..24 h; constants, no config key);
+//                                  the lever round (16): "urgentExit"
+//                                  (0..100), "strikeMinFighters" (0..12),
+//                                  "alarmMin" (1..12), and the eight
+//                                  levers "cadence" (60..7200 s),
+//                                  "strength" (0.25..4, at activation
+//                                  only), "recovery" (0.5..48 h), "reach"
+//                                  (0..86400 s), "aggression" (0.25..4),
+//                                  "waves" (0..3), "minimums" (1..10),
+//                                  "concurrency" (2..6), plus "difficulty"
+//                                  (0..3, every lever at that preset): a
+//                                  lever re-derives every field it folds
+//                                  (CounterAttack's maxLive,
+//                                  forcesLiveHullsMax and firstTownChance
+//                                  included), overwriting earlier field
+//                                  values.  Returns true when the key is
+//                                  known.
 //   gmForcesForce [what, value] test lever; what:
 //                                  "pool"        sets the pool (>= 0) and
 //                                                re-steps the band (no-op
@@ -718,6 +733,28 @@ static GameValue GmForcesTune(const GameState* /*state*/, GameValuePar oper1)
     else if (stricmp(key, "lossWindowHours") == 0)
     {
         t.lossWindowHours = ClampF(v, 0.01f, 24.0f);
+    }
+    else if (stricmp(key, "urgentExit") == 0)
+    {
+        t.urgentExit = ClampF(v, 0, 100);
+    }
+    else if (stricmp(key, "strikeMinFighters") == 0)
+    {
+        t.strikeMinFighters = (int)ClampF(v, 0, 12);
+    }
+    else if (stricmp(key, "alarmMin") == 0)
+    {
+        t.alarmMin = (int)ClampF(v, 1, 12);
+    }
+    else if (t.levers.Set(key, v))
+    {
+        // one of the eight levers or "difficulty": re-derive every field it
+        // folds (overwriting earlier field levers), CounterAttack's too.
+        // strength sizes the pool at activation only; heatCapSpike is read
+        // at mission load only
+        const OccupierForcesLevers levers = t.levers;
+        levers.Derive(t);
+        levers.Derive(CounterAttack::Instance().TuningMutable());
     }
     else
     {

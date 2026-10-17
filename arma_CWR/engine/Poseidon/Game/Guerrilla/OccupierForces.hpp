@@ -191,7 +191,8 @@
 //   forcesHqAssaultMin bodies on HqPos; its cooldown is kept under the name
 //   HqCooldownName.
 //   URGENCY.  Latched by a YELLOW / RED alert edge on a held town (since its
-//   flip) or heat >= forcesUrgentHeat; released when heat < UrgentExitHeat.
+//   flip) or heat >= forcesUrgentHeat; released when heat < the tuning's
+//   urgentExit (UrgentExitHeat 35 at Normal, 0.7 x the forcesAggression entry).
 //   TOKENS.  0..forcesTokensMax, full at the wake, one per
 //   forcesTokenInterval[band] ({600, 1050, 1800, 0} s since 2026-10-15).
 //   Each director tick with a token, a candidate, CanOperate() and fewer
@@ -278,7 +279,8 @@
 // (ForcePackages::HullPrice(.., true)); the infantry is still paid by the
 // source base.  STRIKES (7.3, D17): a jet or attack helicopter, bought ONLY
 // while STRONG, either on an URGENT held town with knownFighters >=
-// StrikeMinFighters that is not inside its strike window, or as the opener
+// the tuning's strikeMinFighters (StrikeMinFighters 3 at Normal,
+// forcesAggression) that is not inside its strike window, or as the opener
 // of a director base retake or HQ assault with a defender reported
 // (OPENERS above).  It is bought right after the
 // ground operation on that target launches (a town strike alone when no
@@ -297,7 +299,8 @@
 // ALARM ANSWERS (8.2, D4).  A zone the resistance does not hold that sits
 // RED is an alarm.  At the sighting cadence the director answers ONE alarm
 // at a time with a CAKAlarm order (origin CAOAlarm): minimum
-// ForcePackages::AlarmMinBodies, always urgent (THIN: the cheapest package
+// the tuning's alarmMin (forcesMinimums; ForcePackages::AlarmMinBodies at
+// Normal), always urgent (THIN: the cheapest package
 // only), lethality against the zone's sightings, sources every occupier base
 // but the alarm zone, ground packages and the transport helicopter.
 // alarmPos is the zone's latest reported position (VZero = the centre).
@@ -319,6 +322,7 @@
 
 #include <Poseidon/Game/Guerrilla/CounterAttackOrders.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/OccupierForcesLevers.hpp>
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
@@ -366,7 +370,12 @@ struct OccupierForcesTuning
     // forcesOn, ZoneRegistry's baseRetake fallback) uses this one default.
     static constexpr float KeyDefault = 1.0f;
 
-    bool enabled = false;           // occupierForces (0/1); false until a CfgGuerrillaZones is read
+    bool enabled = false; // occupierForces (0/1); false until a CfgGuerrillaZones is read
+    // the eight author levers (OccupierForcesLevers.hpp, 16): LoadFromParams
+    // derives the fields marked "lever" below from them, then reads every
+    // old key as an expert override.  The defaults below are Normal's
+    // derivation, field by field.  strength is read here (PoolStartOf)
+    OccupierForcesLevers levers;
     int poolMin = 24;               // forcesPoolMin, 0..200
     int poolPerTown = 2;            // forcesPoolPerTown, 0..8
     float refillHours = 4.0f;       // forcesPoolRefillHours, 0.5..48 (gmForcesTune: 0.01..48)
@@ -385,14 +394,17 @@ struct OccupierForcesTuning
     int nWaveThresholds = 2;
     float waveWarLevel = 1.0f; // forcesWaveWarLevel, 0..3: occupier war level per landed wave
     // the director (6, phase 3)
-    int wakeTowns = 2;            // forcesWakeTowns, 2..99: distinct towns to wake
-    int opsMax = 2;               // forcesOpsMax, 0..6: born operations in flight
+    int wakeTowns = 2; // forcesWakeTowns, 2..99: distinct towns to wake
+    int opsMax = 2;    // forcesOpsMax, 0..6: born operations in flight
     // forcesOpsMaxStrong, 0..6: the born-operation cap while STRONG is
     // max(forcesOpsMax, this); 0 (or 2) gives the old cap of forcesOpsMax
     // in every band
     int opsMaxStrong = 3;
-    float heatFull = 40.0f;       // forcesHeatFull, 1..100: candidate heat
-    float urgentHeat = 50.0f;     // forcesUrgentHeat, 1..100: urgency entry
+    float heatFull = 40.0f;   // forcesHeatFull, 1..100: candidate heat
+    float urgentHeat = 50.0f; // forcesUrgentHeat, 1..100: urgency entry
+    // the urgency exit (lever forcesAggression: 0.7 x the lever's urgentHeat;
+    // OccupierForces::UrgentExitHeat at Normal; no config key)
+    float urgentExit = 35.0f;
     float townCooldown = 1800.0f; // forcesTownCooldown, s: after a repel or a cancel
     // forcesRearmHeat, 0..100 (2026-10-16, video 4): when a rest ends on a
     // zone the resistance still holds and the sighting table still reports
@@ -403,6 +415,12 @@ struct OccupierForcesTuning
     float rearmHeat = 40.0f;
     float pushoutQuiet = 1800.0f; // forcesPushoutQuiet, s: no sighting this long = quiet
     int retakeMin = 4;            // forcesRetakeMin, 1..12: minimum retake bodies
+    // the alarm answer's minimum (lever forcesMinimums; ForcePackages::AlarmMinBodies
+    // at Normal; no config key)
+    int alarmMin = 4;
+    // reported fighters a town strike needs (lever forcesAggression:
+    // round(3 / a); OccupierForces::StrikeMinFighters at Normal; no config key)
+    int strikeMinFighters = 3;
     float lethalityMargin = 1.2f; // forcesLethalityMargin, 1..3
     float urgentCostShare = 1.5f; // forcesUrgentCostShare, 1..3
     float intelDecay = 1800.0f;   // forcesIntelDecay, s: sightings expire
@@ -411,41 +429,41 @@ struct OccupierForcesTuning
     // instead, never below spareCapFloor (and never above the minimum).
     // forcesSpareCap 0 restores the one-source rule (min(max(forcesRetakeMin,
     // garrisonMax), 12) from one base, else refused)
-    bool spareCap = true;          // forcesSpareCap (0/1)
-    int spareCapFloor = 6;         // forcesSpareCapFloor, 1..12
+    bool spareCap = true;  // forcesSpareCap (0/1)
+    int spareCapFloor = 6; // forcesSpareCapFloor, 1..12
     // the arrival rule (6.5, 2026-10-15): when the cheapest lethal package
     // needs more than slowEta s, any faster package within slowCostShare x
     // its price may go; when it needs more than airEta s, a helicopter
     // insertion may go whatever its price.  0 = off (the old choice)
-    float slowEta = 900.0f;        // forcesSlowEta, 0..86400 s
-    float slowCostShare = 3.0f;    // forcesSlowCostShare, 1..5
-    float airEta = 1500.0f;        // forcesAirEta, 0..86400 s
+    float slowEta = 900.0f;     // forcesSlowEta, 0..86400 s
+    float slowCostShare = 3.0f; // forcesSlowCostShare, 1..5
+    float airEta = 1500.0f;     // forcesAirEta, 0..86400 s
     // the road quote (6.5, 2026-10-16): a ground leg whose road route is not
     // known (none, a detour the service does not march, or not planned this
     // tick) is quoted as the straight distance x roadFactor
-    float roadFactor = 1.5f;       // forcesRoadFactor, 1..5
+    float roadFactor = 1.5f; // forcesRoadFactor, 1..5
     // phase 4: the HQ assault and the waves (7.1, 16)
-    int hqAssaultMin = 6;          // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
-    int waveDwell = 2;             // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
-    bool waveFinal = true;         // forcesWaveFinal (0/1): the final stand when one roster base is left
-    float waveShare = 0.5f;        // forcesWaveShare, 0..2: wave size, share of poolStart
-    int waveMin = 12;              // forcesWaveMin, 0..200
-    int waveMax = 48;              // forcesWaveMax, 0..400
-    float waveLead = 600.0f;       // forcesWaveLead, 0..7200 s inbound
-    float waveLeadFinal = 120.0f;  // forcesWaveLeadFinal, 0..7200 s inbound for the final stand
-    float waveRetakeShare = 0.5f;  // forcesWaveRetakeShare, 0..1: strikes' share of the wave
-    int waveOps = 4;               // forcesWaveOps, 0..8: strike targets (and reinforce columns)
-    float waveCluster = 2000.0f;   // forcesWaveCluster, 100..20000 m
-    int waveSurge = 12;            // forcesWaveSurge, 0..48: final-stand surge above strength
-    RString waveHub;               // forcesWaveHub: the template's hub by zone name ("" = the rule)
+    int hqAssaultMin = 6;         // forcesHqAssaultMin, 1..12: minimum HQ assault bodies
+    int waveDwell = 2;            // forcesControlDwell, 1..10: consecutive due ticks before a wave fires
+    bool waveFinal = true;        // forcesWaveFinal (0/1): the final stand when one roster base is left
+    float waveShare = 0.5f;       // forcesWaveShare, 0..2: wave size, share of poolStart
+    int waveMin = 12;             // forcesWaveMin, 0..200
+    int waveMax = 48;             // forcesWaveMax, 0..400
+    float waveLead = 600.0f;      // forcesWaveLead, 0..7200 s inbound
+    float waveLeadFinal = 120.0f; // forcesWaveLeadFinal, 0..7200 s inbound for the final stand
+    float waveRetakeShare = 0.5f; // forcesWaveRetakeShare, 0..1: strikes' share of the wave
+    int waveOps = 4;              // forcesWaveOps, 0..8: strike targets (and reinforce columns)
+    float waveCluster = 2000.0f;  // forcesWaveCluster, 100..20000 m
+    int waveSurge = 12;           // forcesWaveSurge, 0..48: final-stand surge above strength
+    RString waveHub;              // forcesWaveHub: the template's hub by zone name ("" = the rule)
     // forcesLog (0/1, default 0; gmForcesTune "log"): the director log toggle
     // (DirectorLog.hpp).  On, the per-action lines of this service,
     // CounterAttack and OccupierAir log at INFO; off (and not --dev), DEBUG.
     bool log = false;
     // the repel ladder, massing, the value weights and the rest jitter (6.3,
     // 2026-10-16, video 5).  Constants, NOT config keys: each has a
-    // gmForcesTune lever of the same name (tests, tuning), so a later fold
-    // into the eight author levers can take them or keep them constant.
+    // gmForcesTune lever of the same name (tests, tuning).  The lever
+    // consolidation (16) kept every one of them constant.
     float escalateLethality = 1.5f; // "escalateLethality", 1..3: L_req x this after one repel
     float escalateInfantry = 2.0f;  // "escalateInfantry", 0..4: infantry >= this x the fighters reported
     int approachRepels = 2;         // "approachRepels", 0..9: from this repel a different approach (0 = never)
@@ -640,12 +658,13 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // lifecycle ---------------------------------------------------------------
     void Clear();
     void InitMission(); // Clear + read the CfgGuerrillaZones keys
+    // the levers derive the tuning, then the old keys override (OccupierForcesLevers.cpp)
     void LoadFromParams(const ParamEntry* zonesCfg);
     const OccupierForcesTuning& Tuning() const { return _tuning; }
     OccupierForcesTuning& TuningMutable() { return _tuning; }
 
     // pure rules (unit-tested) ------------------------------------------------
-    // max(forcesPoolMin, R + forcesPoolPerTown * K)
+    // max(forcesPoolMin, round(forcesStrength x (R + forcesPoolPerTown * K)))
     static int PoolStartOf(const OccupierForcesTuning& t, int R, int K);
     // 0.75 + 0.5 * meanStanding / 100 (standing clamped to 0..100)
     static float StandingFactor(float meanStanding);

@@ -175,19 +175,19 @@ except `gmHeatDecayHeld` (a script global set in `core/init.sqs`).
 | `townRevertSupport` | 30 | a held town reverts below this support, not below `supportFlip` (range 0..`supportFlip`, repaired and logged; `= supportFlip` is the pre-hysteresis rule) |
 | `baseRetake` | follows `occupierForces` unless authored [code] | base recapture on (row 1b); 0 = held posts are permanent (the superseded decision R) |
 | `counterAttack` | 1 | 0 = no legacy dispatch at all |
-| `counterAttackFirstTownChance` | 0.4 | legacy dispatch probability for the first town (k = 0); range 0..1 |
+| `counterAttackFirstTownChance` | 0.4 | legacy dispatch probability for the first town (k = 0); range 0..1. Derived from `forcesAggression` (0.4a; an authored key is an expert override, below) |
 | `counterAttackChance` | 1.0 | legacy dispatch probability for every later town (k >= 1); with the director AWAKE it no longer answers |
 | `counterAttackSize` | 0.5 | the legacy force, as a share of `groupSize` (12): 6 bodies at war level 1 |
 | `counterAttackWarLevelStep` | 0.25 | force x max(1, 1 + step x (war level - 1)), capped at one group of 12; range 0..2 |
 | `counterAttackDelayMin` / `Max` | 120 / 300 | seconds between the flip and the launch (legacy, drawn per flip) |
-| `counterAttackSourceKeep` | 0.25 | share of a base's `garrisonMax` that never leaves it (every record) |
-| `counterAttackSpeed` / `counterAttackRoadFactor` | 4 / 1.3 | abstract speed (m/s) and road distance per straight metre, key off. With the key on travel uses the package's real speed (section 9.3) |
+| `counterAttackSourceKeep` | 0.25 | share of a base's `garrisonMax` that never leaves it (every record): it sets every base's spare, so it drives every director quote and the spare cap (Malden: Outposts 5, Harbour 6, Airfield 9) |
+| `counterAttackSpeed` | 4 | abstract speed (m/s), key off; with the key on travel uses the package's real speed (section 9.3), and `gmCounterAttackTune "speed"` is a test lever over it. `counterAttackRoadFactor` is retired (16acfd5): authored, it is ignored with a WARN, and every leg with no road route uses `forcesRoadFactor` (1.5, below) |
 | `counterAttackBirthMinToTarget` | 250 | no force is ever born this close to its target (m, range 0..2000) |
 | `counterAttackBirthGiveUp` | 600 | seconds a force waits when no birth point passes on its own route AND no other base's route passes (key on: then it tries the re-source once more and is cancelled unseen, every record, legacy DORMANT ones included; key off: it turns back and its strength returns to the base). A force held at the target edge by the player in the target counts toward it too, then is born at the edge unseen or cancelled unseen (range 30..86400) [commit 6e1ee27, 37e24ba] |
 | `counterAttackDefenderWeight` | 3 | one fighter is worth this many attackers: the legacy odds roll, and the director's required lethality |
 | `counterAttackRepelLoss` | 0.5 | share of a beaten legacy force that does not come home (key off) |
 | `counterAttackLiveTimeout` | 1200 | seconds an unresolved live squad stays before it withdraws (only out of the player's sight); the road march gets its own allowance (road left at 1 m/s + 120 s) |
-| `counterAttackMaxLive` | 2 | live infantry records at once (more wait) |
+| `counterAttackMaxLive` | 2 | live infantry records at once (more wait). Derived from `forcesConcurrency` (n - 1; an authored key is an expert override, below) |
 | `campaignEnd` | 1 | 0 = not a campaign: no win, no lose, and the template authors `occupierForces = 0` |
 | `campaignEndDelay` | 10 | seconds from a win or lose latch to the end mode [16] |
 | `simDiagInterval` | 60 | seconds between `[gmsim]` log lines (0 = off) |
@@ -195,46 +195,50 @@ except `gmHeatDecayHeld` (a script global set in `core/init.sqs`).
 | `budgetSideGroups` | 40 | WARN above this many groups with a living member on one side (engine cap 63; groups with no living member are reported as `emptyGroups`, not counted) [round 3.5] |
 | `emptyGroupRelease` | 60 [round 3.5] | seconds a group with no members and no links (no script handle, service record, waypoint or queued radio message) waits before the zone tick releases it (0 = off) |
 
-**Occupier forces.** Defaults and ranges from [16], confirmed in
-`OccupierForcesTuning` / `CounterAttackTuning` [code] unless marked.
+**Occupier forces.** Since the lever round (OCCUPIER-FORCES.md 16,
+`OccupierForcesLevers.{hpp,cpp}` [code]) an author tunes the director
+through eight levers and a difficulty key; Normal derives exactly the
+defaults the rest of this contract quotes. An authored lever key replaces
+its preset value (repaired into range, logged).
 
-| Key | Default | Meaning |
+| Key | Default (Easy / Normal / Hard / Brutal) | Meaning |
 |---|---|---|
-| `occupierForces` | 1 (engine default from phase 7, `OccupierForcesTuning::KeyDefault`) [phase 7, landing with this commit]; `campaignEnd = 0` missions author 0 | the layer: pool, director, real speeds, live resolution, waves, base recapture, the HQ meter, alarm answers, air |
-| `forcesPoolMin` / `forcesPoolPerTown` | 24 / 2 | `poolStart = max(Min, R + PerTown x K)` (ranges 0..200 / 0..8) |
-| `forcesPoolRefillHours` | 4 | hours from exhausted to full, garrisons included (0.5..48) |
-| `forcesPoolFloor` | 0.2 | no operation in THIN below this share of poolStart |
-| `forcesDirectorInterval` | 60 | director tick (s, 10..600) |
-| `forcesTokensMax` / `forcesTokenInterval[]` | 2 / {600, 1050, 1800, 0} [2026-10-15; was {1800, 2700, 3600, 0}] | command tokens; seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none) |
-| `forcesOpsMax` | 2 | born operations in flight (0..6) outside STRONG; unborn ones do not count; one source, the `OccupierForces` tuning (`OccupierForces::OpsMax`; `CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record) [commit 37e24ba] |
-| `forcesOpsMaxStrong` | 3 [2026-10-15; 0 or 2 restores the old cap] | born operations in flight while STRONG: max(`forcesOpsMax`, this) (0..6) |
-| `forcesLiveHullsMax` | 6 | live hulls at once (0..20) |
-| `forcesWakeTowns` | 2 | distinct towns that wake the director (2..99) |
-| `forcesHeatFull` | 40 | candidate heat (1..100) |
-| `forcesUrgentHeat` | 50 | urgency entry heat (exit below 35, a constant) |
-| `forcesTownCooldown` | 1800 | seconds a target rests after a repel or a cancel |
-| `forcesRearmHeat` | 40 [round 3.5; 0 = no re-arm, the old rule] | heat a held zone is held at after its rest ends with fighters still reported, until an operation goes (0..100; OCCUPIER-FORCES.md 6.3) |
-| `forcesPushoutQuiet` | 1800 | seconds without a sighting that make a held zone quiet |
-| `forcesIntelDecay` | 1800 | seconds a sighting row lives |
-| `forcesRetakeMin` | 4 | minimum retake bodies (1..12) |
-| `forcesSpareCap` / `forcesSpareCapFloor` | 1 / 6 [2026-10-15; `forcesSpareCap = 0` restores the one-source rule] | a post retake or HQ assault no single base can source takes the largest single-base spare, never below the floor (OCCUPIER-FORCES.md 7.2) |
-| `forcesSlowEta` / `forcesSlowCostShare` / `forcesAirEta` | 900 s / 3.0 / 1500 s [2026-10-15; 0 = off, the old choice] | the arrival rule of the package choice (OCCUPIER-FORCES.md 6.5); push-outs included since round 3.5 |
-| `forcesHqAssaultMin` | 6 | minimum HQ assault bodies (1..12) [code] |
-| `forcesLethalityMargin` / `forcesUrgentCostShare` | 1.2 / 1.5 | package choice (1..3) |
-| `forcesControlMilWeight` | 0.6 | weight of the roster in control C |
-| `forcesControlDwell` | 2 | consecutive due ticks before a wave fires (1..10) [code]; key absent from [16] |
-| `forcesWaveThresholds[]` / `forcesWaveFinal` | {0.75, 0.50} / 1 | control thresholds (at most 3) and the final stand |
-| `forcesWaveShare` / `Min` / `Max` | 0.5 / 12 / 48 | wave size, share of poolStart, clamped |
-| `forcesWaveLead` / `LeadFinal` | 600 / 120 | seconds inbound |
-| `forcesWaveRetakeShare` / `forcesWaveOps` / `forcesWaveCluster` | 0.5 / 4 / 2000 m | strikes: share of the wave, targets, cluster radius |
-| `forcesWaveSurge` / `forcesWaveHub` / `forcesWaveWarLevel` | 12 / "" / 1 | final-stand surge, hub by name, occupier war level per landed wave |
-| `forcesSortieTime` | 300 [16] | seconds a live strike spends over its target (range 60..1800; row 25); read from config since `bcca80e` [air] |
+| `occupierForces` | 1 (engine default from phase 7, `OccupierForcesTuning::KeyDefault`); `campaignEnd = 0` missions author 0 | the layer: pool, director, real speeds, live resolution, waves, base recapture, the HQ meter, alarm answers, air |
+| `forcesDifficulty` | 1 (0 Easy, 1 Normal, 2 Hard, 3 Brutal) | picks the preset of every lever below |
+| `forcesCadence` | 1200 / 600 / 420 / 300 s | seconds per operation while STRONG: `forcesTokenInterval[]` = {c, 1.75c, 3c, 0}, `forcesTownCooldown` = 3c |
+| `forcesStrength` | 0.75 / 1 / 1.25 / 1.5 | poolStart = max(`forcesPoolMin`, round(s x (R + 2K))), less the generated garrisons (section 10.1) |
+| `forcesRecovery` | 8 / 4 / 3 / 2 h | `forcesPoolRefillHours`, exhausted to full (section 10.1) |
+| `forcesReach` | 3000 / 1500 / 1200 / 900 s | the arrival rule: `forcesAirEta` = r, `forcesSlowEta` = 0.6r (0 = off) |
+| `forcesAggression` | 0.75 / 1 / 1.25 / 1.5 | `forcesHeatFull` = `forcesRearmHeat` = 40/a, `forcesUrgentHeat` = 50/a (exit 0.7 x), `forcesLethalityMargin` = 1.2a, town strike fighters round(3/a), `counterAttackFirstTownChance` = 0.4a, `heatCapSpike` = 40/a |
+| `forcesWaves` | level 0 / 1 / 2 / 3 | thresholds {0.70, 0.45} / {0.75, 0.50} / {0.80, 0.60} / {0.85, 0.65}, share 0.35 / 0.5 / 0.6 / 0.75, lead 900 / 600 / 450 / 300 s, retake share 0.4 to 0.7, war level per wave 0.75 to 1.5; the final stand at every level (section 11.2) |
+| `forcesMinimums` | 3 / 4 / 6 / 8 bodies | `forcesRetakeMin` and the alarm minimum = m; `forcesHqAssaultMin` = `forcesSpareCapFloor` = m + 2; the spare cap on |
+| `forcesConcurrency` | 2 / 3 / 4 / 5 | `forcesOpsMaxStrong` = n, `forcesOpsMax` = n - 1, `forcesLiveHullsMax` = 2n, `counterAttackMaxLive` = n - 1 |
+| `forcesLog` | 0 | 1 logs the director's per-action lines at INFO (OCCUPIER-FORCES.md 6.6); a diagnostic, outside the levers |
+| `forcesWaveHub` | "" | the wave hub by zone name (geography, outside the levers) |
 | `forcesOffMapEdge` | nearest | the parent nation's map edge for off-map air: "N", "S", "E" or "W"; absent or anything else = the edge nearest the target (row 25) |
 | `forcesTruck`, `forcesArmedCar`, `forcesApc`, `forcesTank` | ladder classification | ground hull class overrides, read from the occupier FACTION descriptor, not `CfgGuerrillaZones`; the shipped descriptors author none [code]. FACTION-PACKS.md documents them |
 | `forcesTransportHeli` / `forcesAttackHeli` / `forcesJet` (faction descriptor) | none (air is never classified from the ladder) | the air hulls; a package is offered only when its class is authored [commit bcca80e]. Authored for EAST (Mi17 / Mi24 / Su25), WEST (UH60 / Cobra / A10) and the @LoBo IDF, Egypt (both rosters), Syria and Jordan; none for GUER, Hizballah or PLO. The descriptor lint does not probe these classes yet (section 8) |
-| `forcesLiveHullsMax` owner | | read by `CounterAttack` (6, 0..20), not by `OccupierForcesTuning` [code] |
 | `standing` (per CITY) | 50 | initial occupier standing |
 | `gmHeatDecayHeld` (script) | 0.25 | heat bled per 10 s by every GREEN resistance-held zone |
+
+**Expert overrides.** Every other director key still reads when authored,
+and replaces only the field it names (its lever keeps deriving the rest),
+with one WARN per key and load (`<owner>: <key> is an expert override of
+the <lever> lever`, or `... of a constant`) [code]. No shipped template
+authors one. The full list with ranges and meanings is OCCUPIER-FORCES.md
+16; the folds:
+
+| Lever | Old keys it derives |
+|---|---|
+| `forcesCadence` | `forcesTokenInterval[]` {600, 1050, 1800, 0}, `forcesTownCooldown` 1800 |
+| `forcesStrength` | (`forcesPoolPerTown` 2 is scaled with it) |
+| `forcesRecovery` | `forcesPoolRefillHours` 4 |
+| `forcesReach` | `forcesAirEta` 1500, `forcesSlowEta` 900 |
+| `forcesAggression` | `forcesHeatFull` 40, `forcesUrgentHeat` 50, `forcesRearmHeat` 40, `forcesLethalityMargin` 1.2, `counterAttackFirstTownChance` 0.4, `heatCapSpike` 40 (ZoneRegistry, at mission load) |
+| `forcesWaves` | `forcesWaveThresholds[]` {0.75, 0.50}, `forcesWaveShare` 0.5, `forcesWaveLead` 600, `forcesWaveRetakeShare` 0.5, `forcesWaveWarLevel` 1 |
+| `forcesMinimums` | `forcesRetakeMin` 4, `forcesHqAssaultMin` 6, `forcesSpareCap` 1, `forcesSpareCapFloor` 6 |
+| `forcesConcurrency` | `forcesOpsMax` 2, `forcesOpsMaxStrong` 3, `forcesLiveHullsMax` 6 (read by `CounterAttack`), `counterAttackMaxLive` 2 |
+| constants | `forcesPoolMin` 24, `forcesPoolFloor` 0.2, `forcesDirectorInterval` 60, `forcesTokensMax` 2, `forcesWakeTowns` 2, `forcesPushoutQuiet` 1800, `forcesIntelDecay` 1800, `forcesUrgentCostShare` 1.5, `forcesSlowCostShare` 3.0, `forcesRoadFactor` 1.5 (the one road factor: a ground leg with no road route, quoted and marched, is the straight distance x this), `forcesControlMilWeight` 0.6, `forcesControlDwell` 2, `forcesWaveFinal` 1, `forcesWaveMin` / `Max` 12 / 48, `forcesWaveLeadFinal` 120, `forcesWaveOps` 4, `forcesWaveCluster` 2000 m, `forcesWaveSurge` 12, `forcesBankHulls` 0, `forcesSortieTime` 300 (read by `CounterAttack`, 60..1800) |
 
 **Saves.** The D2 clock is saved per zone (`recoverClock` on the zone row); a
 save from before it loads with a fresh clock. The S5 pending deposit is saved
@@ -1018,8 +1022,10 @@ legacy key: no longer read, a mission that authors it gets one WARN.
 its roster: every zone of a military type whose authored owner is the
 occupier, independent of `campaignEnd`. R is the roster's summed
 `garrisonMax`; K the administered, non-exempt CITY zones; G their summed
-`garrisonMax`. `poolStart = max(forcesPoolMin, R + forcesPoolPerTown x K)`
-(24, 2 [16]). An empty roster switches the service off for the session.
+`garrisonMax`. `poolStart = max(forcesPoolMin, round(forcesStrength x (R +
+forcesPoolPerTown x K)))` (24, 1, 2 [16]; the strength lever is 1 at Normal,
+so poolStart = R + 2K exactly), less the generated garrisons (OCCUPIER-FORCES.md
+5.5, 5.7). An empty roster switches the service off for the session.
 A SEEDED town (a map label, `seedCities`) counts in K and G only when it
 passes the settlement probe: dry land and at least 3 house-sized buildings
 within 300 m (OCCUPIER-FORCES.md 5.1, 16) [code]; authored towns always
@@ -1032,19 +1038,26 @@ save's K counts by the AUTHORED owner, so towns the player already holds
 stay in K (review M7) [code].
 
 **Refill (OF D8, OF D15).** Per hour `(poolStart + R + G) / forcesPoolRefillHours`
-(4 h [16]), accrued each director tick, scaled by the standing factor
+(4 h [16]: the `forcesRecovery` lever, 8 / 4 / 3 / 2 h by preset), accrued each director tick, scaled by the standing factor
 `0.75 + 0.5 x meanStanding / 100` [16] (exactly 1 at the default 50). Whole
 units enter the pool up to poolStart; only waves push it above. D2 regrowth
 draws first, at most 1 body per 600 s per zone, so an exhausted occupier
 fills its garrisons before its pool.
 
-**Bands (hysteresis, shares of poolStart [16]).**
+**Bands (hysteresis, shares of poolStart [16]).** The band is stepped on
+the strength, `min(pool + committed, max(poolStart, pool) - (lost -
+repaid))` (OCCUPIER-FORCES.md 5.6, round 4a [code]): an airframe out is
+committed, not spent, and losses the refill has not repaid within
+`lossWindowHours` (1 h) count against it. The token intervals are
+`forcesTokenInterval[]`, {600, 1050, 1800, 0} since acf2311 (2026-10-15;
+was {1800, 2700, 3600, 0}), derived from the `forcesCadence` lever as {c,
+1.75c, 3c, 0} (c = 600 at Normal) [code].
 
 | Band | Enter | Leave | Effect |
 |---|---|---|---|
-| STRONG | > 66 % | < 60 % | a token per 1800 s; post operations, HQ assaults and push-out (towns and posts) allowed |
-| STRETCHED | between | | a token per 2700 s |
-| THIN | < 33 % | > 40 % | a token per 3600 s; no operation below `forcesPoolFloor` (20 %); alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`, also in SPENT [code]) |
+| STRONG | > 66 % | < 60 % | a token per 600 s (c); post operations, HQ assaults and push-out (towns and posts) allowed |
+| STRETCHED | between | | a token per 1050 s (1.75c) |
+| THIN | < 33 % | > 40 % | a token per 1800 s (3c); no operation below `forcesPoolFloor` (20 %); alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`, also in SPENT [code]) |
 | SPENT | 0 | > 10 % | no tokens; reverts left hollow (`Deposit` grants nothing); no alarm answers. D2 keeps drawing on the refill, so the pool sits near 0 while garrisons are short and the band leaves SPENT once, at 10 %, without flapping |
 
 ### 10.2 Spending and routing (OCCUPIER-FORCES.md 5.3 to 5.5)

@@ -1176,8 +1176,8 @@ is not checked): the final push. The operation is always an HQ_ASSAULT on
     second token arriving during the hold: the purse is full (2) after any
     quiet spell, so the literal rule would end every hold at once.
 - **The ladder's numbers are constants**, not config keys: each has a
-  `gmForcesTune` lever of the same name for tests and a later fold into the
-  author levers (section 16): `escalateLethality` 1.5, `escalateInfantry`
+  `gmForcesTune` lever of the same name for tests; the lever round kept
+  them constant (section 16): `escalateLethality` 1.5, `escalateInfantry`
   2, `approachRepels` 2, `containRepels` 3, `massingMax` 3
   (`forcesMassingMax`), `restJitter` 0.2, `adjacentTown` 1000 m; the value
   weights 3 / 2 / 1 / 2 and the jitter salt 13 are `OccupierForces`
@@ -2379,88 +2379,156 @@ distance, and is not `headless`.
 
 ## 16. Internal knob reference (implementers only)
 
-Owners: OF = `OccupierForces`, CA = `CounterAttack`, Script =
-`core/init.sqs`. All keys sit in CfgGuerrillaZones unless marked.
-`gmForcesTune` accepts test ranges.
+**The levers** (phase 3 of round 4, owner decision 2; brief:
+`tmp/of-director-levers-audit.md`; code: `OccupierForcesLevers.{hpp,cpp}`).
+An author tunes the director through eight `CfgGuerrillaZones` levers.
+`forcesDifficulty` (0 Easy, 1 Normal, 2 Hard, 3 Brutal; default 1) picks the
+preset value of every lever; an authored lever key replaces its preset with
+its own value, repaired into its range and logged. Normal derives exactly
+the defaults from before the levers, field by field (the unit case
+"levers: Normal derives today's defaults"), so a template that authors no
+lever plays as before. The shipped templates author only `occupierForces`.
 
-| Key / value | Owner | Default | Range | Meaning |
+Every old key of the second table still reads, as an **expert override**:
+the levers derive their fields first, then an authored old key replaces
+the one field it names (its lever keeps deriving the others) and logs one
+WARN per key and load (`<owner>: <key> is an expert override of the
+<lever> lever`, or `... of a constant`). `gmForcesTune` keeps every field
+name it had and adds the levers by the names in brackets: a lever
+re-derives every field it folds, CounterAttack's three included,
+overwriting earlier field values; `strength` takes effect at the next
+activation (the pool is sized once) and ZoneRegistry's `heatCapSpike` at
+mission load only. Tuning is not saved: a load re-reads the mission config.
+
+| Lever ("gmForcesTune name") | Unit, range | Easy / Normal / Hard / Brutal | Folds (the Normal value) |
+|---|---|---|---|
+| `forcesDifficulty` ("difficulty") | preset, 0..3 | 0 / 1 / 2 / 3 | every lever below at that preset |
+| `forcesCadence` ("cadence") | c, seconds per operation while STRONG, 60..7200 | 1200 / 600 / 420 / 300 | `forcesTokenInterval[]` = {c, 1.75c, 3c, 0} ({600, 1050, 1800, 0}); `forcesTownCooldown` = 3c (1800 s) |
+| `forcesStrength` ("strength") | s, poolStart scale, 0.25..4 | 0.75 / 1 / 1.25 / 1.5 | poolStart = max(`forcesPoolMin`, round(s x (R + `forcesPoolPerTown` x K))), less the generated garrisons (5.5, 5.7); the Abel-like 60 becomes 45 / 60 / 75 / 90. Strike prices do not scale with it (NEXT question 1 stays open) |
+| `forcesRecovery` ("recovery") | hours from exhausted to full, 0.5..48 | 8 / 4 / 3 / 2 | `forcesPoolRefillHours` (4, D15) |
+| `forcesReach` ("reach") | r, seconds of ETA before it rides or flies, 0..86400 (0 = the arrival rule off) | 3000 / 1500 / 1200 / 900 | `forcesAirEta` = r (1500 s); `forcesSlowEta` = 0.6r (900 s) |
+| `forcesAggression` ("aggression") | a, 0.25..4 | 0.75 / 1 / 1.25 / 1.5 | `forcesHeatFull` = `forcesRearmHeat` = 40/a (40); `forcesUrgentHeat` = 50/a (50) with its exit at 0.7 x (35); `forcesLethalityMargin` = 1.2a (1.2: with `counterAttackDefenderWeight` 3, L_req = 3.6a per fighter); the town strike's reported fighters round(3/a) (3; 4 / 3 / 2 / 2); `counterAttackFirstTownChance` = 0.4a (0.4); ZoneRegistry `heatCapSpike` = 40/a (40) |
+| `forcesWaves` ("waves") | level, 0..3 | 0 / 1 / 2 / 3 | `forcesWaveThresholds[]` {0.70, 0.45} / {0.75, 0.50} / {0.80, 0.60} / {0.85, 0.65}; `forcesWaveShare` 0.35 / 0.5 / 0.6 / 0.75; `forcesWaveLead` 900 / 600 / 450 / 300 s; `forcesWaveRetakeShare` 0.4 / 0.5 / 0.6 / 0.7; `forcesWaveWarLevel` 0.75 / 1 / 1.25 / 1.5. Every level keeps two thresholds and the final stand |
+| `forcesMinimums` ("minimums") | m bodies, 1..10 | 3 / 4 / 6 / 8 | `forcesRetakeMin` = the alarm minimum = m (4); `forcesHqAssaultMin` = `forcesSpareCapFloor` = m + 2 (6); `forcesSpareCap` on |
+| `forcesConcurrency` ("concurrency") | n born operations in flight while STRONG, 2..6 | 2 / 3 / 4 / 5 | `forcesOpsMaxStrong` = n (3); `forcesOpsMax` = n - 1 (2); `forcesLiveHullsMax` = 2n (6); `counterAttackMaxLive` = n - 1 (2) |
+
+*Deviations from the audit's proposal.* (1) Waves: the audit's Easy
+{0.75} (one threshold) and Brutal {0.85, 0.65, 0.4} (three) would change
+the number of big moments, against D7; every level keeps two thresholds
+and the final stand and moves them instead (Easy later, Hard and Brutal
+earlier). The audit gave no retake share or war level per level; the
+levels step them by 0.1 and 0.25. (2) `forcesWaves` is a level, not a
+quantity, and `forcesConcurrency` starts at 2 (n = 1 would set
+`counterAttackMaxLive` to 0). (3) The audit's "one road factor" was
+already landed by 16acfd5 (`forcesRoadFactor` 1.5 for the quote and the
+march; `counterAttackRoadFactor` is retired: WARN, ignored), so it is a
+constant here. (4) The two exposure options are both kept: the difficulty
+key picks the presets, a lever key takes a value.
+
+**Constants, author keys outside the levers, and test levers.** Kinds:
+*lever* = a field a lever derives, its key an expert override; *constant
+(key)* = a constant whose old key is still an expert override; *constant*
+= no config key (a `gmForcesTune` or `gmCounterAttackTune` lever where
+named, else an engine constant); *author* = an author key outside the
+levers, no WARN; *legacy* = a `counterAttack*` key read as before, no
+WARN. Owners: OF = `OccupierForces`, CA = `CounterAttack`, ZR =
+`ZoneRegistry`, FP = `ForcePackages`, Script = `core/init.sqs`.
+
+| Key / value ("tune name") | Owner | Default (range) | Kind | Meaning |
 |---|---|---|---|---|
-| `occupierForces` | OF | 1 from phase 7 (`OccupierForcesTuning::KeyDefault`; 0 before it, Abel 1 from phase 3); `campaignEnd = 0` missions author 0 | 0/1 | Layer on/off |
-| `forcesLog` | OF (`OccupierForcesTuning::log`; `gmForcesTune "log"`) | 0 | 0..1 | Director log toggle (6.6): 1 logs the per-action lines of OF, CA and `OccupierAir` at INFO; 0 logs them at DEBUG unless the game runs with `--dev`. Read with the layer off too |
-| `forcesPoolMin` / `forcesPoolPerTown` | OF | 24 / 2 | 0..200 / 0..8 | `poolStart = max(Min, R + PerTown * K)` |
-| settlement probe (`LandscapeSettlementProbe::kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZoneRegistry | 3 / 300 m / 4 m | constants | A seeded CITY counts in K only on dry land with at least 3 buildings of bounding sphere over 4 m within 300 m; the Auto seed applies the same rule. Probed once, stored on the zone row (5.1) |
-| `forcesPoolRefillHours` | OF | 4 | 0.5..48 h | Exhausted to full, garrisons included |
-| `forcesPoolFloor` | OF | 0.2 | 0..1 | THIN operations floor |
-| band enter / leave | OF | STRONG 66/60, THIN 33/40, SPENT 0/10 % | constants | Hysteresis; D2 keeps running in SPENT |
-| `forcesDirectorInterval` | OF | 60 | 10..600 s | Tick |
-| sighting cadence | OF | 5 s (`alertInterval`) | | Intel sampling |
-| `forcesIntelDecay` | OF | 1800 | s | Sightings expire |
-| reveal limits | OF | sightings under 60 s, accuracy < 1 | constants | Strike crews only |
-| `forcesWakeTowns` | OF | 2 | 2..99 | Distinct towns to wake |
-| `forcesTokensMax` / `forcesTokenInterval[]` | OF | 2 / {600, 1050, 1800, 0} since 2026-10-15 (was {1800, 2700, 3600, 0}: author the array to restore it, `OccupierForcesTuning::LegacyTokenInterval`) | 0..6 / 0..86400 s per band | Command budget; seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none); the cadence table in 6.3 |
-| `forcesOpsMax` | OF | 2 | 0..6 | Born operations in flight outside STRONG; one source, the `OccupierForces` tuning (`OccupierForces::OpsMax`; `CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record; a wave order gets one more headroom at launch) |
-| `forcesOpsMaxStrong` | OF (`gmForcesTune "opsMaxStrong"`) | 3 since 2026-10-15 (old: 0 or 2, the cap of `forcesOpsMax` in every band) | 0..6 | The born cap while STRONG is max(`forcesOpsMax`, this) |
-| `forcesHeatFull` | OF | 40 | 1..100 | Candidate heat |
-| `gmHeatDecayHeld` | Script | 0.25 | per 10 s | Held-town decay |
-| `forcesUrgentHeat` / urgency exit | OF | 50 / 35 | 1..100 | Urgency band |
-| `forcesTownCooldown` | OF | 1800 | s | After a repel or a cancel |
-| `forcesRearmHeat` | OF (`gmForcesTune "rearmHeat"`) | 40 since 2026-10-16 (new key; 0 = the old rule, no re-arm) | 0..100 | The re-arm (6.3): a rest ending on a held zone with fighters reported holds its heat at least here until an operation goes, its reports decay or it changes hands; 40 = `forcesHeatFull`, so every roll lists it. Re-armed names saved, `gmOccupierForces` [30] |
-| `forcesPushoutQuiet` | OF | 1800 | s | Quiet-town threshold |
-| `forcesRetakeMin` / alarm minimum | OF | 4 / 4 | 1..12 | Minimum bodies; a base retake takes `min(max(forcesRetakeMin, garrisonMax), 12)`, lowered by the spare cap |
-| `forcesSpareCap` / `forcesSpareCapFloor` | OF (`gmForcesTune "spareCap"` / `"spareCapFloor"`) | 1 / 6 since 2026-10-15 (old: 0, the one-source rule) | 0/1 / 1..12 | The spare cap (7.2): a base retake or HQ assault no single base can source takes the largest single-base spare, never below the floor or above the minimum |
-| `forcesSlowEta` / `forcesSlowCostShare` | OF (`gmForcesTune "slowEta"` / `"slowCostShare"`) | 900 s / 3.0 since 2026-10-15 (old: `forcesSlowEta = 0`, off) | 0..86400 s (0 = off) / 1..5 | The arrival rule (6.5): past this ETA of the cheapest lethal package, any faster package within the share may go. Push-outs take it too since 2026-10-16 (old: push-outs kept the minimal package, 6.4); a foot quote under it stays foot |
-| `forcesAirEta` | OF (`gmForcesTune "airEta"`) | 1500 s since 2026-10-15 (old: 0, off) | 0..86400 s (0 = off) | The arrival rule (6.5): past this ETA a transport helicopter insertion may go whatever its price; push-outs included since 2026-10-16 |
-| `forcesRoadFactor` | OF (`gmForcesTune "roadFactor"`) | 1.5 since 2026-10-16 (old: the straight line, 1) | 1..5 | The road quote (6.5): a ground leg with no road route known (none, past the service's detour rule, or past the tick's plan budget) is quoted as the straight distance x this. A known road route is quoted as its length. Air always flies the straight line |
-| road quote cache (`RoadQuoteCache::DefaultTtl` / `DefaultPlansPerTick`) | OF (`RoadRoute.hpp`) | 600 s / 6 | constants | The road quote (6.5): an entry lives 600 s of mission time; the director plans at most 6 new pairs per tick, each pair at most once |
-| `forcesHqAssaultMin` | OF | 6 | 1..12 | Minimum HQ assault bodies |
-| `forcesLethalityMargin` / `forcesUrgentCostShare` | OF | 1.2 / 1.5 | 1..3 | Package choice |
-| prices: body, truck, armed car, APC, tank | OF | 1, 3, 4, 8, 14 | pool units | 6.5 |
-| prices: transport heli, attack heli, jet / off-map multiplier | OF | 10, 18, 22 / 1.5 | | 6.5 |
-| lethality: tiers / motorized / armed car / APC / tank / attack heli / jet | OF | 1.0-1.25-1.5 / 1.25 / 3 / 6 / 12 / 14 / 16 | | 6.5 |
-| foot speed / ground cruise / air cruise | OF | 1.5 m/s / 0.6 / 0.8 of `maxSpeed` (km/h converted) | | Key on only |
-| `forcesLiveHullsMax` | CA | 6 | 0..20 | Live hulls at once (read by `CounterAttack`, not `OccupierForcesTuning`) |
-| `forcesSortieTime` | OF | 300 | 60..1800 s | Strike time over target (read from config since `bcca80e`; the spike lever `gmAirSortie` still takes it as an argument, 300 when <= 0) |
-| heli LZ / landing tolerance | OF | 300-500 m / 100 m | | Insertion |
-| `forcesOffMapEdge` | OF (template) | nearest edge | N/S/E/W | Parent-nation side (read from config since `bcca80e`; the point lies 1500 m beyond the map, level with the target) |
-| `airAudible` | `OccupierAir` | 800 m | `gmAirTune` | Audible floor for aircraft |
-| `landOrderDist` | `OccupierAir` | 450 m | `gmAirTune` | Distance to the pad where `LandStarted` is ordered, re-issued every 5 s |
-| `departTimeout` | `OccupierAir` | 900 s | `gmAirTune` | Backstop: past it a departing airframe beyond the band is removed regardless of the cone |
-| `EscortGap` / `EscortSpread` / `EscortRejoin` | CA | 20 / 150 / 60 m | constants | Escort birth offset; the carrier waits past 150 m, drives on inside 60 m |
-| dismount speed / `StopMax` | CA | 1.5 m/s / 15 s | constants | The carrier brakes at the 250 m edge; dismount at or below the speed, or after `StopMax` |
-| road-route join radius | CA (`RoadRouteServiceJoinRadius`) | 2000 m | constant | Stage 2 crosses to a town-net link within this distance of the source |
-| hull gate | CA | night above `NightEffect` 0.2: the headlight band; 2.5 m ray | constants | Hull births and deletions (review M8) |
-| Leftover check | CA | 30 s | constant | Leftover entries retried |
-| town strike effect | OF | struck town: support -40, standing -40, heat +15, panic, `struckUntil` +1200 s; towns within 2 km: -10 / -10 | | D17, D21 |
-| strike fighters (`StrikeMinFighters` / `StrikeOpenerMinFighters` / `OpenerHqRadius`) | OF | 3 / 1 / 150 m since 2026-10-16 (old: an opener needed none) | constants | Reported fighters a town strike needs; a base or HQ opener needs; the radius around `HqPos` an HQ outside every zone counts them in (7.3) |
-| strike band rule (`PlanStrike` keepStrong, `StrikeKeepsStrongWhy`) | OF | STRONG after the ground operation's debit AND the strike's own since 2026-10-16 (old: STRONG on the pool the ground operation leaves) | constant | A director-bought strike (opener or town strike) goes only on an airframe that leaves the band STRONG; the cheaper attack helicopter when the jet would not; none (one INFO line) when neither does; the test lever is exempt (7.3) |
-| pool ceiling (`PoolCeiling()`, wave headroom, `Banked()`, `Dropped()`) | OF | poolStart + headroom; headroom = a landed wave's overshoot, shrunk at each refund to the overshoot + ledger rows + the refund | saved (`Banked()` session only) | Refunds never lift the pool above it; the excess banks as a pending deposit at the occupier bases with room (source base, else nearest, else most room), one line per base; only what no base can take is dropped and logged once per refund (5.5) |
-| occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 | 0..100 | Recovers +1 per 600 s toward 50; drives informant tips (chance `standing / 200` when >= 50), morale (skill x 0.8 below 25) and the refill factor `0.75 + 0.5 * mean / 100` |
-| HQ meter | GuerrillaBase | `captureRate` x min(HQ_ASSAULT units, 3) per tick within 150 m of `HqPos`; frozen by HOLD presence; decay `captureDecayAbandoned` | | D24 |
-| `occCapture` | ZoneRegistry | `captureRate` (6) x min(crew, `captureCrewCap` 3) per 3 s tick; both present: frozen; resistance alone: - `captureDecayDefended` (10); nobody: - `captureDecayAbandoned` (2) | 0..100 | Enemy base-retake meter, separate field |
-| `baseRetake` | ZoneRegistry | follows `occupierForces` unless authored | 0/1 | Base recapture on; 0 = held posts permanent |
-| hull keys `forcesTruck` ... `forcesJet` | faction descriptor (not `CfgGuerrillaZones`) | ladder classification | class names | Overrides (optional; the shipped descriptors author none, their `vehicles[]` ladders classify the ground hulls); the air keys are read but unused until phase 6 |
-| offered packages | OF | every ground package (`DefaultPackages`); air from phase 6 | bit mask | Phase 5 |
-| hull crew / infantry seats | OF | `hasDriver + hasGunner + hasCommander` (min 1) / `min(12, transportSoldier)` | config | Crew paid as bodies; a hull whose seats cannot hold the minimum is never chosen alone |
-| columns | OF | carrier truck or APC + at most one escort (armed car, APC, tank) | | Escort price, crew and bonus added; pace of the slower hull; 3 groups, 2 hulls |
-| town-edge role | CA (flag from OF) | truck holds back; armed car, APC, tank and every escort support | constants | 3.2 |
-| `forcesControlMilWeight` / `forcesControlDwell` | OF | 0.6 / 2 ticks | dwell 1..10 | Control; consecutive due ticks before a wave fires |
-| `forcesWaveThresholds[]` / `forcesWaveFinal` | OF | {0.75, 0.50} / 1 | at most 3 | Waves |
-| `forcesWaveShare` / `Min` / `Max` | OF | 0.5 / 12 / 48 | | Wave size |
-| `forcesWaveLead` / `LeadFinal` | OF | 600 / 120 | s | Inbound time |
-| `forcesWaveRetakeShare` / `forcesWaveOps` / `forcesWaveCluster` | OF | 0.5 / 4 / 2000 m | | Strikes |
-| `forcesWaveSurge` / `forcesWaveHub` / `forcesWaveWarLevel` | OF | 12 / "" / 1 | | Final stand, hub, commitment |
-| `counterAttackFirstTownChance` / `counterAttackChance` | CA | 0.4 / 1.0 | 0..1 | DORMANT dispatch |
-| `counterAttackSize` / `counterAttackWarLevelStep` | CA | 0.5 / 0.25 | | `ForceSize` |
-| `counterAttackSpeed` / `counterAttackRoadFactor` / `MarchSpeed` | CA | 4 / 1.3 / 1.0 m/s | | Legacy pacing (key off) |
-| `counterAttackBirthMinToTarget` / `counterAttackBirthGiveUp` | CA | 250 m / 600 s | | Birth bound; give-up. Key on: the wait when no base passes (retries every 30 s), then one more re-source, then cancel unseen, every record, legacy DORMANT ones included; an edge hold counts toward it too, then `ArriveLive` at the edge unseen or cancel unseen. Key off: turn back, strength to the base |
-| cone-only base radius / audible floor | CA / Traffic | 300 m / 300 m | | Birth gate |
-| `counterAttackSourceKeep` / `counterAttackDelayMin` / `Max` | CA | 0.25 / 120 / 300 s | | Source and delay |
-| `counterAttackDefenderWeight` / `counterAttackRepelLoss` | CA | 3 / 0.5 | | `Fight` |
-| `counterAttackMaxLive` / `counterAttackLiveTimeout` | CA | 2 / 1200 s | | Live squads |
-| `campaignEndDelay` | CampaignEnd | 10 s | | Win and lose delay |
-| `seedBases` | ZoneRegistry (`BaseDetect`) | absent: 1 when the template authors no AIRFIELD and no SEAPORT, else 0 | 0/1 | Runtime seed of the detected AIRFIELD / SEAPORT zones (status `seed`); OUTPOSTs are never seeded. `gmSeededBases` lists what it added, `gmDetectedBases` every AIRFIELD / SEAPORT candidate with its status. Detection rules and numbers: ISLAND-PACKS.md section 10 (one place) |
-| `playRegion[]` | ZoneRegistry | absent: the authored zones' bounding box + 5 km on every side, for the base seed only | {minX, minZ, maxX, maxZ} | The theatre. Authored: base seeding, the CITY seed and the START TOWN list stay inside it. Absent (or malformed): only the AIRFIELD / SEAPORT seed is bounded, by the default box; the CITY seed and the START TOWN list stay unbounded. A base candidate outside reports `outside-region`; the base detection INFO line says which applies (ISLAND-PACKS.md section 10) |
-| seeded base garrison / income | `BaseDetectOptions` | AIRFIELD 12, SEAPORT 8 / the OUTPOST income (`defaultIncome`) | | Plan 13 yields are not implemented |
+| `occupierForces` ("enabled") | OF, CA, ZR | 1 since phase 7 (`OccupierForcesTuning::KeyDefault`); `campaignEnd = 0` missions author 0 | author | the layer on or off |
+| `forcesLog` ("log") | OF | 0 (0..1) | author (a diagnostic) | 1 logs the per-action lines of OF, CA and `OccupierAir` at INFO; 0 at DEBUG unless `--dev` (6.6); read with the layer off too |
+| `forcesWaveHub` | OF | "" | author (geography) | the template's wave hub by zone name ("" = the rule, 7.1) |
+| `forcesOffMapEdge` | CA | nearest edge | author (geography) | N / S / E / W: the parent nation's side; the point lies 1500 m beyond the map, level with the target |
+| `forcesTruck` ... `forcesJet` | faction descriptor | ladder classification (air: none) | author (content) | hull class overrides; an air package is offered only when its class is authored |
+| `forcesPoolMin` ("poolMin") | OF | 24 (0..200) | constant (key) | poolStart's floor; dead on Malden (R + 2K = 60); read at activation |
+| `forcesPoolPerTown` ("poolPerTown") | OF | 2 (0..8) | lever: Strength scales it | the K weight in poolStart; read at activation |
+| settlement probe (`kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZR | 3 / 300 m / 4 m | constant | a seeded CITY counts in K only on dry land with 3 buildings over 4 m within 300 m; probed once, stored on the zone row (5.1) |
+| `forcesPoolRefillHours` ("refillHours") | OF | 4 (0.5..48 h; tune 0.01..48) | lever: Recovery | exhausted to full, garrisons included: (poolStart + R + G) / h an hour, x the standing factor |
+| `forcesPoolFloor` ("poolFloor") | OF | 0.2 (0..1) | constant (key) | the THIN operations floor |
+| band enter / leave | OF | STRONG 66 / 60, THIN 33 / 40, SPENT 0 / 10 % | constant | hysteresis on the strength (5.6) |
+| `forcesDirectorInterval` ("directorInterval") | OF | 60 (10..600 s; tune 1..600) | constant (key), a test lever | the tick; tokens accrue on elapsed time, so it adds lag, not cadence |
+| sighting cadence | OF | 5 s (`alertInterval`) | constant | intel sampling |
+| `forcesIntelDecay` ("intelDecay") | OF | 1800 (1..86400 s) | constant (key) | a sighting's life; it also caps `forcesPushoutQuiet` |
+| reveal limits | OF | sightings under 60 s, accuracy < 1 | constant | strike crews only |
+| `forcesWakeTowns` ("wakeTowns") | OF | 2 (2..99; tune 1..99) | constant (key), a test lever (1) | distinct towns that wake the director |
+| `forcesTokensMax` ("tokensMax") | OF | 2 (0..6) | constant (key) | the purse |
+| `forcesTokenInterval[]` | OF | {600, 1050, 1800, 0} (0..86400 s per band) | lever: Cadence | seconds per token by band STRONG, STRETCHED, THIN, SPENT (0 = none); a short array keeps the cadence's values for the bands it omits; `LegacyTokenInterval` {1800, 2700, 3600, 0} is the old table (6.3) |
+| `forcesTownCooldown` ("townCooldown") | OF | 1800 (0..86400 s) | lever: Cadence | the rest after a repel or a cancel, hashed +- `restJitter`; its end is the re-arm moment |
+| `forcesOpsMax` ("opsMax") | OF | 2 (0..6) | lever: Concurrency | born operations in flight outside STRONG (`OccupierForces::OpsMax`; `CounterAttack::OpsCap` falls back to 2 while the service is inactive and adds one per living wave record) |
+| `forcesOpsMaxStrong` ("opsMaxStrong") | OF | 3 (0..6) | lever: Concurrency | the born cap while STRONG is max(`forcesOpsMax`, this) |
+| `forcesHeatFull` ("heatFull") | OF | 40 (1..100) | lever: Aggression | candidate chance = heat / heatFull per roll |
+| `gmHeatDecayHeld` | Script | 0.25 per 10 s | constant (script) | held-town decay: the candidate window after a capture |
+| `forcesUrgentHeat` ("urgentHeat") | OF | 50 (1..100) | lever: Aggression | urgency entry |
+| urgency exit ("urgentExit") | OF (`urgentExit`; `UrgentExitHeat` 35) | 35 (0..100) | lever: Aggression (0.7 x the lever's entry); no key | urgency released below it; an authored `forcesUrgentHeat` leaves it where the lever put it |
+| `forcesRearmHeat` ("rearmHeat") | OF | 40 (0..100; 0 = no re-arm) | lever: Aggression (= heatFull) | the re-arm (6.3): a rest ending on a held zone with fighters reported holds its heat here until an operation goes, its reports decay or it changes hands; saved names, `gmOccupierForces` [30] |
+| `forcesPushoutQuiet` ("pushoutQuiet") | OF | 1800 (0..86400 s) | constant (key) | no sighting this long = quiet (towns and held bases); values above `forcesIntelDecay` are dead |
+| `forcesRetakeMin` ("retakeMin") | OF | 4 (1..12) | lever: Minimums | a base retake takes min(max(this, garrisonMax), 12), lowered by the spare cap |
+| alarm minimum ("alarmMin") | OF (`alarmMin`; `ForcePackages::AlarmMinBodies` 4) | 4 (1..12) | lever: Minimums; no key | an alarm answer's minimum bodies (8.2) |
+| `forcesHqAssaultMin` ("hqAssaultMin") | OF | 6 (1..12) | lever: Minimums | minimum HQ assault bodies |
+| `forcesSpareCap` / `forcesSpareCapFloor` ("spareCap" / "spareCapFloor") | OF | 1 / 6 (0/1 / 1..12) | lever: Minimums | the spare cap (7.2): a base retake or HQ assault no single base can source takes the largest single-base spare, never below the floor |
+| `forcesLethalityMargin` ("lethalityMargin") | OF | 1.2 (1..3; tune 0..3) | lever: Aggression | L_req = margin x defenderWeight x fighters |
+| `forcesUrgentCostShare` ("urgentCostShare") | OF | 1.5 (1..3) | constant (key) | an urgent package may cost this share of the cheapest |
+| `forcesSlowEta` ("slowEta") | OF | 900 (0..86400 s; 0 = off) | lever: Reach | the arrival rule (6.5): past this ETA of the cheapest lethal package a faster one within the share may go; push-outs included |
+| `forcesSlowCostShare` ("slowCostShare") | OF, FP (`SlowCostShare` 3) | 3.0 (1..5) | constant (key) | the share above |
+| `forcesAirEta` ("airEta") | OF | 1500 (0..86400 s; 0 = off) | lever: Reach | past this ETA a transport helicopter insertion may go whatever its price |
+| air fighters (`AirFightersMin`) | FP | 1 | constant | reported fighters that make a target "defended" for the air choice |
+| `forcesRoadFactor` ("roadFactor") | OF | 1.5 (1..5) | constant (key) | the one road factor (16acfd5): a ground leg with no known road route, quoted and marched, is the straight distance x this |
+| road quote cache (`RoadQuoteCache::DefaultTtl` / `DefaultPlansPerTick`) | OF (`RoadRoute.hpp`) | 600 s / 6 | constant | the road quote's entries and its plan budget per tick |
+| town strike fighters ("strikeMinFighters") | OF (`strikeMinFighters`; `StrikeMinFighters` 3) | 3 (0..12) | lever: Aggression (round(3/a)); no key | reported fighters a town strike needs (7.3) |
+| opener fighters, HQ radius (`StrikeOpenerMinFighters` / `OpenerHqRadius`) | OF | 1 / 150 m | constant | a base or HQ opener needs one defender reported; the radius around `HqPos` for an HQ outside every zone |
+| strike band rule (`PlanStrike` keepStrong) | OF | STRONG after both debits | constant | a director-bought strike goes only on an airframe that leaves the band STRONG (7.3) |
+| the repel ladder ("escalateLethality", "escalateInfantry", "approachRepels", "containRepels") | OF | 1.5 / 2 / 2 / 3 | constant | 6.3; kept constant by the lever round: they act only after repels, which no lever describes |
+| massing, jitter, adjacency ("massingMax", "restJitter", "adjacentTown") | OF | 3 ticks / 0.2 / 1000 m | constant | 6.3; `adjacentTown` is a geography number, the jitter a feel number |
+| value weights, salts | OF | 3 / 2 / 1 / 2; 7, 11, 13 | constant | candidate ranking (6.3) |
+| `forcesControlMilWeight` ("controlMilWeight") | OF | 0.6 (0..1) | constant (key) | the roster's weight in control C |
+| `forcesControlDwell` ("waveDwell") | OF | 2 ticks (1..10) | constant (key) | consecutive due ticks before a wave fires |
+| `forcesWaveThresholds[]` | OF | {0.75, 0.50} (at most 3) | lever: Waves | control thresholds |
+| `forcesWaveFinal` ("waveFinal") | OF | 1 | constant (key) | the final stand, on at every Waves level (D7) |
+| `forcesWaveShare` ("waveShare") | OF | 0.5 (0..2) | lever: Waves | wave size, share of poolStart |
+| `forcesWaveMin` / `forcesWaveMax` ("waveMin" / "waveMax") | OF | 12 / 48 | constant (key) | the wave size clamp; binds only for poolStart under 24 or over 96 |
+| `forcesWaveLead` ("waveLead") | OF | 600 (0..7200 s) | lever: Waves | seconds inbound |
+| `forcesWaveLeadFinal` ("waveLeadFinal") | OF | 120 (0..7200 s) | constant (key) | the final stand's lead |
+| `forcesWaveRetakeShare` ("waveRetakeShare") | OF | 0.5 (0..1) | lever: Waves | the strikes' share of the wave |
+| `forcesWaveOps` / `forcesWaveCluster` ("waveOps" / "waveCluster") | OF | 4 / 2000 m | constant (key) | strike targets and the cluster radius |
+| `forcesWaveSurge` ("waveSurge") | OF | 12 (0..48) | constant (key) | final-stand surge above strength |
+| `forcesWaveWarLevel` ("waveWarLevel") | OF | 1 (0..3) | lever: Waves | occupier war level per landed wave |
+| wave surge ("surgeDecayHours", "surgeShare") | OF | 1 h / 0.5 | constant | the landed wave's surge above garrisonMax and its decay (7.1) |
+| band loss window ("lossWindowHours") | OF | 1 h | constant | unrepaid losses count against the band this long (5.6) |
+| `forcesBankHulls` ("bankHulls") | OF | 0 (0/1) | constant (key), a test lever | 0 = a hull over the ceiling comes back as a stored spare hull; 1 = it banks as bodies (the df9457e rule) |
+| stored spare hulls (`StoredHullsPerBase`) | OF | 2 per base | constant | a base's garage for spare hulls (5.5); every hull refund, the direct air re-plan included, goes through `RefundHull` |
+| pool ceiling (`PoolCeiling()`, wave headroom, `Banked()`, `Dropped()`) | OF | poolStart + headroom | constant | refunds never lift the pool above it; the excess surges, banks or is stored, and only what no base takes is dropped (5.5) |
+| `heatCapSpike` | ZR | 40 | lever: Aggression (40/a, at mission load) | heat added on a capture |
+| `forcesLiveHullsMax` ("forcesLiveHullsMax", gmCounterAttackTune) | CA | 6 (0..20) | lever: Concurrency | live hulls at once (read by CA, not `OccupierForcesTuning`) |
+| `counterAttackMaxLive` ("maxLive", gmCounterAttackTune) | CA | 2 (0..8) | lever: Concurrency | live infantry records at once (more wait) |
+| `counterAttackFirstTownChance` ("firstTownChance", gmCounterAttackTune) | CA | 0.4 (0..1) | lever: Aggression | DORMANT dispatch for the first town |
+| `forcesSortieTime` | CA | 300 (60..1800 s) | constant (key) | a strike's time over its target |
+| `counterAttack`, `counterAttackChance`, `counterAttackSize` / `WarLevelStep`, `counterAttackDelayMin` / `Max` | CA | 1, 1.0, 0.5 / 0.25, 120 / 300 s | legacy | the DORMANT dispatch and `ForceSize` |
+| `counterAttackSourceKeep` ("sourceKeep") | CA | 0.25 | legacy | share of garrisonMax a base keeps home: every base's spare, so every director quote |
+| `counterAttackSpeed` ("speed"), `MarchSpeed` | CA | 4 / 1.0 m/s | legacy, a test lever | key-off pacing; "speed" overrides the real speeds in tests |
+| `counterAttackRoadFactor` | CA | retired | ignored (WARN) | `forcesRoadFactor` times every leg with no road route |
+| `counterAttackDefenderWeight` / `counterAttackRepelLoss` | CA | 3 / 0.5 | legacy | one fighter = this many attackers (half of L_req); the key-off repel loss |
+| `counterAttackLiveTimeout` ("liveTimeout") | CA | 1200 s | legacy | an unresolved live squad withdraws after it (out of sight) |
+| `counterAttackBirthMinToTarget` / `counterAttackBirthGiveUp` ("birthMinToTarget" / "birthGiveUp") | CA | 250 m / 600 s | legacy (guards) | the birth bound and give-up (3.1) |
+| break-off, hull wait (`BreakOffDivisor` / `WithdrawHullWait`) | CA | 3 / 120 s | constant | a live operation whose infantry x 3 is below its born strength withdraws; its hulls wait at most 120 s for it (3.2) |
+| `EscortGap` / `EscortSpread` / `EscortRejoin`, dismount speed / `StopMax`, road-route join radius, hull gate, Leftover check | CA | 20 / 150 / 60 m; 1.5 m/s / 15 s; 2000 m; `NightEffect` 0.2, 2.5 m ray; 30 s | constant | columns, dismounts, routing and the hull gate (3.2) |
+| cone-only base radius / audible floor | CA / Traffic | 300 m / 300 m | constant | the birth gate |
+| prices: body, truck, armed car, APC, tank / transport heli, attack heli, jet / off-map | FP | 1, 3, 4, 8, 14 / 10, 18, 22 / x 1.5 | constant | pool units (6.5) |
+| lethality: tiers / motorized / armed car / APC / tank / attack heli / jet | FP | 1.0-1.25-1.5 / 1.25 / 3 / 6 / 12 / 14 / 16 | constant | 6.5 |
+| foot speed / ground cruise / air cruise | FP | 1.5 m/s / 0.6 / 0.8 of `maxSpeed` | constant | key on only |
+| hull crew / infantry seats, columns, offered packages, town-edge role | OF, CA | crew = driver + gunner + commander (min 1), seats min(12, transportSoldier); a carrier + at most one escort; every ground package plus authored air | constant | 3.2, 6.5 |
+| heli LZ / landing tolerance; `airAudible` / `landOrderDist` / `departTimeout` (gmAirTune) | OF, `OccupierAir` | 300-500 m / 100 m; 800 / 450 m / 900 s | constant | insertions and the airframe's flight |
+| town strike effect | OF | struck town: support -40, standing -40, heat +15, panic, `struckUntil` +1200 s; towns within 2 km: -10 / -10 | constant | D17, D21 |
+| occupier `standing` | OF (zone row; per-CITY `standing` key) | 50 (0..100) | author (per town) | recovers +1 per 600 s toward 50; tips, morale and the refill factor 0.75 + 0.5 x mean / 100 |
+| `meanStanding` ("meanStanding") | OF | 50 | a test lever, no key | the refill factor's input |
+| HQ meter | GuerrillaBase | `captureRate` x min(HQ_ASSAULT units, 3) per tick within 150 m of `HqPos`; frozen by HOLD presence | constant | D24 |
+| `occCapture` | ZR | `captureRate` 6 x min(crew, `captureCrewCap` 3) per 3 s; defended -10, abandoned -2 | constant (zone keys) | the enemy base-retake meter |
+| `baseRetake` | ZR | follows `occupierForces` unless authored | author | 0 = held posts are permanent |
+| `budgetLiveBodies` / `budgetSideGroups` / `emptyGroupRelease` | ZR | 130 / 40 / 60 s | author (engine guards) | the live-AI and group budgets (OFFSCREEN-CONTRACT.md 6) |
+| `campaignEndDelay` | CampaignEnd | 10 s | author | win and lose delay |
+| `seedBases` | ZR (`BaseDetect`) | absent: 1 when the template authors no AIRFIELD and no SEAPORT, else 0 | author (geography) | runtime seed of the detected AIRFIELD / SEAPORT zones; ISLAND-PACKS.md section 10 |
+| `playRegion[]` | ZR | absent: the authored zones' box + 5 km, for the base seed only | author (geography) | the theatre: base seeding, the CITY seed and the START TOWN list stay inside it (ISLAND-PACKS.md section 10) |
+| seeded base garrison / income | `BaseDetectOptions` | AIRFIELD 12, SEAPORT 8 / the OUTPOST income | constant | plan 13 yields are not implemented |
 
 ## 17. Still open
 

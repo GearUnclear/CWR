@@ -235,124 +235,8 @@ void OccupierForces::LoadFromConfig()
     LoadFromParams(zones);
 }
 
-// read a key and repair it into [lo, hi] (logged), the CounterAttack idiom
-static float ReadRanged(const ParamEntry& cfg, const char* key, float def, float lo, float hi)
-{
-    const float v = cfg.ReadValue(key, def);
-    if (v < lo || v > hi)
-    {
-        const float fixed = v < lo ? lo : hi;
-        LOG_WARN(Core, "OccupierForces: {} = {} repaired to {} (range {}..{})", key, (double)v, (double)fixed,
-                 (double)lo, (double)hi);
-        return fixed;
-    }
-    return v;
-}
-
-static float RepairElement(const char* key, int index, float v, float lo, float hi)
-{
-    if (v < lo || v > hi)
-    {
-        const float fixed = v < lo ? lo : hi;
-        LOG_WARN(Core, "OccupierForces: {}[{}] = {} repaired to {} (range {}..{})", key, index, (double)v,
-                 (double)fixed, (double)lo, (double)hi);
-        return fixed;
-    }
-    return v;
-}
-
-void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
-{
-    _tuning = OccupierForcesTuning();
-    if (!zonesCfg)
-    {
-        return;
-    }
-    const ParamEntry& c = *zonesCfg;
-    OccupierForcesTuning& t = _tuning;
-    t.enabled = c.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault) != 0.0f;
-    t.poolMin = RoundToInt(ReadRanged(c, "forcesPoolMin", (float)t.poolMin, 0.0f, 200.0f));
-    t.poolPerTown = RoundToInt(ReadRanged(c, "forcesPoolPerTown", (float)t.poolPerTown, 0.0f, 8.0f));
-    t.refillHours = ReadRanged(c, "forcesPoolRefillHours", t.refillHours, 0.5f, 48.0f);
-    t.poolFloor = ReadRanged(c, "forcesPoolFloor", t.poolFloor, 0.0f, 1.0f);
-    t.directorInterval = ReadRanged(c, "forcesDirectorInterval", t.directorInterval, 10.0f, 600.0f);
-    t.tokensMax = RoundToInt(ReadRanged(c, "forcesTokensMax", (float)t.tokensMax, 0.0f, 6.0f));
-    t.controlMilWeight = ReadRanged(c, "forcesControlMilWeight", t.controlMilWeight, 0.0f, 1.0f);
-    t.waveWarLevel = ReadRanged(c, "forcesWaveWarLevel", t.waveWarLevel, 0.0f, 3.0f);
-    t.wakeTowns = RoundToInt(ReadRanged(c, "forcesWakeTowns", (float)t.wakeTowns, 2.0f, 99.0f));
-    t.opsMax = RoundToInt(ReadRanged(c, "forcesOpsMax", (float)t.opsMax, 0.0f, 6.0f));
-    t.opsMaxStrong = RoundToInt(ReadRanged(c, "forcesOpsMaxStrong", (float)t.opsMaxStrong, 0.0f, 6.0f));
-    t.heatFull = ReadRanged(c, "forcesHeatFull", t.heatFull, 1.0f, 100.0f);
-    t.urgentHeat = ReadRanged(c, "forcesUrgentHeat", t.urgentHeat, 1.0f, 100.0f);
-    t.townCooldown = ReadRanged(c, "forcesTownCooldown", t.townCooldown, 0.0f, 86400.0f);
-    t.rearmHeat = ReadRanged(c, "forcesRearmHeat", t.rearmHeat, 0.0f, 100.0f);
-    t.pushoutQuiet = ReadRanged(c, "forcesPushoutQuiet", t.pushoutQuiet, 0.0f, 86400.0f);
-    t.retakeMin = RoundToInt(ReadRanged(c, "forcesRetakeMin", (float)t.retakeMin, 1.0f, 12.0f));
-    t.lethalityMargin = ReadRanged(c, "forcesLethalityMargin", t.lethalityMargin, 1.0f, 3.0f);
-    t.urgentCostShare = ReadRanged(c, "forcesUrgentCostShare", t.urgentCostShare, 1.0f, 3.0f);
-    t.intelDecay = ReadRanged(c, "forcesIntelDecay", t.intelDecay, 1.0f, 86400.0f);
-    // 2026-10-15: the spare cap (7.2) and the arrival rule (6.5)
-    t.spareCap = RoundToInt(ReadRanged(c, "forcesSpareCap", t.spareCap ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
-    t.spareCapFloor = RoundToInt(ReadRanged(c, "forcesSpareCapFloor", (float)t.spareCapFloor, 1.0f, 12.0f));
-    t.slowEta = ReadRanged(c, "forcesSlowEta", t.slowEta, 0.0f, 86400.0f);
-    t.slowCostShare = ReadRanged(c, "forcesSlowCostShare", t.slowCostShare, 1.0f, 5.0f);
-    t.airEta = ReadRanged(c, "forcesAirEta", t.airEta, 0.0f, 86400.0f);
-    // 2026-10-16: the road quote (6.5)
-    t.roadFactor = ReadRanged(c, "forcesRoadFactor", t.roadFactor, 1.0f, 5.0f);
-    ForcePackages::SetRoadFactor(t.roadFactor); // the theatre's one road factor (quote and march)
-    // phase 4: the HQ assault and the waves (16)
-    t.hqAssaultMin = RoundToInt(ReadRanged(c, "forcesHqAssaultMin", (float)t.hqAssaultMin, 1.0f, 12.0f));
-    t.waveDwell = RoundToInt(ReadRanged(c, "forcesControlDwell", (float)t.waveDwell, 1.0f, 10.0f));
-    t.waveFinal = c.ReadValue("forcesWaveFinal", t.waveFinal ? 1.0f : 0.0f) != 0.0f;
-    t.waveShare = ReadRanged(c, "forcesWaveShare", t.waveShare, 0.0f, 2.0f);
-    t.waveMin = RoundToInt(ReadRanged(c, "forcesWaveMin", (float)t.waveMin, 0.0f, 200.0f));
-    t.waveMax = RoundToInt(ReadRanged(c, "forcesWaveMax", (float)t.waveMax, 0.0f, 400.0f));
-    t.waveLead = ReadRanged(c, "forcesWaveLead", t.waveLead, 0.0f, 7200.0f);
-    t.waveLeadFinal = ReadRanged(c, "forcesWaveLeadFinal", t.waveLeadFinal, 0.0f, 7200.0f);
-    t.waveRetakeShare = ReadRanged(c, "forcesWaveRetakeShare", t.waveRetakeShare, 0.0f, 1.0f);
-    t.waveOps = RoundToInt(ReadRanged(c, "forcesWaveOps", (float)t.waveOps, 0.0f, 8.0f));
-    t.waveCluster = ReadRanged(c, "forcesWaveCluster", t.waveCluster, 100.0f, 20000.0f);
-    t.waveSurge = RoundToInt(ReadRanged(c, "forcesWaveSurge", (float)t.waveSurge, 0.0f, 48.0f));
-    t.waveHub = c.ReadValue("forcesWaveHub", RString());
-    t.log = RoundToInt(ReadRanged(c, "forcesLog", t.log ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
-    // 2026-10-16 (decision 9): hull refunds over the ceiling bank as bodies
-    // (1) or come back as a stored spare hull (0, the default)
-    t.bankHulls = RoundToInt(ReadRanged(c, "forcesBankHulls", t.bankHulls ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
-
-    // forcesTokenInterval[]: one entry per band; a short array keeps the
-    // defaults of the bands it leaves out
-    const ParamEntry* tokens = c.FindEntry("forcesTokenInterval");
-    if (tokens && tokens->IsArray())
-    {
-        const int n = tokens->GetSize();
-        if (n > NOccupierBands)
-        {
-            LOG_WARN(Core, "OccupierForces: forcesTokenInterval[] has {} entries, only the first {} are read", n,
-                     (int)NOccupierBands);
-        }
-        for (int k = 0; k < n && k < NOccupierBands; k++)
-        {
-            t.tokenInterval[k] = RepairElement("forcesTokenInterval", k, (float)(*tokens)[k], 0.0f, 86400.0f);
-        }
-    }
-    // forcesWaveThresholds[]: at most MaxWaveThresholds control shares
-    const ParamEntry* waves = c.FindEntry("forcesWaveThresholds");
-    if (waves && waves->IsArray())
-    {
-        const int n = waves->GetSize();
-        if (n > OccupierForcesTuning::MaxWaveThresholds)
-        {
-            LOG_WARN(Core, "OccupierForces: forcesWaveThresholds[] has {} entries, only the first {} are read", n,
-                     OccupierForcesTuning::MaxWaveThresholds);
-        }
-        t.nWaveThresholds = MinInt(n, OccupierForcesTuning::MaxWaveThresholds);
-        for (int k = 0; k < OccupierForcesTuning::MaxWaveThresholds; k++)
-        {
-            t.waveThresholds[k] =
-                k < t.nWaveThresholds ? RepairElement("forcesWaveThresholds", k, (float)(*waves)[k], 0.0f, 1.0f) : 0.0f;
-        }
-    }
-}
+// LoadFromParams (the levers, then the expert overrides) lives in
+// OccupierForcesLevers.cpp
 
 // ---------------------------------------------------------------------------
 // pure rules
@@ -360,7 +244,9 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
 
 int OccupierForces::PoolStartOf(const OccupierForcesTuning& t, int R, int K)
 {
-    return MaxInt(t.poolMin, R + t.poolPerTown * K);
+    // forcesStrength scales the sum (1 at Normal: exactly R + 2K)
+    const int sum = R + t.poolPerTown * K;
+    return MaxInt(t.poolMin, t.levers.strength == 1.0f ? sum : RoundToInt(t.levers.strength * (float)sum));
 }
 
 float OccupierForces::StandingFactor(float meanStanding)
@@ -1792,7 +1678,7 @@ void OccupierForces::UpdateUrgency(const ZoneRegistry& registry)
         {
             AddName(_urgent, z->name);
         }
-        else if (z->heat < UrgentExitHeat)
+        else if (z->heat < _tuning.urgentExit)
         {
             RemoveName(_urgent, z->name);
         }
@@ -3745,7 +3631,7 @@ bool OccupierForces::StrikeDue(const ZoneRegistry& registry, const DirectorView&
     {
         return false;
     }
-    if (KnownFighters(registry, target) < StrikeMinFighters)
+    if (KnownFighters(registry, target) < _tuning.strikeMinFighters)
     {
         return false;
     }
@@ -3964,7 +3850,7 @@ bool OccupierForces::EscalationStrikeDue(const ZoneRegistry& registry, const Dir
     {
         return false;
     }
-    if (KnownFighters(registry, target) < (base ? StrikeOpenerMinFighters : StrikeMinFighters))
+    if (KnownFighters(registry, target) < (base ? StrikeOpenerMinFighters : _tuning.strikeMinFighters))
     {
         return false;
     }
@@ -4052,7 +3938,7 @@ DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const Dir
     req.fighters = a.fighters;
     req.defenderWeight = view.defenderWeight;
     req.margin = _tuning.lethalityMargin;
-    req.minBodies = ForcePackages::AlarmMinBodies;
+    req.minBodies = _tuning.alarmMin; // forcesMinimums (ForcePackages::AlarmMinBodies at Normal)
     req.urgent = a.urgent;
     req.urgentCostShare = _tuning.urgentCostShare;
     req.tierFactor = view.tierFactor;

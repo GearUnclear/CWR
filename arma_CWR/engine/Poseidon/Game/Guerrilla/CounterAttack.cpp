@@ -183,7 +183,6 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     CounterAttackTuning& t = _tuning;
     t.enabled = c.ReadValue("counterAttack", 1.0f) != 0.0f;
     t.size = ReadRanged(c, "counterAttackSize", t.size, 0.0f, 4.0f);
-    t.firstTownChance = ReadRanged(c, "counterAttackFirstTownChance", t.firstTownChance, 0.0f, 1.0f);
     t.chance = ReadRanged(c, "counterAttackChance", t.chance, 0.0f, 1.0f);
     t.warLevelStep = ReadRanged(c, "counterAttackWarLevelStep", t.warLevelStep, 0.0f, 2.0f);
     t.delayMin = ReadRanged(c, "counterAttackDelayMin", t.delayMin, 0.0f, 86400.0f);
@@ -209,18 +208,16 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     t.defenderWeight = ReadRanged(c, "counterAttackDefenderWeight", t.defenderWeight, 0.0f, 100.0f);
     t.repelLoss = ReadRanged(c, "counterAttackRepelLoss", t.repelLoss, 0.0f, 1.0f);
     t.liveTimeout = ReadRanged(c, "counterAttackLiveTimeout", t.liveTimeout, 60.0f, 86400.0f);
-    t.maxLive = (int)ReadRanged(c, "counterAttackMaxLive", (float)t.maxLive, 0.0f, 8.0f);
     t.birthMinToTarget = ReadRanged(c, "counterAttackBirthMinToTarget", t.birthMinToTarget, 0.0f, 2000.0f);
     t.birthGiveUp = ReadRanged(c, "counterAttackBirthGiveUp", t.birthGiveUp, 30.0f, 86400.0f);
     // occupier forces (OCCUPIER-FORCES.md 16): the layer key is read here
     // too, so the movement rules know the key without the pool service
     t.forcesOn = c.ReadValue("occupierForces", OccupierForcesTuning::KeyDefault) != 0.0f;
-    // forcesOpsMax is OccupierForces' key (one reader, one writer: its
-    // tuning and gmForcesTune "opsMax"); OpsCap reads it from there
-    t.forcesLiveHullsMax = (int)ReadRanged(c, "forcesLiveHullsMax", (float)t.forcesLiveHullsMax, 0.0f, 20.0f);
-    // phase 6A air (16): the strike time over target and the parent
-    // nation's map edge (N / S / E / W; absent or anything else = nearest)
-    t.sortieTime = ReadRanged(c, "forcesSortieTime", t.sortieTime, 60.0f, 1800.0f);
+    // the levers (OccupierForcesLevers.hpp): forcesConcurrency derives maxLive
+    // and forcesLiveHullsMax, forcesAggression firstTownChance; those keys and
+    // forcesSortieTime read as expert overrides.  forcesOpsMax is OccupierForces'
+    LoadCounterAttackLevers(t, c);
+    // the parent nation's map edge (N / S / E / W; absent or anything else = nearest)
     t.offMapEdge = -1;
     if (const ParamEntry* edge = c.FindEntry("forcesOffMapEdge"))
     {
@@ -3646,7 +3643,9 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
     SettleCrew(registry, r, r.crew, "crew home"); // nothing for a re-plan no row took
     if (r.airReplanned)
     {
-        OccupierForces::Instance().Refund(r.HullPrice(), "air re-plan hull home");
+        // a hull home goes through RefundHull (the stored spare, the ceiling)
+        OccupierForces::Instance().RefundHull(registry, r.HullPrice(), r.package, nullptr,
+                                              r.airOrigin >= 0 ? r.airOrigin : registry.FindZoneIndex(r.source));
         Emit(registry, r, CAOpHullRefund, r.crew, 0, "abstract: home");
         return;
     }

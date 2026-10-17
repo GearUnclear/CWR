@@ -262,6 +262,13 @@ class CfgGuerrillaZones
   undercover, headquarters and `traffic*` keys) is optional and documented in
   `Guerrilla.Abel/description.ext`, which lists every stock default in a comment
   rather than restating them as keys.
+- **The occupier director** is tuned through `forcesDifficulty` and eight
+  levers (`forcesCadence`, `forcesStrength`, `forcesRecovery`, `forcesReach`,
+  `forcesAggression`, `forcesWaves`, `forcesMinimums`, `forcesConcurrency`;
+  OCCUPIER-FORCES.md section 16). Leave them out to get Normal. The older
+  `forces*` keys, `counterAttackFirstTownChance`, `counterAttackMaxLive` and
+  `heatCapSpike` (which follows `forcesAggression`) still read, but only as
+  expert overrides that log a WARN; an island pack should not need them.
 
 ## 5. The four things to edit after scaffolding
 

@@ -566,7 +566,9 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         SettleCrew(registry, r, r.crew, "air crew home");
         if (r.airReplanned)
         {
-            OccupierForces::Instance().Refund(r.HullPrice(), "air re-plan hull home");
+            // an airframe home goes through RefundHull (the stored spare, the ceiling)
+            OccupierForces::Instance().RefundHull(registry, r.HullPrice(), r.package, nullptr,
+                                                  r.airOrigin >= 0 ? r.airOrigin : registry.FindZoneIndex(r.source));
             Emit(registry, r, CAOpHullRefund, r.crew, 0, "airframe home");
         }
         else
@@ -640,7 +642,10 @@ void CounterAttack::StepAirHomes(ZoneRegistry& registry, const CounterAttackView
             SettleCrew(registry, r, h.crew, "air crew home");
             if (h.direct)
             {
-                OccupierForces::Instance().Refund(h.units, "air re-plan hull home");
+                // the airframe through RefundHull (the stored spare, the ceiling);
+                // an AirHome is always a transport insertion's airframe
+                OccupierForces::Instance().RefundHull(registry, h.units, FPTransportHeli, nullptr,
+                                                      registry.FindZoneIndex(h.source));
             }
             GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the airframe of the insertion on {} is home", h.opId,
                      (const char*)h.target);

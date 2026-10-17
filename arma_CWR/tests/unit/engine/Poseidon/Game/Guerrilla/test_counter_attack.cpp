@@ -5514,3 +5514,84 @@ TEST_CASE("CounterAttack - a withdrawal's waiting hulls and walking survivors su
     ExtParsMission.Clear();
     std::filesystem::remove(path);
 }
+
+TEST_CASE("CounterAttack - the levers derive maxLive, forcesLiveHullsMax and firstTownChance; old keys warn once",
+          "[game][guerrilla][counterattack]")
+{
+    {
+        // Normal: today's numbers exactly
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1;"));
+        const CounterAttackTuning& t = f.ca.Tuning();
+        CHECK(t.maxLive == 2);
+        CHECK(t.forcesLiveHullsMax == 6);
+        CHECK(t.firstTownChance == 0.4f);
+        CHECK(t.sortieTime == 300.0f);
+    }
+    {
+        // forcesConcurrency n: maxLive n - 1, hulls 2n; forcesAggression a: 0.4a
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesConcurrency = 5; forcesAggression = 1.5;"));
+        CHECK(f.ca.Tuning().maxLive == 4);
+        CHECK(f.ca.Tuning().forcesLiveHullsMax == 10);
+        CHECK(f.ca.Tuning().firstTownChance == Approx(0.6f));
+    }
+    {
+        // Easy through the difficulty key
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 0;"));
+        CHECK(f.ca.Tuning().maxLive == 1);
+        CHECK(f.ca.Tuning().forcesLiveHullsMax == 4);
+        CHECK(f.ca.Tuning().firstTownChance == Approx(0.3f));
+    }
+    {
+        // an old key overrides its own field only, with one WARN naming the lever
+        CoreLogCapture log;
+        Fixture f;
+        f.Load(
+            ConfigWith("occupierForces = 1; forcesConcurrency = 2; counterAttackMaxLive = 5; forcesSortieTime = 600;"));
+        CHECK(f.ca.Tuning().maxLive == 5);
+        CHECK(f.ca.Tuning().forcesLiveHullsMax == 4); // still the lever's
+        CHECK(f.ca.Tuning().sortieTime == Approx(600.0f));
+        CHECK(log.With({"counterAttackMaxLive is an expert override of the forcesConcurrency lever"}).size() == 1);
+        CHECK(log.With({"forcesSortieTime is an expert override of a constant"}).size() == 1);
+        CHECK(log.With({"forcesLiveHullsMax is an expert override"}).empty());
+    }
+}
+
+TEST_CASE(
+    "CounterAttack - an air re-plan's airframe home goes through RefundHull: over the ceiling a stored spare hull",
+    "[game][guerrilla][counterattack][occupierforces][air]")
+{
+    // the direct (no ledger row) airframe refund used to call Refund, so at a
+    // full pool its hull units banked as garrison bodies; through RefundHull
+    // (decision 9) they come back as a stored spare hull at its airfield
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
+    REQUIRE(f.ca.LaunchFunded(f.registry, far, TruckOrder(f.town, f.post, 4), nullptr, fired));
+    CounterAttack::Record& r = const_cast<CounterAttack::Record&>(*f.ca.Get(0));
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240.0f;
+    cat.hulls[FPTransportHeli].cargo = 14;
+    cat.hulls[FPTransportHeli].crew = 2;
+    REQUIRE(f.ca.AirReplan(f.registry, far, r, cat));
+    REQUIRE(r.airReplanned);
+    REQUIRE(r.airOrigin == f.farBase);
+    const int hull = r.HullPrice();
+    REQUIRE(hull == 10);
+    OccupierForces& of = OccupierForces::Instance();
+    of.SetPool(of.PoolCeiling()); // full: nothing the airframe brings fits under the ceiling
+    const int stored = of.StoredHullTotal();
+    f.Z(f.town).owner = "OCCUPIER"; // the target reverts: the abstract record goes home
+    f.ca.Step(f.registry, far, 1.0f, nullptr, fired);
+    CHECK(of.Pool() == of.PoolCeiling());
+    CHECK(of.StoredHullTotal() == stored + hull);
+    REQUIRE(of.StoredHullRows() >= 1);
+    CHECK(Fixture::Str(of.StoredHullZone(of.StoredHullRows() - 1)) == "FarBase");
+    CHECK(of.StoredHullPackage(of.StoredHullRows() - 1) == FPTransportHeli);
+}

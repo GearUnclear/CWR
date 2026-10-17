@@ -146,6 +146,10 @@
       "escalation",
       "persistence"
     ],
+    "../engine/Poseidon/Game/Guerrilla/OccupierForcesLevers.cpp": [
+      "garrison",
+      "escalation"
+    ],
     "../engine/Poseidon/Game/Guerrilla/ForcePackages.cpp": [
       "garrison",
       "escalation"

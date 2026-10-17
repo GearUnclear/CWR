@@ -742,7 +742,8 @@ void ZoneRegistry::LoadZones(const ParamEntry& cfg)
     _tuning.cacheRadius = cfg.ReadValue("cacheRadius", _tuning.cacheRadius);
     _tuning.supportRate = cfg.ReadValue("supportRate", _tuning.supportRate);
     _tuning.supportFlip = cfg.ReadValue("supportFlip", _tuning.supportFlip);
-    _tuning.heatCapSpike = cfg.ReadValue("heatCapSpike", _tuning.heatCapSpike);
+    // 40 / forcesAggression (OccupierForcesLevers.hpp); an authored heatCapSpike is an expert override
+    _tuning.heatCapSpike = ZoneHeatCapSpike(cfg, _tuning.heatCapSpike);
     _tuning.defaultIncome = cfg.ReadValue("defaultIncome", _tuning.defaultIncome);
     _tuning.holdCount = cfg.ReadValue("holdCount", _tuning.holdCount);
     _tuning.seedCities = ReadSeedCitiesMode(&cfg);

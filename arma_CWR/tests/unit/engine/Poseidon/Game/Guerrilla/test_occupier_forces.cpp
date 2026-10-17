@@ -978,6 +978,318 @@ struct CoreLines
 };
 } // namespace
 
+// ---------------------------------------------------------------------------
+// the eight author levers (OccupierForcesLevers.hpp, 16)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// every field of the director's tuning, compared exactly (Normal must be
+// today's behaviour bit for bit)
+void CheckSameTuning(const OccupierForcesTuning& a, const OccupierForcesTuning& b)
+{
+    CHECK(a.enabled == b.enabled);
+    CHECK(a.poolMin == b.poolMin);
+    CHECK(a.poolPerTown == b.poolPerTown);
+    CHECK(a.refillHours == b.refillHours);
+    CHECK(a.poolFloor == b.poolFloor);
+    CHECK(a.directorInterval == b.directorInterval);
+    CHECK(a.tokensMax == b.tokensMax);
+    for (int k = 0; k < NOccupierBands; k++)
+    {
+        CHECK(a.tokenInterval[k] == b.tokenInterval[k]);
+    }
+    CHECK(a.controlMilWeight == b.controlMilWeight);
+    CHECK(a.nWaveThresholds == b.nWaveThresholds);
+    for (int k = 0; k < OccupierForcesTuning::MaxWaveThresholds; k++)
+    {
+        CHECK(a.waveThresholds[k] == b.waveThresholds[k]);
+    }
+    CHECK(a.waveWarLevel == b.waveWarLevel);
+    CHECK(a.wakeTowns == b.wakeTowns);
+    CHECK(a.opsMax == b.opsMax);
+    CHECK(a.opsMaxStrong == b.opsMaxStrong);
+    CHECK(a.heatFull == b.heatFull);
+    CHECK(a.urgentHeat == b.urgentHeat);
+    CHECK(a.urgentExit == b.urgentExit);
+    CHECK(a.townCooldown == b.townCooldown);
+    CHECK(a.rearmHeat == b.rearmHeat);
+    CHECK(a.pushoutQuiet == b.pushoutQuiet);
+    CHECK(a.retakeMin == b.retakeMin);
+    CHECK(a.alarmMin == b.alarmMin);
+    CHECK(a.strikeMinFighters == b.strikeMinFighters);
+    CHECK(a.lethalityMargin == b.lethalityMargin);
+    CHECK(a.urgentCostShare == b.urgentCostShare);
+    CHECK(a.intelDecay == b.intelDecay);
+    CHECK(a.spareCap == b.spareCap);
+    CHECK(a.spareCapFloor == b.spareCapFloor);
+    CHECK(a.slowEta == b.slowEta);
+    CHECK(a.slowCostShare == b.slowCostShare);
+    CHECK(a.airEta == b.airEta);
+    CHECK(a.roadFactor == b.roadFactor);
+    CHECK(a.hqAssaultMin == b.hqAssaultMin);
+    CHECK(a.waveDwell == b.waveDwell);
+    CHECK(a.waveFinal == b.waveFinal);
+    CHECK(a.waveShare == b.waveShare);
+    CHECK(a.waveMin == b.waveMin);
+    CHECK(a.waveMax == b.waveMax);
+    CHECK(a.waveLead == b.waveLead);
+    CHECK(a.waveLeadFinal == b.waveLeadFinal);
+    CHECK(a.waveRetakeShare == b.waveRetakeShare);
+    CHECK(a.waveOps == b.waveOps);
+    CHECK(a.waveCluster == b.waveCluster);
+    CHECK(a.waveSurge == b.waveSurge);
+    CHECK(Str(a.waveHub) == Str(b.waveHub));
+    CHECK(a.log == b.log);
+    CHECK(a.escalateLethality == b.escalateLethality);
+    CHECK(a.escalateInfantry == b.escalateInfantry);
+    CHECK(a.approachRepels == b.approachRepels);
+    CHECK(a.containRepels == b.containRepels);
+    CHECK(a.massingMax == b.massingMax);
+    CHECK(a.restJitter == b.restJitter);
+    CHECK(a.adjacentTown == b.adjacentTown);
+    CHECK(a.bankHulls == b.bankHulls);
+    CHECK(a.surgeDecayHours == b.surgeDecayHours);
+    CHECK(a.surgeShare == b.surgeShare);
+    CHECK(a.lossWindowHours == b.lossWindowHours);
+}
+} // namespace
+
+TEST_CASE("OccupierForces - levers: Normal derives today's defaults, field by field",
+          "[game][guerrilla][occupierforces]")
+{
+    const OccupierForcesTuning today;
+    // the default levers are Normal's presets
+    const OccupierForcesLevers normal = OccupierForcesLevers::Preset(ForcesNormal);
+    CHECK(today.levers.difficulty == ForcesNormal);
+    CHECK(today.levers.cadence == normal.cadence);
+    CHECK(today.levers.strength == normal.strength);
+    CHECK(today.levers.recovery == normal.recovery);
+    CHECK(today.levers.reach == normal.reach);
+    CHECK(today.levers.aggression == normal.aggression);
+    CHECK(today.levers.waves == normal.waves);
+    CHECK(today.levers.minimums == normal.minimums);
+    CHECK(today.levers.concurrency == normal.concurrency);
+    // the new fields' defaults are the constants they replaced
+    CHECK(today.urgentExit == OccupierForces::UrgentExitHeat);
+    CHECK(today.strikeMinFighters == OccupierForces::StrikeMinFighters);
+    CHECK(today.alarmMin == ForcePackages::AlarmMinBodies);
+
+    // Derive at Normal changes nothing
+    OccupierForcesTuning derived;
+    normal.Derive(derived);
+    CheckSameTuning(derived, today);
+    // nor does the reader with no lever authored, nor forcesDifficulty = 1
+    for (const char* keys : {"occupierForces = 1;", "occupierForces = 1; forcesDifficulty = 1;"})
+    {
+        Fixture f;
+        f.Load(ConfigWith(keys));
+        OccupierForcesTuning expect;
+        expect.enabled = true;
+        CheckSameTuning(f.of.Tuning(), expect);
+        CHECK(f.registry.Tuning().heatCapSpike == 40.0f);
+    }
+    // CounterAttack's three derived fields
+    CounterAttackTuning ca;
+    normal.Derive(ca);
+    const CounterAttackTuning caToday;
+    CHECK(ca.maxLive == caToday.maxLive);
+    CHECK(ca.forcesLiveHullsMax == caToday.forcesLiveHullsMax);
+    CHECK(ca.firstTownChance == caToday.firstTownChance);
+    // poolStart at strength 1: R + 2K exactly (the Abel-like theatre: 60)
+    CHECK(OccupierForces::PoolStartOf(derived, 32, 14) == 60);
+}
+
+TEST_CASE("OccupierForces - levers: each preset derives the documented fields", "[game][guerrilla][occupierforces]")
+{
+    // Easy, Normal, Hard, Brutal (OCCUPIER-FORCES.md 16)
+    const float strongInterval[4] = {1200, 600, 420, 300};
+    const float stretchedInterval[4] = {2100, 1050, 735, 525};
+    const float thinInterval[4] = {3600, 1800, 1260, 900};
+    const float refill[4] = {8, 4, 3, 2};
+    const float airEta[4] = {3000, 1500, 1200, 900};
+    const float slowEta[4] = {1800, 900, 720, 540};
+    const float heatFull[4] = {40.0f / 0.75f, 40, 32, 40.0f / 1.5f};
+    const float urgentHeat[4] = {50.0f / 0.75f, 50, 40, 50.0f / 1.5f};
+    const float margin[4] = {0.9f, 1.2f, 1.5f, 1.8f};
+    const int strikeMin[4] = {4, 3, 2, 2};
+    const float firstTown[4] = {0.3f, 0.4f, 0.5f, 0.6f};
+    const float waveT0[4] = {0.70f, 0.75f, 0.80f, 0.85f};
+    const float waveT1[4] = {0.45f, 0.50f, 0.60f, 0.65f};
+    const float waveShare[4] = {0.35f, 0.5f, 0.6f, 0.75f};
+    const float waveLead[4] = {900, 600, 450, 300};
+    const float waveRetake[4] = {0.4f, 0.5f, 0.6f, 0.7f};
+    const float waveWar[4] = {0.75f, 1.0f, 1.25f, 1.5f};
+    const int retakeMin[4] = {3, 4, 6, 8};
+    const int hqMin[4] = {5, 6, 8, 10};
+    const int opsStrong[4] = {2, 3, 4, 5};
+    const int poolStart[4] = {45, 60, 75, 90}; // R 32, K 14: s x 60
+    for (int d = 0; d < NForcesPresets; d++)
+    {
+        INFO("preset " << d);
+        const OccupierForcesLevers l = OccupierForcesLevers::Preset(d);
+        OccupierForcesTuning t;
+        l.Derive(t);
+        CHECK(t.levers.difficulty == d);
+        // cadence
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(strongInterval[d]));
+        CHECK(t.tokenInterval[OFBandStretched] == Approx(stretchedInterval[d]));
+        CHECK(t.tokenInterval[OFBandThin] == Approx(thinInterval[d]));
+        CHECK(t.tokenInterval[OFBandSpent] == 0.0f);
+        CHECK(t.townCooldown == Approx(thinInterval[d]));
+        // strength (at activation) and recovery
+        CHECK(OccupierForces::PoolStartOf(t, 32, 14) == poolStart[d]);
+        CHECK(t.refillHours == Approx(refill[d]));
+        // reach
+        CHECK(t.airEta == Approx(airEta[d]));
+        CHECK(t.slowEta == Approx(slowEta[d]));
+        // aggression
+        CHECK(t.heatFull == Approx(heatFull[d]));
+        CHECK(t.rearmHeat == Approx(heatFull[d]));
+        CHECK(t.urgentHeat == Approx(urgentHeat[d]));
+        CHECK(t.urgentExit == Approx(urgentHeat[d] * 0.7f));
+        CHECK(t.lethalityMargin == Approx(margin[d]));
+        CHECK(t.strikeMinFighters == strikeMin[d]);
+        CHECK(l.HeatCapSpike() == Approx(heatFull[d]));
+        // waves: two thresholds and the final stand at every level (D7)
+        CHECK(t.nWaveThresholds == 2);
+        CHECK(t.waveThresholds[0] == Approx(waveT0[d]));
+        CHECK(t.waveThresholds[1] == Approx(waveT1[d]));
+        CHECK(t.waveFinal);
+        CHECK(t.waveShare == Approx(waveShare[d]));
+        CHECK(t.waveLead == Approx(waveLead[d]));
+        CHECK(t.waveRetakeShare == Approx(waveRetake[d]));
+        CHECK(t.waveWarLevel == Approx(waveWar[d]));
+        // minimums
+        CHECK(t.retakeMin == retakeMin[d]);
+        CHECK(t.alarmMin == retakeMin[d]);
+        CHECK(t.hqAssaultMin == hqMin[d]);
+        CHECK(t.spareCapFloor == hqMin[d]);
+        CHECK(t.spareCap);
+        // concurrency
+        CHECK(t.opsMaxStrong == opsStrong[d]);
+        CHECK(t.opsMax == opsStrong[d] - 1);
+        CounterAttackTuning ca;
+        l.Derive(ca);
+        CHECK(ca.maxLive == opsStrong[d] - 1);
+        CHECK(ca.forcesLiveHullsMax == 2 * opsStrong[d]);
+        CHECK(ca.firstTownChance == Approx(firstTown[d]));
+        // the constants stay put at every preset
+        const OccupierForcesTuning today;
+        CHECK(t.tokensMax == today.tokensMax);
+        CHECK(t.directorInterval == today.directorInterval);
+        CHECK(t.wakeTowns == today.wakeTowns);
+        CHECK(t.intelDecay == today.intelDecay);
+        CHECK(t.pushoutQuiet == today.pushoutQuiet);
+        CHECK(t.urgentCostShare == today.urgentCostShare);
+        CHECK(t.slowCostShare == today.slowCostShare);
+        CHECK(t.roadFactor == today.roadFactor);
+        CHECK(t.waveMin == today.waveMin);
+        CHECK(t.waveMax == today.waveMax);
+        CHECK(t.waveSurge == today.waveSurge);
+    }
+}
+
+TEST_CASE("OccupierForces - levers: forcesDifficulty, a lever key over its preset, range repair, gmForcesTune names",
+          "[game][guerrilla][occupierforces]")
+{
+    {
+        // Hard through the difficulty key, everywhere the levers reach
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 2;"));
+        const OccupierForcesTuning& t = f.of.Tuning();
+        CHECK(t.levers.difficulty == ForcesHard);
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(420.0f));
+        CHECK(t.heatFull == Approx(32.0f));
+        CHECK(t.opsMaxStrong == 4);
+        CHECK(f.registry.Tuning().heatCapSpike == Approx(32.0f));
+    }
+    {
+        // Brutal with its cadence authored back to 900 s; the rest stay Brutal
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 3; forcesCadence = 900;"));
+        const OccupierForcesTuning& t = f.of.Tuning();
+        CHECK(t.levers.cadence == Approx(900.0f));
+        CHECK(t.tokenInterval[OFBandStrong] == Approx(900.0f));
+        CHECK(t.townCooldown == Approx(2700.0f));
+        CHECK(t.levers.aggression == Approx(1.5f));
+        CHECK(t.retakeMin == 8);
+    }
+    {
+        // every lever key is repaired into its range (and logged)
+        CoreLines log;
+        Fixture f;
+        f.Load(ConfigWith("occupierForces = 1; forcesDifficulty = 9; forcesCadence = 5; forcesStrength = 10; "
+                          "forcesRecovery = 0; forcesReach = -1; forcesAggression = 0; forcesWaves = 7; "
+                          "forcesMinimums = 20; forcesConcurrency = 1;"));
+        const OccupierForcesLevers& l = f.of.Tuning().levers;
+        CHECK(l.difficulty == ForcesBrutal);
+        CHECK(l.cadence == Approx(60.0f));
+        CHECK(l.strength == Approx(4.0f));
+        CHECK(l.recovery == Approx(0.5f));
+        CHECK(l.reach == Approx(0.0f));
+        CHECK(l.aggression == Approx(0.25f));
+        CHECK(l.waves == 3);
+        CHECK(l.minimums == 10);
+        CHECK(l.concurrency == 2);
+        CHECK(f.of.Tuning().hqAssaultMin == 12);
+        CHECK(f.of.Tuning().heatFull == Approx(100.0f)); // 40 / 0.25 clamped
+        // OccupierForces logs the repairs; ZoneRegistry and CounterAttack read quietly
+        CHECK(log.With({"forcesCadence = 5 repaired"}).size() == 1);
+    }
+    // the gmForcesTune lever names
+    OccupierForcesLevers l;
+    CHECK(l.Set("cadence", 300));
+    CHECK(l.cadence == Approx(300.0f));
+    CHECK(l.Set("Concurrency", 99));
+    CHECK(l.concurrency == 6);
+    CHECK(l.Set("difficulty", 0));
+    CHECK(l.cadence == Approx(1200.0f));
+    CHECK(l.minimums == 3);
+    CHECK_FALSE(l.Set("heatFull", 10)); // a field, not a lever
+    OccupierForcesTuning t;
+    t.heatFull = 77; // an earlier field lever is overwritten by the lever
+    l.Derive(t);
+    CHECK(t.heatFull == Approx(40.0f / 0.75f));
+}
+
+TEST_CASE("OccupierForces - levers: an old key overrides its lever-derived field and warns once",
+          "[game][guerrilla][occupierforces]")
+{
+    CoreLines log;
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1; forcesAggression = 1.5; forcesHeatFull = 20; forcesTokenInterval[] = {700}; "
+                      "forcesDirectorInterval = 30; heatCapSpike = 55;"));
+    const OccupierForcesTuning& t = f.of.Tuning();
+    // the override wins over its lever ...
+    CHECK(t.heatFull == Approx(20.0f));
+    CHECK(t.tokenInterval[OFBandStrong] == Approx(700.0f));
+    CHECK(t.directorInterval == Approx(30.0f)); // a constant's override
+    CHECK(f.registry.Tuning().heatCapSpike == Approx(55.0f));
+    // ... and only on its own field: the lever still derives the rest
+    CHECK(t.urgentHeat == Approx(50.0f / 1.5f));
+    CHECK(t.rearmHeat == Approx(40.0f / 1.5f));
+    CHECK(t.tokenInterval[OFBandStretched] == Approx(1050.0f)); // the short array keeps the cadence's
+    // one WARN per authored old key, naming its lever; none for the rest
+    CHECK(log.With({"forcesHeatFull is an expert override of the forcesAggression lever"}).size() == 1);
+    CHECK(log.With({"forcesTokenInterval is an expert override of the forcesCadence lever"}).size() == 1);
+    CHECK(log.With({"forcesDirectorInterval is an expert override of a constant"}).size() == 1);
+    CHECK(log.With({"heatCapSpike is an expert override of the forcesAggression lever"}).size() == 1);
+    CHECK(log.With({"forcesUrgentHeat is an expert override"}).empty());
+    CHECK(log.With({"forcesAggression is an expert override"}).empty()); // a lever is not an override
+    // an authored old key reads exactly as before
+    Fixture g;
+    g.Load(ConfigWith("occupierForces = 1; forcesOpsMax = 1; forcesOpsMaxStrong = 2; forcesSlowEta = 0; "
+                      "forcesAirEta = 0; forcesRearmHeat = 0; forcesRetakeMin = 2;"));
+    CHECK(g.of.Tuning().opsMax == 1);
+    CHECK(g.of.Tuning().opsMaxStrong == 2);
+    CHECK(g.of.Tuning().slowEta == 0.0f);
+    CHECK(g.of.Tuning().airEta == 0.0f);
+    CHECK(g.of.Tuning().rearmHeat == 0.0f);
+    CHECK(g.of.Tuning().retakeMin == 2);
+    CHECK(g.of.Tuning().hqAssaultMin == 6); // the lever's, not the override's
+}
+
 TEST_CASE("OccupierForces - the ceiling: a refund over poolStart is dropped once, booked, and the ledger holds",
           "[game][guerrilla][occupierforces]")
 {
@@ -1686,6 +1998,10 @@ TEST_CASE("OccupierForces - director knobs default to the knob table", "[game][g
     CHECK(t.intelDecay == Approx(1800.0f));
     CHECK(OccupierForces::UrgentExitHeat == Approx(35.0f));
     CHECK(OccupierForces::OfferedPackages == ForcePackages::DefaultPackages);
+    // the lever round's fields (16): the constants they replaced
+    CHECK(t.urgentExit == Approx(35.0f));
+    CHECK(t.strikeMinFighters == 3);
+    CHECK(t.alarmMin == 4);
 
     Fixture f;
     f.Load(ConfigWith("occupierForces = 1; forcesWakeTowns = 1; forcesOpsMax = 9; forcesHeatFull = 30; "
