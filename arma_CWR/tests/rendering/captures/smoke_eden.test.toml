@@ -2,7 +2,6 @@
 # switches classic/remastered with a shot after each; fails if triSetLighting
 # does not answer OK or on a high-severity GL error (I-20 post-check).
 binary = "PoseidonGame"
-data_dir = "packages/RemasterUD"
 mission = "tests/rendering/captures/missions/udcap_eden.Eden"
 tags = ["lighting_smoke", "headful", "exclusive"]
 timeout = 300

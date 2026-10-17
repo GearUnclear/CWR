@@ -7,11 +7,13 @@
     1. Runs tri on the capture tests in this folder (all three by default)
        through the hidden-desktop wrapper, so no game window reaches the
        owner's desktop (D:\Arma_CWA\tmp\tri-hidden-desktop.ps1).
-    2. Always stops the games this run started, scoped by data dir: tri
-       launches every game with `-C <arma_CWR>\packages\RemasterUD`, and
-       tools\stop-owned-games.ps1 -DataDir matches exactly that junction path
-       (other sessions' games, launched from other checkouts or shadows, are
-       left alone). Never a global Stop-Process.
+    2. Always stops the games this run started, scoped by data dir: the tests
+       pin no data_dir, this script passes `--data-dir <arma_CWR>\packages\<DataJunction>`,
+       tri launches every game with `-C` set to it, and
+       tools\stop-owned-games.ps1 -DataDir matches exactly that junction path.
+       Parallel runs (several research agents at once) each pass their own
+       -DataJunction, so one run's cleanup never stops another's games. Never
+       a global Stop-Process.
     3. Runs make_pairs.py: copies <view>__classic.png / <view>__remastered.png
        out of the tri tree, builds <view>__pair.png, contact_sheet.png and
        timings.csv / timings.json / timings.md from the UDCAP log lines.
@@ -26,6 +28,15 @@
 .PARAMETER Tri
     tri.exe to use. The runner is unchanged on the lighting branch, so the main
     checkout's build is the default.
+.PARAMETER DataJunction
+    Name of the junction under arma_CWR\packages that the games use as their
+    data dir. Default RemasterUD. Any other name is created on demand as a
+    junction to -ShadowDir; give every parallel run its own name.
+.PARAMETER ShadowDir
+    The setup-prepared Remaster shadow a new junction points at.
+.PARAMETER ShaderOverrideDir
+    Sets CWR_SHADER_OVERRIDE_DIR for the games of this run (absolute path):
+    every <name>.glsl there replaces the built-in shader of that name.
 .PARAMETER Visible
     Run tri directly instead of on the hidden desktop (game windows show).
 .PARAMETER CollectOnly
@@ -53,6 +64,9 @@ param(
     [int]$Retries = 1,
     [int]$TimeoutSec = 5400,
     [string]$Python = 'python',
+    [string]$DataJunction = 'RemasterUD',
+    [string]$ShadowDir = 'D:\Arma_CWA\tmp\remaster-shadow-67',
+    [string]$ShaderOverrideDir = '',
     [switch]$Visible,
     [switch]$CollectOnly
 )
@@ -66,10 +80,23 @@ $gitRoot = (Resolve-Path (Join-Path $engineRoot '..')).Path             # worktr
 if (-not $OutRoot) { $OutRoot = Join-Path $gitRoot 'tmp\captures' }
 if (-not $OutDir) { $OutDir = Join-Path $OutRoot (Get-Date -Format 'yyyyMMdd-HHmmss') }
 $triOut = Join-Path $OutDir 'tri'
-$junction = Join-Path $engineRoot 'packages\RemasterUD'
+if ($DataJunction -notmatch '^[A-Za-z0-9_-]+$') { Write-Error "-DataJunction must be a plain name: $DataJunction"; exit 2 }
+$junction = Join-Path $engineRoot "packages\$DataJunction"
 
 New-Item -ItemType Directory -Force -Path $triOut | Out-Null
 Write-Host "output: $OutDir"
+
+if (-not $CollectOnly -and $DataJunction -ne 'RemasterUD' -and -not (Test-Path -LiteralPath $junction)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $junction) | Out-Null
+    & cmd /c mklink /J "$junction" "$ShadowDir" | Out-Null
+}
+if ($ShaderOverrideDir) {
+    if (-not (Test-Path -LiteralPath $ShaderOverrideDir)) { Write-Error "shader override dir not found: $ShaderOverrideDir"; exit 2 }
+    $env:CWR_SHADER_OVERRIDE_DIR = (Resolve-Path -LiteralPath $ShaderOverrideDir).Path
+    Write-Host "shader override: $env:CWR_SHADER_OVERRIDE_DIR"
+} else {
+    Remove-Item Env:\CWR_SHADER_OVERRIDE_DIR -ErrorAction SilentlyContinue
+}
 
 $exit = 0
 if (-not $CollectOnly) {
@@ -79,7 +106,7 @@ if (-not $CollectOnly) {
     if (-not (Test-Path -LiteralPath (Join-Path $gameDirAbs 'PoseidonGame.exe'))) { $problems += "no PoseidonGame.exe in $gameDirAbs (is the build finished?)" }
     if (-not (Test-Path -LiteralPath $Tri)) { $problems += "tri not found: $Tri" }
     if (-not (Test-Path -LiteralPath (Join-Path $junction 'dtaExt'))) {
-        $problems += "packages\RemasterUD is missing or not the Remaster shadow. Create it with: cmd /c mklink /J `"$junction`" `"D:\Arma_CWA\tmp\remaster-shadow-67`""
+        $problems += "packages\$DataJunction is missing or not the Remaster shadow. Create it with: cmd /c mklink /J `"$junction`" `"$ShadowDir`""
     }
     if (-not $Visible -and -not (Test-Path -LiteralPath $HiddenDesktop)) { $problems += "hidden-desktop wrapper not found: $HiddenDesktop (or pass -Visible)" }
     foreach ($t in $Tests) {
@@ -90,11 +117,11 @@ if (-not $CollectOnly) {
     $triLog = Join-Path $OutDir 'tri.log'
     # The hidden-desktop wrapper hands this line to `cmd /c "<line> > log 2>&1"`,
     # whose quote stripping makes embedded quotes fragile: keep paths unquoted.
-    foreach ($p in @($Tri, $triOut, $GameDir, $triLog) + $Tests) {
+    foreach ($p in @($Tri, $triOut, $GameDir, $triLog, $junction) + $Tests) {
         if ($p -match '\s') { Write-Error "path with whitespace is not supported here: $p"; exit 2 }
     }
     $testArgs = ($Tests | ForEach-Object { $_ -replace '\\', '/' }) -join ' '
-    $triCmd = "$Tri test --retries $Retries -j1 --timeout 120 --game-dir $GameDir --output-dir $triOut $testArgs"
+    $triCmd = "$Tri test --retries $Retries -j1 --timeout 120 --game-dir $GameDir --data-dir $junction --output-dir $triOut $testArgs"
     "cmd: $triCmd" | Out-File -FilePath (Join-Path $OutDir 'run.txt') -Encoding utf8
     Write-Host "running: $triCmd"
     try {
@@ -109,8 +136,8 @@ if (-not $CollectOnly) {
             $exit = $LASTEXITCODE
         }
     } finally {
-        # Games this run started carry `-C <this worktree's junction>`; stop
-        # only those (a no-op when tri already reaped them).
+        # Games this run started carry `-C <this run's junction>`; stop only
+        # those (a no-op when tri already reaped them).
         if (Test-Path -LiteralPath $StopGames) {
             & powershell -NoProfile -ExecutionPolicy Bypass -File $StopGames -DataDir $junction
         } else {

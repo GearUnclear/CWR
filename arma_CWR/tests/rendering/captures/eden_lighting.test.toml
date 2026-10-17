@@ -4,7 +4,6 @@
 # setup-prepared full-Remaster shadow; without it the test reports
 # `spawn failed`.
 binary = "PoseidonGame"
-data_dir = "packages/RemasterUD"
 mission = "tests/rendering/captures/missions/udcap_eden.Eden"
 tags = ["lighting_capture", "headful", "exclusive"]
 timeout = 600

@@ -3,11 +3,9 @@
 # tests/integration` sweep never picks it up. Run it with run-captures.ps1
 # (README.md beside this file), which also collects the PNGs and timings.
 #
-# data_dir "packages/RemasterUD" is the gitignored junction to the
-# setup-prepared full-Remaster shadow (D:\Arma_CWA\tmp\remaster-shadow-67).
-# Without it the test reports `spawn failed`.
+# No data_dir pin: run-captures.ps1 passes --data-dir (a per-run junction to the
+# Remaster shadow), so parallel runs can each clean up only their own games.
 binary = "PoseidonGame"
-data_dir = "packages/RemasterUD"
 mission = "tests/rendering/captures/missions/udcap_abel.Abel"
 tags = ["lighting_capture", "headful", "exclusive"]
 # Eleven views (22 shots), each with settle blocks of 90-240 frames at 4x MSAA and 150%
