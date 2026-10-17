@@ -1,0 +1,42 @@
+# Water-region metrics
+
+Luminance (0-255) over the water region of each 960x640 capture: mean, sd of a lightly blurred
+image (wave-scale contrast), and sd of a 9x9 high-pass (fine detail). Higher sd = more defined.
+
+| view | image | mean | sd (wave scale) | sd (fine) | GPU frame ms | GPU world ms |
+|---|---|---|---|---|---|---|
+| coastline_sunset | Classic | 69.8 | 29.36 | 3.67 | 0.81 | 0.71 |
+| coastline_sunset | Remastered now | 99.5 | 29.14 | 3.04 | 2.77 | 2.22 |
+| coastline_sunset | Variant A | 96.0 | 24.71 | 12.33 | 2.69 | 2.05 |
+| coastline_sunset | Variant B | 112.3 | 29.49 | 22.18 | 3.20 | 2.70 |
+| coastline_sunset | Variant C | 112.9 | 29.31 | 23.72 | 3.47 | 2.95 |
+| sea_noon | Classic | 145.1 | 13.96 | 6.08 | 0.85 | 0.77 |
+| sea_noon | Remastered now | 129.3 | 6.91 | 4.37 | 1.72 | 1.30 |
+| sea_noon | Variant A | 129.6 | 7.31 | 7.68 | 2.12 | 1.73 |
+| sea_noon | Variant B | 125.2 | 8.26 | 10.06 | 3.41 | 3.09 |
+| sea_noon | Variant C | 127.8 | 8.91 | 12.73 | 3.52 | 3.15 |
+| sea_away_from_sun | Classic | 112.0 | 6.49 | 7.4 | 0.77 | 0.68 |
+| sea_away_from_sun | Remastered now | 113.6 | 7.36 | 5.72 | 1.00 | 0.51 |
+| sea_away_from_sun | Variant A | 115.3 | 6.49 | 6.11 | 3.23 | 2.91 |
+| sea_away_from_sun | Variant B | 124.2 | 6.27 | 14.41 | 8.21 | 6.30 |
+| sea_away_from_sun | Variant C | 124.2 | 6.72 | 15.14 | 2.89 | 2.48 |
+| coast_shore_midsun | Classic | 176.4 | 24.55 | 6.99 | 0.88 | 0.83 |
+| coast_shore_midsun | Remastered now | 154.3 | 15.36 | 3.52 | 3.50 | 2.28 |
+| coast_shore_midsun | Variant A | 150.7 | 14.63 | 8.64 | 3.41 | 2.37 |
+| coast_shore_midsun | Variant B | 138.1 | 17.67 | 12.38 | 2.35 | 1.54 |
+| coast_shore_midsun | Variant C | 139.1 | 18.73 | 13.34 | 4.92 | 3.41 |
+
+Classic shot of each variant run vs the stock run (mean abs difference, 0-255):
+
+- coastline_sunset/A: 0.012
+- coastline_sunset/B: 0.016
+- coastline_sunset/C: 0.313
+- sea_noon/A: 0.161
+- sea_noon/B: 0.129
+- sea_noon/C: 4.219
+- sea_away_from_sun/A: 0.071
+- sea_away_from_sun/B: 0.022
+- sea_away_from_sun/C: 1.039
+- coast_shore_midsun/A: 0.071
+- coast_shore_midsun/B: 2.246
+- coast_shore_midsun/C: 4.706
