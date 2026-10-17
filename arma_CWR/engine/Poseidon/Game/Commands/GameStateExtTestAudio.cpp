@@ -169,6 +169,7 @@ GameValue TriScreenshot(const GameState*, GameValuePar);
 GameValue TriCaptureAtPresent(const GameState*, GameValuePar);
 GameValue TriShadowDepthProbe(const GameState*, GameValuePar);
 GameValue TriEnableShadowMaps(const GameState*);
+GameValue TriSetLighting(const GameState*, GameValuePar);
 GameValue TriShadowSceneDump(const GameState*, GameValuePar);
 GameValue TriSetAlphaToCoverage(const GameState*, GameValuePar);
 GameValue TriSetFlatShading(const GameState*, GameValuePar);
@@ -3243,6 +3244,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triCaptureAtPresent", TriCaptureAtPresent, GameBool));
     GGameState.NewFunction(GameFunction(GameString, "triShadowDepthProbe", TriShadowDepthProbe, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triEnableShadowMaps", TriEnableShadowMaps));
+    GGameState.NewFunction(GameFunction(GameString, "triSetLighting", TriSetLighting, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triShadowSceneDump", TriShadowSceneDump, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triSetAlphaToCoverage", TriSetAlphaToCoverage, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triSetFlatShading", TriSetFlatShading, GameScalar));

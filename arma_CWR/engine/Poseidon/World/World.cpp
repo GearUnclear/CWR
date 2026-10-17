@@ -31,6 +31,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/TitEffects.hpp>
@@ -1538,6 +1539,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 }
 
                 perf.Mark(Dev::FrameProfiler::PhaseDrawObjPrep);
+                // Remastered lighting: terrain horizon map for this landscape
+                // (built off-thread, only while the backend wants one).
+                UpdateTerrainLighting(_scene.GetLandscape());
                 _scene.GetLandscape()->Draw(_scene);
                 perf.Mark(Dev::FrameProfiler::PhaseDrawLandscape);
 
@@ -1598,6 +1602,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (enableDraw)
     {
+        // World/HUD boundary: the remastered lighting's post pass (ambient
+        // occlusion, bloom, sun shafts) runs on the finished 3D frame before the
+        // map, HUD and dialogs draw over it.
+        GEngine->EndWorldScene();
+
         if (_map && (_showMap || _forceMap))
         {
             _map->DrawHUD(camAI, 1);

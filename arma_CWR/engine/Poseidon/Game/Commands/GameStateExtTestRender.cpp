@@ -502,6 +502,81 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
     return GameValue("OK");
 }
 
+/// triSetLighting "<setting>" — remastered lighting for scripted A/B captures.
+/// "classic" / "remastered" switch the lighting model (remastered also turns the
+/// shadow maps on, as the Options row does); "key=value" sets one tuning knob:
+/// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
+/// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
+/// ao, bloom, shafts, post (0/1), debug (0..4). Returns "OK" or "FAIL:<why>".
+GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+{
+    GameStringType text = static_cast<GameStringType>(arg);
+    const std::string setting = (const char*)text ? (const char*)text : "";
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    remaster::LightingTuning t = GEngine->GetLightingTuning();
+    if (setting == "classic" || setting == "remastered")
+    {
+        t.remastered = setting == "remastered";
+        GEngine->SetLightingTuning(t);
+        GEngine->SetShadowMapsEnabled(t.remastered);
+        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
+        return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK" : "FAIL:remastered shaders unavailable");
+    }
+    const size_t eq = setting.find('=');
+    if (eq == std::string::npos)
+        return GameValue("FAIL:expected classic, remastered or key=value");
+    const std::string key = setting.substr(0, eq);
+    const float v = static_cast<float>(std::atof(setting.c_str() + eq + 1));
+    struct Knob
+    {
+        const char* name;
+        float remaster::LightingTuning::*field;
+    };
+    static const Knob kKnobs[] = {
+        {"exposure", &remaster::LightingTuning::exposure},
+        {"sun", &remaster::LightingTuning::sun},
+        {"sky", &remaster::LightingTuning::sky},
+        {"bounce", &remaster::LightingTuning::bounce},
+        {"warmth", &remaster::LightingTuning::warmth},
+        {"saturation", &remaster::LightingTuning::saturation},
+        {"specular", &remaster::LightingTuning::specular},
+        {"localLights", &remaster::LightingTuning::localLights},
+        {"moonlight", &remaster::LightingTuning::moonlight},
+        {"terrainShadows", &remaster::LightingTuning::terrainShadows},
+        {"terrainOcclusion", &remaster::LightingTuning::terrainOcclusion},
+        {"cloudShadows", &remaster::LightingTuning::cloudShadows},
+        {"shadowSoftness", &remaster::LightingTuning::shadowSoftness},
+        {"ao", &remaster::LightingTuning::ambientOcclusion},
+        {"bloom", &remaster::LightingTuning::bloom},
+        {"shafts", &remaster::LightingTuning::sunShafts},
+    };
+    bool found = false;
+    for (const Knob& k : kKnobs)
+    {
+        if (key == k.name)
+        {
+            t.*(k.field) = v;
+            found = true;
+        }
+    }
+    if (key == "post")
+    {
+        t.postEffects = v != 0.0f;
+        found = true;
+    }
+    else if (key == "debug")
+    {
+        t.debugView = static_cast<int>(v);
+        found = true;
+    }
+    if (!found)
+        return GameValue(("FAIL:unknown knob " + key).c_str());
+    GEngine->SetLightingTuning(t);
+    LOG_INFO(Core, "[tri] triSetLighting {}", setting);
+    return GameValue("OK");
+}
+
 /// triEnableShadowMaps — turn on the durable shadow-map (depth-buffer) path. Off
 /// by default; tests / the player enable it so the new shadows supersede the
 /// projected ones. Returns "OK".

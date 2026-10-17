@@ -35,6 +35,10 @@ enum PixelShaderSpecular
 #include <glad/gl.h>
 #include <SDL3/SDL.h>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Remaster/LightRig.hpp>
+#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+
+#include <memory>
 
 typedef int ZFyzType;
 #define zToFyz(z) toInt(z * 0x10000000)
@@ -126,7 +130,10 @@ enum : int
     SlotSpecEn = 19,
     SlotSunEn = 20,
     SlotVpScale = 21,
-    // slots 22..23 reserved
+    // Remastered lighting: the crown ellipsoid of the shape being drawn
+    // (xyz centre, w valid; xyz inverse half extents). Unused by the classic VS.
+    SlotCrown = 22,
+    SlotCrownScale = 23,
     SlotTexMat0 = 24, // 4 vec4s
     SlotTexMat1 = 28, // 4 vec4s
     SlotTexCtrl = 32,
@@ -148,7 +155,9 @@ static_assert(SlotView >= SlotProj + 4, "SlotView overlaps SlotProj");
 static_assert(SlotWorld >= SlotView + 4, "SlotWorld overlaps SlotView");
 static_assert(SlotSunDir >= SlotWorld + 4, "SlotSunDir overlaps SlotWorld");
 static_assert(SlotVpScale >= SlotSunEn + 1, "SlotVpScale overlaps SlotSunEn");
-static_assert(SlotTexMat0 >= SlotVpScale + 1, "SlotTexMat0 overlaps SlotVpScale");
+static_assert(SlotCrown >= SlotVpScale + 1, "SlotCrown overlaps SlotVpScale");
+static_assert(SlotCrownScale >= SlotCrown + 1, "SlotCrownScale overlaps SlotCrown");
+static_assert(SlotTexMat0 >= SlotCrownScale + 1, "SlotTexMat0 overlaps SlotCrownScale");
 static_assert(SlotTexMat1 >= SlotTexMat0 + 4, "SlotTexMat1 overlaps SlotTexMat0");
 static_assert(SlotTexCtrl >= SlotTexMat1 + 4, "SlotTexCtrl overlaps SlotTexMat1");
 static_assert(SlotLightCount >= SlotTexCtrl + 1, "SlotLightCount overlaps SlotTexCtrl");
@@ -667,6 +676,90 @@ class EngineGL33 : public Engine
 
     void SetShadowMapsEnabled(bool enabled) override { _shadowTuning.enabled = enabled; }
     bool ShadowMapsEnabled() const override { return _shadowTuning.enabled; }
+
+    // --- Remastered lighting (EngineGL33_Lighting.cpp, EngineGL33_LightingShaders.cpp,
+    // EngineGL33_PostFX.cpp) ---
+    void SetLightingTuning(const Poseidon::remaster::LightingTuning& tuning) override;
+    Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lighting; }
+    bool LightingRemasterActive() const override { return _lightingActive; }
+    bool WantsTerrainHorizonMap() const override;
+    void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
+    void EndWorldScene() override;
+
+    Poseidon::remaster::LightingTuning _lighting;
+    // Remastered programs built and the setting asks for them: DoSelectPixelShader
+    // picks _shaderProgramRemaster.
+    bool _lightingActive = false;
+    bool _lightingProgramsBuilt = false;
+    // A world 3D pass began since InitDraw (EndWorldScene runs the post pass
+    // only then) and the terrain/cloud lookups are valid for the draws in it
+    // (not a portrait capture or a 3D preview drawn inside a dialog).
+    bool _worldPassOpen = false;
+    bool _worldEffectsOn = false;
+    bool _worldSceneEnded = false; // EndWorldScene ran this frame: later 3D passes are UI previews
+    // The remastered program set is in use: lighting active and inside the
+    // world's 3D passes. Portraits, 3D previews in dialogs and night vision draw
+    // through the classic programs (their own light setups and the green
+    // intensifier are calibrated for them). Owns the unit-2 comparison sampler.
+    bool _remasterPrograms = false;
+    // Opaque draw in flight: the remastered shaders store one minus the sky
+    // light share in alpha (EngineGL33_PostFX.cpp). Mirrors LitConstants.flags.x.
+    bool _litOpaque = false;
+    // The rig's sun colour this frame (sun-shaft tint).
+    Color _lightRigSun = Color(1, 1, 1, 1);
+    // World position of the camera when the shadow depth pass ran: the map is
+    // sampled one frame later, from wherever the camera is then.
+    float _shadowCamPos[3] = {};
+    // Terrain horizon map and the textures the remastered shaders sample.
+    std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> _terrainMap;
+    bool _terrainMapDirty = false;
+    unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
+    unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
+    unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
+    unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: unit 2 when no shadow map
+    unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
+    unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+    unsigned int _shadowCompareSampler = 0;
+    unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
+
+    void InitLightingResources();
+    void DeinitLightingResources();
+    void UploadTerrainHorizonMap();
+    // Per-frame rig, terrain, cloud and camera uniforms; at the start of a 3D pass.
+    void UploadLitFrameConstants();
+    // Re-derives _remasterPrograms from the lighting and world-pass flags and,
+    // on a change, rebinds the unit-2 sampler and re-selects the current
+    // program. Callers flush pending draws first.
+    void UpdateRemasterPrograms();
+    void UploadLitMaterial(const Poseidon::TLMaterial& mat);
+    void UploadLitShadowDelta();
+    void UploadLitLights(const LightList& lights, float nightEffect);
+    void SetLitOpaque(bool opaque);
+    // Binds units 2..5 for the remastered shaders (compare sampler on 2).
+    void BindLightingTextures();
+    void FlushLitConstants();
+    unsigned int SelectProgram(int vs, int spec, int mode, int ps) const;
+
+    struct PostTargets
+    {
+        static constexpr int kBloomLevels = 5;
+        int w = 0, h = 0;
+        unsigned int colorTex = 0, colorFbo = 0;
+        unsigned int depthTex = 0, depthFbo = 0;
+        unsigned int aoTex[2] = {}, aoFbo[2] = {};
+        unsigned int shaftTex = 0, shaftFbo = 0;
+        unsigned int bloomTex[kBloomLevels] = {}, bloomFbo[kBloomLevels] = {};
+        int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
+        unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
+        unsigned int vao = 0;
+        unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0,
+                     progComposite = 0;
+        bool programsTried = false;
+        bool unavailable = false;
+    } _post;
+    void DestroyPostTargets();
+    void DestroyPostPrograms();
+    bool EnsurePostResources(int w, int h);
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
@@ -931,6 +1024,9 @@ class EngineGL33 : public Engine
     FrameState BuildFrameState(Camera* camera, LightSun* sun, int bias, const Color& fogColor, bool sunEnabled);
     PassState BuildPassState(const FrameState& frame, Poseidon::PassId passId);
     void UploadVSWorldMatrix(const float worldMatrix[16]);
+    // Remastered foliage: crown ellipsoid of the shape about to draw. Writes VS
+    // slots 22-23 only when the value changes.
+    void UploadVSCrown(const float center[3], const float invHalf[3]);
     void UploadVSMaterialConstants(const Poseidon::TLMaterial& mat, bool sunEnabled);
     void UploadVSLights(const LightList& lights, const Poseidon::TLMaterial& mat, float nightEffect);
     void UploadVSTexGenConstants(TexGenMode mode);

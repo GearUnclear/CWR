@@ -20,8 +20,8 @@
 //   Per-user knobs      — independent of preset, keep value across
 //                         preset changes:
 //                           msaaSamples, renderScale, alphaToCoverage,
-//                           multitexturing, vsync, fpsCap, brightness,
-//                           gamma
+//                           multitexturing, lighting, vsync, fpsCap,
+//                           brightness, gamma
 //
 // Autodetect on first boot: GraphicsConfig::PickPresetFromRam()
 // returns a tier from SDL_GetSystemRAM(); ApplyPresetToTiers fills the
@@ -62,6 +62,14 @@ public:
 		VsyncOn       = 1,
 		VsyncAdaptive = 2,
 	};
+	// Lighting model.  Classic is the original per-vertex lighting, bit for
+	// bit; Remastered is per-pixel HDR lighting with shadow maps, terrain and
+	// cloud shadows, ambient occlusion and bloom (Graphics/Remaster).
+	enum LightingMode
+	{
+		LightingClassic    = 0,
+		LightingRemastered = 1,
+	};
 
 	// Persistable fields.
 	Preset    qualityPreset    = PresetUltra;
@@ -81,6 +89,7 @@ public:
 	int       msaaSamples      = 0;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
+	LightingMode lighting      = LightingRemastered; // Classic = the original lighting, unchanged
 	float     brightness       = 1.6f;          // 0.4..1.8
 	float     gamma            = 1.2f;          // 0.5..2.3
 

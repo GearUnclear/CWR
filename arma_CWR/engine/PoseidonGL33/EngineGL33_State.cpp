@@ -67,6 +67,10 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
     if (!_glContext)
         return;
     _currentBlendMode = mode;
+    // Remastered lighting: opaque draws write their ambient share into the
+    // frame alpha and blended draws keep it (see EngineGL33_PostFX.cpp).
+    const bool keepAlpha = _lightingActive;
+    SetLitOpaque(mode == BlendMode::Opaque);
     // Each Poseidon::render::blend helper sets enable + func atomically; partial
     // state ("blend enabled but func not set") is unrepresentable.
     switch (mode)
@@ -75,13 +79,22 @@ void EngineGL33::ApplyBlendMode(BlendMode mode)
             Poseidon::render::blend::Opaque();
             break;
         case BlendMode::AlphaBlend:
-            Poseidon::render::blend::AlphaBlend();
+            if (keepAlpha)
+                Poseidon::render::blend::AlphaBlendKeepAlpha();
+            else
+                Poseidon::render::blend::AlphaBlend();
             break;
         case BlendMode::Additive:
-            Poseidon::render::blend::Additive();
+            if (keepAlpha)
+                Poseidon::render::blend::AdditiveKeepAlpha();
+            else
+                Poseidon::render::blend::Additive();
             break;
         case BlendMode::Shadow:
-            Poseidon::render::blend::Shadow();
+            if (keepAlpha)
+                Poseidon::render::blend::ShadowKeepAlpha();
+            else
+                Poseidon::render::blend::Shadow();
             break;
     }
 }

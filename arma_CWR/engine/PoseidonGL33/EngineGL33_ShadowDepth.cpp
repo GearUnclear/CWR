@@ -7,6 +7,8 @@
 #include <Poseidon/Graphics/Core/GLCullState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 
 #include <cstdint>
@@ -269,9 +271,10 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 {
     if (!glContext || !lightVP16 || !triXYZ || vertCount < 3 || res <= 0)
         return false;
-    if (!EnsureProgram() || !EnsureTarget(res) || !EnsureMesh())
-        return false;
-
+    // Capture the bindings to restore before the Ensure* calls: creating a
+    // target or mesh binds (and leaves bound) framebuffer 0 and the new VAO, so
+    // capturing after them sent the rest of the frame after a first enable or a
+    // resolution change to the window instead of the frame target.
     GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -279,6 +282,12 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
     glGetIntegerv(GL_VIEWPORT, prevVP);
+    if (!EnsureProgram() || !EnsureTarget(res) || !EnsureMesh())
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+        return false;
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
     glViewport(0, 0, res, res);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false); // test on, LEQUAL, write on
@@ -320,11 +329,10 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
     if (!glContext || !lightVPs || res <= 0 || numCascades < 1 || (!haveSolid && !haveAlpha))
         return false;
-    if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh())
-        return false;
-    if (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh()))
-        return false;
-
+    // Capture the bindings to restore before the Ensure* calls: creating a
+    // target or mesh binds (and leaves bound) framebuffer 0 and the new VAO, so
+    // capturing after them sent the rest of the frame after a first enable or a
+    // resolution change to the window instead of the frame target.
     GLint prevFBO = 0, prevProg = 0, prevVAO = 0, prevArrayBuf = 0;
     GLint prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -332,6 +340,19 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &prevVAO);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuf);
     glGetIntegerv(GL_VIEWPORT, prevVP);
+    auto restore = [&]()
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
+        glUseProgram(static_cast<GLuint>(prevProg));
+        glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(prevArrayBuf));
+        GL33Bind::Vao(static_cast<GLuint>(prevVAO));
+    };
+    if (!EnsureProgram() || !EnsureArrayTarget(res, numCascades) || !EnsureMesh() ||
+        (haveAlpha && (!EnsureAlphaProgram() || !EnsureAlphaMesh())))
+    {
+        restore();
+        return false;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);
     glViewport(0, 0, res, res);
@@ -467,6 +488,22 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
     _shadowCamFwd[1] = camFwd3[1];
     _shadowCamFwd[2] = camFwd3[2];
     _shadowMapActive = true;
+    // The light view-projections are relative to this frame's camera; the lit
+    // pass samples them next frame from wherever the camera is then.
+    if (GScene && GScene->GetCamera())
+    {
+        const Vector3 cam = GScene->GetCamera()->Position();
+        _shadowCamPos[0] = cam.X();
+        _shadowCamPos[1] = cam.Y();
+        _shadowCamPos[2] = cam.Z();
+    }
+    if (_lightingActive)
+    {
+        // Draws later in this frame (blended objects, cockpits) sample the new
+        // map: hand them its matrices and a zero camera delta now.
+        UpdateShadowMapLitState();
+        UploadLitShadowDelta();
+    }
 }
 
 bool EngineGL33::DumpShadowMap(const char* path)

@@ -2172,3 +2172,27 @@ items:
       are tracked at the repo root. The root files need an owner decision.
     log:
       - "2026-10-13: filed #89 from the agent-guide audit."
+
+  - id: remastered-lighting
+    title: "Remastered lighting: per-pixel HDR sun and sky, shadows, terrain and cloud shadows, post pass (proposal branch)"
+    phase: phase-2
+    status: in-progress
+    priority: 2
+    depends_on: []
+    gh_issues: []
+    summary: >
+      A second lighting model for the GL 3.3 backend behind the Options
+      Lighting row (Classic stays bit-identical): per-fragment linear lighting
+      with a per-fragment tonemap instead of the classic clamp-before-texturing,
+      an elevation-aware sun and a sky hemisphere with a sunward/anti-sun
+      horizon split, an exposure meter that keeps sunlit ground at Classic
+      brightness by day, shadow maps that dim only direct sun, a terrain horizon
+      map (hill shadows at any range, valley sky occlusion), drifting cloud
+      shadows, foliage crown normals, sun-glow fog matching the sky dome, and a
+      post pass (sky-light-only AO, bloom, sun shafts). Design and calibration in
+      arma_CWR/engine/Poseidon/Graphics/Remaster/README.md; offline evidence from
+      tests/rendering/lighting_lab (--renderer remaster).
+    log:
+      - "2026-10-17: proposal on branch claude/youthful-lovelace-8imbdh, built from main rather than the Codex graphics/lighting-improvements branch (PR #210), whose ITERATIONS.md log was used as the list of looks the owner already rejected (S blue haze, U1 mustard ground and crushed APC/soldier shade and flattened crowns, C/G darker-only, depth-map shadow darkening that crushed the shade). Remastered keeps sunlit ground at Classic brightness and puts shade near 0.6 of lit on screen instead of darkening the frame."
+      - "2026-10-17: critique and adversarial review workflows fed the calibration: the default 1.2 display gamma must be counted in every target; alpha-to-coverage cutouts write coverage into alpha, so the AO share is stored as 1 - share (coverage pixels are exempt); the post composite must not re-tonemap; the shadow-map normal offset slid shadows metres off their casters at a low sun until terrain receivers dropped it; Classic clamps the shadow direction to 11.5 degrees, so Remastered builds the cascades from the true sun (min 4 degrees); two-tap cloud noise broke the exact overcast coverage."
+      - "2026-10-17: validation scope: the new test_remaster_lighting (11 cases), the GL-state/debug-group/buffer/IBO/shutdown/UBO source audits and the I-28 shader test pass in a standalone build; every remastered and post shader compiles under glslang and links and renders on Mesa llvmpipe in the lab. NOT yet: an in-game run on Remaster data and a real GPU (the full engine build needs vcpkg downloads this container cannot reach), GPU cost, MSAA plus alpha-to-coverage, cockpits, particles and night vision. The owner's acceptance view (first-person LightingLowSun.Demo, clear 08:00, 4x MSAA at 150%) has a lab stand-in (camera testview, preset morning) but needs real captures."

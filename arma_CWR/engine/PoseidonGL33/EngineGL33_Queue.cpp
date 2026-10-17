@@ -345,6 +345,15 @@ void EngineGL33::BeginPass(PassId passId)
         // Bind the (previous frame's) shadow depth map + light-VP for the lit
         // shaders.  No-op until a depth pass has run with shadow maps enabled.
         UpdateShadowMapLitState();
+        // Remastered lighting: the world's 3D passes (not a portrait capture, a
+        // 3D preview drawn in a dialog after the world, or the night-vision
+        // intensifier) draw through the remastered programs, get the terrain
+        // and cloud lookups and end in the post pass.
+        _worldEffectsOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
+        if (_worldEffectsOn)
+            _worldPassOpen = true;
+        UpdateRemasterPrograms();
+        UploadLitFrameConstants();
     }
 
     // Crop the 3D scene to the AspectSettings world rect (pillarbox /

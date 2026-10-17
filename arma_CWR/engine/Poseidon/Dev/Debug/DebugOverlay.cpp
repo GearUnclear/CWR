@@ -1437,6 +1437,87 @@ void DrawPerfTab()
     if (ImGui::Button("Reset window"))
         perf.Reset();
 }
+// Remastered lighting: live art-direction knobs (Graphics/Remaster/LightRig.hpp).
+// Every slider applies the frame it moves; the summary line at the bottom is
+// meant to be pasted back so a look tuned by eye can become the default.
+void DrawLightingTab()
+{
+    if (!GEngine)
+    {
+        ImGui::TextDisabled("No engine.");
+        return;
+    }
+    remaster::LightingTuning t = GEngine->GetLightingTuning();
+    bool changed = false;
+
+    changed |= ImGui::Checkbox("Remastered lighting", &t.remastered);
+    ImGui::SameLine();
+    ImGui::TextDisabled(GEngine->LightingRemasterActive() ? "(active)" : "(classic shaders)");
+    ImGui::TextDisabled("Off = the original per-vertex lighting, bit for bit (A/B toggle).");
+    bool shadowMaps = GEngine->ShadowMapsEnabled();
+    if (ImGui::Checkbox("Shadow maps (sun shadows)", &shadowMaps))
+        GEngine->SetShadowMapsEnabled(shadowMaps);
+
+    ImGui::SeparatorText("Light");
+    changed |= ImGui::SliderFloat("Exposure", &t.exposure, 0.4f, 2.5f, "%.2f");
+    changed |= ImGui::SliderFloat("Sun", &t.sun, 0.0f, 2.5f, "%.2f");
+    changed |= ImGui::SliderFloat("Sky fill", &t.sky, 0.0f, 2.5f, "%.2f");
+    ImGui::TextDisabled("  shade brightness; lower = more contrast between sun and shade");
+    changed |= ImGui::SliderFloat("Ground bounce", &t.bounce, 0.0f, 3.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Sun warmth", &t.warmth, 0.0f, 2.0f, "%.2f");
+    ImGui::TextDisabled("  0 = neutral sun at any height, 1 = golden low sun");
+    changed |= ImGui::SliderFloat("Saturation", &t.saturation, 0.5f, 1.6f, "%.2f");
+    changed |= ImGui::SliderFloat("Specular", &t.specular, 0.0f, 3.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Local lights", &t.localLights, 0.0f, 4.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Moonlight", &t.moonlight, 0.0f, 4.0f, "%.2f");
+
+    ImGui::SeparatorText("World");
+    changed |= ImGui::SliderFloat("Terrain shadows", &t.terrainShadows, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("  hills shading the valleys (horizon map)");
+    changed |= ImGui::SliderFloat("Terrain occlusion", &t.terrainOcclusion, 0.0f, 1.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Cloud shadows", &t.cloudShadows, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("  drifting shadows in broken overcast");
+    changed |= ImGui::SliderFloat("Shadow softness", &t.shadowSoftness, 0.25f, 4.0f, "%.2f");
+
+    ImGui::SeparatorText("Post effects");
+    changed |= ImGui::Checkbox("Enabled (AO, bloom, shafts)", &t.postEffects);
+    changed |= ImGui::SliderFloat("Ambient occlusion", &t.ambientOcclusion, 0.0f, 2.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Bloom", &t.bloom, 0.0f, 2.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Sun shafts", &t.sunShafts, 0.0f, 2.0f, "%.2f");
+
+    ImGui::SeparatorText("Diagnostics");
+    changed |= ImGui::Combo("View", &t.debugView,
+                            "Final\0"
+                            "Sun visibility\0"
+                            "Terrain sky visibility\0"
+                            "Normals\0"
+                            "Ambient occlusion\0");
+    if (ImGui::Button("Reset knobs to defaults"))
+    {
+        const bool keepRemastered = t.remastered;
+        t = remaster::LightingTuning{};
+        t.remastered = keepRemastered;
+        changed = true;
+    }
+    if (changed)
+        GEngine->SetLightingTuning(t);
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Current tuning (copy back to share):");
+    char summary[512];
+    snprintf(summary, sizeof(summary),
+             "lighting: remastered=%s post=%s exposure=%.2f sun=%.2f sky=%.2f bounce=%.2f warmth=%.2f "
+             "saturation=%.2f specular=%.2f localLights=%.2f moonlight=%.2f terrainShadows=%.2f "
+             "terrainOcclusion=%.2f cloudShadows=%.2f softness=%.2f ao=%.2f bloom=%.2f shafts=%.2f",
+             t.remastered ? "true" : "false", t.postEffects ? "true" : "false", t.exposure, t.sun, t.sky, t.bounce,
+             t.warmth, t.saturation, t.specular, t.localLights, t.moonlight, t.terrainShadows, t.terrainOcclusion,
+             t.cloudShadows, t.shadowSoftness, t.ambientOcclusion, t.bloom, t.sunShafts);
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputText("##lightingSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
+    if (ImGui::Button("Copy summary to clipboard"))
+        ImGui::SetClipboardText(summary);
+}
+
 void DrawRenderTab()
 {
     if (!GEngine)
@@ -1668,6 +1749,11 @@ void DrawMainWindow()
         if (ImGui::BeginTabItem("Render"))
         {
             DrawRenderTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Lighting"))
+        {
+            DrawLightingTab();
             ImGui::EndTabItem();
         }
         ImGuiTabItemFlags shadowFlags = 0;

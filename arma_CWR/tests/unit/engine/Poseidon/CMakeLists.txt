@@ -162,6 +162,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_vertex_color_byte_order.cpp
     Graphics/test_ubo_restore_guards.cpp
     Graphics/test_shader_named_outputs.cpp
+    Graphics/test_remaster_lighting.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp

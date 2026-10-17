@@ -1716,7 +1716,11 @@ void Scene::DrawObjectsAndShadowsPass2()
             float sunFactor = 1.0f - _mainLight->NightEffect();
             sunFactor = floatMax(0.0f, floatMin(1.0f, sunFactor));
             GEngine->SetShadowMapSunFactor(sunFactor);
-            if (sunFactor > 0.01f)
+            // The remastered sun keeps lighting the scene until it is about 1.5
+            // degrees below the horizon: keep its shadows live that long (a
+            // skipped pass would leave a frozen map in view).
+            const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
+            if (sunFactor > 0.01f || remasterSunUp)
             {
                 RenderShadowMapDepthPass(nDraw);
             }

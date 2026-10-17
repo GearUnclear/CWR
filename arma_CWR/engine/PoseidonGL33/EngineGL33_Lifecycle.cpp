@@ -172,6 +172,11 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
 
     _frameOpen = true;
     _drawItems.clear();
+    // Remastered lighting: a new frame has no world pass yet.
+    _worldPassOpen = false;
+    _worldEffectsOn = false;
+    _worldSceneEnded = false;
+    UpdateRemasterPrograms();
 
     TLMaterial invalidMat;
     invalidMat.diffuse = Color(-1, -1, -1, -1);

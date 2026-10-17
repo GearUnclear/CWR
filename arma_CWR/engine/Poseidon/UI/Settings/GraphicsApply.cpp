@@ -96,6 +96,14 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         GEngine->SetRenderScale(cfg.renderScale);
         GEngine->SetMsaaSamples(cfg.msaaSamples);
         GEngine->SetMultitexturing(cfg.multitexturing);
+
+        // Lighting model. Remastered lighting takes its sun shadows from the
+        // depth-buffer shadow maps (its shaders shadow only the direct sun);
+        // Classic keeps the original projected shadows.
+        remaster::LightingTuning lighting = GEngine->GetLightingTuning();
+        lighting.remastered = cfg.lighting == GraphicsConfig::LightingRemastered;
+        GEngine->SetLightingTuning(lighting);
+        GEngine->SetShadowMapsEnabled(lighting.remastered && cfg.shadowQuality != GraphicsConfig::TierOff);
     }
     gUserFpsCap = cfg.fpsCap;
 }

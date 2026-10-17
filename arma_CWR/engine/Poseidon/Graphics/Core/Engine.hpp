@@ -22,6 +22,12 @@
 #include <vector>
 
 #include <Poseidon/Graphics/Core/RenderState.hpp> // DrawItem (for GetRecordedDraws())
+#include <Poseidon/Graphics/Remaster/LightRig.hpp>  // remaster::LightingTuning
+
+namespace Poseidon::remaster
+{
+struct TerrainHorizonMap;
+}
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
 // for `glDrawElements`).  Keeps the frame-layer header out of the Core
@@ -800,6 +806,29 @@ class Engine : public IGraphicsEngine
     /// scene render a depth pass from the sun and the lit shaders sample it.
     virtual void SetShadowMapsEnabled(bool /*enabled*/) {}
     virtual bool ShadowMapsEnabled() const { return false; }
+
+    /// Remastered lighting (per-pixel HDR lighting, terrain and cloud shadows,
+    /// ambient occlusion, bloom; see Graphics/Remaster/LightRig.hpp). Only the
+    /// GL33 backend implements it; `remastered = false` selects the classic
+    /// shaders bit for bit.
+    virtual void SetLightingTuning(const remaster::LightingTuning& /*tuning*/) {}
+    virtual remaster::LightingTuning GetLightingTuning() const
+    {
+        remaster::LightingTuning t;
+        t.remastered = false;
+        return t;
+    }
+    /// True when the remastered shaders are built and selected.
+    virtual bool LightingRemasterActive() const { return false; }
+    /// True when the backend would use a terrain horizon map (remastered
+    /// lighting with terrain shadows or occlusion on); the world builds one only
+    /// then.
+    virtual bool WantsTerrainHorizonMap() const { return false; }
+    /// Hands over the horizon map for the current landscape (nullptr clears it).
+    virtual void SetTerrainHorizonMap(std::shared_ptr<const remaster::TerrainHorizonMap> /*map*/) {}
+    /// World/HUD boundary: called once per frame after the 3D world and before
+    /// the map, HUD and dialogs; runs the remastered post effects.
+    virtual void EndWorldScene() {}
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.
