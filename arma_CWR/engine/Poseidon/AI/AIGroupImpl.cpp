@@ -44,6 +44,30 @@ using namespace Foundation;
 
 // Parameters
 
+// A command message found on a radio channel counts for group only when
+// the group sent it.  A group's own channel carries only its own commands
+// (checked: fatal in strict mode).  The center channel is shared by every
+// group of the side: SendCommand puts a command there whenever the support
+// vehicle a group sends a unit to belongs to another group (CheckFuel,
+// CheckArmor, CheckHealth, CheckAmmo), and its sender group may since have
+// left the center (a null link).  Upstream checked GetFrom() == this there
+// too, so any second group of the side running its own fuel, repair, heal
+// or ammo check while such a message was queued failed the check; that
+// message is not this group's and is skipped.
+bool RadioCommandIsFrom(RadioMessageCommand* msg, AIGroup* group, bool channelCenter)
+{
+    if (!msg)
+    {
+        return false;
+    }
+    if (channelCenter)
+    {
+        return msg->GetFrom() == group;
+    }
+    AI_ERROR(msg->GetFrom() == group);
+    return true;
+}
+
 bool AIGroup::CommandSent(bool channelCenter)
 {
     // channelCenter == true ... check radio of center
@@ -73,7 +97,10 @@ bool AIGroup::CommandSent(bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        if (!RadioCommandIsFrom(msgCmd, this, channelCenter))
+        {
+            continue;
+        }
         if (msgCmd->IsToMainSubgroup())
         {
             return true;
@@ -87,8 +114,7 @@ bool AIGroup::CommandSent(bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
-        if (msgCmd->IsToMainSubgroup())
+        if (RadioCommandIsFrom(msgCmd, this, channelCenter) && msgCmd->IsToMainSubgroup())
         {
             return true;
         }
@@ -140,7 +166,10 @@ bool AIGroup::CommandSent(Command::Message message, bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        if (!RadioCommandIsFrom(msgCmd, this, channelCenter))
+        {
+            continue;
+        }
         if (msgCmd->GetCmdMessage() == message)
         {
             return true;
@@ -153,8 +182,7 @@ bool AIGroup::CommandSent(Command::Message message, bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
-        if (msgCmd->GetCmdMessage() == message)
+        if (RadioCommandIsFrom(msgCmd, this, channelCenter) && msgCmd->GetCmdMessage() == message)
         {
             return true;
         }
@@ -201,7 +229,10 @@ bool AIGroup::CommandSent(AIUnit* to, Command::Message message, bool channelCent
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        if (!RadioCommandIsFrom(msgCmd, this, channelCenter))
+        {
+            continue;
+        }
         if (msgCmd->IsTo(to) && msgCmd->GetCmdMessage() == message)
         {
             return true;
@@ -214,8 +245,7 @@ bool AIGroup::CommandSent(AIUnit* to, Command::Message message, bool channelCent
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
-        if (msgCmd->IsTo(to) && msgCmd->GetCmdMessage() == message)
+        if (RadioCommandIsFrom(msgCmd, this, channelCenter) && msgCmd->IsTo(to) && msgCmd->GetCmdMessage() == message)
         {
             return true;
         }

@@ -1,4 +1,5 @@
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/AI/ArcadeTemplate.hpp>
 #include <Poseidon/Core/SaveVersion.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
@@ -291,4 +292,78 @@ TEST_CASE("AssignAsCargo completes the seat-in and DoGetOut keeps its InCargo ch
     REQUIRE(warn != std::string::npos);
     REQUIRE(check != std::string::npos);
     CHECK(warn < check);
+}
+
+// ---------------------------------------------------------------------------
+// The shared center channel (occupier forces, the break-off column): the
+// side's center radio carries the commands of every group of the side.  A
+// group sends one there when the support vehicle it sends a unit to belongs
+// to another group (CheckFuel / CheckArmor / CheckHealth / CheckAmmo set
+// channelCenter), and upstream CommandSent then checked GetFrom() == this
+// for every command on that channel: the next fuel, repair, heal or ammo
+// check of ANY other group of the side failed "check failed:
+// msgCmd->GetFrom() == this" (AIGroupImpl.cpp, CommandSent) and strict mode
+// ended the game.  Another group's command (or one whose sender group has
+// left) is now skipped there; the group's own channel keeps the check.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a command on the shared center channel counts only for the group that sent it", "[ai][radio]")
+{
+    Ref<AIGroup> carrierCrew = new AIGroup();
+    Ref<AIGroup> infantry = new AIGroup();
+    Command refuel;
+    refuel._message = Command::Refuel;
+    PackedBoolArray none;
+    Ref<RadioMessageCommand> fromCrew = new RadioMessageCommand(carrierCrew, none, refuel);
+
+    // the crew's own fuel check finds its own command on the center channel
+    CHECK(RadioCommandIsFrom(fromCrew, carrierCrew, true));
+    // the infantry's check skips it (upstream: the fatal from-group check)
+    CHECK_FALSE(RadioCommandIsFrom(fromCrew, infantry, true));
+    // a group's own channel only ever carries its own commands
+    CHECK(RadioCommandIsFrom(fromCrew, carrierCrew, false));
+    // no message is nobody's
+    CHECK_FALSE(RadioCommandIsFrom(nullptr, infantry, true));
+
+    // the sender group left the center while its command was still queued
+    // (a released counter-attack group): the link goes null and the
+    // command is nobody's on the center channel
+    Ref<RadioMessageCommand> orphan = new RadioMessageCommand(carrierCrew, none, refuel);
+    carrierCrew.Free();
+    CHECK_FALSE(RadioCommandIsFrom(orphan, infantry, true));
+}
+
+TEST_CASE("every center-channel command scan skips another group's command", "[ai][radio]")
+{
+    const std::string impl = ReadAISource("engine/Poseidon/AI/AIGroupImpl.cpp");
+    const size_t first = impl.find("bool AIGroup::CommandSent(bool channelCenter)");
+    const size_t last = impl.find("void AIGroup::ClearGetInCommands(AIUnit* to)");
+    REQUIRE(first != std::string::npos);
+    REQUIRE(last != std::string::npos);
+    const std::string sent = impl.substr(first, last - first);
+    // the three CommandSent overloads read the center channel when asked:
+    // none keeps the bare from-group check, each scan and each actual
+    // message goes through the helper (two per overload)
+    CHECK(sent.find("AI_ERROR(msgCmd->GetFrom() == this);") == std::string::npos);
+    size_t uses = 0;
+    for (size_t at = sent.find("RadioCommandIsFrom(msgCmd, this, channelCenter)"); at != std::string::npos;
+         at = sent.find("RadioCommandIsFrom(msgCmd, this, channelCenter)", at + 1))
+    {
+        uses++;
+    }
+    CHECK(uses == 6);
+    // the helper keeps the check for the group's own channel
+    const size_t helper = impl.find("bool RadioCommandIsFrom(RadioMessageCommand* msg, AIGroup* group, bool channelCenter)");
+    REQUIRE(helper != std::string::npos);
+    CHECK(impl.find("AI_ERROR(msg->GetFrom() == group);", helper) < first);
+
+    // SendCommand's GetIn / GetOut scan reads the same channel
+    const std::string group = ReadAISource("engine/Poseidon/AI/AIGroup.cpp");
+    const size_t send = group.find("void AIGroup::SendCommand(Command& cmd, PackedBoolArray list, bool channelCenter)");
+    REQUIRE(send != std::string::npos);
+    const size_t sendEnd = group.find("Script* AIGroup::GetScript() const", send);
+    REQUIRE(sendEnd != std::string::npos);
+    const std::string body = group.substr(send, sendEnd - send);
+    CHECK(body.find("AI_ERROR(msgCmd->GetFrom() == this);") == std::string::npos);
+    CHECK(body.find("RadioCommandIsFrom(msgCmd, this, channelCenter)") != std::string::npos);
 }
