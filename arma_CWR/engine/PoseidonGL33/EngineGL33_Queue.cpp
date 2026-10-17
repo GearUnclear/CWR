@@ -350,6 +350,8 @@ void EngineGL33::BeginPass(PassId passId)
         // intensifier) draw through the remastered programs, get the terrain
         // and cloud lookups and end in the post pass.
         _worldEffectsOn = !_portraitTargetSize && !_worldSceneEnded && !_nightVision;
+        if (_worldEffectsOn && !_worldPassOpen)
+            GpuMark(Poseidon::gpu::Mark::WorldBegin);
         if (_worldEffectsOn)
             _worldPassOpen = true;
         UpdateRemasterPrograms();

@@ -35,6 +35,7 @@ enum PixelShaderSpecular
 #include <glad/gl.h>
 #include <SDL3/SDL.h>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 
@@ -212,10 +213,14 @@ struct SVertex
     Poseidon::UVPair t0;
 };
 
-// Free-function override for hot-reload — when set (typically via CLI
-// --shader-override-dir), GL33's CompileGLShader prefers
-// `<dir>/<name>.glsl` over the inline source.  Empty = inline only.
+// Shader override directory — when set (CWR_SHADER_OVERRIDE_DIR, read in
+// Init3DState), GL33's CompileGLShader prefers `<dir>/<name>.glsl` over the
+// inline source.  Empty = inline only.
 void SetShaderOverrideDir(const std::string& dir);
+const std::string& ShaderOverrideDir();
+// Contents of `<override dir>/<name>.glsl`, if the directory is set and the
+// file exists (the post pass compiles its shaders through this too).
+bool LoadShaderOverride(const char* name, std::string& out);
 
 class EngineGL33 : public Engine
 {
@@ -682,6 +687,11 @@ class EngineGL33 : public Engine
     void SetLightingTuning(const Poseidon::remaster::LightingTuning& tuning) override;
     Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lighting; }
     bool LightingRemasterActive() const override { return _lightingActive; }
+    void RequestShaderReload() override { _shaderReloadPending = true; }
+    std::string ShaderOverrideDirectory() const override { return ShaderOverrideDir(); }
+    void SetGpuTimingEnabled(bool enabled) override;
+    bool GpuTimingEnabled() const override { return _gpuTiming; }
+    std::string GpuTimingSummary() const override;
     bool WantsTerrainHorizonMap() const override;
     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
     void EndWorldScene() override;
@@ -697,6 +707,22 @@ class EngineGL33 : public Engine
     bool _worldPassOpen = false;
     bool _worldEffectsOn = false;
     bool _worldSceneEnded = false; // EndWorldScene ran this frame: later 3D passes are UI previews
+    // Dev: rebuild every program from the built-in sources and the override
+    // directory at the start of the next frame (EngineGL33_Shaders.cpp).
+    bool _shaderReloadPending = false;
+    void ReloadShadersNow();
+    // GPU timestamp queries (EngineGL33_GpuTimer.cpp): kGpuFrames frames in
+    // flight, each read back when its slot comes round again and only if the
+    // GPU has finished it (the CPU never waits on a query).
+    static constexpr int kGpuFrames = 4;
+    unsigned int _gpuQueries[kGpuFrames][Poseidon::gpu::kMarkCount] = {};
+    std::uint32_t _gpuRecorded[kGpuFrames] = {};
+    int _gpuSlot = 0;
+    bool _gpuTiming = false;
+    Poseidon::gpu::GpuTimings _gpuTimings;
+    void GpuMark(Poseidon::gpu::Mark mark);
+    void GpuFrameBegin();
+    void DestroyGpuQueries();
     // The remastered program set is in use: lighting active and inside the
     // world's 3D passes. Portraits, 3D previews in dialogs and night vision draw
     // through the classic programs (their own light setups and the green

@@ -250,6 +250,9 @@ constexpr float kBloomKnee = 0.12f;
 
 GLuint CompilePostShader(GLenum type, const char* src, const char* name)
 {
+    std::string overrideSource;
+    if (LoadShaderOverride(name, overrideSource))
+        src = overrideSource.c_str();
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
@@ -465,9 +468,12 @@ void EngineGL33::EndWorldScene()
     // shaders has a sky light share in its alpha and a world depth buffer.
     const bool worldDrawn = _worldPassOpen;
     // Queued world draws commit with the remastered programs before the HUD
-    // and dialogs switch back to the classic set.
-    if (_remasterPrograms)
+    // and dialogs switch back to the classic set (and before the world's GPU
+    // timestamp, so the world section holds all of them).
+    if (_remasterPrograms || (_gpuTiming && worldDrawn))
         FlushAndFreeAllQueues(_queueNo);
+    if (worldDrawn)
+        GpuMark(Poseidon::gpu::Mark::WorldEnd);
     _worldPassOpen = false;
     _worldEffectsOn = false;
     _worldSceneEnded = true;
@@ -569,6 +575,7 @@ void EngineGL33::EndWorldScene()
         bindTex(0, p.aoTex[1]);
         u2f(p.progAoBlur, "stepUV", 0.0f, 1.0f / hh);
         drawTo(p.aoFbo[0], hw, hh);
+        GpuMark(Poseidon::gpu::Mark::AoEnd);
     }
 
     // 2. Bloom chain.
@@ -597,6 +604,7 @@ void EngineGL33::EndWorldScene()
             drawTo(p.bloomFbo[i - 1], p.bloomW[i - 1], p.bloomH[i - 1]);
         }
         Poseidon::render::blend::Opaque();
+        GpuMark(Poseidon::gpu::Mark::BloomEnd);
     }
 
     // 3. Sun shafts, when the sun is in front of the camera and above the horizon.
@@ -635,6 +643,7 @@ void EngineGL33::EndWorldScene()
         bindTex(2, p.colorTex);
         u4f(p.progShafts, "sunScreen", sunU, sunV, shaftWeight, static_cast<float>(w) / static_cast<float>(h));
         drawTo(p.shaftFbo, hw, hh);
+        GpuMark(Poseidon::gpu::Mark::ShaftsEnd);
     }
 
     // 4. Composite into the frame target (every sample gets the resolved value).
@@ -652,6 +661,7 @@ void EngineGL33::EndWorldScene()
     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     drawTo(_ssaaFbo, w, h);
+    GpuMark(Poseidon::gpu::Mark::CompositeEnd);
 
     // Hand the GL state back: frame target bound with its full viewport, unit 0
     // sampler restored, caches invalidated so the next draw re-applies state.

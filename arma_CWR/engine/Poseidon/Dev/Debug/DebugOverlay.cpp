@@ -1516,6 +1516,25 @@ void DrawLightingTab()
     ImGui::InputText("##lightingSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
     if (ImGui::Button("Copy summary to clipboard"))
         ImGui::SetClipboardText(summary);
+
+    // Shader iteration without a restart: edit the files in the override
+    // directory (dump them with tests/rendering/lighting_lab/glsl_extract.py
+    // --dump, plus psRemasterCommon / ps*RemasterMain pieces), then reload.
+    ImGui::SeparatorText("Shaders");
+    const std::string overrideDir = GEngine->ShaderOverrideDirectory();
+    ImGui::TextDisabled("CWR_SHADER_OVERRIDE_DIR: %s", overrideDir.empty() ? "(not set)" : overrideDir.c_str());
+    if (ImGui::Button("Reload shaders"))
+        GEngine->RequestShaderReload();
+
+    // Measured GPU cost: timestamp queries around the world, the shadow pass
+    // and each post step (a few frames behind, smoothed). Flip Remastered
+    // above for the same view's Classic numbers.
+    ImGui::SeparatorText("GPU time");
+    bool gpuTiming = GEngine->GpuTimingEnabled();
+    if (ImGui::Checkbox("Measure GPU time", &gpuTiming))
+        GEngine->SetGpuTimingEnabled(gpuTiming);
+    if (gpuTiming)
+        ImGui::TextWrapped("%s", GEngine->GpuTimingSummary().c_str());
 }
 
 void DrawRenderTab()

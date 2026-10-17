@@ -700,10 +700,14 @@ void main() {
 }
 )";
 
-// Optional override directory for hot-reload.  Set via --shader-override-dir.
-// When set, CompileGLShader looks for `<dir>/<name>.glsl` and prefers its
-// contents over the inline `source` argument.  Empty / not-set = use inline
-// source as the only path (release behaviour).
+// Optional override directory for shader iteration, set from the
+// CWR_SHADER_OVERRIDE_DIR environment variable (Init3DState). When set,
+// CompileGLShader looks for `<dir>/<name>.glsl` and prefers its contents over
+// the inline `source` argument; the remastered fragment shaders also take
+// `psRemasterCommon.glsl` and `<ps>RemasterMain.glsl` pieces, and the post
+// shaders their own names (`psPostAo`, ...). The dev overlay's Reload shaders
+// button rebuilds everything from it without a restart. Empty / not-set = use
+// inline source as the only path (release behaviour).
 static std::string s_shaderOverrideDir;
 
 void SetShaderOverrideDir(const std::string& dir)
@@ -711,6 +715,11 @@ void SetShaderOverrideDir(const std::string& dir)
     s_shaderOverrideDir = dir;
     if (!dir.empty())
         LOG_INFO(Graphics, "GL33: shader override dir = '{}'", dir);
+}
+
+const std::string& ShaderOverrideDir()
+{
+    return s_shaderOverrideDir;
 }
 
 // Returns true if an override file was loaded (out=its contents).
@@ -728,6 +737,11 @@ static bool TryLoadShaderOverride(const char* name, std::string& out)
     out = ss.str();
     LOG_INFO(Graphics, "GL33: shader override loaded — {} ({} bytes)", p.string(), out.size());
     return true;
+}
+
+bool LoadShaderOverride(const char* name, std::string& out)
+{
+    return TryLoadShaderOverride(name, out);
 }
 
 static GLuint CompileGLShader(GLenum type, const char* source, const char* name)
@@ -885,6 +899,35 @@ void EngineGL33::DeinitVertexShaders()
         glDeleteBuffers(1, &s_vsUBO);
         s_vsUBO = 0;
     }
+    if (s_worldUBO)
+    {
+        glDeleteBuffers(1, &s_worldUBO);
+        s_worldUBO = 0;
+    }
+}
+
+void EngineGL33::ReloadShadersNow()
+{
+    _shaderReloadPending = false;
+    if (!_glContext)
+        return;
+    LOG_INFO(Graphics, "GL33: reloading shaders (override dir '{}')", s_shaderOverrideDir);
+    FlushAndFreeAllQueues(_queueNo);
+    // The same teardown and rebuild as a hard reset, minus the textures and
+    // vertex buffers: programs, shader objects, the constant buffers and the
+    // lighting resources (the post programs rebuild on first use, the terrain
+    // horizon map is re-uploaded from its CPU copy).
+    DeinitPixelShaders();
+    DeinitVertexShaders();
+    InitVertexShaders();
+    InitPixelShaders();
+    FlushVSConstants(); // the new VS buffer starts empty
+    const float nightEye = _nightEye;
+    _nightEye = -1.0f; // re-upload the night-eye coefficients InitPixelShaders reset
+    EnableNightEye(nightEye);
+    _pixelShaderSel = PSNone;
+    GL33Bind::Invalidate();
+    InvalidatePipelineCache();
 }
 
 void EngineGL33::SelectVertexShader(VertexShaderID vs)
@@ -1579,7 +1622,16 @@ void EngineGL33::InitPixelShaders()
             const char* body = Poseidon::gl33lighting::RemasterFragmentMain(info.id);
             if (!body)
                 continue;
-            const std::string src = std::string(Poseidon::gl33lighting::RemasterFragmentCommon()) + body;
+            // Override pieces: the shared lighting code and this shader's main
+            // can be edited separately (a whole `<ps>Remaster.glsl` still wins).
+            std::string common = Poseidon::gl33lighting::RemasterFragmentCommon();
+            std::string main = body;
+            std::string piece;
+            if (TryLoadShaderOverride("psRemasterCommon", piece))
+                common = piece;
+            if (TryLoadShaderOverride((std::string(info.name) + "RemasterMain").c_str(), piece))
+                main = piece;
+            const std::string src = common + main;
             const std::string name = std::string(info.name) + "Remaster";
             s_fsRemasterObjects[info.id] = CompileGLShader(GL_FRAGMENT_SHADER, src.c_str(), name.c_str());
         }

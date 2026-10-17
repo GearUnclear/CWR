@@ -75,16 +75,19 @@ def configure(source=None, shader_override_dir=None, nan_check=True, tuning=None
     _options.update(new)
 
 
-def _remaster_shaders(source):
-    if source is None:
-        return glsl_extract.load_shaders(glsl_extract.ENGINE_DIR.parent / REMASTER_FILE)
-    return glsl_extract.load_shaders(source)
+def _remaster_shaders(source, override_dir=None):
+    """The remastered GLSL, with the engine's override pieces applied
+    (psRemasterCommon.glsl, psNormalRemasterMain.glsl, vsTransformRemaster.glsl...)."""
+    path = source if source is not None else glsl_extract.ENGINE_DIR.parent / REMASTER_FILE
+    shaders = glsl_extract.load_shaders(path)
+    glsl_extract.apply_override_dir(shaders, override_dir)
+    return shaders
 
 
 class _Resources(C._Resources):
     def __init__(self, ctx, scene):
         super().__init__(ctx, scene, _options["source"], _options["shader_override_dir"])
-        rs = _remaster_shaders(_options["remaster_source"])
+        rs = _remaster_shaders(_options["remaster_source"], _options["shader_override_dir"])
         self.rshaders = rs
         common = rs["s_psRemasterCommon"]
         vs = rs["s_vsTransformRemasterGLSL"]
@@ -125,7 +128,7 @@ class _Resources(C._Resources):
         self.height_tex = ctx.texture((MAP_N, MAP_N), 2, np.ascontiguousarray(hs).tobytes(), dtype="f4")
         self.height_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.height_tex.repeat_x = self.height_tex.repeat_y = False
-        self.post = PostFX(ctx)
+        self.post = PostFX(ctx, override_dir=_options["shader_override_dir"])
         self.scene_targets = {}
         noise = native.cloud_noise(256, 1)
         self.cloud_tex = ctx.texture((256, 256), 1, np.ascontiguousarray(noise).tobytes())

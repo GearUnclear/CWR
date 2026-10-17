@@ -577,6 +577,21 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
     return GameValue("OK");
 }
 
+/// triGpuTimes <on> — GPU timestamp timing for cost checks. true turns it on
+/// (and resets the averages), false turns it off; either way it returns the
+/// current summary, e.g. "frame 6.12 ms | world 4.80 (shadow 0.62) | post
+/// 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15". Results trail the
+/// frame by a few frames: enable, wait a second, then read.
+GameValue TriGpuTimes(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const bool on = static_cast<bool>(arg);
+    if (on != GEngine->GpuTimingEnabled())
+        GEngine->SetGpuTimingEnabled(on);
+    return GameValue(GEngine->GpuTimingSummary().c_str());
+}
+
 /// triEnableShadowMaps — turn on the durable shadow-map (depth-buffer) path. Off
 /// by default; tests / the player enable it so the new shadows supersede the
 /// projected ones. Returns "OK".

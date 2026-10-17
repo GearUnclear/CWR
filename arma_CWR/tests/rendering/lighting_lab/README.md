@@ -115,8 +115,18 @@ python run_lab.py --renderer remaster --debug-view 1 --no-post --out OUT    # 1 
 python compare.py CLASSIC_OUT OUT --out CMP --labels CLASSIC REMASTERED
 ```
 
-Extra presets for it: `lowsun` (14 degrees, azimuth 195) and `broken`
-(40 degrees, skyThrough 0.6, cloud shadows). The terrain horizon map covers a
+Extra presets for it: `lowsun` (14 degrees, azimuth 195), `broken`
+(40 degrees, skyThrough 0.6, cloud shadows) and `morning` (32 degrees from the
+east, a stand-in for the owner's clear 08:00). The `testview` camera is a
+first-person stand-in for the owner's LightingLowSun.Demo view: the APC, the
+soldier and a jeep under a camouflage net (a half-lit cutout, like the trees).
+
+`--shader-override-dir DIR` applies to the remastered and post shaders too,
+with the engine's names: `psRemasterCommon.glsl` and `ps*RemasterMain.glsl`
+pieces, `vs*Remaster.glsl`, `psPost*.glsl` (`glsl_extract.py --source
+.../EngineGL33_LightingShaders.cpp --dump DIR` writes them). The same directory
+works as the game's `CWR_SHADER_OVERRIDE_DIR`, where the dev overlay's
+*Reload shaders* picks up edits without a restart. The terrain horizon map covers a
 3.2 km window around the scene at 12.5 m.
 
 It adds to what the classic renderer reproduces: a sun shadow map of the object

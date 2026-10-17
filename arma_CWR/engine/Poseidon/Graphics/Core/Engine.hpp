@@ -820,6 +820,16 @@ class Engine : public IGraphicsEngine
     }
     /// True when the remastered shaders are built and selected.
     virtual bool LightingRemasterActive() const { return false; }
+    /// GPU timestamp queries around the frame, the world, the shadow pass and
+    /// the post pass (dev tool; off by default). The summary is the smoothed
+    /// per-section time in milliseconds, a few frames behind.
+    /// Dev: rebuild every shader program at the start of the next frame, picking
+    /// up edits in the shader override directory (CWR_SHADER_OVERRIDE_DIR).
+    virtual void RequestShaderReload() {}
+    virtual std::string ShaderOverrideDirectory() const { return {}; }
+    virtual void SetGpuTimingEnabled(bool /*enabled*/) {}
+    virtual bool GpuTimingEnabled() const { return false; }
+    virtual std::string GpuTimingSummary() const { return "gpu: timing not supported by this backend"; }
     /// True when the backend would use a terrain horizon map (remastered
     /// lighting with terrain shadows or occlusion on); the world builds one only
     /// then.

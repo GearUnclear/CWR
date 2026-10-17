@@ -454,10 +454,12 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
         resolved.push_back({handle, src.firstVertex, src.vertexCount});
     }
 
+    GpuMark(Poseidon::gpu::Mark::ShadowBegin);
     const bool rendered = numCascades >= 1 &&
                           RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
                                              casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
                                              resolved.data(), static_cast<int>(resolved.size()));
+    GpuMark(Poseidon::gpu::Mark::ShadowEnd);
     if (numCascades >= 1)
     {
         // The cascade loop writes cull::Front/None directly and RenderCascadeArray

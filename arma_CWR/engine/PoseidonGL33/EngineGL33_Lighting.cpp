@@ -123,6 +123,7 @@ void EngineGL33::InitLightingResources()
 
 void EngineGL33::DeinitLightingResources()
 {
+    DestroyGpuQueries();
     DestroyPostTargets();
     DestroyPostPrograms();
     auto delTex = [](unsigned int& t)

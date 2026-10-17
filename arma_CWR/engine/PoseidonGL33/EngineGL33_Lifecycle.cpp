@@ -171,6 +171,9 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     base::InitDraw();
 
     _frameOpen = true;
+    if (_shaderReloadPending)
+        ReloadShadersNow();
+    GpuFrameBegin();
     _drawItems.clear();
     // Remastered lighting: a new frame has no world pass yet.
     _worldPassOpen = false;
@@ -202,6 +205,7 @@ void EngineGL33::FinishDraw()
         base::DrawFinishTexts();
 
         CloseAllQueues(_queueNo);
+        GpuMark(Poseidon::gpu::Mark::FrameEnd);
 
         LOG_DEBUG(
             Graphics,

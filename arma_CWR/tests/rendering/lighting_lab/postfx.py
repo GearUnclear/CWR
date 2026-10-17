@@ -27,10 +27,11 @@ def _constants(path) -> dict:
 
 
 class PostFX:
-    def __init__(self, ctx: moderngl.Context, source=None):
+    def __init__(self, ctx: moderngl.Context, source=None, override_dir=None):
         self.ctx = ctx
         path = source or (glsl_extract.ENGINE_DIR.parent / POST_FILE)
         sh = glsl_extract.load_shaders(path)
+        glsl_extract.apply_override_dir(sh, override_dir)  # psPostAo.glsl, ... as in the engine
         self.k = _constants(path)
         vs = sh["s_vsPostGLSL"]
 
