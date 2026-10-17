@@ -1337,8 +1337,9 @@ of six operations debits:
 - *Foot.* Nothing at launch: the source base pays the infantry from its
   stored reserve (5.3). The pool pays it back through D2 regrowth, at most
   1 body per 600 s per base, so at most 6 bodies per base per hour whether
-  the squad died or settled as a garrison. Abel's three ground sources
-  (Outpost, Harbour, Airfield) draw at most 18 an hour.
+  the squad died or settled as a garrison. Abel's five ground sources
+  (Outpost, Harbour, Airfield and the generated La Riviere Outpost and Vigny
+  Outpost, 5.7) draw at most 30 an hour.
 - *Truck.* Hull 3 + driver 1 = 4 units while it is out, refunded when the
   hull is deleted at home unseen, lost only when it is destroyed.
 - *Insertion* (the arrival rule, 6.5; push-outs too since 2026-10-16).
@@ -1839,8 +1840,11 @@ resolves to 0) unless it sets `seedBases = 1`.
 1. Hub top-up: a reserve deposit through `Deposit`.
 2. Final-stand surge (below).
 3. Strikes on the cluster: the HQ if in it, then bases, then towns.
-   - Up to `forcesWaveRetakeShare` (0.5) of the wave, on up to
-     `forcesWaveOps` (4) targets (origin `CAOWave`).
+   - Up to `forcesWaveRetakeShare` (0.5) of the wave's bodies as staged
+     infantry, on up to `forcesWaveOps` (4) targets (origin `CAOWave`). The
+     share counts the infantry only: each strike's hull and crew are paid by
+     the pool on top, like any package (6.5), so a helicopter strike can take
+     more than half the wave's units (video 7: 21 of 30, the share 15).
    - Each target gets its own package, from the hub, under the arrival rule
      since 2026-10-16 (6.5): a strike whose walk from the hub exceeds
      `forcesSlowEta` rides (video 5's HQ assault walked 41 minutes).
@@ -2669,7 +2673,7 @@ WARN. Owners: OF = `OccupierForces`, CA = `CounterAttack`, ZR =
 | `forcesWaveMin` / `forcesWaveMax` ("waveMin" / "waveMax") | OF | 12 / 48 | constant (key) | the wave size clamp; binds only for poolStart under 24 or over 96 |
 | `forcesWaveLead` ("waveLead") | OF | 600 (0..7200 s) | lever: Waves | seconds inbound |
 | `forcesWaveLeadFinal` ("waveLeadFinal") | OF | 120 (0..7200 s) | constant (key) | the final stand's lead |
-| `forcesWaveRetakeShare` ("waveRetakeShare") | OF | 0.5 (0..1) | lever: Waves | the strikes' share of the wave |
+| `forcesWaveRetakeShare` ("waveRetakeShare") | OF | 0.5 (0..1) | lever: Waves | the strikes' share of the wave's bodies, as staged infantry (hulls and crews paid on top, 7.1) |
 | `forcesWaveOps` / `forcesWaveCluster` ("waveOps" / "waveCluster") | OF | 4 / 2000 m | constant (key) | strike targets and the cluster radius |
 | `forcesWaveSurge` ("waveSurge") | OF | 12 (0..48) | constant (key) | final-stand surge above strength |
 | `forcesWaveWarLevel` ("waveWarLevel") | OF | 1 (0..3) | lever: Waves | occupier war level per landed wave |
