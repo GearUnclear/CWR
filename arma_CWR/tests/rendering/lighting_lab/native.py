@@ -56,7 +56,7 @@ def lib() -> ctypes.CDLL:
     L.lab_compute_rig.argtypes = [f32p, f32p, f32p]
     L.lab_default_tuning.argtypes = [f32p]
     u16p = ctypes.POINTER(ctypes.c_uint16)
-    L.lab_build_horizon.argtypes = [f32p, ctypes.c_int, ctypes.c_float, u16p, u8p, f32p]
+    L.lab_build_horizon.argtypes = [f32p, ctypes.c_int, ctypes.c_float, u16p, u8p, f32p, f32p, f32p]
     L.lab_build_horizon.restype = ctypes.c_int
     L.lab_cloud_noise.argtypes = [ctypes.c_int, ctypes.c_uint, u8p]
     L.lab_crown_ellipsoid.argtypes = [f32p, f32p, f32p, f32p]
@@ -106,17 +106,23 @@ def compute_rig(to_sun, to_moon, moon_phase, sun_diffuse, ambient, fog, sky_thro
             "transmit": float(out[17]), "exposure": float(out[18]), "horizon_sun": out[20:23].copy()}
 
 
-def build_horizon(heights: np.ndarray, cell: float):
+def build_horizon(heights: np.ndarray, cell: float, ground_rgb: np.ndarray | None = None):
+    """remaster::BuildTerrainHorizonMap. ground_rgb: (n, n, 3) display-space ground
+    colours. Returns (horizon (4,n,n,4) u16, sky (n,n) u8, height (n,n), tint (n,n,2) or None)."""
     h = np.ascontiguousarray(heights, dtype=np.float32)
     n = h.shape[0]
     hor = np.zeros(4 * n * n * 4, dtype=np.uint16)
     sky = np.zeros(n * n, dtype=np.uint8)
     hgt = np.zeros(n * n, dtype=np.float32)
+    rgb = None if ground_rgb is None else np.ascontiguousarray(ground_rgb, dtype=np.float32).reshape(-1)
+    tint = None if ground_rgb is None else np.zeros(n * n * 2, dtype=np.float32)
     size = lib().lab_build_horizon(_fp(h), n, float(cell), hor.ctypes.data_as(ctypes.POINTER(ctypes.c_uint16)),
-                                   _u8(sky), _fp(hgt))
+                                   _u8(sky), _fp(hgt), _fp(rgb) if rgb is not None else None,
+                                   _fp(tint) if tint is not None else None)
     if size != n:
         raise RuntimeError(f"horizon build returned size {size} for a {n} grid")
-    return hor.reshape(4, n, n, 4), sky.reshape(n, n), hgt.reshape(n, n)
+    return hor.reshape(4, n, n, 4), sky.reshape(n, n), hgt.reshape(n, n), (
+        tint.reshape(n, n, 2) if tint is not None else None)
 
 
 def crown_ellipsoid(box_min, box_max):

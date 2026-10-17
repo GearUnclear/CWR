@@ -282,7 +282,7 @@ uniform sampler2D tex0;
 uniform sampler2D tex1;
 uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound in remastered mode
 uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
-uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility
+uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
 uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
 
 in vec4 vColor;
@@ -378,9 +378,14 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
     return 1.0 - (1.0 - lit) * fade;
 }
 
+// Colour of the light the ground below bounces (luminance 1; white when there
+// is no map). Set by terrainSunVisibility, read by skyIrradiance.
+vec3 g_groundTint = vec3(1.0);
+
 // Hills shadowing the sun, from the precomputed horizon map. Also returns the
-// terrain sky visibility (valley floors see less sky). Geometry well above the
-// ground (roofs, tree crowns, aircraft) is lifted out of both.
+// terrain sky visibility (valley floors see less sky) and sets the ground
+// tint. Geometry well above the ground (roofs, tree crowns, aircraft) is
+// lifted out of the shadow and the occlusion.
 float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     skyVisibility = 1.0;
     if (litTerrain.x < 0.5 || litFlags.y < 0.5) return 1.0;
@@ -388,7 +393,8 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     float last = 1.0 / litTerrain.z - 1.0;
     if (g.x < 0.0 || g.y < 0.0 || g.x > last || g.y > last) return 1.0;
     vec2 uv = (g + 0.5) * litTerrain.z;
-    vec2 hs = texture(terrainHeight, uv).rg;
+    vec4 hs = texture(terrainHeight, uv);
+    g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
     float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
     skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
     float h0 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.x)), litTerrainSel0);
@@ -424,9 +430,12 @@ vec3 skyIrradiance(vec3 n) {
     float h = length(n.xz);
     float sl = length(litSunDir.xz);
     float toward = (h > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(n.xz / h, litSunDir.xz / sl) : 0.5;
-    vec3 horizon = mix(litHorizon.rgb, litHorizonSun.rgb, toward);
+    // The bounce takes the colour of the ground below: the rig's horizon holds
+    // half the (neutral) ground bounce, so swap that half for the tinted one.
+    vec3 ground = litGround.rgb * g_groundTint;
+    vec3 horizon = mix(litHorizon.rgb, litHorizonSun.rgb, toward) + 0.5 * (ground - litGround.rgb);
     float t = clamp(n.y, -1.0, 1.0);
-    return t >= 0.0 ? mix(horizon, litZenith.rgb, t) : mix(horizon, litGround.rgb, -t);
+    return t >= 0.0 ? mix(horizon, litZenith.rgb, t) : mix(horizon, ground, -t);
 }
 
 // Fog toward the sun takes the sky dome's own sun glow (TLVertexTable::

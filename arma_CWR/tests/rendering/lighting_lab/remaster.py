@@ -122,10 +122,17 @@ class _Resources(C._Resources):
         zs = MAP_ORIGIN[1] + np.arange(MAP_N) * MAP_CELL
         X, Z = np.meshgrid(xs, zs)
         heights = scene.heightfield(X, Z).astype(np.float32)
-        hor, sky, hgt = native.build_horizon(heights, MAP_CELL)
+        # ground colour per vertex = the average colour of its landscape texture
+        # (TerrainLighting.cpp GroundColors: Texture::GetColor)
+        means = {k: scene.textures[k]["rgba"][..., :3].reshape(-1, 3).mean(0) for k in ("grass", "dirt")}
+        names = scene.ground_texture(X, Z)
+        ground = np.zeros((MAP_N, MAP_N, 3), dtype=np.float32)
+        for k, m in means.items():
+            ground[names == k] = m
+        hor, sky, hgt, tint = native.build_horizon(heights, MAP_CELL, ground)
         self.horizon_tex = rawgl.rgba16_array(np.ascontiguousarray(hor).tobytes(), MAP_N, MAP_N, 4)
-        hs = np.stack([hgt, sky.astype(np.float32) / 255.0], axis=-1).astype(np.float32)
-        self.height_tex = ctx.texture((MAP_N, MAP_N), 2, np.ascontiguousarray(hs).tobytes(), dtype="f4")
+        hs = np.concatenate([hgt[..., None], sky.astype(np.float32)[..., None] / 255.0, tint], axis=-1).astype(np.float32)
+        self.height_tex = ctx.texture((MAP_N, MAP_N), 4, np.ascontiguousarray(hs).tobytes(), dtype="f4")
         self.height_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.height_tex.repeat_x = self.height_tex.repeat_y = False
         self.post = PostFX(ctx, override_dir=_options["shader_override_dir"])

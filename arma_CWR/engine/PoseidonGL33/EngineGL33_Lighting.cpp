@@ -88,8 +88,8 @@ void EngineGL33::InitLightingResources()
     _dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT, &one);
     const unsigned short open[4] = {0, 0, 0, 0}; // horizon at the bottom of the range: open sky
     _dummyHorizonTex = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, open);
-    const float heightSky[2] = {-1e6f, 1.0f};
-    _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RG32F, GL_RG, GL_FLOAT, heightSky);
+    const float heightSky[4] = {-1e6f, 1.0f, 1.0f, 1.0f}; // height, sky visibility, neutral ground tint
+    _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, heightSky);
 
     const std::vector<std::uint8_t> noise = rm::BuildCloudNoise(256, 1);
     glGenTextures(1, &_cloudNoiseTex);
@@ -237,15 +237,19 @@ void EngineGL33::UploadTerrainHorizonMap()
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
-    std::vector<float> hs(static_cast<size_t>(n) * n * 2);
+    // r = height, g = sky visibility, ba = the ground-bounce tint (red, blue).
+    const bool tint = m.groundTint.size() == static_cast<size_t>(n) * n * 2;
+    std::vector<float> hs(static_cast<size_t>(n) * n * 4);
     for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
     {
-        hs[i * 2 + 0] = m.height[i];
-        hs[i * 2 + 1] = static_cast<float>(m.skyVisibility[i]) / 255.0f;
+        hs[i * 4 + 0] = m.height[i];
+        hs[i * 4 + 1] = static_cast<float>(m.skyVisibility[i]) / 255.0f;
+        hs[i * 4 + 2] = tint ? m.groundTint[i * 2 + 0] : 1.0f;
+        hs[i * 4 + 3] = tint ? m.groundTint[i * 2 + 1] : 1.0f;
     }
     glGenTextures(1, &_terrainHeightTex);
     glBindTexture(GL_TEXTURE_2D, _terrainHeightTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, n, n, 0, GL_RG, GL_FLOAT, hs.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, n, n, 0, GL_RGBA, GL_FLOAT, hs.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

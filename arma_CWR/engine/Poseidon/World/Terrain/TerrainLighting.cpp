@@ -2,6 +2,7 @@
 
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <future>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace Poseidon
@@ -56,6 +58,39 @@ std::uint64_t SampleHeights(const Landscape& land, int range, float grid)
     }
     return h;
 }
+
+// Colour of the ground at every terrain vertex (display space): the average
+// colour of the landscape texture covering it, looked up once per texture.
+// The texture grid can be coarser than the terrain grid.
+std::vector<float> GroundColors(const Landscape& land, int range, float grid)
+{
+    std::vector<float> rgb(static_cast<size_t>(range) * range * 3, 0.5f);
+    const int landRange = land.GetLandRange();
+    const float landGrid = land.GetLandGrid();
+    if (landRange < 1 || !(landGrid > 0.0f))
+        return rgb;
+    std::unordered_map<int, Color> byIndex;
+    for (int z = 0; z < range; ++z)
+    {
+        const int lz = std::min(static_cast<int>(static_cast<float>(z) * grid / landGrid), landRange - 1);
+        for (int x = 0; x < range; ++x)
+        {
+            const int lx = std::min(static_cast<int>(static_cast<float>(x) * grid / landGrid), landRange - 1);
+            const int index = land.ClippedTextureIndex(lz, lx);
+            auto it = byIndex.find(index);
+            if (it == byIndex.end())
+            {
+                Texture* tex = land.ClippedTexture(lz, lx);
+                it = byIndex.emplace(index, tex ? tex->GetColor() : Color(0.5f, 0.5f, 0.5f, 1.0f)).first;
+            }
+            float* o = rgb.data() + (static_cast<size_t>(z) * range + x) * 3;
+            o[0] = it->second.R();
+            o[1] = it->second.G();
+            o[2] = it->second.B();
+        }
+    }
+    return rgb;
+}
 } // namespace
 
 void UpdateTerrainLighting(Landscape* land)
@@ -94,14 +129,17 @@ void UpdateTerrainLighting(Landscape* land)
     for (int z = 0; z < range; ++z)
         for (int x = 0; x < range; ++x)
             heights[static_cast<size_t>(z) * range + x] = land->ClippedData(z, x); // (z, x) order
+    // Texture headers load on this (the main) thread; the worker gets plain colours.
+    std::vector<float> ground = GroundColors(*land, range, grid);
 
     s_state.pending = std::async(
         std::launch::async,
-        [heights = std::move(heights), range, grid]()
+        [heights = std::move(heights), ground = std::move(ground), range, grid]()
         {
             const auto t0 = std::chrono::steady_clock::now();
             auto map = std::make_shared<remaster::TerrainHorizonMap>();
-            remaster::BuildTerrainHorizonMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}, *map);
+            remaster::BuildTerrainHorizonMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}, *map,
+                                             ground.data());
             const auto ms =
                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
             LOG_INFO(Graphics, "Terrain horizon map {}x{} (from {}x{} at {} m) built in {} ms", map->size, map->size,

@@ -857,6 +857,17 @@ class Scene:
     heightfield: Heightfield
     anchors: dict[str, np.ndarray]
     seed: int
+    # 50 m texture squares (ix, iz) that carry the dirt texture; the rest is grass
+    dirt_squares: frozenset = frozenset()
+
+    def ground_texture(self, x, z) -> np.ndarray:
+        """Name per point of the landscape texture under world (x, z): 'dirt' or 'grass'."""
+        ix = np.floor(np.asarray(x) / TEX_SQUARE).astype(int)
+        iz = np.floor(np.asarray(z) / TEX_SQUARE).astype(int)
+        out = np.full(ix.shape, "grass", dtype=object)
+        for (a, b) in self.dirt_squares:
+            out[(ix == a) & (iz == b)] = "dirt"
+        return out
 
     def sky_texture(self, sky_through: float) -> np.ndarray:
         """Sky texture for a weather state: jasno (clear) blended toward zatazeno
@@ -975,7 +986,7 @@ def build_scene(seed: int = 1) -> Scene:
     }
     anchors = {"village": village, "house1": house1, "house2": house2, "vehicle": vehicle, "soldier": soldier,
                "net": net_site}
-    return Scene(meshes, build_sky_dome(), T.build_all(seed - 1), cameras, hf, anchors, seed)
+    return Scene(meshes, build_sky_dome(), T.build_all(seed - 1), cameras, hf, anchors, seed, frozenset(dirt))
 
 
 if __name__ == "__main__":

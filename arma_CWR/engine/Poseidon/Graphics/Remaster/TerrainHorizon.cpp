@@ -30,6 +30,9 @@ float SampleHeight(const std::vector<float>& h, int size, float fx, float fz)
 }
 
 // Box-downsample to at most maxSize texels per side.
+// How much of the ground's own colour the bounce takes (see GroundTint).
+constexpr float kGroundTintStrength = 0.75f;
+
 void Downsample(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst, int& dstSize,
                 float& dstCell)
 {
@@ -125,8 +128,40 @@ float TerrainHorizonMap::SkyVisibility(int x, int z) const
     return static_cast<float>(skyVisibility[static_cast<size_t>(z) * size + x]) / 255.0f;
 }
 
+void GroundTint(float r, float g, float b, float strength, float& tintR, float& tintB)
+{
+    auto lin = [](float v) { return std::pow(std::min(std::max(v, 0.0f), 1.0f), 2.2f); };
+    const float lr = lin(r), lg = lin(g), lb = lin(b);
+    const float luma = 0.2126f * lr + 0.7152f * lg + 0.0722f * lb;
+    float cr = 1.0f, cb = 1.0f;
+    if (luma > 1e-4f)
+    {
+        cr = lr / luma;
+        cb = lb / luma;
+    }
+    const float s = std::min(std::max(strength, 0.0f), 1.0f);
+    cr = std::min(std::max(1.0f + (cr - 1.0f) * s, 0.5f), 1.6f);
+    cb = std::min(std::max(1.0f + (cb - 1.0f) * s, 0.5f), 1.6f);
+    // Green follows from unit luminance; when that falls out of range, clamp
+    // it and rescale red and blue so the luminance is 1 again.
+    float cg = (1.0f - 0.2126f * cr - 0.0722f * cb) / 0.7152f;
+    if (cg < 0.5f || cg > 1.6f)
+    {
+        cg = std::min(std::max(cg, 0.5f), 1.6f);
+        const float rb = 0.2126f * cr + 0.0722f * cb;
+        const float want = 1.0f - 0.7152f * cg;
+        if (rb > 1e-6f)
+        {
+            cr *= want / rb;
+            cb *= want / rb;
+        }
+    }
+    tintR = cr;
+    tintB = cb;
+}
+
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
-                            TerrainHorizonMap& out)
+                            TerrainHorizonMap& out, const float* groundRgb)
 {
     out = TerrainHorizonMap{};
     if (!heights || size < 2 || !(cellSize > 0.0f))
@@ -139,6 +174,24 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
 
     out.size = n;
     out.cellSize = cell;
+    if (groundRgb)
+    {
+        // Box-downsample each channel like the heights, then take the tint.
+        std::vector<float> channel(static_cast<size_t>(size) * size);
+        std::vector<float> rgb[3];
+        for (int c = 0; c < 3; ++c)
+        {
+            for (size_t i = 0; i < channel.size(); ++i)
+                channel[i] = groundRgb[i * 3 + c];
+            int cn = 0;
+            float cc = 0.0f;
+            Downsample(channel.data(), size, cellSize, std::max(2, options.maxSize), rgb[c], cn, cc);
+        }
+        out.groundTint.resize(static_cast<size_t>(n) * n * 2);
+        for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
+            GroundTint(rgb[0][i], rgb[1][i], rgb[2][i], kGroundTintStrength, out.groundTint[i * 2],
+                       out.groundTint[i * 2 + 1]);
+    }
     out.horizon.assign(static_cast<size_t>(TerrainHorizonMap::kLayers) * n * n * 4, 0);
     out.skyVisibility.assign(static_cast<size_t>(n) * n, 255);
     out.height = h;

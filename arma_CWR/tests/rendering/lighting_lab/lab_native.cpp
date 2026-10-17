@@ -91,17 +91,20 @@ extern "C"
     }
 
     // Builds the horizon map. Returns the texel count per side (0 on failure);
-    // horizonOut needs 4 * size * size * 4 uint16, skyOut and heightOut size * size.
+    // horizonOut needs 4 * size * size * 4 uint16, skyOut and heightOut size * size,
+    // tintOut size * size * 2 (written only when groundRgb, size * size * 3, is given).
     int lab_build_horizon(const float* heights, int size, float cellSize, std::uint16_t* horizonOut,
-                          std::uint8_t* skyOut, float* heightOut)
+                          std::uint8_t* skyOut, float* heightOut, const float* groundRgb, float* tintOut)
     {
         TerrainHorizonMap m;
         TerrainHorizonOptions o;
-        if (!BuildTerrainHorizonMap(heights, size, cellSize, o, m))
+        if (!BuildTerrainHorizonMap(heights, size, cellSize, o, m, groundRgb))
             return 0;
         std::memcpy(horizonOut, m.horizon.data(), m.horizon.size() * sizeof(std::uint16_t));
         std::memcpy(skyOut, m.skyVisibility.data(), m.skyVisibility.size());
         std::memcpy(heightOut, m.height.data(), m.height.size() * sizeof(float));
+        if (groundRgb && tintOut)
+            std::memcpy(tintOut, m.groundTint.data(), m.groundTint.size() * sizeof(float));
         return m.size;
     }
 

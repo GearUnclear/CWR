@@ -44,6 +44,11 @@ struct TerrainHorizonMap
     std::vector<std::uint16_t> horizon;      // kLayers * size * size * 4
     std::vector<std::uint8_t> skyVisibility; // size * size, 255 = open sky
     std::vector<float> height;               // size * size, metres (the sampled heights)
+    // Colour of the light the ground bounces, as a luminance-neutral tint:
+    // size * size pairs (r, b) with g = (1 - 0.2126 r - 0.0722 b) / 0.7152, so
+    // the tint never changes how bright the bounce is, only its colour. Empty
+    // when no ground colours were given (the shader then uses a neutral tint).
+    std::vector<float> groundTint;
 
     bool Valid() const { return size > 1 && cellSize > 0.0f; }
     // Decoded horizon angle (degrees) of direction `dir` at texel (x, z).
@@ -66,9 +71,17 @@ std::uint16_t EncodeHorizonDeg(float deg);
 float DecodeHorizonDeg(std::uint16_t value);
 
 // Builds the map from a heights grid. Returns false (and leaves `out` invalid)
-// for an empty grid or a non-positive cell size.
+// for an empty grid or a non-positive cell size. `groundRgb` (optional,
+// size * size * 3, display-space 0..1, same layout as the heights) is the
+// colour of the ground at each vertex: the landscape texture's average colour.
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
-                            TerrainHorizonMap& out);
+                            TerrainHorizonMap& out, const float* groundRgb = nullptr);
+
+// The luminance-neutral bounce tint (r, b) for a display-space ground colour:
+// the colour's linear chroma at unit luminance, softened toward white by
+// `strength` (0 = white, 1 = the full chroma) and kept within [0.5, 1.6] per
+// channel so a saturated texture cannot stain the shade.
+void GroundTint(float r, float g, float b, float strength, float& tintR, float& tintB);
 
 // Reference visibility the shader computes: horizon interpolated between the
 // two directions around the sun azimuth, compared with the sun elevation over a

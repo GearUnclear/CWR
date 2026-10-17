@@ -218,6 +218,64 @@ TEST_CASE("Remaster terrain horizon: a ridge shadows the valley behind it from a
     CHECK(HashHeights(h.data(), n, cell) != HashHeights(h.data(), n, cell * 2.0f));
 }
 
+TEST_CASE("Remaster ground tint colours the bounce without changing its brightness", "[Graphics][remaster]")
+{
+    auto green = [](float r, float b) { return (1.0f - 0.2126f * r - 0.0722f * b) / 0.7152f; };
+    struct Case
+    {
+        float r, g, b;
+    };
+    const Case cases[] = {{1, 1, 1},          {0.76f, 0.65f, 0.45f}, {0.30f, 0.42f, 0.18f}, {0.0f, 1.0f, 0.0f},
+                          {1.0f, 0.0f, 1.0f}, {0.02f, 0.02f, 0.02f}, {0.20f, 0.35f, 0.60f}};
+    for (const Case& c : cases)
+    {
+        CAPTURE(c.r, c.g, c.b);
+        float tr = 0, tb = 0;
+        GroundTint(c.r, c.g, c.b, 0.75f, tr, tb);
+        const float tg = green(tr, tb);
+        CHECK(0.2126f * tr + 0.7152f * tg + 0.0722f * tb == Catch::Approx(1.0f).epsilon(1e-4));
+        for (float v : {tr, tg, tb})
+        {
+            CHECK(v >= 0.5f - 1e-4f);
+            CHECK(v <= 1.6f + 1e-4f);
+        }
+    }
+    float tr = 0, tb = 0;
+    GroundTint(1, 1, 1, 0.75f, tr, tb);
+    CHECK(tr == Catch::Approx(1.0f));
+    CHECK(tb == Catch::Approx(1.0f));
+    GroundTint(0.76f, 0.65f, 0.45f, 0.75f, tr, tb); // desert sand: warm bounce
+    CHECK(tr > 1.15f);
+    CHECK(tb < 0.7f);
+    GroundTint(0.76f, 0.65f, 0.45f, 0.0f, tr, tb); // strength 0 = neutral
+    CHECK(tr == Catch::Approx(1.0f));
+    CHECK(tb == Catch::Approx(1.0f));
+
+    // The builder downsamples the colours with the heights.
+    const int n = 32;
+    std::vector<float> h(static_cast<size_t>(n) * n, 0.0f);
+    std::vector<float> rgb(static_cast<size_t>(n) * n * 3);
+    for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
+    {
+        rgb[i * 3 + 0] = 0.76f;
+        rgb[i * 3 + 1] = 0.65f;
+        rgb[i * 3 + 2] = 0.45f;
+    }
+    TerrainHorizonOptions opt;
+    opt.maxSize = 16;
+    opt.threads = 1;
+    TerrainHorizonMap map;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 10.0f, opt, map, rgb.data()));
+    REQUIRE(map.size == 16);
+    REQUIRE(map.groundTint.size() == static_cast<size_t>(16) * 16 * 2);
+    GroundTint(0.76f, 0.65f, 0.45f, 0.75f, tr, tb);
+    CHECK(map.groundTint[0] == Catch::Approx(tr));
+    CHECK(map.groundTint[1] == Catch::Approx(tb));
+    TerrainHorizonMap plain;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 10.0f, opt, plain));
+    CHECK(plain.groundTint.empty());
+}
+
 TEST_CASE("Remaster cloud noise is uniform, so a threshold sets the covered fraction exactly", "[Graphics][remaster]")
 {
     const int n = 128;
