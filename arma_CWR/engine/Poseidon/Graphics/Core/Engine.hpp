@@ -823,6 +823,10 @@ class Engine : public IGraphicsEngine
     /// GPU timestamp queries around the frame, the world, the shadow pass and
     /// the post pass (dev tool; off by default). The summary is the smoothed
     /// per-section time in milliseconds, a few frames behind.
+    /// A screen overlay (gunner optics, binoculars, cinema border, pillarbox bars)
+    /// is being drawn inside the world pass: the remastered post pass then adds
+    /// no glow this frame, so the overlay's black surround stays black.
+    virtual void MarkWorldOverlay() {}
     /// Dev: rebuild every shader program at the start of the next frame, picking
     /// up edits in the shader override directory (CWR_SHADER_OVERRIDE_DIR).
     virtual void RequestShaderReload() {}

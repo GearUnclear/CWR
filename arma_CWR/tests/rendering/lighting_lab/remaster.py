@@ -66,6 +66,12 @@ MAP_N = 256
 
 def configure(source=None, shader_override_dir=None, nan_check=True, tuning=None, remaster_source=None,
               shadows=True, debug_view=0, post=True, **_kw) -> None:
+    if source is not None and remaster_source is None:
+        # The renderer also runs the working tree's post shaders, lighting
+        # constants and Graphics/Remaster C++ (native.py); a revision of the
+        # GLSL alone would pair old shaders with new everything else.
+        raise ValueError("the remaster renderer renders the working tree only; to compare an older revision, "
+                         "check it out (git worktree) and run the lab there")
     new = {"source": source, "remaster_source": remaster_source or (f"{source}:{REMASTER_FILE}" if source else None),
            "shader_override_dir": shader_override_dir, "nan_check": bool(nan_check), "tuning": tuning,
            "shadows": shadows, "debug_view": int(debug_view), "post": bool(post)}

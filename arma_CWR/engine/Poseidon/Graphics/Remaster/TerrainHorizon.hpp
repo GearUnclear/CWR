@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -63,15 +64,19 @@ struct TerrainHorizonOptions
     int maxSize = 1024;
     // Farthest terrain that can occlude the sun or sky, metres.
     float maxDistance = 6000.0f;
-    // Worker threads; 0 = hardware concurrency.
+    // Worker threads; 0 = half the hardware threads (the game keeps running
+    // while a map builds).
     int threads = 0;
+    // Set to abandon a build early (the landscape changed, the game quits);
+    // the builder then returns false. Checked once per row.
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 std::uint16_t EncodeHorizonDeg(float deg);
 float DecodeHorizonDeg(std::uint16_t value);
 
 // Builds the map from a heights grid. Returns false (and leaves `out` invalid)
-// for an empty grid or a non-positive cell size. `groundRgb` (optional,
+// for an empty grid, a non-positive cell size or a cancelled build. `groundRgb` (optional,
 // size * size * 3, display-space 0..1, same layout as the heights) is the
 // colour of the ground at each vertex: the landscape texture's average colour.
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,

@@ -1105,10 +1105,12 @@ void EngineGL33::UpdateShadowMapLitState()
     float splits[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float cascadeCtl[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float camFwd[4] = {0.0f, 0.0f, 1.0f, 0.0f};
-    // With the remastered lighting on, only its world pass shadows: the classic
-    // programs it hands the HUD, dialogs, 3D previews and night vision to would
-    // otherwise darken them by the shadow at the camera point.
-    const bool shadowPass = !_lightingActive || _remasterPrograms;
+    // With the remastered lighting on, only the world pass shadows: the classic
+    // programs it hands the HUD, dialogs and 3D previews to would otherwise
+    // darken them by the shadow at the camera point. The night-vision world
+    // pass (classic programs) keeps its sun shadows through the classic test.
+    const bool nightVisionWorld = _nightVision && !_worldSceneEnded && !_portraitTargetSize;
+    const bool shadowPass = !_lightingActive || _remasterPrograms || nightVisionWorld;
     if (shadowPass && _shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
     {
         ctl[0] = 1.0f; // enable the per-fragment shadow test

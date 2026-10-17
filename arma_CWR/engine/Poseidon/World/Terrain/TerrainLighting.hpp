@@ -12,5 +12,8 @@ namespace Poseidon
 class Landscape;
 
 void UpdateTerrainLighting(Landscape* land);
+// Cancels and joins any build in flight. Called on world teardown, so no
+// worker outlives the world (or runs on into static destruction).
+void ShutdownTerrainLighting();
 
 } // namespace Poseidon

@@ -681,7 +681,9 @@ class EngineGL33 : public Engine
                           float* outDepth) override;
 
     void SetShadowMapsEnabled(bool enabled) override { _shadowTuning.enabled = enabled; }
-    bool ShadowMapsEnabled() const override { return _shadowTuning.enabled; }
+    // The remastered lighting asked for but not running (its programs failed to
+    // build) falls back to Classic, and Classic shadows are the projected ones.
+    bool ShadowMapsEnabled() const override { return _shadowTuning.enabled && (_lightingActive || !_lighting.remastered); }
 
     // --- Remastered lighting (EngineGL33_Lighting.cpp, EngineGL33_LightingShaders.cpp,
     // EngineGL33_PostFX.cpp) ---
@@ -689,6 +691,11 @@ class EngineGL33 : public Engine
     Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lighting; }
     bool LightingRemasterActive() const override { return _lightingActive; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
+    void MarkWorldOverlay() override
+    {
+        if (_worldPassOpen)
+            _worldOverlayDrawn = true;
+    }
     std::string ShaderOverrideDirectory() const override { return ShaderOverrideDir(); }
     void SetGpuTimingEnabled(bool enabled) override;
     bool GpuTimingEnabled() const override { return _gpuTiming; }
@@ -709,6 +716,7 @@ class EngineGL33 : public Engine
     bool _worldEffectsOn = false;
     bool _worldSceneEnded = false; // EndWorldScene ran this frame: later 3D passes are UI previews
     bool _worldDepthCleared = false; // a depth clear inside the world pass (vehicle interior view)
+    bool _worldOverlayDrawn = false; // a screen overlay drawn inside the world pass (gunner optics)
     // Dev: rebuild every program from the built-in sources and the override
     // directory at the start of the next frame (EngineGL33_Shaders.cpp).
     bool _shaderReloadPending = false;

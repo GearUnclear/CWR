@@ -1450,7 +1450,13 @@ void DrawLightingTab()
     remaster::LightingTuning t = GEngine->GetLightingTuning();
     bool changed = false;
 
-    changed |= ImGui::Checkbox("Remastered lighting", &t.remastered);
+    if (ImGui::Checkbox("Remastered lighting", &t.remastered))
+    {
+        // Classic means the projected shadows too: a real A/B, as the Options
+        // row and triSetLighting do it.
+        GEngine->SetLightingTuning(t);
+        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
+    }
     ImGui::SameLine();
     ImGui::TextDisabled(GEngine->LightingRemasterActive() ? "(active)" : "(classic shaders)");
     ImGui::TextDisabled("Off = the original per-vertex lighting, bit for bit (A/B toggle).");

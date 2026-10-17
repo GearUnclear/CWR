@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -211,6 +212,14 @@ TEST_CASE("Remaster terrain horizon: a ridge shadows the valley behind it from a
     // ridge sees less.
     CHECK(map.SkyVisibility(110, 64) > 0.9f);
     CHECK(map.SkyVisibility(46, 64) < map.SkyVisibility(110, 64));
+
+    // A cancelled build stops and reports failure.
+    std::atomic<bool> cancel{true};
+    TerrainHorizonOptions cancelled = opt;
+    cancelled.cancel = &cancel;
+    TerrainHorizonMap dropped;
+    CHECK_FALSE(BuildTerrainHorizonMap(h.data(), n, cell, cancelled, dropped));
+    CHECK_FALSE(dropped.Valid());
 
     // The 16-bit encoding round-trips to well under the shader penumbra.
     for (float deg : {-5.0f, -1.3f, 0.0f, 2.7f, 12.0f, 45.0f})

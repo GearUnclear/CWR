@@ -33,6 +33,7 @@ extern void SDLGamepad_SetEngine(float mag);
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Graphics/Rendering/Primitives/ClipVert.hpp>
 
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
@@ -317,6 +318,9 @@ World::~World()
         ProgressStart(LocalizeString(IDS_SHUTDOWN));
     }
     DebugLog("World destruct");
+    // No terrain-lighting worker may outlive the world (it reads nothing from
+    // it, but would otherwise be joined during static destruction).
+    ShutdownTerrainLighting();
 
     VehicleTypes.UnlockAllTypes();
 

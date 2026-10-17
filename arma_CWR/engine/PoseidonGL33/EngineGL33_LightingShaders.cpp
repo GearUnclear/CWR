@@ -586,9 +586,9 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
 // Classic night-eye desaturation, fog and alpha handling, shared tail.
 void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     if (alphaRef.z > 0.5) {
-        // Alpha-to-coverage cutouts write coverage (about 1) to alpha, which
-        // the post pass reads as "no sky light to occlude": leaves keep their
-        // light.
+        // Alpha-to-coverage cutouts write coverage, and alpha-to-one makes the
+        // covered samples 1, which the post pass reads as "no sky light to
+        // occlude": leaves keep their light.
         float cov = clamp((r0.a - alphaRef.x) / max(fwidth(r0.a), 1e-4) + 0.5, 0.0, 1.0);
         if (cov <= 0.0) discard;
         r0.a = cov;
@@ -596,8 +596,10 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
         if (r0.a - alphaRef.x * alphaRef.y < 0.0) discard;
         // Opaque draws keep their alpha free (no blending reads it): store one
         // minus the share of sky light that survives the fog, for the post
-        // pass's ambient occlusion. Pre-lit surfaces store 1 (nothing to occlude).
-        if (litFlags.x > 0.5) r0.a = 1.0 - ambientShare * clamp(vFogTC, 0.0, 1.0);
+        // pass's ambient occlusion. Pre-lit surfaces store 1 (nothing to
+        // occlude), and so do alpha-tested cutouts, as they do under MSAA
+        // (coverage, then alpha-to-one), so MSAA does not change their look.
+        if (litFlags.x > 0.5) r0.a = alphaRef.y > 0.5 ? 1.0 : 1.0 - ambientShare * clamp(vFogTC, 0.0, 1.0);
     }
     if (nightEye) {
         float luminance = clamp(dot(r0.rgb, rgbEyeCoef.rgb), 0.0, 1.0);

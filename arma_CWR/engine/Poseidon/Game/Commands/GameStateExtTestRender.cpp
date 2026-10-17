@@ -519,7 +519,7 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
     {
         t.remastered = setting == "remastered";
         GEngine->SetLightingTuning(t);
-        GEngine->SetShadowMapsEnabled(t.remastered);
+        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
         LOG_INFO(Core, "[tri] triSetLighting {}", setting);
         return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK" : "FAIL:remastered shaders unavailable");
     }

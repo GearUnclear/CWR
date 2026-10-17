@@ -5,6 +5,7 @@
 
 #include <Poseidon/Graphics/Core/GLClear.hpp>
 #include <Poseidon/Graphics/Core/GLCullState.hpp>
+#include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -321,9 +322,12 @@ bool RenderDepthFBO(void* glContext, const float* lightVP16, const float* triXYZ
 // the alpha-cutout batches with the texture-alpha-discard program (one bind per
 // caster texture). Depth/clear go through the Core bundles so the GL-state audits
 // stay green; ApplyPipeline re-owns depth/cull/texture on the next draw.
+// `depthClamp` (remastered lighting): casters beyond the light's near plane are
+// flattened onto it instead of clipped. A sun a few degrees up throws shadows
+// hundreds of metres long, from casters far outside a cascade's depth range.
 bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades, int res, const float* solidXYZ,
                         int solidVertCount, const float* alphaXYZUV, int alphaVertCount,
-                        const ResolvedAlphaBatch* batches, int batchCount)
+                        const ResolvedAlphaBatch* batches, int batchCount, bool depthClamp)
 {
     const bool haveSolid = solidXYZ && solidVertCount >= 3;
     const bool haveAlpha = alphaXYZUV && alphaVertCount >= 3 && batches && batchCount > 0;
@@ -358,6 +362,8 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
     glViewport(0, 0, res, res);
     Poseidon::render::depthstencil::Normal(/*hasStencil*/ false);
     Poseidon::render::cull::None();
+    if (depthClamp)
+        Poseidon::render::pipeline::EnableDepthClamp();
 
     // Upload the (cascade-invariant) geometry once; only the light-VP changes per layer.
     if (haveSolid)
@@ -412,6 +418,8 @@ bool RenderCascadeArray(void* glContext, const float* lightVPs, int numCascades,
         }
     }
 
+    if (depthClamp)
+        Poseidon::render::pipeline::DisableDepthClamp(); // the 3D pass runs without it
     glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFBO));
     glViewport(prevVP[0], prevVP[1], prevVP[2], prevVP[3]);
     glUseProgram(static_cast<GLuint>(prevProg));
@@ -458,7 +466,7 @@ void EngineGL33::RenderShadowDepthScene(const float* lightVPs, const float* spli
     const bool rendered = numCascades >= 1 &&
                           RenderCascadeArray(_glContext, lightVPs, numCascades, res, casters.solidXYZ,
                                              casters.solidVertexCount, casters.alphaXYZUV, casters.alphaVertexCount,
-                                             resolved.data(), static_cast<int>(resolved.size()));
+                                             resolved.data(), static_cast<int>(resolved.size()), _lightingActive);
     GpuMark(Poseidon::gpu::Mark::ShadowEnd);
     if (numCascades >= 1)
     {

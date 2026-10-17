@@ -1144,6 +1144,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
 void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
 {
+    GEngine->MarkWorldOverlay();
     LightSun* sun = GScene->MainLight();
     TLMaterial mat;
     mat.ambient = HWhite;
@@ -1328,6 +1329,7 @@ void Object::DrawWidescreenPillarbox(bool requireGameplayActive, bool force)
     barPars.vTL = barPars.vTR = 0.0f;
     const float h = static_cast<float>(vh);
     const float w = static_cast<float>(vw);
+    GEngine->MarkWorldOverlay();
     GEngine->Draw2D(barPars, Rect2DAbs(0.0f, 0.0f, barW, h));
     GEngine->Draw2D(barPars, Rect2DAbs(w - barW, 0.0f, barW, h));
 }

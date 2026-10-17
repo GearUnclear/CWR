@@ -205,6 +205,8 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
         dirZ[i] = std::cos(a);
     }
 
+    auto cancelled = [&options]() { return options.cancel && options.cancel->load(std::memory_order_relaxed); };
+
     // Pass 1: raw angles per direction (float) and the sky visibility.
     const size_t texels = static_cast<size_t>(n) * n;
     std::vector<float> angles(static_cast<size_t>(TerrainHorizonMap::kDirections) * texels);
@@ -213,6 +215,8 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
     {
         for (int z = nextRow.fetch_add(1); z < n; z = nextRow.fetch_add(1))
         {
+            if (cancelled())
+                return;
             for (int x = 0; x < n; ++x)
             {
                 const size_t t = static_cast<size_t>(z) * n + x;
@@ -236,6 +240,8 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
     {
         for (int z = nextRow.fetch_add(1); z < n; z = nextRow.fetch_add(1))
         {
+            if (cancelled())
+                return;
             for (int i = 0; i < TerrainHorizonMap::kDirections; ++i)
             {
                 const float* a = angles.data() + static_cast<size_t>(i) * texels;
@@ -262,7 +268,7 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
         }
     };
 
-    int threads = options.threads > 0 ? options.threads : static_cast<int>(std::thread::hardware_concurrency());
+    int threads = options.threads > 0 ? options.threads : static_cast<int>(std::thread::hardware_concurrency()) / 2;
     threads = std::max(1, std::min(threads, 16));
     auto runPass = [&](auto& pass)
     {
@@ -276,7 +282,17 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
             th.join();
     };
     runPass(march);
+    if (cancelled())
+    {
+        out = TerrainHorizonMap{};
+        return false;
+    }
     runPass(smooth);
+    if (cancelled())
+    {
+        out = TerrainHorizonMap{};
+        return false;
+    }
     return true;
 }
 

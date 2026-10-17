@@ -551,7 +551,10 @@ void EngineGL33::EndWorldScene()
     // occlusion and no depth-tested shafts this frame. Bloom does not need it.
     const bool worldDepth = !_worldDepthCleared;
     const float aoStrength = worldDepth ? _lighting.ambientOcclusion : 0.0f;
-    const float bloomStrength = _lighting.bloom;
+    // A screen overlay drawn inside the world pass (gunner optics mask) is in
+    // the frame already: glow would grey its black surround.
+    const bool glow = !_worldOverlayDrawn;
+    const float bloomStrength = glow ? _lighting.bloom : 0.0f;
 
     // 1. Ambient occlusion + blur.
     const GfxMatrix& proj = _frameState.projection;
@@ -621,7 +624,7 @@ void EngineGL33::EndWorldScene()
     float shaftWeight = 0.0f;
     float sunU = 0.5f, sunV = 0.5f;
     Color shaftTint(1, 1, 1, 1);
-    if (worldDepth && _lighting.sunShafts > 0.0f && GScene)
+    if (worldDepth && glow && _lighting.sunShafts > 0.0f && GScene)
     {
         LightSun* sun = GScene->MainLight();
         Camera* cam = GScene->GetCamera();
