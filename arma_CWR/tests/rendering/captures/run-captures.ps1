@@ -1,0 +1,132 @@
+<#
+.SYNOPSIS
+    Runs the Classic | Remastered lighting capture set through Trident and
+    collects the images and timings into one folder.
+
+.DESCRIPTION
+    1. Runs tri on the capture tests in this folder (all three by default)
+       through the hidden-desktop wrapper, so no game window reaches the
+       owner's desktop (D:\Arma_CWA\tmp\tri-hidden-desktop.ps1).
+    2. Always stops the games this run started, scoped by data dir: tri
+       launches every game with `-C <arma_CWR>\packages\RemasterUD`, and
+       tools\stop-owned-games.ps1 -DataDir matches exactly that junction path
+       (other sessions' games, launched from other checkouts or shadows, are
+       left alone). Never a global Stop-Process.
+    3. Runs make_pairs.py: copies <view>__classic.png / <view>__remastered.png
+       out of the tri tree, builds <view>__pair.png, contact_sheet.png and
+       timings.csv / timings.json / timings.md from the UDCAP log lines.
+
+    Output: <worktree>\tmp\captures\<yyyyMMdd-HHmmss>\ (gitignored: /tmp/ at
+    the git root). tri's own tree is in its tri\ subfolder.
+
+.PARAMETER Tests
+    Test files to run, relative to arma_CWR. Default: the three capture tests.
+.PARAMETER GameDir
+    Build/dist dir with PoseidonGame.exe, relative to arma_CWR or absolute.
+.PARAMETER Tri
+    tri.exe to use. The runner is unchanged on the lighting branch, so the main
+    checkout's build is the default.
+.PARAMETER Visible
+    Run tri directly instead of on the hidden desktop (game windows show).
+.PARAMETER CollectOnly
+    Skip the run; rebuild pairs and tables from an existing output folder
+    (pass it with -OutDir).
+
+.EXAMPLE
+    powershell -NoProfile -File tests\rendering\captures\run-captures.ps1
+.EXAMPLE
+    powershell -NoProfile -File tests\rendering\captures\run-captures.ps1 -Tests tests/rendering/captures/eden_lighting.test.sqf
+#>
+[CmdletBinding()]
+param(
+    [string[]]$Tests = @(
+        'tests/rendering/captures/abel_lighting.test.sqf',
+        'tests/rendering/captures/eden_lighting.test.sqf',
+        'tests/rendering/captures/sinai_lobo_lighting.test.sqf'
+    ),
+    [string]$GameDir = 'dist/lighting-rwdi',
+    [string]$Tri = 'D:\Arma_CWA\arma_CWR\target\debug\tri.exe',
+    [string]$HiddenDesktop = 'D:\Arma_CWA\tmp\tri-hidden-desktop.ps1',
+    [string]$StopGames = 'D:\Arma_CWA\arma_CWR\tools\stop-owned-games.ps1',
+    [string]$OutRoot = '',
+    [string]$OutDir = '',
+    [int]$Retries = 1,
+    [int]$TimeoutSec = 5400,
+    [string]$Python = 'python',
+    [switch]$Visible,
+    [switch]$CollectOnly
+)
+
+$ErrorActionPreference = 'Stop'
+# `powershell -File ... -Tests a,b` delivers "a,b" as one string; split it here.
+$Tests = @($Tests | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { $_ })
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$engineRoot = (Resolve-Path (Join-Path $here '..\..\..')).Path          # arma_CWR
+$gitRoot = (Resolve-Path (Join-Path $engineRoot '..')).Path             # worktree root
+if (-not $OutRoot) { $OutRoot = Join-Path $gitRoot 'tmp\captures' }
+if (-not $OutDir) { $OutDir = Join-Path $OutRoot (Get-Date -Format 'yyyyMMdd-HHmmss') }
+$triOut = Join-Path $OutDir 'tri'
+$junction = Join-Path $engineRoot 'packages\RemasterUD'
+
+New-Item -ItemType Directory -Force -Path $triOut | Out-Null
+Write-Host "output: $OutDir"
+
+$exit = 0
+if (-not $CollectOnly) {
+    # ---- preflight: fail early with a readable reason, not a tri spawn error
+    $gameDirAbs = if ([IO.Path]::IsPathRooted($GameDir)) { $GameDir } else { Join-Path $engineRoot $GameDir }
+    $problems = @()
+    if (-not (Test-Path -LiteralPath (Join-Path $gameDirAbs 'PoseidonGame.exe'))) { $problems += "no PoseidonGame.exe in $gameDirAbs (is the build finished?)" }
+    if (-not (Test-Path -LiteralPath $Tri)) { $problems += "tri not found: $Tri" }
+    if (-not (Test-Path -LiteralPath (Join-Path $junction 'dtaExt'))) {
+        $problems += "packages\RemasterUD is missing or not the Remaster shadow. Create it with: cmd /c mklink /J `"$junction`" `"D:\Arma_CWA\tmp\remaster-shadow-67`""
+    }
+    if (-not $Visible -and -not (Test-Path -LiteralPath $HiddenDesktop)) { $problems += "hidden-desktop wrapper not found: $HiddenDesktop (or pass -Visible)" }
+    foreach ($t in $Tests) {
+        if (-not (Test-Path -LiteralPath (Join-Path $engineRoot $t))) { $problems += "test not found: $t" }
+    }
+    if ($problems) { $problems | ForEach-Object { Write-Error $_ -ErrorAction Continue }; exit 2 }
+
+    $triLog = Join-Path $OutDir 'tri.log'
+    # The hidden-desktop wrapper hands this line to `cmd /c "<line> > log 2>&1"`,
+    # whose quote stripping makes embedded quotes fragile: keep paths unquoted.
+    foreach ($p in @($Tri, $triOut, $GameDir, $triLog) + $Tests) {
+        if ($p -match '\s') { Write-Error "path with whitespace is not supported here: $p"; exit 2 }
+    }
+    $testArgs = ($Tests | ForEach-Object { $_ -replace '\\', '/' }) -join ' '
+    $triCmd = "$Tri test --retries $Retries -j1 --timeout 120 --game-dir $GameDir --output-dir $triOut $testArgs"
+    "cmd: $triCmd" | Out-File -FilePath (Join-Path $OutDir 'run.txt') -Encoding utf8
+    Write-Host "running: $triCmd"
+    try {
+        if ($Visible) {
+            Push-Location $engineRoot
+            try {
+                & cmd /c "$triCmd > `"$triLog`" 2>&1"
+                $exit = $LASTEXITCODE
+            } finally { Pop-Location }
+        } else {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $HiddenDesktop -Log $triLog -WorkDir $engineRoot -Cmd $triCmd -TimeoutSec $TimeoutSec
+            $exit = $LASTEXITCODE
+        }
+    } finally {
+        # Games this run started carry `-C <this worktree's junction>`; stop
+        # only those (a no-op when tri already reaped them).
+        if (Test-Path -LiteralPath $StopGames) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $StopGames -DataDir $junction
+        } else {
+            Write-Warning "stop-owned-games.ps1 not found at $StopGames; check for stray games yourself."
+        }
+    }
+    Write-Host "tri exit code: $exit (log: $triLog)"
+}
+
+# ---- collect: pairs, contact sheet, timings
+& $Python (Join-Path $here 'make_pairs.py') $OutDir --tri-dir $triOut
+$collectExit = $LASTEXITCODE
+
+# The BMP twin of every capture (TriScreenshot writes PNG + BMP) adds nothing.
+Get-ChildItem -LiteralPath $triOut -Recurse -Filter '*.bmp' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+Write-Host "done: $OutDir"
+if ($exit -ne 0) { exit $exit }
+exit $collectExit

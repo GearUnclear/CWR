@@ -1,0 +1,65 @@
+// Minimal Abel mission for the lighting capture run (abel_lighting.test.sqf).
+// It only exists to hang a camera off: one captive player parked on dry open
+// ground on north Malden, NW of (behind) the view-1 camera at [7300, 10900],
+// clear weather. The test sets date, weather, props and the camera per view.
+// SQM position order is [easting, ELEVATION, northing].
+version=11;
+class Mission
+{
+	randomSeed=26101701;
+	class Intel
+	{
+		year=1985;
+		month=3;
+		day=1;
+		hour=8;
+		minute=0;
+		startWeather=0.000000;
+		forecastWeather=0.000000;
+		viewDistance=1500;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={7250.000000,0.000000,10950.000000};
+					azimut=152.500000;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.600000;
+				};
+			};
+		};
+	};
+};
+class Intro
+{
+	randomSeed=26101702;
+	class Intel
+	{
+	};
+};
+class OutroWin
+{
+	randomSeed=26101703;
+	class Intel
+	{
+	};
+};
+class OutroLoose
+{
+	randomSeed=26101704;
+	class Intel
+	{
+	};
+};

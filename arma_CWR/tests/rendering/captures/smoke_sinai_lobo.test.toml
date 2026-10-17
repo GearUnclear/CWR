@@ -1,0 +1,9 @@
+# Smoke check for the remastered lighting toggle on Sinai with @LoBo mounted
+# (the shadow's own @LoBo, as the remaster_ud Sinai tests mount it).
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+mission = "tests/rendering/captures/missions/udcap_sinai.Sinai"
+tags = ["lighting_smoke", "lobo", "headful", "exclusive"]
+timeout = 600
+assert_timeout = 180
+extra_args = ["--no-strict", "--mods-dir", ".", "--mod", "@LoBo", "--display-mode", "windowed", "--width", "960", "--height", "640"]
