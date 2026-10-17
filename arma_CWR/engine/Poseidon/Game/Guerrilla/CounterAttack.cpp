@@ -2,6 +2,7 @@
 
 #include <Poseidon/Game/Guerrilla/AlertMachine.hpp> // zone alert states (alarm answers, 8.2)
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // IsMilitaryType
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp> // RoadFactor / GroundLeg: the one road factor
 #include <Poseidon/Game/Guerrilla/OccupierAir.hpp> // phase 6A: insertions and sorties
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp>
 #include <Poseidon/Game/Guerrilla/GuerrillaBase.hpp>  // HqZone: the HQ's town is never a target (N4a)
@@ -135,6 +136,8 @@ void CounterAttack::Clear()
     _records.Clear();
     _homeHulls.Clear();
     _leftovers.Clear();
+    _ends.Clear();
+    _endLine = RString();
     _accum = 0;
     _townsTaken = 0;
 }
@@ -193,7 +196,16 @@ void CounterAttack::LoadFromParams(const ParamEntry* zonesCfg)
     }
     t.sourceKeep = ReadRanged(c, "counterAttackSourceKeep", t.sourceKeep, 0.0f, 1.0f);
     t.speed = ReadRanged(c, "counterAttackSpeed", t.speed, 0.5f, 100.0f);
-    t.roadFactor = ReadRanged(c, "counterAttackRoadFactor", t.roadFactor, 1.0f, 5.0f);
+    // counterAttackRoadFactor is retired (the break-off round, 2026-10-16):
+    // every leg with no road route uses the theatre's forcesRoadFactor
+    // (ForcePackages::RoadFactor), the quote's factor
+    if (c.FindEntry("counterAttackRoadFactor"))
+    {
+        LOG_WARN(Core,
+                 "CounterAttack: counterAttackRoadFactor is a retired key and is ignored; forcesRoadFactor ({}) "
+                 "times every leg with no road route",
+                 (double)ForcePackages::RoadFactor());
+    }
     t.defenderWeight = ReadRanged(c, "counterAttackDefenderWeight", t.defenderWeight, 0.0f, 100.0f);
     t.repelLoss = ReadRanged(c, "counterAttackRepelLoss", t.repelLoss, 0.0f, 1.0f);
     t.liveTimeout = ReadRanged(c, "counterAttackLiveTimeout", t.liveTimeout, 60.0f, 86400.0f);
@@ -283,8 +295,8 @@ float CounterAttack::TravelTime(const CounterAttackTuning& t, float straightDist
 {
     // the whole road leg from the base to the town: a live squad appears on
     // that road (unseen) and walks the rest, so nothing is cut off the end
-    const float leg = straightDistance > 0 ? straightDistance : 0;
-    const float seconds = leg * t.roadFactor / (t.speed > 0 ? t.speed : 1.0f);
+    const float leg = ForcePackages::GroundLeg(straightDistance > 0 ? straightDistance : 0, 0.0f, QuoteRoadFactor());
+    const float seconds = leg / (t.speed > 0 ? t.speed : 1.0f);
     return seconds < MinTravel ? MinTravel : seconds;
 }
 
@@ -298,8 +310,46 @@ float CounterAttack::RealSpeed(int package, float maxSpeedKmh)
     return (air ? AirCruise : GroundCruise) * maxSpeedKmh / 3.6f;
 }
 
+float CounterAttack::QuoteRoadFactor()
+{
+    // one road factor for a leg with no road route (the levers audit: the
+    // quote used forcesRoadFactor 1.5 while the march used
+    // counterAttackRoadFactor 1.3): the theatre's, the one the director
+    // sets from forcesRoadFactor and prices every quote with
+    const float f = ForcePackages::RoadFactor();
+    return f > 1.0f ? f : 1.0f;
+}
+
+bool CounterAttack::BreaksOff(int bornStrength, int alive)
+{
+    return alive > 0 && bornStrength > 0 && alive * BreakOffDivisor < bornStrength;
+}
+
+const char* CounterAttack::HullReleaseName(int released)
+{
+    switch (released)
+    {
+        case HRWaiting:
+            return "waiting";
+        case HRCleared:
+            return "cleared";
+        case HRWaitOver:
+            return "wait over";
+        case HRNoInfantry:
+            return "no infantry";
+        default:
+            return "";
+    }
+}
+
+float CounterAttack::ClearRadius(const ZoneRegistry& registry) const
+{
+    const float edge = registry.Tuning().zoneArea + TownEdgeMargin;
+    return _tuning.birthMinToTarget > edge ? _tuning.birthMinToTarget : edge;
+}
+
 float CounterAttack::TravelTimeFor(const CounterAttackTuning& t, const Record& r, float straightDistance,
-                                   float roadLength)
+                                   float roadLength, float lineFactor)
 {
     // the test lever, and the legacy pacing with the key off (3.2: the real
     // speeds apply only with occupierForces on)
@@ -308,9 +358,10 @@ float CounterAttack::TravelTimeFor(const CounterAttackTuning& t, const Record& r
         return TravelTime(t, straightDistance);
     }
     const float speed = r.abstractSpeed > 0 ? r.abstractSpeed : FootSpeed;
-    // a real road route already is the road: no roadFactor on top of it;
-    // with only the straight distance known, the road factor stands in
-    const float leg = roadLength > 0 ? roadLength : (straightDistance > 0 ? straightDistance : 0) * t.roadFactor;
+    // a real road route already is the road: no factor on top of it; with
+    // only the straight distance known the quote's road factor stands in
+    const float factor = lineFactor > 1.0f ? lineFactor : 1.0f;
+    const float leg = ForcePackages::GroundLeg(straightDistance > 0 ? straightDistance : 0, roadLength, factor);
     const float seconds = leg / speed;
     return seconds < MinTravel ? MinTravel : seconds;
 }
@@ -886,6 +937,7 @@ void CounterAttack::FarCensus(const ZoneRegistry& registry, const CounterAttackV
     for (int i = 0; i < _homeHulls.Size(); i++)
     {
         out.homeHull += far(_homeHulls[i].crewGroup) ? 1 : 0;
+        out.homeHull += far(_homeHulls[i].cargo) ? 1 : 0; // a withdrawing infantry riding home in its carrier
     }
     for (int i = 0; i < _airHomes.Size(); i++)
     {
@@ -1005,13 +1057,35 @@ void CounterAttack::Dispatch(const CounterAttackOpEvent& ev)
 }
 
 void CounterAttack::Emit(const ZoneRegistry& registry, const Record& r, int type, int bodies, int units,
-                         const char* note)
+                         const char* note, int reason)
 {
+    if (type == CAOpRepelled || type == CAOpSettled || type == CAOpCancelledUnseen || type == CAOpAborted)
+    {
+        // the script surface's record of how operations ended
+        // (gmCounterAttackEnds), the listener or not
+        EndNote e;
+        e.opId = r.opId;
+        e.target = r.target;
+        e.type = type;
+        e.reason = reason;
+        e.bodies = bodies;
+        e.units = units;
+        e.born = r.bornStrength;
+        e.note = note ? note : "";
+        e.line = _endLine;
+        _endLine = RString();
+        if (_ends.Size() >= EndsKept)
+        {
+            _ends.Delete(0);
+        }
+        _ends.Add(e);
+    }
     if (!GListener)
     {
         return;
     }
     CounterAttackOpEvent ev;
+    ev.reason = reason;
     ev.opId = r.opId;
     ev.type = type;
     ev.kind = r.kind;
@@ -1869,7 +1943,7 @@ bool CounterAttack::Fight(ZoneRegistry& registry, const CounterAttackView& view,
         OccupierForces::Instance().NoteLoss(lost, "repelled");
         ReturnToSource(registry, view, r, r.strength - lost);
         AddEvent(fired, ZECounterRepelled, target);
-        Emit(registry, r, CAOpRepelled, r.strength - lost, lost, "abstract fight");
+        Emit(registry, r, CAOpRepelled, r.strength - lost, lost, "abstract fight", CAERDefeated);
         return true;
     }
     GM_DIRECTOR_INFO(Core, "CounterAttack: {} attacker(s) retake {} from {} fighter(s) (odds {:.2f}, roll {:.2f})", r.strength,
@@ -2152,7 +2226,7 @@ float CounterAttack::LegTime(const ZoneRegistry& registry, Record& r, CounterAtt
         const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
         road = r.routeIsRoad ? RouteLength(route) : 0.0f;
     }
-    return TravelTimeFor(_tuning, r, straight, road);
+    return TravelTimeFor(_tuning, r, straight, road, QuoteRoadFactor());
 }
 
 bool CounterAttack::Launch(ZoneRegistry& registry, int target, int src, int n, bool live, CounterAttackOps* ops,
@@ -2629,6 +2703,13 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
         }
         case CALive:
         {
+            if (r.bornStrength <= 0)
+            {
+                // the break-off's yardstick: the infantry the operation was
+                // first born with (a re-birth after a return to the road
+                // keeps it)
+                r.bornStrength = r.strength;
+            }
             if (r.airId > 0 && !r.dismounted)
             {
                 // phase 6A: an insertion in the air, landing or unloading
@@ -2696,8 +2777,29 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                     {
                         r.withdrawing = true;
                         r.resend = 0;
-                        GM_DIRECTOR_INFO(Core, "CounterAttack: {} is no longer the occupier's; the top-up squad goes home",
-                                 (const char*)r.target);
+                        r.withdrawClock = 0;
+                        GM_DIRECTOR_INFO(Core,
+                                         "CounterAttack: [op {}] {} is no longer the occupier's; the top-up squad goes"
+                                         " home (born {}, alive {}; rule: the top-up target was lost), {:.0f} m from"
+                                         " the player",
+                                         r.opId, (const char*)r.target, r.bornStrength, alive,
+                                         PlayerDistance(view, leader));
+                    }
+                    r.withdrawClock += elapsed;
+                    if (ops && r.dismounted && (LiveHullOf(r) > 0 || LiveEscortOf(r) > 0))
+                    {
+                        // item 2: the hulls wait for the infantry on foot to
+                        // clear the town's edge, at most WithdrawHullWait,
+                        // then drive home ahead of it (the record still
+                        // waits for the squad to leave unseen)
+                        const bool cleared = ops->AliveWithin(r.group, town->pos, ClearRadius(registry)) == 0;
+                        if (cleared || r.withdrawClock >= WithdrawHullWait)
+                        {
+                            GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hulls of the top-up squad leave {} ({})",
+                                             r.opId, (const char*)r.target,
+                                             cleared ? "the infantry cleared the edge" : "the wait is over");
+                            FinishHull(registry, view, r, ops);
+                        }
                     }
                     r.resend -= elapsed;
                     if (r.resend <= 0 && ops && home)
@@ -2748,8 +2850,16 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
                 AddEvent(fired, ZECounterRepelled, target);
                 OccupierForces::Instance().NoteLoss(r.strength, "repelled");
                 AddLeftover(r.source, nullptr, r.group, 0); // L7: its dead group leaves unseen
-                Emit(registry, r, CAOpRepelled, 0, r.strength, "wiped out");
+                Emit(registry, r, CAOpRepelled, 0, r.strength, "wiped out", CAERDefeated);
                 return true;
+            }
+            if (!reinforce && valid && (_tuning.forcesOn || r.funded) && BreaksOff(r.bornStrength, alive))
+            {
+                // decision 4, item 7: a failed assault breaks off while the
+                // target is still held (valid here), on the road or at the
+                // edge; the lone survivor is the same rule
+                return Withdraw(registry, view, target, r, ops, alive, leader, CAERBrokenOff,
+                                "living infantry below a third of the strength born, the target still held", fired);
             }
             if (alarm && r.leg == LegTown && !r.answered)
             {
@@ -2892,26 +3002,99 @@ bool CounterAttack::Advance(ZoneRegistry& registry, const CounterAttackView& vie
             }
             if (r.clock >= _tuning.liveTimeout)
             {
-                const float edge = registry.Tuning().cacheRadius + GarrisonCache::DespawnHysteresis;
-                const bool unseen =
-                    !view.playerValid || Dist2D(leader.X(), leader.Z(), view.playerX, view.playerZ) > edge;
-                if (unseen)
+                // it gives up and withdraws in the open (walking back, its
+                // hulls waiting for it), never a vanish in the player's view
+                char rule[96];
+                if (hq && view.hqEstablished && !held)
                 {
-                    GM_DIRECTOR_INFO(Core, "CounterAttack: the force on {} gives up after {:.0f}s; {} go home",
-                             (const char*)r.target, r.clock, alive);
-                    ReturnToSource(registry, view, r, alive);
-                    ops->Remove(r.group);
-                    AddEvent(fired, ZECounterRepelled, target);
-                    OccupierForces::Instance().NoteLoss(r.strength - alive, "repelled");
-                    Emit(registry, r, CAOpRepelled, alive, r.strength - alive, "withdrew");
-                    return true;
+                    snprintf(rule, sizeof(rule), "the HQ it was sent at moved");
                 }
+                else
+                {
+                    snprintf(rule, sizeof(rule), "counterAttackLiveTimeout %.0f s at the target",
+                             (double)_tuning.liveTimeout);
+                }
+                return Withdraw(registry, view, target, r, ops, alive, leader, CAERWithdrew, rule, fired);
             }
             return false;
         }
         default:
             return true;
     }
+}
+
+bool CounterAttack::Withdraw(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r,
+                             CounterAttackOps* ops, int alive, Vector3Par leader, int reason, const char* rule,
+                             AutoArray<ZoneEventRecord>& fired)
+{
+    const int lost = r.strength > alive ? r.strength - alive : 0;
+    const int born = r.bornStrength > 0 ? r.bornStrength : r.strength;
+    const char* where = r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target;
+    const bool mounted = LiveHullOf(r) > 0 && !r.dismounted;
+    const int hulls = LiveHullOf(r) + LiveEscortOf(r);
+    // where the survivors walk: their source, or the nearest occupier base
+    // when it fell (never into the resistance's base), else back where the
+    // route started (an insertion's LZ)
+    RString homeName = r.source;
+    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+    if (!home || stricmp(home->owner, registry.OccupierSide()) != 0)
+    {
+        const int alt = NearestOccupierBase(registry, leader);
+        home = alt >= 0 ? registry.GetZone(alt) : nullptr;
+        if (home)
+        {
+            homeName = home->name;
+        }
+    }
+    Vector3 homePos = home ? home->pos : VZero;
+    if (!home)
+    {
+        const AutoArray<Vector3>& route = RouteOf(registry, r, ops);
+        homePos = route.Size() > 0 ? route[0] : r.spawnPos;
+    }
+    char line[192];
+    if (reason == CAERBrokenOff)
+    {
+        snprintf(line, sizeof(line), "Broken off at %s: %d lost, %d going home", where, lost, alive);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "Withdrew from %s: %d lost, %d going home", where, lost, alive);
+    }
+    char after[160];
+    if (mounted)
+    {
+        snprintf(after, sizeof(after), "the infantry rides home in its carrier");
+    }
+    else if (hulls > 0)
+    {
+        snprintf(after, sizeof(after), "on foot toward %s; the hulls wait for it to clear %.0f m (at most %.0f s)",
+                 (const char*)homeName, (double)ClearRadius(registry), (double)WithdrawHullWait);
+    }
+    else
+    {
+        snprintf(after, sizeof(after), "on foot toward %s",
+                 homeName.GetLength() > 0 ? (const char*)homeName : "its LZ");
+    }
+    // item 4: the withdrawal's own line, with the strength born, the
+    // strength alive and the rule
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] {} (born {}, alive {}; rule: {}); {}, {:.0f} m from the player",
+                     r.opId, line, born, alive, rule ? rule : "", after, PlayerDistance(view, leader));
+    AddEvent(fired, ZECounterRepelled, target);
+    OccupierForces::Instance().NoteLoss(lost, "repelled");
+    if (ops && r.group && alive > 0 && !mounted)
+    {
+        // the survivors fall back on foot: a withdrawing Leftover, removed
+        // only away from the player and unseen, home as bodies there
+        ops->MoveOn(r.group, homePos);
+        AddLeftover(homeName, nullptr, r.group, alive, homePos);
+    }
+    // the hulls (FinishHull, after this returns) wait for the infantry on
+    // foot or carry it home seated
+    r.withdrawReason = reason;
+    _endLine = line;
+    Emit(registry, r, CAOpRepelled, alive, lost, reason == CAERBrokenOff ? "broken off" : "withdrew", reason);
+    return true;
 }
 
 bool CounterAttack::RevertedUnder(ZoneRegistry& registry, const CounterAttackView& view, int target, Record& r)
@@ -3165,7 +3348,7 @@ int CounterAttack::ReturnBodies(ZoneRegistry& registry, const CounterAttackView&
     return back;
 }
 
-void CounterAttack::AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living)
+void CounterAttack::AddLeftover(const RString& source, Entity* hull, AIGroup* group, int living, Vector3Par home)
 {
     if (!hull && !group)
     {
@@ -3176,6 +3359,7 @@ void CounterAttack::AddLeftover(const RString& source, Entity* hull, AIGroup* gr
     l.living = living > 0 ? living : 0;
     l.hull = hull;
     l.group = group;
+    l.home = home;
     _leftovers.Add(l);
 }
 
@@ -3233,8 +3417,19 @@ void CounterAttack::StepLeftovers(ZoneRegistry& registry, const CounterAttackVie
                     OccupierForces::Instance().NoteLoss(l.living - home, "left behind");
                 }
                 CrewHome(registry, view, l.source, home);
+                if (!IsZeroPos(l.home))
+                {
+                    GM_DIRECTOR_INFO(
+                        Core, "CounterAttack: {} withdrawing soldier(s) home unseen at {} ({} lost on the way)", home,
+                        l.source.GetLength() > 0 ? (const char*)l.source : "the pool", l.living - home);
+                }
                 l.living = 0;
                 l.group = nullptr;
+            }
+            else if (alive > 0 && !IsZeroPos(l.home))
+            {
+                // a withdrawal keeps walking home (a stalled leg re-sent)
+                ops->MoveOn(grp, l.home);
             }
         }
         else if (l.living > 0)
@@ -3423,6 +3618,21 @@ void CounterAttack::FinishHull(ZoneRegistry& registry, const CounterAttackView& 
             // lost: the group and an abandoned intact hull to the cleanup (M3)
             AddLeftover(r.source, state == CounterAttackOps::HullIntact ? r.hull.GetLink() : nullptr, r.crewGroup,
                         living);
+            if (r.withdrawReason != CAERNone && !r.dismounted && r.group && ops)
+            {
+                // a withdrawing infantry still seated in it gets out and
+                // walks home (never left in a dead hull, never untracked)
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(r.group, at);
+                if (aboard > 0)
+                {
+                    ops->Dismount(r.group, r.hull);
+                    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(r.source));
+                    const Vector3 homePos = home ? home->pos : at;
+                    ops->MoveOn(r.group, homePos);
+                    AddLeftover(r.source, nullptr, r.group, aboard, homePos);
+                }
+            }
             SettleCrew(registry, r, r.crew, "crew lost or left behind");
             Emit(registry, r, CAOpHullLost, 0, r.HullPrice(), "lost at the end of the operation");
         }
@@ -3479,14 +3689,55 @@ void CounterAttack::SendHullHome(const Record& r, Entity* hull, AIGroup* crewGro
     h.retry = 0;
     h.hull = hull;
     h.crewGroup = crewGroup;
+    // item 2: a withdrawing force's hulls never leave before its infantry.
+    // Seated in the carrier, it rides home with it; on foot, every hull
+    // holds where it stands until the infantry clears the edge, at most
+    // WithdrawHullWait
+    int aboard = 0;
+    if (r.withdrawReason != CAERNone && r.group && ops)
+    {
+        Vector3 at = VZero;
+        const int infantry = ops->Alive(r.group, at);
+        if (infantry > 0 && !r.dismounted && hull == r.hull.GetLink())
+        {
+            h.cargo = r.group;
+            h.cargoLiving = infantry;
+            aboard = infantry;
+        }
+        else if (infantry > 0 && r.dismounted)
+        {
+            h.wait = WithdrawHullWait;
+            h.waited = 0;
+            h.waitGroup = r.group;
+            h.waitAt = DestOf(registry, r);
+            h.waitRadius = ClearRadius(registry);
+            h.released = HRWaiting;
+        }
+    }
     _homeHulls.Add(h);
+    const char* cls = hullClass ? hullClass : (const char*)r.hullClass;
+    if (h.wait > 0)
+    {
+        GM_DIRECTOR_INFO(Core,
+                         "CounterAttack: [op {}] the {} holds for the infantry until it clears {:.0f} m of {} (at"
+                         " most {:.0f} s), then drives home to {} ({} crew)",
+                         r.opId, cls, (double)h.waitRadius, r.kind == CAKHqAssault ? "the HQ" : (const char*)r.target,
+                         (double)WithdrawHullWait, (const char*)r.source, crewAlive);
+        return;
+    }
     const ZoneRecord* src = registry.GetZone(registry.FindZoneIndex(r.source));
     if (ops && src)
     {
         ops->DriveOn(crewGroup, src->pos);
     }
-    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId,
-             hullClass ? hullClass : (const char*)r.hullClass, (const char*)r.source, crewAlive);
+    if (aboard > 0)
+    {
+        GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew, {} infantry aboard)", r.opId,
+                         cls, (const char*)r.source, crewAlive, aboard);
+        return;
+    }
+    GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the {} drives home to {} ({} crew)", r.opId, cls,
+                     (const char*)r.source, crewAlive);
 }
 
 void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackView& view, float elapsed,
@@ -3515,11 +3766,73 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             OccupierForces::Instance().NoteLoss(h.crew - living, "crew");
             AddLeftover(h.source, state == CounterAttackOps::HullIntact ? h.hull.GetLink() : nullptr, h.crewGroup,
                         living);
+            if (h.cargo)
+            {
+                // the withdrawing infantry it carried: the dead lost, the
+                // living out and walking home (a Leftover)
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(h.cargo, at);
+                if (h.cargoLiving > aboard)
+                {
+                    OccupierForces::Instance().NoteLoss(h.cargoLiving - aboard, "killed in the carrier");
+                }
+                if (aboard > 0)
+                {
+                    ops->Dismount(h.cargo, h.hull);
+                    const ZoneRecord* home = registry.GetZone(registry.FindZoneIndex(h.source));
+                    const Vector3 homePos = home ? home->pos : at;
+                    ops->MoveOn(h.cargo, homePos);
+                    AddLeftover(h.source, nullptr, h.cargo, aboard, homePos);
+                }
+                else
+                {
+                    AddLeftover(h.source, nullptr, h.cargo, 0); // L7: the dead, unseen
+                }
+                h.cargo = nullptr;
+                h.cargoLiving = 0;
+            }
             SettleCrew(registry, ref, h.crew, "crew lost or left behind on the way home");
             GM_DIRECTOR_INFO(Core, "CounterAttack: [op {}] the hull driving home to {} is lost", h.opId, (const char*)h.source);
             Emit(registry, ref, CAOpHullLost, 0, h.units, "lost on the way home");
             _homeHulls.Delete(i);
             continue;
+        }
+        if (h.wait > 0)
+        {
+            // item 2: it holds (no drive, no deletion) while a living
+            // survivor of its infantry stands within waitRadius of the
+            // target, at most `wait` seconds; then it leaves
+            Vector3 at = VZero;
+            const int infantry = h.waitGroup ? ops->Alive(h.waitGroup, at) : 0;
+            const int near = infantry > 0 ? ops->AliveWithin(h.waitGroup, h.waitAt, h.waitRadius) : 0;
+            h.waited += elapsed;
+            int why = HRNone;
+            if (infantry <= 0)
+            {
+                why = HRNoInfantry;
+            }
+            else if (near <= 0)
+            {
+                why = HRCleared;
+            }
+            else if (h.waited >= h.wait)
+            {
+                why = HRWaitOver;
+            }
+            if (why == HRNone)
+            {
+                i++;
+                continue;
+            }
+            h.released = why;
+            h.wait = 0;
+            h.waitGroup = nullptr;
+            h.retry = 0;
+            GM_DIRECTOR_INFO(Core,
+                             "CounterAttack: [op {}] the hull at {} leaves after its infantry ({}, held {:.0f} s; {} of"
+                             " it within {:.0f} m); it drives home to {}",
+                             h.opId, (const char*)h.target, HullReleaseName(why), (double)h.waited, near,
+                             (double)h.waitRadius, (const char*)h.source);
         }
         h.retry -= elapsed;
         if (h.retry > 0)
@@ -3528,8 +3841,27 @@ void CounterAttack::StepHomeHulls(ZoneRegistry& registry, const CounterAttackVie
             continue;
         }
         h.retry = RetryInterval;
-        if (ops->HullUnseen(h.hull, h.crewGroup))
+        if (ops->HullUnseen(h.hull, h.crewGroup) && (!h.cargo || ops->BodiesUnseen(h.cargo)))
         {
+            if (h.cargo)
+            {
+                // the infantry riding in it leaves first (a deleted
+                // transport would eject it): the living home as bodies, the
+                // dead lost
+                Vector3 at = VZero;
+                const int aboard = ops->Alive(h.cargo, at);
+                ops->Remove(h.cargo);
+                if (h.cargoLiving > aboard)
+                {
+                    OccupierForces::Instance().NoteLoss(h.cargoLiving - aboard, "killed on the way home");
+                }
+                CrewHome(registry, view, h.source, aboard);
+                GM_DIRECTOR_INFO(Core,
+                                 "CounterAttack: [op {}] {} withdrawing soldier(s) home unseen at {} in their carrier",
+                                 h.opId, aboard, (const char*)h.source);
+                h.cargo = nullptr;
+                h.cargoLiving = 0;
+            }
             // every crewman is deleted with it (HullUnseen waited for them
             // all): the living home, the dead lost
             if (living < h.crew)
@@ -5317,6 +5649,9 @@ LSError CounterAttack::Record::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("airReplanned", airReplanned, 1, false))
     PARAM_CHECK(ar.Serialize("alarmQuiet", alarmQuiet, 1, 0.0f))
     PARAM_CHECK(ar.Serialize("answered", answered, 1, false))
+    // the break-off (absent in older saves: 0, set at the next live step)
+    PARAM_CHECK(ar.Serialize("bornStrength", bornStrength, 1, 0))
+    PARAM_CHECK(ar.Serialize("withdrawClock", withdrawClock, 1, 0.0f))
     return LSOK;
 }
 
@@ -5331,6 +5666,19 @@ LSError CounterAttack::HomeHull::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("crew", crew, 1, 0))
     PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
     PARAM_CHECK(ar.SerializeRef("crewGroup", crewGroup, 1))
+    // a withdrawal (absent in older saves: no wait, no cargo)
+    PARAM_CHECK(ar.Serialize("wait", wait, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waited", waited, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waitRadius", waitRadius, 1, 0.0f))
+    float wx = waitAt.X();
+    float wz = waitAt.Z();
+    PARAM_CHECK(ar.Serialize("waitX", wx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("waitZ", wz, 1, 0.0f))
+    waitAt = Vector3(wx, 0, wz);
+    PARAM_CHECK(ar.SerializeRef("waitGroup", waitGroup, 1))
+    PARAM_CHECK(ar.Serialize("released", released, 1, (int)HRNone))
+    PARAM_CHECK(ar.SerializeRef("cargo", cargo, 1))
+    PARAM_CHECK(ar.Serialize("cargoLiving", cargoLiving, 1, 0))
     return LSOK;
 }
 
@@ -5340,6 +5688,12 @@ LSError CounterAttack::Leftover::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("living", living, 1, 0))
     PARAM_CHECK(ar.SerializeRef("hull", hull, 1))
     PARAM_CHECK(ar.SerializeRef("group", group, 1))
+    // a withdrawal's walk home (absent in older saves: none)
+    float hx = home.X();
+    float hz = home.Z();
+    PARAM_CHECK(ar.Serialize("homeX", hx, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("homeZ", hz, 1, 0.0f))
+    home = Vector3(hx, 0, hz);
     return LSOK;
 }
 

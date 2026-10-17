@@ -535,7 +535,7 @@ bool CounterAttack::AdvanceAirLive(ZoneRegistry& registry, const CounterAttackVi
         if (out <= 0)
         {
             AddLeftover(r.source, nullptr, r.group, 0);
-            Emit(registry, r, CAOpRepelled, 0, r.strength, "the insertion was shot down");
+            Emit(registry, r, CAOpRepelled, 0, r.strength, "the insertion was shot down", CAERDefeated);
             return true;
         }
         r.strength = out;

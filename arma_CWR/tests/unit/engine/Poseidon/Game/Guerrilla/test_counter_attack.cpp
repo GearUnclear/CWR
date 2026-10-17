@@ -15,6 +15,7 @@
 #include <Poseidon/Game/Guerrilla/CampaignEnd.hpp> // the win latch freeze (7.4)
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/GarrisonCache.hpp> // DespawnHysteresis (the far census edge)
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp> // RoadFactor (the one road factor)
 #include <Poseidon/Game/Guerrilla/OccupierForces.hpp> // the pool seams (5.5)
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -262,7 +263,7 @@ TEST_CASE("CounterAttack - pure rules: chance, size, odds, travel, spare", "[gam
     CHECK(CounterAttack::HoldOdds(t, 3, 0) == Approx(1.0f));
     CHECK(CounterAttack::HoldOdds(t, 3, 4) > CounterAttack::HoldOdds(t, 3, 6));
     // travel covers the whole road leg from the base to the town
-    CHECK(CounterAttack::TravelTime(t, 2500.0f) == Approx(2500.0f * 1.3f / 4.0f));
+    CHECK(CounterAttack::TravelTime(t, 2500.0f) == Approx(2500.0f * CounterAttack::QuoteRoadFactor() / 4.0f));
     CHECK(CounterAttack::TravelTime(t, 20.0f) == Approx(CounterAttack::MinTravel));
     // a base keeps a quarter of its strength home
     CHECK(CounterAttack::Spare(t, 6.0f, 0, 6.0f, false) == 5);
@@ -1626,24 +1627,32 @@ TEST_CASE("CounterAttack - occupier forces keys and the real speeds (3.2)", "[ga
 
     CounterAttackTuning t;
     CounterAttack::Record legacy;
-    // key off: the legacy pacing (counterAttackSpeed 4 over roadFactor 1.3)
-    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(CounterAttack::TravelTime(t, 1000.0f)));
-    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(325.0f));
+    // key off: the legacy pacing (counterAttackSpeed 4 over the one road
+    // factor, forcesRoadFactor 1.5; counterAttackRoadFactor is retired)
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f, 1.5f) ==
+          Approx(CounterAttack::TravelTime(t, 1000.0f)));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f, 1.5f) == Approx(375.0f));
     // key on: a legacy record walks at the real foot speed; with only the
-    // straight distance known the road factor stands in, a real road route
-    // is the road
+    // straight distance known the QUOTE's road factor stands in (one factor
+    // for the quote and the march: forcesRoadFactor, never
+    // counterAttackRoadFactor), a real road route is the road
     t.forcesOn = true;
-    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f) == Approx(1300.0f / 1.5f));
-    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 1200.0f) == Approx(800.0f));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f, 1.5f) == Approx(1500.0f / 1.5f));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f, 2.0f) == Approx(2000.0f / 1.5f));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 0.0f, 0.5f) == Approx(1000.0f / 1.5f)); // never below 1
+    // the factor is the theatre's quote factor (ForcePackages::RoadFactor,
+    // forcesRoadFactor)
+    CHECK(CounterAttack::QuoteRoadFactor() == Approx(ForcePackages::RoadFactor()));
+    CHECK(CounterAttack::TravelTimeFor(t, legacy, 1000.0f, 1200.0f, 1.5f) == Approx(800.0f));
     // a truck at 10 m/s
     CounterAttack::Record truck;
     truck.abstractSpeed = 10.0f;
-    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f) == Approx(120.0f));
-    CHECK(CounterAttack::TravelTimeFor(t, truck, 10.0f, 20.0f) == Approx(CounterAttack::MinTravel));
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f, 1.5f) == Approx(120.0f));
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 10.0f, 20.0f, 1.5f) == Approx(CounterAttack::MinTravel));
     // the gmCounterAttackTune "speed" test lever wins over the real speeds
     t.speedLever = true;
     t.speed = 40.0f;
-    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f) == Approx(32.5f));
+    CHECK(CounterAttack::TravelTimeFor(t, truck, 1000.0f, 1200.0f, 1.5f) == Approx(37.5f));
     // A_lethal and the odds: one body of lethality 1 is the old odds
     CounterAttackTuning d;
     CHECK(CounterAttack::HoldOddsLethal(d, 3, 5.0f) == Approx(CounterAttack::HoldOdds(d, 3, 5)));
@@ -1707,9 +1716,9 @@ TEST_CASE("CounterAttack - LaunchFunded: refusals, the spare cap and the abstrac
     CHECK(ear.Last(CAOpLaunched)->opId == 7);
     CHECK(ear.Last(CAOpLaunched)->target == f.town);
     CHECK(ear.Last(CAOpLaunched)->source == f.post);
-    // the real foot speed over the straight distance x roadFactor (no road
-    // net in the test): 670.8 m x 1.3 / 1.5 m/s
-    CHECK(r->travel == Approx(670.82f * 1.3f / 1.5f).margin(0.5f));
+    // the real foot speed over the straight distance x the quote's road
+    // factor (no road net in the test): 670.8 m x forcesRoadFactor / 1.5 m/s
+    CHECK(r->travel == Approx(670.82f * CounterAttack::QuoteRoadFactor() / 1.5f).margin(0.5f));
     CHECK(f.ca.FindByOpId(7) == 0);
     CHECK(f.ca.FindByOpId(99) == -1);
     // an unborn operation does not count against forcesOpsMax
@@ -4302,7 +4311,8 @@ TEST_CASE("CounterAttack - phase 6A: an abstract alarm answer reaches the zone, 
     CounterAttackOrder alarm = KindOrder(CAKAlarm, -1, f.farBase, 4, 81);
     alarm.alarmZone = f.post;
     REQUIRE(f.ca.LaunchFunded(f.registry, far, alarm, nullptr, fired));
-    for (int i = 0; i < 100 && f.ca.Count() > 0; i++)
+    // 10.5 km straight x the quote's road factor 1.5 at 1.5 m/s: about 10500 s
+    for (int i = 0; i < 200 && f.ca.Count() > 0; i++)
     {
         f.ca.Step(f.registry, far, 100.0f, nullptr, fired);
     }
@@ -5036,4 +5046,468 @@ TEST_CASE("CounterAttack - the HQ falls at a full pool: the assault's bodies ban
     CHECK(of.Banked() == 6);
     CHECK(of.Dropped() == 6);
     CHECK(log.With({"ledger: 6 unit(s) over poolStart dropped", "every occupier base at garrisonMax"}).size() == 1);
+}
+
+// ---------------------------------------------------------------------------
+// the break-off (decision 4, the feel assessment's items 7 and 10 as far as
+// they live in CounterAttack): below a third of the born infantry a live
+// operation withdraws while the target is still held, its hulls leave after
+// the infantry, the live timeout withdraws the same way, and the reason
+// reaches the director
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// a six-body truck column with an APC escort from the Post (room for six)
+CounterAttackOrder SixColumn(Fixture& f)
+{
+    f.Z(f.post).garrisonMax = 12;
+    f.Z(f.post).garrison = 12;
+    CounterAttackOrder o = ColumnOrder(f.town, f.post);
+    o.bodies = 6;
+    return o;
+}
+
+// born at the Post with the player in the town, then one more step (the
+// live step sets the born strength)
+const CounterAttack::Record* BornLive(Fixture& f, ColumnOps& ops, const CounterAttackOrder& o,
+                                      AutoArray<ZoneEventRecord>& fired)
+{
+    ops.infAt = f.Z(f.post).pos;
+    ops.carrierCrewAt = f.Z(f.post).pos;
+    ops.escortCrewAt = f.Z(f.post).pos;
+    REQUIRE(f.ca.LaunchFunded(f.registry, AtTown(f), o, &ops, fired));
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    const CounterAttack::Record* r = f.ca.Get(0);
+    REQUIRE(r->phase == CALive);
+    f.Z(f.town).lastGuer = 4; // the defenders hold the town
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(r->bornStrength == o.bodies);
+    return r;
+}
+
+// the column at the 250 m mark: the truck stops and the infantry gets out
+void DismountAtEdge(Fixture& f, ColumnOps& ops, const CounterAttack::Record* r, AutoArray<ZoneEventRecord>& fired)
+{
+    ops.infAt = TowardPost(f, 200.0f);
+    ops.carrierCrewAt = ops.infAt;
+    ops.escortCrewAt = TowardPost(f, 220.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(r->dismounted);
+    REQUIRE(r->leg == CounterAttack::LegTown);
+}
+
+int Index(const FakeListener& ear, int type)
+{
+    for (size_t i = 0; i < ear.events.size(); i++)
+    {
+        if (ear.events[i].type == type)
+        {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
+TEST_CASE("CounterAttack - break-off: below a third of the born infantry it withdraws; the hulls leave after it",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    CoreLogCapture log;
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 6;
+    const CounterAttack::Record* r = BornLive(f, ops, SixColumn(f), fired);
+    DismountAtEdge(f, ops, r, fired);
+
+    // the pure rule: below a third, never at it, never with nobody alive
+    CHECK(CounterAttack::BreaksOff(6, 1));
+    CHECK_FALSE(CounterAttack::BreaksOff(6, 2));
+    CHECK_FALSE(CounterAttack::BreaksOff(6, 0));
+    CHECK(CounterAttack::BreaksOff(4, 1));
+    CHECK_FALSE(CounterAttack::BreaksOff(0, 1));
+
+    // half and a third of the squad still fight on
+    ops.infAlive = 3;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    ops.infAlive = 2;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(ear.Count(CAOpRepelled) == 0);
+
+    // below a third with the town still held: it breaks off at once
+    const Vector3 carrierDriveBefore = ops.lastCarrierDrive;
+    const int escortDrivesBefore = ops.escortDrives;
+    const int movesBefore = ops.moves;
+    fired.Clear();
+    ops.infAlive = 1;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    CHECK(CountEvents(fired, ZECounterRepelled, f.town) == 1);
+    REQUIRE(ear.Count(CAOpRepelled) == 1);
+    const CounterAttackOpEvent* rep = ear.Last(CAOpRepelled);
+    CHECK(rep->reason == CAERBrokenOff);
+    CHECK(rep->bodies == 1); // going home
+    CHECK(rep->units == 5);  // lost
+    CHECK(std::string(CounterAttackEndReasonName(rep->reason)) == "broken off");
+    CHECK(
+        log.With({"Broken off at Town: 5 lost, 1 going home", "born 6, alive 1", "rule: living infantry below a third"})
+            .size() == 1);
+    REQUIRE(f.ca.EndCount() >= 1);
+    const CounterAttack::EndNote* end = f.ca.GetEnd(f.ca.EndCount() - 1);
+    CHECK(Fixture::Str(end->line) == "Broken off at Town: 5 lost, 1 going home");
+    CHECK(end->reason == CAERBrokenOff);
+    CHECK(end->born == 6);
+    // the survivor walks home (a withdrawing Leftover)
+    CHECK(ops.moves > movesBefore);
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    CHECK(f.ca.GetLeftover(0)->living == 1);
+    CHECK(Dist2DTest(f.ca.GetLeftover(0)->home, f.Z(f.post).pos) < 1.0f);
+    // both hulls hold for him: no drive home, no deletion, no refund
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    for (int i = 0; i < 2; i++)
+    {
+        CHECK(f.ca.GetHomeHull(i)->wait > 0);
+        CHECK(f.ca.GetHomeHull(i)->released == CounterAttack::HRWaiting);
+        CHECK(f.ca.GetHomeHull(i)->waitRadius == Approx(250.0f));
+    }
+    CHECK(Dist2DTest(ops.lastCarrierDrive, carrierDriveBefore) < 1.0f);
+    CHECK(ops.escortDrives == escortDrivesBefore);
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+    CHECK(log.With({"holds for the infantry until it clears 250 m of Town"}).size() == 2);
+
+    // still within the edge a minute later: they still hold, even unseen
+    ops.hullUnseen = true;
+    f.ca.Step(f.registry, AtTown(f), 60.0f, &ops, fired);
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    CHECK(f.ca.GetHomeHull(0)->released == CounterAttack::HRWaiting);
+    CHECK(ear.Count(CAOpHullRefund) == 0);
+    CHECK(Removed(ops, "hull:carrier") == 0);
+    ops.hullUnseen = false;
+
+    // he clears the edge: then they drive home
+    ops.infAt = TowardPost(f, 300.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    CHECK(f.ca.GetHomeHull(0)->wait == 0);
+    CHECK(f.ca.GetHomeHull(0)->released == CounterAttack::HRCleared);
+    CHECK(f.ca.GetHomeHull(1)->released == CounterAttack::HRCleared);
+    CHECK(Dist2DTest(ops.lastCarrierDrive, f.Z(f.post).pos) < 1.0f);
+    CHECK(ops.escortDrives > escortDrivesBefore);
+    CHECK(log.With({"leaves after its infantry (cleared"}).size() == 2);
+
+    // home unseen: each refunds its own price, after the repel
+    ops.hullUnseen = true;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.HomeHullCount() == 0);
+    REQUIRE(ear.Count(CAOpHullRefund) == 2);
+    CHECK(Index(ear, CAOpRepelled) < Index(ear, CAOpHullRefund));
+    int refunded = 0;
+    for (const CounterAttackOpEvent& ev : ear.events)
+    {
+        refunded += ev.type == CAOpHullRefund ? ev.units : 0;
+    }
+    CHECK(refunded == 3 + 8);
+
+    // the survivor leaves the world only away from the player and unseen,
+    // then he is home as a body
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 1);
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, Fixture::View(FarX, FarZ), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 0);
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 1.0f));
+    CHECK(log.With({"1 withdrawing soldier(s) home unseen at Post"}).size() == 1);
+}
+
+TEST_CASE("CounterAttack - break-off: the hulls wait for the infantry at most WithdrawHullWait",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 6;
+    const CounterAttack::Record* r = BornLive(f, ops, SixColumn(f), fired);
+    DismountAtEdge(f, ops, r, fired);
+    ops.infAlive = 1;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 0);
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    // the survivor stays pinned inside the edge: they hold to the bound
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::WithdrawHullWait - 10.0f, &ops, fired);
+    CHECK(f.ca.GetHomeHull(0)->released == CounterAttack::HRWaiting);
+    CHECK(Dist2DTest(ops.lastCarrierDrive, f.Z(f.post).pos) > 1.0f);
+    f.ca.Step(f.registry, AtTown(f), 11.0f, &ops, fired);
+    CHECK(f.ca.GetHomeHull(0)->released == CounterAttack::HRWaitOver);
+    CHECK(f.ca.GetHomeHull(1)->released == CounterAttack::HRWaitOver);
+    CHECK(Dist2DTest(ops.lastCarrierDrive, f.Z(f.post).pos) < 1.0f);
+}
+
+TEST_CASE("CounterAttack - break-off: a survivor who dies releases the waiting hulls at once",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 6;
+    const CounterAttack::Record* r = BornLive(f, ops, SixColumn(f), fired);
+    DismountAtEdge(f, ops, r, fired);
+    ops.infAlive = 1;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    ops.infAlive = 0;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(f.ca.GetHomeHull(0)->released == CounterAttack::HRNoInfantry);
+    CHECK(f.ca.GetHomeHull(1)->released == CounterAttack::HRNoInfantry);
+}
+
+TEST_CASE("CounterAttack - break-off: infantry still seated rides home in its carrier, deleted first",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 6;
+    const CounterAttack::Record* r = BornLive(f, ops, SixColumn(f), fired);
+    REQUIRE_FALSE(r->dismounted);
+    // ambushed on the road, still mounted
+    ops.infAt = TowardPost(f, 500.0f);
+    ops.carrierCrewAt = ops.infAt;
+    ops.escortCrewAt = TowardPost(f, 520.0f);
+    ops.infAlive = 1;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpRepelled) == 1);
+    CHECK(ear.Last(CAOpRepelled)->reason == CAERBrokenOff);
+    CHECK(ops.dismounts == 0);
+    CHECK(f.ca.LeftoverCount() == 0); // he is not on foot
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    CHECK(f.ca.GetHomeHull(0)->wait == 0);
+    CHECK(f.ca.GetHomeHull(1)->wait == 0);
+    int cargo = 0;
+    for (int i = 0; i < 2; i++)
+    {
+        cargo += f.ca.GetHomeHull(i)->cargoLiving;
+    }
+    CHECK(cargo == 1);
+    CHECK(Dist2DTest(ops.lastCarrierDrive, f.Z(f.post).pos) < 1.0f);
+    // deleted unseen: the infantry first, then each crew, then its hull
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    ops.removals.clear();
+    ops.hullUnseen = true;
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, Fixture::View(FarX, FarZ), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.HomeHullCount() == 0);
+    REQUIRE(ops.removals.size() >= 3);
+    int infAt = -1, carrierCrewAt = -1;
+    for (size_t i = 0; i < ops.removals.size(); i++)
+    {
+        infAt = infAt < 0 && ops.removals[i] == "inf" ? (int)i : infAt;
+        carrierCrewAt = carrierCrewAt < 0 && ops.removals[i] == "carrierCrew" ? (int)i : carrierCrewAt;
+    }
+    REQUIRE(infAt >= 0);
+    REQUIRE(carrierCrewAt >= 0);
+    CHECK(infAt < carrierCrewAt);
+    // the soldier and both crews home (1 + 1 + 2)
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 4.0f));
+}
+
+TEST_CASE("CounterAttack - break-off: the lone survivor withdraws at once, not after the live timeout",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    CoreLogCapture log;
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops; // a foot squad: SpawnSquad hands out the infantry group
+    ops.infAlive = 4;
+    const CounterAttack::Record* r = BornLive(f, ops, FootOrder(f.town, f.post, 4), fired);
+    CHECK(ops.squads == 1);
+    CHECK(ops.mounts == 0);
+    // at the town edge, then 47 m from the town (video 5, ops 12 and 15)
+    ops.infAt = TowardPost(f, 200.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(r->leg == CounterAttack::LegTown);
+    ops.infAt = TowardPost(f, 47.0f);
+    f.ca.Step(f.registry, AtTown(f), 30.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    // three of the four die: one man is left, far short of the timeout
+    ops.infAlive = 1;
+    const int movesBefore = ops.moves;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpRepelled) == 1);
+    CHECK(ear.Last(CAOpRepelled)->reason == CAERBrokenOff);
+    CHECK(ear.Last(CAOpRepelled)->bodies == 1);
+    CHECK(ear.Last(CAOpRepelled)->units == 3);
+    CHECK(log.With({"Broken off at Town: 3 lost, 1 going home", "born 4, alive 1", "on foot toward Post"}).size() == 1);
+    // he walks home, re-sent while the player is near; no hull to wait for
+    CHECK(ops.moves > movesBefore);
+    CHECK(f.ca.HomeHullCount() == 0);
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    const int movesWalking = ops.moves;
+    f.ca.Step(f.registry, AtTown(f), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(ops.moves > movesWalking);
+    CHECK(f.ca.LeftoverCount() == 1);
+    // away and unseen: home as a body
+    const float postBefore = f.Z(f.post).garrison + (float)f.Z(f.post).pending;
+    ops.bodiesUnseen = true;
+    f.ca.Step(f.registry, Fixture::View(FarX, FarZ), CounterAttack::RetryInterval + 1.0f, &ops, fired);
+    CHECK(f.ca.LeftoverCount() == 0);
+    CHECK(f.Z(f.post).garrison + (float)f.Z(f.post).pending == Approx(postBefore + 1.0f));
+}
+
+TEST_CASE("CounterAttack - the live timeout still ends an operation that never fell below a third",
+          "[game][guerrilla][counterattack]")
+{
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    CoreLogCapture log;
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 4;
+    const CounterAttack::Record* r = BornLive(f, ops, FootOrder(f.town, f.post, 4), fired);
+    ops.infAt = TowardPost(f, 200.0f);
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(r->leg == CounterAttack::LegTown);
+    // half of them die: at a third or above, the fight goes on
+    ops.infAlive = 2;
+    f.ca.Step(f.registry, AtTown(f), 600.0f, &ops, fired);
+    REQUIRE(f.ca.Count() == 1);
+    CHECK(ear.Count(CAOpRepelled) == 0);
+    // the timeout: it withdraws in the open even with the player in the town
+    f.ca.Step(f.registry, AtTown(f), f.ca.Tuning().liveTimeout, &ops, fired);
+    CHECK(f.ca.Count() == 0);
+    REQUIRE(ear.Count(CAOpRepelled) == 1);
+    CHECK(ear.Last(CAOpRepelled)->reason == CAERWithdrew);
+    CHECK(ear.Last(CAOpRepelled)->bodies == 2);
+    CHECK(ear.Last(CAOpRepelled)->units == 2);
+    CHECK(log.With({"Withdrew from Town: 2 lost, 2 going home", "born 4, alive 2",
+                    "rule: counterAttackLiveTimeout 1200 s"})
+              .size() == 1);
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    CHECK(f.ca.GetLeftover(0)->living == 2);
+}
+
+TEST_CASE("CounterAttack - the repel reason reaches the orders: defeated, broken off, withdrew",
+          "[game][guerrilla][counterattack]")
+{
+    CHECK(std::string(CounterAttackEndReasonName(CAERNone)).empty());
+    CHECK(std::string(CounterAttackEndReasonName(CAERDefeated)) == "defeated");
+    CHECK(std::string(CounterAttackEndReasonName(CAERBrokenOff)) == "broken off");
+    CHECK(std::string(CounterAttackEndReasonName(CAERWithdrew)) == "withdrew");
+    CHECK(CounterAttackOpEvent().reason == CAERNone);
+
+    // wiped out: defeated; every other event carries no reason
+    Fixture f;
+    f.Load(ConfigWith("occupierForces = 1;"));
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    FakeListener ear;
+    ListenerGuard guard(&ear);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 4;
+    BornLive(f, ops, FootOrder(f.town, f.post, 4), fired);
+    ops.infAlive = 0;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(ear.Count(CAOpRepelled) == 1);
+    CHECK(ear.Last(CAOpRepelled)->reason == CAERDefeated);
+    for (const CounterAttackOpEvent& ev : ear.events)
+    {
+        if (ev.type != CAOpRepelled)
+        {
+            CHECK(ev.reason == CAERNone);
+        }
+    }
+    // the script surface keeps the reason too
+    REQUIRE(f.ca.EndCount() >= 1);
+    CHECK(f.ca.GetEnd(f.ca.EndCount() - 1)->reason == CAERDefeated);
+    CHECK(f.ca.GetEnd(f.ca.EndCount() - 1)->type == CAOpRepelled);
+}
+
+TEST_CASE("CounterAttack - a withdrawal's waiting hulls and walking survivors survive save/load",
+          "[game][guerrilla][counterattack][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "counter-attack-withdraw.bin";
+    const std::string config = ConfigWith("occupierForces = 1;");
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config);
+    f.RaiseTown(f.town);
+    PoolGuard pool(f);
+    AutoArray<ZoneEventRecord> fired;
+    ColumnOps ops;
+    ops.infAlive = 6;
+    const CounterAttack::Record* r = BornLive(f, ops, SixColumn(f), fired);
+    DismountAtEdge(f, ops, r, fired);
+    ops.infAlive = 1;
+    f.ca.Step(f.registry, AtTown(f), 1.0f, &ops, fired);
+    REQUIRE(f.ca.HomeHullCount() == 2);
+    REQUIRE(f.ca.LeftoverCount() == 1);
+    const float waited = f.ca.GetHomeHull(0)->waited;
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.ca.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    CounterAttack loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    REQUIRE(loaded.HomeHullCount() == 2);
+    const CounterAttack::HomeHull* h = loaded.GetHomeHull(0);
+    CHECK(h->wait == Approx(CounterAttack::WithdrawHullWait));
+    CHECK(h->waited == Approx(waited));
+    CHECK(h->waitRadius == Approx(250.0f));
+    CHECK(h->released == CounterAttack::HRWaiting);
+    CHECK(Dist2DTest(h->waitAt, f.Z(f.town).pos) < 1.0f);
+    REQUIRE(loaded.LeftoverCount() == 1);
+    CHECK(loaded.GetLeftover(0)->living == 1);
+    CHECK(Dist2DTest(loaded.GetLeftover(0)->home, f.Z(f.post).pos) < 1.0f);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
 }

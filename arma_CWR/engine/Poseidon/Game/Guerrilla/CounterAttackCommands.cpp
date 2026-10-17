@@ -90,6 +90,35 @@
 //                                  The airframe and its crew (config hasDriver
 //                                  + hasGunner + hasCommander) are spent from
 //                                  the pool at the 6.5 price.
+//   gmCounterAttackEnds         -> [[opId, target, type, reason, bodies,
+//                                     units, born, note, line], ...] the
+//                                  last 16 operations that ended, oldest
+//                                  first (transient, not saved): type
+//                                  "REPELLED" / "SETTLED" / "CANCELLED" /
+//                                  "ABORTED", reason the
+//                                  CounterAttackEndReason name ("defeated",
+//                                  "broken off", "withdrew", "" for the
+//                                  other types), bodies / units the terminal
+//                                  event's (a repel: survivors going home /
+//                                  bodies lost), born the infantry strength
+//                                  first born (0 never live), note the
+//                                  event note, line a withdrawal's "Broken
+//                                  off at X: N lost, M going home" ("" else)
+//   gmCounterAttackHomeHulls    -> [[opId, hull, crewGroup, waiting,
+//                                     waited, released, waitGroup, cargo,
+//                                     cargoLiving], ...] the intact hulls
+//                                  driving home (or holding for their
+//                                  withdrawing infantry: waiting true,
+//                                  waited the seconds held, released ""
+//                                  until it leaves, then "cleared" / "wait
+//                                  over" / "no infantry"; "" for a hull that
+//                                  never waited); cargo the infantry riding
+//                                  home in it (grpNull none)
+//   gmCounterAttackLeftovers    -> [[group, living, withdrawing, hull],
+//                                     ...] lost hulls, dead groups and
+//                                  stragglers awaiting an unseen deletion;
+//                                  withdrawing true for a withdrawing
+//                                  force's survivors walking home
 
 #include <Poseidon/Game/Guerrilla/CounterAttack.hpp>
 #include <Poseidon/Game/Guerrilla/ForcePackages.hpp>  // ConfigHullInspector (the escort of the test lever)
@@ -174,6 +203,91 @@ static GameValue GmCounterAttacks(const GameState* state)
         row[26] = (float)r->airOrigin;
         row[27] = r->dismounted;
         row[28] = r->struck;
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static const char* EndTypeName(int type)
+{
+    switch (type)
+    {
+        case CAOpRepelled:
+            return "REPELLED";
+        case CAOpSettled:
+            return "SETTLED";
+        case CAOpCancelledUnseen:
+            return "CANCELLED";
+        default:
+            return "ABORTED";
+    }
+}
+
+static GameValue GmCounterAttackEnds(const GameState* state)
+{
+    const CounterAttack& ca = CounterAttack::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < ca.EndCount(); i++)
+    {
+        const CounterAttack::EndNote* e = ca.GetEnd(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(9);
+        row[0] = (float)e->opId;
+        row[1] = GameStringType(e->target);
+        row[2] = GameStringType(EndTypeName(e->type));
+        row[3] = GameStringType(CounterAttackEndReasonName(e->reason));
+        row[4] = (float)e->bodies;
+        row[5] = (float)e->units;
+        row[6] = (float)e->born;
+        row[7] = GameStringType(e->note);
+        row[8] = GameStringType(e->line);
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static GameValue GmCounterAttackHomeHulls(const GameState* state)
+{
+    const CounterAttack& ca = CounterAttack::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < ca.HomeHullCount(); i++)
+    {
+        const CounterAttack::HomeHull* h = ca.GetHomeHull(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(9);
+        row[0] = (float)h->opId;
+        row[1] = GameValueExt((Object*)h->hull.GetLink());
+        row[2] = GameValueExt(h->crewGroup.GetLink());
+        row[3] = h->wait > 0;
+        row[4] = h->waited;
+        row[5] = GameStringType(h->wait > 0 ? "" : CounterAttack::HullReleaseName(h->released));
+        row[6] = GameValueExt(h->waitGroup.GetLink());
+        row[7] = GameValueExt(h->cargo.GetLink());
+        row[8] = (float)h->cargoLiving;
+        rows.Add(rowValue);
+    }
+    return value;
+}
+
+static GameValue GmCounterAttackLeftovers(const GameState* state)
+{
+    const CounterAttack& ca = CounterAttack::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& rows = value;
+    for (int i = 0; i < ca.LeftoverCount(); i++)
+    {
+        const CounterAttack::Leftover* l = ca.GetLeftover(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(4);
+        row[0] = GameValueExt(l->group.GetLink());
+        row[1] = (float)l->living;
+        row[2] = l->home.X() != 0 || l->home.Z() != 0;
+        row[3] = GameValueExt((Object*)l->hull.GetLink());
         rows.Add(rowValue);
     }
     return value;
@@ -482,6 +596,9 @@ static GameValue GmCounterAttackLaunchFunded(const GameState* /*state*/, GameVal
 INIT_MODULE(GuerrillaCounterAttack, 3)
 {
     GGameState.NewNularOp(GameNular(GameArray, "gmCounterAttacks", GmCounterAttacks));
+    GGameState.NewNularOp(GameNular(GameArray, "gmCounterAttackEnds", GmCounterAttackEnds));
+    GGameState.NewNularOp(GameNular(GameArray, "gmCounterAttackHomeHulls", GmCounterAttackHomeHulls));
+    GGameState.NewNularOp(GameNular(GameArray, "gmCounterAttackLeftovers", GmCounterAttackLeftovers));
     GGameState.NewFunction(GameFunction(GameBool, "gmCounterAttackTune", GmCounterAttackTune, GameArray));
     GGameState.NewFunction(
         GameFunction(GameScalar, "gmCounterAttackLaunchFunded", GmCounterAttackLaunchFunded, GameArray));
