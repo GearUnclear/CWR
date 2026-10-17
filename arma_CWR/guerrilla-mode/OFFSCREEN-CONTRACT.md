@@ -1068,7 +1068,7 @@ was {1800, 2700, 3600, 0}), derived from the `forcesCadence` lever as {c,
 |---|---|---|---|
 | STRONG | > 66 % | < 60 % | a token per 600 s (c); post operations, HQ assaults and push-out (towns and posts) allowed |
 | STRETCHED | between | | a token per 1050 s (1.75c) |
-| THIN | < 33 % | > 40 % | a token per 1800 s (3c); no operation below `forcesPoolFloor` (20 %); alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`, also in SPENT [code]) |
+| THIN | < 33 % | > 40 % | a token per 1800 s (3c); no operation below `forcesPoolFloor` (20 %); alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`, also in SPENT [code]). The same floor bounds one launch's own debit in every band (the reserve floor, row "Operation launch" below) |
 | SPENT | 0 | > 10 % | no tokens; reverts left hollow (`Deposit` grants nothing); no alarm answers. D2 keeps drawing on the refill, so the pool sits near 0 while garrisons are short and the band leaves SPENT once, at 10 %, without flapping |
 
 ### 10.2 Spending and routing (OCCUPIER-FORCES.md 5.3 to 5.5)
@@ -1077,7 +1077,7 @@ was {1800, 2700, 3600, 0}), derived from the `forcesCadence` lever as {c,
 |---|---|
 | D2 regrowth | `Draw`: min(bodies, pool); an empty pool grants nothing and clamps the zone's clock |
 | Town or post refill on revert | the holding force's bodies settle first, up to the room; the surplus goes to the pool; the rest of the room is a pool-funded `Deposit`, pending inside the deposit bubble; SPENT grants nothing |
-| Operation launch | the hull and crew price (both hulls of a column) through `Spend` (refused, nothing debited, over the pool or when `!CanOperate()`); infantry from the source base's STORED spare, granted only in full (M1); a foot downgrade refunds the whole hull price |
+| Operation launch | the hull and crew price (both hulls of a column) through `Spend` (refused, nothing debited, over the pool or when `!CanOperate()`); infantry from the source base's STORED spare, granted only in full (M1); a foot downgrade refunds the whole hull price. THE RESERVE FLOOR (OCCUPIER-FORCES.md 6.3, owner decision 2026-10-17, video 7 op 4: 32 to 4 in one launch) [code]: a director-bought ground operation (director and push-out retakes of towns and bases, every repel-ladder rung, the massing fallback, an alarm answer to a town) whose price would leave the pool under `forcesPoolFloor` x poolStart (9.6 on Abel) is not launched and nothing is debited; it waits, with no token, rest or re-arm spent, and is weighed again on later ticks; its plan is chosen on what the pool could pay at max(pool, poolStart) with the floor kept, so it is never downgraded to fit, though the plan's own cheapest qualifying package goes when that one fits. One INFO line per target and plan (`gmOccupierReserve` lists the waits; not saved). Exempt: HQ assaults, wave operations (`CAOWave`), strikes (their own band rules), alarm answers to bases, the air re-plan and the test levers |
 | Survivors home | to the source's reserve up to its room (pending inside the deposit bubble); the surplus to the pool |
 | No base to return to | pool |
 | Adopted live squad | settled once in `RevertTown`; the cut over the refill to the pool |

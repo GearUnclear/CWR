@@ -804,7 +804,7 @@ down.
 |---|---|---|---|
 | STRONG | strength > 66 % | strength < 60 % | One token per 10 min (`forcesTokenInterval[]`, 2026-10-15); base operations (D16) and push-out on towns AND bases allowed |
 | STRETCHED | between | | One token per 17.5 min |
-| THIN | strength < 33 % | strength > 40 % | One token per 30 min; no operation below 20 %; alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`) |
+| THIN | strength < 33 % | strength > 40 % | One token per 30 min; no operation below 20 % (`forcesPoolFloor`; since 2026-10-17 the same floor also bounds one launch's own debit in every band, 6.3 "The reserve floor"); alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`) |
 | SPENT | strength = 0 | strength > 10 % | No tokens; reverts left hollow; no alarm answers. D2 KEEPS RUNNING on the refill: garrisons first, as D15 says. The pool stays near 0 while garrisons are short, and the band leaves SPENT once, when the pool passes 10 % (measured: moments before the last short posts are full, because the per-zone D2 cap binds in the tail), so it does not flap. A pool that genuinely drains to 0 again re-enters SPENT; that is a real drain, not flapping. |
 
 All shares are of poolStart.
@@ -1357,28 +1357,96 @@ insertions in the mix, four trucks and two insertions all lost cost 16 +
 24 + 18 = 58: the pool falls from 48 to 27 in the hour, under 28.8, so
 STRETCHED by the pool alone, and the next hour runs at the STRETCHED rate.
 
-**One ground launch can take most of the pool** (video 6). Trucks and
-insertions are the cheap end. The chooser buys the cheapest package that
-meets the lethality required and the ETA (6.5), and when none meets it
-(the repel ladder's x1.5, the end of massing) it takes the most lethal one
-the pool can pay; the only checks on the price are `Spend`'s (units <=
-pool, and `CanOperate`, which refuses only SPENT, or THIN under the 20 %
-floor). No rule keeps a ground launch inside a band. An APC with a tank
-escort is 8 + 3 + 14 + 3 = 28 units: at 2823 s in video 6 op 4 ("APC (6,
-BMP) with T72 from Le Port Harbour to Sainte Marie ... the pool pays 28,
-... short of the required lethality: the most lethal affordable package")
-took the pool from 32 to 4 in one launch, STRONG to THIN and under the
-floor, so the director launched nothing more until op 3's T72 and Ural came
-home at 3007 s and refunded the pool to 22 (STRETCHED); 184 s of refill
-alone would have added about 2. So a STRONG pool of 48 CAN run nearly dry
-inside an hour, from one escalated operation. In flight at once: at most
-three operations (`forcesOpsMaxStrong`), and the units out together are
-whatever their packages cost, up to the whole pool. When the pool is not
-the limit, what stops the director first is spare infantry (the three
-ground bases hold about 20 spare bodies when full and regrow 18 an hour),
-which the refusal line names (6.5). Whether a single ground launch should
-keep a floor of the pool in hand (like the keep-STRONG rule a director
-strike obeys, 7.3) is an owner decision, open.
+**One ground launch could take most of the pool** (videos 6 and 7, until
+2026-10-17). Trucks and insertions are the cheap end. The chooser buys the
+cheapest package that meets the lethality required and the ETA (6.5), and
+when none meets it (the repel ladder's x1.5, the end of massing) it takes
+the most lethal one; until 2026-10-17 the only checks on its price were
+`Spend`'s (units <= pool, and `CanOperate`, which refuses only SPENT, or
+THIN under the 20 % floor). An APC with a tank escort is 8 + 3 + 14 + 3 =
+28 units: at 2823 s in video 6 op 4 ("APC (6, BMP) with T72 from Le Port
+Harbour to Sainte Marie ... the pool pays 28, ... short of the required
+lethality: the most lethal affordable package") took the pool from 32 to 4
+in one launch, STRONG to THIN and under the floor, and video 7 repeated it
+at 2884 s (op 4, the same package, the strongest one base could bring
+after three ticks of massing, the pool again 32 to 4, STRETCHED to THIN):
+the director launched nothing more until op 3's T72 and Ural came home and
+refunded the pool, and the occupier answered nothing for most of an hour.
+In flight at once: at most three operations (`forcesOpsMaxStrong`). When
+the pool is not the limit, what stops the director first is spare infantry
+(the three ground bases hold about 20 spare bodies when full and regrow 18
+an hour), which the refusal line names (6.5).
+
+**The reserve floor** (owner decision 2026-10-17, video 7 op 4; the aim is
+realistic behaviour: a commander keeps a reserve and does not throw it at
+one village).
+- **The rule.** A director-bought ground operation may not take the pool
+  below `forcesPoolFloor` x poolStart (0.2 x 48 = 9.6 on Abel) by its own
+  debit. The test is made at buy time, on the pool AFTER the launch's price
+  (hull, crew, both hulls of a column; the infantry comes from the source's
+  stored reserve, not the pool), compared as shares like `CanOperate`
+  (`OccupierForces::KeepsReserve`, `ReserveRoomOf`): with 48 the most one
+  launch may cost is 38, with 32 it is 22. A launch the pool pays nothing for
+  (foot) never debits the pool, so the rule never refuses it.
+- **Which operations.** The director's and push-out's retakes of a town or a
+  base, whatever package delivers them (a helicopter insertion's airframe
+  and crew included), every rung of the repel ladder, the massing fallback,
+  a re-armed zone's operation, and an alarm answer to an occupier-held TOWN
+  (a top-up of its garrison). `OccupierForces::ReserveBindsKind`.
+- **Exempt** (they may dig into the reserve): the HQ assault (HQ_ASSAULT,
+  the final push included), the final stand's surge, every wave operation
+  (`CAOWave`: the strikes and the REINFORCE columns, paid from the wave,
+  7.1), an alarm answer to an occupier base under attack (8.2), strikes (the
+  opener, the escalation strike and the town strike keep their own band
+  rules, `PlanStrike` / `PoolBandAfter`, 7.3: unchanged), the air re-plan
+  of a watched ground operation (3.1, its own net ledger movement), the
+  legacy dispatch and the test levers (`gmCounterAttackLaunchFunded`,
+  `gmForcesForce ["alarm" | "strike", ...]`).
+- **The plan does not shrink with the pool.** A floored plan is chosen on
+  the most the pool could pay at max(pool, poolStart) with the floor kept
+  (`ReserveBudget()`, 38 on Abel), not on the pool as it stands, so its "most
+  lethal affordable" fallback is the same package at a pool of 20 as at 48.
+  Before the rule a low pool made the chooser pick a smaller fallback.
+- **It waits; it is never sent undersized.** A plan that does not fit above
+  the floor WAITS: no operation, no token spent, no rest (cooldown) set, the
+  re-arm kept, the target still contained or a candidate as it was; it is
+  weighed again on every later tick as the pool refills, and the director's
+  loop goes on to its next candidate (no strike goes in its place). The
+  plan's own cheapest QUALIFYING package (one that still meets the
+  lethality the plan requires and the ladder's rung) may go in its place
+  when that one fits (the plan re-made on the room the floor leaves,
+  `PlanFor(..., ReserveRoom())`): an urgent or slow target whose arrival
+  rule chose a dearer, faster package takes the cheaper one that meets the
+  same requirement, and the launch writes one line ("[op N] the reserve
+  floor: APC (8, BMP) with BMP (the pool pays 22) would leave the pool under
+  its reserve (pool 31 of 48, floor 9.6); TRUCK (8, Ural) with T72, which
+  meets the plan, goes (the pool pays 21)"). A plan already short of its
+  lethality (the most lethal package) has no cheaper qualifying package: it
+  waits whole. A town that repelled two attacks is not sent an undersized
+  third.
+- **The massing fallback.** When massing ends (6.3 above) and the strongest
+  package then waits on the floor, the target is not massed again: each
+  later tick re-plans the same fallback until the pool can pay it.
+- **One line per wait** (D12, 6.6), when the target's plan or reason
+  changes, not every tick: "OccupierForces: Sainte Marie: escalation retake
+  after massing (APC (6, BMP) with T72, the pool pays 28, lethality 25.50 of
+  32.40, the most lethal package) waits, the pool keeps its reserve (pool 32
+  of 48, floor 9.6: the launch would leave 4)"; a pool short of the price
+  reads "the pool is N short of the price". The waits are listed by
+  `gmOccupierReserve` (6.6) and are not saved (a load logs the wait once
+  more).
+- **Video 7's op 4 under the rule.** The pool at 32 keeps 22 to spend: the
+  APC and T72 (28) waits, and so does every cheaper package (the truck and
+  T72 at 21 would fit but brings 19.5 of the 32.4 needed, an undersized
+  attack). The refill (37 an hour at full standing, 5.2) and op 3's hulls
+  coming home lift the pool past 38 within minutes, and the whole package
+  goes, leaving 10; meanwhile the 22 units in hand still pay for a cheaper
+  operation elsewhere or an alarm answer. Tests: the reserve-floor
+  `[occupierforces]` cases (`test_occupier_forces_reserve.cpp`) and the tri
+  test `guerrilla_forces_reserve_floor` (the video's package on a Le Port
+  held by six fighters: it waits at 32 and goes at 38).
+- `forcesPoolFloor = 0` turns the rule off (and the THIN floor of 5.6 with
+  it); the old pick and price checks come back.
 
 **Urgency (with hysteresis).** A target is URGENT from either of these until
 its heat falls below 35:
@@ -1587,7 +1655,12 @@ as bodies on top of the hull price.
      takes the spare cap (7.2).
 3. **Pick.** The cheapest package meeting both. An URGENT target takes the
    fastest package costing at most 1.5 x that. If none meets `L_req`, the
-   most lethal affordable package goes, and its line says so.
+   most lethal affordable package goes, and its line says so. For an
+   operation the reserve floor binds (6.3, 2026-10-17) "affordable" is what
+   the pool could pay at max(pool, poolStart) with the floor kept (38 on
+   Abel), and a pick that would take the pool under the floor waits, or
+   gives way to the plan's own cheapest qualifying package when that one
+   fits.
    - **The arrival rule** (owner, 2026-10-15; reworked 2026-10-16, phase
      1 C, after video 5, where all five insertions flew to targets with
      "0 fighter(s) reported" while every defended target got the cheap
@@ -1766,6 +1839,20 @@ crews, not hulls. A launch over budget waits like a live squad does.
 
 "Starved: no answer to X alarm" is written once per alarm edge.
 
+A launch that waits on the reserve floor (6.3, 2026-10-17) has no op id
+(nothing was launched, no id is spent) and writes one line per target, again
+only when its plan or the reason changes: "OccupierForces: Sainte Marie:
+escalation retake after massing (APC (6, BMP) with T72, the pool pays 28,
+lethality 25.50 of 32.40, the most lethal package) waits, the pool keeps
+its reserve (pool 32 of 48, floor 9.6: the launch would leave 4)". The words
+name the operation ("retake", "base retake", "alarm answer", with
+"escalation", "re-arm" or "push-out" in front and "after massing" behind
+when they apply) and the plan as the launch line would. When the plan's own
+cheaper qualifying package goes instead, the launch adds "[op N] the
+reserve floor: <plan> (the pool pays P) would leave the pool under its
+reserve (pool X of S, floor F); <package>, which meets the plan, goes (the
+pool pays Q)".
+
 The band line ("band STRONG -> STRETCHED (pool P of S; strength N: ...)")
 is written at most once per frame, when the frame's one step changes the
 band, plus one for a wave landing or a forced pool, which step at once
@@ -1791,6 +1878,7 @@ layer passes `--dev`, so test logs keep the trail.
 - `gmCounterAttacks` (24 slots per record): `[town, source, phase, clock, strength, size, townsBefore, group, spawnPos, spawnReason, opId, kind, origin, package, liveHull, eta, hullClass, funded, hull, seatedInfantry, leader, livingInfantry, escortClass, escort]`.
 - `gmCounterAttackEnds` (the break-off, 2026-10-16): the last 16 ended operations `[opId, target, type, reason, bodies, units, born, note, line]`, `reason` "defeated" / "broken off" / "withdrew" on a repel, `line` a withdrawal's "Broken off at X: L lost, M going home"; `gmCounterAttackHomeHulls` `[opId, hull, crewGroup, waiting, waited s, released, waitGroup, cargo, cargoLiving]`; `gmCounterAttackLeftovers` `[group, living, withdrawing, hull]`.
 - `gmOccupierIntel`: the sightings `[zone, count, age s, positions]`.
+- `gmOccupierReserve` (2026-10-17): `[floorUnits, room, budget, [[zone, what, plan, package, price, pool, best, line]...]]`: `forcesPoolFloor` x poolStart, the most a floored launch may cost now, what a floored plan is chosen on, and the targets whose plan waits on the reserve floor (6.3), with the pool when the line was written, whether it is the massing fallback, and the line.
 - `gmRoadRoute [from, to, joinRadius?]` (the route with its join fields) and `gmRoadComponents [pos, radius]` (the road components near a point).
 - `gmHqState` `[hasHq, destroyed, epoch, hqCapture, zoneIndex, pos]`, `gmHqEpoch`, `gmHqForceCapture`; `gmCampaignEnd` gains slot 8 `lost`, `gmCampaignLost` the latch.
 - The air spike: `gmOccupierAir` and the levers `gmAirInsert`, `gmAirSortie`, `gmAirExposure`, `gmAirUnseen`, `gmAirAbort`, `gmAirReveal`, `gmAirTune` (column layout in `OccupierAirCommands.cpp`).
@@ -1852,6 +1940,9 @@ resolves to 0) unless it sets `seedBases = 1`.
      the parent nation's reinforcement is a reason to try again.
    - They launch together, only once the director is AWAKE (W); a DORMANT
      director logs "no strikes".
+   - Paid from the wave, they are exempt from the reserve floor (6.3): a
+     wave strike and a REINFORCE column may take the pool under
+     `forcesPoolFloor` x poolStart.
 4. REINFORCE columns on foot from the hub to the most-bled held bases, at
    most 12 bodies each and `forcesWaveOps` columns. A column joins its base
    up to the room the base has when it arrives; the rest goes home to the
@@ -2101,6 +2192,11 @@ movement: its refund is capped at the ceiling (5.5) like any other.
 
 It never targets a hidden player position (D9).
 
+The reserve floor of one ground launch (6.3, 2026-10-17) does not apply to
+strikes, which keep the band rules above; the ground operation a strike
+goes with is floored on its own price, and the strike is then tested on the
+pool that launch leaves.
+
 ### 7.4 The win
 
 `CampaignEnd::AllHeld` requires every roster zone held at once, checked every
@@ -2167,6 +2263,11 @@ because `LaunchFrom` takes only towns:
   home as stragglers.
 - **Limits.** One alarm answer at a time. THIN answers only with the
   cheapest package; SPENT does not answer.
+- **The reserve floor** (6.3, 2026-10-17). An answer to an occupier-held
+  TOWN may not take the pool under `forcesPoolFloor` x poolStart; it waits
+  (one line, no rest set) and the next RED zone is weighed in the same
+  step, so a base alarm behind it is still answered. An answer to a BASE
+  under attack is exempt and may dig into the reserve.
 
 Until phase 6, and on old saves, the free script QRF (`qrf.sqs`) runs as
 today.
@@ -2629,7 +2730,7 @@ WARN. Owners: OF = `OccupierForces`, CA = `CounterAttack`, ZR =
 | `forcesPoolPerTown` ("poolPerTown") | OF | 2 (0..8) | lever: Strength scales it | the K weight in poolStart; read at activation |
 | settlement probe (`kMinBuildings` / `kRadius` / `kMinBuildingRadius`) | ZR | 3 / 300 m / 4 m | constant | a seeded CITY counts in K only on dry land with 3 buildings over 4 m within 300 m; probed once, stored on the zone row (5.1) |
 | `forcesPoolRefillHours` ("refillHours") | OF | 4 (0.5..48 h; tune 0.01..48) | lever: Recovery | exhausted to full, garrisons included: (poolStart + R + G) / h an hour, x the standing factor |
-| `forcesPoolFloor` ("poolFloor") | OF | 0.2 (0..1) | constant (key) | the THIN operations floor |
+| `forcesPoolFloor` ("poolFloor") | OF | 0.2 (0..1) | constant (key) | the THIN operations floor (`CanOperate`: no director operation while THIN under it), and since 2026-10-17 the reserve floor (6.3): a director-bought ground operation (director and push-out retakes of towns and bases, every ladder rung, the massing fallback, an alarm answer to a town) may not take the pool under it x poolStart (9.6 on Abel) by its own debit and waits instead; its plan is chosen on what the pool could pay at max(pool, poolStart) with it kept. Exempt: HQ assaults, wave operations, strikes, alarm answers to bases, the levers. 0 turns both off |
 | band enter / leave | OF | STRONG 66 / 60, THIN 33 / 40, SPENT 0 / 10 % | constant | hysteresis on the strength (5.6), stepped once per frame on what the frame left (`StepBandFrame`; a wave landing and a forced pool at once) |
 | `forcesDirectorInterval` ("directorInterval") | OF | 60 (10..600 s; tune 1..600) | constant (key), a test lever | the tick; tokens accrue on elapsed time, so it adds lag, not cadence |
 | sighting cadence | OF | 5 s (`alertInterval`) | constant | intel sampling |
@@ -2808,6 +2909,7 @@ now wait for the dead too, `BodiesUnseen`, `bcca80e`); the default flip
 | 2026-10-14 (phase 6 accepted deviations, `bcca80e`) | No attack-helicopter escort for an insertion (one airframe per insertion); a live alarm answer adopts its whole squad (no `garrisonMax` cap on the live path); strikes are live only in the bubble, abstract elsewhere; wave strikes buy no air opener; an HQ strike with no report aims at `HqPos`; a base-opener strike cuts only the 2 km ring; the air re-plan's helicopter price bypasses the director ledger; alarm answers take no token and run while DORMANT (otherwise a key-on campaign has no answer before the second town). Open with them: the descriptor lint does not check the `forces*` keys; a slow native answer could contest a later Showcase capture chapter (17). |
 | 2026-10-14 (orchestrator, after `402ece6`) | **The settlement probe returns for K** (5.1). A seeded CITY counts in K and G only when the Auto seed's probe (dry land, 3 house-sized buildings within 300 m, 16) accepts it; authored towns always count. The verdict is probed once and saved on the zone row, so K is stable across sessions. Deviation: a block saved before the probe keeps its saved K (re-sizing a running pool would break the ledger, 5.5); only a save without the block probes on load. Measured: Abel K 14 (unchanged), Sinai K 37 to 26, poolStart 88 to 66. |
 | 2026-10-14 (owner decisions) | **Director lines are dev-only (D12 kept).** The per-action INFO lines of the director, `CounterAttack` and `OccupierAir` log at INFO only under `--dev` or with `forcesLog = 1` (default 0), and at DEBUG otherwise; WARN and ERROR are unchanged (6.6, 16). Journal integration is GearUnclear/CWR#98, form open (17). **Alarm answers are born at their base** and travel at real speed even when the target is beside the player (3.1 step 1 as built; the open item is closed). **The Southeast Compound stays an air-only base** for now; boats wait for the vehicle system (17, parked). |
+| 2026-10-17 (owner decision, round 6, video 7 op 4) | **The reserve floor.** A director-bought ground operation may not take the pool under `forcesPoolFloor` x poolStart by its own debit; it waits whole (no token, rest or re-arm spent, one line per target and plan) and is never downgraded below what its plan required, though the plan's own cheapest qualifying package may go when it fits; its plan is chosen on max(pool, poolStart) with the floor kept. Exempt: HQ assaults, wave operations, strikes (their own band rules, unchanged), alarm answers to bases. Implementer's calls: a helicopter insertion is floored like any retake (it has no band rule of its own; only strikes have one), an alarm answer to an occupier TOWN is floored (a garrison top-up), and the waits are not saved (6.3) |
 
 ## 19. Residual risks the owner accepts
 

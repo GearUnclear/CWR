@@ -97,6 +97,7 @@ void OccupierForces::Clear()
     _massTarget = RString();
     _massTicks = 0;
     _massTokens = 0;
+    _reserveWaits.Clear();
     _controlBand = -1;
     _sightings.Clear();
     _ops.Clear();
@@ -1088,6 +1089,7 @@ void OccupierForces::ForgetZone(const char* zone)
         _massTarget = RString();
         _massTicks = 0;
     }
+    ClearReserveWait(zone);
     for (int i = _cooldowns.Size() - 1; i >= 0; i--)
     {
         if (zone && stricmp(_cooldowns[i].zone, zone) == 0)
@@ -1898,7 +1900,7 @@ int OccupierForces::PushoutTarget(const ZoneRegistry& registry, const DirectorVi
 }
 
 DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
-                                       int fixedSource, int fixedSpare, bool best) const
+                                       int fixedSource, int fixedSpare, bool best, int poolCap) const
 {
     DirectorAction a;
     a.origin = origin;
@@ -1942,7 +1944,11 @@ DirectorAction OccupierForces::PlanFor(const ZoneRegistry& registry, const Direc
     req.urgent = a.urgent;
     req.urgentCostShare = _tuning.urgentCostShare;
     req.tierFactor = view.tierFactor;
-    req.pool = _pool;
+    // the reserve floor (6.3, 2026-10-17): a floored plan is chosen on what
+    // the pool can pay at full with the floor kept, not on the pool as it
+    // stands, so it never shrinks to fit a low pool (TryLaunch waits instead)
+    const bool floored = fixedSource < 0 && ReserveBindsKind(a.kind, origin, false, _tuning.poolFloor);
+    req.pool = poolCap >= 0 ? poolCap : (floored ? ReserveBudget() : _pool);
     req.poolActive = Active();
     req.offered = OfferedPackages;
     req.roadFactor = ForcePackages::RoadFactor(); // the road quote (6.5): a ground leg with no road route known
@@ -2201,7 +2207,16 @@ int OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view, 
         DirectorAction a = PlanFor(registry, *v, target, origin);
         // massing (6.3): under strength, a director candidate holds its token
         const RString mass = origin == CAODirector ? MassingReason(a) : RString();
-        if (mass.GetLength() > 0)
+        // the massing fallback already waits for the reserve (6.3): it is
+        // re-planned as it was, without holding another three ticks
+        const int waiting = FindReserveWait(name);
+        bool best = false;
+        if (mass.GetLength() > 0 && waiting >= 0 && _reserveWaits[waiting].best)
+        {
+            a = PlanFor(registry, *v, target, origin, -1, 0, true);
+            best = true;
+        }
+        else if (mass.GetLength() > 0)
         {
             if (stricmp(_massTarget, name) != 0)
             {
@@ -2223,6 +2238,7 @@ int OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view, 
             _massTarget = RString();
             _massTicks = 0;
             a = PlanFor(registry, *v, target, origin, -1, 0, true);
+            best = true;
         }
         else if (stricmp(_massTarget, name) == 0)
         {
@@ -2243,6 +2259,20 @@ int OccupierForces::TryLaunch(ZoneRegistry& registry, const DirectorView& view, 
                 _logSuppressed = 0;
             }
             return LOFailed;
+        }
+        // THE RESERVE FLOOR (6.3, owner 2026-10-17): the launch's own debit
+        // may not take the pool under forcesPoolFloor x poolStart.  The plan's
+        // own cheapest qualifying package may go in its place; nothing
+        // smaller does.  A wait spends no token, rest or re-arm.
+        if (ReserveBinds(registry, a) && !KeepsReserve(a.choice.quote.poolPrice))
+        {
+            const DirectorAction capped = a.choice.shortOfLethality
+                                              ? DirectorAction()
+                                              : PlanFor(registry, *v, target, origin, -1, 0, best, ReserveRoom());
+            if (!AcceptReservePlan(registry, a, capped, best))
+            {
+                return LOReserve;
+            }
         }
         bool refused = false;
         if (LaunchAction(registry, *v, launcher, a, true, false, 0, &refused))
@@ -2408,8 +2438,13 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     {
         RemoveName(_redPaid, z->name);
         RemoveName(_rearm, z->name);
+        ClearReserveWait(z->name);
     }
     PruneOps();
+    if (a.reserveNote.GetLength() > 0)
+    {
+        GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] the reserve floor: {}", opId, (const char*)a.reserveNote);
+    }
 
     // the 2026-10-15 rules, one line each when they changed the operation
     if (a.minUsed > 0 && a.minUsed < a.minAsked)
@@ -2635,6 +2670,10 @@ void OccupierForces::Direct(ZoneRegistry& registry, const DirectorView& view, Di
         if (outcome == LOMassing)
         {
             return; // the token is kept: massing, nothing else goes this tick
+        }
+        if (outcome == LOReserve)
+        {
+            continue; // the plan waits for the reserve (6.3): no strike in its place
         }
         // no ground package could go: an urgent town with fighters may still
         // be struck from the air on its own (it takes the token)
@@ -3918,7 +3957,7 @@ int OccupierForces::ApplyStrikeEffects(ZoneRegistry& registry, int zone, Vector3
 }
 
 int OccupierForces::AlarmTarget(const ZoneRegistry& registry, const DirectorView& view,
-                                const DirectorLauncher& launcher) const
+                                const DirectorLauncher& launcher, const AutoArray<int>* skip) const
 {
     const RString resistance = registry.ResistanceSide();
     int best = -1;
@@ -3934,6 +3973,15 @@ int OccupierForces::AlarmTarget(const ZoneRegistry& registry, const DirectorView
         {
             continue;
         }
+        bool skipped = false;
+        for (int k = 0; skip && k < skip->Size() && !skipped; k++)
+        {
+            skipped = (*skip)[k] == i;
+        }
+        if (skipped)
+        {
+            continue;
+        }
         const int f = KnownFighters(registry, i);
         if (f > bestFighters)
         {
@@ -3944,7 +3992,8 @@ int OccupierForces::AlarmTarget(const ZoneRegistry& registry, const DirectorView
     return best;
 }
 
-DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone) const
+DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone,
+                                         int poolCap) const
 {
     DirectorAction a;
     a.kind = CAKAlarm;
@@ -3970,7 +4019,10 @@ DirectorAction OccupierForces::PlanAlarm(const ZoneRegistry& registry, const Dir
     req.urgent = a.urgent;
     req.urgentCostShare = _tuning.urgentCostShare;
     req.tierFactor = view.tierFactor;
-    req.pool = _pool;
+    // the reserve floor (6.3): an answer to a town is floored, to a base not
+    const bool floored =
+        ReserveBindsKind(CAKAlarm, CAOAlarm, CampaignEnd::IsMilitaryType(z->type), _tuning.poolFloor);
+    req.pool = poolCap >= 0 ? poolCap : (floored ? ReserveBudget() : _pool);
     req.poolActive = Active();
     req.offered = OfferedPackages;
     req.roadFactor = ForcePackages::RoadFactor(); // the road quote (6.5): a ground leg with no road route known
@@ -4036,25 +4088,49 @@ void OccupierForces::AnswerAlarms(ZoneRegistry& registry, const DirectorView& vi
     {
         return; // one alarm answer at a time (8.2)
     }
-    const int zone = AlarmTarget(registry, view, launcher);
-    if (zone < 0)
-    {
-        return;
-    }
-    const ZoneRecord* z = registry.GetZone(zone);
+    // a town alarm whose answer waits for the reserve floor (6.3) is passed
+    // over this step, so a base alarm behind it is still answered
+    AutoArray<int> waiting;
+    int zone = -1;
+    const ZoneRecord* z = nullptr;
     DirectorAction a;
     const char* why = nullptr;
-    if (_band == OFBandSpent)
+    for (int tries = 0; tries <= MaxSourceRetries; tries++)
     {
-        why = "the pool is spent";
-    }
-    else
-    {
+        zone = AlarmTarget(registry, view, launcher, &waiting);
+        if (zone < 0)
+        {
+            return;
+        }
+        z = registry.GetZone(zone);
+        why = nullptr;
+        if (_band == OFBandSpent)
+        {
+            why = "the pool is spent";
+            break;
+        }
         a = PlanAlarm(registry, view, zone);
         if (!a.go)
         {
             why = a.choice.why.GetLength() > 0 ? (const char*)a.choice.why : "no package";
+            break;
         }
+        if (!ReserveBinds(registry, a) || KeepsReserve(a.choice.quote.poolPrice))
+        {
+            break;
+        }
+        const DirectorAction capped =
+            a.choice.shortOfLethality ? DirectorAction() : PlanAlarm(registry, view, zone, ReserveRoom());
+        if (AcceptReservePlan(registry, a, capped, false))
+        {
+            break;
+        }
+        waiting.Add(zone); // no answer and no rest: it is weighed again next step
+        zone = -1;
+    }
+    if (zone < 0)
+    {
+        return;
     }
     if (why)
     {
@@ -4123,7 +4199,8 @@ bool OccupierForces::ForceAlarm(ZoneRegistry& registry, const DirectorView& view
     {
         return false;
     }
-    const DirectorAction a = PlanAlarm(registry, view, zone);
+    // the test lever keeps the old affordability (the pool can pay), no reserve floor
+    const DirectorAction a = PlanAlarm(registry, view, zone, _pool);
     if (!a.go)
     {
         GM_DIRECTOR_INFO(Core, "OccupierForces: forced alarm answer refused: {}", (const char*)a.choice.why);

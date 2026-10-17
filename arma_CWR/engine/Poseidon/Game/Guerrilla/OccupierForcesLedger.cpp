@@ -401,6 +401,188 @@ bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why
 }
 
 // ---------------------------------------------------------------------------
+// THE RESERVE FLOOR (OCCUPIER-FORCES.md 6.3, owner decision 2026-10-17).
+// Video 7 op 4: one APC and T72 column (the pool paid 28) took a pool of 32
+// to 4, under forcesPoolFloor x poolStart (9.6 on Abel), and the occupier
+// could answer nothing for most of an hour.  A commander keeps a reserve:
+// a director-bought ground operation may not take the pool below the floor
+// by its own debit.  It waits instead, and is never sent smaller than its
+// plan required.
+// ---------------------------------------------------------------------------
+
+int OccupierForces::ReserveRoomOf(int pool, int poolStart, float floor)
+{
+    for (int p = pool; p > 0; p--)
+    {
+        const int left = pool - p;
+        // the shares at the tuning's precision, as CanOperateIn compares them
+        const bool below =
+            poolStart > 0 ? (float)left / (float)poolStart < floor : (float)left < floor * (float)poolStart;
+        if (!below)
+        {
+            return p;
+        }
+    }
+    return 0;
+}
+
+bool OccupierForces::ReserveBindsKind(int kind, int origin, bool baseTarget, float floor)
+{
+    if (!(floor > 0.0f) || origin == CAOWave || origin == CAOLegacy)
+    {
+        return false; // the rule off, a wave's operations (paid from the wave), the legacy dispatch
+    }
+    switch (kind)
+    {
+        case CAKRetake:
+        case CAKBase:
+            return origin == CAODirector || origin == CAOPushout;
+        case CAKAlarm:
+            return !baseTarget; // an answer to a base under attack may dig into the reserve
+        default:
+            return false; // HQ assaults, strikes (their own band rules), reinforce columns
+    }
+}
+
+bool OccupierForces::ReserveBinds(const ZoneRegistry& registry, const DirectorAction& a) const
+{
+    if (!Active())
+    {
+        return false;
+    }
+    const ZoneRecord* z = registry.GetZone(a.kind == CAKAlarm && a.alarmZone >= 0 ? a.alarmZone : a.target);
+    return ReserveBindsKind(a.kind, a.origin, z && CampaignEnd::IsMilitaryType(z->type), _tuning.poolFloor);
+}
+
+int OccupierForces::FindReserveWait(const char* zone) const
+{
+    for (int i = 0; zone && i < _reserveWaits.Size(); i++)
+    {
+        if (stricmp(_reserveWaits[i].zone, zone) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void OccupierForces::ClearReserveWait(const char* zone)
+{
+    const int i = FindReserveWait(zone);
+    if (i >= 0)
+    {
+        _reserveWaits.Delete(i);
+    }
+}
+
+namespace
+{
+// "APC (6, BMP) with T72", "FOOT (4)"
+RString ReservePlanWords(const PackageQuote& q)
+{
+    char buf[160];
+    char escort[80] = "";
+    if (q.HasEscort() && q.escortClass.GetLength() > 0)
+    {
+        snprintf(escort, sizeof(escort), " with %s", (const char*)q.escortClass);
+    }
+    if (q.hullClass.GetLength() > 0 && q.package != FPFoot)
+    {
+        snprintf(buf, sizeof(buf), "%s (%d, %s)%s", ForcePackages::PackageName(q.package), q.bodies,
+                 (const char*)q.hullClass, escort);
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "%s (%d)%s", ForcePackages::PackageName(q.package), q.bodies, escort);
+    }
+    return RString(buf);
+}
+} // namespace
+
+void OccupierForces::NoteReserveWait(const ZoneRegistry& registry, const DirectorAction& a, bool best)
+{
+    const ZoneRecord* z = registry.GetZone(a.kind == CAKAlarm && a.alarmZone >= 0 ? a.alarmZone : a.target);
+    if (!z)
+    {
+        return;
+    }
+    const PackageQuote& q = a.choice.quote;
+    const char* qualifier = a.kind == CAKAlarm             ? ""
+                            : a.escalation >= 1            ? "escalation "
+                            : HasName(_rearm, z->name)     ? "re-arm "
+                            : a.origin == CAOPushout       ? "push-out "
+                                                           : "";
+    const char* kind = a.kind == CAKAlarm ? "alarm answer" : (a.kind == CAKBase ? "base retake" : "retake");
+    char what[96];
+    snprintf(what, sizeof(what), "%s%s%s", qualifier, kind, best ? " after massing" : "");
+    const RString plan = ReservePlanWords(q);
+    const int i = FindReserveWait(z->name);
+    if (i >= 0 && _reserveWaits[i].price == q.poolPrice && _reserveWaits[i].package == q.package &&
+        _reserveWaits[i].best == best && stricmp(_reserveWaits[i].plan, plan) == 0 &&
+        stricmp(_reserveWaits[i].what, what) == 0)
+    {
+        return; // the same plan waits for the same reason: logged already
+    }
+    char left[64];
+    if (q.poolPrice <= _pool)
+    {
+        snprintf(left, sizeof(left), "the launch would leave %d", _pool - q.poolPrice);
+    }
+    else
+    {
+        snprintf(left, sizeof(left), "the pool is %d short of the price", q.poolPrice - _pool);
+    }
+    char line[512];
+    snprintf(line, sizeof(line),
+             "OccupierForces: %s: %s (%s, the pool pays %d, lethality %.2f of %.2f%s) waits, the pool keeps its "
+             "reserve (pool %d of %d, floor %.1f: %s)",
+             (const char*)z->name, what, (const char*)plan, q.poolPrice, (double)q.lethality,
+             (double)a.choice.lReq, a.choice.shortOfLethality ? ", the most lethal package" : "", _pool, _poolStart,
+             (double)ReserveFloorUnits(), left);
+    GM_DIRECTOR_INFO(Core, "{}", line);
+    ReserveWaitRow row;
+    row.zone = z->name;
+    row.plan = plan;
+    row.what = what;
+    row.line = line;
+    row.package = q.package;
+    row.price = q.poolPrice;
+    row.pool = _pool;
+    row.best = best;
+    if (i >= 0)
+    {
+        _reserveWaits[i] = row;
+    }
+    else
+    {
+        _reserveWaits.Add(row);
+    }
+}
+
+bool OccupierForces::AcceptReservePlan(const ZoneRegistry& registry, DirectorAction& a, const DirectorAction& capped,
+                                       bool best)
+{
+    const PackageQuote& c = capped.choice.quote;
+    if (capped.go && !capped.choice.shortOfLethality && KeepsReserve(c.poolPrice))
+    {
+        // the plan's own cheapest package that still meets it fits: it goes
+        const PackageQuote& q = a.choice.quote;
+        char note[320];
+        snprintf(note, sizeof(note),
+                 "%s (the pool pays %d) would leave the pool under its reserve (pool %d of %d, floor %.1f); %s, "
+                 "which meets the plan, goes (the pool pays %d)",
+                 (const char*)ReservePlanWords(q), q.poolPrice, _pool, _poolStart, (double)ReserveFloorUnits(),
+                 (const char*)ReservePlanWords(c), c.poolPrice);
+        DirectorAction keep = capped;
+        keep.reserveNote = note;
+        a = keep;
+        return true;
+    }
+    NoteReserveWait(registry, a, best);
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // the ceiling (5.5): banking, the wave surge, stored spare hulls
 // ---------------------------------------------------------------------------
 

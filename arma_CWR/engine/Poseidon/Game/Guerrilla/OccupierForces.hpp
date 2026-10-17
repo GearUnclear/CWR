@@ -97,6 +97,22 @@
 // short and the band leaves SPENT once, when the pool passes 10 %.
 // CanOperate() is false in SPENT and in THIN below forcesPoolFloor.
 //
+// THE RESERVE FLOOR (6.3, owner decision 2026-10-17, video 7 op 4: one
+// APC and T72 column took a pool of 32 to 4).  A director-bought ground
+// operation (a director or push-out retake of a town or base, every rung of
+// the repel ladder, the massing fallback, an alarm answer to a TOWN) may
+// not take the pool below forcesPoolFloor x poolStart by its own debit
+// (KeepsReserve).  Its plan is chosen on ReserveBudget(), the most the pool
+// can pay at max(pool, poolStart) with the floor kept, so the plan does not
+// shrink with the pool.  A plan that does not fit WAITS (TryLaunch
+// LOReserve): never a smaller package below what the plan required, but
+// the plan's own cheapest package that still meets the lethality and the
+// rung (PlanFor on ReserveRoom()) may go in its place.  No token, cooldown
+// or re-arm is spent on a wait; one INFO line per target and plan
+// (NoteReserveWait).  Exempt: HQ assaults, wave operations (CAOWave),
+// strikes (PlanStrike's band rules), alarm answers to bases, the test
+// levers.  forcesPoolFloor 0 turns the rule off.
+//
 // CONTROL (7.1).  C = forcesControlMilWeight * M + (1 - weight) * T: M the
 // share of the roster's garrisonMax the occupier still owns, T the share of
 // the K towns still administered.  Computed each director tick.
@@ -560,6 +576,9 @@ struct DirectorAction
     int bestSpare = 0;
     bool approachBlocked = false;
     RString approach;
+    // the reserve floor (6.3, 2026-10-17): the plan that would have crossed
+    // the floor, when its own cheaper qualifying package went instead
+    RString reserveNote;
 };
 
 // The first-tick roster and town census (5.1)
@@ -941,6 +960,42 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the escalation strike's line names it
     int PoolBandAfter(int price) const { return StepBand(BandNow(), _pool - price, _poolStart); }
     bool CanOperate() const { return CanOperateIn(_band, BandStrength(), _poolStart, _tuning.poolFloor); }
+    // THE RESERVE FLOOR (6.3, 2026-10-17).  The largest price in 0..pool
+    // that leaves (pool - price) / poolStart at or above floor (compared as
+    // shares, like CanOperateIn); 0 when even that is under the floor (a
+    // launch the pool pays nothing for never debits it below)
+    static int ReserveRoomOf(int pool, int poolStart, float floor);
+    // the rule applies to an operation of kind and origin (baseTarget: the
+    // target is a military zone, which exempts an alarm answer)
+    static bool ReserveBindsKind(int kind, int origin, bool baseTarget, float floor);
+    bool ReserveBinds(const ZoneRegistry& registry, const DirectorAction& a) const;
+    int ReserveRoom() const { return ReserveRoomOf(_pool, _poolStart, _tuning.poolFloor); }
+    // what a floored plan is chosen on: ReserveRoomOf(max(pool, poolStart))
+    int ReserveBudget() const
+    {
+        return ReserveRoomOf(_pool > _poolStart ? _pool : _poolStart, _poolStart, _tuning.poolFloor);
+    }
+    bool KeepsReserve(int price) const { return price <= 0 || price <= ReserveRoom(); }
+    float ReserveFloorUnits() const { return _tuning.poolFloor * (float)_poolStart; }
+    // one waiting target (transient, re-logged after a load): the plan that
+    // waits, its line, and whether it is the massing fallback (best)
+    struct ReserveWaitRow
+    {
+        RString zone;
+        RString plan; // the package words, e.g. "APC (6, BMP) with T72"
+        RString what; // the operation words, e.g. "escalation retake"
+        RString line; // the INFO line as written
+        int package = FPFoot;
+        int price = 0;
+        int pool = 0; // the pool when the line was written
+        bool best = false;
+    };
+    int ReserveWaitRows() const { return _reserveWaits.Size(); }
+    const ReserveWaitRow* ReserveWait(int i) const
+    {
+        return i >= 0 && i < _reserveWaits.Size() ? &_reserveWaits[i] : nullptr;
+    }
+    int FindReserveWait(const char* zone) const;
     // THE BAND'S INPUT (5.6, 2026-10-16): the strength the band is stepped
     // on, BandStrengthOf(pool, poolStart, CommittedAir(), LossDebt())
     int BandStrength() const { return BandStrengthOf(_pool, _poolStart, CommittedAir(), LossDebt()); }
@@ -1054,8 +1109,11 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // single-base spare (never below the kind's own minimum), and the
     // approach rule takes any different approach that can go at all (else
     // the plain choice), so the strongest package one base can bring goes.
+    // poolCap >= 0: the pool the chooser may spend (the reserve floor's
+    // second look, ReserveRoom()); -1: ReserveBudget() for a plan the
+    // reserve floor binds (ReserveBindsKind), else the pool.
     DirectorAction PlanFor(const ZoneRegistry& registry, const DirectorView& view, int target, int origin,
-                           int fixedSource = -1, int fixedSpare = 0, bool best = false) const;
+                           int fixedSource = -1, int fixedSpare = 0, bool best = false, int poolCap = -1) const;
     // why a director plan holds its token and masses (6.3, 2026-10-16), ""
     // when it may go.  Only a plan the repel ladder shaped (escalation >= 1):
     // the escalated infantry above every base's spare, the second rung
@@ -1113,9 +1171,14 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the alarm to answer now (8.2): a zone the resistance does not hold,
     // RED, not on cooldown, no record on it; the most reported fighters
     // first, then the zone order; -1 none
-    int AlarmTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher) const;
-    // the alarm answer's package and source (no side effects)
-    DirectorAction PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone) const;
+    // skip (optional): zones passed over this step (a town alarm waiting on
+    // the reserve floor), so the next alarm may be answered
+    int AlarmTarget(const ZoneRegistry& registry, const DirectorView& view, const DirectorLauncher& launcher,
+                    const AutoArray<int>* skip = nullptr) const;
+    // the alarm answer's package and source (no side effects); poolCap as
+    // PlanFor's (an answer to a town is floored, one to a base is not)
+    DirectorAction PlanAlarm(const ZoneRegistry& registry, const DirectorView& view, int zone,
+                             int poolCap = -1) const;
     // an alarm answer of the director's is still in flight (its record
     // lives); rows whose record is gone are closed here
     bool AlarmInFlight(const ZoneRegistry& registry, const DirectorLauncher& launcher);
@@ -1356,11 +1419,22 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     {
         LOFailed,
         LOLaunched,
-        LOMassing
+        LOMassing,
+        LOReserve // the plan waits for the reserve floor (no token, no rest)
     };
 
     void LoadFromConfig();
     int FindRepel(const char* zone) const;
+    // THE RESERVE FLOOR (6.3): `a` is a plan the floor binds that does not
+    // keep the reserve, `capped` the same plan re-made on ReserveRoom() (an
+    // empty action when `a` itself is short of lethality).  True when capped
+    // still meets the plan (go, not short of lethality, keeps the reserve):
+    // it replaces `a`, with reserveNote set.  False: the plan waits, its INFO
+    // line written once per target and plan.  best: the massing fallback
+    bool AcceptReservePlan(const ZoneRegistry& registry, DirectorAction& a, const DirectorAction& capped, bool best);
+    // the wait's line and row (logged when the plan or the reason changed)
+    void NoteReserveWait(const ZoneRegistry& registry, const DirectorAction& a, bool best);
+    void ClearReserveWait(const char* zone);
     // a director operation on zone was repelled: the ladder's next rung, its
     // INFO line, and at containRepels the containment and its surge
     void NoteRepel(ZoneRegistry& registry, int zone, int package, int source);
@@ -1482,6 +1556,8 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     RString _massTarget;
     int _massTicks = 0;
     int _massTokens = 0;
+    // the reserve floor's waiting targets (6.3, transient)
+    AutoArray<ReserveWaitRow> _reserveWaits;
     // transient: the control band (WavesCrossed) of the last Tick, -1 none;
     // a change lifts every containment
     int _controlBand = -1;

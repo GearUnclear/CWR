@@ -60,6 +60,16 @@
 //                                  candidate the director is massing for
 //                                  ("" none; "@HQ" the HQ) and the director
 //                                  ticks it has held its token.
+//   gmOccupierReserve           -> [floorUnits, room, budget, [[zone, what,
+//                                  plan, package, price, pool, best, line]
+//                                  ...]]: the reserve floor (6.3,
+//                                  2026-10-17): forcesPoolFloor x poolStart,
+//                                  the most a floored launch may cost now
+//                                  (the pool kept at the floor), what a
+//                                  floored plan is chosen on (the same at
+//                                  max(pool, poolStart)), and the targets
+//                                  whose plan waits for it (the pool when
+//                                  its line was written, the line itself).
 //   gmLegacyQrf                 -> true while qrf.sqs fields its script QRF
 //                                  (D20): the key off, the service sized
 //                                  off, or a legacy save (a block older than
@@ -386,6 +396,37 @@ static GameValue GmOccupierMassing(const GameState* state)
     row[0] = GameStringType(of.MassingTarget());
     row[1] = (float)of.MassingTicks();
     row[2] = (float)of.Tuning().massingMax;
+    return value;
+}
+
+static GameValue GmOccupierReserve(const GameState* state)
+{
+    const OccupierForces& of = OccupierForces::Instance();
+    GameValue value = state->CreateGameValue(GameArray);
+    GameArrayType& out = value;
+    out.Resize(4);
+    out[0] = of.ReserveFloorUnits();
+    out[1] = (float)of.ReserveRoom();
+    out[2] = (float)of.ReserveBudget();
+    GameValue rowsValue = state->CreateGameValue(GameArray);
+    GameArrayType& rows = rowsValue;
+    for (int i = 0; i < of.ReserveWaitRows(); i++)
+    {
+        const OccupierForces::ReserveWaitRow* w = of.ReserveWait(i);
+        GameValue rowValue = state->CreateGameValue(GameArray);
+        GameArrayType& row = rowValue;
+        row.Resize(8);
+        row[0] = GameStringType(w->zone);
+        row[1] = GameStringType(w->what);
+        row[2] = GameStringType(w->plan);
+        row[3] = GameStringType(ForcePackages::PackageName(w->package));
+        row[4] = (float)w->price;
+        row[5] = (float)w->pool;
+        row[6] = GameValue(w->best);
+        row[7] = GameStringType(w->line);
+        rows.Add(rowValue);
+    }
+    out[3] = rowsValue;
     return value;
 }
 
@@ -859,6 +900,7 @@ INIT_MODULE(GuerrillaOccupierForces, 3)
     GGameState.NewNularOp(GameNular(GameBool, "gmLegacyQrf", GmLegacyQrf));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierRepels", GmOccupierRepels));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierMassing", GmOccupierMassing));
+    GGameState.NewNularOp(GameNular(GameArray, "gmOccupierReserve", GmOccupierReserve));
     GGameState.NewNularOp(GameNular(GameArray, "gmOccupierLedger", GmOccupierLedger));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesTune", GmForcesTune, GameArray));
     GGameState.NewFunction(GameFunction(GameBool, "gmForcesForce", GmForcesForce, GameArray));
