@@ -30,9 +30,11 @@ triSimUntil { time > orT0 + 6 }
 {deleteVehicle _x} forEach ((units group player) - [player])
 player allowDammage false
 
-// the pool sampler: the largest pool - poolStart seen so far
+// the pool sampler: the largest pool - ceiling seen so far (poolStart, or the
+// staged 60 once o1 sets it)
+orCeil = 0
 orOver = -999
-orSample = {orF = gmOccupierForces; if (((orF select 0) - (orF select 1)) > orOver) then {orOver = (orF select 0) - (orF select 1)}}
+orSample = {orF = gmOccupierForces; orRef = orF select 1; if (orCeil > orRef) then {orRef = orCeil}; if (((orF select 0) - orRef) > orOver) then {orOver = (orF select 0) - orRef}}
 
 // ---- o1: a real camera; the pool STRONG; the levers -------------------------
 orP = gmTrafficPercept (getPos player)
@@ -47,6 +49,11 @@ triAssertEq [(format ["%1", gmCounterAttackTune ["firstTownChance", 0]]), "true"
 triAssertEq [(format ["%1", gmCounterAttackTune ["speed", 100]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["slowEta", 0]]), "true"]
 triAssertEq [(format ["%1", gmForcesTune ["airEta", 0]]), "true"]
+// since the generated bases (d5fa57b) Abel's poolStart is 48, and the keep-STRONG
+// rule (3c9947b, 1ae2dc9) cannot afford a ground buy plus an opener on it; the
+// opener this test pins is staged on a pool of 60 (SetPool raises the ceiling)
+triAssertEq [(format ["%1", gmForcesForce ["pool", 60]]), "true"]
+orCeil = 60
 orRes = gmResistanceSide call GM_fnSideFromString
 orOcc = gmOccupierSide call GM_fnSideFromString
 call orSample
