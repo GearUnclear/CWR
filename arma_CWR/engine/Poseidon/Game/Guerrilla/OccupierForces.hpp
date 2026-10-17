@@ -78,9 +78,21 @@
 // own overshoot, the units the ledger rows still hold and the refund
 // itself; wave strength lost in the field takes its headroom with it.
 //
+// THE LEDGER OF 2026-10-16 (OccupierForcesLedger.cpp; decisions 5, 6, 9).
+// While a landed wave is on (SurgeOpen) the excess over the ceiling is a
+// SURGE above garrisonMax at the bases nearest the wave's cluster that
+// decays back over surgeDecayHours (rejoining the pool up to the ceiling,
+// the rest stood down), before any bank or drop.  With forcesBankHulls 0 a
+// hull refund over the ceiling (RefundHull) is a STORED SPARE HULL at its
+// base, back in the pool when it has room; only bodies bank.
+//
 // BANDS (5.6).  Shares of poolStart with hysteresis: STRONG enter > 66 %,
 // leave < 60 %; THIN enter < 33 %, leave > 40 %; SPENT enter at 0, leave
-// > 10 %; STRETCHED between.  The band is re-stepped on every pool change.
+// > 10 %; STRETCHED between.  Since 2026-10-16 the band is stepped on
+// BandStrength(), min(pool + CommittedAir(), max(poolStart, pool) -
+// LossDebt()): an airframe out is committed, not spent, and the losses of
+// the last lossWindowHours the refill has not repaid count against it.
+// The band is re-stepped on every pool, ledger-row or loss change.
 // D2 keeps drawing in SPENT; the pool then sits near 0 while garrisons are
 // short and the band leaves SPENT once, when the pool passes 10 %.
 // CanOperate() is false in SPENT and in THIN below forcesPoolFloor.
@@ -441,6 +453,18 @@ struct OccupierForcesTuning
     int massingMax = 3;             // forcesMassingMax ("massingMax", 0..20): director ticks a hold lasts
     float restJitter = 0.2f;        // "restJitter", 0..0.5: the rest's hashed share, +- (0 = clockwork)
     float adjacentTown = 1000.0f;   // "adjacentTown", 0..5000 m: a town this near an occupier base weighs 2
+    // the ledger and the band (5.5, 5.6, 7.1; 2026-10-16, decisions 5, 6, 9).
+    // forcesBankHulls (0/1, default 0; gmForcesTune "bankHulls"): 0 = a hull
+    // refund over the ceiling comes back as a STORED SPARE HULL (THE CEILING
+    // above) and only bodies bank as garrison; 1 = hull units bank as bodies
+    // (the df9457e rule)
+    bool bankHulls = false;
+    // constants with a gmForcesTune lever of the same name, no config key:
+    // the wave surge's decay back to garrisonMax (h), a base's surge cap above
+    // its garrisonMax (share of garrisonMax), the band's loss window (h)
+    float surgeDecayHours = 1.0f; // "surgeDecayHours", 0.001..24
+    float surgeShare = 0.5f;      // "surgeShare", 0..2
+    float lossWindowHours = 1.0f; // "lossWindowHours", 0.01..24
 };
 
 // One resistance unit an occupier group reports (the 6.1 scan)
@@ -606,6 +630,12 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     static constexpr int ValueAdjacentTown = 2;
     static constexpr int ValueFarTown = 1;
     static constexpr int ValueHq = 2;
+    // the ledger (5.5, 2026-10-16): spare hulls one base stores, loss rows
+    // kept for the band's window (older ones merge), and the gap (s) within
+    // which two losses share a row
+    static constexpr int StoredHullsPerBase = 2;
+    static constexpr int MaxLossRows = 64;
+    static constexpr float LossMergeSeconds = 60.0f;
 
     // lifecycle ---------------------------------------------------------------
     void Clear();
@@ -728,6 +758,10 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // one director tick: the refill, control and the band.  No-op while not
     // Active().
     void Tick(const ZoneRegistry& registry, float elapsed);
+    // the same with the registry the ledger may write (the wave surge's
+    // decay takes bodies out of a base's reserve): the engine path and the
+    // unit tests with a mutable registry
+    void Tick(ZoneRegistry& registry, float elapsed);
     // control over the stored roster and towns
     float ComputeControl(const ZoneRegistry& registry) const;
 
@@ -807,6 +841,45 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // refunded units the ceiling banked as garrison this session (5.5;
     // diagnostics, not saved: the bodies are saved on the zone rows)
     int Banked() const { return _banked; }
+    // a hull's refund (CAOpHullRefund, 5.5, decision 9): as Refund, but with
+    // forcesBankHulls 0 the units over the ceiling come back as a stored
+    // spare hull (StoreHull), never as bodies.  package and what name it
+    // ("APC", "escort of TRUCK"); home: the base it returns to (-1 unknown);
+    // near: where it is.  Returns the units the pool took
+    int RefundHull(ZoneRegistry& registry, int units, int package, const char* what, int home,
+                   const Vector3* near = nullptr);
+    // stored spare hulls (saved): pool units in hull form at an occupier
+    // base, back in the pool as soon as the pool has room under the ceiling
+    // (each Tick, before the refill); lost with their base
+    int StoredHullRows() const { return _storedHulls.Size(); }
+    RString StoredHullZone(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].zone : RString(); }
+    RString StoredHullWhat(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].what : RString(); }
+    int StoredHullPackage(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].package : FPFoot; }
+    int StoredHullUnits(int i) const { return i >= 0 && i < _storedHulls.Size() ? _storedHulls[i].units : 0; }
+    int StoredHullTotal() const;
+    // a zone that can store a spare hull: an occupier-held military base,
+    // not a minor post (CampaignEnd::IsMinorPostType), with fewer than
+    // StoredHullsPerBase hulls stored
+    bool CanStoreHull(const ZoneRegistry& registry, int zone) const;
+    // THE WAVE SURGE (7.1, decision 5): while a landed wave is on
+    // (SurgeOpen), what the ceiling keeps out of the pool is a surge at the
+    // bases nearest the wave's cluster, above garrisonMax (up to surgeShare
+    // x garrisonMax over it), that decays back to garrisonMax over
+    // surgeDecayHours: the decayed bodies rejoin the pool up to the ceiling,
+    // the rest stand down (StoodDown(), saved, a term of 5.5 beside dropped)
+    bool SurgeOpen() const;
+    int SurgeRows() const { return _surge.Size(); }
+    RString SurgeRowZone(int i) const { return i >= 0 && i < _surge.Size() ? _surge[i].zone : RString(); }
+    int SurgeRowBodies(int i) const { return i >= 0 && i < _surge.Size() ? _surge[i].bodies : 0; }
+    int SurgeTotal() const;
+    int StoodDown() const { return _stoodDown; }
+    float SurgeWindowLeft() const { return _surgeWindow; }
+    // the wave's cluster centre the surge gathers around (VZero: none known)
+    Vector3 SurgeAnchor() const { return _surgeAnchor; }
+    void SetSurgeAnchor(Vector3Par pos) { _surgeAnchor = pos; }
+    // the room a surge may take at zone: an occupier-held military zone's
+    // garrisonMax x (1 + surgeShare) - live - reserve - pending, floored, >= 0
+    int SurgeRoom(const ZoneRegistry& registry, int zone, int live) const;
     // S5 (3.3): a pending deposit whose zone changed owner is refunded to
     // this service's pool (GarrisonCache::SetPendingRefundHook).  The hook
     // credits the pool and claims the bodies only while Active(); otherwise
@@ -829,8 +902,24 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     int Band() const { return _band; }
     // the band on the pool as it stands: Band(), or inside a BandHold the
     // band the pending movement would step to (not yet logged or stored)
-    int BandNow() const { return _bandHold > 0 ? StepBand(_band, _pool, _poolStart) : _band; }
-    bool CanOperate() const { return CanOperateIn(_band, _pool, _poolStart, _tuning.poolFloor); }
+    int BandNow() const { return _bandHold > 0 ? StepBand(_band, BandStrength(), _poolStart) : _band; }
+    bool CanOperate() const { return CanOperateIn(_band, BandStrength(), _poolStart, _tuning.poolFloor); }
+    // THE BAND'S INPUT (5.6, 2026-10-16): the strength the band is stepped
+    // on, BandStrengthOf(pool, poolStart, CommittedAir(), LossDebt())
+    int BandStrength() const { return BandStrengthOf(_pool, _poolStart, CommittedAir(), LossDebt()); }
+    // min(pool + committed, max(poolStart, pool) - debt), never below 0:
+    // airframes out count as strength (decision 6), unrepaid losses of the
+    // window do not (feel item 10); a wave's overshoot is strength on top
+    static int BandStrengthOf(int pool, int poolStart, int committed, int debt);
+    // the pool units the ledger rows of airframes still hold (a transport
+    // helicopter, an attack helicopter or a jet, from the launch debit to the
+    // airframe's home or loss event): committed, not spent
+    int CommittedAir() const;
+    // the loss window (lossWindowHours): units booked lost (NoteLoss) in it,
+    // the part the refill repaid since, and the rest (the debt)
+    int LossesInWindow() const;
+    int RepaidInWindow() const;
+    int LossDebt() const { return LossesInWindow() - RepaidInWindow(); }
     // the born-operation cap now (OpsMaxFor the current band); CounterAttack::
     // OpsCap reads it while the service is active
     int OpsMax() const { return OpsMaxFor(_tuning, _band); }
@@ -1171,6 +1260,9 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         // since the crew ledger); false = a row from an older save, which
         // kept its crew for good: reconciled once on load
         bool crewLedger = true;
+        // the occupier AIRFIELD an airframe flew from (-1 off-map or ground):
+        // where its hull is stored over the ceiling (RefundHull)
+        int airOrigin = -1;
         LSError Serialize(ParamArchive& ar);
     };
     // the repel ladder of one zone (6.3, 2026-10-16)
@@ -1181,6 +1273,35 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
         int package = FPFoot;   // the last repelled package
         RString source;         // the base its infantry came from ("" unknown)
         bool contained = false; // the director stops spending on it
+        LSError Serialize(ParamArchive& ar);
+    };
+    // a stored spare hull (5.5, decision 9)
+    struct StoredHullRow
+    {
+        RString zone;
+        int package = FPFoot;
+        RString what;
+        int units = 0;
+        LSError Serialize(ParamArchive& ar);
+    };
+    // one base's wave surge (7.1, decision 5): the bodies above garrisonMax
+    // it still holds, the bodies at its last credit (the decay leaves at
+    // peak / surgeDecayHours per hour) and the fraction due
+    struct SurgeRow
+    {
+        RString zone;
+        int bodies = 0;
+        int peak = 0;
+        float accum = 0;
+        LSError Serialize(ParamArchive& ar);
+    };
+    // losses booked within the band's window (5.6): when, how many, and how
+    // many the refill has repaid since
+    struct LossRow
+    {
+        float stamp = 0;
+        int units = 0;
+        int repaid = 0;
         LSError Serialize(ParamArchive& ar);
     };
     // TryLaunch's outcome: launched, holding the token (massing), or not
@@ -1205,6 +1326,23 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // the excess over the ceiling into the bases with room (THE CEILING):
     // returns the units banked, the rest is the caller's to drop
     int BankExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near);
+    // the ceiling's credit (shared by RefundInto and RefundHull): the wave
+    // headroom shrinks to what can still come back, then min(units, room)
+    // enters the pool; returns it
+    int CreditUnderCeiling(int units);
+    // the excess over the ceiling into the wave surge (SurgeOpen): returns
+    // the units surged, the rest is the caller's
+    int SurgeExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near);
+    // a hull's excess into a stored spare hull: returns the units stored
+    int StoreHull(const ZoneRegistry& registry, int units, int package, const char* what, int home,
+                  const Vector3* near);
+    // the ledger's own step (each Tick, before the refill): the loss window
+    // ages, stored hulls rejoin the pool or are lost with their base, and,
+    // with a writable registry, the wave surge decays
+    void StepLedger(const ZoneRegistry& registry, ZoneRegistry* writable, float elapsed);
+    void TickCore(const ZoneRegistry& registry, ZoneRegistry* writable, float elapsed);
+    // the refill repays the window's losses, oldest first
+    void RepayLosses(int units);
     // re-step the band after a pool change; logs a change.  Deferred while a
     // BandHold is open
     void UpdateBand();
@@ -1319,6 +1457,15 @@ class OccupierForces : public SerializeClass, public CounterAttackListener
     // registry Refund banks into (BindRegistry; null = BankRegistry's rule)
     int _banked = 0;
     ZoneRegistry* _bankRegistry = nullptr;
+    // the hull flag's spare hulls, the wave surge (rows, the bodies stood
+    // down, the window it stays open, its anchor) and the loss window; all
+    // saved (2026-10-16)
+    AutoArray<StoredHullRow> _storedHulls;
+    AutoArray<SurgeRow> _surge;
+    int _stoodDown = 0;
+    float _surgeWindow = 0;
+    Vector3 _surgeAnchor = VZero;
+    AutoArray<LossRow> _losses;
     // transient: how the last Refund split (the pool, banked and where,
     // dropped), so the HQ assault's settled line can say it (6.6)
     struct RefundTally

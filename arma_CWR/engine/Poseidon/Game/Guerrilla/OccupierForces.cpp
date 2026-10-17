@@ -133,6 +133,12 @@ void OccupierForces::Clear()
     _dropped = 0;
     _banked = 0;
     _bankRegistry = nullptr;
+    _storedHulls.Clear();
+    _surge.Clear();
+    _stoodDown = 0;
+    _surgeWindow = 0;
+    _surgeAnchor = VZero;
+    _losses.Clear();
     _refillTotal = 0;
     _wavesTotal = 0;
     _legacySave = false;
@@ -309,6 +315,9 @@ void OccupierForces::LoadFromParams(const ParamEntry* zonesCfg)
     t.waveSurge = RoundToInt(ReadRanged(c, "forcesWaveSurge", (float)t.waveSurge, 0.0f, 48.0f));
     t.waveHub = c.ReadValue("forcesWaveHub", RString());
     t.log = RoundToInt(ReadRanged(c, "forcesLog", t.log ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
+    // 2026-10-16 (decision 9): hull refunds over the ceiling bank as bodies
+    // (1) or come back as a stored spare hull (0, the default)
+    t.bankHulls = RoundToInt(ReadRanged(c, "forcesBankHulls", t.bankHulls ? 1.0f : 0.0f, 0.0f, 1.0f)) != 0;
 
     // forcesTokenInterval[]: one entry per band; a short array keeps the
     // defaults of the bands it leaves out
@@ -746,6 +755,12 @@ bool OccupierForces::Activate(const ZoneRegistry& registry, const AutoArray<bool
     _lost = 0;
     _waveHeadroom = 0;
     _dropped = 0;
+    _storedHulls.Clear();
+    _surge.Clear();
+    _stoodDown = 0;
+    _surgeWindow = 0;
+    _surgeAnchor = VZero;
+    _losses.Clear();
     _legacySave = false;
     _active = true;
     _control = ComputeControl(registry);
@@ -830,386 +845,6 @@ float OccupierForces::ComputeControl(const ZoneRegistry& registry) const
         }
     }
     return ControlOf(heldMax, totalMax, townsAdmin, townsTotal, _tuning.controlMilWeight);
-}
-
-void OccupierForces::UpdateBand()
-{
-    if (_bandHold > 0)
-    {
-        _bandDirty = true; // stepped once when the last hold closes
-        return;
-    }
-    const int next = StepBand(_band, _pool, _poolStart);
-    if (next != _band)
-    {
-        GM_DIRECTOR_INFO(Core, "OccupierForces: band {} -> {} (pool {} of {})", BandName(_band), BandName(next), _pool,
-                 _poolStart);
-        _band = next;
-    }
-}
-
-void OccupierForces::ReleaseBand()
-{
-    if (_bandHold <= 0)
-    {
-        return;
-    }
-    _bandHold--;
-    if (_bandHold == 0 && _bandDirty)
-    {
-        _bandDirty = false;
-        // the whole movement at once: one band step on the net pool
-        if (Active())
-        {
-            UpdateBand();
-        }
-    }
-}
-
-bool OccupierForces::LogAllowed()
-{
-    if (_logClock >= LogQuiet)
-    {
-        _logClock = 0;
-        return true;
-    }
-    _logSuppressed++;
-    return false;
-}
-
-void OccupierForces::Refill(float elapsed)
-{
-    if (_pool >= _poolStart || elapsed <= 0)
-    {
-        _refillAccum = 0; // the refill fills up to poolStart, never above
-        return;
-    }
-    const float perHour = RefillPerHour(_poolStart, _R, _G, _tuning.refillHours, _meanStanding);
-    if (perHour <= 0)
-    {
-        return;
-    }
-    _refillAccum += perHour * elapsed / 3600.0f;
-    const int whole = (int)floorf(_refillAccum);
-    if (whole <= 0)
-    {
-        return;
-    }
-    _refillAccum -= (float)whole;
-    const int credit = MinInt(whole, _poolStart - _pool);
-    _pool += credit;
-    _refillTotal += credit;
-    if (_pool >= _poolStart)
-    {
-        _refillAccum = 0;
-    }
-    UpdateBand();
-}
-
-void OccupierForces::Tick(const ZoneRegistry& registry, float elapsed)
-{
-    if (!Active())
-    {
-        return;
-    }
-    _logClock += elapsed;
-    _clock += elapsed;
-    Refill(elapsed);
-    _control = ComputeControl(registry);
-    // control crossing a wave threshold (either way) lifts every containment
-    const int controlBand = WavesCrossed(_tuning, _control);
-    if (_controlBand >= 0 && controlBand != _controlBand)
-    {
-        char why[80];
-        snprintf(why, sizeof(why), "control %.2f crossed a wave threshold (band %d -> %d)", (double)_control,
-                 _controlBand, controlBand);
-        LiftContainment(why);
-    }
-    _controlBand = controlBand;
-    // the final stand's trigger reads this (StepWaves); a surge on a base
-    // the occupier lost is gone with it
-    _basesHeld = RosterBasesHeld(registry);
-    if (_surgeBodies > 0)
-    {
-        const ZoneRecord* s = registry.GetZone(registry.FindZoneIndex(_surgeZone));
-        if (!s || stricmp(s->owner, registry.OccupierSide()) != 0)
-        {
-            _surgeBodies = 0;
-            _surgeZone = RString();
-        }
-    }
-    UpdateBand();
-}
-
-int OccupierForces::Draw(int bodies)
-{
-    if (bodies <= 0)
-    {
-        return 0;
-    }
-    if (!Active())
-    {
-        return bodies; // legacy D2: regrowth from nothing
-    }
-    const int granted = MinInt(bodies, _pool);
-    if (granted > 0)
-    {
-        _pool -= granted;
-        UpdateBand();
-    }
-    return granted;
-}
-
-int OccupierForces::Deposit(int bodies, const char* why)
-{
-    if (bodies <= 0)
-    {
-        return 0;
-    }
-    if (!Active())
-    {
-        return bodies;
-    }
-    if (_band == OFBandSpent)
-    {
-        if (LogAllowed())
-        {
-            GM_DIRECTOR_INFO(Core, "OccupierForces: SPENT, no deposit of {} ({}){}", bodies, why ? why : "",
-                     _logSuppressed > 0 ? " (other lines suppressed)" : "");
-            _logSuppressed = 0;
-        }
-        return 0;
-    }
-    const int granted = MinInt(bodies, _pool);
-    if (granted > 0)
-    {
-        _pool -= granted;
-        LOG_DEBUG(Core, "OccupierForces: deposit {} of {} ({}), pool {}", granted, bodies, why ? why : "", _pool);
-        UpdateBand();
-    }
-    return granted;
-}
-
-bool OccupierForces::Spend(int units, const char* why)
-{
-    if (!Active() || units <= 0)
-    {
-        return true;
-    }
-    if (units > _pool || !CanOperate())
-    {
-        if (LogAllowed())
-        {
-            GM_DIRECTOR_INFO(Core, "OccupierForces: refused {} unit(s) for {} (pool {} of {}, band {}){}", units,
-                     why ? why : "", _pool, _poolStart, BandName(_band),
-                     _logSuppressed > 0 ? " (other lines suppressed)" : "");
-            _logSuppressed = 0;
-        }
-        return false;
-    }
-    _pool -= units;
-    LOG_DEBUG(Core, "OccupierForces: spent {} for {}, pool {}", units, why ? why : "", _pool);
-    UpdateBand();
-    return true;
-}
-
-bool OccupierForces::SpendOnOp(int opId, int units, int package, const char* why, bool& booked)
-{
-    booked = false;
-    if (!Spend(units, why))
-    {
-        return false;
-    }
-    const int row = FindOp(opId);
-    // only a row whose events reach this ledger: a unit test's listener
-    // would leave the units outstanding for good
-    if (!Active() || units <= 0 || row < 0 || CounterAttack::Listener() != this)
-    {
-        return true;
-    }
-    _ops[row].outstanding += units;
-    _ops[row].package = package;
-    booked = true;
-    GM_DIRECTOR_INFO(Core, "OccupierForces: [op {}] {}: {} unit(s) on the ledger row ({} outstanding)", opId,
-             why ? why : "", units, _ops[row].outstanding);
-    return true;
-}
-
-ZoneRegistry* OccupierForces::BankRegistry() const
-{
-    if (_bankRegistry)
-    {
-        return _bankRegistry;
-    }
-    return this == &Instance() ? &ZoneRegistry::Instance() : nullptr;
-}
-
-int OccupierForces::BankRoom(const ZoneRegistry& registry, int zone, int live)
-{
-    const ZoneRecord* z = registry.GetZone(zone);
-    if (!z || !CampaignEnd::IsMilitaryType(z->type) || stricmp(z->owner, registry.OccupierSide()) != 0)
-    {
-        return 0;
-    }
-    // whole bodies (U3); the pending deposit counts against the room, as
-    // every room in 5.5 does
-    const float room = z->garrisonMax - (float)live - floorf(z->garrison > 0 ? z->garrison : 0) - (float)z->pending;
-    return room > 0 ? (int)floorf(room) : 0;
-}
-
-int OccupierForces::BankExcess(ZoneRegistry& registry, int units, const char* why, int sourceZone,
-                               const Vector3* near)
-{
-    const int n = registry.NZones();
-    if (units <= 0 || n <= 0)
-    {
-        return 0;
-    }
-    // the live garrisons are the engine cache's, indexed on the engine-wide
-    // registry; a unit test's registry has none
-    const bool engineLive = &registry == &ZoneRegistry::Instance();
-    AutoArray<int> room;
-    room.Resize(n);
-    for (int i = 0; i < n; i++)
-    {
-        room[i] = BankRoom(registry, i, engineLive ? GarrisonCache::Instance().LiveCount(i) : 0);
-    }
-    // the reference position: the caller's, else the source base's own
-    const ZoneRecord* src = registry.GetZone(sourceZone);
-    const bool hasPos = near != nullptr || src != nullptr;
-    const Vector3 at = near ? *near : (src ? src->pos : VZero);
-    int left = units;
-    while (left > 0)
-    {
-        // the source base first, else the nearest base with room, else the
-        // one with the most room (ties: the zone order)
-        const bool fromSource = sourceZone >= 0 && sourceZone < n && room[sourceZone] > 0;
-        int pick = fromSource ? sourceZone : -1;
-        float bestD2 = 0;
-        for (int i = 0; i < n && !fromSource; i++)
-        {
-            if (room[i] <= 0)
-            {
-                continue;
-            }
-            const ZoneRecord* z = registry.GetZone(i);
-            const float dx = z->pos.X() - at.X();
-            const float dz = z->pos.Z() - at.Z();
-            const float d2 = dx * dx + dz * dz;
-            const bool better = pick < 0 || (hasPos ? d2 < bestD2 : room[i] > room[pick]);
-            if (better)
-            {
-                pick = i;
-                bestD2 = d2;
-            }
-        }
-        if (pick < 0)
-        {
-            break; // every occupier base at garrisonMax
-        }
-        const int take = MinInt(left, room[pick]);
-        // pending, never straight into the reserve: the bodies join it once
-        // the player is away or every spawn point is hidden (S5, 3.3)
-        GarrisonCache::Deposit(registry, pick, take, src ? sourceZone : pick);
-        room[pick] = 0;
-        left -= take;
-        _banked += take;
-        const ZoneRecord* b = registry.GetZone(pick);
-        _lastRefund.bankedAt = _lastRefund.bankedAt.GetLength() > 0
-                                   ? RString(_lastRefund.bankedAt + RString(", ") + b->name)
-                                   : RString(b->name);
-        GM_DIRECTOR_INFO(Core,
-                         "OccupierForces: ledger: {} unit(s) over poolStart banked at {} ({}; pool {} of {}; reserve {}, "
-                         "pending {}, of {})",
-                         take, (const char*)b->name, why ? why : "", _pool, _poolStart, b->garrison, b->pending,
-                         b->garrisonMax);
-    }
-    return units - left;
-}
-
-int OccupierForces::Refund(int units, const char* why, int sourceZone, const Vector3* near)
-{
-    return RefundInto(BankRegistry(), units, why, sourceZone, near);
-}
-
-int OccupierForces::Refund(ZoneRegistry& registry, int units, const char* why, int sourceZone, const Vector3* near)
-{
-    return RefundInto(&registry, units, why, sourceZone, near);
-}
-
-int OccupierForces::RefundInto(ZoneRegistry* registry, int units, const char* why, int sourceZone,
-                               const Vector3* near)
-{
-    if (!Active() || units <= 0)
-    {
-        return 0;
-    }
-    _lastRefund = RefundTally();
-    _lastRefund.valid = true;
-    _lastRefund.why = why ? why : "";
-    _lastRefund.units = units;
-    // the ceiling (5.5): nothing but a wave lifts the pool above poolStart.
-    // The wave headroom never exceeds the strength that can still come back
-    // as wave strength: the pool's own overshoot, what the ledger rows still
-    // hold and this refund (strength lost in the field shrinks it).  A refund
-    // over the ceiling is cut there; the excess is banked as garrison at the
-    // occupier bases with room (the owner, 2026-10-16), and only what none
-    // can take is dropped, booked beside the losses so the equation holds
-    if (_waveHeadroom > 0)
-    {
-        int held = MaxInt(_pool - _poolStart, 0) + units;
-        for (int i = 0; i < _ops.Size(); i++)
-        {
-            held += MaxInt(_ops[i].outstanding, 0);
-        }
-        _waveHeadroom = MinInt(_waveHeadroom, held);
-    }
-    const int room = MaxInt(PoolCeiling() - _pool, 0);
-    const int credit = MinInt(units, room);
-    const int excess = units - credit;
-    _pool += credit;
-    const int banked = excess > 0 && registry ? BankExcess(*registry, excess, why, sourceZone, near) : 0;
-    const int dropped = excess - banked;
-    _lastRefund.pooled = credit;
-    _lastRefund.banked = banked;
-    _lastRefund.dropped = dropped;
-    if (dropped > 0)
-    {
-        _dropped += dropped;
-        GM_DIRECTOR_INFO(Core,
-                         "OccupierForces: ledger: {} unit(s) over poolStart dropped ({}; {}; pool {} of {})", dropped,
-                         why ? why : "", registry ? "every occupier base at garrisonMax" : "no registry to bank into",
-                         _pool, _poolStart);
-    }
-    LOG_DEBUG(Core, "OccupierForces: refund {} of {} ({}), pool {}", credit, units, why ? why : "", _pool);
-    UpdateBand();
-    return credit;
-}
-
-void OccupierForces::NoteLoss(int units, const char* why)
-{
-    if (!Active() || units <= 0)
-    {
-        return;
-    }
-    _lost += units;
-    LOG_DEBUG(Core, "OccupierForces: lost {} ({}), {} in all", units, why ? why : "", _lost);
-}
-
-void OccupierForces::LandWave(int bodies)
-{
-    if (!Active() || bodies <= 0)
-    {
-        return;
-    }
-    _pool += bodies;
-    _wavesTotal += bodies;
-    _wavesLanded++;
-    // what the wave put above poolStart may come back there after it is spent
-    _waveHeadroom = MaxInt(_waveHeadroom, _pool - _poolStart);
-    GM_DIRECTOR_INFO(Core, "OccupierForces: wave of {} landed, pool {} of {}, {} wave(s) landed", bodies, _pool, _poolStart,
-             _wavesLanded);
-    UpdateBand();
 }
 
 bool OccupierForces::TownEver(const char* name) const
@@ -1917,7 +1552,18 @@ void OccupierForces::NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev)
             break;
         case CAOpHullRefund:
             r.outstanding -= units;
-            Refund(units, "test lever hull home intact", ev.source);
+            if (ZoneRegistry* bank = BankRegistry())
+            {
+                // the hull flag (decision 9) applies to a lever's hull too
+                char what[48];
+                snprintf(what, sizeof(what), "%s%s", ev.note && strncmp(ev.note, "escort", 6) == 0 ? "escort of " : "",
+                         ForcePackages::PackageName(r.package));
+                RefundHull(*bank, units, r.package, what, ev.source);
+            }
+            else
+            {
+                Refund(units, "test lever hull home intact", ev.source);
+            }
             break;
         case CAOpHullLost:
             r.outstanding -= units;
@@ -1949,6 +1595,8 @@ void OccupierForces::NoteLeverOpEvent(int row, const CounterAttackOpEvent& ev)
         r.finished = true;
     }
     PruneOps();
+    // the lever's airframe home or lost moves the band's strength too
+    UpdateBand();
 }
 
 bool OccupierForces::IsHeldTown(const ZoneRegistry& registry, const ZoneRecord& z)
@@ -2823,6 +2471,7 @@ bool OccupierForces::LaunchAction(ZoneRegistry& registry, const DirectorView& vi
     row.origin = a.origin;
     row.package = q.package;
     row.outstanding = q.poolPrice;
+    row.airOrigin = a.airOrigin;
     _ops.Add(row);
     _opCounter = opId;
     if (!launcher.Launch(order))
@@ -3386,6 +3035,13 @@ int OccupierForces::AllocateWave(ZoneRegistry& registry, const DirectorView& vie
     };
     // 1. the hub top-up
     const int hub = PickHub(registry, _tuning, &view.garrisonLive);
+    // the wave's surge gathers at the bases nearest its cluster (decision 5)
+    {
+        const int anchor =
+            BestCluster(registry, _tuning.waveCluster, view.hqZone, view.hqEstablished ? view.hqPos : VZero);
+        const ZoneRecord* az = registry.GetZone(anchor >= 0 ? anchor : hub);
+        _surgeAnchor = az ? az->pos : VZero;
+    }
     if (hub >= 0 && budget > 0)
     {
         const int want = MinInt(shortfall(hub), budget);
@@ -3923,6 +3579,7 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 // package): the ledger row follows, so gmOccupierOps and the
                 // row agree.  The notes are CounterAttack::LaunchCore's and
                 // AirGoLive's (an insertion with no LZ or no airframe).
+                const int hullPackage = _ops[row].package; // before a downgrade rewrites it
                 if (!_ops[row].born && ev.note &&
                     (strncmp(ev.note, "no stored spare", 15) == 0 ||
                      strncmp(ev.note, "insertion impossible", 20) == 0))
@@ -3931,7 +3588,19 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
                 }
                 const int units = MinInt(ev.units > 0 ? ev.units : 0, _ops[row].outstanding);
                 _ops[row].outstanding -= units;
-                Refund(registry, units, "hull home intact", ev.source);
+                // the hull flag (decision 9): over the ceiling a hull comes
+                // back as a stored spare at its base (an airframe at the
+                // airfield it flew from), never as bodies, unless
+                // forcesBankHulls is 1
+                const bool escort = ev.note && strncmp(ev.note, "escort", 6) == 0;
+                char what[48];
+                snprintf(what, sizeof(what), "%s%s", escort ? "escort of " : "",
+                         ForcePackages::PackageName(hullPackage));
+                const bool airframe = hullPackage == FPTransportHeli || hullPackage == FPAttackHeli ||
+                                      hullPackage == FPJet;
+                const int home = airframe && _ops[row].airOrigin >= 0 ? _ops[row].airOrigin : ev.source;
+                const ZoneRecord* tz = registry.GetZone(ev.target);
+                RefundHull(registry, units, hullPackage, what, home, home < 0 && tz ? &tz->pos : nullptr);
             }
             break;
         case CAOpHullLost:
@@ -3995,6 +3664,9 @@ void OccupierForces::NoteOpEvent(ZoneRegistry& registry, const CounterAttackOpEv
         _ops[row].finished = true;
     }
     PruneOps();
+    // a ledger row's airframe home or lost moves the band's strength
+    // (CommittedAir, 5.6) even when the pool did not move
+    UpdateBand();
 }
 
 // ---------------------------------------------------------------------------
@@ -4841,6 +4513,9 @@ LSError OccupierForces::OpRow::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("lever", lever, 1, false))
     // absent in a save before the crew ledger: false, reconciled on load
     PARAM_CHECK(ar.Serialize("crewLedger", crewLedger, 1, false))
+    // absent before 2026-10-16: no airfield known (the hull is stored at the
+    // operation's source)
+    PARAM_CHECK(ar.Serialize("airOrigin", airOrigin, 1, -1))
     return LSOK;
 }
 
@@ -4937,6 +4612,21 @@ LSError OccupierForces::Serialize(ParamArchive& ar)
     int headroom = _waveHeadroom;
     PARAM_CHECK(ar.Serialize("waveHeadroom", headroom, 1, -1))
     PARAM_CHECK(ar.Serialize("dropped", _dropped, 1, 0))
+    // the ledger of 2026-10-16 (absent in older blocks: none): stored spare
+    // hulls, the wave surge, the units stood down, the loss window
+    PARAM_CHECK(ar.Serialize("StoredHulls", _storedHulls, 1))
+    PARAM_CHECK(ar.Serialize("Surge", _surge, 1))
+    PARAM_CHECK(ar.Serialize("stoodDown", _stoodDown, 1, 0))
+    PARAM_CHECK(ar.Serialize("surgeWindow", _surgeWindow, 1, 0.0f))
+    float anchorX = _surgeAnchor.X();
+    float anchorZ = _surgeAnchor.Z();
+    PARAM_CHECK(ar.Serialize("surgeAnchorX", anchorX, 1, 0.0f))
+    PARAM_CHECK(ar.Serialize("surgeAnchorZ", anchorZ, 1, 0.0f))
+    if (ar.IsLoading())
+    {
+        _surgeAnchor = Vector3(anchorX, 0, anchorZ);
+    }
+    PARAM_CHECK(ar.Serialize("Losses", _losses, 1))
     if (ar.IsLoading())
     {
         _waveHeadroom = headroom >= 0 ? headroom : MaxInt(_pool - _poolStart, 0);

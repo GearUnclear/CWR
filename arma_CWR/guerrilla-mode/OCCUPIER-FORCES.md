@@ -639,6 +639,14 @@ still owns empty) is FULL again (pool at poolStart, every garrison at
   `0.75 + 0.5 * meanStanding / 100`. At the default standing of 50 that is
   exactly 1, so the figures above hold. A heavily bombed theatre rebuilds
   more slowly.
+- **The refill repays losses** (2026-10-16, 5.6). Every unit the refill
+  credits to the pool repays the oldest unrepaid loss of the band's loss
+  window first. This is what the band reads: a loss counts against the
+  band until the refill has replaced it or it leaves the window.
+- **Stored spare hulls come back first** (2026-10-16, 5.5). Each tick,
+  before the refill, a stored spare hull rejoins the pool as far as the
+  pool has room under the ceiling, and the wave surge's decay (7.1)
+  returns its bodies, so the refill only fills what is still missing.
 
 ### 5.3 Spending
 
@@ -648,6 +656,10 @@ still owns empty) is FULL again (pool at poolStart, every garrison at
 | Town or base refill on revert | `SettleRevert`, through `Deposit` (5.4) |
 | Operations | The package price at launch. Infantry sourced from a base's spare is paid by that base (D2 refills it); hulls and crews are paid by the pool. |
 | Alarm answers | As operations (8.2) |
+
+An airframe's price leaves the pool at launch like any hull, but the band
+counts it as committed until the airframe is home or lost (5.6). The pool's
+own arithmetic, and so what the next operation can afford, is unchanged.
 
 ### 5.4 Who retakes what, and who garrisons it
 
@@ -693,7 +705,7 @@ erodes until the player or his fighters come back (section 19).
 | Leftover stragglers (3.2) | home as bodies up to the room; a shortfall booked "left behind" |
 | Pending deposit, owner changed | key on: the pool (`GarrisonCache::SetPendingRefundHook`); key off: back to the origin up to its room, else discarded |
 | HQ_ASSAULT on `hqLost` | an abstract record's bodies to the pool; a live squad leaves unseen and comes home. The settled line says where they went (2026-10-16, video 4, which logged "@HQ retaken: 6 stay as its garrison" after refunding them): "[op N] HQ assault done: 1 back to the pool, 5 banked at Airfield" (the ceiling below; ", D dropped (every base full)" when no base had room), or "nobody of the assault left standing"; never the retake line |
-| Surviving hull | price refunded when deleted at home unseen; each hull of a column apart |
+| Surviving hull | price refunded when deleted at home unseen; each hull of a column apart. Over the ceiling, with `forcesBankHulls` 0 (the default, decision 9), the excess is a STORED SPARE HULL (below), never garrison bodies |
 | Destroyed hull | lost |
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
 
@@ -718,9 +730,36 @@ landed above poolStart (the comparison video: 51 of 50 after a jet opener,
   beside him, and the director can spend them again from the reserve. One
   INFO line per base, `ledger: N unit(s) over poolStart banked at <base>`;
   `Banked()` counts them for the session (the bodies are saved on the zone
-  rows, so nothing new is saved). Hull refunds bank like bodies: a pool
-  unit is a body when D2 draws it into a garrison, so a hull home to a full
-  pool becomes the garrison the pool would have bought with it.
+  rows, so nothing new is saved). Only bodies bank (survivors, crews,
+  assault bodies): a hull home over the ceiling is stored (the next item)
+  unless `forcesBankHulls` is 1, which restores the df9457e rule that
+  banked a hull's units as bodies.
+- **Stored spare hulls** (decision 9, 2026-10-16; video 5's "22 banked", an
+  APC home to a full pool that became 22 bodies of garrison). With
+  `forcesBankHulls` 0 the hull units a `CAOpHullRefund` brings over the
+  ceiling (`RefundHull`) are kept as one spare hull row at the base the
+  hull returns to: an airframe's airfield (`airOrigin`), else the
+  operation's source. When that base is not an occupier-held military base
+  or already stores `StoredHullsPerBase` (2) spares, the nearest occupier
+  base with a garage (a military base that is not a minor post) takes it.
+  One INFO line `ledger: APC over poolStart stored as a spare hull at
+  <base> (N unit(s); ...)`. Each tick, before the refill, a spare rejoins
+  the pool as far as the pool has room under the ceiling (`the spare APC
+  stored at <base> rejoins the pool`), whole or in part. A spare at a base
+  the occupier loses is lost with it (booked in `lost`, so it reads in the
+  band's loss window). Only when no base can store one are the hull units
+  dropped (`ledger: N hull unit(s) over poolStart dropped (APC: no occupier
+  base can store a spare hull; ...)`). The rows are saved
+  (`StoredHulls`); `gmOccupierLedger` lists them. Hull refunds that
+  `CounterAttack` credits straight to the pool (the air re-plan's direct
+  settlement) still go through `Refund` and bank as bodies until their call
+  sites pass the hull.
+- **The wave surge** (decision 5, 2026-10-16; 7.1). While a landed wave is
+  on, what the ceiling keeps out of the pool is a surge above
+  `garrisonMax` at the bases nearest the wave's cluster, not a bank or a
+  drop: video 5's 9 dropped and 1 banked become 0 dropped. 7.1 has the
+  rule; the decayed bodies that the pool cannot take stand down
+  (`stoodDown`, saved).
 - **Dropped, only when every base is full.** Only what no occupier base has
   room for is dropped, with one INFO line `ledger: N unit(s) over poolStart
   dropped (...; every occupier base at garrisonMax; ...)` per refund and
@@ -745,24 +784,73 @@ landed above poolStart (the comparison video: 51 of 50 after a jet opener,
 
 **The equation.** With nothing live:
 
-`pool + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped`
+`pool + stored hulls + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped - stood down`
 
 `dropped` is the units the ceiling dropped (`Dropped()`), only when no base
-had room; `losses` (the `lost` field) stays the bodies killed. The banked
-excess needs no term of its own: it moves from op strength into `pending`
-(and later `reserves`), so the equation balances unchanged. The unit tests
-assert it, banked and dropped.
+had room (and, for a hull, no base could store it); `losses` (the `lost`
+field) stays the bodies killed, the hulls destroyed and the spares lost
+with their base; `stood down` is the decayed surge the pool had no room
+for (`StoodDown()`). The banked excess and the surge need no term of their
+own: they move from op strength into `pending` (and later `reserves`).
+Stored spare hulls are pool units in hull form, so they sit beside the
+pool. The unit tests assert it, banked, surged, stored, dropped and stood
+down.
 
 ### 5.6 Bands with hysteresis (D8, D15)
 
 | Band | Enter | Leave | Effect |
 |---|---|---|---|
-| STRONG | pool > 66 % | pool < 60 % | One token per 30 min; base operations (D16) and push-out on towns AND bases allowed |
-| STRETCHED | between | | One token per 45 min |
-| THIN | pool < 33 % | pool > 40 % | One token per 60 min; no operation below 20 %; alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`) |
-| SPENT | pool = 0 | pool > 10 % | No tokens; reverts left hollow; no alarm answers. D2 KEEPS RUNNING on the refill: garrisons first, as D15 says. The pool stays near 0 while garrisons are short, and the band leaves SPENT once, when the pool passes 10 % (measured: moments before the last short posts are full, because the per-zone D2 cap binds in the tail), so it does not flap. A pool that genuinely drains to 0 again re-enters SPENT; that is a real drain, not flapping. |
+| STRONG | strength > 66 % | strength < 60 % | One token per 10 min (`forcesTokenInterval[]`, 2026-10-15); base operations (D16) and push-out on towns AND bases allowed |
+| STRETCHED | between | | One token per 17.5 min |
+| THIN | strength < 33 % | strength > 40 % | One token per 30 min; no operation below 20 %; alarm answers only with the cheapest package; garrisons stop chasing YELLOW contacts (`qrf.sqs`) |
+| SPENT | strength = 0 | strength > 10 % | No tokens; reverts left hollow; no alarm answers. D2 KEEPS RUNNING on the refill: garrisons first, as D15 says. The pool stays near 0 while garrisons are short, and the band leaves SPENT once, when the pool passes 10 % (measured: moments before the last short posts are full, because the per-zone D2 cap binds in the tail), so it does not flap. A pool that genuinely drains to 0 again re-enters SPENT; that is a real drain, not flapping. |
 
 All shares are of poolStart.
+
+**The band's input** (2026-10-16: decision 6 and the feel assessment's item
+10; the levers audit found the band STRONG 99 % of video 5 because foot
+losses were repaid by regrowth under the 37 an hour refill, and every dip
+came from an airframe being out). The band is stepped, with the hysteresis
+above, on the STRENGTH
+
+`strength = min(pool + committed, max(poolStart, pool) - (lost - repaid))`
+
+- `committed` (`CommittedAir`): the pool units the ledger rows of the
+  director's (and the test levers') airframes still hold, a transport
+  helicopter, an attack helicopter or a jet, from the launch debit to the
+  airframe's `CAOpHullRefund` or `CAOpHullLost` (its crew until they
+  settle). An airframe out is committed, not spent: video 5's two Mi17s
+  took the pool from 52 to 31 and the band to STRETCHED for 100 s; the
+  strength stays 52 and the band STRONG. A shot-down airframe leaves
+  `committed` and enters `lost`: it demotes as a real loss. A ground hull
+  out is not committed (a column still moves the band while it is out).
+- `lost` and `repaid` (`LossesInWindow`, `RepaidInWindow`): the units booked
+  lost (every `NoteLoss`: bodies killed in operations and garrisons, crews,
+  hulls destroyed, spares lost with their base) in the last
+  `lossWindowHours` (1.0 h, a constant with the gmForcesTune lever
+  "lossWindowHours"), and the part of them the refill has repaid since
+  (5.2: refill credits repay the oldest loss first). What the refill has
+  not replaced counts against the band; a loss older than the window no
+  longer does.
+- `max(poolStart, pool)`: a wave's overshoot is strength on top.
+- The pool arithmetic is unchanged: `Spend` still needs the units in the
+  pool, and a director strike's keep-STRONG rule (7.3) still reads the
+  pool after its price, so strikes stay as rare as before.
+
+**On Malden** (Guerrilla.Abel: poolStart 60 from R 32, K 14, G 56; refill
+37 an hour). STRONG is left when the strength falls under 36, so 25
+unrepaid losses inside an hour demote it; THIN starts under 20, so 41. A
+cell that kills 37 occupiers inside an hour while D2 regrowth repays 12 of
+them (two source bases at 1 body per 600 s) leaves 25 unrepaid: strength
+35 of 60, STRETCHED, while the pool itself reads 58 to 60 (STRONG by its
+own number). The player sees it as the director slowing to one operation
+every 17.5 minutes, no push-outs, no base operations and no strikes until
+the refill has repaid enough to lift the strength over 66 % (40: at most
+20 unrepaid) or the losses leave the hour. Before this rule the same hour
+changed nothing a player could see. `gmOccupierLedger` reports the
+strength, `committed`, `lost` and `repaid`; the band line names them
+(`band STRONG -> STRETCHED (pool 60 of 60; strength 35: 0 committed in the
+air, 37 lost and 12 repaid in the last 1.0 h)`).
 
 ### 5.7 Generated bases
 
@@ -1599,7 +1687,38 @@ resolves to 0) unless it sets `seedBases = 1`.
      director logs "no strikes".
 4. REINFORCE columns on foot from the hub to the most-bled held bases, at
    most 12 bodies each and `forcesWaveOps` columns.
-5. The rest stays in the pool.
+5. The rest stays in the pool (above poolStart: the wave headroom, 5.5).
+
+**The wave surge** (decision 5, 2026-10-16). Video 5: after wave 1 every
+base sat at `garrisonMax`, and the survivors and hulls that came home over
+the ceiling were dropped (9 dropped, 1 banked). Now, while a landed wave
+is on (`SurgeOpen`: the `WaveWindow`, 1800 s from the landing, or any wave
+operation's ledger row still open), what the ceiling keeps out of the
+pool is a SURGE: a pending deposit (S5) above `garrisonMax` at the occupier
+bases nearest the wave's cluster (the anchor: `BestCluster`'s centre at
+the landing, else the hub), each base up to `surgeShare` (0.5, a lever) x
+its `garrisonMax` over it, the nearest first. One INFO line per base,
+`surge: N unit(s) over poolStart at <base>, above its garrisonMax (...)`.
+Nothing is dropped mid-fight; only what no base's surge cap can take falls
+through to the bank rule (5.5), then to the drop. On Abel with every base
+at `garrisonMax` the caps hold 22 bodies in all (Airfield 6, Le Port
+Harbour 4, Outpost, Southeast Compound and the two generated outposts 3
+each) [measured, tri `guerrilla_forces_surge` at the default share: a
+23-unit jet home over the ceiling surged 22 and dropped 1]. Outside a wave the bank
+rule of df9457e stays for every credit. The surge is ordinary reserve: the
+director may spend it, and bodies spent or killed take their share of the
+surge with them.
+- **It decays.** Each base's surge leaves at the bodies it held at its last
+  credit / `surgeDecayHours` per hour (1.0 h, a constant with the
+  gmForcesTune lever "surgeDecayHours", read live), so the base is back at
+  `garrisonMax` about an hour after its last credit. Only stored
+  bodies leave (a live or pending surge waits). The leaving bodies rejoin
+  the pool up to its ceiling; the rest stand down, one INFO line `surge: N
+  unit(s) stood down at <base> (M back in the pool; ...)`, booked in
+  `StoodDown()` (5.5). A surge at a base the occupier loses ends with it.
+- The player sees the bases near the fight visibly thicker after a wave,
+  thinning back over the next hour ("reinforce what it holds").
+- Saved: the rows (`Surge`), the window, the anchor and `stoodDown`.
 
 Wave operations take no command token. Each living wave record raises the
 born-operation cap by one (`CounterAttack::OpsCap`), and a wave order gets

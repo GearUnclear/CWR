@@ -1059,7 +1059,8 @@ fills its garrisons before its pool.
 | Adopted live squad | settled once in `RevertTown`; the cut over the refill to the pool |
 | A flipped base's live garrison | pool (key on); onto nothing else |
 | Partial-spawn failures (garrisons, operations, crews) | pool |
-| Surviving hull | price refunded when deleted at home unseen |
+| Surviving hull | price refunded when deleted at home unseen; over the ceiling a stored spare hull with `forcesBankHulls` 0 (10.3) [code, 2026-10-16] |
+| Airframe out | its price leaves the pool at launch and is COMMITTED for the band (OCCUPIER-FORCES.md 5.6) until its hull is home or lost; a lost airframe is a loss [code, 2026-10-16] |
 | Crew of a hull or airframe | priced as bodies (1 each) on the operation's ledger row, settled as bodies: home up to the room (the surplus to the pool), the dead lost, the living of a lost hull through the Leftover list. Each settle leaves the row by `CAOpCrewSettled`, crediting nothing, so a settled row reads 0 and a row pruned past `MaxOpRows` x 4 refunds only what is not crew still on the way home. A row from a save before this rule drops on load to what `CounterAttack::OwedOnOp` still owes it, crediting nothing (one INFO line) |
 | Destroyed hull, dead bodies | lost (the `lost` diagnostic) |
 | Hull deleted by a return to abstract travel | no refund; re-created on the next birth |
@@ -1070,14 +1071,16 @@ fills its garrisons before its pool.
 | Leftover stragglers | home up to the room; a shortfall booked "left behind" |
 | Pending deposit, zone lost | key on: the pool (the refund hook); key off: back to the origin up to its room, else discarded [code] |
 | HQ_ASSAULT on `hqLost` | an abstract record's bodies to the pool; a live squad leaves unseen and comes home |
-| Landed wave | its bodies into the pool, above poolStart if need be |
+| Landed wave | its bodies into the pool, above poolStart if need be; it opens the wave surge (10.3) for `WaveWindow` (1800 s) and while its operations are out [code, 2026-10-16] |
+| Stored spare hull | back into the pool as far as it has room under the ceiling, each tick before the refill; lost with its base [code, 2026-10-16] |
+| Wave surge decay | back toward `garrisonMax` over `surgeDecayHours` (1 h): into the pool up to the ceiling, the rest stood down [code, 2026-10-16] |
 | Legacy `Fight` win (key off only) | winners lose `min(A_bodies - 1, ceil(A_bodies x holdOdds x repelLoss))`; the rest settle |
 
 ### 10.3 Conservation
 
 With nothing live,
 
-`pool + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped`
+`pool + stored hulls + reserves + pending + op strength = poolStart + R + G + refill + waves - losses - dropped - stood down`
 
 **The ceiling** [code, round 3 C]. Every path in 10.2 that credits the pool
 goes through `OccupierForces::Refund`, capped at poolStart plus the wave
@@ -1093,6 +1096,36 @@ the equation needs no new term. Only what no base has room for is dropped
 (`dropped`, saved) with one INFO line `ledger: N unit(s) over poolStart
 dropped`. Only a landed wave puts the pool above poolStart
 (OCCUPIER-FORCES.md 5.5).
+
+**The ledger of 2026-10-16** [code, decisions 5, 6, 9; unit cases in
+`[occupierforces]`, tri `guerrilla_forces_surge`, `_sortie_band`,
+`_bank_hulls`].
+- *The wave surge.* While a landed wave is on (`WaveWindow` from the
+  landing, or a wave operation still out), the excess over the ceiling is a
+  pending deposit ABOVE `garrisonMax` at the occupier bases nearest the
+  wave's cluster, up to `surgeShare` (0.5) x `garrisonMax` over it, and only
+  what no surge cap takes falls to the bank rule, then the drop. Each base's
+  surge decays back to `garrisonMax` over `surgeDecayHours` (1 h): the
+  bodies rejoin the pool up to the ceiling, the rest stand down (`stood
+  down`, saved; INFO `surge: N unit(s) stood down at <base>`). Outside a
+  wave the bank rule above is unchanged.
+- *The hull flag.* `forcesBankHulls` (0/1, default 0): with 0 only bodies
+  bank; a hull's units over the ceiling become one stored spare hull row at
+  the base it returns to (an airframe's airfield, else the source), else
+  the nearest occupier base with a garage (not a minor post, at most 2
+  spares each), dropped only when no base can store one. Stored spares are
+  pool units in hull form (the `stored hulls` term) and rejoin the pool
+  first when it has room; a spare at a lost base is booked lost. With 1 a
+  hull banks as bodies (the df9457e rule).
+- *The band's input* (OCCUPIER-FORCES.md 5.6). The band is stepped on
+  `min(pool + committed airframes, max(poolStart, pool) - unrepaid losses
+  of the last lossWindowHours)`, not on the pool: an airframe out does not
+  demote it, a shot-down airframe or an hour of losses the refill has not
+  repaid does. The pool arithmetic, affordability (`Spend`) and the
+  keep-STRONG strike rule read the pool as before.
+- Saved in the GuerrillaOccupierForces block (`StoredHulls`, `Surge`,
+  `stoodDown`, `surgeWindow`, `surgeAnchorX`/`Z`, `Losses`, each operation
+  row's `airOrigin`); an older block loads with none.
 
 holds after every path in 10.2. The unit tests (`[occupierforces]`,
 `ConservationCheck`) assert it. U1 to U5 hold with the key on or off.

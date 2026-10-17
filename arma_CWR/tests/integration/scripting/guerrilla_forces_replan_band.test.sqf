@@ -76,6 +76,8 @@ player setPos [4500, 6000, 0]
 triSimUntil { (not (gmGarrisonSpawned rbO)) and (not (gmGarrisonSpawned rbH)) and (not (gmGarrisonSpawned rbA)) }
 gmZoneSet [rbO, "garrison", 2]
 gmZoneSet [rbA, "garrison", 2]
+// the generated bases (811c5c3) would otherwise re-source the truck by road
+{rbGI = gmZoneIndex (_x select 0); if (rbGI >= 0) then {gmZoneSet [rbGI, "garrison", 2]}} forEach gmGeneratedBases
 rbT2 = time
 triSimUntil { time > rbT2 + 2 }
 triAssertEq [((gmZone rbO) select 3), 2]

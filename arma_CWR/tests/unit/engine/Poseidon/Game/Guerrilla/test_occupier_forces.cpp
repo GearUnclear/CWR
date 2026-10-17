@@ -1045,6 +1045,9 @@ TEST_CASE("OccupierForces - the ceiling keeps a landed wave's headroom; lost wav
     f.Load(AbelLikeConfig(), false);
     REQUIRE(f.of.Activate(f.registry));
     const int P = f.of.PoolStart();
+    // the headroom alone: no wave surge to take the excess (surgeShare 0),
+    // so what the ceiling keeps out is banked or dropped as outside a wave
+    f.of.TuningMutable().surgeShare = 0;
     // a wave lifts the pool above poolStart (7.1) and the ceiling with it
     f.of.LandWave(12);
     CHECK(f.of.Pool() == P + 12);
@@ -1105,6 +1108,7 @@ TEST_CASE("OccupierForces - the ceiling survives save/load", "[game][guerrilla][
     f.Load(config, false);
     REQUIRE(f.of.Activate(f.registry));
     const int P = f.of.PoolStart();
+    f.of.TuningMutable().surgeShare = 0; // the headroom alone (no wave surge)
     f.of.LandWave(6);
     REQUIRE(f.of.Spend(6, "op"));
     f.of.Tick(f.registry, 1.0f); // the pool sits at poolStart: no refill, no headroom used
@@ -5865,6 +5869,460 @@ TEST_CASE("OccupierForces - generated bases: in the roster and R, their garrison
     }
     CHECK(loaded.GeneratedStrength() == 8);
     CHECK(loaded.PoolStart() == 44);
+    ExtParsMission.Clear();
+    std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------------------
+// the ledger of 2026-10-16 (decisions 5, 6, 9; the feel assessment's item 10):
+// the wave surge, committed airframes, the loss window, the hull flag
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// stored reserve plus pending over every zone (the 5.5 reserves + pending)
+int HeldOf(Fixture& f)
+{
+    int n = 0;
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        const ZoneRecord* z = f.registry.GetZone(i);
+        n += (int)floorf(z->garrison > 0 ? z->garrison : 0) + z->pending;
+    }
+    return n;
+}
+void FlushAll(Fixture& f)
+{
+    for (int i = 0; i < f.registry.NZones(); i++)
+    {
+        GarrisonCache::FlushPending(f.registry, i, true, 99999.0f, 99999.0f, nullptr);
+    }
+}
+CounterAttackOpEvent LedgerEvent(int opId, int type, int units, int source = -1)
+{
+    CounterAttackOpEvent ev;
+    ev.opId = opId;
+    ev.type = type;
+    ev.kind = CAKRetake;
+    ev.origin = CAODirector;
+    ev.units = units;
+    ev.bodies = type == CAOpCrewSettled ? units : 0;
+    ev.source = source;
+    return ev;
+}
+} // namespace
+
+TEST_CASE("OccupierForces - the wave surge: the excess over the ceiling thickens the bases near the wave's cluster, "
+          "then decays with nothing dropped",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5 (tmp/of-director-video-5): after a wave every base sat at
+    // garrisonMax and the survivors who came home over the ceiling were
+    // dropped (9 dropped, 1 banked).  Decision 5: while the wave is on, the
+    // excess is a surge above garrisonMax at the bases nearest the wave's
+    // cluster, which decays back to garrisonMax over surgeDecayHours: the
+    // bodies rejoin the pool up to the ceiling and the rest stand down
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    REQUIRE(P == 60);
+    REQUIRE(HeldOf(f) == R + G); // every base and town at its garrisonMax
+    int op = 0;
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool(), HeldOf(f), 0, op, P, R, G, f.of.RefillTotal(),
+                                                f.of.WavesTotal(),
+                                                f.of.Lost() + f.of.Dropped() + f.of.StoodDown()));
+    };
+    CHECK_FALSE(f.of.SurgeOpen());
+    f.of.LandWave(10);
+    REQUIRE(f.of.Pool() == P + 10);
+    CHECK(f.of.SurgeOpen());
+    CHECK(f.of.SurgeWindowLeft() == Approx(OccupierForces::WaveWindow));
+    // the wave's cluster is around Base3 (AllocateWave anchors it there)
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    check();
+    // a wave strike of 20 goes out; the refill tops the pool up to poolStart
+    // meanwhile, so the 20 who come home meet a ceiling with room for 10
+    REQUIRE(f.of.Spend(20, "wave strike"));
+    op += 20;
+    f.of.Tick(f.registry, 1000.0f);
+    REQUIRE(f.of.Pool() == P);
+    REQUIRE(f.of.SurgeOpen());
+    check();
+    CoreLines log;
+    CHECK(f.of.Refund(20, "wave survivors home") == 10);
+    op -= 20;
+    CHECK(f.of.Pool() == P + 10);
+    CHECK(f.of.PoolCeiling() == P + 10);
+    // 0 dropped, nothing banked: 10 surge above garrisonMax, nearest the
+    // cluster first, each base up to +50 % (4 over its 8)
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.of.Banked() == 0);
+    CHECK(f.of.SurgeTotal() == 10);
+    CHECK(f.Z("Base3").pending == 4);
+    CHECK(f.Z("Base2").pending == 4);
+    CHECK(f.Z("Base1").pending == 2);
+    CHECK(f.Z("Base0").pending == 0);
+    CHECK(log.With({"surge: 4 unit(s) over poolStart at Base3", "above its garrisonMax"}).size() == 1);
+    CHECK(log.With({"over poolStart dropped"}).empty());
+    check();
+    // the surge joins the reserves once the player is away: bases visibly
+    // thicker after the wave
+    FlushAll(f);
+    CHECK(f.Z("Base3").garrison == Approx(12.0f));
+    check();
+    // it decays back over about an hour; the pool sits at its ceiling, so
+    // every decayed body stands down
+    for (int k = 0; k < 70; k++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        check();
+        CHECK(f.of.Pool() <= f.of.PoolCeiling());
+    }
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.SurgeRows() == 0);
+    CHECK(f.of.StoodDown() == 10);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(f.Z("Base3").garrison == Approx(8.0f));
+    CHECK(f.Z("Base2").garrison == Approx(8.0f));
+    CHECK(f.Z("Base1").garrison == Approx(8.0f));
+    CHECK(!log.With({"surge:", "unit(s) stood down at Base3"}).empty());
+    check();
+    // the wave is over (the window closed): an excess banks or drops again
+    CHECK_FALSE(f.of.SurgeOpen());
+    CHECK(f.of.Refund(3, "surplus") == 0);
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.Dropped() == 3);
+}
+
+TEST_CASE("OccupierForces - the wave surge rejoins the pool up to the ceiling, the rest stands down; a lost base "
+          "ends it",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    f.of.TuningMutable().surgeDecayHours = 0.5f;
+    f.of.LandWave(8);
+    f.of.SetSurgeAnchor(f.Z("Base0").pos);
+    // the pool at its ceiling: an 8-unit refund is all excess
+    CHECK(f.of.Refund(8, "wave survivors home") == 0);
+    CHECK(f.Z("Base0").pending == 4);
+    CHECK(f.Z("Base1").pending == 4);
+    FlushAll(f);
+    // 5 of the pool's wave strength are spent and lost: the decay brings 5
+    // back to the ceiling first, the other 3 stand down
+    REQUIRE(f.of.Spend(5, "column"));
+    f.of.NoteLoss(5, "column lost");
+    REQUIRE(f.of.PoolCeiling() == P + 8); // the pool's own overshoot keeps the headroom
+    for (int k = 0; k < 40; k++)
+    {
+        f.of.Tick(f.registry, 60.0f);
+        CHECK(f.of.Pool() <= f.of.PoolCeiling());
+    }
+    CHECK(f.of.SurgeTotal() == 0);
+    CHECK(f.of.Pool() == P + 8);
+    CHECK(f.of.StoodDown() == 3);
+    CHECK(f.of.Dropped() == 0);
+    // a surge at a base the occupier loses ends with it (the bodies follow
+    // the zone's own flip rules)
+    f.of.LandWave(4);
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    f.of.SetPool(f.of.PoolCeiling());
+    CHECK(f.of.Refund(4, "survivors") == 0);
+    REQUIRE(f.of.SurgeRows() == 1);
+    CHECK(Str(f.of.SurgeRowZone(0)) == "Base3");
+    f.GiveToResistance("Base3");
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.SurgeRows() == 0);
+}
+
+TEST_CASE("OccupierForces - a sortie does not demote the band; a shot-down airframe does",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5: two Mi17s took the band from STRONG to STRETCHED for 100 s
+    // while they were out.  Decision 6: an airframe out is committed, not
+    // spent: the band is stepped on the pool plus the airframes the ledger
+    // rows still hold, and only a hull lost moves it
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    f.of.SetPool(40); // 66.7 %: STRONG, 4 units above its exit
+    REQUIRE(f.of.Band() == OFBandStrong);
+    // the old arithmetic: an 18-unit insertion on 40 would read STRETCHED
+    CHECK(OccupierForces::StepBand(OFBandStrong, 40 - 18, P) == OFBandStretched);
+    CoreLines log;
+    {
+        // the launch: the debit and the ledger row are one movement
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(18, "Mi17 and crew"));
+        REQUIRE(f.of.BookLeverOp(101, "T0", CAKRetake, FPTransportHeli, 18));
+    }
+    CHECK(f.of.Pool() == 22);
+    CHECK(f.of.CommittedAir() == 18);
+    CHECK(f.of.BandStrength() == 40);
+    CHECK(f.of.Band() == OFBandStrong);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpAirborne, 0));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpLanded, 0));
+    f.of.Tick(f.registry, 100.0f); // the refill tops the pool up a little
+    CHECK(f.of.Band() == OFBandStrong);
+    // home: the crew settle as bodies, the hull is refunded
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpCrewSettled, 2));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(101, CAOpHullRefund, 16, f.registry.FindZoneIndex("Base0")));
+    CHECK(f.of.CommittedAir() == 0);
+    CHECK(f.of.Band() == OFBandStrong);
+    CHECK(log.With({"band STRONG -> STRETCHED"}).empty());
+    // a second sortie is shot down: the hull is a real loss and demotes
+    f.of.SetPool(40);
+    {
+        OccupierForces::BandHold hold(f.of);
+        REQUIRE(f.of.Spend(18, "Mi17 and crew"));
+        REQUIRE(f.of.BookLeverOp(102, "T1", CAKRetake, FPTransportHeli, 18));
+    }
+    CHECK(f.of.Band() == OFBandStrong);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(102, CAOpHullLost, 16));
+    CHECK(f.of.CommittedAir() == 2); // the crew, still to settle
+    CHECK(f.of.LossDebt() == 16);
+    CHECK(f.of.BandStrength() == 24);
+    CHECK(f.of.Band() == OFBandStretched);
+    CHECK(log.With({"band STRONG -> STRETCHED", "pool 22 of 60"}).size() == 1);
+    // a ground hull out is not committed: a column still demotes as before
+    CHECK(OccupierForces::BandStrengthOf(22, P, 0, 0) == 22);
+}
+
+TEST_CASE("OccupierForces - the band reads losses: 37 killed in an hour on a Malden-sized pool drop it to "
+          "STRETCHED while the pool says STRONG",
+          "[game][guerrilla][occupierforces]")
+{
+    // the feel assessment, item 10 (the levers audit: "refill beats the
+    // bands", STRONG 99 % of video 5).  The Abel-like fixture is Malden's
+    // arithmetic: R 32, K 14, G 56, poolStart 60, refill 37 an hour.  The
+    // band is stepped on min(pool, poolStart - lost + repaid) over the last
+    // lossWindowHours: 37 killed in an hour while D2 regrowth repays 12 of
+    // them (two bases at 1 body per 600 s) leaves strength 35 of 60
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    REQUIRE(P == 60);
+    REQUIRE(f.of.Tuning().lossWindowHours == Approx(1.0f));
+    CHECK(OccupierForces::RefillPerHour(P, f.of.RosterStrength(), f.of.TownGarrisons(), 4.0f, 50.0f) ==
+          Approx(37.0f));
+    CoreLines log;
+    int killed = 0;
+    int bandAt = -1; // the kill that first left STRONG
+    f.of.NoteLoss(1, "garrison");
+    killed++;
+    for (int step = 0; step < 36; step++)
+    {
+        if (step % 6 == 0)
+        {
+            CHECK(f.of.Draw(2) == 2); // D2 regrowth at two bases
+        }
+        f.of.Tick(f.registry, 100.0f);
+        f.of.NoteLoss(1, "garrison");
+        killed++;
+        if (bandAt < 0 && f.of.Band() != OFBandStrong)
+        {
+            bandAt = killed;
+        }
+    }
+    CHECK(killed == 37);
+    CHECK(f.of.LossesInWindow() == 37);
+    CHECK(f.of.RepaidInWindow() == 12);
+    CHECK(f.of.BandStrength() == 35);
+    CHECK(f.of.Band() == OFBandStretched);
+    // the pool number alone still says STRONG
+    CHECK(f.of.Pool() >= 58);
+    CHECK(OccupierForces::InitialBand(f.of.Pool(), P) == OFBandStrong);
+    CHECK(bandAt == 37); // 25 unrepaid is the first strength under 60 %
+    CHECK(log.With({"band STRONG -> STRETCHED", "lost"}).size() == 1);
+    // the losses age out of the window: the band recovers
+    f.of.Tick(f.registry, 3700.0f);
+    CHECK(f.of.LossesInWindow() == 0);
+    CHECK(f.of.BandStrength() == f.of.Pool());
+    CHECK(f.of.Band() == OFBandStrong);
+    // the pure rule
+    CHECK(OccupierForces::BandStrengthOf(60, 60, 0, 25) == 35);
+    CHECK(OccupierForces::BandStrengthOf(40, 60, 18, 0) == 58);
+    CHECK(OccupierForces::BandStrengthOf(70, 60, 0, 25) == 45); // a wave's overshoot is strength on top
+    CHECK(OccupierForces::BandStrengthOf(10, 60, 0, 80) == 0);
+}
+
+TEST_CASE("OccupierForces - the hull flag: a hull home over the ceiling is a stored spare, not a garrison",
+          "[game][guerrilla][occupierforces]")
+{
+    // video 5's "22 banked": an APC came home to a full pool and became 22
+    // bodies of garrison.  Decision 9, forcesBankHulls 0 (the default): only
+    // bodies bank; a hull over the ceiling is a stored spare hull at its base
+    // (or the nearest base with a garage), back in the pool when it has room
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart();
+    CHECK_FALSE(f.of.Tuning().bankHulls);
+    const int b1 = f.registry.FindZoneIndex("Base1");
+    f.Z("Base2").garrison = 0; // room to bank bodies, which a hull must not take
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(201, "T0", CAKRetake, FPApc, 22));
+    f.of.Tick(f.registry, 3600.0f); // the refill tops the pool back up
+    REQUIRE(f.of.Pool() == P);
+    CoreLines log;
+    f.of.NoteOpEvent(f.registry, LedgerEvent(201, CAOpCrewSettled, 2));
+    f.of.NoteOpEvent(f.registry, LedgerEvent(201, CAOpHullRefund, 20, b1));
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.Banked() == 0);
+    CHECK(f.of.Dropped() == 0);
+    CHECK(PendingOf(f) == 0);
+    REQUIRE(f.of.StoredHullRows() == 1);
+    CHECK(Str(f.of.StoredHullZone(0)) == "Base1");
+    CHECK(f.of.StoredHullPackage(0) == FPApc);
+    CHECK(f.of.StoredHullUnits(0) == 20);
+    CHECK(f.of.StoredHullTotal() == 20);
+    CHECK(log.With({"ledger: APC over poolStart stored as a spare hull at Base1", "20 unit(s)"}).size() == 1);
+    // the pool spends 8: the stored APC fills it back first (before the refill)
+    REQUIRE(f.of.Spend(8, "truck"));
+    const int refill0 = f.of.RefillTotal();
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.Pool() == P);
+    CHECK(f.of.RefillTotal() == refill0);
+    CHECK(f.of.StoredHullUnits(0) == 12);
+    CHECK(log.With({"the spare APC stored at Base1 rejoins the pool", "8 unit(s)"}).size() == 1);
+    // a base full of spares (StoredHullsPerBase): the next goes to the
+    // nearest base with a garage
+    REQUIRE(f.of.CanStoreHull(f.registry, b1));
+    CHECK(f.of.RefundHull(f.registry, 5, FPTruck, "TRUCK", b1) == 0);
+    CHECK_FALSE(f.of.CanStoreHull(f.registry, b1));
+    CHECK(f.of.RefundHull(f.registry, 4, FPTruck, "TRUCK", b1) == 0);
+    REQUIRE(f.of.StoredHullRows() == 3);
+    const std::string third = Str(f.of.StoredHullZone(2));
+    CHECK((third == "Base0" || third == "Base2"));
+    // the base is lost: its spares are lost with it, a real loss
+    const int lost0 = f.of.Lost();
+    f.GiveToResistance("Base1");
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.Lost() == lost0 + 12 + 5);
+    CHECK(f.of.StoredHullRows() == 1);
+    // no base can store one: dropped, with the line
+    for (int i = 0; i < 4; i++)
+    {
+        f.GiveToResistance(("Base" + std::to_string(i)).c_str());
+    }
+    f.of.Tick(f.registry, 60.0f); // the last spare is lost with its base too
+    CHECK(f.of.StoredHullRows() == 0);
+    f.of.SetPool(P);
+    const int dropped0 = f.of.Dropped();
+    CHECK(f.of.RefundHull(f.registry, 6, FPTank, "TANK", -1) == 0);
+    CHECK(f.of.Dropped() == dropped0 + 6);
+    CHECK(log.With({"6 hull unit(s) over poolStart dropped", "TANK"}).size() == 1);
+}
+
+TEST_CASE("OccupierForces - the hull flag keeps the ledger conserved: stored hulls are pool units in hull form",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(AbelLikeConfig(), false);
+    REQUIRE(f.of.Activate(f.registry));
+    const int P = f.of.PoolStart(), R = f.of.RosterStrength(), G = f.of.TownGarrisons();
+    int op = 0;
+    auto check = [&]()
+    {
+        CHECK(OccupierForces::ConservationCheck(f.of.Pool() + f.of.StoredHullTotal(), HeldOf(f), 0, op, P, R, G,
+                                                f.of.RefillTotal(), f.of.WavesTotal(),
+                                                f.of.Lost() + f.of.Dropped() + f.of.StoodDown()));
+    };
+    check();
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(211, "T0", CAKRetake, FPApc, 22));
+    op += 22;
+    f.of.Tick(f.registry, 3600.0f);
+    check();
+    // the crew are lost in the fight, the hull comes home over the ceiling
+    f.of.NoteLoss(2, "crew");
+    f.of.NoteOpEvent(f.registry, LedgerEvent(211, CAOpCrewSettled, 2));
+    op -= 2;
+    check();
+    f.of.NoteOpEvent(f.registry, LedgerEvent(211, CAOpHullRefund, 20, f.registry.FindZoneIndex("Base1")));
+    op -= 20;
+    CHECK(f.of.StoredHullTotal() == 20);
+    check();
+    REQUIRE(f.of.Spend(15, "column"));
+    op += 15;
+    f.of.Tick(f.registry, 60.0f);
+    CHECK(f.of.StoredHullTotal() == 5);
+    check();
+}
+
+TEST_CASE("OccupierForces - forcesBankHulls 1 keeps the df9457e rule: a hull banks as bodies",
+          "[game][guerrilla][occupierforces]")
+{
+    Fixture f;
+    f.Load(ConfigWith("forcesBankHulls = 1;", AbelLikeConfig().c_str()), false);
+    REQUIRE(f.of.Activate(f.registry));
+    CHECK(f.of.Tuning().bankHulls);
+    const int P = f.of.PoolStart();
+    f.Z("Base2").garrison = 0;
+    REQUIRE(f.of.Spend(22, "APC and crew"));
+    REQUIRE(f.of.BookLeverOp(301, "T0", CAKRetake, FPApc, 22));
+    f.of.Tick(f.registry, 3600.0f);
+    REQUIRE(f.of.Pool() == P);
+    f.of.NoteOpEvent(f.registry, LedgerEvent(301, CAOpHullRefund, 20, f.registry.FindZoneIndex("Base2")));
+    CHECK(f.of.StoredHullRows() == 0);
+    CHECK(f.of.Banked() == 8); // Base2's room; the rest dropped (every base full)
+    CHECK(f.Z("Base2").pending == 8);
+    CHECK(f.of.Dropped() == 12);
+}
+
+TEST_CASE("OccupierForces - the surge, the stored hulls and the loss window survive save/load",
+          "[game][guerrilla][occupierforces][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / "occupier-forces-ledger-2026-10-16.bin";
+    const std::string config = AbelLikeConfig();
+    {
+        QIStream in(config.c_str(), config.size());
+        ExtParsMission.Parse(in);
+    }
+    Fixture f;
+    f.Load(config, false);
+    REQUIRE(f.of.Activate(f.registry));
+    f.of.LandWave(6);
+    f.of.SetSurgeAnchor(f.Z("Base3").pos);
+    REQUIRE(f.of.Refund(6, "wave survivors") == 0);
+    REQUIRE(f.of.SurgeTotal() == 6);
+    REQUIRE(f.of.RefundHull(f.registry, 9, FPTruck, "TRUCK", f.registry.FindZoneIndex("Base0")) == 0);
+    f.of.NoteLoss(7, "repelled");
+    REQUIRE(f.of.Spend(4, "op"));
+    REQUIRE(f.of.BookLeverOp(401, "T0", CAKStrike, FPJet, 4));
+    {
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.of.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(path.string().c_str()));
+    }
+    OccupierForces loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(path.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    CHECK(loaded.SurgeTotal() == 6);
+    CHECK(loaded.SurgeRows() == f.of.SurgeRows());
+    CHECK(loaded.SurgeOpen());
+    CHECK(loaded.SurgeAnchor().X() == Approx(f.Z("Base3").pos.X()));
+    REQUIRE(loaded.StoredHullRows() == 1);
+    CHECK(Str(loaded.StoredHullZone(0)) == "Base0");
+    CHECK(loaded.StoredHullUnits(0) == 9);
+    CHECK(loaded.LossesInWindow() == 7);
+    CHECK(loaded.CommittedAir() == 4);
+    CHECK(loaded.BandStrength() == f.of.BandStrength());
     ExtParsMission.Clear();
     std::filesystem::remove(path);
 }

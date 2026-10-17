@@ -4977,6 +4977,9 @@ TEST_CASE("CounterAttack - a strike's airframe home after the refill banks as ga
     f.Z(f.farBase).garrisonMax = 30; // room 30; the Post stays full
     OccupierForces& of = OccupierForces::Instance();
     ListenerGuard guard(&of);
+    // forcesBankHulls 1: the df9457e rule this case pins (decision 9's
+    // default 0 stores the jet's hull as a spare: test_occupier_forces)
+    of.TuningMutable().bankHulls = true;
     AutoArray<ZoneEventRecord> fired;
     const CounterAttackView far = WithMap(Fixture::View(FarX, FarZ));
     const CounterAttackOrder order = StrikeOrder(f.town);
