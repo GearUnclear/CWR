@@ -861,7 +861,7 @@ void EngineGL33::InitVertexShaders()
     // update buffer contents.
     glGenBuffers(1, &s_vsUBO);
     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), s_vsShadow, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_vsUBO);
 
     // WorldInstances array UBO (binding 2) — 256 mat4 = 16 KB, the GL 3.3
@@ -932,6 +932,17 @@ void EngineGL33::ReloadShadersNow()
     _pixelShaderSel = PSNone;
     GL33Bind::Invalidate();
     InvalidatePipelineCache();
+    // InitVertexShaders cleared the selection; nothing in the 2D path selects
+    // VSScreen again, so restore the current pass's vertex shader.
+    if (IsIn3DPass())
+    {
+        SelectVertexShader(VSTransform);
+    }
+    else
+    {
+        SelectVertexShader(VSScreen);
+        UploadVSScreenConstants();
+    }
 }
 
 void EngineGL33::SelectVertexShader(VertexShaderID vs)
@@ -1111,7 +1122,7 @@ void EngineGL33::UpdateShadowMapLitState()
     // pass (classic programs) keeps its sun shadows through the classic test.
     const bool nightVisionWorld = _nightVision && !_worldSceneEnded && !_portraitTargetSize;
     const bool shadowPass = !_lightingActive || _remasterPrograms || nightVisionWorld;
-    if (shadowPass && _shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
+    if (shadowPass && ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0)
     {
         ctl[0] = 1.0f; // enable the per-fragment shadow test
         // Lit-colour multiplier where shadowed, faded toward 1.0 (no shadow) as the
@@ -1780,7 +1791,9 @@ void EngineGL33::InitPixelShaders()
     // update buffer contents.
     glGenBuffers(1, &s_psUBO);
     glBindBuffer(GL_UNIFORM_BUFFER, s_psUBO);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_psShadow), nullptr, GL_DYNAMIC_DRAW);
+    // Created holding the CPU copy: FlushPSConstants skips uploads by GL name,
+    // and a re-init (soft reset, shader reload) may get the deleted name back.
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_psShadow), s_psShadow, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, s_psUBO);
 
     InitLightingResources();

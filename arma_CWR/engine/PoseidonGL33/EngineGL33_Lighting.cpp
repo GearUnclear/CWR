@@ -266,7 +266,7 @@ void EngineGL33::BindLightingTextures()
         return;
     const bool map = _terrainHorizonTex && _terrainHeightTex;
     GL33Bind::ActiveUnit(2);
-    if (!(_shadowTuning.enabled && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
+    if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     glBindSampler(2, _shadowCompareSampler);
     GL33Bind::ActiveUnit(kTerrainHorizonUnit);

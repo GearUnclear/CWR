@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <future>
@@ -146,7 +147,11 @@ GroundCells GroundColors(const Landscape& land)
     return cells;
 }
 
-// Per terrain vertex, from the texture cells (empty when there are none).
+// Per terrain vertex, from the texture cells (empty when there are none). A
+// cell covers the grid square to its +x/+z, so its colour belongs to the
+// square's centre: each vertex samples the cells bilinearly around its own
+// position (the four cells sharing it when the grids match), which keeps
+// colour edges on the texture edges instead of half a square off.
 std::vector<float> ExpandGroundColors(const GroundCells& cells, int range, float grid)
 {
     std::vector<float> rgb;
@@ -154,17 +159,35 @@ std::vector<float> ExpandGroundColors(const GroundCells& cells, int range, float
         return rgb;
     rgb.resize(static_cast<size_t>(range) * range * 3);
     const int n = cells.landRange;
+    auto axis = [&](int v, int& i0, int& i1, float& t)
+    {
+        const float f = static_cast<float>(v) * grid / cells.landGrid - 0.5f;
+        const float fl = std::floor(f);
+        t = f - fl;
+        i0 = std::min(std::max(static_cast<int>(fl), 0), n - 1);
+        i1 = std::min(std::max(static_cast<int>(fl) + 1, 0), n - 1);
+    };
     for (int z = 0; z < range; ++z)
     {
-        const int lz = std::min(static_cast<int>(static_cast<float>(z) * grid / cells.landGrid), n - 1);
+        int z0, z1;
+        float tz;
+        axis(z, z0, z1, tz);
         for (int x = 0; x < range; ++x)
         {
-            const int lx = std::min(static_cast<int>(static_cast<float>(x) * grid / cells.landGrid), n - 1);
-            const float* c = cells.rgb.data() + (static_cast<size_t>(lz) * n + lx) * 3;
+            int x0, x1;
+            float tx;
+            axis(x, x0, x1, tx);
+            const float* c00 = cells.rgb.data() + (static_cast<size_t>(z0) * n + x0) * 3;
+            const float* c01 = cells.rgb.data() + (static_cast<size_t>(z0) * n + x1) * 3;
+            const float* c10 = cells.rgb.data() + (static_cast<size_t>(z1) * n + x0) * 3;
+            const float* c11 = cells.rgb.data() + (static_cast<size_t>(z1) * n + x1) * 3;
             float* o = rgb.data() + (static_cast<size_t>(z) * range + x) * 3;
-            o[0] = c[0];
-            o[1] = c[1];
-            o[2] = c[2];
+            for (int c = 0; c < 3; ++c)
+            {
+                const float a = c00[c] + (c01[c] - c00[c]) * tx;
+                const float b = c10[c] + (c11[c] - c10[c]) * tx;
+                o[c] = a + (b - a) * tz;
+            }
         }
     }
     return rgb;

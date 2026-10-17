@@ -130,11 +130,26 @@ class _Resources(C._Resources):
         heights = scene.heightfield(X, Z).astype(np.float32)
         # ground colour per vertex = the average colour of its landscape texture
         # (TerrainLighting.cpp GroundColors: Texture::GetColor)
+        # sampled bilinearly between texture-square centres, like ExpandGroundColors
         means = {k: scene.textures[k]["rgba"][..., :3].reshape(-1, 3).mean(0) for k in ("grass", "dirt")}
-        names = scene.ground_texture(X, Z)
-        ground = np.zeros((MAP_N, MAP_N, 3), dtype=np.float32)
-        for k, m in means.items():
-            ground[names == k] = m
+
+        def square_colour(cx, cz):
+            names = scene.ground_texture(cx, cz)
+            out = np.zeros(cx.shape + (3,), dtype=np.float64)
+            for k, m in means.items():
+                out[names == k] = m
+            return out
+
+        from scene import TEX_SQUARE
+        fx = X / TEX_SQUARE - 0.5
+        fz = Z / TEX_SQUARE - 0.5
+        ix, iz = np.floor(fx), np.floor(fz)
+        tx, tz = (fx - ix)[..., None], (fz - iz)[..., None]
+        cx0, cx1 = (ix + 0.5) * TEX_SQUARE, (ix + 1.5) * TEX_SQUARE
+        cz0, cz1 = (iz + 0.5) * TEX_SQUARE, (iz + 1.5) * TEX_SQUARE
+        a = square_colour(cx0, cz0) * (1 - tx) + square_colour(cx1, cz0) * tx
+        b = square_colour(cx0, cz1) * (1 - tx) + square_colour(cx1, cz1) * tx
+        ground = (a * (1 - tz) + b * tz).astype(np.float32)
         hor, sky, hgt, tint = native.build_horizon(heights, MAP_CELL, ground)
         self.horizon_tex = rawgl.rgba16_array(np.ascontiguousarray(hor).tobytes(), MAP_N, MAP_N, 4)
         hs = np.concatenate([hgt[..., None], sky.astype(np.float32)[..., None] / 255.0, tint], axis=-1).astype(np.float32)
