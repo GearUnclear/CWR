@@ -1094,8 +1094,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
     // and its debug view, the TAA resolve and its sharpen, the sky table's
-    // two passes, the luma sharpen, and the canopy's sun-visibility pass
-    CHECK(post == 15);
+    // two passes, the luma sharpen, the canopy's sun-visibility pass, and the
+    // air pass's march, blur, mean and apply
+    CHECK(post == 19);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1210,14 +1211,19 @@ TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][
 {
     // The same contract for the post pass: kPostShaders in
     // EngineGL33_PostShaders.cpp, read the way the lighting lab reads it, gives
-    // each program the engine compiles, under its override name.
+    // each program the engine compiles, under its override name. A row may
+    // name pieces of the remastered prelude (the air pass pastes the
+    // LitConstants block, the terrain and clouds piece and the sky piece), so
+    // the names resolve over both families, as glsl_extract.py does.
     const std::string source = ReadTextFile(Gl33Dir() / "EngineGL33_PostShaders.cpp");
     const size_t open = source.find("kPostShaders[] = {");
     REQUIRE(open != std::string::npos);
     const size_t close = source.find("\n};", open);
     REQUIRE(close != std::string::npos);
     const std::string table = source.substr(open, close - open);
-    const auto raw = RawStringsOf("EngineGL33_Post");
+    auto raw = RawStringsOf("EngineGL33_Post");
+    for (auto& [name, body] : RawStringsOf("EngineGL33_LightingShaders"))
+        raw.emplace(name, body);
     static const std::regex row(R"re(\{\s*"(\w+)"\s*,\s*\{([^{}]*)\}\s*\})re");
     int i = 0;
     for (auto it = std::sregex_iterator(table.begin(), table.end(), row); it != std::sregex_iterator(); ++it, ++i)
@@ -1444,6 +1450,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litWater1", LC::Water1, 1},
         {"litCanopy", LC::Canopy, 1},
         {"litDetail", LC::Detail, 1},
+        {"litHaze", LC::Haze, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1527,7 +1534,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::Canopy) == 76);
     CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
     CHECK(static_cast<int>(LC::Detail) == 77);
-    CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
+    // B8 landed the haze at 78, the last planned slot.
+    CHECK(static_cast<int>(LC::Haze) == 78);
+    CHECK(static_cast<int>(LC::Haze) == static_cast<int>(LC::Detail) + 1);
+    CHECK(gl::LitConstPlanned::End == static_cast<int>(LC::Count));
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;

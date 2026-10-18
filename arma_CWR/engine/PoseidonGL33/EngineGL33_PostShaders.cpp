@@ -4,7 +4,10 @@
 // strings below by the kPostShaders table and read through PostShaderName and
 // PostShaderSource (EngineGL33_Lighting.hpp). s_glslPostCommon holds the depth
 // reconstruction the passes share; a pass that adds a shader adds its row to
-// the table.
+// the table. A row may name pieces of other GL-free files: the sky table's
+// (EngineGL33_PostSkyTableShaders.cpp), the air pass's
+// (EngineGL33_PostAirShaders.cpp) and the remastered prelude's LitConstants
+// block, terrain and clouds piece and sky piece, which the air pass pastes.
 
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -554,7 +557,7 @@ void main() {
 struct PostShaderDef
 {
     const char* name; // override file stem
-    const char* pieces[3];
+    const char* pieces[7];
 };
 const PostShaderDef kPostShaders[] = {
     {"vsPost", {s_vsPostGLSL}},
@@ -575,6 +578,16 @@ const PostShaderDef kPostShaders[] = {
      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
     {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
     {"psCanopySun", {Poseidon::gl33lighting::kPostCanopySunGLSL}},
+    {"psPostAirMarch",
+     {Poseidon::gl33lighting::kPostAirMarchInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
+      Poseidon::gl33lighting::kRemasterTerrainCloudsGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
+      Poseidon::gl33lighting::kPostAirMarchHelpersGLSL, Poseidon::gl33lighting::kPostAirMarchMainGLSL}},
+    {"psPostAirBlur", {Poseidon::gl33lighting::kPostAirBlurGLSL}},
+    {"psPostAirMean", {Poseidon::gl33lighting::kPostAirMeanGLSL}},
+    {"psPostAirApply",
+     {Poseidon::gl33lighting::kPostAirApplyInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
+      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
+      Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

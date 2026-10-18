@@ -61,6 +61,10 @@ const PostStageInfo& GetPostStageInfo(PostStage s);
 // frame: the half-resolution linear depth (0 is the final image, 1 to 3 views
 // of the remastered shaders, 4 the occlusion in the composite).
 constexpr int kDebugViewLinearDepth = 5;
+// The air pass's in-scatter alone over black (haze, mist and beams; B8). Its
+// own stage draws it: the view shows only where the air pass runs. After the
+// light tiles (6, FrameLights.hpp) and the albedo (7, LightRig.hpp).
+constexpr int kDebugViewAir = 8;
 // The shafts run only above this on-screen weight of the sun.
 constexpr float kShaftMinWeight = 0.001f;
 
@@ -90,6 +94,14 @@ struct PostFrameInputs
     // TAA is not running this frame) and its strength is above 0. The Sharpen
     // stage then runs alone, on the composited frame.
     bool lumaSharpen = false;
+    // The air pass (B8): one of airHaze, valleyMist or airBeams and its frame
+    // gate are on. It asks for the pass by itself and runs where the world
+    // depth is there and no screen overlay was drawn (the haze would grey an
+    // optics mask's black surround).
+    bool air = false;
+    // The air pass draws sun beams this frame (airBeams and its gate on):
+    // they replace the legacy shafts.
+    bool airBeams = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -114,7 +126,8 @@ struct PostStagePlan
 // composite then draws into the TAA input instead of the frame target, and
 // the sharpen writes the resolved frame back into every sample of it. With TAA
 // off the luma sharpen asks for the pass and runs the Sharpen stage alone, on
-// the composite's output in the same TAA input; never both sharpens.
+// the composite's output in the same TAA input; never both sharpens. The air
+// pass asks by itself too; when it draws beams the legacy shafts hold off.
 PostStagePlan PlanPostStages(const PostFrameInputs& in);
 
 } // namespace Poseidon::remaster

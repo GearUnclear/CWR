@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 
+#include <Poseidon/Graphics/Remaster/PostStages.hpp>
+
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -58,10 +60,11 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::wetWeather, ""},
     {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", false,
      &FS::lampStreaks, ""},
-    {Feature::AirBeams, "airBeams", "Sun beams and headlight cones", "volumetric", "Sky and air", "B8", false,
-     &FS::airBeams, ""},
-    {Feature::AirHaze, "airHaze", "Aerial haze", "haze", "Sky and air", "B8", false, &FS::airHaze, ""},
-    {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", false, &FS::valleyMist, ""},
+    // B8 (volumetric and haze): one post stage, the air pass, for all three.
+    {Feature::AirBeams, "airBeams", "Sun beams and headlight cones", "volumetric", "Sky and air", "B8", true,
+     &FS::airBeams, "air"},
+    {Feature::AirHaze, "airHaze", "Aerial haze", "haze", "Sky and air", "B8", true, &FS::airHaze, "air"},
+    {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", true, &FS::valleyMist, "air"},
     // B9 (hfrt): the sun-visibility map's build shows in its own section on
     // the frames that rebuild it; the one read per fragment is in the world pass.
     {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", true,
@@ -166,8 +169,8 @@ struct KeyTable
             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
-                       "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0",
-                       &LT::debugView, 0, kDebugViewAlbedo),
+                       "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0",
+                       &LT::debugView, 0, kDebugViewAir),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };
@@ -206,6 +209,9 @@ struct KeyTable
                         "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
             MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
                         "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
+            MakeSubKnob(Feature::AirBeams, "volGain", "Beam contrast",
+                        "-1 = from the weather (4 in clear air, 2.5 in mist); 1 = no boost of the shafts", &LT::volGain,
+                        -1.0f, 6.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

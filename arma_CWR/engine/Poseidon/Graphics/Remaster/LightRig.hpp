@@ -153,6 +153,11 @@ struct LightingTuning
     float seaRelief = 1.0f;
     float seaSky = 1.0f;
     float seaSheen = 1.0f;
+    // Air pass (features.airBeams, AirMedium.hpp): the light shafts' contrast
+    // gain, what stands above the local mean of the scattering is boosted by
+    // gain - 1. Below 0 the weather sets it (4 in clear air, where only
+    // narrow beams through gaps show, 2.5 in mist).
+    float volGain = -1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.
@@ -164,7 +169,8 @@ struct LightingTuning
     // tile of the tiled light list (FrameLights.hpp kDebugViewLightTiles), 7
     // the surface albedo (kDebugViewAlbedo: the display-space colour the lit
     // shaders light, texture, tint and detail applied; with post=0 a shot of
-    // it divides a lit shot into the light on each surface).
+    // it divides a lit shot into the light on each surface), 8 the air pass's
+    // in-scatter alone (PostStages.hpp kDebugViewAir).
     int debugView = 0;
 };
 

@@ -306,10 +306,16 @@ layout(std140) uniform PSConstants {
 };
 )";
 
+} // namespace
+
+namespace Poseidon::gl33lighting
+{
+
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout in EngineGL33_Lighting.hpp. Every shader that reads the rig pastes this
-// string (LitConstantsBlock()); the layout test checks it slot by slot.
-static const char s_glslLitConstantsBlock[] = R"(
+// string (LitConstantsBlock(); the post air pass names it in kPostShaders); the
+// layout test checks it slot by slot.
+const char kLitConstantsBlockGLSL[] = R"(
 // Remastered light rig and per-draw material, binding 3. Layout mirrors
 // LitConst in EngineGL33_Lighting.hpp.
 layout(std140) uniform LitConstants {
@@ -360,8 +366,14 @@ layout(std140) uniform LitConstants {
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
+    vec4 litHaze;         // 78: aerial haze (B8): x classic fog factor scale minus 1 (0 = the classic fog)
 };
 )";
+
+} // namespace Poseidon::gl33lighting
+
+namespace
+{
 
 // Inputs: samplers, varyings and the colour space and tonemap helpers the
 // later pieces use.
@@ -552,9 +564,15 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
 }
 )";
 
+} // namespace
+
+namespace Poseidon::gl33lighting
+{
+
 // Terrain and clouds: the sun's visibility past the hills and under the broken
-// cloud field, the valley sky visibility and the ground-bounce tint.
-static const char s_psRemasterTerrainClouds[] = R"(
+// cloud field, the valley sky visibility and the ground-bounce tint. The post
+// air pass pastes it too (cloudSunVisibility).
+const char kRemasterTerrainCloudsGLSL[] = R"(
 // Colour of the light the ground below bounces (luminance 1; white when there
 // is no map). Set by terrainSunVisibility, read by skyIrradiance.
 vec3 g_groundTint = vec3(1.0);
@@ -696,6 +714,11 @@ float canopySunVisibility(vec3 posAbs) {
     return mix(1.0, mix(m.r, raised, smoothstep(0.5, 1.5, hr)), w);
 }
 )";
+
+} // namespace Poseidon::gl33lighting
+
+namespace
+{
 
 // Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
 
@@ -872,7 +895,10 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
         fogC = atmoFogColor(vWorldRel, fogC);
     }
-    r0.rgb = mix(fogC, r0.rgb, vFogTC);
+    // With the aerial haze on (litHaze.x above 0) the classic fog keeps only
+    // the view-distance edge: its start moves out (AirMedium.hpp FogEdgeScale)
+    // and the post pass's haze takes over the distance before it.
+    r0.rgb = mix(fogC, r0.rgb, min(vFogTC * (1.0 + litHaze.x), 1.0));
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -1291,16 +1317,16 @@ namespace
 // The fragment prelude: these pieces in FragmentPiece order. The lighting lab's
 // glsl_extract.py reads this table to assemble the same source.
 const char* const kFragmentPieces[] = {
-    s_psRemasterHeader,        // Header
-    s_glslLitConstantsBlock,   // LitConstants
-    s_psRemasterInputs,        // Inputs
-    s_psRemasterShadows,       // Shadows
-    s_psRemasterTerrainClouds, // TerrainClouds
-    kRemasterSkyGLSL,          // Sky
-    kRemasterLightsGLSL,       // Lights
-    kRemasterSurfaceGLSL,      // Surface
-    s_psRemasterShade,         // Shade
-    s_psRemasterFinish,        // Finish
+    s_psRemasterHeader,         // Header
+    kLitConstantsBlockGLSL,     // LitConstants
+    s_psRemasterInputs,         // Inputs
+    s_psRemasterShadows,        // Shadows
+    kRemasterTerrainCloudsGLSL, // TerrainClouds
+    kRemasterSkyGLSL,           // Sky
+    kRemasterLightsGLSL,        // Lights
+    kRemasterSurfaceGLSL,       // Surface
+    s_psRemasterShade,          // Shade
+    s_psRemasterFinish,         // Finish
 };
 static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::Count), "one entry per FragmentPiece");
 
@@ -1308,7 +1334,7 @@ static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::C
 // glsl_extract.py reads this table too).
 const char* const kScreenVertexPieces[] = {
     s_vsScreenRemasterHead,
-    s_glslLitConstantsBlock,
+    kLitConstantsBlockGLSL,
     s_vsScreenRemasterMain,
 };
 } // namespace
@@ -1359,7 +1385,7 @@ const char* RemasterFragmentPiece(FragmentPiece piece)
 
 const char* LitConstantsBlock()
 {
-    return s_glslLitConstantsBlock;
+    return kLitConstantsBlockGLSL;
 }
 
 const char* RemasterFragmentMain(int ps)

@@ -13,6 +13,11 @@
 //     (debug=5) reads it so far, so it runs only then;
 //   - Ao: ambient occlusion (Alchemy/SAO style) at half resolution from the
 //     depth buffer, blurred with a depth-aware separable filter;
+//   - Air (EngineGL33_PostAir.cpp, B8): sun beams, headlight cones, the aerial
+//     haze and the valley mist, marched at half resolution on the linear depth
+//     and applied at full resolution into airOutTex, which the bloom and the
+//     composite then read in place of the resolved colour. Its beams replace
+//     the shafts;
 //   - Bloom: a five-level bloom chain from the bright parts of the image;
 //   - Shafts: a radial blur of the visible sky toward the sun;
 //   - Composite: back into the frame target. Occlusion darkens only the sky
@@ -32,8 +37,8 @@
 //     (contrast-adaptive, brightness only, B11). When Sharpen runs the
 //     composite draws into the TAA input instead of the frame target;
 //   - DebugView: a diagnostic view of a post buffer over the frame.
-// The other stages of the list (tag readout, reflections, air, combat scatter)
-// land with their features. The HUD then draws on top, untouched.
+// The other stages of the list (tag readout, reflections, combat scatter) land
+// with their features. The HUD then draws on top, untouched.
 //
 // The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
 // unit tests compile the sources the engine builds (PostShaderSource in
@@ -174,6 +179,11 @@ void EngineGL33::DestroyPostTargets()
     delFbo(p.histFbo[0]);
     delFbo(p.histFbo[1]);
     delFbo(p.opaqueFbo);
+    delFbo(p.airMarchFbo);
+    delFbo(p.airFbo[0]);
+    delFbo(p.airFbo[1]);
+    delFbo(p.airMeanFbo);
+    delFbo(p.airOutFbo);
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         delFbo(p.bloomFbo[i]);
@@ -189,6 +199,11 @@ void EngineGL33::DestroyPostTargets()
     delTex(p.histTex[0]);
     delTex(p.histTex[1]);
     delTex(p.opaqueTex);
+    delTex(p.airTex[0]);
+    delTex(p.airTex[1]);
+    delTex(p.airMistTex);
+    delTex(p.airMeanTex);
+    delTex(p.airOutTex);
     p.w = p.h = 0;
     _taa.history.exists = false; // the TAA history went with its targets
 }
@@ -196,9 +211,9 @@ void EngineGL33::DestroyPostTargets()
 void EngineGL33::DestroyPostPrograms()
 {
     PostTargets& p = _post;
-    for (unsigned int* prog :
-         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
-          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen})
+    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
+                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen,
+                               &p.progLumaSharpen, &p.progAirMarch, &p.progAirBlur, &p.progAirMean, &p.progAirApply})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -211,6 +226,7 @@ void EngineGL33::DestroyPostPrograms()
     }
     p.vao = 0;
     p.programsTried = false;
+    p.airUnavailable = false;
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -236,8 +252,26 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progTaa = link(PostShader::Taa);
         p.progTaaSharpen = link(PostShader::TaaSharpen);
         p.progLumaSharpen = link(PostShader::LumaSharpen);
+        // The air pass is optional: if its programs fail, it never runs and
+        // the rest of the post pass does.
+        p.progAirMarch = link(PostShader::AirMarch);
+        p.progAirBlur = link(PostShader::AirBlur);
+        p.progAirMean = link(PostShader::AirMean);
+        p.progAirApply = link(PostShader::AirApply);
         if (vs)
             glDeleteShader(vs);
+        // The march and the apply read the rig (LitConstants, binding 3).
+        for (GLuint prog : {p.progAirMarch, p.progAirApply})
+        {
+            const GLuint block = prog ? glGetUniformBlockIndex(prog, "LitConstants") : GL_INVALID_INDEX;
+            if (block != GL_INVALID_INDEX)
+                glUniformBlockBinding(prog, block, Poseidon::gl33lighting::kLitBinding);
+        }
+        if (!p.progAirMarch || !p.progAirBlur || !p.progAirMean || !p.progAirApply)
+        {
+            LOG_ERROR(Graphics, "GL33 post: air pass programs failed to build; the air pass is off");
+            p.airUnavailable = true;
+        }
         glGenVertexArrays(1, &p.vao);
         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
             !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen || !p.progLumaSharpen)
@@ -267,6 +301,15 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
     p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
     p.opaqueTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
+    // The air pass: the march's two targets and the blur's ping-pong (filtered:
+    // the blur and the mean tap between texels, the second target holds the
+    // view depth they match), the mean, and the frame with the air applied
+    // (filtered as colorTex is, for the bloom's taps).
+    p.airTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+    p.airTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+    p.airMistTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
+    p.airMeanTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, false);
+    p.airOutTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, true);
     int bw = hw, bh = hh;
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
@@ -309,6 +352,20 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     }
     p.opaqueFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.opaqueTex);
     check();
+    p.airMarchFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airTex[0]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, p.airMistTex, 0);
+    const GLenum airBuffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, airBuffers);
+    check();
+    for (int i = 0; i < 2; ++i)
+    {
+        p.airFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.airTex[i]);
+        check();
+    }
+    p.airMeanFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airMeanTex);
+    check();
+    p.airOutFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.airOutTex);
+    check();
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
@@ -324,8 +381,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     }
     p.w = w;
     p.h = h;
-    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{}; TAA history half float)", w, h, hw,
-             hh);
+    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts, air and linear depth {}x{}; TAA history half float)", w,
+             h, hw, hh);
     return true;
 }
 
@@ -428,6 +485,11 @@ void EngineGL33::EndWorldScene()
     // With TAA off this frame, the luma sharpen when its switch and gate are on.
     in.lumaSharpen = !taaFrame && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
                      _featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;
+    // The air pass, when one of its parts is on this frame (UpdateAirMedium,
+    // with the gates).
+    const bool airFrame = _airFrame == GetFrameCounter() && !_post.airUnavailable;
+    in.air = airFrame && (_airParts.haze || _airParts.valleyMist || _airParts.beams);
+    in.airBeams = airFrame && _airParts.beams;
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
@@ -472,6 +534,9 @@ void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
             break;
         case rm::PostStage::Ao:
             PostAo(f);
+            break;
+        case rm::PostStage::Air:
+            PostAir(f);
             break;
         case rm::PostStage::Bloom:
             PostBloom(f);
@@ -569,7 +634,9 @@ void EngineGL33::PostBloom(const PostFrame& f)
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         const bool first = i == 0;
-        const GLuint src = first ? p.colorTex : p.bloomTex[i - 1];
+        // The frame with the air applied when the air pass ran.
+        const GLuint frame = f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex;
+        const GLuint src = first ? frame : p.bloomTex[i - 1];
         const int sw = first ? f.w : p.bloomW[i - 1];
         const int sh = first ? f.h : p.bloomH[i - 1];
         BindTex(0, src);
@@ -615,7 +682,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
     SetInt(p.progComposite, "aoTex", 2);
     SetInt(p.progComposite, "bloomTex", 3);
     SetInt(p.progComposite, "shaftTex", 4);
-    BindTex(0, p.colorTex);
+    BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex);
     BindTex(2, plan.Runs(rm::PostStage::Ao) ? p.aoTex[0] : p.whiteTex);
     BindTex(3, plan.Runs(rm::PostStage::Bloom) ? p.bloomTex[0] : p.blackTex);
     BindTex(4, plan.Runs(rm::PostStage::Shafts) ? p.shaftTex : p.blackTex);

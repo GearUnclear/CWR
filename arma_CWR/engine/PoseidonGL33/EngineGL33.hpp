@@ -37,6 +37,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+#include <Poseidon/Graphics/Remaster/AirMedium.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
@@ -781,8 +782,18 @@ class EngineGL33 : public Engine
     // Opaque draw in flight: the remastered shaders store one minus the sky
     // light share in alpha (EngineGL33_PostFX.cpp). Mirrors LitConstants.flags.x.
     bool _litOpaque = false;
-    // The rig's sun colour this frame (sun-shaft tint).
+    // The rig's sun colour this frame (sun-shaft tint) and its exposure.
     Color _lightRigSun = Color(1, 1, 1, 1);
+    float _lightRigExposure = 1.0f;
+    // The air pass (B8, EngineGL33_PostAir.cpp): this frame's medium and which
+    // of its parts run (their switches and gates), set with the gates at the
+    // world's first pass; the forward fog's edge follows it (litHaze).
+    Poseidon::remaster::AirMedium _airMedium;
+    Poseidon::remaster::AirParts _airParts;
+    std::uint32_t _airFrame = 0; // engine frame counter when set
+    // Sets _airMedium and _airParts from the gates and the weather, and the
+    // Haze slot (the classic fog's edge) for the world's draws.
+    void UpdateAirMedium();
     // World position of the camera when the shadow depth pass ran: the map is
     // sampled one frame later, from wherever the camera is then.
     float _shadowCamPos[3] = {};
@@ -930,6 +941,16 @@ class EngineGL33 : public Engine
         unsigned int opaqueTex = 0, opaqueFbo = 0;
         unsigned int progTaa = 0, progTaaSharpen = 0;
         unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off (B11)
+        // The air pass (B8, EngineGL33_PostAir.cpp), half resolution: the
+        // march's two targets (RGBA16F: beams, headlights, haze sun
+        // visibility, view depth; RG16F: valley mist top and density), the
+        // blur's ping-pong and the beams' local mean (RG16F); full resolution:
+        // the frame with the air applied (RGBA8, its alpha kept), which the
+        // stages after it read in place of colorTex.
+        unsigned int airTex[2] = {}, airMistTex = 0, airMeanTex = 0, airOutTex = 0;
+        unsigned int airMarchFbo = 0, airFbo[2] = {}, airMeanFbo = 0, airOutFbo = 0;
+        unsigned int progAirMarch = 0, progAirBlur = 0, progAirMean = 0, progAirApply = 0;
+        bool airUnavailable = false; // its programs failed: the air pass never runs, the rest does
         bool programsTried = false;
         bool unavailable = false;
     } _post;
@@ -1003,6 +1024,7 @@ class EngineGL33 : public Engine
     void PostResolve(const PostFrame& f);
     void PostLinearDepth(const PostFrame& f);
     void PostAo(const PostFrame& f);
+    void PostAir(const PostFrame& f); // EngineGL33_PostAir.cpp
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);

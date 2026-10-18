@@ -38,6 +38,10 @@ enum class FragmentPiece : int
 const char* RemasterFragmentPiece(FragmentPiece piece);
 
 // The pieces kept in files of their own (read them through RemasterFragmentPiece).
+// The LitConstants block and the terrain and clouds piece are named here too:
+// the post air pass pastes them (kPostShaders).
+extern const char kLitConstantsBlockGLSL[];
+extern const char kRemasterTerrainCloudsGLSL[];
 extern const char kRemasterSkyGLSL[];
 extern const char kRemasterLightsGLSL[];
 extern const char kRemasterSurfaceGLSL[];
@@ -50,6 +54,16 @@ extern const char kPostSkyViewMeanMainGLSL[];
 // The canopy's sun-visibility pass (EngineGL33_PostCanopyShaders.cpp; read it
 // through PostShaderSource).
 extern const char kPostCanopySunGLSL[];
+// The air pass (EngineGL33_PostAirShaders.cpp; read them through
+// PostShaderSource).
+extern const char kPostAirMarchInputsGLSL[];
+extern const char kPostAirCommonGLSL[];
+extern const char kPostAirMarchHelpersGLSL[];
+extern const char kPostAirMarchMainGLSL[];
+extern const char kPostAirBlurGLSL[];
+extern const char kPostAirMeanGLSL[];
+extern const char kPostAirApplyInputsGLSL[];
+extern const char kPostAirApplyMainGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -79,6 +93,13 @@ enum class PostShader : int
     // The canopy's sun-visibility map (B9). Not a post stage: it runs before
     // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
     CanopySun,
+    // The Air stage (B8, EngineGL33_PostAir.cpp): the half-resolution march
+    // (beams, haze sun visibility, valley mist top), its depth-aware blur, the
+    // beams' local mean, and the full-resolution apply (haze, mist, beams).
+    AirMarch,
+    AirBlur,
+    AirMean,
+    AirApply,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -263,7 +284,11 @@ enum : int
     // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
     Canopy = 76,
     Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
-    Count = 78,
+    // Aerial haze (B8, Graphics/Remaster/AirMedium.hpp): x the classic fog
+    // factor's scale minus 1 (0 = the classic fog: the zero the block starts
+    // with leaves every fragment as before), yzw free.
+    Haze = 78,
+    Count = 79,
 };
 constexpr int MaxLights = 8;
 constexpr int ReservedCount = 1;
@@ -281,7 +306,8 @@ static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
               "LitConst water slots follow the planned padding");
 static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
 static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
-static_assert(Count == Detail + 1, "LitConst size out of sync");
+static_assert(Haze == Detail + 1, "LitConst haze slot follows the terrain detail");
+static_assert(Count == Haze + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to the features still to land (INTEGRATION-PLAN.md
@@ -293,7 +319,8 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
 // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
 // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
 // SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
-// terrain detail at 77, so 70 to 73 are the padding member litPlanned.
+// terrain detail at 77, so 70 to 73 are the padding member litPlanned; B8
+// landed the haze at 78.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
@@ -306,14 +333,14 @@ constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
 constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
 // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
 // 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
-// detail landed (LitConst::Detail, B11).
-constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
-constexpr int End = 79;  // one past the last planned slot
+// detail landed (LitConst::Detail, B11); 78: the haze landed (LitConst::Haze,
+// B8).
+constexpr int End = 79; // one past the last planned slot
 static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
               "the planned slot below the sun shadows is the reserved padding");
 static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
               "the planned slots between the clouds and the water are the planned padding (70 free)");
-static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
+static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
 } // namespace LitConstPlanned

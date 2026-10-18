@@ -18,7 +18,8 @@ constexpr PostStageInfo kStages[] = {
     // in its own step (a pixel change).
     {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
     {PostStage::Ssr, "ssr", "B6", false, false, Mark::SsrEnd, Section::Ssr},
-    {PostStage::Air, "air", "B8", false, false, Mark::AirEnd, Section::Air},
+    // B8: the air pass marches at half resolution, on the linear depth.
+    {PostStage::Air, "air", "B8", true, true, Mark::AirEnd, Section::Air},
     {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
@@ -79,7 +80,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // The stages that can ask for the pass ask by their knob, switch or debug
     // view, whatever this frame's conditions then decide for them.
     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
-                       in.temporal || in.lumaSharpen;
+                       in.temporal || in.lumaSharpen || in.air;
     if (!asked)
         return plan;
 
@@ -92,8 +93,14 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     plan.bloomStrength = in.glow ? in.bloom : 0.0f;
     if (plan.bloomStrength > 0.0f)
         plan.runs |= Bit(PostStage::Bloom);
-    // The shafts are depth tested glow toward a sun on screen.
-    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight)
+    // The air pass needs the world depth, and over a screen overlay its haze
+    // would grey the overlay's black surround.
+    const bool air = in.air && in.worldDepth && in.glow;
+    if (air)
+        plan.runs |= Bit(PostStage::Air);
+    // The shafts are depth tested glow toward a sun on screen; the air pass's
+    // beams replace them.
+    if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight && !(air && in.airBeams))
         plan.runs |= Bit(PostStage::Shafts);
     plan.runs |= Bit(PostStage::Composite);
     // The resolve reprojects with the world depth (a vehicle interior cleared

@@ -153,6 +153,12 @@ As built in A1 (corrections to the bullets above):
   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
   never `;`, so it rides in the UDCAP lines as `feat=`).
 
+As built in B8: `volGain` is the beams' sub-knob under `airBeams` (group `volumetric`), default -1,
+which means "from the weather" (gain 4 in clear air, 2.5 in mist, `AirMedium.hpp`); a value of 0 or
+more is used as given. `airHaze` and `valleyMist` have no sub-knob. The `debug` choice gained view
+8, the air pass's in-scatter alone (`kDebugViewAir`; 6 on the lane, which sat before A6's light tiles
+and B2's albedo took 6 and 7).
+
 ### 3.2 Frame gates and the GPU budget (RTX 3060, 1080p, 60 fps)
 
 The owner's budget only holds if heavy features run only when they can show. New pure module
@@ -223,6 +229,17 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
   frame-relative buffer (5 B9). The shadows fade in from 2 to 4 deg and out from 21 to 25 deg of
   sun and in from a sky-through of 0.5 to 0.6 (`CanopyStrength`), so the gate's edges switch
   nothing on screen; the gate is on exactly where that strength is above 0.
+
+As built in B8: "morning" for the valley mist is an eastern sun between -4 and 10 deg
+(`kGateMorningMaxSunDeg` 10, was 38), and the mist's density is full from 1 to 6 deg and gone by
+10 (`AirMedium.hpp` `MorningWeight`, `kMorningFadeSunDeg`, `kMorningGoneSunDeg`). With the haze
+notes' window (full to 22, gone by 38), and still with a window that ended at 15 deg, the B8 look
+check showed a mist veil over the plain and the hillside at `lowsun_fp` (08:00 in March, sun 12.7
+deg, clear weather); the 05:15 valley (sun 6.3 deg) and `sunrise_ridge` (5.1 deg) keep their
+mist. The haze's gate stays "always beyond 150 m"; at noon its cost is the full-resolution apply
+alone (0.04 to 0.05 ms in the B8 run). Within the beams' gate the medium follows the weather
+(setFog, rain, the sun within about a degree of the horizon), so clear air gets thin beams and
+mist gets fans.
 
 Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
 gates above keep the beams, hfrt and SSR from all being at full cost together only if the
@@ -362,6 +379,14 @@ as planned. On the lane, which sat on B1 alone, the padding `litPlanned` shrank 
 strength (0 while the switch, its gate, the canopy or the map is off, and then the world programs
 read nothing), yz the sun-visibility map's origin (metres), w 1 / its extent.
 
+As built in B8 (a parallel lane on 807ce4b, merged onto A6, B5, B2, B10 and B9): `Haze` landed at 78
+(`Count` 79), the last planned slot (`LitConstPlanned::End` equals `LitConst::Count`; the block
+ends `litCanopy`, `litDetail`, `litHaze`, and `LitConstPlanned` keeps `Night` to `Weather`). It is not the analytic haze for blended surfaces the table names:
+`litHaze.x` is the classic fog factor's scale minus 1, which moves the forward fog's start out
+while the post pass's haze runs (`AirMedium.hpp` `FogEdgeScale`; 0 is the classic fog, so the zero
+block before the first upload changes nothing); yzw are free. Blended surfaces are hazed by the post
+pass with the depth of the opaque surface behind them.
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -443,6 +468,21 @@ texels a side around the camera, not the half-resolution screen buffer the table
 (`InitCanopy`: no canopy, all lit), and the build binds the stand-in on unit 15 while it draws into
 the map (a `[Canopy][ShadowSampler]` audit case).
 
+As built in B8: no new world unit. The air pass binds its inputs to `kPostUnits`: for its
+half-resolution march, unit 0 the linear depth, unit 2 the cascade array (or the depth stand-in,
+never texture 0) under the comparison sampler, which goes back to sampler 0 right after the draw,
+unit 3 the horizon array, 4 the height texture and 5 the cloud noise (the same textures or
+stand-ins the world binds there); for the full-resolution apply, 0 the resolved colour, 2 to 4 its
+half-resolution targets and 5 the resolved depth. It reads the sky table on unit 8 as the world left
+it (`BindSkyTable` rebinds it first). A `[ShadowSampler]` case in `test_air_medium.cpp` checks unit 2.
+On the merged tree (after B10 and B9) the terrain and clouds piece the march pastes also holds the
+sky-matched cloud shadows and the long tree shadows' read: the march reads the sky's cloud density on
+unit 9 (`skyDensity`, rebound with `BindSkyDensity`, so the beams see the clouds the ground's shadows
+come from) and declares `canopySun` (unit 15) and the world names `canopySunVisibility` reads
+(`shadowCtl`, `camFwd`, `vWorldRel`) without calling it; the apply, which pastes the sky piece but not
+the terrain and clouds piece, declares `skyDensity` and stand-ins for the lit clouds' density lookups
+(`skyCloudDensity`, `skyDomeUv`), which only the unused dome shading calls.
+
 ### 3.5 Shader sources: split by concern, test through the accessors
 
 `EngineGL33_LightingShaders.cpp` (757 lines) and `EngineGL33_PostFX.cpp` (725 lines) are the two
@@ -512,6 +552,18 @@ As built in A2 (corrections to the bullets above):
   piece; one checks the unit table. The lab's `glsl_extract.py` assembles the same way
   (`load_programs`), so `--dump` writes `psRemasterCommon.glsl` whole, and it now decodes
   `git show` output as UTF-8 (it used the console code page, which mangled the tip's comments).
+
+As built in B8: a `kPostShaders` row may name pieces of the remastered prelude. The air pass's
+march pastes the LitConstants block and the terrain and clouds piece (`cloudSunVisibility`), its
+apply the LitConstants block and the sky piece (`fogColorToward`, `atmoFogColor`). Those two pieces
+became `kLitConstantsBlockGLSL` and `kRemasterTerrainCloudsGLSL` in `Poseidon::gl33lighting` (they
+were file-static), declared in `EngineGL33_Lighting.hpp`; the assembled bytes of every existing
+program are unchanged by the move. `PostShaderDef` holds up to 7 pieces; the table test resolves
+names over both families, and `glsl_extract.py` loads the lighting family with the post one
+(`_FAMILY_ALSO`). The apply declares the names the sky piece's dome shading reads (`vWorldRel`,
+`vUV0`, `tex0`, `g_groundTint`; never called there) and its own copies of the colour helpers
+(`kLuma`, `toLinear`, `toDisplay`, `tonemapNeutral`): the inputs piece declares the world's varyings
+and cannot be pasted into a post pass.
 
 ### 3.6 Post pipeline stages
 
@@ -608,6 +660,16 @@ the pass by itself; the composite then draws into `taaInTex` (whenever `Sharpen`
 under `Temporal`), and `PostSharpen` runs `psPostLumaSharpen` (CAS 3x3 on brightness only) from it
 into every sample of the frame target when the resolve did not run. Following A1's gate contract
 the luma sharpen also takes over where TAA holds off (a vehicle interior, an optics overlay).
+
+As built in B8: `Air` landed with `readsLinearDepth`. `PostFrameInputs::air` (one of `airHaze`,
+`valleyMist` and `airBeams` on this frame, `EngineGL33::UpdateAirMedium`) asks for the pass by
+itself; the stage runs where the world depth is there and no overlay was drawn (`air && worldDepth
+&& glow`, as the shafts), and `PostFrameInputs::airBeams` holds the legacy `Shafts` off when it runs.
+Its output, the frame with the air applied (RGBA8, its alpha kept), replaces `colorTex` as the input
+of `Bloom` and `Composite`; with the stage off they read `colorTex` as before. Four passes in one
+stage and one GPU section (`air`): the march (two targets), the blur twice, the beams' mean (beams
+only) and the apply. The march takes the TAA sequence's per-frame shift (`PostFrame::noiseShift`),
+so the TAA history is its temporal accumulation.
 
 ### 3.7 Porting method
 
@@ -1834,6 +1896,135 @@ gitignored; light gate).**
 - **Tests**: `AirMedium` optical depth against numeric integration; mist floor builder on a
   synthetic valley; glslang for the air shaders; F3 audit for unit 2 after the stage.
 - **Effort**: 8 days.
+
+**Result (2026-10-18, uncommitted change on 807ce4b in the scratch copy `gr-B8`, a parallel lane
+merged onto A6, B5, B2, B10 and B9; evidence in `tmp/integration/B8/` of the graphics-remaster
+worktree, gitignored; light gate).**
+
+- Built: `Graphics/Remaster/AirMedium.{hpp,cpp}` (pure: the haze's, the valley mist's and the beams'
+  constants; the weather and time rules `MorningWeight`, `BeamMistWeight`, `ComputeAirMedium`; the
+  beams' contrast `BeamShaft`; the closed forms the shaders mirror, `ExpOpticalLength` and
+  `LayerOpticalLength`; the valley floor and its depth, `LocalValleyAt` and `ValleyDepthWeight`; the
+  classic fog's moved edge, `FogEdgeStart` and `FogEdgeScale`; `AirOpticalDepth` for a line of sight
+  from any start distance, the hook for AI sight); the `Air` post stage (`EngineGL33_PostAir.cpp`,
+  its GLSL in the GL-free `EngineGL33_PostAirShaders.cpp`): a half-resolution march on the linear
+  depth into two targets (sun beams, 24 steps over the first 250 m with the shadow map, the horizon
+  map and the cloud field, and the same scattering as if the whole ray saw the sun; headlight cones,
+  up to 4 spotlights within 150 m at night, 24 steps through each cone; the haze's sun visibility,
+  12 samples beyond 150 m; the valley mist's top and density where the ray ends), a depth-aware
+  blur across and down, the beams' depth-matched local mean, and a full-resolution apply (haze and
+  mist in closed form, `C' = C T + S`, toward the sky table's fog colour, then the beams added like
+  light on a screen). The `Haze` slot (3.3), the three switches with the sub-knob `volGain` (3.1),
+  debug view 8 (the air's in-scatter alone; 6 on the lane).
+- Kept: volumetric's march, the phase `0.85 HG(0.75) + 0.15 HG(-0.3)`, the sun radiance from the
+  rig, the spotlight march with the shading's cone and the probe 6 phase sign, the depth-aware mean
+  with gain and floored high-pass and probe 8's edge clamp, the 11-tap depth-aware blur; haze's
+  closed-form height extinction (sigma 1.1e-4, scale height 350 m, chroma 0.85 / 1 / 1.2), the
+  valley mist (2.5e-3, top 40 m above the lowest of 15 taps, noise banks at 1700 and 520 m, fall
+  25 m), the density-weighted sun visibility, the mist's near-white sky term and broad sun lobe,
+  nothing inside 150 m, and the classic fog's start moved out to 55% of its end in clear weather.
+- Rewritten: one post stage instead of a composite rewrite and haze in every remastered pixel
+  shader; the temporal accumulation is the TAA history (the march's start turns per frame, as A5
+  did for AO and shafts). The forward fog's edge moves by a scale of the vertex fog factor in
+  `finishFragment` and the water main (`min(vFogTC * (1 + litHaze.x), 1)` is exactly the factor of
+  the moved start), so no vertex shader changed. The haze's limit is the sky table's fog colour
+  (`atmoFogColor`, `fogColorToward` with the table off), the colour the forward fog converges to.
+  The apply puts the haze under the forward fog's edge (`mix(limit (1 - T), S, f)`), so toward the
+  view distance the mist dissolves into the sky: the hard line where the mist met the horizon (the
+  critic item) is gone. The medium follows the weather (`ComputeAirMedium`): beam mist 0.12 in
+  clear air, 1.5 from setFog 0.1, more above; contrast gain 4 and high-pass 0.85 in clear air, 2.5
+  and 0.6 in mist; the sun within about a degree of the horizon (full from -1 to 1 deg, gone by 4),
+  rain and setFog count as mist; the haze thickens with setFog (x4 at 1) and rain (x2); the valley
+  mist lies in the morning and in setFog from 0.05 (full at 0.3), 40% of it under an overcast. The
+  research's contrast works on the scattering itself; here it works on the share of each ray's
+  scattering that sees the sun (`BeamShaft`; the march writes both sums, the mean averages both),
+  so a ray that only runs longer through the ground mist, as over open ground toward the horizon,
+  is not boosted into a band. Air that a ridge or a cloud shades keeps a dimmer zenith-coloured sky
+  light (`kHazeShadowAmbient` 0.55 of the sky limit's luminance), so a ridge's shadow in the haze
+  stays grey.
+- Corrections found in the look check (dev runs 1 to 3 and a review round): (1) the haze notes'
+  morning (full to 22 deg, gone by 38) and then a morning gone by 15 laid a mist veil over the plain
+  and the hillside at `lowsun_fp` (08:00 in March, sun 12.7 deg, clear): the morning is now full from
+  1 to 6 deg and gone by 10 (3.2), and the mist's density takes `ValleyDepthWeight` (the ring taps'
+  mean ground 20 to 60 m above the floor), so a plain and the open sea pool none; the 05:15 valley
+  (sun 6.3 deg) and `sunrise_ridge` (5.1 deg) keep their mist; (2) the research's clear-air beam
+  mist 0.3 with high-pass 0.6 drew a warm band along the horizon toward the low sun at `lowsun_fp`
+  (+7% horizon-band luma from the beams alone); 0.12 and 0.85 brought it to +1.2%, and the contrast
+  on the lit share (above) removes what was left: the strip of plain below the horizon toward the
+  sun went from +5.4% (a band) to -4.5% against the frame with the legacy shafts; (3) the haze's air
+  has no sun lobe of its own: its limit already holds the glow toward the sun (the table's aureole,
+  the classic glow), and the prototype's extra HG(0.72) lobe would light far ground toward a low
+  sun brighter than the sky behind it; the mist keeps its lobe; (4) the march binds the horizon and
+  height maps whenever the shading's `litTerrain` says they are read (terrain shadows or terrain
+  occlusion on); it bound the stand-ins without terrain shadows while `airGround` read heights from
+  them. Not built: the precomputed mist floor texture. The 15 height taps run once per
+  half-resolution pixel where the mist runs (the prototype's cost came from running them in every
+  lit fragment, with overdraw), so no texture or unit is needed.
+- Dropped as planned: halos for lamps and fires, `volCarve`, the un-floored high-pass, the sky
+  backdrop blit, the per-fragment haze, the variant channel, the other haze variants (grey extinction
+  is not offered as a knob); also the research's own temporal resolve.
+- Off equals before (item 5; `20261018-080035-before` on the base build against
+  `20261018-092937-review-new`, the lane test `b8lane` with the features_ab clocks and cloud pin):
+  with TAA off (a shot repeats there) the three switches off are pixel-identical to the base build
+  at `pinewood_morn`, `pine_eve` and `sunrise_ridge`; `valley_0515` 410 pixels over 2 levels (the
+  base build's own repeat 384, the water), `lowsun_fp` 1,144 (base 1,143, the same moving thing on
+  the horizon), `hl_front` 4 (base 4), `noon_fields` 1,608 (all on the posed soldier's head, which
+  takes another pose in each boot; the in-boot repeat is 21), `town_night` 510,648 (all on the fire,
+  its smoke and what the fire lights; the in-boot repeat is 291,600). With TAA on shots do not
+  repeat (the jitter phase), as in B11.
+- On against off (TAA on, 1080p, 4x MSAA; mean display luma per band, sky / horizon / ground):
+  `pinewood_morn` (setFog 0.1, sun 14.4 deg) +3.4 / +15.9 / +3.0%, R/B 0.934 to 0.948 (warmer):
+  shafts through the crowns and a pale veil over the backlit crowns near the sun; `valley_0515`
+  -2.7 / -3.5 / +4.9%: pink mist banks along the shore and the low ground, islands and ridges out of
+  it; `sunrise_ridge` -2.9 / +12.3 / +0.4%: glowing mist behind the cypresses, the far massif under
+  pink mist; `hl_front` (22:00, setFog 0.2) +14.3 / +2.8 / +0.1%: the Jeep's cones glow above the
+  lit road, the night sky unchanged; `lowsun_fp` -1.2 / -2.1 / -0.1%, the M113's backlit side
+  -2.1% luma with its hue kept (R/B 1.113 to 1.115); `pine_eve` -1.7 / -0.7 / +0.5%, the beam
+  through the cypress gap; `noon_fields` 0.0 / +0.3 / 0.0%; `town_night` within its fire and smoke
+  noise. Where the sun is in view in clear air the legacy shafts' soft glow is gone and the thin
+  beams give back only part of it (skies -1 to -3%); the frame's R/B drops 3 to 7% on the dawn views
+  (the white-pink mist is less saturated than the lit ground).
+- Cost (single readings, the backend's smoothed `air` section, RTX 4060 Ti, one other game on the
+  machine, no clock log; `gpu-review.md`): with beams 0.62 to 1.05 ms (half-resolution march, blur,
+  mean and apply; 0.65 to 1.10 with TAA off), haze and mist without beams 0.16 to 0.28 ms, the apply
+  alone at noon and at night 0.04 to 0.05 ms; the legacy shafts it replaces took 0.27 to 0.43 ms in
+  the same views. Under the plan's 2 to 4 ms at dawn, dusk and in mist on a 3060 (MENU's 1.5 to 2x
+  rule: about 1 to 2 ms).
+- Gate: build 0 warnings; touched C++ files clang-format clean (all were clean at the base); unit
+  gate tags plus `[FeatureSwitches],[FeatureGates],[PostStages],[TemporalAA],[TerrainDetail],
+  [LumaSharpen],[atmosphere],[AirMedium]` 537/537 (14 new `[AirMedium]` cases); the full suite the 6
+  known localisation failures only (3212 cases); smoke_abel 1/1 (KHR_debug ids 131154, 131169 and
+  131218 only); 28 contract mutations (the lane's 19 and the review's 9, `mutate_final.py`) each
+  turn their cases red on the final code (`mutations-final.log`).
+- Landed on B9 (7b7e3e6; A6, B5, B2, B10 and B9 landed after the lane's base) by a three-way apply,
+  13 files in conflict, both sides kept: `Haze` at 78 after `Detail` (`Count` 79; the clouds,
+  water and canopy slots and `litPlanned[4]` as B9 left them, `LitConstPlanned` `Night` to
+  `Weather`, `End` equals `Count`); the debug view moves to 8 (`kDebugViewAir`), after A6's light
+  tiles (6) and B2's albedo (7); the sea's main ends in `finishFragment` since B5, which carries the
+  haze's fog edge, so the lane's own water tail is gone (the off case checks the call instead);
+  the canopy's post shader beside the air pass's four (19 post programs); the landed registry rows
+  (B8 between B5 and B9, landed=18/26) and the sea's three sub-knobs then `volGain` (15 in all);
+  the CMake test list; these notes, the README and the roadmap. Past the conflicts, the semantic
+  one: the terrain and clouds piece the march pastes now also holds B10's sky-matched cloud shadows
+  (`domeCloudCover`) and B9's `canopySunVisibility`. The march reads the sky's cloud density on
+  unit 9 (`skyDensity`, rebound with `BindSkyDensity`), so the beams and the haze's sun visibility
+  take the sky-matched cloud shadows the ground gets, and it declares `canopySun` (unit 15) and the
+  world names `canopySunVisibility` reads (`shadowCtl`, `camFwd`, `vWorldRel`) without calling it.
+  The apply, which pastes the sky piece but not the terrain and clouds piece, declares `skyDensity`
+  and stand-ins for the lit clouds' density lookups (`skyCloudDensity`, `skyDomeUv`), which only
+  the unused dome shading calls. Merged gate: build 0 warnings, touched files clang-format clean,
+  the gate tags plus the landed lanes' tags and `[AirMedium]` 625/625, smoke_abel 1/1 (KHR_debug
+  ids 131154, 131169 and 131218 only; the air programs link).
+- Open: the veil over backlit crowns in setFog (physical, close to "flattened crowns"; `volGain` and
+  the misty high-pass are the levers); the far massif under sunrise mist (the haze notes' "too
+  washed out" risk); clear-air views toward a low sun lose the legacy shafts' glow (above; keeping
+  the legacy shafts in clear air and replacing them only in mist is the lever); the 06:00 to 06:30
+  valley mist of the haze notes is gone with the shorter morning; with TAA off thin foliage against
+  the glow shows speckles; half-resolution shafts beside trunks have blocky edges; a smoke puff in
+  front of far terrain takes that terrain's haze; the beams and the legacy shafts swap at the beams'
+  gate edge (sun 30 deg, 60 deg from the view), not seen in motion; AI sight ignores the medium
+  (`AirOpticalDepth` is ready; the follow-up issue is not filed); no RTX 3060 measured; interiors,
+  optics and night vision skip the stage (the fog edge follows a frame later).
 
 ### B9. hfrt (long tree shadows from the canopy heightfield)
 

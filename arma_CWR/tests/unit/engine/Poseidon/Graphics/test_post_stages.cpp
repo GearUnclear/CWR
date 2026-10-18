@@ -109,11 +109,12 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
     CHECK(gpu::kMarkCount <= 32);
     // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
     // plus the linear depth and the debug view that shows it; A5 the TAA
-    // resolve and its sharpen.
-    CHECK(landed == 9);
+    // resolve and its sharpen; B8 the air pass.
+    CHECK(landed == 10);
     CHECK(GetPostStageInfo(PostStage::Temporal).landed);
     CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
-    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter})
+    CHECK(GetPostStageInfo(PostStage::Air).landed);
+    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::CombatScatter})
     {
         CAPTURE(GetPostStageInfo(s).name);
         CHECK_FALSE(GetPostStageInfo(s).landed);
@@ -316,8 +317,8 @@ TEST_CASE("Post stages: the luma sharpen reads the composite and writes the fram
 
 TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
 {
-    // Today the debug view is its only reader; the stages that land with a
-    // half-resolution pass set readsLinearDepth.
+    // The debug view and the air pass (B8) read it; the stages that land with
+    // a half-resolution pass set readsLinearDepth.
     int readers = 0;
     for (int i = 0; i < kPostStageCount; ++i)
     {
@@ -329,13 +330,14 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
             ++readers;
         }
     }
-    CHECK(readers == 1);
+    CHECK(readers == 2);
     CHECK(GetPostStageInfo(PostStage::DebugView).readsLinearDepth);
+    CHECK(GetPostStageInfo(PostStage::Air).readsLinearDepth);
 
     PostFrameInputs in = Shipped();
     // 6 is the forward shaders' light-tile view (A6) and 7 their albedo view
     // (B2): no post stage of their own.
-    for (int view = 0; view <= kDebugViewAlbedo; ++view)
+    for (int view = 0; view <= kDebugViewAir; ++view)
     {
         CAPTURE(view);
         in.debugView = view;
@@ -347,12 +349,14 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
               Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
     }
     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
-    // the light tiles after it (debug=6) and B2's albedo view last (debug=7).
+    // the light tiles after it (debug=6), B2's albedo view (debug=7) and the air
+    // pass's in-scatter last (debug=8, B8).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
     CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
     CHECK(kDebugViewAlbedo == 7);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewAlbedo));
+    CHECK(kDebugViewAir == kDebugViewAlbedo + 1);
+    CHECK(debug->maxValue == static_cast<float>(kDebugViewAir));
 }
 
 TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][remaster][PostStages]")
@@ -371,38 +375,94 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
                             for (float weight : {0.0f, 0.5f})
                                 for (bool temporal : {false, true})
                                     for (bool luma : {false, true})
-                                    {
-                                        PostFrameInputs in;
-                                        in.ambientOcclusion = ao;
-                                        in.bloom = bloom;
-                                        in.sunShafts = shafts;
-                                        in.debugView = view;
-                                        in.worldDepth = depth;
-                                        in.glow = glow;
-                                        in.shaftWeight = weight;
-                                        in.temporal = temporal;
-                                        in.lumaSharpen = luma;
-                                        const PostStagePlan plan = PlanPostStages(in);
-                                        CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma);
-                                        CHECK((plan.runs & ~landed) == 0u);
-                                        // A pass that runs resolves first and composites.
-                                        if (!plan.Empty())
+                                        for (int air = 0; air < 3; ++air)
                                         {
-                                            CHECK(plan.Runs(PostStage::Resolve));
-                                            CHECK(plan.Runs(PostStage::Composite));
+                                            PostFrameInputs in;
+                                            in.ambientOcclusion = ao;
+                                            in.bloom = bloom;
+                                            in.sunShafts = shafts;
+                                            in.debugView = view;
+                                            in.worldDepth = depth;
+                                            in.glow = glow;
+                                            in.shaftWeight = weight;
+                                            in.temporal = temporal;
+                                            in.lumaSharpen = luma;
+                                            in.air = air > 0;
+                                            in.airBeams = air > 1;
+                                            const PostStagePlan plan = PlanPostStages(in);
+                                            CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma, air);
+                                            CHECK((plan.runs & ~landed) == 0u);
+                                            // A pass that runs resolves first and composites.
+                                            if (!plan.Empty())
+                                            {
+                                                CHECK(plan.Runs(PostStage::Resolve));
+                                                CHECK(plan.Runs(PostStage::Composite));
+                                            }
+                                            // The resolve brings its sharpen, and never runs on a
+                                            // frame drawn without the jitter. The sharpen runs
+                                            // alone only as the luma sharpen.
+                                            if (plan.Runs(PostStage::Temporal))
+                                                CHECK(plan.Runs(PostStage::Sharpen));
+                                            if (!temporal)
+                                                CHECK_FALSE(plan.Runs(PostStage::Temporal));
+                                            if (plan.Runs(PostStage::Sharpen) && !plan.Runs(PostStage::Temporal))
+                                                CHECK(luma);
+                                            if (!luma)
+                                                CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
+                                            // The air pass runs exactly when asked and the
+                                            // world is there to march; its beams replace the
+                                            // shafts; it reads the linear depth.
+                                            CHECK(plan.Runs(PostStage::Air) == (air > 0 && depth && glow));
+                                            if (plan.Runs(PostStage::Air))
+                                                CHECK(plan.Runs(PostStage::LinearDepth));
+                                            if (plan.Runs(PostStage::Air) && air > 1)
+                                                CHECK_FALSE(plan.Runs(PostStage::Shafts));
                                         }
-                                        // The resolve brings its sharpen, and never runs on a
-                                        // frame drawn without the jitter. The sharpen runs
-                                        // alone only as the luma sharpen.
-                                        if (plan.Runs(PostStage::Temporal))
-                                            CHECK(plan.Runs(PostStage::Sharpen));
-                                        if (!temporal)
-                                            CHECK_FALSE(plan.Runs(PostStage::Temporal));
-                                        if (plan.Runs(PostStage::Sharpen) && !plan.Runs(PostStage::Temporal))
-                                            CHECK(luma);
-                                        if (!luma)
-                                            CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
-                                    }
+}
+
+TEST_CASE("Post stages: the air pass asks for the pass, and its beams replace the shafts",
+          "[Graphics][remaster][PostStages][AirMedium]")
+{
+    // Off (the three switches or their gates): the plan of before.
+    PostFrameInputs in = Shipped();
+    const std::uint32_t before = PlanPostStages(in).runs;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Air));
+
+    // Haze or mist only: the air pass and its linear depth, the shafts stay.
+    in.air = true;
+    PostStagePlan plan = PlanPostStages(in);
+    CHECK(plan.runs == (before | Mask({PostStage::LinearDepth, PostStage::Air})));
+    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
+    // With the beams the legacy shafts hold off.
+    in.airBeams = true;
+    plan = PlanPostStages(in);
+    CHECK(plan.Runs(PostStage::Air));
+    CHECK_FALSE(plan.Runs(PostStage::Shafts));
+    CHECK(plan.runs == ((before & ~Mask({PostStage::Shafts})) | Mask({PostStage::LinearDepth, PostStage::Air})));
+
+    // It asks for the pass by itself.
+    PostFrameInputs bare;
+    bare.air = true;
+    CHECK(PlanPostStages(bare).runs ==
+          Mask({PostStage::Resolve, PostStage::LinearDepth, PostStage::Air, PostStage::Composite}));
+
+    // A vehicle interior (no world depth) or a screen overlay (the haze would
+    // grey its black surround): no air, and the shafts follow their own rule.
+    in.worldDepth = false;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Air));
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::LinearDepth));
+    in.worldDepth = true;
+    in.glow = false;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Air));
+    CHECK(PlanPostStages(in).Runs(PostStage::Composite));
+
+    // The air pass runs before the bloom and the composite, which read its
+    // output (EngineGL33_PostFX.cpp).
+    CHECK(static_cast<int>(PostStage::Air) > static_cast<int>(PostStage::Ao));
+    CHECK(static_cast<int>(PostStage::Air) < static_cast<int>(PostStage::Bloom));
+    CHECK(GetPostStageInfo(PostStage::Air).section == gpu::Section::Air);
+    CHECK(std::string(GetPostStageInfo(PostStage::Air).name) == "air");
 }
 
 TEST_CASE("Post stages: the backend runs every landed stage and marks it from the table",

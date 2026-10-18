@@ -815,6 +815,10 @@ void EngineGL33::UploadLitFrameConstants()
     // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
     // the camera moved enough; zero while the switch or its gate is off.
     UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
+    // The air pass (B8): this frame's medium, and the classic fog's edge
+    // (litHaze.x) while the haze replaces the fog before it.
+    _lightRigExposure = rig.exposure;
+    UpdateAirMedium();
     FlushLitConstants();
     BindLightingTextures();
 }

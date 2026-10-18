@@ -199,6 +199,10 @@ def load_shaders(spec: str | os.PathLike | None = None, include_shadow_depth: bo
 
 # Files whose shaders are assembled from pieces spread over the family's files.
 _FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
+# Families whose tables also name pieces of another family: the post air pass
+# pastes the remastered prelude's LitConstants block, terrain and clouds piece
+# and sky piece (kPostShaders rows psPostAirMarch, psPostAirApply).
+_FAMILY_ALSO = {"EngineGL33_Post": ("EngineGL33_LightingShaders",)}
 _FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
 _SCREEN_VS_TABLE = re.compile(r"\bkScreenVertexPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
 _POST_TABLE = re.compile(r"\bkPostShaders\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\};", re.S)
@@ -220,6 +224,8 @@ def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DE
     if p.exists() and p.is_file():
         fam = _family(p.name)
         files = sorted(p.parent.glob(f"{fam}*.cpp")) if fam else [p]
+        for other in _FAMILY_ALSO.get(fam, ()):
+            files += sorted(p.parent.glob(f"{other}*.cpp"))
         return [f.read_text(encoding="utf-8", errors="replace") for f in files]
     s = str(spec)
     rev, path = s.split(":", 1) if ":" in s and not os.path.isabs(s) else (s, default_relpath)
@@ -230,6 +236,8 @@ def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DE
     names = subprocess.run(["git", "ls-tree", "--name-only", f"{rev}:{parent}"], cwd=root, capture_output=True,
                            text=True).stdout.split()
     files = sorted(n for n in names if n.startswith(fam) and n.endswith(".cpp"))
+    for other in _FAMILY_ALSO.get(fam, ()):
+        files += sorted(n for n in names if n.startswith(other) and n.endswith(".cpp"))
     return [git_show(f"{rev}:{parent}/{n}", root) for n in files]
 
 
