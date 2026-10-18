@@ -30,7 +30,10 @@
 // exactly as in the classic shaders, except under the sky table (feature
 // switch `atmosphere`): the sky dome is then shaded from the physically based
 // sky table (vLitMode 2, shadeSkyDome) and pre-lit world draws fade into the
-// table's horizon colour with their fog (vLitMode -1).
+// table's horizon colour with their fog (vLitMode -1); and under the clouds
+// switches (`litClouds`, `skyCloudShadows`): the dome turns with the sky's
+// drift, the dome's and the sky clouds' clouds are lit from their sun side
+// (vLitMode 2 and -2) and the sun disk dims behind a dome cloud.
 //
 // A fragment shader is the common prelude followed by one main body per pixel
 // shader. The prelude is split by concern (FragmentPiece in
@@ -114,19 +117,28 @@ void main() {
     vNormalW = vec3(0.0, 1.0, 0.0);
     vCrown = vec4(0.0);
     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
-    // The sky table: the camera-relative point on the view ray, from the
-    // vertex's screen position and the camera basis, perspective-interpolated
-    // so the fragment shader gets an exact view direction. The sky dome (sky
-    // mode 1) is shaded from the table (vLitMode 2); every other pre-lit draw of
-    // the world (the far horizon polygon, the sky clouds, particles) keeps its
-    // colour and fades into the table's horizon colour with its fog (-1).
-    if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {
+    // The sky's own clouds turn with the sky's drift (litSky.z, 0 unless a
+    // clouds switch is on): the dome's texture turns about the zenith.
+    bool dome = litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5;
+    if (dome && litSky.z != 0.0) vUV0.x += litSky.z;
+    // The sky table and the lit clouds: the camera-relative point on the view
+    // ray, from the vertex's screen position and the camera basis,
+    // perspective-interpolated so the fragment shader gets an exact view
+    // direction. The sky dome (sky mode 1) is shaded from the table and its
+    // clouds lit (vLitMode 2); the sky clouds (sky mode 2) are lit (-2) and,
+    // like every other pre-lit draw of the world (the far horizon polygon,
+    // particles), fade into the table's horizon colour with their fog (-1).
+    // The sun disk (sky mode 3) keeps its colour and its classic fog.
+    if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {
         vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);
         vec3 rel = (litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w;
-        if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {
+        if (dome && (litAtmo.x > 0.0 || litSky.x > 0.0 || litSky.z != 0.0)) {
             vWorldRel = rel;
             vLitMode = 2.0;
-        } else if (litAtmo.z > 0.0) {
+        } else if (litSkyFwd.w > 1.5 && litSkyFwd.w < 2.5 && litSky.x > 0.0) {
+            vWorldRel = rel;
+            vLitMode = -2.0;
+        } else if (litAtmo.z > 0.0 && litSkyFwd.w < 2.5) {
             vWorldRel = rel;
             vLitMode = -1.0;
         }
@@ -341,7 +353,9 @@ layout(std140) uniform LitConstants {
     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
-    vec4 litPlanned[6];   // 68-73: allocated to features still to land (clouds, night, combat, materials; 70 free)
+    vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
+    vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
+    vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litPlanned2;     // 76: planned canopy heightfield (hfrt; padding until it lands)
@@ -360,6 +374,7 @@ uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky vi
 uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
 uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, raw depth (soft-shadow blocker search)
 uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
+uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
 
 in vec4 vColor;
 in vec4 vSpecColor;
@@ -566,14 +581,77 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     return mix(1.0, mix(vis, 1.0, lift), litTerrainLift.z);
 }
 
+// ---- The sky's own clouds (feature switches litClouds and skyCloudShadows;
+// Graphics/Remaster/SkyDensity.hpp holds the CPU mirrors and the constants) --
+// The cloud-density map on unit 9, built from the weather sky texture: r broken
+// cloud (whiter than the clearest sky of its row), g the row is grey all round
+// (an overcast deck, counted as far as the weather is overcast), b darkness.
+const float kSkyShadowDeck = 1800.0;         // kSkyShadowDeckAltitude (m above sea level)
+const float kSkyShadowThreshold = 0.55;      // kSkyShadowThreshold
+const float kSkyShadowEdge = 0.12;           // kSkyShadowEdge
+const float kSkyShadowAnchorRadius = 1500.0; // kSkyShadowAnchorRadius (m)
+const float kSkySunBehindCloud = 0.12;       // kSkySunBehindCloud: the sun disk's light behind a dome cloud
+
+// SkyCloudDensity: broken cloud or the overcast deck, thicker where darker.
+float skyCloudDensity(vec4 m) {
+    float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));
+    return max(m.r, deck) * mix(0.75 + 0.25 * m.b, 0.5 + 0.5 * m.b, deck);
+}
+
+// SkyDomeUv: the dome's texture coordinate of a world direction, from
+// obloha.p3d's own mapping (u = azimuth / 180 deg, the texture wraps twice
+// around the horizon; v piecewise over the rings at -15, 0.87, 29.5, 59.5 and
+// 89 deg), turned with the sky (litSky.z).
+vec2 skyDomeUv(vec3 w) {
+    float az = atan(w.x, w.z) * 57.29578;
+    float e = asin(clamp(w.y * inversesqrt(max(dot(w, w), 1e-12)), -1.0, 1.0)) * 57.29578;
+    float v;
+    if (e < 0.87) v = mix(1.0, 0.9869, clamp((e + 15.0) / 15.87, 0.0, 1.0));
+    else if (e < 29.5) v = mix(0.9869, 0.5434, (e - 0.87) / 28.63);
+    else if (e < 59.5) v = mix(0.5434, 0.1736, (e - 29.5) / 30.0);
+    else v = mix(0.1736, 0.036, clamp((e - 59.5) / 29.5, 0.0, 1.0));
+    return vec2(az / 180.0 + litSky.z, v);
+}
+
+// SkyShadowCover of the dome's cloud in a direction (seen from the camera).
+float skyShadowCoverToward(vec3 w) {
+    float d = skyCloudDensity(textureLod(skyDensity, skyDomeUv(w), 0.0));
+    return smoothstep(kSkyShadowThreshold - kSkyShadowEdge, kSkyShadowThreshold + kSkyShadowEdge, d);
+}
+
+// The cloud shadow on a camera-relative point: projected along the sun to the
+// deck, the deck point is looked up in the dome in the direction an anchor
+// sees it (the camera's own view of the sky, from where the anchor stands,
+// litSkyShadow.xy), so the cloud the player sees in the sky is the one whose
+// shadow lies on the ground. While the anchor moves on, the old one's shadows
+// fade out (litSkyShadow.zw).
+float skyShadowCoverFrom(vec3 q, vec2 anchor) {
+    vec3 w = q - vec3(anchor.x, 0.0, anchor.y);
+    return w.y > 1.0 ? skyShadowCoverToward(w) : 0.0;
+}
+float domeCloudCover(vec3 rel) {
+    vec3 l = litSunDir.xyz;
+    float up = max(l.y, 0.06);
+    vec3 q = rel + l * (max(kSkyShadowDeck - (rel.y + litCamPos.y), 0.0) / up);
+    float c = skyShadowCoverFrom(q, litSkyShadow.xy);
+    if (litSkyShadow.w > 0.0) {
+        vec2 prev = litSkyShadow.xy + kSkyShadowAnchorRadius * vec2(cos(litSkyShadow.z), sin(litSkyShadow.z));
+        c = mix(c, skyShadowCoverFrom(q, prev), litSkyShadow.w);
+    }
+    return c;
+}
+
 // Broken-cloud shadows: the ground point is projected along the sun ray up to
 // the cloud deck and looked up in a drifting noise field whose covered fraction
 // matches the overcast. The noise is histogram-equalised and read once, and
 // the soft edge is symmetric about the threshold and narrows toward a clear or
 // a fully covered sky, so the covered fraction is exactly the overcast (no sun
-// patches under a full overcast, no stray shadows under a clear sky).
+// patches under a full overcast, no stray shadows under a clear sky). With the
+// sky-matched shadows (litSky.y) the dome's own clouds cast them instead, at
+// the transmission that keeps the field's mean (LightRig skyShadowCoverage).
 float cloudSunVisibility(vec3 posAbs) {
     if (litCloud.w < 0.5 || litFlags.y < 0.5) return 1.0;
+    if (litSky.y > 0.5) return mix(1.0, litCloud.y, domeCloudCover(posAbs - litCamPos.xyz));
     float up = max(litSunDir.y, 0.12);
     vec2 p = posAbs.xz + litSunDir.xz / up * (litCloudOffset.z - posAbs.y);
     float n = texture(cloudNoise, (p + litCloudOffset.xy) * litCloud.z).r;
@@ -768,11 +846,15 @@ void main() {
     vec4 r0;
     float ambientShare = 0.0;
     if (vLitMode > 1.5) {
-        // The sky dome (the sky table), over its pre-lit classic colour.
+        // The sky dome (the sky table and the lit clouds), over its pre-lit
+        // classic colour.
         vec4 classic = vColor * t0;
         classic *= constColor;
         classic.rgb += vSpecColor.rgb;
-        r0 = vec4(shadeSkyDome(t0, classic.rgb), classic.a);
+        vec3 rgb = classic.rgb;
+        if (litAtmo.x > 0.0) rgb = shadeSkyDome(t0, classic.rgb);
+        else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));
+        r0 = vec4(rgb, classic.a);
     } else if (vLitMode > 0.5) {
         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
@@ -780,6 +862,13 @@ void main() {
         r0 = vColor * t0;
         r0 *= constColor;
         r0.rgb += vSpecColor.rgb;
+        // The sky clouds lit from their sun side (litClouds).
+        if (vLitMode < -1.5) r0.rgb = litCloudsOverClassic(r0.rgb, litCloudTermsSheet(t0.a));
+        // The sun disk behind a dome cloud (skyCloudShadows): its colour and
+        // its coverage both, so it fades into the cloud whatever its blending
+        // (a dimmed colour alone drew a dark disk over the sky).
+        if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
+            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));
     }
     finishFragment(r0, ambientShare, true);
 }

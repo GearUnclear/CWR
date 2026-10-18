@@ -48,6 +48,10 @@ constexpr float kGateCanopyMinSunDeg = 2.0f;       // long canopy shadows: low s
 constexpr float kGateCanopyMaxSunDeg = 25.0f;
 constexpr float kGateCanopyMinSkyThrough = 0.5f; // long canopy shadows: mostly clear sky
 constexpr float kGateLitCloudsMaxSkyThrough = 0.85f;
+// Sky-matched cloud shadows: down to where the rig's sun is gone (its horizon
+// fade starts at -1.5 deg, LightRig.cpp), so the hand-over to the noise field
+// below it never shows.
+constexpr float kGateSkyShadowsMinSunDeg = -1.5f;
 
 // What a gate looks at. The backend fills what exists today; an input whose
 // source lands with a later step keeps its "unknown" default, noted per field.
@@ -82,6 +86,9 @@ struct GateInputs
     // The sky table's transmittance and multiple-scattering tables are built
     // (a worker thread builds them when the haze changes; Atmosphere.hpp).
     bool skyTablesReady = true;
+    // The cloud-density map of the current weather sky is built (a worker
+    // thread builds it when the weather sky changes; SkyDensity.hpp).
+    bool skyDensityReady = true;
 };
 
 struct Gate

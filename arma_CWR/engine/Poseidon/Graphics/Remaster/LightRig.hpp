@@ -179,6 +179,10 @@ struct LightRigInputs
     float skyThrough = 1.0f;                   // 1 clear .. 0 overcast
     float nightEffect = 0.0f;                  // 0 day .. 1 night
     bool cloudShadowsActive = false;           // the sun dimming by overcast moves into the cloud field
+    // The share of the ground the sky-matched cloud shadows cover (B10,
+    // SkyDensity.hpp SkyShadowCoverage); negative while the noise field casts
+    // them. The field then carries the same mean dimming over this share.
+    float skyShadowCoverage = -1.0f;
 };
 
 struct LightRig
@@ -195,7 +199,9 @@ struct LightRig
     float exposure = 1.0f;
     // Broken-cloud field for the shader: fraction of the ground under cloud
     // shadow (0 under a clear sky, the sky cover once it is clearly cloudy) and
-    // the fraction of sunlight that survives under a cloud.
+    // the fraction of sunlight that survives under a cloud. With sky-matched
+    // shadows (skyShadowCoverage) the transmission is the one that keeps the
+    // field's mean dimming over the sky's own covered share.
     float cloudCover = 0.0f;
     float cloudTransmit = 1.0f;
 };

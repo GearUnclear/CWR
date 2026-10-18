@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
+#include <Poseidon/Graphics/Remaster/SkyDensity.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -1436,6 +1437,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litAtmoCloudSun", LC::AtmoCloudSun, 1},
         {"litAtmoGlow", LC::AtmoGlow, 1},
         {"litAtmoDome", LC::AtmoDome, 1},
+        {"litSky", LC::Sky, 1},
+        {"litSkyShadow", LC::SkyShadow, 1},
         {"litPlanned", LC::Planned, LC::PlannedCount},
         {"litWater0", LC::Water0, 1},
         {"litWater1", LC::Water1, 1},
@@ -1501,17 +1504,22 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
     // The planned slots: the one below the sun shadows is the reserved padding,
-    // the six between the sky pass and the water and the one between the
-    // water and the terrain detail are the planned padding, the rest continue
-    // the declared ones (B1 landed the sun shadow slots 59 and 60, A7 the sky
-    // slots 61 to 67 of plan section 3.3, B5 the water slots 74 and 75).
+    // the four between the clouds and the water and the one between the water
+    // and the terrain detail are the planned padding, the rest continue the
+    // declared ones (B1 landed the sun shadow slots 59 and 60, A7 the sky slots
+    // 61 to 67 of plan section 3.3, B10 the clouds slots 68 and 69, B5 the
+    // water slots 74 and 75).
     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
     CHECK(LC::ReservedCount == 1);
     CHECK(static_cast<int>(LC::Taa) == 59);
     CHECK(static_cast<int>(LC::Pcss) == 60);
     CHECK(static_cast<int>(LC::SkyRight) == 61);
     CHECK(static_cast<int>(LC::AtmoDome) == 67);
-    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
+    CHECK(static_cast<int>(LC::Sky) == 68);
+    CHECK(static_cast<int>(LC::SkyShadow) == 69);
+    // 70 is free (the light list rides in slot 22), so the padding starts there.
+    CHECK(static_cast<int>(LC::Planned) == 70);
+    CHECK(gl::LitConstPlanned::Night == static_cast<int>(LC::Planned) + 1);
     CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
     CHECK(static_cast<int>(LC::Water0) == 74);
     CHECK(static_cast<int>(LC::Water1) == 75);
@@ -1581,14 +1589,21 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     // their pre-existing paths and the fog keeps its classic colours: the
     // feature's "off" is the frame before it.
     const std::string screen = gl::RemasterVertexSource(0); // VSScreen
-    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {");
+    // B10 widened the gate by the clouds' slots (litSky, zero while they are
+    // off: see the clouds' own off case).
+    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0 || litSky.x > 0.0 || litSky.z != 0.0) {");
     REQUIRE(gate != std::string::npos);
-    // vLitMode is 0 before the gate, 2 (dome) or -1 (pre-lit world) inside it.
+    // vLitMode is 0 before the gate, 2 (dome), -2 (lit sky clouds) or -1
+    // (pre-lit world) inside it.
     CHECK(screen.find("vLitMode = 0.0;") < gate);
     CHECK(screen.find("vLitMode = 2.0;") > gate);
+    CHECK(screen.find("vLitMode = -2.0;") > gate);
     CHECK(screen.find("vLitMode = -1.0;") > gate);
-    CHECK(CountOf(screen, "vLitMode = ") == 3);
-    CHECK(screen.find("if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {") != std::string::npos);
+    CHECK(CountOf(screen, "vLitMode = ") == 4);
+    CHECK(screen.find("bool dome = litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5;") != std::string::npos);
+    CHECK(screen.find("if (dome && (litAtmo.x > 0.0 || litSky.x > 0.0 || litSky.z != 0.0)) {") != std::string::npos);
+    // The pre-lit world (and not the sun disk, sky mode 3) takes the table's fog.
+    CHECK(screen.find("} else if (litAtmo.z > 0.0 && litSkyFwd.w < 2.5) {") != std::string::npos);
     // The ray from the screen position: NDC from the pixel position the vertex
     // shader itself projects with, times the perspective w.
     CHECK(screen.find("vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);") != std::string::npos);
@@ -1609,7 +1624,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     // The dome branch is PSNormal's; the other mains light only vLitMode 1.
     const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
     CHECK(normal.find("if (vLitMode > 1.5) {") != std::string::npos);
-    CHECK(normal.find("shadeSkyDome(t0, classic.rgb)") != std::string::npos);
+    CHECK(normal.find("if (litAtmo.x > 0.0) rgb = shadeSkyDome(t0, classic.rgb);") != std::string::npos);
     for (int ps : {1, 2}) // PSDetail, PSGrass
     {
         CAPTURE(ps);
@@ -1769,4 +1784,208 @@ TEST_CASE("Remaster sea: the backend routes the landscape's sea faces only insid
     CHECK(end < next);
     // The water bump map nothing sampled is gone with its missing file.
     CHECK(ReadTextFile(Gl33Dir() / "TextureGL33.hpp").find("GetWaterBumpMap") == std::string::npos);
+}
+
+namespace
+{
+// The value of `const float <name> = <value>;` in a GLSL source, or NaN.
+float GlslConst(const std::string& source, const std::string& name)
+{
+    const std::regex decl("const float " + name + R"(\s*=\s*(-?[0-9.]+)\s*;)");
+    std::smatch m;
+    if (!std::regex_search(source, m, decl))
+        return std::numeric_limits<float>::quiet_NaN();
+    return std::stof(m[1].str());
+}
+
+// A float as the shaders write it: the shortest of 1 to 4 decimals that reads
+// back exactly.
+std::string GlslNumber(float v)
+{
+    for (int digits = 1; digits <= 4; ++digits)
+    {
+        std::ostringstream s;
+        s << std::fixed;
+        s.precision(digits);
+        s << v;
+        if (std::abs(std::stof(s.str()) - v) < 1e-5f)
+            return s.str();
+    }
+    std::ostringstream s;
+    s << v;
+    return s.str();
+}
+} // namespace
+
+TEST_CASE("Remaster sky clouds: with their slots at zero every draw is the one before them",
+          "[Graphics][Shaders][remaster][clouds]")
+{
+    // The clouds switches are off (switch, gate, classic, night vision) exactly
+    // when the engine uploads litSky as zero (EngineGL33_SkyClouds.cpp
+    // UploadLitClouds). Then the dome keeps its texture coordinate and its
+    // draw, the sky clouds and the sun disk pass through, and the shadows come
+    // from the noise field: the frame before B10.
+    const std::string screen = gl::RemasterVertexSource(0); // VSScreen
+    CHECK(screen.find("if (dome && litSky.z != 0.0) vUV0.x += litSky.z;") != std::string::npos);
+    CHECK(CountOf(screen, "vUV0 ") == 1);      // set once ...
+    CHECK(CountOf(screen, "vUV0.x += ") == 1); // ... and turned once
+    const size_t sheets = screen.find("} else if (litSkyFwd.w > 1.5 && litSkyFwd.w < 2.5 && litSky.x > 0.0) {");
+    REQUIRE(sheets != std::string::npos);
+    CHECK(screen.find("vLitMode = -2.0;", sheets) != std::string::npos);
+
+    const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
+    CHECK(normal.find("else if (litSky.x > 0.0) rgb = litCloudsOverClassic(rgb, litCloudTermsDome(vUV0));") !=
+          std::string::npos);
+    CHECK(normal.find("if (vLitMode < -1.5) r0.rgb = litCloudsOverClassic(r0.rgb, litCloudTermsSheet(t0.a));") !=
+          std::string::npos);
+    CHECK(normal.find("if (litSkyFwd.w > 2.5 && litSky.y > 0.5)") != std::string::npos);
+    // The sun disk fades (colour and coverage), it does not turn into a dark disk.
+    CHECK(normal.find("r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));") != std::string::npos);
+    // Only PSNormal draws the sky.
+    for (int ps : {1, 2, 3})
+    {
+        CAPTURE(ps);
+        CHECK(std::string(gl::RemasterFragmentMain(ps)).find("litSky") == std::string::npos);
+    }
+
+    // The shadows: the dome only behind litSky.y, before the noise lookup.
+    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
+    const size_t dome = terrain.find("if (litSky.y > 0.5) return mix(1.0, litCloud.y, domeCloudCover(");
+    REQUIRE(dome != std::string::npos);
+    CHECK(dome < terrain.find("texture(cloudNoise,"));
+    // The previous anchor's lookup only while it fades.
+    CHECK(terrain.find("if (litSkyShadow.w > 0.0) {") != std::string::npos);
+
+    // Lit clouds: on the dome only behind litSky.x, and the terms weigh
+    // nothing at zero strength.
+    const std::string sky = Piece(gl::FragmentPiece::Sky);
+    const size_t lit = sky.find("if (litSky.x > 0.0) {\n        vec4 lc = litCloudTermsDome(vUV0);");
+    REQUIRE(lit != std::string::npos);
+    CHECK(lit < sky.find("vec3 disp = mix(skyDisplay(a), skyDisplay(cloudLin), cloud);"));
+    CHECK(sky.find("if (t.w <= 0.0) return lin;") != std::string::npos);
+    CHECK(sky.find("if (t.w <= 0.0) return disp;") != std::string::npos);
+    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);") !=
+          std::string::npos);
+}
+
+TEST_CASE("Remaster sky clouds: at a high sun the lit-cloud terms are identity, as SkyDensity's LitCloudTerms",
+          "[Graphics][Shaders][remaster][clouds]")
+{
+    // litCloudTerms computes the terms the C++ mirror computes (relief, bellies,
+    // darkening against the sun, lining) and fades every one of them with the
+    // low sun on its way out, so from kLitCloudFadeEndDeg up a cloud keeps its
+    // light: never only darker at midday (test_sky_density.cpp checks the
+    // mirror is identity there).
+    const std::string sky = Piece(gl::FragmentPiece::Sky);
+    const size_t begin =
+        sky.find("vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float deck) {");
+    REQUIRE(begin != std::string::npos);
+    const size_t end = sky.find("\n}\n", begin);
+    REQUIRE(end != std::string::npos);
+    const std::string body = sky.substr(begin, end - begin);
+    for (const char* line : {
+             "float direct = smoothstep(-0.06, 0.04, l.y) * mix(0.45, 1.0, clamp(litSky.w, 0.0, 1.0));",
+             "float relief = clamp((d - tau) * kLitCloudRelief, -0.35, 0.8);",
+             "float gain = 1.0 + relief * direct;",
+             "gain *= 1.0 + (0.55 - dark) * 0.7 * deck;",
+             "gain *= 1.0 - 0.35 * pow(max(cosT, 0.0), 6.0) * smoothstep(0.35, 0.9, feature) * direct;",
+             "float warm = clamp(relief, 0.0, 1.0) * direct;",
+             "float rim = clamp((d - tau) * 3.0, 0.0, 1.0) * (1.0 - 0.5 * d);",
+             "float hg = 0.008 / pow(max(1.64 - 1.6 * cosT, 1e-4), 1.5);",
+             "float silver = hg * rim * kLitCloudSilver * direct;",
+             "float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w);",
+             "return vec4(mix(1.0, gain, lowSun), warm * lowSun, silver * lowSun, litSky.x * smoothstep(0.02, 0.25, "
+             "d));",
+         })
+    {
+        CAPTURE(line);
+        CHECK(body.find(line) != std::string::npos);
+    }
+    // The fade comes once, on the way out: no term is faded on its own.
+    CHECK(CountOf(body, "lowSun") == 4);
+    // From there up the shaders skip the march (the terms would be identity).
+    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);") !=
+          std::string::npos);
+    CHECK(sky.find("if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, "
+                   "0.0, 0.0);") != std::string::npos);
+    const LitCloudShade noon = LitCloudTerms(60.0f, 1.0f, 0.8f, 0.8f, 1.0f, 0.2f, 0.0f, 0.7f);
+    CHECK(noon.gain == 1.0f);
+    CHECK(noon.warm == 0.0f);
+    CHECK(noon.silver == 0.0f);
+}
+
+TEST_CASE("Remaster sky clouds: the shaders use SkyDensity.hpp's constants and dome mapping",
+          "[Graphics][Shaders][remaster][clouds]")
+{
+    const std::string terrain = Piece(gl::FragmentPiece::TerrainClouds);
+    const std::string sky = Piece(gl::FragmentPiece::Sky);
+    struct Const
+    {
+        const std::string* source;
+        const char* glsl;
+        float value;
+    };
+    const Const consts[] = {
+        {&terrain, "kSkyShadowDeck", kSkyShadowDeckAltitude},
+        {&terrain, "kSkyShadowThreshold", kSkyShadowThreshold},
+        {&terrain, "kSkyShadowEdge", kSkyShadowEdge},
+        {&terrain, "kSkyShadowAnchorRadius", kSkyShadowAnchorRadius},
+        {&terrain, "kSkySunBehindCloud", kSkySunBehindCloud},
+        {&sky, "kLitCloudRelief", kLitCloudRelief},
+        {&sky, "kLitCloudSilver", kLitCloudSilver},
+        {&sky, "kLitCloudStepDeg", kLitCloudStepDeg},
+        {&sky, "kLitCloudFadeStartDeg", kLitCloudFadeStartDeg},
+        {&sky, "kLitCloudFadeEndDeg", kLitCloudFadeEndDeg},
+    };
+    for (const Const& c : consts)
+    {
+        CAPTURE(c.glsl);
+        CHECK(GlslConst(*c.source, c.glsl) == Catch::Approx(c.value));
+    }
+
+    // skyDomeUv: the rings of SkyDomeV, segment by segment.
+    const float* e = kSkyDomeRingElevationDeg;
+    const float* v = kSkyDomeRingV;
+    REQUIRE(kSkyDomeRings == 5);
+    const std::string segments[] = {
+        "if (e < " + GlslNumber(e[1]) + ") v = mix(" + GlslNumber(v[0]) + ", " + GlslNumber(v[1]) + ", clamp((e + " +
+            GlslNumber(-e[0]) + ") / " + GlslNumber(e[1] - e[0]) + ", 0.0, 1.0));",
+        "else if (e < " + GlslNumber(e[2]) + ") v = mix(" + GlslNumber(v[1]) + ", " + GlslNumber(v[2]) + ", (e - " +
+            GlslNumber(e[1]) + ") / " + GlslNumber(e[2] - e[1]) + ");",
+        "else if (e < " + GlslNumber(e[3]) + ") v = mix(" + GlslNumber(v[2]) + ", " + GlslNumber(v[3]) + ", (e - " +
+            GlslNumber(e[2]) + ") / " + GlslNumber(e[3] - e[2]) + ");",
+        "else v = mix(" + GlslNumber(v[3]) + ", " + GlslNumber(v[4]) + ", clamp((e - " + GlslNumber(e[3]) + ") / " +
+            GlslNumber(e[4] - e[3]) + ", 0.0, 1.0));",
+    };
+    for (const std::string& seg : segments)
+    {
+        CAPTURE(seg);
+        CHECK(terrain.find(seg) != std::string::npos);
+    }
+    // u: azimuth from north toward east over 180 degrees, plus the turn.
+    CHECK(terrain.find("float az = atan(w.x, w.z) * 57.29578;") != std::string::npos);
+    CHECK(terrain.find("return vec2(az / 180.0 + litSky.z, v);") != std::string::npos);
+    // The density and the deck weight as SkyCloudDensity and SkyDeckWeight.
+    CHECK(terrain.find("float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));") != std::string::npos);
+    CHECK(terrain.find("return max(m.r, deck) * mix(0.75 + 0.25 * m.b, 0.5 + 0.5 * m.b, deck);") != std::string::npos);
+    const float w = SkyDeckWeight(0.5f);
+    CHECK(w == Catch::Approx(1.0f - 0.375f * 0.375f * (3.0f - 2.0f * 0.375f)));
+    CHECK(SkyCloudDensity(0.6f, 1.0f, 0.4f, w) ==
+          Catch::Approx(std::max(0.6f, w) * ((0.75f + 0.25f * 0.4f) * (1.0f - w) + (0.5f + 0.5f * 0.4f) * w)));
+    // The march steps as LitCloudStepAngleDeg, the low-sun fade as LitCloudLowSun.
+    CHECK(sky.find("for (int k = 1; k <= " + std::to_string(kLitCloudSteps) + "; ++k) {") != std::string::npos);
+    CHECK(sky.find("float a = radians(kLitCloudStepDeg) * fk * (0.5 + 0.5 * fk);") != std::string::npos);
+    CHECK(sky.find("1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w)") != std::string::npos);
+    // The shadow edge as SkyShadowCover.
+    CHECK(terrain.find("smoothstep(kSkyShadowThreshold - kSkyShadowEdge, kSkyShadowThreshold + kSkyShadowEdge, d)") !=
+          std::string::npos);
+
+    // The engine builds the map, its coverage and the turn from SkyDensity.hpp.
+    const std::string engine = ReadTextFile(Gl33Dir() / "EngineGL33_SkyClouds.cpp");
+    for (const char* use : {"rm::BuildSkyDensityMap(", "rm::BuildSkyShadowCoverageTable(", "rm::SkyDomeTurnU(",
+                            "rm::MixSkyTexels(", "rm::SkyDeckWeight(", "s_clouds.anchor.Update("})
+    {
+        CAPTURE(use);
+        CHECK(engine.find(use) != std::string::npos);
+    }
 }

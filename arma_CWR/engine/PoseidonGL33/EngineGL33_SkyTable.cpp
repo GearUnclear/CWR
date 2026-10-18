@@ -300,7 +300,7 @@ bool EngineGL33::PollSkyTables()
 
 bool EngineGL33::RemasterSkyPending() const
 {
-    return s_sky.building;
+    return s_sky.building || SkyDensityPending();
 }
 
 void EngineGL33::BindSkyTable()
@@ -417,16 +417,22 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
 {
     if (s_sky.open)
         EndRemasterSky();
-    // Classic lighting, the switch off, and the paths that stay classic (a
+    // Classic lighting, the switches off, and the paths that stay classic (a
     // portrait, a 3D preview after the world, night vision) leave the sky
-    // draws alone: off draws exactly the frame without the feature.
+    // draws alone: off draws exactly the frame without the features.
     if (!_glContext || !_lightingActive || !GScene || !GScene->GetCamera() || !GScene->MainLight() ||
-        _portraitTargetSize || _worldSceneEnded || _nightVision ||
-        !rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere))
+        _portraitTargetSize || _worldSceneEnded || _nightVision)
         return;
-    // Until the worker has the atmosphere tables the sky stays classic (the
+    const bool wantAtmosphere = rm::FeatureOn(_lighting.features, rm::Feature::Atmosphere);
+    const bool wantClouds = SkyCloudsWanted();
+    // The sun disk is the clouds' alone (it dims behind a dome cloud).
+    const bool sunDisk = mode == Poseidon::RemasterSky::Sun;
+    if (sunDisk ? !wantClouds : !wantAtmosphere && !wantClouds)
+        return;
+    // Until the worker has the atmosphere tables the sky table stays off (the
     // gate reads "atmosphere tables building").
-    if (!PollSkyTables())
+    const bool tables = !sunDisk && wantAtmosphere && PollSkyTables();
+    if (!tables && !wantClouds)
         return;
     // Draws queued so far keep their programs.
     FlushQueues();
@@ -441,7 +447,24 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
     LightSun* sun = GScene->MainLight();
     const float sunElevRad = SunElevationRad(sun);
     const float haze = HazeOf(_lighting);
-    if (!_featureGates[rm::Feature::Atmosphere].on)
+    const bool atmosphere = tables && _featureGates[rm::Feature::Atmosphere].on;
+    // What the clouds need of this draw: the dome turns with the sky's drift
+    // whenever a clouds switch is on, the sky clouds are lit while lit clouds
+    // run, and the sun disk dims while the sky-matched shadows run.
+    bool clouds = false;
+    switch (mode)
+    {
+        case Poseidon::RemasterSky::Dome:
+            clouds = wantClouds;
+            break;
+        case Poseidon::RemasterSky::Clouds:
+            clouds = _featureGates[rm::Feature::LitClouds].on;
+            break;
+        case Poseidon::RemasterSky::Sun:
+            clouds = _featureGates[rm::Feature::SkyCloudShadows].on;
+            break;
+    }
+    if (!(sunDisk ? clouds : atmosphere || clouds))
     {
         if (s_sky.forcedPrograms)
         {
@@ -454,7 +477,7 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
     const bool dome = mode == Poseidon::RemasterSky::Dome;
     if (dome)
         GpuMark(Poseidon::gpu::Mark::SkyBegin);
-    if (rm::SkyTableNeedsRebuild(s_sky.built, s_sky.builtSunElevRad, s_sky.builtHaze, sunElevRad, haze) &&
+    if (atmosphere && rm::SkyTableNeedsRebuild(s_sky.built, s_sky.builtSunElevRad, s_sky.builtHaze, sunElevRad, haze) &&
         BuildSkyViewTableGpu(sunElevRad) && dome)
         GpuMark(Poseidon::gpu::Mark::SkyTableEnd);
     s_sky.open = true;
@@ -463,6 +486,7 @@ void EngineGL33::BeginRemasterSky(Poseidon::RemasterSky mode)
     UploadLitSky(-sun->Direction(), land ? land->SkyThrough() : 1.0f);
     FlushLitConstants();
     BindSkyTable();
+    BindSkyDensity();
     GL33Bind::ActiveUnit(0);
 }
 
@@ -506,29 +530,41 @@ void EngineGL33::UploadLitSky(const Vector3& toSun, float skyThrough)
                       camera && _worldEffectsOn;
     const float sunElevRad = std::asin(std::max(-1.0f, std::min(1.0f, toSun.Y())));
     const float day = live ? rm::SkyDayFade(sunElevRad * kDeg) : 0.0f;
+    // The camera basis that turns a screen position into a view ray: the sky
+    // table's dome and fog and the lit clouds read it.
+    auto cameraBasis = [&]
+    {
+        Vector3 r = camera->DirectionAside();
+        Vector3 u = camera->DirectionUp();
+        Vector3 f = camera->Direction();
+        r.Normalize();
+        u.Normalize();
+        f.Normalize();
+        const float l = camera->Left(), t = camera->Top();
+        SetLitSlot(LC::SkyRight, r.X() * l, r.Y() * l, r.Z() * l, rm::atmo::kMieG);
+        SetLitSlot(LC::SkyUp, u.X() * t, u.Y() * t, u.Z() * t, 0.0f);
+        SetLitSlot(LC::SkyFwd, f.X(), f.Y(), f.Z(), static_cast<float>(s_sky.mode));
+    };
     if (day <= 0.0f)
     {
         // The vertex and fragment shaders test the two blends.
-        SetLitSlot(LC::SkyRight, 0.0f, 0.0f, 0.0f, rm::atmo::kMieG);
-        SetLitSlot(LC::SkyUp, 0.0f, 0.0f, 0.0f, 0.0f);
-        SetLitSlot(LC::SkyFwd, 0.0f, 0.0f, 1.0f, static_cast<float>(s_sky.mode));
+        if (camera && _featureGates.computed && _featureGates[rm::Feature::LitClouds].on && _worldEffectsOn)
+        {
+            cameraBasis();
+        }
+        else
+        {
+            SetLitSlot(LC::SkyRight, 0.0f, 0.0f, 0.0f, rm::atmo::kMieG);
+            SetLitSlot(LC::SkyUp, 0.0f, 0.0f, 0.0f, 0.0f);
+            SetLitSlot(LC::SkyFwd, 0.0f, 0.0f, 1.0f, static_cast<float>(s_sky.mode));
+        }
         SetLitSlot(LC::Atmo, 0.0f, 0.0f, 0.0f, rm::kSkyCloudMaskDeadZone);
         SetLitSlot(LC::AtmoCloudSun, 0.0f, 0.0f, 0.0f, 0.0f);
         SetLitSlot(LC::AtmoGlow, 0.0f, 0.0f, 0.0f, 1.0f);
         SetLitSlot(LC::AtmoDome, 0.0f, 0.0f, 0.0f, 0.0f);
         return;
     }
-    // The camera basis that turns a screen position into a view ray.
-    Vector3 r = camera->DirectionAside();
-    Vector3 u = camera->DirectionUp();
-    Vector3 f = camera->Direction();
-    r.Normalize();
-    u.Normalize();
-    f.Normalize();
-    const float l = camera->Left(), t = camera->Top();
-    SetLitSlot(LC::SkyRight, r.X() * l, r.Y() * l, r.Z() * l, rm::atmo::kMieG);
-    SetLitSlot(LC::SkyUp, u.X() * t, u.Y() * t, u.Z() * t, 0.0f);
-    SetLitSlot(LC::SkyFwd, f.X(), f.Y(), f.Z(), static_cast<float>(s_sky.mode));
+    cameraBasis();
     SetLitSlot(LC::Atmo, day, rm::SkyOvercastCloudFloor(skyThrough), day, rm::kSkyCloudMaskDeadZone);
 
     // Brightness reference: the classic dome's vertex colour (TLVertexTable::

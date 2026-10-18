@@ -4,9 +4,10 @@
 // rig, the per-draw material and the local lights from the LitConstants block
 // (binding 3), the shadow map through a comparison sampler on unit 2 (and as
 // raw depth on unit 6), the terrain horizon map on units 3 and 4, the cloud
-// noise on unit 5 and the frame's tiled light list from the FrameLights block
-// (binding 4) and its tile indices on unit 13. Selection between the
-// remastered and classic sets happens in DoSelectPixelShader via
+// noise on unit 5, the sky table on unit 8, the sky's cloud density on unit 9
+// and the frame's tiled light list from the FrameLights block (binding 4) and
+// its tile indices on unit 13. Selection between the remastered and classic
+// sets happens in DoSelectPixelShader via
 // SelectProgram; Classic leaves every classic upload and program untouched.
 
 #include <PoseidonGL33/EngineGL33.hpp>
@@ -156,8 +157,10 @@ void EngineGL33::InitLightingResources()
     GL33Bind::ActiveUnit(kShadowRawUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     GL33Bind::ActiveUnit(0);
-    // The sky table's unit 8 gets its stand-in the same way.
+    // The sky table's unit 8 and the clouds' unit 9 get their stand-ins the
+    // same way.
     InitSkyTable();
+    InitSkyClouds();
     // So does the sea's next-frame unit (EngineGL33_Sea.cpp binds an animation
     // frame there only inside the sea's draws).
     GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
@@ -398,6 +401,7 @@ void EngineGL33::DeinitLightingResources()
     delTex(_post.blackTex);
     DeinitSkyTable();
     DeinitLightTiles();
+    DeinitSkyClouds();
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
@@ -543,6 +547,7 @@ void EngineGL33::BindLightingTextures()
     // The tiled light list's indices (read only while litLightCount.y is set,
     // complete either way).
     GL33Bind::Tex2D(kLightTileUnit, _lightTiles.tileTex);
+    BindSkyDensity();
     GL33Bind::ActiveUnit(0);
 }
 
@@ -601,6 +606,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.optics = _prevWorldOverlayDrawn;
     in.nightVision = _nightVision;
     in.skyTablesReady = SkyTablesReady();
+    in.skyDensityReady = SkyDensityReady();
     const LightList& lights = GScene->ActiveLights();
     for (int i = 0; i < lights.Size(); i++)
     {
@@ -629,6 +635,9 @@ void EngineGL33::UploadLitFrameConstants()
     }
     if (_terrainMapDirty)
         UploadTerrainHorizonMap();
+    // The sky's cloud-density map: collect a finished build, start one when the
+    // weather sky changed (while a clouds switch is on).
+    PollSkyDensity();
 
     LightSun* sun = GScene->MainLight();
     Camera* camera = GScene->GetCamera();
@@ -654,9 +663,17 @@ void EngineGL33::UploadLitFrameConstants()
     in.skyThrough = land ? land->SkyThrough() : 1.0f;
     in.nightEffect = sun->NightEffect();
     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
-    const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
-    _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+    rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
     UpdateFeatureGates(&rig);
+    // Sky-matched cloud shadows lie over the sky's own covered share of the
+    // ground: the rig keeps the mean dimming over it (same cover, so the gates
+    // computed above stand).
+    if (_featureGates[rm::Feature::SkyCloudShadows].on && SkyDensityReady())
+    {
+        in.skyShadowCoverage = SkyShadowCoverageAt(in.skyThrough, rig.sunElevationDeg);
+        rig = rm::ComputeLightRig(in, _lighting);
+    }
+    _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
 
     // The tiled light list: built once per frame while its gate is on, and
     // then read by every draw of the world's passes instead of the draw's own
@@ -783,6 +800,8 @@ void EngineGL33::UploadLitFrameConstants()
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
     UploadLitSky(toSun, in.skyThrough);
+    // The sky's own clouds: lit clouds, the dome's turn, the sky-matched shadows.
+    UploadLitClouds(in.skyThrough, clouds);
     // Terrain detail (B11): zero while the switch or its gate is off, which
     // leaves the terrain main the stock one. w (land or sea) is the draw's,
     // set by SetLitTerrainDraw.
@@ -824,6 +843,7 @@ void EngineGL33::SetLitTerrainDraw(bool land)
 void EngineGL33::PinCloudDrift(bool pinned, float x, float z)
 {
     s_cloudDriftPinned = pinned;
+    PinSkyShadowAnchor(pinned);
     if (pinned)
     {
         s_cloudDrift[0] = x;

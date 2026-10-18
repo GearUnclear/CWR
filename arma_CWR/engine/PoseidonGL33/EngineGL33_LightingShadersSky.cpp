@@ -1,8 +1,9 @@
 // Remastered lighting shaders: the sky piece of the fragment prelude
 // (FragmentPiece::Sky, joined by RemasterFragmentCommon() in
 // EngineGL33_LightingShaders.cpp): the sky light falling on a surface, the fog
-// colour toward the sun, and the sky table's lookups for the dome and the fog
-// colour (aerial perspective). Sky lookups for reflections belong here too.
+// colour toward the sun, the sky table's lookups for the dome and the fog
+// colour (aerial perspective) and the lit sky clouds. Sky lookups for
+// reflections belong here too.
 
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -122,14 +123,153 @@ vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
     return mix(classicFog, disp, litAtmo.z);
 }
 
+// ---- Lit sky clouds (feature switch litClouds; SkyDensity.hpp) --------------
+// The sky's painted clouds read as a density field (the cloud-density map on
+// unit 9, skyCloudDensity). A short march from a sky pixel toward the sun gives
+// the cloud the sunlight crosses before it reaches the pixel; the difference to
+// the pixel's own density is relief, mean-free over a field (the sky keeps its
+// brightness): sun-facing edges lit and warm, the far side shaded. Thin rims
+// facing a nearby sun get a forward-scattered silver lining, thick cloud in
+// front of the sun goes dark, and under an overcast deck the dark lumps deepen
+// into bellies. Relief and lining are on luminance, tinted only by the sun's
+// colour. Every term is the low sun's: all of them fade out together between
+// kLitCloudFadeStartDeg and kLitCloudFadeEndDeg, so from there up the terms are
+// identity (SkyDensity.hpp LitCloudTerms). At midday the relief embossed the
+// painted sky with colour fringes, and the darkening against the sun left on
+// its own made the sky only darker.
+const float kLitCloudRelief = 1.8;        // kLitCloudRelief
+const float kLitCloudSilver = 1.0;        // kLitCloudSilver
+const float kLitCloudStepDeg = 1.2;       // kLitCloudStepDeg
+const float kLitCloudFadeStartDeg = 25.0; // kLitCloudFadeStartDeg
+const float kLitCloudFadeEndDeg = 45.0;   // kLitCloudFadeEndDeg
+const float kLitCloudSilverLight = 1.2;   // the lining's light, in the cloud's own luminance
+
+// The sun's light on a sky cloud seen along the unit direction v: x the
+// luminance gain, y how far its colour goes toward the sun's, z the silver
+// lining (in the cloud's own luminance), w where it applies (the map has cloud
+// there, times litSky.x). `d` is the density here, `tau` the mean density
+// toward the sun, `feature`, `dark` and `deck` the pixel's broken cloud,
+// darkness and deck weight.
+vec4 litCloudTerms(vec3 v, float d, float tau, float feature, float dark, float deck) {
+    vec3 l = litSunDir.xyz;
+    float cosT = dot(v, l);
+    // Overcast flattens the direct part: the light inside a deck is diffuse.
+    float direct = smoothstep(-0.06, 0.04, l.y) * mix(0.45, 1.0, clamp(litSky.w, 0.0, 1.0));
+    float relief = clamp((d - tau) * kLitCloudRelief, -0.35, 0.8);
+    float gain = 1.0 + relief * direct;
+    gain *= 1.0 + (0.55 - dark) * 0.7 * deck;
+    gain *= 1.0 - 0.35 * pow(max(cosT, 0.0), 6.0) * smoothstep(0.35, 0.9, feature) * direct;
+    float warm = clamp(relief, 0.0, 1.0) * direct;
+    // The rim is where the density falls off toward the sun; Henyey-Greenstein
+    // (g 0.8) relative to its peak toward the sun.
+    float rim = clamp((d - tau) * 3.0, 0.0, 1.0) * (1.0 - 0.5 * d);
+    float hg = 0.008 / pow(max(1.64 - 1.6 * cosT, 1e-4), 1.5); // 1 toward the sun
+    float silver = hg * rim * kLitCloudSilver * direct;
+    // All of it fades with the low sun, the darkening against the sun and the
+    // bellies included: identity from kLitCloudFadeEndDeg up.
+    float lowSun = 1.0 - smoothstep(kLitCloudFadeStartDeg, kLitCloudFadeEndDeg, litSun.w);
+    return vec4(mix(1.0, gain, lowSun), warm * lowSun, silver * lowSun, litSky.x * smoothstep(0.02, 0.25, d));
+}
+
+// A cloud's light (linear) under those terms.
+vec3 litCloudLight(vec3 lin, vec4 t) {
+    if (t.w <= 0.0) return lin;
+    float sl = dot(litSun.rgb, kLuma);
+    vec3 sunC = sl > 1e-5 ? litSun.rgb / sl : vec3(1.0); // unit luminance
+    vec3 lit = lin * (t.x * mix(vec3(1.0), sunC, 0.85 * t.y));
+    lit += sunC * (max(dot(lin, kLuma), 0.02) * t.z * kLitCloudSilverLight);
+    return mix(lin, lit, t.w);
+}
+
+// The same over a pre-lit colour (display), where the sky table does not shade
+// it: a colour pushed past white goes toward white rather than clipping
+// channel by channel (clipped channels made colour fringes).
+vec3 litCloudsOverClassic(vec3 disp, vec4 t) {
+    if (t.w <= 0.0) return disp;
+    vec3 c = toDisplay(litCloudLight(toLinear(disp), t));
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak > 1.0) c = mix(c / peak, vec3(1.0), clamp((peak - 1.0) * 0.5, 0.0, 1.0));
+    return c;
+}
+
+// The terms for a dome pixel at its (turned) texture coordinate. The march
+// steps the view ray toward the sun and maps each step through the dome's own
+// mapping, relative to the pixel's mesh coordinate, so it is continuous across
+// the dome's coarse triangles (screen-space derivatives jump at their edges).
+vec4 litCloudTermsDome(vec2 uv) {
+    // Off, or a sun so high the terms are identity: no march.
+    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg) return vec4(1.0, 0.0, 0.0, 0.0);
+    vec4 m = textureLod(skyDensity, uv, 0.0);
+    float d = skyCloudDensity(m);
+    if (d <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
+    vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+    vec3 l = litSunDir.xyz;
+    vec3 t = l - v * dot(v, l);
+    float tl = length(t);
+    t = tl > 1e-4 ? t / tl : vec3(0.0, 1.0, 0.0);
+    vec2 uvA = skyDomeUv(v);
+    float tau = 0.0;
+    float wsum = 0.0;
+    for (int k = 1; k <= 6; ++k) {
+        float fk = float(k);
+        float a = radians(kLitCloudStepDeg) * fk * (0.5 + 0.5 * fk);
+        vec2 duv = skyDomeUv(v * cos(a) + t * sin(a)) - uvA;
+        duv.x -= floor(duv.x + 0.5);
+        float wk = 1.0 / fk;
+        tau += wk * skyCloudDensity(textureLod(skyDensity, uv + duv, 0.0));
+        wsum += wk;
+    }
+    float deck = m.g * (1.0 - smoothstep(0.35, 0.75, litSky.w));
+    return litCloudTerms(v, d, tau / wsum, m.r * (0.75 + 0.25 * m.b), m.b, deck);
+}
+
+// The terms for a sky cloud sheet (DrawClouds' billboards), whose own texture
+// alpha is its density: the march runs in its texture toward the sun, whose
+// direction there comes from a small step of the view ray toward the sun on
+// the screen through the texture's screen-space derivatives (the sheets are
+// flat, so these are smooth).
+vec4 litCloudTermsSheet(float alpha) {
+    vec2 dUVdx = dFdx(vUV0);
+    vec2 dUVdy = dFdy(vUV0);
+    if (litSky.x <= 0.0 || litSun.w >= kLitCloudFadeEndDeg || alpha <= 0.02) return vec4(1.0, 0.0, 0.0, 0.0);
+    vec3 v = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+    vec3 l = litSunDir.xyz;
+    vec3 t = l - v * dot(v, l);
+    float tl = length(t);
+    vec2 dir = vec2(0.0);
+    if (tl > 1e-4) {
+        vec3 v2 = normalize(v + t * (0.01 / tl));
+        vec3 R = litSkyRight.xyz;
+        vec3 U = litSkyUp.xyz;
+        vec3 F = litSkyFwd.xyz;
+        vec2 n1 = vec2(dot(v, R) / max(dot(R, R), 1e-12), dot(v, U) / max(dot(U, U), 1e-12)) / max(dot(v, F), 1e-4);
+        vec2 n2 = vec2(dot(v2, R) / max(dot(R, R), 1e-12), dot(v2, U) / max(dot(U, U), 1e-12)) / max(dot(v2, F), 1e-4);
+        // Pixels per NDC unit go as tan(fov / 2) on each axis (square pixels).
+        vec2 dPix = (n2 - n1) * vec2(length(R), length(U));
+        vec2 duv = dUVdx * dPix.x + dUVdy * dPix.y;
+        float len = length(duv);
+        dir = len > 1e-9 ? duv / len : vec2(0.0);
+    }
+    float tau = 0.0;
+    float wsum = 0.0;
+    for (int k = 1; k <= 6; ++k) {
+        float fk = float(k);
+        float wk = 1.0 / fk;
+        tau += wk * textureGrad(tex0, vUV0 + dir * (0.025 * fk * (0.5 + 0.5 * fk)), dUVdx, dUVdy).a;
+        wsum += wk;
+    }
+    return litCloudTerms(v, alpha, tau / wsum, alpha, 0.0, 0.0);
+}
+
 // The sky dome under the original sky texture's clouds. The clear part of the
 // texture (a painted gradient) becomes the table's sky at the brightness of the
 // texture's clearest texel in the same row under the original dome light and
 // its sun glow; its clouds stay as a mask (brighter than that texel by more
 // than the dead zone litAtmo.w, or the overcast deck) and are lit by the sun
 // seen from the cloud deck plus the sky above, with forward scattering toward
-// the sun. `classic` is the original dome colour, which the night fade
-// (litAtmo.x) returns to.
+// the sun, and with lit clouds on (litSky.x) their relief and lining on top.
+// `classic` is the original dome colour, which the night fade (litAtmo.x)
+// returns to.
 vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     vec3 d = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
     float lumT = dot(t0.rgb, kLuma);
@@ -175,6 +315,14 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     vec3 cPhys = mix(vec3(shade * 0.8 / whiteLin), vec3(shade * 1.25), litAtmo.y) * light;
     vec3 cRelit = cloudTex * rowLight * (dot(light, kLuma) / rowLum);
     vec3 cloudLin = mix(cRelit, cPhys, litAtmoDome.w);
+    // Lit clouds: the relief and lining of the density map's clouds, on the
+    // cloud and on the sky behind it alike (the map also finds the faint bluish
+    // streaks the mask leaves as sky).
+    if (litSky.x > 0.0) {
+        vec4 lc = litCloudTermsDome(vUV0);
+        a = litCloudLight(a, lc);
+        cloudLin = litCloudLight(cloudLin, lc);
+    }
     // Cover over clear sky in display space, where the mask measured it: a
     // faint cloud keeps about the texture's own contrast (mixed in linear light
     // the texture's faint blotches read 40 % stronger than in the original).

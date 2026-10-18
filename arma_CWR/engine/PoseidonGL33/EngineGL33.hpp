@@ -855,7 +855,7 @@ class EngineGL33 : public Engine
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).
     void UploadLitSlots(int first, int count);
-    // Binds units 2..5 and 8 for the remastered shaders (compare sampler on 2).
+    // Binds units 2..5, 8 and 9 for the remastered shaders (compare sampler on 2).
     void BindLightingTextures();
     // The sky table (EngineGL33_SkyTable.cpp): the stand-in and GL objects, the
     // worker build of the atmosphere tables (true once they exist for the
@@ -868,6 +868,23 @@ class EngineGL33 : public Engine
     bool BuildSkyViewTableGpu(float sunElevationRad);
     void UploadLitSky(const Vector3& toSun, float skyThrough);
     void BindSkyTable();
+    // The sky's own clouds (EngineGL33_SkyClouds.cpp): the cloud-density map
+    // on unit 9 (built on a worker thread when the weather sky changes, a
+    // stand-in until the first one), the shadow anchor and the clouds slots.
+    void InitSkyClouds();
+    void DeinitSkyClouds();
+    bool SkyCloudsWanted() const;   // remastered, and litClouds or skyCloudShadows switched on
+    bool SkyDensityReady() const;   // a map is built (the last one while a new weather sky builds)
+    bool SkyDensityPending() const; // a build runs, or the wanted weather sky has none yet
+    void PollSkyDensity();          // collects a finished build; starts one when the weather sky changed
+    // The shadowed share of the ground at this sky-through and sun elevation
+    // (SkyShadowCoverage), or negative without a map.
+    float SkyShadowCoverageAt(float skyThrough, float sunElevationDeg) const;
+    void BindSkyDensity();
+    // Captures: the anchor at the camera, held while the clouds are pinned.
+    void PinSkyShadowAnchor(bool pinned);
+    // The Sky and SkyShadow slots; `cloudField` = the rig casts cloud shadows.
+    void UploadLitClouds(float skyThrough, bool cloudField);
     // One LitConstants slot (flushed with the next FlushLitConstants), and the
     // sky mode (litSkyFwd.w, flushed at once).
     void SetLitSlot(int slot, float x, float y, float z, float w);

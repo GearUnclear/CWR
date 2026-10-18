@@ -27,8 +27,8 @@ enum class FragmentPiece : int
     LitConstants,  // LitConstantsBlock()
     Inputs,        // samplers, varyings, colour space and tonemap helpers
     Shadows,       // shadowMapVisibility
-    TerrainClouds, // terrainSunVisibility, cloudSunVisibility
-    Sky,           // skyIrradiance, fogColorToward (EngineGL33_LightingShadersSky.cpp)
+    TerrainClouds, // terrainSunVisibility, cloudSunVisibility, the dome mapping and the sky-matched shadows
+    Sky,           // skyIrradiance, fogColorToward, the sky table, lit clouds (EngineGL33_LightingShadersSky.cpp)
     Lights,        // localLights (EngineGL33_LightingShadersLights.cpp)
     Surface,       // glossy (EngineGL33_LightingShadersSurface.cpp)
     Shade,         // shadeRemastered
@@ -98,6 +98,7 @@ constexpr int kCloudNoiseUnit = 5;
 // on (the stand-in, then each cascade array as it is created).
 constexpr int kShadowRawUnit = 6;
 constexpr int kSkyLutUnit = 8;     // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
+constexpr int kSkyDensityUnit = 9; // the weather sky's cloud density (EngineGL33_SkyClouds.cpp); a stand-in
 constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI (light list)
 // The sea animation frame the water program cross-fades into (the sea,
 // EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
@@ -106,7 +107,6 @@ constexpr int kSeaNextFrameUnit = 11;
 // kLightDataUnit is free: the light list keeps its lights in a uniform block
 // (kLightListBinding), which the fragments of a tile read faster.
 constexpr int kLightDataUnit = 12;
-constexpr int kSkyDensityUnit = 9;  // cloud density map from the weather sky texture (clouds)
 constexpr int kCanopyUnit = 10;     // canopy heightfield (hfrt)
 constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
 constexpr int kCanopyVisUnit = 15;  // canopy sun visibility (hfrt)
@@ -177,6 +177,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
     {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
     {"skyLut", kSkyLutUnit},                 // sky-view table (the sky table)
+    {"skyDensity", kSkyDensityUnit},         // the weather sky's cloud density (the clouds)
     {"seaNext", kSeaNextFrameUnit},          // next sea animation frame (the water program only)
     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
 };
@@ -235,9 +236,12 @@ enum : int
     AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
     AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
     AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
-    // 68-73: allocated to features still to land (LitConstPlanned Sky to
-    // Weather); one padding member in the block until they do.
-    Planned = 68,
+    // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
+    Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
+    SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
+    // 70-73: allocated to features still to land (70 free, LitConstPlanned
+    // Night to Weather); one padding member in the block until they do.
+    Planned = 70,
     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
     Water1 =
@@ -259,7 +263,8 @@ static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap")
 static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
 static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
 static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
-static_assert(Planned == AtmoDome + 1, "the planned padding follows the sky slots");
+static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
+static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
 static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
               "LitConst water slots follow the planned padding");
 static_assert(Planned2 == Water1 + 1, "the second planned padding follows the water slots");
@@ -273,15 +278,15 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
 // (a slot below it that has not landed yet becomes a padding member there) and
 // raises LitConst::Count, which the upload and the shaders follow. A7 landed
 // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
-// padding member litReserved; B5 landed the water slots 74 and 75 and B11 the
-// terrain detail at 77, so 68 to 73 are the padding member litPlanned and 76
-// the padding member litPlanned2.
+// padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
+// SkyShadow), B5 the water slots 74 and 75 and B11 the terrain detail at 77,
+// so 70 to 73 are the padding member litPlanned and 76 the padding member
+// litPlanned2.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
 // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
-constexpr int Sky = 68;   // clouds: sky mode, lit-cloud strength, shadow source
-constexpr int SkyVp = 69; // clouds: viewport origin and 1 / size (pixels)
+// 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
 // 70 is free: the light list (A6) needs only a tile size and a night factor,
 // which ride in litLightCount.yz (LitConst::LightCount).
 constexpr int Night = 71;        // night: flags, beam profile, moon key
@@ -294,8 +299,8 @@ constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
 constexpr int End = 79;  // one past the last planned slot
 static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
               "the planned slot below the sun shadows is the reserved padding");
-static_assert(Sky == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
-              "the planned slots between the sky pass and the water are the planned padding");
+static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+              "the planned slots between the clouds and the water are the planned padding (70 free)");
 static_assert(Canopy == LitConst::Planned2 && LitConst::Planned2Count == 1 && Canopy == LitConst::Detail - 1,
               "the planned slot between the water and the terrain detail is the second planned padding");
 static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");

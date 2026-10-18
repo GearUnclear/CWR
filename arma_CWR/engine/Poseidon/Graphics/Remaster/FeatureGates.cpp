@@ -221,14 +221,20 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
                 return Off("clear sky");
             if (in.sunElevationDeg <= kGateSkyTableMinSunDeg)
                 return Off("sun below -9 deg");
+            if (!in.skyDensityReady)
+                return Off("sky density map building");
             return On("clouds in the sky");
 
         case Feature::SkyCloudShadows:
             if (in.cloudCover <= 0.0f)
                 return Off("clear sky (cover below 0.05)");
             // Cloud shadows dim the key light: the sun, or the moon as B3's key.
-            if (in.sunElevationDeg <= 0.0f && !(FeatureOn(t.features, Feature::MoonShadows) && MoonKey(in).on))
+            if (in.sunElevationDeg <= kGateSkyShadowsMinSunDeg &&
+                !(FeatureOn(t.features, Feature::MoonShadows) && MoonKey(in).on))
                 return Off("no sun or moon key");
+            // Until the map exists the noise field casts them.
+            if (!in.skyDensityReady)
+                return Off("sky density map building");
             return On("cloud cover");
 
         case Feature::Sharpen:

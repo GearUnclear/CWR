@@ -211,6 +211,13 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
   the resolve is a post stage, and a jittered frame that nothing resolves would shake. The
   backend jitters a frame only when the gate is on and the frame gets a post pass (an offscreen
   frame target, the post programs built; `TaaWantedThisFrame`).
+- As built in B10: the sky cloud shadows' "sun up" is the sun above -1.5 deg
+  (`kGateSkyShadowsMinSunDeg`, where the rig's sun has faded out), so the hand-over to the noise
+  field never shows; both clouds gates read "sky density map building" until the weather sky's map
+  exists (`GateInputs::skyDensityReady`). Lit clouds need no high-sun gate: every lit-cloud term
+  fades out between 25 and 45 deg (not "above 35 deg" as the table had it), and from 45 deg up
+  the shaders return the identity terms before the march, so the gate stays open at midday at
+  the cost of one uniform branch.
 
 Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
 gates above keep the beams, hfrt and SSR from all being at full cost together only if the
@@ -332,6 +339,16 @@ rig is rig math in `ComputeLightRig`, and the crown canopy needs one flag per fr
 `LitConst::Count` and the padding are unchanged; only the block's comment for slot 23 changes
 (which changes the text, not the layout, of every remastered program).
 
+As built in B10 (a parallel lane on 5d7e7ae, merged onto B11, B1, A6, B5 and B2): slots 68 and 69
+landed: `Sky` (x lit-cloud strength with the sky table's night fade, y sky-matched shadows on, z the
+dome's turn as a u offset, w sky-through) and `SkyShadow` (xy the shadow anchor minus the camera in
+metres, z the previous anchor's angle, w its fade weight). The planned `SkyVp` is gone: A7's view ray
+comes from the vertex position, so no viewport is needed. On the lane, which sat on A7 alone, `Count`
+was 70 and `LitConstPlanned` began at `LightTiles` (70); on the merged tree the clouds slots split B5's
+padding instead: `litSky` and `litSkyShadow`, then `litPlanned[4]` for 70 to 73 (`LitConst::Planned`
+70, `PlannedCount` 4; 70 free since A6, `LitConstPlanned` `Night` to `Weather`, static_assert), then
+the water slots, `litPlanned2` and `Detail`, so `Count` stays 78.
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -401,6 +418,10 @@ by the water program only) and the white 1x1 `_post.whiteTex` parked on it at
 `InitLightingResources`. `Engine::BeginSea` binds the animation frame the sea faces do not carry
 there, with unit 0's sampler object (`_samplerObjects[0]`: wrap, anisotropy, the TAA LOD bias), and
 `EndSea` puts the stand-in and sampler 0 back.
+
+As built in B10: `kSkyDensityUnit` (9) is in use, with its `kLitSamplers` row (`skyDensity`) and a
+1x1 RGBA8 no-cloud stand-in bound at `InitLightingResources` (`InitSkyClouds`); `BindLightingTextures`
+and the sky pass bind the map or the stand-in.
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -1861,6 +1882,108 @@ gitignored; light gate).**
 - **Tests**: `SkyDensity` on the three weather skies (jasno has no cloud, oblacno streaks,
   zatazeno deck); dome UV mapping; layout (`Sky`, `SkyVp`); glslang.
 - **Effort**: 4 days.
+
+**Result (2026-10-18, uncommitted change on 5d7e7ae in the scratch copy `gr-B10`; evidence in
+`tmp/integration/B10/` of the graphics-remaster worktree, gitignored; the shots of the build that
+lands are in `final4/`, after the review round).**
+
+- Built as the bullets above with these corrections. The pure module is
+  `Graphics/Remaster/SkyDensity.{hpp,cpp}` (dome mapping, density map, shadow cover and coverage,
+  the constants the shaders mirror, the sky's turn, the shadow anchor); the backend is
+  `EngineGL33_SkyClouds.cpp`. The weather sky files are read once each on the render thread; the
+  decode (`DecodePAABuffer`), the mix of two weather skies (as `TextureGL33::GetPixel` mixes them),
+  the map and its coverage table run on a worker (`std::async`); unit 9 holds a no-cloud stand-in
+  until the first map, the last map stays in use while the next weather sky builds, and
+  `triSettleScene` waits for a pending build (`RemasterSkyPending`). The game's own skies: oblacno
+  gives 256x256 with a shadowed share of 0, 0.163 and 0.287 at a sun of 10, 30 and 60 degrees;
+  zatazeno (overcast 0.9) 0.99 to 1.0 once the weather counts its deck; the jasno and oblacno mix
+  of overcast 0 none (a numpy mirror of the build on the research PNG of oblacno gives the same
+  0.227 the first build's whole-dome coverage logged).
+- The sky hook is A7's: `BeginRemasterSky` opens for the clouds switches too (the dome whenever
+  one is on, the sky clouds while lit clouds run), and a new `RemasterSky::Sun` pass around the sun
+  disk, which fades (colour and coverage) behind a dome cloud. A first build dimmed only its colour
+  and drew a dark disk over the sky.
+- `r0..r7` became GLSL constants mirrored in `SkyDensity.hpp` (deck 1800 m, threshold 0.55, edge
+  0.12, relief 1.8, silver 1.0, march step 1.2 deg), pinned by a contract test. The relief and the
+  silver lining work on luminance tinted only by the sun's chroma (critic fix); in the sky table's
+  path they apply to its sky and cloud colours in linear light before its display mapping (no
+  channel clipping), in the classic path a colour past white goes toward white.
+- Every lit-cloud term fades between 25 and 45 deg of sun: the relief, the silver lining, the
+  darkening of thick cloud seen against the sun and the bellies under a deck, all in one fade on
+  the way out of `litCloudTerms` (C++ mirror `LitCloudTerms` in `SkyDensity`); from 45 deg up the
+  dome and sheet marches return the identity terms before they sample. Review fix: a build that
+  faded only the relief and the lining (the critic's emboss) left the darkening against the sun
+  alone at midday, so the midday sky was only darker (`broken_up`: 35 % of the sky band darker by
+  more than 2 levels, none brighter, the white cumulus greyed). Lit clouds need no high-sun gate:
+  at midday they cost one uniform branch.
+- Correction: atmosphere does not take its cloud mask from this map. A7 tuned its own mask (the
+  12-tap row minimum, dead zone 0.004, noon cirrus kept) and the map's whiteness test was built to
+  find shadow-casting cloud; swapping them would change A7's look. The lit-cloud terms read the map.
+- Correction: the drift comes from the sky clouds' own integrator, `Landscape::CloudsPosition`
+  (`Weather::MoveClouds`, the third value `triPinCloudDrift` already pins), at 0.3 deg per unit
+  (about 6 deg a minute at overcast 0.5), not from the noise field's wind integrator: the visible
+  dome and the classic sheets then move from one clock and captures pin both. The dome turns
+  whenever a clouds switch is on, gated or not, so a gate opening never makes it jump.
+- The anchor (`SkyShadowAnchor`): it stays put until the camera is 1.5 km away, then steps 1.5 km
+  toward it and the old anchor's shadows fade out over 4 s of sim time (a second lookup only while
+  fading); a camera move of 500 m or more in one step snaps it; `triPinCloudDrift` snaps it to the
+  camera and holds it.
+- Rewritten: the shadows cover the sky's own share of the ground, not the noise field's cover. The
+  rig (`LightRigInputs::skyShadowCoverage`) keeps the classic overcast dimming on average: over a
+  larger share more light gets through under each cloud, over a smaller one the rest stays
+  uniform. The share is the shadowed part of the ground within 3 km of the anchor at the sun's
+  height (each point looks the dome up where its deck point is), because the painted skies have
+  no cloud the row test can find below about 15 deg (their horizon is haze): a sun below about 12
+  deg casts no sky-matched shadow, and a first build that took one share for the whole dome
+  (0.227 at overcast 0.5) left the sun on that unshadowed ground at 0.93 of the clear sun against
+  the classic mean of 0.76 (the coast view's ground read +36 % against off, +29 % after the fix,
+  where off has the noise field's shadow on the foreground).
+- The sky clouds (`DrawClouds`' sheets) are lit in their own texture (vLitMode -2; a debug override
+  showed they fill much of the low sky at the hero view). They cast no shadows (the plan's
+  `CollectCloudSheets` follow-up), so at a low sun the visible cloud near the sun is a sheet that
+  shadows nothing.
+- Gates (3.2): the sky shadows run down to -1.5 deg of sun (the rig's horizon fade), not 0, so the
+  hand-over to the noise field never shows; both clouds gates read "sky density map building"
+  until a map exists (`GateInputs::skyDensityReady`). Slots (3.3): 68 `Sky`, 69 `SkyShadow`; the
+  planned `SkyVp` is not needed (the view ray comes from the vertex position since A7), slot 69
+  holds the anchor. Unit 9 (3.4) is in use, with its `kLitSamplers` row and stand-in. Dropped as
+  planned; also the prototype's screen-derivative march on the dome (its seams).
+- Gate: build 0 warnings; clang-format clean on the 19 touched C++ files; unit gate tags plus
+  `[SkyDensity],[clouds],[FeatureSwitches],[FeatureGates],[atmosphere],[PostStages],
+  [triSetFixedStep],[triPinCloudDrift]` 519/519 (15 new cases); the full suite has the 6 known
+  localisation failures only. Twenty mutations each turn a case red: no blur, whiteness against
+  the whole sky, the rig ignoring the share, the share ignoring the sun's height, the shader
+  threshold, one dome ring, the dome turning with the switches off, relief at any sun height, the
+  shadows gated at the horizon, no cross-fade, the gates ignoring the map, the switch not landed, a
+  block member renamed, the sun disk dimmed by colour only, and from the review round the reviewed
+  `litCloudTerms` and its mirror (the darkening against the sun and the bellies not faded), the
+  gain not faded in either, and the dome or the sheet march running at a high sun. Smoke 1/1 on
+  the build that lands (KHR_debug ids 131169, 131154 and 131218 only).
+- Off equals before (`litClouds=0,skyCloudShadows=0` on the build that lands, `final4/`, against
+  the base build's on, nine views): the sky band within 2 levels on four views and one pixel at 3
+  on `coast_oc`; the other four views' sky and every view's horizon and ground bands differ by
+  about the base build's own repeat between its two shots (`noon_fields_oc` sky 2,938 against
+  2,351 pixels over 2, `overcast_heavy` 578 against 406, `overcast_broken` 334 against 524,
+  `broken_high` ground 37,820 against 37,888, `coast_oc_up` 12,358 against 12,987).
+- On against off (`final4/`): the sky band's mean luminance within -0.6 % (dawn) and +0.6 %
+  (`coast_oc`), and two-sided where the clouds are lit: at the hero `coast_oc_up` 36 % of the sky
+  band darker by more than 2 levels and 32 % brighter (mean +0.0007), the clouds' sun-facing edges
+  peach and their bellies slate (sky saturation 0.111 to 0.124, 6-pixel high-pass 0.0049 to
+  0.0054), at dawn the cloud bases pink (27 % darker, 21 % brighter; saturation 0.183 to 0.224);
+  at `broken_high` soft bands across the slopes match the sky and move with it (sky positions 25
+  and 50). From 45 deg of sun up the sky is the one before: `broken_up` (54 deg, looking up) no
+  sky-band pixel over 2 levels either way (the reviewed build: 35 % darker, none brighter),
+  `overcast_heavy` the same, and looking at the sun itself (the sweep's sun-up camera under each
+  switch combination) lit clouds alone change one pixel by more than 2 levels against 925,385 in
+  the reviewed build. Clear views are unchanged (gates off). A sweep of the sky through 180 deg on
+  Eden (14:30, overcast 0.5) shows the sun disk clear wherever the ground at the camera is lit and
+  faded, not dark, wherever it is shadowed; its ground values equal the reviewed build's.
+- Timing (single readings, other games running, not quiet-checked, clocks not sampled):
+  `coast_oc_up` on minus off, the sky section 0.14 to 0.17 ms against 0.22 to 0.28 (+0.08 median,
+  3 rounds) on the build that lands, +0.18 in a second run (2 rounds) and +0.26 on the reviewed
+  build (the same low-sun path); the frame +0.27, +0.66 and +0.76, against a gates-off control
+  (`noon_fields` clear, on equals off) that moved +0.80 and +0.15, so the frame figure is within
+  the noise. The plan's estimate was 0.5 to 1.5 ms.
 
 ### B11. texsharp (terrain detail)
 

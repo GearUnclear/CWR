@@ -187,6 +187,7 @@ enum class RemasterSky : int
 {
     Dome = 1,   // the sky dome (Landscape::DrawSky)
     Clouds = 2, // the sky clouds (Landscape::DrawClouds)
+    Sun = 3,    // the sun disk (Landscape::DrawSky): it dims behind a dome cloud
 };
 
 //@{
@@ -887,15 +888,16 @@ class Engine : public IGraphicsEngine
     /// pass, rain and flares follow. The remastered TAA copies the frame here
     /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
     virtual void BeginTranslucentObjects() {}
-    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp):
+    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp,
+    /// and the sky's own clouds, Graphics/Remaster/SkyDensity.hpp):
     /// Landscape::DrawSky and DrawClouds open it around the pre-world draws of
-    /// the sky dome and the sky clouds, which then draw through the remastered
-    /// programs. A backend without it, or the feature switched or gated off,
-    /// leaves those draws classic.
+    /// the sky dome, the sun disk and the sky clouds, which then draw through
+    /// the remastered programs. A backend without it, or the features switched
+    /// or gated off, leaves those draws classic.
     virtual void BeginRemasterSky(RemasterSky /*mode*/) {}
     virtual void EndRemasterSky() {}
-    /// Work the remastered sky has in flight (the atmosphere tables' worker
-    /// build); triSettleScene waits for it.
+    /// Work the remastered sky has in flight (the atmosphere tables' and the
+    /// cloud-density map's worker builds); triSettleScene waits for it.
     virtual bool RemasterSkyPending() const { return false; }
     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").

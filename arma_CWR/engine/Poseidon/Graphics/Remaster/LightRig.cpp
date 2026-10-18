@@ -246,7 +246,20 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.0f;
     rig.cloudCover = clouds ? shadowCover : 0.0f;
     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
-    const float fieldMean = 1.0f - rig.cloudCover * (1.0f - rig.cloudTransmit);
+    // Sky-matched shadows (B10) lie where the sky's own clouds are, over the
+    // share of the ground they cover, not the sky cover the noise field takes.
+    // They carry the field's mean dimming: over a larger share more light gets
+    // through under each cloud; over a smaller one the rest of the dimming
+    // stays uniform (overcastDim).
+    float fieldCover = rig.cloudCover;
+    if (clouds && in.skyShadowCoverage >= 0.0f)
+    {
+        const float carried = rig.cloudCover * (1.0f - rig.cloudTransmit);
+        fieldCover = Clamp01(in.skyShadowCoverage);
+        if (fieldCover * (1.0f - rig.cloudTransmit) > carried)
+            rig.cloudTransmit = 1.0f - carried / fieldCover;
+    }
+    const float fieldMean = 1.0f - fieldCover * (1.0f - rig.cloudTransmit);
     const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
 
     const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));

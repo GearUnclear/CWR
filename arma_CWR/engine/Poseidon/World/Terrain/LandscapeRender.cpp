@@ -1719,7 +1719,8 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
-    // The remastered sky table shades the dome (a no-op when it is off).
+    // The remastered sky table shades the dome, and the clouds switches light
+    // its clouds and turn it with the sky's drift (a no-op when they are off).
     GEngine->BeginRemasterSky(RemasterSky::Dome);
     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
     GEngine->EndRemasterSky();
@@ -1735,7 +1736,11 @@ void Landscape::DrawSky(Scene& scene)
     }
     scene.GetCamera()->CancelUserClip();
 
+    // With the sky-matched cloud shadows the sun disk dims behind a dome cloud
+    // (a no-op when they are off).
+    GEngine->BeginRemasterSky(RemasterSky::Sun);
     _sunObject->Draw(0, ClipAll & ~ClipBack, *_sunObject);
+    GEngine->EndRemasterSky();
     _moonObject->Draw(0, ClipAll & ~ClipBack, *_moonObject);
 }
 
@@ -1778,7 +1783,8 @@ void Landscape::DrawClouds(Scene& scene)
     }
     // scene.GetCamera()->SetUserClip(1);
     // The remastered sky pass: with the sky table on, the clouds fade into its
-    // horizon colour with their fog (a no-op when it is off).
+    // horizon colour with their fog; with lit clouds on, their sun-facing
+    // edges catch the sun (a no-op when both are off).
     GEngine->BeginRemasterSky(RemasterSky::Clouds);
     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
