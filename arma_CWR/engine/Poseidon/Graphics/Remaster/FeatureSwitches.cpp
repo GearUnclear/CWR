@@ -25,8 +25,8 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", true, &FS::taa, "taa"},
     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
      &FS::lightTiles, ""},
-    {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", false,
-     &FS::atmosphere, ""},
+    {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", true,
+     &FS::atmosphere, "sky"},
     {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", false,
      &FS::treeShadows, ""},
     {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", false,
@@ -159,6 +159,7 @@ struct KeyTable
         rows.assign(std::begin(knobs), std::end(knobs));
         for (const FeatureInfo& f : kFeatures)
             rows.push_back(MakeSwitch(f));
+        // Sub-knobs, in the order their features land.
         const LightingKey subKnobs[] = {
             MakeSubKnob(Feature::Taa, "taaSharpen", "TAA sharpen", "0 = soft; the overshoot stays bounded (no halos)",
                         &LT::taaSharpen, 0.0f, 1.5f),
@@ -166,6 +167,12 @@ struct KeyTable
                         "world textures while TAA runs; negative = sharper", &LT::taaMipBias, -1.5f, 0.5f),
             MakeSubKnob(Feature::Taa, "taaAlpha", "TAA current frame weight", "lower = steadier and softer",
                         &LT::taaAlpha, 0.02f, 1.0f),
+            MakeSubKnob(Feature::Atmosphere, "atmoHue", "Sky hue",
+                        "0 = the original sky's hue relit, 1 = the physical hue", &LT::atmoHue, 0.0f, 1.0f),
+            MakeSubKnob(Feature::Atmosphere, "atmoSat", "Sky saturation",
+                        "display-space saturation of the dome and fog colour", &LT::atmoSat, 0.5f, 1.6f),
+            MakeSubKnob(Feature::Atmosphere, "atmoHaze", "Haze",
+                        "Mie density of the air (rebuilds the atmosphere tables)", &LT::atmoHaze, 0.25f, 4.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

@@ -5,6 +5,7 @@
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 
+#include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
@@ -825,8 +826,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
         ++post;
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
-    // and its debug view, the TAA resolve and its sharpen
-    CHECK(post == 11);
+    // and its debug view, the TAA resolve and its sharpen, and the sky table's
+    // two passes
+    CHECK(post == 13);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -883,6 +885,9 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
         {P::TerrainClouds, "float cloudSunVisibility("},
         {P::Sky, "vec3 skyIrradiance("},
         {P::Sky, "vec3 fogColorToward("},
+        {P::Sky, "vec3 skyRadiance("},
+        {P::Sky, "vec3 atmoFogColor("},
+        {P::Sky, "vec3 shadeSkyDome("},
         {P::Lights, "vec3 localLights("},
         {P::Surface, "vec3 glossy("},
         {P::Shade, "vec3 shadeRemastered("},
@@ -912,6 +917,21 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
         ListedNames(source.substr(open + tableStart.size(), close - open - tableStart.size()));
     CHECK(names.size() == static_cast<size_t>(P::Count));
     CHECK(Joined(names, RawStringsOf("EngineGL33_LightingShaders")) == common);
+
+    // The screen vertex shader is assembled the same way (kScreenVertexPieces):
+    // its head, the shared LitConstants block and its main.
+    const std::string vsStart = "kScreenVertexPieces[] = {";
+    const size_t vsOpen = source.find(vsStart);
+    REQUIRE(vsOpen != std::string::npos);
+    const size_t vsClose = source.find("};", vsOpen);
+    REQUIRE(vsClose != std::string::npos);
+    const std::vector<std::string> vsNames =
+        ListedNames(source.substr(vsOpen + vsStart.size(), vsClose - vsOpen - vsStart.size()));
+    CHECK(vsNames.size() == 3);
+    const char* screen = gl::RemasterVertexSource(0); // VSScreen
+    REQUIRE(screen != nullptr);
+    CHECK(Joined(vsNames, RawStringsOf("EngineGL33_LightingShaders")) == screen);
+    CHECK(CountOf(screen, gl::LitConstantsBlock()) == 1);
 }
 
 TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][remaster]")
@@ -1085,6 +1105,14 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litLightColor", LC::LightColor, LC::MaxLights},
         {"litLightAmb", LC::LightAmb, LC::MaxLights},
         {"litLightDir", LC::LightDir, LC::MaxLights},
+        {"litReserved", LC::Reserved, LC::ReservedCount},
+        {"litSkyRight", LC::SkyRight, 1},
+        {"litSkyUp", LC::SkyUp, 1},
+        {"litSkyFwd", LC::SkyFwd, 1},
+        {"litAtmo", LC::Atmo, 1},
+        {"litAtmoCloudSun", LC::AtmoCloudSun, 1},
+        {"litAtmoGlow", LC::AtmoGlow, 1},
+        {"litAtmoDome", LC::AtmoDome, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1144,8 +1172,14 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
             CHECK(CountOf(program, shared) == 1);
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
-    // The planned slots continue the declared ones.
-    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Count));
+    // The planned slots: the three below the sky pass are the reserved padding,
+    // the rest continue the declared ones (A7 landed the sky slots 61 to 67 of
+    // plan section 3.3).
+    CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
+    CHECK(gl::LitConstPlanned::Pcss == static_cast<int>(LC::Reserved) + LC::ReservedCount - 1);
+    CHECK(static_cast<int>(LC::SkyRight) == 61);
+    CHECK(static_cast<int>(LC::AtmoDome) == 67);
+    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Count));
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;
@@ -1192,5 +1226,111 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
     {
         CAPTURE(name);
         CHECK(declared.count(name) == 1);
+    }
+}
+
+TEST_CASE("Remaster sky table: with its blends at zero every draw is the one before it",
+          "[Graphics][Shaders][remaster][atmosphere]")
+{
+    // The sky table is off (switch, gate, classic) exactly when the engine
+    // uploads litAtmo.x (dome blend) and litAtmo.z (aerial perspective) as 0.
+    // Then the screen vertex shader keeps vLitMode 0, the fragment shaders take
+    // their pre-existing paths and the fog keeps its classic colours: the
+    // feature's "off" is the frame before it.
+    const std::string screen = gl::RemasterVertexSource(0); // VSScreen
+    const size_t gate = screen.find("if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {");
+    REQUIRE(gate != std::string::npos);
+    // vLitMode is 0 before the gate, 2 (dome) or -1 (pre-lit world) inside it.
+    CHECK(screen.find("vLitMode = 0.0;") < gate);
+    CHECK(screen.find("vLitMode = 2.0;") > gate);
+    CHECK(screen.find("vLitMode = -1.0;") > gate);
+    CHECK(CountOf(screen, "vLitMode = ") == 3);
+    CHECK(screen.find("if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {") != std::string::npos);
+    // The ray from the screen position: NDC from the pixel position the vertex
+    // shader itself projects with, times the perspective w.
+    CHECK(screen.find("vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);") != std::string::npos);
+    CHECK(screen.find("(litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w") != std::string::npos);
+
+    // Fog: the table's horizon colour only behind litAtmo.z, and read only
+    // where fog shows (vFogTC 1 ignores the fog colour).
+    const std::string finish = Piece(gl::FragmentPiece::Finish);
+    CHECK(CountOf(finish, "atmoFogColor(") == 2);
+    CHECK(finish.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
+          std::string::npos);
+    CHECK(finish.find("} else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {") != std::string::npos);
+    const std::string water = gl::RemasterFragmentMain(3); // PSWater
+    CHECK(CountOf(water, "atmoFogColor(") == 2);
+    CHECK(water.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
+          std::string::npos);
+    // The dome branch is PSNormal's; the other mains light only vLitMode 1.
+    const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
+    CHECK(normal.find("if (vLitMode > 1.5) {") != std::string::npos);
+    CHECK(normal.find("shadeSkyDome(t0, classic.rgb)") != std::string::npos);
+    for (int ps : {1, 2}) // PSDetail, PSGrass
+    {
+        CAPTURE(ps);
+        CHECK(std::string(gl::RemasterFragmentMain(ps)).find("if (vLitMode > 0.5 && vLitMode < 1.5) {") !=
+              std::string::npos);
+    }
+    CHECK(water.find("bool lit = vLitMode > 0.5 && vLitMode < 1.5;") != std::string::npos);
+    // The dome returns to the classic colour as its blend goes to 0 (night).
+    const std::string sky = Piece(gl::FragmentPiece::Sky);
+    CHECK(sky.find("return mix(classic, disp, litAtmo.x);") != std::string::npos);
+    CHECK(sky.find("return mix(classicFog, disp, litAtmo.z);") != std::string::npos);
+}
+
+TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp lays it out",
+          "[Graphics][Shaders][remaster][atmosphere]")
+{
+    const std::string sky = Piece(gl::FragmentPiece::Sky);
+    // Three regions of kSkyViewSize, the parametrisation of SampleSkyView.
+    CHECK(kSkyViewRegions == 3);
+    CHECK(sky.find("const float n = " + std::to_string(kSkyViewSize) + ".0;") != std::string::npos);
+    CHECK(sky.find("texture(skyLut, vec2(u / 3.0, v))") != std::string::npos);
+    CHECK(sky.find("texture(skyLut, vec2((1.0 + u) / 3.0, v))") != std::string::npos);
+    CHECK(sky.find("mean = texture(skyLut, vec2(2.5 / 3.0, v))") != std::string::npos);
+    CHECK(sky.find("return 0.5 + 0.5 * sign(l) * sqrt(abs(l) / (0.5 * kSkyPi));") != std::string::npos);
+    // The Mie asymmetry and the cloud mask's dead zone come from the engine
+    // (Atmosphere.hpp), not from constants of the shader's own.
+    CHECK(sky.find("float g = litSkyRight.w;") != std::string::npos);
+    CHECK(sky.find("(lumT - bg - litAtmo.w)") != std::string::npos);
+    CHECK(sky.find("(lumT - bg - 0.015)") == std::string::npos);
+    // A row keeps the original dome's brightness, its sun glow included (the
+    // glow weight is region 2's alpha), and the hue blend moves the hue only:
+    // the original hue is relit by the brightness ratio, not channel by
+    // channel (that turned the sunset horizon olive).
+    CHECK(sky.find("vec3 classicLin = toLinear(min(baseDisp + glowDisp * mean.a, capDisp));") != std::string::npos);
+    CHECK(sky.find("vec3 relit = classicLin * (dot(a, kLuma) / rowLum);") != std::string::npos);
+    CHECK(sky.find("a / m") == std::string::npos);
+    CHECK(sky.find("skyClear(d, bgC * litAtmoDome.rgb, bgC * litAtmoGlow.rgb, bgC)") != std::string::npos);
+    // A cloud's colour is the texel taken out of the sky behind it by the
+    // mask's alpha (a thin cirrus is the mask's white, not the composited
+    // texel), and the clouds take the row's glow too.
+    CHECK(sky.find("vec3 cloudDisp = clamp(bgC + (t0.rgb - bgC) / max(alpha, 0.05), 0.0, 1.0);") != std::string::npos);
+    CHECK(sky.find("vec3 rowLight = toLinear(min(litAtmoDome.rgb + litAtmoGlow.rgb * rowGlow, vec3(1.0)));") !=
+          std::string::npos);
+
+    // The GPU passes march as SkyViewTexel and average as SkyViewRowMean.
+    const std::string view = gl::PostShaderSource(gl::PostShader::SkyView);
+    const std::string mean = gl::PostShaderSource(gl::PostShader::SkyViewMean);
+    REQUIRE_FALSE(view.empty());
+    REQUIRE_FALSE(mean.empty());
+    CHECK(gl::PostShaderName(gl::PostShader::SkyView) == std::string("psSkyView"));
+    CHECK(gl::PostShaderName(gl::PostShader::SkyViewMean) == std::string("psSkyViewMean"));
+    CHECK(view.find("float tNext = tMax * f1 * f1;") != std::string::npos);
+    CHECK(view.find("float t = tPrev + 0.3 * dt;") != std::string::npos);
+    CHECK(view.find("float disc = rmu * rmu + (atmoRadii.y - r) * (atmoRadii.y + r);") != std::string::npos);
+    CHECK(view.find("float disc = rmu * rmu - (r - atmoRadii.x) * (r + atmoRadii.x);") != std::string::npos);
+    CHECK(view.find("vec3 srcR = scatR * phaseR * ts + (scatR + scatM) * ms;") != std::string::npos);
+    CHECK(mean.find("float phi = (float(a) + 0.5) / float(taps) * kPi;") != std::string::npos);
+    CHECK(mean.find("if (ij.x < 2 * n) {") != std::string::npos);
+    CHECK(mean.find("fragColor = vec4(sum * (1.0 / float(taps)), glow * (1.0 / float(taps)));") != std::string::npos);
+    // The numbers reach them from Atmosphere.hpp.
+    const std::string engine = ReadTextFile(Gl33Dir() / "EngineGL33_SkyTable.cpp");
+    for (const char* use : {"rm::kSkyViewSteps", "rm::kSkyViewMeanTaps", "rm::atmo::kMieG", "rm::kSkyViewSize",
+                            "rm::kTransmittanceWidth", "rm::kMultiScatterSize", "rm::kSkyViewRegions * n"})
+    {
+        CAPTURE(use);
+        CHECK(engine.find(use) != std::string::npos);
     }
 }

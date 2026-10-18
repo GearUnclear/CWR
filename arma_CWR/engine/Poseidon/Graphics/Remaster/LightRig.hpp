@@ -122,6 +122,14 @@ struct LightingTuning
     float taaSharpen = 0.5f;
     float taaMipBias = -0.5f;
     float taaAlpha = 0.1f;
+    // Sky table (FeatureSet::atmosphere, Atmosphere.hpp) sub-knobs: the hue of
+    // the clear sky (0 the original sky's hue relit by the atmosphere, 1 the
+    // physical hue), the display-space saturation of the dome and the fog
+    // colour, and the haze (Mie density multiplier; a change rebuilds the
+    // atmosphere tables on a worker thread).
+    float atmoHue = 0.5f;
+    float atmoSat = 1.15f;
+    float atmoHaze = 1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

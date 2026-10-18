@@ -41,12 +41,14 @@ SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 UDCAP_RE = re.compile(r"UDCAP;(.*)$")
 # triGpuTimes sections: the frame, the world (with its shadow pass, and its
-# three parts from A4 on: ground, the opaque objects, the rest) and the post
-# pass, then the post stages that run today, in their order (GpuTimings.hpp; a
-# stage that did not run leaves its cell empty). frame_min is the best frame
-# of the timer window (the "| min frame=" field, A4 on).
-GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "post", "resolve", "lindepth", "ao", "bloom",
-              "shafts", "composite", "frame_min")
+# three parts from A4 on: ground, the opaque objects, the rest), the
+# remastered sky dome (with the sky table's build on the frames that rebuild
+# it, A7 on) and the post pass, then the post stages that run today, in their
+# order (GpuTimings.hpp; a section that did not run leaves its cell empty).
+# frame_min is the best frame of the timer window (the "| min frame=" field,
+# A4 on).
+GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "post", "resolve", "lindepth",
+              "ao", "bloom", "shafts", "composite", "frame_min")
 GPU_RES = {
     "frame": re.compile(r"\bframe ([\d.]+) ms"),
     "world": re.compile(r"\bworld ([\d.]+)"),
@@ -54,6 +56,8 @@ GPU_RES = {
     "ground": re.compile(r"\bground ([\d.]+)"),
     "pass1": re.compile(r"\bpass1 ([\d.]+)"),
     "rest": re.compile(r"\brest ([\d.]+)"),
+    "sky": re.compile(r"\bsky ([\d.]+)"),
+    "skytable": re.compile(r"\(skytable ([\d.]+)\)"),
     "post": re.compile(r"\bpost ([\d.]+):"),
     "resolve": re.compile(r"\bresolve ([\d.]+)"),
     "lindepth": re.compile(r"\blindepth ([\d.]+)"),

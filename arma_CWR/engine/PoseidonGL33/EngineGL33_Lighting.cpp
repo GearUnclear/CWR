@@ -145,6 +145,8 @@ void EngineGL33::InitLightingResources()
     GL33Bind::ActiveUnit(kShadowMapUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     GL33Bind::ActiveUnit(0);
+    // The sky table's unit 8 gets its stand-in the same way.
+    InitSkyTable();
 
     glGenSamplers(1, &_shadowCompareSampler);
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -180,6 +182,7 @@ void EngineGL33::DeinitLightingResources()
     delTex(_dummyHeightTex);
     delTex(_post.whiteTex);
     delTex(_post.blackTex);
+    DeinitSkyTable();
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
@@ -311,6 +314,7 @@ void EngineGL33::BindLightingTextures()
     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
+    BindSkyTable();
     GL33Bind::ActiveUnit(0);
 }
 
@@ -368,6 +372,7 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.interior = _prevWorldDepthCleared;
     in.optics = _prevWorldOverlayDrawn;
     in.nightVision = _nightVision;
+    in.skyTablesReady = SkyTablesReady();
     const LightList& lights = GScene->ActiveLights();
     for (int i = 0; i < lights.Size(); i++)
     {
@@ -509,8 +514,24 @@ void EngineGL33::UploadLitFrameConstants()
     const float debug =
         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
+    // The sky table: the camera basis, the dome and fog blends, the clouds' light.
+    UploadLitSky(toSun, in.skyThrough);
     FlushLitConstants();
     BindLightingTextures();
+}
+
+void EngineGL33::SetLitSlot(int slot, float x, float y, float z, float w)
+{
+    SetSlot(slot, x, y, z, w);
+}
+
+void EngineGL33::SetLitSkyMode(int mode)
+{
+    // Twice a frame at most (the sky pass opening and closing): the whole
+    // block through the one flush, so any record of what the buffer holds
+    // stays true.
+    s_lit[LitConst::SkyFwd * 4 + 3] = static_cast<float>(mode);
+    FlushLitConstants();
 }
 
 void EngineGL33::PinCloudDrift(bool pinned, float x, float z)

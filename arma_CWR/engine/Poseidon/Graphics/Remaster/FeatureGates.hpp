@@ -79,6 +79,9 @@ struct GateInputs
     // readout). Negative = not measured.
     float waterShare = -1.0f;
     float wetShare = -1.0f;
+    // The sky table's transmittance and multiple-scattering tables are built
+    // (a worker thread builds them when the haze changes; Atmosphere.hpp).
+    bool skyTablesReady = true;
 };
 
 struct Gate

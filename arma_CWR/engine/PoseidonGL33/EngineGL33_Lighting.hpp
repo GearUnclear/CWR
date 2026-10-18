@@ -8,8 +8,9 @@
 namespace Poseidon::gl33lighting
 {
 
-// Standalone vertex shader of the remastered set for a VertexShaderID, or
-// nullptr.
+// Vertex shader of the remastered set for a VertexShaderID, or nullptr. The
+// screen vertex shader is assembled from its pieces (kScreenVertexPieces: it
+// pastes LitConstantsBlock() for the sky pass); the others are standalone.
 const char* RemasterVertexSource(int vs);
 // Fragment shaders are the common prelude followed by a main body. A null main
 // means the pixel shader reuses its classic source (PSFlat, PSShadow).
@@ -40,6 +41,12 @@ const char* RemasterFragmentPiece(FragmentPiece piece);
 extern const char kRemasterSkyGLSL[];
 extern const char kRemasterLightsGLSL[];
 extern const char kRemasterSurfaceGLSL[];
+// The sky table's passes (EngineGL33_PostSkyTableShaders.cpp; read them through
+// PostShaderSource).
+extern const char kPostSkyTableHeaderGLSL[];
+extern const char kPostSkyTableModelGLSL[];
+extern const char kPostSkyViewMainGLSL[];
+extern const char kPostSkyViewMeanMainGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -61,6 +68,10 @@ enum class PostShader : int
     DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
     Taa,         // the TAA resolve into the history (the Temporal stage)
     TaaSharpen,  // the resolved frame back into the frame target (the Sharpen stage)
+    // The sky table's two fullscreen passes. Not post stages: they run before
+    // the world when the sun has moved (EngineGL33_SkyTable.cpp).
+    SkyView,     // regions 0 and 1 of the sky-view table
+    SkyViewMean, // the whole table: those two copied and each row's mean
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -78,9 +89,9 @@ constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from 
 constexpr int kTerrainHorizonUnit = 3;
 constexpr int kTerrainHeightUnit = 4;
 constexpr int kCloudNoiseUnit = 5;
+constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
 // Allocated to the features still to land; no shader samples them yet.
 constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
-constexpr int kSkyLutUnit = 8;        // sky-view table (sky table)
 constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
 constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
 constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
@@ -153,6 +164,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"terrainHorizon", kTerrainHorizonUnit},
     {"terrainHeight", kTerrainHeightUnit},
     {"cloudNoise", kCloudNoiseUnit},
+    {"skyLut", kSkyLutUnit},
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -191,14 +203,28 @@ enum : int
     LightColor = 34, // MaxLights vec4
     LightAmb = 42,   // MaxLights vec4
     LightDir = 50,   // MaxLights vec4
-    Count = 58,
+    // 58-60: allocated to features still to land (LitConstPlanned MatClass,
+    // Taa, Pcss); one padding member in the block until they do.
+    Reserved = 58,
+    // The sky pass (the sky table; clouds read the camera basis too).
+    SkyRight = 61,     // xyz camera right * tan(fov x / 2), w Mie asymmetry g
+    SkyUp = 62,        // xyz camera up * tan(fov y / 2)
+    SkyFwd = 63,       // xyz camera forward, w sky mode of the draws that follow (RemasterSky; 0 = world)
+    Atmo = 64,         // x dome blend, y overcast cloud floor, z aerial perspective blend, w cloud mask dead zone
+    AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
+    AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
+    AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
+    Count = 68,
 };
 constexpr int MaxLights = 8;
+constexpr int ReservedCount = 3;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
 static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
-static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
+static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
+static_assert(SkyRight == Reserved + ReservedCount, "LitConst sky slots follow the reserved ones");
+static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to the features still to land (INTEGRATION-PLAN.md
@@ -206,19 +232,13 @@ static_assert(Count == LightDir + MaxLights, "LitConst size out of sync");
 // first, next to the per-draw material and light slots. A step that lands a
 // feature moves its rows into LitConst, declares them in LitConstantsBlock()
 // (a slot below it that has not landed yet becomes a padding member there) and
-// raises LitConst::Count, which the upload and the shaders follow.
+// raises LitConst::Count, which the upload and the shaders follow. A7 landed
+// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
 constexpr int Taa = 59;          // temporal: frame index, stochastic flags, taps, penumbra per metre
 constexpr int Pcss = 60;         // shadows: search radius, minimum texels
-constexpr int SkyRight = 61;     // sky pass, shared by the sky table and clouds: camera right * tan(fov x / 2)
-constexpr int SkyUp = 62;        // sky pass: camera up * tan(fov y / 2)
-constexpr int SkyFwd = 63;       // sky pass: camera forward
-constexpr int Atmo = 64;         // sky table: radiance scale, overcast floor, aerial perspective, cloud mask
-constexpr int AtmoCloudSun = 65; // sky table: sun light on the clouds (linear)
-constexpr int AtmoCloudAmb = 66; // sky table: sky light on the clouds (linear)
-constexpr int AtmoDome = 67;     // sky table: classic dome light (linear), hue blend
 constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
 constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
 constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
@@ -231,7 +251,9 @@ constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
 constexpr int Detail = 77;       // texsharp: terrain detail constants
 constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
 constexpr int End = 79;          // one past the last planned slot
-static_assert(MatClass == LitConst::Count, "the planned slots follow the declared ones");
+static_assert(MatClass == LitConst::Reserved && Pcss == LitConst::Reserved + LitConst::ReservedCount - 1,
+              "the planned slots below the sky pass are the reserved padding");
+static_assert(Sky == LitConst::Count, "the other planned slots follow the declared ones");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
 } // namespace LitConstPlanned

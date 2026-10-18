@@ -180,6 +180,15 @@ struct AspectSettings
     //@}
 };
 
+//! What the draws of the remastered sky pass are (Engine::BeginRemasterSky).
+//! The values are the sky mode the shaders read (LitConstants litSkyFwd.w); 0
+//! is the world's own draws.
+enum class RemasterSky : int
+{
+    Dome = 1,   // the sky dome (Landscape::DrawSky)
+    Clouds = 2, // the sky clouds (Landscape::DrawClouds)
+};
+
 //@{
 /*!\name 2D coordinate system
 Various systems of 2D coordinates.
@@ -873,6 +882,19 @@ class Engine : public IGraphicsEngine
     /// pass, rain and flares follow. The remastered TAA copies the frame here
     /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
     virtual void BeginTranslucentObjects() {}
+    /// The remastered sky pass (the sky table, Graphics/Remaster/Atmosphere.hpp):
+    /// Landscape::DrawSky and DrawClouds open it around the pre-world draws of
+    /// the sky dome and the sky clouds, which then draw through the remastered
+    /// programs. A backend without it, or the feature switched or gated off,
+    /// leaves those draws classic.
+    virtual void BeginRemasterSky(RemasterSky /*mode*/) {}
+    virtual void EndRemasterSky() {}
+    /// Work the remastered sky has in flight (the atmosphere tables' worker
+    /// build); triSettleScene waits for it.
+    virtual bool RemasterSkyPending() const { return false; }
+    /// triSkyTableCheck: the GPU sky-view table read back against its CPU
+    /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+    virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.

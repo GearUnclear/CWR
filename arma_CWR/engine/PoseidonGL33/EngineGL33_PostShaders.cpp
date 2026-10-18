@@ -529,6 +529,11 @@ const PostShaderDef kPostShaders[] = {
     {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
     {"psPostTaa", {s_psPostTaaInputs, s_psPostTaaMain}},
     {"psPostTaaSharpen", {s_psPostTaaSharpenGLSL}},
+    {"psSkyView",
+     {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyTableModelGLSL,
+      Poseidon::gl33lighting::kPostSkyViewMainGLSL}},
+    {"psSkyViewMean",
+     {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

@@ -718,6 +718,11 @@ class EngineGL33 : public Engine
     bool WantsTerrainHorizonMap() const override;
     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
     void EndWorldScene() override;
+    // --- The remastered sky: the sky table (EngineGL33_SkyTable.cpp) ---
+    void BeginRemasterSky(Poseidon::RemasterSky mode) override;
+    void EndRemasterSky() override;
+    bool RemasterSkyPending() const override;
+    std::string RemasterSkyCheck(int texels) override;
 
     Poseidon::remaster::LightingTuning _lighting;
     // Remastered programs built and the setting asks for them: DoSelectPixelShader
@@ -802,8 +807,23 @@ class EngineGL33 : public Engine
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).
     void UploadLitSlots(int first, int count);
-    // Binds units 2..5 for the remastered shaders (compare sampler on 2).
+    // Binds units 2..5 and 8 for the remastered shaders (compare sampler on 2).
     void BindLightingTextures();
+    // The sky table (EngineGL33_SkyTable.cpp): the stand-in and GL objects, the
+    // worker build of the atmosphere tables (true once they exist for the
+    // tuning's haze; starts the build when they do not), the GPU build of the
+    // sky-view table, the sky slots of LitConstants and the unit-8 binding.
+    void InitSkyTable();
+    void DeinitSkyTable();
+    bool PollSkyTables();
+    bool SkyTablesReady() const;
+    bool BuildSkyViewTableGpu(float sunElevationRad);
+    void UploadLitSky(const Vector3& toSun, float skyThrough);
+    void BindSkyTable();
+    // One LitConstants slot (flushed with the next FlushLitConstants), and the
+    // sky mode (litSkyFwd.w, flushed at once).
+    void SetLitSlot(int slot, float x, float y, float z, float w);
+    void SetLitSkyMode(int mode);
     void FlushLitConstants();
     unsigned int SelectProgram(int vs, int spec, int mode, int ps) const;
 

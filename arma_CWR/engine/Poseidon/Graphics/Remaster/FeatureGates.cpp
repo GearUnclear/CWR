@@ -125,6 +125,8 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
         case Feature::Atmosphere:
             if (in.sunElevationDeg <= kGateSkyTableMinSunDeg)
                 return Off("sun below -9 deg");
+            if (!in.skyTablesReady)
+                return Off("atmosphere tables building");
             return On("sun above -9 deg");
 
         case Feature::TreeShadows:

@@ -273,6 +273,16 @@ slot nothing reads would change every remastered program for nothing. Its first 
 stochastic PCSS, which lands slot 59 (with 58 as padding) and fills it from the backend's TAA
 sequence (`EngineGL33::_taa.sequence`, the jitter index that advances once per resolve).
 
+As built in A7: slots 61 to 67 landed (`LitConst::Count` 68), with 58 to 60 declared as one padding
+member `litReserved[3]` (`LitConst::Reserved`, `ReservedCount`); `LitConstPlanned` keeps `MatClass`,
+`Taa` and `Pcss` (static_assert: they are the reserved padding) and `Sky` to `Haze` (static_assert:
+`Sky == LitConst::Count`). A step that lands one of 58 to 60 splits `litReserved` into padding
+around its member. Slot 66 is `AtmoGlow` (the classic dome's sun glow, display, and the sky
+saturation), not `AtmoCloudAmb`: the sky light on the clouds is a luminance (`AtmoCloudSun.w`) whose
+colour the shader takes from the table. `SkyFwd.w` is the sky mode of the draws that follow (0 the
+world, 1 the dome, 2 the sky clouds; `Poseidon::RemasterSky`), `SkyRight.w` the Mie asymmetry,
+`SkyUp.w` free.
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -312,6 +322,12 @@ units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits`
 for unit 6 belongs to the step that first samples it (A5 or B1). As built in A5: A5 samples no
 world unit (its stochastic consumers, the PCSS, are B1's), so unit 6 and its `[ShadowSampler]` case
 go to B1. TAA's own inputs are post inputs on `kPostUnits` (3.6).
+
+As built in A7: `kSkyLutUnit` (8) is in use, with its `kLitSamplers` row (`skyLut`) and a 1x1
+RGBA32F stand-in bound at `InitLightingResources` (`InitSkyTable`) until the first sky-view table is
+built; `BindLightingTextures` binds the table or the stand-in on every world pass. The two passes
+that build the table read their inputs with `texelFetch` on unit 0 and, while the table itself is
+not bound, unit 8, and rebind the table after them.
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -1081,6 +1097,83 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
   sunset and -4 deg; transmittance monotone with air mass); a CPU mirror of one LUT texel
   against the GPU pass output in the lab; layout for slots 61-67; glslang for the LUT pass.
 - **Effort**: 5 days.
+
+**Result (2026-10-18, uncommitted change on ced77ae in the scratch copy `gr-A7`; evidence in
+`tmp/integration/A7/` of the graphics-remaster worktree, gitignored).**
+
+- Built as the bullets above with these corrections. The model is the prototype's
+  (`Graphics/Remaster/Atmosphere.{hpp,cpp}`, its constants and its 40-step march), with the
+  ray-sphere discriminants rewritten as (r mu)^2 plus a difference of squares of nearby radii, so
+  they keep their precision in float near the ground on the CPU and the GPU alike. The
+  transmittance and multiple-scattering tables are built on a worker thread (`std::async`, as the
+  terrain horizon map) the first time the feature runs and again when `atmoHaze` changes; until
+  they exist the gate reads "atmosphere tables building" (`GateInputs::skyTablesReady`) and
+  `triSettleScene` waits for them (`Engine::RemasterSkyPending`). The sky-view table is built on
+  the GPU in two fullscreen passes (`psSkyView`: regions 0 and 1 into a 128x64 scratch target;
+  `psSkyViewMean`: the 192x64 table, the two regions copied and region 2 each row's mean), RGBA32F
+  rather than RGBA16F (the table holds radiances down to 1e-6 in deep twilight, and 192x64x16 bytes
+  is 196 KB), its GLSL in the GL-free `EngineGL33_PostSkyTableShaders.cpp` as two `kPostShaders`
+  rows. The table builds only while `atmosphere` is on and gated on: nothing else reads it yet;
+  B5, B8 and B10 widen that condition to their own switches.
+- The hook is `Engine::BeginRemasterSky(RemasterSky::Dome | Clouds)` / `EndRemasterSky()`, called
+  from `Landscape::DrawSky` (around the dome) and `Landscape::DrawClouds`. With the switch off,
+  classic lighting, a portrait, a 3D preview after the world or night vision it returns at once,
+  so those draws are the classic ones. On, it opens the remastered programs as `BeginPass` does
+  (and back after: the stars, sun and moon stay classic), computes the frame's gates there (the
+  world pass reuses them), builds the table when the sun moved 0.02 degrees and sets the sky mode
+  (`litSkyFwd.w`) that tells the screen vertex shader which draws are the dome; the `t1` marker
+  and the `BeginMesh` hack are gone. The screen vertex shader pastes `LitConstantsBlock()`
+  (`kScreenVertexPieces`, which `glsl_extract.py` assembles too). Correction: the NDC
+  reconstruction needs no pillarbox rectangle: it starts from the vertex's own screen position,
+  which the software transform lays out over the whole target independent of the viewport, so it
+  maps back through the camera alone (checked in game with a 4:3 world rect,
+  `a7_pillarbox`).
+- Critic fixes, measured on the six A7 views (`gen_a7.py`: the hero `coastline_sunset` at heading
+  250 and `firefight_dusk`, plus `noon_fields`, `sunrise_ridge`, `coast_oc_up` and `town_night`):
+  - Olive band: the prototype relit the original hue channel by channel (the row-mean ratio per
+    channel), which turned the pink horizon away from a low sun olive. The original hue is now
+    relit by the brightness ratio alone, so `atmoHue` moves the hue only; the anti-sun horizon
+    band at `coastline_sunset` reads (135, 119, 111) against the original's (158, 124, 127), a
+    warm grey 9 % darker, where the sun side gained 34 %.
+  - Darkening: each row now keeps the original dome's brightness with its sun glow included (the
+    prototype's reference left out `SunSkyColor * cos^6`; region 2's alpha holds each row's mean
+    glow weight, `SkyViewRowGlow`, and the fog colour gets the same with `litFogSun`). The sky band
+    (rows 0 to 380) is within -0.1 % and +6 % of the original's mean luminance on the five daytime
+    views (the critic measured the prototype's sunrise 9 % darker; this port before the fix read
+    up to 8 % darker).
+  - Noon cirrus: the dead zone is 0.004, and a cloud's own colour is the texel taken out of the
+    sky behind it by the mask's alpha (the prototype's relit cloud was the composited texel, mostly
+    sky, which erased thin cirrus at hue 0.5); the cover is mixed in display space, where the mask
+    measures it (mixed in linear light the texture's faint blotches read 30 to 40 % stronger). The
+    sky detail (standard deviation of a 6-pixel high-pass, rows 0 to 380) is 1 to 13 % above the
+    original's on every view (`noon_fields` 2.54 against 2.52).
+  - The clouds keep the original brightness too (the row's glow gain on their light).
+- Dropped as planned: `atmoLight`, `atmoSun`, `atmoExposure`, the logs; also `atmoFog` and
+  `atmoClouds` (the switch covers dome and fog; the mask gain is 1) and `atmoDebug`. Sub-knobs
+  `atmoHue` 0.5, `atmoSat` 1.15 and `atmoHaze` 1.0 are registered under the switch. The water's
+  reflection term is left for B5 (its distance fog takes the table's colour).
+- Slots 61 to 67 landed with 58 to 60 as padding (3.3); unit 8 is in use (3.4); new GPU marks
+  `SkyBegin`, `SkyTableEnd`, `SkyEnd` and sections `sky` and `skytable` (23 of 32 marks).
+- Gate: build 0 warnings; clang-format clean on all 22 touched C++ files; unit gate tags plus
+  `[atmosphere]` 476/476 (10 new cases); the full suite has the 6 known localisation failures
+  only. Ten mutations (the gate ignoring the tables, the rebuild threshold in radians, the night
+  fade moved, the mean pass without the glow weight, the channel-by-channel relight, the old dead
+  zone, two block members renamed, the sky ray without its gate, Mie extinction taken as its
+  scattering, the switch not landed) each turn their cases red. `triSkyTableCheck` reads the GPU
+  table back against `SkyViewTexel`, `SkyViewRowMean` and `SkyViewRowGlow`: largest relative
+  error 3.7e-4, glow 7e-7, on every view. Smoke 1/1 (KHR_debug ids 131169, 131154 and 131218
+  only). Off equals before: `atmosphere=0` on the A7 build against the base build is
+  pixel-identical on four views and differs only in the sea of the two coast views, by the same
+  kinds and sizes as one game's own repeat; `town_night` on equals off (gate off at night).
+- Timing (a single reading, `gen_a7_timing.py`: three views, off then on, 3 interleaved rounds,
+  0 of 4 tri slots, no foreign game in the clock samples): the dome itself (`sky`) costs 0.08 to
+  0.10 ms at P0 and 0.27 ms at P3; a table build (`skytable`, a one-minute-per-frame time-lapse at
+  `sunrise_ridge`) 0.06 ms. The whole frame at P0, on minus off: `sunrise_ridge` +0.49 ms median /
+  +0.48 minimum, `noon_fields` +0.53 / +0.55 (most of it the aerial perspective on the fogged
+  world fragments). A second run after the fog lookup was limited to fogged fragments read +0.59
+  and +0.33 ms on the minimum, but its CPU frame ran 2 to 6 ms longer on the same views (a busier
+  machine), so the two runs do not separate that change from the noise. The plan's estimate was
+  about 0.5 ms (3.2); MENU's 1.5 to 2x rule puts the 3060 at about 0.5 to 1.2 ms.
 
 ### B1. shadows (tree shadows, soft sun shadows)
 

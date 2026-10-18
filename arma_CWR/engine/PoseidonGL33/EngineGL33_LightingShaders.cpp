@@ -26,7 +26,10 @@
 // Fog, the night-eye desaturation, alpha test / alpha-to-coverage, the IsColored
 // tint and the detail-texture modulation keep their classic order and space.
 // Pre-lit geometry (VSScreen: sky, clouds, particles, 2D) passes through
-// exactly as in the classic shaders.
+// exactly as in the classic shaders, except under the sky table (feature
+// switch `atmosphere`): the sky dome is then shaded from the physically based
+// sky table (vLitMode 2, shadeSkyDome) and pre-lit world draws fade into the
+// table's horizon colour with their fog (vLitMode -1).
 //
 // A fragment shader is the common prelude followed by one main body per pixel
 // shader. The prelude is split by concern (FragmentPiece in
@@ -51,8 +54,12 @@ namespace
 // Shared varyings of the remastered set: the classic ones plus the world-space
 // normal and a flat flag telling the fragment shader whether the vertex shader
 // supplied a normal (VSTransform) or a pre-lit colour (VSScreen / VSShadow).
+//
+// The screen vertex shader is three pieces (kScreenVertexPieces): its head, the
+// LitConstants block (the sky pass reads the camera basis and the sky table's
+// blends from it) and its main.
 
-static const char s_vsScreenRemasterGLSL[] = R"(#version 330 core
+static const char s_vsScreenRemasterHead[] = R"(#version 330 core
 layout(std140) uniform VSConstants {
     mat4 _pad_proj;
     mat4 _pad_view;
@@ -68,7 +75,9 @@ layout(std140) uniform VSConstants {
     vec4 _pad_sunEn;
     vec4 vpScale;       // 21: {2/width, 2/height, TAA jitter x, y (NDC)}
 };
+)";
 
+static const char s_vsScreenRemasterMain[] = R"(
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in float aRhw;
 layout(location = 2) in vec4 aColor;
@@ -104,6 +113,23 @@ void main() {
     vNormalW = vec3(0.0, 1.0, 0.0);
     vCrown = vec4(0.0);
     vLitMode = 0.0; // pre-lit colour: the fragment shader passes it through
+    // The sky table: the camera-relative point on the view ray, from the
+    // vertex's screen position and the camera basis, perspective-interpolated
+    // so the fragment shader gets an exact view direction. The sky dome (sky
+    // mode 1) is shaded from the table (vLitMode 2); every other pre-lit draw of
+    // the world (the far horizon polygon, the sky clouds, particles) keeps its
+    // colour and fades into the table's horizon colour with its fog (-1).
+    if (litAtmo.x > 0.0 || litAtmo.z > 0.0) {
+        vec2 ndc = vec2(aPos.x * vpScale.x - 1.0, 1.0 - aPos.y * vpScale.y);
+        vec3 rel = (litSkyFwd.xyz + ndc.x * litSkyRight.xyz + ndc.y * litSkyUp.xyz) * w;
+        if (litSkyFwd.w > 0.5 && litSkyFwd.w < 1.5 && litAtmo.x > 0.0) {
+            vWorldRel = rel;
+            vLitMode = 2.0;
+        } else if (litAtmo.z > 0.0) {
+            vWorldRel = rel;
+            vLitMode = -1.0;
+        }
+    }
 }
 )";
 
@@ -304,6 +330,14 @@ layout(std140) uniform LitConstants {
     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
     vec4 litLightDir[8];  // 50-57: xyz beam direction
+    vec4 litReserved[3];  // 58-60: allocated to features still to land (materials, temporal, shadows)
+    vec4 litSkyRight;     // 61: xyz camera right * tan(fov x / 2), w Mie asymmetry g
+    vec4 litSkyUp;        // 62: xyz camera up * tan(fov y / 2)
+    vec4 litSkyFwd;       // 63: xyz camera forward, w sky mode (0 world, 1 dome, 2 sky clouds)
+    vec4 litAtmo;         // 64: x dome blend, y overcast cloud floor, z aerial perspective blend, w cloud mask dead zone
+    vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
+    vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
+    vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
 };
 )";
 
@@ -316,6 +350,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
 uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
 uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
 uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
 
 in vec4 vColor;
 in vec4 vSpecColor;
@@ -584,9 +619,23 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
         // Only blue is raised, so a half-faded warm surface does not turn
         // green. Bright (lamp-lit) surfaces keep their own colour, as in classic.
         const vec3 kNightGrey = vec3(0.985, 0.995, 1.1);
-        r0.rgb = mix(vec3(luminance) * (vLitMode > 0.5 ? kNightGrey : vec3(1.0)), r0.rgb, nightBlend);
+        bool lit = vLitMode > 0.5 && vLitMode < 1.5;
+        r0.rgb = mix(vec3(luminance) * (lit ? kNightGrey : vec3(1.0)), r0.rgb, nightBlend);
     }
-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
+    // Fog: lit geometry fades into the sky behind it (the sun glow, and with
+    // the sky table the table's horizon colour in its own azimuth); pre-lit
+    // world draws take the table's horizon colour too (vLitMode -1, set only
+    // while the table's aerial perspective is on). The dome itself is unfogged.
+    // The table is read only where fog shows (the near field has vFogTC 1, and
+    // the mix below then ignores the fog colour).
+    vec3 fogC = fogColor.rgb;
+    if (vLitMode > 0.5 && vLitMode < 1.5) {
+        fogC = fogColorToward(vWorldRel);
+        if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
+    } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+        fogC = atmoFogColor(vWorldRel, fogC);
+    }
+    r0.rgb = mix(fogC, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -596,7 +645,13 @@ void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 r0;
     float ambientShare = 0.0;
-    if (vLitMode > 0.5) {
+    if (vLitMode > 1.5) {
+        // The sky dome (the sky table), over its pre-lit classic colour.
+        vec4 classic = vColor * t0;
+        classic *= constColor;
+        classic.rgb += vSpecColor.rgb;
+        r0 = vec4(shadeSkyDome(t0, classic.rgb), classic.a);
+    } else if (vLitMode > 0.5) {
         r0.rgb = shadeRemastered(t0.rgb * constColor.rgb, false, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {
@@ -614,7 +669,7 @@ void main() {
     vec4 t1 = texture(tex1, vUV1);
     vec4 r0;
     float ambientShare = 0.0;
-    if (vLitMode > 0.5) {
+    if (vLitMode > 0.5 && vLitMode < 1.5) {
         // Detail modulation stays in display space, as in the classic shader,
         // so the terrain keeps its authored micro-contrast.
         vec3 albedo = t0.rgb * constColor.rgb * (t1.a * 2.0);
@@ -638,7 +693,7 @@ void main() {
     vec4 r0;
     float ambientShare = 0.0;
     r0.a = clamp((psC5.a * 2.0 - 1.0) + t1.a, 0.0, 1.0);
-    if (vLitMode > 0.5) {
+    if (vLitMode > 0.5 && vLitMode < 1.5) {
         r0.rgb = shadeRemastered(clamp(t0.rgb * t1.rgb * 2.0, 0.0, 1.0), true, ambientShare);
     } else {
         r0.rgb = clamp(vColor.rgb * t0.rgb * t1.rgb * 2.0, 0.0, 1.0);
@@ -655,7 +710,8 @@ void main() {
     vec3 bumpNormal = -(t1.xyz * 2.0 - 1.0);
     float glint = clamp(dot(psC4.xyz, bumpNormal), 0.0, 1.0);
     vec4 r0;
-    if (vLitMode > 0.5) {
+    bool lit = vLitMode > 0.5 && vLitMode < 1.5;
+    if (lit) {
         float ambientShare;
         vec3 base = shadeRemastered(t0.rgb, true, ambientShare);
         // The water reflects the sky the player sees behind it (the fog colour
@@ -673,7 +729,16 @@ void main() {
         r0 = vColor * t0;
         r0.rgb += glint;
     }
-    r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
+    // The sea's own fog: as finishFragment's (the reflection term above is the
+    // water step's to change).
+    vec3 fogC = fogColor.rgb;
+    if (lit) {
+        fogC = fogColorToward(vWorldRel);
+        if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
+    } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
+        fogC = atmoFogColor(vWorldRel, fogC);
+    }
+    r0.rgb = mix(fogC, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -700,6 +765,14 @@ const char* const kFragmentPieces[] = {
     s_psRemasterFinish,        // Finish
 };
 static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::Count), "one entry per FragmentPiece");
+
+// The screen vertex shader: these pieces in this order (the lighting lab's
+// glsl_extract.py reads this table too).
+const char* const kScreenVertexPieces[] = {
+    s_vsScreenRemasterHead,
+    s_glslLitConstantsBlock,
+    s_vsScreenRemasterMain,
+};
 } // namespace
 
 const char* RemasterVertexSource(int vs)
@@ -707,7 +780,17 @@ const char* RemasterVertexSource(int vs)
     switch (vs)
     {
         case VSScreen:
-            return s_vsScreenRemasterGLSL;
+        {
+            // Joined once, on first use (thread-safe static).
+            static const std::string screen = []
+            {
+                std::string joined;
+                for (const char* piece : kScreenVertexPieces)
+                    joined += piece;
+                return joined;
+            }();
+            return screen.c_str();
+        }
         case VSTransform:
             return s_vsTransformRemasterGLSL;
         case VSShadow:

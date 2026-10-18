@@ -311,19 +311,24 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         CHECK(GetKeyValue(t, *k) == 0.3f);
         CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
     }
-    // No other switch has sub-knobs yet: every knob with a parent is TAA's.
+    // Only the landed switches have sub-knobs yet: every knob with a parent is
+    // TAA's or the sky table's (A7, test_atmosphere.cpp), three each.
     int children = 0;
+    int taaChildren = 0;
     for (int i = 0; i < LightingKeyCount(); ++i)
     {
         const LightingKey& k = LightingKeyAt(i);
         if (!k.parent)
             continue;
         INFO(k.key);
-        CHECK(std::string_view(k.parent) == "taa");
+        const std::string_view parent(k.parent);
+        CHECK((parent == "taa" || parent == "atmosphere"));
         CHECK(FindFeature(k.parent) != nullptr);
+        taaChildren += parent == "taa" ? 1 : 0;
         ++children;
     }
-    CHECK(children == 3);
+    CHECK(taaChildren == 3);
+    CHECK(children == 6);
 }
 
 TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
@@ -592,12 +597,13 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothing else has",
+TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have landed, nothing else has",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
     // classic): triFeatureState no longer marks them inert, and the overlay
-    // shows the opaque objects' GPU section for them. A5 lands taa.
+    // shows the opaque objects' GPU section for them. A5 lands taa, A7
+    // atmosphere.
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -607,10 +613,11 @@ TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothin
         INFO(info.key);
         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
         const bool taa = info.id == Feature::Taa;
-        CHECK(info.landed == (perf || taa));
+        const bool atmosphere = info.id == Feature::Atmosphere;
+        CHECK(info.landed == (perf || taa || atmosphere));
         if (info.landed)
         {
-            CHECK(std::string_view(info.step) == (perf ? "A4" : "A5"));
+            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : "A7"));
             CHECK(sections.count(info.gpuSection) == 1);
         }
     }
@@ -620,7 +627,7 @@ TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothin
     INFO(s);
     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
-    CHECK(s.find("landed=3/26") != std::string::npos);
+    CHECK(s.find("landed=4/26") != std::string::npos);
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

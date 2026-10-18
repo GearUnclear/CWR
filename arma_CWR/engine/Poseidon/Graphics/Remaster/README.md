@@ -33,13 +33,20 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
 | Cloud shadows | `CloudNoise.cpp`, shader `cloudSunVisibility` | Under broken cloud, the classic uniform sun dimming moves into drifting cloud shadows whose mean transmission equals the classic dimming, so the average frame brightness is unchanged. A clear sky casts none: `setOvercast 0` still reports 4% cover (the clear weather keyframe sits at overcast -0.08), so the shadows fade in from 5% cover and take the full cover from 10% (about overcast 0.1); the dimming they do not carry stays uniform. |
 | Foliage | shader `shadeRemastered`, `CrownEllipsoid` | Half-lit materials (tree crowns, bushes, nets) are lit with the normal of an ellipsoid fitted to the shape's bounding box, with a wrapped terminator, light through the leaves inside the crown's own shadow, and less sky toward the crown's core. A tree reads as one volume with a lit side and a shaded side, not as noise from scattered leaf cards. Leaf cards authored without normals (zero mesh normals, common in CWA crowns) take the ellipsoid's normal outright. |
 | Fog toward the sun | shader `fogColorToward` | Fog takes the sky dome's own sun glow (`SunSkyColor * cos^6`, as `TLVertexTable::DoSkyLighting` shades the dome). Distant ground fades into the colour of the sky behind it, which removes the flat band along the horizon at sunrise and sunset. Away from the sun it is exactly the classic fog. |
+| Sky table (switch `atmosphere`) | `Atmosphere.cpp`, `PoseidonGL33/EngineGL33_SkyTable.cpp`, shaders `shadeSkyDome`, `atmoFogColor` | A physically based clear sky (Rayleigh, Mie, ozone and multiple scattering, after Hillaire 2020) shades the sky dome under the original sky texture's clouds and gives the fog of every world draw its colour (aerial perspective, the far horizon polygon included). A low sun gets a golden horizon band and an aureole, dusk an orange band under a mauve sky, sunrise keeps its pink with a coral glow at the sun, noon a graded blue with its cirrus. Each sky row keeps the original dome's brightness on average (its sun glow included); the table supplies how a direction differs from its row, and the hue is half way between the original's and the physical one (`atmoHue` 0.5, `atmoSat` 1.15). The clouds are the texture's own, masked against each row's clearest texel and lit by the sun seen from 2.5 km. The transmittance and multiple-scattering tables are built on a worker thread when the haze changes; the 192x64 sky-view table on the GPU, in two fullscreen passes, whenever the sun moves 0.02 degrees. It fades out between -3 and -9 degrees of sun (night keeps the classic sky); an overcast deck keeps the classic fog colour. |
 | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
 | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
 | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
 | Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
 
 Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged
-(inside the world pass they take the TAA jitter with the rest of the world).
+(inside the world pass they take the TAA jitter with the rest of the world),
+except under the sky table: the dome is then shaded from it and pre-lit world
+draws fade into its horizon colour with their fog. The dome and the sky clouds
+come before the world's first 3D pass; `Landscape::DrawSky` and `DrawClouds`
+open the remastered programs for them through one hook
+(`Engine::BeginRemasterSky` / `EndRemasterSky`), which does nothing while the
+sky table is off.
 Only shapes with a vertex buffer take the per-fragment path. A shape first
 loaded after the mission starts (`createVehicle` of a class the mission does not
 place, as Guerrilla Mode does for nearly every vehicle) gets its buffers from
@@ -126,15 +133,20 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
   comma list applied in order, all or none (`"remastered,taa=0"`), for
   scripted A/B captures. `triFeatureState` answers every switch with its gate;
   `triPinCloudDrift` holds the cloud shadows and sky clouds still;
-  `triSetFixedStep` fixes the simulation step. `triPinObjectDetail 1` holds the
+  `triSetFixedStep` fixes the simulation step; `triSkyTableCheck <texels>`
+  reads the GPU sky-view table back and compares it with its CPU mirror
+  (`SkyViewTexel`, `SkyViewRowMean`, `SkyViewRowGlow`). The sky table's
+  sub-knobs are `atmoHue`, `atmoSat` and `atmoHaze`. `triPinObjectDetail 1` holds the
   object detail at its finest so both shots draw the same objects, and
   `triSettleScene` waits until a view has finished loading
   (`tests/rendering/captures/README.md`).
 - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
   `triGpuTimes true`, turns on timestamp queries around the frame, the world
-  (with the shadow pass inside it) and each post stage that ran (resolve,
-  linear depth, AO, bloom, shafts, composite, taa, sharpen, in the order of the
-  stage list; TAA's copy for its particle mask lands in the world section)
+  (with the shadow pass inside it), the remastered sky dome (`sky`, with the
+  sky-view table's build, `skytable`, on the frames that rebuild it) and each
+  post stage that ran (resolve, linear depth, AO, bloom, shafts, composite,
+  taa, sharpen, in the order of the stage list; TAA's copy for its particle
+  mask lands in the world section)
   (`EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings`). Results trail the
   frame by a few frames and are smoothed; nothing waits on the GPU. Toggle
   Remastered off for the same view's Classic numbers.
@@ -158,17 +170,20 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 | `Graphics/Remaster/CloudNoise.{hpp,cpp}` | Tileable, histogram-equalised cloud noise. Pure math. |
 | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
 | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+| `Graphics/Remaster/Atmosphere.{hpp,cpp}` | The sky table's atmosphere: its constants, the transmittance and multiple-scattering tables, the sky-view parametrisation and the CPU mirrors of the two GPU passes (`SkyViewTexel`, `SkyViewRowMean`, `SkyViewRowGlow`), the lookup the shaders make, and the frame rules (rebuild, night fade, overcast floor). Pure math. |
+| `PoseidonGL33/EngineGL33_SkyTable.cpp`, `EngineGL33_PostSkyTableShaders.cpp` | The sky table on the GPU: the worker build of the atmosphere tables, the two fullscreen passes that build the sky-view table (their GLSL in a GL-free file, rows of `kPostShaders`), the sky pass hook and its `LitConstants` slots, and `triSkyTableCheck`. |
 | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
 | `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
 | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
 | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
-| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 and 8 in use, 6 and 9-15 allocated) and the sampler table the programs are bound from, program-set selection. |
 | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
 | `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages; the GL helpers the post stages share. |
 | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
 | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
 | `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
 | `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
+| `tests/unit/.../Graphics/test_atmosphere.cpp` | The atmosphere against an independent brute-force integration (the vertical optical depth in closed form, transmittance and sky-view texels at noon, sunset and 4 degrees under), the colours of a clear day, a sunset and a twilight, the table's lookups and row means, and the frame rules, switch, gate and sub-knobs of the sky table. |
 | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
 | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
 

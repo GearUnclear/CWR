@@ -21,6 +21,12 @@ namespace Poseidon::gpu
 enum class Mark : int
 {
     FrameBegin,
+    // The remastered sky dome (the sky table's pass before the world): from
+    // the hook opening it, past the sky-view table build when one runs, to the
+    // end of the dome's draws.
+    SkyBegin,
+    SkyTableEnd,
+    SkyEnd,
     WorldBegin, // first 3D pass of the world
     // Inside the world pass (Landscape::DrawRect, at its existing queue
     // flushes): the sky, terrain, water and horizon drawn; the opaque objects
@@ -62,6 +68,8 @@ enum class Section : int
     Ground,
     Pass1,
     Rest,
+    Sky,      // the remastered sky dome, with the table build when it runs
+    SkyTable, // the sky-view table build (frames that rebuild it)
     // One per post stage, in Mark order: from the end of the latest stage that
     // ran before it (or WorldEnd) to its own end.
     Resolve,
@@ -124,10 +132,10 @@ class GpuTimings
     bool MinMs(Section s, float& ms) const;
     int Frames() const { return _frames; }
 
-    // "frame 6.12 ms | world 4.80 (shadow 0.62) [ground 1.10 pass1 2.40 rest 1.30] | post 0.71: resolve 0.04
-    // ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80 world=4.55 ground=1.02 pass1=2.21
-    // rest=1.21": the post stages in the order they run, each once it has been measured; the minimum
-    // fields use '=' so a parser looking for "<section> <ms>" never reads them.
+    // "frame 6.12 ms | world 4.80 (shadow 0.62) [ground 1.10 pass1 2.40 rest 1.30] | sky 0.05 (skytable
+    // 0.02) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80
+    // world=4.55 ground=1.02 pass1=2.21 rest=1.21": the post stages in the order they run, each once it has
+    // been measured; the minimum fields use '=' so a parser looking for "<section> <ms>" never reads them.
     std::string Summary() const;
 
   private:

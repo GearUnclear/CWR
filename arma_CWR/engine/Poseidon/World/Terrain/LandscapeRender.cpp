@@ -1675,7 +1675,10 @@ void Landscape::DrawSky(Scene& scene)
     float clipLevel = skyPosition.Y();
     scene.GetCamera()->SetUserClipPars(VUp, -clipLevel);
 
+    // The remastered sky table shades the dome (a no-op when it is off).
+    GEngine->BeginRemasterSky(RemasterSky::Dome);
     _skyObject->Draw(0, ClipAll & ~ClipBack | ClipUser0, *_skyObject);
+    GEngine->EndRemasterSky();
     float starsVisibility = (
         // see TLVertexMesh::DoStarLighting
         // overcast limitation
@@ -1730,6 +1733,9 @@ void Landscape::DrawClouds(Scene& scene)
         }
     }
     // scene.GetCamera()->SetUserClip(1);
+    // The remastered sky pass: with the sky table on, the clouds fade into its
+    // horizon colour with their fog (a no-op when it is off).
+    GEngine->BeginRemasterSky(RemasterSky::Clouds);
     AUTO_STATIC_ARRAY(CloudInfo, clouds0, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds1, 1024);
     AUTO_STATIC_ARRAY(CloudInfo, clouds2, 1024);
@@ -1827,6 +1833,7 @@ void Landscape::DrawClouds(Scene& scene)
             }
         }
     }
+    GEngine->EndRemasterSky();
 }
 
 void Landscape::Draw(Scene& scene)

@@ -554,7 +554,8 @@ GameValue TriSceneStats(const GameState* /*state*/)
 /// triSimFrames does, until the view has finished loading: the last
 /// stableFrames frames (default 30) drew draw-call counts within tolerancePct
 /// percent of each other (default 2), at one object LOD width, with no terrain
-/// horizon map build in flight. The per-frame texture upload budget is lifted
+/// horizon map build and no sky table build (the atmosphere tables) in flight.
+/// The per-frame texture upload budget is lifted
 /// on these frames, so textures in view are not held back at a coarser mip and
 /// do not sharpen over the next second. At most maxFrames (default 300, up to 600).
 /// Pin the object detail first (triPinObjectDetail): an adaptive detail can
@@ -584,7 +585,8 @@ GameValue TriSettleScene(const GameState* /*state*/, GameValuePar arg)
             return GameValue("FAIL:no engine");
         const bool rendered = GEngine->GetFrameCounter() != frameBefore;
         const int draws = LastFrameDrawCalls();
-        settle.Add(draws, GScene ? GScene->GetLodInvWidth() : 0.0f, !rendered || draws < 0 || TerrainLightingPending());
+        settle.Add(draws, GScene ? GScene->GetLodInvWidth() : 0.0f,
+                   !rendered || draws < 0 || TerrainLightingPending() || GEngine->RemasterSkyPending());
     }
     const bool ok = settle.Settled();
     LOG_INFO(Core,
@@ -628,10 +630,12 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
 /// key of the registry (Graphics/Remaster/FeatureSwitches.hpp): the knobs
 /// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
 /// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
-/// ao, bloom, shafts, post (0/1), debug (0..4), gates (0/1), and every feature
-/// switch (taa, combatLights, ...; 0 off, 1 on). Comma-separated items apply in
-/// order, all or none: "remastered,taa=0" is the shipped look with one feature
-/// off. Returns "OK", or "FAIL:<why>" with nothing applied.
+/// ao, bloom, shafts, post (0/1), debug (0..5), gates (0/1), every feature
+/// switch (taa, combatLights, ...; 0 off, 1 on) and the sub-knobs of the
+/// features that have landed (taaSharpen, taaMipBias, taaAlpha, atmoHue,
+/// atmoSat, atmoHaze). Comma-separated items apply in order, all or none:
+/// "remastered,taa=0" is the shipped look with one feature off. Returns "OK",
+/// or "FAIL:<why>" with nothing applied.
 GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
 {
     GameStringType text = static_cast<GameStringType>(arg);
@@ -665,6 +669,24 @@ GameValue TriFeatureState(const GameState* /*state*/)
     remaster::FeatureGates gates;
     GEngine->GetFeatureGates(gates);
     return GameValue(remaster::FeatureStateString(GEngine->GetLightingTuning(), gates).c_str());
+}
+
+/// triSkyTableCheck <texels>: the remastered sky table (feature switch
+/// atmosphere) read back from the GPU and compared with its CPU mirror
+/// (Graphics/Remaster/Atmosphere.hpp): regions 0 and 1 against SkyViewTexel at
+/// about <texels> texels each, region 2 against SkyViewRowMean of the GPU's
+/// own regions 0 and 1 on every row. Returns "OK:..." or "FAIL:..." with the
+/// largest relative error of each region and where it is; "FAIL:no sky-view
+/// table ..." before the first build (the switch off, the gate off, or no sky
+/// drawn yet).
+GameValue TriSkyTableCheck(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const int texels = std::max(16, toInt(static_cast<float>(arg)));
+    const std::string res = GEngine->RemasterSkyCheck(texels);
+    LOG_INFO(Core, "[tri] triSkyTableCheck {}", res);
+    return GameValue(res.c_str());
 }
 
 /// triPinCloudDrift [x, z] or [x, z, sky]: hold the clouds still for captures

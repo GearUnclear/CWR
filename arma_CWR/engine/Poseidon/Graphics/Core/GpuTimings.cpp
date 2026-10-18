@@ -21,6 +21,8 @@ constexpr SectionDef kSections[kSectionCount] = {
     {"ground", Mark::WorldBegin, Mark::GroundEnd},
     {"pass1", Mark::GroundEnd, Mark::Pass1End},
     {"rest", Mark::Pass1End, Mark::WorldEnd},
+    {"sky", Mark::SkyBegin, Mark::SkyEnd},
+    {"skytable", Mark::SkyBegin, Mark::SkyTableEnd},
     {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
     {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
     {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
@@ -162,6 +164,8 @@ std::string GpuTimings::Summary() const
             out += "]";
         }
     }
+    if (add(Section::Sky, " | %s %.2f"))
+        add(Section::SkyTable, " (%s %.2f)");
     if (add(Section::Post, " | %s %.2f:"))
     {
         for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)

@@ -200,6 +200,7 @@ def load_shaders(spec: str | os.PathLike | None = None, include_shadow_depth: bo
 # Files whose shaders are assembled from pieces spread over the family's files.
 _FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
 _FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
+_SCREEN_VS_TABLE = re.compile(r"\bkScreenVertexPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
 _POST_TABLE = re.compile(r"\bkPostShaders\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\n\};", re.S)
 _POST_ROW = re.compile(r'\{\s*"(?P<name>\w+)"\s*,\s*\{(?P<pieces>[^{}]*)\}\s*\}')
 
@@ -239,14 +240,21 @@ def _listed_names(body: str) -> list[str]:
 
 def assemble_programs(raw: dict[str, str], text: str) -> dict[str, str]:
     """{engine override name: source} from the raw strings of a file family and
-    its text: the kFragmentPieces prelude (psRemasterCommon), every kPostShaders
-    row, and every raw string no table uses under its own override name."""
+    its text: the kFragmentPieces prelude (psRemasterCommon), the
+    kScreenVertexPieces screen vertex shader (vsScreenRemaster), every
+    kPostShaders row, and every raw string no table uses under its own override
+    name."""
     out: dict[str, str] = {}
     used: set[str] = set()
     m = _FRAGMENT_TABLE.search(text)
     if m:
         names = _listed_names(m.group("body"))
         out["psRemasterCommon"] = "".join(raw[n] for n in names)
+        used.update(names)
+    m = _SCREEN_VS_TABLE.search(text)
+    if m:
+        names = _listed_names(m.group("body"))
+        out["vsScreenRemaster"] = "".join(raw[n] for n in names)
         used.update(names)
     m = _POST_TABLE.search(text)
     if m:
