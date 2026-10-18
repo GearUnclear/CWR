@@ -572,6 +572,15 @@ void Scene::SetObjectLODBias(float bias)
     // LODSelect compares against the per-LOD pixel-size thresholds.
 }
 
+void Scene::PinObjectDetail(float factor)
+{
+    if (factor > 0.0f)
+        saturate(factor, 1.0f, 16.0f);
+    else
+        factor = 0.0f;
+    _lodPinFactor = factor;
+}
+
 void Scene::SetQualitySettings(float val)
 {
     _qualitySettings = val;

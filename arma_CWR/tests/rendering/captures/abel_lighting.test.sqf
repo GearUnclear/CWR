@@ -4,9 +4,11 @@
 //  (see README.md beside this file for the view table and how to run it).
 //
 //  Every matched view runs the same block twice, Classic then Remastered:
-//    switch the lighting model and restart the GPU / CPU timers  (capMode)
-//    triSimFrames 90                    settle: shaders, shadow maps, streaming,
-//                                       and enough frames for the smoothed timers
+//    capMode                            pin the object detail, switch the lighting
+//                                       model (every knob at its default), wait
+//                                       until the view has loaded, restart the
+//                                       GPU / CPU timers
+//    triSimFrames 90                    enough frames for the smoothed timers
 //    capReadTimers                      keep the timings of this mode
 //    capPin                             same date, weather, sim clock, props, view
 //    triSimFrames 3

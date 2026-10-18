@@ -32,6 +32,10 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/SceneSettle.hpp>
+#include <Poseidon/Core/Game/GameLoop.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -480,6 +484,105 @@ GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
     Dev::GFrameProfiler().Reset();
     return GameValue("OK");
 }
+
+/// triPinObjectDetail <factor>: hold the object detail (the Scene LOD width)
+/// for A/B captures. 0 = adaptive, the stock choice from the measured frame
+/// time, which refuses to refine for five seconds after it last coarsened
+/// (Scene::AdjustComplexity), so two shots of one view can differ by
+/// thousands of draws. >= 1 pins the width at that multiple of the finest the
+/// quality setting allows (1 = finest, 16 = coarsest). Returns "OK:<factor>"
+/// or "FAIL:no scene".
+GameValue TriPinObjectDetail(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GScene)
+        return GameValue("FAIL:no scene");
+    GScene->PinObjectDetail(static_cast<float>(static_cast<GameScalarType>(arg)));
+    char buf[32];
+    snprintf(buf, sizeof(buf), "OK:%g", GScene->GetObjectDetailPin());
+    LOG_INFO(Core, "[tri] triPinObjectDetail {}", buf + 3);
+    return GameValue(buf);
+}
+
+// Draw calls of the last finished frame (the counter World::Simulate hands the
+// frame profiler), or -1 before the first one.
+static int LastFrameDrawCalls()
+{
+    const Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+    return perf.FrameCount() > 0 ? perf.Frame(0).drawCalls : -1;
+}
+
+static const char* HorizonMapState()
+{
+    if (!GEngine || !GEngine->WantsTerrainHorizonMap())
+        return "off";
+    return TerrainLightingPending() ? "pending" : "ready";
+}
+
+/// triSceneStats: the last frame's scene state for capture logs, as fields
+/// that splice into a "key=value;..." line: "draws=<GL draw calls>;objects=<
+/// objects with a visible LOD>;lights=<light slots>;lod=<Scene LOD width>;
+/// pin=<triPinObjectDetail factor, 0 = adaptive>;horizon=<off, pending or
+/// ready>" (horizon: the remastered terrain horizon map build). The two
+/// lighting models can issue slightly different draw calls for the same
+/// objects; the object count is the one to compare across them. Any light
+/// slot (a street lamp that has once been on keeps its slot) turns instancing
+/// off for the whole scene (Pass1), which multiplies the draw calls for the
+/// same objects.
+GameValue TriSceneStats(const GameState* /*state*/)
+{
+    char buf[192];
+    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
+             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->NLights() : -1,
+             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    return GameValue(buf);
+}
+
+/// triSettleScene [maxFrames, stableFrames, tolerancePct]: run frames, as
+/// triSimFrames does, until the view has finished loading: the last
+/// stableFrames frames (default 30) drew draw-call counts within tolerancePct
+/// percent of each other (default 2), at one object LOD width, with no terrain
+/// horizon map build in flight. The per-frame texture upload budget is lifted
+/// on these frames, so textures in view are not held back at a coarser mip and
+/// do not sharpen over the next second. At most maxFrames (default 300, up to 600).
+/// Pin the object detail first (triPinObjectDetail): an adaptive detail can
+/// hold a coarse LOD steady for five seconds. Returns "OK:<frames run>" or
+/// "UNSETTLED:<frames run>" (never FAIL, so a busy view still gets its shot);
+/// the details go to the log.
+GameValue TriSettleScene(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [maxFrames, stableFrames, tolerancePct]");
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const GameArrayType& a = arg;
+    auto num = [&a](int i, float fallback)
+    { return a.Size() > i ? static_cast<float>(static_cast<GameScalarType>(a[i])) : fallback; };
+    const int maxFrames = std::clamp(toInt(num(0, 300.0f)), 1, 600);
+    const int window = std::clamp(toInt(num(1, 30.0f)), 1, maxFrames);
+    Dev::SceneSettle settle(window, num(2, 2.0f) * 0.01f);
+    while (settle.Frames() < maxFrames && !settle.Settled())
+    {
+        // 2: TextBank StartFrame spends one, leaving the lift on for this frame only.
+        if (GEngine->TextBank())
+            GEngine->TextBank()->BoostLoadBudget(2);
+        const uint32_t frameBefore = GEngine->GetFrameCounter();
+        Poseidon::AppIdle();
+        if (!GEngine)
+            return GameValue("FAIL:no engine");
+        const bool rendered = GEngine->GetFrameCounter() != frameBefore;
+        const int draws = LastFrameDrawCalls();
+        settle.Add(draws, GScene ? GScene->GetLodInvWidth() : 0.0f, !rendered || draws < 0 || TerrainLightingPending());
+    }
+    const bool ok = settle.Settled();
+    LOG_INFO(Core,
+             "[tri] triSettleScene: {} after {} frames (draws {}..{} over the last {}, lod {}, pin {}, horizon {})",
+             ok ? "settled" : "NOT settled", settle.Frames(), settle.MinDraws(), settle.MaxDraws(), window,
+             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s:%d", ok ? "OK" : "UNSETTLED", settle.Frames());
+    return GameValue(buf);
+}
+
 /// triSetMsaa <0|2|4|8> — MSAA sample count on the frame target (0 = off).
 /// Applied at the next frame boundary. Returns "OK".
 GameValue TriSetMsaa(const GameState* /*state*/, GameValuePar arg)
@@ -502,33 +605,26 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
     return GameValue("OK");
 }
 
-/// triSetLighting "<setting>" — remastered lighting for scripted A/B captures.
-/// "classic" / "remastered" switch the lighting model (remastered also turns the
-/// shadow maps on, as the Options row does); "key=value" sets one tuning knob:
-/// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
-/// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
-/// ao, bloom, shafts, post (0/1), debug (0..4). Returns "OK" or "FAIL:<why>".
-GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+// One triSetLighting item applied to `t`: a mode word resets every knob to the
+// shipped default first. Returns an empty string, or why the item is refused.
+static std::string ApplyLightingItem(remaster::LightingTuning& t, const std::string& item, bool& modeSet)
 {
-    GameStringType text = static_cast<GameStringType>(arg);
-    const std::string setting = (const char*)text ? (const char*)text : "";
-    if (!GEngine)
-        return GameValue("FAIL:no engine");
-    remaster::LightingTuning t = GEngine->GetLightingTuning();
-    if (setting == "classic" || setting == "remastered")
+    if (item == "classic" || item == "remastered")
     {
-        t.remastered = setting == "remastered";
-        GEngine->SetLightingTuning(t);
-        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
-        LOG_INFO(Core, "[tri] triSetLighting {}", setting);
-        return GameValue(t.remastered == GEngine->LightingRemasterActive() ? "OK"
-                                                                           : "FAIL:remastered shaders unavailable");
+        t = remaster::LightingTuning{};
+        t.remastered = item == "remastered";
+        modeSet = true;
+        return {};
     }
-    const size_t eq = setting.find('=');
+    const size_t eq = item.find('=');
     if (eq == std::string::npos)
-        return GameValue("FAIL:expected classic, remastered or key=value");
-    const std::string key = setting.substr(0, eq);
-    const float v = static_cast<float>(std::atof(setting.c_str() + eq + 1));
+        return "expected classic, remastered or key=value";
+    const std::string key = item.substr(0, eq);
+    const char* valueText = item.c_str() + eq + 1;
+    char* valueEnd = nullptr;
+    const float v = std::strtof(valueText, &valueEnd);
+    if (valueEnd == valueText || *valueEnd != '\0')
+        return "bad value in " + item;
     struct Knob
     {
         const char* name;
@@ -572,9 +668,47 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
         found = true;
     }
     if (!found)
-        return GameValue(("FAIL:unknown knob " + key).c_str());
+        return "unknown knob " + key;
+    return {};
+}
+
+/// triSetLighting "<setting>": remastered lighting for scripted A/B captures.
+/// "classic" / "remastered" switch the lighting model and put every tuning knob
+/// back to its shipped default (LightingTuning{}), so the knobs of one variant
+/// never leak into the next; remastered also turns the shadow maps on, classic
+/// off, as the Options row does. "key=value" sets one tuning knob: exposure,
+/// sun, sky, bounce, warmth, saturation, specular, localLights, moonlight,
+/// terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness, ao, bloom,
+/// shafts, post (0/1), debug (0..4). Comma-separated items apply in order, all
+/// or none: "remastered,bounce=2.5" is the shipped look with one knob changed.
+/// Returns "OK", or "FAIL:<why>" with nothing applied.
+GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
+{
+    GameStringType text = static_cast<GameStringType>(arg);
+    const std::string setting = (const char*)text ? (const char*)text : "";
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    remaster::LightingTuning t = GEngine->GetLightingTuning();
+    bool modeSet = false;
+    for (size_t start = 0;;)
+    {
+        const size_t comma = setting.find(',', start);
+        std::string item = setting.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        item.erase(0, item.find_first_not_of(' '));
+        item.erase(item.find_last_not_of(' ') + 1);
+        const std::string why = ApplyLightingItem(t, item, modeSet);
+        if (!why.empty())
+            return GameValue(("FAIL:" + why).c_str());
+        if (comma == std::string::npos)
+            break;
+        start = comma + 1;
+    }
     GEngine->SetLightingTuning(t);
+    if (modeSet)
+        GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
     LOG_INFO(Core, "[tri] triSetLighting {}", setting);
+    if (modeSet && t.remastered != GEngine->LightingRemasterActive())
+        return GameValue("FAIL:remastered shaders unavailable");
     return GameValue("OK");
 }
 

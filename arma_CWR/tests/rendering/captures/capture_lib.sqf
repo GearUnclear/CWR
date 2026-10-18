@@ -35,6 +35,12 @@
 
 capLog = { logInfo (format ["UDCAP;%1", _this]) }
 
+// Object detail for every shot (triPinObjectDetail: 1 = finest, 0 = adaptive)
+// and the load wait before each mode's timers ([maxFrames, stableFrames,
+// tolerancePct], triSettleScene). A test may change them after the #include.
+capDetail = 1
+capSettleArgs = [300, 30, 2]
+
 // "Class" call capHas -> true when CfgVehicles >> Class exists in the merged
 // config (mods included). triAssertConfigClass answers "OK" or "FAIL:...";
 // the comparison turns that into a bool, so nothing FAIL-shaped escapes.
@@ -184,17 +190,32 @@ capClear = {
 }
 
 // "classic" / "remastered" call capMode
-// Switches the lighting model (triSetLighting also turns the shadow maps on for
-// Remastered and off for Classic, as the Options row does), then restarts the
-// GPU timer and the CPU frame profiler so their averages cover this mode only.
-// triGpuTimes false -> true resets GpuTimings (EngineGL33::SetGpuTimingEnabled).
+//  1. triPinObjectDetail capDetail: the same object detail for every shot.
+//     Left adaptive, Scene::AdjustComplexity picks it from the frame time and
+//     refuses to refine for five seconds after it last coarsened, so a shot
+//     soon after a camera jump drew a fraction of the scene (sunrise_ridge:
+//     1,063 objects for about 3 s after the jump, 7,680 once it refined).
+//  2. triSetLighting <mode>: the lighting model with every tuning knob back at
+//     its shipped default, so knobs set for one variant never reach the next
+//     (it also turns the shadow maps on for Remastered and off for Classic, as
+//     the Options row does).
+//  3. triSettleScene capSettleArgs: frames until the view has finished loading
+//     (steady draw count and LOD, no horizon map build, textures at their
+//     wanted mip). "UNSETTLED:<n>" in the log means it ran out of frames.
+//  4. Restart the GPU timer and the CPU frame profiler so their averages cover
+//     this mode only. triGpuTimes false -> true resets GpuTimings
+//     (EngineGL33::SetGpuTimingEnabled). The scene stats are read before the
+//     reset, which also clears the frame the draw count comes from.
 capMode = {
     capModeName = _this;
-    capLit = triSetLighting _this;
+    capPinRes = triPinObjectDetail capDetail;
+    capLit = triSetLighting capModeName;
+    capSettleRes = triSettleScene capSettleArgs;
+    capModeStats = triSceneStats;
     capGpuOff = triGpuTimes false;
     capGpuOn = triGpuTimes true;
     capPerfRes = triPerfReset 0;
-    format ["view=%1;event=mode;mode=%2;lit=%3", capView, _this, capLit] call capLog;
+    format ["view=%1;event=mode;mode=%2;lit=%3;detail=%4;settle=%5;%6", capView, capModeName, capLit, capPinRes, capSettleRes, capModeStats] call capLog;
 }
 
 // Read the timers after the settle frames. GPU results trail the frame by a
@@ -205,7 +226,8 @@ capReadTimers = {
     capPerf = triPerfStats 0;
 }
 
-// "<label>" call capRecord - one line per screenshot.
+// "<label>" call capRecord - one line per screenshot. triSceneStats adds the
+// shot frame's draws=, objects=, lights=, lod=, pin= and horizon= fields.
 capRecord = {
-    format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;perf=%7;gpu=%8", capView, _this, capModeName, capLit, triCamView, triFps, capPerf, capGpu] call capLog;
+    format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;%7;perf=%8;gpu=%9", capView, _this, capModeName, capLit, triCamView, triFps, triSceneStats, capPerf, capGpu] call capLog;
 }

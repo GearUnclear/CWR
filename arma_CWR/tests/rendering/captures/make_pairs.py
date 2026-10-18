@@ -11,7 +11,7 @@ Writes into <out_dir>:
     <view>__classic.png, <view>__remastered.png   copied captures
     <view>__pair.png                              Classic left, Remastered right
     contact_sheet.png                             every pair on one page
-    timings.csv, timings.json                     one row per shot (GPU + CPU)
+    timings.csv, timings.json                     one row per shot (GPU + CPU, draws, load wait)
     timings.md                                    the same as a table, with deltas
     udcap.log                                     every raw UDCAP line
 
@@ -45,6 +45,12 @@ GPU_RES = {
     "composite": re.compile(r"\bcomposite ([\d.]+)"),
 }
 PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
+CALLS_RE = re.compile(r"\bcalls=([\d.]+)")
+# A pair whose shot frames differ by more than this share of drawn objects
+# did not see the same scene (a view still loading, a different object
+# detail). Objects, not draw calls: the two lighting models can issue a few
+# more or fewer draw calls for the same objects.
+OBJECTS_MISMATCH = 0.05
 
 
 def collect_shots(tri_dir: Path, out_dir: Path):
@@ -97,12 +103,23 @@ def read_udcap(tri_dir: Path):
     return lines
 
 
+def to_int(text):
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def shot_rows(lines):
     rows = {}
+    modes = {}  # (view, mode) -> the latest event=mode line: load wait and pin
     for path, _line, body in lines:
         if body is None:
             continue
         kv = parse_kv(body)
+        if kv.get("event") == "mode":
+            modes[(kv.get("view", ""), kv.get("mode", ""))] = kv
+            continue
         if kv.get("event") != "shot":
             continue
         label = kv.get("label", "")
@@ -112,6 +129,17 @@ def shot_rows(lines):
         row = {"view": view, "mode": mode, "lit": kv.get("lit", ""), "cam": kv.get("cam", ""),
                "fps_now": kv.get("fps", ""), "gpu_raw": kv.get("gpu", ""), "perf_raw": kv.get("perf", ""),
                "log": str(path)}
+        # The shot frame's scene (triSceneStats) and the mode's load wait
+        # (triSettleScene); empty in runs from before these fields existed.
+        row["draws"] = to_int(kv.get("draws"))
+        row["objects"] = to_int(kv.get("objects"))
+        row["lights"] = to_int(kv.get("lights"))
+        row["lod"] = kv.get("lod", "")
+        row["pin"] = kv.get("pin", "")
+        row["horizon"] = kv.get("horizon", "")
+        mode_kv = modes.get((kv.get("view", ""), mode), {})
+        row["settle"] = mode_kv.get("settle", "")
+        row["settle_draws"] = to_int(mode_kv.get("draws"))
         for f, rx in GPU_RES.items():
             m = rx.search(row["gpu_raw"])
             row[f"gpu_{f}_ms"] = float(m.group(1)) if m else None
@@ -119,6 +147,8 @@ def shot_rows(lines):
         row["cpu_fps"] = float(m.group(1)) if m else None
         row["cpu_frame_ms"] = float(m.group(2)) if m else None
         row["cpu_frame_p95_ms"] = float(m.group(3)) if m else None
+        m = CALLS_RE.search(row["perf_raw"])
+        row["calls_avg"] = float(m.group(1)) if m else None
         # a later line for the same label (a retry) replaces the earlier one;
         # dict order keeps the run order of the first appearance
         rows[(view, mode)] = row
@@ -167,8 +197,15 @@ def make_pair(view, out_dir: Path, rows_by_key):
             d.text((x0 + 20, title_h + h // 2), "missing", font=big, fill=(255, 160, 160))
         label_box(d, (x0 + 12, title_h + 10), mode.capitalize(), big)
         row = rows_by_key.get((view, mode))
+        foot = []
         if row and row.get("gpu_frame_ms") is not None:
-            label_box(d, (x0 + 12, title_h + h - 30), f"GPU frame {row['gpu_frame_ms']:.2f} ms", small)
+            foot.append(f"GPU frame {row['gpu_frame_ms']:.2f} ms")
+        if row and row.get("draws") is not None:
+            foot.append(f"{row['draws']:,} draws")
+        if row and row.get("objects") is not None:
+            foot.append(f"{row['objects']:,} objects")
+        if foot:
+            label_box(d, (x0 + 12, title_h + h - 30), ", ".join(foot), small)
         if row and row.get("lit") and row["lit"] != "OK":
             label_box(d, (x0 + 12, title_h + 46), f"triSetLighting: {row['lit']}", small)
     dst = out_dir / f"{view}__pair.png"
@@ -203,9 +240,18 @@ def fmt(v):
     return "" if v is None else f"{v:.2f}"
 
 
+def share_delta(a, b, key):
+    """Remastered minus Classic `key` (draws, objects) as a share of the larger, or None."""
+    x, y = (a or {}).get(key), (b or {}).get(key)
+    if x is None or y is None or max(x, y) <= 0:
+        return None
+    return (y - x) / max(x, y)
+
+
 def write_tables(rows, out_dir: Path):
     cols = ["view", "mode", "lit", "cam"] + [f"gpu_{f}_ms" for f in GPU_FIELDS] + \
-           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "gpu_raw", "perf_raw"]
+           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "lights", "calls_avg", "lod",
+            "pin", "horizon", "settle", "settle_draws", "gpu_raw", "perf_raw"]
     with open(out_dir / "timings.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -219,24 +265,30 @@ def write_tables(rows, out_dir: Path):
     md = ["# Lighting capture timings", "",
           "GPU times are the smoothed `triGpuTimes` averages (EngineGL33 timestamp queries, ~90 frames on the view",
           "before the shot); CPU is `triPerfStats` over the same frames. Classic has no post pass, so its post columns",
-          "are empty. Delta = Remastered minus Classic.", "",
-          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | lighting |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame",
+          "(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =",
+          "Remastered minus Classic (draws and objects: share of the larger).", "",
+          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | draws | objects | "
+          "load | lighting |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for v in views:
         for mode in MODES:
             r = by.get((v, mode))
             if not r:
-                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |")
+                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |  |  |  |")
                 continue
+            counts = ["" if r.get(k) is None else f"{r[k]:,}" for k in ("draws", "objects")]
             md.append("| " + " | ".join([v, mode] + [fmt(r[f"gpu_{f}_ms"]) for f in GPU_FIELDS] +
-                                        [fmt(r["cpu_fps"]), r["lit"]]) + " |")
+                                        [fmt(r["cpu_fps"])] + counts + [r.get("settle", ""), r["lit"]]) + " |")
         a, b = by.get((v, "classic")), by.get((v, "remastered"))
         if a and b:
             cells = []
             for f in GPU_FIELDS:
                 x, y = a[f"gpu_{f}_ms"], b[f"gpu_{f}_ms"]
                 cells.append("" if (x is None or y is None) else f"{y - x:+.2f}")
-            md.append("| " + " | ".join([v, "delta"] + cells + ["", ""]) + " |")
+            shares = [share_delta(a, b, k) for k in ("draws", "objects")]
+            md.append("| " + " | ".join([v, "delta"] + cells + [""] +
+                                        ["" if d is None else f"{d:+.1%}" for d in shares] + ["", ""]) + " |")
     (out_dir / "timings.md").write_text("\n".join(md) + "\n", encoding="utf-8")
 
 
@@ -281,6 +333,18 @@ def main(argv):
     bad = [f"{r['view']}__{r['mode']}={r['lit']}" for r in rows if r.get("lit") not in ("OK", "")]
     if bad:
         print("triSetLighting did not answer OK for: " + ", ".join(bad))
+    unsettled = [f"{r['view']}__{r['mode']}={r['settle']}" for r in rows if r.get("settle", "").startswith("UNSETTLED")]
+    if unsettled:
+        print("view still loading when its timers started (triSettleScene ran out of frames): " + ", ".join(unsettled))
+    by = {(r["view"], r["mode"]): r for r in rows}
+    apart = []
+    for v in dict.fromkeys(r["view"] for r in rows):
+        dd = share_delta(by.get((v, "classic")), by.get((v, "remastered")), "objects")
+        if dd is not None and abs(dd) > OBJECTS_MISMATCH:
+            apart.append(f"{v} ({by[(v, 'classic')]['objects']:,} vs {by[(v, 'remastered')]['objects']:,})")
+    if apart:
+        print(f"pairs whose shot frames differ by more than {OBJECTS_MISMATCH:.0%} in drawn objects: " +
+              ", ".join(apart))
     if sheet:
         print(f"contact sheet: {sheet}")
     return 0

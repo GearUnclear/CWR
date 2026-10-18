@@ -220,6 +220,8 @@ class Scene
 
     bool _objectShadows, _vehicleShadows, _cloudlets;
     float _objectLODBias = 1.0f;
+    float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
+    int _drawnObjects = 0;      // DrawnObjectCount
     float _preferredTerrainGrid;
     float _preferredViewDistance;
 
@@ -252,6 +254,17 @@ class Scene
     // LODSelect path; default 1.0 (no bias).
     void SetObjectLODBias(float bias);
     float GetObjectLODBias() const { return _objectLODBias; }
+
+    // Object detail for scripted A/B captures (triPinObjectDetail). By default
+    // (0) AdjustComplexity picks the LOD width from the measured frame time,
+    // so two shots of one view can draw different objects. A factor >= 1
+    // holds the width at that multiple of the finest the quality setting
+    // allows (1 = finest, 16 = coarsest, the adaptive range).
+    void PinObjectDetail(float factor);
+    float GetObjectDetailPin() const { return _lodPinFactor; }
+    // Objects with a visible LOD in the last Pass1 draw list, before occlusion
+    // culling: the same for both lighting models on one view at one detail.
+    int DrawnObjectCount() const { return _drawnObjects; }
 
     Camera* GetCamera() { return _camera; }
     const Camera* GetCamera() const { return _camera; }
@@ -386,4 +399,4 @@ extern Scene* GScene;
 #define IS_SHADOW_VEHICLE (GScene ? GScene->GetVehicleShadows() : true)
 #define IS_SHADOW_OBJECT (GScene ? GScene->GetObjectShadows() : true)
 
-}  // namespace Poseidon
+} // namespace Poseidon

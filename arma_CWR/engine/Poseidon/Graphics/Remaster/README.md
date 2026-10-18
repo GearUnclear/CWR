@@ -78,8 +78,12 @@ well above the ~0.42 of the shadow-map darkening that reviewers called crushed.
   occlusion, cloud shadows, shadow softness, AO, bloom and shafts, plus debug
   views (sun visibility, sky visibility, normals, AO) and a copyable summary
   line.
-- Trident / SQF: `triSetLighting "classic"`, `"remastered"`, or
-  `"key=value,..."` with the same keys, for scripted A/B captures.
+- Trident / SQF: `triSetLighting "classic"` or `"remastered"` (each puts
+  every knob back to its default), `"key=value"` with the same keys, or a
+  comma list applied in order, all or none (`"remastered,bounce=2.5"`), for
+  scripted A/B captures. `triPinObjectDetail 1` holds the object detail at
+  its finest so both shots draw the same objects, and `triSettleScene` waits
+  until a view has finished loading (`tests/rendering/captures/README.md`).
 - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
   `triGpuTimes true`, turns on timestamp queries around the frame, the world
   (with the shadow pass inside it) and each post step

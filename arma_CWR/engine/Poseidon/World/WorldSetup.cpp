@@ -1372,6 +1372,12 @@ void World::SetDate(int year, int month, int day, int hour, int minute)
     LightSun* sun = _scene.MainLight();
     sun->Recalculate(this);
     _scene.MainLightChanged();
+    // Auto street lamps switch for the new time now, as after skipTime, not at
+    // their next simulation tick (every 12 s): a scripted jump into the night
+    // stayed dark for up to 12 s, and two capture shots of one view could
+    // differ in which lamps were lit.
+    if (GLandscape)
+        GLandscape->OnTimeSkipped();
 }
 
 void World::ProcessNetwork()

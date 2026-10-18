@@ -64,25 +64,47 @@ Everything lands in `D:\Arma_CWA_worktrees\lighting\tmp\captures\<yyyyMMdd-HHmms
 | File | Content |
 |---|---|
 | `<view>__classic.png`, `<view>__remastered.png` | The two captures, 960x640 |
-| `<view>__pair.png` | Classic left, Remastered right, labelled, GPU frame time in the corner |
+| `<view>__pair.png` | Classic left, Remastered right, labelled, GPU frame time and the shot frame's draw calls and drawn objects in the corner |
 | `contact_sheet.png` | Every pair on one page |
-| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post / ao / bloom / shafts / composite (ms), CPU fps and frame ms, `triSetLighting` answer, active camera |
-| `timings.md` | The same as a table, with a Remastered minus Classic row per view |
+| `timings.csv`, `timings.json` | One row per shot: GPU frame / world / shadow / post / ao / bloom / shafts / composite (ms), CPU fps and frame ms, `triSetLighting` answer, active camera, the shot frame's draw calls, drawn objects and light slots (`draws`, `objects`, `lights`), the timing window's mean draw calls (`calls_avg`), the object LOD width and pin (`lod`, `pin`), the horizon map state, and the mode's load wait (`settle`, `settle_draws`) |
+| `timings.md` | The same as a table, with a Remastered minus Classic row per view (draws and objects as a share of the larger); `make_pairs.py` also prints the pairs whose drawn objects differ by more than 5% and the modes whose load wait ran out |
 | `udcap.log` | Every raw `UDCAP;...` log line and the horizon-map build line |
 | `tri.log`, `tri\` | tri's console output and its own output tree (game logs, raw captures; the BMP twins are deleted) |
 
 ## How a pair is shot
 
 Per view (`capBegin`) the test sets the camera, date, weather and view
-distance, spawns the props, and lets 150 frames pass so terrain and textures
-stream in. Then, for Classic and again for Remastered:
+distance, spawns the props, and lets 150 frames pass. Then, for Classic and
+again for Remastered:
 
-1. `capMode`: `triSetLighting "<mode>"` (Remastered also turns the shadow maps
-   on, Classic turns them off, as the Options row does), then `triGpuTimes
-   false` / `true` and `triPerfReset`, which restart the GPU and CPU averages.
-2. `triSimFrames 90`: shaders, shadow maps and the timers settle. GPU results
-   trail the frame by a few frames and are an exponential average with weight
-   0.1, so 90 frames leave well under 1% of anything earlier in them.
+1. `capMode`:
+   - `triPinObjectDetail capDetail` (1, the finest detail the quality setting
+     allows): the same object detail for both shots. Left adaptive,
+     `Scene::AdjustComplexity` picks the detail from the frame time and
+     refuses to refine for five seconds after it last coarsened, so a shot
+     soon after a camera jump drew a fraction of the scene. On sunrise_ridge
+     the adaptive detail drew 1,063 objects for about 3 s after the jump and
+     7,680 once it refined; the perf research track's replay of this rig
+     logged 1,465 draw calls for the Classic shot there against about 9,500
+     later. Whether a shot falls inside that window depends on the frame
+     time, so it varied with the machine's load from run to run.
+   - `triSetLighting "<mode>"`: the lighting model with every tuning knob back
+     at its shipped default, so knobs a variant set never reach the next one
+     (Remastered also turns the shadow maps on, Classic turns them off, as the
+     Options row does).
+   - `triSettleScene capSettleArgs` (`[300, 30, 2]`): frames until the view
+     has finished loading. Settled = the last 30 frames drew within 2% of the
+     same number of draw calls, at one LOD width, with no terrain horizon map
+     build in flight. The per-frame texture upload budget is lifted on these
+     frames, so textures in view are not held back at a coarser mip. It
+     answers `OK:<frames>`,
+     or `UNSETTLED:<frames>` after 300 (logged, and listed by `make_pairs.py`;
+     the shot is still taken).
+   - `triGpuTimes false` / `true` and `triPerfReset`, which restart the GPU
+     and CPU averages.
+2. `triSimFrames 90`: the timers settle. GPU results trail the frame by a few
+   frames and are an exponential average with weight 0.1, so 90 frames leave
+   well under 1% of anything earlier in them.
 3. `capReadTimers`: `triGpuTimes true` (the summary string, read while timing
    is still on; `false` would answer "gpu: timing off") and `triPerfStats 0`.
 4. `capPin`: the same `setDate`, `triCheatWeather` + `setOvercast` / `setFog`
@@ -99,7 +121,19 @@ Settings shared by every shot: 960x640 windowed (`--display-mode windowed
 pass (the default `triScreenshot` reads the frame before gamma, darker than what
 a player sees). The remastered exposure meter is a pure function of the sun
 height (`LightRig.cpp`) and the classic eye accommodation is instant, so there
-is no adaptation to wait for between the two modes.
+is no adaptation to wait for between the two modes. The pinned finest object
+detail is what a fast machine settles on, and the frame timings are measured
+on it, so on long views they come out higher than in older runs, which shot
+whatever the adaptive detail had reached.
+
+Street lamps: `setDate` (`capPinEnv`) now switches the auto street lamps for the
+new time at once, as `skipTime` does (`World::SetDate`). Before, they kept their
+old state until their next simulation tick (every 12 s), so a view whose date
+crossed dusk or dawn could change lamps between or during its two shots. Once a
+lamp has been lit its light slot stays, and any slot turns instancing off for
+the whole scene (`SceneDraw.cpp`, Pass1), so later views draw several times more
+calls for the same objects (sunrise_ridge: 2,797 draw calls with no slot, 11,172
+with 12, both 7,680 objects). Compare `objects=` between shots, not `draws=`.
 
 Framing uses the `tools/screenshots` rig: a cutscene camera exists only to hide
 the HUD and give `camSetFov` a target, and `triSetView [east, up, north, dir]`
@@ -161,6 +195,18 @@ Notes on the choices:
 Every helper writes `UDCAP;view=...;event=...` at INFO through `logInfo`, which
 tri saves in the test's `game_stdout.log`. Events: `setup`, `begin` / `view`
 (camera, date, weather, ground-probe and `triSetView` answers), `spawn`,
-`skip_spawn`, `spawn_failed`, `mode` (the `triSetLighting` answer), `shot`
-(one per image: label, mode, lighting answer, `triCamView`, `triFps`,
-`triPerfStats`, and last the `triGpuTimes` summary), `squads`, `tank`, `done`.
+`skip_spawn`, `spawn_failed`, `mode` (the `triSetLighting` answer, the
+`triPinObjectDetail` answer as `detail=`, the `triSettleScene` answer as
+`settle=`, then the `triSceneStats` fields at the end of the wait), `shot` (one
+per image: label, mode, lighting answer, `triCamView`, `triFps`, the shot
+frame's `triSceneStats` fields `draws=` (GL draw calls), `objects=` (objects
+with a visible LOD, before occlusion; the number to compare between the two
+models, whose draw calls for the same objects can differ a little), `lights=`
+(light slots: once a street lamp has been lit its slot stays, and any slot
+turns instancing off for the whole scene, which multiplies the draw calls of
+the same objects), `lod=` (Scene LOD width), `pin=` (0 = adaptive) and
+`horizon=` (`off`, `pending` or `ready`), `triPerfStats` (its `calls=` is the
+timing window's mean), and last the
+`triGpuTimes` summary), `squads`, `tank`, `done`. The game log also carries a
+`[tri] triSettleScene:` line per mode with the draw-call range of the last
+window.

@@ -272,4 +272,9 @@ void ShutdownTerrainLighting()
     s_state.sample = 0;
 }
 
+bool TerrainLightingPending()
+{
+    return GEngine && GEngine->WantsTerrainHorizonMap() && !s_state.handed;
+}
+
 } // namespace Poseidon

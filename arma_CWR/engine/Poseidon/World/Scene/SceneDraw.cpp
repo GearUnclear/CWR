@@ -777,6 +777,16 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
 
 void Scene::AdjustComplexity()
 {
+    if (_lodPinFactor > 0.0f)
+    {
+        // Pinned (PinObjectDetail): the detail no longer follows the frame
+        // time, so A/B captures of one view draw the same objects.
+        _lodInvWidth = _minLodInvWidth * _lodPinFactor;
+        saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);
+        AdjustComplexity(_drawObjects);
+        AdjustShadowComplexity(_drawObjects);
+        return;
+    }
     float oldLodInvWidth = _lodInvWidth;
 
     // adjust lodInvWidth so we are on the line given by points
@@ -1330,6 +1340,7 @@ void Scene::DrawObjectsAndShadowsPass1()
             _drawMergers.Realloc(objNeed);
         }
         _drawMergers.Resize(0);
+        _drawnObjects = 0;
         for (int s = 0; s < _drawObjects.Size(); s++)
         {
             SortObject* sObj = _drawObjects[s];
@@ -1342,6 +1353,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                 continue;
             }
             _drawMergers.Add(sObj);
+            if (sObj->drawLOD != LOD_INVISIBLE)
+            {
+                ++_drawnObjects;
+            }
         }
     }
     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;

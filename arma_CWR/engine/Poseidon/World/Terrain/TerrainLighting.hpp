@@ -15,5 +15,8 @@ void UpdateTerrainLighting(Landscape* land);
 // Cancels and joins any build in flight. Called on world teardown, so no
 // worker outlives the world (or runs on into static destruction).
 void ShutdownTerrainLighting();
+// True while the backend wants a horizon map and the build for the current
+// landscape has not been handed over yet (triSettleScene waits for it).
+bool TerrainLightingPending();
 
 } // namespace Poseidon
