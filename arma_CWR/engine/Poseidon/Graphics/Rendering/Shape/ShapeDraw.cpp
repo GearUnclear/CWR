@@ -266,6 +266,17 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
         shape->OrSpecial(NoShadow);
     }
     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
+    // A shape first loaded after the mission's OptimizeAll (a class a script
+    // creates at run time) would otherwise never get a vertex buffer and would
+    // draw through the CPU T&L path, missing the remastered per-pixel light and
+    // the shadow maps. Queue it for OptimizeLate, which runs before the next
+    // frame draws it. It is not optimised here because the caller is still
+    // setting the shape up (special flags, light hints, animation), and
+    // OptimizeRendering decides from those.
+    if (_optimizedAll && (ENGINE_CONFIG.enableHWTL || ENGINE_CONFIG.enablePIII))
+    {
+        _late.Add(shape);
+    }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
     if (_perfShapeLoadMs >= 1.0)
@@ -314,7 +325,7 @@ void ShapeBank::ReleaseAllVBuffers()
         });
 }
 
-void LODShape::OptimizeRendering()
+void LODShape::OptimizeRendering(bool keepInsideViews)
 {
     LODShape* shape = this;
     bool reload = false;
@@ -326,6 +337,11 @@ void LODShape::OptimizeRendering()
         if (ENGINE_CONFIG.enableHWTL)
         {
             optimizeHW = level->NVertex() > 0 && level->NFaces() > 0;
+        }
+        if (keepInsideViews && (shape->IsSpecLevel(l, VIEW_GUNNER) || shape->IsSpecLevel(l, VIEW_PILOT) ||
+                                shape->IsSpecLevel(l, VIEW_CARGO) || shape->IsSpecLevel(l, VIEW_COMMANDER)))
+        {
+            optimizeHW = false;
         }
         if (ENGINE_CONFIG.enablePIII)
         {
@@ -419,11 +435,57 @@ void ShapeBank::OptimizeAll()
         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
     }
     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
+    // Every cached shape, queued ones included, has just been optimised.
+    _late.Clear();
+    _optimizedAll = true;
+}
+
+void ShapeBank::OptimizeLate()
+{
+    if (_late.Size() == 0)
+    {
+        return;
+    }
+    const auto start = ::Poseidon::Dev::Perf::Now();
+    int optimized = 0;
+    for (int i = 0; i < _late.Size(); i++)
+    {
+        LODShapeWithShadow* shape = _late[i];
+        if (!shape)
+        {
+            continue; // released before it was ever drawn
+        }
+        bool hasBuffer = false;
+        for (int l = 0; l < shape->NLevels() && !hasBuffer; l++)
+        {
+            hasBuffer = shape->Level(l) && shape->Level(l)->GetVertexBuffer();
+        }
+        if (hasBuffer)
+        {
+            continue; // already optimised elsewhere
+        }
+        // The same levels, buffer types and exclusions (sky, stars, clouds,
+        // lights, surface decals, geometry levels) OptimizeAll gives a shape the
+        // mission loaded, except the crew views (VIEW_GUNNER / PILOT / CARGO /
+        // COMMANDER levels, a soldier's first-person level among them): they
+        // keep the CPU path they have always had for these shapes. Inside a
+        // hull the remastered light has no interior light and the hull shadows
+        // the sun, so on the per-pixel path a tank's gunner view only gets darker.
+        shape->OptimizeRendering(true);
+        optimized++;
+    }
+    _late.Clear();
+    const double ms = ::Poseidon::Dev::Perf::ElapsedMs(start);
+    if (ms >= 1.0)
+    {
+        LOG_DEBUG(Graphics, "PERF: ShapeBank::OptimizeLate {} shapes took {:.2f}ms", optimized, ms);
+    }
 }
 
 void ShapeBank::Clear()
 {
     _cache.Clear();
+    _late.Clear();
 }
 
 ShapeBank Shapes;

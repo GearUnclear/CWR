@@ -38,6 +38,15 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
 | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
 
 Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged.
+Only shapes with a vertex buffer take the per-fragment path. A shape first
+loaded after the mission starts (`createVehicle` of a class the mission does not
+place, as Guerrilla Mode does for nearly every vehicle) gets its buffers from
+`ShapeBank::OptimizeLate` before the next frame draws it, the same ones
+`Shapes.OptimizeAll` gives the mission's own shapes; before that fix such
+shapes drew pre-lit with the classic light and received no shadow maps. Their
+crew views (gunner, driver, commander, cargo interiors) stay pre-lit: inside a
+hull this lighting has no interior light, so a tank interior on the per-pixel
+path is far darker (mission-placed vehicles still draw theirs per pixel).
 The remastered programs are used only inside the world's 3D passes
 (`EngineGL33::UpdateRemasterPrograms`). Portrait captures, 3D previews in
 dialogs and night vision draw through the classic programs, because their own

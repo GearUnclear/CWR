@@ -12,6 +12,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
 #include <Poseidon/Audio/Speaker.hpp>
 #include <stdint.h>
@@ -1389,6 +1390,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (enableDraw)
     {
+        // Shapes loaded since the last frame (createVehicle and every other
+        // run-time spawn) get their vertex buffers before anything draws them.
+        Shapes.OptimizeLate();
         _scene.BeginObjects();
         DrawViewerSceneAddons();
     }
