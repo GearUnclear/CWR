@@ -110,8 +110,15 @@ bool GraphicsConfig::Migrate(int refreshHz)
 
     // A cap of 0 below v2 is indistinguishable from the old default, so it is
     // taken as never set.  From v2 on it is the user's Unlimited and survives.
-    if (fpsCap == 0)
+    if (version < 2 && fpsCap == 0)
         fpsCap = FpsCapForRefreshRate(refreshHz);
+
+    // MSAA was off by default below v3 and every save wrote that 0, so a 0
+    // there is taken as never chosen.  2x and 8x were chosen and stay; from v3
+    // on 0 is the user's Off and survives.  A profile with supersampling on
+    // already has anti-aliasing, so its Off is kept too.
+    if (version < 3 && msaaSamples == 0 && renderScale < 1.001f)
+        msaaSamples = kDefaultMsaaSamples;
 
     version = kVersion;
     return true;

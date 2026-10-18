@@ -441,7 +441,9 @@ void EngineGL33::ApplyPendingRenderScale()
     // is single-sampled (scaling blits into a multisampled target are
     // illegal), so the frame target carries whatever AA is configured: the
     // MSAA sample count and the SSAA scale are both live knobs (dev panel
-    // Render tab / GraphicsConfig).  Both default OFF.
+    // Render tab / GraphicsConfig).  The engine starts with both off until
+    // GraphicsConfig applies the user's values at boot (4x MSAA, scale 1 by
+    // default).
     const float want = _pendingRenderScale < 1.001f ? 1.0f : _pendingRenderScale;
     const int sw = static_cast<int>(winW * want + 0.5f);
     const int sh = static_cast<int>(winH * want + 0.5f);

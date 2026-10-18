@@ -48,6 +48,9 @@ TEST_CASE("GraphicsConfig: factory defaults match spec", "[Settings][GraphicsCon
     CHECK(c.particlesQuality == GraphicsConfig::TierHigh);
     CHECK(c.vsync == GraphicsConfig::VsyncOn);
     CHECK(c.fpsCap == 0); // Unlimited
+    CHECK(c.msaaSamples == 4);
+    CHECK(c.alphaToCoverage);
+    CHECK(c.renderScale == 1.0f);
     CHECK(c.brightness == 1.6f);
     CHECK(c.gamma == 1.2f);
     CHECK(c.version == GraphicsConfig::kVersion);
@@ -160,6 +163,109 @@ TEST_CASE("GraphicsConfig: Unlimited survives once the file is current", "[Setti
 
     CHECK_FALSE(c.Migrate(144));
     CHECK(c.fpsCap == 0);
+}
+
+// v2 already made a cap of 0 the user's Unlimited; a later bump must keep it.
+TEST_CASE("GraphicsConfig: a v2 Unlimited cap survives the v3 migration", "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.version = 2;
+    c.fpsCap = 0;
+
+    REQUIRE(c.Migrate(144));
+    CHECK(c.fpsCap == 0);
+    CHECK(c.version == GraphicsConfig::kVersion);
+}
+
+// Below v3 MSAA defaulted to off and every save wrote that 0.
+TEST_CASE("GraphicsConfig: Migrate turns an untouched MSAA Off into 4x", "[Settings][GraphicsConfig]")
+{
+    for (int version : {0, 1, 2})
+    {
+        INFO("from version " << version);
+        GraphicsConfig c;
+        c.version = version;
+        c.msaaSamples = 0;
+        c.renderScale = 1.0f;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.msaaSamples == 4);
+        CHECK(c.version == GraphicsConfig::kVersion);
+    }
+}
+
+// Supersampling is already anti-aliasing, so the one-time lift leaves it alone.
+TEST_CASE("GraphicsConfig: Migrate keeps MSAA Off on a supersampled profile", "[Settings][GraphicsConfig]")
+{
+    for (float scale : {1.5f, 2.0f})
+    {
+        INFO("render scale " << scale);
+        GraphicsConfig c;
+        c.version = 2;
+        c.msaaSamples = 0;
+        c.renderScale = scale;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.version == GraphicsConfig::kVersion);
+        CHECK(c.msaaSamples == 0);
+        CHECK(c.renderScale == scale);
+    }
+}
+
+TEST_CASE("GraphicsConfig: Migrate keeps an MSAA count the user chose", "[Settings][GraphicsConfig]")
+{
+    for (int chosen : {2, 4, 8})
+    {
+        INFO("samples " << chosen);
+        GraphicsConfig c;
+        c.version = 2;
+        c.msaaSamples = chosen;
+
+        REQUIRE(c.Migrate(60));
+        CHECK(c.msaaSamples == chosen);
+    }
+}
+
+TEST_CASE("GraphicsConfig: MSAA Off survives once the file is current", "[Settings][GraphicsConfig]")
+{
+    GraphicsConfig c;
+    c.version = GraphicsConfig::kVersion;
+    c.msaaSamples = 0;
+
+    CHECK_FALSE(c.Migrate(60));
+    CHECK(c.msaaSamples == 0);
+}
+
+// The boot path end to end: a v2 file from before the default changed gets 4x
+// once, and an Off picked after that comes back as Off on every later boot.
+TEST_CASE("GraphicsConfig: an old file gets 4x MSAA once, a later Off sticks", "[Settings][GraphicsConfig]")
+{
+    const std::string path = TmpPath("graphics.cfg");
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "qualityPreset=3;\nmsaaSamples=0;\nfpsCap=60;\nversion=2;\n";
+    }
+
+    GraphicsConfig first;
+    REQUIRE(first.Load(path));
+    REQUIRE(first.version == 2);
+    REQUIRE(first.Migrate(60));
+    CHECK(first.msaaSamples == 4);
+    REQUIRE(first.Save(path));
+
+    GraphicsConfig second;
+    REQUIRE(second.Load(path));
+    CHECK(second.version == GraphicsConfig::kVersion);
+    CHECK_FALSE(second.Migrate(60));
+    CHECK(second.msaaSamples == 4);
+
+    second.msaaSamples = 0; // the user picks Off in Options
+    REQUIRE(second.Save(path));
+
+    GraphicsConfig third;
+    REQUIRE(third.Load(path));
+    CHECK_FALSE(third.Migrate(60));
+    CHECK(third.msaaSamples == 0);
 }
 
 TEST_CASE("GraphicsConfig: a file without a version reloads as version 0", "[Settings][GraphicsConfig]")

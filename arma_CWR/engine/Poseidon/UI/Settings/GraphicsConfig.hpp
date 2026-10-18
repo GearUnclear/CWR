@@ -71,6 +71,9 @@ public:
 		LightingRemastered = 1,
 	};
 
+	// Anti-aliasing out of the box: 4x MSAA, with alpha-to-coverage on cutouts.
+	static constexpr int kDefaultMsaaSamples = 4;
+
 	// Persistable fields.
 	Preset    qualityPreset    = PresetUltra;
 	Tier      terrainDetail    = TierUltra;     // → grid 6.25 m
@@ -86,7 +89,7 @@ public:
 	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for
 	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
-	int       msaaSamples      = 0;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8
+	int       msaaSamples      = kDefaultMsaaSamples; // MSAA on the frame target: 0 (off) / 2 / 4 / 8
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
 	LightingMode lighting      = LightingRemastered; // Classic = the original lighting, unchanged
@@ -95,7 +98,7 @@ public:
 
 	// Schema version of the persisted file.  Load resets this to 0 first, so a
 	// file written before versioning reads back as 0 and Migrate can act on it.
-	static constexpr int kVersion = 2;
+	static constexpr int kVersion = 3;
 	int       version          = kVersion;
 
 	// Bring a loaded config up to kVersion.  Returns true when the caller needs

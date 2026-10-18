@@ -292,9 +292,9 @@ EngineGL33::EngineGL33(int width, int height, bool windowed, int bpp)
 
     // The default framebuffer is single-sampled on purpose: every frame
     // renders into the offscreen frame target (BindFrameRenderTarget), which
-    // carries the MSAA samples — 8x at render scale 1, 4x at SSAA scales —
-    // and resolves into the window with a blit.  A multisampled window
-    // framebuffer would make the scaled-resolve blit illegal
+    // carries the configured MSAA samples (GraphicsConfig, 4x by default) at
+    // the configured render scale, and resolves into the window with a blit.
+    // A multisampled window framebuffer would make the scaled-resolve blit illegal
     // (GL_INVALID_OPERATION: scaling blits need single-sampled targets) and
     // glReadPixels on it is out-of-spec anyway.
 

@@ -88,6 +88,12 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 
 - Options > Graphics > **Lighting**: Classic or Remastered (the default on this
   branch). Remastered turns the shadow maps on unless the shadow quality is Off.
+- Options > Graphics > **Anti-aliasing**: 4x MSAA by default. Opaque cutouts
+  (foliage, fences) use alpha-to-coverage with alpha-to-one; blended draws
+  (camouflage nets, glass) keep plain blending. A graphics.cfg older than v3
+  holding the old default Off is lifted to 4x once, but only when it has no
+  supersampling (render scale 1.0): a supersampled profile already has
+  anti-aliasing and keeps its Off. Off chosen after that stays.
 - Dev overlay, **Lighting** tab: live sliders for exposure, sun, sky, bounce,
   warmth, saturation, specular, local lights, moonlight, terrain shadows and
   occlusion, cloud shadows, shadow softness, AO, bloom and shafts, plus debug
