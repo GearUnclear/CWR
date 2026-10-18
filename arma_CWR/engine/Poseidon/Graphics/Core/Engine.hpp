@@ -868,6 +868,11 @@ class Engine : public IGraphicsEngine
     /// World/HUD boundary: called once per frame after the 3D world and before
     /// the map, HUD and dialogs; runs the remastered post effects.
     virtual void EndWorldScene() {}
+    /// Inside the world pass: the opaque world is drawn, and the translucent
+    /// objects (smoke and fire particles, muzzle flashes, glass), the cockpit
+    /// pass, rain and flares follow. The remastered TAA copies the frame here
+    /// for its particle mask (Graphics/Remaster/TemporalAA.hpp).
+    virtual void BeginTranslucentObjects() {}
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.

@@ -43,6 +43,7 @@ void EngineGL33::CreateSamplerStates()
     // Bind default sampler (linear, wrap) to both texture units
     glBindSampler(0, _samplerObjects[0]);
     glBindSampler(1, _samplerObjects[0]);
+    _taa.mipBiasApplied = 0.0f; // new samplers carry no TAA texture LOD bias
 }
 
 void EngineGL33::DestroySamplerStates()

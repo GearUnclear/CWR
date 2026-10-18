@@ -36,8 +36,10 @@ trees, water) is lit per fragment in linear light and tonemapped per fragment
 | Water | shader `s_psWaterRemasterMain` | Reflects the visible sky (the fog colour with its sun glow, so a low sun lays a path across the sea) with Fresnel. The classic bump glint becomes a tight sparkle that shadows and clouds put out. |
 | Local lights, glossy | shader `localLights`, `glossy` | Headlights, lamps and fires per fragment, keeping the classic pool size. The sum is clamped where classic clamps it, so where pools overlap a lamp-lit wall is never brighter than the original's. Glossy materials get normalised Blinn-Phong and a sky reflection. |
 | Post pass | `EngineGL33_PostFX.cpp` | At the world/HUD boundary (`Engine::EndWorldScene`, called from `World.cpp`): half-resolution ambient occlusion that darkens only the sky-light share of each pixel (opaque draws store 1 - that share in the colour alpha; blended draws keep the destination alpha), so a sunlit wall beside a corner keeps its sunlight. Bloom from near-white only (the sun, glints), so the sky does not haze. Screen-space sun shafts toward a low sun, kept in proportion to the air in front of each pixel (`ShaftInscatter`: 1 - exp(-distance / 300 m), a shorter length in thick fog), so the sky and distant ground carry them and a vehicle 10 m away is not veiled grey. A screen-style composite that is an exact identity where those are zero. |
+| Temporal anti-aliasing | `TemporalAA.cpp`, `EngineGL33_PostTemporal.cpp` | The world is drawn with a sub-pixel jitter (Halton 2, 3 over 16 frames) and each frame is blended into a history of the frames before it (switch `taa`): the history is moved with the camera motion and the depth, clipped to the colours around each pixel and mixed in at 0.1, then sharpened back into the frame target (bounded, no halos). Alpha-tested leaves and wires stop crawling, sub-pixel wire stays continuous, and the AO and shaft sample patterns turn every frame so the history averages them. Smoke, fire, muzzle flashes, glass and rain take most of their own frame (a particle mask from a copy of the frame made between the opaque and the translucent objects), so they do not smear. MSAA stays under it; a texture LOD bias of -0.5 wins back texture detail. |
 
-Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged.
+Pre-lit draws (`VSScreen`: sky, clouds, particles, 2D) pass through unchanged
+(inside the world pass they take the TAA jitter with the rest of the world).
 Only shapes with a vertex buffer take the per-fragment path. A shape first
 loaded after the mission starts (`createVehicle` of a class the mission does not
 place, as Guerrilla Mode does for nearly every vehicle) gets its buffers from
@@ -60,7 +62,11 @@ world pass (gunner optics, pillarbox bars) turns bloom and shafts off for the
 frame so its black surround stays black; camera effects (cinema borders) draw
 after the post pass. Shadow-map casters beyond a cascade's light near plane
 are depth-clamped rather than clipped, so the long shadows of a 4-degree sun
-are not cut off.
+are not cut off. TAA runs only in the world's own passes: the HUD, dialogs,
+portraits, 3D previews and the shadow-map depth pass are never jittered; a
+vehicle interior, a screen overlay (optics) or night vision gates it off, and
+any frame without a resolve, a camera cut (over 50 m or 60 degrees in a frame)
+or a new frame size starts the history again.
 
 ## Calibration
 
@@ -104,6 +110,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
   on; the thresholds are named in `FeatureGates.hpp`). `gates=0` forces every
   enabled feature on, for debugging. Every switch carries the step that makes
   it do something; until then it is inert and its on and off look the same.
+  A feature's sub-knobs sit under its switch: TAA's `taaSharpen` (0.5),
+  `taaMipBias` (-0.5) and `taaAlpha` (0.1).
 - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
@@ -125,7 +133,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
   `triGpuTimes true`, turns on timestamp queries around the frame, the world
   (with the shadow pass inside it) and each post stage that ran (resolve,
-  linear depth, AO, bloom, shafts, composite, in the order of the stage list)
+  linear depth, AO, bloom, shafts, composite, taa, sharpen, in the order of the
+  stage list; TAA's copy for its particle mask lands in the world section)
   (`EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings`). Results trail the
   frame by a few frames and are smoothed; nothing waits on the GPU. Toggle
   Remastered off for the same view's Classic numbers.
@@ -150,13 +159,16 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
 | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
 | `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
+| `Graphics/Remaster/TemporalAA.{hpp,cpp}` | TAA's math: the Halton jitter and the rule that gives a pass its jitter, the camera reprojection built in double precision (the C++ mirror of the resolve's), the cut and history-chain rules, the particle mask thresholds. Pure. |
 | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
 | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
 | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
 | `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+| `PoseidonGL33/EngineGL33_PostTemporal.cpp`, `EngineGL33_PostPass.hpp` | TAA in the backend: the jitter and LOD bias of the world passes (`ApplyTaaJitter`, taken off in `EndWorldScene` and `InitDraw`), the opaque copy for the particle mask (`BeginTranslucentObjects`, called by the scene before its translucent objects), the Temporal and Sharpen stages; the GL helpers the post stages share. |
 | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
 | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
-| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, and the backend running and marking every landed stage. |
+| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, the TAA stages running together and only on a jittered frame, and the backend running and marking every landed stage. |
+| `tests/unit/.../Graphics/test_temporal_aa.cpp` | The jitter sequence and range, the jitter of a pass, the reprojection against hand values and camera pairs, cuts and the history chain, the jitter in the remastered vertex shaders only, the resolve and sharpen contracts, and source audits that the jitter and LOD bias never reach the HUD and that the opaque copy sits between the opaque and the translucent objects. |
 | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
 | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
 

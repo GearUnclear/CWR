@@ -825,8 +825,8 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
         ++post;
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
-    // and its debug view
-    CHECK(post == 9);
+    // and its debug view, the TAA resolve and its sharpen
+    CHECK(post == 11);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -852,7 +852,7 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
                 CHECK(reached);
                 ++strings;
             }
-    CHECK(strings >= 29); // today 3 VS, 10 prelude pieces and 4 mains; 12 post strings
+    CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
 }
 
 TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")

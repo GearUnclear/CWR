@@ -26,10 +26,13 @@
 //     by the air in front of each pixel, so they grow with its distance
 //     (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
 //     hides banding;
+//   - Temporal and Sharpen (EngineGL33_PostTemporal.cpp): the TAA resolve of
+//     the jittered frame with its history, then a bounded sharpen back into
+//     the frame target. When they run the composite draws into the TAA input
+//     instead of the frame target;
 //   - DebugView: a diagnostic view of a post buffer over the frame.
-// The other stages of the list (tag readout, reflections, air, combat scatter,
-// TAA resolve and sharpen) land with their features. The HUD then draws on
-// top, untouched.
+// The other stages of the list (tag readout, reflections, air, combat scatter)
+// land with their features. The HUD then draws on top, untouched.
 //
 // The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
 // unit tests compile the sources the engine builds (PostShaderSource in
@@ -41,6 +44,7 @@
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+#include <PoseidonGL33/EngineGL33_PostPass.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLBlendState.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
@@ -135,44 +139,11 @@ GLuint MakeFbo(GLenum attachment, GLuint tex)
     return f;
 }
 
-// Helpers of the fullscreen stages.
-void BindTex(int unit, GLuint tex)
-{
-    glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, tex);
-}
-
-void DrawTo(GLuint fbo, int vw, int vh)
-{
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0, 0, vw, vh);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-}
-
-void SetInt(GLuint prog, const char* name, int v)
-{
-    const GLint loc = glGetUniformLocation(prog, name);
-    if (loc >= 0)
-        glUniform1i(loc, v);
-}
-
-void Set4(GLuint prog, const char* name, float a, float b, float c, float d)
-{
-    const GLint loc = glGetUniformLocation(prog, name);
-    if (loc >= 0)
-        glUniform4f(loc, a, b, c, d);
-}
-
-void Set2(GLuint prog, const char* name, float a, float b)
-{
-    const GLint loc = glGetUniformLocation(prog, name);
-    if (loc >= 0)
-        glUniform2f(loc, a, b);
-}
-
 } // namespace
 
 namespace rm = Poseidon::remaster;
+// The helpers of the fullscreen stages (EngineGL33_PostPass.hpp).
+using namespace Poseidon::gl33post;
 
 void EngineGL33::DestroyPostTargets()
 {
@@ -198,6 +169,10 @@ void EngineGL33::DestroyPostTargets()
     delFbo(p.aoFbo[1]);
     delFbo(p.shaftFbo);
     delFbo(p.linDepthFbo);
+    delFbo(p.taaInFbo);
+    delFbo(p.histFbo[0]);
+    delFbo(p.histFbo[1]);
+    delFbo(p.opaqueFbo);
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         delFbo(p.bloomFbo[i]);
@@ -209,14 +184,19 @@ void EngineGL33::DestroyPostTargets()
     delTex(p.aoTex[1]);
     delTex(p.shaftTex);
     delTex(p.linDepthTex);
+    delTex(p.taaInTex);
+    delTex(p.histTex[0]);
+    delTex(p.histTex[1]);
+    delTex(p.opaqueTex);
     p.w = p.h = 0;
+    _taa.history.exists = false; // the TAA history went with its targets
 }
 
 void EngineGL33::DestroyPostPrograms()
 {
     PostTargets& p = _post;
     for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
-                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth})
+                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -251,11 +231,13 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progComposite = link(PostShader::Composite);
         p.progLinearDepth = link(PostShader::LinearDepth);
         p.progDebugDepth = link(PostShader::DebugDepth);
+        p.progTaa = link(PostShader::Taa);
+        p.progTaaSharpen = link(PostShader::TaaSharpen);
         if (vs)
             glDeleteShader(vs);
         glGenVertexArrays(1, &p.vao);
         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
-            !p.progLinearDepth || !p.progDebugDepth)
+            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen)
         {
             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
             p.unavailable = true;
@@ -276,6 +258,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     p.aoTex[1] = MakeTexture(GL_RG16F, GL_RG, GL_HALF_FLOAT, hw, hh, true);
     p.shaftTex = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, hw, hh, true);
     p.linDepthTex = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, hw, hh, false);
+    // TAA: the composite's output and the opaque world copy are read texel by
+    // texel; the history is read through bilinear taps (Catmull-Rom).
+    p.taaInTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
+    p.histTex[0] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
+    p.histTex[1] = MakeTexture(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h, true);
+    p.opaqueTex = MakeTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h, false);
     int bw = hw, bh = hh;
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
@@ -309,6 +297,15 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     check();
     p.linDepthFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.linDepthTex);
     check();
+    p.taaInFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.taaInTex);
+    check();
+    for (int i = 0; i < 2; ++i)
+    {
+        p.histFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.histTex[i]);
+        check();
+    }
+    p.opaqueFbo = MakeFbo(GL_COLOR_ATTACHMENT0, p.opaqueTex);
+    check();
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         p.bloomFbo[i] = MakeFbo(GL_COLOR_ATTACHMENT0, p.bloomTex[i]);
@@ -324,7 +321,8 @@ bool EngineGL33::EnsurePostResources(int w, int h)
     }
     p.w = w;
     p.h = h;
-    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{})", w, h, hw, hh);
+    LOG_INFO(Graphics, "GL33 post: targets {}x{} (AO, shafts and linear depth {}x{}; TAA history half float)", w, h, hw,
+             hh);
     return true;
 }
 
@@ -393,6 +391,11 @@ void EngineGL33::EndWorldScene()
     UpdateRemasterPrograms();
     if (_lightingActive)
         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
+    // The HUD, dialogs and everything else after the world draw without the
+    // TAA jitter and texture LOD bias (EngineGL33_PostTemporal.cpp).
+    const bool taaFrame = _taa.frameOn && _taa.frame == GetFrameCounter();
+    _taa.frameOn = false;
+    SetTaaJitterState({}, 0.0f);
     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
         _portraitTargetSize)
         return;
@@ -414,9 +417,15 @@ void EngineGL33::EndWorldScene()
     if (in.worldDepth && in.glow && in.sunShafts > 0.0f && GScene)
         PostFrameSun(f);
     in.shaftWeight = f.shaftWeight;
+    // The world's passes were drawn with the TAA jitter (TaaWantedThisFrame).
+    in.temporal = taaFrame;
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
+    // Under TAA the AO and shaft patterns turn every frame (golden-ratio
+    // steps) and the history averages them; without it they stay fixed.
+    if (f.plan.Runs(rm::PostStage::Temporal))
+        f.noiseShift = static_cast<float>(std::fmod(0.6180339887 * static_cast<double>(_taa.sequence), 1.0));
 
     FlushAndFreeAllQueues(_queueNo);
     RenderTargetSize(f.w, f.h);
@@ -463,6 +472,12 @@ void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
             break;
         case rm::PostStage::Composite:
             PostComposite(f);
+            break;
+        case rm::PostStage::Temporal:
+            PostTemporal(f);
+            break;
+        case rm::PostStage::Sharpen:
+            PostSharpen(f);
             break;
         case rm::PostStage::DebugView:
             PostDebugView(f);
@@ -524,6 +539,7 @@ void EngineGL33::PostAo(const PostFrame& f)
     Set4(p.progAo, "aoParams", kAoRadius, 1.0f, kAoFadeStart, kAoFadeEnd);
     Set4(p.progAo, "screen", static_cast<float>(f.w), static_cast<float>(f.h), 1.0f / f.w, 1.0f / f.h);
     Set4(p.progAo, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
+    SetFloat(p.progAo, "noiseShift", f.noiseShift);
     BindTex(0, p.depthTex);
     DrawTo(p.aoFbo[0], f.hw, f.hh);
     glUseProgram(p.progAoBlur);
@@ -573,13 +589,15 @@ void EngineGL33::PostShafts(const PostFrame& f)
     BindTex(0, p.depthTex);
     BindTex(2, p.colorTex);
     Set4(p.progShafts, "sunScreen", f.sunU, f.sunV, f.shaftWeight, static_cast<float>(f.w) / static_cast<float>(f.h));
+    SetFloat(p.progShafts, "noiseShift", f.noiseShift);
     DrawTo(p.shaftFbo, f.hw, f.hh);
 }
 
 void EngineGL33::PostComposite(const PostFrame& f)
 {
-    // Into the frame target (every sample gets the resolved value). A stage
-    // that did not run this frame reads as its 1x1 stand-in.
+    // Into the frame target (every sample gets the resolved value), or into
+    // the TAA input when the resolve runs (its sharpen then writes the frame
+    // target). A stage that did not run this frame reads as its 1x1 stand-in.
     const PostTargets& p = _post;
     const rm::PostStagePlan& plan = f.plan;
     glUseProgram(p.progComposite);
@@ -604,7 +622,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-    DrawTo(_ssaaFbo, f.w, f.h);
+    DrawTo(plan.Runs(rm::PostStage::Temporal) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
 }
 
 void EngineGL33::PostDebugView(const PostFrame& f)

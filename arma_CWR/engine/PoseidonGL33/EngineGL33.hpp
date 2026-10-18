@@ -39,6 +39,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 
 #include <memory>
@@ -821,9 +822,49 @@ class EngineGL33 : public Engine
         unsigned int vao = 0;
         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
         unsigned int progLinearDepth = 0, progDebugDepth = 0;
+        // TAA (EngineGL33_PostTemporal.cpp): the composite's output when the
+        // resolve runs (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
+        // view depth in metres) and the opaque world copied before the
+        // translucent objects (RGBA8, the particle mask).
+        unsigned int taaInTex = 0, taaInFbo = 0;
+        unsigned int histTex[2] = {}, histFbo[2] = {};
+        unsigned int opaqueTex = 0, opaqueFbo = 0;
+        unsigned int progTaa = 0, progTaaSharpen = 0;
         bool programsTried = false;
         bool unavailable = false;
     } _post;
+    // TAA frame state (EngineGL33_PostTemporal.cpp, Graphics/Remaster/TemporalAA.hpp).
+    struct TaaState
+    {
+        std::uint32_t sequence = 0; // jitter index: advances once per resolved frame
+        // The frame whose world passes are jittered (engine frame counter), its
+        // offset in render-target pixels and its camera; set at its first world
+        // pass, when the frame gates are known.
+        bool frameOn = false;
+        std::uint32_t frame = 0;
+        Poseidon::remaster::TaaOffset jitterPx;
+        Poseidon::remaster::TaaCamera camera;
+        // The offset the vertex shaders hold now (vpScale.zw, NDC).
+        Poseidon::remaster::TaaOffset ndcApplied;
+        float mipBiasApplied = 0.0f;
+        // The opaque world was copied this frame (BeginTranslucentObjects).
+        bool opaqueCopied = false;
+        // The last resolve: its history, target and camera.
+        Poseidon::remaster::TaaHistory history;
+        int historyIdx = 0;
+        Poseidon::remaster::TaaCamera prevCamera;
+    } _taa;
+    // TAA runs this frame: the switch and its frame gate are on, the frame
+    // gets a post pass, and the world's passes are this frame's.
+    bool TaaWantedThisFrame() const;
+    // At each world pass: fixes the frame's jitter and camera on its first
+    // pass, then hands the jitter to the vertex shaders and the texture LOD
+    // bias to the material samplers (zero and none outside a TAA frame).
+    void ApplyTaaJitter();
+    // Writes `ndc` into vpScale.zw (and flushes) and `bias` into the material
+    // samplers, each only when it changes.
+    void SetTaaJitterState(Poseidon::remaster::TaaOffset ndc, float bias);
+    void BeginTranslucentObjects() override;
     void DestroyPostTargets();
     void DestroyPostPrograms();
     bool EnsurePostResources(int w, int h);
@@ -844,6 +885,9 @@ class EngineGL33 : public Engine
         // The sun on screen, for the shafts.
         float sunU = 0.5f, sunV = 0.5f, shaftWeight = 0.0f;
         Color shaftTint = Color(1, 1, 1, 1);
+        // TAA: this frame's shift of the AO and shaft sample patterns (0 when
+        // the resolve does not run: the fixed patterns of before).
+        float noiseShift = 0.0f;
         // Which stages run this frame and the strengths the composite uses.
         Poseidon::remaster::PostStagePlan plan;
     };
@@ -862,6 +906,8 @@ class EngineGL33 : public Engine
     void PostBloom(const PostFrame& f);
     void PostShafts(const PostFrame& f);
     void PostComposite(const PostFrame& f);
+    void PostTemporal(const PostFrame& f);
+    void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
@@ -1122,6 +1168,8 @@ class EngineGL33 : public Engine
     void DeinitVertexShaders();
     void SelectVertexShader(VertexShaderID vs);
     void UploadVSScreenConstants();
+    // vpScale.zw: the TAA jitter the remastered vertex shaders add (NDC).
+    void UploadVSJitter(float x, float y);
     void UploadVSProjection(const FrameState& frame);
     void UploadVSViewConstants(const FrameState& frame);
     FrameState BuildFrameState(Camera* camera, LightSun* sun, int bias, const Color& fogColor, bool sunEnabled);

@@ -115,6 +115,13 @@ struct LightingTuning
     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
+    // Temporal anti-aliasing (features.taa, TemporalAA.hpp): the sharpen after
+    // the resolve undoes the softening of the accumulation, the texture LOD
+    // bias of the world's passes wins back the texture detail it averages, and
+    // alpha is this frame's share in the blend with the history.
+    float taaSharpen = 0.5f;
+    float taaMipBias = -0.5f;
+    float taaAlpha = 0.1f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

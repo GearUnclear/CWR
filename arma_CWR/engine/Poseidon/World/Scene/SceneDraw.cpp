@@ -2047,6 +2047,9 @@ void Scene::DrawObjectsAndShadowsPass2()
 #endif
     // draw alpha parts of roads
     GEngine->FlushQueues();
+    // The opaque world is complete: the remastered TAA keeps a copy for its
+    // particle mask before the translucent objects go on top.
+    GEngine->BeginTranslucentObjects();
     GEngine->EnableReorderQueues(false);
     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpRevAlphaSortObj);
     // last draw alpha objects (not roads - they are already drawn)

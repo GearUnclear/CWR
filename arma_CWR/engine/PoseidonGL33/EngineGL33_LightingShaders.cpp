@@ -66,7 +66,7 @@ layout(std140) uniform VSConstants {
     vec4 _pad_spec;
     vec4 _pad_specEn;
     vec4 _pad_sunEn;
-    vec4 vpScale;       // 21 — {2/width, 2/height, 0, 0}
+    vec4 vpScale;       // 21: {2/width, 2/height, TAA jitter x, y (NDC)}
 };
 
 layout(location = 0) in vec3 aPos;
@@ -92,6 +92,9 @@ void main() {
     gl_Position.y = (1.0 - aPos.y * vpScale.y) * w;
     gl_Position.z = aPos.z * w;
     gl_Position.w = w;
+    // TAA sub-pixel jitter: zero outside a jittered world pass, and then the
+    // position is left exactly as computed.
+    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
     vColor = aColor;
     vSpecColor = aSpecular;
     vUV0 = aUV0;
@@ -118,7 +121,7 @@ layout(std140) uniform VSConstants {
     vec4 specular;      // c18: rgb + power(w)
     vec4 specEn;        // c19
     vec4 sunEn;         // c20
-    vec4 vpScale;       // c21
+    vec4 vpScale;       // c21: zw TAA jitter (NDC)
     vec4 crownCenter;   // c22: xyz shape crown centre (model space), w = valid
     vec4 crownScale;    // c23: xyz 1 / crown half extents
     mat4 texMat0;       // c24-c27
@@ -153,6 +156,8 @@ void main() {
     worldNormal     *= inversesqrt(max(dot(worldNormal, worldNormal), 1e-12));
     vec4 viewPos     = view * worldPos;
     gl_Position      = proj * viewPos;
+    // TAA sub-pixel jitter (see vsScreenRemaster).
+    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
     vWorldRel        = worldPos.xyz; // camera-relative world position
     vNormalW         = worldNormal;
     vLitMode         = 1.0;
@@ -199,7 +204,7 @@ layout(std140) uniform VSConstants {
     vec4 specular;      // c18
     vec4 specEn;        // c19
     vec4 sunEn;         // c20
-    vec4 vpScale;       // c21
+    vec4 vpScale;       // c21: zw TAA jitter (NDC)
     vec4 _pad22;
     vec4 _pad23;
     mat4 texMat0;       // c24-c27
@@ -228,6 +233,8 @@ flat out float vLitMode;
 void main() {
     vec4 worldPos = worldArr[gl_InstanceID] * vec4(pos, 1.0);
     gl_Position   = proj * view * worldPos;
+    // TAA sub-pixel jitter (see vsScreenRemaster).
+    if (vpScale.z != 0.0 || vpScale.w != 0.0) gl_Position.xy += vpScale.zw * gl_Position.w;
     vColor        = diffuse;
     vSpecColor    = vec4(0.0);
     vUV0          = (texCtrl.x > 0.5) ? (texMat0 * vec4(uv, 0, 1)).xy : uv;

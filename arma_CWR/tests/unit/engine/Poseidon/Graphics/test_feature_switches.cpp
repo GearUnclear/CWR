@@ -272,6 +272,58 @@ TEST_CASE("Feature gates: TAA runs on a drawn world, not in interiors, optics or
     in = Noon();
     in.worldDrawn = false;
     CHECK_FALSE(G(in, Feature::Taa).on);
+    // The resolve is a post stage: with the post effects off nothing would
+    // resolve the jittered frame.
+    in = Noon();
+    CHECK_FALSE(G(in, Feature::Taa, Apply("remastered,post=0")).on);
+    CHECK(std::string_view(G(in, Feature::Taa, Apply("remastered,post=0")).reason) == "post effects off");
+    CHECK(G(in, Feature::Taa, Apply("remastered,post=0,gates=0")).on); // the debugging override still wins
+}
+
+TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch", "[remaster][FeatureSwitches]")
+{
+    // A5 makes taa do something: it is no longer inert, and the overlay shows
+    // its GPU section (the Temporal post stage's).
+    const FeatureInfo& taa = GetFeatureInfo(Feature::Taa);
+    CHECK(taa.landed);
+    CHECK(std::string_view(taa.step) == "A5");
+    CHECK(std::string_view(taa.gpuSection) == "taa");
+
+    // Plan 3.1's sub-knobs: sharpen 0.5, texture LOD bias -0.5, alpha 0.1, each
+    // under the taa switch, in its track's group.
+    struct Sub
+    {
+        const char* key;
+        float value;
+    };
+    for (const Sub& sub : {Sub{"taaSharpen", 0.5f}, Sub{"taaMipBias", -0.5f}, Sub{"taaAlpha", 0.1f}})
+    {
+        INFO(sub.key);
+        const LightingKey* k = FindLightingKey(sub.key);
+        REQUIRE(k != nullptr);
+        CHECK(k->kind == KeyKind::Knob);
+        REQUIRE(k->parent != nullptr);
+        CHECK(std::string_view(k->parent) == "taa");
+        CHECK(std::string_view(k->group) == "temporal");
+        CHECK(KeyDefault(*k) == sub.value);
+        // triSetLighting takes it, and baseline / remastered put it back.
+        const LightingTuning t = Apply(std::string("remastered,") + sub.key + "=0.3");
+        CHECK(GetKeyValue(t, *k) == 0.3f);
+        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
+    }
+    // No other switch has sub-knobs yet: every knob with a parent is TAA's.
+    int children = 0;
+    for (int i = 0; i < LightingKeyCount(); ++i)
+    {
+        const LightingKey& k = LightingKeyAt(i);
+        if (!k.parent)
+            continue;
+        INFO(k.key);
+        CHECK(std::string_view(k.parent) == "taa");
+        CHECK(FindFeature(k.parent) != nullptr);
+        ++children;
+    }
+    CHECK(children == 3);
 }
 
 TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
@@ -529,7 +581,8 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
         INFO(info.key);
         CHECK(s.find(std::string(" ") + info.key + "=") != std::string::npos);
     }
-    // Nothing reads a switch yet in A1: every one is marked inert.
+    // Every switch that has not landed is marked inert; taa has landed (A5).
+    CHECK(s.find(" taa=1:on:world-drawn:inert") == std::string::npos);
     size_t inert = 0;
     for (size_t p = s.find(":inert"); p != std::string::npos; p = s.find(":inert", p + 1))
         ++inert;
@@ -539,11 +592,12 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after A4 has", "[remaster][FeatureSwitches]")
+TEST_CASE("Feature switches: the frame-cost switches and TAA have landed, nothing else has",
+          "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
     // classic): triFeatureState no longer marks them inert, and the overlay
-    // shows the opaque objects' GPU section for them.
+    // shows the opaque objects' GPU section for them. A5 lands taa.
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -552,10 +606,11 @@ TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after 
         const FeatureInfo& info = GetFeatureInfo(static_cast<Feature>(i));
         INFO(info.key);
         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
-        CHECK(info.landed == perf);
+        const bool taa = info.id == Feature::Taa;
+        CHECK(info.landed == (perf || taa));
         if (info.landed)
         {
-            CHECK(std::string_view(info.step) == "A4");
+            CHECK(std::string_view(info.step) == (perf ? "A4" : "A5"));
             CHECK(sections.count(info.gpuSection) == 1);
         }
     }
@@ -565,7 +620,7 @@ TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after 
     INFO(s);
     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
-    CHECK(s.find("landed=2/26") != std::string::npos);
+    CHECK(s.find("landed=3/26") != std::string::npos);
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

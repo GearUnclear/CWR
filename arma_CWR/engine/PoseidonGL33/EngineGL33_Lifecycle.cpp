@@ -185,6 +185,11 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     _worldDepthCleared = false;
     _worldOverlayDrawn = false;
     UpdateRemasterPrograms();
+    // No TAA jitter or LOD bias until this frame's world pass asks for them
+    // (EndWorldScene takes them off too; a frame that never reached it must
+    // not hand them to the next frame's menus).
+    _taa.frameOn = false;
+    SetTaaJitterState({}, 0.0f);
 
     TLMaterial invalidMat;
     invalidMat.diffuse = Color(-1, -1, -1, -1);

@@ -105,6 +105,10 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return On("beyond 150 m", scale);
 
         case Feature::Taa:
+            // The resolve is a post stage: no post pass, no resolve (and an
+            // unresolved jitter would shake the frame).
+            if (!t.postEffects)
+                return Off("post effects off");
             if (!WorldVisible(in, why))
                 return Off(why);
             return On("world drawn");

@@ -59,6 +59,8 @@ enum class PostShader : int
     Composite,
     LinearDepth, // half-resolution view depth (the LinearDepth post stage)
     DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
+    Taa,         // the TAA resolve into the history (the Temporal stage)
+    TaaSharpen,  // the resolved frame back into the frame target (the Sharpen stage)
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -111,7 +113,8 @@ constexpr bool RemasterUnitsValid()
 static_assert(detail::RemasterUnitsValid(),
               "remastered texture units: 2 to 15, never the material units 0 and 1 or the upload unit 7, all distinct");
 
-// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp).
+// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp,
+// EngineGL33_PostTemporal.cpp).
 // The post pass sets their samplers to none before the first fullscreen stage
 // and unbinds all of them at its end; a stage that binds any other unit
 // restores that unit itself. Never unit 1 (its sampler object belongs to

@@ -23,8 +23,9 @@ constexpr PostStageInfo kStages[] = {
     {PostStage::Shafts, "shafts", "A3", true, false, Mark::ShaftsEnd, Section::Shafts},
     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
     {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
-    {PostStage::Temporal, "taa", "A5", false, false, Mark::TemporalEnd, Section::Temporal},
-    {PostStage::Sharpen, "sharpen", "A5", false, false, Mark::SharpenEnd, Section::Sharpen},
+    {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
+    // A5 lands TAA's sharpen; B11's luma sharpen (with TAA off) joins it.
+    {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
     {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
 };
 static_assert(sizeof(kStages) / sizeof(kStages[0]) == kPostStageCount, "one PostStageInfo per PostStage");
@@ -75,9 +76,10 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
 {
     PostStagePlan plan;
     const bool debugDepth = in.debugView == kDebugViewLinearDepth;
-    // The stages that can ask for the pass ask by their knob (or debug view),
-    // whatever this frame's conditions then decide for them.
-    const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth;
+    // The stages that can ask for the pass ask by their knob, switch or debug
+    // view, whatever this frame's conditions then decide for them.
+    const bool asked =
+        in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth || in.temporal;
     if (!asked)
         return plan;
 
@@ -94,6 +96,11 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     if (in.worldDepth && in.glow && in.sunShafts > 0.0f && in.shaftWeight > kShaftMinWeight)
         plan.runs |= Bit(PostStage::Shafts);
     plan.runs |= Bit(PostStage::Composite);
+    // The resolve reprojects with the world depth (a vehicle interior cleared
+    // it), and a screen overlay in the world pass was drawn jittered over the
+    // world: such a frame goes out as drawn and the history starts again.
+    if (in.temporal && in.worldDepth && in.glow)
+        plan.runs |= Bit(PostStage::Temporal) | Bit(PostStage::Sharpen);
     if (debugDepth)
         plan.runs |= Bit(PostStage::DebugView);
 

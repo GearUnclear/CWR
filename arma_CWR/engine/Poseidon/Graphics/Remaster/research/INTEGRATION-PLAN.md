@@ -144,7 +144,9 @@ As built in A1 (corrections to the bullets above):
   the new `Engine::GpuTimingSectionMs(name)`; no feature has a section yet.
 - Sub-knobs (the right column of the table above) are not registered yet: each step adds its
   own rows with `parent` set to its switch, so `triSetLighting` never accepts a knob that does
-  nothing.
+  nothing. A5 added the first (`MakeSubKnob` in `FeatureSwitches.cpp`): `taaSharpen` 0.5,
+  `taaMipBias` -0.5 and `taaAlpha` 0.1, floats of `LightingTuning`, grouped under the track
+  (`temporal`) with `parent` `taa`.
 - `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
   never `;`, so it rides in the UDCAP lines as `feat=`).
@@ -203,6 +205,10 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
   cloud shadows a cloud cover above 0 (F4 fades it in from 0.05) and the sun up or the moon key.
   "Morning" for the valley mist is an eastern sun between -4 and 38 deg (the haze notes' morning
   weight), not a clock hour. The thresholds are named constants in `FeatureGates.hpp`.
+- As built in A5: the TAA gate also needs the post effects on (`post=0` reads "post effects off"):
+  the resolve is a post stage, and a jittered frame that nothing resolves would shake. The
+  backend jitters a frame only when the gate is on and the frame gets a post pass (an offscreen
+  frame target, the post programs built; `TaaWantedThisFrame`).
 
 Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
 gates above keep the beams, hfrt and SSR from all being at full cost together only if the
@@ -261,6 +267,12 @@ step that lands a feature moves its row into `LitConst`, declares it in `LitCons
 lower planned one (A5's `Taa` at 59 before B7's `MatClass` at 58) declares the lower ones as padding
 members.
 
+As built in A5: the `Taa` slot did not land. No world shader reads a TAA value in A5 (the jitter
+rides in the VS constants' `vpScale.zw`, the resolve is a post pass with its own uniforms), and a
+slot nothing reads would change every remastered program for nothing. Its first reader is B1's
+stochastic PCSS, which lands slot 59 (with 58 as padding) and fills it from the backend's TAA
+sequence (`EngineGL33::_taa.sequence`, the jitter index that advances once per resolve).
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -297,7 +309,9 @@ are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cp
 to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
 units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits` in A3, 3.6).
 `GL33Bind` caches units 0 to 7 only (`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
-for unit 6 belongs to the step that first samples it (A5 or B1).
+for unit 6 belongs to the step that first samples it (A5 or B1). As built in A5: A5 samples no
+world unit (its stochastic consumers, the PCSS, are B1's), so unit 6 and its `[ShadowSampler]` case
+go to B1. TAA's own inputs are post inputs on `kPostUnits` (3.6).
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -440,6 +454,22 @@ As built in A3 (corrections to the list and the paragraph above):
   nothing yet: AO still reads the full-resolution depth (moving AO onto it changes AO's pixels, so
   it is a step of its own, A4 or later), and its gate is "a running stage reads it", so on the
   shipped frame it does not run and costs nothing; only `debug=5` runs it.
+
+As built in A5: `Temporal` and `Sharpen` landed, as one pair (`PostFrameInputs::temporal`: the
+switch and its frame gate were on when the world's passes began, so they were drawn jittered).
+TAA asks for the pass by itself, like a knob; the two stages run only when the frame also kept its
+world depth and drew no overlay (an interior or optics frame goes out as drawn and the history
+restarts). When they run the composite draws into the TAA input (`taaInTex`) instead of the frame
+target, and the sharpen writes every sample of the frame target; the debug view still draws
+last. Their pass code is `EngineGL33_PostTemporal.cpp`, their GLSL `psPostTaa` and
+`psPostTaaSharpen` in `EngineGL33_PostShaders.cpp` (two `kPostShaders` rows); the GL helpers the
+stages share (`BindTex`, `DrawTo`, `SetInt`, `SetFloat`, `Set2`, `Set4`) moved from
+`EngineGL33_PostFX.cpp`'s anonymous namespace to `EngineGL33_PostPass.hpp`, so a stage file needs
+no copy. The resolve binds its five inputs to `kPostUnits` (the composite's output 0, depth 2,
+history 3, the world as drawn 4, the opaque copy 5). The only cost outside the post sections is the
+particle mask's copy of the frame target between the opaque and the translucent objects
+(`Engine::BeginTranslucentObjects`, called from `Scene::DrawObjectsAndShadowsPass2`), which lands
+in the `world` section.
 
 ### 3.7 Porting method
 
@@ -913,6 +943,75 @@ graphics-remaster worktree, gitignored).**
   math, previous view to current) against hand values; `Taa` slot in the layout test; glslang
   for both new post shaders; a GL state audit that the jitter is zero for the HUD.
 - **Effort**: 5 days.
+
+**Result (2026-10-18, uncommitted change on ced77ae in the scratch copy `gr-A5`, a parallel lane;
+evidence in `tmp/integration/A5/` of the graphics-remaster worktree, gitignored; light gate).**
+
+- Built: `Graphics/Remaster/TemporalAA.{hpp,cpp}` (pure: Halton(2, 3) jitter over 16 frames,
+  `TaaPassJitterNdc`, the one rule that gives a pass its jitter, the reprojection built in double
+  precision with its cut rule (over 50 m or 60 deg in a frame), the history chain on the engine
+  frame counter, the particle mask thresholds); `EngineGL33_PostTemporal.cpp` (`ApplyTaaJitter` at
+  every world pass after the gates, `SetTaaJitterState` with the texture LOD bias,
+  `BeginTranslucentObjects`, `PostTemporal`, `PostSharpen`); `psPostTaa` and `psPostTaaSharpen`;
+  the guarded jitter in the three remastered vertex shaders; `Temporal` and `Sharpen` landed
+  (3.6); the `taa` switch landed with its three sub-knobs (3.1) and the post-effects condition on
+  its gate (3.2). Not built: the `Taa` slot and unit 6 (3.3, 3.4: B1's), per-object motion
+  vectors and an HDR resolve (below).
+- Corrections to the bullets above. The reconstruction kernel is exp(-4 d^2), not the
+  prototype's exp(-2.29 d^2): a sweep on the hero view gave 15.5% less sharpness (mean neighbour
+  difference, the prototype's metric) with 2.29, 5.0% with 4 and 2.8% with 8, and 8.5% less, 2.3%
+  and 4.1% more on `lowsun_fp`; 4 keeps the wires continuous where 8 starts to dash them
+  (`images/sweep_lowsun_off_k229_k4_k8.png`). The history keeps the view depth in its alpha
+  (RGBA16F), not in two extra R32F targets with MRT. "Per-object motion where the plan says" and
+  "resolved before the tone curve" stay documented, not built: the remastered shaders tonemap per
+  fragment and the frame target is RGBA8 display space, so a resolve before the tone curve needs an
+  HDR frame target; the resolve works on the tonemapped display values (the space Karis resolves an
+  HDR frame in) with luma weights. The particle mask was built after all (it was "documented"
+  above): a colour copy of the frame target between the opaque world and the translucent objects
+  (`Engine::BeginTranslucentObjects`, one call in `Scene::DrawObjectsAndShadowsPass2` before the
+  back-to-front alpha loop); where the translucent objects (smoke, fire, muzzle flashes, glass),
+  the cockpit pass, rain and flares changed a pixel by more than 2 levels the resolve takes up to
+  0.8 of this frame (all of it above 24 levels) and drops the luma weights. The prototype's
+  stochastic AO (4 taps, no blur) is not ported; instead the AO and shaft sample patterns turn per
+  frame (golden-ratio steps of the TAA sequence) while TAA runs, blur kept, so the history averages
+  them. "Soft-ended soldier shadow" in the A5 look check (section 8) is B1's PCSS; A5's visible part
+  is steadier foliage and wire.
+- Off equals before (item 5; `lane/20261018-060047-before` on the base build, `lane/20261018-063134-final-new`
+  on the A5 build, the features_ab hero block with its clock and cloud pin): `taa=0` on the A5 build
+  against the base build at `temporal_forest_edge_golden` is at most 2 levels, 0 pixels over 2 (the
+  base build's own repeat: 1 level, 0 pixels). `lowsun_fp`: 1,008 pixels over 2, all inside the
+  posed soldier's head (x 1046 to 1082, y 521 to 560; the base build's repeat moved 30 there);
+  `town_night`: fire and smoke, as the base build's repeat.
+- On against off: sharpness -6.7% on the hero view (-9.6% in its crown crop), +2.4% on `lowsun_fp`,
+  -1.1% on `town_night`, +1.0% on `sinai_lowsun_fp` (the sharpen check view); mean colour within
+  0.3 levels and the 5th and 95th brightness percentiles within 0.4 on the forest and `lowsun_fp`
+  views (`town_night` within 1 level, its fire differs shot to shot): no darkening, no grade. The M113,
+  Jeep and Zelda antennas and the tent ropes are continuous where 4x MSAA alone dashes them. Motion
+  (`lane/20261018-062248-v2-motion`, S mode, 40 frames per pass): a yaw pan of 2 px per step
+  leaves 22.6% less frame-to-frame residual in a central crown crop (steadier crowns) and is 13.9%
+  less sharp there (9.5 to 10.7% over the whole frame); a Jeep crossing at 25 m at 0.12 and then
+  0.5 m per step leaves no trail (difference images show outlines only); the town Fire at 9 m keeps
+  its flicker (frame-to-frame change in the flame and smoke region -1%, temporal deviation -7%,
+  peak and mean luma within 0.006); still pixels change by 0.0026 luma from frame to frame (0.0007
+  without TAA: the jitter's residual, under one level).
+- Cost (RTX 4060 Ti, 1080p, scale 1.0, 4x MSAA, one game, 3 interleaved rounds, not a quiet-machine
+  run: `lane/20261018-062609-cost`): the `taa` section 0.16 to 0.22 ms and `sharpen` 0.05 to 0.10 ms;
+  the GPU frame median rises by 0.71 to 0.81 ms (forest 5.55 to 6.30, `lowsun_fp` 5.39 to 6.20,
+  `town_night` 6.21 to 6.92), most of it the -0.5 texture LOD bias in the world pass: with
+  `taaMipBias=0` the rise is 0.08 to 0.34 ms (and the hero view 11.2% less sharp instead of 6.7%);
+  without the opaque copy (a temporary knob of the cost build) the frame is within the round-to-round
+  noise of the shipped one. The 0.3 ms of 3.2 covers the resolve and sharpen; it did not count the
+  LOD bias.
+- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
+  `EngineGL33_State.cpp`, not clean at ced77ae, by `clang-format-diff.py` on the changed lines);
+  unit gate tags plus `[PostStages],[TemporalAA]` 478/478 (12 new cases); `[Graphics]` has the known
+  DDS fixture failure only, the full suite the 6 known localisation failures only; smoke_abel 1/1
+  with KHR_debug ids 131169, 131154 and 131218 only. Twelve mutations turn their cases red: the
+  jitter cleared after `EndWorldScene`'s early return, the translucent hook after the alpha sort,
+  the jitter applied before the gates, the opaque copy creating targets mid-world, a pass jitter
+  that ignores the world pass, a reprojection without the camera translation, a history chain
+  without the frame check, the TAA stages on an interior frame, no post-effects gate, `taa` not
+  landed, the 2.29 kernel, an unguarded jitter add.
 
 ### A6. Shared light list
 

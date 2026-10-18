@@ -108,10 +108,12 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
     CHECK(marks.size() == static_cast<size_t>(kPostStageCount));
     CHECK(gpu::kMarkCount <= 32);
     // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
-    // plus the linear depth and the debug view that shows it.
-    CHECK(landed == 7);
-    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter,
-                        PostStage::Temporal, PostStage::Sharpen})
+    // plus the linear depth and the debug view that shows it; A5 the TAA
+    // resolve and its sharpen.
+    CHECK(landed == 9);
+    CHECK(GetPostStageInfo(PostStage::Temporal).landed);
+    CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
+    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::Air, PostStage::CombatScatter})
     {
         CAPTURE(GetPostStageInfo(s).name);
         CHECK_FALSE(GetPostStageInfo(s).landed);
@@ -209,6 +211,52 @@ TEST_CASE("Post stages: interior and optics frames hold their stages off", "[Gra
     CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
 }
 
+TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jittered frame",
+          "[Graphics][remaster][PostStages][TemporalAA]")
+{
+    // Without the jitter (taa switch or gate off) nothing changes: the plan of
+    // before, which is what makes the switch's "off" the look before A5.
+    PostFrameInputs in = Shipped();
+    const std::uint32_t before = PlanPostStages(in).runs;
+    CHECK(before ==
+          Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
+
+    in.temporal = true;
+    PostStagePlan plan = PlanPostStages(in);
+    CHECK(plan.runs == (before | Mask({PostStage::Temporal, PostStage::Sharpen})));
+    // The other stages and their strengths are untouched.
+    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
+    CHECK_FALSE(plan.Runs(PostStage::LinearDepth));
+
+    // TAA asks for the pass on its own: with every knob off the frame still
+    // gets the resolve, the composite and the two TAA stages.
+    PostFrameInputs bare;
+    bare.temporal = true;
+    CHECK(PlanPostStages(bare).runs ==
+          Mask({PostStage::Resolve, PostStage::Composite, PostStage::Temporal, PostStage::Sharpen}));
+
+    // A vehicle interior (no world depth to reproject with) or a screen
+    // overlay drawn over the jittered world: the frame goes out as drawn.
+    in.worldDepth = false;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Temporal));
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Sharpen));
+    in.worldDepth = true;
+    in.glow = false;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Temporal));
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Sharpen));
+    CHECK(PlanPostStages(in).Runs(PostStage::Composite));
+
+    // The debug view still draws last, over the resolved frame.
+    in.glow = true;
+    in.debugView = kDebugViewLinearDepth;
+    plan = PlanPostStages(in);
+    CHECK(plan.Runs(PostStage::Temporal));
+    CHECK(plan.Runs(PostStage::DebugView));
+    CHECK(static_cast<int>(PostStage::DebugView) > static_cast<int>(PostStage::Sharpen));
+    CHECK(static_cast<int>(PostStage::Temporal) > static_cast<int>(PostStage::Composite));
+}
+
 TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
 {
     // Today the debug view is its only reader; the stages that land with a
@@ -259,25 +307,32 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
                     for (bool depth : {false, true})
                         for (bool glow : {false, true})
                             for (float weight : {0.0f, 0.5f})
-                            {
-                                PostFrameInputs in;
-                                in.ambientOcclusion = ao;
-                                in.bloom = bloom;
-                                in.sunShafts = shafts;
-                                in.debugView = view;
-                                in.worldDepth = depth;
-                                in.glow = glow;
-                                in.shaftWeight = weight;
-                                const PostStagePlan plan = PlanPostStages(in);
-                                CAPTURE(ao, bloom, shafts, view, depth, glow, weight);
-                                CHECK((plan.runs & ~landed) == 0u);
-                                // A pass that runs resolves first and composites.
-                                if (!plan.Empty())
+                                for (bool temporal : {false, true})
                                 {
-                                    CHECK(plan.Runs(PostStage::Resolve));
-                                    CHECK(plan.Runs(PostStage::Composite));
+                                    PostFrameInputs in;
+                                    in.ambientOcclusion = ao;
+                                    in.bloom = bloom;
+                                    in.sunShafts = shafts;
+                                    in.debugView = view;
+                                    in.worldDepth = depth;
+                                    in.glow = glow;
+                                    in.shaftWeight = weight;
+                                    in.temporal = temporal;
+                                    const PostStagePlan plan = PlanPostStages(in);
+                                    CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal);
+                                    CHECK((plan.runs & ~landed) == 0u);
+                                    // A pass that runs resolves first and composites.
+                                    if (!plan.Empty())
+                                    {
+                                        CHECK(plan.Runs(PostStage::Resolve));
+                                        CHECK(plan.Runs(PostStage::Composite));
+                                    }
+                                    // The resolve and its sharpen: both or neither,
+                                    // and never on a frame drawn without the jitter.
+                                    CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
+                                    if (!temporal)
+                                        CHECK_FALSE(plan.Runs(PostStage::Temporal));
                                 }
-                            }
 }
 
 TEST_CASE("Post stages: the backend runs every landed stage and marks it from the table",

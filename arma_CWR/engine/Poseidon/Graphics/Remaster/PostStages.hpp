@@ -81,6 +81,11 @@ struct PostFrameInputs
     // The sun's weight on screen for the shafts: 0 when it is behind the
     // camera or under the horizon, scaled down by cloud and night.
     float shaftWeight = 0.0f;
+    // Temporal anti-aliasing: the taa switch and its frame gate were on when
+    // the world's passes began, so they were drawn with the sub-pixel jitter
+    // (TemporalAA.hpp). The resolve and its sharpen then run unless this frame
+    // turned out to be a vehicle interior or to carry a screen overlay.
+    bool temporal = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -97,10 +102,13 @@ struct PostStagePlan
 };
 
 // The early return asks every stage: the pass runs when a landed stage asks
-// for it (its knob is on, or its debug view is selected), and then Resolve and
-// Composite always run, so a stage that is on but held off this frame (AO in a
-// vehicle interior) still gets the composite, which copies the resolved frame
-// back as it always has. Each other stage runs when its own gate says so.
+// for it (its knob is on, its switch and frame gate are on, or its debug view
+// is selected), and then Resolve and Composite always run, so a stage that is
+// on but held off this frame (AO in a vehicle interior) still gets the
+// composite, which copies the resolved frame back as it always has. Each other
+// stage runs when its own gate says so. Temporal and Sharpen run together: the
+// composite then draws into the TAA input instead of the frame target, and
+// the sharpen writes the resolved frame back into every sample of it.
 PostStagePlan PlanPostStages(const PostFrameInputs& in);
 
 } // namespace Poseidon::remaster

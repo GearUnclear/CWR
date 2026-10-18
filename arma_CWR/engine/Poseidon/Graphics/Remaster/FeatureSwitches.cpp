@@ -22,7 +22,7 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", true, &FS::drawGrouping,
      "pass1"},
     {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
-    {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", false, &FS::taa, ""},
+    {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", true, &FS::taa, "taa"},
     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
      &FS::lightTiles, ""},
     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", false,
@@ -107,6 +107,17 @@ LightingKey MakeSwitch(const FeatureInfo& f)
     return k;
 }
 
+// A knob that tunes one feature: the overlay shows it under the feature's
+// switch, in the switch's track.
+LightingKey MakeSubKnob(Feature parent, const char* key, const char* label, const char* hint, float LT::* field,
+                        float lo, float hi)
+{
+    const FeatureInfo& f = kFeatures[static_cast<int>(parent)];
+    LightingKey k = MakeKnob(key, label, f.track, hint, field, lo, hi);
+    k.parent = f.key;
+    return k;
+}
+
 struct KeyTable
 {
     std::vector<LightingKey> rows;
@@ -148,6 +159,15 @@ struct KeyTable
         rows.assign(std::begin(knobs), std::end(knobs));
         for (const FeatureInfo& f : kFeatures)
             rows.push_back(MakeSwitch(f));
+        const LightingKey subKnobs[] = {
+            MakeSubKnob(Feature::Taa, "taaSharpen", "TAA sharpen", "0 = soft; the overshoot stays bounded (no halos)",
+                        &LT::taaSharpen, 0.0f, 1.5f),
+            MakeSubKnob(Feature::Taa, "taaMipBias", "TAA texture LOD bias",
+                        "world textures while TAA runs; negative = sharper", &LT::taaMipBias, -1.5f, 0.5f),
+            MakeSubKnob(Feature::Taa, "taaAlpha", "TAA current frame weight", "lower = steadier and softer",
+                        &LT::taaAlpha, 0.02f, 1.0f),
+        };
+        rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());
     }
 };

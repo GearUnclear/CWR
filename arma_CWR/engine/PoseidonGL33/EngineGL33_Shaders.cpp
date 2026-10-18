@@ -989,8 +989,17 @@ void EngineGL33::SelectVertexShader(VertexShaderID vs)
 
 void EngineGL33::UploadVSScreenConstants()
 {
-    float vpScale[4] = {2.0f / _w, 2.0f / _h, 0, 0};
+    // zw: the TAA jitter the world's passes hold (the world's own screen-space
+    // draws, smoke and rain, move with it); zero everywhere else.
+    float vpScale[4] = {2.0f / _w, 2.0f / _h, _taa.ndcApplied.x, _taa.ndcApplied.y};
     memcpy(s_vsShadow + VSConst::SlotVpScale * 4, vpScale, 16);
+    FlushVSConstants();
+}
+
+void EngineGL33::UploadVSJitter(float x, float y)
+{
+    s_vsShadow[VSConst::SlotVpScale * 4 + 2] = x;
+    s_vsShadow[VSConst::SlotVpScale * 4 + 3] = y;
     FlushVSConstants();
 }
 

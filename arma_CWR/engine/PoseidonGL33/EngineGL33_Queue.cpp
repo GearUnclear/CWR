@@ -356,6 +356,9 @@ void EngineGL33::BeginPass(PassId passId)
         // shaders.  No-op until a depth pass has run with shadow maps enabled.
         UpdateShadowMapLitState();
         UploadLitFrameConstants();
+        // The TAA jitter and texture LOD bias of this pass (the frame gates are
+        // known now); zero for any pass that is not a TAA frame's world pass.
+        ApplyTaaJitter();
     }
 
     // Crop the 3D scene to the AspectSettings world rect (pillarbox /
