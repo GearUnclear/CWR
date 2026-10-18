@@ -163,6 +163,10 @@ bool EnsureArrayTarget(int res, int layers)
         s_arrFbo = 0;
     }
 
+    // The lit programs sample the map on unit 2, and deleting the old array
+    // above left texture 0 there if it was bound. Create the new one on unit 2,
+    // so the unit holds a complete depth array again even if the FBO fails.
+    GL33Bind::ActiveUnit(2);
     glGenTextures(1, &s_arrTex);
     glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, res, res, layers, 0, GL_DEPTH_COMPONENT, GL_FLOAT,

@@ -247,3 +247,109 @@ TEST_CASE("I-04 T1: per-draw sampler routes through Poseidon::render::sampler::B
         REQUIRE(region.find("Poseidon::render::sampler::BindSlot0") != std::string::npos);
     }
 }
+
+// Shadow-map unit: every lit program, classic (sampler2DArray) and remastered
+// (sampler2DArrayShadow under a comparison sampler object), samples the cascade
+// array on unit 2. Texture 0 there is an incomplete texture to the classic
+// programs and undefined behaviour under the comparison sampler (NVIDIA KHR_debug
+// ids 131204 and 131222). The unit holds the 1x1 depth stand-in from init and a
+// cascade array once one exists; the ways to lose that are deleting the bound
+// array and unbinding the array target, so the audits below pin both.
+namespace
+{
+
+std::string FunctionBody(const std::string& source, const std::string& signature)
+{
+    const size_t start = source.find(signature);
+    if (start == std::string::npos)
+        return {};
+    const size_t end = source.find("\n}\n", start);
+    return source.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+} // namespace
+
+TEST_CASE("Shadow-map unit 2 holds the depth stand-in from init on", "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    REQUIRE_FALSE(lighting.empty());
+    const std::string init = FunctionBody(lighting, "void EngineGL33::InitLightingResources()");
+    REQUIRE_FALSE(init.empty());
+
+    // The stand-in is created first, then bound on unit 2 with no unit change in
+    // between that could land the bind elsewhere.
+    const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
+    REQUIRE(made != std::string::npos);
+    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
+    const size_t unit2 = init.find(unitCall, made);
+    REQUIRE(unit2 != std::string::npos);
+    const size_t bind = init.find("glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);", unit2);
+    REQUIRE(bind != std::string::npos);
+    const std::string between = init.substr(unit2 + unitCall.size(), bind - unit2 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("Invalidate(") == std::string::npos);
+}
+
+TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sampled",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    REQUIRE_FALSE(depth.empty());
+    const std::string ensure = FunctionBody(depth, "bool EnsureArrayTarget(int res, int layers)");
+    REQUIRE_FALSE(ensure.empty());
+
+    // glDeleteTextures leaves texture 0 on every unit the old array was bound
+    // to; the replacement must be bound on unit 2 straight away.
+    const size_t del = ensure.find("glDeleteTextures(1, &s_arrTex);");
+    REQUIRE(del != std::string::npos);
+    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
+    const size_t unit2 = ensure.find(unitCall, del);
+    REQUIRE(unit2 != std::string::npos);
+    const size_t bind = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit2);
+    REQUIRE(bind != std::string::npos);
+    const std::string between = ensure.substr(unit2 + unitCall.size(), bind - unit2 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("glActiveTexture(") == std::string::npos);
+}
+
+TEST_CASE("The texture-array target is unbound only on the upload unit",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    // An explicit unbind of GL_TEXTURE_2D_ARRAY elsewhere would put texture 0 on
+    // unit 2 if that unit were active. Today the only one follows the terrain
+    // horizon upload on the upload unit (unit 7).
+    constexpr AllowedCallsite kAllowed[] = {
+        {"EngineGL33_Lighting.cpp", "UploadTerrainHorizonMap, on the upload unit", 1},
+    };
+    const std::string needle = "glBindTexture(GL_TEXTURE_2D_ARRAY, 0)";
+    auto corpus = ReadGL33Corpus();
+    REQUIRE_FALSE(corpus.files.empty());
+    for (const auto& [name, body] : corpus.files)
+    {
+        const int n = CountOccurrences(body, needle);
+        if (n == 0)
+            continue;
+        int expected = -1;
+        for (const auto& a : kAllowed)
+            if (name == a.relPath)
+                expected = a.expectedCount;
+        CAPTURE(name);
+        CAPTURE(n);
+        REQUIRE(n == expected);
+    }
+
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    const std::string upload = FunctionBody(lighting, "void EngineGL33::UploadTerrainHorizonMap()");
+    REQUIRE_FALSE(upload.empty());
+    const std::string unitCall = "GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);";
+    const size_t unit = upload.find(unitCall);
+    REQUIRE(unit != std::string::npos);
+    const size_t unbind = upload.find(needle, unit);
+    REQUIRE(unbind != std::string::npos);
+    const std::string between = upload.substr(unit + unitCall.size(), unbind - unit - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    REQUIRE(between.find("Tex2D(") == std::string::npos);
+}

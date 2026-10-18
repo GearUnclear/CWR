@@ -108,6 +108,13 @@ void EngineGL33::InitLightingResources()
     _post.whiteTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, white);
     _post.blackTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, black);
     GL33Bind::Invalidate();
+    // Every lit program, classic and remastered, has its shadowMap sampler on
+    // unit 2, and none may meet texture 0 there (an incomplete texture; under
+    // the comparison sampler, undefined behaviour). Park the stand-in on the
+    // unit until a shadow map replaces it.
+    GL33Bind::ActiveUnit(2);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+    GL33Bind::ActiveUnit(0);
 
     glGenSamplers(1, &_shadowCompareSampler);
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
