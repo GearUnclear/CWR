@@ -272,4 +272,16 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     return rig;
 }
 
+float ShaftScatterLength(float fogEnd)
+{
+    if (!(fogEnd > 0.0f))
+        return kShaftScatterLength;
+    return std::max(1.0f, std::min(kShaftScatterLength, fogEnd / kShaftFogLengths));
+}
+
+float ShaftInscatter(float distance, float scatterLength)
+{
+    return 1.0f - std::exp(-std::max(distance, 0.0f) / std::max(scatterLength, 1.0f));
+}
+
 } // namespace Poseidon::remaster

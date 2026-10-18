@@ -16,6 +16,7 @@ import moderngl
 import glsl_extract
 
 POST_FILE = "arma_CWR/engine/PoseidonGL33/EngineGL33_PostFX.cpp"
+RIG_FILE = "arma_CWR/engine/Poseidon/Graphics/Remaster/LightRig.hpp"  # the shafts' scattering length
 BLOOM_LEVELS = 5
 
 
@@ -33,6 +34,7 @@ class PostFX:
         sh = glsl_extract.load_shaders(path)
         glsl_extract.apply_override_dir(sh, override_dir)  # psPostAo.glsl, ... as in the engine
         self.k = _constants(path)
+        self.k.update(_constants(glsl_extract.ENGINE_DIR.parent / RIG_FILE))
         vs = sh["s_vsPostGLSL"]
 
         def prog(name):
@@ -83,14 +85,22 @@ class PostFX:
         if name in prog:
             prog[name].value = value
 
+    def scatter_length(self, fog_end):
+        """LightRig ShaftScatterLength: the sun shafts' scattering length (m) for a fog end (m)."""
+        k = self.k
+        if not fog_end > 0:
+            return k["kShaftScatterLength"]
+        return max(1.0, min(k["kShaftScatterLength"], fog_end / k["kShaftFogLengths"]))
+
     def _draw(self, prog, fbo, size):
         fbo.use()
         self.ctx.viewport = (0, 0, *size)
         self.vaos[id(prog)].render(moderngl.TRIANGLES, vertices=3)
 
     def run(self, color_tex, depth_tex, out_fbo, w, h, proj16, tuning, sun_uv=None, shaft_weight=0.0,
-            sun_rgb=(1.0, 1.0, 1.0), debug_ao=False):
-        """proj16: GfxMatrix row-major (_11.._44). Writes the composite to out_fbo."""
+            sun_rgb=(1.0, 1.0, 1.0), debug_ao=False, fog_end=0.0):
+        """proj16: GfxMatrix row-major (_11.._44). fog_end: the scene's fog end (m), which can shorten the
+        shafts' scattering length. Writes the composite to out_fbo."""
         ctx = self.ctx
         self._targets(w, h)
         hw, hh = (w + 1) // 2, (h + 1) // 2
@@ -162,5 +172,10 @@ class PostFX:
         self._set(p, "compParams", (ao_strength, bloom_strength * 0.25, tuning["sunShafts"] * 0.6, 1.0))
         lum = max(1e-4, 0.2126 * sun_rgb[0] + 0.7152 * sun_rgb[1] + 0.0722 * sun_rgb[2])
         self._set(p, "shaftColor", (sun_rgb[0] / lum, sun_rgb[1] / lum, sun_rgb[2] / lum, 1.0))
+        depth_tex.use(location=5)
+        self._set(p, "depthTex", 5)
+        self._set(p, "projInfo", (p33, p43, 1.0 / p11, 1.0 / p22))
+        self._set(p, "depthMap", (1.0, 0.0, 1.0 / self.scatter_length(fog_end), 0.0))
+        self._set(p, "worldRect", (0.0, 0.0, 1.0, 1.0))
         self._set(p, "debugView", (1.0 if debug_ao else 0.0, 0.0, 0.0, 0.0))
         self._draw(p, out_fbo, (w, h))

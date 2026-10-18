@@ -446,7 +446,7 @@ def render(ctx: moderngl.Context, scene, preset, width: int, height: int) -> Ima
     if _options["post"] and tuning.get("postEffects", 1.0):
         sun_uv, weight = _sun_screen(preset, sun, frame, lp)
         R.post.run(color, depth, out_fbo, width, height, frame.projection, tuning, sun_uv, weight,
-                   tuple(rig["sun"]), debug_ao=_options["debug_view"] == 4)
+                   tuple(rig["sun"]), debug_ao=_options["debug_view"] == 4, fog_end=lp.fog_end)
         final = out_tex
     img = C.apply_gamma(ctx, R, final, lp.gamma, width, height)
     err = ctx.error

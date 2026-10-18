@@ -133,4 +133,21 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
 // centred on the origin.
 void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3], float invHalf[3]);
 
+// Sun shafts are sunlight scattered toward the eye by the air in front of a
+// surface, so they grow with the amount of air on the view ray. The post
+// composite keeps ShaftInscatter(distance) of the shaft light it gathers from
+// the visible sky: all of it over the sky, most of it on distant ground, next
+// to none on a vehicle a few metres away. The scattering length is
+// kShaftScatterLength in clear air; fog or rain that brings the fog end nearer
+// than kShaftFogLengths of it shortens it, so thick haze carries its shafts
+// closer.
+constexpr float kShaftScatterLength = 300.0f; // metres
+constexpr float kShaftFogLengths = 3.0f;      // scattering lengths that fit in the fog range
+
+// Scattering length in metres for a scene whose fog ends at `fogEnd` metres.
+float ShaftScatterLength(float fogEnd);
+// Share of the gathered shaft light kept on a surface `distance` metres from
+// the eye: 1 - exp(-distance / scatterLength), the composite shader's formula.
+float ShaftInscatter(float distance, float scatterLength);
+
 } // namespace Poseidon::remaster

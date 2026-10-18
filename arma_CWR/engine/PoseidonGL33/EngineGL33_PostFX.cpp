@@ -14,7 +14,10 @@
 //      or alpha-to-coverage pixels (alpha 1) are left alone. Bloom and shafts
 //      add in linear light with a soft screen-style add that can never clip,
 //      and leave the frame exactly as it was where they are zero (the frame is
-//      already tonemapped: no second curve). A dither hides banding.
+//      already tonemapped: no second curve). The shafts are light scattered
+//      by the air in front of each pixel, so they grow with its distance
+//      (LightRig ShaftInscatter): a nearby vehicle is not veiled. A dither
+//      hides banding.
 // The HUD then draws on top, untouched.
 //
 // All GL state the passes touch is restored or the bind caches invalidated;
@@ -212,10 +215,28 @@ uniform sampler2D colorTex;
 uniform sampler2D aoTex;
 uniform sampler2D bloomTex;
 uniform sampler2D shaftTex;
+uniform sampler2D depthTex;
 uniform vec4 compParams; // x AO strength, y bloom strength, z shaft strength, w dither (0/1)
 uniform vec4 shaftColor; // rgb sun tint
+uniform vec4 projInfo;   // as psPostAo
+uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
+uniform vec4 worldRect;  // as psPostAo
 uniform vec4 debugView;  // x: 1 = show occlusion
 out vec4 fragColor;
+
+// The shaft pass gathers the sky toward the sun, which is the light the air
+// scatters toward the eye along an endless ray. A surface ends the ray: only
+// the air in front of it scatters, 1 - exp(-distance / length) of the sky's
+// share (LightRig ShaftInscatter). Without this a backlit vehicle 10 m away
+// took the full sky glow and turned into a grey cut-out.
+float shaftInscatter() {
+    float d = textureLod(depthTex, vUV, 0.0).r;
+    if (d >= 0.999999) return 1.0; // sky, as the shaft pass sees it
+    float z = projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x);
+    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    float dist = z * length(vec3(ndc * projInfo.zw, 1.0));
+    return 1.0 - exp(-max(dist, 0.0) * depthMap.z);
+}
 
 void main() {
     vec4 c = texture(colorTex, vUV);
@@ -229,7 +250,9 @@ void main() {
     // Glow adds like light onto a screen: 1 - (1 - base)(1 - glow), with the
     // glow's own energy rolled off. Identity where there is no glow, never
     // above 1, so the tonemapped frame keeps its whites and the sky its colour.
-    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + texture(shaftTex, vUV).rgb * shaftColor.rgb * compParams.z;
+    vec3 shaft = texture(shaftTex, vUV).rgb;
+    if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
+    vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
     vec3 col = pow(lin, vec3(1.0 / 2.2));
     // Dither only what the composite changed: elsewhere the frame passes
@@ -672,6 +695,14 @@ void EngineGL33::EndWorldScene()
     u4f(p.progComposite, "compParams", aoStrength, bloomStrength * 0.25f, _lighting.sunShafts * 0.6f, 1.0f);
     const float lum = std::max(1e-4f, 0.2126f * shaftTint.R() + 0.7152f * shaftTint.G() + 0.0722f * shaftTint.B());
     u4f(p.progComposite, "shaftColor", shaftTint.R() / lum, shaftTint.G() / lum, shaftTint.B() / lum, 1.0f);
+    // The shafts keep only what the air in front of each pixel scatters; the
+    // depth is read only where there is a shaft term.
+    u1i(p.progComposite, "depthTex", 5);
+    bindTex(5, p.depthTex);
+    u4f(p.progComposite, "projInfo", proj._33, proj._43, 1.0f / proj._11, 1.0f / proj._22);
+    const float scatterLength = Poseidon::remaster::ShaftScatterLength(GScene ? GScene->GetFogMaxRange() : 0.0f);
+    u4f(p.progComposite, "depthMap", depthScale, depthBias, 1.0f / scatterLength, 0.0f);
+    u4f(p.progComposite, "worldRect", rectX, rectY, rectW, rectH);
     u4f(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
     drawTo(_ssaaFbo, w, h);
     GpuMark(Poseidon::gpu::Mark::CompositeEnd);

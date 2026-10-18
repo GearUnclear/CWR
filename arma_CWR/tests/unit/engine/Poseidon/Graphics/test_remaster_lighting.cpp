@@ -692,6 +692,46 @@ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Gr
     CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
 }
 
+TEST_CASE("Remaster sun shafts brighten the air, not the surfaces near the eye", "[Graphics][Shaders][remaster]")
+{
+    // Clear air: the fog end of any view distance from 900 m up.
+    for (float fogEnd : {880.0f, 1480.0f, 3980.0f})
+    {
+        CAPTURE(fogEnd);
+        const float length = ShaftScatterLength(fogEnd);
+        CHECK(length <= kShaftScatterLength);
+        CHECK(length > 0.9f * kShaftScatterLength);
+        // The acceptance props at a low sun: soldier 7 m, Jeep 10 m, M113 16 m.
+        // At full weight they were veiled grey.
+        CHECK(ShaftInscatter(7.0f, length) < 0.03f);
+        CHECK(ShaftInscatter(10.0f, length) < 0.04f);
+        CHECK(ShaftInscatter(16.0f, length) < 0.06f);
+        // Distant ground and the sky keep the shafts.
+        CHECK(ShaftInscatter(1000.0f, length) > 0.95f);
+        CHECK(ShaftInscatter(std::numeric_limits<float>::infinity(), length) == 1.0f);
+        float prev = -1.0f;
+        for (float d = 0.0f; d < 2000.0f; d += 50.0f)
+        {
+            CHECK(ShaftInscatter(d, length) > prev);
+            prev = ShaftInscatter(d, length);
+        }
+    }
+    CHECK(ShaftScatterLength(0.0f) == kShaftScatterLength); // no fog range yet
+    // Thick fog scatters closer to the eye.
+    CHECK(ShaftScatterLength(150.0f) == Catch::Approx(50.0f));
+    CHECK(ShaftInscatter(30.0f, ShaftScatterLength(150.0f)) > 2.0f * ShaftInscatter(30.0f, ShaftScatterLength(880.0f)));
+
+    // The composite applies the same falloff to the shaft term, with the
+    // length the engine takes from ShaftScatterLength.
+    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+    const std::string composite = RawString(post, "s_psPostCompositeGLSL");
+    REQUIRE_FALSE(composite.empty());
+    CHECK(composite.find("uniform sampler2D depthTex;") != std::string::npos);
+    CHECK(composite.find("1.0 - exp(-max(dist, 0.0) * depthMap.z)") != std::string::npos);
+    CHECK(composite.find("shaft *= shaftInscatter()") != std::string::npos);
+    CHECK(post.find("1.0f / scatterLength") != std::string::npos);
+}
+
 TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "[Graphics][Shaders][remaster]")
 {
     namespace LC = Poseidon::gl33lighting::LitConst;
