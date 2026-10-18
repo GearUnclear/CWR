@@ -35,6 +35,7 @@ enum PixelShaderSpecular
 #include <glad/gl.h>
 #include <SDL3/SDL.h>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
@@ -703,6 +704,7 @@ class EngineGL33 : public Engine
         out = _featureGates;
         return true;
     }
+    bool LocalLightsFromTiles() const override { return _lightTilesActive; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
@@ -802,6 +804,8 @@ class EngineGL33 : public Engine
     void UpdateRemasterPrograms();
     void UploadLitMaterial(const Poseidon::TLMaterial& mat);
     void UploadLitShadowDelta();
+    // The draw's own light list into the per-draw light slots; while the tiled
+    // list lights the pass, only the draw's night factor (litLightCount.z).
     void UploadLitLights(const LightList& lights, float nightEffect);
     void SetLitOpaque(bool opaque);
     // The terrain detail (B11) runs on the land only: the land and the sea are
@@ -811,6 +815,35 @@ class EngineGL33 : public Engine
     // ApplyPassState, for a PSDetail draw: the land or the sea, from the
     // draw's multitexture stage (EngineGL33_State.cpp, next to SetTexture's).
     void SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec);
+
+    // The frame's tiled light list (the lightTiles switch, plan section 5 A6;
+    // Graphics/Rendering/Lighting/FrameLights.hpp). Built once per frame at the
+    // world's first 3D pass when its gate is on: the scene's active lights,
+    // ranked, binned into kTileSize tiles over the frame target and uploaded to
+    // a uniform block of lights (kLightListBinding) and a tile index texture
+    // (kLightTileUnit).
+    struct LightTileState
+    {
+        std::vector<Poseidon::lighting::FrameLight> lights; // ranked
+        Poseidon::lighting::TileGrid grid;
+        std::vector<float> texels;                 // the buffer contents (PackFrameLights)
+        std::vector<float> uploadedTexels;         // what the buffer holds
+        std::vector<std::uint8_t> uploadedIndices; // what the tile texture holds
+        unsigned int dataBuf = 0;                  // uniform block (kLightListBinding), kMaxFrameLights lights
+        unsigned int tileTex = 0;                  // RGBA8UI, kTileTexels texels per tile
+        int texW = 0, texH = 0;                    // tile texture size
+        std::uint32_t frame = 0xffffffffu;         // frame counter of the last build
+    } _lightTiles;
+    // The remastered programs read the tiled list in the current world pass
+    // (litLightCount.y holds the tile size) instead of a draw's own lights:
+    // per-draw light uploads stop and the scene may draw lit objects in
+    // instanced runs (LocalLightsFromTiles). Decided at each world 3D pass from
+    // the frame's gate, cleared at EndWorldScene.
+    bool _lightTilesActive = false;
+    void InitLightTiles();
+    void DeinitLightTiles();
+    // Builds, bins and uploads the list (once per frame).
+    void UpdateLightTiles();
     // Writes slots [first, first + count) of the CPU LitConstants block to its
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).

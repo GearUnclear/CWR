@@ -20,7 +20,8 @@
 //     instead of noise from scattered leaf cards;
 //   - fog toward the sun takes the sky dome's sun glow, so distant ground
 //     fades into the sky colour behind it;
-//   - local lights (headlights, lamps, fires) are evaluated per fragment;
+//   - local lights (headlights, lamps, fires) are evaluated per fragment,
+//     from the frame's tiled light list while it is on (lightTiles);
 //   - glossy materials get normalised Blinn-Phong with a Fresnel boost and a
 //     sky reflection.
 // Fog, the night-eye desaturation, alpha test / alpha-to-coverage, the IsColored
@@ -322,7 +323,7 @@ layout(std140) uniform LitConstants {
     vec4 litCloudOffset;  // 19: xy drift (m), z deck altitude (m), w edge softness
     vec4 litShadowDelta;  // 20: xyz camera move since the shadow pass, w filter radius (texels)
     vec4 litFlags;        // 21: x AO share to alpha, y world effects on, z debug view, w saturation
-    vec4 litLightCount;   // 22: x active local lights
+    vec4 litLightCount;   // 22: x the draw's lights, y tile size of the tiled list (0 = off), z its night factor
     vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun
     vec4 litFogSun;       // 24: rgb sky-dome sun glow added to the fog (display), w enabled
     vec4 litFogCap;       // 25: rgb fog colour limit (the sky texture colour)
@@ -659,7 +660,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
     if (foliage) ambientShare *= 0.5;
 
-    if (litFlags.z > 0.5) {
+    if (litFlags.z > 0.5 && litFlags.z < 3.5) {
         // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
         if (litFlags.z < 1.5) return vec3(sunVisibility);
         if (litFlags.z < 2.5) return vec3(skyVisibility);
@@ -667,7 +668,9 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     }
     vec3 display = toDisplay(tonemapNeutral(radiance));
     float grey = dot(display, kLuma);
-    return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+    display = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+    // Debug view 6: the lights per tile of the tiled light list.
+    return litFlags.z > 5.5 ? lightTileView(display) : display;
 }
 )";
 

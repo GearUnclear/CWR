@@ -333,7 +333,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     CHECK(GetPostStageInfo(PostStage::DebugView).readsLinearDepth);
 
     PostFrameInputs in = Shipped();
-    for (int view = 0; view <= 5; ++view)
+    // 6 is the forward shaders' light-tile view (A6): no post stage of its own.
+    for (int view = 0; view <= 6; ++view)
     {
         CAPTURE(view);
         in.debugView = view;
@@ -344,10 +345,12 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
         CHECK((plan.runs & ~Mask({PostStage::LinearDepth, PostStage::DebugView})) ==
               Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
     }
-    // The registry offers the view (the overlay's combo, triSetLighting debug=5).
+    // The registry offers the view (the overlay's combo, triSetLighting debug=5),
+    // and the light tiles after it (debug=6).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewLinearDepth));
+    CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
+    CHECK(debug->maxValue == 6.0f);
 }
 
 TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][remaster][PostStages]")

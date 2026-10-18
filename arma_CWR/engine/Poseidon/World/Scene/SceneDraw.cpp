@@ -1775,10 +1775,12 @@ void Scene::DrawObjectsAndShadowsPass1()
         // (InstancedRunRules.hpp). Local lights: with drawGrouping off, any
         // light slot in the scene turns runs off for every object (Abel's
         // street lamps hold slots by day too); with it on, an object is kept
-        // out only when its own light list is not empty.
+        // out only when its own light list is not empty, unless the frame's
+        // tiled light list lights every draw (lightTiles): then no draw's own
+        // list matters and lit objects join runs too.
         const bool noLocalLights = NLights() == 0;
         const bool runsAllowed = noLocalLights || drawGrouping;
-        Scene* lightsPerObject = drawGrouping && !noLocalLights ? this : nullptr;
+        Scene* lightsPerObject = drawGrouping && !noLocalLights && !GEngine->LocalLightsFromTiles() ? this : nullptr;
         counters.lightSlots = NLights();
         counters.activeLights = _aLights.Size();
         for (int i = 0; i < _drawMergers.Size();)

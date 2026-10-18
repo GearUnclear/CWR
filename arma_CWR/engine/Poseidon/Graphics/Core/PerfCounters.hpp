@@ -41,6 +41,11 @@ struct FrameCounters
     int vsUploads = 0;
     int vsSkips = 0;
     int vsBytes = 0;
+    // The tiled light list (FrameLights.hpp, EngineGL33::UpdateLightTiles), on
+    // the frames that build one
+    int tileLights = 0;  // lights in the frame's list
+    int tileRefs = 0;    // tile entries: a light counts once per tile its reach covers
+    float tileMs = 0.0f; // CPU: gather, rank, bin and upload
 };
 
 class Counters
@@ -58,12 +63,13 @@ class Counters
     // Per-frame averages over the window, for triPerfStats:
     // "objs opaque=<n> runs=<n> runobj=<n> litobj=<n> lights=<slots>/<on> | hill ran=<share> idle=<share>
     //  tested=<n> hidden=<n> kept=<n> builds=<n> wedges=<n> hillcpu=<ms> | prep lod=<ms> occ=<ms> |
-    //  ubo lit=<uploads>/<skips> litKB=<kB> vs=<uploads>/<skips> vsKB=<kB>"
+    //  ubo lit=<uploads>/<skips> litKB=<kB> vs=<uploads>/<skips> vsKB=<kB> | tiles lights=<n> refs=<n>
+    //  tilecpu=<ms>"
     std::string Summary() const;
 
     // One per FrameCounters member (PerfCounters.cpp lists them; a static_assert
     // there keeps the count).
-    static constexpr int kFields = 22;
+    static constexpr int kFields = 25;
 
   private:
     FrameCounters _frame;

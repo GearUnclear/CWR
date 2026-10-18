@@ -17,7 +17,10 @@ namespace Poseidon::InstancedRun
 // out of runs (Scene::NLights() != 0; Abel's street lamps hold slots by day
 // too). With it on, the rule is per object: an object may head or join a run
 // only when the light list its own draw would select is empty (localLit
-// false), so the head's empty list is right for every member.
+// false), so the head's empty list is right for every member. While the
+// frame's tiled light list lights every draw (lightTiles,
+// Engine::LocalLightsFromTiles), no draw's own list is read and the caller
+// leaves localLit false for every object.
 
 // What the grouping reads from one queued object.  POD; no engine dependencies.
 struct RunEntry
@@ -35,7 +38,8 @@ struct RunEntry
     bool ownVertices;
     // Scene::SelectLights for the object's own draw returns a light: its draw
     // would be lit by a local light (a lamp, a headlight, a fire). False when
-    // the scene has no light slot, or by day (SelectLights selects none then).
+    // the scene has no light slot, by day (SelectLights selects none then) and
+    // while the tiled light list lights every draw.
     bool localLit = false;
 };
 

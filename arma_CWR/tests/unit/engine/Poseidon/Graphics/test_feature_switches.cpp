@@ -686,13 +686,14 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsharp and the sun shadows have landed, "
-          "nothing else has",
+TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp and the sun shadows "
+          "have landed, nothing else has",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
     // classic): triFeatureState no longer marks them inert, and the overlay
-    // shows the opaque objects' GPU section for them. A5 lands taa, A7
+    // shows the opaque objects' GPU section for them. A5 lands taa, A6 the
+    // tiled light list (the world pass: it has no pass of its own), A7
     // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
     // depth pass) and softShadows (the world pass).
     std::set<std::string> sections;
@@ -704,14 +705,16 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
         INFO(info.key);
         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
         const bool taa = info.id == Feature::Taa;
+        const bool lightList = info.id == Feature::LightTiles;
         const bool atmosphere = info.id == Feature::Atmosphere;
         const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
         const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
-        CHECK(info.landed == (perf || taa || atmosphere || texsharp || shadows));
+        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows));
         if (info.landed)
         {
             CHECK(std::string_view(info.step) == (perf         ? "A4"
                                                   : taa        ? "A5"
+                                                  : lightList  ? "A6"
                                                   : atmosphere ? "A7"
                                                   : shadows    ? "B1"
                                                                : "B11"));
@@ -726,9 +729,10 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table, texsha
     INFO(s);
     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+    CHECK(s.find(" lightTiles=1:off:no-local-light ") != std::string::npos);
     CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
     CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
-    CHECK(s.find("landed=8/26") != std::string::npos);
+    CHECK(s.find("landed=9/26") != std::string::npos);
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

@@ -1719,6 +1719,9 @@ void EngineGL33::InitPixelShaders()
         GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
         if (litBlock != GL_INVALID_INDEX)
             glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
+        GLuint lightBlock = glGetUniformBlockIndex(prog, "FrameLights");
+        if (lightBlock != GL_INVALID_INDEX)
+            glUniformBlockBinding(prog, lightBlock, Poseidon::gl33lighting::kLightListBinding);
         // The lit samplers from the unit table, the shadow depth map of both
         // sets (unit 2) among them.
         for (const auto& ls : Poseidon::gl33lighting::kLitSamplers)

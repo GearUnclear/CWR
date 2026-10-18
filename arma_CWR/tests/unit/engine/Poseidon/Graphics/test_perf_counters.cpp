@@ -29,6 +29,9 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window", 
     c.Frame().hillHidden = 4000;
     c.Frame().hillMs = 1.5f;
     c.Frame().litBytes = 4096;
+    c.Frame().tileLights = 9;
+    c.Frame().tileRefs = 3000;
+    c.Frame().tileMs = 0.2f;
     c.EndFrame();
     CHECK(c.WindowFrames() == 2);
     const std::string s = c.Summary();
@@ -37,6 +40,8 @@ TEST_CASE("PerfCounters: frames close into per-frame averages over the window", 
     CHECK(s.find("tested=6000 hidden=5000 kept=1.5") != std::string::npos);
     CHECK(s.find("hillcpu=1.000") != std::string::npos);
     CHECK(s.find("litKB=3.0") != std::string::npos);
+    // The tiled light list: averaged over every frame of the window.
+    CHECK(s.find("| tiles lights=4.5 refs=1500 tilecpu=0.100") != std::string::npos);
     // It rides in UDCAP lines after triPerfStats' own fields: no ';', and none
     // of the names the capture parser reads there (fps=, frame=, calls=).
     CHECK(s.find(';') == std::string::npos);

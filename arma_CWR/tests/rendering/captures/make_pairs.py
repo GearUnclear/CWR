@@ -78,6 +78,10 @@ COUNTER_RES = {
     "lod_ms": re.compile(r"\bprep lod=([\d.]+)"),
     "lit_kb": re.compile(r"\blitKB=([\d.]+)"),
     "vs_kb": re.compile(r"\bvsKB=([\d.]+)"),
+    # The tiled light list (A6 on): lights in the list, tile entries, CPU.
+    "tile_lights": re.compile(r"\btiles lights=([\d.]+)"),
+    "tile_refs": re.compile(r"\btiles lights=[\d.]+ refs=([\d.]+)"),
+    "tile_cpu_ms": re.compile(r"\btilecpu=([\d.]+)"),
 }
 PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
 CALLS_RE = re.compile(r"\bcalls=([\d.]+)")

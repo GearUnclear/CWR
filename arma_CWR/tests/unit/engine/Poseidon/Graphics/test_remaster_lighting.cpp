@@ -888,7 +888,11 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
         {P::Sky, "vec3 skyRadiance("},
         {P::Sky, "vec3 atmoFogColor("},
         {P::Sky, "vec3 shadeSkyDome("},
+        {P::Lights, "uniform FrameLights {"},
+        {P::Lights, "vec3 localLight("},
+        {P::Lights, "vec3 localLightsTiled("},
         {P::Lights, "vec3 localLights("},
+        {P::Lights, "vec3 lightTileView("},
         {P::Surface, "vec3 glossy("},
         {P::Shade, "vec3 shadeRemastered("},
         {P::Finish, "void finishFragment("},
@@ -1222,8 +1226,9 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
 
     // Every sampler a remastered program declares has its unit in the table
     // (tex0 and tex1 are the material units): an unbound sampler reads unit 0.
+    // Integer samplers (usampler2D, the light tiles) count too.
     std::set<std::string> declared;
-    static const std::regex sampler(R"(uniform\s+sampler\w+\s+(\w+)\s*;)");
+    static const std::regex sampler(R"(uniform\s+[iu]?sampler\w+\s+(\w+)\s*;)");
     for (const std::string& program : RemasterPrograms())
         for (auto it = std::sregex_iterator(program.begin(), program.end(), sampler); it != std::sregex_iterator();
              ++it)

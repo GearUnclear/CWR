@@ -391,6 +391,9 @@ void EngineGL33::EndWorldScene()
     _worldPassOpen = false;
     _worldEffectsOn = false;
     _worldSceneEnded = true;
+    // Passes after the world (portraits, 3D previews) light each draw from its
+    // own list.
+    _lightTilesActive = false;
     UpdateRemasterPrograms();
     if (_lightingActive)
         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs

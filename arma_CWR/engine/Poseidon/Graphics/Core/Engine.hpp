@@ -834,6 +834,11 @@ class Engine : public IGraphicsEngine
     /// first 3D pass of a frame; Graphics/Remaster/FeatureGates.hpp). False
     /// when this backend computes none.
     virtual bool GetFeatureGates(remaster::FeatureGates& /*out*/) const { return false; }
+    /// True while the world's draws are lit from the frame's tiled light list
+    /// (the lightTiles feature, Graphics/Rendering/Lighting/FrameLights.hpp)
+    /// instead of each draw's own light list: a draw's list then lights
+    /// nothing, so the scene may draw lit objects in instanced runs.
+    virtual bool LocalLightsFromTiles() const { return false; }
     /// Captures: hold the remastered cloud-shadow field at a drift offset in
     /// metres (pinned = false lets it drift with the wind again from where it
     /// is). The field integrates the wind every frame, so re-pinning the sim

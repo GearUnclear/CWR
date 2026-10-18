@@ -364,7 +364,8 @@ const LightList& Scene::SelectLights(Vector3Par pos, float radius, LightList& wo
         LightContext context;
         context.position = pos;
         QSort(work.Data(), work.Size(), &context, CmpALight);
-        const int maxLightsPerObject = 7;
+        // The remastered tiled light list keeps the same budget per fragment.
+        const int maxLightsPerObject = Poseidon::lighting::kClassicLightsPerSurface;
         if (work.Size() > maxLightsPerObject)
         {
             work.Resize(maxLightsPerObject);

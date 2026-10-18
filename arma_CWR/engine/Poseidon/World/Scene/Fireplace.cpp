@@ -24,6 +24,7 @@ Fireplace::Fireplace(VehicleType* type) : VehicleWithAI(type)
     _smoke.Load(cls >> "Smoke");
 
     _light = new LightPointOnVehicle(this, VZero);
+    _light->SetKind(lighting::FrameLightKind::Fire);
     _light->Switch(_burning);
     _light->Load(cls >> "Light");
     _lightColor = _light->GetDiffuse();

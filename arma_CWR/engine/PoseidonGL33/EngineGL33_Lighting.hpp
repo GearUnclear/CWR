@@ -81,6 +81,9 @@ const char* PostShaderSource(PostShader shader);
 
 // Uniform-buffer binding point of LitConstants (VS = 0, PS = 1, WorldInstances = 2).
 constexpr unsigned int kLitBinding = 3;
+// Uniform-buffer binding point of FrameLights, the frame's tiled light list
+// (EngineGL33_LightingShadersLights.cpp, Graphics/Rendering/Lighting/FrameLights.hpp).
+constexpr unsigned int kLightListBinding = 4;
 
 // Texture units of the remastered inputs (INTEGRATION-PLAN.md section 3.4).
 // Units 0 and 1 hold the material textures and 7 is the upload unit
@@ -94,13 +97,15 @@ constexpr int kCloudNoiseUnit = 5;
 // shadows' blocker search, B1): like unit 2, a complete depth array from init
 // on (the stand-in, then each cascade array as it is created).
 constexpr int kShadowRawUnit = 6;
-constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
+constexpr int kSkyLutUnit = 8;     // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
+constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI (light list)
 // Allocated to the features still to land; no shader samples them yet.
+// kLightDataUnit is free: the light list keeps its lights in a uniform block
+// (kLightListBinding), which the fragments of a tile read faster.
+constexpr int kLightDataUnit = 12;
 constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
 constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
 constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
-constexpr int kLightDataUnit = 12;    // light buffer, samplerBuffer (light list)
-constexpr int kLightTileUnit = 13;    // per-tile light indices (light list)
 constexpr int kCombatMaskUnit = 14;   // combat shadow mask (combat)
 constexpr int kCanopyVisUnit = 15;    // canopy sun visibility (hfrt)
 
@@ -170,6 +175,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
     {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
     {"skyLut", kSkyLutUnit},                 // sky-view table (the sky table)
+    {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -259,9 +265,10 @@ namespace LitConstPlanned
 {
 constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
 // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
-constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
-constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
-constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
+constexpr int Sky = 68;   // clouds: sky mode, lit-cloud strength, shadow source
+constexpr int SkyVp = 69; // clouds: viewport origin and 1 / size (pixels)
+// 70 is free: the light list (A6) needs only a tile size and a night factor,
+// which ride in litLightCount.yz (LitConst::LightCount).
 constexpr int Night = 71;        // night: flags, beam profile, moon key
 constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
 constexpr int Weather = 73;      // materials: wetness, rain, puddles, time

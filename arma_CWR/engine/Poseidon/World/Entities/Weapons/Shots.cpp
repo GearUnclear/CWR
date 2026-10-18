@@ -1020,6 +1020,7 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
                 {
                     _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack),
                                                      this, Vector3(0, 0, -0.5));
+                    _light->SetKind(lighting::FrameLightKind::Combat);
                     GLOB_SCENE->AddLight(_light);
                 }
                 if (_light)
@@ -1316,6 +1317,7 @@ void IlluminatingShell::Simulate(float deltaT, SimulationImportance prec)
     {
         _light = new LightPointOnVehicle(GLOB_SCENE->Preloaded(SphereLight), _lightColor, Color(HBlack), this,
                                          Vector3(0, 0, -0.5));
+        _light->SetKind(lighting::FrameLightKind::Combat);
         _light->SetBrightness(2);
         GLOB_SCENE->AddLight(_light);
 

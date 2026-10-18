@@ -329,6 +329,7 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
         if (!_light)
         {
             _light = new LightPoint(HBlack, HBlack);
+            _light->SetKind(lighting::FrameLightKind::Combat);
             GLOB_SCENE->AddLight(_light);
         }
     }
@@ -1218,6 +1219,7 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
             if (!_light)
             {
                 _light = new LightPoint(FireColor, FireAmbient);
+                _light->SetKind(lighting::FrameLightKind::Combat);
                 GLOB_SCENE->AddLight(_light);
             }
             if (_light)
@@ -1874,6 +1876,7 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
         if (!_light)
         {
             _light = new LightPoint(HBlack, HBlack);
+            _light->SetKind(lighting::FrameLightKind::Combat);
             GLOB_SCENE->AddLight(_light);
         }
         if (_light)

@@ -23,8 +23,10 @@ constexpr FeatureInfo kFeatures[] = {
      "pass1"},
     {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", true, &FS::taa, "taa"},
-    {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
-     &FS::lightTiles, ""},
+    // A6: no pass of its own; the per-fragment light loop is part of the
+    // world pass's shading.
+    {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", true,
+     &FS::lightTiles, "world"},
     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", true,
      &FS::atmosphere, "sky"},
     // B1 (shadows): the casters' cost shows in the shadow depth pass, the soft
@@ -155,8 +157,8 @@ struct KeyTable
             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
-                       "Linear depth (half res)\0",
-                       &LT::debugView, 0, 5),
+                       "Linear depth (half res)\0Light tiles (lights per tile)\0",
+                       &LT::debugView, 0, 6),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };

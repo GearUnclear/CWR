@@ -305,6 +305,14 @@ x the soft filter's per-frame turn, y 1 in a TAA frame, z taps per frame there, 
 angular radius (0 = the stock filter); `litPcss` x the search reach (m), y the smallest filter
 radius (texels), z the soft strength (the gate-edge fade), w the leaf lift (texels).
 
+As built in A6 (a parallel lane on c584185, merged onto A5, A7, B11 and B1): slot 70 (`LightTiles`)
+is not used and its row left `LitConstPlanned`; it stays inside B11's padding `litPlanned`. The light
+list needs no tile counts (the tile texture is 2D and the shader finds its tile from `gl_FragCoord`)
+and no light count (each tile's list ends at a 0 index), so its two values, the tile size and the
+draw's night factor, ride in the free lanes `litLightCount.y` and `.z` of slot 22
+(`LitConst::LightCount`, the local-light slot). A6 adds no `LitConst` slot and no padding member
+(`Count` stays 78).
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -356,6 +364,18 @@ NEAREST, non-compare sampler object kept on the unit. It holds the depth stand-i
 `InitLightingResources` on; `BindLightingTextures` binds the cascade array (or the stand-in) on
 every world pass and `EnsureArrayTarget` rebinds it the moment it recreates the array, the F3 rule
 of unit 2. The `[ShadowSampler]` audit case for unit 6 is in `test_gl_state_cache_audit.cpp`.
+
+As built in A6: unit 13 is sampled (`lightTiles`, a `usampler2D` in RGBA8UI, not RGBA16UI: a light
+index plus one fits a byte with 64 lights, which halves the upload) and has its `kLitSamplers` row.
+Unit 12 stays free: the light data is a uniform block, `FrameLights` on binding point 4
+(`kLightListBinding`, `vec4 frameLights[256]`, 4 KB), not a texture buffer. A build that read the
+lights through `texelFetch` on a `samplerBuffer` took 1.6 ms more world time than the per-draw path
+at the 10-light town view (minimum of 3 interleaved rounds, 4060 Ti, another lane's game running);
+with the uniform block, which the fragments of a tile read alike, and the tile's texels read once,
+the same reading on a quiet machine is 0.5 ms (5 A6). No stand-ins: `InitLightingResources`
+creates the real block (zeroed) and a one-tile texture with no light, parks the texture on its unit,
+and `BindLightingTextures` binds it with the others. The unit-table test now counts integer samplers
+(`[iu]?sampler`).
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -1090,6 +1110,73 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
   strongest at the camera; owner exclusion); layout (`LightTiles`); glslang (integer and buffer
   samplers compile under 3.30).
 - **Effort**: 5 days.
+
+**Result (2026-10-18, uncommitted change on c584185 in the scratch copy `gr-A6`, a parallel lane
+merged onto A5, A7, B11 and B1; evidence in `tmp/integration/A6/` of the graphics-remaster worktree,
+gitignored).**
+
+- Built as the bullets above with these corrections. `FrameLights` holds per light its kind, the
+  camera-relative position, the start distance (full strength inside it; the reach ends at 10 times
+  it, the classic model's window), the colours as authored, the unit beam direction, the sort
+  brightness, the owner's object id and a shadow slot; there is no separate range or linear radiance,
+  because every kind keeps the classic model at A6 (the display-space sum and its 1.0 clamp; moving
+  `Fire` and `Combat` to linear HDR changes their look, which is B4's to tune). The kind comes from a
+  new `Light::Kind`, set where lights are made: street lamps `Lamp`, camp fires `Fire`, weapon flashes,
+  explosions, burning wrecks, flares and missile motors `Combat`, any spotlight `Spot`. The owner and
+  the shadow slot stay on the CPU (no shader reads them before B3 and B4); owner exclusion and
+  `ParticleLight` are not written (B3 or B4, whichever lands first).
+- The source is the scene's active lights (`Scene::ActiveLights`: on, within the horizon range plus
+  500 m, the 16 strongest at the camera), ranked as `Light::Compare` ranks them, at most 64 in the
+  buffer. A light is binned by its reach, a sphere of 10 start distances, a spotlight too: the classic
+  budget below ranks a spotlight wherever it is in reach, inside its cone or not, so every tile in
+  reach must list it (a spotlight's cone has an enclosing sphere about half as large, centred
+  reach / (2 cos a) ahead of the lamp; B3, which gives headlights their own model, can bin them by it).
+  The screen box comes from the tangent planes per axis (the exact box of the projected sphere), a
+  reach outside one of the four frustum side planes is skipped, and one that crosses the eye plane
+  covers the viewport. The tiles (32 px) cover the whole frame target from pixel (0, 0), so a fragment
+  finds its tile from `gl_FragCoord` alone and the aspect pillarbox needs nothing; 16 entries per tile,
+  not 8: the active list holds up to 16 lights, so no tile drops one today, and 8 would cut a lamp at a
+  tile edge. With the classic model's reach (street lamps start at 50 m, so they reach 500 m;
+  headlights 1.1 km) every light of the Saint Louis views covers every tile: the tiles cull nothing
+  there, and will once B3's lamps have a physical reach.
+- The classic budget is kept, per fragment. The first build shaded every light of the tile; at the
+  Saint Louis lamps view (10 lights) walls and crowns came out 16 levels brighter on average over 24%
+  of the frame, from the lamps' ambient term, which the per-object cap of 7 (`Scene::SelectLights`)
+  had limited; the ground was already at the clamp. A budget by contribution (the 7 that add the most)
+  changed nothing there, and binning spotlights by their cone (so they rank only near their beam)
+  brought the brightening back: the classic cap is spent largely on near headlights that light little.
+  As built, the tiled path ranks the tile's lights by the classic rule (sort brightness over squared
+  distance) at the fragment, faded to 0 from half the squared reach to the reach (where no tile lists
+  a light it must not rank, or the budget would change at a tile edge), and keeps 7, the 7th and 8th
+  blending within 25% of the 7th's importance; `ClassicImportance` and `ClassicBudgetWeights` are the
+  C++ mirrors. The set follows the light across a surface instead of breaking at object edges.
+  `kClassicLightsPerSurface` is also the per-object cap in `Scene.cpp`.
+- GLSL: `localLight()` is the one model both paths call; the light data is a uniform block (3.4),
+  the tile indices an RGBA8UI texture on unit 13, read once per fragment; `litLightCount.y` is the
+  tile size while the tiles light the pass and `.z` the draw's night factor (1 for a material without
+  sun, as `UploadLitLights` gives it), so no slot 70 (3.3). In tile mode `UploadLitLights` sends only
+  slot 22, and Pass1 leaves `localLit` false (`Engine::LocalLightsFromTiles`), so lit objects join
+  instanced runs; with `drawGrouping=0` the pre-A4 rule stays. Debug view 6 draws the lights per tile
+  and the grid. `triPerfStats` gained `tiles lights= refs= tilecpu=`, and `make_pairs.py` its columns.
+- Pixels (1080p, scale 1.0, 4x MSAA; `gate5-off-vs-before.md`, `gate6-on-vs-off.md`): `lightTiles=0`
+  against the base build is pixel-identical at sunrise_ridge and within the base build's own off/on
+  repeat at the two lamp views (283 and 266 pixels over 2 levels against 279 and 290, the AI drivers'
+  heads); the hero `town_night` with its fire is not repeatable (313,257 against the base's own
+  322,330). On against off: 22,111 and 22,115 pixels over 2 levels at the lamp views (1% of the frame,
+  mean +4.8 levels where they differ): a tree crown beside a lamp and some far window frames, which
+  now rank the lamps nearest to each pixel rather than to the object's centre; nothing by day.
+- Cost (4060 Ti, 1080p, scale 1.0, 4x MSAA, the lamps views, where all 10 lights cover every tile):
+  the world pass costs about 0.5 to 1.1 ms more with the tiles on. By the GPU minimum over the
+  90-frame window: +0.54 to 0.69 ms in three interleaved rounds at the timing view (3.99 to 4.66,
+  4.12 to 4.66 and, at a lower clock, 2.30 to 2.99 ms, while the B5 lane ran a game; Pass1 +0.41 to
+  0.53, ground +0.15 to 0.18), +0.47 to 0.63 in four pairs at the CPU view, and +0.50 to 1.23 in four
+  pairs there with `drawGrouping=0` (the 1.23 pair +1.10 by its 90-frame average; captures `timing4`
+  and `cpu1`). A quiet run of the build before the reach fade read +0.42 to 0.61 ms. CPU frame within 0.2 ms (medians 9.04, 9.18, 7.60 ms off; 9.24, 9.38, 7.59 on); the tile
+  build takes 0.03 ms. Draw calls 877 to 790 or 804 (10 instanced runs of 57 objects), LitConstants
+  bytes per frame 101.1 to 5.8 KB. By day the gate holds it off and sunrise_ridge draws the same frame.
+  Seen on the way, for A4: at this view `drawGrouping=0` gave a lower CPU frame than `drawGrouping=1`
+  on a quiet machine (median 7.4 to 8.0 ms against 9.2 to 10.2, `drw:obj` 3.5 to 3.9 against 5.0 to
+  5.4) and less world time (3.81 against 4.10 to 4.18 ms with the tiles off).
 
 ### A7. Sky table and the remastered sky pass (atmosphere)
 
