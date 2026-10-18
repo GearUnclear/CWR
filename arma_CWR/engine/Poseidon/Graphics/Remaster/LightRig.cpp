@@ -142,8 +142,18 @@ void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3
     constexpr float kMinHalf = 0.05f;
     for (int i = 0; i < 3; ++i)
     {
-        const float size = std::max(boxMax[i] - boxMin[i], 0.0f);
-        center[i] = boxMin[i] + size * (i == 1 ? 0.6f : 0.5f);
+        // The constants reach every vertex of the draw, so an axis with NaN or
+        // infinite bounds (or an extent that overflows) falls back to the
+        // smallest crown at the origin instead of lighting the shape with NaN.
+        float lo = boxMin[i];
+        float size = boxMax[i] - boxMin[i];
+        if (!std::isfinite(lo) || !std::isfinite(size))
+        {
+            lo = 0.0f;
+            size = 0.0f;
+        }
+        size = std::max(size, 0.0f);
+        center[i] = lo + size * (i == 1 ? 0.6f : 0.5f);
         invHalf[i] = 1.0f / std::max(0.5f * size, kMinHalf);
     }
 }

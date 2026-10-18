@@ -14,6 +14,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <regex>
 #include <set>
@@ -229,6 +230,53 @@ TEST_CASE("Remaster crown ellipsoid sits on the upper part of the shape", "[Grap
     CrownEllipsoid(flat, flat, c, ih);
     CHECK(std::isfinite(ih[0]));
     CHECK(std::isfinite(ih[1]));
+}
+
+TEST_CASE("Remaster crown ellipsoid stays finite for degenerate boxes", "[Graphics][remaster]")
+{
+    // The constants reach every vertex of the draw (VS slots 22-23): a NaN or
+    // infinite one turns the whole crown's lighting normal into NaN.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const float big = std::numeric_limits<float>::max();
+    struct Box
+    {
+        const char* what;
+        float mn[3];
+        float mx[3];
+    };
+    const Box boxes[] = {
+        {"NaN min", {nan, 0.0f, -2.0f}, {3.0f, 10.0f, 2.0f}},
+        {"NaN max", {-3.0f, 0.0f, -2.0f}, {3.0f, nan, 2.0f}},
+        {"infinite max", {-3.0f, 0.0f, -2.0f}, {inf, 10.0f, 2.0f}},
+        {"infinite both ways", {-inf, -inf, -inf}, {inf, inf, inf}},
+        {"extent overflows", {-big, 0.0f, -2.0f}, {big, 10.0f, 2.0f}},
+        {"inverted (empty)", {1e10f, 1e10f, 1e10f}, {-1e10f, -1e10f, -1e10f}},
+        {"point", {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f}},
+    };
+    for (const Box& b : boxes)
+    {
+        CAPTURE(b.what);
+        float c[3], ih[3];
+        CrownEllipsoid(b.mn, b.mx, c, ih);
+        for (int i = 0; i < 3; ++i)
+        {
+            CAPTURE(i);
+            CHECK(std::isfinite(c[i]));
+            CHECK(std::isfinite(ih[i]));
+            CHECK(ih[i] > 0.0f);
+            CHECK(ih[i] <= 20.0f); // half extent never below 5 cm
+        }
+    }
+    // The broken axis is the only one replaced: the others keep their fit.
+    const float mn[3] = {nan, 0.0f, -2.0f};
+    const float mx[3] = {3.0f, 10.0f, 2.0f};
+    float c[3], ih[3];
+    CrownEllipsoid(mn, mx, c, ih);
+    CHECK(c[1] == Catch::Approx(6.0f));
+    CHECK(ih[1] == Catch::Approx(1.0f / 5.0f));
+    CHECK(c[2] == Catch::Approx(0.0f));
+    CHECK(ih[2] == Catch::Approx(1.0f / 2.0f));
 }
 
 TEST_CASE("Remaster terrain horizon: a ridge shadows the valley behind it from a low sun", "[Graphics][remaster]")
@@ -482,6 +530,34 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
         ++postCount;
     }
     CHECK(postCount == 7);
+}
+
+TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Graphics][Shaders][remaster]")
+{
+    // Many CWA tree crowns (the town birch on Malden, several pines and
+    // broadleaves) have leaf cards whose mesh normals are zero. normalize() of a
+    // zero vector is undefined (NaN on NVIDIA), and a NaN lighting normal makes
+    // the crown fall back to ground-only sky light with no sun shadow. The
+    // vertex shaders and the per-fragment normal setup must use the guarded
+    // form, x * inversesqrt(max(dot(x, x), eps)), which keeps a zero vector zero.
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_LightingShaders.cpp");
+    REQUIRE_FALSE(lighting.empty());
+    for (const std::string& sym : Symbols(lighting))
+    {
+        if (sym.rfind("s_vs", 0) != 0)
+            continue;
+        CAPTURE(sym);
+        CHECK(RawString(lighting, sym).find("normalize(") == std::string::npos);
+    }
+    const std::string common = RawString(lighting, "s_psRemasterCommon");
+    const size_t start = common.find("vec3 shadeRemastered(");
+    REQUIRE(start != std::string::npos);
+    const size_t end = common.find("\n}\n", start);
+    REQUIRE(end != std::string::npos);
+    const std::string shade = common.substr(start, end - start);
+    CHECK(shade.find("normalize(") == std::string::npos);
+    // A foliage fragment without a normal of its own lights with the crown's.
+    CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
 }
 
 TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "[Graphics][Shaders][remaster]")

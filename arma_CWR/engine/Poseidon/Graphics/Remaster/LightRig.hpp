@@ -128,6 +128,8 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
 // model's bounding box (min, max; y up). Trunks make the box taller than the
 // crown, so the centre sits at 60% of the height. Writes the centre and the
 // inverse half extents; the shader lights a leaf with the ellipsoid's normal.
+// Always finite: an axis with NaN or infinite bounds gets a 5 cm half extent
+// centred on the origin.
 void CrownEllipsoid(const float boxMin[3], const float boxMax[3], float center[3], float invHalf[3]);
 
 } // namespace Poseidon::remaster

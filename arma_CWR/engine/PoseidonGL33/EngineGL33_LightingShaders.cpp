@@ -136,7 +136,11 @@ flat out float vLitMode;
 
 void main() {
     vec4 worldPos    = worldArr[gl_InstanceID] * vec4(pos, 1.0);
-    vec3 worldNormal = normalize(mat3(worldArr[gl_InstanceID]) * normal);
+    // Many tree crowns have leaf cards with zero mesh normals: keep them zero
+    // (normalizing a zero vector gives NaN); the fragment shader gives them the
+    // crown's normal.
+    vec3 worldNormal = mat3(worldArr[gl_InstanceID]) * normal;
+    worldNormal     *= inversesqrt(max(dot(worldNormal, worldNormal), 1e-12));
     vec4 viewPos     = view * worldPos;
     gl_Position      = proj * viewPos;
     vWorldRel        = worldPos.xyz; // camera-relative world position
@@ -527,18 +531,21 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // leaves), keep some sun inside the crown's own shadow and dim the sky fill
     // toward the crown's core.
     bool foliage = dot(litMatForced.rgb, kLuma) > 1e-4;
+    bool crown = foliage && vCrown.w > 0.0;
+    vec3 cn = crown ? vCrown.xyz * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12)) : vec3(0.0);
+    // A leaf card without a mesh normal (zero, see VSTransform) takes the
+    // crown's normal for its sun, sky and shadow lookup.
+    if (foliage && dot(n, n) < 0.25) n = cn;
     vec3 nCast = (foliage && dot(n, l) < 0.0) ? -n : n;
     vec3 nLight = n;
     float crownSky = 1.0;
-    if (foliage) {
-        if (vCrown.w > 0.0) {
-            vec3 cn = vCrown.xyz * inversesqrt(max(dot(vCrown.xyz, vCrown.xyz), 1e-12));
-            vec3 card = dot(n, cn) < 0.0 ? -n : n;
-            nLight = normalize(card * 0.3 + cn * 0.7);
-            crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
-        } else {
-            nLight = nCast;
-        }
+    if (crown) {
+        vec3 card = dot(n, cn) < 0.0 ? -n : n;
+        vec3 blend = card * 0.3 + cn * 0.7;
+        nLight = blend * inversesqrt(max(dot(blend, blend), 1e-12));
+        crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
+    } else if (foliage) {
+        nLight = nCast;
     }
 
     float nl = max(dot(n, l), 0.0);
