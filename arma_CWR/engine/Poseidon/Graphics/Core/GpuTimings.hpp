@@ -27,6 +27,13 @@ enum class Mark : int
     SkyBegin,
     SkyTableEnd,
     SkyEnd,
+    // The canopy's sun-visibility map (the long tree shadows, B9), in the
+    // frames that rebuild it, at the frame's first upload of the lit
+    // constants: in the remastered sky's hook before SkyBegin when the sky
+    // pass runs, otherwise at the world's first 3D pass just after
+    // WorldBegin (the world and ground sections then include it too).
+    CanopyBegin,
+    CanopyEnd,
     WorldBegin, // first 3D pass of the world
     // Inside the world pass (Landscape::DrawRect, at its existing queue
     // flushes): the sky, terrain, water and horizon drawn; the opaque objects
@@ -70,6 +77,7 @@ enum class Section : int
     Rest,
     Sky,      // the remastered sky dome, with the table build when it runs
     SkyTable, // the sky-view table build (frames that rebuild it)
+    Canopy,   // the canopy's sun-visibility map build (frames that rebuild it)
     // One per post stage, in Mark order: from the end of the latest stage that
     // ran before it (or WorldEnd) to its own end.
     Resolve,

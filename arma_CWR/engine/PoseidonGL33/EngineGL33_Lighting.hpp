@@ -47,6 +47,9 @@ extern const char kPostSkyTableHeaderGLSL[];
 extern const char kPostSkyTableModelGLSL[];
 extern const char kPostSkyViewMainGLSL[];
 extern const char kPostSkyViewMeanMainGLSL[];
+// The canopy's sun-visibility pass (EngineGL33_PostCanopyShaders.cpp; read it
+// through PostShaderSource).
+extern const char kPostCanopySunGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -73,6 +76,9 @@ enum class PostShader : int
     SkyView,     // regions 0 and 1 of the sky-view table
     SkyViewMean, // the whole table: those two copied and each row's mean
     LumaSharpen, // the composited frame, sharpened in brightness only, into the frame target (Sharpen, TAA off)
+    // The canopy's sun-visibility map (B9). Not a post stage: it runs before
+    // the world when the sun or the camera moved (EngineGL33_Canopy.cpp).
+    CanopySun,
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -103,13 +109,19 @@ constexpr int kLightTileUnit = 13; // per-tile light indices, usampler2D RGBA8UI
 // The sea animation frame the water program cross-fades into (the sea,
 // EngineGL33_Sea.cpp); a white stand-in outside the sea's draws.
 constexpr int kSeaNextFrameUnit = 11;
+// The canopy heightfield (B9, EngineGL33_Canopy.cpp): sampled only by the
+// pass that builds the sun-visibility map, never by a world program; holds a
+// stand-in until the first canopy is uploaded.
+constexpr int kCanopyUnit = 10;
+// The canopy's sun-visibility map (B9): a world-space map around the camera
+// the world programs read beyond the shadow maps; a stand-in (all lit) until
+// the first map is built.
+constexpr int kCanopyVisUnit = 15;
 // Allocated to the features still to land; no shader samples them yet.
 // kLightDataUnit is free: the light list keeps its lights in a uniform block
 // (kLightListBinding), which the fragments of a tile read faster.
 constexpr int kLightDataUnit = 12;
-constexpr int kCanopyUnit = 10;     // canopy heightfield (hfrt)
 constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
-constexpr int kCanopyVisUnit = 15;  // canopy sun visibility (hfrt)
 
 namespace detail
 {
@@ -180,6 +192,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"skyDensity", kSkyDensityUnit},         // the weather sky's cloud density (the clouds)
     {"seaNext", kSeaNextFrameUnit},          // next sea animation frame (the water program only)
     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
+    {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -246,16 +259,15 @@ enum : int
     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
     Water1 =
         75, // rgb sheen light (linear: the sun in the original sun's hue, times the sheen), w sheen's flat-normal share
-    // 76: allocated to the canopy heightfield (LitConstPlanned Canopy); a
-    // second padding member in the block until it lands.
-    Planned2 = 76,
+    // Long tree shadows (B9, Graphics/Remaster/Canopy.hpp): x strength (0 =
+    // off), yz the sun-visibility map's origin (m), w 1 / its extent (1/m).
+    Canopy = 76,
     Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
     Count = 78,
 };
 constexpr int MaxLights = 8;
 constexpr int ReservedCount = 1;
 constexpr int PlannedCount = Water0 - Planned;
-constexpr int Planned2Count = Detail - Planned2;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
@@ -267,7 +279,8 @@ static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slot
 static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
 static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
               "LitConst water slots follow the planned padding");
-static_assert(Planned2 == Water1 + 1, "the second planned padding follows the water slots");
+static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
+static_assert(Detail == Canopy + 1, "the terrain detail follows the canopy");
 static_assert(Count == Detail + 1, "LitConst size out of sync");
 } // namespace LitConst
 
@@ -279,9 +292,8 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
 // raises LitConst::Count, which the upload and the shaders follow. A7 landed
 // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
 // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
-// SkyShadow), B5 the water slots 74 and 75 and B11 the terrain detail at 77,
-// so 70 to 73 are the padding member litPlanned and 76 the padding member
-// litPlanned2.
+// SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
+// terrain detail at 77, so 70 to 73 are the padding member litPlanned.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
@@ -293,16 +305,14 @@ constexpr int Night = 71;        // night: flags, beam profile, moon key
 constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
 constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
 // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
-constexpr int Canopy = 76; // hfrt: canopy heightfield constants
-// 77: texsharp's terrain detail landed (LitConst::Detail, B11).
+// 76: hfrt's canopy landed (LitConst::Canopy, B9); 77: texsharp's terrain
+// detail landed (LitConst::Detail, B11).
 constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
 constexpr int End = 79;  // one past the last planned slot
 static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
               "the planned slot below the sun shadows is the reserved padding");
 static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
               "the planned slots between the clouds and the water are the planned padding (70 free)");
-static_assert(Canopy == LitConst::Planned2 && LitConst::Planned2Count == 1 && Canopy == LitConst::Detail - 1,
-              "the planned slot between the water and the terrain detail is the second planned padding");
 static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");

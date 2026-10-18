@@ -62,8 +62,10 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::airBeams, ""},
     {Feature::AirHaze, "airHaze", "Aerial haze", "haze", "Sky and air", "B8", false, &FS::airHaze, ""},
     {Feature::ValleyMist, "valleyMist", "Valley mist", "haze", "Sky and air", "B8", false, &FS::valleyMist, ""},
-    {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", false,
-     &FS::canopyShadows, ""},
+    // B9 (hfrt): the sun-visibility map's build shows in its own section on
+    // the frames that rebuild it; the one read per fragment is in the world pass.
+    {Feature::CanopyShadows, "canopyShadows", "Long canopy shadows", "hfrt", "Light and shadow", "B9", true,
+     &FS::canopyShadows, "canopy"},
     // B10 (clouds): lit clouds cost in the sky pass (the dome and the sky
     // clouds), the sky-matched shadows one density tap per lit world fragment.
     {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", true, &FS::litClouds, "sky"},

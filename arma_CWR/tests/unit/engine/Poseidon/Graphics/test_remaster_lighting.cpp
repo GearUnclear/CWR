@@ -1094,8 +1094,8 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
     // and its debug view, the TAA resolve and its sharpen, the sky table's
-    // two passes, and the luma sharpen
-    CHECK(post == 14);
+    // two passes, the luma sharpen, and the canopy's sun-visibility pass
+    CHECK(post == 15);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1442,7 +1442,7 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litPlanned", LC::Planned, LC::PlannedCount},
         {"litWater0", LC::Water0, 1},
         {"litWater1", LC::Water1, 1},
-        {"litPlanned2", LC::Planned2, LC::Planned2Count},
+        {"litCanopy", LC::Canopy, 1},
         {"litDetail", LC::Detail, 1},
     };
     // Walks the members of one declaration, slot by slot.
@@ -1504,11 +1504,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
     // The planned slots: the one below the sun shadows is the reserved padding,
-    // the four between the clouds and the water and the one between the water
-    // and the terrain detail are the planned padding, the rest continue the
-    // declared ones (B1 landed the sun shadow slots 59 and 60, A7 the sky slots
-    // 61 to 67 of plan section 3.3, B10 the clouds slots 68 and 69, B5 the
-    // water slots 74 and 75).
+    // the four between the clouds and the water are the planned padding, the
+    // rest continue the declared ones (B1 landed the sun shadow slots 59 and
+    // 60, A7 the sky slots 61 to 67 of plan section 3.3, B10 the clouds slots
+    // 68 and 69, B5 the water slots 74 and 75, B9 the canopy at 76).
     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
     CHECK(LC::ReservedCount == 1);
     CHECK(static_cast<int>(LC::Taa) == 59);
@@ -1519,14 +1518,15 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::SkyShadow) == 69);
     // 70 is free (the light list rides in slot 22), so the padding starts there.
     CHECK(static_cast<int>(LC::Planned) == 70);
+    CHECK(LC::PlannedCount == 4);
     CHECK(gl::LitConstPlanned::Night == static_cast<int>(LC::Planned) + 1);
     CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
     CHECK(static_cast<int>(LC::Water0) == 74);
     CHECK(static_cast<int>(LC::Water1) == 75);
-    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Planned2));
-    // B11 landed the terrain detail at 77; 76 is the second planned padding.
+    // B9 landed the canopy at 76 and B11 the terrain detail at 77.
+    CHECK(static_cast<int>(LC::Canopy) == 76);
+    CHECK(static_cast<int>(LC::Canopy) == static_cast<int>(LC::Water1) + 1);
     CHECK(static_cast<int>(LC::Detail) == 77);
-    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
     CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
 
     // The decoded horizon range in the shader is the encoder's.

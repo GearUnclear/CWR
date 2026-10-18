@@ -689,6 +689,23 @@ GameValue TriSkyTableCheck(const GameState* /*state*/, GameValuePar arg)
     return GameValue(res.c_str());
 }
 
+/// triCanopyCheck <texels>: the canopy's sun-visibility map (feature switch
+/// canopyShadows, the long tree shadows) read back from the GPU and compared
+/// with its CPU mirror (Graphics/Remaster/Canopy.hpp CanopySunAt) at about
+/// <texels> texels spread over the map. Returns "OK:..." or "FAIL:..." with the
+/// largest error of each stored channel and of what a receiver reads; "FAIL:no
+/// sun-visibility map ..." before the first build (the switch or its gate off,
+/// or no canopy yet).
+GameValue TriCanopyCheck(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    const int texels = std::max(16, toInt(static_cast<float>(arg)));
+    const std::string res = GEngine->RemasterCanopyCheck(texels);
+    LOG_INFO(Core, "[tri] triCanopyCheck {}", res);
+    return GameValue(res.c_str());
+}
+
 /// triPinCloudDrift [x, z] or [x, z, sky]: hold the clouds still for captures
 /// until released: the remastered cloud-shadow field at drift offset x, z
 /// (metres) and the sky dome clouds at `sky` (Landscape::CloudsPosition; where

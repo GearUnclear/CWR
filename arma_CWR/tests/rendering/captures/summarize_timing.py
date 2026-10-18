@@ -33,9 +33,10 @@ from PIL import Image
 
 # ground, pass1 and rest split the world pass and frame_min is the best frame of
 # a shot's timer window (GpuTimings, A4 on); empty for runs before A4. sky and
-# skytable are the remastered sky dome and its table build (A7 on).
-SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "post", "resolve", "lindepth",
-            "ao", "bloom", "shafts", "composite", "frame_min")
+# skytable are the remastered sky dome and its table build (A7 on); canopy the
+# canopy's sun-visibility map build (B9 on, frames that rebuild it).
+SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "sky", "skytable", "canopy", "post", "resolve",
+            "lindepth", "ao", "bloom", "shafts", "composite", "frame_min")
 ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
 # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
 BANDS = ((0, 422), (422, 591), (591, 1080))

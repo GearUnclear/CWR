@@ -574,6 +574,7 @@ const PostShaderDef kPostShaders[] = {
     {"psSkyViewMean",
      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
     {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
+    {"psCanopySun", {Poseidon::gl33lighting::kPostCanopySunGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

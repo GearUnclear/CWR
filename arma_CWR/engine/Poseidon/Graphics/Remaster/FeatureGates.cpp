@@ -19,8 +19,9 @@ Gate Off(const char* reason, float scale = 1.0f)
 }
 
 // The pass resolution of each feature (plan section 3.2): the air pass, the
-// SSR trace, the combat shadow mask and the canopy visibility buffer run at
-// half resolution; everything else at full (or has no pass of its own).
+// SSR trace and the combat shadow mask run at half resolution; everything else
+// at full or has no screen pass of its own (the canopy's sun-visibility map is
+// a world-space map around the camera, Canopy.hpp, not a screen buffer).
 float FeatureScale(Feature f)
 {
     switch (f)
@@ -30,7 +31,6 @@ float FeatureScale(Feature f)
         case Feature::AirBeams:
         case Feature::AirHaze:
         case Feature::ValleyMist:
-        case Feature::CanopyShadows:
             return 0.5f;
         default:
             return 1.0f;

@@ -18,5 +18,9 @@ void ShutdownTerrainLighting();
 // True while the backend wants a horizon map and the build for the current
 // landscape has not been handed over yet (triSettleScene waits for it).
 bool TerrainLightingPending();
+// A landscape object was destroyed (Object::SetDestroyed): its footprint
+// leaves the canopy of the long tree shadows (Graphics/Remaster/Canopy.hpp) on
+// the next UpdateTerrainLighting, or as soon as the canopy is handed over.
+void TerrainCanopyObjectDestroyed(int objectId);
 
 } // namespace Poseidon

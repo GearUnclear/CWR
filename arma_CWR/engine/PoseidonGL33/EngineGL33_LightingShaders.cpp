@@ -358,7 +358,7 @@ layout(std140) uniform LitConstants {
     vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
-    vec4 litPlanned2;     // 76: planned canopy heightfield (hfrt; padding until it lands)
+    vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
 };
 )";
@@ -375,6 +375,7 @@ uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
 uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, raw depth (soft-shadow blocker search)
 uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
 uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
+uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
 
 in vec4 vColor;
 in vec4 vSpecColor;
@@ -557,6 +558,9 @@ static const char s_psRemasterTerrainClouds[] = R"(
 // Colour of the light the ground below bounces (luminance 1; white when there
 // is no map). Set by terrainSunVisibility, read by skyIrradiance.
 vec3 g_groundTint = vec3(1.0);
+// Height of the ground below the fragment (m; far below anything without a
+// map). Set by terrainSunVisibility, read by canopySunVisibility.
+float g_groundHeight = -1e6;
 
 // Hills shadowing the sun, from the precomputed horizon map. Also returns the
 // terrain sky visibility (valley floors see less sky) and sets the ground
@@ -571,6 +575,7 @@ float terrainSunVisibility(vec3 posAbs, out float skyVisibility) {
     vec2 uv = (g + 0.5) * litTerrain.z;
     vec4 hs = texture(terrainHeight, uv);
     g_groundTint = vec3(hs.b, (1.0 - 0.2126 * hs.b - 0.0722 * hs.a) / 0.7152, hs.a);
+    g_groundHeight = hs.x;
     float lift = smoothstep(litTerrainLift.x, litTerrainLift.y, posAbs.y - hs.x);
     skyVisibility = mix(1.0, mix(hs.g, 1.0, lift), litTerrain.w);
     float h0 = dot(texture(terrainHorizon, vec3(uv, litTerrainSun.x)), litTerrainSel0);
@@ -660,6 +665,36 @@ float cloudSunVisibility(vec3 posAbs) {
     float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
     return mix(1.0, litCloud.y, covered);
 }
+
+// Long tree shadows beyond the shadow maps (canopyShadows; Canopy.hpp): the
+// sun-visibility map traced through the canopy of every tree, bush, forest and
+// building, read once. A texel holds r the ground's visibility, g the lowest
+// raised receiver's (one that never shades itself), b the height above the
+// ground below which a raised receiver (a crown, a wall, a roof) is in a
+// neighbour's shadow (/ 48 m) and a that edge's softness (/ 16 m). It takes
+// over where the shadow maps fade out (their far fade, or from 100 to 150 m
+// without them) and fades out at the map's edge. 1 while off (litCanopy.x 0).
+// Reads g_groundHeight: call it after terrainSunVisibility.
+float canopySunVisibility(vec3 posAbs) {
+    if (litCanopy.x <= 0.0 || litFlags.y < 0.5) return 1.0;
+    int nC = int(cascadeCtl.x);
+    bool maps = shadowCtl.x > 0.5 && nC > 0;
+    vec3 rel = vWorldRel + litShadowDelta.xyz;
+    float depth = maps ? dot(rel, camFwd.xyz) : length(vWorldRel);
+    float reach = maps ? cascadeSplits[nC - 1] : 150.0;
+    float fade = maps ? max(cascadeCtl.y, 1.0) : 50.0;
+    float w = clamp((depth - (reach - fade)) / fade, 0.0, 1.0);
+    vec2 uv = (posAbs.xz - litCanopy.yz) * litCanopy.w;
+    vec2 e = abs(uv - 0.5);
+    w *= litCanopy.x * (1.0 - smoothstep(0.42, 0.48, max(e.x, e.y)));
+    if (w <= 0.0) return 1.0;
+    vec4 m = texture(canopySun, uv);
+    float hr = posAbs.y - g_groundHeight;
+    float h = m.b * 48.0;
+    float s = max(m.a * 16.0, 0.25);
+    float raised = mix(m.g, 1.0, smoothstep(h - s, h + s, max(hr, 1.5)));
+    return mix(1.0, mix(m.r, raised, smoothstep(0.5, 1.5, hr)), w);
+}
 )";
 
 // Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
@@ -740,6 +775,8 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
     float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
                           terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
+    // Long tree shadows beyond the shadow maps (canopyShadows); 1 while off.
+    sunVisibility *= canopySunVisibility(posAbs);
     g_sunVisibility = sunVisibility;
 
     vec3 kd = litMatDiffuse.rgb;

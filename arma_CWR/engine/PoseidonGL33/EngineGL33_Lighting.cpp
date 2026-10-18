@@ -4,11 +4,12 @@
 // rig, the per-draw material and the local lights from the LitConstants block
 // (binding 3), the shadow map through a comparison sampler on unit 2 (and as
 // raw depth on unit 6), the terrain horizon map on units 3 and 4, the cloud
-// noise on unit 5, the sky table on unit 8, the sky's cloud density on unit 9
-// and the frame's tiled light list from the FrameLights block (binding 4) and
-// its tile indices on unit 13. Selection between the remastered and classic
-// sets happens in DoSelectPixelShader via
-// SelectProgram; Classic leaves every classic upload and program untouched.
+// noise on unit 5, the sky table on unit 8, the sky's cloud density on unit 9,
+// the frame's tiled light list from the FrameLights block (binding 4) and
+// its tile indices on unit 13, and the canopy's sun-visibility map on unit 15
+// (EngineGL33_Canopy.cpp). Selection between the remastered and classic sets
+// happens in DoSelectPixelShader via SelectProgram; Classic leaves every
+// classic upload and program untouched.
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
@@ -157,10 +158,11 @@ void EngineGL33::InitLightingResources()
     GL33Bind::ActiveUnit(kShadowRawUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     GL33Bind::ActiveUnit(0);
-    // The sky table's unit 8 and the clouds' unit 9 get their stand-ins the
-    // same way.
+    // The sky table's unit 8, the clouds' unit 9 and the canopy's units 10 and
+    // 15 get their stand-ins the same way.
     InitSkyTable();
     InitSkyClouds();
+    InitCanopy();
     // So does the sea's next-frame unit (EngineGL33_Sea.cpp binds an animation
     // frame there only inside the sea's draws).
     GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
@@ -402,6 +404,7 @@ void EngineGL33::DeinitLightingResources()
     DeinitSkyTable();
     DeinitLightTiles();
     DeinitSkyClouds();
+    DeinitCanopy();
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
@@ -548,6 +551,7 @@ void EngineGL33::BindLightingTextures()
     // complete either way).
     GL33Bind::Tex2D(kLightTileUnit, _lightTiles.tileTex);
     BindSkyDensity();
+    BindCanopy();
     GL33Bind::ActiveUnit(0);
 }
 
@@ -808,6 +812,9 @@ void EngineGL33::UploadLitFrameConstants()
     const std::array<float, 3> detail =
         rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
     SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);
+    // Long tree shadows (B9): the sun-visibility map, rebuilt when the sun or
+    // the camera moved enough; zero while the switch or its gate is off.
+    UploadLitCanopy(toSun, _featureGates.inputs.sunElevationDeg, _featureGates.inputs.skyThrough);
     FlushLitConstants();
     BindLightingTextures();
 }

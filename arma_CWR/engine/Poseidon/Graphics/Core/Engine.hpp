@@ -28,6 +28,8 @@ namespace Poseidon::remaster
 {
 struct TerrainHorizonMap;
 struct FeatureGates;
+struct CanopyField;
+struct CanopyRect;
 } // namespace Poseidon::remaster
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
@@ -880,6 +882,16 @@ class Engine : public IGraphicsEngine
     virtual bool WantsTerrainHorizonMap() const { return false; }
     /// Hands over the horizon map for the current landscape (nullptr clears it).
     virtual void SetTerrainHorizonMap(std::shared_ptr<const remaster::TerrainHorizonMap> /*map*/) {}
+    /// Hands over the canopy of the current landscape's objects (the long tree
+    /// shadows, Graphics/Remaster/Canopy.hpp), built with the horizon map;
+    /// nullptr clears it. The field stays the world's: it changes in place.
+    virtual void SetTerrainCanopy(std::shared_ptr<const remaster::CanopyField> /*canopy*/) {}
+    /// Texel rectangles of the canopy that changed in place since it was handed
+    /// over (a destroyed tree or building).
+    virtual void TerrainCanopyChanged(const remaster::CanopyRect* /*rects*/, int /*count*/) {}
+    /// triCanopyCheck: the GPU sun-visibility map read back against its CPU
+    /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
+    virtual std::string RemasterCanopyCheck(int /*texels*/) { return "FAIL:no canopy in this backend"; }
     /// World/HUD boundary: called once per frame after the 3D world and before
     /// the map, HUD and dialogs; runs the remastered post effects.
     virtual void EndWorldScene() {}

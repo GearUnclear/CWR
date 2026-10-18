@@ -732,6 +732,10 @@ class EngineGL33 : public Engine
     // faces route to the water program (BuildContext::remasteredSea).
     bool SeaRouted() const { return _seaOpen; }
     bool _seaOpen = false;
+    // --- Long tree shadows: the canopy and its sun-visibility map (EngineGL33_Canopy.cpp) ---
+    void SetTerrainCanopy(std::shared_ptr<const Poseidon::remaster::CanopyField> canopy) override;
+    void TerrainCanopyChanged(const Poseidon::remaster::CanopyRect* rects, int count) override;
+    std::string RemasterCanopyCheck(int texels) override;
 
     Poseidon::remaster::LightingTuning _lighting;
     // Remastered programs built and the setting asks for them: DoSelectPixelShader
@@ -855,7 +859,7 @@ class EngineGL33 : public Engine
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).
     void UploadLitSlots(int first, int count);
-    // Binds units 2..5, 8 and 9 for the remastered shaders (compare sampler on 2).
+    // Binds units 2..6, 8, 9, 13 and 15 for the remastered shaders (compare sampler on 2).
     void BindLightingTextures();
     // The sky table (EngineGL33_SkyTable.cpp): the stand-in and GL objects, the
     // worker build of the atmosphere tables (true once they exist for the
@@ -885,6 +889,16 @@ class EngineGL33 : public Engine
     void PinSkyShadowAnchor(bool pinned);
     // The Sky and SkyShadow slots; `cloudField` = the rig casts cloud shadows.
     void UploadLitClouds(float skyThrough, bool cloudField);
+    // The canopy (EngineGL33_Canopy.cpp): the stand-ins on units 10 and 15, the
+    // canopy texture (uploaded whole, or the rectangles that changed), the GPU
+    // build of the sun-visibility map when the sun or the camera moved, the
+    // Canopy slot of LitConstants and the unit-15 binding.
+    void InitCanopy();
+    void DeinitCanopy();
+    void UploadCanopyField();
+    bool BuildCanopySunGpu(const Vector3& toSun, float originX, float originZ, float texel);
+    void UploadLitCanopy(const Vector3& toSun, float sunElevationDeg, float skyThrough);
+    void BindCanopy();
     // One LitConstants slot (flushed with the next FlushLitConstants), and the
     // sky mode (litSkyFwd.w, flushed at once).
     void SetLitSlot(int slot, float x, float y, float z, float w);
