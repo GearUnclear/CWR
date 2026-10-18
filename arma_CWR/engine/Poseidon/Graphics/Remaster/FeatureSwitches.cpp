@@ -58,10 +58,12 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::LitClouds, "litClouds", "Lit sky clouds", "clouds", "Sky and air", "B10", false, &FS::litClouds, ""},
     {Feature::SkyCloudShadows, "skyCloudShadows", "Sky-matched cloud shadows", "clouds", "Sky and air", "B10", false,
      &FS::skyCloudShadows, ""},
-    {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", false,
-     &FS::terrainDetail, ""},
-    {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", false, &FS::sharpen,
-     ""},
+    // B11 (texsharp): the terrain detail runs inside the ground draw, the luma
+    // sharpen in the post pass's sharpen stage (TAA's own sharpen when TAA runs).
+    {Feature::TerrainDetail, "terrainDetail", "Terrain detail", "texsharp", "Light and shadow", "B11", true,
+     &FS::terrainDetail, "ground"},
+    {Feature::Sharpen, "sharpen", "Sharpen (with TAA off)", "texsharp", "Light and shadow", "B11", true, &FS::sharpen,
+     "sharpen"},
 };
 static_assert(sizeof(kFeatures) / sizeof(kFeatures[0]) == kFeatureCount, "one FeatureInfo per Feature");
 
@@ -173,6 +175,10 @@ struct KeyTable
                         "display-space saturation of the dome and fog colour", &LT::atmoSat, 0.5f, 1.6f),
             MakeSubKnob(Feature::Atmosphere, "atmoHaze", "Haze",
                         "Mie density of the air (rebuilds the atmosphere tables)", &LT::atmoHaze, 0.25f, 4.0f),
+            MakeSubKnob(Feature::TerrainDetail, "detailStrength", "Terrain grain strength",
+                        "grain from the square's own texture; 2 starts to look scaly", &LT::detailStrength, 0.0f, 3.0f),
+            MakeSubKnob(Feature::Sharpen, "sharpenStrength", "Luma sharpen strength",
+                        "contrast-adaptive, brightness only; runs only with TAA off", &LT::sharpenStrength, 0.0f, 1.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

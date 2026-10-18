@@ -509,6 +509,45 @@ void main() {
 }
 )";
 
+// Luma sharpen (the Sharpen stage with TAA off, step B11, the sharpen switch):
+// contrast-adaptive sharpening (AMD FidelityFX CAS, 3x3 form) of the
+// composited frame, applied to brightness only (the research's full-colour CAS
+// turned the coloured texel noise of pale ground into speckle), into every
+// sample of the frame target. Strength 0 to 1 sets the CAS peak from -1/8 to
+// -1/5; the backend skips the stage at strength 0.
+static const char s_psPostLumaSharpenGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D srcTex; // the composited frame
+uniform vec4 sharpen;     // x strength 0..1, yz size (pixels)
+out vec4 fragColor;
+vec3 tap(ivec2 ip, ivec2 o, ivec2 lim) { return texelFetch(srcTex, clamp(ip + o, ivec2(0), lim), 0).rgb; }
+void main() {
+    ivec2 ip = ivec2(gl_FragCoord.xy);
+    ivec2 lim = ivec2(sharpen.yz) - 1;
+    vec3 a = tap(ip, ivec2(-1, -1), lim);
+    vec3 b = tap(ip, ivec2(0, -1), lim);
+    vec3 c = tap(ip, ivec2(1, -1), lim);
+    vec3 d = tap(ip, ivec2(-1, 0), lim);
+    vec3 e = texelFetch(srcTex, ip, 0).rgb;
+    vec3 f = tap(ip, ivec2(1, 0), lim);
+    vec3 g = tap(ip, ivec2(-1, 1), lim);
+    vec3 h = tap(ip, ivec2(0, 1), lim);
+    vec3 i = tap(ip, ivec2(1, 1), lim);
+    // Soft minimum and maximum of the cross plus the corners.
+    vec3 mn = min(min(min(d, e), min(f, b)), h);
+    mn += min(mn, min(min(a, c), min(g, i)));
+    vec3 mx = max(max(max(d, e), max(f, b)), h);
+    mx += max(mx, max(max(a, c), max(g, i)));
+    // Less sharpening where the neighbourhood is near black or white.
+    vec3 amp = sqrt(clamp(min(mn, 2.0 - mx) / max(mx, vec3(1e-5)), 0.0, 1.0));
+    vec3 w = amp * (-1.0 / mix(8.0, 5.0, clamp(sharpen.x, 0.0, 1.0)));
+    vec3 sh = clamp((b * w + d * w + f * w + h * w + e) / (1.0 + 4.0 * w), 0.0, 1.0);
+    // Brightness only: the sharpened luma onto the pixel's own colour.
+    const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+    fragColor = vec4(clamp(e + (dot(sh, kLuma) - dot(e, kLuma)), 0.0, 1.0), 1.0);
+}
+)";
+
 // Every post shader, assembled from the raw strings above: these pieces in this
 // order, in PostShader order. The lighting lab's glsl_extract.py reads this
 // table to assemble the same sources.
@@ -534,6 +573,7 @@ const PostShaderDef kPostShaders[] = {
       Poseidon::gl33lighting::kPostSkyViewMainGLSL}},
     {"psSkyViewMean",
      {Poseidon::gl33lighting::kPostSkyTableHeaderGLSL, Poseidon::gl33lighting::kPostSkyViewMeanMainGLSL}},
+    {"psPostLumaSharpen", {s_psPostLumaSharpenGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

@@ -13,11 +13,13 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+#include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstring>
 
@@ -516,6 +518,12 @@ void EngineGL33::UploadLitFrameConstants()
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
     UploadLitSky(toSun, in.skyThrough);
+    // Terrain detail (B11): zero while the switch or its gate is off, which
+    // leaves the terrain main the stock one. w (land or sea) is the draw's,
+    // set by SetLitTerrainDraw.
+    const std::array<float, 3> detail =
+        rm::terrain_detail::FrameConstants(_lighting, _featureGates[rm::Feature::TerrainDetail].on);
+    SetSlot(LitConst::Detail, detail[0], detail[1], detail[2], s_lit[LitConst::Detail * 4 + 3]);
     FlushLitConstants();
     BindLightingTextures();
 }
@@ -532,6 +540,20 @@ void EngineGL33::SetLitSkyMode(int mode)
     // stays true.
     s_lit[LitConst::SkyFwd * 4 + 3] = static_cast<float>(mode);
     FlushLitConstants();
+}
+
+void EngineGL33::SetLitTerrainDraw(bool land)
+{
+    // Per draw, but it changes only between the land and the sea (both drawn
+    // by PSDetail), a few times a frame: upload the one slot when it does.
+    if (!_lightingActive)
+        return;
+    float& w = s_lit[LitConst::Detail * 4 + 3];
+    const float value = land ? 1.0f : 0.0f;
+    if (w == value)
+        return;
+    w = value;
+    UploadLitSlots(LitConst::Detail, 1);
 }
 
 void EngineGL33::PinCloudDrift(bool pinned, float x, float z)

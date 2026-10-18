@@ -338,6 +338,8 @@ layout(std140) uniform LitConstants {
     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
+    vec4 litPlanned[9];   // 68-76: allocated to features still to land (clouds .. hfrt)
+    vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
 };
 )";
 
@@ -663,7 +665,95 @@ void main() {
 }
 )";
 
+// The terrain main (PSDetail: the land and, until the sea gets its own shader,
+// the sea). Terrain detail (B11, research track texsharp; the C++ mirror of
+// this math and its constants is Graphics/Remaster/TerrainDetail.hpp): every
+// terrain square is one 128 px texture over 50 m, so from about 10 m to 150 m
+// a texel covers 5 to 15 pixels and the slope is a bilinear smear. The land
+// takes three luminance-only layers, each relative to the local mean, so hue
+// and average brightness stay as authored:
+//   - self-detail: the luminance high-pass of the square's own texture, zoomed
+//     kTdZoom times and read near the fragment (grass from grass, rock from
+//     rock), in cells of kTdCellTexels texels, each cell's patch rotated by
+//     its own random angle; the four cells around the fragment are blended
+//     keeping the grain's variance, then softly limited at +-kTdLimit. The
+//     zoomed sample takes the zoomed derivatives, so it mip-maps away by itself
+//     once the base texture is no longer magnified. Near the eye, where the
+//     zoomed patch is itself magnified into soft blobs, it fades in with the
+//     patch's mip level (kTdNearFromLod to kTdNearToLod) and leaves the
+//     authored detail texture alone;
+//   - detail kept: the detail texture's deviation from its mean, scaled up as
+//     its mips average it out (at most kTdKeptCap);
+//   - anti-tiling: a rotated, rescaled second detail sample mixed in where the
+//     detail texture is minified.
+// litDetail.xyz is zero while the switch or its gate is off, and litDetail.w
+// is zero for the sea: then this is the stock terrain main. Nothing is
+// evaluated beyond kTdMaxDistance (the frame gate's "terrain within 300 m").
 static const char s_psDetailRemasterMain[] = R"(
+// Terrain detail constants (Graphics/Remaster/TerrainDetail.hpp holds the same).
+const float kTdZoom = 6.0;
+const float kTdCellTexels = 2.0;
+const float kTdJitterTexels = 6.0;
+const float kTdLimit = 0.4;
+const float kTdMinLocalMean = 0.04;
+const float kTdFadeStart = 220.0;
+const float kTdMaxDistance = 300.0;
+const float kTdKeptCap = 2.0;
+const float kTdKeptFadeStart = 150.0;
+const float kTdNearFromLod = -3.5;
+const float kTdNearToLod = -2.5;
+const float kTdMaxAniso = 16.0;
+
+float tdLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+// The mip level the GPU picks (kTdMaxAniso anisotropy) for uv derivatives dx,
+// dy on a texture of size ts.
+float tdLod(vec2 dx, vec2 dy, vec2 ts) {
+    float l1 = length(dx * ts);
+    float l2 = length(dy * ts);
+    float pmax = max(l1, l2);
+    float pmin = max(min(l1, l2), 1e-6);
+    return log2(max(pmax / min(kTdMaxAniso, pmax / pmin), 1e-6));
+}
+
+// Two values in [0, 1) from a cell index (Hoskins' hash22).
+vec2 tdHash2(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+// Self-detail at base uv `uv` (texture size ts, uv derivatives dx, dy): the
+// variance-preserving blend of the four cells' relative luminance high-pass,
+// zero mean, about -1..1.
+float tdSelfDetail(vec2 uv, vec2 ts, vec2 dx, vec2 dy) {
+    vec2 p = uv * ts; // base texel space
+    vec2 g = p / kTdCellTexels - 0.5;
+    vec2 i0 = floor(g);
+    vec2 f = g - i0;
+    vec2 gx = dx * kTdZoom;
+    vec2 gy = dy * kTdZoom;
+    float lpLod = log2(kTdZoom);
+    float acc = 0.0;
+    float w2 = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        vec2 o = vec2(float(k & 1), float(k >> 1));
+        vec2 cell = i0 + o;
+        vec2 c = (cell + 0.5) * kTdCellTexels;
+        vec2 jit = (tdHash2(cell + kTdZoom) - 0.5) * kTdJitterTexels;
+        float a = 6.2831853 * tdHash2(cell + 17.0 + kTdZoom).x;
+        mat2 R = mat2(cos(a), sin(a), -sin(a), cos(a));
+        vec2 q = (c + R * ((p - c) * kTdZoom) + jit) / ts;
+        float hf = tdLum(textureGrad(tex0, q, R * gx, R * gy).rgb);
+        float lp = tdLum(textureLod(tex0, q, lpLod).rgb);
+        vec2 ww = mix(1.0 - f, f, o);
+        float w = ww.x * ww.y;
+        acc += w * (hf - lp) / max(lp, kTdMinLocalMean);
+        w2 += w * w;
+    }
+    return acc * inversesqrt(max(w2, 1e-4));
+}
+
 void main() {
     vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
@@ -672,7 +762,41 @@ void main() {
     if (vLitMode > 0.5 && vLitMode < 1.5) {
         // Detail modulation stays in display space, as in the classic shader,
         // so the terrain keeps its authored micro-contrast.
-        vec3 albedo = t0.rgb * constColor.rgb * (t1.a * 2.0);
+        float detail = t1.a * 2.0;
+        float selfMod = 1.0;
+        if (litDetail.w > 0.5 && (litDetail.x > 0.0 || litDetail.y > 0.0 || litDetail.z > 0.0)) {
+            // Derivatives before the distance branch (non-uniform control flow).
+            vec2 d0x = dFdx(vUV0);
+            vec2 d0y = dFdy(vUV0);
+            vec2 d1x = dFdx(vUV1);
+            vec2 d1y = dFdy(vUV1);
+            float dist = length(vWorldRel);
+            if (dist < kTdMaxDistance) {
+                float fade = 1.0 - smoothstep(kTdFadeStart, kTdMaxDistance, dist);
+                vec2 ts0 = vec2(textureSize(tex0, 0));
+                float selfW = litDetail.x * fade *
+                             smoothstep(kTdNearFromLod, kTdNearToLod, tdLod(d0x, d0y, ts0) + log2(kTdZoom));
+                if (selfW > 0.0) {
+                    float m = selfW * tdSelfDetail(vUV0, ts0, d0x, d0y);
+                    selfMod = 1.0 + m * inversesqrt(1.0 + m * m / (kTdLimit * kTdLimit));
+                }
+                float lod1 = tdLod(d1x, d1y, vec2(textureSize(tex1, 0)));
+                float dMean = textureLod(tex1, vUV1, 16.0).a * 2.0; // the 1x1 mip: the texture's mean
+                float dev = detail - dMean;
+                float antiTile = litDetail.z * clamp(lod1, 0.0, 1.0) * fade;
+                if (antiTile > 0.0) {
+                    mat2 M = mat2(0.6, -0.8, 0.8, 0.6) * 0.87;
+                    float dB = textureGrad(tex1, M * vUV1 + vec2(0.31, 0.57), M * d1x, M * d1y).a * 2.0 - dMean;
+                    dev = mix(dev, (dev + dB) * 0.70710678, antiTile);
+                }
+                if (litDetail.y > 0.0) {
+                    float boost = clamp(exp2(lod1 * 0.5 * litDetail.y), 1.0, kTdKeptCap);
+                    dev *= mix(boost, 1.0, smoothstep(kTdKeptFadeStart, kTdMaxDistance, dist));
+                }
+                detail = max(dMean + dev, 0.0);
+            }
+        }
+        vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
         r0.rgb = shadeRemastered(albedo, true, ambientShare);
         r0.a = vColor.a * t0.a * constColor.a;
     } else {

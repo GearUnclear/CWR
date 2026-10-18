@@ -72,6 +72,7 @@ enum class PostShader : int
     // the world when the sun has moved (EngineGL33_SkyTable.cpp).
     SkyView,     // regions 0 and 1 of the sky-view table
     SkyViewMean, // the whole table: those two copied and each row's mean
+    LumaSharpen, // the composited frame, sharpened in brightness only, into the frame target (Sharpen, TAA off)
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -214,17 +215,23 @@ enum : int
     AtmoCloudSun = 65, // rgb sun light on the sky clouds (linear), w sky light on them (linear; the table's colour)
     AtmoGlow = 66,     // rgb classic dome sun glow (display, SunSkyColor), w sky saturation
     AtmoDome = 67,     // rgb classic dome light (display, SkyColor), w hue (0 the original hue relit, 1 physical)
-    Count = 68,
+    // 68-76: allocated to features still to land (LitConstPlanned Sky to
+    // Canopy); one padding member in the block until they do.
+    Planned = 68,
+    Detail = 77, // terrain detail (B11): x self-detail strength, y detail kept, z anti-tiling, w land draw
+    Count = 78,
 };
 constexpr int MaxLights = 8;
 constexpr int ReservedCount = 3;
+constexpr int PlannedCount = Detail - Planned;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
 static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
 static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
 static_assert(SkyRight == Reserved + ReservedCount, "LitConst sky slots follow the reserved ones");
-static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
+static_assert(Planned == AtmoDome + 1, "the planned padding follows the sky slots");
+static_assert(Count == Detail + 1, "LitConst size out of sync");
 } // namespace LitConst
 
 // The slots allocated to the features still to land (INTEGRATION-PLAN.md
@@ -233,7 +240,8 @@ static_assert(Count == AtmoDome + 1, "LitConst size out of sync");
 // feature moves its rows into LitConst, declares them in LitConstantsBlock()
 // (a slot below it that has not landed yet becomes a padding member there) and
 // raises LitConst::Count, which the upload and the shaders follow. A7 landed
-// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved.
+// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved; B11
+// landed the terrain detail at 77, so 68 to 76 are the padding member litPlanned.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
@@ -248,12 +256,14 @@ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
 constexpr int Water0 = 74;       // water: wave, swell, ripple, sky weight
 constexpr int Water1 = 75;       // water: sheen, glint, sparkle
 constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
-constexpr int Detail = 77;       // texsharp: terrain detail constants
-constexpr int Haze = 78;         // haze: the analytic fallback for blended surfaces
-constexpr int End = 79;          // one past the last planned slot
+// 77: texsharp's terrain detail landed (LitConst::Detail, B11).
+constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
+constexpr int End = 79;  // one past the last planned slot
 static_assert(MatClass == LitConst::Reserved && Pcss == LitConst::Reserved + LitConst::ReservedCount - 1,
               "the planned slots below the sky pass are the reserved padding");
-static_assert(Sky == LitConst::Count, "the other planned slots follow the declared ones");
+static_assert(Sky == LitConst::Planned && Canopy == LitConst::Detail - 1,
+              "the planned slots between the sky pass and the terrain detail are the planned padding");
+static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");
 } // namespace LitConstPlanned

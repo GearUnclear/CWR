@@ -86,6 +86,10 @@ struct PostFrameInputs
     // (TemporalAA.hpp). The resolve and its sharpen then run unless this frame
     // turned out to be a vehicle interior or to carry a screen overlay.
     bool temporal = false;
+    // The luma sharpen (B11): the sharpen switch and its frame gate are on (so
+    // TAA is not running this frame) and its strength is above 0. The Sharpen
+    // stage then runs alone, on the composited frame.
+    bool lumaSharpen = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -108,7 +112,9 @@ struct PostStagePlan
 // composite, which copies the resolved frame back as it always has. Each other
 // stage runs when its own gate says so. Temporal and Sharpen run together: the
 // composite then draws into the TAA input instead of the frame target, and
-// the sharpen writes the resolved frame back into every sample of it.
+// the sharpen writes the resolved frame back into every sample of it. With TAA
+// off the luma sharpen asks for the pass and runs the Sharpen stage alone, on
+// the composite's output in the same TAA input; never both sharpens.
 PostStagePlan PlanPostStages(const PostFrameInputs& in);
 
 } // namespace Poseidon::remaster

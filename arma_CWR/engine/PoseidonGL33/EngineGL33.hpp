@@ -803,6 +803,13 @@ class EngineGL33 : public Engine
     void UploadLitShadowDelta();
     void UploadLitLights(const LightList& lights, float nightEffect);
     void SetLitOpaque(bool opaque);
+    // The terrain detail (B11) runs on the land only: the land and the sea are
+    // both drawn by PSDetail, the land with the DetailTexture bit, the sea with
+    // SpecularTexture. Sets litDetail.w for the draw ApplyPassState prepares.
+    void SetLitTerrainDraw(bool land);
+    // ApplyPassState, for a PSDetail draw: the land or the sea, from the
+    // draw's multitexture stage (EngineGL33_State.cpp, next to SetTexture's).
+    void SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec);
     // Writes slots [first, first + count) of the CPU LitConstants block to its
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).
@@ -843,13 +850,14 @@ class EngineGL33 : public Engine
         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
         unsigned int progLinearDepth = 0, progDebugDepth = 0;
         // TAA (EngineGL33_PostTemporal.cpp): the composite's output when the
-        // resolve runs (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
+        // Sharpen stage runs, after the resolve or alone (RGBA8), the history ping-pong (RGBA16F: rgb colour, a
         // view depth in metres) and the opaque world copied before the
         // translucent objects (RGBA8, the particle mask).
         unsigned int taaInTex = 0, taaInFbo = 0;
         unsigned int histTex[2] = {}, histFbo[2] = {};
         unsigned int opaqueTex = 0, opaqueFbo = 0;
         unsigned int progTaa = 0, progTaaSharpen = 0;
+        unsigned int progLumaSharpen = 0; // the luma sharpen with TAA off (B11)
         bool programsTried = false;
         bool unavailable = false;
     } _post;

@@ -24,7 +24,7 @@ constexpr PostStageInfo kStages[] = {
     {PostStage::CombatScatter, "scatter", "B4", false, false, Mark::CombatScatterEnd, Section::CombatScatter},
     {PostStage::Composite, "composite", "A3", true, false, Mark::CompositeEnd, Section::Composite},
     {PostStage::Temporal, "taa", "A5", true, false, Mark::TemporalEnd, Section::Temporal},
-    // A5 lands TAA's sharpen; B11's luma sharpen (with TAA off) joins it.
+    // A5 landed TAA's sharpen; B11's luma sharpen (with TAA off) joined it.
     {PostStage::Sharpen, "sharpen", "A5", true, false, Mark::SharpenEnd, Section::Sharpen},
     {PostStage::DebugView, "debugview", "A3", true, true, Mark::DebugViewEnd, Section::DebugView},
 };
@@ -78,8 +78,8 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     const bool debugDepth = in.debugView == kDebugViewLinearDepth;
     // The stages that can ask for the pass ask by their knob, switch or debug
     // view, whatever this frame's conditions then decide for them.
-    const bool asked =
-        in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth || in.temporal;
+    const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
+                       in.temporal || in.lumaSharpen;
     if (!asked)
         return plan;
 
@@ -101,6 +101,9 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // world: such a frame goes out as drawn and the history starts again.
     if (in.temporal && in.worldDepth && in.glow)
         plan.runs |= Bit(PostStage::Temporal) | Bit(PostStage::Sharpen);
+    // With TAA off, the luma sharpen: the same stage, alone.
+    else if (in.lumaSharpen)
+        plan.runs |= Bit(PostStage::Sharpen);
     if (debugDepth)
         plan.runs |= Bit(PostStage::DebugView);
 

@@ -311,8 +311,9 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         CHECK(GetKeyValue(t, *k) == 0.3f);
         CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.3,baseline"), *k) == sub.value);
     }
-    // Only the landed switches have sub-knobs yet: every knob with a parent is
-    // TAA's or the sky table's (A7, test_atmosphere.cpp), three each.
+    // Every knob with a parent sits under a landed feature switch, in its
+    // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp)
+    // and texsharp's two (B11).
     int children = 0;
     int taaChildren = 0;
     for (int i = 0; i < LightingKeyCount(); ++i)
@@ -322,13 +323,63 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
             continue;
         INFO(k.key);
         const std::string_view parent(k.parent);
-        CHECK((parent == "taa" || parent == "atmosphere"));
-        CHECK(FindFeature(k.parent) != nullptr);
+        CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen"));
+        REQUIRE(FindFeature(k.parent) != nullptr);
+        CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
         taaChildren += parent == "taa" ? 1 : 0;
         ++children;
     }
     CHECK(taaChildren == 3);
-    CHECK(children == 6);
+    CHECK(children == 8);
+}
+
+TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
+          "[remaster][FeatureSwitches][TerrainDetail]")
+{
+    // B11 makes terrainDetail and sharpen do something: they are no longer
+    // inert, and the overlay shows where their GPU time goes (the ground draw,
+    // the post pass's sharpen stage).
+    const FeatureInfo& detail = GetFeatureInfo(Feature::TerrainDetail);
+    const FeatureInfo& sharpen = GetFeatureInfo(Feature::Sharpen);
+    CHECK(detail.landed);
+    CHECK(sharpen.landed);
+    CHECK(std::string_view(detail.step) == "B11");
+    CHECK(std::string_view(sharpen.step) == "B11");
+    CHECK(std::string_view(detail.gpuSection) == "ground");
+    CHECK(std::string_view(sharpen.gpuSection) == "sharpen");
+
+    // Plan 3.1's sub-knob detailStrength 1.5 under terrainDetail, and the luma
+    // sharpen's strength 0.3 (the research's CAS 0.3) under sharpen, both in
+    // the texsharp group.
+    struct Sub
+    {
+        const char* key;
+        const char* parent;
+        float value;
+    };
+    for (const Sub& sub : {Sub{"detailStrength", "terrainDetail", 1.5f}, Sub{"sharpenStrength", "sharpen", 0.3f}})
+    {
+        INFO(sub.key);
+        const LightingKey* k = FindLightingKey(sub.key);
+        REQUIRE(k != nullptr);
+        CHECK(k->kind == KeyKind::Knob);
+        REQUIRE(k->parent != nullptr);
+        CHECK(std::string_view(k->parent) == sub.parent);
+        CHECK(std::string_view(k->group) == "texsharp");
+        CHECK(KeyDefault(*k) == sub.value);
+        const LightingTuning t = Apply(std::string("remastered,") + sub.key + "=0.7");
+        CHECK(GetKeyValue(t, *k) == 0.7f);
+        CHECK(GetKeyValue(Apply(std::string(sub.key) + "=0.7,baseline"), *k) == sub.value);
+    }
+
+    // triFeatureState: the terrain detail runs by day and is not inert.
+    const LightingTuning t = Apply("remastered");
+    const FeatureGates g = ComputeFeatureGates(Noon(), t);
+    const std::string s = FeatureStateString(t, g);
+    INFO(s);
+    CHECK(s.find(" terrainDetail=1:on:per-terrain-fragment-within-300-m ") != std::string::npos);
+    CHECK(s.find(" sharpen=1:off:TAA-sharpens") != std::string::npos);
+    CHECK(s.find("sharpen=1:off:TAA-sharpens:inert") == std::string::npos);
 }
 
 TEST_CASE("Feature gates: the light list runs with a lamp at night or a combat light", "[remaster][FeatureGates]")
@@ -597,13 +648,13 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have landed, nothing else has",
+TEST_CASE("Feature switches: the frame-cost switches, TAA, the sky table and texsharp have landed, nothing else has",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
     // classic): triFeatureState no longer marks them inert, and the overlay
     // shows the opaque objects' GPU section for them. A5 lands taa, A7
-    // atmosphere.
+    // atmosphere, B11 terrainDetail and sharpen.
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -614,10 +665,11 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
         const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
         const bool taa = info.id == Feature::Taa;
         const bool atmosphere = info.id == Feature::Atmosphere;
-        CHECK(info.landed == (perf || taa || atmosphere));
+        const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
+        CHECK(info.landed == (perf || taa || atmosphere || texsharp));
         if (info.landed)
         {
-            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : "A7"));
+            CHECK(std::string_view(info.step) == (perf ? "A4" : taa ? "A5" : atmosphere ? "A7" : "B11"));
             CHECK(sections.count(info.gpuSection) == 1);
         }
     }
@@ -627,7 +679,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA and the sky table have
     INFO(s);
     CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
     CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
-    CHECK(s.find("landed=4/26") != std::string::npos);
+    CHECK(s.find("landed=6/26") != std::string::npos);
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

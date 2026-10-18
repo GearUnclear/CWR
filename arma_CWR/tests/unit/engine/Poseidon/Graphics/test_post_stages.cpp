@@ -257,6 +257,63 @@ TEST_CASE("Post stages: the TAA resolve and its sharpen run together on a jitter
     CHECK(static_cast<int>(PostStage::Temporal) > static_cast<int>(PostStage::Composite));
 }
 
+TEST_CASE("Post stages: with TAA off the luma sharpen runs the Sharpen stage alone",
+          "[Graphics][remaster][PostStages][LumaSharpen]")
+{
+    // Off (the sharpen switch, its gate or its strength): the plan of before.
+    PostFrameInputs in = Shipped();
+    const std::uint32_t before = PlanPostStages(in).runs;
+    in.lumaSharpen = true;
+    PostStagePlan plan = PlanPostStages(in);
+    CHECK(plan.runs == (before | Mask({PostStage::Sharpen})));
+    CHECK_FALSE(plan.Runs(PostStage::Temporal));
+    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
+
+    // It asks for the pass on its own.
+    PostFrameInputs bare;
+    bare.lumaSharpen = true;
+    CHECK(PlanPostStages(bare).runs == Mask({PostStage::Resolve, PostStage::Composite, PostStage::Sharpen}));
+
+    // One sharpen: a jittered frame gets TAA's (the backend never asks for both).
+    in.temporal = true;
+    plan = PlanPostStages(in);
+    CHECK(plan.Runs(PostStage::Temporal));
+    CHECK(plan.Runs(PostStage::Sharpen));
+
+    // Where TAA holds off (a vehicle interior, an optics overlay), the luma
+    // sharpen takes over (FeatureGates: "TAA gated off in an interior").
+    in.temporal = false;
+    in.worldDepth = false;
+    CHECK(PlanPostStages(in).Runs(PostStage::Sharpen));
+    in.worldDepth = true;
+    in.glow = false;
+    CHECK(PlanPostStages(in).Runs(PostStage::Sharpen));
+}
+
+TEST_CASE("Post stages: the luma sharpen reads the composite and writes the frame target",
+          "[Graphics][remaster][PostStages][LumaSharpen][GL33]")
+{
+    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+    const std::string temporal = ReadTextFile(Gl33Dir() / "EngineGL33_PostTemporal.cpp");
+    REQUIRE_FALSE(post.empty());
+    REQUIRE_FALSE(temporal.empty());
+    // The composite goes to the TAA input whenever the Sharpen stage runs.
+    CHECK(CountOf(post, "DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);") == 1);
+    // The luma sharpen asks only on a frame without TAA, with its gate on.
+    CHECK(CountOf(post, "in.lumaSharpen = !taaFrame && _featureGates.computed") == 1);
+    CHECK(CountOf(post, "_featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;") == 1);
+    // The stage picks the luma sharpen when the resolve did not run, reading
+    // the composite's output.
+    const size_t at = temporal.find("void EngineGL33::PostSharpen(const PostFrame& f)");
+    REQUIRE(at != std::string::npos);
+    const std::string body = temporal.substr(at, temporal.find("\n}\n", at) - at);
+    CHECK(body.find("if (!f.plan.Runs(rm::PostStage::Temporal))") != std::string::npos);
+    CHECK(body.find("glUseProgram(p.progLumaSharpen);") != std::string::npos);
+    CHECK(body.find("BindTex(0, p.taaInTex);") != std::string::npos);
+    CHECK(body.find("glUseProgram(p.progTaaSharpen);") != std::string::npos);
+}
+
 TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
 {
     // Today the debug view is its only reader; the stages that land with a
@@ -308,31 +365,39 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
                         for (bool glow : {false, true})
                             for (float weight : {0.0f, 0.5f})
                                 for (bool temporal : {false, true})
-                                {
-                                    PostFrameInputs in;
-                                    in.ambientOcclusion = ao;
-                                    in.bloom = bloom;
-                                    in.sunShafts = shafts;
-                                    in.debugView = view;
-                                    in.worldDepth = depth;
-                                    in.glow = glow;
-                                    in.shaftWeight = weight;
-                                    in.temporal = temporal;
-                                    const PostStagePlan plan = PlanPostStages(in);
-                                    CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal);
-                                    CHECK((plan.runs & ~landed) == 0u);
-                                    // A pass that runs resolves first and composites.
-                                    if (!plan.Empty())
+                                    for (bool luma : {false, true})
                                     {
-                                        CHECK(plan.Runs(PostStage::Resolve));
-                                        CHECK(plan.Runs(PostStage::Composite));
+                                        PostFrameInputs in;
+                                        in.ambientOcclusion = ao;
+                                        in.bloom = bloom;
+                                        in.sunShafts = shafts;
+                                        in.debugView = view;
+                                        in.worldDepth = depth;
+                                        in.glow = glow;
+                                        in.shaftWeight = weight;
+                                        in.temporal = temporal;
+                                        in.lumaSharpen = luma;
+                                        const PostStagePlan plan = PlanPostStages(in);
+                                        CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma);
+                                        CHECK((plan.runs & ~landed) == 0u);
+                                        // A pass that runs resolves first and composites.
+                                        if (!plan.Empty())
+                                        {
+                                            CHECK(plan.Runs(PostStage::Resolve));
+                                            CHECK(plan.Runs(PostStage::Composite));
+                                        }
+                                        // The resolve brings its sharpen, and never runs on a
+                                        // frame drawn without the jitter. The sharpen runs
+                                        // alone only as the luma sharpen.
+                                        if (plan.Runs(PostStage::Temporal))
+                                            CHECK(plan.Runs(PostStage::Sharpen));
+                                        if (!temporal)
+                                            CHECK_FALSE(plan.Runs(PostStage::Temporal));
+                                        if (plan.Runs(PostStage::Sharpen) && !plan.Runs(PostStage::Temporal))
+                                            CHECK(luma);
+                                        if (!luma)
+                                            CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
                                     }
-                                    // The resolve and its sharpen: both or neither,
-                                    // and never on a frame drawn without the jitter.
-                                    CHECK(plan.Runs(PostStage::Temporal) == plan.Runs(PostStage::Sharpen));
-                                    if (!temporal)
-                                        CHECK_FALSE(plan.Runs(PostStage::Temporal));
-                                }
 }
 
 TEST_CASE("Post stages: the backend runs every landed stage and marks it from the table",

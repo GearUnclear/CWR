@@ -701,6 +701,15 @@ void EngineGL33::SetTexture(const TextureGL33* tex, const Poseidon::render::Lega
     SetMultiTexturing(format);
 }
 
+void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The multitexture stage of a PSDetail draw tells the land from the sea:
+    // the land's faces carry DetailTexture (the detail texture on slot 1), the
+    // sea's SpecularTexture (Landscape WaterFlags). The terrain detail (B11)
+    // runs on the land only.
+    SetLitTerrainDraw(Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture));
+}
+
 void EngineGL33::SetMultiTexturing(VFormatSet format)
 {
     if (_formatSet == format)

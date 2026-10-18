@@ -826,9 +826,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
         ++post;
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
-    // and its debug view, the TAA resolve and its sharpen, and the sky table's
-    // two passes
-    CHECK(post == 13);
+    // and its debug view, the TAA resolve and its sharpen, the sky table's
+    // two passes, and the luma sharpen
+    CHECK(post == 14);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1113,6 +1113,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litAtmoCloudSun", LC::AtmoCloudSun, 1},
         {"litAtmoGlow", LC::AtmoGlow, 1},
         {"litAtmoDome", LC::AtmoDome, 1},
+        {"litPlanned", LC::Planned, LC::PlannedCount},
+        {"litDetail", LC::Detail, 1},
     };
     // Walks the members of one declaration, slot by slot.
     auto checkBlock = [](const std::string& block)
@@ -1179,7 +1181,11 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(gl::LitConstPlanned::Pcss == static_cast<int>(LC::Reserved) + LC::ReservedCount - 1);
     CHECK(static_cast<int>(LC::SkyRight) == 61);
     CHECK(static_cast<int>(LC::AtmoDome) == 67);
-    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Count));
+    CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
+    // B11 landed the terrain detail at 77; 68 to 76 are the planned padding.
+    CHECK(static_cast<int>(LC::Detail) == 77);
+    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
+    CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
 
     // The decoded horizon range in the shader is the encoder's.
     std::ostringstream range;

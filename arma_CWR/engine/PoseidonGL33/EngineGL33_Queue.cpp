@@ -265,6 +265,12 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     {
         SetTexture(tex, spec);
     }
+
+    // PSDetail draws the land and the sea: the terrain detail runs on the land
+    // only. Other draws leave the flag as it is, so it changes only between
+    // land and sea.
+    if (d.shader == Poseidon::render::ShaderFamily::Detail)
+        SelectTerrainDetailLayer(spec);
 }
 
 void EngineGL33::QueuePrepareTriangle(const MipInfo& absMip, int specFlags)

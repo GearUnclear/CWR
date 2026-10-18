@@ -28,8 +28,9 @@
 //     hides banding;
 //   - Temporal and Sharpen (EngineGL33_PostTemporal.cpp): the TAA resolve of
 //     the jittered frame with its history, then a bounded sharpen back into
-//     the frame target. When they run the composite draws into the TAA input
-//     instead of the frame target;
+//     the frame target; with TAA off, Sharpen alone is the luma sharpen
+//     (contrast-adaptive, brightness only, B11). When Sharpen runs the
+//     composite draws into the TAA input instead of the frame target;
 //   - DebugView: a diagnostic view of a post buffer over the frame.
 // The other stages of the list (tag readout, reflections, air, combat scatter)
 // land with their features. The HUD then draws on top, untouched.
@@ -195,8 +196,9 @@ void EngineGL33::DestroyPostTargets()
 void EngineGL33::DestroyPostPrograms()
 {
     PostTargets& p = _post;
-    for (unsigned int* prog : {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts,
-                               &p.progComposite, &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen})
+    for (unsigned int* prog :
+         {&p.progAo, &p.progAoBlur, &p.progBloomDown, &p.progBloomUp, &p.progShafts, &p.progComposite,
+          &p.progLinearDepth, &p.progDebugDepth, &p.progTaa, &p.progTaaSharpen, &p.progLumaSharpen})
     {
         if (*prog)
             glDeleteProgram(*prog);
@@ -233,11 +235,12 @@ bool EngineGL33::EnsurePostResources(int w, int h)
         p.progDebugDepth = link(PostShader::DebugDepth);
         p.progTaa = link(PostShader::Taa);
         p.progTaaSharpen = link(PostShader::TaaSharpen);
+        p.progLumaSharpen = link(PostShader::LumaSharpen);
         if (vs)
             glDeleteShader(vs);
         glGenVertexArrays(1, &p.vao);
         if (!p.progAo || !p.progAoBlur || !p.progBloomDown || !p.progBloomUp || !p.progShafts || !p.progComposite ||
-            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen)
+            !p.progLinearDepth || !p.progDebugDepth || !p.progTaa || !p.progTaaSharpen || !p.progLumaSharpen)
         {
             LOG_ERROR(Graphics, "GL33 post: programs failed to build; remastered post effects disabled");
             p.unavailable = true;
@@ -419,6 +422,9 @@ void EngineGL33::EndWorldScene()
     in.shaftWeight = f.shaftWeight;
     // The world's passes were drawn with the TAA jitter (TaaWantedThisFrame).
     in.temporal = taaFrame;
+    // With TAA off this frame, the luma sharpen when its switch and gate are on.
+    in.lumaSharpen = !taaFrame && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+                     _featureGates[rm::Feature::Sharpen].on && _lighting.sharpenStrength > 0.0f;
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
@@ -596,8 +602,9 @@ void EngineGL33::PostShafts(const PostFrame& f)
 void EngineGL33::PostComposite(const PostFrame& f)
 {
     // Into the frame target (every sample gets the resolved value), or into
-    // the TAA input when the resolve runs (its sharpen then writes the frame
-    // target). A stage that did not run this frame reads as its 1x1 stand-in.
+    // the TAA input when the Sharpen stage runs (after the resolve, or alone as
+    // the luma sharpen), which then writes the frame target. A stage that did
+    // not run this frame reads as its 1x1 stand-in.
     const PostTargets& p = _post;
     const rm::PostStagePlan& plan = f.plan;
     glUseProgram(p.progComposite);
@@ -622,7 +629,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-    DrawTo(plan.Runs(rm::PostStage::Temporal) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
+    DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
 }
 
 void EngineGL33::PostDebugView(const PostFrame& f)

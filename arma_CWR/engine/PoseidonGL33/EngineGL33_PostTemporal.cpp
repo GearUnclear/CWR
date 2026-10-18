@@ -16,6 +16,8 @@
 //     mask;
 //   - the post pass runs the Temporal stage (the resolve into the history)
 //     and the Sharpen stage (the history back into the frame target).
+// With TAA off the Sharpen stage can run alone: the luma sharpen of step B11
+// (the sharpen switch), on the composited frame.
 // Any frame without a resolve breaks the history chain (TaaHistoryUsable): the
 // next resolve starts from its own frame, as does a camera cut or a new
 // target size. The shadow-map depth pass has its own shaders and is never
@@ -27,6 +29,8 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+
+#include <algorithm>
 
 namespace rm = Poseidon::remaster;
 using namespace Poseidon::gl33post;
@@ -165,9 +169,21 @@ void EngineGL33::PostTemporal(const PostFrame& f)
 
 void EngineGL33::PostSharpen(const PostFrame& f)
 {
+    const PostTargets& p = _post;
+    if (!f.plan.Runs(rm::PostStage::Temporal))
+    {
+        // TAA off: the luma sharpen (B11) of the composited frame into every
+        // sample of the frame target.
+        glUseProgram(p.progLumaSharpen);
+        SetInt(p.progLumaSharpen, "srcTex", 0);
+        BindTex(0, p.taaInTex);
+        const float strength = std::clamp(_lighting.sharpenStrength, 0.0f, 1.0f);
+        Set4(p.progLumaSharpen, "sharpen", strength, static_cast<float>(f.w), static_cast<float>(f.h), 0.0f);
+        DrawTo(_ssaaFbo, f.w, f.h);
+        return;
+    }
     // The resolved frame (the history the resolve just wrote) into every
     // sample of the frame target.
-    const PostTargets& p = _post;
     glUseProgram(p.progTaaSharpen);
     SetInt(p.progTaaSharpen, "srcTex", 0);
     BindTex(0, p.histTex[_taa.historyIdx]);

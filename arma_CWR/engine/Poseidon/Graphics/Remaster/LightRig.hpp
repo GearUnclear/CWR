@@ -130,6 +130,11 @@ struct LightingTuning
     float atmoHue = 0.5f;
     float atmoSat = 1.15f;
     float atmoHaze = 1.0f;
+    // Terrain detail (features.terrainDetail, TerrainDetail.hpp): the strength
+    // of the grain the land takes from its own texture. The luma sharpen
+    // (features.sharpen, with TAA off): its contrast-adaptive strength, 0..1.
+    float detailStrength = 1.5f;
+    float sharpenStrength = 0.3f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

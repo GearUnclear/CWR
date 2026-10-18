@@ -56,7 +56,8 @@ TEST_CASE("Spec-bit boundary: typed spec reads in the backend match the whitelis
         // PrepareMeshTL time.
         {"EngineGL33_Mesh.cpp", {"Material::DisableSun", "Routing::IsColored"}},
         // Multitexture stage selection in SetTexture — slot-1 binding
-        // decision, upstream of the descriptor.
+        // decision, upstream of the descriptor. SelectTerrainDetailLayer reads
+        // the same stage to tell the land from the sea (terrain detail, B11).
         {"EngineGL33_State.cpp", {"Backend::DetailTexture", "Backend::SpecularTexture", "Backend::GrassTexture"}},
     };
 

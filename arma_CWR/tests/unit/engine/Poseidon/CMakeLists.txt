@@ -170,6 +170,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_post_stages.cpp
     Graphics/test_temporal_aa.cpp
     Graphics/test_atmosphere.cpp
+    Graphics/test_terrain_detail.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp

@@ -146,7 +146,9 @@ As built in A1 (corrections to the bullets above):
   own rows with `parent` set to its switch, so `triSetLighting` never accepts a knob that does
   nothing. A5 added the first (`MakeSubKnob` in `FeatureSwitches.cpp`): `taaSharpen` 0.5,
   `taaMipBias` -0.5 and `taaAlpha` 0.1, floats of `LightingTuning`, grouped under the track
-  (`temporal`) with `parent` `taa`.
+  (`temporal`) with `parent` `taa`. B11 added `detailStrength` 1.5 under `terrainDetail` and
+  `sharpenStrength` 0.3 (the luma sharpen's CAS strength, not in the table above) under
+  `sharpen`, both in the `texsharp` group.
 - `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
   never `;`, so it rides in the UDCAP lines as `feat=`).
@@ -282,6 +284,18 @@ saturation), not `AtmoCloudAmb`: the sky light on the clouds is a luminance (`At
 colour the shader takes from the table. `SkyFwd.w` is the sky mode of the draws that follow (0 the
 world, 1 the dome, 2 the sky clouds; `Poseidon::RemasterSky`), `SkyRight.w` the Mie asymmetry,
 `SkyUp.w` free.
+
+As built in B11 (a parallel lane on 193c735): `Detail` landed at 77 as planned. `LitConst` gained
+`Planned` = 58 (`PlannedCount` = 19 slots, declared in the block as one padding array
+`vec4 litPlanned[19]`), `Detail` = 77 and `Count` = 78; on top of A7 the padding is 68 to 76
+(`Planned` = 68, `litPlanned[9]`, after A7's `litReserved[3]` and sky slots); `LitConstPlanned` keeps the rows that
+have not landed (`Haze` 78 is now at `Count`). A lane that lands a lower slot splits the padding
+array around it. `litDetail.xyz` is per frame (self-detail strength, detail-kept rate,
+anti-tiling weight; zero while the switch or its gate is off) and `litDetail.w` per draw (1 for
+the land, 0 for the sea: both are drawn by PSDetail until B5 moves the sea out). The w flag is set
+in `ApplyPassState` from the draw's multitexture stage (`SelectTerrainDetailLayer` in
+`EngineGL33_State.cpp`, the land's faces carry `DetailTexture`, the sea's `SpecularTexture`) and
+uploads one slot only when it changes, a few times a frame.
 
 ### 3.4 Texture units
 
@@ -486,6 +500,13 @@ history 3, the world as drawn 4, the opaque copy 5). The only cost outside the p
 particle mask's copy of the frame target between the opaque and the translucent objects
 (`Engine::BeginTranslucentObjects`, called from `Scene::DrawObjectsAndShadowsPass2`), which lands
 in the `world` section.
+
+As built in B11: the luma sharpen is the `Sharpen` stage run alone. `PostFrameInputs::lumaSharpen`
+(the `sharpen` switch and gate on this frame, `sharpenStrength` above 0, no TAA frame) asks for
+the pass by itself; the composite then draws into `taaInTex` (whenever `Sharpen` runs, not only
+under `Temporal`), and `PostSharpen` runs `psPostLumaSharpen` (CAS 3x3 on brightness only) from it
+into every sample of the frame target when the resolve did not run. Following A1's gate contract
+the luma sharpen also takes over where TAA holds off (a vehicle interior, an optics overlay).
 
 ### 3.7 Porting method
 
@@ -1615,6 +1636,61 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
 - **GPU gating**: terrain within 300 m.
 - **Tests**: glslang; a C++ mirror of the cell rotation and limiter.
 - **Effort**: 1.5 days.
+
+**Result (2026-10-18, uncommitted change on 193c735 in the scratch copy `gr-B11`, a parallel lane;
+evidence in `tmp/integration/B11/` of the graphics-remaster worktree, gitignored; light gate).**
+
+- Built: `Graphics/Remaster/TerrainDetail.{hpp,cpp}` (pure: the shape constants and the C++ mirror
+  of the terrain main's math: cell hash, rotation and patch position, variance-preserving blend,
+  soft limiter, near and far fades, detail-kept boost, anti-tiling weight, frame constants); the
+  glsl7 self-detail ported into `s_psDetailRemasterMain` (zoom 6, 2-texel cells, 4 rotated cells,
+  limiter 0.4, strength 1.5) with detail kept (`K2` rate 2, capped at 2x) and the anti-tiling
+  sample (`K1` 1); the `Detail` slot and the per-draw land flag (3.3); the luma CAS 0.3 as the
+  `Sharpen` stage with TAA off (`psPostLumaSharpen`, 3.6); `terrainDetail` and `sharpen` landed
+  with `detailStrength` and `sharpenStrength` (3.1). Gate: as A1 wrote it (terrain detail
+  "always", the luma sharpen only when TAA does not run); the 300 m range is in the shader.
+- Corrections to the bullets above. The first in-game look showed the self-detail painting soft
+  blotches over the near path (2 to 8 m: the zoomed patch is itself magnified there) and the
+  anti-tiling sample smearing the authored pebbles. The self-detail now fades in with the zoomed
+  patch's mip level (-3.5 to -2.5, 8 to 16 m on flat ground from a standing eye at 1080p) and the
+  anti-tiling sample enters only as the detail texture minifies (mip 0 to 1); the near path keeps
+  its authored look. Everything fades out between 220 and 300 m (the boost from 150 m: the
+  research's 400 m would step at the 300 m skip). The sea is drawn by PSDetail too (no `IsWater`):
+  the backend flags the land's draws (3.3), and the sea band of `coastline_sunset` is unchanged
+  (1.5% of its pixels over 2 levels, the TAA repeat noise; mean within 0.01 levels). Roads are
+  objects (PSNormal), never PSDetail, so they are skipped by construction; paths painted into
+  terrain textures cannot be told apart before B7's terrain classes and are not skipped. Not
+  ported: the optional 3-cell hex grid (the 4-cell look is the approved one) and `StreamFix`
+  (identity at the target render scale 1.0, no visible change in the research at 1.5, and a
+  residency change outside the switch registry; a follow-up for supersampled profiles).
+  Strength 1.5 stays: the low-frequency contrast of the ground band (luma std after a 10 px blur)
+  moved +0.7% on the Eden meadow, 0.0% on the hero view and +0.1% at noon, so the step adds grain,
+  not olive mottling (1.2 was the plan's fallback).
+- Off equals before (item 5): with TAA off a shot repeats to the pixel, and
+  `remastered,taa=0,terrainDetail=0,sharpen=0` on the B11 build against `remastered,taa=0` on the
+  base build at the hero view differs in 0 pixels in every band. With TAA on a shot is not
+  repeatable (the jitter phase at the shot): the base build's inert off and on at the hero view
+  differ in 81,069 pixels over 2 levels; the B11 build's off against the base build's shots in
+  57,490 and 73,568; `noon_fields` in 48.
+- On against off (TAA on, 1080p, 4x MSAA): ground band (rows 591 to 1080) mean luma +0.3% on the
+  hero view, +0.4% at noon, +0.1% on the meadow, +0.04% at `lowsun_fp`, +0.3% on the beach; R/G
+  and G/B unchanged to three decimals; sharpness (mean absolute Laplacian of the luma) +38.7%,
+  +17.0%, +5.9%, +0.5% (near gravel, faded) and +15.8%. With TAA off the terrain detail gives
+  +37% at the hero view and the luma sharpen a further +89%.
+- Motion (the walk of 7.3, 0.25 m per frame, 40 frames, TAA on): frame-to-frame change over
+  spatial detail 1.09 to 1.11x of off per band, second temporal difference over spatial detail
+  1.13 to 1.17x; the difference images show the grain moving with the ground in cell-sized blobs,
+  no single-pixel sparkle (`video/b11walk/b11walk__sbs.mp4`).
+- Cost (single readings, not a quiet machine): the `ground` section +0.29 ms (hero) and +0.37 ms
+  (noon) as medians of 3 interleaved rounds, +0.27 to +0.31 ms with TAA off at the hero view; the
+  luma sharpen 0.05 ms. The base build's inert off and on frame medians differed by +1.7 and
+  +3.3 ms in the same kind of rounds, so frame totals are noise here.
+- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
+  `EngineGL33_State.cpp`, not clean at the base, by `clang-format-diff.py` on the changed lines);
+  unit gate tags plus `[FeatureSwitches],[FeatureGates],[PostStages],[TemporalAA],[TerrainDetail],
+  [LumaSharpen]` 505/505; full suite the 6 known localisation failures only; smoke_abel 1/1 with
+  KHR_debug ids 131169, 131154 and 131218 only. 12 of 13 mutations turn their cases red (the 13th,
+  the luma sharpen also asked on a TAA frame, plans the same stages).
 
 ---
 
