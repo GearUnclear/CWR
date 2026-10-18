@@ -316,6 +316,55 @@ TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sam
     REQUIRE(between.find("glActiveTexture(") == std::string::npos);
 }
 
+// Unit 6 (kShadowRawUnit, B1's soft shadows) holds the same cascade array under
+// a raw-depth sampler: the same two ways to lose a complete array there, and
+// the same cures.
+TEST_CASE("Shadow raw-depth unit 6 holds the stand-in from init and each new cascade array",
+          "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
+{
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    REQUIRE_FALSE(lighting.empty());
+    const std::string init = FunctionBody(lighting, "void EngineGL33::InitLightingResources()");
+    REQUIRE_FALSE(init.empty());
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowRawUnit);";
+    const std::string bindDummy = "glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);";
+    const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
+    REQUIRE(made != std::string::npos);
+    const size_t unit6 = init.find(unitCall, made);
+    REQUIRE(unit6 != std::string::npos);
+    const size_t bind = init.find(bindDummy, unit6);
+    REQUIRE(bind != std::string::npos);
+    std::string between = init.substr(unit6 + unitCall.size(), bind - unit6 - unitCall.size());
+    CAPTURE(between);
+    REQUIRE(between.find("ActiveUnit(") == std::string::npos);
+    // Its sampler reads raw depth (no comparison) and stays on the unit.
+    CHECK(init.find("glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);") != std::string::npos);
+    CHECK(init.find("glBindSampler(kShadowRawUnit, _shadowRawSampler);") != std::string::npos);
+
+    // Every lit pass binds the live array there, or the stand-in.
+    const std::string bindTex = FunctionBody(lighting, "void EngineGL33::BindLightingTextures()");
+    const size_t unit6b = bindTex.find(unitCall);
+    REQUIRE(unit6b != std::string::npos);
+    CHECK(bindTex.find("glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);", unit6b) !=
+          std::string::npos);
+
+    // A recreated array is bound on unit 6 too, straight after its creation,
+    // before anything can sample the deleted one's texture 0 there.
+    const std::string depth = ReadTextFile(Gl33Dir() / "EngineGL33_ShadowDepth.cpp");
+    const std::string ensure = FunctionBody(depth, "bool EnsureArrayTarget(int res, int layers)");
+    REQUIRE_FALSE(ensure.empty());
+    const size_t created = ensure.find("glTexImage3D(GL_TEXTURE_2D_ARRAY");
+    REQUIRE(created != std::string::npos);
+    const size_t unit6e = ensure.find(unitCall, created);
+    REQUIRE(unit6e != std::string::npos);
+    const size_t bindNew = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit6e);
+    REQUIRE(bindNew != std::string::npos);
+    between = ensure.substr(unit6e + unitCall.size(), bindNew - unit6e - unitCall.size());
+    CAPTURE(between);
+    CHECK(between.find("ActiveUnit(") == std::string::npos);
+    CHECK(ensure.find("return false", created) > bindNew); // bound even if the FBO then fails
+}
+
 TEST_CASE("The texture-array target is unbound only on the upload unit",
           "[Graphics][GL33][StateCacheAudit][ShadowSampler]")
 {

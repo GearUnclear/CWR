@@ -27,10 +27,12 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::lightTiles, ""},
     {Feature::Atmosphere, "atmosphere", "Sky table (dome and fog colour)", "atmosphere", "Sky and air", "A7", true,
      &FS::atmosphere, "sky"},
-    {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", false,
-     &FS::treeShadows, ""},
-    {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", false,
-     &FS::softShadows, ""},
+    // B1 (shadows): the casters' cost shows in the shadow depth pass, the soft
+    // filter's in the world pass that samples it.
+    {Feature::TreeShadows, "treeShadows", "Tree and building sun shadows", "shadows", "Light and shadow", "B1", true,
+     &FS::treeShadows, "shadow"},
+    {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", true,
+     &FS::softShadows, "world"},
     {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", false, &FS::lowSunRig, ""},
     {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", false,
      &FS::crownCanopy, ""},
@@ -179,6 +181,14 @@ struct KeyTable
                         "grain from the square's own texture; 2 starts to look scaly", &LT::detailStrength, 0.0f, 3.0f),
             MakeSubKnob(Feature::Sharpen, "sharpenStrength", "Luma sharpen strength",
                         "contrast-adaptive, brightness only; runs only with TAA off", &LT::sharpenStrength, 0.0f, 1.0f),
+            MakeSubKnob(Feature::TreeShadows, "leafBias", "Leaf shadow bias",
+                        "shadow-map texels a leaf's own lookup moves toward the sun; 0 = striped crowns", &LT::leafBias,
+                        0.0f, 8.0f),
+            MakeSubKnob(Feature::SoftShadows, "sunSize", "Sun size",
+                        "apparent diameter (deg): 0.53 real, 1 shipped; wider = softer far shadow ends", &LT::sunSize,
+                        0.0f, 3.0f),
+            MakeSubKnob(Feature::SoftShadows, "shadowReach", "Soft shadow reach",
+                        "metres along the sun ray over which a shadow keeps softening", &LT::shadowReach, 2.0f, 80.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

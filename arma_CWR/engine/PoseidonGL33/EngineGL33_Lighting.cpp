@@ -2,10 +2,11 @@
 //
 // The remastered program set (EngineGL33_LightingShaders.cpp) reads the light
 // rig, the per-draw material and the local lights from the LitConstants block
-// (binding 3), the shadow map through a comparison sampler on unit 2, the
-// terrain horizon map on units 3 and 4 and the cloud noise on unit 5. Selection
-// between the remastered and classic sets happens in DoSelectPixelShader via
-// SelectProgram; Classic leaves every classic upload and program untouched.
+// (binding 3), the shadow map through a comparison sampler on unit 2 (and as
+// raw depth on unit 6), the terrain horizon map on units 3 and 4 and the cloud
+// noise on unit 5. Selection between the remastered and classic sets happens
+// in DoSelectPixelShader via SelectProgram; Classic leaves every classic upload
+// and program untouched.
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
@@ -13,6 +14,7 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -146,6 +148,10 @@ void EngineGL33::InitLightingResources()
     // unit until a shadow map replaces it.
     GL33Bind::ActiveUnit(kShadowMapUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
+    // The same rule for unit 6, where the remastered programs read the array
+    // as raw depth (the soft shadows' blocker search).
+    GL33Bind::ActiveUnit(kShadowRawUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     GL33Bind::ActiveUnit(0);
     // The sky table's unit 8 gets its stand-in the same way.
     InitSkyTable();
@@ -157,6 +163,16 @@ void EngineGL33::InitLightingResources()
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+
+    // Raw depth: nearest texel, no comparison. Unit 6 keeps it for good; no
+    // other program samples that unit.
+    glGenSamplers(1, &_shadowRawSampler);
+    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(_shadowRawSampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+    glBindSampler(kShadowRawUnit, _shadowRawSampler);
 
     // The map (if any) belongs to the landscape, not the context: re-upload it.
     _terrainMapDirty = _terrainMap != nullptr;
@@ -191,6 +207,12 @@ void EngineGL33::DeinitLightingResources()
         glBindSampler(kShadowMapUnit, 0);
         glDeleteSamplers(1, &_shadowCompareSampler);
         _shadowCompareSampler = 0;
+    }
+    if (_shadowRawSampler)
+    {
+        glBindSampler(kShadowRawUnit, 0);
+        glDeleteSamplers(1, &_shadowRawSampler);
+        _shadowRawSampler = 0;
     }
     if (s_litUBO)
     {
@@ -308,10 +330,14 @@ void EngineGL33::BindLightingTextures()
     if (!_remasterPrograms)
         return;
     const bool map = _terrainHorizonTex && _terrainHeightTex;
+    const bool shadowMap = ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0;
     GL33Bind::ActiveUnit(kShadowMapUnit);
-    if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
+    if (!shadowMap)
         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     glBindSampler(kShadowMapUnit, _shadowCompareSampler);
+    GL33Bind::ActiveUnit(kShadowRawUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, shadowMap ? _shadowMapTex : _dummyDepthArray);
+    glBindSampler(kShadowRawUnit, _shadowRawSampler);
     GL33Bind::ActiveUnit(kTerrainHorizonUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
@@ -513,6 +539,12 @@ void EngineGL33::UploadLitFrameConstants()
     // The shadow map was rendered from where the camera was then.
     SetSlot(LitConst::ShadowDelta, cam.X() - _shadowCamPos[0], cam.Y() - _shadowCamPos[1], cam.Z() - _shadowCamPos[2],
             kShadowFilterTexels * _lighting.shadowSoftness);
+    // Sun shadows (B1): the soft filter with its per-frame turn under TAA, and
+    // the leaves' lift toward the sun; zero while their gates are off.
+    const rm::SunShadowConstants sunShadows =
+        rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
+    SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
+    SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
     const float debug =
         _lighting.debugView >= 1 && _lighting.debugView <= 3 ? static_cast<float>(_lighting.debugView) : 0.0f;
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);

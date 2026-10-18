@@ -297,6 +297,14 @@ in `ApplyPassState` from the draw's multitexture stage (`SelectTerrainDetailLaye
 `EngineGL33_State.cpp`, the land's faces carry `DetailTexture`, the sea's `SpecularTexture`) and
 uploads one slot only when it changes, a few times a frame.
 
+As built in B1 (a parallel lane on 193c735, merged onto A7 and B11): `Taa` (59) and `Pcss` (60)
+landed, so A7's padding `litReserved[3]` became `vec4 litReserved` for `MatClass` alone
+(`LitConst::Reserved` 58, `ReservedCount` 1) followed by `litTaa` and `litPcss`; `Count` stays 78.
+`LitConstPlanned` keeps `MatClass` (static_assert: the reserved padding). `litTaa` is per frame:
+x the soft filter's per-frame turn, y 1 in a TAA frame, z taps per frame there, w tan of the sun's
+angular radius (0 = the stock filter); `litPcss` x the search reach (m), y the smallest filter
+radius (texels), z the soft strength (the gate-edge fade), w the leaf lift (texels).
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -342,6 +350,12 @@ RGBA32F stand-in bound at `InitLightingResources` (`InitSkyTable`) until the fir
 built; `BindLightingTextures` binds the table or the stand-in on every world pass. The two passes
 that build the table read their inputs with `texelFetch` on unit 0 and, while the table itself is
 not bound, unit 8, and rebind the table after them.
+
+As built in B1: `kShadowRawUnit` (6) is in use, with its `kLitSamplers` row (`shadowDepth`) and a
+NEAREST, non-compare sampler object kept on the unit. It holds the depth stand-in from
+`InitLightingResources` on; `BindLightingTextures` binds the cascade array (or the stand-in) on
+every world pass and `EnsureArrayTarget` rebinds it the moment it recreates the array, the F3 rule
+of unit 2. The `[ShadowSampler]` audit case for unit 6 is in `test_gl_state_cache_audit.cpp`.
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 

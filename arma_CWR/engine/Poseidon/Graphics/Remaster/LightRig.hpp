@@ -70,7 +70,7 @@ struct FeatureSet
     float taa = 1.0f;             // A5 temporal anti-aliasing
     float lightTiles = 1.0f;      // A6 one tiled light list for every local light
     float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
-    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map
+    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map, leaves without self-shadow stripes
     float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
     float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
     float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
@@ -135,6 +135,15 @@ struct LightingTuning
     // (features.sharpen, with TAA off): its contrast-adaptive strength, 0..1.
     float detailStrength = 1.5f;
     float sharpenStrength = 0.3f;
+    // Sun shadows (features.softShadows and features.treeShadows,
+    // SunShadows.hpp): the sun's apparent diameter in degrees for the soft
+    // shadows (0.53 is the real sun; 1 keeps contact sharp and long shadow
+    // ends soft), how far along the sun ray a blocker still softens its shadow
+    // more (metres; the penumbra stops growing there), and how many
+    // shadow-map texels a leaf's own shadow lookup moves toward the sun.
+    float sunSize = 1.0f;
+    float shadowReach = 40.0f;
+    float leafBias = 6.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

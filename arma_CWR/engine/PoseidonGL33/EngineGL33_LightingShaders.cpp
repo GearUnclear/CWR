@@ -330,7 +330,9 @@ layout(std140) uniform LitConstants {
     vec4 litLightColor[8];// 34-41: rgb diffuse radiance, w = spotlight
     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
     vec4 litLightDir[8];  // 50-57: xyz beam direction
-    vec4 litReserved[3];  // 58-60: allocated to features still to land (materials, temporal, shadows)
+    vec4 litReserved;     // 58: planned per-draw material class (padding until it lands)
+    vec4 litTaa;          // 59: x soft-shadow tap turn, y 1 = TAA frame, z taps per frame, w tan(sun radius)
+    vec4 litPcss;         // 60: x search reach (m), y min filter (texels), z soft strength, w leaf lift (texels)
     vec4 litSkyRight;     // 61: xyz camera right * tan(fov x / 2), w Mie asymmetry g
     vec4 litSkyUp;        // 62: xyz camera up * tan(fov y / 2)
     vec4 litSkyFwd;       // 63: xyz camera forward, w sky mode (0 world, 1 dome, 2 sky clouds)
@@ -352,6 +354,7 @@ uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound i
 uniform sampler2DArray terrainHorizon;     // unit 3: horizon angles (16-bit unorm), 4 directions per layer
 uniform sampler2D terrainHeight;           // unit 4: r = height (m), g = sky visibility, ba = ground tint (r, b)
 uniform sampler2D cloudNoise;              // unit 5: equalised tileable noise
+uniform sampler2DArray shadowDepth;        // unit 6: the cascade array again, raw depth (soft-shadow blocker search)
 uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky table; Atmosphere.hpp)
 
 in vec4 vColor;
@@ -393,6 +396,68 @@ const vec2 kPoisson[12] = vec2[](
     vec2( 0.962, -0.195), vec2( 0.473, -0.480), vec2( 0.519,  0.767), vec2( 0.185, -0.893),
     vec2( 0.507,  0.064), vec2( 0.896,  0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
 
+// The stock filter: 12 hardware comparisons on the Poisson disc, `radius` in
+// light-plane uv.
+float pcfVisibility(vec2 suv, int c, float zRef, float radius) {
+    float lit = 0.0;
+    for (int k = 0; k < 12; ++k)
+        lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), zRef));
+    return lit / 12.0;
+}
+
+// Interleaved gradient noise: a value per pixel that differs from its
+// neighbours, here the turn of the soft filter's tap pattern.
+float shadowNoise(vec2 p) {
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+// Contact-hardening soft sun shadow (PCSS, softShadows; SunShadows.hpp). The
+// sun is a disk of angular radius atan(litTaa.w). A blocker search in the raw
+// depth map (shadowDepth) finds the mean depth of what shadows the receiver
+// within litPcss.x metres along the sun ray; the penumbra in the light plane is
+// that distance times the radius' tangent, so the shadow is sharp where a
+// caster meets the ground and soft at the far end of a long evening shadow.
+// Taps are golden-angle (Vogel) spirals turned per pixel; each filter tap is a
+// hardware 2x2 comparison. Without TAA the search takes 16 taps on the near
+// tiers (8 on the frustum tiers, where it spans a few texels) and the filter
+// 12, 24 or 32 by its width; in a TAA frame (litTaa.y) 4 of each, turned anew
+// every frame (litTaa.x), and the history averages them. `zRef` is the
+// receiver's biased depth, `ts` one texel in uv, `texelWorld` one texel in
+// metres, `tanSlope` the receiver's tilt against the light (its depth rises
+// across the kernel; terrain, which never casts, passes 0).
+float pcssVisibility(vec2 suv, int c, float zRef, float ts, float texelWorld, float tanSlope) {
+    float tanA = litTaa.w;
+    float depthPerM = max(length(vec3(cascadeVP[c][0][2], cascadeVP[c][1][2], cascadeVP[c][2][2])), 1e-9);
+    bool temporal = litTaa.y > 0.5;
+    float turn = 6.2831853 * (shadowNoise(gl_FragCoord.xy) + litTaa.x);
+    float slopeDepth = tanSlope * texelWorld * depthPerM; // depth per texel of tap offset
+    float searchT = clamp(litPcss.x * tanA / texelWorld, 2.0, 48.0);
+    int nSearch = temporal ? int(litTaa.z) : (c < int(cascadeCtl.w) ? 16 : 8);
+    float z0 = texture(shadowDepth, vec3(suv, float(c))).r;
+    float bSum = 0.0;
+    float bN = 0.0;
+    if (z0 < zRef) { bSum += z0; bN += 1.0; }
+    for (int k = 0; k < 16; ++k) {
+        if (k >= nSearch) break;
+        float r = sqrt((float(k) + 0.5) / float(nSearch)) * searchT;
+        float a = float(k) * 2.39996323 + turn;
+        float zb = texture(shadowDepth, vec3(suv + vec2(cos(a), sin(a)) * (r * ts), float(c))).r;
+        if (zb < zRef - r * slopeDepth) { bSum += zb; bN += 1.0; }
+    }
+    if (bN < 0.5) return 1.0;
+    float dB = max(zRef - bSum / bN, 0.0) / depthPerM; // metres along the sun ray
+    float rT = clamp(dB * tanA / texelWorld, litPcss.y, searchT);
+    int nTaps = temporal ? int(litTaa.z) : (rT < 3.0 ? 12 : (rT < 10.0 ? 24 : 32));
+    float lit = 0.0;
+    for (int k = 0; k < 32; ++k) {
+        if (k >= nTaps) break;
+        float r = sqrt((float(k) + 0.5) / float(nTaps)) * rT;
+        float a = float(k) * 2.39996323 + turn + 1.3;
+        lit += texture(shadowMap, vec4(suv + vec2(cos(a), sin(a)) * (r * ts), float(c), zRef - r * slopeDepth));
+    }
+    return lit / float(nTaps);
+}
+
 // Sun visibility from the cascaded shadow maps: 1 = lit. Same tier selection,
 // cross-fade and far fade as the classic shaders, re-anchored to the camera
 // position the depth pass used. Casters self-shadow, so their lookup point is
@@ -400,8 +465,10 @@ const vec2 kPoisson[12] = vec2[](
 // two texels at grazing sun (no stripes on walls and leaf cards). The terrain
 // never casts into the map and passes offsetScale 0, and up-facing surfaces fade
 // the offset out: an offset there would slide every shadow away from its caster
-// by metres at a low sun.
-float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
+// by metres at a low sun. Leaves (treeShadows) also move their lookup
+// `leafLift` texels toward the sun: their two-sided cards are in the map, and
+// no normal keeps a card at a grazing sun off its own depth.
+float shadowMapVisibility(vec3 n, float nl, float offsetScale, float leafLift) {
     if (shadowCtl.x < 0.5) return 1.0;
     vec3 rel = vWorldRel + litShadowDelta.xyz;
     int nC = int(cascadeCtl.x);
@@ -434,7 +501,9 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
         // themselves, and an offset would shift their shadow edges against the
         // terrain beside them.
         float offset = texelWorld * offsetScale * (0.4 + 1.6 * slope) * (1.0 - smoothstep(0.75, 0.97, n.y));
-        vec4 cp = cascadeVP[c] * vec4(rel + n * offset, 1.0);
+        vec3 at = rel + n * offset;
+        if (leafLift > 0.0) at += litSunDir.xyz * (leafLift * texelWorld);
+        vec4 cp = cascadeVP[c] * vec4(at, 1.0);
         vec3 sc = cp.xyz / cp.w;
         vec2 suv = sc.xy * 0.5 + 0.5;
         if (suv.x > 0.0 && suv.x < 1.0 && suv.y > 0.0 && suv.y < 1.0 && sc.z > 0.0 && sc.z < 1.0) {
@@ -442,10 +511,16 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
             // Looser tiers cover more ground per texel: shrink their radius so
             // the penumbra width in metres stays comparable across tiers.
             float radius = ts * litShadowDelta.w / float(c + 1);
-            float lit = 0.0;
-            for (int k = 0; k < 12; ++k)
-                lit += texture(shadowMap, vec4(suv + kPoisson[k] * radius, float(c), sc.z - bias));
-            litSum += w * (lit / 12.0);
+            // The soft filter (fading in over 2 degrees above the gate's edge)
+            // or the stock one.
+            float soft = litTaa.w > 0.0 ? litPcss.z : 0.0;
+            float lit = 1.0;
+            if (soft < 1.0) lit = pcfVisibility(suv, c, sc.z - bias, radius);
+            if (soft > 0.0) {
+                float tanSlope = offsetScale > 0.0 ? min(slope / max(nl, 0.25), 4.0) : 0.0;
+                lit = mix(lit, pcssVisibility(suv, c, sc.z - bias, ts, texelWorld, tanSlope), soft);
+            }
+            litSum += w * lit;
             wSum += w;
         }
     }
@@ -551,7 +626,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     float nl = max(dot(n, l), 0.0);
     float nlCast = max(dot(nCast, l), 0.0);
     float skyVisibility;
-    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0) *
+    // Leaves (not grass, which shades as terrain) lift their lookup toward the
+    // sun: treeShadows' cure for the stripes a two-sided card casts on itself.
+    float leafLift = (foliage && !terrain) ? litPcss.w : 0.0;
+    float sunVisibility = shadowMapVisibility(nCast, nlCast, terrain ? 0.0 : 1.0, leafLift) *
                           terrainSunVisibility(posAbs, skyVisibility) * cloudSunVisibility(posAbs);
     g_sunVisibility = sunVisibility;
 

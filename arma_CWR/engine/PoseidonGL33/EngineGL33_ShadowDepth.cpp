@@ -17,6 +17,7 @@
 #include <vector>
 
 using Poseidon::gl33lighting::kShadowMapUnit;
+using Poseidon::gl33lighting::kShadowRawUnit;
 
 // Self-contained offscreen depth render used to validate the GL shadow-depth
 // path against the CPU oracle. Renders
@@ -178,6 +179,10 @@ bool EnsureArrayTarget(int res, int layers)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // Unit 6 reads the same array as raw depth (the remastered soft shadows)
+    // and held the deleted one too: give it the new array as well.
+    GL33Bind::ActiveUnit(kShadowRawUnit);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
 
     glGenFramebuffers(1, &s_arrFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, s_arrFbo);

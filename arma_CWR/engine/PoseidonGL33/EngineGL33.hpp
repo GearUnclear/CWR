@@ -779,10 +779,11 @@ class EngineGL33 : public Engine
     unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
     unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
     unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
-    unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: unit 2 when no shadow map
+    unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: units 2 and 6 when no shadow map
     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
     unsigned int _shadowCompareSampler = 0;
+    unsigned int _shadowRawSampler = 0; // unit 6: the cascade array as raw depth (soft-shadow blocker search)
     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
 
     void InitLightingResources();

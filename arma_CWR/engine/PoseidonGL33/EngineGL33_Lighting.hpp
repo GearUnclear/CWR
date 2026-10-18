@@ -90,9 +90,12 @@ constexpr int kShadowMapUnit = 2; // cascade array; a complete depth array from 
 constexpr int kTerrainHorizonUnit = 3;
 constexpr int kTerrainHeightUnit = 4;
 constexpr int kCloudNoiseUnit = 5;
+// The cascade array again under a non-compare NEAREST sampler (the soft
+// shadows' blocker search, B1): like unit 2, a complete depth array from init
+// on (the stand-in, then each cascade array as it is created).
+constexpr int kShadowRawUnit = 6;
 constexpr int kSkyLutUnit = 8; // sky-view table (the sky table, EngineGL33_SkyTable.cpp); a stand-in until built
 // Allocated to the features still to land; no shader samples them yet.
-constexpr int kShadowRawUnit = 6;     // the cascade array again, non-compare NEAREST sampler (shadows, temporal)
 constexpr int kSkyDensityUnit = 9;    // cloud density map from the weather sky texture (clouds)
 constexpr int kCanopyUnit = 10;       // canopy heightfield (hfrt)
 constexpr int kSeaNextFrameUnit = 11; // next sea animation frame (water)
@@ -161,11 +164,12 @@ struct LitSampler
     int unit;
 };
 constexpr LitSampler kLitSamplers[] = {
-    {"shadowMap", kShadowMapUnit},
-    {"terrainHorizon", kTerrainHorizonUnit},
-    {"terrainHeight", kTerrainHeightUnit},
-    {"cloudNoise", kCloudNoiseUnit},
-    {"skyLut", kSkyLutUnit},
+    {"shadowMap", kShadowMapUnit},           // the cascade array (comparison sampler in remastered)
+    {"terrainHorizon", kTerrainHorizonUnit}, // horizon angles
+    {"terrainHeight", kTerrainHeightUnit},   // height, sky visibility, ground tint
+    {"cloudNoise", kCloudNoiseUnit},         // cloud-shadow noise
+    {"shadowDepth", kShadowRawUnit},         // the cascade array as raw depth (soft shadows)
+    {"skyLut", kSkyLutUnit},                 // sky-view table (the sky table)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test
@@ -204,9 +208,16 @@ enum : int
     LightColor = 34, // MaxLights vec4
     LightAmb = 42,   // MaxLights vec4
     LightDir = 50,   // MaxLights vec4
-    // 58-60: allocated to features still to land (LitConstPlanned MatClass,
-    // Taa, Pcss); one padding member in the block until they do.
+    // 58: allocated to the materials' per-draw class (LitConstPlanned
+    // MatClass); one padding member in the block until it lands.
     Reserved = 58,
+    // Sun shadows (B1, Graphics/Remaster/SunShadows.hpp): x per-frame turn of
+    // the soft shadows' taps, y 1 in a TAA frame, z taps per frame there,
+    // w tan(sun angular radius) (0 = the stock filter).
+    Taa = 59,
+    // x blocker search reach (m), y smallest filter radius (texels), z soft
+    // filter strength, w leaf lift toward the sun (texels).
+    Pcss = 60,
     // The sky pass (the sky table; clouds read the camera basis too).
     SkyRight = 61,     // xyz camera right * tan(fov x / 2), w Mie asymmetry g
     SkyUp = 62,        // xyz camera up * tan(fov y / 2)
@@ -222,14 +233,15 @@ enum : int
     Count = 78,
 };
 constexpr int MaxLights = 8;
-constexpr int ReservedCount = 3;
+constexpr int ReservedCount = 1;
 constexpr int PlannedCount = Detail - Planned;
 static_assert(LightPos == FogCap + 1, "LitConst slots out of order");
 static_assert(LightColor == LightPos + MaxLights, "LitConst light ranges overlap");
 static_assert(LightAmb == LightColor + MaxLights, "LitConst light ranges overlap");
 static_assert(LightDir == LightAmb + MaxLights, "LitConst light ranges overlap");
 static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow the lights");
-static_assert(SkyRight == Reserved + ReservedCount, "LitConst sky slots follow the reserved ones");
+static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
+static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
 static_assert(Planned == AtmoDome + 1, "the planned padding follows the sky slots");
 static_assert(Count == Detail + 1, "LitConst size out of sync");
 } // namespace LitConst
@@ -240,13 +252,13 @@ static_assert(Count == Detail + 1, "LitConst size out of sync");
 // feature moves its rows into LitConst, declares them in LitConstantsBlock()
 // (a slot below it that has not landed yet becomes a padding member there) and
 // raises LitConst::Count, which the upload and the shaders follow. A7 landed
-// the sky slots 61 to 67, so 58 to 60 are the padding member litReserved; B11
-// landed the terrain detail at 77, so 68 to 76 are the padding member litPlanned.
+// the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
+// padding member litReserved; B11 landed the terrain detail at 77, so 68 to 76
+// are the padding member litPlanned.
 namespace LitConstPlanned
 {
-constexpr int MatClass = 58;     // materials, per draw: class, object kind, blend, hash
-constexpr int Taa = 59;          // temporal: frame index, stochastic flags, taps, penumbra per metre
-constexpr int Pcss = 60;         // shadows: search radius, minimum texels
+constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
+// 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
 constexpr int Sky = 68;          // clouds: sky mode, lit-cloud strength, shadow source
 constexpr int SkyVp = 69;        // clouds: viewport origin and 1 / size (pixels)
 constexpr int LightTiles = 70;   // light list: tile size, tile counts, light count
@@ -259,8 +271,8 @@ constexpr int Canopy = 76;       // hfrt: canopy heightfield constants
 // 77: texsharp's terrain detail landed (LitConst::Detail, B11).
 constexpr int Haze = 78; // haze: the analytic fallback for blended surfaces
 constexpr int End = 79;  // one past the last planned slot
-static_assert(MatClass == LitConst::Reserved && Pcss == LitConst::Reserved + LitConst::ReservedCount - 1,
-              "the planned slots below the sky pass are the reserved padding");
+static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
+              "the planned slot below the sun shadows is the reserved padding");
 static_assert(Sky == LitConst::Planned && Canopy == LitConst::Detail - 1,
               "the planned slots between the sky pass and the terrain detail are the planned padding");
 static_assert(Haze == LitConst::Count, "the other planned slots follow the declared ones");

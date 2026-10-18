@@ -1106,6 +1106,8 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litLightAmb", LC::LightAmb, LC::MaxLights},
         {"litLightDir", LC::LightDir, LC::MaxLights},
         {"litReserved", LC::Reserved, LC::ReservedCount},
+        {"litTaa", LC::Taa, 1},
+        {"litPcss", LC::Pcss, 1},
         {"litSkyRight", LC::SkyRight, 1},
         {"litSkyUp", LC::SkyUp, 1},
         {"litSkyFwd", LC::SkyFwd, 1},
@@ -1174,11 +1176,13 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
             CHECK(CountOf(program, shared) == 1);
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
-    // The planned slots: the three below the sky pass are the reserved padding,
-    // the rest continue the declared ones (A7 landed the sky slots 61 to 67 of
-    // plan section 3.3).
+    // The planned slots: the one below the sun shadows is the reserved padding,
+    // the rest continue the declared ones (B1 landed the sun shadow slots 59
+    // and 60, A7 the sky slots 61 to 67 of plan section 3.3).
     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
-    CHECK(gl::LitConstPlanned::Pcss == static_cast<int>(LC::Reserved) + LC::ReservedCount - 1);
+    CHECK(LC::ReservedCount == 1);
+    CHECK(static_cast<int>(LC::Taa) == 59);
+    CHECK(static_cast<int>(LC::Pcss) == 60);
     CHECK(static_cast<int>(LC::SkyRight) == 61);
     CHECK(static_cast<int>(LC::AtmoDome) == 67);
     CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
@@ -1213,6 +1217,8 @@ TEST_CASE("Remaster texture units come from one table that binds every sampler",
     // The shadow-map audits of test_gl_state_cache_audit.cpp pin binds to this
     // constant; the shaders' comments and the classic programs say unit 2.
     CHECK(gl::kShadowMapUnit == 2);
+    // The soft shadows read the same array as raw depth on unit 6 (plan 3.4).
+    CHECK(gl::kShadowRawUnit == 6);
 
     // Every sampler a remastered program declares has its unit in the table
     // (tex0 and tex1 are the material units): an unbound sampler reads unit 0.

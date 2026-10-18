@@ -9,6 +9,7 @@
 #include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
+#include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -113,6 +114,12 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     const float smShadowsZ = ENGINE_CONFIG.shadowsZ;
     const float smShadowFar = smCamNear + smCap.distanceCoef * (smShadowsZ - smCamNear);
     const float smCasterMaxDist2 = Square(smShadowFar);
+    // Remastered sun shadows (Graphics/Remaster/SunShadows.hpp): with the
+    // treeShadows gate on, every static object casts whatever the legacy
+    // object-shadow toggle says.
+    remaster::FeatureGates smGates;
+    const bool smTreeShadows = GEngine->LightingRemasterActive() && GEngine->GetFeatureGates(smGates) &&
+                               smGates[remaster::Feature::TreeShadows].on;
 
     // Walk one shape's faces in WORLD space, dispatching triangles to the emit
     // callbacks. Used for live (camera-relative stream) and cache (world-space
@@ -276,7 +283,8 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // casters. Shadow maps want every real caster the camera can see, so gate
         // only on "this never casts" (model NoShadow flag / CastShadow opt-out);
         // per-face NoShadow / alpha is still handled by ClassifyShadowCaster below.
-        if ((oi->shape->Special() & NoShadow) || !oi->object->CastShadow())
+        if ((oi->shape->Special() & NoShadow) ||
+            !remaster::CastsIntoSunShadowMap(oi->object->CastShadow(), oi->object->Static(), smTreeShadows))
         {
             continue;
         }
