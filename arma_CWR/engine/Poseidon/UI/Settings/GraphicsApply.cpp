@@ -4,6 +4,8 @@
 #include <Poseidon/Graphics/Core/Engine.hpp> // pulls Engine + extern GEngine
 #include <Poseidon/World/Scene/Scene.hpp>
 
+#include <optional>
+
 namespace Poseidon
 {
 
@@ -69,24 +71,42 @@ int VsyncToInterval(GraphicsConfig::VsyncMode v)
     }
     return 1;
 }
+
+// The config last pushed by ApplyGraphicsConfigToEngine.
+std::optional<GraphicsConfig> s_appliedConfig;
 } // namespace
+
+void ApplyGraphicsShadowsToScene(const GraphicsConfig& cfg, Scene& scene)
+{
+    // Shadow tier: Off turns both off, Low and up turn both on.  Low/Med/High
+    // discrimination is UI-only until a shadow-distance bias hook
+    // lands.
+    const bool shadowsOn = cfg.shadowQuality != GraphicsConfig::TierOff;
+    scene.SetObjectShadows(shadowsOn);
+    scene.SetVehicleShadows(shadowsOn);
+    // Particles tier: Off turns cloudlets off, Low/High on.  Low vs
+    // High is UI-only until the cloudlet system grows tiered density.
+    scene.SetCloudlets(cfg.particlesQuality != GraphicsConfig::TierOff);
+}
+
+void ApplyGraphicsConfigToScene(const GraphicsConfig& cfg, Scene& scene)
+{
+    scene.SetPreferredTerrainGrid(TerrainGridForTier(cfg.terrainDetail));
+    scene.SetObjectLODBias(ObjectLodTierToBias(cfg.objectLod));
+    ApplyGraphicsShadowsToScene(cfg, scene);
+}
+
+const GraphicsConfig* AppliedGraphicsConfig()
+{
+    return s_appliedConfig ? &*s_appliedConfig : nullptr;
+}
 
 void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
 {
+    // Kept for a Scene built later: at boot this runs before the world exists.
+    s_appliedConfig = cfg;
     if (GScene)
-    {
-        GScene->SetPreferredTerrainGrid(TerrainGridForTier(cfg.terrainDetail));
-        GScene->SetObjectLODBias(ObjectLodTierToBias(cfg.objectLod));
-        // Shadow tier — Off → both off; Low+ → both on.  Low/Med/High
-        // discrimination is UI-only until a shadow-distance bias hook
-        // lands.
-        const bool shadowsOn = cfg.shadowQuality != GraphicsConfig::TierOff;
-        GScene->SetObjectShadows(shadowsOn);
-        GScene->SetVehicleShadows(shadowsOn);
-        // Particles tier — Off → cloudlets off; Low/High → on.  Low vs
-        // High is UI-only until the cloudlet system grows tiered density.
-        GScene->SetCloudlets(cfg.particlesQuality != GraphicsConfig::TierOff);
-    }
+        ApplyGraphicsConfigToScene(cfg, *GScene);
     if (GEngine)
     {
         GEngine->SetSwapInterval(VsyncToInterval(cfg.vsync));

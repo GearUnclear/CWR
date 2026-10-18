@@ -27,6 +27,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
+#include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -682,6 +683,16 @@ void Scene::LoadConfig()
     {
         float value = cfg >> "terrainGrid";
         SetPreferredTerrainGrid(value);
+    }
+    // The Graphics options (graphics.cfg) own the shadows and smoke; the
+    // profile keys above are their legacy copies. Boot applies the options
+    // before the world and this Scene exist, so take them on here: at
+    // construction (boot, mod re-mount) and on a profile switch. Only these
+    // draw-only tiers: the terrain grid subdivides the terrain heights that
+    // SurfaceY reads, so it keeps the profile key or the default above.
+    if (const GraphicsConfig* graphics = AppliedGraphicsConfig())
+    {
+        ApplyGraphicsShadowsToScene(*graphics, *this);
     }
 
     SetPreferredViewDistance(GetSelectedPreferredViewDistance());

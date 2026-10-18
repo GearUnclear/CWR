@@ -334,6 +334,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Settings/test_displayConfig.cpp
     UI/Settings/test_display_startup_overrides.cpp
     UI/Settings/test_graphicsConfig.cpp
+    UI/Settings/test_graphicsApply.cpp
     UI/Settings/test_gameSettingsConfig.cpp
     UI/Settings/test_viewDistance.cpp
     UI/Settings/test_contextControlsConfig.cpp
