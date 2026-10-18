@@ -187,6 +187,65 @@ TEST_CASE("Remaster light rig: night keeps the classic ambient level", "[Graphic
     CHECK(rig.exposure == Catch::Approx(1.0f));
 }
 
+TEST_CASE("Remaster light rig: a full moon lights a cool, pale, readable night", "[Graphics][remaster]")
+{
+    const LightingTuning tuning;
+    // 22:00 on a clear night: sun far below, a full moon 60 degrees up.
+    LightRigInputs in = ClearSky(-40.0f);
+    const float moonElevation = 60.0f * kPi / 180.0f;
+    in.towardMoon[0] = 0.0f;
+    in.towardMoon[1] = std::sin(moonElevation);
+    in.towardMoon[2] = std::cos(moonElevation);
+    in.moonPhaseLight = 1.0f;
+    const LightRig rig = ComputeLightRig(in, tuning);
+    CHECK(rig.exposure == Catch::Approx(1.0f));
+
+    // Moonlit flat ground: clearly darker than day (noon ground shows the bare
+    // texture, 1.0), but readable, not the near-black of a moonless night.
+    const float lit = Luminance(rig.moon) * in.towardMoon[1] + Luminance(rig.skyZenith);
+    const float shade = Luminance(rig.skyZenith);
+    CAPTURE(lit, shade, Shown(lit, rig.exposure), Shown(shade, rig.exposure));
+    CHECK(Shown(lit, rig.exposure) > 0.18f);
+    CHECK(Shown(lit, rig.exposure) < 0.30f);
+    // Moon shade keeps its detail (the moonlit sky fills it), as day shade does.
+    const float ratio = Shown(shade, rig.exposure) / Shown(lit, rig.exposure);
+    CHECK(ratio > 0.45f);
+    CHECK(ratio < 0.75f);
+
+    // Cool but pale: blue over red, no blue cast.
+    CHECK(rig.moon.b > rig.moon.g);
+    CHECK(rig.moon.g > rig.moon.r);
+    CHECK(RedOverBlue(rig.moon) > 0.75f);
+    CHECK(RedOverBlue(rig.moon) < 0.9f);
+    CHECK(RedOverBlue(rig.skyZenith) < 1.0f);
+
+    // A moonless night keeps the classic ambient level.
+    LightRigInputs moonless = in;
+    moonless.moonPhaseLight = 0.0f;
+    const LightRig dark = ComputeLightRig(moonless, tuning);
+    CHECK(Luminance(dark.moon) == 0.0f);
+    CHECK(Luminance(dark.skyZenith) == Catch::Approx(0.0009f).margin(1e-6));
+    CHECK(Shown(Luminance(dark.skyZenith), dark.exposure) < 0.5f * Shown(lit, rig.exposure));
+
+    // Overcast hides the moon as it dims the sun.
+    LightRigInputs overcast = in;
+    overcast.skyThrough = 0.0f;
+    const LightRig cloudy = ComputeLightRig(overcast, tuning);
+    CHECK(Luminance(cloudy.moon) < 0.25f * Luminance(rig.moon));
+
+    // By day the moon adds nothing: the day rig is unchanged with the moon up.
+    LightRigInputs day = ClearSky(45.0f);
+    const LightRig dayNoMoon = ComputeLightRig(day, tuning);
+    day.towardMoon[1] = in.towardMoon[1];
+    day.towardMoon[2] = in.towardMoon[2];
+    day.moonPhaseLight = 1.0f;
+    const LightRig dayMoon = ComputeLightRig(day, tuning);
+    CHECK(Luminance(dayMoon.moon) == 0.0f);
+    CHECK(Luminance(dayMoon.skyZenith) == Luminance(dayNoMoon.skyZenith));
+    CHECK(Luminance(dayMoon.skyHorizon) == Luminance(dayNoMoon.skyHorizon));
+    CHECK(Luminance(dayMoon.skyGround) == Luminance(dayNoMoon.skyGround));
+}
+
 TEST_CASE("Remaster light rig: cloud shadows carry the classic overcast dimming on average", "[Graphics][remaster]")
 {
     // At every overcast, and with the cloud-shadow knob turned down, the mean

@@ -22,7 +22,8 @@
 //   - an exposure meter, so sunlit ground keeps its classic on-screen
 //     brightness from noon down to a low sun (the frame does not just get
 //     darker),
-//   - an optional moon fill at night.
+//   - a moon key light at night (cool, pale, dimmed by overcast) with the
+//     moonlit sky as its fill; a moonless night keeps the classic ambient.
 //
 // All colours here are linear and exclude the material terms; the shader
 // multiplies by the material diffuse / ambient (which carry the user
@@ -72,7 +73,7 @@ struct LightingTuning
     float cloudShadows = 1.0f;     // moving cloud shadows in broken overcast
     float specular = 1.0f;         // sun highlights and sky reflection on glossy materials
     float localLights = 1.0f;      // headlights, lamps, fires
-    float moonlight = 1.0f;        // directional moon fill at night
+    float moonlight = 1.0f;        // moon key light (and its sky fill) at night
     float ambientOcclusion = 0.7f; // screen-space AO strength (post effects)
     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)

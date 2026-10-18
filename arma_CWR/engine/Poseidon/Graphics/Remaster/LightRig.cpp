@@ -43,7 +43,11 @@ float AirMass(float elevationDeg)
 constexpr float kSunNoon = 0.55f;
 constexpr float kSkyNoon = 0.15f;
 constexpr float kSkyNight = 0.0009f; // display parity with the classic night ambient
-constexpr float kMoonFull = 0.0035f;
+// A full moon high in a clear sky shows moonlit ground at roughly a quarter of
+// its texture brightness (the noon sun shows all of it): dark but readable.
+// The sky it lights adds kMoonSky of it as fill, so moon shade keeps detail.
+constexpr float kMoonFull = 0.02f;
+constexpr float kMoonSky = 0.25f;
 constexpr float kGroundAlbedo = 0.2f;
 constexpr float kExtinction = 0.05f; // optical depth per air mass beyond the zenith
 constexpr float kCloudTransmit = 0.2f;
@@ -242,6 +246,21 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     if (skyCap < skyPower)
         skyPower = std::max(skyPower + (skyCap - skyPower) * twilight, kSkyNight * tuning.sky);
 
+    // --- moon ----------------------------------------------------------------
+    // The moon is the key light of a clear night, dimmed by overcast as the sun
+    // is. Moonlight is a little warmer than sunlight, but the dark-adapted eye
+    // sees it cool and pale: a cool, low-saturation tint, not a blue cast.
+    const float sinMoon = std::max(in.towardMoon[1], 0.0f);
+    const float moonUp = Smoothstep(0.0f, 0.2f, sinMoon);
+    const float night = Clamp01(in.nightEffect);
+    const float moonOvercast = skyThrough * 0.8f + 0.2f;
+    const float moonPower = kMoonFull * Clamp01(in.moonPhaseLight) * moonUp * night * moonOvercast * tuning.moonlight;
+    const Rgb moonChroma = NormaliseLuminance(Rgb(0.82f, 0.90f, 1.00f));
+    rig.moon = moonChroma * moonPower;
+    // The moonlit sky fills the shade. It is added after the twilight cap: the
+    // classic night sky the cap reads stays near black whatever the moon does.
+    const float moonSky = kMoonSky * moonPower * tuning.sky;
+
     const Rgb clearZenith = NormaliseLuminance(Rgb(0.60f, 0.69f, 0.88f));
     const Rgb greyZenith = NormaliseLuminance(Rgb(0.95f, 1.00f, 1.06f));
     const Rgb zenithChroma = Mix(greyZenith, clearZenith, skyThrough);
@@ -252,23 +271,19 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
                                   ? NormaliseLuminance(Mix(NormaliseLuminance(fogLinear), Rgb(1, 1, 1), 0.35f))
                                   : zenithChroma;
 
-    rig.skyZenith = zenithChroma * skyPower;
-    // Ground bounce: the ground below lit by sun and sky, near neutral.
+    rig.skyZenith = zenithChroma * skyPower + moonChroma * moonSky;
+    // Ground bounce: the ground below lit by sun, moon and sky, near neutral.
     const float sunOnGround = Luminance(rig.sun) * std::max(sinSun, 0.0f);
-    const float bouncePower = kGroundAlbedo * (sunOnGround + skyPower) * tuning.bounce;
+    const float moonOnGround = moonPower * sinMoon;
+    const float bouncePower = kGroundAlbedo * (sunOnGround + moonOnGround + skyPower + moonSky) * tuning.bounce;
     const Rgb bounceChroma = NormaliseLuminance(Rgb(1.0f, 1.0f, 0.96f));
     rig.skyGround = bounceChroma * bouncePower;
     // A vertical surface sees half the dome and half the ground. The sky toward
     // a low sun is brighter than the sky opposite it.
     const float low = 1.0f - Clamp01(sinSun);
-    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + rig.skyGround * 0.5f;
-    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + rig.skyGround * 0.5f;
-
-    // --- moon ----------------------------------------------------------------
-    const float moonUp = Smoothstep(0.0f, 0.2f, in.towardMoon[1]);
-    const float night = Clamp01(in.nightEffect);
-    const float moonPower = kMoonFull * Clamp01(in.moonPhaseLight) * moonUp * night * tuning.moonlight;
-    rig.moon = NormaliseLuminance(Rgb(0.70f, 0.80f, 1.00f)) * moonPower;
+    const Rgb moonHorizon = moonChroma * (0.55f * moonSky);
+    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + rig.skyGround * 0.5f + moonHorizon;
+    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + rig.skyGround * 0.5f + moonHorizon;
     return rig;
 }
 

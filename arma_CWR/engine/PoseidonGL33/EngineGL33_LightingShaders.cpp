@@ -566,10 +566,12 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
     vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
     vec3 moon = kd * litMoon.rgb * (max(dot(nLight, litMoonDir.xyz), 0.0) * sunOn);
-    // Classic adds local lights in display space before texturing; taking that
-    // sum to linear keeps the authored size and falloff of headlight and lamp
-    // pools (a linear sum would make them about twice as wide).
-    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.5)));
+    // Classic adds local lights in display space before texturing and clamps
+    // the sum at 1; taking that sum to linear keeps the authored size and
+    // falloff of headlight and lamp pools (a linear sum would make them about
+    // twice as wide). The same clamp keeps a lamp-lit surface from getting
+    // brighter than the original's, where overlapping pools sum past 1.
+    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
 
     vec3 a = toLinear(albedo);
@@ -611,7 +613,12 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     if (nightEye) {
         float luminance = clamp(dot(r0.rgb, rgbEyeCoef.rgb), 0.0, 1.0);
         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
-        r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
+        // Lit surfaces fade toward a slightly cool grey of the same luminance:
+        // the dark-adapted eye sees moonlit ground pale and cool, not neutral.
+        // Only blue is raised, so a half-faded warm surface does not turn
+        // green. Bright (lamp-lit) surfaces keep their own colour, as in classic.
+        const vec3 kNightGrey = vec3(0.985, 0.995, 1.1);
+        r0.rgb = mix(vec3(luminance) * (vLitMode > 0.5 ? kNightGrey : vec3(1.0)), r0.rgb, nightBlend);
     }
     r0.rgb = mix(vLitMode > 0.5 ? fogColorToward(vWorldRel) : fogColor.rgb, r0.rgb, vFogTC);
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
