@@ -122,6 +122,10 @@ public:
 	void HitBy( EntityAI *killer, float howMuch, RString ammo ) override;
 
 	LSError Serialize(ParamArchive &ar) override;
+
+	// switchLight and lightIsOn find lamps with dyn_cast<StreetLamp>; without its
+	// own id that cast accepts every Entity
+	USE_CASTING(base)
 };
 
 class RoadType: public RefCount
