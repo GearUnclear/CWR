@@ -47,6 +47,11 @@ constexpr float kMoonFull = 0.0035f;
 constexpr float kGroundAlbedo = 0.2f;
 constexpr float kExtinction = 0.05f; // optical depth per air mass beyond the zenith
 constexpr float kCloudTransmit = 0.2f;
+// The clearest weather the engine has is not cloud-free: setOvercast 0 sits
+// between the "jasno" keyframe at overcast -0.08 and "oblacno" at 0.5
+// (GetWeatherBasics in Landscape.cpp), so it reports skyThrough 0.959, a cover
+// of 0.041. A cover up to this much is a clear sky and casts no cloud shadows.
+constexpr float kClearSkyCover = 0.05f;
 constexpr float kBrightness = 1.6f; // default user brightness folded into the materials
 constexpr float kMaxMeterGain = 1.6f;
 
@@ -189,13 +194,19 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     // Classic dims the sun by overcast (diffuse = full * (skyThrough*0.8+0.2)).
     // With cloud shadows on, that dimming moves into a moving cloud field whose
     // mean transmission matches it: cover c with transmission T under a cloud
-    // averages 1 - c(1 - T), so c = (1 - skyThrough) for T = 0.2.
+    // averages 1 - c(1 - T), so c = (1 - skyThrough) for T = 0.2. A clear sky
+    // casts no cloud shadows: the field's cover fades in from kClearSkyCover and
+    // is the full sky cover from twice that on. Whatever dimming the field does
+    // not carry (the faded-in part, or a cloudShadows knob below 1) stays
+    // uniform, so the mean sun is classic's at every overcast.
     const float skyThrough = Clamp01(in.skyThrough);
     const float cover = 1.0f - skyThrough;
-    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && cover > 0.02f;
-    const float overcastDim = clouds ? 1.0f : skyThrough * 0.8f + 0.2f;
-    rig.cloudCover = clouds ? cover : 0.0f;
+    const float shadowCover = cover * Smoothstep(kClearSkyCover, 2.0f * kClearSkyCover, cover);
+    const bool clouds = in.cloudShadowsActive && tuning.cloudShadows > 0.0f && shadowCover > 0.0f;
+    rig.cloudCover = clouds ? shadowCover : 0.0f;
     rig.cloudTransmit = clouds ? 1.0f - (1.0f - kCloudTransmit) * std::min(1.0f, tuning.cloudShadows) : 1.0f;
+    const float fieldMean = 1.0f - rig.cloudCover * (1.0f - rig.cloudTransmit);
+    const float overcastDim = std::min(1.0f, (skyThrough * 0.8f + 0.2f) / fieldMean);
 
     const float extinction = std::exp(-kExtinction * (AirMass(elevation) - 1.0f));
     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);

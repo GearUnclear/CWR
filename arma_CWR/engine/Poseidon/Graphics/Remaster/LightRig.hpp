@@ -107,8 +107,9 @@ struct LightRig
     // Gain before the tonemap: tuning.exposure times a meter that keeps sunlit
     // ground at its classic on-screen brightness as the sun gets lower.
     float exposure = 1.0f;
-    // Broken-cloud field for the shader: fraction of the sky covered and the
-    // fraction of sunlight that survives under a cloud.
+    // Broken-cloud field for the shader: fraction of the ground under cloud
+    // shadow (0 under a clear sky, the sky cover once it is clearly cloudy) and
+    // the fraction of sunlight that survives under a cloud.
     float cloudCover = 0.0f;
     float cloudTransmit = 1.0f;
 };
