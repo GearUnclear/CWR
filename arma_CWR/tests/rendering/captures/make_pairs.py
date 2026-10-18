@@ -40,14 +40,20 @@ MODES = tuple(m for pair in PAIR_MODES for m in pair)
 SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 UDCAP_RE = re.compile(r"UDCAP;(.*)$")
-# triGpuTimes sections: the frame, the world (with its shadow pass) and the post
+# triGpuTimes sections: the frame, the world (with its shadow pass, and its
+# three parts from A4 on: ground, the opaque objects, the rest) and the post
 # pass, then the post stages that run today, in their order (GpuTimings.hpp; a
-# stage that did not run leaves its cell empty).
-GPU_FIELDS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
+# stage that did not run leaves its cell empty). frame_min is the best frame
+# of the timer window (the "| min frame=" field, A4 on).
+GPU_FIELDS = ("frame", "world", "shadow", "ground", "pass1", "rest", "post", "resolve", "lindepth", "ao", "bloom",
+              "shafts", "composite", "frame_min")
 GPU_RES = {
     "frame": re.compile(r"\bframe ([\d.]+) ms"),
     "world": re.compile(r"\bworld ([\d.]+)"),
     "shadow": re.compile(r"\(shadow ([\d.]+)\)"),
+    "ground": re.compile(r"\bground ([\d.]+)"),
+    "pass1": re.compile(r"\bpass1 ([\d.]+)"),
+    "rest": re.compile(r"\brest ([\d.]+)"),
     "post": re.compile(r"\bpost ([\d.]+):"),
     "resolve": re.compile(r"\bresolve ([\d.]+)"),
     "lindepth": re.compile(r"\blindepth ([\d.]+)"),
@@ -55,6 +61,19 @@ GPU_RES = {
     "bloom": re.compile(r"\bbloom ([\d.]+)"),
     "shafts": re.compile(r"\bshafts ([\d.]+)"),
     "composite": re.compile(r"\bcomposite ([\d.]+)"),
+    "frame_min": re.compile(r"\| min frame=([\d.]+)"),
+}
+# triPerfStats' frame-cost counters (after " || ", A4 on): window averages.
+COUNTER_RES = {
+    "runs": re.compile(r"\bruns=([\d.]+)"),
+    "runobj": re.compile(r"\brunobj=([\d.]+)"),
+    "hill_tested": re.compile(r"\btested=([\d.]+)"),
+    "hill_hidden": re.compile(r"\bhidden=([\d.]+)"),
+    "hill_kept": re.compile(r"\bkept=([\d.]+)"),
+    "hill_cpu_ms": re.compile(r"\bhillcpu=([\d.]+)"),
+    "lod_ms": re.compile(r"\bprep lod=([\d.]+)"),
+    "lit_kb": re.compile(r"\blitKB=([\d.]+)"),
+    "vs_kb": re.compile(r"\bvsKB=([\d.]+)"),
 }
 PERF_RE = re.compile(r"\bfps=([\d.]+) frame=([\d.]+)/([\d.]+)/([\d.]+)")
 CALLS_RE = re.compile(r"\bcalls=([\d.]+)")
@@ -148,6 +167,7 @@ def shot_rows(lines):
         # (triSettleScene); empty in runs from before these fields existed.
         row["draws"] = to_int(kv.get("draws"))
         row["objects"] = to_int(kv.get("objects"))
+        row["culled"] = to_int(kv.get("culled"))
         row["lights"] = to_int(kv.get("lights"))
         row["lod"] = kv.get("lod", "")
         row["pin"] = kv.get("pin", "")
@@ -164,6 +184,10 @@ def shot_rows(lines):
         row["cpu_frame_p95_ms"] = float(m.group(3)) if m else None
         m = CALLS_RE.search(row["perf_raw"])
         row["calls_avg"] = float(m.group(1)) if m else None
+        counters = row["perf_raw"].split(" || ", 1)[1] if " || " in row["perf_raw"] else ""
+        for f, rx in COUNTER_RES.items():
+            m = rx.search(counters)
+            row[f] = float(m.group(1)) if m else None
         # a later line for the same label (a retry) replaces the earlier one;
         # dict order keeps the run order of the first appearance
         rows[(view, mode)] = row
@@ -285,8 +309,9 @@ def share_delta(a, b, key):
 
 def write_tables(rows, out_dir: Path):
     cols = ["view", "mode", "lit", "cam"] + [f"gpu_{f}_ms" for f in GPU_FIELDS] + \
-           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "lights", "calls_avg", "lod",
-            "pin", "horizon", "settle", "settle_draws", "setting", "gpu_raw", "perf_raw", "feat"]
+           ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "culled", "lights",
+            "calls_avg"] + list(COUNTER_RES) + \
+           ["lod", "pin", "horizon", "settle", "settle_draws", "setting", "gpu_raw", "perf_raw", "feat"]
     with open(out_dir / "timings.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()

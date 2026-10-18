@@ -21,7 +21,12 @@ namespace Poseidon::gpu
 enum class Mark : int
 {
     FrameBegin,
-    WorldBegin,  // first 3D pass of the world
+    WorldBegin, // first 3D pass of the world
+    // Inside the world pass (Landscape::DrawRect, at its existing queue
+    // flushes): the sky, terrain, water and horizon drawn; the opaque objects
+    // (Scene::DrawObjectsAndShadowsPass1) drawn.
+    GroundEnd,
+    Pass1End,
     ShadowBegin, // shadow-map depth pass
     ShadowEnd,
     WorldEnd, // Engine::EndWorldScene, after the world's queued draws
@@ -51,6 +56,12 @@ enum class Section : int
     Frame,
     World, // includes the shadow pass
     Shadow,
+    // The world pass in three parts: WorldBegin to GroundEnd (sky, terrain,
+    // water, horizon), GroundEnd to Pass1End (the opaque objects), Pass1End to
+    // WorldEnd (the shadow-map pass, the alpha objects, the rest).
+    Ground,
+    Pass1,
+    Rest,
     // One per post stage, in Mark order: from the end of the latest stage that
     // ran before it (or WorldEnd) to its own end.
     Resolve,
@@ -107,14 +118,21 @@ class GpuTimings
     bool AverageMs(Section s, float& ms) const;
     // Last frame's duration, -1 when that frame did not measure it.
     float LastMs(Section s) const { return _last[static_cast<int>(s)]; }
+    // The shortest frame since the last reset; false while never measured.
+    // Other processes on the GPU only ever add time, so on a shared GPU the
+    // minimum is closer to this program's own cost than the average.
+    bool MinMs(Section s, float& ms) const;
     int Frames() const { return _frames; }
 
-    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05
-    // composite 0.14": the post stages in the order they run, each once it has been measured.
+    // "frame 6.12 ms | world 4.80 (shadow 0.62) [ground 1.10 pass1 2.40 rest 1.30] | post 0.71: resolve 0.04
+    // ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80 world=4.55 ground=1.02 pass1=2.21
+    // rest=1.21": the post stages in the order they run, each once it has been measured; the minimum
+    // fields use '=' so a parser looking for "<section> <ms>" never reads them.
     std::string Summary() const;
 
   private:
     std::array<float, kSectionCount> _avg{};
+    std::array<float, kSectionCount> _min{};
     std::array<float, kSectionCount> _last = detail::Unmeasured();
     std::array<int, kSectionCount> _count{};
     int _frames = 0;

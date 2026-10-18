@@ -850,6 +850,15 @@ class Engine : public IGraphicsEngine
     /// its smoothed milliseconds, false while timing is off or the section has
     /// not been measured. The Lighting tab shows each feature's own section.
     virtual bool GpuTimingSectionMs(const char* /*name*/, float& /*ms*/) const { return false; }
+    /// Points inside the world pass for the GPU timings' ground / pass1 / rest
+    /// sections (Landscape::DrawRect calls them right after its own queue
+    /// flushes, so timing on or off issues the same draws).
+    enum class WorldPhase : int
+    {
+        GroundDrawn,  // sky, terrain, water and horizon
+        ObjectsDrawn, // the opaque objects (Scene::DrawObjectsAndShadowsPass1)
+    };
+    virtual void GpuMarkWorldPhase(WorldPhase /*phase*/) {}
     /// True when the backend would use a terrain horizon map (remastered
     /// lighting with terrain shadows or occlusion on); the world builds one only
     /// then.

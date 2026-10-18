@@ -830,6 +830,63 @@ void Object::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transfor
     }
 }
 
+// Object::Draw's texture hints for one LOD without the draw (the hill cull,
+// Scene::DrawObjectsAndShadowsPass1): the same fog skip, the same proxies at
+// the same LODs, the same distance and flags for Shape::PrepareTextures. A
+// hidden object's textures then get the mipmap a draw would have asked for:
+// the shadow-map pass loads its alpha-tested caster textures from that hint,
+// and a texture it shares with an object in view keeps the same mipmaps.
+void Object::PrepareDrawTextures(int level, const FrameBase& pos)
+{
+    if (!_shape || level == LOD_INVISIBLE)
+    {
+        return;
+    }
+    Shape* sShape = _shape->LevelOpaque(level);
+    if (!sShape || sShape->NFaces() <= 0)
+    {
+        return;
+    }
+    int special = sShape->Special() | GetObjSpecial();
+    const float dist2 = GScene->GetCamera()->Position().Distance2(pos.Position());
+    const render::LegacySpec specT = render::SplitLegacy(special);
+    if (!render::Has(specT.routing, render::Routing::FogDisabled))
+    {
+        const float radius = pos.Scale() * _shape->BoundingSphere();
+        if (NoFogNeeded(dist2, sShape, radius))
+        {
+            special |= FogDisabled;
+        }
+        else if (ConstFogUsed(dist2, sShape, radius) >= 0.99 && render::Has(specT.backend, render::Backend::IsAlphaFog))
+        {
+            return; // Draw skips a fully fogged alpha-fog object
+        }
+    }
+    const float z2 = render::Has(render::SplitLegacy(special).routing, render::Routing::NoDropdown) ? 0 : dist2;
+    const Matrix4 transform = pos.Transform();
+    const Matrix4 invTransform = pos.GetInvTransform();
+    for (int i = 0; i < sShape->NProxies(); i++)
+    {
+        const ProxyObject& proxy = sShape->Proxy(i);
+        Matrix4Val pTransform = transform * proxy.obj->Transform();
+        Matrix4Val invPTransform = proxy.invTransform * invTransform;
+        LODShapeWithShadow* pshape = proxy.obj->GetShapeOnPos(pTransform.Position());
+        if (!pshape)
+        {
+            continue;
+        }
+        const int plevel = GScene->LevelFromDistance2(pshape, dist2, pTransform.Scale(), pTransform.Direction(),
+                                                      GScene->GetCamera()->Direction());
+        if (plevel == LOD_INVISIBLE)
+        {
+            continue;
+        }
+        FrameWithInverse pFrame(pTransform, invPTransform);
+        proxy.obj->PrepareDrawTextures(plevel, pFrame);
+    }
+    sShape->PrepareTextures(z2, special);
+}
+
 // pos is used mainly for proper proxy object positioning. This is the main function
 // used for object rendering. Default implementation performs Object::Animate before and
 // Object::Deanimate after rendering, checks for fog optimization (early constant fog

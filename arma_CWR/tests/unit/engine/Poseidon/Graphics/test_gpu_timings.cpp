@@ -69,7 +69,7 @@ TEST_CASE("GpuTimings: sections from one full frame", "[Graphics][gpu]")
     REQUIRE(t.AverageMs(Section::Frame, ms));
     CHECK(ms == Catch::Approx(6.0).margin(1e-3));
     CHECK(t.Summary() == "frame 6.00 ms | world 4.80 (shadow 0.60) | post 0.70: resolve 0.05 ao 0.25 bloom 0.20 "
-                         "shafts 0.05 composite 0.15");
+                         "shafts 0.05 composite 0.15 | min frame=6.00 world=4.80");
 }
 
 TEST_CASE("GpuTimings: a skipped post step folds into the next one", "[Graphics][gpu]")
@@ -193,4 +193,50 @@ TEST_CASE("GpuTimings: missing or out-of-order stamps are dropped, averages smoo
     CHECK(t.Frames() == 0);
     CHECK_FALSE(t.AverageMs(Section::Frame, ms));
     CHECK(t.LastMs(Section::Frame) < 0.0f);
+}
+
+TEST_CASE("GpuTimings: the world pass splits into ground, opaque objects and the rest", "[Graphics][gpu]")
+{
+    // A4: Landscape::DrawRect marks the end of the ground (sky, terrain, water,
+    // horizon) and of the opaque objects (Pass1); the rest is the shadow-map
+    // pass, the alpha objects and what follows.
+    Frame f = FullFrame();
+    f.Set(Mark::GroundEnd, 0.9);
+    f.Set(Mark::Pass1End, 3.1);
+    GpuTimings t;
+    t.Submit(f.stamps, f.recorded);
+    CHECK(t.LastMs(Section::Ground) == Catch::Approx(0.7).margin(1e-3));
+    CHECK(t.LastMs(Section::Pass1) == Catch::Approx(2.2).margin(1e-3));
+    CHECK(t.LastMs(Section::Rest) == Catch::Approx(1.9).margin(1e-3));
+    CHECK(t.LastMs(Section::Ground) + t.LastMs(Section::Pass1) + t.LastMs(Section::Rest) ==
+          Catch::Approx(t.LastMs(Section::World)).margin(1e-3));
+    const std::string s = t.Summary();
+    INFO(s);
+    CHECK(s.find("world 4.80 (shadow 0.60) [ground 0.70 pass1 2.20 rest 1.90] | post 0.70:") != std::string::npos);
+    // make_pairs.py reads "<section> <ms>"; the minimum fields use '=' so
+    // they never shadow the averages.
+    CHECK(s.find(" | min frame=6.00 world=4.80 ground=0.70 pass1=2.20 rest=1.90") != std::string::npos);
+    // The two marks are world marks: never post stage marks.
+    CHECK(PostStageSection(Mark::GroundEnd) == Section::Count);
+    CHECK(PostStageSection(Mark::Pass1End) == Section::Count);
+}
+
+TEST_CASE("GpuTimings: the minimum is the shortest frame since the reset", "[Graphics][gpu]")
+{
+    GpuTimings t;
+    float ms = 0.0f;
+    CHECK_FALSE(t.MinMs(Section::Frame, ms));
+    for (double frame : {9.0, 6.0, 12.0, 7.0})
+    {
+        Frame f;
+        f.Set(Mark::FrameBegin, 0.0);
+        f.Set(Mark::FrameEnd, frame);
+        t.Submit(f.stamps, f.recorded);
+    }
+    REQUIRE(t.MinMs(Section::Frame, ms));
+    CHECK(ms == Catch::Approx(6.0).margin(1e-3));
+    REQUIRE(t.AverageMs(Section::Frame, ms));
+    CHECK(ms > 6.5f); // the average is not the minimum
+    t.Reset();
+    CHECK_FALSE(t.MinMs(Section::Frame, ms));
 }

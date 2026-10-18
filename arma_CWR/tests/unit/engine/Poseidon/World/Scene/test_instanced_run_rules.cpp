@@ -130,3 +130,26 @@ TEST_CASE("InstancedRun: members stay inside the fog band", "[scene][instancing]
     CHECK_FALSE(CanJoin(head, Plain(8999.0f)));
     CHECK_FALSE(CanJoin(head, Plain(11001.0f)));
 }
+
+TEST_CASE("InstancedRun: an object lit by a local light neither heads nor joins a run", "[scene][instancing]")
+{
+    // drawGrouping (plan section 5 A4): with light slots in the scene, an
+    // object takes part in runs when the light list its own draw would select
+    // is empty. The run is drawn with the head's list, so a lit object would
+    // either light its unlit twins (as head) or lose its own light (as member).
+    RunEntry lit = Plain(10010.0f);
+    lit.localLit = true;
+    CHECK_FALSE(CanHead(lit));
+    CHECK_FALSE(CanJoin(Plain(), lit));
+    CHECK(CanJoin(Plain(), Plain(10010.0f)));
+
+    // Five twins along a street, the third under a lamp: it is drawn alone,
+    // the two before it and the two after it are each too short for a run.
+    const std::vector<RunEntry> street{Plain(10000.0f), Plain(10010.0f), lit, Plain(10030.0f), Plain(10040.0f)};
+    CHECK(RunLengths(street) == std::vector<int>{2, 1, 2});
+
+    // A wood far from any lamp keeps its runs.
+    const std::vector<RunEntry> wood{Plain(10000.0f), Plain(10010.0f), Plain(10020.0f), Plain(10030.0f),
+                                     Plain(10040.0f)};
+    CHECK(RunLengths(wood) == std::vector<int>{5});
+}

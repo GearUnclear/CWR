@@ -32,6 +32,7 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Rendering/Draw/FontMapping.hpp>
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Dev/Diag/SceneSettle.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -452,7 +453,10 @@ GameValue TriTextInputActive(const GameState* /*state*/)
 }
 
 /// triPerfStats — frame-phase profiler rolling stats as a machine-readable
-/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N".
+/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N",
+/// then " || " and the frame-cost counters averaged over the same window
+/// (Graphics/Core/PerfCounters.hpp: instanced runs, hill culling, the CPU of
+/// LOD selection and occlusion, uniform-buffer uploads).
 GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
 {
     Dev::FrameProfiler& perf = Dev::GFrameProfiler();
@@ -460,7 +464,7 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
         return GameValue("FAIL:no_frames");
     const auto total = perf.TotalStats();
     const auto draw = perf.DrawStats();
-    char buf[768];
+    char buf[1400];
     int off = snprintf(buf, sizeof(buf), "fps=%.1f frame=%.2f/%.2f/%.2f setup=%.2f/%.2f draw=%.2f/%.2f", perf.AvgFps(),
                        total.avgMs, total.p95Ms, total.maxMs, perf.Stats(Dev::FrameProfiler::PhaseSetup).avgMs,
                        perf.Stats(Dev::FrameProfiler::PhaseSetup).p95Ms, draw.avgMs, draw.p95Ms);
@@ -477,14 +481,17 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
         off +=
             snprintf(buf + off, sizeof(buf) - off, " %s=%.2f/%.2f", Dev::FrameProfiler::PhaseName(p), s.avgMs, s.p95Ms);
     }
+    snprintf(buf + off, sizeof(buf) - off, " || %s", Poseidon::perf::GPerfCounters().Summary().c_str());
     LOG_INFO(Core, "[tri] triPerfStats {}", buf);
     return GameValue(buf);
 }
 
-/// triPerfReset — clear the frame-profiler ring (start a fresh measurement window).
+/// triPerfReset: clear the frame-profiler ring (start a fresh measurement
+/// window) and the frame-cost counters' window with it.
 GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
 {
     Dev::GFrameProfiler().Reset();
+    Poseidon::perf::GPerfCounters().ResetWindow();
     return GameValue("OK");
 }
 
@@ -523,20 +530,23 @@ static const char* HorizonMapState()
 
 /// triSceneStats: the last frame's scene state for capture logs, as fields
 /// that splice into a "key=value;..." line: "draws=<GL draw calls>;objects=<
-/// objects with a visible LOD>;lights=<light slots>;lod=<Scene LOD width>;
-/// pin=<triPinObjectDetail factor, 0 = adaptive>;horizon=<off, pending or
-/// ready>" (horizon: the remastered terrain horizon map build). The two
-/// lighting models can issue slightly different draw calls for the same
-/// objects; the object count is the one to compare across them. Any light
+/// objects with a visible LOD>;culled=<of those, hidden by the hill cull>;
+/// lights=<light slots>;lod=<Scene LOD width>;pin=<triPinObjectDetail factor,
+/// 0 = adaptive>;horizon=<off, pending or ready>" (horizon: the remastered
+/// terrain horizon map build). The two lighting models can issue slightly
+/// different draw calls for the same objects; the object count is the one to
+/// compare across them, and it counts the objects the hill cull hid (so it
+/// compares across the hillCull switch too). With drawGrouping off, any light
 /// slot (a street lamp that has once been on keeps its slot) turns instancing
 /// off for the whole scene (Pass1), which multiplies the draw calls for the
 /// same objects.
 GameValue TriSceneStats(const GameState* /*state*/)
 {
-    char buf[192];
-    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
-             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->NLights() : -1,
-             GScene ? GScene->GetLodInvWidth() : 0.0f, GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
+    char buf[224];
+    snprintf(buf, sizeof(buf), "draws=%d;objects=%d;culled=%d;lights=%d;lod=%g;pin=%g;horizon=%s", LastFrameDrawCalls(),
+             GScene ? GScene->DrawnObjectCount() : -1, GScene ? GScene->HillHiddenObjectCount() : -1,
+             GScene ? GScene->NLights() : -1, GScene ? GScene->GetLodInvWidth() : 0.0f,
+             GScene ? GScene->GetObjectDetailPin() : 0.0f, HorizonMapState());
     return GameValue(buf);
 }
 

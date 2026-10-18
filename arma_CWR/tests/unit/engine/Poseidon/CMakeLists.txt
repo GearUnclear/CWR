@@ -165,6 +165,8 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_remaster_lighting.cpp
     Graphics/test_feature_switches.cpp
     Graphics/test_gpu_timings.cpp
+    Graphics/test_perf_counters.cpp
+    Graphics/test_ubo_mirror.cpp
     Graphics/test_post_stages.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
@@ -476,6 +478,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Scene/test_surface_draw_order.cpp
     World/Scene/test_alpha_sort_order.cpp
     World/Scene/test_instanced_run_rules.cpp
+    World/Scene/test_terrain_occlusion.cpp
     World/Scene/test_streetlamp_casting.cpp
 
     # Core subsystem tests

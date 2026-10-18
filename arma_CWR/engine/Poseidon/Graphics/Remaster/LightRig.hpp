@@ -65,7 +65,7 @@ Rgb TonemapNeutral(const Rgb& c);
 // 4 of research/INTEGRATION-PLAN.md); until then nothing reads it.
 struct FeatureSet
 {
-    float drawGrouping = 1.0f;    // A4 perf: one draw call for runs of the same shape
+    float drawGrouping = 1.0f;    // A4 perf: instanced runs at any light, unchanged constants not re-sent
     float hillCull = 1.0f;        // A4 perf: objects behind hills are not drawn
     float taa = 1.0f;             // A5 temporal anti-aliasing
     float lightTiles = 1.0f;      // A6 one tiled light list for every local light

@@ -1534,6 +1534,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::GroundDrawn);
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
@@ -1581,6 +1582,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 #endif
     GEngine->FlushQueues();
+    GEngine->GpuMarkWorldPhase(Engine::WorldPhase::ObjectsDrawn);
 
     // draw alpha objects and shadows
     scene.DrawObjectsAndShadowsPass2();

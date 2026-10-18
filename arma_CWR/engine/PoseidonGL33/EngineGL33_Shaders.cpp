@@ -8,6 +8,8 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
 #include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 
 #include <SDL3/SDL.h>
@@ -794,15 +796,41 @@ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
 static GLuint s_psUBO = 0;
+// What s_vsUBO holds: every write below records itself here (a new buffer
+// starts unknown, InitVertexShaders).
+static Poseidon::gpu::UboMirror s_vsMirror;
+static constexpr int kVsSlots = static_cast<int>(sizeof(s_vsShadow) / 16);
+
+// Writes slots [first, first + count) of s_vsShadow to the VS buffer and
+// records them in its mirror.
+static void UploadVSSlots(int first, int count)
+{
+    // glBindBufferBase is sticky: done once at UBO creation in
+    // InitVertexShaders.  Per-upload we only update buffer contents.
+    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, first * 16, count * 16, s_vsShadow + first * 4);
+    s_vsMirror.Store(s_vsShadow, first, count);
+    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
+    ++c.vsUploads;
+    c.vsBytes += count * 16;
+}
 
 void EngineGL33::FlushVSConstants()
 {
     if (!s_vsUBO)
         return;
-    // glBindBufferBase is sticky — done once at UBO creation in
-    // InitVertexShaders.  Per-flush we only update buffer contents.
-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_vsShadow), s_vsShadow);
+    // drawGrouping: send only the slots that changed since the last upload.
+    // With the WorldInstances buffer the VSConstants world slots are std140
+    // padding no shader reads (every VS takes the world matrix from
+    // WorldInstances), so they never count as a change.
+    const bool dedupe = _featureGates[Poseidon::remaster::Feature::DrawGrouping].on;
+    int first = 0, count = 0;
+    if (!s_vsMirror.Plan(s_vsShadow, dedupe, first, count, s_worldUBO ? VSConst::SlotWorld : 0, s_worldUBO ? 4 : 0))
+    {
+        ++Poseidon::perf::GPerfCounters().Frame().vsSkips;
+        return;
+    }
+    UploadVSSlots(first, count);
 }
 
 void EngineGL33::FlushPSConstants()
@@ -863,6 +891,7 @@ void EngineGL33::InitVertexShaders()
     glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_vsShadow), s_vsShadow, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_vsUBO);
+    s_vsMirror.Reset(kVsSlots); // the next flush sends the whole block
 
     // WorldInstances array UBO (binding 2) — 256 mat4 = 16 KB, the GL 3.3
     // minimum guaranteed UBO size. Slot 0 = the classic per-draw world
@@ -903,6 +932,7 @@ void EngineGL33::DeinitVertexShaders()
         glDeleteBuffers(1, &s_vsUBO);
         s_vsUBO = 0;
     }
+    s_vsMirror.Reset(kVsSlots);
     if (s_worldUBO)
     {
         glDeleteBuffers(1, &s_worldUBO);
@@ -1185,9 +1215,7 @@ void EngineGL33::UploadVSCrown(const float center[3], const float invHalf[3])
     memcpy(s_vsShadow + VSConst::SlotCrown * 4, v, sizeof(v));
     if (!s_vsUBO)
         return;
-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotCrown * 4 * sizeof(float), sizeof(v),
-                    s_vsShadow + VSConst::SlotCrown * 4);
+    UploadVSSlots(VSConst::SlotCrown, 2);
 }
 
 void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
@@ -1207,8 +1235,7 @@ void EngineGL33::UploadVSWorldMatrix(const float worldMatrix[16])
     // writers (materials, lights, cascade VPs) still flush the full block.
     if (!s_vsUBO)
         return;
-    glBindBuffer(GL_UNIFORM_BUFFER, s_vsUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, VSConst::SlotWorld * 4 * sizeof(float), 64, s_vsShadow + VSConst::SlotWorld * 4);
+    UploadVSSlots(VSConst::SlotWorld, 4);
 }
 
 void EngineGL33::UploadVSMaterialConstants(const TLMaterial& mat, bool sunEnabled)

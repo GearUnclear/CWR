@@ -10,6 +10,8 @@
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
+#include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -26,6 +28,8 @@ namespace
 {
 float s_lit[LitConst::Count * 4] = {};
 GLuint s_litUBO = 0;
+// What s_litUBO holds (UploadLitSlots keeps it; a new buffer starts unknown).
+Poseidon::gpu::UboMirror s_litMirror;
 // Cloud drift integrated from the wind, so a wind change bends the drift
 // instead of jumping the whole field. Integrated per frame, so re-pinning the
 // sim clock (triSetSimTime) does not put it back; captures pin it instead
@@ -68,12 +72,34 @@ GLuint MakeDummyTexture(GLenum target, GLenum internalFormat, GLenum format, GLe
 }
 } // namespace
 
+// The one place the LitConstants buffer is written: `count` slots of s_lit
+// from `first` on, recorded in the mirror.
+void EngineGL33::UploadLitSlots(int first, int count)
+{
+    if (!s_litUBO || count <= 0)
+        return;
+    glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, first * 16, count * 16, s_lit + first * 4);
+    s_litMirror.Store(s_lit, first, count);
+    Poseidon::perf::FrameCounters& c = Poseidon::perf::GPerfCounters().Frame();
+    ++c.litUploads;
+    c.litBytes += count * 16;
+}
+
 void EngineGL33::FlushLitConstants()
 {
     if (!s_litUBO)
         return;
-    glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_lit), s_lit);
+    // drawGrouping: send only the slots that changed since the last upload
+    // (a draw's material and lights, mostly); off, the whole block as before.
+    const bool dedupe = _featureGates[rm::Feature::DrawGrouping].on;
+    int first = 0, count = 0;
+    if (!s_litMirror.Plan(s_lit, dedupe, first, count))
+    {
+        ++Poseidon::perf::GPerfCounters().Frame().litSkips;
+        return;
+    }
+    UploadLitSlots(first, count);
 }
 
 void EngineGL33::InitLightingResources()
@@ -82,6 +108,7 @@ void EngineGL33::InitLightingResources()
     glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_lit), nullptr, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, kLitBinding, s_litUBO);
+    s_litMirror.Reset(LitConst::Count); // a new buffer holds nothing known yet
 
     // Stand-ins so every sampler of the remastered shaders always has a complete
     // texture of the right kind, map or no map. Created on the upload unit; the
@@ -165,6 +192,7 @@ void EngineGL33::DeinitLightingResources()
         glDeleteBuffers(1, &s_litUBO);
         s_litUBO = 0;
     }
+    s_litMirror.Reset(LitConst::Count);
 }
 
 void EngineGL33::SetLightingTuning(const rm::LightingTuning& tuning)
@@ -300,11 +328,7 @@ void EngineGL33::SetLitOpaque(bool opaque)
     _litOpaque = opaque;
     s_lit[LitConst::Flags * 4 + 0] = opaque ? 1.0f : 0.0f;
     // Blend modes switch per draw group: upload just the flags slot.
-    if (s_litUBO)
-    {
-        glBindBuffer(GL_UNIFORM_BUFFER, s_litUBO);
-        glBufferSubData(GL_UNIFORM_BUFFER, LitConst::Flags * 16, 16, s_lit + LitConst::Flags * 4);
-    }
+    UploadLitSlots(LitConst::Flags, 1);
 }
 
 void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)

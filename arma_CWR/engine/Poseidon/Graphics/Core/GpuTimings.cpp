@@ -18,6 +18,9 @@ constexpr SectionDef kSections[kSectionCount] = {
     {"frame", Mark::FrameBegin, Mark::FrameEnd},
     {"world", Mark::WorldBegin, Mark::WorldEnd},
     {"shadow", Mark::ShadowBegin, Mark::ShadowEnd},
+    {"ground", Mark::WorldBegin, Mark::GroundEnd},
+    {"pass1", Mark::GroundEnd, Mark::Pass1End},
+    {"rest", Mark::Pass1End, Mark::WorldEnd},
     {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
     {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
     {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
@@ -107,6 +110,7 @@ void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t re
         const float ms = static_cast<float>(b - a) * 1e-6f;
         _last[i] = ms;
         _avg[i] = _count[i] == 0 ? ms : _avg[i] + (ms - _avg[i]) * kSmoothing;
+        _min[i] = _count[i] == 0 || ms < _min[i] ? ms : _min[i];
         ++_count[i];
     }
 }
@@ -117,6 +121,15 @@ bool GpuTimings::AverageMs(Section s, float& ms) const
     if (_count[i] == 0)
         return false;
     ms = _avg[i];
+    return true;
+}
+
+bool GpuTimings::MinMs(Section s, float& ms) const
+{
+    const int i = static_cast<int>(s);
+    if (_count[i] == 0)
+        return false;
+    ms = _min[i];
     return true;
 }
 
@@ -137,11 +150,33 @@ std::string GpuTimings::Summary() const
     };
     add(Section::Frame, "%s %.2f ms");
     if (add(Section::World, " | %s %.2f"))
+    {
         add(Section::Shadow, " (%s %.2f)");
+        float ms = 0.0f;
+        if (AverageMs(Section::Ground, ms) || AverageMs(Section::Pass1, ms) || AverageMs(Section::Rest, ms))
+        {
+            out += " [";
+            const size_t open = out.size();
+            for (Section s : {Section::Ground, Section::Pass1, Section::Rest})
+                add(s, out.size() == open ? "%s %.2f" : " %s %.2f");
+            out += "]";
+        }
+    }
     if (add(Section::Post, " | %s %.2f:"))
     {
         for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
             add(static_cast<Section>(i), " %s %.2f");
+    }
+    // The best frame of the window for the frame, the world and its parts.
+    bool first = true;
+    for (Section s : {Section::Frame, Section::World, Section::Ground, Section::Pass1, Section::Rest})
+    {
+        float ms = 0.0f;
+        if (!MinMs(s, ms))
+            continue;
+        std::snprintf(buf, sizeof(buf), "%s%s=%.2f", first ? " | min " : " ", SectionName(s), ms);
+        out += buf;
+        first = false;
     }
     return out.empty() ? "gpu: no sections measured yet" : out;
 }

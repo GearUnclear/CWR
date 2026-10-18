@@ -830,6 +830,45 @@ graphics-remaster worktree, gitignored).**
   `test_gpu_timings.cpp` for the new sections.
 - **Effort**: 4 days.
 
+**Result (2026-10-18, uncommitted change on ced77ae in the scratch copy `gr-A4`; evidence in
+`tmp/integration/A4/` of the graphics-remaster worktree, gitignored).**
+
+- Built as the bullets above with these corrections. The cull does not run before LOD selection and
+  sorting: it runs after `AdjustComplexity` and the object occlusion pass and only flags an object
+  (`SortObject::hillHidden`). The object keeps its draw LOD and its place in every sort, the
+  shadow-map pass still casts it from its draw LOD, and `Object::PrepareDrawTextures` gives its
+  texture hints without the draw; moving the cull earlier changes sort orders, casters and mip
+  loads, so the frame stops being exact. The horizon table is not built on a worker thread for a
+  raised eye: `TerrainOcclusion::HorizonTable` holds, per azimuth wedge (512) and chord (25 m apart
+  to 500 m, 50 m to 1,500 m, 100 m beyond), the steepest slope the lowest terrain along the chord
+  blocks (the drawn triangles, exact), and builds a wedge only when an object asks for it, for the
+  exact eye of the frame (0.86 ms of CPU per frame at sunrise_ridge for 8,887 tested objects, 1.07
+  ms while walking 0.5 m a frame with 43 wedges built per frame). `CullGovernor` is the adaptive
+  rule (idle after 30 frames under 200 tested or 10% hidden, one probe every 30 frames). The UBO
+  mirrors are `Graphics/Core/UboMirror.hpp` behind `UploadLitSlots` and a VS twin, deduping only
+  with `drawGrouping` on; the VS world slots are ignored while `WorldInstances` exists (no shader
+  reads them). `PerfCounters` rides in `triPerfStats` after ` || `; `triSceneStats` gained
+  `culled=` and `objects=` still counts hidden objects.
+- Correction found on the way (hot spot 6, `SceneDraw.cpp`): the shadow-map pass's alpha-tested
+  casters sample their textures with whatever sampler the last draw before the pass left on unit 0
+  (a leak older than A4). That draw is the last road or decal blend section of Pass2's pre-shadow
+  loop, so hiding it changed the cutout of leaf-card shadows in view (3,291 px over 2 levels, max
+  14, at sunrise_ridge; 13,829 px under `debug=1`). A fixed sampler for the casters made `on` differ
+  from `off` instead. As built, the last overlay of that loop (and, in a view with none, the last
+  object Pass1 draws) is drawn even when hidden: 2 objects a frame (`kept=` in `triPerfStats`).
+  Any later step that changes which draw comes last before the shadow-map pass (B1, B3, B7) must
+  keep that draw, or fix the leak behind its own switch.
+- Pixel results: sunrise_ridge, its walk end, its 120-frame walk, the hill-only and grouping-only
+  pairs, `debug=1` sun visibility and noon_walk are pixel-identical `off` against `on` in one game
+  and `off` against the A3 build across boots; town_night's lamps without the fire are identical
+  `off` against the A3 build, and `on` differs from `off` in 1 pixel by 1 level; the
+  valley, noon_fields, lowsun_fp and town_night with its fire differ only within each view's own
+  same-game noise on the A3 build; forest_edge_golden differs only on the live AI soldier's head.
+- Draws (single reading, 1920x1080, scale 1.0, 4x MSAA): sunrise_ridge 12,910 to 1,912 (A3 at this
+  tip draws 12,910, not the 11,000 above), its walk end 13,712 to 1,714, valley 05:15 11,406 to
+  5,242, noon_fields 6,398 to 1,566. GPU world pass at sunrise_ridge 18.16 to 2.52 ms, CPU frame
+  rate 34 to 72 fps.
+
 ### A5. temporal (TAA)
 
 - **Prototype touched**: `GameStateExtTestRender.cpp`, `LightRig.hpp` (14 knobs),
@@ -1395,7 +1434,7 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
 | `EngineGL33_PostFX.cpp` | F5, combat, ssr, volumetric, materials, night, shadows, texsharp, temporal | A3 turns it into stages; every feature adds its own `EngineGL33_Post*.cpp`, with its GLSL in a GL-free file and a `kPostShaders` row (A2, 3.5). Only A3 and A5 touch the stage list itself; later steps register a stage. |
 | `EngineGL33_Lighting.{hpp,cpp}` | F3, perf, combat, ssr, materials, atmosphere, hfrt, haze, shadows, night, clouds, texsharp, temporal | `LitConst` and the unit table are fixed in A2 (3.3, 3.4). `UploadLitFrameConstants` is split into per-feature `UploadLit<Feature>()` calls made from it; `BindLightingTextures` binds from the unit table; all partial uploads go through A4's mirror helper. |
 | `LightRig.{hpp,cpp}` | F2, F4, F5, F9, every prototype's `LightingTuning` fields, shade's rig terms, night's moon key | Feature switches leave `LightingTuning` for `FeatureSet` (A1). Rig math changes only in B2 (`lowSunRig`) and B3 (`KeyLight`), in that order, each with re-pinned tests. |
-| `SceneDraw.cpp` | F1, F6, perf, night | A4 first (cull before LOD selection and sort; light gate via `RunEntry`). B3 then adds the moon shadow-pass condition in `DrawObjectsAndShadowsPass2`. |
+| `SceneDraw.cpp` | F1, F6, perf, night | A4 first (light gate via `RunEntry`; as built the cull flags objects after LOD selection and occlusion, see 5 A4, and keeps the last draw before the shadow-map pass, whose sampler the pass's cutout casters inherit). B3 then adds the moon shadow-pass condition in `DrawObjectsAndShadowsPass2`, keeping that last draw. |
 | `GameStateExtTestRender.cpp` | F1 and every prototype's knobs | A1 makes the knob table data (`FeatureSwitches.cpp`, where `ApplyLightingItem` now lives); later steps add rows to the table, never parsing code. |
 | `Object.cpp` (`DrawDecal`), `Lights.cpp` | combat, night | One `ParticleLight` in A6's module, written in B3 or B4 (whichever lands first) and reused. |
 | `ShapeDraw.cpp` | F8, shade, materials | F8 owns late buffers; B7 adds only the object-kind field on the draw descriptor. |

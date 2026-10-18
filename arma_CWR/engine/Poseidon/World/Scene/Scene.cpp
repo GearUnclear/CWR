@@ -933,6 +933,7 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
     sObj->shadowLOD = LOD_INVISIBLE; // override with autodetection
     sObj->drawLOD = LOD_INVISIBLE;   // override with autodetection
 #endif
+    sObj->hillHidden = false; // the hill cull sets it again in Pass1
     sObj->distance2 = dist2;
     sObj->passNum = -1; // noninit
 
@@ -996,6 +997,7 @@ void Scene::CloudletForDrawing(Object* obj)
     sObj->drawLOD = 0;
     sObj->forceDrawLOD = 0;
     sObj->shadowLOD = LOD_INVISIBLE;
+    sObj->hillHidden = false;
     sObj->distance2 = dist2;
     sObj->zCoord = cPos.Z(); // alpha-pass sort key: centre camera-space depth (cPos computed above)
     sObj->radius = radius;

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 
@@ -536,4 +537,42 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     for (int i = 0; i < kFeatureCount; ++i)
         landed += GetFeatureInfo(static_cast<Feature>(i)).landed ? 1 : 0;
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
+}
+
+TEST_CASE("Feature switches: the frame-cost switches have landed, nothing after A4 has", "[remaster][FeatureSwitches]")
+{
+    // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
+    // classic): triFeatureState no longer marks them inert, and the overlay
+    // shows the opaque objects' GPU section for them.
+    std::set<std::string> sections;
+    for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+        sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
+    for (int i = 0; i < kFeatureCount; ++i)
+    {
+        const FeatureInfo& info = GetFeatureInfo(static_cast<Feature>(i));
+        INFO(info.key);
+        const bool perf = info.id == Feature::DrawGrouping || info.id == Feature::HillCull;
+        CHECK(info.landed == perf);
+        if (info.landed)
+        {
+            CHECK(std::string_view(info.step) == "A4");
+            CHECK(sections.count(info.gpuSection) == 1);
+        }
+    }
+    const LightingTuning t = Apply("remastered");
+    FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
+    const std::string s = FeatureStateString(t, g);
+    INFO(s);
+    CHECK(s.find(" drawGrouping=1:on:always ") != std::string::npos);
+    CHECK(s.find(" hillCull=1:on:always ") != std::string::npos);
+    CHECK(s.find("landed=2/26") != std::string::npos);
+    // Classic keeps its own draw path: the gates hold them off.
+    const LightingTuning classic = Apply("classic");
+    const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);
+    CHECK_FALSE(gc[Feature::DrawGrouping].on);
+    CHECK_FALSE(gc[Feature::HillCull].on);
+    // Night vision keeps them (they change no pixel).
+    GateInputs nv;
+    nv.nightVision = true;
+    CHECK(ComputeFeatureGates(nv, t)[Feature::HillCull].on);
 }

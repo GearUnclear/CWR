@@ -713,6 +713,7 @@ class EngineGL33 : public Engine
     bool GpuTimingEnabled() const override { return _gpuTiming; }
     std::string GpuTimingSummary() const override;
     bool GpuTimingSectionMs(const char* name, float& ms) const override;
+    void GpuMarkWorldPhase(WorldPhase phase) override;
     bool WantsTerrainHorizonMap() const override;
     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
     void EndWorldScene() override;
@@ -796,6 +797,10 @@ class EngineGL33 : public Engine
     void UploadLitShadowDelta();
     void UploadLitLights(const LightList& lights, float nightEffect);
     void SetLitOpaque(bool opaque);
+    // Writes slots [first, first + count) of the CPU LitConstants block to its
+    // buffer and records them in the buffer's mirror: every upload of the
+    // block, whole or partial, goes through here (plan section 5 A4).
+    void UploadLitSlots(int first, int count);
     // Binds units 2..5 for the remastered shaders (compare sampler on 2).
     void BindLightingTextures();
     void FlushLitConstants();

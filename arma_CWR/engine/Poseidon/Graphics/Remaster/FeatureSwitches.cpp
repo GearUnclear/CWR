@@ -17,8 +17,11 @@ using LT = LightingTuning;
 // One row per Feature, in enum order (checked below). `landed` turns true in
 // the step that makes the switch do something.
 constexpr FeatureInfo kFeatures[] = {
-    {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", false, &FS::drawGrouping, ""},
-    {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", false, &FS::hillCull, ""},
+    // A4 (perf): both pixel-exact; their GPU time shows in the opaque objects'
+    // section of the world pass.
+    {Feature::DrawGrouping, "drawGrouping", "Draw grouping", "perf", "Frame cost", "A4", true, &FS::drawGrouping,
+     "pass1"},
+    {Feature::HillCull, "hillCull", "Hill culling", "perf", "Frame cost", "A4", true, &FS::hillCull, "pass1"},
     {Feature::Taa, "taa", "Temporal anti-aliasing", "temporal", "Light and shadow", "A5", false, &FS::taa, ""},
     {Feature::LightTiles, "lightTiles", "Tiled light list", "light list", "Night and combat", "A6", false,
      &FS::lightTiles, ""},

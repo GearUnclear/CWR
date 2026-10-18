@@ -41,6 +41,14 @@ bool EngineGL33::GpuTimingSectionMs(const char* name, float& ms) const
     return false;
 }
 
+void EngineGL33::GpuMarkWorldPhase(WorldPhase phase)
+{
+    // Only inside the world's own pass (not a portrait or a 3D preview).
+    if (!_worldPassOpen)
+        return;
+    GpuMark(phase == WorldPhase::GroundDrawn ? Mark::GroundEnd : Mark::Pass1End);
+}
+
 void EngineGL33::DestroyGpuQueries()
 {
     if (_gpuQueries[0][0] && _glContext)

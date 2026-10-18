@@ -3,6 +3,7 @@
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
@@ -1796,6 +1797,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
     Poseidon::gPerfDrawCalls = 0;
+    Poseidon::perf::GPerfCounters().EndFrame(); // same frames as the profiler (triPerfStats)
 
 #if _ENABLE_CHEATS
     static bool disableVis = false;

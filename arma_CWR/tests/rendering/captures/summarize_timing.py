@@ -31,7 +31,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-SECTIONS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
+# ground, pass1 and rest split the world pass and frame_min is the best frame of
+# a shot's timer window (GpuTimings, A4 on); empty for runs before A4.
+SECTIONS = ("frame", "world", "shadow", "ground", "pass1", "rest", "post", "resolve", "lindepth", "ao", "bloom",
+            "shafts", "composite", "frame_min")
 ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
 # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
 BANDS = ((0, 422), (422, 591), (591, 1080))
@@ -168,6 +171,7 @@ def main():
         draws = med([r.get("draws") for r in g])
         objs = med([r.get("objects") for r in g])
         rec["draws_median"], rec["objects_median"] = draws, objs
+        rec["culled_median"] = med([r.get("culled") for r in g])
         settles = ",".join(str(r.get("settle", "")) for r in g)
         rec["settle"] = settles
         mhz = med([r.get("gpu_mhz") for r in g])

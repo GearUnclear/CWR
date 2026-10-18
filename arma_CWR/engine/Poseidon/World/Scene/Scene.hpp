@@ -47,6 +47,10 @@ class SortObject : public RefCount
     signed char drawLOD, shadowLOD;
     signed char passNum;
     signed char forceDrawLOD; // forced draw LOD
+    // The hill cull hid the object this frame (Pass1): it keeps its draw LOD,
+    // so the sorts order the list as if it were drawn and the shadow-map pass
+    // casts its shadow from that LOD; only the draws skip it.
+    bool hillHidden = false;
 
     unsigned char orClip; // or clip flags only - andClip would always be 0
 
@@ -222,6 +226,7 @@ class Scene
     float _objectLODBias = 1.0f;
     float _lodPinFactor = 0.0f; // PinObjectDetail: 0 = adaptive
     int _drawnObjects = 0;      // DrawnObjectCount
+    int _hillHiddenObjects = 0; // HillHiddenObjectCount
     float _preferredTerrainGrid;
     float _preferredViewDistance;
 
@@ -265,6 +270,9 @@ class Scene
     // Objects with a visible LOD in the last Pass1 draw list, before occlusion
     // culling: the same for both lighting models on one view at one detail.
     int DrawnObjectCount() const { return _drawnObjects; }
+    // Of those, the objects the hill cull hid behind the terrain in the same
+    // Pass1 (they still count in DrawnObjectCount, so capture tables compare).
+    int HillHiddenObjectCount() const { return _hillHiddenObjects; }
 
     Camera* GetCamera() { return _camera; }
     const Camera* GetCamera() const { return _camera; }
