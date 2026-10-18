@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -9,9 +10,10 @@
 // the results back a few frames later, when the GPU has finished them, so the
 // CPU never waits. Each finished frame hands its stamps to Submit, which turns
 // them into per-section durations and keeps a smoothed average per section.
-// Marks a frame did not reach (a pass that was off) are skipped: a section
-// starts at the latest mark before its own start that the frame did record,
-// so the post-pass sections still add up to the post pass when AO is off.
+// Marks a frame did not reach (a pass that was off) are skipped: a post stage's
+// section starts at the latest stage mark before its own start that the frame
+// did record, so the stage sections still add up to the post pass when a stage
+// is off.
 
 namespace Poseidon::gpu
 {
@@ -22,12 +24,25 @@ enum class Mark : int
     WorldBegin,  // first 3D pass of the world
     ShadowBegin, // shadow-map depth pass
     ShadowEnd,
-    WorldEnd,     // Engine::EndWorldScene, after the world's queued draws
-    AoEnd,        // post: ambient occlusion and its blur
-    BloomEnd,     // post: bloom chain
-    ShaftsEnd,    // post: sun shafts
-    CompositeEnd, // post: composite into the frame
-    FrameEnd,     // before the swap
+    WorldEnd, // Engine::EndWorldScene, after the world's queued draws
+    // The post pass: the end of each stage, in the order the stages run
+    // (Poseidon::remaster::PostStage, Graphics/Remaster/PostStages.hpp, which
+    // checks the order). A stage that does not run in a frame records none.
+    ResolveEnd,       // resolve of the multisampled frame target
+    LinearDepthEnd,   // half-resolution view depth
+    TagReadoutEnd,    // SSR stencil tags (B6)
+    AoEnd,            // ambient occlusion and its blur
+    SsrEnd,           // screen-space reflections (B6)
+    AirEnd,           // beams and haze (B8)
+    BloomEnd,         // bloom chain
+    ShaftsEnd,        // legacy sun shafts
+    CombatScatterEnd, // combat light in smoke (B4)
+    CompositeEnd,     // composite into the frame
+    TemporalEnd,      // TAA resolve (A5)
+    SharpenEnd,       // TAA sharpen or the luma sharpen (A5, B11)
+    DebugViewEnd,     // a diagnostic view of a post buffer
+    PostEnd,          // after the last stage that ran
+    FrameEnd,         // before the swap
     Count
 };
 
@@ -36,18 +51,48 @@ enum class Section : int
     Frame,
     World, // includes the shadow pass
     Shadow,
+    // One per post stage, in Mark order: from the end of the latest stage that
+    // ran before it (or WorldEnd) to its own end.
+    Resolve,
+    LinearDepth,
+    TagReadout,
     Ao,
+    Ssr,
+    Air,
     Bloom,
     Shafts,
+    CombatScatter,
     Composite,
-    Post, // Ao + Bloom + Shafts + Composite
+    Temporal,
+    Sharpen,
+    DebugView,
+    Post, // WorldEnd to PostEnd: every stage
     Count
 };
 
 constexpr int kMarkCount = static_cast<int>(Mark::Count);
 constexpr int kSectionCount = static_cast<int>(Section::Count);
+// The backend records a frame's marks in a 32-bit mask.
+static_assert(kMarkCount <= 32, "GpuTimings records the marks of a frame in a 32-bit mask");
+// One post stage section per post stage mark, in the same order.
+constexpr int kPostStageMarks = static_cast<int>(Mark::DebugViewEnd) - static_cast<int>(Mark::ResolveEnd) + 1;
+static_assert(static_cast<int>(Section::DebugView) - static_cast<int>(Section::Resolve) + 1 == kPostStageMarks,
+              "one post stage section per post stage mark");
 
 const char* SectionName(Section s);
+// The post stage section that ends at `m`; Section::Count for any other mark.
+Section PostStageSection(Mark m);
+
+namespace detail
+{
+constexpr std::array<float, kSectionCount> Unmeasured()
+{
+    std::array<float, kSectionCount> a{};
+    for (float& v : a)
+        v = -1.0f;
+    return a;
+}
+} // namespace detail
 
 class GpuTimings
 {
@@ -64,13 +109,14 @@ class GpuTimings
     float LastMs(Section s) const { return _last[static_cast<int>(s)]; }
     int Frames() const { return _frames; }
 
-    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: ao 0.30 bloom 0.21 shafts 0.05 composite 0.15"
+    // "frame 6.12 ms | world 4.80 (shadow 0.62) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05
+    // composite 0.14": the post stages in the order they run, each once it has been measured.
     std::string Summary() const;
 
   private:
-    float _avg[kSectionCount] = {};
-    float _last[kSectionCount] = {-1, -1, -1, -1, -1, -1, -1, -1};
-    int _count[kSectionCount] = {};
+    std::array<float, kSectionCount> _avg{};
+    std::array<float, kSectionCount> _last = detail::Unmeasured();
+    std::array<int, kSectionCount> _count{};
     int _frames = 0;
 };
 

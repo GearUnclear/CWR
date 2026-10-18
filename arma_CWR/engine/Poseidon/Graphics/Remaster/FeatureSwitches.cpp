@@ -136,8 +136,9 @@ struct KeyTable
             MakeKnob("bloom", "Bloom", "Post effects", "", &LT::bloom, 0.0f, 2.0f),
             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
             MakeChoice("debug", "View", "Diagnostics",
-                       "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0", &LT::debugView, 0,
-                       4),
+                       "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
+                       "Linear depth (half res)\0",
+                       &LT::debugView, 0, 5),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };

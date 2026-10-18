@@ -824,7 +824,9 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
         CHECK(ok);
         ++post;
     }
-    CHECK(post == 7); // vsPost, AO, AO blur, bloom down and up, shafts, composite
+    // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
+    // and its debug view
+    CHECK(post == 9);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -850,7 +852,7 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
                 CHECK(reached);
                 ++strings;
             }
-    CHECK(strings >= 26); // today 3 VS, 10 prelude pieces and 4 mains; 9 post strings
+    CHECK(strings >= 29); // today 3 VS, 10 prelude pieces and 4 mains; 12 post strings
 }
 
 TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")
@@ -938,10 +940,38 @@ TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][
     CHECK(i == static_cast<int>(gl::PostShader::Count));
     CHECK(gl::PostShaderName(gl::PostShader::Count) == nullptr);
 
-    // psPostAo reads the shared depth reconstruction.
+    // psPostAo and psPostLinearDepth read the shared depth reconstruction.
     const std::string ao = gl::PostShaderSource(gl::PostShader::Ao);
     CHECK(CountOf(ao, "float viewZ(vec2 uv) {") == 1);
     CHECK(CountOf(ao, "vec3 viewPos(vec2 uv, float z) {") == 1);
+    const std::string linear = gl::PostShaderSource(gl::PostShader::LinearDepth);
+    CHECK(CountOf(linear, "float viewZ(vec2 uv) {") == 1);
+    CHECK(CountOf(linear, "vec3 viewPos(vec2 uv, float z) {") == 1);
+    CHECK(CountOf(linear, "viewZ(uv)") == 1);
+}
+
+TEST_CASE("Post linear depth: half resolution, nearest and farthest on a checkerboard, the sky at 1e6",
+          "[Graphics][Shaders][remaster][PostStages]")
+{
+    // The contract its readers rely on (the stages that trace or upsample at
+    // half resolution): one texel per 2x2 full-resolution pixels, read at their
+    // exact texel centres; even texels keep the nearest view depth and odd
+    // texels the farthest; the sky is 1e6, by the threshold psPostAo uses.
+    const std::string linear = gl::PostShaderSource(gl::PostShader::LinearDepth);
+    REQUIRE_FALSE(linear.empty());
+    CHECK(linear.find("vec2 uv = (vec2(ij * 2 + ivec2(k & 1, k >> 1)) + 0.5) * screen.zw;") != std::string::npos);
+    CHECK(linear.find("float z = d >= 0.999999 ? 1e6 : viewZ(uv);") != std::string::npos);
+    CHECK(linear.find("((ij.x + ij.y) & 1) == 0 ? zNear : zFar") != std::string::npos);
+    const std::string ao = gl::PostShaderSource(gl::PostShader::Ao);
+    CHECK(ao.find("if (d0 >= 0.999999) { fragColor = vec4(1.0, 1e6, 0.0, 1.0); return; } // sky") != std::string::npos);
+    // The debug view reads it and nothing else.
+    const std::string debug = gl::PostShaderSource(gl::PostShader::DebugDepth);
+    CHECK(debug.find("uniform sampler2D linDepthTex;") != std::string::npos);
+    CHECK(CountOf(debug, "uniform sampler2D") == 1);
+    // The target is one float channel at half resolution, sampled nearest.
+    const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
+    CHECK(post.find("p.linDepthTex = MakeTexture(GL_R32F, GL_RED, GL_FLOAT, hw, hh, false);") != std::string::npos);
+    CHECK(post.find("DrawTo(p.linDepthFbo, f.hw, f.hh);") != std::string::npos);
 }
 
 TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Graphics][Shaders][remaster]")

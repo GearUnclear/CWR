@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-SECTIONS = ("frame", "world", "shadow", "post", "ao", "bloom", "shafts", "composite")
+SECTIONS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
 ROUND_RE = re.compile(r"^(.+)_r(\d+)$")
 # banddiff.py's 640-row bands (0-250 sky, 250-350 horizon, 350-640 ground) at 1080 rows
 BANDS = ((0, 422), (422, 591), (591, 1080))
@@ -151,8 +151,8 @@ def main():
           "from the load, so light views run at lower clocks than heavy ones). gpu_sampler.ps1 stamps",
           "its rows in whole seconds and writes one every 2 to 3 s, so the window edges are good to",
           "about a second: the row stamped in the shot's own second may have been read just after it.", "",
-          "| view | mode | n | frame | world | shadow | post | ao | bloom | shafts | composite | CPU frame | draws | objects | GPU MHz | P-states | settle |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| view | mode | n | " + " | ".join(SECTIONS) + " | CPU frame | draws | objects | GPU MHz | P-states | settle |",
+          "|---|---|---|" + "---|" * (len(SECTIONS) + 6)]
     summary = []
     for key in order:
         g = sorted(groups[key], key=lambda r: r["round"])

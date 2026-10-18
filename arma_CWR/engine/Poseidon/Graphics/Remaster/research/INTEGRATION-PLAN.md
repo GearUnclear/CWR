@@ -295,8 +295,8 @@ classic and remastered programs alike; it took the `shadowMap` row, which was a 
 are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cpp` look for
 `GL33Bind::ActiveUnit(kShadowMapUnit);`. Not in the table: `BindLightingTextures` still binds units 2
 to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
-units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's. `GL33Bind` caches units 0 to 7 only
-(`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
+units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's (named `kPostUnits` in A3, 3.6).
+`GL33Bind` caches units 0 to 7 only (`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
 for unit 6 belongs to the step that first samples it (A5 or B1).
 
 ### 3.5 Shader sources: split by concern, test through the accessors
@@ -395,6 +395,51 @@ Each stage owns its GPU mark (new `Mark` values; `GpuTimings` records marks in a
 so the count must stay at 32 or fewer) and restores what it binds. The early return asks every
 stage's gate. Combat's shadow mask and hfrt's visibility buffer are not post stages: they run at
 the start of the next world pass (B4, B9).
+
+As built in A3 (corrections to the list and the paragraph above):
+
+- The list is `PostStage` in `Graphics/Remaster/PostStages.{hpp,cpp}` (pure, no GL): thirteen
+  stages, the ten entries above with their pairs split (`Resolve`, `LinearDepth`; `Temporal`,
+  `Sharpen`) and a `DebugView` stage at the end that draws a post buffer over the frame
+  (`debug=5`: the linear depth). Every planned stage is in the list from A3 on, with its step,
+  `landed` (A3 lands Resolve, LinearDepth, Ao, Bloom, Shafts, Composite and DebugView) and
+  `readsLinearDepth`. A later step lands its stage by writing its pass, adding its `case` to
+  `EngineGL33::RunPostStage` and setting `landed` (a test checks that every landed stage has a case
+  and no other does); it never reorders the list. A stage that has not landed never runs.
+- `PlanPostStages(PostFrameInputs)` gives the frame's `PostStagePlan` (a bit per stage, the AO and
+  bloom strengths). The early return keeps its old meaning: the pass runs when a stage's knob asks
+  for it (`ao`, `bloom` or `shafts` above 0, or `debug=5`), even when the frame then holds that
+  stage off (AO in a vehicle interior, glow under gunner optics); Resolve and Composite then run as
+  before. Asking the frame-gated stages instead would skip the composite on such frames, and the
+  composite writes the resolved value into every MSAA sample, so the HUD's antialiased edges drawn
+  after it would change: a pixel change.
+- `PostFrame` (`EngineGL33.hpp`) holds the frame and half size, `projInfo`, the 3D rect, the depth
+  scale and bias, the sun's screen position, weight and tint, and the plan. "Gates" became the
+  plan: none of the landed stages has a feature switch, so the feature gates of 3.2 join
+  `PostFrameInputs` with the first post stage that reads one (A5, B4, B6, B8).
+- The resolve blits under the state the world left, as before (the blit honours the scissor
+  test); the fullscreen stages share one state set after it and torn down after the last stage
+  (`BeginPostFullscreen`, `EndPostFullscreen`). The stages bind their inputs to `kPostUnits`
+  {0, 2, 3, 4, 5} (`EngineGL33_Lighting.hpp`, with a `static_assert`: never unit 1 or 7), which the
+  teardown unbinds; "restores what it binds" applies to anything else a stage changes (bloom's
+  additive blend goes back to opaque; a stage that binds another unit restores it).
+- GPU marks: one per stage, contiguous after `WorldEnd` in list order (`ResolveEnd` ..
+  `DebugViewEnd`), then `PostEnd`; 20 of the 32. The `post` section runs from `WorldEnd` to
+  `PostEnd` (it ended at `CompositeEnd`), so stages after the composite count. Every stage section
+  starts at the latest stage mark the frame recorded before it. Section names: `resolve`,
+  `lindepth`, `tags`, `ao`, `ssr`, `air`, `bloom`, `shafts`, `scatter`, `composite`, `taa`,
+  `sharpen`, `debugview`. The `ao` section no longer holds the resolve blits (now `resolve`), so
+  `ao` in the A0 to A2 tables is resolve plus AO. `make_pairs.py` and `summarize_timing.py` carry
+  `resolve` and `lindepth` columns.
+- `PostLinearDepth`: R32F at `(w + 1) / 2` by `(h + 1) / 2`, the view depth in metres from
+  `s_glslPostCommon`'s `viewZ` at the four full-resolution texel centres under each texel, the sky
+  at 1e6 (AO's sentinel, same threshold). Even texels (`(x + y)` even) keep the nearest of the four,
+  odd texels the farthest, so along a silhouette a depth-aware upsample finds a tap at either depth
+  (volumetric's probe 8 had a speckled rim on thin foliage where no half-resolution tap matched).
+  No mip chain: SSR's Hi-Z and SAO-style mip taps belong to the steps that read them. It feeds
+  nothing yet: AO still reads the full-resolution depth (moving AO onto it changes AO's pixels, so
+  it is a step of its own, A4 or later), and its gate is "a running stage reads it", so on the
+  shipped frame it does not run and costs nothing; only `debug=5` runs it.
 
 ### 3.7 Porting method
 
@@ -699,6 +744,43 @@ graphics-remaster worktree, gitignored).**
 
 As 3.6. Pixel-exact against A2 (capture A/B, `banddiff.py` from `tmp/research/perf/scripts`).
 `PostLinearDepth` is new work but feeds nothing yet. Effort 2 days.
+
+**Result (2026-10-18, uncommitted change on af5b999; evidence in `tmp/integration/A3/` of the
+graphics-remaster worktree, gitignored).**
+
+- Built as 3.6 with the as-built notes there: `PostStages.{hpp,cpp}` (the list, `PlanPostStages`),
+  `PostFrame` and one member function per landed stage in `EngineGL33_PostFX.cpp`, one GPU mark and
+  section per stage plus `PostEnd`, `kPostUnits`, the half-resolution linear depth
+  (`psPostLinearDepth`) and the debug view that shows it (`psPostDebugDepth`, `debug=5`, "Linear
+  depth (half res)" in the overlay's View list).
+- No pixel changes: `glsl_extract.py --dump` of af5b999 and of the change give the same 30 programs
+  (md5 lists equal) plus the two new post programs. `features_ab` on the A3 build against the A2
+  build, both this session (`20261018-040749-ab-A3`, `20261018-040811-ab-A2build`): the five views
+  that repeat to the pixel between boots are pixel-identical, off and on; the others differ by the
+  same kinds and sizes as each build's own off against on (fire, smoke and lamps at night, the sea,
+  the posed soldier). The three-island set (`20261018-041416-set` against
+  `20261018-040948-set-A2build`): within boot-to-boot noise, Classic included. A first A3 set shot
+  while three other games loaded (`20261018-040811-set`) differed in the sky band of the daytime
+  views by the sky clouds' position, in Classic as much as in Remastered (the capture set does not
+  hold the clouds); the rerun on a quiet machine matched.
+- Timing (item 7, 0 of 4 slots, no foreign game in 241 sampler rows, `20261018-035421-timing`):
+  where both runs read P0 the Remastered frame medians are within -0.22 to +0.27 ms of A2's run
+  (sunrise_ridge 17.67 against 17.49, valley 05:15 23.97 against 23.82, Eden broken_high 24.58
+  against 24.74); Classic, which A3 does not touch, moved by -0.35 to +0.34 ms between the same two
+  runs. The new sections split the old `ao` one: the resolve blits take 0.22 to 0.65 ms at P0 (0.46
+  on sunrise_ridge, 0.65 in the valley, 0.62 on Eden's broken_high, 0.60 on Sinai at noon) and AO
+  with its blur 0.06 to 0.20 ms. Correction to 3.6: the MSAA resolve, not AO's full-resolution depth
+  reads, is the largest fixed post cost on this card (the sun shafts take 0.27 to 0.49 ms at P0
+  where the sun is in view). The linear depth does not run on the shipped frame (no `lindepth`
+  section in any of the 60 Remastered shots); under `debug=5` (`20261018-040520-lindepth-timing`,
+  five Abel views, 3 rounds) it takes 0.01 ms at P0 and 0.03 ms at P3 (coastline_sunset).
+- Build 0 warnings, clang-format clean on every touched C++ file, smoke 3/3 with KHR_debug ids
+  131169, 131154 and 131218 only. Unit gate tags plus `[PostStages]`: 466/466 (10 new cases);
+  `[Graphics]` has the known DDS fixture failure only, the full suite the 6 known localisation
+  failures only. Seven mutations (the linear depth on every pass, an early return that asks the
+  frame-gated strengths, `post` ending at the composite, no fall-back of a stage section, a landed
+  stage without its `case`, the linear depth keeping the nearest sample everywhere, the debug view
+  not reading the linear depth) each turn their cases red.
 
 ### A4. perf (draw grouping and hill culling)
 

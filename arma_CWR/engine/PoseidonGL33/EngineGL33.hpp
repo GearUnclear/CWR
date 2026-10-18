@@ -38,6 +38,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+#include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 
 #include <memory>
@@ -808,17 +809,55 @@ class EngineGL33 : public Engine
         unsigned int depthTex = 0, depthFbo = 0;
         unsigned int aoTex[2] = {}, aoFbo[2] = {};
         unsigned int shaftTex = 0, shaftFbo = 0;
+        unsigned int linDepthTex = 0, linDepthFbo = 0; // R32F half res: view depth in metres
         unsigned int bloomTex[kBloomLevels] = {}, bloomFbo[kBloomLevels] = {};
         int bloomW[kBloomLevels] = {}, bloomH[kBloomLevels] = {};
         unsigned int whiteTex = 0, blackTex = 0; // 1x1 stand-ins for skipped passes
         unsigned int vao = 0;
         unsigned int progAo = 0, progAoBlur = 0, progBloomDown = 0, progBloomUp = 0, progShafts = 0, progComposite = 0;
+        unsigned int progLinearDepth = 0, progDebugDepth = 0;
         bool programsTried = false;
         bool unavailable = false;
     } _post;
     void DestroyPostTargets();
     void DestroyPostPrograms();
     bool EnsurePostResources(int w, int h);
+
+    // One post pass (INTEGRATION-PLAN.md section 3.6): what every stage reads.
+    // EndWorldScene fills it, then runs the stages its plan names in
+    // PostStage order (Graphics/Remaster/PostStages.hpp).
+    struct PostFrame
+    {
+        int w = 0, h = 0;   // frame target
+        int hw = 0, hh = 0; // half resolution: AO, shafts, linear depth
+        // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
+        float projInfo[4] = {};
+        // The 3D viewport in uv (x, y, w, h): the scene may fill only a
+        // sub-rectangle (aspect pillarbox).
+        float rect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+        float depthScale = 1.0f, depthBias = 0.0f; // ndcZ = depth * scale + bias
+        // The sun on screen, for the shafts.
+        float sunU = 0.5f, sunV = 0.5f, shaftWeight = 0.0f;
+        Color shaftTint = Color(1, 1, 1, 1);
+        // Which stages run this frame and the strengths the composite uses.
+        Poseidon::remaster::PostStagePlan plan;
+    };
+    void PostFrameGeometry(PostFrame& f) const;
+    void PostFrameSun(PostFrame& f) const;
+    void RunPostStage(Poseidon::remaster::PostStage stage, const PostFrame& f);
+    // The fullscreen stages' shared state, set after the resolve; and its
+    // teardown, after the last stage.
+    void BeginPostFullscreen();
+    void EndPostFullscreen();
+    // The stages (EngineGL33_PostFX.cpp). Each leaves the shared state as it
+    // found it, apart from the program and the kPostUnits bindings.
+    void PostResolve(const PostFrame& f);
+    void PostLinearDepth(const PostFrame& f);
+    void PostAo(const PostFrame& f);
+    void PostBloom(const PostFrame& f);
+    void PostShafts(const PostFrame& f);
+    void PostComposite(const PostFrame& f);
+    void PostDebugView(const PostFrame& f);
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }

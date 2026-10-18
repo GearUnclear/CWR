@@ -18,18 +18,42 @@ constexpr SectionDef kSections[kSectionCount] = {
     {"frame", Mark::FrameBegin, Mark::FrameEnd},
     {"world", Mark::WorldBegin, Mark::WorldEnd},
     {"shadow", Mark::ShadowBegin, Mark::ShadowEnd},
-    {"ao", Mark::WorldEnd, Mark::AoEnd},
-    {"bloom", Mark::AoEnd, Mark::BloomEnd},
+    {"resolve", Mark::WorldEnd, Mark::ResolveEnd},
+    {"lindepth", Mark::ResolveEnd, Mark::LinearDepthEnd},
+    {"tags", Mark::LinearDepthEnd, Mark::TagReadoutEnd},
+    {"ao", Mark::TagReadoutEnd, Mark::AoEnd},
+    {"ssr", Mark::AoEnd, Mark::SsrEnd},
+    {"air", Mark::SsrEnd, Mark::AirEnd},
+    {"bloom", Mark::AirEnd, Mark::BloomEnd},
     {"shafts", Mark::BloomEnd, Mark::ShaftsEnd},
-    {"composite", Mark::ShaftsEnd, Mark::CompositeEnd},
-    {"post", Mark::WorldEnd, Mark::CompositeEnd},
+    {"scatter", Mark::ShaftsEnd, Mark::CombatScatterEnd},
+    {"composite", Mark::CombatScatterEnd, Mark::CompositeEnd},
+    {"taa", Mark::CompositeEnd, Mark::TemporalEnd},
+    {"sharpen", Mark::TemporalEnd, Mark::SharpenEnd},
+    {"debugview", Mark::SharpenEnd, Mark::DebugViewEnd},
+    {"post", Mark::WorldEnd, Mark::PostEnd},
 };
 
-// Sections whose start may fall back to an earlier recorded mark: the post
-// pass runs its steps in order and skips the ones that are off.
-bool StartFallsBack(Section s)
+constexpr bool PostStageSectionsChain()
 {
-    return s == Section::Bloom || s == Section::Shafts || s == Section::Composite;
+    // Each post stage section ends at its own mark and starts at the mark of
+    // the stage before it, the first one at WorldEnd.
+    for (int i = 0; i < kPostStageMarks; ++i)
+    {
+        const SectionDef& d = kSections[static_cast<int>(Section::Resolve) + i];
+        if (static_cast<int>(d.to) != static_cast<int>(Mark::ResolveEnd) + i)
+            return false;
+        if (static_cast<int>(d.from) != static_cast<int>(Mark::WorldEnd) + i)
+            return false;
+    }
+    return true;
+}
+static_assert(PostStageSectionsChain(), "post stage sections run from the previous stage mark to their own");
+
+bool IsPostStage(Section s)
+{
+    return static_cast<int>(s) >= static_cast<int>(Section::Resolve) &&
+           static_cast<int>(s) <= static_cast<int>(Section::DebugView);
 }
 
 constexpr float kSmoothing = 0.1f; // weight of the newest frame
@@ -38,6 +62,14 @@ constexpr float kSmoothing = 0.1f; // weight of the newest frame
 const char* SectionName(Section s)
 {
     return kSections[static_cast<int>(s)].name;
+}
+
+Section PostStageSection(Mark m)
+{
+    const int i = static_cast<int>(m) - static_cast<int>(Mark::ResolveEnd);
+    if (i < 0 || i >= kPostStageMarks)
+        return Section::Count;
+    return static_cast<Section>(static_cast<int>(Section::Resolve) + i);
 }
 
 void GpuTimings::Reset()
@@ -59,7 +91,9 @@ void GpuTimings::Submit(const std::uint64_t stamps[kMarkCount], std::uint32_t re
         int from = static_cast<int>(d.from);
         if (!has(d.from))
         {
-            if (!StartFallsBack(s))
+            // A post stage that did not run leaves no mark: the next stage
+            // starts at the latest one that did, at the latest at WorldEnd.
+            if (!IsPostStage(s))
                 continue;
             while (from > static_cast<int>(Mark::WorldEnd) && !has(static_cast<Mark>(from)))
                 --from;
@@ -106,10 +140,8 @@ std::string GpuTimings::Summary() const
         add(Section::Shadow, " (%s %.2f)");
     if (add(Section::Post, " | %s %.2f:"))
     {
-        add(Section::Ao, " %s %.2f");
-        add(Section::Bloom, " %s %.2f");
-        add(Section::Shafts, " %s %.2f");
-        add(Section::Composite, " %s %.2f");
+        for (int i = static_cast<int>(Section::Resolve); i <= static_cast<int>(Section::DebugView); ++i)
+            add(static_cast<Section>(i), " %s %.2f");
     }
     return out.empty() ? "gpu: no sections measured yet" : out;
 }

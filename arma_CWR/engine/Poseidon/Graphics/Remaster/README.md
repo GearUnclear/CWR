@@ -107,7 +107,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 - Dev overlay, **Lighting** tab, generated from the same registry: sliders for
   exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
   moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
-  bloom and shafts, debug views (sun visibility, sky visibility, normals, AO),
+  bloom and shafts, debug views (sun visibility, sky visibility, normals, AO,
+  the post pass's half-resolution linear depth),
   a **Features** section (per area, one checkbox per switch with its live gate,
   "active" or "gated: <reason>", and its GPU section once it has one) and a
   summary line that is a `triSetLighting` setting, to copy back.
@@ -123,7 +124,8 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
   (`tests/rendering/captures/README.md`).
 - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
   `triGpuTimes true`, turns on timestamp queries around the frame, the world
-  (with the shadow pass inside it) and each post step
+  (with the shadow pass inside it) and each post stage that ran (resolve,
+  linear depth, AO, bloom, shafts, composite, in the order of the stage list)
   (`EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings`). Results trail the
   frame by a few frames and are smoothed; nothing waits on the GPU. Toggle
   Remastered off for the same view's Classic numbers.
@@ -147,12 +149,14 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 | `Graphics/Remaster/CloudNoise.{hpp,cpp}` | Tileable, histogram-equalised cloud noise. Pure math. |
 | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
 | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
+| `Graphics/Remaster/PostStages.{hpp,cpp}` | The post pass as a fixed list of stages (plan section 3.6), each with its GPU mark, and the plan of a frame: which stages run and at what strength (the early return asks every stage). Pure. |
 | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
 | `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
 | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
-| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass, and its GLSL (no GL code there, so the unit tests compile the sources the engine builds), assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
+| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass: its stages run in list order on one `PostFrame` (`EndWorldScene`), each followed by its GPU mark; the half-resolution linear depth (R32F, view depth in metres) for the stages that trace or upsample at half resolution. Its GLSL (no GL code there, so the unit tests compile the sources the engine builds) is assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
 | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
 | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
+| `tests/unit/.../Graphics/test_post_stages.cpp`, `test_gpu_timings.cpp` | The stage list (order, marks, sections, what has landed), the plan of a frame against the pass as it ran before the list, the linear depth running only for a reader, and the backend running and marking every landed stage. |
 | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
 | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
 

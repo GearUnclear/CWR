@@ -57,6 +57,8 @@ enum class PostShader : int
     BloomUp,
     Shafts,
     Composite,
+    LinearDepth, // half-resolution view depth (the LinearDepth post stage)
+    DebugDepth,  // that depth drawn over the frame (the DebugView stage, debug view 5)
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -108,6 +110,31 @@ constexpr bool RemasterUnitsValid()
 } // namespace detail
 static_assert(detail::RemasterUnitsValid(),
               "remastered texture units: 2 to 15, never the material units 0 and 1 or the upload unit 7, all distinct");
+
+// Texture units the post stages bind their inputs to (EngineGL33_PostFX.cpp).
+// The post pass sets their samplers to none before the first fullscreen stage
+// and unbinds all of them at its end; a stage that binds any other unit
+// restores that unit itself. Never unit 1 (its sampler object belongs to
+// ApplyPipeline) or the upload unit 7.
+constexpr int kPostUnits[] = {0, 2, 3, 4, 5};
+namespace detail
+{
+constexpr bool PostUnitsValid()
+{
+    constexpr int n = static_cast<int>(sizeof(kPostUnits) / sizeof(kPostUnits[0]));
+    for (int i = 0; i < n; ++i)
+    {
+        const int unit = kPostUnits[i];
+        if (unit < 0 || unit == 1 || unit == 7 || unit > 15)
+            return false;
+        for (int j = 0; j < i; ++j)
+            if (kPostUnits[j] == unit)
+                return false;
+    }
+    return true;
+}
+} // namespace detail
+static_assert(detail::PostUnitsValid(), "post texture units: 0 to 15, never unit 1 or the upload unit 7, all distinct");
 
 // Sampler uniform -> texture unit for every lit program, classic and
 // remastered; InitPixelShaders binds them from this table and skips a name the

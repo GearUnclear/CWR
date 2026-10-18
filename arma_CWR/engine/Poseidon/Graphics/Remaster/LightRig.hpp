@@ -121,7 +121,8 @@ struct LightingTuning
     bool gates = true;
     FeatureSet features;
     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
-    // 3 normals, 4 ambient occlusion.
+    // 3 normals, 4 ambient occlusion, 5 the post pass's half-resolution
+    // linear depth (PostStages.hpp kDebugViewLinearDepth).
     int debugView = 0;
 };
 

@@ -40,12 +40,17 @@ MODES = tuple(m for pair in PAIR_MODES for m in pair)
 SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 UDCAP_RE = re.compile(r"UDCAP;(.*)$")
-GPU_FIELDS = ("frame", "world", "shadow", "post", "ao", "bloom", "shafts", "composite")
+# triGpuTimes sections: the frame, the world (with its shadow pass) and the post
+# pass, then the post stages that run today, in their order (GpuTimings.hpp; a
+# stage that did not run leaves its cell empty).
+GPU_FIELDS = ("frame", "world", "shadow", "post", "resolve", "lindepth", "ao", "bloom", "shafts", "composite")
 GPU_RES = {
     "frame": re.compile(r"\bframe ([\d.]+) ms"),
     "world": re.compile(r"\bworld ([\d.]+)"),
     "shadow": re.compile(r"\(shadow ([\d.]+)\)"),
     "post": re.compile(r"\bpost ([\d.]+):"),
+    "resolve": re.compile(r"\bresolve ([\d.]+)"),
+    "lindepth": re.compile(r"\blindepth ([\d.]+)"),
     "ao": re.compile(r"\bao ([\d.]+)"),
     "bloom": re.compile(r"\bbloom ([\d.]+)"),
     "shafts": re.compile(r"\bshafts ([\d.]+)"),
@@ -298,15 +303,14 @@ def write_tables(rows, out_dir: Path):
           "are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame",
           "(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =",
           "Remastered minus Classic, or on minus off (draws and objects: share of the larger).", "",
-          "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | draws | objects | "
-          "load | lighting |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "| view | mode | " + " | ".join(GPU_FIELDS) + " | CPU fps | draws | objects | load | lighting |",
+          "|---|---|" + "---|" * (len(GPU_FIELDS) + 5)]
     for v in views:
         left, right = pair_modes(v, out_dir, by)
         for mode in (left, right):
             r = by.get((v, mode))
             if not r:
-                md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |  |  |  |")
+                md.append(f"| {v} | {mode} | missing |" + "  |" * (len(GPU_FIELDS) + 4))
                 continue
             counts = ["" if r.get(k) is None else f"{r[k]:,}" for k in ("draws", "objects")]
             md.append("| " + " | ".join([v, mode] + [fmt(r[f"gpu_{f}_ms"]) for f in GPU_FIELDS] +

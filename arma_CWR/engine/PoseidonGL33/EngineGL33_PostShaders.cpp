@@ -29,7 +29,8 @@ void main() {
 // view-space depth in metres at a uv and the view-space position of a uv at a
 // depth. The pass declares the inputs these read, under these names: depthTex,
 // projInfo (x = _33, y = _43, z = 1/_11, w = 1/_22), depthMap (ndcZ = depth *
-// x + y) and worldRect (the 3D viewport in uv), as psPostAo does.
+// x + y) and worldRect (the 3D viewport in uv), as psPostAo and
+// psPostLinearDepth do.
 static const char s_glslPostCommon[] = R"(
 float viewZ(vec2 uv) {
     float d = texture(depthTex, uv).r;
@@ -251,6 +252,58 @@ void main() {
 }
 )";
 
+// Half-resolution linear depth (the LinearDepth stage), for the stages that
+// trace or upsample at half resolution. Output r = view depth in metres of one
+// of the four full-resolution pixels under the texel, 1e6 for the sky. Its
+// inputs, then s_glslPostCommon, then its main.
+static const char s_psPostLinearDepthInputs[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D depthTex;
+uniform vec4 projInfo;  // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
+uniform vec4 depthMap;  // ndcZ = depth * x + y
+uniform vec4 screen;    // xy full-res size, zw 1/size
+uniform vec4 worldRect; // xy origin, zw size of the 3D viewport in uv (read by viewPos)
+out vec4 fragColor;
+)";
+
+// On a checkerboard, even texels keep the nearest of their four pixels and odd
+// texels the farthest, so along a silhouette the half-resolution buffer holds
+// both the edge and what lies behind it, and a depth-aware upsample finds a tap
+// at either depth (a thin branch against the sky keeps its own). The four reads
+// land on exact full-resolution texel centres; on an odd frame size the last
+// row or column repeats the edge pixel (clamp to edge).
+static const char s_psPostLinearDepthMain[] = R"(
+void main() {
+    ivec2 ij = ivec2(gl_FragCoord.xy);
+    float zNear = 1e6;
+    float zFar = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        vec2 uv = (vec2(ij * 2 + ivec2(k & 1, k >> 1)) + 0.5) * screen.zw;
+        float d = texture(depthTex, uv).r;
+        float z = d >= 0.999999 ? 1e6 : viewZ(uv); // sky as psPostAo sees it
+        zNear = min(zNear, z);
+        zFar = max(zFar, z);
+    }
+    fragColor = vec4(((ij.x + ij.y) & 1) == 0 ? zNear : zFar, 0.0, 0.0, 1.0);
+}
+)";
+
+// Debug view 5 (the DebugView stage): the half-resolution linear depth over the
+// frame, on a log scale from white at 1 m to black at 8 km, the sky blue. The
+// texels stay square (nearest filtering) and the checkerboard of nearest and
+// farthest samples shows along silhouettes.
+static const char s_psPostDebugDepthGLSL[] = R"(#version 330 core
+in vec2 vUV;
+uniform sampler2D linDepthTex; // r = view depth in metres, 1e6 = sky
+out vec4 fragColor;
+void main() {
+    float z = texture(linDepthTex, vUV).r;
+    if (z >= 1e5) { fragColor = vec4(0.25, 0.45, 0.85, 1.0); return; }
+    float g = 1.0 - clamp(log2(max(z, 1.0)) / 13.0, 0.0, 1.0);
+    fragColor = vec4(vec3(g), 1.0);
+}
+)";
+
 // Every post shader, assembled from the raw strings above: these pieces in this
 // order, in PostShader order. The lighting lab's glsl_extract.py reads this
 // table to assemble the same sources.
@@ -267,6 +320,8 @@ const PostShaderDef kPostShaders[] = {
     {"psPostBloomUp", {s_psPostBloomUpGLSL}},
     {"psPostShafts", {s_psPostShaftsGLSL}},
     {"psPostComposite", {s_psPostCompositeGLSL}},
+    {"psPostLinearDepth", {s_psPostLinearDepthInputs, s_glslPostCommon, s_psPostLinearDepthMain}},
+    {"psPostDebugDepth", {s_psPostDebugDepthGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");
