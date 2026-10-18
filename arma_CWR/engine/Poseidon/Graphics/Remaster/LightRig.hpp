@@ -56,6 +56,43 @@ float ToDisplay(float linear);
 // linear.
 Rgb TonemapNeutral(const Rgb& c);
 
+// The feature switches of the remastered lighting, one float per switch: 0 off,
+// 1 on (the shipped default). A switch counts as on above 0. Each member is a
+// triSetLighting key of the same name; the registry that names, labels and
+// groups them, and the gate that decides each frame whether an enabled feature
+// runs, are in FeatureSwitches.hpp and FeatureGates.hpp. The comment after each
+// member names the integration step that makes it do something (plan section
+// 4 of research/INTEGRATION-PLAN.md); until then nothing reads it.
+struct FeatureSet
+{
+    float drawGrouping = 1.0f;    // A4 perf: one draw call for runs of the same shape
+    float hillCull = 1.0f;        // A4 perf: objects behind hills are not drawn
+    float taa = 1.0f;             // A5 temporal anti-aliasing
+    float lightTiles = 1.0f;      // A6 one tiled light list for every local light
+    float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
+    float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map
+    float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
+    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
+    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
+    float nightLights = 1.0f;     // B3 physical lamps and low-beam headlights
+    float moonShadows = 1.0f;     // B3 the moon as a shadow-casting key light
+    float stars = 1.0f;           // B3 stars in a dark sky
+    float combatLights = 1.0f;    // B4 fires, flashes and flares light the scene
+    float combatShadows = 1.0f;   // B4 combat lights cast shadows
+    float seaWaves = 1.0f;        // B5 wave relief and a broken sun path on the sea
+    float ssr = 1.0f;             // B6 screen-space reflections on water and wet ground
+    float wetWeather = 1.0f;      // B7 rain wets surfaces and fills puddles
+    float lampStreaks = 1.0f;     // B7 lamp light streaks on wet ground
+    float airBeams = 1.0f;        // B8 sun beams and headlight cones in the air
+    float airHaze = 1.0f;         // B8 aerial haze with distance
+    float valleyMist = 1.0f;      // B8 morning mist pooled in the valleys
+    float canopyShadows = 1.0f;   // B9 long tree shadows beyond the shadow map
+    float litClouds = 1.0f;       // B10 sky clouds lit from their sun side
+    float skyCloudShadows = 1.0f; // B10 cloud shadows that match the sky
+    float terrainDetail = 1.0f;   // B11 grass and rock grain on terrain
+    float sharpen = 1.0f;         // B11 luma sharpening when TAA is off
+};
+
 // Art-direction knobs, live-tunable from the dev overlay Lighting tab. The
 // defaults are the shipped look.
 struct LightingTuning
@@ -78,6 +115,11 @@ struct LightingTuning
     float bloom = 0.35f;           // glow around the sun, sky and highlights (post effects)
     float sunShafts = 1.0f;        // light shafts toward a low sun (post effects)
     float shadowSoftness = 1.0f;   // shadow-map filter radius multiplier
+    // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
+    // can show; off (gates=0) runs every enabled feature on every frame, for
+    // debugging.
+    bool gates = true;
+    FeatureSet features;
     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
     // 3 normals, 4 ambient occlusion.
     int debugView = 0;

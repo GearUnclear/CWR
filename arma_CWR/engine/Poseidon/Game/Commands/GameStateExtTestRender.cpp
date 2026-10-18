@@ -35,7 +35,10 @@ using namespace Poseidon;
 #include <Poseidon/Dev/Diag/SceneSettle.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -605,83 +608,20 @@ GameValue TriSetRenderScale(const GameState* /*state*/, GameValuePar arg)
     return GameValue("OK");
 }
 
-// One triSetLighting item applied to `t`: a mode word resets every knob to the
-// shipped default first. Returns an empty string, or why the item is refused.
-static std::string ApplyLightingItem(remaster::LightingTuning& t, const std::string& item, bool& modeSet)
-{
-    if (item == "classic" || item == "remastered")
-    {
-        t = remaster::LightingTuning{};
-        t.remastered = item == "remastered";
-        modeSet = true;
-        return {};
-    }
-    const size_t eq = item.find('=');
-    if (eq == std::string::npos)
-        return "expected classic, remastered or key=value";
-    const std::string key = item.substr(0, eq);
-    const char* valueText = item.c_str() + eq + 1;
-    char* valueEnd = nullptr;
-    const float v = std::strtof(valueText, &valueEnd);
-    if (valueEnd == valueText || *valueEnd != '\0')
-        return "bad value in " + item;
-    struct Knob
-    {
-        const char* name;
-        float remaster::LightingTuning::* field;
-    };
-    static const Knob kKnobs[] = {
-        {"exposure", &remaster::LightingTuning::exposure},
-        {"sun", &remaster::LightingTuning::sun},
-        {"sky", &remaster::LightingTuning::sky},
-        {"bounce", &remaster::LightingTuning::bounce},
-        {"warmth", &remaster::LightingTuning::warmth},
-        {"saturation", &remaster::LightingTuning::saturation},
-        {"specular", &remaster::LightingTuning::specular},
-        {"localLights", &remaster::LightingTuning::localLights},
-        {"moonlight", &remaster::LightingTuning::moonlight},
-        {"terrainShadows", &remaster::LightingTuning::terrainShadows},
-        {"terrainOcclusion", &remaster::LightingTuning::terrainOcclusion},
-        {"cloudShadows", &remaster::LightingTuning::cloudShadows},
-        {"shadowSoftness", &remaster::LightingTuning::shadowSoftness},
-        {"ao", &remaster::LightingTuning::ambientOcclusion},
-        {"bloom", &remaster::LightingTuning::bloom},
-        {"shafts", &remaster::LightingTuning::sunShafts},
-    };
-    bool found = false;
-    for (const Knob& k : kKnobs)
-    {
-        if (key == k.name)
-        {
-            t.*(k.field) = v;
-            found = true;
-        }
-    }
-    if (key == "post")
-    {
-        t.postEffects = v != 0.0f;
-        found = true;
-    }
-    else if (key == "debug")
-    {
-        t.debugView = static_cast<int>(v);
-        found = true;
-    }
-    if (!found)
-        return "unknown knob " + key;
-    return {};
-}
-
 /// triSetLighting "<setting>": remastered lighting for scripted A/B captures.
-/// "classic" / "remastered" switch the lighting model and put every tuning knob
-/// back to its shipped default (LightingTuning{}), so the knobs of one variant
-/// never leak into the next; remastered also turns the shadow maps on, classic
-/// off, as the Options row does. "key=value" sets one tuning knob: exposure,
-/// sun, sky, bounce, warmth, saturation, specular, localLights, moonlight,
-/// terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness, ao, bloom,
-/// shafts, post (0/1), debug (0..4). Comma-separated items apply in order, all
-/// or none: "remastered,bounce=2.5" is the shipped look with one knob changed.
-/// Returns "OK", or "FAIL:<why>" with nothing applied.
+/// Mode words put the whole tuning back to a known state, so the knobs of one
+/// variant never leak into the next: "classic" is the original look,
+/// "remastered" the shipped defaults with every feature switch on, and
+/// "baseline" the remastered look with every feature switch off (the look of
+/// the graphics-remaster branch cut). Remastered and baseline also turn the
+/// shadow maps on, classic off, as the Options row does. "key=value" sets one
+/// key of the registry (Graphics/Remaster/FeatureSwitches.hpp): the knobs
+/// exposure, sun, sky, bounce, warmth, saturation, specular, localLights,
+/// moonlight, terrainShadows, terrainOcclusion, cloudShadows, shadowSoftness,
+/// ao, bloom, shafts, post (0/1), debug (0..4), gates (0/1), and every feature
+/// switch (taa, combatLights, ...; 0 off, 1 on). Comma-separated items apply in
+/// order, all or none: "remastered,taa=0" is the shipped look with one feature
+/// off. Returns "OK", or "FAIL:<why>" with nothing applied.
 GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
 {
     GameStringType text = static_cast<GameStringType>(arg);
@@ -690,19 +630,9 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
         return GameValue("FAIL:no engine");
     remaster::LightingTuning t = GEngine->GetLightingTuning();
     bool modeSet = false;
-    for (size_t start = 0;;)
-    {
-        const size_t comma = setting.find(',', start);
-        std::string item = setting.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
-        item.erase(0, item.find_first_not_of(' '));
-        item.erase(item.find_last_not_of(' ') + 1);
-        const std::string why = ApplyLightingItem(t, item, modeSet);
-        if (!why.empty())
-            return GameValue(("FAIL:" + why).c_str());
-        if (comma == std::string::npos)
-            break;
-        start = comma + 1;
-    }
+    const std::string why = remaster::ApplyLightingSetting(t, setting, modeSet);
+    if (!why.empty())
+        return GameValue(("FAIL:" + why).c_str());
     GEngine->SetLightingTuning(t);
     if (modeSet)
         GEngine->SetShadowMapsEnabled(GEngine->LightingRemasterActive());
@@ -710,6 +640,70 @@ GameValue TriSetLighting(const GameState* /*state*/, GameValuePar arg)
     if (modeSet && t.remastered != GEngine->LightingRemasterActive())
         return GameValue("FAIL:remastered shaders unavailable");
     return GameValue("OK");
+}
+
+/// triFeatureState: the feature switches and their frame gates as one line for
+/// capture logs (remaster::FeatureStateString): "mode=.. gates=.. computed=..
+/// frame=.. sun=.. night=.. sky=.. rain=.. fog=.. lights=.. landed=n/26 |
+/// <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...". The gates are the
+/// ones the backend computed at the last world pass; computed=0 means no world
+/// pass has run (or the backend has no gates). Never contains ';'.
+GameValue TriFeatureState(const GameState* /*state*/)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    remaster::FeatureGates gates;
+    GEngine->GetFeatureGates(gates);
+    return GameValue(remaster::FeatureStateString(GEngine->GetLightingTuning(), gates).c_str());
+}
+
+/// triPinCloudDrift [x, z] or [x, z, sky]: hold the clouds still for captures
+/// until released: the remastered cloud-shadow field at drift offset x, z
+/// (metres) and the sky dome clouds at `sky` (Landscape::CloudsPosition; where
+/// they are when left out). [] releases both, and they move on from where they
+/// are. Both move by integration (the shadow field with the wind every frame,
+/// the sky clouds with the simulation step), so re-pinning the sim clock
+/// (triSetSimTime) alone does not put them back: A/B pairs and the video's off
+/// and on passes pin them to see the same clouds and cloud shadows. Returns
+/// "OK:pinned <x> <z> sky <pos>", "OK:released <x> <z> sky <pos>" or
+/// "FAIL:<why>".
+GameValue TriPinCloudDrift(const GameState* /*state*/, GameValuePar arg)
+{
+    if (!GEngine)
+        return GameValue("FAIL:no engine");
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [x, z], [x, z, sky] or []");
+    const GameArrayType& a = arg;
+    if (a.Size() != 0 && a.Size() != 2 && a.Size() != 3)
+        return GameValue("FAIL:expected [x, z], [x, z, sky] or []");
+    const bool pin = a.Size() >= 2;
+    float x = 0.0f, z = 0.0f;
+    if (pin)
+    {
+        x = static_cast<float>(static_cast<GameScalarType>(a[0]));
+        z = static_cast<float>(static_cast<GameScalarType>(a[1]));
+    }
+    else
+    {
+        GEngine->GetCloudDrift(x, z);
+    }
+    float nowX = 0.0f, nowZ = 0.0f;
+    if (!GEngine->GetCloudDrift(nowX, nowZ))
+        return GameValue("FAIL:no cloud field in this backend");
+    GEngine->PinCloudDrift(pin, x, z);
+    GEngine->GetCloudDrift(nowX, nowZ);
+    float sky = -1.0f;
+    if (Landscape* land = GScene ? GScene->GetLandscape() : nullptr)
+    {
+        const float skyPos =
+            a.Size() == 3 ? static_cast<float>(static_cast<GameScalarType>(a[2])) : land->CloudsPosition();
+        land->HoldClouds(pin, skyPos);
+        sky = land->CloudsPosition();
+    }
+    char buf[128];
+    snprintf(buf, sizeof(buf), "OK:%s %.2f %.2f sky %.3f", pin ? "pinned" : "released", nowX, nowZ, sky);
+    LOG_INFO(Core, "[tri] triPinCloudDrift {}", buf + 3);
+    return GameValue(buf);
 }
 
 /// triGpuTimes <on> — GPU timestamp timing for cost checks. true turns it on

@@ -175,7 +175,10 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
         ReloadShadersNow();
     GpuFrameBegin();
     _drawItems.clear();
-    // Remastered lighting: a new frame has no world pass yet.
+    // Remastered lighting: a new frame has no world pass yet. The feature
+    // gates read the last frame's interior and optics flags.
+    _prevWorldDepthCleared = _worldDepthCleared;
+    _prevWorldOverlayDrawn = _worldOverlayDrawn;
     _worldPassOpen = false;
     _worldEffectsOn = false;
     _worldSceneEnded = false;

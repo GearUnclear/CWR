@@ -292,6 +292,7 @@ class Weather
 	float _overcastSetClouds;
 	float _fogSet;
 	float _cloudsPos;
+    bool _cloudsHeld; // captures: the sky clouds hold still (Landscape::HoldClouds)
 		
 	Ref<Texture> _sky;
 	float _cloudsAlpha;
@@ -793,6 +794,7 @@ class Landscape: public SerializeClass
 	float GetOvercast() const {return _weather.GetOvercast();}
 	void SetOvercast( float overcast ) {_weather.SetOvercast(this,overcast);}
 	void SetFog( float fog ) {_weather.SetFog(this,fog);}
+    float GetFog() const { return _weather.GetFog(); }
 	void SetRain(float density, float time){_weather.SetRain(density,time);}
 	void Simulate( float deltaT );
 	float GetSeaLevel() const {return _seaLevelWave;}
@@ -805,6 +807,14 @@ class Landscape: public SerializeClass
 	// query weather
 	Texture *SkyTexture();
 	float CloudsPosition() const {return _weather._cloudsPos;}
+    // Captures: hold the sky clouds at `pos` (they move with the simulation
+    // step otherwise, so re-pinning the sim clock does not put them back).
+    void HoldClouds(bool held, float pos)
+    {
+        _weather._cloudsHeld = held;
+        if (held)
+            _weather._cloudsPos = pos;
+    }
 	float SkyThrough() const {return _weather._skyThrough;}
 	float CloudsAlpha() const {return _weather._cloudsAlpha;}
 	float CloudsBrightness() const {return _weather._cloudsBrightness;}

@@ -44,6 +44,8 @@
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/World/World.hpp>
@@ -77,8 +79,9 @@ namespace
 {
 bool s_initialized = false;
 bool s_visible = false;
-bool s_selectShadowsTab = false; // one-shot: force-select the Shadows tab next draw
-bool s_selectMemoryTab = false;  // one-shot: force-select the Memory tab next draw
+bool s_selectShadowsTab = false;       // one-shot: force-select the Shadows tab next draw
+bool s_selectMemoryTab = false;        // one-shot: force-select the Memory tab next draw
+bool s_selectLightingFeatures = false; // one-shot: Lighting tab, scrolled to its Features section
 SDL_Window* s_window = nullptr;
 // Saved mouse-grab state while the dev panel holds the cursor released.
 bool s_mouseReleasedByPanel = false;
@@ -1437,9 +1440,173 @@ void DrawPerfTab()
     if (ImGui::Button("Reset window"))
         perf.Reset();
 }
-// Remastered lighting: live art-direction knobs (Graphics/Remaster/LightRig.hpp).
-// Every slider applies the frame it moves; the summary line at the bottom is
-// meant to be pasted back so a look tuned by eye can become the default.
+// Remastered lighting: live art-direction knobs and the feature switches,
+// all generated from the registry (Graphics/Remaster/FeatureSwitches.hpp), so
+// every key triSetLighting takes is here too. Every control applies the frame
+// it moves; the summary line at the bottom is a triSetLighting setting that
+// can be pasted back so a look tuned by eye can become the default.
+namespace
+{
+
+// One knob (not a feature switch) as its control. True when it changed.
+bool DrawLightingKnob(remaster::LightingTuning& t, const remaster::LightingKey& k)
+{
+    bool changed = false;
+    switch (k.kind)
+    {
+        case remaster::KeyKind::Knob:
+        {
+            float v = remaster::GetKeyValue(t, k);
+            if (ImGui::SliderFloat(k.label, &v, k.minValue, k.maxValue, "%.2f"))
+            {
+                remaster::SetKeyValue(t, k, v);
+                changed = true;
+            }
+            break;
+        }
+        case remaster::KeyKind::Toggle:
+        {
+            bool on = remaster::GetKeyValue(t, k) != 0.0f;
+            if (ImGui::Checkbox(k.label, &on))
+            {
+                remaster::SetKeyValue(t, k, on ? 1.0f : 0.0f);
+                changed = true;
+            }
+            break;
+        }
+        case remaster::KeyKind::Choice:
+        {
+            int c = static_cast<int>(remaster::GetKeyValue(t, k));
+            if (ImGui::Combo(k.label, &c, k.choices ? k.choices : ""))
+            {
+                remaster::SetKeyValue(t, k, static_cast<float>(c));
+                changed = true;
+            }
+            break;
+        }
+        case remaster::KeyKind::Switch:
+            break;
+    }
+    if (k.hint && k.hint[0])
+        ImGui::TextDisabled("  %s", k.hint);
+    return changed;
+}
+
+bool DrawLightingKnobGroup(remaster::LightingTuning& t, const char* group)
+{
+    bool changed = false;
+    for (int i = 0; i < remaster::LightingKeyCount(); ++i)
+    {
+        const remaster::LightingKey& k = remaster::LightingKeyAt(i);
+        if (k.kind != remaster::KeyKind::Switch && !k.parent && std::string_view(k.group) == group)
+            changed |= DrawLightingKnob(t, k);
+    }
+    return changed;
+}
+
+bool HasSubKnobs(const char* switchKey)
+{
+    for (int k = 0; k < remaster::LightingKeyCount(); ++k)
+    {
+        const char* parent = remaster::LightingKeyAt(k).parent;
+        if (parent && std::string_view(parent) == switchKey)
+            return true;
+    }
+    return false;
+}
+
+// The Features section: per area, one checkbox per feature switch with the
+// step that lands it, its live gate ("active" or "gated: <reason>") and its
+// own GPU section, then its sub-knobs under a collapsing header.
+bool DrawLightingFeatures(remaster::LightingTuning& t)
+{
+    bool changed = DrawLightingKnobGroup(t, "Gates");
+    if (ImGui::Button("All features on"))
+    {
+        for (int i = 0; i < remaster::kFeatureCount; ++i)
+            remaster::SetFeatureValue(t.features, static_cast<remaster::Feature>(i), 1.0f);
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("All off (baseline)"))
+    {
+        for (int i = 0; i < remaster::kFeatureCount; ++i)
+            remaster::SetFeatureValue(t.features, static_cast<remaster::Feature>(i), 0.0f);
+        changed = true;
+    }
+
+    remaster::FeatureGates gates;
+    const bool haveGates = GEngine->GetFeatureGates(gates) && gates.computed;
+    if (haveGates)
+    {
+        const remaster::GateInputs& in = gates.inputs;
+        ImGui::TextDisabled("gates of frame %u:", gates.frame);
+        ImGui::TextDisabled("  sun %.1f deg, night %.2f, sky %.2f, rain %.2f, fog %.2f, %d lights", in.sunElevationDeg,
+                            in.nightEffect, in.skyThrough, in.rainDensity, in.fog, in.localLights);
+    }
+    else
+    {
+        ImGui::TextDisabled("gates: no world pass drawn yet");
+    }
+
+    for (const char* area : remaster::kFeatureAreas)
+    {
+        if (!ImGui::TreeNodeEx(area, ImGuiTreeNodeFlags_DefaultOpen))
+            continue;
+        for (int i = 0; i < remaster::kFeatureCount; ++i)
+        {
+            const auto f = static_cast<remaster::Feature>(i);
+            const remaster::FeatureInfo& info = remaster::GetFeatureInfo(f);
+            if (std::string_view(info.area) != area)
+                continue;
+            ImGui::PushID(info.key);
+            bool on = remaster::FeatureOn(t.features, f);
+            if (ImGui::Checkbox(info.label, &on))
+            {
+                remaster::SetFeatureValue(t.features, f, on ? 1.0f : 0.0f);
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (info.landed)
+                ImGui::TextDisabled("%s", info.key);
+            else
+                ImGui::TextDisabled("%s (inert until %s)", info.key, info.step);
+            if (haveGates)
+            {
+                const remaster::Gate& g = gates[f];
+                std::string line = std::string("    ") + (g.on ? "active: " : "gated: ") + g.reason;
+                if (g.scale < 1.0f)
+                    line += ", half resolution";
+                float ms = 0.0f;
+                if (info.gpuSection[0] && GEngine->GpuTimingSectionMs(info.gpuSection, ms))
+                {
+                    char cost[32];
+                    std::snprintf(cost, sizeof(cost), ", GPU %.2f ms", ms);
+                    line += cost;
+                }
+                if (g.on)
+                    ImGui::TextUnformatted(line.c_str());
+                else
+                    ImGui::TextDisabled("%s", line.c_str());
+            }
+            if (HasSubKnobs(info.key) && ImGui::CollapsingHeader("tuning"))
+            {
+                for (int k = 0; k < remaster::LightingKeyCount(); ++k)
+                {
+                    const remaster::LightingKey& key = remaster::LightingKeyAt(k);
+                    if (key.parent && std::string_view(key.parent) == info.key)
+                        changed |= DrawLightingKnob(t, key);
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::TreePop();
+    }
+    return changed;
+}
+
+} // namespace
+
 void DrawLightingTab()
 {
     if (!GEngine)
@@ -1464,60 +1631,33 @@ void DrawLightingTab()
     if (ImGui::Checkbox("Shadow maps (sun shadows)", &shadowMaps))
         GEngine->SetShadowMapsEnabled(shadowMaps);
 
-    ImGui::SeparatorText("Light");
-    changed |= ImGui::SliderFloat("Exposure", &t.exposure, 0.4f, 2.5f, "%.2f");
-    changed |= ImGui::SliderFloat("Sun", &t.sun, 0.0f, 2.5f, "%.2f");
-    changed |= ImGui::SliderFloat("Sky fill", &t.sky, 0.0f, 2.5f, "%.2f");
-    ImGui::TextDisabled("  shade brightness; lower = more contrast between sun and shade");
-    changed |= ImGui::SliderFloat("Ground bounce", &t.bounce, 0.0f, 3.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Sun warmth", &t.warmth, 0.0f, 2.0f, "%.2f");
-    ImGui::TextDisabled("  0 = neutral sun at any height, 1 = golden low sun");
-    changed |= ImGui::SliderFloat("Saturation", &t.saturation, 0.5f, 1.6f, "%.2f");
-    changed |= ImGui::SliderFloat("Specular", &t.specular, 0.0f, 3.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Local lights", &t.localLights, 0.0f, 4.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Moonlight", &t.moonlight, 0.0f, 4.0f, "%.2f");
-
-    ImGui::SeparatorText("World");
-    changed |= ImGui::SliderFloat("Terrain shadows", &t.terrainShadows, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  hills shading the valleys (horizon map)");
-    changed |= ImGui::SliderFloat("Terrain occlusion", &t.terrainOcclusion, 0.0f, 1.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Cloud shadows", &t.cloudShadows, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  drifting shadows in broken overcast");
-    changed |= ImGui::SliderFloat("Shadow softness", &t.shadowSoftness, 0.25f, 4.0f, "%.2f");
-
-    ImGui::SeparatorText("Post effects");
-    changed |= ImGui::Checkbox("Enabled (AO, bloom, shafts)", &t.postEffects);
-    changed |= ImGui::SliderFloat("Ambient occlusion", &t.ambientOcclusion, 0.0f, 2.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Bloom", &t.bloom, 0.0f, 2.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Sun shafts", &t.sunShafts, 0.0f, 2.0f, "%.2f");
-
-    ImGui::SeparatorText("Diagnostics");
-    changed |= ImGui::Combo("View", &t.debugView,
-                            "Final\0"
-                            "Sun visibility\0"
-                            "Terrain sky visibility\0"
-                            "Normals\0"
-                            "Ambient occlusion\0");
-    if (ImGui::Button("Reset knobs to defaults"))
+    for (const char* group : {"Light", "World", "Post effects", "Diagnostics"})
+    {
+        ImGui::SeparatorText(group);
+        changed |= DrawLightingKnobGroup(t, group);
+    }
+    if (ImGui::Button("Reset knobs and features to defaults"))
     {
         const bool keepRemastered = t.remastered;
         t = remaster::LightingTuning{};
         t.remastered = keepRemastered;
         changed = true;
     }
+
+    ImGui::SeparatorText("Features");
+    if (s_selectLightingFeatures)
+    {
+        ImGui::SetScrollHereY(0.0f);
+        s_selectLightingFeatures = false;
+    }
+    changed |= DrawLightingFeatures(t);
     if (changed)
         GEngine->SetLightingTuning(t);
 
     ImGui::Separator();
-    ImGui::TextDisabled("Current tuning (copy back to share):");
-    char summary[512];
-    snprintf(summary, sizeof(summary),
-             "lighting: remastered=%s post=%s exposure=%.2f sun=%.2f sky=%.2f bounce=%.2f warmth=%.2f "
-             "saturation=%.2f specular=%.2f localLights=%.2f moonlight=%.2f terrainShadows=%.2f "
-             "terrainOcclusion=%.2f cloudShadows=%.2f softness=%.2f ao=%.2f bloom=%.2f shafts=%.2f",
-             t.remastered ? "true" : "false", t.postEffects ? "true" : "false", t.exposure, t.sun, t.sky, t.bounce,
-             t.warmth, t.saturation, t.specular, t.localLights, t.moonlight, t.terrainShadows, t.terrainOcclusion,
-             t.cloudShadows, t.shadowSoftness, t.ambientOcclusion, t.bloom, t.sunShafts);
+    ImGui::TextDisabled("Current tuning as a triSetLighting setting (copy back to share):");
+    char summary[1024];
+    std::snprintf(summary, sizeof(summary), "%s", remaster::TuningSummary(t).c_str());
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::InputText("##lightingSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
     if (ImGui::Button("Copy summary to clipboard"))
@@ -1776,7 +1916,7 @@ void DrawMainWindow()
             DrawRenderTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Lighting"))
+        if (ImGui::BeginTabItem("Lighting", nullptr, s_selectLightingFeatures ? ImGuiTabItemFlags_SetSelected : 0))
         {
             DrawLightingTab();
             ImGui::EndTabItem();
@@ -1928,6 +2068,10 @@ void SelectShadowsTab()
 void SelectMemoryTab()
 {
     s_selectMemoryTab = true;
+}
+void SelectLightingFeatures()
+{
+    s_selectLightingFeatures = true;
 }
 
 void RequestDeferredReload(const char* modPath)

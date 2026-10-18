@@ -28,6 +28,19 @@ std::string EngineGL33::GpuTimingSummary() const
     return _gpuTimings.Summary();
 }
 
+bool EngineGL33::GpuTimingSectionMs(const char* name, float& ms) const
+{
+    if (!_gpuTiming || !name)
+        return false;
+    for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
+    {
+        const auto s = static_cast<Poseidon::gpu::Section>(i);
+        if (std::strcmp(Poseidon::gpu::SectionName(s), name) == 0)
+            return _gpuTimings.AverageMs(s, ms);
+    }
+    return false;
+}
+
 void EngineGL33::DestroyGpuQueries()
 {
     if (_gpuQueries[0][0] && _glContext)

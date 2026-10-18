@@ -438,6 +438,7 @@ void Weather::Init()
     _overcastSetClouds = -1.0;
     _fogSet = 0.0f;
     _cloudsPos = 0;
+    _cloudsHeld = false;
     _cloudsAlpha = 0.0f;
     _cloudsBrightness = 1.0f;
     _cloudsSpeed = 0.2f;
@@ -557,7 +558,8 @@ void Weather::SetFog(Landscape* land, float fog)
 
 void Weather::MoveClouds(float deltaT)
 {
-    _cloudsPos += _cloudsSpeed * deltaT;
+    if (!_cloudsHeld)
+        _cloudsPos += _cloudsSpeed * deltaT;
 
     // simulate rain
     float maxRain = _overcastSetClouds * 1.5 - 1;

@@ -41,6 +41,13 @@ capLog = { logInfo (format ["UDCAP;%1", _this]) }
 capDetail = 1
 capSettleArgs = [300, 30, 2]
 
+// Per-view settings a test may change before capBegin (the generated tests set
+// both for every view): capRain is the rain density pinned with the weather,
+// capEyeAbs true makes capEye metres above sea level instead of above the
+// ground probe (sea views: over water the probe reads the sea floor).
+capRain = 0
+capEyeAbs = false
+
 // "Class" call capHas -> true when CfgVehicles >> Class exists in the merged
 // config (mods included). triAssertConfigClass answers "OK" or "FAIL:...";
 // the comparison turns that into a bool, so nothing FAIL-shaped escapes.
@@ -70,7 +77,7 @@ capPinEnv = {
     setDate capDate;
     capWx = triCheatWeather capOvercast;
     0 setOvercast capOvercast;
-    0 setRain 0;
+    0 setRain capRain;
     0 setFog capFog;
     setViewDistance capVD;
     if (capPinTime) then { capSimRes = triSetSimTime capSimT };
@@ -91,6 +98,7 @@ capPinView = {
     capCam camSetFov capFov;
     capCam camCommit 0;
     capEyeASL = _g + capEye;
+    if (capEyeAbs) then { capEyeASL = capEye };
     capViewRes = triSetView [capOX, capEyeASL, capOZ, _dx, _dy, _dz];
 }
 
@@ -227,7 +235,11 @@ capReadTimers = {
 }
 
 // "<label>" call capRecord - one line per screenshot. triSceneStats adds the
-// shot frame's draws=, objects=, lights=, lod=, pin= and horizon= fields.
+// shot frame's draws=, objects=, lights=, lod=, pin= and horizon= fields;
+// feat= is triFeatureState (every feature switch and its frame gate, no ';'
+// inside). format takes at most nine arguments, so the line is built in two.
 capRecord = {
-    format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;%7;perf=%8;gpu=%9", capView, _this, capModeName, capLit, triCamView, triFps, triSceneStats, capPerf, capGpu] call capLog;
+    private ["_head"];
+    _head = format ["view=%1;event=shot;label=%2;mode=%3;lit=%4;cam=%5;fps=%6;%7;feat=%8", capView, _this, capModeName, capLit, triCamView, triFps, triSceneStats, triFeatureState];
+    format ["%1;perf=%2;gpu=%3", _head, capPerf, capGpu] call capLog;
 }

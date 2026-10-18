@@ -27,9 +27,12 @@ namespace
 float s_lit[LitConst::Count * 4] = {};
 GLuint s_litUBO = 0;
 // Cloud drift integrated from the wind, so a wind change bends the drift
-// instead of jumping the whole field.
+// instead of jumping the whole field. Integrated per frame, so re-pinning the
+// sim clock (triSetSimTime) does not put it back; captures pin it instead
+// (PinCloudDrift, triPinCloudDrift), and it holds still while pinned.
 float s_cloudDrift[2] = {1830.0f, 970.0f};
 float s_cloudDriftTime = -1.0f;
+bool s_cloudDriftPinned = false;
 
 constexpr float kCloudDeckAltitude = 1500.0f; // metres
 constexpr float kCloudScale = 1.0f / 6000.0f; // noise tile = 6 km
@@ -304,10 +307,67 @@ void EngineGL33::SetLitOpaque(bool opaque)
     }
 }
 
+void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
+{
+    // Once per frame, in the world's own passes: a portrait capture or a 3D
+    // preview drawn after the world must not overwrite the world's gates.
+    if (!GScene || _portraitTargetSize || _worldSceneEnded)
+        return;
+    if (_featureGates.computed && _featureGates.frame == GetFrameCounter())
+        return;
+    LightSun* sun = GScene->MainLight();
+    if (!sun)
+        return;
+    Camera* camera = GScene->GetCamera();
+    Landscape* land = GScene->GetLandscape();
+
+    constexpr float kDeg = 57.29578f;
+    auto clampUnit = [](float v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v); };
+    rm::GateInputs in;
+    const Vector3 toSun = -sun->Direction();
+    const Vector3 toMoon = -sun->MoonDirection();
+    in.sunElevationDeg = std::asin(clampUnit(toSun.Y())) * kDeg;
+    float azimuth = std::atan2(toSun.X(), toSun.Z()) * kDeg;
+    in.sunAzimuthDeg = azimuth < 0.0f ? azimuth + 360.0f : azimuth;
+    if (camera)
+        in.sunViewAngleDeg = std::acos(clampUnit(camera->Direction() * toSun)) * kDeg;
+    in.moonElevationDeg = std::asin(clampUnit(toMoon.Y())) * kDeg;
+    // The moon light share the rig uses (LightSun::Recalculate's phase).
+    const float cosMoonPhase = -(sun->Direction() * sun->MoonDirection());
+    in.moonPhase = cosMoonPhase + 1.0f < 1.0f ? cosMoonPhase + 1.0f : 1.0f;
+    in.nightEffect = sun->NightEffect();
+    in.skyThrough = land ? land->SkyThrough() : 1.0f;
+    in.cloudCover = rig ? rig->cloudCover : 0.0f;
+    in.rainDensity = land ? land->GetRainDensity() : 0.0f;
+    in.fog = land ? land->GetFog() : 0.0f;
+    in.worldDrawn = true; // only the world's passes get here
+    in.interior = _prevWorldDepthCleared;
+    in.optics = _prevWorldOverlayDrawn;
+    in.nightVision = _nightVision;
+    const LightList& lights = GScene->ActiveLights();
+    for (int i = 0; i < lights.Size(); i++)
+    {
+        Light* light = lights[i];
+        if (!light)
+            continue;
+        LightDescription desc;
+        light->GetDescription(desc);
+        if (desc.type == LTPoint || desc.type == LTSpotLight)
+            in.localLights++;
+        if (desc.type == LTSpotLight)
+            in.spotLights++;
+    }
+    _featureGates = rm::ComputeFeatureGates(in, _lighting);
+    _featureGates.frame = GetFrameCounter();
+}
+
 void EngineGL33::UploadLitFrameConstants()
 {
     if (!_remasterPrograms || !GScene)
+    {
+        UpdateFeatureGates(nullptr);
         return;
+    }
     if (_terrainMapDirty)
         UploadTerrainHorizonMap();
 
@@ -337,6 +397,7 @@ void EngineGL33::UploadLitFrameConstants()
     in.cloudShadowsActive = _worldEffectsOn && _lighting.cloudShadows > 0.0f;
     const rm::LightRig rig = rm::ComputeLightRig(in, _lighting);
     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+    UpdateFeatureGates(&rig);
 
     SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
@@ -398,7 +459,7 @@ void EngineGL33::UploadLitFrameConstants()
 
     // Cloud field drifting with the wind.
     const float now = Glob.time.toFloat();
-    if (s_cloudDriftTime >= 0.0f)
+    if (s_cloudDriftTime >= 0.0f && !s_cloudDriftPinned)
     {
         float dt = now - s_cloudDriftTime;
         dt = dt < 0.0f ? 0.0f : (dt > 0.5f ? 0.5f : dt); // pauses and time skips do not jump the field
@@ -426,6 +487,23 @@ void EngineGL33::UploadLitFrameConstants()
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
     FlushLitConstants();
     BindLightingTextures();
+}
+
+void EngineGL33::PinCloudDrift(bool pinned, float x, float z)
+{
+    s_cloudDriftPinned = pinned;
+    if (pinned)
+    {
+        s_cloudDrift[0] = x;
+        s_cloudDrift[1] = z;
+    }
+}
+
+bool EngineGL33::GetCloudDrift(float& x, float& z) const
+{
+    x = s_cloudDrift[0];
+    z = s_cloudDrift[1];
+    return true;
 }
 
 void EngineGL33::UploadLitShadowDelta()

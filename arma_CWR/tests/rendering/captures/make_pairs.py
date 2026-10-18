@@ -7,9 +7,14 @@
 out of Trident's output tree and reads the UDCAP log lines; without new
 screenshots there it just rebuilds from what is already in <out_dir>.
 
+Two kinds of pairs, told apart by the shot labels:
+    <view>__classic / <view>__remastered   the lighting model A/B (the capture set)
+    <view>__off / <view>__on               a feature's switches off / the shipped
+                                           defaults (features_ab.test.sqf)
+
 Writes into <out_dir>:
-    <view>__classic.png, <view>__remastered.png   copied captures
-    <view>__pair.png                              Classic left, Remastered right
+    <view>__<mode>.png                            copied captures
+    <view>__pair.png                              left mode left, right mode right
     contact_sheet.png                             every pair on one page
     timings.csv, timings.json                     one row per shot (GPU + CPU, draws, load wait)
     timings.md                                    the same as a table, with deltas
@@ -29,8 +34,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-MODES = ("classic", "remastered")
-SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered)\.png$")
+# (left, right) of each kind of pair; a view's shots are one kind or the other.
+PAIR_MODES = (("classic", "remastered"), ("off", "on"))
+MODES = tuple(m for pair in PAIR_MODES for m in pair)
+SHOT_RE = re.compile(r"^(\d{3})_(.+)__(classic|remastered|off|on)\.png$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 UDCAP_RE = re.compile(r"UDCAP;(.*)$")
 GPU_FIELDS = ("frame", "world", "shadow", "post", "ao", "bloom", "shafts", "composite")
@@ -112,7 +119,7 @@ def to_int(text):
 
 def shot_rows(lines):
     rows = {}
-    modes = {}  # (view, mode) -> the latest event=mode line: load wait and pin
+    modes = {}  # (view, mode setting) -> the latest event=mode line: load wait and pin
     for path, _line, body in lines:
         if body is None:
             continue
@@ -128,7 +135,10 @@ def shot_rows(lines):
         view, mode = label.rsplit("__", 1)
         row = {"view": view, "mode": mode, "lit": kv.get("lit", ""), "cam": kv.get("cam", ""),
                "fps_now": kv.get("fps", ""), "gpu_raw": kv.get("gpu", ""), "perf_raw": kv.get("perf", ""),
-               "log": str(path)}
+               "log": str(path),
+               # the triSetLighting setting of the shot (capModeName) and the
+               # feature switches with their gates (triFeatureState, A1 on)
+               "setting": kv.get("mode", ""), "feat": kv.get("feat", "")}
         # The shot frame's scene (triSceneStats) and the mode's load wait
         # (triSettleScene); empty in runs from before these fields existed.
         row["draws"] = to_int(kv.get("draws"))
@@ -137,7 +147,7 @@ def shot_rows(lines):
         row["lod"] = kv.get("lod", "")
         row["pin"] = kv.get("pin", "")
         row["horizon"] = kv.get("horizon", "")
-        mode_kv = modes.get((kv.get("view", ""), mode), {})
+        mode_kv = modes.get((kv.get("view", ""), kv.get("mode", "")), {})
         row["settle"] = mode_kv.get("settle", "")
         row["settle_draws"] = to_int(mode_kv.get("draws"))
         for f, rx in GPU_RES.items():
@@ -153,6 +163,25 @@ def shot_rows(lines):
         # dict order keeps the run order of the first appearance
         rows[(view, mode)] = row
     return list(rows.values())
+
+
+def pair_modes(view, out_dir: Path, rows_by_key=None):
+    """The (left, right) modes of `view`: the kind its captures or log rows use."""
+    for pair in PAIR_MODES:
+        for m in pair:
+            if (out_dir / f"{view}__{m}.png").exists() or (rows_by_key and (view, m) in rows_by_key):
+                return pair
+    return PAIR_MODES[0]
+
+
+def mode_title(mode, row):
+    if mode == "off":
+        setting = (row or {}).get("setting", "")
+        keys = setting.split(",", 1)[1] if "," in setting else ""
+        return f"Off: {keys}" if keys else "Off"
+    if mode == "on":
+        return "On (remastered)"
+    return mode.capitalize()
 
 
 def font(size):
@@ -172,8 +201,9 @@ def label_box(draw, xy, text, fnt):
 
 
 def make_pair(view, out_dir: Path, rows_by_key):
+    modes = pair_modes(view, out_dir, rows_by_key)
     imgs = {}
-    for mode in MODES:
+    for mode in modes:
         p = out_dir / f"{view}__{mode}.png"
         if p.exists():
             imgs[mode] = Image.open(p).convert("RGB")
@@ -188,15 +218,15 @@ def make_pair(view, out_dir: Path, rows_by_key):
     big = font(22)
     small = font(15)
     d.text((10, 8), view, font=big, fill=(235, 235, 235))
-    for idx, mode in enumerate(MODES):
+    for idx, mode in enumerate(modes):
         x0 = idx * (w + gap)
         if mode in imgs:
             pair.paste(imgs[mode], (x0, title_h))
         else:
             d.rectangle([x0, title_h, x0 + w, title_h + h], fill=(60, 0, 0))
             d.text((x0 + 20, title_h + h // 2), "missing", font=big, fill=(255, 160, 160))
-        label_box(d, (x0 + 12, title_h + 10), mode.capitalize(), big)
         row = rows_by_key.get((view, mode))
+        label_box(d, (x0 + 12, title_h + 10), mode_title(mode, row), big)
         foot = []
         if row and row.get("gpu_frame_ms") is not None:
             foot.append(f"GPU frame {row['gpu_frame_ms']:.2f} ms")
@@ -226,8 +256,8 @@ def contact_sheet(pairs, out_dir: Path, cols=2, thumb_w=960):
     rows = (len(thumbs) + cols - 1) // cols
     sheet = Image.new("RGB", (cols * thumb_w + (cols + 1) * pad, rows * th + (rows + 1) * pad + 40), (16, 16, 16))
     d = ImageDraw.Draw(sheet)
-    d.text((pad, 10), f"Lighting captures: Classic (left) | Remastered (right), {out_dir.name}", font=font(20),
-           fill=(230, 230, 230))
+    d.text((pad, 10), f"Lighting captures: Classic | Remastered, or a feature off | on, {out_dir.name}",
+           font=font(20), fill=(230, 230, 230))
     for i, t in enumerate(thumbs):
         r, c = divmod(i, cols)
         sheet.paste(t, (pad + c * (thumb_w + pad), 40 + pad + r * (th + pad)))
@@ -241,7 +271,7 @@ def fmt(v):
 
 
 def share_delta(a, b, key):
-    """Remastered minus Classic `key` (draws, objects) as a share of the larger, or None."""
+    """Right minus left `key` (draws, objects) of a pair as a share of the larger, or None."""
     x, y = (a or {}).get(key), (b or {}).get(key)
     if x is None or y is None or max(x, y) <= 0:
         return None
@@ -251,7 +281,7 @@ def share_delta(a, b, key):
 def write_tables(rows, out_dir: Path):
     cols = ["view", "mode", "lit", "cam"] + [f"gpu_{f}_ms" for f in GPU_FIELDS] + \
            ["cpu_fps", "cpu_frame_ms", "cpu_frame_p95_ms", "fps_now", "draws", "objects", "lights", "calls_avg", "lod",
-            "pin", "horizon", "settle", "settle_draws", "gpu_raw", "perf_raw"]
+            "pin", "horizon", "settle", "settle_draws", "setting", "gpu_raw", "perf_raw", "feat"]
     with open(out_dir / "timings.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -267,12 +297,13 @@ def write_tables(rows, out_dir: Path):
           "before the shot); CPU is `triPerfStats` over the same frames. Classic has no post pass, so its post columns",
           "are empty. Draws = GL draw calls and objects = objects with a visible LOD, both of the shot frame",
           "(`triSceneStats`); load = the `triSettleScene` answer before the mode's timers (frames run). Delta =",
-          "Remastered minus Classic (draws and objects: share of the larger).", "",
+          "Remastered minus Classic, or on minus off (draws and objects: share of the larger).", "",
           "| view | mode | frame | world | shadow | post | ao | bloom | shafts | composite | CPU fps | draws | objects | "
           "load | lighting |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for v in views:
-        for mode in MODES:
+        left, right = pair_modes(v, out_dir, by)
+        for mode in (left, right):
             r = by.get((v, mode))
             if not r:
                 md.append(f"| {v} | {mode} | missing |  |  |  |  |  |  |  |  |  |  |  |  |")
@@ -280,7 +311,7 @@ def write_tables(rows, out_dir: Path):
             counts = ["" if r.get(k) is None else f"{r[k]:,}" for k in ("draws", "objects")]
             md.append("| " + " | ".join([v, mode] + [fmt(r[f"gpu_{f}_ms"]) for f in GPU_FIELDS] +
                                         [fmt(r["cpu_fps"])] + counts + [r.get("settle", ""), r["lit"]]) + " |")
-        a, b = by.get((v, "classic")), by.get((v, "remastered"))
+        a, b = by.get((v, left)), by.get((v, right))
         if a and b:
             cells = []
             for f in GPU_FIELDS:
@@ -327,7 +358,8 @@ def main(argv):
     sheet = contact_sheet(pairs, out_dir)
 
     print(f"screenshots copied: {copied}; shot log lines: {len(rows)}; pairs: {len(pairs)}")
-    missing = [f"{v}__{m}" for v in views for m in MODES if not (out_dir / f"{v}__{m}.png").exists()]
+    missing = [f"{v}__{m}" for v in views for m in pair_modes(v, out_dir, rows_by_key)
+               if not (out_dir / f"{v}__{m}.png").exists()]
     if missing:
         print("missing captures: " + ", ".join(missing))
     bad = [f"{r['view']}__{r['mode']}={r['lit']}" for r in rows if r.get("lit") not in ("OK", "")]
@@ -339,9 +371,10 @@ def main(argv):
     by = {(r["view"], r["mode"]): r for r in rows}
     apart = []
     for v in dict.fromkeys(r["view"] for r in rows):
-        dd = share_delta(by.get((v, "classic")), by.get((v, "remastered")), "objects")
+        left, right = pair_modes(v, out_dir, by)
+        dd = share_delta(by.get((v, left)), by.get((v, right)), "objects")
         if dd is not None and abs(dd) > OBJECTS_MISMATCH:
-            apart.append(f"{v} ({by[(v, 'classic')]['objects']:,} vs {by[(v, 'remastered')]['objects']:,})")
+            apart.append(f"{v} ({by[(v, left)]['objects']:,} vs {by[(v, right)]['objects']:,})")
     if apart:
         print(f"pairs whose shot frames differ by more than {OBJECTS_MISMATCH:.0%} in drawn objects: " +
               ", ".join(apart))

@@ -125,6 +125,30 @@ Feature switch keys (each a float, 0 off, 1 on, default 1):
 The existing keys `terrainShadows` (hills) and `cloudShadows` (noise field) keep their meaning.
 Debug knobs stay as debug-view values (`debug=<n>`), not as feature switches.
 
+As built in A1 (corrections to the bullets above):
+
+- `FeatureSet` sits in `LightRig.hpp` beside `LightingTuning`: `FeatureSwitches.hpp` includes
+  `LightRig.hpp` for its member pointers, so the struct cannot live in `FeatureSwitches.hpp`
+  without an include cycle. `gates` is a bool knob (`gates=0` turns it off).
+- The key table is not a constexpr array: its rows point at float, bool and int members, so it
+  is built once at first use (`LightingKeyCount`, `LightingKeyAt`, `FindLightingKey`). It holds
+  no defaults: a key's default is its member initialiser, read from `LightingTuning{}`
+  (`KeyDefault`), so there is one source. Each `FeatureInfo` carries the step that lands it and
+  `landed` (false for every switch in A1: nothing reads one yet; the step that lands a feature
+  sets it, and `triFeatureState` marks the others `:inert`).
+- `ApplyLightingItem` and the comma-list handling (`ApplyLightingSetting`) moved out of
+  `GameStateExtTestRender.cpp` into `FeatureSwitches.cpp` (pure, unit-tested); `TriSetLighting`
+  calls them.
+- The whole Lighting tab is generated from the table, knobs included; its copy-back line is a
+  `triSetLighting` setting (`TuningSummary`) that round-trips. A feature's GPU section comes from
+  the new `Engine::GpuTimingSectionMs(name)`; no feature has a section yet.
+- Sub-knobs (the right column of the table above) are not registered yet: each step adds its
+  own rows with `parent` set to its switch, so `triSetLighting` never accepts a knob that does
+  nothing.
+- `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
+  fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
+  never `;`, so it rides in the UDCAP lines as `feat=`).
+
 ### 3.2 Frame gates and the GPU budget (RTX 3060, 1080p, 60 fps)
 
 The owner's budget only holds if heavy features run only when they can show. New pure module
@@ -154,6 +178,31 @@ resolution scale. A dev knob `gates=0` forces every enabled feature on for debug
 | hfrt | sun between 2 and 25 deg, sky-through above 0.5, receivers beyond the last cascade | half-res visibility buffer | target 1.5 to 3 ms |
 | clouds | sky-through below 0.85, relief and silver lining fade above 35 deg sun | full (sky pixels) | 0.5 to 1.5 ms |
 | texsharp | terrain fragments within 300 m | full | 1 to 3 ms |
+
+As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
+
+- The gates are computed once per frame, from `UploadLitFrameConstants` (on its early-return
+  path too, so they read "classic lighting" or "night vision" when the remastered programs are
+  not in use), only in the world's own passes (not a portrait capture or a 3D preview drawn after
+  the world). The interior and optics flags are the previous frame's: this frame sets them
+  during the world pass, after the gates.
+- Night vision gates off every feature but the frame-cost ones: under the intensifier the
+  world draws through the classic programs (`BeginPass`), not only TAA and SSR as the table says.
+- Inputs that land later keep a stated stand-in: combat lights within 60 m are 0 until B4; the
+  water and wet screen shares are "not measured" until B6's readout, and SSR's gate stays on
+  while they are; the wetness is the rain density until B7's integrator. "Local lights in view"
+  is `Scene::ActiveLights()` (lights on within the horizon range plus 500 m), not a frustum test,
+  and they count only at night: the light upload scales lamps and headlights by the night effect
+  and skips them by day (`UploadLitLights`), so the first in-game run, which counted 3 to 7 lights
+  on by day at `sunrise_ridge` and `woods_pine2_evening`, had the light list gated on
+  for nothing.
+- Dependencies the table leaves implicit: `combatShadows` needs `combatLights`, `lampStreaks`
+  needs `wetWeather` and a lamp lit at night, `sharpen` runs only when TAA does not, the sun
+  shadow gates also open for the moon key (B3's condition: sun 3 deg under, moon above 3 deg,
+  phase above 0.25), lit clouds need a sky-through below 0.85 and the sun above -9 deg, and sky
+  cloud shadows a cloud cover above 0 (F4 fades it in from 0.05) and the sun up or the moon key.
+  "Morning" for the valley mist is an eastern sun between -4 and 38 deg (the haze notes' morning
+  weight), not a clock hour. The thresholds are named constants in `FeatureGates.hpp`.
 
 Worst cases from MENU section 4 (a low sun over water and woods: about 20 ms) do not fit; the
 gates above keep the beams, hfrt and SSR from all being at full cost together only if the
@@ -503,6 +552,50 @@ graphics-remaster worktree, gitignored).**
 - Tests: registry cases (3.1), `FeatureGates` cases (one per gate row of 3.2, plus `gates=0`),
   `triSetFixedStep` round trip.
 - Effort 3 days.
+
+**Result (2026-10-18, uncommitted change on 4b285f4; evidence in `tmp/integration/A1/` of the
+graphics-remaster worktree, gitignored).**
+
+- Built as the bullets above, with the as-built corrections recorded in 3.1, 3.2, 6, 7.2 and
+  7.4. Additions the plan did not list, each needed by the gate: `triPinCloudDrift [x, z, sky]`
+  (holds the remastered cloud-shadow field and the sky dome clouds; neither follows the pinned
+  clock, 7.2), a fixed sim clock per view in the generated A/B test (`capSimT`, so the sea
+  matches between runs and builds), `triDevPanelLighting <bool>` (shows the Lighting tab on its
+  Features section for a screenshot; the panel draws only with `--dev`),
+  `Engine::GpuTimingSectionMs`, `Landscape::GetFog` and `Landscape::HoldClouds`.
+  `timing_lib.sqf`'s `capRain` and `capEyeAbs` went into `capture_lib.sqf` (defaults keep the
+  capture set's statements unchanged); the generated tests live next to it in `captures/`
+  (Trident resolves `#include` against the including file).
+- No feature reads its switch yet (`landed` false for all 26), so A1 changes no pixel by design;
+  the only per-frame work it adds is the gate evaluation at the first world pass.
+- Gate: build 0 warnings; touched files clang-format clean (the tab-style `Landscape.hpp`
+  checked by `clang-format-diff.py` on the added lines only); unit tags of item 3 plus
+  `[FeatureSwitches],[FeatureGates],[triSetFixedStep],[triPinCloudDrift]` 452/452 cases (27
+  new). Broken contracts turn them red: baseline that does not zero the switches, a sun shadow
+  threshold of 2 deg, a step that ignores `triSetFixedStep` and a pin that does not pin made 8
+  cases fail (99 assertions); the threshold alone fails exactly the sun-shadow case. Smoke 3/3 on
+  each of three successive builds, KHR_debug ids 131169, 131154 and 131218 only.
+- P mode (7.2) holds: with `triSetFixedStep 0.0333` and `triPauseGame`, two frames rendered 6
+  frames apart around a burning Fire and Ural, with `baseline` and back between them, are
+  pixel-identical; the same two frames unpaused differ in 87,247 pixels. `triRenderFrames` is not
+  needed. The skeleton clips (6 to 8 frames: a line path, a mover, an orbit, a time-lapse and a
+  P-mode combat clip with the shell events) gave off and on passes identical frame for frame,
+  except the posed soldiers' heads, which turn between the two S-mode passes (a known risk for V).
+- Off equals baseline (item 5), `features_ab` at 1080p against the A0 build's `remastered` with
+  the same fixed clocks (`gate5-table.md`): the horizon and ground bands of every view are within
+  the same-config noise except `clouds_coast_oc_up`, whose cloud shadows and low clouds A1 holds
+  and the A0 build lets drift; the sky band differs on every daytime view by the position of the
+  sky clouds (A1 holds them at 0, the A0 build cannot; two A1 boots match there to the pixel). The
+  three-island capture set on the A1 build against A0's `gr-base`: horizon and ground bands within
+  A0's boot-to-boot noise, the same exceptions in the sea (`coastline_sunset`) and the overcast
+  views, and Classic, which A1 does not touch, shows the same kinds and sizes of difference.
+- Timing (item 7): the A0 views on the A1 build (3 rounds, 1080p, scale 1.0, 4x MSAA) match A0 at
+  P0: sunrise_ridge 17.31 against 17.41 ms, valley 05:15 23.76 against 23.30, Eden broken_high
+  24.65 against 24.31, overcast_broken 12.02 against 11.85, bay_offshore 7.39 against 7.73, the
+  CPU frame of those five within 0.7 ms. A first full run while an Arma 3 process was busy read
+  about 60% slower on Abel's long views with large round-to-round swings, so it was set aside. The
+  gates read off at the noon references (14 of 26 at `noon_fields` and `sea_noon`: the night, wet,
+  combat, beam, mist, canopy and cloud features, the light list and the sharpen pass).
 
 ### A2. Shader split and shared tables
 
@@ -1128,7 +1221,7 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
 | `EngineGL33_Lighting.{hpp,cpp}` | F3, perf, combat, ssr, materials, atmosphere, hfrt, haze, shadows, night, clouds, texsharp, temporal | `LitConst` and the unit table are fixed in A2 (3.3, 3.4). `UploadLitFrameConstants` is split into per-feature `UploadLit<Feature>()` calls made from it; `BindLightingTextures` binds from the unit table; all partial uploads go through A4's mirror helper. |
 | `LightRig.{hpp,cpp}` | F2, F4, F5, F9, every prototype's `LightingTuning` fields, shade's rig terms, night's moon key | Feature switches leave `LightingTuning` for `FeatureSet` (A1). Rig math changes only in B2 (`lowSunRig`) and B3 (`KeyLight`), in that order, each with re-pinned tests. |
 | `SceneDraw.cpp` | F1, F6, perf, night | A4 first (cull before LOD selection and sort; light gate via `RunEntry`). B3 then adds the moon shadow-pass condition in `DrawObjectsAndShadowsPass2`. |
-| `GameStateExtTestRender.cpp` | F1 and every prototype's knobs | A1 makes the knob table data; no later step edits `ApplyLightingItem`. |
+| `GameStateExtTestRender.cpp` | F1 and every prototype's knobs | A1 makes the knob table data (`FeatureSwitches.cpp`, where `ApplyLightingItem` now lives); later steps add rows to the table, never parsing code. |
 | `Object.cpp` (`DrawDecal`), `Lights.cpp` | combat, night | One `ParticleLight` in A6's module, written in B3 or B4 (whichever lands first) and reused. |
 | `ShapeDraw.cpp` | F8, shade, materials | F8 owns late buffers; B7 adds only the object-kind field on the draw descriptor. |
 | `LandscapeRender.cpp` | perf (marks), haze, clouds, water (`WaterFlags`) | A4 marks; A7 sky hook in `DrawSky`/`DrawClouds`; B5 water routing; haze's backdrop capture is not ported. |
@@ -1177,9 +1270,16 @@ New `video/capture_motion.sqf` (included after `capture_lib.sqf`):
 **S mode (sequential passes)** for deterministic scenes and every temporal feature: run the
 whole path with the feature off, then again with it on. Per frame: `capClockAt`, `capPathAt`,
 `capPropsAt`, `triSimFrames 2`, `triScreenshot "<feature>__off__f0001"`. AI props stay captive
-with `disableAI "MOVE"`; vehicles move only by teleport. Water, sky drift and cloud shadows
-follow the pinned clock, so both passes match; smoke and fire particles do not, which the video
-accepts.
+with `disableAI "MOVE"`; vehicles move only by teleport. Water follows the pinned clock, so both
+passes match there; smoke and fire particles do not, which the video accepts. Correction (A1):
+the sky drift and the cloud shadows do not follow the pinned clock. The remastered cloud-shadow
+field integrates the wind on every frame (`EngineGL33_Lighting.cpp`, the step clamped to 0 to
+0.5 s) and the sky dome clouds integrate `_cloudsSpeed * deltaT` (`Weather::MoveClouds`), so
+re-pinning `Glob.time` puts neither back (A1 measured up to 266,558 of 2,073,600 pixels over 2
+levels between the two remastered shots of `coast_oc_up`, overcast 0.5, on the A0 build). A1
+adds `triPinCloudDrift [x, z, sky]`, which holds both still until `[]` releases them; every
+generated test pins them per view, so passes, pairs and builds from A1 on see the same clouds.
+A clip that wants the sky to drift (Eden `broken_high`) steps the pin per frame.
 
 **P mode (paired, paused)** for non-deterministic scenes (combat, rain): `triSetFixedStep
 0.0333` and per frame: `triPauseGame`, `capPathAt`, `triSetLighting "remastered,<keys>=0"`,
@@ -1235,9 +1335,10 @@ feature.
 
 ### 7.4 Assembly
 
-`video/make_video.py <run folder>`: collects `<seq>_<feature>__off__f####.png` and `__on__`
-from the tri tree (deleting the BMP twins as `make_pairs.py` does), checks both passes have every
-frame, writes `tmp/video/<feature>/<feature>__sbs.mp4` (two 1920x1080 panels side by side,
+`video/make_video.py <run folder>`: collects `<seq>_<clip>__off__f####.png` and `__on__`
+from the tri tree (run-captures deletes the BMP twins), checks both passes have every
+frame, writes `tmp/video/<clip>/<clip>__sbs.mp4` (one folder per clip of 7.3, several per
+feature; two 1920x1080 panels side by side,
 3840x1080, labels "<feature> off" and "on", optional GPU ms from the frame log) and
 `<feature>__wipe.mp4` (1920x1080, left half off, right half on, divider line) with
 `C:\ffmpeg\bin\ffmpeg.exe` and Pillow (both present on this machine: ffmpeg on PATH, Pillow

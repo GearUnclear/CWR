@@ -94,17 +94,33 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
   holding the old default Off is lifted to 4x once, but only when it has no
   supersampling (render scale 1.0): a supersampled profile already has
   anti-aliasing and keeps its Off. Off chosen after that stays.
-- Dev overlay, **Lighting** tab: live sliders for exposure, sun, sky, bounce,
-  warmth, saturation, specular, local lights, moonlight, terrain shadows and
-  occlusion, cloud shadows, shadow softness, AO, bloom and shafts, plus debug
-  views (sun visibility, sky visibility, normals, AO) and a copyable summary
-  line.
-- Trident / SQF: `triSetLighting "classic"` or `"remastered"` (each puts
-  every knob back to its default), `"key=value"` with the same keys, or a
-  comma list applied in order, all or none (`"remastered,bounce=2.5"`), for
-  scripted A/B captures. `triPinObjectDetail 1` holds the object detail at
-  its finest so both shots draw the same objects, and `triSettleScene` waits
-  until a view has finished loading (`tests/rendering/captures/README.md`).
+- **Feature switches and gates** (`FeatureSwitches.{hpp,cpp}`,
+  `FeatureGates.{hpp,cpp}`): every lighting feature of the integration plan
+  (`research/INTEGRATION-PLAN.md` section 3.1) has a switch, a float in
+  `LightingTuning::features` (0 off, 1 on, all on by default) that is also a
+  `triSetLighting` key, and a frame gate computed once per frame at the world
+  pass (`EngineGL33::UpdateFeatureGates`) that runs an enabled feature only
+  where it can show (a low sun for beams, wet weather for wet shading, and so
+  on; the thresholds are named in `FeatureGates.hpp`). `gates=0` forces every
+  enabled feature on, for debugging. Every switch carries the step that makes
+  it do something; until then it is inert and its on and off look the same.
+- Dev overlay, **Lighting** tab, generated from the same registry: sliders for
+  exposure, sun, sky, bounce, warmth, saturation, specular, local lights,
+  moonlight, terrain shadows and occlusion, cloud shadows, shadow softness, AO,
+  bloom and shafts, debug views (sun visibility, sky visibility, normals, AO),
+  a **Features** section (per area, one checkbox per switch with its live gate,
+  "active" or "gated: <reason>", and its GPU section once it has one) and a
+  summary line that is a `triSetLighting` setting, to copy back.
+- Trident / SQF: `triSetLighting "classic"`, `"remastered"` (every switch on)
+  or `"baseline"` (every switch off: the look of the branch cut); each puts
+  every knob back to its default. `"key=value"` with any registry key, or a
+  comma list applied in order, all or none (`"remastered,taa=0"`), for
+  scripted A/B captures. `triFeatureState` answers every switch with its gate;
+  `triPinCloudDrift` holds the cloud shadows and sky clouds still;
+  `triSetFixedStep` fixes the simulation step. `triPinObjectDetail 1` holds the
+  object detail at its finest so both shots draw the same objects, and
+  `triSettleScene` waits until a view has finished loading
+  (`tests/rendering/captures/README.md`).
 - **GPU time**: the Lighting tab's *Measure GPU time* checkbox, or
   `triGpuTimes true`, turns on timestamp queries around the frame, the world
   (with the shadow pass inside it) and each post step
@@ -127,12 +143,15 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 | `Graphics/Remaster/LightRig.{hpp,cpp}` | Light rig, exposure meter, tonemap, sun chroma, crown ellipsoid. Pure math. |
 | `Graphics/Remaster/TerrainHorizon.{hpp,cpp}` | Horizon map builder and the CPU reference of the shader's sun visibility. Pure math. |
 | `Graphics/Remaster/CloudNoise.{hpp,cpp}` | Tileable, histogram-equalised cloud noise. Pure math. |
+| `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
+| `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
 | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
 | `PoseidonGL33/EngineGL33_LightingShaders.cpp` | The remastered GLSL. |
 | `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, textures on units 2-5, program-set selection. |
 | `PoseidonGL33/EngineGL33_PostFX.cpp` | The post pass. |
 | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
 | `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block, glslang compile of every remastered and post shader. |
+| `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
 | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
 
 ## What has and has not been validated

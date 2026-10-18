@@ -27,7 +27,8 @@
 namespace Poseidon::remaster
 {
 struct TerrainHorizonMap;
-}
+struct FeatureGates;
+} // namespace Poseidon::remaster
 
 // Forward-decl for `EmitDraw` — the frame layer's `Draw` value (full param-pack
 // for `glDrawElements`).  Keeps the frame-layer header out of the Core
@@ -820,6 +821,17 @@ class Engine : public IGraphicsEngine
     }
     /// True when the remastered shaders are built and selected.
     virtual bool LightingRemasterActive() const { return false; }
+    /// The remastered features' frame gates as last computed (at the world's
+    /// first 3D pass of a frame; Graphics/Remaster/FeatureGates.hpp). False
+    /// when this backend computes none.
+    virtual bool GetFeatureGates(remaster::FeatureGates& /*out*/) const { return false; }
+    /// Captures: hold the remastered cloud-shadow field at a drift offset in
+    /// metres (pinned = false lets it drift with the wind again from where it
+    /// is). The field integrates the wind every frame, so re-pinning the sim
+    /// clock alone does not put it back; a pinned field makes the two shots of
+    /// an A/B pair, and two builds, see the same cloud shadows.
+    virtual void PinCloudDrift(bool /*pinned*/, float /*x*/, float /*z*/) {}
+    virtual bool GetCloudDrift(float& /*x*/, float& /*z*/) const { return false; }
     /// GPU timestamp queries around the frame, the world, the shadow pass and
     /// the post pass (dev tool; off by default). The summary is the smoothed
     /// per-section time in milliseconds, a few frames behind.
@@ -834,6 +846,10 @@ class Engine : public IGraphicsEngine
     virtual void SetGpuTimingEnabled(bool /*enabled*/) {}
     virtual bool GpuTimingEnabled() const { return false; }
     virtual std::string GpuTimingSummary() const { return "gpu: timing not supported by this backend"; }
+    /// One section of the GPU timings by its summary name ("ao", "post", ...):
+    /// its smoothed milliseconds, false while timing is off or the section has
+    /// not been measured. The Lighting tab shows each feature's own section.
+    virtual bool GpuTimingSectionMs(const char* /*name*/, float& /*ms*/) const { return false; }
     /// True when the backend would use a terrain horizon map (remastered
     /// lighting with terrain shadows or occlusion on); the world builds one only
     /// then.

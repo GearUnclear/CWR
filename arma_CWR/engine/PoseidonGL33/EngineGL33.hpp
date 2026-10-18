@@ -36,6 +36,7 @@ enum PixelShaderSpecular
 #include <SDL3/SDL.h>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 
@@ -693,6 +694,13 @@ class EngineGL33 : public Engine
     void SetLightingTuning(const Poseidon::remaster::LightingTuning& tuning) override;
     Poseidon::remaster::LightingTuning GetLightingTuning() const override { return _lighting; }
     bool LightingRemasterActive() const override { return _lightingActive; }
+    void PinCloudDrift(bool pinned, float x, float z) override;
+    bool GetCloudDrift(float& x, float& z) const override;
+    bool GetFeatureGates(Poseidon::remaster::FeatureGates& out) const override
+    {
+        out = _featureGates;
+        return true;
+    }
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
@@ -703,6 +711,7 @@ class EngineGL33 : public Engine
     void SetGpuTimingEnabled(bool enabled) override;
     bool GpuTimingEnabled() const override { return _gpuTiming; }
     std::string GpuTimingSummary() const override;
+    bool GpuTimingSectionMs(const char* name, float& ms) const override;
     bool WantsTerrainHorizonMap() const override;
     void SetTerrainHorizonMap(std::shared_ptr<const Poseidon::remaster::TerrainHorizonMap> map) override;
     void EndWorldScene() override;
@@ -720,6 +729,13 @@ class EngineGL33 : public Engine
     bool _worldSceneEnded = false;   // EndWorldScene ran this frame: later 3D passes are UI previews
     bool _worldDepthCleared = false; // a depth clear inside the world pass (vehicle interior view)
     bool _worldOverlayDrawn = false; // a screen overlay drawn inside the world pass (gunner optics)
+    // The two flags above as the previous frame left them: the gates are
+    // computed at the start of the world pass, before this frame can set them.
+    bool _prevWorldDepthCleared = false;
+    bool _prevWorldOverlayDrawn = false;
+    // Feature gates (Graphics/Remaster/FeatureGates.hpp), computed once per
+    // frame at the world's first 3D pass by UpdateFeatureGates.
+    Poseidon::remaster::FeatureGates _featureGates;
     // Dev: rebuild every program from the built-in sources and the override
     // directory at the start of the next frame (EngineGL33_Shaders.cpp).
     bool _shaderReloadPending = false;
@@ -766,6 +782,11 @@ class EngineGL33 : public Engine
     void UploadTerrainHorizonMap();
     // Per-frame rig, terrain, cloud and camera uniforms; at the start of a 3D pass.
     void UploadLitFrameConstants();
+    // Fills the gate inputs from the scene and computes _featureGates, once per
+    // frame and only in the world's own passes (not a portrait capture or a 3D
+    // preview after the world). `rig` is this frame's light rig when the
+    // remastered programs computed one (its cloud cover), else nullptr.
+    void UpdateFeatureGates(const Poseidon::remaster::LightRig* rig);
     // Re-derives _remasterPrograms from the lighting and world-pass flags and,
     // on a change, rebinds the unit-2 sampler and re-selects the current
     // program. Callers flush pending draws first.

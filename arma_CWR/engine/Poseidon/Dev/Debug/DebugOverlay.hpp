@@ -46,6 +46,10 @@ namespace DebugOverlay
     // Same, for the "Memory" tab (process heap + per-subsystem residency).
     void SelectMemoryTab();
 
+    // Same, for the "Lighting" tab, scrolled to its Features section (the
+    // feature switches and their live gates).
+    void SelectLightingFeatures();
+
     // Returns true if the focused ImGui widget wants to swallow keyboard /
     // mouse events.  Callers should drop the SDL event before passing it to
     // the engine when these return true — otherwise typing into a slider
