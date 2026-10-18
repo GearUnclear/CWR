@@ -324,7 +324,7 @@ layout(std140) uniform LitConstants {
     vec4 litShadowDelta;  // 20: xyz camera move since the shadow pass, w filter radius (texels)
     vec4 litFlags;        // 21: x AO share to alpha, y world effects on, z debug view, w saturation
     vec4 litLightCount;   // 22: x the draw's lights, y tile size of the tiled list (0 = off), z its night factor
-    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun
+    vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun, w = crowns lit as a canopy
     vec4 litFogSun;       // 24: rgb sky-dome sun glow added to the fog (display), w enabled
     vec4 litFogCap;       // 25: rgb fog colour limit (the sky texture colour)
     vec4 litLightPos[8];  // 26-33: xyz camera-relative, w start attenuation distance
@@ -592,6 +592,18 @@ static const char s_psRemasterShade[] = R"(
 // Sun visibility of the last shaded fragment (water reuses it for its glint).
 float g_sunVisibility = 1.0;
 
+// Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w; research track
+// shade, crown V18). The sun reaching a leaf crosses the crown in front of it:
+// the path, in crown radii, from the leaf to the crown's surface toward the
+// sun, with the crown taken as a sphere around the ellipsoid's centre (the
+// leaf at |e| = vCrown.w along the gradient direction `cnDir`).
+float crownSunPath(vec3 cnDir, float r, vec3 l) {
+    vec3 p = cnDir * min(r, 1.0);
+    float b = dot(p, l);
+    float c = dot(p, p) - 1.0;
+    return max(-b + sqrt(max(b * b - c, 0.0)), 0.0);
+}
+
 // Lights a fragment of a VSTransform draw. `albedo` is the display-space surface
 // colour (texture, tint and detail already applied); `terrain` marks surfaces
 // that never cast into the shadow map. Returns the tonemapped display-space
@@ -617,14 +629,29 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     if (foliage && dot(n, n) < 0.25) n = cn;
     vec3 nCast = (foliage && dot(n, l) < 0.0) ? -n : n;
     vec3 nLight = n;
+    // A crown lit as a canopy (crownCanopy; grass shades as terrain and keeps
+    // its look): the sun reaching a leaf crosses the crown in front of it
+    // (optical depth 1 per crown radius, a quarter of the sun passes whatever
+    // the depth), the core sees less sky (0.45 of it, 0.6 without), and below
+    // 35 degrees of sun, fully below 12, the crown takes 0.65 of the sun and
+    // 0.75 of the sky: a low sun's wrapped terminator and the exposure meter
+    // otherwise light the whole crown pale. `crownSun` and `crownSky` stay 1
+    // and the stock values without it.
+    bool canopy = crown && !terrain && litHorizonSun.w > 0.5;
+    float crownSun = 1.0;
     float crownSky = 1.0;
     if (crown) {
         vec3 card = dot(n, cn) < 0.0 ? -n : n;
         vec3 blend = card * 0.3 + cn * 0.7;
         nLight = blend * inversesqrt(max(dot(blend, blend), 1e-12));
-        crownSky = mix(0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
+        crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));
     } else if (foliage) {
         nLight = nCast;
+    }
+    if (canopy) {
+        float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);
+        crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);
+        crownSky *= mix(1.0, 0.75, lowSun);
     }
 
     float nl = max(dot(n, l), 0.0);
@@ -643,7 +670,7 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     float sunShadow = sunVisibility;
     if (foliage) {
         sunTerm = clamp((dot(nLight, l) + 0.35) / 1.35, 0.0, 1.0);
-        sunShadow = mix(0.45, 1.0, sunVisibility);
+        sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;
     }
     vec3 direct = litSun.rgb * (kd * sunTerm + litMatForced.rgb) * (sunShadow * sunOn);
     vec3 ambient = ka * skyIrradiance(nLight) * (skyVisibility * crownSky * sunOn);
@@ -657,17 +684,26 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
 
     vec3 a = toLinear(albedo);
+    if (canopy) {
+        // Light that bounces between leaves before it leaves the crown picks
+        // up the leaf colour again: the canopy's albedo is the leaf's with its
+        // saturation deepened (a power of 1.3) at the same luminance.
+        vec3 p = pow(a, vec3(1.3));
+        a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
+    }
     float exposure = litZenith.w;
     vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn) * exposure;
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
     if (foliage) ambientShare *= 0.5;
 
-    if (litFlags.z > 0.5 && litFlags.z < 3.5) {
-        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal.
+    if (litFlags.z > 0.5 && litFlags.z < 4.5) {
+        // Debug views: 1 = sun visibility, 2 = terrain sky visibility, 3 = normal,
+        // 4 = the albedo in display space (debug=7; LightRig.hpp kShaderDebugAlbedo).
         if (litFlags.z < 1.5) return vec3(sunVisibility);
         if (litFlags.z < 2.5) return vec3(skyVisibility);
-        return nLight * 0.5 + 0.5;
+        if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;
+        return albedo;
     }
     vec3 display = toDisplay(tonemapNeutral(radiance));
     float grey = dot(display, kLuma);

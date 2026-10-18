@@ -687,8 +687,8 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows "
-          "and the sea have landed, nothing else has",
+TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
+          "shade and the sea have landed, nothing else has",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
@@ -696,8 +696,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     // shows the opaque objects' GPU section for them. A5 lands taa, A6 the
     // tiled light list (the world pass: it has no pass of its own), A7
     // atmosphere, B11 terrainDetail and sharpen, B1 treeShadows (the shadow
-    // depth pass) and softShadows (the world pass), B5 seaWaves (its draws are
-    // in the world pass's ground section).
+    // depth pass) and softShadows (the world pass), B2 lowSunRig and
+    // crownCanopy (the world pass's lighting), B5 seaWaves (its draws are in
+    // the world pass's ground section).
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -711,8 +712,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
         const bool atmosphere = info.id == Feature::Atmosphere;
         const bool texsharp = info.id == Feature::TerrainDetail || info.id == Feature::Sharpen;
         const bool shadows = info.id == Feature::TreeShadows || info.id == Feature::SoftShadows;
+        const bool shade = info.id == Feature::LowSunRig || info.id == Feature::CrownCanopy;
         const bool sea = info.id == Feature::SeaWaves;
-        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || sea));
+        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || sea));
         if (info.landed)
         {
             CHECK(std::string_view(info.step) == (perf         ? "A4"
@@ -720,6 +722,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
                                                   : lightList  ? "A6"
                                                   : atmosphere ? "A7"
                                                   : shadows    ? "B1"
+                                                  : shade      ? "B2"
                                                   : sea        ? "B5"
                                                                : "B11"));
             CHECK(sections.count(info.gpuSection) == 1);
@@ -727,6 +730,8 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     }
     CHECK(std::string_view(GetFeatureInfo(Feature::TreeShadows).gpuSection) == "shadow");
     CHECK(std::string_view(GetFeatureInfo(Feature::SoftShadows).gpuSection) == "world");
+    CHECK(std::string_view(GetFeatureInfo(Feature::LowSunRig).gpuSection) == "world");
+    CHECK(std::string_view(GetFeatureInfo(Feature::CrownCanopy).gpuSection) == "world");
     const LightingTuning t = Apply("remastered");
     FeatureGates g = ComputeFeatureGates(GateInputs{}, t);
     const std::string s = FeatureStateString(t, g);
@@ -736,8 +741,12 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     CHECK(s.find(" lightTiles=1:off:no-local-light ") != std::string::npos);
     CHECK(s.find(" treeShadows=1:on:sun-above-4-deg ") != std::string::npos);
     CHECK(s.find(" softShadows=1:on:sun-above-4-deg ") != std::string::npos);
+    // The low-sun rig is constants and the canopy a few terms on foliage:
+    // both run whenever they are on (their own math fades them by sun height).
+    CHECK(s.find(" lowSunRig=1:on:always ") != std::string::npos);
+    CHECK(s.find(" crownCanopy=1:on:always ") != std::string::npos);
     CHECK(s.find(" seaWaves=1:on:per-sea-fragment ") != std::string::npos);
-    CHECK(s.find("landed=10/26") != std::string::npos);
+    CHECK(s.find("landed=12/26") != std::string::npos);
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

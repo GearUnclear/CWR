@@ -187,8 +187,45 @@ Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
     return NormaliseLuminance(Mix(physical, NormaliseLuminance(classicLinear), w));
 }
 
+float LowSunHueShare(float elevationDeg)
+{
+    // Classic's sunset colour ramps in from 25 degrees (LightSun::Recalculate,
+    // begSunset), so 0.4 of it from there down, and 0.3 more in the last 9
+    // degrees (shade research V20: the lit side of a hull at a 4.8 degree sun
+    // came out as red as classic's only with it).
+    return 0.4f * (1.0f - Smoothstep(6.0f, 25.0f, elevationDeg)) + 0.3f * (1.0f - Smoothstep(4.0f, 9.0f, elevationDeg));
+}
+
+Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth)
+{
+    const Rgb evening = EveningSunChroma(elevationDeg, classicSun, warmth);
+    const Rgb classicLinear = ToLinear(classicSun);
+    const float w = LowSunHueShare(elevationDeg) * Clamp01(warmth);
+    // Above 25 degrees (and with no classic colour, or warmth 0) the share is
+    // 0: the sun is EveningSunChroma's to the bit.
+    if (w <= 0.0f || Luminance(classicLinear) < 1e-5f)
+        return evening;
+    return NormaliseLuminance(Mix(evening, NormaliseLuminance(classicLinear), w));
+}
+
+float LowSunFill(float elevationDeg)
+{
+    return (1.0f - Smoothstep(8.0f, 40.0f, elevationDeg)) * Smoothstep(-2.0f, 3.0f, elevationDeg);
+}
+
+float ShaderDebugView(int debugView)
+{
+    if (debugView >= 1 && debugView <= 3)
+        return static_cast<float>(debugView);
+    return debugView == kDebugViewAlbedo ? kShaderDebugAlbedo : 0.0f;
+}
+
 LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
 {
+    // The low-sun rig (B2): the evening hue from 25 degrees and the sideways
+    // fill on vertical faces. Off, the rig is the one before that step to the
+    // bit (every term below multiplies by exactly 1 or keeps its chroma).
+    const bool lowSunRig = tuning.features.lowSunRig > 0.0f;
     LightRig rig;
     const float sinSun = std::max(-1.0f, std::min(1.0f, in.towardSun[1]));
     const float elevation = std::asin(sinSun) * 180.0f / kPi;
@@ -216,7 +253,9 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const float aboveHorizon = Smoothstep(-1.5f, 1.0f, elevation);
     const float clearSun = kSunNoon * extinction * aboveHorizon;
     const float sunPower = clearSun * overcastDim * tuning.sun;
-    rig.sun = EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth) * sunPower;
+    const Rgb sunChroma = lowSunRig ? LowSunChroma(elevation, in.classicSunDiffuse, tuning.warmth)
+                                    : EveningSunChroma(elevation, in.classicSunDiffuse, tuning.warmth);
+    rig.sun = sunChroma * sunPower;
 
     // --- sky hemisphere ------------------------------------------------------
     const float clearSky = kSkyNoon * SkyDayFraction(sinSun);
@@ -277,13 +316,39 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     const float moonOnGround = moonPower * sinMoon;
     const float bouncePower = kGroundAlbedo * (sunOnGround + moonOnGround + skyPower + moonSky) * tuning.bounce;
     const Rgb bounceChroma = NormaliseLuminance(Rgb(1.0f, 1.0f, 0.96f));
-    rig.skyGround = bounceChroma * bouncePower;
+    // The low-sun rig's sideways fill (LowSunFill; 0 with the switch off, by
+    // day above 40 degrees and at night).
+    const float fill = lowSunRig ? LowSunFill(elevation) : 0.0f;
+    rig.skyGround = bounceChroma * (bouncePower * (1.0f + kLowSunFillBounce * fill));
     // A vertical surface sees half the dome and half the ground. The sky toward
     // a low sun is brighter than the sky opposite it.
     const float low = 1.0f - Clamp01(sinSun);
     const Rgb moonHorizon = moonChroma * (0.55f * moonSky);
-    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + rig.skyGround * 0.5f + moonHorizon;
-    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + rig.skyGround * 0.5f + moonHorizon;
+    rig.skyHorizonSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low) * (1.0f + kLowSunFillSunward * fill)) +
+                        rig.skyGround * 0.5f + moonHorizon;
+    rig.skyHorizon = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low) * (1.0f + kLowSunFillAntiSun * fill)) +
+                     rig.skyGround * 0.5f + moonHorizon;
+    if (fill > 0.0f)
+    {
+        // The rule of the twilight cap above, for walls, wherever the fill
+        // runs (not faded in by `twilight`): the fill lifts a vertical face
+        // at most to the visible sky (skyCap), never above it, and never below
+        // what it had without the fill. Only a dim sky binds (a clear sky's
+        // fog colour caps far above the fill).
+        const Rgb groundHalf = bounceChroma * (bouncePower * 0.5f) + moonHorizon;
+        const Rgb plainSun = sunwardChroma * (0.55f * skyPower * (1.0f + 0.4f * low)) + groundHalf;
+        const Rgb plainAnti = zenithChroma * (0.55f * skyPower * (1.0f - 0.25f * low)) + groundHalf;
+        auto limit = [skyCap](Rgb& lifted, const Rgb& plain)
+        {
+            const float plainLum = Luminance(plain);
+            const float liftedLum = Luminance(lifted);
+            const float cap = std::max(plainLum, skyCap);
+            if (liftedLum > cap && liftedLum > plainLum)
+                lifted = Mix(plain, lifted, (cap - plainLum) / (liftedLum - plainLum));
+        };
+        limit(rig.skyHorizonSun, plainSun);
+        limit(rig.skyHorizon, plainAnti);
+    }
     return rig;
 }
 

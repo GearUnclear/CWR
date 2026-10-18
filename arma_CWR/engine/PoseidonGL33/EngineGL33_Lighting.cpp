@@ -687,7 +687,10 @@ void EngineGL33::UploadLitFrameConstants()
     SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
-    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, 0.0f);
+    // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
+    // gate are on; 0 leaves shadeRemastered's foliage as it was before.
+    const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;
+    SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, rig.skyHorizonSun.b, crownCanopy);
 
     // Fog toward the sun: the sky dome adds SunSkyColor * cos^6 to SkyColor
     // before modulating the sky texture (TLVertexTable::DoSkyLighting), while
@@ -772,11 +775,11 @@ void EngineGL33::UploadLitFrameConstants()
         rm::ComputeSunShadowConstants(_lighting, _featureGates, TaaWantedThisFrame(), _taa.sequence);
     SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
     SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
-    // Debug views of the forward shaders: 1 to 3 (shadeRemastered) and the
-    // lights per tile (6); 4 and 5 are the post pass's.
+    // Debug views of the forward shaders: 1 to 3 and the albedo (7, drawn as 4)
+    // by rm::ShaderDebugView (shadeRemastered), and the lights per tile (6);
+    // 4 and 5 are the post pass's.
     const int dv = _lighting.debugView;
-    const float debug =
-        (dv >= 1 && dv <= 3) || dv == fl::kDebugViewLightTiles ? static_cast<float>(_lighting.debugView) : 0.0f;
+    const float debug = dv == fl::kDebugViewLightTiles ? static_cast<float>(dv) : rm::ShaderDebugView(dv);
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
     UploadLitSky(toSun, in.skyThrough);

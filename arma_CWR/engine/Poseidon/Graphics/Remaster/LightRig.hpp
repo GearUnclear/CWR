@@ -13,12 +13,15 @@
 //
 //   - a sun whose colour follows its elevation (near-neutral by day; below 16
 //     degrees it takes the classic sunset colour, so evenings are as warm on
-//     screen as the original's) and whose strength follows the classic
+//     screen as the original's; with the low-sun rig from 25 degrees, as
+//     classic's own sunset ramp) and whose strength follows the classic
 //     overcast and night ramps,
 //   - a sky hemisphere (zenith, ground bounce and a horizon band split into a
 //     sunward half and an anti-sun half). The sunward horizon takes the engine
 //     fog colour, so a mod's sky tints the light and a low sun gives warm light
-//     on the sun side and cool shade on the other,
+//     on the sun side and cool shade on the other. Below 40 degrees the low-sun
+//     rig adds sideways fill to vertical faces, so the shaded side of a hull
+//     stays readable at a low sun,
 //   - an exposure meter, so sunlit ground keeps its classic on-screen
 //     brightness from noon down to a low sun (the frame does not just get
 //     darker),
@@ -72,8 +75,8 @@ struct FeatureSet
     float atmosphere = 1.0f;      // A7 sky table for the dome and the fog colour
     float treeShadows = 1.0f;     // B1 trees and buildings in the sun shadow map, leaves without self-shadow stripes
     float softShadows = 1.0f;     // B1 contact-hardening (PCSS) sun shadows
-    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides
-    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy
+    float lowSunRig = 1.0f;       // B2 low-sun hue and readable shaded sides (ComputeLightRig)
+    float crownCanopy = 1.0f;     // B2 tree crowns lit as a canopy (shader shadeRemastered)
     float nightLights = 1.0f;     // B3 physical lamps and low-beam headlights
     float moonShadows = 1.0f;     // B3 the moon as a shadow-casting key light
     float stars = 1.0f;           // B3 stars in a dark sky
@@ -158,7 +161,10 @@ struct LightingTuning
     // Diagnostic view: 0 off, 1 sun visibility, 2 terrain sky visibility,
     // 3 normals, 4 ambient occlusion, 5 the post pass's half-resolution
     // linear depth (PostStages.hpp kDebugViewLinearDepth), 6 the lights per
-    // tile of the tiled light list (FrameLights.hpp kDebugViewLightTiles).
+    // tile of the tiled light list (FrameLights.hpp kDebugViewLightTiles), 7
+    // the surface albedo (kDebugViewAlbedo: the display-space colour the lit
+    // shaders light, texture, tint and detail applied; with post=0 a shot of
+    // it divides a lit shot into the light on each surface).
     int debugView = 0;
 };
 
@@ -194,6 +200,17 @@ struct LightRig
     float cloudTransmit = 1.0f;
 };
 
+// The debug view (LightingTuning::debugView) that shows the albedo, and the
+// value the lit shaders read for it (litFlags.z; 1 to 3 are the views of
+// the same number).
+constexpr int kDebugViewAlbedo = 7;
+constexpr float kShaderDebugAlbedo = 4.0f;
+// litFlags.z for a debug view: 1 to 3 and the albedo view are drawn by the lit
+// shaders, every other view (4 and 5 by the post pass) leaves them as they are.
+// The light tiles' view (6, FrameLights.hpp) is 0 here: the backend passes it
+// through itself.
+float ShaderDebugView(int debugView);
+
 LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning);
 
 // Sun chroma at an elevation (degrees), normalised to unit luminance.
@@ -204,6 +221,29 @@ Rgb SunChroma(float elevationDeg, float warmth);
 // space, LightSun's colorFull or Diffuse) taken to linear, so evenings keep the
 // original's warm hue on screen. `warmth` 0 = neutral.
 Rgb EveningSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
+// With the low-sun rig (FeatureSet::lowSunRig, plan step B2) the sun then
+// takes a further LowSunHueShare of the classic sunset hue: from 25 degrees
+// down (where classic's own sunset ramp starts; EveningSunChroma reaches only
+// 14% of it at 12.7 degrees) and more in the last 9, where classic's sun is
+// nearly pure red and the remastered sky fill would otherwise leave a sunlit
+// hull less red than the original's. Times the warmth (clamped to 1).
+float LowSunHueShare(float elevationDeg);
+Rgb LowSunChroma(float elevationDeg, const Rgb& classicSun, float warmth);
+
+// The low-sun rig's sideways fill on vertical faces. At a low sun the light on
+// a wall comes mostly sideways, from the bright horizon band and the sunlit
+// ground in front of it, which the hemisphere split under-counts: the face of
+// a hull turned away from a 7 to 14 degree sun fell to 0.32 to 0.42 of its
+// sunlit side on screen (0.6 is the target; 0.42 was called crushed). The fill
+// weight is LowSunFill (full from 8 degrees down to the horizon, gone by 40,
+// and faded out under the horizon); the sky part of the anti-sun horizon takes
+// 1 + kLowSunFillAntiSun * fill, the sunward one 1 + kLowSunFillSunward * fill
+// and the ground bounce 1 + kLowSunFillBounce * fill. Up-facing ground (the
+// zenith term) is unchanged, so cast shadows on the ground keep their depth.
+constexpr float kLowSunFillAntiSun = 2.6f;
+constexpr float kLowSunFillSunward = 0.5f;
+constexpr float kLowSunFillBounce = 1.3f;
+float LowSunFill(float elevationDeg);
 
 // Ellipsoid that stands in for a tree crown when lighting foliage, from the
 // model's bounding box (min, max; y up). Trunks make the box taller than the

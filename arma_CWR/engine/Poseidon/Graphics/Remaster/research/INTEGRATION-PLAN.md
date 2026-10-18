@@ -326,6 +326,12 @@ flat-normal share. The layer heights, lobes and fades stay shader constants, not
 switch on in the remastered world pass the sea's faces leave PSDetail for the water program, which
 does not read `litDetail`; `litDetail.w` still tells the land from the sea when the switch is off.
 
+As built in B2 (a parallel lane on 807ce4b, merged onto A6 and B5): no slot lands. The low-sun
+rig is rig math in `ComputeLightRig`, and the crown canopy needs one flag per frame:
+`litHorizonSun.w` (slot 23, unused before), 1 while `crownCanopy` and its gate are on.
+`LitConst::Count` and the padding are unchanged; only the block's comment for slot 23 changes
+(which changes the text, not the layout, of every remastered program).
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -1381,6 +1387,62 @@ gitignored).**
   14 deg (shade's `unitcheck.py` numbers), noon unchanged, and `lowSunRig=0` equal to the tip
   rig. Update the README calibration table.
 - **Effort**: 2 days.
+
+**Result (2026-10-18, uncommitted change on 807ce4b in the scratch copy `gr-B2`, a parallel lane
+merged onto A6 and B5; evidence in `tmp/integration/B2/` of the graphics-remaster worktree,
+gitignored).**
+
+- Built as the bullets above. `lowSunRig` is read by `ComputeLightRig` from the switch (its gate is
+  "always"; the rig runs before the gates, which take its cloud cover): `LowSunChroma` blends a
+  further `LowSunHueShare` of the classic hue over `EveningSunChroma`, and `LowSunFill` scales the
+  horizon and bounce terms with the named constants `kLowSunFill{AntiSun,Sunward,Bounce}`. Off,
+  every term multiplies by exactly 1, so the rig equals 807ce4b's (a unit case pins 807ce4b's values
+  at 7.5, 12.7 and 30 degrees). `crownCanopy` is V18 as plain code in `shadeRemastered`, from its gate
+  (`litHorizonSun.w`, 3.3). The sun shafts take the rig's sun colour (`_lightRigSun`, the post
+  pass's shaft tint), so with `lowSunRig` the low-sun hue tints them too.
+- Corrections and additions: the fill is limited by the visible sky (a vertical face goes at most
+  to it, never below its value without the fill). The limit holds wherever the fill runs (-2 to 40
+  degrees of sun), not only in twilight: unlike the sky's twilight cap it is not faded in by the
+  twilight weight. Under a dim dusk sky the prototype's fill lit a wall facing away from a 1 to 3
+  degree sun at 1.4 to 2.1 times the visible sky. Under a clear sky the limit does not bind (the unit
+  test's clear-sky rig is the same with and without it). The canopy terms skip grass (`terrain`
+  draws), which the prototype also darkened; `crownCanopy` is the crowns' switch. The albedo view
+  is kept as `debug=7` (5 is the linear depth since A3, 6 A6's light tiles; it was 6 on the lane),
+  mapped to the lit shaders' 4 by `ShaderDebugView`. The 7 degree hue case did not move (its hull,
+  N.L 0.5, stays within 10% of Classic); the new pins are a model of the research boxes' faces (45
+  and 135 degrees from the sun): shade/lit 0.5 to 0.65 with the rig, below 0.41 without, from 4.8
+  to 14 degrees (the model reads 0.52 to 0.59; the game 0.02 to 0.07 higher), and the lit face at
+  least as warm as without the rig.
+- In game (albedo-normalised boxes, 1920x1080, `b2_abel` / `b2_sinai`; the research's 960x640 boxes
+  do not carry over): hull shade/lit on 0.61 / 0.62 (M113 / Jeep) at 12.7 degrees, 0.57 / 0.61 at 7.5,
+  0.55 / 0.61 at 4.8; Sinai Zelda / HMMWV 0.60 / 0.63 at 12.2 and 0.56 / 0.59 at 7.6 (before 0.41 to
+  0.49, Classic 0.33 to 0.53). Sunlit hull faces warmer than before in every box and at least as warm
+  as Classic except two Jeep values, slightly less warm than Classic on one ratio each (`lowsun_box`
+  r:b 1.26 against 1.28, `dawn_box5` g:r 0.59 against 0.58; the other ratio warmer). Ground cast
+  shadows and the noon frame unchanged; sunlit ground warmer (g:r 0.92 to 0.86 at 12.7 degrees,
+  Classic 0.87). Golden crowns greener with an unchanged p10:p90 spread; the broadleaf crown at
+  Classic's brightness, the conifer 9% darker than before and 15% darker than Classic.
+- Off equals before: the box values of off and of the base build are equal to 0.01 on every view; the
+  Abel views differ from the base build (another boot) by the same kinds and sizes as the base
+  build's own repeat within one game (pixels over 2 levels, lowsun_fp 40,918 against 43,969,
+  lowsun_box 56,542 against 45,618); Sinai's ground band differs between boots as A0 found, with
+  equal means.
+- Cost: one reading per view, frame minimum on minus off -0.41 to +0.35 ms with no consistent sign
+  (the base build's same frame twice spreads -0.13 to +0.23 ms): not resolved. Gate: build 0
+  warnings, clang-format clean, unit gate tags 529/529 (6 new cases), twelve mutations red,
+  smoke_abel 1/1 (KHR_debug ids 131154, 131169 and 131218 only).
+- Landed on B5 (e91b3f3; A6 and B5 landed after the lane's base) by a three-way apply, 8 files in
+  conflict, both sides kept: A6 took debug view 6 (the lights per tile), so the albedo view is 7
+  (`kDebugViewAlbedo`; the lit shaders still see it as 4, their debug branch takes 1 to 4, and the
+  backend passes 6 through itself beside `ShaderDebugView`); the comments of slots 22 and 23; the
+  landed registry rows and their test (landed=12/26); the post-stage test over the debug views;
+  these notes and the roadmap. Past the conflicts the canopy case's check of the debug mapping in
+  `EngineGL33_Lighting.cpp` follows the merged line. Merged gate: build 0 warnings, touched files
+  clang-format clean, the gate tags plus the landed lanes' tags (`[FeatureSwitches]`,
+  `[FeatureGates]`, `[PostStages]`, `[SunShadows]`, `[atmosphere]`, `[triSetFixedStep]`,
+  `[triPinCloudDrift]`, `[SeaWaves]`, `[build-descriptor]`, `[TemporalAA]`, `[TerrainDetail]`,
+  `[FrameLights]`, `[PerfCounters]`) 577/577, smoke_abel 1/1 (KHR_debug ids 131154, 131169 and
+  131218 only).
 
 ### B3. night (moon shadows, low beams, stars, physical lamps)
 

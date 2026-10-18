@@ -7,6 +7,7 @@
 
 #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+#include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
@@ -171,6 +172,270 @@ TEST_CASE("Remaster light rig: evening sun keeps the original's sunset hue on sc
     neutral.warmth = 0.0f;
     const LightRig flat = ComputeLightRig(in, neutral);
     CHECK(RedOverBlue(flat.sun) < 1.1f);
+}
+
+namespace
+{
+// Classic's sun colour at an elevation (LightSun::Recalculate's colorFull):
+// FullSunColor (0.85, 0.75, 0.4) toward SunsetColor (0.8, 0.3, 0.23) as the
+// sine of the elevation falls below sin 25 degrees. At 7 degrees it is the
+// (0.814, 0.43, 0.279) of the case above.
+Rgb ClassicSunColor(float elevationDeg)
+{
+    const float s = std::sin(std::max(elevationDeg, 0.0f) * kPi / 180.0f);
+    const float t = std::min(std::max(1.0f - s / 0.42262f, 0.0f), 1.0f);
+    return Mix(Rgb(0.85f, 0.75f, 0.4f), Rgb(0.8f, 0.30f, 0.23f), t);
+}
+
+LightRigInputs ClearSkyClassicSun(float elevationDeg)
+{
+    LightRigInputs in = ClearSky(elevationDeg);
+    in.classicSunDiffuse = ClassicSunColor(elevationDeg);
+    return in;
+}
+
+LightingTuning WithLowSunRig(bool on)
+{
+    LightingTuning t;
+    t.features.lowSunRig = on ? 1.0f : 0.0f;
+    return t;
+}
+
+// Light (rig units, linear) on a vertical face whose normal is `offDeg` from
+// the sun's azimuth: the sun times N.L and the horizon band between its
+// anti-sun and sunward halves, as the shader's skyIrradiance gives it for a
+// horizontal normal. The shade track's calibration boxes turn a hull 45
+// degrees from the sun (lit) and 135 (shaded).
+Rgb VerticalFace(const LightRig& rig, float elevationDeg, float offDeg)
+{
+    const float cosOff = std::cos(offDeg * kPi / 180.0f);
+    const float sunTerm = std::max(std::cos(elevationDeg * kPi / 180.0f) * cosOff, 0.0f);
+    const float toward = 0.5f + 0.5f * cosOff;
+    return rig.sun * sunTerm + Mix(rig.skyHorizon, rig.skyHorizonSun, toward);
+}
+
+bool SameRgb(const Rgb& a, const Rgb& b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b;
+}
+} // namespace
+
+TEST_CASE("Remaster light rig: the low-sun rig keeps the shaded side of a hull readable", "[Graphics][remaster]")
+{
+    // Plan step B2 (research track shade): the face of a hull turned away from
+    // a low sun was crushed (0.32 to 0.42 of its sunlit side on screen in the
+    // research's calibration boxes; the target is about 0.6, and 0.42 was
+    // rejected). The sideways fill lifts it into a readable range without
+    // flattening the hull. The game measures 0.02 to 0.07 above this model
+    // (AO, ground tint and the measured faces' exact angles).
+    for (float e : {4.8f, 7.5f, 9.0f, 12.7f, 14.0f})
+    {
+        CAPTURE(e);
+        const LightRigInputs in = ClearSkyClassicSun(e);
+        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
+        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
+        auto ratio = [e](const LightRig& rig)
+        {
+            return Shown(Luminance(VerticalFace(rig, e, 135.0f)), rig.exposure) /
+                   Shown(Luminance(VerticalFace(rig, e, 45.0f)), rig.exposure);
+        };
+        CAPTURE(ratio(on), ratio(off));
+        CHECK(ratio(off) < 0.41f);
+        CHECK(ratio(on) > 0.5f);
+        CHECK(ratio(on) < 0.65f); // still a shaded side, not flat light
+        CHECK(ratio(on) > ratio(off) + 0.15f);
+        // The sunlit side is not dimmed to get there.
+        CHECK(Luminance(VerticalFace(on, e, 45.0f)) >= Luminance(VerticalFace(off, e, 45.0f)));
+        // Up-facing ground and its cast shadows keep their light, and the
+        // exposure is the meter's: only walls and the sun's hue change.
+        CHECK(Luminance(on.skyZenith) == Luminance(off.skyZenith));
+        CHECK(on.exposure == off.exposure);
+        CHECK(Luminance(on.sun) == Catch::Approx(Luminance(off.sun)).epsilon(1e-5));
+    }
+    // The fill is full from 8 degrees down to the horizon, gone by 40 and
+    // faded out under the horizon; noon and night are untouched to the bit.
+    CHECK(LowSunFill(40.0f) == 0.0f);
+    CHECK(LowSunFill(8.0f) == Catch::Approx(1.0f));
+    CHECK(LowSunFill(3.0f) == Catch::Approx(1.0f));
+    CHECK(LowSunFill(-2.0f) == 0.0f);
+    float last = 0.0f;
+    for (float e = 40.0f; e >= 8.0f; e -= 1.0f)
+    {
+        CAPTURE(e);
+        CHECK(LowSunFill(e) >= last);
+        last = LowSunFill(e);
+    }
+    for (float e : {40.0f, 45.0f, 60.0f, 85.0f, -3.0f, -30.0f})
+    {
+        CAPTURE(e);
+        const LightRigInputs in = ClearSkyClassicSun(e);
+        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
+        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
+        CHECK(SameRgb(on.sun, off.sun));
+        CHECK(SameRgb(on.skyZenith, off.skyZenith));
+        CHECK(SameRgb(on.skyHorizon, off.skyHorizon));
+        CHECK(SameRgb(on.skyHorizonSun, off.skyHorizonSun));
+        CHECK(SameRgb(on.skyGround, off.skyGround));
+        CHECK(on.exposure == off.exposure);
+    }
+}
+
+TEST_CASE("Remaster light rig: the low-sun rig warms the evening sun from 25 degrees, as classic does",
+          "[Graphics][remaster]")
+{
+    // Classic's sunset colour ramps in from 25 degrees; EveningSunChroma takes
+    // it only below 16 (14% of it at 12.7 degrees), so the sunlit ground and
+    // hulls read greener and greyer than the original's. The low-sun rig takes
+    // a further share of it from 25 degrees down and more in the last 9.
+    CHECK(LowSunHueShare(25.0f) == 0.0f);
+    CHECK(LowSunHueShare(60.0f) == 0.0f);
+    CHECK(LowSunHueShare(4.0f) == Catch::Approx(0.7f));
+    CHECK(LowSunHueShare(0.0f) == Catch::Approx(0.7f));
+    float last = 0.0f;
+    for (float e = 25.0f; e >= 0.0f; e -= 0.5f)
+    {
+        CAPTURE(e);
+        CHECK(LowSunHueShare(e) >= last);
+        last = LowSunHueShare(e);
+    }
+    for (float e : {4.8f, 7.5f, 9.0f, 12.7f, 14.0f, 20.0f})
+    {
+        CAPTURE(e);
+        const LightRigInputs in = ClearSkyClassicSun(e);
+        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
+        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
+        // The sun itself: redder and less green than before the step.
+        CHECK(RedOverBlue(on.sun) > RedOverBlue(off.sun));
+        CHECK(on.sun.g / on.sun.r < off.sun.g / off.sun.r);
+        // The sunlit face of a hull (45 degrees from the sun) is at least as
+        // warm as before the step, though the fill adds cool sky to it: owner
+        // rule, evenings no less warm than the original look on hulls.
+        const Rgb litOn = VerticalFace(on, e, 45.0f);
+        const Rgb litOff = VerticalFace(off, e, 45.0f);
+        CAPTURE(RedOverBlue(litOn), RedOverBlue(litOff));
+        CHECK(RedOverBlue(litOn) >= RedOverBlue(litOff));
+        CHECK(litOn.g / litOn.r <= litOff.g / litOff.r);
+    }
+    // Warmth 0 keeps a neutral sun with the rig on, and no classic colour
+    // leaves the physical one.
+    LightingTuning neutral = WithLowSunRig(true);
+    neutral.warmth = 0.0f;
+    CHECK(RedOverBlue(ComputeLightRig(ClearSkyClassicSun(7.0f), neutral).sun) < 1.1f);
+    LightRigInputs noClassic = ClearSky(7.0f);
+    noClassic.classicSunDiffuse = Rgb(0.0f, 0.0f, 0.0f);
+    CHECK(SameRgb(ComputeLightRig(noClassic, WithLowSunRig(true)).sun,
+                  ComputeLightRig(noClassic, WithLowSunRig(false)).sun));
+}
+
+TEST_CASE("Remaster light rig: with lowSunRig off the rig is the one before the low-sun step", "[Graphics][remaster]")
+{
+    // The video's "off" is honest only if the switch restores the earlier rig:
+    // values of ComputeLightRig at the branch tip before B2 (807ce4b), the
+    // ClearSky inputs with classic's sun colour.
+    struct Golden
+    {
+        float e;
+        Rgb sun, zenith, horizon, horizonSun, ground;
+        float exposure;
+    };
+    const Golden golden[] = {
+        {7.5f,
+         {0.800340891f, 0.308145106f, 0.15937148f},
+         {0.0422399715f, 0.0485759676f, 0.0619519576f},
+         {0.028278444f, 0.0310057588f, 0.0363595635f},
+         {0.0425428152f, 0.0463276245f, 0.0500698723f},
+         {0.0201927219f, 0.0201927219f, 0.0193850119f},
+         1.04015148f},
+        {12.7f,
+         {0.605924964f, 0.435198337f, 0.311057419f},
+         {0.0577532463f, 0.0664162338f, 0.0847047642f},
+         {0.0423756465f, 0.0462110043f, 0.0536355972f},
+         {0.0599935316f, 0.0650311857f, 0.0698774755f},
+         {0.0336132348f, 0.0336132348f, 0.032268703f},
+         1.2436173f},
+        {30.0f,
+         {0.542771995f, 0.521061122f, 0.488494784f},
+         {0.0945555493f, 0.108738877f, 0.138681471f},
+         {0.0825667083f, 0.0893924385f, 0.102319837f},
+         {0.101729915f, 0.1092733f, 0.116054296f},
+         {0.0741237104f, 0.0741237104f, 0.0711587593f},
+         1.56306732f},
+    };
+    auto same = [](const Rgb& a, const Rgb& b)
+    {
+        return a.r == Catch::Approx(b.r).epsilon(1e-6) && a.g == Catch::Approx(b.g).epsilon(1e-6) &&
+               a.b == Catch::Approx(b.b).epsilon(1e-6);
+    };
+    for (const Golden& g : golden)
+    {
+        CAPTURE(g.e);
+        const LightRigInputs in = ClearSkyClassicSun(g.e);
+        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
+        CHECK(same(off.sun, g.sun));
+        CHECK(same(off.skyZenith, g.zenith));
+        CHECK(same(off.skyHorizon, g.horizon));
+        CHECK(same(off.skyHorizonSun, g.horizonSun));
+        CHECK(same(off.skyGround, g.ground));
+        CHECK(off.exposure == Catch::Approx(g.exposure).epsilon(1e-6));
+        // On (the default) differs on the walls.
+        const LightRig on = ComputeLightRig(in, LightingTuning{});
+        CHECK_FALSE(same(on.skyHorizon, g.horizon));
+    }
+    // baseline (every switch off) is the same rig.
+    const LightRig b = ComputeLightRig(ClearSkyClassicSun(12.7f), TuningForMode(LightingMode::Baseline));
+    CHECK(same(b.skyHorizon, golden[1].horizon));
+    CHECK(same(b.sun, golden[1].sun));
+}
+
+TEST_CASE("Remaster light rig: the low-sun fill never lights a wall above the visible sky in twilight",
+          "[Graphics][remaster]")
+{
+    // The twilight cap of the sky fill holds for walls with the fill on: a
+    // vertical face goes at most to the visible sky, and never below what it
+    // had without the fill. A clear sky's fog colour caps far above the fill,
+    // so by day the fill is the research's to the bit (the case above).
+    for (float e : {-1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 5.0f})
+    {
+        CAPTURE(e);
+        LightRigInputs in = ClearSkyClassicSun(e);
+        in.fogColor = Rgb(0.20f, 0.12f, 0.12f); // dim dusk sky
+        const float skyShown = Luminance(ToLinear(in.fogColor));
+        const LightRig on = ComputeLightRig(in, WithLowSunRig(true));
+        const LightRig off = ComputeLightRig(in, WithLowSunRig(false));
+        for (const auto& [lit, plain] :
+             {std::pair{on.skyHorizon, off.skyHorizon}, std::pair{on.skyHorizonSun, off.skyHorizonSun}})
+        {
+            const float shown = Luminance(lit) * kBrightness * on.exposure;
+            const float before = Luminance(plain) * kBrightness * off.exposure;
+            CAPTURE(shown, before, skyShown);
+            CHECK(shown <= std::max(skyShown, before) * 1.001f);
+            CHECK(shown >= before * 0.999f);
+        }
+    }
+    // Under the dim sky the fill still lifts the shaded wall where it can.
+    LightRigInputs in = ClearSkyClassicSun(1.0f);
+    in.fogColor = Rgb(0.20f, 0.12f, 0.12f);
+    CHECK(Luminance(ComputeLightRig(in, WithLowSunRig(true)).skyHorizon) >
+          1.2f * Luminance(ComputeLightRig(in, WithLowSunRig(false)).skyHorizon));
+}
+
+TEST_CASE("Remaster debug views: the albedo view is drawn by the lit shaders", "[Graphics][remaster]")
+{
+    // debug=7 shows each lit surface's albedo (display space), the shade
+    // track's calibration view: with post=0 a shot of it divides a lit shot
+    // into the light on every surface. The lit shaders see it as 4; the post
+    // pass's views (4 ambient occlusion, 5 linear depth) leave them alone, and
+    // the light tiles' view (6) the backend passes through itself.
+    CHECK(kDebugViewAlbedo == 7);
+    CHECK(ShaderDebugView(0) == 0.0f);
+    CHECK(ShaderDebugView(1) == 1.0f);
+    CHECK(ShaderDebugView(2) == 2.0f);
+    CHECK(ShaderDebugView(3) == 3.0f);
+    CHECK(ShaderDebugView(4) == 0.0f);
+    CHECK(ShaderDebugView(5) == 0.0f);
+    CHECK(ShaderDebugView(6) == 0.0f);
+    CHECK(ShaderDebugView(kDebugViewAlbedo) == kShaderDebugAlbedo);
+    CHECK(ShaderDebugView(8) == 0.0f);
 }
 
 TEST_CASE("Remaster light rig: twilight fill never outshines the visible sky", "[Graphics][remaster]")
@@ -1028,6 +1293,56 @@ TEST_CASE("Remaster lighting normals survive leaves without a mesh normal", "[Gr
     CHECK(shade.find("normalize(") == std::string::npos);
     // A foliage fragment without a normal of its own lights with the crown's.
     CHECK(std::regex_search(shade, std::regex(R"(if\s*\(\s*foliage\s*&&\s*dot\(n,\s*n\)\s*<[^)]*\)\s*n\s*=\s*cn;)")));
+}
+
+TEST_CASE("Remaster tree crowns as a canopy: the shader's switch, its terms and its off path",
+          "[Graphics][Shaders][remaster]")
+{
+    // crownCanopy (plan step B2, research track shade crown V18): the backend
+    // sets litHorizonSun.w from the switch's frame gate, and shadeRemastered
+    // lights a crown (not grass, which shades as terrain) as a canopy only
+    // while it is 1. Off, every term is the stock one.
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    CHECK(lighting.find("const float crownCanopy = _featureGates[rm::Feature::CrownCanopy].on ? 1.0f : 0.0f;") !=
+          std::string::npos);
+    CHECK(lighting.find("SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, "
+                        "rig.skyHorizonSun.b, crownCanopy);") != std::string::npos);
+    // The debug view the lit shaders draw comes from one mapping (the light
+    // tiles' view aside, which the backend passes through).
+    CHECK(lighting.find("const float debug = dv == fl::kDebugViewLightTiles ? static_cast<float>(dv) : "
+                        "rm::ShaderDebugView(dv);") != std::string::npos);
+
+    const std::string piece = Piece(gl::FragmentPiece::Shade);
+    const size_t start = piece.find("vec3 shadeRemastered(");
+    REQUIRE(start != std::string::npos);
+    const std::string shade = piece.substr(start);
+    CHECK(shade.find("bool canopy = crown && !terrain && litHorizonSun.w > 0.5;") != std::string::npos);
+    // Off: the stock crown core (0.6 of the sky) and the stock leaf shadow;
+    // on: the deeper core, the sun through the crown and the low-sun canopy.
+    CHECK(shade.find("crownSky = mix(canopy ? 0.45 : 0.6, 1.0, smoothstep(0.1, 0.95, vCrown.w));") !=
+          std::string::npos);
+    CHECK(shade.find("sunShadow = mix(0.45, 1.0, sunVisibility) * crownSun;") != std::string::npos);
+    CHECK(shade.find("float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);") != std::string::npos);
+    CHECK(shade.find("crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);") !=
+          std::string::npos);
+    CHECK(shade.find("crownSky *= mix(1.0, 0.75, lowSun);") != std::string::npos);
+    // The canopy terms sit inside `if (canopy)` blocks, crownSun and crownSky
+    // start at 1 (the stock values), and the saturated canopy albedo too.
+    CHECK(shade.find("float crownSun = 1.0;") != std::string::npos);
+    CHECK(std::regex_search(shade, std::regex(R"(if \(canopy\) \{\s*float lowSun)")));
+    CHECK(
+        std::regex_search(shade, std::regex(R"(if \(canopy\) \{\s*(//[^\n]*\n\s*)*vec3 p = pow\(a, vec3\(1\.3\)\);)")));
+    CHECK(CountOf(shade, "pow(a, vec3(1.3))") == 1);
+    // The path through the crown is declared in the same piece, before it.
+    CHECK(piece.find("float crownSunPath(vec3 cnDir, float r, vec3 l) {") < start);
+    // The albedo debug view.
+    CHECK(shade.find("if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;\n        return albedo;") != std::string::npos);
+    // The LitConstants block names the w.
+    CHECK(
+        std::string(gl::LitConstantsBlock())
+            .find(
+                "vec4 litHorizonSun;   // 23: rgb on a vertical surface facing the sun, w = crowns lit as a canopy") !=
+        std::string::npos);
 }
 
 TEST_CASE("Remaster sun shafts brighten the air, not the surfaces near the eye", "[Graphics][Shaders][remaster]")

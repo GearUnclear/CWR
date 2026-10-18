@@ -35,9 +35,12 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::treeShadows, "shadow"},
     {Feature::SoftShadows, "softShadows", "Soft sun shadows", "shadows", "Light and shadow", "B1", true,
      &FS::softShadows, "world"},
-    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", false, &FS::lowSunRig, ""},
-    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", false,
-     &FS::crownCanopy, ""},
+    // B2 (shade): the low-sun rig is constants computed once a frame (no GPU
+    // cost of its own; the world pass is what it lights); the crown canopy is
+    // a few terms on the world pass's foliage.
+    {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
+    {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
+     &FS::crownCanopy, "world"},
     {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", false,
      &FS::nightLights, ""},
     {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", false, &FS::moonShadows,
@@ -159,8 +162,8 @@ struct KeyTable
             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
-                       "Linear depth (half res)\0Light tiles (lights per tile)\0",
-                       &LT::debugView, 0, 6),
+                       "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0",
+                       &LT::debugView, 0, kDebugViewAlbedo),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };
