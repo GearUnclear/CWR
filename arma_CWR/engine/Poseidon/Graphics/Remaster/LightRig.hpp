@@ -144,6 +144,12 @@ struct LightingTuning
     float sunSize = 1.0f;
     float shadowReach = 40.0f;
     float leafBias = 6.0f;
+    // Sea (FeatureSet::seaWaves, SeaWaves.hpp) sub-knobs, each a multiplier of
+    // the shipped value: the wave relief, the mean sky reflection and the
+    // sheen toward the sun in the original sun's hue.
+    float seaRelief = 1.0f;
+    float seaSky = 1.0f;
+    float seaSheen = 1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.

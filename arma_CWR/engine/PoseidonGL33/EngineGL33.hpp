@@ -725,6 +725,13 @@ class EngineGL33 : public Engine
     void EndRemasterSky() override;
     bool RemasterSkyPending() const override;
     std::string RemasterSkyCheck(int texels) override;
+    // --- The remastered sea (EngineGL33_Sea.cpp) ---
+    void BeginSea(Texture* otherFrame, float otherWeight) override;
+    void EndSea() override;
+    // Between BeginSea and EndSea with the feature on: the landscape's sea
+    // faces route to the water program (BuildContext::remasteredSea).
+    bool SeaRouted() const { return _seaOpen; }
+    bool _seaOpen = false;
 
     Poseidon::remaster::LightingTuning _lighting;
     // Remastered programs built and the setting asks for them: DoSelectPixelShader

@@ -900,6 +900,15 @@ class Engine : public IGraphicsEngine
     /// triSkyTableCheck: the GPU sky-view table read back against its CPU
     /// mirror at `texels` texels ("OK:..." or "FAIL:<why>").
     virtual std::string RemasterSkyCheck(int /*texels*/) { return "FAIL:no sky table in this backend"; }
+    /// The remastered sea (feature switch `seaWaves`, Graphics/Remaster/
+    /// SeaWaves.hpp): Landscape::DrawWater opens it around its sea draws with
+    /// the animation frame its faces do not carry (`otherFrame`, may be null)
+    /// and that frame's share of the cross-fade. The backend draws the sea
+    /// faces in between with the remastered water program. A backend without
+    /// it, Classic, or the feature switched or gated off, leaves them on the
+    /// detail program as before.
+    virtual void BeginSea(Texture* /*otherFrame*/, float /*otherWeight*/) {}
+    virtual void EndSea() {}
 
     /// Read / replace the full shadow-map tuning set (see ShadowMapTuning).
     /// Default base returns an all-default set; only the GL33 backend stores it.

@@ -251,6 +251,7 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.isMultitexturing = IsMultitexturing();
     ctx.shadowAlphaRef = static_cast<std::uint8_t>((_shadowFactor * 7) >> 4);
     ctx.passKindHint = GetPassKindHint();
+    ctx.remasteredSea = SeaRouted();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
@@ -266,9 +267,10 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
         SetTexture(tex, spec);
     }
 
-    // PSDetail draws the land and the sea: the terrain detail runs on the land
-    // only. Other draws leave the flag as it is, so it changes only between
-    // land and sea.
+    // PSDetail draws the land and, unless the sea is routed to the water
+    // program (seaWaves, EngineGL33_Sea.cpp), the sea: the terrain detail runs
+    // on the land only. Other draws leave the flag as it is, so it changes only
+    // between land and sea.
     if (d.shader == Poseidon::render::ShaderFamily::Detail)
         SelectTerrainDetailLayer(spec);
 }

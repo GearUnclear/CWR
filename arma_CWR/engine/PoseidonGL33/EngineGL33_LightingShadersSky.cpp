@@ -181,6 +181,21 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     vec3 disp = mix(skyDisplay(a), skyDisplay(cloudLin), cloud);
     return mix(classic, disp, litAtmo.x);
 }
+
+// The clear sky a mirror-like surface reflects along the unit direction r
+// (above the horizon), display. It is the sky the player sees: without the sky
+// table the fog colour with its sun glow (fogColorToward, the original sky
+// behind the horizon); with it, the table's sky in that direction at that
+// brightness, as the dome draws it, and the classic colour again under an
+// overcast deck (litAtmo.y) and as the table fades out at night (litAtmo.x).
+vec3 skyReflection(vec3 r) {
+    vec3 classic = fogColorToward(r);
+    if (litAtmo.x <= 0.0) return classic;
+    vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
+    vec3 disp = skyDisplay(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)));
+    disp = mix(disp, classic, litAtmo.y);
+    return mix(classic, disp, litAtmo.x);
+}
 )";
 
 } // namespace Poseidon::gl33lighting

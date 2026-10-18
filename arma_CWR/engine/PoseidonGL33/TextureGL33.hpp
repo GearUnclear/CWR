@@ -256,7 +256,6 @@ class TextBankGL33 : public AbstractTextBank
     Ref<TextureGL33> _detail;
     Ref<TextureGL33> _specular;
     Ref<TextureGL33> _grass;
-    Ref<TextureGL33> _waterBump;
 
     AutoArray<SurfaceInfoGL33> _freeTextures;
 
@@ -341,7 +340,6 @@ class TextBankGL33 : public AbstractTextBank
     TextureGL33* GetDetailTexture() const { return _detail; }
     TextureGL33* GetGrassTexture() const { return _grass; }
     TextureGL33* GetSpecularTexture() const { return _specular; }
-    TextureGL33* GetWaterBumpMap() const { return _waterBump; }
 
     bool VerifyChecksums() override;
     bool ReserveMemory(GL33MipCacheRoot& root, int limit);

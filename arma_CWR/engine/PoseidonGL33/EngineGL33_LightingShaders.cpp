@@ -341,7 +341,10 @@ layout(std140) uniform LitConstants {
     vec4 litAtmoCloudSun; // 65: rgb sun light on the sky clouds (linear), w sky light on them (linear)
     vec4 litAtmoGlow;     // 66: rgb classic dome sun glow (display), w sky saturation
     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
-    vec4 litPlanned[9];   // 68-76: allocated to features still to land (clouds .. hfrt)
+    vec4 litPlanned[6];   // 68-73: allocated to features still to land (clouds, night, combat, materials; 70 free)
+    vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
+    vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
+    vec4 litPlanned2;     // 76: planned canopy heightfield (hfrt; padding until it lands)
     vec4 litDetail;       // 77: terrain detail: x self-detail strength, y detail kept, z anti-tiling, w land draw
 };
 )";
@@ -909,42 +912,210 @@ void main() {
 )";
 
 static const char s_psWaterRemasterMain[] = R"(
+// The sea (feature switch seaWaves, Graphics/Remaster/SeaWaves.hpp). The
+// landscape's sea faces come here in Remastered with the switch on (the
+// backend routes them between Engine::BeginSea and EndSea); off, they stay on
+// the detail program. tex0 is the sea texture's animation frame (one repeat per
+// 50 m), seaNext the frame it cross-fades into (litWater0.y of it) and tex1
+// the specular detail texture (data/specular_dx.paa), whose alpha is a ripple
+// pattern (32 repeats per 50 m through the detail texgen).
+//
+// The texture's brightness is taken as the wave height. Three layers (the
+// texture, a swell copy at 0.27x frequency rotated 37 degrees, the ripples)
+// give the wave normal. The texture-to-world mapping is solved per pixel from
+// screen derivatives (exact on the flat sea, so no tangents are needed), and
+// the finite-difference step follows the pixel footprint, so the gradient is
+// filtered by the same mips as the colour. The sea is its lit texture under
+// the sky reflected by Fresnel on that normal: a low mean share, so it never
+// turns into a pale mirror, and the part of the Fresnel term that comes from
+// the waves at full weight, so a facet tilted away from the viewer shows sky
+// and one tilted toward shows water. The sun lays a broad lobe and a tight
+// sparkle on the waves (the sparkle widens with the footprint, so distant
+// glitter turns into sheen instead of aliasing), and the material's own broad
+// lobe keeps the original's sheen in the original sun's hue (litWater1.rgb).
+uniform sampler2D seaNext; // unit 11: the animation frame tex0 cross-fades into
+
+const float kSeaWaveK = 0.8;          // metres of height per unit of texture luminance
+const float kSeaSwellK = 1.2;         // the swell layer
+const float kSeaRippleK = 0.004;      // the ripple layer
+const float kSeaFrameRho = 0.75;      // gradient correlation of consecutive frames (SeaWaves.hpp)
+const float kSeaSkyVar = 1.0;         // weight of the wave-driven part of the Fresnel term
+const float kSeaBroadPow = 32.0;      // the sun path
+const float kSeaBroadW = 2.5;
+const float kSeaTightPow = 1500.0;    // the sparkle
+const float kSeaTightW = 1.0;
+const float kSeaFadeStart = 400.0;    // m: the waves fade from here ...
+const float kSeaFadeEnd = 3000.0;     // ... to here,
+const float kSeaFadeFloor = 0.35;     // ... down to this share
+const float kSeaAnisoFloor = 0.3;     // wave share kept where the footprint exceeds the 16:1 filter
+const float kSeaFarSkyStart = 1000.0; // m: the mean sky share fades from here ...
+const float kSeaFarSkyEnd = 3000.0;   // ... to here,
+const float kSeaFarSkyFloor = 0.5;    // ... down to this share: the far sea keeps its own colour
+
+vec4 seaTex(vec2 uv) {
+    vec4 a = texture(tex0, uv);
+    return litWater0.y > 0.0 ? mix(a, texture(seaNext, uv), litWater0.y) : a;
+}
+
+float seaLum(vec2 uv) { return dot(seaTex(uv).rgb, kLuma); }
+
+// World gradients of the two texture coordinates on the horizontal sea plane,
+// gU = (du/dX, du/dZ), solved from the screen derivatives.
+void seaUvGradients(vec2 uv, out vec2 gU, out vec2 gV) {
+    vec2 dPx = dFdx(vWorldRel.xz), dPy = dFdy(vWorldRel.xz);
+    vec2 dUx = dFdx(uv), dUy = dFdy(uv);
+    float det = dPx.x * dPy.y - dPx.y * dPy.x;
+    float id = abs(det) > 1e-12 ? 1.0 / det : 0.0;
+    gU = vec2(dUx.x * dPy.y - dUy.x * dPx.y, dUy.x * dPx.x - dUx.x * dPy.x) * id;
+    gV = vec2(dUx.y * dPy.y - dUy.y * dPx.y, dUy.y * dPx.x - dUx.y * dPy.x) * id;
+}
+
+// Finite-difference step in texture space, matched to what the anisotropic
+// filter keeps.
+float seaUvStep(vec2 uv, float texel) {
+    float a = length(dFdx(uv)), b = length(dFdy(uv));
+    return max(texel, max(min(a, b), max(a, b) / 16.0));
+}
+
+// World-space height gradient (metres per metre per unit of height) of the sea
+// texture at uv, whose height there is h0.
+vec2 seaGrad(vec2 uv, float h0, vec2 gU, vec2 gV, float e) {
+    float hu = seaLum(uv + vec2(e, 0.0));
+    float hv = seaLum(uv + vec2(0.0, e));
+    return ((hu - h0) * gU + (hv - h0) * gV) / e;
+}
+
+// The same for the ripple pattern (tex1's alpha).
+vec2 seaRippleGrad(vec2 uv, float h0, vec2 gU, vec2 gV, float e) {
+    float hu = texture(tex1, uv + vec2(e, 0.0)).a;
+    float hv = texture(tex1, uv + vec2(0.0, e)).a;
+    return ((hu - h0) * gU + (hv - h0) * gV) / e;
+}
+
+// The sea's lit body under its flat normal: shadeRemastered without the gloss
+// and the foliage branch, as linear radiance after exposure, with the sky
+// light's share and the sun's visibility.
+vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
+    vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
+    vec3 posAbs = vWorldRel + litCamPos.xyz;
+    float sunOn = litSunDir.w;
+    float nl = max(dot(n, litSunDir.xyz), 0.0);
+    float skyVisibility;
+    // The sea casts nothing into the map and is no leaf: no offset, no lift.
+    sunVis = shadowMapVisibility(n, nl, 0.0, 0.0) * terrainSunVisibility(posAbs, skyVisibility) *
+             cloudSunVisibility(posAbs);
+    g_sunVisibility = sunVis;
+    vec3 kd = litMatDiffuse.rgb;
+    vec3 ka = litMatAmbient.rgb;
+    vec3 direct = litSun.rgb * (kd * nl + litMatForced.rgb) * (sunVis * sunOn);
+    vec3 ambient = ka * skyIrradiance(n) * (skyVisibility * sunOn);
+    vec3 moon = kd * litMoon.rgb * (max(dot(n, litMoonDir.xyz), 0.0) * sunOn);
+    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
+    vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
+    vec3 a = toLinear(albedo);
+    float exposure = litZenith.w;
+    vec3 radiance = a * (direct + ambient + moon + local + emissive) * exposure;
+    ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(dot(radiance, kLuma), 1e-5), 0.0, 1.0);
+    return radiance;
+}
+
 void main() {
-    vec4 t0 = texture(tex0, vUV0);
     vec4 t1 = texture(tex1, vUV1);
-    vec3 bumpNormal = -(t1.xyz * 2.0 - 1.0);
-    float glint = clamp(dot(psC4.xyz, bumpNormal), 0.0, 1.0);
     vec4 r0;
+    float ambientShare = 0.0;
+    // Derivatives first, in uniform control flow.
+    vec2 gU, gV;
+    seaUvGradients(vUV0, gU, gV);
+    float e0 = seaUvStep(vUV0, 1.0 / 512.0);
+    float e1 = seaUvStep(vUV1, 1.0 / 256.0);
+    float foot = length(fwidth(vWorldRel.xz));
+    float fa = length(dFdx(vUV0)), fb = length(dFdy(vUV0));
+    float anisoRatio = min(fa, fb) / max(max(fa, fb), 1e-12);
     bool lit = vLitMode > 0.5 && vLitMode < 1.5;
-    if (lit) {
-        float ambientShare;
-        vec3 base = shadeRemastered(t0.rgb, true, ambientShare);
-        // The water reflects the sky the player sees behind it (the fog colour
-        // with its sun glow, so the low sun lays a bright path across the sea),
-        // rising toward grazing angles (Fresnel). The classic bump glint becomes
-        // a tight HDR sparkle that clouds and shadows put out.
+    if (lit && litFlags.z < 0.5) {
+        vec4 t0 = seaTex(vUV0);
+        vec3 albedo = t0.rgb * constColor.rgb * (t1.a * 2.0);
+        float dist = length(vWorldRel);
+        // ---- The wave normal.
+        vec2 grad = kSeaWaveK * seaGrad(vUV0, dot(t0.rgb, kLuma), gU, gV, e0);
+        // The swell: the same texture at about 1/4 frequency, rotated 37 degrees.
+        const mat2 R = mat2(0.7986, 0.6018, -0.6018, 0.7986) * 0.27;
+        vec2 uvS = R * vUV0 + vec2(0.31, 0.57);
+        vec2 gUs = R[0][0] * gU + R[1][0] * gV;
+        vec2 gVs = R[0][1] * gU + R[1][1] * gV;
+        float eS = max(1.0 / 512.0, e0 * 0.27);
+        grad += kSeaSwellK * seaGrad(uvS, seaLum(uvS), gUs, gVs, eS);
+        // The ripples: specular_dx's alpha at the detail tiling (vUV1 = 32 x vUV0).
+        grad += kSeaRippleK * seaRippleGrad(vUV1, t1.a, gU * 32.0, gV * 32.0, e1);
+        grad *= mix(kSeaFadeFloor, 1.0, 1.0 - smoothstep(kSeaFadeStart, kSeaFadeEnd, dist));
+        // Beyond the 16:1 the anisotropic filter covers, the texture is
+        // under-filtered along the view and its gradient aliases into
+        // pixel-high stripes at grazing range: fewer waves there.
+        grad *= clamp(16.0 * anisoRatio, kSeaAnisoFloor, 1.0);
+        // Two frames mixed keep the relief of one (SeaCrossFadeGain).
+        float w = litWater0.y;
+        float spread = (1.0 - w) * (1.0 - w) + w * w + 2.0 * w * (1.0 - w) * kSeaFrameRho;
+        grad *= litWater0.x * inversesqrt(max(spread, 1e-6));
+        vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
         vec3 v = -vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
-        float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
-        vec3 r = reflect(-v, vec3(0.0, 1.0, 0.0));
-        vec3 sky = toLinear(fogColorToward(vec3(r.x, 0.0, r.z)));
-        vec3 sparkle = litSun.rgb * pow(glint, 12.0) * 6.0 * (litSunDir.w * g_sunVisibility);
-        vec3 radiance = mix(toLinear(base), sky, fresnel * 0.6) + sparkle * litZenith.w;
-        r0 = vec4(toDisplay(tonemapNeutral(radiance)), vColor.a * t0.a);
+        vec3 l = litSunDir.xyz;
+        float sunOn = litSunDir.w;
+        float exposure = litZenith.w;
+        float sunVis;
+        vec3 body = seaBody(albedo, ambientShare, sunVis);
+        // ---- The sky in the reflected direction, by Fresnel on the wave
+        // normal: the mean share low (litWater0.z, less at a high sun and
+        // beyond 1 km), the waves' share at full weight. At a high sun the
+        // reflected sky also takes litWater0.w of the original fog colour.
+        float nv = max(dot(n, v), 0.0);
+        float F = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+        float Ff = 0.02 + 0.98 * pow(1.0 - clamp(v.y, 0.0, 1.0), 5.0);
+        vec3 r = reflect(-v, n);
+        r.y = max(r.y, 0.01);
+        r = normalize(r);
+        vec3 skyDisp = mix(skyReflection(r), fogColor.rgb, litWater0.w);
+        vec3 sky = toLinear(skyDisp) * mix(1.0, 0.82, smoothstep(0.15, 0.9, r.y));
+        float skyMean = litWater0.z * mix(kSeaFarSkyFloor, 1.0, 1.0 - smoothstep(kSeaFarSkyStart, kSeaFarSkyEnd, dist));
+        float wSky = clamp(skyMean * Ff + kSeaSkyVar * (F - Ff), 0.0, 0.95);
+        // ---- The sun: a broad path and a tight sparkle on the wave normal
+        // (normalised Blinn-Phong, Schlick on v.h; the sparkle widens with the
+        // footprint), and the original's sheen, the material's broad lobe in the
+        // original sun's hue, on a normal that turns flat (litWater1.w) at a
+        // high sun, a smooth wash as the original's per-vertex sheen.
+        vec3 h = normalize(l + v);
+        float nh = max(dot(n, h), 0.0);
+        float vh = max(dot(v, h), 0.0);
+        float Fh = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
+        float pT = kSeaTightPow / (1.0 + kSeaTightPow * 0.004 * foot);
+        const float kInv8Pi = 0.0397887;
+        float lobes = kSeaBroadW * (kSeaBroadPow + 8.0) * kInv8Pi * pow(nh, kSeaBroadPow) +
+                      kSeaTightW * (pT + 8.0) * kInv8Pi * pow(nh, pT);
+        vec3 nS = normalize(mix(n, vec3(0.0, 1.0, 0.0), litWater1.w));
+        float nhS = max(dot(nS, h), 0.0);
+        float pM = max(litMatSpecular.w, 1.0);
+        float sheen = pow(nhS, pM) * (pM + 8.0) / 28.0 * (1.0 + 2.0 * pow(1.0 - vh, 5.0)) *
+                      smoothstep(0.0, 0.15, dot(nS, l));
+        vec3 sun = (litSun.rgb * (Fh * lobes * smoothstep(0.0, 0.04, l.y)) + litMatSpecular.rgb * litWater1.rgb * sheen) *
+                   (sunVis * sunOn * litHorizon.w);
+        vec3 radiance = body * (1.0 - wSky) + sky * wSky + sun * exposure;
+        vec3 display = toDisplay(tonemapNeutral(radiance));
+        float grey = dot(display, kLuma);
+        r0.rgb = max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
+        r0.a = vColor.a * t0.a * constColor.a;
+    } else if (lit) {
+        // The debug views (sun visibility, sky visibility, normals) show the
+        // sea as the detail program does.
+        vec4 t0 = texture(tex0, vUV0);
+        r0.rgb = shadeRemastered(t0.rgb * constColor.rgb * (t1.a * 2.0), true, ambientShare);
+        r0.a = vColor.a * t0.a * constColor.a;
     } else {
+        vec4 t0 = texture(tex0, vUV0);
         r0 = vColor * t0;
-        r0.rgb += glint;
+        r0 *= constColor;
+        r0.rgb *= t1.a * 2.0;
+        r0 += vSpecColor;
     }
-    // The sea's own fog: as finishFragment's (the reflection term above is the
-    // water step's to change).
-    vec3 fogC = fogColor.rgb;
-    if (lit) {
-        fogC = fogColorToward(vWorldRel);
-        if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);
-    } else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {
-        fogC = atmoFogColor(vWorldRel, fogC);
-    }
-    r0.rgb = mix(fogC, r0.rgb, vFogTC);
-    fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
+    finishFragment(r0, ambientShare, true);
 }
 )";
 

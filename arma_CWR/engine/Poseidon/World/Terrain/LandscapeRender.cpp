@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Game/OperMap.hpp>
@@ -317,8 +318,14 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
 
 static Vector3 WaterNormal(0, -1, 0);
 
-// const int WaterFlags = IsWater|SpecularTexture;
-
+// The sea's faces carry the specular layer alone (data\specular_dx.paa, a
+// ripple pattern in its alpha), so they draw through the detail program like
+// the terrain. They never carry IsWater: that bit selects the engine's water
+// family, whose classic shader binds the detail texture as a bump map (the
+// waterBump texture of the remaster config does not exist). The remastered sea
+// is routed explicitly instead: DrawWater opens Engine::BeginSea around these
+// faces' draws, and the backend draws them with its water program while the
+// feature switch seaWaves is on.
 const int WaterFlags = SpecularTexture;
 
 #define SEAMS 1
@@ -1144,6 +1151,42 @@ static AnimatorDefault GAnimatorWater(Color(0.8, 0.8, 0.8));
 
 void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
 {
+    // The remastered sea (feature switch seaWaves, Graphics/Remaster/
+    // SeaWaves.hpp): the backend draws the faces below with its water program
+    // and cross-fades the animation frame they carry (AnimateTexture in the
+    // loop) into its neighbour, so the waves it derives from the texture do
+    // not pop at each frame switch. Classic and the switch off draw them as
+    // before.
+    {
+        float texPhase = fastFmod(Glob.time.toFloat(), 2);
+        if (texPhase > 1.0f)
+        {
+            texPhase = 2 - texPhase;
+        }
+        Texture* sea = _texture[0];
+        Texture* other = nullptr;
+        float otherWeight = 0.0f;
+        const int frames = sea ? sea->AnimationLength() : 1;
+        if (frames > 1)
+        {
+            PolyProperties faces;
+            faces.Init();
+            faces.SetTexture(sea);
+            faces.AnimateTexture(texPhase);
+            int bound = 0;
+            for (int i = 0; i < frames; i++)
+            {
+                if (sea->GetAnimation(i) == faces.GetTexture())
+                {
+                    bound = i;
+                }
+            }
+            const remaster::SeaFrameBlend blend = remaster::SeaAnimationBlend(texPhase, frames, bound);
+            other = sea->GetAnimation(blend.other);
+            otherWeight = blend.otherWeight;
+        }
+        GEngine->BeginSea(other, otherWeight);
+    }
     for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
     {
         for (int z = bigRect.zBeg; z < bigRect.zEnd; z += LandSegmentSize)
@@ -1214,6 +1257,7 @@ void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
             }
         }
     }
+    GEngine->EndSea();
 }
 
 struct GroundLayerInfo

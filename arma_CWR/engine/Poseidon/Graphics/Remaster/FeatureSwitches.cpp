@@ -47,7 +47,9 @@ constexpr FeatureInfo kFeatures[] = {
      &FS::combatLights, ""},
     {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", false,
      &FS::combatShadows, ""},
-    {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", false, &FS::seaWaves, ""},
+    // B5 (water): the sea's draws, in the ground section of the world pass
+    // (sky, terrain, water, horizon).
+    {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
     {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", false, &FS::ssr, ""},
     {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", false,
      &FS::wetWeather, ""},
@@ -191,6 +193,12 @@ struct KeyTable
                         0.0f, 3.0f),
             MakeSubKnob(Feature::SoftShadows, "shadowReach", "Soft shadow reach",
                         "metres along the sun ray over which a shadow keeps softening", &LT::shadowReach, 2.0f, 80.0f),
+            MakeSubKnob(Feature::SeaWaves, "seaRelief", "Wave relief", "0 = a flat sea; 1 = the shipped waves",
+                        &LT::seaRelief, 0.0f, 2.0f),
+            MakeSubKnob(Feature::SeaWaves, "seaSky", "Sea sky reflection",
+                        "the mean share of sky the sea reflects; the waves' share stays", &LT::seaSky, 0.0f, 2.0f),
+            MakeSubKnob(Feature::SeaWaves, "seaSheen", "Sea sheen",
+                        "the broad sheen toward the sun, in the original hue", &LT::seaSheen, 0.0f, 3.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

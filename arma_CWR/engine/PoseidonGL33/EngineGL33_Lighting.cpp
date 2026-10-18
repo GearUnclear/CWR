@@ -158,6 +158,10 @@ void EngineGL33::InitLightingResources()
     GL33Bind::ActiveUnit(0);
     // The sky table's unit 8 gets its stand-in the same way.
     InitSkyTable();
+    // So does the sea's next-frame unit (EngineGL33_Sea.cpp binds an animation
+    // frame there only inside the sea's draws).
+    GL33Bind::Tex2D(kSeaNextFrameUnit, _post.whiteTex);
+    GL33Bind::ActiveUnit(0);
 
     glGenSamplers(1, &_shadowCompareSampler);
     glSamplerParameteri(_shadowCompareSampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

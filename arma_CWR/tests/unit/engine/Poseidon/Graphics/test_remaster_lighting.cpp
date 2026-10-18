@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Remaster/Atmosphere.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
+#include <Poseidon/Graphics/Remaster/SeaWaves.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -888,6 +889,7 @@ TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics
         {P::Sky, "vec3 skyRadiance("},
         {P::Sky, "vec3 atmoFogColor("},
         {P::Sky, "vec3 shadeSkyDome("},
+        {P::Sky, "vec3 skyReflection("},
         {P::Lights, "uniform FrameLights {"},
         {P::Lights, "vec3 localLight("},
         {P::Lights, "vec3 localLightsTiled("},
@@ -1120,6 +1122,9 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
         {"litAtmoGlow", LC::AtmoGlow, 1},
         {"litAtmoDome", LC::AtmoDome, 1},
         {"litPlanned", LC::Planned, LC::PlannedCount},
+        {"litWater0", LC::Water0, 1},
+        {"litWater1", LC::Water1, 1},
+        {"litPlanned2", LC::Planned2, LC::Planned2Count},
         {"litDetail", LC::Detail, 1},
     };
     // Walks the members of one declaration, slot by slot.
@@ -1181,8 +1186,10 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(CountOf(gl::RemasterFragmentCommon(), shared) == 1);
 
     // The planned slots: the one below the sun shadows is the reserved padding,
-    // the rest continue the declared ones (B1 landed the sun shadow slots 59
-    // and 60, A7 the sky slots 61 to 67 of plan section 3.3).
+    // the six between the sky pass and the water and the one between the
+    // water and the terrain detail are the planned padding, the rest continue
+    // the declared ones (B1 landed the sun shadow slots 59 and 60, A7 the sky
+    // slots 61 to 67 of plan section 3.3, B5 the water slots 74 and 75).
     CHECK(gl::LitConstPlanned::MatClass == static_cast<int>(LC::Reserved));
     CHECK(LC::ReservedCount == 1);
     CHECK(static_cast<int>(LC::Taa) == 59);
@@ -1190,7 +1197,11 @@ TEST_CASE("Remaster LitConstants GLSL block matches the LitConst slot layout", "
     CHECK(static_cast<int>(LC::SkyRight) == 61);
     CHECK(static_cast<int>(LC::AtmoDome) == 67);
     CHECK(gl::LitConstPlanned::Sky == static_cast<int>(LC::Planned));
-    // B11 landed the terrain detail at 77; 68 to 76 are the planned padding.
+    CHECK(gl::LitConstPlanned::Weather == static_cast<int>(LC::Planned) + LC::PlannedCount - 1);
+    CHECK(static_cast<int>(LC::Water0) == 74);
+    CHECK(static_cast<int>(LC::Water1) == 75);
+    CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Planned2));
+    // B11 landed the terrain detail at 77; 76 is the second planned padding.
     CHECK(static_cast<int>(LC::Detail) == 77);
     CHECK(gl::LitConstPlanned::Canopy == static_cast<int>(LC::Detail) - 1);
     CHECK(gl::LitConstPlanned::Haze == static_cast<int>(LC::Count));
@@ -1275,10 +1286,11 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     CHECK(finish.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
           std::string::npos);
     CHECK(finish.find("} else if (vLitMode < -0.5 && litAtmo.z > 0.0 && vFogTC < 1.0) {") != std::string::npos);
+    // The sea (B5) fogs through finishFragment like the detail program it
+    // replaces, and its sky reflection is the classic one while litAtmo.x is 0.
     const std::string water = gl::RemasterFragmentMain(3); // PSWater
-    CHECK(CountOf(water, "atmoFogColor(") == 2);
-    CHECK(water.find("if (litAtmo.z > 0.0 && vFogTC < 1.0) fogC = atmoFogColor(vWorldRel, fogC);") !=
-          std::string::npos);
+    CHECK(CountOf(water, "atmoFogColor(") == 0);
+    CHECK(CountOf(water, "finishFragment(r0, ambientShare, true);") == 1);
     // The dome branch is PSNormal's; the other mains light only vLitMode 1.
     const std::string normal = gl::RemasterFragmentMain(0); // PSNormal
     CHECK(normal.find("if (vLitMode > 1.5) {") != std::string::npos);
@@ -1294,6 +1306,7 @@ TEST_CASE("Remaster sky table: with its blends at zero every draw is the one bef
     const std::string sky = Piece(gl::FragmentPiece::Sky);
     CHECK(sky.find("return mix(classic, disp, litAtmo.x);") != std::string::npos);
     CHECK(sky.find("return mix(classicFog, disp, litAtmo.z);") != std::string::npos);
+    CHECK(sky.find("if (litAtmo.x <= 0.0) return classic;") != std::string::npos);
 }
 
 TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp lays it out",
@@ -1350,4 +1363,95 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
         CAPTURE(use);
         CHECK(engine.find(use) != std::string::npos);
     }
+}
+
+TEST_CASE("Remaster sea: the water program is the variant C model on the shared pieces",
+          "[Graphics][Shaders][remaster][SeaWaves]")
+{
+    const std::string water = gl::RemasterFragmentMain(3); // PSWater
+    REQUIRE_FALSE(water.empty());
+    // The next animation frame on its own unit, from the one unit table.
+    bool row = false;
+    for (const auto& s : gl::kLitSamplers)
+        row = row || (std::string(s.name) == "seaNext" && s.unit == gl::kSeaNextFrameUnit);
+    CHECK(row);
+    CHECK(gl::kSeaNextFrameUnit == 11);
+    CHECK(water.find("uniform sampler2D seaNext;") != std::string::npos);
+    // The cross-fade: litWater0.y of the next frame, and the relief gain with
+    // SeaWaves.hpp's frame correlation.
+    CHECK(water.find("mix(a, texture(seaNext, uv), litWater0.y)") != std::string::npos);
+    std::ostringstream rho;
+    rho << "const float kSeaFrameRho = " << kSeaFrameCorrelation << ";";
+    CHECK(water.find(rho.str()) != std::string::npos);
+    CHECK(water.find("2.0 * w * (1.0 - w) * kSeaFrameRho") != std::string::npos);
+    CHECK(water.find("grad *= litWater0.x * inversesqrt(max(spread, 1e-6));") != std::string::npos);
+    // The engine's constants: the relief, the mean sky weight and its tint,
+    // the sheen light and its flat-normal share at a high sun.
+    for (const char* use : {"litWater0.x", "litWater0.z", "litWater0.w", "litWater1.rgb", "litWater1.w"})
+    {
+        CAPTURE(use);
+        CHECK(water.find(use) != std::string::npos);
+    }
+    // The sky term is the shared reflection lookup (the sky table's sky when
+    // it is on), not a copy of its own.
+    CHECK(CountOf(water, "skyReflection(r)") == 1);
+    CHECK(CountOf(gl::RemasterFragmentCommon(), "vec3 skyReflection(vec3 r) {") == 1);
+    // Local light through the shared lights piece with the shaded surfaces'
+    // clamp (F9: 1.0), not the prototype's 1.5.
+    CHECK(CountOf(water, "localLights(n, kd, ka) * litGround.w, vec3(1.0))") == 1);
+    CHECK(water.find("litGround.w, vec3(1.5)") == std::string::npos);
+    // No sea detection by material any more (the prototype's isSea()), and the
+    // previous main's constant bump normal (the detail texture read as one) is
+    // gone.
+    CHECK(water.find("isSea(") == std::string::npos);
+    CHECK(water.find("bumpNormal") == std::string::npos);
+    // Pre-lit faces draw exactly as the detail program's pre-lit branch, and
+    // every branch ends in the shared tail (night eye, AO alpha, fog).
+    const std::string detail = gl::RemasterFragmentMain(1); // PSDetail
+    const std::string preLit = "r0 = vColor * t0;\n        r0 *= constColor;\n        r0.rgb *= t1.a * 2.0;\n"
+                               "        r0 += vSpecColor;";
+    CHECK(detail.find(preLit) != std::string::npos);
+    CHECK(water.find(preLit) != std::string::npos);
+    CHECK(water.find("finishFragment(r0, ambientShare, true);") != std::string::npos);
+}
+
+TEST_CASE("Remaster sea: the backend routes the landscape's sea faces only inside the sea scope",
+          "[Graphics][remaster][SeaWaves]")
+{
+    // The descriptor flag comes from the scope, and the scope opens only in the
+    // remastered world pass with the switch on and gated on.
+    const std::string queue = ReadTextFile(Gl33Dir() / "EngineGL33_Queue.cpp");
+    CHECK(CountOf(queue, "ctx.remasteredSea = SeaRouted();") == 1);
+    const std::string sea = ReadTextFile(Gl33Dir() / "EngineGL33_Sea.cpp");
+    REQUIRE_FALSE(sea.empty());
+    for (const char* gate :
+         {"!_remasterPrograms", "_nightVision", "_portraitTargetSize", "_worldSceneEnded",
+          "!rm::FeatureOn(_lighting.features, rm::Feature::SeaWaves)", "!_featureGates[rm::Feature::SeaWaves].on"})
+    {
+        CAPTURE(gate);
+        CHECK(sea.find(gate) < sea.find("_seaOpen = true;"));
+    }
+    CHECK(CountOf(sea, "_seaOpen = true;") == 1);
+    CHECK(CountOf(sea, "_seaOpen = false;") == 1);
+    // The sea keeps its ripple layer on unit 1 under the water family.
+    const std::string state = ReadTextFile(Gl33Dir() / "EngineGL33_State.cpp");
+    CHECK(state.find("fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;") !=
+          std::string::npos);
+    // The landscape opens the scope around its sea draws, and its sea faces
+    // are the specular layer alone (never IsWater).
+    const std::string land = ReadTextFile(std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" /
+                                          "World" / "Terrain" / "LandscapeRender.cpp");
+    CHECK(land.find("const int WaterFlags = SpecularTexture;") != std::string::npos);
+    CHECK(CountOf(land, "water.OrSpecial(WaterFlags | NoClamp);") == 2);
+    const size_t draw = land.find("void Landscape::DrawWater(");
+    REQUIRE(draw != std::string::npos);
+    const size_t begin = land.find("GEngine->BeginSea(other, otherWeight);", draw);
+    const size_t loop = land.find("for (int x = bigRect.xBeg;", draw);
+    const size_t end = land.find("GEngine->EndSea();", draw);
+    const size_t next = land.find("struct GroundLayerInfo", draw);
+    CHECK(begin < loop);
+    CHECK(loop < end);
+    CHECK(end < next);
+    // The water bump map nothing sampled is gone with its missing file.
+    CHECK(ReadTextFile(Gl33Dir() / "TextureGL33.hpp").find("GetWaterBumpMap") == std::string::npos);
 }

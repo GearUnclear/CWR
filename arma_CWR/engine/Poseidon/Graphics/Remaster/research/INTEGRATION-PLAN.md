@@ -313,6 +313,19 @@ draw's night factor, ride in the free lanes `litLightCount.y` and `.z` of slot 2
 (`LitConst::LightCount`, the local-light slot). A6 adds no `LitConst` slot and no padding member
 (`Count` stays 78).
 
+As built in B5 (a parallel lane on 5d7e7ae, merged onto B11, B1 and A6): slots 74 and 75 landed
+(`LitConst::Water0`, `Water1`). On the lane, which sat on A7 alone, 68 to 73 were a second padding
+member `litReserved2[6]` and `Count` was 76; on the merged tree B11's padding splits around the water
+slots instead: `litPlanned[6]` for 68 to 73 (`LitConst::Planned`, `PlannedCount` 6; `LitConstPlanned`
+`Sky` to `Weather`, static_assert), the two water slots, then `vec4 litPlanned2` for 76
+(`LitConst::Planned2`, `Planned2Count` 1; `LitConstPlanned::Canopy`, static_assert) before `Detail`
+77, so `Count` stays 78. A step that lands one of 68 to 73 splits `litPlanned`, the canopy step
+replaces `litPlanned2`. `Water0` is the wave relief scale, the next animation frame's share, the mean
+sky weight and the sky's tint toward the fog colour; `Water1` the sheen light (rgb) and the sheen's
+flat-normal share. The layer heights, lobes and fades stay shader constants, not slots. With the
+switch on in the remastered world pass the sea's faces leave PSDetail for the water program, which
+does not read `litDetail`; `litDetail.w` still tells the land from the sea when the switch is off.
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -376,6 +389,12 @@ the same reading on a quiet machine is 0.5 ms (5 A6). No stand-ins: `InitLightin
 creates the real block (zeroed) and a one-tile texture with no light, parks the texture on its unit,
 and `BindLightingTextures` binds it with the others. The unit-table test now counts integer samplers
 (`[iu]?sampler`).
+
+As built in B5: `kSeaNextFrameUnit` (11) is in use, with its `kLitSamplers` row (`seaNext`, declared
+by the water program only) and the white 1x1 `_post.whiteTex` parked on it at
+`InitLightingResources`. `Engine::BeginSea` binds the animation frame the sea faces do not carry
+there, with unit 0's sampler object (`_samplerObjects[0]`: wrap, anisotropy, the TAA LOD bias), and
+`EndSea` puts the stand-in and sampler 0 back.
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -1505,6 +1524,77 @@ gitignored).**
 - **Tests**: glslang (water main), layout (`Water0/1`), a render-flag test that landscape water
   faces route to `ShaderFamily::Water` only in Remastered.
 - **Effort**: 3 days.
+
+**Result (2026-10-18, uncommitted change on 5d7e7ae in the scratch copy `gr-B5`, a parallel lane
+merged onto B11, B1 and A6; evidence in `tmp/integration/B5/` of the graphics-remaster worktree,
+gitignored; light gate).**
+
+- Built: `Graphics/Remaster/SeaWaves.{hpp,cpp}` (pure: the frame cross-fade, the relief gain of a
+  mix of two frames, the per-frame constants, the sheen's light); `EngineGL33_Sea.cpp`
+  (`Engine::BeginSea` / `EndSea`); `BuildContext::remasteredSea` and its rule in
+  `BuildRenderPassDescriptor`; the variant C model as `s_psWaterRemasterMain` (its old constant
+  "bump normal" is gone), `skyReflection` in the sky piece; slots 74 and 75 (3.3), unit 11 (3.4);
+  the switch landed with sub-knobs `seaRelief`, `seaSky`, `seaSheen` (1 each; 3.1 said none) and
+  GPU section `ground` (the sea has no pass of its own). Dropped: the dead `waterBump` texture
+  (`GetWaterBumpMap`, its load); the README's Water row rewritten.
+- Correction, routing: the face spec has no free bit (`RenderFlags.hpp` asserts that the three
+  categories cover all 32), so the sea is not an `IsWater`-style face bit. The route is a draw scope:
+  `Landscape::DrawWater` opens `Engine::BeginSea` around its sea draws; with the switch on and
+  gated on in the remastered world pass the backend sets `BuildContext::remasteredSea`, and an
+  opaque 3D face carrying the specular layer alone (the landscape's `WaterFlags`) routes to
+  `ShaderFamily::Water` with the detail texgen (its ripple layer at 32 repeats) and the specular
+  layer on unit 1. Classic and the switch off never open the scope: the sea stays on PSDetail.
+- Correction, cross-fade: `AnimateTexture` binds `floor(phase * n)`; the lane spreads the 7 frames
+  evenly over the phase instead (frame k alone at k / (n - 1)) and mixes the bound frame with its
+  neighbour on unit 11, so the mix is continuous in the phase, and divides out the relief lost
+  halfway (consecutive frames' luminance gradients correlate 0.65 to 0.82, measured on
+  `more_anim.01` to `.07`; the shader uses 0.75).
+- Correction, sky term: the reflection reads the A7 table only while the sky table is on
+  (`litAtmo.x`); with `atmosphere` off it is the classic fog colour with its glow, the sky the
+  player then sees. The table is not built for `seaWaves` alone (a reflection of the physical sky
+  under the classic dome would not match the sky above it).
+- Correction, noon colour: lowering the mean sky weight and tinting the sky toward the fog colour
+  cannot reach the original's hue. Its green-yellow noon sea is the blue-grey texture (mean
+  (91, 106, 115) over `more_anim.01`) plus its per-vertex sheen: a broad, unnormalised lobe in the
+  yellow classic sun colour on the flat normal. The sheen keeps the original sun's hue (display
+  chroma), grows from 0.35 to 2.4 between 15 and 50 degrees of sun and moves to the flat normal
+  there (on the wave normal it split into yellow facets and blue troughs, a mustard sea). A sweep
+  (`seaSheen` 0.8 to 3, `seaSky` 0.5 to 3) set the constants: `sea_noon` hue 126.1 against 133.7
+  degrees (7.6 off), mean 150.1 against 143.8; the mid-sun shore (16:30) hue 72.2 against 76.4,
+  mean 164.3 against 169.7. The far sea's mean sky share fades to half between 1 and 3 km.
+- Off equals before: `seaWaves=0` on the B5 build against the base build's off shot at the same
+  place in the sequence: 1,994 / 1,040 / 7,654 / 1,324 pixels over 2 levels (hero, noon, shore,
+  night) against the base build's own boot repeat of 1,208 / 10,470 / 10,916; Classic within 6
+  pixels. In one game of the base build the second shot of an identical setting differs from the
+  first by 9,379 (hero) to 171,765 (noon) pixels, so off is judged against the off shot.
+- On: water-region fine detail (sd of a 9x9 high-pass) 2.0 to 20.7 at the hero, 3.8 to 8.2 at
+  noon, 2.7 to 9.2 at mid-sun, 2.2 to 4.2 at night; the hero sea's mean 89.4 to 100.4 (Classic
+  44.5). Motion, the sea clock at 1/30 s per frame for 24 frames: off spikes at every frame switch
+  (1.07 to 1.16 against a median change of 0.74, max/median 1.56), on has no spike there (max/median
+  1.20; 7.72, 8.30, 8.63, 7.12 and 6.44 at those frames against a median of 7.40).
+- Cost (a single reading, 3 interleaved rounds, one foreign game holding a slot, P0): the ground
+  section on minus off +0.56 ms median at the hero, +1.00 at noon and +1.10 at mid-sun (frames full
+  of sea), the frame +0.18, +1.00 and +0.54. The plan's 0.2 ms was low; MENU's 1.5 to 2x rule puts a
+  3060 at 1.5 to 2.2 ms on a frame full of sea.
+- Gate: build 0 warnings; touched files clang-format clean (`EngineGL33_Queue.cpp` and
+  `EngineGL33_State.cpp`, not clean at the base, by `clang-format-diff.py` on the changed lines);
+  unit gate tags plus `[SeaWaves],[build-descriptor],[FeatureSwitches],[FeatureGates],[atmosphere],
+  [PostStages],[TemporalAA]` 541/541 (9 new cases); twelve mutations red; smoke_abel 1/1 and the
+  lane run with KHR_debug ids 131154, 131169 and 131218 only.
+- Known risks: the hero's near field (eye 3 m ASL, the sea from 2 m out, which the research never
+  shot) reads as large smooth swells; the noon near band is beige-grey (159, 160, 150) where the
+  original's is yellow-green-grey (154, 159, 146), and a near-grey hue swings 30 to 40 degrees for
+  0.2 of `seaSheen`; the 7-frame ping-pong now moves the normals (the frame-to-frame change is
+  about 10 times off's), with no travelling waves; at night on is 5 levels darker than off with
+  twice the detail and no moon glint; Eden, Sinai, rain, overcast and the shoreline unverified.
+- Landed on A6 (706b9a3; B11, B1 and A6 landed after the lane's base) by a three-way apply, 9 files
+  in conflict, both sides kept: the sub-knob rows and tuning fields, unit 11 beside units 6, 8 and 13,
+  the water slots inside B11's padding (3.3), the landed registry rows (landed=10/26, 14 sub-knobs),
+  the fragment-piece list, the test list, these notes and the roadmap. Past the conflicts the water
+  main's `shadowMapVisibility` call takes B1's leaf-lift argument (0), which the glslang case caught.
+  Merged gate: build clean, touched files clang-format clean, the gate tags plus the landed lanes'
+  tags, `[SeaWaves]` and `[build-descriptor]` 573/573, smoke_abel 1/1 (KHR_debug ids 131154, 131169
+  and 131218 only).
 
 ### B6. ssr (screen-space reflections)
 

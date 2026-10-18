@@ -299,7 +299,10 @@ void EngineGL33::ApplyPipeline(const Poseidon::render::RenderPassDescriptor& d)
         case Poseidon::render::ShaderFamily::Water:
             vs = meshVertexInput ? VSTransform : VSNone;
             ps = PSWater;
-            fmt = DetailTex;
+            // The landscape's sea (routed here in Remastered, BuildContext::
+            // remasteredSea) keeps the detail texgen and its specular layer:
+            // data\specular_dx.paa, whose alpha is the ripple pattern.
+            fmt = d.texGen == Poseidon::render::TexGenMode::Detail ? SpecularTex : DetailTex;
             break;
         case Poseidon::render::ShaderFamily::Detail:
             vs = meshVertexInput ? VSTransform : VSNone;
