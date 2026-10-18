@@ -1,4 +1,5 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <PoseidonGL33/EngineGL33_Lighting.hpp>
 #include <PoseidonGL33/GL33BindCache.hpp>
 
 #include <glad/gl.h>
@@ -14,6 +15,8 @@
 
 #include <cstdint>
 #include <vector>
+
+using Poseidon::gl33lighting::kShadowMapUnit;
 
 // Self-contained offscreen depth render used to validate the GL shadow-depth
 // path against the CPU oracle. Renders
@@ -166,7 +169,7 @@ bool EnsureArrayTarget(int res, int layers)
     // The lit programs sample the map on unit 2, and deleting the old array
     // above left texture 0 there if it was bound. Create the new one on unit 2,
     // so the unit holds a complete depth array again even if the FBO fails.
-    GL33Bind::ActiveUnit(2);
+    GL33Bind::ActiveUnit(kShadowMapUnit);
     glGenTextures(1, &s_arrTex);
     glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, res, res, layers, 0, GL_DEPTH_COMPONENT, GL_FLOAT,

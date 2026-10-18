@@ -115,7 +115,7 @@ void EngineGL33::InitLightingResources()
     // unit 2, and none may meet texture 0 there (an incomplete texture; under
     // the comparison sampler, undefined behaviour). Park the stand-in on the
     // unit until a shadow map replaces it.
-    GL33Bind::ActiveUnit(2);
+    GL33Bind::ActiveUnit(kShadowMapUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
     GL33Bind::ActiveUnit(0);
 
@@ -156,7 +156,7 @@ void EngineGL33::DeinitLightingResources()
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
-        glBindSampler(2, 0);
+        glBindSampler(kShadowMapUnit, 0);
         glDeleteSamplers(1, &_shadowCompareSampler);
         _shadowCompareSampler = 0;
     }
@@ -194,7 +194,7 @@ void EngineGL33::UpdateRemasterPrograms()
     // Unit 2 holds the shadow-map array for both sets; only the remastered
     // shaders read it through a comparison sampler (the classic ones read raw
     // depth, and compare mode on a plain sampler is undefined).
-    glBindSampler(2, on ? _shadowCompareSampler : 0);
+    glBindSampler(kShadowMapUnit, on ? _shadowCompareSampler : 0);
     InvalidatePipelineCache();
     // Re-bind the current program from the other set (water reads the scene's
     // sun when selected; without a scene, the next selection re-binds).
@@ -275,10 +275,10 @@ void EngineGL33::BindLightingTextures()
     if (!_remasterPrograms)
         return;
     const bool map = _terrainHorizonTex && _terrainHeightTex;
-    GL33Bind::ActiveUnit(2);
+    GL33Bind::ActiveUnit(kShadowMapUnit);
     if (!(ShadowMapsEnabled() && _shadowMapActive && _shadowMapTex && _shadowCascades > 0))
         glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);
-    glBindSampler(2, _shadowCompareSampler);
+    glBindSampler(kShadowMapUnit, _shadowCompareSampler);
     GL33Bind::ActiveUnit(kTerrainHorizonUnit);
     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);

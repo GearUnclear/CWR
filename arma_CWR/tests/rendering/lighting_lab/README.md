@@ -27,7 +27,7 @@ any frame produced non-finite values.
 
 | File | Role |
 |---|---|
-| `glsl_extract.py` | Pulls `R"(...)"` / `R"delim(...)delim"` shader strings out of C++ by variable name, from a path or `git show <rev>:<path>`. `--dump DIR` writes `vsTransform.glsl`, `psNormal.glsl`, ... in the engine's override naming. |
+| `glsl_extract.py` | Pulls `R"(...)"` / `R"delim(...)delim"` shader strings out of C++ by variable name, from a path or `git show <rev>:<path>`. `load_programs` assembles the remastered and post programs from their pieces (the files of a family, `EngineGL33_LightingShaders*.cpp` or `EngineGL33_Post*.cpp`, joined by the engine's `kFragmentPieces` and `kPostShaders` tables). `--dump DIR` writes the programs the engine compiles, `vsTransform.glsl`, `psNormal.glsl`, `psRemasterCommon.glsl`, `psPostAo.glsl`, ... in the engine's override naming. |
 | `lighting.py` | Python port of `LightSun::Recalculate`, `Scene::MainLightChanged`, `Engine::InitDraw` (accom = brightness, default 1.6), `CreateMaterial*` + `TexMaterial::Combine`, `UploadVSMaterialConstants`, `DoSkyLighting`, the sun-object colours and the night-eye coefficients. Lighting presets live here. |
 | `textures.py` | Deterministic, tileable numpy textures: grass, dirt, detail (grey, alpha 0.5 +- 0.15), plaster with window, roof tiles, olive paint, bark, foliage RGBA cutout, rock, crate, uniform, skin, rubber, sky (clear to overcast), sun disc/halo, horizon band. |
 | `scene.py` | World-space geometry (X east, Y up, Z north, left-handed, metres): terrain, 2 houses, an APC, 26 trees, a soldier, rocks, crates, the sky dome, the sun billboards and the far-plane horizon polygon. Camera presets live here. |
@@ -124,7 +124,8 @@ soldier and a jeep under a camouflage net (a half-lit cutout, like the trees).
 `--shader-override-dir DIR` applies to the remastered and post shaders too,
 with the engine's names: `psRemasterCommon.glsl` and `ps*RemasterMain.glsl`
 pieces, `vs*Remaster.glsl`, `psPost*.glsl` (`glsl_extract.py --source
-.../EngineGL33_LightingShaders.cpp --dump DIR` writes them). The same directory
+.../EngineGL33_LightingShaders.cpp --dump DIR` and `--source .../EngineGL33_PostFX.cpp
+--dump DIR` write them, assembled). The same directory
 works as the game's `CWR_SHADER_OVERRIDE_DIR`, where the dev overlay's
 *Reload shaders* picks up edits without a restart. The terrain horizon map covers a
 3.2 km window around the scene at 12.5 m.

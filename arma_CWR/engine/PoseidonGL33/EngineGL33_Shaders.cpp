@@ -1142,7 +1142,7 @@ void EngineGL33::UpdateShadowMapLitState()
         camFwd[1] = _shadowCamFwd[1];
         camFwd[2] = _shadowCamFwd[2];
         memcpy(s_psShadow + 8 * 4, _shadowMapVP, sizeof(float) * 16 * _shadowCascades);
-        GL33Bind::ActiveUnit(2);
+        GL33Bind::ActiveUnit(Poseidon::gl33lighting::kShadowMapUnit);
         glBindTexture(GL_TEXTURE_2D_ARRAY, _shadowMapTex);
         GL33Bind::ActiveUnit(0);
     }
@@ -1679,21 +1679,13 @@ void EngineGL33::InitPixelShaders()
             glUniform1i(loc0, 0);
         if (loc1 >= 0)
             glUniform1i(loc1, 1);
-        GLint locShadow = glGetUniformLocation(prog, "shadowMap");
-        if (locShadow >= 0)
-            glUniform1i(locShadow, 2); // shadow depth map on texture unit 2
         // Remastered lighting inputs (absent from the classic programs).
         GLuint litBlock = glGetUniformBlockIndex(prog, "LitConstants");
         if (litBlock != GL_INVALID_INDEX)
             glUniformBlockBinding(prog, litBlock, Poseidon::gl33lighting::kLitBinding);
-        const struct
-        {
-            const char* name;
-            int unit;
-        } litSamplers[] = {{"terrainHorizon", Poseidon::gl33lighting::kTerrainHorizonUnit},
-                           {"terrainHeight", Poseidon::gl33lighting::kTerrainHeightUnit},
-                           {"cloudNoise", Poseidon::gl33lighting::kCloudNoiseUnit}};
-        for (const auto& ls : litSamplers)
+        // The lit samplers from the unit table, the shadow depth map of both
+        // sets (unit 2) among them.
+        for (const auto& ls : Poseidon::gl33lighting::kLitSamplers)
         {
             GLint loc = glGetUniformLocation(prog, ls.name);
             if (loc >= 0)

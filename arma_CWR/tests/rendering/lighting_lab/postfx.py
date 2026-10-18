@@ -1,7 +1,7 @@
 """The remastered post pass (EngineGL33_PostFX.cpp) for the lab.
 
-Runs the engine's own post GLSL (s_vsPostGLSL, s_psPost*GLSL), extracted from
-the C++ source, over the lab's scene colour (display space, ambient share in
+Runs the engine's own post GLSL (vsPost, psPost*), assembled from the C++
+sources as the engine assembles it (glsl_extract.load_programs), over the lab's scene colour (display space, ambient share in
 alpha) and depth texture, with the same pass order and uniforms as
 EngineGL33::EndWorldScene: half-res AO + two blur passes, a five-level bloom
 chain, sun shafts, composite with dither.
@@ -31,22 +31,22 @@ class PostFX:
     def __init__(self, ctx: moderngl.Context, source=None, override_dir=None):
         self.ctx = ctx
         path = source or (glsl_extract.ENGINE_DIR.parent / POST_FILE)
-        sh = glsl_extract.load_shaders(path)
-        glsl_extract.apply_override_dir(sh, override_dir)  # psPostAo.glsl, ... as in the engine
+        # EngineGL33_PostFX.cpp and its family (the GLSL is in EngineGL33_PostShaders.cpp)
+        sh = glsl_extract.load_programs(path, override_dir)  # psPostAo.glsl, ... as in the engine
         self.k = _constants(path)
         self.k.update(_constants(glsl_extract.ENGINE_DIR.parent / RIG_FILE))
-        vs = sh["s_vsPostGLSL"]
+        vs = sh["vsPost"]
 
         def prog(name):
             p = ctx.program(vertex_shader=vs, fragment_shader=sh[name])
             return p
 
-        self.p_ao = prog("s_psPostAoGLSL")
-        self.p_blur = prog("s_psPostAoBlurGLSL")
-        self.p_down = prog("s_psPostBloomDownGLSL")
-        self.p_up = prog("s_psPostBloomUpGLSL")
-        self.p_shafts = prog("s_psPostShaftsGLSL")
-        self.p_comp = prog("s_psPostCompositeGLSL")
+        self.p_ao = prog("psPostAo")
+        self.p_blur = prog("psPostAoBlur")
+        self.p_down = prog("psPostBloomDown")
+        self.p_up = prog("psPostBloomUp")
+        self.p_shafts = prog("psPostShafts")
+        self.p_comp = prog("psPostComposite")
         self.vaos = {id(p): ctx.vertex_array(p, []) for p in
                      (self.p_ao, self.p_blur, self.p_down, self.p_up, self.p_shafts, self.p_comp)}
         self.size = None

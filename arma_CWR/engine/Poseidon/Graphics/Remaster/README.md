@@ -129,9 +129,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
   Remastered off for the same view's Classic numbers.
 - **Shader iteration**: with `CWR_SHADER_OVERRIDE_DIR` set, every shader can be
   replaced by `<dir>/<name>.glsl` (dump them with
-  `tests/rendering/lighting_lab/glsl_extract.py --dump`). The remastered
-  fragment shaders also take the pieces `psRemasterCommon.glsl` and
-  `<ps>RemasterMain.glsl`, the post shaders their own names (`psPostAo`, ...).
+  `tests/rendering/lighting_lab/glsl_extract.py --dump`, which writes the
+  sources the engine assembles). The remastered fragment shaders also take the
+  pieces `psRemasterCommon.glsl` (the whole prelude, all its concern pieces
+  joined) and `<ps>RemasterMain.glsl`, the post shaders their own names
+  (`psPostAo`, ...).
   The Lighting tab's *Reload shaders* rebuilds every program at the start of
   the next frame, so edits show without a restart. The shader binary cache is
   keyed on the override files too.
@@ -146,11 +148,11 @@ and cool rather than neutral; lamp-lit surfaces keep their colour.
 | `Graphics/Remaster/FeatureSwitches.{hpp,cpp}` | The registry of every `triSetLighting` key: knobs and feature switches, labels, groups, mode words, the summary line. Pure. |
 | `Graphics/Remaster/FeatureGates.{hpp,cpp}` | Per-frame gates of the features (whether an enabled feature runs, at what resolution, why) and the `triFeatureState` line. Pure. |
 | `World/Terrain/TerrainLighting.{hpp,cpp}` | Keeps the horizon map in step with the landscape (async build, hand-over on the render thread). |
-| `PoseidonGL33/EngineGL33_LightingShaders.cpp` | The remastered GLSL. |
-| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, textures on units 2-5, program-set selection. |
-| `PoseidonGL33/EngineGL33_PostFX.cpp` | The post pass. |
+| `PoseidonGL33/EngineGL33_LightingShaders{,Sky,Lights,Surface}.cpp` | The remastered GLSL: the vertex shaders, the fragment mains and the fragment prelude split by concern (`FragmentPiece`: header, `LitConstants`, inputs, shadows, terrain and clouds, sky, local lights, surface, shade, finish), joined in that order. The `LitConstants` block is one string that every shader reading the rig pastes. |
+| `PoseidonGL33/EngineGL33_Lighting.{hpp,cpp}` | `LitConstants` layout (binding 3) and uploads, the slots planned for the features still to land, the texture unit table (units 2-5 in use, 6 and 8-15 allocated) and the sampler table the programs are bound from, program-set selection. |
+| `PoseidonGL33/EngineGL33_PostFX.cpp`, `EngineGL33_PostShaders.cpp` | The post pass, and its GLSL (no GL code there, so the unit tests compile the sources the engine builds), assembled by the `kPostShaders` table; `s_glslPostCommon` holds the shared depth reconstruction. |
 | `PoseidonGL33/EngineGL33_GpuTimer.cpp`, `Graphics/Core/GpuTimings.{hpp,cpp}` | GPU timestamp queries and their bookkeeping. |
-| `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block, glslang compile of every remastered and post shader. |
+| `tests/unit/.../Graphics/test_remaster_lighting.cpp` | Rig calibration, horizon map, cloud noise, crown ellipsoid, `LitConstants` layout against the GLSL block (one declaration, slot by slot), glslang compile of every remastered and post program through the accessors, every raw GLSL string reaching a program, the assembly tables the lab parses, the texture unit table. |
 | `tests/unit/.../Graphics/test_feature_switches.cpp`, `.../Game/test_tri_capture_verbs.cpp` | The registry (keys, labels, defaults of 1, `baseline` and `remastered`, the summary round trip), one case per gate row of plan section 3.2, and the capture verbs (`triSetLighting`, `triFeatureState`, `triSetFixedStep`, `triPinCloudDrift`). |
 | `tests/rendering/lighting_lab/` | Offline lab: renders a synthetic scene through the real engine GLSL and C++ rig (`--renderer remaster`). |
 

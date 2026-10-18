@@ -28,12 +28,22 @@
 // Pre-lit geometry (VSScreen: sky, clouds, particles, 2D) passes through
 // exactly as in the classic shaders.
 //
-// The fragment shaders are built from two strings: s_psRemasterCommon (the
-// #version line, blocks, samplers, varyings and the lighting functions) and one
-// main body per pixel shader. The vertex shaders are standalone.
+// A fragment shader is the common prelude followed by one main body per pixel
+// shader. The prelude is split by concern (FragmentPiece in
+// EngineGL33_Lighting.hpp) and RemasterFragmentCommon() joins the pieces in a
+// fixed order: the header, the LitConstants block, the inputs and colour
+// helpers, shadows, terrain and clouds, sky (EngineGL33_LightingShadersSky.cpp),
+// local lights (EngineGL33_LightingShadersLights.cpp), surface
+// (EngineGL33_LightingShadersSurface.cpp), shadeRemastered and finishFragment.
+// A feature edits the piece of its concern. The LitConstants block is one
+// string (LitConstantsBlock()) that every shader reading the rig pastes. The
+// vertex shaders are standalone.
 
 #include <PoseidonGL33/EngineGL33.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
+
+#include <iterator>
+#include <string>
 
 namespace
 {
@@ -230,8 +240,10 @@ void main() {
 }
 )";
 
-// Everything the remastered fragment shaders share. Ends without main().
-static const char s_psRemasterCommon[] = R"(#version 330 core
+// The fragment prelude by concern (FragmentPiece), joined in kFragmentPieces
+// order. Each piece after the header starts with the blank line that separates
+// it from the one before. Header: the version and the classic pixel constants.
+static const char s_psRemasterHeader[] = R"(#version 330 core
 layout(std140) uniform PSConstants {
     vec4 fogColor;     // c0
     vec4 alphaRef;     // c1: {ref, enabled, alphaToCoverage, flatDebug}
@@ -246,7 +258,12 @@ layout(std140) uniform PSConstants {
     vec4 cascadeCtl;   // c25: {count, fadeRange, biasBase, omniCount}
     vec4 camFwd;       // c26
 };
+)";
 
+// The LitConstants block (binding 3): the one GLSL declaration of the LitConst
+// layout in EngineGL33_Lighting.hpp. Every shader that reads the rig pastes this
+// string (LitConstantsBlock()); the layout test checks it slot by slot.
+static const char s_glslLitConstantsBlock[] = R"(
 // Remastered light rig and per-draw material, binding 3. Layout mirrors
 // LitConst in EngineGL33_Lighting.hpp.
 layout(std140) uniform LitConstants {
@@ -281,7 +298,11 @@ layout(std140) uniform LitConstants {
     vec4 litLightAmb[8];  // 42-49: rgb ambient radiance
     vec4 litLightDir[8];  // 50-57: xyz beam direction
 };
+)";
 
+// Inputs: samplers, varyings and the colour space and tonemap helpers the
+// later pieces use.
+static const char s_psRemasterInputs[] = R"(
 uniform sampler2D tex0;
 uniform sampler2D tex1;
 uniform sampler2DArrayShadow shadowMap;    // unit 2, comparison sampler bound in remastered mode
@@ -317,7 +338,10 @@ vec3 tonemapNeutral(vec3 c) {
     float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
     return mix(c, vec3(newPeak), g);
 }
+)";
 
+// Shadows: the sun's visibility from the cascaded shadow maps.
+static const char s_psRemasterShadows[] = R"(
 // 12-tap Poisson disc; each tap is a hardware 2x2 comparison (bilinear PCF),
 // so the penumbra is smooth without per-pixel noise.
 const vec2 kPoisson[12] = vec2[](
@@ -387,7 +411,11 @@ float shadowMapVisibility(vec3 n, float nl, float offsetScale) {
     float fade = clamp((lastSplit - eyeDepth) / max(cascadeCtl.y, 0.001), 0.0, 1.0);
     return 1.0 - (1.0 - lit) * fade;
 }
+)";
 
+// Terrain and clouds: the sun's visibility past the hills and under the broken
+// cloud field, the valley sky visibility and the ground-bounce tint.
+static const char s_psRemasterTerrainClouds[] = R"(
 // Colour of the light the ground below bounces (luminance 1; white when there
 // is no map). Set by terrainSunVisibility, read by skyIrradiance.
 vec3 g_groundTint = vec3(1.0);
@@ -431,85 +459,13 @@ float cloudSunVisibility(vec3 posAbs) {
     float covered = edge > 1e-4 ? smoothstep(1.0 - cover - edge, 1.0 - cover + edge, n) : step(1.0 - cover, n);
     return mix(1.0, litCloud.y, covered);
 }
+)";
 
-// Irradiance from the sky hemisphere (and the ground below it) onto a surface
-// with normal n. The horizon band is brighter, and takes the sky's colour,
-// toward the sun; opposite the sun it keeps the cool zenith colour, so a low
-// sun gives warm light and cool shade.
-vec3 skyIrradiance(vec3 n) {
-    float h = length(n.xz);
-    float sl = length(litSunDir.xz);
-    float toward = (h > 1e-3 && sl > 1e-3) ? 0.5 + 0.5 * dot(n.xz / h, litSunDir.xz / sl) : 0.5;
-    // The bounce takes the colour of the ground below: the rig's horizon holds
-    // half the (neutral) ground bounce, so swap that half for the tinted one.
-    vec3 ground = litGround.rgb * g_groundTint;
-    vec3 horizon = mix(litHorizon.rgb, litHorizonSun.rgb, toward) + 0.5 * (ground - litGround.rgb);
-    float t = clamp(n.y, -1.0, 1.0);
-    return t >= 0.0 ? mix(horizon, litZenith.rgb, t) : mix(horizon, ground, -t);
-}
+// Sky, local lights and surface are in EngineGL33_LightingShaders{Sky,Lights,Surface}.cpp.
 
-// Fog toward the sun takes the sky dome's own sun glow (TLVertexTable::
-// DoSkyLighting adds SunSkyColor * cos^6 to SkyColor, times the sky texture),
-// so distant ground fades into the colour of the sky behind it instead of a
-// flat band. Away from the sun this is exactly the classic fog colour.
-vec3 fogColorToward(vec3 rel) {
-    if (litFogSun.w < 0.5) return fogColor.rgb;
-    float c = max(dot(rel * inversesqrt(max(dot(rel, rel), 1e-12)), litSunDir.xyz), 0.0);
-    float c2 = c * c;
-    return min(fogColor.rgb + litFogSun.rgb * (c2 * c2 * c2), max(litFogCap.rgb, fogColor.rgb));
-}
-
-// Point lights and spotlights per fragment: the classic quadratic falloff past
-// the start distance, ending in a smooth window instead of a hard cut at 10x
-// the start distance, and a smoothed spotlight cone.
-vec3 localLights(vec3 n, vec3 kd, vec3 ka) {
-    vec3 sum = vec3(0.0);
-    int count = int(litLightCount.x);
-    for (int i = 0; i < 8; ++i) {
-        if (i >= count) break;
-        vec3 toLight = litLightPos[i].xyz - vWorldRel;
-        float d2 = dot(toLight, toLight);
-        float start2 = litLightPos[i].w * litLightPos[i].w;
-        float end2 = start2 * 100.0;
-        if (d2 >= end2) continue;
-        float cone = 1.0;
-        if (litLightColor[i].w > 0.5) {
-            float inside = -dot(toLight, litLightDir[i].xyz);
-            if (inside <= 0.0) continue;
-            float cos2 = inside * inside / max(d2, 1e-6);
-            cone = smoothstep(0.9415, 0.9806, cos2); // 14 deg soft edge, full inside 8 deg
-            if (cone <= 0.0) continue;
-        }
-        float atten = (d2 > start2) ? start2 / d2 : 1.0;
-        atten *= 1.0 - smoothstep(0.5 * end2, end2, d2);
-        float cosFi = max(dot(toLight, n), 0.0) * inversesqrt(max(d2, 1e-6));
-        sum += (kd * litLightColor[i].rgb * cosFi + ka * litLightAmb[i].rgb) * (atten * cone);
-    }
-    return sum;
-}
-
-// Sun highlight and sky reflection for glossy materials (specular power > 0).
-vec3 glossy(vec3 n, vec3 v, float sunVisibility) {
-    float power = litMatSpecular.w;
-    if (power <= 0.0) return vec3(0.0);
-    vec3 l = litSunDir.xyz;
-    float nl = dot(n, l);
-    vec3 h = normalize(l + v);
-    float nh = max(dot(n, h), 0.0);
-    float vh = max(dot(v, h), 0.0);
-    float p = max(power, 1.0);
-    // Normalised Blinn-Phong (tighter lobes are brighter) with a Schlick-style
-    // grazing boost.
-    float norm = (p + 8.0) / 28.0;
-    float fresnel = 1.0 + 2.0 * pow(clamp(1.0 - vh, 0.0, 1.0), 5.0);
-    vec3 sunSpec = litMatSpecular.rgb * litSun.rgb * (pow(nh, p) * norm * fresnel * smoothstep(0.0, 0.15, nl) * sunVisibility);
-    vec3 r = reflect(-v, n);
-    float fv = pow(clamp(1.0 - dot(n, v), 0.0, 1.0), 5.0);
-    float gloss = clamp(dot(litMatSpecular.rgb, kLuma), 0.0, 1.0);
-    vec3 skySpec = skyIrradiance(r) * (gloss * (0.04 + 0.96 * fv) * 0.6);
-    return (sunSpec + skySpec) * litHorizon.w;
-}
-
+// Shade: one fragment's light (sun, sky, moon, local lights, emissive, gloss),
+// tonemapped.
+static const char s_psRemasterShade[] = R"(
 // Sun visibility of the last shaded fragment (water reuses it for its glint).
 float g_sunVisibility = 1.0;
 
@@ -591,7 +547,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     float grey = dot(display, kLuma);
     return max(mix(vec3(grey), display, litFlags.w), vec3(0.0));
 }
+)";
 
+// Finish: alpha, the night eye and fog, the tail every main ends with.
+static const char s_psRemasterFinish[] = R"(
 // Classic night-eye desaturation, fog and alpha handling, shared tail.
 void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     if (alphaRef.z > 0.5) {
@@ -717,6 +676,25 @@ void main() {
 namespace Poseidon::gl33lighting
 {
 
+namespace
+{
+// The fragment prelude: these pieces in FragmentPiece order. The lighting lab's
+// glsl_extract.py reads this table to assemble the same source.
+const char* const kFragmentPieces[] = {
+    s_psRemasterHeader,        // Header
+    s_glslLitConstantsBlock,   // LitConstants
+    s_psRemasterInputs,        // Inputs
+    s_psRemasterShadows,       // Shadows
+    s_psRemasterTerrainClouds, // TerrainClouds
+    kRemasterSkyGLSL,          // Sky
+    kRemasterLightsGLSL,       // Lights
+    kRemasterSurfaceGLSL,      // Surface
+    s_psRemasterShade,         // Shade
+    s_psRemasterFinish,        // Finish
+};
+static_assert(std::size(kFragmentPieces) == static_cast<size_t>(FragmentPiece::Count), "one entry per FragmentPiece");
+} // namespace
+
 const char* RemasterVertexSource(int vs)
 {
     switch (vs)
@@ -734,7 +712,26 @@ const char* RemasterVertexSource(int vs)
 
 const char* RemasterFragmentCommon()
 {
-    return s_psRemasterCommon;
+    // Joined once, on first use (thread-safe static).
+    static const std::string common = []
+    {
+        std::string joined;
+        for (const char* piece : kFragmentPieces)
+            joined += piece;
+        return joined;
+    }();
+    return common.c_str();
+}
+
+const char* RemasterFragmentPiece(FragmentPiece piece)
+{
+    const int i = static_cast<int>(piece);
+    return i >= 0 && i < static_cast<int>(FragmentPiece::Count) ? kFragmentPieces[i] : nullptr;
+}
+
+const char* LitConstantsBlock()
+{
+    return s_glslLitConstantsBlock;
 }
 
 const char* RemasterFragmentMain(int ps)

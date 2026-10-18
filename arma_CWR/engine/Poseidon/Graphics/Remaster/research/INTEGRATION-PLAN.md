@@ -252,6 +252,15 @@ dirty-range flush (A4) stays small:
 79 vec4 is 1,264 bytes, far below the GL minimum uniform block size. Combat's reprojection rows
 (prototype slots 59-64) are not needed once its shadow becomes a mask pass (B4).
 
+As built in A2: `LitConst` itself is unchanged (`Count` 58): growing it would change the block's
+GLSL and the bytes of every remastered program, and A2 changes none. The rows above are a separate
+table, `LitConstPlanned` in `EngineGL33_Lighting.hpp` (`constexpr int`, comment per row; a
+`static_assert` that they start at `LitConst::Count` and that 79 slots fit the 16 KB GL minimum). The
+step that lands a feature moves its row into `LitConst`, declares it in `LitConstantsBlock()` and raises
+`Count`; the layout test then checks it. std140 members are contiguous, so a slot that lands before a
+lower planned one (A5's `Taa` at 59 before B7's `MatClass` at 58) declares the lower ones as padding
+members.
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -276,6 +285,19 @@ hfrt also takes 8. Allocation (GL 3.3 guarantees 16 fragment units), as constant
 rows; every prototype appended a row). Every unit that can be sampled gets a complete stand-in
 texture at `InitLightingResources`, the same rule F3 applied to unit 2, and a new
 `[ShadowSampler]` audit case covers unit 6.
+
+As built in A2: the constants are in `EngineGL33_Lighting.hpp`, with `kShadowMapUnit` 2 for the
+cascade array and the four units in use; one `static_assert` checks that every unit is within 2 to 15,
+not 7, and distinct. `kLitSamplers` (name, unit) is the one table `InitPixelShaders` binds from, for
+classic and remastered programs alike; it took the `shadowMap` row, which was a literal 2 in
+`EngineGL33_Shaders.cpp`. The other literal 2s for the shadow unit (`EngineGL33_Lighting.cpp`,
+`EngineGL33_ShadowDepth.cpp` `EnsureArrayTarget`, `EngineGL33_Shaders.cpp` `UploadPSShadowConstants`)
+are `kShadowMapUnit` now, and the two F3 audits in `test_gl_state_cache_audit.cpp` look for
+`GL33Bind::ActiveUnit(kShadowMapUnit);`. Not in the table: `BindLightingTextures` still binds units 2
+to 5 by name (each unit has its own stand-in and texture target), and the post pass keeps its own
+units (`{0, 2, 3, 4, 5}` in `EndWorldScene`), which are A3's. `GL33Bind` caches units 0 to 7 only
+(`kUnits = 8` in `GL33BindCache.cpp`), so units 8 to 15 bind on every call. The `[ShadowSampler]` case
+for unit 6 belongs to the step that first samples it (A5 or B1).
 
 ### 3.5 Shader sources: split by concern, test through the accessors
 
@@ -307,6 +329,45 @@ files almost every prototype edits. Before any visible feature lands (step A2):
   and compiles every `s_ps*` / `s_vs*` symbol of every `EngineGL33_Post*.cpp`. The layout test
   checks every declaration of `uniform LitConstants` in those files against `LitConst`, slot by
   slot, so a stale copy fails.
+
+As built in A2 (corrections to the bullets above):
+
+- There is no single `s_psRemasterCommon` string any more: the LitConstants block sits between the
+  `PSConstants` header and the samplers, so the prelude is ten pieces (`FragmentPiece`: header,
+  LitConstants, inputs, shadows, terrain and clouds, sky, lights, surface, shade, finish), joined by
+  the table `kFragmentPieces`. `RemasterFragmentCommon()` returns the join and
+  `RemasterFragmentPiece()` one piece. The new files are `EngineGL33_LightingShadersSky.cpp`,
+  `EngineGL33_LightingShadersLights.cpp` and `EngineGL33_LightingShadersSurface.cpp`; every piece
+  after the header starts with the blank line before it, so the join is byte for byte the tip's
+  `s_psRemasterCommon`.
+- "PoseidonTests links PoseidonGL33" holds only for objects without engine code: the first A2 build
+  pulled `EngineGL33_PostFX.cpp.obj` in through the post accessors, which pulled
+  `EngineGL33_Lifecycle.cpp.obj`, whose `CreateEngineGL33` collides with the test stub
+  (`test_stubs.cpp:101`, lld-link duplicate symbol). So the post GLSL moved to
+  `EngineGL33_PostShaders.cpp` (no GL code, the `kPostShaders` table, `PostShaderName` and
+  `PostShaderSource`), and `EngineGL33_PostFX.cpp` keeps the pass code. A post pass added later puts
+  its GLSL in a GL-free file (`EngineGL33_PostShaders.cpp` or its own `EngineGL33_Post<Name>Shaders.cpp`)
+  and adds its row to `kPostShaders`; its pass code goes where 3.6 says.
+- `s_glslPostCommon` holds only the depth reconstruction AO uses (`viewZ(vec2)`, `viewPos`), and the
+  pass declares the four inputs it reads (`depthTex`, `projInfo`, `depthMap`, `worldRect`): AO declares
+  its own `aoParams` and `screen` between them, so a shared declaration block would reorder AO's
+  uniforms and change its bytes. Interleaved gradient noise, the cascade lookup and the projection
+  helpers join it with their first post consumer (A3's linear depth, A5, B6, B8); the noise is still
+  written inline in AO, the shafts and the composite. The terrain and cloud helpers need no rewrite:
+  the TerrainClouds piece takes positions, so a post pass pastes `LitConstantsBlock()`, the samplers
+  and `RemasterFragmentPiece(FragmentPiece::TerrainClouds)`.
+- `s_glslLitConstantsBlock` is pasted into the prelude only; no vertex or post shader reads the rig
+  yet (A7 is the first).
+- Tests: the compile case goes through `RemasterVertexSource`, `RemasterFragmentCommon` plus each
+  `RemasterFragmentMain`, and `PostShaderSource`; pieces do not compile alone, so "every `s_ps*` /
+  `s_vs*` symbol" became a separate case that every raw string of `EngineGL33_LightingShaders*.cpp`
+  and `EngineGL33_Post*.cpp` sits inside a compiled program. The layout case checks every
+  `uniform LitConstants {` in `engine/PoseidonGL33/*.{cpp,hpp}` member by member and that there is one.
+  Two more cases pin the assembly tables as the lighting lab reads them (`kFragmentPieces`,
+  `kPostShaders` parsed from the source give exactly what the accessors return) and the concern of each
+  piece; one checks the unit table. The lab's `glsl_extract.py` assembles the same way
+  (`load_programs`), so `--dump` writes `psRemasterCommon.glsl` whole, and it now decodes
+  `git show` output as UTF-8 (it used the console code page, which mangled the tip's comments).
 
 ### 3.6 Post pipeline stages
 
@@ -601,6 +662,38 @@ graphics-remaster worktree, gitignored).**
 
 As 3.3 to 3.5. Pixel-exact: the assembled GLSL strings must be byte-identical to the tip's
 (compare `glsl_extract.py --dump` output before and after). Effort 2 days.
+
+**Result (2026-10-18, uncommitted change on 7e013c2; evidence in `tmp/integration/A2/` of the
+graphics-remaster worktree, gitignored).**
+
+- Built as 3.3 to 3.5 with the as-built notes there: the prelude in ten concern pieces joined by
+  `kFragmentPieces`, one `s_glslLitConstantsBlock`, the post GLSL in `EngineGL33_PostShaders.cpp`
+  with `kPostShaders` and `s_glslPostCommon`, `LitConstPlanned` for slots 58 to 78, the unit
+  constants with their `static_assert` and the `kLitSamplers` table, the tests through the accessors.
+- Byte identity: `glsl_extract.py --dump` of the tip (`HEAD:` sources) and of the working tree give the
+  same 30 files (8 remastered, 7 post, 15 classic and shadow-depth programs, md5 lists equal). The
+  engine side was checked apart from the Python parse: a scratch program linked against the A2
+  build's own shader objects wrote what `RemasterVertexSource`, `RemasterFragmentCommon`,
+  `RemasterFragmentMain` and `PostShaderSource` return, and all 15 sources and the 4 joined fragment
+  programs equal the tip's raw strings.
+- Off equals baseline (item 5): `features_ab` on the A2 build against the A1 build, both shot this
+  session: the five views that repeat to the pixel between two boots of one build (`perf_sunrise_ridge`,
+  `shadows_woods_pine2_evening`, `hfrt_hill_1730`, `airbeams_pinewood_morn`, `texsharp_forest_edge`)
+  are pixel-identical across the builds, off and on; the others differ by the same kinds and sizes as
+  the A1 build's own off against on and its boot-to-boot noise (fire, smoke and lamps at night, the
+  posed soldier's head, a 22-pixel moving detail on the night horizon, the sea). The three-island set against the A1 build's set of this session: within
+  the A1 build's boot-to-boot noise, in Classic too.
+- Timing (item 7, quiet: 0 of 4 slots, no foreign game in 235 sampler rows): at P0 in both runs the
+  Remastered frame medians are within -0.27 to +0.18 ms of A1's run (sunrise_ridge 17.49 against
+  17.31, valley 05:15 23.82 against 23.76, Eden broken_high 24.74 against 24.65); 14 of 26 gates off
+  at `noon_fields`, as in A1.
+- Build 0 warnings (the 11 touched translation units rebuilt), clang-format clean (`ShadowDepth.cpp`,
+  not clean at the tip, by `clang-format-diff.py` on the changed lines), smoke 3/3 with KHR_debug ids
+  131169, 131154 and 131218 only.
+- Tests: 456/456 on the gate tags (4 new cases); `[Graphics]` has the known DDS fixture failure only;
+  the full suite has the 6 known localisation failures only. Five mutations (a `kLitSamplers` row
+  dropped, a stale hand copy of the block, two pieces swapped in the table, `psPostAo` without the
+  shared string, two block members swapped) each turn their case red.
 
 ### A3. Post stages
 
@@ -1217,7 +1310,7 @@ list of the 8 strongest lights handed to every draw; materials: `localSpec` over
 | File / unit | Touched by | Rule |
 |---|---|---|
 | `EngineGL33_LightingShaders.cpp` | F2, F9, temporal, combat, atmosphere, shadows, clouds, night (override), materials (override), shade (override), hfrt (override), haze (override), texsharp (override), water | A2 splits it by concern first. After that one feature edits one piece; `shadeRemastered` (crown and ambient) and `finishFragment` stay single-owner per step: B2 then B7 then B9. The VS sources change only in A5 (jitter) and A7 (sky ray); haze's `vSkyClip` is not ported (A7 replaces it). |
-| `EngineGL33_PostFX.cpp` | F5, combat, ssr, volumetric, materials, night, shadows, texsharp, temporal | A3 turns it into stages; every feature adds its own `EngineGL33_Post*.cpp`. Only A3 and A5 touch the stage list itself; later steps register a stage. |
+| `EngineGL33_PostFX.cpp` | F5, combat, ssr, volumetric, materials, night, shadows, texsharp, temporal | A3 turns it into stages; every feature adds its own `EngineGL33_Post*.cpp`, with its GLSL in a GL-free file and a `kPostShaders` row (A2, 3.5). Only A3 and A5 touch the stage list itself; later steps register a stage. |
 | `EngineGL33_Lighting.{hpp,cpp}` | F3, perf, combat, ssr, materials, atmosphere, hfrt, haze, shadows, night, clouds, texsharp, temporal | `LitConst` and the unit table are fixed in A2 (3.3, 3.4). `UploadLitFrameConstants` is split into per-feature `UploadLit<Feature>()` calls made from it; `BindLightingTextures` binds from the unit table; all partial uploads go through A4's mirror helper. |
 | `LightRig.{hpp,cpp}` | F2, F4, F5, F9, every prototype's `LightingTuning` fields, shade's rig terms, night's moon key | Feature switches leave `LightingTuning` for `FeatureSet` (A1). Rig math changes only in B2 (`lowSunRig`) and B3 (`KeyLight`), in that order, each with re-pinned tests. |
 | `SceneDraw.cpp` | F1, F6, perf, night | A4 first (cull before LOD selection and sort; light gate via `RunEntry`). B3 then adds the moon shadow-pass condition in `DrawObjectsAndShadowsPass2`. |

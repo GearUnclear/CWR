@@ -254,7 +254,9 @@ TEST_CASE("I-04 T1: per-draw sampler routes through Poseidon::render::sampler::B
 // programs and undefined behaviour under the comparison sampler (NVIDIA KHR_debug
 // ids 131204 and 131222). The unit holds the 1x1 depth stand-in from init and a
 // cascade array once one exists; the ways to lose that are deleting the bound
-// array and unbinding the array target, so the audits below pin both.
+// array and unbinding the array target, so the audits below pin both. The
+// backend names the unit kShadowMapUnit (EngineGL33_Lighting.hpp, which
+// test_remaster_lighting.cpp pins to 2).
 namespace
 {
 
@@ -280,7 +282,7 @@ TEST_CASE("Shadow-map unit 2 holds the depth stand-in from init on", "[Graphics]
     // between that could land the bind elsewhere.
     const size_t made = init.find("_dummyDepthArray = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_DEPTH_COMPONENT");
     REQUIRE(made != std::string::npos);
-    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
     const size_t unit2 = init.find(unitCall, made);
     REQUIRE(unit2 != std::string::npos);
     const size_t bind = init.find("glBindTexture(GL_TEXTURE_2D_ARRAY, _dummyDepthArray);", unit2);
@@ -303,7 +305,7 @@ TEST_CASE("A recreated cascade array takes unit 2, where the deleted one was sam
     // to; the replacement must be bound on unit 2 straight away.
     const size_t del = ensure.find("glDeleteTextures(1, &s_arrTex);");
     REQUIRE(del != std::string::npos);
-    const std::string unitCall = "GL33Bind::ActiveUnit(2);";
+    const std::string unitCall = "GL33Bind::ActiveUnit(kShadowMapUnit);";
     const size_t unit2 = ensure.find(unitCall, del);
     REQUIRE(unit2 != std::string::npos);
     const size_t bind = ensure.find("glBindTexture(GL_TEXTURE_2D_ARRAY, s_arrTex);", unit2);

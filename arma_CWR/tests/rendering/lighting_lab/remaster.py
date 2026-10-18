@@ -1,8 +1,9 @@
 """Renderer for the REMASTERED lighting pipeline.
 
 Same scene, passes and std140 VS/PS blocks as classic.py, plus:
-  - the remastered program set from EngineGL33_LightingShaders.cpp
-    (s_vs*RemasterGLSL, s_psRemasterCommon + s_ps*RemasterMain);
+  - the remastered program set from EngineGL33_LightingShaders*.cpp
+    (vs*Remaster, psRemasterCommon + ps*RemasterMain, assembled from their
+    pieces as the engine does, glsl_extract.load_programs);
   - the LitConstants block (binding 3) filled like EngineGL33's remastered
     uploads, with the light rig computed by the engine's own C++ (native.py);
   - a sun shadow map (shadowpass.py) read through a comparison sampler;
@@ -82,12 +83,11 @@ def configure(source=None, shader_override_dir=None, nan_check=True, tuning=None
 
 
 def _remaster_shaders(source, override_dir=None):
-    """The remastered GLSL, with the engine's override pieces applied
-    (psRemasterCommon.glsl, psNormalRemasterMain.glsl, vsTransformRemaster.glsl...)."""
+    """The remastered GLSL by the engine's override names, assembled as the
+    engine assembles it, with the override files applied (psRemasterCommon.glsl,
+    psNormalRemasterMain.glsl, vsTransformRemaster.glsl...)."""
     path = source if source is not None else glsl_extract.ENGINE_DIR.parent / REMASTER_FILE
-    shaders = glsl_extract.load_shaders(path)
-    glsl_extract.apply_override_dir(shaders, override_dir)
-    return shaders
+    return glsl_extract.load_programs(path, override_dir)
 
 
 class _Resources(C._Resources):
@@ -95,12 +95,12 @@ class _Resources(C._Resources):
         super().__init__(ctx, scene, _options["source"], _options["shader_override_dir"])
         rs = _remaster_shaders(_options["remaster_source"], _options["shader_override_dir"])
         self.rshaders = rs
-        common = rs["s_psRemasterCommon"]
-        vs = rs["s_vsTransformRemasterGLSL"]
+        common = rs["psRemasterCommon"]
+        vs = rs["vsTransformRemaster"]
         self.rprog = {
-            "normal": G.create_program(ctx, vs, common + rs["s_psNormalRemasterMain"], "vsTransformR+psNormalR"),
-            "detail": G.create_program(ctx, vs, common + rs["s_psDetailRemasterMain"], "vsTransformR+psDetailR"),
-            "prelit": G.create_program(ctx, PRELIT_VS, common + rs["s_psNormalRemasterMain"], "prelit+psNormalR"),
+            "normal": G.create_program(ctx, vs, common + rs["psNormalRemasterMain"], "vsTransformR+psNormalR"),
+            "detail": G.create_program(ctx, vs, common + rs["psDetailRemasterMain"], "vsTransformR+psDetailR"),
+            "prelit": G.create_program(ctx, PRELIT_VS, common + rs["psNormalRemasterMain"], "prelit+psNormalR"),
         }
         for p in self.rprog.values():
             if "LitConstants" in p:
