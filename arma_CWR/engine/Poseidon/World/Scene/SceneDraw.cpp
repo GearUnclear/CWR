@@ -35,6 +35,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
+#include <Poseidon/World/Scene/InstancedRunRules.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
@@ -1291,6 +1292,26 @@ static void DrawSortObject(SortObject* oi)
     GEngine->SetPassKindHint(savedHint);
 }
 
+// The instanced-run facts of one queued object (InstancedRunRules.hpp).
+// `headLevel` is the head's draw level: an object joins a run only with the
+// head's shape and LOD, so that level is its own whenever the answer matters.
+// IsAnimated indexes the object's shape by its draw LOD, which for a later
+// object may be LOD_INVISIBLE, so it is asked only for the head's shape and LOD.
+static InstancedRun::RunEntry InstancedRunEntry(const SortObject* so, const LODShape* headShape, int headLOD,
+                                                const Shape* headLevel)
+{
+    const Object* obj = so->object;
+    InstancedRun::RunEntry entry;
+    entry.shape = obj->GetShape();
+    entry.drawLOD = so->drawLOD;
+    entry.passNum = so->passNum;
+    entry.special = headLevel->Special() | obj->GetObjSpecial();
+    entry.distance2 = so->distance2;
+    entry.isStatic = obj->Static();
+    entry.ownVertices = obj->GetShape() == headShape && so->drawLOD == headLOD && obj->IsAnimated(so->drawLOD);
+    return entry;
+}
+
 void Scene::DrawObjectsAndShadowsPass1()
 {
     // select first objects - those with highest visual priority
@@ -1535,12 +1556,15 @@ void Scene::DrawObjectsAndShadowsPass1()
     {
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
-        // the head once inside Begin/EndInstancedRun — every TL section then
+        // the head once inside Begin/EndInstancedRun, and every TL section then
         // renders all K instances from the WorldInstances matrix array. The
         // predicate keeps per-object state out of batches: static, proxy-free,
         // not OnSurface/IsColored, equal obj-special, no local lights in the
-        // scene, and a tight distance band so the head's constant-fog value
-        // is representative for the whole batch.
+        // scene, a tight distance band so the head's constant-fog value is
+        // representative for the whole batch, and no object whose draw rewrites
+        // its own vertices (a land-following bush fitted to its own patch of
+        // slope, a damaged house): the run draws every member from the head's
+        // vertex buffer (InstancedRunRules.hpp).
         const bool noLocalLights = NLights() == 0;
         for (int i = 0; i < _drawMergers.Size();)
         {
@@ -1565,9 +1589,9 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
 
             int runEnd = i + 1;
-            const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
-            const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
+            const InstancedRun::RunEntry head = InstancedRunEntry(oi, shape, oi->drawLOD, sShape);
+            const render::LegacySpec headSpec = render::SplitLegacy(head.special);
+            const bool headBatchable = noLocalLights && InstancedRun::CanHead(head) && sShape->NProxies() == 0 &&
                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
                                        oi->object != GWorld->CameraOn();
@@ -1576,17 +1600,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                 GEngine->InstancedRunReset();
                 if (GEngine->InstancedRunAdd(oi->object->Transform()))
                 {
-                    // Fog band: keep members within ~5% of the head's distance so
-                    // the head's per-object constant fog approximates all of them.
-                    const float d2lo = oi->distance2 * 0.90f;
-                    const float d2hi = oi->distance2 * 1.10f;
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
-                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
-                            oj->passNum != oi->passNum || !oj->object->Static() ||
-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
-                            oj->distance2 > d2hi)
+                        if (!InstancedRun::CanJoin(head, InstancedRunEntry(oj, shape, oi->drawLOD, sShape)))
                         {
                             break;
                         }
