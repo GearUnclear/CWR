@@ -1123,7 +1123,7 @@ Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
 // burning wreck's black column glows at its base only. A puff inside a fire's
 // flames glows as part of them (CombatFlameEmission): that light, linear,
 // goes to `emit`, added after the particle's own colour.
-Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3])
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3], bool ownGlow = false)
 {
     const lighting::CombatLightSet& set = lighting::GCombatLights();
     // A fire's light (kept in its hue) and every other combat light (white
@@ -1133,6 +1133,11 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
     emit[0] = emit[1] = emit[2] = 0.0f;
     for (const lighting::CombatLightRecord& r : set.Records())
     {
+        // A fireball's glowing puff is the blast's light (look fix "boom"): a
+        // detonation's light on it added the flash's white over its own glow,
+        // and by night washed the fireball out to pale grey.
+        if (ownGlow && r.detonation)
+            continue;
         const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
         const float d2 = dx * dx + dy * dy + dz * dz;
         float irr = lighting::CombatIrradiance(r.sample, d2);
@@ -1140,7 +1145,9 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[
             continue;
         const float d = std::sqrt(d2);
         irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
-        float* acc = r.kind == lighting::CombatLightKind::Fire ? e : o;
+        // A detonation's light (look fix "boom") keeps its hue on its smoke as a
+        // fire's does: its afterburn lit the dust round it khaki, not orange.
+        float* acc = r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o;
         for (int i = 0; i < 3; ++i)
             acc[i] += r.sample.rgb[i] * irr;
         float flame[3];
@@ -1243,6 +1250,13 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                 float soot[3];
                 if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
                 {
+                    // Look fix "boom": the glow keeps its ratio to the combat
+                    // light it gives (the bursts' day scale, 0.2 by day);
+                    // by night its own light on its smoke outshone it, a pale
+                    // grey cloud round a fuel fireball.
+                    const float nightGlow = lighting::GCombatLights().BurstDayScale() / 0.2f;
+                    for (int i = 0; i < 3; ++i)
+                        fireballEmit[i] *= nightGlow;
                     fireballOwn = Color(soot[0], soot[1], soot[2], ((ColorVal)GetConstantColor()).A());
                     fireball = true;
                 }
@@ -1316,7 +1330,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                     const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
                 }
-                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
+                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);
                 for (int i = 0; i < 3; ++i)
                     flameEmit[i] += fireballEmit[i];
             }

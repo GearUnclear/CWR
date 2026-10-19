@@ -131,8 +131,21 @@ void DeleteTex(unsigned int& t)
 constexpr float kFireSurfaceBody = 1.3f;
 // A shell burst's light on surfaces ends this many of its ball's radii out
 // (look fix "burst": 20 m lit the plain behind a burst into a band along the
-// horizon); a heavy shell's 2.6 m ball lights the ground within about 8 m.
-constexpr float kBurstSurfaceReachCores = 3.0f;
+// horizon). Look fix "boom": the ball is now half the fireball's radius (a
+// 120 mm HE shell's 1.1 m), and three of them lit a flat bright disc with an
+// edge; the light falls off as the inverse square from a ball 1.3 m up and
+// fades out smoothly by 10 balls (5 fireball radii, 11 m for the shell), and
+// lasts only as long as the gas glows.
+constexpr float kBurstSurfaceReachCores = 10.0f;
+// ... and never past this (m): a fuel fireball's 3.2 m ball lit a 32 m strip
+// along the horizon. Its surface gain under the camera (round 2's 0.3 left
+// the ground within a grenade's reach one flat, saturated ellipse).
+constexpr float kBurstSurfaceReachMax = 10.0f;
+constexpr float kBurstSurfaceGain = 0.12f;
+// A fuel fireball's ball sits a third of its 13 m height up and its ground lit
+// from eye height drew an orange line along the horizon brighter than the
+// fireball: its surface gain.
+constexpr float kFuelSurfaceGain = 0.04f;
 
 // How thick the lit smoke and dust around a light is (m): muzzle gas, the
 // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
@@ -150,6 +163,11 @@ float ScatterMedium(fl::CombatLightKind kind, float core)
         case fl::CombatLightKind::Tracer:
         case fl::CombatLightKind::Motor:
             return 0.0f;
+        case fl::CombatLightKind::Explosion:
+            // Look fix "boom": the lit air of a detonation is its own fireball
+            // (no dust has risen within its few frames of flash); a 2 core +
+            // 1.5 m ball drew a soft globe of light by night; half its ball.
+            return 0.5f * core;
         default:
             return 2.0f * core + 1.5f;
     }
@@ -280,13 +298,16 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                 case fl::CombatLightKind::Cannon:
                     // (Seen from eye height the lit ground round a burst 60 m
                     // out is a thin strip along the horizon.)
-                    gain = 0.3f;
+                    gain = r.kind != fl::CombatLightKind::Explosion ? 0.3f
+                           : r.detonation && r.det.deflagration     ? kFuelSurfaceGain
+                                                                    : kBurstSurfaceGain;
                     // Look fix "burst": a young burst still lit the plain 20 m
                     // round into a ruler-straight band along the horizon,
                     // brighter than its own fireball. Its light ends within
                     // kBurstSurfaceReachCores of its ball, under the cloud.
-                    f.range = std::min(
-                        f.range, r.kind == fl::CombatLightKind::Explosion ? kBurstSurfaceReachCores * f.start : 20.0f);
+                    f.range = std::min(f.range, r.kind == fl::CombatLightKind::Explosion
+                                                    ? std::min(kBurstSurfaceReachCores * f.start, kBurstSurfaceReachMax)
+                                                    : 20.0f);
                     warmG = 0.8f;
                     warmB = 0.56f;
                     break;

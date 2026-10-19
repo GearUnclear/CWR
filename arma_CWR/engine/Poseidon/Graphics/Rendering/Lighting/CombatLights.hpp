@@ -234,6 +234,116 @@ constexpr float kFireballSoot[3] = {0.24f, 0.21f, 0.18f};
 void BlackBodyRgb(float temperatureK, float out[3]);
 bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3]);
 
+// Detonation physics (look fix "boom"): what a munition's charge makes of its
+// flash, fireball and dust column, and a burning vehicle's fuel of its
+// fireball. Classic sized every blast from `hit` (the round's direct damage),
+// clamped to 0.25 .. 1, and ran the same 0.05 s of white-hot puffs for all:
+// a 120 mm HEAT round (hit 700) burst bigger than the 120 mm HE shell (hit
+// 200), a grenade looked like a small shell, and every blast read as a blink.
+//
+// The charge (TNT equivalent, kg) comes from the blast the config gives the
+// round: the engine's own crater energy, indirectHit x indirectHitRange
+// (Landscape::ExplosionDammage), over kChargeEnergyPerKg, calibrated so the
+// 120 mm HE shell (150 x 8) is 2.5 kg, about a 120 mm HE round's filling;
+// the hand grenade (18 x 7) then comes to 0.26 kg and the 120 mm HEAT round
+// (300 x 1) to 0.63 kg. A round whose direct hit exceeds its blast energy is
+// a shaped charge (HEAT, rockets): its jet takes much of the energy, so its
+// fireball is kShapedRadiusShare of a plain charge's and its flash shorter.
+//
+// Blast scaling (Hopkinson-Cranz): lengths and times go with the cube root of
+// the charge, s = W^(1/3). The detonation products expand to about
+// kFireballRadiusPerS x s metres (1 kg TNT: a 1.6 m ball) and glow white-hot,
+// a brightness temperature of kDetonationPeakK, cooling with an e-folding
+// time of kFlashTimePerS x s (tens of milliseconds). A cased charge with a
+// negative oxygen balance (TNT -74 %, Composition B -43 %) burns its fuel-rich
+// products in the air behind the flash: an orange afterburn at kAfterburnK for
+// kAfterburnTimePerS x s; a shaped charge (Octol, about -24 %) has a third of
+// it. Then the gas cools to soot within kGlowFallTime. The blast throws a dust
+// and smoke column kColumnHeightPerS x s high that lingers kColumnLifePerS x s
+// seconds and drifts with the wind.
+//
+// A vehicle's fuel does not detonate; its tank bursts and the spray burns as a
+// deflagration. The fireball of a burning mass M kg of hydrocarbon (CCPS /
+// TNO fireball correlations): diameter kFuelDiameterPerS x M^(1/3) m and
+// duration kFuelDurationPerS x M^(1/3) s; a sooty flame of kFuelFlameK, slower,
+// cooler and darker than any detonation, then thick black smoke.
+constexpr float kChargeEnergyPerKg = 480.0f;
+constexpr float kMinChargeKg = 0.02f;
+constexpr float kMaxChargeKg = 500.0f;
+constexpr float kFireballRadiusPerS = 1.6f;
+constexpr float kShapedRadiusShare = 0.75f;
+constexpr float kFlashTimePerS = 0.03f;
+constexpr float kShapedFlashShare = 0.75f;
+constexpr float kAfterburnTimePerS = 0.12f;
+constexpr float kShapedAfterburnShare = 0.33f;
+constexpr float kDetonationPeakK = 3200.0f;
+constexpr float kAfterburnK = 2000.0f;
+constexpr float kGlowFallTime = 0.08f;
+constexpr float kSootK = 900.0f;
+constexpr float kColumnHeightPerS = 6.0f;
+constexpr float kColumnLifePerS = 12.0f;
+constexpr float kShapedColumnShare = 0.7f;
+// The engine's classic blast size (Shots.cpp: hit x 0.003, clamped 0.25 .. 1)
+// of the reference shell, for a blast that arrives without its round (a
+// network copy): size 0.6 = the 2.5 kg shell.
+constexpr float kReferenceBlastSize = 0.6f;
+constexpr float kReferenceChargeKg = 2.5f;
+// Fuel: FuelExplosion's hit (CfgAmmo 100, the engine scales it by the vehicle's
+// explosives: fuel litres x 0.1 plus its ammunition) to kg of fuel in the
+// fireball: hit / 0.1 litres x 0.74 kg/l, half of it burning in the fireball
+// (the rest feeds the wreck's fire).
+constexpr float kFuelKgPerHit = 3.7f;
+constexpr float kMinFuelKg = 1.0f;
+constexpr float kMaxFuelKg = 150.0f; // a heavy vehicle's tank (about 400 l), half in the ball
+constexpr float kFuelDiameterPerS = 5.8f;
+constexpr float kFuelDurationPerS = 0.45f;
+constexpr float kFuelFlameK = 1900.0f;
+constexpr float kFuelRiseShare = 0.2f;
+constexpr float kFuelColumnLife = 20.0f;
+struct Detonation
+{
+    float chargeKg = kReferenceChargeKg; // TNT equivalent; a deflagration's fuel burnt
+    float scale = 1.0f;                  // the cube root of chargeKg
+    bool shaped = false;                 // a shaped charge (HEAT, rockets)
+    bool deflagration = false;           // a fuel fireball
+    float radius = 1.6f;                 // the luminous fireball at its largest (m)
+    float flashTime = 0.03f;             // the flash's e-folding time (s)
+    float burnTime = 0.12f;              // afterburn, or the burning fuel fireball (s)
+    float peakK = kDetonationPeakK;      // brightness temperature at its birth (K)
+    float burnK = kAfterburnK;           // what the burning gas glows at (K)
+    float columnHeight = 6.0f;           // the dust and smoke column (m)
+    float columnLife = 12.0f;            // how long the column lingers (s)
+};
+// From the round's config (CfgAmmo hit, indirectHit, indirectHitRange).
+Detonation DetonationFromAmmo(float hit, float indirectHit, float indirectHitRange);
+// From the classic blast size alone (0.25 .. 1): s = 2.5^(1/3) x size / 0.6.
+Detonation DetonationFromBlastSize(float blastSize);
+// A fuel fireball from the kg of fuel that burns in it.
+Detonation DeflagrationFromFuel(float fuelKg);
+// The gas temperature (K) `age` seconds after the detonation: the flash's
+// peakK falling with flashTime onto the afterburn's burnK, held burnTime, then
+// falling to soot (kSootK) with kGlowFallTime. A deflagration rises to its
+// flame over kFuelRiseShare of its burn, holds, then cools.
+float DetonationTemperature(const Detonation& d, float age);
+// How fast a fireball puff born at `bornK` cools (K/s, negative): to the end
+// of the glow (1100 K) by the end of the burn, and over no less than
+// kMinGlowSpan: a camera's 1/30 s shutter holds a flash shorter than its
+// frame for the whole frame (a HEAT round's 19 ms flash was gone before its
+// first frame was drawn).
+constexpr float kMinGlowSpan = 0.1f;
+float DetonationPuffCooling(const Detonation& d, float bornK);
+// The detonation's combat light `age` seconds after it (before the day
+// scaling): the visible power of a hot ball of its radius at its temperature
+// (Wien at 580 nm against the peak), in the black body's colour, its ball
+// kDetonationCoreShare of the fireball's radius. The flash at the peak is
+// kDetonationFlashI1 x W^(2/3) (radiating area), a fuel fireball
+// kDeflagrationI1 x M^(2/3) at its flame.
+constexpr float kDetonationFlashI1 = 350.0f;
+constexpr float kDeflagrationI1 = 60.0f;
+constexpr float kDetonationCoreShare = 0.5f;
+CombatLightSample EvaluateDetonationLight(const Detonation& d, float age, std::uint32_t seed,
+                                          const CombatTuning& tuning);
+
 // A fire burns inside the foot of its own smoke, and the light reaching a
 // particle of that smoke has crossed the smoke below it. Soot drinks what it
 // does not scatter: under a burning wreck's black column only the base glows
@@ -336,7 +446,9 @@ struct CombatLightRecord
     std::uint32_t seed = 0;             // its flicker phase
     float tint[3] = {1.0f, 1.0f, 1.0f}; // flares and motors: the ammo's light colour
     bool owned = false;                 // moved and removed by its owner
-    CombatLightSample sample;           // this frame's (Evaluate)
+    bool detonation = false;            // a blast with its own physics (det)
+    Detonation det;
+    CombatLightSample sample; // this frame's (Evaluate)
 };
 
 // The most one Tick ages the set by. A longer step (time acceleration at a low
@@ -349,6 +461,8 @@ class CombatLightSet
   public:
     // A burst at a world position.
     std::uint32_t Spawn(CombatLightKind kind, const float pos[3], float strength);
+    // A blast (kind Explosion) whose light follows its detonation physics.
+    std::uint32_t SpawnDetonation(const float pos[3], const Detonation& d);
     // A light its owner moves (Update) and removes (Remove).
     std::uint32_t Create(CombatLightKind kind, const float pos[3], float strength);
     bool Update(std::uint32_t id, const float pos[3], float strength);
@@ -361,6 +475,10 @@ class CombatLightSet
     // frame's other readers (the smoke gain, the scatter gain).
     void Evaluate(const CombatTuning& tuning, float nightEffect);
     const CombatTuning& Tuning() const { return _tuning; }
+    // This frame's day scale of a burst (CombatDayScale): a fireball's glow
+    // follows it (look fix "boom"), so by night its flames stay brighter than
+    // the smoke its light lights.
+    float BurstDayScale() const { return _burstDayScale; }
     // Drops the bursts at once (they end on their own within 0.9 s of
     // simulation): the scene's teardown (Scene::ResetLights, called from
     // ~Scene only).
@@ -376,6 +494,7 @@ class CombatLightSet
     std::uint32_t Add(CombatLightKind kind, const float pos[3], float strength, bool owned);
     std::vector<CombatLightRecord> _records;
     CombatTuning _tuning;
+    float _burstDayScale = 0.2f;
     std::uint32_t _nextId = 1;
     std::uint32_t _seed = 0x9e3779b9u;
     double _simTime = 0.0;

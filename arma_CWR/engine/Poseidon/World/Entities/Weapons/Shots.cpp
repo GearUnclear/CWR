@@ -350,6 +350,8 @@ void PipeBomb::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(Position());
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -377,6 +379,8 @@ void TimeBomb::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(Position());
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -476,6 +480,8 @@ void Mine::Simulate(float deltaT, SimulationImportance prec)
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);
+                explosion->SetDetonation(
+                    lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                 explosion->SetPosition(Position());
                 GLOB_WORLD->AddAnimal(explosion);
                 GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -748,6 +754,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                             ePos[1] = minY;
                         }
                         Explosion* explosion = new Explosion(nullptr, _parent, size);
+                        explosion->SetDetonation(
+                            lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                         explosion->SetPosition(ePos);
                         GLOB_WORLD->AddAnimal(explosion);
                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -781,6 +789,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                         saturate(size, MinExplosion, MaxExplosion);
                         exploPos[1] += 0.5 * size;
                         Explosion* explosion = new Explosion(nullptr, _parent, size);
+                        explosion->SetDetonation(
+                            lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                         explosion->SetPosition(exploPos);
                         GLOB_WORLD->AddAnimal(explosion);
                         GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
@@ -1210,6 +1220,8 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
                 float size = Type()->hit * 0.003;
                 saturate(size, MinExplosion, MaxExplosion);
                 Explosion* explosion = new Explosion(nullptr, _parent, size);
+                explosion->SetDetonation(
+                    lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
                 pos -= Direction() * 2 * size;
                 float minY = GLandscape->RoadSurfaceY(position[0], position[2]) + 3 * size;
                 if (pos[1] < minY)
@@ -1261,6 +1273,8 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
             float size = Type()->hit * 0.003;
             saturate(size, MinExplosion, MaxExplosion);
             Explosion* explosion = new Explosion(nullptr, _parent, size);
+            explosion->SetDetonation(
+                lighting::DetonationFromAmmo(Type()->hit, Type()->indirectHit, Type()->indirectHitRange));
             explosion->SetPosition(lPos);
             GLOB_WORLD->AddAnimal(explosion);
             GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);

@@ -1174,7 +1174,9 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(decal.find("if (combat &&") != std::string::npos);
     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
           std::string::npos);
-    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);") != std::string::npos);
+    // Look fix "boom": a fireball's glowing puff takes no detonation light.
+    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit, fireball);") !=
+          std::string::npos);
     // Look fix "fire": a puff's colour comes under one by its peak (no
     // clipped white column) and the light past it goes to the decal's glow.
     CHECK(decal.find("lighting::KeepHueUnderOne(rgb);") != std::string::npos);
@@ -1184,7 +1186,9 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);") !=
           std::string::npos);
     CHECK(litParticle.find("lighting::CombatParticleMix(base, e, o,") != std::string::npos);
-    CHECK(litParticle.find("r.kind == lighting::CombatLightKind::Fire ? e : o") != std::string::npos);
+    // Look fix "boom": a detonation's light keeps its hue on smoke as a fire's.
+    CHECK(litParticle.find("r.kind == lighting::CombatLightKind::Fire || r.detonation ? e : o") != std::string::npos);
+    CHECK(litParticle.find("if (ownGlow && r.detonation)") != std::string::npos);
     CHECK(litParticle.find("lighting::CombatFlameEmission(r.kind, r.sample, d, flame);") != std::string::npos);
     // The frame's list keeps the steady lights past the twelve, and a fire's
     // lit air is a small halo, not a 4.4 m ball over its smoke.
@@ -1209,4 +1213,150 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     REQUIRE(doSim != std::string::npos);
     REQUIRE(tick != std::string::npos);
     CHECK(doSim < tick);
+}
+
+TEST_CASE("Combat lights: look fix boom: a munition's charge sets its flash, fireball and column by the cube root",
+          "[remaster][CombatLights]")
+{
+    // CfgAmmo of the Remaster: Shell120 (hit 200, indirectHit 150, range 8),
+    // GrenadeHand (20, 18, 7), Heat120 (700, 300, 1).
+    const Detonation he = DetonationFromAmmo(200.0f, 150.0f, 8.0f);
+    const Detonation grenade = DetonationFromAmmo(20.0f, 18.0f, 7.0f);
+    const Detonation heat = DetonationFromAmmo(700.0f, 300.0f, 1.0f);
+    CHECK(he.chargeKg == Approx(2.5f));
+    CHECK(grenade.chargeKg == Approx(126.0f / 480.0f));
+    CHECK(heat.chargeKg == Approx(300.0f / 480.0f));
+    CHECK_FALSE(he.shaped);
+    CHECK_FALSE(grenade.shaped);
+    CHECK(heat.shaped);
+    // Hopkinson-Cranz: radius and times go with W^(1/3).
+    CHECK(he.scale == Approx(std::cbrt(2.5f)));
+    CHECK(he.radius == Approx(kFireballRadiusPerS * std::cbrt(2.5f)));
+    CHECK(he.flashTime == Approx(kFlashTimePerS * std::cbrt(2.5f)));
+    CHECK(he.radius / grenade.radius == Approx(std::cbrt(2.5f / grenade.chargeKg)));
+    // The shell's flash is tens of milliseconds, the grenade's shorter; the
+    // HEAT round's fireball is smaller and briefer than the HE shell's,
+    // although its direct hit is 3.5 times the shell's (Classic: bigger).
+    CHECK(he.flashTime > 0.03f);
+    CHECK(he.flashTime < 0.06f);
+    CHECK(grenade.flashTime < he.flashTime);
+    CHECK(heat.radius < he.radius);
+    CHECK(heat.flashTime + heat.burnTime < 0.5f * (he.flashTime + he.burnTime));
+    CHECK(he.columnLife > 12.0f);
+    CHECK(grenade.columnLife < he.columnLife);
+    CHECK(grenade.columnHeight < he.columnHeight);
+    // A blast without its round: the classic size stands for the charge.
+    CHECK(DetonationFromBlastSize(kReferenceBlastSize).chargeKg == Approx(kReferenceChargeKg));
+    CHECK(DetonationFromBlastSize(0.25f).radius < DetonationFromBlastSize(1.0f).radius);
+}
+
+TEST_CASE("Combat lights: look fix boom: the gas cools from the white-hot flash through the afterburn to soot",
+          "[remaster][CombatLights]")
+{
+    const Detonation he = DetonationFromAmmo(200.0f, 150.0f, 8.0f);
+    CHECK(DetonationTemperature(he, 0.0f) == Approx(kDetonationPeakK));
+    // One flash time on, most of the flash's excess is gone; through the
+    // afterburn the gas holds near kAfterburnK; after it, soot.
+    const float t1 = DetonationTemperature(he, he.flashTime);
+    CHECK(t1 < 2500.0f);
+    CHECK(t1 > kAfterburnK);
+    CHECK(DetonationTemperature(he, he.burnTime) == Approx(kAfterburnK).epsilon(0.03));
+    CHECK(DetonationTemperature(he, he.burnTime + 0.4f) < 1000.0f);
+    // The light: the flash's power at the peak goes with the radiating area
+    // (W^(2/3)); a frame later it has fallen several-fold (Wien), and once the
+    // gas is soot the burst is over.
+    const CombatTuning tuning;
+    const CombatLightSample s0 = EvaluateDetonationLight(he, 0.0f, 1u, tuning);
+    const CombatLightSample s1 = EvaluateDetonationLight(he, 1.0f / 30.0f, 1u, tuning);
+    const CombatLightSample s2 = EvaluateDetonationLight(he, 2.0f / 30.0f, 1u, tuning);
+    const float p0 = s0.intensity * s0.core * s0.core;
+    const float p1 = s1.intensity * s1.core * s1.core;
+    const float p2 = s2.intensity * s2.core * s2.core;
+    CHECK(p0 == Approx(kDetonationFlashI1 * std::pow(2.5f, 2.0f / 3.0f)));
+    CHECK(p1 < 0.4f * p0);
+    CHECK(p2 < 0.4f * p1);
+    CHECK_FALSE(s0.finished);
+    CHECK(EvaluateDetonationLight(he, he.burnTime + 0.4f, 1u, tuning).finished);
+    // The flash is white-hot, the afterburn orange.
+    CHECK(s0.rgb[2] / s0.rgb[0] > 0.12f);
+    const CombatLightSample sb = EvaluateDetonationLight(he, 0.7f * he.burnTime, 1u, tuning);
+    CHECK(sb.rgb[2] / sb.rgb[0] < s0.rgb[2] / s0.rgb[0]);
+    // A puff born hot glows until the burn ends, then cools to soot.
+    const float cool = DetonationPuffCooling(he, kDetonationPeakK);
+    CHECK(cool < 0.0f);
+    CHECK(kDetonationPeakK + cool * (he.flashTime + he.burnTime) == Approx(1100.0f));
+    // A HEAT round's flash is shorter than a frame: its puffs glow at least
+    // kMinGlowSpan, as a 1/30 s shutter holds the flash.
+    const Detonation heat = DetonationFromAmmo(700.0f, 300.0f, 1.0f);
+    CHECK(heat.flashTime + heat.burnTime < kMinGlowSpan);
+    CHECK(DetonationPuffCooling(heat, kDetonationPeakK) == Approx(-(kDetonationPeakK - 1100.0f) / kMinGlowSpan));
+    // The fireball's glow follows the bursts' day scale (by night five-fold).
+    CombatLightSet set;
+    set.Evaluate(tuning, 0.0f);
+    CHECK(set.BurstDayScale() == Approx(CombatDayScale(CombatLightKind::Explosion, 0.0f)));
+    set.Evaluate(tuning, 1.0f);
+    CHECK(set.BurstDayScale() == Approx(1.0f));
+}
+
+TEST_CASE("Combat lights: look fix boom: a vehicle's fuel burns as a slow, cooler, rolling fireball",
+          "[remaster][CombatLights]")
+{
+    // A jeep: explosives = 50 l x 0.1 = 5, times 0.5 .. 0.75: hit about 3.
+    const Detonation fuel = DeflagrationFromFuel(kFuelKgPerHit * 3.0f);
+    const Detonation he = DetonationFromAmmo(200.0f, 150.0f, 8.0f);
+    CHECK(fuel.deflagration);
+    // CCPS fireball: D = 5.8 M^(1/3), t = 0.45 M^(1/3).
+    CHECK(2.0f * fuel.radius == Approx(kFuelDiameterPerS * std::cbrt(11.1f)));
+    CHECK(fuel.burnTime == Approx(kFuelDurationPerS * std::cbrt(11.1f)));
+    CHECK(fuel.burnTime > 0.9f);
+    CHECK(fuel.radius > 2.0f * he.radius);
+    // Cooler than a detonation all the way, and burning for its whole time.
+    for (float t = 0.0f; t < fuel.burnTime; t += 0.05f)
+    {
+        CHECK(DetonationTemperature(fuel, t) <= kFuelFlameK + 1.0f);
+        CHECK(DetonationTemperature(fuel, t) > 1600.0f);
+    }
+    CHECK(DetonationTemperature(fuel, 0.5f * fuel.burnTime) > DetonationTemperature(he, 0.5f * fuel.burnTime));
+    const CombatTuning tuning;
+    CHECK_FALSE(EvaluateDetonationLight(fuel, 0.9f * fuel.burnTime, 7u, tuning).finished);
+    CHECK(EvaluateDetonationLight(fuel, 4.0f * fuel.burnTime + 1.0f, 7u, tuning).finished);
+    // The fuel in the ball is bounded (a heavy vehicle's tank).
+    CHECK(DeflagrationFromFuel(1e5f).chargeKg == Approx(kMaxFuelKg));
+}
+
+TEST_CASE("Combat lights: look fix boom: blasts take their round's charge, craters their column, the set its light",
+          "[remaster][CombatLights]")
+{
+    const std::string shots = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Entities" / "Weapons" / "Shots.cpp");
+    size_t n = 0, at = 0;
+    while ((at = shots.find("new Explosion(nullptr, _parent, size);", at)) != std::string::npos)
+    {
+        ++n;
+        const size_t next = shots.find(';', at + 40);
+        CHECK(shots.substr(at, next - at + 160).find("DetonationFromAmmo(") != std::string::npos);
+        at = next;
+    }
+    CHECK(n == 7);
+    const std::string coll = ReadTextFile(EngineDir() / "Poseidon" / "World" / "Simulation" / "Collisions.cpp");
+    CHECK(coll.find("crater->SetDetonation(") != std::string::npos);
+    const std::string smokes =
+        ReadTextFile(EngineDir() / "Poseidon" / "Graphics" / "Rendering" / "Effects" / "Smokes.cpp");
+    CHECK(smokes.find("lighting::GCombatLights().SpawnDetonation(p, _det);") != std::string::npos);
+    CHECK(smokes.find("lighting::GCombatLights().SpawnDetonation(p, _deflagration);") != std::string::npos);
+    // A fireball's puffs are drawn in the frame they are born, hot.
+    CHECK(smokes.find("_fire.SetShowAtBirth(true);") != std::string::npos);
+    const std::string post = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_PostCombat.cpp");
+    CHECK(post.find("std::min(kBurstSurfaceReachCores * f.start, kBurstSurfaceReachMax)") != std::string::npos);
+    // The set evaluates a detonation's light by its physics.
+    CombatLightSet set;
+    const float p[3] = {0.0f, 0.0f, 0.0f};
+    const Detonation he = DetonationFromAmmo(200.0f, 150.0f, 8.0f);
+    const std::uint32_t id = set.SpawnDetonation(p, he);
+    set.Evaluate(CombatTuning(), 1.0f);
+    REQUIRE(set.Find(id) != nullptr);
+    CHECK(set.Find(id)->detonation);
+    CHECK(set.Find(id)->sample.core == Approx(kDetonationCoreShare * he.radius));
+    set.Tick(0.2f);
+    set.Tick(0.25f);
+    CHECK(set.Find(id) == nullptr);
 }

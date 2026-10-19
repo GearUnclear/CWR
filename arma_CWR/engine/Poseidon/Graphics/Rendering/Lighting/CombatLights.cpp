@@ -376,6 +376,110 @@ bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emi
     return true;
 }
 
+namespace
+{
+// The visible power of a black body at `k` against one at `refK` (Wien at
+// 580 nm, kFireballWienK = c2 / 580 nm).
+float WienRatio(float k, float refK)
+{
+    return std::exp(kFireballWienK * (1.0f / std::max(refK, 1.0f) - 1.0f / std::max(k, 1.0f)));
+}
+} // namespace
+
+Detonation DetonationFromAmmo(float hit, float indirectHit, float indirectHitRange)
+{
+    Detonation d;
+    const float energy = std::max(indirectHit, 0.0f) * std::max(indirectHitRange, 0.0f);
+    d.chargeKg = Clamp(energy / kChargeEnergyPerKg, kMinChargeKg, kMaxChargeKg);
+    d.scale = std::cbrt(d.chargeKg);
+    d.shaped = hit > energy;
+    d.radius = kFireballRadiusPerS * d.scale * (d.shaped ? kShapedRadiusShare : 1.0f);
+    d.flashTime = kFlashTimePerS * d.scale * (d.shaped ? kShapedFlashShare : 1.0f);
+    d.burnTime = kAfterburnTimePerS * d.scale * (d.shaped ? kShapedAfterburnShare : 1.0f);
+    d.peakK = kDetonationPeakK;
+    d.burnK = kAfterburnK;
+    d.columnHeight = kColumnHeightPerS * d.scale * (d.shaped ? kShapedColumnShare : 1.0f);
+    d.columnLife = kColumnLifePerS * d.scale;
+    return d;
+}
+
+Detonation DetonationFromBlastSize(float blastSize)
+{
+    // The reference shell's charge at its classic size, the cube root linear
+    // in the size: W = 2.5 kg x (size / 0.6)^3.
+    const float r = std::max(blastSize, 0.05f) / kReferenceBlastSize;
+    const float kg = kReferenceChargeKg * r * r * r;
+    // indirectHit x indirectHitRange of that charge, no shaped charge.
+    return DetonationFromAmmo(0.0f, kg * kChargeEnergyPerKg, 1.0f);
+}
+
+Detonation DeflagrationFromFuel(float fuelKg)
+{
+    Detonation d;
+    d.deflagration = true;
+    d.chargeKg = Clamp(fuelKg, kMinFuelKg, kMaxFuelKg);
+    d.scale = std::cbrt(d.chargeKg);
+    d.radius = 0.5f * kFuelDiameterPerS * d.scale;
+    d.burnTime = kFuelDurationPerS * d.scale;
+    d.flashTime = kFuelRiseShare * d.burnTime;
+    d.peakK = kFuelFlameK;
+    d.burnK = kFuelFlameK;
+    d.columnHeight = 3.0f * d.radius;
+    d.columnLife = kFuelColumnLife;
+    return d;
+}
+
+float DetonationTemperature(const Detonation& d, float age)
+{
+    const float t = std::max(age, 0.0f);
+    if (d.deflagration)
+    {
+        // Ignition, a rolling rise to the flame, the burn, then the soot.
+        const float up = std::min(t / std::max(d.flashTime, 1e-3f), 1.0f);
+        const float fall = std::max(0.3f * d.burnTime, kGlowFallTime);
+        const float hold = t <= d.burnTime ? 1.0f : std::exp(-(t - d.burnTime) / fall);
+        return kSootK + (d.burnK - kSootK) * (0.75f + 0.25f * up) * hold;
+    }
+    const float hold = t <= d.burnTime ? 1.0f : std::exp(-(t - d.burnTime) / kGlowFallTime);
+    return kSootK + (d.burnK - kSootK) * hold + (d.peakK - d.burnK) * std::exp(-t / std::max(d.flashTime, 1e-3f));
+}
+
+float DetonationPuffCooling(const Detonation& d, float bornK)
+{
+    const float glowEndK = 1100.0f;
+    const float span = d.deflagration ? 0.6f * d.burnTime : d.flashTime + d.burnTime;
+    return -std::max(bornK - glowEndK, 100.0f) / std::max(span, kMinGlowSpan);
+}
+
+CombatLightSample EvaluateDetonationLight(const Detonation& d, float age, std::uint32_t seed,
+                                          const CombatTuning& tuning)
+{
+    CombatLightSample s;
+    if (age < 0.0f)
+    {
+        s.finished = true;
+        return s;
+    }
+    const float k = DetonationTemperature(d, age);
+    float body[3];
+    BlackBodyRgb(k, body);
+    SetColour(s, body[0], body[1], body[2]);
+    // The radiating area goes with the charge to the 2/3 (a ball of the
+    // fireball's radius), its visible power with Wien against the peak.
+    const float area = std::pow(d.chargeKg, 2.0f / 3.0f);
+    float i1 = d.deflagration ? kDeflagrationI1 * area * WienRatio(k, kFuelFlameK)
+                              : kDetonationFlashI1 * area * WienRatio(k, d.peakK) *
+                                    std::max(kFlashGain * tuning.flash, 0.0f) / kFlashGain;
+    // A burning fuel ball flickers as it rolls; a detonation's flash does not.
+    if (d.deflagration)
+        i1 *= 1.0f + 0.15f * Noise1(age * 9.0f, seed) + 0.08f * Noise1(age * 23.0f, seed ^ 0x51ed27U);
+    const float core = std::max(kDetonationCoreShare * d.radius, 0.2f);
+    SetPower(s, std::max(i1, 0.0f), core, kCombatMaxRange);
+    // Over once the gas is soot (its light a thousandth of the flash).
+    s.finished = k < 1150.0f && age > d.burnTime;
+    return s;
+}
+
 float CombatTwilight(float sunElevationDeg)
 {
     const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
@@ -575,6 +679,15 @@ std::uint32_t CombatLightSet::Spawn(CombatLightKind kind, const float pos[3], fl
     return Add(kind, pos, strength, false);
 }
 
+std::uint32_t CombatLightSet::SpawnDetonation(const float pos[3], const Detonation& d)
+{
+    const std::uint32_t id = Add(CombatLightKind::Explosion, pos, d.scale, false);
+    CombatLightRecord& r = _records.back();
+    r.detonation = true;
+    r.det = d;
+    return id;
+}
+
 std::uint32_t CombatLightSet::Create(CombatLightKind kind, const float pos[3], float strength)
 {
     return Add(kind, pos, strength, true);
@@ -624,6 +737,17 @@ void CombatLightSet::Remove(std::uint32_t id)
         _records.end());
 }
 
+namespace
+{
+// A record's envelope: a blast with its detonation physics, or its kind's.
+CombatLightSample SampleRecord(const CombatLightRecord& r, const CombatTuning& tuning)
+{
+    if (r.detonation)
+        return EvaluateDetonationLight(r.det, r.age, r.seed, tuning);
+    return EvaluateCombatLight(r.kind, r.strength, r.age, r.seed, tuning);
+}
+} // namespace
+
 void CombatLightSet::Tick(float dt)
 {
     if (!(dt > 0.0f))
@@ -636,19 +760,18 @@ void CombatLightSet::Tick(float dt)
         r.age += step;
     // Bursts whose envelope is over leave (the tuning does not change when).
     const CombatTuning neutral;
-    _records.erase(
-        std::remove_if(
-            _records.begin(), _records.end(), [&neutral](const CombatLightRecord& r)
-            { return !r.owned && EvaluateCombatLight(r.kind, r.strength, r.age, r.seed, neutral).finished; }),
-        _records.end());
+    _records.erase(std::remove_if(_records.begin(), _records.end(), [&neutral](const CombatLightRecord& r)
+                                  { return !r.owned && SampleRecord(r, neutral).finished; }),
+                   _records.end());
 }
 
 void CombatLightSet::Evaluate(const CombatTuning& tuning, float nightEffect)
 {
     _tuning = tuning;
+    _burstDayScale = CombatDayScale(CombatLightKind::Explosion, nightEffect);
     for (CombatLightRecord& r : _records)
     {
-        CombatLightSample s = EvaluateCombatLight(r.kind, r.strength, r.age, r.seed, tuning);
+        CombatLightSample s = SampleRecord(r, tuning);
         if (r.kind == CombatLightKind::Flare || r.kind == CombatLightKind::Motor)
         {
             const float lum = 0.2126f * r.tint[0] + 0.7152f * r.tint[1] + 0.0722f * r.tint[2];
