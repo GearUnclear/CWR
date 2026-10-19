@@ -173,9 +173,28 @@ Each bug got a fix agent in a scratch worktree, an independent reviewer and an i
 
 Second attempts were in progress in `D:\Arma_CWA_worktrees\fix2-object-shadows` and `fix2-msaa-default` (uncommitted) when this log was written. Details: `research/bugs.md`, items 10 and 11.
 
+## O1. The photoreal overhaul (8476b9b to f4d57cb, 2026-10-19)
+
+The owner found the integrated features (A0 to A7, B1 to B11 on `graphics-remaster`) too subtle ("nearly no difference") and asked for a real visual overhaul in a modern photoreal direction, judged at thumbnail size against the vanilla upstream build. It was built in detached scratch copies by parallel workflows (lanes light, fog and surface, a look director, then fixer rounds with critics) and landed as five commits, one per round:
+
+| Commit | Round | What it brings |
+|---|---|---|
+| 8476b9b | 0 to 2 | Metered camera with a hue-keeping filmic curve (`photoLight`), froxel volumetric fog that replaces the stock fog and B8's air (`volFog`), GTAO and surface light (`surfaces`); AI sight follows the drawn fog; a GL bind-cache fix also covering B6 and B8 |
+| 2c957bb | 3 | The owner's wet-ground seam fixed at the root (a continuous ground-colour field instead of per-square albedo), dusk combat light without horizon strips or muzzle pools, grey-day air without a plate or halos, a clear near field at noon |
+| 1fcc8a4 | 4 | Black-body fireball glow, twilight-scaled combat light, a blue noon sky, a white-hot sun disc, lighter mist, the AI fog medium computed in the simulation |
+| 46b47a0 | 5 | Sun-in-frame metering, speck-free mist under sights, dawn haze by the phase function, particles lit by the photoreal rig, AI link end-to-end tests; the owner's rain rule: only puddles reflect (option 4 of a six-way puddle study) |
+| f4d57cb | explosions | Explosions scale with the munition's charge from CfgAmmo (detonation physics, option 1 of a six-way study): a brief white-hot flash, a lingering dark earth column, fuel fires as sooty deflagrations |
+
+**Owner decisions.** The overhaul is the final look, with nothing kept from the as-landed column (three-way sheet, round 3). There is no toggle requirement: deep changes that cannot be switched off are fine. AI vision must follow the rendered fog. The vanilla side of every comparison comes from a build of the vanilla upstream repo. Rain: only puddles may reflect.
+
+**Checks.** Each round: unit gate tags all green (round 5: 331 cases), the full capture set shot four games at a time, two critics (realism at thumbnail size; artefacts and cost), both "ready for the owner" after round 5. Cost on an RTX 4060 Ti at 1080p, 4x MSAA, quiet machine: +1.52 ms mean over 21 views (round 3: +1.45 ms); the low-sun day views grew about 0.3 to 0.5 ms (dawn haze phase).
+
+**Known leftovers.** The light mist is paler than vanilla and greys its trees; a rainy day reads more misty than rainy at thumbnail size; the low sun is a small white disc rather than a large glare; the HE flash is one or two frames (physically right, a pop in motion); the night fuel soot reads pale; the ground field arrives about 0.6 s after an island loads, so the old seam can flash once; script-fired rockets (LAW, RPG) never armed in the capture tests.
+
+**Where the evidence is (not in git).** `graphics-remaster\tmp\look\`: `director\` (sheets and notes per round, `round2` to `round4`), `fix`, `fix4`, `fix5` (fixer notes and patches), `puddle\1..6` and `boom\1..6` (the two six-way studies), `critic_r3_*` to `critic_r5_*`, `ref\vanilla` and `ref\landed` (the reference shots), `owner\` (everything shown to the owner).
+
 ## P1. Pending
 
-- The new branch `graphics-remaster` with the ideas that worked (requested by the owner on 2026-10-17; it did not exist yet when this log was written).
-- A video with a side-by-side comparison in motion of each approach (requested by the owner).
+- The comparison video "Uslu dur! trailer, part 1: graphics" (vanilla upstream left, everything on right, narrated), made from the O1 build.
 - A clean timing run on an idle machine at 1080p, ideally on an RTX 3060.
 - Re-shoot every before picture once B11 and B12 land.
