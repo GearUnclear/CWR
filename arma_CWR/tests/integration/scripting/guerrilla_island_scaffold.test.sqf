@@ -21,8 +21,12 @@ triAssertEq [(gmResistanceSide), "GUER"]
 triAssertEq [(format ["%1", side player]), "GUER"]
 
 // -- the scaffold's zone table came through the registry intact --------------
-triSimUntil { gmZoneCount >= 22 }
-triAssertEq [(gmZoneCount), 22]
+// 22 authored + seeded, plus the 2 bases the runtime seed adds (issue #76:
+// the template authors no AIRFIELD or SEAPORT, so seedBases defaults on and
+// Everon Airfield and Chotain Harbour join as occupier zones)
+triSimUntil { gmZoneCount >= 24 }
+triAssertEq [(gmZoneCount), 24]
+triAssertEq [(count gmSeededBases), 2]
 gsCamp = gmZoneIndex "Camp"
 triAssertEq [((gmZone gsCamp) select 1), "CAMP"]
 triAssertEq [((gmZone gsCamp) select 2), "GUER"]

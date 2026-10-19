@@ -38,6 +38,12 @@ class CfgGuerrillaZones
     // classifier runs over the loaded landscape and adds any town this offline
     // pass missed, deduped against the explicit CITY zones below at 300 m.
     seedCitySupport = 20;
+    // Generated occupier bases (OCCUPIER-FORCES.md 5.7): at new game the
+    // engine adds OUTPOST zones where the density rule finds a town more than
+    // 2.5 km from a ground base, stored in the save and never re-derived.
+    // Everon's west and south (Lamentin, Le Moule, Morton, Gravette, Regina,
+    // Figari) are 2.5 to 6.1 km from the five hubs.
+    generateBases = 1;
 
     class Zones
     {

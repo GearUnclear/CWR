@@ -14,9 +14,11 @@
 // the comparison lives here, so it stays testable with hand-built records and
 // cannot drift from what the resolution pass actually does.
 
+#include <Poseidon/Game/Guerrilla/BaseDetect.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 
+#include <string>
 #include <vector>
 
 namespace Poseidon::Guerrilla
@@ -84,5 +86,72 @@ class RecordingClassProbe final : public ClassProbe
     const ClassProbe& _inner;
     mutable std::vector<Query> _queries;
 };
+
+// ---------------------------------------------------------------------------
+// per-template base audit (issue #76, `PoseidonTools guerrilla lint --bases`)
+// ---------------------------------------------------------------------------
+//
+// The detector (BaseDetect) finds the AIRFIELD / SEAPORT / OUTPOST hubs a world
+// models; this half compares its candidates with what one template authors.
+// Pure: the command parses description.ext and reads the .wrp, these functions
+// only read ParamEntry trees and candidate lists.
+
+// Every class under cfgGuerrillaZones >> Zones, read the way
+// ZoneRegistry::LoadZones reads it: name defaults to the class name, type to
+// OUTPOST, position[] is getPos order {easting, northing, elevation}. A zone
+// without a usable position[] is kept at (0, 0). Null in, nothing out.
+void ReadTemplateZones(const ParamEntry* cfgGuerrillaZones, std::vector<DetectAuthoredZone>& out);
+
+// CfgGuerrillaZones >> seedBases as the runtime resolves it: a present key is
+// on when nonzero; an absent key defaults to 1 when the template authors no
+// AIRFIELD and no SEAPORT zone, else 0.
+struct SeedBasesSetting
+{
+    bool seed = false;
+    bool explicitKey = false; // seedBases is present in the template
+    int authoredAirfields = 0;
+    int authoredSeaports = 0;
+};
+SeedBasesSetting ResolveSeedBases(const ParamEntry* cfgGuerrillaZones, const std::vector<DetectAuthoredZone>& authored);
+
+// playRegion[] = {minX, minZ, maxX, maxZ}. False (and the outputs untouched)
+// when the key is absent, has fewer than four values, or is empty (min >= max).
+bool ReadPlayRegion(const ParamEntry* cfgGuerrillaZones, float& minX, float& minZ, float& maxX, float& maxZ);
+
+// The theatre as the runtime resolves it: the authored playRegion[] when it
+// is valid, else the bounding box of the authored zones padded by `pad` (5 km)
+// on every side. False only with neither (no valid key and no zones).
+// `isDefault` (optional) says which one it was.
+bool ResolvePlayRegion(const ParamEntry* cfgGuerrillaZones, const std::vector<DetectAuthoredZone>& authored,
+                       float& minX, float& minZ, float& maxX, float& maxZ, bool* isDefault = nullptr,
+                       float pad = 5000.0f);
+
+// One audit row per candidate.
+//   COVERED  an authored zone models it: coveredBy names it, coverDist is the
+//            centre-to-centre distance (-1 when the name is not authored)
+//   MISSING  the template does not author it: for AIRFIELD / SEAPORT, seeded
+//            says whether the runtime seed adds it; an OUTPOST is never seeded
+//   SKIPPED  outside playRegion[] or below the seeding confidence
+struct BaseLintRow
+{
+    std::string verdict; // COVERED | MISSING | SKIPPED
+    std::string type;
+    std::string name;
+    float x = 0;
+    float z = 0;
+    float confidence = 0;
+    std::string status; // BaseStatusName of the candidate
+    std::string coveredBy;
+    std::string coveredByType;
+    float coverDist = -1;
+    bool seeded = false;
+    std::string line; // the formatted report row, without the trailing newline
+};
+std::vector<BaseLintRow> LintTemplateBases(const BaseDetectResult& detected,
+                                           const std::vector<DetectAuthoredZone>& authored,
+                                           const SeedBasesSetting& seedBases);
+
+// The per-template header row: "BASES <label> seedBases=<0|1> (<why>) ...".
+std::string FormatSeedBasesRow(const char* label, const SeedBasesSetting& seedBases);
 
 } // namespace Poseidon::Guerrilla

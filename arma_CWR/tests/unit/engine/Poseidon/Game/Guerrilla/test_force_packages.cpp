@@ -1,0 +1,2136 @@
+// Occupier force packages (OCCUPIER-FORCES.md 6.5, D1 and D2; ForcePackages):
+// the ladder classification for WEST, EAST and LoBo Hizballah from config
+// facts (APC before Tank, horns are not weapons, air never from the ladder),
+// the descriptor overrides, the price and lethality table, the real abstract
+// speeds (3.2), the package choice (the cheapest lethal package, the fastest
+// within the urgent cost share, the most lethal affordable fallback, the
+// minimum bodies, the source's spare), both worked examples of 6.5 with the
+// crew included, no war-level gate, and the group and hull budgets.  Phase 5:
+// the default offer of every ground package, the armour ladders and crews,
+// the seat cap, the choice with armour affordable and not, the town-edge
+// role, and the downgrade to foot.  2026-10-16: the road quote (a ground
+// leg on the road route, the straight line x forcesRoadFactor without one,
+// air on the straight line) and the road quote cache ([roadroute]).  Pure:
+// the class facts come from a fake inspector, not the game config, and the
+// road routes from a fake planner, not the road net.
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <Poseidon/Game/Guerrilla/ForcePackages.hpp>
+#include <Poseidon/Game/Guerrilla/RoadRoute.hpp>
+
+#include <math.h>
+#include <string.h>
+#include <chrono>
+#include <vector>
+#include <map>
+#include <string>
+
+using namespace Poseidon;
+using namespace Poseidon::Guerrilla;
+using Catch::Approx;
+
+namespace
+{
+
+// facts read from the Remaster config (CfgVehicles, 2026-10-13) and, for the
+// LoBo Hizballah ladder, the shape of its classes: weapons that take a
+// magazine are crew weapons, horns (CarHorn / TruckHorn) take none
+struct FakeInspector final : HullInspector
+{
+    std::map<std::string, HullFacts> facts;
+
+    void Add(const char* cls, const char* sim, int cargo, float speed, float armor, bool weapon, int crew)
+    {
+        HullFacts f;
+        f.exists = true;
+        f.simulation = sim;
+        f.cargo = cargo;
+        f.maxSpeedKmh = speed;
+        f.armor = armor;
+        f.crewWeapon = weapon;
+        f.crew = crew;
+        facts[cls] = f;
+    }
+    bool Inspect(const char* className, HullFacts& out) const override
+    {
+        out = HullFacts();
+        auto it = facts.find(className ? className : "");
+        if (it == facts.end())
+        {
+            return false;
+        }
+        out = it->second;
+        return true;
+    }
+};
+
+FakeInspector VanillaAndLoBo()
+{
+    FakeInspector in;
+    // WEST {Jeep, Truck5t, M113, M60}
+    in.Add("Jeep", "car", 3, 100, 20, false, 1);
+    in.Add("Truck5t", "car", 12, 80, 20, false, 1);
+    in.Add("M113", "tank", 8, 60, 150, true, 2);
+    in.Add("M60", "tank", 0, 54, 300, true, 3);
+    // EAST {UAZ, Ural, BMP, T72}
+    in.Add("UAZ", "car", 3, 90, 20, false, 1);
+    in.Add("Ural", "car", 12, 80, 20, false, 1);
+    in.Add("BMP", "tank", 8, 70, 200, true, 3);
+    in.Add("T72", "tank", 0, 60, 400, true, 3);
+    // LoBo Hizballah {Ural, JeepMG, Ural zsu23, JeepAT}
+    in.Add("LoBo_Ural_Hizballah", "car", 12, 80, 20, false, 1);
+    in.Add("LoBo_JeepMG_Hizballah", "car", 1, 100, 20, true, 2);
+    in.Add("LoBo_ural_Hizbal_zsu23", "car", 0, 80, 20, true, 2);
+    in.Add("LoBo_JeepAT_Hizballah", "car", 1, 100, 20, true, 2);
+    // air, for the overrides
+    in.Add("UH60", "helicopter", 10, 300, 40, true, 2);
+    in.Add("AH1", "helicopter", 0, 280, 40, true, 2);
+    in.Add("A10", "airplane", 0, 650, 60, true, 1);
+    return in;
+}
+
+AutoArray<RString> Ladder(std::initializer_list<const char*> names)
+{
+    AutoArray<RString> out;
+    for (const char* n : names)
+    {
+        out.Add(RString(n));
+    }
+    return out;
+}
+
+std::string Str(const RString& s)
+{
+    return std::string((const char*)s);
+}
+
+// a catalogue with a Truck5t (cargo 12, 80 km/h, one driver)
+ForcePackageCatalogue WestCatalogue()
+{
+    const FakeInspector in = VanillaAndLoBo();
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"Jeep", "Truck5t", "M113", "M60"}), nullptr, in, cat);
+    return cat;
+}
+
+AutoArray<PackageSource> OneSource(int zone, float distance, int spare)
+{
+    AutoArray<PackageSource> s;
+    PackageSource src;
+    src.zone = zone;
+    src.distance = distance;
+    src.spare = spare;
+    s.Add(src);
+    return s;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - the WEST ladder: no armed car, Truck5t truck, M113 APC, M60 tank",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = VanillaAndLoBo();
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"Jeep", "Truck5t", "M113", "M60"}), nullptr, in, cat);
+    CHECK(cat.Offered(FPFoot));
+    CHECK_FALSE(cat.Offered(FPArmedCar)); // the Jeep carries only a horn
+    CHECK(Str(cat.hulls[FPTruck].className) == "Truck5t");
+    CHECK(Str(cat.hulls[FPApc].className) == "M113");
+    CHECK(Str(cat.hulls[FPTank].className) == "M60");
+    CHECK_FALSE(cat.Offered(FPTransportHeli));
+    CHECK_FALSE(cat.Offered(FPAttackHeli));
+    CHECK_FALSE(cat.Offered(FPJet));
+    CHECK(cat.hulls[FPTruck].cargo == 12);
+    CHECK(cat.hulls[FPTruck].crew == 1);
+    CHECK(cat.hulls[FPTruck].maxSpeedKmh == Approx(80.0f));
+    CHECK(cat.hulls[FPTank].crew == 3);
+}
+
+TEST_CASE("ForcePackages - the EAST ladder: rung 0 UAZ is no package, BMP is an APC (before Tank)",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = VanillaAndLoBo();
+    HullFacts uaz;
+    REQUIRE(in.Inspect("UAZ", uaz));
+    CHECK(ForcePackages::Classify(uaz) == -1);
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UAZ", "Ural", "BMP", "T72"}), nullptr, in, cat);
+    CHECK_FALSE(cat.Offered(FPArmedCar));
+    CHECK(Str(cat.hulls[FPTruck].className) == "Ural");
+    CHECK(Str(cat.hulls[FPApc].className) == "BMP"); // gun + transportSoldier 8: APC, not tank
+    CHECK(Str(cat.hulls[FPTank].className) == "T72");
+}
+
+TEST_CASE("ForcePackages - LoBo Hizballah: Ural truck, JeepMG / JeepAT / Ural zsu23 armed cars, no armour",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = VanillaAndLoBo();
+    const char* names[] = {"LoBo_Ural_Hizballah", "LoBo_JeepMG_Hizballah", "LoBo_ural_Hizbal_zsu23",
+                           "LoBo_JeepAT_Hizballah"};
+    const int expected[] = {FPTruck, FPArmedCar, FPArmedCar, FPArmedCar};
+    for (int i = 0; i < 4; i++)
+    {
+        HullFacts f;
+        REQUIRE(in.Inspect(names[i], f));
+        CHECK(ForcePackages::Classify(f) == expected[i]);
+    }
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({names[0], names[1], names[2], names[3]}), nullptr, in, cat);
+    CHECK(Str(cat.hulls[FPTruck].className) == "LoBo_Ural_Hizballah");
+    CHECK(Str(cat.hulls[FPArmedCar].className) == "LoBo_JeepMG_Hizballah"); // the lowest rung wins
+    CHECK_FALSE(cat.Offered(FPApc));
+    CHECK_FALSE(cat.Offered(FPTank));
+}
+
+TEST_CASE("ForcePackages - air is never classified from the ladder; the descriptor keys override",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = VanillaAndLoBo();
+    HullFacts heli;
+    REQUIRE(in.Inspect("UH60", heli));
+    CHECK(ForcePackages::IsAir(heli));
+    CHECK(ForcePackages::Classify(heli) == -1);
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UH60", "Jeep", "Truck5t"}), nullptr, in, cat);
+    CHECK_FALSE(cat.Offered(FPTransportHeli));
+
+    RString overrides[NForcePackages];
+    overrides[FPTruck] = "Ural";         // replaces the ladder's Truck5t
+    overrides[FPArmedCar] = "M113";      // an override wins over the classification
+    overrides[FPTransportHeli] = "UH60"; // air must be authored
+    overrides[FPAttackHeli] = "AH1";
+    overrides[FPJet] = "NoSuchJet"; // an unknown class is ignored
+    ForcePackages::BuildCatalogue(Ladder({"Jeep", "Truck5t", "M113", "M60"}), overrides, in, cat);
+    CHECK(Str(cat.hulls[FPTruck].className) == "Ural");
+    CHECK(Str(cat.hulls[FPArmedCar].className) == "M113");
+    CHECK(Str(cat.hulls[FPTransportHeli].className) == "UH60");
+    CHECK(Str(cat.hulls[FPAttackHeli].className) == "AH1");
+    CHECK_FALSE(cat.Offered(FPJet));
+    CHECK(Str(cat.hulls[FPTank].className) == "M60");
+    CHECK(std::string(ForcePackages::OverrideKey(FPTruck)) == "forcesTruck");
+    CHECK(std::string(ForcePackages::OverrideKey(FPArmedCar)) == "forcesArmedCar");
+    CHECK(std::string(ForcePackages::OverrideKey(FPApc)) == "forcesApc");
+    CHECK(std::string(ForcePackages::OverrideKey(FPTank)) == "forcesTank");
+    CHECK(std::string(ForcePackages::OverrideKey(FPTransportHeli)) == "forcesTransportHeli");
+    CHECK(std::string(ForcePackages::OverrideKey(FPAttackHeli)) == "forcesAttackHeli");
+    CHECK(std::string(ForcePackages::OverrideKey(FPJet)) == "forcesJet");
+    CHECK(std::string(ForcePackages::OverrideKey(FPFoot)).empty());
+}
+
+TEST_CASE("ForcePackages - wheeled armour with cargo is an APC; an unarmed APC hull with cargo is a truck",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    HullFacts brdm;
+    brdm.exists = true;
+    brdm.simulation = "car";
+    brdm.armor = 120;
+    brdm.cargo = 6;
+    brdm.crewWeapon = true;
+    CHECK(ForcePackages::Classify(brdm) == FPApc);
+    brdm.cargo = 2;
+    CHECK(ForcePackages::Classify(brdm) == FPArmedCar);
+    HullFacts carrier;
+    carrier.exists = true;
+    carrier.simulation = "tank";
+    carrier.armor = 150;
+    carrier.cargo = 10;
+    carrier.crewWeapon = false;
+    CHECK(ForcePackages::Classify(carrier) == FPTruck);
+    HullFacts man;
+    man.exists = true;
+    man.simulation = "soldier";
+    CHECK(ForcePackages::Classify(man) == -1);
+}
+
+TEST_CASE("ForcePackages - prices and lethality follow the 6.5 table", "[game][guerrilla][occupierforces][packages]")
+{
+    CHECK(ForcePackages::HullPrice(FPFoot) == 0);
+    CHECK(ForcePackages::HullPrice(FPTruck) == 3);
+    CHECK(ForcePackages::HullPrice(FPArmedCar) == 4);
+    CHECK(ForcePackages::HullPrice(FPApc) == 8);
+    CHECK(ForcePackages::HullPrice(FPTank) == 14);
+    CHECK(ForcePackages::HullPrice(FPTransportHeli) == 10);
+    CHECK(ForcePackages::HullPrice(FPTransportHeli, true) == 15);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli) == 18);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli, true) == 27);
+    CHECK(ForcePackages::HullPrice(FPJet) == 22);
+    CHECK(ForcePackages::HullPrice(FPJet, true) == 33);
+
+    CHECK(ForcePackages::TierFactor(0) == Approx(1.0f));
+    CHECK(ForcePackages::TierFactor(1) == Approx(1.25f));
+    CHECK(ForcePackages::TierFactor(2) == Approx(1.5f));
+    CHECK(ForcePackages::TierFactor(7) == Approx(1.5f));
+    CHECK(ForcePackages::Lethality(FPFoot, 4, 1.0f) == Approx(4.0f));
+    CHECK(ForcePackages::Lethality(FPFoot, 4, 1.5f) == Approx(6.0f));
+    CHECK(ForcePackages::Lethality(FPTruck, 9, 1.0f) == Approx(11.25f));
+    CHECK(ForcePackages::Lethality(FPArmedCar, 1, 1.0f) == Approx(4.0f));
+    CHECK(ForcePackages::Lethality(FPApc, 8, 1.0f) == Approx(16.0f));
+    CHECK(ForcePackages::Lethality(FPTank, 0, 1.0f) == Approx(12.0f));
+    CHECK(ForcePackages::Lethality(FPTransportHeli, 8, 1.0f) == Approx(10.0f));
+    CHECK(ForcePackages::Lethality(FPAttackHeli, 0, 1.0f) == Approx(14.0f));
+    CHECK(ForcePackages::Lethality(FPJet, 0, 1.0f) == Approx(16.0f));
+}
+
+TEST_CASE("ForcePackages - real abstract speeds: foot 1.5 m/s, a truck 0.6 x its maxSpeed",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    CHECK(ForcePackages::SpeedOf(FPFoot, cat) == Approx(1.5f));
+    CHECK(ForcePackages::SpeedOf(FPTruck, cat) == Approx(0.6f * 80.0f / 3.6f));
+    // a package the faction lacks moves (if ever asked) at a walk
+    CHECK(ForcePackages::SpeedOf(FPArmedCar, cat) == Approx(1.5f));
+    ForcePackageCatalogue air;
+    air.hulls[FPTransportHeli].className = "UH60";
+    air.hulls[FPTransportHeli].maxSpeedKmh = 300;
+    CHECK(ForcePackages::SpeedOf(FPTransportHeli, air) == Approx(0.8f * 300.0f / 3.6f));
+}
+
+TEST_CASE("ForcePackages - worked example 1: a quiet empty town 1 km from a base goes on foot",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 0;
+    req.minBodies = 4;
+    req.urgent = false;
+    req.pool = 60;
+    req.offered = ForcePackages::Phase3Packages;
+    const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(7, 1000.0f, 9));
+    REQUIRE(c.ok);
+    CHECK_FALSE(c.shortOfLethality);
+    CHECK(c.lReq == Approx(0.0f));
+    REQUIRE(c.nQuotes == 2);
+    // foot: 4 units, about 11 min at 1.5 m/s (the doc rounds to 15 with the road)
+    CHECK(c.quotes[0].package == FPFoot);
+    CHECK(c.quotes[0].bodies == 4);
+    CHECK(c.quotes[0].price == 4);
+    CHECK(c.quotes[0].poolPrice == 0);
+    // motorized: 4 bodies + a driver + a truck = 8 units, about 75 s
+    CHECK(c.quotes[1].package == FPTruck);
+    CHECK(c.quotes[1].bodies == 4);
+    CHECK(c.quotes[1].crew == 1);
+    CHECK(c.quotes[1].price == 8);
+    CHECK(c.quotes[1].poolPrice == 4);
+    CHECK(c.quotes[1].seconds < c.quotes[0].seconds);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.quote.source == 7);
+    CHECK(c.quote.bodies == 4);
+}
+
+TEST_CASE("ForcePackages - worked example 2: a loud flip 3.5 km out with 3 fighters goes motorized",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 3;
+    req.defenderWeight = 3;
+    req.margin = 1.2f;
+    req.minBodies = 4;
+    req.urgent = true;
+    req.urgentCostShare = 1.5f;
+    req.pool = 60;
+    req.offered = ForcePackages::Phase3Packages;
+    const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.lReq == Approx(10.8f));
+    REQUIRE(c.nQuotes == 2);
+    // foot 11: 11 units, about 39 min
+    CHECK(c.quotes[0].bodies == 11);
+    CHECK(c.quotes[0].price == 11);
+    CHECK(c.quotes[0].lethality == Approx(11.0f));
+    CHECK(c.quotes[0].seconds == Approx(3500.0f / 1.5f));
+    // motorized 9 + a driver: 13 units, lethality 11.25, about 5 min
+    CHECK(c.quotes[1].bodies == 9);
+    CHECK(c.quotes[1].crew == 1);
+    CHECK(c.quotes[1].price == 13);
+    CHECK(c.quotes[1].lethality == Approx(11.25f));
+    CHECK(c.quotes[1].seconds == Approx(3500.0f / (0.6f * 80.0f / 3.6f)));
+    // 13 <= 1.5 x 11: urgent takes the faster package
+    CHECK(c.quote.package == FPTruck);
+    CHECK(Str(c.quote.hullClass) == "Truck5t");
+    CHECK(c.quote.poolPrice == 4); // hull 3 + one crew body; the 9 come from the base
+    CHECK(c.quote.speed == Approx(0.6f * 80.0f / 3.6f));
+    // the same target not urgent: the cheapest lethal package, on foot
+    req.urgent = false;
+    const PackageChoice calm = ForcePackages::Choose(req, cat, OneSource(3, 3500.0f, 12));
+    REQUIRE(calm.ok);
+    CHECK(calm.quote.package == FPFoot);
+    CHECK(calm.quote.bodies == 11);
+    // urgent but over the cost share: a cheapest of 11 allows 16.5; a share
+    // of 1.1 allows 12.1, and the truck's 13 is too dear
+    req.urgent = true;
+    req.urgentCostShare = 1.1f;
+    const PackageChoice tight = ForcePackages::Choose(req, cat, OneSource(3, 3500.0f, 12));
+    REQUIRE(tight.ok);
+    CHECK(tight.quote.package == FPFoot);
+}
+
+TEST_CASE("ForcePackages - the minimum bodies, the source's spare and the most lethal fallback",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 3; // L_req 10.8
+    req.minBodies = 4;
+    req.pool = 60;
+    req.offered = ForcePackages::Phase3Packages;
+    // a base that can spare only 6: foot 6 (6.0) and motorized 6 (7.5) both
+    // fall short; the most lethal affordable one goes and says so
+    PackageChoice c = ForcePackages::Choose(req, cat, OneSource(2, 2000.0f, 6));
+    REQUIRE(c.ok);
+    CHECK(c.shortOfLethality);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.bodies == 6);
+    CHECK(c.quote.lethality == Approx(7.5f));
+    // a pool that cannot pay the truck (4 units): foot 6 goes, still short
+    req.pool = 3;
+    c = ForcePackages::Choose(req, cat, OneSource(2, 2000.0f, 6));
+    REQUIRE(c.ok);
+    CHECK(c.shortOfLethality);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.quote.poolPrice == 0);
+    // no base can spare the minimum: no operation
+    req.pool = 60;
+    c = ForcePackages::Choose(req, cat, OneSource(2, 2000.0f, 3));
+    CHECK_FALSE(c.ok);
+    CHECK(c.why.GetLength() > 0);
+    // the nearest base with the minimum, not the nearest base
+    AutoArray<PackageSource> two;
+    PackageSource nearPoor;
+    nearPoor.zone = 1;
+    nearPoor.distance = 500;
+    nearPoor.spare = 3;
+    PackageSource farRich;
+    farRich.zone = 4;
+    farRich.distance = 3000;
+    farRich.spare = 9;
+    two.Add(nearPoor);
+    two.Add(farRich);
+    req.fighters = 0;
+    c = ForcePackages::Choose(req, cat, two);
+    REQUIRE(c.ok);
+    CHECK(c.quote.source == 4);
+    // a garrison of 6 to retake: at least 6 bodies whatever L_req says
+    req.minBodies = 6;
+    c = ForcePackages::Choose(req, cat, two);
+    REQUIRE(c.ok);
+    CHECK(c.quote.bodies == 6);
+    // a hull package draws its infantry from the stored reserve
+    AutoArray<PackageSource> liveOnly = OneSource(5, 3500.0f, 9);
+    liveOnly[0].spareStored = 0;
+    req.minBodies = 4;
+    req.fighters = 3;
+    req.urgent = true;
+    c = ForcePackages::Choose(req, cat, liveOnly);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+}
+
+TEST_CASE("ForcePackages - phase 3 offers foot and truck only; no war-level gate",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = VanillaAndLoBo();
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"Jeep", "Truck5t", "M113", "M60"}), nullptr, in, cat);
+    PackageRequest req;
+    req.fighters = 4; // L_req 14.4: one group of 12 on foot (12.0) cannot meet it
+    req.minBodies = 4;
+    req.pool = 100;
+    req.offered = ForcePackages::Phase3Packages;
+    PackageChoice c = ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.nQuotes == 2);
+    for (int i = 0; i < c.nQuotes; i++)
+    {
+        CHECK((c.quotes[i].package == FPFoot || c.quotes[i].package == FPTruck));
+    }
+    // motorized 12 (15.0) meets 14.4 where foot 12 (12.0) cannot
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.bodies == 12);
+    // every package offered: the APC (8 + 2 crew, +6, x1.25) is chosen when
+    // it is the cheapest lethal one; the request carries no war level at all,
+    // so nothing gates armour on it (D2) - only the tier factor
+    req.offered = ForcePackages::AllPackages;
+    c = ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 12));
+    REQUIRE(c.ok);
+    // foot, truck, APC, tank, then the columns truck+APC, truck+tank,
+    // APC+APC, APC+tank (no armed car, no air in this ladder)
+    CHECK(c.nQuotes == 8);
+    // truck 12 + 1 + 3 = 16 (15.0); APC needs ceil(8.4 / 1.25) = 7: 7 + 2 + 8 = 17 (14.75);
+    // every column costs more than the plain truck
+    CHECK(c.quote.package == FPTruck);
+    // a better tier: foot 10 x 1.5 = 15.0 meets it for 10 units
+    req.tierFactor = 1.5f;
+    c = ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.quote.bodies == 10);
+}
+
+TEST_CASE("ForcePackages - group and hull budgets", "[game][guerrilla][occupierforces][packages]")
+{
+    CHECK(ForcePackages::GroupsOf(FPFoot) == 1);
+    CHECK(ForcePackages::GroupsOf(FPTruck) == 2);
+    CHECK(ForcePackages::GroupsOf(FPTransportHeli) == 2);
+    CHECK(ForcePackages::HullsOf(FPFoot) == 0);
+    CHECK(ForcePackages::HullsOf(FPTruck) == 1);
+    CHECK(ForcePackages::WithinBudgets(FPFoot, 39, 6));
+    CHECK_FALSE(ForcePackages::WithinBudgets(FPFoot, 40, 0));
+    CHECK(ForcePackages::WithinBudgets(FPTruck, 38, 5));
+    CHECK_FALSE(ForcePackages::WithinBudgets(FPTruck, 39, 0)); // two groups do not fit in one
+    CHECK_FALSE(ForcePackages::WithinBudgets(FPTruck, 10, 6)); // forcesLiveHullsMax
+    CHECK(ForcePackages::WithinBudgets(FPFoot, 10, 6));        // foot needs no hull
+}
+
+TEST_CASE("ForcePackages - names for gmOccupierOps", "[game][guerrilla][occupierforces][packages]")
+{
+    CHECK(std::string(ForcePackages::PackageName(FPFoot)) == "FOOT");
+    CHECK(std::string(ForcePackages::PackageName(FPTruck)) == "TRUCK");
+    CHECK(std::string(ForcePackages::PackageName(FPJet)) == "JET");
+    CHECK(std::string(ForcePackages::KindName(CAKRetake)) == "RETAKE");
+    CHECK(std::string(ForcePackages::KindName(CAKHqAssault)) == "HQ_ASSAULT");
+    CHECK(std::string(ForcePackages::OriginName(CAOLegacy)) == "LEGACY");
+    CHECK(std::string(ForcePackages::OriginName(CAODirector)) == "DIRECTOR");
+    CHECK(std::string(ForcePackages::OriginName(CAOPushout)) == "PUSHOUT");
+}
+
+// ---------------------------------------------------------------------------
+// phase 5: armour packages (armed car, APC, tank)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// a ladder with all three armour packages, in the shape of LoBo's Egyptian
+// frontier roster {Toyota MG, BTR-60, BMP, T-55}: an armed pickup with two
+// cargo seats, a wheeled APC (car simulation, armoured, eight seats), a
+// tracked APC and a tank.  The facts are fakes in that shape, not config
+// reads.
+FakeInspector ArmourLadder()
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("ToyotaMG", "car", 2, 110, 20, true, 2);
+    in.Add("BTR60", "car", 8, 80, 120, true, 2);
+    in.Add("BMPE", "tank", 8, 65, 200, true, 3);
+    in.Add("T55", "tank", 0, 50, 350, true, 3);
+    // an IDF-shaped ladder: no truck at all
+    in.Add("HMMWVPatrol", "car", 3, 100, 30, true, 2);
+    in.Add("Zelda", "tank", 10, 60, 150, true, 2);
+    in.Add("M60A1", "tank", 0, 50, 300, true, 3);
+    return in;
+}
+
+ForcePackageCatalogue ArmourCatalogue()
+{
+    const FakeInspector in = ArmourLadder();
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"ToyotaMG", "BTR60", "BMPE", "T55"}), nullptr, in, cat);
+    return cat;
+}
+
+ForcePackageCatalogue IdfCatalogue()
+{
+    const FakeInspector in = ArmourLadder();
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"HMMWVPatrol", "Zelda", "M60A1"}), nullptr, in, cat);
+    return cat;
+}
+
+// the plain (escort-less) quote of a package
+const PackageQuote* QuoteOf(const PackageChoice& c, int package)
+{
+    for (int i = 0; i < c.nQuotes; i++)
+    {
+        if (c.quotes[i].package == package && !c.quotes[i].HasEscort())
+        {
+            return &c.quotes[i];
+        }
+    }
+    return nullptr;
+}
+
+// a column's quote: carrier + escort
+const PackageQuote* ColumnOf(const PackageChoice& c, int carrier, int escort)
+{
+    for (int i = 0; i < c.nQuotes; i++)
+    {
+        if (c.quotes[i].package == carrier && c.quotes[i].escort == escort)
+        {
+            return &c.quotes[i];
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - phase 6A offers every package by default; air only where authored",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const PackageRequest req;
+    CHECK(req.offered == ForcePackages::DefaultPackages);
+    CHECK(ForcePackages::DefaultPackages == (ForcePackages::GroundPackages | ForcePackages::AirPackages));
+    CHECK(ForcePackages::DefaultPackages == ForcePackages::AllPackages);
+    CHECK_FALSE(req.airOffMap);
+    for (int p = FPTransportHeli; p < NForcePackages; p++)
+    {
+        CHECK((ForcePackages::AirPackages & ForcePackages::Bit(p)) != 0);
+        CHECK((ForcePackages::GroundPackages & ForcePackages::Bit(p)) == 0);
+    }
+    CHECK((ForcePackages::GroundPackages | ForcePackages::AirPackages) == ForcePackages::AllPackages);
+    CHECK((ForcePackages::Phase3Packages & ForcePackages::GroundPackages) == ForcePackages::Phase3Packages);
+    // a ladder catalogue offers no air: the default offer changes nothing
+    // until the descriptor authors a class
+    const ForcePackageCatalogue cat = WestCatalogue();
+    CHECK_FALSE(cat.Offered(FPTransportHeli));
+    CHECK_FALSE(cat.Offered(FPAttackHeli));
+    CHECK_FALSE(cat.Offered(FPJet));
+}
+
+TEST_CASE("ForcePackages - air packages: prices on and off map, seats, lethality, speed and the choice",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("Mi17", "helicopter", 14, 240, 40, true, 2);
+    in.Add("Mi24", "helicopter", 8, 300, 60, true, 2);
+    in.Add("Su25", "airplane", 0, 900, 60, true, 1);
+    RString overrides[NForcePackages];
+    overrides[FPTransportHeli] = "Mi17";
+    overrides[FPAttackHeli] = "Mi24";
+    overrides[FPJet] = "Su25";
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UAZ", "Ural", "BMP", "T72"}), overrides, in, cat);
+    REQUIRE(cat.Offered(FPTransportHeli));
+    REQUIRE(cat.Offered(FPAttackHeli));
+    REQUIRE(cat.Offered(FPJet));
+    // prices 10 / 18 / 22, x1.5 off map (6.5, D3)
+    CHECK(ForcePackages::HullPrice(FPTransportHeli) == 10);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli) == 18);
+    CHECK(ForcePackages::HullPrice(FPJet) == 22);
+    CHECK(ForcePackages::HullPrice(FPTransportHeli, true) == 15);
+    CHECK(ForcePackages::HullPrice(FPAttackHeli, true) == 27);
+    CHECK(ForcePackages::HullPrice(FPJet, true) == 33);
+    // the transport carries min(12, transportSoldier); the strike airframes nobody
+    CHECK(ForcePackages::SeatCap(FPTransportHeli, cat) == 12);
+    CHECK(ForcePackages::SeatCap(FPAttackHeli, cat) == 0);
+    CHECK(ForcePackages::SeatCap(FPJet, cat) == 0);
+    // lethality: inserted infantry x 1.25; +14 / +16 for the strike airframes
+    CHECK(ForcePackages::Lethality(FPTransportHeli, 8, 1.0f) == Approx(10.0f));
+    CHECK(ForcePackages::LethalityAdd(FPAttackHeli) == Approx(14.0f));
+    CHECK(ForcePackages::LethalityAdd(FPJet) == Approx(16.0f));
+    // the abstract leg: 0.8 x maxSpeed, straight line
+    CHECK(ForcePackages::SpeedOf(FPTransportHeli, cat) == Approx(0.8f * 240.0f / 3.6f));
+    CHECK(ForcePackages::GroupsOf(FPTransportHeli) == 2);
+    CHECK(ForcePackages::EdgeRole(FPTransportHeli) == FERNone);
+
+    PackageRequest req;
+    req.fighters = 0;
+    req.minBodies = 4;
+    req.pool = 200;
+    const AutoArray<PackageSource> src = OneSource(3, 6000.0f, 12);
+    // a quote: bodies + crew + hull; off map the hull costs 15
+    PackageQuote q = ForcePackages::Quote(FPTransportHeli, req, cat, src);
+    CHECK(q.source == 3);
+    CHECK(q.bodies == 4);
+    CHECK(q.crew == 2);
+    CHECK(q.hullPrice == 10);
+    CHECK(q.poolPrice == 12);
+    CHECK(q.price == 16);
+    req.airOffMap = true;
+    q = ForcePackages::Quote(FPTransportHeli, req, cat, src);
+    CHECK(q.hullPrice == 15);
+    CHECK(q.price == 21);
+    req.airOffMap = false;
+    // the strike airframes are quoted seats-short and never chosen for a ground operation
+    CHECK(ForcePackages::Quote(FPAttackHeli, req, cat, src).seatsShort);
+    CHECK(ForcePackages::Quote(FPJet, req, cat, src).seatsShort);
+    PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package != FPAttackHeli);
+    CHECK(c.quote.package != FPJet);
+    // urgent: the helicopter is the fastest package; it goes when it costs
+    // within the urgent share of the cheapest lethal one (foot, 4 units here,
+    // so a share of 5 lets the 16-unit insertion through)
+    req.urgent = true;
+    req.urgentCostShare = 5.0f;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.lethal);
+    // a pool that cannot pay the helicopter: the ground package goes
+    req.pool = 5;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package != FPTransportHeli);
+}
+
+TEST_CASE("ForcePackages - the armour ladders: armed car, wheeled and tracked APC, tank; the lowest rung wins",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const FakeInspector in = ArmourLadder();
+    const char* names[] = {"ToyotaMG", "BTR60", "BMPE", "T55", "HMMWVPatrol", "Zelda", "M60A1"};
+    const int expected[] = {FPArmedCar, FPApc, FPApc, FPTank, FPArmedCar, FPApc, FPTank};
+    for (int i = 0; i < 7; i++)
+    {
+        HullFacts f;
+        REQUIRE(in.Inspect(names[i], f));
+        CHECK(ForcePackages::Classify(f) == expected[i]);
+    }
+    const ForcePackageCatalogue cat = ArmourCatalogue();
+    CHECK_FALSE(cat.Offered(FPTruck));
+    CHECK(Str(cat.hulls[FPArmedCar].className) == "ToyotaMG");
+    CHECK(Str(cat.hulls[FPApc].className) == "BTR60"); // before the BMP: the lower rung
+    CHECK(Str(cat.hulls[FPTank].className) == "T55");
+    // crew per class: what hasDriver + hasGunner + hasCommander count
+    CHECK(cat.hulls[FPArmedCar].crew == 2);
+    CHECK(cat.hulls[FPApc].crew == 2);
+    CHECK(cat.hulls[FPTank].crew == 3);
+    CHECK(ForcePackages::CrewOf(FPArmedCar, cat) == 2);
+    CHECK(ForcePackages::CrewOf(FPTank, cat) == 3);
+    CHECK(ForcePackages::CrewOf(FPTruck, cat) == 0); // not offered
+    // the WEST ladder: the M113 has two crew, the M60 three
+    const ForcePackageCatalogue west = WestCatalogue();
+    CHECK(ForcePackages::CrewOf(FPApc, west) == 2);
+    CHECK(ForcePackages::CrewOf(FPTank, west) == 3);
+    // an override names an armour class directly
+    RString overrides[NForcePackages];
+    overrides[FPTank] = "M60A1";
+    overrides[FPApc] = "Zelda";
+    ForcePackageCatalogue over;
+    ForcePackages::BuildCatalogue(Ladder({"ToyotaMG", "BTR60", "BMPE", "T55"}), overrides, in, over);
+    CHECK(Str(over.hulls[FPTank].className) == "M60A1");
+    CHECK(Str(over.hulls[FPApc].className) == "Zelda");
+    CHECK(over.hulls[FPApc].cargo == 10);
+}
+
+TEST_CASE("ForcePackages - armour prices and lethality in a quote: bodies + crew + hull",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = ArmourCatalogue();
+    PackageRequest req;
+    req.fighters = 0;
+    req.minBodies = 2; // an armed car's two seats hold the minimum
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(1, 2000.0f, 12);
+    const PackageQuote car = ForcePackages::Quote(FPArmedCar, req, cat, src);
+    CHECK(car.source == 1);
+    CHECK(car.bodies == 2);
+    CHECK(car.crew == 2);
+    CHECK(car.hullPrice == 4);
+    CHECK(car.poolPrice == 6);
+    CHECK(car.price == 8);
+    CHECK(car.lethality == Approx(2.0f + 3.0f)); // no carried factor, +3
+    CHECK(car.speed == Approx(0.6f * 110.0f / 3.6f));
+    const PackageQuote apc = ForcePackages::Quote(FPApc, req, cat, src);
+    CHECK(apc.bodies == 2);
+    CHECK(apc.crew == 2);
+    CHECK(apc.hullPrice == 8);
+    CHECK(apc.poolPrice == 10);
+    CHECK(apc.price == 12);
+    CHECK(apc.lethality == Approx(2.0f * 1.25f + 6.0f));
+    // a tank carries nobody: its quote is seats-short at any minimum >= 1
+    const PackageQuote tank = ForcePackages::Quote(FPTank, req, cat, src);
+    CHECK(tank.seatsShort);
+    CHECK(tank.source == -1);
+    CHECK(tank.hullPrice == 14);
+    CHECK(tank.poolPrice == 17);
+    CHECK(ForcePackages::Lethality(FPTank, 0, 1.0f) == Approx(12.0f));
+    CHECK(ForcePackages::Lethality(FPArmedCar, 2, 1.5f) == Approx(6.0f));
+    CHECK(ForcePackages::Lethality(FPApc, 8, 1.25f) == Approx(8.0f * 1.25f * 1.25f + 6.0f));
+}
+
+TEST_CASE("ForcePackages - the seat cap: a hull carries at most its cargo seats, one group at most",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue west = WestCatalogue();
+    CHECK(ForcePackages::SeatCap(FPFoot, west) == ForcePackages::MaxGroup);
+    CHECK(ForcePackages::SeatCap(FPTruck, west) == 12);
+    CHECK(ForcePackages::SeatCap(FPApc, west) == 8);
+    CHECK(ForcePackages::SeatCap(FPTank, west) == 0);
+    CHECK(ForcePackages::SeatCap(FPArmedCar, west) == 0); // not offered
+    const ForcePackageCatalogue idf = IdfCatalogue();
+    CHECK(ForcePackages::SeatCap(FPApc, idf) == 10);
+    CHECK(ForcePackages::SeatCap(FPArmedCar, idf) == 3);
+
+    PackageRequest req;
+    req.fighters = 5; // L_req 18: the APC wants ceil(12 / 1.25) = 10 but has 8 seats
+    req.minBodies = 4;
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(2, 1500.0f, 12);
+    const PackageQuote apc = ForcePackages::Quote(FPApc, req, west, src);
+    CHECK(apc.bodies == 8);
+    CHECK_FALSE(apc.seatsShort);
+    CHECK(apc.lethality == Approx(16.0f));
+    CHECK_FALSE(apc.lethal);
+    // a minimum above the seats: the APC is quoted, short, and never chosen
+    req.minBodies = 9;
+    const PackageQuote big = ForcePackages::Quote(FPApc, req, west, src);
+    CHECK(big.seatsShort);
+    CHECK(big.source == -1);
+    const PackageChoice c = ForcePackages::Choose(req, west, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package != FPApc);
+    CHECK(c.quote.package != FPTank);
+    // the IDF-shaped armed car (3 seats) cannot carry a retake's 4
+    req.minBodies = 4;
+    req.fighters = 0;
+    const PackageQuote car = ForcePackages::Quote(FPArmedCar, req, idf, src);
+    CHECK(car.seatsShort);
+    req.minBodies = 3;
+    const PackageQuote car3 = ForcePackages::Quote(FPArmedCar, req, idf, src);
+    CHECK_FALSE(car3.seatsShort);
+    CHECK(car3.bodies == 3);
+}
+
+TEST_CASE("ForcePackages - the choice with armour affordable and not", "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue west = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 5; // L_req 18: foot 12 (12.0), truck 12 (15.0), APC 8 (16.0): no single hull meets it
+    req.minBodies = 4;
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(2, 1500.0f, 12);
+    PackageChoice c = ForcePackages::Choose(req, west, src);
+    REQUIRE(c.ok);
+    CHECK(c.nQuotes == 8); // foot, truck, APC, tank + truck+APC, truck+tank, APC+APC, APC+tank
+    // a column meets it: truck + APC escort, 10 + 1 + 3 + 2 + 8 = 24 units,
+    // 10 x 1.25 + 6 = 18.5 (truck + tank 26, APC + APC 25, APC + tank 31)
+    CHECK_FALSE(c.shortOfLethality);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.escort == FPApc);
+    CHECK(c.quote.price == 24);
+    // the pool cannot pay any column (the cheapest needs 14): the most
+    // lethal affordable single package goes, the APC
+    req.pool = 13;
+    c = ForcePackages::Choose(req, west, src);
+    REQUIRE(c.ok);
+    CHECK(c.shortOfLethality);
+    CHECK(c.quote.package == FPApc);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.quote.bodies == 8);
+    CHECK(c.quote.crew == 2);
+    CHECK(c.quote.poolPrice == 10);
+    CHECK(c.quote.price == 18);
+    CHECK(c.quote.lethality == Approx(16.0f));
+    CHECK(Str(c.quote.hullClass) == "M113");
+    // the pool cannot pay the APC (10) but can the truck (4)
+    req.pool = 9;
+    c = ForcePackages::Choose(req, west, src);
+    REQUIRE(c.ok);
+    CHECK(c.shortOfLethality);
+    CHECK(c.quote.package == FPTruck);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.quote.lethality == Approx(15.0f));
+    // the pool inert: everything is affordable, the cheapest lethal column
+    req.pool = 0;
+    req.poolActive = false;
+    c = ForcePackages::Choose(req, west, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.escort == FPApc);
+
+    // an IDF-shaped ladder (no truck): the APC is the only carrier.  A loud
+    // urgent flip with 3 fighters (L_req 10.8): foot 11 is the cheapest at
+    // 11; the APC (4 + 2 crew + 8 = 14, lethality 11.0) costs at most 1.5 x
+    // that and is faster, so it goes
+    const ForcePackageCatalogue idf = IdfCatalogue();
+    PackageRequest loud;
+    loud.fighters = 3;
+    loud.minBodies = 4;
+    loud.urgent = true;
+    loud.pool = 60;
+    c = ForcePackages::Choose(loud, idf, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK_FALSE(c.shortOfLethality);
+    CHECK(c.quote.package == FPApc);
+    CHECK(c.quote.bodies == 4);
+    CHECK(c.quote.price == 14);
+    CHECK(c.quote.lethality == Approx(11.0f));
+    const PackageQuote* car = QuoteOf(c, FPArmedCar);
+    REQUIRE(car != nullptr);
+    CHECK(car->seatsShort); // three seats, four needed
+    const PackageQuote* tank = QuoteOf(c, FPTank);
+    REQUIRE(tank != nullptr);
+    CHECK(tank->seatsShort);
+    // the same flip with a pool that cannot pay the APC: on foot
+    loud.pool = 9;
+    c = ForcePackages::Choose(loud, idf, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.quote.bodies == 11);
+    // not urgent: the cheapest lethal package, on foot
+    loud.pool = 60;
+    loud.urgent = false;
+    c = ForcePackages::Choose(loud, idf, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+
+    // an armed car is quoted where its seats hold the minimum (3 here):
+    // 1 fighter (L_req 3.6), foot 4 (4 units) against the armed car's
+    // 3 + 2 crew + 4 = 9 units (lethality 6.0).  Urgent, the ceiling is
+    // 1.5 x 4 = 6, so the armed car is too dear and foot goes.
+    PackageRequest small;
+    small.fighters = 1;
+    small.minBodies = 3;
+    small.urgent = true;
+    small.pool = 60;
+    c = ForcePackages::Choose(small, idf, OneSource(3, 3000.0f, 12));
+    REQUIRE(c.ok);
+    const PackageQuote* smallCar = QuoteOf(c, FPArmedCar);
+    REQUIRE(smallCar != nullptr);
+    CHECK(smallCar->source == 3);
+    CHECK(smallCar->bodies == 3);
+    CHECK(smallCar->price == 9);
+    CHECK(smallCar->lethality == Approx(6.0f));
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.quote.bodies == 4);
+}
+
+TEST_CASE("ForcePackages - both worked examples hold with every ground package offered",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    // example 1: a quiet empty town 1 km from a base
+    PackageRequest quiet;
+    quiet.fighters = 0;
+    quiet.minBodies = 4;
+    quiet.pool = 60;
+    PackageChoice c = ForcePackages::Choose(quiet, cat, OneSource(7, 1000.0f, 9));
+    REQUIRE(c.ok);
+    CHECK(c.nQuotes == 8);
+    const PackageQuote* apc = QuoteOf(c, FPApc);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->bodies == 4);
+    CHECK(apc->price == 14); // 4 bodies + 2 crew + the APC's 8
+    CHECK(ColumnOf(c, FPTruck, FPApc)->price == 18);
+    CHECK(c.quote.package == FPFoot);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.quote.price == 4);
+    // example 2: a loud flip 3.5 km from the Harbour, 3 fighters, urgent
+    PackageRequest loud;
+    loud.fighters = 3;
+    loud.minBodies = 4;
+    loud.urgent = true;
+    loud.pool = 60;
+    c = ForcePackages::Choose(loud, cat, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.lReq == Approx(10.8f));
+    apc = QuoteOf(c, FPApc);
+    REQUIRE(apc != nullptr);
+    const PackageQuote* truck = QuoteOf(c, FPTruck);
+    REQUIRE(truck != nullptr);
+    // the APC: 4 + 2 crew + 8 = 14 units, lethality 11.0, within 1.5 x 11
+    // but slower than the truck (0.6 x 60 km/h against 0.6 x 80)
+    CHECK(apc->bodies == 4);
+    CHECK(apc->price == 14);
+    CHECK(apc->lethality == Approx(11.0f));
+    CHECK(apc->lethal);
+    CHECK(apc->seconds > truck->seconds);
+    CHECK(QuoteOf(c, FPTank)->seatsShort);
+    // the columns: truck + APC 4 + 1 + 3 + 2 + 8 = 18 and truck + tank
+    // 4 + 1 + 3 + 3 + 14 = 25, both above 1.5 x 11 = 16.5
+    const PackageQuote* truckApc = ColumnOf(c, FPTruck, FPApc);
+    REQUIRE(truckApc != nullptr);
+    CHECK(truckApc->bodies == 4);
+    CHECK(truckApc->price == 18);
+    CHECK(truckApc->lethality == Approx(11.0f));
+    const PackageQuote* truckTank = ColumnOf(c, FPTruck, FPTank);
+    REQUIRE(truckTank != nullptr);
+    CHECK(truckTank->price == 25);
+    CHECK(c.quote.package == FPTruck);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.quote.bodies == 9);
+    CHECK(c.quote.price == 13);
+}
+
+TEST_CASE("ForcePackages - at the town edge armed hulls support and trucks hold back",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    CHECK(ForcePackages::EdgeRole(FPFoot) == FERNone);
+    CHECK(ForcePackages::EdgeRole(FPTruck) == FERHoldBack);
+    CHECK(ForcePackages::EdgeRole(FPArmedCar) == FERSupport);
+    CHECK(ForcePackages::EdgeRole(FPApc) == FERSupport);
+    CHECK(ForcePackages::EdgeRole(FPTank) == FERSupport);
+    CHECK(ForcePackages::EdgeRole(FPTransportHeli) == FERNone);
+    CHECK(ForcePackages::EdgeRole(FPAttackHeli) == FERNone);
+    CHECK(ForcePackages::EdgeRole(FPJet) == FERNone);
+    CHECK_FALSE(ForcePackages::SupportsAtEdge(FPTruck));
+    CHECK(ForcePackages::SupportsAtEdge(FPApc));
+    CHECK(ForcePackages::IsGroundHull(FPTruck));
+    CHECK(ForcePackages::IsGroundHull(FPTank));
+    CHECK_FALSE(ForcePackages::IsGroundHull(FPFoot));
+    CHECK_FALSE(ForcePackages::IsGroundHull(FPTransportHeli));
+    // every ground hull package counts one crewed hull and two groups
+    for (int p = FPTruck; p <= FPTank; p++)
+    {
+        CHECK(ForcePackages::GroupsOf(p) == 2);
+        CHECK(ForcePackages::HullsOf(p) == 1);
+    }
+}
+
+TEST_CASE("ForcePackages - a hull package downgrades to foot when the stored reserve cannot pay",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    // stored 0, live 9: the truck's 9 go on foot
+    CHECK(ForcePackages::MustDowngrade(FPTruck, 9, 0, 9));
+    CHECK(ForcePackages::MustDowngrade(FPApc, 4, 3, 6));
+    CHECK(ForcePackages::MustDowngrade(FPTank, 1, 0, 4));
+    // the stored reserve pays: no downgrade
+    CHECK_FALSE(ForcePackages::MustDowngrade(FPTruck, 9, 9, 9));
+    // nobody can pay at all: no downgrade (the launch is refused instead)
+    CHECK_FALSE(ForcePackages::MustDowngrade(FPTruck, 9, 0, 5));
+    // foot and air never downgrade
+    CHECK_FALSE(ForcePackages::MustDowngrade(FPFoot, 4, 0, 9));
+    CHECK_FALSE(ForcePackages::MustDowngrade(FPTransportHeli, 8, 0, 12));
+
+    // worked example 2's truck quote, downgraded
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest loud;
+    loud.fighters = 3;
+    loud.minBodies = 4;
+    loud.urgent = true;
+    loud.pool = 60;
+    loud.offered = ForcePackages::Phase3Packages;
+    const PackageChoice c = ForcePackages::Choose(loud, cat, OneSource(3, 3500.0f, 12));
+    REQUIRE(c.ok);
+    REQUIRE(c.quote.package == FPTruck);
+    int refund = -1;
+    const PackageQuote f = ForcePackages::Downgrade(c.quote, 1.0f, c.lReq, refund);
+    CHECK(refund == 4); // the truck's 3 + its driver
+    CHECK(f.package == FPFoot);
+    CHECK(f.source == 3);
+    CHECK(f.bodies == 9);
+    CHECK(f.crew == 0);
+    CHECK(f.hullPrice == 0);
+    CHECK(f.poolPrice == 0);
+    CHECK(f.price == 9);
+    CHECK(f.hullClass.GetLength() == 0);
+    CHECK(f.speed == Approx(1.5f));
+    CHECK(f.seconds == Approx(3500.0f / 1.5f).epsilon(0.001));
+    CHECK(f.lethality == Approx(9.0f));
+    CHECK_FALSE(f.lethal); // 9 on foot fall short of 10.8
+    CHECK(f.affordable);
+    // a foot quote stays as it is, nothing refunded
+    const PackageQuote same = ForcePackages::Downgrade(f, 1.0f, c.lReq, refund);
+    CHECK(refund == 0);
+    CHECK(same.package == FPFoot);
+    CHECK(same.bodies == 9);
+}
+
+// ---------------------------------------------------------------------------
+// phase 5: columns (a carrier + one escort hull, the owner's option b)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// a ladder with every ground role: a truck (80 km/h), a slow armoured car
+// (40 km/h, two seats), a tracked APC (65 km/h, eight seats, three crew)
+// and a tank (60 km/h).  Fakes in that shape.
+ForcePackageCatalogue ColumnCatalogue()
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("ColTruck", "car", 12, 80, 20, false, 1);
+    in.Add("ColArmouredCar", "car", 2, 40, 20, true, 2);
+    in.Add("ColApc", "tank", 8, 65, 200, true, 3);
+    in.Add("ColTank", "tank", 0, 60, 400, true, 3);
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"ColTruck", "ColArmouredCar", "ColApc", "ColTank"}), nullptr, in, cat);
+    return cat;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - a column: carrier + escort, its price, lethality and pace",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 5; // L_req 18
+    req.minBodies = 4;
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(2, 1500.0f, 12);
+    const PackageQuote q = ForcePackages::Quote(FPTruck, FPApc, req, cat, src);
+    CHECK(q.package == FPTruck);
+    CHECK(q.escort == FPApc);
+    CHECK(q.HasEscort());
+    CHECK(Str(q.hullClass) == "Truck5t");
+    CHECK(Str(q.escortClass) == "M113");
+    CHECK(q.bodies == 10); // ceil((18 - 6) / 1.25)
+    CHECK(q.crew == 1);
+    CHECK(q.hullPrice == 3);
+    CHECK(q.escortCrew == 2);
+    CHECK(q.escortHullPrice == 8);
+    CHECK(q.EscortPoolPrice() == 10);
+    CHECK(q.poolPrice == 14);
+    CHECK(q.price == 24);
+    CHECK(q.lethality == Approx(10.0f * 1.25f + 6.0f));
+    CHECK(q.lethal);
+    // the slower hull sets the pace: the M113's 60 km/h, not the truck's 80
+    CHECK(q.speed == Approx(0.6f * 60.0f / 3.6f));
+    CHECK(q.seconds == Approx(1500.0f / (0.6f * 60.0f / 3.6f)));
+    CHECK(ForcePackages::GroupsOf(q) == 3);
+    CHECK(ForcePackages::HullsOf(q) == 2);
+    CHECK(ForcePackages::ColumnLethality(FPApc, FPTank, 4, 1.0f) == Approx(4.0f * 1.25f + 6.0f + 12.0f));
+    // an APC carrier with an APC escort: the escort adds its +6 and carries nobody
+    const PackageQuote aa = ForcePackages::Quote(FPApc, FPApc, req, cat, src);
+    CHECK(aa.bodies == 5); // ceil((18 - 12) / 1.25), the carrier's 8 seats
+    CHECK(aa.lethality == Approx(5.0f * 1.25f + 12.0f));
+    CHECK(aa.price == 5 + 2 + 8 + 2 + 8);
+    // invalid pairs quote no source: foot never takes an escort, a tank never carries
+    CHECK(ForcePackages::Quote(FPFoot, FPApc, req, cat, src).source == -1);
+    CHECK(ForcePackages::Quote(FPTank, FPApc, req, cat, src).source == -1);
+    CHECK(ForcePackages::Quote(FPTruck, FPTruck, req, cat, src).source == -1);
+    CHECK(ForcePackages::Quote(FPTruck, FPArmedCar, req, cat, src).source == -1); // WEST has no armed car
+    // the plain overload is the escort-less column
+    const PackageQuote plain = ForcePackages::Quote(FPTruck, req, cat, src);
+    CHECK_FALSE(plain.HasEscort());
+    CHECK(plain.EscortPoolPrice() == 0);
+    CHECK(ForcePackages::GroupsOf(plain) == 2);
+    CHECK(ForcePackages::HullsOf(plain) == 1);
+}
+
+TEST_CASE("ForcePackages - a column is chosen when L_req exceeds what a truck squad gives",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 4.5f; // L_req 16.2: a full truck squad gives 15.0
+    req.minBodies = 4;
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(2, 2000.0f, 12);
+    PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK_FALSE(QuoteOf(c, FPTruck)->lethal);
+    // the APC alone: ceil(10.2 / 1.25) = 9 but 8 seats: 16.0, short.
+    // truck + APC: ceil(10.2 / 1.25) = 9 bodies, 17.25, 9 + 4 + 10 = 23;
+    // truck + tank: 4 bodies, 17.0, 4 + 4 + 17 = 25; APC + APC: 4, 17.0,
+    // 4 + 10 + 10 = 24
+    CHECK_FALSE(c.shortOfLethality);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.escort == FPApc);
+    CHECK(c.quote.bodies == 9);
+    CHECK(c.quote.price == 23);
+    CHECK(c.quote.lethality == Approx(17.25f));
+    // with the truck squad enough, the plain truck stays the choice
+    req.fighters = 4; // L_req 14.4
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTruck);
+    CHECK_FALSE(c.quote.HasEscort());
+}
+
+TEST_CASE("ForcePackages - a lone tank is never chosen, even when nothing else meets L_req",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 30; // L_req 108: nothing meets it
+    req.minBodies = 4;
+    req.pool = 1000;
+    PackageChoice c = ForcePackages::Choose(req, cat, OneSource(2, 1500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.shortOfLethality);
+    CHECK(c.quote.package != FPTank);
+    REQUIRE(QuoteOf(c, FPTank) != nullptr);
+    CHECK(QuoteOf(c, FPTank)->seatsShort);
+    // the tank goes only as an escort: the most lethal column is
+    // APC + tank, 8 x 1.25 + 6 + 12 = 28
+    CHECK(c.quote.package == FPApc);
+    CHECK(c.quote.escort == FPTank);
+    CHECK(c.quote.lethality == Approx(28.0f));
+    // only foot and the tank offered: foot goes, never the tank
+    req.offered = ForcePackages::Bit(FPFoot) | ForcePackages::Bit(FPTank);
+    c = ForcePackages::Choose(req, cat, OneSource(2, 1500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    // a seats-short armed car (one seat) is never chosen either
+    const FakeInspector in = VanillaAndLoBo();
+    ForcePackageCatalogue hiz;
+    ForcePackages::BuildCatalogue(Ladder({"LoBo_JeepMG_Hizballah"}), nullptr, in, hiz);
+    req.offered = ForcePackages::DefaultPackages;
+    req.fighters = 3;
+    c = ForcePackages::Choose(req, hiz, OneSource(2, 1500.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(QuoteOf(c, FPArmedCar)->seatsShort);
+}
+
+TEST_CASE("ForcePackages - URGENT takes the fastest within 1.5 x across columns",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = ColumnCatalogue();
+    PackageRequest req;
+    req.fighters = 5; // L_req 18: truck 12 (15.0) short; the APC alone 8 (16.0) short
+    req.minBodies = 4;
+    req.pool = 100;
+    const AutoArray<PackageSource> src = OneSource(4, 3000.0f, 12);
+    PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    // the cheapest lethal: truck + armoured car, 12 + 1 + 3 + 2 + 4 = 22
+    // (18.0), at the armoured car's 40 km/h
+    const PackageQuote* car = ColumnOf(c, FPTruck, FPArmedCar);
+    REQUIRE(car != nullptr);
+    CHECK(car->price == 22);
+    CHECK(car->lethal);
+    CHECK(car->speed == Approx(0.6f * 40.0f / 3.6f));
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.escort == FPArmedCar);
+    // urgent: anything up to 1.5 x 22 = 33 may go, and the fastest does:
+    // truck + APC (10 bodies, 10 + 4 + 11 = 25, 65 km/h) beats truck + tank
+    // (60 km/h) and ties APC + APC (65 km/h, 27) on pace but is cheaper
+    req.urgent = true;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    const PackageQuote* apc = ColumnOf(c, FPTruck, FPApc);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->price == 25);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.escort == FPApc);
+    CHECK(c.quote.speed == Approx(0.6f * 65.0f / 3.6f));
+    // a tighter share (1.1 x 22 = 24.2): the faster columns are too dear
+    req.urgentCostShare = 1.1f;
+    c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.quote.escort == FPArmedCar);
+}
+
+TEST_CASE("ForcePackages - a column goes on foot whole: the downgrade refunds both hulls",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = WestCatalogue();
+    PackageRequest req;
+    req.fighters = 4.5f;
+    req.minBodies = 4;
+    req.pool = 100;
+    const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(2, 2000.0f, 12));
+    REQUIRE(c.ok);
+    REQUIRE(c.quote.HasEscort());
+    CHECK(ForcePackages::MustDowngrade(c.quote.package, c.quote.bodies, 0, 12));
+    int refund = -1;
+    const PackageQuote f = ForcePackages::Downgrade(c.quote, 1.0f, c.lReq, refund);
+    CHECK(refund == 14); // truck 3 + driver 1 + APC 8 + its crew 2
+    CHECK(f.package == FPFoot);
+    CHECK_FALSE(f.HasEscort());
+    CHECK(f.escortClass.GetLength() == 0);
+    CHECK(f.escortCrew == 0);
+    CHECK(f.escortHullPrice == 0);
+    CHECK(f.EscortPoolPrice() == 0);
+    CHECK(f.poolPrice == 0);
+    CHECK(f.bodies == 9);
+    CHECK(f.price == 9);
+    CHECK(f.speed == Approx(1.5f));
+    CHECK(f.seconds == Approx(2000.0f / 1.5f).epsilon(0.001));
+    CHECK(f.lethality == Approx(9.0f));
+    CHECK(ForcePackages::GroupsOf(f) == 1);
+    CHECK(ForcePackages::HullsOf(f) == 0);
+}
+
+TEST_CASE("ForcePackages - a base on another landmass is an air-only source (phase 6A)",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    FakeInspector in = VanillaAndLoBo();
+    in.Add("Mi17", "helicopter", 14, 240, 40, true, 2);
+    RString overrides[NForcePackages];
+    overrides[FPTransportHeli] = "Mi17";
+    ForcePackageCatalogue cat;
+    ForcePackages::BuildCatalogue(Ladder({"UAZ", "Ural", "BMP", "T72"}), overrides, in, cat);
+    PackageRequest req;
+    req.minBodies = 4;
+    req.pool = 200;
+    // the only base with spare stands on an island of its own (Malden's
+    // Southeast Compound): no ground package can come from it
+    AutoArray<PackageSource> island = OneSource(5, 1700.0f, 8);
+    island[0].airOnly = true;
+    CHECK(ForcePackages::Quote(FPFoot, req, cat, island).source == -1);
+    CHECK(ForcePackages::Quote(FPTruck, req, cat, island).source == -1);
+    CHECK(ForcePackages::Quote(FPApc, req, cat, island).source == -1);
+    const PackageQuote heli = ForcePackages::Quote(FPTransportHeli, req, cat, island);
+    CHECK(heli.source == 5);
+    CHECK(heli.bodies == 4);
+    // its reserve still pays an insertion: the helicopter is the choice
+    PackageChoice c = ForcePackages::Choose(req, cat, island);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 5);
+    // a base on the target's landmass serves every package again
+    island[0].airOnly = false;
+    c = ForcePackages::Choose(req, cat, island);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-15: the arrival rule (forcesSlowEta / forcesSlowCostShare /
+// forcesAirEta) and the refusal that names the shortfall
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// the EAST hulls the director buys on Malden: Ural (80 km/h, crew 1, 12
+// seats) and Mi17 (240 km/h, crew 2, 12 seats)
+ForcePackageCatalogue EastWithMi17()
+{
+    ForcePackageCatalogue cat;
+    cat.hulls[FPTruck].className = "Ural";
+    cat.hulls[FPTruck].maxSpeedKmh = 80;
+    cat.hulls[FPTruck].cargo = 12;
+    cat.hulls[FPTruck].crew = 1;
+    cat.hulls[FPTransportHeli].className = "Mi17";
+    cat.hulls[FPTransportHeli].maxSpeedKmh = 240;
+    cat.hulls[FPTransportHeli].cargo = 12;
+    cat.hulls[FPTransportHeli].crew = 2;
+    return cat;
+}
+
+// the director's defaults for the rule
+PackageRequest MaldenRequest()
+{
+    PackageRequest req;
+    req.minBodies = 4;
+    req.pool = 60;
+    req.slowEta = 900.0f;
+    req.slowCostShare = 3.0f;
+    req.airEta = 1500.0f;
+    return req;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - the arrival rule is off by default in the pure chooser",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const PackageRequest req;
+    CHECK(req.slowEta == Approx(0.0f));
+    CHECK(req.slowCostShare == Approx(3.0f));
+    CHECK(req.airEta == Approx(0.0f));
+    // a 4.6 km walk with the rule off: foot, as before
+    PackageRequest r = req;
+    r.minBodies = 4;
+    r.pool = 60;
+    const PackageChoice c = ForcePackages::Choose(r, EastWithMi17(), OneSource(1, 4600.0f, 5));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPFoot);
+    CHECK(c.etaRule == PackageChoice::EtaNone);
+}
+
+TEST_CASE("ForcePackages - the arrival rule on Malden: foot under 900 s, a truck past it, an empty town never flies",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = MaldenRequest();
+    // prices: foot 4; truck 4 + 1 + 3 = 8 (2 x); Mi17 4 + 2 + 10 = 16 (4 x)
+    // Houdan, 0.5 km: foot about 333 s
+    const PackageChoice houdan = ForcePackages::Choose(req, cat, OneSource(1, 500.0f, 5));
+    REQUIRE(houdan.ok);
+    CHECK(houdan.quote.package == FPFoot);
+    CHECK(houdan.etaRule == PackageChoice::EtaNone);
+    CHECK(houdan.reason == PackageChoice::ReasonGroundCheapest);
+    // Dourdan, 1.0 km: foot about 667 s, still under 900
+    CHECK(ForcePackages::Choose(req, cat, OneSource(1, 1000.0f, 5)).quote.package == FPFoot);
+    // La Trinite, 1.7 km: foot about 1133 s; the truck within 3 x
+    const PackageChoice trinite = ForcePackages::Choose(req, cat, OneSource(1, 1700.0f, 5));
+    REQUIRE(trinite.ok);
+    CHECK(trinite.cheapestPackage == FPFoot);
+    CHECK(trinite.cheapestSeconds == Approx(1133.3f).margin(1.0f));
+    CHECK(trinite.quote.package == FPTruck);
+    CHECK(trinite.quote.price == 8);
+    CHECK(trinite.quote.seconds == Approx(1700.0f / (0.6f * 80.0f / 3.6f)).margin(1.0f));
+    CHECK(trinite.etaRule == PackageChoice::EtaSlow);
+    CHECK(trinite.reason == PackageChoice::ReasonGroundCheapest);
+    // Chapoi, 2.6 km: foot about 1733 s, past 1500, but the truck is there
+    // in about 195 s and nobody is reported: the truck (2026-10-16 phase 1
+    // C; it was an insertion)
+    const PackageChoice chapoi = ForcePackages::Choose(req, cat, OneSource(1, 2600.0f, 6));
+    REQUIRE(chapoi.ok);
+    CHECK(chapoi.quote.package == FPTruck);
+    CHECK(chapoi.etaRule == PackageChoice::EtaSlow);
+    CHECK(chapoi.reason == PackageChoice::ReasonGroundCheapest);
+    // Goisse, 4.6 km (66 min on foot by road): still the truck, about 345 s
+    const PackageChoice goisse = ForcePackages::Choose(req, cat, OneSource(1, 4600.0f, 5));
+    REQUIRE(goisse.ok);
+    CHECK(goisse.quote.package == FPTruck);
+    CHECK(goisse.quote.price == 8);
+    CHECK(goisse.quote.seconds == Approx(4600.0f / (0.6f * 80.0f / 3.6f)).margin(1.0f));
+    CHECK(goisse.etaRule == PackageChoice::EtaSlow);
+    CHECK(goisse.walkSeconds == Approx(4600.0f / 1.5f).margin(1.0f));
+    CHECK(goisse.groundSeconds == Approx(goisse.quote.seconds));
+    // no helicopter in the catalogue: the same truck
+    ForcePackageCatalogue ground = cat;
+    ground.hulls[FPTransportHeli] = ForceHull();
+    const PackageChoice truck = ForcePackages::Choose(req, ground, OneSource(1, 4600.0f, 5));
+    CHECK(truck.quote.package == FPTruck);
+    CHECK(truck.etaRule == PackageChoice::EtaSlow);
+    // past forcesAirEta even by truck (22 km, about 1650 s): the insertion
+    // goes, at the off-map price too (4 + 2 + 15 = 21)
+    const PackageChoice ferry = ForcePackages::Choose(req, cat, OneSource(1, 22000.0f, 5));
+    CHECK(ferry.quote.package == FPTransportHeli);
+    CHECK(ferry.etaRule == PackageChoice::EtaAir);
+    CHECK(ferry.reason == PackageChoice::ReasonAirEta);
+    PackageRequest offMap = req;
+    offMap.airOffMap = true;
+    const PackageChoice far = ForcePackages::Choose(offMap, cat, OneSource(1, 22000.0f, 5));
+    CHECK(far.quote.package == FPTransportHeli);
+    CHECK(far.quote.price == 21);
+    // the pool cannot pay the Mi17 (12 units for hull and crew): the truck
+    PackageRequest poor = req;
+    poor.pool = 8;
+    const PackageChoice slow = ForcePackages::Choose(poor, cat, OneSource(1, 22000.0f, 5));
+    CHECK(slow.quote.package == FPTruck);
+    CHECK(slow.reason == PackageChoice::ReasonGroundSlow);
+}
+
+TEST_CASE("ForcePackages - the arrival rule keeps L_req, the URGENT share and the slow share apart",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    // urgent and slow: the truck is the only package meeting slowEta
+    PackageRequest req = MaldenRequest();
+    req.urgent = true;
+    const PackageChoice u = ForcePackages::Choose(req, cat, OneSource(1, 1700.0f, 5));
+    CHECK(u.quote.package == FPTruck);
+    CHECK(u.etaRule == PackageChoice::EtaSlow);
+    CHECK(u.reason == PackageChoice::ReasonGroundCheapest);
+    // urgent with the old 2 x truck-to-foot ratio under 900 s: the URGENT
+    // share (1.5 x) still keeps it on foot, no arrival rule
+    const PackageChoice near = ForcePackages::Choose(req, cat, OneSource(1, 800.0f, 5));
+    CHECK(near.quote.package == FPFoot);
+    CHECK(near.etaRule == PackageChoice::EtaNone);
+    // the slow share bound (the upper bound, ForcePackages::SlowCostShare 3):
+    // at 1.5 x nothing within it meets slowEta, the fastest within it (foot)
+    // goes
+    PackageRequest tight = MaldenRequest();
+    tight.slowCostShare = 1.5f;
+    const PackageChoice t = ForcePackages::Choose(tight, cat, OneSource(1, 1700.0f, 5));
+    CHECK(t.quote.package == FPFoot);
+    CHECK(t.reason == PackageChoice::ReasonGroundSlow);
+    CHECK(PackageRequest().slowCostShare == Approx(ForcePackages::SlowCostShare));
+    // L_req still binds: three fighters (L_req 10.8).  Foot needs 11 bodies
+    // (11 units, about 1133 s), the truck 9 (13 units, lethality 11.25), the
+    // Mi17 9 (21 units, about 32 s).  Foot is the cheapest lethal package,
+    // the walk is past slowEta and fighters are reported: the insertion
+    PackageRequest loud = MaldenRequest();
+    loud.fighters = 3;
+    const PackageChoice l = ForcePackages::Choose(loud, cat, OneSource(1, 1700.0f, 12));
+    REQUIRE(l.ok);
+    CHECK(l.cheapestPackage == FPFoot);
+    CHECK(l.quote.package == FPTransportHeli);
+    CHECK(l.quote.bodies == 9);
+    CHECK(l.quote.price == 21);
+    CHECK(l.quote.lethal);
+    CHECK(l.etaRule == PackageChoice::EtaAir);
+    CHECK(l.reason == PackageChoice::ReasonAirFighters);
+}
+
+TEST_CASE("ForcePackages - a refusal names the shortfall against the largest single-base spare",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    PackageRequest req;
+    req.minBodies = 12;
+    req.pool = 60;
+    AutoArray<PackageSource> sources = OneSource(1, 3000.0f, 6);
+    PackageSource other;
+    other.zone = 2;
+    other.distance = 2000.0f;
+    other.spare = 5;
+    sources.Add(other);
+    const PackageChoice c = ForcePackages::Choose(req, EastWithMi17(), sources);
+    CHECK_FALSE(c.ok);
+    CHECK(c.largestSpare == 6);
+    CHECK(Str(c.why) == "no occupier base can spare the minimum (12 needed, the largest single-base spare is 6: short 6)");
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-16 (round 3 D): the road quote.  A ground package's seconds stand
+// on the road route the counter-attack service marches (RoadQuoteCache), the
+// straight line x forcesRoadFactor when no route is known; air flies the
+// straight line.  Malden figures from gmRoadRoute on Guerrilla.Abel
+// (2026-10-16, the service's parameters): Arudy is 2224 m straight from the
+// Outpost and 2691 m by road; Sainte Marie is 2513 m from the Camp (road
+// 5529 m, past the service's detour rule) and 2901 m from Le Port Harbour
+// (road 3635 m).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+AutoArray<PackageSource> RoadSource(int zone, float distance, float road, int spare)
+{
+    AutoArray<PackageSource> s = OneSource(zone, distance, spare);
+    s[0].road = road;
+    return s;
+}
+
+constexpr float UralSpeed = 0.6f * 80.0f / 3.6f;  // 13.3 m/s
+constexpr float Mi17Speed = 0.8f * 240.0f / 3.6f; // 53.3 m/s
+
+} // namespace
+
+TEST_CASE("ForcePackages - the road quote on Malden: Arudy is a truck by the straight line, a helicopter by the road",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = MaldenRequest();
+    // the straight line (no route known, factor 1): foot about 1483 s, past
+    // forcesSlowEta, under forcesAirEta: the truck goes
+    const PackageChoice line = ForcePackages::Choose(req, cat, OneSource(1, 2224.0f, 5));
+    REQUIRE(line.ok);
+    CHECK(line.cheapestPackage == FPFoot);
+    CHECK(line.cheapestSeconds == Approx(2224.0f / 1.5f).margin(1.0f));
+    CHECK(line.quote.package == FPTruck);
+    CHECK(line.etaRule == PackageChoice::EtaSlow);
+    CHECK(line.quote.eta == FEQLine);
+    CHECK(Str(ForcePackages::EtaNote(line.quote)) == "line 167 s");
+    // the road route (2691 m): foot about 1794 s, past forcesAirEta, but
+    // the truck needs about 202 s by road and nobody is reported: the truck
+    // (2026-10-16 phase 1 C; it was the insertion)
+    const PackageChoice road = ForcePackages::Choose(req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    REQUIRE(road.ok);
+    CHECK(road.cheapestPackage == FPFoot);
+    CHECK(road.cheapestSeconds == Approx(2691.0f / 1.5f).margin(1.0f));
+    REQUIRE(road.cheapestIndex >= 0);
+    CHECK(road.quotes[road.cheapestIndex].eta == FEQRoad);
+    CHECK(Str(ForcePackages::EtaNote(road.quotes[road.cheapestIndex])) == "road 1794 s");
+    CHECK(road.quote.package == FPTruck);
+    CHECK(road.etaRule == PackageChoice::EtaSlow);
+    CHECK(road.quote.eta == FEQRoad);
+    // with three fighters reported the walk is still past slowEta: the
+    // insertion, and the helicopter flies the straight line whatever the road
+    PackageRequest loud = req;
+    loud.fighters = 3;
+    const PackageChoice air = ForcePackages::Choose(loud, cat, RoadSource(1, 2224.0f, 2691.0f, 12));
+    REQUIRE(air.ok);
+    CHECK(air.quote.package == FPTransportHeli);
+    CHECK(air.reason == PackageChoice::ReasonAirFighters);
+    CHECK(air.quote.eta == FEQLine);
+    CHECK(air.quote.travel == Approx(2224.0f));
+    CHECK(air.quote.seconds == Approx(2224.0f / Mi17Speed).margin(0.5f));
+    const PackageQuote truck = ForcePackages::Quote(FPTruck, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    CHECK(truck.eta == FEQRoad);
+    CHECK(truck.travel == Approx(2691.0f));
+    CHECK(truck.seconds == Approx(2691.0f / UralSpeed).margin(0.5f));
+    // La Trinite (1707 m straight, 1708 m by road) keeps its truck
+    const PackageChoice trinite = ForcePackages::Choose(req, cat, RoadSource(1, 1707.0f, 1708.0f, 5));
+    CHECK(trinite.quote.package == FPTruck);
+    CHECK(trinite.etaRule == PackageChoice::EtaSlow);
+}
+
+TEST_CASE("ForcePackages - no road route known: the straight line x forcesRoadFactor",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    CHECK(PackageRequest().roadFactor == Approx(1.0f)); // the pure chooser: the straight line
+    req.roadFactor = 1.5f;
+    // Arudy with no route: 2224 x 1.5 = 3336 m on foot, about 2224 s
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(foot.eta == FEQLineFactor);
+    CHECK(foot.etaFactor == Approx(1.5f));
+    CHECK(foot.travel == Approx(3336.0f));
+    CHECK(foot.seconds == Approx(2224.0f).margin(0.5f));
+    CHECK(Str(ForcePackages::EtaNote(foot)) == "line x1.5 2224 s");
+    // the truck covers 3336 m in about 250 s: ground, no air case
+    const PackageChoice c = ForcePackages::Choose(req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(c.quote.eta == FEQLineFactor);
+    // a known road wins over the factor
+    const PackageQuote road = ForcePackages::Quote(FPFoot, req, cat, RoadSource(1, 2224.0f, 2691.0f, 5));
+    CHECK(road.eta == FEQRoad);
+    CHECK(road.travel == Approx(2691.0f));
+    // the factor at 1: the plain straight line, as before
+    req.roadFactor = 1.0f;
+    const PackageQuote plain = ForcePackages::Quote(FPFoot, req, cat, OneSource(1, 2224.0f, 5));
+    CHECK(plain.eta == FEQLine);
+    CHECK(plain.travel == Approx(2224.0f));
+    // the downgrade walks the same leg
+    req.roadFactor = 1.5f;
+    const PackageQuote t = ForcePackages::Quote(FPTruck, req, cat, OneSource(1, 2224.0f, 5));
+    int refund = 0;
+    const PackageQuote down = ForcePackages::Downgrade(t, 1.0f, 0.0f, refund);
+    CHECK(down.package == FPFoot);
+    CHECK(down.travel == Approx(3336.0f));
+    CHECK(down.seconds == Approx(2224.0f).margin(0.5f));
+}
+
+TEST_CASE("ForcePackages - air is quoted on the straight line, whatever the road and the factor",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 2.0f;
+    const PackageQuote a = ForcePackages::Quote(FPTransportHeli, req, cat, RoadSource(1, 4650.0f, 7283.0f, 5));
+    const PackageQuote b = ForcePackages::Quote(FPTransportHeli, req, cat, OneSource(1, 4650.0f, 5));
+    CHECK(a.eta == FEQLine);
+    CHECK(b.eta == FEQLine);
+    CHECK(a.seconds == Approx(4650.0f / Mi17Speed).margin(0.5f));
+    CHECK(b.seconds == Approx(a.seconds));
+}
+
+TEST_CASE("ForcePackages - the source is the base with the shortest leg for the package",
+          "[game][guerrilla][occupierforces][packages][roadroute][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    // Sainte Marie: the Camp is nearer straight but its road is past the
+    // detour rule (no road known: 2513 x 1.5 = 3769 m); Le Port Harbour's
+    // road is 3635 m
+    AutoArray<PackageSource> sources = OneSource(0, 2513.0f, 6);
+    PackageSource harbour;
+    harbour.zone = 3;
+    harbour.distance = 2901.0f;
+    harbour.road = 3635.0f;
+    harbour.spare = 6;
+    sources.Add(harbour);
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, cat, sources);
+    CHECK(foot.source == 3);
+    CHECK(foot.eta == FEQRoad);
+    // the helicopter flies from the straight-nearest base's infantry
+    CHECK(ForcePackages::Quote(FPTransportHeli, req, cat, sources).source == 0);
+    // with the straight line only, the Camp is nearest on foot too
+    req.roadFactor = 1.0f;
+    sources[1].road = -1;
+    CHECK(ForcePackages::Quote(FPFoot, req, cat, sources).source == 0);
+}
+
+TEST_CASE("ForcePackages - the INFO line's arrival words are kept for gmForcesEtaNotes",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    ForcePackages::ClearEtaNotes();
+    CHECK(ForcePackages::EtaNoteCount() == 0);
+    PackageQuote q;
+    q.package = FPFoot;
+    q.source = 2;
+    q.eta = FEQRoad;
+    q.seconds = 3393.4f;
+    CHECK(Str(ForcePackages::LogEtaNote(q)) == "road 3393 s");
+    q.eta = FEQLineFactor;
+    q.etaFactor = 1.5f;
+    q.seconds = 2733.0f;
+    CHECK(Str(ForcePackages::LogEtaNote(q)) == "line x1.5 2733 s");
+    REQUIRE(ForcePackages::EtaNoteCount() == 2);
+    CHECK(Str(ForcePackages::EtaNoteAt(0).text) == "road 3393 s");
+    CHECK(ForcePackages::EtaNoteAt(0).source == 2);
+    CHECK(ForcePackages::EtaNoteAt(1).eta == FEQLineFactor);
+    // a ring: the oldest go first
+    for (int i = 0; i < ForcePackages::EtaNoteRing + 3; i++)
+    {
+        q.seconds = (float)i;
+        q.eta = FEQLine;
+        ForcePackages::LogEtaNote(q);
+    }
+    CHECK(ForcePackages::EtaNoteCount() == ForcePackages::EtaNoteRing);
+    CHECK(Str(ForcePackages::EtaNoteAt(0).text) == "line 3 s");
+    CHECK(Str(ForcePackages::EtaNoteAt(ForcePackages::EtaNoteRing - 1).text) == "line 18 s");
+    ForcePackages::ClearEtaNotes();
+}
+
+// ---------------------------------------------------------------------------
+// 2026-10-16 (phase 1 C, after video 5: all five insertions flew to empty
+// targets): ground first, the CHEAPEST package that meets slowEta, and air
+// only across water, past forcesAirEta by the fastest ground package, or on
+// a defended target out of walking reach.  Malden figures (Guerrilla.Abel):
+// Goisse [3593, 8528] is 4585 m straight from the Outpost [7600, 6300] (by
+// road about 5940 m, 66 minutes on foot) and 4646 m from the Airfield
+// [8030, 9905]; the Southeast Compound [9715, 3940] stands on an island of
+// its own, 1328 m from Le Port Harbour [8410, 3690]; La Trinite is 1707 m
+// from the Outpost (1708 m by road).  Spares as in videos 4 and 5: the
+// Outpost 5, the Harbour 6, the Airfield 9.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Goisse's sources: the Outpost by road, the Airfield by the straight line
+// (no road known: x forcesRoadFactor)
+AutoArray<PackageSource> GoisseSources()
+{
+    AutoArray<PackageSource> s = RoadSource(2, 4585.0f, 5940.0f, 5);
+    PackageSource airfield;
+    airfield.zone = 5;
+    airfield.distance = 4646.0f;
+    airfield.spare = 9;
+    s.Add(airfield);
+    return s;
+}
+
+PackageRequest DirectorRequest()
+{
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    return req;
+}
+
+// EAST with a fast wheeled APC (BTR-like: 100 km/h, crew 2, 8 seats) beside
+// the Ural and the Mi17: a package that is faster than the truck and within
+// 3 x the foot price, so the old "fastest within the share" and the new
+// "cheapest meeting slowEta" disagree
+ForcePackageCatalogue EastWithFastApc()
+{
+    ForcePackageCatalogue cat = EastWithMi17();
+    cat.hulls[FPApc].className = "BTR60";
+    cat.hulls[FPApc].maxSpeedKmh = 100;
+    cat.hulls[FPApc].cargo = 8;
+    cat.hulls[FPApc].crew = 2;
+    return cat;
+}
+
+} // namespace
+
+TEST_CASE("ForcePackages - an empty far target gets a truck, not a helicopter",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = DirectorRequest();
+    // empty Goisse: the walk is 66 minutes, but the Ural is there in about
+    // 446 s by road, under forcesAirEta, and nobody is reported
+    const PackageChoice c = ForcePackages::Choose(req, cat, GoisseSources());
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.source == 2);
+    CHECK(c.quote.eta == FEQRoad);
+    CHECK(c.quote.seconds == Approx(5940.0f / UralSpeed).margin(1.0f));
+    CHECK(c.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(c.cheapestPackage == FPFoot);
+    CHECK(c.walkSeconds == Approx(5940.0f / 1.5f).margin(1.0f));
+    CHECK(c.groundSeconds == Approx(c.quote.seconds));
+    // the insertion was quoted, valid and faster, and did not go
+    const PackageQuote* heli = QuoteOf(c, FPTransportHeli);
+    REQUIRE(heli != nullptr);
+    CHECK(heli->source >= 0);
+    CHECK(heli->lethal);
+    CHECK(heli->seconds < c.quote.seconds);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "ground: cheapest under slowEta");
+    // the video 5 legs (foot 3183 to 5157 s by road, a truck 9 to 14 x
+    // faster): every empty target is a truck now
+    for (float road : {4775.0f, 4986.0f, 6318.0f, 7736.0f})
+    {
+        const PackageChoice v = ForcePackages::Choose(req, cat, RoadSource(1, road / 1.3f, road, 6));
+        REQUIRE(v.ok);
+        CHECK(v.quote.package == FPTruck);
+        CHECK_FALSE(PackageChoice::IsAirReason(v.reason));
+    }
+}
+
+TEST_CASE("ForcePackages - a defended far target gets the helicopter, a defended near one ground",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = DirectorRequest();
+    req.fighters = 3; // L_req 10.8: an insertion needs 9 bodies (11.25)
+    // Goisse with three fighters reported: out of walking reach, so the
+    // insertion goes.  Its infantry is the Airfield's 9 (lethal), not the
+    // nearer Outpost's 5 (6.25, short): the source covers what L_req needs
+    const PackageChoice c = ForcePackages::Choose(req, cat, GoisseSources());
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 5);
+    CHECK(c.quote.bodies == 9);
+    CHECK(c.quote.price == 9 + 2 + 10);
+    CHECK(c.quote.lethal);
+    CHECK(c.reason == PackageChoice::ReasonAirFighters);
+    CHECK(c.etaRule == PackageChoice::EtaAir);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "air: fighters reported");
+    // the line's "the cheapest": the cheapest lethal ground package, the
+    // Airfield's 9 by truck (13 units, line x1.5 about 523 s): ground could
+    // be there under forcesAirEta, the fighters decide
+    CHECK(c.cheapestPackage == FPTruck);
+    CHECK(c.cheapestSeconds == Approx(4646.0f * 1.5f / UralSpeed).margin(1.0f));
+    CHECK(c.cheapestSeconds < req.airEta);
+    // the walk is the Outpost's 5 by road (the foot quote, lethal or not)
+    CHECK(c.walkSeconds == Approx(5940.0f / 1.5f).margin(1.0f));
+    // without the Airfield nothing is lethal: the most lethal affordable
+    // package from the Outpost goes and says so (the plain fallback)
+    const PackageChoice outpost = ForcePackages::Choose(req, cat, RoadSource(2, 4585.0f, 5940.0f, 5));
+    REQUIRE(outpost.ok);
+    CHECK(outpost.shortOfLethality);
+    // the pool cannot pay the airframe (12 units): the truck, ground
+    PackageRequest poor = req;
+    poor.pool = 4;
+    const PackageChoice p = ForcePackages::Choose(poor, cat, GoisseSources());
+    REQUIRE(p.ok);
+    CHECK(p.quote.package == FPTruck);
+    CHECK(p.reason == PackageChoice::ReasonGroundCheapest);
+    // Houdan (535 m from the Outpost) with three reported and 12 to spare:
+    // a walk of about 373 s by road, inside slowEta: eleven on foot, no air
+    const PackageChoice houdan = ForcePackages::Choose(req, cat, RoadSource(2, 535.0f, 560.0f, 12));
+    REQUIRE(houdan.ok);
+    CHECK(houdan.quote.package == FPFoot);
+    CHECK(houdan.quote.bodies == 11);
+    CHECK(houdan.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(houdan.etaRule == PackageChoice::EtaNone);
+    // fewer than AirFightersMin reported is empty ground
+    PackageRequest quiet = req;
+    quiet.fighters = 0;
+    CHECK(ForcePackages::Choose(quiet, cat, GoisseSources()).quote.package == FPTruck);
+}
+
+TEST_CASE("ForcePackages - a cross-water target gets the helicopter",
+          "[game][guerrilla][occupierforces][packages][air]")
+{
+    const ForcePackageCatalogue cat = EastWithMi17();
+    const PackageRequest req = DirectorRequest();
+    // the Southeast Compound retaken from the mainland: every base stands
+    // on another landmass, no ground package can come, the insertion goes
+    // though nobody is reported
+    AutoArray<PackageSource> mainland = OneSource(4, 1328.0f, 6); // Le Port Harbour
+    mainland[0].airOnly = true;
+    PackageSource outpost;
+    outpost.zone = 2;
+    outpost.distance = 3306.0f;
+    outpost.spare = 5;
+    outpost.airOnly = true;
+    mainland.Add(outpost);
+    const PackageChoice c = ForcePackages::Choose(req, cat, mainland);
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPTransportHeli);
+    CHECK(c.quote.source == 4);
+    CHECK(c.reason == PackageChoice::ReasonAirWater);
+    CHECK(c.etaRule == PackageChoice::EtaAir);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "air: across water");
+    CHECK(c.walkSeconds == Approx(-1.0f));
+    // a mainland town only the Compound can pay for (its reserve flies)
+    AutoArray<PackageSource> island = OneSource(3, 1700.0f, 6);
+    island[0].airOnly = true;
+    const PackageChoice i = ForcePackages::Choose(req, cat, island);
+    REQUIRE(i.ok);
+    CHECK(i.quote.package == FPTransportHeli);
+    CHECK(i.reason == PackageChoice::ReasonAirWater);
+    // the same town with a mainland base able to walk it: ground again
+    PackageSource harbour;
+    harbour.zone = 4;
+    harbour.distance = 600.0f;
+    harbour.road = 640.0f;
+    harbour.spare = 6;
+    island.Add(harbour);
+    const PackageChoice g = ForcePackages::Choose(req, cat, island);
+    REQUIRE(g.ok);
+    CHECK(g.quote.package == FPFoot);
+    CHECK(g.quote.source == 4);
+}
+
+TEST_CASE("ForcePackages - a 900 to 1500 s leg takes the cheapest package that meets slowEta",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithFastApc();
+    PackageRequest req = DirectorRequest();
+    req.minBodies = 6;
+    // La Trinite, 1708 m by road from the Outpost: foot 6 (about 1139 s,
+    // past 900); the Ural 6 + 1 + 3 = 10 units, about 128 s; the APC
+    // 6 + 2 + 8 = 16 units (within 3 x 6 = 18), about 102 s.  The old rule
+    // took the fastest within the share (the APC); the cheapest that meets
+    // slowEta is the truck
+    const AutoArray<PackageSource> src = RoadSource(2, 1707.0f, 1708.0f, 12);
+    const PackageChoice c = ForcePackages::Choose(req, cat, src);
+    REQUIRE(c.ok);
+    CHECK(c.cheapestPackage == FPFoot);
+    CHECK(c.cheapestSeconds == Approx(1708.0f / 1.5f).margin(1.0f));
+    const PackageQuote* apc = QuoteOf(c, FPApc);
+    REQUIRE(apc != nullptr);
+    CHECK(apc->price == 16);
+    CHECK(apc->seconds < c.quote.seconds);
+    CHECK(c.quote.package == FPTruck);
+    CHECK(c.quote.price == 10);
+    CHECK_FALSE(c.quote.HasEscort());
+    CHECK(c.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    // the share is an upper bound only: at 1.5 x (9 units) nothing within it
+    // meets slowEta, and the fastest within it (foot) goes
+    PackageRequest tight = req;
+    tight.slowCostShare = 1.5f;
+    const PackageChoice t = ForcePackages::Choose(tight, cat, src);
+    CHECK(t.quote.package == FPFoot);
+    CHECK(t.reason == PackageChoice::ReasonGroundSlow);
+    CHECK(Str(ForcePackages::ReasonWords(t.reason)) == "ground: slow but no air case");
+}
+
+TEST_CASE("ForcePackages - URGENT: the fastest within its share under slowEta, the fastest meeting it past",
+          "[game][guerrilla][occupierforces][packages]")
+{
+    const ForcePackageCatalogue cat = EastWithFastApc();
+    PackageRequest req = DirectorRequest();
+    req.minBodies = 6;
+    req.urgent = true;
+    // past slowEta (La Trinite): the FASTEST package meeting it within the
+    // bound, the APC, overrides the cheapest meeting it (the truck)
+    const PackageChoice c = ForcePackages::Choose(req, cat, RoadSource(2, 1707.0f, 1708.0f, 12));
+    REQUIRE(c.ok);
+    CHECK(c.quote.package == FPApc);
+    CHECK(c.quote.price == 16);
+    CHECK(c.reason == PackageChoice::ReasonUrgentSlow);
+    CHECK(c.etaRule == PackageChoice::EtaSlow);
+    CHECK(Str(ForcePackages::ReasonWords(c.reason)) == "urgent: fastest under slowEta");
+    // under slowEta (Dourdan, 1000 m: foot about 667 s): the share at 1.5 x
+    // 6 = 9 holds nothing faster, foot goes
+    const AutoArray<PackageSource> near = RoadSource(2, 950.0f, 1000.0f, 12);
+    const PackageChoice f = ForcePackages::Choose(req, cat, near);
+    CHECK(f.quote.package == FPFoot);
+    CHECK(f.reason == PackageChoice::ReasonGroundCheapest);
+    CHECK(f.etaRule == PackageChoice::EtaNone);
+    // a share of 2 (12 units): the next faster package, the truck
+    PackageRequest wide = req;
+    wide.urgentCostShare = 2.0f;
+    const PackageChoice w = ForcePackages::Choose(wide, cat, near);
+    CHECK(w.quote.package == FPTruck);
+    CHECK(w.reason == PackageChoice::ReasonUrgentShare);
+    CHECK(Str(ForcePackages::ReasonWords(w.reason)) == "urgent: fastest within forcesUrgentCostShare");
+    // urgency never buys air on its own: an empty Goisse goes by road
+    PackageRequest goisse = DirectorRequest();
+    goisse.urgent = true;
+    const PackageChoice g = ForcePackages::Choose(goisse, EastWithMi17(), GoisseSources());
+    REQUIRE(g.ok);
+    CHECK(g.quote.package == FPTruck);
+    CHECK_FALSE(PackageChoice::IsAirReason(g.reason));
+}
+
+TEST_CASE("ForcePackages - the reason words and the one road factor",
+          "[game][guerrilla][occupierforces][packages][roadroute]")
+{
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonNone)) == "");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonGroundCheapest)) == "ground: cheapest under slowEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonGroundSlow)) == "ground: slow but no air case");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonUrgentShare)) ==
+          "urgent: fastest within forcesUrgentCostShare");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonUrgentSlow)) == "urgent: fastest under slowEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirWater)) == "air: across water");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirEta)) == "air: past forcesAirEta");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::ReasonAirFighters)) == "air: fighters reported");
+    CHECK(Str(ForcePackages::ReasonWords(PackageChoice::NReasons)) == "");
+    for (int r = 0; r < PackageChoice::NReasons; r++)
+    {
+        CHECK(PackageChoice::IsAirReason(r) == (Str(ForcePackages::ReasonWords(r)).rfind("air: ", 0) == 0));
+    }
+    // the plain choice names no reason
+    const PackageChoice off = ForcePackages::Choose(PackageRequest(), EastWithMi17(), OneSource(1, 4600.0f, 5));
+    CHECK(off.reason == PackageChoice::ReasonNone);
+
+    // the one road factor: forcesRoadFactor's default until the director sets it
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::DefaultRoadFactor));
+    CHECK(ForcePackages::DefaultRoadFactor == Approx(1.5f));
+    ForcePackages::SetRoadFactor(1.3f);
+    CHECK(ForcePackages::RoadFactor() == Approx(1.3f));
+    ForcePackages::SetRoadFactor(0.5f);
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::MinRoadFactor));
+    ForcePackages::SetRoadFactor(9.0f);
+    CHECK(ForcePackages::RoadFactor() == Approx(ForcePackages::MaxRoadFactor));
+    ForcePackages::SetRoadFactor(ForcePackages::DefaultRoadFactor);
+    // the ground leg the quote prices and the march walks: a known road as
+    // it is, else the straight line x the factor (never below the line)
+    CHECK(ForcePackages::GroundLeg(2224.0f, 2691.0f, 1.5f) == Approx(2691.0f));
+    CHECK(ForcePackages::GroundLeg(2224.0f, -1.0f, 1.5f) == Approx(3336.0f));
+    CHECK(ForcePackages::GroundLeg(2224.0f, -1.0f, 0.5f) == Approx(2224.0f));
+    CHECK(ForcePackages::GroundLeg(-5.0f, -1.0f, 1.5f) == Approx(0.0f));
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = ForcePackages::RoadFactor();
+    const PackageQuote foot = ForcePackages::Quote(FPFoot, req, EastWithMi17(), OneSource(1, 2224.0f, 5));
+    CHECK(foot.eta == FEQLineFactor);
+    CHECK(foot.travel == Approx(ForcePackages::GroundLeg(2224.0f, -1.0f, ForcePackages::RoadFactor())));
+}
+
+// ---------------------------------------------------------------------------
+// the road quote cache (RoadRoute.hpp): a fake planner stands in for the
+// road net
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+struct FakeRoads
+{
+    int calls = 0;
+    float factor = 1.3f; // road length / straight distance
+    bool none = false;   // no route at all
+};
+
+FakeRoads& Roads()
+{
+    static FakeRoads r;
+    return r;
+}
+
+bool FakePlanner(Vector3Par from, Vector3Par to, float& length)
+{
+    FakeRoads& r = Roads();
+    r.calls++;
+    if (r.none)
+    {
+        return false;
+    }
+    const float dx = from.X() - to.X();
+    const float dz = from.Z() - to.Z();
+    length = sqrtf(dx * dx + dz * dz) * r.factor;
+    return true;
+}
+
+// the cache with the fake planner, restored to the road net on exit
+struct QuoteGuard
+{
+    explicit QuoteGuard(int plansPerTick = RoadQuoteCache::DefaultPlansPerTick,
+                        float ttl = RoadQuoteCache::DefaultTtl)
+    {
+        Roads() = FakeRoads();
+        RoadQuoteCache::Instance().SetPlanner(FakePlanner);
+        RoadQuoteCache::Instance().SetBudget(plansPerTick, ttl);
+        RoadQuoteCache::Instance().ResetStats();
+    }
+    ~QuoteGuard()
+    {
+        RoadQuoteCache::Instance().SetPlanner(nullptr);
+        RoadQuoteCache::Instance().SetBudget(RoadQuoteCache::DefaultPlansPerTick, RoadQuoteCache::DefaultTtl);
+        RoadQuoteCache::Instance().ResetStats();
+    }
+};
+
+} // namespace
+
+TEST_CASE("RoadQuoteCache - a pair is planned once and then answered from the cache",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard;
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 outpost(7600, 25, 6300);
+    const Vector3 arudy(5400, 0, 6630);
+    const float straight = sqrtf(2200.0f * 2200.0f + 330.0f * 330.0f);
+    CHECK(cache.Length(outpost, arudy, 100.0f) == Approx(straight * 1.3f));
+    CHECK(Roads().calls == 1);
+    // the same tick, a later tick: the cache answers
+    CHECK(cache.Length(outpost, arudy, 100.0f) == Approx(straight * 1.3f));
+    CHECK(cache.Length(outpost, arudy, 160.0f) == Approx(straight * 1.3f));
+    CHECK(Roads().calls == 1);
+    CHECK(cache.Stats().plans == 1);
+    CHECK(cache.Stats().hits == 2);
+    // the key is the pair to the metre: the reverse leg is its own pair
+    cache.Length(arudy, outpost, 160.0f);
+    CHECK(Roads().calls == 2);
+    CHECK(cache.Size() == 2);
+    // a route the service already planned (a service Search records it) is
+    // reused without planning
+    const Vector3 harbour(8410, 8, 3690);
+    cache.Record(harbour, arudy, true, 5759.0f, 160.0f);
+    CHECK(cache.Length(harbour, arudy, 170.0f) == Approx(5759.0f));
+    CHECK(Roads().calls == 2);
+    CHECK(cache.Stats().recorded == 1);
+}
+
+TEST_CASE("RoadQuoteCache - no route, the detour rule and no road net answer -1",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard;
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 a(1000, 0, 1000);
+    const Vector3 b(3000, 0, 1000);
+    // no route: -1, and the failure is cached for the tick and the TTL
+    Roads().none = true;
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(Roads().calls == 1);
+    // the service's detour rule (road > 2 x straight + 300 m): not marched
+    Roads() = FakeRoads();
+    Roads().factor = 2.3f;
+    const Vector3 c(1000, 0, 5000);
+    CHECK(cache.Length(a, c, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().detours == 1);
+    Roads().factor = 2.0f;
+    const Vector3 d(5000, 0, 1000);
+    CHECK(cache.Length(a, d, 10.0f) == Approx(8000.0f)); // 2 x 4000, within the slack
+    // no road net (unit tests) and no planner: -1 without planning
+    const int plans = cache.Stats().plans;
+    cache.SetPlanner(nullptr);
+    CHECK(cache.Length(a, b, 10.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().plans == plans);
+}
+
+TEST_CASE("RoadQuoteCache - the tick's plan budget, the TTL and a new mission",
+          "[game][guerrilla][occupierforces][roadroute]")
+{
+    QuoteGuard guard(2, 300.0f);
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const Vector3 base(0, 0, 0);
+    const Vector3 t1(1000, 0, 0);
+    const Vector3 t2(2000, 0, 0);
+    const Vector3 t3(3000, 0, 0);
+    // two plans a tick: the third pair is over budget (-1: the director
+    // quotes the straight line x forcesRoadFactor) and is not cached
+    CHECK(cache.Length(base, t1, 50.0f) == Approx(1300.0f));
+    CHECK(cache.Length(base, t2, 50.0f) == Approx(2600.0f));
+    CHECK(cache.Length(base, t3, 50.0f) == Approx(-1.0f));
+    CHECK(cache.Stats().overBudget == 1);
+    CHECK(Roads().calls == 2);
+    // the next tick plans it
+    CHECK(cache.Length(base, t3, 51.0f) == Approx(3900.0f));
+    CHECK(Roads().calls == 3);
+    // past the TTL an entry is planned again when the tick has budget...
+    Roads().factor = 1.4f;
+    CHECK(cache.Length(base, t1, 400.0f) == Approx(1400.0f));
+    CHECK(cache.Length(base, t2, 400.0f) == Approx(2800.0f));
+    CHECK(Roads().calls == 5);
+    // ...and served as it is when the budget is spent (the road net does not
+    // change)
+    CHECK(cache.Length(base, t3, 400.0f) == Approx(3900.0f));
+    CHECK(Roads().calls == 5);
+    // a clock running backwards (a new mission) clears the cache
+    CHECK(cache.Length(base, t3, 5.0f) == Approx(4200.0f));
+    CHECK(Roads().calls == 6);
+    CHECK(cache.Size() == 1);
+}
+
+TEST_CASE("RoadQuoteCache - quoting 6 sources x 14 towns with the cache warm stays under 2 ms",
+          "[game][guerrilla][occupierforces][roadroute][packages]")
+{
+    QuoteGuard guard(1000, 600.0f);
+    RoadQuoteCache& cache = RoadQuoteCache::Instance();
+    const ForcePackageCatalogue cat = EastWithMi17();
+    PackageRequest req = MaldenRequest();
+    req.roadFactor = 1.5f;
+    std::vector<Vector3> bases;
+    std::vector<Vector3> towns;
+    for (int b = 0; b < 6; b++)
+    {
+        bases.push_back(Vector3(1000.0f + 1300.0f * (float)b, 0, 2000.0f + 900.0f * (float)(b % 3)));
+    }
+    for (int t = 0; t < 14; t++)
+    {
+        towns.push_back(Vector3(500.0f + 650.0f * (float)t, 0, 7000.0f - 350.0f * (float)(t % 5)));
+    }
+    // warm: one director tick plans every pair
+    for (const Vector3& t : towns)
+    {
+        for (const Vector3& b : bases)
+        {
+            REQUIRE(cache.Length(b, t, 100.0f) > 0);
+        }
+    }
+    const int plans = cache.Stats().plans;
+    CHECK(plans == 84);
+    // a later tick: the director's quotes for every town, warm
+    int chosen = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (size_t t = 0; t < towns.size(); t++)
+    {
+        AutoArray<PackageSource> sources;
+        for (size_t b = 0; b < bases.size(); b++)
+        {
+            PackageSource s;
+            s.zone = (int)b;
+            const float dx = bases[b].X() - towns[t].X();
+            const float dz = bases[b].Z() - towns[t].Z();
+            s.distance = sqrtf(dx * dx + dz * dz);
+            s.road = cache.Length(bases[b], towns[t], 160.0f);
+            s.spare = 6;
+            sources.Add(s);
+        }
+        const PackageChoice c = ForcePackages::Choose(req, cat, sources);
+        chosen += c.ok ? 1 : 0;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    CHECK(cache.Stats().plans == plans); // every lookup a hit
+    CHECK(chosen == 14);
+    INFO("6 x 14 warm quotes took " << ms << " ms");
+    CHECK(ms < 2.0);
+}

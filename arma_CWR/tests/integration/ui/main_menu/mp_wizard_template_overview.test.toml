@@ -1,4 +1,6 @@
-data_dir = "packages/Demo"
+# The local Demo package ships no Templates folder, so this runs on the
+# setup-prepared Remaster shadow, whose Templates hold the stock Abel set.
+data_dir = "packages/RemasterUD"
 timeout = 120
 assert_timeout = 30
-tags = ["headful", "ci-host-blocked"]
+tags = ["headful", "ci-host-blocked", "remaster_ud"]

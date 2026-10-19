@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <Poseidon/AI/AI.hpp>            // AIGroup / AISubgroup (ForeignGroupLinks)
 #include <Poseidon/Core/SaveVersion.hpp> // WorldSerializeVersion
 #include <Poseidon/Game/Guerrilla/FactionTwins.hpp>
 #include <Poseidon/Game/Guerrilla/ZoneRegistry.hpp>
@@ -8,6 +9,9 @@
 #include <Poseidon/IO/ParamFileExt.hpp> // ExtParsMission (load-pass config rebuild)
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Game/Commands/GameStateExt.hpp> // GGameState (gmSeededBases, issue #76)
+#include <Poseidon/Foundation/Modules/Modules.hpp> // InitModules (command registration)
+#include <Evaluator/express.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -434,6 +438,65 @@ TEST_CASE("ZoneRegistry - military capture rules", "[game][guerrilla]")
         f.registry.EvaluateTick(in, fired);
         REQUIRE(Str(f.registry.GetZone(outpost)->owner) == "EAST");
         REQUIRE(f.registry.GetZone(outpost)->capture == Approx(0.0f));
+    }
+
+    SECTION("U4: a live body of the post's own garrison within 800 m still defends it")
+    {
+        // the reserve is all materialized and nobody is inside the 150 m
+        // circle, but one of the post's own garrison stepped 200 m out to
+        // fight (GarrisonCache::LiveCountWithin, cacheRadius)
+        ZoneRecord* z = f.registry.GetZoneMutable(outpost);
+        z->garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, outpost, outpost);
+        in.garrisonNear.Resize(f.registry.NZones());
+        for (int i = 0; i < in.garrisonNear.Size(); i++)
+        {
+            in.garrisonNear[i] = 0;
+        }
+        in.garrisonNear[outpost] = 1;
+        Ticks(f.registry, in, fired, 5);
+        REQUIRE(Str(z->owner) == "EAST");
+        REQUIRE(z->capture == Approx(0.0f));
+        REQUIRE(z->contestedLastTick);
+        REQUIRE(z->lastGarrisonNear == 1);
+        REQUIRE(CountEvents(fired, ZECaptureStarted, outpost) == 0);
+
+        // the decay choice reads it too: a half capture with only that
+        // defender re-secures at captureDecayDefended (10), not the
+        // abandoned fade (2)
+        z->capture = 50;
+        ZoneTickInputs noGuer = MakeInputs(f.registry, outpost, -1);
+        noGuer.garrisonNear = in.garrisonNear;
+        f.registry.EvaluateTick(noGuer, fired);
+        REQUIRE(z->capture == Approx(40.0f));
+        noGuer.garrisonNear[outpost] = 0;
+        f.registry.EvaluateTick(noGuer, fired);
+        REQUIRE(z->capture == Approx(38.0f));
+
+        // the body killed (or beyond 800 m): the meter climbs again
+        in.garrisonNear[outpost] = 0;
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(z->capture == Approx(44.0f));
+    }
+
+    SECTION("U4 does not touch towns: garrisonNear is read by the military branch only")
+    {
+        // a town's support gate keeps its own inputs (occ, reserve,
+        // garrisonLive); a stray garrisonNear value changes nothing there
+        const int village = f.registry.FindZoneIndex("Village");
+        REQUIRE(village >= 0);
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(f.registry, village, village);
+        in.garrisonNear.Resize(f.registry.NZones());
+        for (int i = 0; i < in.garrisonNear.Size(); i++)
+        {
+            in.garrisonNear[i] = 0;
+        }
+        in.garrisonNear[village] = 3;
+        const float before = f.registry.GetZone(village)->support;
+        f.registry.EvaluateTick(in, fired);
+        REQUIRE(f.registry.GetZone(village)->support == Approx(before + 5.0f));
     }
 
     // Off-screen contract D1 (issue #71): outside cacheRadius a zone keeps
@@ -1240,18 +1303,53 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(z.support == Approx(25.0f));
         // authored RESISTANCE falls to plain NEUTRAL administration
         REQUIRE(Str(z.owner) == "NEUTRAL");
-        REQUIRE(z.garrison == Approx(4.0f)); // refilled to the town's strength
+        // refilled to the town's strength; the player stands in the town, so
+        // the refill is a PENDING deposit (S5), not bodies at his feet
+        REQUIRE(z.garrison == Approx(0.0f));
+        REQUIRE(z.pending == 4);
+        REQUIRE(z.pendingOrigin == -1); // from nothing (no pool in phase 1)
+        REQUIRE(z.revertRefill == 4);
         REQUIRE(t.f.registry.IsGarrisonable(z));
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
         REQUIRE(CountEvents(fired, ZECaptured, t.held) == 0);
         REQUIRE(t.f.registry.LiberatedTownCount() == 0);
 
-        // administered again: the refilled reserve now blocks the rise
+        // administered again: the occupiers still standing in it block the
+        // rise (the pending refill itself never defends)
         fired.Clear();
         ZoneTickInputs back = MakeInputs(t.f.registry, t.held, t.held);
+        back.occCount[t.held] = 2;
         Ticks(t.f.registry, back, fired, 5);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.held).support == Approx(25.0f));
+        REQUIRE(t.Z(t.held).revertRefill == 0); // the adoption's window was the revert tick
+    }
+
+    SECTION("S5: a pending refill does not defend; a direct one off-screen does")
+    {
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 2;
+        Ticks(t.f.registry, in, fired, 9);
+        REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
+        REQUIRE(t.Z(t.held).pending == 4);
+        // the occupiers gone, one fighter: support rises past the pending
+        // deposit (it is not a defender) - the gate sees no reserve
+        ZoneTickInputs rise = MakeInputs(t.f.registry, t.held, t.held);
+        t.f.registry.EvaluateTick(rise, fired);
+        REQUIRE(t.Z(t.held).support == Approx(30.0f));
+
+        // the same retake with the player far away: the refill is a direct
+        // reserve write, which defends as before
+        TownFixture far;
+        far.Load(kTownConfig);
+        AutoArray<ZoneEventRecord> fired2;
+        ZoneTickInputs remote = MakeInputs(far.f.registry, far.farPost, -1);
+        remote.occCount[far.held] = 2;
+        Ticks(far.f.registry, remote, fired2, 9);
+        REQUIRE(Str(far.Z(far.held).owner) == "NEUTRAL");
+        REQUIRE(far.Z(far.held).garrison == Approx(4.0f));
+        REQUIRE(far.Z(far.held).pending == 0);
     }
 
     SECTION("a town that rose reverts to its authored owner with its garrison back")
@@ -1268,7 +1366,9 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(Str(t.Z(t.town).owner) == "GUER");
         t.f.registry.EvaluateTick(occ, fired); // 25
         REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
-        REQUIRE(t.Z(t.town).garrison == Approx(4.0f));
+        // the player in the town: the refill is pending (S5)
+        REQUIRE(t.Z(t.town).garrison + (float)t.Z(t.town).pending == Approx(4.0f));
+        REQUIRE(t.Z(t.town).pending == 4);
         REQUIRE(CountEvents(fired, ZETownLost, t.town) == 1);
     }
 
@@ -1330,6 +1430,7 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         Ticks(t.f.registry, in, fired, 9);
         REQUIRE(Str(t.Z(t.held).owner) == "NEUTRAL");
         REQUIRE(t.Z(t.held).garrison == Approx(0.0f));
+        REQUIRE(t.Z(t.held).pending == 0);
     }
 
     SECTION("RevertTown is a no-op on anything but a resistance-held CITY")
@@ -1342,6 +1443,28 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
         REQUIRE(fired.Size() == 0);
         REQUIRE(t.f.registry.RevertTown(t.held, fired));
         REQUIRE(CountEvents(fired, ZETownLost, t.held) == 1);
+    }
+
+    SECTION("occupier forces: a holding force settles first, the rest is the refill (OCCUPIER-FORCES.md 5.4)")
+    {
+        // the pool is inactive here, so the refill comes from nothing as
+        // before; only its split changes
+        AutoArray<ZoneEventRecord> fired;
+        const int room = (int)t.Z(t.held).garrisonMax;
+        REQUIRE(room >= 2);
+        t.Z(t.held).garrison = 0;
+        t.Z(t.held).pending = 0;
+        t.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f); // a zone tick saw the player far away
+        // more settled bodies than room: the town is full, nothing is refilled
+        REQUIRE(t.f.registry.RevertTown(t.held, fired, room + 2));
+        CHECK(t.Z(t.held).garrison == Approx((float)room));
+        CHECK(t.Z(t.held).revertRefill == 0);
+        // one settled body: the refill tops up the rest
+        t.Z(t.held).owner = "GUER";
+        t.Z(t.held).garrison = 0;
+        REQUIRE(t.f.registry.RevertTown(t.held, fired, 1));
+        CHECK(t.Z(t.held).garrison == Approx((float)room));
+        CHECK(t.Z(t.held).revertRefill == room - 1);
     }
 
     SECTION("townRetake = 0: liberated towns are permanent and inert (pre-#79)")
@@ -1390,37 +1513,160 @@ TEST_CASE("ZoneRegistry - the town retake (issue #79 scope addition)", "[game][g
     }
 }
 
-TEST_CASE("PlayerCountsAsPresence - the D1 rule (issue #79)", "[game][guerrilla]")
+TEST_CASE("Player presence - the HOLD and CAPTURE predicates (OCCUPIER-FORCES 8.1, D11, D23, #86)",
+          "[game][guerrilla]")
 {
+    // gmUndercover is true for the whole campaign, so the matrix is drawn
+    // undercover; "not undercover" is the last row
     PlayerPresenceInput in;
-    SECTION("not undercover: always counts")
+    in.undercover = true;
+    SECTION("uniformed, rifle slung, unseen: holds, does not capture")
+    {
+        in.warriorOutfit = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("uniformed, weapon in hands: both")
+    {
+        in.warriorOutfit = true;
+        in.weaponInHands = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, rifle slung, unseen: neither")
+    {
+        REQUIRE_FALSE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, weapon seen by an occupier observer: holds, does not capture")
+    {
+        in.weaponSeen = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE_FALSE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, exposed: both")
+    {
+        in.exposed = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("disguised, weapon in hands: both")
+    {
+        in.weaponInHands = true;
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
+    }
+    SECTION("not undercover: both, whatever else")
     {
         in.undercover = false;
-        REQUIRE(PlayerCountsAsPresence(in));
+        REQUIRE(PlayerHoldsPresence(in));
+        REQUIRE(PlayerCapturesPresence(in));
     }
-    SECTION("disguised and unseen: does not count")
+}
+
+TEST_CASE("ZoneRegistry - HOLD presence freezes a held town's drain; only CAPTURE raises support",
+          "[game][guerrilla]")
+{
+    TownFixture t;
+    t.Load(kTownConfig);
+    const int n = t.f.registry.NZones();
+    auto zeroHold = [n](ZoneTickInputs& in)
     {
-        in.undercover = true;
-        REQUIRE_FALSE(PlayerCountsAsPresence(in));
-    }
-    SECTION("an observer holds an exposed verdict: counts")
+        in.guerHold.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            in.guerHold[i] = 0;
+        }
+    };
+
+    SECTION("a uniformed player with his rifle slung (HOLD, not CAPTURE) freezes the drain; gone, it drains")
     {
-        in.undercover = true;
-        in.exposed = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        in.occCount[t.held] = 1;
+        zeroHold(in);
+        in.guerHold[t.held] = 1; // the player holds; the capture count stays 0
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.held).support == Approx(70.0f)); // no drain, no rise
+        REQUIRE(Str(t.Z(t.held).owner) == "GUER");
+        REQUIRE(t.Z(t.held).contestedLastTick);
+        REQUIRE(t.Z(t.held).lastGuer == 0);
+        REQUIRE(t.Z(t.held).lastGuerHold == 1);
+
+        // the player walks away: the occupier drains the town
+        ZoneTickInputs gone = MakeInputs(t.f.registry, t.farPost, -1);
+        gone.occCount[t.held] = 1;
+        t.f.registry.EvaluateTick(gone, fired);
+        REQUIRE(t.Z(t.held).support == Approx(65.0f));
     }
-    SECTION("overtly armed: counts")
+
+    SECTION("HOLD alone never raises an administered town; CAPTURE does")
     {
-        in.undercover = true;
-        in.weaponInHands = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        t.Z(t.town).garrison = 0; // its defenders are dead
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.town, -1);
+        zeroHold(in);
+        in.guerHold[t.town] = 1;
+        Ticks(t.f.registry, in, fired, 10);
+        REQUIRE(t.Z(t.town).support == Approx(20.0f));
+        REQUIRE(Str(t.Z(t.town).owner) == "NEUTRAL");
+        // weapon in hands: he captures
+        in.guerCount[t.town] = 1;
+        t.f.registry.EvaluateTick(in, fired);
+        REQUIRE(t.Z(t.town).support == Approx(25.0f));
     }
-    SECTION("warrior outfit: counts")
+
+    SECTION("HOLD consolidates an unopposed held town (D18)")
     {
-        in.undercover = true;
-        in.warriorOutfit = true;
-        REQUIRE(PlayerCountsAsPresence(in));
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.held, -1);
+        zeroHold(in);
+        in.guerHold[t.held] = 1;
+        Ticks(t.f.registry, in, fired, 2);
+        REQUIRE(t.Z(t.held).support == Approx(80.0f));
     }
+
+    SECTION("HOLD alone never raises a post's capture meter")
+    {
+        t.Z(t.post).garrison = 0;
+        AutoArray<ZoneEventRecord> fired;
+        ZoneTickInputs in = MakeInputs(t.f.registry, t.post, -1);
+        zeroHold(in);
+        in.guerHold[t.post] = 1;
+        Ticks(t.f.registry, in, fired, 3);
+        REQUIRE(t.Z(t.post).capture == Approx(0.0f));
+    }
+}
+
+TEST_CASE("ZoneRegistry - U3: authored reserves are whole bodies", "[game][guerrilla]")
+{
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Half  { name=\"Half\";  type=\"OUTPOST\"; owner=\"EAST\"; garrison=5.5; "
+                         "garrisonMax=7.9; position[]={1000.0, 1000.0, 0.0}; };\n"
+                         "        class Neg   { name=\"Neg\";   type=\"OUTPOST\"; owner=\"EAST\"; garrison=-2; "
+                         "position[]={2000.0, 1000.0, 0.0}; };\n"
+                         "        class Burg  { name=\"Burg\";  type=\"CITY\";    owner=\"NEUTRAL\"; "
+                         "garrisonMax=4.5; position[]={3000.0, 1000.0, 0.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class CfgGuerrillaFactions { class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; }; };\n";
+    RegistryFixture f;
+    f.Load(config);
+    const ZoneRecord* half = f.registry.GetZone(f.registry.FindZoneIndex("Half"));
+    const ZoneRecord* neg = f.registry.GetZone(f.registry.FindZoneIndex("Neg"));
+    const ZoneRecord* burg = f.registry.GetZone(f.registry.FindZoneIndex("Burg"));
+    REQUIRE(half != nullptr);
+    REQUIRE(neg != nullptr);
+    REQUIRE(burg != nullptr);
+    CHECK(half->garrison == 5.0f); // floored, exactly
+    CHECK(half->garrisonMax == 7.0f);
+    CHECK(neg->garrison == 0.0f);
+    CHECK(neg->garrisonMax == 0.0f);
+    CHECK(burg->garrisonMax == 4.0f);
+    CHECK(burg->garrison == 4.0f); // cityGarrison, whole already
 }
 
 TEST_CASE("ZoneRegistry - IsCivilianOutfitClass reads the resistance Civ-family keys (issue #79 D1)",
@@ -1454,6 +1700,9 @@ TEST_CASE("ZoneRegistry - town defender state survives save/load (issue #79)", "
         t.Z(t.hamlet).garrison = 0;
         t.Z(t.held).flipDay = 3; // the counter-attack seam
         t.Z(t.held).flipMinute = 615;
+        t.Z(t.town).pending = 3; // an S5 deposit on its way into the reserve
+        t.Z(t.town).pendingOrigin = t.post;
+        t.Z(t.post).garrison = 2.5f; // a fractional reserve, as an older save may carry
         t.f.registry.SetEventHandler(ZETownLost, "hTownLost");
         ParamArchiveSave ar(WorldSerializeVersion);
         REQUIRE(t.f.registry.Serialize(ar) == LSOK);
@@ -1483,6 +1732,13 @@ TEST_CASE("ZoneRegistry - town defender state survives save/load (issue #79)", "
     CHECK(held->flipMinute == 615);
     CHECK(Str(held->owner) == "GUER");
     CHECK(held->garrison == Approx(0.0f));
+    // the pending deposit survives with its origin (saved by name)
+    CHECK(town->pending == 3);
+    CHECK(town->pendingOrigin == loaded.FindZoneIndex("Post"));
+    CHECK(held->pending == 0);
+    CHECK(held->pendingOrigin == -1);
+    // U3: the reserve loads as whole bodies
+    CHECK(loaded.GetZone(loaded.FindZoneIndex("Post"))->garrison == 2.0f);
     CHECK(Str(loaded.GetEventHandler(ZETownLost)) == "hTownLost");
     ExtParsMission.Clear();
     std::filesystem::remove(archivePath);
@@ -1536,6 +1792,145 @@ TEST_CASE("SimBudgetBreaches - live bodies and per-side groups (issue #71)", "[g
     t.budgetLiveBodies = 0; // off
     t.budgetSideGroups = 0;
     REQUIRE(SimBudgetBreaches(d, t) == 0);
+}
+
+TEST_CASE("SimBudgetAdmit - a spawn checked against the census before it lands (round 3 A)",
+          "[game][guerrilla][traffic]")
+{
+    ZoneTuning t; // budgetLiveBodies 130, budgetSideGroups 40
+    LiveCensus c;
+    c.liveTotal = 128;
+    c.sideGroups = 39;
+    REQUIRE(SimBudgetAdmit(c, 2, 1, t) == 0); // 130 of 130 and 40 of 40: at the cap is within budget
+    REQUIRE(SimBudgetAdmit(c, 3, 1, t) == SBLiveBodies);
+    REQUIRE(SimBudgetAdmit(c, 2, 2, t) == SBSideGroups);
+    REQUIRE(SimBudgetAdmit(c, 3, 2, t) == (SBLiveBodies | SBSideGroups));
+    c.liveTotal = 140; // already over: nothing more fits, not even an empty group
+    REQUIRE(SimBudgetAdmit(c, 0, 0, t) == SBLiveBodies);
+    t.budgetLiveBodies = 0; // a budget <= 0 is off
+    t.budgetSideGroups = 0;
+    REQUIRE(SimBudgetAdmit(c, 50, 50, t) == 0);
+}
+
+// Video 4 (2026-10-16): a scenario that deleteVehicle'd its squads but not
+// their groups ran the resistance group census from 1 to 14 with 11 bodies.
+// The budget counts groups with a living member; the empty ones are reported.
+TEST_CASE("Census - an empty group is reported, not counted against the group budget", "[game][guerrilla]")
+{
+    CenterCensus tally;
+    CensusTallyGroup(0, tally); // deleteVehicle'd squad: no members left
+    CensusTallyGroup(0, tally); // a wiped squad: dead bodies only
+    REQUIRE(tally.groups == 0);
+    REQUIRE(tally.emptyGroups == 2);
+    REQUIRE(tally.bodies == 0);
+
+    SECTION("a group with one living member is counted")
+    {
+        CensusTallyGroup(1, tally);
+        REQUIRE(tally.groups == 1);
+        REQUIRE(tally.emptyGroups == 2);
+        REQUIRE(tally.bodies == 1);
+    }
+    SECTION("empty groups leave the budget's room to a real spawn")
+    {
+        ZoneTuning t; // budgetSideGroups 40
+        for (int i = 0; i < 39; i++)
+        {
+            CensusTallyGroup(3, tally);
+        }
+        for (int i = 0; i < 20; i++)
+        {
+            CensusTallyGroup(0, tally);
+        }
+        REQUIRE(tally.groups == 39);
+        REQUIRE(tally.emptyGroups == 22);
+        LiveCensus c;
+        c.liveTotal = tally.bodies;
+        c.sideGroups = tally.groups;
+        REQUIRE(SimBudgetAdmit(c, 3, 1, t) == 0); // 40 of 40 counting the living only
+        REQUIRE(SimBudgetAdmit(c, 3, 2, t) == SBSideGroups);
+        SimDiag d;
+        d.grpMaxSide = tally.groups;
+        d.grpEmpty = tally.emptyGroups;
+        REQUIRE(SimBudgetBreaches(d, t) == 0); // 61 allocated, 39 within budget
+    }
+}
+
+TEST_CASE("EmptyGroupReleaseVerdict - only an unlinked group with no members, after the hold", "[game][guerrilla]")
+{
+    const float hold = 60.0f;
+    EmptyGroupFacts f; // no members, local, nobody's, unlinked
+    REQUIRE(EmptyGroupReleaseVerdict(f, 0.0f, hold) == EGVWait);
+    REQUIRE(EmptyGroupReleaseVerdict(f, 60.0f, hold) == EGVWait); // more than the hold, not at it
+    REQUIRE(EmptyGroupReleaseVerdict(f, 60.5f, hold) == EGVRelease);
+
+    SECTION("a dead body keeps its group")
+    {
+        f.members = 1;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never the player's group")
+    {
+        f.playerGroup = true;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never a remote group or in a network session")
+    {
+        f.local = false;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+        f.local = true;
+        f.networkSession = true;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("never a group a script or a service still links (a pending spawn)")
+    {
+        f.foreignLinks = 1;
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, hold) == EGVKeep);
+    }
+    SECTION("a hold of 0 turns the release off")
+    {
+        REQUIRE(EmptyGroupReleaseVerdict(f, 600.0f, 0.0f) == EGVKeep);
+    }
+}
+
+TEST_CASE("ForeignGroupLinks - a group's own radio and subgroup links do not count", "[game][guerrilla]")
+{
+    Ref<AIGroup> grp = new AIGroup(); // stands in for the center's ref
+    REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+
+    SECTION("its own subgroups' back links are its own")
+    {
+        Ref<AISubgroup> sub = new AISubgroup();
+        grp->AddSubgroup(sub);
+        REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+    }
+    SECTION("a script handle or a service record is foreign")
+    {
+        LLink<AIGroup> handle = grp.GetRef();
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+        LLink<AIGroup> record = grp.GetRef();
+        REQUIRE(ForeignGroupLinks(grp, 1) == 2);
+    }
+    SECTION("a second strong ref is foreign")
+    {
+        Ref<AIGroup> other = grp;
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+    }
+    SECTION("a Target naming the group outside its own target list is foreign")
+    {
+        // the group's own list entries are its own (the tri test's emptied
+        // squads kept 45 of them); one held anywhere else is not
+        Ref<Target> held = new Target(grp);
+        REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+    }
+    SECTION("dropped links stop counting")
+    {
+        {
+            LLink<AIGroup> handle = grp.GetRef();
+            REQUIRE(ForeignGroupLinks(grp, 1) == 1);
+        }
+        REQUIRE(ForeignGroupLinks(grp, 1) == 0);
+    }
 }
 
 TEST_CASE("ZoneRegistry - heat clamps", "[game][guerrilla]")
@@ -2025,7 +2420,7 @@ TEST_CASE("ZoneRegistry - playerSide pins the resistance side (roster pick, not 
         REQUIRE(occ != res); // two records, not one aliased twice
         REQUIRE(Str(occ->side) == "WEST");
         REQUIRE(Str(res->side) == "GUER");
-        // same order of battle on both sides — that IS what a mirror match is
+        // same order of battle on both sides: that IS what a mirror match is
         REQUIRE(Str(occ->tiers[0]) == "SoldierGB");
         REQUIRE(Str(res->tiers[0]) == "SoldierGB");
         REQUIRE(Str(f.registry.FactionValue("WEST", "flag")) == "guer.pac");
@@ -2587,6 +2982,9 @@ TEST_CASE("ZoneRegistry - seedCities appends CITY zones from the world's Names",
         REQUIRE(houdan->income == Approx(0.0f));
         REQUIRE(houdan->heat == Approx(0.0f));
         REQUIRE(Str(houdan->marker) == "gmZoneCity_0");
+        // the static seeded flag (OCCUPIER-FORCES.md 5.1): seeded towns only
+        REQUIRE(houdan->seeded);
+        REQUIRE_FALSE(f.registry.GetZone(f.registry.FindZoneIndex("Camp"))->seeded);
         // Names position[] is 2D map coords [x, z]; elevation 0
         REQUIRE(houdan->pos.X() == Approx(3500.0f));
         REQUIRE(houdan->pos.Z() == Approx(4200.0f));
@@ -2713,7 +3111,73 @@ void Unship(FakeProbe& probe, const char* className)
                          probe.vehicles.end());
 }
 
+// a settlement probe that rejects the listed names and counts its calls
+struct CountingSettlement final : SettlementProbe
+{
+    std::vector<std::string> labels;
+    mutable int calls = 0;
+    bool IsSettlement(const char* name, const Vector3&) const override
+    {
+        calls++;
+        for (const std::string& l : labels)
+        {
+            if (stricmp(l.c_str(), name) == 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 } // namespace
+
+TEST_CASE("ZoneRegistry - the occupier pool's settlement pass stores a verdict on each seeded town once",
+          "[game][guerrilla][occupierforces]")
+{
+    // seedCities = 1 seeds every Names town without the probe; the pool's
+    // pass (OCCUPIER-FORCES.md 5.1) then probes the seeded rows only
+    const char* config = "class CfgGuerrillaZones\n"
+                         "{\n"
+                         "    seedCities = 1;\n"
+                         "    class Zones\n"
+                         "    {\n"
+                         "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"GUER\"; "
+                         "position[]={6500.0, 6500.0, 100.0}; };\n"
+                         "        class Village { name=\"Village\"; type=\"CITY\"; owner=\"NEUTRAL\"; "
+                         "position[]={1000.0, 1000.0, 0.0}; };\n"
+                         "    };\n"
+                         "};\n"
+                         "class Names\n"
+                         "{\n"
+                         "    class Houdan { name=\"Houdan\"; position[]={3500.0, 4200.0}; };\n"
+                         "    class Hamlet { name=\"Hamlet\"; position[]={9000.0, 9000.0}; };\n"
+                         "};\n";
+    RegistryFixture f;
+    f.Load(config, nullptr, nullptr, "Names");
+    const ZoneRecord* houdan = f.registry.GetZone(f.registry.FindZoneIndex("Houdan"));
+    const ZoneRecord* hamlet = f.registry.GetZone(f.registry.FindZoneIndex("Hamlet"));
+    const ZoneRecord* village = f.registry.GetZone(f.registry.FindZoneIndex("Village"));
+    REQUIRE(houdan != nullptr);
+    REQUIRE(hamlet != nullptr);
+    REQUIRE(village != nullptr);
+    CHECK(houdan->settlement == 0); // seeding (All) never probes
+    CHECK(hamlet->settlement == 0);
+
+    CountingSettlement probe;
+    probe.labels = {"Hamlet", "Village"};
+    CHECK(f.registry.ProbeSeededSettlements(probe) == 2);
+    CHECK(probe.calls == 2); // the authored Village and the Camp are never probed
+    CHECK(houdan->settlement == 1);
+    CHECK(hamlet->settlement == -1);
+    CHECK(village->settlement == 0);
+
+    // a second pass finds every seeded row decided and probes nothing
+    probe.labels = {"Houdan"};
+    CHECK(f.registry.ProbeSeededSettlements(probe) == 0);
+    CHECK(probe.calls == 2);
+    CHECK(houdan->settlement == 1);
+}
 
 TEST_CASE("ZoneRegistry - plan-15 resolution keeps a fully-shipped descriptor verbatim", "[game][guerrilla]")
 {
@@ -2865,6 +3329,36 @@ TEST_CASE("ZoneRegistry - plan-15 resolution substitutes unknown incoming factio
     }
 }
 
+TEST_CASE("ZoneRegistry - plan-15 resolution checks the forces* hull keys and clears a missing one",
+          "[game][guerrilla][packages]")
+{
+    // the occupier force package overrides (OCCUPIER-FORCES.md 6.5) name
+    // vehicle classes: a missing one is never substituted with a soldier, it
+    // is cleared so the package falls back to the vehicles[] ladder
+    std::string cfg = kPlan15Config;
+    const std::string anchor = "        officer=\"OfficerE\";\n";
+    const size_t at = cfg.find(anchor);
+    REQUIRE(at != std::string::npos);
+    cfg.insert(at, "        forcesTruck=\"Ural\";\n        forcesJet=\"Su25\";\n");
+    SECTION("a shipped hull is kept verbatim")
+    {
+        FakeProbe probe = FullClassicProbe();
+        probe.vehicles.push_back("Su25");
+        RegistryFixture f;
+        f.Load(cfg.c_str(), nullptr, nullptr, nullptr, &probe);
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesTruck")) == "Ural");
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesJet")) == "Su25");
+    }
+    SECTION("a missing hull is cleared, never replaced by tier 0")
+    {
+        FakeProbe probe = FullClassicProbe(); // no Su25 in this package
+        RegistryFixture f;
+        f.Load(cfg.c_str(), nullptr, nullptr, nullptr, &probe);
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesTruck")) == "Ural");
+        CHECK(Str(f.registry.FactionValue("EAST", "forcesJet")) == "");
+    }
+}
+
 TEST_CASE("ZoneRegistry - plan-15 squad composition", "[game][guerrilla]")
 {
     RegistryFixture f;
@@ -2963,4 +3457,1035 @@ TEST_CASE("ZoneRegistry - plan-15 squad composition", "[game][guerrilla]")
             REQUIRE(Str(a[i]) == Str(b[i]));
         }
     }
+}
+
+// ===========================================================================
+// Occupier forces phase 4 (OCCUPIER-FORCES.md 7.2, 7.3, 11): the base
+// recapture (occCapture, the remote tick, RevertBase, baseLost), the new
+// zone events, standing and the phase-4 save fields.
+// ===========================================================================
+
+namespace
+{
+
+// a Camp, a town with an authored standing, a plain town, a post that the
+// fixture hands to the resistance (Rebel, garrison 6), an occupier post and a
+// far post (the "away" anchor)
+const char* kBaseConfig = "class CfgGuerrillaZones\n"
+                          "{\n"
+                          "    class Zones\n"
+                          "    {\n"
+                          "        class Camp    { name=\"Camp\";    type=\"CAMP\";    owner=\"RESISTANCE\"; "
+                          "position[]={1000.0, 1000.0, 0.0}; };\n"
+                          "        class Town    { name=\"Town\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+                          "standing=20; position[]={1000.0, 1300.0, 0.0}; };\n"
+                          "        class Plain   { name=\"Plain\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=20; "
+                          "position[]={1300.0, 1300.0, 0.0}; };\n"
+                          "        class Rebel   { name=\"Rebel\";   type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=6; "
+                          "position[]={2000.0, 2000.0, 0.0}; };\n"
+                          "        class Post    { name=\"Post\";    type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                          "position[]={3000.0, 3000.0, 0.0}; };\n"
+                          "        class FarPost { name=\"FarPost\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                          "position[]={20000.0, 20000.0, 0.0}; };\n"
+                          "    };\n"
+                          "};\n";
+
+std::string BaseConfigWith(const char* keys)
+{
+    std::string cfg = kBaseConfig;
+    const std::string anchor = "class CfgGuerrillaZones\n{\n";
+    cfg.insert(anchor.size(), std::string("    ") + keys + "\n");
+    return cfg;
+}
+
+struct BaseFixture
+{
+    std::string text;
+    RegistryFixture f;
+    int camp = -1, town = -1, plain = -1, rebel = -1, post = -1, farPost = -1;
+
+    // Rebel is authored OCCUPIER and handed to the resistance here, as a
+    // capture leaves it (income tap open, no reserve)
+    void Load(const std::string& config)
+    {
+        text = config;
+        f.Load(text.c_str());
+        camp = f.registry.FindZoneIndex("Camp");
+        town = f.registry.FindZoneIndex("Town");
+        plain = f.registry.FindZoneIndex("Plain");
+        rebel = f.registry.FindZoneIndex("Rebel");
+        post = f.registry.FindZoneIndex("Post");
+        farPost = f.registry.FindZoneIndex("FarPost");
+        REQUIRE(farPost >= 0);
+        Z(rebel).owner = f.registry.ResistanceSide();
+        Z(rebel).garrison = 0;
+        Z(rebel).income = 25;
+    }
+    ZoneRecord& Z(int i) { return *f.registry.GetZoneMutable(i); }
+    // the player at zone `at` (-1: far away); occ occupiers / hold fighters,
+    // an abstract holding force and its settled bodies, all at Rebel
+    ZoneTickInputs Inputs(int at, int occ, int hold, int abstractOcc = 0, int settle = 0)
+    {
+        ZoneTickInputs in = MakeInputs(f.registry, at >= 0 ? at : farPost, -1);
+        const int n = f.registry.NZones();
+        in.guerHold.Resize(n);
+        in.abstractOcc.Resize(n);
+        in.settleOcc.Resize(n);
+        for (int i = 0; i < n; i++)
+        {
+            in.guerHold[i] = 0;
+            in.abstractOcc[i] = 0;
+            in.settleOcc[i] = 0;
+        }
+        in.occCount[rebel] = occ;
+        in.guerHold[rebel] = hold;
+        in.abstractOcc[rebel] = abstractOcc;
+        in.settleOcc[rebel] = settle;
+        return in;
+    }
+};
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - base recapture: the key follows occupierForces unless authored", "[game][guerrilla]")
+{
+    BaseFixture dflt;
+    dflt.Load(kBaseConfig);
+    CHECK(dflt.f.registry.Tuning().baseRetake); // phase 7: occupierForces defaults on
+    BaseFixture off;
+    off.Load(BaseConfigWith("occupierForces = 0;"));
+    CHECK_FALSE(off.f.registry.Tuning().baseRetake);
+    AutoArray<ZoneEventRecord> fired;
+    // with the key off a liberated post is permanent (the old decision R)
+    Ticks(off.f.registry, off.Inputs(off.rebel, 3, 0), fired, 20);
+    CHECK(off.Z(off.rebel).occCapture == Approx(0.0f));
+    CHECK(Str(off.Z(off.rebel).owner) == "GUER");
+
+    BaseFixture on;
+    on.Load(BaseConfigWith("occupierForces = 1;"));
+    CHECK(on.f.registry.Tuning().baseRetake);
+    BaseFixture own;
+    own.Load(BaseConfigWith("occupierForces = 1; baseRetake = 0;"));
+    CHECK_FALSE(own.f.registry.Tuning().baseRetake);
+    BaseFixture solo;
+    solo.Load(BaseConfigWith("baseRetake = 1;"));
+    CHECK(solo.f.registry.Tuning().baseRetake);
+}
+
+TEST_CASE("ZoneRegistry - base recapture: occCapture rises in its own field, freezes, decays", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    ZoneRecord& z = b.Z(b.rebel);
+    AutoArray<ZoneEventRecord> fired;
+
+    // one occupier, no hold presence: captureRate (6) x 1 per tick; the
+    // player's meter and his events stay untouched
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 1, 0), fired);
+    CHECK(z.occCapture == Approx(6.0f));
+    CHECK(z.capture == Approx(0.0f));
+    CHECK(CountEvents(fired, ZECaptureStarted, b.rebel) == 0);
+    // three or more: the crew cap (x3)
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 5, 0), fired);
+    CHECK(z.occCapture == Approx(24.0f));
+    // a hold squad freezes it (both present)
+    Ticks(b.f.registry, b.Inputs(b.rebel, 5, 3), fired, 5);
+    CHECK(z.occCapture == Approx(24.0f));
+    CHECK(z.contestedLastTick);
+    CHECK(CountEvents(fired, ZEContested, b.rebel) == 0);
+    // the resistance alone re-secures fast (captureDecayDefended 10)
+    b.f.registry.EvaluateTick(b.Inputs(b.rebel, 0, 3), fired);
+    CHECK(z.occCapture == Approx(14.0f));
+    // nobody: the slow fade (captureDecayAbandoned 2), off-screen too
+    b.f.registry.EvaluateTick(b.Inputs(-1, 0, 0), fired);
+    CHECK(z.occCapture == Approx(12.0f));
+    CHECK(z.lastRemote);
+    Ticks(b.f.registry, b.Inputs(-1, 0, 0), fired, 10);
+    CHECK(z.occCapture == Approx(0.0f));
+    CHECK(Str(z.owner) == "GUER");
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 0);
+    CHECK(CountEvents(fired, ZECaptureLost, b.rebel) == 0);
+    // a held base with only its hold squad is not ticked (no remote count)
+    b.f.registry.EvaluateTick(b.Inputs(-1, 0, 3), fired);
+    CHECK_FALSE(z.lastRemote);
+    CHECK_FALSE(z.contestedLastTick);
+}
+
+TEST_CASE("ZoneRegistry - base recapture: an abstract force ticks it off-screen; at 100 the base reverts",
+          "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    ZoneRecord& z = b.Z(b.rebel);
+    AutoArray<ZoneEventRecord> fired;
+    // a holding BASE force of 4 (abstractOcc) with the player far away: the
+    // remote tick opens and the meter runs at the crew cap
+    ZoneTickInputs in = b.Inputs(-1, 0, 0, 4, 4);
+    b.f.registry.EvaluateTick(in, fired);
+    CHECK(z.lastRemote);
+    CHECK(z.occCapture == Approx(18.0f));
+    Ticks(b.f.registry, in, fired, 5); // 18 per tick: 100 on the sixth tick
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+    CHECK(Str(z.owner) == "EAST"); // the authored OCCUPIER token
+    CHECK(z.income == Approx(0.0f)); // the tap closes
+    CHECK(z.occCapture == Approx(0.0f));
+    CHECK(z.capture == Approx(0.0f));
+    CHECK(z.lostCount == 1);
+    // the holding force's 4 bodies settle first, the rest of the room is a
+    // pool deposit (the pool is inert here: it passes through)
+    CHECK(z.garrison == Approx(6.0f));
+    CHECK(z.revertRefill == 2);
+    // the occupier's post again: no more base ticks
+    Ticks(b.f.registry, in, fired, 3);
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+
+    // the player re-captures it: ZECaptured again, lostCount kept ("Retaken")
+    z.garrison = 0;
+    ZoneTickInputs take = MakeInputs(b.f.registry, b.rebel, b.rebel, 3);
+    Ticks(b.f.registry, take, fired, 10);
+    CHECK(Str(z.owner) == "GUER");
+    CHECK(CountEvents(fired, ZECaptured, b.rebel) == 1);
+    CHECK(z.lostCount == 1);
+    CHECK(z.income == Approx(25.0f)); // the defensive income < 1 rule reopens the tap
+}
+
+TEST_CASE("ZoneRegistry - L10: a revert before the first zone tick since a load goes pending", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    AutoArray<ZoneEventRecord> fired;
+    // no tick yet (a load clears the tick's player): nobody knows where the
+    // player stands, so the refill never lands as reserve beside him
+    REQUIRE_FALSE(b.f.registry.TickSeen());
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(0.0f));
+    CHECK(b.Z(b.rebel).pending == 6);
+    // after a tick that saw him far away the same write is reserve
+    b.Z(b.rebel).owner = "GUER";
+    b.Z(b.rebel).pending = 0;
+    b.Z(b.rebel).pendingOrigin = -1;
+    b.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f);
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(6.0f));
+    CHECK(b.Z(b.rebel).pending == 0);
+    // and beside him it is pending again
+    b.Z(b.rebel).owner = "GUER";
+    b.Z(b.rebel).garrison = 0;
+    b.f.registry.NoteTickPlayer(true, b.Z(b.rebel).pos.X(), b.Z(b.rebel).pos.Z());
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).pending == 6);
+    // a Clear (as at a load) forgets the tick
+    b.f.registry.Clear();
+    CHECK_FALSE(b.f.registry.TickSeen());
+}
+
+TEST_CASE("ZoneRegistry - RevertBase refuses towns, occupier posts and the camp; settled surplus", "[game][guerrilla]")
+{
+    BaseFixture b;
+    b.Load(BaseConfigWith("baseRetake = 1;"));
+    AutoArray<ZoneEventRecord> fired;
+    CHECK_FALSE(b.f.registry.RevertBase(b.post, fired));
+    CHECK_FALSE(b.f.registry.RevertBase(b.camp, fired)); // a CAMP is not a base (CampaignEnd::IsMilitaryType)
+    b.Z(b.town).owner = "GUER";
+    CHECK_FALSE(b.f.registry.RevertBase(b.town, fired));
+    CHECK(fired.Size() == 0);
+    CHECK(b.f.registry.IsHeldBase(b.Z(b.rebel)));
+    CHECK_FALSE(b.f.registry.IsHeldBase(b.Z(b.camp)));
+    // 9 settled bodies into a room of 6: 6 stay (the surplus goes to the pool)
+    b.f.registry.NoteTickPlayer(true, 99999.0f, 99999.0f); // a zone tick saw the player far away
+    REQUIRE(b.f.registry.RevertBase(b.rebel, fired, 9));
+    CHECK(b.Z(b.rebel).garrison == Approx(6.0f));
+    CHECK(b.Z(b.rebel).revertRefill == 0);
+    CHECK(CountEvents(fired, ZEBaseLost, b.rebel) == 1);
+}
+
+TEST_CASE("ZoneRegistry - the phase-4 zone events and the authored standing", "[game][guerrilla]")
+{
+    CHECK(ZoneRegistry::EventTypeFromName("baseLost") == ZEBaseLost);
+    CHECK(ZoneRegistry::EventTypeFromName("hqLost") == ZEHqLost);
+    CHECK(ZoneRegistry::EventTypeFromName("BASELOST") == ZEBaseLost);
+    BaseFixture b;
+    b.Load(kBaseConfig);
+    // standing: authored per CITY, default 50, clamped to 0..100
+    CHECK(b.Z(b.town).standing == Approx(20.0f));
+    CHECK(b.Z(b.plain).standing == Approx(50.0f));
+    CHECK(b.Z(b.rebel).struckUntil == Approx(0.0f));
+    std::string high = kBaseConfig;
+    high.replace(high.find("standing=20"), 11, "standing=900");
+    BaseFixture c;
+    c.Load(high);
+    CHECK(c.Z(c.town).standing == Approx(100.0f));
+}
+
+TEST_CASE("ZoneRegistry - occCapture, standing, struckUntil, lostCount and the new handlers survive save/load",
+          "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-phase4.bin";
+    {
+        QIStream in(kBaseConfig, strlen(kBaseConfig));
+        ExtParsMission.Parse(in);
+    }
+    {
+        BaseFixture b;
+        b.Load(kBaseConfig);
+        b.Z(b.rebel).occCapture = 42.0f;
+        b.Z(b.rebel).lostCount = 2;
+        b.Z(b.town).standing = 12.5f;
+        b.Z(b.plain).struckUntil = 4321.0f;
+        // the settlement verdict rides on the row (OCCUPIER-FORCES.md 5.1)
+        b.Z(b.town).settlement = -1;
+        b.Z(b.plain).settlement = 1;
+        b.f.registry.SetEventHandler(ZEBaseLost, "hBase");
+        b.f.registry.SetEventHandler(ZEHqLost, "hHq");
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(b.f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    const ZoneRecord* rebel = loaded.GetZone(loaded.FindZoneIndex("Rebel"));
+    const ZoneRecord* town = loaded.GetZone(loaded.FindZoneIndex("Town"));
+    const ZoneRecord* plain = loaded.GetZone(loaded.FindZoneIndex("Plain"));
+    REQUIRE(rebel != nullptr);
+    REQUIRE(town != nullptr);
+    REQUIRE(plain != nullptr);
+    CHECK(rebel->occCapture == Approx(42.0f));
+    CHECK(rebel->lostCount == 2);
+    CHECK(town->standing == Approx(12.5f));
+    CHECK(plain->standing == Approx(50.0f));
+    CHECK(plain->struckUntil == Approx(4321.0f));
+    CHECK(town->settlement == -1);
+    CHECK(plain->settlement == 1);
+    CHECK(rebel->settlement == 0); // never probed: absent from the row, the default stays
+    CHECK(Str(loaded.GetEventHandler(ZEBaseLost)) == "hBase");
+    CHECK(Str(loaded.GetEventHandler(ZEHqLost)) == "hHq");
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}
+
+// ===========================================================================
+// Occupier forces phase 6 (OCCUPIER-FORCES.md 7.3, D17, D18, D21): the town
+// strike's effects, the strike window and the townStruck event.
+// ===========================================================================
+
+namespace
+{
+
+// a struck town (held), a town 1.5 km away, one exactly 2 km away, one
+// 2.1 km away, a town already near the floor 1 km away, and an occupier post
+// beside the struck town (not a CITY: the ring never touches it)
+const char* kStrikeConfig = "class CfgGuerrillaZones\n"
+                            "{\n"
+                            "    class Zones\n"
+                            "    {\n"
+                            "        class Camp   { name=\"Camp\";   type=\"CAMP\";    owner=\"RESISTANCE\"; "
+                            "position[]={9000.0, 9000.0, 0.0}; };\n"
+                            "        class Struck { name=\"Struck\"; type=\"CITY\";    owner=\"RESISTANCE\"; support=80; "
+                            "standing=80; position[]={1000.0, 1000.0, 0.0}; };\n"
+                            "        class Near   { name=\"Near\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={2500.0, 1000.0, 0.0}; };\n"
+                            "        class Edge   { name=\"Edge\";   type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={3000.0, 1000.0, 0.0}; };\n"
+                            "        class Far    { name=\"Far\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=60; "
+                            "standing=60; position[]={3100.0, 1000.0, 0.0}; };\n"
+                            "        class Low    { name=\"Low\";    type=\"CITY\";    owner=\"NEUTRAL\"; support=5; "
+                            "standing=5; position[]={1000.0, 2000.0, 0.0}; };\n"
+                            "        class Post   { name=\"Post\";   type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                            "position[]={1200.0, 1000.0, 0.0}; };\n"
+                            "    };\n"
+                            "};\n";
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - a town strike: -40 / -40 there, -10 / -10 within 2 km, floors, stamp and event",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    REQUIRE(f.registry.IsActive());
+    ZoneRegistry& r = f.registry;
+    const int struck = r.FindZoneIndex("Struck");
+    auto Z = [&r](const char* name) -> ZoneRecord& { return *r.GetZoneMutable(r.FindZoneIndex(name)); };
+    Z("Struck").heat = 20;
+    const float heatPost = Z("Post").heat;
+    CHECK(ZoneRegistry::EventTypeFromName("townStruck") == ZETownStruck);
+    CHECK_FALSE(r.IsStruck(struck, 100.0f));
+
+    AutoArray<ZoneEventRecord> fired;
+    const int ring = r.ApplyStrike(struck, VZero, 100.0f, fired);
+    CHECK(ring == 3); // Near, Edge (exactly 2 km) and Low; not Far
+    CHECK(Z("Struck").support == Approx(40.0f));
+    CHECK(Z("Struck").standing == Approx(40.0f));
+    CHECK(Z("Struck").heat == Approx(35.0f));
+    CHECK(Z("Struck").struckUntil == Approx(1300.0f));
+    CHECK(Z("Near").support == Approx(50.0f));
+    CHECK(Z("Near").standing == Approx(50.0f));
+    CHECK(Z("Edge").support == Approx(50.0f));
+    CHECK(Z("Far").support == Approx(60.0f)); // 2.1 km: untouched
+    CHECK(Z("Far").standing == Approx(60.0f));
+    CHECK(Z("Low").support == Approx(0.0f)); // floors at 0
+    CHECK(Z("Low").standing == Approx(0.0f));
+    CHECK(Z("Near").struckUntil == Approx(0.0f)); // the ring is not stamped
+    CHECK(Z("Post").heat == Approx(heatPost));
+    REQUIRE(fired.Size() == 1);
+    CHECK(fired[0].type == ZETownStruck);
+    CHECK(fired[0].zoneIndex == struck);
+    // the strike window
+    CHECK(r.IsStruck(struck, 100.0f));
+    CHECK(r.IsStruck(struck, 1299.0f));
+    CHECK_FALSE(r.IsStruck(struck, 1300.0f));
+    CHECK_FALSE(r.IsStruck(r.FindZoneIndex("Near"), 200.0f));
+    // a second strike floors the town and restamps it
+    r.ApplyStrike(struck, VZero, 500.0f, fired);
+    CHECK(Z("Struck").support == Approx(0.0f));
+    CHECK(Z("Struck").standing == Approx(0.0f));
+    CHECK(Z("Struck").struckUntil == Approx(1700.0f));
+    CHECK(Z("Near").support == Approx(40.0f));
+}
+
+TEST_CASE("ZoneRegistry - a strike on a base or a reported position cuts the ring only",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    ZoneRegistry& r = f.registry;
+    auto Z = [&r](const char* name) -> ZoneRecord& { return *r.GetZoneMutable(r.FindZoneIndex(name)); };
+    AutoArray<ZoneEventRecord> fired;
+    // the base opener: Post is no CITY; the ring is centred on it (Struck at
+    // 200 m, Near 1.3 km, Edge 1.8 km, Far 1.9 km, Low 1.02 km)
+    CHECK(r.ApplyStrike(r.FindZoneIndex("Post"), VZero, 10.0f, fired) == 5);
+    CHECK(fired.Size() == 0); // no townStruck, no stamp
+    CHECK(Z("Struck").support == Approx(70.0f));
+    CHECK(Z("Struck").struckUntil == Approx(0.0f));
+    CHECK(Z("Far").support == Approx(50.0f));
+    // a reported position outside every zone (index -1): the ring around it
+    CHECK(r.ApplyStrike(-1, Vector3(5200.0f, 0.0f, 1000.0f), 10.0f, fired) == 0);
+    CHECK(r.ApplyStrike(-1, Vector3(4500.0f, 0.0f, 1000.0f), 10.0f, fired) == 3); // Near, Edge, Far
+    CHECK(Z("Far").support == Approx(40.0f));
+    // nowhere at all: nothing
+    CHECK(r.ApplyStrike(-1, VZero, 10.0f, fired) == 0);
+}
+
+TEST_CASE("ZoneRegistry - D18: a struck held town does not recover without presence",
+          "[game][guerrilla][occupierforces]")
+{
+    RegistryFixture f;
+    f.Load(kStrikeConfig);
+    ZoneRegistry& r = f.registry;
+    const int struck = r.FindZoneIndex("Struck");
+    AutoArray<ZoneEventRecord> fired;
+    r.ApplyStrike(struck, VZero, 0.0f, fired);
+    const float after = r.GetZone(struck)->support;
+    // nobody there: the town stays weakened
+    ZoneTickInputs empty = MakeInputs(r, -1, -1);
+    Ticks(r, empty, fired, 20);
+    CHECK(r.GetZone(struck)->support <= after + 1e-3f);
+    CHECK(r.GetZone(struck)->standing == Approx(40.0f));
+}
+
+TEST_CASE("ZoneRegistry - the townStruck handler survives save/load", "[game][guerrilla][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-phase6.bin";
+    {
+        QIStream in(kStrikeConfig, strlen(kStrikeConfig));
+        ExtParsMission.Parse(in);
+    }
+    {
+        RegistryFixture f;
+        f.Load(kStrikeConfig);
+        f.registry.SetEventHandler(ZETownStruck, "hStruck");
+        AutoArray<ZoneEventRecord> fired;
+        f.registry.ApplyStrike(f.registry.FindZoneIndex("Struck"), VZero, 50.0f, fired);
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+    ZoneRegistry loaded;
+    {
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+    }
+    const ZoneRecord* z = loaded.GetZone(loaded.FindZoneIndex("Struck"));
+    REQUIRE(z != nullptr);
+    CHECK(z->struckUntil == Approx(1250.0f));
+    CHECK(z->support == Approx(40.0f));
+    CHECK(z->standing == Approx(40.0f));
+    CHECK(loaded.IsStruck(loaded.FindZoneIndex("Struck"), 1000.0f));
+    CHECK(Str(loaded.GetEventHandler(ZETownStruck)) == "hStruck");
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}
+
+// ---------------------------------------------------------------------------
+// issue #76: the AIRFIELD / SEAPORT seed (BaseWorldProbe + BaseDetect)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// land west of x = 9000 (20 m up), sea east of it (5 m down)
+struct CoastHeight final : HeightField
+{
+    float Height(float x, float /*z*/) const override { return x < 9000.0f ? 20.0f : -5.0f; }
+};
+
+// a synthetic world: one ILS strip (touchdown [4000, 4000], runway west to
+// [3200, 4000], apron [3500, 4100]) and a concrete quay pair on the coast
+// at [9000, 6025].  enabled = false stands in for a headless run.
+struct FakeBaseWorld final : BaseWorldProbe
+{
+    CoastHeight height;
+    bool enabled = true;
+    mutable int calls = 0;
+    bool Gather(BaseDetectInputs& in) const override
+    {
+        calls++;
+        if (!enabled)
+        {
+            return false;
+        }
+        in.worldClass = "Testland";
+        in.worldDisplay = "Testland";
+        in.worldSize = 12800.0f;
+        in.height = &height;
+        IlsEntry e;
+        e.x = 4000.0f;
+        e.z = 4000.0f;
+        e.dirX = 1.0f;
+        e.dirZ = 0.0f;
+        e.taxiOff.push_back(ScaffoldPoint{3200.0f, 4000.0f});
+        e.taxiIn.push_back(ScaffoldPoint{3500.0f, 4100.0f});
+        e.taxiIn.push_back(ScaffoldPoint{3600.0f, 4100.0f});
+        e.source = "CfgWorlds >> Testland";
+        in.ils.push_back(e);
+        DetectObject pier;
+        pier.x = 9010.0f;
+        pier.z = 6000.0f;
+        pier.model = "data3d\\molo_beton.p3d";
+        in.objects.push_back(pier);
+        DetectObject quay;
+        quay.x = 8990.0f;
+        quay.z = 6050.0f;
+        quay.model = "data3d\\molo_krychle.p3d";
+        in.objects.push_back(quay);
+        // houses: Portville is a settlement, so it may name the harbour
+        // (BaseDetect names bases after settlements only, never a bare label)
+        for (int i = 0; i < 3; i++)
+        {
+            DetectObject house;
+            house.x = 8000.0f + 30.0f * (float)i;
+            house.z = 6000.0f;
+            house.model = "data3d\\dum01.p3d";
+            house.radius = 9.0f;
+            in.objects.push_back(house);
+        }
+        return true;
+    }
+};
+
+// defaultIncome 30 so the seeded income is visibly the tuning's; no authored
+// AIRFIELD / SEAPORT, so seedBases resolves on by default
+const char* kBaseSeedConfig = "class CfgGuerrillaZones\n"
+                              "{\n"
+                              "    defaultIncome = 30;\n"
+                              "    class Zones\n"
+                              "    {\n"
+                              "        class Camp { name=\"Camp\"; type=\"CAMP\"; owner=\"RESISTANCE\"; "
+                              "position[]={1000.0, 1000.0, 20.0}; };\n"
+                              "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; garrison=4; "
+                              "position[]={6000.0, 6000.0, 20.0}; };\n"
+                              "    };\n"
+                              "};\n"
+                              "class Names\n"
+                              "{\n"
+                              "    class Hilltop     { name=\"Hilltop\"; position[]={3550.0, 4150.0}; };\n"
+                              "    class Portville   { name=\"Portville\";    position[]={8000.0, 6000.0}; };\n"
+                              "    class Eastend     { name=\"Eastend\";      position[]={7000.0, 2000.0}; };\n"
+                              "};\n"
+                              "class CfgGuerrillaFactions\n"
+                              "{\n"
+                              "    class East { side=\"EAST\"; tiers[]={\"SoldierEB\"}; };\n"
+                              "    class Guer { side=\"GUER\"; holdClass=\"SoldierGB\"; };\n"
+                              "};\n";
+
+struct SeedBaseFixture
+{
+    ParamFile file;
+    ZoneRegistry registry;
+    FakeBaseWorld world;
+
+    void Load(const std::string& config, bool names = true)
+    {
+        QIStream in(config.c_str(), config.size());
+        file.Parse(in);
+        registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), file.FindEntry("CfgGuerrillaFactions"), nullptr,
+                                nullptr, names ? file.FindEntry("Names") : nullptr, nullptr, nullptr, &world);
+    }
+    const ZoneRecord* Z(const char* name) const { return registry.GetZone(registry.FindZoneIndex(name)); }
+};
+
+std::string WithKey(const std::string& config, const char* key)
+{
+    std::string s(config);
+    const std::string anchor = "defaultIncome = 30;";
+    s.replace(s.find(anchor), anchor.size(), anchor + " " + key);
+    return s;
+}
+
+std::string WithZone(const std::string& config, const char* zoneLine)
+{
+    std::string s(config);
+    const std::string anchor = "    };\n};\nclass Names";
+    s.insert(s.find(anchor), zoneLine);
+    return s;
+}
+
+std::string ArrStr(const GameValue& v)
+{
+    return Str((RString)(GameStringType)v);
+}
+
+} // namespace
+
+TEST_CASE("ZoneRegistry - seedBases resolves on without an authored AIRFIELD / SEAPORT (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    auto read = [](const std::string& config) {
+        ParamFile file;
+        QIStream in(config.c_str(), config.size());
+        file.Parse(in);
+        return ZoneRegistry::ReadSeedBases(file.FindEntry("CfgGuerrillaZones"));
+    };
+    CHECK(read(kBaseSeedConfig));
+    CHECK_FALSE(ZoneRegistry::ReadSeedBases(nullptr));
+    const char* airfield = "        class AF { name=\"AF\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; "
+                           "position[]={100.0, 100.0, 0.0}; };\n";
+    const char* seaport = "        class SP { name=\"SP\"; type=\"SEAPORT\"; owner=\"OCCUPIER\"; "
+                          "position[]={100.0, 100.0, 0.0}; };\n";
+    CHECK_FALSE(read(WithZone(kBaseSeedConfig, airfield)));
+    CHECK_FALSE(read(WithZone(kBaseSeedConfig, seaport)));
+    // the explicit key wins both ways
+    CHECK_FALSE(read(WithKey(kBaseSeedConfig, "seedBases = 0;")));
+    CHECK(read(WithKey(WithZone(kBaseSeedConfig, airfield), "seedBases = 1;")));
+    // a template without AIRFIELD / SEAPORT (kDemoConfig) resolves on
+    RegistryFixture f;
+    f.Load(kDemoConfig);
+    CHECK(f.registry.Tuning().seedBases);
+}
+
+TEST_CASE("ZoneRegistry - detected AIRFIELD and SEAPORT seed as occupier zones (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.Load(kBaseSeedConfig);
+    REQUIRE(f.registry.BaseDetectionRan());
+    REQUIRE(f.world.calls == 1);
+    REQUIRE(f.registry.NSeededBases() == 2);
+
+    const ZoneRecord* air = f.Z("Testland Airfield");
+    REQUIRE(air != nullptr);
+    CHECK(Str(air->type) == "AIRFIELD");
+    CHECK(Str(air->ownerConfig) == "OCCUPIER");
+    CHECK(Str(air->owner) == Str(f.registry.OccupierSide()));
+    CHECK(air->seeded);
+    CHECK(air->garrison == Approx(12.0f));
+    CHECK(air->garrisonMax == Approx(12.0f));
+    CHECK(air->income == Approx(30.0f)); // ZoneTuning::defaultIncome
+    CHECK(Str(air->marker) == "gmZoneBase_0");
+    // the apron (first ilsTaxiIn point) is dry, so it is the centre; pos is
+    // engine axes (X easting, Y height, Z northing)
+    CHECK(air->pos.X() == Approx(3500.0f));
+    CHECK(air->pos.Z() == Approx(4100.0f));
+    CHECK(air->pos.Y() == Approx(20.0f));
+
+    const ZoneRecord* port = f.Z("Portville Harbour");
+    REQUIRE(port != nullptr);
+    CHECK(Str(port->type) == "SEAPORT");
+    CHECK(Str(port->owner) == Str(f.registry.OccupierSide()));
+    CHECK(port->seeded);
+    CHECK(port->garrison == Approx(8.0f));
+    CHECK(port->garrisonMax == Approx(8.0f));
+    CHECK(port->income == Approx(30.0f));
+    CHECK(Str(port->marker) == "gmZoneBase_1");
+    CHECK(port->pos.X() < 9000.0f - 25.0f); // walked inland to a dry spawn square
+
+    // seeded bases are garrisonable occupier posts, never seeded towns
+    CHECK(f.registry.IsGarrisonable(*air));
+    CHECK_FALSE(f.registry.IsAdministeredTown(*air));
+    CountingSettlement probe;
+    f.registry.ProbeSeededSettlements(probe);
+    CHECK(air->settlement == 0);
+    CHECK(port->settlement == 0);
+
+    // seeding order: AIRFIELDs, then SEAPORTs
+    REQUIRE(f.registry.SeededBase(0) != nullptr);
+    CHECK(Str(f.registry.SeededBase(0)->name) == "Testland Airfield");
+    CHECK(Str(f.registry.SeededBase(1)->name) == "Portville Harbour");
+    CHECK(f.registry.SeededBase(2) == nullptr);
+    CHECK(f.registry.SeededBase(0)->confidence >= 0.5f);
+    CHECK_FALSE(f.registry.SeededBase(0)->evidence.empty());
+
+    // the base seed runs before the city seed: the Names label 71 m from the
+    // airfield is absorbed by the 300 m dedup instead of becoming a CITY
+    CHECK(f.registry.FindZoneIndex("Hilltop") == -1);
+    REQUIRE(f.Z("Portville") != nullptr);
+    CHECK(Str(f.Z("Portville")->type) == "CITY");
+    CHECK(f.Z("Portville")->seeded);
+    // authored zones are untouched
+    CHECK_FALSE(f.Z("Camp")->seeded);
+    CHECK_FALSE(f.Z("Post")->seeded);
+}
+
+TEST_CASE("ZoneRegistry - seedBases = 0 detects but seeds nothing (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.Load(WithKey(kBaseSeedConfig, "seedBases = 0;"));
+    CHECK_FALSE(f.registry.Tuning().seedBases);
+    CHECK(f.registry.BaseDetectionRan());
+    CHECK(f.registry.DetectedBases().size() == 2);
+    CHECK(f.registry.NSeededBases() == 0);
+    CHECK(f.registry.FindZoneIndex("Testland Airfield") == -1);
+    // with no airfield zone, the Names label near the strip seeds as a CITY
+    CHECK(f.registry.FindZoneIndex("Hilltop") >= 0);
+}
+
+TEST_CASE("ZoneRegistry - an authored AIRFIELD covers the detected one (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    // seedBases forced on: the authored AIRFIELD alone would turn it off
+    const char* authored = "        class Field { name=\"Field\"; type=\"AIRFIELD\"; owner=\"OCCUPIER\"; garrison=10; "
+                           "position[]={3400.0, 4100.0, 20.0}; };\n";
+    SeedBaseFixture f;
+    f.Load(WithKey(WithZone(kBaseSeedConfig, authored), "seedBases = 1;"));
+    REQUIRE(f.registry.Tuning().seedBases);
+    REQUIRE(f.registry.DetectedBases().size() == 2);
+    const BaseCandidate& air = f.registry.DetectedBases()[0];
+    CHECK(Str(air.type) == "AIRFIELD");
+    CHECK(air.status == BaseStatus::Covered);
+    CHECK(Str(air.coveredBy) == "Field");
+    // only the harbour seeds
+    REQUIRE(f.registry.NSeededBases() == 1);
+    CHECK(Str(f.registry.SeededBase(0)->type) == "SEAPORT");
+    CHECK(f.Z("Testland Airfield") == nullptr);
+    CHECK_FALSE(f.Z("Field")->seeded);
+    CHECK(f.Z("Field")->garrison == Approx(10.0f));
+}
+
+TEST_CASE("ZoneRegistry - no world, no detection (issue #76)", "[game][guerrilla][zones][bases]")
+{
+    SeedBaseFixture f;
+    f.world.enabled = false;
+    f.Load(kBaseSeedConfig);
+    CHECK_FALSE(f.registry.BaseDetectionRan());
+    CHECK(f.registry.DetectedBases().empty());
+    CHECK(f.registry.NSeededBases() == 0);
+    // the default LoadFromParams (no probe) never detects either
+    RegistryFixture plain;
+    plain.Load(kBaseSeedConfig);
+    CHECK_FALSE(plain.registry.BaseDetectionRan());
+    // nor does a mission without a zones config
+    FakeBaseWorld world;
+    ZoneRegistry none;
+    none.LoadFromParams(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &world);
+    CHECK(world.calls == 0);
+    CHECK_FALSE(none.IsActive());
+}
+
+TEST_CASE("ZoneRegistry - playRegion keeps towns and bases off the unplayed map (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    SECTION("the west of the map only")
+    {
+        // Eastend [7000, 2000], Portville [8000, 6000] and the harbour
+        // [~8970, ~6000] lie outside
+        SeedBaseFixture f;
+        f.Load(WithKey(kBaseSeedConfig, "playRegion[] = {0, 0, 6000, 12800};"));
+        REQUIRE(f.registry.Tuning().playRegion.valid);
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        CHECK(f.registry.FindZoneIndex("Eastend") == -1);
+        CHECK(f.registry.FindZoneIndex("Portville") == -1);
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+
+        // the START TOWN list honours the same bounds
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        REQUIRE(towns.Size() == 1);
+        // menu time cannot see the airfield that absorbs this one at runtime
+        CHECK(Str(towns[0]) == "Hilltop");
+    }
+
+    SECTION("not authored: the authored zones' box + 5 km, which here holds everything")
+    {
+        // Camp [1000, 1000] and Post [6000, 6000]: -4000..11000 both ways
+        SeedBaseFixture f;
+        f.Load(kBaseSeedConfig);
+        const ZoneTuning::PlayRegion& r = f.registry.Tuning().playRegion;
+        REQUIRE(r.valid);
+        CHECK_FALSE(r.authored);
+        CHECK(r.minX == Approx(-4000.0f));
+        CHECK(r.minZ == Approx(-4000.0f));
+        CHECK(r.maxX == Approx(11000.0f));
+        CHECK(r.maxZ == Approx(11000.0f));
+        CHECK(f.registry.NSeededBases() == 2);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        CHECK(towns.Size() == 3);
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(r)) == "default box for bases only [-4000, -4000, 11000, 11000]");
+    }
+
+    SECTION("the default box keeps a far base out but never a far town")
+    {
+        // only the Camp at [1000, 1000]: the box is -4000..6000, so the
+        // airfield apron [3500, 4100] is in and the harbour [~8970, ~6000]
+        // is out; Eastend [7000, 2000] and Portville [8000, 6000] lie outside
+        // the box too, but the default bounds bases only: the city seed and
+        // the START TOWN list stay unbounded
+        std::string config = kBaseSeedConfig;
+        const std::string post = "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; "
+                                 "garrison=4; position[]={6000.0, 6000.0, 20.0}; };\n";
+        REQUIRE(config.find(post) != std::string::npos);
+        config.erase(config.find(post), post.size());
+        SeedBaseFixture f;
+        f.Load(config);
+        REQUIRE(f.registry.Tuning().playRegion.valid);
+        CHECK_FALSE(f.registry.Tuning().playRegion.authored);
+        CHECK(f.registry.Tuning().playRegion.maxX == Approx(6000.0f));
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        // the far towns still seed as CITY zones
+        REQUIRE(f.Z("Eastend") != nullptr);
+        CHECK(Str(f.Z("Eastend")->type) == "CITY");
+        REQUIRE(f.Z("Portville") != nullptr);
+        CHECK(Str(f.Z("Portville")->type) == "CITY");
+        // the far harbour does not
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(Str(f.registry.DetectedBases()[1].type) == "SEAPORT");
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        CHECK(towns.Size() == 3);
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(f.registry.Tuning().playRegion)) ==
+              "default box for bases only [-4000, -4000, 6000, 6000]");
+
+        // an authored region overrides the default box
+        SeedBaseFixture g;
+        g.Load(WithKey(config, "playRegion[] = {0, 0, 12800, 12800};"));
+        CHECK(g.registry.Tuning().playRegion.authored);
+        CHECK(g.registry.NSeededBases() == 2);
+        CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
+        CHECK(g.registry.FindZoneIndex("Portville") >= 0);
+    }
+
+    SECTION("an authored region bounds the far town and the far base alike")
+    {
+        // the same Camp-only config, with an authored region of the default
+        // box's size: Eastend, Portville and the harbour all stay out
+        std::string config = kBaseSeedConfig;
+        const std::string post = "        class Post { name=\"Post\"; type=\"OUTPOST\"; owner=\"OCCUPIER\"; "
+                                 "garrison=4; position[]={6000.0, 6000.0, 20.0}; };\n";
+        REQUIRE(config.find(post) != std::string::npos);
+        config.erase(config.find(post), post.size());
+        SeedBaseFixture f;
+        f.Load(WithKey(config, "playRegion[] = {-4000, -4000, 6000, 6000};"));
+        REQUIRE(f.registry.Tuning().playRegion.authored);
+        CHECK(f.Z("Testland Airfield") != nullptr);
+        CHECK(f.registry.FindZoneIndex("Eastend") == -1);
+        CHECK(f.registry.FindZoneIndex("Portville") == -1);
+        REQUIRE(f.registry.NSeededBases() == 1);
+        REQUIRE(f.registry.DetectedBases().size() == 2);
+        CHECK(f.registry.DetectedBases()[1].status == BaseStatus::OutsideRegion);
+        AutoArray<RString> towns;
+        ZoneRegistry::CollectTownNames(f.file.FindEntry("CfgGuerrillaZones"), f.file.FindEntry("Names"), towns);
+        REQUIRE(towns.Size() == 1);
+        CHECK(Str(towns[0]) == "Hilltop");
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(f.registry.Tuning().playRegion)) ==
+              "playRegion authored [-4000, -4000, 6000, 6000]");
+    }
+
+    SECTION("the INFO clause without any region")
+    {
+        ZoneTuning::PlayRegion none;
+        CHECK(Str(ZoneRegistry::PlayRegionInfo(none)) == "no playRegion (whole map)");
+    }
+
+    SECTION("a malformed region falls back to the default box")
+    {
+        for (const char* bad :
+             {"playRegion[] = {0, 0, 6000};", "playRegion[] = {6000, 0, 0, 12800};", "playRegion = 5;"})
+        {
+            SeedBaseFixture g;
+            g.Load(WithKey(kBaseSeedConfig, bad));
+            CHECK(g.registry.Tuning().playRegion.valid);
+            CHECK_FALSE(g.registry.Tuning().playRegion.authored);
+            CHECK(g.registry.NSeededBases() == 2);
+            CHECK(g.registry.FindZoneIndex("Eastend") >= 0);
+        }
+    }
+}
+
+TEST_CASE("ZoneRegistry - a seeded base survives save/load by name (issue #76)",
+          "[game][guerrilla][zones][bases][save][load]")
+{
+    const std::filesystem::path dir = std::filesystem::current_path() / "tmp";
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path archivePath = dir / "zone-registry-bases.bin";
+    // the load pass rebuilds from ExtParsMission (no world Names in the unit
+    // run, so the harbour takes the world's name both times)
+    {
+        QIStream in(kBaseSeedConfig, strlen(kBaseSeedConfig));
+        ExtParsMission.Parse(in);
+    }
+    FakeBaseWorld world;
+    {
+        SeedBaseFixture f;
+        f.Load(kBaseSeedConfig, false);
+        const int port = f.registry.FindZoneIndex("Testland Harbour");
+        REQUIRE(port >= 0);
+        ZoneRecord& z = *f.registry.GetZoneMutable(port);
+        z.owner = f.registry.ResistanceSide(); // liberated
+        z.garrison = 3;
+        z.capture = 40;
+        z.occCapture = 25;
+        z.lostCount = 1;
+        // a deposit on the authored post whose origin is the seeded base
+        ZoneRecord& post = *f.registry.GetZoneMutable(f.registry.FindZoneIndex("Post"));
+        post.pending = 2;
+        post.pendingOrigin = port;
+        ParamArchiveSave ar(WorldSerializeVersion);
+        REQUIRE(f.registry.Serialize(ar) == LSOK);
+        REQUIRE(ar.SaveBin(archivePath.string().c_str()));
+    }
+
+    SECTION("the detector reproduces the base: its dynamic state comes back")
+    {
+        ZoneRegistry loaded;
+        loaded.SetBaseProbeOverride(&world);
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        const int port = loaded.FindZoneIndex("Testland Harbour");
+        const ZoneRecord* z = loaded.GetZone(port);
+        REQUIRE(z != nullptr);
+        CHECK(z->seeded);
+        CHECK(Str(z->ownerConfig) == "OCCUPIER");
+        CHECK(Str(z->owner) == Str(loaded.ResistanceSide()));
+        CHECK(z->garrison == Approx(3.0f));
+        CHECK(z->garrisonMax == Approx(8.0f)); // static, config-rebuilt
+        CHECK(z->capture == Approx(40.0f));
+        CHECK(z->occCapture == Approx(25.0f));
+        CHECK(z->lostCount == 1);
+        CHECK(loaded.IsHeldBase(*z));
+        CHECK(loaded.NSeededBases() == 2);
+        CHECK(loaded.GetZone(loaded.FindZoneIndex("Post"))->pendingOrigin == port);
+    }
+
+    SECTION("a row for a base the detector no longer produces is dropped")
+    {
+        FakeBaseWorld gone;
+        gone.enabled = false;
+        ZoneRegistry loaded;
+        loaded.SetBaseProbeOverride(&gone);
+        ParamArchiveLoad ar;
+        REQUIRE(ar.LoadBin(archivePath.string().c_str()));
+        ar.FirstPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        ar.SecondPass();
+        REQUIRE(loaded.Serialize(ar) == LSOK);
+        CHECK(loaded.FindZoneIndex("Testland Harbour") == -1);
+        CHECK(loaded.FindZoneIndex("Testland Airfield") == -1);
+        CHECK(loaded.NZones() == 2);
+        const ZoneRecord* post = loaded.GetZone(loaded.FindZoneIndex("Post"));
+        REQUIRE(post != nullptr);
+        CHECK(post->pending == 2);
+        CHECK(post->pendingOrigin == -1); // the origin's name no longer resolves
+    }
+    ExtParsMission.Clear();
+    std::filesystem::remove(archivePath);
+}
+
+TEST_CASE("ZoneRegistry - gmSeededBases / gmDetectedBases / gmZone seeded slot (issue #76)",
+          "[game][guerrilla][zones][bases]")
+{
+    GGameState.Reset();
+    Poseidon::Foundation::InitModules();
+    ParamFile file;
+    {
+        QIStream in(kBaseSeedConfig, strlen(kBaseSeedConfig));
+        file.Parse(in);
+    }
+    FakeBaseWorld world;
+    ZoneRegistry& registry = ZoneRegistry::Instance();
+    registry.Clear();
+
+    // before any load: detection did not run, both lists are empty
+    {
+        GameValue seeded = GGameState.Evaluate("gmSeededBases");
+        REQUIRE(seeded.GetType() == GameArray);
+        CHECK(((const GameArrayType&)seeded).Size() == 0);
+        GameValue detected = GGameState.Evaluate("gmDetectedBases");
+        REQUIRE(detected.GetType() == GameArray);
+        CHECK(((const GameArrayType&)detected).Size() == 0);
+    }
+
+    registry.LoadFromParams(file.FindEntry("CfgGuerrillaZones"), nullptr, nullptr, nullptr, file.FindEntry("Names"),
+                            nullptr, nullptr, &world);
+    GameValue seeded = GGameState.Evaluate("gmSeededBases");
+    REQUIRE(seeded.GetType() == GameArray);
+    const GameArrayType& rows = seeded;
+    REQUIRE(rows.Size() == 2);
+    const GameArrayType& air = rows[0];
+    REQUIRE(air.Size() == 5);
+    CHECK(ArrStr(air[0]) == "Testland Airfield");
+    CHECK(ArrStr(air[1]) == "AIRFIELD");
+    const GameArrayType& pos = air[2];
+    REQUIRE(pos.Size() == 3);
+    CHECK((float)pos[0] == Approx(3500.0f)); // easting
+    CHECK((float)pos[1] == Approx(4100.0f)); // northing
+    CHECK((float)pos[2] == Approx(20.0f));   // height
+    CHECK((float)air[3] >= 0.5f);
+    CHECK(((const GameArrayType&)air[4]).Size() > 0);
+
+    GameValue detected = GGameState.Evaluate("gmDetectedBases");
+    REQUIRE(detected.GetType() == GameArray);
+    const GameArrayType& drows = detected;
+    REQUIRE(drows.Size() == 2);
+    const GameArrayType& port = drows[1];
+    REQUIRE(port.Size() == 7);
+    CHECK(ArrStr(port[1]) == "SEAPORT");
+    CHECK(ArrStr(port[5]) == "seed");
+    CHECK(ArrStr(port[6]) == "");
+
+    // gmZone slot 10: the seeded flag, for bases and towns alike
+    char expr[64];
+    snprintf(expr, sizeof(expr), "gmZone %d", registry.FindZoneIndex("Testland Airfield"));
+    GameValue zone = GGameState.Evaluate(expr);
+    const GameArrayType& zrow = zone;
+    REQUIRE(zrow.Size() == 11);
+    CHECK((bool)zrow[10]);
+    snprintf(expr, sizeof(expr), "gmZone %d", registry.FindZoneIndex("Camp"));
+    GameValue camp = GGameState.Evaluate(expr);
+    const GameArrayType& crow = camp;
+    REQUIRE(crow.Size() == 11);
+    CHECK_FALSE((bool)crow[10]);
+
+    registry.Clear();
 }

@@ -6,7 +6,10 @@
 // military zone is resistance-owned.  "Enemy military zone" is every zone
 // whose type is neither CAMP nor CITY and whose authored owner (the config
 // owner: the OCCUPIER token or the occupier's literal side) is the
-// campaign's occupier.  The set (the "roster") is taken once, on the first
+// campaign's occupier, plus every generated occupier base (OCCUPIER-FORCES.md
+// 5.7).  Minor posts are left out (the owner, 2026-10-16): a zone whose
+// countsForWin flag is false, and every CHECKPOINT, COASTAL, HELIPAD or RADAR
+// zone (IsMinorPostType); they capture, source and alarm like any base.  The set (the "roster") is taken once, on the first
 // tick with an active ZoneRegistry, and saved with the campaign; a template
 // that later gains or renames a zone does not move an existing campaign's
 // goal.  A campaign whose roster is empty can never win.  Town support is
@@ -21,10 +24,21 @@
 // display turns into the debriefing (with the UD win text added by
 // DisplayDebriefing when the briefing carries no Debriefing:End1 section),
 // then the empty OutroWin, then the main menu.  A campaign saved inside
-// that window resumes the clock on load.  The lose path is untouched:
-// player death still drops into the stock end dialog (issue #79 D10).
+// that window resumes the clock on load.  Player death still drops into the
+// stock end dialog (issue #79 D10).
 //
-// Script surface (CampaignEndCommands.cpp): gmCampaignWon,
+// THE LOSE RULE (OCCUPIER-FORCES.md 9.2, D10, D13): checked every second
+// after the win check, never once won, absent with campaignEnd = 0.  The
+// campaign is LOST when the player has no HQ (GuerrillaBase::HasHq false:
+// destroyed and not re-established), holds no base (any resistance-held
+// non-CITY zone, the Camp included) and holds no town.  A campaign that never
+// had an HQ and never held a zone is not lost (a mission with nothing to
+// lose).  The lost latch is saved here only and never clears; after the same
+// campaignEndDelay the service sets EMLoser once (still EMContinue only),
+// which the stock flow turns into the defeat debriefing (the UD lose text,
+// DisplayDebriefing), OutroLoose and the main menu.  Saves stay on disk.
+//
+// Script surface (CampaignEndCommands.cpp): gmCampaignWon, gmCampaignLost,
 // gmCampaignEnd and the gmCampaignEndDelay knob.  Config (CfgGuerrillaZones):
 // campaignEndDelay (seconds) and campaignEnd = 0 to switch the rule off.
 
@@ -75,8 +89,20 @@ class CampaignEnd : public SerializeClass
     // the rule (pure, unit-tested) ------------------------------------------
     // every type that is not CAMP and not CITY (case-insensitive)
     static bool IsMilitaryType(const char* type);
-    // the zone's AUTHORED owner names the campaign's occupier
+    // the zone's AUTHORED owner names the campaign's occupier.  False for a
+    // generated base (ZoneRecord::generated): it is not authored.  The
+    // occupier pool sizes R through this predicate, so a generated garrison
+    // adds nothing to R or poolStart (the conservation stand-in of
+    // OCCUPIER-FORCES.md 5.7 until the pool sizes generated bases itself)
     static bool IsAuthoredOccupier(const ZoneRecord& zone, const ZoneRegistry& registry);
+    // a generated base whose config owner is the occupier (the OCCUPIER token)
+    static bool IsGeneratedOccupier(const ZoneRecord& zone, const ZoneRegistry& registry);
+    // the minor kinds of the base catalogue: CHECKPOINT, COASTAL, HELIPAD,
+    // RADAR (case-insensitive)
+    static bool IsMinorPostType(const char* type);
+    // a military zone that counts toward the win: its countsForWin flag and
+    // not a minor kind
+    static bool CountsForWin(const ZoneRecord& zone);
     // take the roster from the registry; a no-op once taken (also after a load)
     void TakeRoster(const ZoneRegistry& registry);
     bool HasRoster() const { return _rosterTaken; }
@@ -89,11 +115,27 @@ class CampaignEnd : public SerializeClass
     // the registry, and every present one held by the resistance (a saved
     // zone the template no longer has is skipped, not counted against)
     bool AllHeld(const ZoneRegistry& registry) const;
+    // the resistance holds any zone right now (a base, the Camp or a town)
+    static bool HoldsAnything(const ZoneRegistry& registry);
 
     // one check: takes the roster when needed, then latches the win.  True
     // only on the tick that latches.  dayNow / minuteNow stamp the win.
     // Always false (and no roster is taken) while the rule is switched off.
     bool Evaluate(const ZoneRegistry& registry, int dayNow = 0, int minuteNow = 0);
+    // the lose check (9.2), run after Evaluate on the same tick: latches when
+    // there is no HQ (hasHq false), the resistance holds no zone at all, and
+    // the campaign has had something to lose (hadHq, or a zone once held).
+    // True only on the tick that latches; always false once won, once lost,
+    // and while the rule is switched off.  Records the zones held this tick
+    // (the "once held" counters of the debriefing) on every call.
+    bool EvaluateLost(const ZoneRegistry& registry, bool hasHq, bool hadHq, int dayNow = 0, int minuteNow = 0);
+    // add every zone the resistance holds now to the once-held set
+    void NoteHeld(const ZoneRegistry& registry);
+    // once-held military bases (not CAMP, not CITY) and towns (CITY), by
+    // the registry's current types; zones the template lost are skipped
+    int BasesOnceHeld(const ZoneRegistry& registry) const;
+    int TownsOnceHeld(const ZoneRegistry& registry) const;
+    int ZonesOnceHeld() const { return _onceHeld.Size(); }
 
     // the latch -------------------------------------------------------------
     bool Won() const { return _won; }
@@ -104,9 +146,13 @@ class CampaignEnd : public SerializeClass
     // latch came on the first check of the session (a fresh roster or a
     // load knows no "before")
     RString LastTaken() const { return _lastTaken; }
+    // the lose latch (9.2); OccupierForces and CounterAttack freeze on it
+    bool Lost() const { return _lost; }
+    int LostDay() const { return _lostDay; }
+    int LostMinute() const { return _lostMinute; }
 
     // the end request -------------------------------------------------------
-    bool EndPending() const { return _won && !_endIssued; }
+    bool EndPending() const { return (_won || _lost) && !_endIssued; }
     bool EndIssued() const { return _endIssued; }
     float EndClock() const { return _endClock; }
     // runtime override of endDelay (script knob gmCampaignEndDelay); a
@@ -122,14 +168,19 @@ class CampaignEnd : public SerializeClass
     // the debriefing's win heading and body ("Malden is free.")
     static RString DebriefingTitle(const char* island);
     static RString DebriefingBody(const char* islandPhrase, int held, int day);
-    // the live debriefing text for a won campaign (the island's name and
-    // phrase from the world and the registry); false while not won
+    // the defeat heading and body ("Malden is lost.")
+    static RString LoseTitle(const char* island);
+    static RString LoseBody(const char* islandPhrase, int day, int bases, int towns);
+    // the live debriefing text: the win text for a won campaign, the lose
+    // text for a lost one (the island's name and phrase from the world and
+    // the registry); false while neither
     bool DebriefingText(RString& title, RString& body) const;
 
     // engine hook -----------------------------------------------------------
-    // per-frame; no-op without an active ZoneRegistry.  Checks the rule at
-    // TickInterval, writes the journal line on the latch, and asks the
-    // world for END1 when the end clock runs out.
+    // per-frame; no-op without an active ZoneRegistry.  Checks the win rule,
+    // then the lose rule, at TickInterval, writes the journal line on the win
+    // latch, and asks the world for END1 (won) or EMLoser (lost) when the end
+    // clock runs out.
     void Simulate(float deltaT);
 
     // save gate: a campaign carries the block once its roster is taken
@@ -149,7 +200,11 @@ class CampaignEnd : public SerializeClass
     void LoadFromConfig();
     // the latch's side effects in the live world (journal line, log)
     void OnWon();
-    // ask the world for END1 (only while it is still EMContinue)
+    // the lose latch's INFO line (D12: no other messaging)
+    void OnLost();
+    // once-held zones of one kind (towns: CITY; else military bases)
+    int CountOnceHeld(const ZoneRegistry& registry, bool towns) const;
+    // ask the world for END1 / EMLoser (only while it is still EMContinue)
     void RequestEnd();
 
     CampaignEndTuning _tuning;
@@ -159,6 +214,11 @@ class CampaignEnd : public SerializeClass
     int _wonDay = 0;
     int _wonMinute = 0;
     RString _lastTaken;
+    bool _lost = false;
+    int _lostDay = 0;
+    int _lostMinute = 0;
+    // every zone the resistance has held this campaign, by name (saved)
+    AutoArray<RosterRow> _onceHeld;
     bool _endIssued = false;
     float _endClock = 0;
     float _accum = 0;

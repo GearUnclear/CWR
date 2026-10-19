@@ -1,0 +1,18 @@
+# Occupier forces, the whole route watched (OCCUPIER-FORCES.md 3.1 D6, phase 3;
+# native CounterAttack birth chain). Boots the SHIPPED Guerrilla.Abel template
+# (repo-root-relative) on the full Remaster lane: data_dir
+# "packages/RemasterUD" is a gitignored junction to a setup-prepared shadow of
+# the Steam Remastered folder (tools/runtime/new-remaster-shadow.ps1, then
+# setup-guerrilla.ps1 in Remaster mode; see guerrilla-mode/FRESH-INSTALL.md).
+# The shadow must carry the current gmcore (guerrilla-mode/install-missions.ps1).
+# Without the junction the test reports spawn failed, which is not a regression.
+# Not headless: the birth gate needs a real camera.
+mission = "guerrilla-mode/mission/Guerrilla.Abel"
+binary = "PoseidonGame"
+data_dir = "packages/RemasterUD"
+tags = ["scripting", "guerrilla", "remaster_ud", "occupierforces", "counterattack"]
+# the deferral waits out a 20 s give-up; the re-sourced squad walks up to
+# 10 simulated minutes (setAccTime 2)
+timeout = 1200
+assert_timeout = 900
+extra_args = ["--dev"]

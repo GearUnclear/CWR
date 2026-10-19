@@ -326,6 +326,19 @@ fn expand_placeholders(value: &str, values: &HashMap<String, String>) -> String 
     expanded
 }
 
+/// Expands the placeholders a single-instance sidecar toml may use in
+/// `extra_args`. Today that is only `${repo_root}`, the engine checkout root
+/// (`arma_CWR`, the same root a relative `data_dir` or `mission` resolves
+/// against), so a test can reach repo fixtures whatever data dir it runs on.
+pub(super) fn expand_single_test_args(values: &[String]) -> Vec<String> {
+    let mut replacements = HashMap::new();
+    replacements.insert(
+        "repo_root".to_string(),
+        repo_root().to_string_lossy().to_string(),
+    );
+    expand_placeholders_vec(values, &replacements)
+}
+
 fn expand_placeholders_vec(
     values: &[String],
     replacements: &HashMap<String, String>,
@@ -2131,6 +2144,10 @@ pub async fn run_multi_test(
     );
     replacements.insert("ports.game".to_string(), game_port.to_string());
     replacements.insert("game.port".to_string(), game_port.to_string());
+    replacements.insert(
+        "repo_root".to_string(),
+        repo_root().to_string_lossy().to_string(),
+    );
 
     let http_fixtures =
         match start_http_fixtures(&config.http_fixtures, test_dir, &test_output_dir).await {
@@ -2563,6 +2580,24 @@ mod tests {
             expanded,
             "--master-server=http://127.0.0.1:12345 --port=23456"
         );
+    }
+
+    #[test]
+    fn expand_single_test_args_substitutes_repo_root() {
+        let args = vec![
+            "--mods-dir".to_string(),
+            ".".to_string(),
+            "--mod".to_string(),
+            "@LoBo;${repo_root}/tests/fixtures/mods-lobo/@lobofixup".to_string(),
+        ];
+        let expanded = expand_single_test_args(&args);
+        let root = repo_root().to_string_lossy().to_string();
+        assert_eq!(expanded[1], ".");
+        assert_eq!(
+            expanded[3],
+            format!("@LoBo;{root}/tests/fixtures/mods-lobo/@lobofixup")
+        );
+        assert!(repo_root().join("tests").join("fixtures").is_dir());
     }
 
     #[test]

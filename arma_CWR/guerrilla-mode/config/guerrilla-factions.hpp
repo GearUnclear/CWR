@@ -75,6 +75,14 @@
 //       WEST western, EAST eastern_europe, GUER levant (one warn per faction).
 //       Enemy Legends use the western_evil bank: western/british/israeli,
 //       falling back to western when this key selects a different region.
+//   forcesTransportHeli / forcesAttackHeli / forcesJet   the occupier's air
+//       hulls (OCCUPIER-FORCES.md 6.5, phase 6), one CfgVehicles class each,
+//       read natively by OccupierForces (ZoneRegistry::FactionValue). Ground
+//       packages are classified off the vehicles[] ladder (forcesTruck /
+//       forcesArmedCar / forcesApc / forcesTank override that); air is never
+//       classified, it must be authored. A missing or unresolvable key means
+//       that package is simply not offered, so an irregular roster leaves all
+//       three out.
 //   civClassCount + civClass<N>  CIV only: the population bodies, numbered
 //       keys and not an array because gmFactionValue skips array entries
 //   civVehicles[]                CIV only: ambient road-traffic hulls
@@ -116,6 +124,12 @@ class CfgGuerrillaFactions
         vehicles[] = {"Jeep", "Truck5t", "M113", "M60"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "OfficerW";
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6), the twin of EAST's
+        // set: UH-60 troop lift, AH-1 Cobra gunship, A-10 ground attack
+        forcesTransportHeli = "UH60";
+        forcesAttackHeli = "Cobra";
+        forcesJet = "A10";
 
         // ---- resistance-capable key set (any faction may now be the
         // resistance roster; on a GUER-player island it spawns onto the GUER
@@ -174,6 +188,13 @@ class CfgGuerrillaFactions
         vehicles[] = {"UAZ", "Ural", "BMP", "T72"};
         vehicleThresholds[] = {3, 6, 8};
         officer = "OfficerE";
+
+        // occupier air (OCCUPIER-FORCES.md 6.5, phase 6): Mi-17 troop lift,
+        // Mi-24 gunship, Su-25 ground attack (the Su25 class ships in
+        // AddOns\su25.pbo, not the core CONFIG.BIN)
+        forcesTransportHeli = "Mi17";
+        forcesAttackHeli = "Mi24";
+        forcesJet = "Su25";
 
         // ---- resistance-capable key set (EAST may now be the resistance
         // roster; on a GUER-player island it spawns onto the GUER side) ----
@@ -258,6 +279,8 @@ class CfgGuerrillaFactions
         // identical to his own riflemen is a real downgrade. OfficerG is a
         // verified side=2 scope=2 class (: SoldierGB, AK47 + Binocular).
         officer = "OfficerG";
+        // No forces* air keys: 1.99 ships no GUER aircraft and the FIA flies
+        // nothing, so a GUER occupier is offered no air packages (6.5).
 
         holdClass = "SoldierGB";
         holdCount = 3;

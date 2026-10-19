@@ -86,6 +86,9 @@ struct ScaffoldZone
     int support = 0;
     RString marker;
     RString note; // one-line provenance comment emitted above the zone
+    // further comment lines emitted above the zone class (a detected base's
+    // evidence, issue #76), one "// " line each
+    std::vector<std::string> evidence;
 };
 
 struct ScaffoldOptions
@@ -132,6 +135,12 @@ struct ScaffoldResult
     float playerZ = 0;
     float playerY = 0;
     std::vector<std::string> warnings;
+    // Detected bases that are NOT emitted as zone classes (covered, outside
+    // playRegion[], low confidence, or over the --outposts budget): rendered as
+    // commented-out notes at the end of the Zones block, one line each, without
+    // the leading "// " (AppendZones adds it). Filled by MergeBaseCandidates.
+    std::vector<std::string> baseNotes;
+    int baseCount = 0; // AIRFIELD + SEAPORT + detected OUTPOST zones merged in
     bool ok = false;
     std::string error;
 };
@@ -145,7 +154,22 @@ struct ScaffoldInputs
     std::vector<ScaffoldPoint> roads;
     std::vector<ScaffoldPoint> buildings;
     float worldSize = 12800.0f; // grid cells * landGrid, for candidate clamping
+    // playRegion[] = {minX, minZ, maxX, maxZ} (issue #76): when set, towns
+    // outside it are skipped and the camp and outposts are placed inside it.
+    bool hasRegion = false;
+    float regionMinX = 0, regionMinZ = 0, regionMaxX = 0, regionMaxZ = 0;
+    // Zones placed by another pass (detected bases, issue #76) that the outpost
+    // spread must keep opt.zoneMinSpacing clear of, as it does the camp and the
+    // towns. Only their position is read.
+    std::vector<ScaffoldPoint> reserved;
+    // Names labels that are not towns: a detected AIRFIELD adopts the label
+    // that names it ("Egyptian Airbase"), and the runtime CITY seed drops that
+    // label by name, so the scaffold does too (case-insensitive).
+    std::vector<RString> skipTownNames;
 };
+
+// Forward declaration: BaseDetect.hpp includes this header.
+struct BaseDetectResult;
 
 // Selects the towns, places the camp and the outposts. Fails (ok = false, with
 // error set) only when the inputs cannot yield a template at all: no world
@@ -155,6 +179,23 @@ bool BuildZones(const ScaffoldInputs& in, const ScaffoldOptions& opt, ScaffoldRe
 // The town half on its own (BuildZones runs it first). Appends CITY zones in
 // Names-block order, deduped at opt.townDedupDist against each other.
 void SelectTownZones(const ScaffoldInputs& in, const ScaffoldOptions& opt, ScaffoldResult& out);
+
+// Detected bases (issue #76, BaseDetect) into a placed zone table.
+//
+// The number of OUTPOST candidates (status Offline) that become real zones:
+// the first min(outpostBudget, offline) of them in the detector's order. The
+// tool places outpostBudget minus this many heuristic outposts, so --outposts N
+// means N OUTPOST zones in total.
+int DetectedOutpostsToEmit(const BaseDetectResult& bases, int outpostBudget);
+
+// Merges the candidates into `out` (built by BuildZones): every Seed AIRFIELD
+// and SEAPORT and the first DetectedOutpostsToEmit(...) Offline OUTPOSTs become
+// occupier zone classes, inserted after the CAMP and before the heuristic
+// OUTPOSTs (order: CAMP, AIRFIELDs, SEAPORTs, detected OUTPOSTs, heuristic
+// OUTPOSTs, CITYs), each with its evidence as comment lines; every other
+// candidate becomes a commented-out note (out.baseNotes). Markers are
+// renumbered over the final order.
+void MergeBaseCandidates(const BaseDetectResult& bases, int outpostBudget, ScaffoldResult& out);
 
 // ---------------------------------------------------------------------------
 // template text
@@ -176,6 +217,13 @@ struct TemplateInfo
     RString wrpPath;    // echoed into the header comment
     int roadPoints = 0; // echoed into the header comment
     int buildingPoints = 0;
+    // playRegion[] to emit (issue #76); hasRegion false = no key
+    bool hasRegion = false;
+    float regionMinX = 0, regionMinZ = 0, regionMaxX = 0, regionMaxZ = 0;
+    // With a kept Zones block (--keep-zones) the renderer cannot see the zone
+    // types it splices, so the caller says how many AIRFIELD / SEAPORT zones
+    // the kept block authors; it decides the seedBases note in the header.
+    int keptBaseZones = 0;
 };
 
 // keepZones, when non-empty, is spliced in verbatim in place of the generated

@@ -108,4 +108,9 @@ asserts the ledger entry is `PASS` plus system-level postconditions (treasury
 delta, unlock set, rank, zone owner...). Chapter order matters: **alert runs
 before capture** so the FSM climbs against a live garrison; the alert chapter
 ends by force-despawning the garrison (perception sources vanish → zone calms
-→ qrf.sqs stands the QRF down), leaving the world quiet for capture.
+→ the answer stands down), leaving the world quiet for capture. RED counts as
+answered either way: with `occupierForces = 1` (the Guerrilla.Abel default the
+Showcase inherits) by a native `"ALARM"` row in `gmOccupierOps` aimed at the
+Outpost, a package the forces director picks and fields out of sight; with the
+key off or an old save (`gmLegacyQrf`) by the scripted qrf.sqs convoy
+(`GM_QRF_ACTIVE`).

@@ -8,6 +8,12 @@
 ;  WHAT CHANGED (Phase 1.5):
 ;    * Camp anchor = the first zone of type "CAMP" from the native registry
 ;      ("CAMP" call GM_fnZoneOfType) - no zone-name literal.
+;  WHAT CHANGED (occupier forces, OCCUPIER-FORCES.md 9.1):
+;    * The anchor follows the HEADQUARTERS: gmHqPos (GuerrillaBase), which a
+;      campaign establishes at the Camp by default. While no HQ stands
+;      (destroyed and not re-established, or never elected) there is no
+;      recruiting: the menu is not mounted. gmCampPos stays as the name of
+;      the current anchor (the Camp centre until the first HQ reading).
 ;    * Recruit classes come from the resistance faction descriptor
 ;      (recruitFighter / recruitSpecialist via gmFactionValue).
 ;    * Proximity uses the binary `distance` on position arrays.
@@ -15,7 +21,8 @@
 ;  OWNS: GM_PLAYER_GROUPS, the action ids (gmAct*), the request queue
 ;        (gmReq*); debits gmResources/gmManpower ("-" direction only;
 ;        economy.sqs owns "+"). Also its GM_RECRUIT_*/GM_*_COST_* consts.
-;  READS: gmZone tuples (Camp anchor), gmWarLevel (train cap),
+;  READS: gmHqEstablished / gmHqPos (the anchor), gmZone tuples (the Camp
+;        centre before the first HQ reading), gmWarLevel (train cap),
 ;        gmResistanceSide + faction recruit keys, GM_fnEquipFromUnlocked.
 ; ============================================================================
 
@@ -23,7 +30,7 @@
 
 ; ---- tunables (recruit-owned consts) -----------------------------------------
 ;   GM_RECRUIT_POLL    seconds between proximity / request polls
-;   GM_RECRUIT_RADIUS  how close to the Camp the menu appears (metres)
+;   GM_RECRUIT_RADIUS  how close to the HQ the menu appears (metres)
 ;   GM_GROUP_CAP       engine MAX_UNITS_PER_GROUP - overflow to new group
 ;   GM_RECRUIT_COST_*  fighter: manpower / resource cost
 ;   GM_SPEC_COST_*     specialist: manpower / resource cost
@@ -66,11 +73,13 @@ gmReqPending    = false
 gmReqId         = -1
 gmReqCaller     = aP
 
-; ---- locate the Camp (the recruiter anchor): first zone of type CAMP ---------
+; ---- the recruiter anchor: the HQ (gmHqPos); gmCampPos names it ---------------
+;  Before the first HQ reading it is the first CAMP zone's centre (or [0,0,0]
+;  on a template with no Camp); every poll re-reads the HQ. No HQ = no menu.
 gmCampIdx = "CAMP" call GM_fnZoneOfType
-? gmCampIdx < 0 : hint "GM ERROR: no CAMP zone in CfgGuerrillaZones - recruit menu disabled."
-? gmCampIdx < 0 : exit
-gmCampPos = (gmZone gmCampIdx) select GM_Z_POS
+gmCampPos = [0, 0, 0]
+? gmCampIdx >= 0 : gmCampPos = (gmZone gmCampIdx) select GM_Z_POS
+gmRecHq = false
 
 ; journal: starter objective on the map's Plan page (native Journal; flips
 ; DONE on the first recruit below). Set once per campaign - this boot code
@@ -79,7 +88,12 @@ gmJournalObjective ["firstRecruit", "Take a first recruit at the Camp (1 HR)", "
 
 #loop
 ~GM_RECRUIT_POLL
-gmRecDist = (getPos aP) distance gmCampPos
+; (SQS evaluates a whole line - no short-circuit - so gmHqPos, [] while no HQ
+;  stands, is read only on its own guarded line)
+gmRecHq = gmHqEstablished
+? gmRecHq : gmCampPos = gmHqPos
+gmRecDist = 100000
+? gmRecHq : gmRecDist = (getPos aP) distance gmCampPos
 ? (gmRecDist < GM_RECRUIT_RADIUS) and (not gmRecruitActive) : goto "addMenu"
 ? (gmRecDist >= GM_RECRUIT_RADIUS) and gmRecruitActive : goto "delMenu"
 ? gmReqPending : goto "request"

@@ -31,7 +31,10 @@ player allowDammage false
 bdStops = [getPos player]
 bdCities = 0
 bdI = 0
-while {bdI < gmZoneCount} do {bdZ = gmZone bdI; bdP = bdZ select 8; if ((bdZ select 1) != "CITY") then {bdStops = bdStops + [[bdP select 0, bdP select 1, 0]]} else {if (bdCities < 4) then {bdStops = bdStops + [[bdP select 0, bdP select 1, 0]]; bdCities = bdCities + 1}}; bdI = bdI + 1}
+// The tour is the template's AUTHORED zones (plus 4 towns): the 9 unrolled
+// stops below. Bases the runtime seed adds (issue #76, gmZone slot 10, 7 on
+// Sinai) are skipped, so the tour still fits; soaking them is a follow-up.
+while {bdI < gmZoneCount} do {bdZ = gmZone bdI; bdP = bdZ select 8; if ((bdZ select 1) == "CITY") then {if (bdCities < 4) then {bdStops = bdStops + [[bdP select 0, bdP select 1, 0]]; bdCities = bdCities + 1}} else {if (!(bdZ select 10)) then {bdStops = bdStops + [[bdP select 0, bdP select 1, 0]]}}; bdI = bdI + 1}
 bdMaxLive = 0
 bdMaxGroups = 0
 bdK = -1

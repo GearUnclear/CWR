@@ -40,9 +40,19 @@ joinInProgress = 0;
 
 class CfgGuerrillaZones
 {
+    // Base seeding (#76) pinned off: this mission authors every zone it wants.
+    seedBases = 0;
     // Not a campaign: a tester who clears this fixture's only base must not be
     // sent to the win debriefing (campaign win rule, issue #79 B3).
     campaignEnd = 0;
+    // A reference slice, not a campaign: no occupier forces director
+    // (OCCUPIER-FORCES.md) changes its pace.
+    occupierForces = 0;
+    // Town defenders (#79 B2) pinned off: this reference slice parks the player
+    // beside dealers in administered towns, and a garrison standing on the
+    // dealer (fixed spawn points since OCCUPIER-FORCES.md L11) kept the buy
+    // actions from mounting (market_reference_mission timed out every run).
+    cityGarrison = 0;
     // Engine tuning at stock defaults (zoneArea=150; cacheRadius=800;
     // revealRadius=1500; hqMinPos=4; garageRadius=100; garageInvulnerable=1).
     // Direct-launch faction fallbacks (the menu button publishes no gmSel*):

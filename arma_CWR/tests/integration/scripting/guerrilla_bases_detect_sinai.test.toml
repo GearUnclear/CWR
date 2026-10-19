@@ -1,0 +1,21 @@
+# Occupation-network detection (issue #76), Sinai: the Wadi airstrip and the
+# Egyptian Airbase stand as AIRFIELDs (the airbase no longer a seeded CITY),
+# Sharm and El Tor as SEAPORTs, all occupier-owned and counted in the roster.
+# Boots the real Guerrilla.Sinai template (repo-root-relative) on the @LoBo
+# Sinai world, mounted exactly like guerrilla_sinai_swap: the FULL CWA
+# install as the data dir (a Remaster shadow) with the @LoBo mod folder
+# INSIDE it; --mods-dir "." resolves against the game CWD (the data dir), so
+# "@LoBo" mounts <data dir>\@LoBo.
+# PRECONDITIONS (one-time, rerun after an @LoBo reinstall), as for
+# guerrilla_sinai_swap: tools/lobo/install-lobo-factions.ps1,
+# PoseidonTools mod doctor <data dir>\@LoBo --fix,
+# guerrilla-mode/install-missions.ps1.
+mission = "guerrilla-mode/mission/Guerrilla.Sinai"
+binary = "PoseidonGame"
+tags = ["scripting", "guerrilla", "full_cwa", "lobo", "headless", "occupierforces", "bases"]
+# @LoBo logs ERROR-level noise from legacy pbos (fatal under the default
+# --strict), so this test opts out like guerrilla_sinai_swap; generous
+# budgets for the first mount and the Sinai world load.
+timeout = 420
+assert_timeout = 240
+extra_args = ["--dev", "--no-strict", "--mods-dir", ".", "--mod", "@LoBo"]

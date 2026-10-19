@@ -45,6 +45,7 @@ OptionsShell::OptionsShell(ControlsContainer* parent) : OptionsShell(parent, tru
 OptionsShell::~OptionsShell()
 {
     TeardownShell();
+    ReleaseRetiredPages();
 }
 
 ControlObjectContainer* OptionsShell::GetNotebook()
@@ -157,7 +158,9 @@ void OptionsShell::PopPage()
     auto top = std::move(m_stack.back());
     m_stack.pop_back();
     top->Unmount(*this);
-    top.reset();
+    // Park, do not destroy: the caller is usually `top` itself (or its
+    // scroll list) and touches its own members after this returns.
+    m_retired.push_back(std::move(top));
 
     // PushPage hides the previous page's controls in all cases (modal
     // or not — see comment there).  Symmetric re-show on pop.
@@ -261,9 +264,19 @@ void OptionsShell::TeardownShell()
         auto top = std::move(m_stack.back());
         m_stack.pop_back();
         top->Unmount(*this);
-        top.reset();
+        // Destroy can run from inside a page handler (Close with no
+        // animated notebook exits at once), so teardown parks pages too.
+        m_retired.push_back(std::move(top));
     }
     DebugClearNotebookMountedIdcs();
+}
+
+void OptionsShell::ReleaseRetiredPages()
+{
+    // Move out first: a page destructor must never see a half-cleared list.
+    std::vector<std::unique_ptr<OptionsPage>> retired;
+    retired.swap(m_retired);
+    retired.clear();
 }
 
 Control* OptionsShell::OnCreateCtrl(int type, int idc, const ParamEntry& cls)
@@ -371,6 +384,10 @@ ControllerUiScene OptionsShell::GetControllerUiScene() const
 
 void OptionsShell::OnSimulate(EntityAI* vehicle)
 {
+    // No page frame is on the stack here, so pages popped during the last
+    // frame's input handling can finally be destroyed.
+    ReleaseRetiredPages();
+
     // Page first so scroll-list pages can drain the cursor wheel
     // before Display::OnSimulate forwards it to the notebook (whose
     // OnMouseZChanged would otherwise dolly the camera).

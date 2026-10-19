@@ -1,3 +1,13 @@
+# KNOWN RED ON THIS MACHINE (2026-10-14), kept as the upstream test. It needs
+# the stock main menu's Mission Editor entry (idc 115) AND an SPTemplates
+# folder. The local Demo package (packages/Demo) has the editor entry but
+# ships no SPTemplates, so the wizard's template list is empty and OK stays on
+# display 67 (fails "expected == 68, got 67"); the Remaster
+# shadow (packages/RemasterUD) has SPTemplates but UD's RscDisplayMainUD drops
+# the editor entry on purpose (guerrilla-mode/runtime/common/bin/ud-mainmenu.hpp).
+# Only the unmodified retail Remaster has both, and no new test may pin
+# packages/Game. Its multiplayer sibling, mp_wizard_finish_demo, reaches the
+# wizard through Multiplayer > New and runs on the Remaster shadow.
 data_dir = "packages/Demo"
 timeout = 120
 assert_timeout = 30
