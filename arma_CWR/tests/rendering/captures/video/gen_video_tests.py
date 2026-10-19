@@ -126,6 +126,13 @@ LOWSUN_STAGE = dict(x=7300, z=10900, eye=1.75, h=152.5, p=-3)
 SINAI_STAGE = dict(x=8350, z=2950, eye=1.75, h=338.8, p=-3)
 
 CLIPS = [
+    # The video's opening: the Remaster's lighting as it was before this work
+    # ("baseline": every switch off) against the full new lighting.
+    dict(clip="opening_pine_eve", feature="original look vs new lighting", keys=[], off="baseline",
+         world="Abel", mode="S", frames=240, date=[1985, 7, 5, 18, 15], vd=1500, stage=stage_of(A_PINE_EVE),
+         path=line(A_PINE_EVE, strafe(A_PINE_EVE, -10, h=300, p=3)),
+         props=['[["SoldierWB"], 14, -3, 160, "man"] call capSpawn;', '[["Jeep"], 22, 4, 250, "veh"] call capSpawn;'],
+         note="opening: baseline (all 26 switches off) against remastered; strafe 10 m left with a 12 deg pan"),
     dict(clip="perf_sunrise_ridge", feature="perf", keys=["drawGrouping", "hillCull"], world="Abel", mode="S",
          frames=240, date=[1985, 7, 5, 5, 8], vd=4000, stage=stage_of(A_SUNRISE),
          path=line(A_SUNRISE, [4426, 3315, 1.75, 75, 2])),
@@ -155,14 +162,16 @@ CLIPS = [
          path=line([4400, 3300, 1.75, 60, 4], [4400, 3300, 1.75, 60, 4]), lapse=12),
     dict(clip="shadows_woods_pine2_evening", feature="shadows", keys=["treeShadows", "softShadows"], world="Abel",
          mode="S", frames=240, date=[1985, 7, 5, 17, 30], vd=1500, stage=stage_of(A_WOODS),
-         path=line(A_WOODS, along(A_WOODS, 20, h=225)), props=['[["Jeep"], 15, 2, 70, "veh"] call capSpawn;']),
+         path=line(A_WOODS, along(A_WOODS, 10, h=225)), props=['[["Jeep"], 15, 2, 70, "veh"] call capSpawn;'],
+         note="10 m along instead of 7.3's 20 m: at 20 m the camera is inside a pine crown"),
     dict(clip="shadows_forest_edge_lapse", feature="shadows", keys=["treeShadows", "softShadows"], world="Abel",
          mode="S", frames=240, date=[1985, 7, 5, 17, 30], vd=1500, stage=stage_of(A_FOREST),
          path=line(A_FOREST, A_FOREST), lapse=4500 / 240, props=['[["SoldierWB"], 12, 2, 215, "man"] call capSpawn;']),
     dict(clip="shade_lowsun_fp_orbit", feature="shade", keys=["lowSunRig", "crownCanopy"], world="Abel", mode="S",
          frames=240, date=[1985, 3, 1, 8, 0], vd=1500, stage=LOWSUN_STAGE,
-         path=orbit(LOWSUN_STAGE, [16, 5], 12, 1.75, 0, 120, -3), props=views.LOWSUN_FP_PROPS,
-         note="orbit at 12 m around the M113 of the lowsun_fp set; eye 1.75 and pitch -3 assumed"),
+         path=orbit(LOWSUN_STAGE, [16, 5], 12, 1.75, 0, -110, -3), props=views.LOWSUN_FP_PROPS,
+         note="orbit at 12 m around the M113 of the lowsun_fp set, 0 to -110 deg (7.3's 0 to 120 runs the "
+              "camera into the tent at bearing 99 deg, 10 m from the M113); eye 1.75 and pitch -3 assumed"),
     dict(clip="shade_sinai_orbit", feature="shade", keys=["lowSunRig", "crownCanopy"], world="Sinai", mode="S",
          frames=180, date=[2005, 7, 21, 16, 10], vd=2000, stage=SINAI_STAGE,
          path=orbit(SINAI_STAGE, [16, 5], 12, 1.75, 0, 90, -3), props=SINAI_SET,
@@ -261,8 +270,14 @@ def stage_block(c, n):
     return out
 
 
+def off_setting(c):
+    """The "off" pass's triSetLighting word: the clip's own (the opening's
+    "baseline") or the shipped defaults with the clip's switch keys at 0."""
+    return c.get("off") or "remastered," + ",".join(f"{k}=0" for k in c["keys"])
+
+
 def s_mode(c, n):
-    off = "remastered," + ",".join(f"{k}=0" for k in c["keys"])
+    off = off_setting(c)
     out = ["triSimFrames 150"]
     for pas, setting in (("off", off), ("on", "remastered")):
         out += [f'"{setting}" call capMode', "[] call capPin"]
@@ -278,7 +293,7 @@ def s_mode(c, n):
 
 
 def p_mode(c, n):
-    off = "remastered," + ",".join(f"{k}=0" for k in c["keys"])
+    off = off_setting(c)
     out = ["triSimFrames 150", '"remastered" call capMode', "[] call capPin",
            f"call {{ capFixRes = triSetFixedStep {capgen.num(1.0 / FPS)} }}"]
     for k in range(n):
