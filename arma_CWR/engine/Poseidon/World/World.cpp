@@ -12,6 +12,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
@@ -1718,6 +1719,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     if (doSim)
     {
+        // Combat lights age by the simulation step (a paused game holds them
+        // still); bursts fired during this step start at age 0, so the frame
+        // after a shot shows its flash at full strength.
+        lighting::GCombatLights().Tick(deltaT);
 #if BACKGROUND_AI
         _secThread->FinishSecondary();
 #else

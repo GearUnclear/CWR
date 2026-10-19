@@ -91,15 +91,22 @@ struct FrameLight
     // (kPhysicalNearEnd and the low beam's back plane).
     std::uint32_t owner = 0;
     int shadowSlot = -1; // combat shadow mask channel (B4); -1 = none
+    // A combat light (B4, CombatLights.hpp): linear HDR, outside the classic
+    // model and its budget. `start` is then the ball radius r0, `diffuse` the
+    // linear radiance at the core (intensity times the unit-luminance colour),
+    // `range` the window end; `ambient` and `sortBrightness` are unused.
+    bool hdr = false;
+    float range = 0.0f;
 
-    bool IsSpot() const { return kind == FrameLightKind::Spot; }
+    bool IsSpot() const { return kind == FrameLightKind::Spot && !hdr; }
 };
 
 // True when the light adds nothing (no diffuse and no ambient colour).
 bool LightIsDark(const FrameLight& light);
 
 // The sphere a light is binned by (camera-relative centre, radius in metres):
-// its reach, kRangeFactor start distances around it, for every kind. A
+// its reach, kRangeFactor start distances around it, for every classic kind,
+// and its window (FrameLight::range) for a combat light. A
 // spotlight lights only the sector inside its cone edge, whose enclosing sphere
 // (centred reach / (2 cos a) ahead of the lamp, radius the same, a the cone
 // edge's angle) is about half as large; but the classic budget ranks a
@@ -121,6 +128,18 @@ LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* phys
 // (stable for ties). Drops lights that add nothing and keeps at most
 // `capacity`.
 void RankFrameLights(std::vector<FrameLight>& lights, int capacity = kMaxFrameLights);
+
+// Combat lights in the frame's buffer: at most this many, the strongest at the
+// camera (CombatLights.hpp ShadowScore), and always first, so a tile lists them
+// before its classic lights (a full tile drops a far classic light, never a
+// fire) and the classic budget sees the same lights as without them.
+constexpr int kMaxCombatFrameLights = 12;
+
+// The frame's buffer with combat lights: `combat` (ranked by the caller,
+// strongest first, at most kMaxCombatFrameLights kept) followed by the ranked
+// classic lights, at most kMaxFrameLights in all. Returns how many combat
+// lights lead the list.
+int MergeCombatFrameLights(std::vector<FrameLight>& classicRanked, const std::vector<FrameLight>& combat);
 
 // The camera and the screen the tiles cover.
 struct TileView
@@ -170,9 +189,11 @@ void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& vie
 int TileLightsAt(const TileGrid& grid, int px, int py, int out[kMaxLightsPerTile]);
 
 // The light block's contents, kTexelsPerLight vec4s per light:
-//   0: xyz position (camera-relative), w start distance
-//   1: rgb diffuse, w 1 for a spotlight (the per-draw litLightColor layout)
-//   2: rgb ambient, w sort brightness (the classic budget's ranking)
+//   0: xyz position (camera-relative), w start distance (a combat light: its core radius)
+//   1: rgb diffuse, w 1 for a spotlight (the per-draw litLightColor layout),
+//      2 for a combat light (rgb its linear radiance at the core)
+//   2: rgb ambient, w sort brightness (the classic budget's ranking); a combat
+//      light: x its range, y its shadow mask channel + 1 (0 = none)
 //   3: xyz beam direction, w kind
 void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& texels);
 

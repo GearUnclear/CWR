@@ -22,6 +22,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <float.h>
 #include <stdint.h>
+#include <algorithm>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
@@ -804,6 +805,19 @@ void ShotBullet::Simulate(float deltaT, SimulationImportance prec)
 {
     base::Simulate(deltaT, prec);
     SetEnd(Position());
+    // A visible tracer carries a small combat light along its path
+    // (CombatLights.hpp), whatever the lighting setting.
+    const int a8 = GetConstantColor().A8();
+    if (a8 >= 4 && !_delete)
+    {
+        const Vector3 at = Position();
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _tracerLight.Set(lighting::CombatLightKind::Tracer, p, std::min(a8 / 255.0f * 4.0f, 1.5f));
+    }
+    else
+    {
+        _tracerLight.Release();
+    }
 }
 
 void ShotBullet::Sound(bool inside, float deltaT)
@@ -1027,11 +1041,16 @@ void Missile::Simulate(float deltaT, SimulationImportance prec)
                 {
                     _light->SetDiffuse(_lightColor * fade);
                 }
+                // The motor's combat light (CombatLights.hpp).
+                const float p[3] = {backPos.X(), backPos.Y(), backPos.Z()};
+                _motorLight.Set(lighting::CombatLightKind::Motor, p, fade);
+                _motorLight.SetTint(_lightColor.R(), _lightColor.G(), _lightColor.B());
             }
         }
         break;
         case Fly:
             _light.Free();
+            _motorLight.Release();
             break;
     }
 
@@ -1343,6 +1362,12 @@ void IlluminatingShell::Simulate(float deltaT, SimulationImportance prec)
     if (_light)
     {
         _light->SetDiffuse(_lightColor * fade);
+        // The flare's combat light (CombatLights.hpp), tinted by the ammo's
+        // light colour, with a flicker of its own.
+        const Vector3 at = Position();
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _flareLight.Set(lighting::CombatLightKind::Flare, p, 1.0f);
+        _flareLight.SetTint(_lightColor.R(), _lightColor.G(), _lightColor.B());
     }
 }
 

@@ -680,10 +680,10 @@ TEST_CASE("Reflection switch: landed with its two sub-knobs and its post stages"
         CHECK(KeyDefault(*k) == s.def);
     }
     // The diagnostic views are in the overlay's list, after B2's albedo (7)
-    // and B8's air (8) views.
+    // and B8's air (8) views (B4's combat mask follows them).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewSsrReflection));
+    CHECK(debug->maxValue >= static_cast<float>(kDebugViewSsrReflection));
     CHECK(kDebugViewSsrTags == 9);
     CHECK(kDebugViewSsrReflection == 10);
 }

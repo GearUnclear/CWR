@@ -253,9 +253,11 @@ vec2 wetEnvBRDF(float rough, float nv) {
 // The local lights' streaks in the water film at this fragment (linear light,
 // before the exposure): the lights of the tiled list (the physical lamps and
 // low beams at their physical intensity, the other kinds at their classic
-// value), or the draw's own list.
+// value; the combat lights at the head of the list, B4, at their own linear
+// light, which no night factor scales), or the draw's own list.
 vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
     vec3 sum = vec3(0.0);
+    vec3 combat = vec3(0.0);
     float nv = clamp(dot(n, v), 1e-3, 1.0);
     float a = max(rough * rough, 0.002);
     if (litLightCount.y > 0.5) {
@@ -270,6 +272,16 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             float d2 = dot(toLight, toLight);
             float d = sqrt(max(d2, 1e-12));
             vec3 L = toLight / d;
+            if (color.w > 1.5) {
+                // A combat light (combatLights' model, without its shadow).
+                float r2 = frameLights[at + 2].x * frameLights[at + 2].x;
+                if (d2 >= r2) continue;
+                float x = d2 / r2;
+                float win = (1.0 - x * x) * (1.0 - x * x);
+                combat += color.rgb * (win / (1.0 + d2 / max(pos.w * pos.w, 1e-4))) *
+                          wetLobe(L, d, n, v, nv, a, kWetSpecCap);
+                continue;
+            }
             bool spot = color.w > 0.5;
             vec3 light;
             if (physicalKind(id)) {
@@ -296,7 +308,7 @@ vec3 wetLampStreaks(vec3 n, vec3 v, float rough) {
             }
             sum += light * wetLobe(L, d, n, v, nv, a, kWetSpecCap);
         }
-        return sum * litLightCount.z;
+        return sum * litLightCount.z + combat;
     }
     int count = int(litLightCount.x);
     for (int i = 0; i < 8; ++i) {

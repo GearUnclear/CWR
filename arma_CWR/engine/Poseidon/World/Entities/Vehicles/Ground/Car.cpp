@@ -2062,7 +2062,7 @@ void Car::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* targ
             {
                 case AmmoShotBullet:
                     _mGunClouds.Start(0.1);
-                    _mGunFire.Start(0.1, 0.4, true);
+                    _mGunFire.Start(0.1, 0.4, true, mode->_ammo->hit);
                     _mGunFireFrames = 1;
                     _mGunFireTime = Glob.uiTime;
                     int newPhase;

@@ -46,6 +46,11 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
             _light->SetDiffuse(_lightColor * fade);
             position = _light->Transform().Position();
         }
+        // The combat light, whatever the lighting setting, 0.6 m above the
+        // logs (a light at the logs grazes the ground around them).
+        const Vector3 at = position + VUp * 0.6f;
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _combatFire.Set(lighting::CombatLightKind::Fire, p, 1.0f);
         _smoke.Simulate(position, Speed(), deltaT, prec);
         if (_sound)
         {
@@ -55,6 +60,7 @@ void Fireplace::Simulate(float deltaT, SimulationImportance prec)
     }
     else
     {
+        _combatFire.Release();
         if (_light)
         {
             _light->Switch(false);

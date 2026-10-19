@@ -83,7 +83,7 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // The stages that can ask for the pass ask by their knob, switch or debug
     // view, whatever this frame's conditions then decide for them.
     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
-                       in.temporal || in.lumaSharpen || in.air || in.ssrTags;
+                       in.temporal || in.lumaSharpen || in.air || in.ssrTags || in.combatMask;
     if (!asked)
         return plan;
 
@@ -132,6 +132,10 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     for (const PostStageInfo& s : kStages)
         if (s.readsLinearDepth && plan.Runs(s.id))
             plan.runs |= Bit(PostStage::LinearDepth);
+    // The next frame's combat shadow mask traces through the linear depth (a
+    // vehicle interior has no world depth to give it).
+    if (in.combatMask && in.worldDepth)
+        plan.runs |= Bit(PostStage::LinearDepth);
     return plan;
 }
 

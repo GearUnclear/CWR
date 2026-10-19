@@ -34,6 +34,7 @@ enum PixelShaderSpecular
 
 #include <glad/gl.h>
 #include <SDL3/SDL.h>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
@@ -711,6 +712,7 @@ class EngineGL33 : public Engine
     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
     bool RemasterMoonKey() const override;
     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
+    bool CombatLightsActive() const override { return _combat.active; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
@@ -896,6 +898,69 @@ class EngineGL33 : public Engine
     void DeinitLightTiles();
     // Builds, bins and uploads the list (once per frame).
     void UpdateLightTiles();
+
+    // Combat light (plan section 5 B4; Graphics/Rendering/Lighting/CombatLights.hpp,
+    // EngineGL33_PostCombat.cpp). The game's combat lights join the tiled list
+    // as HDR entries while their gate is on; up to four of them are shadowed
+    // through a half-resolution mask traced at the start of the world from the
+    // previous frame's linear depth; the strongest scatter in the air of the
+    // composite; a burst's flash raises the exposure.
+    struct CombatState
+    {
+        // This frame's combat lights light the world (UpdateLightTiles), and
+        // the classic lights of the same sources light nothing.
+        bool active = false;
+        int count = 0;          // combat lights at the head of the tiled list
+        float flashGain = 1.0f; // the flash exposure response this frame
+        float flashHeld = 0.0f; // the flash irradiance the response follows (FlashHeldIrradiance)
+        float exposure = 1.0f;  // the rig's exposure times the flash gain (the forward shaders' litZenith.w)
+        Poseidon::lighting::ShadowSelection selection;
+        double selectionTime = 0.0; // CombatLightSet::SimTime at the last selection
+        // The frame the mask is built in, and whether it was.
+        std::uint32_t maskFrame = 0xffffffffu;
+        bool maskBuilt = false;
+        int shadowed = 0;         // channels in use this frame
+        float maskLight[16] = {}; // per channel: xyz in the mask camera's view, w core radius
+        float maskRange[4] = {};  // per channel: window end
+        // The camera of the last linear depth (EndWorldScene), which the mask
+        // is traced in, and the frame it was drawn in.
+        Poseidon::lighting::CombatMaskCamera depthCamera;
+        std::uint32_t depthFrame = 0xffffffffu;
+        bool depthValid = false;
+        // The forward shaders' mapping of this frame's fragments into the mask.
+        float rows[3][4] = {};
+        // The FrameLights block's combat members as uploaded (4 vec4).
+        float uploaded[16] = {};
+        bool uploadedValid = false;
+        // The strongest combat lights for the composite's in-scatter: view
+        // space position and core radius, linear radiance and window end, the
+        // radius of the lit medium.
+        int scatterCount = 0;
+        float scatterPos[32] = {}, scatterRgb[32] = {}, scatterMed[32] = {};
+        // GL: the mask and its blur ping-pong (RGBA8, half resolution), the
+        // white stand-in, the programs.
+        unsigned int maskTex[2] = {}, maskFbo[2] = {};
+        int maskW = 0, maskH = 0;
+        unsigned int standInTex = 0;
+        unsigned int progMask = 0, progBlur = 0, vao = 0;
+        bool programsTried = false, unavailable = false;
+    } _combat;
+    void InitCombatResources();
+    void DeinitCombatResources();
+    // The combat lights of this frame for the tiled list (camera-relative,
+    // ranked, the shadowed ones given a channel) and the scatter list; called
+    // by UpdateLightTiles while the combat gate is on.
+    void GatherCombatLights(const Poseidon::lighting::TileView& view, std::vector<Poseidon::lighting::FrameLight>& out);
+    // The FrameLights block's combat members (count, mask strength, rows).
+    void UploadCombatFrame();
+    // The shadow mask for this frame (once per frame, at the world's first 3D
+    // pass, after the tiled list): the trace and its blur into unit 14.
+    void UpdateCombatMask();
+    void BindCombatMask();
+    // The post pass: remember the camera of the linear depth the next frame's
+    // mask traces through; the composite's in-scatter uniforms.
+    void SaveCombatMaskCamera(int targetW, int targetH, const float rect[4]);
+    void SetCombatScatterUniforms(unsigned int program, float exposure);
     // Writes slots [first, first + count) of the CPU LitConstants block to its
     // buffer and records them in the buffer's mirror: every upload of the
     // block, whole or partial, goes through here (plan section 5 A4).
@@ -1039,6 +1104,9 @@ class EngineGL33 : public Engine
         // TAA: this frame's shift of the AO and shaft sample patterns (0 when
         // the resolve does not run: the fixed patterns of before).
         float noiseShift = 0.0f;
+        // This frame's world was lit by combat lights: the composite scatters
+        // them in the air (B4).
+        bool combatScatter = false;
         // Which stages run this frame and the strengths the composite uses.
         Poseidon::remaster::PostStagePlan plan;
         // The frame's colour the air pass, the glow stages and the composite

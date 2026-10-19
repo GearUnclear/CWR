@@ -30,8 +30,19 @@ const char kRemasterLightsGLSL[] = R"(
 // 10-light town view the block cost less GPU time than texel fetches.
 layout(std140) uniform FrameLights {
     vec4 frameLights[256]; // kMaxFrameLights * kTexelsPerLight
+    // Combat light (B4, CombatLights.hpp): x the combat lights at the head of
+    // the list (light indices 1 to x), y the shadow mask's strength (0 = no
+    // mask this frame).
+    vec4 combatFrame;
+    // The shadow mask's mapping (CombatMaskRows): u = (combatPrevU.xyz . p +
+    // combatPrevU.w) / z, v likewise, z = combatPrevZ.xyz . p + combatPrevZ.w
+    // (last frame's view depth), for a camera-relative point p.
+    vec4 combatPrevU;
+    vec4 combatPrevV;
+    vec4 combatPrevZ;
 };
 uniform usampler2D lightTiles; // unit 13: per tile kTileTexels texels of 4 light indices + 1, 0 after the last
+uniform sampler2D combatMask;  // unit 14: the combat shadow mask, one shadowed light per channel (last frame's screen)
 const int kTexelsPerLight = 4;
 const int kTileTexels = 4;
 const int kMaxTileLights = 16;
@@ -233,13 +244,25 @@ bool physicalKind(int id) {
 // each adds its own light to g_physicalLocal (and gleam to g_physicalSpec),
 // linear and unclamped, and the budget ranks the other kinds among
 // themselves.
+// The combat lights listed at the head of this fragment's tile (set by
+// localLightsTiled, read by combatLights).
+int g_combatHead = 0;
+
 vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     int count = loadTileList();
-    int classic = count;
+    // The frame's combat lights lead its list and so every tile's
+    // (FrameLights.hpp MergeCombatFrameLights): combatLights shades them, and
+    // neither the classic budget nor the physical model sees them.
+    int head = 0;
+    int nCombat = int(combatFrame.x);
+    while (head < count && tileEntry(head) <= nCombat) ++head;
+    g_combatHead = head;
+    int classic = count - head;
     if (litNight.x > 0.5) {
         classic = 0;
         for (int k = 0; k < kMaxTileLights; ++k) {
             if (k >= count) break;
+            if (k < head) continue;
             int id = tileEntry(k);
             if (physicalKind(id)) physicalLight(id, n, kd, ka);
             else ++classic;
@@ -255,6 +278,7 @@ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
         float t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0, t5 = 0.0, t6 = 0.0, t7 = 0.0;
         for (int k = 0; k < kMaxTileLights; ++k) {
             if (k >= count) break;
+            if (k < head) continue;
             if (physicalKind(tileEntry(k))) continue;
             float v = lightImportance(tileEntry(k));
             float m;
@@ -275,12 +299,82 @@ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     vec3 sum = vec3(0.0);
     for (int k = 0; k < kMaxTileLights; ++k) {
         if (k >= count) break;
+        if (k < head) continue;
         int id = tileEntry(k);
         if (physicalKind(id)) continue;
         float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
         if (w > 0.0) sum += w * tiledLight(id, n, kd, ka);
     }
     return sum * litLightCount.z;
+}
+
+// The combat shadow mask at this fragment (B4): last frame's mask, where this
+// point was on last frame's screen, read once per fragment (one bilinear tap
+// for all four channels). Outside that screen, or behind that camera, nothing
+// is shadowed. g_combatMaskInside tells debug view 11 where the tap missed.
+vec4 g_combatMaskVis = vec4(1.0);
+bool g_combatMaskRead = false;
+bool g_combatMaskInside = false;
+
+float combatShadowVis(int channel) {
+    if (!g_combatMaskRead) {
+        g_combatMaskRead = true;
+        float z = dot(combatPrevZ.xyz, vWorldRel) + combatPrevZ.w;
+        if (z > 0.05) {
+            vec2 uv = vec2(dot(combatPrevU.xyz, vWorldRel) + combatPrevU.w, dot(combatPrevV.xyz, vWorldRel) + combatPrevV.w) / z;
+            if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) {
+                g_combatMaskVis = textureLod(combatMask, uv, 0.0);
+                g_combatMaskInside = true;
+            }
+        }
+    }
+    float v = channel == 1 ? g_combatMaskVis.x : (channel == 2 ? g_combatMaskVis.y : (channel == 3 ? g_combatMaskVis.z : g_combatMaskVis.w));
+    return mix(1.0, v, combatFrame.y);
+}
+
+// Combat light at this fragment (B4, CombatLights.hpp): the muzzle flashes,
+// bursts, fires, tracers, flares and missile motors at the head of the tile's
+// list, in linear HDR (outside the classic clamp): E = I * window / (1 + d^2 /
+// r0^2), a ball of radius r0 that still reaches a surface it sits low over
+// and wraps around one it is inside (a flash at the muzzle lights the
+// shooter's arm), the shadowed ones dimmed by the mask, and a flash highlight
+// on glossy materials (g_combatSpec). Leaf cards take the crown's wrapped
+// terminator, as for the sun. No combat light without the tiled list.
+vec3 g_combatSpec = vec3(0.0);
+
+vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
+    g_combatSpec = vec3(0.0);
+    vec3 sum = vec3(0.0);
+    if (litLightCount.y < 0.5) return sum;
+    float power = litMatSpecular.w;
+    for (int k = 0; k < kMaxTileLights; ++k) {
+        if (k >= g_combatHead) break;
+        int at = (tileEntry(k) - 1) * kTexelsPerLight;
+        vec4 pos = frameLights[at];
+        vec3 radiance = frameLights[at + 1].rgb;
+        vec4 ext = frameLights[at + 2]; // x window end (m), y shadow channel + 1
+        vec3 toLight = pos.xyz - vWorldRel;
+        float d2 = dot(toLight, toLight);
+        float r2 = ext.x * ext.x;
+        if (d2 >= r2) continue;
+        float x = d2 / r2;
+        float win = 1.0 - x * x;
+        win *= win;
+        float e = win / (1.0 + d2 / max(pos.w * pos.w, 1e-4));
+        float invD = inversesqrt(max(d2, 1e-6));
+        vec3 l = toLight * invD;
+        float sa = min(pos.w * invD, 1.0);
+        float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0) : clamp((dot(n, l) + sa) / (1.0 + sa), 0.0, 1.0);
+        if (nl <= 0.0) continue;
+        if (ext.y > 0.5) e *= combatShadowVis(int(ext.y + 0.5));
+        sum += radiance * (e * nl);
+        if (power > 0.0) {
+            vec3 h = normalize(l + v);
+            float p = max(power, 1.0);
+            g_combatSpec += radiance * (e * pow(max(dot(n, h), 0.0), p) * ((p + 8.0) / 28.0) * smoothstep(0.0, 0.15, nl));
+        }
+    }
+    return sum;
 }
 
 // Headlights, lamps and fires at this fragment (display space, before the

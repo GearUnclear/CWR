@@ -215,7 +215,49 @@ uniform vec4 projInfo;   // as psPostAo
 uniform vec4 depthMap;   // ndcZ = depth * x + y; z 1 / shaft scattering length (1/m)
 uniform vec4 worldRect;  // as psPostAo
 uniform vec4 debugView;  // x: 1 = show occlusion
+// Combat light scattered in the air (B4, the combatLights switch;
+// CombatLights.hpp): the strongest combat lights, in view space.
+uniform vec4 scatterParams; // x light count (0 = none), y scattering per metre times the exposure, z sky distance (m)
+uniform vec4 scatterPos[8]; // xyz view space (m), w core radius r0
+uniform vec4 scatterRgb[8]; // rgb linear radiance at the core, w window end (m)
+uniform vec4 scatterMed[8]; // x radius of the lit smoke and dust around the light (m)
 out vec4 fragColor;
+
+// Single scattering of the combat lights, integrated in closed form along the
+// pixel's view ray through a ball of lit air around each light (its smoke and
+// dust; a fire's spreads thinner and taller), up to the depth buffer: the glow
+// around a flash stops at whatever stands in front of it. Nothing without a
+// combat light.
+vec3 combatScatter() {
+    int count = int(scatterParams.x);
+    if (count <= 0) return vec3(0.0);
+    float d = textureLod(depthTex, vUV, 0.0).r;
+    vec2 ndc = (vUV - worldRect.xy) / worldRect.zw * 2.0 - 1.0;
+    vec3 dir = vec3(ndc.x * projInfo.z, ndc.y * projInfo.w, 1.0);
+    float invLen = inversesqrt(dot(dir, dir));
+    dir *= invLen;
+    float far = scatterParams.z;
+    if (d < 0.999999) far = (projInfo.y / ((d * depthMap.x + depthMap.y) - projInfo.x)) / invLen;
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 8; ++i) {
+        if (i >= count) break;
+        vec3 L = scatterPos[i].xyz;
+        float r0 = scatterPos[i].w;
+        float b = dot(L, dir);
+        float h2 = max(dot(L, L) - b * b, 0.0);
+        float medium = min(scatterMed[i].x, scatterRgb[i].w);
+        float medium2 = medium * medium;
+        if (h2 >= medium2) continue;
+        float chord = sqrt(medium2 - h2);
+        float H = sqrt(h2 + r0 * r0);
+        float t0 = max(b - chord, 0.0);
+        float t1 = min(far, b + chord);
+        if (t1 <= t0) continue;
+        float rim = 1.0 - h2 / medium2;
+        sum += scatterRgb[i].rgb * (r0 * r0 * (atan((t1 - b) / H) - atan((t0 - b) / H)) / H * rim * rim * rim);
+    }
+    return sum * scatterParams.y;
+}
 
 // The shaft pass gathers the sky toward the sun, which is the light the air
 // scatters toward the eye along an endless ray. A surface ends the ray: only
@@ -246,6 +288,7 @@ void main() {
     vec3 shaft = texture(shaftTex, vUV).rgb;
     if (max(shaft.r, max(shaft.g, shaft.b)) > 0.0) shaft *= shaftInscatter();
     vec3 glow = texture(bloomTex, vUV).rgb * compParams.y + shaft * shaftColor.rgb * compParams.z;
+    glow += combatScatter();
     lin += (1.0 - lin) * (1.0 - exp(-max(glow, vec3(0.0))));
     vec3 col = pow(lin, vec3(1.0 / 2.2));
     // Dither only what the composite changed: elsewhere the frame passes
@@ -601,6 +644,8 @@ const PostShaderDef kPostShaders[] = {
     {"psPostSsrComposite",
      {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,
       Poseidon::gl33lighting::kPostSsrCompositeMainGLSL}},
+    {"psCombatMask", {Poseidon::gl33lighting::kPostCombatMaskGLSL}},
+    {"psCombatMaskBlur", {Poseidon::gl33lighting::kPostCombatMaskBlurGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

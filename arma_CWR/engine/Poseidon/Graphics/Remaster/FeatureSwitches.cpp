@@ -2,6 +2,7 @@
 
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -52,10 +53,13 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", true, &FS::moonShadows,
      "shadow"},
     {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", true, &FS::stars, "world"},
-    {Feature::CombatLights, "combatLights", "Combat light", "combat", "Night and combat", "B4", false,
-     &FS::combatLights, ""},
-    {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", false,
-     &FS::combatShadows, ""},
+    // B4 (combat): the combat lights shade in the world pass (their scattering
+    // in the air adds to the composite); their shadow mask has its own pass at
+    // the start of the world (combatmask).
+    {Feature::CombatLights, "combatLights", "Combat light", "combat", "Night and combat", "B4", true, &FS::combatLights,
+     "world"},
+    {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", true,
+     &FS::combatShadows, "combatmask"},
     // B5 (water): the sea's draws, in the ground section of the world pass
     // (sky, terrain, water, horizon).
     {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
@@ -177,8 +181,8 @@ struct KeyTable
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
                        "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0"
-                       "Reflection tags\0Reflections only\0",
-                       &LT::debugView, 0, kDebugViewSsrReflection),
+                       "Reflection tags\0Reflections only\0Combat shadow mask\0",
+                       &LT::debugView, 0, Poseidon::lighting::kDebugViewCombatMask),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };
@@ -235,6 +239,15 @@ struct KeyTable
                         &LT::wetness, -1.0f, 1.0f),
             MakeSubKnob(Feature::WetWeather, "puddles", "Puddles", "the puddles' amount; 0 = none, 1 = the weather's",
                         &LT::puddles, 0.0f, 2.0f),
+            MakeSubKnob(Feature::CombatLights, "combatFlash", "Burst flash",
+                        "the white-hot first flash of shells and grenades; also the flash's exposure response",
+                        &LT::combatFlash, 0.0f, 3.0f),
+            MakeSubKnob(Feature::CombatLights, "combatFire", "Fire light", "camp fires and burning wrecks",
+                        &LT::combatFire, 0.0f, 3.0f),
+            MakeSubKnob(Feature::CombatLights, "combatSmoke", "Lit smoke", "combat light on smoke and dust",
+                        &LT::combatSmoke, 0.0f, 3.0f),
+            MakeSubKnob(Feature::CombatLights, "combatScatter", "Lit air", "combat light scattered in the air",
+                        &LT::combatScatter, 0.0f, 3.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

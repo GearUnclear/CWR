@@ -502,10 +502,11 @@ TEST_CASE("Wet weather shaders: the sun's glint in the film is capped far below 
     // A pixel's footprint widens the lobe (far wet ground: no white dashes).
     CHECK(constant("kWetSunFoot") > 0.0f);
     CHECK(surface.find("float sunFoot = kWetSunFoot * length(fwidth(posAbs));") != std::string::npos);
-    // Every sun lobe takes the sun's cap, every lamp lobe the lamps'.
+    // Every sun lobe takes the sun's cap, every lamp lobe the lamps' (the tiled
+    // list's, the draw's own list's, and the combat lights' of B4).
     CHECK(CountOf(surface, "wetLobe(litSunDir.xyz, 1e4, nf, v, nv, ") == 2);
     CHECK(CountOf(surface, ", kWetSunCap)") == 2);
-    CHECK(CountOf(surface, ", kWetSpecCap)") == 2);
+    CHECK(CountOf(surface, ", kWetSpecCap)") == 3);
     CHECK(surface.find("min(3.14159265 * D * vis * nl * norm, cap) * F") != std::string::npos);
 }
 

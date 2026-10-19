@@ -730,6 +730,10 @@ namespace
 static const char s_psRemasterShade[] = R"(
 // Sun visibility of the last shaded fragment (water reuses it for its glint).
 float g_sunVisibility = 1.0;
+// Share of the fragment's radiance that comes from combat light (B4): the
+// night-eye desaturation (finishFragment) is a model of dim moonlit vision; a
+// surface lit by a flash or a fire keeps its colour.
+float g_combatShare = 0.0;
 
 // Tree crowns lit as a canopy (crownCanopy, litHorizonSun.w; research track
 // shade, crown V18). The sun reaching a leaf crosses the crown in front of it:
@@ -831,6 +835,12 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     g_lightForced = litMatForced.rgb;
     vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * litGround.w;
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
+    // Combat light (B4): linear HDR, outside the classic clamp; none unless
+    // the frame's combat lights are in the tiled list. The flash highlight is
+    // for vehicles, glass and gear: the terrain's segments differ in specular
+    // material, and a low flash's glint drew their borders on the ground.
+    vec3 combat = kd * combatLights(n, nLight, foliage, v);
+    vec3 combatGloss = terrain ? vec3(0.0) : litMatSpecular.rgb * g_combatSpec * litHorizon.w;
 
     vec3 a = toLinear(albedo);
     if (canopy) {
@@ -851,10 +861,13 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         wetSurface(albedo, n, v, posAbs, skyVisibility, sunVisibility * sunOn, foliage, a, wetKeep, wetLit, wetEnv,
                    wetMirror);
     float exposure = litZenith.w;
-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) * wetKeep + glossy(n, v, sunVisibility) * sunOn +
-                     g_physicalSpec * litGround.w + wetLit) * exposure + wetEnv;
+    vec3 radiance = (a * (direct + ambient + moon + local + emissive + combat) * wetKeep +
+                     glossy(n, v, sunVisibility) * sunOn + g_physicalSpec * litGround.w + combatGloss + wetLit) *
+                        exposure +
+                    wetEnv;
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * wetKeep * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0) * (1.0 - wetMirror);
+    g_combatShare = clamp(dot((a * combat + combatGloss) * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
     if (foliage) ambientShare *= 0.5;
 
     if (litFlags.z > 0.5 && litFlags.z < 4.5) {
@@ -864,6 +877,12 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         if (litFlags.z < 2.5) return vec3(skyVisibility);
         if (litFlags.z < 3.5) return nLight * 0.5 + 0.5;
         return albedo;
+    }
+    if (litFlags.z > 10.5) {
+        // Debug view 11: the combat shadow mask's first channel as this surface
+        // reads it, red where it falls outside last frame's mask.
+        float vis = combatShadowVis(1);
+        return g_combatMaskInside ? vec3(vis) : vec3(1.0, 0.0, 0.0);
     }
     vec3 display = toDisplay(tonemapNeutral(radiance));
     float grey = dot(display, kLuma);
@@ -896,6 +915,8 @@ void finishFragment(vec4 r0, float ambientShare, bool nightEye) {
     if (nightEye) {
         float luminance = clamp(dot(r0.rgb, rgbEyeCoef.rgb), 0.0, 1.0);
         float nightBlend = clamp(luminance + rgbEyeCoef.a, 0.0, 1.0);
+        // A surface lit by combat light keeps its colour (0 without one).
+        nightBlend = max(nightBlend, sqrt(g_combatShare));
         // Lit surfaces fade toward a slightly cool grey of the same luminance:
         // the dark-adapted eye sees moonlit ground pale and cool, not neutral.
         // Only blue is raised, so a half-faded warm surface does not turn

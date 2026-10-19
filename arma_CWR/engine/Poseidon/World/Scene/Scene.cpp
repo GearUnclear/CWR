@@ -25,6 +25,7 @@ using Poseidon::Foundation::IsOutOfMemory;
 using Poseidon::Foundation::MStorage;
 using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
@@ -310,6 +311,10 @@ void Scene::AddLight(Light* light)
 void Scene::ResetLights()
 {
     _lights.Clear();
+    // Called from ~Scene only: the scene's teardown drops the combat light
+    // bursts with its lights (they would end on their own within 0.9 s of
+    // simulation); the owners of the others remove them (CombatLights.hpp).
+    lighting::GCombatLights().ClearBursts();
 }
 
 static int CmpALight(const ActiveLightPointer* l0, const ActiveLightPointer* l1, LightContext* context)

@@ -456,9 +456,13 @@ void EngineGL33::EndWorldScene()
     _worldEffectsOn = false;
     _worldSceneEnded = true;
     // Passes after the world (portraits, 3D previews) light each draw from its
-    // own list, by the classic model.
+    // own list, by the classic model, combat sources with their classic
+    // lights. The composite still scatters this frame's combat lights
+    // (combatWasActive).
     _lightTilesActive = false;
     _nightLightsActive = false;
+    const bool combatWasActive = _combat.active;
+    _combat.active = false;
     UpdateRemasterPrograms();
     if (_lightingActive)
         UpdateShadowMapLitState(); // disarms the shadow test for the HUD and dialogs
@@ -513,6 +517,11 @@ void EngineGL33::EndWorldScene()
     in.ssrTags =
         in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
                        in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
+    // The combat shadow mask of the next frame traces through this frame's
+    // linear depth (B4).
+    in.combatMask = combatWasActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+                    _featureGates[rm::Feature::CombatShadows].on;
+    f.combatScatter = combatWasActive;
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
@@ -544,6 +553,10 @@ void EngineGL33::EndWorldScene()
     }
     GpuMark(Poseidon::gpu::Mark::PostEnd);
     EndPostFullscreen();
+    // The linear depth the next frame's combat shadow mask traces through,
+    // and the camera it was drawn from.
+    if (f.plan.Runs(rm::PostStage::LinearDepth))
+        SaveCombatMaskCamera(f.w, f.h, f.rect);
 }
 
 void EngineGL33::RunPostStage(rm::PostStage stage, PostFrame& f)
@@ -730,6 +743,8 @@ void EngineGL33::PostComposite(const PostFrame& f)
     Set4(p.progComposite, "depthMap", f.depthScale, f.depthBias, 1.0f / scatterLength, 0.0f);
     Set4(p.progComposite, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
     Set4(p.progComposite, "debugView", _lighting.debugView == 4 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    // The combat lights' scattering in the air (none without them; B4).
+    SetCombatScatterUniforms(p.progComposite, f.combatScatter ? _combat.exposure : 0.0f);
     DrawTo(plan.Runs(rm::PostStage::Sharpen) ? p.taaInFbo : _ssaaFbo, f.w, f.h);
 }
 

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
@@ -363,7 +364,7 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
     // the light tiles after it (debug=6), B2's albedo view (debug=7), the air
     // pass's in-scatter (debug=8, B8) and the reflections' two last (debug=9
-    // and 10, B6).
+    // and 10, B6), and the combat shadow mask after them (debug=11, B4).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
     CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
@@ -371,7 +372,8 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
     CHECK(kDebugViewAir == kDebugViewAlbedo + 1);
     CHECK(kDebugViewSsrTags == kDebugViewAir + 1);
     CHECK(kDebugViewSsrReflection == kDebugViewSsrTags + 1);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewSsrReflection));
+    CHECK(Poseidon::lighting::kDebugViewCombatMask == kDebugViewSsrReflection + 1);
+    CHECK(debug->maxValue == static_cast<float>(Poseidon::lighting::kDebugViewCombatMask));
 }
 
 TEST_CASE("Post stages: the reflections read the tags out whenever they were written, and trace when gated on",

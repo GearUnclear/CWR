@@ -333,6 +333,29 @@ void SmokeSourceVehicle::Simulate(float deltaT, SimulationImportance prec)
             GLOB_SCENE->AddLight(_light);
         }
     }
+    // Combat light (CombatLights.hpp), whatever the lighting setting: the fuel
+    // explosion is one burst, and the embers of a burning wreck glow under its
+    // smoke while it burns, 1.5 m up (the flames' centre, not the deck: rays
+    // from the ground to a light just above it graze it and shadow it).
+    if (_fire.Active() && !_combatBurst && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+    {
+        _combatBurst = true;
+        const Vector3 at = Position() + VUp * 0.8f;
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        lighting::GCombatLights().Spawn(lighting::CombatLightKind::Explosion, p, _fire.GetSize());
+    }
+    const float glow = canDelete || !GlowsAsWreck() ? 0.0f : _inOutDensity * _density;
+    if (glow > 0.01f && prec <= SimulateInvisibleNear)
+    {
+        const Vector3 at = Position() + VUp * 1.5f;
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        _combatEmbers.Set(lighting::CombatLightKind::Fire, p, 0.9f * glow * _size);
+    }
+    else
+    {
+        _combatEmbers.Release();
+    }
+
     if (_light)
     {
         _lightTime += deltaT * 1.0;
@@ -1192,11 +1215,19 @@ void WeaponLightSource::Init()
 
 void WeaponLightSource::Start(float time, float intensity, bool mGun)
 {
+    Start(time, intensity, mGun, -1.0f);
+}
+
+void WeaponLightSource::Start(float time, float intensity, bool mGun, float ammoHit)
+{
     float lightTime = time * 3;
     _timeToLight = lightTime;
     _invTotalTimeToLight = 1 / lightTime;
     _lightIntensity = intensity;
     _lightMGun = mGun;
+    // The combat light's burst, sized by the round (CombatLights.hpp).
+    _combatPending = true;
+    _combatStrength = lighting::CombatMuzzleStrength(ammoHit, mGun, intensity);
 }
 
 bool WeaponLightSource::Active() const
@@ -1213,6 +1244,14 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
     else
     {
         _timeToLight -= deltaT;
+        // The combat light: one burst per shot, fire and forget.
+        if (_combatPending && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+        {
+            const float p[3] = {pos.X(), pos.Y(), pos.Z()};
+            lighting::GCombatLights().Spawn(
+                _lightMGun ? lighting::CombatLightKind::Muzzle : lighting::CombatLightKind::Cannon, p, _combatStrength);
+        }
+        _combatPending = false;
         // simulate light
         if (ENGINE_CONFIG.lights & LIGHT_EXPLO)
         {
@@ -1288,7 +1327,12 @@ void WeaponFireSource::Simulate(Vector3Par pos, Vector3Par speed, float density,
 
 void WeaponFireSource::Start(float time, float intensity, bool lightMGun)
 {
-    base2::Start(time, intensity, lightMGun);
+    Start(time, intensity, lightMGun, -1.0f);
+}
+
+void WeaponFireSource::Start(float time, float intensity, bool lightMGun, float ammoHit)
+{
+    base2::Start(time, intensity, lightMGun, ammoHit);
     base::Start(time);
 }
 
@@ -1869,6 +1913,16 @@ void Explosion::Simulate(float deltaT, SimulationImportance prec)
         {
             GLOB_WORLD->SwitchCameraTo(_owner, GLOB_WORLD->GetCameraType());
         }
+    }
+
+    // The combat light: one burst per explosion, at the fireball's centre (a
+    // few metres up for a shell, so it reaches the ground at a usable angle).
+    if (!_combatSpawned && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))
+    {
+        _combatSpawned = true;
+        const Vector3 at = Position() + VUp * (1.0f + 2.5f * _exSize);
+        const float p[3] = {at.X(), at.Y(), at.Z()};
+        lighting::GCombatLights().Spawn(lighting::CombatLightKind::Explosion, p, _exSize);
     }
 
     if ((_fire.Active() || _minLightTime > 0) && prec <= SimulateInvisibleNear && (ENGINE_CONFIG.lights & LIGHT_EXPLO))

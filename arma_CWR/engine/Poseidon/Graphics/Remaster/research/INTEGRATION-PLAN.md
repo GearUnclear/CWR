@@ -438,7 +438,14 @@ combat shadow mask, `LitConstPlanned::CombatShadow`, static_assert) followed by 
 streaks on, the reflections' pass reflecting the wet ground), set by `UploadLitWeather` and kept by the
 per-draw updates. `litWeather` is x the surface wetness, y the rain density, z the puddle level, w the
 sim clock wrapped at 4096 s; all zero while the gate is off, which every wet term of the shaders tests
-first. B4 landing 72 replaces `litPlanned`.
+first.
+
+As built in B4 (a parallel lane on 706b9a3, ported onto cb3dd0d): slot 72 (`CombatShadow`) is not
+used. The combat values that change per frame (the shadowed count and mask strength, the previous
+camera's three reprojection rows) ride in four `vec4` appended to A6's `FrameLights` block
+(binding 4) after the light texels, written by `UploadCombatFrame`; the flash exposure rides in
+`Zenith.w` as the rig's exposure already did. B4 adds no `LitConst` slot: `litPlanned` (72) stays
+padding and `Count` stays 79.
 
 ### 3.4 Texture units
 
@@ -1792,6 +1799,66 @@ graphics-remaster worktree, gitignored).**
   scaling, hysteresis selection); mask reprojection UV at the centre and edges; layout
   (`CombatShadow`); glslang for the mask pass.
 - **Effort**: 7 days.
+
+As built in B4 (corrections to the bullets above):
+
+- The lights live in `CombatLightSet` (`GCombatLights()`), ticked from `World::Simulate` inside
+  the `doSim` block, so a paused game holds every light's age. Bursts (muzzle, cannon,
+  explosion) are spawned and forgotten; continuous lights (wreck embers, camp fires, tracers,
+  flares, missile motors) are owned through a `CombatLightHandle`. Muzzle strength comes from
+  the round's `hit` (`CombatMuzzleStrength`), a shell burst's from the explosion size
+  (`Explosion::_exSize`) and a fuel burst's from the fire size; `indirectHit` is not read.
+  They reach the frame as up to 12 HDR entries at the head of A6's tiled list
+  (`MergeCombatFrameLights`, packed kind 2 with the window range), not through the per-draw
+  8-slot path; `Lights.hpp` gained no `hdrRange`, and the classic light of the same source is
+  skipped at selection (`UpdateLightTiles`, `DrawDecal`) only while the combat lights are on.
+- The mask is traced each frame from the previous frame's half-resolution linear depth (24
+  steps), then blurred by a separable 7-tap bilateral filter. It has no history of its own: the
+  temporal anti-aliasing resolve averages its remaining noise. `LinearDepth` runs whenever the
+  mask is asked for (`PostFrameInputs::combatMask`).
+- The analytic in-scatter is a term of the composite (`combatScatter()`), not its own post
+  stage: the `CombatScatter` stage stays unlanded.
+- The centre seam was not in the reprojection (it stayed with the shadows, the scatter, the lit
+  smoke and TAA each switched off, and moved with the world, not the screen). The capture camera
+  stood on the terrain segment line x = 7600, one segment's material is specular and the other
+  not, and the low flash's glint drew the line. Terrain takes no flash glint now.
+- The flash exposure is driven by explosions and cannon only (a rifle's own muzzle would open it
+  every shot), held with a 0.12 s decay. By day bursts keep a fifth of their night strength and
+  continuous lights 12 %.
+- The flash frame: a probe of the capture showed a shell burst first drawn 0.03 s after it
+  (`combat_eye_k05`) and the second flash shot 0.13 s after it (`k06`; pausing and unpausing for
+  each still take a simulation step each), and a classic burst still whitens the frame then.
+  The research envelope's 60 ms fall left that frame 14 to 24 levels under Classic at eye
+  height, so the white flash holds 0.15 s (`kExplosionFlashHold`) before it falls in 50 ms.
+  Every burst colour stays at or under the fire's red over blue (the research's fireball cooled
+  to (1.0, 0.40, 0.11), the lane's first muzzle colour was (1.0, 0.70, 0.42), and the ground they
+  lit read khaki, red over blue 1.50 to 1.55 on screen).
+- The fire's colour is (1.0, 0.70, 0.45), and a fireball cools to it: the first build's
+  (1.0, 0.66, 0.39) lit the ground round a camp fire at red over blue 1.43 to 1.53, over the
+  1.4 above. Now the lit lower third of `combat_fires` reads 1.35 to 1.38, and the brightest
+  part of the camp fire's pool still 1.46. The muzzle and cannon colours moved a step whiter
+  with it.
+- A fire's light reaches the smoke and dust particles of its own column through the smoke below
+  them (`CombatSmokeTransmittance`, a reach of 1.5 core radii for black soot growing with the
+  square of the particle's albedo): lit at full strength, a burning wreck's black plume read at
+  sky level at night where Classic draws it dark. Its lit air is a small halo (1.7 m, a quarter
+  of a flash's share), not a 4.4 m ball over the column.
+- At most 12 combat lights reach the tiled list; past that the steady lights (fires, flares,
+  missile motors) stay and the weakest bursts and tracers go (`KeepCombatLights`): the classic
+  light of a steady source lights nothing while the combat lights are on, so a cut fire went
+  dark.
+- The warm horizon strip is cut by each light's window: a receiver beyond the light's range
+  (at most 120 m, a flare 400 m) gets nothing.
+- `CombatLightSet::Tick` ages the set by the simulation step, at most `kCombatMaxTickStep` (0.25 s)
+  per call, and a step of 0 (paused) ages nothing. The lane first skipped longer steps as clock
+  jumps, but `World::Simulate` passes the step times the time acceleration: under `setAccTime 4`
+  (the Showcase's escalation chapter) any frame slower than 1/16 s skipped the tick, so every burst
+  stayed at its full flash and the set grew with every shot.
+- On the merged tree (ported onto cb3dd0d) the combat shadow mask's debug view is 11, after B6's
+  two (`kDebugViewCombatMask`), and the physical lamps of B3 and the wet lamp streaks of B7 skip
+  the combat entries at the head of the tile's list: the streaks give a combat light its own
+  model at its own linear light (no night factor), not the classic spotlight its packing (w 2)
+  would otherwise read as.
 
 ### B5. water (sea waves, variant C)
 

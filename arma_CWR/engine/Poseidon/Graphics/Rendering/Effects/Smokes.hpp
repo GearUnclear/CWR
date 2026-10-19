@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Evaluator/express.hpp>
@@ -388,6 +389,14 @@ class SmokeSourceVehicle: public Entity,public SmokeSource
 
 	USE_FAST_ALLOCATOR
 	USE_CASTING(base)
+
+  protected:
+    // Combat light (CombatLights.hpp): the fuel explosion's burst, spawned once,
+    // and the embers glowing under a burning wreck's smoke.
+    bool _combatBurst = false;
+    lighting::CombatLightHandle _combatEmbers;
+    // A burning wreck's smoke (SmokeSourceOnVehicle): its embers glow.
+    virtual bool GlowsAsWreck() const { return false; }
 };
 
 class SmokeSourceOnVehicle: public SmokeSourceVehicle,public AttachedOnVehicle
@@ -408,6 +417,9 @@ class SmokeSourceOnVehicle: public SmokeSourceVehicle,public AttachedOnVehicle
 	LSError Serialize(ParamArchive &ar) override;
 
 	USE_FAST_ALLOCATOR;
+
+  protected:
+    bool GlowsAsWreck() const override { return true; }
 };
 
 class Explosion: public Vehicle
@@ -444,6 +456,9 @@ class Explosion: public Vehicle
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 
 	USE_FAST_ALLOCATOR;
+
+  private:
+    bool _combatSpawned = false; // its combat light burst (CombatLights.hpp)
 };
 
 class Crater: public Smoke
@@ -575,6 +590,15 @@ public:
 	bool Active() const;
 	void Simulate(Vector3Par pos, float deltaT);
 	virtual LSError Serialize(ParamArchive &ar);
+    // ammoHit: the fired ammo's hit (config), which sizes the combat light's
+    // flash (CombatLights.hpp); the three-argument Start passes -1 (no ammo).
+    void Start(float time, float intensity, bool mGun, float ammoHit);
+
+  protected:
+    // Combat light: one burst per shot, spawned at the next Simulate, with
+    // the strength of the fired ammo.
+    bool _combatPending = false;
+    float _combatStrength = 1.0f;
 };
 
 class WeaponFireSource: public WeaponCloudsSource, public WeaponLightSource
@@ -596,6 +620,7 @@ public:
 	);
 
 	LSError Serialize(ParamArchive &ar) override;
+    void Start(float time, float intensity, bool mGun, float ammoHit);
 };
 
 class ObjectDestructed: public Vehicle

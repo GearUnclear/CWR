@@ -178,6 +178,14 @@ struct LightingTuning
     // weather) and the puddles' amount (a multiple of the state's puddles).
     float wetness = -1.0f;
     float puddles = 1.0f;
+    // Combat light (features.combatLights, CombatLights.hpp): gains on the
+    // shipped look of a burst's white-hot first flash, of fires and wreck
+    // embers, of the combat light on smoke particles and of its scattering in
+    // the air around each light.
+    float combatFlash = 1.0f;
+    float combatFire = 1.0f;
+    float combatSmoke = 1.0f;
+    float combatScatter = 1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.
@@ -192,7 +200,9 @@ struct LightingTuning
     // it divides a lit shot into the light on each surface), 8 the air pass's
     // in-scatter alone (PostStages.hpp kDebugViewAir), 9 the reflections'
     // surface tags and 10 the reflections alone (ScreenReflections.hpp
-    // kDebugViewSsrTags, kDebugViewSsrReflection).
+    // kDebugViewSsrTags, kDebugViewSsrReflection), 11 the
+    // combat shadow mask as each surface reads it (CombatLights.hpp
+    // kDebugViewCombatMask).
     int debugView = 0;
 };
 

@@ -1095,9 +1095,10 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
     // and its debug view, the TAA resolve and its sharpen, the sky table's
     // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
-    // pass's march, blur, mean and apply, and the reflections' tag readout,
-    // shares, trace, rough blur and composite
-    CHECK(post == 24);
+    // pass's march, blur, mean and apply, the reflections' tag readout,
+    // shares, trace, rough blur and composite, and the combat shadow mask and
+    // its blur
+    CHECK(post == 26);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1319,9 +1320,10 @@ TEST_CASE("Remaster tree crowns as a canopy: the shader's switch, its terms and 
     CHECK(lighting.find("SetSlot(LitConst::HorizonSun, rig.skyHorizonSun.r, rig.skyHorizonSun.g, "
                         "rig.skyHorizonSun.b, crownCanopy);") != std::string::npos);
     // The debug view the lit shaders draw comes from one mapping (the light
-    // tiles' view aside, which the backend passes through).
-    CHECK(lighting.find("const float debug = dv == fl::kDebugViewLightTiles ? static_cast<float>(dv) : "
-                        "rm::ShaderDebugView(dv);") != std::string::npos);
+    // tiles' and the combat mask's views aside, which the backend passes through).
+    CHECK(lighting.find("const float debug = dv == fl::kDebugViewLightTiles || dv == fl::kDebugViewCombatMask ? "
+                        "static_cast<float>(dv)") != std::string::npos);
+    CHECK(lighting.find(": rm::ShaderDebugView(dv);") != std::string::npos);
 
     const std::string piece = Piece(gl::FragmentPiece::Shade);
     const size_t start = piece.find("vec3 shadeRemastered(");

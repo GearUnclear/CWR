@@ -107,6 +107,11 @@ struct PostFrameInputs
     // switch's frame gate is on (water or wet ground on screen).
     bool ssrTags = false;
     bool ssr = false;
+    // The combat shadow mask (B4): its switch and frame gate are on and combat
+    // light lit this frame. The next frame's mask traces through this frame's
+    // half-resolution linear depth, so LinearDepth runs (it is not a stage of
+    // its own: the mask pass runs at the start of the next world).
+    bool combatMask = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.

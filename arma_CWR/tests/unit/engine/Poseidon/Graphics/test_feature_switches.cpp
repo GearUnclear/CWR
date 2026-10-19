@@ -315,8 +315,9 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
     // texsharp's two (B11), the sun shadows' three (B1, below), the sea's three
     // (B5), the beams' contrast (B8, below), the night's lamp and headlight
-    // strengths (B3, test_night_lights.cpp), the reflections' two (B6) and the
-    // wet weather's two (B7, test_wet_weather.cpp).
+    // strengths (B3, test_night_lights.cpp), the reflections' two (B6), the
+    // wet weather's two (B7, test_wet_weather.cpp) and combat light's four (B4,
+    // test_combat_lights.cpp).
     int children = 0;
     int taaChildren = 0;
     for (int i = 0; i < LightingKeyCount(); ++i)
@@ -328,7 +329,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         const std::string_view parent(k.parent);
         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
-               parent == "nightLights" || parent == "ssr" || parent == "wetWeather"));
+               parent == "nightLights" || parent == "ssr" || parent == "wetWeather" || parent == "combatLights"));
         REQUIRE(FindFeature(k.parent) != nullptr);
         CHECK(FindFeature(k.parent)->landed);
         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
@@ -336,7 +337,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         ++children;
     }
     CHECK(taaChildren == 3);
-    CHECK(children == 21);
+    CHECK(children == 25);
 }
 
 TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
@@ -772,9 +773,9 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
     CHECK(inert + landed == static_cast<size_t>(kFeatureCount));
 }
 
-TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
-          "shade, the night, the sea, the reflections, the wet weather, the air pass, the canopy shadows and the "
-          "clouds have landed, nothing else has",
+TEST_CASE("Feature switches: every feature switch has landed: the frame-cost switches, TAA, the light list, the sky "
+          "table, texsharp, the sun shadows, shade, the night, combat light, the sea, the reflections, the wet "
+          "weather, the air pass, the canopy shadows and the clouds",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
@@ -789,7 +790,8 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     // B7 wetWeather and lampStreaks (the world pass's shading),
     // B8 the air pass's three (its post stage), B9 canopyShadows (the canopy's
     // sun-visibility map build), B10 litClouds (the sky section) and
-    // skyCloudShadows (the world section: one density tap per lit fragment).
+    // skyCloudShadows (the world section: one density tap per lit fragment),
+    // and B4 combatLights (the world pass) and combatShadows (its mask pass).
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -806,14 +808,15 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
         const bool shade = info.id == Feature::LowSunRig || info.id == Feature::CrownCanopy;
         const bool night =
             info.id == Feature::NightLights || info.id == Feature::MoonShadows || info.id == Feature::Stars;
+        const bool combat = info.id == Feature::CombatLights || info.id == Feature::CombatShadows;
         const bool sea = info.id == Feature::SeaWaves;
         const bool ssr = info.id == Feature::Ssr;
         const bool wet = info.id == Feature::WetWeather || info.id == Feature::LampStreaks;
         const bool air = info.id == Feature::AirBeams || info.id == Feature::AirHaze || info.id == Feature::ValleyMist;
         const bool canopy = info.id == Feature::CanopyShadows;
         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
-        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night || sea ||
-                              ssr || wet || air || canopy || clouds));
+        CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night ||
+                              combat || sea || ssr || wet || air || canopy || clouds));
         if (info.landed)
         {
             CHECK(std::string_view(info.step) == (perf         ? "A4"
@@ -823,6 +826,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
                                                   : shadows    ? "B1"
                                                   : shade      ? "B2"
                                                   : night      ? "B3"
+                                                  : combat     ? "B4"
                                                   : sea        ? "B5"
                                                   : ssr        ? "B6"
                                                   : wet        ? "B7"
@@ -859,11 +863,16 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     CHECK(s.find(" moonShadows=1:off:day ") != std::string::npos);
     CHECK(s.find(" stars=1:off:day ") != std::string::npos);
     CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
-    CHECK(s.find("landed=24/26") != std::string::npos);
+    // Combat light holds off with no combat light near, its shadows by day.
+    CHECK(s.find(" combatLights=1:off:") != std::string::npos);
+    CHECK(s.find(" combatShadows=1:off") != std::string::npos);
+    CHECK(s.find("landed=26/26") != std::string::npos);
     CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");
+    CHECK(std::string_view(GetFeatureInfo(Feature::CombatLights).gpuSection) == "world");
+    CHECK(std::string_view(GetFeatureInfo(Feature::CombatShadows).gpuSection) == "combatmask");
     // Classic keeps its own draw path: the gates hold them off.
     const LightingTuning classic = Apply("classic");
     const FeatureGates gc = ComputeFeatureGates(GateInputs{}, classic);

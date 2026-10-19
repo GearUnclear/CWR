@@ -859,6 +859,12 @@ class Engine : public IGraphicsEngine
     /// term), and true. False when they are off: every light then lights the
     /// particle by the classic model, as before.
     virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
+    /// True while the frame's combat lights (the combatLights feature,
+    /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
+    /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare
+    /// or a missile (Light::Kind Combat or Fire) then draws its glow but lights
+    /// nothing, and smoke takes the combat lights instead.
+    virtual bool CombatLightsActive() const { return false; }
     /// Captures: hold the remastered cloud-shadow field at a drift offset in
     /// metres (pinned = false lets it drift with the wind again from where it
     /// is). The field integrates the wind every frame, so re-pinning the sim

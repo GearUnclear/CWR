@@ -562,9 +562,11 @@ TEST_CASE("Frame lights: the shaders read the list with the model and sizes of F
     std::snprintf(band, sizeof(band), "float band = max(edgeIn - edgeOut, %.2f * edgeIn);", kClassicBudgetSoftness);
     CHECK(lights.find(band) != std::string::npos);
     // (B3: the budget counts the lights of the classic model; with the physical
-    // lamps and low beams on they leave it, test_night_lights.cpp.)
+    // lamps and low beams on they leave it, test_night_lights.cpp. B4: the
+    // combat lights at the head of the tile leave it too.)
     CHECK(lights.find("float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) "
                       ": 1.0;") != std::string::npos);
+    CHECK(lights.find("int classic = count - head;") != std::string::npos);
     // The 7th and 8th strongest: the last two of the eight kept sorted.
     CHECK(kClassicLightsPerSurface == 7);
     CHECK(lights.find("edgeIn = t6;") != std::string::npos);

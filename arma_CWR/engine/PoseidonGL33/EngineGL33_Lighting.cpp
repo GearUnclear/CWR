@@ -190,6 +190,7 @@ void EngineGL33::InitLightingResources()
     glBindSampler(kShadowRawUnit, _shadowRawSampler);
 
     InitLightTiles();
+    InitCombatResources();
 
     // The map (if any) belongs to the landscape, not the context: re-upload it.
     _terrainMapDirty = _terrainMap != nullptr;
@@ -199,8 +200,9 @@ void EngineGL33::InitLightTiles()
 {
     LightTileState& t = _lightTiles;
     // The lights: a uniform block of kMaxFrameLights lights on its own binding
-    // point, zeroed, so a remastered program always meets a complete buffer.
-    const std::vector<float> none(static_cast<size_t>(fl::kMaxFrameLights) * fl::kTexelsPerLight * 4, 0.0f);
+    // point, zeroed, so a remastered program always meets a complete buffer;
+    // the combat light's four vec4 follow them (UploadCombatFrame).
+    const std::vector<float> none(static_cast<size_t>(fl::kMaxFrameLights) * fl::kTexelsPerLight * 4 + 16, 0.0f);
     glGenBuffers(1, &t.dataBuf);
     glBindBuffer(GL_UNIFORM_BUFFER, t.dataBuf);
     glBufferData(GL_UNIFORM_BUFFER, static_cast<GLsizeiptr>(none.size() * sizeof(float)), none.data(), GL_DYNAMIC_DRAW);
@@ -275,6 +277,11 @@ void EngineGL33::UpdateLightTiles()
     {
         Light* light = active[i];
         if (!light)
+            continue;
+        // While the combat lights light the frame, the classic light of each
+        // of their sources draws its glow and lights nothing.
+        if (_combat.active &&
+            (light->Kind() == fl::FrameLightKind::Combat || light->Kind() == fl::FrameLightKind::Fire))
             continue;
         LightDescription desc;
         light->GetDescription(desc);
@@ -351,6 +358,16 @@ void EngineGL33::UpdateLightTiles()
     view.viewport[1] = static_cast<float>(targetH - yBottom);
     view.viewport[2] = static_cast<float>(x1 - x0);
     view.viewport[3] = static_cast<float>(yBottom - yTop);
+
+    // The combat lights (B4) lead the list, the classic ones follow ranked as
+    // before.
+    _combat.count = 0;
+    if (_combat.active)
+    {
+        std::vector<fl::FrameLight> combat;
+        GatherCombatLights(view, combat);
+        _combat.count = fl::MergeCombatFrameLights(t.lights, combat);
+    }
 
     const int tilesX = (targetW + fl::kTileSize - 1) / fl::kTileSize;
     const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
@@ -431,6 +448,7 @@ void EngineGL33::DeinitLightingResources()
     DeinitLightTiles();
     DeinitSkyClouds();
     DeinitCanopy();
+    DeinitCombatResources();
     _post.unavailable = false;
     if (_shadowCompareSampler)
     {
@@ -578,6 +596,8 @@ void EngineGL33::BindLightingTextures()
     GL33Bind::Tex2D(kLightTileUnit, _lightTiles.tileTex);
     BindSkyDensity();
     BindCanopy();
+    // The combat shadow mask, or its white stand-in.
+    BindCombatMask();
     GL33Bind::ActiveUnit(0);
 }
 
@@ -650,6 +670,27 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
         in.waterShare = _ssr.waterShare;
         in.wetShare = _ssr.groundShare;
     }
+    // The combat lights of this frame (B4): evaluated once, for the tiled
+    // list, the smoke and the gates; a light counts while its reach comes
+    // within kGateCombatRange of the camera.
+    {
+        fl::CombatTuning ct;
+        ct.flash = _lighting.combatFlash;
+        ct.fire = _lighting.combatFire;
+        ct.smoke = _lighting.combatSmoke;
+        ct.scatter = _lighting.combatScatter;
+        fl::CombatLightSet& combat = fl::GCombatLights();
+        combat.Evaluate(ct, in.nightEffect);
+        const Vector3 cam = camera ? camera->Position() : VZero;
+        for (const fl::CombatLightRecord& r : combat.Records())
+        {
+            if (r.sample.intensity <= 1e-5f)
+                continue;
+            const float dx = r.pos[0] - cam.X(), dy = r.pos[1] - cam.Y(), dz = r.pos[2] - cam.Z();
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) - r.sample.range < rm::kGateCombatRange)
+                ++in.combatLightsNear;
+        }
+    }
     const LightList& lights = GScene->ActiveLights();
     for (int i = 0; i < lights.Size(); i++)
     {
@@ -677,6 +718,7 @@ void EngineGL33::UploadLitFrameConstants()
         _lightTilesActive = false;
         _nightLightsActive = false;
         _wetShading = false;
+        _combat.active = false;
         return;
     }
     if (_terrainMapDirty)
@@ -734,13 +776,25 @@ void EngineGL33::UploadLitFrameConstants()
     // then read by every draw of the world's passes instead of the draw's own
     // list. Off, the per-draw slots carry each draw's lights as before.
     const bool wasTiled = _lightTilesActive;
-    _lightTilesActive =
-        _featureGates.computed && _featureGates.frame == GetFrameCounter() && _featureGates[rm::Feature::LightTiles].on;
+    _lightTilesActive = gatesNow && _featureGates[rm::Feature::LightTiles].on;
+    // Combat light (B4): the game's combat lights join the tiled list, so
+    // only with it.
+    _combat.active = _lightTilesActive && _featureGates[rm::Feature::CombatLights].on;
     if (_lightTilesActive)
     {
         UpdateLightTiles();
         _lightTilesActive = _lightTiles.frame == GetFrameCounter();
+        _combat.active = _combat.active && _lightTilesActive;
     }
+    if (!_combat.active)
+    {
+        _combat.flashGain = 1.0f;
+        _combat.scatterCount = 0;
+    }
+    // The shadow mask (once per frame) and the block's combat members.
+    UpdateCombatMask();
+    if (_lightTilesActive)
+        UploadCombatFrame();
     // While the tiles light the draws the per-draw light slots go stale, and
     // slot 22 is set here for the pass until each draw's material upload sets
     // its own night factor: whenever the tiles are or were on, the next
@@ -760,7 +814,10 @@ void EngineGL33::UploadLitFrameConstants()
     // The sky reads the sun whatever the key (the sky table, its aureole, the
     // fog toward the sun, the warm side of the sky light, the lit clouds).
     SetSlot(LitConst::SkySun, key.skySunToward[0], key.skySunToward[1], key.skySunToward[2], key.skySunElevationDeg);
-    SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
+    // A burst's flash at the camera opens the exposure for as long as it lasts
+    // (B4; 1 without one).
+    _combat.exposure = rig.exposure * _combat.flashGain;
+    SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
     // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
     // gate are on; 0 leaves shadeRemastered's foliage as it was before.
@@ -852,10 +909,12 @@ void EngineGL33::UploadLitFrameConstants()
     SetSlot(LitConst::Taa, sunShadows.taa[0], sunShadows.taa[1], sunShadows.taa[2], sunShadows.taa[3]);
     SetSlot(LitConst::Pcss, sunShadows.pcss[0], sunShadows.pcss[1], sunShadows.pcss[2], sunShadows.pcss[3]);
     // Debug views of the forward shaders: 1 to 3 and the albedo (7, drawn as 4)
-    // by rm::ShaderDebugView (shadeRemastered), and the lights per tile (6);
-    // 4 and 5 are the post pass's.
+    // by rm::ShaderDebugView (shadeRemastered), the lights per tile (6) and the
+    // combat shadow mask (11, CombatLights.hpp kDebugViewCombatMask); 4, 5 and
+    // 8 to 10 are the post pass's.
     const int dv = _lighting.debugView;
-    const float debug = dv == fl::kDebugViewLightTiles ? static_cast<float>(dv) : rm::ShaderDebugView(dv);
+    const float debug = dv == fl::kDebugViewLightTiles || dv == fl::kDebugViewCombatMask ? static_cast<float>(dv)
+                                                                                         : rm::ShaderDebugView(dv);
     SetSlot(LitConst::Flags, _litOpaque ? 1.0f : 0.0f, _worldEffectsOn ? 1.0f : 0.0f, debug, _lighting.saturation);
     // The sky table: the camera basis, the dome and fog blends, the clouds' light.
     UploadLitSky(toSun, in.skyThrough);

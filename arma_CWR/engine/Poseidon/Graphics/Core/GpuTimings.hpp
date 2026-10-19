@@ -34,6 +34,10 @@ enum class Mark : int
     // WorldBegin (the world and ground sections then include it too).
     CanopyBegin,
     CanopyEnd,
+    // The combat shadow mask (B4): its trace and blur, at the start of the
+    // world's first pass of a frame that shadows a combat light.
+    CombatMaskBegin,
+    CombatMaskEnd,
     WorldBegin, // first 3D pass of the world
     // Inside the world pass (Landscape::DrawRect, at its existing queue
     // flushes): the sky, terrain, water and horizon drawn; the opaque objects
@@ -75,9 +79,10 @@ enum class Section : int
     Ground,
     Pass1,
     Rest,
-    Sky,      // the remastered sky dome, with the table build when it runs
-    SkyTable, // the sky-view table build (frames that rebuild it)
-    Canopy,   // the canopy's sun-visibility map build (frames that rebuild it)
+    Sky,        // the remastered sky dome, with the table build when it runs
+    SkyTable,   // the sky-view table build (frames that rebuild it)
+    Canopy,     // the canopy's sun-visibility map build (frames that rebuild it)
+    CombatMask, // the combat shadow mask's trace and blur (frames that shadow a combat light)
     // One per post stage, in Mark order: from the end of the latest stage that
     // ran before it (or WorldEnd) to its own end.
     Resolve,
@@ -141,7 +146,7 @@ class GpuTimings
     int Frames() const { return _frames; }
 
     // "frame 6.12 ms | world 4.80 (shadow 0.62) [ground 1.10 pass1 2.40 rest 1.30] | sky 0.05 (skytable
-    // 0.02) | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80
+    // 0.02) | combatmask 0.40 | post 0.71: resolve 0.04 ao 0.27 bloom 0.21 shafts 0.05 composite 0.14 | min frame=5.80
     // world=4.55 ground=1.02 pass1=2.21 rest=1.21": the post stages in the order they run, each once it has
     // been measured; the minimum fields use '=' so a parser looking for "<section> <ms>" never reads them.
     std::string Summary() const;

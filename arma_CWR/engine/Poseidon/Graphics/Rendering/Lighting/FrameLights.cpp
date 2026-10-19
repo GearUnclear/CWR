@@ -58,8 +58,9 @@ bool LightIsDark(const FrameLight& light)
 
 LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* physical)
 {
-    const float r = physical && UsesPhysicalModel(light.kind) ? PhysicalReach(light, *physical)
-                                                              : kRangeFactor * std::fabs(light.start);
+    const float r = light.hdr                                   ? std::fabs(light.range)
+                    : physical && UsesPhysicalModel(light.kind) ? PhysicalReach(light, *physical)
+                                                                : kRangeFactor * std::fabs(light.start);
     return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, r};
 }
 
@@ -70,6 +71,31 @@ void RankFrameLights(std::vector<FrameLight>& lights, int capacity)
                      [](const FrameLight& a, const FrameLight& b) { return Importance(a) > Importance(b); });
     if (capacity >= 0 && static_cast<int>(lights.size()) > capacity)
         lights.resize(static_cast<size_t>(capacity));
+}
+
+int MergeCombatFrameLights(std::vector<FrameLight>& classicRanked, const std::vector<FrameLight>& combat)
+{
+    std::vector<FrameLight> merged;
+    merged.reserve(std::min<size_t>(combat.size() + classicRanked.size(), kMaxFrameLights));
+    int n = 0;
+    for (const FrameLight& l : combat)
+    {
+        if (n >= kMaxCombatFrameLights)
+            break;
+        if (LightIsDark(l))
+            continue;
+        merged.push_back(l);
+        merged.back().hdr = true;
+        ++n;
+    }
+    for (const FrameLight& l : classicRanked)
+    {
+        if (static_cast<int>(merged.size()) >= kMaxFrameLights)
+            break;
+        merged.push_back(l);
+    }
+    classicRanked.swap(merged);
+    return n;
 }
 
 void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize)
@@ -210,11 +236,21 @@ void PackFrameLights(const std::vector<FrameLight>& lights, std::vector<float>& 
         t[4] = l.diffuse[0];
         t[5] = l.diffuse[1];
         t[6] = l.diffuse[2];
-        t[7] = l.IsSpot() ? 1.0f : 0.0f;
-        t[8] = l.ambient[0];
-        t[9] = l.ambient[1];
-        t[10] = l.ambient[2];
-        t[11] = l.sortBrightness;
+        t[7] = l.hdr ? 2.0f : (l.IsSpot() ? 1.0f : 0.0f);
+        if (l.hdr)
+        {
+            t[8] = l.range;
+            t[9] = static_cast<float>(l.shadowSlot + 1);
+            t[10] = 0.0f;
+            t[11] = 0.0f;
+        }
+        else
+        {
+            t[8] = l.ambient[0];
+            t[9] = l.ambient[1];
+            t[10] = l.ambient[2];
+            t[11] = l.sortBrightness;
+        }
         t[12] = l.dir[0];
         t[13] = l.dir[1];
         t[14] = l.dir[2];

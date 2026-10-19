@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1099,6 +1100,35 @@ Color AddParticleNightLight(ColorVal classic, const float physical[3], float nig
     return Color(toDisplay(toLinear(classic.R()) + s * physical[0]), toDisplay(toLinear(classic.G()) + s * physical[1]),
                  toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
 }
+
+// A smoke or dust particle lit from inside by the frame's combat lights
+// (CombatLights.hpp): their irradiance at the particle, isotropic, added to its
+// display-space colour in linear light. A fire's light crosses its own smoke
+// to reach the particle: the darker the particle (`albedo`, the luminance of
+// its own colour), the shorter the reach (CombatSmokeTransmittance), so a
+// burning wreck's black column glows at its base only.
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
+{
+    const lighting::CombatLightSet& set = lighting::GCombatLights();
+    float e[3] = {0.0f, 0.0f, 0.0f};
+    for (const lighting::CombatLightRecord& r : set.Records())
+    {
+        const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        float irr = lighting::CombatIrradiance(r.sample, d2);
+        if (irr <= 0.0f)
+            continue;
+        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, std::sqrt(d2), albedo);
+        for (int i = 0; i < 3; ++i)
+            e[i] += r.sample.rgb[i] * irr;
+    }
+    if (e[0] + e[1] + e[2] <= 1e-5f)
+        return color;
+    const float gain = set.Tuning().smoke;
+    return Color(lighting::CombatParticleChannel(color.R(), e[0], gain),
+                 lighting::CombatParticleChannel(color.G(), e[1], gain),
+                 lighting::CombatParticleChannel(color.B(), e[2], gain), color.A());
+}
 } // namespace
 
 void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
@@ -1176,6 +1206,10 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             LightSun* sun = GScene->MainLight();
             sun->SetMaterial(mat);
             colorI = sun->FullResult(0.5);
+            // While the combat lights light the frame, the classic light of a
+            // flash, a fire or a flare draws its glow and lights nothing: the
+            // particle takes the combat lights below instead.
+            const bool combat = GEngine->CombatLightsActive();
             float addLightsFactor = sun->NightEffect();
             if (addLightsFactor > 0.01)
             {
@@ -1196,6 +1230,10 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
                     for (int index = 0; index < lights.Size(); index++)
                     {
+                        const lighting::FrameLightKind kind = lights[index]->Kind();
+                        if (combat &&
+                            (kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire))
+                            continue;
                         if (night && IsPhysicalNightLight(*lights[index]))
                             continue;
                         colorI += lights[index]->Apply(VZero, VForward);
@@ -1206,6 +1244,17 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             }
             ColorVal accom = GEngine->GetAccomodateEye();
             colorI = colorI * accom;
+            if (combat)
+            {
+                // The particle's own colour (multiplied in below) is its albedo.
+                float albedo = 1.0f;
+                if (render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+                {
+                    const Color own = (ColorVal)GetConstantColor();
+                    albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
+                }
+                colorI = CombatLitParticle(colorI, pos.Position(), albedo);
+            }
             colorI.SetA(1);
         }
         else

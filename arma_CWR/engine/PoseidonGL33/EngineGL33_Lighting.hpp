@@ -76,6 +76,10 @@ extern const char kPostSsrTraceMainGLSL[];
 extern const char kPostSsrBlurGLSL[];
 extern const char kPostSsrCompositeInputsGLSL[];
 extern const char kPostSsrCompositeMainGLSL[];
+// The combat shadow mask's passes (EngineGL33_PostCombatShaders.cpp; read them
+// through PostShaderSource).
+extern const char kPostCombatMaskGLSL[];
+extern const char kPostCombatMaskBlurGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -118,6 +122,10 @@ enum class PostShader : int
     SsrTrace,     // the half-resolution trace: the reflection as a multiply and an add, and its spread
     SsrBlur,      // the trace gathered sideways over its spread (rough reflections have no hard outline)
     SsrComposite, // the reflections laid on the full-resolution frame
+    // The combat shadow mask (B4). Not post stages: they run at the start of
+    // the world, from the previous frame's linear depth (EngineGL33_PostCombat.cpp).
+    CombatMask,     // the trace toward each shadowed combat light, half resolution
+    CombatMaskBlur, // its depth-aware blur, one axis per pass
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.
@@ -156,11 +164,14 @@ constexpr int kCanopyUnit = 10;
 // the world programs read beyond the shadow maps; a stand-in (all lit) until
 // the first map is built.
 constexpr int kCanopyVisUnit = 15;
+// The combat shadow mask (B4): RGBA8 at half resolution, one shadowed combat
+// light per channel, in the previous frame's screen; a 1x1 white stand-in
+// (nothing shadowed) until the first mask is built.
+constexpr int kCombatMaskUnit = 14;
 // Allocated to the features still to land; no shader samples them yet.
 // kLightDataUnit is free: the light list keeps its lights in a uniform block
 // (kLightListBinding), which the fragments of a tile read faster.
 constexpr int kLightDataUnit = 12;
-constexpr int kCombatMaskUnit = 14; // combat shadow mask (combat)
 
 namespace detail
 {
@@ -232,6 +243,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"seaNext", kSeaNextFrameUnit},          // next sea animation frame (the water program only)
     {"lightTiles", kLightTileUnit},          // per-tile light indices, unsigned integer (the light list)
     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
+    {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test

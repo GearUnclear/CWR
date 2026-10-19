@@ -114,7 +114,8 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return On("world drawn");
 
         case Feature::LightTiles:
-            if (in.combatLightsNear > 0)
+            // The combat lights shade from the tiled list (B4).
+            if (in.combatLightsNear > 0 && FeatureOn(t.features, Feature::CombatLights))
                 return On("combat light within 60 m");
             if (in.localLights <= 0)
                 return Off("no local light");
@@ -155,17 +156,26 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return MoonKey(in);
 
         case Feature::CombatLights:
+            // The combat lights are entries of the tiled light list: without
+            // it the classic lights of the same sources light the scene.
+            if (!FeatureOn(t.features, Feature::LightTiles))
+                return Off("light list off");
             if (in.combatLightsNear <= 0)
                 return Off("no combat light within 60 m");
             return On("combat light within 60 m");
 
         case Feature::CombatShadows:
-            if (!FeatureOn(t.features, Feature::CombatLights))
+            if (!FeatureOn(t.features, Feature::CombatLights) || !FeatureOn(t.features, Feature::LightTiles))
                 return Off("combat light off", scale);
             if (in.combatLightsNear <= 0)
                 return Off("no combat light within 60 m", scale);
             if (in.nightEffect <= kGateCombatMaskMinNight)
                 return Off("day (night below 0.3)", scale);
+            // The mask traces through the post pass's half-resolution depth.
+            if (!t.postEffects)
+                return Off("post effects off", scale);
+            if (!WorldVisible(in, why))
+                return Off(why, scale);
             return On("combat light at night", scale);
 
         case Feature::Ssr:

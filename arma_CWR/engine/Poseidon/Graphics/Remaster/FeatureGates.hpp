@@ -77,7 +77,8 @@ struct GateInputs
     bool nightVision = false; // the intensifier is on
     int localLights = 0;      // point and spot lights on, within reach of the camera
     int spotLights = 0;       // of those, spot lights (headlights)
-    // Combat lights within kGateCombatRange of the camera (B4). 0 until then.
+    // Combat lights (B4, CombatLights.hpp) lit this frame whose reach comes
+    // within kGateCombatRange of the camera (a flare 100 m up counts).
     int combatLightsNear = 0;
     // A recent frame's screen share of water and of the ground the rain wets
     // (terrain and roads), from the reflections' tag readout (B6, read back a
