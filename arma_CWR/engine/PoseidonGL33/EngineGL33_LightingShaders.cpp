@@ -313,8 +313,8 @@ namespace Poseidon::gl33lighting
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout in EngineGL33_Lighting.hpp. Every shader that reads the rig pastes this
-// string (LitConstantsBlock(); the post air pass names it in kPostShaders); the
-// layout test checks it slot by slot.
+// string (LitConstantsBlock(); the post air pass and the reflections' trace
+// name it in kPostShaders); the layout test checks it slot by slot.
 const char kLitConstantsBlockGLSL[] = R"(
 // Remastered light rig and per-draw material, binding 3. Layout mirrors
 // LitConst in EngineGL33_Lighting.hpp.

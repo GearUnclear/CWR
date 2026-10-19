@@ -201,7 +201,8 @@ def load_shaders(spec: str | os.PathLike | None = None, include_shadow_depth: bo
 _FAMILIES = ("EngineGL33_LightingShaders", "EngineGL33_Post")
 # Families whose tables also name pieces of another family: the post air pass
 # pastes the remastered prelude's LitConstants block, terrain and clouds piece
-# and sky piece (kPostShaders rows psPostAirMarch, psPostAirApply).
+# and sky piece (kPostShaders rows psPostAirMarch, psPostAirApply), the
+# reflections' trace its LitConstants block and sky piece (psPostSsrTrace).
 _FAMILY_ALSO = {"EngineGL33_Post": ("EngineGL33_LightingShaders",)}
 _FRAGMENT_TABLE = re.compile(r"\bkFragmentPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
 _SCREEN_VS_TABLE = re.compile(r"\bkScreenVertexPieces\s*\[\s*\]\s*=\s*\{(?P<body>.*?)\};", re.S)
@@ -216,7 +217,9 @@ def _family(name: str) -> str | None:
 def load_family(spec: str | os.PathLike | None = None, default_relpath: str = DEFAULT_SHADER_RELPATH) -> list[str]:
     """The text of the C++ file at `spec` and of the other .cpp files of its
     family in the same directory (EngineGL33_LightingShaders*.cpp,
-    EngineGL33_Post*.cpp), from disk or from the same git revision."""
+    EngineGL33_Post*.cpp), plus the files of the families it also names
+    (_FAMILY_ALSO: a post shader can paste a piece of the fragment prelude),
+    from disk or from the same git revision."""
     root = repo_root()
     if spec is None:
         spec = root / default_relpath

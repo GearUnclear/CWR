@@ -113,21 +113,27 @@ void EngineGL33::ApplyDepthMode(DepthMode mode)
     // the stencil leg.  Matches D3D11's `D3D11_DEPTH_STENCIL_DESC`
     // which bundles depth + stencil at the API level.
     namespace ds = Poseidon::render::depthstencil;
+    // The stencil leg carries the draw's surface tag for the screen-space
+    // reflections (ApplyPassState sets _ssrStencil; the default is REPLACE 0
+    // into every bit, the state of before the tags).
+    const ds::StencilTag tag{_ssrStencil.ref, _ssrStencil.writeMask, _ssrStencil.shadowCompareMask};
     switch (mode)
     {
         case DepthMode::Normal:
-            ds::Normal(_hasStencilBuffer);
+            ds::Normal(_hasStencilBuffer, tag);
             break;
         case DepthMode::ReadOnly:
-            ds::ReadOnly(_hasStencilBuffer);
+            ds::ReadOnly(_hasStencilBuffer, tag);
             break;
         case DepthMode::Disabled:
-            ds::Disabled(_hasStencilBuffer);
+            ds::Disabled(_hasStencilBuffer, tag);
             break;
         case DepthMode::Shadow:
-            ds::Shadow(_hasStencilBuffer);
+            ds::Shadow(_hasStencilBuffer, tag);
             break;
     }
+    _ssrStencilApplied = _ssrStencil;
+    _ssrStencilValid = true;
 }
 
 void EngineGL33::SetAlphaTest(bool enable, DWORD ref, bool alphaToCoverage)
@@ -704,13 +710,18 @@ void EngineGL33::SetTexture(const TextureGL33* tex, const Poseidon::render::Lega
     SetMultiTexturing(format);
 }
 
-void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
+bool EngineGL33::IsLandLayer(const Poseidon::render::LegacySpec& spec)
 {
     // The multitexture stage of a PSDetail draw tells the land from the sea:
     // the land's faces carry DetailTexture (the detail texture on slot 1), the
-    // sea's SpecularTexture (Landscape WaterFlags). The terrain detail (B11)
-    // runs on the land only.
-    SetLitTerrainDraw(Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture));
+    // sea's SpecularTexture (Landscape WaterFlags).
+    return Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture);
+}
+
+void EngineGL33::SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec)
+{
+    // The terrain detail (B11) runs on the land only.
+    SetLitTerrainDraw(IsLandLayer(spec));
 }
 
 void EngineGL33::SetMultiTexturing(VFormatSet format)

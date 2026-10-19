@@ -3,6 +3,7 @@
 #include <PoseidonGL33/GL33BindCache.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
 #include <Poseidon/Graphics/Core/GLCullState.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/TextureGL33.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -154,6 +155,10 @@ void EngineGL33::InitDraw(bool clear, PackedColor color)
     GLbitfield clearMask = GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
     if (clear)
         clearMask |= GL_COLOR_BUFFER_BIT;
+    // The stencil clear honours the write mask: every bit (the reflections'
+    // tags narrow it inside the world pass), and the next draw sets its own.
+    Poseidon::render::depthstencil::StencilFullWriteMask();
+    _ssrStencilValid = false;
     Poseidon::render::clear::WithMask(clearMask);
 
     if (_textBank)

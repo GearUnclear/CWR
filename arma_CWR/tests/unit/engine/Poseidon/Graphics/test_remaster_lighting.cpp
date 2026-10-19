@@ -1094,9 +1094,10 @@ TEST_CASE("Remaster shaders compile under glslang and their varyings match", "[G
     }
     // vsPost, AO, AO blur, bloom down and up, shafts, composite, linear depth
     // and its debug view, the TAA resolve and its sharpen, the sky table's
-    // two passes, the luma sharpen, the canopy's sun-visibility pass, and the
-    // air pass's march, blur, mean and apply
-    CHECK(post == 19);
+    // two passes, the luma sharpen, the canopy's sun-visibility pass, the air
+    // pass's march, blur, mean and apply, and the reflections' tag readout,
+    // shares, trace, rough blur and composite
+    CHECK(post == 24);
 }
 
 TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a compiled program",
@@ -1213,8 +1214,9 @@ TEST_CASE("Post shaders are the pieces their table names", "[Graphics][Shaders][
     // EngineGL33_PostShaders.cpp, read the way the lighting lab reads it, gives
     // each program the engine compiles, under its override name. A row may
     // name pieces of the remastered prelude (the air pass pastes the
-    // LitConstants block, the terrain and clouds piece and the sky piece), so
-    // the names resolve over both families, as glsl_extract.py does.
+    // LitConstants block, the terrain and clouds piece and the sky piece, the
+    // reflections' trace the block and the sky piece), so the names resolve
+    // over both families, as glsl_extract.py does.
     const std::string source = ReadTextFile(Gl33Dir() / "EngineGL33_PostShaders.cpp");
     const size_t open = source.find("kPostShaders[] = {");
     REQUIRE(open != std::string::npos);

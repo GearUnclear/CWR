@@ -521,11 +521,14 @@ TEST_CASE("Air pass: off leaves every draw and the post pass as they were", "[re
     CHECK(update.find("parts.haze = post && _featureGates[rm::Feature::AirHaze].on;") != std::string::npos);
 
     // The bloom and the composite read the frame with the air applied only
-    // when the Air stage ran; otherwise the resolved frame, as before.
+    // when the Air stage ran; otherwise the frame the stages before it left
+    // (the resolved frame, or the reflections' output), as before. The air
+    // pass applies over that frame.
     const std::string post = ReadTextFile(Gl33Dir() / "EngineGL33_PostFX.cpp");
     REQUIRE_FALSE(post.empty());
-    CHECK(CountOf(post, "f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex") == 1);
-    CHECK(CountOf(post, "BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex);") == 1);
+    CHECK(CountOf(post, "f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor") == 1);
+    CHECK(CountOf(post, "BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor);") == 1);
+    CHECK(CountOf(air, "BindTex(0, f.frameColor);") == 1);
     CHECK(CountOf(post, "in.air = airFrame && (_airParts.haze || _airParts.valleyMist || _airParts.beams);") == 1);
     // With every air switch off the plan is the plan of before.
     PostFrameInputs in;

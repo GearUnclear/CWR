@@ -20,9 +20,11 @@
 //      contrast works against (for the sun, on the share of the scattering
 //      that sees the sun, so open ground toward the horizon gets no band);
 //   4. psPostAirApply, full resolution: haze and mist in closed form toward the
-//      sky behind each pixel, then the beams, into airOutTex. The bloom and the
-//      composite read airOutTex in place of colorTex; with the stage off they
-//      read colorTex as before, so "off" is the frame before the feature.
+//      sky behind each pixel, then the beams, over the frame the stages before
+//      it left (PostFrame::frameColor: the resolved colour, or the frame with
+//      the reflections when Ssr ran), into airOutTex. The bloom and the
+//      composite read airOutTex in place of that frame; with the stage off they
+//      read it as before, so "off" is the frame before the feature.
 // When the air pass draws beams the legacy shafts hold off (PlanPostStages).
 // With the haze on, the forward fog keeps only its view-distance edge
 // (UpdateAirMedium sets litHaze.x; the shaders' finishFragment).
@@ -328,7 +330,7 @@ void EngineGL33::PostAir(const PostFrame& f)
     SetInt(prog, "airMeanTex", 4);
     SetInt(prog, "depthTex", 5);
     SetInt(prog, "skyLut", kSkyLutUnit);
-    BindTex(0, p.colorTex);
+    BindTex(0, f.frameColor);
     BindTex(2, march ? p.airTex[0] : p.blackTex);
     BindTex(3, march ? p.airMistTex : p.blackTex);
     BindTex(4, beams ? p.airMeanTex : p.blackTex);

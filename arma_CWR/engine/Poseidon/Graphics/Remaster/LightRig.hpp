@@ -164,6 +164,14 @@ struct LightingTuning
     // kLampIntensityPerStart, kLowBeamPeak).
     float nightLamp = 1.0f;
     float nightSpot = 1.0f;
+    // Screen-space reflections (FeatureSet::ssr, ScreenReflections.hpp)
+    // sub-knobs: the share of the sea's light a reflection on water takes, as a
+    // multiple of the pass's estimate of the sky's share (its mean weight; 1.5
+    // also covers the share the sea program's waves add), and the ground's
+    // wetness (-1 = the weather: the rain density until a wetness state exists;
+    // 0..1 forces it).
+    float ssrWater = 1.5f;
+    float ssrWet = -1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.
@@ -176,7 +184,9 @@ struct LightingTuning
     // the surface albedo (kDebugViewAlbedo: the display-space colour the lit
     // shaders light, texture, tint and detail applied; with post=0 a shot of
     // it divides a lit shot into the light on each surface), 8 the air pass's
-    // in-scatter alone (PostStages.hpp kDebugViewAir).
+    // in-scatter alone (PostStages.hpp kDebugViewAir), 9 the reflections'
+    // surface tags and 10 the reflections alone (ScreenReflections.hpp
+    // kDebugViewSsrTags, kDebugViewSsrReflection).
     int debugView = 0;
 };
 

@@ -178,6 +178,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_canopy.cpp
     Graphics/test_air_medium.cpp
     Graphics/test_night_lights.cpp
+    Graphics/test_screen_reflections.cpp
     Graphics/test_jpg_import.cpp
     Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp

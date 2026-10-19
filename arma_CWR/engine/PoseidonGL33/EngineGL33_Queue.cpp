@@ -254,10 +254,19 @@ void EngineGL33::ApplyPassState(TextureGL33* tex, int level, const Poseidon::ren
     ctx.remasteredSea = SeaRouted();
 
     const Poseidon::render::RenderPassDescriptor d = Poseidon::render::BuildRenderPassDescriptor(spec, ctx);
+    // The screen-space reflections' surface tag of this draw (its stencil
+    // reference and masks; the state of before while the world writes no
+    // tags). The land and the sea's unrouted faces share the detail family:
+    // the land carries the detail texture.
+    _ssrStencil = Poseidon::remaster::SsrStencilForDraw(d, IsLandLayer(spec), SsrTagging());
     const PipelineVertexInput previousVertexInput = _pipelineVertexInput;
     _pipelineVertexInput = vertexInput;
     ApplyPipeline(d);
     _pipelineVertexInput = previousVertexInput;
+    // ApplyPipeline skips an unchanged descriptor; the tag can change without
+    // it (land and sea, a road after the terrain).
+    if (!_ssrStencilValid || _ssrStencilApplied != _ssrStencil)
+        ApplyDepthMode(_currentDepthMode);
 
     // IsTexBound is the sole gate: it reflects OnTexDeleted, so deleted handles
     // that the driver recycles for new textures are never silently skipped.
@@ -358,7 +367,13 @@ void EngineGL33::BeginPass(PassId passId)
         if (_worldEffectsOn && !_worldPassOpen)
             GpuMark(Poseidon::gpu::Mark::WorldBegin);
         if (_worldEffectsOn)
+        {
             _worldPassOpen = true;
+            // The world's fog for the reflections' trace (PostSsr): from here on
+            // the frame state's fog flag follows each draw.
+            _ssrWorldFog[0] = _frameState.fogParams[0];
+            _ssrWorldFog[1] = _frameState.fogParams[1];
+        }
         UpdateRemasterPrograms();
         // Bind the (previous frame's) shadow depth map + light-VP for the lit
         // shaders.  No-op until a depth pass has run with shadow maps enabled.

@@ -174,11 +174,15 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
                 return Off(why, scale);
             if (in.waterShare < 0.0f && in.wetShare < 0.0f)
                 return On("screen share not measured", scale);
+            // The ground reflects only while it is wet: the knob's wetness
+            // when it forces one, else the weather's.
+            const bool wet = (t.ssrWet >= 0.0f ? t.ssrWet : GateWetness(in)) > kGateWetMin;
             const float share =
-                (in.waterShare > 0.0f ? in.waterShare : 0.0f) + (in.wetShare > 0.0f ? in.wetShare : 0.0f);
+                (in.waterShare > 0.0f ? in.waterShare : 0.0f) + (wet && in.wetShare > 0.0f ? in.wetShare : 0.0f);
             if (share <= kGateSsrMinShare)
-                return Off("water and wet below 1% of the screen", scale);
-            return On("water or wet above 1% of the screen", scale);
+                return Off(wet ? "water and wet ground below 1% of the screen" : "water below 1% of the screen, dry",
+                           scale);
+            return On("water or wet ground above 1% of the screen", scale);
         }
 
         case Feature::WetWeather:

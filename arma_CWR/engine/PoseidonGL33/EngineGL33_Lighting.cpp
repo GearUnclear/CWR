@@ -635,6 +635,14 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
     in.nightVision = _nightVision;
     in.skyTablesReady = SkyTablesReady();
     in.skyDensityReady = SkyDensityReady();
+    // The reflections' screen shares, read back from a recent frame's tags
+    // (EngineGL33_PostSsr.cpp); older than a few frames they count as not
+    // measured.
+    if (_ssr.shareValid && GetFrameCounter() - _ssr.shareFrame <= static_cast<std::uint32_t>(rm::kSsrShareMaxAge))
+    {
+        in.waterShare = _ssr.waterShare;
+        in.wetShare = _ssr.groundShare;
+    }
     const LightList& lights = GScene->ActiveLights();
     for (int i = 0; i < lights.Size(); i++)
     {
@@ -709,6 +717,10 @@ void EngineGL33::UploadLitFrameConstants()
     // shadow map from the key (RemasterMoonKey).
     const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
     const rm::KeyLight key = rm::ComputeKeyLight(in, rig, gatesNow ? rm::MoonKeyShare(_featureGates) : 0.0f);
+    // This frame's world passes write the reflections' surface tags
+    // (ApplyPassState); the post pass reads them out.
+    if (SsrTagging())
+        _ssrTagFrame = GetFrameCounter();
 
     // The tiled light list: built once per frame while its gate is on, and
     // then read by every draw of the world's passes instead of the draw's own

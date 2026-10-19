@@ -314,8 +314,8 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
     // Every knob with a parent sits under a landed feature switch, in its
     // track's group: TAA's three, the sky table's three (A7, test_atmosphere.cpp),
     // texsharp's two (B11), the sun shadows' three (B1, below), the sea's three
-    // (B5), the beams' contrast (B8, below) and the night's lamp and headlight
-    // strengths (B3, test_night_lights.cpp).
+    // (B5), the beams' contrast (B8, below), the night's lamp and headlight
+    // strengths (B3, test_night_lights.cpp) and the reflections' two (B6).
     int children = 0;
     int taaChildren = 0;
     for (int i = 0; i < LightingKeyCount(); ++i)
@@ -327,7 +327,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         const std::string_view parent(k.parent);
         CHECK((parent == "taa" || parent == "atmosphere" || parent == "terrainDetail" || parent == "sharpen" ||
                parent == "softShadows" || parent == "treeShadows" || parent == "seaWaves" || parent == "airBeams" ||
-               parent == "nightLights"));
+               parent == "nightLights" || parent == "ssr"));
         REQUIRE(FindFeature(k.parent) != nullptr);
         CHECK(FindFeature(k.parent)->landed);
         CHECK(std::string_view(k.group) == FindFeature(k.parent)->track);
@@ -335,7 +335,7 @@ TEST_CASE("Feature switches: TAA has landed, with its sub-knobs under its switch
         ++children;
     }
     CHECK(taaChildren == 3);
-    CHECK(children == 17);
+    CHECK(children == 19);
 }
 
 TEST_CASE("Feature switches: the terrain detail and the luma sharpen have landed, each with its strength",
@@ -551,11 +551,11 @@ TEST_CASE("Feature gates: combat light needs a combat light within 60 m, its sha
     CHECK_FALSE(G(in, Feature::CombatShadows, Apply("remastered,combatLights=0")).on);
 }
 
-TEST_CASE("Feature gates: SSR runs at half resolution while water or wet shows on 1% of the screen",
-          "[remaster][FeatureGates]")
+TEST_CASE("Feature gates: SSR runs at half resolution while water or wet ground shows on 1% of the screen",
+          "[remaster][FeatureGates][ssr]")
 {
     GateInputs in = Noon();
-    // Until B6's readout measures the shares, SSR stays on.
+    // Until the tag readout measures the shares, SSR stays on.
     CHECK(G(in, Feature::Ssr).on);
     CHECK(G(in, Feature::Ssr).scale == 0.5f);
     in.waterShare = 0.004f;
@@ -563,9 +563,23 @@ TEST_CASE("Feature gates: SSR runs at half resolution while water or wet shows o
     CHECK_FALSE(G(in, Feature::Ssr).on);
     in.waterShare = 0.03f;
     CHECK(G(in, Feature::Ssr).on);
+    // The ground the rain wets counts only while it is wet: dry roads and
+    // fields reflect nothing.
     in.waterShare = 0.0f;
-    in.wetShare = 0.02f;
+    in.wetShare = 0.6f;
+    CHECK_FALSE(G(in, Feature::Ssr).on);
+    CHECK(std::string_view(G(in, Feature::Ssr).reason) == "water below 1% of the screen, dry");
+    in.rainDensity = 0.5f; // no wetness state yet: the rain stands in
     CHECK(G(in, Feature::Ssr).on);
+    in.wetness = 0.01f; // a wetness state wins over the rain
+    CHECK_FALSE(G(in, Feature::Ssr).on);
+    // The ssrWet knob forces the ground's wetness either way.
+    CHECK(G(in, Feature::Ssr, Apply("remastered,ssrWet=0.8")).on);
+    in.wetness = 1.0f;
+    CHECK_FALSE(G(in, Feature::Ssr, Apply("remastered,ssrWet=0")).on);
+    in.wetShare = 0.004f; // wet, but too little of it on screen
+    CHECK_FALSE(G(in, Feature::Ssr).on);
+    in.wetShare = 0.6f;
     in.optics = true;
     CHECK_FALSE(G(in, Feature::Ssr).on);
 }
@@ -758,7 +772,8 @@ TEST_CASE("Feature gates: the state line names every switch and never holds a ';
 }
 
 TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the sky table, texsharp, the sun shadows, "
-          "shade, the night, the sea, the air pass, the canopy shadows and the clouds have landed, nothing else has",
+          "shade, the night, the sea, the reflections, the air pass, the canopy shadows and the clouds have landed, "
+          "nothing else has",
           "[remaster][FeatureSwitches]")
 {
     // A4 lands drawGrouping and hillCull (pixel-exact, both always on unless
@@ -769,10 +784,10 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     // depth pass) and softShadows (the world pass), B2 lowSunRig and
     // crownCanopy (the world pass's lighting), B3 nightLights and stars (the
     // world pass) and moonShadows (the shadow depth pass), B5 seaWaves (its
-    // draws are in the world pass's ground section), B8 the air pass's three
-    // (its post stage), B9 canopyShadows (the canopy's sun-visibility map
-    // build), B10 litClouds (the sky section) and skyCloudShadows (the world
-    // section: one density tap per lit fragment).
+    // draws are in the world pass's ground section), B6 ssr (its post stage),
+    // B8 the air pass's three (its post stage), B9 canopyShadows (the canopy's
+    // sun-visibility map build), B10 litClouds (the sky section) and
+    // skyCloudShadows (the world section: one density tap per lit fragment).
     std::set<std::string> sections;
     for (int i = 0; i < Poseidon::gpu::kSectionCount; ++i)
         sections.insert(Poseidon::gpu::SectionName(static_cast<Poseidon::gpu::Section>(i)));
@@ -790,11 +805,12 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
         const bool night =
             info.id == Feature::NightLights || info.id == Feature::MoonShadows || info.id == Feature::Stars;
         const bool sea = info.id == Feature::SeaWaves;
+        const bool ssr = info.id == Feature::Ssr;
         const bool air = info.id == Feature::AirBeams || info.id == Feature::AirHaze || info.id == Feature::ValleyMist;
         const bool canopy = info.id == Feature::CanopyShadows;
         const bool clouds = info.id == Feature::LitClouds || info.id == Feature::SkyCloudShadows;
         CHECK(info.landed == (perf || taa || lightList || atmosphere || texsharp || shadows || shade || night || sea ||
-                              air || canopy || clouds));
+                              ssr || air || canopy || clouds));
         if (info.landed)
         {
             CHECK(std::string_view(info.step) == (perf         ? "A4"
@@ -805,6 +821,7 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
                                                   : shade      ? "B2"
                                                   : night      ? "B3"
                                                   : sea        ? "B5"
+                                                  : ssr        ? "B6"
                                                   : air        ? "B8"
                                                   : canopy     ? "B9"
                                                   : clouds     ? "B10"
@@ -837,7 +854,9 @@ TEST_CASE("Feature switches: the frame-cost switches, TAA, the light list, the s
     CHECK(s.find(" nightLights=1:off:day ") != std::string::npos);
     CHECK(s.find(" moonShadows=1:off:day ") != std::string::npos);
     CHECK(s.find(" stars=1:off:day ") != std::string::npos);
-    CHECK(s.find("landed=21/26") != std::string::npos);
+    CHECK(s.find(" ssr=1:on@0.5:screen-share-not-measured ") != std::string::npos);
+    CHECK(s.find("landed=22/26") != std::string::npos);
+    CHECK(std::string_view(GetFeatureInfo(Feature::Ssr).gpuSection) == "ssr");
     CHECK(std::string_view(GetFeatureInfo(Feature::CanopyShadows).gpuSection) == "canopy");
     CHECK(std::string_view(GetFeatureInfo(Feature::LitClouds).gpuSection) == "sky");
     CHECK(std::string_view(GetFeatureInfo(Feature::SkyCloudShadows).gpuSection) == "world");

@@ -9,15 +9,20 @@
 //   - Resolve: the multisampled frame target (colour with the ambient share
 //     in alpha, depth and stencil) into single-sample textures;
 //   - LinearDepth: half-resolution view depth in metres, for the stages that
-//     trace or upsample at half resolution. Only the linear depth debug view
-//     (debug=5) reads it so far, so it runs only then;
+//     trace or upsample at half resolution: the reflections, the air pass
+//     and the linear depth debug view (debug=5), so it runs only with them;
+//   - TagReadout and Ssr (EngineGL33_PostSsr.cpp): the screen-space
+//     reflections' surface tags out of the resolved stencil, and the
+//     reflections traced at half resolution and laid on the frame; the
+//     stages after them read that frame (PostFrame::frameColor);
 //   - Ao: ambient occlusion (Alchemy/SAO style) at half resolution from the
 //     depth buffer, blurred with a depth-aware separable filter;
 //   - Air (EngineGL33_PostAir.cpp, B8): sun beams, headlight cones, the aerial
 //     haze and the valley mist, marched at half resolution on the linear depth
-//     and applied at full resolution into airOutTex, which the bloom and the
-//     composite then read in place of the resolved colour. Its beams replace
-//     the shafts;
+//     and applied at full resolution over the frame the stages before it
+//     left (PostFrame::frameColor) into airOutTex, which the bloom and the
+//     composite then read in place of that frame. Its beams replace the
+//     shafts;
 //   - Bloom: a five-level bloom chain from the bright parts of the image;
 //   - Shafts: a radial blur of the visible sky toward the sun;
 //   - Composite: back into the frame target. Occlusion darkens only the sky
@@ -37,8 +42,8 @@
 //     (contrast-adaptive, brightness only, B11). When Sharpen runs the
 //     composite draws into the TAA input instead of the frame target;
 //   - DebugView: a diagnostic view of a post buffer over the frame.
-// The other stages of the list (tag readout, reflections, combat scatter) land
-// with their features. The HUD then draws on top, untouched.
+// The other stage of the list (combat scatter) lands with its feature. The
+// HUD then draws on top, untouched.
 //
 // The shaders live in EngineGL33_PostShaders.cpp, which has no GL code, so the
 // unit tests compile the sources the engine builds (PostShaderSource in
@@ -206,6 +211,7 @@ void EngineGL33::DestroyPostTargets()
     delTex(p.airOutTex);
     p.w = p.h = 0;
     _taa.history.exists = false; // the TAA history went with its targets
+    DestroySsrTargets();
 }
 
 void EngineGL33::DestroyPostPrograms()
@@ -227,6 +233,7 @@ void EngineGL33::DestroyPostPrograms()
     p.vao = 0;
     p.programsTried = false;
     p.airUnavailable = false;
+    DestroySsrPrograms();
 }
 
 bool EngineGL33::EnsurePostResources(int w, int h)
@@ -460,6 +467,11 @@ void EngineGL33::EndWorldScene()
     const bool taaFrame = _taa.frameOn && _taa.frame == GetFrameCounter();
     _taa.frameOn = false;
     SetTaaJitterState({}, 0.0f);
+    // ... and without the reflections' surface tags: the stencil state of
+    // before (every bit written), also for the resolve below.
+    _ssrStencil = {};
+    if (_glContext && _ssrStencilValid && _ssrStencilApplied != _ssrStencil)
+        ApplyDepthMode(_currentDepthMode);
     if (!worldDrawn || !_glContext || !_lightingActive || !_lighting.postEffects || !SSAAActive() ||
         _portraitTargetSize)
         return;
@@ -491,6 +503,16 @@ void EngineGL33::EndWorldScene()
     const bool airFrame = _airFrame == GetFrameCounter() && !_post.airUnavailable;
     in.air = airFrame && (_airParts.haze || _airParts.valleyMist || _airParts.beams);
     in.airBeams = airFrame && _airParts.beams;
+    // The reflections: this frame's world passes wrote the surface tags, and
+    // the gate (water or wet ground on screen) is on. With the gate off the
+    // tags are read out only every few frames, to keep the gate's screen
+    // shares fresh (the reflections' diagnostic views read them every frame).
+    in.ssrTags = _ssrTagFrame == GetFrameCounter() && rm::FeatureOn(_lighting.features, rm::Feature::Ssr);
+    in.ssr = in.ssrTags && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+             _featureGates[rm::Feature::Ssr].on;
+    in.ssrTags =
+        in.ssrTags && (in.ssr || GetFrameCounter() % static_cast<std::uint32_t>(rm::kSsrShareProbeFrames) == 0 ||
+                       in.debugView == rm::kDebugViewSsrTags || in.debugView == rm::kDebugViewSsrReflection);
     f.plan = rm::PlanPostStages(in);
     if (f.plan.Empty())
         return; // nothing to add: leave the frame as drawn
@@ -505,6 +527,7 @@ void EngineGL33::EndWorldScene()
         return;
     f.hw = (f.w + 1) / 2;
     f.hh = (f.h + 1) / 2;
+    f.frameColor = _post.colorTex;
 
     // The stages in list order, each followed by its GPU mark. The resolve
     // blits under the state the world left, as it always has; the fullscreen
@@ -523,7 +546,7 @@ void EngineGL33::EndWorldScene()
     EndPostFullscreen();
 }
 
-void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
+void EngineGL33::RunPostStage(rm::PostStage stage, PostFrame& f)
 {
     switch (stage)
     {
@@ -533,8 +556,14 @@ void EngineGL33::RunPostStage(rm::PostStage stage, const PostFrame& f)
         case rm::PostStage::LinearDepth:
             PostLinearDepth(f);
             break;
+        case rm::PostStage::TagReadout:
+            PostTagReadout(f);
+            break;
         case rm::PostStage::Ao:
             PostAo(f);
+            break;
+        case rm::PostStage::Ssr:
+            PostSsr(f);
             break;
         case rm::PostStage::Air:
             PostAir(f);
@@ -635,8 +664,9 @@ void EngineGL33::PostBloom(const PostFrame& f)
     for (int i = 0; i < PostTargets::kBloomLevels; ++i)
     {
         const bool first = i == 0;
-        // The frame with the air applied when the air pass ran.
-        const GLuint frame = f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex;
+        // The frame with the air applied when the air pass ran, else the frame
+        // the stages before it left (PostFrame::frameColor).
+        const GLuint frame = f.plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor;
         const GLuint src = first ? frame : p.bloomTex[i - 1];
         const int sw = first ? f.w : p.bloomW[i - 1];
         const int sh = first ? f.h : p.bloomH[i - 1];
@@ -664,7 +694,7 @@ void EngineGL33::PostShafts(const PostFrame& f)
     SetInt(p.progShafts, "depthTex", 0);
     SetInt(p.progShafts, "colorTex", 2);
     BindTex(0, p.depthTex);
-    BindTex(2, p.colorTex);
+    BindTex(2, f.frameColor);
     Set4(p.progShafts, "sunScreen", f.sunU, f.sunV, f.shaftWeight, static_cast<float>(f.w) / static_cast<float>(f.h));
     SetFloat(p.progShafts, "noiseShift", f.noiseShift);
     DrawTo(p.shaftFbo, f.hw, f.hh);
@@ -683,7 +713,7 @@ void EngineGL33::PostComposite(const PostFrame& f)
     SetInt(p.progComposite, "aoTex", 2);
     SetInt(p.progComposite, "bloomTex", 3);
     SetInt(p.progComposite, "shaftTex", 4);
-    BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : p.colorTex);
+    BindTex(0, plan.Runs(rm::PostStage::Air) ? p.airOutTex : f.frameColor);
     BindTex(2, plan.Runs(rm::PostStage::Ao) ? p.aoTex[0] : p.whiteTex);
     BindTex(3, plan.Runs(rm::PostStage::Bloom) ? p.bloomTex[0] : p.blackTex);
     BindTex(4, plan.Runs(rm::PostStage::Shafts) ? p.shaftTex : p.blackTex);

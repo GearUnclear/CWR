@@ -149,6 +149,11 @@ As built in A1 (corrections to the bullets above):
   (`temporal`) with `parent` `taa`. B11 added `detailStrength` 1.5 under `terrainDetail` and
   `sharpenStrength` 0.3 (the luma sharpen's CAS strength, not in the table above) under
   `sharpen`, both in the `texsharp` group.
+- As built in B6: `ssr` has the sub-knobs `ssrWater` 1.5 (not 0.6: it scales the pass's estimate
+  of the sea program's own sky share, which the reflection takes over, not a blend weight over the
+  frame) and `ssrWet` -1 (the rain density until B7's wetness state; 0 to 1 forces it). The debug
+  views 9 (the surface tags) and 10 (the reflection alone) are `debug` values, not switches
+  (7 and 8 on the lane; B2's albedo and B8's air views took those numbers first).
 - `triFeatureState` answers `mode=.. gates=.. computed=.. frame=.. sun=.. night=.. sky=.. rain=..
   fog=.. lights=.. landed=n/26 | <key>=<value>:<on|off>[@<scale>]:<reason>[:inert] ...` (spaces,
   never `;`, so it rides in the UDCAP lines as `feat=`).
@@ -229,6 +234,13 @@ As built in A1 (`FeatureGates.{hpp,cpp}`, `EngineGL33::UpdateFeatureGates`):
   frame-relative buffer (5 B9). The shadows fade in from 2 to 4 deg and out from 21 to 25 deg of
   sun and in from a sky-through of 0.5 to 0.6 (`CanopyStrength`), so the gate's edges switch
   nothing on screen; the gate is on exactly where that strength is above 0.
+- As built in B6: the water and wet shares are measured. While the switch is on the world draws
+  write their surface tags; the TagReadout stage samples them on a 32 x 18 grid of 6 x 6 taps and
+  reads the grid back through a ring of three pixel-pack buffers with fences, never waited on, a
+  few frames later; a share older than 30 frames counts as "not measured" (the gate then stays on).
+  While the gate is off the readout runs every 8th frame only. The ground counts only while it is
+  wet (`ssrWet` when it forces a value, else the wetness stand-in), so a dry town or field gates
+  SSR off ("water below 1% of the screen, dry"); the scale stays 0.5.
 
 As built in B8: "morning" for the valley mist is an eastern sun between -4 and 10 deg
 (`kGateMorningMaxSunDeg` 10, was 38), and the mist's density is full from 1 to 6 deg and gone by
@@ -688,6 +700,19 @@ of `Bloom` and `Composite`; with the stage off they read `colorTex` as before. F
 stage and one GPU section (`air`): the march (two targets), the blur twice, the beams' mean (beams
 only) and the apply. The march takes the TAA sequence's per-frame shift (`PostFrame::noiseShift`),
 so the TAA history is its temporal accumulation.
+
+As built in B6: `TagReadout` and `Ssr` landed (`Ssr` reads the linear depth, which now runs with
+it). The world's passes write the tags (`PostFrameInputs::ssrTags`, the switch on in the remastered
+world pass), which ask for the pass by themselves: the readout runs on every frame the gate is on
+and on every 8th frame while it is off (it keeps the gate's shares fresh), and only when the frame
+kept its world depth. `Ssr` runs when the gate is on and the frame drew no screen overlay (or for
+the debug views 9 and 10). It writes the frame with the reflections into its own RGBA8 target, and
+the stages after it read that through `PostFrame::frameColor`: the air pass applies its haze,
+mist and beams over it, the shafts read it, and the bloom and the composite read it, or the air
+pass's output when that ran; the resolved frame stays as the world drew it, for the TAA particle
+mask. Its inputs sit on `kPostUnits` plus the sky table on unit 8 (the trace calls the sky piece's
+`skyReflection`), which holds the same table outside the post pass. No LitConstants slot and no
+world texture unit.
 
 ### 3.7 Porting method
 
@@ -1884,6 +1909,92 @@ gitignored; light gate).**
 - **Tests**: tag code table (bits do not overlap the 0x1F projected-shadow range); march hit
   logic as a CPU mirror on a synthetic depth row; glslang (`psPostSsr`, tag shader).
 - **Effort**: 5 days.
+
+**Result (2026-10-18, uncommitted change on e91b3f3 in the scratch copy `gr-B6`, a parallel lane;
+evidence in `tmp/integration/B6/` of the graphics-remaster worktree, gitignored; light gate).**
+
+- Built: `Graphics/Remaster/ScreenReflections.{hpp,cpp}` (pure: the tag code table and each draw's
+  stencil state, the march as a CPU mirror on a depth row, the edge fade, the water composite, the
+  rough blur as a CPU mirror); `EngineGL33_PostSsr.cpp` (the TagReadout and Ssr stages, their
+  targets, the share readback); `EngineGL33_PostSsrShaders.cpp` (`psPostSsrTag`, `psPostSsrShare`,
+  `psPostSsrTrace`, `psPostSsrBlur`, `psPostSsrComposite`, five `kPostShaders` rows; the trace pastes
+  the LitConstants block and the sky piece); `GLDepthStencilState.hpp` `StencilTag` (reference, write
+  mask, shadow compare mask) on every depth-stencil bundle; the tag per draw from the descriptor in
+  `ApplyPassState` (`SsrStencilForDraw`); stencil clears write every bit first.
+- Correction, tags: bits 7 and 6 are the surface (terrain 0x40, water 0x80, road 0xC0), bit 5 the
+  cover flag of a blended draw that writes depth (a vehicle's windows, glass, signs, bush cards: no
+  reflection under them; a ray that meets one lays it over what it finds beyond as much as it hides,
+  see the review round below), bits 4 to 0 the shadow counter. No vehicle or glossy class: paint reflections are
+  dropped (as above), so no object kind is needed (B7 adds the class field). An opaque draw clears
+  the tag, a draw without a depth write keeps it (it writes the low bits only).
+- Correction, water: no forward-shader change. The trace recomputes the sea program's sky in the
+  reflected direction (`skyReflection`, its fog tint and far fade, the mean sky weight `litWater0.z`),
+  estimates that sky's share of the pixel's light, and where a ray meets something swaps that share
+  for the reflection, per channel: lin * ((1 - x) + x R / S), x = share * `ssrWater` (1.5, capped at
+  0.95). Rays that see sky or leave the frame leave the sea as drawn. B5's wave normal is not rebuilt
+  in the post pass; the prototype's ripples move the mirror image at 0.35 of its slopes (its calm
+  setting; full slopes smeared the hero hill into a brown band).
+- Correction, resolution and history: the trace runs at half resolution over A3's linear depth with no
+  history of its own (under TAA the march start turns per frame and A5's history averages it), and a
+  rough blur was added: a horizontal gather over each texel's cone width at what it reflects (up to 24
+  half-resolution texels, same surface, similar depth, taps of a narrower spread weighted down so
+  puddle edges stay sharp). Without it a rough wet reflection drew a hard-edged box under a vehicle.
+  A ray that leaves the frame takes the frame's open sky above where it points, as a ray that ends on
+  open sky does (a pale patch where the two kinds met).
+- Off equals before (pinned clock and fixed step, the same place in the sequence on both builds): the
+  hero 8,326 pixels over 2 levels against the base build's own repeat of 184,007; the sunset sea 1,379
+  (max 9) against the base shot of the same sea state; the dry low-sun set and dry noon within their
+  repeat (30,298 and 129,868 against 30,095 and 120,999). Classic: 6 and 3,590 pixels.
+- On: the hero mirrors the boat (its reflection 87, 94, 102 to 52, 51, 54) and the hill (that band
+  99, 109, 116 to 91, 88, 83); the sunset sea's mean is unchanged (no lilac wash); the wet ground's
+  mean darkens by 3 to 19 levels, with puddles mirroring the houses and lamp posts; dry noon is gated
+  off. Motion (the sea clock at 1/30 s per frame): frame-to-frame change max/median 1.16 on, 1.29
+  off.
+- Cost (a single reading, three other lanes' games running): the post section on minus off +0.35 to
+  +0.95 ms on the stills (4060 Ti, 1080p, 4x MSAA), the ssr section 0.32 to 1.68 ms in the timing
+  rounds, frame times 8 to 28 ms there. Unmeasured on a quiet GPU and on a 3060.
+- Review round (three defects the reviewer found, fixed in the same scratch copy):
+  - Fog: the trace took the fog flag from `_frameState.fogParams[2]`, which `SetShaderFogEnabled`
+    rewrites per draw (shadows, lights, alpha-fog and unfogged draws leave it 0), so fully fogged
+    ground darkened (rain field: 169, 169, 162 to 158, 158, 152) and fogged trees showed as pale
+    ghosts. `BeginPass` now copies the world's fog start and range (`_ssrWorldFog`) and the trace
+    uses the world vertex shader's formula with no flag. Fog-coloured pixels now change no more than
+    two runs' off shots differ (rain field 13,275 of 76,526 against a noise floor of 15,387, mean
+    +0.01 level; it was 44,142 at -4.56).
+  - Covered panels: rays passed every blended depth writer, and the covered region of the jeep is
+    its canvas's rear window, so its wet-road reflection had a pale box of sky. The march now keeps
+    the first panel it meets and goes on; the panel lies over what the ray found beyond by its
+    opacity: 1 when the first uncovered texel after it stands in front of the ray (the panel is set
+    in something solid: the ray would meet the vehicle's inside), 1 when the march ends on it,
+    otherwise from how far its colour is from that texel, the background next to it (0.04 to 0.12
+    in the largest channel), so a card's transparent parts still let rays through. No blended bush
+    card exists in the Abel or Eden views shot: the research's clutter bush is alpha-tested
+    (opaque) here, so the bush rule rests on the tests.
+  - Dot lattice: a regular pattern of dark dots on wet roads followed the march start's interleaved
+    noise ((3, 1) half-resolution texels, where that noise repeats), so it came from the trace, not
+    the gathers: a grazing ray met its own road, which the half-resolution depth's nearest samples
+    put just in front of it. A candidate within 0.03 m + 0.004 m per metre of depth of the start's
+    plane (the depth normal) is now that surface (`SsrSelfTolerance`). On the open road between the
+    puddle and the jeep the reflection view's dark dots fell from 177 to 24 (the on frame has 10,
+    the off frame's own road texture 20), with no lattice at 1:1 or in 16 frames of motion. The two gathers the reviewer named were also made to sample every texel they span: the
+    streak's taps stand no farther apart than the mip level's footprint (`SsrStreakTaps`, up to 12
+    a side; the ground's streak is as before, water at a grazing angle gets more taps), and the
+    rough blur takes a tap per texel of its spread (`SsrBlurTaps`, up to 24 a side).
+- Landed on B3 (06c7e4d) by a three-way apply (15 files in conflict). B2's albedo and B8's air had
+  taken debug views 7 and 8, so the reflections' views are 9 and 10, and the trace reads a
+  reflections-alone flag (`ssrFrame.y`) instead of the view's number; the LitConstants block keeps
+  B8's name `kLitConstantsBlockGLSL`; both stage rows read the linear depth (`Ssr`, `Air`); the
+  sub-knobs follow B8's and B3's (19), landed=22/26, 24 post shaders, 3 linear depth readers.
+  Past the conflicts: the air pass applies over `PostFrame::frameColor` (the frame with the
+  reflections when `Ssr` ran), the bloom and the composite read the air pass's output when it ran
+  and that frame otherwise, and the shafts read that frame; the trace declares the lit clouds'
+  names B10's sky piece now uses (`skyDensity`, stand-ins for `skyCloudDensity` and `skyDomeUv`).
+  Merged gate: build clean, no new clang-format findings, unit tags 701/701 (8 item 3 plus the
+  landed lanes' tags and `[ssr]`, `[build-descriptor]`, `[SpecSplit]`), smoke_abel 1/1 (KHR_debug
+  ids 131154, 131169 and 131218 only). A landing check at the smoke view with the ground forced
+  wet (`ssrWet=1`) ran both stages in one frame (ssr 0.54 ms, air 0.70 ms, one reading): the
+  lower third of the frame keeps the reflections with the air on and off (105, 98, 96 both,
+  against 109, 98, 90 with `ssr=0`), and the upper third takes the haze.
 
 ### B7. materials (wet weather, puddles, lamp streaks, material classes)
 

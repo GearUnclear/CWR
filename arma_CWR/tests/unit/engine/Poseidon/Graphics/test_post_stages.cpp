@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Core/GpuTimings.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -109,12 +110,15 @@ TEST_CASE("Post stages: the list of plan 3.6, each with its own GPU mark and sec
     CHECK(gpu::kMarkCount <= 32);
     // A3 lands the passes that existed (resolve, AO, bloom, shafts, composite)
     // plus the linear depth and the debug view that shows it; A5 the TAA
-    // resolve and its sharpen; B8 the air pass.
-    CHECK(landed == 10);
+    // resolve and its sharpen; B6 the tag readout and the reflections; B8 the
+    // air pass.
+    CHECK(landed == 12);
     CHECK(GetPostStageInfo(PostStage::Temporal).landed);
     CHECK(GetPostStageInfo(PostStage::Sharpen).landed);
+    CHECK(GetPostStageInfo(PostStage::TagReadout).landed);
+    CHECK(GetPostStageInfo(PostStage::Ssr).landed);
     CHECK(GetPostStageInfo(PostStage::Air).landed);
-    for (PostStage s : {PostStage::TagReadout, PostStage::Ssr, PostStage::CombatScatter})
+    for (PostStage s : {PostStage::CombatScatter})
     {
         CAPTURE(GetPostStageInfo(s).name);
         CHECK_FALSE(GetPostStageInfo(s).landed);
@@ -317,8 +321,8 @@ TEST_CASE("Post stages: the luma sharpen reads the composite and writes the fram
 
 TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[Graphics][remaster][PostStages]")
 {
-    // The debug view and the air pass (B8) read it; the stages that land with
-    // a half-resolution pass set readsLinearDepth.
+    // Its readers: the debug view, the reflections (B6) and the air pass (B8);
+    // the stages that land with a half-resolution pass set readsLinearDepth.
     int readers = 0;
     for (int i = 0; i < kPostStageCount; ++i)
     {
@@ -330,14 +334,16 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
             ++readers;
         }
     }
-    CHECK(readers == 2);
+    CHECK(readers == 3);
     CHECK(GetPostStageInfo(PostStage::DebugView).readsLinearDepth);
+    CHECK(GetPostStageInfo(PostStage::Ssr).readsLinearDepth);
     CHECK(GetPostStageInfo(PostStage::Air).readsLinearDepth);
 
     PostFrameInputs in = Shipped();
     // 6 is the forward shaders' light-tile view (A6) and 7 their albedo view
-    // (B2): no post stage of their own.
-    for (int view = 0; view <= kDebugViewAir; ++view)
+    // (B2): no post stage of their own; 8 is the air pass's (B8), which needs
+    // its switches, 9 and 10 the reflections' (B6), which need the tags.
+    for (int view = 0; view <= kDebugViewSsrReflection; ++view)
     {
         CAPTURE(view);
         in.debugView = view;
@@ -348,15 +354,80 @@ TEST_CASE("Post stages: the linear depth runs exactly when a stage reads it", "[
         CHECK((plan.runs & ~Mask({PostStage::LinearDepth, PostStage::DebugView})) ==
               Mask({PostStage::Resolve, PostStage::Ao, PostStage::Bloom, PostStage::Shafts, PostStage::Composite}));
     }
+    // With the tags written and the reflections' gate on, the reflections
+    // bring the linear depth.
+    in.debugView = 0;
+    in.ssrTags = true;
+    in.ssr = true;
+    CHECK(PlanPostStages(in).Runs(PostStage::LinearDepth));
     // The registry offers the view (the overlay's combo, triSetLighting debug=5),
-    // the light tiles after it (debug=6), B2's albedo view (debug=7) and the air
-    // pass's in-scatter last (debug=8, B8).
+    // the light tiles after it (debug=6), B2's albedo view (debug=7), the air
+    // pass's in-scatter (debug=8, B8) and the reflections' two last (debug=9
+    // and 10, B6).
     const LightingKey* debug = FindLightingKey("debug");
     REQUIRE(debug != nullptr);
     CHECK(debug->maxValue >= static_cast<float>(kDebugViewLinearDepth));
     CHECK(kDebugViewAlbedo == 7);
     CHECK(kDebugViewAir == kDebugViewAlbedo + 1);
-    CHECK(debug->maxValue == static_cast<float>(kDebugViewAir));
+    CHECK(kDebugViewSsrTags == kDebugViewAir + 1);
+    CHECK(kDebugViewSsrReflection == kDebugViewSsrTags + 1);
+    CHECK(debug->maxValue == static_cast<float>(kDebugViewSsrReflection));
+}
+
+TEST_CASE("Post stages: the reflections read the tags out whenever they were written, and trace when gated on",
+          "[Graphics][remaster][PostStages][ssr]")
+{
+    // Off (the switch: no tags): the plan of before, which is what makes the
+    // switch's "off" the look before B6.
+    PostFrameInputs in = Shipped();
+    const std::uint32_t before = PlanPostStages(in).runs;
+    in.ssr = true; // a gate without tags cannot run anything
+    CHECK(PlanPostStages(in).runs == before);
+
+    // Tags written, gate off (dry, no water on screen): the readout alone
+    // measures the shares, so the gate can open again; nothing else changes.
+    in.ssr = false;
+    in.ssrTags = true;
+    PostStagePlan plan = PlanPostStages(in);
+    CHECK(plan.runs == (before | Mask({PostStage::TagReadout})));
+    CHECK(plan.aoStrength == LightingTuning{}.ambientOcclusion);
+    CHECK(plan.bloomStrength == LightingTuning{}.bloom);
+
+    // Gate on: the trace, with the linear depth it marches.
+    in.ssr = true;
+    plan = PlanPostStages(in);
+    CHECK(plan.runs == (before | Mask({PostStage::TagReadout, PostStage::LinearDepth, PostStage::Ssr})));
+    // Before bloom, so reflected highlights bloom; the readout before both.
+    CHECK(static_cast<int>(PostStage::Ssr) < static_cast<int>(PostStage::Bloom));
+    CHECK(static_cast<int>(PostStage::TagReadout) < static_cast<int>(PostStage::Ssr));
+
+    // The tags ask for the pass on their own (the readout keeps the gate fed).
+    PostFrameInputs bare;
+    bare.ssrTags = true;
+    CHECK(PlanPostStages(bare).runs == Mask({PostStage::Resolve, PostStage::TagReadout, PostStage::Composite}));
+
+    // A vehicle interior: no world depth, no readout and no trace. Optics: the
+    // readout, no trace.
+    in.worldDepth = false;
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::TagReadout));
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Ssr));
+    in.worldDepth = true;
+    in.glow = false;
+    CHECK(PlanPostStages(in).Runs(PostStage::TagReadout));
+    CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Ssr));
+
+    // The diagnostic views trace whatever the gate says, while there are tags.
+    in.glow = true;
+    in.ssr = false;
+    for (int view : {kDebugViewSsrTags, kDebugViewSsrReflection})
+    {
+        CAPTURE(view);
+        in.debugView = view;
+        CHECK(PlanPostStages(in).Runs(PostStage::Ssr));
+        in.ssrTags = false;
+        CHECK_FALSE(PlanPostStages(in).Runs(PostStage::Ssr));
+        in.ssrTags = true;
+    }
 }
 
 TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][remaster][PostStages]")
@@ -369,13 +440,13 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
     for (float ao : {0.0f, 0.7f})
         for (float bloom : {0.0f, 0.35f})
             for (float shafts : {0.0f, 1.0f})
-                for (int view = 0; view <= 6; ++view)
+                for (int view = 0; view <= kDebugViewSsrReflection; ++view)
                     for (bool depth : {false, true})
                         for (bool glow : {false, true})
                             for (float weight : {0.0f, 0.5f})
                                 for (bool temporal : {false, true})
                                     for (bool luma : {false, true})
-                                        for (int air = 0; air < 3; ++air)
+                                        for (int extra = 0; extra < 12; ++extra)
                                         {
                                             PostFrameInputs in;
                                             in.ambientOcclusion = ao;
@@ -387,10 +458,27 @@ TEST_CASE("Post stages: a stage that has not landed never runs", "[Graphics][rem
                                             in.shaftWeight = weight;
                                             in.temporal = temporal;
                                             in.lumaSharpen = luma;
+                                            const int air = extra % 3;
+                                            const int ssr = extra / 3;
                                             in.air = air > 0;
                                             in.airBeams = air > 1;
+                                            in.ssrTags = (ssr & 1) != 0;
+                                            in.ssr = (ssr & 2) != 0;
                                             const PostStagePlan plan = PlanPostStages(in);
-                                            CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma, air);
+                                            CAPTURE(ao, bloom, shafts, view, depth, glow, weight, temporal, luma, air,
+                                                    ssr);
+                                            // The reflections run only on the tags the world wrote,
+                                            // with its depth; the trace only after the readout.
+                                            if (!in.ssrTags || !depth)
+                                            {
+                                                CHECK_FALSE(plan.Runs(PostStage::TagReadout));
+                                                CHECK_FALSE(plan.Runs(PostStage::Ssr));
+                                            }
+                                            if (plan.Runs(PostStage::Ssr))
+                                            {
+                                                CHECK(plan.Runs(PostStage::TagReadout));
+                                                CHECK(plan.Runs(PostStage::LinearDepth));
+                                            }
                                             CHECK((plan.runs & ~landed) == 0u);
                                             // A pass that runs resolves first and composites.
                                             if (!plan.Empty())

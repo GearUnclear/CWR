@@ -102,6 +102,11 @@ struct PostFrameInputs
     // The air pass draws sun beams this frame (airBeams and its gate on):
     // they replace the legacy shafts.
     bool airBeams = false;
+    // Screen-space reflections (B6, ScreenReflections.hpp): the world's passes
+    // wrote the surface tags into the stencil (the ssr switch is on), and the
+    // switch's frame gate is on (water or wet ground on screen).
+    bool ssrTags = false;
+    bool ssr = false;
 };
 
 // A frame's stages: which run and the strengths the composite uses.
@@ -128,6 +133,10 @@ struct PostStagePlan
 // off the luma sharpen asks for the pass and runs the Sharpen stage alone, on
 // the composite's output in the same TAA input; never both sharpens. The air
 // pass asks by itself too; when it draws beams the legacy shafts hold off.
+// Tags the world wrote ask for the pass too (TagReadout measures the screen
+// shares the reflections' gate reads, so the gate can open again); Ssr runs
+// only on a frame that kept its world depth and drew no screen overlay, unless
+// one of its diagnostic views is selected.
 PostStagePlan PlanPostStages(const PostFrameInputs& in);
 
 } // namespace Poseidon::remaster

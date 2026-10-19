@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Core/GLBufferMap.hpp>
 #include <Poseidon/Graphics/Core/GLClear.hpp>
+#include <Poseidon/Graphics/Core/GLDepthStencilState.hpp>
 #include <Poseidon/Graphics/Core/GLIndexBuffer.hpp>
 #include <Poseidon/Graphics/Core/GLPipelineState.hpp>
 #include <PoseidonGL33/GLVertexAttribLayouts.hpp>
@@ -365,7 +366,14 @@ void EngineGL33::Clear(bool clearZ, bool clear, PackedColor color)
             _worldDepthCleared = true; // the post pass has no world depth this frame
         mask |= GL_DEPTH_BUFFER_BIT;
         if (_hasStencilBuffer)
+        {
             mask |= GL_STENCIL_BUFFER_BIT;
+            // A stencil clear honours the write mask, which a draw that keeps
+            // the reflections' surface tags narrows: clear every bit, and let
+            // the next draw set its own stencil state again.
+            Poseidon::render::depthstencil::StencilFullWriteMask();
+            _ssrStencilValid = false;
+        }
     }
     Poseidon::render::clear::WithMask(mask);
 }

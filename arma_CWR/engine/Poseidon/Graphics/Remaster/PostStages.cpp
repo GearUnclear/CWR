@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 
+#include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
+
 namespace Poseidon::remaster
 {
 
@@ -13,11 +15,12 @@ using gpu::Section;
 constexpr PostStageInfo kStages[] = {
     {PostStage::Resolve, "resolve", "A3", true, false, Mark::ResolveEnd, Section::Resolve},
     {PostStage::LinearDepth, "lindepth", "A3", true, false, Mark::LinearDepthEnd, Section::LinearDepth},
-    {PostStage::TagReadout, "tags", "B6", false, false, Mark::TagReadoutEnd, Section::TagReadout},
+    {PostStage::TagReadout, "tags", "B6", true, false, Mark::TagReadoutEnd, Section::TagReadout},
     // AO still reads the full-resolution depth; it moves onto the linear depth
     // in its own step (a pixel change).
     {PostStage::Ao, "ao", "A3", true, false, Mark::AoEnd, Section::Ao},
-    {PostStage::Ssr, "ssr", "B6", false, false, Mark::SsrEnd, Section::Ssr},
+    // The reflections march the half-resolution linear depth.
+    {PostStage::Ssr, "ssr", "B6", true, true, Mark::SsrEnd, Section::Ssr},
     // B8: the air pass marches at half resolution, on the linear depth.
     {PostStage::Air, "air", "B8", true, true, Mark::AirEnd, Section::Air},
     {PostStage::Bloom, "bloom", "A3", true, false, Mark::BloomEnd, Section::Bloom},
@@ -80,11 +83,22 @@ PostStagePlan PlanPostStages(const PostFrameInputs& in)
     // The stages that can ask for the pass ask by their knob, switch or debug
     // view, whatever this frame's conditions then decide for them.
     const bool asked = in.ambientOcclusion > 0.0f || in.bloom > 0.0f || in.sunShafts > 0.0f || debugDepth ||
-                       in.temporal || in.lumaSharpen || in.air;
+                       in.temporal || in.lumaSharpen || in.air || in.ssrTags;
     if (!asked)
         return plan;
 
     plan.runs |= Bit(PostStage::Resolve);
+    // The reflections: the tags are read out (and their screen shares
+    // measured for the gate) whenever the world wrote them and kept its depth;
+    // the trace runs when the gate is on and no screen overlay covers the
+    // world, or when one of its diagnostic views is selected.
+    if (in.ssrTags && in.worldDepth)
+    {
+        plan.runs |= Bit(PostStage::TagReadout);
+        const bool debugSsr = in.debugView == kDebugViewSsrTags || in.debugView == kDebugViewSsrReflection;
+        if ((in.ssr && in.glow) || debugSsr)
+            plan.runs |= Bit(PostStage::Ssr);
+    }
     // Occlusion needs the world depth.
     plan.aoStrength = in.worldDepth ? in.ambientOcclusion : 0.0f;
     if (plan.aoStrength > 0.0f)

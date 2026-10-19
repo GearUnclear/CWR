@@ -79,8 +79,10 @@ struct GateInputs
     int spotLights = 0;       // of those, spot lights (headlights)
     // Combat lights within kGateCombatRange of the camera (B4). 0 until then.
     int combatLightsNear = 0;
-    // Last frame's screen share of water and of wet surfaces (B6's tag
-    // readout). Negative = not measured.
+    // A recent frame's screen share of water and of the ground the rain wets
+    // (terrain and roads), from the reflections' tag readout (B6, read back a
+    // few frames later). The ground counts only while it is wet (the wetness
+    // below, or the ssrWet knob). Negative = not measured (no tags written).
     float waterShare = -1.0f;
     float wetShare = -1.0f;
     // The sky table's transmittance and multiple-scattering tables are built

@@ -41,6 +41,7 @@ enum PixelShaderSpecular
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/LightRig.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <Poseidon/Graphics/Remaster/TemporalAA.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 
@@ -839,6 +840,10 @@ class EngineGL33 : public Engine
     // ApplyPassState, for a PSDetail draw: the land or the sea, from the
     // draw's multitexture stage (EngineGL33_State.cpp, next to SetTexture's).
     void SelectTerrainDetailLayer(const Poseidon::render::LegacySpec& spec);
+    // A detail-family draw's faces are the land's (the detail texture), not
+    // the sea's (the specular layer alone); the terrain detail and the
+    // reflections' surface tag both ask (EngineGL33_State.cpp).
+    static bool IsLandLayer(const Poseidon::render::LegacySpec& spec);
 
     // The frame's tiled light list (the lightTiles switch, plan section 5 A6;
     // Graphics/Rendering/Lighting/FrameLights.hpp). Built once per frame at the
@@ -1017,10 +1022,15 @@ class EngineGL33 : public Engine
         float noiseShift = 0.0f;
         // Which stages run this frame and the strengths the composite uses.
         Poseidon::remaster::PostStagePlan plan;
+        // The frame's colour the air pass, the glow stages and the composite
+        // read: the resolved world (_post.colorTex), or the reflections' output
+        // once the Ssr stage has run. When the air pass runs, the bloom and the
+        // composite read its output (_post.airOutTex) instead.
+        unsigned int frameColor = 0;
     };
     void PostFrameGeometry(PostFrame& f) const;
     void PostFrameSun(PostFrame& f) const;
-    void RunPostStage(Poseidon::remaster::PostStage stage, const PostFrame& f);
+    void RunPostStage(Poseidon::remaster::PostStage stage, PostFrame& f);
     // The fullscreen stages' shared state, set after the resolve; and its
     // teardown, after the last stage.
     void BeginPostFullscreen();
@@ -1037,6 +1047,66 @@ class EngineGL33 : public Engine
     void PostTemporal(const PostFrame& f);
     void PostSharpen(const PostFrame& f);
     void PostDebugView(const PostFrame& f);
+    // Screen-space reflections (EngineGL33_PostSsr.cpp; the math is
+    // Graphics/Remaster/ScreenReflections.hpp, the shaders
+    // EngineGL33_PostSsrShaders.cpp): the tag readout and share measurement,
+    // and the reflections (half-resolution trace, the rough blur, full-resolution
+    // composite into _ssr.outTex, which becomes the frame's colour for the
+    // later stages).
+    void PostTagReadout(const PostFrame& f);
+    void PostSsr(PostFrame& f);
+    struct SsrTargets
+    {
+        int w = 0, h = 0;
+        unsigned int tagTex = 0, tagFbo = 0; // R8 full res: each pixel's stencil tag (the FBO holds the depth-stencil)
+        unsigned int shareTex = 0, shareFbo = 0; // RGBA8 kSsrShareW x kSsrShareH: water and wettable ground per cell
+        unsigned int mipTex = 0, mipFbo = 0;     // RGBA8 full res with mips: the frame for the reflection's blur
+        int mipLevels = 1;
+        unsigned int traceTex = 0, traceFbo = 0; // RGBA16F half res: the reflection as a multiply and an add
+        unsigned int spreadTex = 0;              // R16F half res: its spread (the trace's second target)
+        unsigned int blurTex = 0, blurFbo = 0;   // RGBA16F half res: the trace after the rough blur
+        unsigned int outTex = 0, outFbo = 0;     // RGBA8 full res: the frame with the reflections
+        unsigned int progTag = 0, progShare = 0, progTrace = 0, progBlur = 0, progComposite = 0;
+        bool programsTried = false;
+        bool unavailable = false;
+        // The share readback: a ring of pixel-pack buffers, each with its fence
+        // (GLsync), read once the GPU is done with it (never waited on).
+        static constexpr int kRing = 3;
+        unsigned int pbo[kRing] = {};
+        GLsync fence[kRing] = {};
+        std::uint32_t pboFrame[kRing] = {};
+        int ringNext = 0;
+        // The last share read back, and the frame it was measured on.
+        float waterShare = -1.0f;
+        float groundShare = -1.0f;
+        std::uint32_t shareFrame = 0;
+        bool shareValid = false;
+    } _ssr;
+    bool EnsureSsrResources(int w, int h);
+    void DestroySsrTargets();
+    void DestroySsrPrograms();
+    // Reads back the oldest share measurement the GPU has finished (no wait)
+    // and queues this frame's.
+    void ReadSsrShares();
+    // The stencil state the draw being prepared wants (its surface tag,
+    // Poseidon::remaster::SsrStencilForDraw) and the one ApplyDepthMode last
+    // gave the GL (valid once applied; a stencil clear invalidates it).
+    Poseidon::remaster::SsrStencil _ssrStencil;
+    Poseidon::remaster::SsrStencil _ssrStencilApplied;
+    bool _ssrStencilValid = false;
+    // The frame whose world passes wrote the tags (UploadLitFrameConstants).
+    std::uint32_t _ssrTagFrame = 0xffffffffu;
+    // The world's distance fog (start in metres, 1 / range), copied when
+    // BeginPass builds the world pass's frame state. The trace redoes that fog
+    // with it: _frameState.fogParams[2] is the fog flag of whichever draw came
+    // last (SetShaderFogEnabled runs per draw, and shadows, lights, alpha-fog
+    // and unfogged draws set it to 0), not the world's.
+    float _ssrWorldFog[2] = {0.0f, 0.0f};
+    // The world's passes write the surface tags: the ssr switch is on, the
+    // remastered programs draw the world (_remasterPrograms is off for 3D
+    // previews in dialogs and under night vision), inside the world pass and
+    // not into a portrait.
+    bool SsrTagging() const;
     ShadowMapTuning GetShadowMapTuning() const override { return _shadowTuning; }
     void SetShadowMapTuning(const ShadowMapTuning& tuning) override { _shadowTuning = tuning; }
     void SetShadowMapSunFactor(float f) override { _shadowSunFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }

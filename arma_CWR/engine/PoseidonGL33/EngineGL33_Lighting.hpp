@@ -39,7 +39,8 @@ const char* RemasterFragmentPiece(FragmentPiece piece);
 
 // The pieces kept in files of their own (read them through RemasterFragmentPiece).
 // The LitConstants block and the terrain and clouds piece are named here too:
-// the post air pass pastes them (kPostShaders).
+// the post air pass pastes them, and the reflections' trace pastes the block
+// and the sky piece (kPostShaders).
 extern const char kLitConstantsBlockGLSL[];
 extern const char kRemasterTerrainCloudsGLSL[];
 extern const char kRemasterSkyGLSL[];
@@ -64,6 +65,15 @@ extern const char kPostAirBlurGLSL[];
 extern const char kPostAirMeanGLSL[];
 extern const char kPostAirApplyInputsGLSL[];
 extern const char kPostAirApplyMainGLSL[];
+// The screen-space reflections' passes (EngineGL33_PostSsrShaders.cpp; read
+// them through PostShaderSource).
+extern const char kPostSsrTagGLSL[];
+extern const char kPostSsrShareGLSL[];
+extern const char kPostSsrTraceInputsGLSL[];
+extern const char kPostSsrTraceMainGLSL[];
+extern const char kPostSsrBlurGLSL[];
+extern const char kPostSsrCompositeInputsGLSL[];
+extern const char kPostSsrCompositeMainGLSL[];
 
 // The LitConstants block (binding 3): the one GLSL declaration of the LitConst
 // layout below. Every shader that reads the rig pastes this string instead of
@@ -100,6 +110,12 @@ enum class PostShader : int
     AirBlur,
     AirMean,
     AirApply,
+    // The screen-space reflections (the TagReadout and Ssr stages).
+    SsrTag,       // a constant where the stencil test passes: the tags read out bit by bit
+    SsrShare,     // the screen shares of water and wettable ground, on a small grid
+    SsrTrace,     // the half-resolution trace: the reflection as a multiply and an add, and its spread
+    SsrBlur,      // the trace gathered sideways over its spread (rough reflections have no hard outline)
+    SsrComposite, // the reflections laid on the full-resolution frame
     Count,
 };
 // The override file stem (vsPost, psPostAo, ...) and the assembled source.

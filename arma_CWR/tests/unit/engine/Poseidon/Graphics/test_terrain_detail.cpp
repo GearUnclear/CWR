@@ -377,7 +377,8 @@ TEST_CASE("Terrain detail: the terrain main takes the mirror's constants and run
     CHECK(queue.find(
               "if (d.shader == Poseidon::render::ShaderFamily::Detail)\n        SelectTerrainDetailLayer(spec);") !=
           std::string::npos);
-    CHECK(state.find(
-              "SetLitTerrainDraw(Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture));") !=
+    // (IsLandLayer is the one reading of the stage; the reflections' tags ask it too.)
+    CHECK(state.find("SetLitTerrainDraw(IsLandLayer(spec));") != std::string::npos);
+    CHECK(state.find("return Poseidon::render::Has(spec.backend, Poseidon::render::Backend::DetailTexture);") !=
           std::string::npos);
 }

@@ -588,6 +588,17 @@ const PostShaderDef kPostShaders[] = {
      {Poseidon::gl33lighting::kPostAirApplyInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
       Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostAirCommonGLSL,
       Poseidon::gl33lighting::kPostAirApplyMainGLSL}},
+    // The screen-space reflections (EngineGL33_PostSsrShaders.cpp). The trace
+    // pastes the LitConstants block and the sky piece of the fragment prelude.
+    {"psPostSsrTag", {Poseidon::gl33lighting::kPostSsrTagGLSL}},
+    {"psPostSsrShare", {Poseidon::gl33lighting::kPostSsrShareGLSL}},
+    {"psPostSsrTrace",
+     {Poseidon::gl33lighting::kPostSsrTraceInputsGLSL, Poseidon::gl33lighting::kLitConstantsBlockGLSL,
+      Poseidon::gl33lighting::kRemasterSkyGLSL, Poseidon::gl33lighting::kPostSsrTraceMainGLSL}},
+    {"psPostSsrBlur", {Poseidon::gl33lighting::kPostSsrBlurGLSL}},
+    {"psPostSsrComposite",
+     {Poseidon::gl33lighting::kPostSsrCompositeInputsGLSL, s_glslPostCommon,
+      Poseidon::gl33lighting::kPostSsrCompositeMainGLSL}},
 };
 constexpr int kPostShaderCount = static_cast<int>(Poseidon::gl33lighting::PostShader::Count);
 static_assert(std::size(kPostShaders) == static_cast<size_t>(kPostShaderCount), "one entry per PostShader");

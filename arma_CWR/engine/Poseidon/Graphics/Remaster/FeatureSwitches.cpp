@@ -1,6 +1,7 @@
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -58,7 +59,8 @@ constexpr FeatureInfo kFeatures[] = {
     // B5 (water): the sea's draws, in the ground section of the world pass
     // (sky, terrain, water, horizon).
     {Feature::SeaWaves, "seaWaves", "Sea waves", "water", "Water and shine", "B5", true, &FS::seaWaves, "ground"},
-    {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", false, &FS::ssr, ""},
+    // B6 (ssr): the tag readout and the reflections, two post stages.
+    {Feature::Ssr, "ssr", "Screen-space reflections", "ssr", "Water and shine", "B6", true, &FS::ssr, "ssr"},
     {Feature::WetWeather, "wetWeather", "Wet weather and puddles", "materials", "Water and shine", "B7", false,
      &FS::wetWeather, ""},
     {Feature::LampStreaks, "lampStreaks", "Lamp streaks on wet ground", "materials", "Water and shine", "B7", false,
@@ -172,8 +174,9 @@ struct KeyTable
             MakeKnob("shafts", "Sun shafts", "Post effects", "", &LT::sunShafts, 0.0f, 2.0f),
             MakeChoice("debug", "View", "Diagnostics",
                        "Final\0Sun visibility\0Terrain sky visibility\0Normals\0Ambient occlusion\0"
-                       "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0",
-                       &LT::debugView, 0, kDebugViewAir),
+                       "Linear depth (half res)\0Light tiles (lights per tile)\0Albedo\0Air scattering\0"
+                       "Reflection tags\0Reflections only\0",
+                       &LT::debugView, 0, kDebugViewSsrReflection),
             MakeToggle("gates", "Frame gates", "Gates", "off = enabled features run on every frame (debugging)",
                        &LT::gates),
         };
@@ -219,6 +222,11 @@ struct KeyTable
                         "the lamps' intensity; 0 = street lamps light nothing", &LT::nightLamp, 0.0f, 4.0f),
             MakeSubKnob(Feature::NightLights, "nightSpot", "Headlight strength",
                         "the low beam's hot spot; 0 = headlights light nothing", &LT::nightSpot, 0.0f, 4.0f),
+            MakeSubKnob(Feature::Ssr, "ssrWater", "Water reflection",
+                        "the share of the sea's light a reflection takes, times the sky's estimated share",
+                        &LT::ssrWater, 0.0f, 2.0f),
+            MakeSubKnob(Feature::Ssr, "ssrWet", "Ground wetness", "-1 = the weather (rain); 0..1 forces it",
+                        &LT::ssrWet, -1.0f, 1.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());
