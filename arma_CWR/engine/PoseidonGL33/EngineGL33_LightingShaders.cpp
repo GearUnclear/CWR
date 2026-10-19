@@ -319,8 +319,8 @@ const char kLitConstantsBlockGLSL[] = R"(
 // Remastered light rig and per-draw material, binding 3. Layout mirrors
 // LitConst in EngineGL33_Lighting.hpp.
 layout(std140) uniform LitConstants {
-    vec4 litSunDir;       // 0: xyz toward the sun, w = sun enabled (sunEn)
-    vec4 litSun;          // 1: rgb sun radiance, w = sun elevation (degrees)
+    vec4 litSunDir;       // 0: xyz toward the key light (the sun; the moon under the moon key), w = sun enabled (sunEn)
+    vec4 litSun;          // 1: rgb key light radiance, w = its elevation (degrees)
     vec4 litZenith;       // 2: rgb sky irradiance on an up-facing surface, w = exposure
     vec4 litHorizon;      // 3: rgb on a vertical surface facing away from the sun, w = specular scale
     vec4 litGround;       // 4: rgb on a down-facing surface, w = local light scale
@@ -361,7 +361,9 @@ layout(std140) uniform LitConstants {
     vec4 litAtmoDome;     // 67: rgb classic dome light (display), w hue (0 the original hue relit, 1 physical)
     vec4 litSky;          // 68: x lit-cloud strength, y sky-matched shadows on, z the dome's turn (u), w sky-through
     vec4 litSkyShadow;    // 69: xy shadow anchor - camera (m), z previous anchor's angle (rad), w its weight
-    vec4 litPlanned[4];   // 70-73: allocated to features still to land (night, combat, materials; 70 free)
+    vec4 litSkySun;       // 70: xyz toward the sun, w its elevation (degrees): the sun the sky reads (skySunDir)
+    vec4 litNight;        // 71: x physical lamps and low beams on, y lamp per start metre, z low-beam peak, w moon key share
+    vec4 litPlanned[2];   // 72-73: allocated to features still to land (combat, materials)
     vec4 litWater0;       // 74: x wave relief scale, y share of the next sea frame, z mean sky weight, w sky tint
     vec4 litWater1;       // 75: rgb sheen light (linear, the original sun's hue), w sheen's flat-normal share
     vec4 litCanopy;       // 76: long tree shadows: x strength (0 = off), yz sun-visibility map origin (m), w 1 / its extent
@@ -784,8 +786,10 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     } else if (foliage) {
         nLight = nCast;
     }
+    // The low sun's crown factors follow the sun, not the moon key (B3): the
+    // night's crowns keep them under the moon.
     if (canopy) {
-        float lowSun = 1.0 - smoothstep(12.0, 35.0, litSun.w);
+        float lowSun = 1.0 - smoothstep(12.0, 35.0, skySunElevation());
         crownSun = mix(1.0, exp(-crownSunPath(cn, vCrown.w, l)), 0.75) * mix(1.0, 0.65, lowSun);
         crownSky *= mix(1.0, 0.75, lowSun);
     }
@@ -818,7 +822,13 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
     // falloff of headlight and lamp pools (a linear sum would make them about
     // twice as wide). The same clamp keeps a lamp-lit surface from getting
     // brighter than the original's, where overlapping pools sum past 1.
-    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
+    // The physical lamps and low beams (nightLights) add their own linear
+    // light outside that clamp; leaves take them through the crown, as the sun.
+    g_lightView = v;
+    g_lightLeafNormal = nLight;
+    g_lightLeaves = foliage;
+    g_lightForced = litMatForced.rgb;
+    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * litGround.w;
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
 
     vec3 a = toLinear(albedo);
@@ -830,7 +840,8 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
         a = p * (dot(a, kLuma) / max(dot(p, kLuma), 1e-6));
     }
     float exposure = litZenith.w;
-    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn) * exposure;
+    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + glossy(n, v, sunVisibility) * sunOn +
+                     g_physicalSpec * litGround.w) * exposure;
     float total = dot(radiance, kLuma);
     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(total, 1e-5), 0.0, 1.0);
     if (foliage) ambientShare *= 0.5;
@@ -931,7 +942,7 @@ void main() {
         // its coverage both, so it fades into the cloud whatever its blending
         // (a dimmed colour alone drew a dark disk over the sky).
         if (litSkyFwd.w > 2.5 && litSky.y > 0.5)
-            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(litSunDir.xyz));
+            r0 *= mix(1.0, kSkySunBehindCloud, skyShadowCoverToward(skySunDir()));
     }
     finishFragment(r0, ambientShare, true);
 }
@@ -1182,7 +1193,9 @@ vec2 seaRippleGrad(vec2 uv, float h0, vec2 gU, vec2 gV, float e) {
 
 // The sea's lit body under its flat normal: shadeRemastered without the gloss
 // and the foliage branch, as linear radiance after exposure, with the sky
-// light's share and the sun's visibility.
+// light's share and the sun's visibility. The physical lamps and low beams
+// (nightLights) leave localLights' classic sum, so the body adds them as
+// shadeRemastered does: their linear light and their gleam on the material.
 vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
     vec3 n = vNormalW * inversesqrt(max(dot(vNormalW, vNormalW), 1e-12));
     vec3 posAbs = vWorldRel + litCamPos.xyz;
@@ -1198,11 +1211,12 @@ vec3 seaBody(vec3 albedo, out float ambientShare, out float sunVis) {
     vec3 direct = litSun.rgb * (kd * nl + litMatForced.rgb) * (sunVis * sunOn);
     vec3 ambient = ka * skyIrradiance(n) * (skyVisibility * sunOn);
     vec3 moon = kd * litMoon.rgb * (max(dot(n, litMoonDir.xyz), 0.0) * sunOn);
-    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0)));
+    g_lightView = -vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
+    vec3 local = toLinear(min(localLights(n, kd, ka) * litGround.w, vec3(1.0))) + g_physicalLocal * litGround.w;
     vec3 emissive = toLinear(min(litMatEmissive.rgb, vec3(1.5)));
     vec3 a = toLinear(albedo);
     float exposure = litZenith.w;
-    vec3 radiance = a * (direct + ambient + moon + local + emissive) * exposure;
+    vec3 radiance = (a * (direct + ambient + moon + local + emissive) + g_physicalSpec * litGround.w) * exposure;
     ambientShare = clamp(dot(a * ambient * exposure, kLuma) / max(dot(radiance, kLuma), 1e-5), 0.0, 1.0);
     return radiance;
 }

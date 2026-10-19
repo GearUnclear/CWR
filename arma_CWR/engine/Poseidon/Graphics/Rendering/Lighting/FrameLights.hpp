@@ -17,12 +17,15 @@
 // UpdateLightTiles); the shader side is localLightsTiled() in
 // EngineGL33_LightingShadersLights.cpp.
 //
-// Every kind is shaded with the classic local-light model today (full strength
-// inside the start distance, a quadratic falloff past it ending in a smooth
-// window at kRangeFactor times it, a smoothed spotlight cone, the sum taken in
-// display space and clamped at 1, as the per-draw path does). The kind travels
-// with each light so the steps that give a kind its own model (B3 lamps and
-// low beams, B4 fire and combat light) find it here.
+// The classic local-light model (full strength inside the start distance, a
+// quadratic falloff past it ending in a smooth window at kRangeFactor times
+// it, a smoothed spotlight cone, the sum taken in display space and clamped at
+// 1, as the per-draw path does) shades every kind, except that at night, with
+// the nightLights switch on (B3), street lamps and headlights take the
+// physical model below: light falling off with the squared distance from the
+// bulb, a low-beam pattern for headlights, summed in linear light. The kind
+// travels with each light so the steps that give a kind its own model (B4 fire
+// and combat light) find it here.
 
 namespace Poseidon::lighting
 {
@@ -37,6 +40,8 @@ enum class FrameLightKind : std::uint8_t
 };
 
 const char* FrameLightKindName(FrameLightKind kind);
+
+struct PhysicalLightParams; // the physical model's intensities (below)
 
 // The classic local-light model the shaders apply (EngineGL33_LightingShadersLights.cpp
 // localLight; the test pins the shader's numbers to these).
@@ -80,8 +85,10 @@ struct FrameLight
     float ambient[3] = {};             // display-space colour it adds whatever the surface faces
     float dir[3] = {0.0f, 0.0f, 1.0f}; // unit beam direction (spotlights)
     float sortBrightness = 0.0f;       // Light::SortBrightness: the ranking weight (Light::Compare)
-    // The object the light is attached to (Object::ID, 0 = none), for the
-    // self-exclusion the night lamps need (B3). The shaders do not read it yet.
+    // The object the light is attached to (Object::ID, 0 = none). The shaders
+    // do not read it: a draw in an instanced run has no single object, so the
+    // physical model keeps a light off its owner by geometry instead
+    // (kPhysicalNearEnd and the low beam's back plane).
     std::uint32_t owner = 0;
     int shadowSlot = -1; // combat shadow mask channel (B4); -1 = none
 
@@ -97,14 +104,17 @@ bool LightIsDark(const FrameLight& light);
 // (centred reach / (2 cos a) ahead of the lamp, radius the same, a the cone
 // edge's angle) is about half as large; but the classic budget ranks a
 // spotlight wherever it is in reach, cone or not (as Scene::SelectLights does),
-// so every tile in reach must list it. The step that lifts the budget for
-// headlights (B3) can bin them by the cone.
+// so every tile in reach must list it. With `physical` (the physical model
+// lights the frame, B3) a street lamp or headlight is binned by its physical
+// reach instead (PhysicalReach), still centred on the bulb: the low beam's
+// floor and spill light most of the half-space ahead, so its cone is no
+// tighter bound.
 struct LightSphere
 {
     float c[3];
     float r;
 };
-LightSphere LightBounds(const FrameLight& light);
+LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* physical = nullptr);
 
 // Ranks the lights as Light::Compare ranks the scene's active lights: by sort
 // brightness over the squared distance from the camera, strongest first
@@ -147,11 +157,13 @@ void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize = kTi
 // The light's reach on screen: the pixel rectangle x0, y0, x1, y1 (frame-target
 // pixels, lower-left origin, inclusive) that holds every pixel it can light,
 // clipped to the viewport. False when the reach is off screen.
-bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4]);
+bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4],
+                     const PhysicalLightParams* physical = nullptr);
 
 // Bins the ranked lights into the grid (sized beforehand): every tile lists
 // the lights whose reach covers it, in rank order, up to kMaxLightsPerTile.
-void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid);
+void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid,
+                      const PhysicalLightParams* physical = nullptr);
 
 // The lights listed in the tile that holds frame-target pixel (px, py): their
 // indices into the ranked list, in order. Returns how many.
@@ -178,5 +190,115 @@ float ClassicImportance(const FrameLight& light, const float p[3]);
 // 8th strongest blend when they are within kClassicBudgetSoftness of the 7th's
 // importance; the weights change continuously with the importances.
 void ClassicBudgetWeights(const float* importance, int n, float* weight);
+
+// ---- The physical lamps and low beams (B3, the nightLights switch) ----------
+//
+// A street lamp is a point source of intensity kLampIntensityPerStart times
+// its start distance (the start distance is 50 m times the configured
+// brightness, so the intensity follows the brightness linearly); a headlight
+// is a low beam of hot-spot intensity kLowBeamPeak times the nightSpot knob.
+// The irradiance at distance d is I / (d^2 + kPhysicalSoftening): no flat
+// disc of full light out to the start distance, so lamps lay pools and the
+// country away from them stays dark. A smooth window ends every light at its
+// physical reach (PhysicalReach, at most the classic reach), the sphere the
+// tiles bin it by. Colours (PhysicalColour): a street lamp takes its
+// configured colour to linear (F9b gives lamps their authored warm colour); a
+// headlight is white at its configured colour's linear luminance. No warming:
+// a warmed headlight turned verges mustard in the research, and the configured
+// rosy beam (0.9, 0.8, 0.8) still turned the khaki grass of a verge orange-tan
+// in the beam (hue 39 deg, saturation 0.29, at b3_jeep_side). The shaders'
+// copy is physicalLight in EngineGL33_LightingShadersLights.cpp; the test pins
+// its numbers to these.
+// The research tuned its lamps at 4 * 0.3 = 1.2 per start metre on lamps the
+// engine then read as white (the colour bug F9b fixed); the authored (0.9,
+// 0.8, 0.6) is 0.63 as bright in linear light, so the same pools take 1.9.
+constexpr float kLampIntensityPerStart = 1.9f; // street lamp: I = 1.9 * start
+// The research's low beams (4000 * 0.3 * nightSpot 1.5 = 1800) blew the hot
+// spot out at 1080p; 800 keeps the hot spot under white (about 193 levels on
+// the moonless road) and the far verges at a night level. A verge in the beam
+// core 10 to 20 m out still reads brighter than the noon lawn (b3_jeep_side).
+constexpr float kLowBeamPeak = 800.0f;      // headlight hot spot at nightSpot 1
+constexpr float kPhysicalSoftening = 0.25f; // m^2 added to d^2: a bulb is not a point
+// Light reaching a surface closer to the bulb than kNearEnd is the lamp's own
+// housing, post or vehicle (bumper, grille): it fades out from kNearEnd to
+// kNearStart. With the low beam's back plane (nothing behind the lamp) this is
+// the owner exclusion: the shaders cannot tell the draw's object in an
+// instanced run.
+constexpr float kPhysicalNearStart = 0.25f; // metres
+constexpr float kPhysicalNearEnd = 1.0f;
+// The low beam, in radians about its axis (vertical: up positive). Wide
+// horizontally (a core of kLowBeamCoreWidth and a spill of kLowBeamSpillWidth,
+// kLowBeamSpill strong), a hot band kLowBeamHotBand under the axis
+// (kLowBeamHotWidth wide), and a cut-off that closes between kLowBeamCutLow and
+// kLowBeamCutHigh above it (0.3 to 1.4 degrees: a hard top edge, a little
+// softer than the research's 0.2 to 0.9, which hill roads put right on the
+// road). Under the hot band a faint kLowBeamFloor reaches down to
+// kLowBeamFloorEnd (34 deg), so the road just ahead of the bumper is not black.
+constexpr float kLowBeamCutLow = -0.005f;
+constexpr float kLowBeamCutHigh = 0.025f;
+constexpr float kLowBeamHotBand = -0.03f; // 1.7 deg under the axis
+constexpr float kLowBeamHotWidth = 0.05f;
+constexpr float kLowBeamFloor = 0.02f;
+constexpr float kLowBeamFloorEnd = -0.6f;
+constexpr float kLowBeamFloorStart = -0.1f;
+constexpr float kLowBeamCoreWidth = 0.25f; // +-14 deg
+constexpr float kLowBeamSpill = 0.15f;
+constexpr float kLowBeamSpillWidth = 0.6f; // +-34 deg
+// A headlight is aimed as fixed to the body, this much (tan) under the body's
+// own pitch along the lamp's heading: 1%, the usual low-beam setting. On a
+// flat road a lamp 0.9 m up lays its hot band about 23 m ahead, and on any
+// steady slope the same distance up or down it.
+constexpr float kLowBeamTilt = 0.01f;
+
+// True for the kinds the physical model shades (street lamps and headlights).
+bool UsesPhysicalModel(FrameLightKind kind);
+
+// The low beam's relative intensity toward unit direction `toPoint` from the
+// lamp, for the unit axis `beam`: (1 + kLowBeamFloor)(1 + kLowBeamSpill) on
+// the hot band's centre line straight ahead, 0 behind the lamp's plane.
+float LowBeamPattern(const float toPoint[3], const float beam[3]);
+
+// The headlight's axis, unit: the horizontal heading of the model's beam axis
+// `lampDir` (its vertical part is ignored: a model's beam axis can point
+// degrees up or down), pitched as the body is along that heading
+// (`bodyForward`, the owner's forward axis) minus kLowBeamTilt.
+void LowBeamAim(const float lampDir[3], const float bodyForward[3], float out[3]);
+
+// The physical model's parameters for a frame (NightLights.hpp
+// ComputeNightConstants fills the shaders' copy).
+struct PhysicalLightParams
+{
+    float lampPerStart = kLampIntensityPerStart;
+    float spotPeak = kLowBeamPeak; // times the nightSpot knob
+};
+
+// A physical light reaches as far as its strongest irradiance (a lamp's
+// intensity, a low beam's hot spot) stays above kPhysicalMinIrradiance, and no
+// farther than the classic reach (kRangeFactor start distances); the window
+// that ends it starts at half its square, where the light is twice that. At
+// this level a light adds about one display level to the darkest night
+// ground, so a lamp 260 m off no longer lists itself in every tile of a
+// country road. The shaders compute the same reach.
+constexpr float kPhysicalMinIrradiance = 0.002f;
+float PhysicalReach(const FrameLight& light, const PhysicalLightParams& params);
+
+// Linear irradiance (per colour channel, before any surface term) that a
+// light of the physical model puts on camera-relative point `p`: its intensity
+// toward the point over the softened squared distance, the near fade, the
+// reach window and the light's PhysicalColour. 0 for a kind the physical model
+// does not shade.
+void PhysicalIrradiance(const FrameLight& light, const float p[3], const PhysicalLightParams& params, float out[3]);
+
+// A physical light's linear colour: a lamp's configured colour taken to
+// linear; a headlight's, white at that colour's linear luminance (Rec. 709).
+void PhysicalColour(const FrameLight& light, float out[3]);
+
+// The linear light the frame's physical lamps and headlights put on a particle
+// (a smoke or dust puff, drawn as a camera-facing decal lit on the CPU,
+// Object::DrawDecal) at camera-relative point `p`: the sum of
+// PhysicalIrradiance over `lights`. A puff scatters light every way, so there
+// is no surface term. The classic kinds keep lighting particles their own way.
+void ParticleLight(const std::vector<FrameLight>& lights, const float p[3], const PhysicalLightParams& params,
+                   float out[3]);
 
 } // namespace Poseidon::lighting

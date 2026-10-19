@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 
+#include <Poseidon/Graphics/Remaster/NightLights.hpp>
+
 #include <algorithm>
 #include <cmath>
 
@@ -72,9 +74,14 @@ SunShadowConstants ComputeSunShadowConstants(const LightingTuning& tuning, const
         c.pcss[0] = std::max(tuning.shadowReach, kPcssMinReachMetres);
         c.pcss[1] = kPcssMinFilterTexels;
         // The gate opens at 4 deg; the soft filter fades in over the next 2
-        // degrees. Forced on (gates=0) or opened by the moon key, it runs whole.
+        // degrees. Forced on (gates=0) it runs whole. Under the moon key
+        // (B3) the stock filter casts the moon's shadows: at a fiftieth of the
+        // noon sun no one sees a contact-hardening penumbra, and the soft
+        // filter's taps would cost the night's world pass for nothing.
         const float sun = gates.inputs.sunElevationDeg;
-        c.pcss[2] = (tuning.gates && sun > kGateSunShadowMinSunDeg) ? PcssStrength(sun) : 1.0f;
+        c.pcss[2] = MoonKeyShare(gates) > 0.0f                        ? 0.0f
+                    : (tuning.gates && sun > kGateSunShadowMinSunDeg) ? PcssStrength(sun)
+                                                                      : 1.0f;
     }
     const Gate& trees = gates[Feature::TreeShadows];
     c.pcss[3] = trees.on ? std::max(tuning.leafBias, 0.0f) : 0.0f;

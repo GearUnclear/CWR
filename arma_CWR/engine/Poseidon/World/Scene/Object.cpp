@@ -27,6 +27,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <stdint.h>
 #include <stdio.h>
+#include <algorithm>
 #include <cmath>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -1068,6 +1069,36 @@ int Object::GetComplexity(int level, const FrameBase& pos) const
     return nFaces;
 }
 
+namespace
+{
+// A light the remastered night's physical model shades (a street lamp or a
+// headlight, FrameLights.hpp UsesPhysicalModel), as the GL backend classifies
+// the frame's lights.
+bool IsPhysicalNightLight(Light& light)
+{
+    LightDescription desc;
+    light.GetDescription(desc);
+    if (desc.type != LTPoint && desc.type != LTSpotLight)
+        return false;
+    return lighting::UsesPhysicalModel(desc.type == LTSpotLight ? lighting::FrameLightKind::Spot : light.Kind());
+}
+
+// The classic decal light (display space) plus the physical lamps' and
+// headlights' linear light on the puff, scaled by the night as the shaders
+// scale them. The decal material takes half of a light's diffuse colour
+// (0.25 diffuse and 0.25 forced, DrawDecal), so the puff takes half of the
+// physical light too; the sum goes back to display space.
+Color AddParticleNightLight(ColorVal classic, const float physical[3], float night)
+{
+    constexpr float kDecalShare = 0.5f;
+    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
+    const float s = kDecalShare * night;
+    return Color(toDisplay(toLinear(classic.R()) + s * physical[0]), toDisplay(toLinear(classic.G()) + s * physical[1]),
+                 toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
+}
+} // namespace
+
 void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 {
     if (forceLOD == LOD_INVISIBLE)
@@ -1146,6 +1177,11 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             float addLightsFactor = sun->NightEffect();
             if (addLightsFactor > 0.01)
             {
+                // The remastered night (nightLights): street lamps and
+                // headlights light the puff by their physical model, summed in
+                // linear light with the rest; the other lights keep theirs.
+                float physical[3];
+                const bool night = GEngine->ParticleNightLight(pos.Position(), physical);
                 const LightList& lights = GScene->ActiveLights();
                 if (lights.Size() > 0)
                 {
@@ -1158,9 +1194,13 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
                     for (int index = 0; index < lights.Size(); index++)
                     {
+                        if (night && IsPhysicalNightLight(*lights[index]))
+                            continue;
                         colorI += lights[index]->Apply(VZero, VForward);
                     }
                 }
+                if (night)
+                    colorI = AddParticleNightLight(colorI, physical, addLightsFactor);
             }
             ColorVal accom = GEngine->GetAccomodateEye();
             colorI = colorI * accom;

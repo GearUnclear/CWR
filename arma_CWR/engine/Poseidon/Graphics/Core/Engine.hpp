@@ -842,6 +842,15 @@ class Engine : public IGraphicsEngine
     /// instead of each draw's own light list: a draw's list then lights
     /// nothing, so the scene may draw lit objects in instanced runs.
     virtual bool LocalLightsFromTiles() const { return false; }
+    /// True when this frame's key light is the moon (the moonShadows feature,
+    /// Graphics/Remaster/NightLights.hpp): the scene then renders the sun
+    /// shadow map from the moon's direction, at night.
+    virtual bool RemasterMoonKey() const { return false; }
+    /// The physical lamps and low beams (the nightLights feature): the linear
+    /// light they put on a particle at world point `pos` this frame (no surface
+    /// term), and true. False when they are off: every light then lights the
+    /// particle by the classic model, as before.
+    virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
     /// Captures: hold the remastered cloud-shadow field at a drift offset in
     /// metres (pinned = false lets it drift with the wind again from where it
     /// is). The field integrates the wind every frame, so re-pinning the sim

@@ -11,6 +11,12 @@
 // from the same lights, those whose reach covers its tile, within the classic
 // budget of 7 per surface. litLightCount.y holds the tile size while the tiled
 // list lights the pass and is 0 otherwise.
+//
+// At night, with the nightLights switch (B3, litNight.x), the tiled path gives
+// street lamps and headlights the physical model instead (physicalLight:
+// inverse-square light from the bulb, a low-beam pattern, rough diffuse,
+// leaves wrapped as for the sun), summed in linear light into g_physicalLocal
+// and g_physicalSpec outside the classic clamp and budget.
 
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -106,6 +112,114 @@ vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
     return localLight(frameLights[at], frameLights[at + 1], frameLights[at + 2].rgb, frameLights[at + 3].xyz, n, kd, ka);
 }
 
+// ---- The physical lamps and low beams (B3, nightLights; litNight.x on) ------
+// Street lamps (kind 1) and headlights (kind 2) as physical lights: intensity
+// over the softened squared distance from the bulb, in linear light, summed
+// outside the classic budget and clamp. FrameLights.hpp holds the model and
+// these constants (the test pins them); NightLights.hpp the slot.
+const float kNightSoftening = 0.25;  // kPhysicalSoftening
+const float kNightMinIrradiance = 0.002; // kPhysicalMinIrradiance
+const float kNightNearStart = 0.25;  // kPhysicalNearStart
+const float kNightNearEnd = 1.0;     // kPhysicalNearEnd
+const float kBeamCutLow = -0.005;    // kLowBeamCutLow
+const float kBeamCutHigh = 0.025;    // kLowBeamCutHigh
+const float kBeamHotBand = -0.03;    // kLowBeamHotBand
+const float kBeamHotWidth = 0.05;    // kLowBeamHotWidth
+const float kBeamFloor = 0.02;       // kLowBeamFloor
+const float kBeamFloorEnd = -0.6;    // kLowBeamFloorEnd
+const float kBeamFloorStart = -0.1;  // kLowBeamFloorStart
+const float kBeamCoreWidth = 0.25;   // kLowBeamCoreWidth
+const float kBeamSpill = 0.15;       // kLowBeamSpill
+const float kBeamSpillWidth = 0.6;   // kLowBeamSpillWidth
+
+// What shadeRemastered hands the physical lights besides the normal: the view
+// direction, and for foliage the crown-blended normal and the forced diffuse
+// (leaves take a lamp as they take the sun: wrapped, through the crown).
+vec3 g_lightView = vec3(0.0, 1.0, 0.0);
+vec3 g_lightLeafNormal = vec3(0.0, 1.0, 0.0);
+vec3 g_lightForced = vec3(0.0);
+bool g_lightLeaves = false;
+// The physical lights' sums at this fragment, linear: the diffuse (times the
+// material) and the gleam on glossy materials.
+vec3 g_physicalLocal = vec3(0.0);
+vec3 g_physicalSpec = vec3(0.0);
+
+// The low beam's relative intensity toward unit direction L from the lamp, for
+// the unit axis `beam` (FrameLights.hpp LowBeamPattern): wide horizontally, a
+// hot band 1.7 degrees under the axis and a hard top edge just above it.
+float lowBeamPattern(vec3 L, vec3 beam) {
+    float c = dot(L, beam);
+    if (c <= 0.0) return 0.0;
+    vec3 right = vec3(beam.z, 0.0, -beam.x) * inversesqrt(max(beam.x * beam.x + beam.z * beam.z, 1e-12));
+    vec3 u = cross(beam, right);
+    float ah = atan(dot(L, right), c);
+    float av = atan(dot(L, u), c);
+    float cut = 1.0 - smoothstep(kBeamCutLow, kBeamCutHigh, av);
+    float hv = (av - kBeamHotBand) / kBeamHotWidth;
+    float vert = exp(-hv * hv) + kBeamFloor * smoothstep(kBeamFloorEnd, kBeamFloorStart, av);
+    float h1 = ah / kBeamCoreWidth;
+    float h2 = ah / kBeamSpillWidth;
+    float horiz = exp(-h1 * h1) + kBeamSpill * exp(-h2 * h2);
+    return vert * horiz * cut;
+}
+
+// One lamp or headlight at this fragment, added to g_physicalLocal and
+// g_physicalSpec. A rough diffuse (Oren-Nayar, sigma 0.5, Fujii's form,
+// normalised to 1 at normal incidence) lets gravel, asphalt and plaster scatter
+// a grazing low beam back toward the driver; leaves wrap their terminator as
+// they do for the sun. A lamp keeps a little of its classic ambient (capped);
+// a headlight none.
+void physicalLight(int id, vec3 n, vec3 kd, vec3 ka) {
+    int at = (id - 1) * kTexelsPerLight;
+    vec4 pos = frameLights[at];
+    vec4 color = frameLights[at + 1];
+    vec3 toLight = pos.xyz - vWorldRel;
+    float d2 = dot(toLight, toLight);
+    bool spot = color.w > 0.5;
+    // The physical reach (FrameLights.hpp PhysicalReach), which the tiles bin by.
+    float peak = spot ? litNight.z : litNight.y * pos.w;
+    float end2 = min(kReachFactor * kReachFactor * pos.w * pos.w, peak / kNightMinIrradiance);
+    if (d2 >= end2) return;
+    float d = sqrt(max(d2, 1e-12));
+    vec3 L = toLight / d;
+    float I = spot ? peak * lowBeamPattern(-L, frameLights[at + 3].xyz) : peak;
+    if (I <= 0.0) return;
+    I *= (1.0 - smoothstep(0.5 * end2, end2, d2)) * smoothstep(kNightNearStart, kNightNearEnd, d);
+    float E = I / (d2 + kNightSoftening);
+    // A lamp's authored colour; a headlight white at its colour's luminance
+    // (FrameLights.hpp PhysicalColour: the rosy beam turned khaki verges tan).
+    vec3 col = toLinear(color.rgb);
+    if (spot) col = vec3(dot(col, kLuma));
+    col *= E;
+    if (g_lightLeaves) {
+        float wrap = clamp((dot(g_lightLeafNormal, L) + 0.35) / 1.35, 0.0, 1.0);
+        g_physicalLocal += col * (kd * wrap + g_lightForced);
+        return;
+    }
+    float nl = max(dot(n, L), 0.0);
+    if (nl > 0.0) {
+        float cosR = max(dot(n, g_lightView), 0.0);
+        float s = dot(L, g_lightView) - nl * cosR;
+        float t = s > 0.0 ? max(max(nl, cosR), 0.1) : 1.0;
+        nl *= max((0.72 + 0.33 * s / t) / 0.72, 0.0);
+    }
+    g_physicalLocal += kd * col * nl;
+    if (!spot) g_physicalLocal += ka * toLinear(frameLights[at + 2].rgb) * (0.3 * min(E, 0.3));
+    float power = litMatSpecular.w;
+    if (power > 0.0 && nl > 0.0) {
+        vec3 h = normalize(L + g_lightView);
+        float p = max(power, 1.0);
+        g_physicalSpec += litMatSpecular.rgb * col * (pow(max(dot(n, h), 0.0), p) * (p + 8.0) / 28.0 * nl);
+    }
+}
+
+// The kinds the physical model shades: a lamp (1) or a headlight (2), while
+// litNight.x is on.
+bool physicalKind(int id) {
+    float kind = frameLights[(id - 1) * kTexelsPerLight + 3].w;
+    return litNight.x > 0.5 && kind > 0.5 && kind < 2.5;
+}
+
 // The frame's tiled list: the lights whose reach covers this fragment's tile
 // (an empty tile costs one fetch), within the classic budget. The classic
 // selection (Scene::SelectLights) ranks lights by their sort brightness over
@@ -114,17 +228,34 @@ vec3 tiledLight(int id, vec3 n, vec3 kd, vec3 ka) {
 // blend instead of a cut, so the set changes smoothly across a surface rather
 // than at object edges. The buffer holds the lights' own colours; the draw's
 // night factor (litLightCount.z, the factor the per-draw upload scales them
-// by) applies to the sum.
+// by) applies to the sum. With the physical lamps and low beams on
+// (litNight.x), lamps and headlights leave the classic sum and its budget:
+// each adds its own light to g_physicalLocal (and gleam to g_physicalSpec),
+// linear and unclamped, and the budget ranks the other kinds among
+// themselves.
 vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     int count = loadTileList();
+    int classic = count;
+    if (litNight.x > 0.5) {
+        classic = 0;
+        for (int k = 0; k < kMaxTileLights; ++k) {
+            if (k >= count) break;
+            int id = tileEntry(k);
+            if (physicalKind(id)) physicalLight(id, n, kd, ka);
+            else ++classic;
+        }
+        g_physicalLocal *= litLightCount.z;
+        g_physicalSpec *= litLightCount.z;
+    }
     // The budget's edge: the importance of the 7th (edgeIn) and the 8th
     // (edgeOut) strongest, from the eight strongest kept sorted in registers.
     float edgeIn = 0.0;
     float edgeOut = 0.0;
-    if (count > kClassicBudget) {
+    if (classic > kClassicBudget) {
         float t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0, t5 = 0.0, t6 = 0.0, t7 = 0.0;
         for (int k = 0; k < kMaxTileLights; ++k) {
             if (k >= count) break;
+            if (physicalKind(tileEntry(k))) continue;
             float v = lightImportance(tileEntry(k));
             float m;
             m = max(t0, v); v = min(t0, v); t0 = m;
@@ -145,7 +276,8 @@ vec3 localLightsTiled(vec3 n, vec3 kd, vec3 ka) {
     for (int k = 0; k < kMaxTileLights; ++k) {
         if (k >= count) break;
         int id = tileEntry(k);
-        float w = count > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
+        if (physicalKind(id)) continue;
+        float w = classic > kClassicBudget ? clamp(0.5 + (lightImportance(id) - mid) / band, 0.0, 1.0) : 1.0;
         if (w > 0.0) sum += w * tiledLight(id, n, kd, ka);
     }
     return sum * litLightCount.z;

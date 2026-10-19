@@ -138,6 +138,14 @@ Gate Condition(Feature f, const GateInputs& in, const LightingTuning& t)
             return Off("sun below 4 deg");
 
         case Feature::NightLights:
+            // The physical lamps and low beams are a model of the tiled light
+            // list (the per-draw path keeps the classic one).
+            if (in.nightEffect <= kGateNightMinEffect)
+                return Off("day");
+            if (!FeatureOn(t.features, Feature::LightTiles))
+                return Off("light list off");
+            return On("night");
+
         case Feature::Stars:
             if (in.nightEffect <= kGateNightMinEffect)
                 return Off("day");

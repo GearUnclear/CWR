@@ -273,9 +273,18 @@ enum : int
     // The sky's own clouds (EngineGL33_SkyClouds.cpp, Graphics/Remaster/SkyDensity.hpp).
     Sky = 68,       // x lit-cloud strength, y sky-matched shadows on (1), z the dome's turn (u offset), w sky-through
     SkyShadow = 69, // xy shadow anchor - camera (m, east and north), z previous anchor's angle (rad), w its weight
-    // 70-73: allocated to features still to land (70 free, LitConstPlanned
-    // Night to Weather); one padding member in the block until they do.
-    Planned = 70,
+    // The night (B3, Graphics/Remaster/NightLights.hpp). SunDir and Sun carry
+    // the key light, which under the moon key is the moon; the sky reads the
+    // sun from SkySun: xyz toward the sun, w its elevation (degrees). Equal to
+    // SunDir.xyz and Sun.w whenever the sun is the key.
+    SkySun = 70,
+    // x 1 while the physical lamps and low beams light the frame, y lamp
+    // intensity per metre of start distance, z low-beam hot-spot intensity,
+    // w the moon key's share (0: the sun is the key).
+    Night = 71,
+    // 72-73: allocated to features still to land (LitConstPlanned
+    // CombatShadow and Weather); one padding member in the block until they do.
+    Planned = 72,
     // The sea (EngineGL33_Sea.cpp, Graphics/Remaster/SeaWaves.hpp).
     Water0 = 74, // x wave relief scale, y share of the next animation frame, z mean sky weight, w sky tint
     Water1 =
@@ -301,7 +310,8 @@ static_assert(Reserved == LightDir + MaxLights, "LitConst reserved slots follow 
 static_assert(Taa == Reserved + ReservedCount && Pcss == Taa + 1, "LitConst sun shadow slots follow the reserved one");
 static_assert(SkyRight == Pcss + 1, "LitConst sky slots follow the sun shadow ones");
 static_assert(Sky == AtmoDome + 1 && SkyShadow == Sky + 1, "LitConst clouds slots follow the sky table's");
-static_assert(Planned == SkyShadow + 1, "the planned padding follows the clouds slots");
+static_assert(SkySun == SkyShadow + 1 && Night == SkySun + 1, "LitConst night slots follow the clouds slots");
+static_assert(Planned == Night + 1, "the planned padding follows the night slots");
 static_assert(Water0 == Planned + PlannedCount && Water1 == Water0 + 1,
               "LitConst water slots follow the planned padding");
 static_assert(Canopy == Water1 + 1, "the canopy follows the water slots");
@@ -318,17 +328,16 @@ static_assert(Count == Haze + 1, "LitConst size out of sync");
 // raises LitConst::Count, which the upload and the shaders follow. A7 landed
 // the sky slots 61 to 67 and B1 the sun shadow slots 59 and 60, so 58 is the
 // padding member litReserved; B10 landed the clouds slots 68 and 69 (Sky,
-// SkyShadow), B5 the water slots 74 and 75, B9 the canopy at 76 and B11 the
-// terrain detail at 77, so 70 to 73 are the padding member litPlanned; B8
-// landed the haze at 78.
+// SkyShadow), B3 the night slots 70 and 71 (SkySun, Night), B5 the water slots
+// 74 and 75, B9 the canopy at 76 and B11 the terrain detail at 77, so 72 and 73
+// are the padding member litPlanned; B8 landed the haze at 78.
 namespace LitConstPlanned
 {
 constexpr int MatClass = 58; // materials, per draw: class, object kind, blend, hash
 // 59, 60: the sun shadows landed (LitConst::Taa, LitConst::Pcss, B1).
 // 68, 69: the sky's clouds landed (LitConst::Sky, LitConst::SkyShadow, B10).
-// 70 is free: the light list (A6) needs only a tile size and a night factor,
-// which ride in litLightCount.yz (LitConst::LightCount).
-constexpr int Night = 71;        // night: flags, beam profile, moon key
+// 70, 71: the night landed (LitConst::SkySun, LitConst::Night, B3); 70 was
+// free (the light list, A6, rides in litLightCount.yz, LitConst::LightCount).
 constexpr int CombatShadow = 72; // combat: mask scale, strength, shadowed count
 constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
 // 74, 75: the sea landed (LitConst::Water0, LitConst::Water1, B5).
@@ -338,8 +347,8 @@ constexpr int Weather = 73;      // materials: wetness, rain, puddles, time
 constexpr int End = 79; // one past the last planned slot
 static_assert(MatClass == LitConst::Reserved && LitConst::ReservedCount == 1,
               "the planned slot below the sun shadows is the reserved padding");
-static_assert(Night == LitConst::Planned + 1 && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
-              "the planned slots between the clouds and the water are the planned padding (70 free)");
+static_assert(CombatShadow == LitConst::Planned && Weather == LitConst::Planned + LitConst::PlannedCount - 1,
+              "the planned slots between the night and the water are the planned padding");
 static_assert(End == LitConst::Count, "every planned slot above the padding has landed");
 // std140 vec4 slots; GL 3.3 guarantees uniform blocks of 16384 bytes.
 static_assert(End * 16 <= 16384, "LitConstants stays within the GL minimum uniform block size");

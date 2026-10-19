@@ -365,6 +365,31 @@ LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning)
     return rig;
 }
 
+KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare)
+{
+    KeyLight key;
+    const float share = Clamp01(moonShare);
+    const float* toward = share > 0.0f ? in.towardMoon : in.towardSun;
+    for (int i = 0; i < 3; ++i)
+    {
+        key.toward[i] = toward[i];
+        key.skySunToward[i] = in.towardSun[i];
+    }
+    key.skySunElevationDeg = rig.sunElevationDeg;
+    if (share <= 0.0f)
+    {
+        key.radiance = rig.sun;
+        key.elevationDeg = rig.sunElevationDeg;
+        return key;
+    }
+    const float sinMoon = std::max(-1.0f, std::min(1.0f, in.towardMoon[1]));
+    key.elevationDeg = std::asin(sinMoon) * 180.0f / kPi;
+    key.radiance = rig.moon * share;
+    key.moonShare = share;
+    rig.moon = rig.moon * (1.0f - share);
+    return key;
+}
+
 float ShaftScatterLength(float fogEnd)
 {
     if (!(fogEnd > 0.0f))

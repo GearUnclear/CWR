@@ -387,6 +387,24 @@ while the post pass's haze runs (`AirMedium.hpp` `FogEdgeScale`; 0 is the classi
 block before the first upload changes nothing); yzw are free. Blended surfaces are hazed by the post
 pass with the depth of the opaque surface behind them.
 
+As built in B3 (a parallel lane on 706b9a3, ported onto 7b7e3e6): `Night` landed at 71 as planned and a
+second slot, `SkySun`, at 70 (free since A6), so B10's `litPlanned[4]` became `litSkySun`, `litNight`
+and `litPlanned[2]` for 72 and 73 (`LitConst::Planned` 72, `PlannedCount` 2; `LitConstPlanned` keeps
+`CombatShadow`, `Weather` and `Haze`, static_assert: `CombatShadow` is `Planned`); `Count` stays 78.
+`SunDir` and `Sun` (0, 1) now carry the key light, which under the moon key is the moon; the sky
+(the table and its twilight glow, the fog toward the sun, the warm side of the sky light, the lit
+clouds, the sun disk behind a cloud, the crowns' low-sun factors) reads the sun from `litSkySun`
+(xyz toward the sun, w its elevation), equal to `SunDir.xyz` and `Sun.w` whenever the sun is the
+key. Without it the dusk glow would jump to the moon's side wherever the moon key (sun 3 degrees
+under) and the sky table (sun above -9 degrees) overlap. `litNight` x is 1 while the physical lamps
+and low beams light the pass, y the lamp intensity per start metre, z the low beam's peak, w the
+moon key's share (the sky's sun radiance is 0 while it is above 0). The prototype's borrowed `w`
+lanes are not used.
+On the merged tree (B3 onto B8): `Haze` is at 78 and `Count` 79 as B8 built it, `SkySun` and `Night`
+take 70 and 71, the padding `litPlanned[2]` covers 72 and 73, and `LitConstPlanned` keeps
+`CombatShadow` and `Weather` (static_asserts: `CombatShadow` is `Planned`, `End` equals
+`LitConst::Count`).
+
 ### 3.4 Texture units
 
 Today: 0-1 material, 2 shadow array (compare sampler, F3 invariant), 3 horizon, 4 height,
@@ -1598,6 +1616,69 @@ gitignored).**
   a C++ mirror; self-levelling aim on flat and 14 deg slopes; star splat geometry; layout
   (`Night`).
 - **Effort**: 5 days.
+
+**Result (2026-10-18, uncommitted change on 7b7e3e6 in the scratch copy `gr-B3`, a parallel lane
+first built on 706b9a3 and ported onto B5, B2, B10 and B9; evidence in `tmp/integration/B3/` of the
+graphics-remaster worktree, gitignored).**
+
+- Built as the bullets above with these corrections. The moon key is `ComputeKeyLight` (`LightRig`)
+  with the share from `MoonKeyShare` (new `Graphics/Remaster/NightLights.{hpp,cpp}`): 0 unless the
+  A1 gate is on, faded in over 3 degrees above the sun and moon edges and 0.1 of phase; it moves that
+  share of F9's moon out of `litMoon` into the key slots and nothing else. The scene renders the
+  shadow pass for it (`Engine::RemasterMoonKey`, the frame's gate) from the moon's direction, with
+  B1's stock filter (no soft taps at a fiftieth of the noon sun). The sky stays on the sun through a
+  second slot, `SkySun` (3.3): B10's lit clouds and A7's table read the key slots, which the moon key
+  would otherwise move to the moon's side of a dusk sky.
+- Lamps and low beams are kinds of A6's tiled list (`physicalLight` in the lights piece): intensity
+  over d^2 + 0.25 (lamps 1.9 per start metre, headlights 800 at the hot spot, sub-knobs `nightLamp`
+  and `nightSpot`), a physical reach (where the strongest light falls to 0.002, at most the classic
+  10 start distances) that ends them and that the tiles bin them by, Oren-Nayar diffuse, leaves
+  wrapped with the crown normal, the sum linear outside the classic clamp and budget (the budget of 7
+  ranks the classic kinds among themselves). The aim is the lamp's heading pitched as the body is,
+  1% down (`LowBeamAim`), not the ground 25 m ahead. Owner exclusion is geometric (a fade from 1 to
+  0.25 m off the bulb and nothing behind the lamp's plane): a draw in an instanced run has no single
+  object to exclude by id. The `nightLights` gate also needs `lightTiles` (the model lives in the
+  tiled path). Correction to "spot colour from config": a headlight is white at its configured
+  colour's linear luminance (`PhysicalColour`); the configured rosy (0.9, 0.8, 0.8) turned the
+  khaki grass of a verge in the beam orange-tan (hue 39 deg, saturation 0.29 at `b3_jeep_side`;
+  white: hue 51, saturation 0.24, against the noon lawn's 53 and 0.35). Lamps keep F9b's colour.
+  So section 8's must-see "warm low beam" is not met: the beam is white by choice.
+- Every caller of `localLights` adds the physical sums: `shadeRemastered` and B5's `seaBody` (the
+  view direction, the linear light outside the clamp, the gleam). A review found `seaBody` without
+  them, so with `nightLights` on a lamp or a low beam lit the sea not at all (`b3_sea_beam`, a Jeep
+  on the shore facing the sea: the water ahead read 14 to 18 levels on, against the classic pool's
+  49 to 56 off). Fixed, it reads 39 to 87 ahead and 72 beside the Jeep, where the classic cone did not
+  reach (14), in the sea's own blue-grey as the classic pool. A unit test scans every program for it.
+- `LowBeamAim` and the low-beam pattern apply to every spotlight on a vehicle (`AttachedOnVehicle`),
+  not only to headlights: a reflector a config points down or up (an aircraft's, a boat's, a
+  searchlight's) is levelled to its heading at the body's slope, 1% down, and takes the hard top
+  edge. Not checked against the configs; restricting the aim to lamps near the body's forward axis
+  is the fix if one turns up.
+- `ParticleLight` (`FrameLights`) lights smoke with the same lamps and headlights in linear light
+  (`Object::DrawDecal` through `Engine::ParticleNightLight`; the classic loop skips those kinds
+  then): B4 reuses it. Stars are 5-vertex fans (`MakeStarSplat`) while the stars gate is on.
+- Pixels (1920x1080, scale 1.0, 4x MSAA): off against the base build is within the base build's own
+  off/on repeat at every view (hero `night_road_flat_drive_moonless` 22,193 against 22,163 pixels over
+  2 levels; night vision 0; the town with its fire differs by smoke and flame, as A6 found). With the
+  moon key at sun -7.8 deg the dusk sky is the same on and off (mean (57.1, 30.0, 31.4) against
+  (57.1, 30.0, 31.3) west, the stars added). On: the hero's hot spot 193 levels (off 106), the far
+  field away from the beam 27 to 18 levels; the moonless town square (`b3_town_lamps`) loses its
+  flat khaki wash (lawn 122 to 42 levels, saturation 0.11 to 0.03) and halves its mean (91 to 45),
+  and the moonlit one with its fire (`b3_town_night`, 93 to 53) gains moon shadows, lamp-lit facades
+  and fire-lit smoke; moon glints on the sea (B5's sun lobes read the key); nothing by day or under
+  night vision.
+- Cost (one reading, 4060 Ti, a B4 lane game running; GPU frame minimum on minus off): moonless road
+  +0.37 ms, moonlit road +0.42 (the moon's shadow pass 0.17), town lamps +0.35, town night +0.68,
+  moon sky +0.75 (pass 0.27); the base build's same frame twice spread -1.03 to +0.79 ms in the same
+  kind of run, so only the shadow pass (0.16 to 0.27 ms, a section that exists only under the moon
+  key) is resolved. The lane's earlier three-round reading on 706b9a3 (quiet but for one foreign game)
+  was +0.01 to +0.55 ms.
+- Gate: build 0 new warnings, touched files clang-format clean, the gate tags plus the landed
+  lanes' tags 626/626, the full suite with the 6 known localisation failures only, fifteen mutations
+  red (among them the sky reading the key, the key handing the sky the moon, the crowns' low sun from
+  the key, the white headlight in C++ and GLSL, the slot order) and four more for the sea fix (the
+  sea's physical light, its view direction, its gleam, a caller without the term), smoke_abel 1/1
+  (KHR_debug ids 131154, 131169 and 131218 only).
 
 ### B4. combat (emissive combat light with shadows)
 

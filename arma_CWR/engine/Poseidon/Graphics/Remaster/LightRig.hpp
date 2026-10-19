@@ -158,6 +158,12 @@ struct LightingTuning
     // gain - 1. Below 0 the weather sets it (4 in clear air, where only
     // narrow beams through gaps show, 2.5 in mist).
     float volGain = -1.0f;
+    // Night lights (features.nightLights, NightLights.hpp): the street lamps'
+    // and the headlights' strength, times the lamp intensity per start metre
+    // and the low beam's hot-spot intensity (FrameLights.hpp
+    // kLampIntensityPerStart, kLowBeamPeak).
+    float nightLamp = 1.0f;
+    float nightSpot = 1.0f;
     // Frame gates (FeatureGates.hpp): on runs an enabled feature only when it
     // can show; off (gates=0) runs every enabled feature on every frame, for
     // debugging.
@@ -224,6 +230,39 @@ constexpr float kShaderDebugAlbedo = 4.0f;
 float ShaderDebugView(int debugView);
 
 LightRig ComputeLightRig(const LightRigInputs& in, const LightingTuning& tuning);
+
+// The key light: what the shader's sun slots carry and what the shadow map,
+// the terrain horizon, the cloud shadows and the glossy highlight follow. By
+// day and in twilight it is the sun. At night, with the moon key on (the
+// moonShadows switch and its gate, B3), it is the moon: `moonShare` (0..1,
+// NightLights.hpp MoonKeyShare) of the rig's moon moves out of the shadowless
+// moon term into the key, so the moon keeps F9's calibration (kMoonFull, its
+// chroma, its sky fill) and only gains shadows; the rest stays in rig.moon.
+// The sun is fully set where the share can be above 0 (the gate needs it 3
+// degrees under the horizon; the rig's sun is out by 1.5 degrees under).
+//
+// The sky does not follow the key: the sky table and its aureole, the fog
+// toward the sun, the warm side of the sky light on surfaces, the lit clouds
+// and the sun disk stay on the sun whatever the key (the sky table is still
+// near full strength 3 degrees under the horizon, SkyDayFade). The key carries
+// the sun's own direction and elevation for them (`skySunToward`,
+// `skySunElevationDeg`; the shaders' litSkySun), equal to `toward` and
+// `elevationDeg` whenever the sun is the key.
+struct KeyLight
+{
+    float toward[3] = {0.0f, 1.0f, 0.0f}; // unit, y up
+    Rgb radiance;                         // linear
+    float elevationDeg = 90.0f;
+    float moonShare = 0.0f; // 0: the sun is the key
+    float skySunToward[3] = {0.0f, 1.0f, 0.0f};
+    float skySunElevationDeg = 90.0f;
+    bool IsMoon() const { return moonShare > 0.0f; }
+};
+
+// The key light for the frame. Moves `moonShare` of rig.moon into the key when
+// it is above 0 (rig.moon keeps the rest); leaves the rig alone otherwise. The
+// sky's sun is the sun either way.
+KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare);
 
 // Sun chroma at an elevation (degrees), normalised to unit luminance.
 Rgb SunChroma(float elevationDeg, float warmth);

@@ -43,11 +43,14 @@ constexpr FeatureInfo kFeatures[] = {
     {Feature::LowSunRig, "lowSunRig", "Low-sun rig", "shade", "Light and shadow", "B2", true, &FS::lowSunRig, "world"},
     {Feature::CrownCanopy, "crownCanopy", "Tree crowns as a canopy", "shade", "Light and shadow", "B2", true,
      &FS::crownCanopy, "world"},
-    {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", false,
-     &FS::nightLights, ""},
-    {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", false, &FS::moonShadows,
-     ""},
-    {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", false, &FS::stars, ""},
+    // B3 (night): the lamps and low beams shade in the world pass, the moon's
+    // shadow map renders in the shadow depth pass, the stars draw with the sky
+    // (part of the world section).
+    {Feature::NightLights, "nightLights", "Lamps and low beams", "night", "Night and combat", "B3", true,
+     &FS::nightLights, "world"},
+    {Feature::MoonShadows, "moonShadows", "Moon shadows", "night", "Night and combat", "B3", true, &FS::moonShadows,
+     "shadow"},
+    {Feature::Stars, "stars", "Stars", "night", "Night and combat", "B3", true, &FS::stars, "world"},
     {Feature::CombatLights, "combatLights", "Combat light", "combat", "Night and combat", "B4", false,
      &FS::combatLights, ""},
     {Feature::CombatShadows, "combatShadows", "Combat light shadows", "combat", "Night and combat", "B4", false,
@@ -212,6 +215,10 @@ struct KeyTable
             MakeSubKnob(Feature::AirBeams, "volGain", "Beam contrast",
                         "-1 = from the weather (4 in clear air, 2.5 in mist); 1 = no boost of the shafts", &LT::volGain,
                         -1.0f, 6.0f),
+            MakeSubKnob(Feature::NightLights, "nightLamp", "Street lamp strength",
+                        "the lamps' intensity; 0 = street lamps light nothing", &LT::nightLamp, 0.0f, 4.0f),
+            MakeSubKnob(Feature::NightLights, "nightSpot", "Headlight strength",
+                        "the low beam's hot spot; 0 = headlights light nothing", &LT::nightSpot, 0.0f, 4.0f),
         };
         rows.insert(rows.end(), std::begin(subKnobs), std::end(subKnobs));
         count = static_cast<int>(rows.size());

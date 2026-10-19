@@ -17,6 +17,7 @@
 #include <Poseidon/Graphics/Core/PerfCounters.hpp>
 #include <Poseidon/Graphics/Core/UboMirror.hpp>
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
+#include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -261,6 +262,11 @@ void EngineGL33::UpdateLightTiles()
     // own list is chosen from. Positions camera-relative as in UploadLitLights;
     // colours as authored, the draw's night factor scales them in the shader.
     const float* camPos = _frameState.cameraPos;
+    // With the physical low beams on (nightLights, B3) a headlight is aimed
+    // from its vehicle's body (FrameLights.hpp LowBeamAim); off, every light
+    // keeps the model's beam axis.
+    const bool aimBeams =
+        _featureGates.computed && _featureGates.frame == frame && _featureGates[rm::Feature::NightLights].on;
     t.lights.clear();
     const LightList& active = GScene->ActiveLights();
     for (int i = 0; i < active.Size(); i++)
@@ -294,7 +300,16 @@ void EngineGL33::UpdateLightTiles()
         if (auto* attached = dynamic_cast<AttachedOnVehicle*>(light))
         {
             if (const Object* owner = attached->AttachedOn())
+            {
                 f.owner = static_cast<std::uint32_t>(owner->ID());
+                if (spot && aimBeams)
+                {
+                    const Vector3 body = owner->Direction();
+                    const float lampDir[3] = {f.dir[0], f.dir[1], f.dir[2]};
+                    const float bodyForward[3] = {body.X(), body.Y(), body.Z()};
+                    fl::LowBeamAim(lampDir, bodyForward, f.dir);
+                }
+            }
         }
         t.lights.push_back(f);
     }
@@ -339,7 +354,16 @@ void EngineGL33::UpdateLightTiles()
     const int tilesY = (targetH + fl::kTileSize - 1) / fl::kTileSize;
     if (t.grid.tilesX != tilesX || t.grid.tilesY != tilesY)
         fl::ResizeTileGrid(t.grid, targetW, targetH);
-    fl::BinLightsToTiles(t.lights, view, t.grid);
+    // With the physical model on, lamps and headlights are binned by their
+    // physical reach (the shaders end them there too).
+    fl::PhysicalLightParams physical;
+    if (aimBeams)
+    {
+        const rm::NightConstants night = rm::ComputeNightConstants(_lighting, _featureGates, true);
+        physical.lampPerStart = night.night[1];
+        physical.spotPeak = night.night[2];
+    }
+    fl::BinLightsToTiles(t.lights, view, t.grid, aimBeams ? &physical : nullptr);
     fl::PackFrameLights(t.lights, t.texels);
 
     // Upload what changed since the last build (a still camera sends nothing).
@@ -633,8 +657,10 @@ void EngineGL33::UploadLitFrameConstants()
     if (!_remasterPrograms || !GScene)
     {
         UpdateFeatureGates(nullptr);
-        // Classic programs light each draw from its own list.
+        // Classic programs light each draw from its own list, by the classic
+        // model.
         _lightTilesActive = false;
+        _nightLightsActive = false;
         return;
     }
     if (_terrainMapDirty)
@@ -678,6 +704,11 @@ void EngineGL33::UploadLitFrameConstants()
         rig = rm::ComputeLightRig(in, _lighting);
     }
     _lightRigSun = Color(rig.sun.r, rig.sun.g, rig.sun.b, 1.0f);
+    // The key light (B3): the sun, or at night with the moon key the moon,
+    // which then also leaves the shadowless moon term. The scene renders the
+    // shadow map from the key (RemasterMoonKey).
+    const bool gatesNow = _featureGates.computed && _featureGates.frame == GetFrameCounter();
+    const rm::KeyLight key = rm::ComputeKeyLight(in, rig, gatesNow ? rm::MoonKeyShare(_featureGates) : 0.0f);
 
     // The tiled light list: built once per frame while its gate is on, and
     // then read by every draw of the world's passes instead of the draw's own
@@ -704,8 +735,11 @@ void EngineGL33::UploadLitFrameConstants()
         lightCount[2] = sun->NightEffect();
     }
 
-    SetSlot(LitConst::SunDir, toSun.X(), toSun.Y(), toSun.Z(), _sunEnabled ? 1.0f : 0.0f);
-    SetSlot(LitConst::Sun, rig.sun.r, rig.sun.g, rig.sun.b, rig.sunElevationDeg);
+    SetSlot(LitConst::SunDir, key.toward[0], key.toward[1], key.toward[2], _sunEnabled ? 1.0f : 0.0f);
+    SetSlot(LitConst::Sun, key.radiance.r, key.radiance.g, key.radiance.b, key.elevationDeg);
+    // The sky reads the sun whatever the key (the sky table, its aureole, the
+    // fog toward the sun, the warm side of the sky light, the lit clouds).
+    SetSlot(LitConst::SkySun, key.skySunToward[0], key.skySunToward[1], key.skySunToward[2], key.skySunElevationDeg);
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, rig.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
     // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
@@ -746,7 +780,8 @@ void EngineGL33::UploadLitFrameConstants()
                          (_lighting.terrainShadows > 0.0f || _lighting.terrainOcclusion > 0.0f);
     if (terrain)
     {
-        float azimuth = std::atan2(toSun.X(), toSun.Z()) / (2.0f * 3.14159265f);
+        // The hills shadow the key light (the moon under the moon key).
+        float azimuth = std::atan2(key.toward[0], key.toward[2]) / (2.0f * 3.14159265f);
         if (azimuth < 0.0f)
             azimuth += 1.0f;
         const float f = azimuth * static_cast<float>(rm::TerrainHorizonMap::kDirections);
@@ -819,8 +854,40 @@ void EngineGL33::UploadLitFrameConstants()
     // (litHaze.x) while the haze replaces the fog before it.
     _lightRigExposure = rig.exposure;
     UpdateAirMedium();
+    // The night (B3): the physical lamps and low beams, while their gate is on
+    // and the tiled list lighting the pass; zero otherwise, which leaves the
+    // classic model for every light. w: the moon key's share.
+    const rm::NightConstants night =
+        rm::ComputeNightConstants(_lighting, _featureGates, _lightTilesActive, key.moonShare);
+    SetSlot(LitConst::Night, night.night[0], night.night[1], night.night[2], night.night[3]);
+    _nightLightsActive = night.night[0] > 0.5f;
     FlushLitConstants();
     BindLightingTextures();
+}
+
+bool EngineGL33::RemasterMoonKey() const
+{
+    // The frame's gate, so every caller of a frame agrees (the scene's shadow
+    // pass asks after the passes that uploaded the key).
+    return _lightingActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
+           rm::MoonKeyShare(_featureGates) > 0.0f;
+}
+
+bool EngineGL33::ParticleNightLight(Vector3Par pos, float linear[3]) const
+{
+    linear[0] = linear[1] = linear[2] = 0.0f;
+    if (!_nightLightsActive || _lightTiles.frame != GetFrameCounter())
+        return false;
+    // The tiled list's lights are camera-relative to the frame's camera, as
+    // the particle is drawn from (the same world pass).
+    const float* camPos = _frameState.cameraPos;
+    const float p[3] = {pos.X() - camPos[0], pos.Y() - camPos[1], pos.Z() - camPos[2]};
+    fl::PhysicalLightParams params;
+    const rm::NightConstants night = rm::ComputeNightConstants(_lighting, _featureGates, true);
+    params.lampPerStart = night.night[1];
+    params.spotPeak = night.night[2];
+    fl::ParticleLight(_lightTiles.lights, p, params, linear);
+    return true;
 }
 
 void EngineGL33::SetLitSlot(int slot, float x, float y, float z, float w)

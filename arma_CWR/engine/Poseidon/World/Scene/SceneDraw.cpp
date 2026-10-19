@@ -2014,7 +2014,9 @@ void Scene::DrawObjectsAndShadowsPass2()
             // degrees below the horizon: keep its shadows live that long (a
             // skipped pass would leave a frozen map in view).
             const bool remasterSunUp = GEngine->LightingRemasterActive() && _mainLight->SunDirection().Y() < 0.026f;
-            if (sunFactor > 0.01f || remasterSunUp)
+            // At night the remastered moon key (moonShadows) casts the shadows:
+            // the pass renders from the moon (SceneShadowPass.cpp).
+            if (sunFactor > 0.01f || remasterSunUp || GEngine->RemasterMoonKey())
             {
                 RenderShadowMapDepthPass(nDraw);
             }

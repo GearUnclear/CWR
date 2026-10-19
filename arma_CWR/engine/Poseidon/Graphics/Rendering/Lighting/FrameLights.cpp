@@ -56,9 +56,11 @@ bool LightIsDark(const FrameLight& light)
     return true;
 }
 
-LightSphere LightBounds(const FrameLight& light)
+LightSphere LightBounds(const FrameLight& light, const PhysicalLightParams* physical)
 {
-    return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, kRangeFactor * std::fabs(light.start)};
+    const float r = physical && UsesPhysicalModel(light.kind) ? PhysicalReach(light, *physical)
+                                                              : kRangeFactor * std::fabs(light.start);
+    return LightSphere{{light.pos[0], light.pos[1], light.pos[2]}, r};
 }
 
 void RankFrameLights(std::vector<FrameLight>& lights, int capacity)
@@ -81,13 +83,13 @@ void ResizeTileGrid(TileGrid& grid, int targetW, int targetH, int tileSize)
     grid.litTiles = 0;
 }
 
-bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4])
+bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4], const PhysicalLightParams* physical)
 {
     const float vx0 = view.viewport[0], vy0 = view.viewport[1];
     const float vw = view.viewport[2], vh = view.viewport[3];
     if (vw <= 0.0f || vh <= 0.0f)
         return false;
-    const LightSphere s = LightBounds(light);
+    const LightSphere s = LightBounds(light, physical);
     float v[3];
     for (int r = 0; r < 3; ++r)
         v[r] = view.rot[r][0] * s.c[0] + view.rot[r][1] * s.c[1] + view.rot[r][2] * s.c[2];
@@ -135,7 +137,8 @@ bool LightScreenRect(const FrameLight& light, const TileView& view, float rect[4
     return true;
 }
 
-void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid)
+void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& view, TileGrid& grid,
+                      const PhysicalLightParams* physical)
 {
     std::fill(grid.indices.begin(), grid.indices.end(), std::uint8_t{0});
     grid.refs = 0;
@@ -148,7 +151,7 @@ void BinLightsToTiles(const std::vector<FrameLight>& lights, const TileView& vie
     for (int i = 0; i < n; ++i)
     {
         float rect[4];
-        if (!LightScreenRect(lights[static_cast<size_t>(i)], view, rect))
+        if (!LightScreenRect(lights[static_cast<size_t>(i)], view, rect, physical))
             continue;
         const int tx0 = std::clamp(static_cast<int>(std::floor(rect[0] / ts)), 0, grid.tilesX - 1);
         const int ty0 = std::clamp(static_cast<int>(std::floor(rect[1] / ts)), 0, grid.tilesY - 1);
@@ -261,6 +264,143 @@ void ClassicBudgetWeights(const float* importance, int n, float* weight)
     const float band = std::max(edgeIn - edgeOut, kClassicBudgetSoftness * edgeIn);
     for (int k = 0; k < n; ++k)
         weight[k] = n > budget ? std::clamp(0.5f + (importance[k] - mid) / band, 0.0f, 1.0f) : 1.0f;
+}
+
+bool UsesPhysicalModel(FrameLightKind kind)
+{
+    return kind == FrameLightKind::Lamp || kind == FrameLightKind::Spot;
+}
+
+namespace
+{
+
+float Smoothstep(float e0, float e1, float x)
+{
+    const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+float Dot(const float a[3], const float b[3])
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+} // namespace
+
+float LowBeamPattern(const float toPoint[3], const float beam[3])
+{
+    const float c = Dot(toPoint, beam);
+    if (c <= 0.0f)
+        return 0.0f;
+    // The beam's frame: right = up x beam, u = beam x right (y up).
+    float right[3] = {beam[2], 0.0f, -beam[0]};
+    const float rl = std::sqrt(std::max(right[0] * right[0] + right[2] * right[2], 1e-12f));
+    right[0] /= rl;
+    right[2] /= rl;
+    const float u[3] = {beam[1] * right[2] - beam[2] * right[1], beam[2] * right[0] - beam[0] * right[2],
+                        beam[0] * right[1] - beam[1] * right[0]};
+    const float ah = std::atan2(Dot(toPoint, right), c);
+    const float av = std::atan2(Dot(toPoint, u), c);
+    const float cut = 1.0f - Smoothstep(kLowBeamCutLow, kLowBeamCutHigh, av);
+    const float hv = (av - kLowBeamHotBand) / kLowBeamHotWidth;
+    const float vert = std::exp(-hv * hv) + kLowBeamFloor * Smoothstep(kLowBeamFloorEnd, kLowBeamFloorStart, av);
+    const float h1 = ah / kLowBeamCoreWidth;
+    const float h2 = ah / kLowBeamSpillWidth;
+    const float horiz = std::exp(-h1 * h1) + kLowBeamSpill * std::exp(-h2 * h2);
+    return vert * horiz * cut;
+}
+
+void LowBeamAim(const float lampDir[3], const float bodyForward[3], float out[3])
+{
+    float hx = lampDir[0], hz = lampDir[2];
+    float hl = std::sqrt(hx * hx + hz * hz);
+    const float fl = std::sqrt(bodyForward[0] * bodyForward[0] + bodyForward[2] * bodyForward[2]);
+    if (hl < 1e-4f)
+    {
+        // A lamp pointing straight up or down: take the body's heading.
+        hx = bodyForward[0];
+        hz = bodyForward[2];
+        hl = fl;
+    }
+    if (hl < 1e-4f || fl < 1e-4f)
+    {
+        // No heading at all (a body pointing straight up): keep the model's axis.
+        const float l = std::sqrt(std::max(Dot(lampDir, lampDir), 1e-12f));
+        for (int i = 0; i < 3; ++i)
+            out[i] = lampDir[i] / l;
+        return;
+    }
+    hx /= hl;
+    hz /= hl;
+    // The body's slope along the lamp's heading (its forward slope projected
+    // onto that heading), then the tilt under it.
+    const float along = (bodyForward[0] * hx + bodyForward[2] * hz) / fl;
+    const float slope = bodyForward[1] / fl * along - kLowBeamTilt;
+    const float l = std::sqrt(1.0f + slope * slope);
+    out[0] = hx / l;
+    out[1] = slope / l;
+    out[2] = hz / l;
+}
+
+float PhysicalReach(const FrameLight& light, const PhysicalLightParams& params)
+{
+    const float peak = light.IsSpot() ? params.spotPeak : params.lampPerStart * light.start;
+    const float classic2 = kRangeFactor * kRangeFactor * light.start * light.start;
+    return std::sqrt(std::min(classic2, std::max(peak, 0.0f) / kPhysicalMinIrradiance));
+}
+
+void PhysicalIrradiance(const FrameLight& light, const float p[3], const PhysicalLightParams& params, float out[3])
+{
+    out[0] = out[1] = out[2] = 0.0f;
+    if (!UsesPhysicalModel(light.kind))
+        return;
+    const float rel[3] = {p[0] - light.pos[0], p[1] - light.pos[1], p[2] - light.pos[2]};
+    const float d2 = Dot(rel, rel);
+    const float reach = PhysicalReach(light, params);
+    const float end2 = reach * reach;
+    if (d2 >= end2)
+        return;
+    const float d = std::sqrt(std::max(d2, 1e-12f));
+    float intensity = 0.0f;
+    if (light.IsSpot())
+    {
+        const float toPoint[3] = {rel[0] / d, rel[1] / d, rel[2] / d};
+        intensity = params.spotPeak * LowBeamPattern(toPoint, light.dir);
+    }
+    else
+    {
+        intensity = params.lampPerStart * light.start;
+    }
+    intensity *= (1.0f - Smoothstep(0.5f * end2, end2, d2)) * Smoothstep(kPhysicalNearStart, kPhysicalNearEnd, d);
+    const float e = intensity / (d2 + kPhysicalSoftening);
+    float colour[3];
+    PhysicalColour(light, colour);
+    for (int i = 0; i < 3; ++i)
+        out[i] = colour[i] * e;
+}
+
+void PhysicalColour(const FrameLight& light, float out[3])
+{
+    for (int i = 0; i < 3; ++i)
+        out[i] = std::pow(std::max(light.diffuse[i], 0.0f), 2.2f);
+    if (!light.IsSpot())
+        return;
+    // The shaders' kLuma (Rec. 709).
+    const float y = 0.2126f * out[0] + 0.7152f * out[1] + 0.0722f * out[2];
+    out[0] = out[1] = out[2] = y;
+}
+
+void ParticleLight(const std::vector<FrameLight>& lights, const float p[3], const PhysicalLightParams& params,
+                   float out[3])
+{
+    out[0] = out[1] = out[2] = 0.0f;
+    for (const FrameLight& l : lights)
+    {
+        float e[3];
+        PhysicalIrradiance(l, p, params, e);
+        for (int i = 0; i < 3; ++i)
+            out[i] += e[i];
+    }
 }
 
 } // namespace Poseidon::lighting

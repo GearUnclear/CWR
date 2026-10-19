@@ -1,6 +1,9 @@
 #include <PoseidonGL33/EngineGL33.hpp>
+#include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+
+#include <cstdint>
 
 inline int FracAlpha(float a)
 {
@@ -217,6 +220,14 @@ void EngineGL33::DrawPoints(int beg, int end)
         return;
     }
 
+    // The remastered stars (B3, the stars switch and its night gate; the
+    // frame's gate as last computed, so the sky drawn before the world's first
+    // pass may read the previous frame's): a soft splat with a faint colour
+    // per star (NightLights.hpp MakeStarSplat) instead of the two-pixel
+    // bilinear dot.
+    const bool splats = _lightingActive && !_nightVision && !_portraitTargetSize && _featureGates.computed &&
+                        _featureGates[Poseidon::remaster::Feature::Stars].on;
+
     for (int i = beg; i < end; i++)
     {
         if (_mesh->Clip(i) & ClipAll)
@@ -229,6 +240,33 @@ void EngineGL33::DrawPoints(int beg, int end)
         if (color.A8() < 8)
         {
             continue; // do not draw stars that are not visible
+        }
+
+        if (splats)
+        {
+            const Poseidon::remaster::StarSplat s =
+                Poseidon::remaster::MakeStarSplat(v.pos[0], v.pos[1], color.A8(), static_cast<std::uint32_t>(i));
+            // The whole splat on screen, or none of it (as the dot below).
+            if (s.x[1] < 0.0f || s.y[1] < 0.0f || s.x[3] > _w || s.y[3] > _h)
+            {
+                continue;
+            }
+            Color base(color.R8() / 255.0f * s.tint[0], color.G8() / 255.0f * s.tint[1],
+                       color.B8() / 255.0f * s.tint[2]);
+            base.SaturateMinMax();
+            TLVertex fan[5];
+            for (int c = 0; c < 5; c++)
+            {
+                fan[c] = v;
+                fan[c].pos[0] = s.x[c];
+                fan[c].pos[1] = s.y[c];
+                fan[c].color = PackedColorRGB(PackedColor(base), FracAlpha(s.alpha[c]));
+                fan[c].specular = PackedColor(0xff000000); // no fog, as the dot
+            }
+            static const VertexIndex fanIndices[6] = {0, 1, 2, 3, 4, 1};
+            AddVertices(fan, 5);
+            QueueFan(fanIndices, 6);
+            continue;
         }
 
         // calculate alpha in TL, TR, BL, BR corners

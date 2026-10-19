@@ -493,13 +493,15 @@ void main() {
         vec3 tau = tauAir + vec3(mistTau);
         vec3 T = exp(-tau);
         float vis = clamp(air.b, 0.0, 1.0);
-        float sunOn = smoothstep(-0.035, 0.0175, litSunDir.y) * litSunDir.w;
+        // The air, like the fog it replaces, stays on the sun (B3): under the
+        // moon key litSunDir and litSun carry the moon, the sky's sun is set.
+        float sunOn = smoothstep(-0.035, 0.0175, skySunDir().y) * litSunDir.w;
         vec3 skyLim = toLinear(airSkyLimit(rel));
         float skyLum = dot(skyLim, kLuma);
         vec3 zen = litZenith.rgb / max(dot(litZenith.rgb, kLuma), 1e-4);
         vec3 airAmb = mix(zen * (skyLum * kAirHazeShadowAmbient), skyLim, mix(1.0, vis, sunOn));
-        vec3 sunL = litSun.rgb * (litZenith.w * sunOn);
-        float cs = dot(dir, litSunDir.xyz);
+        vec3 sunL = skySunRadiance() * (litZenith.w * sunOn);
+        float cs = dot(dir, skySunDir());
         vec3 mistAmb = mix(vec3(skyLum), skyLim, 0.6) * mix(0.62, 0.85, vis);
         vec3 mistSun = sunL * ((0.10 + 0.07 * airHG(cs, 0.5)) * vis);
         vec3 scat = (tauAir * airAmb + vec3(mistTau) * (mistAmb + mistSun)) / max(tau, vec3(1e-6)) * (1.0 - T);

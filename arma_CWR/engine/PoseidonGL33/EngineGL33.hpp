@@ -706,6 +706,8 @@ class EngineGL33 : public Engine
         return true;
     }
     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
+    bool RemasterMoonKey() const override;
+    bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
@@ -862,6 +864,10 @@ class EngineGL33 : public Engine
     // instanced runs (LocalLightsFromTiles). Decided at each world 3D pass from
     // the frame's gate, cleared at EndWorldScene.
     bool _lightTilesActive = false;
+    // The physical lamps and low beams light this world pass (LitConst::Night
+    // x, the nightLights gate with the tiled list): particles take them too
+    // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
+    bool _nightLightsActive = false;
     void InitLightTiles();
     void DeinitLightTiles();
     // Builds, bins and uploads the list (once per frame).

@@ -405,12 +405,13 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
     // Classic keeps the shadow direction at least 11.5 degrees above the
     // horizon (LightSun::Recalculate). The remastered lighting shades with the
     // true sun, so its shadows follow it down to 4 degrees: full-length evening
-    // shadows that line up with the lit and shaded sides of every object.
+    // shadows that line up with the lit and shaded sides of every object. At
+    // night the remastered moon key (moonShadows) casts them from the moon.
     Vector3 sd = _mainLight->ShadowDirection();
     if (GEngine->LightingRemasterActive())
     {
         constexpr float kMinShadowSinElevation = 0.0698f; // sin(4 deg)
-        sd = _mainLight->SunDirection();
+        sd = GEngine->RemasterMoonKey() ? _mainLight->MoonDirection() : _mainLight->SunDirection();
         if (sd.Y() > -kMinShadowSinElevation)
         {
             const float horiz = std::sqrt(std::max(sd.X() * sd.X() + sd.Z() * sd.Z(), 1e-8f));
