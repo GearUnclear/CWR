@@ -529,9 +529,11 @@ vec3 camEncode(vec3 lin) { return camFold(lin * litCamera.w); }
 // of the fold's top.
 // The sun disk under the camera (PhotoCamera.hpp kSunDiscRadiusDeg,
 // kSunDiscLevel): its angular radius (radians) and the light of its core,
-// pre-exposed (past the curve's white at any exposure).
+// pre-exposed (past the curve's white at any exposure), and how far its
+// colour goes to white (kSunDiscWhite).
 const float kCamSunRadius = 0.007854; // kSunDiscRadiusDeg
 const float kCamSunLevel = 12.0;      // kSunDiscLevel
+const float kCamSunWhite = 0.85;      // kSunDiscWhite
 
 // A lit fragment's radiance on the display: the shipped tonemap with the
 // display saturation (litFlags.w), or under the camera the scene light itself
@@ -1095,21 +1097,39 @@ vec3 shadeRemastered(vec3 albedo, bool terrain, out float ambientShare) {
 // Finish: alpha, the night eye and fog, the tail every main ends with.
 static const char s_psRemasterFinish[] = R"(
 // The sun disk under the photoreal camera (sky mode 3; PhotoCamera.hpp
-// kSunDiscRadiusDeg, kSunDiscLevel): a disc of kCamSunRadius around the
-// sun's direction, anti-aliased over its rim, at kCamSunLevel in the colour of
-// the sunlight through the air; its glow is the sky table's aureole and the
-// camera's bloom. Display coded, alpha its coverage (the sprite blends by
-// alpha, so outside the disc the sky stays as the dome drew it).
+// kSunDiscRadiusDeg, kSunDiscLevel, kSunDiscWhite): a disc of kCamSunRadius
+// around the sun's direction, anti-aliased over its rim, at kCamSunLevel in the
+// colour of the sunlight through the air taken kCamSunWhite of the way to white
+// (from 4 degrees up; a sensor clips every channel of the sun, so it burns
+// white, and the hue-keeping curve held it at a pale peach); its glow is the
+// sky's roll-off toward the sun (camSkyRolloff), the aureole and the bloom.
+// The disc is round on the screen: the offset to the sun in pixels (the view
+// ray's change per pixel solved in the sky's tangent plane) times the angle of
+// a pixel of the same solid angle. The angle itself drew the rectilinear
+// lens's oval near the frame's corners. Display coded, alpha its coverage
+// (the sprite blends by alpha, so outside the disc the sky stays as the dome
+// drew it).
 vec4 camSunDisc() {
     if (dot(vWorldRel, vWorldRel) <= 0.0 || skySunElevation() < -1.0) return vec4(0.0);
     vec3 d = normalize(vWorldRel);
     vec3 s = skySunDir();
     float ang = atan(length(cross(d, s)), dot(d, s));
     float aa = max(fwidth(ang), 1e-5);
+    vec3 dx = dFdx(d), dy = dFdy(d);
+    float a11 = dot(dx, dx), a12 = dot(dx, dy), a22 = dot(dy, dy);
+    float det = a11 * a22 - a12 * a12;
+    if (det > 1e-24) {
+        vec3 o = s - d;
+        float b1 = dot(dx, o), b2 = dot(dy, o);
+        vec2 px = vec2(a22 * b1 - a12 * b2, a11 * b2 - a12 * b1) / det;
+        aa = sqrt(sqrt(det)); // the angle of a pixel of the same solid angle
+        ang = length(px) * aa;
+    }
     float disc = 1.0 - smoothstep(kCamSunRadius - aa, kCamSunRadius + aa, ang);
     vec3 sun = skySunRadiance();
     float pk = max(sun.r, max(sun.g, sun.b));
     vec3 chroma = pk > 1e-6 ? sun / pk : vec3(1.0);
+    chroma = mix(chroma, vec3(1.0), kCamSunWhite * smoothstep(0.0, 4.0, skySunElevation()));
     return vec4(toDisplay(chroma * kCamSunLevel), disc);
 }
 

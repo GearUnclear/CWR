@@ -348,6 +348,40 @@ void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float
         out[i] = kFlameRgb[i] * e;
 }
 
+void BlackBodyRgb(float temperatureK, float out[3])
+{
+    const float t = Clamp(temperatureK, 1000.0f, 3000.0f);
+    out[0] = 1.0f;
+    out[1] = std::max(0.155f + (t - 1500.0f) * 0.000207f, 0.05f);
+    out[2] = 0.15f * std::pow(Clamp((t - 1900.0f) / 1100.0f, 0.0f, 1.0f), 1.5f);
+}
+
+bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3])
+{
+    if (!(hottestK >= kFireballTableK && hottestK <= kFireballTableMaxK))
+        return false;
+    const float t = std::max(temperatureK, 0.0f);
+    const float fade = Clamp((t - kFireballGlowFromK) / (kFireballGlowFullK - kFireballGlowFromK), 0.0f, 1.0f);
+    const float glow = kFireballEmission *
+                       std::exp(kFireballWienK * (1.0f / kFireballRefK - 1.0f / std::max(t, 1.0f))) * fade * fade *
+                       (3.0f - 2.0f * fade);
+    float body[3];
+    BlackBodyRgb(t, body);
+    for (int i = 0; i < 3; ++i)
+    {
+        albedo[i] = kFireballSoot[i];
+        // A soft per-channel saturation: the hottest core goes white-yellow.
+        emit[i] = kFireballEmitCap * (1.0f - std::exp(-body[i] * glow / kFireballEmitCap));
+    }
+    return true;
+}
+
+float CombatTwilight(float sunElevationDeg)
+{
+    const float above = std::max(sunElevationDeg - kTwilightNightDeg, 0.0f);
+    return std::max(std::pow(10.0f, -above / kTwilightDecadeDeg), kTwilightFloor);
+}
+
 void KeepHueUnderOne(float rgb[3])
 {
     const float peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
@@ -364,7 +398,7 @@ float CombatSmokeReach(float core, float albedo)
 
 float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo)
 {
-    if (kind != CombatLightKind::Fire)
+    if (kind != CombatLightKind::Fire && kind != CombatLightKind::Explosion)
         return 1.0f;
     const float inside = std::max(d - s.core, 0.0f);
     return std::exp(-inside / CombatSmokeReach(s.core, albedo));

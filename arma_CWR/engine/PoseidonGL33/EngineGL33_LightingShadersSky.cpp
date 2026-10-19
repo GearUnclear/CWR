@@ -135,13 +135,21 @@ vec3 skyClear(vec3 d, vec3 baseDisp, vec3 glowDisp, vec3 capDisp) {
 // (PhotoCamera.hpp kSkyRolloffKnee, kSkyRolloffCap): only the sun's disc
 // clips, and the glow round a low sun is a smooth golden gradient instead of
 // a ragged white plateau where the sky's clouds and the aureole crossed white.
-const float kCamSkyKnee = 1.2; // kSkyRolloffKnee
-const float kCamSkyCap = 2.4;  // kSkyRolloffCap
-vec3 camSkyRolloff(vec3 lin) {
+// Toward the sun (the unit direction d) the cap rises to kCamSkySunCap, past
+// white, as 1 / (1 + 2 (1 - cos) / kCamSkyGlowRad^2) (PhotoCamera.hpp
+// kSkySunCap, kSkySunGlowRad, SkyRolloffToward): the sky round the sun burns
+// white and its glare falls off smoothly; one cap everywhere drew a flat cream
+// plateau out to about 2 degrees round a pale disc.
+const float kCamSkyKnee = 1.2;      // kSkyRolloffKnee
+const float kCamSkyCap = 2.4;       // kSkyRolloffCap
+const float kCamSkySunCap = 10.0;   // kSkySunCap
+const float kCamSkyGlowRad = 0.021; // kSkySunGlowRad
+vec3 camSkyRolloff(vec3 lin, vec3 d) {
     if (litCamera.x < 0.5) return lin;
     float m = max(lin.r, max(lin.g, lin.b)) * max(litCamera.w, 1e-6);
     if (m <= kCamSkyKnee) return lin;
-    float r = kCamSkyCap - kCamSkyKnee;
+    float glow = 1.0 / (1.0 + 2.0 * (1.0 - clamp(dot(d, skySunDir()), -1.0, 1.0)) / (kCamSkyGlowRad * kCamSkyGlowRad));
+    float r = kCamSkyCap + (kCamSkySunCap - kCamSkyCap) * glow - kCamSkyKnee;
     return lin * ((kCamSkyKnee + r * (1.0 - exp(-(m - kCamSkyKnee) / r))) / m);
 }
 
@@ -155,8 +163,25 @@ vec3 camSkyRolloff(vec3 lin) {
 //     blue (the table's own zenith hue), which the haze otherwise greyed at
 //     sunset, and at twilight the band along the horizon is brighter and
 //     warmer toward the sun's bearing, dimmer away from it;
+//   - by day, above that band, the clear blue a camera renders (camSkyDeepen);
 //   - the weather's veil (litCameraLook.x): a pale grey layer over the blue,
 //     the broken cloud of an overcast day rather than a clear one.
+// The clear day's blue (look fix "noon"; PhotoCamera.hpp kCameraDaySkyDeep,
+// DaySkyDeepen): the clear sky's chroma about its luminance, in linear light
+// (same luminance, same dominant hue), times 1 + kCamSkyDeep * w, no channel
+// under kCamSkyDeepFloor of the luminance. The table's sky has the real
+// sky's chromaticity, which the hue-keeping curve keeps exactly; a camera's
+// per-channel film curve deepens it, and without that the noon zenith over a
+// bright plain read as slate.
+const float kCamSkyDeep = 0.65;      // kCameraDaySkyDeep
+const float kCamSkyDeepFloor = 0.25; // kCameraDaySkyFloor
+vec3 camSkyDeepen(vec3 a, float w) {
+    float l = dot(a, kLuma);
+    float lo = min(a.r, min(a.g, a.b));
+    if (w <= 0.0 || l <= 1e-8 || lo >= l) return a;
+    float s = max(1.0, min(1.0 + kCamSkyDeep * clamp(w, 0.0, 1.0), (1.0 - kCamSkyDeepFloor) * l / (l - lo)));
+    return vec3(l) + (a - vec3(l)) * s;
+}
 vec3 camSkyLook(vec3 a, vec3 d) {
     if (litCamera.x < 0.5) return a;
     float e = max(d.y, 0.0);
@@ -165,6 +190,10 @@ vec3 camSkyLook(vec3 a, vec3 d) {
     float day = smoothstep(8.0, 25.0, sunEl);
     float band = exp(-e / 0.16) * day;
     a = mix(a, vec3(lum), 0.6 * band) * (1.0 + 0.45 * band);
+    // DaySkyDeepWeight: by day, above the horizon band, out of the sun's glow,
+    // not under the weather's veil.
+    a = camSkyDeepen(a, day * smoothstep(0.03, 0.4, e) * (1.0 - clamp(litCameraLook.x, 0.0, 1.0)) *
+                            (1.0 - smoothstep(0.86, 0.985, dot(d, skySunDir()))));
     float low = litCameraLook.w;
     if (low > 0.0) {
         vec4 mz;
@@ -221,7 +250,7 @@ vec3 atmoFogColor(vec3 rel, vec3 classicFog) {
     vec3 h = vec3(d.x, clamp(d.y, 0.0, 0.25) * 0.5 + 0.015, d.z);
     h *= inversesqrt(max(dot(h, h), 1e-12));
     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
-    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), h)));
+    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(h, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), h), h));
     disp = mix(disp, classicFog, litAtmo.y);
     return mix(classicFog, disp, litAtmo.z);
 }
@@ -400,15 +429,24 @@ vec4 camCloudTexel(vec4 t0) {
     return a * g0.y + b * g1.y;
 }
 
+// The grey deck's cloud base under the camera (PhotoCamera.hpp kDeckRelief,
+// kDeckDark, kDeckFromSin, kDeckFullSin).
+const float kCamDeckRelief = 2.4;
+const float kCamDeckDark = 0.5;
+const float kCamDeckFromSin = 0.12;
+const float kCamDeckFullSin = 0.3;
+
 vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     t0 = camCloudTexel(t0);
     vec3 d = vWorldRel * inversesqrt(max(dot(vWorldRel, vWorldRel), 1e-12));
     float lumT = dot(t0.rgb, kLuma);
     float bg = lumT;
     vec3 bgC = t0.rgb;
+    float rowSum = lumT;
     for (int k = 1; k < 12; ++k) {
         vec3 s = texture(tex0, vec2(vUV0.x + float(k) / 12.0, vUV0.y)).rgb;
         float ls = dot(s, kLuma);
+        rowSum += ls;
         if (ls < bg) {
             bg = ls;
             bgC = s;
@@ -462,11 +500,22 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
         a = camSkyLook(a, d);
         float cl = dot(cloudLin, kLuma);
         cloudLin = mix(cloudLin, vec3(cl * 0.92), 0.5 * litCameraLook.x);
+        // A full grey deck shows its cloud base: the painted deck's light
+        // relative to its row's mean deepens (darker lumps, brighter thin
+        // parts) and the deck darkens, above the horizon's band only (look
+        // fix round 4: a near-white sheet, a rain day read as dry mist).
+        // By day only (a night deck keeps round 3's look).
+        float deck = litAtmo.y * litCameraLook.x * smoothstep(kCamDeckFromSin, kCamDeckFullSin, d.y) *
+                     smoothstep(-6.0, 2.0, skySunElevation());
+        if (deck > 0.0) {
+            float rel = clamp(shade / max(pow(rowSum / 12.0, 2.2), 1e-4), 0.25, 3.0);
+            cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark, deck);
+        }
     }
     // Cover over clear sky in display space, where the mask measured it: a
     // faint cloud keeps about the texture's own contrast (mixed in linear light
     // the texture's faint blotches read 40 % stronger than in the original).
-    vec3 disp = mix(skyDisplay(camSkyRolloff(a)), skyDisplay(camSkyRolloff(cloudLin)), cloud);
+    vec3 disp = mix(skyDisplay(camSkyRolloff(a, d)), skyDisplay(camSkyRolloff(cloudLin, d)), cloud);
     // Under the photoreal camera the night the table fades into is the
     // original dome's brightness in a night blue (its dusk red under the
     // physical twilight turned the blue hour's zenith mauve).
@@ -484,7 +533,7 @@ vec3 skyReflection(vec3 r) {
     vec3 classic = fogColorToward(r);
     if (litAtmo.x <= 0.0) return classic;
     vec3 glow = litFogSun.w > 0.5 ? litFogSun.rgb : vec3(0.0);
-    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), r)));
+    vec3 disp = skyDisplay(camSkyRolloff(camSkyLook(skyClear(r, fogColor.rgb, glow, max(litFogCap.rgb, fogColor.rgb)), r), r));
     disp = mix(disp, classic, litAtmo.y);
     return mix(classic, disp, litAtmo.x);
 }

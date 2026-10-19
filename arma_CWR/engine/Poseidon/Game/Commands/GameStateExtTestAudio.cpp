@@ -171,6 +171,7 @@ GameValue TriShadowDepthProbe(const GameState*, GameValuePar);
 GameValue TriEnableShadowMaps(const GameState*);
 GameValue TriSetLighting(const GameState*, GameValuePar);
 GameValue TriFeatureState(const GameState*);
+GameValue TriFogSight(const GameState*, GameValuePar);
 GameValue TriPinCloudDrift(const GameState*, GameValuePar);
 GameValue TriSkyTableCheck(const GameState*, GameValuePar);
 GameValue TriCanopyCheck(const GameState*, GameValuePar);
@@ -3256,6 +3257,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameString, "triEnableShadowMaps", TriEnableShadowMaps));
     GGameState.NewFunction(GameFunction(GameString, "triSetLighting", TriSetLighting, GameString));
     GGameState.NewNularOp(GameNular(GameString, "triFeatureState", TriFeatureState));
+    GGameState.NewFunction(GameFunction(GameString, "triFogSight", TriFogSight, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triPinCloudDrift", TriPinCloudDrift, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triSkyTableCheck", TriSkyTableCheck, GameScalar));
     GGameState.NewFunction(GameFunction(GameString, "triCanopyCheck", TriCanopyCheck, GameScalar));

@@ -82,6 +82,13 @@ struct TerrainHorizonOptions
     const std::atomic<bool>* cancel = nullptr;
 };
 
+// The heights grid the map is built from: `src` (size x size, cellSize
+// metres apart) box-downsampled to at most maxSize texels per side, as
+// BuildTerrainHorizonMap samples its `height`. AI sight's map
+// (VolumetricFog.hpp BuildFogSightMap) takes the same grid.
+void DownsampleTerrainGrid(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst,
+                           int& dstSize, float& dstCell);
+
 std::uint16_t EncodeHorizonDeg(float deg);
 float DecodeHorizonDeg(std::uint16_t value);
 

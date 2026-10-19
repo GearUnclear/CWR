@@ -522,12 +522,96 @@ TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and it
     CHECK(CombatSmokeTransmittance(CombatLightKind::Fire, embers, 3.0f, soot) <
           CombatSmokeTransmittance(CombatLightKind::Fire, embers, 2.0f, soot));
     CHECK(CombatSmokeReach(embers.core, pale) > 4.0f * CombatSmokeReach(embers.core, soot));
-    // A flash, a flare, a tracer or a motor lights the smoke from the air.
-    for (CombatLightKind k : {CombatLightKind::Explosion, CombatLightKind::Muzzle, CombatLightKind::Cannon,
-                              CombatLightKind::Flare, CombatLightKind::Tracer, CombatLightKind::Motor})
+    // A shell burst's light crosses its own cloud too (look fix "burst"): the
+    // base round its ball is lit, the far side of its cloud less.
+    const CombatLightSample burst = At(CombatLightKind::Explosion, 0.3f);
+    CHECK(CombatSmokeTransmittance(CombatLightKind::Explosion, burst, burst.core * 0.5f, soot) == 1.0f);
+    CHECK(CombatSmokeTransmittance(CombatLightKind::Explosion, burst, burst.core + 6.0f, 0.2f) < 0.5f);
+    // A muzzle or cannon flash, a flare, a tracer or a motor lights the smoke
+    // from the air.
+    for (CombatLightKind k : {CombatLightKind::Muzzle, CombatLightKind::Cannon, CombatLightKind::Flare,
+                              CombatLightKind::Tracer, CombatLightKind::Motor})
     {
         INFO(CombatLightKindName(k));
         CHECK(CombatSmokeTransmittance(k, At(k, 0.0f), 8.0f, soot) == 1.0f);
+    }
+}
+
+TEST_CASE("Combat lights: a fireball's puff glows from white-hot to orange and cools to dark soot",
+          "[remaster][CombatLights]")
+{
+    // CfgCloudlets Explosion: born at 2500 K, its table tops at 2200 K.
+    float albedo[3], hot[3], warm[3], cool[3], cold[3];
+    REQUIRE(FireballPuff(2500.0f, 2200.0f, albedo, hot));
+    REQUIRE(FireballPuff(2000.0f, 2200.0f, albedo, warm));
+    REQUIRE(FireballPuff(1600.0f, 2200.0f, albedo, cool));
+    REQUIRE(FireballPuff(850.0f, 2200.0f, albedo, cold));
+    // White-hot past the puff's white (its glow carries above 1): red and
+    // green near the cap, blue well up, always brighter than the ground a
+    // burst lights at dusk.
+    CHECK(hot[0] > 1.9f);
+    CHECK(hot[1] > 1.5f);
+    CHECK(hot[2] > 0.5f);
+    // 2000 K: orange, red leading.
+    CHECK(warm[0] > 0.4f);
+    CHECK(warm[1] < 0.5f * warm[0]);
+    CHECK(warm[2] < 0.05f * warm[0]);
+    // 1600 K: a dim red glow, far under the core.
+    CHECK(cool[0] < 0.1f * hot[0]);
+    CHECK(cool[1] < 0.3f * cool[0]);
+    CHECK(cool[2] < 0.1f * cool[0]);
+    // The black body: red-orange at 1500 K, yellower and bluer hotter.
+    float b15[3], b25[3];
+    BlackBodyRgb(1500.0f, b15);
+    BlackBodyRgb(2500.0f, b25);
+    CHECK(b15[1] == Catch::Approx(0.155f).margin(0.01));
+    CHECK(b25[1] == Catch::Approx(0.36f).margin(0.02));
+    CHECK(b25[2] == Catch::Approx(0.06f).margin(0.01));
+    // Under the glow's start nothing: smoke.
+    CHECK(cold[0] == 0.0f);
+    CHECK(cold[1] == 0.0f);
+    // What it scatters is dark grey-brown soot, never its table's colour.
+    CHECK(albedo[0] < 0.3f);
+    CHECK(albedo[0] >= albedo[1]);
+    CHECK(albedo[1] >= albedo[2]);
+    // Monotone in temperature.
+    float prev = 0.0f;
+    for (float t = 800.0f; t <= 2600.0f; t += 50.0f)
+    {
+        float a[3], e[3];
+        FireballPuff(t, 2200.0f, a, e);
+        CHECK(e[0] >= prev);
+        CHECK(e[0] <= kFireballEmitCap);
+        prev = e[0];
+    }
+    // Crater smoke (its table tops at 500) and a camp fire's or a smoke
+    // shell's smoke (1000: orange at its foot, then grey) are no fireball.
+    float a[3] = {9.0f, 9.0f, 9.0f}, e[3] = {9.0f, 9.0f, 9.0f};
+    CHECK_FALSE(FireballPuff(500.0f, 500.0f, a, e));
+    CHECK_FALSE(FireballPuff(1000.0f, 1000.0f, a, e));
+    // A gun's fire (WeaponFireGun, its table to 4200 on its own scale).
+    CHECK_FALSE(FireballPuff(4500.0f, 4200.0f, a, e));
+    CHECK(a[0] == 9.0f);
+    CHECK(e[0] == 9.0f);
+}
+
+TEST_CASE("Combat lights: a steady light reads against the twilight under the camera", "[remaster][CombatLights]")
+{
+    // The night as before.
+    CHECK(CombatTwilight(-6.0f) == 1.0f);
+    CHECK(CombatTwilight(-20.0f) == 1.0f);
+    // Tenfold per 2.5 degrees of sun above it.
+    CHECK(CombatTwilight(-3.5f) == Catch::Approx(0.1f).epsilon(1e-3));
+    CHECK(CombatTwilight(-4.75f) == Catch::Approx(std::sqrt(0.1f)).epsilon(1e-3));
+    // The firefights' dusk (sun 1.7 degrees under) and the day: the floor.
+    CHECK(CombatTwilight(-1.7f) == Catch::Approx(kTwilightFloor));
+    CHECK(CombatTwilight(40.0f) == Catch::Approx(kTwilightFloor));
+    float prev = 2.0f;
+    for (float e = -15.0f; e <= 10.0f; e += 0.25f)
+    {
+        const float s = CombatTwilight(e);
+        CHECK(s <= prev);
+        prev = s;
     }
 }
 

@@ -194,6 +194,17 @@ bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb
     return true;
 }
 
+void DownsampleTerrainGrid(const float* src, int size, float cellSize, int maxSize, std::vector<float>& dst,
+                           int& dstSize, float& dstCell)
+{
+    dst.clear();
+    dstSize = 0;
+    dstCell = 0.0f;
+    if (!src || size < 2 || !(cellSize > 0.0f))
+        return;
+    Downsample(src, size, cellSize, std::max(2, maxSize), dst, dstSize, dstCell);
+}
+
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
                             TerrainHorizonMap& out, const float* groundRgb)
 {

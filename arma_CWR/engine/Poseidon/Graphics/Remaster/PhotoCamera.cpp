@@ -269,6 +269,25 @@ float SkyRolloff(float m)
     return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
 }
 
+float SkySunGlow(float cosToSun)
+{
+    const float c = std::min(std::max(cosToSun, -1.0f), 1.0f);
+    return 1.0f / (1.0f + 2.0f * (1.0f - c) / (kSkySunGlowRad * kSkySunGlowRad));
+}
+
+float SkyRolloffCapToward(float cosToSun)
+{
+    return kSkyRolloffCap + (kSkySunCap - kSkyRolloffCap) * SkySunGlow(cosToSun);
+}
+
+float SkyRolloffToward(float m, float cosToSun)
+{
+    if (!(m > kSkyRolloffKnee))
+        return m;
+    const float r = SkyRolloffCapToward(cosToSun) - kSkyRolloffKnee;
+    return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
+}
+
 float SunRingWeight(float sunElevationDeg)
 {
     return 1.0f - Smoothstep(kSunRingFullDeg, kSunRingOffDeg, sunElevationDeg);
@@ -339,6 +358,23 @@ float CameraTimeOfDayEv(float sunElevationDeg, float veil)
            kCameraHighSunEv * Smoothstep(35.0f, 55.0f, sunElevationDeg) * (1.0f - Clamp01(veil));
 }
 
+float DaySkyDeepWeight(float sunElevationDeg, float sinViewElevation, float cosToSun, float veil)
+{
+    return Smoothstep(8.0f, 25.0f, sunElevationDeg) * Smoothstep(0.03f, 0.4f, sinViewElevation) *
+           (1.0f - Clamp01(veil)) * (1.0f - Smoothstep(0.86f, 0.985f, cosToSun));
+}
+
+Rgb DaySkyDeepen(const Rgb& c, float weight)
+{
+    const float l = Luminance(c);
+    const float lo = std::min(c.r, std::min(c.g, c.b));
+    if (!(weight > 0.0f) || !(l > 1e-8f) || lo >= l)
+        return c;
+    const float s = std::max(
+        1.0f, std::min(1.0f + kCameraDaySkyDeep * Clamp01(weight), (1.0f - kCameraDaySkyFloor) * l / (l - lo)));
+    return {l + (c.r - l) * s, l + (c.g - l) * s, l + (c.b - l) * s};
+}
+
 float CameraDuskKeep(float sunElevationDeg)
 {
     return Smoothstep(5.0f, 0.0f, sunElevationDeg) * Smoothstep(-6.0f, -3.0f, sunElevationDeg);
@@ -402,9 +438,15 @@ Rgb ApplyToneCurveHueKeeping(const ToneCurve& curve, const Rgb& in)
     // To white late: near the top of the curve, and with the light past the
     // curve's white (kWhiteExcessStops stops past it is white).
     const float excess = Clamp01(std::log2(std::max(peak / curve.white, 1.0f)) / kWhiteExcessStops);
-    const float toWhite = std::max(std::pow(y, kCrosstalk), excess);
     const Rgb ratio = c * (1.0f / peak);
-    return Mix(ratio, Rgb(1.0f, 1.0f, 1.0f), toWhite) * y;
+    // Saturated light less (kChromaKeep, the composite's since round 2), and
+    // each channel by its share of the peak (kHueRoll).
+    const float chroma = 1.0f - std::min(ratio.r, std::min(ratio.g, ratio.b));
+    const float toWhite =
+        std::max(std::max(std::pow(y, kCrosstalk), excess) * (1.0f - kChromaKeep * chroma * chroma), 1e-6f);
+    auto roll = [&](float share)
+    { return share + (1.0f - share) * std::pow(toWhite, 1.0f + kHueRoll * (1.0f - share)); };
+    return Rgb(roll(ratio.r), roll(ratio.g), roll(ratio.b)) * y;
 }
 
 // ---- Colour -------------------------------------------------------------------

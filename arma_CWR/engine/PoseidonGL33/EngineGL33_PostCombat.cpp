@@ -129,6 +129,10 @@ void DeleteTex(unsigned int& t)
 // in (look fix "fire": the stones round a camp fire went past white to a
 // cream slab).
 constexpr float kFireSurfaceBody = 1.3f;
+// A shell burst's light on surfaces ends this many of its ball's radii out
+// (look fix "burst": 20 m lit the plain behind a burst into a band along the
+// horizon); a heavy shell's 2.6 m ball lights the ground within about 8 m.
+constexpr float kBurstSurfaceReachCores = 3.0f;
 
 // How thick the lit smoke and dust around a light is (m): muzzle gas, the
 // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
@@ -277,7 +281,12 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                     // (Seen from eye height the lit ground round a burst 60 m
                     // out is a thin strip along the horizon.)
                     gain = 0.3f;
-                    f.range = std::min(f.range, 20.0f);
+                    // Look fix "burst": a young burst still lit the plain 20 m
+                    // round into a ruler-straight band along the horizon,
+                    // brighter than its own fireball. Its light ends within
+                    // kBurstSurfaceReachCores of its ball, under the cloud.
+                    f.range = std::min(
+                        f.range, r.kind == fl::CombatLightKind::Explosion ? kBurstSurfaceReachCores * f.start : 20.0f);
                     warmG = 0.8f;
                     warmB = 0.56f;
                     break;
@@ -303,6 +312,11 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                 default:
                     break;
             }
+            // Look fix "burst": a steady light reads against the twilight
+            // (CombatTwilight): the burning wreck's fire drew a warm line
+            // along the dusk horizon behind it.
+            if (fl::CombatLightIsSteady(r.kind))
+                gain *= std::min(std::max(set.Tuning().twilight, 0.0f), 1.0f);
             // The warmth at the same luminance.
             const float lum0 = 0.2126f * f.diffuse[0] + 0.7152f * f.diffuse[1] + 0.0722f * f.diffuse[2];
             f.diffuse[1] *= warmG;

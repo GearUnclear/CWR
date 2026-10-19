@@ -237,6 +237,48 @@ TEST_CASE("PhotoCamera: the sky rolls off under white, and the guards' sky limit
     CHECK(kSunDiscLevel > c.white);
 }
 
+TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off smoothly to the sky's cap",
+          "[Remaster][PhotoCamera]")
+{
+    LightingTuning t;
+    const ToneCurve c = MakeToneCurve(t.camContrast, t.camShoulder, t.camWhite);
+    const float deg = 3.14159265f / 180.0f;
+    // At the sun the cap is past the curve's white: the sky round the disc
+    // clips (no flat cream plateau of 0.85 round a low sun).
+    CHECK(SkySunGlow(1.0f) == Catch::Approx(1.0f));
+    CHECK(SkyRolloffCapToward(1.0f) == Catch::Approx(kSkySunCap));
+    CHECK(kSkySunCap > c.white);
+    CHECK(ApplyToneCurve(c, SkyRolloffToward(1000.0f, std::cos(0.5f * deg))) >= 0.999f);
+    // Half the rise at kSkySunGlowRad.
+    CHECK(SkySunGlow(std::cos(kSkySunGlowRad)) == Catch::Approx(0.5f).margin(0.01f));
+    // A bright aureole's output falls with the angle, smoothly: no step of
+    // more than a percent of white per tenth of a degree, and no plateau of
+    // the same value from 0.6 to 3 degrees.
+    float prev = 2.0f;
+    for (float a = 0.6f; a <= 6.0f; a += 0.1f)
+    {
+        const float y = ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(a * deg)));
+        CHECK(y <= prev + 1e-6f);
+        if (prev <= 1.0f)
+            CHECK(prev - y < 0.01f);
+        prev = y;
+    }
+    CHECK(ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(0.6f * deg))) -
+              ApplyToneCurve(c, SkyRolloffToward(200.0f, std::cos(3.0f * deg))) >
+          0.05f);
+    // Far from the sun the cap is the sky's (within 2% from 20 degrees): the
+    // broad sky, a silver lining and the guards are unchanged.
+    CHECK(SkyRolloffCapToward(std::cos(20.0f * deg)) < kSkyRolloffCap * 1.02f);
+    CHECK(SkyRolloffCapToward(-1.0f) < kSkyRolloffCap * 1.001f);
+    // Under the knee nothing changes, at the sun as anywhere.
+    CHECK(SkyRolloffToward(0.5f, 1.0f) == 0.5f);
+    CHECK(SkyRolloffToward(3.0f, -1.0f) == Catch::Approx(SkyRolloff(3.0f)).epsilon(0.002));
+    // The sun's disc goes most of the way to white (a sensor clips every
+    // channel of the sun).
+    CHECK(kSunDiscWhite >= 0.7f);
+    CHECK(kSunDiscWhite <= 1.0f);
+}
+
 TEST_CASE("PhotoCamera: the sky seen through a canopy stays pale sky, the sun's own glare may clip",
           "[Remaster][PhotoCamera]")
 {
@@ -297,13 +339,28 @@ TEST_CASE("PhotoCamera: the filmic curve passes middle grey, reaches white and k
     const Rgb orange(0.18f, 0.09f, 0.03f);
     const Rgb mid = ApplyToneCurveHueKeeping(c, orange);
     CHECK(mid.g / mid.r == Catch::Approx(0.5f).margin(0.03));
+    // Far past white a white light is white; a saturated orange rolls off to a
+    // yellow-orange, its blue following last (kChromaKeep, kHueRoll; look fix
+    // "burst": one mix for all three channels turned a flame's core cream).
+    const Rgb white(0.18f, 0.18f, 0.17f);
+    const Rgb whiteHot = ApplyToneCurveHueKeeping(c, white * 40.0f);
+    CHECK(whiteHot.b == Catch::Approx(1.0f).margin(0.01));
     const Rgb hot = ApplyToneCurveHueKeeping(c, orange * 40.0f);
-    CHECK(hot.b == Catch::Approx(1.0f).margin(0.01));
+    CHECK(hot.r == Catch::Approx(1.0f).margin(0.01));
+    CHECK(hot.g / hot.r > 0.5f);
+    CHECK(hot.b < 0.5f * hot.g);
     // A flame bright but under the curve's white keeps most of its hue (the
     // old y^4 path to white turned it white).
     const Rgb flame = ApplyToneCurveHueKeeping(c, orange * 8.0f);
     CHECK(flame.b < 0.5f * flame.r);
     CHECK(flame.g < 0.8f * flame.r);
+    // A flame's core a stop past white: yellow-orange, the blue moving least
+    // (the single mix gave blue at half the red).
+    const Rgb flameCore(1.0f, 0.55f, 0.16f);
+    const Rgb core = ApplyToneCurveHueKeeping(c, flameCore * (kMiddleGrey * 32.0f));
+    CHECK(core.g / core.r < 0.75f);
+    CHECK(core.b / core.r < 0.4f);
+    CHECK(core.b < 0.5f * core.g);
 }
 
 TEST_CASE("PhotoCamera: the white balance makes its target white and keeps white's luminance",
@@ -562,4 +619,70 @@ TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and le
     CHECK(grey < 1.0f);
     CHECK(GoldenWarmShare(Rgb(0.45f, 0.5f, 0.55f)) < grey);
     CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
+}
+
+TEST_CASE("PhotoCamera: look fix noon: a bright plain at a high sun is exposed a little under, not dull",
+          "[Remaster][PhotoCamera]")
+{
+    // Round 2 put a bright plain 0.38 EV under on top of the high sun's
+    // step: the Sinai sand sat 35 levels under the original and the clear
+    // sky over it went slate. Now a plain that meters about 0.84 EV above the
+    // average scene (noon_fields) sits between a quarter and under half a
+    // stop under the average scene's grey, the high sun's step included.
+    LightingTuning t;
+    t.camEv = 0.0f;
+    MeterResult plain;
+    plain.valid = true;
+    plain.mean = kDaylightMeanLog2 + 0.84f;
+    plain.highlight = plain.mean + 1.0f;
+    const float timeEv = CameraTimeOfDayEv(60.0f, 0.0f);
+    const float under = TargetExposureLog2(plain, 0.0f, t, 0.0f, 0.0f, timeEv) - (std::log2(kMiddleGrey) - plain.mean);
+    CHECK(under < -0.2f);
+    CHECK(under > -0.45f);
+    // Still under the average scene: a bright plain is not pulled up to grey.
+    CHECK(kBrightKeep <= 0.0f);
+}
+
+TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera's blue, the horizon stays pale",
+          "[Remaster][PhotoCamera]")
+{
+    // The table's noon zenith (linear, the slate (91, 114, 148) of round 3).
+    const Rgb zenith(0.104f, 0.170f, 0.302f);
+    const float w = DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.0f);
+    CHECK(w == Catch::Approx(1.0f));
+    const Rgb deep = DaySkyDeepen(zenith, w);
+    // Same luminance, more chroma, the same dominant hue (the chroma vector
+    // is scaled, not turned), no channel under the floor.
+    const float l = Luminance(zenith);
+    CHECK(Luminance(deep) == Catch::Approx(l).epsilon(1e-4));
+    CHECK(deep.b - deep.r > 1.5f * (zenith.b - zenith.r));
+    CHECK((deep.g - l) / (deep.b - l) == Catch::Approx((zenith.g - l) / (zenith.b - l)).epsilon(1e-4));
+    CHECK(std::min(deep.r, std::min(deep.g, deep.b)) >= kCameraDaySkyFloor * l - 1e-6f);
+    // In display terms a deep, clean blue: red well under half of blue.
+    CHECK(std::pow(deep.r, 1.0f / 2.2f) < 0.45f * std::pow(deep.b, 1.0f / 2.2f));
+    // A strongly coloured sky deepens only to the floor (no neon), and one
+    // already past it is left as it is.
+    const Rgb blue(0.06f, 0.12f, 0.50f);
+    const Rgb held = DaySkyDeepen(blue, 1.0f);
+    CHECK(held.b > blue.b);
+    CHECK(std::min(held.r, std::min(held.g, held.b)) >= kCameraDaySkyFloor * Luminance(blue) - 1e-5f);
+    const Rgb neon(0.02f, 0.10f, 0.60f);
+    CHECK(DaySkyDeepen(neon, 1.0f).r == Catch::Approx(neon.r));
+    // Grey and black stay as they are; no weight is the identity.
+    const Rgb grey(0.3f, 0.3f, 0.3f);
+    CHECK(DaySkyDeepen(grey, 1.0f).r == Catch::Approx(0.3f));
+    CHECK(DaySkyDeepen(grey, 1.0f).b == Catch::Approx(0.3f));
+    CHECK(DaySkyDeepen(Rgb(0.0f, 0.0f, 0.0f), 1.0f).b == 0.0f);
+    CHECK(DaySkyDeepen(zenith, 0.0f).r == zenith.r);
+    // The weight: none at the horizon (the pale band), at a low sun (golden
+    // hour, dusk, night keep their own sky), in the sun's glow, under the
+    // weather's veil; it grows with the view's elevation.
+    CHECK(DaySkyDeepWeight(60.0f, 0.0f, 0.3f, 0.0f) == 0.0f);
+    CHECK(DaySkyDeepWeight(60.0f, 0.1f, 0.3f, 0.0f) < DaySkyDeepWeight(60.0f, 0.3f, 0.3f, 0.0f));
+    CHECK(DaySkyDeepWeight(6.0f, 0.5f, 0.3f, 0.0f) == 0.0f);
+    CHECK(DaySkyDeepWeight(-10.0f, 0.5f, 0.3f, 0.0f) == 0.0f);
+    CHECK(DaySkyDeepWeight(12.0f, 0.5f, 0.3f, 0.0f) < 0.2f);
+    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.99f, 0.0f) == 0.0f);
+    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 1.0f) == 0.0f);
+    CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
 }

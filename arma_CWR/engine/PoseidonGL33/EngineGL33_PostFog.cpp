@@ -24,8 +24,10 @@
 //      before the feature.
 // The legacy shafts hold off while it runs (PlanPostStages). The forward fog
 // keeps only its view-distance edge (UpdateFogMedium sets litHaze.x;
-// finishFragment). AI sight takes the mist and the humid ground air through
-// SetFogSight.
+// finishFragment). AI sight is not set here: the simulation computes it from
+// the same inputs (WorldFogInputs) and knobs through the same ComputeFogMedium,
+// whether or not this stage runs (TerrainLighting.hpp SimulateFogSight); the
+// fog floor below is drawn from AI sight's own map.
 //
 // GL state: the stage binds its inputs to kPostUnits and unit 12 (the fog
 // floor, kFogFloorUnit) and reads units 8 (the sky table, rebound here), 9 and
@@ -46,6 +48,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/TerrainLighting.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -275,6 +278,10 @@ float Smooth(float e0, float e1, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
+// The last frame that warned of a difference between the drawn air and AI
+// sight (UpdateFogMedium), so the warning comes at most every 600 frames.
+std::uint32_t s_sightWarnFrame = 0;
+
 // A light in the air: its reach there (m) and its intensity (linear, I in
 // E = I / r^2): the physical lamps and low beams (FrameLights.hpp), and a
 // fire's or another light's classic colour at a strength of its kind.
@@ -304,24 +311,31 @@ void EngineGL33::UpdateFogMedium()
         const bool post =
             _lighting.postEffects && SSAAActive() && !_post.unavailable && !_fog.unavailable && !_prevWorldDepthCleared;
         const bool on = post && _featureGates[rm::Feature::VolFog].on;
-        const rm::GateInputs& g = _featureGates.inputs;
-        rm::FogInputs in;
-        in.sunElevationDeg = g.sunElevationDeg;
-        in.sunAzimuthDeg = g.sunAzimuthDeg;
-        in.nightEffect = g.nightEffect;
-        in.skyThrough = g.skyThrough;
-        in.fog = g.fog;
-        in.rain = g.rainDensity;
-        in.viewDistance = ENGINE_CONFIG.tacticalZ;
-        in.fogStart = GScene->GetFogMinRange();
-        in.fogEnd = GScene->GetFogMaxRange();
-        in.year = Glob.clock.GetYear();
-        in.dayOfYear = std::clamp(static_cast<int>(std::floor(Glob.clock.GetTimeInYear() / OneDay)), 0, 365);
+        // The world's inputs, the same function AI sight's step takes them
+        // from (the aridity, for the dust, is the renderer's own).
+        rm::FogInputs in = Poseidon::WorldFogInputs(GScene->GetLandscape());
         in.aridity = _fog.aridity;
         _fog.medium = rm::ComputeFogMedium(in, _lighting, on);
         _fog.on = on;
-        // AI sight takes the same mist and humid air while the fog runs.
-        rm::SetFogSight(on ? &_fog.medium : nullptr, _fog.sightMap);
+        rm::SetDrawnFogMedium(on ? &_fog.medium : nullptr);
+        // The drawn mist and humid air are AI sight's (the simulation step
+        // computed them from the same inputs and knobs this frame); a
+        // difference means a second source crept in.
+        if (on)
+        {
+            const rm::FogMedium& ai = rm::FogSightMedium();
+            auto differs = [](float a, float b) { return std::fabs(a - b) > 1e-4f * std::max(std::fabs(a), 1e-6f); };
+            if ((differs(ai.groundSigma, _fog.medium.groundSigma) || differs(ai.mistSigma, _fog.medium.mistSigma) ||
+                 differs(ai.mistLayer, _fog.medium.mistLayer) || differs(ai.groundHeight, _fog.medium.groundHeight)) &&
+                frame - s_sightWarnFrame > 600u)
+            {
+                s_sightWarnFrame = frame;
+                LOG_WARN(Graphics,
+                         "GL33 fog: drawn air and AI sight differ: ground {:.3e} vs {:.3e}, mist {:.3e} vs {:.3e} "
+                         "(a knob changed after the simulation step, or a second source of the medium)",
+                         _fog.medium.groundSigma, ai.groundSigma, _fog.medium.mistSigma, ai.mistSigma);
+            }
+        }
         if (on && frame % 600u == 0u)
             LOG_INFO(Graphics,
                      "GL33 fog: medium haze={:.2e} ground={:.2e} weather={:.2e} mist={:.2e} dust={:.2e} event={:.2f} "
@@ -377,7 +391,7 @@ void EngineGL33::DestroyFogResources()
     _fog.nearW = _fog.nearH = 0;
     _fog.floorFor = nullptr;
     _fog.sightMap.reset();
-    rm::SetFogSight(nullptr, nullptr);
+    rm::SetDrawnFogMedium(nullptr);
     _fog.programsTried = false;
     _fog.unavailable = false;
     _fog.historyValid = false;
@@ -503,26 +517,27 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
 
 void EngineGL33::UpdateFogFloor()
 {
-    // The fog floor and the mist layer follow the terrain map: built once per
-    // map on the CPU (VolumetricFog.hpp BuildFogFloor, BuildFogLayer), kept on
-    // their own texture and, with the ground, for AI sight.
+    // The dust's aridity follows the terrain map's ground tints (render only).
     const rm::TerrainHorizonMap* map = (_terrainMap && _terrainMap->Valid()) ? _terrainMap.get() : nullptr;
-    if (map == _fog.floorFor)
+    if (map != _fog.floorFor)
+    {
+        _fog.floorFor = map;
+        if (map && map->height.size() == static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
+            _fog.aridity = rm::FogAridity(map->groundTint, map->height);
+    }
+    // The fog floor and the mist layer are AI sight's own map (built by the
+    // simulation when the island loads, VolumetricFog.hpp BuildFogSightMap):
+    // the drawn mist lies where AI sight finds it, from the first frame and
+    // whatever the terrain lighting's settings.
+    std::shared_ptr<const rm::FogSightMap> sight = rm::FogSightMapInUse();
+    if (sight && !sight->Valid())
+        sight.reset();
+    if (sight == _fog.sightMap)
         return;
-    _fog.floorFor = map;
     DeleteTex(_fog.floorTex);
-    _fog.sightMap.reset();
-    if (!map || map->height.size() < static_cast<size_t>(map->size) * static_cast<size_t>(map->size))
+    _fog.sightMap = sight;
+    if (!sight)
         return;
-    auto sight = std::make_shared<rm::FogSightMap>();
-    sight->size = map->size;
-    sight->cellSize = map->cellSize;
-    sight->ground.assign(map->height.begin(), map->height.begin() + static_cast<size_t>(map->size) * map->size);
-    sight->floorY = rm::BuildFogFloor(sight->ground.data(), map->size, map->cellSize);
-    sight->layer = rm::BuildFogLayer(sight->ground.data(), sight->floorY, map->size, map->cellSize);
-    if (!sight->Valid())
-        return;
-    _fog.aridity = rm::FogAridity(map->groundTint, sight->ground);
     std::vector<float> packed(sight->floorY.size() * 2);
     for (size_t i = 0; i < sight->floorY.size(); ++i)
     {
@@ -531,10 +546,10 @@ void EngineGL33::UpdateFogFloor()
     }
     GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    _fog.floorTex = Make2D(GL_RG32F, GL_RG, GL_FLOAT, map->size, map->size, packed.data());
+    _fog.floorTex = Make2D(GL_RG32F, GL_RG, GL_FLOAT, sight->size, sight->size, packed.data());
     GL33Bind::Invalidate();
-    _fog.floorCell = map->cellSize;
-    _fog.floorSize = map->size;
+    _fog.floorCell = sight->cellSize;
+    _fog.floorSize = sight->size;
     float layerMax = 0.0f;
     size_t layerCells = 0;
     for (float l : sight->layer)
@@ -542,10 +557,10 @@ void EngineGL33::UpdateFogFloor()
         layerMax = std::max(layerMax, l);
         layerCells += l > 1.0f ? 1u : 0u;
     }
-    _fog.sightMap = std::move(sight);
     LOG_INFO(Graphics,
-             "GL33 fog: fog floor {}x{} at {} m; mist layer up to {:.1f} m over {:.1f}% of the map; aridity {:.2f}",
-             map->size, map->size, map->cellSize, layerMax,
+             "GL33 fog: fog floor {}x{} at {} m (AI sight's map); mist layer up to {:.1f} m over {:.1f}% of the map; "
+             "aridity {:.2f}",
+             sight->size, sight->size, sight->cellSize, layerMax,
              100.0 * static_cast<double>(layerCells) / static_cast<double>(_fog.sightMap->floorY.size()), _fog.aridity);
 }
 

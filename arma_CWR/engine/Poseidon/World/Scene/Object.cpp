@@ -11,6 +11,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/CombatLights.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1211,8 +1212,31 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         Color colorI;
         // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
         float flameEmit[3] = {0.0f, 0.0f, 0.0f};
+        // A fireball's puff: its glow (linear) and its soot colour.
+        float fireballEmit[3] = {0.0f, 0.0f, 0.0f};
+        Color fireballOwn;
+        bool fireball = false;
+        // A fireball's puff (look fix "burst", FireballPuff) glows as a hot
+        // body and scatters as soot. Its shape is self-lit (MSShining): its
+        // table's colour times the eye's adaptation, which the photoreal
+        // camera holds at 1, so a dusk burst showed its table's lemon and
+        // mustard at a lit wall's level. Under the combat lights it takes the
+        // scene's light on its soot and adds its glow.
+        if (GEngine->CombatLightsActive() &&
+            render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
+        {
+            if (const Cloudlet* puff = dynamic_cast<const Cloudlet*>(this))
+            {
+                float soot[3];
+                if (lighting::FireballPuff(puff->Temperature(), puff->HottestTemperature(), soot, fireballEmit))
+                {
+                    fireballOwn = Color(soot[0], soot[1], soot[2], ((ColorVal)GetConstantColor()).A());
+                    fireball = true;
+                }
+            }
+        }
         int mat = (hints & ClipUserMask) / ClipUserStep;
-        if (mat != MSShining)
+        if (mat != MSShining || fireball)
         {
             TLMaterial mat;
             mat.ambient = HWhite;
@@ -1267,10 +1291,12 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                 float albedo = 1.0f;
                 if (render::Has(render::SplitLegacy(special).routing, render::Routing::IsColored))
                 {
-                    const Color own = (ColorVal)GetConstantColor();
+                    const Color own = fireball ? fireballOwn : (ColorVal)GetConstantColor();
                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
                 }
                 colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
+                for (int i = 0; i < 3; ++i)
+                    flameEmit[i] += fireballEmit[i];
             }
             colorI.SetA(1);
         }
@@ -1281,14 +1307,14 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         const render::LegacySpec specT = render::SplitLegacy(special);
         if (render::Has(specT.routing, render::Routing::IsColored))
         {
-            colorI = colorI * (ColorVal)GetConstantColor();
+            colorI = colorI * (fireball ? fireballOwn : (ColorVal)GetConstantColor());
         }
         // A puff in a strong combat light (the foot of a camp fire's column)
         // passes 1: brought under it by its peak, it keeps the light's hue
         // instead of clipping to white in the 8-bit vertex colour, and the
         // light past 1 goes to the backend as the decal's glow (SetDecalGlow),
         // so the column's foot glows brighter than the smoke above it.
-        if (mat != MSShining && GEngine->CombatLightsActive())
+        if ((mat != MSShining || fireball) && GEngine->CombatLightsActive())
         {
             // The flame's own light (not its colour's: it glows, it does not
             // scatter) joins in linear light.

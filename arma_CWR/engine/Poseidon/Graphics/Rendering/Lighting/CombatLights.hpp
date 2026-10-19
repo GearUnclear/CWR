@@ -79,7 +79,27 @@ struct CombatTuning
     // 0.15 s at its peak lit the plain round a shell burst into a band along
     // the horizon in every frame of it; the flash now falls from its birth.
     float flashHold = kExplosionFlashHold;
+    // The steady lights' share on surfaces and in the air against the
+    // twilight (CombatTwilight): 1, and under the photoreal camera less while
+    // the sky still lights the ground. Their flames and smoke keep it all.
+    float twilight = 1.0f;
 };
+
+// A steady light (a fire, a flare, a motor) against the twilight under the
+// photoreal camera (look fix "burst"): the share of its night power that
+// reads against the sky's light on the ground at a sun `sunElevationDeg`.
+// The camera meters a dusk plain about as dark as a night field and exposes
+// it a few stops brighter than a night, so a wreck's fire at the day scale
+// still lit the plain behind it into a warm line along the horizon 1.7
+// degrees after sunset. The real twilight's light on the ground falls about
+// tenfold per kTwilightDecadeDeg of sun from the horizon to the night; the
+// share is 1 from kTwilightNightDeg under (the night as before) and falls
+// tenfold per kTwilightDecadeDeg above it, to kTwilightFloor (by day the
+// day scale alone).
+constexpr float kTwilightNightDeg = -6.0f;
+constexpr float kTwilightDecadeDeg = 2.5f;
+constexpr float kTwilightFloor = 0.1f;
+float CombatTwilight(float sunElevationDeg);
 
 // One light at one age: E(d) = intensity * window(d) / (1 + d^2 / core^2), a
 // ball of radius `core` rather than a point, and the window a smooth end at
@@ -178,6 +198,42 @@ void KeepHueUnderOne(float rgb[3]);
 // core radii); zero for every other kind and outside it.
 void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3]);
 
+// A shell burst's fireball (look fix "burst"): the puffs of an explosion
+// (CfgCloudlets Explosion, a gun's fire) carry a temperature in kelvin that
+// cools from 2500 K. Classic lit them past white with the explosion's own
+// light; under the combat lights they were lit smoke of their table's colour
+// (lemon at 1900 K, mustard at 1600 K) at the scene's light, so a dusk burst
+// read as a flat mustard cloud with no hot core and then a salmon smear. A
+// puff whose table tops out (`hottestK`) between kFireballTableK and
+// kFireballTableMaxK is a fireball's, in kelvin (a camp fire's smoke and a smoke
+// shell's top out at 1000, grey and orange; a gun's fire runs its own scale to
+// 4200, orange at 2800 and grey smoke under 2300, and keeps its look): it
+// glows as a hot body at its temperature, the colour of a black body (red-
+// orange to yellow-white) at kFireballEmission times exp(kFireballWienK (1 /
+// kFireballRefK - 1 / T)), Wien's law at 580 nm (its visible light climbs
+// about twelvefold from 1800 K to 2200 K, so only the hottest puffs of a cloud
+// glow white and the rest dim to orange and red inside their soot; a power of
+// 8 on the table's colour lit the whole cloud one yellow at 0.17 s), faded in
+// from kFireballGlowFromK to kFireballGlowFullK. Each channel saturates softly
+// at kFireballEmitCap (linear, the puff's colour and its glow), as film does,
+// so the hottest core goes white-yellow. What it scatters is soot
+// (kFireballSoot, display): it cools from a white-hot core through orange to
+// dark grey-brown smoke. Returns false (outputs untouched) for any other puff.
+constexpr float kFireballTableK = 1500.0f;
+constexpr float kFireballTableMaxK = 3000.0f;
+constexpr float kFireballGlowFromK = 900.0f;
+constexpr float kFireballGlowFullK = 1300.0f;
+constexpr float kFireballRefK = 2200.0f;
+constexpr float kFireballWienK = 24800.0f; // c2 / 580 nm
+constexpr float kFireballEmission = 8.0f;
+constexpr float kFireballEmitCap = 2.0f;
+constexpr float kFireballSoot[3] = {0.24f, 0.21f, 0.18f};
+// The linear colour of a black body at `temperatureK` (1000 to 3000 K, red
+// channel 1): a fit to the sRGB black-body table (1500 K (1, 0.155, 0), 2000 K
+// (1, 0.255, 0.002), 2500 K (1, 0.36, 0.06), 3000 K (1, 0.47, 0.15)).
+void BlackBodyRgb(float temperatureK, float out[3]);
+bool FireballPuff(float temperatureK, float hottestK, float albedo[3], float emit[3]);
+
 // A fire burns inside the foot of its own smoke, and the light reaching a
 // particle of that smoke has crossed the smoke below it. Soot drinks what it
 // does not scatter: under a burning wreck's black column only the base glows
@@ -191,9 +247,11 @@ constexpr float kSootReachCores = 1.5f;
 constexpr float kPaleReachCores = 14.0f;
 float CombatSmokeReach(float core, float albedo);
 // The share of a light's irradiance that reaches a smoke or dust particle `d`
-// metres from it: for a fire 1 within its core, then exp(-(d - core) /
-// reach); a flash, a tracer, a flare or a motor lights the smoke around it
-// from the air, 1.
+// metres from it: for a fire or a shell burst 1 within its core, then
+// exp(-(d - core) / reach) (look fix "burst": a burst's light lit every puff of
+// its own cloud alike, one flat colour; it now lights the cloud's base and
+// near side); a muzzle or cannon flash, a tracer, a flare or a motor lights
+// the smoke around it from the air, 1.
 float CombatSmokeTransmittance(CombatLightKind kind, const CombatLightSample& s, float d, float albedo);
 
 // The steady lights that have a classic light behind them: fires, flares and

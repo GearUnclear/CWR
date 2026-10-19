@@ -40,6 +40,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Terrain/TerrainLighting.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -669,6 +670,53 @@ GameValue TriFeatureState(const GameState* /*state*/)
     remaster::FeatureGates gates;
     GEngine->GetFeatureGates(gates);
     return GameValue(remaster::FeatureStateString(GEngine->GetLightingTuning(), gates).c_str());
+}
+
+/// triFogSight [[east, north, aboveGround], [east, north, aboveGround]]: AI
+/// sight's air between two points (Graphics/Remaster/VolumetricFog.hpp, AI
+/// sight) next to the air the renderer's fog drew this frame, for probes that
+/// check the two agree: "ai=<0|1> Tai=<transmittance> drawn=<0|1>
+/// Tdrawn=<the same through the drawn medium> classic=<the classic tactical
+/// fog's visibility> groundAi=.. mistAi=.. groundDrawn=.. mistDrawn=.. map=<n>".
+/// Never contains ';'.
+GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
+    const GameArrayType& a = arg;
+    if (a.Size() < 2 || a[0].GetType() != GameArray || a[1].GetType() != GameArray)
+        return GameValue("FAIL:expected [[e, n, agl], [e, n, agl]]");
+    float p[2][3];
+    for (int k = 0; k < 2; ++k)
+    {
+        const GameArrayType& v = a[k];
+        if (v.Size() < 3)
+            return GameValue("FAIL:a point needs [e, n, agl]");
+        const float e = static_cast<GameScalarType>(v[0]);
+        const float n = static_cast<GameScalarType>(v[1]);
+        const float agl = static_cast<GameScalarType>(v[2]);
+        const float ground = GLandscape ? GLandscape->SurfaceY(e, n) : 0.0f;
+        p[k][0] = e;
+        p[k][1] = ground + agl;
+        p[k][2] = n;
+    }
+    const float ai = remaster::FogSightTransmittance(p[0], p[1]);
+    const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse();
+    remaster::FogMedium drawnMedium;
+    const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
+    const float tDrawn =
+        drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, p[0], p[1]) : 1.0f;
+    const float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
+    const float classic =
+        GScene ? 1.0f - GScene->TacticalFog8(dx * dx + dy * dy + dz * dz) * (1.0f / 255.0f) : 1.0f;
+    const remaster::FogMedium& m = remaster::FogSightMedium();
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "ai=%d Tai=%.4f drawn=%d Tdrawn=%.4f classic=%.4f groundAi=%.3e mistAi=%.3e groundDrawn=%.3e "
+             "mistDrawn=%.3e map=%d",
+             remaster::FogSightActive() ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, classic, m.groundSigma, m.mistSigma,
+             drawn ? drawnMedium.groundSigma : 0.0f, drawn ? drawnMedium.mistSigma : 0.0f, map ? map->size : 0);
+    return GameValue(buf);
 }
 
 /// triSkyTableCheck <texels>: the remastered sky table (feature switch

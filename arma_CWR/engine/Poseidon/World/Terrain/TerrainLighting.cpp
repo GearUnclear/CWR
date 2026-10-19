@@ -3,6 +3,11 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Remaster/Canopy.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+#include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
@@ -436,6 +441,91 @@ void UpdateTerrainLighting(Landscape* land)
                                   return r;
                               });
     s_state.pending = std::move(build);
+}
+
+namespace
+{
+// AI sight's map and the landscape it was built for.
+struct FogSightBuilt
+{
+    const Landscape* land = nullptr;
+    int range = 0;
+    float grid = 0.0f;
+    std::uint64_t sample = 0;
+    std::shared_ptr<const remaster::FogSightMap> map;
+};
+FogSightBuilt s_sight;
+} // namespace
+
+remaster::FogInputs WorldFogInputs(const Landscape* land)
+{
+    remaster::FogInputs in;
+    constexpr float kDeg = 57.29578f;
+    auto clampUnit = [](float v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v); };
+    const LightSun* sun = GScene ? GScene->MainLight() : nullptr;
+    if (sun)
+    {
+        const Vector3 toSun = -sun->Direction();
+        in.sunElevationDeg = std::asin(clampUnit(toSun.Y())) * kDeg;
+        const float azimuth = std::atan2(toSun.X(), toSun.Z()) * kDeg;
+        in.sunAzimuthDeg = azimuth < 0.0f ? azimuth + 360.0f : azimuth;
+        in.nightEffect = sun->NightEffect();
+    }
+    if (land)
+    {
+        in.skyThrough = land->SkyThrough();
+        in.fog = land->GetFog();
+        in.rain = land->GetRainDensity();
+    }
+    in.viewDistance = ENGINE_CONFIG.tacticalZ;
+    if (GScene)
+    {
+        in.fogStart = GScene->GetFogMinRange();
+        in.fogEnd = GScene->GetFogMaxRange();
+    }
+    in.year = Glob.clock.GetYear();
+    in.dayOfYear = std::clamp(static_cast<int>(std::floor(Glob.clock.GetTimeInYear() / OneDay)), 0, 365);
+    return in;
+}
+
+void SimulateFogSight(Landscape* land)
+{
+    const int range = land ? land->GetTerrainRange() : 0;
+    const float grid = land ? land->GetTerrainGrid() : 0.0f;
+    if (range < 2 || !(grid > 0.0f))
+    {
+        ShutdownFogSight();
+        return;
+    }
+    const std::uint64_t sample = SampleHeights(*land, range, grid);
+    if (land != s_sight.land || range != s_sight.range || grid != s_sight.grid || sample != s_sight.sample)
+    {
+        // A new island (or reshaped ground): the map is built here, at once,
+        // so AI sight never runs a step without it.
+        const auto t0 = std::chrono::steady_clock::now();
+        std::vector<float> heights(static_cast<size_t>(range) * range);
+        for (int z = 0; z < range; ++z)
+            for (int x = 0; x < range; ++x)
+                heights[static_cast<size_t>(z) * range + x] = land->ClippedData(z, x); // (z, x) order
+        s_sight.land = land;
+        s_sight.range = range;
+        s_sight.grid = grid;
+        s_sight.sample = sample;
+        s_sight.map = remaster::BuildFogSightMap(heights.data(), range, grid, remaster::TerrainHorizonOptions{}.maxSize);
+        if (s_sight.map)
+            LOG_INFO(Graphics, "AI fog sight: map {}x{} at {} m (from {}x{} at {} m) built in {} ms", s_sight.map->size,
+                     s_sight.map->size, s_sight.map->cellSize, range, range, grid,
+                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
+                         .count());
+    }
+    const remaster::LightingTuning tuning = GEngine ? GEngine->GetLightingTuning() : remaster::LightingTuning{};
+    remaster::UpdateFogSightMedium(WorldFogInputs(land), tuning, s_sight.map);
+}
+
+void ShutdownFogSight()
+{
+    s_sight = FogSightBuilt{};
+    remaster::SetFogSight(nullptr, nullptr);
 }
 
 void ShutdownTerrainLighting()

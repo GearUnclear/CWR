@@ -321,6 +321,7 @@ World::~World()
     // No terrain-lighting worker may outlive the world (it reads nothing from
     // it, but would otherwise be joined during static destruction).
     ShutdownTerrainLighting();
+    ShutdownFogSight();
 
     VehicleTypes.UnlockAllTypes();
 
@@ -1320,6 +1321,9 @@ void World::SimulateLandscape(float deltaT)
     }
     GLOB_LAND->SetOvercast(_actualOvercast);
     GLOB_LAND->SetFog(_actualFog);
+    // AI sight's air from this step's weather and time (the renderer's fog
+    // takes the same medium; TerrainLighting.hpp SimulateFogSight).
+    SimulateFogSight(GLOB_LAND);
 }
 
 void World::SetWeather(float overcast, float fog, float time)

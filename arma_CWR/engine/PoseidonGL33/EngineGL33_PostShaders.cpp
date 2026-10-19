@@ -437,7 +437,10 @@ vec3 camTone(vec3 x) {
     float excess = clamp(log2(max(peak / camNight.z, 1.0)) / camNight.w, 0.0, 1.0);
     float chroma = 1.0 - min(ratio.r, min(ratio.g, ratio.b));
     float whiten = max(pow(y, 8.0), excess) * (1.0 - 0.8 * chroma * chroma); // kCrosstalk, kChromaKeep
-    return mix(ratio, vec3(1.0), whiten) * y;
+    // A channel the light holds less of goes to white later (kHueRoll, look
+    // fix "burst"): a bright orange rolls off to yellow-orange, not cream.
+    vec3 w = pow(vec3(max(whiten, 1e-6)), 1.0 + 3.0 * (1.0 - ratio)); // kHueRoll
+    return mix(ratio, vec3(1.0), w) * y;
 }
 
 void main() {

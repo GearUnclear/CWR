@@ -3,6 +3,7 @@
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
+#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
@@ -123,8 +124,8 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
     // A level line of sight at the fog floor through setFog 0.3 with VD 1500:
     // what is left of a surface at the classic fog's end is a small share, and
     // under half at two thirds of it, where the classic linear fog is half
-    // (with kSetFogBoost, look director round 2: under half already at a
-    // third of it).
+    // (look fix round 4: about half at a third of it, with the mist and the
+    // humid air on top, and the first 150 m keep more than 60 %).
     FogInputs in = ClearNoon();
     in.viewDistance = 1500.0f;
     in.fog = 0.3f;
@@ -137,7 +138,9 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
     CHECK(left < 0.25f);
     CHECK(left > 0.001f);
     CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.5f);
-    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.5f);
+    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.6f);
+    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) > 0.4f);
+    CHECK(std::exp(-sigma * 150.0f) > 0.6f);
     // It thins upward from the fog floor: a hilltop 600 m up sees farther.
     CHECK(FogExtinctionAt(m, 600.0f, 0.0f) < 0.6f * sigma);
 }
@@ -334,6 +337,168 @@ TEST_CASE("Volumetric fog: AI sight takes the mist and the humid air the player 
     SetFogSight(&dry, map);
     CHECK_FALSE(FogSightActive());
     CHECK(FogSightTransmittance(a, b) == 1.0f);
+    SetFogSight(nullptr, nullptr);
+}
+
+// ---- AI sight is the simulation's (round 4 "ailink") ----------------------------
+
+namespace
+{
+
+// A misty morning in fog: the weather and the time the simulation and the
+// renderer both read (WorldFogInputs).
+FogInputs MistyMorning()
+{
+    FogInputs in = ClearNoon();
+    in.sunElevationDeg = 3.0f;
+    in.sunAzimuthDeg = 80.0f;
+    in.skyThrough = 0.3f;
+    in.fog = 0.3f;
+    in.viewDistance = 1500.0f;
+    in.fogStart = 450.0f;
+    in.fogEnd = 1500.0f;
+    return in;
+}
+
+// A valley 64 x 64 cells of 50 m: walls at 90 m, a floor at 20 m between
+// x 20 and 44 (the mist pools there).
+std::vector<float> ValleyHeights(int n)
+{
+    std::vector<float> h(static_cast<size_t>(n) * n);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+            h[static_cast<size_t>(z) * n + x] = (x >= 20 && x <= 44) ? 20.0f : 90.0f;
+    return h;
+}
+
+} // namespace
+
+TEST_CASE("Volumetric fog: AI sight equals the drawn fog's air for the same inputs and knobs", "[remaster][fog]")
+{
+    const std::vector<float> h = ValleyHeights(64);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
+    REQUIRE(map);
+    REQUIRE(map->Valid());
+    // Across the valley floor, 1.7 m over it, 500 m.
+    const float a[3] = {1100.0f, 21.7f, 1000.0f};
+    const float b[3] = {1100.0f, 21.7f, 1500.0f};
+    for (float density : {1.0f, 0.5f, 2.0f})
+        for (float mist : {1.0f, 0.5f, 0.0f})
+        {
+            LightingTuning t;
+            t.fogDensity = density;
+            t.fogMist = mist;
+            const FogInputs in = MistyMorning();
+            UpdateFogSightMedium(in, t, map);
+            // The renderer's medium while its fog draws.
+            const FogMedium drawn = ComputeFogMedium(in, t, true);
+            const FogMedium& ai = FogSightMedium();
+            CHECK(ai.groundSigma == drawn.groundSigma);
+            CHECK(ai.groundHeight == drawn.groundHeight);
+            CHECK(ai.mistSigma == drawn.mistSigma);
+            CHECK(ai.mistLayer == drawn.mistLayer);
+            CHECK(ai.mistFall == drawn.mistFall);
+            CHECK(FogSightActive());
+            CHECK(FogSightTransmittance(a, b) == FogSightTransmittanceThrough(drawn, *map, a, b));
+        }
+    // The knobs move AI sight as they move the drawn fog: thicker with
+    // fogDensity, thinner without the mist.
+    auto sightWith = [&](float density, float mist)
+    {
+        LightingTuning t;
+        t.fogDensity = density;
+        t.fogMist = mist;
+        UpdateFogSightMedium(MistyMorning(), t, map);
+        return FogSightTransmittance(a, b);
+    };
+    const float base = sightWith(1.0f, 1.0f);
+    CHECK(base < 0.9f); // the misty valley takes a real share
+    CHECK(sightWith(2.0f, 1.0f) < base);
+    CHECK(sightWith(1.0f, 0.0f) > base);
+    SetFogSight(nullptr, nullptr);
+}
+
+TEST_CASE("Volumetric fog: AI sight does not follow the render path", "[remaster][fog]")
+{
+    const std::vector<float> h = ValleyHeights(64);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), 64, 50.0f);
+    REQUIRE(map);
+    const float a[3] = {1100.0f, 21.7f, 1000.0f};
+    const float b[3] = {1100.0f, 21.7f, 1500.0f};
+    const FogInputs in = MistyMorning();
+    UpdateFogSightMedium(in, LightingTuning{}, map);
+    const float normal = FogSightTransmittance(a, b);
+    REQUIRE(normal < 0.9f);
+
+    // Post effects off and a vehicle interior: the fog's gate is off, the
+    // renderer keeps the classic forward fog; AI sight is the same.
+    LightingTuning noPost;
+    noPost.postEffects = false;
+    GateInputs gi;
+    gi.fog = in.fog;
+    gi.skyThrough = in.skyThrough;
+    gi.sunElevationDeg = in.sunElevationDeg;
+    gi.sunAzimuthDeg = in.sunAzimuthDeg;
+    CHECK_FALSE(ComputeFeatureGates(gi, noPost)[Feature::VolFog].on);
+    UpdateFogSightMedium(in, noPost, map);
+    CHECK(FogSightActive());
+    CHECK(FogSightTransmittance(a, b) == normal);
+
+    GateInputs interior = gi;
+    interior.interior = true;
+    CHECK_FALSE(ComputeFeatureGates(interior, LightingTuning{})[Feature::VolFog].on);
+    UpdateFogSightMedium(in, LightingTuning{}, map);
+    CHECK(FogSightTransmittance(a, b) == normal);
+
+    // The fog's quality knob and the other render-only knobs change nothing.
+    LightingTuning coarse;
+    coarse.fogQuality = 0.0f;
+    coarse.fogSun = 0.3f;
+    coarse.fogLights = 0.0f;
+    UpdateFogSightMedium(in, coarse, map);
+    CHECK(FogSightTransmittance(a, b) == normal);
+    SetFogSight(nullptr, nullptr);
+}
+
+TEST_CASE("Volumetric fog: AI sight works without a renderer", "[remaster][fog]")
+{
+    // A dedicated server or a headless client: no GL, no terrain horizon map,
+    // the lighting tuning the base engine reports (classic, default knobs).
+    // The sight map comes straight from the heights, sampled as the horizon
+    // map samples them.
+    const int n = 40;
+    std::vector<float> h(static_cast<size_t>(n) * n);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+            h[static_cast<size_t>(z) * n + x] =
+                20.0f + 3.0f * std::fabs(static_cast<float>(x - 20)) + 0.5f * static_cast<float>(z % 7);
+    const std::shared_ptr<const FogSightMap> map = BuildFogSightMap(h.data(), n, 25.0f, 16);
+    REQUIRE(map);
+    TerrainHorizonOptions options;
+    options.maxSize = 16;
+    options.threads = 1;
+    TerrainHorizonMap horizon;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, 25.0f, options, horizon));
+    CHECK(map->size == horizon.size);
+    CHECK(map->cellSize == horizon.cellSize);
+    CHECK(map->ground == horizon.height);
+    CHECK(map->floorY == BuildFogFloor(horizon.height.data(), horizon.size, horizon.cellSize));
+    CHECK(BuildFogSightMap(nullptr, n, 25.0f) == nullptr);
+    CHECK(BuildFogSightMap(h.data(), 1, 25.0f) == nullptr);
+
+    LightingTuning headless;
+    headless.remastered = false;
+    UpdateFogSightMedium(MistyMorning(), headless, map);
+    CHECK(FogSightActive());
+    const float from[3] = {500.0f, 22.0f, 100.0f};
+    const float to[3] = {500.0f, 22.0f, 800.0f};
+    CHECK(FogSightTransmittance(from, to) < 1.0f);
+    CHECK(FogSightTransmittance(from, to) ==
+          FogSightTransmittanceThrough(ComputeFogMedium(MistyMorning(), LightingTuning{}, true), *map, from, to));
+    // No island: classic sight.
+    UpdateFogSightMedium(MistyMorning(), headless, nullptr);
+    CHECK_FALSE(FogSightActive());
+    CHECK(FogSightTransmittance(from, to) == 1.0f);
     SetFogSight(nullptr, nullptr);
 }
 
@@ -767,4 +932,44 @@ TEST_CASE("Volumetric fog: the air's colour along the screen's edges is the ring
     CHECK(CountOf(inject, "g_air = mix(g_air, ring.rgb, clamp(ringSure, 0.0, 1.0) * (1.0 - fogNightAir.w)) * "
                           "fogLightK.y;") == 1);
     CHECK(CountOf(inject, "clamp(ring.a, 0.0, 1.0)") == 0);
+}
+
+TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps its density", "[remaster][fog]")
+{
+    // Look fix round 4 "mist": setFog's own fog by day is kSetFogBoost of the
+    // classic extinction (0.75), the night's is round 3's (2 x 2.8).
+    FogInputs day = ClearNoon();
+    day.viewDistance = 1500.0f;
+    day.fog = 0.3f;
+    day.fogEnd = WeatherVisibility(day.fog, 0.0f, day.viewDistance);
+    const float classic = kWeatherExtinction * (1.0f / day.fogEnd - 1.0f / day.viewDistance);
+    const FogMedium d = ComputeFogMedium(day, LightingTuning{}, true);
+    CHECK(kSetFogBoost < 1.0f);
+    CHECK(d.weatherSigma == Catch::Approx(classic * kSetFogBoost).epsilon(1e-4));
+    FogInputs night = day;
+    night.nightEffect = 1.0f;
+    night.sunElevationDeg = -30.0f;
+    const FogMedium n = ComputeFogMedium(night, LightingTuning{}, true);
+    CHECK(n.weatherSigma == Catch::Approx(classic * 2.0f * 2.8f).epsilon(1e-3));
+    // Under a grey deck the grey haze does not stack on a day's setFog (as on
+    // rain's fog): the rock 150 m out keeps more than 60 % at the fog floor.
+    FogInputs grey = day;
+    grey.skyThrough = 0.09f;
+    const FogMedium g = ComputeFogMedium(grey, LightingTuning{}, true);
+    CHECK(g.hazeSigma < kHazeClear * (1.0f + 0.5f * kHazeGreyGain));
+    FogInputs dryGrey = grey;
+    dryGrey.fog = 0.0f;
+    CHECK(ComputeFogMedium(dryGrey, LightingTuning{}, true).hazeSigma > g.hazeSigma);
+    CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * 150.0f) > 0.6f);
+    CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * g.zFar) > 0.08f);
+}
+
+TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough to read", "[fog][remaster]")
+{
+    // Look fix round 4 "sun": at 14 the shafts of pine_rays barely read; the
+    // near pass's soft cap was not the limit (the beams are linear in the
+    // gain there), so the gain itself rose. The beams' gain at fogSun 1.
+    CHECK(kFogBeamGain >= 30.0f);
+    CHECK(kFogBeamGain <= 40.0f);
+    CHECK(kFogBeamReach == Catch::Approx(180.0f));
 }

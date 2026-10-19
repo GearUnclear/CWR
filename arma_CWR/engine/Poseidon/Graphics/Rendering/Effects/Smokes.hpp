@@ -104,6 +104,14 @@ class Cloudlet: public Smoke
 	public:
 	Cloudlet( LODShapeWithShadow *shape, float duration, float loopedDuration=0 );
 
+	// Its temperature (K) and its table's hottest (the last entry's maxT; 0
+	// without a table): a fireball's puff glows (CombatLights FireballPuff).
+	float Temperature() const {return _t;}
+	float HottestTemperature() const
+	{
+		return _cloudletTTable && _cloudletTTable->Size()>0 ? _cloudletTTable->Get(_cloudletTTable->Size()-1).maxT : 0.0f;
+	}
+
 	void SetGrowUp( float growUp, float size )
 	{
 		_size=size;

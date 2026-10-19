@@ -743,6 +743,9 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
             ct.smokeTint = 0.85f * camNight;
             ct.flashHold = fl::kExplosionFlashHold * _combat.night;
+            // Look fix "burst": a steady light's share on surfaces against
+            // the twilight's light on the ground (CombatTwilight).
+            ct.twilight = fl::CombatTwilight(in.sunElevationDeg);
         }
         ct.scatter = _lighting.combatScatter;
         fl::CombatLightSet& combat = fl::GCombatLights();

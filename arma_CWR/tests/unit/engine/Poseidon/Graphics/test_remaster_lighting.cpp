@@ -1159,9 +1159,38 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
     const std::string inputs = Piece(gl::FragmentPiece::Inputs);
     CHECK(constant(inputs, "kCamSunRadius") == Catch::Approx(kSunDiscRadiusDeg * 3.14159265f / 180.0f).epsilon(1e-4));
     CHECK(constant(inputs, "kCamSunLevel") == Catch::Approx(kSunDiscLevel));
+    CHECK(constant(inputs, "kCamSunWhite") == Catch::Approx(kSunDiscWhite));
     const std::string skyPiece = Piece(gl::FragmentPiece::Sky);
     CHECK(constant(skyPiece, "kCamSkyKnee") == Catch::Approx(kSkyRolloffKnee));
     CHECK(constant(skyPiece, "kCamSkyCap") == Catch::Approx(kSkyRolloffCap));
+    // The grey deck's cloud base (look fix round 4), faded in above the band
+    // the grey-sky horizon ring measures (3.8 degrees up, sine 0.066).
+    CHECK(constant(skyPiece, "kCamDeckRelief") == Catch::Approx(kDeckRelief));
+    CHECK(constant(skyPiece, "kCamDeckDark") == Catch::Approx(kDeckDark));
+    CHECK(constant(skyPiece, "kCamDeckFromSin") == Catch::Approx(kDeckFromSin));
+    CHECK(constant(skyPiece, "kCamDeckFullSin") == Catch::Approx(kDeckFullSin));
+    CHECK(kDeckDark < 1.0f);
+    CHECK(kDeckFromSin > 0.1f);
+    CHECK(kDeckFullSin > kDeckFromSin);
+    CHECK(constant(skyPiece, "kCamSkySunCap") == Catch::Approx(kSkySunCap));
+    CHECK(constant(skyPiece, "kCamSkyGlowRad") == Catch::Approx(kSkySunGlowRad));
+    // Every sky roll-off knows its direction to the sun (the glow round it),
+    // and the sun's disc is round on the screen (solved per pixel, not the
+    // angle's oval near the corners).
+    CHECK(skyPiece.find("vec3 camSkyRolloff(vec3 lin, vec3 d)") != std::string::npos);
+    CHECK(skyPiece.find("camSkyRolloff(a)") == std::string::npos);
+    const std::string common = gl::RemasterFragmentCommon();
+    const size_t disc = common.find("vec4 camSunDisc()");
+    REQUIRE(disc != std::string::npos);
+    const std::string discBody = common.substr(disc, common.find("\n}\n", disc) - disc);
+    CHECK(discBody.find("dFdx(d)") != std::string::npos);
+    CHECK(discBody.find("kCamSunWhite") != std::string::npos);
+    // Look fix "noon": the clear day's blue (DaySkyDeepen) is the dome's, with
+    // DaySkyDeepWeight's ramps, inside the camera's look of the clear sky.
+    CHECK(constant(skyPiece, "kCamSkyDeep") == Catch::Approx(kCameraDaySkyDeep));
+    CHECK(constant(skyPiece, "kCamSkyDeepFloor") == Catch::Approx(kCameraDaySkyFloor));
+    CHECK(skyPiece.find("a = camSkyDeepen(a, day * smoothstep(0.03, 0.4, e)") != std::string::npos);
+    CHECK(skyPiece.find("smoothstep(0.86, 0.985, dot(d, skySunDir()))));") != std::string::npos);
 }
 
 TEST_CASE("Remaster fragment prelude is its concern pieces in order", "[Graphics][Shaders][remaster]")

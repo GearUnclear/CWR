@@ -189,8 +189,13 @@ constexpr float kFogBackShare = 0.12f;
 // The near-field pass marches the sun's forward lobe this far (m), times
 // this gain: the morning aerosols' lobe is narrower and stronger than the
 // haze's g (the shafts between crowns).
+// (Look fix round 4 "sun": 35, was 14. At 14 the shafts between the crowns of
+// a morning wood were too faint to read at a thumbnail. The pass's soft cap
+// (0.45) is not what held them: taking it before the lit share changed
+// nothing, the beams are linear in this gain, and 2.5 times it draws clear
+// shafts on the dark crowns while the open sky round them stays as it was.)
 constexpr float kFogBeamReach = 180.0f;
-constexpr float kFogBeamGain = 14.0f;
+constexpr float kFogBeamGain = 35.0f;
 // The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
 constexpr float kRainVisibility = 350.0f;
 // A grey deck thickens the clear haze by 1 + this (times the sky's greyness,
@@ -211,7 +216,11 @@ constexpr float kWeatherExtinction = 3.2f;
 // night visibility is shorter still; look director round 2: with
 // kSetFogBoost a house 60 to 120 m up a foggy street at setFog 0.35 loses
 // half to three quarters of its contrast).
-constexpr float kNightFogBoost = 1.0f;
+// (Look fix round 4 "mist": 1 -> 6.47 with kSetFogBoost 0.75, so the night's
+// setFog keeps round 3's density, 2 x 2.8 = 5.6 times the classic
+// extinction: the foggy night street is unchanged; only the day's mist
+// thins.)
+constexpr float kNightFogBoost = 2.0f * 2.8f / 0.75f - 1.0f;
 // setFog's own fog (not rain's) is this much denser again (look director
 // round 2: a hill 200 m out stood crisp in a setFog 0.3 morning mist the
 // classic fog hid; the volume's fog thickens with distance like it, not as
@@ -219,7 +228,19 @@ constexpr float kNightFogBoost = 1.0f;
 // (The player's mist is then thicker than the classic tactical fog the AI
 // sees through: AI sight keeps the classic visibility plus the mist and the
 // humid air, FogSightTransmittance.)
-constexpr float kSetFogBoost = 2.8f;
+// (Look fix round 4 "mist": 2.8 -> 0.75, the share of the classic
+// extinction setFog's own fog takes, as kRainFogShare is rain's. With the
+// valley mist and the humid air on top, 2.8 left a rock 300 m out under a
+// tenth of its contrast at setFog 0.3: a white wall where the classic fog
+// keeps the first 300 m crisp. At 0.75 that rock keeps about half and a
+// fifth of a surface is left at the classic fog end, where the AI's
+// tactical sight ends; the mist still thickens with distance.)
+constexpr float kSetFogBoost = 0.75f;
+// setFog's share of the valley mist's weight by day, rising to
+// kMistFogWeightNight at night (look fix round 4: 1.2 -> 0.6 by day, the
+// mist layer doubled the weather fog in every hollow; the night keeps 1.2).
+constexpr float kMistFogWeight = 0.6f;
+constexpr float kMistFogWeightNight = 1.2f;
 // The forward fog keeps the view-distance edge: it starts at this share of
 // the fog end.
 constexpr float kFogEdgeStart = 0.93f;
@@ -361,6 +382,18 @@ float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float abov
 float FogGroundAirTop(const FogMedium& m, float y, float floorY, float layer);
 
 // ---- AI sight ------------------------------------------------------------------
+//
+// AI sight is part of the simulation, not of the renderer: once per
+// simulation step (World::SimulateLandscape, Poseidon::SimulateFogSight in
+// World/Terrain/TerrainLighting.hpp) the world's weather, time of day and
+// knobs (FogInputs, LightingTuning) give the medium through ComputeFogMedium
+// with `applied` true, the very function and inputs the renderer's fog takes,
+// over a sight map built from the island's heights when it loads. No render
+// state enters it: post effects, the SSAA path, a vehicle interior view, the
+// fog's gates and quality, a missing renderer (a dedicated server, a headless
+// client) leave AI sight as it is, and every machine computes it from the same
+// synced weather and date. The renderer's fog floor reads the same map
+// (FogSightMapInUse).
 
 // The terrain the sight test reads: ground, fog floor and mist layer on one
 // grid (x east, z north, cell (0, 0) at the world origin).
@@ -371,13 +404,33 @@ struct FogSightMap
     std::vector<float> ground, floorY, layer;
     bool Valid() const;
 };
-// The renderer hands the frame's medium and the map over each frame while the
-// fog runs (nullptr: the fog is off, sight is classic).
+// The sight map of a landscape's heights grid (range x range, `grid` metres
+// apart, row-major by z then x): the grid box-downsampled as the terrain
+// horizon map samples it (DownsampleTerrainGrid, at most maxSize texels per
+// side), its fog floor (BuildFogFloor) and mist layer (BuildFogLayer). Null
+// for an invalid grid.
+std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize = 1024);
+// The simulation's step: AI sight takes ComputeFogMedium(in, t, true) over
+// `map` (null: no island, sight is classic).
+void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map);
+// The medium and the map AI sight uses now (the renderer's fog floor draws
+// from this map; null before an island loads).
+const FogMedium& FogSightMedium();
+std::shared_ptr<const FogSightMap> FogSightMapInUse();
+// Low level: set the medium and the map directly (nullptr: sight is classic).
 void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map);
 bool FogSightActive();
 // Transmittance (0..1) of the mist and the humid ground air along the line
-// between two world points (x east, y up, z north): 1 while the fog is off.
+// between two world points (x east, y up, z north): 1 while sight is classic.
 // Eight samples along the line, with the eye's near thinning around `from`.
 float FogSightTransmittance(const float from[3], const float to[3]);
+// The same through a given medium over a given map (pure).
+float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3],
+                                   const float to[3]);
+// The medium the renderer's fog drew this frame (nullptr: it did not draw),
+// for probes that compare the drawn air with AI sight (triFogSight); AI
+// sight never reads it.
+void SetDrawnFogMedium(const FogMedium* m);
+bool GetDrawnFogMedium(FogMedium& out);
 
 } // namespace Poseidon::remaster

@@ -397,7 +397,10 @@ triSimFrames 90
 call { player setPos [7290, 10885, 0] }
 triSimFrames 5
 call { player moveInGunner capTank }
-triSimFrames 400
+// 100 frames, not 400 (look director round 4): the action menu's hide timer
+// runs on the UI clock (real time), so under four parallel games 463 frames
+// outlasted it and round 3's optic lost the menu vanilla and landed show.
+triSimFrames 100
 call { (vehicle player) switchCamera "GUNNER" }
 triSimFrames 60
 [] call capPin
@@ -411,7 +414,10 @@ triSimFrames 90
 call { player setPos [7290, 10885, 0] }
 triSimFrames 5
 call { player moveInGunner capTank }
-triSimFrames 400
+// 100 frames, not 400 (look director round 4): the action menu's hide timer
+// runs on the UI clock (real time), so under four parallel games 463 frames
+// outlasted it and round 3's optic lost the menu vanilla and landed show.
+triSimFrames 100
 call { (vehicle player) switchCamera "GUNNER" }
 triSimFrames 60
 [] call capPin

@@ -1,5 +1,7 @@
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
 
+#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -228,7 +230,12 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     // 1 + 2 rain on top erased a hill 300 m away.)
     // (Look fix "plate": the grey gain 3.5 to kHazeGreyGain; a dry overcast
     // erased every ridge past 1.5 km.)
-    m.hazeSigma = kHazeClear * density * (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * rain)) *
+    // (Look fix round 4 "mist": setFog's own fog carries its air as rain's
+    // does; the grey haze on top of a setFog 0.3 mist under a deck erased a
+    // rock 300 m out.)
+    const float wetAir = std::max(rain, Smooth(0.0f, 0.3f, fog) * (1.0f - night));
+    m.hazeSigma = kHazeClear * density *
+                  (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * wetAir)) *
                   (1.0f + 0.5f * rain);
     m.rayleigh = kRayleighScale * density;
     // The humid air near the ground: a misty morning, the night, a grey sky,
@@ -258,9 +265,10 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     // and night), a grey sky, rain and fog.
     const bool west = !(in.sunAzimuthDeg > 0.0f && in.sunAzimuthDeg < 180.0f);
     const float evening = west ? Smooth(6.0f, 0.0f, in.sunElevationDeg) : 0.0f;
-    const float weight = std::min(event * (morning + 0.3f * std::max(evening, night)) +
-                                      0.2f * Smooth(0.5f, 1.0f, overcast) + 0.5f * rain + 1.2f * fog,
-                                  2.0f);
+    const float weight =
+        std::min(event * (morning + 0.3f * std::max(evening, night)) + 0.2f * Smooth(0.5f, 1.0f, overcast) +
+                     0.5f * rain + (kMistFogWeight + (kMistFogWeightNight - kMistFogWeight) * night) * fog,
+                 2.0f);
     m.mistSigma = kMistSigma * weight * std::max(t.fogMist, 0.0f) * density;
     m.mistLayer = 1.0f + 1.5f * fog + 0.5f * rain;
     m.mistFall = kMistLayerFall * (1.0f + fog);
@@ -436,13 +444,41 @@ float SampleGrid(const FogSightMap& map, const std::vector<float>& grid, float x
 
 } // namespace
 
+std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int range, float grid, int maxSize)
+{
+    auto sight = std::make_shared<FogSightMap>();
+    DownsampleTerrainGrid(heights, range, grid, maxSize, sight->ground, sight->size, sight->cellSize);
+    if (sight->size < 2)
+        return nullptr;
+    sight->floorY = BuildFogFloor(sight->ground.data(), sight->size, sight->cellSize);
+    sight->layer = BuildFogLayer(sight->ground.data(), sight->floorY, sight->size, sight->cellSize);
+    if (!sight->Valid())
+        return nullptr;
+    return sight;
+}
+
 void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map)
 {
     FogSightState& s = Sight();
     s.on = m != nullptr && map && map->Valid() && (m->mistSigma > 0.0f || m->groundSigma > 0.0f);
-    if (m)
-        s.medium = *m;
+    s.medium = m ? *m : FogMedium{};
     s.map = std::move(map);
+}
+
+void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map)
+{
+    const FogMedium m = ComputeFogMedium(in, t, true);
+    SetFogSight(&m, std::move(map));
+}
+
+const FogMedium& FogSightMedium()
+{
+    return Sight().medium;
+}
+
+std::shared_ptr<const FogSightMap> FogSightMapInUse()
+{
+    return Sight().map;
 }
 
 bool FogSightActive()
@@ -450,12 +486,10 @@ bool FogSightActive()
     return Sight().on;
 }
 
-float FogSightTransmittance(const float from[3], const float to[3])
+float FogSightTransmittanceThrough(const FogMedium& m, const FogSightMap& map, const float from[3], const float to[3])
 {
-    const FogSightState& s = Sight();
-    if (!s.on || !s.map)
+    if (!map.Valid())
         return 1.0f;
-    const FogSightMap& map = *s.map;
     const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
     const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-3f)
@@ -470,9 +504,46 @@ float FogSightTransmittance(const float from[3], const float to[3])
         const float floorY = SampleGrid(map, map.floorY, x, z);
         const float layer = SampleGrid(map, map.layer, x, z);
         const float near = kMistNearKeep + (1.0f - kMistNearKeep) * Smooth(kMistNearFrom, kMistNearTo, len * t);
-        tau += FogSightExtinctionAt(s.medium, y, floorY, y - ground, layer) * near;
+        tau += FogSightExtinctionAt(m, y, floorY, y - ground, layer) * near;
     }
     return std::exp(-tau * len / kSamples);
+}
+
+float FogSightTransmittance(const float from[3], const float to[3])
+{
+    const FogSightState& s = Sight();
+    if (!s.on || !s.map)
+        return 1.0f;
+    return FogSightTransmittanceThrough(s.medium, *s.map, from, to);
+}
+
+namespace
+{
+struct DrawnFogState
+{
+    bool drawn = false;
+    FogMedium medium;
+};
+DrawnFogState& Drawn()
+{
+    static DrawnFogState s;
+    return s;
+}
+} // namespace
+
+void SetDrawnFogMedium(const FogMedium* m)
+{
+    DrawnFogState& d = Drawn();
+    d.drawn = m != nullptr;
+    d.medium = m ? *m : FogMedium{};
+}
+
+bool GetDrawnFogMedium(FogMedium& out)
+{
+    const DrawnFogState& d = Drawn();
+    if (d.drawn)
+        out = d.medium;
+    return d.drawn;
 }
 
 } // namespace Poseidon::remaster
