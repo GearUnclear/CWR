@@ -1,4 +1,4 @@
-# look-director views on Eden: gen_look_director.py, modes classic, overhaul.
+# look-director views on Eden: gen_look_director.py, modes overhaul.
 # Generated, do not edit. A photo and timing generator, not a regression test:
 # run it with run-captures.ps1.
 binary = "PoseidonGame"

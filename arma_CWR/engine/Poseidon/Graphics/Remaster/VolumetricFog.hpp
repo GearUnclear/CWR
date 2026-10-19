@@ -152,12 +152,19 @@ constexpr float kMistSigma = 2.0e-3f;
 // legible: their density near the eye is kMistNearKeep of it, rising to the
 // whole from kMistNearFrom to kMistNearTo metres away.
 constexpr float kMistNearKeep = 0.15f;
-// The clear haze, dust and air keep this share near the eye, the whole from
+// The clear haze and air keep this share near the eye, the whole from
 // kHazeNearFrom to kHazeNearTo away: the depth is in the distance (blue from
-// about 3 km), the first kilometre and a half keeps its colour and contrast.
-constexpr float kHazeNearKeep = 0.35f;
+// about 3 km), the first kilometre keeps its colour and contrast.
+// (Look fix "veil": 0.06 and 3 km, were 0.35 and 2.5 km. The air's light is
+// the bright horizon sky, many times a dark wood, so the old optical depth of
+// 0.05 to 0.1 over the first 300 to 600 m laid a milky blue veil over every
+// wood below a clear noon vista. Now 0.015 at 500 m, 0.05 at 1 km, 0.27 at
+// 2 km and 0.67 at 3 km, against 0.08, 0.18, 0.51 and 0.96: the near field is
+// nearly clear, the far ridges keep most of their air. Dust keeps its own
+// near share, kDustNearKeep.)
+constexpr float kHazeNearKeep = 0.06f;
 constexpr float kHazeNearFrom = 200.0f;
-constexpr float kHazeNearTo = 2500.0f;
+constexpr float kHazeNearTo = 3000.0f;
 // Under a grey deck, in rain and in fog the near air is thick too: the
 // thinning ends at kHazeNearToGrey with kHazeNearKeepGrey at the eye.
 constexpr float kHazeNearKeepGrey = 0.3f;
@@ -186,6 +193,17 @@ constexpr float kFogBeamReach = 180.0f;
 constexpr float kFogBeamGain = 14.0f;
 // The classic engine's visibility in rain at full density (Landscape.cpp: 350 m).
 constexpr float kRainVisibility = 350.0f;
+// A grey deck thickens the clear haze by 1 + this (times the sky's greyness,
+// less in rain, whose own fog carries its air). (Look fix "plate": at 3.5 a
+// dry overcast was a 1.5 km wash, every ridge past it one flat plate; at 1.2
+// the ridges from 1 to 3 km fade one behind the other.)
+constexpr float kHazeGreyGain = 1.2f;
+// Rain's weather fog takes this share of the extinction that gives the
+// classic tactical visibility (setFog keeps all of it): about a fifth of a
+// surface is left at the classic fog end, where the AI's tactical sight
+// ends. (Look fix "plate": with the whole, rain 0.8 left a hill 300 m away a
+// third of its contrast and nothing past a kilometre.)
+constexpr float kRainFogShare = 0.5f;
 // The weather fog's extinction times the visibility it takes away: what the
 // weather leaves of a surface at the classic fog end is about e^-3.2.
 constexpr float kWeatherExtinction = 3.2f;
@@ -270,6 +288,18 @@ struct FogMedium
 // `rain` and a view distance (Landscape.cpp, the night factor at 1): the
 // distance at which its fog ends.
 float WeatherVisibility(float fog, float rain, float viewDistance);
+// How grey the sky is for the air's colour: 0 at a sky-through of 0.65 and
+// over, 1 at 0.15 and under. Under a grey sky the horizon ring measures the
+// deck above the horizon fill, and the apply lays the air over that fill.
+float FogGreySky(float skyThrough);
+// The classic horizon polygon (Landscape::DrawHorizont) stands from under the
+// horizon up to this share of the far distance above the eye: the sine of its
+// top's elevation (3.4 degrees). It is drawn in the classic fog colour, not
+// the sky's, so under a grey sky the apply replaces it with the air.
+constexpr float kFogHorizonFillTop = 0.06f;
+// Under a grey sky the horizon ring samples from this elevation (degrees),
+// above the polygon's top: the deck over the land, not the fill.
+constexpr float kFogRingGreyFromDeg = 3.8f;
 // The morning weight: an eastern sun from 6 degrees under the horizon (full
 // from 2 under to 8 above), gone by 24 degrees.
 float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg);
@@ -319,6 +349,10 @@ std::vector<float> BuildFogLayer(const float* heights, const std::vector<float>&
 // mist's noise and the eye's near thinning: the C++ mirror of the injection's
 // density (Rayleigh at green), for the tests.
 float FogExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround = 1e4f, float layer = kMistLayerMax);
+// The share of its clear haze and Rayleigh air the eye's near thinning keeps
+// `dist` metres from the eye (the injection's hazeKeep: hazeNearKeep at the
+// eye, the whole from kHazeNearFrom to hazeNearTo), for the tests.
+float FogHazeNearKeep(const FogMedium& m, float dist);
 // The share of it that the classic tactical fog does not hold (the mist and
 // the humid ground air): what AI sight takes on top of it.
 float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer);

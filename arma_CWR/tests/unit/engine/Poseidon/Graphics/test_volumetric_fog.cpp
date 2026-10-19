@@ -611,3 +611,160 @@ TEST_CASE("Volumetric fog: round 3 medium rules (clear near air, dust, hilltops,
     CHECK(FogAridity({0.8f, 0.9f, 0.8f, 0.9f, 1.4f, 0.5f, 1.4f, 0.5f}, heights) == 0.0f);
     CHECK(FogAridity({}, heights) == 0.0f);
 }
+
+TEST_CASE("Volumetric fog: a grey day fades its ridges into the deck's air, with no horizon plate", "[remaster][fog]")
+{
+    // How grey the sky is for the air's colour: none under a broken sky's
+    // blue gaps, all under a full deck.
+    CHECK(FogGreySky(1.0f) == 0.0f);
+    CHECK(FogGreySky(0.65f) == 0.0f);
+    CHECK(FogGreySky(0.4f) == Catch::Approx(0.5f));
+    CHECK(FogGreySky(0.15f) == Catch::Approx(1.0f));
+    CHECK(FogGreySky(0.0f) == Catch::Approx(1.0f));
+    // The ring samples above the classic horizon polygon's top (3.4 degrees).
+    CHECK(std::sin(kFogRingGreyFromDeg * 3.14159265f / 180.0f) > kFogHorizonFillTop);
+
+    // A dry full deck thickens the clear haze by 1 + kHazeGreyGain: the
+    // ridges from 1 to 3 km fade one behind the other instead of one wash
+    // (look fix "plate": the gain was 3.5, everything past 1.5 km was gone).
+    const LightingTuning t{};
+    const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
+    FogInputs grey = ClearNoon();
+    grey.skyThrough = 0.0f;
+    grey.viewDistance = 3500.0f;
+    const FogMedium overcast = ComputeFogMedium(grey, t, true);
+    CHECK(overcast.hazeSigma == Catch::Approx(noon.hazeSigma * (1.0f + kHazeGreyGain)));
+    const float sigmaGrey = FogExtinctionAt(overcast, 100.0f, 0.0f, 100.0f, 0.0f);
+    CHECK(std::exp(-sigmaGrey * 1000.0f) > 0.2f);  // a ridge 1 km out keeps a fifth or more
+    CHECK(std::exp(-sigmaGrey * 2000.0f) > 0.05f); // one at 2 km is still there
+    CHECK(std::exp(-sigmaGrey * 3000.0f) < 0.15f); // one at 3 km is mostly air
+
+    // Rain takes kRainFogShare of the classic tactical visibility's extinction;
+    // setFog keeps all of it.
+    FogInputs wet = grey;
+    wet.rain = 0.8f;
+    const FogMedium rain = ComputeFogMedium(wet, t, true);
+    const float vis = WeatherVisibility(0.0f, 0.8f, 3500.0f);
+    CHECK(vis == Catch::Approx(980.0f));
+    CHECK(rain.weatherSigma ==
+          Catch::Approx(kWeatherExtinction * (1.0f / vis - 1.0f / 3500.0f) * kRainFogShare).epsilon(1e-4));
+    // A hill 300 m away in rain 0.8 keeps over 40 % of its contrast (the
+    // shaders' near thinning leaves it more), the classic fog end (where the
+    // AI's tactical sight ends) under 15 %, 2 km nearly nothing.
+    const float sigmaRain = FogExtinctionAt(rain, 30.0f, 0.0f, 30.0f, 0.0f);
+    CHECK(std::exp(-sigmaRain * 300.0f) > 0.4f);
+    CHECK(std::exp(-sigmaRain * vis) < 0.15f);
+    CHECK(std::exp(-sigmaRain * 2000.0f) < 0.02f);
+    FogInputs foggy = grey;
+    foggy.fog = 0.3f;
+    const float visFog = WeatherVisibility(0.3f, 0.0f, 3500.0f);
+    CHECK(ComputeFogMedium(foggy, t, true).weatherSigma ==
+          Catch::Approx(kWeatherExtinction * (1.0f / visFog - 1.0f / 3500.0f) * kSetFogBoost).epsilon(1e-4));
+}
+
+TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the apply lays the air over the fill",
+          "[remaster][fog][Shaders]")
+{
+    const std::string ring = gl::PostShaderSource(gl::PostShader::FogRing);
+    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
+    REQUIRE_FALSE(ring.empty());
+    REQUIRE_FALSE(apply.empty());
+    CHECK(kFogRingGreyFromDeg == 3.8f);
+    CHECK(CountOf(ring, "const float kRingGreyFromDeg = 3.8;") == 1);
+    CHECK(CountOf(ring, "max(found + radians(0.3), radians(kRingGreyFromDeg))") == 1);
+    CHECK(kFogHorizonFillTop == 0.06f);
+    CHECK(CountOf(apply, "const float kApplyFillTop = 0.06;") == 1);
+    // Grey (fogSkyWeather.z, FogGreySky) or wet, the fill below the polygon's
+    // top is the air entirely; the deck above sinks into it.
+    CHECK(CountOf(apply, "float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));") == 1);
+    CHECK(CountOf(apply, "float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);") == 1);
+    CHECK(CountOf(apply, "base = mix(base, airAt, hb * greyFill);") == 1);
+}
+
+TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light under the fog, not on the air",
+          "[remaster][fog][Shaders]")
+{
+    // The apply writes the surface's share of the pixel's light after the fog
+    // on a second target (an optic overlay's untouched mask: 1), and the
+    // composite scales the surface target's sky and sun shares by it before
+    // the occlusion and the contact shadow: darkening the whole pixel by that
+    // share of the occlusion is darkening the surface under the fog (look fix
+    // "plate": dark rims at the foot of fogged trees).
+    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
+    CHECK(CountOf(apply, "layout(location = 0) out vec4 fragColor;") == 1);
+    CHECK(CountOf(apply, "layout(location = 1) out vec4 fogVeil;") == 1);
+    CHECK(CountOf(apply, "fogVeil = vec4(1.0);") == 1);
+    CHECK(CountOf(apply, "float surfL = dot(base * T, kApplyLuma);") == 1);
+    CHECK(CountOf(apply, "fogVeil = vec4(allL > 1e-6 ? clamp(surfL / allL, 0.0, 1.0) : clamp(T, 0.0, 1.0));") == 1);
+    const std::string composite = gl::PostShaderSource(gl::PostShader::Composite);
+    REQUIRE_FALSE(composite.empty());
+    CHECK(CountOf(composite, "uniform sampler2D fogVeilTex;") == 1);
+    CHECK(CountOf(composite, "float veil = surfParams2.y > 0.5 ? textureLod(fogVeilTex, vUV, 0.0).r : 1.0;") == 1);
+    const size_t veiled = composite.find("s.r *= veil;");
+    const size_t keep = composite.find("keep = max(1.0 - clamp(s.r, 0.0, 1.0) * (1.0 - ao)");
+    REQUIRE(veiled != std::string::npos);
+    REQUIRE(keep != std::string::npos);
+    CHECK(veiled < keep);
+    CHECK(CountOf(composite, "s.b *= veil;") == 1);
+    // A free unit: not a post unit, not a material or upload unit.
+    CHECK(gl::kFogVeilUnit == gl::kFogFloorUnit);
+    for (int u : gl::kPostUnits)
+        CHECK(u != gl::kFogVeilUnit);
+    CHECK(gl::kFogVeilUnit != 1);
+    CHECK(gl::kFogVeilUnit != 7);
+}
+
+TEST_CASE("Volumetric fog: clear noon air is nearly clear for the first kilometre, the far ridges keep theirs",
+          "[remaster][fog]")
+{
+    // Look fix "veil": the clear haze's optical depth along a level ray 300 m
+    // up, with the eye's near thinning (the injection's hazeKeep).
+    LightingTuning t;
+    const FogMedium noon = ComputeFogMedium(ClearNoon(), t, true);
+    auto tau = [](const FogMedium& m, float to)
+    {
+        const float sigma = m.hazeSigma * std::exp(-300.0f / m.hazeHeight);
+        double sum = 0.0;
+        for (float s = 0.5f; s < to; s += 1.0f)
+            sum += sigma * FogHazeNearKeep(m, s);
+        return static_cast<float>(sum);
+    };
+    // The round-2 thinning (0.35 at the eye, the whole at 2.5 km).
+    FogMedium before = noon;
+    before.hazeNearKeep = 0.35f;
+    before.hazeNearTo = 2500.0f;
+    CHECK(FogHazeNearKeep(noon, 0.0f) == Catch::Approx(kHazeNearKeep));
+    CHECK(FogHazeNearKeep(noon, kHazeNearTo) == Catch::Approx(1.0f));
+    // The first few hundred metres are nearly clear: a dark wood 500 m out
+    // takes under 2.5 % of the horizon's light (it took 8 %, a milky veil).
+    CHECK(tau(noon, 500.0f) < 0.025f);
+    CHECK(tau(before, 500.0f) > 0.07f);
+    CHECK(tau(noon, 1000.0f) < 0.08f);
+    // The depth is in the distance: ridges 3 and 5 km out keep most of their air.
+    CHECK(tau(noon, 3000.0f) > 0.6f);
+    CHECK(tau(noon, 5000.0f) > 0.8f * tau(before, 5000.0f));
+    // A grey deck keeps its thick near air.
+    FogInputs grey = ClearNoon();
+    grey.skyThrough = 0.0f;
+    const FogMedium deck = ComputeFogMedium(grey, t, true);
+    CHECK(FogHazeNearKeep(deck, 0.0f) == Catch::Approx(kHazeNearKeepGrey));
+    CHECK(FogHazeNearKeep(deck, kHazeNearToGrey) == Catch::Approx(1.0f));
+    // The shaders' thinning is this one, read from the medium.
+    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
+    CHECK(CountOf(inject, "float hazeKeep = mix(fogWind.w, 1.0, smoothstep(kHazeNearFrom, fogWind.z, dist));") == 1);
+}
+
+TEST_CASE("Volumetric fog: the air's colour along the screen's edges is the ring's, not the model's",
+          "[remaster][fog][Shaders]")
+{
+    // Look fix "veil": a column takes the ring's measured sky as surely as the
+    // freshest of its nine taps (the taps past the screen's edge, never seen,
+    // no longer count as doubt), and the model only where the ring's
+    // measurements in that azimuth have aged.
+    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
+    REQUIRE_FALSE(inject.empty());
+    CHECK(CountOf(inject, "ringSure = max(ringSure, a.a * (1.0 - 0.1 * abs(float(k))));") == 1);
+    CHECK(CountOf(inject, "g_air = mix(g_air, ring.rgb, clamp(ringSure, 0.0, 1.0) * (1.0 - fogNightAir.w)) * "
+                          "fogLightK.y;") == 1);
+    CHECK(CountOf(inject, "clamp(ring.a, 0.0, 1.0)") == 0);
+}

@@ -390,16 +390,24 @@ void main() {
     // gaps between crowns.
     float az = atan(d.x, d.z) * (1.0 / 6.2831853);
     vec4 ring = vec4(0.0);
+    // How fresh the nearest measurement of this azimuth is: the freshest tap,
+    // a little less for the outer ones. (The taps' mean read the azimuths past
+    // the screen's edge, never seen, as doubt, so the columns along the edges
+    // took up to half of the model's paler colour: a pale smear down the left
+    // of a clear noon vista, look fix "veil". Azimuths out of view still fade
+    // to the model as their measurements age.)
+    float ringSure = 0.0;
     for (int k = -4; k <= 4; ++k) {
         float w = 5.0 - abs(float(k));
         vec4 a = texture(fogRing, vec2(az + float(k) * (2.0 / 256.0), 0.5));
         ring += w * vec4(a.rgb * a.a, a.a);
+        ringSure = max(ringSure, a.a * (1.0 - 0.1 * abs(float(k))));
     }
     ring /= 25.0;
     ring.rgb /= max(ring.a, 1e-4);
     // (Not at night: the lamps' heads and flares above the roofs would read
     // as sky there; the night sky is the model's dark colour.)
-    g_air = mix(g_air, ring.rgb, clamp(ring.a, 0.0, 1.0) * (1.0 - fogNightAir.w)) * fogLightK.y;
+    g_air = mix(g_air, ring.rgb, clamp(ringSure, 0.0, 1.0) * (1.0 - fogNightAir.w)) * fogLightK.y;
 
     // The sun's share of it: the sun's single scattering (Mie phase) against
     // the sky's light (the rig's, a white surface under the sky).
@@ -679,6 +687,7 @@ out vec4 fragColor;
 
 // The ring's main (after its inputs and the camera's codec).
 const char kPostFogRingMainGLSL[] = R"(
+const float kRingGreyFromDeg = 3.8; // kFogRingGreyFromDeg
 
 // The frame's uv of a world direction, w 0 when it is off screen.
 vec3 ringProject(vec3 d) {
@@ -714,12 +723,15 @@ void main() {
         // height in every azimuth), none within five degrees of the sun, the
         // mean of the darker half: the sky's colour, not the sun's disc and
         // glare, a star or a bright gap between crowns.
-        // Under a grey sky (ringCtl.z) the samples start just above the land
-        // and stay low: the weather's fill along the horizon is the air's
-        // colour, and the darker deck above it made the rain's air a dark
-        // slate that far hills faded into (look director round 2).
-        float base = mix(max(found, radians(2.0)), max(found, 0.0) + radians(0.3), ringCtl.z);
-        float stepDeg = mix(1.0, 0.4, ringCtl.z);
+        // Under a grey sky (ringCtl.z) the samples start just above the
+        // classic horizon fill (the horizon polygon, drawn in the classic fog
+        // colour up to 3.4 degrees, kFogHorizonFillTop) or the land if it
+        // stands higher, and stay low: the deck over the horizon is the air's
+        // colour. (Look fix "plate": sampled just above the land they read
+        // the fill, a warm flat grey, and every far ridge and the fill itself
+        // took it: a painted plate under a cooler, brighter sky.)
+        float base = mix(max(found, radians(2.0)), max(found + radians(0.3), radians(kRingGreyFromDeg)), ringCtl.z);
+        float stepDeg = mix(1.0, 0.6, ringCtl.z);
         vec4 s[3];
         for (int k = 0; k < 3; ++k) s[k] = vec4(0.0, 0.0, 0.0, 1e9);
         int nS = 0;
@@ -853,13 +865,17 @@ uniform vec4 fogNearSize;    // xy the near target's size, z 1 = an optic overla
                              // w 1 = worldTex holds the world before it
 uniform sampler2D worldTex;  // unit 6: the world before this frame's screen overlay (SnapshotWorldBeforeOverlay)
 uniform vec4 fogSkyEye;      // x the eye's height (m), y the fog floor under it (m), z the wet air at the eye (1/m), w its depth (m)
-uniform vec4 fogSkyWeather;  // x weather fog (1/m at the floor), y its scale height (m)
+uniform vec4 fogSkyWeather;  // x weather fog (1/m at the floor), y its scale height (m), z how grey the sky is (FogGreySky)
 uniform vec4 fogSkyClear;    // x haze (1/m at sea level), y its scale height, z Rayleigh (green, 1/m at sea level), w dust (1/m at 0 m)
 uniform vec4 fogSkyDust;     // x dust's scale height (m), yz the eye's world x, z (m), w the ground under the eye (m)
 uniform vec4 fogGlow;        // x the night glow's gain (0 = none)
 uniform vec4 fogSkyLobe;     // x the sun's forward lobe in the clear air past the far end (0 = none)
 uniform mat3 viewToWorld;    // view-space direction to world (camera-relative)
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+// The surface's share of the pixel's light after the fog (FogState::veilTex):
+// the composite's occlusion and contact shadows darken the surface's own
+// light, not the air in front of it.
+layout(location = 1) out vec4 fogVeil;
 )";
 
 // The apply's main (after its inputs and the LitConstants block: the sun's
@@ -872,6 +888,8 @@ const float kApplyBeyond = 40000.0;
 // The sun's glow past the far end fades above the horizon with
 // exp(-sin(elevation) / this): 2.9 degrees.
 const float kApplyLobeFade = 0.05;
+// The classic horizon polygon's top over the eye (kFogHorizonFillTop).
+const float kApplyFillTop = 0.06;
 
 // The world's per-fragment shoulder above 0.8 (tonemapNeutral's peak curve,
 // without its whitening, which the frame already holds) and its inverse: the
@@ -980,6 +998,7 @@ void main() {
     vec4 c = snap ? texture(worldTex, vUV) : cOver;
     if (!snap && fogNearSize.z > 0.5 && max(c.r, max(c.g, c.b)) < 0.012) {
         fragColor = c;
+        fogVeil = vec4(1.0);
         return;
     }
     float zRaw = fogViewZ(vUV);
@@ -1095,23 +1114,27 @@ void main() {
             T *= 1.0 - rd;
         }
     }
-    // In rain and weather fog the dome's own fill under and along the horizon
-    // already is the weather's air (the engine draws it in the fog colour):
-    // the volume's darker air laid over it read as a grey wall beyond the
-    // land. The sky keeps its fill there; the land still fogs.
+    // In rain and weather fog the sky past the far end is the weather's air
+    // already: the volume's air is not laid over it again (that read as a
+    // grey wall beyond the land); the land still fogs.
+    float wetSky = clamp(fogSkyWeather.x * 2000.0, 0.0, 1.0);
     if (sky) {
-        float wetSky = clamp(fogSkyWeather.x * 2000.0, 0.0, 1.0);
         S *= 1.0 - wetSky;
         T = mix(T, 1.0, wetSky);
-        // The deck above the fill sinks into the weather's air toward the
-        // horizon (its height fade, about 5 degrees): the fill's flat band
-        // ended in a hard edge under the clouds.
-        if (wetSky > 0.0 && airValid) {
-            vec2 ndcW = cuv * 2.0 - 1.0;
-            float sW = normalize(viewToWorld * vec3(ndcW.x * projInfo.z, ndcW.y * projInfo.w, 1.0)).y;
-            float hb = exp(-max(sW, 0.0) / 0.09);
-            base = mix(base, airAt, 0.9 * hb * wetSky);
-        }
+    }
+    // Under a grey sky and in rain, the classic horizon fill (the horizon
+    // polygon in the classic fog colour, up to kApplyFillTop over the eye's
+    // horizon, and the dome's flat band under it) is the air's colour, the
+    // deck over the horizon the ring measured, and the deck above the fill
+    // sinks into it over its height fade (about 5 degrees). (Look fix
+    // "plate": the fill kept the classic fog's warm grey, a painted plate
+    // between the hills with a hard seam at its top under a cooler sky.)
+    float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));
+    if ((sky || z > 0.98 * fogDepth.x) && greyFill > 0.0 && airValid) {
+        vec2 ndcW = cuv * 2.0 - 1.0;
+        float sW = normalize(viewToWorld * vec3(ndcW.x * projInfo.z, ndcW.y * projInfo.w, 1.0)).y;
+        float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);
+        base = mix(base, airAt, hb * greyFill);
     }
     if (fogApply.w > 0.5) S += fogNear(sky ? 1e6 : z);
     // The night glow: the blurred light of the frame, laid into the fog in
@@ -1149,6 +1172,14 @@ void main() {
         col += (n + m - 1.0) / 255.0; // triangular dither, +-1 LSB
     }
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0 - (1.0 - clamp(c.a, 0.0, 1.0)) * T);
+    // The surface's share of the light this pixel ends with (its own light
+    // through the fog against the air's in front of it): the composite's
+    // occlusion darkens that share only, as if it had darkened the surface
+    // before the fog. (T alone left a pale fogged treeline its full
+    // occlusion: the air in front is several times the trees' own light.)
+    float surfL = dot(base * T, kApplyLuma);
+    float allL = surfL + dot(S, kApplyLuma);
+    fogVeil = vec4(allL > 1e-6 ? clamp(surfL / allL, 0.0, 1.0) : clamp(T, 0.0, 1.0));
 }
 )";
 

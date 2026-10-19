@@ -865,6 +865,12 @@ class Engine : public IGraphicsEngine
     /// or a missile (Light::Kind Combat or Fire) then draws its glow but lights
     /// nothing, and smoke takes the combat lights instead.
     virtual bool CombatLightsActive() const { return false; }
+    /// Light past the 8-bit colour of the next DrawDecal (display space,
+    /// rgb): the backend adds it to the decal's colour under the photoreal
+    /// camera, which stores light above white, so a smoke puff at the foot of
+    /// a camp fire's column glows brighter than its colour can say. The draw
+    /// clears it. Without the camera (or on another backend) it is dropped.
+    virtual void SetDecalGlow(PackedColor /*glow*/) {}
     /// Captures: hold the remastered cloud-shadow field at a drift offset in
     /// metres (pinned = false lets it drift with the wind again from where it
     /// is). The field integrates the wind every frame, so re-pinning the sim

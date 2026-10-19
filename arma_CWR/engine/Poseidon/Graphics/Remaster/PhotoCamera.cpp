@@ -319,6 +319,20 @@ float CameraGolden(float sunElevationDeg)
     return Smoothstep(32.0f, 16.0f, sunElevationDeg) * Smoothstep(1.0f, 5.0f, sunElevationDeg);
 }
 
+Rgb GoldenWarmGain(float golden)
+{
+    const float g = Clamp01(golden);
+    const Rgb w = kCameraGoldenWarm * (1.0f / Luminance(kCameraGoldenWarm));
+    return {1.0f + (w.r - 1.0f) * g, 1.0f + (w.g - 1.0f) * g, 1.0f + (w.b - 1.0f) * g};
+}
+
+float GoldenWarmShare(const Rgb& c)
+{
+    const float peak = MaxOf(c);
+    const float warmth = peak > 0.0f ? (c.r - c.b) / peak : 0.0f;
+    return Smoothstep(kGoldenShareFrom, kGoldenShareTo, warmth);
+}
+
 float CameraTimeOfDayEv(float sunElevationDeg, float veil)
 {
     return kCameraGoldenEv * CameraGolden(sunElevationDeg) +

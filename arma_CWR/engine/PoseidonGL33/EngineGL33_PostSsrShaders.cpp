@@ -75,6 +75,7 @@ uniform sampler2D mipTex;        // unit 3: the resolved frame with mips (displa
 uniform sampler2D terrainHeight; // unit 4: r = terrain height (m)
 uniform sampler2D depthTex;      // unit 5: the resolved depth (the ray's origin and the surface normal)
 uniform sampler2D skyLut;        // unit 8: the sky table (skyReflection)
+uniform sampler2D groundField;   // unit 12: the land's own colour per terrain vertex (the puddles piece's classes)
 uniform vec4 projInfo;   // x = _33, y = _43 (viewZ = y / (ndcZ - x)), z = 1/_11, w = 1/_22
 uniform vec4 depthMap;   // ndcZ = depth * x + y
 uniform vec4 worldRect;  // the 3D viewport in uv
@@ -606,16 +607,26 @@ void main() {
         // Far away puddles shrink below the pixel and the ground is one wet sheen.
         float near = 1.0 - smoothstep(kSsrPuddleFadeStart, kSsrPuddleFadeEnd, dist);
         float flatness = smoothstep(0.85, 0.98, nD.y);
-        float grass = road ? 0.0 : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01);
+        // The land's grass share from the ground field (groundFieldAt, the
+        // forward pass's own classes): continuous across the landscape's
+        // squares, where the frame's colour jumped at every square whose
+        // texture differed a little from its neighbour's. The frame's colour
+        // only while the field is not built.
+        vec4 field = road ? vec4(0.0) : groundFieldAt(posW.xz);
+        bool fieldOn = field.a > 0.5;
+        float grass = road ? 0.0 : (fieldOn ? wetVegetation(field.rgb) : smoothstep(0.01, 0.05, c0.g - max(c0.r, c0.b) + 0.01));
         float th = road ? kSsrPuddleRoad : kSsrPuddleGround;
         float puddle = wet * flatness * smoothstep(th, th + 0.035, pn + 0.08 * (wet - 1.0)) * (1.0 - grass) * near;
         if (wetWeather) {
-            // The wet weather's puddles (wetPuddle, the forward pass's own),
-            // and a grass test that holds under warm lamps, which turn lit
-            // grass from green to amber: green near red and well above blue.
-            float gr = c0.g / max(c0.r, 1e-3);
-            float gb = c0.g / max(c0.b, 1e-3);
-            grass = road ? 0.0 : max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
+            // The wet weather's puddles (wetPuddle, the forward pass's own).
+            // Without the field, a grass test that holds under warm lamps,
+            // which turn lit grass from green to amber: green near red and
+            // well above blue.
+            if (!road && !fieldOn) {
+                float gr = c0.g / max(c0.r, 1e-3);
+                float gb = c0.g / max(c0.b, 1e-3);
+                grass = max(grass, smoothstep(0.84, 0.92, gr) * smoothstep(1.1, 1.3, gb));
+            }
             puddle = wetPuddle(posW, footT, road ? 1.0 : 0.0, grass, ssrWetMode.y).x;
         }
         vec3 nW = normalize(mix(nD, vec3(0.0, 1.0, 0.0), mix(0.6, 1.0, puddle)));

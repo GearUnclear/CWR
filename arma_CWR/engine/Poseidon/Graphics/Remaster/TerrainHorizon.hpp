@@ -50,6 +50,16 @@ struct TerrainHorizonMap
     // the tint never changes how bright the bounce is, only its colour. Empty
     // when no ground colours were given (the shader then uses a neutral tint).
     std::vector<float> groundTint;
+    // The ground's own colour (display space 0..1): size * size rgb triples,
+    // the landscape textures' average colours blended over the squares that
+    // share each vertex (box-downsampled like the heights). The wet weather
+    // tells grass from bare ground and how porous the land is from this
+    // continuous field (SampleGroundColor, the shaders' groundFieldAt), not
+    // from each square's own texture: every square has its own texture, and a
+    // class read per pixel jumped at a square whose texture differed a little
+    // from its neighbour's (a straight seam in the wet sheen and the puddles).
+    // Empty when no ground colours were given.
+    std::vector<float> groundColor;
 
     bool Valid() const { return size > 1 && cellSize > 0.0f; }
     // Decoded horizon angle (degrees) of direction `dir` at texel (x, z).
@@ -87,6 +97,13 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
 // `strength` (0 = white, 1 = the full chroma) and kept within [0.5, 1.6] per
 // channel so a saturated texture cannot stain the shade.
 void GroundTint(float r, float g, float b, float strength, float& tintR, float& tintB);
+
+// The ground colour at world (x, z) as the shaders read it (groundFieldAt in
+// EngineGL33_LightingShadersSurface.cpp): between the four texels around the
+// point with smoothstep weights, so the field and its slope are continuous
+// across every grid line (no edge and no crease), clamped at the map's edges.
+// False (rgb untouched) when the map has no ground colours.
+bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb[3]);
 
 // Reference visibility the shader computes: horizon interpolated between the
 // two directions around the sun azimuth, compared with the sun elevation over a

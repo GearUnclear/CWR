@@ -13,8 +13,10 @@
 //     while the gate is off, and then no fragment does any of this.
 //   - Each lit draw carries its surface class (litMatClass.x, from its texture
 //     name and object kind) and the main tells objects, the land and grass
-//     clutter apart (g_wetDraw). The land tells grass from bare ground per
-//     pixel from its albedo (wetVegetation).
+//     clutter apart (g_wetDraw). The land tells grass from bare ground, and
+//     how porous it is, from the ground field (groundFieldAt: the land's own
+//     colour, continuous across the landscape's squares), not per pixel from
+//     its square's texture, whose class jumped at every texture edge.
 //   - Water fills the pores: a surface darkens by its porosity (cloth a lot,
 //     plaster less, paint not at all). What it does not soak up forms a smooth
 //     film (paint, glass, metal, asphalt), which reflects the sky (objects; the
@@ -39,9 +41,49 @@ namespace Poseidon::gl33lighting
 // The puddle field: a pure function of the world position, so the forward
 // pass (the puddle's darkening and its water film) and the reflections' trace
 // (its mirror, EngineGL33_PostSsrShaders.cpp) agree pixel for pixel without a
-// buffer between them. It reads the LitConstants block and the terrain height
-// map (terrainHeight, unit 4), which both declare.
+// buffer between them. It reads the LitConstants block, the terrain height
+// map (terrainHeight, unit 4) and the ground field (groundField, unit 12),
+// which both declare. The land's classes (grass, bare ground, its porosity)
+// are here too, from the ground field, so both passes class the land alike.
 const char kRemasterPuddlesGLSL[] = R"(
+// ---- The land's wet classes (wetWeather; TerrainHorizon.hpp groundColor) ----
+// The grass share of a ground colour (display): green above red and blue,
+// or olive and yellow-green grass (green about equal to red, well above blue).
+float wetVegetation(vec3 c) {
+    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
+    float gr = c.g / max(c.r, 1e-3);
+    float gb = c.g / max(c.b, 1e-3);
+    return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));
+}
+
+// The porosity of bare ground from its colour: soil and sand soak up a lot,
+// grey gravel and rock little.
+float wetGroundPorosity(vec3 c) {
+    float mx = max(c.r, max(c.g, c.b));
+    float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
+    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0);
+    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0);
+    return mix(mix(0.7, 0.9, warm), 0.3, rock);
+}
+
+// The ground's own colour (display) at world xz: the landscape textures'
+// average colours blended over the squares that share each vertex
+// (SampleGroundColor mirrors this), read with smoothed interpolation between
+// the texels, so it has no edge and no crease at any square or grid line.
+// a = 1 where the field is built, 0 without a map or ground colours.
+// The land is classed from this, not from the pixel's own texture: each
+// square of the landscape has its own texture, and a class read per pixel
+// jumped at every square whose texture differed a little from its neighbour's
+// (a straight seam in the sheen and the puddles; the owner's wet seam).
+vec4 groundFieldAt(vec2 xz) {
+    if (litTerrain.x < 0.5) return vec4(0.0);
+    vec2 t = xz * litTerrain.y;
+    vec2 i = floor(t);
+    vec2 f = t - i;
+    f = f * f * (3.0 - 2.0 * f);
+    return textureLod(groundField, (i + f + 0.5) * litTerrain.z, 0.0);
+}
+
 // ---- Puddles (wetWeather; Graphics/Remaster/Wetness.hpp) ----
 // Level ground pools water: three octaves of value noise (the finer ones fade
 // out below the pixel's footprint, so far puddles do not shimmer), raised in
@@ -102,7 +144,11 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
         vec2 g = vec2(hx1 - hx0, hz1 - hz0) * (0.5 / cell);
         flatness = smoothstep(0.85, 0.98, inversesqrt(1.0 + dot(g, g)));
     }
-    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg) + kPuddleLevelShift * (1.0 - level);
+    // The land's grass share is an average over mixed ground (the ground
+    // field), whose water stands in its bare patches: the threshold leans
+    // toward bare ground's (veg squared), so a mixed square holds about the
+    // puddles its bare and grassy parts would hold apart.
+    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
     float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
     return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
 }
@@ -168,25 +214,6 @@ const float kWetRingsFar = 40.0;    // rain rings on puddles within this distanc
 // What the main is shading: 0 an object (its class from litMatClass.x), 1 the
 // land, 2 grass clutter, 3 the sea on the detail program (never wet).
 int g_wetDraw = 0;
-
-// The grass share of a ground albedo (display): green above red and blue,
-// or olive and yellow-green grass (green about equal to red, well above blue).
-float wetVegetation(vec3 c) {
-    float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);
-    float gr = c.g / max(c.r, 1e-3);
-    float gb = c.g / max(c.b, 1e-3);
-    return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));
-}
-
-// The porosity of bare ground from its albedo: soil and sand soak up a lot,
-// grey gravel and rock little.
-float wetGroundPorosity(vec3 c) {
-    float mx = max(c.r, max(c.g, c.b));
-    float sat = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-3);
-    float warm = clamp((c.r - c.b) * 5.0, 0.0, 1.0);
-    float rock = clamp(1.0 - sat * 5.0, 0.0, 1.0);
-    return mix(mix(0.7, 0.9, warm), 0.3, rock);
-}
 
 // How much rain a surface takes: up-facing fully, vertical with run-down
 // streaks near the eye (low and soft: hulls must not stripe), undersides
@@ -557,14 +584,25 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
     }
     bool ground = g_wetDraw == 1 || g_wetDraw == 2 || litMatClass.y > 7.5;
     int cls = int(clamp(litMatClass.x + 0.5, 0.0, 13.0));
-    float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(albedo) : 0.0);
-    float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(albedo), kWetGrassPorosity, veg);
+    // The land's classes come from the ground field (groundFieldAt), the same
+    // continuous colour the reflections' trace reads, so the sheen, the
+    // darkening and the puddles blend across a texture edge instead of jumping
+    // at it; the albedo only while the field is not built yet.
+    vec3 groundC = albedo;
+    if (g_wetDraw == 1) {
+        vec4 field = groundFieldAt(posAbs.xz);
+        if (field.a > 0.5) groundC = field.rgb;
+    }
+    float veg = g_wetDraw == 2 ? 1.0 : (g_wetDraw == 1 ? wetVegetation(groundC) : 0.0);
+    float porosity = g_wetDraw == 0 ? kWetPorosity[cls] : mix(wetGroundPorosity(groundC), kWetGrassPorosity, veg);
     float w = (ground ? mix(0.45, 1.0, skyVisibility) : wetCoverage(n, posAbs, skyVisibility, dist)) * wet;
-    // Standing water on the land and on roads.
+    // Standing water on the land and on roads. The land pools as bare ground
+    // or grass by its field, never by its square's texture name (the trace
+    // never treats the land as a road either).
     vec2 pud = vec2(0.0);
     if (ground && g_wetDraw != 2) {
         float footT = max(length(fwidth(posAbs.xz)), 1e-3);
-        pud = wetPuddle(posAbs, footT, (g_wetDraw == 0 || cls == 7) ? 1.0 : 0.0, veg, litWeather.z);
+        pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);
     }
     w = max(w, pud.y);
     if (w <= 0.0 && pud.x <= 0.0) return;

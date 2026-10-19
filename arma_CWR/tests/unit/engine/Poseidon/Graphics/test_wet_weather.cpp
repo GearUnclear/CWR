@@ -4,10 +4,12 @@
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <Poseidon/Graphics/Remaster/SurfaceMaterials.hpp>
+#include <Poseidon/Graphics/Remaster/TerrainHorizon.hpp>
 #include <Poseidon/Graphics/Remaster/Wetness.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -530,4 +532,164 @@ TEST_CASE("Wet weather backend: the gate sets the Weather slot, the per-draw cla
     CHECK(
         ssr.find("const float weatherWet = wetWeather ? _wetFrame.surface : (land ? land->GetRainDensity() : 0.0f);") !=
         std::string::npos);
+}
+
+// ---- The land's classes: one continuous field, no seam at a texture edge ------
+
+namespace
+{
+
+// The shaders' wetVegetation (the puddles piece), line for line; the test below
+// pins the shader's text to it.
+float WetVegetationMirror(float r, float g, float b)
+{
+    const float green = std::clamp((g - std::max(r, b)) * 10.0f + (g - b) * 1.5f, 0.0f, 1.0f);
+    const float gr = g / std::max(r, 1e-3f);
+    const float gb = g / std::max(b, 1e-3f);
+    auto smooth = [](float e0, float e1, float x)
+    {
+        const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    return std::max(green, smooth(1.1f, 1.3f, gb) * smooth(0.9f, 1.0f, gr));
+}
+
+} // namespace
+
+TEST_CASE("Wet weather land: the classes come from a field that blends across a texture edge",
+          "[remaster][wet][TerrainHorizon]")
+{
+    // Two neighbouring stretches of land whose textures differ a little in
+    // colour, as the owner's wet town square (a grey gravel texture beside an
+    // olive one). Classed per pixel from each square's own texture, the grass
+    // share jumped at their shared edge: the straight seam in the sheen and
+    // the puddles.
+    const float A[3] = {0.47f, 0.46f, 0.43f}; // grey gravel
+    const float B[3] = {0.44f, 0.45f, 0.36f}; // olive grass
+    const float vegA = WetVegetationMirror(A[0], A[1], A[2]);
+    const float vegB = WetVegetationMirror(B[0], B[1], B[2]);
+    REQUIRE(std::fabs(vegB - vegA) > 0.5f);
+
+    // The map's ground colours (per vertex, as the landscape hands them over)
+    // are kept as the ground field.
+    const int n = 16;
+    const float cell = 50.0f;
+    std::vector<float> h(static_cast<size_t>(n) * n, 0.0f);
+    std::vector<float> rgb(static_cast<size_t>(n) * n * 3);
+    for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+            for (int c = 0; c < 3; ++c)
+                rgb[(static_cast<size_t>(z) * n + x) * 3 + c] = x < 8 ? A[c] : B[c];
+    TerrainHorizonOptions opt;
+    opt.threads = 1;
+    TerrainHorizonMap map;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, map, rgb.data()));
+    REQUIRE(map.groundColor.size() == rgb.size());
+    for (size_t i = 0; i < rgb.size(); ++i)
+        CHECK(map.groundColor[i] == Catch::Approx(rgb[i]));
+    TerrainHorizonMap plain;
+    REQUIRE(BuildTerrainHorizonMap(h.data(), n, cell, opt, plain));
+    CHECK(plain.groundColor.empty());
+    float none[3] = {-1.0f, -1.0f, -1.0f};
+    CHECK_FALSE(SampleGroundColor(plain, 100.0f, 100.0f, none));
+    CHECK(none[0] == -1.0f);
+
+    // Walking across the edge a quarter metre at a time, the class read from
+    // the field changes by a sliver per step (no step anywhere), and away from
+    // the edge each stretch keeps its own class.
+    float c[3];
+    float prev = -1.0f;
+    float biggest = 0.0f;
+    for (float x = 2.0f * cell; x <= 13.0f * cell; x += 0.25f)
+    {
+        REQUIRE(SampleGroundColor(map, x, 7.3f * cell, c));
+        const float veg = WetVegetationMirror(c[0], c[1], c[2]);
+        if (prev >= 0.0f)
+            biggest = std::max(biggest, std::fabs(veg - prev));
+        prev = veg;
+    }
+    CHECK(biggest < 0.03f);
+    REQUIRE(SampleGroundColor(map, 3.0f * cell, 7.3f * cell, c));
+    CHECK(WetVegetationMirror(c[0], c[1], c[2]) == Catch::Approx(vegA).margin(1e-4));
+    REQUIRE(SampleGroundColor(map, 12.0f * cell, 7.3f * cell, c));
+    CHECK(WetVegetationMirror(c[0], c[1], c[2]) == Catch::Approx(vegB).margin(1e-4));
+    // No crease either: at a grid line the field's slope is the same from
+    // both sides (zero, the smoothstep weights), so the sheen does not fold.
+    float l[3], m[3], r[3];
+    REQUIRE(SampleGroundColor(map, 7.0f * cell - 0.5f, 100.0f, l));
+    REQUIRE(SampleGroundColor(map, 7.0f * cell, 100.0f, m));
+    REQUIRE(SampleGroundColor(map, 7.0f * cell + 0.5f, 100.0f, r));
+    CHECK(std::fabs((m[2] - l[2]) - (r[2] - m[2])) < 1e-4f);
+    // Clamped at the map's edges.
+    REQUIRE(SampleGroundColor(map, -500.0f, -500.0f, c));
+    CHECK(c[2] == Catch::Approx(A[2]));
+    REQUIRE(SampleGroundColor(map, 1e5f, 1e5f, c));
+    CHECK(c[2] == Catch::Approx(B[2]));
+}
+
+TEST_CASE("Wet weather shaders: the forward pass and the trace class the land from the ground field",
+          "[remaster][wet][Shaders]")
+{
+    // The classes and the field live in the puddles piece, which the prelude
+    // and the trace each paste once: both class the land alike.
+    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
+    CHECK(puddles.find("vec4 groundFieldAt(vec2 xz) {") != std::string::npos);
+    CHECK(puddles.find("float wetVegetation(vec3 c) {") != std::string::npos);
+    CHECK(puddles.find("float wetGroundPorosity(vec3 c) {") != std::string::npos);
+    // The mirror above is the shader's grass share.
+    CHECK(puddles.find("float green = clamp((c.g - max(c.r, c.b)) * 10.0 + (c.g - c.b) * 1.5, 0.0, 1.0);") !=
+          std::string::npos);
+    CHECK(puddles.find("return max(green, smoothstep(1.1, 1.3, gb) * smoothstep(0.9, 1.0, gr));") != std::string::npos);
+    // SampleGroundColor's smoothed interpolation; without a map, nothing.
+    const size_t at = puddles.find("vec4 groundFieldAt(vec2 xz) {");
+    REQUIRE(at != std::string::npos);
+    const std::string field = puddles.substr(at, puddles.find("\n}\n", at) - at);
+    CHECK(field.find("if (litTerrain.x < 0.5) return vec4(0.0);") != std::string::npos);
+    CHECK(field.find("f = f * f * (3.0 - 2.0 * f);") != std::string::npos);
+    CHECK(field.find("return textureLod(groundField, (i + f + 0.5) * litTerrain.z, 0.0);") != std::string::npos);
+    // The field's grass share is an average over mixed ground: its puddle
+    // threshold leans toward bare ground's, where such ground's water stands.
+    CHECK(puddles.find("kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);") != std::string::npos);
+    const std::string common = gl::RemasterFragmentCommon();
+    CHECK(CountOf(common, "float wetVegetation(vec3 c) {") == 1);
+    CHECK(common.find("uniform sampler2D groundField;") != std::string::npos);
+
+    // The forward pass: the land's grass share and porosity from the field
+    // (the albedo only while there is none), never per pixel from the
+    // square's own texture; the land pools water as bare ground or grass,
+    // never as a road by its texture's name.
+    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
+    CHECK(surface.find("vec4 field = groundFieldAt(posAbs.xz);") != std::string::npos);
+    CHECK(surface.find("if (field.a > 0.5) groundC = field.rgb;") != std::string::npos);
+    CHECK(surface.find("wetVegetation(groundC)") != std::string::npos);
+    CHECK(surface.find("wetGroundPorosity(groundC)") != std::string::npos);
+    CHECK(surface.find("wetVegetation(albedo)") == std::string::npos);
+    CHECK(surface.find("wetGroundPorosity(albedo)") == std::string::npos);
+    CHECK(surface.find("pud = wetPuddle(posAbs, footT, g_wetDraw == 0 ? 1.0 : 0.0, veg, litWeather.z);") !=
+          std::string::npos);
+    CHECK(surface.find("cls == 7) ? 1.0 : 0.0, veg") == std::string::npos);
+
+    // The trace: the land's grass share from the same field, the frame's
+    // colour only without one.
+    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
+    CHECK(trace.find("uniform sampler2D groundField;") != std::string::npos);
+    CHECK(trace.find("vec4 field = road ? vec4(0.0) : groundFieldAt(posW.xz);") != std::string::npos);
+    CHECK(trace.find("(fieldOn ? wetVegetation(field.rgb) : ") != std::string::npos);
+    CHECK(trace.find("if (!road && !fieldOn) {") != std::string::npos);
+
+    // Its unit: one row of the world programs' table, shared with the fog's
+    // floor (which only the fog's injection reads, binds and unbinds); the
+    // world binds the field at each lighting upload and the trace binds it too.
+    bool row = false;
+    for (const auto& s : gl::kLitSamplers)
+        row = row || (std::string(s.name) == "groundField" && s.unit == gl::kGroundFieldUnit);
+    CHECK(row);
+    CHECK(gl::kFogFloorUnit == gl::kGroundFieldUnit);
+    const std::string lighting = ReadTextFile(Gl33Dir() / "EngineGL33_Lighting.cpp");
+    CHECK(lighting.find("GL33Bind::Tex2D(kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
+    CHECK(lighting.find("glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, n, n, 0, GL_RGBA, GL_UNSIGNED_SHORT, gc.data());") !=
+          std::string::npos);
+    const std::string ssr = ReadTextFile(Gl33Dir() / "EngineGL33_PostSsr.cpp");
+    CHECK(ssr.find("SetInt(tr, \"groundField\", Poseidon::gl33lighting::kGroundFieldUnit);") != std::string::npos);
+    CHECK(ssr.find("BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
 }

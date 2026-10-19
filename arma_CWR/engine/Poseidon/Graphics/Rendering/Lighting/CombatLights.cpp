@@ -18,6 +18,29 @@ constexpr float kSmokeGain = 0.35f; // combat light on smoke particles
 // Material brightness the remastered shaders give a white surface: a particle
 // lit by irradiance e shows what a white surface lit by e shows.
 constexpr float kParticleBrightness = 1.6f;
+// The fire's light deepens toward its own hue in the smoke it lights
+// (CombatTuning::smokeTint): each channel's share of the peak to this power,
+// reached as the light's luminance on the particle grows at this rate (look
+// fix "fire": 1.6 left the lit column peach, 3 turned it salmon red).
+constexpr float kSmokeTintPower = 2.2f;
+// The flame's body (look fix "fire"): a fire's flames are its own smoke
+// glowing, incandescent soot in a volume round the light. The classic fire's
+// light lit the puffs there past white, and that yellow column was the
+// flame; the combat light on smoke only scatters, so under the camera the
+// fire had no flame. A puff within kFlameBodyCores core radii of a fire's
+// light emits the flame's colour (linear, kFlameRgb at its peak channel)
+// up to kFlameEmission at the light, falling off squared, times the fire's
+// strength and flicker.
+constexpr float kFlameBodyCores = 3.0f;
+constexpr float kFlameEmission = 8.0f;
+constexpr float kFlameRgb[3] = {1.0f, 0.55f, 0.16f};
+// The fire's own power at strength 1 (EvaluateCombatLight's Fire).
+constexpr float kFirePower = 7.0f;
+constexpr float kSmokeTintRate = 0.6f;
+// The ceiling of the colour version's soft saturation (CombatParticleLight),
+// linear light added at most: the scalar's 4 held the foot of a camp fire's
+// column at the level of the smoke 3 m up, a flat glow with no flame in it.
+constexpr float kParticleLightCap = 12.0f;
 // The fire's colour, and the warmth a fireball cools to: (1.0, 0.66, 0.39)
 // lit the ground round a camp fire at red over blue 1.43 to 1.53 on screen,
 // over the 1.4 that keeps it from reading khaki; one step less saturated.
@@ -152,7 +175,7 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
             SetColour(s, 1.0f, 0.90f + (kFireRgb[1] - 0.90f) * c, 0.74f + (kFireRgb[2] - 0.74f) * c);
             const float flash = std::max(kFlashGain * tuning.flash, 0.0f);
             const float peak = 0.65f * flash + 0.35f;
-            const float afterHold = std::max(age - kExplosionFlashHold, 0.0f);
+            const float afterHold = std::max(age - std::max(tuning.flashHold, 0.0f), 0.0f);
             const float flicker =
                 1.0f + std::min(afterHold / 0.05f, 1.0f) *
                            (0.22f * Noise1(age * 14.0f, seed) + 0.1f * Noise1(age * 31.0f, seed ^ 0x51ed27U));
@@ -176,7 +199,7 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
             const float f = 0.80f + 0.10f * std::sin(kTwoPi * 1.3f * age + ph) +
                             0.07f * std::sin(kTwoPi * 3.7f * age + 2.1f * ph) + 0.10f * Noise1(age * 6.0f, seed) +
                             0.04f * Noise1(age * 11.0f, seed ^ 0x2545f491U);
-            SetPower(s, 7.0f * kFireGain * std::max(tuning.fire, 0.0f) * st, 0.45f, kCombatMaxRange);
+            SetPower(s, kFirePower * kFireGain * std::max(tuning.fire, 0.0f) * st, 0.45f, kCombatMaxRange);
             s.intensity *= std::max(f, 0.2f);
             break;
         }
@@ -218,6 +241,30 @@ float CombatDayScale(CombatLightKind kind, float nightEffect)
     return CombatLightIsBurst(kind) ? 0.2f + 0.8f * night : 0.12f + 0.88f * night;
 }
 
+float CombatNight(float classicNight, bool photoCamera, float cameraNight)
+{
+    const float classic = Clamp(classicNight, 0.0f, 1.0f);
+    return photoCamera ? std::min(classic, Clamp(cameraNight, 0.0f, 1.0f)) : classic;
+}
+
+float CombatBallCosine(float cosTheta, float core, float d)
+{
+    const float c = Clamp(cosTheta, -1.0f, 1.0f);
+    // The ball's angular radius, sin sigma; at its surface and inside it 1.
+    const float sinSigma = d > core ? std::max(core, 0.0f) / d : 1.0f;
+    const float s2 = sinSigma * sinSigma;
+    if (c * c > s2 || s2 <= 0.0f)
+        return std::max(c, 0.0f);
+    if (s2 >= 1.0f)
+        return 0.5f * (1.0f + c);
+    const float sinTheta = std::sqrt(std::max(1.0f - c * c, 1e-12f));
+    const float x = std::sqrt(1.0f / s2 - 1.0f);
+    const float y = Clamp(-x * c / sinTheta, -1.0f, 1.0f);
+    const float sy = sinTheta * std::sqrt(std::max(1.0f - y * y, 0.0f));
+    const float e = (c * std::acos(y) - x * sy) * s2 + std::atan(sy / x);
+    return std::max(e, 0.0f) / (3.14159265f * s2);
+}
+
 bool CombatLightOpensExposure(CombatLightKind kind)
 {
     return kind == CombatLightKind::Explosion || kind == CombatLightKind::Cannon;
@@ -248,6 +295,65 @@ float CombatParticleChannel(float display, float irradiance, float smokeGain)
         return display;
     const float lin = std::pow(std::max(display, 0.0f), 2.2f) + x / (1.0f + x * 0.25f);
     return std::pow(lin, 1.0f / 2.2f);
+}
+
+void CombatParticleLight(const float display[3], const float irradiance[3], float smokeGain, float tint, float out[3])
+{
+    const float k = kParticleBrightness * kSmokeGain * std::max(smokeGain, 0.0f);
+    float x[3];
+    for (int i = 0; i < 3; ++i)
+        x[i] = std::max(irradiance[i], 0.0f) * k;
+    const float peak = std::max(x[0], std::max(x[1], x[2]));
+    if (peak <= 0.0f)
+    {
+        for (int i = 0; i < 3; ++i)
+            out[i] = display[i];
+        return;
+    }
+    // A soft saturation on the peak channel (to kParticleLightCap), the same
+    // share off every channel: the light keeps its hue however strong.
+    const float keep = 1.0f / (1.0f + peak / kParticleLightCap);
+    const float lum = (0.2126f * x[0] + 0.7152f * x[1] + 0.0722f * x[2]) * keep;
+    const float w = Clamp(tint, 0.0f, 1.0f) * (1.0f - std::exp(-lum * kSmokeTintRate));
+    for (int i = 0; i < 3; ++i)
+    {
+        const float hue = std::pow(x[i] / peak, kSmokeTintPower);
+        const float add = x[i] * keep * (1.0f + (hue - 1.0f) * w);
+        out[i] = std::pow(std::pow(std::max(display[i], 0.0f), 2.2f) + add, 1.0f / 2.2f);
+    }
+}
+
+void CombatParticleMix(const float display[3], const float fire[3], const float other[3], float smokeGain, float tint,
+                       float out[3])
+{
+    CombatParticleLight(display, fire, smokeGain, tint, out);
+    for (int i = 0; i < 3; ++i)
+        out[i] = CombatParticleChannel(out[i], other[i], smokeGain);
+}
+
+void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3])
+{
+    out[0] = out[1] = out[2] = 0.0f;
+    if (kind != CombatLightKind::Fire || s.intensity <= 0.0f)
+        return;
+    const float body = kFlameBodyCores * std::max(s.core, 0.05f);
+    if (d >= body)
+        return;
+    const float t = 1.0f - d / body;
+    // The fire's strength times its flicker (and the fire knob): the light's
+    // power over a strength 1 fire's.
+    const float level = s.intensity * s.core * s.core / (kFirePower * kFireGain);
+    const float e = kFlameEmission * level * t * t;
+    for (int i = 0; i < 3; ++i)
+        out[i] = kFlameRgb[i] * e;
+}
+
+void KeepHueUnderOne(float rgb[3])
+{
+    const float peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
+    if (peak > 1.0f)
+        for (int i = 0; i < 3; ++i)
+            rgb[i] /= peak;
 }
 
 float CombatSmokeReach(float core, float albedo)

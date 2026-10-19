@@ -124,6 +124,12 @@ void DeleteTex(unsigned int& t)
     t = 0;
 }
 
+// A fire's light on surfaces under the photoreal camera comes from a body of
+// flames this wide (m), not from the 0.45 m ball the smoke reach is measured
+// in (look fix "fire": the stones round a camp fire went past white to a
+// cream slab).
+constexpr float kFireSurfaceBody = 1.3f;
+
 // How thick the lit smoke and dust around a light is (m): muzzle gas, the
 // dust and smoke of a blast, the hot air round a fire's flames. A fire's own
 // smoke is lit particle by particle (Object::DrawDecal), its base glowing; a
@@ -278,9 +284,21 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
                 case fl::CombatLightKind::Fire:
                     // (A burning wreck's fire at its roof lit the plain behind
                     // it out to 120 m: a strip along the horizon at dusk.)
+                    // Look fix "fire": a wood fire's light is near 2000 K;
+                    // at (0.74, 0.48) the stones round a camp fire went to a
+                    // cream slab past white and the lit grass stayed
+                    // grey-green (red over green 5.8 levels).
                     f.range = std::min(f.range, 20.0f);
-                    warmG = 0.74f;
-                    warmB = 0.48f;
+                    warmG = 0.6f;
+                    warmB = 0.3f;
+                    // The flames are a body, not a point: the stones round
+                    // them take a flame's light (1 / (body^2 + d^2) at the
+                    // same power); from 3 m out the pool loses under a quarter stop.
+                    if (f.start < kFireSurfaceBody)
+                    {
+                        gain *= (f.start * f.start) / (kFireSurfaceBody * kFireSurfaceBody);
+                        f.start = kFireSurfaceBody;
+                    }
                     break;
                 default:
                     break;
@@ -326,9 +344,10 @@ void EngineGL33::GatherCombatLights(const fl::TileView& view, std::vector<fl::Fr
     const double now = set.SimTime();
     const float dt = static_cast<float>(std::max(now - c.selectionTime, 0.0));
     c.selectionTime = now;
-    LightSun* sun = GScene ? GScene->MainLight() : nullptr;
+    // The night of this frame's evaluation (CombatNight: the photoreal
+    // camera's own under it).
     c.flashHeld = fl::FlashHeldIrradiance(c.flashHeld, flash, dt);
-    c.flashGain = fl::FlashExposureGain(c.flashHeld, sun ? sun->NightEffect() : 1.0f);
+    c.flashGain = fl::FlashExposureGain(c.flashHeld, c.night);
 
     // The shadowed lights: tracers and missile motors cast none (too small to
     // matter); the rest compete for the four channels with hysteresis.

@@ -438,6 +438,7 @@ uniform sampler2D skyLut;                  // unit 8: sky-view table (the sky ta
 uniform sampler2D skyDensity;              // unit 9: cloud density of the weather sky (SkyDensity.hpp)
 uniform sampler2D canopySun;               // unit 15: the canopy's sun-visibility map (long tree shadows; Canopy.hpp)
 uniform sampler2D canopyHeight;            // unit 10: the canopy heightfield, r top, g density (Canopy.hpp)
+uniform sampler2D groundField;             // unit 12: the land's own colour per terrain vertex, a = built (wet weather)
 // The surfaces lane's per-draw class (SurfaceLight.hpp; EngineGL33::ApplySurfaceClass
 // sets it on the bound program): x SurfaceClass, y DrawKind, z 1 = a blending
 // texture (glass, a canvas window, a sign).
@@ -1401,8 +1402,8 @@ void main() {
             }
         }
         vec3 albedo = t0.rgb * constColor.rgb * (detail * selfMod);
-        // The land takes the rain (puddles, the grass share from its albedo);
-        // the sea on this program does not.
+        // The land takes the rain (puddles, the grass share from the ground
+        // field); the sea on this program does not.
         g_wetDraw = litDetail.w > 0.5 ? 1 : 3;
         // Relief (the surfaces lane): the detail texture's grain as a height
         // (its alpha, times the square's luminance, as the albedo takes it),

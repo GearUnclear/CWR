@@ -173,10 +173,16 @@ vec3 viewAt(int x, int y) {
     return texelFetch(viewTex, ivec2(x, y), 0).rgb;
 }
 
+// AtmosphereMiePhase: the broad lobe and the aureole's peak.
+const float kAureoleG = 0.97;    // atmo::kMieAureoleG
+const float kAureoleShare = 0.3; // atmo::kMieAureoleShare
 float miePhase(float c) {
     float g = atmoRayleigh.w;
     float k = 3.0 / (8.0 * kPi) * (1.0 - g * g) / (2.0 + g * g);
-    return k * (1.0 + c * c) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5);
+    float broad = k * (1.0 + c * c) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5);
+    float peak = (1.0 - kAureoleG * kAureoleG) /
+                 (4.0 * kPi * pow(max(1.0 + kAureoleG * kAureoleG - 2.0 * kAureoleG * c, 1e-7), 1.5));
+    return mix(broad, peak, kAureoleShare);
 }
 
 vec3 sampleView(float l, float phi, float cosToSun) {

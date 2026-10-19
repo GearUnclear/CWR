@@ -256,7 +256,9 @@ uniform sampler2D surfTex;
 uniform vec4 surfParams; // x 1 = the surface target holds the shares, y occlusion power, z contact shadows, w multi-bounce
 uniform vec4 aoSize;     // xy the occlusion's size, zw 1 / size
 uniform vec4 sunView;    // xyz toward the sun in view space, w this frame's turn of the march (TAA)
-uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1)
+uniform vec4 surfParams2; // x the occlusion power's multiple on static architecture (the target's alpha code 1),
+                          // y 1 = fogVeilTex holds the surface's share of each pixel's light after the fog
+uniform sampler2D fogVeilTex; // r: the surface's share of the light after the fog (EngineGL33_PostFog.cpp, FogState::veilTex)
 // The photoreal camera (photoLight; Graphics/Remaster/PhotoCamera.hpp):
 uniform vec4 camParams;  // x 1 = on, y exposure (linear), z curve (0 hue-keeping, 1 per channel, 2 ACES,
                          // 3 Neutral), w vignette
@@ -264,6 +266,7 @@ uniform vec4 camCurve;   // the filmic curve y = x^a / (x^(a d) b + c): a, d, b,
 uniform vec4 camColor0;  // rows of the white balance times the scene saturation
 uniform vec4 camColor1;
 uniform vec4 camColor2;
+uniform vec4 camGolden;  // rgb the golden hour's warm gain (1 = none), laid on the light that is not blue
 uniform vec4 camGlow;    // x bloom gain, y shaft gain, z aspect (w / h), w the rods' warmth fade width
 uniform vec4 camNight;   // x the night's rod shift, y its luminance, z the curve's white (scene light), w stops past
                          // it to white
@@ -448,6 +451,16 @@ void main() {
         // The surface target's share, the occlusion upsampled by depth, its
         // strength as a power and the multi-bounce correction by the albedo.
         vec4 s = textureLod(surfTex, vUV, 0.0);
+        // The volumetric fog veils the surface: the occlusion and the contact
+        // shadow take the surface's share of the light after the fog (its
+        // own light through it), not the air's light in front of it (the
+        // world's shares hold only the classic fog's edge). (Look fix
+        // "plate": a fogged treeline 300 m out in rain kept its full
+        // occlusion over the fog's light: dark scalloped rims at the foot of
+        // every crown.)
+        float veil = surfParams2.y > 0.5 ? textureLod(fogVeilTex, vUV, 0.0).r : 1.0;
+        s.r *= veil;
+        s.b *= veil;
         float zc = compositeViewZ(vUV);
         ao = upsampleOcclusion(vUV, zc);
         // The target's alpha: 0.5 the occlusion as set, 1 static architecture
@@ -495,6 +508,17 @@ void main() {
         // Combat light scattered in the air (B4), as light at the exposure.
         x += combatScatter();
         x = max(vec3(dot(camColor0.xyz, x), dot(camColor1.xyz, x), dot(camColor2.xyz, x)), vec3(0.0));
+        // The golden hour's warm balance (camGolden) is the low sun's light:
+        // what it shows takes it, the blue sky and the sky-lit blue do not
+        // (PhotoCamera.hpp GoldenWarmShare: none at a warmth (r - b) / peak
+        // of -0.7, all from 0.4, a wide ramp so a sky's gradient from the
+        // sun's glow to its blue stays smooth). Over the whole frame it
+        // turned the clear sky teal-grey.
+        if (camGolden.r != 1.0 || camGolden.b != 1.0) {
+            float pk = max(x.r, max(x.g, x.b));
+            float warmth = pk > 0.0 ? (x.r - x.b) / pk : 0.0;
+            x *= mix(vec3(1.0), camGolden.rgb, smoothstep(-0.7, 0.4, warmth)); // kGoldenShareFrom, kGoldenShareTo
+        }
         // At a low sun the camera, on daylight balance, sees the shade lit by
         // the blue sky: what the sky lights more than the sun (the world's
         // sky light share, `share`) leans cool (camShade), what the sun

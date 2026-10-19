@@ -1106,11 +1106,17 @@ Color AddParticleNightLight(ColorVal classic, const float physical[3], float nig
 // display-space colour in linear light. A fire's light crosses its own smoke
 // to reach the particle: the darker the particle (`albedo`, the luminance of
 // its own colour), the shorter the reach (CombatSmokeTransmittance), so a
-// burning wreck's black column glows at its base only.
-Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
+// burning wreck's black column glows at its base only. A puff inside a fire's
+// flames glows as part of them (CombatFlameEmission): that light, linear,
+// goes to `emit`, added after the particle's own colour.
+Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo, float emit[3])
 {
     const lighting::CombatLightSet& set = lighting::GCombatLights();
+    // A fire's light (kept in its hue) and every other combat light (white
+    // hot at its core): CombatParticleMix.
     float e[3] = {0.0f, 0.0f, 0.0f};
+    float o[3] = {0.0f, 0.0f, 0.0f};
+    emit[0] = emit[1] = emit[2] = 0.0f;
     for (const lighting::CombatLightRecord& r : set.Records())
     {
         const float dx = r.pos[0] - at.X(), dy = r.pos[1] - at.Y(), dz = r.pos[2] - at.Z();
@@ -1118,33 +1124,25 @@ Color CombatLitParticle(ColorVal color, Vector3Par at, float albedo)
         float irr = lighting::CombatIrradiance(r.sample, d2);
         if (irr <= 0.0f)
             continue;
-        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, std::sqrt(d2), albedo);
+        const float d = std::sqrt(d2);
+        irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);
+        float* acc = r.kind == lighting::CombatLightKind::Fire ? e : o;
         for (int i = 0; i < 3; ++i)
-            e[i] += r.sample.rgb[i] * irr;
+            acc[i] += r.sample.rgb[i] * irr;
+        float flame[3];
+        lighting::CombatFlameEmission(r.kind, r.sample, d, flame);
+        for (int i = 0; i < 3; ++i)
+            emit[i] += flame[i];
     }
-    if (e[0] + e[1] + e[2] <= 1e-5f)
+    if (e[0] + e[1] + e[2] + o[0] + o[1] + o[2] <= 1e-5f)
         return color;
-    const float gain = set.Tuning().smoke;
-    // The light's hue on the particle's own colour (CombatTuning::smokeTint).
-    Color base = color;
-    const float tint = set.Tuning().smokeTint;
-    if (tint > 0.0f)
-    {
-        const float peak = std::max(e[0], std::max(e[1], e[2]));
-        const float lum = 0.2126f * e[0] + 0.7152f * e[1] + 0.0722f * e[2];
-        const float w = tint * (1.0f - std::exp(-lum * 0.6f));
-        float c[3] = {color.R(), color.G(), color.B()};
-        for (int i = 0; i < 3; ++i)
-        {
-            const float hue = std::pow(std::max(e[i] / peak, 0.0f), 1.6f);
-            const float lin = std::pow(std::max(c[i], 0.0f), 2.2f) * (1.0f + (hue - 1.0f) * w);
-            c[i] = std::pow(lin, 1.0f / 2.2f);
-        }
-        base = Color(c[0], c[1], c[2], color.A());
-    }
-    return Color(lighting::CombatParticleChannel(base.R(), e[0], gain),
-                 lighting::CombatParticleChannel(base.G(), e[1], gain),
-                 lighting::CombatParticleChannel(base.B(), e[2], gain), color.A());
+    // A fire's light keeps its hue on the puff, deepened toward it by the tint
+    // (CombatTuning::smokeTint); a burst's or a muzzle's light whitens as it
+    // grows. DrawDecal keeps the result's hue under one.
+    const float base[3] = {color.R(), color.G(), color.B()};
+    float lit[3];
+    lighting::CombatParticleMix(base, e, o, set.Tuning().smoke, set.Tuning().smokeTint, lit);
+    return Color(lit[0], lit[1], lit[2], color.A());
 }
 } // namespace
 
@@ -1211,6 +1209,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         // world space normal is opposite to camera direction
         ClipFlags hints = shape->GetOrHints();
         Color colorI;
+        // The light a puff inside a fire's flames emits (linear; CombatLitParticle).
+        float flameEmit[3] = {0.0f, 0.0f, 0.0f};
         int mat = (hints & ClipUserMask) / ClipUserStep;
         if (mat != MSShining)
         {
@@ -1270,7 +1270,7 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
                     const Color own = (ColorVal)GetConstantColor();
                     albedo = 0.2126f * own.R() + 0.7152f * own.G() + 0.0722f * own.B();
                 }
-                colorI = CombatLitParticle(colorI, pos.Position(), albedo);
+                colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);
             }
             colorI.SetA(1);
         }
@@ -1282,6 +1282,28 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         if (render::Has(specT.routing, render::Routing::IsColored))
         {
             colorI = colorI * (ColorVal)GetConstantColor();
+        }
+        // A puff in a strong combat light (the foot of a camp fire's column)
+        // passes 1: brought under it by its peak, it keeps the light's hue
+        // instead of clipping to white in the 8-bit vertex colour, and the
+        // light past 1 goes to the backend as the decal's glow (SetDecalGlow),
+        // so the column's foot glows brighter than the smoke above it.
+        if (mat != MSShining && GEngine->CombatLightsActive())
+        {
+            // The flame's own light (not its colour's: it glows, it does not
+            // scatter) joins in linear light.
+            float rgb[3] = {colorI.R(), colorI.G(), colorI.B()};
+            for (int i = 0; i < 3; ++i)
+                if (flameEmit[i] > 0.0f)
+                    rgb[i] = std::pow(std::pow(std::max(rgb[i], 0.0f), 2.2f) + flameEmit[i], 1.0f / 2.2f);
+            float glow[3] = {rgb[0], rgb[1], rgb[2]};
+            lighting::KeepHueUnderOne(rgb);
+            for (int i = 0; i < 3; ++i)
+                glow[i] -= rgb[i];
+            lighting::KeepHueUnderOne(glow);
+            colorI = Color(rgb[0], rgb[1], rgb[2], colorI.A());
+            if (glow[0] + glow[1] + glow[2] > 1.0f / 255.0f)
+                GEngine->SetDecalGlow(PackedColor(Color(glow[0], glow[1], glow[2], 0.0f)));
         }
         // check if there are not some unsupported lighting flags
         float dist2 = Position().Distance2(camera.Position());

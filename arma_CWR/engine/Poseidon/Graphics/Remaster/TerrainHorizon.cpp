@@ -160,6 +160,40 @@ void GroundTint(float r, float g, float b, float strength, float& tintR, float& 
     tintB = cb;
 }
 
+bool SampleGroundColor(const TerrainHorizonMap& map, float x, float z, float rgb[3])
+{
+    const int n = map.size;
+    if (!map.Valid() || map.groundColor.size() != static_cast<size_t>(n) * n * 3)
+        return false;
+    // Texel coordinates (vertex v at texel v), the fraction smoothstepped, as
+    // the shader's (i + f + 0.5) / n under the GPU's bilinear filter.
+    auto axis = [n](float t, int& i0, int& i1, float& f)
+    {
+        const float fl = std::floor(t);
+        f = t - fl;
+        f = f * f * (3.0f - 2.0f * f);
+        const int i = static_cast<int>(fl);
+        i0 = std::min(std::max(i, 0), n - 1);
+        i1 = std::min(std::max(i + 1, 0), n - 1);
+    };
+    int x0, x1, z0, z1;
+    float fx, fz;
+    axis(x / map.cellSize, x0, x1, fx);
+    axis(z / map.cellSize, z0, z1, fz);
+    auto at = [&map, n](int x, int z) { return map.groundColor.data() + (static_cast<size_t>(z) * n + x) * 3; };
+    const float* c00 = at(x0, z0);
+    const float* c10 = at(x1, z0);
+    const float* c01 = at(x0, z1);
+    const float* c11 = at(x1, z1);
+    for (int k = 0; k < 3; ++k)
+    {
+        const float a = c00[k] + (c10[k] - c00[k]) * fx;
+        const float b = c01[k] + (c11[k] - c01[k]) * fx;
+        rgb[k] = a + (b - a) * fz;
+    }
+    return true;
+}
+
 bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, const TerrainHorizonOptions& options,
                             TerrainHorizonMap& out, const float* groundRgb)
 {
@@ -188,9 +222,14 @@ bool BuildTerrainHorizonMap(const float* heights, int size, float cellSize, cons
             Downsample(channel.data(), size, cellSize, std::max(2, options.maxSize), rgb[c], cn, cc);
         }
         out.groundTint.resize(static_cast<size_t>(n) * n * 2);
+        out.groundColor.resize(static_cast<size_t>(n) * n * 3);
         for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
+        {
             GroundTint(rgb[0][i], rgb[1][i], rgb[2][i], kGroundTintStrength, out.groundTint[i * 2],
                        out.groundTint[i * 2 + 1]);
+            for (int c = 0; c < 3; ++c)
+                out.groundColor[i * 3 + c] = std::min(std::max(rgb[c][i], 0.0f), 1.0f);
+        }
     }
     out.horizon.assign(static_cast<size_t>(TerrainHorizonMap::kLayers) * n * n * 4, 0);
     out.skyVisibility.assign(static_cast<size_t>(n) * n, 255);

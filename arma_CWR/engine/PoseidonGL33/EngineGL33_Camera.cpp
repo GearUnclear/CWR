@@ -133,17 +133,10 @@ void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
         _lighting.camSat - rm::kLowSunSaturationDrop * lowSun * (1.0f - c.nightEffect) - rm::kVeilSaturationDrop * veil;
     c.color = rm::Multiply(rm::Saturation(sat), wb);
     c.timeEv = rm::CameraTimeOfDayEv(rig.sunElevationDeg, veil);
-    // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance).
-    if (c.golden > 0.0f)
-    {
-        const rm::Rgb w = rm::kCameraGoldenWarm * (1.0f / rm::Luminance(rm::kCameraGoldenWarm));
-        const float g = c.golden * (1.0f - veil);
-        rm::Mat3 warm;
-        warm.m[0] = 1.0f + (w.r - 1.0f) * g;
-        warm.m[4] = 1.0f + (w.g - 1.0f) * g;
-        warm.m[8] = 1.0f + (w.b - 1.0f) * g;
-        c.color = rm::Multiply(warm, c.color);
-    }
+    // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance):
+    // the composite lays it on the light that is not blue (GoldenWarmShare),
+    // so the clear sky and the sky-lit shade keep their blue.
+    c.goldenGain = rm::GoldenWarmGain(c.golden * (1.0f - veil));
     // The cool shade of a low sun.
     const float lowShade = 1.0f - rm::SmoothStep(15.0f, 45.0f, rig.sunElevationDeg);
     c.shadeCool =

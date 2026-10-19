@@ -1,4 +1,4 @@
-// look-director views on Sinai: gen_look_director.py, modes classic, overhaul.
+// look-director views on Sinai: gen_look_director.py, modes overhaul.
 // Generated, do not edit: 1920x1080 windowed, render scale 1.0, 4x MSAA, presented frame.
 #include "capture_lib.sqf"
 
@@ -53,13 +53,6 @@ call {
     [["LoBo_camnet", "CampEast", "Camp"], 22, -3, -152.8, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "sinai_lowsun_fp__classic"
-"sinai_lowsun_fp__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -80,13 +73,6 @@ call {
     [["LoBoGolaniWB", "SoldierWB"], 8, -2, 160, "man"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "sinai_desert_noon__classic"
-"sinai_desert_noon__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers

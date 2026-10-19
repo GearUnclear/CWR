@@ -188,6 +188,20 @@ float TargetExposureLog2(const MeterResult& m, float nightEffect, const Lighting
 constexpr float kCameraGoldenEv = -0.7f;
 inline const Rgb kCameraGoldenWarm{1.1f, 1.0f, 0.76f};
 float CameraGolden(float sunElevationDeg);
+// The warm balance's gain per channel at golden share `golden` (0..1):
+// kCameraGoldenWarm at unit luminance, that far.
+Rgb GoldenWarmGain(float golden);
+// The golden hour's warmth is the low sun's light: the composite lays it on
+// what that light shows and leaves the blue alone (look fix "fire": over the
+// whole frame it turned the clear sky and the clouds teal-grey, (129, 148,
+// 163) on forest_edge_golden, and the picture read as a dull afternoon).
+// The share a colour takes: none at a warmth (r - b) / peak of
+// kGoldenShareFrom (a blue sky), all from kGoldenShareTo (a sunlit field; a
+// grey cloud takes most of it). A wide ramp: from -0.25 to 0.1 the sunrise
+// sky drew an edge round the sun's glow where it met the blue.
+constexpr float kGoldenShareFrom = -0.7f;
+constexpr float kGoldenShareTo = 0.4f;
+float GoldenWarmShare(const Rgb& c);
 // A high sun under a clear sky (look director round 2: the noon ground stayed
 // near-white paper): kCameraHighSunEv from 35 degrees, full from 55, gone
 // under the weather's veil.

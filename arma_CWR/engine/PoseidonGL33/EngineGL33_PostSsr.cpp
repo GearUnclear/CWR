@@ -441,12 +441,16 @@ void EngineGL33::PostSsr(PostFrame& f)
     SetInt(tr, "terrainHeight", 4);
     SetInt(tr, "depthTex", 5);
     SetInt(tr, "skyLut", Poseidon::gl33lighting::kSkyLutUnit);
+    SetInt(tr, "groundField", Poseidon::gl33lighting::kGroundFieldUnit);
     SetInt(tr, "tex0", 0);
     BindTex(0, p.linDepthTex);
     BindTex(2, s.tagTex);
     BindTex(3, s.mipTex);
     BindTex(4, _terrainHeightTex ? _terrainHeightTex : _dummyHeightTex);
     BindTex(5, p.depthTex);
+    // The ground field, the land's classes the forward pass used (the world's
+    // own binding of that unit, so it stays bound after the stage).
+    BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());
     // (The raw binds above left the bind cache's active unit stale: without
     // this the sky table could land on unit 5, the depth's; look director.)
     GL33Bind::Invalidate();

@@ -1,4 +1,4 @@
-// look-director views on Eden: gen_look_director.py, modes classic, overhaul.
+// look-director views on Eden: gen_look_director.py, modes overhaul.
 // Generated, do not edit: 1920x1080 windowed, render scale 1.0, 4x MSAA, presented frame.
 #include "capture_lib.sqf"
 
@@ -50,13 +50,6 @@ call {
     [["Jeep"], 12, -5, 70, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "overcast_broken__classic"
-"overcast_broken__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -76,13 +69,6 @@ call {
     [["Jeep"], 12, -5, 70, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "overcast_heavy__classic"
-"overcast_heavy__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -102,13 +88,6 @@ call {
     [["Jeep"], 12, -5, 70, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "rain_day__classic"
-"rain_day__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -125,13 +104,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 12800; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "noon_vista__classic"
-"noon_vista__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers

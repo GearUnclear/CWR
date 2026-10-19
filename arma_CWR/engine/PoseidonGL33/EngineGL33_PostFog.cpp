@@ -347,6 +347,7 @@ void EngineGL33::DestroyFogResources()
     DeleteTex(_fog.integTex);
     DeleteFbo(_fog.outFbo);
     DeleteTex(_fog.outTex);
+    DeleteTex(_fog.veilTex);
     DeleteFbo(_fog.snapFbo);
     DeleteTex(_fog.snapTex);
     _fog.snapW = _fog.snapH = 0;
@@ -432,10 +433,11 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
         LOG_INFO(Graphics, "GL33 fog: froxel volume {}x{}x{} ({} px cells)", grid.cellsX, grid.cellsY, grid.slices,
                  grid.cellPixels);
     }
-    if (_fog.outW != w || _fog.outH != h || !_fog.outTex || !_fog.nearTex)
+    if (_fog.outW != w || _fog.outH != h || !_fog.outTex || !_fog.veilTex || !_fog.nearTex)
     {
         DeleteFbo(_fog.outFbo);
         DeleteTex(_fog.outTex);
+        DeleteTex(_fog.veilTex);
         DeleteFbo(_fog.nearFbo);
         DeleteTex(_fog.nearTex);
         for (int i = 0; i < 4; ++i)
@@ -448,6 +450,7 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
         // the fogged frame, and an 8-bit store needed a dither the curve then
         // drew as a fine diagonal hatch in the sky's gradients.
         _fog.outTex = Make2D(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h);
+        _fog.veilTex = Make2D(GL_R8, GL_RED, GL_UNSIGNED_BYTE, w, h);
         _fog.glowW[0] = std::max(1, (w + 3) / 4);
         _fog.glowH[0] = std::max(1, (h + 3) / 4);
         _fog.glowW[1] = std::max(1, (_fog.glowW[0] + 3) / 4);
@@ -459,6 +462,14 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
         _fog.nearTex = Make2D(GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, _fog.nearW, _fog.nearH);
         GL33Bind::Invalidate();
         complete = MakeFbo(_fog.outTex, _fog.outFbo) && complete;
+        {
+            // The apply's second output: the surface's share of the light.
+            static const GLenum kOutBufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+            glBindFramebuffer(GL_FRAMEBUFFER, _fog.outFbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, _fog.veilTex, 0);
+            glDrawBuffers(2, kOutBufs);
+            complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE && complete;
+        }
         complete = MakeFbo(_fog.nearTex, _fog.nearFbo) && complete;
         for (int i = 0; i < 4; ++i)
             complete = MakeFbo(_fog.glowTex[i], _fog.glowFbo[i]) && complete;
@@ -591,6 +602,14 @@ unsigned int EngineGL33::PostSceneTex(const PostFrame& f) const
         return _post.airOutTex;
     const bool fogged = _fog.appliedFrame == GetFrameCounter() && _fog.outTex;
     return fogged ? _fog.outTex : f.frameColor;
+}
+
+unsigned int EngineGL33::PostFogVeilTex(const PostFrame& f) const
+{
+    if (!f.plan.Runs(rm::PostStage::Air) || !f.plan.fog)
+        return 0;
+    const bool fogged = _fog.appliedFrame == GetFrameCounter() && _fog.outTex && _fog.veilTex;
+    return fogged ? _fog.veilTex : 0;
 }
 
 void EngineGL33::PostFog(const PostFrame& f)
@@ -765,9 +784,9 @@ void EngineGL33::PostFog(const PostFrame& f)
         Set4(ring, "worldRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
         // z: how grey the sky is (no sun glare to avoid, and rain streaks over
         // the horizon are dark: the ring takes the mean of its samples there
-        // instead of the darker half, so far air in rain matches the sky).
-        const float greySky = std::min(std::max((0.65f - m.skyThrough) / 0.5f, 0.0f), 1.0f);
-        Set4(ring, "ringCtl", static_cast<float>(kFogRingBins), kFogRingDecay, greySky, 0.0f);
+        // instead of the darker half, so far air in rain matches the sky; and
+        // it samples the deck above the classic horizon fill, not the fill).
+        Set4(ring, "ringCtl", static_cast<float>(kFogRingBins), kFogRingDecay, rm::FogGreySky(m.skyThrough), 0.0f);
         const Vector3 toSun = -sun->SunDirection();
         Set4(ring, "ringSun", toSun.X(), toSun.Y(), toSun.Z(), 0.0f);
         Set4(ring, "fogCam", cameraFrame ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
@@ -1080,7 +1099,8 @@ void EngineGL33::PostFog(const PostFrame& f)
     Set4(apply, "fogNearSize", static_cast<float>(_fog.nearW), static_cast<float>(_fog.nearH),
          _worldOverlayDrawn ? 1.0f : 0.0f, overlaySnap && cameraFrame ? 1.0f : 0.0f);
     Set4(apply, "fogSkyEye", cam[1], floorEye, wetEye, wetDepth);
-    Set4(apply, "fogSkyWeather", m.weatherSigma, m.weatherHeight, 0.0f, 0.0f);
+    // z: how grey the sky is (the air replaces the classic horizon fill).
+    Set4(apply, "fogSkyWeather", m.weatherSigma, m.weatherHeight, rm::FogGreySky(m.skyThrough), 0.0f);
     Set4(apply, "fogSkyClear", m.hazeSigma, m.hazeHeight, m.rayleigh * 13.558e-6f, m.dustSigma * rm::kDustSkyShare);
     Set4(apply, "fogSkyDust", m.dustHeight, cam[0], cam[2], groundEye);
     Set4(apply, "fogGlow", glow ? glowGain : 0.0f, 0.0f, 0.0f, 0.0f);

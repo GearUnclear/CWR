@@ -211,14 +211,25 @@ constexpr int kCanopyVisUnit = 15;
 // light per channel, in the previous frame's screen; a 1x1 white stand-in
 // (nothing shadowed) until the first mask is built.
 constexpr int kCombatMaskUnit = 14;
-// Allocated to the features still to land; no shader samples them yet.
-// kLightDataUnit is free: the light list keeps its lights in a uniform block
-// (kLightListBinding), which the fragments of a tile read faster.
-constexpr int kLightDataUnit = 12;
-// The volumetric fog's floor map (the lowest ground nearby, look-fog) takes the
-// free light-data unit: only the fog's injection pass samples it, and binds it
-// itself (no world program declares it).
-constexpr int kFogFloorUnit = kLightDataUnit;
+// The ground field (the wet weather's land classes; TerrainHorizonMap::
+// groundColor): RGBA16, the land's own colour per terrain vertex, a = 1 where
+// built; a transparent black stand-in (a = 0) until a map with ground colours
+// is uploaded. The world programs and the reflections' trace read it (the
+// trace binds it itself and unbinds it). It takes the unit the light list's
+// data was allocated (the list keeps its lights in a uniform block,
+// kLightListBinding, which the fragments of a tile read faster).
+constexpr int kGroundFieldUnit = 12;
+// The volumetric fog's floor map (the lowest ground nearby, look-fog) shares
+// the ground field's unit: only the fog's injection pass samples it, binds it
+// itself (no world program declares it) and unbinds it at its end; the world
+// binds the ground field again at each frame's lighting upload
+// (BindLightingTextures).
+constexpr int kFogFloorUnit = kGroundFieldUnit;
+// The surface's share of each pixel's light after the fog (FogState::veilTex),
+// read by the post composite on the ground field's unit after the fog pass
+// has handed it back; the composite unbinds it again, and the world binds the
+// ground field again at the next lighting upload (BindLightingTextures).
+constexpr int kFogVeilUnit = kGroundFieldUnit;
 // The volumetric fog's horizon ring (EngineGL33_PostFog.cpp), read by its
 // injection in the post pass on the light list's tile unit, which the world
 // binds again at each frame's lighting upload (BindLightingTextures).
@@ -228,7 +239,7 @@ namespace detail
 {
 constexpr int kRemasterUnits[] = {kShadowMapUnit,    kTerrainHorizonUnit, kTerrainHeightUnit, kCloudNoiseUnit,
                                   kShadowRawUnit,    kSkyLutUnit,         kSkyDensityUnit,    kCanopyUnit,
-                                  kSeaNextFrameUnit, kLightDataUnit,      kLightTileUnit,     kCombatMaskUnit,
+                                  kSeaNextFrameUnit, kGroundFieldUnit,    kLightTileUnit,     kCombatMaskUnit,
                                   kCanopyVisUnit};
 constexpr bool RemasterUnitsValid()
 {
@@ -296,6 +307,7 @@ constexpr LitSampler kLitSamplers[] = {
     {"canopySun", kCanopyVisUnit},           // the canopy's sun-visibility map (long tree shadows)
     {"combatMask", kCombatMaskUnit},         // the combat shadow mask (combat light)
     {"canopyHeight", kCanopyUnit},           // the canopy heightfield (the sky it hides: surface lane)
+    {"groundField", kGroundFieldUnit},       // the land's own colour (the wet weather's land classes)
 };
 
 // LitConstants vec4 slots; must match LitConstantsBlock() (the layout test

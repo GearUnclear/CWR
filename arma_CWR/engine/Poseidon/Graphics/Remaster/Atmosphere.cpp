@@ -289,9 +289,16 @@ float AtmosphereRayleighPhase(float cosTheta)
 
 float AtmosphereMiePhase(float cosTheta)
 {
+    // The broad lobe (Cornette-Shanks) and the aureole (Henyey-Greenstein),
+    // each normalised over the sphere.
     const float g = atmo::kMieG;
     const float k = 3.0f / (8.0f * kPi) * (1.0f - g * g) / (2.0f + g * g);
-    return k * (1.0f + cosTheta * cosTheta) / std::pow(std::max(1.0f + g * g - 2.0f * g * cosTheta, 1e-6f), 1.5f);
+    const float broad =
+        k * (1.0f + cosTheta * cosTheta) / std::pow(std::max(1.0f + g * g - 2.0f * g * cosTheta, 1e-6f), 1.5f);
+    const float ga = atmo::kMieAureoleG;
+    const float peak =
+        (1.0f - ga * ga) / (4.0f * kPi * std::pow(std::max(1.0f + ga * ga - 2.0f * ga * cosTheta, 1e-7f), 1.5f));
+    return broad + (peak - broad) * atmo::kMieAureoleShare;
 }
 
 float SkyViewRowElevation(int row)

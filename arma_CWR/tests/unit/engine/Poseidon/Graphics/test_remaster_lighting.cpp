@@ -1729,6 +1729,19 @@ TEST_CASE("Remaster sky table: the shaders read the table the way Atmosphere.cpp
     // The Mie asymmetry and the cloud mask's dead zone come from the engine
     // (Atmosphere.hpp), not from constants of the shader's own.
     CHECK(sky.find("float g = litSkyRight.w;") != std::string::npos);
+    // The aureole's peak (AtmosphereMiePhase) in the dome and in the row mean
+    // pass, the numbers of Atmosphere.hpp.
+    CHECK(atmo::kMieAureoleG == 0.97f);
+    CHECK(atmo::kMieAureoleShare == 0.3f);
+    CHECK(sky.find("const float kSkyAureoleG = 0.97;") != std::string::npos);
+    CHECK(sky.find("const float kSkyAureoleShare = 0.3;") != std::string::npos);
+    CHECK(sky.find("return mix(broad, peak, kSkyAureoleShare);") != std::string::npos);
+    {
+        const std::string meanPass = gl::PostShaderSource(gl::PostShader::SkyViewMean);
+        CHECK(meanPass.find("const float kAureoleG = 0.97;") != std::string::npos);
+        CHECK(meanPass.find("const float kAureoleShare = 0.3;") != std::string::npos);
+        CHECK(meanPass.find("return mix(broad, peak, kAureoleShare);") != std::string::npos);
+    }
     CHECK(sky.find("(lumT - bg - litAtmo.w)") != std::string::npos);
     CHECK(sky.find("(lumT - bg - 0.015)") == std::string::npos);
     // A row keeps the original dome's brightness, its sun glow included (the

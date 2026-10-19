@@ -270,6 +270,8 @@ class EngineGL33 : public Engine
 #endif
 
     RString _pendingScreenshotPath;
+    // The next decal's light past its colour (SetDecalGlow), cleared by it.
+    PackedColor _decalGlow = PackedColor(0u);
 
     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
                    const Poseidon::MipInfo& mip, int specFlags) override;
@@ -717,6 +719,7 @@ class EngineGL33 : public Engine
     bool RemasterMoonKey() const override;
     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
     bool CombatLightsActive() const override { return _combat.active; }
+    void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
     void MarkWorldOverlay() override
     {
@@ -824,10 +827,12 @@ class EngineGL33 : public Engine
     bool _terrainMapDirty = false;
     unsigned int _terrainHorizonTex = 0; // GL_TEXTURE_2D_ARRAY RGBA16, 4 layers
     unsigned int _terrainHeightTex = 0;  // GL_RG32F: height, sky visibility
+    unsigned int _groundFieldTex = 0;    // GL_RGBA16: the land's own colour per vertex, a = 1 (unit 12)
     unsigned int _cloudNoiseTex = 0;     // GL_R8, tileable
     unsigned int _dummyDepthArray = 0;   // 1x1x1 depth array: units 2 and 6 when no shadow map
     unsigned int _dummyHorizonTex = 0;   // 1x1x1 RGBA16 array: unit 3 when no map
     unsigned int _dummyHeightTex = 0;    // 1x1 RG32F: unit 4 when no map
+    unsigned int _dummyGroundTex = 0;    // 1x1 RGBA16 (0, 0, 0, 0): unit 12 without a ground field
     unsigned int _shadowCompareSampler = 0;
     unsigned int _shadowRawSampler = 0; // unit 6: the cascade array as raw depth (soft-shadow blocker search)
     unsigned int _shaderProgramRemaster[NVertexShaders][NPixelShaderSpecular][NPixelShaderModes][NPixelShaders] = {};
@@ -835,6 +840,9 @@ class EngineGL33 : public Engine
     void InitLightingResources();
     void DeinitLightingResources();
     void UploadTerrainHorizonMap();
+    // The ground field's texture (unit 12) while a map with ground colours is
+    // uploaded, else its stand-in (a = 0: the shaders class the land as before).
+    unsigned int GroundFieldTexture() const;
     // Per-frame rig, terrain, cloud and camera uniforms; at the start of a 3D pass.
     void UploadLitFrameConstants();
     // Fills the gate inputs from the scene and computes _featureGates, once per
@@ -929,6 +937,7 @@ class EngineGL33 : public Engine
         float flashGain = 1.0f; // the flash exposure response this frame
         float flashHeld = 0.0f; // the flash irradiance the response follows (FlashHeldIrradiance)
         float exposure = 1.0f;  // the rig's exposure times the flash gain (the forward shaders' litZenith.w)
+        float night = 0.0f;     // the night the day scale and the flash response follow (CombatNight)
         Poseidon::lighting::ShadowSelection selection;
         double selectionTime = 0.0; // CombatLightSet::SimTime at the last selection
         // The frame the mask is built in, and whether it was.
@@ -1188,6 +1197,9 @@ class EngineGL33 : public Engine
         float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
         // Colour: white balance times the scene saturation.
         Poseidon::remaster::Mat3 color;
+        // The golden hour's warm gain (GoldenWarmGain), laid by the composite
+        // on the light that is not blue (camGolden).
+        Poseidon::remaster::Rgb goldenGain{1.0f, 1.0f, 1.0f};
         float shadeCool = 0.0f; // the cool shade of a low sun (composite camShade.w)
         float whiteBalance = 0.0f;
         float skyScale = 0.0f;
@@ -1381,6 +1393,9 @@ class EngineGL33 : public Engine
     // The colour the stages after the Air stage read: the fogged frame when
     // the fog ran this frame, else the resolved frame.
     unsigned int PostSceneTex(const PostFrame& f) const;
+    // The surface's share of each pixel's light after the fog
+    // (FogState::veilTex) when the fog ran this frame, else 0.
+    unsigned int PostFogVeilTex(const PostFrame& f) const;
     // A screen overlay is about to be drawn into the world pass (a rifle's
     // iron sight, a gunner's optic): the frame so far, resolved, for the fog.
     void SnapshotWorldBeforeOverlay();
@@ -1393,8 +1408,11 @@ class EngineGL33 : public Engine
         unsigned int injectTex[2] = {}, integTex = 0;
         std::vector<unsigned int> injectFbo[2], integFbo;
         int current = 0;
-        // The fogged frame (RGBA16F, full resolution).
-        unsigned int outTex = 0, outFbo = 0;
+        // The fogged frame (RGBA16F, full resolution), and on the same FBO's
+        // second attachment the surface's share of each pixel's light after
+        // the fog (R8, veilTex): the composite's occlusion and contact
+        // shadows act on the surface's own light, not on the air in front.
+        unsigned int outTex = 0, outFbo = 0, veilTex = 0;
         int outW = 0, outH = 0;
         // The world before this frame's screen overlay (RGBA8, resolved;
         // SnapshotWorldBeforeOverlay) and the frame it holds.

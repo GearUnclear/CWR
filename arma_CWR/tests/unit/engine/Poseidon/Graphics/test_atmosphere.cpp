@@ -330,6 +330,40 @@ TEST_CASE("Sky table: lookups return the texels and the row mean averages its ro
     CHECK(SkyViewRowGlow(high, kSkyViewSize - 1) == Catch::Approx(std::pow(std::sin(high), 6.0)).epsilon(0.02));
 }
 
+TEST_CASE("Sky table: the haze's phase has the sun's aureole and conserves the light", "[remaster][atmosphere]")
+{
+    // Look fix "veil": a broad lobe plus the aureole's narrow peak.
+    auto at = [](double deg)
+    { return static_cast<double>(AtmosphereMiePhase(static_cast<float>(std::cos(deg * kPi / 180.0)))); };
+    // Over the sphere it integrates to 1 (the scattered light is the same).
+    double sum = 0.0;
+    constexpr int kSteps = 200000;
+    for (int i = 0; i < kSteps; ++i)
+    {
+        const double th = (i + 0.5) * kPi / kSteps;
+        sum += AtmosphereMiePhase(static_cast<float>(std::cos(th))) * 2.0 * kPi * std::sin(th) * (kPi / kSteps);
+    }
+    CHECK(sum == Catch::Approx(1.0).epsilon(0.01));
+    // The glow gathers round the disc: 1 degree from the sun is many times 10
+    // (the single broad lobe of 0.8 gave twice), and falls on toward 30.
+    CHECK(at(1.0) > 10.0 * at(10.0));
+    CHECK(at(3.0) > 3.0 * at(10.0));
+    CHECK(at(10.0) > 3.0 * at(30.0));
+    // The broad glow and the sky away from the sun keep most of their light.
+    auto cs08 = [](double deg)
+    {
+        const double g = 0.8, c = std::cos(deg * kPi / 180.0);
+        return 3.0 / (8.0 * kPi) * (1.0 - g * g) / (2.0 + g * g) * (1.0 + c * c) /
+               std::pow(1.0 + g * g - 2.0 * g * c, 1.5);
+    };
+    for (double deg : {10.0, 20.0, 30.0, 60.0, 90.0, 150.0})
+    {
+        CAPTURE(deg);
+        CHECK(at(deg) > 0.65 * cs08(deg));
+        CHECK(at(deg) < 1.25 * cs08(deg));
+    }
+}
+
 TEST_CASE("Sky table: rebuilt when the sun moves 0.02 degrees or the haze changes", "[remaster][atmosphere]")
 {
     const float deg = static_cast<float>(kPi / 180.0);

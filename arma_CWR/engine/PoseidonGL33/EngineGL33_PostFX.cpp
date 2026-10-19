@@ -952,13 +952,22 @@ void EngineGL33::PostComposite(const PostFrame& f)
     SetInt(p.progComposite, "surfTex", 6);
     Set4(p.progComposite, "surfParams", surf ? 1.0f : 0.0f, std::max(_lighting.surfAo, 0.0f),
          sunUp && !f.surfaceInterior ? std::max(_lighting.surfContact, 0.0f) : 0.0f, 1.0f);
-    Set4(p.progComposite, "surfParams2", rm::kSurfaceStaticAoBoost, 0.0f, 0.0f, 0.0f);
+    // The surface's share of each pixel's light after the volumetric fog,
+    // when it ran: the occlusion and the contact shadows act on that share.
+    const unsigned int fogVeil = surf ? PostFogVeilTex(f) : 0u;
+    SetInt(p.progComposite, "fogVeilTex", Poseidon::gl33lighting::kFogVeilUnit);
+    Set4(p.progComposite, "surfParams2", rm::kSurfaceStaticAoBoost, fogVeil ? 1.0f : 0.0f, 0.0f, 0.0f);
     Set4(p.progComposite, "sunView", sunView[0], sunView[1], sunView[2], f.noiseShift);
     Set4(p.progComposite, "aoSize", static_cast<float>(f.hw), static_cast<float>(f.hh), 1.0f / f.hw, 1.0f / f.hh);
     if (surf)
     {
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, p.surfTex);
+        if (fogVeil)
+        {
+            glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFogVeilUnit);
+            glBindTexture(GL_TEXTURE_2D, fogVeil);
+        }
         glActiveTexture(GL_TEXTURE0);
     }
     // The photoreal camera: exposure, curve, colour, glare and vignette.
@@ -971,6 +980,9 @@ void EngineGL33::PostComposite(const PostFrame& f)
         Set4(p.progComposite, "camColor0", m[0], m[1], m[2], 0.0f);
         Set4(p.progComposite, "camColor1", m[3], m[4], m[5], 0.0f);
         Set4(p.progComposite, "camColor2", m[6], m[7], m[8], 0.0f);
+        // The golden hour's warm gain, on the light that is not blue
+        // (PhotoCamera.hpp GoldenWarmShare).
+        Set4(p.progComposite, "camGolden", _camera.goldenGain.r, _camera.goldenGain.g, _camera.goldenGain.b, 0.0f);
         // No screen-space shafts under the camera: their 40-step radial march
         // drew a fan of streaks and a hatch round a low sun, in the frame's
         // focal point; the air pass's beams (B8) are the camera's sun beams.
@@ -1001,6 +1013,11 @@ void EngineGL33::PostComposite(const PostFrame& f)
     {
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, 0);
+        if (fogVeil)
+        {
+            glActiveTexture(GL_TEXTURE0 + Poseidon::gl33lighting::kFogVeilUnit);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
         glActiveTexture(GL_TEXTURE0);
         GL33Bind::Invalidate();
     }

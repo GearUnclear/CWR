@@ -67,10 +67,19 @@ const float kSkyPi = 3.14159265;
 // this white cloud over that clear sky.
 const float kSkyCloudWhite = 0.92;
 
+// The haze's phase (AtmosphereMiePhase): the broad lobe of asymmetry g
+// (litSkyRight.w, atmo::kMieG) and the aureole's narrow peak round the sun
+// (atmo::kMieAureoleG, kMieAureoleShare), so a low sun's glow gathers round
+// the disc instead of spreading into a flat column down to the horizon.
+const float kSkyAureoleG = 0.97;    // atmo::kMieAureoleG
+const float kSkyAureoleShare = 0.3; // atmo::kMieAureoleShare
 float skyMiePhase(float c) {
     float g = litSkyRight.w;
     float k = 3.0 / (8.0 * kSkyPi) * (1.0 - g * g) / (2.0 + g * g);
-    return k * (1.0 + c * c) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5);
+    float broad = k * (1.0 + c * c) / pow(max(1.0 + g * g - 2.0 * g * c, 1e-6), 1.5);
+    float ga = kSkyAureoleG;
+    float peak = (1.0 - ga * ga) / (4.0 * kSkyPi * pow(max(1.0 + ga * ga - 2.0 * ga * c, 1e-7), 1.5));
+    return mix(broad, peak, kSkyAureoleShare);
 }
 
 // The table's v of an elevation (radians).

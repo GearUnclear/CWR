@@ -164,6 +164,11 @@ float WeatherVisibility(float fog, float rain, float viewDistance)
     return std::max(range, 0.1f);
 }
 
+float FogGreySky(float skyThrough)
+{
+    return Clamp01((0.65f - skyThrough) / 0.5f);
+}
+
 float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
 {
     const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
@@ -221,8 +226,10 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     // (Look director round 2: rain's own weather fog carries most of its
     // air; once the air took the sky's real colour, a grey deck's haze times
     // 1 + 2 rain on top erased a hill 300 m away.)
-    m.hazeSigma =
-        kHazeClear * density * (1.0f + 3.5f * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * rain)) * (1.0f + 0.5f * rain);
+    // (Look fix "plate": the grey gain 3.5 to kHazeGreyGain; a dry overcast
+    // erased every ridge past 1.5 km.)
+    m.hazeSigma = kHazeClear * density * (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * rain)) *
+                  (1.0f + 0.5f * rain);
     m.rayleigh = kRayleighScale * density;
     // The humid air near the ground: a misty morning, the night, a grey sky,
     // rain and fog (a foggy morning most: the light falls through it in
@@ -243,6 +250,8 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
                      (1.0f + kNightFogBoost * night * Smooth(0.0f, 0.15f, fog));
     const float wFog = fog / std::max(fog + rain, 1e-4f);
     m.weatherSigma *= 1.0f + (kSetFogBoost - 1.0f) * wFog * Smooth(0.0f, 0.15f, fog);
+    // Rain's part keeps kRainFogShare of it (setFog's all).
+    m.weatherSigma *= wFog + kRainFogShare * (1.0f - wFog);
     m.weatherHeight = kWeatherFogHeight * wFog + kRainHazeHeight * (1.0f - wFog);
 
     // Valley mist: the day's misty morning (and a little of it that evening
@@ -330,6 +339,11 @@ float FogGroundAirTop(const FogMedium& m, float y, float floorY, float layer)
 {
     const float top = floorY + std::max(layer, 0.0f) * m.mistLayer + kGroundAirTop;
     return 1.0f - Smooth(top, top + kGroundAirFade, y);
+}
+
+float FogHazeNearKeep(const FogMedium& m, float dist)
+{
+    return m.hazeNearKeep + (1.0f - m.hazeNearKeep) * Smooth(kHazeNearFrom, m.hazeNearTo, dist);
 }
 
 float FogSightExtinctionAt(const FogMedium& m, float y, float floorY, float aboveGround, float layer)

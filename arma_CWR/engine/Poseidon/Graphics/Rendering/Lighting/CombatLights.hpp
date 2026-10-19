@@ -49,6 +49,14 @@ const char* CombatLightKindName(CombatLightKind kind);
 // The others belong to an owner that moves them and removes them.
 bool CombatLightIsBurst(CombatLightKind kind);
 
+// How long a burst's white-hot flash holds at its peak (seconds of simulation)
+// before it falls: a classic shell burst still whitens the frame 0.13 s after
+// the burst (four steps at 30 fps), and a flash falling from its birth left
+// that frame 14 to 24 levels under Classic at eye height. The hold goes with
+// the eye's flash response (FlashExposureGain), which only runs at night:
+// CombatTuning::flashHold.
+constexpr float kExplosionFlashHold = 0.15f;
+
 // The combat sub-knobs (LightingTuning combatFlash, combatFire, combatSmoke,
 // combatScatter): gains on the shipped look, 1 each. The research's round-9
 // look (its combatFlash 6, combatFire 2.5, combatSmoke 0.35) is the shipped
@@ -65,6 +73,12 @@ struct CombatTuning
     // column over a camp fire reads fire-lit orange, as the classic fire's
     // decal light made it, not white steam. 0 = additive light only.
     float smokeTint = 0.0f;
+    // How long a burst's white-hot flash holds at its peak (s). Under the
+    // photoreal camera the hold follows its night (CombatNight), as the flash
+    // response it matches does: at dusk the response is off, and a flash held
+    // 0.15 s at its peak lit the plain round a shell burst into a band along
+    // the horizon in every frame of it; the flash now falls from its birth.
+    float flashHold = kExplosionFlashHold;
 };
 
 // One light at one age: E(d) = intensity * window(d) / (1 + d^2 / core^2), a
@@ -86,12 +100,6 @@ constexpr float kCombatRangeFloor = 0.006f;
 constexpr float kCombatMaxRange = 120.0f;   // bursts and fires
 constexpr float kCombatFlareRange = 400.0f; // a flare hangs 50 to 150 m up
 
-// How long a burst's white-hot flash holds at its peak (seconds of simulation)
-// before it falls: a classic shell burst still whitens the frame 0.13 s after
-// the burst (four steps at 30 fps), and a flash falling from its birth left
-// that frame 14 to 24 levels under Classic at eye height.
-constexpr float kExplosionFlashHold = 0.15f;
-
 // The envelope of a light `age` seconds after its birth, before the day
 // scaling. `strength` is the source's (CombatStrength*), `seed` its own
 // flicker phase.
@@ -103,6 +111,31 @@ CombatLightSample EvaluateCombatLight(CombatLightKind kind, float strength, floa
 // vanish by day (0.12), flashes keep a fifth of their punch (the research's
 // half whitened the ground around a noon shell burst by 11 levels).
 float CombatDayScale(CombatLightKind kind, float nightEffect);
+// The night the day scale and the flash response follow. Classic's night
+// effect is 1 as soon as the sun is under the horizon; the photoreal camera
+// (PhotoCamera.hpp CameraNight) still exposes a twilight there, its sky still
+// lighting the ground, and counts the night from 4.5 degrees under. Under that
+// camera a dusk fire and shell burst lit at full night power drew a strip
+// brighter than the sky along the horizon, and every rifleman's flash an oval
+// on the ground: the lights follow the camera's night there, as its fog's
+// lamp halos do. `cameraNight` is read only while `photoCamera` is on.
+float CombatNight(float classicNight, bool photoCamera, float cameraNight);
+
+// How much of a combat light's ball (radius `core`, its centre `d` metres off
+// and at cos `cosTheta` to a surface's normal) is above that surface's
+// horizon, as the share of a point light's full irradiance (cos 0 = 1): the
+// irradiance of a sphere light clipped at the horizon (Lagarde and de
+// Rousiers 2014, "Moving Frostbite to PBR", 4.7.2) over that of the whole
+// sphere face on. cosTheta itself while the ball is wholly above the horizon;
+// (1 + cosTheta) / 2 at its surface and inside it (a flash at the muzzle
+// lights the shooter's arm all round); 0 once it is wholly below. A ball low
+// over flat ground lights the ground far from it at a grazing angle: about
+// 2 core / (3 pi d) of its light for one centred on the ground, where the
+// former wrap (cos + core / d) / (1 + core / d) gave about core / d, five
+// times as much, which drew the lit plain behind a burst or a fire as a band
+// along the horizon. The shaders' combatLights computes the same
+// (EngineGL33_LightingShadersLights.cpp).
+float CombatBallCosine(float cosTheta, float core, float d);
 
 // Strength of a muzzle or cannon flash from the fired ammo's `hit` (config);
 // without one (hit <= 0) from the classic flash intensity (soldier 0.004,
@@ -117,6 +150,33 @@ float CombatIrradiance(const CombatLightSample& s, float d2);
 // saturation (a particle in the fireball's core glows, the cloud around it
 // shades off instead of clipping to flat cream), times the smoke gain.
 float CombatParticleChannel(float display, float irradiance, float smokeGain);
+// The same on a colour, keeping the light's hue (look fix "fire"): the soft
+// saturation is taken on the light's peak channel and scales every channel
+// alike, so a puff in a fire's light glows the fire's colour however close it
+// is. Per channel the three saturated toward one value, and the column over a
+// camp fire went to white steam. `tint` (CombatTuning::smokeTint) deepens the
+// light toward its own hue (each channel's share of the peak to the power
+// 2.2) as it grows: what lights a pale smoke from inside has crossed it. The
+// result is in display space and may pass 1 (KeepHueUnderOne).
+void CombatParticleLight(const float display[3], const float irradiance[3], float smokeGain, float tint, float out[3]);
+// The combat lights on one puff (look director round 3, where the "fire"
+// and "horizon" fixes meet): a fire's light keeps its hue
+// (CombatParticleLight, with the tint), every other light (a burst's
+// white-hot flash, a muzzle flash, a flare, a tracer) saturates channel by
+// channel toward white (CombatParticleChannel), as a fireball's incandescent
+// core does. With every light hue-kept a dusk shell burst's cloud went one
+// flat mustard yellow. `fire` and `other` are the two lights' irradiance.
+void CombatParticleMix(const float display[3], const float fire[3], const float other[3], float smokeGain, float tint,
+                       float out[3]);
+// A display colour brought under 1 by its peak channel, so an 8-bit vertex
+// colour keeps its hue instead of clipping each channel to white.
+void KeepHueUnderOne(float rgb[3]);
+// The flame's body (look fix "fire"): the light (linear rgb) a puff of smoke
+// `d` metres from a fire's light emits as part of the flames (incandescent
+// soot), added to what it scatters and not scaled by its own colour. A
+// yellow-orange glow that falls off within a metre or so of the light (3
+// core radii); zero for every other kind and outside it.
+void CombatFlameEmission(CombatLightKind kind, const CombatLightSample& s, float d, float out[3]);
 
 // A fire burns inside the foot of its own smoke, and the light reaching a
 // particle of that smoke has crossed the smoke below it. Soot drinks what it

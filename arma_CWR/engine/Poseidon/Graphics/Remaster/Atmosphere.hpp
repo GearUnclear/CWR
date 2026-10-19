@@ -49,7 +49,19 @@ constexpr float kOzoneAbsorption[3] = {0.650e-6f, 1.881e-6f, 0.085e-6f};
 constexpr float kOzoneCentre = 25000.0f;
 constexpr float kOzoneHalfWidth = 15000.0f;
 constexpr float kGroundAlbedo = 0.3f;
-constexpr float kMieG = 0.8f; // Cornette-Shanks asymmetry
+// The haze's phase (AtmosphereMiePhase): a broad Cornette-Shanks lobe of
+// asymmetry kMieG plus the narrow forward peak of real haze (the solar
+// aureole), a Henyey-Greenstein lobe of kMieAureoleG with kMieAureoleShare of
+// the light. One broad lobe of 0.8 was nearly flat over the first 5 degrees
+// (1 degree from the sun only twice as bright as 10), so a low sun's glow was
+// a wide flat wash that the camera's sky roll-off pressed into a column from
+// the sun down to the horizon (look fix "veil": the smear on
+// coastline_sunset). With the peak the glow gathers round the disc (about 9
+// times the old phase at 1 degree, 2 at 3, 0.7 at 10) and the broad lobe keeps
+// the warm horizon under it.
+constexpr float kMieG = 0.75f;
+constexpr float kMieAureoleG = 0.97f;
+constexpr float kMieAureoleShare = 0.3f;
 } // namespace atmo
 
 constexpr int kTransmittanceWidth = 256; // view zenith cosine

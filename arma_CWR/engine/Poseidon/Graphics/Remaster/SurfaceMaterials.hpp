@@ -34,7 +34,10 @@
 //
 // The terrain is not classified here: its squares are blends of four corner
 // materials named by island-specific two-letter codes (abel\p4p4ttp4.pac), so
-// the shader tells grass from bare ground per pixel from the albedo.
+// the shader tells grass from bare ground by the land's own colour: the ground
+// field (TerrainHorizonMap::groundColor), the textures' average colours blended
+// over the squares that share each vertex, so the class blends across a texture
+// edge instead of jumping at it.
 
 namespace Poseidon::remaster
 {

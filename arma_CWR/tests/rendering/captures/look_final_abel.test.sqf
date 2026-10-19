@@ -1,4 +1,4 @@
-// look-director views on Abel: gen_look_director.py, modes classic, overhaul.
+// look-director views on Abel: gen_look_director.py, modes overhaul.
 // Generated, do not edit: 1920x1080 windowed, render scale 1.0, 4x MSAA, presented frame.
 #include "capture_lib.sqf"
 
@@ -51,13 +51,6 @@ call {
     [["SoldierWB"], 8, -2, 160, "man"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "noon_fields__classic"
-"noon_fields__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -80,13 +73,6 @@ call {
     [["LoBo_camnet", "CampEast", "Camp"], 22, -3, -152.5, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "lowsun_fp__classic"
-"lowsun_fp__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -107,13 +93,6 @@ call {
     [["Jeep"], 25, 3, 90, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "forest_edge_golden__classic"
-"forest_edge_golden__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -130,13 +109,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 3800; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "sunrise_ridge__classic"
-"sunrise_ridge__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -153,13 +125,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 4400; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "coastline_sunset__classic"
-"coastline_sunset__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -180,13 +145,6 @@ call {
     [["SoldierWB"], 9, -2, 150, "man"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "woods_pine2_evening__classic"
-"woods_pine2_evening__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -203,13 +161,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 5600; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "blue_hour_coast__classic"
-"blue_hour_coast__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -226,13 +177,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 6200; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "dawn_valley__classic"
-"dawn_valley__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -249,13 +193,6 @@ call { capRain = 0; capEyeAbs = false }
 call { capSimT = 6800; capSimRes = triSetSimTime capSimT; format ["view=%1;event=clock;simT=%2;res=%3", capView, capSimT, capSimRes] call capLog }
 call { capDriftRes = triPinCloudDrift [1830, 970, 0]; format ["view=%1;event=clouds;drift=%2", capView, capDriftRes] call capLog }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "pine_rays__classic"
-"pine_rays__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -276,14 +213,6 @@ call {
     if (not (isNull capFire)) then { capFire inflame true };
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-call { if (not (isNull capFire)) then { capFire inflame true } }
-triSimFrames 3
-triScreenshot "town_night__classic"
-"town_night__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -309,14 +238,6 @@ call {
     format ["view=%1;event=jeep;jeep=%2;driver=%3", capView, capJeep, driver capJeep] call capLog;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-call { if (not (isNull capFire)) then { capFire inflame true } }
-triSimFrames 3
-triScreenshot "town_fog_night__classic"
-"town_fog_night__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -339,14 +260,6 @@ call {
     if (not (isNull capFire)) then { capFire inflame true };
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-call { if (not (isNull capFire)) then { capFire inflame true } }
-triSimFrames 3
-triScreenshot "town_night_rain__classic"
-"town_night_rain__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -369,13 +282,6 @@ call {
     [["M113"], 14, 4, 30, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "jeep_close_noon__classic"
-"jeep_close_noon__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -395,13 +301,6 @@ call {
     [["Jeep"], 14, -3, 30, "veh"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "town_noon__classic"
-"town_noon__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers
@@ -421,13 +320,6 @@ call {
     [["SoldierWB"], 10, 1, 200, "man"] call capSpawn;
 }
 triSimFrames 150
-"classic" call capMode
-triSimFrames 90
-[] call capReadTimers
-[] call capPin
-triSimFrames 3
-triScreenshot "forest_morning__classic"
-"forest_morning__classic" call capRecord
 "remastered" call capMode
 triSimFrames 90
 [] call capReadTimers

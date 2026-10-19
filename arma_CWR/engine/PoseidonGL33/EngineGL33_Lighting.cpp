@@ -28,6 +28,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -133,6 +134,8 @@ void EngineGL33::InitLightingResources()
     _dummyHorizonTex = MakeDummyTexture(GL_TEXTURE_2D_ARRAY, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, open);
     const float heightSky[4] = {-1e6f, 1.0f, 1.0f, 1.0f}; // height, sky visibility, neutral ground tint
     _dummyHeightTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA32F, GL_RGBA, GL_FLOAT, heightSky);
+    const unsigned short noGround[4] = {0, 0, 0, 0}; // a = 0: no ground field (the shaders fall back)
+    _dummyGroundTex = MakeDummyTexture(GL_TEXTURE_2D, GL_RGBA16, GL_RGBA, GL_UNSIGNED_SHORT, noGround);
 
     const std::vector<std::uint8_t> noise = rm::BuildCloudNoise(256, 1);
     glGenTextures(1, &_cloudNoiseTex);
@@ -439,10 +442,12 @@ void EngineGL33::DeinitLightingResources()
     };
     delTex(_terrainHorizonTex);
     delTex(_terrainHeightTex);
+    delTex(_groundFieldTex);
     delTex(_cloudNoiseTex);
     delTex(_dummyDepthArray);
     delTex(_dummyHorizonTex);
     delTex(_dummyHeightTex);
+    delTex(_dummyGroundTex);
     delTex(_post.whiteTex);
     delTex(_post.blackTex);
     DeinitSkyTable();
@@ -538,6 +543,7 @@ void EngineGL33::UploadTerrainHorizonMap()
     };
     delTex(_terrainHorizonTex);
     delTex(_terrainHeightTex);
+    delTex(_groundFieldTex);
     if (!_terrainMap || !_terrainMap->Valid())
         return;
     const rm::TerrainHorizonMap& m = *_terrainMap;
@@ -575,8 +581,38 @@ void EngineGL33::UploadTerrainHorizonMap()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    // The ground field (the wet weather's land classes): the land's own colour
+    // per vertex, a = 1; 16 bits a channel, as the wet classes are steep in
+    // the colour. None without ground colours (the stand-in's a = 0).
+    if (m.groundColor.size() == static_cast<size_t>(n) * n * 3)
+    {
+        std::vector<unsigned short> gc(static_cast<size_t>(n) * n * 4);
+        for (size_t i = 0; i < static_cast<size_t>(n) * n; ++i)
+        {
+            for (int c = 0; c < 3; ++c)
+                gc[i * 4 + c] = static_cast<unsigned short>(
+                    std::lround(std::clamp(m.groundColor[i * 3 + c], 0.0f, 1.0f) * 65535.0f));
+            gc[i * 4 + 3] = 65535;
+        }
+        glGenTextures(1, &_groundFieldTex);
+        glBindTexture(GL_TEXTURE_2D, _groundFieldTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16, n, n, 0, GL_RGBA, GL_UNSIGNED_SHORT, gc.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     GL33Bind::Invalidate();
-    LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded", n, n, m.cellSize);
+    LOG_INFO(Graphics, "GL33: terrain horizon map {}x{} at {} m uploaded{}", n, n, m.cellSize,
+             _groundFieldTex ? " with its ground field" : "");
+}
+
+unsigned int EngineGL33::GroundFieldTexture() const
+{
+    return _groundFieldTex && _terrainHorizonTex && _terrainHeightTex ? _groundFieldTex : _dummyGroundTex;
 }
 
 void EngineGL33::BindLightingTextures()
@@ -596,6 +632,9 @@ void EngineGL33::BindLightingTextures()
     glBindTexture(GL_TEXTURE_2D_ARRAY, map ? _terrainHorizonTex : _dummyHorizonTex);
     GL33Bind::Tex2D(kTerrainHeightUnit, map ? _terrainHeightTex : _dummyHeightTex);
     GL33Bind::Tex2D(kCloudNoiseUnit, _cloudNoiseTex);
+    // The ground field (the wet weather's land classes), or its stand-in (the
+    // fog's injection takes this unit for its floor in the post pass).
+    GL33Bind::Tex2D(kGroundFieldUnit, GroundFieldTexture());
     BindSkyTable();
     // The tiled light list's indices (read only while litLightCount.y is set,
     // complete either way).
@@ -686,19 +725,28 @@ void EngineGL33::UpdateFeatureGates(const rm::LightRig* rig)
         ct.flash = _lighting.combatFlash;
         ct.fire = _lighting.combatFire;
         ct.smoke = _lighting.combatSmoke;
-        // Under the photoreal camera at night (look director round 2) a fire
-        // lights its own smoke three times as strongly: the classic fire's
-        // light, which lit the column yellow, lights nothing now, and the
-        // column read as white steam over the flame.
+        // Their night: under the photoreal camera its own (CombatNight), so a
+        // dusk fire or burst is not lit at full night power in a twilight
+        // frame.
+        _combat.night = fl::CombatNight(in.nightEffect, _camera.frameOn, _camera.nightEffect);
+        // Under the photoreal camera at night the fire's light on its own
+        // smoke deepens toward its hue (look director round 2). Look fix
+        // "fire": the column read as white steam because the smoke's light
+        // saturated channel by channel and clipped in the 8-bit colour, not
+        // because it was too weak; with the hue kept and the light past white
+        // carried as the puff's glow (CombatParticleLight, SetDecalGlow) the
+        // round-2 boost of three times lit the column flat orange to 4 m up.
+        // A burst's flash holds at its peak only where the flash response
+        // runs (CombatTuning::flashHold).
         if (_camera.frameOn)
         {
             const float camNight = std::min(std::max(_camera.nightEffect, 0.0f), 1.0f);
-            ct.smoke *= 1.0f + 2.0f * camNight;
             ct.smokeTint = 0.85f * camNight;
+            ct.flashHold = fl::kExplosionFlashHold * _combat.night;
         }
         ct.scatter = _lighting.combatScatter;
         fl::CombatLightSet& combat = fl::GCombatLights();
-        combat.Evaluate(ct, in.nightEffect);
+        combat.Evaluate(ct, _combat.night);
         const Vector3 cam = camera ? camera->Position() : VZero;
         for (const fl::CombatLightRecord& r : combat.Records())
         {

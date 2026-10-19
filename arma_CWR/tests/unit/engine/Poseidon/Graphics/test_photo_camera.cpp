@@ -536,3 +536,30 @@ TEST_CASE("PhotoCamera: critic round 2: the histogram meter, the low sun's balan
     pin.camera = false;
     CHECK(PlanPostStages(pin).Runs(PostStage::Shafts));
 }
+TEST_CASE("PhotoCamera: the golden hour warms the light the low sun shows and leaves the blue sky blue",
+          "[Remaster][PhotoCamera]")
+{
+    // Look fix "fire": the warm balance over the whole frame turned the clear
+    // sky and its clouds teal-grey on forest_edge_golden ((129, 148, 163)).
+    // The gain: none out of the golden hour, kCameraGoldenWarm at unit
+    // luminance in it.
+    const Rgb none = GoldenWarmGain(0.0f);
+    CHECK(none.r == 1.0f);
+    CHECK(none.g == 1.0f);
+    CHECK(none.b == 1.0f);
+    const Rgb full = GoldenWarmGain(1.0f);
+    CHECK(Luminance(full) == Catch::Approx(1.0f).epsilon(1e-4));
+    CHECK(full.r > 1.05f);
+    CHECK(full.b < 0.8f);
+    CHECK(GoldenWarmGain(2.0f).r == Catch::Approx(full.r));
+    // The share: a clear sky's blue takes none, a sunlit field all of it, a
+    // grey cloud most of it; it rises with the warmth.
+    CHECK(GoldenWarmShare(Rgb(0.20f, 0.30f, 0.49f)) < 0.05f);
+    CHECK(GoldenWarmShare(Rgb(0.10f, 0.20f, 0.50f)) == 0.0f);
+    CHECK(GoldenWarmShare(Rgb(0.28f, 0.17f, 0.05f)) == 1.0f);
+    const float grey = GoldenWarmShare(Rgb(0.5f, 0.5f, 0.5f));
+    CHECK(grey > 0.5f);
+    CHECK(grey < 1.0f);
+    CHECK(GoldenWarmShare(Rgb(0.45f, 0.5f, 0.55f)) < grey);
+    CHECK(GoldenWarmShare(Rgb(0.0f, 0.0f, 0.0f)) > 0.0f);
+}

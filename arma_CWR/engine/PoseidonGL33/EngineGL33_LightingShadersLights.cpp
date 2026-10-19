@@ -340,14 +340,37 @@ float combatShadowVis(int channel) {
     return mix(1.0, v, combatFrame.y);
 }
 
+// How much of a combat light's ball is above a surface's horizon, as a share
+// of its full irradiance (CombatLights.hpp CombatBallCosine, the same math):
+// c = cos to the ball's centre, the ball of radius `core` `d` metres off.
+// cos while the ball is wholly above the horizon, (1 + cos) / 2 at its surface
+// and inside it, the horizon-clipped sphere light (Lagarde and de Rousiers
+// 2014) between: flat ground far from a ball low over it takes the little
+// the ball's top shows it, so the plain behind a burst or a fire is no band
+// along the horizon.
+float combatBallCosine(float c, float core, float d) {
+    float s = d > core ? core / d : 1.0;
+    float s2 = s * s;
+    if (c * c > s2 || s2 <= 0.0) return max(c, 0.0);
+    if (s2 >= 1.0) return 0.5 * (1.0 + c);
+    float sinT = sqrt(max(1.0 - c * c, 1e-12));
+    float x = sqrt(1.0 / s2 - 1.0);
+    float y = clamp(-x * c / sinT, -1.0, 1.0);
+    float sy = sinT * sqrt(max(1.0 - y * y, 0.0));
+    float e = (c * acos(y) - x * sy) * s2 + atan(sy / x);
+    return max(e, 0.0) / (3.14159265 * s2);
+}
+
 // Combat light at this fragment (B4, CombatLights.hpp): the muzzle flashes,
 // bursts, fires, tracers, flares and missile motors at the head of the tile's
 // list, in linear HDR (outside the classic clamp): E = I * window / (1 + d^2 /
-// r0^2), a ball of radius r0 that still reaches a surface it sits low over
-// and wraps around one it is inside (a flash at the muzzle lights the
-// shooter's arm), the shadowed ones dimmed by the mask, and a flash highlight
-// on glossy materials (g_combatSpec). Leaf cards take the crown's wrapped
-// terminator, as for the sun. No combat light without the tiled list.
+// r0^2), a ball of radius r0 that lights a surface by the part of it above
+// that surface's horizon (combatBallCosine: it still reaches a surface it
+// sits low over and wraps around one it is inside, a flash at the muzzle
+// lighting the shooter's arm), the shadowed ones dimmed by the mask, and a
+// flash highlight on glossy materials (g_combatSpec). Leaf cards take the
+// crown's wrapped terminator, as for the sun. No combat light without the
+// tiled list.
 vec3 g_combatSpec = vec3(0.0);
 
 vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
@@ -371,8 +394,8 @@ vec3 combatLights(vec3 n, vec3 nLight, bool foliage, vec3 v) {
         float e = win / (1.0 + d2 / max(pos.w * pos.w, 1e-4));
         float invD = inversesqrt(max(d2, 1e-6));
         vec3 l = toLight * invD;
-        float sa = min(pos.w * invD, 1.0);
-        float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0) : clamp((dot(n, l) + sa) / (1.0 + sa), 0.0, 1.0);
+        float nl = foliage ? clamp((dot(nLight, l) + 0.5) / 1.5, 0.0, 1.0)
+                           : combatBallCosine(dot(n, l), pos.w, d2 * invD);
         if (nl <= 0.0) continue;
         if (ext.y > 0.5) e *= combatShadowVis(int(ext.y + 0.5));
         sum += radiance * (e * nl);

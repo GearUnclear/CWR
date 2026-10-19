@@ -6,6 +6,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/FrameLights.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
+#include <Poseidon/Graphics/Remaster/PhotoCamera.hpp>
 #include <Poseidon/Graphics/Remaster/PostStages.hpp>
 #include <Poseidon/Graphics/Remaster/ScreenReflections.hpp>
 #include <PoseidonGL33/EngineGL33_Lighting.hpp>
@@ -205,6 +206,20 @@ TEST_CASE("Combat lights: a burst's flash lasts as long as Classic's whiteout an
     }
     CHECK(At(CombatLightKind::Explosion, kExplosionFlashHold).intensity > 0.94f * e0);
     CHECK(At(CombatLightKind::Explosion, 8.0f / 30.0f).intensity < 0.3f * e0);
+    // Where the flash response does not run (the photoreal camera's dusk:
+    // CombatTuning::flashHold 0) the flash falls from its birth: the same
+    // peak, about half of it a step later, and the frame 0.13 s after
+    // the burst (firefight_2's) lit at under a fifth of the held flash.
+    CombatTuning noHold;
+    noHold.flashHold = 0.0f;
+    CHECK(CombatTuning{}.flashHold == kExplosionFlashHold);
+    const float n0 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 0.0f, 7, noHold).intensity;
+    CHECK(n0 == Approx(e0));
+    const float n1 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 1.0f / 30.0f, 7, noHold).intensity;
+    CHECK(n1 < 0.7f * e0);
+    CHECK(n1 > 0.35f * e0);
+    const float n4 = EvaluateCombatLight(CombatLightKind::Explosion, 1.0f, 4.0f / 30.0f, 7, noHold).intensity;
+    CHECK(n4 < 0.2f * At(CombatLightKind::Explosion, 4.0f / 30.0f).intensity);
     // Red over blue of the light: the fire's warmth (1 / 0.45) is what lit
     // ground takes at about 1.4 on screen; a burst stays at or under it at every
     // age, and the white-hot flash well under it (the research's orange
@@ -231,6 +246,80 @@ TEST_CASE("Combat lights: by day continuous lights fade to 12%, flashes to a fif
     CHECK(CombatDayScale(CombatLightKind::Explosion, 0.0f) == Approx(0.2f));
     CHECK(CombatDayScale(CombatLightKind::Muzzle, 1.0f) == Approx(1.0f));
     CHECK(CombatDayScale(CombatLightKind::Flare, 0.5f) == Approx(0.56f));
+}
+
+TEST_CASE("Combat lights: under the photoreal camera they follow its night, so a dusk is no full night",
+          "[remaster][CombatLights]")
+{
+    namespace rm = Poseidon::remaster;
+    // Without the camera: Classic's night effect.
+    CHECK(CombatNight(1.0f, false, 0.0f) == 1.0f);
+    CHECK(CombatNight(0.3f, false, 1.0f) == Approx(0.3f));
+    // The dusk firefight (19:35, sun 1.7 degrees under): Classic's night is
+    // already 1, the camera's still 0. A fire took its full night power there
+    // and lit the plain behind it brighter than the sky; now the day scale.
+    const float dusk = rm::CameraNight(-1.7f);
+    CHECK(dusk == 0.0f);
+    CHECK(CombatNight(1.0f, true, dusk) == 0.0f);
+    CHECK(CombatDayScale(CombatLightKind::Fire, CombatNight(1.0f, true, dusk)) == Approx(0.12f));
+    CHECK(CombatDayScale(CombatLightKind::Muzzle, CombatNight(1.0f, true, dusk)) == Approx(0.2f));
+    // The night (town_night's sun 50 degrees under, any sun 12 or more under)
+    // keeps the night power.
+    CHECK(CombatNight(1.0f, true, rm::CameraNight(-50.0f)) == 1.0f);
+    CHECK(CombatNight(1.0f, true, rm::CameraNight(-12.0f)) == 1.0f);
+    // The blue hour between: a share.
+    const float blue = CombatNight(1.0f, true, rm::CameraNight(-8.0f));
+    CHECK(blue > 0.0f);
+    CHECK(blue < 1.0f);
+    // Never more night than Classic's (a day frame stays a day frame).
+    CHECK(CombatNight(0.0f, true, 1.0f) == 0.0f);
+    CHECK(CombatNight(2.0f, false, 0.0f) == 1.0f);
+}
+
+TEST_CASE("Combat lights: a ball lights a surface by the part of it above that surface's horizon",
+          "[remaster][CombatLights]")
+{
+    // Wholly above the horizon: the point light's cosine.
+    CHECK(CombatBallCosine(0.8f, 1.0f, 10.0f) == Approx(0.8f));
+    CHECK(CombatBallCosine(1.0f, 0.3f, 2.0f) == Approx(1.0f));
+    // At its surface and inside it: (1 + cos) / 2, all round (the muzzle's
+    // flash lights the shooter's arm).
+    CHECK(CombatBallCosine(0.0f, 1.0f, 0.5f) == Approx(0.5f));
+    CHECK(CombatBallCosine(-0.6f, 1.0f, 1.0f) == Approx(0.2f));
+    // Wholly below: nothing.
+    CHECK(CombatBallCosine(-0.5f, 1.0f, 10.0f) == 0.0f);
+    // Continuous where the ball meets the horizon and at its surface, and
+    // growing with the cosine.
+    for (float d : {1.001f, 1.5f, 3.0f, 10.0f, 40.0f})
+    {
+        const float s = 1.0f / d;
+        CHECK(CombatBallCosine(s - 1e-4f, 1.0f, d) == Approx(s).margin(1e-3));
+        CHECK(CombatBallCosine(-s + 1e-4f, 1.0f, d) == Approx(0.0f).margin(1e-3));
+        float prev = 0.0f;
+        for (int i = -20; i <= 20; ++i)
+        {
+            const float v = CombatBallCosine(static_cast<float>(i) / 20.0f, 1.0f, d);
+            CHECK(v >= prev - 1e-5f);
+            CHECK(v <= 1.0f);
+            prev = v;
+        }
+    }
+    CHECK(CombatBallCosine(0.0f, 1.0f, 1.0001f) == Approx(0.5f).margin(0.02f));
+    // A ball centred on flat ground lights it far off by the rim of its top:
+    // 2 core / (3 pi d), a quarter to a fifth of the former wrap's (cos + core
+    // / d) / (1 + core / d), which drew the plain behind a burst as a band.
+    for (float d : {5.0f, 10.0f, 20.0f})
+    {
+        const float s = 1.0f / d;
+        CHECK(CombatBallCosine(0.0f, 1.0f, d) == Approx(2.0f * s / (3.0f * 3.14159265f)).epsilon(0.03));
+        CHECK(CombatBallCosine(0.0f, 1.0f, d) < 0.27f * s / (1.0f + s));
+    }
+    // The firefight's shell burst (core 2.6 m, 3.5 m up) over the plain 20 m
+    // off: wholly above that ground's horizon, the point light's cosine, a
+    // third under the wrap's.
+    const float d = std::sqrt(20.0f * 20.0f + 3.5f * 3.5f), c = 3.5f / d;
+    CHECK(CombatBallCosine(c, 2.6f, d) == Approx(c));
+    CHECK(CombatBallCosine(c, 2.6f, d) < 0.7f * (c + 2.6f / d) / (1.0f + 2.6f / d));
 }
 
 TEST_CASE("Combat lights: a flash's strength comes from the fired ammo", "[remaster][CombatLights]")
@@ -277,6 +366,130 @@ TEST_CASE("Combat lights: smoke takes the light softly; no light leaves it as it
     }
     // Soft saturation: a fireball's core glows without running away.
     CHECK(CombatParticleChannel(0.3f, 1e4f, 1.0f) < 2.0f);
+}
+
+TEST_CASE("Combat lights: a fire lights its smoke in its own colour however close, brighter at the foot",
+          "[remaster][CombatLights]")
+{
+    // Look fix "fire": the channels saturated one by one toward the same
+    // value, so the foot of a camp fire's column went white (town_night
+    // plume (179, 166, 151)), and the 8-bit colour clipped each channel. The
+    // colour version saturates on the peak and keeps the light's hue.
+    const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
+    const float ambient[3] = {0.08f, 0.08f, 0.09f}; // a puff under the night's light
+    auto lit = [&](float d, float tint, float out[3])
+    {
+        const float e = CombatIrradiance(fire, d * d) * CombatSmokeTransmittance(CombatLightKind::Fire, fire, d, 0.7f);
+        const float irr[3] = {fire.rgb[0] * e, fire.rgb[1] * e, fire.rgb[2] * e};
+        CombatParticleLight(ambient, irr, 3.0f, tint, out);
+    };
+    // No light: as it was.
+    const float none[3] = {0.0f, 0.0f, 0.0f};
+    float same[3];
+    CombatParticleLight(ambient, none, 3.0f, 0.85f, same);
+    for (int i = 0; i < 3; ++i)
+        CHECK(same[i] == ambient[i]);
+    float foot[3], mid[3], top[3];
+    lit(0.8f, 0.0f, foot);
+    lit(3.0f, 0.0f, mid);
+    lit(6.0f, 0.0f, top);
+    // Warm through: red over blue stays well above grey at the foot, where
+    // the per-channel form had all three near its ceiling.
+    CHECK(foot[0] / foot[2] > 1.3f);
+    const float perChannel = CombatParticleChannel(0.08f, fire.rgb[0] * 40.0f, 3.0f) /
+                             CombatParticleChannel(0.09f, fire.rgb[2] * 40.0f, 3.0f);
+    CHECK(perChannel < 1.25f);
+    // The foot glows past white (the backend carries it as the decal's glow)
+    // and well above the smoke 3 m up, which is above the smoke 6 m up.
+    CHECK(foot[0] > 1.5f);
+    CHECK(foot[0] > 1.6f * mid[0]);
+    CHECK(mid[0] > top[0]);
+    // Bounded: the ceiling of the soft saturation.
+    float core[3];
+    const float huge[3] = {1e5f, 7e4f, 4.5e4f};
+    CombatParticleLight(ambient, huge, 3.0f, 0.0f, core);
+    CHECK(core[0] < 3.3f);
+    // The tint deepens the hue toward the light's own, never brightens red.
+    float tinted[3];
+    lit(0.8f, 0.85f, tinted);
+    CHECK(tinted[0] == Catch::Approx(foot[0]));
+    CHECK(tinted[1] / tinted[0] < foot[1] / foot[0]);
+    CHECK(tinted[2] / tinted[0] < foot[2] / foot[0]);
+    // Under one by the peak: the hue stays.
+    float c[3] = {2.0f, 1.2f, 0.6f};
+    KeepHueUnderOne(c);
+    CHECK(c[0] == Catch::Approx(1.0f));
+    CHECK(c[1] == Catch::Approx(0.6f));
+    CHECK(c[2] == Catch::Approx(0.3f));
+    float d[3] = {0.5f, 0.4f, 0.3f};
+    KeepHueUnderOne(d);
+    CHECK(d[0] == 0.5f);
+}
+
+TEST_CASE("Combat lights: a burst's cloud whitens at its core, a fire's smoke keeps the fire's colour",
+          "[remaster][CombatLights]")
+{
+    // Look director round 3 (the "fire" and "horizon" fixes merged): with
+    // every combat light kept in its hue, a dusk shell burst's cloud went one
+    // flat mustard yellow. A fire's light keeps its hue; a burst's light
+    // saturates channel by channel toward white, as an incandescent core does.
+    const float ambient[3] = {0.08f, 0.08f, 0.09f};
+    const float none[3] = {0.0f, 0.0f, 0.0f};
+    const CombatLightSample burst = At(CombatLightKind::Explosion, 0.15f);
+    const float eb = CombatIrradiance(burst, 2.0f * 2.0f);
+    const float b[3] = {burst.rgb[0] * eb, burst.rgb[1] * eb, burst.rgb[2] * eb};
+    float mixed[3], hueKept[3];
+    CombatParticleMix(ambient, none, b, 1.0f, 0.0f, mixed);
+    CombatParticleLight(ambient, b, 1.0f, 0.0f, hueKept);
+    // The burst's cloud close to it is near white; kept in its hue it was not.
+    CHECK(mixed[0] / mixed[2] < 1.15f);
+    CHECK(hueKept[0] / hueKept[2] > 1.2f);
+    // Each channel is the per-channel form's.
+    for (int i = 0; i < 3; ++i)
+        CHECK(mixed[i] == Catch::Approx(CombatParticleChannel(ambient[i], b[i], 1.0f)));
+    // A fire's light alone is the hue-kept form's, with its tint.
+    const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
+    const float ef = CombatIrradiance(fire, 0.8f * 0.8f);
+    const float f[3] = {fire.rgb[0] * ef, fire.rgb[1] * ef, fire.rgb[2] * ef};
+    float fireMix[3], fireOnly[3];
+    CombatParticleMix(ambient, f, none, 3.0f, 0.85f, fireMix);
+    CombatParticleLight(ambient, f, 3.0f, 0.85f, fireOnly);
+    for (int i = 0; i < 3; ++i)
+        CHECK(fireMix[i] == Catch::Approx(fireOnly[i]));
+    // No light: as it was.
+    float same[3];
+    CombatParticleMix(ambient, none, none, 1.0f, 0.85f, same);
+    for (int i = 0; i < 3; ++i)
+        CHECK(same[i] == Catch::Approx(ambient[i]));
+}
+
+TEST_CASE("Combat lights: the smoke inside a fire's flames glows as the flame", "[remaster][CombatLights]")
+{
+    // Look fix "fire": the classic fire's light lit the puffs round it past
+    // white, and that yellow column was the flame; the combat light on smoke
+    // only scatters, so under the camera a camp fire had no flame. A puff in
+    // the flames' body emits a yellow-orange light, strongest at the light,
+    // none a metre or so out, and only for a fire.
+    const CombatLightSample fire = At(CombatLightKind::Fire, 1.0f);
+    float at[3], half[3], out[3];
+    CombatFlameEmission(CombatLightKind::Fire, fire, 0.0f, at);
+    CombatFlameEmission(CombatLightKind::Fire, fire, 0.5f, half);
+    CombatFlameEmission(CombatLightKind::Fire, fire, 1.5f, out);
+    CHECK(at[0] > 1.5f);
+    CHECK(at[0] > at[1]);
+    CHECK(at[1] > 2.0f * at[2]);
+    CHECK(half[0] > 0.0f);
+    CHECK(half[0] < at[0]);
+    CHECK(out[0] == 0.0f);
+    // A stronger fire's flames glow more; a flash, a flare or no fire not at all.
+    float big[3];
+    CombatFlameEmission(CombatLightKind::Fire, At(CombatLightKind::Fire, 1.0f, 2.0f), 0.0f, big);
+    CHECK(big[0] > 1.5f * at[0]);
+    float flash[3];
+    CombatFlameEmission(CombatLightKind::Explosion, At(CombatLightKind::Explosion, 0.0f), 0.0f, flash);
+    CHECK(flash[0] == 0.0f);
+    CombatFlameEmission(CombatLightKind::Flare, At(CombatLightKind::Flare, 1.0f), 0.0f, flash);
+    CHECK(flash[0] == 0.0f);
 }
 
 TEST_CASE("Combat lights: a burning wreck's black smoke glows at its base and its column stays dark",
@@ -806,6 +1019,17 @@ TEST_CASE("Combat lights: the shaders read the combat entries, the mask and the 
                       "vWorldRel) + combatPrevV.w) / z;") != std::string::npos);
     // The model is EvaluateCombatLight's: E = I * window / (1 + d^2 / r0^2).
     CHECK(lights.find("float e = win / (1.0 + d2 / max(pos.w * pos.w, 1e-4));") != std::string::npos);
+    // A surface takes the part of the ball above its horizon, as
+    // CombatBallCosine computes it (leaves keep the crown's wrap).
+    const std::string ball = FunctionBody(lights, "float combatBallCosine(float c, float core, float d) {");
+    REQUIRE(!ball.empty());
+    CHECK(ball.find("float s = d > core ? core / d : 1.0;") != std::string::npos);
+    CHECK(ball.find("if (c * c > s2 || s2 <= 0.0) return max(c, 0.0);") != std::string::npos);
+    CHECK(ball.find("if (s2 >= 1.0) return 0.5 * (1.0 + c);") != std::string::npos);
+    CHECK(ball.find("float e = (c * acos(y) - x * sy) * s2 + atan(sy / x);") != std::string::npos);
+    CHECK(ball.find("return max(e, 0.0) / (3.14159265 * s2);") != std::string::npos);
+    CHECK(lights.find(": combatBallCosine(dot(n, l), pos.w, d2 * invD);") != std::string::npos);
+    CHECK(lights.find("(dot(n, l) + sa) / (1.0 + sa)") == std::string::npos);
     // Shade: combat light in linear light, outside the classic clamp.
     const std::string shade = gl::RemasterFragmentPiece(gl::FragmentPiece::Shade);
     CHECK(shade.find("vec3 combat = kd * combatLights(n, nLight, foliage, v);") != std::string::npos);
@@ -866,11 +1090,18 @@ TEST_CASE("Combat lights: with the combat light on, the classic lights of its so
     CHECK(decal.find("if (combat &&") != std::string::npos);
     CHECK(decal.find("(kind == lighting::FrameLightKind::Combat || kind == lighting::FrameLightKind::Fire)") !=
           std::string::npos);
-    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo);") != std::string::npos);
+    CHECK(decal.find("colorI = CombatLitParticle(colorI, pos.Position(), albedo, flameEmit);") != std::string::npos);
+    // Look fix "fire": a puff's colour comes under one by its peak (no
+    // clipped white column) and the light past it goes to the decal's glow.
+    CHECK(decal.find("lighting::KeepHueUnderOne(rgb);") != std::string::npos);
+    CHECK(decal.find("GEngine->SetDecalGlow(") != std::string::npos);
     // A fire's light crosses its smoke to reach a particle (the wreck's plume).
     const std::string litParticle = FunctionBody(object, "Color CombatLitParticle(");
-    CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, std::sqrt(d2), albedo);") !=
+    CHECK(litParticle.find("irr *= lighting::CombatSmokeTransmittance(r.kind, r.sample, d, albedo);") !=
           std::string::npos);
+    CHECK(litParticle.find("lighting::CombatParticleMix(base, e, o,") != std::string::npos);
+    CHECK(litParticle.find("r.kind == lighting::CombatLightKind::Fire ? e : o") != std::string::npos);
+    CHECK(litParticle.find("lighting::CombatFlameEmission(r.kind, r.sample, d, flame);") != std::string::npos);
     // The frame's list keeps the steady lights past the twelve, and a fire's
     // lit air is a small halo, not a 4.4 m ball over its smoke.
     const std::string post = ReadTextFile(EngineDir() / "PoseidonGL33" / "EngineGL33_PostCombat.cpp");
