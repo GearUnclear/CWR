@@ -195,7 +195,7 @@ The owner found the integrated features (A0 to A7, B1 to B11 on `graphics-remast
 
 ## V2. The trailer (2026-10-19)
 
-"Uslu dur! trailer, part 1: graphics": 14 scenes from the Uslu dur world (resistance, occupiers, checkpoints, convoys, the occupied town), each shot twice at 60 fps from one camera path, on a vanilla upstream build and on the O1 build, and composited full size behind a moving divider that sweeps the whole frame; calm dissolves and wipes, Oswald and Roboto text with the HUD green as the only accent, a typed opening line, and a calm female narration (local Breeze TTS, every line checked by transcription). 2:13.4, 1080p60, -16 LUFS. Tooling 111e563; the files are in `graphics-remaster	mpideo2inal\` (not in git). The NPC head flicker in early takes was the AI look-around fast-forwarded by the capture's real time per frame; the fix is capture-only (an exact 1/60 s step and a held gaze).
+"Uslu dur! trailer, part 1: graphics": 14 scenes from the Uslu dur world (resistance, occupiers, checkpoints, convoys, the occupied town), each shot twice at 60 fps from one camera path, on a vanilla upstream build and on the O1 build, and composited full size behind a moving divider that sweeps the whole frame; calm dissolves and wipes, Oswald and Roboto text with the HUD green as the only accent, a typed opening line, and a calm female narration (local Breeze TTS, every line checked by transcription). 2:13.4, 1080p60, -16 LUFS. Tooling 111e563; the files are in `graphics-remaster/tmp/video/v2/final/` (not in git). The NPC head flicker in early takes was the AI look-around fast-forwarded by the capture's real time per frame; the fix is capture-only (an exact 1/60 s step and a held gaze).
 
 ## P1. Pending
 
