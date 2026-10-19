@@ -2131,7 +2131,11 @@ evidence in `tmp/integration/B7/` of the graphics-remaster worktree, gitignored;
   off (`wetWeather=1:off:dry`), the frame is the same.
 - Cost (one reading, other lanes' games running): GPU frame minimum on minus off +0.57 ms at the wet
   night town, the wet street and after the rain, +0.14 in rain on the fields, -0.05 at dry noon (gated);
-  a second run with more foreign load spread -2.4 to +2.5 ms. Unmeasured on a quiet GPU.
+  a second run with more foreign load spread -2.4 to +2.5 ms. The final reading, after the glint
+  rework (`files/20261018-191054-glint1-new`, two views, other lanes' games running): GPU frame on
+  minus off +1.36 ms at the wet night town (frame minimum +1.30), +0.78 at the low sun wet (minimum
+  +0.51). The night figure is above the 0.8 ms budget of section 3 until a quiet-GPU timing settles
+  it. Unmeasured on a quiet GPU.
 - Gate: build 0 new warnings; clang-format clean on every touched file (the tab-style `Vertex.hpp`,
   `Vehicle.hpp`, `Object.hpp`, `Landscape.hpp` and `EngineGL33_Queue.cpp` on the added lines; the
   checker still names the untouched tab-indented line after each addition); unit gate tags plus the
