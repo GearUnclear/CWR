@@ -28,7 +28,7 @@ Observed in the code:
 - A man in a seat is not in the world's `_vehicles` list but in
   `World::_outVehicles` (`World/World.hpp:236`). Nothing removes flagged
   entries from `_outVehicles`; it is serialised as-is
-  (`World/WorldImpl.cpp:1684`).
+  (`World/WorldImpl.cpp:1685`).
 - Deleting the hull instead does not help a corpse: the hull's eject path
   (`Eject`, `Game/Commands/GameStateExtWorld.cpp:312`) only calls `SetDelete()`
   on a man without a brain, again leaving him in `_outVehicles`.
