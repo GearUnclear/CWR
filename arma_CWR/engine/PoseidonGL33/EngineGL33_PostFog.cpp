@@ -82,6 +82,8 @@ constexpr float kFogNightAirShare = 0.35f;
 // (the rest is the last frame's), and the decay of what a bin knows per frame
 // out of view.
 constexpr int kFogRingBins = 256;
+// Row 0 the sky's colour, row 1 the sine of the elevation it was measured at.
+constexpr int kFogRingRows = 2;
 constexpr float kFogRingShare = 0.3f;
 constexpr float kFogRingDecay = 0.995f;
 // The night glow's gain (the blurred light laid into the fog), and the share
@@ -490,10 +492,11 @@ bool EngineGL33::EnsureFogResources(int w, int h, const rm::FogGrid& grid)
         if (!_fog.ringTex[0])
         {
             GL33Bind::ActiveUnit(kUploadUnit - GL_TEXTURE0);
-            const std::vector<float> zero(static_cast<size_t>(kFogRingBins) * 4, 0.0f);
+            // Two rows: the colour, and where it was measured (look fix "dawn").
+            const std::vector<float> zero(static_cast<size_t>(kFogRingBins) * kFogRingRows * 4, 0.0f);
             for (int i = 0; i < 2; ++i)
             {
-                _fog.ringTex[i] = Make2D(GL_RGBA16F, GL_RGBA, GL_FLOAT, kFogRingBins, 1, zero.data());
+                _fog.ringTex[i] = Make2D(GL_RGBA16F, GL_RGBA, GL_FLOAT, kFogRingBins, kFogRingRows, zero.data());
                 glBindTexture(GL_TEXTURE_2D, _fog.ringTex[i]);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
                 glBindTexture(GL_TEXTURE_2D, 0);
@@ -805,7 +808,7 @@ void EngineGL33::PostFog(const PostFrame& f)
         const Vector3 toSun = -sun->SunDirection();
         Set4(ring, "ringSun", toSun.X(), toSun.Y(), toSun.Z(), 0.0f);
         Set4(ring, "fogCam", cameraFrame ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-        DrawTo(_fog.ringFbo[next], kFogRingBins, 1);
+        DrawTo(_fog.ringFbo[next], kFogRingBins, kFogRingRows);
         _fog.ringCur = next;
     }
 

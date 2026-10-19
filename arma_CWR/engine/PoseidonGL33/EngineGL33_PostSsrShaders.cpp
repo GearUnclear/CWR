@@ -635,7 +635,11 @@ void main() {
         nW = normalize(nW + vec3(rip, 0.0, -rip));
         float rough = mix(road ? 0.30 : mix(0.45, 0.75, grass), 0.02, puddle);
         float cone = mix(road ? 0.10 : 0.22, 0.008, puddle);
-        float weight = mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), 1.0, puddle);
+        // With the wet weather on, only its puddles mirror: the wet ground
+        // around them is dark and rough (the forward pass gives it at most a
+        // dim, broad glint near a light), so a road or a square never shows a
+        // reflected lamp, wall or sky outside its standing water.
+        float weight = wetWeather ? puddle : mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), 1.0, puddle);
         vec3 rW = reflect(-vW, nW);
         if (rW.y < 0.002) rW = normalize(vec3(rW.x, 0.002, rW.z));
         float hidden;

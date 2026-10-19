@@ -438,6 +438,24 @@ struct KeyLight
 // it is above 0 (rig.moon keeps the rest); leaves the rig alone otherwise. The
 // sky's sun is the sun either way.
 KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShare);
+
+// A lit particle (smoke, dust, a fireball's soot; Object::DrawDecal) under the
+// photoreal rig: the light the world gets, not the classic sun. A puff has no
+// face: it takes kParticleKeyShare of the key light (the sun, or the moon under
+// the moon key) and of the moon's shadowless rest (a thick puff scatters the
+// sun from its whole lit half: about what a sunlit wall gets; the classic
+// decal's 0.375 with the sky's weaker physical share left white smoke duller
+// than the sand under it by day), the sun dimmed by the cloud
+// field's mean, plus the sky's irradiance averaged over every direction (the
+// lit shaders' skyIrradiance: a quarter of the zenith's, a quarter of each
+// horizon side's and a quarter of the ground's bounce) times `shade`, the
+// share of the sky fill the world's surfaces keep (SurfaceLight.hpp
+// SurfaceShadeFactor; 1 without the surfaces lane). Irradiance in the rig's
+// units, before the material's brightness and the exposure. A dusk burst's
+// dust then takes the dusk air's dim light, not the classic sunset's pink sun,
+// which the classic model keeps shining for 5 degrees after sunset.
+constexpr float kParticleKeyShare = 0.6f;
+Rgb ParticleRigIrradiance(const LightRig& rig, const KeyLight& key, float shade);
 // The photoreal rig's scale (photoLight): a white surface facing up under the
 // clear sky's sun and sky at this sun height shows at the brightness classic
 // shows a white surface at noon. Every other light keeps its physical ratio to

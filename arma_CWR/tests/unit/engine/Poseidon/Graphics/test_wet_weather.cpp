@@ -693,3 +693,162 @@ TEST_CASE("Wet weather shaders: the forward pass and the trace class the land fr
     CHECK(ssr.find("SetInt(tr, \"groundField\", Poseidon::gl33lighting::kGroundFieldUnit);") != std::string::npos);
     CHECK(ssr.find("BindTex(Poseidon::gl33lighting::kGroundFieldUnit, GroundFieldTexture());") != std::string::npos);
 }
+
+namespace
+{
+
+struct V3
+{
+    float x, y, z;
+};
+V3 Sub(V3 a, V3 b)
+{
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+float Dot(V3 a, V3 b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+V3 Unit(V3 a)
+{
+    const float l = std::sqrt(Dot(a, a));
+    return {a.x / l, a.y / l, a.z / l};
+}
+
+// wetLobe (EngineGL33_LightingShadersSurface.cpp): GGX, the lamp a small
+// sphere (kWetBulb 0.15 m), water's Fresnel, the peak at most `cap`.
+float WetLobe(V3 L, float d, V3 n, V3 v, float a, float cap)
+{
+    const float nl = Dot(n, L);
+    if (nl <= 0.0f)
+        return 0.0f;
+    const float nv = std::clamp(Dot(n, v), 1e-3f, 1.0f);
+    const float aP = std::clamp(a + 0.15f / (2.0f * std::max(d, 0.1f)), 0.0f, 1.0f);
+    const float norm = (a / aP) * (a / aP);
+    const V3 h = Unit({L.x + v.x, L.y + v.y, L.z + v.z});
+    const float nh = std::max(Dot(n, h), 0.0f);
+    const float vh = std::max(Dot(v, h), 0.0f);
+    const float a2 = aP * aP;
+    const float dd = nh * nh * (a2 - 1.0f) + 1.0f;
+    const float D = a2 / (3.14159265f * dd * dd);
+    const float vis =
+        0.5f / std::max(nl * std::sqrt(nv * nv * (1.0f - a2) + a2) + nv * std::sqrt(nl * nl * (1.0f - a2) + a2), 1e-5f);
+    const float F = 0.02f + 0.98f * std::pow(1.0f - vh, 5.0f);
+    return std::min(3.14159265f * D * vis * nl * norm, cap) * F;
+}
+
+struct LampGlint
+{
+    float peak = 0.0f;   // the brightest point on the ground (lobe over the distance squared)
+    float length = 0.0f; // its extent toward the eye at half the peak (m)
+    float width = 0.0f;  // and across (m)
+};
+
+// A street lamp 5 m up at the origin, the eye 1.75 m up 15 m away: the lamp's
+// reflection on level ground of roughness `rough` (alpha its square, at least
+// 0.002 as wetLampStreaks takes it), times `share`.
+LampGlint Glint(float rough, float share)
+{
+    const V3 lamp{0.0f, 5.0f, 0.0f};
+    const V3 eye{0.0f, 1.75f, -15.0f};
+    const V3 up{0.0f, 1.0f, 0.0f};
+    const float a = std::max(rough * rough, 0.002f);
+    const auto at = [&](float x, float z)
+    {
+        const V3 p{x, 0.0f, z};
+        const V3 tl = Sub(lamp, p);
+        const float d = std::sqrt(Dot(tl, tl));
+        return WetLobe(Unit(tl), d, up, Unit(Sub(eye, p)), a, 80.0f) * share / (d * d);
+    };
+    LampGlint g;
+    float px = 0.0f, pz = 0.0f;
+    for (float z = -14.9f; z <= 10.0f; z += 0.025f)
+        for (float x = -6.0f; x <= 6.0f; x += 0.025f)
+            if (const float f = at(x, z); f > g.peak)
+            {
+                g.peak = f;
+                px = x;
+                pz = z;
+            }
+    for (float z = -14.9f; z <= 10.0f; z += 0.025f)
+        g.length += at(px, z) >= 0.5f * g.peak ? 0.025f : 0.0f;
+    for (float x = -6.0f; x <= 6.0f; x += 0.025f)
+        g.width += at(x, pz) >= 0.5f * g.peak ? 0.025f : 0.0f;
+    return g;
+}
+
+} // namespace
+
+TEST_CASE("Wet weather shaders: only the puddles mirror; the ground around them darkens and glints dimly",
+          "[remaster][wet][Shaders][ssr]")
+{
+    const std::string surface = gl::RemasterFragmentPiece(gl::FragmentPiece::Surface);
+    const auto constant = [&](const char* name)
+    {
+        const std::regex re(std::string("const float ") + name + R"( = ([0-9.]+);)");
+        std::smatch m;
+        INFO(name);
+        REQUIRE(std::regex_search(surface, m, re));
+        return std::stof(m[1].str());
+    };
+
+    // The trace: with the wet weather on, the reflection's weight is the
+    // puddle's alone (the owner: too much reflection on non-puddle ground), so
+    // a road or a square outside its standing water reflects no lamp, wall or
+    // sky. B6 alone (wet weather off) keeps its own wet ground.
+    const std::string trace = gl::PostShaderSource(gl::PostShader::SsrTrace);
+    CHECK(trace.find("float weight = wetWeather ? puddle : mix(road ? 0.65 * wet : 0.5 * wet * (1.0 - 0.85 * grass), "
+                     "1.0, puddle);") != std::string::npos);
+
+    // The forward pass: the ground's lamp glint takes the ground's roughness
+    // and share (the sun's already did), a puddle keeps its sharp streak, and
+    // the ground's sky reflection (while the trace does not run) is the
+    // puddle's alone.
+    CHECK(surface.find("lit += wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough) *\n"
+                       "                   (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));") !=
+          std::string::npos);
+    CHECK(surface.find("if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;") != std::string::npos);
+    CHECK(surface.find("vec2 ab = wetEnvBRDF(ground ? kWetPuddleRough : max(rough, kWetObjectSkyRough), nv);") !=
+          std::string::npos);
+    CHECK(surface.find("float F = (0.02 * ab.x + ab.y) * (ground ? pud.x : filmW) * up;") != std::string::npos);
+    // ... and its film shows as a deeper colour instead.
+    CHECK(surface.find("if (ground) a *= 1.0 - kWetGroundFilmDark * film * (1.0 - pud.x);") != std::string::npos);
+    const float filmDark = constant("kWetGroundFilmDark");
+    CHECK(filmDark >= 0.15f);
+    CHECK(filmDark <= 0.4f);
+
+    // What a street lamp draws on the ground. A puddle: a bright, thin streak
+    // toward the eye. The old film (kWetFilmRough at its full share on gravel):
+    // nearly as bright and as thin, a second streak where no water stands. The
+    // ground now: a broad patch at a few percent of the puddle's brightness, no
+    // image of the lamp.
+    const float porosityGravel = 0.3f;
+    const float film = 1.0f - 0.75f * porosityGravel;
+    const LampGlint puddle = Glint(constant("kWetPuddleRough"), 1.0f);
+    const LampGlint before = Glint(constant("kWetFilmRough"), film);
+    const LampGlint ground = Glint(std::max(constant("kWetFilmRough"), constant("kWetSunGroundRough")),
+                                   film * constant("kWetSunGroundFilm"));
+    INFO("puddle " << puddle.peak << " " << puddle.length << "x" << puddle.width << ", before " << before.peak << " "
+                   << before.length << "x" << before.width << ", ground " << ground.peak << " " << ground.length << "x"
+                   << ground.width);
+    CHECK(before.peak > 0.5f * puddle.peak);
+    CHECK(before.width < 0.25f);
+    CHECK(ground.peak < 0.05f * puddle.peak);
+    CHECK(ground.width > 10.0f * puddle.width);
+    CHECK(ground.width > 1.0f);
+    // The sun's glint on the ground is at least as rough and no larger.
+    CHECK(constant("kWetSunGroundRough") >= 0.55f);
+    CHECK(constant("kWetSunGroundFilm") <= 0.35f);
+
+    // The puddles carry the rain's look now: roads and bare ground hold a
+    // little more water than B6's thresholds (pinned to them above), grass
+    // no more, in the one field both passes read.
+    const std::string puddles = gl::RemasterFragmentPiece(gl::FragmentPiece::Puddles);
+    CHECK(puddles.find("float th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + "
+                       "kPuddleLevelShift * (1.0 - level);") != std::string::npos);
+    std::smatch m;
+    REQUIRE(std::regex_search(puddles, m, std::regex(R"(const float kPuddleMore = ([0-9.]+);)")));
+    const float more = std::stof(m[1].str());
+    CHECK(more > 0.0f);
+    CHECK(more <= 0.06f);
+}

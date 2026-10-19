@@ -23,7 +23,8 @@
 //     ground's reflection is the reflections' pass while it runs, litMatClass.w),
 //     the sun and, at night, every lamp, fire and headlight as a streak toward
 //     the eye (lampStreaks, litMatClass.z). Grass blades break the film into a
-//     dull sheen.
+//     dull sheen. On the ground only the puddles mirror: around them the film
+//     deepens the colour and glints dimly and broadly near a light.
 //   - Rain reaches up-facing surfaces fully, vertical ones with run-down
 //     streaks near the eye, undersides little; the hills' sky visibility shelters
 //     the ground. Puddles (wetPuddle, shared with the reflections' trace) are
@@ -95,6 +96,10 @@ vec4 groundFieldAt(vec2 xz) {
 const float kPuddleRoad = 0.61;       // noise threshold on roads
 const float kPuddleGround = 0.67;     // on bare ground
 const float kPuddleGrass = 0.74;      // on grass
+// Only the puddles mirror (the wet ground around them does not), so they carry
+// the rain's look: roads and bare ground hold this much more water than B6's
+// thresholds above (lowered by it), grass no more.
+const float kPuddleMore = 0.04;
 const float kPuddleEdge = 0.035;      // the threshold's soft edge
 const float kPuddleDamp = 0.06;       // the damp margin below the threshold
 const float kPuddleHollow = 0.1;      // the field's rise per metre of hollow (capped at a metre) ...
@@ -148,7 +153,7 @@ vec2 wetPuddle(vec3 posW, float footT, float road, float veg, float level) {
     // field), whose water stands in its bare patches: the threshold leans
     // toward bare ground's (veg squared), so a mixed square holds about the
     // puddles its bare and grassy parts would hold apart.
-    float th = mix(mix(kPuddleGround, kPuddleRoad, road), kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
+    float th = mix(mix(kPuddleGround, kPuddleRoad, road) - kPuddleMore, kPuddleGrass, veg * veg) + kPuddleLevelShift * (1.0 - level);
     float keep = flatness * min(level * 4.0, 1.0) * (1.0 - smoothstep(kPuddleFadeStart, kPuddleFadeEnd, length(posW - litCamPos.xyz)));
     return vec2(smoothstep(th, th + kPuddleEdge, field), smoothstep(th - kPuddleDamp, th, field)) * keep;
 }
@@ -197,8 +202,12 @@ const float kWetPuddleRough = 0.05; // a puddle's
 const float kWetGrassFilm = 0.1;    // grass blades break the film up: this share of it ...
 const float kWetGrassRough = 0.4;   // ... this rough
 const float kWetSunRough = 0.3;     // the film's sun glint is at least this rough (a sharp one burns white)
-const float kWetSunGroundRough = 0.5; // bare ground's: grit and stones stand through the thin film ...
-const float kWetSunGroundFilm = 0.5;  // ... and break up this share of it
+// The ground outside its puddles: grit, stones and grass stand through the thin
+// film, so it mirrors nothing. Its glints (the sun's, the lamps') are this
+// rough, a dim broad sheen near a light, never a streak or an image ...
+const float kWetSunGroundRough = 0.6;
+const float kWetSunGroundFilm = 0.3;  // ... at this share of the film
+const float kWetGroundFilmDark = 0.25; // and the film darkens the ground by this share of it (deeper, not shinier)
 const float kWetSunFoot = 0.25;     // a pixel's footprint (m) widens the glint's alpha by this per metre
 const float kWetSunCap = 3.0;       // the sun glint's peak (the low sun's lobe would clip a white column)
 const float kWetObjectSky = 0.5;    // objects: rain beads, so their film reflects this share of the sky ...
@@ -613,11 +622,15 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
         float l = dot(a, kLuma);
         a = max(mix(vec3(l), a, 1.0 + kWetSaturate * w * soak), vec3(0.0));
     }
-    a *= (1.0 - (ground ? kWetGroundDarken : kWetDarken) * soak * w) * mix(1.0, kWetDampDark, pud.y * (1.0 - pud.x)) *
-         mix(1.0, kWetPuddleDark, pud.x);
-    mirror = pud.x;
     // The film: what the surface does not soak up; grass breaks it up.
     float film = w * (1.0 - 0.75 * porosity) * (1.0 - veg) + kWetGrassFilm * w * veg;
+    a *= (1.0 - (ground ? kWetGroundDarken : kWetDarken) * soak * w) * mix(1.0, kWetDampDark, pud.y * (1.0 - pud.x)) *
+         mix(1.0, kWetPuddleDark, pud.x);
+    // Outside its puddles the ground's film shows as a deeper colour, not as a
+    // shine (the owner: only puddles reflect): asphalt and gravel, which soak
+    // up little, darken by their film instead.
+    if (ground) a *= 1.0 - kWetGroundFilmDark * film * (1.0 - pud.x);
+    mirror = pud.x;
     float filmW = max(film, pud.x);
     if (filmW <= 0.0) return;
     float rough = mix(kWetFilmRough, kWetGrassRough, veg);
@@ -653,23 +666,28 @@ void wetSurface(vec3 albedo, vec3 n, vec3 v, vec3 posAbs, float skyVisibility, f
     lit = litSun.rgb * (sun * sunLight * litHorizon.w);
     // The lamps' streaks: the film's lobe and the puddle's, each at its own
     // roughness and blended by the water's share (a lobe of the blended
-    // roughness drew a bright ring at every puddle's edge).
+    // roughness drew a bright ring at every puddle's edge). Only a puddle draws
+    // a streak: the ground around it takes the broad, dim glint of its grit
+    // (kWetSunGroundRough, kWetSunGroundFilm), as for the sun.
     if (litMatClass.z > 0.5) {
-        if (pud.x < 1.0) lit += wetLampStreaks(nf, v, rough) * (film * (1.0 - pud.x));
+        if (pud.x < 1.0)
+            lit += wetLampStreaks(nf, v, ground ? max(rough, kWetSunGroundRough) : rough) *
+                   (film * (1.0 - pud.x) * (ground ? kWetSunGroundFilm : 1.0));
         if (pud.x > 0.0) lit += wetLampStreaks(nf, v, kWetPuddleRough) * pud.x;
     }
     // The sky in the film: objects always (weaker: rain beads on them); the
     // ground only while the reflections' pass does not reflect it (it then
-    // reflects the ground with what is on screen, sky included). A face that
-    // looks down reflects the ground, which its own light already shows.
+    // reflects the ground with what is on screen, sky included), and there
+    // only in its puddles. A face that looks down reflects the ground, which
+    // its own light already shows.
     if (!ground || litMatClass.w < 0.5) {
         vec3 r = reflect(-v, nf);
         float up = smoothstep(-0.1, 0.1, r.y);
         r.y = max(r.y, 0.02);
         r *= inversesqrt(dot(r, r));
         vec3 sky = mix(toLinear(skyReflection(r)), toLinear(fogColorToward(r)), kWetSkyFog);
-        vec2 ab = wetEnvBRDF(ground ? mix(rough, kWetPuddleRough, pud.x) : max(rough, kWetObjectSkyRough), nv);
-        float F = (0.02 * ab.x + ab.y) * filmW * up;
+        vec2 ab = wetEnvBRDF(ground ? kWetPuddleRough : max(rough, kWetObjectSkyRough), nv);
+        float F = (0.02 * ab.x + ab.y) * (ground ? pud.x : filmW) * up;
         F = ground ? F : min(F * kWetObjectSky, kWetSkyCap);
         env = sky * (F * mix(0.3, 1.0, skyVisibility) * litSunDir.w);
         keep = 1.0 - F;

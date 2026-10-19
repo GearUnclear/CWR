@@ -247,6 +247,12 @@ triScreenshot "town_night__remastered"
 //  allowDamage false notwithstanding). The whole set is staged afresh for
 //  each mode (capFFStage / capFFClear), so both modes start from the same
 //  layout; AI fire and the sim clock are not re-pinned, so the flashes differ.
+//  The shells are timed: from the first drop to the third shot the world steps
+//  a fixed 1/30 s a frame (capFixStep, triSetFixedStep), so every run and every
+//  round catches the second shell's burst at the same age: firefight_2 6
+//  frames (0.2 s) after its drop, a young fireball (the shell falls 40 m in
+//  about 5 frames), firefight_3 26 frames (0.87 s) after it, a smoke column
+//  with its dust foot. Real time again after the third shot.
 // ----------------------------------------------------------------------------
 ["firefight", 7600, 10850, 2, 0, 0, [1985, 7, 5, 19, 35], 0, 0, 1000] call capBegin
 capPinTime = false
@@ -294,12 +300,15 @@ capBoom = {
     if ((count capFE) > 0) then { capShell = createShell ["Shell120", [_p select 0, _p select 1, 40], [0, 0, -250], capFE select 0, objNull] };
 }
 capBurn = { if (not (isNull capBurnV)) then { capBurnV inflame true } }
+// <seconds> call capFixStep: a fixed sim step (0 = real time again).
+capFixStep = { capFixRes = triSetFixedStep _this; format ["view=firefight;event=fixstep;step=%1;res=%2", _this, capFixRes] call capLog }
 [] call capFFStage
 "classic" call capMode
 [] call capEngage
 triSimFrames 200
 [] call capReadTimers
 call { [] call capPinEnv; [] call capPinView; [] call capEngage; [] call capBurn }
+0.0333333 call capFixStep
 [62, -2] call capBoom
 triSimFrames 5
 triScreenshot "firefight_1__classic"
@@ -313,6 +322,7 @@ triScreenshot "firefight_2__classic"
 triSimFrames 20
 triScreenshot "firefight_3__classic"
 "firefight_3__classic" call capRecord
+0 call capFixStep
 [] call capFFClear
 triSimFrames 30
 [] call capFFStage
@@ -321,6 +331,7 @@ triSimFrames 30
 triSimFrames 200
 [] call capReadTimers
 call { [] call capPinEnv; [] call capPinView; [] call capEngage; [] call capBurn }
+0.0333333 call capFixStep
 [62, -2] call capBoom
 triSimFrames 5
 triScreenshot "firefight_1__remastered"
@@ -334,6 +345,7 @@ triScreenshot "firefight_2__remastered"
 triSimFrames 20
 triScreenshot "firefight_3__remastered"
 "firefight_3__remastered" call capRecord
+0 call capFixStep
 [] call capFFClear
 
 // ----------------------------------------------------------------------------

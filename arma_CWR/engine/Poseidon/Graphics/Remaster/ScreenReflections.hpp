@@ -40,7 +40,9 @@
 //      the sea stays the sea program's (no pale sunset wash).
 //   4. Wet ground (the rain, or `ssrWet`): roads and bare ground darken and
 //      take a rough, streaked reflection; level hollows hold puddles, which are
-//      dark mirrors with rain rings; grass only darkens a little.
+//      dark mirrors with rain rings; grass only darkens a little. With the wet
+//      weather (B7) on, only its puddles reflect: the ground around them
+//      darkens in the forward pass and reflects nothing here.
 
 namespace Poseidon::remaster
 {

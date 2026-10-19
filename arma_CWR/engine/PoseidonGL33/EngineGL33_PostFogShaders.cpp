@@ -324,6 +324,24 @@ vec3 g_lobe = vec3(0.0);
 
 // One cell's medium and light at a camera-relative point: rgb the light it
 // scatters toward the eye per metre, a its extinction per metre, both per km.
+// The sky table's two parts along the unit direction d (skyRadiance without
+// the phase): r the Rayleigh and multiple scattering, m the haze's single
+// scattering without its phase.
+const float kFogRingPhaseMax = 1.5; // VolumetricFog.hpp kFogRingPhaseMax
+void fogSkyParts(vec3 d, out vec3 r, out vec3 m) {
+    float l = asin(clamp(d.y, -1.0, 1.0));
+    vec2 sh = skySunDir().xz;
+    float sl = length(sh);
+    float dl = length(d.xz);
+    float cphi = (sl > 1e-4 && dl > 1e-4) ? dot(d.xz / dl, sh / sl) : 1.0;
+    float phi = acos(clamp(cphi, -1.0, 1.0));
+    const float n = 64.0; // texels per region (kSkyViewSize)
+    float u = clamp(sqrt(phi / kSkyPi), 0.5 / n, 1.0 - 0.5 / n);
+    float v = skyRowV(l);
+    r = texture(skyLut, vec2(u / 3.0, v)).rgb;
+    m = texture(skyLut, vec2((1.0 + u) / 3.0, v)).rgb;
+}
+
 vec4 fogCell(vec3 rel) {
     FogMediumCell c = fogMediumAt(rel);
     float sMie = c.haze + c.dust + c.wet;
@@ -397,10 +415,32 @@ void main() {
     // of a clear noon vista, look fix "veil". Azimuths out of view still fade
     // to the model as their measurements age.)
     float ringSure = 0.0;
+    // Each tap at this column's own angle to the sun (look fix "dawn"): the
+    // ring holds the sky a few degrees above the land, toward a low sun the
+    // aureole's flank; the haze over ground under the horizon is farther from
+    // the sun and takes less of its forward scattering (FogRingPhaseGain). The
+    // sky table's own parts at the tap's direction (row 1: where the ring
+    // measured it) say how much of that sky is the haze's phase. Only under a
+    // clear sky (the table is the clear sky's).
+    float phaseOn = litAtmo.z > 0.0 ? clamp(fogWeather.z, 0.0, 1.0) * (1.0 - fogNightAir.w) : 0.0;
+    float phaseCol = phaseOn > 0.0 ? skyMiePhase(dot(d, skySunDir())) : 0.0;
     for (int k = -4; k <= 4; ++k) {
         float w = 5.0 - abs(float(k));
-        vec4 a = texture(fogRing, vec2(az + float(k) * (2.0 / 256.0), 0.5));
-        ring += w * vec4(a.rgb * a.a, a.a);
+        float u = az + float(k) * (2.0 / 256.0);
+        vec4 a = texture(fogRing, vec2(u, 0.25));
+        vec3 gain = vec3(1.0);
+        if (phaseOn > 0.0 && a.a > 0.0) {
+            float se = clamp(texture(fogRing, vec2(u, 0.75)).r, -0.2, 0.5);
+            float ce = sqrt(1.0 - se * se);
+            float azk = u * 6.2831853;
+            vec3 dk = vec3(sin(azk) * ce, se, cos(azk) * ce);
+            vec3 pr, pm;
+            fogSkyParts(dk, pr, pm);
+            vec3 ringSky = pr + pm * skyMiePhase(dot(dk, skySunDir()));
+            vec3 colSky = pr + pm * phaseCol;
+            gain = mix(vec3(1.0), clamp(colSky / max(ringSky, vec3(1e-9)), vec3(0.0), vec3(kFogRingPhaseMax)), phaseOn);
+        }
+        ring += w * vec4(a.rgb * gain * a.a, a.a);
         ringSure = max(ringSure, a.a * (1.0 - 0.1 * abs(float(k))));
     }
     ring /= 25.0;
@@ -668,7 +708,10 @@ void main() {
 // from north (clockwise) over a full turn: the sky a little above the
 // silhouette (the lowest sky in that azimuth, the limit far ground melts
 // into); rgb linear, a how sure (1 measured this frame, decaying while out of
-// view; 0 never seen: the model's colour then).
+// view; 0 never seen: the model's colour then). A second row holds where that
+// colour was measured: r the sine of the samples' mean elevation, a as sure
+// (the injection takes the sun's phase at that direction back out, look fix
+// "dawn"; VolumetricFog.hpp FogRingPhaseGain).
 const char kPostFogRingGLSL[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;  // unit 0: the resolved frame (display)
@@ -733,9 +776,14 @@ void main() {
         float base = mix(max(found, radians(2.0)), max(found + radians(0.3), radians(kRingGreyFromDeg)), ringCtl.z);
         float stepDeg = mix(1.0, 0.6, ringCtl.z);
         vec4 s[3];
-        for (int k = 0; k < 3; ++k) s[k] = vec4(0.0, 0.0, 0.0, 1e9);
+        float se[3]; // the sine of each kept sample's elevation
+        for (int k = 0; k < 3; ++k) {
+            s[k] = vec4(0.0, 0.0, 0.0, 1e9);
+            se[k] = 0.0;
+        }
         int nS = 0;
         vec3 sumAll = vec3(0.0);
+        float sumEl = 0.0;
         for (int k = 0; k < 6; ++k) {
             vec3 dd = ringDir(az, base + radians(0.6 * stepDeg + stepDeg * float(k)));
             if (dot(dd, ringSun.xyz) > 0.9962) continue;
@@ -744,23 +792,43 @@ void main() {
             vec3 t = textureLod(colorTex, p.xy, 0.0).rgb;
             vec3 c = fogCam.x > 0.5 ? camDecode(t) : pow(clamp(t, 0.0, 1.0), vec3(2.2));
             vec4 v = vec4(c, dot(c, vec3(0.2126, 0.7152, 0.0722)));
+            float ve = dd.y;
             sumAll += c;
+            sumEl += ve;
             // Keep the three darkest, s[0] darkest.
             for (int j = 0; j < 3; ++j) {
-                if (v.a < s[j].a) { vec4 t = s[j]; s[j] = v; v = t; }
+                if (v.a < s[j].a) {
+                    vec4 t = s[j];
+                    s[j] = v;
+                    v = t;
+                    float te = se[j];
+                    se[j] = ve;
+                    ve = te;
+                }
             }
             ++nS;
         }
         vec3 best = vec3(-1.0);
+        float bestEl = 0.0;
         if (nS > 0) {
             int m = min(nS, 3);
             vec3 sum = s[0].rgb;
-            if (m > 1) sum += s[1].rgb;
-            if (m > 2) sum += s[2].rgb;
+            float sumE = se[0];
+            if (m > 1) {
+                sum += s[1].rgb;
+                sumE += se[1];
+            }
+            if (m > 2) {
+                sum += s[2].rgb;
+                sumE += se[2];
+            }
             best = mix(sum / float(m), sumAll / float(nS), ringCtl.z);
+            bestEl = mix(sumE / float(m), sumEl / float(nS), ringCtl.z);
         }
+        // Row 0 the colour, row 1 where it was measured.
+        vec3 value = gl_FragCoord.y < 1.0 ? best : vec3(bestEl, 0.0, 0.0);
         if (best.r >= 0.0)
-            outc = vec4(prev.a > 0.0 ? mix(prev.rgb, best, ringProj.w) : best, 1.0);
+            outc = vec4(prev.a > 0.0 ? mix(prev.rgb, value, ringProj.w) : value, 1.0);
     }
     fragColor = outc;
 }
@@ -890,6 +958,10 @@ const float kApplyBeyond = 40000.0;
 const float kApplyLobeFade = 0.05;
 // The classic horizon polygon's top over the eye (kFogHorizonFillTop).
 const float kApplyFillTop = 0.06;
+// The overlay's darkening ratio: added to the world before and after the
+// overlay, so a channel the overlay left alone keeps a ratio of 1 even at 0
+// (VolumetricFog.hpp kFogSnapRatioEps).
+const float kSnapRatioEps = 1e-7;
 
 // The world's per-fragment shoulder above 0.8 (tonemapNeutral's peak curve,
 // without its whitening, which the frame already holds) and its inverse: the
@@ -1155,9 +1227,17 @@ void main() {
         if (snap) {
             // The overlay's darkening (its share of the world it left), and
             // whatever it drew brighter than the world (a reticle, the
-            // target brackets) added back as drawn.
+            // target brackets) added back as drawn. A channel the overlay
+            // left as it was keeps the fogged light whole, at any level: a
+            // near-black world channel (code 0 or 1, under the old 1e-5
+            // floor) gave a ratio of 0 or 0.5 with the overlay nowhere near,
+            // so dark needles in a fogged tree line came out as single black
+            // and green pixels (look fix round 5 "mist"; kSnapRatioEps is far
+            // under code 1, (1/255)^2.2 = 5e-6, so a black mask over the
+            // darkest world still darkens it whole).
             vec3 over = camDecode(cOver.rgb);
-            outLin = outLin * clamp(over / max(lin0, vec3(1e-5)), 0.0, 1.0) + max(over - lin0, vec3(0.0));
+            outLin = outLin * clamp((over + kSnapRatioEps) / (lin0 + kSnapRatioEps), 0.0, 1.0) +
+                     max(over - lin0, vec3(0.0));
         }
         col = camFold(outLin);
     } else {

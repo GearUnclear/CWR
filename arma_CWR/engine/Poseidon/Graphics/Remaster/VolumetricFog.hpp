@@ -220,7 +220,9 @@ constexpr float kWeatherExtinction = 3.2f;
 // setFog keeps round 3's density, 2 x 2.8 = 5.6 times the classic
 // extinction: the foggy night street is unchanged; only the day's mist
 // thins.)
-constexpr float kNightFogBoost = 2.0f * 2.8f / 0.75f - 1.0f;
+// (Look fix round 5 "mist": with kSetFogBoost 0.3 the same rule gives
+// 2 x 2.8 / 0.3 - 1 = 17.7: the night is still unchanged.)
+constexpr float kNightFogBoost = 2.0f * 2.8f / 0.3f - 1.0f;
 // setFog's own fog (not rain's) is this much denser again (look director
 // round 2: a hill 200 m out stood crisp in a setFog 0.3 morning mist the
 // classic fog hid; the volume's fog thickens with distance like it, not as
@@ -235,11 +237,26 @@ constexpr float kNightFogBoost = 2.0f * 2.8f / 0.75f - 1.0f;
 // keeps the first 300 m crisp. At 0.75 that rock keeps about half and a
 // fifth of a surface is left at the classic fog end, where the AI's
 // tactical sight ends; the mist still thickens with distance.)
-constexpr float kSetFogBoost = 0.75f;
+// (Look fix round 5 "mist": 0.75 -> 0.3. At 0.75, with the clear haze, the
+// valley mist and the humid air stacked on it, a rock 300 m out kept under
+// half of itself and read as a ghost even under the camera's grey-day
+// exposure: the setFog 0.3 morning read as dense fog, not the light mist it
+// is. With kSetFogHazeCut and kMistFogWeight 0.2 a level line at the fog
+// floor under a grey deck keeps about two thirds at 300 m, half at 500 m and
+// a third at the classic fog end: the rock and the tree line read through a
+// veil and the far hills fade.)
+constexpr float kSetFogBoost = 0.3f;
+// A day's setFog carries the humid air the clear haze stood for: the haze is
+// cut by this share at setFog 0.3 and over (by day; rain keeps its haze).
+// (Look fix round 5 "mist": the clear haze, about 6e-4 per metre, stood as
+// thick as setFog's own fog under it.)
+constexpr float kSetFogHazeCut = 0.5f;
 // setFog's share of the valley mist's weight by day, rising to
 // kMistFogWeightNight at night (look fix round 4: 1.2 -> 0.6 by day, the
 // mist layer doubled the weather fog in every hollow; the night keeps 1.2).
-constexpr float kMistFogWeight = 0.6f;
+// (Look fix round 5 "mist": 0.6 -> 0.2 by day; the mist layer in the
+// hollows before the rock thickened the light mist again.)
+constexpr float kMistFogWeight = 0.2f;
 constexpr float kMistFogWeightNight = 1.2f;
 // The forward fog keeps the view-distance edge: it starts at this share of
 // the fog end.
@@ -318,9 +335,35 @@ float FogGreySky(float skyThrough);
 // top's elevation (3.4 degrees). It is drawn in the classic fog colour, not
 // the sky's, so under a grey sky the apply replaces it with the air.
 constexpr float kFogHorizonFillTop = 0.06f;
+// An optic overlay over the fogged world: the apply lays the overlay's
+// darkening back as (after + eps) / (before + eps) per channel (FogSnapRatio,
+// GLSL kSnapRatioEps), so a channel the overlay left alone keeps the fogged
+// light whole even at 0. eps is far under the frame's darkest nonzero code,
+// (1/255)^2.2 = 5e-6, so a black mask over the darkest world still darkens it
+// whole. (Look fix round 5 "mist": the old max(before, 1e-5) floor turned
+// world channels at code 0 or 1 into a ratio of 0 or 0.5 with no overlay
+// there: single black and green pixels over a fogged tree line, wherever its
+// needles were near black; TAA's sharper mips made more of them.)
+constexpr float kFogSnapRatioEps = 1e-7f;
+// The overlay's darkening of one channel: 1 where the overlay left it.
+float FogSnapRatio(float after, float before);
 // Under a grey sky the horizon ring samples from this elevation (degrees),
 // above the polygon's top: the deck over the land, not the fill.
 constexpr float kFogRingGreyFromDeg = 3.8f;
+// The ring's light along a column at the column's own angle to the sun. The
+// ring measures the sky a few degrees above the land (from 2 degrees up, the
+// darker half of six samples), so toward a low sun it holds the aureole's
+// flank; the haze over ground under the horizon is farther from the sun and
+// takes less of the sun's forward scattering (look fix "dawn": a cream veil
+// over dawn_valley's bay). Per channel, from the sky table's two parts at the
+// ring's sample direction (r the Rayleigh and multiple scattering, m the
+// haze's single scattering without its phase), the gain is
+// (r + m P(column)) / (r + m P(ring)), P the sky's own Mie phase, at most
+// kFogRingPhaseMax (haze in front of land right under the sun glows, but
+// never more than this over the sky just above the land), and none under a
+// grey sky (the sky table is the clear sky's).
+constexpr float kFogRingPhaseMax = 1.5f;
+float FogRingPhaseGain(float r, float m, float phaseColumn, float phaseRing);
 // The morning weight: an eastern sun from 6 degrees under the horizon (full
 // from 2 under to 8 above), gone by 24 degrees.
 float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg);
@@ -414,8 +457,13 @@ std::shared_ptr<const FogSightMap> BuildFogSightMap(const float* heights, int ra
 // `map` (null: no island, sight is classic).
 void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::shared_ptr<const FogSightMap> map);
 // The medium and the map AI sight uses now (the renderer's fog floor draws
-// from this map; null before an island loads).
-const FogMedium& FogSightMedium();
+// from this map; null before an island loads). Both are handed out by value
+// (the map as a shared pointer to an immutable map), so no caller holds a
+// reference into the state the next simulation step rewrites. The state is
+// written once per simulation step on the main thread (SimulateFogSight),
+// where PerformAI and the renderer read it (BACKGROUND_AI is 0); a reader on
+// another thread would need a snapshot handed over, not these calls.
+FogMedium FogSightMedium();
 std::shared_ptr<const FogSightMap> FogSightMapInUse();
 // Low level: set the medium and the map directly (nullptr: sight is classic).
 void SetFogSight(const FogMedium* m, std::shared_ptr<const FogSightMap> map);

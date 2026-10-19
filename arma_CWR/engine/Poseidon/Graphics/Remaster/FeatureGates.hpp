@@ -128,6 +128,14 @@ struct CameraReadout
     float cpuCollectMs = 0.0f;
     float cpuQueueMs = 0.0f;
     std::uint32_t skippedMeters = 0;
+    // The guards' readings (log2 scene luminance; kMeterFloorLog2 when none):
+    // the sky's bright end, the sky by a low sun in frame and that guard's
+    // weight, and the exposure the meter's mean alone asks for (no guard), so
+    // a log shows which guard holds the frame down.
+    float meterSkyTop = -16.0f;
+    float meterSunRing = -16.0f;
+    float meterSunRingWeight = 0.0f;
+    float unguardedLog2 = 0.0f;
 };
 
 struct FeatureGates

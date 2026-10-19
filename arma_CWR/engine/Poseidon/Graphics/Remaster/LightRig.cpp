@@ -519,6 +519,15 @@ KeyLight ComputeKeyLight(const LightRigInputs& in, LightRig& rig, float moonShar
     return key;
 }
 
+Rgb ParticleRigIrradiance(const LightRig& rig, const KeyLight& key, float shade)
+{
+    const float field = 1.0f - Clamp01(rig.cloudCover) * (1.0f - Clamp01(rig.cloudTransmit));
+    const Rgb direct =
+        key.radiance * (kParticleKeyShare * (key.IsMoon() ? 1.0f : field)) + rig.moon * kParticleKeyShare;
+    const Rgb sky = (rig.skyZenith + rig.skyHorizon + rig.skyHorizonSun + rig.skyGround) * 0.25f;
+    return direct + sky * std::max(shade, 0.0f);
+}
+
 float ShaftScatterLength(float fogEnd)
 {
     if (!(fogEnd > 0.0f))

@@ -1102,6 +1102,19 @@ Color AddParticleNightLight(ColorVal classic, const float physical[3], float nig
                  toDisplay(toLinear(classic.B()) + s * physical[2]), classic.A());
 }
 
+// The photoreal rig's light on the puff (ParticleRigLight: linear, at the
+// frame's exposure and pre-exposure) at the material's brightness (the eye's
+// accommodation, which carries the user brightness as the lit shaders'
+// materials do), added in linear light to the display-space local lights.
+Color AddParticleRigLight(ColorVal display, const float rig[3], ColorVal accom)
+{
+    auto toLinear = [](float v) { return std::pow(std::max(v, 0.0f), 2.2f); };
+    auto toDisplay = [](float v) { return std::pow(std::max(v, 0.0f), 1.0f / 2.2f); };
+    return Color(toDisplay(toLinear(display.R()) + rig[0] * accom.R()),
+                 toDisplay(toLinear(display.G()) + rig[1] * accom.G()),
+                 toDisplay(toLinear(display.B()) + rig[2] * accom.B()), display.A());
+}
+
 // A smoke or dust particle lit from inside by the frame's combat lights
 // (CombatLights.hpp): their irradiance at the particle, isotropic, added to its
 // display-space colour in linear light. A fire's light crosses its own smoke
@@ -1246,7 +1259,14 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             mat.specFlags = 0;
             LightSun* sun = GScene->MainLight();
             sun->SetMaterial(mat);
-            colorI = sun->FullResult(0.5);
+            // Under the photoreal camera the frame's rig lights the puff
+            // (ParticleRigLight; added below, after the local lights), not the
+            // classic sun and ambient: the classic dusk sun is still a pink
+            // light 1.7 degrees after sunset, and the camera's white balance
+            // for the blue dusk air made it a salmon smudge on the horizon.
+            float rigLight[3];
+            const bool rigLit = GEngine->ParticleRigLight(rigLight);
+            colorI = rigLit ? Color(0, 0, 0, 1) : sun->FullResult(0.5);
             // While the combat lights light the frame, the classic light of a
             // flash, a fire or a flare draws its glow and lights nothing: the
             // particle takes the combat lights below instead.
@@ -1285,6 +1305,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             }
             ColorVal accom = GEngine->GetAccomodateEye();
             colorI = colorI * accom;
+            if (rigLit)
+                colorI = AddParticleRigLight(colorI, rigLight, accom);
             if (combat)
             {
                 // The particle's own colour (multiplied in below) is its albedo.

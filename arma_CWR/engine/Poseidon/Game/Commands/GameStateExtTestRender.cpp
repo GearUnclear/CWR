@@ -41,6 +41,7 @@ using namespace Poseidon;
 #include <Poseidon/Graphics/Remaster/FeatureGates.hpp>
 #include <Poseidon/Graphics/Remaster/FeatureSwitches.hpp>
 #include <Poseidon/Graphics/Remaster/VolumetricFog.hpp>
+#include <Poseidon/AI/EntityAI.hpp>
 namespace Poseidon
 {
 extern bool gPerfDumpShapesOnce;
@@ -716,6 +717,46 @@ GameValue TriFogSight(const GameState* /*state*/, GameValuePar arg)
              "mistDrawn=%.3e map=%d",
              remaster::FogSightActive() ? 1 : 0, ai, drawn ? 1 : 0, tDrawn, classic, m.groundSigma, m.mistSigma,
              drawn ? drawnMedium.groundSigma : 0.0f, drawn ? drawnMedium.mistSigma : 0.0f, map ? map->size : 0);
+    return GameValue(buf);
+}
+
+/// triAiSight [observer, target]: the observer's real AI visibility of the
+/// target (EntityAI::CalcVisibility with line of sight assumed, the call
+/// target tracking makes) next to its parts: the classic tactical fog's
+/// visibility, the size term, AI sight's air between the observer's eye and
+/// the target's aim (FogSightTransmittance) and the same line through the
+/// medium the renderer's fog drew this frame. "vis=<CalcVisibility>
+/// classic=<..> size=<..> Tai=<..> drawn=<0|1> Tdrawn=<..> dist=<m>
+/// fogAi=<vis / (classic size), the fog share AI took>". Never contains ';'.
+GameValue TriAiSight(const GameState* /*state*/, GameValuePar arg)
+{
+    if (arg.GetType() != GameArray)
+        return GameValue("FAIL:expected [observer, target]");
+    const GameArrayType& a = arg;
+    if (a.Size() < 2)
+        return GameValue("FAIL:expected [observer, target]");
+    EntityAI* observer = dyn_cast<EntityAI>(GetObject(a[0]));
+    EntityAI* target = dyn_cast<EntityAI>(GetObject(a[1]));
+    if (!observer || !target)
+        return GameValue("FAIL:both must be vehicles or men");
+    const Vector3 eye = observer->CameraPosition();
+    const Vector3 aim = target->AimingPosition();
+    const float dist2 = (aim - eye).SquareSize();
+    const float vis = observer->CalcVisibility(target, dist2, nullptr, true);
+    const float classic = GScene ? 1.0f - GScene->TacticalFog8(dist2) * (1.0f / 255.0f) : 1.0f;
+    float size = dist2 > 0.0f ? target->GetRadius() * 5000.0f / dist2 : 100.0f;
+    size = std::min(size, 40.0f);
+    const float from[3] = {eye.X(), eye.Y(), eye.Z()};
+    const float to[3] = {aim.X(), aim.Y(), aim.Z()};
+    const float tAi = remaster::FogSightActive() ? remaster::FogSightTransmittance(from, to) : 1.0f;
+    const std::shared_ptr<const remaster::FogSightMap> map = remaster::FogSightMapInUse();
+    remaster::FogMedium drawnMedium;
+    const bool drawn = remaster::GetDrawnFogMedium(drawnMedium);
+    const float tDrawn = drawn && map ? remaster::FogSightTransmittanceThrough(drawnMedium, *map, from, to) : 1.0f;
+    const float base = classic * size;
+    char buf[320];
+    snprintf(buf, sizeof(buf), "vis=%.5f classic=%.4f size=%.4f Tai=%.4f drawn=%d Tdrawn=%.4f dist=%.0f fogAi=%.4f",
+             vis, classic, size, tAi, drawn ? 1 : 0, tDrawn, std::sqrt(dist2), base > 0.0f ? vis / base : 0.0f);
     return GameValue(buf);
 }
 

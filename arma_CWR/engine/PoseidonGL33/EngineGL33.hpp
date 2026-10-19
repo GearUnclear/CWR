@@ -718,6 +718,7 @@ class EngineGL33 : public Engine
     bool LocalLightsFromTiles() const override { return _lightTilesActive; }
     bool RemasterMoonKey() const override;
     bool ParticleNightLight(Vector3Par pos, float linear[3]) const override;
+    bool ParticleRigLight(float linear[3]) const override;
     bool CombatLightsActive() const override { return _combat.active; }
     void SetDecalGlow(PackedColor glow) override { _decalGlow = glow; }
     void RequestShaderReload() override { _shaderReloadPending = true; }
@@ -900,6 +901,11 @@ class EngineGL33 : public Engine
     // x, the nightLights gate with the tiled list): particles take them too
     // (ParticleNightLight). Decided with _lightTilesActive, cleared with it.
     bool _nightLightsActive = false;
+    // The rig's light on a lit particle under the photoreal camera
+    // (ParticleRigLight; pre-exposed linear), set with the frame's rig
+    // (UploadLitFrameConstants) for the frame it names.
+    float _particleRigLight[3] = {0.0f, 0.0f, 0.0f};
+    std::uint32_t _particleRigFrame = 0xffffffffu;
     // Wet weather (B7, Graphics/Remaster/Wetness.hpp, SurfaceMaterials.hpp):
     // this frame's wetness (the world's state or the knob), set with the gates;
     // _wetShading while the wetWeather gate is on in the world's passes, which
@@ -1195,6 +1201,7 @@ class EngineGL33 : public Engine
         float duskKeep = 0.0f;   // CameraDuskKeep: the dusk's dark keep share (look director round 2)
         float golden = 0.0f;     // CameraGolden: the golden hour's warmth (look director round 2)
         float timeEv = 0.0f;     // CameraTimeOfDayEv: the golden hour's and the high sun's EV (look director round 2)
+        float veil = 0.0f;       // CameraWeatherVeil: the grey day's highlight limit (look fix round 5)
         // Colour: white balance times the scene saturation.
         Poseidon::remaster::Mat3 color;
         // The golden hour's warm gain (GoldenWarmGain), laid by the composite

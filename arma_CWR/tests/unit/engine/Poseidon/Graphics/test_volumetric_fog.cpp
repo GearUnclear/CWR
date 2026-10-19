@@ -123,9 +123,10 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
 {
     // A level line of sight at the fog floor through setFog 0.3 with VD 1500:
     // what is left of a surface at the classic fog's end is a small share, and
-    // under half at two thirds of it, where the classic linear fog is half
+    // about half at two thirds of it, where the classic linear fog is half
     // (look fix round 4: about half at a third of it, with the mist and the
-    // humid air on top, and the first 150 m keep more than 60 %).
+    // humid air on top, and the first 150 m keep more than 60 %; look fix
+    // round 5: a light mist, about two thirds at a third of it).
     FogInputs in = ClearNoon();
     in.viewDistance = 1500.0f;
     in.fog = 0.3f;
@@ -135,11 +136,11 @@ TEST_CASE("Volumetric fog: the weather fog reaches the classic visibility's opac
     CHECK(m.weatherSigma > 0.0f);
     const float sigma = FogExtinctionAt(m, 0.0f, 0.0f);
     const float left = std::exp(-sigma * in.fogEnd);
-    CHECK(left < 0.25f);
+    CHECK(left < 0.45f);
     CHECK(left > 0.001f);
-    CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.5f);
-    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.6f);
-    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) > 0.4f);
+    CHECK(std::exp(-sigma * 0.66f * in.fogEnd) < 0.6f);
+    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) < 0.8f);
+    CHECK(std::exp(-sigma * 0.33f * in.fogEnd) > 0.55f);
     CHECK(std::exp(-sigma * 150.0f) > 0.6f);
     // It thins upward from the fog floor: a hilltop 600 m up sees farther.
     CHECK(FogExtinctionAt(m, 600.0f, 0.0f) < 0.6f * sigma);
@@ -418,6 +419,10 @@ TEST_CASE("Volumetric fog: AI sight equals the drawn fog's air for the same inpu
     SetFogSight(nullptr, nullptr);
 }
 
+// The pure helper only: UpdateFogSightMedium never receives gate state, so
+// this case alone cannot catch a leak. The end-to-end pin (the simulation
+// step on a real landscape, an engine reporting each render path state, and
+// the engine's call order) is World/test_fog_sight_link.cpp ([aisight]).
 TEST_CASE("Volumetric fog: AI sight does not follow the render path", "[remaster][fog]")
 {
     const std::vector<float> h = ValleyHeights(64);
@@ -827,6 +832,40 @@ TEST_CASE("Volumetric fog: a grey day fades its ridges into the deck's air, with
           Catch::Approx(kWeatherExtinction * (1.0f / visFog - 1.0f / 3500.0f) * kSetFogBoost).epsilon(1e-4));
 }
 
+TEST_CASE("Volumetric fog: the air's light takes the sun's phase at each column's own angle to the sun",
+          "[remaster][fog][Shaders]")
+{
+    // A column straight at the ring's sample: the ring's colour, unchanged
+    // (far ground still melts into the sky behind it).
+    CHECK(FogRingPhaseGain(0.4f, 0.6f, 3.0f, 3.0f) == Catch::Approx(1.0f));
+    // The haze over ground under the horizon toward a low sun is farther
+    // from the sun than the ring's sample above the land: less of the sun's
+    // forward light (dawn_valley's bay, look fix "dawn").
+    const float gBay = FogRingPhaseGain(0.2f, 0.8f, 0.7f, 3.2f);
+    CHECK(gBay < 0.5f);
+    CHECK(gBay > 0.2f); // the sky's own part stays
+    // Away from the sun the phase is flat: next to no change.
+    CHECK(FogRingPhaseGain(0.6f, 0.4f, 0.05f, 0.055f) == Catch::Approx(1.0f).margin(0.02));
+    // Haze in front of land right under the sun glows, capped.
+    CHECK(FogRingPhaseGain(0.2f, 0.8f, 50.0f, 3.0f) == Catch::Approx(kFogRingPhaseMax));
+    CHECK(kFogRingPhaseMax >= 1.0f);
+    CHECK(kFogRingPhaseMax <= 2.0f);
+    CHECK(FogRingPhaseGain(0.0f, 0.0f, 1.0f, 1.0f) >= 0.0f);
+
+    const std::string ring = gl::PostShaderSource(gl::PostShader::FogRing);
+    const std::string inject = gl::PostShaderSource(gl::PostShader::FogInject);
+    REQUIRE_FALSE(ring.empty());
+    REQUIRE_FALSE(inject.empty());
+    // The ring's second row holds where it measured the colour.
+    CHECK(CountOf(ring, "vec3 value = gl_FragCoord.y < 1.0 ? best : vec3(bestEl, 0.0, 0.0);") == 1);
+    CHECK(CountOf(inject, "texture(fogRing, vec2(u, 0.25))") == 1);
+    CHECK(CountOf(inject, "texture(fogRing, vec2(u, 0.75))") == 1);
+    CHECK(CountOf(inject, "const float kFogRingPhaseMax = 1.5;") == 1);
+    CHECK(kFogRingPhaseMax == 1.5f);
+    CHECK(CountOf(inject, "vec3 colSky = pr + pm * phaseCol;") == 1);
+    CHECK(CountOf(inject, "ring += w * vec4(a.rgb * gain * a.a, a.a);") == 1);
+}
+
 TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the apply lays the air over the fill",
           "[remaster][fog][Shaders]")
 {
@@ -844,6 +883,32 @@ TEST_CASE("Volumetric fog: the ring reads the deck over the horizon fill, the ap
     CHECK(CountOf(apply, "float greyFill = max(wetSky, clamp(fogSkyWeather.z, 0.0, 1.0));") == 1);
     CHECK(CountOf(apply, "float hb = exp(-max(sW - kApplyFillTop, 0.0) / 0.09);") == 1);
     CHECK(CountOf(apply, "base = mix(base, airAt, hb * greyFill);") == 1);
+}
+
+TEST_CASE("Volumetric fog: an optic overlay's darkening leaves a near-black world channel alone",
+          "[remaster][fog][Shaders]")
+{
+    // Look fix round 5 "mist": world channels at code 0 or 1 gave a ratio of
+    // 0 or 0.5 under the old 1e-5 floor with no overlay there (black and green
+    // specks over a fogged tree line).
+    const float code1 = std::pow(1.0f / 255.0f, 2.2f);
+    CHECK(FogSnapRatio(0.0f, 0.0f) == Catch::Approx(1.0f));
+    CHECK(FogSnapRatio(code1, code1) == Catch::Approx(1.0f));
+    CHECK(FogSnapRatio(0.3f, 0.3f) == Catch::Approx(1.0f));
+    // A black mask over the darkest world still darkens it whole.
+    CHECK(kFogSnapRatioEps < 0.05f * code1);
+    CHECK(FogSnapRatio(0.0f, code1) < 0.05f);
+    CHECK(FogSnapRatio(0.0f, 0.2f) < 1e-5f);
+    // A half-dark mask, half; brighter than the world (a reticle) is 1 (the
+    // apply adds the difference back).
+    CHECK(FogSnapRatio(0.1f, 0.2f) == Catch::Approx(0.5f).epsilon(1e-4));
+    CHECK(FogSnapRatio(0.4f, 0.2f) == Catch::Approx(1.0f));
+    const std::string apply = gl::PostShaderSource(gl::PostShader::FogApply);
+    REQUIRE_FALSE(apply.empty());
+    CHECK(CountOf(apply, "const float kSnapRatioEps = 1e-7;") == 1);
+    CHECK(kFogSnapRatioEps == 1e-7f);
+    CHECK(CountOf(apply, "clamp((over + kSnapRatioEps) / (lin0 + kSnapRatioEps), 0.0, 1.0)") == 1);
+    CHECK(CountOf(apply, "max(lin0, vec3(1e-5))") == 0);
 }
 
 TEST_CASE("Volumetric fog: the composite's occlusion acts on the surface's light under the fog, not on the air",
@@ -962,6 +1027,30 @@ TEST_CASE("Volumetric fog: a day's setFog is a light mist, the foggy night keeps
     CHECK(ComputeFogMedium(dryGrey, LightingTuning{}, true).hazeSigma > g.hazeSigma);
     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * 150.0f) > 0.6f);
     CHECK(std::exp(-FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f) * g.zFar) > 0.08f);
+    // Look fix round 5 "mist": a light mist, not dense fog. The rock 300 m out
+    // keeps about two thirds of itself and the tree line 500 m out half, at
+    // the fog floor, while the classic fog end (742 m) is still faded; the
+    // clear haze gives way to setFog's own mist by day.
+    const float sig = FogExtinctionAt(g, 0.0f, 0.0f, 1.75f, 0.0f);
+    CHECK(std::exp(-sig * 300.0f) > 0.6f);
+    CHECK(std::exp(-sig * 500.0f) > 0.45f);
+    CHECK(std::exp(-sig * day.fogEnd) < 0.45f);
+    CHECK(kSetFogBoost <= 0.5f);
+    CHECK(kMistFogWeight < kMistFogWeightNight);
+    FogInputs clearAir = grey;
+    clearAir.fog = 0.0f;
+    clearAir.skyThrough = 1.0f;
+    FogInputs mistAir = clearAir;
+    mistAir.fog = 0.3f;
+    CHECK(ComputeFogMedium(mistAir, LightingTuning{}, true).hazeSigma ==
+          Catch::Approx(ComputeFogMedium(clearAir, LightingTuning{}, true).hazeSigma * (1.0f - kSetFogHazeCut)));
+    FogInputs mistNight = mistAir;
+    mistNight.nightEffect = 1.0f;
+    mistNight.sunElevationDeg = -30.0f;
+    FogInputs clearNight = mistNight;
+    clearNight.fog = 0.0f;
+    CHECK(ComputeFogMedium(mistNight, LightingTuning{}, true).hazeSigma ==
+          Catch::Approx(ComputeFogMedium(clearNight, LightingTuning{}, true).hazeSigma));
 }
 
 TEST_CASE("Volumetric fog: the morning shafts between crowns are strong enough to read", "[fog][remaster]")

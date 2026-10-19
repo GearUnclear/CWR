@@ -161,6 +161,15 @@ constexpr float kBrightKeep = -0.05f;
 // their colour), pulled that far.
 constexpr float kHighlightLimit = 1.3f;
 constexpr float kHighlightGuard = 0.85f;
+// Under the weather's veil (CameraWeatherVeil: an overcast day, a morning
+// mist, rain) the frame's bright end is the grey deck or the mist itself, not
+// a sunlit highlight: it is held at kGreyHighlightLimit instead (a light grey
+// below the curve's shoulder, as a photograph of a grey day keeps its sky and
+// its mist grey). (Look fix round 5 "mist": held at 1.3 the mist sat in the
+// shoulder at about 214 of 255 against the original's 178, its contrast
+// pressed flat, so the rock 300 m out and the tree line behind it were nearly
+// erased; the grey decks of rain and overcast were a near-white sheet.)
+constexpr float kGreyHighlightLimit = 0.8f;
 // The sky by a low sun in frame (MeterResult::sunRing) stays at this scene
 // light after exposure (the curve shows it a little under white, golden, not
 // blown); the foreground goes darker, as a photograph into the sun does.
@@ -183,8 +192,10 @@ constexpr float kExposureNightMaxLog2 = -1.0f;
 // sunset to a grey noon).
 // `duskKeep` (CameraDuskKeep, 0..1) raises the dark keep toward kDuskDarkKeep.
 // `timeEv` (CameraTimeOfDayEv) is added (EV).
+// `veil` (CameraWeatherVeil, 0..1) moves the highlight limit toward
+// kGreyHighlightLimit by day.
 float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t, float dusk = 0.0f,
-                         float duskKeep = 0.0f, float timeEv = 0.0f);
+                         float duskKeep = 0.0f, float timeEv = 0.0f, float veil = 0.0f);
 // The golden hour (look director round 2: a 12 degree sun read as a neutral
 // mid-afternoon): the camera takes kCameraGoldenEv off (the low sun is a
 // dimmer light, the picture a darker, warmer one) and balances a little warm
@@ -430,6 +441,29 @@ float SkySunGlow(float cosToSun);
 float SkyRolloffCapToward(float cosToSun);
 // The roll-off of the sky along a direction with this cosine to the sun.
 float SkyRolloffToward(float preExposedPeak, float cosToSun);
+// The sky as the meter reads it (the meter pass's meterSkyLight): a sky
+// tap's stored peak (SkyRolloffToward along its view ray) taken back to the
+// light it came from and rolled off with the plain cap (SkyRolloff), so the
+// meter and its guards see the sky round the sun as they see the rest of the
+// sky and the sun's glow burns white without closing the camera down. Light
+// at or past the cap toward the sun (the disc, the air's glow over it) reads
+// as the plain cap. (Look fix round 5 "exposure": the meter read the burn;
+// with the sun in or just out of frame the guards on the sky's bright end and
+// on the sky by a low sun took 0.3 to 1.5 EV off, woods_pine2_evening went
+// from ev 1.82 to 0.27, its frame mean from 50 to 33 of 255, darker than
+// town_night.)
+float SkyMeterLight(float storedPeak, float cosToSun);
+// A low sun turns the sky away from its glow toward the zenith's blue (the
+// sky shader's camSkyLook: none within about 10 degrees of the sun, all from
+// 30). The angle from the sun counts the height above the sun kLowSunGlowFlat
+// times and the sky under the sun's height as at it (only the azimuth then),
+// so the warm glow is a band along the horizon round the sun's bearing,
+// brightest near the sun, not a disc round it (look fix "dawn": at
+// sunrise_ridge the golden disc reached more than half the sky's height).
+// LowSunGlowCos is that angle's cosine (elevations in radians, cosAzimuth the
+// cosine of the azimuth between the direction and the sun).
+constexpr float kLowSunGlowFlat = 3.0f;
+float LowSunGlowCos(float sunElevation, float elevation, float cosAzimuth);
 
 // ---- The grey deck ------------------------------------------------------------
 // Under the camera a full grey deck (the overcast cloud floor under the
@@ -446,6 +480,11 @@ constexpr float kDeckRelief = 2.4f;
 constexpr float kDeckDark = 0.5f;
 constexpr float kDeckFromSin = 0.12f;
 constexpr float kDeckFullSin = 0.3f;
+// Under rain (its density, 0..1) the deck's light is a further
+// 1 - kDeckRainDark x rain: a rain deck is a thick nimbostratus, darker than a
+// dry overcast. (Look fix round 5 "mist": rain_day read as a wet misty day
+// against the original's and landed's darker rain deck.)
+constexpr float kDeckRainDark = 0.4f;
 
 // ---- The sun disk -----------------------------------------------------------
 // Under the camera the sun's sprite (its painted halo and star) is not drawn:

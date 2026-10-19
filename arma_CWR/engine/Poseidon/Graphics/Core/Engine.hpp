@@ -859,6 +859,14 @@ class Engine : public IGraphicsEngine
     /// term), and true. False when they are off: every light then lights the
     /// particle by the classic model, as before.
     virtual bool ParticleNightLight(Vector3Par /*pos*/, float /*linear*/[3]) const { return false; }
+    /// The photoreal camera (photoLight): the frame's light rig on a lit
+    /// particle (smoke, dust, a fireball's soot; LightRig.hpp
+    /// ParticleRigIrradiance), linear, at the rig's exposure and the frame's
+    /// pre-exposure, as the world's passes store scene light; before the
+    /// material's brightness and the particle's own colour. True while the
+    /// camera writes this frame's scene light: the particle then takes it in
+    /// place of the classic sun and ambient. False otherwise (classic light).
+    virtual bool ParticleRigLight(float /*linear*/[3]) const { return false; }
     /// True while the frame's combat lights (the combatLights feature,
     /// Graphics/Rendering/Lighting/CombatLights.hpp) light the world: the
     /// classic light of a muzzle flash, an explosion, a wreck, a fire, a flare

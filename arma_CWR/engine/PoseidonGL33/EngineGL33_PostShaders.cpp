@@ -597,15 +597,48 @@ void main() {
 // that is black through (an optic's mask, pillarbox bars) weighs nothing, so
 // the camera meters the scene inside it. Read back by the CPU, which builds
 // the histogram.
+// The meter reads the sky at its plain roll-off (PhotoCamera.hpp
+// SkyMeterLight): toward the sun the dome's roll-off rises past white
+// (camSkyRolloff, kSkySunCap) so the sun's glow burns, and the guards that
+// keep the sky under white closed the camera down for that burn (look fix
+// round 5 "exposure"). Each sky tap's peak is taken back through the roll-off
+// toward the sun along its own view ray (meterProj, meterRect, meterSun) and
+// rolled off with the plain cap (meterSky: knee, cap, the cap toward the sun,
+// the glow's radius), so the meter sees the sky round the sun as it sees the
+// rest of the sky, and the frame keeps its burn.
 static const char s_psPostMeterHead[] = R"(#version 330 core
 in vec2 vUV;
 uniform sampler2D colorTex;
 uniform sampler2D depthTex;
 uniform vec4 meterParams; // x the sky's weight, y 1 / the frame's pre-exposure, zw meter size
+uniform vec4 meterSky;    // the sky's roll-off: x knee, y cap, z the cap toward the sun, w the glow's radius (rad)
+uniform vec4 meterSun;    // xyz the unit direction to the sun in view space (z forward), w 1: take the sun's cap out
+uniform vec4 meterProj;   // x 1 / proj._11, y 1 / proj._22: the view ray is (ndc.x x, ndc.y y, 1)
+uniform vec4 meterRect;   // the 3D viewport in uv (x, y, w, h)
 out vec4 fragColor;
 )";
 
 static const char s_psPostMeterMain[] = R"(
+// The factor that takes a sky tap's pre-exposed light (the dome's roll-off
+// toward the sun along this tap's view ray) to the plain roll-off of the same
+// light (PhotoCamera.cpp SkyMeterLight): the roll-off with cap C is
+// k + r (1 - exp(-(m - k) / r)), r = C - k; it is inverted with the cap toward
+// the sun and rolled off again with the plain cap. Light at or past the cap
+// toward the sun (the disc, the air's glow over it) reads as the plain cap.
+float meterSkyLight(vec3 pre, vec2 uv) {
+    float o = max(pre.r, max(pre.g, pre.b));
+    float k = meterSky.x;
+    if (meterSun.w < 0.5 || o <= k) return 1.0;
+    vec2 ndc = (uv - meterRect.xy) / max(meterRect.zw, vec2(1e-6)) * 2.0 - 1.0;
+    vec3 ray = normalize(vec3(ndc.x * meterProj.x, ndc.y * meterProj.y, 1.0));
+    float c = clamp(dot(ray, meterSun.xyz), -1.0, 1.0);
+    float glow = 1.0 / (1.0 + 2.0 * (1.0 - c) / (meterSky.w * meterSky.w));
+    float rs = meterSky.y + (meterSky.z - meterSky.y) * glow - k;
+    float rp = meterSky.y - k;
+    float m = k - rs * log(max(1.0 - (o - k) / rs, 1e-6));
+    return (k + rp * (1.0 - exp(-(m - k) / rp))) / o;
+}
+
 void main() {
     vec2 cell = floor(gl_FragCoord.xy);
     float sum = 0.0, wsum = 0.0, hi = -32.0, lo = 32.0, skyHi = -32.0;
@@ -613,9 +646,11 @@ void main() {
         for (int i = 0; i < 4; ++i) {
             vec2 uv = (cell + (vec2(float(i), float(j)) + 0.5) / 4.0) / meterParams.zw;
             vec3 t = textureLod(colorTex, uv, 0.0).rgb;
-            vec3 lin = camDecode(t) * meterParams.y;
-            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
+            vec3 pre = camDecode(t);
             bool sky = textureLod(depthTex, uv, 0.0).r >= 0.999999;
+            if (sky) pre *= meterSkyLight(pre, uv);
+            vec3 lin = pre * meterParams.y;
+            float l = log2(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 1e-5));
             float w = sky ? meterParams.x : 1.0;
             sum += l * w;
             wsum += w;

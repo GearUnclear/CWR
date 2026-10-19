@@ -182,6 +182,19 @@ vec3 camSkyDeepen(vec3 a, float w) {
     float s = max(1.0, min(1.0 + kCamSkyDeep * clamp(w, 0.0, 1.0), (1.0 - kCamSkyDeepFloor) * l / (l - lo)));
     return vec3(l) + (a - vec3(l)) * s;
 }
+// The cosine of the angle from the sun with the height above the sun counted
+// kCamGlowFlat times (PhotoCamera.hpp kLowSunGlowFlat, LowSunGlowCos): the
+// low sun's warm glow lies along the horizon.
+const float kCamGlowFlat = 3.0; // kLowSunGlowFlat
+float camLowSunGlowCos(vec3 d) {
+    vec3 s = skySunDir();
+    float es = asin(clamp(s.y, -1.0, 1.0));
+    float ed = asin(clamp(d.y, -1.0, 1.0));
+    float e = min(es + max(ed - es, 0.0) * kCamGlowFlat, 1.5707963);
+    vec2 sh = s.xz, dh = d.xz;
+    float cAz = (dot(sh, sh) > 1e-8 && dot(dh, dh) > 1e-8) ? dot(normalize(dh), normalize(sh)) : 1.0;
+    return sin(es) * sin(e) + cos(es) * cos(e) * cAz;
+}
 vec3 camSkyLook(vec3 a, vec3 d) {
     if (litCamera.x < 0.5) return a;
     float e = max(d.y, 0.0);
@@ -201,8 +214,12 @@ vec3 camSkyLook(vec3 a, vec3 d) {
         vec3 zc = zen / max(dot(zen, kLuma), 1e-8);
         float l = dot(a, kLuma);
         // Away from the sun's glow (none within about 10 degrees of it, all
-        // from 30, so the golden aureole stays golden).
-        float away = 1.0 - smoothstep(0.86, 0.985, dot(d, skySunDir()));
+        // from 30, so the golden aureole stays golden). The height above the
+        // sun counts kCamGlowFlat times (PhotoCamera.hpp LowSunGlowCos): the
+        // warm glow is a band along the horizon round the sun's bearing, not
+        // a disc round the sun (look fix "dawn": at sunrise_ridge the golden
+        // disc reached more than half the sky's height).
+        float away = 1.0 - smoothstep(0.86, 0.985, camLowSunGlowCos(d));
         // Over the lowest 30 degrees, so the warm horizon band fades into the
         // blue above it without an upper edge (a 3 to 27 degree ramp read as
         // a painted stripe at the blue hour).
@@ -430,11 +447,12 @@ vec4 camCloudTexel(vec4 t0) {
 }
 
 // The grey deck's cloud base under the camera (PhotoCamera.hpp kDeckRelief,
-// kDeckDark, kDeckFromSin, kDeckFullSin).
+// kDeckDark, kDeckFromSin, kDeckFullSin, kDeckRainDark).
 const float kCamDeckRelief = 2.4;
 const float kCamDeckDark = 0.5;
 const float kCamDeckFromSin = 0.12;
 const float kCamDeckFullSin = 0.3;
+const float kCamDeckRainDark = 0.4;
 
 vec3 shadeSkyDome(vec4 t0, vec3 classic) {
     t0 = camCloudTexel(t0);
@@ -509,7 +527,10 @@ vec3 shadeSkyDome(vec4 t0, vec3 classic) {
                      smoothstep(-6.0, 2.0, skySunElevation());
         if (deck > 0.0) {
             float rel = clamp(shade / max(pow(rowSum / 12.0, 2.2), 1e-4), 0.25, 3.0);
-            cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark, deck);
+            // Under rain the deck is a heavier, darker nimbostratus (litWeather.y,
+            // the rain's density while the wet weather runs).
+            float rainDeck = 1.0 - kCamDeckRainDark * clamp(litWeather.y, 0.0, 1.0);
+            cloudLin *= pow(rel, kCamDeckRelief * deck) * mix(1.0, kCamDeckDark * rainDeck, deck);
         }
     }
     // Cover over clear sky in display space, where the mask measured it: a

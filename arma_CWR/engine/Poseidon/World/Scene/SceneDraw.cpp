@@ -383,11 +383,13 @@ void Scene::DrawRain()
         // Under the photoreal camera (photoLight) the overlay's streaks are
         // stretched by the exposure and the curve: at full strength they
         // smeared the whole sky with vertical lines (look director round 2).
+        // (Look fix round 5 "mist": 0.45 -> 0.9; under the grey day's
+        // exposure and drawn after the opaque copy, at 0.45 no streak read.)
         if (GEngine && GEngine->LightingRemasterActive())
         {
             const remaster::LightingTuning tuning = GEngine->GetLightingTuning();
             if (tuning.features.photoLight > 0.5f)
-                density *= 0.45f;
+                density *= 0.9f;
         }
         DrawRainLevel(density, yDensity, xOffset, yOffset, 8);
         DrawRainLevel(density, yDensity, xOffset, yOffset, 2);

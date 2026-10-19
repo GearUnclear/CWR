@@ -133,6 +133,7 @@ void EngineGL33::UpdateCameraFrame(const rm::LightRig& rig, bool atmosphereOn)
         _lighting.camSat - rm::kLowSunSaturationDrop * lowSun * (1.0f - c.nightEffect) - rm::kVeilSaturationDrop * veil;
     c.color = rm::Multiply(rm::Saturation(sat), wb);
     c.timeEv = rm::CameraTimeOfDayEv(rig.sunElevationDeg, veil);
+    c.veil = veil;
     // The golden hour's warm balance (kCameraGoldenWarm, at unit luminance):
     // the composite lays it on the light that is not blue (GoldenWarmShare),
     // so the clear sky and the sky-lit shade keep their blue.
@@ -241,7 +242,8 @@ void EngineGL33::CameraAdapt()
     const float dt = c.lastStep < 0.0 ? 0.0f : static_cast<float>(std::min(std::max(now - c.lastStep, 0.0), 0.25));
     c.lastStep = now;
     if (c.meter.valid)
-        c.targetLog2 = rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv);
+        c.targetLog2 =
+            rm::TargetExposureLog2(c.meter, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv, c.veil);
     if (c.snap)
     {
         if (fresh && freshFrame >= c.snapFrame)
@@ -283,6 +285,33 @@ void EngineGL33::PostCameraMeter(const PostFrame& f)
     // Scene light: the stored frame divided by its pre-exposure.
     Set4(p.progMeter, "meterParams", rm::kMeterSkyWeight, std::exp2(-c.preExposureLog2),
          static_cast<float>(rm::kMeterWidth), static_cast<float>(rm::kMeterHeight));
+    // The sky at its plain roll-off (SkyMeterLight): the dome's cap rises
+    // toward the sun so its glow burns white; the meter takes that rise back
+    // out along each sky tap's view ray, so the guards do not close the camera
+    // down for the sun's burn.
+    Set4(p.progMeter, "meterSky", rm::kSkyRolloffKnee, rm::kSkyRolloffCap, rm::kSkySunCap, rm::kSkySunGlowRad);
+    {
+        float sunView[3] = {0.0f, 0.0f, 1.0f};
+        bool sunOk = false;
+        LightSun* sun = GScene ? GScene->MainLight() : nullptr;
+        Camera* cam = GScene ? GScene->GetCamera() : nullptr;
+        if (sun && cam)
+        {
+            // Camera space as PostFrameSun's: x right, y up, z forward.
+            const Vector3 v = cam->InverseScaled().Rotate(-sun->SunDirection());
+            const float len = v.Size();
+            if (len > 1e-6f)
+            {
+                sunView[0] = v.X() / len;
+                sunView[1] = v.Y() / len;
+                sunView[2] = v.Z() / len;
+                sunOk = true;
+            }
+        }
+        Set4(p.progMeter, "meterSun", sunView[0], sunView[1], sunView[2], sunOk ? 1.0f : 0.0f);
+    }
+    Set4(p.progMeter, "meterProj", f.projInfo[2], f.projInfo[3], 0.0f, 0.0f);
+    Set4(p.progMeter, "meterRect", f.rect[0], f.rect[1], f.rect[2], f.rect[3]);
     DrawTo(p.meterFbo, rm::kMeterWidth, rm::kMeterHeight);
 
     // Queue the readback into the free slot: the target's own format (RGBA16F
@@ -353,5 +382,17 @@ rm::CameraReadout EngineGL33::CameraReadoutNow() const
     r.cpuCollectMs = c.cpuCollectMs;
     r.cpuQueueMs = c.cpuQueueMs;
     r.skippedMeters = c.skippedMeters;
+    r.meterSkyTop = c.meter.skyTop;
+    r.meterSunRing = c.meter.sunRing;
+    r.meterSunRingWeight = c.meter.sunRingWeight;
+    if (c.meter.valid)
+    {
+        rm::MeterResult free = c.meter;
+        free.highlight = rm::kMeterFloorLog2;
+        free.skyTop = rm::kMeterFloorLog2;
+        free.sunRingWeight = 0.0f;
+        r.unguardedLog2 =
+            rm::TargetExposureLog2(free, c.nightEffect, _lighting, c.duskEffect, c.duskKeep, c.timeEv, c.veil);
+    }
     return r;
 }

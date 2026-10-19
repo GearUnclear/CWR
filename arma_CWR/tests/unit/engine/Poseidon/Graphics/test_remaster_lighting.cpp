@@ -1130,6 +1130,29 @@ TEST_CASE("Every raw GLSL string of the lighting and post sources reaches a comp
     CHECK(strings >= 32); // today 3 VS, 10 prelude pieces and 4 mains; 15 post strings
 }
 
+TEST_CASE("The camera's meter reads the sky round the sun at the plain roll-off (look fix exposure)",
+          "[Graphics][Shaders][remaster]")
+{
+    // The meter pass takes each sky tap through meterSkyLight (PhotoCamera.cpp
+    // SkyMeterLight) before its luminance, so the mean, the blocks' brightest
+    // tap and their brightest sky tap all read the sky at the plain roll-off;
+    // its constants come in as uniforms from PhotoCamera.hpp (EngineGL33_Camera.cpp).
+    const std::string meter = gl::PostShaderSource(gl::PostShader::Meter);
+    const size_t fn = meter.find("float meterSkyLight(vec3 pre, vec2 uv)");
+    REQUIRE(fn != std::string::npos);
+    const size_t use = meter.find("if (sky) pre *= meterSkyLight(pre, uv);");
+    REQUIRE(use != std::string::npos);
+    CHECK(use > fn);
+    const size_t lum = meter.find("float l = log2(", use);
+    CHECK(lum != std::string::npos);
+    for (const char* u :
+         {"uniform vec4 meterSky;", "uniform vec4 meterSun;", "uniform vec4 meterProj;", "uniform vec4 meterRect;"})
+    {
+        CAPTURE(u);
+        CHECK(meter.find(u) != std::string::npos);
+    }
+}
+
 TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[Graphics][Shaders][remaster]")
 {
     // The lit prelude stores with the same text the post passes decode with.
@@ -1169,11 +1192,22 @@ TEST_CASE("The photoreal camera's encoding in the shaders is PhotoCamera's", "[G
     CHECK(constant(skyPiece, "kCamDeckDark") == Catch::Approx(kDeckDark));
     CHECK(constant(skyPiece, "kCamDeckFromSin") == Catch::Approx(kDeckFromSin));
     CHECK(constant(skyPiece, "kCamDeckFullSin") == Catch::Approx(kDeckFullSin));
+    // Under rain the deck darkens further (look fix round 5), read from the
+    // wet weather's rain density.
+    CHECK(constant(skyPiece, "kCamDeckRainDark") == Catch::Approx(kDeckRainDark));
+    CHECK(kDeckRainDark > 0.0f);
+    CHECK(kDeckRainDark < 0.6f);
+    CHECK(skyPiece.find("kCamDeckRainDark * clamp(litWeather.y, 0.0, 1.0)") != std::string::npos);
     CHECK(kDeckDark < 1.0f);
     CHECK(kDeckFromSin > 0.1f);
     CHECK(kDeckFullSin > kDeckFromSin);
     CHECK(constant(skyPiece, "kCamSkySunCap") == Catch::Approx(kSkySunCap));
     CHECK(constant(skyPiece, "kCamSkyGlowRad") == Catch::Approx(kSkySunGlowRad));
+    // The low sun's warm glow is a band along the horizon (look fix "dawn"):
+    // the blue-turning mask measures the angle with the height above the sun
+    // stretched (LowSunGlowCos).
+    CHECK(constant(skyPiece, "kCamGlowFlat") == Catch::Approx(kLowSunGlowFlat));
+    CHECK(skyPiece.find("float away = 1.0 - smoothstep(0.86, 0.985, camLowSunGlowCos(d));") != std::string::npos);
     // Every sky roll-off knows its direction to the sun (the glow round it),
     // and the sun's disc is round on the screen (solved per pixel, not the
     // angle's oval near the corners).

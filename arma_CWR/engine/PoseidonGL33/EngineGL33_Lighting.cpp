@@ -21,6 +21,7 @@
 #include <Poseidon/Graphics/Remaster/CloudNoise.hpp>
 #include <Poseidon/Graphics/Remaster/NightLights.hpp>
 #include <Poseidon/Graphics/Remaster/SunShadows.hpp>
+#include <Poseidon/Graphics/Remaster/SurfaceLight.hpp>
 #include <Poseidon/Graphics/Remaster/TerrainDetail.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -788,6 +789,11 @@ void EngineGL33::UploadLitFrameConstants()
         _nightLightsActive = false;
         _wetShading = false;
         _combat.active = false;
+        // No volumetric fog is drawn: the published drawn medium (for probes;
+        // AI sight never reads it) must not keep the last remastered frame's
+        // (fix5 aitest: triFogSight reported drawn=1 with a stale medium
+        // after a switch to classic lighting).
+        Poseidon::remaster::SetDrawnFogMedium(nullptr);
         return;
     }
     if (_terrainMapDirty)
@@ -920,6 +926,20 @@ void EngineGL33::UploadLitFrameConstants()
     // A burst's flash at the camera opens the exposure for as long as it lasts
     // (B4; 1 without one).
     _combat.exposure = rig.exposure * _combat.flashGain;
+    // Lit particles take the rig's light under the camera (ParticleRigLight):
+    // the world's sky fill share and exposure, at the frame's pre-exposure.
+    if (_camera.frameOn)
+    {
+        const float shade = _featureGates.computed && _featureGates[rm::Feature::Surfaces].on
+                                ? rm::SurfaceShadeFactor(_lighting.surfShade, rig.sunElevationDeg, in.skyThrough)
+                                : 1.0f;
+        const rm::Rgb irr = rm::ParticleRigIrradiance(rig, key, shade);
+        const float k = _combat.exposure * std::exp2(_camera.preExposureLog2);
+        _particleRigLight[0] = irr.r * k;
+        _particleRigLight[1] = irr.g * k;
+        _particleRigLight[2] = irr.b * k;
+        _particleRigFrame = GetFrameCounter();
+    }
     SetSlot(LitConst::Zenith, rig.skyZenith.r, rig.skyZenith.g, rig.skyZenith.b, _combat.exposure);
     SetSlot(LitConst::Horizon, rig.skyHorizon.r, rig.skyHorizon.g, rig.skyHorizon.b, _lighting.specular);
     // w: tree crowns lit as a canopy (B2, crownCanopy), 1 while its switch and
@@ -1155,6 +1175,14 @@ bool EngineGL33::RemasterMoonKey() const
     // pass asks after the passes that uploaded the key).
     return _lightingActive && _featureGates.computed && _featureGates.frame == GetFrameCounter() &&
            rm::MoonKeyShare(_featureGates) > 0.0f;
+}
+
+bool EngineGL33::ParticleRigLight(float linear[3]) const
+{
+    const bool on = _camera.frameOn && _camera.frame == GetFrameCounter() && _particleRigFrame == GetFrameCounter();
+    for (int i = 0; i < 3; ++i)
+        linear[i] = on ? _particleRigLight[i] : 0.0f;
+    return on;
 }
 
 bool EngineGL33::ParticleNightLight(Vector3Par pos, float linear[3]) const

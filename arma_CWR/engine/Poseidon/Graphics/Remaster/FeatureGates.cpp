@@ -390,16 +390,17 @@ std::string FeatureStateString(const LightingTuning& tuning, const FeatureGates&
     const CameraReadout& c = gates.camera;
     if (c.valid)
     {
-        char cam[320];
+        char cam[400];
         std::snprintf(cam, sizeof(cam),
                       " | cam ev=%.2f target=%.2f pre=%.2f mean=%.2f high=%.2f wb=%.2f sky=%.3f sun=%.3f skyup=%.3f "
-                      "reads=%u cpu=%.3f/%.3f skip=%u",
+                      "reads=%u cpu=%.3f/%.3f skip=%u skytop=%.2f ring=%.2f ringw=%.2f free=%.2f",
                       static_cast<double>(c.exposureLog2), static_cast<double>(c.targetLog2),
                       static_cast<double>(c.preExposureLog2), static_cast<double>(c.meterMean),
                       static_cast<double>(c.meterHighlight), static_cast<double>(c.whiteBalance),
                       static_cast<double>(c.skyScale), static_cast<double>(c.sunLum), static_cast<double>(c.skyUpLum),
                       c.readbacks, static_cast<double>(c.cpuCollectMs), static_cast<double>(c.cpuQueueMs),
-                      c.skippedMeters);
+                      c.skippedMeters, static_cast<double>(c.meterSkyTop), static_cast<double>(c.meterSunRing),
+                      static_cast<double>(c.meterSunRingWeight), static_cast<double>(c.unguardedLog2));
         out += cam;
     }
     return out;

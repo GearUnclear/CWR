@@ -174,6 +174,43 @@ TEST_CASE("PhotoCamera: exposure keeps part of a scene's darkness, guards its hi
     CHECK(TargetExposureLog2(day, 0.0f, plus) == Catch::Approx(TargetExposureLog2(day, 0.0f, t) + 1.0f));
 }
 
+TEST_CASE("PhotoCamera: a grey day holds its bright end, the deck or the mist, at a light grey",
+          "[Remaster][PhotoCamera]")
+{
+    // Look fix round 5 "mist": the optics mist view metered mean -3.37 and
+    // high -0.58; held at kHighlightLimit the mist sat in the curve's shoulder.
+    LightingTuning t;
+    t.camEv = 0.0f;
+    MeterResult mist;
+    mist.valid = true;
+    mist.mean = -3.37f;
+    mist.highlight = -0.58f;
+    const float clear = TargetExposureLog2(mist, 0.0f, t);
+    const float grey = TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 1.0f);
+    CHECK(kGreyHighlightLimit < kHighlightLimit);
+    CHECK(kGreyHighlightLimit > 0.5f); // a light grey, not a dark one
+    CHECK(grey < clear);
+    // The bright end lands near the grey limit (the guard's pull, not a clamp).
+    const float bright = grey + mist.highlight;
+    CHECK(bright < std::log2(kHighlightLimit));
+    CHECK(bright == Catch::Approx(std::log2(kGreyHighlightLimit)).margin(0.15));
+    // Half a veil, halfway; no veil, unchanged.
+    const float half = TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 0.5f);
+    CHECK(half < clear);
+    CHECK(half > grey);
+    CHECK(TargetExposureLog2(mist, 0.0f, t, 0.0f, 0.0f, 0.0f, 0.0f) == Catch::Approx(clear));
+    // A scene whose bright end is under the grey limit is not touched.
+    MeterResult dim = mist;
+    dim.highlight = mist.mean + 0.3f;
+    CHECK(TargetExposureLog2(dim, 0.0f, t, 0.0f, 0.0f, 0.0f, 1.0f) == Catch::Approx(TargetExposureLog2(dim, 0.0f, t)));
+    // At night the bright end is a lamp: the veil leaves the night's guard alone.
+    MeterResult night = mist;
+    night.mean = -9.0f;
+    night.highlight = -2.0f;
+    CHECK(TargetExposureLog2(night, 1.0f, t, 0.0f, 0.0f, 0.0f, 1.0f) ==
+          Catch::Approx(TargetExposureLog2(night, 1.0f, t)));
+}
+
 TEST_CASE("PhotoCamera: a low sun in frame holds the sky by it golden, not blown", "[Remaster][PhotoCamera]")
 {
     // A meter grid with the sun at uv (0.5, 0.6): its own block very bright
@@ -237,6 +274,37 @@ TEST_CASE("PhotoCamera: the sky rolls off under white, and the guards' sky limit
     CHECK(kSunDiscLevel > c.white);
 }
 
+TEST_CASE("PhotoCamera: a low sun's warm glow is a band along the horizon, not a disc round the sun",
+          "[Remaster][PhotoCamera]")
+{
+    const float deg = 3.14159265f / 180.0f;
+    const float sunEl = 5.0f * deg;
+    // At the sun, and the horizon band under it is as close as the sun's own
+    // height (the glow hugs the horizon); off to the side, the azimuth.
+    CHECK(LowSunGlowCos(sunEl, sunEl, 1.0f) == Catch::Approx(1.0f).margin(1e-5));
+    CHECK(LowSunGlowCos(sunEl, 0.0f, 1.0f) == Catch::Approx(1.0f).margin(1e-5));
+    CHECK(LowSunGlowCos(sunEl, 0.0f, std::cos(20.0f * deg)) ==
+          Catch::Approx(LowSunGlowCos(sunEl, sunEl, std::cos(20.0f * deg))).margin(1e-5));
+    // The glow mask: none within about 10 degrees (cos 0.985), all from 30
+    // (cos 0.86). 15 degrees to the side at the sun's height stays warm; 15
+    // degrees straight above the sun is out of the glow (it was inside).
+    CHECK(LowSunGlowCos(sunEl, sunEl, std::cos(15.0f * deg)) > 0.95f);
+    CHECK(std::cos(15.0f * deg) > 0.95f);
+    CHECK(LowSunGlowCos(sunEl, 20.0f * deg, 1.0f) < 0.86f);
+    // Wider than it is tall: the same angle along the horizon keeps more glow.
+    for (float a = 4.0f; a <= 30.0f; a += 2.0f)
+    {
+        const float side = LowSunGlowCos(sunEl, sunEl, std::cos(a * deg));
+        const float up = LowSunGlowCos(sunEl, sunEl + a * deg, 1.0f);
+        INFO("angle " << a);
+        CHECK(side > up);
+    }
+    // Never past straight up.
+    CHECK(LowSunGlowCos(sunEl, 80.0f * deg, 1.0f) == Catch::Approx(std::sin(sunEl)).margin(1e-4));
+    CHECK(kLowSunGlowFlat >= 2.0f);
+    CHECK(kLowSunGlowFlat <= 4.0f);
+}
+
 TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off smoothly to the sky's cap",
           "[Remaster][PhotoCamera]")
 {
@@ -277,6 +345,76 @@ TEST_CASE("PhotoCamera: toward the sun the sky burns white, its glare falls off 
     // channel of the sun).
     CHECK(kSunDiscWhite >= 0.7f);
     CHECK(kSunDiscWhite <= 1.0f);
+}
+
+TEST_CASE("PhotoCamera: look fix exposure: the meter reads the sky round the sun at the plain roll-off",
+          "[Remaster][PhotoCamera]")
+{
+    const float deg = 3.14159265f / 180.0f;
+    // The sky's stored light toward the sun, read back, is the plain
+    // roll-off of the same light at any angle: the burn is the display's, not
+    // the meter's.
+    for (float a : {0.3f, 1.0f, 2.0f, 3.0f, 5.0f, 8.0f, 20.0f, 90.0f})
+    {
+        const float c = std::cos(a * deg);
+        for (float m = 0.2f; m < 60.0f; m *= 1.3f)
+        {
+            CAPTURE(a, m);
+            const float stored = SkyRolloffToward(m, c);
+            const float read = SkyMeterLight(stored, c);
+            const float plain = SkyRolloff(m);
+            // log2 within 0.02 EV until the plain roll-off is within a
+            // hundredth of its cap (where float precision of the inverse
+            // runs out, and the reading saturates at the cap either way).
+            if (plain < kSkyRolloffCap - 0.024f)
+                CHECK(std::fabs(std::log2(read / plain)) < 0.02f);
+            CHECK(read <= kSkyRolloffCap + 1e-4f);
+            CHECK(read <= stored + 1e-4f);
+        }
+    }
+    // Under the knee and far from the sun nothing changes.
+    CHECK(SkyMeterLight(0.9f, 1.0f) == 0.9f);
+    CHECK(SkyMeterLight(2.0f, -1.0f) == Catch::Approx(2.0f).epsilon(0.002));
+    // The disc and anything past the cap toward the sun read as the plain cap.
+    CHECK(SkyMeterLight(kSunDiscLevel, 1.0f) == Catch::Approx(kSkyRolloffCap).epsilon(0.001));
+    CHECK(SkyMeterLight(kSkySunCap * 2.0f, std::cos(0.5f * deg)) == Catch::Approx(kSkyRolloffCap).epsilon(0.001));
+
+    // The camera into a low sun (woods_pine2_evening, lowsun_fp): the sky a
+    // few degrees from the sun is many times past the cap. Closed loop: the
+    // frame is drawn at the exposure, the meter reads it back, the guard on
+    // the sky by the sun sets the next exposure. Reading the dome's own
+    // stored light, the burn's higher cap held the guard's tap past its limit
+    // and the camera closed down; read through SkyMeterLight it settles where
+    // the plain roll-off (round 3) settled.
+    LightingTuning t;
+    auto settle = [&](auto stored, auto read)
+    {
+        float e = 2.0f;
+        for (int i = 0; i < 200; ++i)
+        {
+            MeterResult m;
+            m.valid = true;
+            m.mean = -7.7f;
+            m.highlight = -4.0f;
+            // The ring's brightest tap: sky 4 degrees from the sun, scene light 6.
+            const float c = std::cos(4.0f * deg);
+            const float pre = 6.0f * std::exp2(e);
+            m.sunRing = std::log2(read(stored(pre, c), c)) - e;
+            m.sunRingWeight = 0.72f;
+            e = TargetExposureLog2(m, 0.0f, t);
+        }
+        return e;
+    };
+    auto towardSun = [](float pre, float c) { return SkyRolloffToward(pre, c); };
+    auto plainSky = [](float pre, float) { return SkyRolloff(pre); };
+    auto dome = [](float stored, float) { return stored; };
+    auto meter = [](float stored, float c) { return SkyMeterLight(stored, c); };
+    const float round3 = settle(plainSky, dome);
+    const float burnt = settle(towardSun, dome);
+    const float fixed = settle(towardSun, meter);
+    CAPTURE(round3, burnt, fixed);
+    CHECK(burnt < round3 - 0.3f); // the cause: the meter read the burn
+    CHECK(fixed == Catch::Approx(round3).margin(0.05f));
 }
 
 TEST_CASE("PhotoCamera: the sky seen through a canopy stays pale sky, the sun's own glare may clip",
@@ -685,4 +823,72 @@ TEST_CASE("PhotoCamera: look fix noon: the clear day sky deepens toward a camera
     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.99f, 0.0f) == 0.0f);
     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 1.0f) == 0.0f);
     CHECK(DaySkyDeepWeight(60.0f, 0.5f, 0.3f, 0.5f) == Catch::Approx(0.5f));
+}
+
+TEST_CASE("PhotoCamera: look fix particles: smoke and dust take the rig's light, not the classic sun",
+          "[Remaster][PhotoCamera]")
+{
+    // A lit particle (Object::DrawDecal) under the camera: kParticleKeyShare of
+    // the key light (a thick puff's lit half, about a sunlit wall's share) plus
+    // the sky's irradiance averaged over every direction, the sky term times
+    // the world's shade share.
+    LightingTuning t{};
+    LightRigInputs in = PhysicalInputs(60.0f);
+    LightRig noon = ComputeLightRig(in, t);
+    REQUIRE(noon.physical);
+    const KeyLight key = ComputeKeyLight(in, noon, 0.0f);
+    const Rgb irr = ParticleRigIrradiance(noon, key, 1.0f);
+    const Rgb sky = (noon.skyZenith + noon.skyHorizon + noon.skyHorizonSun + noon.skyGround) * 0.25f;
+    CHECK(irr.r == Catch::Approx(noon.sun.r * kParticleKeyShare + sky.r));
+    CHECK(irr.g == Catch::Approx(noon.sun.g * kParticleKeyShare + sky.g));
+    CHECK(irr.b == Catch::Approx(noon.sun.b * kParticleKeyShare + sky.b));
+    // A noon puff is lit less than a white up-facing surface in the sun, more
+    // than the shade: the sun dominates it.
+    const float upLit = Luminance(noon.sun) * std::sin(60.0f * kPi / 180.0f) + Luminance(noon.skyZenith);
+    CHECK(Luminance(irr) < upLit);
+    CHECK(Luminance(irr) > 0.6f * upLit);
+    CHECK(Luminance(irr) > Luminance(noon.skyZenith));
+    CHECK(Luminance(noon.sun) * kParticleKeyShare > Luminance(sky));
+    // The shade share scales the sky's part only.
+    const Rgb shaded = ParticleRigIrradiance(noon, key, 0.5f);
+    CHECK(shaded.g == Catch::Approx(noon.sun.g * kParticleKeyShare + 0.5f * sky.g));
+    // The cloud field's mean dims the sun's part as it dims the open ground.
+    LightRig cloudy = noon;
+    cloudy.cloudCover = 1.0f;
+    cloudy.cloudTransmit = 0.08f;
+    const Rgb under = ParticleRigIrradiance(cloudy, key, 1.0f);
+    CHECK(under.g == Catch::Approx(noon.sun.g * kParticleKeyShare * 0.08f + sky.g));
+
+    // firefight_3: 19:35, the sun 1.7 degrees under the horizon. The classic
+    // model still shines its sunset sun (pink) on every puff; the rig's sun has
+    // set, so the burst's dust takes the dusk sky's light alone: dim and not
+    // warmer than the sky that lights it (the camera balances that sky to
+    // white), so the foot reads grey against the twilight, not salmon.
+    LightRigInputs duskIn = PhysicalInputs(-1.7f);
+    duskIn.classicSunDiffuse = Rgb(0.6f, 0.3f, 0.25f);
+    duskIn.nightEffect = 0.3f;
+    LightRig dusk = ComputeLightRig(duskIn, t);
+    REQUIRE(dusk.physical);
+    const KeyLight duskKey = ComputeKeyLight(duskIn, dusk, 0.0f);
+    CHECK(Luminance(duskKey.radiance) == 0.0f);
+    const Rgb duskIrr = ParticleRigIrradiance(dusk, duskKey, 1.0f);
+    CHECK(Luminance(duskIrr) > 0.0f);
+    CHECK(Luminance(duskIrr) < 0.1f * Luminance(irr));
+    CHECK(RedOverBlue(duskIrr) <= RedOverBlue(dusk.skyZenith + dusk.skyHorizon + dusk.skyHorizonSun) * 1.02f);
+    CHECK(RedOverBlue(duskIrr) < 1.1f);
+
+    // Under the moon key the moon's key share and its shadowless rest both
+    // light the puff at the key share (no cloud field on the moon).
+    LightRig night = noon;
+    night.sun = Rgb();
+    night.moon = Rgb(0.01f, 0.011f, 0.012f);
+    KeyLight moonKey;
+    moonKey.moonShare = 0.6f;
+    moonKey.radiance = night.moon * 0.6f;
+    night.moon = night.moon * 0.4f;
+    night.cloudCover = 1.0f;
+    night.cloudTransmit = 0.08f;
+    const Rgb nightSky = (night.skyZenith + night.skyHorizon + night.skyHorizonSun + night.skyGround) * 0.25f;
+    const Rgb moonLit = ParticleRigIrradiance(night, moonKey, 1.0f);
+    CHECK(moonLit.b == Catch::Approx(0.012f * kParticleKeyShare + nightSky.b));
 }

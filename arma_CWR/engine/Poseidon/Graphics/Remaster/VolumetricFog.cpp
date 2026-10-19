@@ -171,6 +171,17 @@ float FogGreySky(float skyThrough)
     return Clamp01((0.65f - skyThrough) / 0.5f);
 }
 
+float FogSnapRatio(float after, float before)
+{
+    return Clamp01((std::max(after, 0.0f) + kFogSnapRatioEps) / (std::max(before, 0.0f) + kFogSnapRatioEps));
+}
+
+float FogRingPhaseGain(float r, float m, float phaseColumn, float phaseRing)
+{
+    const float ring = std::max(r + m * phaseRing, 1e-9f);
+    return std::clamp((r + m * phaseColumn) / ring, 0.0f, kFogRingPhaseMax);
+}
+
 float FogMorningWeight(float sunElevationDeg, float sunAzimuthDeg)
 {
     const bool east = sunAzimuthDeg > 0.0f && sunAzimuthDeg < 180.0f;
@@ -233,10 +244,12 @@ FogMedium ComputeFogMedium(const FogInputs& in, const LightingTuning& t, bool ap
     // (Look fix round 4 "mist": setFog's own fog carries its air as rain's
     // does; the grey haze on top of a setFog 0.3 mist under a deck erased a
     // rock 300 m out.)
+    // (Look fix round 5 "mist": and the clear haze itself is cut under a
+    // day's setFog, kSetFogHazeCut: setFog's mist is that humid air.)
     const float wetAir = std::max(rain, Smooth(0.0f, 0.3f, fog) * (1.0f - night));
     m.hazeSigma = kHazeClear * density *
                   (1.0f + kHazeGreyGain * Smooth(0.5f, 0.95f, overcast) * (1.0f - 0.7f * wetAir)) *
-                  (1.0f + 0.5f * rain);
+                  (1.0f + 0.5f * rain) * (1.0f - kSetFogHazeCut * Smooth(0.0f, 0.3f, fog) * (1.0f - night));
     m.rayleigh = kRayleighScale * density;
     // The humid air near the ground: a misty morning, the night, a grey sky,
     // rain and fog (a foggy morning most: the light falls through it in
@@ -471,7 +484,7 @@ void UpdateFogSightMedium(const FogInputs& in, const LightingTuning& t, std::sha
     SetFogSight(&m, std::move(map));
 }
 
-const FogMedium& FogSightMedium()
+FogMedium FogSightMedium()
 {
     return Sight().medium;
 }

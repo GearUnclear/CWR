@@ -275,6 +275,12 @@ float SkySunGlow(float cosToSun)
     return 1.0f / (1.0f + 2.0f * (1.0f - c) / (kSkySunGlowRad * kSkySunGlowRad));
 }
 
+float LowSunGlowCos(float sunElevation, float elevation, float cosAzimuth)
+{
+    const float e = std::min(sunElevation + std::max(elevation - sunElevation, 0.0f) * kLowSunGlowFlat, 1.5707963f);
+    return std::sin(sunElevation) * std::sin(e) + std::cos(sunElevation) * std::cos(e) * cosAzimuth;
+}
+
 float SkyRolloffCapToward(float cosToSun)
 {
     return kSkyRolloffCap + (kSkySunCap - kSkyRolloffCap) * SkySunGlow(cosToSun);
@@ -288,6 +294,15 @@ float SkyRolloffToward(float m, float cosToSun)
     return kSkyRolloffKnee + r * (1.0f - std::exp(-(m - kSkyRolloffKnee) / r));
 }
 
+float SkyMeterLight(float storedPeak, float cosToSun)
+{
+    if (!(storedPeak > kSkyRolloffKnee))
+        return storedPeak;
+    const float rs = SkyRolloffCapToward(cosToSun) - kSkyRolloffKnee;
+    const float m = kSkyRolloffKnee - rs * std::log(std::max(1.0f - (storedPeak - kSkyRolloffKnee) / rs, 1e-6f));
+    return SkyRolloff(m);
+}
+
 float SunRingWeight(float sunElevationDeg)
 {
     return 1.0f - Smoothstep(kSunRingFullDeg, kSunRingOffDeg, sunElevationDeg);
@@ -296,7 +311,7 @@ float SunRingWeight(float sunElevationDeg)
 // ---- Exposure -----------------------------------------------------------------
 
 float TargetExposureLog2(const MeterResult& m, float nightEffect, const LightingTuning& t, float dusk, float duskKeep,
-                         float timeEv)
+                         float timeEv, float veil)
 {
     if (!m.valid)
         return 0.0f;
@@ -311,7 +326,11 @@ float TargetExposureLog2(const MeterResult& m, float nightEffect, const Lighting
     float e = std::log2(kMiddleGrey) + comp - m.mean;
     // The highlight guard: the bright end of the frame stays below the
     // curve's white (a sunset sky is not blown out to lift the dark ground).
-    const float eHigh = std::log2(kHighlightLimit) - m.highlight;
+    // On a grey day the bright end is the deck or the mist: a light grey (by
+    // day: at night the bright end is a lamp).
+    const float grey = Clamp01(veil) * (1.0f - night);
+    const float limit = kHighlightLimit + (kGreyHighlightLimit - kHighlightLimit) * grey;
+    const float eHigh = std::log2(limit) - m.highlight;
     if (e > eHigh)
         e += (eHigh - e) * kHighlightGuard;
     // The sky's bright end stays pale sky, not a white hole.
